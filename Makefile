@@ -38,7 +38,9 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/pmm.o \
         $(BUILD)/paging.o \
         $(BUILD)/heap.o \
-        $(BUILD)/shell.o
+        $(BUILD)/shell.o \
+        $(BUILD)/switch.o \
+        $(BUILD)/task.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -51,6 +53,9 @@ $(BUILD)/boot.o: boot/boot.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
 $(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
+	$(AS) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/switch.o: kernel/switch.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: kernel/%.c | $(BUILD)

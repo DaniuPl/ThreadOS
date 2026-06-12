@@ -1,0 +1,192 @@
+/* Wątki jądra i scheduler (round-robin z wywłaszczaniem)
+ *
+ * Każdy wątek ma własny stos 8 KiB. Przełączenie kontekstu (switch.S)
+ * zapisuje rejestry callee-saved i ESP - resztę stanu trzyma stos:
+ * wątek wywłaszczony przerwaniem ma na stosie pełną ramkę przerwania
+ * i wznowi się przez iret, wątek po task_sleep/yield wróci ze
+ * zwykłego wywołania schedule().
+ *
+ * Lista wątków jest cykliczna; "main" (dawne kmain) nigdy nie śpi
+ * i pełni rolę wątku bezczynności (hlt), więc scheduler zawsze ma
+ * kogo wybrać. Zakończone wątki (zombie) są sprzątane przy kolejnych
+ * wywołaniach schedule() - nigdy nie sprzątamy bieżącego.
+ */
+
+#include <stddef.h>
+#include "include/task.h"
+#include "include/heap.h"
+#include "include/pit.h"
+#include "include/printk.h"
+#include "include/string.h"
+#include "include/io.h"
+
+#define STACK_SIZE 8192
+#define NAME_MAX   16
+
+enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
+
+struct task {
+    uint32_t esp;
+    void (*entry)(void *);
+    void *arg;
+    enum task_state state;
+    uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
+    int id;
+    char name[NAME_MAX];
+    void *stack;                /* NULL dla wątku main (stos z boot.S) */
+    struct task *next;
+};
+
+extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
+
+static struct task *current;
+static int next_id;
+
+static void task_set_name(struct task *t, const char *name)
+{
+    int i = 0;
+    for (; name[i] && i < NAME_MAX - 1; i++)
+        t->name[i] = name[i];
+    t->name[i] = '\0';
+}
+
+/* Pierwszy kod każdego nowego wątku - context_switch "wraca" tutaj */
+static void task_trampoline(void)
+{
+    __asm__ volatile("sti");
+    current->entry(current->arg);
+    task_exit();
+}
+
+void scheduler_init(void)
+{
+    struct task *main_task = kmalloc(sizeof(*main_task));
+    main_task->id = next_id++;
+    task_set_name(main_task, "main");
+    main_task->state = TASK_RUNNING;
+    main_task->stack = NULL;
+    main_task->next = main_task;
+    current = main_task;
+}
+
+struct task *task_create(const char *name, void (*entry)(void *), void *arg)
+{
+    struct task *t = kmalloc(sizeof(*t));
+    t->stack = kmalloc(STACK_SIZE);
+    t->entry = entry;
+    t->arg = arg;
+    t->state = TASK_READY;
+    t->id = next_id++;
+    task_set_name(t, name);
+
+    /* Spreparuj stos tak, by context_switch zdjął zerowe rejestry
+       i "wrócił" do trampoliny */
+    uint32_t *sp = (uint32_t *)((uint32_t)t->stack + STACK_SIZE);
+    *--sp = (uint32_t)task_trampoline;  /* adres powrotu z context_switch */
+    *--sp = 0;                          /* ebp */
+    *--sp = 0;                          /* ebx */
+    *--sp = 0;                          /* esi */
+    *--sp = 0;                          /* edi */
+    t->esp = (uint32_t)sp;
+
+    uint32_t flags = irq_save();
+    t->next = current->next;
+    current->next = t;
+    irq_restore(flags);
+    return t;
+}
+
+static void reap_zombies(void)
+{
+    struct task *t = current;
+    while (t->next != current) {
+        if (t->next->state == TASK_ZOMBIE) {
+            struct task *z = t->next;
+            t->next = z->next;
+            kfree(z->stack);
+            kfree(z);
+        } else {
+            t = t->next;
+        }
+    }
+}
+
+/* Budzi zaspane wątki i zwraca pierwszy gotowy po current (lub NULL) */
+static struct task *pick_next(void)
+{
+    uint32_t now = pit_ticks();
+    struct task *found = NULL;
+
+    struct task *t = current->next;
+    do {
+        if (t->state == TASK_SLEEPING && (int32_t)(now - t->wake_at) >= 0)
+            t->state = TASK_READY;
+        if (!found && t->state == TASK_READY && t != current)
+            found = t;
+        t = t->next;
+    } while (t != current->next);
+
+    return found;
+}
+
+void schedule(void)
+{
+    if (!current)   /* timer tyka, zanim scheduler wystartuje */
+        return;
+
+    reap_zombies();
+
+    struct task *next = pick_next();
+    if (!next)      /* nikt inny nie jest gotowy - bież dalej */
+        return;
+
+    struct task *prev = current;
+    if (prev->state == TASK_RUNNING)
+        prev->state = TASK_READY;
+    next->state = TASK_RUNNING;
+    current = next;
+    context_switch(&prev->esp, next->esp);
+}
+
+void task_yield(void)
+{
+    uint32_t flags = irq_save();
+    schedule();
+    irq_restore(flags);
+}
+
+void task_sleep(uint32_t ms)
+{
+    uint32_t flags = irq_save();
+    current->wake_at = pit_ticks() + (ms + 9) / 10;  /* tyknięcie = 10 ms */
+    current->state = TASK_SLEEPING;
+    schedule();
+    irq_restore(flags);
+}
+
+void task_exit(void)
+{
+    irq_save();
+    current->state = TASK_ZOMBIE;
+    schedule();
+    /* zombie nigdy nie zostanie wybrany ponownie */
+    for (;;)
+        __asm__ volatile("hlt");
+}
+
+void task_dump(void)
+{
+    static const char *state_names[] = { "gotowy", "dziala", "spi", "zombie" };
+
+    uint32_t flags = irq_save();
+    printk("  ID  STAN    NAZWA\n");
+    struct task *t = current;
+    do {
+        printk("  %d   %s", t->id, state_names[t->state]);
+        for (int pad = 8 - (int)strlen(state_names[t->state]); pad > 0; pad--)
+            printk(" ");
+        printk("%s%s\n", t->name, t == current ? " (biezacy)" : "");
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}

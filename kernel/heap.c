@@ -12,6 +12,7 @@
 #include "include/heap.h"
 #include "include/pmm.h"
 #include "include/printk.h"
+#include "include/io.h"
 
 #define HEAP_SIZE (1024u * 1024)
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((a) - 1))
@@ -43,11 +44,17 @@ void heap_init(void)
     heap_head->next = (void *)0;
 }
 
+/* Sterta bywa używana i przez wątki, i przez handlery IRQ (scheduler
+   sprząta zombie) - sekcja krytyczna z wyłączonymi przerwaniami. */
+
 void *kmalloc(size_t size)
 {
     if (!size)
         return (void *)0;
     size = ALIGN_UP(size, 8);
+
+    uint32_t flags = irq_save();
+    void *result = (void *)0;
 
     for (struct block *b = heap_head; b; b = b->next) {
         if (!b->free || b->size < size)
@@ -65,9 +72,12 @@ void *kmalloc(size_t size)
         }
         b->free = 0;
         used_bytes += b->size;
-        return (void *)((uint32_t)b + sizeof(struct block));
+        result = (void *)((uint32_t)b + sizeof(struct block));
+        break;
     }
-    return (void *)0;   /* brak miejsca */
+
+    irq_restore(flags);
+    return result;
 }
 
 void kfree(void *ptr)
@@ -78,17 +88,21 @@ void kfree(void *ptr)
     if (addr < heap_start + sizeof(struct block) || addr >= heap_end)
         return;
 
-    struct block *b = (struct block *)(addr - sizeof(struct block));
-    if (b->free)
-        return;
-    b->free = 1;
-    used_bytes -= b->size;
+    uint32_t flags = irq_save();
 
-    /* Sklej z wolnym następnikiem */
-    while (b->next && b->next->free) {
-        b->size += sizeof(struct block) + b->next->size;
-        b->next = b->next->next;
+    struct block *b = (struct block *)(addr - sizeof(struct block));
+    if (!b->free) {
+        b->free = 1;
+        used_bytes -= b->size;
+
+        /* Sklej z wolnym następnikiem */
+        while (b->next && b->next->free) {
+            b->size += sizeof(struct block) + b->next->size;
+            b->next = b->next->next;
+        }
     }
+
+    irq_restore(flags);
 }
 
 uint32_t heap_total_bytes(void) { return HEAP_SIZE; }

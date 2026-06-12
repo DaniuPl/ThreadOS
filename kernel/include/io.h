@@ -24,4 +24,18 @@ static inline void io_wait(void)
     outb(0x80, 0);
 }
 
+/* Wyłącza przerwania, zwracając poprzedni stan flag -
+   do krytycznych sekcji współdzielonych z handlerami IRQ */
+static inline uint32_t irq_save(void)
+{
+    uint32_t flags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static inline void irq_restore(uint32_t flags)
+{
+    __asm__ volatile("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
+}
+
 #endif

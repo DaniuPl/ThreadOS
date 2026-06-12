@@ -19,7 +19,9 @@ ProtonOS/
 │   ├── pic.c           # remapowanie PIC 8259, maskowanie, EOI
 │   ├── pit.c           # timer PIT (100 Hz), licznik uptime
 │   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
-│   ├── shell.c         # prosty shell: help, mem, uptime, clear, reboot...
+│   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
+│   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
+│   ├── shell.c         # prosty shell: help, ps, mem, uptime, clear, reboot...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
@@ -85,7 +87,9 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 - [x] Zarządzanie pamięcią fizyczną (alokator ramek - bitmapa)
 - [x] Stronicowanie (identycznościowe 64 MiB; page fault z diagnostyką CR2)
 - [x] Alokator pamięci jądra (kmalloc/kfree)
-- [x] Prosty shell w jądrze (help, mem, uptime, clear, crash, reboot)
+- [x] Prosty shell w jądrze (help, ps, mem, uptime, clear, crash, reboot)
+- [x] Wątki jądra + scheduler (round-robin, wywłaszczanie z timera,
+      sleep/yield/exit, sprzątanie zombie)
 - [ ] Pełny menedżer pamięci wirtualnej (mapowanie na żądanie, >64 MiB)
-- [ ] Procesy, scheduler, syscalle, tryb użytkownika
+- [ ] Tryb użytkownika (ring 3), TSS, syscalle
 - [ ] System plików (najpierw ramdisk/initrd)

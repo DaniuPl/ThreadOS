@@ -4,8 +4,10 @@
   2. obsługę wyjątku breakpoint (int3) przez IDT
   3. inicjalizację pamięci: PMM, stronicowanie, kmalloc selftest
   4. tykanie timera PIT (licznik uptime w rogu ekranu rośnie)
-  5. shell: echo klawiatury, komendy 'help' i 'mem' (QMP sendkey)
-  6. page fault: komenda 'crash' musi wywołać wyjątek 14 z adresem w CR2
+  5. wielozadaniowość: liczniki wątków A/B rosną niezależnie, wątek C
+     kończy się i znika z listy 'ps'
+  6. shell: echo klawiatury, komendy 'help', 'mem', 'ps' (QMP sendkey)
+  7. page fault: komenda 'crash' musi wywołać wyjątek 14 z adresem w CR2
 
 Użycie: python3 scripts/vga_smoke_test.py [build/protonos.bin]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
@@ -138,6 +140,25 @@ def main():
         check(f"timer PIT tyka (uptime {t1}s -> {t2}s)",
               t1 is not None and t2 is not None and t2 > t1)
 
+        # Wielozadaniowosc: liczniki watkow A i B musza rosnac niezaleznie
+        def counters(s):
+            a = re.search(r"watek-A: (\d+)", s)
+            b = re.search(r"watek-B: (\d+)", s)
+            return (int(a.group(1)) if a else None,
+                    int(b.group(1)) if b else None)
+
+        a1, b1 = counters(q.wait_for("watek-A: "))
+        time.sleep(1.5)
+        a2, b2 = counters(q.screen())
+        check(f"watek A liczy ({a1} -> {a2})",
+              a1 is not None and a2 is not None and a2 > a1)
+        check(f"watek B liczy ({b1} -> {b2})",
+              b1 is not None and b2 is not None and b2 > b1)
+
+        # Watek C konczy sie po 2 s
+        screen = q.wait_for("watek-C: zakonczony")
+        check("watek C zakonczyl prace", True)
+
         # Klawiatura: wstrzyknij "proton 1" i sprawdz echo
         for key in ["p", "r", "o", "t", "o", "n", "spc", "1"]:
             q.sendkey(key)
@@ -167,6 +188,14 @@ def main():
         q.type_line("uptime")
         screen = q.screen()
         check("komenda 'uptime' dziala", "tyknac timera" in screen)
+
+        q.type_line("ps")
+        screen = q.screen()
+        check("komenda 'ps' pokazuje watki",
+              "main (biezacy)" in screen and "demo-A" in screen
+              and "demo-B" in screen)
+        check("zombie po watku C zostal sprzatniety",
+              "demo-C" not in screen)
 
         # Na koncu: crash powinien wywolac page fault z diagnostyka
         q.type_line("crash")

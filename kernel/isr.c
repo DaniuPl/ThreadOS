@@ -49,8 +49,12 @@ void isr_handler(struct regs *r)
 
     if (r->int_no >= IRQ_BASE && r->int_no < IRQ_BASE + 16) {
         int irq = r->int_no - IRQ_BASE;
+        /* EOI przed handlerem: handler timera przelacza konteksty,
+           wiec do "konca" tego przerwania moze dojsc dopiero, gdy
+           watek znow dostanie procesor - PIC nie moze na to czekac.
+           Bramki przerwan trzymaja IF=0, wiec zagniezdzenie nie grozi. */
+        pic_send_eoi(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](r);
-        pic_send_eoi(irq);
     }
 }

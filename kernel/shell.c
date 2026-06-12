@@ -14,6 +14,7 @@
 #include "include/pmm.h"
 #include "include/pit.h"
 #include "include/heap.h"
+#include "include/task.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -32,6 +33,7 @@ static void cmd_help(void)
 {
     printk("Dostepne komendy:\n"
            "  help    - ta pomoc\n"
+           "  ps      - lista watkow jadra\n"
            "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
            "  uptime  - czas od startu systemu\n"
            "  clear   - wyczysc ekran\n"
@@ -60,6 +62,8 @@ static void run_command(const char *cmd)
         return;
     if (!strcmp(cmd, "help"))
         cmd_help();
+    else if (!strcmp(cmd, "ps"))
+        task_dump();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))
