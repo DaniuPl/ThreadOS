@@ -12,6 +12,7 @@
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/printk.h"
+#include "include/io.h"
 
 #define MANAGED_LIMIT (64u * 1024 * 1024)
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
@@ -84,6 +85,16 @@ void pmm_init(const struct multiboot_info *mbi)
     reserve_range(0, 1024 * 1024);
     /* Obraz jądra (kod + dane + bss) */
     reserve_range((uint32_t)_kernel_start, (uint32_t)_kernel_end);
+
+    /* Moduły bootloadera (initrd) - nie wolno ich nadpisać */
+    if (mbi->flags & MULTIBOOT_FLAG_MODS) {
+        const struct multiboot_mod *mods =
+            (const struct multiboot_mod *)mbi->mods_addr;
+        reserve_range(mbi->mods_addr,
+                      mbi->mods_addr + mbi->mods_count * sizeof(*mods));
+        for (uint32_t i = 0; i < mbi->mods_count; i++)
+            reserve_range(mods[i].start, mods[i].end);
+    }
 }
 
 uint32_t pmm_alloc_frame(void)
@@ -91,8 +102,12 @@ uint32_t pmm_alloc_frame(void)
     return pmm_alloc_contiguous(1);
 }
 
+/* Alokacje i zwalnianie biegna tez z kontekstu IRQ (exec, sprzatanie
+   przestrzeni adresowych zombie) - stad sekcje krytyczne. */
+
 uint32_t pmm_alloc_contiguous(uint32_t n)
 {
+    uint32_t flags = irq_save();
     uint32_t run = 0;
     for (uint32_t f = 0; f < MAX_FRAMES; f++) {
         if (frame_test(f)) {
@@ -104,19 +119,23 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
             for (uint32_t i = first; i <= f; i++)
                 frame_set(i);
             used_frames += n;
+            irq_restore(flags);
             return first * PAGE_SIZE;
         }
     }
+    irq_restore(flags);
     return 0;
 }
 
 void pmm_free_frame(uint32_t addr)
 {
+    uint32_t flags = irq_save();
     uint32_t frame = addr / PAGE_SIZE;
     if (frame < MAX_FRAMES && frame_test(frame)) {
         frame_clear(frame);
         used_frames--;
     }
+    irq_restore(flags);
 }
 
 uint32_t pmm_total_frames(void) { return total_frames; }

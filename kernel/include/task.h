@@ -24,4 +24,8 @@ void task_dump(void);
 
 const char *task_current_name(void);
 
+/* Bieżące zadanie przechodzi na własną przestrzeń adresową;
+   katalog stron zostanie zwolniony przy sprzątaniu zombie */
+void task_use_address_space(uint32_t dir_phys);
+
 #endif

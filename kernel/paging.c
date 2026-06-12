@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 #include "include/paging.h"
+#include "include/pmm.h"
+#include "include/string.h"
 
 #define PTE_PRESENT 0x1
 #define PTE_WRITE   0x2
@@ -38,20 +40,77 @@ void paging_init(void)
         : "eax", "memory");
 }
 
-void paging_make_user(uint32_t addr, uint32_t size)
+uint32_t paging_kernel_cr3(void)
 {
-    uint32_t start = addr & ~0xFFFu;
-    uint32_t end = addr + size;
+    return (uint32_t)page_directory;
+}
 
-    for (uint32_t a = start; a < end; a += 4096) {
-        if (a >= PAGING_IDENTITY_LIMIT)
-            break;
-        uint32_t pde = a >> 22;
-        uint32_t pte = (a >> 12) & 0x3FF;
-        /* USER musi byc i w katalogu, i we wpisie strony - reszta
-           stron tej tablicy zostaje supervisor, wiec nic nie tracimy */
-        page_directory[pde] |= PTE_USER;
-        page_tables[pde][pte] |= PTE_USER;
-        __asm__ volatile("invlpg (%0)" : : "r"(a) : "memory");
+/* Wszystkie ramki z PMM leżą <64 MiB, więc jądro widzi je przez
+   mapowanie identycznościowe - katalogi i tablice stron procesów
+   modyfikujemy wprost po adresie fizycznym. */
+
+uint32_t paging_new_address_space(void)
+{
+    uint32_t dir_phys = pmm_alloc_frame();
+    if (!dir_phys)
+        return 0;
+    uint32_t *dir = (uint32_t *)dir_phys;
+    /* Mapowania jądra współdzielone (te same tablice stron, supervisor),
+       reszta wpisów pusta - tam zamieszka program użytkownika */
+    for (int i = 0; i < 1024; i++)
+        dir[i] = page_directory[i];
+    return dir_phys;
+}
+
+int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
+{
+    /* Nie pozwól zamapować strony użytkownika na obszarze jądra */
+    if (vaddr < PAGING_IDENTITY_LIMIT)
+        return 0;
+
+    uint32_t *dir = (uint32_t *)dir_phys;
+    uint32_t pde = vaddr >> 22;
+    uint32_t pte = (vaddr >> 12) & 0x3FF;
+    uint32_t pt_phys;
+
+    if (!(dir[pde] & PTE_PRESENT)) {
+        pt_phys = pmm_alloc_frame();
+        if (!pt_phys)
+            return 0;
+        memset((void *)pt_phys, 0, 4096);
+        dir[pde] = pt_phys | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    } else {
+        if (dir[pde] == page_directory[pde])  /* tablica jądra - nie ruszaj */
+            return 0;
+        pt_phys = dir[pde] & ~0xFFFu;
     }
+
+    ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    return 1;
+}
+
+uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    uint32_t pde = vaddr >> 22;
+    if (!(dir[pde] & PTE_PRESENT) || dir[pde] == page_directory[pde])
+        return 0;
+    uint32_t pte = ((uint32_t *)(dir[pde] & ~0xFFFu))[(vaddr >> 12) & 0x3FF];
+    return pte & PTE_PRESENT ? pte & ~0xFFFu : 0;
+}
+
+void paging_destroy_address_space(uint32_t dir_phys)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    for (int i = 0; i < 1024; i++) {
+        /* Zwalniaj tylko tablice procesu - jądrowe są współdzielone */
+        if (!(dir[i] & PTE_PRESENT) || dir[i] == page_directory[i])
+            continue;
+        uint32_t *pt = (uint32_t *)(dir[i] & ~0xFFFu);
+        for (int j = 0; j < 1024; j++)
+            if (pt[j] & PTE_PRESENT)
+                pmm_free_frame(pt[j] & ~0xFFFu);
+        pmm_free_frame((uint32_t)pt);
+    }
+    pmm_free_frame(dir_phys);
 }

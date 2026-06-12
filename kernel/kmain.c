@@ -16,6 +16,7 @@
 #include "include/shell.h"
 #include "include/string.h"
 #include "include/task.h"
+#include "include/initrd.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
@@ -142,6 +143,11 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         ok("Sterta jadra: kmalloc/kfree dzialaja (1 MiB)");
     else
         printk("[FAIL] kmalloc selftest!\n");
+
+    initrd_init(mbi);
+    if (initrd_file_count())
+        printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
+               initrd_file_count());
 
     scheduler_init();
     task_create("demo-A", demo_counter, (void *)0);

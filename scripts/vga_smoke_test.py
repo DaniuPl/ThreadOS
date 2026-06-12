@@ -7,11 +7,12 @@
   5. wielozadaniowość: liczniki wątków A/B rosną niezależnie, wątek C
      kończy się i znika z listy 'ps'
   6. shell: echo klawiatury, komendy 'help', 'mem', 'ps' (QMP sendkey)
-  7. tryb użytkownika: proces ring 3 robi syscalle (write/sleep), po czym
-     próbuje czytać pamięć jądra - musi zginąć, a system musi żyć dalej
+  7. procesy: 'run hello' (ELF z initrd, syscalle, czyste wyjście,
+     brak wycieku ramek), 'run evil' (czyta pamięć jądra - ginie,
+     system żyje), 'run brak' (błąd), 'ls'
   8. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
 
-Użycie: python3 scripts/vga_smoke_test.py [build/protonos.bin]
+Użycie: python3 scripts/vga_smoke_test.py [protonos.bin] [initrd.img]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
 """
 
@@ -25,19 +26,22 @@ import tempfile
 import time
 
 KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/protonos.bin"
+INITRD = sys.argv[2] if len(sys.argv) > 2 else None
 VGA_ADDR = 0xB8000
 VGA_BYTES = 80 * 25 * 2
 
 
 class Qemu:
-    def __init__(self, kernel):
+    def __init__(self, kernel, initrd=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
+        cmd = ["qemu-system-i386", "-kernel", kernel,
+               "-display", "none", "-no-reboot",
+               "-qmp", f"unix:{self.qmp_path},server,nowait"]
+        if initrd:
+            cmd += ["-initrd", initrd]
         self.proc = subprocess.Popen(
-            ["qemu-system-i386", "-kernel", kernel,
-             "-display", "none", "-no-reboot",
-             "-qmp", f"unix:{self.qmp_path},server,nowait"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         time.sleep(1)
         if self.proc.poll() is not None:
             raise RuntimeError("QEMU zakonczyl sie przedwczesnie:\n"
@@ -109,7 +113,7 @@ def main():
         if not cond:
             failures.append(name)
 
-    q = Qemu(KERNEL)
+    q = Qemu(KERNEL, INITRD)
     try:
         # Czekaj na pelny boot (prompt shella) zamiast zgadywac czas
         screen = q.wait_for("ProtonOS shell")
@@ -175,7 +179,7 @@ def main():
         time.sleep(0.3)
         screen = q.screen()
         check("nieznana komenda zgloszona",
-              "nieznana komenda: 'proton 1X'" in screen)
+              "nieznana komenda: 'proton'" in screen)
 
         q.type_line("help")
         screen = q.screen()
@@ -200,17 +204,46 @@ def main():
         check("zombie po watku C zostal sprzatniety",
               "demo-C" not in screen)
 
-        # Tryb uzytkownika: proces ring 3 + syscalle + ochrona pamieci
-        q.type_line("user")
-        screen = q.wait_for("[ring3] czesc z trybu uzytkownika!")
-        check("proces ring 3 wystartowal i robi syscall write", True)
-        screen = q.wait_for("[ring3] licze: 3")
+        # initrd: 'ls' pokazuje spakowane programy
+        q.type_line("ls")
+        screen = q.screen()
+        check("komenda 'ls' pokazuje pliki initrd",
+              "hello" in screen and "evil" in screen)
+
+        # Wyciek ramek: zmierz uzycie PMM przed i po zyciu procesu
+        def pmm_used(s):
+            m = re.findall(r"PMM:\s+(\d+)/", s)
+            return int(m[-1]) if m else None
+
+        q.type_line("mem")
+        used_before = pmm_used(q.screen())
+
+        # 'run hello': proces ELF z wlasna przestrzenia adresowa
+        q.type_line("run hello")
+        q.wait_for("[hello] czesc, jestem procesem ELF")
+        check("proces hello wystartowal z ELF i robi syscall write", True)
+        q.wait_for("[hello] licze: 3")
         check("syscalle write+sleep dzialaja w petli", True)
-        screen = q.wait_for("proces 'user-demo' ubity")
-        check("proba czytania pamieci jadra ubila proces", True)
+        q.wait_for("proces 'hello' zakonczyl sie (kod 0)")
+        check("hello zakonczyl sie czysto przez sys_exit", True)
+
+        time.sleep(0.5)  # czas na sprzatniecie zombie
+        q.type_line("mem")
+        used_after = pmm_used(q.screen())
+        check(f"brak wycieku ramek po procesie ({used_before} -> {used_after})",
+              used_before is not None and used_after == used_before)
+
+        # 'run evil': proba czytania pamieci jadra
+        q.type_line("run evil")
+        screen = q.wait_for("proces 'evil' ubity")
+        check("evil czytal pamiec jadra i zostal ubity", True)
         check("CR2 pokazuje atakowany adres", "siegnal po adres 100000" in screen)
         check("kod po ataku nie wykonal sie",
               "TEGO NIE POWINNO BYC WIDAC" not in screen)
+
+        # 'run' z nieistniejacym plikiem
+        q.type_line("run brak")
+        check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
 
         # System musi zyc dalej: liczniki rosna, shell odpowiada
         a3, _ = counters(q.screen())

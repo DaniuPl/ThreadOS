@@ -20,7 +20,16 @@ struct multiboot_info {
 } __attribute__((packed));
 
 #define MULTIBOOT_FLAG_MEM  (1 << 0)
+#define MULTIBOOT_FLAG_MODS (1 << 3)
 #define MULTIBOOT_FLAG_MMAP (1 << 6)
+
+/* Moduł załadowany przez bootloader (np. initrd z opcji -initrd QEMU) */
+struct multiboot_mod {
+    uint32_t start;
+    uint32_t end;
+    uint32_t string;
+    uint32_t reserved;
+} __attribute__((packed));
 
 /* Wpis mapy pamięci. Uwaga: pole size opisuje rozmiar reszty wpisu,
    więc następny wpis leży pod adresem +size+4. */

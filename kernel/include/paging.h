@@ -9,8 +9,14 @@
 /* Mapuje identycznościowo pierwsze 64 MiB i włącza stronicowanie */
 void paging_init(void);
 
-/* Nadaje stronom z podanego zakresu bit USER (dostęp z ring 3).
-   Zakres musi leżeć w obszarze mapowanym identycznościowo. */
-void paging_make_user(uint32_t addr, uint32_t size);
+/* CR3 jądra - przestrzeń adresowa wątków jądra */
+uint32_t paging_kernel_cr3(void);
+
+/* Przestrzenie adresowe procesów: katalog stron dzielący mapowania
+   jądra (supervisor) + własne strony użytkownika powyżej 64 MiB */
+uint32_t paging_new_address_space(void);
+int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
+uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr);
+void paging_destroy_address_space(uint32_t dir_phys);
 
 #endif

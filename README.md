@@ -22,8 +22,9 @@ ProtonOS/
 │   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
 │   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
 │   ├── syscall.c       # syscalle int 0x80: write, exit, sleep, getticks
-│   ├── usermode.c      # wejście w ring 3: strony USER, stos, ramka iret
-│   ├── userprog.c      # program użytkownika (sekcja .user, tylko syscalle)
+│   ├── usermode.c      # wejście w ring 3 przez iret
+│   ├── exec.c          # loader ELF32: przestrzeń adresowa + segmenty + stos
+│   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── shell.c         # prosty shell: help, ps, mem, uptime, clear, reboot...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -33,7 +34,13 @@ ProtonOS/
 │   ├── vga.c           # sterownik trybu tekstowego VGA
 │   ├── string.c        # memset/memcpy/strlen (brak libc w jądrze)
 │   └── include/        # nagłówki jądra
+├── user/               # programy użytkownika (osobne ELF-y!)
+│   ├── usys.h          # biblioteczka syscalli (int 0x80)
+│   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
+│   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
+│   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
+│   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO
@@ -95,6 +102,9 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
       sleep/yield/exit, sprzątanie zombie)
 - [x] Tryb użytkownika (ring 3): TSS, syscalle int 0x80, ochrona pamięci
       (proces sięgający po pamięć jądra ginie, system żyje dalej)
-- [ ] Pełny menedżer pamięci wirtualnej (osobne przestrzenie adresowe)
-- [ ] Ładowanie programów z zewnątrz (ELF z ramdisku/initrd)
-- [ ] System plików
+- [x] Osobne przestrzenie adresowe (katalog stron per proces, CR3 w
+      schedulerze, pełne sprzątanie ramek po zakończeniu procesu)
+- [x] Ładowanie programów ELF z initrd (`ls`, `run hello`, `run evil`)
+- [ ] Więcej syscalli: read (klawiatura), spawn/wait, sbrk
+- [ ] System plików z prawdziwego dysku (ATA + np. FAT)
+- [ ] Shell jako program użytkownika

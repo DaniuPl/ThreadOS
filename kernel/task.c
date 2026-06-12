@@ -20,6 +20,7 @@
 #include "include/string.h"
 #include "include/io.h"
 #include "include/gdt.h"
+#include "include/paging.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -29,6 +30,8 @@ enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
 struct task {
     uint32_t esp;
     uint32_t kstack_top;        /* dla TSS.esp0 (przerwania z ring 3) */
+    uint32_t cr3;               /* przestrzeń adresowa zadania */
+    int owns_dir;               /* czy katalog stron zwolnić przy reap */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -71,6 +74,8 @@ void scheduler_init(void)
     main_task->state = TASK_RUNNING;
     main_task->stack = NULL;
     main_task->kstack_top = (uint32_t)stack_top;
+    main_task->cr3 = paging_kernel_cr3();
+    main_task->owns_dir = 0;
     main_task->next = main_task;
     current = main_task;
 }
@@ -80,6 +85,8 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     struct task *t = kmalloc(sizeof(*t));
     t->stack = kmalloc(STACK_SIZE);
     t->kstack_top = (uint32_t)t->stack + STACK_SIZE;
+    t->cr3 = paging_kernel_cr3();
+    t->owns_dir = 0;
     t->entry = entry;
     t->arg = arg;
     t->state = TASK_READY;
@@ -110,6 +117,9 @@ static void reap_zombies(void)
         if (t->next->state == TASK_ZOMBIE) {
             struct task *z = t->next;
             t->next = z->next;
+            /* CR3 zombie nie jest juz zaladowany - bezpiecznie zwolnic */
+            if (z->owns_dir)
+                paging_destroy_address_space(z->cr3);
             kfree(z->stack);
             kfree(z);
         } else {
@@ -154,6 +164,10 @@ void schedule(void)
     current = next;
     /* Przerwanie z ring 3 tego wątku ma wylądować na jego stosie jądra */
     tss_set_esp0(next->kstack_top);
+    /* Zmiana przestrzeni adresowej tylko, gdy trzeba (przeladowanie
+       CR3 oproznia TLB - szkoda cykli miedzy watkami jadra) */
+    if (next->cr3 != prev->cr3)
+        __asm__ volatile("movl %0, %%cr3" : : "r"(next->cr3) : "memory");
     context_switch(&prev->esp, next->esp);
 }
 
@@ -181,6 +195,15 @@ void task_exit(void)
     /* zombie nigdy nie zostanie wybrany ponownie */
     for (;;)
         __asm__ volatile("hlt");
+}
+
+void task_use_address_space(uint32_t dir_phys)
+{
+    uint32_t flags = irq_save();
+    current->cr3 = dir_phys;
+    current->owns_dir = 1;
+    __asm__ volatile("movl %0, %%cr3" : : "r"(dir_phys) : "memory");
+    irq_restore(flags);
 }
 
 const char *task_current_name(void)

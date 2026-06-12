@@ -22,6 +22,13 @@ LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
 BUILD   := build
 KERNEL  := $(BUILD)/protonos.bin
 ISO     := $(BUILD)/protonos.iso
+INITRD  := $(BUILD)/initrd.img
+
+# Programy uzytkownika (ELF-y ladowane z initrd)
+USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
+               -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
+               -Wl,--build-id=none -Wl,--no-warn-rwx-segments
+USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -44,11 +51,12 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/task.o \
         $(BUILD)/syscall.o \
         $(BUILD)/usermode.o \
-        $(BUILD)/userprog.o
+        $(BUILD)/initrd.o \
+        $(BUILD)/exec.o
 
 .PHONY: all iso run run-iso test clean
 
-all: $(KERNEL)
+all: $(KERNEL) $(INITRD)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -71,22 +79,33 @@ $(KERNEL): $(OBJS) linker.ld
 	    && echo "OK: $@ jest poprawnym obrazem Multiboot" \
 	    || echo "INFO: grub-file niedostepny - pomijam weryfikacje Multiboot"
 
-iso: $(KERNEL) grub.cfg
+$(BUILD)/user: | $(BUILD)
+	mkdir -p $(BUILD)/user
+
+$(BUILD)/user/%.elf: user/%.c user/usys.h user/user.ld | $(BUILD)/user
+	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
+
+$(INITRD): $(USER_ELFS) scripts/mkinitrd.py
+	python3 scripts/mkinitrd.py $@ \
+	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf
+
+iso: $(KERNEL) $(INITRD) grub.cfg
 	mkdir -p $(BUILD)/isodir/boot/grub
 	cp $(KERNEL) $(BUILD)/isodir/boot/protonos.bin
+	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
 	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
 
 # QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a
-run: $(KERNEL)
-	qemu-system-i386 -kernel $(KERNEL)
+run: $(KERNEL) $(INITRD)
+	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD)
 
 run-iso: iso
 	qemu-system-i386 -cdrom $(ISO)
 
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA
-test: $(KERNEL)
-	python3 scripts/vga_smoke_test.py $(KERNEL)
+test: $(KERNEL) $(INITRD)
+	python3 scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
 
 clean:
 	rm -rf $(BUILD)
