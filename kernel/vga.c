@@ -21,14 +21,19 @@ void vga_set_color(enum vga_color fg, enum vga_color bg)
     color = (uint8_t)fg | (uint8_t)bg << 4;
 }
 
-void vga_init(void)
+void vga_clear(void)
 {
     row = 0;
     col = 0;
-    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     for (size_t y = 0; y < VGA_HEIGHT; y++)
         for (size_t x = 0; x < VGA_WIDTH; x++)
             vga_buffer[y * VGA_WIDTH + x] = vga_entry(' ', color);
+}
+
+void vga_init(void)
+{
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    vga_clear();
 }
 
 /* Przewija ekran o jedną linię w górę */

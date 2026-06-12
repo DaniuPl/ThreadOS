@@ -37,6 +37,11 @@ void isr_handler(struct regs *r)
 
         printk("\n!!! WYJATEK CPU %u: %s (err=%x) pod eip=%x\n",
                r->int_no, exception_names[r->int_no], r->err_code, r->eip);
+        if (r->int_no == 14) {
+            uint32_t cr2;
+            __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
+            printk("Page fault pod adresem (CR2): %x\n", cr2);
+        }
         printk("System zatrzymany.\n");
         for (;;)
             __asm__ volatile("cli; hlt");

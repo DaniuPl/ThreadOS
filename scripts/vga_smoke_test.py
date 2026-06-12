@@ -2,8 +2,10 @@
 """Test dymny ProtonOS: bootuje jądro w QEMU bez okna i weryfikuje:
   1. boot + komunikaty inicjalizacji (Multiboot, GDT, IDT, PIC, PIT, klawiatura)
   2. obsługę wyjątku breakpoint (int3) przez IDT
-  3. tykanie timera PIT (licznik uptime w rogu ekranu rośnie)
-  4. echo klawiatury PS/2 (klawisze wstrzykiwane przez QMP sendkey)
+  3. inicjalizację pamięci: PMM, stronicowanie, kmalloc selftest
+  4. tykanie timera PIT (licznik uptime w rogu ekranu rośnie)
+  5. shell: echo klawiatury, komendy 'help' i 'mem' (QMP sendkey)
+  6. page fault: komenda 'crash' musi wywołać wyjątek 14 z adresem w CR2
 
 Użycie: python3 scripts/vga_smoke_test.py [build/protonos.bin]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
@@ -32,7 +34,7 @@ class Qemu:
              "-display", "none", "-no-reboot",
              "-qmp", f"unix:{self.qmp_path},server,nowait"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        time.sleep(2)
+        time.sleep(1)
         if self.proc.poll() is not None:
             raise RuntimeError("QEMU zakonczyl sie przedwczesnie:\n"
                                + self.proc.stderr.read().decode())
@@ -65,9 +67,28 @@ class Qemu:
             lines.append(chars.decode("cp437", "replace").rstrip())
         return "\n".join(lines).rstrip()
 
+    def wait_for(self, text, timeout=15):
+        """Czeka, az podany tekst pojawi sie na ekranie VGA."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            screen = self.screen()
+            if text in screen:
+                return screen
+            time.sleep(0.3)
+        raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na ekranie")
+
     def sendkey(self, key):
         self.hmp(f"sendkey {key}")
         time.sleep(0.1)
+
+    KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
+                "/": "slash"}
+
+    def type_line(self, text):
+        for ch in text:
+            self.sendkey(self.KEYNAMES.get(ch, ch))
+        self.sendkey("ret")
+        time.sleep(0.3)
 
     def close(self):
         self.proc.kill()
@@ -86,7 +107,8 @@ def main():
 
     q = Qemu(KERNEL)
     try:
-        screen = q.screen()
+        # Czekaj na pelny boot (prompt shella) zamiast zgadywac czas
+        screen = q.wait_for("ProtonOS shell")
         print("=== Ekran VGA po boocie ===")
         print(screen)
         print("===========================")
@@ -97,15 +119,20 @@ def main():
             check(f"komunikat '{expected}'", expected in screen)
 
         check("obsluga wyjatku int3 (breakpoint)", "[INT3]" in screen)
-        check("jadro przezylo int3 (doszlo do 'System gotowy')",
-              "System gotowy" in screen)
+
+        for expected in ["Pamiec fizyczna", "Stronicowanie wlaczone",
+                         "kmalloc/kfree dzialaja"]:
+            check(f"komunikat '{expected}'", expected in screen)
+
+        check("jadro przezylo init pamieci (doszlo do shella)",
+              "ProtonOS shell" in screen)
 
         # Timer: uptime w rogu ekranu musi urosnac
         def uptime(s):
             m = re.search(r"uptime: (\d+)s", s)
             return int(m.group(1)) if m else None
 
-        t1 = uptime(screen)
+        t1 = uptime(q.wait_for("uptime: "))
         time.sleep(2)
         t2 = uptime(q.screen())
         check(f"timer PIT tyka (uptime {t1}s -> {t2}s)",
@@ -118,6 +145,37 @@ def main():
         screen = q.screen()
         check("echo klawiatury: 'proton 1'", "> proton 1" in screen)
         check("echo klawiatury z shiftem: 'X'", "> proton 1X" in screen)
+
+        # Dokoncz smieciowa linie enterem i przetestuj komendy shella
+        q.sendkey("ret")
+        time.sleep(0.3)
+        screen = q.screen()
+        check("nieznana komenda zgloszona",
+              "nieznana komenda: 'proton 1X'" in screen)
+
+        q.type_line("help")
+        screen = q.screen()
+        check("komenda 'help' wypisuje liste komend",
+              "Dostepne komendy" in screen and "reboot" in screen)
+
+        q.type_line("mem")
+        screen = q.screen()
+        check("komenda 'mem' pokazuje RAM i ramki",
+              "RAM wykryty" in screen and "ramek 4 KiB" in screen)
+        check("komenda 'mem' pokazuje sterte", "sterta jadra" in screen)
+
+        q.type_line("uptime")
+        screen = q.screen()
+        check("komenda 'uptime' dziala", "tyknac timera" in screen)
+
+        # Na koncu: crash powinien wywolac page fault z diagnostyka
+        q.type_line("crash")
+        screen = q.screen()
+        check("page fault obsluzony (wyjatek 14)",
+              "WYJATEK CPU 14: Page Fault" in screen)
+        check("CR2 wskazuje felerny adres",
+              "(CR2): e0000000" in screen)
+        check("system zatrzymany po wyjatku", "System zatrzymany" in screen)
 
         print()
         if failures:

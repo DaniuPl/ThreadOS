@@ -34,7 +34,11 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr.o \
         $(BUILD)/pic.o \
         $(BUILD)/pit.o \
-        $(BUILD)/keyboard.o
+        $(BUILD)/keyboard.o \
+        $(BUILD)/pmm.o \
+        $(BUILD)/paging.o \
+        $(BUILD)/heap.o \
+        $(BUILD)/shell.o
 
 .PHONY: all iso run run-iso test clean
 

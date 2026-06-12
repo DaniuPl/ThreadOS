@@ -9,8 +9,33 @@
 #include "include/pic.h"
 #include "include/pit.h"
 #include "include/keyboard.h"
+#include "include/multiboot.h"
+#include "include/pmm.h"
+#include "include/paging.h"
+#include "include/heap.h"
+#include "include/shell.h"
+#include "include/string.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+
+/* Szybki test sterty: alokacja, zapis, zwolnienie, ponowne uzycie */
+static int kmalloc_selftest(void)
+{
+    char *a = kmalloc(64);
+    char *b = kmalloc(128);
+    if (!a || !b)
+        return 0;
+    memset(a, 0xAA, 64);
+    memset(b, 0x55, 128);
+    if ((uint8_t)a[63] != 0xAA || (uint8_t)b[0] != 0x55)
+        return 0;
+    kfree(a);
+    char *c = kmalloc(32);   /* powinno trafic w zwolniona dziure */
+    int reused = (c == a);
+    kfree(b);
+    kfree(c);
+    return reused;
+}
 
 static void ok(const char *what)
 {
@@ -22,7 +47,8 @@ static void ok(const char *what)
 
 void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 {
-    (void)multiboot_info_addr; /* mapa pamięci itp. - do wykorzystania później */
+    const struct multiboot_info *mbi =
+        (const struct multiboot_info *)multiboot_info_addr;
 
     vga_init();
     serial_init();
@@ -61,7 +87,20 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     /* Test IDT: int3 powinno wydrukowac komunikat i wrocic */
     __asm__ volatile("int $3");
 
-    printk("\nSystem gotowy. Mozesz pisac na klawiaturze:\n> ");
+    pmm_init(mbi);
+    printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
+           pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
+
+    paging_init();
+    ok("Stronicowanie wlaczone (identycznosciowe 64 MiB)");
+
+    heap_init();
+    if (kmalloc_selftest())
+        ok("Sterta jadra: kmalloc/kfree dzialaja (1 MiB)");
+    else
+        printk("[FAIL] kmalloc selftest!\n");
+
+    shell_init();
 
     /* Czekaj na przerwania - hlt budzi CPU przy kazdym IRQ */
     for (;;)

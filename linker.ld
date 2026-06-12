@@ -6,6 +6,8 @@ SECTIONS
 {
     . = 1M;
 
+    _kernel_start = .;
+
     /* Nagłówek Multiboot musi być w pierwszych 8 KiB pliku - dlatego
        ma własną sekcję na samym początku obrazu */
     .multiboot : ALIGN(4)
@@ -33,4 +35,6 @@ SECTIONS
         *(COMMON)
         *(.bss)
     }
+
+    _kernel_end = .;
 }

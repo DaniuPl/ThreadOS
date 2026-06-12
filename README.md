@@ -18,7 +18,11 @@ ProtonOS/
 │   ├── isr.c           # wspólny handler: wyjątki CPU i dispatch IRQ
 │   ├── pic.c           # remapowanie PIC 8259, maskowanie, EOI
 │   ├── pit.c           # timer PIT (100 Hz), licznik uptime
-│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII, echo
+│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
+│   ├── shell.c         # prosty shell: help, mem, uptime, clear, reboot...
+│   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
+│   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
+│   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
 │   ├── vga.c           # sterownik trybu tekstowego VGA
@@ -77,9 +81,11 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 - [x] Sterownik klawiatury (PS/2)
 - [x] Timer (PIT) i licznik czasu
 - [x] Port szeregowy (COM1) + printk
-- [ ] Odczyt mapy pamięci z Multiboot
-- [ ] Zarządzanie pamięcią fizyczną (alokator ramek)
-- [ ] Stronicowanie (paging)
-- [ ] Alokator pamięci jądra (kmalloc)
-- [ ] Prosty shell w jądrze (buforowanie linii z klawiatury)
+- [x] Odczyt mapy pamięci z Multiboot
+- [x] Zarządzanie pamięcią fizyczną (alokator ramek - bitmapa)
+- [x] Stronicowanie (identycznościowe 64 MiB; page fault z diagnostyką CR2)
+- [x] Alokator pamięci jądra (kmalloc/kfree)
+- [x] Prosty shell w jądrze (help, mem, uptime, clear, crash, reboot)
+- [ ] Pełny menedżer pamięci wirtualnej (mapowanie na żądanie, >64 MiB)
 - [ ] Procesy, scheduler, syscalle, tryb użytkownika
+- [ ] System plików (najpierw ramdisk/initrd)

@@ -9,7 +9,6 @@
 #include "include/io.h"
 #include "include/isr.h"
 #include "include/pic.h"
-#include "include/printk.h"
 
 #define KBD_DATA_PORT 0x60
 
@@ -35,6 +34,12 @@ static const char keymap_shift[128] = {
 };
 
 static int shift_pressed;
+static keyboard_char_handler_t on_char;
+
+void keyboard_set_handler(keyboard_char_handler_t handler)
+{
+    on_char = handler;
+}
 
 static void keyboard_irq(struct regs *r)
 {
@@ -54,8 +59,8 @@ static void keyboard_irq(struct regs *r)
         return;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
-    if (c)
-        printk("%c", c);
+    if (c && on_char)
+        on_char(c);
 }
 
 void keyboard_init(void)
