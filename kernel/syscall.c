@@ -11,6 +11,8 @@
 #include "include/task.h"
 #include "include/pit.h"
 #include "include/printk.h"
+#include "include/keyboard.h"
+#include "include/exec.h"
 
 #define WRITE_MAX 1024
 
@@ -43,6 +45,21 @@ void syscall_handler(struct regs *r)
         break;
     case SYS_GETTICKS:
         r->eax = pit_ticks();
+        break;
+    case SYS_READ:
+        r->eax = (uint32_t)keyboard_read((char *)r->ebx, r->ecx);
+        break;
+    case SYS_SPAWN:
+        r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
+        break;
+    case SYS_WAIT:
+        /* Najprostsze czekanie: drzemka, az proces zniknie z listy */
+        while (task_alive((int)r->ebx))
+            task_sleep(20);
+        r->eax = 0;
+        break;
+    case SYS_GETPID:
+        r->eax = (uint32_t)task_current_id();
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",

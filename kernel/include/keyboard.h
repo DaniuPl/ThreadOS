@@ -8,4 +8,9 @@ void keyboard_init(void);
 typedef void (*keyboard_char_handler_t)(char c);
 void keyboard_set_handler(keyboard_char_handler_t handler);
 
+/* Blokujący odczyt dla procesów (syscall read). Bieżące zadanie
+   przejmuje konsolę do swojej śmierci; zwraca >=1 przeczytanych
+   znaków (bez echa - echo robi czytający). */
+int keyboard_read(char *buf, uint32_t len);
+
 #endif

@@ -10,7 +10,9 @@
   7. procesy: 'run hello' (ELF z initrd, syscalle, czyste wyjście,
      brak wycieku ramek), 'run evil' (czyta pamięć jądra - ginie,
      system żyje), 'run brak' (błąd), 'ls'
-  8. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
+  8. shell użytkownika (ring 3): 'run sh' przejmuje klawiaturę przez
+     sys_read, spawn+wait programów, exit oddaje konsolę jądru
+  9. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
 
 Użycie: python3 scripts/vga_smoke_test.py [protonos.bin] [initrd.img]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
@@ -244,6 +246,35 @@ def main():
         # 'run' z nieistniejacym plikiem
         q.type_line("run brak")
         check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
+
+        # Shell uzytkownika: sys_read przejmuje konsole
+        q.type_line("run sh")
+        q.wait_for("ush - shell uzytkownika")
+        q.wait_for("ush>")  # uwaga: zrzut ekranu obcina spacje na koncu linii
+        check("ush wystartowal w ring 3", True)
+
+        q.type_line("pid")
+        check("ush zna swoj pid (sys_getpid)", "moj pid to" in q.wait_for("moj pid to"))
+
+        q.type_line("hello")
+        q.wait_for("[hello] koncze sie grzecznie")
+        check("ush odpalil hello przez spawn+wait", True)
+
+        q.type_line("nieistnieje")
+        check("ush zglasza nieznany program",
+              "ush: nie znam 'nieistnieje'" in q.wait_for("ush: nie znam"))
+
+        q.type_line("exit")
+        q.wait_for("ush: pa!")
+        check("ush wyszedl przez sys_exit", True)
+
+        # Konsola wraca do shella jadra
+        before = len(re.findall(r"tyknac timera", q.screen()))
+        q.type_line("uptime")
+        time.sleep(0.3)
+        after = len(re.findall(r"tyknac timera", q.screen()))
+        check("konsola wrocila do shella jadra po smierci ush",
+              after > before or "tyknac timera" in q.screen() and before == 0)
 
         # System musi zyc dalej: liczniki rosna, shell odpowiada
         a3, _ = counters(q.screen())

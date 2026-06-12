@@ -39,8 +39,10 @@ static int kmalloc_selftest(void)
     return reused;
 }
 
-/* Wątki demonstracyjne: A i B liczą w swoim tempie na dole ekranu,
-   C wita się, żyje 2 sekundy i kończy (test task_exit + sprzątania) */
+/* Wątki demonstracyjne: A i B liczą w swoim tempie, C wita się, żyje
+   2 sekundy i kończy (test task_exit + sprzątania).
+   Rysują w wierszu 0 (jak uptime) - kursor konsoli nigdy tam nie
+   stoi, więc nie nadpisują promptu. */
 
 static void draw_labeled_counter(int x, const char *label, uint32_t n)
 {
@@ -59,7 +61,7 @@ static void draw_labeled_counter(int x, const char *label, uint32_t n)
     while (d)
         buf[i++] = digits[--d];
     buf[i] = '\0';
-    vga_write_at(x, 24, buf);
+    vga_write_at(x, 0, buf);
 }
 
 static void demo_counter(void *arg)
@@ -67,7 +69,7 @@ static void demo_counter(void *arg)
     int slot = (int)arg;
     uint32_t n = 0;
     for (;;) {
-        draw_labeled_counter(slot ? 16 : 0,
+        draw_labeled_counter(slot ? 33 : 18,
                              slot ? "watek-B: " : "watek-A: ", n++);
         task_sleep(slot ? 330 : 200);
     }
@@ -76,9 +78,9 @@ static void demo_counter(void *arg)
 static void demo_mortal(void *arg)
 {
     (void)arg;
-    vga_write_at(34, 24, "watek-C: czesc!     ");
+    vga_write_at(48, 0, "watek-C: czesc!     ");
     task_sleep(2000);
-    vga_write_at(34, 24, "watek-C: zakonczony ");
+    vga_write_at(48, 0, "watek-C: zakonczony ");
 }
 
 static void ok(const char *what)

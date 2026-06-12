@@ -25,7 +25,8 @@
 #define STACK_SIZE 8192
 #define NAME_MAX   16
 
-enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
+enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_BLOCKED,
+                  TASK_ZOMBIE };
 
 struct task {
     uint32_t esp;
@@ -187,6 +188,53 @@ void task_sleep(uint32_t ms)
     irq_restore(flags);
 }
 
+/* Blokowanie bez terminu - ktoś musi obudzić przez task_unblock */
+void task_block(void)
+{
+    uint32_t flags = irq_save();
+    current->state = TASK_BLOCKED;
+    schedule();
+    irq_restore(flags);
+}
+
+/* Wołane z IF=0 (kontekst IRQ albo sekcja krytyczna) */
+void task_unblock(struct task *t)
+{
+    if (t->state == TASK_BLOCKED)
+        t->state = TASK_READY;
+}
+
+struct task *task_current(void)
+{
+    return current;
+}
+
+int task_id_of(struct task *t)
+{
+    return t->id;
+}
+
+int task_current_id(void)
+{
+    return current->id;
+}
+
+int task_alive(int id)
+{
+    uint32_t flags = irq_save();
+    int alive = 0;
+    struct task *t = current;
+    do {
+        if (t->id == id && t->state != TASK_ZOMBIE) {
+            alive = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return alive;
+}
+
 void task_exit(void)
 {
     irq_save();
@@ -213,7 +261,8 @@ const char *task_current_name(void)
 
 void task_dump(void)
 {
-    static const char *state_names[] = { "gotowy", "dziala", "spi", "zombie" };
+    static const char *state_names[] = { "gotowy", "dziala", "spi",
+                                         "czeka", "zombie" };
 
     uint32_t flags = irq_save();
     printk("  ID  STAN    NAZWA\n");

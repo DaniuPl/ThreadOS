@@ -9,6 +9,10 @@
 #define SYS_EXIT     2
 #define SYS_SLEEP    3
 #define SYS_GETTICKS 4
+#define SYS_READ     5
+#define SYS_SPAWN    6
+#define SYS_WAIT     7
+#define SYS_GETPID   8
 
 static inline int32_t sys_write(const char *s, uint32_t len)
 {
@@ -41,6 +45,52 @@ static inline uint32_t sys_getticks(void)
     uint32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_GETTICKS) : "memory");
     return ret;
+}
+
+static inline int32_t sys_read(char *buf, uint32_t len)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_READ), "b"(buf), "c"(len)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_spawn(const char *name)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SPAWN), "b"(name)
+                     : "memory");
+    return ret;
+}
+
+static inline void sys_wait(int32_t pid)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WAIT), "b"(pid)
+                     : "memory");
+    (void)ret;
+}
+
+static inline int32_t sys_getpid(void)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_GETPID) : "memory");
+    return ret;
+}
+
+static inline int ustreq(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
 }
 
 static inline uint32_t ustrlen(const char *s)

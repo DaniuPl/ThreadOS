@@ -28,7 +28,8 @@ INITRD  := $(BUILD)/initrd.img
 USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
                -Wl,--build-id=none -Wl,--no-warn-rwx-segments
-USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf
+USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
+             $(BUILD)/user/sh.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -87,7 +88,8 @@ $(BUILD)/user/%.elf: user/%.c user/usys.h user/user.ld | $(BUILD)/user
 
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
-	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf
+	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
+	    sh=$(BUILD)/user/sh.elf
 
 iso: $(KERNEL) $(INITRD) grub.cfg
 	mkdir -p $(BUILD)/isodir/boot/grub

@@ -9,6 +9,7 @@
 #include "include/io.h"
 #include "include/isr.h"
 #include "include/pic.h"
+#include "include/task.h"
 
 #define KBD_DATA_PORT 0x60
 
@@ -36,9 +37,59 @@ static const char keymap_shift[128] = {
 static int shift_pressed;
 static keyboard_char_handler_t on_char;
 
+/* Konsola dla procesow: gdy jakis proces czyta klawiature
+   (sys_read), znaki ladaja w buforze kolowym zamiast w shellu
+   jadra. Po smierci wlasciciela konsola wraca do jadra. */
+#define KBD_BUF_SIZE 128
+static char kbuf[KBD_BUF_SIZE];
+static uint32_t khead, ktail;
+static int console_owner_id = -1;
+static struct task *kbd_waiter;
+
 void keyboard_set_handler(keyboard_char_handler_t handler)
 {
     on_char = handler;
+}
+
+/* Dostarczenie znaku - kontekst IRQ (IF=0) */
+static void deliver(char c)
+{
+    if (console_owner_id >= 0 && !task_alive(console_owner_id))
+        console_owner_id = -1;
+
+    if (console_owner_id >= 0) {
+        if (khead - ktail < KBD_BUF_SIZE)
+            kbuf[khead++ & (KBD_BUF_SIZE - 1)] = c;
+        if (kbd_waiter) {
+            task_unblock(kbd_waiter);
+            kbd_waiter = (void *)0;
+        }
+    } else if (on_char) {
+        on_char(c);
+    }
+}
+
+/* Blokujacy odczyt dla syscalla read - wola proces uzytkownika */
+int keyboard_read(char *buf, uint32_t len)
+{
+    if (!len)
+        return 0;
+
+    uint32_t flags = irq_save();
+    console_owner_id = task_current_id();
+
+    uint32_t got = 0;
+    while (!got) {
+        while (ktail != khead && got < len)
+            buf[got++] = kbuf[ktail++ & (KBD_BUF_SIZE - 1)];
+        if (!got) {
+            kbd_waiter = task_current();
+            task_block();
+        }
+    }
+
+    irq_restore(flags);
+    return (int)got;
 }
 
 static void keyboard_irq(struct regs *r)
@@ -59,8 +110,8 @@ static void keyboard_irq(struct regs *r)
         return;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
-    if (c && on_char)
-        on_char(c);
+    if (c)
+        deliver(c);
 }
 
 void keyboard_init(void)

@@ -15,6 +15,13 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg);
 void task_yield(void);              /* oddaj dobrowolnie procesor */
 void task_sleep(uint32_t ms);       /* uśpij bieżący wątek */
 void task_exit(void);               /* zakończ bieżący wątek */
+void task_block(void);              /* śpij, aż ktoś obudzi */
+void task_unblock(struct task *t);  /* obudź (wołać z IF=0) */
+
+struct task *task_current(void);
+int task_id_of(struct task *t);
+int task_current_id(void);
+int task_alive(int id);             /* czy zadanie o tym id wciąż żyje */
 
 /* Wybiera następny wątek i przełącza kontekst. Wołać z IF=0. */
 void schedule(void);

@@ -163,6 +163,5 @@ int exec_spawn(const char *name)
     uint32_t len = strlen(name) + 1;
     char *copy = kmalloc(len);
     memcpy(copy, name, len);
-    task_create(name, exec_task, copy);
-    return 0;
+    return task_id_of(task_create(name, exec_task, copy));
 }
