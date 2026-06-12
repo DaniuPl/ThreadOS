@@ -35,6 +35,7 @@ static struct idt_ptr idt_pointer;
     X(32) X(33) X(34) X(35) X(36) X(37) X(38) X(39) \
     X(40) X(41) X(42) X(43) X(44) X(45) X(46) X(47)
 STUB_LIST(DECLARE_STUB)
+extern void isr128(void);
 
 static void idt_set_gate(int n, void (*handler)(void), uint8_t flags)
 {
@@ -56,6 +57,9 @@ void idt_init(void)
 #define SET_GATE(n) idt_set_gate(n, isr##n, 0x8E);
     STUB_LIST(SET_GATE)
 #undef SET_GATE
+
+    /* Syscall: 0xEE = DPL 3, wiec int 0x80 wolno wykonac z ring 3 */
+    idt_set_gate(0x80, isr128, 0xEE);
 
     __asm__ volatile("lidt %0" : : "m"(idt_pointer));
 }

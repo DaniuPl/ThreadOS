@@ -13,6 +13,7 @@
 
 #define PTE_PRESENT 0x1
 #define PTE_WRITE   0x2
+#define PTE_USER    0x4
 
 #define NUM_TABLES (PAGING_IDENTITY_LIMIT / (4096u * 1024))
 
@@ -35,4 +36,22 @@ void paging_init(void)
         :
         : "r"(page_directory)
         : "eax", "memory");
+}
+
+void paging_make_user(uint32_t addr, uint32_t size)
+{
+    uint32_t start = addr & ~0xFFFu;
+    uint32_t end = addr + size;
+
+    for (uint32_t a = start; a < end; a += 4096) {
+        if (a >= PAGING_IDENTITY_LIMIT)
+            break;
+        uint32_t pde = a >> 22;
+        uint32_t pte = (a >> 12) & 0x3FF;
+        /* USER musi byc i w katalogu, i we wpisie strony - reszta
+           stron tej tablicy zostaje supervisor, wiec nic nie tracimy */
+        page_directory[pde] |= PTE_USER;
+        page_tables[pde][pte] |= PTE_USER;
+        __asm__ volatile("invlpg (%0)" : : "r"(a) : "memory");
+    }
 }

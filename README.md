@@ -21,6 +21,9 @@ ProtonOS/
 │   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
 │   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
 │   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
+│   ├── syscall.c       # syscalle int 0x80: write, exit, sleep, getticks
+│   ├── usermode.c      # wejście w ring 3: strony USER, stos, ramka iret
+│   ├── userprog.c      # program użytkownika (sekcja .user, tylko syscalle)
 │   ├── shell.c         # prosty shell: help, ps, mem, uptime, clear, reboot...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -90,6 +93,8 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 - [x] Prosty shell w jądrze (help, ps, mem, uptime, clear, crash, reboot)
 - [x] Wątki jądra + scheduler (round-robin, wywłaszczanie z timera,
       sleep/yield/exit, sprzątanie zombie)
-- [ ] Pełny menedżer pamięci wirtualnej (mapowanie na żądanie, >64 MiB)
-- [ ] Tryb użytkownika (ring 3), TSS, syscalle
-- [ ] System plików (najpierw ramdisk/initrd)
+- [x] Tryb użytkownika (ring 3): TSS, syscalle int 0x80, ochrona pamięci
+      (proces sięgający po pamięć jądra ginie, system żyje dalej)
+- [ ] Pełny menedżer pamięci wirtualnej (osobne przestrzenie adresowe)
+- [ ] Ładowanie programów z zewnątrz (ELF z ramdisku/initrd)
+- [ ] System plików

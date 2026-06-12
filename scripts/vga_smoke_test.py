@@ -7,7 +7,9 @@
   5. wielozadaniowość: liczniki wątków A/B rosną niezależnie, wątek C
      kończy się i znika z listy 'ps'
   6. shell: echo klawiatury, komendy 'help', 'mem', 'ps' (QMP sendkey)
-  7. page fault: komenda 'crash' musi wywołać wyjątek 14 z adresem w CR2
+  7. tryb użytkownika: proces ring 3 robi syscalle (write/sleep), po czym
+     próbuje czytać pamięć jądra - musi zginąć, a system musi żyć dalej
+  8. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
 
 Użycie: python3 scripts/vga_smoke_test.py [build/protonos.bin]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
@@ -140,12 +142,13 @@ def main():
         check(f"timer PIT tyka (uptime {t1}s -> {t2}s)",
               t1 is not None and t2 is not None and t2 > t1)
 
-        # Wielozadaniowosc: liczniki watkow A i B musza rosnac niezaleznie
+        # Wielozadaniowosc: liczniki watkow A i B musza rosnac niezaleznie.
+        # Bierzemy OSTATNIE wystapienie - po przewinieciu ekranu wyzej
+        # moga wisiec stare, martwe kopie linii z licznikami.
         def counters(s):
-            a = re.search(r"watek-A: (\d+)", s)
-            b = re.search(r"watek-B: (\d+)", s)
-            return (int(a.group(1)) if a else None,
-                    int(b.group(1)) if b else None)
+            a = re.findall(r"watek-A: (\d+)", s)
+            b = re.findall(r"watek-B: (\d+)", s)
+            return (int(a[-1]) if a else None, int(b[-1]) if b else None)
 
         a1, b1 = counters(q.wait_for("watek-A: "))
         time.sleep(1.5)
@@ -196,6 +199,28 @@ def main():
               and "demo-B" in screen)
         check("zombie po watku C zostal sprzatniety",
               "demo-C" not in screen)
+
+        # Tryb uzytkownika: proces ring 3 + syscalle + ochrona pamieci
+        q.type_line("user")
+        screen = q.wait_for("[ring3] czesc z trybu uzytkownika!")
+        check("proces ring 3 wystartowal i robi syscall write", True)
+        screen = q.wait_for("[ring3] licze: 3")
+        check("syscalle write+sleep dzialaja w petli", True)
+        screen = q.wait_for("proces 'user-demo' ubity")
+        check("proba czytania pamieci jadra ubila proces", True)
+        check("CR2 pokazuje atakowany adres", "siegnal po adres 100000" in screen)
+        check("kod po ataku nie wykonal sie",
+              "TEGO NIE POWINNO BYC WIDAC" not in screen)
+
+        # System musi zyc dalej: liczniki rosna, shell odpowiada
+        a3, _ = counters(q.screen())
+        time.sleep(1)
+        a4, _ = counters(q.screen())
+        check(f"system zyje po ubiciu procesu ({a3} -> {a4})",
+              a3 is not None and a4 is not None and a4 > a3)
+        q.type_line("uptime")
+        check("shell odpowiada po ubiciu procesu",
+              "tyknac timera" in q.screen())
 
         # Na koncu: crash powinien wywolac page fault z diagnostyka
         q.type_line("crash")

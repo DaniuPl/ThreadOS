@@ -20,6 +20,16 @@ SECTIONS
         *(.text)
     }
 
+    /* Program użytkownika - osobne strony, bo dostają bit USER */
+    .user : ALIGN(4K)
+    {
+        _user_start = .;
+        *(.user_text)
+        *(.user_data)
+        . = ALIGN(4K);
+        _user_end = .;
+    }
+
     .rodata : ALIGN(4K)
     {
         *(.rodata)

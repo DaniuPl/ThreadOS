@@ -4,6 +4,8 @@
 #include "include/isr.h"
 #include "include/pic.h"
 #include "include/printk.h"
+#include "include/syscall.h"
+#include "include/task.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -28,11 +30,29 @@ void irq_install_handler(int irq, irq_handler_t handler)
 
 void isr_handler(struct regs *r)
 {
+    if (r->int_no == SYSCALL_VECTOR) {
+        syscall_handler(r);
+        return;
+    }
+
     if (r->int_no < 32) {
         /* Breakpoint (int3) to wyjątek-pułapka: zgłoś i jedź dalej */
         if (r->int_no == 3) {
             printk("[INT3] breakpoint pod eip=%x\n", r->eip);
             return;
+        }
+
+        /* Wyjątek w ring 3: ginie tylko proces użytkownika, nie system */
+        if ((r->cs & 3) == 3) {
+            printk("\n[jadro] proces '%s' ubity: %s (err=%x, eip=%x)\n",
+                   task_current_name(), exception_names[r->int_no],
+                   r->err_code, r->eip);
+            if (r->int_no == 14) {
+                uint32_t cr2;
+                __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
+                printk("[jadro] proces siegnal po adres %x\n", cr2);
+            }
+            task_exit();
         }
 
         printk("\n!!! WYJATEK CPU %u: %s (err=%x) pod eip=%x\n",

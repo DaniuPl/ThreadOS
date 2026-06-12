@@ -23,8 +23,18 @@ struct gdt_ptr {
     uint32_t base;
 } __attribute__((packed));
 
-static struct gdt_entry gdt[5];
+/* TSS - w trybie chronionym używany tylko po to, by CPU wiedział,
+   na jaki stos jądra (ss0:esp0) przeskoczyć przy przerwaniu z ring 3 */
+struct tss {
+    uint32_t prev_tss;
+    uint32_t esp0;
+    uint32_t ss0;
+    uint32_t unused[23];
+} __attribute__((packed));
+
+static struct gdt_entry gdt[6];
 static struct gdt_ptr gdt_pointer;
+static struct tss tss;
 
 static void gdt_set_entry(int i, uint32_t base, uint32_t limit,
                           uint8_t access, uint8_t gran)
@@ -49,6 +59,10 @@ void gdt_init(void)
     gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);       /* kod użytkownika, ring 3 */
     gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);       /* dane użytkownika, ring 3 */
 
+    tss.ss0 = GDT_KERNEL_DATA;
+    /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
+    gdt_set_entry(5, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x00);
+
     /* Załaduj GDT, przeładuj rejestry segmentowe; CS wymaga dalekiego skoku */
     __asm__ volatile(
         "lgdt %0\n\t"
@@ -60,7 +74,15 @@ void gdt_init(void)
         "movw %%ax, %%ss\n\t"
         "ljmpl %2, $1f\n\t"
         "1:\n\t"
+        "movw %3, %%ax\n\t"
+        "ltr %%ax\n\t"
         :
-        : "m"(gdt_pointer), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE)
+        : "m"(gdt_pointer), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE),
+          "i"(GDT_TSS)
         : "eax", "memory");
+}
+
+void tss_set_esp0(uint32_t esp0)
+{
+    tss.esp0 = esp0;
 }

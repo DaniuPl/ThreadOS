@@ -22,4 +22,6 @@ void schedule(void);
 /* Wypisuje listę wątków (komenda 'ps' w shellu) */
 void task_dump(void);
 
+const char *task_current_name(void);
+
 #endif

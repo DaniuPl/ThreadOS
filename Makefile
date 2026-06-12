@@ -15,8 +15,9 @@ CFLAGS  := -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 ASFLAGS := -m32
 # Uwaga: docelowo warto linkować z -lgcc (wymaga gcc-multilib z 32-bit libgcc),
 # np. gdy pojawi się 64-bitowe dzielenie. Na razie jądro się bez niej obywa.
+# --no-warn-rwx-segments: sekcja .user swiadomie laczy kod i dane (RWX)
 LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
-           -Wl,--build-id=none
+           -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 BUILD   := build
 KERNEL  := $(BUILD)/protonos.bin
@@ -40,7 +41,10 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/heap.o \
         $(BUILD)/shell.o \
         $(BUILD)/switch.o \
-        $(BUILD)/task.o
+        $(BUILD)/task.o \
+        $(BUILD)/syscall.o \
+        $(BUILD)/usermode.o \
+        $(BUILD)/userprog.o
 
 .PHONY: all iso run run-iso test clean
 

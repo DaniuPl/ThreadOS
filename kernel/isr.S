@@ -77,6 +77,9 @@ ISR_NOERR 45
 ISR_NOERR 46
 ISR_NOERR 47
 
+/* Syscalle: int 0x80 (bramka z DPL=3, dostępna z ring 3) */
+ISR_NOERR 128
+
 isr_common:
     pushal
     pushl %ds

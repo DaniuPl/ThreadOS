@@ -19,6 +19,7 @@
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/io.h"
+#include "include/gdt.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -27,6 +28,7 @@ enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
 
 struct task {
     uint32_t esp;
+    uint32_t kstack_top;        /* dla TSS.esp0 (przerwania z ring 3) */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -36,6 +38,9 @@ struct task {
     void *stack;                /* NULL dla wątku main (stos z boot.S) */
     struct task *next;
 };
+
+/* Stos rozruchowy z boot.S - wątek main kontynuuje na nim */
+extern char stack_top[];
 
 extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
 
@@ -65,6 +70,7 @@ void scheduler_init(void)
     task_set_name(main_task, "main");
     main_task->state = TASK_RUNNING;
     main_task->stack = NULL;
+    main_task->kstack_top = (uint32_t)stack_top;
     main_task->next = main_task;
     current = main_task;
 }
@@ -73,6 +79,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
 {
     struct task *t = kmalloc(sizeof(*t));
     t->stack = kmalloc(STACK_SIZE);
+    t->kstack_top = (uint32_t)t->stack + STACK_SIZE;
     t->entry = entry;
     t->arg = arg;
     t->state = TASK_READY;
@@ -145,6 +152,8 @@ void schedule(void)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
     current = next;
+    /* Przerwanie z ring 3 tego wątku ma wylądować na jego stosie jądra */
+    tss_set_esp0(next->kstack_top);
     context_switch(&prev->esp, next->esp);
 }
 
@@ -172,6 +181,11 @@ void task_exit(void)
     /* zombie nigdy nie zostanie wybrany ponownie */
     for (;;)
         __asm__ volatile("hlt");
+}
+
+const char *task_current_name(void)
+{
+    return current ? current->name : "(brak)";
 }
 
 void task_dump(void)
