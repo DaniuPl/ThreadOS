@@ -29,4 +29,8 @@ void vga_set_color(enum vga_color fg, enum vga_color bg);
 void vga_putchar(char c);
 void vga_write(const char *s);
 
+/* Pisze w konkretnym miejscu ekranu, nie ruszając kursora
+   (np. licznik uptime w rogu) */
+void vga_write_at(size_t x, size_t y, const char *s);
+
 #endif

@@ -52,6 +52,13 @@ void vga_putchar(char c)
             vga_scroll();
         return;
     }
+    if (c == '\b') {
+        if (col > 0) {
+            col--;
+            vga_buffer[row * VGA_WIDTH + col] = vga_entry(' ', color);
+        }
+        return;
+    }
 
     vga_buffer[row * VGA_WIDTH + col] = vga_entry(c, color);
     if (++col == VGA_WIDTH) {
@@ -65,4 +72,10 @@ void vga_write(const char *s)
 {
     while (*s)
         vga_putchar(*s++);
+}
+
+void vga_write_at(size_t x, size_t y, const char *s)
+{
+    while (*s && x < VGA_WIDTH && y < VGA_HEIGHT)
+        vga_buffer[y * VGA_WIDTH + x++] = vga_entry(*s++, color);
 }

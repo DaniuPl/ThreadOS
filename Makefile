@@ -23,11 +23,20 @@ KERNEL  := $(BUILD)/protonos.bin
 ISO     := $(BUILD)/protonos.iso
 
 OBJS := $(BUILD)/boot.o \
+        $(BUILD)/isr_stubs.o \
         $(BUILD)/kmain.o \
         $(BUILD)/vga.o \
-        $(BUILD)/string.o
+        $(BUILD)/serial.o \
+        $(BUILD)/printk.o \
+        $(BUILD)/string.o \
+        $(BUILD)/gdt.o \
+        $(BUILD)/idt.o \
+        $(BUILD)/isr.o \
+        $(BUILD)/pic.o \
+        $(BUILD)/pit.o \
+        $(BUILD)/keyboard.o
 
-.PHONY: all iso run run-iso clean
+.PHONY: all iso run run-iso test clean
 
 all: $(KERNEL)
 
@@ -35,6 +44,9 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 $(BUILD)/boot.o: boot/boot.S | $(BUILD)
+	$(AS) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: kernel/%.c | $(BUILD)
@@ -58,6 +70,10 @@ run: $(KERNEL)
 
 run-iso: iso
 	qemu-system-i386 -cdrom $(ISO)
+
+# Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA
+test: $(KERNEL)
+	python3 scripts/vga_smoke_test.py $(KERNEL)
 
 clean:
 	rm -rf $(BUILD)

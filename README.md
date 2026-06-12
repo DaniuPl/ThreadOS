@@ -12,9 +12,20 @@ ProtonOS/
 │   └── boot.S          # nagłówek Multiboot, ustawienie stosu, skok do kmain()
 ├── kernel/
 │   ├── kmain.c         # główny punkt wejścia jądra w C
-│   ├── vga.c           # sterownik trybu tekstowego VGA (wypisywanie na ekran)
+│   ├── gdt.c           # własna GDT (płaski model, segmenty ring 0 i ring 3)
+│   ├── idt.c           # IDT - 256 bramek przerwań
+│   ├── isr.S           # stuby przerwań w asemblerze (wyjątki + IRQ)
+│   ├── isr.c           # wspólny handler: wyjątki CPU i dispatch IRQ
+│   ├── pic.c           # remapowanie PIC 8259, maskowanie, EOI
+│   ├── pit.c           # timer PIT (100 Hz), licznik uptime
+│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII, echo
+│   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
+│   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
+│   ├── vga.c           # sterownik trybu tekstowego VGA
 │   ├── string.c        # memset/memcpy/strlen (brak libc w jądrze)
 │   └── include/        # nagłówki jądra
+├── scripts/
+│   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO
 └── Makefile
@@ -32,13 +43,20 @@ ProtonOS/
 ```sh
 make          # buduje build/protonos.bin
 make run      # uruchamia jądro w QEMU (najprostsza droga)
+make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
 make iso      # buduje bootowalne ISO z GRUB-em
 make run-iso  # uruchamia ISO w QEMU
 make clean
 ```
 
-Po uruchomieniu jądro czyści ekran, wypisuje banner i weryfikuje,
-że zostało załadowane przez bootloader zgodny z Multiboot.
+Po uruchomieniu jądro wypisuje status inicjalizacji każdego podsystemu,
+w prawym górnym rogu tyka licznik uptime, a wszystko co wpiszesz na
+klawiaturze jest echo'wane na ekran. Logi jądra idą równolegle na port
+szeregowy (`make run` + opcja `-serial stdio` w QEMU pokaże je w terminalu).
+
+`make test` bootuje jądro w QEMU bez okna i przez QMP sprawdza zawartość
+ekranu VGA, tykanie timera oraz echo klawiatury (wstrzykuje klawisze
+poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 
 ## Jak to działa
 
@@ -51,14 +69,17 @@ Po uruchomieniu jądro czyści ekran, wypisuje banner i weryfikuje,
 3. `kmain()` inicjalizuje sterownik VGA i wypisuje tekst, pisząc
    bezpośrednio do bufora pod adresem `0xB8000`.
 
-## Plan rozwoju (następne kroki)
+## Plan rozwoju
 
-- [ ] GDT (Global Descriptor Table) - własne deskryptory segmentów
-- [ ] IDT + obsługa wyjątków CPU
-- [ ] PIC (remapowanie) i przerwania sprzętowe (IRQ)
-- [ ] Sterownik klawiatury (PS/2)
-- [ ] Timer (PIT) i licznik czasu
+- [x] GDT (Global Descriptor Table) - własne deskryptory segmentów
+- [x] IDT + obsługa wyjątków CPU
+- [x] PIC (remapowanie) i przerwania sprzętowe (IRQ)
+- [x] Sterownik klawiatury (PS/2)
+- [x] Timer (PIT) i licznik czasu
+- [x] Port szeregowy (COM1) + printk
 - [ ] Odczyt mapy pamięci z Multiboot
 - [ ] Zarządzanie pamięcią fizyczną (alokator ramek)
 - [ ] Stronicowanie (paging)
-- [ ] Tryb 64-bit / wyższa półka: procesy, scheduler, syscalle
+- [ ] Alokator pamięci jądra (kmalloc)
+- [ ] Prosty shell w jądrze (buforowanie linii z klawiatury)
+- [ ] Procesy, scheduler, syscalle, tryb użytkownika
