@@ -30,7 +30,7 @@ static void print_pid(void)
     } while (pid);
     print("ush: moj pid to ");
     while (n)
-        sys_write(&buf[--n], 1);
+        sys_write(STDOUT, &buf[--n], 1);
     print("\n");
 }
 
@@ -39,7 +39,7 @@ static uint32_t read_line(void)
     uint32_t n = 0;
     for (;;) {
         char c;
-        if (sys_read(&c, 1) != 1)
+        if (sys_read(STDIN, &c, 1) != 1)
             continue;
         if (c == '\n') {
             print("\n");
@@ -54,7 +54,7 @@ static uint32_t read_line(void)
         }
         if (n < LINE_MAX - 1) {
             line[n++] = c;
-            sys_write(&c, 1);   /* echo robi shell, nie jadro */
+            sys_write(STDOUT, &c, 1);   /* echo robi shell, nie jadro */
         }
     }
     line[n] = '\0';

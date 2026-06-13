@@ -181,6 +181,125 @@ int fs_read(const char *name, void *buf, uint32_t max)
     return (int)len;
 }
 
+int fs_open(const char *name, int create)
+{
+    if (!ready || strlen(name) > FS_NAME_MAX)
+        return -1;
+
+    uint32_t flags = irq_save();
+    int idx = find_inode(name);
+    if (idx < 0 && create) {
+        idx = alloc_inode();
+        if (idx >= 0) {
+            memset(inodes[idx].name, 0, sizeof(inodes[idx].name));
+            memcpy(inodes[idx].name, name, strlen(name));
+            inodes[idx].size = 0;
+            inodes[idx].used = 1;
+            flush_inodes();
+        }
+    }
+    irq_restore(flags);
+    return idx;
+}
+
+int fs_size(int idx)
+{
+    if (!ready || idx < 0 || idx >= FS_MAX_FILES || !inodes[idx].used)
+        return -1;
+    return (int)inodes[idx].size;
+}
+
+int fs_truncate(int idx)
+{
+    if (!ready || idx < 0 || idx >= FS_MAX_FILES || !inodes[idx].used)
+        return -1;
+    uint32_t flags = irq_save();
+    inodes[idx].size = 0;
+    flush_inodes();
+    irq_restore(flags);
+    return 0;
+}
+
+int fs_read_at(int idx, uint32_t off, void *buf, uint32_t len)
+{
+    if (!ready || idx < 0 || idx >= FS_MAX_FILES || !inodes[idx].used)
+        return -1;
+
+    uint32_t flags = irq_save();
+    uint32_t size = inodes[idx].size;
+    if (off >= size) {
+        irq_restore(flags);
+        return 0;                       /* za koncem pliku */
+    }
+    if (off + len > size)
+        len = size - off;
+
+    uint32_t base = DATA_START + idx * FILE_SECTORS;
+    uint8_t *dst = buf;
+    uint32_t done = 0;
+
+    while (done < len) {
+        uint32_t pos = off + done;
+        uint32_t sector = pos / ATA_SECTOR_SIZE;
+        uint32_t soff = pos % ATA_SECTOR_SIZE;
+        uint32_t chunk = ATA_SECTOR_SIZE - soff;
+        if (chunk > len - done)
+            chunk = len - done;
+
+        if (ata_read_sector(base + sector, sector_buf) < 0) {
+            irq_restore(flags);
+            return -1;
+        }
+        memcpy(dst + done, sector_buf + soff, chunk);
+        done += chunk;
+    }
+
+    irq_restore(flags);
+    return (int)done;
+}
+
+int fs_write_at(int idx, uint32_t off, const void *buf, uint32_t len)
+{
+    if (!ready || idx < 0 || idx >= FS_MAX_FILES || !inodes[idx].used)
+        return -1;
+    if (off + len > FS_MAX_SIZE)
+        return -1;
+
+    uint32_t flags = irq_save();
+    uint32_t base = DATA_START + idx * FILE_SECTORS;
+    const uint8_t *src = buf;
+    uint32_t done = 0;
+
+    while (done < len) {
+        uint32_t pos = off + done;
+        uint32_t sector = pos / ATA_SECTOR_SIZE;
+        uint32_t soff = pos % ATA_SECTOR_SIZE;
+        uint32_t chunk = ATA_SECTOR_SIZE - soff;
+        if (chunk > len - done)
+            chunk = len - done;
+
+        /* Czytaj-modyfikuj-zapisz, bo zmieniamy fragment sektora */
+        if (ata_read_sector(base + sector, sector_buf) < 0) {
+            irq_restore(flags);
+            return -1;
+        }
+        memcpy(sector_buf + soff, src + done, chunk);
+        if (ata_write_sector(base + sector, sector_buf) < 0) {
+            irq_restore(flags);
+            return -1;
+        }
+        done += chunk;
+    }
+
+    if (off + len > inodes[idx].size) {
+        inodes[idx].size = off + len;
+        flush_inodes();
+    }
+
+    irq_restore(flags);
+    return (int)done;
+}
+
 void fs_list(void)
 {
     if (!ready) {

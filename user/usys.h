@@ -14,15 +14,27 @@
 #define SYS_WAIT     7
 #define SYS_GETPID   8
 #define SYS_SBRK     9
-#define SYS_FWRITE   10
-#define SYS_FREAD    11
+#define SYS_OPEN     10
+#define SYS_CLOSE    11
+#define SYS_SEEK     12
 
-static inline int32_t sys_write(const char *s, uint32_t len)
+/* Flagi open() */
+#define O_READ   1
+#define O_WRITE  2
+#define O_CREATE 4
+#define O_TRUNC  8
+
+/* Standardowe deskryptory */
+#define STDIN  0
+#define STDOUT 1
+#define STDERR 2
+
+static inline int32_t sys_write(int fd, const void *buf, uint32_t len)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_WRITE), "b"(s), "c"(len)
+                     : "a"(SYS_WRITE), "b"(fd), "c"(buf), "d"(len)
                      : "memory");
     return ret;
 }
@@ -50,12 +62,12 @@ static inline uint32_t sys_getticks(void)
     return ret;
 }
 
-static inline int32_t sys_read(char *buf, uint32_t len)
+static inline int32_t sys_read(int fd, void *buf, uint32_t len)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_READ), "b"(buf), "c"(len)
+                     : "a"(SYS_READ), "b"(fd), "c"(buf), "d"(len)
                      : "memory");
     return ret;
 }
@@ -106,22 +118,29 @@ static inline void *malloc(uint32_t size)
     return p == (void *)-1 ? (void *)0 : p;
 }
 
-static inline int32_t sys_fwrite(const char *name, const void *buf, uint32_t len)
+static inline int32_t sys_open(const char *name, int flags)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_FWRITE), "b"(name), "c"(buf), "d"(len)
+                     : "a"(SYS_OPEN), "b"(name), "c"(flags)
                      : "memory");
     return ret;
 }
 
-static inline int32_t sys_fread(const char *name, void *buf, uint32_t max)
+static inline int32_t sys_close(int fd)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_CLOSE), "b"(fd) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_seek(int fd, uint32_t off)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_FREAD), "b"(name), "c"(buf), "d"(max)
+                     : "a"(SYS_SEEK), "b"(fd), "c"(off)
                      : "memory");
     return ret;
 }
@@ -145,7 +164,7 @@ static inline uint32_t ustrlen(const char *s)
 
 static inline void print(const char *s)
 {
-    sys_write(s, ustrlen(s));
+    sys_write(STDOUT, s, ustrlen(s));
 }
 
 #endif

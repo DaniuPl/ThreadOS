@@ -28,6 +28,7 @@ ProtonOS/
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, polling)
 │   ├── fs.c            # PFS - prosty zapisywalny system plików na dysku
+│   ├── kfile.c         # deskryptory plików: fd 0/1/2 + pliki (open/read/write/seek)
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, write...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -44,7 +45,8 @@ ProtonOS/
 │   ├── sh.c            # ush - shell użytkownika (read/spawn/wait w ring 3)
 │   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
 │   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
-│   ├── fileio.c        # zapisuje i czyta plik na dysku (syscalle fwrite/fread)
+│   ├── fileio.c        # zapis i odczyt pliku przez deskryptory (open/read/write)
+│   ├── cat.c           # wypisuje plik na konsolę (read pliku -> write na fd 1)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -123,8 +125,10 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       konsolę, uruchamia programy przez spawn+wait, `exit` wraca do jądra)
 - [x] Argumenty programów (argc/argv) - `run echo proton os dziala`
 - [x] Syscall sbrk + malloc w userspace (dynamiczna pamięć) - `run memtest`
-- [x] Sterownik dysku ATA (PIO) + system plików PFS (`fls`, `cat`, `write`,
-      syscalle fwrite/fread) - pliki przeżywają restart
-- [ ] Deskryptory plików (sys_open/close), katalogi
-- [ ] Potoki / przekierowania strumieni między procesami
+- [x] Sterownik dysku ATA (PIO) + system plików PFS - pliki przeżywają restart
+- [x] Deskryptory plików w stylu Uniksa: open/close/read/write/seek,
+      fd 0/1/2 = klawiatura/konsola, wyższe fd = pliki (jeden `write` na
+      wszystko); program `cat` w ring 3
+- [ ] Dziedziczenie fd przez spawn + przekierowania strumieni (`cmd > plik`)
+- [ ] Katalogi w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami

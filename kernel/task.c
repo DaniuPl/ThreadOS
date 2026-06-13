@@ -41,6 +41,7 @@ struct task {
     int id;
     char name[NAME_MAX];
     void *stack;                /* NULL dla wątku main (stos z boot.S) */
+    struct file_desc fds[TASK_MAX_FD];
     struct task *next;
 };
 
@@ -58,6 +59,20 @@ static void task_set_name(struct task *t, const char *name)
     for (; name[i] && i < NAME_MAX - 1; i++)
         t->name[i] = name[i];
     t->name[i] = '\0';
+}
+
+/* Standardowe strumienie: 0=klawiatura (read), 1/2=konsola (write) */
+static void task_init_fds(struct task *t)
+{
+    memset(t->fds, 0, sizeof(t->fds));
+    t->fds[0].used = 1; t->fds[0].readable = 1;   /* stdin  */
+    t->fds[1].used = 1; t->fds[1].writable = 1;   /* stdout */
+    t->fds[2].used = 1; t->fds[2].writable = 1;   /* stderr */
+}
+
+struct file_desc *task_fds(void)
+{
+    return current->fds;
 }
 
 /* Pierwszy kod każdego nowego wątku - context_switch "wraca" tutaj */
@@ -79,6 +94,7 @@ void scheduler_init(void)
     main_task->cr3 = paging_kernel_cr3();
     main_task->owns_dir = 0;
     main_task->brk = 0;
+    task_init_fds(main_task);
     main_task->next = main_task;
     current = main_task;
 }
@@ -91,6 +107,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->cr3 = paging_kernel_cr3();
     t->owns_dir = 0;
     t->brk = 0;
+    task_init_fds(t);
     t->entry = entry;
     t->arg = arg;
     t->state = TASK_READY;

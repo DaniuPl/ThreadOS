@@ -5,6 +5,21 @@
 
 struct task;
 
+/* Tablica deskryptorow plikow procesu. fd 0/1/2 = klawiatura/konsola,
+   wyzsze fd = pliki na dysku (is_file=1). */
+#define TASK_MAX_FD 8
+struct file_desc {
+    int used;
+    int is_file;
+    int inode;            /* indeks i-wezla PFS dla plikow */
+    uint32_t off;         /* biezacy offset w pliku */
+    int readable;
+    int writable;
+};
+
+/* Tablica fd biezacego zadania (do warstwy syscalli plikowych) */
+struct file_desc *task_fds(void);
+
 /* Zamienia bieżący tok wykonania (kmain) w pierwszy wątek systemu */
 void scheduler_init(void);
 

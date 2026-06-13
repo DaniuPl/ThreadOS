@@ -19,6 +19,20 @@ int fs_write(const char *name, const void *data, uint32_t len);
 /* Czyta plik do buf (max bajtow). Zwraca liczbe bajtow albo -1. */
 int fs_read(const char *name, void *buf, uint32_t max);
 
+/* --- Operacje po indeksie i-wezla (warstwa deskryptorow plikow) --- */
+
+/* Otwiera plik po nazwie; gdy create=1 tworzy go, jesli nie istnieje.
+   Zwraca indeks i-wezla (>=0) albo -1. */
+int fs_open(const char *name, int create);
+
+int fs_size(int idx);                 /* rozmiar pliku albo -1 */
+int fs_truncate(int idx);             /* zeruje rozmiar pliku */
+
+/* Odczyt/zapis len bajtow od offsetu. Zapis rozszerza plik.
+   Zwracaja liczbe przetworzonych bajtow albo -1. */
+int fs_read_at(int idx, uint32_t off, void *buf, uint32_t len);
+int fs_write_at(int idx, uint32_t off, const void *buf, uint32_t len);
+
 /* Wypisuje liste plikow (komenda 'fls') */
 void fs_list(void);
 

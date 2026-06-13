@@ -353,6 +353,16 @@ def main():
         check("cat zglasza brak pliku",
               "brak pliku 'niema'" in q.wait_for("brak pliku"))
 
+        # Program 'cat' w ring 3: czyta plik przez fd, pisze na fd 1
+        # (zunifikowany model I/O: read pliku -> write na konsole).
+        # Czyscimy ekran, by nie zlapac starego echa 'witaj-z-dysku-pfs'.
+        q.type_line("clear")
+        time.sleep(0.3)
+        q.type_line("run cat greeting")
+        check("program ring3 'cat' czyta plik przez fd i pisze na fd 1",
+              "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs",
+                                                timeout=20))
+
         # Na koncu: crash powinien wywolac page fault z diagnostyka
         q.type_line("crash")
         screen = q.screen()

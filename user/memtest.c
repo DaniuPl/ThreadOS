@@ -19,7 +19,7 @@ static void print_dec(uint32_t v)
         v /= 10;
     } while (v);
     while (n)
-        sys_write(&buf[--n], 1);
+        sys_write(STDOUT, &buf[--n], 1);
 }
 
 void _start(void)

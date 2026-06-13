@@ -13,27 +13,19 @@
 #include "include/printk.h"
 #include "include/keyboard.h"
 #include "include/exec.h"
-#include "include/fs.h"
+#include "include/kfile.h"
 
-#define WRITE_MAX 1024
-
-static int32_t sys_write(const char *s, uint32_t len)
-{
-    if (len > WRITE_MAX)
-        len = WRITE_MAX;
-    /* Zaufanie do wskaźnika użytkownika jest naiwne, ale bezpieczne
-       o tyle, że błędny adres skończy się page faultem w ring 0 -
-       walidacja zakresów przyjdzie z prawdziwą przestrzenią adresową. */
-    for (uint32_t i = 0; i < len; i++)
-        printk("%c", s[i]);
-    return (int32_t)len;
-}
+/* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
+   page faultem w ring 0 (ginie proces). Pelna walidacja przyjdzie z
+   prawdziwym oddzieleniem przestrzeni jadra. Limit ucina absurdy. */
+#define IO_MAX 4096
 
 void syscall_handler(struct regs *r)
 {
     switch (r->eax) {
     case SYS_WRITE:
-        r->eax = (uint32_t)sys_write((const char *)r->ebx, r->ecx);
+        r->eax = (uint32_t)file_write((int)r->ebx, (const void *)r->ecx,
+                                      r->edx > IO_MAX ? IO_MAX : r->edx);
         break;
     case SYS_EXIT:
         printk("[jadro] proces '%s' zakonczyl sie (kod %d)\n",
@@ -48,7 +40,8 @@ void syscall_handler(struct regs *r)
         r->eax = pit_ticks();
         break;
     case SYS_READ:
-        r->eax = (uint32_t)keyboard_read((char *)r->ebx, r->ecx);
+        r->eax = (uint32_t)file_read((int)r->ebx, (void *)r->ecx,
+                                     r->edx > IO_MAX ? IO_MAX : r->edx);
         break;
     case SYS_SPAWN:
         r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
@@ -65,13 +58,14 @@ void syscall_handler(struct regs *r)
     case SYS_SBRK:
         r->eax = process_sbrk((int32_t)r->ebx);
         break;
-    case SYS_FWRITE:
-        r->eax = (uint32_t)fs_write((const char *)r->ebx,
-                                    (const void *)r->ecx, r->edx);
+    case SYS_OPEN:
+        r->eax = (uint32_t)file_open((const char *)r->ebx, (int)r->ecx);
         break;
-    case SYS_FREAD:
-        r->eax = (uint32_t)fs_read((const char *)r->ebx,
-                                   (void *)r->ecx, r->edx);
+    case SYS_CLOSE:
+        r->eax = (uint32_t)file_close((int)r->ebx);
+        break;
+    case SYS_SEEK:
+        r->eax = (uint32_t)file_seek((int)r->ebx, r->ecx);
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
