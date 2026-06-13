@@ -4,18 +4,6 @@
 
 #include "usys.h"
 
-static void print_dec(uint32_t v)
-{
-    char buf[12];
-    int n = 0;
-    do {
-        buf[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    while (n)
-        sys_write(STDOUT, &buf[--n], 1);
-}
-
 void _start(void)
 {
     uint32_t bytes = 0, lines = 0;

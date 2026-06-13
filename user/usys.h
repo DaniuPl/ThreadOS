@@ -84,12 +84,14 @@ static inline int32_t sys_spawn(const char *cmdline, const char *outfile)
     return ret;
 }
 
-static inline int32_t sys_pipeline(const char *cmd1, const char *cmd2)
+/* Potok cmd1|cmd2; outfile != NULL kieruje stdout konsumenta do pliku */
+static inline int32_t sys_pipeline(const char *cmd1, const char *cmd2,
+                                   const char *outfile)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_PIPELINE), "b"(cmd1), "c"(cmd2)
+                     : "a"(SYS_PIPELINE), "b"(cmd1), "c"(cmd2), "d"(outfile)
                      : "memory");
     return ret;
 }
@@ -172,6 +174,44 @@ static inline uint32_t ustrlen(const char *s)
     while (s[n])
         n++;
     return n;
+}
+
+/* Czy w 'hay' wystepuje podlancuch 'needle' */
+static inline int ustrstr(const char *hay, const char *needle)
+{
+    if (!*needle)
+        return 1;
+    for (; *hay; hay++) {
+        const char *h = hay, *n = needle;
+        while (*h && *n && *h == *n) {
+            h++;
+            n++;
+        }
+        if (!*n)
+            return 1;
+    }
+    return 0;
+}
+
+static inline int uatoi(const char *s)
+{
+    int v = 0;
+    while (*s >= '0' && *s <= '9')
+        v = v * 10 + (*s++ - '0');
+    return v;
+}
+
+/* Wypisuje liczbe dziesietna na stdout */
+static inline void print_dec(uint32_t v)
+{
+    char buf[12];
+    int n = 0;
+    do {
+        buf[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (n)
+        sys_write(STDOUT, &buf[--n], 1);
 }
 
 static inline void print(const char *s)

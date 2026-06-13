@@ -10,18 +10,6 @@
 #define BLOCKS    8
 #define BLOCK_LEN 4096   /* po jednej stronie kazdy - wymusza wzrost brk */
 
-static void print_dec(uint32_t v)
-{
-    char buf[12];
-    int n = 0;
-    do {
-        buf[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    while (n)
-        sys_write(STDOUT, &buf[--n], 1);
-}
-
 void _start(void)
 {
     print("[memtest] start sterty: ");

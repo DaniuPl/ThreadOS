@@ -85,14 +85,30 @@ void _start(void)
             continue;
         }
 
-        /* Potok: 'cmd1 | cmd2' - dwa programy polaczone potokiem */
+        /* Potok: 'cmd1 | cmd2' (opcjonalnie 'cmd2 > plik') */
         for (char *s = line; *s; s++) {
             if (*s == '|') {
                 *s = '\0';
                 char *right = s + 1;
                 while (*right == ' ')
                     right++;
-                int32_t pid = sys_pipeline(line, right);
+                /* opcjonalne '>' po prawej stronie potoku */
+                char *outfile = (void *)0;
+                for (char *r = right; *r; r++)
+                    if (*r == '>') {
+                        *r = '\0';
+                        char *f = r + 1;
+                        while (*f == ' ')
+                            f++;
+                        for (char *e = f; *e; e++)
+                            if (*e == ' ') {
+                                *e = '\0';
+                                break;
+                            }
+                        outfile = f;
+                        break;
+                    }
+                int32_t pid = sys_pipeline(line, right, outfile);
                 if (pid < 0)
                     print("ush: nie moge uruchomic potoku\n");
                 else

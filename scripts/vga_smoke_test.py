@@ -327,6 +327,28 @@ def main():
         check("potok laczy dwa procesy (echo | wc): poprawny licznik",
               "wc: wierszy=1 bajtow=12" in screen)
 
+        # seq jako producent wielu wierszy: 'seq 5 | wc' -> 5 wierszy,
+        # 10 bajtow (1\n2\n3\n4\n5\n)
+        q.type_line("seq 5 | wc")
+        check("seq przez potok do wc: 5 wierszy, 10 bajtow",
+              "wc: wierszy=5 bajtow=10" in q.wait_for("wc: wierszy=5"))
+
+        # grep filtruje w potoku; wynik mierzymy przez plik + wc, bo
+        # samo '7' na ekranie myli sie z echem wpisanej komendy.
+        # seq 9 | grep 7 -> tylko '7' (1 wiersz, 2 bajty)
+        q.type_line("seq 9 | grep 7 > g.txt")
+        time.sleep(0.5)
+        q.type_line("cat g.txt | wc")
+        check("grep w potoku przepuszcza tylko pasujace wiersze",
+              "wc: wierszy=1 bajtow=2" in q.wait_for("wc: wierszy=1 bajtow=2"))
+
+        # head ucina do N wierszy: seq 20 | head 3 -> 3 wiersze, 6 bajtow
+        q.type_line("seq 20 | head 3 > h.txt")
+        time.sleep(0.5)
+        q.type_line("cat h.txt | wc")
+        check("head ogranicza potok do N wierszy",
+              "wc: wierszy=3 bajtow=6" in q.wait_for("wc: wierszy=3 bajtow=6"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)

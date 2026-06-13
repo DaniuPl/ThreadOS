@@ -49,6 +49,9 @@ ProtonOS/
 │   ├── fileio.c        # zapis i odczyt pliku przez deskryptory (open/read/write)
 │   ├── cat.c           # wypisuje plik na konsolę (read pliku -> write na fd 1)
 │   ├── wc.c            # liczy bajty/wiersze ze stdin (konsument potoku)
+│   ├── seq.c           # wypisuje 1..N (producent potoku)
+│   ├── grep.c          # przepuszcza wiersze zawierające wzorzec
+│   ├── head.c          # przepuszcza pierwsze N wierszy
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -136,5 +139,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Potoki międzyprocesowe (`echo cos | wc`) - dwa procesy równolegle,
       bufor w jądrze, konsument blokuje się na pustym potoku i dostaje
       EOF, gdy producent się kończy
+- [x] Narzędzia uniksowe komponujące się przez potoki: `seq`, `grep`,
+      `head`, `wc`, `cat` (np. `seq 9 | grep 7 > plik`)
+- [ ] Wielostopniowe potoki (`a | b | c`)
 - [ ] Katalogi w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami

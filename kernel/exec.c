@@ -26,21 +26,14 @@
 #define ARG_MAX        16
 #define CMD_MAX        128
 
-/* Sposob ustawienia standardowych strumieni procesu potomnego */
-enum redir {
-    REDIR_NONE,
-    REDIR_FILE_OUT,    /* stdout do pliku (out) - 'cmd > plik' */
-    REDIR_PIPE_OUT,    /* stdout do potoku (pipe) - lewa strona 'a | b' */
-    REDIR_PIPE_IN,     /* stdin z potoku (pipe) - prawa strona 'a | b' */
-};
-
 /* Argumenty przekazywane do watka-procesu: linia polecen plus
-   sposob przekierowania strumieni */
+   niezalezne ustawienie stdin/stdout. Pozwala laczyc przekierowania,
+   np. konsument potoku z wyjsciem do pliku ('a | b > plik'). */
 struct exec_args {
     char cmd[CMD_MAX];
-    char out[FS_NAME_MAX + 1];
-    enum redir redir;
-    int pipe;
+    int in_pipe;                  /* stdin z potoku (idx) albo -1 */
+    int out_pipe;                 /* stdout do potoku (idx) albo -1 */
+    char out_file[FS_NAME_MAX + 1]; /* stdout do pliku ("" = brak) */
 };
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
@@ -159,14 +152,14 @@ static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
     return sp;
 }
 
-/* Sprzatniecie po nieudanym starcie: jesli proces mial przejac koniec
-   potoku, trzeba go zwolnic, inaczej druga strona zawisnie */
+/* Sprzatniecie po nieudanym starcie: jesli proces mial przejac konce
+   potoku, trzeba je zwolnic, inaczej druga strona zawisnie */
 static void exec_fail(struct exec_args *a)
 {
-    if (a->redir == REDIR_PIPE_OUT)
-        pipe_close_writer(a->pipe);
-    else if (a->redir == REDIR_PIPE_IN)
-        pipe_close_reader(a->pipe);
+    if (a->out_pipe >= 0)
+        pipe_close_writer(a->out_pipe);
+    if (a->in_pipe >= 0)
+        pipe_close_reader(a->in_pipe);
     kfree(a);
 }
 
@@ -246,21 +239,13 @@ static void exec_task(void *arg)
            tok[0], size, eh->e_entry, argc);
     uint32_t entry = eh->e_entry;
 
-    /* Przekierowanie strumieni przed wejsciem w ring 3 */
-    switch (a->redir) {
-    case REDIR_FILE_OUT:
-        if (file_redirect_stdout(a->out) < 0)
-            printk("exec: nie moge przekierowac stdout do '%s'\n", a->out);
-        break;
-    case REDIR_PIPE_OUT:
-        file_set_pipe(1, a->pipe, 1);   /* stdout -> koniec zapisu */
-        break;
-    case REDIR_PIPE_IN:
-        file_set_pipe(0, a->pipe, 0);   /* stdin <- koniec odczytu */
-        break;
-    case REDIR_NONE:
-        break;
-    }
+    /* Przekierowanie strumieni przed wejsciem w ring 3 (niezaleznie) */
+    if (a->in_pipe >= 0)
+        file_set_pipe(0, a->in_pipe, 0);    /* stdin <- koniec odczytu */
+    if (a->out_pipe >= 0)
+        file_set_pipe(1, a->out_pipe, 1);   /* stdout -> koniec zapisu */
+    else if (a->out_file[0] && file_redirect_stdout(a->out_file) < 0)
+        printk("exec: nie moge przekierowac stdout do '%s'\n", a->out_file);
     kfree(a);
 
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
@@ -324,10 +309,22 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
         n++;
     }
     a->cmd[n] = '\0';
-    a->redir = REDIR_NONE;
-    a->out[0] = '\0';
-    a->pipe = -1;
+    a->in_pipe = -1;
+    a->out_pipe = -1;
+    a->out_file[0] = '\0';
     return a;
+}
+
+static void set_outfile(struct exec_args *a, const char *outfile)
+{
+    if (!outfile || !outfile[0])
+        return;
+    uint32_t m = 0;
+    while (outfile[m] && m < FS_NAME_MAX) {
+        a->out_file[m] = outfile[m];
+        m++;
+    }
+    a->out_file[m] = '\0';
 }
 
 int exec_spawn(const char *cmdline)
@@ -345,20 +342,15 @@ int exec_spawn_redirect(const char *cmdline, const char *outfile)
     struct exec_args *a = make_args(cmdline, prog);
     if (!a)
         return -1;
-
-    a->redir = REDIR_FILE_OUT;
-    uint32_t m = 0;
-    while (outfile[m] && m < FS_NAME_MAX) {
-        a->out[m] = outfile[m];
-        m++;
-    }
-    a->out[m] = '\0';
+    set_outfile(a, outfile);
     return task_id_of(task_create(prog, exec_task, a));
 }
 
 /* Uruchamia potok 'cmd1 | cmd2': stdout cmd1 -> potok -> stdin cmd2.
-   Oba procesy dzialaja rownolegle. Zwraca pid konsumenta (cmd2) albo -1. */
-int exec_spawn_pipeline(const char *cmd1, const char *cmd2)
+   Oba procesy dzialaja rownolegle. Gdy outfile != NULL, stdout
+   konsumenta idzie dodatkowo do pliku. Zwraca pid konsumenta albo -1. */
+int exec_spawn_pipeline(const char *cmd1, const char *cmd2,
+                        const char *outfile)
 {
     char prog1[16], prog2[16];
     struct exec_args *a1 = make_args(cmd1, prog1);
@@ -378,11 +370,10 @@ int exec_spawn_pipeline(const char *cmd1, const char *cmd2)
         return -1;
     }
 
-    a1->redir = REDIR_PIPE_OUT;
-    a1->pipe = pidx;
-    a2->redir = REDIR_PIPE_IN;
-    a2->pipe = pidx;
+    a1->out_pipe = pidx;            /* producent: stdout -> potok */
+    a2->in_pipe = pidx;             /* konsument: stdin <- potok */
+    set_outfile(a2, outfile);       /* opcjonalnie stdout konsumenta -> plik */
 
-    task_create(prog1, exec_task, a1);                 /* producent */
-    return task_id_of(task_create(prog2, exec_task, a2)); /* konsument */
+    task_create(prog1, exec_task, a1);
+    return task_id_of(task_create(prog2, exec_task, a2));
 }

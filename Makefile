@@ -32,7 +32,9 @@ USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
 USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
              $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf \
-             $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf
+             $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf \
+             $(BUILD)/user/seq.elf $(BUILD)/user/grep.elf \
+             $(BUILD)/user/head.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -98,7 +100,9 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
 	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf \
-	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf
+	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf \
+	    seq=$(BUILD)/user/seq.elf grep=$(BUILD)/user/grep.elf \
+	    head=$(BUILD)/user/head.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)
