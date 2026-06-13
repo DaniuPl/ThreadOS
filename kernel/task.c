@@ -21,6 +21,7 @@
 #include "include/io.h"
 #include "include/gdt.h"
 #include "include/paging.h"
+#include "include/kfile.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -64,7 +65,7 @@ static void task_set_name(struct task *t, const char *name)
 /* Standardowe strumienie: 0=klawiatura (read), 1/2=konsola (write) */
 static void task_init_fds(struct task *t)
 {
-    memset(t->fds, 0, sizeof(t->fds));
+    memset(t->fds, 0, sizeof(t->fds));         /* kind=FD_CONSOLE (=0) */
     t->fds[0].used = 1; t->fds[0].readable = 1;   /* stdin  */
     t->fds[1].used = 1; t->fds[1].writable = 1;   /* stdout */
     t->fds[2].used = 1; t->fds[2].writable = 1;   /* stderr */
@@ -257,6 +258,10 @@ int task_alive(int id)
 
 void task_exit(void)
 {
+    /* Zamknij deskryptory - konce potokow musza zwolnic druga strone
+       (czytelnik dostanie EOF, pisarz - przerwany potok) */
+    file_close_all();
+
     irq_save();
     current->state = TASK_ZOMBIE;
     schedule();

@@ -22,4 +22,11 @@ int  file_seek(int fd, uint32_t off);
    Uzywane przy 'cmd > plik'. Zwraca 0 albo -1. */
 int  file_redirect_stdout(const char *name);
 
+/* Ustawia podany fd jako koniec potoku (writable=1 -> zapis/stdout,
+   0 -> odczyt/stdin). Uzywane przy budowie potoku 'cmd1 | cmd2'. */
+void file_set_pipe(int fd, int pipe_idx, int writable);
+
+/* Zwalnia wszystkie deskryptory biezacego zadania (konce potokow) */
+void file_close_all(void);
+
 #endif

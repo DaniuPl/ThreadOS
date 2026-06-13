@@ -32,7 +32,7 @@ USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
 USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
              $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf \
-             $(BUILD)/user/cat.elf
+             $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -59,7 +59,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/exec.o \
         $(BUILD)/ata.o \
         $(BUILD)/fs.o \
-        $(BUILD)/kfile.o
+        $(BUILD)/kfile.o \
+        $(BUILD)/pipe.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -97,7 +98,7 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
 	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf \
-	    cat=$(BUILD)/user/cat.elf
+	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

@@ -28,7 +28,8 @@ ProtonOS/
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, polling)
 │   ├── fs.c            # PFS - prosty zapisywalny system plików na dysku
-│   ├── kfile.c         # deskryptory plików: fd 0/1/2 + pliki (open/read/write/seek)
+│   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
+│   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, write...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -42,11 +43,12 @@ ProtonOS/
 │   ├── usys.h          # biblioteczka syscalli (int 0x80)
 │   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
 │   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
-│   ├── sh.c            # ush - shell użytkownika (spawn/wait, przekierowanie >)
+│   ├── sh.c            # ush - shell użytkownika (spawn/wait, > oraz |)
 │   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
 │   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
 │   ├── fileio.c        # zapis i odczyt pliku przez deskryptory (open/read/write)
 │   ├── cat.c           # wypisuje plik na konsolę (read pliku -> write na fd 1)
+│   ├── wc.c            # liczy bajty/wiersze ze stdin (konsument potoku)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -131,6 +133,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       wszystko); program `cat` w ring 3
 - [x] Przekierowanie wyjścia w shellu (`echo tekst > plik`) - jądro
       podmienia stdout procesu na uchwyt pliku przed wejściem w ring 3
-- [ ] Pełne dziedziczenie tablicy fd rodzica przez dziecko + potoki (`|`)
+- [x] Potoki międzyprocesowe (`echo cos | wc`) - dwa procesy równolegle,
+      bufor w jądrze, konsument blokuje się na pustym potoku i dostaje
+      EOF, gdy producent się kończy
 - [ ] Katalogi w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami

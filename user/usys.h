@@ -17,6 +17,7 @@
 #define SYS_OPEN     10
 #define SYS_CLOSE    11
 #define SYS_SEEK     12
+#define SYS_PIPELINE 13
 
 /* Flagi open() */
 #define O_READ   1
@@ -79,6 +80,16 @@ static inline int32_t sys_spawn(const char *cmdline, const char *outfile)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_SPAWN), "b"(cmdline), "c"(outfile)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_pipeline(const char *cmd1, const char *cmd2)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_PIPELINE), "b"(cmd1), "c"(cmd2)
                      : "memory");
     return ret;
 }

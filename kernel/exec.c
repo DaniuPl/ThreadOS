@@ -18,6 +18,7 @@
 #include "include/string.h"
 #include "include/fs.h"
 #include "include/kfile.h"
+#include "include/pipe.h"
 #include "include/printk.h"
 
 #define USER_STACK_TOP 0xC0000000u
@@ -25,12 +26,21 @@
 #define ARG_MAX        16
 #define CMD_MAX        128
 
+/* Sposob ustawienia standardowych strumieni procesu potomnego */
+enum redir {
+    REDIR_NONE,
+    REDIR_FILE_OUT,    /* stdout do pliku (out) - 'cmd > plik' */
+    REDIR_PIPE_OUT,    /* stdout do potoku (pipe) - lewa strona 'a | b' */
+    REDIR_PIPE_IN,     /* stdin z potoku (pipe) - prawa strona 'a | b' */
+};
+
 /* Argumenty przekazywane do watka-procesu: linia polecen plus
-   opcjonalne przekierowanie stdout do pliku (shell: 'cmd > plik') */
+   sposob przekierowania strumieni */
 struct exec_args {
     char cmd[CMD_MAX];
     char out[FS_NAME_MAX + 1];
-    int has_out;
+    enum redir redir;
+    int pipe;
 };
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
@@ -149,6 +159,17 @@ static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
     return sp;
 }
 
+/* Sprzatniecie po nieudanym starcie: jesli proces mial przejac koniec
+   potoku, trzeba go zwolnic, inaczej druga strona zawisnie */
+static void exec_fail(struct exec_args *a)
+{
+    if (a->redir == REDIR_PIPE_OUT)
+        pipe_close_writer(a->pipe);
+    else if (a->redir == REDIR_PIPE_IN)
+        pipe_close_reader(a->pipe);
+    kfree(a);
+}
+
 /* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
 static void exec_task(void *arg)
 {
@@ -168,7 +189,7 @@ static void exec_task(void *arg)
             p++;
     }
     if (!argc) {
-        kfree(a);
+        exec_fail(a);
         return;
     }
 
@@ -176,21 +197,21 @@ static void exec_task(void *arg)
     const uint8_t *file = initrd_find(tok[0], &size);
     if (!file) {
         printk("exec: '%s' zniknal z initrd?\n", tok[0]);
-        kfree(a);
+        exec_fail(a);
         return;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
         printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
-        kfree(a);
+        exec_fail(a);
         return;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
-        kfree(a);
+        exec_fail(a);
         return;
     }
 
@@ -204,7 +225,7 @@ static void exec_task(void *arg)
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
-            kfree(a);
+            exec_fail(a);
             return;
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
@@ -215,7 +236,7 @@ static void exec_task(void *arg)
     if (!sframe) {
         printk("exec: brak pamieci na stos\n");
         paging_destroy_address_space(dir);
-        kfree(a);
+        exec_fail(a);
         return;
     }
 
@@ -225,10 +246,21 @@ static void exec_task(void *arg)
            tok[0], size, eh->e_entry, argc);
     uint32_t entry = eh->e_entry;
 
-    /* Przekierowanie stdout do pliku ('cmd > plik'): podmieniamy fd 1
-       tego procesu na uchwyt pliku, zanim wejdzie w ring 3 */
-    if (a->has_out && file_redirect_stdout(a->out) < 0)
-        printk("exec: nie moge przekierowac stdout do '%s'\n", a->out);
+    /* Przekierowanie strumieni przed wejsciem w ring 3 */
+    switch (a->redir) {
+    case REDIR_FILE_OUT:
+        if (file_redirect_stdout(a->out) < 0)
+            printk("exec: nie moge przekierowac stdout do '%s'\n", a->out);
+        break;
+    case REDIR_PIPE_OUT:
+        file_set_pipe(1, a->pipe, 1);   /* stdout -> koniec zapisu */
+        break;
+    case REDIR_PIPE_IN:
+        file_set_pipe(0, a->pipe, 0);   /* stdin <- koniec odczytu */
+        break;
+    case REDIR_NONE:
+        break;
+    }
     kfree(a);
 
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
@@ -265,24 +297,24 @@ uint32_t process_sbrk(int32_t increment)
     return brk;
 }
 
-static int spawn_common(const char *cmdline, const char *outfile)
+/* Buduje exec_args dla zadanej linii polecen, kopiujac nazwe programu
+   do prog[16]. Zwraca NULL, gdy program nie istnieje w initrd. */
+static struct exec_args *make_args(const char *cmdline, char *prog)
 {
-    /* Nazwa programu = pierwsze slowo linii */
-    char prog[16];
     uint32_t i = 0;
     while (*cmdline == ' ')
         cmdline++;
-    while (cmdline[i] && cmdline[i] != ' ' && i < sizeof(prog) - 1) {
+    while (cmdline[i] && cmdline[i] != ' ' && i < 15) {
         prog[i] = cmdline[i];
         i++;
     }
     prog[i] = '\0';
 
     if (!prog[0])
-        return -1;
+        return (void *)0;
     if (!initrd_find(prog, (void *)0)) {
         printk("run: brak pliku '%s' w initrd (sprawdz 'ls')\n", prog);
-        return -1;
+        return (void *)0;
     }
 
     struct exec_args *a = kmalloc(sizeof(*a));
@@ -292,27 +324,65 @@ static int spawn_common(const char *cmdline, const char *outfile)
         n++;
     }
     a->cmd[n] = '\0';
-
-    a->has_out = 0;
-    if (outfile && outfile[0]) {
-        uint32_t m = 0;
-        while (outfile[m] && m < FS_NAME_MAX) {
-            a->out[m] = outfile[m];
-            m++;
-        }
-        a->out[m] = '\0';
-        a->has_out = 1;
-    }
-
-    return task_id_of(task_create(prog, exec_task, a));
+    a->redir = REDIR_NONE;
+    a->out[0] = '\0';
+    a->pipe = -1;
+    return a;
 }
 
 int exec_spawn(const char *cmdline)
 {
-    return spawn_common(cmdline, (void *)0);
+    char prog[16];
+    struct exec_args *a = make_args(cmdline, prog);
+    if (!a)
+        return -1;
+    return task_id_of(task_create(prog, exec_task, a));
 }
 
 int exec_spawn_redirect(const char *cmdline, const char *outfile)
 {
-    return spawn_common(cmdline, outfile);
+    char prog[16];
+    struct exec_args *a = make_args(cmdline, prog);
+    if (!a)
+        return -1;
+
+    a->redir = REDIR_FILE_OUT;
+    uint32_t m = 0;
+    while (outfile[m] && m < FS_NAME_MAX) {
+        a->out[m] = outfile[m];
+        m++;
+    }
+    a->out[m] = '\0';
+    return task_id_of(task_create(prog, exec_task, a));
+}
+
+/* Uruchamia potok 'cmd1 | cmd2': stdout cmd1 -> potok -> stdin cmd2.
+   Oba procesy dzialaja rownolegle. Zwraca pid konsumenta (cmd2) albo -1. */
+int exec_spawn_pipeline(const char *cmd1, const char *cmd2)
+{
+    char prog1[16], prog2[16];
+    struct exec_args *a1 = make_args(cmd1, prog1);
+    if (!a1)
+        return -1;
+    struct exec_args *a2 = make_args(cmd2, prog2);
+    if (!a2) {
+        kfree(a1);
+        return -1;
+    }
+
+    int pidx = pipe_alloc();
+    if (pidx < 0) {
+        kfree(a1);
+        kfree(a2);
+        printk("run: brak wolnego potoku\n");
+        return -1;
+    }
+
+    a1->redir = REDIR_PIPE_OUT;
+    a1->pipe = pidx;
+    a2->redir = REDIR_PIPE_IN;
+    a2->pipe = pidx;
+
+    task_create(prog1, exec_task, a1);                 /* producent */
+    return task_id_of(task_create(prog2, exec_task, a2)); /* konsument */
 }

@@ -17,6 +17,7 @@ static void print_help(void)
           "  help        - ta pomoc\n"
           "  pid         - pokaz pid shella\n"
           "  cmd > plik  - przekieruj wyjscie programu do pliku\n"
+          "  cmd1 | cmd2 - polacz programy potokiem\n"
           "  exit        - wyjdz do shella jadra\n");
 }
 
@@ -84,6 +85,22 @@ void _start(void)
             continue;
         }
 
+        /* Potok: 'cmd1 | cmd2' - dwa programy polaczone potokiem */
+        for (char *s = line; *s; s++) {
+            if (*s == '|') {
+                *s = '\0';
+                char *right = s + 1;
+                while (*right == ' ')
+                    right++;
+                int32_t pid = sys_pipeline(line, right);
+                if (pid < 0)
+                    print("ush: nie moge uruchomic potoku\n");
+                else
+                    sys_wait(pid);
+                goto next;
+            }
+        }
+
         /* Przekierowanie: 'cmd args > plik' kieruje stdout do pliku */
         char *outfile = (void *)0;
         for (char *s = line; *s; s++) {
@@ -116,5 +133,6 @@ void _start(void)
             print(outfile);
             print("'\n");
         }
+    next:;
     }
 }

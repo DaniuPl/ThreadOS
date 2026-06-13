@@ -103,7 +103,8 @@ class Qemu:
         time.sleep(0.1)
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
-                "/": "slash", ">": "shift-dot", "<": "shift-comma"}
+                "/": "slash", ">": "shift-dot", "<": "shift-comma",
+                "|": "shift-backslash"}
 
     def type_line(self, text):
         for ch in text:
@@ -317,6 +318,14 @@ def main():
         q.type_line("cat redir.txt")
         check("przekierowane wyjscie trafilo do pliku (cat redir.txt)",
               "przekierowanie-ok" in q.wait_for("przekierowanie-ok"))
+
+        # Potok: 'echo proton-pipe | wc' - dwa procesy rownolegle,
+        # echo pisze do potoku, wc czyta do EOF i liczy ('proton-pipe\n'
+        # = 11 znakow + nowa linia = 12 bajtow, 1 wiersz)
+        q.type_line("echo proton-pipe | wc")
+        screen = q.wait_for("wc: wierszy=")
+        check("potok laczy dwa procesy (echo | wc): poprawny licznik",
+              "wc: wierszy=1 bajtow=12" in screen)
 
         q.type_line("exit")
         q.wait_for("ush: pa!")

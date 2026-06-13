@@ -71,6 +71,10 @@ void syscall_handler(struct regs *r)
     case SYS_SEEK:
         r->eax = (uint32_t)file_seek((int)r->ebx, r->ecx);
         break;
+    case SYS_PIPELINE:
+        r->eax = (uint32_t)exec_spawn_pipeline((const char *)r->ebx,
+                                               (const char *)r->ecx);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

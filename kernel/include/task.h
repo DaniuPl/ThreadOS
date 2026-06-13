@@ -6,13 +6,21 @@
 struct task;
 
 /* Tablica deskryptorow plikow procesu. fd 0/1/2 = klawiatura/konsola,
-   wyzsze fd = pliki na dysku (is_file=1). */
+   wyzsze fd = pliki na dysku albo konce potoku. */
 #define TASK_MAX_FD 8
+
+enum fd_kind {
+    FD_CONSOLE,           /* klawiatura (read) / ekran (write) */
+    FD_FILE,              /* plik na dysku PFS */
+    FD_PIPE,              /* koniec potoku miedzyprocesowego */
+};
+
 struct file_desc {
     int used;
-    int is_file;
-    int inode;            /* indeks i-wezla PFS dla plikow */
-    uint32_t off;         /* biezacy offset w pliku */
+    enum fd_kind kind;
+    int inode;            /* FD_FILE: indeks i-wezla PFS */
+    uint32_t off;         /* FD_FILE: biezacy offset */
+    int pipe;             /* FD_PIPE: indeks potoku */
     int readable;
     int writable;
 };
