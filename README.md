@@ -42,7 +42,7 @@ ProtonOS/
 │   ├── usys.h          # biblioteczka syscalli (int 0x80)
 │   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
 │   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
-│   ├── sh.c            # ush - shell użytkownika (read/spawn/wait w ring 3)
+│   ├── sh.c            # ush - shell użytkownika (spawn/wait, przekierowanie >)
 │   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
 │   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
 │   ├── fileio.c        # zapis i odczyt pliku przez deskryptory (open/read/write)
@@ -129,6 +129,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Deskryptory plików w stylu Uniksa: open/close/read/write/seek,
       fd 0/1/2 = klawiatura/konsola, wyższe fd = pliki (jeden `write` na
       wszystko); program `cat` w ring 3
-- [ ] Dziedziczenie fd przez spawn + przekierowania strumieni (`cmd > plik`)
+- [x] Przekierowanie wyjścia w shellu (`echo tekst > plik`) - jądro
+      podmienia stdout procesu na uchwyt pliku przed wejściem w ring 3
+- [ ] Pełne dziedziczenie tablicy fd rodzica przez dziecko + potoki (`|`)
 - [ ] Katalogi w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami

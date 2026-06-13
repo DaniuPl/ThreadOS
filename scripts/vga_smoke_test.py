@@ -103,7 +103,7 @@ class Qemu:
         time.sleep(0.1)
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
-                "/": "slash"}
+                "/": "slash", ">": "shift-dot", "<": "shift-comma"}
 
     def type_line(self, text):
         for ch in text:
@@ -304,6 +304,19 @@ def main():
         q.type_line("nieistnieje")
         check("ush zglasza nieznany program",
               "ush: nie znam 'nieistnieje'" in q.wait_for("ush: nie znam"))
+
+        # Przekierowanie wyjscia: 'echo ... > plik' (dziedziczenie fd 1)
+        q.type_line("echo przekierowanie-ok > redir.txt")
+        screen = q.wait_for("wyjscie zapisane do 'redir.txt'")
+        # echo nie powinno wypisac tekstu na konsole - poszedl do pliku
+        idx = screen.rfind("redir.txt")
+        check("echo z '>' nie pisze na konsole (wyjscie do pliku)",
+              "przekierowanie-ok" not in screen.split("echo przekierowanie-ok")[-1]
+              .split("wyjscie zapisane")[0])
+        # ...a 'cat' tego pliku pokazuje zapisana tresc
+        q.type_line("cat redir.txt")
+        check("przekierowane wyjscie trafilo do pliku (cat redir.txt)",
+              "przekierowanie-ok" in q.wait_for("przekierowanie-ok"))
 
         q.type_line("exit")
         q.wait_for("ush: pa!")

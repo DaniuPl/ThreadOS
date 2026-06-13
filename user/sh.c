@@ -14,9 +14,10 @@ static char line[LINE_MAX];
 static void print_help(void)
 {
     print("ush: wpisz nazwe programu z initrd (np. hello), albo:\n"
-          "  help - ta pomoc\n"
-          "  pid  - pokaz pid shella\n"
-          "  exit - wyjdz do shella jadra\n");
+          "  help        - ta pomoc\n"
+          "  pid         - pokaz pid shella\n"
+          "  cmd > plik  - przekieruj wyjscie programu do pliku\n"
+          "  exit        - wyjdz do shella jadra\n");
 }
 
 static void print_pid(void)
@@ -83,7 +84,26 @@ void _start(void)
             continue;
         }
 
-        int32_t pid = sys_spawn(line);
+        /* Przekierowanie: 'cmd args > plik' kieruje stdout do pliku */
+        char *outfile = (void *)0;
+        for (char *s = line; *s; s++) {
+            if (*s == '>') {
+                *s = '\0';
+                char *f = s + 1;
+                while (*f == ' ')
+                    f++;
+                outfile = f;
+                /* utnij spacje na koncu nazwy pliku */
+                for (char *e = f; *e; e++)
+                    if (*e == ' ') {
+                        *e = '\0';
+                        break;
+                    }
+                break;
+            }
+        }
+
+        int32_t pid = sys_spawn(line, outfile);
         if (pid < 0) {
             print("ush: nie znam '");
             print(line);
@@ -91,5 +111,10 @@ void _start(void)
             continue;
         }
         sys_wait(pid);
+        if (outfile) {
+            print("ush: wyjscie zapisane do '");
+            print(outfile);
+            print("'\n");
+        }
     }
 }

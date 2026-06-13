@@ -99,3 +99,20 @@ int file_seek(int fd, uint32_t off)
     fds[fd].off = off;
     return (int)off;
 }
+
+int file_redirect_stdout(const char *name)
+{
+    int idx = fs_open(name, O_CREATE);
+    if (idx < 0)
+        return -1;
+    fs_truncate(idx);
+
+    struct file_desc *fds = task_fds();
+    fds[1].used = 1;
+    fds[1].is_file = 1;
+    fds[1].inode = idx;
+    fds[1].off = 0;
+    fds[1].readable = 0;
+    fds[1].writable = 1;
+    return 0;
+}

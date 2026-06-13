@@ -16,11 +16,22 @@
 #include "include/usermode.h"
 #include "include/heap.h"
 #include "include/string.h"
+#include "include/fs.h"
+#include "include/kfile.h"
 #include "include/printk.h"
 
 #define USER_STACK_TOP 0xC0000000u
 #define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
 #define ARG_MAX        16
+#define CMD_MAX        128
+
+/* Argumenty przekazywane do watka-procesu: linia polecen plus
+   opcjonalne przekierowanie stdout do pliku (shell: 'cmd > plik') */
+struct exec_args {
+    char cmd[CMD_MAX];
+    char out[FS_NAME_MAX + 1];
+    int has_out;
+};
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
 struct elf_ehdr {
@@ -141,12 +152,12 @@ static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
 /* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
 static void exec_task(void *arg)
 {
-    char *cmdline = arg;
+    struct exec_args *a = arg;
 
-    /* Tokenizacja w miejscu: cmdline to nasza kopia z kmalloc */
+    /* Tokenizacja w miejscu: a->cmd to nasza kopia */
     char *tok[ARG_MAX];
     int argc = 0;
-    char *p = cmdline;
+    char *p = a->cmd;
     while (*p && argc < ARG_MAX) {
         while (*p == ' ')
             *p++ = '\0';
@@ -157,7 +168,7 @@ static void exec_task(void *arg)
             p++;
     }
     if (!argc) {
-        kfree(cmdline);
+        kfree(a);
         return;
     }
 
@@ -165,21 +176,21 @@ static void exec_task(void *arg)
     const uint8_t *file = initrd_find(tok[0], &size);
     if (!file) {
         printk("exec: '%s' zniknal z initrd?\n", tok[0]);
-        kfree(cmdline);
+        kfree(a);
         return;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
         printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
-        kfree(cmdline);
+        kfree(a);
         return;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
-        kfree(cmdline);
+        kfree(a);
         return;
     }
 
@@ -193,7 +204,7 @@ static void exec_task(void *arg)
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
-            kfree(cmdline);
+            kfree(a);
             return;
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
@@ -204,7 +215,7 @@ static void exec_task(void *arg)
     if (!sframe) {
         printk("exec: brak pamieci na stos\n");
         paging_destroy_address_space(dir);
-        kfree(cmdline);
+        kfree(a);
         return;
     }
 
@@ -213,7 +224,12 @@ static void exec_task(void *arg)
     printk("[jadro] exec '%s': ELF %u B, entry %x, argc=%d\n",
            tok[0], size, eh->e_entry, argc);
     uint32_t entry = eh->e_entry;
-    kfree(cmdline);
+
+    /* Przekierowanie stdout do pliku ('cmd > plik'): podmieniamy fd 1
+       tego procesu na uchwyt pliku, zanim wejdzie w ring 3 */
+    if (a->has_out && file_redirect_stdout(a->out) < 0)
+        printk("exec: nie moge przekierowac stdout do '%s'\n", a->out);
+    kfree(a);
 
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
        zostana zwolnione przy sprzataniu zombie */
@@ -249,7 +265,7 @@ uint32_t process_sbrk(int32_t increment)
     return brk;
 }
 
-int exec_spawn(const char *cmdline)
+static int spawn_common(const char *cmdline, const char *outfile)
 {
     /* Nazwa programu = pierwsze slowo linii */
     char prog[16];
@@ -269,8 +285,34 @@ int exec_spawn(const char *cmdline)
         return -1;
     }
 
-    uint32_t len = strlen(cmdline) + 1;
-    char *copy = kmalloc(len);
-    memcpy(copy, cmdline, len);
-    return task_id_of(task_create(prog, exec_task, copy));
+    struct exec_args *a = kmalloc(sizeof(*a));
+    uint32_t n = 0;
+    while (cmdline[n] && n < CMD_MAX - 1) {
+        a->cmd[n] = cmdline[n];
+        n++;
+    }
+    a->cmd[n] = '\0';
+
+    a->has_out = 0;
+    if (outfile && outfile[0]) {
+        uint32_t m = 0;
+        while (outfile[m] && m < FS_NAME_MAX) {
+            a->out[m] = outfile[m];
+            m++;
+        }
+        a->out[m] = '\0';
+        a->has_out = 1;
+    }
+
+    return task_id_of(task_create(prog, exec_task, a));
+}
+
+int exec_spawn(const char *cmdline)
+{
+    return spawn_common(cmdline, (void *)0);
+}
+
+int exec_spawn_redirect(const char *cmdline, const char *outfile)
+{
+    return spawn_common(cmdline, outfile);
 }

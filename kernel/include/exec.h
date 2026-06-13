@@ -8,6 +8,10 @@
    argumenty rozdzielone spacjami). Zwraca pid albo -1. */
 int exec_spawn(const char *cmdline);
 
+/* Jak exec_spawn, ale stdout (fd 1) procesu jest przekierowany do
+   pliku outfile na dysku (tworzonego/obcinanego). */
+int exec_spawn_redirect(const char *cmdline, const char *outfile);
+
 /* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
 uint32_t process_sbrk(int32_t increment);

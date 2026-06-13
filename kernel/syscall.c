@@ -44,7 +44,11 @@ void syscall_handler(struct regs *r)
                                      r->edx > IO_MAX ? IO_MAX : r->edx);
         break;
     case SYS_SPAWN:
-        r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
+        if (r->ecx)
+            r->eax = (uint32_t)exec_spawn_redirect((const char *)r->ebx,
+                                                   (const char *)r->ecx);
+        else
+            r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
         break;
     case SYS_WAIT:
         /* Najprostsze czekanie: drzemka, az proces zniknie z listy */

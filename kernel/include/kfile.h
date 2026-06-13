@@ -18,4 +18,8 @@ int  file_read(int fd, void *buf, uint32_t len);
 int  file_write(int fd, const void *buf, uint32_t len);
 int  file_seek(int fd, uint32_t off);
 
+/* Podmienia stdout (fd 1) biezacego zadania na plik (tworzony+obcinany).
+   Uzywane przy 'cmd > plik'. Zwraca 0 albo -1. */
+int  file_redirect_stdout(const char *name);
+
 #endif

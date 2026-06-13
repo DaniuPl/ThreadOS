@@ -72,12 +72,13 @@ static inline int32_t sys_read(int fd, void *buf, uint32_t len)
     return ret;
 }
 
-static inline int32_t sys_spawn(const char *name)
+/* Uruchamia program; gdy outfile != NULL, jego stdout idzie do pliku */
+static inline int32_t sys_spawn(const char *cmdline, const char *outfile)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_SPAWN), "b"(name)
+                     : "a"(SYS_SPAWN), "b"(cmdline), "c"(outfile)
                      : "memory");
     return ret;
 }
