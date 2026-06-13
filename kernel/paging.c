@@ -86,6 +86,11 @@ int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
     }
 
     ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    /* Jeśli mapujemy do aktywnej przestrzeni (sbrk), odśwież TLB */
+    uint32_t active;
+    __asm__ volatile("movl %%cr3, %0" : "=r"(active));
+    if (active == dir_phys)
+        __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
     return 1;
 }
 

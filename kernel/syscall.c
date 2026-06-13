@@ -61,6 +61,9 @@ void syscall_handler(struct regs *r)
     case SYS_GETPID:
         r->eax = (uint32_t)task_current_id();
         break;
+    case SYS_SBRK:
+        r->eax = process_sbrk((int32_t)r->ebx);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

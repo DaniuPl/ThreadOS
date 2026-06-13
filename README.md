@@ -24,7 +24,7 @@ ProtonOS/
 │   ├── syscall.c       # syscalle int 0x80: write/exit/sleep/getticks/
 │   │                   #   read/spawn/wait/getpid
 │   ├── usermode.c      # wejście w ring 3 przez iret
-│   ├── exec.c          # loader ELF32: przestrzeń adresowa + segmenty + stos
+│   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── shell.c         # prosty shell: help, ps, mem, uptime, clear, reboot...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
@@ -40,6 +40,8 @@ ProtonOS/
 │   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
 │   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
 │   ├── sh.c            # ush - shell użytkownika (read/spawn/wait w ring 3)
+│   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
+│   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -110,6 +112,8 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 - [x] Syscalle read (klawiatura, blokujące), spawn, wait, getpid
 - [x] Shell jako program użytkownika (`run sh` - ring 3, przejmuje
       konsolę, uruchamia programy przez spawn+wait, `exit` wraca do jądra)
-- [ ] Syscall sbrk / mmap (dynamiczna pamięć dla procesów)
+- [x] Argumenty programów (argc/argv) - `run echo proton os dziala`
+- [x] Syscall sbrk + malloc w userspace (dynamiczna pamięć) - `run memtest`
 - [ ] System plików z prawdziwego dysku (ATA + np. FAT)
-- [ ] Argumenty programów (argc/argv) i potoki
+- [ ] Potoki / przekierowania, zapis do plików (sys_open/read/write)
+- [ ] mmap, współdzielona pamięć między procesami

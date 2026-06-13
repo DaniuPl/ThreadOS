@@ -35,4 +35,8 @@ const char *task_current_name(void);
    katalog stron zostanie zwolniony przy sprzątaniu zombie */
 void task_use_address_space(uint32_t dir_phys);
 
+uint32_t task_current_cr3(void);    /* CR3 bieżącego zadania */
+uint32_t task_brk(void);            /* koniec sterty procesu (0 = wątek jądra) */
+void task_set_brk(uint32_t brk);
+
 #endif

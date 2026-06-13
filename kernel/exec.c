@@ -19,6 +19,8 @@
 #include "include/printk.h"
 
 #define USER_STACK_TOP 0xC0000000u
+#define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
+#define ARG_MAX        16
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
 struct elf_ehdr {
@@ -98,32 +100,92 @@ static int load_segment(uint32_t dir, const uint8_t *file,
     return 1;
 }
 
+/* Zapis 32-bitowej wartości na stos użytkownika - jądro pisze przez
+   adres fizyczny ramki, bo przestrzeń procesu nie jest jeszcze aktywna */
+static void stack_write32(uint32_t sframe, uint32_t sp, uint32_t val)
+{
+    *(uint32_t *)(sframe + (sp - (USER_STACK_TOP - PAGE_SIZE))) = val;
+}
+
+/* Układa argumenty na stosie procesu (konwencja cdecl dla
+   _start(int argc, char **argv)) i zwraca początkowy ESP */
+static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
+{
+    uint32_t stack_base = USER_STACK_TOP - PAGE_SIZE;
+    uint32_t sp = USER_STACK_TOP;
+    uint32_t uargv[ARG_MAX];
+
+    for (int i = argc - 1; i >= 0; i--) {
+        uint32_t len = strlen(tok[i]) + 1;
+        sp -= len;
+        memcpy((void *)(sframe + (sp - stack_base)), tok[i], len);
+        uargv[i] = sp;
+    }
+
+    sp &= ~3u;                          /* wyrównanie do 4 B */
+    sp -= 4 * (argc + 1);               /* argv[] + NULL na końcu */
+    uint32_t argv_base = sp;
+    for (int i = 0; i < argc; i++)
+        stack_write32(sframe, argv_base + 4 * i, uargv[i]);
+    stack_write32(sframe, argv_base + 4 * argc, 0);
+
+    sp -= 4;
+    stack_write32(sframe, sp, argv_base);   /* argv */
+    sp -= 4;
+    stack_write32(sframe, sp, (uint32_t)argc);
+    sp -= 4;
+    stack_write32(sframe, sp, 0);           /* atrapa adresu powrotu */
+    return sp;
+}
+
 /* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
 static void exec_task(void *arg)
 {
-    char *name = arg;
+    char *cmdline = arg;
+
+    /* Tokenizacja w miejscu: cmdline to nasza kopia z kmalloc */
+    char *tok[ARG_MAX];
+    int argc = 0;
+    char *p = cmdline;
+    while (*p && argc < ARG_MAX) {
+        while (*p == ' ')
+            *p++ = '\0';
+        if (!*p)
+            break;
+        tok[argc++] = p;
+        while (*p && *p != ' ')
+            p++;
+    }
+    if (!argc) {
+        kfree(cmdline);
+        return;
+    }
+
     uint32_t size;
-    const uint8_t *file = initrd_find(name, &size);
+    const uint8_t *file = initrd_find(tok[0], &size);
     if (!file) {
-        printk("exec: '%s' zniknal z initrd?\n", name);
-        kfree(name);
+        printk("exec: '%s' zniknal z initrd?\n", tok[0]);
+        kfree(cmdline);
         return;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
-        printk("exec: '%s' nie jest programem ELF32 i386\n", name);
-        kfree(name);
+        printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
+        kfree(cmdline);
         return;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
-        kfree(name);
+        kfree(cmdline);
         return;
     }
 
+    /* Załaduj segmenty, śledząc koniec obrazu - tam zacznie się
+       sterta procesu (sbrk) */
+    uint32_t brk = 0;
     const struct elf_phdr *ph =
         (const struct elf_phdr *)(file + eh->e_phoff);
     for (int i = 0; i < eh->e_phnum; i++) {
@@ -131,37 +193,84 @@ static void exec_task(void *arg)
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
-            kfree(name);
+            kfree(cmdline);
             return;
         }
+        if (ph[i].p_vaddr + ph[i].p_memsz > brk)
+            brk = ph[i].p_vaddr + ph[i].p_memsz;
     }
 
-    if (!page_frame_for(dir, USER_STACK_TOP - PAGE_SIZE)) {
+    uint32_t sframe = page_frame_for(dir, USER_STACK_TOP - PAGE_SIZE);
+    if (!sframe) {
         printk("exec: brak pamieci na stos\n");
         paging_destroy_address_space(dir);
-        kfree(name);
+        kfree(cmdline);
         return;
     }
 
-    printk("[jadro] exec '%s': ELF %u B, entry %x\n", name, size, eh->e_entry);
+    uint32_t esp = build_argv_stack(sframe, tok, argc);
+
+    printk("[jadro] exec '%s': ELF %u B, entry %x, argc=%d\n",
+           tok[0], size, eh->e_entry, argc);
     uint32_t entry = eh->e_entry;
-    kfree(name);
+    kfree(cmdline);
 
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
        zostana zwolnione przy sprzataniu zombie */
+    task_set_brk(brk);
     task_use_address_space(dir);
-    enter_ring3(entry, USER_STACK_TOP);
+    enter_ring3(entry, esp);
 }
 
-int exec_spawn(const char *name)
+/* sbrk: przesuwa koniec sterty procesu, mapując nowe strony.
+   Zwraca stary brk albo -1. */
+uint32_t process_sbrk(int32_t increment)
 {
-    if (!initrd_find(name, (void *)0)) {
-        printk("run: brak pliku '%s' w initrd (sprawdz 'ls')\n", name);
+    uint32_t brk = task_brk();
+    if (!brk)                       /* nie-proces (watek jadra) */
+        return (uint32_t)-1;
+    if (increment == 0)
+        return brk;
+    if (increment < 0)              /* zmniejszanie: nieobslugiwane */
+        return (uint32_t)-1;
+
+    uint32_t new_brk = brk + (uint32_t)increment;
+    if (new_brk < brk || new_brk > USER_BRK_MAX)
+        return (uint32_t)-1;
+
+    uint32_t dir = task_current_cr3();
+    for (uint32_t va = (brk + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+         va < new_brk; va += PAGE_SIZE) {
+        if (!page_frame_for(dir, va))
+            return (uint32_t)-1;
+    }
+
+    task_set_brk(new_brk);
+    return brk;
+}
+
+int exec_spawn(const char *cmdline)
+{
+    /* Nazwa programu = pierwsze slowo linii */
+    char prog[16];
+    uint32_t i = 0;
+    while (*cmdline == ' ')
+        cmdline++;
+    while (cmdline[i] && cmdline[i] != ' ' && i < sizeof(prog) - 1) {
+        prog[i] = cmdline[i];
+        i++;
+    }
+    prog[i] = '\0';
+
+    if (!prog[0])
+        return -1;
+    if (!initrd_find(prog, (void *)0)) {
+        printk("run: brak pliku '%s' w initrd (sprawdz 'ls')\n", prog);
         return -1;
     }
 
-    uint32_t len = strlen(name) + 1;
+    uint32_t len = strlen(cmdline) + 1;
     char *copy = kmalloc(len);
-    memcpy(copy, name, len);
-    return task_id_of(task_create(name, exec_task, copy));
+    memcpy(copy, cmdline, len);
+    return task_id_of(task_create(prog, exec_task, copy));
 }

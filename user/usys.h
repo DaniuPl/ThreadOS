@@ -13,6 +13,7 @@
 #define SYS_SPAWN    6
 #define SYS_WAIT     7
 #define SYS_GETPID   8
+#define SYS_SBRK     9
 
 static inline int32_t sys_write(const char *s, uint32_t len)
 {
@@ -82,6 +83,25 @@ static inline int32_t sys_getpid(void)
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_GETPID) : "memory");
     return ret;
+}
+
+static inline void *sys_sbrk(int32_t increment)
+{
+    void *ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SBRK), "b"(increment)
+                     : "memory");
+    return ret;
+}
+
+/* Najprostszy bump-allocator na sbrk: tylko alokuje, nie zwalnia.
+   W zupelnosci wystarczy dla zabawkowych programow. */
+static inline void *malloc(uint32_t size)
+{
+    size = (size + 7) & ~7u;
+    void *p = sys_sbrk((int32_t)size);
+    return p == (void *)-1 ? (void *)0 : p;
 }
 
 static inline int ustreq(const char *a, const char *b)

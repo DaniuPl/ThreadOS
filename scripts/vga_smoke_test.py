@@ -44,12 +44,21 @@ class Qemu:
             cmd += ["-initrd", initrd]
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        time.sleep(1)
-        if self.proc.poll() is not None:
-            raise RuntimeError("QEMU zakonczyl sie przedwczesnie:\n"
-                               + self.proc.stderr.read().decode())
+
+        # Poczekaj, az QEMU wystawi socket QMP (start bywa wolny)
         sock = socket.socket(socket.AF_UNIX)
-        sock.connect(self.qmp_path)
+        deadline = time.time() + 10
+        while True:
+            if self.proc.poll() is not None:
+                raise RuntimeError("QEMU zakonczyl sie przedwczesnie:\n"
+                                   + self.proc.stderr.read().decode())
+            try:
+                sock.connect(self.qmp_path)
+                break
+            except (FileNotFoundError, ConnectionRefusedError):
+                if time.time() > deadline:
+                    raise
+                time.sleep(0.2)
         self.f = sock.makefile("rwb")
         self.f.readline()  # baner QMP
         self.cmd({"execute": "qmp_capabilities"})
@@ -234,6 +243,27 @@ def main():
         used_after = pmm_used(q.screen())
         check(f"brak wycieku ramek po procesie ({used_before} -> {used_after})",
               used_before is not None and used_after == used_before)
+
+        # 'run echo ...': argumenty (argc/argv) docieraja do procesu
+        q.type_line("run echo proton os dziala")
+        screen = q.wait_for("proton os dziala")
+        check("argumenty argc/argv docieraja do procesu (echo)",
+              "proton os dziala" in screen)
+
+        # 'run memtest': sbrk/malloc daje procesowi rosnaca pamiec
+        q.type_line("run memtest")
+        screen = q.wait_for("[memtest] OK:")
+        check("sbrk/malloc dziala (memtest zapisal i zweryfikowal pamiec)",
+              "blokow po" in screen and "zweryfikowanych" in screen)
+        check("memtest nie zglosil bledu pamieci",
+              "BLAD" not in screen.split("[memtest] OK")[0].split("[memtest] start")[-1])
+
+        # Brak wycieku takze po procesie uzywajacym sbrk
+        time.sleep(0.5)
+        q.type_line("mem")
+        used_after_mt = pmm_used(q.screen())
+        check(f"brak wycieku ramek po memtest ({used_before} -> {used_after_mt})",
+              used_after_mt is not None and used_after_mt == used_before)
 
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")

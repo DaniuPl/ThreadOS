@@ -33,6 +33,7 @@ struct task {
     uint32_t kstack_top;        /* dla TSS.esp0 (przerwania z ring 3) */
     uint32_t cr3;               /* przestrzeń adresowa zadania */
     int owns_dir;               /* czy katalog stron zwolnić przy reap */
+    uint32_t brk;               /* koniec sterty procesu (sbrk); 0 = wątek jądra */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -77,6 +78,7 @@ void scheduler_init(void)
     main_task->kstack_top = (uint32_t)stack_top;
     main_task->cr3 = paging_kernel_cr3();
     main_task->owns_dir = 0;
+    main_task->brk = 0;
     main_task->next = main_task;
     current = main_task;
 }
@@ -88,6 +90,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->kstack_top = (uint32_t)t->stack + STACK_SIZE;
     t->cr3 = paging_kernel_cr3();
     t->owns_dir = 0;
+    t->brk = 0;
     t->entry = entry;
     t->arg = arg;
     t->state = TASK_READY;
@@ -252,6 +255,21 @@ void task_use_address_space(uint32_t dir_phys)
     current->owns_dir = 1;
     __asm__ volatile("movl %0, %%cr3" : : "r"(dir_phys) : "memory");
     irq_restore(flags);
+}
+
+uint32_t task_current_cr3(void)
+{
+    return current->cr3;
+}
+
+uint32_t task_brk(void)
+{
+    return current->brk;
+}
+
+void task_set_brk(uint32_t brk)
+{
+    current->brk = brk;
 }
 
 const char *task_current_name(void)

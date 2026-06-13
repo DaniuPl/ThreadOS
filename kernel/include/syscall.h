@@ -11,6 +11,7 @@
 #define SYS_SPAWN    6   /* ebx=nazwa programu z initrd -> pid albo -1 */
 #define SYS_WAIT     7   /* ebx=pid - blokuje az proces sie skonczy */
 #define SYS_GETPID   8   /* -> pid biezacego procesu */
+#define SYS_SBRK     9   /* ebx=increment -> stary brk albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 
