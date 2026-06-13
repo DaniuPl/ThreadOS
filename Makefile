@@ -34,7 +34,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf \
              $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf \
              $(BUILD)/user/seq.elf $(BUILD)/user/grep.elf \
-             $(BUILD)/user/head.elf
+             $(BUILD)/user/head.elf $(BUILD)/user/ls.elf \
+             $(BUILD)/user/rm.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -102,7 +103,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf \
 	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf \
 	    seq=$(BUILD)/user/seq.elf grep=$(BUILD)/user/grep.elf \
-	    head=$(BUILD)/user/head.elf
+	    head=$(BUILD)/user/head.elf ls=$(BUILD)/user/ls.elf \
+	    rm=$(BUILD)/user/rm.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

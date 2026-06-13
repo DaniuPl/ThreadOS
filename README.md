@@ -52,6 +52,8 @@ ProtonOS/
 │   ├── seq.c           # wypisuje 1..N (producent potoku)
 │   ├── grep.c          # przepuszcza wiersze zawierające wzorzec
 │   ├── head.c          # przepuszcza pierwsze N wierszy
+│   ├── ls.c            # listuje pliki na dysku (sys_readdir)
+│   ├── rm.c            # usuwa plik (sys_unlink)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -142,5 +144,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Narzędzia uniksowe komponujące się przez potoki: `seq`, `grep`,
       `head`, `wc`, `cat` (np. `seq 9 | grep 7 > plik`)
 - [x] Wielostopniowe potoki (`seq 20 | grep 1 | wc`, do 5 etapów)
-- [ ] Katalogi w systemie plików
+- [x] Zarządzanie plikami z ring 3: `ls` (sys_readdir), `rm` (sys_unlink)
+- [ ] Katalogi (podkatalogi, ścieżki) w systemie plików
+- [ ] Status wyjścia procesu zwracany przez wait
 - [ ] mmap, współdzielona pamięć między procesami

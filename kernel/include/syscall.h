@@ -16,6 +16,8 @@
 #define SYS_CLOSE    11  /* ebx=fd -> 0 albo -1 */
 #define SYS_SEEK     12  /* ebx=fd, ecx=offset -> nowy offset albo -1 */
 #define SYS_PIPELINE 13  /* ebx=linia z '|', ecx=plik na stdout -> pid ostatniego */
+#define SYS_READDIR  14  /* ebx=slot, ecx=bufor nazwy -> rozmiar albo -1 */
+#define SYS_UNLINK   15  /* ebx=nazwa -> 0 albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 

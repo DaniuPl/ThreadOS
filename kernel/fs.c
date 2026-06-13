@@ -300,6 +300,40 @@ int fs_write_at(int idx, uint32_t off, const void *buf, uint32_t len)
     return (int)done;
 }
 
+int fs_get(int slot, char *name, uint32_t *size)
+{
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+        return -1;
+    uint32_t flags = irq_save();
+    int i = 0;
+    while (inodes[slot].name[i]) {
+        name[i] = inodes[slot].name[i];
+        i++;
+    }
+    name[i] = '\0';
+    if (size)
+        *size = inodes[slot].size;
+    int ret = (int)inodes[slot].size;
+    irq_restore(flags);
+    return ret;
+}
+
+int fs_delete(const char *name)
+{
+    if (!ready)
+        return -1;
+    uint32_t flags = irq_save();
+    int idx = find_inode(name);
+    if (idx < 0) {
+        irq_restore(flags);
+        return -1;
+    }
+    inodes[idx].used = 0;
+    flush_inodes();
+    irq_restore(flags);
+    return 0;
+}
+
 void fs_list(void)
 {
     if (!ready) {

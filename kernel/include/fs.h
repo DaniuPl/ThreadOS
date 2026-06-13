@@ -33,6 +33,13 @@ int fs_truncate(int idx);             /* zeruje rozmiar pliku */
 int fs_read_at(int idx, uint32_t off, void *buf, uint32_t len);
 int fs_write_at(int idx, uint32_t off, const void *buf, uint32_t len);
 
+/* Enumeracja katalogu: dla slotu 0..FS_MAX_FILES-1 wpisuje nazwe do
+   name (>=FS_NAME_MAX+1) i zwraca rozmiar pliku; -1 gdy slot pusty. */
+int fs_get(int slot, char *name, uint32_t *size);
+
+/* Usuwa plik po nazwie. Zwraca 0 albo -1 (brak pliku). */
+int fs_delete(const char *name);
+
 /* Wypisuje liste plikow (komenda 'fls') */
 void fs_list(void);
 

@@ -14,6 +14,7 @@
 #include "include/keyboard.h"
 #include "include/exec.h"
 #include "include/kfile.h"
+#include "include/fs.h"
 
 /* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
    page faultem w ring 0 (ginie proces). Pelna walidacja przyjdzie z
@@ -74,6 +75,12 @@ void syscall_handler(struct regs *r)
     case SYS_PIPELINE:
         r->eax = (uint32_t)exec_spawn_pipeline((const char *)r->ebx,
                                                (const char *)r->ecx);
+        break;
+    case SYS_READDIR:
+        r->eax = (uint32_t)fs_get((int)r->ebx, (char *)r->ecx, (void *)0);
+        break;
+    case SYS_UNLINK:
+        r->eax = (uint32_t)fs_delete((const char *)r->ebx);
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",

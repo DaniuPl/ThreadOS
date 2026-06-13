@@ -18,6 +18,10 @@
 #define SYS_CLOSE    11
 #define SYS_SEEK     12
 #define SYS_PIPELINE 13
+#define SYS_READDIR  14
+#define SYS_UNLINK   15
+
+#define FS_NAME_MAX  23
 
 /* Flagi open() */
 #define O_READ   1
@@ -154,6 +158,27 @@ static inline int32_t sys_seek(int fd, uint32_t off)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_SEEK), "b"(fd), "c"(off)
+                     : "memory");
+    return ret;
+}
+
+/* Enumeracja plikow: slot 0..; zwraca rozmiar i wpisuje nazwe, -1 = pusty */
+static inline int32_t sys_readdir(int slot, char *name)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_READDIR), "b"(slot), "c"(name)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_unlink(const char *name)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_UNLINK), "b"(name)
                      : "memory");
     return ret;
 }

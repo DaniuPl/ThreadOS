@@ -363,6 +363,21 @@ def main():
         check("potok 4-stopniowy z przekierowaniem do pliku",
               "wc: wierszy=3 bajtow=8" in q.wait_for("wc: wierszy=3 bajtow=8"))
 
+        # ls/rm jako programy ring 3. 'echo xyz > usuwany' -> "xyz\n" (4 B);
+        # ls pokazuje "usuwany  4 B" (rozmiar nie wystepuje w wpisanej
+        # komendzie, wiec to jednoznaczny dowod)
+        q.type_line("echo xyz > usuwany")
+        time.sleep(0.5)
+        q.type_line("ls")
+        check("ls (ring 3) listuje plik z rozmiarem",
+              "usuwany  4 B" in q.wait_for("usuwany  4 B"))
+        # po rm plik znika - sprawdzamy deterministycznie przez potok
+        q.type_line("rm usuwany")
+        time.sleep(0.5)
+        q.type_line("ls | grep usuwany | wc")
+        check("rm usunal plik (ls juz go nie pokazuje)",
+              "wc: wierszy=0 bajtow=0" in q.wait_for("wc: wierszy=0 bajtow=0"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)
