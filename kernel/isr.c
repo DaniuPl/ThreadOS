@@ -52,7 +52,7 @@ void isr_handler(struct regs *r)
                 __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
                 printk("[jadro] proces siegnal po adres %x\n", cr2);
             }
-            task_exit();
+            task_exit(-1);          /* ubity przez wyjatek CPU */
         }
 
         printk("\n!!! WYJATEK CPU %u: %s (err=%x) pod eip=%x\n",

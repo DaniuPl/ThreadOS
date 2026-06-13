@@ -36,6 +36,20 @@ static void print_pid(void)
     print("\n");
 }
 
+/* Pokazuje niezerowy kod wyjscia ostatniego polecenia (jak $? w bash) */
+static void report_code(int32_t code)
+{
+    if (code == 0)
+        return;
+    print("ush: [kod ");
+    if (code < 0) {
+        print("-");
+        code = -code;
+    }
+    print_dec((uint32_t)code);
+    print("]\n");
+}
+
 static uint32_t read_line(void)
 {
     uint32_t n = 0;
@@ -114,7 +128,7 @@ void _start(void)
             if (pid < 0)
                 print("ush: nie moge uruchomic potoku\n");
             else
-                sys_wait(pid);
+                report_code(sys_wait(pid));
             goto next;
         }
 
@@ -144,7 +158,7 @@ void _start(void)
             print("'\n");
             continue;
         }
-        sys_wait(pid);
+        report_code(sys_wait(pid));
         if (outfile) {
             print("ush: wyjscie zapisane do '");
             print(outfile);

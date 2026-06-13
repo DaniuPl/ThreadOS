@@ -40,6 +40,7 @@ struct task {
     enum task_state state;
     uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
     int id;
+    int exit_code;              /* kod zwrocony przez task_exit */
     char name[NAME_MAX];
     void *stack;                /* NULL dla wątku main (stos z boot.S) */
     struct file_desc fds[TASK_MAX_FD];
@@ -53,6 +54,32 @@ extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
 
 static struct task *current;
 static int next_id;
+
+/* Tablica kodow wyjscia zakonczonych procesow - wait je stad odczytuje.
+   Maly bufor cykliczny; przy przepelnieniu nadpisuje najstarszy wpis. */
+#define EXIT_SLOTS 16
+static struct { int pid; int code; int valid; } exit_codes[EXIT_SLOTS];
+static int exit_next;
+
+static void exit_record(int pid, int code)
+{
+    exit_codes[exit_next].pid = pid;
+    exit_codes[exit_next].code = code;
+    exit_codes[exit_next].valid = 1;
+    exit_next = (exit_next + 1) % EXIT_SLOTS;
+}
+
+/* Pobiera (i kasuje) zapamietany kod wyjscia danego pid; 0 gdy brak */
+static int exit_take(int pid)
+{
+    for (int i = 0; i < EXIT_SLOTS; i++) {
+        if (exit_codes[i].valid && exit_codes[i].pid == pid) {
+            exit_codes[i].valid = 0;
+            return exit_codes[i].code;
+        }
+    }
+    return 0;
+}
 
 static void task_set_name(struct task *t, const char *name)
 {
@@ -81,7 +108,7 @@ static void task_trampoline(void)
 {
     __asm__ volatile("sti");
     current->entry(current->arg);
-    task_exit();
+    task_exit(0);
 }
 
 void scheduler_init(void)
@@ -256,18 +283,31 @@ int task_alive(int id)
     return alive;
 }
 
-void task_exit(void)
+void task_exit(int code)
 {
     /* Zamknij deskryptory - konce potokow musza zwolnic druga strone
        (czytelnik dostanie EOF, pisarz - przerwany potok) */
     file_close_all();
 
-    irq_save();
+    uint32_t flags = irq_save();
+    current->exit_code = code;
+    /* Zapamietaj kod od razu - wait widzi 'nieaktywny' juz przy ZOMBIE,
+       a reaper moze sprzatnac zadanie zanim wait zdazy je odczytac */
+    exit_record(current->id, code);
     current->state = TASK_ZOMBIE;
     schedule();
+    (void)flags;
     /* zombie nigdy nie zostanie wybrany ponownie */
     for (;;)
         __asm__ volatile("hlt");
+}
+
+/* Czeka na zakonczenie procesu o danym pid i zwraca jego kod wyjscia */
+int task_wait(int pid)
+{
+    while (task_alive(pid))
+        task_sleep(20);
+    return exit_take(pid);
 }
 
 void task_use_address_space(uint32_t dir_phys)

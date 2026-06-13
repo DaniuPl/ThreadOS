@@ -99,14 +99,15 @@ static inline int32_t sys_pipeline(const char *pipeline, const char *outfile)
     return ret;
 }
 
-static inline void sys_wait(int32_t pid)
+/* Czeka na proces 'pid' i zwraca jego kod wyjscia */
+static inline int32_t sys_wait(int32_t pid)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_WAIT), "b"(pid)
                      : "memory");
-    (void)ret;
+    return ret;
 }
 
 static inline int32_t sys_getpid(void)

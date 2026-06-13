@@ -378,6 +378,17 @@ def main():
         check("rm usunal plik (ls juz go nie pokazuje)",
               "wc: wierszy=0 bajtow=0" in q.wait_for("wc: wierszy=0 bajtow=0"))
 
+        # Kody wyjscia: grep bez dopasowan konczy sie kodem 1, a kod
+        # ostatniego etapu potoku wraca z wait do shella
+        q.type_line("seq 5 | grep 9")
+        check("kod wyjscia z potoku (grep bez dopasowan -> kod 1)",
+              "ush: [kod 1]" in q.wait_for("ush: [kod 1]"))
+
+        # Proces ubity wyjatkiem CPU zwraca kod -1
+        q.type_line("evil")
+        check("kod wyjscia procesu ubitego wyjatkiem (-1)",
+              "ush: [kod -1]" in q.wait_for("ush: [kod -1]"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)

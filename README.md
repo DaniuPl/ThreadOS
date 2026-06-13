@@ -145,6 +145,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       `head`, `wc`, `cat` (np. `seq 9 | grep 7 > plik`)
 - [x] Wielostopniowe potoki (`seq 20 | grep 1 | wc`, do 5 etapów)
 - [x] Zarządzanie plikami z ring 3: `ls` (sys_readdir), `rm` (sys_unlink)
+- [x] Status wyjścia procesu zwracany przez `wait` (kod widoczny w `ush`;
+      `grep` zwraca 1 bez dopasowań, proces ubity wyjątkiem → -1)
 - [ ] Katalogi (podkatalogi, ścieżki) w systemie plików
-- [ ] Status wyjścia procesu zwracany przez wait
 - [ ] mmap, współdzielona pamięć między procesami

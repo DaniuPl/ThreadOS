@@ -37,7 +37,8 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg);
 
 void task_yield(void);              /* oddaj dobrowolnie procesor */
 void task_sleep(uint32_t ms);       /* uśpij bieżący wątek */
-void task_exit(void);               /* zakończ bieżący wątek */
+void task_exit(int code);           /* zakończ bieżący wątek z kodem */
+int  task_wait(int pid);            /* czekaj na proces, zwróć jego kod */
 void task_block(void);              /* śpij, aż ktoś obudzi */
 void task_unblock(struct task *t);  /* obudź (wołać z IF=0) */
 

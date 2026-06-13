@@ -31,7 +31,7 @@ void syscall_handler(struct regs *r)
     case SYS_EXIT:
         printk("[jadro] proces '%s' zakonczyl sie (kod %d)\n",
                task_current_name(), (int)r->ebx);
-        task_exit();
+        task_exit((int)r->ebx);
         break;
     case SYS_SLEEP:
         task_sleep(r->ebx);
@@ -52,10 +52,7 @@ void syscall_handler(struct regs *r)
             r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
         break;
     case SYS_WAIT:
-        /* Najprostsze czekanie: drzemka, az proces zniknie z listy */
-        while (task_alive((int)r->ebx))
-            task_sleep(20);
-        r->eax = 0;
+        r->eax = (uint32_t)task_wait((int)r->ebx);  /* -> kod wyjscia */
         break;
     case SYS_GETPID:
         r->eax = (uint32_t)task_current_id();

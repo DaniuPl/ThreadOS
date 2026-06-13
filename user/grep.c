@@ -8,6 +8,7 @@
 
 static char line[LINE_MAX];
 static int len;
+static int matched;             /* czy cokolwiek dopasowano */
 
 static void flush_line(const char *pattern)
 {
@@ -15,6 +16,7 @@ static void flush_line(const char *pattern)
     if (ustrstr(line, pattern)) {
         sys_write(STDOUT, line, (uint32_t)len);
         sys_write(STDOUT, "\n", 1);
+        matched = 1;
     }
     len = 0;
 }
@@ -39,5 +41,5 @@ void _start(int argc, char **argv)
     if (len)            /* ostatni wiersz bez nowej linii */
         flush_line(argv[1]);
 
-    sys_exit(0);
+    sys_exit(matched ? 0 : 1);  /* jak prawdziwy grep: 1 = brak dopasowan */
 }
