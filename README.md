@@ -141,6 +141,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       EOF, gdy producent się kończy
 - [x] Narzędzia uniksowe komponujące się przez potoki: `seq`, `grep`,
       `head`, `wc`, `cat` (np. `seq 9 | grep 7 > plik`)
-- [ ] Wielostopniowe potoki (`a | b | c`)
+- [x] Wielostopniowe potoki (`seq 20 | grep 1 | wc`, do 5 etapów)
 - [ ] Katalogi w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami

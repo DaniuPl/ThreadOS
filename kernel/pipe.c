@@ -17,7 +17,7 @@
 #include "include/string.h"
 
 #define PIPE_CAP   512
-#define MAX_PIPES  4
+#define MAX_PIPES  8
 
 struct pipe {
     int used;

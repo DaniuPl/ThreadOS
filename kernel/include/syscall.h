@@ -15,7 +15,7 @@
 #define SYS_OPEN     10  /* ebx=nazwa, ecx=flagi O_* -> fd albo -1 */
 #define SYS_CLOSE    11  /* ebx=fd -> 0 albo -1 */
 #define SYS_SEEK     12  /* ebx=fd, ecx=offset -> nowy offset albo -1 */
-#define SYS_PIPELINE 13  /* ebx=cmd1, ecx=cmd2 -> pid konsumenta albo -1 */
+#define SYS_PIPELINE 13  /* ebx=linia z '|', ecx=plik na stdout -> pid ostatniego */
 
 #define SYSCALL_VECTOR 0x80
 

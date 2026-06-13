@@ -349,6 +349,20 @@ def main():
         check("head ogranicza potok do N wierszy",
               "wc: wierszy=3 bajtow=6" in q.wait_for("wc: wierszy=3 bajtow=6"))
 
+        # Potok 3-stopniowy: seq 20 | grep 1 | wc. Liczby 1..20 z cyfra
+        # '1' to 1,10..19 = 11 wierszy; bajty 2 + 10*3 = 32
+        q.type_line("seq 20 | grep 1 | wc")
+        check("potok 3-stopniowy (seq | grep | wc)",
+              "wc: wierszy=11 bajtow=32" in q.wait_for("wc: wierszy=11"))
+
+        # Potok 4-stopniowy z przekierowaniem: seq 30 | grep 2 | head 3 > p.txt
+        # liczby z '2': 2,12,20,...; pierwsze 3 -> "2\n12\n20\n" = 3w/8B
+        q.type_line("seq 30 | grep 2 | head 3 > p.txt")
+        time.sleep(0.5)
+        q.type_line("cat p.txt | wc")
+        check("potok 4-stopniowy z przekierowaniem do pliku",
+              "wc: wierszy=3 bajtow=8" in q.wait_for("wc: wierszy=3 bajtow=8"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)

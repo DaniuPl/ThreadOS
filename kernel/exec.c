@@ -25,6 +25,7 @@
 #define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
 #define ARG_MAX        16
 #define CMD_MAX        128
+#define MAX_STAGES     5     /* maks. liczba etapow potoku a|b|c|... */
 
 /* Argumenty przekazywane do watka-procesu: linia polecen plus
    niezalezne ustawienie stdin/stdout. Pozwala laczyc przekierowania,
@@ -346,34 +347,82 @@ int exec_spawn_redirect(const char *cmdline, const char *outfile)
     return task_id_of(task_create(prog, exec_task, a));
 }
 
-/* Uruchamia potok 'cmd1 | cmd2': stdout cmd1 -> potok -> stdin cmd2.
-   Oba procesy dzialaja rownolegle. Gdy outfile != NULL, stdout
-   konsumenta idzie dodatkowo do pliku. Zwraca pid konsumenta albo -1. */
-int exec_spawn_pipeline(const char *cmd1, const char *cmd2,
-                        const char *outfile)
+/* Uruchamia wielostopniowy potok 'a | b | c | ...': stdout kazdego
+   etapu plynie do stdin nastepnego. Wszystkie etapy dzialaja rownolegle.
+   'pipeline' to cala linia z separatorami '|'. Gdy outfile != NULL,
+   stdout ostatniego etapu idzie dodatkowo do pliku. Zwraca pid
+   ostatniego etapu albo -1.
+
+   Najpierw przygotowujemy argumenty WSZYSTKICH etapow (walidujac, ze
+   programy istnieja) i dopiero potem tworzymy zadania - dzieki temu
+   blad w ktoryms etapie nie zostawia polowy uruchomionego potoku. */
+int exec_spawn_pipeline(const char *pipeline, const char *outfile)
 {
-    char prog1[16], prog2[16];
-    struct exec_args *a1 = make_args(cmd1, prog1);
-    if (!a1)
+    char buf[CMD_MAX * MAX_STAGES];
+    uint32_t bl = 0;
+    while (pipeline[bl] && bl < sizeof(buf) - 1) {
+        buf[bl] = pipeline[bl];
+        bl++;
+    }
+    buf[bl] = '\0';
+
+    /* Podziel na etapy po '|' (z przycieciem spacji) */
+    char *seg[MAX_STAGES];
+    int nseg = 0;
+    char *start = buf;
+    for (char *p = buf;; p++) {
+        if (*p == '|' || *p == '\0') {
+            int end = (*p == '\0');
+            *p = '\0';
+            while (*start == ' ')
+                start++;
+            char *e = start + strlen(start);
+            while (e > start && e[-1] == ' ')
+                *--e = '\0';
+            if (nseg < MAX_STAGES)
+                seg[nseg++] = start;
+            start = p + 1;
+            if (end)
+                break;
+        }
+    }
+    if (nseg < 2)
         return -1;
-    struct exec_args *a2 = make_args(cmd2, prog2);
-    if (!a2) {
-        kfree(a1);
-        return -1;
+
+    /* Przygotuj argumenty wszystkich etapow (walidacja istnienia) */
+    struct exec_args *args[MAX_STAGES];
+    char prog[MAX_STAGES][16];
+    for (int i = 0; i < nseg; i++) {
+        args[i] = make_args(seg[i], prog[i]);
+        if (!args[i]) {
+            for (int j = 0; j < i; j++)
+                kfree(args[j]);
+            return -1;
+        }
     }
 
-    int pidx = pipe_alloc();
-    if (pidx < 0) {
-        kfree(a1);
-        kfree(a2);
-        printk("run: brak wolnego potoku\n");
-        return -1;
+    /* Potoki miedzy sasiednimi etapami: pipe[i] laczy etap i z i+1 */
+    for (int i = 0; i + 1 < nseg; i++) {
+        int pidx = pipe_alloc();
+        if (pidx < 0) {
+            printk("run: brak wolnego potoku\n");
+            for (int j = 0; j < nseg; j++)
+                kfree(args[j]);
+            /* zwolnij juz przydzielone potoki przez zamkniecie obu koncow */
+            for (int j = 0; j < i; j++) {
+                pipe_close_reader(args[j + 1]->in_pipe);
+                pipe_close_writer(args[j]->out_pipe);
+            }
+            return -1;
+        }
+        args[i]->out_pipe = pidx;
+        args[i + 1]->in_pipe = pidx;
     }
 
-    a1->out_pipe = pidx;            /* producent: stdout -> potok */
-    a2->in_pipe = pidx;             /* konsument: stdin <- potok */
-    set_outfile(a2, outfile);       /* opcjonalnie stdout konsumenta -> plik */
+    set_outfile(args[nseg - 1], outfile);  /* stdout ostatniego -> plik */
 
-    task_create(prog1, exec_task, a1);
-    return task_id_of(task_create(prog2, exec_task, a2));
+    int last_pid = -1;
+    for (int i = 0; i < nseg; i++)
+        last_pid = task_id_of(task_create(prog[i], exec_task, args[i]));
+    return last_pid;
 }

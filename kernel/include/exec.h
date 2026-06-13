@@ -12,11 +12,11 @@ int exec_spawn(const char *cmdline);
    pliku outfile na dysku (tworzonego/obcinanego). */
 int exec_spawn_redirect(const char *cmdline, const char *outfile);
 
-/* Uruchamia potok 'cmd1 | cmd2' (procesy rownolegle polaczone potokiem).
-   Gdy outfile != NULL, stdout konsumenta idzie dodatkowo do pliku.
-   Zwraca pid konsumenta (cmd2) albo -1. */
-int exec_spawn_pipeline(const char *cmd1, const char *cmd2,
-                        const char *outfile);
+/* Uruchamia wielostopniowy potok 'a | b | c | ...' (procesy rownolegle).
+   'pipeline' to cala linia z separatorami '|'. Gdy outfile != NULL,
+   stdout ostatniego etapu idzie dodatkowo do pliku. Zwraca pid
+   ostatniego etapu albo -1. */
+int exec_spawn_pipeline(const char *pipeline, const char *outfile);
 
 /* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */

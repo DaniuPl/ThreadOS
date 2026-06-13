@@ -84,14 +84,13 @@ static inline int32_t sys_spawn(const char *cmdline, const char *outfile)
     return ret;
 }
 
-/* Potok cmd1|cmd2; outfile != NULL kieruje stdout konsumenta do pliku */
-static inline int32_t sys_pipeline(const char *cmd1, const char *cmd2,
-                                   const char *outfile)
+/* Potok 'a | b | c'; outfile != NULL kieruje stdout ostatniego do pliku */
+static inline int32_t sys_pipeline(const char *pipeline, const char *outfile)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_PIPELINE), "b"(cmd1), "c"(cmd2), "d"(outfile)
+                     : "a"(SYS_PIPELINE), "b"(pipeline), "c"(outfile)
                      : "memory");
     return ret;
 }
