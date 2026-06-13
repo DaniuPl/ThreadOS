@@ -23,6 +23,7 @@ BUILD   := build
 KERNEL  := $(BUILD)/protonos.bin
 ISO     := $(BUILD)/protonos.iso
 INITRD  := $(BUILD)/initrd.img
+DISK    := $(BUILD)/disk.img
 
 # Programy uzytkownika (ELF-y ladowane z initrd)
 USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
@@ -30,7 +31,7 @@ USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
-             $(BUILD)/user/memtest.elf
+             $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -54,7 +55,9 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/syscall.o \
         $(BUILD)/usermode.o \
         $(BUILD)/initrd.o \
-        $(BUILD)/exec.o
+        $(BUILD)/exec.o \
+        $(BUILD)/ata.o \
+        $(BUILD)/fs.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -91,7 +94,11 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
-	    memtest=$(BUILD)/user/memtest.elf
+	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf
+
+# Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
+$(DISK): | $(BUILD)
+	dd if=/dev/zero of=$@ bs=1M count=1 status=none
 
 iso: $(KERNEL) $(INITRD) grub.cfg
 	mkdir -p $(BUILD)/isodir/boot/grub
@@ -100,14 +107,16 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
 
-# QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a
-run: $(KERNEL) $(INITRD)
-	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD)
+# QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a.
+# Dysk (-hda) trafia na pierwsza magistrale ATA jako master.
+run: $(KERNEL) $(INITRD) $(DISK)
+	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK)
 
 run-iso: iso
 	qemu-system-i386 -cdrom $(ISO)
 
-# Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA
+# Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
+# Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
 test: $(KERNEL) $(INITRD)
 	python3 scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
 

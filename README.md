@@ -26,7 +26,9 @@ ProtonOS/
 │   ├── usermode.c      # wejście w ring 3 przez iret
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
-│   ├── shell.c         # prosty shell: help, ps, mem, uptime, clear, reboot...
+│   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, polling)
+│   ├── fs.c            # PFS - prosty zapisywalny system plików na dysku
+│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, write...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
@@ -42,6 +44,7 @@ ProtonOS/
 │   ├── sh.c            # ush - shell użytkownika (read/spawn/wait w ring 3)
 │   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
 │   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
+│   ├── fileio.c        # zapisuje i czyta plik na dysku (syscalle fwrite/fread)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -77,6 +80,12 @@ szeregowy (`make run` + opcja `-serial stdio` w QEMU pokaże je w terminalu).
 `make test` bootuje jądro w QEMU bez okna i przez QMP sprawdza zawartość
 ekranu VGA, tykanie timera oraz echo klawiatury (wstrzykuje klawisze
 poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
+Test uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**, więc
+weryfikuje też, że pliki zapisane na PFS przeżywają restart.
+
+`make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
+formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
+lub syscall `fwrite` zostają na nim między uruchomieniami.
 
 ## Jak to działa
 
@@ -114,6 +123,8 @@ poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
       konsolę, uruchamia programy przez spawn+wait, `exit` wraca do jądra)
 - [x] Argumenty programów (argc/argv) - `run echo proton os dziala`
 - [x] Syscall sbrk + malloc w userspace (dynamiczna pamięć) - `run memtest`
-- [ ] System plików z prawdziwego dysku (ATA + np. FAT)
-- [ ] Potoki / przekierowania, zapis do plików (sys_open/read/write)
+- [x] Sterownik dysku ATA (PIO) + system plików PFS (`fls`, `cat`, `write`,
+      syscalle fwrite/fread) - pliki przeżywają restart
+- [ ] Deskryptory plików (sys_open/close), katalogi
+- [ ] Potoki / przekierowania strumieni między procesami
 - [ ] mmap, współdzielona pamięć między procesami

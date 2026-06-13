@@ -17,6 +17,18 @@ static inline uint8_t inb(uint16_t port)
     return value;
 }
 
+static inline void outw(uint16_t port, uint16_t value)
+{
+    __asm__ volatile("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline uint16_t inw(uint16_t port)
+{
+    uint16_t value;
+    __asm__ volatile("inw %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
 /* Krótkie opóźnienie - zapis do nieużywanego portu 0x80.
    Daje staremu sprzętowi (np. PIC) czas na przetworzenie komendy. */
 static inline void io_wait(void)

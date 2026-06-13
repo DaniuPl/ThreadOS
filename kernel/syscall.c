@@ -13,6 +13,7 @@
 #include "include/printk.h"
 #include "include/keyboard.h"
 #include "include/exec.h"
+#include "include/fs.h"
 
 #define WRITE_MAX 1024
 
@@ -63,6 +64,14 @@ void syscall_handler(struct regs *r)
         break;
     case SYS_SBRK:
         r->eax = process_sbrk((int32_t)r->ebx);
+        break;
+    case SYS_FWRITE:
+        r->eax = (uint32_t)fs_write((const char *)r->ebx,
+                                    (const void *)r->ecx, r->edx);
+        break;
+    case SYS_FREAD:
+        r->eax = (uint32_t)fs_read((const char *)r->ebx,
+                                   (void *)r->ecx, r->edx);
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",

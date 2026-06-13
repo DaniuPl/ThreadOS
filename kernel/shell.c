@@ -17,6 +17,7 @@
 #include "include/task.h"
 #include "include/initrd.h"
 #include "include/exec.h"
+#include "include/fs.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -38,6 +39,9 @@ static void cmd_help(void)
            "  ps      - lista watkow jadra\n"
            "  ls      - pliki w initrd\n"
            "  run X   - uruchom program X z initrd (proces ring 3)\n"
+           "  fls     - pliki na dysku (PFS)\n"
+           "  cat F   - wypisz plik z dysku\n"
+           "  write F txt - zapisz tekst do pliku na dysku\n"
            "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
            "  uptime  - czas od startu systemu\n"
            "  clear   - wyczysc ekran\n"
@@ -58,6 +62,39 @@ static void cmd_uptime(void)
 {
     uint32_t s = pit_ticks() / 100;
     printk("uptime: %u s (%u tyknac timera po 10 ms)\n", s, pit_ticks());
+}
+
+static void cmd_cat(const char *name)
+{
+    static char buf[FS_MAX_SIZE + 1];
+    int n = fs_read(name, buf, FS_MAX_SIZE);
+    if (n < 0) {
+        printk("cat: brak pliku '%s' (lista: 'fls')\n", name);
+        return;
+    }
+    buf[n] = '\0';
+    printk("%s", buf);
+    if (n && buf[n - 1] != '\n')
+        printk("\n");
+}
+
+static void cmd_write(char *args)
+{
+    /* args = "nazwa tekst..." */
+    char *text = args;
+    while (*text && *text != ' ')
+        text++;
+    if (*text == ' ')
+        *text++ = '\0';
+
+    if (!*args || !*text) {
+        printk("uzycie: write <plik> <tekst>\n");
+        return;
+    }
+    if (fs_write(args, text, strlen(text)) < 0)
+        printk("write: blad zapisu '%s'\n", args);
+    else
+        printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
 }
 
 static void run_command(char *cmd)
@@ -87,6 +124,16 @@ static void run_command(char *cmd)
         else
             printk("uzycie: run <plik> (lista: 'ls')\n");
     }
+    else if (!strcmp(cmd, "fls"))
+        fs_list();
+    else if (!strcmp(cmd, "cat")) {
+        if (*arg)
+            cmd_cat(arg);
+        else
+            printk("uzycie: cat <plik>\n");
+    }
+    else if (!strcmp(cmd, "write"))
+        cmd_write(arg);
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))

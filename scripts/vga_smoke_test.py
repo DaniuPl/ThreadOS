@@ -34,7 +34,7 @@ VGA_BYTES = 80 * 25 * 2
 
 
 class Qemu:
-    def __init__(self, kernel, initrd=None):
+    def __init__(self, kernel, initrd=None, disk=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -42,6 +42,8 @@ class Qemu:
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if initrd:
             cmd += ["-initrd", initrd]
+        if disk:
+            cmd += ["-hda", disk]
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -124,13 +126,22 @@ def main():
         if not cond:
             failures.append(name)
 
-    q = Qemu(KERNEL, INITRD)
+    # Swiezy obraz dysku (1 MiB) wspoldzielony przez oba boot-y -
+    # jadro sformatuje go przy pierwszym starcie
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.write(b"\0" * (1024 * 1024))
+
+    q = Qemu(KERNEL, INITRD, disk)
     try:
         # Czekaj na pelny boot (prompt shella) zamiast zgadywac czas
         screen = q.wait_for("ProtonOS shell")
         print("=== Ekran VGA po boocie ===")
         print(screen)
         print("===========================")
+
+        check("dysk ATA + PFS wykryty i sformatowany",
+              "Dysk ATA + PFS gotowy" in screen)
 
         for expected in ["Multiboot OK", "GDT zaladowana", "IDT zaladowana",
                          "PIC przemapowany", "Timer PIT", "Klawiatura PS/2",
@@ -316,6 +327,32 @@ def main():
         check("shell odpowiada po ubiciu procesu",
               "tyknac timera" in q.screen())
 
+        # --- System plikow na dysku (PFS) ---
+        # Proces ring 3 pisze i czyta plik syscallami
+        q.type_line("run fileio")
+        screen = q.wait_for("[fileio] OK")
+        check("proces ring3 zapisal i odczytal plik z dysku",
+              "odczytano z dysku: plik zapisany przez proces ring3" in screen)
+
+        # Shell jadra: write -> cat (zapis i odczyt w obrebie jednego boota)
+        q.type_line("write greeting witaj-z-dysku-pfs")
+        check("zapis pliku z shella jadra",
+              "zapisano" in q.wait_for("zapisano"))
+        q.type_line("cat greeting")
+        check("odczyt zapisanego pliku (cat)",
+              "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs"))
+
+        # fls pokazuje oba pliki
+        q.type_line("fls")
+        screen = q.wait_for("Pliki na dysku")
+        check("fls listuje pliki na dysku",
+              "greeting" in screen and "ring3.txt" in screen)
+
+        # cat nieistniejacego pliku
+        q.type_line("cat niema")
+        check("cat zglasza brak pliku",
+              "brak pliku 'niema'" in q.wait_for("brak pliku"))
+
         # Na koncu: crash powinien wywolac page fault z diagnostyka
         q.type_line("crash")
         screen = q.screen()
@@ -324,15 +361,41 @@ def main():
         check("CR2 wskazuje felerny adres",
               "(CR2): e0000000" in screen)
         check("system zatrzymany po wyjatku", "System zatrzymany" in screen)
-
-        print()
-        if failures:
-            print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
-            return 1
-        print("WSZYSTKIE TESTY PRZESZLY")
-        return 0
     finally:
         q.close()
+
+    # --- Persystencja: drugi boot na TYM SAMYM dysku ---
+    print("--- drugi boot (ten sam dysk) ---")
+    q2 = Qemu(KERNEL, INITRD, disk)
+    try:
+        screen = q2.wait_for("ProtonOS shell")
+        check("drugi boot: dysk wykryty (juz sformatowany, bez ponownego format)",
+              "Dysk ATA + PFS gotowy" in screen
+              and "sformatowany" not in screen)
+
+        q2.type_line("fls")
+        screen = q2.wait_for("Pliki na dysku")
+        check("pliki przetrwaly restart (fls)",
+              "greeting" in screen and "ring3.txt" in screen)
+
+        q2.type_line("cat greeting")
+        check("zawartosc pliku przetrwala restart (cat)",
+              "witaj-z-dysku-pfs" in q2.wait_for("witaj-z-dysku-pfs"))
+
+        q2.type_line("cat ring3.txt")
+        check("plik zapisany przez ring3 przetrwal restart",
+              "plik zapisany przez proces ring3" in q2.wait_for("ring3"))
+    finally:
+        q2.close()
+        if os.path.exists(disk):
+            os.unlink(disk)
+
+    print()
+    if failures:
+        print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
+        return 1
+    print("WSZYSTKIE TESTY PRZESZLY")
+    return 0
 
 
 if __name__ == "__main__":

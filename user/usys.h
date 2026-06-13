@@ -14,6 +14,8 @@
 #define SYS_WAIT     7
 #define SYS_GETPID   8
 #define SYS_SBRK     9
+#define SYS_FWRITE   10
+#define SYS_FREAD    11
 
 static inline int32_t sys_write(const char *s, uint32_t len)
 {
@@ -102,6 +104,26 @@ static inline void *malloc(uint32_t size)
     size = (size + 7) & ~7u;
     void *p = sys_sbrk((int32_t)size);
     return p == (void *)-1 ? (void *)0 : p;
+}
+
+static inline int32_t sys_fwrite(const char *name, const void *buf, uint32_t len)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_FWRITE), "b"(name), "c"(buf), "d"(len)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_fread(const char *name, void *buf, uint32_t max)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_FREAD), "b"(name), "c"(buf), "d"(max)
+                     : "memory");
+    return ret;
 }
 
 static inline int ustreq(const char *a, const char *b)

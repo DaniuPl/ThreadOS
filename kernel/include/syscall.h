@@ -12,6 +12,8 @@
 #define SYS_WAIT     7   /* ebx=pid - blokuje az proces sie skonczy */
 #define SYS_GETPID   8   /* -> pid biezacego procesu */
 #define SYS_SBRK     9   /* ebx=increment -> stary brk albo -1 */
+#define SYS_FWRITE   10  /* ebx=nazwa, ecx=bufor, edx=len -> 0 albo -1 */
+#define SYS_FREAD    11  /* ebx=nazwa, ecx=bufor, edx=max -> bajty albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 
