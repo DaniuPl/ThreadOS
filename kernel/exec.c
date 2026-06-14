@@ -35,6 +35,7 @@ struct exec_args {
     int in_pipe;                  /* stdin z potoku (idx) albo -1 */
     int out_pipe;                 /* stdout do potoku (idx) albo -1 */
     char out_file[FS_NAME_MAX + 1]; /* stdout do pliku ("" = brak) */
+    int out_append;               /* 1 = dopisuj (>>), 0 = obcinaj (>) */
 };
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
@@ -245,7 +246,8 @@ static void exec_task(void *arg)
         file_set_pipe(0, a->in_pipe, 0);    /* stdin <- koniec odczytu */
     if (a->out_pipe >= 0)
         file_set_pipe(1, a->out_pipe, 1);   /* stdout -> koniec zapisu */
-    else if (a->out_file[0] && file_redirect_stdout(a->out_file) < 0)
+    else if (a->out_file[0] &&
+             file_redirect_stdout(a->out_file, a->out_append) < 0)
         printk("exec: nie moge przekierowac stdout do '%s'\n", a->out_file);
     kfree(a);
 
@@ -313,6 +315,7 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
     a->in_pipe = -1;
     a->out_pipe = -1;
     a->out_file[0] = '\0';
+    a->out_append = 0;
     return a;
 }
 
@@ -337,13 +340,14 @@ int exec_spawn(const char *cmdline)
     return task_id_of(task_create(prog, exec_task, a));
 }
 
-int exec_spawn_redirect(const char *cmdline, const char *outfile)
+int exec_spawn_redirect(const char *cmdline, const char *outfile, int append)
 {
     char prog[16];
     struct exec_args *a = make_args(cmdline, prog);
     if (!a)
         return -1;
     set_outfile(a, outfile);
+    a->out_append = append;
     return task_id_of(task_create(prog, exec_task, a));
 }
 

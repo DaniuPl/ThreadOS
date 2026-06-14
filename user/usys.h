@@ -88,13 +88,15 @@ static inline int32_t sys_read(int fd, void *buf, uint32_t len)
     return ret;
 }
 
-/* Uruchamia program; gdy outfile != NULL, jego stdout idzie do pliku */
-static inline int32_t sys_spawn(const char *cmdline, const char *outfile)
+/* Uruchamia program; outfile != NULL kieruje stdout do pliku
+   (append=1 dopisuje na koncu zamiast obcinac) */
+static inline int32_t sys_spawn(const char *cmdline, const char *outfile,
+                                int append)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_SPAWN), "b"(cmdline), "c"(outfile)
+                     : "a"(SYS_SPAWN), "b"(cmdline), "c"(outfile), "d"(append)
                      : "memory");
     return ret;
 }

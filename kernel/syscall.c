@@ -48,7 +48,8 @@ void syscall_handler(struct regs *r)
     case SYS_SPAWN:
         if (r->ecx)
             r->eax = (uint32_t)exec_spawn_redirect((const char *)r->ebx,
-                                                   (const char *)r->ecx);
+                                                   (const char *)r->ecx,
+                                                   (int)r->edx);
         else
             r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
         break;

@@ -135,18 +135,25 @@ int file_seek(int fd, uint32_t off)
     return (int)off;
 }
 
-int file_redirect_stdout(const char *name)
+int file_redirect_stdout(const char *name, int append)
 {
     int idx = fs_open(name, O_CREATE);
     if (idx < 0)
         return -1;
-    fs_truncate(idx);
+
+    uint32_t off = 0;
+    if (append) {
+        int sz = fs_size(idx);
+        off = sz > 0 ? (uint32_t)sz : 0;   /* dopisuj na koncu pliku */
+    } else {
+        fs_truncate(idx);
+    }
 
     struct file_desc *fds = task_fds();
     fds[1].used = 1;
     fds[1].kind = FD_FILE;
     fds[1].inode = idx;
-    fds[1].off = 0;
+    fds[1].off = off;
     fds[1].readable = 0;
     fds[1].writable = 1;
     return 0;

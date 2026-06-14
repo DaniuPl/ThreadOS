@@ -400,6 +400,38 @@ def main():
         check("date (ring 3) czyta RTC: data i format z bazy QEMU",
               m is not None)
 
+        # Dopisywanie '>>': apf = "appendtest\n"(11B) + "zz\n"(3B) = 14B/2w.
+        # Gdyby '>>' obcinalo jak '>', bylby tylko "zz\n" (3B/1w).
+        q.type_line("echo appendtest > apf")
+        time.sleep(0.4)
+        q.type_line("echo zz >> apf")
+        time.sleep(0.4)
+        q.type_line("cat apf | wc")
+        check("dopisywanie '>>' nie obcina pliku (14 B, 2 wiersze)",
+              "wc: wierszy=2 bajtow=14" in q.wait_for("wc: wierszy=2 bajtow=14"))
+
+        # cp tworzy NIEZALEZNA kopie: dopisanie do kopii (+ "more\n" 5B)
+        # daje 19B, nie ruszajac oryginalu
+        q.type_line("cp apf cpf")
+        time.sleep(0.4)
+        q.type_line("echo more >> cpf")
+        time.sleep(0.4)
+        q.type_line("cat cpf | wc")
+        check("cp tworzy niezalezna kopie pliku (19 B, 3 wiersze)",
+              "wc: wierszy=3 bajtow=19" in q.wait_for("wc: wierszy=3 bajtow=19"))
+
+        # mv przenosi: zrodlo znika, cel ma tresc
+        q.type_line("mv cpf mvf")
+        time.sleep(0.4)
+        q.type_line("cat cpf")
+        check("mv usunal plik zrodlowy",
+              "nie moge otworzyc 'cpf'" in q.wait_for("nie moge otworzyc 'cpf'"))
+        q.type_line("echo end >> mvf")
+        time.sleep(0.4)
+        q.type_line("cat mvf | wc")
+        check("mv zachowal tresc w pliku docelowym (23 B, 4 wiersze)",
+              "wc: wierszy=4 bajtow=23" in q.wait_for("wc: wierszy=4 bajtow=23"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)

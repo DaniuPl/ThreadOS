@@ -16,7 +16,7 @@ static void print_help(void)
     print("ush: wpisz nazwe programu z initrd (np. hello), albo:\n"
           "  help        - ta pomoc\n"
           "  pid         - pokaz pid shella\n"
-          "  cmd > plik  - przekieruj wyjscie programu do pliku\n"
+          "  cmd > plik  - przekieruj wyjscie do pliku (>> dopisuje)\n"
           "  cmd1 | cmd2 - polacz programy potokiem\n"
           "  exit        - wyjdz do shella jadra\n");
 }
@@ -114,6 +114,8 @@ void _start(void)
                 if (*r == '>') {
                     *r = '\0';
                     char *f = r + 1;
+                    if (*f == '>')      /* '>>' w potoku: obcina jak '>' */
+                        f++;
                     while (*f == ' ')
                         f++;
                     for (char *e = f; *e; e++)
@@ -132,12 +134,17 @@ void _start(void)
             goto next;
         }
 
-        /* Przekierowanie: 'cmd args > plik' kieruje stdout do pliku */
+        /* Przekierowanie: '> plik' obcina, '>> plik' dopisuje */
         char *outfile = (void *)0;
+        int append = 0;
         for (char *s = line; *s; s++) {
             if (*s == '>') {
                 *s = '\0';
                 char *f = s + 1;
+                if (*f == '>') {        /* '>>' = dopisywanie */
+                    append = 1;
+                    f++;
+                }
                 while (*f == ' ')
                     f++;
                 outfile = f;
@@ -151,7 +158,7 @@ void _start(void)
             }
         }
 
-        int32_t pid = sys_spawn(line, outfile);
+        int32_t pid = sys_spawn(line, outfile, append);
         if (pid < 0) {
             print("ush: nie znam '");
             print(line);

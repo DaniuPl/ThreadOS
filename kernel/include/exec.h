@@ -9,8 +9,8 @@
 int exec_spawn(const char *cmdline);
 
 /* Jak exec_spawn, ale stdout (fd 1) procesu jest przekierowany do
-   pliku outfile na dysku (tworzonego/obcinanego). */
-int exec_spawn_redirect(const char *cmdline, const char *outfile);
+   pliku outfile. append=0 obcina plik, append=1 dopisuje (>>). */
+int exec_spawn_redirect(const char *cmdline, const char *outfile, int append);
 
 /* Uruchamia wielostopniowy potok 'a | b | c | ...' (procesy rownolegle).
    'pipeline' to cala linia z separatorami '|'. Gdy outfile != NULL,

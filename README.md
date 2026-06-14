@@ -56,6 +56,8 @@ ProtonOS/
 │   ├── ls.c            # listuje pliki na dysku (sys_readdir)
 │   ├── rm.c            # usuwa plik (sys_unlink)
 │   ├── date.c          # data i godzina z RTC (sys_time)
+│   ├── cp.c            # kopiuje plik (read src -> write dst)
+│   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -150,5 +152,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Status wyjścia procesu zwracany przez `wait` (kod widoczny w `ush`;
       `grep` zwraca 1 bez dopasowań, proces ubity wyjątkiem → -1)
 - [x] Zegar czasu rzeczywistego (RTC/CMOS) + program `date`
+- [x] Dopisywanie `>>` oraz programy `cp` i `mv`
 - [ ] Katalogi (podkatalogi, ścieżki) w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami
