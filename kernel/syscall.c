@@ -15,6 +15,7 @@
 #include "include/exec.h"
 #include "include/kfile.h"
 #include "include/fs.h"
+#include "include/rtc.h"
 
 /* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
    page faultem w ring 0 (ginie proces). Pelna walidacja przyjdzie z
@@ -78,6 +79,10 @@ void syscall_handler(struct regs *r)
         break;
     case SYS_UNLINK:
         r->eax = (uint32_t)fs_delete((const char *)r->ebx);
+        break;
+    case SYS_TIME:
+        rtc_read((struct rtc_time *)r->ebx);
+        r->eax = 0;
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",

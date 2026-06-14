@@ -39,6 +39,8 @@ class Qemu:
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
                "-display", "none", "-no-reboot",
+               # Stala data RTC -> deterministyczny test komendy 'date'
+               "-rtc", "base=2026-06-13T12:34:56",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if initrd:
             cmd += ["-initrd", initrd]
@@ -388,6 +390,15 @@ def main():
         q.type_line("evil")
         check("kod wyjscia procesu ubitego wyjatkiem (-1)",
               "ush: [kod -1]" in q.wait_for("ush: [kod -1]"))
+
+        # RTC: 'date' (ring 3) czyta zegar CMOS; QEMU ma stala baze.
+        # Sprawdzamy tylko date (godzina przesunie sie przez czas testu),
+        # plus format 'godz:min:sek' (dwie cyfry kazda)
+        q.type_line("date")
+        screen = q.wait_for("2026-06-13")
+        m = re.search(r"2026-06-13 (\d\d):(\d\d):(\d\d)", screen)
+        check("date (ring 3) czyta RTC: data i format z bazy QEMU",
+              m is not None)
 
         q.type_line("exit")
         q.wait_for("ush: pa!")

@@ -18,6 +18,7 @@
 #define SYS_PIPELINE 13  /* ebx=linia z '|', ecx=plik na stdout -> pid ostatniego */
 #define SYS_READDIR  14  /* ebx=slot, ecx=bufor nazwy -> rozmiar albo -1 */
 #define SYS_UNLINK   15  /* ebx=nazwa -> 0 albo -1 */
+#define SYS_TIME     16  /* ebx=bufor struct rtc_time -> 0 */
 
 #define SYSCALL_VECTOR 0x80
 

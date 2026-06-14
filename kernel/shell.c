@@ -18,6 +18,7 @@
 #include "include/initrd.h"
 #include "include/exec.h"
 #include "include/fs.h"
+#include "include/rtc.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -44,6 +45,7 @@ static void cmd_help(void)
            "  write F txt - zapisz tekst do pliku na dysku\n"
            "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
            "  uptime  - czas od startu systemu\n"
+           "  date    - data i godzina z RTC\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -62,6 +64,16 @@ static void cmd_uptime(void)
 {
     uint32_t s = pit_ticks() / 100;
     printk("uptime: %u s (%u tyknac timera po 10 ms)\n", s, pit_ticks());
+}
+
+static void cmd_date(void)
+{
+    struct rtc_time t;
+    rtc_read(&t);
+    printk("%u-%u%u-%u%u %u%u:%u%u:%u%u\n", t.year,
+           t.month / 10, t.month % 10, t.day / 10, t.day % 10,
+           t.hour / 10, t.hour % 10, t.min / 10, t.min % 10,
+           t.sec / 10, t.sec % 10);
 }
 
 static void cmd_cat(const char *name)
@@ -138,6 +150,8 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))
         cmd_uptime();
+    else if (!strcmp(cmd, "date"))
+        cmd_date();
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))

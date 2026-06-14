@@ -20,8 +20,19 @@
 #define SYS_PIPELINE 13
 #define SYS_READDIR  14
 #define SYS_UNLINK   15
+#define SYS_TIME     16
 
 #define FS_NAME_MAX  23
+
+/* Uklad pol musi byc zgodny ze struct rtc_time w jadrze */
+struct utime {
+    uint16_t year;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t min;
+    uint8_t sec;
+} __attribute__((packed));
 
 /* Flagi open() */
 #define O_READ   1
@@ -182,6 +193,16 @@ static inline int32_t sys_unlink(const char *name)
                      : "a"(SYS_UNLINK), "b"(name)
                      : "memory");
     return ret;
+}
+
+static inline void sys_time(struct utime *t)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TIME), "b"(t)
+                     : "memory");
+    (void)ret;
 }
 
 static inline int ustreq(const char *a, const char *b)

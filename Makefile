@@ -35,7 +35,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf \
              $(BUILD)/user/seq.elf $(BUILD)/user/grep.elf \
              $(BUILD)/user/head.elf $(BUILD)/user/ls.elf \
-             $(BUILD)/user/rm.elf
+             $(BUILD)/user/rm.elf $(BUILD)/user/date.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -63,7 +63,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/ata.o \
         $(BUILD)/fs.o \
         $(BUILD)/kfile.o \
-        $(BUILD)/pipe.o
+        $(BUILD)/pipe.o \
+        $(BUILD)/rtc.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -104,7 +105,7 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf \
 	    seq=$(BUILD)/user/seq.elf grep=$(BUILD)/user/grep.elf \
 	    head=$(BUILD)/user/head.elf ls=$(BUILD)/user/ls.elf \
-	    rm=$(BUILD)/user/rm.elf
+	    rm=$(BUILD)/user/rm.elf date=$(BUILD)/user/date.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

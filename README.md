@@ -30,7 +30,8 @@ ProtonOS/
 │   ├── fs.c            # PFS - prosty zapisywalny system plików na dysku
 │   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
-│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, write...
+│   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
+│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
@@ -54,6 +55,7 @@ ProtonOS/
 │   ├── head.c          # przepuszcza pierwsze N wierszy
 │   ├── ls.c            # listuje pliki na dysku (sys_readdir)
 │   ├── rm.c            # usuwa plik (sys_unlink)
+│   ├── date.c          # data i godzina z RTC (sys_time)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -147,5 +149,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Zarządzanie plikami z ring 3: `ls` (sys_readdir), `rm` (sys_unlink)
 - [x] Status wyjścia procesu zwracany przez `wait` (kod widoczny w `ush`;
       `grep` zwraca 1 bez dopasowań, proces ubity wyjątkiem → -1)
+- [x] Zegar czasu rzeczywistego (RTC/CMOS) + program `date`
 - [ ] Katalogi (podkatalogi, ścieżki) w systemie plików
 - [ ] mmap, współdzielona pamięć między procesami
