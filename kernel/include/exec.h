@@ -22,4 +22,7 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile);
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
 uint32_t process_sbrk(int32_t increment);
 
+/* mmap: mapuje 'size' bajtow swiezej pamieci procesu, zwraca adres albo 0 */
+uint32_t process_mmap(uint32_t size);
+
 #endif

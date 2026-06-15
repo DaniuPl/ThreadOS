@@ -369,6 +369,18 @@ def main():
         check(f"brak wycieku ramek po memtest ({used_before} -> {used_after_mt})",
               used_after_mt is not None and used_after_mt == used_before)
 
+        # 'run mmaptest': mmap daje swieza, wyzerowana, zapisywalna pamiec
+        q.type_line("run mmaptest")
+        screen = q.wait_for("[mmaptest] OK:")
+        check("mmap dziala (3 strony zmapowane, zerowe i zapisywalne)",
+              "zapisane i zweryfikowane" in screen)
+        # i nie wycieka po zakonczeniu procesu (zwolnione z przestrzenia)
+        time.sleep(0.5)
+        q.type_line("mem")
+        used_after_mm = pmm_used(q.screen())
+        check(f"brak wycieku ramek po mmaptest ({used_before} -> {used_after_mm})",
+              used_after_mm is not None and used_after_mm == used_before)
+
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")

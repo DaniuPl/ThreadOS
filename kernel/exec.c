@@ -23,6 +23,8 @@
 
 #define USER_STACK_TOP 0xC0000000u
 #define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
+#define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej sterty) */
+#define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej stosu) */
 #define ARG_MAX        16
 #define CMD_MAX        128
 #define MAX_STAGES     5     /* maks. liczba etapow potoku a|b|c|... */
@@ -254,6 +256,7 @@ static void exec_task(void *arg)
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
        zostana zwolnione przy sprzataniu zombie */
     task_set_brk(brk);
+    task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
     enter_ring3(entry, esp);
 }
@@ -283,6 +286,29 @@ uint32_t process_sbrk(int32_t increment)
 
     task_set_brk(new_brk);
     return brk;
+}
+
+/* mmap: mapuje 'size' bajtow swiezej (wyzerowanej) pamieci procesu w
+   obszarze mmap i zwraca jej adres albo 0. Zwolnienie nastepuje wraz
+   z przestrzenia adresowa przy koncu procesu. */
+uint32_t process_mmap(uint32_t size)
+{
+    uint32_t base = task_mmap_next();
+    if (!base || !size)             /* nie-proces albo zerowy rozmiar */
+        return 0;
+
+    uint32_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t end = base + pages * PAGE_SIZE;
+    if (end > MMAP_MAX || end < base)
+        return 0;
+
+    uint32_t dir = task_current_cr3();
+    for (uint32_t va = base; va < end; va += PAGE_SIZE) {
+        if (!page_frame_for(dir, va))
+            return 0;
+    }
+    task_set_mmap_next(end);
+    return base;
 }
 
 /* Buduje exec_args dla zadanej linii polecen, kopiujac nazwe programu

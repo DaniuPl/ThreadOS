@@ -186,4 +186,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       klik wynosi okno na wierzch (porządek Z niezależny od slotu)
 - [x] Wyższa rozdzielczość VESA (640x480x32 przez DISPI + PCI), pulpit
       z podwójnym buforowaniem (bez migotania); fallback do 320x200
-- [ ] mmap, współdzielona pamięć między procesami
+- [x] Syscall `mmap` - anonimowa pamięć procesu (świeża, zerowana),
+      zwalniana z przestrzenią adresową; `run mmaptest`
+- [ ] Pamięć współdzielona między procesami
