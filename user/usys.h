@@ -21,6 +21,9 @@
 #define SYS_READDIR  14
 #define SYS_UNLINK   15
 #define SYS_TIME     16
+#define SYS_CHDIR    17
+#define SYS_GETCWD   18
+#define SYS_MKDIR    19
 
 #define FS_NAME_MAX  23
 
@@ -176,13 +179,44 @@ static inline int32_t sys_seek(int fd, uint32_t off)
     return ret;
 }
 
-/* Enumeracja plikow: slot 0..; zwraca rozmiar i wpisuje nazwe, -1 = pusty */
-static inline int32_t sys_readdir(int slot, char *name)
+/* Enumeracja katalogu roboczego: kolejny wpis o numerze 'index'.
+   Zwraca rozmiar pliku, -2 dla katalogu albo -1 gdy nie ma wiecej wpisow. */
+static inline int32_t sys_readdir(int index, char *name)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_READDIR), "b"(slot), "c"(name)
+                     : "a"(SYS_READDIR), "b"(index), "c"(name)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_chdir(const char *path)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_CHDIR), "b"(path)
+                     : "memory");
+    return ret;
+}
+
+static inline void sys_getcwd(char *buf)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_GETCWD), "b"(buf)
+                     : "memory");
+    (void)ret;
+}
+
+static inline int32_t sys_mkdir(const char *path)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_MKDIR), "b"(path)
                      : "memory");
     return ret;
 }

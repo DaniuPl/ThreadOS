@@ -35,6 +35,7 @@ struct task {
     uint32_t cr3;               /* przestrzeń adresowa zadania */
     int owns_dir;               /* czy katalog stron zwolnić przy reap */
     uint32_t brk;               /* koniec sterty procesu (sbrk); 0 = wątek jądra */
+    int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -103,6 +104,16 @@ struct file_desc *task_fds(void)
     return current->fds;
 }
 
+int task_cwd(void)
+{
+    return current->cwd;
+}
+
+void task_set_cwd(int slot)
+{
+    current->cwd = slot;
+}
+
 /* Pierwszy kod każdego nowego wątku - context_switch "wraca" tutaj */
 static void task_trampoline(void)
 {
@@ -122,6 +133,7 @@ void scheduler_init(void)
     main_task->cr3 = paging_kernel_cr3();
     main_task->owns_dir = 0;
     main_task->brk = 0;
+    main_task->cwd = -1;        /* katalog glowny */
     task_init_fds(main_task);
     main_task->next = main_task;
     current = main_task;
@@ -135,6 +147,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->cr3 = paging_kernel_cr3();
     t->owns_dir = 0;
     t->brk = 0;
+    t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
     task_init_fds(t);
     t->entry = entry;
     t->arg = arg;

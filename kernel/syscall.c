@@ -75,15 +75,39 @@ void syscall_handler(struct regs *r)
         r->eax = (uint32_t)exec_spawn_pipeline((const char *)r->ebx,
                                                (const char *)r->ecx);
         break;
-    case SYS_READDIR:
-        r->eax = (uint32_t)fs_get((int)r->ebx, (char *)r->ecx, (void *)0);
+    case SYS_READDIR: {
+        char *nb = (char *)r->ecx;
+        uint32_t size;
+        int is_d;
+        if (!fs_readdir(task_cwd(), (int)r->ebx, nb, &size, &is_d))
+            r->eax = (uint32_t)-1;       /* brak kolejnego wpisu */
+        else
+            r->eax = is_d ? (uint32_t)-2 : size;  /* -2 = katalog */
         break;
+    }
     case SYS_UNLINK:
-        r->eax = (uint32_t)fs_delete((const char *)r->ebx);
+        r->eax = (uint32_t)fs_unlink(task_cwd(), (const char *)r->ebx);
         break;
     case SYS_TIME:
         rtc_read((struct rtc_time *)r->ebx);
         r->eax = 0;
+        break;
+    case SYS_CHDIR: {
+        int nc;
+        if (fs_chdir(task_cwd(), (const char *)r->ebx, &nc) == 0) {
+            task_set_cwd(nc);
+            r->eax = 0;
+        } else {
+            r->eax = (uint32_t)-1;
+        }
+        break;
+    }
+    case SYS_GETCWD:
+        fs_getpath(task_cwd(), (char *)r->ebx);
+        r->eax = 0;
+        break;
+    case SYS_MKDIR:
+        r->eax = (uint32_t)fs_mkdir(task_cwd(), (const char *)r->ebx);
         break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",

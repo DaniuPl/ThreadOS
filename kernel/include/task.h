@@ -28,6 +28,10 @@ struct file_desc {
 /* Tablica fd biezacego zadania (do warstwy syscalli plikowych) */
 struct file_desc *task_fds(void);
 
+/* Katalog roboczy biezacego zadania (slot PFS, -1 = root) */
+int task_cwd(void);
+void task_set_cwd(int slot);
+
 /* Zamienia bieżący tok wykonania (kmain) w pierwszy wątek systemu */
 void scheduler_init(void);
 

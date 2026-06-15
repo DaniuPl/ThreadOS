@@ -16,6 +16,8 @@ static void print_help(void)
     print("ush: wpisz nazwe programu z initrd (np. hello), albo:\n"
           "  help        - ta pomoc\n"
           "  pid         - pokaz pid shella\n"
+          "  cd [kat]    - zmien katalog (bez arg = /)\n"
+          "  pwd         - pokaz katalog roboczy\n"
           "  cmd > plik  - przekieruj wyjscie do pliku (>> dopisuje)\n"
           "  cmd1 | cmd2 - polacz programy potokiem\n"
           "  exit        - wyjdz do shella jadra\n");
@@ -82,7 +84,11 @@ void _start(void)
     print("\nush - shell uzytkownika (ring 3). Wpisz 'help'.\n");
 
     for (;;) {
-        print("ush> ");
+        char cwd[128];
+        sys_getcwd(cwd);
+        print("ush:");
+        print(cwd);
+        print("> ");
         if (!read_line())
             continue;
 
@@ -96,6 +102,26 @@ void _start(void)
         }
         if (ustreq(line, "pid")) {
             print_pid();
+            continue;
+        }
+        if (ustreq(line, "pwd")) {
+            sys_getcwd(cwd);
+            print(cwd);
+            print("\n");
+            continue;
+        }
+        /* cd [katalog] - wbudowane, bo zmienia cwd samego shella */
+        if (line[0] == 'c' && line[1] == 'd' &&
+            (line[2] == '\0' || line[2] == ' ')) {
+            char *arg = line + 2;
+            while (*arg == ' ')
+                arg++;
+            const char *target = *arg ? arg : "/";
+            if (sys_chdir(target) < 0) {
+                print("ush: nie ma katalogu '");
+                print(target);
+                print("'\n");
+            }
             continue;
         }
 

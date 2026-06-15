@@ -27,7 +27,7 @@ ProtonOS/
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, polling)
-│   ├── fs.c            # PFS - prosty zapisywalny system plików na dysku
+│   ├── fs.c            # PFS - system plików z katalogami (ścieżki, ., ..)
 │   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
@@ -58,6 +58,7 @@ ProtonOS/
 │   ├── date.c          # data i godzina z RTC (sys_time)
 │   ├── cp.c            # kopiuje plik (read src -> write dst)
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
+│   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -153,5 +154,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       `grep` zwraca 1 bez dopasowań, proces ubity wyjątkiem → -1)
 - [x] Zegar czasu rzeczywistego (RTC/CMOS) + program `date`
 - [x] Dopisywanie `>>` oraz programy `cp` i `mv`
-- [ ] Katalogi (podkatalogi, ścieżki) w systemie plików
+- [x] Katalogi w PFS: ścieżki (absolutne/względne, `.`/`..`), katalog
+      roboczy per proces (dziedziczony), `mkdir`/`cd`/`pwd`/`ls`
 - [ ] mmap, współdzielona pamięć między procesami
+- [ ] Sygnały (kill, obsługa w procesie)

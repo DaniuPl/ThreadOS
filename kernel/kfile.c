@@ -37,7 +37,7 @@ int file_open(const char *name, int flags)
     if (fd < 0)
         return -1;                       /* brak wolnego deskryptora */
 
-    int idx = fs_open(name, flags & O_CREATE);
+    int idx = fs_open(task_cwd(), name, flags & O_CREATE);
     if (idx < 0)
         return -1;
     if (flags & O_TRUNC)
@@ -137,7 +137,7 @@ int file_seek(int fd, uint32_t off)
 
 int file_redirect_stdout(const char *name, int append)
 {
-    int idx = fs_open(name, O_CREATE);
+    int idx = fs_open(task_cwd(), name, O_CREATE);
     if (idx < 0)
         return -1;
 

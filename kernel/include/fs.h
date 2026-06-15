@@ -7,40 +7,46 @@
 #define FS_MAX_FILES 16
 #define FS_MAX_SIZE  (32 * 512)   /* 16 KiB na plik (32 sektory) */
 
+#define FS_ROOT (-1)              /* katalog glowny (wirtualny i-wezel) */
+
 /* Wykrywa dysk i wczytuje system plikow PFS; formatuje pusty dysk.
    Zwraca 1 gdy gotowy, 0 gdy brak dysku. */
 int fs_init(void);
-
 int fs_ready(void);
 
-/* Zapisuje caly plik (nadpisuje). Zwraca 0 albo -1. */
+/* --- Operacje na sciezkach (wzgledem katalogu roboczego cwd) ---
+   cwd to slot katalogu albo FS_ROOT. Sciezka moze byc absolutna ("/a/b"),
+   wzgledna ("a/b") i zawierac "." oraz "..". */
+
+/* Otwiera plik; create=1 tworzy go, jesli nie istnieje. Slot albo -1. */
+int fs_open(int cwd, const char *path, int create);
+
+/* Tworzy katalog. Zwraca 0 albo -1. */
+int fs_mkdir(int cwd, const char *path);
+
+/* Rozwiazuje sciezke do katalogu i zapisuje jego slot w *newcwd.
+   Zwraca 0 albo -1 (nie istnieje / nie jest katalogiem). */
+int fs_chdir(int cwd, const char *path, int *newcwd);
+
+/* Usuwa plik albo pusty katalog. Zwraca 0 albo -1. */
+int fs_unlink(int cwd, const char *path);
+
+/* Wpisuje absolutna sciezke slotu do buf (>= 128 B). */
+void fs_getpath(int slot, char *buf);
+
+/* Enumeracja katalogu 'dir' (FS_ROOT albo slot): kolejny wpis o numerze
+   index. Wpisuje nazwe, rozmiar i czy to katalog. Zwraca 1 albo 0. */
+int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_dir);
+
+/* --- Operacje po slocie i-wezla --- */
+int fs_size(int slot);
+int fs_truncate(int slot);
+int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len);
+int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len);
+
+/* --- Wygodne operacje dla shella jadra (zawsze w katalogu glownym) --- */
 int fs_write(const char *name, const void *data, uint32_t len);
-
-/* Czyta plik do buf (max bajtow). Zwraca liczbe bajtow albo -1. */
 int fs_read(const char *name, void *buf, uint32_t max);
-
-/* --- Operacje po indeksie i-wezla (warstwa deskryptorow plikow) --- */
-
-/* Otwiera plik po nazwie; gdy create=1 tworzy go, jesli nie istnieje.
-   Zwraca indeks i-wezla (>=0) albo -1. */
-int fs_open(const char *name, int create);
-
-int fs_size(int idx);                 /* rozmiar pliku albo -1 */
-int fs_truncate(int idx);             /* zeruje rozmiar pliku */
-
-/* Odczyt/zapis len bajtow od offsetu. Zapis rozszerza plik.
-   Zwracaja liczbe przetworzonych bajtow albo -1. */
-int fs_read_at(int idx, uint32_t off, void *buf, uint32_t len);
-int fs_write_at(int idx, uint32_t off, const void *buf, uint32_t len);
-
-/* Enumeracja katalogu: dla slotu 0..FS_MAX_FILES-1 wpisuje nazwe do
-   name (>=FS_NAME_MAX+1) i zwraca rozmiar pliku; -1 gdy slot pusty. */
-int fs_get(int slot, char *name, uint32_t *size);
-
-/* Usuwa plik po nazwie. Zwraca 0 albo -1 (brak pliku). */
-int fs_delete(const char *name);
-
-/* Wypisuje liste plikow (komenda 'fls') */
 void fs_list(void);
 
 #endif

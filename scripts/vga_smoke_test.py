@@ -294,7 +294,7 @@ def main():
         # Shell uzytkownika: sys_read przejmuje konsole
         q.type_line("run sh")
         q.wait_for("ush - shell uzytkownika")
-        q.wait_for("ush>")  # uwaga: zrzut ekranu obcina spacje na koncu linii
+        q.wait_for("ush:/")  # prompt pokazuje katalog roboczy (root = /)
         check("ush wystartowal w ring 3", True)
 
         q.type_line("pid")
@@ -432,6 +432,26 @@ def main():
         check("mv zachowal tresc w pliku docelowym (23 B, 4 wiersze)",
               "wc: wierszy=4 bajtow=23" in q.wait_for("wc: wierszy=4 bajtow=23"))
 
+        # Katalogi: mkdir + cd (prompt pokazuje sciezke roboczy)
+        q.type_line("mkdir d1")
+        time.sleep(0.4)
+        q.type_line("cd d1")
+        check("cd wchodzi do podkatalogu (prompt = sciezka robocza)",
+              "ush:/d1>" in q.wait_for("ush:/d1>"))
+        # plik tworzony w podkatalogu (wzgledem cwd); "hejka\n" = 6 B
+        q.type_line("echo hejka > f1")
+        time.sleep(0.4)
+        q.type_line("cd ..")
+        time.sleep(0.4)
+        # podkatalog widoczny w katalogu glownym jako 'd1/'
+        q.type_line("ls")
+        check("ls pokazuje podkatalog ze slashem (d1/)",
+              "d1/" in q.wait_for("d1/"))
+        # plik z podkatalogu osiagalny sciezka wzgledna; nie ma go w root
+        q.type_line("cat d1/f1 | wc")
+        check("sciezka wzgledna do pliku w podkatalogu (6 B, 1 wiersz)",
+              "wc: wierszy=1 bajtow=6" in q.wait_for("wc: wierszy=1 bajtow=6"))
+
         q.type_line("exit")
         q.wait_for("ush: pa!")
         check("ush wyszedl przez sys_exit", True)
@@ -471,7 +491,7 @@ def main():
 
         # fls pokazuje oba pliki
         q.type_line("fls")
-        screen = q.wait_for("Pliki na dysku")
+        screen = q.wait_for("Katalog glowny")
         check("fls listuje pliki na dysku",
               "greeting" in screen and "ring3.txt" in screen)
 
@@ -511,7 +531,7 @@ def main():
               and "sformatowany" not in screen)
 
         q2.type_line("fls")
-        screen = q2.wait_for("Pliki na dysku")
+        screen = q2.wait_for("Katalog glowny")
         check("pliki przetrwaly restart (fls)",
               "greeting" in screen and "ring3.txt" in screen)
 

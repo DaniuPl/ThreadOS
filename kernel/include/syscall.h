@@ -16,9 +16,12 @@
 #define SYS_CLOSE    11  /* ebx=fd -> 0 albo -1 */
 #define SYS_SEEK     12  /* ebx=fd, ecx=offset -> nowy offset albo -1 */
 #define SYS_PIPELINE 13  /* ebx=linia z '|', ecx=plik na stdout -> pid ostatniego */
-#define SYS_READDIR  14  /* ebx=slot, ecx=bufor nazwy -> rozmiar albo -1 */
-#define SYS_UNLINK   15  /* ebx=nazwa -> 0 albo -1 */
+#define SYS_READDIR  14  /* ebx=index, ecx=bufor nazwy -> rozmiar (dir: -2) albo -1 */
+#define SYS_UNLINK   15  /* ebx=sciezka -> 0 albo -1 */
 #define SYS_TIME     16  /* ebx=bufor struct rtc_time -> 0 */
+#define SYS_CHDIR    17  /* ebx=sciezka -> 0 albo -1 */
+#define SYS_GETCWD   18  /* ebx=bufor (>=128) -> 0 */
+#define SYS_MKDIR    19  /* ebx=sciezka -> 0 albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 
