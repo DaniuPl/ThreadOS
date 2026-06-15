@@ -15,6 +15,7 @@
 #include "include/string.h"
 #include "include/font8x8.h"
 #include "include/keyboard.h"
+#include "include/exec.h"
 #include "include/io.h"
 
 /* Indeksy palety pulpitu (ustawiane w desktop_thread) */
@@ -61,6 +62,18 @@ static int drag_idx = -1;
 static int drag_dx, drag_dy;
 static int prev_pressed;    /* poprzedni stan LPM - do wykrycia klikniecia */
 static int focus_idx = -1;  /* okno z fokusem klawiatury */
+
+/* Pasek zadan i menu uruchamiania */
+#define TB_H 12                       /* wysokosc paska zadan */
+#define MENU_BW 40                    /* szerokosc przycisku "Menu" */
+#define MENU_ROW 12                   /* wysokosc wpisu menu */
+#define MENU_W 80                     /* szerokosc rozwinietego menu */
+static int menu_open;
+static const char *menu_items[] = {"guiapp", "gclock"};
+#define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
+
+static int taskbar_y(void) { return VIDEO_H - TB_H; }
+static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
 
 /* Wstawia zdarzenie do kolejki okna (chronione - wolane z kompozytora,
    IRQ klawiatury i posrednio z syscalla) */
@@ -220,6 +233,24 @@ static void handle_input(int mx, int my, int buttons)
     int pressed = buttons & 0x01;
 
     if (pressed && !prev_pressed) {     /* zbocze wcisniecia = klik */
+        /* Pasek zadan / menu uruchamiania ma pierwszenstwo (na wierzchu) */
+        if (in_rect(mx, my, 2, taskbar_y() + 2, MENU_BW, TB_H - 4)) {
+            menu_open = !menu_open;
+            prev_pressed = pressed;
+            return;
+        }
+        if (menu_open) {
+            for (int i = 0; i < MENU_N; i++) {
+                if (in_rect(mx, my, 2, menu_item_y(i), MENU_W, MENU_ROW)) {
+                    exec_spawn(menu_items[i]);   /* uruchom aplikacje */
+                    menu_open = 0;
+                    prev_pressed = pressed;
+                    return;
+                }
+            }
+            menu_open = 0;                /* klik poza menu - zamknij */
+        }
+
         int hit = 0;
         for (int i = MAX_WIN - 1; i >= 0; i--) {
             struct window *w = &wins[i];
@@ -278,6 +309,24 @@ static void handle_input(int mx, int my, int buttons)
     }
 
     prev_pressed = pressed;
+}
+
+/* Rysuje pasek zadan na dole i (jesli otwarte) menu uruchamiania */
+static void draw_taskbar(void)
+{
+    int ty = taskbar_y();
+    video_fill_rect(0, ty, VIDEO_W, TB_H, COL_BAR);
+    video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
+    video_draw_string(6, ty + 3, "Menu", COL_WHITE);
+
+    if (menu_open) {
+        for (int i = 0; i < MENU_N; i++) {
+            int iy = menu_item_y(i);
+            video_fill_rect(2, iy, MENU_W, MENU_ROW, COL_WIN);
+            video_fill_rect(2, iy, MENU_W, 1, COL_BLACK);
+            video_draw_string(6, iy + 2, menu_items[i], COL_BLACK);
+        }
+    }
 }
 
 /* Kopiuje tytul do okna (z przycieciem) */
@@ -432,6 +481,7 @@ static void desktop_thread(void *arg)
             if (wins[i].used)
                 draw_window(&wins[i]);
 
+        draw_taskbar();
         draw_cursor(mx, my);
 
         task_sleep(30);                       /* ~33 klatek/s */

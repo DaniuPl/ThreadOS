@@ -837,6 +837,44 @@ def main():
     finally:
         q7.close()
 
+    # --- Pasek zadan i menu uruchamiania (osobny boot) ---
+    print("--- pulpit: pasek zadan + menu ---")
+    q8 = Qemu(KERNEL, INITRD)
+    try:
+        q8.wait_for("ProtonOS shell")
+        q8.type_line("desktop")
+        time.sleep(0.8)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        _, _, at = q8.screen_pixels()
+        check("pasek zadan: przycisk 'Menu' (niebieski, 30,190)",
+              near(at(30, 190), (0, 0, 255)))
+        # przed uruchomieniem aplikacji slot 2 jest pusty (tlo okna jadra)
+        check("przed launchem brak okna aplikacji (101,71 nie czerwone)",
+              not near(at(101, 71), (255, 0, 0)))
+
+        # Klik 'Menu' -> rozwija sie menu (wpisy nad paskiem)
+        q8.mouse_goto(10, 193)
+        q8.mouse_click()
+        time.sleep(0.3)
+        _, _, at = q8.screen_pixels()
+        check("klik 'Menu' rozwija menu (wpis szary 70,170)",
+              near(at(70, 170), (224, 224, 224)))
+
+        # Klik wpisu 'guiapp' -> uruchamia aplikacje (jej okno sie pojawia)
+        q8.mouse_goto(40, 170)
+        q8.mouse_click()
+        time.sleep(1.0)
+        _, _, at = q8.screen_pixels()
+        check("wybor z menu uruchamia aplikacje (czerwony kwadrat 101,71)",
+              near(at(101, 71), (255, 0, 0)))
+        check("menu zamyka sie po wyborze (70,170 nie szare menu)",
+              not near(at(70, 170), (224, 224, 224)))
+    finally:
+        q8.close()
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")

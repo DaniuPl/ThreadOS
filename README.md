@@ -63,7 +63,8 @@ ProtonOS/
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
-│   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + zdarzenia klików)
+│   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
+│   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -177,5 +178,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       procesu przez kolejkę zdarzeń (`win_poll`), aplikacja reaguje
 - [x] Zdarzenia klawiatury do okna z fokusem (klik fokusuje; klik w
       pulpit zdejmuje fokus i klawisze wracają do shella jądra)
-- [ ] Pasek zadań i menu uruchamiania aplikacji
+- [x] Pasek zadań z przyciskiem `Menu` i menu uruchamiania aplikacji
+      (klik uruchamia program przez exec_spawn) - `guiapp`, `gclock`
 - [ ] mmap, współdzielona pamięć między procesami
+- [ ] Wyższa rozdzielczość (VESA przez GRUB)

@@ -38,7 +38,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/rm.elf $(BUILD)/user/date.elf \
              $(BUILD)/user/cp.elf $(BUILD)/user/mv.elf \
              $(BUILD)/user/mkdir.elf $(BUILD)/user/spin.elf \
-             $(BUILD)/user/guiapp.elf
+             $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -114,7 +114,7 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    rm=$(BUILD)/user/rm.elf date=$(BUILD)/user/date.elf \
 	    cp=$(BUILD)/user/cp.elf mv=$(BUILD)/user/mv.elf \
 	    mkdir=$(BUILD)/user/mkdir.elf spin=$(BUILD)/user/spin.elf \
-	    guiapp=$(BUILD)/user/guiapp.elf
+	    guiapp=$(BUILD)/user/guiapp.elf gclock=$(BUILD)/user/gclock.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)
