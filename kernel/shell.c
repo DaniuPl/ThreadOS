@@ -20,6 +20,7 @@
 #include "include/fs.h"
 #include "include/rtc.h"
 #include "include/mouse.h"
+#include "include/video.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -48,6 +49,7 @@ static void cmd_help(void)
            "  uptime  - czas od startu systemu\n"
            "  date    - data i godzina z RTC\n"
            "  mouse   - pozycja i przyciski myszy\n"
+           "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -66,6 +68,17 @@ static void cmd_uptime(void)
 {
     uint32_t s = pit_ticks() / 100;
     printk("uptime: %u s (%u tyknac timera po 10 ms)\n", s, pit_ticks());
+}
+
+static void cmd_gfx(void)
+{
+    /* Przelacz w tryb graficzny 13h i narysuj wzorzec testowy.
+       To przejscie jednokierunkowe - tekstowa konsola znika. */
+    video_init();
+    video_clear(3);                       /* tlo niebieskie */
+    video_fill_rect(120, 70, 80, 60, 1);  /* czerwony prostokat na srodku */
+    video_fill_rect(10, 10, 40, 40, 2);   /* zielony w rogu */
+    video_fill_rect(270, 10, 40, 40, 5);  /* zolty w drugim rogu */
 }
 
 static void cmd_mouse(void)
@@ -164,6 +177,8 @@ static void run_command(char *cmd)
         cmd_date();
     else if (!strcmp(cmd, "mouse"))
         cmd_mouse();
+    else if (!strcmp(cmd, "gfx"))
+        cmd_gfx();
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))

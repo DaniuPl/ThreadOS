@@ -32,6 +32,7 @@ ProtonOS/
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
 │   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
+│   ├── video.c         # tryb graficzny VGA 13h (320x200, piksele, paleta)
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -161,6 +162,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Procesy w tle (`cmd &`) i `kill <pid>` (dostarczane przy powrocie
       do ring 3 - z syscalla albo przerwania timera)
 - [x] Sterownik myszy PS/2 (IRQ12) - pozycja i przyciski (komenda `mouse`)
-- [ ] Tryb graficzny (framebuffer VGA 13h: putpixel, fill, blit)
+- [x] Tryb graficzny VGA 13h (320x200x256): piksele, prostokąty, paleta
+      (komenda `gfx`, testowany przez QMP screendump)
 - [ ] Kursor myszy na ekranie graficznym
-- [ ] mmap, współdzielona pamięć między procesami
+- [ ] Renderowanie tekstu w trybie graficznym (czcionka bitmapowa)
+- [ ] Okna / kompozytor

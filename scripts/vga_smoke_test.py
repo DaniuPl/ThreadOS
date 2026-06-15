@@ -31,6 +31,8 @@ KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/protonos.bin"
 INITRD = sys.argv[2] if len(sys.argv) > 2 else None
 VGA_ADDR = 0xB8000
 VGA_BYTES = 80 * 25 * 2
+VIDEO_W = 320
+VIDEO_H = 200
 
 
 class Qemu:
@@ -114,6 +116,33 @@ class Qemu:
         self.cmd({"execute": "input-send-event", "arguments": {"events": [
             {"type": "btn", "data": {"button": "left", "down": down}}]}})
         time.sleep(0.2)
+
+    def screen_pixels(self):
+        """Zrzut ekranu (QMP screendump) -> (skala_x, skala_y, funkcja
+        pikseli we wspolrzednych framebuffera 320x200). QEMU podwaja
+        tryb 13h przy wyswietlaniu, stad skalowanie."""
+        ppm = tempfile.mktemp(suffix=".ppm")
+        self.cmd({"execute": "screendump", "arguments": {"filename": ppm}})
+        data = open(ppm, "rb").read()
+        os.unlink(ppm)
+        idx, fields = 2, []
+        while len(fields) < 3:
+            while data[idx] in b" \t\n\r":
+                idx += 1
+            s = idx
+            while data[idx] not in b" \t\n\r":
+                idx += 1
+            fields.append(int(data[s:idx]))
+        idx += 1
+        w, h, _ = fields
+        px = data[idx:]
+        sx, sy = w // VIDEO_W, h // VIDEO_H
+
+        def at(fx, fy):
+            x, y = fx * sx + 1, fy * sy + 1
+            o = (y * w + x) * 3
+            return (px[o], px[o + 1], px[o + 2])
+        return sx, sy, at
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
@@ -588,6 +617,31 @@ def main():
         q2.close()
         if os.path.exists(disk):
             os.unlink(disk)
+
+    # --- Tryb graficzny (osobny boot: 'gfx' jest jednokierunkowy) ---
+    print("--- tryb graficzny (screendump) ---")
+    q3 = Qemu(KERNEL, INITRD)
+    try:
+        q3.wait_for("ProtonOS shell")
+        q3.type_line("gfx")
+        time.sleep(1.0)
+        sx, sy, at = q3.screen_pixels()
+        check(f"tryb graficzny aktywny (ekran skalowany {sx}x{sy})",
+              sx >= 1 and sy >= 1)
+
+        def near(px, want, tol=40):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        check("framebuffer: tlo niebieskie (fb 160,180)",
+              near(at(160, 180), (0, 0, 255)))
+        check("framebuffer: czerwony prostokat na srodku (fb 160,100)",
+              near(at(160, 100), (255, 0, 0)))
+        check("framebuffer: zielony prostokat w rogu (fb 30,30)",
+              near(at(30, 30), (0, 255, 0)))
+        check("framebuffer: zolty prostokat w rogu (fb 290,30)",
+              near(at(290, 30), (255, 255, 0)))
+    finally:
+        q3.close()
 
     print()
     if failures:

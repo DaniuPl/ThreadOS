@@ -67,7 +67,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/kfile.o \
         $(BUILD)/pipe.o \
         $(BUILD)/rtc.o \
-        $(BUILD)/mouse.o
+        $(BUILD)/mouse.o \
+        $(BUILD)/video.o
 
 .PHONY: all iso run run-iso test clean
 
