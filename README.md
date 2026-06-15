@@ -69,6 +69,8 @@ ProtonOS/
 │   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
 │   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
+│   ├── gmon.c          # monitor zasobów (RAM/uptime na żywo, sys_sysinfo)
+│   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
@@ -196,4 +198,5 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Pamięć współdzielona między procesami (`sys_shm` po kluczu) -
       dwa procesy widzą tę samą pamięć (`shmtest` + `shmread`)
 - [x] Ikony na pulpicie - klikalne kafelki uruchamiające aplikacje
-- [ ] Wskaźnik zasobów (RAM/uptime na żywo)
+- [x] Wskaźnik zasobów (`gmon`) - RAM/uptime na żywo + pasek użycia
+      pamięci (syscall `sys_sysinfo`)

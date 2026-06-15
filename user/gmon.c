@@ -1,0 +1,55 @@
+/* gmon - wskaznik zasobow (ring 3)
+ *
+ * Co pol sekundy odpytuje jadro o statystyki (sys_sysinfo) i rysuje w
+ * oknie zuzycie RAM oraz uptime na zywo, z paskiem wykorzystania pamieci.
+ */
+
+#include "usys.h"
+
+#define C_BG    8
+#define C_WHITE 4
+#define C_GREEN 2
+#define C_RED   1
+#define C_BLUE  3
+
+/* Rysuje liczbe dziesietna w oknie */
+static void draw_num(int w, int x, int y, uint32_t v, int col)
+{
+    char tmp[12], s[12];
+    int n = 0, j = 0;
+    do {
+        tmp[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (n)
+        s[j++] = tmp[--n];
+    s[j] = '\0';
+    win_text(w, x, y, s, col);
+}
+
+void _start(void)
+{
+    int w = win_create(170, 80, "Monitor");
+    if (w < 0)
+        sys_exit(1);
+
+    for (;;) {
+        struct sysinfo si;
+        sys_sysinfo(&si);
+
+        win_rect(w, 0, 0, 170, 80, C_BG);
+        win_text(w, 4, 4, "RAM uzyte (KiB):", C_GREEN);
+        draw_num(w, 136, 4, si.used_kib, C_WHITE);
+        win_text(w, 4, 16, "RAM razem (KiB):", C_GREEN);
+        draw_num(w, 136, 16, si.ram_kib, C_WHITE);
+        win_text(w, 4, 28, "uptime (s):", C_GREEN);
+        draw_num(w, 96, 28, si.uptime_s, C_WHITE);
+
+        /* Pasek wykorzystania RAM (procent z used/total) */
+        uint32_t pct = si.ram_kib ? (si.used_kib * 160 / si.ram_kib) : 0;
+        win_rect(w, 4, 48, 160, 12, C_RED);
+        win_rect(w, 4, 48, (int)pct, 12, C_BLUE);
+
+        sys_sleep(500);
+    }
+}

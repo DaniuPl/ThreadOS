@@ -15,6 +15,7 @@
 #include "include/exec.h"
 #include "include/kfile.h"
 #include "include/fs.h"
+#include "include/pmm.h"
 #include "include/rtc.h"
 #include "include/desktop.h"
 
@@ -25,6 +26,11 @@ struct win_rect_cmd {
 struct win_text_cmd {
     int32_t x, y, color;
     uint32_t s;                 /* wskaznik na lancuch (char *) */
+};
+struct sysinfo_buf {
+    uint32_t ram_kib;
+    uint32_t used_kib;
+    uint32_t uptime_s;
 };
 
 /* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
@@ -150,6 +156,14 @@ void syscall_handler(struct regs *r)
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;
+    case SYS_SYSINFO: {
+        struct sysinfo_buf *si = (struct sysinfo_buf *)r->ebx;
+        si->ram_kib = pmm_ram_kib();
+        si->used_kib = pmm_used_frames() * 4;
+        si->uptime_s = pit_ticks() / 100;
+        r->eax = 0;
+        break;
+    }
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

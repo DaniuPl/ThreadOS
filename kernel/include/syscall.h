@@ -29,6 +29,7 @@
 #define SYS_WIN_POLL   24 /* ebx=winid, ecx=&event -> 1 (jest), 0 (brak), -1 */
 #define SYS_MMAP       25 /* ebx=rozmiar -> adres albo 0 */
 #define SYS_SHM        26 /* ebx=klucz, ecx=rozmiar -> adres wspoldzielony */
+#define SYS_SYSINFO    27 /* ebx=bufor {ram_kib,used_kib,uptime_s} -> 0 */
 
 #define SYSCALL_VECTOR 0x80
 

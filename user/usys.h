@@ -31,8 +31,15 @@
 #define SYS_WIN_POLL   24
 #define SYS_MMAP       25
 #define SYS_SHM        26
+#define SYS_SYSINFO    27
 
 #define FS_NAME_MAX  23
+
+struct sysinfo {
+    uint32_t ram_kib;
+    uint32_t used_kib;
+    uint32_t uptime_s;
+};
 
 /* Uklad pol musi byc zgodny ze struct rtc_time w jadrze */
 struct utime {
@@ -170,6 +177,17 @@ static inline void *sys_shm(int key, uint32_t size)
                      : "a"(SYS_SHM), "b"(key), "c"(size)
                      : "memory");
     return ret;
+}
+
+/* sysinfo: statystyki systemu (RAM, uptime) do wskazanego bufora */
+static inline void sys_sysinfo(struct sysinfo *si)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SYSINFO), "b"(si)
+                     : "memory");
+    (void)ret;
 }
 
 /* Najprostszy bump-allocator na sbrk: tylko alokuje, nie zwalnia.

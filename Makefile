@@ -40,7 +40,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/mkdir.elf $(BUILD)/user/spin.elf \
              $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
              $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
-             $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf
+             $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
+             $(BUILD)/user/gmon.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -120,7 +121,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    mkdir=$(BUILD)/user/mkdir.elf spin=$(BUILD)/user/spin.elf \
 	    guiapp=$(BUILD)/user/guiapp.elf gclock=$(BUILD)/user/gclock.elf \
 	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf \
-	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf
+	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf \
+	    gmon=$(BUILD)/user/gmon.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

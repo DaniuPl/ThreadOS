@@ -42,6 +42,7 @@ static const struct icon icons[] = {
     {8, 20, "App", "guiapp"},
     {8, 60, "Zegar", "gclock"},
     {8, 100, "Pliki", "gfiles"},
+    {8, 140, "Monitor", "gmon"},
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 

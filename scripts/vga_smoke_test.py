@@ -319,11 +319,13 @@ def main():
         check("zombie po watku C zostal sprzatniety",
               "demo-C" not in screen)
 
-        # initrd: 'ls' pokazuje spakowane programy
+        # initrd: 'ls' pokazuje spakowane programy. Plikow jest duzo,
+        # wiec wczesne (hello/evil) sie przewijaja - sprawdzamy pozne,
+        # ktore zostaja na dole ekranu.
         q.type_line("ls")
         screen = q.screen()
         check("komenda 'ls' pokazuje pliki initrd",
-              "hello" in screen and "evil" in screen)
+              "gmon" in screen and "shmread" in screen)
 
         # Wyciek ramek: zmierz uzycie PMM przed i po zyciu procesu
         def pmm_used(s):
@@ -732,8 +734,8 @@ def main():
         check("kursor rysowany w pozycji myszy (bialy ~50,41)",
               q4.wait_pixel(50, 41, (255, 255, 255)))
         _, _, at = q4.screen_raw()
-        check("tlo pulpitu (teal) z dala od kursora i okien",
-              near(at(10, 150), (0, 128, 160)))
+        check("tlo pulpitu (teal) z dala od kursora, ikon i okien",
+              near(at(350, 200), (0, 128, 160)))
         # przesun w inne miejsce - kursor podaza
         q4.mouse_move(150, 80)
         check("kursor podaza za mysza (bialy ~200,121)",
@@ -1027,6 +1029,36 @@ def main():
               q10.wait_pixel(101, 71, (255, 0, 0)))
     finally:
         q10.close()
+
+    # --- Wskaznik zasobow (gmon) na zywo ---
+    print("--- pulpit: monitor zasobow (gmon) ---")
+    q11 = Qemu(KERNEL, INITRD)
+    try:
+        q11.wait_for("ProtonOS shell")
+        q11.type_line("desktop")
+        time.sleep(0.8)
+        q11.type_line("run gmon")
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # gmon slot2 (94,54), content (95,65). Pasek RAM (content y48)
+        # zawiera niebieski fragment uzycia -> ekran ~ (101,116).
+        check("monitor zasobow: pasek RAM (niebieski 101,116)",
+              q11.wait_pixel(101, 116, (0, 0, 255)))
+
+        # uptime (liczba przy content(96,28) -> ekran (191,93)) rosnie:
+        # komorka tekstu zmienia sie w czasie -> zywy monitor
+        def up_cell():
+            _, _, a = q11.screen_raw()
+            return [a(191 + c, 93 + r) for r in range(8) for c in range(24)]
+        c1 = up_cell()
+        time.sleep(1.6)
+        c2 = up_cell()
+        check("monitor zasobow zywy: uptime aktualizuje sie w oknie",
+              c1 != c2)
+    finally:
+        q11.close()
 
     print()
     if failures:
