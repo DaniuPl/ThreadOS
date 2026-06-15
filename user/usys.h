@@ -24,6 +24,7 @@
 #define SYS_CHDIR    17
 #define SYS_GETCWD   18
 #define SYS_MKDIR    19
+#define SYS_KILL     20
 
 #define FS_NAME_MAX  23
 
@@ -217,6 +218,16 @@ static inline int32_t sys_mkdir(const char *path)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_MKDIR), "b"(path)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_kill(int pid)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_KILL), "b"(pid)
                      : "memory");
     return ret;
 }

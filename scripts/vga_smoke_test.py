@@ -106,7 +106,7 @@ class Qemu:
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
-                "|": "shift-backslash"}
+                "|": "shift-backslash", "&": "shift-7"}
 
     def type_line(self, text):
         for ch in text:
@@ -451,6 +451,21 @@ def main():
         q.type_line("cat d1/f1 | wc")
         check("sciezka wzgledna do pliku w podkatalogu (6 B, 1 wiersz)",
               "wc: wierszy=1 bajtow=6" in q.wait_for("wc: wierszy=1 bajtow=6"))
+
+        # Tlo ('&') + kill: spin dziala w tle, kill go konczy
+        q.type_line("spin &")
+        sbg = q.wait_for("w tle, pid=")
+        pidm = re.search(r"w tle, pid=(\d+)", sbg)
+        check("uruchomienie w tle ('&') zwraca pid", pidm is not None)
+        time.sleep(1.0)
+        q.type_line("kill " + pidm.group(1))
+        check("kill konczy proces w tle (komunikat 'zabity')",
+              "zabity (kod -9)" in q.wait_for("zabity (kod -9)"))
+        # po zabiciu spin nie produkuje juz znacznikow
+        base = q.screen().count("[spin] tik")
+        time.sleep(1.6)
+        check("zabity proces przestal dzialac (brak nowych tikow)",
+              q.screen().count("[spin] tik") == base)
 
         q.type_line("exit")
         q.wait_for("ush: pa!")

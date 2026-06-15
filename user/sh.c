@@ -124,6 +124,35 @@ void _start(void)
             }
             continue;
         }
+        /* kill <pid> - zaznacz proces do zabicia */
+        if (line[0] == 'k' && line[1] == 'i' && line[2] == 'l' &&
+            line[3] == 'l' && (line[4] == ' ' || line[4] == '\0')) {
+            char *a = line + 4;
+            while (*a == ' ')
+                a++;
+            if (!*a) {
+                print("uzycie: kill <pid>\n");
+            } else if (sys_kill(uatoi(a)) < 0) {
+                print("ush: nie ma procesu o pid ");
+                print(a);
+                print("\n");
+            }
+            continue;
+        }
+
+        /* Uruchomienie w tle: koncowe '&' (shell nie czeka na proces) */
+        int bg = 0;
+        {
+            int e = (int)ustrlen(line) - 1;
+            while (e >= 0 && line[e] == ' ')
+                e--;
+            if (e >= 0 && line[e] == '&') {
+                bg = 1;
+                line[e] = '\0';
+                while (e > 0 && line[e - 1] == ' ')
+                    line[--e] = '\0';
+            }
+        }
 
         /* Potok wielostopniowy: 'a | b | c' (opcjonalnie '... > plik').
            Jadro rozbija linie po '|', wiec tu tylko wykrywamy '|',
@@ -191,11 +220,17 @@ void _start(void)
             print("'\n");
             continue;
         }
-        report_code(sys_wait(pid));
-        if (outfile) {
-            print("ush: wyjscie zapisane do '");
-            print(outfile);
-            print("'\n");
+        if (bg) {                  /* w tle: nie czekamy, pokazujemy pid */
+            print("ush: w tle, pid=");
+            print_dec((uint32_t)pid);
+            print("\n");
+        } else {
+            report_code(sys_wait(pid));
+            if (outfile) {
+                print("ush: wyjscie zapisane do '");
+                print(outfile);
+                print("'\n");
+            }
         }
     next:;
     }

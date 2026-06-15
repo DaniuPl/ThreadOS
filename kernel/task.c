@@ -42,6 +42,7 @@ struct task {
     uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
     int id;
     int exit_code;              /* kod zwrocony przez task_exit */
+    int killed;                 /* oczekujace zabicie (kill) */
     char name[NAME_MAX];
     void *stack;                /* NULL dla wątku main (stos z boot.S) */
     struct file_desc fds[TASK_MAX_FD];
@@ -134,6 +135,7 @@ void scheduler_init(void)
     main_task->owns_dir = 0;
     main_task->brk = 0;
     main_task->cwd = -1;        /* katalog glowny */
+    main_task->killed = 0;
     task_init_fds(main_task);
     main_task->next = main_task;
     current = main_task;
@@ -148,6 +150,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->owns_dir = 0;
     t->brk = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
+    t->killed = 0;
     task_init_fds(t);
     t->entry = entry;
     t->arg = arg;
@@ -321,6 +324,39 @@ int task_wait(int pid)
     while (task_alive(pid))
         task_sleep(20);
     return exit_take(pid);
+}
+
+/* Zaznacza proces o danym pid do zabicia. Faktyczne zakonczenie nastapi,
+   gdy ten proces wroci do trybu uzytkownika (task_kill_pending).
+   Budzi go, gdy spi/czeka, by szybciej trafil w punkt powrotu. */
+int task_kill(int pid)
+{
+    uint32_t flags = irq_save();
+    struct task *t = current;
+    int found = 0;
+    do {
+        if (t->id == pid && t->state != TASK_ZOMBIE) {
+            t->killed = 1;
+            if (t->state == TASK_SLEEPING || t->state == TASK_BLOCKED)
+                t->state = TASK_READY;
+            found = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return found ? 0 : -1;
+}
+
+/* Wolane przy powrocie do ring 3: jesli proces ma oczekujace zabicie,
+   konczy go tutaj (w jego wlasnym kontekscie). */
+void task_kill_pending(void)
+{
+    if (current->killed) {
+        printk("[jadro] proces '%s' (pid %d) zabity (kod -9)\n",
+               current->name, current->id);
+        task_exit(-9);
+    }
 }
 
 void task_use_address_space(uint32_t dir_phys)

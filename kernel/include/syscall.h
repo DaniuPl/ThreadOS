@@ -22,6 +22,7 @@
 #define SYS_CHDIR    17  /* ebx=sciezka -> 0 albo -1 */
 #define SYS_GETCWD   18  /* ebx=bufor (>=128) -> 0 */
 #define SYS_MKDIR    19  /* ebx=sciezka -> 0 albo -1 */
+#define SYS_KILL     20  /* ebx=pid -> 0 albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 

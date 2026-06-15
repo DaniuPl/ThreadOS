@@ -59,6 +59,7 @@ ProtonOS/
 │   ├── cp.c            # kopiuje plik (read src -> write dst)
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
+│   ├── spin.c          # długo żyjący proces do demonstracji kill
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -156,5 +157,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Dopisywanie `>>` oraz programy `cp` i `mv`
 - [x] Katalogi w PFS: ścieżki (absolutne/względne, `.`/`..`), katalog
       roboczy per proces (dziedziczony), `mkdir`/`cd`/`pwd`/`ls`
+- [x] Procesy w tle (`cmd &`) i `kill <pid>` (dostarczane przy powrocie
+      do ring 3 - z syscalla albo przerwania timera)
 - [ ] mmap, współdzielona pamięć między procesami
-- [ ] Sygnały (kill, obsługa w procesie)
+- [ ] Pełne sygnały z handlerami w przestrzeni użytkownika

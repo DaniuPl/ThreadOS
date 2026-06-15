@@ -109,6 +109,9 @@ void syscall_handler(struct regs *r)
     case SYS_MKDIR:
         r->eax = (uint32_t)fs_mkdir(task_cwd(), (const char *)r->ebx);
         break;
+    case SYS_KILL:
+        r->eax = (uint32_t)task_kill((int)r->ebx);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());
