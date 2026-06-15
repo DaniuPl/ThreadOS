@@ -25,6 +25,7 @@
 #define COL_DESK   6      /* tlo pulpitu (ciemny blekit) */
 #define COL_BAR    7      /* gorny pasek (jasnoszary) */
 #define COL_WIN    8      /* tlo okna (szary) */
+#define COL_TBBTN  9      /* przycisk okna na pasku zadan (ciemnoszary) */
 
 #define TITLE_H 10
 
@@ -50,6 +51,7 @@ struct window {
     int owner;             /* pid procesu-wlasciciela; -1 = okno jadra */
     uint8_t *content;      /* bufor treści aplikacji (NULL = okno jadra) */
     int cw, ch;            /* wymiary obszaru treści */
+    int z;                 /* porzadek rysowania (wyzszy = na wierzchu) */
     struct wevent evq[WEV_QLEN];  /* kolejka zdarzen dla aplikacji */
     int ev_head, ev_tail;
 };
@@ -74,6 +76,37 @@ static const char *menu_items[] = {"guiapp", "gclock"};
 
 static int taskbar_y(void) { return VIDEO_H - TB_H; }
 static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
+
+/* Lista przyciskow okien na pasku zadan (po przycisku Menu) */
+#define TBL_X0 (2 + MENU_BW + 4)
+#define TBL_W  52
+
+static int z_top;           /* najwyzszy przydzielony porzadek Z */
+
+/* Wynosi okno na wierzch (najwyzszy Z) */
+static void raise_win(int i)
+{
+    wins[i].z = ++z_top;
+}
+
+/* Wypelnia out[] slotami uzywanych okien w kolejnosci Z (od spodu);
+   zwraca ich liczbe */
+static int zorder(int *out)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used)
+            out[n++] = i;
+    for (int a = 1; a < n; a++) {     /* sortowanie przez wstawianie po z */
+        int key = out[a], b = a - 1;
+        while (b >= 0 && wins[out[b]].z > wins[key].z) {
+            out[b + 1] = out[b];
+            b--;
+        }
+        out[b + 1] = key;
+    }
+    return n;
+}
 
 /* Wstawia zdarzenie do kolejki okna (chronione - wolane z kompozytora,
    IRQ klawiatury i posrednio z syscalla) */
@@ -250,12 +283,29 @@ static void handle_input(int mx, int my, int buttons)
             }
             menu_open = 0;                /* klik poza menu - zamknij */
         }
+        /* Przyciski okien na pasku zadan: fokus + wyniesienie na wierzch */
+        if (my >= taskbar_y()) {
+            int j = 0;
+            for (int i = 0; i < MAX_WIN; i++) {
+                if (!wins[i].used)
+                    continue;
+                if (in_rect(mx, my, TBL_X0 + j * TBL_W, taskbar_y(),
+                            TBL_W - 2, TB_H)) {
+                    focus_idx = i;
+                    raise_win(i);
+                    prev_pressed = pressed;
+                    return;
+                }
+                j++;
+            }
+        }
 
         int hit = 0;
-        for (int i = MAX_WIN - 1; i >= 0; i--) {
+        int ord[MAX_WIN];
+        int n = zorder(ord);
+        for (int k = n - 1; k >= 0; k--) {  /* od okna na wierzchu w dol */
+            int i = ord[k];
             struct window *w = &wins[i];
-            if (!w->used)
-                continue;
             /* przycisk zamkniecia [x] */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->used = 0;
@@ -267,6 +317,7 @@ static void handle_input(int mx, int my, int buttons)
                 in_rect(mx, my, btn_x(w), btn_y(w), BTN_W, BTN_H)) {
                 w->counter++;
                 focus_idx = i;
+                raise_win(i);
                 hit = 1;
                 break;
             }
@@ -276,12 +327,14 @@ static void handle_input(int mx, int my, int buttons)
                 drag_dx = mx - w->x;
                 drag_dy = my - w->y;
                 focus_idx = i;
+                raise_win(i);
                 hit = 1;
                 break;
             }
             /* klik w cialo okna aplikacji -> fokus + zdarzenie do procesu */
             if (in_rect(mx, my, w->x, w->y, w->w, w->h)) {
                 focus_idx = i;
+                raise_win(i);
                 hit = 1;
                 int cx = mx - (w->x + 1);
                 int cy = my - (w->y + TITLE_H + 1);
@@ -318,6 +371,25 @@ static void draw_taskbar(void)
     video_fill_rect(0, ty, VIDEO_W, TB_H, COL_BAR);
     video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
     video_draw_string(6, ty + 3, "Menu", COL_WHITE);
+
+    /* Lista otwartych okien - przycisk na okno; fokus podswietlony */
+    int j = 0;
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!wins[i].used)
+            continue;
+        int bx = TBL_X0 + j * TBL_W;
+        video_fill_rect(bx, ty, TBL_W - 2, TB_H,
+                        i == focus_idx ? COL_TITLE : COL_TBBTN);
+        /* tytul przyciety do szerokosci przycisku (6 znakow) */
+        char label[7];
+        int k = 0;
+        for (; wins[i].title[k] && k < 6; k++)
+            label[k] = wins[i].title[k];
+        label[k] = '\0';
+        video_draw_string(bx + 2, ty + 3, label,
+                          i == focus_idx ? COL_WHITE : COL_BLACK);
+        j++;
+    }
 
     if (menu_open) {
         for (int i = 0; i < MENU_N; i++) {
@@ -395,6 +467,8 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->cw = cw;
         w->ch = ch;
         w->used = 1;
+        raise_win(i);              /* nowe okno na wierzchu */
+        focus_idx = i;             /* i z fokusem */
         return i;
     }
     return -1;
@@ -455,14 +529,17 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_DESK, 0, 32, 40);   /* ciemny blekit pulpitu */
     video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
+    video_set_palette(COL_TBBTN, 26, 26, 26); /* ciemnoszary przycisk paska */
 
     /* Dwa okna jadra (bez wlasciciela, bez bufora treści) */
     wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
                               .used = 1, .has_button = 1, .owner = -1};
     set_title(&wins[0], "Terminal");
+    raise_win(0);
     wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
                               .used = 1, .has_button = 0, .owner = -1};
     set_title(&wins[1], "Pliki");
+    raise_win(1);
 
     for (;;) {
         reap_windows();
@@ -477,9 +554,10 @@ static void desktop_thread(void *arg)
         video_fill_rect(0, 0, VIDEO_W, 10, COL_BAR);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
-        for (int i = 0; i < MAX_WIN; i++)
-            if (wins[i].used)
-                draw_window(&wins[i]);
+        int ord[MAX_WIN];
+        int n = zorder(ord);
+        for (int k = 0; k < n; k++)      /* od spodu na wierzch (porzadek Z) */
+            draw_window(&wins[ord[k]]);
 
         draw_taskbar();
         draw_cursor(mx, my);

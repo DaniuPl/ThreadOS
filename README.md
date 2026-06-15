@@ -180,5 +180,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       pulpit zdejmuje fokus i klawisze wracają do shella jądra)
 - [x] Pasek zadań z przyciskiem `Menu` i menu uruchamiania aplikacji
       (klik uruchamia program przez exec_spawn) - `guiapp`, `gclock`
-- [ ] mmap, współdzielona pamięć między procesami
+- [x] Lista otwartych okien na pasku zadań: podświetlenie okna z fokusem,
+      klik wynosi okno na wierzch (porządek Z niezależny od slotu)
 - [ ] Wyższa rozdzielczość (VESA przez GRUB)
+- [ ] mmap, współdzielona pamięć między procesami

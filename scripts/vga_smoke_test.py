@@ -872,6 +872,19 @@ def main():
               near(at(101, 71), (255, 0, 0)))
         check("menu zamyka sie po wyborze (70,170 nie szare menu)",
               not near(at(70, 170), (224, 224, 224)))
+
+        # Lista okien na pasku zadan: przyciski Terminal/Pliki/guiapp.
+        # guiapp jest na wierzchu (swiezo uruchomione) - czerwony przy (101,71).
+        # Klik przycisku 'Terminal' (slot0, j0, x46..96) wynosi je na
+        # wierzch i fokusuje: czerwony guiappa zostaje zakryty oknem jadra.
+        q8.mouse_goto(60, 193)
+        q8.mouse_click()
+        time.sleep(0.5)
+        _, _, at = q8.screen_pixels()
+        check("klik przycisku na pasku wynosi okno na wierzch (czerwony zakryty)",
+              near(at(101, 71), (224, 224, 224), 15))
+        check("fokusowane okno podswietlone na pasku zadan (niebieski 90,194)",
+              near(at(90, 194), (0, 0, 255)))
     finally:
         q8.close()
 
