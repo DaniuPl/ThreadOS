@@ -791,24 +791,31 @@ def main():
         _, _, at = q7.screen_pixels()
         check("aplikacja ring3 narysowala czerwony kwadrat (101,71)",
               near(at(101, 71), (255, 0, 0)))
-        check("aplikacja ring3 narysowala zielony kwadrat (135,71)",
-              near(at(135, 71), (0, 255, 0)))
-        check("aplikacja ring3 narysowala niebieski kwadrat (169,71)",
-              near(at(169, 71), (0, 0, 255)))
+        check("aplikacja ring3 narysowala niebieski kwadrat (170,75)",
+              near(at(170, 75), (0, 0, 255)))
 
-        # Animacja: licznik (komorka ~195,95) zmienia sie w czasie
-        cell1 = [at(195 + c, 95 + r) for r in range(8) for c in range(8)]
-        time.sleep(1.5)
+        # Zdarzenia: klik w cialo okna trafia do aplikacji (win_poll),
+        # ktora rysuje bialy znacznik w miejscu klikniecia. Licznik
+        # 'klikniec:' przy (175,89) rosnie. Kursor odsuwamy, by nie
+        # zaslonil znacznika przy zrzucie.
+        cnt_before = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
+        q7.mouse_goto(150, 110)
+        q7.mouse_click()
+        q7.mouse_goto(60, 140)            # odsun kursor od znacznika
+        time.sleep(0.4)
         _, _, at = q7.screen_pixels()
-        cell2 = [at(195 + c, 95 + r) for r in range(8) for c in range(8)]
-        check("aplikacja zywa: licznik animuje sie w oknie", cell1 != cell2)
+        check("klik dostarczony do aplikacji: znacznik w miejscu (149,109)",
+              near(at(149, 109), (255, 255, 255)))
+        cnt_after = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
+        check("aplikacja zliczyla klikniecie (licznik zmienil cyfre)",
+              cnt_before != cnt_after)
 
         # Zabicie aplikacji: kompozytor sprzata jej okno (pid 5)
         q7.type_line("kill 5")
         time.sleep(1.0)
         _, _, at = q7.screen_pixels()
-        check("po zabiciu aplikacji jej okno zostaje sprzatniete (169,71 teal)",
-              near(at(169, 71), (0, 128, 160)))
+        check("po zabiciu aplikacji jej okno zostaje sprzatniete (170,75 teal)",
+              near(at(170, 75), (0, 128, 160)))
     finally:
         q7.close()
 

@@ -26,6 +26,7 @@
 #define SYS_WIN_CREATE 21 /* ebx=cw, ecx=ch, edx=tytul -> winid albo -1 */
 #define SYS_WIN_RECT   22 /* ebx=winid, ecx=&{x,y,w,h,color} -> 0/-1 */
 #define SYS_WIN_TEXT   23 /* ebx=winid, ecx=&{x,y,color,str} -> 0/-1 */
+#define SYS_WIN_POLL   24 /* ebx=winid, ecx=&event -> 1 (jest), 0 (brak), -1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -140,6 +140,10 @@ void syscall_handler(struct regs *r)
                                             (uint8_t)c->color);
         break;
     }
+    case SYS_WIN_POLL:
+        r->eax = (uint32_t)desktop_win_poll((int)r->ebx, task_current_id(),
+                                            (void *)r->ecx);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

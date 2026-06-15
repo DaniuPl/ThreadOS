@@ -28,6 +28,16 @@
 
 #define COL_RED    1      /* przycisk zamkniecia */
 
+/* Zdarzenie dla aplikacji (uklad zgodny z usys.h struct win_event) */
+struct wevent {
+    int32_t type;          /* 0 = brak, 1 = klik myszy */
+    int32_t x, y;          /* wspolrzedne wzgledem obszaru treści */
+    int32_t val;           /* maska przyciskow */
+};
+#define WEV_NONE  0
+#define WEV_CLICK 1
+#define WEV_QLEN  8
+
 struct window {
     int x, y, w, h;
     char title[24];
@@ -37,6 +47,8 @@ struct window {
     int owner;             /* pid procesu-wlasciciela; -1 = okno jadra */
     uint8_t *content;      /* bufor treści aplikacji (NULL = okno jadra) */
     int cw, ch;            /* wymiary obszaru treści */
+    struct wevent evq[WEV_QLEN];  /* kolejka zdarzen dla aplikacji */
+    int ev_head, ev_tail;
 };
 
 #define MAX_WIN 6
@@ -212,9 +224,22 @@ static void handle_input(int mx, int my, int buttons)
                 drag_dy = my - w->y;
                 break;
             }
-            /* klik w cialo okna - pochlon, nie przebijaj do nizszych */
-            if (in_rect(mx, my, w->x, w->y, w->w, w->h))
-                break;
+            /* klik w cialo okna aplikacji -> zdarzenie do procesu */
+            if (in_rect(mx, my, w->x, w->y, w->w, w->h)) {
+                if (w->content) {
+                    int cx = mx - (w->x + 1);
+                    int cy = my - (w->y + TITLE_H + 1);
+                    if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch) {
+                        int next = (w->ev_head + 1) % WEV_QLEN;
+                        if (next != w->ev_tail) {  /* kolejka nie pelna */
+                            w->evq[w->ev_head] = (struct wevent){
+                                WEV_CLICK, cx, cy, buttons & 0x07};
+                            w->ev_head = next;
+                        }
+                    }
+                }
+                break;            /* pochlon - nie przebijaj do nizszych */
+            }
         }
     }
 
@@ -317,6 +342,23 @@ int desktop_win_text(int winid, int owner, int x, int y, const char *s,
         return -1;
     buf_text(win, x, y, s, color);
     return 0;
+}
+
+/* Pobiera kolejne zdarzenie okna do *out. Zwraca 1, gdy bylo, inaczej 0. */
+int desktop_win_poll(int winid, int owner, void *out)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    uint32_t flags = irq_save();
+    int got = 0;
+    if (win->ev_tail != win->ev_head) {
+        *(struct wevent *)out = win->evq[win->ev_tail];
+        win->ev_tail = (win->ev_tail + 1) % WEV_QLEN;
+        got = 1;
+    }
+    irq_restore(flags);
+    return got;
 }
 
 static void desktop_thread(void *arg)

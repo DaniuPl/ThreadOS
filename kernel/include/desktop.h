@@ -13,5 +13,6 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
                      uint8_t color);
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,
                      uint8_t color);
+int desktop_win_poll(int winid, int owner, void *out);
 
 #endif

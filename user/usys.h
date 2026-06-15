@@ -28,6 +28,7 @@
 #define SYS_WIN_CREATE 21
 #define SYS_WIN_RECT   22
 #define SYS_WIN_TEXT   23
+#define SYS_WIN_POLL   24
 
 #define FS_NAME_MAX  23
 
@@ -276,6 +277,25 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
                      : "a"(SYS_WIN_TEXT), "b"(winid), "c"(&c)
                      : "memory");
     (void)ret;
+}
+
+#define WEV_NONE  0
+#define WEV_CLICK 1
+struct win_event {
+    int32_t type;          /* WEV_* */
+    int32_t x, y;          /* wspolrzedne wzgledem obszaru treści */
+    int32_t val;           /* maska przyciskow */
+};
+
+/* Pobiera zdarzenie okna (nieblokujace). Zwraca 1 = jest, 0 = brak. */
+static inline int32_t win_poll(int winid, struct win_event *ev)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_POLL), "b"(winid), "c"(ev)
+                     : "memory");
+    return ret;
 }
 
 static inline int32_t sys_unlink(const char *name)

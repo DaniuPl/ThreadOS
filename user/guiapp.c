@@ -1,50 +1,66 @@
-/* guiapp - aplikacja graficzna w ring 3
+/* guiapp - interaktywna aplikacja graficzna w ring 3
  *
- * Tworzy wlasne okno na pulpicie i rysuje w nim przez syscalle
- * (win_rect / win_text) - jadrowy kompozytor sklada jego bufor na
- * ekran. Co ~0.5 s odswieza zawartosc (licznik), wiec widac, ze to
- * zywy proces uzytkownika rysujacy do swojego okna. Konczy sie przez
- * kill; kompozytor sprzata jego okno, gdy proces zniknie.
+ * Tworzy wlasne okno i rysuje przez syscalle. Kompozytor jadra dostarcza
+ * jej zdarzenia (klikniecia w obszar okna) przez win_poll - aplikacja
+ * reaguje: w miejscu kazdego klikniecia rysuje bialy znacznik i zlicza
+ * je. Konczy sie przez kill; kompozytor sprzata okno.
  */
 
 #include "usys.h"
 
-/* Indeksy palety pulpitu */
 #define C_BG    8    /* szare tlo okna */
 #define C_RED   1
 #define C_GREEN 2
 #define C_BLUE  3
 #define C_WHITE 4
 
+#define MAXPT 64
+static int px[MAXPT], py[MAXPT];
+static int npt;
+
+static void draw_int(int w, int x, int y, int v, int col)
+{
+    char tmp[12], s[12];
+    int n = 0, j = 0;
+    do {
+        tmp[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (n)
+        s[j++] = tmp[--n];
+    s[j] = '\0';
+    win_text(w, x, y, s, col);
+}
+
 void _start(void)
 {
-    int w = win_create(120, 50, "Aplikacja");
+    int w = win_create(120, 60, "Aplikacja");
     if (w < 0)
         sys_exit(1);
 
-    int n = 0;
     for (;;) {
-        win_rect(w, 0, 0, 120, 50, C_BG);          /* wyczysc tlo */
-        win_rect(w, 6, 6, 30, 16, C_RED);          /* kolorowe kwadraty */
-        win_rect(w, 40, 6, 30, 16, C_GREEN);
-        win_rect(w, 74, 6, 30, 16, C_BLUE);
-        win_text(w, 6, 30, "ring3 rysuje:", C_WHITE);
+        /* Odbierz wszystkie oczekujace zdarzenia (klikniecia) */
+        struct win_event ev;
+        while (win_poll(w, &ev) == 1) {
+            if (ev.type == WEV_CLICK && npt < MAXPT) {
+                px[npt] = ev.x;
+                py[npt] = ev.y;
+                npt++;
+            }
+        }
 
-        /* licznik klatek jako tekst (dowod zywej aplikacji) */
-        char buf[12];
-        int v = n, len = 0;
-        char tmp[12];
-        do {
-            tmp[len++] = (char)('0' + v % 10);
-            v /= 10;
-        } while (v);
-        int j = 0;
-        while (len)
-            buf[j++] = tmp[--len];
-        buf[j] = '\0';
-        win_text(w, 100, 30, buf, C_WHITE);
+        /* Przerysuj okno: tlo, paleta kwadratow, podpis, licznik klikniec */
+        win_rect(w, 0, 0, 120, 60, C_BG);
+        win_rect(w, 6, 6, 24, 12, C_RED);
+        win_rect(w, 34, 6, 24, 12, C_GREEN);
+        win_rect(w, 62, 6, 24, 12, C_BLUE);
+        win_text(w, 6, 24, "klikniec:", C_WHITE);
+        draw_int(w, 80, 24, npt, C_WHITE);
 
-        n++;
-        sys_sleep(500);
+        /* Znaczniki w miejscach klikniec */
+        for (int i = 0; i < npt; i++)
+            win_rect(w, px[i] - 2, py[i] - 2, 5, 5, C_WHITE);
+
+        sys_sleep(80);
     }
 }

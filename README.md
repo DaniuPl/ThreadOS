@@ -63,7 +63,7 @@ ProtonOS/
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
-│   ├── guiapp.c        # aplikacja graficzna w ring 3 (własne okno, win_*)
+│   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + zdarzenia klików)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -173,5 +173,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Aplikacje graficzne w ring 3: proces tworzy własne okno i rysuje
       przez syscalle (`win_create`/`win_rect`/`win_text`); kompozytor składa
       jego bufor i sprząta okno po śmierci procesu (`run guiapp`)
-- [ ] Dostarczanie zdarzeń myszy/klawiatury do aplikacji w jej oknie
+- [x] Dostarczanie zdarzeń do aplikacji: kliknięcie w okno trafia do
+      procesu przez kolejkę zdarzeń (`win_poll`), aplikacja reaguje
+- [ ] Zdarzenia klawiatury do okna z fokusem
 - [ ] mmap, współdzielona pamięć między procesami
