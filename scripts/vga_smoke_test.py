@@ -909,20 +909,20 @@ def main():
         check("przed launchem brak okna aplikacji (101,71 nie czerwone)",
               not near(at(101, 71), (255, 0, 0)))
 
-        # Klik 'Menu' -> rozwija sie menu (wpisy nad paskiem; guiapp y444)
+        # Menu ma 3 wpisy (guiapp/gclock/gfiles): entry0 'guiapp' y432..444
         q8.mouse_goto(10, 472)
         q8.mouse_click()
-        check("klik 'Menu' rozwija menu (wpis szary 70,448)",
-              q8.wait_pixel(70, 448, (224, 224, 224)))
+        check("klik 'Menu' rozwija menu (wpis szary 70,438)",
+              q8.wait_pixel(70, 438, (224, 224, 224)))
 
-        # Klik wpisu 'guiapp' -> uruchamia aplikacje (jej okno sie pojawia)
-        q8.mouse_goto(40, 448)
+        # Klik wpisu 'guiapp' (entry0) -> uruchamia aplikacje
+        q8.mouse_goto(40, 438)
         q8.mouse_click()
         check("wybor z menu uruchamia aplikacje (czerwony kwadrat 101,71)",
               q8.wait_pixel(101, 71, (255, 0, 0)))
         _, _, at = q8.screen_raw()
-        check("menu zamyka sie po wyborze (70,448 nie szare menu)",
-              not near(at(70, 448), (224, 224, 224)))
+        check("menu zamyka sie po wyborze (70,438 nie szare menu)",
+              not near(at(70, 438), (224, 224, 224)))
 
         # Lista okien na pasku zadan: przyciski Terminal/Pliki/guiapp.
         # guiapp jest na wierzchu (swiezo uruchomione) - czerwony przy (101,71).
@@ -936,6 +936,46 @@ def main():
               q8.wait_pixel(90, 469, (0, 0, 255)))
     finally:
         q8.close()
+
+    # --- Menedzer plikow GUI: FS -> okno aplikacji (osobny boot z dyskiem) ---
+    print("--- pulpit: menedzer plikow (gfiles) ---")
+    gdisk = tempfile.mktemp(suffix=".img")
+    with open(gdisk, "wb") as f:
+        f.write(b"\0" * (1024 * 1024))
+    q9 = Qemu(KERNEL, INITRD, gdisk)
+    try:
+        q9.wait_for("ProtonOS shell")
+        q9.type_line("write raport abc")   # plik na dysku (przed pulpitem)
+        time.sleep(0.5)
+        q9.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # Menu -> wpis 'gfiles' (entry2, y456..468)
+        q9.mouse_goto(10, 472)
+        q9.mouse_click()
+        q9.mouse_goto(40, 462)
+        q9.mouse_click()
+        # gfiles slot2 (94,54), content (95,65); nazwa pliku przy
+        # content(8,16) -> screen(103,81). Tekst (bialy) = pliki z PFS.
+        def files_row_white():
+            _, _, a = q9.screen_raw()
+            return sum(1 for x in range(103, 160) for y in range(81, 89)
+                       if near(a(x, y), (255, 255, 255), 10))
+        appeared = False
+        for _ in range(15):
+            if files_row_white() > 0:
+                appeared = True
+                break
+            time.sleep(0.2)
+        check("menedzer plikow GUI listuje plik z dysku (FS -> okno)",
+              appeared)
+    finally:
+        q9.close()
+        if os.path.exists(gdisk):
+            os.unlink(gdisk)
 
     print()
     if failures:

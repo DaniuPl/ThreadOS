@@ -71,7 +71,7 @@ static int focus_idx = -1;  /* okno z fokusem klawiatury */
 #define MENU_ROW 12                   /* wysokosc wpisu menu */
 #define MENU_W 80                     /* szerokosc rozwinietego menu */
 static int menu_open;
-static const char *menu_items[] = {"guiapp", "gclock"};
+static const char *menu_items[] = {"guiapp", "gclock", "gfiles"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 static int taskbar_y(void) { return video_h() - TB_H; }
