@@ -22,10 +22,14 @@
 
 #define TITLE_H 10
 
+#define COL_RED    1      /* przycisk zamkniecia */
+
 struct window {
     int x, y, w, h;
     const char *title;
     int used;
+    int has_button;        /* czy okno ma przycisk akcji */
+    int counter;           /* licznik klikniec przycisku */
 };
 
 #define MAX_WIN 3
@@ -34,6 +38,21 @@ static struct window wins[MAX_WIN];
 /* Stan przeciagania: indeks okna i uchwyt (offset kursora w oknie) */
 static int drag_idx = -1;
 static int drag_dx, drag_dy;
+static int prev_pressed;    /* poprzedni stan LPM - do wykrycia klikniecia */
+
+#define CLOSE_SZ 8          /* przycisk [x] w prawym rogu paska */
+#define BTN_W 40
+#define BTN_H 12
+
+static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
+{
+    return x >= rx && x < rx + rw && y >= ry && y < ry + rh;
+}
+
+static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
+static int close_y(const struct window *w) { return w->y + 1; }
+static int btn_x(const struct window *w)   { return w->x + 8; }
+static int btn_y(const struct window *w)    { return w->y + TITLE_H + 8; }
 
 /* Strzalka kursora 8x12: bity ustawione = piksel kursora.
    Bit najstarszy (0x80) to lewa kolumna. */
@@ -62,6 +81,23 @@ static void draw_cursor(int mx, int my)
                 video_putpixel(mx + col, my + row, COL_WHITE);
 }
 
+/* Rysuje liczbe dziesietna jako tekst */
+static void draw_int(int x, int y, int v, uint8_t col)
+{
+    char tmp[12];
+    int n = 0;
+    do {
+        tmp[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    char s[12];
+    int j = 0;
+    while (n)
+        s[j++] = tmp[--n];
+    s[j] = '\0';
+    video_draw_string(x, y, s, col);
+}
+
 static void draw_window(const struct window *win)
 {
     /* Tlo okna z czarna ramka */
@@ -73,6 +109,17 @@ static void draw_window(const struct window *win)
     /* Pasek tytulu + nazwa */
     video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H, COL_TITLE);
     video_draw_string(win->x + 3, win->y + 2, win->title, COL_WHITE);
+    /* Przycisk zamkniecia [x] w prawym rogu paska */
+    video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_RED);
+    video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
+
+    /* Opcjonalny przycisk akcji + licznik klikniec */
+    if (win->has_button) {
+        video_fill_rect(btn_x(win), btn_y(win), BTN_W, BTN_H, COL_BAR);
+        video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
+        draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
+                 COL_WHITE);
+    }
 }
 
 /* Czy punkt jest na pasku tytulu okna (uchwyt do przeciagania) */
@@ -82,34 +129,57 @@ static int on_titlebar(const struct window *win, int x, int y)
            y >= win->y && y < win->y + TITLE_H;
 }
 
-/* Aktualizuje przeciaganie okna na podstawie pozycji i przyciskow myszy */
-static void handle_drag(int mx, int my, int buttons)
+/* Obsluga myszy: klikniecia (zamkniecie, przycisk) i przeciaganie okien.
+   Klikniecia maja pierwszenstwo przed przeciaganiem; oba liczone na
+   zboczu wcisniecia LPM, by jeden klik = jedna akcja. */
+static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
-    if (!pressed) {
-        drag_idx = -1;
-        return;
-    }
-    if (drag_idx < 0) {            /* poczatek przeciagania: znajdz okno */
+
+    if (pressed && !prev_pressed) {     /* zbocze wcisniecia = klik */
         for (int i = MAX_WIN - 1; i >= 0; i--) {
-            if (wins[i].used && on_titlebar(&wins[i], mx, my)) {
-                drag_idx = i;
-                drag_dx = mx - wins[i].x;
-                drag_dy = my - wins[i].y;
+            struct window *w = &wins[i];
+            if (!w->used)
+                continue;
+            /* przycisk zamkniecia [x] */
+            if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
+                w->used = 0;
                 break;
             }
+            /* przycisk akcji w oknie */
+            if (w->has_button &&
+                in_rect(mx, my, btn_x(w), btn_y(w), BTN_W, BTN_H)) {
+                w->counter++;
+                break;
+            }
+            /* pasek tytulu -> rozpocznij przeciaganie */
+            if (on_titlebar(w, mx, my)) {
+                drag_idx = i;
+                drag_dx = mx - w->x;
+                drag_dy = my - w->y;
+                break;
+            }
+            /* klik w cialo okna - pochlon, nie przebijaj do nizszych */
+            if (in_rect(mx, my, w->x, w->y, w->w, w->h))
+                break;
         }
     }
-    if (drag_idx >= 0) {           /* w trakcie: okno podaza za kursorem */
+
+    if (!pressed)
+        drag_idx = -1;
+
+    if (pressed && drag_idx >= 0) {     /* w trakcie: okno podaza za kursorem */
         int nx = mx - drag_dx;
         int ny = my - drag_dy;
         if (nx < 0) nx = 0;
-        if (ny < TITLE_H) ny = TITLE_H;     /* nie chowaj pod gorny pasek */
+        if (ny < TITLE_H) ny = TITLE_H;
         if (nx > VIDEO_W - wins[drag_idx].w) nx = VIDEO_W - wins[drag_idx].w;
         if (ny > VIDEO_H - wins[drag_idx].h) ny = VIDEO_H - wins[drag_idx].h;
         wins[drag_idx].x = nx;
         wins[drag_idx].y = ny;
     }
+
+    prev_pressed = pressed;
 }
 
 static void desktop_thread(void *arg)
@@ -120,13 +190,13 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
 
-    wins[0] = (struct window){40, 60, 120, 70, "Terminal", 1};
-    wins[1] = (struct window){180, 95, 120, 70, "Pliki", 1};
+    wins[0] = (struct window){40, 60, 120, 70, "Terminal", 1, 1, 0};
+    wins[1] = (struct window){180, 95, 120, 70, "Pliki", 1, 0, 0};
 
     for (;;) {
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
-        handle_drag(mx, my, buttons);
+        handle_input(mx, my, buttons);
 
         video_clear(COL_DESK);
 

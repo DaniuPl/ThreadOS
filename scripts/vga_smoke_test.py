@@ -117,6 +117,17 @@ class Qemu:
             {"type": "btn", "data": {"button": "left", "down": down}}]}})
         time.sleep(0.2)
 
+    # Sledzenie pozycji kursora (pulpit startuje na srodku 320x200)
+    mx, my = 160, 100
+
+    def mouse_goto(self, tx, ty):
+        self.mouse_move(tx - self.mx, ty - self.my)
+        self.mx, self.my = tx, ty
+
+    def mouse_click(self):
+        self.mouse_button(True)
+        self.mouse_button(False)
+
     def screen_pixels(self):
         """Zrzut ekranu (QMP screendump) -> (skala_x, skala_y, funkcja
         pikseli we wspolrzednych framebuffera 320x200). QEMU podwaja
@@ -722,6 +733,45 @@ def main():
               near(at(220, 99), (0, 0, 255)))
     finally:
         q5.close()
+
+    # --- Pulpit: klikalne kontrolki (przycisk akcji + zamkniecie) ---
+    print("--- pulpit: kontrolki (klik) ---")
+    q6 = Qemu(KERNEL, INITRD)
+    try:
+        q6.wait_for("ProtonOS shell")
+        q6.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # win0 (40,60,120x70): przycisk [x] czerwony w prawym rogu paska
+        _, _, at = q6.screen_pixels()
+        check("przycisk zamkniecia [x] (czerwony, ~153,63)",
+              near(at(153, 63), (255, 0, 0)))
+
+        # Licznik przy przycisku 'Klik' (komorka ~94,80). Klikamy 3x.
+        cell_before = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
+        q6.mouse_goto(68, 84)            # srodek przycisku 'Klik'
+        for _ in range(3):
+            q6.mouse_click()
+        _, _, at = q6.screen_pixels()
+        cell_after = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
+        white_after = sum(1 for p in cell_after if near(p, (255, 255, 255), 10))
+        check("przycisk akcji reaguje na klik (licznik zmienil cyfre)",
+              cell_before != cell_after and white_after > 0)
+
+        # Zamkniecie okna: klik [x] okna 1 (close box ~293,99)
+        q6.mouse_goto(293, 99)
+        q6.mouse_click()
+        _, _, at = q6.screen_pixels()
+        check("klik [x] zamyka okno (pasek win1 znika, wraca tlo)",
+              near(at(220, 99), (0, 128, 160)))
+        # okno 0 nadal jest (klik nie ruszyl innych okien)
+        check("inne okno pozostaje otwarte po zamknieciu (win0 pasek 80,64)",
+              near(at(80, 64), (0, 0, 255)))
+    finally:
+        q6.close()
 
     print()
     if failures:

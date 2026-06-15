@@ -33,7 +33,7 @@ ProtonOS/
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
 │   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
 │   ├── video.c         # tryb graficzny VGA 13h (piksele, prostokąty, tekst 8x8)
-│   ├── desktop.c       # kompozytor: tło, okna (drag myszą), kursor
+│   ├── desktop.c       # kompozytor: okna (drag, [x], przycisk), kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -168,5 +168,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Kursor myszy na pulpicie graficznym (kompozytor jako wątek jądra)
 - [x] Renderowanie tekstu czcionką bitmapową 8x8
 - [x] Okna z paskami tytułu, przeciąganie myszą (kompozytor) - `desktop`
-- [ ] Klikalne kontrolki / toolkit GUI dla aplikacji
+- [x] Klikalne kontrolki: przycisk zamknięcia [x], przycisk akcji z licznikiem
+- [ ] Aplikacje graficzne w ring 3 (syscalle rysujące do okna)
 - [ ] mmap, współdzielona pamięć między procesami
