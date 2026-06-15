@@ -660,8 +660,8 @@ def main():
         _, _, at = q4.screen_pixels()
         check("kursor rysowany w pozycji myszy (bialy ~50,41)",
               near(at(50, 41), (255, 255, 255)))
-        check("tlo pulpitu (teal) z dala od kursora",
-              near(at(220, 150), (0, 128, 160)))
+        check("tlo pulpitu (teal) z dala od kursora i okien",
+              near(at(10, 150), (0, 128, 160)))
         # przesun w inne miejsce - kursor podaza
         q4.mouse_move(150, 80)
         time.sleep(0.5)
@@ -684,6 +684,44 @@ def main():
               f"{gry} szarych)", blk > 5 and gry > 5)
     finally:
         q4.close()
+
+    # --- Pulpit: okna i przeciaganie mysza (osobny boot) ---
+    print("--- pulpit: okna + drag ---")
+    q5 = Qemu(KERNEL, INITRD)
+    try:
+        q5.wait_for("ProtonOS shell")
+        q5.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # Okna: win0 (40,60,120x70) i win1 (180,95). Mysz startuje (160,100).
+        _, _, at = q5.screen_pixels()
+        check("okno 0: pasek tytulu niebieski (80,64)",
+              near(at(80, 64), (0, 0, 255)))
+        check("okno 0: tlo szare (80,100)",
+              near(at(80, 100), (224, 224, 224)))
+        check("okno 1: pasek tytulu niebieski (220,99)",
+              near(at(220, 99), (0, 0, 255)))
+
+        # Przeciaganie okna 0: kursor (160,100) -> pasek win0 (60,64),
+        # wcisnij LPM, przesun (+80,+50), pusc. Okno -> (120,110).
+        q5.mouse_move(-100, -36)
+        q5.mouse_button(True)
+        q5.mouse_move(80, 50)
+        q5.mouse_button(False)
+        time.sleep(0.4)
+        _, _, at = q5.screen_pixels()
+        # nowy pasek win0 w widocznej (niezaslonietej) czesci: (150,114)
+        check("okno 0 przeciagniete na nowa pozycje (pasek ~150,114)",
+              near(at(150, 114), (0, 0, 255)))
+        check("stare miejsce okna 0 wyczyszczone (teal ~60,90)",
+              near(at(60, 90), (0, 128, 160)))
+        check("okno 1 nieruszone podczas przeciagania (220,99)",
+              near(at(220, 99), (0, 0, 255)))
+    finally:
+        q5.close()
 
     print()
     if failures:
