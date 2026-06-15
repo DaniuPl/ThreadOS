@@ -9,6 +9,7 @@
  */
 
 #include "include/video.h"
+#include "include/font8x8.h"
 #include "include/io.h"
 
 static volatile uint8_t *const fb = (uint8_t *)0xA0000;
@@ -106,4 +107,21 @@ void video_fill_rect(int x, int y, int w, int h, uint8_t color)
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
             video_putpixel(x + i, y + j, color);
+}
+
+void video_draw_char(int x, int y, char c, uint8_t color)
+{
+    if (c < 0x20 || c > 0x7E)
+        return;
+    const uint8_t *glyph = font8x8[c - 0x20];
+    for (int row = 0; row < 8; row++)
+        for (int col = 0; col < 8; col++)
+            if (glyph[row] & (1 << col))      /* bit 0 = lewa kolumna */
+                video_putpixel(x + col, y + row, color);
+}
+
+void video_draw_string(int x, int y, const char *s, uint8_t color)
+{
+    for (int i = 0; s[i]; i++)
+        video_draw_char(x + i * 8, y, s[i], color);
 }

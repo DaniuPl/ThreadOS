@@ -15,4 +15,8 @@ void video_clear(uint8_t color);
 void video_putpixel(int x, int y, uint8_t color);
 void video_fill_rect(int x, int y, int w, int h, uint8_t color);
 
+/* Tekst czcionka 8x8 (tylko piksele pierwszoplanowe - tlo bez zmian) */
+void video_draw_char(int x, int y, char c, uint8_t color);
+void video_draw_string(int x, int y, const char *s, uint8_t color);
+
 #endif

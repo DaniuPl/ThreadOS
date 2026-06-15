@@ -670,6 +670,18 @@ def main():
               near(at(200, 121), (255, 255, 255)))
         check("poprzednia pozycja kursora wyczyszczona (teal ~50,41)",
               near(at(50, 41), (0, 128, 160)))
+
+        # Tekst (czcionka 8x8): pasek tytulu z napisem "ProtonOS".
+        # Pasek jasnoszary; glif czarny -> komorka litery ma i czarne,
+        # i szare piksele (czyli to ksztalt, nie pelny prostokat).
+        _, _, at = q4.screen_pixels()
+        check("pasek tytulu narysowany (jasnoszary, puste miejsce)",
+              near(at(200, 4), (192, 192, 192)))
+        cell = [at(2 + c, 1 + r) for r in range(8) for c in range(8)]
+        blk = sum(1 for p in cell if near(p, (0, 0, 0)))
+        gry = sum(1 for p in cell if near(p, (192, 192, 192)))
+        check(f"tekst renderowany czcionka 8x8 (glif 'P': {blk} czarnych, "
+              f"{gry} szarych)", blk > 5 and gry > 5)
     finally:
         q4.close()
 

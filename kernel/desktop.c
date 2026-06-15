@@ -16,6 +16,7 @@
 #define COL_BLACK  0
 #define COL_WHITE  4
 #define COL_DESK   6      /* tlo pulpitu (ciemny blekit) */
+#define COL_BAR    7      /* pasek tytulu (jasnoszary) */
 
 /* Strzalka kursora 8x12: bity ustawione = piksel kursora.
    Bit najstarszy (0x80) to lewa kolumna. */
@@ -49,9 +50,14 @@ static void desktop_thread(void *arg)
     (void)arg;
     video_init();
     video_set_palette(COL_DESK, 0, 32, 40);   /* ciemny blekit pulpitu */
+    video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary pasek */
 
     for (;;) {
         video_clear(COL_DESK);
+
+        /* Gorny pasek z tytulem (renderowany czcionka 8x8) */
+        video_fill_rect(0, 0, VIDEO_W, 10, COL_BAR);
+        video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
