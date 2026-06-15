@@ -25,6 +25,9 @@
 #define SYS_GETCWD   18
 #define SYS_MKDIR    19
 #define SYS_KILL     20
+#define SYS_WIN_CREATE 21
+#define SYS_WIN_RECT   22
+#define SYS_WIN_TEXT   23
 
 #define FS_NAME_MAX  23
 
@@ -230,6 +233,49 @@ static inline int32_t sys_kill(int pid)
                      : "a"(SYS_KILL), "b"(pid)
                      : "memory");
     return ret;
+}
+
+/* --- GUI: okno aplikacji rysowane na pulpicie --- */
+
+struct win_rect_cmd {
+    int32_t x, y, w, h, color;
+};
+struct win_text_cmd {
+    int32_t x, y, color;
+    const char *s;
+};
+
+/* Tworzy okno o obszarze treści cw x ch; zwraca winid albo -1 */
+static inline int32_t win_create(int cw, int ch, const char *title)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_CREATE), "b"(cw), "c"(ch), "d"(title)
+                     : "memory");
+    return ret;
+}
+
+static inline void win_rect(int winid, int x, int y, int w, int h, int color)
+{
+    struct win_rect_cmd c = { x, y, w, h, color };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_RECT), "b"(winid), "c"(&c)
+                     : "memory");
+    (void)ret;
+}
+
+static inline void win_text(int winid, int x, int y, const char *s, int color)
+{
+    struct win_text_cmd c = { x, y, color, s };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_TEXT), "b"(winid), "c"(&c)
+                     : "memory");
+    (void)ret;
 }
 
 static inline int32_t sys_unlink(const char *name)

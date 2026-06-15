@@ -16,6 +16,16 @@
 #include "include/kfile.h"
 #include "include/fs.h"
 #include "include/rtc.h"
+#include "include/desktop.h"
+
+/* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
+struct win_rect_cmd {
+    int32_t x, y, w, h, color;
+};
+struct win_text_cmd {
+    int32_t x, y, color;
+    uint32_t s;                 /* wskaznik na lancuch (char *) */
+};
 
 /* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
    page faultem w ring 0 (ginie proces). Pelna walidacja przyjdzie z
@@ -112,6 +122,24 @@ void syscall_handler(struct regs *r)
     case SYS_KILL:
         r->eax = (uint32_t)task_kill((int)r->ebx);
         break;
+    case SYS_WIN_CREATE:
+        r->eax = (uint32_t)desktop_win_create(task_current_id(), (int)r->ebx,
+                                              (int)r->ecx, (const char *)r->edx);
+        break;
+    case SYS_WIN_RECT: {
+        struct win_rect_cmd *c = (struct win_rect_cmd *)r->ecx;
+        r->eax = (uint32_t)desktop_win_rect((int)r->ebx, task_current_id(),
+                                            c->x, c->y, c->w, c->h,
+                                            (uint8_t)c->color);
+        break;
+    }
+    case SYS_WIN_TEXT: {
+        struct win_text_cmd *c = (struct win_text_cmd *)r->ecx;
+        r->eax = (uint32_t)desktop_win_text((int)r->ebx, task_current_id(),
+                                            c->x, c->y, (const char *)c->s,
+                                            (uint8_t)c->color);
+        break;
+    }
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

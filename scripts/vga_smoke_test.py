@@ -773,6 +773,45 @@ def main():
     finally:
         q6.close()
 
+    # --- Aplikacja ring 3 z wlasnym oknem (rysowanie przez syscalle) ---
+    print("--- pulpit: aplikacja ring 3 ---")
+    q7 = Qemu(KERNEL, INITRD)
+    try:
+        q7.wait_for("ProtonOS shell")
+        q7.type_line("desktop")
+        time.sleep(0.8)
+        q7.type_line("run guiapp")
+        time.sleep(1.2)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # guiapp -> slot 2 (sloty 0/1 to okna jadra): okno (94,54),
+        # obszar treści od (95,65). Kwadraty RGB rysowane przez syscalle.
+        _, _, at = q7.screen_pixels()
+        check("aplikacja ring3 narysowala czerwony kwadrat (101,71)",
+              near(at(101, 71), (255, 0, 0)))
+        check("aplikacja ring3 narysowala zielony kwadrat (135,71)",
+              near(at(135, 71), (0, 255, 0)))
+        check("aplikacja ring3 narysowala niebieski kwadrat (169,71)",
+              near(at(169, 71), (0, 0, 255)))
+
+        # Animacja: licznik (komorka ~195,95) zmienia sie w czasie
+        cell1 = [at(195 + c, 95 + r) for r in range(8) for c in range(8)]
+        time.sleep(1.5)
+        _, _, at = q7.screen_pixels()
+        cell2 = [at(195 + c, 95 + r) for r in range(8) for c in range(8)]
+        check("aplikacja zywa: licznik animuje sie w oknie", cell1 != cell2)
+
+        # Zabicie aplikacji: kompozytor sprzata jej okno (pid 5)
+        q7.type_line("kill 5")
+        time.sleep(1.0)
+        _, _, at = q7.screen_pixels()
+        check("po zabiciu aplikacji jej okno zostaje sprzatniete (169,71 teal)",
+              near(at(169, 71), (0, 128, 160)))
+    finally:
+        q7.close()
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")

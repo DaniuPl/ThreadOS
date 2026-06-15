@@ -52,6 +52,7 @@ static void cmd_help(void)
            "  mouse   - pozycja i przyciski myszy\n"
            "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
            "  desktop - graficzny pulpit z kursorem myszy\n"
+           "  kill P  - zabij proces o pid P\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -64,6 +65,19 @@ static void cmd_mem(void)
            pmm_used_frames(), pmm_total_frames());
     printk("sterta jadra: %u/%u B zajetych\n",
            heap_used_bytes(), heap_total_bytes());
+}
+
+static void cmd_kill(const char *arg)
+{
+    if (!*arg) {
+        printk("uzycie: kill <pid>\n");
+        return;
+    }
+    int pid = 0;
+    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
+        pid = pid * 10 + (*p - '0');
+    if (task_kill(pid) < 0)
+        printk("kill: nie ma procesu o pid %d\n", pid);
 }
 
 static void cmd_uptime(void)
@@ -183,6 +197,8 @@ static void run_command(char *cmd)
         cmd_gfx();
     else if (!strcmp(cmd, "desktop"))
         desktop_start();
+    else if (!strcmp(cmd, "kill"))
+        cmd_kill(arg);
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))

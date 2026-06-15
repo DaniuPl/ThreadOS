@@ -33,7 +33,7 @@ ProtonOS/
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
 │   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
 │   ├── video.c         # tryb graficzny VGA 13h (piksele, prostokąty, tekst 8x8)
-│   ├── desktop.c       # kompozytor: okna (drag, [x], przycisk), kursor
+│   ├── desktop.c       # kompozytor: okna jądra i aplikacji, drag, [x], kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -63,6 +63,7 @@ ProtonOS/
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
+│   ├── guiapp.c        # aplikacja graficzna w ring 3 (własne okno, win_*)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
@@ -169,5 +170,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Renderowanie tekstu czcionką bitmapową 8x8
 - [x] Okna z paskami tytułu, przeciąganie myszą (kompozytor) - `desktop`
 - [x] Klikalne kontrolki: przycisk zamknięcia [x], przycisk akcji z licznikiem
-- [ ] Aplikacje graficzne w ring 3 (syscalle rysujące do okna)
+- [x] Aplikacje graficzne w ring 3: proces tworzy własne okno i rysuje
+      przez syscalle (`win_create`/`win_rect`/`win_text`); kompozytor składa
+      jego bufor i sprząta okno po śmierci procesu (`run guiapp`)
+- [ ] Dostarczanie zdarzeń myszy/klawiatury do aplikacji w jej oknie
 - [ ] mmap, współdzielona pamięć między procesami

@@ -11,6 +11,10 @@
 #include "include/video.h"
 #include "include/mouse.h"
 #include "include/task.h"
+#include "include/heap.h"
+#include "include/string.h"
+#include "include/font8x8.h"
+#include "include/io.h"
 
 /* Indeksy palety pulpitu (ustawiane w desktop_thread) */
 #define COL_BLACK  0
@@ -26,13 +30,16 @@
 
 struct window {
     int x, y, w, h;
-    const char *title;
+    char title[24];
     int used;
     int has_button;        /* czy okno ma przycisk akcji */
     int counter;           /* licznik klikniec przycisku */
+    int owner;             /* pid procesu-wlasciciela; -1 = okno jadra */
+    uint8_t *content;      /* bufor treści aplikacji (NULL = okno jadra) */
+    int cw, ch;            /* wymiary obszaru treści */
 };
 
-#define MAX_WIN 3
+#define MAX_WIN 6
 static struct window wins[MAX_WIN];
 
 /* Stan przeciagania: indeks okna i uchwyt (offset kursora w oknie) */
@@ -98,6 +105,42 @@ static void draw_int(int x, int y, int v, uint8_t col)
     video_draw_string(x, y, s, col);
 }
 
+/* --- Rysowanie do bufora treści aplikacji (indeksy palety) --- */
+
+static void buf_rect(struct window *w, int x, int y, int rw, int rh, uint8_t c)
+{
+    for (int j = 0; j < rh; j++) {
+        int py = y + j;
+        if (py < 0 || py >= w->ch)
+            continue;
+        for (int i = 0; i < rw; i++) {
+            int px = x + i;
+            if (px >= 0 && px < w->cw)
+                w->content[py * w->cw + px] = c;
+        }
+    }
+}
+
+static void buf_char(struct window *w, int x, int y, char ch, uint8_t c)
+{
+    if (ch < 0x20 || ch > 0x7E)
+        return;
+    const uint8_t *g = font8x8[ch - 0x20];
+    for (int row = 0; row < 8; row++)
+        for (int col = 0; col < 8; col++)
+            if (g[row] & (1 << col)) {
+                int px = x + col, py = y + row;
+                if (px >= 0 && px < w->cw && py >= 0 && py < w->ch)
+                    w->content[py * w->cw + px] = c;
+            }
+}
+
+static void buf_text(struct window *w, int x, int y, const char *s, uint8_t c)
+{
+    for (int i = 0; s[i]; i++)
+        buf_char(w, x + i * 8, y, s[i], c);
+}
+
 static void draw_window(const struct window *win)
 {
     /* Tlo okna z czarna ramka */
@@ -119,6 +162,16 @@ static void draw_window(const struct window *win)
         video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
         draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
                  COL_WHITE);
+    }
+
+    /* Okno aplikacji: skomponuj jej bufor treści w obszarze roboczym */
+    if (win->content) {
+        int bx = win->x + 1;
+        int by = win->y + TITLE_H + 1;
+        for (int j = 0; j < win->ch; j++)
+            for (int i = 0; i < win->cw; i++)
+                video_putpixel(bx + i, by + j,
+                               win->content[j * win->cw + i]);
     }
 }
 
@@ -182,6 +235,90 @@ static void handle_input(int mx, int my, int buttons)
     prev_pressed = pressed;
 }
 
+/* Kopiuje tytul do okna (z przycieciem) */
+static void set_title(struct window *w, const char *t)
+{
+    int i = 0;
+    for (; t[i] && i < (int)sizeof(w->title) - 1; i++)
+        w->title[i] = t[i];
+    w->title[i] = '\0';
+}
+
+/* Zwalnia okna, ktorych proces-wlasciciel juz nie zyje */
+static void reap_windows(void)
+{
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (wins[i].used && wins[i].owner >= 0 && !task_alive(wins[i].owner)) {
+            kfree(wins[i].content);
+            wins[i].content = (void *)0;
+            wins[i].used = 0;
+        }
+    }
+}
+
+/* --- API dla syscalli aplikacji (kontekst syscalla = IF=0) --- */
+
+int desktop_win_create(int owner, int cw, int ch, const char *title)
+{
+    if (cw <= 0 || ch <= 0 || cw > VIDEO_W || ch > VIDEO_H)
+        return -1;
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (wins[i].used)
+            continue;
+        uint8_t *buf = kmalloc(cw * ch);
+        if (!buf)
+            return -1;
+        memset(buf, COL_WIN, cw * ch);     /* startowo szare tlo */
+        struct window *w = &wins[i];
+        /* kaskadowe ustawienie nowych okien aplikacji */
+        w->x = 70 + i * 12;
+        w->y = 30 + i * 12;
+        w->w = cw + 2;
+        w->h = ch + TITLE_H + 2;
+        set_title(w, title);
+        w->has_button = 0;
+        w->counter = 0;
+        w->owner = owner;
+        w->content = buf;
+        w->cw = cw;
+        w->ch = ch;
+        w->used = 1;
+        return i;
+    }
+    return -1;
+}
+
+/* Sprawdza, czy winid jest oknem aplikacji owner */
+static struct window *app_window(int winid, int owner)
+{
+    if (winid < 0 || winid >= MAX_WIN)
+        return (void *)0;
+    struct window *w = &wins[winid];
+    if (!w->used || !w->content || w->owner != owner)
+        return (void *)0;
+    return w;
+}
+
+int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
+                     uint8_t color)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    buf_rect(win, x, y, w, h, color);
+    return 0;
+}
+
+int desktop_win_text(int winid, int owner, int x, int y, const char *s,
+                     uint8_t color)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    buf_text(win, x, y, s, color);
+    return 0;
+}
+
 static void desktop_thread(void *arg)
 {
     (void)arg;
@@ -190,10 +327,17 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
 
-    wins[0] = (struct window){40, 60, 120, 70, "Terminal", 1, 1, 0};
-    wins[1] = (struct window){180, 95, 120, 70, "Pliki", 1, 0, 0};
+    /* Dwa okna jadra (bez wlasciciela, bez bufora treści) */
+    wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
+                              .used = 1, .has_button = 1, .owner = -1};
+    set_title(&wins[0], "Terminal");
+    wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
+                              .used = 1, .has_button = 0, .owner = -1};
+    set_title(&wins[1], "Pliki");
 
     for (;;) {
+        reap_windows();
+
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
         handle_input(mx, my, buttons);
