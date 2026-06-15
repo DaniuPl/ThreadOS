@@ -31,6 +31,7 @@ ProtonOS/
 │   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
+│   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -159,5 +160,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       roboczy per proces (dziedziczony), `mkdir`/`cd`/`pwd`/`ls`
 - [x] Procesy w tle (`cmd &`) i `kill <pid>` (dostarczane przy powrocie
       do ring 3 - z syscalla albo przerwania timera)
+- [x] Sterownik myszy PS/2 (IRQ12) - pozycja i przyciski (komenda `mouse`)
+- [ ] Tryb graficzny (framebuffer VGA 13h: putpixel, fill, blit)
+- [ ] Kursor myszy na ekranie graficznym
 - [ ] mmap, współdzielona pamięć między procesami
-- [ ] Pełne sygnały z handlerami w przestrzeni użytkownika

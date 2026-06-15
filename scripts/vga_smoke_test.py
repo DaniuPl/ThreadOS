@@ -104,6 +104,17 @@ class Qemu:
         self.hmp(f"sendkey {key}")
         time.sleep(0.1)
 
+    def mouse_move(self, dx, dy):
+        self.cmd({"execute": "input-send-event", "arguments": {"events": [
+            {"type": "rel", "data": {"axis": "x", "value": dx}},
+            {"type": "rel", "data": {"axis": "y", "value": dy}}]}})
+        time.sleep(0.2)
+
+    def mouse_button(self, down):
+        self.cmd({"execute": "input-send-event", "arguments": {"events": [
+            {"type": "btn", "data": {"button": "left", "down": down}}]}})
+        time.sleep(0.2)
+
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
                 "|": "shift-backslash", "&": "shift-7"}
@@ -145,6 +156,8 @@ def main():
 
         check("dysk ATA + PFS wykryty i sformatowany",
               "Dysk ATA + PFS gotowy" in screen)
+        check("mysz PS/2 wykryta przy boocie",
+              "Mysz PS/2 gotowa" in screen)
 
         for expected in ["Multiboot OK", "GDT zaladowana", "IDT zaladowana",
                          "PIC przemapowany", "Timer PIT", "Klawiatura PS/2",
@@ -290,6 +303,20 @@ def main():
         # 'run' z nieistniejacym plikiem
         q.type_line("run brak")
         check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
+
+        # Mysz PS/2: ruch (delty wzgledne) i przycisk, czytane komenda 'mouse'.
+        # Start na srodku 320x200 = (160,100); QEMU przekazuje delty 1:1.
+        q.mouse_move(40, 30)
+        q.type_line("mouse")
+        check("mysz reaguje na ruch (160,100)+(40,30) -> (200,130)",
+              "mysz: x=200 y=130" in q.wait_for("mysz: x=200 y=130"))
+        q.mouse_move(-80, -50)
+        q.mouse_button(True)
+        q.type_line("mouse")
+        check("mysz: kolejny ruch i wcisniety LPM (120,80 b1)",
+              "mysz: x=120 y=80 przyciski=1" in
+              q.wait_for("mysz: x=120 y=80 przyciski=1"))
+        q.mouse_button(False)
 
         # Shell uzytkownika: sys_read przejmuje konsole
         q.type_line("run sh")

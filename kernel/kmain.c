@@ -9,6 +9,7 @@
 #include "include/pic.h"
 #include "include/pit.h"
 #include "include/keyboard.h"
+#include "include/mouse.h"
 #include "include/multiboot.h"
 #include "include/pmm.h"
 #include "include/paging.h"
@@ -127,6 +128,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     keyboard_init();
     ok("Klawiatura PS/2 gotowa");
+
+    mouse_init();
+    ok("Mysz PS/2 gotowa (IRQ12)");
 
     __asm__ volatile("sti");
     ok("Przerwania wlaczone (sti)");

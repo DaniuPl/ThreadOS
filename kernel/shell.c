@@ -19,6 +19,7 @@
 #include "include/exec.h"
 #include "include/fs.h"
 #include "include/rtc.h"
+#include "include/mouse.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -46,6 +47,7 @@ static void cmd_help(void)
            "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
            "  uptime  - czas od startu systemu\n"
            "  date    - data i godzina z RTC\n"
+           "  mouse   - pozycja i przyciski myszy\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -64,6 +66,14 @@ static void cmd_uptime(void)
 {
     uint32_t s = pit_ticks() / 100;
     printk("uptime: %u s (%u tyknac timera po 10 ms)\n", s, pit_ticks());
+}
+
+static void cmd_mouse(void)
+{
+    int x, y, b;
+    mouse_get(&x, &y, &b);
+    printk("mysz: x=%u y=%u przyciski=%u\n", (uint32_t)x, (uint32_t)y,
+           (uint32_t)b);
 }
 
 static void cmd_date(void)
@@ -152,6 +162,8 @@ static void run_command(char *cmd)
         cmd_uptime();
     else if (!strcmp(cmd, "date"))
         cmd_date();
+    else if (!strcmp(cmd, "mouse"))
+        cmd_mouse();
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))
