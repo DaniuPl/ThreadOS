@@ -45,6 +45,28 @@ uint32_t paging_kernel_cr3(void)
     return (uint32_t)page_directory;
 }
 
+int paging_map_phys(uint32_t phys, uint32_t size)
+{
+    uint32_t start = phys & ~0xFFFu;
+    uint32_t end = (phys + size + 0xFFFu) & ~0xFFFu;
+
+    for (uint32_t a = start; a < end; a += 4096) {
+        uint32_t pde = a >> 22;
+        uint32_t pte = (a >> 12) & 0x3FF;
+        if (!(page_directory[pde] & PTE_PRESENT)) {
+            uint32_t pt = pmm_alloc_frame();   /* ramka <64 MiB, identycznie */
+            if (!pt)
+                return -1;
+            memset((void *)pt, 0, 4096);
+            page_directory[pde] = pt | PTE_PRESENT | PTE_WRITE;
+        }
+        uint32_t *pt = (uint32_t *)(page_directory[pde] & ~0xFFFu);
+        pt[pte] = a | PTE_PRESENT | PTE_WRITE;
+        __asm__ volatile("invlpg (%0)" : : "r"(a) : "memory");
+    }
+    return 0;
+}
+
 /* Wszystkie ramki z PMM leżą <64 MiB, więc jądro widzi je przez
    mapowanie identycznościowe - katalogi i tablice stron procesów
    modyfikujemy wprost po adresie fizycznym. */

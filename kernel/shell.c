@@ -97,6 +97,20 @@ static void cmd_gfx(void)
     video_fill_rect(270, 10, 40, 40, 5);  /* zolty w drugim rogu */
 }
 
+static void cmd_vesa(void)
+{
+    /* Tryb VESA 640x480x32 + wzorzec testowy (jednokierunkowe). */
+    if (video_init_vesa(640, 480) < 0) {
+        printk("vesa: brak framebuffera (PCI)\n");
+        return;
+    }
+    video_clear(3);                        /* tlo niebieskie */
+    video_fill_rect(200, 150, 240, 180, 1); /* czerwony na srodku */
+    video_fill_rect(20, 20, 60, 60, 2);    /* zielony w rogu */
+    video_draw_string(210, 235, "ProtonOS VESA 640x480", 4);
+    video_present();
+}
+
 static void cmd_mouse(void)
 {
     int x, y, b;
@@ -195,6 +209,8 @@ static void run_command(char *cmd)
         cmd_mouse();
     else if (!strcmp(cmd, "gfx"))
         cmd_gfx();
+    else if (!strcmp(cmd, "vesa"))
+        cmd_vesa();
     else if (!strcmp(cmd, "desktop"))
         desktop_start();
     else if (!strcmp(cmd, "kill"))

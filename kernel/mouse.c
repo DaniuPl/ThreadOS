@@ -17,6 +17,7 @@
 #include "include/isr.h"
 #include "include/pic.h"
 #include "include/vga.h"
+#include "include/video.h"
 
 #define SCREEN_W 320
 #define SCREEN_H 200
@@ -123,10 +124,11 @@ static void mouse_irq(struct regs *r)
 
         mouse_x += dx;
         mouse_y -= dy;         /* os Y ekranu rosnie w dol */
+        int mw = video_w(), mh = video_h();   /* przycinaj do trybu */
         if (mouse_x < 0) mouse_x = 0;
-        if (mouse_x >= SCREEN_W) mouse_x = SCREEN_W - 1;
+        if (mouse_x >= mw) mouse_x = mw - 1;
         if (mouse_y < 0) mouse_y = 0;
-        if (mouse_y >= SCREEN_H) mouse_y = SCREEN_H - 1;
+        if (mouse_y >= mh) mouse_y = mh - 1;
         mouse_buttons = packet[0] & 0x07;
 
         draw_status();

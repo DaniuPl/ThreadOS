@@ -32,7 +32,9 @@ ProtonOS/
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
 │   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
-│   ├── video.c         # tryb graficzny VGA 13h (piksele, prostokąty, tekst 8x8)
+│   ├── video.c         # tryb graficzny: VGA 13h (8bpp) i VESA liniowy (32bpp),
+│   │                   #   podwójne buforowanie, tekst 8x8
+│   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
 │   ├── desktop.c       # kompozytor: okna jądra i aplikacji, drag, [x], kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
@@ -182,5 +184,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       (klik uruchamia program przez exec_spawn) - `guiapp`, `gclock`
 - [x] Lista otwartych okien na pasku zadań: podświetlenie okna z fokusem,
       klik wynosi okno na wierzch (porządek Z niezależny od slotu)
-- [ ] Wyższa rozdzielczość (VESA przez GRUB)
+- [x] Wyższa rozdzielczość VESA (640x480x32 przez DISPI + PCI), pulpit
+      z podwójnym buforowaniem (bez migotania); fallback do 320x200
 - [ ] mmap, współdzielona pamięć między procesami

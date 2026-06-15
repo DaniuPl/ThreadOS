@@ -155,6 +155,43 @@ class Qemu:
             return (px[o], px[o + 1], px[o + 2])
         return sx, sy, at
 
+    def wait_pixel(self, x, y, want, tol=40, timeout=4):
+        """Czeka, az piksel (x,y) osiagnie kolor 'want' (z tolerancja).
+        Niweluje flakiness: kompozytor hi-res odswieza wolniej niz
+        przychodza zdarzenia. Zwraca True/False."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            _, _, at = self.screen_raw()
+            p = at(x, y)
+            if all(abs(p[i] - want[i]) <= tol for i in range(3)):
+                return True
+            time.sleep(0.2)
+        return False
+
+    def screen_raw(self):
+        """Zrzut ekranu w natywnych wspolrzednych (bez skalowania) -
+        (szerokosc, wysokosc, funkcja pikseli). Do trybow VESA."""
+        ppm = tempfile.mktemp(suffix=".ppm")
+        self.cmd({"execute": "screendump", "arguments": {"filename": ppm}})
+        data = open(ppm, "rb").read()
+        os.unlink(ppm)
+        idx, fields = 2, []
+        while len(fields) < 3:
+            while data[idx] in b" \t\n\r":
+                idx += 1
+            s = idx
+            while data[idx] not in b" \t\n\r":
+                idx += 1
+            fields.append(int(data[s:idx]))
+        idx += 1
+        w, h, _ = fields
+        px = data[idx:]
+
+        def at(x, y):
+            o = (y * w + x) * 3
+            return (px[o], px[o + 1], px[o + 2])
+        return w, h, at
+
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
                 "|": "shift-backslash", "&": "shift-7"}
@@ -665,27 +702,29 @@ def main():
         def near(px, want, tol=40):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
+        # Pulpit dziala w wysokiej rozdzielczosci VESA (640x480)
+        gw, gh, _ = q4.screen_raw()
+        check(f"pulpit w trybie VESA wysokiej rozdzielczosci ({gw}x{gh})",
+              gw == 640 and gh == 480)
+
         # mysz startuje na srodku (160,100); przesun do ~(50,40)
         q4.mouse_move(-110, -60)
-        time.sleep(0.5)
-        _, _, at = q4.screen_pixels()
         check("kursor rysowany w pozycji myszy (bialy ~50,41)",
-              near(at(50, 41), (255, 255, 255)))
+              q4.wait_pixel(50, 41, (255, 255, 255)))
+        _, _, at = q4.screen_raw()
         check("tlo pulpitu (teal) z dala od kursora i okien",
               near(at(10, 150), (0, 128, 160)))
         # przesun w inne miejsce - kursor podaza
         q4.mouse_move(150, 80)
-        time.sleep(0.5)
-        _, _, at = q4.screen_pixels()
         check("kursor podaza za mysza (bialy ~200,121)",
-              near(at(200, 121), (255, 255, 255)))
+              q4.wait_pixel(200, 121, (255, 255, 255)))
         check("poprzednia pozycja kursora wyczyszczona (teal ~50,41)",
-              near(at(50, 41), (0, 128, 160)))
+              q4.wait_pixel(50, 41, (0, 128, 160)))
 
         # Tekst (czcionka 8x8): pasek tytulu z napisem "ProtonOS".
         # Pasek jasnoszary; glif czarny -> komorka litery ma i czarne,
         # i szare piksele (czyli to ksztalt, nie pelny prostokat).
-        _, _, at = q4.screen_pixels()
+        _, _, at = q4.screen_raw()
         check("pasek tytulu narysowany (jasnoszary, puste miejsce)",
               near(at(200, 4), (192, 192, 192)))
         cell = [at(2 + c, 1 + r) for r in range(8) for c in range(8)]
@@ -708,9 +747,9 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # Okna: win0 (40,60,120x70) i win1 (180,95). Mysz startuje (160,100).
-        _, _, at = q5.screen_pixels()
         check("okno 0: pasek tytulu niebieski (80,64)",
-              near(at(80, 64), (0, 0, 255)))
+              q5.wait_pixel(80, 64, (0, 0, 255)))
+        _, _, at = q5.screen_raw()
         check("okno 0: tlo szare (80,100)",
               near(at(80, 100), (224, 224, 224)))
         check("okno 1: pasek tytulu niebieski (220,99)",
@@ -722,11 +761,10 @@ def main():
         q5.mouse_button(True)
         q5.mouse_move(80, 50)
         q5.mouse_button(False)
-        time.sleep(0.4)
-        _, _, at = q5.screen_pixels()
         # nowy pasek win0 w widocznej (niezaslonietej) czesci: (150,114)
         check("okno 0 przeciagniete na nowa pozycje (pasek ~150,114)",
-              near(at(150, 114), (0, 0, 255)))
+              q5.wait_pixel(150, 114, (0, 0, 255)))
+        _, _, at = q5.screen_raw()
         check("stare miejsce okna 0 wyczyszczone (teal ~60,90)",
               near(at(60, 90), (0, 128, 160)))
         check("okno 1 nieruszone podczas przeciagania (220,99)",
@@ -746,16 +784,17 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # win0 (40,60,120x70): przycisk [x] czerwony w prawym rogu paska
-        _, _, at = q6.screen_pixels()
         check("przycisk zamkniecia [x] (czerwony, ~153,63)",
-              near(at(153, 63), (255, 0, 0)))
+              q6.wait_pixel(153, 63, (255, 0, 0)))
+        _, _, at = q6.screen_raw()
 
         # Licznik przy przycisku 'Klik' (komorka ~94,80). Klikamy 3x.
         cell_before = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
         q6.mouse_goto(68, 84)            # srodek przycisku 'Klik'
         for _ in range(3):
             q6.mouse_click()
-        _, _, at = q6.screen_pixels()
+        time.sleep(0.6)
+        _, _, at = q6.screen_raw()
         cell_after = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
         white_after = sum(1 for p in cell_after if near(p, (255, 255, 255), 10))
         check("przycisk akcji reaguje na klik (licznik zmienil cyfre)",
@@ -764,9 +803,9 @@ def main():
         # Zamkniecie okna: klik [x] okna 1 (close box ~293,99)
         q6.mouse_goto(293, 99)
         q6.mouse_click()
-        _, _, at = q6.screen_pixels()
         check("klik [x] zamyka okno (pasek win1 znika, wraca tlo)",
-              near(at(220, 99), (0, 128, 160)))
+              q6.wait_pixel(220, 99, (0, 128, 160)))
+        _, _, at = q6.screen_raw()
         # okno 0 nadal jest (klik nie ruszyl innych okien)
         check("inne okno pozostaje otwarte po zamknieciu (win0 pasek 80,64)",
               near(at(80, 64), (0, 0, 255)))
@@ -788,11 +827,10 @@ def main():
 
         # guiapp -> slot 2 (sloty 0/1 to okna jadra): okno (94,54),
         # obszar treści od (95,65). Kwadraty RGB rysowane przez syscalle.
-        _, _, at = q7.screen_pixels()
         check("aplikacja ring3 narysowala czerwony kwadrat (101,71)",
-              near(at(101, 71), (255, 0, 0)))
+              q7.wait_pixel(101, 71, (255, 0, 0)))
         check("aplikacja ring3 narysowala niebieski kwadrat (170,75)",
-              near(at(170, 75), (0, 0, 255)))
+              q7.wait_pixel(170, 75, (0, 0, 255)))
 
         # Zdarzenia: klik w cialo okna trafia do aplikacji (win_poll),
         # ktora rysuje bialy znacznik w miejscu klikniecia. Licznik
@@ -802,25 +840,31 @@ def main():
         q7.mouse_goto(150, 110)
         q7.mouse_click()
         q7.mouse_goto(60, 140)            # odsun kursor od znacznika
-        time.sleep(0.4)
-        _, _, at = q7.screen_pixels()
         check("klik dostarczony do aplikacji: znacznik w miejscu (149,109)",
-              near(at(149, 109), (255, 255, 255)))
+              q7.wait_pixel(149, 109, (255, 255, 255)))
+        _, _, at = q7.screen_raw()
         cnt_after = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
         check("aplikacja zliczyla klikniecie (licznik zmienil cyfre)",
               cnt_before != cnt_after)
 
         # Klawiatura do okna z fokusem: okno jest sfokusowane (klikniete
         # wyzej). Po wpisaniu znakow pole 'txt:' (~135,103) pokazuje tekst.
-        txt_before = [at(135 + c, 103 + r) for r in range(8) for c in range(24)]
         for k in ("a", "b", "c"):
             q7.sendkey(k)
-        time.sleep(0.4)
-        _, _, at = q7.screen_pixels()
-        txt_after = [at(135 + c, 103 + r) for r in range(8) for c in range(24)]
-        white = sum(1 for p in txt_after if near(p, (255, 255, 255), 10))
+
+        def txt_white():
+            _, _, a = q7.screen_raw()
+            return sum(1 for x in range(135, 159) for y in range(103, 111)
+                       if near(a(x, y), (255, 255, 255), 10))
+
+        appeared = False
+        for _ in range(15):          # poll: tekst pojawia sie po kilku klatkach
+            if txt_white() > 0:
+                appeared = True
+                break
+            time.sleep(0.2)
         check("klawiatura trafia do okna z fokusem (tekst pojawil sie)",
-              txt_before != txt_after and white > 0)
+              appeared)
 
         # Klik w pulpit (puste tlo) zdejmuje fokus, by 'kill 5' trafilo
         # do shella jadra, a nie do okna aplikacji
@@ -830,10 +874,8 @@ def main():
 
         # Zabicie aplikacji: kompozytor sprzata jej okno (pid 5)
         q7.type_line("kill 5")
-        time.sleep(1.0)
-        _, _, at = q7.screen_pixels()
         check("po zabiciu aplikacji jej okno zostaje sprzatniete (170,75 teal)",
-              near(at(170, 75), (0, 128, 160)))
+              q7.wait_pixel(170, 75, (0, 128, 160)))
     finally:
         q7.close()
 
@@ -843,48 +885,43 @@ def main():
     try:
         q8.wait_for("ProtonOS shell")
         q8.type_line("desktop")
-        time.sleep(0.8)
 
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        _, _, at = q8.screen_pixels()
-        check("pasek zadan: przycisk 'Menu' (niebieski, 30,190)",
-              near(at(30, 190), (0, 0, 255)))
+        # Pasek zadan na dole (640x480 -> y=468); przycisk 'Menu' x2..42
+        check("pasek zadan: przycisk 'Menu' (niebieski, 30,470)",
+              q8.wait_pixel(30, 470, (0, 0, 255)))
+        _, _, at = q8.screen_raw()
         # przed uruchomieniem aplikacji slot 2 jest pusty (tlo okna jadra)
         check("przed launchem brak okna aplikacji (101,71 nie czerwone)",
               not near(at(101, 71), (255, 0, 0)))
 
-        # Klik 'Menu' -> rozwija sie menu (wpisy nad paskiem)
-        q8.mouse_goto(10, 193)
+        # Klik 'Menu' -> rozwija sie menu (wpisy nad paskiem; guiapp y444)
+        q8.mouse_goto(10, 472)
         q8.mouse_click()
-        time.sleep(0.3)
-        _, _, at = q8.screen_pixels()
-        check("klik 'Menu' rozwija menu (wpis szary 70,170)",
-              near(at(70, 170), (224, 224, 224)))
+        check("klik 'Menu' rozwija menu (wpis szary 70,448)",
+              q8.wait_pixel(70, 448, (224, 224, 224)))
 
         # Klik wpisu 'guiapp' -> uruchamia aplikacje (jej okno sie pojawia)
-        q8.mouse_goto(40, 170)
+        q8.mouse_goto(40, 448)
         q8.mouse_click()
-        time.sleep(1.0)
-        _, _, at = q8.screen_pixels()
         check("wybor z menu uruchamia aplikacje (czerwony kwadrat 101,71)",
-              near(at(101, 71), (255, 0, 0)))
-        check("menu zamyka sie po wyborze (70,170 nie szare menu)",
-              not near(at(70, 170), (224, 224, 224)))
+              q8.wait_pixel(101, 71, (255, 0, 0)))
+        _, _, at = q8.screen_raw()
+        check("menu zamyka sie po wyborze (70,448 nie szare menu)",
+              not near(at(70, 448), (224, 224, 224)))
 
         # Lista okien na pasku zadan: przyciski Terminal/Pliki/guiapp.
         # guiapp jest na wierzchu (swiezo uruchomione) - czerwony przy (101,71).
-        # Klik przycisku 'Terminal' (slot0, j0, x46..96) wynosi je na
+        # Klik przycisku 'Terminal' (slot0, j0, x46..96, y468) wynosi je na
         # wierzch i fokusuje: czerwony guiappa zostaje zakryty oknem jadra.
-        q8.mouse_goto(60, 193)
+        q8.mouse_goto(60, 473)
         q8.mouse_click()
-        time.sleep(0.5)
-        _, _, at = q8.screen_pixels()
         check("klik przycisku na pasku wynosi okno na wierzch (czerwony zakryty)",
-              near(at(101, 71), (224, 224, 224), 15))
-        check("fokusowane okno podswietlone na pasku zadan (niebieski 90,194)",
-              near(at(90, 194), (0, 0, 255)))
+              q8.wait_pixel(101, 71, (224, 224, 224), 15))
+        check("fokusowane okno podswietlone na pasku zadan (niebieski 90,469)",
+              q8.wait_pixel(90, 469, (0, 0, 255)))
     finally:
         q8.close()
 

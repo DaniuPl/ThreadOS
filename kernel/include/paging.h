@@ -9,6 +9,10 @@
 /* Mapuje identycznościowo pierwsze 64 MiB i włącza stronicowanie */
 void paging_init(void);
 
+/* Mapuje identycznościowo zakres pamieci fizycznej (np. framebuffer
+   VESA lezacy wysoko, poza 64 MiB). Zwraca 0 albo -1. */
+int paging_map_phys(uint32_t phys, uint32_t size);
+
 /* CR3 jądra - przestrzeń adresowa wątków jądra */
 uint32_t paging_kernel_cr3(void);
 

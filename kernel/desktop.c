@@ -74,7 +74,7 @@ static int menu_open;
 static const char *menu_items[] = {"guiapp", "gclock"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
-static int taskbar_y(void) { return VIDEO_H - TB_H; }
+static int taskbar_y(void) { return video_h() - TB_H; }
 static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
 
 /* Lista przyciskow okien na pasku zadan (po przycisku Menu) */
@@ -355,8 +355,8 @@ static void handle_input(int mx, int my, int buttons)
         int ny = my - drag_dy;
         if (nx < 0) nx = 0;
         if (ny < TITLE_H) ny = TITLE_H;
-        if (nx > VIDEO_W - wins[drag_idx].w) nx = VIDEO_W - wins[drag_idx].w;
-        if (ny > VIDEO_H - wins[drag_idx].h) ny = VIDEO_H - wins[drag_idx].h;
+        if (nx > video_w() - wins[drag_idx].w) nx = video_w() - wins[drag_idx].w;
+        if (ny > video_h() - wins[drag_idx].h) ny = video_h() - wins[drag_idx].h;
         wins[drag_idx].x = nx;
         wins[drag_idx].y = ny;
     }
@@ -368,7 +368,7 @@ static void handle_input(int mx, int my, int buttons)
 static void draw_taskbar(void)
 {
     int ty = taskbar_y();
-    video_fill_rect(0, ty, VIDEO_W, TB_H, COL_BAR);
+    video_fill_rect(0, ty, video_w(), TB_H, COL_BAR);
     video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
     video_draw_string(6, ty + 3, "Menu", COL_WHITE);
 
@@ -444,7 +444,7 @@ static void desktop_on_key(char c)
 
 int desktop_win_create(int owner, int cw, int ch, const char *title)
 {
-    if (cw <= 0 || ch <= 0 || cw > VIDEO_W || ch > VIDEO_H)
+    if (cw <= 0 || ch <= 0 || cw > video_w() || ch > video_h())
         return -1;
     for (int i = 0; i < MAX_WIN; i++) {
         if (wins[i].used)
@@ -525,7 +525,10 @@ int desktop_win_poll(int winid, int owner, void *out)
 static void desktop_thread(void *arg)
 {
     (void)arg;
-    video_init();
+    /* Sprobuj wysokiej rozdzielczosci VESA (640x480x32); gdy brak
+       framebuffera - wroc do trybu 13h (320x200) */
+    if (video_init_vesa(640, 480) < 0)
+        video_init();
     video_set_palette(COL_DESK, 0, 32, 40);   /* ciemny blekit pulpitu */
     video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
@@ -551,7 +554,7 @@ static void desktop_thread(void *arg)
         video_clear(COL_DESK);
 
         /* Gorny pasek z tytulem systemu */
-        video_fill_rect(0, 0, VIDEO_W, 10, COL_BAR);
+        video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
         int ord[MAX_WIN];
@@ -562,6 +565,7 @@ static void desktop_thread(void *arg)
         draw_taskbar();
         draw_cursor(mx, my);
 
+        video_present();                      /* gotowa klatka -> ekran */
         task_sleep(30);                       /* ~33 klatek/s */
     }
 }

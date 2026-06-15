@@ -1,34 +1,43 @@
-/* Sterownik trybu graficznego VGA 13h (320x200, 256 kolorow)
+/* Sterownik trybu graficznego: VGA 13h (320x200x8) albo VESA liniowy
+ * (np. 640x480x32) przez interfejs Bochs/QEMU DISPI.
  *
- * W trybie chronionym nie mamy BIOS-u, wiec tryb ustawiamy bezposrednio
- * programujac rejestry VGA standardowymi wartosciami dla trybu 13h
- * (Misc, Sequencer, CRTC, Graphics Controller, Attribute Controller).
- * Framebuffer to liniowy obszar 320*200 bajtow pod 0xA0000 - kazdy bajt
- * to indeks koloru w palecie DAC. 0xA0000 lezy w pierwszym MiB, wiec
- * jest juz w mapowaniu identycznosciowym jadra.
+ * Aby kod pulpitu pozostal niezalezny od trybu, rysuje on indeksami
+ * palety (0..255). W trybie 8bpp indeks trafia wprost do bufora i do
+ * DAC; w trybie 32bpp trzymamy programowa palete index->RGB i piszemy
+ * 32-bitowy kolor. Framebuffer 13h jest pod 0xA0000 (w mapowaniu
+ * jadra), a liniowy VESA - pod adresem z PCI (mapowany osobno).
  */
 
 #include "include/video.h"
 #include "include/font8x8.h"
+#include "include/pci.h"
+#include "include/paging.h"
+#include "include/pmm.h"
+#include "include/string.h"
 #include "include/io.h"
 
-static volatile uint8_t *const fb = (uint8_t *)0xA0000;
+/* Stan biezacego trybu. Rysujemy do 'fb' (bufor roboczy); 'front' to
+   widoczny framebuffer. Gdy sa rozne (podwojne buforowanie), gotowa
+   klatke przenosi video_present() - to usuwa migotanie i rozrywanie. */
+static volatile uint8_t *fb = (uint8_t *)0xA0000;
+static volatile uint8_t *front = (uint8_t *)0xA0000;
+static int vid_w = 320, vid_h = 200;
+static int vid_pitch = 320;          /* bajtow na wiersz */
+static int vid_bpp = 8;
+static uint32_t palette_rgb[256];    /* programowa paleta (0x00RRGGBB) */
 
-/* Standardowe wartosci rejestrow trybu 13h: Misc, 5x SEQ, 25x CRTC,
-   9x GC, 21x AC (kolejnosc jak w write_regs ponizej). */
+int video_w(void) { return vid_w; }
+int video_h(void) { return vid_h; }
+
+/* --- Tryb 13h (rejestry VGA) --- */
 static uint8_t mode13[] = {
-    /* MISC */
     0x63,
-    /* SEQ */
     0x03, 0x01, 0x0F, 0x00, 0x0E,
-    /* CRTC */
     0x5F, 0x4F, 0x50, 0x82, 0x54, 0x80, 0xBF, 0x1F,
     0x00, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x9C, 0x0E, 0x8F, 0x28, 0x40, 0x96, 0xB9, 0xA3,
     0xFF,
-    /* GC */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x05, 0x0F, 0xFF,
-    /* AC */
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
     0x41, 0x00, 0x0F, 0x00, 0x00,
@@ -36,70 +45,131 @@ static uint8_t mode13[] = {
 
 static void write_regs(uint8_t *r)
 {
-    outb(0x3C2, *r++);                       /* Misc output */
-
-    for (uint8_t i = 0; i < 5; i++) {        /* Sequencer */
+    outb(0x3C2, *r++);
+    for (uint8_t i = 0; i < 5; i++) {
         outb(0x3C4, i);
         outb(0x3C5, *r++);
     }
-
-    /* Odblokuj rejestry CRTC (wyczysc bit ochrony w CR11) */
     outb(0x3D4, 0x11);
     outb(0x3D5, inb(0x3D5) & 0x7F);
-
-    for (uint8_t i = 0; i < 25; i++) {       /* CRTC */
+    for (uint8_t i = 0; i < 25; i++) {
         outb(0x3D4, i);
         outb(0x3D5, *r++);
     }
-
-    for (uint8_t i = 0; i < 9; i++) {        /* Graphics Controller */
+    for (uint8_t i = 0; i < 9; i++) {
         outb(0x3CE, i);
         outb(0x3CF, *r++);
     }
-
-    for (uint8_t i = 0; i < 21; i++) {       /* Attribute Controller */
-        inb(0x3DA);                          /* reset zatrzasku indeks/dane */
+    for (uint8_t i = 0; i < 21; i++) {
+        inb(0x3DA);
         outb(0x3C0, i);
         outb(0x3C0, *r++);
     }
-
-    inb(0x3DA);                              /* odblokuj palete, wlacz obraz */
+    inb(0x3DA);
     outb(0x3C0, 0x20);
 }
 
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b)
 {
-    outb(0x3C8, idx);
-    outb(0x3C9, r);                          /* skladowe 6-bitowe (0..63) */
-    outb(0x3C9, g);
-    outb(0x3C9, b);
+    /* skladowe 6-bitowe (0..63) -> 8-bitowe w programowej palecie */
+    palette_rgb[idx] = ((uint32_t)((r << 2) | (r >> 4)) << 16) |
+                       ((uint32_t)((g << 2) | (g >> 4)) << 8) |
+                       (uint32_t)((b << 2) | (b >> 4));
+    if (vid_bpp == 8) {
+        outb(0x3C8, idx);
+        outb(0x3C9, r);
+        outb(0x3C9, g);
+        outb(0x3C9, b);
+    }
+}
+
+static void set_default_palette(void)
+{
+    video_set_palette(0, 0, 0, 0);
+    video_set_palette(1, 63, 0, 0);
+    video_set_palette(2, 0, 63, 0);
+    video_set_palette(3, 0, 0, 63);
+    video_set_palette(4, 63, 63, 63);
+    video_set_palette(5, 63, 63, 0);
 }
 
 void video_init(void)
 {
+    vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
+    fb = front = (uint8_t *)0xA0000;     /* bez podwojnego buforowania */
     write_regs(mode13);
-
-    /* Podstawowa paleta: kilka czytelnych kolorow na ustalonych indeksach */
-    video_set_palette(0, 0, 0, 0);           /* czarny */
-    video_set_palette(1, 63, 0, 0);          /* czerwony */
-    video_set_palette(2, 0, 63, 0);          /* zielony */
-    video_set_palette(3, 0, 0, 63);          /* niebieski */
-    video_set_palette(4, 63, 63, 63);        /* bialy */
-    video_set_palette(5, 63, 63, 0);         /* zolty */
-
+    set_default_palette();
     video_clear(0);
+}
+
+/* --- Tryb VESA liniowy (Bochs/QEMU DISPI) --- */
+#define VBE_INDEX 0x01CE
+#define VBE_DATA  0x01CF
+
+static void dispi(uint16_t idx, uint16_t val)
+{
+    outw(VBE_INDEX, idx);
+    outw(VBE_DATA, val);
+}
+
+int video_init_vesa(int w, int h)
+{
+    uint32_t lfb = pci_find_vga_lfb();
+    if (!lfb)
+        return -1;
+    if (paging_map_phys(lfb, (uint32_t)w * h * 4) < 0)
+        return -1;
+
+    dispi(4, 0x00);          /* wylacz przed zmiana trybu */
+    dispi(1, (uint16_t)w);   /* XRES */
+    dispi(2, (uint16_t)h);   /* YRES */
+    dispi(3, 32);            /* BPP */
+    dispi(4, 0x41);          /* ENABLED | LFB */
+
+    vid_w = w; vid_h = h; vid_pitch = w * 4; vid_bpp = 32;
+    front = (uint8_t *)lfb;
+
+    /* Bufor roboczy w RAM (podwojne buforowanie - bez migotania) */
+    uint32_t bytes = (uint32_t)w * h * 4;
+    uint32_t pages = (bytes + 4095) / 4096;
+    uint32_t back = pmm_alloc_contiguous(pages);
+    fb = back ? (uint8_t *)back : front;   /* bez RAM - rysuj wprost do LFB */
+
+    set_default_palette();
+    video_clear(0);
+    video_present();
+    return 0;
+}
+
+void video_present(void)
+{
+    if (fb != front)
+        memcpy((void *)front, (const void *)fb, (uint32_t)vid_h * vid_pitch);
+}
+
+/* --- Rysowanie (niezalezne od trybu) --- */
+
+void video_putpixel(int x, int y, uint8_t color)
+{
+    if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
+        return;
+    if (vid_bpp == 8)
+        fb[y * vid_pitch + x] = color;
+    else
+        *(volatile uint32_t *)(fb + y * vid_pitch + x * 4) = palette_rgb[color];
 }
 
 void video_clear(uint8_t color)
 {
-    for (int i = 0; i < VIDEO_W * VIDEO_H; i++)
-        fb[i] = color;
-}
-
-void video_putpixel(int x, int y, uint8_t color)
-{
-    if ((unsigned)x < VIDEO_W && (unsigned)y < VIDEO_H)
-        fb[y * VIDEO_W + x] = color;
+    if (vid_bpp == 8) {
+        for (int i = 0; i < vid_pitch * vid_h; i++)
+            fb[i] = color;
+    } else {
+        uint32_t c = palette_rgb[color];
+        volatile uint32_t *p = (volatile uint32_t *)fb;
+        for (int i = 0; i < vid_w * vid_h; i++)
+            p[i] = c;
+    }
 }
 
 void video_fill_rect(int x, int y, int w, int h, uint8_t color)
@@ -116,7 +186,7 @@ void video_draw_char(int x, int y, char c, uint8_t color)
     const uint8_t *glyph = font8x8[c - 0x20];
     for (int row = 0; row < 8; row++)
         for (int col = 0; col < 8; col++)
-            if (glyph[row] & (1 << col))      /* bit 0 = lewa kolumna */
+            if (glyph[row] & (1 << col))
                 video_putpixel(x + col, y + row, color);
 }
 

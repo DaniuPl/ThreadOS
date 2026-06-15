@@ -10,6 +10,18 @@
    framebuffer pod 0xA0000) i ustawia podstawowa palete. */
 void video_init(void);
 
+/* Tryb VESA liniowy (Bochs/QEMU DISPI), 32 bpp. Zwraca 0 albo -1
+   (brak framebuffera) - wtedy warto wrocic do video_init(). */
+int video_init_vesa(int w, int h);
+
+/* Wymiary biezacego trybu */
+int video_w(void);
+int video_h(void);
+
+/* Przenosi gotowa klatke z bufora roboczego na ekran (podwojne
+   buforowanie). W trybie bez bufora roboczego nic nie robi. */
+void video_present(void);
+
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b);
 void video_clear(uint8_t color);
 void video_putpixel(int x, int y, uint8_t color);
