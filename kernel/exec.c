@@ -19,6 +19,7 @@
 #include "include/fs.h"
 #include "include/kfile.h"
 #include "include/pipe.h"
+#include "include/shm.h"
 #include "include/printk.h"
 
 #define USER_STACK_TOP 0xC0000000u
@@ -307,6 +308,33 @@ uint32_t process_mmap(uint32_t size)
         if (!page_frame_for(dir, va))
             return 0;
     }
+    task_set_mmap_next(end);
+    return base;
+}
+
+/* Mapuje region pamieci wspoldzielonej (po kluczu) do przestrzeni
+   biezacego procesu i zwraca jego adres wirtualny albo 0. Rozne procesy
+   wskazuja te same ramki fizyczne -> widza te sama pamiec. */
+uint32_t process_shm(int key, uint32_t size)
+{
+    uint32_t base = task_mmap_next();
+    if (!base)
+        return 0;
+    uint32_t phys = shm_get(key, size);
+    if (!phys)
+        return 0;
+
+    uint32_t pages = (size ? size : 4096);
+    pages = (pages + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t end = base + pages * PAGE_SIZE;
+    if (end > MMAP_MAX || end < base)
+        return 0;
+
+    uint32_t dir = task_current_cr3();
+    for (uint32_t i = 0; i < pages; i++)
+        if (!paging_map_user_in(dir, base + i * PAGE_SIZE,
+                                phys + i * PAGE_SIZE))
+            return 0;
     task_set_mmap_next(end);
     return base;
 }

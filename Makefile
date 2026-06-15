@@ -39,7 +39,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/cp.elf $(BUILD)/user/mv.elf \
              $(BUILD)/user/mkdir.elf $(BUILD)/user/spin.elf \
              $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
-             $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf
+             $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
+             $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -72,7 +73,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mouse.o \
         $(BUILD)/video.o \
         $(BUILD)/desktop.o \
-        $(BUILD)/pci.o
+        $(BUILD)/pci.o \
+        $(BUILD)/shm.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -117,7 +119,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    cp=$(BUILD)/user/cp.elf mv=$(BUILD)/user/mv.elf \
 	    mkdir=$(BUILD)/user/mkdir.elf spin=$(BUILD)/user/spin.elf \
 	    guiapp=$(BUILD)/user/guiapp.elf gclock=$(BUILD)/user/gclock.elf \
-	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf
+	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf \
+	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

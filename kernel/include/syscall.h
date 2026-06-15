@@ -28,6 +28,7 @@
 #define SYS_WIN_TEXT   23 /* ebx=winid, ecx=&{x,y,color,str} -> 0/-1 */
 #define SYS_WIN_POLL   24 /* ebx=winid, ecx=&event -> 1 (jest), 0 (brak), -1 */
 #define SYS_MMAP       25 /* ebx=rozmiar -> adres albo 0 */
+#define SYS_SHM        26 /* ebx=klucz, ecx=rozmiar -> adres wspoldzielony */
 
 #define SYSCALL_VECTOR 0x80
 

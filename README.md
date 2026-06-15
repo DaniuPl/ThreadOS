@@ -35,6 +35,7 @@ ProtonOS/
 │   ├── video.c         # tryb graficzny: VGA 13h (8bpp) i VESA liniowy (32bpp),
 │   │                   #   podwójne buforowanie, tekst 8x8
 │   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
+│   ├── shm.c           # pamięć współdzielona między procesami (po kluczu)
 │   ├── desktop.c       # kompozytor: okna jądra i aplikacji, drag, [x], kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
@@ -192,4 +193,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       zwalniana z przestrzenią adresową; `run mmaptest`
 - [x] Menedżer plików GUI (`gfiles`) - lista plików z PFS + kliknięcie
       nazwy otwiera plik i pokazuje treść (FS -> klik -> read -> okno)
-- [ ] Pamięć współdzielona między procesami
+- [x] Pamięć współdzielona między procesami (`sys_shm` po kluczu) -
+      dwa procesy widzą tę samą pamięć (`shmtest` + `shmread`)
+- [ ] Ikony na pulpicie
+- [ ] Wskaźnik zasobów (RAM/uptime na żywo)

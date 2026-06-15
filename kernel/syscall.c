@@ -147,6 +147,9 @@ void syscall_handler(struct regs *r)
     case SYS_MMAP:
         r->eax = process_mmap(r->ebx);
         break;
+    case SYS_SHM:
+        r->eax = process_shm((int)r->ebx, r->ecx);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

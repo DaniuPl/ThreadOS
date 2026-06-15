@@ -25,4 +25,7 @@ uint32_t process_sbrk(int32_t increment);
 /* mmap: mapuje 'size' bajtow swiezej pamieci procesu, zwraca adres albo 0 */
 uint32_t process_mmap(uint32_t size);
 
+/* shm: mapuje region pamieci wspoldzielonej (po kluczu); adres albo 0 */
+uint32_t process_shm(int key, uint32_t size);
+
 #endif

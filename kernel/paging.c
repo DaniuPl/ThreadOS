@@ -12,6 +12,7 @@
 #include "include/paging.h"
 #include "include/pmm.h"
 #include "include/string.h"
+#include "include/shm.h"
 
 #define PTE_PRESENT 0x1
 #define PTE_WRITE   0x2
@@ -134,9 +135,15 @@ void paging_destroy_address_space(uint32_t dir_phys)
         if (!(dir[i] & PTE_PRESENT) || dir[i] == page_directory[i])
             continue;
         uint32_t *pt = (uint32_t *)(dir[i] & ~0xFFFu);
-        for (int j = 0; j < 1024; j++)
-            if (pt[j] & PTE_PRESENT)
-                pmm_free_frame(pt[j] & ~0xFFFu);
+        for (int j = 0; j < 1024; j++) {
+            if (!(pt[j] & PTE_PRESENT))
+                continue;
+            uint32_t frame = pt[j] & ~0xFFFu;
+            /* Ramek pamieci wspoldzielonej nie zwalniamy - moga ich
+               uzywac inne procesy */
+            if (!shm_is_shared(frame))
+                pmm_free_frame(frame);
+        }
         pmm_free_frame((uint32_t)pt);
     }
     pmm_free_frame(dir_phys);

@@ -381,6 +381,14 @@ def main():
         check(f"brak wycieku ramek po mmaptest ({used_before} -> {used_after_mm})",
               used_after_mm is not None and used_after_mm == used_before)
 
+        # 'run shmtest': pamiec wspoldzielona miedzy procesami. shmtest
+        # zapisuje 12345 i uruchamia shmread (osobny proces), ktory czyta
+        # te sama pamiec - dowodem jest jego linia z odczytana wartoscia.
+        q.type_line("run shmtest")
+        screen = q.wait_for("[shmread] wartosc=")
+        check("pamiec wspoldzielona: inny proces czyta zapisana wartosc",
+              "[shmread] wartosc=12345" in screen)
+
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")

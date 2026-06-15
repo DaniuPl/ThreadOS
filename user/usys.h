@@ -30,6 +30,7 @@
 #define SYS_WIN_TEXT   23
 #define SYS_WIN_POLL   24
 #define SYS_MMAP       25
+#define SYS_SHM        26
 
 #define FS_NAME_MAX  23
 
@@ -156,6 +157,17 @@ static inline void *sys_mmap(uint32_t size)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_MMAP), "b"(size)
+                     : "memory");
+    return ret;
+}
+
+/* shm: pamiec wspoldzielona po kluczu; ten sam klucz = ta sama pamiec */
+static inline void *sys_shm(int key, uint32_t size)
+{
+    void *ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SHM), "b"(key), "c"(size)
                      : "memory");
     return ret;
 }
