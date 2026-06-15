@@ -1005,6 +1005,29 @@ def main():
         if os.path.exists(gdisk):
             os.unlink(gdisk)
 
+    # --- Ikony na pulpicie (osobny boot) ---
+    print("--- pulpit: ikony ---")
+    q10 = Qemu(KERNEL, INITRD)
+    try:
+        q10.wait_for("ProtonOS shell")
+        q10.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # ikona 'App' (kafelek 8,20,32x24) pomaranczowa
+        check("ikona pulpitu narysowana (pomaranczowy kafelek 20,30)",
+              q10.wait_pixel(20, 30, (255, 162, 0)))
+        # klik ikony uruchamia aplikacje (guiapp -> czerwony kwadrat)
+        q10.mouse_goto(24, 32)
+        q10.mouse_click()
+        q10.mouse_goto(300, 300)         # odsun kursor
+        check("klik ikony uruchamia aplikacje (czerwony kwadrat 101,71)",
+              q10.wait_pixel(101, 71, (255, 0, 0)))
+    finally:
+        q10.close()
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")

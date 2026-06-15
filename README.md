@@ -195,5 +195,5 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       nazwy otwiera plik i pokazuje treść (FS -> klik -> read -> okno)
 - [x] Pamięć współdzielona między procesami (`sys_shm` po kluczu) -
       dwa procesy widzą tę samą pamięć (`shmtest` + `shmread`)
-- [ ] Ikony na pulpicie
+- [x] Ikony na pulpicie - klikalne kafelki uruchamiające aplikacje
 - [ ] Wskaźnik zasobów (RAM/uptime na żywo)

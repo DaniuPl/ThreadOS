@@ -26,8 +26,24 @@
 #define COL_BAR    7      /* gorny pasek (jasnoszary) */
 #define COL_WIN    8      /* tlo okna (szary) */
 #define COL_TBBTN  9      /* przycisk okna na pasku zadan (ciemnoszary) */
+#define COL_ICON   10     /* ikona pulpitu (pomaranczowa) */
 
 #define TITLE_H 10
+
+/* Ikony pulpitu: klikniecie uruchamia aplikacje */
+#define ICON_W 32
+#define ICON_H 24
+struct icon {
+    int x, y;
+    const char *label;
+    const char *app;
+};
+static const struct icon icons[] = {
+    {8, 20, "App", "guiapp"},
+    {8, 60, "Zegar", "gclock"},
+    {8, 100, "Pliki", "gfiles"},
+};
+#define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
 #define COL_RED    1      /* przycisk zamkniecia */
 
@@ -343,8 +359,16 @@ static void handle_input(int mx, int my, int buttons)
                 break;            /* pochlon - nie przebijaj do nizszych */
             }
         }
-        if (!hit)
-            focus_idx = -1;       /* klik w pulpit = utrata fokusu */
+        if (!hit) {
+            /* Klik w tlo pulpitu: ikona uruchamia aplikacje, inaczej
+               utrata fokusu */
+            focus_idx = -1;
+            for (int k = 0; k < ICON_N; k++)
+                if (in_rect(mx, my, icons[k].x, icons[k].y, ICON_W, ICON_H)) {
+                    exec_spawn(icons[k].app);
+                    break;
+                }
+        }
     }
 
     if (!pressed)
@@ -365,6 +389,18 @@ static void handle_input(int mx, int my, int buttons)
 }
 
 /* Rysuje pasek zadan na dole i (jesli otwarte) menu uruchamiania */
+/* Rysuje ikony na tle pulpitu (kafelek + podpis) */
+static void draw_icons(void)
+{
+    for (int k = 0; k < ICON_N; k++) {
+        const struct icon *ic = &icons[k];
+        video_fill_rect(ic->x, ic->y, ICON_W, ICON_H, COL_ICON);
+        video_fill_rect(ic->x, ic->y, ICON_W, 1, COL_BLACK);
+        video_fill_rect(ic->x, ic->y + ICON_H - 1, ICON_W, 1, COL_BLACK);
+        video_draw_string(ic->x, ic->y + ICON_H + 2, ic->label, COL_WHITE);
+    }
+}
+
 static void draw_taskbar(void)
 {
     int ty = taskbar_y();
@@ -533,6 +569,7 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
     video_set_palette(COL_TBBTN, 26, 26, 26); /* ciemnoszary przycisk paska */
+    video_set_palette(COL_ICON, 63, 40, 0);   /* pomaranczowa ikona */
 
     /* Dwa okna jadra (bez wlasciciela, bez bufora treści) */
     wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
@@ -556,6 +593,8 @@ static void desktop_thread(void *arg)
         /* Gorny pasek z tytulem systemu */
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
+
+        draw_icons();                         /* ikony na tle (pod oknami) */
 
         int ord[MAX_WIN];
         int n = zorder(ord);
