@@ -281,6 +281,7 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
 
 #define WEV_NONE  0
 #define WEV_CLICK 1
+#define WEV_KEY   2
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* wspolrzedne wzgledem obszaru treści */

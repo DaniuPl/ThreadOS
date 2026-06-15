@@ -14,6 +14,7 @@
 #include "include/heap.h"
 #include "include/string.h"
 #include "include/font8x8.h"
+#include "include/keyboard.h"
 #include "include/io.h"
 
 /* Indeksy palety pulpitu (ustawiane w desktop_thread) */
@@ -36,6 +37,7 @@ struct wevent {
 };
 #define WEV_NONE  0
 #define WEV_CLICK 1
+#define WEV_KEY   2
 #define WEV_QLEN  8
 
 struct window {
@@ -58,6 +60,22 @@ static struct window wins[MAX_WIN];
 static int drag_idx = -1;
 static int drag_dx, drag_dy;
 static int prev_pressed;    /* poprzedni stan LPM - do wykrycia klikniecia */
+static int focus_idx = -1;  /* okno z fokusem klawiatury */
+
+/* Wstawia zdarzenie do kolejki okna (chronione - wolane z kompozytora,
+   IRQ klawiatury i posrednio z syscalla) */
+static void win_enqueue(struct window *w, int type, int x, int y, int val)
+{
+    if (!w->content)
+        return;
+    uint32_t flags = irq_save();
+    int next = (w->ev_head + 1) % WEV_QLEN;
+    if (next != w->ev_tail) {
+        w->evq[w->ev_head] = (struct wevent){type, x, y, val};
+        w->ev_head = next;
+    }
+    irq_restore(flags);
+}
 
 #define CLOSE_SZ 8          /* przycisk [x] w prawym rogu paska */
 #define BTN_W 40
@@ -202,6 +220,7 @@ static void handle_input(int mx, int my, int buttons)
     int pressed = buttons & 0x01;
 
     if (pressed && !prev_pressed) {     /* zbocze wcisniecia = klik */
+        int hit = 0;
         for (int i = MAX_WIN - 1; i >= 0; i--) {
             struct window *w = &wins[i];
             if (!w->used)
@@ -209,38 +228,39 @@ static void handle_input(int mx, int my, int buttons)
             /* przycisk zamkniecia [x] */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->used = 0;
+                hit = 1;
                 break;
             }
             /* przycisk akcji w oknie */
             if (w->has_button &&
                 in_rect(mx, my, btn_x(w), btn_y(w), BTN_W, BTN_H)) {
                 w->counter++;
+                focus_idx = i;
+                hit = 1;
                 break;
             }
-            /* pasek tytulu -> rozpocznij przeciaganie */
+            /* pasek tytulu -> rozpocznij przeciaganie (i fokus) */
             if (on_titlebar(w, mx, my)) {
                 drag_idx = i;
                 drag_dx = mx - w->x;
                 drag_dy = my - w->y;
+                focus_idx = i;
+                hit = 1;
                 break;
             }
-            /* klik w cialo okna aplikacji -> zdarzenie do procesu */
+            /* klik w cialo okna aplikacji -> fokus + zdarzenie do procesu */
             if (in_rect(mx, my, w->x, w->y, w->w, w->h)) {
-                if (w->content) {
-                    int cx = mx - (w->x + 1);
-                    int cy = my - (w->y + TITLE_H + 1);
-                    if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch) {
-                        int next = (w->ev_head + 1) % WEV_QLEN;
-                        if (next != w->ev_tail) {  /* kolejka nie pelna */
-                            w->evq[w->ev_head] = (struct wevent){
-                                WEV_CLICK, cx, cy, buttons & 0x07};
-                            w->ev_head = next;
-                        }
-                    }
-                }
+                focus_idx = i;
+                hit = 1;
+                int cx = mx - (w->x + 1);
+                int cy = my - (w->y + TITLE_H + 1);
+                if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch)
+                    win_enqueue(w, WEV_CLICK, cx, cy, buttons & 0x07);
                 break;            /* pochlon - nie przebijaj do nizszych */
             }
         }
+        if (!hit)
+            focus_idx = -1;       /* klik w pulpit = utrata fokusu */
     }
 
     if (!pressed)
@@ -277,7 +297,25 @@ static void reap_windows(void)
             kfree(wins[i].content);
             wins[i].content = (void *)0;
             wins[i].used = 0;
+            if (focus_idx == i)
+                focus_idx = -1;
         }
+    }
+}
+
+/* Handler klawiatury pulpitu: klawisz trafia do okna aplikacji z fokusem.
+   Gdy nic nie ma fokusu, przekazujemy klawisz do poprzedniego handlera
+   (shell jadra) - dzieki temu komendy ('run ...') dalej dzialaja.
+   Biegnie w kontekscie IRQ1. */
+static keyboard_char_handler_t prev_key_handler;
+
+static void desktop_on_key(char c)
+{
+    if (focus_idx >= 0 && focus_idx < MAX_WIN && wins[focus_idx].used &&
+        wins[focus_idx].content) {
+        win_enqueue(&wins[focus_idx], WEV_KEY, 0, 0, (unsigned char)c);
+    } else if (prev_key_handler) {
+        prev_key_handler(c);
     }
 }
 
@@ -402,5 +440,7 @@ static void desktop_thread(void *arg)
 
 void desktop_start(void)
 {
+    prev_key_handler = keyboard_get_handler();   /* zachowaj shell jadra */
+    keyboard_set_handler(desktop_on_key);        /* klawisze -> okno z fokusem */
     task_create("desktop", desktop_thread, (void *)0);
 }

@@ -51,6 +51,11 @@ void keyboard_set_handler(keyboard_char_handler_t handler)
     on_char = handler;
 }
 
+keyboard_char_handler_t keyboard_get_handler(void)
+{
+    return on_char;
+}
+
 /* Dostarczenie znaku - kontekst IRQ (IF=0) */
 static void deliver(char c)
 {

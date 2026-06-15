@@ -810,6 +810,24 @@ def main():
         check("aplikacja zliczyla klikniecie (licznik zmienil cyfre)",
               cnt_before != cnt_after)
 
+        # Klawiatura do okna z fokusem: okno jest sfokusowane (klikniete
+        # wyzej). Po wpisaniu znakow pole 'txt:' (~135,103) pokazuje tekst.
+        txt_before = [at(135 + c, 103 + r) for r in range(8) for c in range(24)]
+        for k in ("a", "b", "c"):
+            q7.sendkey(k)
+        time.sleep(0.4)
+        _, _, at = q7.screen_pixels()
+        txt_after = [at(135 + c, 103 + r) for r in range(8) for c in range(24)]
+        white = sum(1 for p in txt_after if near(p, (255, 255, 255), 10))
+        check("klawiatura trafia do okna z fokusem (tekst pojawil sie)",
+              txt_before != txt_after and white > 0)
+
+        # Klik w pulpit (puste tlo) zdejmuje fokus, by 'kill 5' trafilo
+        # do shella jadra, a nie do okna aplikacji
+        q7.mouse_goto(60, 140)
+        q7.mouse_click()
+        time.sleep(0.2)
+
         # Zabicie aplikacji: kompozytor sprzata jej okno (pid 5)
         q7.type_line("kill 5")
         time.sleep(1.0)

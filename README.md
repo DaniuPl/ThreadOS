@@ -175,5 +175,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       jego bufor i sprząta okno po śmierci procesu (`run guiapp`)
 - [x] Dostarczanie zdarzeń do aplikacji: kliknięcie w okno trafia do
       procesu przez kolejkę zdarzeń (`win_poll`), aplikacja reaguje
-- [ ] Zdarzenia klawiatury do okna z fokusem
+- [x] Zdarzenia klawiatury do okna z fokusem (klik fokusuje; klik w
+      pulpit zdejmuje fokus i klawisze wracają do shella jądra)
+- [ ] Pasek zadań i menu uruchamiania aplikacji
 - [ ] mmap, współdzielona pamięć między procesami
