@@ -67,7 +67,7 @@ ProtonOS/
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
 │   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
 │   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
-│   ├── gfiles.c        # menedżer plików GUI - listuje pliki z PFS w oknie
+│   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
@@ -190,6 +190,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       z podwójnym buforowaniem (bez migotania); fallback do 320x200
 - [x] Syscall `mmap` - anonimowa pamięć procesu (świeża, zerowana),
       zwalniana z przestrzenią adresową; `run mmaptest`
-- [x] Menedżer plików GUI (`gfiles`) - aplikacja ring 3 listująca pliki
-      z dysku PFS w oknie (system plików spięty z UI)
+- [x] Menedżer plików GUI (`gfiles`) - lista plików z PFS + kliknięcie
+      nazwy otwiera plik i pokazuje treść (FS -> klik -> read -> okno)
 - [ ] Pamięć współdzielona między procesami

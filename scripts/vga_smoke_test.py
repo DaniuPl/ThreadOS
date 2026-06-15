@@ -972,6 +972,26 @@ def main():
             time.sleep(0.2)
         check("menedzer plikow GUI listuje plik z dysku (FS -> okno)",
               appeared)
+
+        # Klik nazwy pliku -> podglad tresci. Wiersz0 przy content(.,16)
+        # -> ekran y81. Po kliknieciu panel 'tresc:' (content y102 ->
+        # ekran y167) pokazuje zawartosc. Kursor odsuwamy przed zrzutem.
+        q9.mouse_goto(115, 83)
+        q9.mouse_click()
+        q9.mouse_goto(60, 300)
+
+        def preview_white():
+            _, _, a = q9.screen_raw()
+            return sum(1 for x in range(99, 200) for y in range(167, 175)
+                       if near(a(x, y), (255, 255, 255), 10))
+        prev = False
+        for _ in range(15):
+            if preview_white() > 0:
+                prev = True
+                break
+            time.sleep(0.2)
+        check("klik pliku w gfiles pokazuje jego tresc (open+read z ring3)",
+              prev)
     finally:
         q9.close()
         if os.path.exists(gdisk):
