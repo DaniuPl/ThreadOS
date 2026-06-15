@@ -21,6 +21,7 @@
 #include "include/rtc.h"
 #include "include/mouse.h"
 #include "include/video.h"
+#include "include/desktop.h"
 #include "include/io.h"
 
 #define LINE_MAX 80
@@ -50,6 +51,7 @@ static void cmd_help(void)
            "  date    - data i godzina z RTC\n"
            "  mouse   - pozycja i przyciski myszy\n"
            "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
+           "  desktop - graficzny pulpit z kursorem myszy\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -179,6 +181,8 @@ static void run_command(char *cmd)
         cmd_mouse();
     else if (!strcmp(cmd, "gfx"))
         cmd_gfx();
+    else if (!strcmp(cmd, "desktop"))
+        desktop_start();
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))

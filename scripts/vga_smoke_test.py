@@ -643,6 +643,36 @@ def main():
     finally:
         q3.close()
 
+    # --- Pulpit graficzny: kursor myszy (osobny boot) ---
+    print("--- pulpit: kursor myszy ---")
+    q4 = Qemu(KERNEL, INITRD)
+    try:
+        q4.wait_for("ProtonOS shell")
+        q4.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=40):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # mysz startuje na srodku (160,100); przesun do ~(50,40)
+        q4.mouse_move(-110, -60)
+        time.sleep(0.5)
+        _, _, at = q4.screen_pixels()
+        check("kursor rysowany w pozycji myszy (bialy ~50,41)",
+              near(at(50, 41), (255, 255, 255)))
+        check("tlo pulpitu (teal) z dala od kursora",
+              near(at(220, 150), (0, 128, 160)))
+        # przesun w inne miejsce - kursor podaza
+        q4.mouse_move(150, 80)
+        time.sleep(0.5)
+        _, _, at = q4.screen_pixels()
+        check("kursor podaza za mysza (bialy ~200,121)",
+              near(at(200, 121), (255, 255, 255)))
+        check("poprzednia pozycja kursora wyczyszczona (teal ~50,41)",
+              near(at(50, 41), (0, 128, 160)))
+    finally:
+        q4.close()
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
