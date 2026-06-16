@@ -70,6 +70,7 @@ struct window {
     uint8_t *content;      /* bufor treści aplikacji (NULL = okno jadra) */
     int cw, ch;            /* wymiary obszaru treści */
     int z;                 /* porzadek rysowania (wyzszy = na wierzchu) */
+    int minimized;         /* czy zwiniete (ukryte, widoczne na pasku) */
     struct wevent evq[WEV_QLEN];  /* kolejka zdarzen dla aplikacji */
     int ev_head, ev_tail;
 };
@@ -79,6 +80,7 @@ static struct window wins[MAX_WIN];
 
 /* Stan przeciagania: indeks okna i uchwyt (offset kursora w oknie) */
 static int drag_idx = -1;
+static int resize_idx = -1;
 static int drag_dx, drag_dy;
 static int prev_pressed;    /* poprzedni stan LPM - do wykrycia klikniecia */
 static int focus_idx = -1;  /* okno z fokusem klawiatury */
@@ -141,9 +143,12 @@ static void win_enqueue(struct window *w, int type, int x, int y, int val)
     irq_restore(flags);
 }
 
-#define CLOSE_SZ 8          /* przycisk [x] w prawym rogu paska */
+#define CLOSE_SZ 8          /* przyciski paska [_] [x] */
+#define GRIP_SZ  8          /* uchwyt zmiany rozmiaru (prawy dolny rog) */
 #define BTN_W 40
 #define BTN_H 12
+#define WIN_MIN_W 60
+#define WIN_MIN_H 40
 
 static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 {
@@ -152,6 +157,10 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 
 static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
 static int close_y(const struct window *w) { return w->y + 1; }
+static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
+static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
+static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
+static int resizable(const struct window *w) { return w->content == (void *)0; }
 static int btn_x(const struct window *w)   { return w->x + 8; }
 static int btn_y(const struct window *w)    { return w->y + TITLE_H + 8; }
 
@@ -237,6 +246,8 @@ static void buf_text(struct window *w, int x, int y, const char *s, uint8_t c)
 
 static void draw_window(const struct window *win)
 {
+    if (win->minimized)            /* zwiniete - widoczne tylko na pasku */
+        return;
     /* Tlo okna z czarna ramka */
     video_fill_rect(win->x, win->y, win->w, win->h, COL_WIN);
     video_fill_rect(win->x, win->y, win->w, 1, COL_BLACK);
@@ -246,9 +257,15 @@ static void draw_window(const struct window *win)
     /* Pasek tytulu + nazwa */
     video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H, COL_TITLE);
     video_draw_string(win->x + 3, win->y + 2, win->title, COL_WHITE);
+    /* Przycisk zwijania [_] obok zamkniecia */
+    video_fill_rect(min_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
+    video_draw_char(min_x(win), close_y(win), '_', COL_WHITE);
     /* Przycisk zamkniecia [x] w prawym rogu paska */
     video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_RED);
     video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
+    /* Uchwyt zmiany rozmiaru (prawy dolny rog) dla okien jadra */
+    if (resizable(win))
+        video_fill_rect(grip_x(win), grip_y(win), GRIP_SZ, GRIP_SZ, COL_BAR);
 
     /* Opcjonalny przycisk akcji + licznik klikniec */
     if (win->has_button) {
@@ -309,6 +326,7 @@ static void handle_input(int mx, int my, int buttons)
                     continue;
                 if (in_rect(mx, my, TBL_X0 + j * TBL_W, taskbar_y(),
                             TBL_W - 2, TB_H)) {
+                    wins[i].minimized = 0;   /* przywroc, jesli zwiniete */
                     focus_idx = i;
                     raise_win(i);
                     prev_pressed = pressed;
@@ -324,9 +342,28 @@ static void handle_input(int mx, int my, int buttons)
         for (int k = n - 1; k >= 0; k--) {  /* od okna na wierzchu w dol */
             int i = ord[k];
             struct window *w = &wins[i];
+            if (w->minimized)               /* zwiniete - poza zasiegiem */
+                continue;
             /* przycisk zamkniecia [x] */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->used = 0;
+                hit = 1;
+                break;
+            }
+            /* przycisk zwijania [_] */
+            if (in_rect(mx, my, min_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
+                w->minimized = 1;
+                if (focus_idx == i)
+                    focus_idx = -1;
+                hit = 1;
+                break;
+            }
+            /* uchwyt zmiany rozmiaru (prawy dolny rog) */
+            if (resizable(w) &&
+                in_rect(mx, my, grip_x(w), grip_y(w), GRIP_SZ, GRIP_SZ)) {
+                resize_idx = i;
+                focus_idx = i;
+                raise_win(i);
                 hit = 1;
                 break;
             }
@@ -373,8 +410,10 @@ static void handle_input(int mx, int my, int buttons)
         }
     }
 
-    if (!pressed)
+    if (!pressed) {
         drag_idx = -1;
+        resize_idx = -1;
+    }
 
     if (pressed && drag_idx >= 0) {     /* w trakcie: okno podaza za kursorem */
         int nx = mx - drag_dx;
@@ -385,6 +424,18 @@ static void handle_input(int mx, int my, int buttons)
         if (ny > video_h() - wins[drag_idx].h) ny = video_h() - wins[drag_idx].h;
         wins[drag_idx].x = nx;
         wins[drag_idx].y = ny;
+    }
+
+    if (pressed && resize_idx >= 0) {   /* w trakcie: prawy dolny rog za kursorem */
+        struct window *w = &wins[resize_idx];
+        int nw = mx - w->x + 1;
+        int nh = my - w->y + 1;
+        if (nw < WIN_MIN_W) nw = WIN_MIN_W;
+        if (nh < WIN_MIN_H) nh = WIN_MIN_H;
+        if (w->x + nw > video_w()) nw = video_w() - w->x;
+        if (w->y + nh > video_h()) nh = video_h() - w->y;
+        w->w = nw;
+        w->h = nh;
     }
 
     prev_pressed = pressed;

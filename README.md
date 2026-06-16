@@ -209,5 +209,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       równe round-robin (`run prio`)
 - [x] Terminal w oknie GUI (`gterm`) - wpisz komendę, jej wyjście
       pojawia się w oknie (klawiatura -> spawn z przekierowaniem -> odczyt)
-- [ ] Zmiana rozmiaru / minimalizacja okien
+- [x] Zmiana rozmiaru / minimalizacja okien: przycisk `[_]` zwija okno
+      (zostaje na pasku zadań - klik przywraca), uchwyt w prawym dolnym
+      rogu okien jądra zmienia rozmiar przeciąganiem
 - [ ] Zapis pozycji ikon/plików na dysku

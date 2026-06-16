@@ -1129,6 +1129,54 @@ def main():
         if os.path.exists(tdisk):
             os.unlink(tdisk)
 
+    # --- Zwijanie i zmiana rozmiaru okien (osobny boot) ---
+    print("--- pulpit: minimalizacja + zmiana rozmiaru ---")
+    q13 = Qemu(KERNEL, INITRD)
+    try:
+        q13.wait_for("ProtonOS shell")
+        q13.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # win0 "Terminal" (40,60,120x70): pasek tytulu niebieski na starcie
+        check("okno 0: pasek tytulu niebieski przed zwinieciem (80,64)",
+              q13.wait_pixel(80, 64, (0, 0, 255)))
+
+        # Przycisk zwijania [_] win0: min_x = x+w-2*8-2 = 142, y=61 (8x8).
+        # Klik srodka (146,65) zwija okno -> pasek znika, wraca tlo.
+        q13.mouse_goto(146, 65)
+        q13.mouse_click()
+        q13.mouse_goto(400, 300)              # odsun kursor
+        check("zwiniete okno znika z pulpitu (pasek 80,64 -> teal)",
+              q13.wait_pixel(80, 64, (0, 128, 160)))
+
+        # Okno wciaz na pasku zadan (slot0 'Terminal', x46..96, y468).
+        # Klik przywraca je: pasek tytulu niebieski znow widoczny.
+        q13.mouse_goto(60, 473)
+        q13.mouse_click()
+        q13.mouse_goto(400, 300)
+        check("klik na pasku zadan przywraca zwiniete okno (80,64 niebieski)",
+              q13.wait_pixel(80, 64, (0, 0, 255)))
+
+        # Zmiana rozmiaru: uchwyt win0 w prawym dolnym rogu
+        # grip_x = x+w-8 = 152, grip_y = y+h-8 = 122. Przed zmiana punkt
+        # (170,140) jest poza oknem (teal). Przeciagamy uchwyt (155,125)
+        # o (+60,+40) -> okno rosnie i pokrywa (170,140).
+        _, _, at = q13.screen_raw()
+        check("przed zmiana rozmiaru punkt poza oknem (170,140 teal)",
+              near(at(170, 140), (0, 128, 160)))
+        q13.mouse_goto(155, 125)
+        q13.mouse_button(True)
+        q13.mouse_move(60, 40)
+        q13.mouse_button(False)
+        q13.mouse_goto(400, 300)
+        check("po zmianie rozmiaru okno powiekszone (170,140 szare tlo okna)",
+              q13.wait_pixel(170, 140, (224, 224, 224)))
+    finally:
+        q13.close()
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
