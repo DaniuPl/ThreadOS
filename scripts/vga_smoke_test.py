@@ -1177,6 +1177,57 @@ def main():
     finally:
         q13.close()
 
+    # --- Zapis pozycji ikon na dysku (dwa boot-y na tym samym dysku) ---
+    print("--- pulpit: zapis pozycji ikon na dysku ---")
+    idisk = tempfile.mktemp(suffix=".img")
+    with open(idisk, "wb") as f:
+        f.write(b"\0" * (1024 * 1024))
+    q14 = Qemu(KERNEL, INITRD, idisk)
+    try:
+        q14.wait_for("ProtonOS shell")
+        q14.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # ikona 'App' domyslnie (8,20,32x24) - kafelek pomaranczowy ~ (20,30)
+        check("ikona App w domyslnej pozycji (20,30 pomaranczowy)",
+              q14.wait_pixel(20, 30, (255, 162, 0)))
+
+        # Przeciagnij ikone: chwyt srodka (24,32), przesun na (416,312) z
+        # wcisnietym LPM -> ikona laduje w (400,300). Pusc.
+        q14.mouse_goto(24, 32)
+        q14.mouse_button(True)
+        q14.mouse_goto(416, 312)
+        q14.mouse_button(False)
+        q14.mouse_goto(100, 250)          # odsun kursor od ikony
+        check("ikona przeniesiona na nowa pozycje (410,310 pomaranczowy)",
+              q14.wait_pixel(410, 310, (255, 162, 0)))
+        check("stara pozycja ikony wyczyszczona (20,30 teal)",
+              q14.wait_pixel(20, 30, (0, 128, 160)))
+    finally:
+        q14.close()
+
+    # Reboot na TYM SAMYM dysku: pozycja ikony przetrwala (icons.pos)
+    q15 = Qemu(KERNEL, INITRD, idisk)
+    try:
+        q15.wait_for("ProtonOS shell")
+        q15.type_line("desktop")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        check("pozycja ikony przetrwala restart (410,310 pomaranczowy)",
+              q15.wait_pixel(410, 310, (255, 162, 0)))
+        check("domyslna pozycja ikony pusta po restarcie (20,30 teal)",
+              q15.wait_pixel(20, 30, (0, 128, 160)))
+    finally:
+        q15.close()
+        if os.path.exists(idisk):
+            os.unlink(idisk)
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")

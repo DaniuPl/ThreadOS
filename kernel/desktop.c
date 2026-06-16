@@ -16,6 +16,7 @@
 #include "include/font8x8.h"
 #include "include/keyboard.h"
 #include "include/exec.h"
+#include "include/fs.h"
 #include "include/io.h"
 
 /* Indeksy palety pulpitu (ustawiane w desktop_thread) */
@@ -38,7 +39,7 @@ struct icon {
     const char *label;
     const char *app;
 };
-static const struct icon icons[] = {
+static struct icon icons[] = {
     {8, 20, "App", "guiapp"},
     {8, 60, "Zegar", "gclock"},
     {8, 100, "Pliki", "gfiles"},
@@ -46,6 +47,40 @@ static const struct icon icons[] = {
     {8, 180, "Term", "gterm"},
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
+
+/* Plik na dysku z zapamietanymi pozycjami ikon (pary x,y w kolejnosci) */
+#define ICON_POS_FILE "icons.pos"
+
+static int icon_drag = -1;      /* przeciagana ikona (-1 = brak) */
+static int icon_dx, icon_dy;    /* uchwyt: offset kursora w ikonie */
+static int icon_press_x, icon_press_y;   /* pozycja wcisniecia (klik vs drag) */
+
+/* Wczytuje pozycje ikon z dysku (jesli plik istnieje i pasuje rozmiarem) */
+static void icons_load(void)
+{
+    if (!fs_ready())
+        return;
+    int32_t buf[ICON_N * 2];
+    if (fs_read(ICON_POS_FILE, buf, sizeof(buf)) < (int)sizeof(buf))
+        return;
+    for (int k = 0; k < ICON_N; k++) {
+        icons[k].x = buf[k * 2];
+        icons[k].y = buf[k * 2 + 1];
+    }
+}
+
+/* Zapisuje biezace pozycje ikon na dysk */
+static void icons_save(void)
+{
+    if (!fs_ready())
+        return;
+    int32_t buf[ICON_N * 2];
+    for (int k = 0; k < ICON_N; k++) {
+        buf[k * 2] = icons[k].x;
+        buf[k * 2 + 1] = icons[k].y;
+    }
+    fs_write(ICON_POS_FILE, buf, sizeof(buf));
+}
 
 #define COL_RED    1      /* przycisk zamkniecia */
 
@@ -399,12 +434,16 @@ static void handle_input(int mx, int my, int buttons)
             }
         }
         if (!hit) {
-            /* Klik w tlo pulpitu: ikona uruchamia aplikacje, inaczej
-               utrata fokusu */
+            /* Klik w tlo pulpitu: chwyt ikony (uruchomienie lub przeniesienie
+               rozstrzygane przy puszczeniu), inaczej utrata fokusu */
             focus_idx = -1;
             for (int k = 0; k < ICON_N; k++)
                 if (in_rect(mx, my, icons[k].x, icons[k].y, ICON_W, ICON_H)) {
-                    exec_spawn(icons[k].app);
+                    icon_drag = k;
+                    icon_dx = mx - icons[k].x;
+                    icon_dy = my - icons[k].y;
+                    icon_press_x = mx;
+                    icon_press_y = my;
                     break;
                 }
         }
@@ -413,6 +452,25 @@ static void handle_input(int mx, int my, int buttons)
     if (!pressed) {
         drag_idx = -1;
         resize_idx = -1;
+        if (icon_drag >= 0) {       /* puszczenie ikony: klik czy przeniesienie? */
+            int ddx = mx - icon_press_x, ddy = my - icon_press_y;
+            if (ddx * ddx + ddy * ddy < 9)
+                exec_spawn(icons[icon_drag].app);   /* ledwie ruszona -> klik */
+            else
+                icons_save();                       /* przeniesiona -> zapisz uklad */
+            icon_drag = -1;
+        }
+    }
+
+    if (pressed && icon_drag >= 0) {    /* ikona podaza za kursorem */
+        int nx = mx - icon_dx;
+        int ny = my - icon_dy;
+        if (nx < 0) nx = 0;
+        if (ny < 10) ny = 10;                       /* pod gornym paskiem */
+        if (nx > video_w() - ICON_W) nx = video_w() - ICON_W;
+        if (ny > video_h() - TB_H - ICON_H) ny = video_h() - TB_H - ICON_H;
+        icons[icon_drag].x = nx;
+        icons[icon_drag].y = ny;
     }
 
     if (pressed && drag_idx >= 0) {     /* w trakcie: okno podaza za kursorem */
@@ -623,6 +681,8 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
     video_set_palette(COL_TBBTN, 26, 26, 26); /* ciemnoszary przycisk paska */
     video_set_palette(COL_ICON, 63, 40, 0);   /* pomaranczowa ikona */
+
+    icons_load();              /* przywroc zapamietane pozycje ikon z dysku */
 
     /* Dwa okna jadra (bez wlasciciela, bez bufora treści) */
     wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,

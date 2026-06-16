@@ -36,7 +36,7 @@ ProtonOS/
 │   │                   #   podwójne buforowanie, tekst 8x8
 │   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
 │   ├── shm.c           # pamięć współdzielona między procesami (po kluczu)
-│   ├── desktop.c       # kompozytor: okna jądra i aplikacji, drag, [x], kursor
+│   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
@@ -212,4 +212,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Zmiana rozmiaru / minimalizacja okien: przycisk `[_]` zwija okno
       (zostaje na pasku zadań - klik przywraca), uchwyt w prawym dolnym
       rogu okien jądra zmienia rozmiar przeciąganiem
-- [ ] Zapis pozycji ikon/plików na dysku
+- [x] Zapis pozycji ikon na dysku: ikony pulpitu można przeciągać myszą,
+      a ich rozmieszczenie zapisuje się do pliku PFS (`icons.pos`) i wraca
+      po restarcie (kompozytor czyta je przy starcie)
