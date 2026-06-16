@@ -156,6 +156,9 @@ void syscall_handler(struct regs *r)
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;
+    case SYS_THREAD:
+        r->eax = (uint32_t)process_thread(r->ebx, r->ecx);
+        break;
     case SYS_SYSINFO: {
         struct sysinfo_buf *si = (struct sysinfo_buf *)r->ebx;
         si->ram_kib = pmm_ram_kib();

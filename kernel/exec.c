@@ -312,6 +312,43 @@ uint32_t process_mmap(uint32_t size)
     return base;
 }
 
+/* Watki w procesie: nowe zadanie dzielace przestrzen adresowa, wchodzace
+   w ring 3 pod 'entry' z wlasnym stosem. */
+struct thread_start {
+    uint32_t entry;
+    uint32_t arg;
+    uint32_t ustack_top;
+};
+
+static void thread_trampoline(void *a)
+{
+    /* Biegniemy juz w przestrzeni adresowej procesu (scheduler zaladowal
+       jej CR3). Ulozmy stos uzytkownika i wejdzmy w ring 3. */
+    struct thread_start ts = *(struct thread_start *)a;
+    kfree(a);
+    uint32_t *sp = (uint32_t *)ts.ustack_top;
+    *--sp = ts.arg;                  /* argument funkcji watku */
+    *--sp = 0;                       /* atrapa adresu powrotu */
+    enter_ring3(ts.entry, (uint32_t)sp);
+}
+
+/* Tworzy watek biegnacy w przestrzeni biezacego procesu. Zwraca tid albo -1. */
+int process_thread(uint32_t entry, uint32_t arg)
+{
+    if (!task_mmap_next())                  /* tylko z procesu ring 3 */
+        return -1;
+    uint32_t stack = process_mmap(8192);    /* stos watku w przestrzeni procesu */
+    if (!stack)
+        return -1;
+
+    struct thread_start *ts = kmalloc(sizeof(*ts));
+    ts->entry = entry;
+    ts->arg = arg;
+    ts->ustack_top = stack + 8192;
+    return task_id_of(task_create_thread("thread", thread_trampoline, ts,
+                                         task_current_cr3()));
+}
+
 /* Mapuje region pamieci wspoldzielonej (po kluczu) do przestrzeni
    biezacego procesu i zwraca jego adres wirtualny albo 0. Rozne procesy
    wskazuja te same ramki fizyczne -> widza te sama pamiec. */

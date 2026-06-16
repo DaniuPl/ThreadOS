@@ -71,6 +71,7 @@ ProtonOS/
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
 │   ├── gmon.c          # monitor zasobów (RAM/uptime na żywo, sys_sysinfo)
 │   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
+│   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
@@ -200,3 +201,6 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Ikony na pulpicie - klikalne kafelki uruchamiające aplikacje
 - [x] Wskaźnik zasobów (`gmon`) - RAM/uptime na żywo + pasek użycia
       pamięci (syscall `sys_sysinfo`)
+- [x] Wątki w procesie (`sys_thread`) - wiele zadań współdzieli przestrzeń
+      adresową; przestrzeń zwalniana po ostatnim wątku (`run threads`)
+- [ ] Lepszy scheduler z priorytetami

@@ -391,6 +391,23 @@ def main():
         check("pamiec wspoldzielona: inny proces czyta zapisana wartosc",
               "[shmread] wartosc=12345" in screen)
 
+        # 'run threads': dwa watki w jednym procesie (wspolna pamiec).
+        # Kazdy zapisuje inna zmienna globalna; main sumuje -> 33.
+        # Swieza baza ramek (shmtest zajal trwaly region wspoldzielony).
+        q.type_line("mem")
+        used_before_th = pmm_used(q.screen())
+        q.type_line("run threads")
+        screen = q.wait_for("[threads] watki zapisaly")
+        check("watki w procesie dziela pamiec (suma globalnych = 33)",
+              "suma=33" in screen)
+        # brak wycieku ramek po procesie wielowatkowym (stosy watkow +
+        # przestrzen adresowa zwolnione, gdy konczy sie ostatni watek)
+        time.sleep(0.5)
+        q.type_line("mem")
+        used_after_th = pmm_used(q.screen())
+        check(f"brak wycieku ramek po watkach ({used_before_th} -> {used_after_th})",
+              used_after_th is not None and used_after_th == used_before_th)
+
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")

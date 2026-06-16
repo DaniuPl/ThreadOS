@@ -28,4 +28,7 @@ uint32_t process_mmap(uint32_t size);
 /* shm: mapuje region pamieci wspoldzielonej (po kluczu); adres albo 0 */
 uint32_t process_shm(int key, uint32_t size);
 
+/* Tworzy watek w przestrzeni biezacego procesu; zwraca tid albo -1 */
+int process_thread(uint32_t entry, uint32_t arg);
+
 #endif

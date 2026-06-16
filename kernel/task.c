@@ -178,6 +178,36 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     return t;
 }
 
+/* Tworzy zadanie-watek dzielace przestrzen adresowa (cr3) biezacego
+   procesu. owns_dir=1, ale przestrzen zniszczy dopiero ostatni watek
+   (reap sprawdza cr3_in_use). Dziedziczy brk/mmap_next procesu. */
+struct task *task_create_thread(const char *name, void (*entry)(void *),
+                                void *arg, uint32_t cr3)
+{
+    struct task *t = task_create(name, entry, arg);
+    uint32_t flags = irq_save();
+    t->cr3 = cr3;
+    t->owns_dir = 1;
+    t->brk = current->brk;
+    t->mmap_next = current->mmap_next;
+    irq_restore(flags);
+    return t;
+}
+
+/* Czy jakies inne zadanie wciaz uzywa tej przestrzeni adresowej (CR3)?
+   Watki procesu wspoldziela CR3 - przestrzen niszczymy dopiero, gdy
+   konczy sie ostatni z nich. */
+static int cr3_in_use(uint32_t cr3, struct task *except)
+{
+    struct task *t = current;
+    do {
+        if (t != except && t->cr3 == cr3)
+            return 1;
+        t = t->next;
+    } while (t != current);
+    return 0;
+}
+
 static void reap_zombies(void)
 {
     struct task *t = current;
@@ -185,8 +215,9 @@ static void reap_zombies(void)
         if (t->next->state == TASK_ZOMBIE) {
             struct task *z = t->next;
             t->next = z->next;
-            /* CR3 zombie nie jest juz zaladowany - bezpiecznie zwolnic */
-            if (z->owns_dir)
+            /* Niszcz przestrzen adresowa tylko, gdy zaden inny watek
+               (procesu) jej juz nie uzywa. CR3 zombie nie jest aktywny. */
+            if (z->owns_dir && !cr3_in_use(z->cr3, z))
                 paging_destroy_address_space(z->cr3);
             kfree(z->stack);
             kfree(z);

@@ -39,6 +39,10 @@ void scheduler_init(void);
    tyknięcia timera */
 struct task *task_create(const char *name, void (*entry)(void *), void *arg);
 
+/* Tworzy watek dzielacy przestrzen adresowa (cr3) biezacego procesu */
+struct task *task_create_thread(const char *name, void (*entry)(void *),
+                                void *arg, uint32_t cr3);
+
 void task_yield(void);              /* oddaj dobrowolnie procesor */
 void task_sleep(uint32_t ms);       /* uśpij bieżący wątek */
 void task_exit(int code);           /* zakończ bieżący wątek z kodem */

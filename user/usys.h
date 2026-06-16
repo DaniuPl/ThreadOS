@@ -32,6 +32,7 @@
 #define SYS_MMAP       25
 #define SYS_SHM        26
 #define SYS_SYSINFO    27
+#define SYS_THREAD     28
 
 #define FS_NAME_MAX  23
 
@@ -175,6 +176,18 @@ static inline void *sys_shm(int key, uint32_t size)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_SHM), "b"(key), "c"(size)
+                     : "memory");
+    return ret;
+}
+
+/* thread: tworzy watek w tym samym procesie (wspolna pamiec). entry to
+   funkcja void(*)(void*). Zwraca tid albo -1. */
+static inline int32_t sys_thread(void (*entry)(void *), void *arg)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_THREAD), "b"(entry), "c"(arg)
                      : "memory");
     return ret;
 }
