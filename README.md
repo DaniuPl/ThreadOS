@@ -73,6 +73,7 @@ ProtonOS/
 │   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
+│   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
@@ -206,6 +207,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       adresową; przestrzeń zwalniana po ostatnim wątku (`run threads`)
 - [x] Scheduler z priorytetami (`sys_setprio`): wyższy wywłaszcza niższy,
       równe round-robin (`run prio`)
-- [ ] Okno terminala w GUI
+- [x] Terminal w oknie GUI (`gterm`) - wpisz komendę, jej wyjście
+      pojawia się w oknie (klawiatura -> spawn z przekierowaniem -> odczyt)
 - [ ] Zmiana rozmiaru / minimalizacja okien
 - [ ] Zapis pozycji ikon/plików na dysku

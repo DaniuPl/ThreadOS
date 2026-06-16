@@ -1086,6 +1086,49 @@ def main():
     finally:
         q11.close()
 
+    # --- Terminal w oknie GUI (osobny boot z dyskiem) ---
+    print("--- pulpit: terminal GUI (gterm) ---")
+    tdisk = tempfile.mktemp(suffix=".img")
+    with open(tdisk, "wb") as f:
+        f.write(b"\0" * (1024 * 1024))
+    q12 = Qemu(KERNEL, INITRD, tdisk)
+    try:
+        q12.wait_for("ProtonOS shell")
+        q12.type_line("desktop")
+        time.sleep(0.8)
+        q12.type_line("run gterm")
+        time.sleep(1.0)
+
+        def near(px, want, tol=45):
+            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+        # klik w okno terminala (slot2, content 95,65) -> fokus klawiatury
+        q12.mouse_goto(150, 120)
+        q12.mouse_click()
+        q12.mouse_goto(400, 300)
+        # wpisz 'seq 3' i Enter -> wyjscie (1,2,3) pojawia sie w oknie
+        for ch in "seq 3":
+            q12.sendkey({" ": "spc"}.get(ch, ch))
+        q12.sendkey("ret")
+
+        # wyjscie rysowane u gory okna (content y4 -> ekran y69)
+        def out_white():
+            _, _, a = q12.screen_raw()
+            return sum(1 for x in range(99, 130) for y in range(69, 99)
+                       if near(a(x, y), (255, 255, 255), 10))
+        shown = False
+        for _ in range(20):
+            if out_white() > 0:
+                shown = True
+                break
+            time.sleep(0.2)
+        check("terminal GUI uruchamia komende i pokazuje wyjscie w oknie",
+              shown)
+    finally:
+        q12.close()
+        if os.path.exists(tdisk):
+            os.unlink(tdisk)
+
     print()
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
