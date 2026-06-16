@@ -42,6 +42,7 @@ struct task {
     enum task_state state;
     uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
     int id;
+    int priority;               /* 0=wysoki, 1=normalny, 2=niski (idle) */
     int exit_code;              /* kod zwrocony przez task_exit */
     int killed;                 /* oczekujace zabicie (kill) */
     char name[NAME_MAX];
@@ -138,6 +139,7 @@ void scheduler_init(void)
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* katalog glowny */
     main_task->killed = 0;
+    main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
     task_init_fds(main_task);
     main_task->next = main_task;
     current = main_task;
@@ -154,6 +156,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->mmap_next = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
     t->killed = 0;
+    t->priority = 1;            /* domyslnie normalny priorytet */
     task_init_fds(t);
     t->entry = entry;
     t->arg = arg;
@@ -227,22 +230,46 @@ static void reap_zombies(void)
     }
 }
 
-/* Budzi zaspane wątki i zwraca pierwszy gotowy po current (lub NULL) */
+/* Budzi zaspane watki i wybiera nastepne zadanie wedlug priorytetu:
+   wyzszy priorytet (mniejsza liczba) wywlaszcza nizszy; rownorzedne
+   chodza round-robin; biezace zadanie zostaje, gdy jest scisle wyzsze
+   od wszystkich gotowych. */
 static struct task *pick_next(void)
 {
     uint32_t now = pit_ticks();
-    struct task *found = NULL;
 
+    /* Obudz spioch ow, ktorych czas minal */
     struct task *t = current->next;
     do {
         if (t->state == TASK_SLEEPING && (int32_t)(now - t->wake_at) >= 0)
             t->state = TASK_READY;
-        if (!found && t->state == TASK_READY && t != current)
-            found = t;
         t = t->next;
     } while (t != current->next);
 
-    return found;
+    /* Najwyzszy priorytet (najmniejsza liczba) wsrod gotowych */
+    int best = 1 << 30;
+    t = current;
+    do {
+        if (t->state == TASK_READY && t->priority < best)
+            best = t->priority;
+        t = t->next;
+    } while (t != current);
+    if (best == (1 << 30))
+        return NULL;                  /* nikt gotowy - biezace bieży dalej */
+
+    /* Biezace zadanie scisle wyzsze niz cokolwiek gotowego -> zostaje */
+    if (current->state == TASK_RUNNING && current->priority < best)
+        return NULL;
+
+    /* Round-robin wsrod gotowych o priorytecie 'best', zaczynajac za current */
+    t = current->next;
+    do {
+        if (t->state == TASK_READY && t->priority == best)
+            return t;
+        t = t->next;
+    } while (t != current->next);
+
+    return NULL;
 }
 
 void schedule(void)
@@ -425,6 +452,15 @@ uint32_t task_mmap_next(void)
 void task_set_mmap_next(uint32_t addr)
 {
     current->mmap_next = addr;
+}
+
+void task_set_priority(int prio)
+{
+    if (prio < 0)
+        prio = 0;
+    if (prio > 2)
+        prio = 2;
+    current->priority = prio;
 }
 
 const char *task_current_name(void)

@@ -31,6 +31,7 @@
 #define SYS_SHM        26 /* ebx=klucz, ecx=rozmiar -> adres wspoldzielony */
 #define SYS_SYSINFO    27 /* ebx=bufor {ram_kib,used_kib,uptime_s} -> 0 */
 #define SYS_THREAD     28 /* ebx=entry, ecx=arg -> tid watku albo -1 */
+#define SYS_SETPRIO    29 /* ebx=poziom (0/1/2) -> 0 */
 
 #define SYSCALL_VECTOR 0x80
 

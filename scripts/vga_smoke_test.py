@@ -408,6 +408,15 @@ def main():
         check(f"brak wycieku ramek po watkach ({used_before_th} -> {used_after_th})",
               used_after_th is not None and used_after_th == used_before_th)
 
+        # 'run prio': scheduler z priorytetami. Watek normalny wywlaszcza
+        # niski -> przez to samo okno czasu naliczy wielokrotnie wiecej.
+        q.type_line("run prio")
+        screen = q.wait_for("[prio] normalny=", timeout=20)
+        m = re.search(r"normalny=(\d+) niski=(\d+)", screen)
+        ok = m and int(m.group(1)) > int(m.group(2)) * 5
+        check("scheduler z priorytetami: normalny >> niski"
+              + (f" ({m.group(1)} vs {m.group(2)})" if m else ""), ok)
+
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")

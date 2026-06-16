@@ -33,6 +33,7 @@
 #define SYS_SHM        26
 #define SYS_SYSINFO    27
 #define SYS_THREAD     28
+#define SYS_SETPRIO    29
 
 #define FS_NAME_MAX  23
 
@@ -190,6 +191,17 @@ static inline int32_t sys_thread(void (*entry)(void *), void *arg)
                      : "a"(SYS_THREAD), "b"(entry), "c"(arg)
                      : "memory");
     return ret;
+}
+
+/* setprio: priorytet biezacego zadania (0=wysoki, 1=normalny, 2=niski) */
+static inline void sys_setprio(int level)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SETPRIO), "b"(level)
+                     : "memory");
+    (void)ret;
 }
 
 /* sysinfo: statystyki systemu (RAM, uptime) do wskazanego bufora */
