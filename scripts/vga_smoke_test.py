@@ -51,6 +51,11 @@ TEXT_MODE = "nodesktop"
 # Obraz dysku pod PFS3 (jadro formatuje pusty dysk przy pierwszym starcie)
 DISK_SIZE = 16 * 1024 * 1024
 
+# Zegar guesta: ustalony, ale pozniejszy niz data wystawienia
+# certyfikatow generowanych w trakcie testu
+RTC_BASE = "2030-06-13T12:34:56"
+RTC_DATE = "2030-06-13"
+
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
 MENU_ROW = 12
 MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
@@ -106,24 +111,48 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
     return stop.set
 
 
-def start_https_server():
-    """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
-    locie. Certyfikat jest samopodpisany - ProtonOS i tak go jeszcze nie
-    sprawdza, a test dzieki temu nie potrzebuje niczego z zewnatrz.
-    Zwraca (port, stop) albo (None, stop), gdy brakuje openssl-a."""
-    import ssl
+CERT_DER = None          # certyfikat serwera HTTPS (do magazynu zaufania)
+
+
+def make_test_cert(dirpath):
+    """Certyfikat samopodpisany dla protonos.test: SubjectAltName z nazwa
+    i wieloznacznikiem, flaga CA (moze wiec sluzyc tez za korzen
+    zaufania) i dziesiecioletnia waznosc, zeby obejmowala ustalony zegar
+    guesta. Robimy to narzedziem openssl - jest wszedzie tam, gdzie
+    testuje sie TLS."""
     import subprocess
 
+    certfile = os.path.join(dirpath, "cert.pem")
+    keyfile = os.path.join(dirpath, "key.pem")
+    derfile = os.path.join(dirpath, "cert.der")
+
+    subprocess.run(
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", keyfile,
+         "-out", certfile, "-days", "3650", "-nodes",
+         "-subj", "/CN=protonos.test",
+         "-addext", "subjectAltName=DNS:protonos.test,DNS:*.protonos.test"],
+        check=True, capture_output=True, timeout=120)
+    subprocess.run(
+        ["openssl", "x509", "-in", certfile, "-outform", "DER", "-out", derfile],
+        check=True, capture_output=True, timeout=60)
+
+    with open(derfile, "rb") as f:
+        return certfile, keyfile, f.read()
+
+
+def start_https_server():
+    """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
+    locie. Test nie potrzebuje dzieki temu niczego z zewnatrz.
+    Zwraca (port, stop) albo (None, stop), gdy brakuje bibliotek."""
+    global CERT_DER
+    import ssl
+
     tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
-    cert = os.path.join(tmpdir, "cert.pem")
-    key = os.path.join(tmpdir, "key.pem")
     try:
-        subprocess.run(
-            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", key,
-             "-out", cert, "-days", "1", "-nodes", "-subj", "/CN=protonos.test"],
-            check=True, capture_output=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None, lambda: None
+        certfile, keyfile, der = make_test_cert(tmpdir)
+    except BaseException:                # brak openssl-a to nie powod, by
+        return None, lambda: None        # wywrocic caly test
+    CERT_DER = der
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -139,7 +168,7 @@ def start_https_server():
             pass
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(cert, key)
+    ctx.load_cert_chain(certfile, keyfile)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     srv = socketserver.TCPServer(("0.0.0.0", 0), Handler)
     srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
@@ -173,6 +202,14 @@ def start_http_server():
                 self.wfile.write(b"0\r\n\r\n")
                 return
 
+            if self.path.endswith(".der") and CERT_DER:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(CERT_DER)))
+                self.end_headers()
+                self.wfile.write(CERT_DER)
+                return
+
             body = BIG_PAGE if self.path.startswith("/duza") else PAGE
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -195,8 +232,11 @@ class Qemu:
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
                "-display", "none", "-no-reboot",
-               # Stala data RTC -> deterministyczny test komendy 'date'
-               "-rtc", "base=2026-06-13T12:34:56",
+               # Stala data RTC -> deterministyczny test komendy 'date'.
+               # Musi byc pozniejsza niz chwila wystawienia certyfikatow
+               # testowych, inaczej TLS slusznie je odrzuci jako
+               # "jeszcze nie obowiazuje".
+               "-rtc", "base=" + RTC_BASE,
                # Karta sieciowa w trybie uzytkownika: brama 10.0.2.2
                # odpowiada na ARP i ICMP echo, wiec 'ping' da sie
                # przetestowac bez zadnej sieci na hoscie
@@ -772,27 +812,69 @@ def main():
                   "HTTP 200 (chunked), tresc %d B" % len(PAGE) in hop)
             check("tresc po zlozeniu jest cala",
                   "ProtonOS TCP dziala" in hop)
+            # HTTPS: pelne uzgodnienie TLS 1.3 z prawdziwym OpenSSL-em po
+            # drugiej stronie (X25519 + ChaCha20-Poly1305, sprawdzone Finished)
+            https_port, https_stop = start_https_server()
+            if https_port is None:
+                print("INFO: brak openssl - pomijam testy TLS")
+            else:
+                dns_stop = start_dns_server()
+                try:
+                    q.type_line("dns 10.0.2.2")
+                    q.wait_for("serwer DNS ustawiony", timeout=10)
+
+                    # 1. Bez magazynu zaufania: kanal szyfrowany, ale
+                    #    tozsamosc niepotwierdzona - i program to mowi
+                    q.type_line("clear")
+                    q.type_line("run httpget https://protonos.test %d /"
+                                % https_port)
+                    sec = q.wait_for("tresc ", timeout=60)
+                    check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
+                          "[httpget] TLS 1.3" in sec)
+                    check("HTTPS: odpowiedz 200 z pelna trescia",
+                          "HTTP 200, tresc %d B" % len(PAGE) in sec)
+                    check("HTTPS: tresc odszyfrowana poprawnie",
+                          "ProtonOS TCP dziala" in sec)
+                    check("bez roots.der certyfikat jest zglaszany jako "
+                          "niesprawdzony",
+                          "certyfikat NIESPRAWDZONY" in sec)
+
+                    # 2. Pobranie certyfikatu wystawcy prosto na dysk
+                    q.type_line("clear")
+                    q.type_line("run httpget 10.0.2.2 %d /cert.der roots.der"
+                                % http_port)
+                    q.wait_for("tresc ", timeout=30)
+                    q.type_line("fls")
+                    check("magazyn zaufania zapisany na dysku",
+                          "roots.der" in q.wait_for("roots.der", timeout=10))
+
+                    # 3. Z magazynem: pelna weryfikacja lancucha, dat i nazwy
+                    q.type_line("clear")
+                    q.type_line("run httpget https://protonos.test %d /"
+                                % https_port)
+                    ver = q.wait_for("tresc ", timeout=60)
+                    if "certyfikat sprawdzony" not in ver:
+                        print("--- ekran (diagnostyka) ---")
+                        print(ver)
+                        print("---------------------------")
+                    check("certyfikat sprawdzony wzgledem magazynu zaufania",
+                          "certyfikat sprawdzony" in ver)
+                    check("tresc pobrana po zweryfikowanym TLS",
+                          "HTTP 200, tresc %d B" % len(PAGE) in ver)
+
+                    # 4. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
+                    #    wiec polaczenie ma zostac zerwane
+                    q.type_line("clear")
+                    q.type_line("run httpget https://10.0.2.2 %d /" % https_port)
+                    bad = q.wait_for("nie udalo sie polaczyc", timeout=60)
+                    check("zla nazwa w certyfikacie odrzucona",
+                          "certyfikat nie obejmuje tej nazwy" in bad)
+                finally:
+                    https_stop()
+                    dns_stop()
+
         finally:
             http_stop()
-
-        # HTTPS: pelne uzgodnienie TLS 1.3 z prawdziwym OpenSSL-em po
-        # drugiej stronie (X25519 + ChaCha20-Poly1305, sprawdzone Finished)
-        https_port, https_stop = start_https_server()
-        if https_port is None:
-            print("INFO: brak openssl - pomijam test TLS")
-        else:
-            try:
-                q.type_line("clear")
-                q.type_line("run httpget https://10.0.2.2 %d /" % https_port)
-                sec = q.wait_for("tresc ", timeout=60)
-                check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
-                      "[httpget] TLS 1.3" in sec)
-                check("HTTPS: odpowiedz 200 z pelna trescia",
-                      "HTTP 200, tresc %d B" % len(PAGE) in sec)
-                check("HTTPS: tresc odszyfrowana poprawnie",
-                      "ProtonOS TCP dziala" in sec)
-            finally:
-                https_stop()
 
         q.type_line("netstat")
         check("netstat: po zamknieciu nie ma wiszacych polaczen",
@@ -924,8 +1006,8 @@ def main():
         # Sprawdzamy tylko date (godzina przesunie sie przez czas testu),
         # plus format 'godz:min:sek' (dwie cyfry kazda)
         q.type_line("date")
-        screen = q.wait_for("2026-06-13")
-        m = re.search(r"2026-06-13 (\d\d):(\d\d):(\d\d)", screen)
+        screen = q.wait_for(RTC_DATE)
+        m = re.search(RTC_DATE + r" (\d\d):(\d\d):(\d\d)", screen)
         check("date (ring 3) czyta RTC: data i format z bazy QEMU",
               m is not None)
 

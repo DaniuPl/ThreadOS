@@ -12,6 +12,7 @@
 
 #include "usys.h"
 #include "uhttp.h"
+#include "ucert.h"
 
 #define W 320
 #define H 200
@@ -36,6 +37,7 @@ static char text[PAGE_MAX];   /* tresc po odarciu ze znacznikow */
 static int text_len;
 
 static char status[64] = "Wpisz adres (nazwa albo IP) i nacisnij Enter";
+static int last_secure;              /* czy ostatnia strona byla sprawdzona */
 
 static void set_status(const char *s)
 {
@@ -164,6 +166,14 @@ static void fetch(void)
         return;
     }
 
+    static uint8_t roots[16384];
+    static int roots_loaded;
+    if (use_tls && !roots_loaded) {
+        uint32_t n = cert_load_roots("roots.der", roots, sizeof(roots));
+        http_set_roots(roots, n, 0);     /* pokaz stan, nie zrywaj polaczenia */
+        roots_loaded = 1;
+    }
+
     struct http_result res;
     res.status = 0;
     res.body_len = 0;
@@ -194,6 +204,8 @@ static void fetch(void)
         set_status("Przekierowanie...");
     }
 
+    last_secure = use_tls && res.verified;
+
     page[page_len] = '\0';
     if (!page_len) {
         set_status("Pusta odpowiedz");
@@ -211,7 +223,10 @@ static void fetch(void)
 
     char st[64];
     int i = 0;
-    const char *lead = use_tls ? "TLS HTTP " : "HTTP ";
+    /* Stan polaczenia widoczny w oknie: "TLS+" = certyfikat sprawdzony,
+       "TLS?" = szyfrowane, ale bez potwierdzonej tozsamosci */
+    const char *lead = use_tls ? (res.verified ? "TLS+ HTTP " : "TLS? HTTP ")
+                               : "HTTP ";
     while (*lead)
         st[i++] = *lead++;
     st[i++] = (char)('0' + (res.status / 100) % 10);
@@ -302,7 +317,8 @@ void _start(void)
         win_rect(w, 0, 0, W, 14, C_TITLE);
         addr[addr_len] = '\0';
         win_text(w, 4, 3, addr, C_WHITE);
-        win_text(w, 4, 17, status, text_len ? C_GREEN : C_RED);
+        win_text(w, 4, 17, status,
+             text_len ? (last_secure ? C_GREEN : C_WHITE) : C_RED);
         draw_page(w);
 
         sys_sleep(60);

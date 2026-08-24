@@ -87,11 +87,16 @@ ProtonOS/
 │   ├── ux25519.h       # X25519 - wymiana kluczy na Curve25519
 │   ├── urand.h         # źródło losowości (RTC + timer + SHA-256)
 │   ├── utls.h          # klient TLS 1.3: handshake, klucze, rekordy
+│   ├── ubignum.h       # wielkie liczby (Montgomery) pod RSA
+│   ├── ursa.h          # podpisy RSA: PKCS#1 v1.5 i PSS
+│   ├── ux509.h         # parser certyfikatów X.509 (DER)
+│   ├── ucert.h         # weryfikacja łańcucha, dat i nazwy hosta
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP/HTTPS (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
 │   ├── gweb.c          # przeglądarka w oknie: adres -> TCP -> tekst + PFS
-│   ├── cryptotest.c    # wektory testowe SHA-256/HMAC/HKDF z RFC
+│   ├── cryptotest.c    # wektory testowe kryptografii z RFC
+│   ├── certtest.c      # test parsera X.509 i podpisów RSA
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
@@ -156,8 +161,11 @@ Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
 (`Transfer-Encoding: chunked`) i idzie za przekierowaniami 301/302/307/308,
 także względnymi. Adresy `https://` idą przez **TLS 1.3** (X25519 +
 ChaCha20-Poly1305) - działa to zarówno w `httpget`, jak i w przeglądarce.
-**Uwaga:** certyfikat serwera nie jest jeszcze sprawdzany, więc połączenie
-jest szyfrowane, ale nieuwierzytelnione.
+Certyfikat serwera jest **weryfikowany**, gdy na dysku leży magazyn
+zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
+z `CertificateVerify`, łańcuch podpisów do zaufanego wystawcy, daty
+ważności i nazwa hosta. Bez tego pliku połączenie jest tylko szyfrowane -
+i program mówi to wprost, a przeglądarka pokazuje `TLS?` zamiast `TLS+`.
 
 TCP działa w obie strony. Jako klient: `run httpget 10.0.2.2 8000 /`
 pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
@@ -336,3 +344,10 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       (certyfikat jeszcze niesprawdzany - to następny krok)
 - [x] Źródło losowości dla programów (`urand.h`): RTC, licznik timera,
       pid i adresy ze stosu zmieszane przez SHA-256
+- [x] Weryfikacja certyfikatów: wielkie liczby w postaci Montgomery'ego,
+      podpisy RSA (PKCS#1 v1.5 i PSS), parser X.509/DER, sprawdzanie
+      łańcucha do zaufanego wystawcy, dat ważności i nazwy hosta
+      (SubjectAltName z wieloznacznikiem); magazyn zaufania czytany
+      z pliku `roots.der` na PFS (`run certtest`)
+- [x] Stos procesu urósł z 4 KiB do 32 KiB - RSA na 2048 bitach
+      potrzebuje kilku kilobajtów na same liczby robocze

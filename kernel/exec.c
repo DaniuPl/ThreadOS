@@ -23,6 +23,11 @@
 #include "include/printk.h"
 
 #define USER_STACK_TOP 0xC0000000u
+/* Stos procesu: jedna strona wystarczala, dopoki programy nie zaczely
+   liczyc kryptografii - RSA na 2048 bitach potrzebuje kilku kilobajtow
+   na same liczby robocze. Osiem stron to 32 KiB. */
+#define USER_STACK_PAGES 8
+#define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE)
 #define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
 #define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej sterty) */
 #define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej stosu) */
@@ -92,7 +97,7 @@ static int load_segment(uint32_t dir, const uint8_t *file,
                         const struct elf_phdr *ph)
 {
     if (ph->p_vaddr < PAGING_IDENTITY_LIMIT ||
-        ph->p_vaddr + ph->p_memsz > USER_STACK_TOP - PAGE_SIZE) {
+        ph->p_vaddr + ph->p_memsz > USER_STACK_BASE) {
         printk("exec: segment poza dozwolonym zakresem (%x)\n", ph->p_vaddr);
         return 0;
     }
@@ -230,12 +235,19 @@ static void exec_task(void *arg)
             brk = ph[i].p_vaddr + ph[i].p_memsz;
     }
 
-    uint32_t sframe = page_frame_for(dir, USER_STACK_TOP - PAGE_SIZE);
-    if (!sframe) {
-        printk("exec: brak pamieci na stos\n");
-        paging_destroy_address_space(dir);
-        exec_fail(a);
-        return;
+    /* Najwyzsza strona stosu (tam trafiaja argumenty), a pod nia reszta */
+    uint32_t sframe = 0;
+    for (int i = 0; i < USER_STACK_PAGES; i++) {
+        uint32_t va = USER_STACK_TOP - (uint32_t)(i + 1) * PAGE_SIZE;
+        uint32_t frame = page_frame_for(dir, va);
+        if (!frame) {
+            printk("exec: brak pamieci na stos\n");
+            paging_destroy_address_space(dir);
+            exec_fail(a);
+            return;
+        }
+        if (i == 0)
+            sframe = frame;
     }
 
     uint32_t esp = build_argv_stack(sframe, tok, argc);

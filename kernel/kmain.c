@@ -207,17 +207,20 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         tcp_init();        /* watek retransmisji TCP */
     }
 
-    shell_init();
-
     /* Docelowo system startuje prosto na pulpit; 'nodesktop' w linii
        polecen jadra zostawia konsole tekstowa (uzywa tego test dymny
-       i komendy, ktore wypisuja duzo tekstu). */
-    if (cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text")) {
+       i komendy, ktore wypisuja duzo tekstu). Komunikat idzie przed
+       shell_init, zeby ostatnia rzecza na ekranie byl prompt. */
+    int text_mode = cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text");
+    if (text_mode)
         printk("Tryb tekstowy (linia polecen jadra) - pulpit: 'desktop'\n");
-    } else {
+    else
         printk("Start pulpitu graficznego (wylaczysz opcja 'nodesktop')\n");
+
+    shell_init();
+
+    if (!text_mode)
         desktop_start();
-    }
 
     /* Watek main jest watkiem bezczynnosci - hlt do najblizszego IRQ */
     for (;;)

@@ -6,11 +6,14 @@
  *
  * Nazwe hosta rozwiazuje przez DNS, radzi sobie z kodowaniem 'chunked'
  * i idzie za przekierowaniami (do trzech). Dla adresow https laczy sie
- * przez TLS 1.3 - certyfikat nie jest jeszcze sprawdzany (patrz utls.h).
+ * przez TLS 1.3 i sprawdza certyfikat wzgledem magazynu zaufania z
+ * pliku "roots.der" na dysku. Gdy tego pliku nie ma, polaczenie jest
+ * tylko szyfrowane - i program mowi o tym wprost.
  */
 
 #include "usys.h"
 #include "uhttp.h"
+#include "ucert.h"
 
 #define MAX_REDIRECTS 3
 
@@ -74,6 +77,16 @@ void _start(int argc, char **argv)
         }
     }
 
+    static uint8_t roots[16384];
+    uint32_t roots_len = 0;
+    if (use_tls) {
+        roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
+        http_set_roots(roots, roots_len, roots_len ? 1 : 0);
+        if (!roots_len)
+            print("[httpget] UWAGA: brak pliku roots.der - certyfikat "
+                  "nie bedzie sprawdzany\n");
+    }
+
     struct http_result res;
     for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
         uint32_t ip = http_resolve(host);
@@ -98,7 +111,12 @@ void _start(int argc, char **argv)
 
         if (http_get(ip, parsed_port, host, path, use_tls, body_sink, &st,
                      &res) < 0) {
-            print("[httpget] nie udalo sie polaczyc\n");
+            print("[httpget] nie udalo sie polaczyc");
+            if (use_tls && res.verify_err) {
+                print(": ");
+                print(cert_error_text(res.verify_err));
+            }
+            print("\n");
             if (st.fd >= 0)
                 sys_close(st.fd);
             sys_exit(1);
@@ -120,6 +138,13 @@ void _start(int argc, char **argv)
 
     if (st.fd >= 0)
         sys_close(st.fd);
+
+    if (use_tls) {
+        print(res.verified ? "[httpget] certyfikat sprawdzony (wystawca, "
+                             "nazwa, daty)\n"
+                           : "[httpget] certyfikat NIESPRAWDZONY - kanal "
+                             "szyfrowany, ale bez potwierdzenia tozsamosci\n");
+    }
 
     print("[httpget] HTTP ");
     print_dec((uint32_t)res.status);

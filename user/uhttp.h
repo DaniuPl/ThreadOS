@@ -70,6 +70,8 @@ struct http_result {
     int status;                  /* kod odpowiedzi albo 0 */
     uint32_t body_len;           /* odebranych bajtow tresci */
     int chunked;                 /* czy tresc byla w kawalkach */
+    int verified;                /* https: czy certyfikat sie obronil */
+    int verify_err;              /* https: powod, gdy nie */
     char location[192];          /* naglowek Location (przekierowanie) */
 };
 
@@ -169,6 +171,19 @@ static inline int http_apply_location(const char *loc, char *host, int hmax,
 
 /* Pobiera zasob. Zwraca 0 przy powodzeniu, -1 gdy nie udalo sie
    polaczyc albo wyslac zadania. Kod HTTP i Location w 'res'. */
+/* Ustawienia weryfikacji dla polaczen https - wspolne dla programu.
+   Gdy roots_len == 0, certyfikat jest sprawdzany "na sucho": wynik
+   trafia do res->verified, ale polaczenie nie jest zrywane. */
+static struct tls_config http_tls_cfg;
+
+static inline void http_set_roots(const uint8_t *roots, uint32_t len,
+                                  int require)
+{
+    http_tls_cfg.roots = roots;
+    http_tls_cfg.roots_len = len;
+    http_tls_cfg.verify = require;
+}
+
 static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                            const char *path, int use_tls, http_sink sink,
                            void *arg, struct http_result *res)
@@ -181,13 +196,19 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     res->status = 0;
     res->body_len = 0;
     res->chunked = 0;
+    res->verified = 0;
+    res->verify_err = 0;
     res->location[0] = '\0';
 
     tp.tls = use_tls;
     tp.sock = -1;
     if (use_tls) {
-        if (tls_connect(&tp.conn, ip, port, host) < 0)
+        if (tls_connect(&tp.conn, ip, port, host, &http_tls_cfg) < 0) {
+            res->verify_err = tp.conn.verify_err;
             return -1;
+        }
+        res->verified = tp.conn.verified;
+        res->verify_err = tp.conn.verify_err;
     } else {
         tp.sock = tcp_connect(ip, port, 5000);
         if (tp.sock < 0)

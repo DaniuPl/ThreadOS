@@ -47,7 +47,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/nslookup.elf \
              $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf \
              $(BUILD)/user/gweb.elf \
-             $(BUILD)/user/cryptotest.elf
+             $(BUILD)/user/cryptotest.elf \
+             $(BUILD)/user/certtest.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -115,10 +116,12 @@ $(KERNEL): $(OBJS) linker.ld
 $(BUILD)/user: | $(BUILD)
 	mkdir -p $(BUILD)/user
 
-$(BUILD)/user/%.elf: user/%.c user/usys.h user/udns.h user/uhttp.h \
-                     user/usha256.h user/uchacha.h \
-                     user/ux25519.h user/urand.h \
-                     user/utls.h user/user.ld | $(BUILD)/user
+# Naglowki userspace sa wciagane przez wiele programow (biblioteczka
+# syscalli, siec, kryptografia), wiec zmiana ktoregokolwiek ma
+# przebudowac wszystko - stad wildcard zamiast recznej listy.
+USER_HEADERS := $(wildcard user/*.h)
+
+$(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
@@ -142,7 +145,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    nslookup=$(BUILD)/user/nslookup.elf \
 	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
 	    gweb=$(BUILD)/user/gweb.elf \
-	    cryptotest=$(BUILD)/user/cryptotest.elf
+	    cryptotest=$(BUILD)/user/cryptotest.elf \
+	    certtest=$(BUILD)/user/certtest.elf
 
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.
@@ -173,7 +177,7 @@ run-iso: iso
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
 test: $(KERNEL) $(INITRD)
-	python3 scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
+	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
 
 clean:
 	rm -rf $(BUILD)

@@ -10,11 +10,14 @@
  * leci juz zaszyfrowana -> Finished po obu stronach -> dane aplikacji
  * na osobnych kluczach.
  *
- * UWAGA - swiadome ograniczenie: certyfikat serwera jest odbierany i
- * wchodzi do transkryptu, ale NIE jest sprawdzany (brak parsera X.509,
- * podpisow i magazynu korzeni CA). Polaczenie jest wiec szyfrowane, ale
- * nieuwierzytelnione: chroni przed podsluchem biernym, nie przed kims,
- * kto potrafi podstawic sie za serwer. Weryfikacja to nastepny krok.
+ * Certyfikat serwera jest sprawdzany, gdy podamy magazyn zaufania:
+ * podpis w CertificateVerify (kluczem z certyfikatu), lancuch podpisow
+ * do zaufanego korzenia, daty waznosci i nazwa hosta. Bez magazynu
+ * polaczenie jest tylko szyfrowane - i wtedy jest to jasno powiedziane
+ * wolajacemu (pole 'verified').
+ *
+ * Czego jeszcze nie ma: podpisow ECDSA (czesc serwerow ich uzywa),
+ * odwolan certyfikatow i sprawdzania ograniczen nazw.
  */
 
 #ifndef PROTONOS_UTLS_H
@@ -25,6 +28,7 @@
 #include "uchacha.h"
 #include "ux25519.h"
 #include "urand.h"
+#include "ucert.h"
 
 #define TLS_PLAINTEXT_MAX 16384
 #define TLS_RECORD_MAX    (TLS_PLAINTEXT_MAX + 256)
@@ -49,9 +53,18 @@
 #define TLS_CHACHA20_SHA256  0x1303
 #define GROUP_X25519         0x001d
 
+/* Co i wzgledem czego sprawdzac */
+struct tls_config {
+    int verify;                          /* 1 = wymagaj poprawnego lancucha */
+    const uint8_t *roots;                /* certyfikaty DER, jeden za drugim */
+    uint32_t roots_len;
+};
+
 struct tls_conn {
     int32_t sock;
     int established;
+    int verified;                        /* 1 = certyfikat sprawdzony */
+    int verify_err;                      /* CERT_* gdy sie nie udalo */
 
     uint8_t key_c[32], iv_c[12];         /* klucze aplikacyjne */
     uint8_t key_s[32], iv_s[12];
@@ -216,10 +229,107 @@ static inline void tls_traffic_keys(const uint8_t *secret, uint8_t *key,
     hkdf_expand_label(secret, "iv", 0, 0, iv, 12);
 }
 
+/* --- sprawdzenie certyfikatow --- */
+
+/* Rozbiera wiadomosc Certificate, sprawdza podpis z CertificateVerify
+   (to on dowodzi, ze serwer ma klucz prywatny do certyfikatu) i caly
+   lancuch. Zwraca CERT_OK albo kod bledu. */
+static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
+                                  const uint8_t *cv, uint32_t cvlen,
+                                  const uint8_t *cv_hash, const char *host,
+                                  const uint8_t *roots, uint32_t roots_len)
+{
+    struct x509_cert chain[CERT_CHAIN_MAX];
+    int n = 0;
+
+    if (certlen < 8)
+        return CERT_ERR_PARSE;
+
+    const uint8_t *p = certmsg + 4;      /* za naglowkiem wiadomosci */
+    const uint8_t *end = certmsg + certlen;
+    p += 1 + p[0];                       /* certificate_request_context */
+    if (p + 3 > end)
+        return CERT_ERR_PARSE;
+    uint32_t list_len = tls_get24(p);
+    p += 3;
+    const uint8_t *list_end = p + list_len;
+    if (list_end > end)
+        list_end = end;
+
+    while (p + 3 <= list_end && n < CERT_CHAIN_MAX) {
+        uint32_t clen = tls_get24(p);
+        p += 3;
+        if (p + clen > list_end)
+            break;
+        if (x509_parse(&chain[n], p, clen) == 0)
+            n++;
+        p += clen;
+        if (p + 2 > list_end)
+            break;
+        uint32_t extlen = tls_get16(p);  /* rozszerzenia wpisu */
+        p += 2 + extlen;
+    }
+    if (!n)
+        return CERT_ERR_PARSE;
+
+    /* CertificateVerify: algorytm, dlugosc, podpis */
+    if (cvlen < 8)
+        return CERT_ERR_PARSE;
+    uint32_t alg = tls_get16(cv + 4);
+    uint32_t siglen = tls_get16(cv + 6);
+    const uint8_t *sig = cv + 8;
+    if (8 + siglen > cvlen)
+        return CERT_ERR_PARSE;
+
+    /* Podpisywana tresc wedlug RFC 8446 4.4.3 */
+    static uint8_t tosign[64 + 34 + 32];
+    uint32_t m = 0;
+    for (int i = 0; i < 64; i++)
+        tosign[m++] = 0x20;
+    const char *label = "TLS 1.3, server CertificateVerify";
+    for (int i = 0; label[i]; i++)
+        tosign[m++] = (uint8_t)label[i];
+    tosign[m++] = 0x00;
+    for (int i = 0; i < 32; i++)
+        tosign[m++] = cv_hash[i];
+
+    uint8_t hash[32];
+    sha256(tosign, m, hash);
+
+    const struct x509_cert *leaf = &chain[0];
+    if (leaf->key_type != X509_KEY_RSA)
+        return CERT_ERR_ALG;             /* ECDSA jeszcze nie umiemy */
+
+    int ok = 0;
+    if (alg == 0x0804)                   /* rsa_pss_rsae_sha256 */
+        ok = rsa_verify_pss_sha256(leaf->mod, leaf->mod_len, leaf->exp,
+                                   sig, siglen, hash, leaf->mod_len * 8);
+    else if (alg == 0x0401)              /* rsa_pkcs1_sha256 */
+        ok = rsa_verify_pkcs1_sha256(leaf->mod, leaf->mod_len, leaf->exp,
+                                     sig, siglen, hash);
+    else
+        return CERT_ERR_ALG;
+
+    if (!ok)
+        return CERT_ERR_SIGNATURE;
+
+    return cert_verify_chain(chain, n, roots, roots_len, host);
+}
+
 /* --- uzgodnienie --- */
 
+/* Zamyka polaczenie po nieudanym uzgodnieniu - inaczej gniazdo TCP
+   zostaje otwarte az do konca zycia procesu (a slotow jest kilka) */
+static inline void tls_abort(struct tls_conn *c)
+{
+    if (c->sock >= 0)
+        tcp_close(c->sock);
+    c->sock = -1;
+    c->established = 0;
+}
+
 static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
-                              const char *sni)
+                              const char *sni, const struct tls_config *cfg)
 {
     static uint8_t msg[TLS_HS_MAX];
     static uint8_t hs[TLS_HS_MAX];
@@ -232,6 +342,8 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
 
     c->error = 0;
     c->established = 0;
+    c->verified = 0;
+    c->verify_err = CERT_ERR_PARSE;
     c->applen = c->appoff = 0;
     c->seq_c = c->seq_s = 0;
 
@@ -319,6 +431,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     tls_put16(rec + 3, n);
     if (tls_write_all(c, rec, 5) < 0 || tls_write_all(c, msg, n) < 0) {
         c->error = "nie udalo sie wyslac ClientHello";
+        tls_abort(c);
         return -1;
     }
 
@@ -329,6 +442,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     if (tls_read_record(c, &type, hdr, msg, &len) < 0 ||
         type != REC_HANDSHAKE || len < 4 || msg[0] != HS_SERVER_HELLO) {
         c->error = "brak ServerHello";
+        tls_abort(c);
         return -1;
     }
     sha256_update(&tr, msg, len);
@@ -338,6 +452,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     p += 32;                             /* random */
     if (p >= len) {
         c->error = "uszkodzony ServerHello";
+        tls_abort(c);
         return -1;
     }
     p += 1 + msg[p];                     /* legacy_session_id */
@@ -346,6 +461,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     p += 1;                              /* kompresja */
     if (suite != TLS_CHACHA20_SHA256) {
         c->error = "serwer wybral inny zestaw szyfrow";
+        tls_abort(c);
         return -1;
     }
 
@@ -371,6 +487,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     }
     if (!have_key) {
         c->error = "ServerHello bez klucza x25519";
+        tls_abort(c);
         return -1;
     }
 
@@ -405,6 +522,11 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     c->seq_c = c->seq_s = 0;
 
     /* --- reszta uzgodnien (juz zaszyfrowana) --- */
+    static uint8_t cert_msg[TLS_HS_MAX];
+    static uint8_t cv_msg[1024];
+    uint32_t cert_msg_len = 0, cv_msg_len = 0;
+    uint8_t cv_hash[32];
+
     uint32_t hslen = 0;
     int finished_seen = 0;
     uint8_t before_finished[32];
@@ -415,7 +537,9 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         if (got < 0) {
             if (!c->error)
                 c->error = "przerwane uzgodnienie";
-            return -1;
+            tls_abort(c);
+            tls_abort(c);
+        return -1;
         }
         if (inner != REC_HANDSHAKE)
             continue;
@@ -431,6 +555,21 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                 break;                   /* wiadomosc jeszcze nie w calosci */
 
             uint8_t mtype = hs[off];
+
+            if (mtype == HS_CERTIFICATE && 4 + mlen <= TLS_HS_MAX) {
+                cert_msg_len = 4 + mlen;
+                for (uint32_t i = 0; i < cert_msg_len; i++)
+                    cert_msg[i] = hs[off + i];
+            } else if (mtype == HS_CERT_VERIFY && 4 + mlen <= sizeof(cv_msg)) {
+                /* podpis pokrywa transkrypt do konca wiadomosci
+                   Certificate - czyli stan sprzed tej wiadomosci */
+                struct sha256 sc = tr;
+                sha256_final(&sc, cv_hash);
+                cv_msg_len = 4 + mlen;
+                for (uint32_t i = 0; i < cv_msg_len; i++)
+                    cv_msg[i] = hs[off + i];
+            }
+
             if (mtype == HS_FINISHED) {
                 struct sha256 s2 = tr;   /* transkrypt bez Finished serwera */
                 sha256_final(&s2, before_finished);
@@ -445,7 +584,10 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                         bad = 1;
                 if (bad) {
                     c->error = "Finished serwera sie nie zgadza";
-                    return -1;
+                    tls_abort(c);
+                    tls_abort(c);
+            tls_abort(c);
+        return -1;
                 }
                 finished_seen = 1;
             }
@@ -463,6 +605,23 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         hslen = rest;
     }
 
+    /* --- czy to na pewno ten serwer? --- */
+    if (cert_msg_len && cv_msg_len) {
+        c->verify_err = tls_check_certs(cert_msg, cert_msg_len, cv_msg,
+                                        cv_msg_len, cv_hash, sni,
+                                        cfg ? cfg->roots : 0,
+                                        cfg ? cfg->roots_len : 0);
+        c->verified = (c->verify_err == CERT_OK);
+    } else {
+        c->verify_err = CERT_ERR_PARSE;
+    }
+
+    if (cfg && cfg->verify && !c->verified) {
+        c->error = cert_error_text(c->verify_err);
+        tls_abort(c);
+        return -1;
+    }
+
     /* --- nasze Finished --- */
     struct sha256 s3 = tr;               /* transkrypt z Finished serwera */
     sha256_final(&s3, transcript);
@@ -478,6 +637,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         fin[4 + i] = verify[i];
     if (tls_send_encrypted(c, REC_HANDSHAKE, fin, 36) < 0) {
         c->error = "nie udalo sie wyslac Finished";
+        tls_abort(c);
         return -1;
     }
 
