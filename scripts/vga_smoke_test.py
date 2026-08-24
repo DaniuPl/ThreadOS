@@ -182,10 +182,26 @@ class Qemu:
         time.sleep(0.1)
 
     def mouse_move(self, dx, dy):
-        self.cmd({"execute": "input-send-event", "arguments": {"events": [
-            {"type": "rel", "data": {"axis": "x", "value": dx}},
-            {"type": "rel", "data": {"axis": "y", "value": dy}}]}})
-        time.sleep(0.2)
+        """Mysz PS/2 przenosi w jednym pakiecie tylko male delty, wiec
+        wieksze skoki dzielimy na kroki - inaczej kursor laduje gdzie
+        indziej, niz chcial test."""
+        while dx or dy:
+            sx = max(-100, min(100, dx))
+            sy = max(-100, min(100, dy))
+            self.cmd({"execute": "input-send-event", "arguments": {"events": [
+                {"type": "rel", "data": {"axis": "x", "value": sx}},
+                {"type": "rel", "data": {"axis": "y", "value": sy}}]}})
+            dx -= sx
+            dy -= sy
+            time.sleep(0.05)
+        time.sleep(0.15)
+
+    def mouse_home(self):
+        """Dosuwa kursor do lewego gornego rogu (kompozytor przytrzymuje
+        go w granicach ekranu) i zeruje sledzona pozycje - kalibracja
+        przed klikaniem w konkretne miejsca."""
+        self.mouse_move(-800, -600)
+        self.mx, self.my = 0, 0
 
     def mouse_button(self, down):
         self.cmd({"execute": "input-send-event", "arguments": {"events": [

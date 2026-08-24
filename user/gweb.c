@@ -77,22 +77,46 @@ static int parse_addr(uint32_t *ip, uint32_t *port, char *path, int path_max)
     return *ip && *port ? 1 : 0;
 }
 
-/* Wycina znaczniki HTML i sklada biale znaki - prosty czytnik tekstu */
+/* Czy w miejscu i zaczyna sie znacznik o podanej nazwie? */
+static int tag_is(int i, const char *name)
+{
+    int k = 0;
+    while (name[k]) {
+        char c = page[i + k];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c + 32);
+        if (c != name[k])
+            return 0;
+        k++;
+    }
+    char after = page[i + k];
+    return after == '>' || after == ' ' || after == '\n' || after == '\r';
+}
+
+/* Wycina znaczniki HTML i sklada biale znaki - prosty czytnik tekstu.
+   Zawartosc <title>, <script> i <style> pomijamy: to nie jest tresc
+   strony, tylko jej metryczka i kod. */
 static void strip_html(void)
 {
-    int out = 0, in_tag = 0, space = 1;
+    int out = 0, in_tag = 0, space = 1, skip = 0;
 
     for (int i = 0; i < page_len && out < PAGE_MAX - 1; i++) {
         char c = page[i];
         if (c == '<') {
             in_tag = 1;
+            if (tag_is(i + 1, "title") || tag_is(i + 1, "script") ||
+                tag_is(i + 1, "style"))
+                skip = 1;
+            else if (tag_is(i + 2, "title") || tag_is(i + 2, "script") ||
+                     tag_is(i + 2, "style"))
+                skip = 0;                 /* znacznik zamykajacy </...> */
             continue;
         }
         if (c == '>') {
             in_tag = 0;
             continue;
         }
-        if (in_tag)
+        if (in_tag || skip)
             continue;
         if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
             if (!space) {
@@ -219,22 +243,39 @@ static void fetch(void)
     set_status(st);
 }
 
-/* Rysuje tresc zawijana na COLS znakow */
+/* Rysuje tresc zawijana na granicach slow (lamanie w srodku wyrazu
+   robi sie nieczytelne przy czcionce 8x8) */
 static void draw_page(int w)
 {
     char linebuf[COLS + 1];
-    int col = 0, row = 0, y = 30;
+    int col = 0, row = 0, y = 30, i = 0;
 
-    for (int i = 0; i < text_len && row < ROWS; i++) {
-        linebuf[col++] = text[i];
-        if (col == COLS) {
-            linebuf[col] = '\0';
+    while (i < text_len && row < ROWS) {
+        /* dlugosc najblizszego slowa */
+        int wlen = 0;
+        while (i + wlen < text_len && text[i + wlen] != ' ')
+            wlen++;
+
+        if (wlen > COLS) {               /* slowo dluzsze niz wiersz */
+            wlen = COLS - col;
+        } else if (col && col + 1 + wlen > COLS) {
+            linebuf[col] = '\0';         /* nie miesci sie - nowy wiersz */
             win_text(w, 4, y, linebuf, C_WHITE);
             y += 10;
             row++;
             col = 0;
+            continue;
         }
+
+        if (col)
+            linebuf[col++] = ' ';
+        for (int k = 0; k < wlen && col < COLS; k++)
+            linebuf[col++] = text[i + k];
+        i += wlen;
+        while (i < text_len && text[i] == ' ')
+            i++;
     }
+
     if (col && row < ROWS) {
         linebuf[col] = '\0';
         win_text(w, 4, y, linebuf, C_WHITE);
