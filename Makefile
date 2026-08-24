@@ -114,7 +114,7 @@ $(KERNEL): $(OBJS) linker.ld
 $(BUILD)/user: | $(BUILD)
 	mkdir -p $(BUILD)/user
 
-$(BUILD)/user/%.elf: user/%.c user/usys.h user/user.ld | $(BUILD)/user
+$(BUILD)/user/%.elf: user/%.c user/usys.h user/udns.h user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py

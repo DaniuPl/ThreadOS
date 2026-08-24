@@ -68,12 +68,70 @@ PAGE = b"<html>ProtonOS TCP dziala</html>\n"
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
 
 
+def start_dns_server(answer_ip=(10, 0, 2, 2)):
+    """Prosciutki serwer DNS na hoscie: na kazde pytanie o rekord A
+    odpowiada tym samym adresem. Dzieki temu sciezka 'nazwa -> adres'
+    da sie sprawdzic bez zadnej sieci na zewnatrz."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("0.0.0.0", 53))
+    stop = threading.Event()
+
+    def serve():
+        sock.settimeout(0.5)
+        while not stop.is_set():
+            try:
+                data, addr = sock.recvfrom(512)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if len(data) < 12:
+                continue
+            # pytanie konczy sie zerowym bajtem nazwy + QTYPE + QCLASS
+            i = 12
+            while i < len(data) and data[i]:
+                i += data[i] + 1
+            qend = i + 5
+            header = data[:2] + b"\x81\x80" + data[4:6] + b"\x00\x01" \
+                     + b"\x00\x00\x00\x00"
+            answer = (b"\xc0\x0c"            # wskaznik na nazwe z pytania
+                      + b"\x00\x01\x00\x01"  # typ A, klasa IN
+                      + b"\x00\x00\x00\x3c"  # TTL 60 s
+                      + b"\x00\x04" + bytes(answer_ip))
+            sock.sendto(header + data[12:qend] + answer, addr)
+        sock.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return stop.set
+
+
 def start_http_server():
     """Serwer HTTP na hoscie - guest siega do niego przez brame slirpa
     (10.0.2.2), wiec test TCP nie potrzebuje zadnej sieci na zewnatrz."""
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def do_GET(self):
+            if self.path.startswith("/stara"):      # przekierowanie
+                self.send_response(302)
+                self.send_header("Location", "/kawalki")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            if self.path.startswith("/kawalki"):    # kodowanie chunked
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                for i in range(0, len(PAGE), 7):    # celowo male kawalki
+                    part = PAGE[i:i + 7]
+                    self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
+                self.wfile.write(b"0\r\n\r\n")
+                return
+
             body = BIG_PAGE if self.path.startswith("/duza") else PAGE
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -598,22 +656,19 @@ def main():
               "nie udalo sie otworzyc gniazda" not in again)
         q.type_line("kill udpecho")
 
-        # DNS z ring 3 przez serwer podany w DHCP. Slirp przekazuje
-        # zapytanie do resolvera hosta - gdy maszyna jest offline,
-        # program ma czysto zglosic brak odpowiedzi, a nie zawiesic sie.
-        q.type_line("run nslookup example.com")
-        dns = q.wait_for("[nslookup] pytam 10.0.2.3", timeout=10)
-        for _ in range(30):
-            dns = q.screen()
-            if "ma adres" in dns or "nslookup] brak" in dns or \
-               "nslookup] nazwa" in dns or "nslookup] serwer" in dns:
-                break
-            time.sleep(0.4)
-        resolved = "example.com ma adres" in dns
-        check("nslookup: odpowiedz DNS albo czysty timeout (offline)",
-              resolved or "[nslookup] brak odpowiedzi" in dns)
-        print("      (DNS " + ("odpowiedzial" if resolved
-                               else "niedostepny - sprawdzono sciezke bledu") + ")")
+        # DNS z ring 3. Pytamy wlasny serwer stojacy na hoscie (10.0.2.2),
+        # wiec test nie zalezy od internetu ani od resolvera maszyny.
+        dns_stop = start_dns_server()
+        try:
+            q.type_line("clear")
+            q.type_line("dns 10.0.2.2")
+            q.wait_for("serwer DNS ustawiony", timeout=10)
+            q.type_line("run nslookup protonos.test")
+            dns = q.wait_for("ma adres", timeout=20)
+            check("nslookup rozwiazal nazwe przez wskazany serwer DNS",
+                  "protonos.test ma adres 10.0.2.2" in dns)
+        finally:
+            dns_stop()
 
         # TCP jako klient: po drugiej stronie stoi prawdziwy stos
         # (serwer HTTP w Pythonie na hoscie), a nie nasza wlasna petla
@@ -621,9 +676,9 @@ def main():
         try:
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /" % http_port)
-            page = q.wait_for("odebrano", timeout=30)
+            page = q.wait_for("tresc ", timeout=30)
             check("TCP: handshake i odpowiedz HTTP 200",
-                  "HTTP/1.0 200 OK" in page)
+                  "[httpget] HTTP 200" in page)
             check("TCP: tresc strony dotarla w calosci",
                   "ProtonOS TCP dziala" in page)
             check("httpget zakonczyl sie bez bledu",
@@ -632,7 +687,7 @@ def main():
             # Siec -> dysk: tresc HTTP zapisana na PFS i odczytana z niego
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d / strona.htm" % http_port)
-            q.wait_for("odebrano", timeout=30)
+            q.wait_for("tresc ", timeout=30)
             q.type_line("cat strona.htm")
             saved = q.wait_for("ProtonOS TCP dziala", timeout=10)
             check("tresc z sieci zapisana na PFS i odczytana z dysku",
@@ -643,12 +698,11 @@ def main():
             # PFS3: plik grubo ponad stary limit 16 KiB na plik
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /duza duza.htm" % http_port)
-            big = q.wait_for("odebrano", timeout=90)
-            # httpget liczy wszystko, co przyszlo z sieci - razem z
-            # naglowkami HTTP, wiec liczba jest nieco wieksza od strony
-            got = re.search(r"odebrano (\d+) B", big)
+            big = q.wait_for("tresc ", timeout=90)
+            # httpget podaje dlugosc samej tresci (bez naglowkow)
+            got = re.search(r"tresc (\d+) B", big)
             check("duza strona pobrana w calosci (%d B tresci)" % len(BIG_PAGE),
-                  got is not None and int(got.group(1)) >= len(BIG_PAGE))
+                  got is not None and int(got.group(1)) == len(BIG_PAGE))
             q.type_line("fls")
             listing = q.wait_for("duza.htm", timeout=10)
             check("plik ponad stary limit 16 KiB zapisany na PFS",
@@ -657,6 +711,18 @@ def main():
             usage = q.wait_for("dysk: ", timeout=10)
             check("df pokazuje zajetosc dysku w blokach",
                   "bloki po 1024 B" in usage and "zajete" in usage)
+
+            # HTTP/1.1: przekierowanie 302 i tresc w kawalkach (chunked) -
+            # tak odpowiada wiekszosc prawdziwych serwerow
+            q.type_line("clear")
+            q.type_line("run httpget 10.0.2.2 %d /stara" % http_port)
+            hop = q.wait_for("tresc ", timeout=30)
+            check("klient idzie za przekierowaniem 302",
+                  "przekierowanie -> /kawalki" in hop)
+            check("tresc w kawalkach (chunked) zlozona poprawnie",
+                  "HTTP 200 (chunked), tresc %d B" % len(PAGE) in hop)
+            check("tresc po zlozeniu jest cala",
+                  "ProtonOS TCP dziala" in hop)
         finally:
             http_stop()
 
@@ -967,10 +1033,17 @@ def main():
     with open(wdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
     http_port, http_stop = start_http_server()
+    dns_stop = start_dns_server()
     q_web = Qemu(KERNEL, INITRD, wdisk)
     try:
         q_web.wait_desktop()
         time.sleep(2.0)                  # chwila na dzierzawe DHCP
+
+        # Serwer DNS hosta: przegladarka bedzie szukac adresu po nazwie.
+        # Komenda idzie do shella jadra - w trybie graficznym slucha on
+        # klawiatury, dopoki zadne okno nie ma fokusu.
+        q_web.type_line("dns 10.0.2.2")
+        time.sleep(0.5)
         time.sleep(1.0)
         q_web.type_line("run gweb")
         time.sleep(1.5)
@@ -990,7 +1063,7 @@ def main():
 
         for _ in range(20):              # skasuj domyslny adres
             q_web.sendkey("backspace")
-        for ch in "10.0.2.2:%d/" % http_port:
+        for ch in "protonos.test:%d/" % http_port:   # adres po nazwie
             q_web.sendkey(Qemu.KEYNAMES.get(ch, ch))
         q_web.sendkey("ret")
 
@@ -1000,10 +1073,12 @@ def main():
                 shown = True
                 break
             time.sleep(0.4)
-        check("przegladarka pobrala strone i narysowala tekst w oknie", shown)
+        check("przegladarka rozwiazala nazwe, pobrala strone i "
+              "narysowala tekst", shown)
     finally:
         q_web.close()
         http_stop()
+        dns_stop()
 
     # Ten sam dysk w trybie tekstowym: tresc ze swiata przezyla restart
     q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE)

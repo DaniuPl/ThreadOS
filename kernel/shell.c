@@ -39,32 +39,63 @@ static void prompt(void)
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
+/* Lista komend rosnie, a ekran ma 25 wierszy - dlatego dwie kolumny:
+   caly spis miesci sie bez przewijania. */
+static const struct {
+    const char *name;
+    const char *desc;
+} commands[] = {
+    {"help",     "ta pomoc"},
+    {"ps",       "watki jadra"},
+    {"ls",       "pliki w initrd"},
+    {"run X",    "uruchom program X"},
+    {"fls",      "pliki na dysku"},
+    {"cat F",    "wypisz plik"},
+    {"write F",  "zapisz tekst do pliku"},
+    {"df",       "zajetosc dysku"},
+    {"mem",      "uzycie pamieci"},
+    {"uptime",   "czas od startu"},
+    {"date",     "data i godzina (RTC)"},
+    {"mouse",    "pozycja myszy"},
+    {"ifconfig", "karta sieciowa"},
+    {"arp",      "tablica ARP"},
+    {"ping IP",  "4 pakiety ICMP"},
+    {"dns IP",   "ustaw serwer DNS"},
+    {"netstat",  "polaczenia TCP"},
+    {"dhcp",     "adres IP z sieci"},
+    {"desktop",  "pulpit graficzny"},
+    {"kill P",   "zabij proces (pid/nazwa)"},
+    {"clear",    "wyczysc ekran"},
+    {"gfx",      "test trybu 13h"},
+    {"vesa",     "test trybu VESA"},
+    {"crash",    "test page faulta"},
+    {"reboot",   "restart komputera"},
+};
+
+#define COMMAND_N ((int)(sizeof(commands) / sizeof(commands[0])))
+
+static void print_padded(const char *s, int width)
+{
+    printk("%s", s);
+    for (int i = (int)strlen(s); i < width; i++)
+        printk(" ");
+}
+
 static void cmd_help(void)
 {
-    printk("Dostepne komendy:\n"
-           "  help    - ta pomoc\n"
-           "  ps      - lista watkow jadra\n"
-           "  ls      - pliki w initrd\n"
-           "  run X   - uruchom program X z initrd (proces ring 3)\n"
-           "  fls     - pliki na dysku (PFS)\n"
-           "  cat F   - wypisz plik z dysku\n"
-           "  write F txt - zapisz tekst do pliku na dysku\n"
-           "  df      - zajetosc dysku\n"
-           "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
-           "  uptime  - czas od startu systemu\n"
-           "  date    - data i godzina z RTC\n"
-           "  mouse   - pozycja i przyciski myszy\n"
-           "  ifconfig- karta sieciowa: MAC, IP, statystyki\n"
-           "  arp     - tablica ARP (IP -> MAC)\n"
-           "  ping IP - wyslij 4 pakiety ICMP echo, np. ping 10.0.2.2\n"
-           "  dhcp    - pobierz adres IP z sieci (DHCP)\n"
-           "  netstat - polaczenia TCP\n"
-           "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
-           "  desktop - graficzny pulpit z kursorem myszy\n"
-           "  kill P  - zabij proces (pid albo nazwa)\n"
-           "  clear   - wyczysc ekran\n"
-           "  crash   - test page faulta (zatrzymuje system!)\n"
-           "  reboot  - restart komputera\n");
+    int rows = (COMMAND_N + 1) / 2;
+    printk("Dostepne komendy:\n");
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < 2; c++) {
+            int i = r + c * rows;
+            if (i >= COMMAND_N)
+                break;
+            printk("  ");
+            print_padded(commands[i].name, 10);
+            print_padded(commands[i].desc, c ? 0 : 25);
+        }
+        printk("\n");
+    }
 }
 
 static void cmd_mem(void)
@@ -227,6 +258,19 @@ static void dhcp_thread_cmd(void *arg)
     shell_refresh();
 }
 
+static void cmd_dns(const char *arg)
+{
+    uint32_t ip;
+    if (!net_parse_ip(arg, &ip)) {
+        printk("uzycie: dns <adres ip serwera>\n");
+        return;
+    }
+    net_set_dns(ip);
+    printk("serwer DNS ustawiony na ");
+    net_print_ip(ip);
+    printk("\n");
+}
+
 static void cmd_ping(const char *arg)
 {
     uint32_t ip;
@@ -291,6 +335,8 @@ static void run_command(char *cmd)
         net_arp_dump();
     else if (!strcmp(cmd, "netstat"))
         tcp_dump();
+    else if (!strcmp(cmd, "dns"))
+        cmd_dns(arg);
     else if (!strcmp(cmd, "dhcp"))
         task_create("dhcp", dhcp_thread_cmd, 0);
     else if (!strcmp(cmd, "ping"))

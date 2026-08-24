@@ -20,6 +20,7 @@ uint32_t net_gw(void);
 uint32_t net_dns(void);
 int net_configured(void);            /* czy system ma juz adres IP */
 void net_set_config(uint32_t ip, uint32_t mask, uint32_t gw, uint32_t dns);
+void net_set_dns(uint32_t ip);       /* reczna zmiana serwera DNS */
 void net_use_fallback(void);         /* statyczna konfiguracja awaryjna */
 
 /* "10.0.2.2" -> 0x0A000202; zwraca 1 przy sukcesie */

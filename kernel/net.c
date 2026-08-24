@@ -183,6 +183,13 @@ void net_set_config(uint32_t ip, uint32_t mask, uint32_t gw, uint32_t dns)
         arp_cache[i].used = 0;
 }
 
+/* Reczne wskazanie serwera DNS (komenda 'dns') - przydaje sie, gdy
+   DHCP go nie podal albo chcemy odpytac inny */
+void net_set_dns(uint32_t ip)
+{
+    my_dns = ip;
+}
+
 void net_use_fallback(void)
 {
     net_set_config(FALLBACK_IP, FALLBACK_MASK, FALLBACK_GW, 0);

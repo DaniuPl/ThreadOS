@@ -1,15 +1,17 @@
 /* gweb - przegladarka w oknie pulpitu (ring 3)
  *
- * Wpisz adres w postaci ip[:port][/sciezka] i nacisnij Enter: program
- * laczy sie po TCP, wysyla zadanie HTTP/1.0, obdziera odpowiedz z
- * naglowkow i znacznikow HTML, po czym rysuje tekst w oknie i zapisuje
- * cala tresc na dysk (plik 'strona.htm').
+ * Wpisz adres w postaci host[:port][/sciezka] i nacisnij Enter: program
+ * rozwiazuje nazwe przez DNS (albo bierze podany adres IP), laczy sie po
+ * TCP, wysyla zadanie HTTP/1.0, obdziera odpowiedz z naglowkow i
+ * znacznikow HTML, po czym rysuje tekst w oknie i zapisuje cala tresc
+ * na dysk (plik 'strona.htm').
  *
  * Spina cztery warstwy naraz: klawiature i kompozytor pulpitu, TCP,
  * system plikow i procesy ring 3.
  */
 
 #include "usys.h"
+#include "uhttp.h"
 
 #define W 320
 #define H 200
@@ -33,7 +35,7 @@ static int page_len;
 static char text[PAGE_MAX];   /* tresc po odarciu ze znacznikow */
 static int text_len;
 
-static char status[64] = "Wpisz adres i nacisnij Enter";
+static char status[64] = "Wpisz adres (nazwa albo IP) i nacisnij Enter";
 
 static void set_status(const char *s)
 {
@@ -43,38 +45,6 @@ static void set_status(const char *s)
         i++;
     }
     status[i] = '\0';
-}
-
-/* Rozbija "ip[:port][/sciezka]" na czesci. 0 = zly adres. */
-static int parse_addr(uint32_t *ip, uint32_t *port, char *path, int path_max)
-{
-    char host[32];
-    int h = 0, i = 0;
-
-    while (addr[i] && addr[i] != ':' && addr[i] != '/' &&
-           h < (int)sizeof(host) - 1)
-        host[h++] = addr[i++];
-    host[h] = '\0';
-
-    *port = 80;
-    if (addr[i] == ':') {
-        i++;
-        uint32_t p = 0;
-        while (addr[i] >= '0' && addr[i] <= '9')
-            p = p * 10 + (uint32_t)(addr[i++] - '0');
-        *port = p;
-    }
-
-    int t = 0;
-    if (addr[i] == '/')
-        while (addr[i] && t < path_max - 1)
-            path[t++] = addr[i++];
-    if (!t)
-        path[t++] = '/';
-    path[t] = '\0';
-
-    *ip = uparse_ip(host);
-    return *ip && *port ? 1 : 0;
 }
 
 /* Czy w miejscu i zaczyna sie znacznik o podanej nazwie? */
@@ -118,6 +88,43 @@ static void strip_html(void)
         }
         if (in_tag || skip)
             continue;
+        if (c == '&') {                  /* encja: &amp; &nbsp; &#39; ... */
+            int j = i + 1, len = 0;
+            char ent[10];
+            while (j < page_len && page[j] != ';' && len < 9 &&
+                   page[j] != ' ' && page[j] != '<')
+                ent[len++] = page[j++];
+            ent[len] = '\0';
+            if (j < page_len && page[j] == ';') {
+                i = j;                   /* zjedz cala encje */
+                char rep = 0;
+                if (ent[0] == 'a' && ent[1] == 'm')       rep = '&';
+                else if (ent[0] == 'l' && ent[1] == 't')  rep = '<';
+                else if (ent[0] == 'g' && ent[1] == 't')  rep = '>';
+                else if (ent[0] == 'q')                   rep = '"';
+                else if (ent[0] == '#')                   rep = '?';
+                else if (ent[0] == 'n' && ent[1] == 'b')  rep = ' ';
+                else                                      rep = '?';
+                if (rep == ' ') {
+                    if (!space) {
+                        text[out++] = ' ';
+                        space = 1;
+                    }
+                } else {
+                    text[out++] = rep;
+                    space = 0;
+                }
+                continue;
+            }
+        }
+        if ((unsigned char)c >= 0x80) {   /* UTF-8: font ma tylko ASCII */
+            /* bajty kontynuacji pomijamy, pierwszy zamieniamy na kropke */
+            if (((unsigned char)c & 0xC0) != 0x80) {
+                text[out++] = '.';
+                space = 0;
+            }
+            continue;
+        }
         if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
             if (!space) {
                 text[out++] = ' ';
@@ -132,76 +139,60 @@ static void strip_html(void)
     text_len = out;
 }
 
+/* Odbiera tresc strumieniem do bufora strony */
+static void page_sink(const char *data, uint32_t len, void *arg)
+{
+    (void)arg;
+    for (uint32_t i = 0; i < len && page_len < PAGE_MAX - 1; i++)
+        page[page_len++] = data[i];
+}
+
 static void fetch(void)
 {
-    uint32_t ip, port;
-    char path[64];
+    char host[64];
+    char path[96];
+    uint32_t port = 80;
 
     page_len = 0;
     text_len = 0;
     text[0] = '\0';
 
-    if (!parse_addr(&ip, &port, path, sizeof(path))) {
-        set_status("Zly adres (uzyj ip[:port][/sciezka])");
+    if (!http_parse_url(addr, host, sizeof(host), &port, path, sizeof(path))) {
+        set_status("Zly adres");
         return;
     }
 
-    set_status("Lacze...");
-    int32_t conn = tcp_connect(ip, port, 5000);
-    if (conn < 0) {
-        set_status("Nie udalo sie polaczyc");
-        return;
-    }
+    struct http_result res;
+    res.status = 0;
+    res.body_len = 0;
 
-    static char req[192];
-    int r = 0;
-    const char *p1 = "GET ";
-    while (*p1)
-        req[r++] = *p1++;
-    for (int i = 0; path[i]; i++)
-        req[r++] = path[i];
-    const char *p2 = " HTTP/1.0\r\nHost: protonos\r\nConnection: close\r\n\r\n";
-    while (*p2)
-        req[r++] = *p2++;
-
-    if (tcp_send(conn, req, (uint32_t)r, 5000) < 0) {
-        tcp_close(conn);
-        set_status("Blad wysylania zadania");
-        return;
-    }
-
-    static char chunk[512];
-    int header_done = 0;
-    int status_code = 0;
-
-    for (;;) {
-        int32_t n = tcp_recv(conn, chunk, sizeof(chunk), 8000);
-        if (n <= 0)
-            break;                        /* 0 = koniec, -1 = timeout */
-
-        int start = 0;
-        if (!header_done) {
-            if (!status_code && n > 12) {  /* "HTTP/1.x 200 ..." */
-                status_code = (chunk[9] - '0') * 100 + (chunk[10] - '0') * 10 +
-                              (chunk[11] - '0');
-            }
-            for (int i = 0; i + 3 < n; i++) {
-                if (chunk[i] == '\r' && chunk[i + 1] == '\n' &&
-                    chunk[i + 2] == '\r' && chunk[i + 3] == '\n') {
-                    start = i + 4;
-                    header_done = 1;
-                    break;
-                }
-            }
-            if (!header_done)
-                continue;
+    for (int hop = 0; hop < 3; hop++) {
+        set_status("Szukam adresu...");
+        uint32_t ip = http_resolve(host);
+        if (!ip) {
+            set_status("Nie znam takiej nazwy");
+            return;
         }
-        for (int i = start; i < n && page_len < PAGE_MAX - 1; i++)
-            page[page_len++] = chunk[i];
-    }
-    tcp_close(conn);
-    page[page_len] = '\0';
 
+        set_status("Lacze...");
+        if (http_get(ip, port, host, path, page_sink, 0, &res) < 0) {
+            set_status("Nie udalo sie polaczyc");
+            return;
+        }
+
+        int redirect = (res.status == 301 || res.status == 302 ||
+                        res.status == 307 || res.status == 308);
+        if (!redirect || !res.location[0])
+            break;
+
+        page_len = 0;                    /* strona przekierowania nas nie interesuje */
+        if (!http_apply_location(res.location, host, sizeof(host), &port,
+                                 path, sizeof(path)))
+            break;
+        set_status("Przekierowanie...");
+    }
+
+    page[page_len] = '\0';
     if (!page_len) {
         set_status("Pusta odpowiedz");
         return;
@@ -217,16 +208,16 @@ static void fetch(void)
     strip_html();
 
     char st[64];
-    int s = 0;
+    int i = 0;
     const char *lead = "HTTP ";
     while (*lead)
-        st[s++] = *lead++;
-    st[s++] = (char)('0' + (status_code / 100) % 10);
-    st[s++] = (char)('0' + (status_code / 10) % 10);
-    st[s++] = (char)('0' + status_code % 10);
-    const char *tail = ", ";
-    while (*tail)
-        st[s++] = *tail++;
+        st[i++] = *lead++;
+    st[i++] = (char)('0' + (res.status / 100) % 10);
+    st[i++] = (char)('0' + (res.status / 10) % 10);
+    st[i++] = (char)('0' + res.status % 10);
+    const char *sep = res.chunked ? " chunked, " : ", ";
+    while (*sep)
+        st[i++] = *sep++;
     uint32_t v = (uint32_t)page_len;
     char digits[10];
     int d = 0;
@@ -235,11 +226,11 @@ static void fetch(void)
         v /= 10;
     } while (v);
     while (d)
-        st[s++] = digits[--d];
+        st[i++] = digits[--d];
     const char *end = " B -> strona.htm";
     while (*end)
-        st[s++] = *end++;
-    st[s] = '\0';
+        st[i++] = *end++;
+    st[i] = '\0';
     set_status(st);
 }
 

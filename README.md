@@ -80,6 +80,8 @@ ProtonOS/
 │   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
 │   ├── udpecho.c       # serwer UDP w ring 3 (odsyła, co dostał)
 │   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
+│   ├── udns.h          # klient DNS dla programów (wspólny dla nslookup/gweb)
+│   ├── uhttp.h         # klient HTTP/1.1: chunked, przekierowania, URL-e
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
@@ -141,6 +143,12 @@ Programy w ring 3 mają własne gniazda UDP: `run udpecho` nasłuchuje na
 porcie 7777, `run udptest` wysyła do niego datagram (domyślnie przez pętlę
 zwrotną, więc działa i bez sieci), a `run nslookup example.com` pyta
 o adres serwer DNS przyznany przez DHCP.
+
+Adresy można podawać po nazwie - `nslookup`, `httpget` i przeglądarka
+pytają serwer DNS przyznany przez DHCP (albo wskazany ręcznie: `dns 1.1.1.1`).
+Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
+(`Transfer-Encoding: chunked`) i idzie za przekierowaniami 301/302/307/308,
+także względnymi.
 
 TCP działa w obie strony. Jako klient: `run httpget 10.0.2.2 8000 /`
 pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
@@ -297,3 +305,9 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       bloku i-węzłów i bitmapy
 - [x] TCP: aktualizacja okna po odczycie z gniazda - odbiór dużych
       odpowiedzi nie czeka już na probnik nadawcy (100 KiB w kilka sekund)
+- [x] Nazwy zamiast adresów: wspólny klient DNS (`udns.h`) w `nslookup`
+      i przeglądarce, ręczne wskazanie serwera komendą `dns`
+- [x] Klient HTTP/1.1 (`uhttp.h`): kodowanie `chunked` sklejane przez
+      granice pakietów, przekierowania (bezwzględne i względne), rozbiór
+      `http://host[:port]/ścieżka`; w przeglądarce encje HTML (`&amp;`)
+      i bajty UTF-8 zamieniane na czytelne znaki
