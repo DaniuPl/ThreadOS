@@ -45,7 +45,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
-             $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf
+             $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf \
+             $(BUILD)/user/gweb.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -135,7 +136,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
-	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf
+	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
+	    gweb=$(BUILD)/user/gweb.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)

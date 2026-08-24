@@ -83,6 +83,7 @@ ProtonOS/
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
+│   ├── gweb.c          # przeglądarka w oknie: adres -> TCP -> tekst + PFS
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
@@ -143,6 +144,11 @@ pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
 strona.htm` zapisuje samą treść na dysk (PFS). Jako serwer: `run tcpserv`
 nasłuchuje na porcie 5555, który `make run` wystawia na hosta - można się
 połączyć zwykłym `nc localhost 5555`. Stan połączeń pokazuje `netstat`.
+
+Na pulpicie jest też **przeglądarka** (`gweb`, ikona `Web` albo wpis w menu):
+wpisujesz adres w postaci `ip[:port][/ścieżka]`, a program pobiera stronę po
+TCP, obdziera ją ze znaczników HTML, rysuje tekst w oknie i zapisuje treść
+na dysk jako `strona.htm`.
 
 `make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
 formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
@@ -272,3 +278,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       syscalle `tcp_connect`/`listen`/`accept`/`send`/`recv`/`close`,
       klient HTTP (`httpget` - treść ze świata ląduje na PFS) i serwer
       w ring 3 (`tcpserv`), podgląd przez `netstat`
+- [x] Przeglądarka w oknie pulpitu (`gweb`): pasek adresu z klawiatury,
+      pobranie strony po TCP, wycięcie znaczników HTML, tekst zawijany
+      w oknie i zapis treści na PFS - sieć, GUI, klawiatura i dysk
+      w jednej aplikacji ring 3

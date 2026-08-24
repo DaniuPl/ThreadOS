@@ -45,6 +45,7 @@ static struct icon icons[] = {
     {8, 100, "Pliki", "gfiles"},
     {8, 140, "Monitor", "gmon"},
     {8, 180, "Term", "gterm"},
+    {8, 220, "Web", "gweb"},
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
@@ -126,7 +127,7 @@ static int focus_idx = -1;  /* okno z fokusem klawiatury */
 #define MENU_ROW 12                   /* wysokosc wpisu menu */
 #define MENU_W 80                     /* szerokosc rozwinietego menu */
 static int menu_open;
-static const char *menu_items[] = {"guiapp", "gclock", "gfiles"};
+static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 static int taskbar_y(void) { return video_h() - TB_H; }

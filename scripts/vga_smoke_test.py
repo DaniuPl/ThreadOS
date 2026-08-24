@@ -41,6 +41,19 @@ VGA_BYTES = 80 * 25 * 2
 VIDEO_W = 320
 VIDEO_H = 200
 
+# Geometria menu pulpitu (kernel/desktop.c): wpisy rosna w gore od paska
+# zadan, wiec kazdy nowy program przesuwa poprzednie. Trzymamy to w
+# jednym miejscu, zeby dodanie aplikacji nie psulo testow klikania.
+MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
+MENU_ROW = 12
+MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
+
+
+def menu_y(name):
+    """Srodek wpisu menu o danej nazwie (wspolrzedne ekranu 640x480)."""
+    idx = MENU_ITEMS.index(name)
+    return MENU_TASKBAR_Y - (len(MENU_ITEMS) - idx) * MENU_ROW + MENU_ROW // 2
+
 
 PAGE = b"<html>ProtonOS TCP dziala</html>\n"
 
@@ -230,6 +243,7 @@ class Qemu:
         return w, h, at
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
+                ":": "shift-semicolon",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
                 "|": "shift-backslash", "&": "shift-7"}
 
@@ -877,6 +891,64 @@ def main():
     finally:
         q_srv.close()
 
+    # --- Przegladarka w oknie pulpitu (siec -> GUI -> dysk) ---
+    print("--- pulpit: przegladarka (gweb) ---")
+    wdisk = tempfile.mktemp(suffix=".img")
+    with open(wdisk, "wb") as f:
+        f.write(b"\0" * (1024 * 1024))
+    http_port, http_stop = start_http_server()
+    q_web = Qemu(KERNEL, INITRD, wdisk)
+    try:
+        q_web.wait_for("ProtonOS shell")
+        q_web.wait_for("[siec] DHCP", timeout=20)
+        q_web.type_line("desktop")
+        time.sleep(1.0)
+        q_web.type_line("run gweb")
+        time.sleep(1.5)
+
+        def page_white():
+            _, _, a = q_web.screen_raw()
+            return sum(1 for y in range(100, 250) for x in range(96, 400)
+                       if a(x, y) == (255, 255, 255))
+
+        before = page_white()
+
+        # Klik w okno daje mu fokus klawiatury; potem kursor na bok
+        q_web.mouse_goto(150, 120)
+        q_web.mouse_click()
+        q_web.mouse_goto(400, 350)
+        time.sleep(0.3)
+
+        for _ in range(20):              # skasuj domyslny adres
+            q_web.sendkey("backspace")
+        for ch in "10.0.2.2:%d/" % http_port:
+            q_web.sendkey(Qemu.KEYNAMES.get(ch, ch))
+        q_web.sendkey("ret")
+
+        shown = False
+        for _ in range(25):
+            if page_white() > before + 50:
+                shown = True
+                break
+            time.sleep(0.4)
+        check("przegladarka pobrala strone i narysowala tekst w oknie", shown)
+    finally:
+        q_web.close()
+        http_stop()
+
+    # Ten sam dysk w trybie tekstowym: tresc ze swiata przezyla restart
+    q_web2 = Qemu(KERNEL, INITRD, wdisk)
+    try:
+        q_web2.wait_for("ProtonOS shell")
+        q_web2.type_line("cat strona.htm")
+        saved = q_web2.wait_for("ProtonOS TCP dziala", timeout=10)
+        check("strona zapisana przez przegladarke przezyla restart",
+              "<html>ProtonOS TCP dziala</html>" in saved)
+    finally:
+        q_web2.close()
+        if os.path.exists(wdisk):
+            os.unlink(wdisk)
+
     # --- Persystencja: drugi boot na TYM SAMYM dysku ---
     print("--- drugi boot (ten sam dysk) ---")
     q2 = Qemu(KERNEL, INITRD, disk)
@@ -1135,20 +1207,20 @@ def main():
         check("przed launchem brak okna aplikacji (101,71 nie czerwone)",
               not near(at(101, 71), (255, 0, 0)))
 
-        # Menu ma 3 wpisy (guiapp/gclock/gfiles): entry0 'guiapp' y432..444
+        # Wpisy menu liczone z MENU_ITEMS (patrz menu_y)
         q8.mouse_goto(10, 472)
         q8.mouse_click()
-        check("klik 'Menu' rozwija menu (wpis szary 70,438)",
-              q8.wait_pixel(70, 438, (224, 224, 224)))
+        check("klik 'Menu' rozwija menu (wpis szary)",
+              q8.wait_pixel(70, menu_y("guiapp"), (224, 224, 224)))
 
         # Klik wpisu 'guiapp' (entry0) -> uruchamia aplikacje
-        q8.mouse_goto(40, 438)
+        q8.mouse_goto(40, menu_y("guiapp"))
         q8.mouse_click()
         check("wybor z menu uruchamia aplikacje (czerwony kwadrat 101,71)",
               q8.wait_pixel(101, 71, (255, 0, 0)))
         _, _, at = q8.screen_raw()
-        check("menu zamyka sie po wyborze (70,438 nie szare menu)",
-              not near(at(70, 438), (224, 224, 224)))
+        check("menu zamyka sie po wyborze (wpis znika)",
+              not near(at(70, menu_y("guiapp")), (224, 224, 224)))
 
         # Lista okien na pasku zadan: przyciski Terminal/Pliki/guiapp.
         # guiapp jest na wierzchu (swiezo uruchomione) - czerwony przy (101,71).
@@ -1179,10 +1251,10 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # Menu -> wpis 'gfiles' (entry2, y456..468)
+        # Menu -> wpis 'gfiles'
         q9.mouse_goto(10, 472)
         q9.mouse_click()
-        q9.mouse_goto(40, 462)
+        q9.mouse_goto(40, menu_y("gfiles"))
         q9.mouse_click()
         # gfiles slot2 (94,54), content (95,65); nazwa pliku przy
         # content(8,16) -> screen(103,81). Tekst (bialy) = pliki z PFS.
