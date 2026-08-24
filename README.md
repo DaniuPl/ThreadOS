@@ -85,8 +85,10 @@ ProtonOS/
 │   ├── usha256.h       # SHA-256, HMAC, HKDF (fundament pod TLS 1.3)
 │   ├── uchacha.h       # ChaCha20, Poly1305, AEAD (RFC 8439)
 │   ├── ux25519.h       # X25519 - wymiana kluczy na Curve25519
+│   ├── urand.h         # źródło losowości (RTC + timer + SHA-256)
+│   ├── utls.h          # klient TLS 1.3: handshake, klucze, rekordy
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
-│   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
+│   ├── httpget.c       # klient HTTP/HTTPS (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
 │   ├── gweb.c          # przeglądarka w oknie: adres -> TCP -> tekst + PFS
 │   ├── cryptotest.c    # wektory testowe SHA-256/HMAC/HKDF z RFC
@@ -152,7 +154,10 @@ Adresy można podawać po nazwie - `nslookup`, `httpget` i przeglądarka
 pytają serwer DNS przyznany przez DHCP (albo wskazany ręcznie: `dns 1.1.1.1`).
 Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
 (`Transfer-Encoding: chunked`) i idzie za przekierowaniami 301/302/307/308,
-także względnymi.
+także względnymi. Adresy `https://` idą przez **TLS 1.3** (X25519 +
+ChaCha20-Poly1305) - działa to zarówno w `httpget`, jak i w przeglądarce.
+**Uwaga:** certyfikat serwera nie jest jeszcze sprawdzany, więc połączenie
+jest szyfrowane, ale nieuwierzytelnione.
 
 TCP działa w obie strony. Jako klient: `run httpget 10.0.2.2 8000 /`
 pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
@@ -322,3 +327,12 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       (`run cryptotest`; jedno mnożenie skalarne X25519 ~20 ms)
 - [x] `printk` niepodzielny: komunikat z wątku nie wchodzi już w środek
       linii wypisywanej przez inny wątek albo obsługę przerwania
+- [x] Klient **TLS 1.3** (RFC 8446) w ring 3: ClientHello z SNI i
+      `key_share`, wspólny sekret X25519, harmonogram kluczy na HKDF,
+      zaszyfrowana reszta uzgodnień, sprawdzenie `Finished` serwera,
+      własne `Finished`, osobne klucze aplikacyjne i warstwa rekordów
+      z ChaCha20-Poly1305. `httpget https://...` i przeglądarka pobierają
+      strony po HTTPS; uzgodnienie z OpenSSL-em trwa ~90 ms
+      (certyfikat jeszcze niesprawdzany - to następny krok)
+- [x] Źródło losowości dla programów (`urand.h`): RTC, licznik timera,
+      pid i adresy ze stosu zmieszane przez SHA-256

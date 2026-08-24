@@ -106,6 +106,47 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
     return stop.set
 
 
+def start_https_server():
+    """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
+    locie. Certyfikat jest samopodpisany - ProtonOS i tak go jeszcze nie
+    sprawdza, a test dzieki temu nie potrzebuje niczego z zewnatrz.
+    Zwraca (port, stop) albo (None, stop), gdy brakuje openssl-a."""
+    import ssl
+    import subprocess
+
+    tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
+    cert = os.path.join(tmpdir, "cert.pem")
+    key = os.path.join(tmpdir, "key.pem")
+    try:
+        subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", key,
+             "-out", cert, "-days", "1", "-nodes", "-subj", "/CN=protonos.test"],
+            check=True, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None, lambda: None
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(PAGE)))
+            self.end_headers()
+            self.wfile.write(PAGE)
+
+        def log_message(self, *args):
+            pass
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    srv = socketserver.TCPServer(("0.0.0.0", 0), Handler)
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv.server_address[1], srv.shutdown
+
+
 def start_http_server():
     """Serwer HTTP na hoscie - guest siega do niego przez brame slirpa
     (10.0.2.2), wiec test TCP nie potrzebuje zadnej sieci na zewnatrz."""
@@ -733,6 +774,25 @@ def main():
                   "ProtonOS TCP dziala" in hop)
         finally:
             http_stop()
+
+        # HTTPS: pelne uzgodnienie TLS 1.3 z prawdziwym OpenSSL-em po
+        # drugiej stronie (X25519 + ChaCha20-Poly1305, sprawdzone Finished)
+        https_port, https_stop = start_https_server()
+        if https_port is None:
+            print("INFO: brak openssl - pomijam test TLS")
+        else:
+            try:
+                q.type_line("clear")
+                q.type_line("run httpget https://10.0.2.2 %d /" % https_port)
+                sec = q.wait_for("tresc ", timeout=60)
+                check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
+                      "[httpget] TLS 1.3" in sec)
+                check("HTTPS: odpowiedz 200 z pelna trescia",
+                      "HTTP 200, tresc %d B" % len(PAGE) in sec)
+                check("HTTPS: tresc odszyfrowana poprawnie",
+                      "ProtonOS TCP dziala" in sec)
+            finally:
+                https_stop()
 
         q.type_line("netstat")
         check("netstat: po zamknieciu nie ma wiszacych polaczen",

@@ -6,7 +6,8 @@
  *   - kodowanie 'chunked' (serwery uzywaja go, gdy nie znaja z gory
  *     dlugosci odpowiedzi) sklejane przez granice pakietow,
  *   - naglowek Location, zeby dalo sie isc za przekierowaniem,
- *   - rozbior adresu "http://host[:port]/sciezka".
+ *   - rozbior adresu "http://host[:port]/sciezka" oraz https://,
+ *   - polaczenie po TLS 1.3, gdy adres jest https (patrz utls.h).
  *
  * Tresc idzie strumieniem do funkcji zwrotnej - dzieki temu program
  * moze ja od razu zapisywac na dysk albo skladac do okna, bez trzymania
@@ -18,9 +19,52 @@
 
 #include "usys.h"
 #include "udns.h"
+#include "utls.h"
 
 #define HTTP_HDR_MAX  2048
 #define HTTP_CHUNK    1024
+
+/* Jedno miejsce, przez ktore ida bajty - zwykly TCP albo TLS */
+struct http_transport {
+    int tls;
+    int32_t sock;
+    struct tls_conn conn;
+};
+
+static inline int http_tp_send(struct http_transport *tp, const void *data,
+                               uint32_t len)
+{
+    if (tp->tls)
+        return tls_send(&tp->conn, data, len);
+
+    const uint8_t *p = data;
+    uint32_t done = 0;
+    while (done < len) {
+        uint32_t take = len - done;
+        if (take > 1024)
+            take = 1024;
+        if (tcp_send(tp->sock, p + done, take, 10000) < 0)
+            return -1;
+        done += take;
+    }
+    return 0;
+}
+
+static inline int http_tp_recv(struct http_transport *tp, void *buf,
+                               uint32_t max)
+{
+    if (tp->tls)
+        return tls_recv(&tp->conn, buf, max);
+    return tcp_recv(tp->sock, buf, max, 10000);
+}
+
+static inline void http_tp_close(struct http_transport *tp)
+{
+    if (tp->tls)
+        tls_close(&tp->conn);
+    else if (tp->sock >= 0)
+        tcp_close(tp->sock);
+}
 
 struct http_result {
     int status;                  /* kod odpowiedzi albo 0 */
@@ -55,19 +99,27 @@ static inline const char *uhttp_header(const char *line, const char *name)
     return line + i;
 }
 
-/* Rozbior "http://host[:port]/sciezka" albo "host[:port]/sciezka" */
+/* Rozbior "http://host[:port]/sciezka", "https://..." albo samego
+   "host[:port]/sciezka". W *tls wraca 1 dla https (i port 443). */
 static inline int http_parse_url(const char *url, char *host, int hmax,
-                                 uint32_t *port, char *path, int pmax)
+                                 uint32_t *port, char *path, int pmax,
+                                 int *tls)
 {
-    int i = 0;
-    /* pomin schemat */
+    int i = 0, secure = 0;
+
     if (url[0] == 'h' && url[1] == 't' && url[2] == 't' && url[3] == 'p') {
         int j = 4;
-        if (url[j] == 's')
-            j++;                  /* https - i tak nie umiemy, ale rozbierz */
+        if (url[j] == 's') {
+            secure = 1;
+            j++;
+        }
         if (url[j] == ':' && url[j + 1] == '/' && url[j + 2] == '/')
             i = j + 3;
+        else
+            secure = 0;           /* to nie byl schemat, tylko nazwa hosta */
     }
+    if (tls)
+        *tls = secure;
 
     int h = 0;
     while (url[i] && url[i] != ':' && url[i] != '/' && h < hmax - 1)
@@ -76,7 +128,7 @@ static inline int http_parse_url(const char *url, char *host, int hmax,
     if (!h)
         return 0;
 
-    *port = 80;
+    *port = secure ? 443 : 80;
     if (url[i] == ':') {
         i++;
         uint32_t p = 0;
@@ -98,11 +150,12 @@ static inline int http_parse_url(const char *url, char *host, int hmax,
    adres zaczynajacy sie od "/" tylko sciezke (tak wysyla przekierowania
    wiekszosc serwerow). Zwraca 1, gdy udalo sie ustalic nowy cel. */
 static inline int http_apply_location(const char *loc, char *host, int hmax,
-                                      uint32_t *port, char *path, int pmax)
+                                      uint32_t *port, char *path, int pmax,
+                                      int *tls)
 {
     for (int i = 0; loc[i] && i < 8; i++) {
         if (loc[i] == ':' && loc[i + 1] == '/' && loc[i + 2] == '/')
-            return http_parse_url(loc, host, hmax, port, path, pmax);
+            return http_parse_url(loc, host, hmax, port, path, pmax, tls);
     }
 
     int t = 0;
@@ -117,21 +170,29 @@ static inline int http_apply_location(const char *loc, char *host, int hmax,
 /* Pobiera zasob. Zwraca 0 przy powodzeniu, -1 gdy nie udalo sie
    polaczyc albo wyslac zadania. Kod HTTP i Location w 'res'. */
 static inline int http_get(uint32_t ip, uint32_t port, const char *host,
-                           const char *path, http_sink sink, void *arg,
-                           struct http_result *res)
+                           const char *path, int use_tls, http_sink sink,
+                           void *arg, struct http_result *res)
 {
     static char req[512];
     static char buf[HTTP_CHUNK];
     static char hdr[HTTP_HDR_MAX];
+    static struct http_transport tp;
 
     res->status = 0;
     res->body_len = 0;
     res->chunked = 0;
     res->location[0] = '\0';
 
-    int32_t conn = tcp_connect(ip, port, 5000);
-    if (conn < 0)
-        return -1;
+    tp.tls = use_tls;
+    tp.sock = -1;
+    if (use_tls) {
+        if (tls_connect(&tp.conn, ip, port, host) < 0)
+            return -1;
+    } else {
+        tp.sock = tcp_connect(ip, port, 5000);
+        if (tp.sock < 0)
+            return -1;
+    }
 
     int r = 0;
     const char *pre = "GET ";
@@ -149,8 +210,8 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     while (*end)
         req[r++] = *end++;
 
-    if (tcp_send(conn, req, (uint32_t)r, 5000) < 0) {
-        tcp_close(conn);
+    if (http_tp_send(&tp, req, (uint32_t)r) < 0) {
+        http_tp_close(&tp);
         return -1;
     }
 
@@ -162,7 +223,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     int sizelen = 0;
 
     for (;;) {
-        int32_t n = tcp_recv(conn, buf, sizeof(buf), 10000);
+        int n = http_tp_recv(&tp, buf, sizeof(buf));
         if (n <= 0)
             break;                     /* 0 = koniec strumienia, -1 = timeout */
 
@@ -284,7 +345,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
             break;
     }
 
-    tcp_close(conn);
+    http_tp_close(&tp);
     return 0;
 }
 

@@ -152,12 +152,14 @@ static void fetch(void)
     char host[64];
     char path[96];
     uint32_t port = 80;
+    int use_tls = 0;
 
     page_len = 0;
     text_len = 0;
     text[0] = '\0';
 
-    if (!http_parse_url(addr, host, sizeof(host), &port, path, sizeof(path))) {
+    if (!http_parse_url(addr, host, sizeof(host), &port, path, sizeof(path),
+                        &use_tls)) {
         set_status("Zly adres");
         return;
     }
@@ -174,8 +176,8 @@ static void fetch(void)
             return;
         }
 
-        set_status("Lacze...");
-        if (http_get(ip, port, host, path, page_sink, 0, &res) < 0) {
+        set_status(use_tls ? "Uzgadniam TLS..." : "Lacze...");
+        if (http_get(ip, port, host, path, use_tls, page_sink, 0, &res) < 0) {
             set_status("Nie udalo sie polaczyc");
             return;
         }
@@ -187,7 +189,7 @@ static void fetch(void)
 
         page_len = 0;                    /* strona przekierowania nas nie interesuje */
         if (!http_apply_location(res.location, host, sizeof(host), &port,
-                                 path, sizeof(path)))
+                                 path, sizeof(path), &use_tls))
             break;
         set_status("Przekierowanie...");
     }
@@ -209,7 +211,7 @@ static void fetch(void)
 
     char st[64];
     int i = 0;
-    const char *lead = "HTTP ";
+    const char *lead = use_tls ? "TLS HTTP " : "HTTP ";
     while (*lead)
         st[i++] = *lead++;
     st[i++] = (char)('0' + (res.status / 100) % 10);

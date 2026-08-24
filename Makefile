@@ -117,7 +117,8 @@ $(BUILD)/user: | $(BUILD)
 
 $(BUILD)/user/%.elf: user/%.c user/usys.h user/udns.h user/uhttp.h \
                      user/usha256.h user/uchacha.h \
-                     user/ux25519.h user/user.ld | $(BUILD)/user
+                     user/ux25519.h user/urand.h \
+                     user/utls.h user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py

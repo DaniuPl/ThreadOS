@@ -1,11 +1,12 @@
-/* httpget - klient HTTP w ring 3 (TCP + HTTP/1.1)
+/* httpget - klient HTTP/HTTPS w ring 3
  *
- * Uzycie: run httpget <host|ip> [port] [sciezka] [plik]
- *   run httpget 10.0.2.2 8000 /            - wypisz odpowiedz na konsole
- *   run httpget przyklad.pl 80 / str.htm   - zapisz tresc do pliku na PFS
+ * Uzycie: run httpget <adres> [port] [sciezka] [plik]
+ *   run httpget 10.0.2.2 8000 /                - na konsole
+ *   run httpget https://przyklad.pl / str.htm  - przez TLS 1.3, do pliku
  *
  * Nazwe hosta rozwiazuje przez DNS, radzi sobie z kodowaniem 'chunked'
- * i idzie za przekierowaniami (do trzech).
+ * i idzie za przekierowaniami (do trzech). Dla adresow https laczy sie
+ * przez TLS 1.3 - certyfikat nie jest jeszcze sprawdzany (patrz utls.h).
  */
 
 #include "usys.h"
@@ -37,17 +38,18 @@ void _start(int argc, char **argv)
 
     char host[64];
     char path[128];
-    uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 80;
+    uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 0;
     const char *outfile = argc > 4 ? argv[4] : 0;
 
     /* Host moze byc sam ("przyklad.pl") albo pelnym adresem */
     uint32_t parsed_port = port;
+    int use_tls = 0;
     if (!http_parse_url(argv[1], host, sizeof(host), &parsed_port,
-                        path, sizeof(path))) {
+                        path, sizeof(path), &use_tls)) {
         print("[httpget] zly adres\n");
         sys_exit(1);
     }
-    if (argc > 2)
+    if (port)
         parsed_port = port;              /* port z argumentu ma pierwszenstwo */
     if (argc > 3) {
         int i = 0;
@@ -84,7 +86,7 @@ void _start(int argc, char **argv)
             sys_exit(1);
         }
 
-        print("[httpget] ");
+        print(use_tls ? "[httpget] TLS 1.3 " : "[httpget] ");
         print(host);
         print(" (");
         print_ip(ip);
@@ -94,7 +96,8 @@ void _start(int argc, char **argv)
         print(path);
         print("\n");
 
-        if (http_get(ip, parsed_port, host, path, body_sink, &st, &res) < 0) {
+        if (http_get(ip, parsed_port, host, path, use_tls, body_sink, &st,
+                     &res) < 0) {
             print("[httpget] nie udalo sie polaczyc\n");
             if (st.fd >= 0)
                 sys_close(st.fd);
@@ -110,7 +113,7 @@ void _start(int argc, char **argv)
         print(res.location);
         print("\n");
         if (!http_apply_location(res.location, host, sizeof(host),
-                                 &parsed_port, path, sizeof(path)))
+                                 &parsed_port, path, sizeof(path), &use_tls))
             break;
         st.written = 0;                  /* tresc przekierowania nie liczy sie */
     }
