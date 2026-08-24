@@ -15,6 +15,7 @@ int net_init(void);
 void net_rx(const uint8_t *frame, uint16_t len);
 
 uint32_t net_ip(void);
+uint32_t net_mask(void);
 uint32_t net_gw(void);
 uint32_t net_dns(void);
 int net_configured(void);            /* czy system ma juz adres IP */

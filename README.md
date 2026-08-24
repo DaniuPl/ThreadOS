@@ -21,7 +21,8 @@ ProtonOS/
 │   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
 │   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
 │   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
-│   ├── syscall.c       # syscalle int 0x80 + walidacja wskaźników z ring 3
+│   ├── syscall.c       # syscalle int 0x80 (m.in. gniazda UDP) + walidacja
+│   │                   #   wskaźników z ring 3
 │   │                   #   (user_ok/user_str: zły adres = -1, nie page fault)
 │   ├── usermode.c      # wejście w ring 3 przez iret
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
@@ -76,6 +77,9 @@ ProtonOS/
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
 │   ├── gmon.c          # monitor zasobów (RAM/uptime na żywo, sys_sysinfo)
 │   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
+│   ├── udpecho.c       # serwer UDP w ring 3 (odsyła, co dostał)
+│   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
+│   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
@@ -125,6 +129,11 @@ klient **DHCP** prosi o niego sieć i ustawia maskę, bramę oraz serwer DNS
 nie ma serwera DHCP, system po kilku próbach bierze adres awaryjny.
 Komendy: `ifconfig`, `arp`, `ping 10.0.2.2`, `dhcp` (ponowna konfiguracja).
 ProtonOS odpowiada również na cudze zapytania ARP i na pingi do siebie.
+
+Programy w ring 3 mają własne gniazda UDP: `run udpecho` nasłuchuje na
+porcie 7777, `run udptest` wysyła do niego datagram (domyślnie przez pętlę
+zwrotną, więc działa i bez sieci), a `run nslookup example.com` pyta
+o adres serwer DNS przyznany przez DHCP.
 
 `make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
 formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
@@ -242,3 +251,9 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       DNS przychodzą z sieci zamiast być wpisane na sztywno (`dhcp`);
       `kill` przyjmuje też nazwę procesu, a prompt shella odrysowuje się
       po asynchronicznych komunikatach jądra
+- [x] Gniazda UDP w ring 3 (`udp_open`/`udp_send`/`udp_recv`/`udp_close`,
+      `netinfo`): gniazdo należy do procesu i zwalnia się po jego śmierci,
+      dane idą przez sprawdzone wskaźniki, a pętla zwrotna pozwala dwóm
+      procesom gadać po UDP bez sieci (`udpecho` + `udptest`); klient DNS
+      w userspace (`nslookup example.com`) i przerywanie oczekiwania
+      w jądrze przez `kill`

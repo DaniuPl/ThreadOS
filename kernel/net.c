@@ -151,6 +151,11 @@ uint32_t net_ip(void)
     return my_ip;
 }
 
+uint32_t net_mask(void)
+{
+    return my_mask;
+}
+
 uint32_t net_gw(void)
 {
     return my_gw;
@@ -388,6 +393,9 @@ int net_udp_send_raw(uint32_t src_ip, uint32_t dst_ip, const uint8_t *dst_mac,
     return ret;
 }
 
+static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
+                        const uint8_t *data, uint16_t len);
+
 /* Zwalnia gniazda po procesach, ktore juz nie zyja (jak okna pulpitu) */
 static void udp_reap(void)
 {
@@ -471,6 +479,18 @@ int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
     if (!my_ip)
         return -1;                   /* system nie ma jeszcze adresu */
 
+    /* Petla zwrotna: datagram do wlasnego adresu (albo 127.x) wraca
+       prosto do kolejek gniazd, bez wychodzenia na kabel. Dzieki temu
+       dwa procesy moga gadac po UDP nawet bez sieci. */
+    if (ip == my_ip || (ip >> 24) == 127) {
+        if (len > UDP_DATA_MAX)
+            return -1;
+        uint32_t flags = irq_save();
+        udp_deliver(port, my_ip, udp_socks[sock].port, data, len);
+        irq_restore(flags);
+        return len;
+    }
+
     const uint8_t *mac = arp_resolve(ip);
     if (!mac)
         return -1;
@@ -514,6 +534,8 @@ int net_udp_recv(int sock, int owner, uint32_t *from_ip, uint16_t *from_port,
         waited += 10;
         if (!s->used || s->owner != owner)
             return -1;               /* gniazdo zamkniete w miedzyczasie */
+        if (task_killed())
+            return -1;               /* proces ma zginac - nie czekaj do konca */
     }
 }
 
@@ -659,6 +681,8 @@ static const uint8_t *arp_resolve(uint32_t ip)
             mac = arp_lookup(target);
             if (mac)
                 return mac;
+            if (task_killed())
+                return 0;
         }
     }
     return 0;
@@ -710,8 +734,14 @@ void net_ping(uint32_t ip, int count)
             return;
         }
 
-        for (int i = 0; i < 100 && !ping_got; i++)   /* do 1 s */
+        for (int i = 0; i < 100 && !ping_got; i++) { /* do 1 s */
             task_sleep(10);
+            if (task_killed()) {      /* 'kill ping' ma dzialac od razu */
+                ping_waiting = 0;
+                printk("ping: przerwane\n");
+                return;
+            }
+        }
         ping_waiting = 0;
 
         if (ping_got) {

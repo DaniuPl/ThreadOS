@@ -412,6 +412,14 @@ int task_kill(int pid)
 /* Zabija pierwsze zyjace zadanie o podanej nazwie i zwraca jego pid
    (albo -1). Przydatne, gdy pid nie jest znany - np. aplikacja zostala
    odpalona z menu pulpitu, a nie z shella. */
+/* Czy biezace zadanie zostalo zaznaczone do zabicia? Pozwala dlugim
+   oczekiwaniom w jadrze (np. odbior z gniazda) przerwac czekanie
+   zamiast trzymac proces przy zyciu az do wlasnego timeoutu. */
+int task_killed(void)
+{
+    return current->killed;
+}
+
 int task_kill_name(const char *name)
 {
     uint32_t flags = irq_save();

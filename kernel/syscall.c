@@ -28,6 +28,7 @@
 #include "include/rtc.h"
 #include "include/desktop.h"
 #include "include/paging.h"
+#include "include/net.h"
 #include "include/string.h"
 
 /* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
@@ -45,6 +46,16 @@ struct sysinfo_buf {
 };
 struct win_event_buf {
     int32_t type, x, y, val;
+};
+struct udp_send_cmd {
+    uint32_t ip, port, buf, len;
+};
+struct udp_recv_cmd {
+    uint32_t buf, max, timeout_ms;
+    uint32_t from_ip, from_port;    /* wypelniane przez jadro */
+};
+struct netinfo_buf {
+    uint32_t ip, mask, gw, dns;
 };
 
 #define IO_MAX     4096          /* limit na jeden read/write */
@@ -327,6 +338,63 @@ void syscall_handler(struct regs *r)
         si.used_kib = pmm_used_frames() * 4;
         si.uptime_s = pit_ticks() / 100;
         r->eax = user_put(r->ebx, &si, sizeof(si)) < 0 ? EFAULT : 0;
+        break;
+    }
+    case SYS_UDP_OPEN:
+        r->eax = (uint32_t)net_udp_open((uint16_t)r->ebx, task_current_id());
+        break;
+    case SYS_UDP_SEND: {
+        struct udp_send_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 || c.len > IO_MAX ||
+            !user_ok(c.buf, c.len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)net_udp_send((int)r->ebx, task_current_id(), c.ip,
+                                        (uint16_t)c.port, (const void *)c.buf,
+                                        (uint16_t)c.len);
+        break;
+    }
+    case SYS_UDP_RECV: {
+        struct udp_recv_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 || c.max > IO_MAX ||
+            !user_ok(c.buf, c.max)) {
+            r->eax = EFAULT;
+            break;
+        }
+        /* Odbior czeka (task_sleep), ale pisze do bufora dopiero po
+           obudzeniu - a wtedy znowu aktywna jest przestrzen adresowa
+           tego procesu. Wskaznik uzytkownika jest juz sprawdzony, wiec
+           dane moga isc prosto do niego, bez posrednika w jadrze. */
+        uint32_t from_ip = 0;
+        uint16_t from_port = 0;
+        int n = net_udp_recv((int)r->ebx, task_current_id(), &from_ip,
+                             &from_port, (void *)c.buf, (uint16_t)c.max,
+                             c.timeout_ms);
+        if (n < 0) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        c.from_ip = from_ip;
+        c.from_port = from_port;
+        r->eax = user_put(r->ecx, &c, sizeof(c)) < 0 ? EFAULT : (uint32_t)n;
+        break;
+    }
+    case SYS_UDP_CLOSE:
+        net_udp_close((int)r->ebx, task_current_id());
+        r->eax = 0;
+        break;
+    case SYS_NETINFO: {
+        struct netinfo_buf ni;
+        if (!net_configured()) {
+            r->eax = (uint32_t)-1;      /* siec jeszcze bez adresu */
+            break;
+        }
+        ni.ip = net_ip();
+        ni.mask = net_mask();
+        ni.gw = net_gw();
+        ni.dns = net_dns();
+        r->eax = user_put(r->ebx, &ni, sizeof(ni)) < 0 ? EFAULT : 0;
         break;
     }
     default:

@@ -34,6 +34,11 @@
 #define SYS_SYSINFO    27
 #define SYS_THREAD     28
 #define SYS_SETPRIO    29
+#define SYS_UDP_OPEN   30
+#define SYS_UDP_SEND   31
+#define SYS_UDP_RECV   32
+#define SYS_UDP_CLOSE  33
+#define SYS_NETINFO    34
 
 #define FS_NAME_MAX  23
 
@@ -444,6 +449,95 @@ static inline void print_dec(uint32_t v)
 static inline void print(const char *s)
 {
     sys_write(STDOUT, s, ustrlen(s));
+}
+
+/* --- siec: gniazda UDP -------------------------------------------------
+   Adresy IPv4 sa w kolejnosci hosta (10.0.2.3 == 0x0A000203). */
+
+struct netinfo {
+    uint32_t ip, mask, gw, dns;
+};
+
+struct udp_send_cmd {
+    uint32_t ip, port, buf, len;
+};
+
+struct udp_recv_cmd {
+    uint32_t buf, max, timeout_ms;
+    uint32_t from_ip, from_port;    /* wypelnia jadro */
+};
+
+/* Otwiera gniazdo UDP na porcie (0 = przydziel dowolny wolny). */
+static inline int32_t udp_open(uint32_t port)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_UDP_OPEN), "b"(port)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t udp_send(int32_t sock, uint32_t ip, uint32_t port,
+                               const void *buf, uint32_t len)
+{
+    struct udp_send_cmd c = { ip, port, (uint32_t)buf, len };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_UDP_SEND), "b"(sock), "c"(&c)
+                     : "memory");
+    return ret;
+}
+
+/* Czeka do timeout_ms na datagram; zwraca dlugosc albo -1.
+   from_ip/from_port moga byc zerowe, gdy nadawca nas nie interesuje. */
+static inline int32_t udp_recv(int32_t sock, void *buf, uint32_t max,
+                               uint32_t timeout_ms, uint32_t *from_ip,
+                               uint32_t *from_port)
+{
+    struct udp_recv_cmd c = { (uint32_t)buf, max, timeout_ms, 0, 0 };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_UDP_RECV), "b"(sock), "c"(&c)
+                     : "memory");
+    if (ret >= 0) {
+        if (from_ip)
+            *from_ip = c.from_ip;
+        if (from_port)
+            *from_port = c.from_port;
+    }
+    return ret;
+}
+
+static inline void udp_close(int32_t sock)
+{
+    __asm__ volatile("int $0x80"
+                     :
+                     : "a"(SYS_UDP_CLOSE), "b"(sock)
+                     : "memory");
+}
+
+/* Konfiguracja sieci (z DHCP). 0 = OK, -1 = system nie ma jeszcze adresu. */
+static inline int32_t netinfo(struct netinfo *ni)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_NETINFO), "b"(ni)
+                     : "memory");
+    return ret;
+}
+
+/* Wypisuje adres IPv4 w postaci a.b.c.d */
+static inline void print_ip(uint32_t ip)
+{
+    for (int i = 3; i >= 0; i--) {
+        print_dec((ip >> (i * 8)) & 0xFF);
+        if (i)
+            print(".");
+    }
 }
 
 #endif

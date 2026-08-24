@@ -32,6 +32,11 @@
 #define SYS_SYSINFO    27 /* ebx=bufor {ram_kib,used_kib,uptime_s} -> 0 */
 #define SYS_THREAD     28 /* ebx=entry, ecx=arg -> tid watku albo -1 */
 #define SYS_SETPRIO    29 /* ebx=poziom (0/1/2) -> 0 */
+#define SYS_UDP_OPEN   30 /* ebx=port (0=efemeryczny) -> gniazdo albo -1 */
+#define SYS_UDP_SEND   31 /* ebx=gniazdo, ecx=&{ip,port,buf,len} -> bajty/-1 */
+#define SYS_UDP_RECV   32 /* ebx=gniazdo, ecx=&{buf,max,ms,ip,port} -> bajty/-1 */
+#define SYS_UDP_CLOSE  33 /* ebx=gniazdo -> 0 */
+#define SYS_NETINFO    34 /* ebx=&{ip,mask,gw,dns} -> 0 albo -1 (brak sieci) */
 
 #define SYSCALL_VECTOR 0x80
 

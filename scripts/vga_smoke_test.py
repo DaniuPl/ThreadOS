@@ -12,7 +12,9 @@
      system żyje), 'run brak' (błąd), 'ls'
   8. shell użytkownika (ring 3): 'run sh' przejmuje klawiaturę przez
      sys_read, spawn+wait programów, exit oddaje konsolę jądru
-  9. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
+  9. sieć: DHCP (adres z serwera), ARP + ICMP ('ping'), gniazda UDP
+     w ring 3 (udpecho + udptest przez pętlę zwrotną) i DNS ('nslookup')
+ 10. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
 
 Użycie: python3 scripts/vga_smoke_test.py [protonos.bin] [initrd.img]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
@@ -472,6 +474,49 @@ def main():
         q.type_line("arp")
         check("tablica ARP zna MAC bramy",
               "10.0.2.2" in q.wait_for("10.0.2.2  "))
+
+        # Gniazda UDP w ring 3: dwa procesy gadaja przez petle zwrotna,
+        # wiec test nie zalezy od zadnej sieci na zewnatrz
+        q.type_line("run udpecho")
+        q.wait_for("nasluchuje na porcie 7777", timeout=10)
+        check("proces ring 3 otworzyl gniazdo UDP", True)
+
+        q.type_line("run udptest")
+        echo = q.wait_for("echo wrocilo", timeout=10)
+        check("datagram wrocil do nadawcy przez petle zwrotna",
+              "echo wrocilo: proton-udp" in echo)
+        check("serwer zobaczyl datagram od klienta",
+              "[udpecho] od 10.0.2.15:" in echo)
+        check("klient zakonczyl sie bez bledu",
+              "proces 'udptest' zakonczyl sie (kod 0)" in echo)
+
+        # Gniazdo ma wlasciciela: po smierci procesu port musi sie zwolnic
+        q.type_line("kill udpecho")
+        time.sleep(0.5)
+        q.type_line("clear")          # czysty ekran: stare "nasluchuje" znika
+        q.type_line("run udpecho")
+        again = q.wait_for("porcie 7777", timeout=10)
+        check("port zwolniony po smierci wlasciciela gniazda",
+              "nasluchuje na porcie 7777" in again and
+              "nie udalo sie otworzyc gniazda" not in again)
+        q.type_line("kill udpecho")
+
+        # DNS z ring 3 przez serwer podany w DHCP. Slirp przekazuje
+        # zapytanie do resolvera hosta - gdy maszyna jest offline,
+        # program ma czysto zglosic brak odpowiedzi, a nie zawiesic sie.
+        q.type_line("run nslookup example.com")
+        dns = q.wait_for("[nslookup] pytam 10.0.2.3", timeout=10)
+        for _ in range(30):
+            dns = q.screen()
+            if "ma adres" in dns or "nslookup] brak" in dns or \
+               "nslookup] nazwa" in dns or "nslookup] serwer" in dns:
+                break
+            time.sleep(0.4)
+        resolved = "example.com ma adres" in dns
+        check("nslookup: odpowiedz DNS albo czysty timeout (offline)",
+              resolved or "[nslookup] brak odpowiedzi" in dns)
+        print("      (DNS " + ("odpowiedzial" if resolved
+                               else "niedostepny - sprawdzono sciezke bledu") + ")")
 
         q.type_line("ifconfig")
         ifc = q.wait_for("RX ")

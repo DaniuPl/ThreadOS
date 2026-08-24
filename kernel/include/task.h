@@ -49,6 +49,7 @@ void task_exit(int code);           /* zakończ bieżący wątek z kodem */
 int  task_wait(int pid);            /* czekaj na proces, zwróć jego kod */
 int  task_kill(int pid);            /* zaznacz proces do zabicia (0/-1) */
 int  task_kill_name(const char *name); /* to samo po nazwie -> pid albo -1 */
+int  task_killed(void);             /* czy biezace zadanie ma zginac */
 void task_kill_pending(void);       /* dorecz zabicie przy powrocie do ring 3 */
 void task_block(void);              /* śpij, aż ktoś obudzi */
 void task_unblock(struct task *t);  /* obudź (wołać z IF=0) */

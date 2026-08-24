@@ -42,7 +42,9 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
              $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
              $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
-             $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf
+             $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
+             $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
+             $(BUILD)/user/nslookup.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -128,7 +130,9 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf \
 	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf \
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
-	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf
+	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
+	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
+	    nslookup=$(BUILD)/user/nslookup.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)
