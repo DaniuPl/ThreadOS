@@ -43,6 +43,10 @@ class Qemu:
                "-display", "none", "-no-reboot",
                # Stala data RTC -> deterministyczny test komendy 'date'
                "-rtc", "base=2026-06-13T12:34:56",
+               # Karta sieciowa w trybie uzytkownika: brama 10.0.2.2
+               # odpowiada na ARP i ICMP echo, wiec 'ping' da sie
+               # przetestowac bez zadnej sieci na hoscie
+               "-netdev", "user,id=n0", "-device", "rtl8139,netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if initrd:
             cmd += ["-initrd", initrd]
@@ -235,6 +239,8 @@ def main():
               "Dysk ATA + PFS gotowy" in screen)
         check("mysz PS/2 wykryta przy boocie",
               "Mysz PS/2 gotowa" in screen)
+        check("karta sieciowa RTL8139 wykryta przy boocie",
+              "Siec: RTL8139" in screen)
 
         for expected in ["Multiboot OK", "GDT zaladowana", "IDT zaladowana",
                          "PIC przemapowany", "Timer PIT", "Klawiatura PS/2",
@@ -428,6 +434,32 @@ def main():
         # 'run' z nieistniejacym plikiem
         q.type_line("run brak")
         check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
+
+        # Siec: ARP + ICMP przez karte RTL8139. Brama slirpa (10.0.2.2)
+        # odpowiada na oba, wiec test nie potrzebuje sieci na hoscie.
+        q.type_line("ifconfig")
+        ifc = q.wait_for("eth0  MAC")
+        check("ifconfig pokazuje adres IP", "IP 10.0.2.15" in ifc)
+        check("ifconfig pokazuje brame", "brama 10.0.2.2" in ifc)
+
+        q.type_line("ping 10.0.2.2")
+        pong = q.wait_for("40 B od 10.0.2.2: seq=1", timeout=20)
+        check("ping: odpowiedz ICMP echo od bramy", "40 B od 10.0.2.2" in pong)
+        stats = q.wait_for("--- statystyki:", timeout=20)
+        check("ping: wszystkie 4 pakiety wrocily",
+              "wyslano 4, odebrano 4" in stats)
+
+        q.type_line("arp")
+        check("tablica ARP zna MAC bramy",
+              "10.0.2.2" in q.wait_for("10.0.2.2  "))
+
+        q.type_line("ifconfig")
+        ifc = q.wait_for("RX ")
+        # Na ekranie wisi tez wyjscie poprzedniego 'ifconfig' (sprzed
+        # pinga) - liczy sie ostatnie, najswiezsze wystapienie
+        rx = re.findall(r"RX (\d+) pakietow, TX (\d+) pakietow", ifc)
+        check(f"licznik pakietow RX/TX rosnie (ostatni: {rx[-1] if rx else None})",
+              bool(rx) and int(rx[-1][0]) > 0 and int(rx[-1][1]) > 0)
 
         # Mysz PS/2: ruch (delty wzgledne) i przycisk, czytane komenda 'mouse'.
         # Start na srodku 320x200 = (160,100); QEMU przekazuje delty 1:1.

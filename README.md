@@ -36,8 +36,11 @@ ProtonOS/
 │   │                   #   podwójne buforowanie, tekst 8x8
 │   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
 │   ├── shm.c           # pamięć współdzielona między procesami (po kluczu)
+│   ├── rtl8139.c       # sterownik karty sieciowej Realtek RTL8139 (DMA)
+│   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP
 │   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
-│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date...
+│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
+│   │                   #   ifconfig, arp, ping...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
@@ -112,6 +115,12 @@ ekranu VGA, tykanie timera oraz echo klawiatury (wstrzykuje klawisze
 poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
 Test uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**, więc
 weryfikuje też, że pliki zapisane na PFS przeżywają restart.
+
+`make run` podpina też kartę sieciową RTL8139 w trybie użytkownika QEMU
+(`-netdev user`). System dostaje statycznie adres **10.0.2.15/24** z bramą
+**10.0.2.2** - komendy `ifconfig`, `arp` i `ping 10.0.2.2` działają od razu,
+bez konfiguracji sieci na hoście. ProtonOS odpowiada również na cudze
+zapytania ARP i na pingi skierowane do siebie.
 
 `make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
 formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
@@ -215,3 +224,7 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
 - [x] Zapis pozycji ikon na dysku: ikony pulpitu można przeciągać myszą,
       a ich rozmieszczenie zapisuje się do pliku PFS (`icons.pos`) i wraca
       po restarcie (kompozytor czyta je przy starcie)
+- [x] Karta sieciowa RTL8139 (PCI + DMA: pierścień RX, 4 deskryptory TX,
+      przerwanie karty) i stos sieciowy: Ethernet, ARP z tablicą adresów,
+      IPv4 z sumą kontrolną, ICMP - `ifconfig`, `arp`, `ping 10.0.2.2`
+      (system odpowiada też na cudze ARP i pingi do siebie)

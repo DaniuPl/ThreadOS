@@ -19,6 +19,8 @@
 #include "include/task.h"
 #include "include/initrd.h"
 #include "include/fs.h"
+#include "include/net.h"
+#include "include/rtl8139.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
@@ -158,6 +160,13 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     if (fs_init())
         ok("Dysk ATA + PFS gotowy (komendy 'fls', 'cat', 'write')");
+
+    if (net_init()) {
+        const uint8_t *m = rtl8139_mac();
+        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x, IP 10.0.2.15 "
+               "(komendy 'ifconfig', 'ping')\n",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+    }
 
     scheduler_init();
     task_create("demo-A", demo_counter, (void *)0);

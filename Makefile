@@ -75,7 +75,9 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/video.o \
         $(BUILD)/desktop.o \
         $(BUILD)/pci.o \
-        $(BUILD)/shm.o
+        $(BUILD)/shm.o \
+        $(BUILD)/rtl8139.o \
+        $(BUILD)/net.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -138,8 +140,11 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 
 # QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a.
 # Dysk (-hda) trafia na pierwsza magistrale ATA jako master.
+# Siec: karta RTL8139 w trybie uzytkownika QEMU (10.0.2.15, brama 10.0.2.2)
+NETOPTS := -netdev user,id=n0 -device rtl8139,netdev=n0
+
 run: $(KERNEL) $(INITRD) $(DISK)
-	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK)
+	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
 
 run-iso: iso
 	qemu-system-i386 -cdrom $(ISO)

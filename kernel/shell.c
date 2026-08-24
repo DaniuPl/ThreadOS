@@ -23,6 +23,7 @@
 #include "include/video.h"
 #include "include/desktop.h"
 #include "include/io.h"
+#include "include/net.h"
 
 #define LINE_MAX 80
 
@@ -50,6 +51,9 @@ static void cmd_help(void)
            "  uptime  - czas od startu systemu\n"
            "  date    - data i godzina z RTC\n"
            "  mouse   - pozycja i przyciski myszy\n"
+           "  ifconfig- karta sieciowa: MAC, IP, statystyki\n"
+           "  arp     - tablica ARP (IP -> MAC)\n"
+           "  ping IP - wyslij 4 pakiety ICMP echo, np. ping 10.0.2.2\n"
            "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
            "  desktop - graficzny pulpit z kursorem myszy\n"
            "  kill P  - zabij proces o pid P\n"
@@ -162,6 +166,27 @@ static void cmd_write(char *args)
         printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
 }
 
+/* Ping czeka na odpowiedzi (task_sleep), a shell dziala w kontekscie
+   przerwania klawiatury - dlatego robota idzie do osobnego watku jadra. */
+static uint32_t ping_target;
+
+static void ping_thread(void *arg)
+{
+    (void)arg;
+    net_ping(ping_target, 4);
+}
+
+static void cmd_ping(const char *arg)
+{
+    uint32_t ip;
+    if (!net_parse_ip(arg, &ip)) {
+        printk("uzycie: ping <adres ip>, np. ping 10.0.2.2\n");
+        return;
+    }
+    ping_target = ip;
+    task_create("ping", ping_thread, 0);
+}
+
 static void run_command(char *cmd)
 {
     if (!*cmd)
@@ -207,6 +232,12 @@ static void run_command(char *cmd)
         cmd_date();
     else if (!strcmp(cmd, "mouse"))
         cmd_mouse();
+    else if (!strcmp(cmd, "ifconfig"))
+        net_ifconfig();
+    else if (!strcmp(cmd, "arp"))
+        net_arp_dump();
+    else if (!strcmp(cmd, "ping"))
+        cmd_ping(arg);
     else if (!strcmp(cmd, "gfx"))
         cmd_gfx();
     else if (!strcmp(cmd, "vesa"))
