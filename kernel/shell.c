@@ -49,6 +49,7 @@ static void cmd_help(void)
            "  fls     - pliki na dysku (PFS)\n"
            "  cat F   - wypisz plik z dysku\n"
            "  write F txt - zapisz tekst do pliku na dysku\n"
+           "  df      - zajetosc dysku\n"
            "  mem     - uzycie pamieci (RAM, ramki PMM, sterta)\n"
            "  uptime  - czas od startu systemu\n"
            "  date    - data i godzina z RTC\n"
@@ -151,16 +152,41 @@ static void cmd_date(void)
 
 static void cmd_cat(const char *name)
 {
-    static char buf[FS_MAX_SIZE + 1];
-    int n = fs_read(name, buf, FS_MAX_SIZE);
-    if (n < 0) {
+    /* Pliki moga miec setki kilobajtow, wiec czytamy kawalkami zamiast
+       trzymac caly plik w buforze jadra */
+    int slot = fs_open(FS_ROOT, name, 0);
+    if (slot < 0) {
         printk("cat: brak pliku '%s' (lista: 'fls')\n", name);
         return;
     }
-    buf[n] = '\0';
-    printk("%s", buf);
-    if (n && buf[n - 1] != '\n')
+
+    char buf[257];
+    uint32_t off = 0;
+    char last = '\n';
+    for (;;) {
+        int n = fs_read_at(slot, off, buf, sizeof(buf) - 1);
+        if (n <= 0)
+            break;
+        buf[n] = '\0';
+        printk("%s", buf);
+        last = buf[n - 1];
+        off += (uint32_t)n;
+    }
+    if (last != '\n')
         printk("\n");
+}
+
+static void cmd_df(void)
+{
+    uint32_t used, total;
+    fs_usage(&used, &total);
+    if (!total) {
+        printk("df: brak dysku\n");
+        return;
+    }
+    uint32_t kib = FS_BLOCK / 1024;
+    printk("dysk: %u KiB, zajete %u KiB, wolne %u KiB (bloki po %u B)\n",
+           total * kib, used * kib, (total - used) * kib, FS_BLOCK);
 }
 
 static void cmd_write(char *args)
@@ -247,6 +273,8 @@ static void run_command(char *cmd)
         else
             printk("uzycie: cat <plik>\n");
     }
+    else if (!strcmp(cmd, "df"))
+        cmd_df();
     else if (!strcmp(cmd, "write"))
         cmd_write(arg);
     else if (!strcmp(cmd, "mem"))

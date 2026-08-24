@@ -8,6 +8,10 @@
 /* Czy na pierwszej magistrali (master) jest dysk */
 int ata_present(void);
 
+/* Pojemnosc dysku w sektorach (IDENTIFY DEVICE, LBA28).
+   0 = nie udalo sie odczytac. */
+uint32_t ata_sectors(void);
+
 /* Odczyt/zapis pojedynczego sektora 512 B (LBA28, tryb PIO, polling).
    Zwraca 0 przy sukcesie, -1 przy bledzie. */
 int ata_read_sector(uint32_t lba, void *buf);

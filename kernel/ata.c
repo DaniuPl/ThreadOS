@@ -26,14 +26,47 @@
 #define ST_DRQ  0x08
 #define ST_ERR  0x01
 
-#define CMD_READ  0x20
-#define CMD_WRITE 0x30
-#define CMD_FLUSH 0xE7
+#define CMD_READ     0x20
+#define CMD_WRITE    0x30
+#define CMD_FLUSH    0xE7
+#define CMD_IDENTIFY 0xEC
 
 int ata_present(void)
 {
     /* Pusta magistrala zwraca 0xFF (linie w stanie wysokim) */
     return inb(ATA_STATUS) != 0xFF;
+}
+
+static int ata_wait_drq(void);
+
+/* Pojemnosc dysku: komenda IDENTIFY DEVICE zwraca 256 slow opisu,
+   z ktorych slowa 60-61 to liczba sektorow adresowalnych w LBA28. */
+uint32_t ata_sectors(void)
+{
+    static uint32_t cached;
+    if (cached)
+        return cached;
+    if (!ata_present())
+        return 0;
+
+    outb(ATA_DRIVE, 0xA0);              /* master, tryb CHS/LBA bez znaczenia */
+    outb(ATA_SECCOUNT, 0);
+    outb(ATA_LBA_LO, 0);
+    outb(ATA_LBA_MID, 0);
+    outb(ATA_LBA_HI, 0);
+    outb(ATA_CMD, CMD_IDENTIFY);
+
+    if (inb(ATA_STATUS) == 0)           /* brak dysku */
+        return 0;
+    if (ata_wait_drq() < 0)
+        return 0;
+
+    uint16_t id[256];
+    for (int i = 0; i < 256; i++)
+        id[i] = inw(ATA_DATA);
+
+    cached = ((uint32_t)id[61] << 16) | id[60];
+    return cached;
 }
 
 /* Odczyt alt-status 4x daje wymagane ~400 ns na ustabilizowanie BSY

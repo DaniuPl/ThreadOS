@@ -139,9 +139,10 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
 	    gweb=$(BUILD)/user/gweb.elf
 
-# Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
+# Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
+# PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.
 $(DISK): | $(BUILD)
-	dd if=/dev/zero of=$@ bs=1M count=1 status=none
+	dd if=/dev/zero of=$@ bs=1M count=16 status=none
 
 iso: $(KERNEL) $(INITRD) grub.cfg
 	mkdir -p $(BUILD)/isodir/boot/grub

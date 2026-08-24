@@ -1,15 +1,25 @@
-/* PFS - ProtonOS File System (z katalogami)
+/* PFS3 - ProtonOS File System z przydzialem blokow
  *
- * Uklad dysku (sektory po 512 B):
- *   sektor 0       - superblok (magic "PFS2")
- *   sektor 1       - tablica i-wezlow (16 x 32 B = 512 B)
- *   sektor 2+i*32  - dane pliku i (kazdy plik ma staly obszar 32 sektorow)
+ * Poprzednia wersja dawala kazdemu plikowi staly obszar 32 sektorow:
+ * bez fragmentacji, ale z twardym sufitem 16 KiB i 16 plikow. Odkad
+ * system sciaga rzeczy z sieci, to za malo - wiec bloki sa przydzielane
+ * z bitmapy, a i-wezel trzyma ich liste.
  *
- * Katalogi to i-wezly typu DIR; kazdy i-wezel pamieta slot rodzica
- * (FS_ROOT = -1 dla katalogu glownego). Sciezki sa rozwiazywane przez
- * chodzenie po komponentach ("." i ".." obslugiwane). Alokacja danych
- * jest statyczna (plik o slocie i zawsze w tym samym miejscu), wiec nie
- * ma fragmentacji. Operacje dyskowe biegna z wylaczonymi przerwaniami.
+ * Uklad dysku (blok = 1 KiB = 2 sektory):
+ *   blok 0        - superblok (magic "PFS3")
+ *   bloki 1..4    - bitmapa blokow (4 KiB = 32768 bitow)
+ *   bloki 5..12   - tablica i-wezlow (64 x 128 B)
+ *   bloki 13..    - dane
+ *
+ * Plik ma 12 blokow bezposrednich i jeden blok posredni (256 wskaznikow),
+ * czyli do 268 KiB. Katalogi to i-wezly typu DIR; kazdy i-wezel pamieta
+ * slot rodzica (FS_ROOT = -1 dla korzenia). Sciezki rozwiazuje sie
+ * chodzeniem po komponentach ("." i ".." obslugiwane).
+ *
+ * Bitmapa i tablica i-wezlow siedza w pamieci i sa zapisywane na dysk
+ * przy kazdej zmianie - przy tej skali to prostsze i bezpieczniejsze niz
+ * pamiec podreczna z odroczonym zapisem. Operacje dyskowe biegna z
+ * wylaczonymi przerwaniami.
  */
 
 #include "include/fs.h"
@@ -18,39 +28,196 @@
 #include "include/printk.h"
 #include "include/io.h"
 
-#define MAGIC      "PFS2"
-#define INODE_SECTOR 1
-#define DATA_START 2
-#define FILE_SECTORS 32
+#define MAGIC          "PFS3"
+#define SECTORS_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)
+
+#define BITMAP_START   1
+#define BITMAP_BLOCKS  4
+#define BITMAP_BITS    (BITMAP_BLOCKS * FS_BLOCK * 8)
+#define INODE_START    (BITMAP_START + BITMAP_BLOCKS)
+#define INODE_SIZE     128
+#define INODE_BLOCKS   (FS_MAX_FILES * INODE_SIZE / FS_BLOCK)
+#define DATA_START     (INODE_START + INODE_BLOCKS)
 
 #define FS_TYPE_FILE 0
 #define FS_TYPE_DIR  1
 #define FS_NOTFOUND  (-2)
 
 struct inode {
-    char name[FS_NAME_MAX + 1];   /* 24 B, z NUL */
+    char name[FS_NAME_MAX + 1];   /* 64 B, z NUL */
     uint32_t size;                /* 4 B */
     uint8_t used;                 /* 1 B */
     uint8_t type;                 /* 1 B: FS_TYPE_FILE / FS_TYPE_DIR */
-    int8_t parent;                /* 1 B: slot rodzica, -1 = root */
-    uint8_t reserved;             /* 1 B */
-} __attribute__((packed));        /* 32 B -> 16 i-wezlow na sektor */
+    int16_t parent;               /* 2 B: slot rodzica, -1 = root */
+    uint32_t direct[FS_DIRECT];   /* 48 B: numery blokow */
+    uint32_t indirect;            /* 4 B: blok ze wskaznikami (0 = brak) */
+    uint8_t reserved[4];
+} __attribute__((packed));        /* 128 B -> 8 i-wezlow na blok */
 
 struct superblock {
     char magic[8];
     uint32_t ninodes;
+    uint32_t nblocks;             /* ile blokow obejmuje bitmapa */
+    uint32_t data_start;
 } __attribute__((packed));
 
 static int ready;
 static struct inode inodes[FS_MAX_FILES];
+static uint8_t bitmap[BITMAP_BLOCKS * FS_BLOCK];
+static uint32_t total_blocks;
+static uint8_t block_buf[FS_BLOCK];
 static uint8_t sector_buf[ATA_SECTOR_SIZE];
+
+/* --- dostep do blokow ------------------------------------------------- */
+
+static int block_read(uint32_t block, void *buf)
+{
+    uint8_t *p = buf;
+    for (uint32_t i = 0; i < SECTORS_PER_BLOCK; i++)
+        if (ata_read_sector(block * SECTORS_PER_BLOCK + i,
+                            p + i * ATA_SECTOR_SIZE) < 0)
+            return -1;
+    return 0;
+}
+
+static int block_write(uint32_t block, const void *buf)
+{
+    const uint8_t *p = buf;
+    for (uint32_t i = 0; i < SECTORS_PER_BLOCK; i++) {
+        memcpy(sector_buf, p + i * ATA_SECTOR_SIZE, ATA_SECTOR_SIZE);
+        if (ata_write_sector(block * SECTORS_PER_BLOCK + i, sector_buf) < 0)
+            return -1;
+    }
+    return 0;
+}
 
 static void flush_inodes(void)
 {
-    memset(sector_buf, 0, ATA_SECTOR_SIZE);
-    memcpy(sector_buf, inodes, sizeof(inodes));
-    ata_write_sector(INODE_SECTOR, sector_buf);
+    const uint8_t *src = (const uint8_t *)inodes;
+    for (uint32_t i = 0; i < INODE_BLOCKS; i++)
+        block_write(INODE_START + i, src + i * FS_BLOCK);
 }
+
+/* Zapisuje tylko blok z danym i-wezlem. Przy zapisie pliku i-wezel
+   zmienia sie co blok danych, wiec przepisywanie calej tablicy (8 KiB
+   przez PIO) kosztowaloby wiecej niz same dane. */
+static void flush_inode(int slot)
+{
+    uint32_t blk = (uint32_t)slot * INODE_SIZE / FS_BLOCK;
+    const uint8_t *src = (const uint8_t *)inodes;
+    block_write(INODE_START + blk, src + blk * FS_BLOCK);
+}
+
+static void flush_bitmap(void)
+{
+    for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
+        block_write(BITMAP_START + i, bitmap + i * FS_BLOCK);
+}
+
+/* Jak wyzej: przy przydziale bloku wystarczy zapisac ten kawalek
+   bitmapy, w ktorym zmienil sie bit */
+static void flush_bitmap_bit(uint32_t b)
+{
+    uint32_t blk = b / 8 / FS_BLOCK;
+    block_write(BITMAP_START + blk, bitmap + blk * FS_BLOCK);
+}
+
+/* --- bitmapa blokow --------------------------------------------------- */
+
+static int bit_get(uint32_t b)
+{
+    return (bitmap[b / 8] >> (b % 8)) & 1;
+}
+
+static void bit_set(uint32_t b, int v)
+{
+    if (v)
+        bitmap[b / 8] |= (uint8_t)(1 << (b % 8));
+    else
+        bitmap[b / 8] &= (uint8_t)~(1 << (b % 8));
+}
+
+/* Przydziela wyzerowany blok; 0 = brak miejsca (blok 0 to superblok) */
+static uint32_t block_alloc(void)
+{
+    for (uint32_t b = DATA_START; b < total_blocks; b++) {
+        if (bit_get(b))
+            continue;
+        bit_set(b, 1);
+        flush_bitmap_bit(b);
+        memset(block_buf, 0, FS_BLOCK);
+        block_write(b, block_buf);
+        return b;
+    }
+    return 0;
+}
+
+static void block_free(uint32_t b)
+{
+    if (b < DATA_START || b >= total_blocks)
+        return;
+    bit_set(b, 0);
+    flush_bitmap_bit(b);
+}
+
+/* Zwalnia wszystkie bloki pliku */
+static void inode_free_blocks(struct inode *in)
+{
+    for (int i = 0; i < FS_DIRECT; i++) {
+        if (in->direct[i]) {
+            block_free(in->direct[i]);
+            in->direct[i] = 0;
+        }
+    }
+    if (in->indirect) {
+        static uint32_t ptrs[FS_INDIRECT];
+        if (block_read(in->indirect, ptrs) == 0)
+            for (uint32_t i = 0; i < FS_INDIRECT; i++)
+                if (ptrs[i])
+                    block_free(ptrs[i]);
+        block_free(in->indirect);
+        in->indirect = 0;
+    }
+    in->size = 0;
+}
+
+/* Numer bloku dysku dla n-tego bloku pliku; alloc=1 przydziela brakujace.
+   Zwraca 0, gdy bloku nie ma (albo nie da sie przydzielic). */
+static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
+{
+    if (n < FS_DIRECT) {
+        if (!in->direct[n] && alloc)
+            in->direct[n] = block_alloc();
+        return in->direct[n];
+    }
+
+    n -= FS_DIRECT;
+    if (n >= FS_INDIRECT)
+        return 0;                          /* poza sufitem rozmiaru pliku */
+
+    if (!in->indirect) {
+        if (!alloc)
+            return 0;
+        in->indirect = block_alloc();
+        if (!in->indirect)
+            return 0;
+    }
+
+    static uint32_t ptrs[FS_INDIRECT];
+    if (block_read(in->indirect, ptrs) < 0)
+        return 0;
+    if (!ptrs[n]) {
+        if (!alloc)
+            return 0;
+        ptrs[n] = block_alloc();
+        if (!ptrs[n])
+            return 0;
+        block_write(in->indirect, ptrs);
+    }
+    return ptrs[n];
+}
+
+/* --- start i formatowanie --------------------------------------------- */
 
 static void format_disk(void)
 {
@@ -58,14 +225,22 @@ static void format_disk(void)
     memset(&sb, 0, sizeof(sb));
     memcpy(sb.magic, MAGIC, 4);
     sb.ninodes = FS_MAX_FILES;
+    sb.nblocks = total_blocks;
+    sb.data_start = DATA_START;
 
-    memset(sector_buf, 0, ATA_SECTOR_SIZE);
-    memcpy(sector_buf, &sb, sizeof(sb));
-    ata_write_sector(0, sector_buf);
+    memset(block_buf, 0, FS_BLOCK);
+    memcpy(block_buf, &sb, sizeof(sb));
+    block_write(0, block_buf);
+
+    memset(bitmap, 0, sizeof(bitmap));
+    for (uint32_t b = 0; b < DATA_START; b++)  /* metadane zajete */
+        bit_set(b, 1);
+    flush_bitmap();
 
     memset(inodes, 0, sizeof(inodes));
     flush_inodes();
-    printk("[ OK ] PFS: pusty dysk sformatowany\n");
+    printk("[ OK ] PFS: pusty dysk sformatowany (%u blokow po %u B)\n",
+           total_blocks, FS_BLOCK);
 }
 
 int fs_init(void)
@@ -74,17 +249,30 @@ int fs_init(void)
         printk("[ !! ] FS: brak dysku ATA\n");
         return 0;
     }
-    if (ata_read_sector(0, sector_buf) < 0) {
+
+    uint32_t sectors = ata_sectors();
+    total_blocks = sectors / SECTORS_PER_BLOCK;
+    if (total_blocks > BITMAP_BITS)
+        total_blocks = BITMAP_BITS;        /* tyle obejmuje bitmapa */
+    if (total_blocks <= DATA_START) {
+        printk("[ !! ] FS: dysk za maly (%u blokow)\n", total_blocks);
+        return 0;
+    }
+
+    if (block_read(0, block_buf) < 0) {
         printk("[ !! ] FS: blad odczytu superbloku\n");
         return 0;
     }
 
-    struct superblock *sb = (struct superblock *)sector_buf;
+    struct superblock *sb = (struct superblock *)block_buf;
     if (memcmp(sb->magic, MAGIC, 4) != 0) {
         format_disk();
     } else {
-        ata_read_sector(INODE_SECTOR, sector_buf);
-        memcpy(inodes, sector_buf, sizeof(inodes));
+        for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
+            block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
+        uint8_t *dst = (uint8_t *)inodes;
+        for (uint32_t i = 0; i < INODE_BLOCKS; i++)
+            block_read(INODE_START + i, dst + i * FS_BLOCK);
     }
     ready = 1;
     return 1;
@@ -93,6 +281,18 @@ int fs_init(void)
 int fs_ready(void)
 {
     return ready;
+}
+
+void fs_usage(uint32_t *used, uint32_t *total)
+{
+    uint32_t u = 0;
+    for (uint32_t b = 0; b < total_blocks; b++)
+        if (bit_get(b))
+            u++;
+    if (used)
+        *used = u;
+    if (total)
+        *total = total_blocks;
 }
 
 /* --- Pomocnicze: katalogi i rozwiazywanie sciezek --- */
@@ -176,9 +376,9 @@ static int resolve_parent(int cwd, const char *path, char *base)
         bname = path;
     } else {
         int n = (int)(last - path);
-        if (n >= 120)
+        if (n >= 240)
             return FS_NOTFOUND;
-        char tmp[128];
+        char tmp[256];
         memcpy(tmp, path, n);
         tmp[n] = '\0';
         dir = (n == 0) ? FS_ROOT : resolve(cwd, tmp);  /* "/x" -> root */
@@ -200,12 +400,11 @@ static int create_inode(int dir, const char *base, int type)
     int idx = alloc_inode();
     if (idx < 0)
         return -1;
-    memset(inodes[idx].name, 0, sizeof(inodes[idx].name));
+    memset(&inodes[idx], 0, sizeof(inodes[idx]));
     memcpy(inodes[idx].name, base, strlen(base));
-    inodes[idx].size = 0;
     inodes[idx].used = 1;
     inodes[idx].type = (uint8_t)type;
-    inodes[idx].parent = (int8_t)dir;
+    inodes[idx].parent = (int16_t)dir;
     flush_inodes();
     return idx;
 }
@@ -293,6 +492,7 @@ int fs_unlink(int cwd, const char *path)
                 return -1;
             }
     }
+    inode_free_blocks(&inodes[slot]);
     inodes[slot].used = 0;
     flush_inodes();
     irq_restore(flags);
@@ -367,8 +567,8 @@ int fs_truncate(int slot)
     if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
         return -1;
     uint32_t flags = irq_save();
-    inodes[slot].size = 0;
-    flush_inodes();
+    inode_free_blocks(&inodes[slot]);
+    flush_inode(slot);
     irq_restore(flags);
     return 0;
 }
@@ -379,30 +579,34 @@ int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len)
         return -1;
 
     uint32_t flags = irq_save();
-    uint32_t size = inodes[slot].size;
-    if (off >= size) {
+    struct inode *in = &inodes[slot];
+    if (off >= in->size) {
         irq_restore(flags);
         return 0;
     }
-    if (off + len > size)
-        len = size - off;
+    if (off + len > in->size)
+        len = in->size - off;
 
-    uint32_t base = DATA_START + slot * FILE_SECTORS;
     uint8_t *dst = buf;
     uint32_t done = 0;
 
     while (done < len) {
         uint32_t pos = off + done;
-        uint32_t sector = pos / ATA_SECTOR_SIZE;
-        uint32_t soff = pos % ATA_SECTOR_SIZE;
-        uint32_t chunk = ATA_SECTOR_SIZE - soff;
+        uint32_t bno = inode_block(in, pos / FS_BLOCK, 0);
+        uint32_t boff = pos % FS_BLOCK;
+        uint32_t chunk = FS_BLOCK - boff;
         if (chunk > len - done)
             chunk = len - done;
-        if (ata_read_sector(base + sector, sector_buf) < 0) {
-            irq_restore(flags);
-            return -1;
+
+        if (!bno) {                        /* dziura w pliku - zera */
+            memset(dst + done, 0, chunk);
+        } else {
+            if (block_read(bno, block_buf) < 0) {
+                irq_restore(flags);
+                return -1;
+            }
+            memcpy(dst + done, block_buf + boff, chunk);
         }
-        memcpy(dst + done, sector_buf + soff, chunk);
         done += chunk;
     }
     irq_restore(flags);
@@ -417,35 +621,48 @@ int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len)
         return -1;
 
     uint32_t flags = irq_save();
-    uint32_t base = DATA_START + slot * FILE_SECTORS;
+    struct inode *in = &inodes[slot];
     const uint8_t *src = buf;
     uint32_t done = 0;
+    int meta_dirty = 0;
 
     while (done < len) {
         uint32_t pos = off + done;
-        uint32_t sector = pos / ATA_SECTOR_SIZE;
-        uint32_t soff = pos % ATA_SECTOR_SIZE;
-        uint32_t chunk = ATA_SECTOR_SIZE - soff;
+        uint32_t boff = pos % FS_BLOCK;
+        uint32_t chunk = FS_BLOCK - boff;
         if (chunk > len - done)
             chunk = len - done;
-        if (ata_read_sector(base + sector, sector_buf) < 0) {
-            irq_restore(flags);
-            return -1;
+
+        uint32_t had = inode_block(in, pos / FS_BLOCK, 0);
+        uint32_t bno = had ? had : inode_block(in, pos / FS_BLOCK, 1);
+        if (!had && bno)
+            meta_dirty = 1;                /* doszedl nowy blok do i-wezla */
+        if (!bno) {                        /* brak miejsca na dysku */
+            break;
         }
-        memcpy(sector_buf + soff, src + done, chunk);
-        if (ata_write_sector(base + sector, sector_buf) < 0) {
+
+        if (chunk != FS_BLOCK) {           /* czesciowy blok - doczytaj */
+            if (block_read(bno, block_buf) < 0) {
+                irq_restore(flags);
+                return -1;
+            }
+        }
+        memcpy(block_buf + boff, src + done, chunk);
+        if (block_write(bno, block_buf) < 0) {
             irq_restore(flags);
             return -1;
         }
         done += chunk;
     }
 
-    if (off + len > inodes[slot].size) {
-        inodes[slot].size = off + len;
-        flush_inodes();
+    if (off + done > in->size) {
+        in->size = off + done;
+        meta_dirty = 1;
     }
+    if (meta_dirty)
+        flush_inode(slot);
     irq_restore(flags);
-    return (int)done;
+    return done ? (int)done : -1;
 }
 
 /* --- Wygoda dla shella jadra (katalog glowny) --- */

@@ -27,8 +27,8 @@ ProtonOS/
 │   ├── usermode.c      # wejście w ring 3 przez iret
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
-│   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, polling)
-│   ├── fs.c            # PFS - system plików z katalogami (ścieżki, ., ..)
+│   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, IDENTIFY)
+│   ├── fs.c            # PFS3 - bloki 1 KiB z bitmapy, i-węzły, katalogi
 │   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
@@ -153,9 +153,12 @@ wpisujesz adres w postaci `ip[:port][/ścieżka]`, a program pobiera stronę po
 TCP, obdziera ją ze znaczników HTML, rysuje tekst w oknie i zapisuje treść
 na dysk jako `strona.htm`.
 
-`make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
-formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
-lub syscall `fwrite` zostają na nim między uruchomieniami.
+`make run` dołącza obraz dysku `build/disk.img` (16 MiB, jako `-hda`); jądro
+rozpoznaje jego pojemność przez ATA IDENTIFY i formatuje pusty dysk przy
+pierwszym starcie. Pliki zostają na nim między uruchomieniami, a `df`
+pokazuje zajętość. PFS3 przydziela bloki po 1 KiB z bitmapy: 64 i-węzły,
+nazwy do 63 znaków, do 268 KiB na plik (12 bloków bezpośrednich + blok
+pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
 
 ## Jak to działa
 
@@ -287,3 +290,10 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       w jednej aplikacji ring 3
 - [x] Start prosto na pulpit graficzny; linia poleceń jądra (Multiboot
       `-append`) z opcją `nodesktop` zostawia konsolę tekstową
+- [x] PFS3: przydział bloków z bitmapy zamiast stałych obszarów - 64
+      i-węzły, nazwy do 63 znaków, pliki do 268 KiB (bloki bezpośrednie
+      + pośredni), zwalnianie bloków przy `rm`/truncate, `df` i rozmiar
+      dysku z ATA IDENTIFY; zapis metadanych ograniczony do zmienionego
+      bloku i-węzłów i bitmapy
+- [x] TCP: aktualizacja okna po odczycie z gniazda - odbiór dużych
+      odpowiedzi nie czeka już na probnik nadawcy (100 KiB w kilka sekund)

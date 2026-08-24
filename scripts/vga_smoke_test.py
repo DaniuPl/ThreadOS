@@ -48,6 +48,9 @@ VIDEO_H = 200
 # tekstowy linia polecen jadra.
 TEXT_MODE = "nodesktop"
 
+# Obraz dysku pod PFS3 (jadro formatuje pusty dysk przy pierwszym starcie)
+DISK_SIZE = 16 * 1024 * 1024
+
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
 MENU_ROW = 12
 MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
@@ -60,6 +63,9 @@ def menu_y(name):
 
 
 PAGE = b"<html>ProtonOS TCP dziala</html>\n"
+# Strona grubo ponad stary limit PFS (16 KiB na plik) - sprawdza
+# przydzial blokow, blok posredni i przepustowosc TCP
+BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
 
 
 def start_http_server():
@@ -68,11 +74,12 @@ def start_http_server():
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            body = BIG_PAGE if self.path.startswith("/duza") else PAGE
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
-            self.send_header("Content-Length", str(len(PAGE)))
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(PAGE)
+            self.wfile.write(body)
 
         def log_message(self, *args):
             pass
@@ -313,7 +320,7 @@ def main():
     # jadro sformatuje go przy pierwszym starcie
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
-        f.write(b"\0" * (1024 * 1024))
+        f.write(b"\0" * DISK_SIZE)
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
@@ -632,6 +639,24 @@ def main():
                   "<html>ProtonOS TCP dziala</html>" in saved)
             check("do pliku poszla sama tresc, bez naglowkow HTTP",
                   "Content-Length" not in saved)
+
+            # PFS3: plik grubo ponad stary limit 16 KiB na plik
+            q.type_line("clear")
+            q.type_line("run httpget 10.0.2.2 %d /duza duza.htm" % http_port)
+            big = q.wait_for("odebrano", timeout=90)
+            # httpget liczy wszystko, co przyszlo z sieci - razem z
+            # naglowkami HTTP, wiec liczba jest nieco wieksza od strony
+            got = re.search(r"odebrano (\d+) B", big)
+            check("duza strona pobrana w calosci (%d B tresci)" % len(BIG_PAGE),
+                  got is not None and int(got.group(1)) >= len(BIG_PAGE))
+            q.type_line("fls")
+            listing = q.wait_for("duza.htm", timeout=10)
+            check("plik ponad stary limit 16 KiB zapisany na PFS",
+                  "duza.htm  (%d B)" % len(BIG_PAGE) in listing)
+            q.type_line("df")
+            usage = q.wait_for("dysk: ", timeout=10)
+            check("df pokazuje zajetosc dysku w blokach",
+                  "bloki po 1024 B" in usage and "zajete" in usage)
         finally:
             http_stop()
 
@@ -940,7 +965,7 @@ def main():
     print("--- pulpit: przegladarka (gweb) ---")
     wdisk = tempfile.mktemp(suffix=".img")
     with open(wdisk, "wb") as f:
-        f.write(b"\0" * (1024 * 1024))
+        f.write(b"\0" * DISK_SIZE)
     http_port, http_stop = start_http_server()
     q_web = Qemu(KERNEL, INITRD, wdisk)
     try:
@@ -1014,6 +1039,16 @@ def main():
         q2.type_line("cat ring3.txt")
         check("plik zapisany przez ring3 przetrwal restart",
               "plik zapisany przez proces ring3" in q2.wait_for("ring3"))
+
+        # Duzy plik z sieci: i-wezel z blokiem posrednim po restarcie
+        q2.type_line("fls")
+        listing = q2.wait_for("duza.htm", timeout=10)
+        check("duzy plik (>100 KiB) przetrwal restart z pelnym rozmiarem",
+              "duza.htm  (%d B)" % len(BIG_PAGE) in listing)
+        q2.type_line("df")
+        usage = q2.wait_for("dysk: ", timeout=10)
+        check("zajetosc dysku odtworzona z bitmapy po restarcie",
+              "zajete" in usage and "zajete 0 KiB" not in usage)
     finally:
         q2.close()
         if os.path.exists(disk):
@@ -1278,7 +1313,7 @@ def main():
     print("--- pulpit: menedzer plikow (gfiles) ---")
     gdisk = tempfile.mktemp(suffix=".img")
     with open(gdisk, "wb") as f:
-        f.write(b"\0" * (1024 * 1024))
+        f.write(b"\0" * DISK_SIZE)
     q9 = Qemu(KERNEL, INITRD, gdisk)
     try:
         q9.wait_desktop()
@@ -1388,7 +1423,7 @@ def main():
     print("--- pulpit: terminal GUI (gterm) ---")
     tdisk = tempfile.mktemp(suffix=".img")
     with open(tdisk, "wb") as f:
-        f.write(b"\0" * (1024 * 1024))
+        f.write(b"\0" * DISK_SIZE)
     q12 = Qemu(KERNEL, INITRD, tdisk)
     try:
         q12.wait_desktop()
@@ -1477,7 +1512,7 @@ def main():
     print("--- pulpit: zapis pozycji ikon na dysku ---")
     idisk = tempfile.mktemp(suffix=".img")
     with open(idisk, "wb") as f:
-        f.write(b"\0" * (1024 * 1024))
+        f.write(b"\0" * DISK_SIZE)
     q14 = Qemu(KERNEL, INITRD, idisk)
     try:
         q14.wait_desktop()

@@ -3,9 +3,15 @@
 
 #include <stdint.h>
 
-#define FS_NAME_MAX  23
-#define FS_MAX_FILES 16
-#define FS_MAX_SIZE  (32 * 512)   /* 16 KiB na plik (32 sektory) */
+/* PFS3: bloki po 1 KiB przydzielane z bitmapy, 64 i-wezly, dluzsze nazwy.
+   Plik moze miec 12 blokow bezposrednich + blok posredni (256 wskaznikow),
+   czyli 268 KiB - dosc, by trzymac na dysku strony sciagniete z sieci. */
+#define FS_NAME_MAX  63
+#define FS_MAX_FILES 64
+#define FS_BLOCK     1024u
+#define FS_DIRECT    12
+#define FS_INDIRECT  (FS_BLOCK / 4)          /* wskaznikow w bloku posrednim */
+#define FS_MAX_SIZE  ((FS_DIRECT + FS_INDIRECT) * FS_BLOCK)   /* 268 KiB */
 
 #define FS_ROOT (-1)              /* katalog glowny (wirtualny i-wezel) */
 
@@ -28,10 +34,10 @@ int fs_mkdir(int cwd, const char *path);
    Zwraca 0 albo -1 (nie istnieje / nie jest katalogiem). */
 int fs_chdir(int cwd, const char *path, int *newcwd);
 
-/* Usuwa plik albo pusty katalog. Zwraca 0 albo -1. */
+/* Usuwa plik albo pusty katalog (zwalnia jego bloki). 0 albo -1. */
 int fs_unlink(int cwd, const char *path);
 
-/* Wpisuje absolutna sciezke slotu do buf (>= 128 B). */
+/* Wpisuje absolutna sciezke slotu do buf (>= 512 B). */
 void fs_getpath(int slot, char *buf);
 
 /* Enumeracja katalogu 'dir' (FS_ROOT albo slot): kolejny wpis o numerze
@@ -48,5 +54,8 @@ int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len);
 int fs_write(const char *name, const void *data, uint32_t len);
 int fs_read(const char *name, void *buf, uint32_t max);
 void fs_list(void);
+
+/* Zajetosc dysku: bloki uzyte / wszystkie (komenda 'df') */
+void fs_usage(uint32_t *used_blocks, uint32_t *total_blocks);
 
 #endif

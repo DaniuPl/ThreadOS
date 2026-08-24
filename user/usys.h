@@ -46,7 +46,7 @@
 #define SYS_TCP_RECV    39
 #define SYS_TCP_CLOSE   40
 
-#define FS_NAME_MAX  23
+#define FS_NAME_MAX  63
 
 struct sysinfo {
     uint32_t ram_kib;

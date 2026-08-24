@@ -28,7 +28,7 @@
 #include "include/io.h"
 
 #define TCP_CONNS     6
-#define RX_BUF        4096
+#define RX_BUF        8192
 #define TX_BUF        1460      /* jeden segment danych na raz */
 #define ACCEPT_QUEUE  4
 #define MSS           1460
@@ -84,6 +84,7 @@ struct tcp_conn {
     uint32_t last_send;         /* tyknicie ostatniej wysylki */
     int retries;
 
+    uint16_t adv_wnd;           /* okno rozglaszane w ostatnim ACK */
     int listener;               /* dla polaczen z nasluchu: id gniazda */
     int accepted;               /* czy odebrane przez tcp_accept */
 };
@@ -195,7 +196,9 @@ static void tcp_out(struct tcp_conn *c, uint8_t flags, uint32_t seq,
     put32(seg + 8, c->rcv_nxt);
     seg[12] = 5 << 4;                    /* naglowek 20 B, brak opcji */
     seg[13] = flags;
-    put16(seg + 14, rx_window(c));
+    uint16_t wnd = rx_window(c);
+    c->adv_wnd = wnd;
+    put16(seg + 14, wnd);
     put16(seg + 16, 0);
     put16(seg + 18, 0);
     if (len)
@@ -593,7 +596,16 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
             if (n < c->rx_len)
                 memcpy(c->rx, c->rx + n, c->rx_len - n);
             c->rx_len -= n;
+
+            /* Aktualizacja okna: jesli ostatni ACK oglaszal ciasno, a
+               teraz jest miejsce, powiedz o tym od razu. Inaczej nadawca
+               czeka z pelnym buforem az do swojego probnika i transfer
+               zwalnia do kilku kilobajtow na sekunde. */
+            int announce = (c->adv_wnd < MSS && rx_window(c) >= MSS &&
+                            c->state == TCP_ESTABLISHED);
             irq_restore(irq);
+            if (announce)
+                tcp_out(c, ACK, c->snd_nxt, 0, 0);
             return n;
         }
         int done = c->fin_received || c->state == TCP_CLOSED;
