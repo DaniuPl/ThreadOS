@@ -22,6 +22,7 @@
 #include "include/net.h"
 #include "include/rtl8139.h"
 #include "include/dhcp.h"
+#include "include/tcp.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
@@ -178,8 +179,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     /* Adres IP bierzemy z sieci - klient DHCP czeka na odpowiedzi
        serwera, wiec musi chodzic w watku (po scheduler_init) */
-    if (has_net)
+    if (has_net) {
         dhcp_start();
+        tcp_init();        /* watek retransmisji TCP */
+    }
 
     shell_init();
 

@@ -56,4 +56,17 @@ int net_udp_send_raw(uint32_t src_ip, uint32_t dst_ip, const uint8_t *dst_mac,
                      uint16_t src_port, uint16_t dst_port,
                      const void *data, uint16_t len);
 
+/* --- uslugi dla warstwy TCP ------------------------------------------- */
+
+uint16_t net_transport_checksum(uint32_t src_ip, uint32_t dst_ip,
+                                uint8_t proto, const uint8_t *seg,
+                                uint16_t len);
+
+/* Wysyla pakiet IP do znanego MAC-a (mozna wolac z przerwania) */
+int net_ip_send_mac(uint32_t dst_ip, const uint8_t *dst_mac, uint8_t proto,
+                    const void *payload, uint16_t len);
+
+/* Rozwiazuje MAC (przez brame dla adresow spoza sieci); blokuje */
+int net_resolve_mac(uint32_t ip, uint8_t *out);
+
 #endif

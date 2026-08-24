@@ -37,6 +37,12 @@
 #define SYS_UDP_RECV   32 /* ebx=gniazdo, ecx=&{buf,max,ms,ip,port} -> bajty/-1 */
 #define SYS_UDP_CLOSE  33 /* ebx=gniazdo -> 0 */
 #define SYS_NETINFO    34 /* ebx=&{ip,mask,gw,dns} -> 0 albo -1 (brak sieci) */
+#define SYS_TCP_CONNECT 35 /* ebx=ip, ecx=port, edx=timeout_ms -> polaczenie/-1 */
+#define SYS_TCP_LISTEN  36 /* ebx=port -> gniazdo nasluchujace albo -1 */
+#define SYS_TCP_ACCEPT  37 /* ebx=gniazdo, ecx=timeout_ms -> polaczenie/-1 */
+#define SYS_TCP_SEND    38 /* ebx=polaczenie, ecx=&{buf,len,timeout} -> bajty/-1 */
+#define SYS_TCP_RECV    39 /* ebx=polaczenie, ecx=&{buf,max,timeout} -> bajty/0/-1 */
+#define SYS_TCP_CLOSE   40 /* ebx=polaczenie -> 0 */
 
 #define SYSCALL_VECTOR 0x80
 

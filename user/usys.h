@@ -39,6 +39,12 @@
 #define SYS_UDP_RECV   32
 #define SYS_UDP_CLOSE  33
 #define SYS_NETINFO    34
+#define SYS_TCP_CONNECT 35
+#define SYS_TCP_LISTEN  36
+#define SYS_TCP_ACCEPT  37
+#define SYS_TCP_SEND    38
+#define SYS_TCP_RECV    39
+#define SYS_TCP_CLOSE   40
 
 #define FS_NAME_MAX  23
 
@@ -538,6 +544,107 @@ static inline void print_ip(uint32_t ip)
         if (i)
             print(".");
     }
+}
+
+/* --- siec: polaczenia TCP --------------------------------------------- */
+
+struct tcp_io_cmd {
+    uint32_t buf, len, timeout_ms;
+};
+
+/* Nawiazuje polaczenie; zwraca uchwyt albo -1 */
+static inline int32_t tcp_connect(uint32_t ip, uint32_t port,
+                                  uint32_t timeout_ms)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TCP_CONNECT), "b"(ip), "c"(port), "d"(timeout_ms)
+                     : "memory");
+    return ret;
+}
+
+/* Otwiera gniazdo nasluchujace na porcie */
+static inline int32_t tcp_listen(uint32_t port)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TCP_LISTEN), "b"(port)
+                     : "memory");
+    return ret;
+}
+
+/* Odbiera nawiazane polaczenie z kolejki gniazda nasluchujacego */
+static inline int32_t tcp_accept(int32_t listener, uint32_t timeout_ms)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TCP_ACCEPT), "b"(listener), "c"(timeout_ms)
+                     : "memory");
+    return ret;
+}
+
+/* Wysyla dane i czeka na potwierdzenie drugiej strony */
+static inline int32_t tcp_send(int32_t conn, const void *buf, uint32_t len,
+                               uint32_t timeout_ms)
+{
+    struct tcp_io_cmd c = { (uint32_t)buf, len, timeout_ms };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TCP_SEND), "b"(conn), "c"(&c)
+                     : "memory");
+    return ret;
+}
+
+/* Odbiera dane: >0 = bajty, 0 = druga strona zamknela, -1 = blad/timeout */
+static inline int32_t tcp_recv(int32_t conn, void *buf, uint32_t max,
+                               uint32_t timeout_ms)
+{
+    struct tcp_io_cmd c = { (uint32_t)buf, max, timeout_ms };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TCP_RECV), "b"(conn), "c"(&c)
+                     : "memory");
+    return ret;
+}
+
+static inline void tcp_close(int32_t conn)
+{
+    __asm__ volatile("int $0x80"
+                     :
+                     : "a"(SYS_TCP_CLOSE), "b"(conn)
+                     : "memory");
+}
+
+/* "10.0.2.2" -> 0x0A000202 (0 = zly zapis) */
+static inline uint32_t uparse_ip(const char *s)
+{
+    uint32_t ip = 0, part = 0;
+    int digits = 0, parts = 0;
+
+    for (; *s; s++) {
+        if (*s == '.') {
+            if (!digits || parts == 3)
+                return 0;
+            ip = (ip << 8) | (part & 0xFF);
+            part = 0;
+            digits = 0;
+            parts++;
+        } else if (*s >= '0' && *s <= '9') {
+            part = part * 10 + (uint32_t)(*s - '0');
+            if (part > 255 || ++digits > 3)
+                return 0;
+        } else {
+            return 0;
+        }
+    }
+    if (parts != 3 || !digits)
+        return 0;
+    return (ip << 8) | (part & 0xFF);
 }
 
 #endif

@@ -40,6 +40,7 @@ ProtonOS/
 │   ├── rtl8139.c       # sterownik karty sieciowej Realtek RTL8139 (DMA)
 │   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP + UDP
 │   ├── dhcp.c          # klient DHCP (DISCOVER/OFFER/REQUEST/ACK)
+│   ├── tcp.c           # TCP: klient i serwer, ACK-i, retransmisje, FIN
 │   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
 │   │                   #   ifconfig, arp, ping...
@@ -80,6 +81,8 @@ ProtonOS/
 │   ├── udpecho.c       # serwer UDP w ring 3 (odsyła, co dostał)
 │   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
+│   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
+│   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
@@ -134,6 +137,12 @@ Programy w ring 3 mają własne gniazda UDP: `run udpecho` nasłuchuje na
 porcie 7777, `run udptest` wysyła do niego datagram (domyślnie przez pętlę
 zwrotną, więc działa i bez sieci), a `run nslookup example.com` pyta
 o adres serwer DNS przyznany przez DHCP.
+
+TCP działa w obie strony. Jako klient: `run httpget 10.0.2.2 8000 /`
+pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
+strona.htm` zapisuje samą treść na dysk (PFS). Jako serwer: `run tcpserv`
+nasłuchuje na porcie 5555, który `make run` wystawia na hosta - można się
+połączyć zwykłym `nc localhost 5555`. Stan połączeń pokazuje `netstat`.
 
 `make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
 formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
@@ -257,3 +266,9 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       procesom gadać po UDP bez sieci (`udpecho` + `udptest`); klient DNS
       w userspace (`nslookup example.com`) i przerywanie oczekiwania
       w jądrze przez `kill`
+- [x] TCP: aktywne i pasywne otwarcie (klient i serwer), numery
+      sekwencyjne z potwierdzeniami, retransmisje z wątku `tcpd`,
+      zamknięcie przez FIN, RST na segment do zamkniętego portu;
+      syscalle `tcp_connect`/`listen`/`accept`/`send`/`recv`/`close`,
+      klient HTTP (`httpget` - treść ze świata ląduje na PFS) i serwer
+      w ring 3 (`tcpserv`), podgląd przez `netstat`

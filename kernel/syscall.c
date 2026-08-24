@@ -29,6 +29,7 @@
 #include "include/desktop.h"
 #include "include/paging.h"
 #include "include/net.h"
+#include "include/tcp.h"
 #include "include/string.h"
 
 /* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
@@ -56,6 +57,9 @@ struct udp_recv_cmd {
 };
 struct netinfo_buf {
     uint32_t ip, mask, gw, dns;
+};
+struct tcp_io_cmd {
+    uint32_t buf, len, timeout_ms;
 };
 
 #define IO_MAX     4096          /* limit na jeden read/write */
@@ -397,6 +401,46 @@ void syscall_handler(struct regs *r)
         r->eax = user_put(r->ebx, &ni, sizeof(ni)) < 0 ? EFAULT : 0;
         break;
     }
+    case SYS_TCP_CONNECT:
+        r->eax = (uint32_t)tcp_connect(r->ebx, (uint16_t)r->ecx,
+                                       task_current_id(), r->edx);
+        break;
+    case SYS_TCP_LISTEN:
+        r->eax = (uint32_t)tcp_listen((uint16_t)r->ebx, task_current_id());
+        break;
+    case SYS_TCP_ACCEPT:
+        r->eax = (uint32_t)tcp_accept((int)r->ebx, task_current_id(), r->ecx);
+        break;
+    case SYS_TCP_SEND: {
+        struct tcp_io_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 || c.len > IO_MAX ||
+            !user_ok(c.buf, c.len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)tcp_send((int)r->ebx, task_current_id(),
+                                    (const void *)c.buf, (uint16_t)c.len,
+                                    c.timeout_ms);
+        break;
+    }
+    case SYS_TCP_RECV: {
+        struct tcp_io_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 || c.len > IO_MAX ||
+            !user_ok(c.buf, c.len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        /* Jak przy UDP: po obudzeniu znowu aktywna jest przestrzen tego
+           procesu, wiec dane moga isc prosto do sprawdzonego bufora. */
+        r->eax = (uint32_t)tcp_recv((int)r->ebx, task_current_id(),
+                                    (void *)c.buf, (uint16_t)c.len,
+                                    c.timeout_ms);
+        break;
+    }
+    case SYS_TCP_CLOSE:
+        tcp_close((int)r->ebx, task_current_id());
+        r->eax = 0;
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

@@ -1,4 +1,4 @@
-/* Stos sieciowy ProtonOS: Ethernet + ARP + IPv4 + ICMP + UDP
+/* Stos sieciowy ProtonOS: Ethernet + ARP + IPv4 + ICMP + UDP + TCP
  *
  * Minimalny, ale prawdziwy: system sam odpowiada na zapytania ARP i na
  * pingi z zewnatrz, a komenda 'ping' rozwiazuje adres MAC przez ARP
@@ -19,6 +19,7 @@
 #include "include/io.h"
 #include "include/pit.h"
 #include "include/task.h"
+#include "include/tcp.h"
 
 #define ETH_HDR_LEN   14
 #define ETH_P_IP      0x0800
@@ -29,6 +30,7 @@
 
 #define IP_PROTO_ICMP 1
 #define IP_PROTO_UDP  17
+#define IP_PROTO_TCP  6
 
 #define ICMP_ECHO_REQUEST 8
 #define ICMP_ECHO_REPLY   0
@@ -574,6 +576,52 @@ static void handle_udp(uint32_t src_ip, const uint8_t *udp, uint16_t len)
     udp_deliver(dst_port, src_ip, src_port, udp + 8, (uint16_t)(ulen - 8));
 }
 
+/* --- uslugi dla warstwy TCP ------------------------------------------- */
+
+/* Suma kontrolna z pseudonaglowkiem - taka sama dla UDP i TCP */
+uint16_t net_transport_checksum(uint32_t src_ip, uint32_t dst_ip,
+                                uint8_t proto, const uint8_t *seg,
+                                uint16_t len)
+{
+    uint32_t sum = 0;
+
+    sum += (src_ip >> 16) & 0xFFFF;
+    sum += src_ip & 0xFFFF;
+    sum += (dst_ip >> 16) & 0xFFFF;
+    sum += dst_ip & 0xFFFF;
+    sum += proto;
+    sum += len;
+
+    for (uint16_t i = 0; i + 1 < len; i += 2)
+        sum += get16(seg + i);
+    if (len & 1)
+        sum += (uint32_t)seg[len - 1] << 8;
+
+    while (sum >> 16)
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+/* Wysyla gotowy segment do znanego juz MAC-a odbiorcy. TCP potwierdza
+   segmenty z przerwania karty, a rozwiazywanie ARP blokuje - dlatego
+   MAC jest zapamietywany w polaczeniu przy jego zestawianiu. */
+int net_ip_send_mac(uint32_t dst_ip, const uint8_t *dst_mac, uint8_t proto,
+                    const void *payload, uint16_t len)
+{
+    return ip_send_from(my_ip, dst_ip, dst_mac, proto, payload, len);
+}
+
+/* Rozwiazuje MAC dla adresu (przez brame, gdy adres jest poza siecia).
+   Blokuje - tylko z kontekstu watku. Kopiuje 6 bajtow do out. */
+int net_resolve_mac(uint32_t ip, uint8_t *out)
+{
+    const uint8_t *mac = arp_resolve(ip);
+    if (!mac)
+        return -1;
+    memcpy(out, mac, 6);
+    return 0;
+}
+
 /* --- odbior ----------------------------------------------------------- */
 
 static void handle_arp(const uint8_t *a, uint16_t len)
@@ -641,6 +689,9 @@ static void handle_ip(const uint8_t *ip, uint16_t len, const uint8_t *src_mac)
                     (uint16_t)(total - ihl));
     else if (ip[9] == IP_PROTO_UDP)
         handle_udp(get32(ip + 12), ip + ihl, (uint16_t)(total - ihl));
+    else if (ip[9] == IP_PROTO_TCP)
+        tcp_input(get32(ip + 12), dst_ip, src_mac, ip + ihl,
+                  (uint16_t)(total - ihl));
 }
 
 void net_rx(const uint8_t *frame, uint16_t len)

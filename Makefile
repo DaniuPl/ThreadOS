@@ -44,7 +44,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
-             $(BUILD)/user/nslookup.elf
+             $(BUILD)/user/nslookup.elf \
+             $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -81,7 +82,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/shm.o \
         $(BUILD)/rtl8139.o \
         $(BUILD)/net.o \
-        $(BUILD)/dhcp.o
+        $(BUILD)/dhcp.o \
+        $(BUILD)/tcp.o
 
 .PHONY: all iso run run-iso test clean
 
@@ -132,7 +134,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
-	    nslookup=$(BUILD)/user/nslookup.elf
+	    nslookup=$(BUILD)/user/nslookup.elf \
+	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf
 
 # Pusty obraz dysku 1 MiB pod system plikow PFS (jadro go sformatuje)
 $(DISK): | $(BUILD)
@@ -147,8 +150,11 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 
 # QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a.
 # Dysk (-hda) trafia na pierwsza magistrale ATA jako master.
-# Siec: karta RTL8139 w trybie uzytkownika QEMU (10.0.2.15, brama 10.0.2.2)
-NETOPTS := -netdev user,id=n0 -device rtl8139,netdev=n0
+# Siec: karta RTL8139 w trybie uzytkownika QEMU (adres z DHCP: 10.0.2.15,
+# brama 10.0.2.2). hostfwd wystawia serwer TCP z ProtonOS-a na hosta:
+# po 'run tcpserv' mozna z terminala zrobic 'nc localhost 5555'.
+NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
+           -device rtl8139,netdev=n0
 
 run: $(KERNEL) $(INITRD) $(DISK)
 	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)

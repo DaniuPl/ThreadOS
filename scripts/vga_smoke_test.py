@@ -13,18 +13,23 @@
   8. shell użytkownika (ring 3): 'run sh' przejmuje klawiaturę przez
      sys_read, spawn+wait programów, exit oddaje konsolę jądru
   9. sieć: DHCP (adres z serwera), ARP + ICMP ('ping'), gniazda UDP
-     w ring 3 (udpecho + udptest przez pętlę zwrotną) i DNS ('nslookup')
+     w ring 3 (udpecho + udptest przez pętlę zwrotną), DNS ('nslookup'),
+     TCP w obie strony - klient ('httpget' do serwera HTTP na hoście,
+     treść ląduje na PFS) i serwer ('tcpserv' + połączenie z hosta)
  10. page fault w ring 0: komenda 'crash' zatrzymuje system z diagnostyką
 
 Użycie: python3 scripts/vga_smoke_test.py [protonos.bin] [initrd.img]
 Kod wyjścia 0 = wszystko OK, 1 = błąd.
 """
 
+import http.server
 import json
 import os
 import re
 import socket
+import socketserver
 import subprocess
+import threading
 import sys
 import tempfile
 import time
@@ -37,8 +42,31 @@ VIDEO_W = 320
 VIDEO_H = 200
 
 
+PAGE = b"<html>ProtonOS TCP dziala</html>\n"
+
+
+def start_http_server():
+    """Serwer HTTP na hoscie - guest siega do niego przez brame slirpa
+    (10.0.2.2), wiec test TCP nie potrzebuje zadnej sieci na zewnatrz."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(PAGE)))
+            self.end_headers()
+            self.wfile.write(PAGE)
+
+        def log_message(self, *args):
+            pass
+
+    srv = socketserver.TCPServer(("0.0.0.0", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv.server_address[1], srv.shutdown
+
+
 class Qemu:
-    def __init__(self, kernel, initrd=None, disk=None):
+    def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -48,7 +76,10 @@ class Qemu:
                # Karta sieciowa w trybie uzytkownika: brama 10.0.2.2
                # odpowiada na ARP i ICMP echo, wiec 'ping' da sie
                # przetestowac bez zadnej sieci na hoscie
-               "-netdev", "user,id=n0", "-device", "rtl8139,netdev=n0",
+               "-netdev",
+               "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:{hostfwd_port}"
+                               if hostfwd_port else ""),
+               "-device", "rtl8139,netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if initrd:
             cmd += ["-initrd", initrd]
@@ -518,6 +549,37 @@ def main():
         print("      (DNS " + ("odpowiedzial" if resolved
                                else "niedostepny - sprawdzono sciezke bledu") + ")")
 
+        # TCP jako klient: po drugiej stronie stoi prawdziwy stos
+        # (serwer HTTP w Pythonie na hoscie), a nie nasza wlasna petla
+        http_port, http_stop = start_http_server()
+        try:
+            q.type_line("clear")
+            q.type_line("run httpget 10.0.2.2 %d /" % http_port)
+            page = q.wait_for("odebrano", timeout=30)
+            check("TCP: handshake i odpowiedz HTTP 200",
+                  "HTTP/1.0 200 OK" in page)
+            check("TCP: tresc strony dotarla w calosci",
+                  "ProtonOS TCP dziala" in page)
+            check("httpget zakonczyl sie bez bledu",
+                  "proces 'httpget' zakonczyl sie (kod 0)" in page)
+
+            # Siec -> dysk: tresc HTTP zapisana na PFS i odczytana z niego
+            q.type_line("clear")
+            q.type_line("run httpget 10.0.2.2 %d / strona.htm" % http_port)
+            q.wait_for("odebrano", timeout=30)
+            q.type_line("cat strona.htm")
+            saved = q.wait_for("ProtonOS TCP dziala", timeout=10)
+            check("tresc z sieci zapisana na PFS i odczytana z dysku",
+                  "<html>ProtonOS TCP dziala</html>" in saved)
+            check("do pliku poszla sama tresc, bez naglowkow HTTP",
+                  "Content-Length" not in saved)
+        finally:
+            http_stop()
+
+        q.type_line("netstat")
+        check("netstat: po zamknieciu nie ma wiszacych polaczen",
+              "brak polaczen TCP" in q.wait_for("polacze", timeout=10))
+
         q.type_line("ifconfig")
         ifc = q.wait_for("RX ")
         # Na ekranie wisi tez wyjscie poprzedniego 'ifconfig' (sprzed
@@ -784,6 +846,36 @@ def main():
         check("system zatrzymany po wyjatku", "System zatrzymany" in screen)
     finally:
         q.close()
+
+    # --- ProtonOS jako serwer TCP (pasywne otwarcie, osobny boot) ---
+    print("--- siec: serwer TCP w ring 3 ---")
+    srv_port = 5555
+    q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port)
+    try:
+        q_srv.wait_for("ProtonOS shell")
+        q_srv.wait_for("[siec] DHCP", timeout=20)
+        q_srv.type_line("run tcpserv")
+        q_srv.wait_for("nasluchuje na porcie 5555", timeout=15)
+        check("ring 3 nasluchuje na porcie TCP", True)
+
+        # Laczy sie prawdziwy stos hosta (przez hostfwd QEMU)
+        sock = socket.create_connection(("127.0.0.1", srv_port), timeout=15)
+        sock.settimeout(15)
+        greeting = sock.recv(200)
+        check("host polaczyl sie i dostal powitanie od ProtonOS-a",
+              b"ProtonOS TCP gotowy" in greeting)
+
+        sock.sendall(b"czesc z hosta\n")
+        echoed = sock.recv(200)
+        check("dane z hosta wrocily odbite przez serwer w ring 3",
+              b"czesc z hosta" in echoed)
+        sock.close()
+
+        seen = q_srv.wait_for("od klienta", timeout=15)
+        check("serwer zobaczyl dane klienta",
+              "od klienta: czesc z hosta" in seen)
+    finally:
+        q_srv.close()
 
     # --- Persystencja: drugi boot na TYM SAMYM dysku ---
     print("--- drugi boot (ten sam dysk) ---")

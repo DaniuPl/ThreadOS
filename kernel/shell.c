@@ -25,6 +25,7 @@
 #include "include/io.h"
 #include "include/net.h"
 #include "include/dhcp.h"
+#include "include/tcp.h"
 
 #define LINE_MAX 80
 
@@ -56,6 +57,7 @@ static void cmd_help(void)
            "  arp     - tablica ARP (IP -> MAC)\n"
            "  ping IP - wyslij 4 pakiety ICMP echo, np. ping 10.0.2.2\n"
            "  dhcp    - pobierz adres IP z sieci (DHCP)\n"
+           "  netstat - polaczenia TCP\n"
            "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
            "  desktop - graficzny pulpit z kursorem myszy\n"
            "  kill P  - zabij proces (pid albo nazwa)\n"
@@ -259,6 +261,8 @@ static void run_command(char *cmd)
         net_ifconfig();
     else if (!strcmp(cmd, "arp"))
         net_arp_dump();
+    else if (!strcmp(cmd, "netstat"))
+        tcp_dump();
     else if (!strcmp(cmd, "dhcp"))
         task_create("dhcp", dhcp_thread_cmd, 0);
     else if (!strcmp(cmd, "ping"))
