@@ -432,6 +432,17 @@ def main():
               "TEGO NIE POWINNO BYC WIDAC" not in screen)
 
         # 'run' z nieistniejacym plikiem
+        # Granica jadro/uzytkownik: proces podaje w syscallach wskazniki
+        # na pamiec jadra - kazdy musi wrocic z bledem, a proces ma zyc
+        q.type_line("run evil2")
+        ev2 = q.wait_for("granica trzyma", timeout=20)
+        check("syscalle odrzucaja wskazniki na pamiec jadra",
+              "jadro odrzucilo wszystkie proby" in ev2)
+        check("evil2 nie wypisal pamieci jadra na konsole",
+              "PRZESZLO" not in ev2 and "DZIURA" not in ev2)
+        check("proces przezyl odrzucone syscalle (kod 0)",
+              "kod 0" in ev2)
+
         q.type_line("run brak")
         check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
 

@@ -30,6 +30,7 @@ USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
                -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
+             $(BUILD)/user/evil2.elf \
              $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
              $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf \
              $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf \
@@ -113,6 +114,7 @@ $(BUILD)/user/%.elf: user/%.c user/usys.h user/user.ld | $(BUILD)/user
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
+	    evil2=$(BUILD)/user/evil2.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
 	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf \
 	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf \

@@ -21,8 +21,8 @@ ProtonOS/
 │   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
 │   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
 │   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
-│   ├── syscall.c       # syscalle int 0x80: write/exit/sleep/getticks/
-│   │                   #   read/spawn/wait/getpid
+│   ├── syscall.c       # syscalle int 0x80 + walidacja wskaźników z ring 3
+│   │                   #   (user_ok/user_str: zły adres = -1, nie page fault)
 │   ├── usermode.c      # wejście w ring 3 przez iret
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
@@ -53,6 +53,7 @@ ProtonOS/
 │   ├── usys.h          # biblioteczka syscalli (int 0x80)
 │   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
 │   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
+│   ├── evil2.c         # podaje jądru wskaźniki na jego pamięć - dostaje -1
 │   ├── sh.c            # ush - shell użytkownika (spawn/wait, > oraz |)
 │   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
 │   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
@@ -228,3 +229,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       przerwanie karty) i stos sieciowy: Ethernet, ARP z tablicą adresów,
       IPv4 z sumą kontrolną, ICMP - `ifconfig`, `arp`, `ping 10.0.2.2`
       (system odpowiada też na cudze ARP i pingi do siebie)
+- [x] Walidacja wskaźników z ring 3: każdy adres podany w syscallu musi
+      leżeć w przestrzeni użytkownika i być zamapowany w katalogu stron
+      procesu (`user_ok`/`user_str`), łańcuchy i struktury kopiowane do
+      buforów jądra; zły wskaźnik to błąd -1, a nie zapis w pamięci jądra
+      cudzymi rękami (`run evil2`)

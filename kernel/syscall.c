@@ -3,6 +3,15 @@
  * Konwencja jak w starym Linuksie: numer w eax, argumenty w ebx/ecx/edx,
  * wynik w eax. Handler dostaje wskaźnik na zapisane rejestry użytkownika
  * i modyfikuje eax w ramce - stub przerwania odtworzy go przy iret.
+ *
+ * Granica jądro/użytkownik: proces w ring 3 nie może sięgnąć po pamięć
+ * jądra sam (pilnuje tego stronicowanie), ale mógłby to zrobić cudzymi
+ * rękami - podając w syscallu wskaźnik na pamięć jądra. Jądro pisałoby
+ * wtedy pod ten adres w ring 0, z pełnymi prawami. Dlatego każdy adres
+ * przychodzący z ring 3 przechodzi przez user_ok()/user_str(): musi
+ * leżeć w przestrzeni użytkownika i być realnie zamapowany w katalogu
+ * stron procesu. Zły wskaźnik = błąd -1 (EFAULT), a nie page fault
+ * w jądrze albo cicha kradzież pamięci.
  */
 
 #include <stdint.h>
@@ -18,6 +27,8 @@
 #include "include/pmm.h"
 #include "include/rtc.h"
 #include "include/desktop.h"
+#include "include/paging.h"
+#include "include/string.h"
 
 /* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
 struct win_rect_cmd {
@@ -32,19 +43,88 @@ struct sysinfo_buf {
     uint32_t used_kib;
     uint32_t uptime_s;
 };
+struct win_event_buf {
+    int32_t type, x, y, val;
+};
 
-/* Wskazniki uzytkownika sa zaufane naiwnie - bledny adres skonczy sie
-   page faultem w ring 0 (ginie proces). Pelna walidacja przyjdzie z
-   prawdziwym oddzieleniem przestrzeni jadra. Limit ucina absurdy. */
-#define IO_MAX 4096
+#define IO_MAX     4096          /* limit na jeden read/write */
+#define PATH_MAX   128           /* najdluzsza sciezka/linia polecen */
+#define USER_TOP   0xC0000000u   /* szczyt przestrzeni uzytkownika (stos) */
+#define EFAULT     ((uint32_t)-1)
+
+/* --- walidacja wskaznikow z ring 3 ------------------------------------ */
+
+/* Czy [addr, addr+len) w calosci lezy w pamieci uzytkownika biezacego
+   procesu? paging_get_mapping() zwraca ramke tylko dla stron z wlasnych
+   tablic procesu - strony jadra (wspoldzielone PDE) daja 0, wiec adres
+   z obszaru jadra odpada automatycznie. */
+static int user_ok(uint32_t addr, uint32_t len)
+{
+    if (!len)
+        return 1;
+    if (!addr || addr >= USER_TOP || len > USER_TOP - addr)
+        return 0;
+
+    uint32_t cr3 = task_current_cr3();
+    for (uint32_t page = addr & ~0xFFFu; page < addr + len; page += 0x1000) {
+        if (!paging_get_mapping(cr3, page))
+            return 0;
+    }
+    return 1;
+}
+
+/* Kopiuje lancuch z przestrzeni uzytkownika do bufora jadra.
+   0 = OK, -1 = zly wskaznik albo lancuch dluzszy niz max-1. */
+static int user_str(char *dst, uint32_t uaddr, uint32_t max)
+{
+    uint32_t cr3 = task_current_cr3();
+
+    for (uint32_t i = 0; i < max; i++) {
+        uint32_t va = uaddr + i;
+        if (!va || va >= USER_TOP)
+            return -1;
+        /* Sprawdzaj mapowanie na starcie i przy kazdym przejsciu strony */
+        if (i == 0 || (va & 0xFFF) == 0) {
+            if (!paging_get_mapping(cr3, va & ~0xFFFu))
+                return -1;
+        }
+        dst[i] = *(const volatile char *)va;
+        if (!dst[i])
+            return 0;
+    }
+    return -1;                   /* brak zera w limicie - odrzuc */
+}
+
+/* Zapis do pamieci uzytkownika po sprawdzeniu adresu. 0 = OK, -1 = blad. */
+static int user_put(uint32_t uaddr, const void *src, uint32_t len)
+{
+    if (!user_ok(uaddr, len))
+        return -1;
+    memcpy((void *)uaddr, src, len);
+    return 0;
+}
+
+/* Odczyt z pamieci uzytkownika po sprawdzeniu adresu. 0 = OK, -1 = blad. */
+static int user_get(void *dst, uint32_t uaddr, uint32_t len)
+{
+    if (!user_ok(uaddr, len))
+        return -1;
+    memcpy(dst, (const void *)uaddr, len);
+    return 0;
+}
 
 void syscall_handler(struct regs *r)
 {
     switch (r->eax) {
-    case SYS_WRITE:
-        r->eax = (uint32_t)file_write((int)r->ebx, (const void *)r->ecx,
-                                      r->edx > IO_MAX ? IO_MAX : r->edx);
+    case SYS_WRITE: {
+        uint32_t len = r->edx > IO_MAX ? IO_MAX : r->edx;
+        if (!user_ok(r->ecx, len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)file_write((int)r->ebx, (const void *)r->ecx, len);
         break;
+    }
     case SYS_EXIT:
         printk("[jadro] proces '%s' zakonczyl sie (kod %d)\n",
                task_current_name(), (int)r->ebx);
@@ -57,18 +137,35 @@ void syscall_handler(struct regs *r)
     case SYS_GETTICKS:
         r->eax = pit_ticks();
         break;
-    case SYS_READ:
-        r->eax = (uint32_t)file_read((int)r->ebx, (void *)r->ecx,
-                                     r->edx > IO_MAX ? IO_MAX : r->edx);
+    case SYS_READ: {
+        uint32_t len = r->edx > IO_MAX ? IO_MAX : r->edx;
+        if (!user_ok(r->ecx, len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)file_read((int)r->ebx, (void *)r->ecx, len);
         break;
-    case SYS_SPAWN:
-        if (r->ecx)
-            r->eax = (uint32_t)exec_spawn_redirect((const char *)r->ebx,
-                                                   (const char *)r->ecx,
-                                                   (int)r->edx);
-        else
-            r->eax = (uint32_t)exec_spawn((const char *)r->ebx);
+    }
+    case SYS_SPAWN: {
+        /* Linia polecen (i nazwa pliku na stdout) ida do buforow jadra -
+           exec zaklada wlasna przestrzen adresowa, wiec pamiec procesu
+           wolajacego nie moze byc pod nia potrzebna. */
+        char cmd[PATH_MAX], out[PATH_MAX];
+        if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        if (r->ecx) {
+            if (user_str(out, r->ecx, sizeof(out)) < 0) {
+                r->eax = EFAULT;
+                break;
+            }
+            r->eax = (uint32_t)exec_spawn_redirect(cmd, out, (int)r->edx);
+        } else {
+            r->eax = (uint32_t)exec_spawn(cmd);
+        }
         break;
+    }
     case SYS_WAIT:
         r->eax = (uint32_t)task_wait((int)r->ebx);  /* -> kod wyjscia */
         break;
@@ -78,39 +175,69 @@ void syscall_handler(struct regs *r)
     case SYS_SBRK:
         r->eax = process_sbrk((int32_t)r->ebx);
         break;
-    case SYS_OPEN:
-        r->eax = (uint32_t)file_open((const char *)r->ebx, (int)r->ecx);
+    case SYS_OPEN: {
+        char path[PATH_MAX];
+        if (user_str(path, r->ebx, sizeof(path)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)file_open(path, (int)r->ecx);
         break;
+    }
     case SYS_CLOSE:
         r->eax = (uint32_t)file_close((int)r->ebx);
         break;
     case SYS_SEEK:
         r->eax = (uint32_t)file_seek((int)r->ebx, r->ecx);
         break;
-    case SYS_PIPELINE:
-        r->eax = (uint32_t)exec_spawn_pipeline((const char *)r->ebx,
-                                               (const char *)r->ecx);
+    case SYS_PIPELINE: {
+        char cmd[PATH_MAX], out[PATH_MAX];
+        if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        if (r->ecx && user_str(out, r->ecx, sizeof(out)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)exec_spawn_pipeline(cmd, r->ecx ? out : 0);
         break;
+    }
     case SYS_READDIR: {
-        char *nb = (char *)r->ecx;
+        char nb[FS_NAME_MAX + 1];
         uint32_t size;
         int is_d;
-        if (!fs_readdir(task_cwd(), (int)r->ebx, nb, &size, &is_d))
+        if (!fs_readdir(task_cwd(), (int)r->ebx, nb, &size, &is_d)) {
             r->eax = (uint32_t)-1;       /* brak kolejnego wpisu */
+            break;
+        }
+        if (user_put(r->ecx, nb, strlen(nb) + 1) < 0)
+            r->eax = EFAULT;
         else
             r->eax = is_d ? (uint32_t)-2 : size;  /* -2 = katalog */
         break;
     }
-    case SYS_UNLINK:
-        r->eax = (uint32_t)fs_unlink(task_cwd(), (const char *)r->ebx);
+    case SYS_UNLINK: {
+        char path[PATH_MAX];
+        if (user_str(path, r->ebx, sizeof(path)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)fs_unlink(task_cwd(), path);
         break;
-    case SYS_TIME:
-        rtc_read((struct rtc_time *)r->ebx);
-        r->eax = 0;
+    }
+    case SYS_TIME: {
+        struct rtc_time t;
+        rtc_read(&t);
+        r->eax = user_put(r->ebx, &t, sizeof(t)) < 0 ? EFAULT : 0;
         break;
+    }
     case SYS_CHDIR: {
+        char path[PATH_MAX];
         int nc;
-        if (fs_chdir(task_cwd(), (const char *)r->ebx, &nc) == 0) {
+        if (user_str(path, r->ebx, sizeof(path)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        if (fs_chdir(task_cwd(), path, &nc) == 0) {
             task_set_cwd(nc);
             r->eax = 0;
         } else {
@@ -118,38 +245,65 @@ void syscall_handler(struct regs *r)
         }
         break;
     }
-    case SYS_GETCWD:
-        fs_getpath(task_cwd(), (char *)r->ebx);
-        r->eax = 0;
+    case SYS_GETCWD: {
+        char path[PATH_MAX];
+        fs_getpath(task_cwd(), path);
+        r->eax = user_put(r->ebx, path, strlen(path) + 1) < 0 ? EFAULT : 0;
         break;
-    case SYS_MKDIR:
-        r->eax = (uint32_t)fs_mkdir(task_cwd(), (const char *)r->ebx);
+    }
+    case SYS_MKDIR: {
+        char path[PATH_MAX];
+        if (user_str(path, r->ebx, sizeof(path)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)fs_mkdir(task_cwd(), path);
         break;
+    }
     case SYS_KILL:
         r->eax = (uint32_t)task_kill((int)r->ebx);
         break;
-    case SYS_WIN_CREATE:
-        r->eax = (uint32_t)desktop_win_create(task_current_id(), (int)r->ebx,
-                                              (int)r->ecx, (const char *)r->edx);
+    case SYS_WIN_CREATE: {
+        char title[64];
+        if (user_str(title, r->edx, sizeof(title)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)desktop_win_create(task_current_id(),
+                                                  (int)r->ebx, (int)r->ecx,
+                                                  title);
         break;
+    }
     case SYS_WIN_RECT: {
-        struct win_rect_cmd *c = (struct win_rect_cmd *)r->ecx;
-        r->eax = (uint32_t)desktop_win_rect((int)r->ebx, task_current_id(),
-                                            c->x, c->y, c->w, c->h,
-                                            (uint8_t)c->color);
+        struct win_rect_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)desktop_win_rect((int)r->ebx,
+                                                task_current_id(),
+                                                c.x, c.y, c.w, c.h,
+                                                (uint8_t)c.color);
         break;
     }
     case SYS_WIN_TEXT: {
-        struct win_text_cmd *c = (struct win_text_cmd *)r->ecx;
+        struct win_text_cmd c;
+        char s[128];
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 ||
+            user_str(s, c.s, sizeof(s)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
         r->eax = (uint32_t)desktop_win_text((int)r->ebx, task_current_id(),
-                                            c->x, c->y, (const char *)c->s,
-                                            (uint8_t)c->color);
+                                            c.x, c.y, s, (uint8_t)c.color);
         break;
     }
-    case SYS_WIN_POLL:
-        r->eax = (uint32_t)desktop_win_poll((int)r->ebx, task_current_id(),
-                                            (void *)r->ecx);
+    case SYS_WIN_POLL: {
+        struct win_event_buf ev;
+        int got = desktop_win_poll((int)r->ebx, task_current_id(), &ev);
+        if (got == 1 && user_put(r->ecx, &ev, sizeof(ev)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)got;
         break;
+    }
     case SYS_MMAP:
         r->eax = process_mmap(r->ebx);
         break;
@@ -157,18 +311,22 @@ void syscall_handler(struct regs *r)
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;
     case SYS_THREAD:
-        r->eax = (uint32_t)process_thread(r->ebx, r->ecx);
+        /* Watek startuje w ring 3 - punkt wejscia musi byc kodem procesu */
+        if (!user_ok(r->ebx, 1))
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)process_thread(r->ebx, r->ecx);
         break;
     case SYS_SETPRIO:
         task_set_priority((int)r->ebx);
         r->eax = 0;
         break;
     case SYS_SYSINFO: {
-        struct sysinfo_buf *si = (struct sysinfo_buf *)r->ebx;
-        si->ram_kib = pmm_ram_kib();
-        si->used_kib = pmm_used_frames() * 4;
-        si->uptime_s = pit_ticks() / 100;
-        r->eax = 0;
+        struct sysinfo_buf si;
+        si.ram_kib = pmm_ram_kib();
+        si.used_kib = pmm_used_frames() * 4;
+        si.uptime_s = pit_ticks() / 100;
+        r->eax = user_put(r->ebx, &si, sizeof(si)) < 0 ? EFAULT : 0;
         break;
     }
     default:
