@@ -46,7 +46,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
              $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf \
-             $(BUILD)/user/gweb.elf
+             $(BUILD)/user/gweb.elf \
+             $(BUILD)/user/cryptotest.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -114,7 +115,8 @@ $(KERNEL): $(OBJS) linker.ld
 $(BUILD)/user: | $(BUILD)
 	mkdir -p $(BUILD)/user
 
-$(BUILD)/user/%.elf: user/%.c user/usys.h user/udns.h user/user.ld | $(BUILD)/user
+$(BUILD)/user/%.elf: user/%.c user/usys.h user/udns.h user/uhttp.h \
+                     user/usha256.h user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
 $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
@@ -137,7 +139,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
 	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
-	    gweb=$(BUILD)/user/gweb.elf
+	    gweb=$(BUILD)/user/gweb.elf \
+	    cryptotest=$(BUILD)/user/cryptotest.elf
 
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.

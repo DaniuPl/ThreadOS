@@ -608,6 +608,14 @@ def main():
         check("proces przezyl odrzucone syscalle (kod 0)",
               "kod 0" in ev2)
 
+        # Kryptografia pod przyszly TLS: wektory z RFC liczone w ring 3
+        q.type_line("clear")
+        q.type_line("run cryptotest")
+        crypto = q.wait_for("[crypto] wszystkie", timeout=20)
+        check("wektory SHA-256/HMAC/HKDF zgadzaja sie z RFC",
+              "wszystkie wektory zgadzaja sie" in crypto and
+              "BLAD" not in crypto)
+
         q.type_line("run brak")
         check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
 

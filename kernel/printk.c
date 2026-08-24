@@ -2,6 +2,11 @@
  *
  * Każdy znak idzie jednocześnie na ekran VGA i port szeregowy,
  * więc komunikaty widać też przy uruchomieniu QEMU z -serial stdio.
+ *
+ * Cały wypis jest niepodzielny (przerwania wyłączone na czas jednego
+ * printk). Bez tego komunikat z wątku - na przykład dzierżawa DHCP -
+ * potrafił wejść w środek linii wypisywanej właśnie przez inny wątek
+ * albo przez obsługę przerwania, i na ekranie zostawała sieczka.
  */
 
 #include <stdarg.h>
@@ -9,6 +14,7 @@
 #include "include/printk.h"
 #include "include/vga.h"
 #include "include/serial.h"
+#include "include/io.h"
 
 static void kputchar(char c)
 {
@@ -40,6 +46,8 @@ void printk(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
+
+    uint32_t irq = irq_save();
 
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
@@ -77,6 +85,7 @@ void printk(const char *fmt, ...)
             break;
         case '\0':
             va_end(args);
+            irq_restore(irq);
             return;
         default:
             kputchar('%');
@@ -85,4 +94,5 @@ void printk(const char *fmt, ...)
     }
 
     va_end(args);
+    irq_restore(irq);
 }

@@ -82,10 +82,12 @@ ProtonOS/
 │   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
 │   ├── udns.h          # klient DNS dla programów (wspólny dla nslookup/gweb)
 │   ├── uhttp.h         # klient HTTP/1.1: chunked, przekierowania, URL-e
+│   ├── usha256.h       # SHA-256, HMAC, HKDF (fundament pod TLS 1.3)
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
 │   ├── gweb.c          # przeglądarka w oknie: adres -> TCP -> tekst + PFS
+│   ├── cryptotest.c    # wektory testowe SHA-256/HMAC/HKDF z RFC
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
@@ -311,3 +313,8 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       granice pakietów, przekierowania (bezwzględne i względne), rozbiór
       `http://host[:port]/ścieżka`; w przeglądarce encje HTML (`&amp;`)
       i bajty UTF-8 zamieniane na czytelne znaki
+- [x] Kryptografia pod TLS: SHA-256, HMAC-SHA256, HKDF (w tym
+      `HKDF-Expand-Label` z RFC 8446) w userspace, sprawdzane wektorami
+      z FIPS 180-4, RFC 4231 i RFC 5869 (`run cryptotest`)
+- [x] `printk` niepodzielny: komunikat z wątku nie wchodzi już w środek
+      linii wypisywanej przez inny wątek albo obsługę przerwania
