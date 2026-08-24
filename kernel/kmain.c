@@ -21,6 +21,7 @@
 #include "include/fs.h"
 #include "include/net.h"
 #include "include/rtl8139.h"
+#include "include/dhcp.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
@@ -161,10 +162,11 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (fs_init())
         ok("Dysk ATA + PFS gotowy (komendy 'fls', 'cat', 'write')");
 
-    if (net_init()) {
+    int has_net = net_init();
+    if (has_net) {
         const uint8_t *m = rtl8139_mac();
-        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x, IP 10.0.2.15 "
-               "(komendy 'ifconfig', 'ping')\n",
+        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x "
+               "(komendy 'ifconfig', 'ping', 'dhcp')\n",
                m[0], m[1], m[2], m[3], m[4], m[5]);
     }
 
@@ -173,6 +175,11 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     task_create("demo-B", demo_counter, (void *)1);
     task_create("demo-C", demo_mortal, (void *)0);
     ok("Scheduler: watki jadra, wywlaszczanie co 10 ms");
+
+    /* Adres IP bierzemy z sieci - klient DHCP czeka na odpowiedzi
+       serwera, wiec musi chodzic w watku (po scheduler_init) */
+    if (has_net)
+        dhcp_start();
 
     shell_init();
 

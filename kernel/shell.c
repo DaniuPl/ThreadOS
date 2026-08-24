@@ -24,6 +24,7 @@
 #include "include/desktop.h"
 #include "include/io.h"
 #include "include/net.h"
+#include "include/dhcp.h"
 
 #define LINE_MAX 80
 
@@ -54,9 +55,10 @@ static void cmd_help(void)
            "  ifconfig- karta sieciowa: MAC, IP, statystyki\n"
            "  arp     - tablica ARP (IP -> MAC)\n"
            "  ping IP - wyslij 4 pakiety ICMP echo, np. ping 10.0.2.2\n"
+           "  dhcp    - pobierz adres IP z sieci (DHCP)\n"
            "  gfx     - tryb graficzny 13h, wzorzec testowy\n"
            "  desktop - graficzny pulpit z kursorem myszy\n"
-           "  kill P  - zabij proces o pid P\n"
+           "  kill P  - zabij proces (pid albo nazwa)\n"
            "  clear   - wyczysc ekran\n"
            "  crash   - test page faulta (zatrzymuje system!)\n"
            "  reboot  - restart komputera\n");
@@ -74,9 +76,21 @@ static void cmd_mem(void)
 static void cmd_kill(const char *arg)
 {
     if (!*arg) {
-        printk("uzycie: kill <pid>\n");
+        printk("uzycie: kill <pid|nazwa>\n");
         return;
     }
+
+    /* Nazwa zamiast pidu: wygodniejsza, gdy program poszedl z menu
+       pulpitu albo gdy numeracja pidow zalezy od kolejnosci startu */
+    if (*arg < '0' || *arg > '9') {
+        int pid = task_kill_name(arg);
+        if (pid < 0)
+            printk("kill: nie ma procesu '%s'\n", arg);
+        else
+            printk("kill: proces '%s' ma pid %d\n", arg, pid);
+        return;
+    }
+
     int pid = 0;
     for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
         pid = pid * 10 + (*p - '0');
@@ -174,6 +188,15 @@ static void ping_thread(void *arg)
 {
     (void)arg;
     net_ping(ping_target, 4);
+    shell_refresh();
+}
+
+static void dhcp_thread_cmd(void *arg)
+{
+    (void)arg;
+    if (!dhcp_configure())
+        printk("dhcp: brak odpowiedzi serwera\n");
+    shell_refresh();
 }
 
 static void cmd_ping(const char *arg)
@@ -236,6 +259,8 @@ static void run_command(char *cmd)
         net_ifconfig();
     else if (!strcmp(cmd, "arp"))
         net_arp_dump();
+    else if (!strcmp(cmd, "dhcp"))
+        task_create("dhcp", dhcp_thread_cmd, 0);
     else if (!strcmp(cmd, "ping"))
         cmd_ping(arg);
     else if (!strcmp(cmd, "gfx"))
@@ -277,6 +302,16 @@ static void shell_on_char(char c)
         line[line_len++] = c;
         printk("%c", c);
     }
+}
+
+/* Po asynchronicznym wypisie jadra (DHCP, ping w tle) prompt zostaje
+   gdzies wyzej na ekranie - odrysuj go razem z niedokonczona linia. */
+void shell_refresh(void)
+{
+    prompt();
+    line[line_len] = '\0';
+    if (line_len)
+        printk("%s", line);
 }
 
 void shell_init(void)

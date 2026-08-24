@@ -242,6 +242,14 @@ def main():
         check("karta sieciowa RTL8139 wykryta przy boocie",
               "Siec: RTL8139" in screen)
 
+        # Adres IP przychodzi z serwera DHCP slirpa juz po starcie shella.
+        # Czekamy na komunikat, zanim ekran zacznie sluzyc testom
+        # klawiatury - inaczej wpada w srodek pisanej linii.
+        lease = q.wait_for("[siec] DHCP", timeout=20)
+        check("DHCP przyznal adres IP", "przyznano 10.0.2.15" in lease)
+        check("DHCP przekazal brame i serwer DNS",
+              "brama 10.0.2.2" in lease and "DNS 10.0.2.3" in lease)
+
         for expected in ["Multiboot OK", "GDT zaladowana", "IDT zaladowana",
                          "PIC przemapowany", "Timer PIT", "Klawiatura PS/2",
                          "Przerwania wlaczone"]:
@@ -452,6 +460,7 @@ def main():
         ifc = q.wait_for("eth0  MAC")
         check("ifconfig pokazuje adres IP", "IP 10.0.2.15" in ifc)
         check("ifconfig pokazuje brame", "brama 10.0.2.2" in ifc)
+        check("ifconfig pokazuje serwer DNS z DHCP", "DNS 10.0.2.3" in ifc)
 
         q.type_line("ping 10.0.2.2")
         pong = q.wait_for("40 B od 10.0.2.2: seq=1", timeout=20)
@@ -957,14 +966,15 @@ def main():
         check("klawiatura trafia do okna z fokusem (tekst pojawil sie)",
               appeared)
 
-        # Klik w pulpit (puste tlo) zdejmuje fokus, by 'kill 5' trafilo
+        # Klik w pulpit (puste tlo) zdejmuje fokus, by 'kill' trafilo
         # do shella jadra, a nie do okna aplikacji
         q7.mouse_goto(60, 140)
         q7.mouse_click()
         time.sleep(0.2)
 
-        # Zabicie aplikacji: kompozytor sprzata jej okno (pid 5)
-        q7.type_line("kill 5")
+        # Zabicie aplikacji: kompozytor sprzata jej okno. Zabijamy po
+        # nazwie - pid zalezy od tego, ile watkow wystartowalo wczesniej
+        q7.type_line("kill guiapp")
         check("po zabiciu aplikacji jej okno zostaje sprzatniete (170,75 teal)",
               q7.wait_pixel(170, 75, (0, 128, 160)))
     finally:

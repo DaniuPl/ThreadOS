@@ -409,6 +409,28 @@ int task_kill(int pid)
     return found ? 0 : -1;
 }
 
+/* Zabija pierwsze zyjace zadanie o podanej nazwie i zwraca jego pid
+   (albo -1). Przydatne, gdy pid nie jest znany - np. aplikacja zostala
+   odpalona z menu pulpitu, a nie z shella. */
+int task_kill_name(const char *name)
+{
+    uint32_t flags = irq_save();
+    struct task *t = current;
+    int pid = -1;
+    do {
+        if (t->state != TASK_ZOMBIE && !strcmp(t->name, name)) {
+            t->killed = 1;
+            if (t->state == TASK_SLEEPING || t->state == TASK_BLOCKED)
+                t->state = TASK_READY;
+            pid = t->id;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return pid;
+}
+
 /* Wolane przy powrocie do ring 3: jesli proces ma oczekujace zabicie,
    konczy go tutaj (w jego wlasnym kontekscie). */
 void task_kill_pending(void)

@@ -15,7 +15,11 @@ int net_init(void);
 void net_rx(const uint8_t *frame, uint16_t len);
 
 uint32_t net_ip(void);
-void net_set_config(uint32_t ip, uint32_t mask, uint32_t gw);
+uint32_t net_gw(void);
+uint32_t net_dns(void);
+int net_configured(void);            /* czy system ma juz adres IP */
+void net_set_config(uint32_t ip, uint32_t mask, uint32_t gw, uint32_t dns);
+void net_use_fallback(void);         /* statyczna konfiguracja awaryjna */
 
 /* "10.0.2.2" -> 0x0A000202; zwraca 1 przy sukcesie */
 int net_parse_ip(const char *s, uint32_t *out);
@@ -27,5 +31,28 @@ void net_arp_dump(void);        /* komenda 'arp' */
 /* Wysyla 'count' zadan ICMP echo i wypisuje odpowiedzi.
    Blokuje (task_sleep), wiec wolac z kontekstu watku, nie z IRQ. */
 void net_ping(uint32_t ip, int count);
+
+/* --- gniazda UDP ------------------------------------------------------
+   'owner' to pid procesu-wlasciciela (-1 dla gniazd jadra); gniazda po
+   martwych procesach sa odzyskiwane przy kolejnym otwarciu. */
+
+/* port 0 = przydziel efemeryczny. Zwraca deskryptor gniazda albo -1. */
+int net_udp_open(uint16_t port, int owner);
+void net_udp_close(int sock, int owner);
+uint16_t net_udp_port(int sock);
+
+int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
+                 const void *data, uint16_t len);
+
+/* Czeka do timeout_ms na datagram; zwraca liczbe bajtow albo -1.
+   Blokuje (task_sleep) - tylko z kontekstu watku. */
+int net_udp_recv(int sock, int owner, uint32_t *from_ip, uint16_t *from_port,
+                 void *buf, uint16_t max, uint32_t timeout_ms);
+
+/* Datagram z jawnym adresem zrodlowym i MAC-iem odbiorcy - dla klienta
+   DHCP, ktory nie ma jeszcze ani adresu IP, ani wpisu ARP. */
+int net_udp_send_raw(uint32_t src_ip, uint32_t dst_ip, const uint8_t *dst_mac,
+                     uint16_t src_port, uint16_t dst_port,
+                     const void *data, uint16_t len);
 
 #endif

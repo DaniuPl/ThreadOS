@@ -78,7 +78,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/pci.o \
         $(BUILD)/shm.o \
         $(BUILD)/rtl8139.o \
-        $(BUILD)/net.o
+        $(BUILD)/net.o \
+        $(BUILD)/dhcp.o
 
 .PHONY: all iso run run-iso test clean
 

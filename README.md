@@ -37,7 +37,8 @@ ProtonOS/
 │   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
 │   ├── shm.c           # pamięć współdzielona między procesami (po kluczu)
 │   ├── rtl8139.c       # sterownik karty sieciowej Realtek RTL8139 (DMA)
-│   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP
+│   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP + UDP
+│   ├── dhcp.c          # klient DHCP (DISCOVER/OFFER/REQUEST/ACK)
 │   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
 │   │                   #   ifconfig, arp, ping...
@@ -118,10 +119,12 @@ Test uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**, więc
 weryfikuje też, że pliki zapisane na PFS przeżywają restart.
 
 `make run` podpina też kartę sieciową RTL8139 w trybie użytkownika QEMU
-(`-netdev user`). System dostaje statycznie adres **10.0.2.15/24** z bramą
-**10.0.2.2** - komendy `ifconfig`, `arp` i `ping 10.0.2.2` działają od razu,
-bez konfiguracji sieci na hoście. ProtonOS odpowiada również na cudze
-zapytania ARP i na pingi skierowane do siebie.
+(`-netdev user`). Adres IP nie jest wpisany na sztywno - zaraz po starcie
+klient **DHCP** prosi o niego sieć i ustawia maskę, bramę oraz serwer DNS
+(w QEMU wychodzi 10.0.2.15/24, brama 10.0.2.2, DNS 10.0.2.3). Gdy w sieci
+nie ma serwera DHCP, system po kilku próbach bierze adres awaryjny.
+Komendy: `ifconfig`, `arp`, `ping 10.0.2.2`, `dhcp` (ponowna konfiguracja).
+ProtonOS odpowiada również na cudze zapytania ARP i na pingi do siebie.
 
 `make run` dołącza obraz dysku `build/disk.img` (jako `-hda`); jądro
 formatuje pusty dysk przy pierwszym starcie. Pliki zapisane przez `write`
@@ -234,3 +237,8 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       procesu (`user_ok`/`user_str`), łańcuchy i struktury kopiowane do
       buforów jądra; zły wskaźnik to błąd -1, a nie zapis w pamięci jądra
       cudzymi rękami (`run evil2`)
+- [x] UDP: gniazda w jądrze (porty, kolejki datagramów, suma kontrolna
+      z pseudonagłówkiem) i klient DHCP - adres IP, maska, brama i serwer
+      DNS przychodzą z sieci zamiast być wpisane na sztywno (`dhcp`);
+      `kill` przyjmuje też nazwę procesu, a prompt shella odrysowuje się
+      po asynchronicznych komunikatach jądra
