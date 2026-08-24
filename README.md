@@ -83,6 +83,8 @@ ProtonOS/
 │   ├── udns.h          # klient DNS dla programów (wspólny dla nslookup/gweb)
 │   ├── uhttp.h         # klient HTTP/1.1: chunked, przekierowania, URL-e
 │   ├── usha256.h       # SHA-256, HMAC, HKDF (fundament pod TLS 1.3)
+│   ├── uchacha.h       # ChaCha20, Poly1305, AEAD (RFC 8439)
+│   ├── ux25519.h       # X25519 - wymiana kluczy na Curve25519
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP przez TCP (na konsolę albo do pliku)
 │   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
@@ -314,7 +316,9 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       `http://host[:port]/ścieżka`; w przeglądarce encje HTML (`&amp;`)
       i bajty UTF-8 zamieniane na czytelne znaki
 - [x] Kryptografia pod TLS: SHA-256, HMAC-SHA256, HKDF (w tym
-      `HKDF-Expand-Label` z RFC 8446) w userspace, sprawdzane wektorami
-      z FIPS 180-4, RFC 4231 i RFC 5869 (`run cryptotest`)
+      `HKDF-Expand-Label` z RFC 8446), ChaCha20, Poly1305 i AEAD
+      ChaCha20-Poly1305, X25519 - wszystko w userspace i sprawdzane
+      wektorami z FIPS 180-4, RFC 4231, RFC 5869, RFC 8439 i RFC 7748
+      (`run cryptotest`; jedno mnożenie skalarne X25519 ~20 ms)
 - [x] `printk` niepodzielny: komunikat z wątku nie wchodzi już w środek
       linii wypisywanej przez inny wątek albo obsługę przerwania

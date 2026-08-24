@@ -612,7 +612,7 @@ def main():
         q.type_line("clear")
         q.type_line("run cryptotest")
         crypto = q.wait_for("[crypto] wszystkie", timeout=20)
-        check("wektory SHA-256/HMAC/HKDF zgadzaja sie z RFC",
+        check("wektory SHA-256/HMAC/HKDF/ChaCha20/Poly1305/X25519 z RFC",
               "wszystkie wektory zgadzaja sie" in crypto and
               "BLAD" not in crypto)
 
