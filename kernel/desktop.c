@@ -725,6 +725,11 @@ static void desktop_thread(void *arg)
 
 void desktop_start(void)
 {
+    static int running;                          /* jeden kompozytor wystarczy */
+    if (running)
+        return;
+    running = 1;
+
     prev_key_handler = keyboard_get_handler();   /* zachowaj shell jadra */
     keyboard_set_handler(desktop_on_key);        /* klawisze -> okno z fokusem */
     task_create("desktop", desktop_thread, (void *)0);

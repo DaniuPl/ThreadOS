@@ -44,6 +44,10 @@ VIDEO_H = 200
 # Geometria menu pulpitu (kernel/desktop.c): wpisy rosna w gore od paska
 # zadan, wiec kazdy nowy program przesuwa poprzednie. Trzymamy to w
 # jednym miejscu, zeby dodanie aplikacji nie psulo testow klikania.
+# System startuje prosto na pulpit; testy konsolowe wymuszaja tryb
+# tekstowy linia polecen jadra.
+TEXT_MODE = "nodesktop"
+
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
 MENU_ROW = 12
 MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
@@ -79,7 +83,8 @@ def start_http_server():
 
 
 class Qemu:
-    def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None):
+    def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
+                 append=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -94,6 +99,8 @@ class Qemu:
                                if hostfwd_port else ""),
                "-device", "rtl8139,netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
+        if append:
+            cmd += ["-append", append]
         if initrd:
             cmd += ["-initrd", initrd]
         if disk:
@@ -151,6 +158,24 @@ class Qemu:
                 return screen
             time.sleep(0.3)
         raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na ekranie")
+
+    DESK_BG = (0, 128, 160)          # tlo pulpitu (teal)
+
+    def wait_desktop(self, timeout=25):
+        """Czeka, az kompozytor narysuje pulpit. W trybie graficznym
+        bufor tekstowy VGA (0xB8000) przestaje byc oknem na to, co
+        widac, wiec gotowosci szukamy w pikselach, nie w napisach."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                w, _, at = self.screen_raw()
+                if w >= 640 and all(abs(at(600, 300)[i] - self.DESK_BG[i]) <= 40
+                                    for i in range(3)):
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.3)
+        raise RuntimeError("timeout: pulpit sie nie pojawil")
 
     def sendkey(self, key):
         self.hmp(f"sendkey {key}")
@@ -274,7 +299,7 @@ def main():
     with open(disk, "wb") as f:
         f.write(b"\0" * (1024 * 1024))
 
-    q = Qemu(KERNEL, INITRD, disk)
+    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         # Czekaj na pelny boot (prompt shella) zamiast zgadywac czas
         screen = q.wait_for("ProtonOS shell")
@@ -293,6 +318,10 @@ def main():
         # Czekamy na komunikat, zanim ekran zacznie sluzyc testom
         # klawiatury - inaczej wpada w srodek pisanej linii.
         lease = q.wait_for("[siec] DHCP", timeout=20)
+        # Komunikat sklada sie z kilku printk-ow, wiec chwila na dopisanie
+        # reszty linii - inaczej test czyta ja w polowie
+        time.sleep(0.5)
+        lease = q.screen()
         check("DHCP przyznal adres IP", "przyznano 10.0.2.15" in lease)
         check("DHCP przekazal brame i serwer DNS",
               "brama 10.0.2.2" in lease and "DNS 10.0.2.3" in lease)
@@ -864,7 +893,7 @@ def main():
     # --- ProtonOS jako serwer TCP (pasywne otwarcie, osobny boot) ---
     print("--- siec: serwer TCP w ring 3 ---")
     srv_port = 5555
-    q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port)
+    q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port, append=TEXT_MODE)
     try:
         q_srv.wait_for("ProtonOS shell")
         q_srv.wait_for("[siec] DHCP", timeout=20)
@@ -899,9 +928,8 @@ def main():
     http_port, http_stop = start_http_server()
     q_web = Qemu(KERNEL, INITRD, wdisk)
     try:
-        q_web.wait_for("ProtonOS shell")
-        q_web.wait_for("[siec] DHCP", timeout=20)
-        q_web.type_line("desktop")
+        q_web.wait_desktop()
+        time.sleep(2.0)                  # chwila na dzierzawe DHCP
         time.sleep(1.0)
         q_web.type_line("run gweb")
         time.sleep(1.5)
@@ -937,7 +965,7 @@ def main():
         http_stop()
 
     # Ten sam dysk w trybie tekstowym: tresc ze swiata przezyla restart
-    q_web2 = Qemu(KERNEL, INITRD, wdisk)
+    q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE)
     try:
         q_web2.wait_for("ProtonOS shell")
         q_web2.type_line("cat strona.htm")
@@ -951,7 +979,7 @@ def main():
 
     # --- Persystencja: drugi boot na TYM SAMYM dysku ---
     print("--- drugi boot (ten sam dysk) ---")
-    q2 = Qemu(KERNEL, INITRD, disk)
+    q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         screen = q2.wait_for("ProtonOS shell")
         check("drugi boot: dysk wykryty (juz sformatowany, bez ponownego format)",
@@ -977,7 +1005,7 @@ def main():
 
     # --- Tryb graficzny (osobny boot: 'gfx' jest jednokierunkowy) ---
     print("--- tryb graficzny (screendump) ---")
-    q3 = Qemu(KERNEL, INITRD)
+    q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
         q3.wait_for("ProtonOS shell")
         q3.type_line("gfx")
@@ -1004,8 +1032,7 @@ def main():
     print("--- pulpit: kursor myszy ---")
     q4 = Qemu(KERNEL, INITRD)
     try:
-        q4.wait_for("ProtonOS shell")
-        q4.type_line("desktop")
+        q4.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=40):
@@ -1048,8 +1075,7 @@ def main():
     print("--- pulpit: okna + drag ---")
     q5 = Qemu(KERNEL, INITRD)
     try:
-        q5.wait_for("ProtonOS shell")
-        q5.type_line("desktop")
+        q5.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1085,8 +1111,7 @@ def main():
     print("--- pulpit: kontrolki (klik) ---")
     q6 = Qemu(KERNEL, INITRD)
     try:
-        q6.wait_for("ProtonOS shell")
-        q6.type_line("desktop")
+        q6.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1125,8 +1150,7 @@ def main():
     print("--- pulpit: aplikacja ring 3 ---")
     q7 = Qemu(KERNEL, INITRD)
     try:
-        q7.wait_for("ProtonOS shell")
-        q7.type_line("desktop")
+        q7.wait_desktop()
         time.sleep(0.8)
         q7.type_line("run guiapp")
         time.sleep(1.2)
@@ -1193,8 +1217,7 @@ def main():
     print("--- pulpit: pasek zadan + menu ---")
     q8 = Qemu(KERNEL, INITRD)
     try:
-        q8.wait_for("ProtonOS shell")
-        q8.type_line("desktop")
+        q8.wait_desktop()
 
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
@@ -1242,10 +1265,9 @@ def main():
         f.write(b"\0" * (1024 * 1024))
     q9 = Qemu(KERNEL, INITRD, gdisk)
     try:
-        q9.wait_for("ProtonOS shell")
+        q9.wait_desktop()
         q9.type_line("write raport abc")   # plik na dysku (przed pulpitem)
         time.sleep(0.5)
-        q9.type_line("desktop")
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1299,8 +1321,7 @@ def main():
     print("--- pulpit: ikony ---")
     q10 = Qemu(KERNEL, INITRD)
     try:
-        q10.wait_for("ProtonOS shell")
-        q10.type_line("desktop")
+        q10.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1322,8 +1343,7 @@ def main():
     print("--- pulpit: monitor zasobow (gmon) ---")
     q11 = Qemu(KERNEL, INITRD)
     try:
-        q11.wait_for("ProtonOS shell")
-        q11.type_line("desktop")
+        q11.wait_desktop()
         time.sleep(0.8)
         q11.type_line("run gmon")
 
@@ -1355,8 +1375,7 @@ def main():
         f.write(b"\0" * (1024 * 1024))
     q12 = Qemu(KERNEL, INITRD, tdisk)
     try:
-        q12.wait_for("ProtonOS shell")
-        q12.type_line("desktop")
+        q12.wait_desktop()
         time.sleep(0.8)
         q12.type_line("run gterm")
         time.sleep(1.0)
@@ -1395,8 +1414,7 @@ def main():
     print("--- pulpit: minimalizacja + zmiana rozmiaru ---")
     q13 = Qemu(KERNEL, INITRD)
     try:
-        q13.wait_for("ProtonOS shell")
-        q13.type_line("desktop")
+        q13.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1446,8 +1464,7 @@ def main():
         f.write(b"\0" * (1024 * 1024))
     q14 = Qemu(KERNEL, INITRD, idisk)
     try:
-        q14.wait_for("ProtonOS shell")
-        q14.type_line("desktop")
+        q14.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):
@@ -1474,8 +1491,7 @@ def main():
     # Reboot na TYM SAMYM dysku: pozycja ikony przetrwala (icons.pos)
     q15 = Qemu(KERNEL, INITRD, idisk)
     try:
-        q15.wait_for("ProtonOS shell")
-        q15.type_line("desktop")
+        q15.wait_desktop()
         time.sleep(1.0)
 
         def near(px, want, tol=45):

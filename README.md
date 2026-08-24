@@ -120,6 +120,9 @@ w prawym górnym rogu tyka licznik uptime, a wszystko co wpiszesz na
 klawiaturze jest echo'wane na ekran. Logi jądra idą równolegle na port
 szeregowy (`make run` + opcja `-serial stdio` w QEMU pokaże je w terminalu).
 
+Testy uruchamiają część instancji z `-append nodesktop` (sprawdzają
+konsolę), a część bez niej - żeby przejść ścieżkę, którą widzi użytkownik.
+
 `make test` bootuje jądro w QEMU bez okna i przez QMP sprawdza zawartość
 ekranu VGA, tykanie timera oraz echo klawiatury (wstrzykuje klawisze
 poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
@@ -282,3 +285,5 @@ lub syscall `fwrite` zostają na nim między uruchomieniami.
       pobranie strony po TCP, wycięcie znaczników HTML, tekst zawijany
       w oknie i zapis treści na PFS - sieć, GUI, klawiatura i dysk
       w jednej aplikacji ring 3
+- [x] Start prosto na pulpit graficzny; linia poleceń jądra (Multiboot
+      `-append`) z opcją `nodesktop` zostawia konsolę tekstową

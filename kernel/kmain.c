@@ -19,12 +19,35 @@
 #include "include/task.h"
 #include "include/initrd.h"
 #include "include/fs.h"
+#include "include/desktop.h"
 #include "include/net.h"
 #include "include/rtl8139.h"
 #include "include/dhcp.h"
 #include "include/tcp.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+
+/* Czy linia polecen jadra zawiera dane slowo?
+   QEMU przekazuje ja opcja -append, GRUB - wpisem w grub.cfg. */
+static int cmdline_has(const struct multiboot_info *mbi, const char *word)
+{
+    if (!(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)
+        return 0;
+
+    const char *cmd = (const char *)mbi->cmdline;
+    size_t wlen = strlen(word);
+
+    for (int i = 0; cmd[i]; i++) {
+        if (i && cmd[i - 1] != ' ')
+            continue;                    /* dopasowuj tylko cale slowa */
+        size_t k = 0;
+        while (k < wlen && cmd[i + k] == word[k])
+            k++;
+        if (k == wlen && (cmd[i + k] == '\0' || cmd[i + k] == ' '))
+            return 1;
+    }
+    return 0;
+}
 
 /* Szybki test sterty: alokacja, zapis, zwolnienie, ponowne uzycie */
 static int kmalloc_selftest(void)
@@ -185,6 +208,16 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     }
 
     shell_init();
+
+    /* Docelowo system startuje prosto na pulpit; 'nodesktop' w linii
+       polecen jadra zostawia konsole tekstowa (uzywa tego test dymny
+       i komendy, ktore wypisuja duzo tekstu). */
+    if (cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text")) {
+        printk("Tryb tekstowy (linia polecen jadra) - pulpit: 'desktop'\n");
+    } else {
+        printk("Start pulpitu graficznego (wylaczysz opcja 'nodesktop')\n");
+        desktop_start();
+    }
 
     /* Watek main jest watkiem bezczynnosci - hlt do najblizszego IRQ */
     for (;;)

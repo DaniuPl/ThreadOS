@@ -20,6 +20,7 @@ struct multiboot_info {
 } __attribute__((packed));
 
 #define MULTIBOOT_FLAG_MEM  (1 << 0)
+#define MULTIBOOT_FLAG_CMDLINE (1 << 2)
 #define MULTIBOOT_FLAG_MODS (1 << 3)
 #define MULTIBOOT_FLAG_MMAP (1 << 6)
 
