@@ -144,6 +144,94 @@ def make_test_cert(dirpath, ec=False):
         return certfile, keyfile, f.read()
 
 
+def make_chain_certs(dirpath):
+    """Prawdziwy lancuch: korzen -> posrednik -> certyfikat serwera.
+    Zaufanie dajemy tylko korzeniowi, wiec ProtonOS musi przejsc cala
+    droge podpisow, a nie tylko porownac jeden certyfikat."""
+    import subprocess
+
+    def run(args, **kw):
+        subprocess.run(args, check=True, capture_output=True, timeout=120, **kw)
+
+    j = lambda name: os.path.join(dirpath, name)
+
+    with open(j("ca.ext"), "w") as f:
+        f.write("basicConstraints=critical,CA:TRUE\n"
+                "keyUsage=critical,keyCertSign,cRLSign\n")
+    with open(j("leaf.ext"), "w") as f:
+        f.write("basicConstraints=critical,CA:FALSE\n"
+                "subjectAltName=DNS:protonos.test\n")
+
+    # korzen
+    run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", j("root.key"), "-out", j("root.pem"), "-days", "3650",
+         "-subj", "/CN=ProtonOS Test Root",
+         "-addext", "basicConstraints=critical,CA:TRUE"])
+
+    # posrednik podpisany korzeniem
+    run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", j("int.key"), "-out", j("int.csr"),
+         "-subj", "/CN=ProtonOS Test Intermediate"])
+    run(["openssl", "x509", "-req", "-in", j("int.csr"),
+         "-CA", j("root.pem"), "-CAkey", j("root.key"), "-CAcreateserial",
+         "-out", j("int.pem"), "-days", "3650", "-extfile", j("ca.ext")])
+
+    # certyfikat serwera podpisany posrednikiem
+    run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
+         "-keyout", j("leaf.key"), "-out", j("leaf.csr"),
+         "-subj", "/CN=protonos.test"])
+    run(["openssl", "x509", "-req", "-in", j("leaf.csr"),
+         "-CA", j("int.pem"), "-CAkey", j("int.key"), "-CAcreateserial",
+         "-out", j("leaf.pem"), "-days", "3650", "-extfile", j("leaf.ext")])
+
+    # serwer wysyla certyfikat wraz z posrednikiem
+    with open(j("chain.pem"), "w") as out:
+        out.write(open(j("leaf.pem")).read())
+        out.write(open(j("int.pem")).read())
+
+    run(["openssl", "x509", "-in", j("root.pem"), "-outform", "DER",
+         "-out", j("root.der")])
+    with open(j("root.der"), "rb") as f:
+        return j("chain.pem"), j("leaf.key"), f.read()
+
+
+CERT_DER_ROOT = None     # korzen lancucha (do magazynu zaufania)
+
+
+def start_https_chain_server():
+    """Serwer HTTPS przedstawiajacy lancuch dwupoziomowy."""
+    global CERT_DER_ROOT
+    import ssl
+
+    tmpdir = tempfile.mkdtemp(prefix="protonos-chain-")
+    try:
+        chainfile, keyfile, root_der = make_chain_certs(tmpdir)
+    except BaseException:
+        return None, lambda: None
+    CERT_DER_ROOT = root_der
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(PAGE)))
+            self.end_headers()
+            self.wfile.write(PAGE)
+
+        def log_message(self, *args):
+            pass
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(chainfile, keyfile)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    srv = socketserver.TCPServer(("0.0.0.0", 0), Handler)
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv.server_address[1], srv.shutdown
+
+
 def start_https_server(ec=False):
     """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
     locie - z kluczem RSA albo na krzywej P-256. Test nie potrzebuje
@@ -208,6 +296,14 @@ def start_http_server():
                     part = PAGE[i:i + 7]
                     self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
+                return
+
+            if self.path.startswith("/rootca") and CERT_DER_ROOT:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(CERT_DER_ROOT)))
+                self.end_headers()
+                self.wfile.write(CERT_DER_ROOT)
                 return
 
             if self.path.startswith("/eccert") and CERT_DER_EC:
@@ -839,10 +935,20 @@ def main():
                     q.type_line("dns 10.0.2.2")
                     q.wait_for("serwer DNS ustawiony", timeout=10)
 
-                    # 1. Bez magazynu zaufania: kanal szyfrowany, ale
-                    #    tozsamosc niepotwierdzona - i program to mowi
+                    # 1. Certyfikat samopodpisany, a w systemie tylko
+                    #    wbudowane korzenie publicznych CA: polaczenie ma
+                    #    zostac zerwane
                     q.type_line("clear")
                     q.type_line("run httpget https://protonos.test %d /"
+                                % https_port)
+                    rej = q.wait_for("nie udalo sie polaczyc", timeout=60)
+                    check("obcy certyfikat odrzucony przez wbudowany "
+                          "magazyn zaufania",
+                          "brak zaufanego wystawcy" in rej)
+
+                    # ... chyba ze swiadomie pominiemy sprawdzanie (-k)
+                    q.type_line("clear")
+                    q.type_line("run httpget -k https://protonos.test %d /"
                                 % https_port)
                     sec = q.wait_for("tresc ", timeout=60)
                     check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
@@ -851,8 +957,7 @@ def main():
                           "HTTP 200, tresc %d B" % len(PAGE) in sec)
                     check("HTTPS: tresc odszyfrowana poprawnie",
                           "ProtonOS TCP dziala" in sec)
-                    check("bez roots.der certyfikat jest zglaszany jako "
-                          "niesprawdzony",
+                    check("-k mowi wprost, ze tozsamosc nie jest sprawdzona",
                           "certyfikat NIESPRAWDZONY" in sec)
 
                     # 2. Pobranie certyfikatu wystawcy prosto na dysk
@@ -905,7 +1010,31 @@ def main():
                                     "roots.der" % http_port)
                         q.wait_for("tresc ", timeout=30)
 
-                    # 5. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
+                    # 5. Lancuch dwupoziomowy: ufamy tylko korzeniowi,
+                    #    wiec system musi przejsc przez posrednika
+                    ch_port, ch_stop = start_https_chain_server()
+                    if ch_port is not None:
+                        try:
+                            q.type_line("clear")
+                            q.type_line("run httpget 10.0.2.2 %d /rootca.der "
+                                        "roots.der" % http_port)
+                            q.wait_for("tresc ", timeout=30)
+                            q.type_line("clear")
+                            q.type_line("run httpget https://protonos.test %d /"
+                                        % ch_port)
+                            chres = q.wait_for("tresc ", timeout=90)
+                            check("lancuch przez posrednika domkniety do "
+                                  "zaufanego korzenia",
+                                  "certyfikat sprawdzony" in chres)
+                        finally:
+                            ch_stop()
+
+                        q.type_line("clear")
+                        q.type_line("run httpget 10.0.2.2 %d /cert.der "
+                                    "roots.der" % http_port)
+                        q.wait_for("tresc ", timeout=30)
+
+                    # 6. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
                     #    wiec polaczenie ma zostac zerwane
                     q.type_line("clear")
                     q.type_line("run httpget https://10.0.2.2 %d /" % https_port)

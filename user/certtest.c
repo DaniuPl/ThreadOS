@@ -16,6 +16,7 @@
 #include "ux509.h"
 #include "uecdsa.h"
 #include "certdata.h"
+#include "ucert.h"
 
 static int failures;
 
@@ -134,6 +135,41 @@ void _start(void)
     result("podpis ECDSA wiadomosci (osobny wektor)",
            ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec_sig,
                             sizeof(ec_sig)));
+
+    /* --- wbudowany magazyn zaufania --- */
+    int roots_ok = 0, roots_bad = 0;
+    const uint8_t *p = ca_roots_der;
+    uint32_t left = sizeof(ca_roots_der);
+    while (left > 4 && p[0] == 0x30) {
+        uint32_t l = p[1], rlen;
+        if (l & 0x80) {
+            uint32_t nb = l & 0x7f;
+            if (nb > 4 || 2u + nb > left)
+                break;
+            l = 0;
+            for (uint32_t k = 0; k < nb; k++)
+                l = (l << 8) | p[2 + k];
+            rlen = 2 + nb + l;
+        } else {
+            rlen = 2 + l;
+        }
+        if (rlen > left)
+            break;
+
+        struct x509_cert root;
+        if (x509_parse(&root, p, rlen) == 0 && root.is_ca &&
+            root.not_after[0])
+            roots_ok++;
+        else
+            roots_bad++;
+        p += rlen;
+        left -= rlen;
+    }
+    print("      wbudowanych korzeni CA: ");
+    print_dec((uint32_t)roots_ok);
+    print("\n");
+    result("wszystkie wbudowane korzenie daja sie rozczytac",
+           roots_bad == 0 && roots_ok == CA_ROOTS_COUNT);
 
     if (failures) {
         print("[cert] BLEDOW: ");

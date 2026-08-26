@@ -6,8 +6,10 @@
  *   2. czy jest wazny wedlug zegara systemu,
  *   3. czy prowadzi lancuch podpisow do certyfikatu, ktoremu ufamy.
  *
- * Magazyn zaufania to po prostu konkatenacja certyfikatow w DER -
- * wczytywana z pliku na dysku (domyslnie "roots.der").
+ * Magazyn zaufania to konkatenacja certyfikatow w DER. Czesc jest
+ * wbudowana w system (caroots.h - korzenie publicznych CA), a dodatkowe
+ * mozna dolozyc plikiem "roots.der" na dysku - przydaje sie do wlasnych
+ * certyfikatow w sieci lokalnej.
  */
 
 #ifndef PROTONOS_UCERT_H
@@ -18,6 +20,7 @@
 #include "ursa.h"
 #include "ux509.h"
 #include "uecdsa.h"
+#include "caroots.h"
 
 #define CERT_CHAIN_MAX 5
 #define CERT_ROOTS_MAX 8
@@ -124,6 +127,48 @@ static inline int cert_check_dates(const struct x509_cert *c, const char *now)
     return CERT_OK;
 }
 
+/* Czy ktorys z certyfikatow w magazynie podpisal 'cur'? Magazyn to
+   sklejone certyfikaty DER - idziemy po nich, czytajac dlugosc z
+   naglowka kazdego. */
+static inline int cert_in_store(const struct x509_cert *cur,
+                                const uint8_t *store, uint32_t len,
+                                const char *now)
+{
+    const uint8_t *p = store;
+    uint32_t left = len;
+
+    while (p && left > 4) {
+        struct x509_cert root;
+        uint32_t rlen;
+
+        if (p[0] != 0x30)
+            break;
+        uint32_t l = p[1];
+        if (l & 0x80) {
+            uint32_t nb = l & 0x7f;
+            if (nb > 4 || 2u + nb > left)
+                break;
+            l = 0;
+            for (uint32_t k = 0; k < nb; k++)
+                l = (l << 8) | p[2 + k];
+            rlen = 2 + nb + l;
+        } else {
+            rlen = 2 + l;
+        }
+        if (rlen > left)
+            break;
+
+        if (x509_parse(&root, p, rlen) == 0 &&
+            cert_check_dates(&root, now) == CERT_OK &&
+            cert_signed_by(cur, &root))
+            return 1;
+
+        p += rlen;
+        left -= rlen;
+    }
+    return 0;
+}
+
 /* Pelne sprawdzenie: nazwa, daty i lancuch do zaufanego korzenia.
    chain[0] to certyfikat serwera. */
 static inline int cert_verify_chain(struct x509_cert *chain, int n,
@@ -147,37 +192,9 @@ static inline int cert_verify_chain(struct x509_cert *chain, int n,
     for (int i = 0; i < n; i++) {
         struct x509_cert *cur = &chain[i];
 
-        /* czy podpisal go ktorys z korzeni? */
-        const uint8_t *p = roots;
-        uint32_t left = roots_len;
-        while (left > 4) {
-            struct x509_cert root;
-            uint32_t rlen = 0;
-            if (p[0] != 0x30)
-                break;
-            uint32_t l = p[1];
-            if (l & 0x80) {
-                uint32_t nb = l & 0x7f;
-                if (nb > 4 || 2u + nb > left)
-                    break;
-                l = 0;
-                for (uint32_t k = 0; k < nb; k++)
-                    l = (l << 8) | p[2 + k];
-                rlen = 2 + nb + l;
-            } else {
-                rlen = 2 + l;
-            }
-            if (rlen > left)
-                break;
-
-            if (x509_parse(&root, p, rlen) == 0) {
-                if (cert_check_dates(&root, now) == CERT_OK &&
-                    cert_signed_by(cur, &root))
-                    return CERT_OK;      /* lancuch domkniety */
-            }
-            p += rlen;
-            left -= rlen;
-        }
+        if (cert_in_store(cur, roots, roots_len, now) ||
+            cert_in_store(cur, ca_roots_der, sizeof(ca_roots_der), now))
+            return CERT_OK;              /* lancuch domkniety */
 
         /* jak nie korzen, to moze nastepny w lancuchu */
         if (i + 1 < n) {
@@ -188,8 +205,8 @@ static inline int cert_verify_chain(struct x509_cert *chain, int n,
             if (err != CERT_OK)
                 return err;
             if (!cert_signed_by(cur, up)) {
-                if (cur->sig_alg == X509_ALG_ECDSA_SHA256 ||
-                    up->key_type == X509_KEY_EC)
+                if (cur->sig_alg == X509_ALG_UNKNOWN ||
+                    up->key_type == X509_KEY_UNKNOWN)
                     return CERT_ERR_ALG;
                 return CERT_ERR_SIGNATURE;
             }

@@ -91,6 +91,7 @@ ProtonOS/
 │   ├── ursa.h          # podpisy RSA: PKCS#1 v1.5 i PSS
 │   ├── ux509.h         # parser certyfikatów X.509 (DER)
 │   ├── uecdsa.h        # ECDSA na krzywej P-256 (weryfikacja podpisów)
+│   ├── caroots.h       # wbudowane korzenie CA (generowane skryptem)
 │   ├── ucert.h         # weryfikacja łańcucha, dat i nazwy hosta
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP/HTTPS (na konsolę albo do pliku)
@@ -105,6 +106,7 @@ ProtonOS/
 │   └── user.ld         # programy linkowane pod 0x08048000
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
+│   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO
@@ -356,3 +358,7 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       na tych samych wielkich liczbach co RSA, weryfikacja podpisów
       w certyfikatach i w `CertificateVerify` (~80 ms na podpis) -
       serwery z kluczem EC przestały być poza zasięgiem
+- [x] Wbudowany magazyn zaufania: 14 korzeni publicznych CA w obrazie
+      systemu (skrypt `mkcaroots.py` odświeża je z zasobu hosta), do tego
+      własne korzenie z pliku `roots.der`; weryfikacja jest domyślnie
+      wymagana dla `https://` (`httpget -k` ją pomija)

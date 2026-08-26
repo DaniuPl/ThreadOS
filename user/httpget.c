@@ -6,9 +6,10 @@
  *
  * Nazwe hosta rozwiazuje przez DNS, radzi sobie z kodowaniem 'chunked'
  * i idzie za przekierowaniami (do trzech). Dla adresow https laczy sie
- * przez TLS 1.3 i sprawdza certyfikat wzgledem magazynu zaufania z
- * pliku "roots.der" na dysku. Gdy tego pliku nie ma, polaczenie jest
- * tylko szyfrowane - i program mowi o tym wprost.
+ * przez TLS 1.3 i sprawdza certyfikat: wbudowane korzenie publicznych
+ * CA plus to, co ewentualnie lezy w pliku "roots.der" na dysku.
+ * Certyfikat, ktory sie nie obroni, konczy polaczenie - chyba ze
+ * uzyjemy -k.
  */
 
 #include "usys.h"
@@ -34,8 +35,15 @@ static void body_sink(const char *data, uint32_t len, void *arg)
 
 void _start(int argc, char **argv)
 {
+    int insecure = 0;
+    if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'k') {
+        insecure = 1;                    /* jak -k w curlu */
+        argv++;
+        argc--;
+    }
+
     if (argc < 2) {
-        print("uzycie: httpget <host|ip> [port] [sciezka] [plik]\n");
+        print("uzycie: httpget [-k] <host|ip> [port] [sciezka] [plik]\n");
         sys_exit(1);
     }
 
@@ -78,13 +86,12 @@ void _start(int argc, char **argv)
     }
 
     static uint8_t roots[16384];
-    uint32_t roots_len = 0;
     if (use_tls) {
-        roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
-        http_set_roots(roots, roots_len, roots_len ? 1 : 0);
-        if (!roots_len)
-            print("[httpget] UWAGA: brak pliku roots.der - certyfikat "
-                  "nie bedzie sprawdzany\n");
+        /* Wbudowane korzenie sa zawsze; z dysku dokladamy wlasne */
+        uint32_t roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
+        http_set_roots(roots, roots_len, !insecure);
+        if (insecure)
+            print("[httpget] UWAGA: -k, certyfikat nie bedzie sprawdzany\n");
     }
 
     struct http_result res;

@@ -169,8 +169,11 @@ static void fetch(void)
     static uint8_t roots[16384];
     static int roots_loaded;
     if (use_tls && !roots_loaded) {
+        /* Wbudowane korzenie publicznych CA + ewentualne wlasne z dysku.
+           Certyfikat, ktory sie nie obroni, konczy polaczenie - tak jak
+           w prawdziwej przegladarce. */
         uint32_t n = cert_load_roots("roots.der", roots, sizeof(roots));
-        http_set_roots(roots, n, 0);     /* pokaz stan, nie zrywaj polaczenia */
+        http_set_roots(roots, n, 1);
         roots_loaded = 1;
     }
 
