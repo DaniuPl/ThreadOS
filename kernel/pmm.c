@@ -21,6 +21,10 @@
 extern char _kernel_start[], _kernel_end[];
 
 static uint32_t bitmap[MAX_FRAMES / 32];
+/* Licznik wlascicieli ramki. Zwykla ramka ma 1; przy kopiowaniu przy
+   zapisie (fork) ta sama ramka fizyczna trafia do kilku przestrzeni
+   adresowych naraz i zwalnia sie dopiero, gdy odda ja ostatnia. */
+static uint16_t refs[MAX_FRAMES];
 static uint32_t total_frames;   /* ramki dostępne dla PMM */
 static uint32_t used_frames;
 static uint32_t ram_kib;        /* cała wykryta pamięć */
@@ -36,6 +40,7 @@ static void reserve_range(uint32_t start, uint32_t end)
             break;
         if (!frame_test(f)) {
             frame_set(f);
+            refs[f] = 1;
             used_frames++;
         }
     }
@@ -116,8 +121,10 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
         }
         if (++run == n) {
             uint32_t first = f - n + 1;
-            for (uint32_t i = first; i <= f; i++)
+            for (uint32_t i = first; i <= f; i++) {
                 frame_set(i);
+                refs[i] = 1;
+            }
             used_frames += n;
             irq_restore(flags);
             return first * PAGE_SIZE;
@@ -132,10 +139,32 @@ void pmm_free_frame(uint32_t addr)
     uint32_t flags = irq_save();
     uint32_t frame = addr / PAGE_SIZE;
     if (frame < MAX_FRAMES && frame_test(frame)) {
-        frame_clear(frame);
-        used_frames--;
+        if (refs[frame] > 1) {
+            refs[frame]--;              /* ramka ma jeszcze wlascicieli */
+        } else {
+            refs[frame] = 0;
+            frame_clear(frame);
+            used_frames--;
+        }
     }
     irq_restore(flags);
+}
+
+/* Dopisuje wlasciciela ramki (fork: dziecko dziedziczy strony rodzica) */
+void pmm_frame_ref(uint32_t addr)
+{
+    uint32_t flags = irq_save();
+    uint32_t frame = addr / PAGE_SIZE;
+    if (frame < MAX_FRAMES && frame_test(frame) && refs[frame] < 0xFFFF)
+        refs[frame]++;
+    irq_restore(flags);
+}
+
+/* Ilu wlascicieli ma ramka (0 = wolna) */
+uint32_t pmm_frame_refs(uint32_t addr)
+{
+    uint32_t frame = addr / PAGE_SIZE;
+    return frame < MAX_FRAMES ? refs[frame] : 0;
 }
 
 uint32_t pmm_total_frames(void) { return total_frames; }

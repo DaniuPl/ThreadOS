@@ -103,6 +103,7 @@ ProtonOS/
 │   ├── certtest.c      # test parsera X.509 i podpisów RSA
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
+│   ├── forktest.c      # fork() i kopiowanie przy zapisie
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
@@ -396,3 +397,11 @@ obrazie dysku.
       znak do bufora kołowego i budzi wątek, więc komenda może spać,
       czekać na sieć albo czytać dysk, a znaki wpisane w tym czasie nie
       giną (`ping` i `dhcp` nie potrzebują już wątków-obejść)
+- [x] `fork()` z kopiowaniem przy zapisie: dziecko wraca z syscalla tam,
+      gdzie rodzic, i widzi jego pamięć, ale nic nie jest kopiowane -
+      obie przestrzenie dostają te same ramki bez prawa zapisu, ramka
+      liczy właścicieli, a prywatna kopia strony powstaje dopiero przy
+      pierwszym zapisie. Bit WP w CR0 obejmuje tym również zapisy jądra
+      (syscall wypełniający bufor procesu), dziecko dziedziczy
+      deskryptory i końce potoków (`run forktest`: 256 KiB bufora,
+      przyrost RAM po `fork` - 12 KiB)

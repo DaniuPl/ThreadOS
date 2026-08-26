@@ -45,6 +45,7 @@
 #define SYS_TCP_SEND    38
 #define SYS_TCP_RECV    39
 #define SYS_TCP_CLOSE   40
+#define SYS_FORK        41
 
 #define FS_NAME_MAX  63
 
@@ -161,6 +162,16 @@ static inline int32_t sys_wait(int32_t pid)
                      : "=a"(ret)
                      : "a"(SYS_WAIT), "b"(pid)
                      : "memory");
+    return ret;
+}
+
+/* Rozwidla proces. Zwraca pid dziecka rodzicowi, zero dziecku,
+   -1 przy bledzie. Dziecko dostaje wlasna kopie pamieci (fizycznie
+   te sama az do pierwszego zapisu - kopiowanie przy zapisie). */
+static inline int32_t sys_fork(void)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_FORK) : "memory");
     return ret;
 }
 

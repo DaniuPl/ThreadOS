@@ -441,6 +441,11 @@ void syscall_handler(struct regs *r)
         tcp_close((int)r->ebx, task_current_id());
         r->eax = 0;
         break;
+    case SYS_FORK:
+        /* Jedyny syscall, ktoremu potrzebna jest cala ramka rejestrow:
+           z niej dziecko wraca do ring 3 tam, gdzie rodzic */
+        r->eax = (uint32_t)process_fork(r);
+        break;
     default:
         printk("[jadro] nieznany syscall %u od '%s'\n",
                r->eax, task_current_name());

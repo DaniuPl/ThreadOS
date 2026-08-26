@@ -819,6 +819,38 @@ def main():
         check(f"brak wycieku ramek po watkach ({used_before_th} -> {used_after_th})",
               used_after_th is not None and used_after_th == used_before_th)
 
+        # 'run forktest': fork() z kopiowaniem przy zapisie. Program
+        # zajmuje 256 KiB, rozwidla sie i sprawdza, ze dziecko dostalo
+        # wzorzec rodzica, a wlasne zapisy zostaly u niego - przy czym
+        # tuz po fork pamiec urosla o tablice stron, nie o caly bufor.
+        q.type_line("clear")
+        q.type_line("mem")
+        used_before_fk = pmm_used(q.screen())
+        q.type_line("run forktest")
+        screen = q.wait_for("[forktest] dziecko: wzorzec odziedziczony",
+                            timeout=30)
+        check("fork: dziecko wraca z syscalla z pamiecia rodzica", True)
+        m = re.search(r"przyrost RAM po fork: (\d+) KiB", screen)
+        check("fork nie kopiuje pamieci procesu"
+              + (f" (256 KiB bufora, przyrost {m.group(1)} KiB)" if m else ""),
+              m is not None and int(m.group(1)) < 64)
+        screen = q.wait_for("[forktest] rodzic: wzorzec nietkniety",
+                            timeout=30)
+        check("zapisy dziecka nie widac u rodzica (prywatne kopie stron)",
+              True)
+        # Ten sam wzorzec zostal nietkniety takze tam, gdzie w dziecku
+        # pisalo JADRO (syscall) - o to dba bit WP w CR0.
+        check("zapis jadra w dziecku tez trafil w prywatna kopie strony",
+              "rodzic: wzorzec nietkniety" in screen)
+        check("rodzic odbiera kod wyjscia dziecka przez wait",
+              "kod dziecka=7" in screen)
+        q.wait_for("proces 'forktest' zakonczyl sie (kod 0)", timeout=20)
+        time.sleep(0.6)
+        q.type_line("mem")
+        used_after_fk = pmm_used(q.screen())
+        check(f"brak wycieku ramek po fork ({used_before_fk} -> {used_after_fk})",
+              used_after_fk is not None and used_after_fk == used_before_fk)
+
         # 'run prio': scheduler z priorytetami. Watek normalny wywlaszcza
         # niski -> przez to samo okno czasu naliczy wielokrotnie wiecej.
         q.type_line("run prio")

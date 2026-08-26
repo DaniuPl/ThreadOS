@@ -15,7 +15,15 @@ uint32_t pmm_alloc_frame(void);
 /* Zwraca adres pierwszej z n kolejnych wolnych ramek (0 = brak) */
 uint32_t pmm_alloc_contiguous(uint32_t n);
 
+/* Zwalnia jednego wlasciciela ramki; ramka wraca do puli dopiero,
+   gdy byl ostatni (zob. pmm_frame_ref - kopiowanie przy zapisie) */
 void pmm_free_frame(uint32_t addr);
+
+/* Dopisuje wlasciciela ramki (strona wspoldzielona po fork) */
+void pmm_frame_ref(uint32_t addr);
+
+/* Liczba wlascicieli ramki (0 = wolna) */
+uint32_t pmm_frame_refs(uint32_t addr);
 
 uint32_t pmm_total_frames(void);
 uint32_t pmm_used_frames(void);

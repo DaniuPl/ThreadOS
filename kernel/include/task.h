@@ -28,6 +28,10 @@ struct file_desc {
 /* Tablica fd biezacego zadania (do warstwy syscalli plikowych) */
 struct file_desc *task_fds(void);
 
+/* fork: nowe zadanie z podana przestrzenia adresowa, dziedziczace po
+   biezacym sterte, katalog roboczy, priorytet i deskryptory */
+struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3);
+
 /* Katalog roboczy biezacego zadania (slot PFS, -1 = root) */
 int task_cwd(void);
 void task_set_cwd(int slot);

@@ -23,4 +23,14 @@ int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr);
 void paging_destroy_address_space(uint32_t dir_phys);
 
+/* Klonuje przestrzen adresowa na potrzeby fork(): zadna strona procesu
+   nie jest kopiowana - obie przestrzenie dostaja te same ramki bez
+   prawa zapisu, a kopia powstaje dopiero przy pierwszym zapisie
+   (kopiowanie przy zapisie). Zwraca CR3 kopii albo 0. */
+uint32_t paging_clone_address_space(uint32_t src_phys);
+
+/* Obsluga page faulta na stronie oddanej na kopiowanie przy zapisie.
+   Zwraca 1, gdy blad zostal zalatwiony (mozna wznowic instrukcje). */
+int paging_handle_cow(uint32_t vaddr, uint32_t err_code);
+
 #endif

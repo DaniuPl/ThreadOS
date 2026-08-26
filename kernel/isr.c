@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include "include/isr.h"
+#include "include/paging.h"
 #include "include/pic.h"
 #include "include/printk.h"
 #include "include/syscall.h"
@@ -37,6 +38,17 @@ void isr_handler(struct regs *r)
     }
 
     if (r->int_no < 32) {
+        /* Page fault na stronie oddanej na kopiowanie przy zapisie
+           (fork) nie jest bledem - zrob prywatna kopie i wznow
+           instrukcje. Dotyczy tez zapisow jadra (CR0.WP), np. gdy
+           syscall wypelnia bufor swiezo rozwidlonego procesu. */
+        if (r->int_no == 14) {
+            uint32_t cr2;
+            __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
+            if (paging_handle_cow(cr2, r->err_code))
+                return;
+        }
+
         /* Breakpoint (int3) to wyjątek-pułapka: zgłoś i jedź dalej */
         if (r->int_no == 3) {
             printk("[INT3] breakpoint pod eip=%x\n", r->eip);

@@ -22,6 +22,7 @@
 #include "include/gdt.h"
 #include "include/paging.h"
 #include "include/kfile.h"
+#include "include/pipe.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -193,6 +194,35 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     t->owns_dir = 1;
     t->brk = current->brk;
     t->mmap_next = current->mmap_next;
+    irq_restore(flags);
+    return t;
+}
+
+/* Rozwidlenie procesu (fork): dziecko dostaje gotowa kopie przestrzeni
+   adresowej (cr3, zob. paging_clone_address_space), a poza tym wszystko
+   po rodzicu - sterte, obszar mmap, katalog roboczy, priorytet i tablice
+   deskryptorow. Konce potokow dziedziczone przez dziecko dostaja
+   dodatkowego wlasciciela, inaczej zamkniecie u dziecka dawaloby
+   przedwczesny EOF rodzicowi. */
+struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
+{
+    struct task *t = task_create(current->name, entry, arg);
+    uint32_t flags = irq_save();
+    t->cr3 = cr3;
+    t->owns_dir = 1;
+    t->brk = current->brk;
+    t->mmap_next = current->mmap_next;
+    t->cwd = current->cwd;
+    t->priority = current->priority;
+    for (int i = 0; i < TASK_MAX_FD; i++) {
+        t->fds[i] = current->fds[i];
+        if (t->fds[i].used && t->fds[i].kind == FD_PIPE) {
+            if (t->fds[i].readable)
+                pipe_add_reader(t->fds[i].pipe);
+            if (t->fds[i].writable)
+                pipe_add_writer(t->fds[i].pipe);
+        }
+    }
     irq_restore(flags);
     return t;
 }

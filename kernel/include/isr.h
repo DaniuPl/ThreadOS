@@ -10,6 +10,10 @@ struct regs {
     uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax; /* pushal */
     uint32_t int_no, err_code;
     uint32_t eip, cs, eflags;       /* odkładane sprzętowo przez CPU */
+    /* Przy wejściu z ring 3 CPU odkłada jeszcze stos użytkownika.
+       Ważne tylko wtedy, gdy (cs & 3) == 3 - m.in. przy fork(), gdzie
+       dziecko wraca do ring 3 z tą samą ramką co rodzic. */
+    uint32_t useresp, ss;
 };
 
 /* IRQ 0-15 są mapowane na wektory 32-47 */

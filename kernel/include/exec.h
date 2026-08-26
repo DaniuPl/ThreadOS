@@ -18,6 +18,13 @@ int exec_spawn_redirect(const char *cmdline, const char *outfile, int append);
    ostatniego etapu albo -1. */
 int exec_spawn_pipeline(const char *pipeline, const char *outfile);
 
+/* fork: rozwidla biezacy proces. Dziecko dostaje klon przestrzeni
+   adresowej rodzica (kopiowanie przy zapisie) i wraca z syscalla
+   w tym samym miejscu programu. Zwraca pid dziecka (u rodzica),
+   zero (u dziecka) albo -1. 'r' to ramka rejestrow syscalla. */
+struct regs;
+int process_fork(struct regs *r);
+
 /* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
 uint32_t process_sbrk(int32_t increment);

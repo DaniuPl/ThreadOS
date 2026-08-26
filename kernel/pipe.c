@@ -117,6 +117,20 @@ static void pipe_maybe_free(struct pipe *p)
         p->used = 0;
 }
 
+/* Dopisuje wlasciciela konca potoku - po fork obie strony trzymaja
+   ten sam koniec i dopiero zamkniecie obu daje EOF drugiej stronie. */
+void pipe_add_reader(int idx)
+{
+    if (idx >= 0 && idx < MAX_PIPES && pipes[idx].used)
+        pipes[idx].readers++;
+}
+
+void pipe_add_writer(int idx)
+{
+    if (idx >= 0 && idx < MAX_PIPES && pipes[idx].used)
+        pipes[idx].writers++;
+}
+
 void pipe_close_reader(int idx)
 {
     if (idx < 0 || idx >= MAX_PIPES)

@@ -21,6 +21,7 @@
 #include "include/pipe.h"
 #include "include/shm.h"
 #include "include/printk.h"
+#include "include/isr.h"
 
 #define USER_STACK_TOP 0xC0000000u
 /* Stos procesu: jedna strona wystarczala, dopoki programy nie zaczely
@@ -272,6 +273,51 @@ static void exec_task(void *arg)
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
     enter_ring3(entry, esp);
+}
+
+/* --- fork: rozwidlenie procesu --------------------------------------
+ *
+ * Dziecko nie jest ladowane od nowa - dostaje klon przestrzeni adresowej
+ * rodzica (kopiowanie przy zapisie, zob. paging_clone_address_space) i
+ * startuje jako watek jadra, ktory natychmiast wraca do ring 3 z ramka
+ * rejestrow zapamietana w chwili syscalla. Wraca wiec w tym samym
+ * miejscu programu co rodzic - rozni ich tylko zawartosc eax: rodzic
+ * dostaje pid dziecka, dziecko zero.
+ */
+static void fork_child(void *arg)
+{
+    struct regs *saved = arg;
+    struct regs frame = *saved;       /* na wlasny stos jadra */
+    kfree(saved);
+    enter_ring3_regs(&frame);
+}
+
+int process_fork(struct regs *r)
+{
+    if (!task_brk())                  /* watek jadra nie ma czego rozwidlac */
+        return -1;
+    if ((r->cs & 3) != 3)             /* fork wolany spoza ring 3 */
+        return -1;
+
+    struct regs *saved = kmalloc(sizeof(*saved));
+    if (!saved)
+        return -1;
+    *saved = *r;
+    saved->eax = 0;                   /* fork() zwraca w dziecku zero */
+
+    uint32_t dir = paging_clone_address_space(task_current_cr3());
+    if (!dir) {
+        kfree(saved);
+        return -1;
+    }
+
+    struct task *t = task_fork(fork_child, saved, dir);
+    if (!t) {
+        paging_destroy_address_space(dir);
+        kfree(saved);
+        return -1;
+    }
+    return task_id_of(t);
 }
 
 /* sbrk: przesuwa koniec sterty procesu, mapując nowe strony.
