@@ -90,7 +90,8 @@ ProtonOS/
 │   ├── ubignum.h       # wielkie liczby (Montgomery) pod RSA
 │   ├── ursa.h          # podpisy RSA: PKCS#1 v1.5 i PSS
 │   ├── ux509.h         # parser certyfikatów X.509 (DER)
-│   ├── uecdsa.h        # ECDSA na krzywej P-256 (weryfikacja podpisów)
+│   ├── uecdsa.h        # ECDSA na krzywych P-256 i P-384 (weryfikacja)
+│   ├── usha512.h       # SHA-512 i SHA-384 (podpisy na P-384)
 │   ├── caroots.h       # wbudowane korzenie CA (generowane skryptem)
 │   ├── ucert.h         # weryfikacja łańcucha, dat i nazwy hosta
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
@@ -165,7 +166,7 @@ Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
 także względnymi. Adresy `https://` idą przez **TLS 1.3** (X25519 +
 ChaCha20-Poly1305) - działa to zarówno w `httpget`, jak i w przeglądarce.
 Certyfikat serwera jest **weryfikowany** (podpisy RSA - PKCS#1 v1.5 i PSS -
-oraz ECDSA na krzywej P-256), gdy na dysku leży magazyn zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
+oraz ECDSA na krzywych P-256 i P-384), gdy na dysku leży magazyn zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
 z `CertificateVerify`, łańcuch podpisów do zaufanego wystawcy, daty
 ważności i nazwa hosta. Bez tego pliku połączenie jest tylko szyfrowane -
 i program mówi to wprost, a przeglądarka pokazuje `TLS?` zamiast `TLS+`.
@@ -374,3 +375,7 @@ obrazie dysku.
 - [x] PFS3: blok podwójnie pośredni - sufit rozmiaru pliku rośnie
       z 268 KiB do 64 MiB (test pobiera z sieci 400 KB prosto na dysk
       i czyta je z powrotem przez potok)
+- [x] ECDSA na krzywej P-384 i skrót SHA-384/SHA-512: arytmetyka krzywych
+      sparametryzowana (jeden komplet wzorów dla P-256 i P-384), stałe
+      krzywych i tablice SHA-512 generowane, a nie przepisywane ręcznie;
+      `CertificateVerify` przyjmuje `ecdsa_secp384r1_sha384`

@@ -122,9 +122,10 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
 
 CERT_DER = None          # certyfikat serwera HTTPS (do magazynu zaufania)
 CERT_DER_EC = None       # to samo, ale na krzywej P-256
+CERT_DER_P384 = None     # i na krzywej P-384 (podpis SHA-384)
 
 
-def make_test_cert(dirpath, ec=False):
+def make_test_cert(dirpath, ec=False, p384=False):
     """Certyfikat samopodpisany dla protonos.test: SubjectAltName z nazwa
     i wieloznacznikiem, flaga CA (moze wiec sluzyc tez za korzen
     zaufania) i dziesiecioletnia waznosc, zeby obejmowala ustalony zegar
@@ -132,13 +133,20 @@ def make_test_cert(dirpath, ec=False):
     testuje sie TLS."""
     import subprocess
 
-    tag = "ec" if ec else "rsa"
+    tag = "p384" if p384 else ("ec" if ec else "rsa")
     certfile = os.path.join(dirpath, "cert-%s.pem" % tag)
     keyfile = os.path.join(dirpath, "key-%s.pem" % tag)
     derfile = os.path.join(dirpath, "cert-%s.der" % tag)
 
-    keyargs = (["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"]
-               if ec else ["-newkey", "rsa:2048"])
+    if p384:
+        keyargs = ["-newkey", "ec", "-pkeyopt",
+                   "ec_paramgen_curve:secp384r1", "-sha384"]
+    elif ec:
+        keyargs = ["-newkey", "ec", "-pkeyopt",
+                   "ec_paramgen_curve:prime256v1"]
+    else:
+        keyargs = ["-newkey", "rsa:2048"]
+
     subprocess.run(
         ["openssl", "req", "-x509"] + keyargs + ["-keyout", keyfile,
          "-out", certfile, "-days", "3650", "-nodes",
@@ -241,20 +249,22 @@ def start_https_chain_server():
     return srv.server_address[1], srv.shutdown
 
 
-def start_https_server(ec=False):
+def start_https_server(ec=False, p384=False):
     """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
     locie - z kluczem RSA albo na krzywej P-256. Test nie potrzebuje
     dzieki temu niczego z zewnatrz.
     Zwraca (port, stop) albo (None, stop), gdy brakuje openssl-a."""
-    global CERT_DER, CERT_DER_EC
+    global CERT_DER, CERT_DER_EC, CERT_DER_P384
     import ssl
 
     tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
     try:
-        certfile, keyfile, der = make_test_cert(tmpdir, ec)
+        certfile, keyfile, der = make_test_cert(tmpdir, ec, p384)
     except BaseException:                # brak openssl-a to nie powod, by
         return None, lambda: None        # wywrocic caly test
-    if ec:
+    if p384:
+        CERT_DER_P384 = der
+    elif ec:
         CERT_DER_EC = der
     else:
         CERT_DER = der
@@ -331,6 +341,14 @@ def start_http_server():
                 self.send_header("Content-Length", str(len(CERT_DER_ROOT)))
                 self.end_headers()
                 self.wfile.write(CERT_DER_ROOT)
+                return
+
+            if self.path.startswith("/p384cert") and CERT_DER_P384:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(CERT_DER_P384)))
+                self.end_headers()
+                self.wfile.write(CERT_DER_P384)
                 return
 
             if self.path.startswith("/eccert") and CERT_DER_EC:
@@ -1060,6 +1078,26 @@ def main():
                         q.type_line("run httpget 10.0.2.2 %d /cert.der "
                                     "roots.der" % http_port)
                         q.wait_for("tresc ", timeout=30)
+
+                    # 4b. Krzywa P-384 (podpisy SHA-384) - taka jest m.in.
+                    #     ISRG Root X2
+                    p384_port, p384_stop = start_https_server(ec=True,
+                                                              p384=True)
+                    if p384_port is not None:
+                        try:
+                            q.type_line("clear")
+                            q.type_line("run httpget 10.0.2.2 %d "
+                                        "/p384cert.der roots.der" % http_port)
+                            q.wait_for("tresc ", timeout=30)
+                            q.type_line("clear")
+                            q.type_line("run httpget https://protonos.test %d /"
+                                        % p384_port)
+                            p3 = q.wait_for("tresc ", timeout=120)
+                            check("certyfikat na krzywej P-384 sprawdzony "
+                                  "(ECDSA + SHA-384)",
+                                  "certyfikat sprawdzony" in p3)
+                        finally:
+                            p384_stop()
 
                     # 5. Lancuch dwupoziomowy: ufamy tylko korzeniowi,
                     #    wiec system musi przejsc przez posrednika

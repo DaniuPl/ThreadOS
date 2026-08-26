@@ -18,6 +18,7 @@
 #define X509_ALG_RSA_SHA256  1
 #define X509_ALG_RSA_PSS     2
 #define X509_ALG_ECDSA_SHA256 3
+#define X509_ALG_ECDSA_SHA384 4
 
 #define X509_KEY_UNKNOWN 0
 #define X509_KEY_RSA     1
@@ -35,7 +36,7 @@ struct x509_cert {
     const uint8_t *mod;      uint32_t mod_len;    /* RSA: modulus */
     uint32_t exp;                                 /* RSA: wykladnik */
     const uint8_t *ec_point; uint32_t ec_point_len; /* EC: 0x04||X||Y */
-    int ec_p256;                                  /* czy krzywa P-256 */
+    int ec_bits;                                  /* 256 albo 384; 0 = obca */
 
     char not_before[16], not_after[16];           /* YYYYMMDDHHMMSS */
 
@@ -110,6 +111,8 @@ static inline int x509_alg_from_oid(const uint8_t *oid, uint32_t len)
         {0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x0a};
     static const uint8_t ecdsa_sha256[] =
         {0x2a,0x86,0x48,0xce,0x3d,0x04,0x03,0x02};
+    static const uint8_t ecdsa_sha384[] =
+        {0x2a,0x86,0x48,0xce,0x3d,0x04,0x03,0x03};
 
     if (der_oid_is(oid, len, rsa_sha256, sizeof(rsa_sha256)))
         return X509_ALG_RSA_SHA256;
@@ -117,6 +120,8 @@ static inline int x509_alg_from_oid(const uint8_t *oid, uint32_t len)
         return X509_ALG_RSA_PSS;
     if (der_oid_is(oid, len, ecdsa_sha256, sizeof(ecdsa_sha256)))
         return X509_ALG_ECDSA_SHA256;
+    if (der_oid_is(oid, len, ecdsa_sha384, sizeof(ecdsa_sha384)))
+        return X509_ALG_ECDSA_SHA384;
     return X509_ALG_UNKNOWN;
 }
 
@@ -231,17 +236,21 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
         return -1;
 
     /* Dla krzywych po identyfikatorze algorytmu idzie identyfikator
-       krzywej - interesuje nas tylko prime256v1 (NIST P-256) */
+       krzywej - umiemy prime256v1 (P-256) i secp384r1 (P-384) */
     if (kalg < kalg_end) {
         const uint8_t *curve;
         uint32_t curvelen;
         uint8_t ctag;
         static const uint8_t oid_p256[] =
             {0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07};
+        static const uint8_t oid_p384[] = {0x2b,0x81,0x04,0x00,0x22};
         if (der_next(&kalg, kalg_end, &ctag, &curve, &curvelen) == 0 &&
-            ctag == 0x06 &&
-            der_oid_is(curve, curvelen, oid_p256, sizeof(oid_p256)))
-            c->ec_p256 = 1;
+            ctag == 0x06) {
+            if (der_oid_is(curve, curvelen, oid_p256, sizeof(oid_p256)))
+                c->ec_bits = 256;
+            else if (der_oid_is(curve, curvelen, oid_p384, sizeof(oid_p384)))
+                c->ec_bits = 384;
+        }
     }
 
     static const uint8_t oid_rsa[] =

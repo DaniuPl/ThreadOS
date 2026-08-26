@@ -20,6 +20,7 @@
 #include "ursa.h"
 #include "ux509.h"
 #include "uecdsa.h"
+#include "usha512.h"
 #include "caroots.h"
 
 #define CERT_CHAIN_MAX 5
@@ -86,22 +87,41 @@ static inline int cert_str_cmp(const char *a, const char *b)
 static inline int cert_signed_by(const struct x509_cert *sub,
                                  const struct x509_cert *issuer)
 {
-    uint8_t hash[32];
+    uint8_t hash[64];
 
     if (!x509_name_match(sub->issuer, sub->issuer_len,
                          issuer->subject, issuer->subject_len))
         return 0;
 
-    sha256(sub->tbs, sub->tbs_len, hash);
-
     if (issuer->key_type == X509_KEY_EC) {
-        if (!issuer->ec_p256 || !issuer->ec_point)
+        struct ec_curve *cv;
+        uint32_t hashlen;
+
+        if (issuer->ec_bits == 256)
+            cv = &ec_p256;
+        else if (issuer->ec_bits == 384)
+            cv = &ec_p384;
+        else
             return 0;
-        if (sub->sig_alg != X509_ALG_ECDSA_SHA256)
+        if (!issuer->ec_point)
             return 0;
-        return ecdsa_verify_der(issuer->ec_point, issuer->ec_point_len, hash,
-                                sub->sig, sub->sig_len);
+
+        /* skrot dobiera algorytm podpisu, nie krzywa */
+        if (sub->sig_alg == X509_ALG_ECDSA_SHA256) {
+            sha256(sub->tbs, sub->tbs_len, hash);
+            hashlen = 32;
+        } else if (sub->sig_alg == X509_ALG_ECDSA_SHA384) {
+            sha384(sub->tbs, sub->tbs_len, hash);
+            hashlen = 48;
+        } else {
+            return 0;
+        }
+
+        return ecdsa_verify_der(cv, issuer->ec_point, issuer->ec_point_len,
+                                hash, hashlen, sub->sig, sub->sig_len);
     }
+
+    sha256(sub->tbs, sub->tbs_len, hash);
 
     if (issuer->key_type != X509_KEY_RSA || !issuer->mod)
         return 0;

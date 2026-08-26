@@ -300,10 +300,28 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
     int ok = 0;
 
     if (leaf->key_type == X509_KEY_EC) {
-        if (alg != 0x0403 || !leaf->ec_p256 || !leaf->ec_point)
-            return CERT_ERR_ALG;         /* ecdsa_secp256r1_sha256 */
-        if (!ecdsa_verify_der(leaf->ec_point, leaf->ec_point_len, hash,
-                              sig, siglen))
+        struct ec_curve *cv;
+        uint8_t echash[64];
+        uint32_t hashlen;
+
+        /* 0x0403 = ecdsa_secp256r1_sha256, 0x0503 = ..._secp384r1_sha384 */
+        if (alg == 0x0403 && leaf->ec_bits == 256) {
+            cv = &ec_p256;
+            for (int k = 0; k < 32; k++)
+                echash[k] = hash[k];
+            hashlen = 32;
+        } else if (alg == 0x0503 && leaf->ec_bits == 384) {
+            cv = &ec_p384;
+            sha384(tosign, m, echash);   /* P-384 podpisuje sie SHA-384 */
+            hashlen = 48;
+        } else {
+            return CERT_ERR_ALG;
+        }
+        if (!leaf->ec_point)
+            return CERT_ERR_ALG;
+
+        if (!ecdsa_verify_der(cv, leaf->ec_point, leaf->ec_point_len, echash,
+                              hashlen, sig, siglen))
             return CERT_ERR_SIGNATURE;
         return cert_verify_chain(chain, n, roots, roots_len, host);
     }
@@ -412,10 +430,11 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
 
     /* signature_algorithms - serwer bez tego odmawia */
     tls_put16(msg + n, 0x000d); n += 2;
-    tls_put16(msg + n, 8); n += 2;
-    tls_put16(msg + n, 6); n += 2;
+    tls_put16(msg + n, 10); n += 2;      /* dlugosc rozszerzenia */
+    tls_put16(msg + n, 8); n += 2;       /* dlugosc listy algorytmow */
     tls_put16(msg + n, 0x0804); n += 2;  /* rsa_pss_rsae_sha256 */
     tls_put16(msg + n, 0x0403); n += 2;  /* ecdsa_secp256r1_sha256 */
+    tls_put16(msg + n, 0x0503); n += 2;  /* ecdsa_secp384r1_sha384 */
     tls_put16(msg + n, 0x0401); n += 2;  /* rsa_pkcs1_sha256 */
 
     /* key_share z naszym kluczem publicznym */

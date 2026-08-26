@@ -15,6 +15,7 @@
 #include "ursa.h"
 #include "ux509.h"
 #include "uecdsa.h"
+#include "usha512.h"
 #include "certdata.h"
 #include "ucert.h"
 
@@ -112,29 +113,71 @@ void _start(void)
     result("rozbior certyfikatu ECDSA",
            x509_parse(&ec, ec_cert_der, sizeof(ec_cert_der)) == 0);
     result("klucz na krzywej P-256 rozpoznany",
-           ec.key_type == X509_KEY_EC && ec.ec_p256 && ec.ec_point_len == 65);
+           ec.key_type == X509_KEY_EC && ec.ec_bits == 256 &&
+           ec.ec_point_len == 65);
     result("algorytm podpisu: ECDSA + SHA-256",
            ec.sig_alg == X509_ALG_ECDSA_SHA256);
 
-    uint32_t t0 = sys_getticks();
+    uint32_t t0, t1;
+    t0 = sys_getticks();
     sha256(ec.tbs, ec.tbs_len, hash);
     result("podpis wlasny certyfikatu (ECDSA P-256)",
-           ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec.sig,
-                            ec.sig_len));
-    uint32_t t1 = sys_getticks();
+           ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+                            ec.sig, ec.sig_len));
+    t1 = sys_getticks();
     print("      sprawdzenie podpisu ECDSA zajelo ~");
     print_dec((t1 - t0) * 10);
     print(" ms\n");
 
     hash[0] ^= 0x01;
     result("ECDSA: zly skrot odrzucony",
-           !ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec.sig,
-                             ec.sig_len));
+           !ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+                             ec.sig, ec.sig_len));
 
     sha256(pss_msg, msglen, hash);
     result("podpis ECDSA wiadomosci (osobny wektor)",
-           ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec_sig,
-                            sizeof(ec_sig)));
+           ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+                            ec_sig, sizeof(ec_sig)));
+
+    /* --- certyfikat na krzywej P-384 (SHA-384) --- */
+    struct x509_cert ec384;
+    uint8_t hash384[48];
+
+    result("rozbior certyfikatu P-384",
+           x509_parse(&ec384, p384_cert_der, sizeof(p384_cert_der)) == 0);
+    result("klucz na krzywej P-384 rozpoznany",
+           ec384.key_type == X509_KEY_EC && ec384.ec_bits == 384 &&
+           ec384.ec_point_len == 97);
+    result("algorytm podpisu: ECDSA + SHA-384",
+           ec384.sig_alg == X509_ALG_ECDSA_SHA384);
+
+    t0 = sys_getticks();
+    sha384(ec384.tbs, ec384.tbs_len, hash384);
+    result("podpis wlasny certyfikatu (ECDSA P-384)",
+           ecdsa_verify_der(&ec_p384, ec384.ec_point, ec384.ec_point_len,
+                            hash384, 48, ec384.sig, ec384.sig_len));
+    t1 = sys_getticks();
+    print("      sprawdzenie podpisu P-384 zajelo ~");
+    print_dec((t1 - t0) * 10);
+    print(" ms\n");
+
+    hash384[0] ^= 0x01;
+    result("P-384: zly skrot odrzucony",
+           !ecdsa_verify_der(&ec_p384, ec384.ec_point, ec384.ec_point_len,
+                             hash384, 48, ec384.sig, ec384.sig_len));
+
+    /* SHA-384 na znanym wektorze (FIPS 180-4) */
+    static const uint8_t want384[] = {
+        0xcb,0x00,0x75,0x3f,0x45,0xa3,0x5e,0x8b,0xb5,0xa0,0x3d,0x69,0x9a,0xc6,
+        0x50,0x07,0x27,0x2c,0x32,0xab,0x0e,0xde,0xd1,0x63,0x1a,0x8b,0x60,0x5a,
+        0x43,0xff,0x5b,0xed,0x80,0x86,0x07,0x2b,0xa1,0xe7,0xcc,0x23,0x58,0xba,
+        0xec,0xa1,0x34,0xc8,0x25,0xa7 };
+    sha384("abc", 3, hash384);
+    int same = 1;
+    for (int i = 0; i < 48; i++)
+        if (hash384[i] != want384[i])
+            same = 0;
+    result("SHA-384('abc') zgadza sie z FIPS 180-4", same);
 
     /* --- wbudowany magazyn zaufania --- */
     int roots_ok = 0, roots_bad = 0;
