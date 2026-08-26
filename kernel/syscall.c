@@ -441,6 +441,17 @@ void syscall_handler(struct regs *r)
         tcp_close((int)r->ebx, task_current_id());
         r->eax = 0;
         break;
+    case SYS_EXEC: {
+        /* Linia polecen do bufora jadra: pamiec procesu zaraz zniknie
+           razem z cala jego przestrzenia adresowa */
+        char cmd[PATH_MAX];
+        if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)process_exec(cmd);   /* przy powodzeniu nie wraca */
+        break;
+    }
     case SYS_FORK:
         /* Jedyny syscall, ktoremu potrzebna jest cala ramka rejestrow:
            z niej dziecko wraca do ring 3 tam, gdzie rodzic */

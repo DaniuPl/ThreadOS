@@ -844,6 +844,15 @@ def main():
               "rodzic: wzorzec nietkniety" in screen)
         check("rodzic odbiera kod wyjscia dziecka przez wait",
               "kod dziecka=7" in screen)
+        # Druga polowa pary uniksowej: dziecko podmienia sie w inny
+        # program przez exec, a rodzic czeka na ten sam pid.
+        screen = q.wait_for("[forktest] rodzic doczekal sie pidu", timeout=30)
+        check("exec podmienia obraz procesu w miejscu",
+              "[forktest] po exec: inny program, ten sam pid" in screen)
+        check("po exec proces nazywa sie jak nowy program",
+              "proces 'echo' zakonczyl sie (kod 0)" in screen)
+        check("wait rodzica trafia w ten sam pid po exec",
+              "doczekal sie pidu" in screen)
         q.wait_for("proces 'forktest' zakonczyl sie (kod 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")

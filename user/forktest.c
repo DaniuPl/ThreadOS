@@ -98,5 +98,23 @@ void _start(void)
     print("[forktest] rodzic: wzorzec nietkniety, kod dziecka=");
     print_dec((uint32_t)code);
     print("\n");
+
+    /* Klasyczna para uniksowa: rozwidl sie, a w dziecku wskocz w inny
+       program. Pid, deskryptory i katalog roboczy zostaja - wymienia
+       sie tylko obraz procesu, wiec rodzic czeka na ten sam pid. */
+    int32_t pid2 = sys_fork();
+    if (pid2 < 0) {
+        print("[forktest] drugi fork sie nie udal\n");
+        sys_exit(1);
+    }
+    if (pid2 == 0) {
+        sys_exec("echo [forktest] po exec: inny program, ten sam pid");
+        print("[forktest] exec sie nie udal\n");    /* tu nie powinno dojsc */
+        sys_exit(1);
+    }
+    sys_wait(pid2);
+    print("[forktest] rodzic doczekal sie pidu ");
+    print_dec((uint32_t)pid2);
+    print(" po exec\n");
     sys_exit(0);
 }

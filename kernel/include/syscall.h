@@ -44,6 +44,7 @@
 #define SYS_TCP_RECV    39 /* ebx=polaczenie, ecx=&{buf,max,timeout} -> bajty/0/-1 */
 #define SYS_TCP_CLOSE   40 /* ebx=polaczenie -> 0 */
 #define SYS_FORK        41 /* -> pid dziecka (rodzic) / 0 (dziecko) / -1 */
+#define SYS_EXEC        42 /* ebx=linia polecen; nie wraca albo -1 */
 
 #define SYSCALL_VECTOR 0x80
 

@@ -405,3 +405,7 @@ obrazie dysku.
       (syscall wypełniający bufor procesu), dziecko dziedziczy
       deskryptory i końce potoków (`run forktest`: 256 KiB bufora,
       przyrost RAM po `fork` - 12 KiB)
+- [x] `exec()` w miejscu (odpowiednik `execv`): proces podmienia własny
+      program, zachowując pid, deskryptory i katalog roboczy - razem
+      z `fork()` daje to klasyczną parę uniksową (rozwidl się, w dziecku
+      wskocz w nowy program), a `ps` pokazuje już nową nazwę

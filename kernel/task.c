@@ -198,6 +198,15 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     return t;
 }
 
+/* Zmiana nazwy biezacego zadania - exec podmienia program, wiec 'ps'
+   ma pokazywac nowy, a nie ten, ktory sie nim stal */
+void task_rename(const char *name)
+{
+    uint32_t flags = irq_save();
+    task_set_name(current, name);
+    irq_restore(flags);
+}
+
 /* Rozwidlenie procesu (fork): dziecko dostaje gotowa kopie przestrzeni
    adresowej (cr3, zob. paging_clone_address_space), a poza tym wszystko
    po rodzicu - sterte, obszar mmap, katalog roboczy, priorytet i tablice
@@ -225,6 +234,24 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     }
     irq_restore(flags);
     return t;
+}
+
+/* Czy przestrzeni adresowej uzywa jeszcze jakis inny watek? Pyta o to
+   exec przed zniszczeniem starego obrazu procesu. */
+int task_cr3_shared(uint32_t cr3)
+{
+    uint32_t flags = irq_save();
+    int shared = 0;
+    struct task *t = current->next;
+    while (t != current) {
+        if (t->cr3 == cr3 && t->state != TASK_ZOMBIE) {
+            shared = 1;
+            break;
+        }
+        t = t->next;
+    }
+    irq_restore(flags);
+    return shared;
 }
 
 /* Czy jakies inne zadanie wciaz uzywa tej przestrzeni adresowej (CR3)?

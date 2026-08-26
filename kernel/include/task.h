@@ -32,6 +32,12 @@ struct file_desc *task_fds(void);
    biezacym sterte, katalog roboczy, priorytet i deskryptory */
 struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3);
 
+/* Zmienia nazwe biezacego zadania (exec podmienia program) */
+void task_rename(const char *name);
+
+/* Czy tej przestrzeni adresowej uzywa jeszcze jakis inny watek? */
+int task_cr3_shared(uint32_t cr3);
+
 /* Katalog roboczy biezacego zadania (slot PFS, -1 = root) */
 int task_cwd(void);
 void task_set_cwd(int slot);

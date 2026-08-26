@@ -25,6 +25,10 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile);
 struct regs;
 int process_fork(struct regs *r);
 
+/* exec: podmienia program biezacego procesu (pid, deskryptory i katalog
+   roboczy zostaja). Przy powodzeniu nie wraca; -1 przy bledzie. */
+int process_exec(const char *cmdline);
+
 /* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
 uint32_t process_sbrk(int32_t increment);

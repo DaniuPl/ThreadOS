@@ -174,15 +174,11 @@ static void exec_fail(struct exec_args *a)
     kfree(a);
 }
 
-/* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
-static void exec_task(void *arg)
+/* Dzieli linie polecen na slowa w miejscu; zwraca argc */
+static int tokenize(char *cmd, char **tok)
 {
-    struct exec_args *a = arg;
-
-    /* Tokenizacja w miejscu: a->cmd to nasza kopia */
-    char *tok[ARG_MAX];
     int argc = 0;
-    char *p = a->cmd;
+    char *p = cmd;
     while (*p && argc < ARG_MAX) {
         while (*p == ' ')
             *p++ = '\0';
@@ -192,31 +188,33 @@ static void exec_task(void *arg)
         while (*p && *p != ' ')
             p++;
     }
-    if (!argc) {
-        exec_fail(a);
-        return;
-    }
+    return argc;
+}
 
+/* Buduje swiezy obraz procesu: nowa przestrzen adresowa, segmenty ELF
+   z initrd, stos i argumenty na nim. Zwraca CR3 (0 przy bledzie)
+   i wypelnia entry/esp/brk. Uzywaja tego dwie drogi - start nowego
+   procesu (exec_task) i podmiana obrazu biezacego (process_exec). */
+static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
+                            uint32_t *esp_out, uint32_t *brk_out)
+{
     uint32_t size;
     const uint8_t *file = initrd_find(tok[0], &size);
     if (!file) {
-        printk("exec: '%s' zniknal z initrd?\n", tok[0]);
-        exec_fail(a);
-        return;
+        printk("exec: brak pliku '%s' w initrd (sprawdz 'ls')\n", tok[0]);
+        return 0;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
         printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
-        exec_fail(a);
-        return;
+        return 0;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
-        exec_fail(a);
-        return;
+        return 0;
     }
 
     /* Załaduj segmenty, śledząc koniec obrazu - tam zacznie się
@@ -229,8 +227,7 @@ static void exec_task(void *arg)
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
-            exec_fail(a);
-            return;
+            return 0;
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
             brk = ph[i].p_vaddr + ph[i].p_memsz;
@@ -244,18 +241,39 @@ static void exec_task(void *arg)
         if (!frame) {
             printk("exec: brak pamieci na stos\n");
             paging_destroy_address_space(dir);
-            exec_fail(a);
-            return;
+            return 0;
         }
         if (i == 0)
             sframe = frame;
     }
 
-    uint32_t esp = build_argv_stack(sframe, tok, argc);
-
+    *esp_out = build_argv_stack(sframe, tok, argc);
+    *entry_out = eh->e_entry;
+    *brk_out = brk;
     printk("[jadro] exec '%s': ELF %u B, entry %x, argc=%d\n",
            tok[0], size, eh->e_entry, argc);
-    uint32_t entry = eh->e_entry;
+    return dir;
+}
+
+/* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
+static void exec_task(void *arg)
+{
+    struct exec_args *a = arg;
+
+    /* Tokenizacja w miejscu: a->cmd to nasza kopia */
+    char *tok[ARG_MAX];
+    int argc = tokenize(a->cmd, tok);
+    if (!argc) {
+        exec_fail(a);
+        return;
+    }
+
+    uint32_t entry, esp, brk;
+    uint32_t dir = build_image(tok, argc, &entry, &esp, &brk);
+    if (!dir) {
+        exec_fail(a);
+        return;
+    }
 
     /* Przekierowanie strumieni przed wejsciem w ring 3 (niezaleznie) */
     if (a->in_pipe >= 0)
@@ -318,6 +336,52 @@ int process_fork(struct regs *r)
         return -1;
     }
     return task_id_of(t);
+}
+
+/* --- exec: podmiana obrazu biezacego procesu ------------------------
+ *
+ * Odpowiednik uniksowego execv: pid, deskryptory i katalog roboczy
+ * zostaja, wymienia sie tylko program i cala przestrzen adresowa.
+ * Razem z fork() daje to klasyczna pare - rozwidl sie, a w dziecku
+ * wskocz w nowy program. Przy powodzeniu nie wraca.
+ */
+int process_exec(const char *cmdline)
+{
+    if (!task_brk())                  /* watek jadra nie ma czego podmieniac */
+        return -1;
+
+    char buf[CMD_MAX];
+    uint32_t i = 0;
+    while (cmdline[i] && i < sizeof(buf) - 1) {
+        buf[i] = cmdline[i];
+        i++;
+    }
+    buf[i] = '\0';
+
+    char *tok[ARG_MAX];
+    int argc = tokenize(buf, tok);
+    if (!argc)
+        return -1;
+
+    uint32_t entry, esp, brk;
+    uint32_t dir = build_image(tok, argc, &entry, &esp, &brk);
+    if (!dir)
+        return -1;                    /* stary obraz caly czas dziala */
+
+    /* Od tego miejsca nie ma juz odwrotu */
+    uint32_t old = task_current_cr3();
+    task_rename(tok[0]);              /* 'ps' ma pokazywac nowy program */
+    task_set_brk(brk);
+    task_set_mmap_next(MMAP_BASE);
+    task_use_address_space(dir);
+
+    /* Stara przestrzen znika, o ile nie kreci sie w niej jeszcze jakis
+       watek tego procesu (sys_thread) */
+    if (!task_cr3_shared(old))
+        paging_destroy_address_space(old);
+
+    enter_ring3(entry, esp);       /* nie wraca */
+    return 0;
 }
 
 /* sbrk: przesuwa koniec sterty procesu, mapując nowe strony.

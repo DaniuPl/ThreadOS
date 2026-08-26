@@ -46,6 +46,7 @@
 #define SYS_TCP_RECV    39
 #define SYS_TCP_CLOSE   40
 #define SYS_FORK        41
+#define SYS_EXEC        42
 
 #define FS_NAME_MAX  63
 
@@ -172,6 +173,19 @@ static inline int32_t sys_fork(void)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_FORK) : "memory");
+    return ret;
+}
+
+/* Podmienia program biezacego procesu (pid i deskryptory zostaja).
+   Przy powodzeniu nie wraca; -1 oznacza, ze programu nie da sie
+   uruchomic i stary obraz dziala dalej. */
+static inline int32_t sys_exec(const char *cmdline)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_EXEC), "b"(cmdline)
+                     : "memory");
     return ret;
 }
 
