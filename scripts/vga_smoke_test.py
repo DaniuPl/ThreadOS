@@ -75,6 +75,8 @@ LINK_PAGE = (b"<html><body><h1>Strona pierwsza</h1>"
              + b"</body></html>\n")
 LINK_PAGE2 = (b"<html><body><h1>Strona druga</h1>"
               b"<p>Odnosnik zadzialal.</p></body></html>\n")
+# Ponad dawny sufit 268 KiB na plik - wchodzi w blok podwojnie posredni
+HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" * 6500
 # Strona grubo ponad stary limit PFS (16 KiB na plik) - sprawdza
 # przydzial blokow, blok posredni i przepustowosc TCP
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
@@ -303,6 +305,14 @@ def start_http_server():
                     part = PAGE[i:i + 7]
                     self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
+                return
+
+            if self.path.startswith("/ogromna"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(HUGE_PAGE)))
+                self.end_headers()
+                self.wfile.write(HUGE_PAGE)
                 return
 
             if self.path.startswith("/linki") or self.path.startswith("/druga"):
@@ -929,6 +939,30 @@ def main():
             usage = q.wait_for("dysk: ", timeout=10)
             check("df pokazuje zajetosc dysku w blokach",
                   "bloki po 1024 B" in usage and "zajete" in usage)
+
+            # Plik ponad dawny sufit 268 KiB: dane trafiaja do bloku
+            # podwojnie posredniego, a potem czytamy je z powrotem
+            q.type_line("clear")
+            q.type_line("run httpget 10.0.2.2 %d /ogromna ogromna.htm"
+                        % http_port)
+            huge = q.wait_for("tresc ", timeout=180)
+            check("plik ponad 268 KiB pobrany w calosci (%d B)"
+                  % len(HUGE_PAGE),
+                  "tresc %d B" % len(HUGE_PAGE) in huge)
+
+            q.type_line("fls")
+            listing = q.wait_for("ogromna.htm", timeout=15)
+            check("zapisany na PFS z pelnym rozmiarem",
+                  "ogromna.htm  (%d B)" % len(HUGE_PAGE) in listing)
+
+            q.type_line("run sh")
+            q.wait_for("ush:/", timeout=20)
+            q.type_line("cat ogromna.htm | wc")
+            back = q.wait_for("bajtow=", timeout=180)
+            check("odczyt przez blok podwojnie posredni oddaje te same dane",
+                  "wierszy=6500 bajtow=%d" % len(HUGE_PAGE) in back)
+            q.type_line("exit")
+            q.wait_for("ush: pa!", timeout=20)
 
             # HTTP/1.1: przekierowanie 302 i tresc w kawalkach (chunked) -
             # tak odpowiada wiekszosc prawdziwych serwerow

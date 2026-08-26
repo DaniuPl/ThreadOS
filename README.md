@@ -28,7 +28,7 @@ ProtonOS/
 │   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
 │   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
 │   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, IDENTIFY)
-│   ├── fs.c            # PFS3 - bloki 1 KiB z bitmapy, i-węzły, katalogi
+│   ├── fs.c            # PFS3 - bloki 1 KiB z bitmapy, i-węzły (do 64 MiB)
 │   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
 │   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
 │   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
@@ -187,8 +187,9 @@ klikalne** - wyróżnione kolorem, klik idzie za adresem z `<a href>`.
 rozpoznaje jego pojemność przez ATA IDENTIFY i formatuje pusty dysk przy
 pierwszym starcie. Pliki zostają na nim między uruchomieniami, a `df`
 pokazuje zajętość. PFS3 przydziela bloki po 1 KiB z bitmapy: 64 i-węzły,
-nazwy do 63 znaków, do 268 KiB na plik (12 bloków bezpośrednich + blok
-pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
+nazwy do 63 znaków i do **64 MiB na plik** (12 bloków bezpośrednich, blok
+pośredni i blok podwójnie pośredni) - czyli tyle, ile zmieści się na
+obrazie dysku.
 
 ## Jak to działa
 
@@ -370,3 +371,6 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       kolorem i klikalne (adresy względne i bezwzględne), rozdzielanie
       tekstu na granicy znaczników blokowych, pasek adresu odświeżany
       po przejściu za odnośnikiem
+- [x] PFS3: blok podwójnie pośredni - sufit rozmiaru pliku rośnie
+      z 268 KiB do 64 MiB (test pobiera z sieci 400 KB prosto na dysk
+      i czyta je z powrotem przez potok)

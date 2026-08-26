@@ -4,14 +4,17 @@
 #include <stdint.h>
 
 /* PFS3: bloki po 1 KiB przydzielane z bitmapy, 64 i-wezly, dluzsze nazwy.
-   Plik moze miec 12 blokow bezposrednich + blok posredni (256 wskaznikow),
-   czyli 268 KiB - dosc, by trzymac na dysku strony sciagniete z sieci. */
+   Plik ma 12 blokow bezposrednich, blok posredni (256 wskaznikow) i blok
+   podwojnie posredni (256 x 256) - czyli do 64 MiB, wiecej niz mieszcza
+   sie na typowym obrazie dysku. */
 #define FS_NAME_MAX  63
 #define FS_MAX_FILES 64
 #define FS_BLOCK     1024u
 #define FS_DIRECT    12
 #define FS_INDIRECT  (FS_BLOCK / 4)          /* wskaznikow w bloku posrednim */
-#define FS_MAX_SIZE  ((FS_DIRECT + FS_INDIRECT) * FS_BLOCK)   /* 268 KiB */
+#define FS_DINDIRECT (FS_INDIRECT * FS_INDIRECT)   /* przez blok podwojny */
+#define FS_MAX_SIZE  ((uint32_t)(FS_DIRECT + FS_INDIRECT + FS_DINDIRECT) \
+                      * FS_BLOCK)                   /* ~64 MiB */
 
 #define FS_ROOT (-1)              /* katalog glowny (wirtualny i-wezel) */
 

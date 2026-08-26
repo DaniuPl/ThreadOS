@@ -11,8 +11,8 @@
  *   bloki 5..12   - tablica i-wezlow (64 x 128 B)
  *   bloki 13..    - dane
  *
- * Plik ma 12 blokow bezposrednich i jeden blok posredni (256 wskaznikow),
- * czyli do 268 KiB. Katalogi to i-wezly typu DIR; kazdy i-wezel pamieta
+ * Plik ma 12 blokow bezposrednich, blok posredni (256 wskaznikow) i blok
+ * podwojnie posredni (256 blokow po 256 wskaznikow), czyli do 64 MiB. Katalogi to i-wezly typu DIR; kazdy i-wezel pamieta
  * slot rodzica (FS_ROOT = -1 dla korzenia). Sciezki rozwiazuje sie
  * chodzeniem po komponentach ("." i ".." obslugiwane).
  *
@@ -51,7 +51,7 @@ struct inode {
     int16_t parent;               /* 2 B: slot rodzica, -1 = root */
     uint32_t direct[FS_DIRECT];   /* 48 B: numery blokow */
     uint32_t indirect;            /* 4 B: blok ze wskaznikami (0 = brak) */
-    uint8_t reserved[4];
+    uint32_t dindirect;           /* 4 B: blok blokow ze wskaznikami */
 } __attribute__((packed));        /* 128 B -> 8 i-wezlow na blok */
 
 struct superblock {
@@ -60,6 +60,10 @@ struct superblock {
     uint32_t nblocks;             /* ile blokow obejmuje bitmapa */
     uint32_t data_start;
 } __attribute__((packed));
+
+/* Uklad na dysku zalezy od rozmiaru i-wezla - niech kompilator pilnuje */
+_Static_assert(sizeof(struct inode) == INODE_SIZE,
+               "i-wezel musi miec dokladnie INODE_SIZE bajtow");
 
 static int ready;
 static struct inode inodes[FS_MAX_FILES];
@@ -169,14 +173,31 @@ static void inode_free_blocks(struct inode *in)
             in->direct[i] = 0;
         }
     }
+    static uint32_t ptrs[FS_INDIRECT];
+    static uint32_t ptrs2[FS_INDIRECT];
+
     if (in->indirect) {
-        static uint32_t ptrs[FS_INDIRECT];
         if (block_read(in->indirect, ptrs) == 0)
             for (uint32_t i = 0; i < FS_INDIRECT; i++)
                 if (ptrs[i])
                     block_free(ptrs[i]);
         block_free(in->indirect);
         in->indirect = 0;
+    }
+    if (in->dindirect) {
+        if (block_read(in->dindirect, ptrs) == 0) {
+            for (uint32_t i = 0; i < FS_INDIRECT; i++) {
+                if (!ptrs[i])
+                    continue;
+                if (block_read(ptrs[i], ptrs2) == 0)
+                    for (uint32_t j = 0; j < FS_INDIRECT; j++)
+                        if (ptrs2[j])
+                            block_free(ptrs2[j]);
+                block_free(ptrs[i]);
+            }
+        }
+        block_free(in->dindirect);
+        in->dindirect = 0;
     }
     in->size = 0;
 }
@@ -192,29 +213,65 @@ static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
     }
 
     n -= FS_DIRECT;
-    if (n >= FS_INDIRECT)
-        return 0;                          /* poza sufitem rozmiaru pliku */
-
-    if (!in->indirect) {
-        if (!alloc)
-            return 0;
-        in->indirect = block_alloc();
-        if (!in->indirect)
-            return 0;
-    }
 
     static uint32_t ptrs[FS_INDIRECT];
-    if (block_read(in->indirect, ptrs) < 0)
-        return 0;
-    if (!ptrs[n]) {
+    static uint32_t ptrs2[FS_INDIRECT];
+
+    if (n < FS_INDIRECT) {               /* blok posredni */
+        if (!in->indirect) {
+            if (!alloc)
+                return 0;
+            in->indirect = block_alloc();
+            if (!in->indirect)
+                return 0;
+        }
+        if (block_read(in->indirect, ptrs) < 0)
+            return 0;
+        if (!ptrs[n]) {
+            if (!alloc)
+                return 0;
+            ptrs[n] = block_alloc();
+            if (!ptrs[n])
+                return 0;
+            block_write(in->indirect, ptrs);
+        }
+        return ptrs[n];
+    }
+
+    n -= FS_INDIRECT;                    /* blok podwojnie posredni */
+    if (n >= (uint32_t)FS_DINDIRECT)
+        return 0;                        /* poza sufitem rozmiaru pliku */
+
+    uint32_t hi = n / FS_INDIRECT, lo = n % FS_INDIRECT;
+
+    if (!in->dindirect) {
         if (!alloc)
             return 0;
-        ptrs[n] = block_alloc();
-        if (!ptrs[n])
+        in->dindirect = block_alloc();
+        if (!in->dindirect)
             return 0;
-        block_write(in->indirect, ptrs);
     }
-    return ptrs[n];
+    if (block_read(in->dindirect, ptrs) < 0)
+        return 0;
+    if (!ptrs[hi]) {
+        if (!alloc)
+            return 0;
+        ptrs[hi] = block_alloc();
+        if (!ptrs[hi])
+            return 0;
+        block_write(in->dindirect, ptrs);
+    }
+    if (block_read(ptrs[hi], ptrs2) < 0)
+        return 0;
+    if (!ptrs2[lo]) {
+        if (!alloc)
+            return 0;
+        ptrs2[lo] = block_alloc();
+        if (!ptrs2[lo])
+            return 0;
+        block_write(ptrs[hi], ptrs2);
+    }
+    return ptrs2[lo];
 }
 
 /* --- start i formatowanie --------------------------------------------- */
