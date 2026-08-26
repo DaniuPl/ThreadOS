@@ -149,6 +149,52 @@ static inline void bn_mont_mul(struct bignum *out, const struct bignum *a,
         bn_sub(out, m);
 }
 
+/* a = a + b (mod nic - czysta suma; zaklada zapas na przeniesienie) */
+static inline void bn_add_raw(struct bignum *a, const struct bignum *b)
+{
+    int len = a->len > b->len ? a->len : b->len;
+    uint64_t carry = 0;
+
+    for (int i = 0; i < len; i++) {
+        uint64_t ai = (i < a->len) ? a->n[i] : 0;
+        uint64_t bi = (i < b->len) ? b->n[i] : 0;
+        uint64_t cur = ai + bi + carry;
+        a->n[i] = (uint32_t)cur;
+        carry = cur >> 32;
+    }
+    a->len = len;
+    if (carry && a->len < BN_MAX_LIMBS)
+        a->n[a->len++] = (uint32_t)carry;
+}
+
+/* Dodawanie i odejmowanie modulo (wartosci musza byc juz zredukowane).
+   Wynik powstaje w kopii roboczej, bo wolajacy czesto podaje ten sam
+   obiekt jako wynik i argument (np. fp_add(&a, &b, &a)) - zapis wprost
+   do 'out' zniszczylby wtedy drugi argument. */
+static inline void bn_add_mod(struct bignum *out, const struct bignum *a,
+                              const struct bignum *b, const struct bignum *m)
+{
+    struct bignum t = *a, u = *b;
+
+    bn_add_raw(&t, &u);
+    if (bn_cmp(&t, m) >= 0)
+        bn_sub(&t, m);
+    *out = t;
+}
+
+static inline void bn_sub_mod(struct bignum *out, const struct bignum *a,
+                              const struct bignum *b, const struct bignum *m)
+{
+    struct bignum t = *a, u = *b;
+
+    if (bn_cmp(&t, &u) < 0) {            /* pozycz modulus */
+        struct bignum mm = *m;
+        bn_add_raw(&t, &mm);
+    }
+    bn_sub(&t, &u);
+    *out = t;
+}
+
 /* Potegowanie modularne: out = base^exp mod m (wykladnik 32-bitowy) */
 static inline int bn_modexp(struct bignum *out, const struct bignum *base,
                             uint32_t exp, const struct bignum *m)
@@ -205,6 +251,74 @@ static inline int bn_modexp(struct bignum *out, const struct bignum *base,
 
     bn_mont_mul(out, &acc, &one, m, m_inv);   /* powrot z postaci Montgomery'ego */
     return 0;
+}
+
+/* Potegowanie z wykladnikiem dowolnej dlugosci (big-endian).
+   Potrzebne do odwrotnosci modulo w ciele krzywej: a^(p-2). */
+static inline int bn_modexp_bytes(struct bignum *out, const struct bignum *base,
+                                  const uint8_t *exp, uint32_t explen,
+                                  const struct bignum *m)
+{
+    struct bignum r2, x, acc, one;
+
+    if (m->len == 0 || !(m->n[0] & 1))
+        return -1;
+
+    uint32_t m_inv = bn_inv32(m->n[0]);
+    int n = m->len;
+
+    bn_zero(&r2);
+    r2.len = 1;
+    r2.n[0] = 1;
+    for (int i = 0; i < 64 * n; i++) {
+        uint32_t carry = 0;
+        for (int j = 0; j < r2.len; j++) {
+            uint32_t v = r2.n[j];
+            r2.n[j] = (v << 1) | carry;
+            carry = v >> 31;
+        }
+        if (carry && r2.len < BN_MAX_LIMBS)
+            r2.n[r2.len++] = carry;
+        if (bn_cmp(&r2, m) >= 0)
+            bn_sub(&r2, m);
+    }
+
+    bn_mont_mul(&x, base, &r2, m, m_inv);
+
+    bn_zero(&one);
+    one.len = 1;
+    one.n[0] = 1;
+    bn_mont_mul(&acc, &one, &r2, m, m_inv);
+
+    int started = 0;
+    for (uint32_t i = 0; i < explen; i++) {
+        for (int b = 7; b >= 0; b--) {
+            if (started)
+                bn_mont_mul(&acc, &acc, &acc, m, m_inv);
+            if ((exp[i] >> b) & 1) {
+                if (started) {
+                    bn_mont_mul(&acc, &acc, &x, m, m_inv);
+                } else {
+                    acc = x;
+                    started = 1;
+                }
+            }
+        }
+    }
+    if (!started) {                      /* wykladnik zerowy -> 1 */
+        bn_zero(out);
+        out->len = 1;
+        out->n[0] = 1;
+        return 0;
+    }
+
+    bn_mont_mul(out, &acc, &one, m, m_inv);
+    return 0;
+}
+
+static inline int bn_is_zero(const struct bignum *a)
+{
+    return a->len == 0;
 }
 
 #endif

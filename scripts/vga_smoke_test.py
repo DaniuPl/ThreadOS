@@ -112,9 +112,10 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
 
 
 CERT_DER = None          # certyfikat serwera HTTPS (do magazynu zaufania)
+CERT_DER_EC = None       # to samo, ale na krzywej P-256
 
 
-def make_test_cert(dirpath):
+def make_test_cert(dirpath, ec=False):
     """Certyfikat samopodpisany dla protonos.test: SubjectAltName z nazwa
     i wieloznacznikiem, flaga CA (moze wiec sluzyc tez za korzen
     zaufania) i dziesiecioletnia waznosc, zeby obejmowala ustalony zegar
@@ -122,12 +123,15 @@ def make_test_cert(dirpath):
     testuje sie TLS."""
     import subprocess
 
-    certfile = os.path.join(dirpath, "cert.pem")
-    keyfile = os.path.join(dirpath, "key.pem")
-    derfile = os.path.join(dirpath, "cert.der")
+    tag = "ec" if ec else "rsa"
+    certfile = os.path.join(dirpath, "cert-%s.pem" % tag)
+    keyfile = os.path.join(dirpath, "key-%s.pem" % tag)
+    derfile = os.path.join(dirpath, "cert-%s.der" % tag)
 
+    keyargs = (["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1"]
+               if ec else ["-newkey", "rsa:2048"])
     subprocess.run(
-        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", keyfile,
+        ["openssl", "req", "-x509"] + keyargs + ["-keyout", keyfile,
          "-out", certfile, "-days", "3650", "-nodes",
          "-subj", "/CN=protonos.test",
          "-addext", "subjectAltName=DNS:protonos.test,DNS:*.protonos.test"],
@@ -140,19 +144,23 @@ def make_test_cert(dirpath):
         return certfile, keyfile, f.read()
 
 
-def start_https_server():
+def start_https_server(ec=False):
     """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
-    locie. Test nie potrzebuje dzieki temu niczego z zewnatrz.
-    Zwraca (port, stop) albo (None, stop), gdy brakuje bibliotek."""
-    global CERT_DER
+    locie - z kluczem RSA albo na krzywej P-256. Test nie potrzebuje
+    dzieki temu niczego z zewnatrz.
+    Zwraca (port, stop) albo (None, stop), gdy brakuje openssl-a."""
+    global CERT_DER, CERT_DER_EC
     import ssl
 
     tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
     try:
-        certfile, keyfile, der = make_test_cert(tmpdir)
+        certfile, keyfile, der = make_test_cert(tmpdir, ec)
     except BaseException:                # brak openssl-a to nie powod, by
         return None, lambda: None        # wywrocic caly test
-    CERT_DER = der
+    if ec:
+        CERT_DER_EC = der
+    else:
+        CERT_DER = der
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -200,6 +208,14 @@ def start_http_server():
                     part = PAGE[i:i + 7]
                     self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
+                return
+
+            if self.path.startswith("/eccert") and CERT_DER_EC:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(CERT_DER_EC)))
+                self.end_headers()
+                self.wfile.write(CERT_DER_EC)
                 return
 
             if self.path.endswith(".der") and CERT_DER:
@@ -862,7 +878,34 @@ def main():
                     check("tresc pobrana po zweryfikowanym TLS",
                           "HTTP 200, tresc %d B" % len(PAGE) in ver)
 
-                    # 4. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
+                    # 4. Serwer z certyfikatem na krzywej P-256: caly
+                    #    lancuch i CertificateVerify ida przez ECDSA
+                    ec_port, ec_stop = start_https_server(ec=True)
+                    if ec_port is not None:
+                        try:
+                            q.type_line("clear")
+                            q.type_line("run httpget 10.0.2.2 %d /eccert.der "
+                                        "roots.der" % http_port)
+                            q.wait_for("tresc ", timeout=30)
+                            q.type_line("clear")
+                            q.type_line("run httpget https://protonos.test %d /"
+                                        % ec_port)
+                            ecres = q.wait_for("tresc ", timeout=90)
+                            check("certyfikat na krzywej P-256 sprawdzony "
+                                  "(ECDSA)",
+                                  "certyfikat sprawdzony" in ecres)
+                            check("tresc pobrana po TLS z kluczem EC",
+                                  "HTTP 200, tresc %d B" % len(PAGE) in ecres)
+                        finally:
+                            ec_stop()
+
+                        # wroc do magazynu z certyfikatem RSA
+                        q.type_line("clear")
+                        q.type_line("run httpget 10.0.2.2 %d /cert.der "
+                                    "roots.der" % http_port)
+                        q.wait_for("tresc ", timeout=30)
+
+                    # 5. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
                     #    wiec polaczenie ma zostac zerwane
                     q.type_line("clear")
                     q.type_line("run httpget https://10.0.2.2 %d /" % https_port)

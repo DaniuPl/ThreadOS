@@ -5,14 +5,16 @@
  * Certyfikat jest samopodpisany, wiec do weryfikacji wystarczy klucz,
  * ktory sam w sobie niesie - nie trzeba zadnego magazynu zaufania.
  *
- * Dodatkowo: podpis w schemacie PSS (tego wymaga TLS 1.3) oraz proba
- * podmiany bajtu - podpis musi wtedy odpasc.
+ * Dodatkowo: podpis w schemacie PSS (tego wymaga TLS 1.3), to samo dla
+ * certyfikatu na krzywej P-256 (ECDSA) oraz proba podmiany bajtu -
+ * podpis musi wtedy odpasc.
  */
 
 #include "usys.h"
 #include "usha256.h"
 #include "ursa.h"
 #include "ux509.h"
+#include "uecdsa.h"
 #include "certdata.h"
 
 static int failures;
@@ -103,6 +105,35 @@ void _start(void)
     } else {
         print_str("      ", "certyfikat bez SubjectAltName (stary styl)");
     }
+
+    /* --- certyfikat na krzywej P-256 --- */
+    struct x509_cert ec;
+    result("rozbior certyfikatu ECDSA",
+           x509_parse(&ec, ec_cert_der, sizeof(ec_cert_der)) == 0);
+    result("klucz na krzywej P-256 rozpoznany",
+           ec.key_type == X509_KEY_EC && ec.ec_p256 && ec.ec_point_len == 65);
+    result("algorytm podpisu: ECDSA + SHA-256",
+           ec.sig_alg == X509_ALG_ECDSA_SHA256);
+
+    uint32_t t0 = sys_getticks();
+    sha256(ec.tbs, ec.tbs_len, hash);
+    result("podpis wlasny certyfikatu (ECDSA P-256)",
+           ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec.sig,
+                            ec.sig_len));
+    uint32_t t1 = sys_getticks();
+    print("      sprawdzenie podpisu ECDSA zajelo ~");
+    print_dec((t1 - t0) * 10);
+    print(" ms\n");
+
+    hash[0] ^= 0x01;
+    result("ECDSA: zly skrot odrzucony",
+           !ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec.sig,
+                             ec.sig_len));
+
+    sha256(pss_msg, msglen, hash);
+    result("podpis ECDSA wiadomosci (osobny wektor)",
+           ecdsa_verify_der(ec.ec_point, ec.ec_point_len, hash, ec_sig,
+                            sizeof(ec_sig)));
 
     if (failures) {
         print("[cert] BLEDOW: ");

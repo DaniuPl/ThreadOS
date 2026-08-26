@@ -90,6 +90,7 @@ ProtonOS/
 │   ├── ubignum.h       # wielkie liczby (Montgomery) pod RSA
 │   ├── ursa.h          # podpisy RSA: PKCS#1 v1.5 i PSS
 │   ├── ux509.h         # parser certyfikatów X.509 (DER)
+│   ├── uecdsa.h        # ECDSA na krzywej P-256 (weryfikacja podpisów)
 │   ├── ucert.h         # weryfikacja łańcucha, dat i nazwy hosta
 │   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
 │   ├── httpget.c       # klient HTTP/HTTPS (na konsolę albo do pliku)
@@ -161,8 +162,8 @@ Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
 (`Transfer-Encoding: chunked`) i idzie za przekierowaniami 301/302/307/308,
 także względnymi. Adresy `https://` idą przez **TLS 1.3** (X25519 +
 ChaCha20-Poly1305) - działa to zarówno w `httpget`, jak i w przeglądarce.
-Certyfikat serwera jest **weryfikowany**, gdy na dysku leży magazyn
-zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
+Certyfikat serwera jest **weryfikowany** (podpisy RSA - PKCS#1 v1.5 i PSS -
+oraz ECDSA na krzywej P-256), gdy na dysku leży magazyn zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
 z `CertificateVerify`, łańcuch podpisów do zaufanego wystawcy, daty
 ważności i nazwa hosta. Bez tego pliku połączenie jest tylko szyfrowane -
 i program mówi to wprost, a przeglądarka pokazuje `TLS?` zamiast `TLS+`.
@@ -351,3 +352,7 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       z pliku `roots.der` na PFS (`run certtest`)
 - [x] Stos procesu urósł z 4 KiB do 32 KiB - RSA na 2048 bitach
       potrzebuje kilku kilobajtów na same liczby robocze
+- [x] ECDSA na krzywej NIST P-256: arytmetyka punktów w postaci Jacobiego
+      na tych samych wielkich liczbach co RSA, weryfikacja podpisów
+      w certyfikatach i w `CertificateVerify` (~80 ms na podpis) -
+      serwery z kluczem EC przestały być poza zasięgiem

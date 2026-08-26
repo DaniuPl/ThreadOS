@@ -17,6 +17,7 @@
 #include "usha256.h"
 #include "ursa.h"
 #include "ux509.h"
+#include "uecdsa.h"
 
 #define CERT_CHAIN_MAX 5
 #define CERT_ROOTS_MAX 8
@@ -87,10 +88,20 @@ static inline int cert_signed_by(const struct x509_cert *sub,
     if (!x509_name_match(sub->issuer, sub->issuer_len,
                          issuer->subject, issuer->subject_len))
         return 0;
-    if (issuer->key_type != X509_KEY_RSA || !issuer->mod)
-        return 0;
 
     sha256(sub->tbs, sub->tbs_len, hash);
+
+    if (issuer->key_type == X509_KEY_EC) {
+        if (!issuer->ec_p256 || !issuer->ec_point)
+            return 0;
+        if (sub->sig_alg != X509_ALG_ECDSA_SHA256)
+            return 0;
+        return ecdsa_verify_der(issuer->ec_point, issuer->ec_point_len, hash,
+                                sub->sig, sub->sig_len);
+    }
+
+    if (issuer->key_type != X509_KEY_RSA || !issuer->mod)
+        return 0;
 
     if (sub->sig_alg == X509_ALG_RSA_SHA256)
         return rsa_verify_pkcs1_sha256(issuer->mod, issuer->mod_len,
@@ -100,7 +111,7 @@ static inline int cert_signed_by(const struct x509_cert *sub,
         return rsa_verify_pss_sha256(issuer->mod, issuer->mod_len, issuer->exp,
                                      sub->sig, sub->sig_len, hash,
                                      issuer->mod_len * 8);
-    return 0;                            /* np. ECDSA - jeszcze nie umiemy */
+    return 0;                            /* inny algorytm - nie umiemy */
 }
 
 /* Sprawdza waznosc wedlug zegara */

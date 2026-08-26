@@ -34,6 +34,8 @@ struct x509_cert {
     int key_type;
     const uint8_t *mod;      uint32_t mod_len;    /* RSA: modulus */
     uint32_t exp;                                 /* RSA: wykladnik */
+    const uint8_t *ec_point; uint32_t ec_point_len; /* EC: 0x04||X||Y */
+    int ec_p256;                                  /* czy krzywa P-256 */
 
     char not_before[16], not_after[16];           /* YYYYMMDDHHMMSS */
 
@@ -228,6 +230,20 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     if (der_next(&kalg, kalg_end, &tag, &oid, &oidlen) < 0 || tag != 0x06)
         return -1;
 
+    /* Dla krzywych po identyfikatorze algorytmu idzie identyfikator
+       krzywej - interesuje nas tylko prime256v1 (NIST P-256) */
+    if (kalg < kalg_end) {
+        const uint8_t *curve;
+        uint32_t curvelen;
+        uint8_t ctag;
+        static const uint8_t oid_p256[] =
+            {0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07};
+        if (der_next(&kalg, kalg_end, &ctag, &curve, &curvelen) == 0 &&
+            ctag == 0x06 &&
+            der_oid_is(curve, curvelen, oid_p256, sizeof(oid_p256)))
+            c->ec_p256 = 1;
+    }
+
     static const uint8_t oid_rsa[] =
         {0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x01};
     static const uint8_t oid_ec[] = {0x2a,0x86,0x48,0xce,0x3d,0x02,0x01};
@@ -241,6 +257,11 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     if (der_next(&spki, spki_end, &tag, &bits, &bitlen) < 0 || tag != 0x03 ||
         bitlen < 2)
         return -1;
+
+    if (c->key_type == X509_KEY_EC) {    /* punkt: 0x04 || X || Y */
+        c->ec_point = bits + 1;
+        c->ec_point_len = bitlen - 1;
+    }
 
     if (c->key_type == X509_KEY_RSA) {   /* SEQUENCE { modulus, exponent } */
         const uint8_t *k = bits + 1, *k_end = bits + bitlen;

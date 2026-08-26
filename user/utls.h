@@ -297,10 +297,19 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
     sha256(tosign, m, hash);
 
     const struct x509_cert *leaf = &chain[0];
-    if (leaf->key_type != X509_KEY_RSA)
-        return CERT_ERR_ALG;             /* ECDSA jeszcze nie umiemy */
-
     int ok = 0;
+
+    if (leaf->key_type == X509_KEY_EC) {
+        if (alg != 0x0403 || !leaf->ec_p256 || !leaf->ec_point)
+            return CERT_ERR_ALG;         /* ecdsa_secp256r1_sha256 */
+        if (!ecdsa_verify_der(leaf->ec_point, leaf->ec_point_len, hash,
+                              sig, siglen))
+            return CERT_ERR_SIGNATURE;
+        return cert_verify_chain(chain, n, roots, roots_len, host);
+    }
+
+    if (leaf->key_type != X509_KEY_RSA)
+        return CERT_ERR_ALG;
     if (alg == 0x0804)                   /* rsa_pss_rsae_sha256 */
         ok = rsa_verify_pss_sha256(leaf->mod, leaf->mod_len, leaf->exp,
                                    sig, siglen, hash, leaf->mod_len * 8);
