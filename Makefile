@@ -4,6 +4,7 @@
 #   make        - buduje protonos.bin (jądro Multiboot)
 #   make iso    - buduje bootowalne ISO (wymaga grub-mkrescue + xorriso)
 #   make run    - uruchamia jądro w QEMU (wymaga qemu-system-i386)
+#   make fuzz   - sprawdza parsery na uszkodzonych danych (sanitizery)
 #   make clean  - usuwa pliki wynikowe
 
 CC      := gcc
@@ -88,7 +89,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/dhcp.o \
         $(BUILD)/tcp.o
 
-.PHONY: all iso run run-iso test clean
+.PHONY: all iso run run-iso test fuzz clean
 
 all: $(KERNEL) $(INITRD)
 
@@ -178,6 +179,12 @@ run-iso: iso
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
 test: $(KERNEL) $(INITRD)
 	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
+
+# Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez
+# sanitizery na hoscie, karmiac uszkodzonymi wejsciami (certyfikaty,
+# HTML, HTTP oraz ramki trafiajace do net.c i tcp.c w jadrze).
+fuzz:
+	python3 scripts/fuzz_parsers.py 500
 
 clean:
 	rm -rf $(BUILD)

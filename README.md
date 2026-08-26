@@ -82,6 +82,7 @@ ProtonOS/
 │   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
 │   ├── udns.h          # klient DNS dla programów (wspólny dla nslookup/gweb)
 │   ├── uhttp.h         # klient HTTP/1.1: chunked, przekierowania, URL-e
+│   ├── uhtml.h         # HTML -> tekst: znaczniki, encje, odnośniki, wiersze
 │   ├── usha256.h       # SHA-256, HMAC, HKDF (fundament pod TLS 1.3)
 │   ├── uchacha.h       # ChaCha20, Poly1305, AEAD (RFC 8439)
 │   ├── ux25519.h       # X25519 - wymiana kluczy na Curve25519
@@ -105,9 +106,15 @@ ProtonOS/
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
+├── tests/
+│   └── fuzz/           # sprawdzanie parserów na uszkodzonych danych
+│       ├── harness.c   # parsery ring 3 (X.509, HTML, HTTP, podpisy)
+│       ├── kernel_harness.c  # ścieżka pakietów: net.c + tcp.c
+│       └── kstub/      # zaślepki sprzętu i schedulera dla kodu jądra
 ├── scripts/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
 │   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
+│   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO
@@ -127,6 +134,7 @@ ProtonOS/
 make          # buduje build/protonos.bin
 make run      # uruchamia jądro w QEMU (najprostsza droga)
 make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
+make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
 make iso      # buduje bootowalne ISO z GRUB-em
 make run-iso  # uruchamia ISO w QEMU
 make clean
@@ -379,3 +387,8 @@ obrazie dysku.
       sparametryzowana (jeden komplet wzorów dla P-256 i P-384), stałe
       krzywych i tablice SHA-512 generowane, a nie przepisywane ręcznie;
       `CertificateVerify` przyjmuje `ecdsa_secp384r1_sha384`
+- [x] Odporność parserów: `uhtml.h` (HTML -> tekst) wydzielony z
+      przeglądarki i obwarowany granicami, a `make fuzz` przepuszcza
+      przez sanitizery uszkodzone certyfikaty, HTML, odpowiedzi HTTP,
+      podpisy DER i **ramki sieciowe trafiające do jądra** (net.c i tcp.c
+      kompilowane na hoście z zaślepkami sprzętu)

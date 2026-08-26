@@ -179,6 +179,11 @@ static inline void fp_inv(const struct ec_curve *c, struct bignum *o,
                           const struct bignum *a)
 {
     uint8_t e[64];
+
+    if (c->size == 0 || c->size > sizeof(e)) {   /* parametry z kosmosu */
+        bn_zero(o);
+        return;
+    }
     for (uint32_t i = 0; i < c->size; i++)
         e[i] = c->p_bytes[i];
     e[c->size - 1] -= 2;
@@ -388,6 +393,8 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
 
     /* w = s^-1 mod n */
     uint8_t nm2[64];
+    if (c->size == 0 || c->size > sizeof(nm2))
+        return 0;
     for (uint32_t i = 0; i < c->size; i++)
         nm2[i] = c->n_bytes[i];
     nm2[c->size - 1] -= 2;
