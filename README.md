@@ -18,7 +18,7 @@ ProtonOS/
 │   ├── isr.c           # wspólny handler: wyjątki CPU i dispatch IRQ
 │   ├── pic.c           # remapowanie PIC 8259, maskowanie, EOI
 │   ├── pit.c           # timer PIT (100 Hz), licznik uptime
-│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII
+│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII, strzałki/PgUp
 │   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
 │   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
 │   ├── syscall.c       # syscalle int 0x80 (m.in. gniazda UDP) + walidacja
@@ -177,9 +177,11 @@ nasłuchuje na porcie 5555, który `make run` wystawia na hosta - można się
 połączyć zwykłym `nc localhost 5555`. Stan połączeń pokazuje `netstat`.
 
 Na pulpicie jest też **przeglądarka** (`gweb`, ikona `Web` albo wpis w menu):
-wpisujesz adres w postaci `ip[:port][/ścieżka]`, a program pobiera stronę po
-TCP, obdziera ją ze znaczników HTML, rysuje tekst w oknie i zapisuje treść
-na dysk jako `strona.htm`.
+wpisujesz adres w postaci `host[:port][/ścieżka]` (albo `https://...`),
+a program rozwiązuje nazwę, pobiera stronę, obdziera ją ze znaczników HTML,
+rysuje tekst w oknie i zapisuje treść na dysk jako `strona.htm`. Stronę
+przewija się strzałkami i PgUp/PgDn (Home wraca na górę), a **odnośniki są
+klikalne** - wyróżnione kolorem, klik idzie za adresem z `<a href>`.
 
 `make run` dołącza obraz dysku `build/disk.img` (16 MiB, jako `-hda`); jądro
 rozpoznaje jego pojemność przez ATA IDENTIFY i formatuje pusty dysk przy
@@ -362,3 +364,9 @@ pośredni) - strona ściągnięta z sieci mieści się bez cięcia.
       systemu (skrypt `mkcaroots.py` odświeża je z zasobu hosta), do tego
       własne korzenie z pliku `roots.der`; weryfikacja jest domyślnie
       wymagana dla `https://` (`httpget -k` ją pomija)
+- [x] Klawisze rozszerzone (strzałki, PgUp/PgDn, Home/End) w sterowniku
+      klawiatury - dostarczane programom jako własne kody sterujące
+- [x] Przeglądarka: przewijanie strony, odnośniki `<a href>` wyróżnione
+      kolorem i klikalne (adresy względne i bezwzględne), rozdzielanie
+      tekstu na granicy znaczników blokowych, pasek adresu odświeżany
+      po przejściu za odnośnikiem

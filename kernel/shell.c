@@ -376,6 +376,8 @@ static void shell_on_char(char c)
         }
         return;
     }
+    if (c < 0x20)                       /* strzalki i spolka - nie dla shella */
+        return;
     if (line_len < LINE_MAX - 1) {
         line[line_len++] = c;
         printk("%c", c);

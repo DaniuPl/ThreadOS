@@ -48,6 +48,17 @@
 
 #define FS_NAME_MAX  63
 
+/* Klawisze bez odpowiednika w ASCII - musza zgadzac sie z
+   kernel/include/keyboard.h */
+#define KEY_UP    0x11
+#define KEY_DOWN  0x12
+#define KEY_LEFT  0x13
+#define KEY_RIGHT 0x14
+#define KEY_PGUP  0x15
+#define KEY_PGDN  0x16
+#define KEY_HOME  0x17
+#define KEY_END   0x18
+
 struct sysinfo {
     uint32_t ram_kib;
     uint32_t used_kib;

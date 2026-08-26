@@ -1,7 +1,9 @@
 /* Sterownik klawiatury PS/2 (scancode set 1)
  *
- * Na razie najprostsza możliwa wersja: każde wciśnięcie klawisza
- * jest tłumaczone na ASCII i echo'wane na ekran.
+ * Każde wciśnięcie klawisza jest tłumaczone na ASCII i przekazywane
+ * dalej. Klawisze bez odpowiednika w ASCII - strzałki, PgUp/PgDn,
+ * Home/End - przychodzą jako scancode poprzedzony bajtem 0xE0
+ * i zamieniane są na własne kody sterujące (KEY_* w keyboard.h).
  */
 
 #include <stdint.h>
@@ -16,6 +18,7 @@
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
 #define SC_RELEASED 0x80
+#define SC_EXTENDED 0xE0
 
 /* Mapa scancode -> ASCII dla układu US (indeks = scancode) */
 static const char keymap[128] = {
@@ -34,7 +37,24 @@ static const char keymap_shift[128] = {
     0, '*', 0, ' ',
 };
 
+/* Scancode rozszerzony (po 0xE0) -> nasz kod sterujacy */
+static char extended_key(uint8_t scancode)
+{
+    switch (scancode) {
+    case 0x48: return KEY_UP;
+    case 0x50: return KEY_DOWN;
+    case 0x4B: return KEY_LEFT;
+    case 0x4D: return KEY_RIGHT;
+    case 0x49: return KEY_PGUP;
+    case 0x51: return KEY_PGDN;
+    case 0x47: return KEY_HOME;
+    case 0x4F: return KEY_END;
+    default:   return 0;
+    }
+}
+
 static int shift_pressed;
+static int extended_next;               /* poprzedni bajt to 0xE0 */
 static keyboard_char_handler_t on_char;
 
 /* Konsola dla procesow: gdy jakis proces czyta klawiature
@@ -101,6 +121,20 @@ static void keyboard_irq(struct regs *r)
 {
     (void)r;
     uint8_t scancode = inb(KBD_DATA_PORT);
+
+    if (scancode == SC_EXTENDED) {      /* prefiks klawisza rozszerzonego */
+        extended_next = 1;
+        return;
+    }
+    if (extended_next) {
+        extended_next = 0;
+        if (!(scancode & SC_RELEASED)) {
+            char c = extended_key(scancode);
+            if (c)
+                deliver(c);
+        }
+        return;
+    }
 
     if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
         shift_pressed = 1;
