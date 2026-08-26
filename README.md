@@ -392,3 +392,7 @@ obrazie dysku.
       przez sanitizery uszkodzone certyfikaty, HTML, odpowiedzi HTTP,
       podpisy DER i **ramki sieciowe trafiające do jądra** (net.c i tcp.c
       kompilowane na hoście z zaślepkami sprzętu)
+- [x] Shell jądra jako zwykły wątek: przerwanie klawiatury tylko wrzuca
+      znak do bufora kołowego i budzi wątek, więc komenda może spać,
+      czekać na sieć albo czytać dysk, a znaki wpisane w tym czasie nie
+      giną (`ping` i `dhcp` nie potrzebują już wątków-obejść)

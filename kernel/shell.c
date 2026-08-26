@@ -1,8 +1,11 @@
 /* Prosty shell jądra
  *
  * Buforuje znaki z klawiatury do końca linii i wykonuje komendę.
- * Działa w kontekście przerwania klawiatury - dla zabawkowego systemu
- * w zupełności wystarczy, dopóki komendy są krótkie.
+ * Shell jest zwykłym wątkiem jądra: przerwanie klawiatury tylko wrzuca
+ * znak do bufora kołowego i budzi wątek, a cała reszta - echo, edycja
+ * linii i wykonanie komendy - dzieje się już przy włączonych
+ * przerwaniach. Dzięki temu komenda może spać, czytać dysk albo czekać
+ * na sieć, nie blokując przy tym timera ani reszty systemu.
  */
 
 #include <stdint.h>
@@ -31,6 +34,13 @@
 
 static char line[LINE_MAX];
 static int line_len;
+
+/* Bufor kołowy między przerwaniem klawiatury a wątkiem shella.
+   Rozmiar musi być potęgą dwójki - indeksy liczymy modulo maską. */
+#define SHELL_BUF 128
+static char keybuf[SHELL_BUF];
+static uint32_t kb_head, kb_tail;
+static struct task *shell_waiter;   /* != NULL tylko gdy wątek śpi */
 
 static void prompt(void)
 {
@@ -239,23 +249,10 @@ static void cmd_write(char *args)
         printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
 }
 
-/* Ping czeka na odpowiedzi (task_sleep), a shell dziala w kontekscie
-   przerwania klawiatury - dlatego robota idzie do osobnego watku jadra. */
-static uint32_t ping_target;
-
-static void ping_thread(void *arg)
+static void cmd_dhcp(void)
 {
-    (void)arg;
-    net_ping(ping_target, 4);
-    shell_refresh();
-}
-
-static void dhcp_thread_cmd(void *arg)
-{
-    (void)arg;
     if (!dhcp_configure())
         printk("dhcp: brak odpowiedzi serwera\n");
-    shell_refresh();
 }
 
 static void cmd_dns(const char *arg)
@@ -271,6 +268,10 @@ static void cmd_dns(const char *arg)
     printk("\n");
 }
 
+/* Ping i DHCP czekaja na odpowiedzi (task_sleep). Kiedys shell dzialal
+   w kontekscie przerwania i nie wolno mu bylo spac - obie komendy szly
+   wiec do osobnych watkow. Teraz shell jest watkiem i po prostu czeka,
+   a znaki wpisane w miedzyczasie czekaja w buforze klawiatury. */
 static void cmd_ping(const char *arg)
 {
     uint32_t ip;
@@ -278,8 +279,7 @@ static void cmd_ping(const char *arg)
         printk("uzycie: ping <adres ip>, np. ping 10.0.2.2\n");
         return;
     }
-    ping_target = ip;
-    task_create("ping", ping_thread, 0);
+    net_ping(ip, 4);
 }
 
 static void run_command(char *cmd)
@@ -338,7 +338,7 @@ static void run_command(char *cmd)
     else if (!strcmp(cmd, "dns"))
         cmd_dns(arg);
     else if (!strcmp(cmd, "dhcp"))
-        task_create("dhcp", dhcp_thread_cmd, 0);
+        cmd_dhcp();
     else if (!strcmp(cmd, "ping"))
         cmd_ping(arg);
     else if (!strcmp(cmd, "gfx"))
@@ -359,7 +359,7 @@ static void run_command(char *cmd)
         printk("nieznana komenda: '%s' (wpisz 'help')\n", cmd);
 }
 
-static void shell_on_char(char c)
+static void shell_handle_char(char c)
 {
     if (c == '\n') {
         printk("\n");
@@ -394,9 +394,41 @@ void shell_refresh(void)
         printk("%s", line);
 }
 
+/* Kontekst przerwania klawiatury (IF=0): tylko odloz znak i obudz watek */
+static void shell_on_char(char c)
+{
+    if (kb_head - kb_tail < SHELL_BUF)
+        keybuf[kb_head++ & (SHELL_BUF - 1)] = c;
+    if (shell_waiter) {
+        task_unblock(shell_waiter);
+        shell_waiter = (struct task *)0;
+    }
+}
+
+/* Kontekst watku: czeka na znak z bufora */
+static char shell_getchar(void)
+{
+    uint32_t flags = irq_save();
+    while (kb_head == kb_tail) {
+        shell_waiter = task_current();
+        task_block();
+    }
+    char c = keybuf[kb_tail++ & (SHELL_BUF - 1)];
+    irq_restore(flags);
+    return c;
+}
+
+static void shell_thread(void *arg)
+{
+    (void)arg;
+    for (;;)
+        shell_handle_char(shell_getchar());
+}
+
 void shell_init(void)
 {
     keyboard_set_handler(shell_on_char);
     printk("\nProtonOS shell - wpisz 'help', by zobaczyc komendy.\n");
     prompt();
+    task_create("shell", shell_thread, 0);
 }

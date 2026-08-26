@@ -723,8 +723,10 @@ def main():
         q.type_line("ps")
         screen = q.screen()
         check("komenda 'ps' pokazuje watki",
-              "main (biezacy)" in screen and "demo-A" in screen
+              "main" in screen and "demo-A" in screen
               and "demo-B" in screen)
+        check("shell jest wlasnym watkiem (nie kontekst przerwania)",
+              "shell (biezacy)" in screen)
         check("zombie po watku C zostal sprzatniety",
               "demo-C" not in screen)
 
@@ -865,12 +867,20 @@ def main():
         check("ifconfig pokazuje brame", "brama 10.0.2.2" in ifc)
         check("ifconfig pokazuje serwer DNS z DHCP", "DNS 10.0.2.3" in ifc)
 
+        # Shell jest wlasnym watkiem: 'ping' spi w nim przez cztery sekundy,
+        # a komenda wpisana w miedzyczasie czeka w buforze klawiatury
+        # i wykonuje sie zaraz po nim. Dawniej shell dzialal w kontekscie
+        # przerwania, wiec spac nie mogl i ping szedl do osobnego watku.
         q.type_line("ping 10.0.2.2")
+        q.type_line("dns 10.0.2.3")     # pisanie na zapas w trakcie pinga
         pong = q.wait_for("40 B od 10.0.2.2: seq=1", timeout=20)
         check("ping: odpowiedz ICMP echo od bramy", "40 B od 10.0.2.2" in pong)
         stats = q.wait_for("--- statystyki:", timeout=20)
         check("ping: wszystkie 4 pakiety wrocily",
               "wyslano 4, odebrano 4" in stats)
+        buffered = q.wait_for("serwer DNS ustawiony na", timeout=20)
+        check("znaki wpisane w trakcie komendy nie gina (bufor klawiatury)",
+              "serwer DNS ustawiony na 10.0.2.3" in buffered)
 
         q.type_line("arp")
         check("tablica ARP zna MAC bramy",
