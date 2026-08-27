@@ -50,6 +50,7 @@ ProtonOS/
 │   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
 │   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
 │   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
+│   ├── fbcon.c         # konsola tekstowa rysowana na buforze obrazu
 │   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── uhci.c          # kontroler USB: przesyłki sterujące i przerwaniowe
@@ -526,3 +527,15 @@ obrazie dysku.
       Bochs/QEMU, który istnieje wyłącznie na maszynie wirtualnej, więc
       gdy tryb ustawił loader, zostajemy przy nim (i dostajemy 1024x768
       zamiast 640x480)
+- [x] **Pierwszy krok na x86-64**: drugi obraz jądra (`make kernel64`)
+      wchodzi w tryb długi. GRUB zostawia nas w trybie chronionym 32-bit,
+      więc `boot64/boot64.S` sam układa tablice stron (pierwsze 4 GiB
+      stronami po 2 MiB - nie dla pamięci, tylko dlatego, że wysoko leżą
+      rejestry urządzeń i bufor obrazu), włącza PAE, ustawia bit LME
+      w EFER, włącza stronicowanie i skacze daleko do segmentu z bitem L.
+      Procesor sam potwierdza wynik: bit LMA w EFER ustawia on, nie my.
+      Najważniejsze jest to, czego w tym obrazie **nie ma** - żadnej
+      kopii kodu: wypisywanie, konsola na buforze obrazu, znaczniki
+      Multiboota 2 i obsługa łańcuchów to te same pliki kompilowane
+      drugi raz, a cała różnica między trybami zamyka się w `io.h`
+      i w kilku rzutowaniach przez `uintptr_t`

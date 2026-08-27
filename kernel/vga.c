@@ -15,7 +15,7 @@
 #include "include/vga.h"
 #include "include/string.h"
 #include "include/task.h"
-#include "include/video.h"
+#include "include/fbcon.h"
 
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
@@ -58,7 +58,7 @@ static void put(struct console *c, size_t idx, uint16_t cell)
     if (c != &consoles[active])
         return;
     if (on_framebuffer)
-        video_console_cell((int)(idx % VGA_WIDTH), (int)(idx / VGA_WIDTH),
+        fbcon_cell((int)(idx % VGA_WIDTH), (int)(idx / VGA_WIDTH),
                            (char)(cell & 0xFF), (uint8_t)(cell >> 8));
     else
         vga_buffer[idx] = cell;
@@ -70,7 +70,7 @@ static void redraw(const struct console *c)
 {
     if (on_framebuffer) {
         for (size_t i = 0; i < VGA_CELLS; i++)
-            video_console_cell((int)(i % VGA_WIDTH), (int)(i / VGA_WIDTH),
+            fbcon_cell((int)(i % VGA_WIDTH), (int)(i / VGA_WIDTH),
                                (char)(c->cells[i] & 0xFF),
                                (uint8_t)(c->cells[i] >> 8));
     } else {
@@ -83,7 +83,7 @@ static void redraw(const struct console *c)
    zanim cokolwiek zostanie wypisane. */
 void console_use_framebuffer(void)
 {
-    if (video_console_enable())
+    if (fbcon_enable())
         on_framebuffer = 1;
 }
 

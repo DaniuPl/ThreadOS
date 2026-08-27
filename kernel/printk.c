@@ -28,7 +28,7 @@ static void kputs(const char *s)
         kputchar(*s++);
 }
 
-static void print_uint(uint32_t value, uint32_t base)
+static void print_uint(uintptr_t value, uint32_t base)
 {
     char buf[11]; /* max 10 cyfr dziesiętnych + NUL */
     static const char digits[] = "0123456789abcdef";
@@ -78,7 +78,7 @@ void printk(const char *fmt, ...)
             break;
         case 'p':
             kputs("0x");
-            print_uint((uint32_t)va_arg(args, void *), 16);
+            print_uint((uintptr_t)va_arg(args, void *), 16);
             break;
         case '%':
             kputchar('%');

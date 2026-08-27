@@ -96,9 +96,10 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/uhci.o \
         $(BUILD)/usbkbd.o \
         $(BUILD)/acpi.o \
-        $(BUILD)/mb2.o
+        $(BUILD)/mb2.o \
+        $(BUILD)/fbcon.o
 
-.PHONY: all iso run run-iso test fuzz clean
+.PHONY: all iso run run-iso test fuzz clean kernel64 run64
 
 all: $(KERNEL) $(INITRD)
 
@@ -167,6 +168,40 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    lazymem=$(BUILD)/user/lazymem.elf \
 	    swaptest=$(BUILD)/user/swaptest.elf
 
+# --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
+#
+# Drugi obraz, budowany z tych samych zrodel: rozne sa tylko wejscie
+# (boot64/boot64.S wchodzi w tryb dlugi) i szkielet kmain64. Reszta to
+# te same pliki kompilowane po raz drugi - roznice miedzy trybami
+# zamykaja sie w naglowku io.h i w kilku rzutowaniach.
+KERNEL64 := $(BUILD)/protonos64.bin
+CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
+            -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -O2 -g
+LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
+             -Wl,--build-id=none -Wl,--no-warn-rwx-segments
+
+SHARED64 := string serial printk mb2 fbcon vga
+OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/kmain64.o \
+          $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
+
+$(BUILD)/64:
+	mkdir -p $(BUILD)/64
+
+$(BUILD)/64/boot64.o: boot64/boot64.S | $(BUILD)/64
+	$(CC) -m64 -c $< -o $@
+
+$(BUILD)/64/kmain64.o: kernel64/kmain64.c $(KERNEL_HEADERS) | $(BUILD)/64
+	$(CC) $(CFLAGS64) -c $< -o $@
+
+$(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/64
+	$(CC) $(CFLAGS64) -c $< -o $@
+
+$(KERNEL64): $(OBJS64) linker64.ld
+	$(CC) $(LDFLAGS64) $(OBJS64) -o $@
+
+kernel64: $(KERNEL64)
+	@echo "Gotowe: $(KERNEL64) (tryb dlugi, ladowany przez GRUB-a)"
+
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.
 $(DISK): | $(BUILD)
@@ -206,8 +241,8 @@ run-iso: iso $(DISK)
 
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
-test: $(KERNEL) $(INITRD)
-	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD)
+test: $(KERNEL) $(INITRD) $(KERNEL64)
+	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD) $(KERNEL64)
 
 # Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez
 # sanitizery na hoscie, karmiac uszkodzonymi wejsciami (certyfikaty,

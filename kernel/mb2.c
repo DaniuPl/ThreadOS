@@ -89,7 +89,7 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
 {
     if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
         kind = "Multiboot 1";
-        return (const struct multiboot_info *)addr;
+        return (const struct multiboot_info *)(uintptr_t)addr;
     }
     if (magic != MULTIBOOT2_BOOTLOADER_MAGIC)
         return (const struct multiboot_info *)0;
@@ -101,12 +101,12 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
 
     /* Pierwsze osiem bajtow to calkowity rozmiar i pole zerowe;
        znaczniki zaczynaja sie zaraz za nimi */
-    uint32_t total = *(const uint32_t *)addr;
+    uint32_t total = *(const uint32_t *)(uintptr_t)addr;
     uint32_t pos = addr + 8;
     uint32_t end = addr + total;
 
     while (pos + sizeof(struct tag) <= end) {
-        const struct tag *t = (const struct tag *)pos;
+        const struct tag *t = (const struct tag *)(uintptr_t)pos;
         if (t->type == TAG_END || t->size < sizeof(struct tag))
             break;
 
@@ -121,7 +121,7 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
             if (nmods < MODS_MAX) {
                 mods[nmods].start = m->mod_start;
                 mods[nmods].end = m->mod_end;
-                mods[nmods].string = (uint32_t)m->string;
+                mods[nmods].string = (uint32_t)(uintptr_t)m->string;
                 mods[nmods].reserved = 0;
                 nmods++;
             }
@@ -137,7 +137,7 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
                 if (nmmap >= MMAP_MAX)
                     break;
                 const struct mmap_entry2 *e =
-                    (const struct mmap_entry2 *)(pos + o);
+                    (const struct mmap_entry2 *)(uintptr_t)(pos + o);
                 /* Starsza postac liczy rozmiar wpisu OD POLA za nim,
                    wiec kolejny lezy pod adresem +size+4 */
                 mmap[nmmap].size = sizeof(struct multiboot_mmap_entry) - 4;
@@ -181,11 +181,11 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
 
     if (nmods) {
         info.mods_count = nmods;
-        info.mods_addr = (uint32_t)mods;
+        info.mods_addr = (uint32_t)(uintptr_t)mods;
         info.flags |= MULTIBOOT_FLAG_MODS;
     }
     if (nmmap) {
-        info.mmap_addr = (uint32_t)mmap;
+        info.mmap_addr = (uint32_t)(uintptr_t)mmap;
         info.mmap_length = nmmap * sizeof(struct multiboot_mmap_entry);
         info.flags |= MULTIBOOT_FLAG_MMAP;
     }

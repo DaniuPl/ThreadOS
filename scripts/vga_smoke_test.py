@@ -37,6 +37,7 @@ import time
 
 KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/protonos.bin"
 INITRD = sys.argv[2] if len(sys.argv) > 2 else None
+KERNEL64 = sys.argv[3] if len(sys.argv) > 3 else None
 VGA_ADDR = 0xB8000
 VGA_BYTES = 80 * 25 * 2
 VIDEO_W = 320
@@ -386,10 +387,12 @@ def start_http_server():
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, usbkbd=False,
-                 cdrom=None, serial=None):
+                 cdrom=None, serial=None, qemu="qemu-system-i386"):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
-        cmd = ["qemu-system-i386",
+        # Jadro 64-bitowe potrzebuje procesora z trybem dlugim, a
+        # qemu-system-i386 takiego nie udaje
+        cmd = [qemu,
                "-display", "none", "-no-reboot",
                # Stala data RTC -> deterministyczny test komendy 'date'.
                # Musi byc pozniejsza niz chwila wystawienia certyfikatow
@@ -2612,6 +2615,69 @@ def main():
             shutil.rmtree(isodir, ignore_errors=True)
             if os.path.exists(iso):
                 os.unlink(iso)
+
+    # --- Jadro 64-bitowe (tryb dlugi) ------------------------------
+    # Ten sam kod, kompilowany drugi raz: wejscie wchodzi w tryb dlugi,
+    # a reszta - wypisywanie, konsola na buforze obrazu, odczyt
+    # znacznikow - to te same pliki, co w jadrze 32-bitowym.
+    print("--- jadro 64-bitowe (tryb dlugi) ---")
+    if KERNEL64 is None or not os.path.exists(KERNEL64):
+        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+    elif shutil.which("grub-mkrescue") is None:
+        print("POMINIETE: brak grub-mkrescue")
+    elif shutil.which("qemu-system-x86_64") is None:
+        print("POMINIETE: brak qemu-system-x86_64 (tryb dlugi)")
+    else:
+        d64 = tempfile.mkdtemp()
+        iso64 = tempfile.mktemp(suffix=".iso")
+        slog64 = tempfile.mktemp(suffix=".log")
+        try:
+            os.makedirs(d64 + "/boot/grub")
+            shutil.copy(KERNEL64, d64 + "/boot/protonos64.bin")
+            with open(d64 + "/boot/grub/grub.cfg", "w") as fh:
+                fh.write("set timeout=0\nset default=0\n"
+                         'menuentry "ProtonOS 64" {\n'
+                         "    multiboot2 /boot/protonos64.bin\n}\n")
+            made = subprocess.run(["grub-mkrescue", "-o", iso64, d64],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+            check("obraz ISO z jadrem 64-bitowym buduje sie", made)
+            if made:
+                q23 = Qemu(KERNEL, INITRD, cdrom=iso64, serial=slog64,
+                           qemu="qemu-system-x86_64")
+                try:
+                    out = q23.wait_serial("Tryb dlugi:", timeout=40)
+                    check("jadro startuje w trybie dlugim",
+                          "Jadro uruchomione w trybie dlugim" in out)
+                    # LMA ustawia sam procesor - to jego zdanie, nie nasze
+                    check("procesor potwierdza tryb dlugi (LMA=1)",
+                          "LMA=1" in out)
+                    check("wskazniki maja osiem bajtow",
+                          "wskaznik ma 8 bajtow" in out)
+                    check("mapa pamieci czytana tym samym kodem",
+                          re.search(r"Pamiec fizyczna: \d{5,} KiB RAM",
+                                    q23.wait_serial("Pamiec fizyczna",
+                                                    timeout=20)) is not None)
+                    check("bufor obrazu od loadera rozpoznany",
+                          re.search(r"Bufor obrazu: \d+x\d+",
+                                    q23.wait_serial("Bufor obrazu",
+                                                    timeout=20)) is not None)
+                    # I to samo na ekranie: konsola rysowana wlasnym kodem
+                    q23.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
+                    w, h, at = q23.screen_raw()
+                    x0, y0 = (w - 640) // 2, (h - 200) // 2
+                    lit = sum(1 for y in range(y0, y0 + 200)
+                              for x in range(x0, x0 + 640)
+                              if at(x, y) != (0, 0, 0))
+                    check(f"konsola 64-bitowa rysuje na buforze obrazu "
+                          f"({lit} pikseli)", lit > 2000)
+                finally:
+                    q23.close()
+        finally:
+            shutil.rmtree(d64, ignore_errors=True)
+            for f in (iso64, slog64):
+                if os.path.exists(f):
+                    os.unlink(f)
 
     print()
     if failures:

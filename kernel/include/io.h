@@ -49,17 +49,31 @@ static inline void io_wait(void)
 }
 
 /* Wyłącza przerwania, zwracając poprzedni stan flag -
-   do krytycznych sekcji współdzielonych z handlerami IRQ */
-static inline uint32_t irq_save(void)
+   do krytycznych sekcji współdzielonych z handlerami IRQ.
+
+   W trybie długim rejestr flag jest 64-bitowy i instrukcje zdejmujące
+   go ze stosu mają inny sufiks; poza tym sekwencja jest ta sama, więc
+   różnicę zamyka jeden warunek zamiast osobnej wersji pliku. */
+#ifdef __x86_64__
+typedef unsigned long irqflags_t;
+#define IRQ_PUSHF "pushfq; popq %0; cli"
+#define IRQ_POPF  "pushq %0; popfq"
+#else
+typedef uint32_t irqflags_t;
+#define IRQ_PUSHF "pushfl; popl %0; cli"
+#define IRQ_POPF  "pushl %0; popfl"
+#endif
+
+static inline irqflags_t irq_save(void)
 {
-    uint32_t flags;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
+    irqflags_t flags;
+    __asm__ volatile(IRQ_PUSHF : "=r"(flags) : : "memory");
     return flags;
 }
 
-static inline void irq_restore(uint32_t flags)
+static inline void irq_restore(irqflags_t flags)
 {
-    __asm__ volatile("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
+    __asm__ volatile(IRQ_POPF : : "r"(flags) : "memory", "cc");
 }
 
 #endif

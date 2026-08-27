@@ -10,6 +10,7 @@
 
 #include "include/video.h"
 #include "include/font8x8.h"
+#include "include/fbcon.h"
 #include "include/pci.h"
 #include "include/paging.h"
 #include "include/pmm.h"
@@ -168,7 +169,7 @@ static uint32_t lfb_addr, lfb_bytes;
 
 int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
 {
-    if (bpp != 32 || !addr || w <= 0 || h <= 0 || pitch < (uint32_t)w * 4)
+    if (fbcon_set_framebuffer(addr, pitch, w, h, bpp) < 0)
         return -1;
     vid_w = w;
     vid_h = h;
@@ -195,6 +196,21 @@ int video_map_lfb(void)
 int video_have_loader_lfb(void)
 {
     return lfb_from_loader;
+}
+
+int video_console_enable(void)
+{
+    return fbcon_enable();
+}
+
+int video_console_active(void)
+{
+    return fbcon_active();
+}
+
+void video_console_cell(int col, int row, char ch, uint8_t attr)
+{
+    fbcon_cell(col, row, ch, attr);
 }
 
 void video_present(void)
@@ -244,72 +260,6 @@ void video_draw_char(int x, int y, char c, uint8_t color)
         for (int col = 0; col < 8; col++)
             if (glyph[row] & (1 << col))
                 video_putpixel(x + col, y + row, color);
-}
-
-/* --- Konsola tekstowa na buforze obrazu -----------------------------
- *
- * Osiem na osiem pikseli na znak, z tej samej czcionki, co reszta
- * grafiki. Rysujemy wprost do widocznego bufora, z pominieciem bufora
- * roboczego: konsola i kompozytor pulpitu nigdy nie sa widoczne naraz,
- * a przepisywanie calego ekranu po kazdej literze nie mialoby sensu.
- */
-#define CON_COLS 80
-#define CON_ROWS 25
-#define GLYPH    8
-
-/* Szesnascie kolorow trybu tekstowego VGA w postaci RGB */
-static const uint32_t console_rgb[16] = {
-    0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
-    0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
-    0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
-    0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
-};
-
-static int con_on, con_x0, con_y0;
-
-int video_console_enable(void)
-{
-    if (vid_bpp != 32 || !front ||
-        vid_w < CON_COLS * GLYPH || vid_h < CON_ROWS * GLYPH)
-        return 0;
-
-    /* Blok tekstu na srodku ekranu */
-    con_x0 = (vid_w - CON_COLS * GLYPH) / 2;
-    con_y0 = (vid_h - CON_ROWS * GLYPH) / 2;
-
-    for (int y = 0; y < vid_h; y++) {
-        uint32_t *row = (uint32_t *)(front + (uint32_t)y * vid_pitch);
-        for (int x = 0; x < vid_w; x++)
-            row[x] = 0;
-    }
-    con_on = 1;
-    return 1;
-}
-
-int video_console_active(void)
-{
-    return con_on;
-}
-
-void video_console_cell(int col, int row, char ch, uint8_t attr)
-{
-    if (!con_on || col < 0 || row < 0 || col >= CON_COLS || row >= CON_ROWS)
-        return;
-
-    uint32_t fgc = console_rgb[attr & 0x0F];
-    uint32_t bgc = console_rgb[(attr >> 4) & 0x0F];
-    const uint8_t *glyph = (ch >= 0x20 && (uint8_t)ch <= 0x7E)
-                               ? font8x8[ch - 0x20] : font8x8[0];
-
-    int px = con_x0 + col * GLYPH;
-    int py = con_y0 + row * GLYPH;
-    for (int y = 0; y < GLYPH; y++) {
-        uint32_t *dst = (uint32_t *)(front + (uint32_t)(py + y) * vid_pitch +
-                                     (uint32_t)px * 4);
-        uint8_t bits = glyph[y];
-        for (int x = 0; x < GLYPH; x++)
-            dst[x] = (bits & (1 << x)) ? fgc : bgc;
-    }
 }
 
 void video_draw_string(int x, int y, const char *s, uint8_t color)
