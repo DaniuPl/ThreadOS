@@ -19,7 +19,10 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/pic.h"
 #include "../kernel/include/pit.h"
+#include "../kernel/include/pmm.h"
+#include "../kernel/include/heap.h"
 #include "idt64.h"
+#include "paging64.h"
 
 /* Miejsca, w ktorych wspoldzielone pliki siegaja po scheduler.
    Zadan w tym jadrze jeszcze nie ma, wiec wypisy ida na pierwsza
@@ -75,21 +78,6 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("Tryb dlugi: LMA=%u, wskaznik ma %u bajtow\n",
            (uint32_t)long_mode_active(), (uint32_t)sizeof(void *));
 
-    /* Mapa pamieci ze znacznikow - ten sam kod, co w jadrze 32-bitowym */
-    uint32_t ram_kib = 0;
-    if (mbi->flags & MULTIBOOT_FLAG_MMAP) {
-        uint32_t pos = mbi->mmap_addr;
-        uint32_t end = mbi->mmap_addr + mbi->mmap_length;
-        while (pos < end) {
-            const struct multiboot_mmap_entry *e =
-                (const struct multiboot_mmap_entry *)(uintptr_t)pos;
-            if (e->type == MULTIBOOT_MEMORY_AVAILABLE)
-                ram_kib += (uint32_t)(e->len / 1024);
-            pos += e->size + 4;
-        }
-    }
-    printk("[ OK ] Pamiec fizyczna: %u KiB RAM\n", ram_kib);
-
     if (mbi->flags & MULTIBOOT_FLAG_MODS)
         printk("[ OK ] Moduly od loadera: %u\n", mbi->mods_count);
 
@@ -101,6 +89,59 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     if (mb2_rsdp())
         printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());
 
+    /* --- Pamiec ------------------------------------------------- */
+    pmm_init(mbi);
+    printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
+           pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
+
+    if (paging64_init() < 0) {
+        vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
+        printk("BLAD: nie udalo sie zbudowac tablic stron\n");
+        for (;;)
+            __asm__ volatile("cli; hlt");
+    }
+    printk("[ OK ] Stronicowanie czteropoziomowe: %u MiB, zakaz "
+           "wykonywania %s\n",
+           (uint32_t)(paging64_identity_top() / (1024 * 1024)),
+           paging64_nx_enabled() ? "wlaczony" : "wylaczony");
+
+    /* Mapowanie drobne: ramka wstawiona wysoko, daleko poza obszar
+       opisany identycznosciowo. Zapis i odczyt przez ten adres to
+       dowod, ze cala czterostopniowa sciezka dziala. */
+    uint32_t frame = pmm_alloc_frame();
+    uint64_t high = 0x0000000200000000ULL;      /* osiem gigabajtow */
+    if (frame && paging64_map(high, frame, PG_WRITE | PG_NX) == 0) {
+        volatile uint64_t *p = (volatile uint64_t *)(uintptr_t)high;
+        *p = 0x0123456789ABCDEFULL;
+        uint64_t phys = paging64_lookup(high);
+        printk("[ OK ] Mapowanie 4 KiB pod 8 GiB: odczyt %x%x, "
+               "adres fizyczny %x\n",
+               (uint32_t)(*p >> 32), (uint32_t)*p, (uint32_t)phys);
+    } else {
+        printk("[ !! ] Mapowanie 4 KiB nie powiodlo sie\n");
+    }
+
+    heap_init();
+    /* Szybki sprawdzian sterty: przydziel, zapisz, zwolnij i sprawdz,
+       czy pamiec wraca do puli - ten sam test, co w jadrze 32-bitowym */
+    char *a = kmalloc(1024);
+    char *b = kmalloc(4096);
+    int heap_ok = a && b && a != b;
+    if (heap_ok) {
+        for (int i = 0; i < 1024; i++)
+            a[i] = (char)i;
+        for (int i = 0; i < 1024; i++)
+            if (a[i] != (char)i)
+                heap_ok = 0;
+    }
+    uint32_t used = heap_used_bytes();
+    kfree(a);
+    kfree(b);
+    printk("[ OK ] Sterta jadra: %s (szczyt %u B, po zwolnieniu %u B)\n",
+           heap_ok ? "kmalloc/kfree dzialaja" : "BLAD", used,
+           heap_used_bytes());
+
+    /* --- Przerwania --------------------------------------------- */
     idt64_init();
     printk("[ OK ] IDT zaladowana (wyjatki 0-31, IRQ 32-47)\n");
 

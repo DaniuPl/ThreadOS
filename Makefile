@@ -180,9 +180,10 @@ CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk mb2 fbcon vga pic pit
+SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
+          $(BUILD)/64/paging64.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
 $(BUILD)/64:
@@ -194,7 +195,9 @@ $(BUILD)/64/boot64.o: boot64/boot64.S | $(BUILD)/64
 $(BUILD)/64/isr64_stubs.o: boot64/isr64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
-$(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) kernel64/idt64.h | $(BUILD)/64
+KERNEL64_HEADERS := $(wildcard kernel64/*.h)
+
+$(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
 $(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/64

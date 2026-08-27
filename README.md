@@ -555,3 +555,14 @@ obrazie dysku.
       to tak, jak takie błędy zwykle: działało, działało, po czym
       klawiatura milkła. Teraz deskryptor jest uzbrojony bez przerwy,
       a kontroler ponawia go sam co ramkę
+- [x] Pamięć w trybie długim: PMM i sterta jądra przeniosły się **bez
+      jednej zmiany logiki** (bitmapa ramek nie zależy od trybu -
+      wystarczyło kilka rzutowań przez `uintptr_t`), a stronicowanie
+      napisane od nowa: cztery poziomy zamiast dwóch, wpisy 64-bitowe,
+      tablice budowane z ramek od PMM zamiast leżeć na sztywno
+      w obrazie jądra. Doszedł bit, którego 32-bitowe stronicowanie nie
+      miało - **zakaz wykonywania**: bufor obrazu i pamięć danych są
+      oznaczone tak, że procesor odmówi wykonania czegokolwiek, co w nich
+      leży. Sprawdzian: strona 4 KiB wstawiona **osiem gigabajtów** ponad
+      obszar opisany identycznościowo, zapisana i odczytana przez pełną
+      czterostopniową ścieżkę

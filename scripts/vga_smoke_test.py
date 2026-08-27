@@ -2663,6 +2663,28 @@ def main():
                                     q23.wait_serial("Bufor obrazu",
                                                     timeout=20)) is not None)
 
+                    # Pamiec: wlasne tablice zbudowane z ramek od PMM,
+                    # a nie te ulozone na sztywno w obrazie jadra
+                    mem = q23.wait_serial("Stronicowanie czteropoziomowe",
+                                          timeout=20)
+                    m = re.search(r"czteropoziomowe: (\d+) MiB, zakaz "
+                                  r"wykonywania (\w+)", mem)
+                    check("wlasne tablice stron obejmuja cala pamiec"
+                          + (f" ({m.group(1)} MiB)" if m else ""),
+                          m is not None and int(m.group(1)) >= 100)
+                    check("zakaz wykonywania wlaczony (bit NXE)",
+                          m is not None and m.group(2) == "wlaczony")
+                    # Strona wstawiona osiem gigabajtow ponad obszar
+                    # opisany identycznosciowo - zapis i odczyt przez
+                    # nia przechodza cala czterostopniowa sciezke
+                    hi = q23.wait_serial("Mapowanie 4 KiB", timeout=20)
+                    check("mapowanie 4 KiB daleko poza pamiecia dziala",
+                          "odczyt 123456789abcdef" in hi)
+                    heap = q23.wait_serial("Sterta jadra", timeout=20)
+                    check("sterta jadra dziala w trybie dlugim",
+                          "kmalloc/kfree dzialaja" in heap
+                          and "po zwolnieniu 0 B" in heap)
+
                     # Przerwania w trybie dlugim: pulapka int3 przechodzi
                     # cala droge - stub, tablice, ramke rejestrow, iretq -
                     # i wraca, nie zatrzymujac systemu

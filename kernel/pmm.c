@@ -66,7 +66,7 @@ void pmm_init(const struct multiboot_info *mbi)
 
     while (entry_addr < mmap_end) {
         const struct multiboot_mmap_entry *e =
-            (const struct multiboot_mmap_entry *)entry_addr;
+            (const struct multiboot_mmap_entry *)(uintptr_t)entry_addr;
 
         if (e->type == MULTIBOOT_MEMORY_AVAILABLE) {
             ram_kib += (uint32_t)(e->len / 1024);
@@ -95,12 +95,13 @@ void pmm_init(const struct multiboot_info *mbi)
     /* Pierwszy 1 MiB: wektory BIOS, bufor VGA, struktury bootloadera */
     reserve_range(0, 1024 * 1024);
     /* Obraz jądra (kod + dane + bss) */
-    reserve_range((uint32_t)_kernel_start, (uint32_t)_kernel_end);
+    reserve_range((uint32_t)(uintptr_t)_kernel_start,
+                  (uint32_t)(uintptr_t)_kernel_end);
 
     /* Moduły bootloadera (initrd) - nie wolno ich nadpisać */
     if (mbi->flags & MULTIBOOT_FLAG_MODS) {
         const struct multiboot_mod *mods =
-            (const struct multiboot_mod *)mbi->mods_addr;
+            (const struct multiboot_mod *)(uintptr_t)mbi->mods_addr;
         reserve_range(mbi->mods_addr,
                       mbi->mods_addr + mbi->mods_count * sizeof(*mods));
         for (uint32_t i = 0; i < mbi->mods_count; i++)
@@ -177,7 +178,8 @@ void pmm_free_frame(uint32_t addr)
        tablica stron pokazywala na wlasny kod albo dane jadra, ramka
        trafilaby do pierwszego lepszego procesu - lepiej glosno
        zaprotestowac, niz po cichu oddac system do przepisania. */
-    if (addr >= (uint32_t)_kernel_start && addr < (uint32_t)_kernel_end) {
+    if (addr >= (uint32_t)(uintptr_t)_kernel_start &&
+        addr < (uint32_t)(uintptr_t)_kernel_end) {
         printk("[PMM] proba zwolnienia ramki obrazu jadra (%x) - odmawiam\n",
                addr);
         irq_restore(flags);

@@ -38,7 +38,7 @@ void heap_init(void)
     }
     heap_end = heap_start + HEAP_SIZE;
 
-    heap_head = (struct block *)heap_start;
+    heap_head = (struct block *)(uintptr_t)heap_start;
     heap_head->size = HEAP_SIZE - sizeof(struct block);
     heap_head->free = 1;
     heap_head->next = (void *)0;
@@ -63,7 +63,7 @@ void *kmalloc(size_t size)
         /* Podziel blok, jeśli reszta pomieści nagłówek i sensowne dane */
         if (b->size >= size + sizeof(struct block) + MIN_SPLIT) {
             struct block *rest =
-                (struct block *)((uint32_t)b + sizeof(struct block) + size);
+                (struct block *)((uintptr_t)b + sizeof(struct block) + size);
             rest->size = b->size - size - sizeof(struct block);
             rest->free = 1;
             rest->next = b->next;
@@ -72,7 +72,7 @@ void *kmalloc(size_t size)
         }
         b->free = 0;
         used_bytes += b->size;
-        result = (void *)((uint32_t)b + sizeof(struct block));
+        result = (void *)((uintptr_t)b + sizeof(struct block));
         break;
     }
 
@@ -84,7 +84,7 @@ void kfree(void *ptr)
 {
     if (!ptr)
         return;
-    uint32_t addr = (uint32_t)ptr;
+    uint32_t addr = (uint32_t)(uintptr_t)ptr;
     if (addr < heap_start + sizeof(struct block) || addr >= heap_end)
         return;
 
