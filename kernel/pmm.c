@@ -144,6 +144,16 @@ void pmm_free_frame(uint32_t addr)
 {
     uint32_t flags = irq_save();
     uint32_t frame = addr / PAGE_SIZE;
+    /* Bezpiecznik: obraz jadra nigdy nie wraca do puli. Gdyby jakas
+       tablica stron pokazywala na wlasny kod albo dane jadra, ramka
+       trafilaby do pierwszego lepszego procesu - lepiej glosno
+       zaprotestowac, niz po cichu oddac system do przepisania. */
+    if (addr >= (uint32_t)_kernel_start && addr < (uint32_t)_kernel_end) {
+        printk("[PMM] proba zwolnienia ramki obrazu jadra (%x) - odmawiam\n",
+               addr);
+        irq_restore(flags);
+        return;
+    }
     if (frame < MAX_FRAMES && frame_test(frame)) {
         if (refs[frame] > 1) {
             refs[frame]--;              /* ramka ma jeszcze wlascicieli */

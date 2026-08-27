@@ -98,6 +98,22 @@ int paging_map_phys(uint32_t phys, uint32_t size)
     return 0;
 }
 
+/* Czy ten wpis katalogu opisuje tablicę jądra?
+ *
+ * Tablice jądra są współdzielone przez wszystkie przestrzenie adresowe:
+ * nie wolno ich niszczyć przy sprzątaniu procesu ani wpisywać do nich
+ * stron użytkownika.
+ *
+ * Porównanie wprost z page_directory[i] nie wystarczy - procesor sam
+ * ustawia w używanym wpisie bit "odwiedzony", więc ta sama tablica ma
+ * po chwili różne wartości wpisu w różnych katalogach. Rozstrzyga za to
+ * bit USER: tablice jądra go nie mają i nigdy mieć nie będą.
+ */
+static int kernel_table(uint32_t pde)
+{
+    return (pde & PTE_PRESENT) && !(pde & PTE_USER);
+}
+
 /* Każda ramka z PMM leży w obszarze mapowanym identycznościowo, więc
    jądro widzi ją wprost pod jej adresem fizycznym - katalogi i tablice
    stron procesów modyfikujemy bez żadnego okna ani mapowania tymczasowego. */
@@ -133,7 +149,7 @@ int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
         memset((void *)pt_phys, 0, 4096);
         dir[pde] = pt_phys | PTE_PRESENT | PTE_WRITE | PTE_USER;
     } else {
-        if (dir[pde] == page_directory[pde])  /* tablica jądra - nie ruszaj */
+        if (kernel_table(dir[pde]))   /* tablica jądra - nie ruszaj */
             return 0;
         pt_phys = dir[pde] & ~0xFFFu;
     }
@@ -151,7 +167,7 @@ uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
 {
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pde = vaddr >> 22;
-    if (!(dir[pde] & PTE_PRESENT) || dir[pde] == page_directory[pde])
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
         return 0;
     uint32_t pte = ((uint32_t *)(dir[pde] & ~0xFFFu))[(vaddr >> 12) & 0x3FF];
     return pte & PTE_PRESENT ? pte & ~0xFFFu : 0;
@@ -162,7 +178,7 @@ void paging_destroy_address_space(uint32_t dir_phys)
     uint32_t *dir = (uint32_t *)dir_phys;
     for (int i = 0; i < 1024; i++) {
         /* Zwalniaj tylko tablice procesu - jądrowe są współdzielone */
-        if (!(dir[i] & PTE_PRESENT) || dir[i] == page_directory[i])
+        if (!(dir[i] & PTE_PRESENT) || kernel_table(dir[i]))
             continue;
         uint32_t *pt = (uint32_t *)(dir[i] & ~0xFFFu);
         for (int j = 0; j < 1024; j++) {
@@ -207,7 +223,7 @@ uint32_t paging_clone_address_space(uint32_t src_phys)
 
     for (int i = 0; i < 1024; i++) {
         /* Tablice jadra sa wspoldzielone - przepisujemy wpis bez zmian */
-        if (!(src[i] & PTE_PRESENT) || src[i] == page_directory[i]) {
+        if (!(src[i] & PTE_PRESENT) || kernel_table(src[i])) {
             dst[i] = page_directory[i];
             continue;
         }
@@ -255,7 +271,7 @@ int paging_handle_cow(uint32_t vaddr, uint32_t err_code)
     __asm__ volatile("movl %%cr3, %0" : "=r"(dir_phys));
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pde = vaddr >> 22;
-    if (!(dir[pde] & PTE_PRESENT) || dir[pde] == page_directory[pde])
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
         return 0;
 
     uint32_t *pt = (uint32_t *)(dir[pde] & ~0xFFFu);

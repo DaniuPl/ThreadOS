@@ -4,6 +4,7 @@
 #include "include/isr.h"
 #include "include/paging.h"
 #include "include/signal.h"
+#include "include/exec.h"
 #include "include/pic.h"
 #include "include/printk.h"
 #include "include/syscall.h"
@@ -48,6 +49,10 @@ void isr_handler(struct regs *r)
             uint32_t cr2;
             __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
             if (paging_handle_cow(cr2, r->err_code))
+                return;
+            /* Strona ze sterty albo mmap, ktorej proces jeszcze nie
+               dotknal - przydziel ja teraz i wznow instrukcje */
+            if (!(r->err_code & 0x1) && process_demand_page(cr2))
                 return;
         }
 

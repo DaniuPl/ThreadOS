@@ -288,9 +288,43 @@ static void exec_task(void *arg)
     /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
        zostana zwolnione przy sprzataniu zombie */
     task_set_brk(brk);
+    task_set_brk_base(brk);
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
     enter_ring3(entry, esp);
+}
+
+/* --- stronicowanie na zadanie --------------------------------------
+ *
+ * Sterta (sbrk) i obszar mmap sa procesowi obiecane, ale puste: zaden
+ * z tych adresow nie ma jeszcze ramki. Pierwszy dostep konczy sie
+ * bledem strony, a jadro dopiero wtedy przydziela wyzerowana ramke
+ * i wznawia instrukcje.
+ *
+ * Wola to zarowno obsluga wyjatku (dostep z ring 3), jak i walidacja
+ * wskaznikow w syscallach: jadro, ktore ma zaraz wypelnic bufor
+ * procesu, musi go najpierw urzeczywistnic - inaczej swiezo
+ * przydzielony, nietkniety bufor wygladalby jak zly wskaznik.
+ *
+ * Zwraca 1, gdy strona powstala (mozna wznowic), 0 gdy adres nie nalezy
+ * do zadnego obiecanego obszaru albo zabraklo pamieci.
+ */
+int process_demand_page(uint32_t addr)
+{
+    uint32_t brk = task_brk();
+    if (!brk)                       /* watek jadra - nie ma sterty */
+        return 0;
+
+    int in_heap = addr >= task_brk_base() && addr < brk;
+    int in_mmap = addr >= MMAP_BASE && addr < task_mmap_next();
+    if (!in_heap && !in_mmap)
+        return 0;
+
+    uint32_t dir = task_current_cr3();
+    uint32_t va = addr & ~(PAGE_SIZE - 1);
+    if (paging_get_mapping(dir, va))
+        return 0;                   /* strona juz jest - blad z innego powodu */
+    return page_frame_for(dir, va) != 0;
 }
 
 /* --- fork: rozwidlenie procesu --------------------------------------
@@ -372,6 +406,7 @@ int process_exec(const char *cmdline)
     uint32_t old = task_current_cr3();
     task_rename(tok[0]);              /* 'ps' ma pokazywac nowy program */
     task_set_brk(brk);
+    task_set_brk_base(brk);
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
 
@@ -400,13 +435,10 @@ uint32_t process_sbrk(int32_t increment)
     if (new_brk < brk || new_brk > USER_BRK_MAX)
         return (uint32_t)-1;
 
-    uint32_t dir = task_current_cr3();
-    for (uint32_t va = (brk + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-         va < new_brk; va += PAGE_SIZE) {
-        if (!page_frame_for(dir, va))
-            return (uint32_t)-1;
-    }
-
+    /* Zadnej ramki tu nie przydzielamy: sterta rosnie na papierze,
+       a strony pojawiaja sie dopiero przy pierwszym dotknieciu
+       (process_demand_page). Program, ktory prosi o 200 MiB i uzywa
+       jednego, zajmie tez jeden. */
     task_set_brk(new_brk);
     return brk;
 }
@@ -425,12 +457,7 @@ uint32_t process_mmap(uint32_t size)
     if (end > MMAP_MAX || end < base)
         return 0;
 
-    uint32_t dir = task_current_cr3();
-    for (uint32_t va = base; va < end; va += PAGE_SIZE) {
-        if (!page_frame_for(dir, va))
-            return 0;
-    }
-    task_set_mmap_next(end);
+    task_set_mmap_next(end);        /* strony jak przy sbrk - na zadanie */
     return base;
 }
 

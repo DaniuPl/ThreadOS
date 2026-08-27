@@ -873,6 +873,34 @@ def main():
         check(f"brak wycieku ramek po fork ({used_before_fk} -> {used_after_fk})",
               used_after_fk is not None and used_after_fk == used_before_fk)
 
+        # 'run lazymem': stronicowanie na zadanie. Prosba o 64 MiB nie
+        # kosztuje ani ramki - place sie dopiero za dotkniete strony.
+        q.type_line("clear")
+        time.sleep(0.6)          # niech zombie po poprzednim tescie zniknie
+        q.type_line("mem")
+        used_before_lz = pmm_used(q.screen())
+        q.type_line("run lazymem")
+        screen = q.wait_for("[lazymem] dotkniete", timeout=40)
+        m = re.search(r"poproszone 64 MiB, RAM urosl o (\d+) KiB", screen)
+        check("prosba o 64 MiB sterty nie kosztuje ani ramki"
+              + (f" (+{m.group(1)} KiB)" if m else ""),
+              m is not None and int(m.group(1)) == 0)
+        m = re.search(r"dotkniete 1 MiB, RAM urosl o (\d+) KiB", screen)
+        check("place sie dokladnie za dotkniete strony"
+              + (f" (+{m.group(1)} KiB)" if m else ""),
+              m is not None and int(m.group(1)) == 1024)
+        screen = q.wait_for("[lazymem] mmap tez daje strony", timeout=30)
+        check("syscall urzeczywistnia nietknieta strone zamiast zglaszac blad",
+              "syscall urzeczywistnil nietknieta strone" in screen)
+        check("mmap tez przydziela strony dopiero przy dotknieciu", True)
+        q.wait_for("proces 'lazymem' zakonczyl sie (kod 0)", timeout=20)
+        time.sleep(0.6)
+        q.type_line("mem")
+        used_after_lz = pmm_used(q.screen())
+        check(f"brak wycieku ramek po stronicowaniu na zadanie"
+              f" ({used_before_lz} -> {used_after_lz})",
+              used_after_lz is not None and used_after_lz == used_before_lz)
+
         # 'run ptree': drzewo procesow. Trzy dzieci koncza sie w innej
         # kolejnosci, niz powstaly, a rodzic zbiera je przez waitany.
         q.type_line("clear")

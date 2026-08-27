@@ -29,6 +29,10 @@ int process_fork(struct regs *r);
    roboczy zostaja). Przy powodzeniu nie wraca; -1 przy bledzie. */
 int process_exec(const char *cmdline);
 
+/* Stronicowanie na zadanie: przydziela ramke pod adres nalezacy do
+   sterty albo obszaru mmap biezacego procesu. 1 = strona powstala. */
+int process_demand_page(uint32_t addr);
+
 /* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
    (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
 uint32_t process_sbrk(int32_t increment);

@@ -37,6 +37,8 @@ struct task {
     uint32_t cr3;               /* przestrzeń adresowa zadania */
     int owns_dir;               /* czy katalog stron zwolnić przy reap */
     uint32_t brk;               /* koniec sterty procesu (sbrk); 0 = wątek jądra */
+    uint32_t brk_base;          /* poczatek sterty - stad zaczyna sie obszar
+                                   przydzielany dopiero przy pierwszym dotknieciu */
     uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     int parent;                  /* pid rodzica (-1 = brak, sierota) */
@@ -158,6 +160,7 @@ void scheduler_init(void)
     main_task->cr3 = paging_kernel_cr3();
     main_task->owns_dir = 0;
     main_task->brk = 0;
+    main_task->brk_base = 0;
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* katalog glowny */
     main_task->parent = -1;     /* korzen drzewa procesow */
@@ -177,6 +180,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->cr3 = paging_kernel_cr3();
     t->owns_dir = 0;
     t->brk = 0;
+    t->brk_base = 0;
     t->mmap_next = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
     t->parent = current ? current->id : -1;
@@ -218,6 +222,7 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     t->cr3 = cr3;
     t->owns_dir = 1;
     t->brk = current->brk;
+    t->brk_base = current->brk_base;
     t->mmap_next = current->mmap_next;
     irq_restore(flags);
     return t;
@@ -358,6 +363,7 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     t->cr3 = cr3;
     t->owns_dir = 1;
     t->brk = current->brk;
+    t->brk_base = current->brk_base;
     t->mmap_next = current->mmap_next;
     t->cwd = current->cwd;
     t->priority = current->priority;
@@ -754,6 +760,18 @@ uint32_t task_brk(void)
 void task_set_brk(uint32_t brk)
 {
     current->brk = brk;
+}
+
+uint32_t task_brk_base(void)
+{
+    return current->brk_base;
+}
+
+/* Poczatek sterty ustawia exec razem z jej koncem - obszar miedzy nimi
+   nalezy do procesu, ale ramki dostaje dopiero przy pierwszym dotknieciu */
+void task_set_brk_base(uint32_t base)
+{
+    current->brk_base = base;
 }
 
 uint32_t task_mmap_next(void)

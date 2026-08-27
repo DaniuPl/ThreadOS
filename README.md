@@ -437,3 +437,18 @@ obrazie dysku.
       się z `0x08048000` pod **1 GiB**, żeby zejść mapowaniu z drogi:
       jeden proces potrafi teraz zająć 80 MiB, czyli więcej, niż cały
       system widział wcześniej
+- [x] Stronicowanie na żądanie: `sbrk` i `mmap` nie przydzielają już ani
+      jednej ramki - obszar jest procesowi obiecany, a strony powstają
+      dopiero przy pierwszym dotknięciu (prośba o 64 MiB kosztuje 0 KiB,
+      zapis 1 MiB kosztuje dokładnie 1024 KiB). Walidacja wskaźników
+      w syscallach umie taką stronę urzeczywistnić, więc świeżo
+      przydzielony, nietknięty bufor nie wygląda z jądra jak zły
+      wskaźnik (`run lazymem`)
+- [x] Naprawiony stary błąd rozpoznawania tablic jądra: były rozpoznawane
+      po **pełnej wartości** wpisu w katalogu stron, a procesor sam
+      ustawia w nim bit „odwiedzony" - ta sama tablica miała więc po
+      chwili różne wartości w różnych katalogach i sprzątanie procesu
+      potrafiło zwolnić tablicę **jądra**, oddając kawałek własnego
+      obrazu jądra do puli wolnych ramek. Teraz rozstrzyga bit USER,
+      którego tablice jądra nie mają; w PMM stoi dodatkowo bezpiecznik
+      odmawiający zwolnienia ramki z obrazu jądra

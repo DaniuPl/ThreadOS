@@ -83,7 +83,10 @@ static int user_ok(uint32_t addr, uint32_t len)
 
     uint32_t cr3 = task_current_cr3();
     for (uint32_t page = addr & ~0xFFFu; page < addr + len; page += 0x1000) {
-        if (!paging_get_mapping(cr3, page))
+        /* Strona moze byc procesowi obiecana, ale jeszcze nietknieta
+           (sterta/mmap) - wtedy urzeczywistniamy ja tu, zamiast uznawac
+           swiezo przydzielony bufor za zly wskaznik */
+        if (!paging_get_mapping(cr3, page) && !process_demand_page(page))
             return 0;
     }
     return 1;
@@ -101,7 +104,8 @@ static int user_str(char *dst, uint32_t uaddr, uint32_t max)
             return -1;
         /* Sprawdzaj mapowanie na starcie i przy kazdym przejsciu strony */
         if (i == 0 || (va & 0xFFF) == 0) {
-            if (!paging_get_mapping(cr3, va & ~0xFFFu))
+            if (!paging_get_mapping(cr3, va & ~0xFFFu) &&
+                !process_demand_page(va))
                 return -1;
         }
         dst[i] = *(const volatile char *)va;
