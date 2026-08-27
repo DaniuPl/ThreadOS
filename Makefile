@@ -166,12 +166,21 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 $(DISK): | $(BUILD)
 	dd if=/dev/zero of=$@ bs=1M count=16 status=none
 
+# Obraz ISO do wypalenia albo uruchomienia z 'qemu -cdrom'. GRUB wgrywa
+# jadro przez Multiboot i podaje mu initrd jako modul; menu pozwala wybrac
+# pulpit albo konsole tekstowa (grub.cfg).
 iso: $(KERNEL) $(INITRD) grub.cfg
+	@command -v grub-mkrescue >/dev/null || { \
+	    echo "BLAD: brak grub-mkrescue."; \
+	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-common xorriso"; \
+	    echo "  Fedora:        dnf install grub2-tools xorriso"; \
+	    exit 1; }
 	mkdir -p $(BUILD)/isodir/boot/grub
 	cp $(KERNEL) $(BUILD)/isodir/boot/protonos.bin
 	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
 	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
+	@echo "Gotowe: $(ISO) - 'make run-iso' albo wypal na pendrive"
 
 # QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a.
 # Dysk (-hda) trafia na pierwsza magistrale ATA jako master.
@@ -184,8 +193,10 @@ NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
 run: $(KERNEL) $(INITRD) $(DISK)
 	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
 
-run-iso: iso
-	qemu-system-i386 -cdrom $(ISO)
+# Uruchomienie z ISO tak, jak na prawdziwej maszynie: dysk (PFS + plik
+# wymiany) i karta sieciowa, bo bez nich polowa systemu nie ma co robic.
+run-iso: iso $(DISK)
+	qemu-system-i386 -cdrom $(ISO) -boot d -hda $(DISK) $(NETOPTS)
 
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.

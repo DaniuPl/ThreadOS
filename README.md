@@ -140,8 +140,8 @@ make          # buduje build/protonos.bin
 make run      # uruchamia jądro w QEMU (najprostsza droga)
 make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
 make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
-make iso      # buduje bootowalne ISO z GRUB-em
-make run-iso  # uruchamia ISO w QEMU
+make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
+make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
 make clean
 ```
 
