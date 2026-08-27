@@ -16,6 +16,7 @@
 #include "include/swap.h"
 #include "include/fs.h"
 #include "include/ata.h"
+#include "include/blk.h"
 #include "include/pmm.h"
 #include "include/task.h"
 #include "include/printk.h"
@@ -104,13 +105,10 @@ int swap_write(int slot, const void *frame)
     if (slot < 0 || (uint32_t)slot >= slot_count)
         return -1;
     const uint8_t *p = frame;
-    for (uint32_t b = 0; b < SLOT_BLOCKS; b++) {
-        uint32_t lba = fs_block_lba(slot_blk[slot][b]);
-        for (uint32_t i = 0; i < SECT_PER_BLOCK; i++)
-            if (ata_write_sector(lba + i,
-                                 p + b * FS_BLOCK + i * ATA_SECTOR_SIZE) < 0)
-                return -1;
-    }
+    for (uint32_t b = 0; b < SLOT_BLOCKS; b++)
+        if (blk_write(fs_block_lba(slot_blk[slot][b]), SECT_PER_BLOCK,
+                      p + b * FS_BLOCK) < 0)
+            return -1;
     stat_out++;
     return 0;
 }
@@ -120,13 +118,10 @@ int swap_read(int slot, void *frame)
     if (slot < 0 || (uint32_t)slot >= slot_count)
         return -1;
     uint8_t *p = frame;
-    for (uint32_t b = 0; b < SLOT_BLOCKS; b++) {
-        uint32_t lba = fs_block_lba(slot_blk[slot][b]);
-        for (uint32_t i = 0; i < SECT_PER_BLOCK; i++)
-            if (ata_read_sector(lba + i,
-                                p + b * FS_BLOCK + i * ATA_SECTOR_SIZE) < 0)
-                return -1;
-    }
+    for (uint32_t b = 0; b < SLOT_BLOCKS; b++)
+        if (blk_read(fs_block_lba(slot_blk[slot][b]), SECT_PER_BLOCK,
+                     p + b * FS_BLOCK) < 0)
+            return -1;
     stat_in++;
     return 0;
 }

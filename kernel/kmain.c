@@ -19,6 +19,7 @@
 #include "include/task.h"
 #include "include/initrd.h"
 #include "include/fs.h"
+#include "include/blk.h"
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
@@ -192,8 +193,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
                initrd_file_count());
 
+    if (blk_init())
+        printk("[ OK ] Kontroler dysku: %s\n", blk_name());
     if (fs_init())
-        ok("Dysk ATA + PFS gotowy (komendy 'fls', 'cat', 'write')");
+        ok("Dysk + PFS gotowy (komendy 'fls', 'cat', 'write')");
 
     int has_net = net_init();
     if (has_net) {

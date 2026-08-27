@@ -384,7 +384,7 @@ def start_http_server():
 
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
-                 append=None, ram_mib=None):
+                 append=None, ram_mib=None, sata=False):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -408,7 +408,12 @@ class Qemu:
             cmd += ["-append", append]
         if initrd:
             cmd += ["-initrd", initrd]
-        if disk:
+        if disk and sata:
+            # Dysk za kontrolerem AHCI - tak wyglada kazda nowsza plyta
+            cmd += ["-device", "ich9-ahci,id=ahci",
+                    "-drive", f"id=sata0,file={disk},if=none,format=raw",
+                    "-device", "ide-hd,drive=sata0,bus=ahci.0"]
+        elif disk:
             cmd += ["-hda", disk]
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -628,8 +633,10 @@ def main():
         print(screen)
         print("===========================")
 
-        check("dysk ATA + PFS wykryty i sformatowany",
-              "Dysk ATA + PFS gotowy" in screen)
+        check("dysk + PFS wykryty i sformatowany",
+              "Dysk + PFS gotowy" in screen)
+        check("kontroler dysku nazwany przy boocie (tu stary ATA PIO)",
+              "Kontroler dysku: ATA PIO" in screen)
         check("mysz PS/2 wykryta przy boocie",
               "Mysz PS/2 gotowa" in screen)
         check("karta sieciowa RTL8139 wykryta przy boocie",
@@ -1729,7 +1736,7 @@ def main():
     try:
         screen = q2.wait_for("ProtonOS shell")
         check("drugi boot: dysk wykryty (juz sformatowany, bez ponownego format)",
-              "Dysk ATA + PFS gotowy" in screen
+              "Dysk + PFS gotowy" in screen
               and "sformatowany" not in screen)
 
         q2.type_line("fls")
@@ -2263,6 +2270,44 @@ def main():
         q15.close()
         if os.path.exists(idisk):
             os.unlink(idisk)
+
+    # --- Dysk za kontrolerem AHCI ----------------------------------
+    # Ten sam system plikow i ta sama wymiana stron, tyle ze dane
+    # przenosi kontroler przez DMA zamiast procesora slowo po slowie.
+    print("--- kontroler AHCI (SATA) ---")
+    sdisk = tempfile.mktemp(suffix=".img")
+    with open(sdisk, "wb") as fh:
+        fh.truncate(64 * 1024 * 1024)
+    q18 = Qemu(KERNEL, INITRD, sdisk, append=TEXT_MODE, ram_mib=16, sata=True)
+    try:
+        boot = q18.wait_for("Kontroler dysku:", timeout=30)
+        check("kontroler AHCI wykryty po PCI i wybrany zamiast ATA",
+              "Kontroler dysku: AHCI" in boot)
+        check("PFS sformatowal dysk przez AHCI",
+              "PFS" in q18.wait_for("Dysk + PFS gotowy", timeout=20))
+        check("plik wymiany zalozony na dysku SATA",
+              re.search(r"Wymiana stron: \d+ KiB",
+                        q18.wait_for("Wymiana stron:", timeout=20)) is not None)
+
+        q18.wait_for("ProtonOS shell", timeout=20)
+        q18.type_line("clear")
+        q18.type_line("write ahci proton przez dma")
+        q18.wait_for("zapisano", timeout=20)
+        q18.type_line("cat ahci")
+        back = q18.wait_for("proton przez dma", timeout=20)
+        check("zapis i odczyt pliku przez DMA oddaja te same dane",
+              "proton przez dma" in back)
+
+        # Wymiana stron przez AHCI: te same 18 MiB na maszynie z 16 MiB
+        q18.type_line("clear")
+        q18.type_line("run swaptest 18")
+        out = q18.wait_for("[swaptest] wszystkie", timeout=120)
+        check("wymiana stron przez AHCI oddaje strony bez zmian",
+              "stron wrocilo w calosci" in out)
+    finally:
+        q18.close()
+        if os.path.exists(sdisk):
+            os.unlink(sdisk)
 
     # --- Konsole wirtualne -----------------------------------------
     # Alt+F1..F4 przelacza ekran, ale kazda konsola ma wlasna tresc,

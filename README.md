@@ -48,6 +48,8 @@ ProtonOS/
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - identycznościowe całe RAM, COW
 │   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
+│   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
+│   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
@@ -469,3 +471,12 @@ obrazie dysku.
       (jak uniksowy terminal kontrolujący) - program uruchomiony na
       drugiej konsoli pisze na niej dalej, kiedy patrzymy na pierwszą,
       a `Ctrl+C` trafia w proces trzymający tę konsolę, którą widać
+- [x] Sterownik **AHCI (SATA)** i warstwa urządzenia blokowego: kontroler
+      znajdowany po klasie PCI (0x01/0x06/0x01), polecenia składane
+      w pamięci (lista poleceń, tablica polecenia z ramką FIS i PRDT),
+      dane przenoszone przez **DMA** zamiast przepisywania słowo po
+      słowie. System plików i wymiana stron nie wiedzą już, jaki dysk
+      mają pod spodem - wybór zapada raz przy starcie, ATA PIO zostaje
+      drogą zapasową. To warunek zobaczenia dysku na nowszej płycie,
+      która nie ma trybu zgodności; przy okazji ta sama wymiana 18 MiB
+      na maszynie z 16 MiB RAM-u trwa 4,3 s zamiast 8,3 s

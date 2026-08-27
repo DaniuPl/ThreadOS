@@ -24,6 +24,7 @@
 
 #include "include/fs.h"
 #include "include/ata.h"
+#include "include/blk.h"
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
@@ -70,29 +71,19 @@ static struct inode inodes[FS_MAX_FILES];
 static uint8_t bitmap[BITMAP_BLOCKS * FS_BLOCK];
 static uint32_t total_blocks;
 static uint8_t block_buf[FS_BLOCK];
-static uint8_t sector_buf[ATA_SECTOR_SIZE];
 
 /* --- dostep do blokow ------------------------------------------------- */
 
+/* Caly blok jednym poleceniem: przy AHCI to jeden transfer DMA zamiast
+   dwoch osobnych rozkazow na sektor */
 static int block_read(uint32_t block, void *buf)
 {
-    uint8_t *p = buf;
-    for (uint32_t i = 0; i < SECTORS_PER_BLOCK; i++)
-        if (ata_read_sector(block * SECTORS_PER_BLOCK + i,
-                            p + i * ATA_SECTOR_SIZE) < 0)
-            return -1;
-    return 0;
+    return blk_read(block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
 }
 
 static int block_write(uint32_t block, const void *buf)
 {
-    const uint8_t *p = buf;
-    for (uint32_t i = 0; i < SECTORS_PER_BLOCK; i++) {
-        memcpy(sector_buf, p + i * ATA_SECTOR_SIZE, ATA_SECTOR_SIZE);
-        if (ata_write_sector(block * SECTORS_PER_BLOCK + i, sector_buf) < 0)
-            return -1;
-    }
-    return 0;
+    return blk_write(block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
 }
 
 static void flush_inodes(void)
@@ -302,12 +293,12 @@ static void format_disk(void)
 
 int fs_init(void)
 {
-    if (!ata_present()) {
-        printk("[ !! ] FS: brak dysku ATA\n");
+    if (!blk_present()) {
+        printk("[ !! ] FS: brak dysku\n");
         return 0;
     }
 
-    uint32_t sectors = ata_sectors();
+    uint32_t sectors = blk_sectors();
     total_blocks = sectors / SECTORS_PER_BLOCK;
     if (total_blocks > BITMAP_BITS)
         total_blocks = BITMAP_BITS;        /* tyle obejmuje bitmapa */

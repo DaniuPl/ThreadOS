@@ -90,7 +90,9 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/dhcp.o \
         $(BUILD)/tcp.o \
         $(BUILD)/signal.o \
-        $(BUILD)/swap.o
+        $(BUILD)/swap.o \
+        $(BUILD)/ahci.o \
+        $(BUILD)/blk.o
 
 .PHONY: all iso run run-iso test fuzz clean
 

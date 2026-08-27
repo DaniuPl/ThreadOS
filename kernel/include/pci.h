@@ -13,11 +13,18 @@ struct pci_dev {
     int bus, slot;
     uint16_t vendor, device;
     uint32_t bar0;        /* surowa zawartosc BAR0 (bit 0: 1 = port I/O) */
+    uint32_t bar[6];      /* wszystkie rejestry bazowe, surowe */
     uint8_t irq;          /* linia IRQ z pola Interrupt Line */
 };
 
 /* Szuka urzadzenia o danym vendor/device. 1 = znaleziono. */
 int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
+
+/* Szuka urzadzenia po klasie (klasa/podklasa/interfejs programowy) -
+   tak znajduje sie kontroler, ktorego numeru modelu nie znamy z gory,
+   np. dowolny kontroler AHCI (0x01/0x06/0x01). 1 = znaleziono. */
+int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
+                   struct pci_dev *out);
 
 /* Wlacza dostep do portow I/O, pamieci i bus mastering (DMA) */
 void pci_enable_bus_master(const struct pci_dev *dev);
