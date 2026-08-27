@@ -10,7 +10,8 @@ SECTIONS
 
     /* Nagłówek Multiboot musi być w pierwszych 8 KiB pliku - dlatego
        ma własną sekcję na samym początku obrazu */
-    .multiboot : ALIGN(4)
+    /* Naglowek Multiboot 2 wymaga wyrownania do 8 bajtow */
+    .multiboot : ALIGN(8)
     {
         KEEP(*(.multiboot))
     }

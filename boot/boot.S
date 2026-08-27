@@ -18,6 +18,50 @@
 .long MB_FLAGS
 .long MB_CHECKSUM
 
+/* Nagłówek Multiboot 2
+ *
+ * Obraz nosi oba nagłówki naraz i to jest celowe: QEMU uruchamiane
+ * z opcją -kernel rozumie tylko starszy, a GRUB woli nowszy. Loader
+ * wybiera ten, który zna, i przekazuje inny magic w eax - jądro
+ * rozpoznaje po nim, w której postaci dostało informacje o maszynie.
+ *
+ * Nowszy jest drogą do UEFI: tam nie ma ani BIOS-u, ani starego
+ * Multiboota, a wskaźnik na tablice ACPI podaje właśnie loader.
+ */
+.set MB2_MAGIC, 0xE85250D6
+.set MB2_ARCH,  0                    /* tryb chroniony i386 */
+
+.align 8
+mb2_header:
+.long MB2_MAGIC
+.long MB2_ARCH
+.long mb2_header_end - mb2_header
+.long -(MB2_MAGIC + MB2_ARCH + (mb2_header_end - mb2_header))
+
+    /* O co prosimy loader: linia poleceń, moduły, mapa pamięci
+       i wskaźnik na tablice ACPI (pod UEFI nie ma go gdzie szukać) */
+    .align 8
+    .short 1                         /* znacznik: żądanie informacji */
+    .short 0
+    .long 8 + 5 * 4
+    .long 1                          /* linia poleceń */
+    .long 3                          /* moduły */
+    .long 6                          /* mapa pamięci */
+    .long 14                         /* RSDP (ACPI 1.0) */
+    .long 15                         /* RSDP (ACPI 2.0) */
+
+    /* Moduły wyrównane do granic stron - tak samo jak w Multiboot 1 */
+    .align 8
+    .short 6
+    .short 0
+    .long 8
+
+    .align 8
+    .short 0                         /* znacznik końca */
+    .short 0
+    .long 8
+mb2_header_end:
+
 /* Stos jądra - 16 KiB, wyrównany do 16 bajtów (wymóg ABI System V) */
 .section .bss
 .align 16

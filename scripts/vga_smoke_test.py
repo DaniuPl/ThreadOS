@@ -26,6 +26,7 @@ import http.server
 import json
 import os
 import re
+import shutil
 import socket
 import socketserver
 import subprocess
@@ -384,10 +385,11 @@ def start_http_server():
 
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
-                 append=None, ram_mib=None, sata=False, usbkbd=False):
+                 append=None, ram_mib=None, sata=False, usbkbd=False,
+                 cdrom=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
-        cmd = ["qemu-system-i386", "-kernel", kernel,
+        cmd = ["qemu-system-i386",
                "-display", "none", "-no-reboot",
                # Stala data RTC -> deterministyczny test komendy 'date'.
                # Musi byc pozniejsza niz chwila wystawienia certyfikatow
@@ -408,10 +410,15 @@ class Qemu:
             # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
             # nowsza niz mniej wiecej 2010 rok
             cmd += ["-usb", "-device", "usb-kbd"]
-        if append:
-            cmd += ["-append", append]
-        if initrd:
-            cmd += ["-initrd", initrd]
+        if cdrom:
+            # Rozruch jak z prawdziwej plyty: jadro wgrywa GRUB, a nie QEMU
+            cmd += ["-cdrom", cdrom, "-boot", "d"]
+        else:
+            cmd += ["-kernel", kernel]
+            if append:
+                cmd += ["-append", append]
+            if initrd:
+                cmd += ["-initrd", initrd]
         if disk and sata:
             # Dysk za kontrolerem AHCI - tak wyglada kazda nowsza plyta
             cmd += ["-device", "ich9-ahci,id=ahci",
@@ -2460,6 +2467,61 @@ def main():
         q16.close()
         if os.path.exists(swdisk):
             os.unlink(swdisk)
+
+    # --- Rozruch z obrazu ISO (Multiboot 2) ------------------------
+    # Tu jadro wgrywa GRUB, a nie QEMU - a wiec inna postac informacji
+    # o maszynie: mapa pamieci, initrd jako modul i wskaznik na tablice
+    # ACPI przychodza jako znaczniki Multiboot 2.
+    print("--- rozruch z ISO (Multiboot 2) ---")
+    if shutil.which("grub-mkrescue") is None:
+        print("POMINIETE: brak grub-mkrescue "
+              "(apt install grub-pc-bin grub-common xorriso)")
+    else:
+        isodir = tempfile.mkdtemp()
+        iso = tempfile.mktemp(suffix=".iso")
+        try:
+            os.makedirs(isodir + "/boot/grub")
+            shutil.copy(KERNEL, isodir + "/boot/protonos.bin")
+            shutil.copy(INITRD, isodir + "/boot/initrd.img")
+            # Wlasne menu: bez odliczania i od razu w tryb tekstowy,
+            # zeby dalo sie czytac ekran
+            with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
+                fh.write("set timeout=0\nset default=0\n"
+                         'menuentry "ProtonOS" {\n'
+                         "    multiboot2 /boot/protonos.bin nodesktop\n"
+                         "    module2 /boot/initrd.img\n}\n")
+            made = subprocess.run(["grub-mkrescue", "-o", iso, isodir],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+            check("obraz ISO buduje sie", made)
+            if made:
+                q21 = Qemu(KERNEL, INITRD, cdrom=iso)
+                try:
+                    boot = q21.wait_for("Multiboot OK", timeout=40)
+                    check("jadro wgrane przez GRUB-a mowi Multiboot 2",
+                          "Multiboot OK (Multiboot 2)" in boot)
+                    check("mapa pamieci ze znacznika Multiboot 2",
+                          re.search(r"Pamiec fizyczna: \d+ KiB RAM",
+                                    q21.wait_for("Pamiec fizyczna",
+                                                 timeout=20)) is not None)
+                    check("initrd dotarl jako modul Multiboot 2",
+                          re.search(r"initrd: \d+ plikow",
+                                    q21.wait_for("initrd:", timeout=20))
+                          is not None)
+                    check("wskaznik na tablice ACPI podany przez GRUB-a",
+                          "ACPI: tablice od" in q21.wait_for("ACPI:",
+                                                             timeout=20))
+                    q21.wait_for("ProtonOS shell", timeout=30)
+                    q21.type_line("uptime")
+                    check("system z plyty odpowiada na komendy",
+                          "uptime:" in q21.wait_for("tyknac timera",
+                                                    timeout=20))
+                finally:
+                    q21.close()
+        finally:
+            shutil.rmtree(isodir, ignore_errors=True)
+            if os.path.exists(iso):
+                os.unlink(iso)
 
     print()
     if failures:

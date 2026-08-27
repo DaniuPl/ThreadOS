@@ -21,6 +21,7 @@
 #include "include/fs.h"
 #include "include/blk.h"
 #include "include/acpi.h"
+#include "include/mb2.h"
 #include "include/usbkbd.h"
 #include "include/swap.h"
 #include "include/desktop.h"
@@ -133,8 +134,9 @@ static void ok(const char *what)
 
 void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 {
-    const struct multiboot_info *mbi =
-        (const struct multiboot_info *)multiboot_info_addr;
+    /* Loader mowi w magicu, w ktorej postaci przekazal informacje;
+       dalej caly system widzi je juz jednakowo */
+    const struct multiboot_info *mbi = mb2_info(magic, multiboot_info_addr);
 
     vga_init();
     serial_init();
@@ -144,13 +146,13 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     printk("Jadro uruchomione w trybie chronionym 32-bit.\n\n");
 
-    if (magic != MULTIBOOT_BOOTLOADER_MAGIC) {
+    if (!mbi) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        printk("BLAD: nieprawidlowy magic Multiboot (%x)!\n", magic);
+        printk("BLAD: nieznany magic od bootloadera (%x)!\n", magic);
         for (;;)
             __asm__ volatile("cli; hlt");
     }
-    ok("Multiboot OK.");
+    printk("[ OK ] Multiboot OK (%s)\n", mb2_boot_kind());
 
     gdt_init();
     ok("GDT zaladowana (plaski model pamieci, segmenty ring 0/3)");
@@ -195,6 +197,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
                initrd_file_count());
 
+    /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
+       tablice ACPI podaje wtedy wylacznie loader */
+    if (mb2_rsdp())
+        acpi_set_rsdp(mb2_rsdp());
     if (acpi_init())
         printk("[ OK ] ACPI: tablice od '%s' (komendy 'poweroff', 'reboot')\n",
                acpi_oem());

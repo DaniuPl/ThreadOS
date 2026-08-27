@@ -120,8 +120,23 @@ static int checksum_ok(const void *p, uint32_t len)
 
 /* RSDP lezy albo w obszarze danych BIOS-u, albo w pamieci ROM
    miedzy 0xE0000 a 0xFFFFF; zawsze na granicy 16 bajtow. */
+/* Wskaznik podany przez loader (Multiboot 2) - ma pierwszenstwo przed
+   szukaniem na wlasna reke, bo pod UEFI szukac nie ma gdzie */
+static uint32_t given_rsdp;
+
+void acpi_set_rsdp(uint32_t addr)
+{
+    given_rsdp = addr;
+}
+
 static const struct rsdp *find_rsdp(void)
 {
+    if (given_rsdp) {
+        const struct rsdp *r = (const struct rsdp *)given_rsdp;
+        if (!memcmp(r->signature, "RSD PTR ", 8) && checksum_ok(r, 20))
+            return r;
+    }
+
     /* Adres obszaru danych BIOS-u lezy pod stalym adresem 0x40E.
        Czytamy go bajt po bajcie: dla kompilatora staly adres wygrany
        na wskaznik to "tablica o zerowej dlugosci" i slusznie sie

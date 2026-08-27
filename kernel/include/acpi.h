@@ -17,6 +17,10 @@
  * (DSDT), pod nazwa _S5_.
  */
 
+/* Wskaznik na tablice podany przez bootloader (Multiboot 2). Wolane
+   przed acpi_init; 0 = loader go nie podal i trzeba poszukac samemu. */
+void acpi_set_rsdp(uint32_t addr);
+
 /* Znajduje tablice ACPI. 1 = mozna wylaczyc komputer. */
 int acpi_init(void);
 

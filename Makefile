@@ -95,7 +95,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/blk.o \
         $(BUILD)/uhci.o \
         $(BUILD)/usbkbd.o \
-        $(BUILD)/acpi.o
+        $(BUILD)/acpi.o \
+        $(BUILD)/mb2.o
 
 .PHONY: all iso run run-iso test fuzz clean
 

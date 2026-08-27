@@ -50,6 +50,7 @@ ProtonOS/
 │   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
 │   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
 │   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
+│   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── uhci.c          # kontroler USB: przesyłki sterujące i przerwaniowe
 │   ├── usbkbd.c        # klawiatura USB (HID, protokół rozruchowy)
@@ -505,3 +506,12 @@ obrazie dysku.
       kontroler klawiatury). Tablice leżą zwykle poza pamięcią zarządzaną
       przez jądro, więc każda jest doklejana do mapowania
       identycznościowego przed odczytem
+- [x] **Multiboot 2**: obraz jądra nosi teraz oba nagłówki naraz. QEMU
+      z opcją `-kernel` rozumie tylko starszy, GRUB woli nowszy - loader
+      wybiera ten, który zna, i mówi w `magic`, którego użył. Informacje
+      z nowszej postaci (linia poleceń, moduły, mapa pamięci) są
+      przepisywane do tej samej struktury, której reszta jądra używa od
+      początku, więc ani PMM, ani initrd nie widzą różnicy. Nowość, która
+      naprawdę coś zmienia: **wskaźnik na tablice ACPI podaje loader** -
+      pod UEFI nie ma pamięci BIOS-u, w której dałoby się go poszukać
+      samemu. To pierwszy krok w stronę rozruchu przez UEFI
