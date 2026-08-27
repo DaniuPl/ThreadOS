@@ -185,6 +185,8 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
           $(BUILD)/64/paging64.o $(BUILD)/64/task64.o \
+          $(BUILD)/64/gdt64.o $(BUILD)/64/syscall64.o \
+          $(BUILD)/64/syscall64_stub.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
 $(BUILD)/64:
@@ -197,6 +199,9 @@ $(BUILD)/64/isr64_stubs.o: boot64/isr64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 $(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64
+	$(CC) -m64 -c $< -o $@
+
+$(BUILD)/64/syscall64_stub.o: boot64/syscall64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 KERNEL64_HEADERS := $(wildcard kernel64/*.h)

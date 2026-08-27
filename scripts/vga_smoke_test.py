@@ -2713,6 +2713,21 @@ def main():
                           "zrobil swoje" in zom
                           and "zadan na liscie: 4" in zom)
 
+                    # Ring 3: selektor kodu zna tylko procesor, a jego
+                    # dwa najnizsze bity mowia, w ktorym pierscieniu
+                    # program NAPRAWDE dzialal. Zeby to powiedziec,
+                    # musial wejsc do jadra instrukcja syscall.
+                    q23.wait_serial("Wywolania systemowe przez instrukcje",
+                                    timeout=20)
+                    r3 = q23.wait_serial("Program w ring 3:", timeout=25)
+                    m = re.search(r"Program w ring 3: (.+?), cs=(\w+), "
+                                  r"pierscien (\d)", r3)
+                    check("program wszedl do jadra instrukcja syscall",
+                          m is not None and m.group(1) == "odezwal sie")
+                    check("procesor potwierdza pierscien 3"
+                          + (f" (cs={m.group(2)})" if m else ""),
+                          m is not None and m.group(3) == "3")
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

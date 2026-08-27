@@ -24,6 +24,9 @@
 #include "idt64.h"
 #include "paging64.h"
 #include "task64.h"
+#include "gdt64.h"
+#include "syscall64.h"
+#include "../kernel/include/string.h"
 
 /* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
    na razie jedna, wiec wszystko idzie na pierwsza. */
@@ -60,6 +63,52 @@ static void mortal(void *arg)
     (void)arg;
     task64_sleep(300);
     mortal_done = 1;
+}
+
+/* Watek, ktory schodzi do ring 3.
+ *
+ * Kod programu lezy w obrazie jadra, ale ring 3 nie ma prawa go tam
+ * czytac - kopiujemy go wiec do swiezej ramki i mapujemy ja jako
+ * dostepna dla uzytkownika. Stos programu to druga taka ramka.
+ *
+ * Ze stosem jadra jest inaczej niz przy bramce przerwania: instrukcja
+ * syscall stosu nie przelacza, wiec adres wlasnego stosu trzeba
+ * procesorowi podac z gory - i to dwa razy, bo przerwanie z ring 3
+ * bierze go skad indziej (z TSS) niz wywolanie systemowe. */
+extern const uint8_t user_payload_start[], user_payload_end[];
+
+#define USER_CODE_VA  0x0000000040000000ULL
+#define USER_STACK_VA 0x0000000040001000ULL
+
+static void ring3_thread(void *arg)
+{
+    (void)arg;
+
+    uint32_t code = pmm_alloc_frame();
+    uint32_t stack = pmm_alloc_frame();
+    if (!code || !stack) {
+        printk("[ !! ] Ring 3: brak pamieci\n");
+        task64_exit();
+    }
+
+    uint64_t len = (uint64_t)(user_payload_end - user_payload_start);
+    memcpy((void *)(uintptr_t)code, user_payload_start, (uint32_t)len);
+
+    /* Kod bez prawa zapisu, stos bez prawa wykonywania - jedno i drugie
+       ring 3 widzi, ale zadne nie jest jednoczesnie i pisane, i wykonywane */
+    if (paging64_map(USER_CODE_VA, code, PG_USER) < 0 ||
+        paging64_map(USER_STACK_VA, stack, PG_USER | PG_WRITE | PG_NX) < 0) {
+        printk("[ !! ] Ring 3: nie da sie zmapowac programu\n");
+        task64_exit();
+    }
+
+    /* Wierzcholek wlasnego stosu - stad jadro wystartuje przy kazdym
+       wejsciu z ring 3 */
+    uint64_t kstack;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
+    syscall64_set_kernel_stack(kstack & ~0xFULL);
+
+    enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16);
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -205,6 +254,23 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            counter_a, counter_b);
     printk("[ OK ] Watek konczacy sie: %s, zadan na liscie: %d\n",
            mortal_done ? "zrobil swoje" : "nie zdazyl", task64_count());
+
+    /* --- Ring 3 -------------------------------------------------- */
+    gdt64_init();
+    printk("[ OK ] GDT z segmentami ring 3 i zadaniem TSS\n");
+
+    syscall64_init();
+    printk("[ OK ] Wywolania systemowe przez instrukcje syscall\n");
+
+    task64_create("ring3", ring3_thread, 0);
+    task64_sleep(200);
+
+    /* Selektor kodu zna tylko procesor - dwa najnizsze bity mowia,
+       w ktorym pierscieniu naprawde dzialal program */
+    uint32_t cs = syscall64_user_cs();
+    printk("[ OK ] Program w ring 3: %s, cs=%x, pierscien %u\n",
+           syscall64_user_ran() ? "odezwal sie" : "MILCZY", cs, cs & 3);
+
     task64_dump();
 
     printk("\nSzkielet 64-bitowy stoi. Reszta jadra dochodzi po kolei.\n");

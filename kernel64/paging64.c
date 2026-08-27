@@ -37,18 +37,26 @@ static uint64_t *table_at(uint64_t entry)
     return (uint64_t *)(uintptr_t)(entry & ADDR_MASK);
 }
 
-/* Zwraca tablice nizszego poziomu, tworzac ja, gdy jeszcze nie ma */
-static uint64_t *ensure(uint64_t *table, int idx)
+/* Zwraca tablice nizszego poziomu, tworzac ja, gdy jeszcze nie ma.
+ *
+ * 'extra' to prawa, ktore musza byc otwarte po drodze. Procesor liczy
+ * dostep jako iloczyn wpisow ze WSZYSTKICH poziomow, wiec zamkniety
+ * wpis posredni uniewaznia najhojniejszy wpis konca sciezki - strona
+ * oznaczona jako dostepna dla uzytkownika i tak byla dla niego
+ * niewidoczna, bo tablica po drodze nie miala tego bitu.
+ *
+ * Otwieramy je na wyrost i to jest bezpieczne: o dostepie rozstrzyga
+ * i tak najbardziej restrykcyjny wpis, a tym jest zawsze ten ostatni. */
+static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
 {
     if (!(table[idx] & PTE_PRESENT)) {
         uint32_t frame = pmm_alloc_frame();
         if (!frame)
             return (uint64_t *)0;
         memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
-        /* Prawa nadaje sie na kazdym poziomie osobno; na posrednich
-           dajemy najszersze, bo o dostepie rozstrzyga i tak najbardziej
-           restrykcyjny wpis na calej sciezce */
-        table[idx] = (uint64_t)frame | PTE_PRESENT | PTE_WRITE;
+        table[idx] = (uint64_t)frame | PTE_PRESENT | PTE_WRITE | extra;
+    } else {
+        table[idx] |= extra;        /* dolozenie praw do istniejacej sciezki */
     }
     return table_at(table[idx]);
 }
@@ -63,17 +71,21 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
     if (!pml4)
         return -1;
 
-    uint64_t *pdpt = ensure(pml4, (int)((virt >> 39) & 0x1FF));
+    /* Bit uzytkownika musi isc przez cala sciezke - inaczej ring 3
+       nie zobaczy strony, choc jej wlasny wpis na to pozwala */
+    uint64_t path = flags & PG_USER;
+
+    uint64_t *pdpt = ensure(pml4, (int)((virt >> 39) & 0x1FF), path);
     if (!pdpt)
         return -1;
-    uint64_t *pd = ensure(pdpt, (int)((virt >> 30) & 0x1FF));
+    uint64_t *pd = ensure(pdpt, (int)((virt >> 30) & 0x1FF), path);
     if (!pd)
         return -1;
 
     int i2 = (int)((virt >> 21) & 0x1FF);
     if (pd[i2] & PTE_HUGE)
         return -1;              /* obszar opisany juz strona 2 MiB */
-    uint64_t *pt = ensure(pd, i2);
+    uint64_t *pt = ensure(pd, i2, path);
     if (!pt)
         return -1;
 
@@ -85,10 +97,10 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
 /* Jeden wpis na dwa megabajty - tak opisujemy pamiec i bufor obrazu */
 static int map_huge(uint64_t virt, uint64_t phys, uint64_t flags)
 {
-    uint64_t *pdpt = ensure(pml4, (int)((virt >> 39) & 0x1FF));
+    uint64_t *pdpt = ensure(pml4, (int)((virt >> 39) & 0x1FF), 0);
     if (!pdpt)
         return -1;
-    uint64_t *pd = ensure(pdpt, (int)((virt >> 30) & 0x1FF));
+    uint64_t *pd = ensure(pdpt, (int)((virt >> 30) & 0x1FF), 0);
     if (!pd)
         return -1;
     pd[(virt >> 21) & 0x1FF] = (phys & ~(uint64_t)(HUGE_SIZE - 1)) |

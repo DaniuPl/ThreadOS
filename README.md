@@ -575,3 +575,15 @@ obrazie dysku.
       wywołania (co przy wywołaniu z obsługi timera zagnieżdżałoby się
       bez końca). Sprawdzian jest arytmetyczny: przez 600 ms wątek
       śpiący po 20 ms budzi się dokładnie 30 razy, a ten po 50 ms - 12
+- [x] **Ring 3 i instrukcja `syscall`** w trybie długim - port jądra
+      domyka się. GDT z segmentami użytkownika (ich kolejność nie jest
+      dowolna: `sysret` składa selektory z jednej wartości w rejestrze
+      STAR, więc dane muszą leżeć **przed** kodem) i zadanie TSS, które
+      w trybie długim ma już tylko jedno zadanie - powiedzieć, na który
+      stos przejść przy przerwaniu z ring 3. Wejście do jądra nie idzie
+      przez bramkę przerwania, tylko przez `syscall`: procesor bierze
+      adres z rejestru modelu, a adres powrotu zostawia w RCX. Cena jest
+      taka, że `syscall` **nie przełącza stosu** - własny trzeba podać
+      z góry, i to dwa razy, bo przerwanie bierze go skądinąd (z TSS)
+      niż wywołanie systemowe. Dowód: program mówi jądru swój selektor
+      kodu, którego zna tylko procesor - `cs=23`, pierścień 3
