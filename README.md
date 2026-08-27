@@ -57,7 +57,7 @@ ProtonOS/
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
-│   ├── vga.c           # tryb tekstowy VGA + 4 konsole wirtualne
+│   ├── vga.c           # 4 konsole wirtualne (VGA albo bufor obrazu)
 │   ├── string.c        # memset/memcpy/strlen (brak libc w jądrze)
 │   └── include/        # nagłówki jądra
 ├── user/               # programy użytkownika (osobne ELF-y!)
@@ -515,3 +515,14 @@ obrazie dysku.
       naprawdę coś zmienia: **wskaźnik na tablice ACPI podaje loader** -
       pod UEFI nie ma pamięci BIOS-u, w której dałoby się go poszukać
       samemu. To pierwszy krok w stronę rozruchu przez UEFI
+- [x] **Konsola na buforze obrazu**: nagłówek Multiboot 2 prosi loader
+      o tryb graficzny, a jądro rysuje w nim znaki samo - tą samą
+      czcionką 8x8, co reszta grafiki, w kolorach trybu tekstowego
+      przeliczonych na RGB. Bufor znaków pod `0xB8000` przestaje być
+      potrzebny, a to warunek działania pod UEFI, gdzie trybu tekstowego
+      VGA nie ma w ogóle. Cztery konsole wirtualne działają bez zmian -
+      różni się tylko to, dokąd trafia gotowa komórka. Pulpit korzysta
+      z tego samego bufora: `video_init_vesa` sięga po interfejs
+      Bochs/QEMU, który istnieje wyłącznie na maszynie wirtualnej, więc
+      gdy tryb ustawił loader, zostajemy przy nim (i dostajemy 1024x768
+      zamiast 640x480)

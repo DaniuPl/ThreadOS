@@ -14,6 +14,21 @@ void video_init(void);
    (brak framebuffera) - wtedy warto wrocic do video_init(). */
 int video_init_vesa(int w, int h);
 
+/* Przejmuje bufor obrazu ustawiony przez bootloader (Multiboot 2).
+   Dziala na kazdym sprzecie - inaczej niz video_init_vesa, ktory siega
+   po interfejs Bochs/QEMU. 0 = przejety. */
+int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp);
+
+/* Doklejenie bufora do mapowania stron - wolac zaraz po paging_init */
+int video_map_lfb(void);
+int video_have_loader_lfb(void);
+
+/* Konsola tekstowa rysowana na buforze obrazu (gdy nie ma trybu
+   tekstowego VGA - np. pod UEFI). 1 = wlaczona. */
+int video_console_enable(void);
+int video_console_active(void);
+void video_console_cell(int col, int row, char ch, uint8_t attr);
+
 /* Wymiary biezacego trybu */
 int video_w(void);
 int video_h(void);

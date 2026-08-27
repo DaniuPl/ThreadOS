@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "include/vga.h"
+#include "include/video.h"
 #include "include/serial.h"
 #include "include/printk.h"
 #include "include/gdt.h"
@@ -138,6 +139,15 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        dalej caly system widzi je juz jednakowo */
     const struct multiboot_info *mbi = mb2_info(magic, multiboot_info_addr);
 
+    /* Gdy loader ustawil tryb graficzny, konsola musi na nim rysowac -
+       i to zanim padnie pierwszy komunikat. Stronicowanie jeszcze nie
+       dziala, wiec bufor jest osiagalny wprost; doklejenie go do
+       mapowania przychodzi zaraz po paging_init. */
+    const struct mb2_framebuffer *lfb = mb2_framebuffer();
+    if (lfb && video_adopt_lfb(lfb->addr, lfb->pitch, (int)lfb->width,
+                               (int)lfb->height, (int)lfb->bpp) == 0)
+        console_use_framebuffer();
+
     vga_init();
     serial_init();
 
@@ -183,6 +193,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     paging_init();
+    video_map_lfb();          /* zanim cokolwiek napiszemy na ekranie */
     printk("[ OK ] Stronicowanie wlaczone (identycznosciowe %u MiB)\n",
            paging_identity_limit() / (1024 * 1024));
 

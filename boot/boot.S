@@ -56,6 +56,18 @@ mb2_header:
     .short 0
     .long 8
 
+    /* Prośba o tryb graficzny z liniowym buforem obrazu.
+       Pod UEFI nie ma trybu tekstowego VGA - bufor znaków pod 0xB8000
+       po prostu nie istnieje - więc jedyną drogą do pokazania czegokolwiek
+       jest bufor obrazu podany przez loader. Znaki rysujemy wtedy sami. */
+    .align 8
+    .short 5                         /* znacznik: tryb obrazu */
+    .short 0
+    .long 20
+    .long 1024                       /* szerokość */
+    .long 768                        /* wysokość */
+    .long 32                         /* bitów na piksel */
+
     .align 8
     .short 0                         /* znacznik końca */
     .short 0

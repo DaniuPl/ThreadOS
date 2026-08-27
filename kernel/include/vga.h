@@ -33,6 +33,10 @@ enum vga_color {
 void console_switch(int n);
 int  console_active(void);
 
+/* Rysuj konsole na buforze obrazu zamiast w buforze znakow VGA -
+   pod UEFI trybu tekstowego nie ma w ogole */
+void console_use_framebuffer(void);
+
 void vga_init(void);
 void vga_clear(void);
 void vga_set_color(enum vga_color fg, enum vga_color bg);

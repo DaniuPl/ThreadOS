@@ -21,6 +21,7 @@
 #define TAG_CMDLINE  1
 #define TAG_MODULE   3
 #define TAG_MMAP     6
+#define TAG_FRAMEBUF 8
 #define TAG_RSDP_OLD 14
 #define TAG_RSDP_NEW 15
 
@@ -42,6 +43,16 @@ struct mmap_entry2 {
     uint32_t reserved;
 } __attribute__((packed));
 
+struct tag_framebuffer {
+    struct tag tag;
+    uint64_t addr;
+    uint32_t pitch;
+    uint32_t width, height;
+    uint8_t bpp;
+    uint8_t type;                /* 1 = kolory wprost, 2 = tekst EGA */
+    uint16_t reserved;
+} __attribute__((packed));
+
 struct tag_module {
     struct tag tag;
     uint32_t mod_start;
@@ -56,6 +67,7 @@ static struct multiboot_info info;
 static struct multiboot_mmap_entry mmap[MMAP_MAX];
 static struct multiboot_mod mods[MODS_MAX];
 static uint32_t rsdp_addr;
+static struct mb2_framebuffer framebuffer;
 static const char *kind = "?";
 
 const char *mb2_boot_kind(void)
@@ -66,6 +78,11 @@ const char *mb2_boot_kind(void)
 uint32_t mb2_rsdp(void)
 {
     return rsdp_addr;
+}
+
+const struct mb2_framebuffer *mb2_framebuffer(void)
+{
+    return framebuffer.addr ? &framebuffer : (const struct mb2_framebuffer *)0;
 }
 
 const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
@@ -128,6 +145,23 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
                 mmap[nmmap].len = e->len;
                 mmap[nmmap].type = e->type;
                 nmmap++;
+            }
+            break;
+        }
+
+        case TAG_FRAMEBUF: {
+            const struct tag_framebuffer *f =
+                (const struct tag_framebuffer *)t;
+            /* Bierzemy tylko tryb z kolorami wprost i adresem, ktory
+               miesci sie w 32 bitach - inny i tak bylby dla nas
+               nieuzyteczny. Typ 2 znaczy, ze loader zostawil tryb
+               tekstowy, wiec zostajemy przy buforze znakow. */
+            if (f->type == 1 && f->bpp == 32 && (f->addr >> 32) == 0) {
+                framebuffer.addr = (uint32_t)f->addr;
+                framebuffer.pitch = f->pitch;
+                framebuffer.width = f->width;
+                framebuffer.height = f->height;
+                framebuffer.bpp = f->bpp;
             }
             break;
         }

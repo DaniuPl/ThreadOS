@@ -21,6 +21,16 @@
    ksztalcie. NULL = magic nie nalezy do zadnej znanej postaci. */
 const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr);
 
+/* Bufor obrazu podany przez loader (tryb graficzny z kolorami wprost).
+   NULL = loader zostawil tryb tekstowy albo nie umial inaczej. */
+struct mb2_framebuffer {
+    uint32_t addr;
+    uint32_t pitch;              /* bajtow na wiersz */
+    uint32_t width, height;
+    uint32_t bpp;
+};
+const struct mb2_framebuffer *mb2_framebuffer(void);
+
 /* Ktora postac zostala uzyta - do komunikatu startowego */
 const char *mb2_boot_kind(void);
 

@@ -15,6 +15,7 @@
 #include "include/vga.h"
 #include "include/string.h"
 #include "include/task.h"
+#include "include/video.h"
 
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
@@ -30,6 +31,11 @@ struct console {
 
 static struct console consoles[CONSOLE_COUNT];
 static int active;
+
+/* Gdy nie ma trybu tekstowego VGA (np. pod UEFI), znaki rysujemy sami
+   na buforze obrazu. Bufor znakow konsoli zostaje bez zmian - rozni
+   sie tylko to, dokad trafia gotowa komorka. */
+static int on_framebuffer;
 
 static uint16_t vga_entry(char c, uint8_t color)
 {
@@ -49,8 +55,36 @@ static struct console *mine(void)
 static void put(struct console *c, size_t idx, uint16_t cell)
 {
     c->cells[idx] = cell;
-    if (c == &consoles[active])
+    if (c != &consoles[active])
+        return;
+    if (on_framebuffer)
+        video_console_cell((int)(idx % VGA_WIDTH), (int)(idx / VGA_WIDTH),
+                           (char)(cell & 0xFF), (uint8_t)(cell >> 8));
+    else
         vga_buffer[idx] = cell;
+}
+
+/* Przerysowuje cala widoczna konsole - po przewinieciu i po
+   przelaczeniu ekranu */
+static void redraw(const struct console *c)
+{
+    if (on_framebuffer) {
+        for (size_t i = 0; i < VGA_CELLS; i++)
+            video_console_cell((int)(i % VGA_WIDTH), (int)(i / VGA_WIDTH),
+                               (char)(c->cells[i] & 0xFF),
+                               (uint8_t)(c->cells[i] >> 8));
+    } else {
+        for (size_t i = 0; i < VGA_CELLS; i++)
+            vga_buffer[i] = c->cells[i];
+    }
+}
+
+/* Wlacza rysowanie konsol na buforze obrazu. Wolane przy starcie,
+   zanim cokolwiek zostanie wypisane. */
+void console_use_framebuffer(void)
+{
+    if (video_console_enable())
+        on_framebuffer = 1;
 }
 
 void vga_set_color(enum vga_color fg, enum vga_color bg)
@@ -77,8 +111,7 @@ void vga_init(void)
             consoles[i].cells[k] = vga_entry(' ', consoles[i].color);
     }
     active = 0;
-    for (size_t k = 0; k < VGA_CELLS; k++)
-        vga_buffer[k] = consoles[0].cells[k];
+    redraw(&consoles[0]);
 }
 
 int console_active(void)
@@ -92,8 +125,7 @@ void console_switch(int n)
     if (n < 0 || n >= CONSOLE_COUNT || n == active)
         return;
     active = n;
-    for (size_t k = 0; k < VGA_CELLS; k++)
-        vga_buffer[k] = consoles[n].cells[k];
+    redraw(&consoles[n]);
 }
 
 /* Przewija konsole o jedna linie w gore */
@@ -106,8 +138,7 @@ static void scroll(struct console *c)
     c->row = VGA_HEIGHT - 1;
 
     if (c == &consoles[active])
-        for (size_t k = 0; k < VGA_CELLS; k++)
-            vga_buffer[k] = c->cells[k];
+        redraw(c);
 }
 
 void vga_putchar(char c)

@@ -386,7 +386,7 @@ def start_http_server():
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, usbkbd=False,
-                 cdrom=None):
+                 cdrom=None, serial=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386",
@@ -410,6 +410,11 @@ class Qemu:
             # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
             # nowsza niz mniej wiecej 2010 rok
             cmd += ["-usb", "-device", "usb-kbd"]
+        self.serial_path = serial
+        if serial:
+            # Gdy konsola rysuje sie na buforze obrazu, w buforze znakow
+            # VGA nie ma juz nic do czytania - tekst zbieramy z portu
+            cmd += ["-serial", "file:" + serial]
         if cdrom:
             # Rozruch jak z prawdziwej plyty: jadro wgrywa GRUB, a nie QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
@@ -614,6 +619,22 @@ class Qemu:
             self.sendkey(self.KEYNAMES.get(ch, ch))
         self.sendkey("ret")
         time.sleep(0.3)
+
+    def serial(self):
+        """Wszystko, co jadro wypisalo na port szeregowy."""
+        if not self.serial_path or not os.path.exists(self.serial_path):
+            return ""
+        with open(self.serial_path, "rb") as fh:
+            return fh.read().decode("latin1")
+
+    def wait_serial(self, text, timeout=20):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            out = self.serial()
+            if text in out:
+                return out
+            time.sleep(0.3)
+        raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na porcie")
 
     def wait_exit(self, timeout=20):
         """Czeka, az QEMU sam sie zakonczy (wylaczenie zasilania)."""
@@ -2330,15 +2351,29 @@ def main():
         check("komenda wpisana z klawiatury USB wykonuje sie",
               "uptime:" in out)
         # Wielka litera powstaje z modyfikatora w raporcie HID -
-        # 'type_line' umie tylko male, wiec skladamy klawisze recznie
-        for ch in "write":
-            q19.sendkey(ch)
-        q19.sendkey("spc")
-        q19.sendkey("shift-a")
-        q19.sendkey("spc")
-        q19.sendkey("x")
-        q19.sendkey("ret")
-        saved = q19.wait_for("zapisano", timeout=20)
+        # 'type_line' umie tylko male, wiec skladamy klawisze recznie.
+        # Klawiature odpytujemy piecdziesiat razy na sekunde, a QEMU
+        # trzyma klawisz okolo stu milisekund - przy zbyt szybkim
+        # nadawaniu press i release sasiednich klawiszy zachodza na
+        # siebie. Stad wolniejsze tempo i druga proba.
+        def type_shift_a():
+            for ch in "write":
+                q19.sendkey(ch)
+                time.sleep(0.15)
+            for k in ("spc", "shift-a", "spc", "x", "ret"):
+                q19.sendkey(k)
+                time.sleep(0.25)
+
+        saved = ""
+        for attempt in range(3):
+            type_shift_a()
+            try:
+                saved = q19.wait_for("zapisano", timeout=10)
+                if "do 'A'" in saved:
+                    break
+            except RuntimeError:
+                pass
+            q19.type_line("clear")
         check("modyfikator Shift z raportu HID daje wielkie litery",
               "do 'A'" in saved)
     finally:
@@ -2495,29 +2530,84 @@ def main():
                                   stderr=subprocess.DEVNULL).returncode == 0
             check("obraz ISO buduje sie", made)
             if made:
-                q21 = Qemu(KERNEL, INITRD, cdrom=iso)
+                slog = tempfile.mktemp(suffix=".log")
+                q21 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog)
                 try:
-                    boot = q21.wait_for("Multiboot OK", timeout=40)
+                    boot = q21.wait_serial("Multiboot OK", timeout=40)
                     check("jadro wgrane przez GRUB-a mowi Multiboot 2",
                           "Multiboot OK (Multiboot 2)" in boot)
                     check("mapa pamieci ze znacznika Multiboot 2",
                           re.search(r"Pamiec fizyczna: \d+ KiB RAM",
-                                    q21.wait_for("Pamiec fizyczna",
-                                                 timeout=20)) is not None)
+                                    q21.wait_serial("Pamiec fizyczna",
+                                                    timeout=20)) is not None)
                     check("initrd dotarl jako modul Multiboot 2",
                           re.search(r"initrd: \d+ plikow",
-                                    q21.wait_for("initrd:", timeout=20))
+                                    q21.wait_serial("initrd:", timeout=20))
                           is not None)
                     check("wskaznik na tablice ACPI podany przez GRUB-a",
-                          "ACPI: tablice od" in q21.wait_for("ACPI:",
-                                                             timeout=20))
-                    q21.wait_for("ProtonOS shell", timeout=30)
+                          "ACPI: tablice od" in q21.wait_serial("ACPI:",
+                                                                timeout=20))
+                    q21.wait_serial("ProtonOS shell", timeout=30)
                     q21.type_line("uptime")
                     check("system z plyty odpowiada na komendy",
-                          "uptime:" in q21.wait_for("tyknac timera",
-                                                    timeout=20))
+                          "uptime:" in q21.wait_serial("tyknac timera",
+                                                       timeout=20))
+
+                    # Konsola rysowana na buforze obrazu od GRUB-a:
+                    # tryb tekstowy VGA w ogole tu nie dziala, wiec
+                    # kazdy zapalony piksel to znak narysowany przez nas
+                    w, h, at = q21.screen_raw()
+                    check(f"loader ustawil tryb graficzny ({w}x{h})",
+                          w >= 640 and h >= 400)
+                    x0, y0 = (w - 640) // 2, (h - 200) // 2
+                    lit = sum(1 for y in range(y0, y0 + 200)
+                              for x in range(x0, x0 + 640)
+                              if at(x, y) != (0, 0, 0))
+                    check(f"konsola narysowana na buforze obrazu "
+                          f"({lit} pikseli)", lit > 3000)
+                    green = sum(1 for y in range(y0, y0 + 200)
+                                for x in range(x0, x0 + 640)
+                                if at(x, y) == (85, 255, 85))
+                    check("kolory trybu tekstowego oddane w RGB "
+                          f"(jasnozielone [ OK ]: {green})", green > 100)
+                    outside = sum(1 for y in range(0, min(40, y0))
+                                  for x in range(0, w, 4)
+                                  if at(x, y) != (0, 0, 0))
+                    check("poza blokiem tekstu ekran czysty", outside == 0)
                 finally:
                     q21.close()
+                    if os.path.exists(slog):
+                        os.unlink(slog)
+
+                # Pulpit na tym samym buforze: video_init_vesa nie ma
+                # tu czego ustawiac, bo tryb ustawil juz loader
+                with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
+                    fh.write("set timeout=0\nset default=0\n"
+                             'menuentry "ProtonOS" {\n'
+                             "    multiboot2 /boot/protonos.bin\n"
+                             "    module2 /boot/initrd.img\n}\n")
+                iso2 = tempfile.mktemp(suffix=".iso")
+                try:
+                    subprocess.run(["grub-mkrescue", "-o", iso2, isodir],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+                    q22 = Qemu(KERNEL, INITRD, cdrom=iso2)
+                    try:
+                        time.sleep(22)
+                        w, h, at = q22.screen_raw()
+                        teal = sum(1 for y in range(0, h, 8)
+                                   for x in range(0, w, 8)
+                                   if all(abs(at(x, y)[i] - (0, 128, 160)[i])
+                                          <= 40 for i in range(3)))
+                        total = (h // 8) * (w // 8)
+                        check(f"pulpit rysuje sie na buforze od loadera "
+                              f"({w}x{h}, {teal}/{total} probek tla)",
+                              teal > total * 0.7)
+                    finally:
+                        q22.close()
+                finally:
+                    if os.path.exists(iso2):
+                        os.unlink(iso2)
         finally:
             shutil.rmtree(isodir, ignore_errors=True)
             if os.path.exists(iso):
