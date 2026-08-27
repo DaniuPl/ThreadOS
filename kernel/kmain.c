@@ -170,7 +170,8 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     paging_init();
-    ok("Stronicowanie wlaczone (identycznosciowe 64 MiB)");
+    printk("[ OK ] Stronicowanie wlaczone (identycznosciowe %u MiB)\n",
+           paging_identity_limit() / (1024 * 1024));
 
     heap_init();
     if (kmalloc_selftest())

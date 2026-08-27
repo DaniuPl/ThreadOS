@@ -31,7 +31,7 @@ void initrd_init(const struct multiboot_info *mbi)
     const struct multiboot_mod *mod =
         (const struct multiboot_mod *)mbi->mods_addr;
 
-    if (mod->end > PAGING_IDENTITY_LIMIT) {
+    if (mod->end > paging_identity_limit()) {
         printk("[ !! ] initrd: modul poza zarzadzana pamiecia (%x)\n",
                mod->start);
         return;

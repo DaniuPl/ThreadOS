@@ -97,7 +97,7 @@ static uint32_t page_frame_for(uint32_t dir, uint32_t vaddr)
 static int load_segment(uint32_t dir, const uint8_t *file,
                         const struct elf_phdr *ph)
 {
-    if (ph->p_vaddr < PAGING_IDENTITY_LIMIT ||
+    if (ph->p_vaddr < PAGING_USER_BASE ||
         ph->p_vaddr + ph->p_memsz > USER_STACK_BASE) {
         printk("exec: segment poza dozwolonym zakresem (%x)\n", ph->p_vaddr);
         return 0;

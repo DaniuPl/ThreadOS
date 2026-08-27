@@ -15,6 +15,7 @@
 #include "include/vga.h"
 #include "include/string.h"
 #include "include/pmm.h"
+#include "include/paging.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -112,8 +113,9 @@ static void cmd_help(void)
 static void cmd_mem(void)
 {
     printk("RAM wykryty:  %u KiB\n", pmm_ram_kib());
-    printk("PMM:          %u/%u ramek 4 KiB zajetych (zarzadzane 64 MiB)\n",
-           pmm_used_frames(), pmm_total_frames());
+    printk("PMM:          %u/%u ramek 4 KiB zajetych (zarzadzane %u MiB)\n",
+           pmm_used_frames(), pmm_total_frames(),
+           paging_identity_limit() / (1024 * 1024));
     printk("sterta jadra: %u/%u B zajetych\n",
            heap_used_bytes(), heap_total_bytes());
 }

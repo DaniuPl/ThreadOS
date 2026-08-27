@@ -46,7 +46,7 @@ ProtonOS/
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
 │   │                   #   ifconfig, arp, ping...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
-│   ├── paging.c        # stronicowanie - mapowanie identycznościowe 64 MiB
+│   ├── paging.c        # stronicowanie - identycznościowe całe RAM, COW
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
@@ -428,3 +428,12 @@ obrazie dysku.
       trzymającego konsolę i przerywa jego oczekiwanie na klawisz;
       `kill P S` w shellu jądra wysyła dowolny sygnał, także pod nazwę
       procesu (`run sigtest`)
+- [x] Cała wykryta pamięć pod zarządem: mapowanie identycznościowe nie
+      kończy się już na 64 MiB, tylko sięga szczytu RAM-u (do 512 MiB).
+      Pierwsze 64 MiB opisują tablice statyczne - jądro musi widzieć
+      pamięć, zanim poprosi PMM o pierwszą ramkę - a dalsze tablice
+      biorą się już z PMM, więc granicę wyznacza ilość RAM-u, a nie
+      rozmiar tablicy w `.bss`. Przestrzeń użytkownika przeprowadziła
+      się z `0x08048000` pod **1 GiB**, żeby zejść mapowaniu z drogi:
+      jeden proces potrafi teraz zająć 80 MiB, czyli więcej, niż cały
+      system widział wcześniej

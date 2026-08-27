@@ -715,6 +715,15 @@ def main():
         check("komenda 'mem' pokazuje RAM i ramki",
               "RAM wykryty" in screen and "ramek 4 KiB" in screen)
         check("komenda 'mem' pokazuje sterte", "sterta jadra" in screen)
+        # Cala wykryta pamiec jest pod zarzadem, nie tylko pierwsze 64 MiB:
+        # mapowanie identycznosciowe ciagnie sie az po szczyt RAM-u.
+        mm = re.search(r"zarzadzane (\d+) MiB", screen)
+        ram = re.search(r"RAM wykryty:\s+(\d+) KiB", screen)
+        check("zarzadzana pamiec siega szczytu wykrytego RAM-u"
+              + (f" ({mm.group(1)} MiB z {int(ram.group(1)) // 1024} MiB)"
+                 if mm and ram else ""),
+              mm is not None and ram is not None
+              and int(mm.group(1)) >= int(ram.group(1)) // 1024 - 2)
 
         q.type_line("uptime")
         screen = q.screen()
@@ -748,8 +757,12 @@ def main():
 
         # 'run hello': proces ELF z wlasna przestrzenia adresowa
         q.type_line("run hello")
-        q.wait_for("[hello] czesc, jestem procesem ELF")
+        screen = q.wait_for("[hello] czesc, jestem procesem ELF")
         check("proces hello wystartowal z ELF i robi syscall write", True)
+        # Przestrzen uzytkownika zaczyna sie od 1 GiB - ponizej jest juz
+        # tylko mapowanie identycznosciowe jadra
+        check("program uzytkownika mieszka powyzej 1 GiB",
+              re.search(r"entry 4[0-9a-f]{7}", screen) is not None)
         q.wait_for("[hello] licze: 3")
         check("syscalle write+sleep dzialaja w petli", True)
         q.wait_for("proces 'hello' zakonczyl sie (kod 0)")

@@ -1,13 +1,29 @@
 #ifndef PROTONOS_PAGING_H
 #define PROTONOS_PAGING_H
 
-/* Granica mapowania identycznościowego (musi zgadzać się z pmm.c) */
-#define PAGING_IDENTITY_LIMIT (64u * 1024 * 1024)
-
 #include <stdint.h>
 
-/* Mapuje identycznościowo pierwsze 64 MiB i włącza stronicowanie */
+/* Początek przestrzeni użytkownika. Poniżej tego adresu jądro trzyma
+   mapowanie identycznościowe całej pamięci fizycznej, którą zarządza -
+   to więc ten adres, a nie ilość RAM-u, wyznacza granicę między
+   światami. Program użytkownika linkuje się od niego (user/user.ld). */
+#define PAGING_USER_BASE 0x40000000u        /* 1 GiB */
+
+/* Ile pamięci fizycznej jądro potrafi objąć mapowaniem
+   identycznościowym (musi zgadzać się z pmm.c i mieścić poniżej
+   PAGING_USER_BASE) */
+#define PAGING_MANAGED_MAX (512u * 1024 * 1024)
+
+/* Pierwsze 64 MiB opisują tablice statyczne - jądro musi widzieć
+   pamięć, zanim zacznie prosić PMM o ramki na dalsze tablice */
+#define PAGING_STATIC_LIMIT (64u * 1024 * 1024)
+
+/* Mapuje identycznościowo całą wykrytą pamięć (do PAGING_MANAGED_MAX)
+   i włącza stronicowanie */
 void paging_init(void);
+
+/* Dokąd naprawdę sięga mapowanie identycznościowe (bajty) */
+uint32_t paging_identity_limit(void);
 
 /* Mapuje identycznościowo zakres pamieci fizycznej (np. framebuffer
    VESA lezacy wysoko, poza 64 MiB). Zwraca 0 albo -1. */

@@ -29,4 +29,8 @@ uint32_t pmm_total_frames(void);
 uint32_t pmm_used_frames(void);
 uint32_t pmm_ram_kib(void);    /* cala wykryta pamiec RAM w KiB */
 
+/* Adres tuz za ostatnia zarzadzana ramka - stad stronicowanie wie,
+   dokad ciagnac mapowanie identycznosciowe */
+uint32_t pmm_managed_top(void);
+
 #endif

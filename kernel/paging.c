@@ -1,11 +1,18 @@
 /* Stronicowanie
  *
- * Pierwsze 64 MiB mapujemy identycznościowo (adres wirtualny = fizyczny)
- * stronami 4 KiB i włączamy bit PG w CR0. Jądro działa dalej pod tymi
- * samymi adresami, ale od teraz każdy dostęp poza mapowany obszar
- * wywoła page fault zamiast cichej korupcji pamięci.
+ * Całą wykrytą pamięć fizyczną mapujemy identycznościowo (adres
+ * wirtualny = fizyczny) stronami 4 KiB i włączamy bit PG w CR0. Jądro
+ * działa dalej pod tymi samymi adresami, ale od teraz każdy dostęp poza
+ * mapowany obszar wywoła page fault zamiast cichej korupcji pamięci.
  *
- * Katalog i tablice stron są statyczne - 64 MiB to 16 tablic po 4 KiB.
+ * Pierwsze 64 MiB opisują tablice statyczne - jądro musi widzieć
+ * pamięć, zanim zacznie prosić PMM o ramki na cokolwiek. Dalsze tablice
+ * biorą się już z PMM, więc granicę wyznacza ilość RAM-u, a nie rozmiar
+ * tablicy w .bss.
+ *
+ * Mapowanie kończy się najpóźniej na PAGING_USER_BASE: powyżej zaczyna
+ * się przestrzeń użytkownika i tam ta sama liczba znaczy już co innego
+ * w każdym procesie.
  */
 
 #include <stdint.h>
@@ -21,10 +28,16 @@
    na kopiowanie przy zapisie (fork). Sprzet go ignoruje. */
 #define PTE_COW     0x200
 
-#define NUM_TABLES (PAGING_IDENTITY_LIMIT / (4096u * 1024))
+#define NUM_TABLES (PAGING_STATIC_LIMIT / (4096u * 1024))
 
 static uint32_t page_directory[1024] __attribute__((aligned(4096)));
 static uint32_t page_tables[NUM_TABLES][1024] __attribute__((aligned(4096)));
+static uint32_t identity_limit;   /* dokad naprawde siega mapowanie */
+
+uint32_t paging_identity_limit(void)
+{
+    return identity_limit;
+}
 
 void paging_init(void)
 {
@@ -33,6 +46,16 @@ void paging_init(void)
             page_tables[t][i] = ((t * 1024 + i) * 4096) | PTE_PRESENT | PTE_WRITE;
         page_directory[t] = (uint32_t)page_tables[t] | PTE_PRESENT | PTE_WRITE;
     }
+    identity_limit = PAGING_STATIC_LIMIT;
+
+    /* Reszta wykrytej pamieci - tablice stron biora sie juz z PMM.
+       Wyzej niz do poczatku przestrzeni uzytkownika nie idziemy. */
+    uint32_t top = pmm_managed_top();
+    if (top > PAGING_USER_BASE)
+        top = PAGING_USER_BASE;
+    if (top > PAGING_STATIC_LIMIT &&
+        paging_map_phys(PAGING_STATIC_LIMIT, top - PAGING_STATIC_LIMIT) == 0)
+        identity_limit = top;
 
     /* PG (bit 31) wlacza stronicowanie, WP (bit 16) sprawia, ze zakaz
        zapisu obowiazuje takze jadro. Bez WP kod jadra pisalby w strony
@@ -62,7 +85,7 @@ int paging_map_phys(uint32_t phys, uint32_t size)
         uint32_t pde = a >> 22;
         uint32_t pte = (a >> 12) & 0x3FF;
         if (!(page_directory[pde] & PTE_PRESENT)) {
-            uint32_t pt = pmm_alloc_frame();   /* ramka <64 MiB, identycznie */
+            uint32_t pt = pmm_alloc_frame();   /* ramka nisko, widoczna wprost */
             if (!pt)
                 return -1;
             memset((void *)pt, 0, 4096);
@@ -75,9 +98,9 @@ int paging_map_phys(uint32_t phys, uint32_t size)
     return 0;
 }
 
-/* Wszystkie ramki z PMM leżą <64 MiB, więc jądro widzi je przez
-   mapowanie identycznościowe - katalogi i tablice stron procesów
-   modyfikujemy wprost po adresie fizycznym. */
+/* Każda ramka z PMM leży w obszarze mapowanym identycznościowo, więc
+   jądro widzi ją wprost pod jej adresem fizycznym - katalogi i tablice
+   stron procesów modyfikujemy bez żadnego okna ani mapowania tymczasowego. */
 
 uint32_t paging_new_address_space(void)
 {
@@ -95,7 +118,7 @@ uint32_t paging_new_address_space(void)
 int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
 {
     /* Nie pozwól zamapować strony użytkownika na obszarze jądra */
-    if (vaddr < PAGING_IDENTITY_LIMIT)
+    if (vaddr < PAGING_USER_BASE)
         return 0;
 
     uint32_t *dir = (uint32_t *)dir_phys;

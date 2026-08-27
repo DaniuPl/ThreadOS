@@ -4,17 +4,20 @@
  * pamięci z Multiboot oznaczamy dostępne obszary jako wolne, po czym
  * rezerwujemy pierwszy 1 MiB (BIOS, VGA) i obraz jądra.
  *
- * Zarządzamy maksymalnie pierwszymi 64 MiB - tyle stronicowanie mapuje
- * identycznościowo (zob. paging.c). Pamięć powyżej zostanie podpięta,
- * gdy powstanie pełny menedżer pamięci wirtualnej.
+ * Zarządzamy pamięcią do PAGING_MANAGED_MAX - tyle stronicowanie umie
+ * objąć mapowaniem identycznościowym, nie wchodząc w przestrzeń
+ * użytkownika (zob. paging.c). Bitmapa i liczniki właścicieli są
+ * statyczne na tę górną granicę; ile ramek naprawdę istnieje, mówi
+ * dopiero mapa pamięci od bootloadera.
  */
 
 #include "include/pmm.h"
+#include "include/paging.h"
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
 
-#define MANAGED_LIMIT (64u * 1024 * 1024)
+#define MANAGED_LIMIT PAGING_MANAGED_MAX
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
 
 /* Symbole z linker.ld wyznaczające obraz jądra w pamięci */
@@ -28,6 +31,7 @@ static uint16_t refs[MAX_FRAMES];
 static uint32_t total_frames;   /* ramki dostępne dla PMM */
 static uint32_t used_frames;
 static uint32_t ram_kib;        /* cała wykryta pamięć */
+static uint32_t managed_top;    /* adres tuż za ostatnią zarządzaną ramką */
 
 static void frame_set(uint32_t frame)   { bitmap[frame / 32] |=  (1u << (frame % 32)); }
 static void frame_clear(uint32_t frame) { bitmap[frame / 32] &= ~(1u << (frame % 32)); }
@@ -79,6 +83,8 @@ void pmm_init(const struct multiboot_info *mbi)
                     frame_clear(f);
                     total_frames++;
                 }
+                if (f_end * PAGE_SIZE > managed_top)
+                    managed_top = f_end * PAGE_SIZE;
             }
         }
         entry_addr += e->size + 4;
@@ -170,3 +176,4 @@ uint32_t pmm_frame_refs(uint32_t addr)
 uint32_t pmm_total_frames(void) { return total_frames; }
 uint32_t pmm_used_frames(void)  { return used_frames; }
 uint32_t pmm_ram_kib(void)      { return ram_kib; }
+uint32_t pmm_managed_top(void)  { return managed_top; }
