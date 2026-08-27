@@ -50,7 +50,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gweb.elf \
              $(BUILD)/user/cryptotest.elf \
              $(BUILD)/user/certtest.elf \
-             $(BUILD)/user/forktest.elf
+             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -149,7 +149,7 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    gweb=$(BUILD)/user/gweb.elf \
 	    cryptotest=$(BUILD)/user/cryptotest.elf \
 	    certtest=$(BUILD)/user/certtest.elf \
-	    forktest=$(BUILD)/user/forktest.elf
+	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf
 
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.

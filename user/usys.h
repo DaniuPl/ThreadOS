@@ -47,6 +47,7 @@
 #define SYS_TCP_CLOSE   40
 #define SYS_FORK        41
 #define SYS_EXEC        42
+#define SYS_WAITANY     43
 
 #define FS_NAME_MAX  63
 
@@ -173,6 +174,18 @@ static inline int32_t sys_fork(void)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_FORK) : "memory");
+    return ret;
+}
+
+/* Czeka na dowolne wlasne dziecko. Zwraca jego pid, a kod wyjscia
+   wpisuje pod 'code' (moze byc NULL). -1 = nie ma juz dzieci. */
+static inline int32_t sys_waitany(int32_t *code)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WAITANY), "b"(code)
+                     : "memory");
     return ret;
 }
 

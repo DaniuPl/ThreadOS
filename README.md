@@ -104,6 +104,7 @@ ProtonOS/
 │   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── forktest.c      # fork() i kopiowanie przy zapisie
+│   ├── ptree.c         # drzewo procesów: waitany i sieroty
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
@@ -409,3 +410,8 @@ obrazie dysku.
       program, zachowując pid, deskryptory i katalog roboczy - razem
       z `fork()` daje to klasyczną parę uniksową (rozwidl się, w dziecku
       wskocz w nowy program), a `ps` pokazuje już nową nazwę
+- [x] Drzewo procesów: każde zadanie zna swojego rodzica (`ps` pokazuje
+      kolumnę RODZIC), `waitany` czeka na **dowolne** własne dziecko
+      i oddaje je w kolejności kończenia (pid + kod wyjścia), a osierocone
+      procesy trafiają pod opiekę dziadka - ich kod wyjścia nie przepada
+      razem z rodzicem (`run ptree`)

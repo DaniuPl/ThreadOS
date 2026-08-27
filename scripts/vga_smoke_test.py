@@ -860,6 +860,37 @@ def main():
         check(f"brak wycieku ramek po fork ({used_before_fk} -> {used_after_fk})",
               used_after_fk is not None and used_after_fk == used_before_fk)
 
+        # 'run ptree': drzewo procesow. Trzy dzieci koncza sie w innej
+        # kolejnosci, niz powstaly, a rodzic zbiera je przez waitany.
+        q.type_line("clear")
+        q.type_line("mem")
+        used_before_pt = pmm_used(q.screen())
+        q.type_line("run ptree")
+        screen = q.wait_for("[ptree] zebrane wszystkie dzieci", timeout=30)
+        m = re.findall(r"skonczylo dziecko (\d+) z kodem (\d+)", screen)
+        check("wait na dowolne dziecko oddaje je w kolejnosci konczenia"
+              + (f" (pidy {[p for p, _ in m]})" if m else ""),
+              len(m) == 3 and [int(p) for p, _ in m] == sorted(
+                  (int(p) for p, _ in m), reverse=True))
+        check("kod wyjscia pasuje do dziecka, ktore go zwrocilo",
+              [c for _, c in m] == ["22", "21", "20"])
+        screen = q.wait_for("[ptree] sierota przygarnieta", timeout=30)
+        check("sierota trafia pod opieke dziadka (kod 99 dociera do niego)",
+              "z kodem 99" in screen)
+        q.wait_for("proces 'ptree' zakonczyl sie (kod 0)", timeout=20)
+        time.sleep(0.6)
+        q.type_line("mem")
+        used_after_pt = pmm_used(q.screen())
+        check(f"brak wycieku ramek po drzewie procesow"
+              f" ({used_before_pt} -> {used_after_pt})",
+              used_after_pt is not None and used_after_pt == used_before_pt)
+
+        q.type_line("clear")
+        q.type_line("ps")
+        screen = q.screen()
+        check("ps pokazuje rodzica kazdego watku",
+              "RODZIC" in screen and re.search(r"\n  0   -", screen) is not None)
+
         # 'run prio': scheduler z priorytetami. Watek normalny wywlaszcza
         # niski -> przez to samo okno czasu naliczy wielokrotnie wiecej.
         q.type_line("run prio")

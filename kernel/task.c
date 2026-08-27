@@ -38,6 +38,7 @@ struct task {
     uint32_t brk;               /* koniec sterty procesu (sbrk); 0 = wątek jądra */
     uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
+    int parent;                  /* pid rodzica (-1 = brak, sierota) */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -61,14 +62,17 @@ static struct task *current;
 static int next_id;
 
 /* Tablica kodow wyjscia zakonczonych procesow - wait je stad odczytuje.
+   Kazdy wpis pamieta tez rodzica, bo zadanie znika z listy szybciej,
+   niz rodzic zdazy po niego przyjsc (task_wait_any pyta wlasnie tu).
    Maly bufor cykliczny; przy przepelnieniu nadpisuje najstarszy wpis. */
 #define EXIT_SLOTS 16
-static struct { int pid; int code; int valid; } exit_codes[EXIT_SLOTS];
+static struct { int pid; int parent; int code; int valid; } exit_codes[EXIT_SLOTS];
 static int exit_next;
 
-static void exit_record(int pid, int code)
+static void exit_record(int pid, int parent, int code)
 {
     exit_codes[exit_next].pid = pid;
+    exit_codes[exit_next].parent = parent;
     exit_codes[exit_next].code = code;
     exit_codes[exit_next].valid = 1;
     exit_next = (exit_next + 1) % EXIT_SLOTS;
@@ -139,6 +143,7 @@ void scheduler_init(void)
     main_task->brk = 0;
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* katalog glowny */
+    main_task->parent = -1;     /* korzen drzewa procesow */
     main_task->killed = 0;
     main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
     task_init_fds(main_task);
@@ -156,6 +161,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->brk = 0;
     t->mmap_next = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
+    t->parent = current ? current->id : -1;
     t->killed = 0;
     t->priority = 1;            /* domyslnie normalny priorytet */
     task_init_fds(t);
@@ -427,7 +433,21 @@ void task_exit(int code)
     current->exit_code = code;
     /* Zapamietaj kod od razu - wait widzi 'nieaktywny' juz przy ZOMBIE,
        a reaper moze sprzatnac zadanie zanim wait zdazy je odczytac */
-    exit_record(current->id, code);
+    exit_record(current->id, current->parent, code);
+
+    /* Dzieci, ktore nas przezyly, trafiaja pod opieke wlasnego dziadka
+       (a w ostateczonosci watku glownego) - inaczej nikt nigdy nie
+       odebralby ich kodu wyjscia. */
+    int grandparent = current->parent >= 0 ? current->parent : 0;
+    struct task *t = current->next;
+    while (t != current) {
+        if (t->parent == current->id)
+            t->parent = grandparent;
+        t = t->next;
+    }
+    for (int i = 0; i < EXIT_SLOTS; i++)
+        if (exit_codes[i].valid && exit_codes[i].parent == current->id)
+            exit_codes[i].parent = grandparent;
     current->state = TASK_ZOMBIE;
     schedule();
     (void)flags;
@@ -442,6 +462,55 @@ int task_wait(int pid)
     while (task_alive(pid))
         task_sleep(20);
     return exit_take(pid);
+}
+
+/* Czy biezace zadanie ma jeszcze zywe dzieci? */
+static int has_children(void)
+{
+    uint32_t flags = irq_save();
+    int any = 0;
+    struct task *t = current->next;
+    while (t != current) {
+        if (t->parent == current->id && t->state != TASK_ZOMBIE) {
+            any = 1;
+            break;
+        }
+        t = t->next;
+    }
+    irq_restore(flags);
+    return any;
+}
+
+/* Zdejmuje kod wyjscia dowolnego zakonczonego dziecka; -1 gdy zadne
+   jeszcze nie skonczylo */
+static int take_child_exit(int *code)
+{
+    uint32_t flags = irq_save();
+    int pid = -1;
+    for (int i = 0; i < EXIT_SLOTS; i++) {
+        if (exit_codes[i].valid && exit_codes[i].parent == current->id) {
+            exit_codes[i].valid = 0;
+            pid = exit_codes[i].pid;
+            *code = exit_codes[i].code;
+            break;
+        }
+    }
+    irq_restore(flags);
+    return pid;
+}
+
+/* Czeka na dowolne wlasne dziecko i zwraca jego pid (kod wyjscia do
+   *code). -1 oznacza, ze nie ma juz na co czekac - zadnych dzieci. */
+int task_wait_any(int *code)
+{
+    for (;;) {
+        int pid = take_child_exit(code);
+        if (pid >= 0)
+            return pid;
+        if (!has_children())
+            return -1;
+        task_sleep(20);
+    }
 }
 
 /* Zaznacza proces o danym pid do zabicia. Faktyczne zakonczenie nastapi,
@@ -561,10 +630,15 @@ void task_dump(void)
                                          "czeka", "zombie" };
 
     uint32_t flags = irq_save();
-    printk("  ID  STAN    NAZWA\n");
+    printk("  ID  RODZIC  STAN    NAZWA\n");
     struct task *t = current;
     do {
-        printk("  %d   %s", t->id, state_names[t->state]);
+        printk("  %d   ", t->id);
+        if (t->parent >= 0)
+            printk("%d", t->parent);
+        else
+            printk("-");
+        printk("       %s", state_names[t->state]);
         for (int pad = 8 - (int)strlen(state_names[t->state]); pad > 0; pad--)
             printk(" ");
         printk("%s%s\n", t->name, t == current ? " (biezacy)" : "");

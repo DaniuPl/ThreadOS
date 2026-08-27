@@ -441,6 +441,16 @@ void syscall_handler(struct regs *r)
         tcp_close((int)r->ebx, task_current_id());
         r->eax = 0;
         break;
+    case SYS_WAITANY: {
+        int code = 0;
+        int pid = task_wait_any(&code);
+        if (pid >= 0 && r->ebx && user_put(r->ebx, &code, sizeof(code)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)pid;      /* -1 = nie ma juz dzieci */
+        break;
+    }
     case SYS_EXEC: {
         /* Linia polecen do bufora jadra: pamiec procesu zaraz zniknie
            razem z cala jego przestrzenia adresowa */

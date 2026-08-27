@@ -45,6 +45,7 @@
 #define SYS_TCP_CLOSE   40 /* ebx=polaczenie -> 0 */
 #define SYS_FORK        41 /* -> pid dziecka (rodzic) / 0 (dziecko) / -1 */
 #define SYS_EXEC        42 /* ebx=linia polecen; nie wraca albo -1 */
+#define SYS_WAITANY     43 /* ebx=&kod -> pid dziecka albo -1 (brak dzieci) */
 
 #define SYSCALL_VECTOR 0x80
 

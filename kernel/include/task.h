@@ -32,6 +32,10 @@ struct file_desc *task_fds(void);
    biezacym sterte, katalog roboczy, priorytet i deskryptory */
 struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3);
 
+/* Czeka na dowolne wlasne dziecko: zwraca jego pid, a kod wyjscia
+   wpisuje do *code. -1 = brak dzieci, na ktore mozna czekac. */
+int task_wait_any(int *code);
+
 /* Zmienia nazwe biezacego zadania (exec podmienia program) */
 void task_rename(const char *name);
 
