@@ -17,6 +17,7 @@
 #include "include/pmm.h"
 #include "include/paging.h"
 #include "include/swap.h"
+#include "include/acpi.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -95,6 +96,7 @@ static const struct {
     {"vesa",     "test trybu VESA"},
     {"crash",    "test page faulta"},
     {"reboot",   "restart komputera"},
+    {"poweroff", "wylacz komputer"},
 };
 
 #define COMMAND_N ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -401,8 +403,16 @@ static void run_command(char *cmd)
         vga_clear();
     else if (!strcmp(cmd, "crash"))
         *(volatile uint32_t *)0xE0000000 = 1;  /* poza mapowaniem -> #PF */
-    else if (!strcmp(cmd, "reboot"))
-        outb(0x64, 0xFE);  /* impuls reset przez kontroler klawiatury */
+    else if (!strcmp(cmd, "reboot")) {
+        printk("Restart...\n");
+        if (!acpi_reboot())
+            outb(0x64, 0xFE);  /* zapasowo: impuls przez kontroler klawiatury */
+    }
+    else if (!strcmp(cmd, "poweroff")) {
+        printk("Wylaczanie zasilania...\n");
+        acpi_poweroff();
+        printk("poweroff: nie udalo sie - mozna wylaczyc zasilanie recznie\n");
+    }
     else
         printk("nieznana komenda: '%s' (wpisz 'help')\n", cmd);
 }

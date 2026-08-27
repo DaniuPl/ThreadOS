@@ -50,6 +50,7 @@ ProtonOS/
 │   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
 │   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
 │   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
+│   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── uhci.c          # kontroler USB: przesyłki sterujące i przerwaniowe
 │   ├── usbkbd.c        # klawiatura USB (HID, protokół rozruchowy)
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
@@ -494,3 +495,13 @@ obrazie dysku.
 - [x] Skanowanie PCI obejmuje wszystkie funkcje urządzenia, nie tylko
       zerową - kontrolery wbudowane w mostek siedzą na funkcji 2 albo 3
       i przeglądanie samych zerowych nie znajdowało ich nigdy
+- [x] **ACPI**: wyłączanie i restart komputera. Wskaźnik RSDP znajdowany
+      w pamięci poniżej megabajta, przez niego spis tablic (RSDT), a w nim
+      tablica zasilania (FADT). Sama wartość, którą trzeba wpisać, żeby
+      komputer zgasł, siedzi jeszcze głębiej - w bajtkodzie AML (DSDT),
+      pod nazwą `_S5_`; pełnego interpretera nie ma, ten jeden obiekt
+      czytamy wprost. Komendy `poweroff` i `reboot` (restart przez
+      rejestr resetu ACPI, a gdy firmware go nie podaje - impulsem przez
+      kontroler klawiatury). Tablice leżą zwykle poza pamięcią zarządzaną
+      przez jądro, więc każda jest doklejana do mapowania
+      identycznościowego przed odczytem

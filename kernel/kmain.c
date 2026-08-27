@@ -20,6 +20,7 @@
 #include "include/initrd.h"
 #include "include/fs.h"
 #include "include/blk.h"
+#include "include/acpi.h"
 #include "include/usbkbd.h"
 #include "include/swap.h"
 #include "include/desktop.h"
@@ -194,10 +195,16 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
                initrd_file_count());
 
-    if (blk_init())
-        printk("[ OK ] Kontroler dysku: %s\n", blk_name());
+    if (acpi_init())
+        printk("[ OK ] ACPI: tablice od '%s' (komendy 'poweroff', 'reboot')\n",
+               acpi_oem());
+    else
+        printk("[ !! ] ACPI: brak tablic - komputera nie wylaczymy\n");
+
+    blk_init();
     if (fs_init())
-        ok("Dysk + PFS gotowy (komendy 'fls', 'cat', 'write')");
+        printk("[ OK ] Dysk %s + PFS gotowy (komendy 'fls', 'cat', 'write')\n",
+               blk_name());
 
     int has_net = net_init();
     if (has_net) {

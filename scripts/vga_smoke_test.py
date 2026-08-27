@@ -608,6 +608,15 @@ class Qemu:
         self.sendkey("ret")
         time.sleep(0.3)
 
+    def wait_exit(self, timeout=20):
+        """Czeka, az QEMU sam sie zakonczy (wylaczenie zasilania)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                return True
+            time.sleep(0.3)
+        return False
+
     def close(self):
         self.proc.kill()
         for p in (self.qmp_path, self.dump_path):
@@ -638,9 +647,9 @@ def main():
         print("===========================")
 
         check("dysk + PFS wykryty i sformatowany",
-              "Dysk + PFS gotowy" in screen)
+              "+ PFS gotowy" in screen)
         check("kontroler dysku nazwany przy boocie (tu stary ATA PIO)",
-              "Kontroler dysku: ATA PIO" in screen)
+              "Dysk ATA PIO + PFS gotowy" in screen)
         check("mysz PS/2 wykryta przy boocie",
               "Mysz PS/2 gotowa" in screen)
         check("karta sieciowa RTL8139 wykryta przy boocie",
@@ -1740,7 +1749,7 @@ def main():
     try:
         screen = q2.wait_for("ProtonOS shell")
         check("drugi boot: dysk wykryty (juz sformatowany, bez ponownego format)",
-              "Dysk + PFS gotowy" in screen
+              "+ PFS gotowy" in screen
               and "sformatowany" not in screen)
 
         q2.type_line("fls")
@@ -2275,6 +2284,24 @@ def main():
         if os.path.exists(idisk):
             os.unlink(idisk)
 
+    # --- ACPI: wylaczenie i restart komputera ----------------------
+    # Wylaczenie zasilania widac po tym, ze maszyna wirtualna sama
+    # konczy dzialanie - to najuczciwszy dowod, jaki mozna miec.
+    print("--- ACPI (wylaczanie zasilania) ---")
+    q20 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
+    try:
+        boot = q20.wait_for("ACPI:", timeout=30)
+        check("tablice ACPI znalezione przy starcie",
+              re.search(r"ACPI: tablice od '\S+", boot) is not None)
+        q20.wait_for("ProtonOS shell", timeout=20)
+        q20.type_line("help")
+        check("'poweroff' jest w spisie komend",
+              "poweroff" in q20.wait_for("Dostepne komendy", timeout=20))
+        q20.type_line("poweroff")
+        check("'poweroff' faktycznie gasi maszyne", q20.wait_exit(timeout=20))
+    finally:
+        q20.close()
+
     # --- Klawiatura USB --------------------------------------------
     # Kontroler USB, rozpoznanie urzadzenia, protokol rozruchowy HID.
     # QEMU kieruje klawisze do urzadzenia USB, wiec to, ze komenda
@@ -2321,11 +2348,11 @@ def main():
         fh.truncate(64 * 1024 * 1024)
     q18 = Qemu(KERNEL, INITRD, sdisk, append=TEXT_MODE, ram_mib=16, sata=True)
     try:
-        boot = q18.wait_for("Kontroler dysku:", timeout=30)
+        boot = q18.wait_for("+ PFS gotowy", timeout=30)
         check("kontroler AHCI wykryty po PCI i wybrany zamiast ATA",
-              "Kontroler dysku: AHCI" in boot)
+              "Dysk AHCI (SATA, DMA) + PFS gotowy" in boot)
         check("PFS sformatowal dysk przez AHCI",
-              "PFS" in q18.wait_for("Dysk + PFS gotowy", timeout=20))
+              "sformatowany" in boot)
         check("plik wymiany zalozony na dysku SATA",
               re.search(r"Wymiana stron: \d+ KiB",
                         q18.wait_for("Wymiana stron:", timeout=20)) is not None)
