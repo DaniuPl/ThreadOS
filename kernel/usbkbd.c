@@ -185,22 +185,15 @@ static void poll_thread(void *arg)
            pisaniu - a przy przepelnieniu kolejki urzadzenie po prostu
            wyrzuca to, czego nie zdazylismy odebrac. Opozniamy sie wiec
            dopiero wtedy, gdy naprawde nie ma juz nic do wziecia. */
-        /* Klawiatura kolejkuje raporty i oddaje po jednym na zapytanie.
-           Przy szybkim pisaniu jedno zapytanie na obieg to za malo -
-           czytamy, dopoki cos jest, i dopiero potem idziemy spac.
-
-           To wlasnie drenaz kolejki radzi sobie z szybkim pisaniem,
-           a nie czestsze zagladanie: odpytywanie co 10 ms zamiast co 20
-           przestaje dzialac zupelnie - watek nie schodzi wtedy z drogi
-           kontrolerowi na tyle dlugo, by ten zdazyl przerobic ramke. */
-        for (int i = 0; i < 8; i++) {
-            int n = uhci_interrupt_in(dev_addr, dev_lowspeed, ep_num,
-                                      ep_maxpacket, report, ep_maxpacket,
-                                      &toggle);
-            if (n < 8)
-                break;
+        /* Jeden raport na obieg. Wiecej nie trzeba: deskryptor odczytu
+           czeka w kolejce kontrolera bez przerwy, wiec raporty
+           kolejkuja sie w urzadzeniu, a nie gina. Piecdziesiat obiegow
+           na sekunde odbiera je szybciej, niz da sie pisac. */
+        int n = uhci_interrupt_in(dev_addr, dev_lowspeed, ep_num,
+                                  ep_maxpacket, report, ep_maxpacket,
+                                  &toggle);
+        if (n >= 8)
             handle_report();
-        }
         task_sleep(20);
     }
 }

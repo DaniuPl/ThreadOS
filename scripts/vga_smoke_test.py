@@ -2662,6 +2662,21 @@ def main():
                           re.search(r"Bufor obrazu: \d+x\d+",
                                     q23.wait_serial("Bufor obrazu",
                                                     timeout=20)) is not None)
+
+                    # Przerwania w trybie dlugim: pulapka int3 przechodzi
+                    # cala droge - stub, tablice, ramke rejestrow, iretq -
+                    # i wraca, nie zatrzymujac systemu
+                    trap = q23.wait_serial("[INT3]", timeout=20)
+                    check("wyjatek-pulapka obsluzony i wznowiony",
+                          re.search(r"\[INT3\] breakpoint pod rip=",
+                                    trap) is not None)
+                    # A timer musi tykac sam z siebie - to dowod, ze
+                    # przerwania sprzetowe dochodza przez nowa tablice
+                    ticks = q23.wait_serial("Timer tyka:", timeout=25)
+                    m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
+                    check("przerwania sprzetowe dochodza (timer tyka"
+                          + (f" {m.group(1)} -> {m.group(2)})" if m else ")"),
+                          m is not None and int(m.group(2)) - int(m.group(1)) >= 100)
                     # I to samo na ekranie: konsola rysowana wlasnym kodem
                     q23.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
                     w, h, at = q23.screen_raw()

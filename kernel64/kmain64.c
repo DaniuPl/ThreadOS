@@ -17,12 +17,21 @@
 #include "../kernel/include/vga.h"
 #include "../kernel/include/serial.h"
 #include "../kernel/include/printk.h"
+#include "../kernel/include/pic.h"
+#include "../kernel/include/pit.h"
+#include "idt64.h"
 
-/* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Zadan tu
-   jeszcze nie ma - wszystko idzie na pierwsza. */
+/* Miejsca, w ktorych wspoldzielone pliki siegaja po scheduler.
+   Zadan w tym jadrze jeszcze nie ma, wiec wypisy ida na pierwsza
+   konsole, a przerwanie timera tylko zwieksza licznik i wraca.
+   Te dwie zaslepki znikna, gdy port dojdzie do zadan. */
 int task_vc(void)
 {
     return 0;
+}
+
+void schedule(void)
+{
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -91,6 +100,29 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     if (mb2_rsdp())
         printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());
+
+    idt64_init();
+    printk("[ OK ] IDT zaladowana (wyjatki 0-31, IRQ 32-47)\n");
+
+    pic_init();
+    printk("[ OK ] PIC przemapowany (IRQ -> wektory 32-47)\n");
+
+    pit_init(100);
+    printk("[ OK ] Timer PIT: 100 Hz\n");
+
+    __asm__ volatile("sti");
+    printk("[ OK ] Przerwania wlaczone (sti)\n");
+
+    /* Wyjatek-pulapka: sprawdza cala droge - stub, tablice, ramke
+       rejestrow i powrot przez iretq - nie zatrzymujac systemu */
+    __asm__ volatile("int $3");
+
+    /* Timer musi tykac sam z siebie: czekamy na przerwania i patrzymy,
+       czy licznik rusza. To dowod, ze przerwania sprzetowe dochodza. */
+    uint32_t start = pit_ticks();
+    for (int i = 0; i < 200; i++)
+        __asm__ volatile("hlt");
+    printk("[ OK ] Timer tyka: %u -> %u tyknac\n", start, pit_ticks());
 
     printk("\nSzkielet 64-bitowy stoi. Reszta jadra dochodzi po kolei.\n");
 

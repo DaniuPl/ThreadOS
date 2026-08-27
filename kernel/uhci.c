@@ -81,6 +81,7 @@ static int nports;
 static uint32_t *frame_list;
 static struct qh *queue;
 static struct td *tds;
+static int armed;          /* czy deskryptor odczytu czeka w kolejce */
 
 static uint16_t rd16(int off)        { return inw(base + off); }
 static void     wr16(int off, uint16_t v) { outw(base + off, v); }
@@ -224,29 +225,50 @@ int uhci_control(int addr, int lowspeed, int maxpacket,
     return (int)got;
 }
 
+/* Odczyt z punktu koncowego przerwaniowego.
+ *
+ * Deskryptor uzbrajamy raz i NIGDY go nie porzucamy. To sedno: gdyby
+ * przy braku danych zdejmowac go z kolejki, kontroler moglby dokonczyc
+ * przesylke juz po naszej decyzji. Raport wpadlby wtedy do bufora,
+ * ktorego nikt nie czyta, a urzadzenie przestawiloby przelacznik
+ * danych - i od tej chwili nie zgadzalby sie z naszym juz na zawsze.
+ * Objawialo sie to tak, jak takie bledy zwykle: dzialalo, dzialalo,
+ * po czym klawiatura milkla na dobre.
+ *
+ * Uzbrojony deskryptor kontroler ponawia sam co ramke, dopoki
+ * urzadzenie nie ma nic do powiedzenia. My tylko zagladamy, czy juz
+ * sie skonczyl - i nie czekamy ani chwili. Raporty odbieramy wiec po
+ * jednym na obieg, ale zaden nie ginie.
+ */
 int uhci_interrupt_in(int addr, int lowspeed, int endpoint, int maxpacket,
                       void *data, int len, int *toggle)
 {
     if (!base || len <= 0 || len > maxpacket)
         return -1;
 
+    /* Gdyby kontroler sie zatrzymal (blad przetwarzania listy),
+       sam wypis o tym nikomu nie pomoze - podnosimy go z powrotem */
     if (rd16(REG_STS) & STS_HALTED) {
         wr16(REG_STS, 0x3F);
         wr16(REG_CMD, CMD_RS | CMD_MAXP);
+        armed = 0;
     }
 
-    fill_td(0, PID_IN, addr, endpoint, toggle ? *toggle : 0, len, data,
-            lowspeed);
-
-    queue->element = (uint32_t)&tds[0];
-    for (uint32_t spin = 0; spin < 200000u; spin++)
-        if (!(tds[0].status & TD_ACTIVE))
-            break;
-    queue->element = LINK_TERMINATE;
+    if (!armed) {
+        fill_td(0, PID_IN, addr, endpoint, toggle ? *toggle : 0, len, data,
+                lowspeed);
+        queue->element = (uint32_t)&tds[0];
+        armed = 1;
+        return 0;                        /* odpowiedz przyjdzie za chwile */
+    }
 
     uint32_t st = tds[0].status;
     if (st & TD_ACTIVE)
-        return 0;
+        return 0;                        /* urzadzenie milczy - czekamy dalej */
+
+    /* Deskryptor zuzyty: kontroler sam przestawil juz wskaznik kolejki
+       na to, co bylo za nim, czyli na koniec listy */
+    armed = 0;
     if (st & TD_STALLED)
         return -1;
     if (toggle)

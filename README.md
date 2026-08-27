@@ -539,3 +539,19 @@ obrazie dysku.
       Multiboota 2 i obsługa łańcuchów to te same pliki kompilowane
       drugi raz, a cała różnica między trybami zamyka się w `io.h`
       i w kilku rzutowaniach przez `uintptr_t`
+- [x] Przerwania i wyjątki w trybie długim: własna tablica IDT (wpis ma
+      teraz 16 bajtów, bo adres procedury jest 64-bitowy i nie mieści
+      się w jednym kawałku), stuby odkładające szesnaście rejestrów
+      ręcznie - `pushal` w trybie długim już nie istnieje - i powrót
+      przez `iretq`. `struct regs` ma od teraz wersję zależną od trybu,
+      dzięki czemu sterowniki PIC i PIT kompilują się w obu jądrach bez
+      jednej zmiany. Dowód: pułapka `int3` wraca, nie zatrzymując
+      systemu, a timer tyka sam z siebie (1 -> 201 tyknięć)
+- [x] Naprawiony błąd w sterowniku USB: deskryptor odczytu był przy
+      braku danych **porzucany**, a kontroler potrafił dokończyć
+      przesyłkę już po tej decyzji - raport wpadał do bufora, którego
+      nikt nie czytał, a urządzenie przestawiało przełącznik danych
+      i przestawał się on zgadzać z naszym już na zawsze. Objawiało się
+      to tak, jak takie błędy zwykle: działało, działało, po czym
+      klawiatura milkła. Teraz deskryptor jest uzbrojony bez przerwy,
+      a kontroler ponawia go sam co ramkę
