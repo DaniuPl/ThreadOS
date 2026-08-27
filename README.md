@@ -51,7 +51,7 @@ ProtonOS/
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
-│   ├── vga.c           # sterownik trybu tekstowego VGA
+│   ├── vga.c           # tryb tekstowy VGA + 4 konsole wirtualne
 │   ├── string.c        # memset/memcpy/strlen (brak libc w jądrze)
 │   └── include/        # nagłówki jądra
 ├── user/               # programy użytkownika (osobne ELF-y!)
@@ -463,3 +463,9 @@ obrazie dysku.
       wyrzuconej strony trzyma numer miejsca w górnych bitach, `mem`
       pokazuje bilans, a `run swaptest 18` mieści 18 MiB na maszynie
       z 16 MiB RAM-u
+- [x] Konsole wirtualne (Alt+F1..F4): każda ma własny ekran 80x25, własny
+      shell, własny bufor klawiszy i własnego właściciela klawiatury.
+      To, na którą konsolę idzie wypis, wynika z **zadania**, które pisze
+      (jak uniksowy terminal kontrolujący) - program uruchomiony na
+      drugiej konsoli pisze na niej dalej, kiedy patrzymy na pierwszą,
+      a `Ctrl+C` trafia w proces trzymający tę konsolę, którą widać

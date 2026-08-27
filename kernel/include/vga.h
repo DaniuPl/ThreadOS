@@ -24,6 +24,15 @@ enum vga_color {
     VGA_WHITE = 15,
 };
 
+/* Konsole wirtualne: kazda ma wlasny ekran 80x25, wlasny kursor
+   i wlasnego wlasciciela klawiatury. Widoczna jest jedna, przelacza
+   sie je przez Alt+F1..F4. Ktora dostaje wypis, decyduje konsola
+   piszacego zadania (task_vc). */
+#define CONSOLE_COUNT 4
+
+void console_switch(int n);
+int  console_active(void);
+
 void vga_init(void);
 void vga_clear(void);
 void vga_set_color(enum vga_color fg, enum vga_color bg);

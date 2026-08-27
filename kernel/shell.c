@@ -35,15 +35,27 @@
 
 #define LINE_MAX 80
 
-static char line[LINE_MAX];
-static int line_len;
-
-/* Bufor kołowy między przerwaniem klawiatury a wątkiem shella.
-   Rozmiar musi być potęgą dwójki - indeksy liczymy modulo maską. */
+/* Każda konsola wirtualna ma własny shell: własną edytowaną linię,
+   własny bufor klawiszy i własny wątek. Bufor musi mieć rozmiar
+   będący potęgą dwójki - indeksy liczymy modulo maską. */
 #define SHELL_BUF 128
-static char keybuf[SHELL_BUF];
-static uint32_t kb_head, kb_tail;
-static struct task *shell_waiter;   /* != NULL tylko gdy wątek śpi */
+
+struct shell {
+    char line[LINE_MAX];
+    int line_len;
+    char keybuf[SHELL_BUF];
+    uint32_t kb_head, kb_tail;
+    struct task *waiter;            /* != NULL tylko gdy wątek śpi */
+};
+
+static struct shell shells[CONSOLE_COUNT];
+
+/* Shell konsoli, na której pisze bieżące zadanie */
+static struct shell *my_shell(void)
+{
+    int vc = task_vc();
+    return &shells[(vc >= 0 && vc < CONSOLE_COUNT) ? vc : 0];
+}
 
 static void prompt(void)
 {
@@ -109,6 +121,8 @@ static void cmd_help(void)
         }
         printk("\n");
     }
+    printk("Konsole: Alt+F1..F%d (teraz %d)\n",
+           CONSOLE_COUNT, task_vc() + 1);
 }
 
 static void cmd_mem(void)
@@ -393,27 +407,27 @@ static void run_command(char *cmd)
         printk("nieznana komenda: '%s' (wpisz 'help')\n", cmd);
 }
 
-static void shell_handle_char(char c)
+static void shell_handle_char(struct shell *sh, char c)
 {
     if (c == '\n') {
         printk("\n");
-        line[line_len] = '\0';
-        run_command(line);
-        line_len = 0;
+        sh->line[sh->line_len] = '\0';
+        run_command(sh->line);
+        sh->line_len = 0;
         prompt();
         return;
     }
     if (c == '\b') {
-        if (line_len > 0) {
-            line_len--;
+        if (sh->line_len > 0) {
+            sh->line_len--;
             printk("\b");
         }
         return;
     }
     if (c < 0x20)                       /* strzalki i spolka - nie dla shella */
         return;
-    if (line_len < LINE_MAX - 1) {
-        line[line_len++] = c;
+    if (sh->line_len < LINE_MAX - 1) {
+        sh->line[sh->line_len++] = c;
         printk("%c", c);
     }
 }
@@ -422,47 +436,65 @@ static void shell_handle_char(char c)
    gdzies wyzej na ekranie - odrysuj go razem z niedokonczona linia. */
 void shell_refresh(void)
 {
+    struct shell *sh = my_shell();
     prompt();
-    line[line_len] = '\0';
-    if (line_len)
-        printk("%s", line);
+    sh->line[sh->line_len] = '\0';
+    if (sh->line_len)
+        printk("%s", sh->line);
 }
 
-/* Kontekst przerwania klawiatury (IF=0): tylko odloz znak i obudz watek */
+/* Kontekst przerwania klawiatury (IF=0): tylko odloz znak i obudz
+   watek. Znak przychodzi z konsoli, ktora akurat widac. */
 static void shell_on_char(char c)
 {
-    if (kb_head - kb_tail < SHELL_BUF)
-        keybuf[kb_head++ & (SHELL_BUF - 1)] = c;
-    if (shell_waiter) {
-        task_unblock(shell_waiter);
-        shell_waiter = (struct task *)0;
+    struct shell *sh = &shells[console_active()];
+    if (sh->kb_head - sh->kb_tail < SHELL_BUF)
+        sh->keybuf[sh->kb_head++ & (SHELL_BUF - 1)] = c;
+    if (sh->waiter) {
+        task_unblock(sh->waiter);
+        sh->waiter = (struct task *)0;
     }
 }
 
-/* Kontekst watku: czeka na znak z bufora */
-static char shell_getchar(void)
+/* Kontekst watku: czeka na znak z bufora wlasnej konsoli */
+static char shell_getchar(struct shell *sh)
 {
     uint32_t flags = irq_save();
-    while (kb_head == kb_tail) {
-        shell_waiter = task_current();
+    while (sh->kb_head == sh->kb_tail) {
+        sh->waiter = task_current();
         task_block();
     }
-    char c = keybuf[kb_tail++ & (SHELL_BUF - 1)];
+    char c = sh->keybuf[sh->kb_tail++ & (SHELL_BUF - 1)];
     irq_restore(flags);
     return c;
 }
 
 static void shell_thread(void *arg)
 {
-    (void)arg;
+    int vc = (int)arg;
+    task_set_vc(vc);                    /* od teraz piszemy na swojej konsoli */
+    struct shell *sh = &shells[vc];
+
+    /* Pierwsza konsola dostala powitanie jeszcze w shell_init, zeby
+       komunikaty startowe i prompt ustawily sie w przewidywalnej
+       kolejnosci. Pozostale witaja sie same. */
+    if (vc) {
+        printk("ProtonOS - konsola %d. Alt+F1..F4 przelacza.\n", vc + 1);
+        prompt();
+    }
+
     for (;;)
-        shell_handle_char(shell_getchar());
+        shell_handle_char(sh, shell_getchar(sh));
 }
 
 void shell_init(void)
 {
-    keyboard_set_handler(shell_on_char);
+    for (int vc = 0; vc < CONSOLE_COUNT; vc++)
+        keyboard_set_handler(vc, shell_on_char);
+
     printk("\nProtonOS shell - wpisz 'help', by zobaczyc komendy.\n");
     prompt();
-    task_create("shell", shell_thread, 0);
+
+    for (int vc = 0; vc < CONSOLE_COUNT; vc++)
+        task_create("shell", shell_thread, (void *)(uint32_t)vc);
 }

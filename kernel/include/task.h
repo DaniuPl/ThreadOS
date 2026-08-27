@@ -103,6 +103,8 @@ const char *task_current_name(void);
 void task_use_address_space(uint32_t dir_phys);
 
 uint32_t task_current_cr3(void);    /* CR3 bieżącego zadania */
+int task_vc(void);                  /* konsola, na ktorej zadanie pisze */
+void task_set_vc(int vc);
 uint32_t task_brk(void);            /* koniec sterty procesu (0 = wątek jądra) */
 void task_set_brk(uint32_t brk);
 uint32_t task_brk_base(void);       /* poczatek sterty procesu */

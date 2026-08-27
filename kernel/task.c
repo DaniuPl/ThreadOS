@@ -42,6 +42,7 @@ struct task {
     uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     int parent;                  /* pid rodzica (-1 = brak, sierota) */
+    int vc;                      /* konsola, na ktorej zadanie pisze */
     uint32_t sig_pending;        /* maska oczekujacych sygnalow */
     uint32_t sig_handler[NSIG];  /* SIG_DFL / SIG_IGN / adres procedury */
     uint32_t sig_tramp;          /* trampolina powrotu (adres w ring 3) */
@@ -164,6 +165,7 @@ void scheduler_init(void)
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* katalog glowny */
     main_task->parent = -1;     /* korzen drzewa procesow */
+    main_task->vc = 0;
     main_task->killed = 0;
     main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
     task_init_fds(main_task);
@@ -184,6 +186,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->mmap_next = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
     t->parent = current ? current->id : -1;
+    t->vc = current ? current->vc : 0;   /* dziecko pisze tam, co rodzic */
     t->killed = 0;
     t->priority = 1;            /* domyslnie normalny priorytet */
     task_init_fds(t);
@@ -792,6 +795,18 @@ void task_use_address_space(uint32_t dir_phys)
 uint32_t task_current_cr3(void)
 {
     return current->cr3;
+}
+
+/* Konsola biezacego zadania. Przed startem schedulera nie ma jeszcze
+   zadnego - wypisy rozruchowe ida na pierwsza. */
+int task_vc(void)
+{
+    return current ? current->vc : 0;
+}
+
+void task_set_vc(int vc)
+{
+    current->vc = vc;
 }
 
 uint32_t task_brk(void)

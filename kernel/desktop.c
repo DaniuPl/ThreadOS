@@ -730,7 +730,7 @@ void desktop_start(void)
         return;
     running = 1;
 
-    prev_key_handler = keyboard_get_handler();   /* zachowaj shell jadra */
-    keyboard_set_handler(desktop_on_key);        /* klawisze -> okno z fokusem */
+    prev_key_handler = keyboard_console_handler();  /* shell widocznej konsoli */
+    keyboard_set_override(desktop_on_key);          /* klawisze -> okno z fokusem */
     task_create("desktop", desktop_thread, (void *)0);
 }

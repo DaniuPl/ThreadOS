@@ -108,7 +108,12 @@ $(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
 $(BUILD)/switch.o: kernel/switch.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
-$(BUILD)/%.o: kernel/%.c | $(BUILD)
+# Zaleznosc od naglowkow jest tu wypisana wprost: bez niej zmiana
+# w kernel/include/ nie przebudowywala nic, a make konczyl sie zielono,
+# choc obiekty pamietaly stary prototyp.
+KERNEL_HEADERS := $(wildcard kernel/include/*.h)
+
+$(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL): $(OBJS) linker.ld

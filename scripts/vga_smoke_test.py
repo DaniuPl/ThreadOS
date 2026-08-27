@@ -2264,6 +2264,53 @@ def main():
         if os.path.exists(idisk):
             os.unlink(idisk)
 
+    # --- Konsole wirtualne -----------------------------------------
+    # Alt+F1..F4 przelacza ekran, ale kazda konsola ma wlasna tresc,
+    # wlasny shell i wlasnych "swoich" pisarzy: program uruchomiony na
+    # drugiej pisze na niej dalej, kiedy patrzymy na pierwsza.
+    print("--- konsole wirtualne (Alt+F1..F4) ---")
+    q17 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
+    try:
+        q17.wait_for("ProtonOS shell", timeout=30)
+        q17.type_line("clear")
+        q17.type_line("uptime")
+        first = q17.wait_for("tyknac timera", timeout=20)
+        check("pierwsza konsola dziala jak dotad", "uptime:" in first)
+
+        q17.sendkey("alt-f2")
+        time.sleep(0.6)
+        second = q17.screen()
+        check("Alt+F2 pokazuje druga konsole z wlasnym promptem",
+              "konsola 2" in second)
+        check("tresc pierwszej konsoli nie przecieka na druga",
+              "tyknac timera" not in second)
+
+        q17.type_line("run spin")
+        q17.wait_for("[spin] tik", timeout=20)
+        check("program uruchomiony na drugiej konsoli pisze na niej", True)
+
+        q17.sendkey("alt-f1")
+        time.sleep(1.5)
+        back = q17.screen()
+        check("pierwsza konsola nietknieta po powrocie",
+              "tyknac timera" in back)
+        check("program z drugiej konsoli nie pisze po pierwszej",
+              "[spin] tik" not in back)
+
+        q17.sendkey("alt-f2")
+        time.sleep(0.5)
+        before = q17.screen().count("[spin] tik")
+        time.sleep(1.5)
+        after = q17.screen().count("[spin] tik")
+        check("program pisal na swoja konsole takze wtedy, gdy jej nie bylo"
+              f" widac ({before} -> {after})",
+              after != before or before >= 8)
+        q17.type_line("kill spin")
+        q17.wait_for("zabity (kod -9)", timeout=20)
+        check("kill z wlasnej konsoli konczy jej program", True)
+    finally:
+        q17.close()
+
     # --- Wymiana stron na dysk -------------------------------------
     # Maszyna z 16 MiB RAM-u i program, ktory bierze 18 MiB: bez wymiany
     # nie ma prawa sie udac. Wzorzec zalezy od numeru strony, wiec strona

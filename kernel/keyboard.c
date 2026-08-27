@@ -13,12 +13,15 @@
 #include "include/pic.h"
 #include "include/task.h"
 #include "include/signal.h"
+#include "include/vga.h"
 
 #define KBD_DATA_PORT 0x60
 
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
 #define SC_CTRL   0x1D
+#define SC_ALT    0x38
+#define SC_F1     0x3B          /* F1..F4 leza kolejno: 0x3B..0x3E */
 #define SC_RELEASED 0x80
 #define SC_EXTENDED 0xE0
 
@@ -57,51 +60,86 @@ static char extended_key(uint8_t scancode)
 
 static int shift_pressed;
 static int ctrl_pressed;
+static int alt_pressed;
 static int extended_next;               /* poprzedni bajt to 0xE0 */
-static keyboard_char_handler_t on_char;
 
-/* Konsola dla procesow: gdy jakis proces czyta klawiature
-   (sys_read), znaki ladaja w buforze kolowym zamiast w shellu
-   jadra. Po smierci wlasciciela konsola wraca do jadra. */
+/* Kazda konsola wirtualna ma wlasna kolejke znakow i wlasnego
+   wlasciciela. Gdy jakis proces czyta z niej klawiature (sys_read),
+   znaki ladaja w kolejce zamiast u shella tej konsoli; po smierci
+   wlasciciela konsola wraca do shella. */
 #define KBD_BUF_SIZE 128
-static char kbuf[KBD_BUF_SIZE];
-static uint32_t khead, ktail;
-static int console_owner_id = -1;
-static struct task *kbd_waiter;
 
-void keyboard_set_handler(keyboard_char_handler_t handler)
+struct kbd_console {
+    char buf[KBD_BUF_SIZE];
+    uint32_t head, tail;
+    int owner_id;                       /* proces czytajacy, -1 = shell */
+    struct task *waiter;
+    keyboard_char_handler_t on_char;    /* shell tej konsoli */
+};
+
+static struct kbd_console cons[CONSOLE_COUNT];
+static keyboard_char_handler_t override;   /* pulpit zabiera wszystkie klawisze */
+static int cons_ready;
+
+static struct kbd_console *console(int n)
 {
-    on_char = handler;
+    if (!cons_ready) {                  /* -1 zamiast zera dla wlasciciela */
+        for (int i = 0; i < CONSOLE_COUNT; i++)
+            cons[i].owner_id = -1;
+        cons_ready = 1;
+    }
+    if (n < 0 || n >= CONSOLE_COUNT)
+        n = 0;
+    return &cons[n];
 }
 
-keyboard_char_handler_t keyboard_get_handler(void)
+void keyboard_set_handler(int vc, keyboard_char_handler_t handler)
 {
-    return on_char;
+    console(vc)->on_char = handler;
 }
 
-/* Dostarczenie znaku - kontekst IRQ (IF=0) */
+/* Pulpit dziala w trybie graficznym, gdzie konsole tekstowe nie maja
+   sensu - przechwytuje wiec wszystkie klawisze, zanim trafia gdziekolwiek */
+void keyboard_set_override(keyboard_char_handler_t handler)
+{
+    override = handler;
+}
+
+keyboard_char_handler_t keyboard_console_handler(void)
+{
+    return console(console_active())->on_char;
+}
+
+/* Dostarczenie znaku - kontekst IRQ (IF=0). Znak trafia na konsole,
+   ktora akurat widac; ta decyduje, czy nalezy do procesu, czy do shella. */
 static void deliver(char c)
 {
-    if (console_owner_id >= 0 && !task_alive(console_owner_id))
-        console_owner_id = -1;
+    if (override) {                     /* pulpit */
+        override(c);
+        return;
+    }
+
+    struct kbd_console *k = console(console_active());
+    if (k->owner_id >= 0 && !task_alive(k->owner_id))
+        k->owner_id = -1;
 
     /* Ctrl+C nie jest znakiem do przeczytania, tylko sygnalem dla
        procesu trzymajacego konsole. Gdy konsoli nikt nie trzyma,
        przerywac nie ma kogo - shell jadra znak zignoruje. */
-    if (c == KEY_INTR && console_owner_id >= 0) {
-        task_signal_send(console_owner_id, SIGINT);
+    if (c == KEY_INTR && k->owner_id >= 0) {
+        task_signal_send(k->owner_id, SIGINT);
         return;
     }
 
-    if (console_owner_id >= 0) {
-        if (khead - ktail < KBD_BUF_SIZE)
-            kbuf[khead++ & (KBD_BUF_SIZE - 1)] = c;
-        if (kbd_waiter) {
-            task_unblock(kbd_waiter);
-            kbd_waiter = (void *)0;
+    if (k->owner_id >= 0) {
+        if (k->head - k->tail < KBD_BUF_SIZE)
+            k->buf[k->head++ & (KBD_BUF_SIZE - 1)] = c;
+        if (k->waiter) {
+            task_unblock(k->waiter);
+            k->waiter = (void *)0;
         }
-    } else if (on_char) {
-        on_char(c);
+    } else if (k->on_char) {
+        k->on_char(c);
     }
 }
 
@@ -112,13 +150,17 @@ int keyboard_read(char *buf, uint32_t len)
         return 0;
 
     uint32_t flags = irq_save();
-    console_owner_id = task_current_id();
+    /* Proces czyta z WLASNEJ konsoli, nie z tej, na ktora akurat
+       patrzymy - inaczej przelaczenie ekranu przekierowywaloby
+       klawiature w srodku czyjegos odczytu */
+    struct kbd_console *k = console(task_vc());
+    k->owner_id = task_current_id();
 
     uint32_t got = 0;
     int interrupted = 0;
     while (!got) {
-        while (ktail != khead && got < len)
-            buf[got++] = kbuf[ktail++ & (KBD_BUF_SIZE - 1)];
+        while (k->tail != k->head && got < len)
+            buf[got++] = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
         if (got)
             break;
         /* Czekanie na klawisz przerywa sygnal (np. Ctrl+C): wracamy
@@ -127,12 +169,12 @@ int keyboard_read(char *buf, uint32_t len)
             interrupted = 1;
             break;
         }
-        kbd_waiter = task_current();
+        k->waiter = task_current();
         task_block();
     }
 
-    if (kbd_waiter == task_current())   /* obudzil nas sygnal, nie klawisz */
-        kbd_waiter = (void *)0;
+    if (k->waiter == task_current())    /* obudzil nas sygnal, nie klawisz */
+        k->waiter = (void *)0;
     irq_restore(flags);
     return interrupted ? -1 : (int)got;
 }
@@ -156,6 +198,21 @@ static void keyboard_irq(struct regs *r)
         return;
     }
 
+    if (scancode == SC_ALT) {
+        alt_pressed = 1;
+        return;
+    }
+    if (scancode == (SC_ALT | SC_RELEASED)) {
+        alt_pressed = 0;
+        return;
+    }
+    /* Alt+F1..F4 przelacza konsole. W trybie graficznym nie ma czego
+       przelaczac - pulpit trzyma caly ekran dla siebie. */
+    if (alt_pressed && !override &&
+        scancode >= SC_F1 && scancode < SC_F1 + CONSOLE_COUNT) {
+        console_switch(scancode - SC_F1);
+        return;
+    }
     if (scancode == SC_CTRL) {
         ctrl_pressed = 1;
         return;

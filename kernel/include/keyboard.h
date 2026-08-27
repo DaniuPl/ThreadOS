@@ -20,10 +20,17 @@
 /* Instaluje handler IRQ1 i odmaskowuje przerwanie klawiatury */
 void keyboard_init(void);
 
-/* Rejestruje odbiorcę znaków z klawiatury (np. shell) */
+/* Odbiorca znakow danej konsoli wirtualnej (shell tej konsoli).
+   Znak trafia tam tylko wtedy, gdy konsoli nie trzyma zaden proces. */
 typedef void (*keyboard_char_handler_t)(char c);
-void keyboard_set_handler(keyboard_char_handler_t handler);
-keyboard_char_handler_t keyboard_get_handler(void);
+void keyboard_set_handler(int vc, keyboard_char_handler_t handler);
+
+/* Handler widocznej konsoli - pulpit oddaje mu klawisze, gdy zadne
+   okno nie ma fokusu */
+keyboard_char_handler_t keyboard_console_handler(void);
+
+/* Pulpit przechwytuje wszystkie klawisze (tryb graficzny nie ma konsol) */
+void keyboard_set_override(keyboard_char_handler_t handler);
 
 /* Blokujący odczyt dla procesów (syscall read). Bieżące zadanie
    przejmuje konsolę do swojej śmierci; zwraca >=1 przeczytanych
