@@ -45,6 +45,14 @@ void paging_destroy_address_space(uint32_t dir_phys);
    (kopiowanie przy zapisie). Zwraca CR3 kopii albo 0. */
 uint32_t paging_clone_address_space(uint32_t src_phys);
 
+/* Wyrzuca na dysk do 'want' nieuzywanych stron z podanej przestrzeni
+   adresowej (algorytm drugiej szansy). Zwraca, ile zwolnil. */
+int paging_reclaim_pages(uint32_t dir_phys, int want);
+
+/* Sciaga z dysku strone, po ktora proces wlasnie siegnal.
+   1 = wrocila, mozna wznowic instrukcje. */
+int paging_swap_in(uint32_t dir_phys, uint32_t vaddr);
+
 /* Obsluga page faulta na stronie oddanej na kopiowanie przy zapisie.
    Zwraca 1, gdy blad zostal zalatwiony (mozna wznowic instrukcje). */
 int paging_handle_cow(uint32_t vaddr, uint32_t err_code);

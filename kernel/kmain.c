@@ -19,6 +19,7 @@
 #include "include/task.h"
 #include "include/initrd.h"
 #include "include/fs.h"
+#include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
 #include "include/rtl8139.h"
@@ -109,7 +110,14 @@ static void demo_mortal(void *arg)
     (void)arg;
     vga_write_at(48, 0, "watek-C: czesc!     ");
     task_sleep(2000);
-    vga_write_at(48, 0, "watek-C: zakonczony ");
+    /* Napis odrysowujemy jeszcze chwile. Wiersz 0 znika przy kazdym
+       przewinieciu ekranu, a komunikaty startowe sypia sie jeszcze
+       dobra sekunde po tym, jak watek konczy robote - inaczej dowod
+       na to, ze zdazyl sie wykonac, wyjezdzalby razem z nimi. */
+    for (int i = 0; i < 12; i++) {
+        vga_write_at(48, 0, "watek-C: zakonczony ");
+        task_sleep(500);
+    }
 }
 
 static void ok(const char *what)
@@ -200,6 +208,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     task_create("demo-B", demo_counter, (void *)1);
     task_create("demo-C", demo_mortal, (void *)0);
     ok("Scheduler: watki jadra, wywlaszczanie co 10 ms");
+
+    /* Wymiana stron dopiero tutaj: odzyskiwanie pamieci obchodzi liste
+       zadan, wiec scheduler musi juz istniec */
+    swap_init();
 
     /* Adres IP bierzemy z sieci - klient DHCP czeka na odpowiedzi
        serwera, wiec musi chodzic w watku (po scheduler_init) */

@@ -51,6 +51,11 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_dir);
 int fs_size(int slot);
 int fs_truncate(int slot);
 int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len);
+/* Blok dysku pod 'index'-tym blokiem pliku (alloc=1 przydziela go);
+   0 = blad. Do tego pierwszy sektor ATA danego bloku - swap rezerwuje
+   miejsce przez system plikow, a pisze po nim wprost. */
+uint32_t fs_file_block(int slot, uint32_t index, int alloc);
+uint32_t fs_block_lba(uint32_t block);
 int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len);
 
 /* --- Wygodne operacje dla shella jadra (zawsze w katalogu glownym) --- */

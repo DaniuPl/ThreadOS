@@ -12,6 +12,11 @@ void pmm_init(const struct multiboot_info *mbi);
 /* Zwraca adres fizyczny wolnej ramki 4 KiB (0 = brak pamięci) */
 uint32_t pmm_alloc_frame(void);
 
+/* Kogo prosic o pamiec przy braku wolnych ramek. Funkcja ma zwolnic
+   co najmniej jedna ramke i zwrocic 1; 0 znaczy "nie ma juz czego
+   oddac". Ustawia to wymiana stron (swap_init). */
+void pmm_set_reclaim(int (*fn)(void));
+
 /* Zwraca adres pierwszej z n kolejnych wolnych ramek (0 = brak) */
 uint32_t pmm_alloc_contiguous(uint32_t n);
 

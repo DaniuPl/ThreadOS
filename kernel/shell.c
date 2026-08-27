@@ -16,6 +16,7 @@
 #include "include/string.h"
 #include "include/pmm.h"
 #include "include/paging.h"
+#include "include/swap.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -115,9 +116,17 @@ static void cmd_mem(void)
     printk("RAM wykryty:  %u KiB\n", pmm_ram_kib());
     printk("PMM:          %u/%u ramek 4 KiB zajetych (zarzadzane %u MiB)\n",
            pmm_used_frames(), pmm_total_frames(),
-           paging_identity_limit() / (1024 * 1024));
+           pmm_managed_top() / (1024 * 1024));
     printk("sterta jadra: %u/%u B zajetych\n",
            heap_used_bytes(), heap_total_bytes());
+
+    uint32_t sused, stotal, sout, sin;
+    swap_stats(&sused, &stotal, &sout, &sin);
+    if (stotal)
+        printk("wymiana:      %u/%u stron na dysku (wyrzuconych %u, "
+               "sciagnietych %u)\n", sused, stotal, sout, sin);
+    else
+        printk("wymiana:      brak pliku wymiany\n");
 }
 
 static void cmd_kill(char *arg)

@@ -384,7 +384,7 @@ def start_http_server():
 
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
-                 append=None):
+                 append=None, ram_mib=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -402,6 +402,8 @@ class Qemu:
                                if hostfwd_port else ""),
                "-device", "rtl8139,netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
+        if ram_mib:
+            cmd += ["-m", str(ram_mib)]
         if append:
             cmd += ["-append", append]
         if initrd:
@@ -2048,9 +2050,11 @@ def main():
               appeared)
 
         # Klik nazwy pliku -> podglad tresci. Wiersz0 przy content(.,16)
-        # -> ekran y81. Po kliknieciu panel 'tresc:' (content y102 ->
+        # -> ekran y81, kolejne co 10 px. Klikamy WIERSZ 1: wiersz 0 to
+        # 'swap.sys', ktory jadro zaklada przy starcie (i-wezel 0), a nam
+        # chodzi o 'raport'. Po kliknieciu panel 'tresc:' (content y102 ->
         # ekran y167) pokazuje zawartosc. Kursor odsuwamy przed zrzutem.
-        q9.mouse_goto(115, 83)
+        q9.mouse_goto(115, 93)
         q9.mouse_click()
         q9.mouse_goto(60, 300)
 
@@ -2259,6 +2263,43 @@ def main():
         q15.close()
         if os.path.exists(idisk):
             os.unlink(idisk)
+
+    # --- Wymiana stron na dysk -------------------------------------
+    # Maszyna z 16 MiB RAM-u i program, ktory bierze 18 MiB: bez wymiany
+    # nie ma prawa sie udac. Wzorzec zalezy od numeru strony, wiec strona
+    # wczytana z niewlasciwego miejsca od razu sie wysypie.
+    print("--- wymiana stron na dysk ---")
+    swdisk = tempfile.mktemp(suffix=".img")
+    with open(swdisk, "wb") as fh:
+        fh.truncate(64 * 1024 * 1024)
+    q16 = Qemu(KERNEL, INITRD, swdisk, append=TEXT_MODE, ram_mib=16)
+    try:
+        boot = q16.wait_for("Wymiana stron:", timeout=30)
+        check("plik wymiany zakladany przy starcie",
+              re.search(r"Wymiana stron: \d+ KiB na dysku", boot) is not None)
+        q16.wait_for("ProtonOS shell", timeout=20)
+        q16.type_line("clear")
+        q16.type_line("run swaptest 18")
+        out = q16.wait_for("[swaptest] wszystkie", timeout=120)
+        check("18 MiB zmiescilo sie na maszynie z 16 MiB RAM-u",
+              "stron wrocilo w calosci" in out)
+        q16.type_line("clear")
+        q16.type_line("mem")
+        stats = q16.wait_for("wymiana:", timeout=20)
+        m = re.search(r"wyrzuconych (\d+), sciagnietych (\d+)", stats)
+        check("strony naprawde poszly na dysk i wrocily"
+              + (f" (-{m.group(1)} +{m.group(2)})" if m else ""),
+              m is not None and int(m.group(1)) > 1000
+              and int(m.group(2)) > 1000)
+        # Program skonczyl sie, wiec jego miejsca w pliku wymiany wrocily
+        m = re.search(r"wymiana:\s+(\d+)/(\d+) stron", stats)
+        check("miejsca w pliku wymiany zwolnione po smierci procesu"
+              + (f" ({m.group(1)}/{m.group(2)})" if m else ""),
+              m is not None and int(m.group(1)) == 0)
+    finally:
+        q16.close()
+        if os.path.exists(swdisk):
+            os.unlink(swdisk)
 
     print()
     if failures:

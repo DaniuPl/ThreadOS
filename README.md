@@ -47,6 +47,7 @@ ProtonOS/
 │   │                   #   ifconfig, arp, ping...
 │   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
 │   ├── paging.c        # stronicowanie - identycznościowe całe RAM, COW
+│   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
@@ -452,3 +453,13 @@ obrazie dysku.
       obrazu jądra do puli wolnych ramek. Teraz rozstrzyga bit USER,
       którego tablice jądra nie mają; w PMM stoi dodatkowo bezpiecznik
       odmawiający zwolnienia ramki z obrazu jądra
+- [x] Wymiana stron na dysk: gdy zabraknie ramek, jądro wyrzuca na dysk
+      strony leżące odłogiem (algorytm drugiej szansy - bit „odwiedzona"
+      ustawiany przez procesor) i sprowadza je z powrotem przy pierwszym
+      dotknięciu. Miejsce rezerwuje przez system plików (`swap.sys`,
+      widoczny w `fls` i `df`), ale same strony wędrują tam wprost przez
+      ATA, z pominięciem kodu PFS - wymiana potrafi ruszyć w środku
+      operacji na plikach, a PFS ma jeden wspólny bufor na blok. Wpis
+      wyrzuconej strony trzyma numer miejsca w górnych bitach, `mem`
+      pokazuje bilans, a `run swaptest 18` mieści 18 MiB na maszynie
+      z 16 MiB RAM-u

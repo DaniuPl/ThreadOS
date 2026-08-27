@@ -48,6 +48,10 @@ uint32_t task_signal_leave(void);      /* adres ramki albo 0 */
    wpisuje do *code. -1 = brak dzieci, na ktore mozna czekac. */
 int task_wait_any(int *code);
 
+/* Wyrzuca na dysk jedna nieuzywana strone ktoregos z procesow.
+   1 = zwolniono ramke. Wola to PMM, gdy zabraknie pamieci. */
+int task_reclaim_page(void);
+
 /* Zmienia nazwe biezacego zadania (exec podmienia program) */
 void task_rename(const char *name);
 

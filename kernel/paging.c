@@ -20,13 +20,20 @@
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/shm.h"
+#include "include/swap.h"
+#include "include/printk.h"
 
 #define PTE_PRESENT 0x1
 #define PTE_WRITE   0x2
 #define PTE_USER    0x4
-/* Bit 9 jest do dyspozycji systemu - znaczymy nim strone oddana
-   na kopiowanie przy zapisie (fork). Sprzet go ignoruje. */
+#define PTE_ACCESSED 0x20   /* ustawia procesor przy uzyciu strony */
+/* Bity 9 i 10 sa do dyspozycji systemu; sprzet je ignoruje.
+   Bit 9  - strona oddana na kopiowanie przy zapisie (fork).
+   Bit 10 - strona wyrzucona na dysk; numer miejsca siedzi w gornych
+            bitach wpisu, ktore przy nieobecnej stronie i tak nikogo
+            nie obchodza. */
 #define PTE_COW     0x200
+#define PTE_SWAPPED 0x400
 
 #define NUM_TABLES (PAGING_STATIC_LIMIT / (4096u * 1024))
 
@@ -182,8 +189,12 @@ void paging_destroy_address_space(uint32_t dir_phys)
             continue;
         uint32_t *pt = (uint32_t *)(dir[i] & ~0xFFFu);
         for (int j = 0; j < 1024; j++) {
-            if (!(pt[j] & PTE_PRESENT))
+            if (!(pt[j] & PTE_PRESENT)) {
+                /* Strona lezaca na dysku - oddaj jej miejsce */
+                if (pt[j] & PTE_SWAPPED)
+                    swap_free_slot((int)(pt[j] >> 12));
                 continue;
+            }
             uint32_t frame = pt[j] & ~0xFFFu;
             /* Ramek pamieci wspoldzielonej nie zwalniamy - moga ich
                uzywac inne procesy */
@@ -239,6 +250,14 @@ uint32_t paging_clone_address_space(uint32_t src_phys)
 
         for (int j = 0; j < 1024; j++) {
             uint32_t e = spt[j];
+            if (!(e & PTE_PRESENT) && (e & PTE_SWAPPED)) {
+                /* Strona rodzica lezy na dysku - sciagnij ja, zanim
+                   podzielisz ja z dzieckiem (jedno miejsce w pliku
+                   wymiany nie moze nalezec do dwoch przestrzeni) */
+                uint32_t va = ((uint32_t)i << 22) | ((uint32_t)j << 12);
+                if (paging_swap_in(src_phys, va))
+                    e = spt[j];
+            }
             if (!(e & PTE_PRESENT)) {
                 dpt[j] = 0;
                 continue;
@@ -292,6 +311,114 @@ int paging_handle_cow(uint32_t vaddr, uint32_t err_code)
         pmm_free_frame(frame);          /* jeden wlasciciel mniej */
         pt[idx] = copy | (e & 0xFFFu & ~(uint32_t)PTE_COW) | PTE_WRITE;
     }
+    __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    return 1;
+}
+
+/* --- wymiana stron -------------------------------------------------- */
+
+/* Wpis strony wyrzuconej na dysk: nieobecna, ze znacznikiem i numerem
+   miejsca w gornych bitach. Procesor takiego wpisu nie interpretuje. */
+static uint32_t swap_pte(int slot)
+{
+    return ((uint32_t)slot << 12) | PTE_SWAPPED;
+}
+
+/* Wskaznik zegara: gdzie skonczylismy ostatnie szukanie ofiary. Bez
+   niego kazde szukanie zaczynaloby sie od poczatku i wyrzucalo w kolko
+   te same, najnizej lezace strony. */
+static uint32_t clock_pde = 256;
+static uint32_t clock_pte;
+
+/* Wyrzuca na dysk jedna strone z podanej przestrzeni adresowej.
+ *
+ * Algorytm drugiej szansy: procesor sam zaznacza w kazdym uzytym wpisie
+ * bit "odwiedzona". Strone z tym bitem zostawiamy, tylko go gasimy -
+ * jesli do nastepnego obchodu nikt jej nie tknie, poleci. Zabieramy
+ * wiec te, ktore naprawde lezaly odlogiem.
+ *
+ * Nie ruszamy stron wspoldzielonych (shm), stron oddanych na kopiowanie
+ * przy zapisie ani ramek nalezacych do wiecej niz jednej przestrzeni -
+ * z nimi wymiana wymagalaby liczenia wlascicieli takze na dysku.
+ */
+int paging_reclaim_pages(uint32_t dir_phys, int want)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    int freed = 0;
+
+    /* Dwa obchody: pierwszy gasi bity "odwiedzona", drugi zabiera */
+    for (int pass = 0; pass < 2 && freed < want; pass++) {
+        /* Przestrzen uzytkownika to wpisy katalogu 256..767 */
+        for (uint32_t n = 0; n < 512 && freed < want; n++) {
+            uint32_t i = 256 + (clock_pde - 256 + n) % 512;
+            if (!(dir[i] & PTE_PRESENT) || kernel_table(dir[i]))
+                continue;
+            uint32_t *pt = (uint32_t *)(dir[i] & ~0xFFFu);
+            /* Wewnatrz tablicy tez zaczynamy tam, gdzie skonczylismy -
+               inaczej kazde szukanie przemiatalo by od nowa strony,
+               ktore juz dawno poszly na dysk */
+            uint32_t start = (n == 0) ? clock_pte : 0;
+            for (uint32_t k = 0; k < 1024 && freed < want; k++) {
+                uint32_t j = (start + k) % 1024;
+                uint32_t e = pt[j];
+                if (!(e & PTE_PRESENT) || !(e & PTE_USER) || (e & PTE_COW))
+                    continue;
+                uint32_t frame = e & ~0xFFFu;
+                if (shm_is_shared(frame) || pmm_frame_refs(frame) != 1)
+                    continue;
+                if (e & PTE_ACCESSED) {
+                    pt[j] = e & ~(uint32_t)PTE_ACCESSED;   /* druga szansa */
+                    continue;
+                }
+
+                int slot = swap_alloc_slot();
+                if (slot < 0)
+                    goto done;              /* plik wymiany pelny */
+                if (swap_write(slot, (const void *)frame) < 0) {
+                    swap_free_slot(slot);
+                    goto done;
+                }
+                pt[j] = swap_pte(slot);
+                pmm_free_frame(frame);
+                clock_pde = i;
+                clock_pte = j + 1;
+                freed++;
+            }
+        }
+        /* Po pierwszym obchodzie wszystkie bity sa juz zgaszone -
+           drugi obchod znajdzie ofiary, o ile w ogole jest co brac */
+    }
+done:
+    if (freed)
+        flush_if_active(dir_phys);
+    return freed;
+}
+
+/* Sciaga z dysku strone, ktora proces wlasnie probowal dotknac.
+   Zwraca 1, gdy strona wrocila (mozna wznowic instrukcje). */
+int paging_swap_in(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    uint32_t pde = vaddr >> 22;
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
+        return 0;
+
+    uint32_t *pt = (uint32_t *)(dir[pde] & ~0xFFFu);
+    uint32_t idx = (vaddr >> 12) & 0x3FF;
+    uint32_t e = pt[idx];
+    if ((e & PTE_PRESENT) || !(e & PTE_SWAPPED))
+        return 0;
+
+    int slot = (int)(e >> 12);
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;                       /* brak pamieci nawet na powrot */
+    if (swap_read(slot, (void *)frame) < 0) {
+        pmm_free_frame(frame);
+        return 0;
+    }
+    pt[idx] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    swap_free_slot(slot);
     __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
     return 1;
 }

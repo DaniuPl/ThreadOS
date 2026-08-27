@@ -301,6 +301,10 @@ static void exec_task(void *arg)
  * bledem strony, a jadro dopiero wtedy przydziela wyzerowana ramke
  * i wznawia instrukcje.
  *
+ * Ten sam punkt obsluguje strony, ktore nie tyle jeszcze nie powstaly,
+ * co zostaly wyrzucone na dysk - wtedy zamiast swiezego zera wraca ich
+ * dawna zawartosc.
+ *
  * Wola to zarowno obsluga wyjatku (dostep z ring 3), jak i walidacja
  * wskaznikow w syscallach: jadro, ktore ma zaraz wypelnic bufor
  * procesu, musi go najpierw urzeczywistnic - inaczej swiezo
@@ -315,15 +319,23 @@ int process_demand_page(uint32_t addr)
     if (!brk)                       /* watek jadra - nie ma sterty */
         return 0;
 
+    uint32_t dir = task_current_cr3();
+    uint32_t va = addr & ~(PAGE_SIZE - 1);
+    if (paging_get_mapping(dir, va))
+        return 0;                   /* strona juz jest - blad z innego powodu */
+
+    /* Najpierw dysk, i to dla KAZDEGO adresu uzytkownika: wymiana
+       zabiera tez strony kodu i stosu, ktore do zadnego obiecanego
+       obszaru nie naleza. Sprawdzenie zakresu ponizej dotyczy tylko
+       stron, ktore maja dopiero powstac. */
+    if (paging_swap_in(dir, va))
+        return 1;
+
     int in_heap = addr >= task_brk_base() && addr < brk;
     int in_mmap = addr >= MMAP_BASE && addr < task_mmap_next();
     if (!in_heap && !in_mmap)
         return 0;
 
-    uint32_t dir = task_current_cr3();
-    uint32_t va = addr & ~(PAGE_SIZE - 1);
-    if (paging_get_mapping(dir, va))
-        return 0;                   /* strona juz jest - blad z innego powodu */
     return page_frame_for(dir, va) != 0;
 }
 

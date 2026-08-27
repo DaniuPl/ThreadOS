@@ -612,6 +612,27 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
 
 /* --- Operacje po slocie --- */
 
+/* Numer bloku dysku, pod ktorym lezy 'index'-ty blok pliku. alloc=1
+   przydziela go, gdy plik jeszcze tam nie siega. 0 = blad.
+   Korzysta z tego swap: miejsce rezerwuje przez system plikow (wiec
+   'df' i 'fls' mowia prawde), a pisze po nim juz wprost przez ATA -
+   bez wchodzenia w kod PFS, ktory ma jeden wspolny bufor na blok. */
+uint32_t fs_file_block(int slot, uint32_t index, int alloc)
+{
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+        return 0;
+    uint32_t blk = inode_block(&inodes[slot], index, alloc);
+    if (blk && alloc)
+        flush_inode(slot);
+    return blk;
+}
+
+/* Pierwszy sektor ATA danego bloku PFS */
+uint32_t fs_block_lba(uint32_t block)
+{
+    return block * SECTORS_PER_BLOCK;
+}
+
 int fs_size(int slot)
 {
     if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)

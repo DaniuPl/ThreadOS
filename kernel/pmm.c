@@ -116,7 +116,17 @@ uint32_t pmm_alloc_frame(void)
 /* Alokacje i zwalnianie biegna tez z kontekstu IRQ (exec, sprzatanie
    przestrzeni adresowych zombie) - stad sekcje krytyczne. */
 
-uint32_t pmm_alloc_contiguous(uint32_t n)
+/* Kogo prosic o pamiec, gdy jej zabraknie (ustawia to wymiana stron).
+   PMM nie wie nic o procesach ani o dysku - dostaje tylko funkcje,
+   ktora ma zwolnic co najmniej jedna ramke. */
+static int (*reclaim)(void);
+
+void pmm_set_reclaim(int (*fn)(void))
+{
+    reclaim = fn;
+}
+
+static uint32_t alloc_contiguous_raw(uint32_t n)
 {
     uint32_t flags = irq_save();
     uint32_t run = 0;
@@ -137,6 +147,25 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
         }
     }
     irq_restore(flags);
+    return 0;
+}
+
+uint32_t pmm_alloc_contiguous(uint32_t n)
+{
+    uint32_t addr = alloc_contiguous_raw(n);
+    if (addr || !reclaim)
+        return addr;
+
+    /* Brak wolnych ramek: sprobuj odzyskac tyle, ile trzeba, wyrzucajac
+       nieuzywane strony procesow na dysk. Gdy odzyskiwanie przestaje
+       cokolwiek dawac, pamieci naprawde nie ma. */
+    for (uint32_t tries = 0; tries < n + 4; tries++) {
+        if (!reclaim())
+            break;
+        addr = alloc_contiguous_raw(n);
+        if (addr)
+            return addr;
+    }
     return 0;
 }
 

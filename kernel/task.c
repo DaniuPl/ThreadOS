@@ -333,6 +333,48 @@ uint32_t task_signal_leave(void)
     return frame;
 }
 
+/* Odzyskiwanie pamieci: obchodzi przestrzenie adresowe procesow
+   i prosi kazda o oddanie jednej strony na dysk. Zaczyna od nastepnej
+   po ostatnio odwiedzonej, zeby nie obdzierac w kolko tego samego
+   procesu. Zwraca 1, gdy udalo sie zwolnic ramke.
+
+   Watki jadra (cr3 jadra) pomijamy - pamiec jadra na dysk nie idzie.
+
+   Cala robota idzie przy wylaczonych przerwaniach i nie jest to tylko
+   ostroznosc wobec listy zadan: miedzy zgaszeniem wpisu strony
+   a zapisaniem jej na dysk nikt nie moze dostac procesora. Inaczej
+   watek dzielacy te przestrzen trafilby na strone "juz na dysku",
+   ktorej tam jeszcze nie ma. */
+int task_reclaim_page(void)
+{
+    static struct task *cursor;
+    if (!current)                   /* scheduler jeszcze nie wystartowal */
+        return 0;
+    uint32_t flags = irq_save();
+
+    struct task *start = cursor && cursor->state != TASK_ZOMBIE
+                             ? cursor : current;
+    struct task *t = start;
+    uint32_t kernel_cr3 = paging_kernel_cr3();
+    int freed = 0;
+
+    do {
+        t = t->next;
+        /* Partiami: samo przemiatanie tablic stron kosztuje wiecej niz
+           zapis jednej strony, wiec nie oplaca sie chodzic po nich
+           od nowa dla kazdej brakujacej ramki */
+        if (t->cr3 != kernel_cr3 && t->state != TASK_ZOMBIE &&
+            paging_reclaim_pages(t->cr3, 32)) {
+            cursor = t;
+            freed = 1;
+            break;
+        }
+    } while (t != start);
+
+    irq_restore(flags);
+    return freed;
+}
+
 /* Zmiana nazwy biezacego zadania - exec podmienia program, wiec 'ps'
    ma pokazywac nowy, a nie ten, ktory sie nim stal */
 void task_rename(const char *name)
