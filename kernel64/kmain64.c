@@ -23,18 +23,43 @@
 #include "../kernel/include/heap.h"
 #include "idt64.h"
 #include "paging64.h"
+#include "task64.h"
 
-/* Miejsca, w ktorych wspoldzielone pliki siegaja po scheduler.
-   Zadan w tym jadrze jeszcze nie ma, wiec wypisy ida na pierwsza
-   konsole, a przerwanie timera tylko zwieksza licznik i wraca.
-   Te dwie zaslepki znikna, gdy port dojdzie do zadan. */
+/* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
+   na razie jedna, wiec wszystko idzie na pierwsza. */
 int task_vc(void)
 {
     return 0;
 }
 
-void schedule(void)
+/* Watki demonstracyjne: dwa liczace bez konca i jeden, ktory sam sie
+   konczy - po to, zeby bylo widac, ze zombie znika z listy. */
+static volatile uint32_t counter_a, counter_b;
+static volatile int mortal_done;
+
+static void count_a(void *arg)
 {
+    (void)arg;
+    for (;;) {
+        counter_a++;
+        task64_sleep(20);
+    }
+}
+
+static void count_b(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        counter_b++;
+        task64_sleep(50);
+    }
+}
+
+static void mortal(void *arg)
+{
+    (void)arg;
+    task64_sleep(300);
+    mortal_done = 1;
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -164,6 +189,23 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     for (int i = 0; i < 200; i++)
         __asm__ volatile("hlt");
     printk("[ OK ] Timer tyka: %u -> %u tyknac\n", start, pit_ticks());
+
+    /* --- Watki -------------------------------------------------- */
+    scheduler64_init();
+    task64_create("licz-A", count_a, 0);
+    task64_create("licz-B", count_b, 0);
+    task64_create("krotki", mortal, 0);
+    printk("[ OK ] Scheduler: %d zadania na liscie\n", task64_count());
+
+    /* Watek glowny zasypia; procesor musi w tym czasie pojsc do innych.
+       Gdyby przelaczanie kontekstu bylo zepsute, liczniki zostalyby
+       na zerze albo system zawisl. */
+    task64_sleep(600);
+    printk("[ OK ] Watki licza rownolegle: A=%u, B=%u\n",
+           counter_a, counter_b);
+    printk("[ OK ] Watek konczacy sie: %s, zadan na liscie: %d\n",
+           mortal_done ? "zrobil swoje" : "nie zdazyl", task64_count());
+    task64_dump();
 
     printk("\nSzkielet 64-bitowy stoi. Reszta jadra dochodzi po kolei.\n");
 

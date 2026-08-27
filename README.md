@@ -566,3 +566,12 @@ obrazie dysku.
       leży. Sprawdzian: strona 4 KiB wstawiona **osiem gigabajtów** ponad
       obszar opisany identycznościowo, zapisana i odczytana przez pełną
       czterostopniową ścieżkę
+- [x] Wątki jądra w trybie długim: przełączanie kontekstu zapisuje sześć
+      rejestrów zamiast czterech i po osiem bajtów każdy, reszta stanu
+      wątku zostaje na jego własnym stosie - tak samo jak w jądrze
+      32-bitowym. Doszedł osobny **wątek bezczynności**: dzięki niemu
+      przypadek „nikt nie jest gotowy" po prostu nie występuje,
+      a scheduler nie musi czekać na przerwanie w środku własnego
+      wywołania (co przy wywołaniu z obsługi timera zagnieżdżałoby się
+      bez końca). Sprawdzian jest arytmetyczny: przez 600 ms wątek
+      śpiący po 20 ms budzi się dokładnie 30 razy, a ten po 50 ms - 12

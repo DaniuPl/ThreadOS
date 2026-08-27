@@ -2694,6 +2694,25 @@ def main():
                                     trap) is not None)
                     # A timer musi tykac sam z siebie - to dowod, ze
                     # przerwania sprzetowe dochodza przez nowa tablice
+
+                    # Watki: liczniki musza zgadzac sie z dlugoscia snu
+                    # co do jednego. Przez 600 ms watek spiacy po 20 ms
+                    # zdazy 30 razy, a ten po 50 ms - 12. Zepsute
+                    # przelaczanie kontekstu albo usypianie od razu
+                    # wypycha te liczby poza zakres.
+                    sch = q23.wait_serial("Watki licza rownolegle",
+                                          timeout=25)
+                    m = re.search(r"A=(\d+), B=(\d+)", sch)
+                    check("watki dzialaja rownolegle, a sen trwa tyle, ile ma"
+                          + (f" (A={m.group(1)}, B={m.group(2)})"
+                             if m else ""),
+                          m is not None and 28 <= int(m.group(1)) <= 32
+                          and 11 <= int(m.group(2)) <= 13)
+                    zom = q23.wait_serial("Watek konczacy sie", timeout=20)
+                    check("zakonczony watek znika z listy",
+                          "zrobil swoje" in zom
+                          and "zadan na liscie: 4" in zom)
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

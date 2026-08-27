@@ -182,8 +182,9 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
+          $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
-          $(BUILD)/64/paging64.o \
+          $(BUILD)/64/paging64.o $(BUILD)/64/task64.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
 $(BUILD)/64:
@@ -193,6 +194,9 @@ $(BUILD)/64/boot64.o: boot64/boot64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 $(BUILD)/64/isr64_stubs.o: boot64/isr64.S | $(BUILD)/64
+	$(CC) -m64 -c $< -o $@
+
+$(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 KERNEL64_HEADERS := $(wildcard kernel64/*.h)
