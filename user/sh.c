@@ -132,7 +132,7 @@ void _start(void)
                 a++;
             if (!*a) {
                 print("uzycie: kill <pid>\n");
-            } else if (sys_kill(uatoi(a)) < 0) {
+            } else if (sys_kill(uatoi(a), SIGKILL) < 0) {
                 print("ush: nie ma procesu o pid ");
                 print(a);
                 print("\n");

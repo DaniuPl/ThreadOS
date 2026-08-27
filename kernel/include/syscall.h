@@ -22,7 +22,7 @@
 #define SYS_CHDIR    17  /* ebx=sciezka -> 0 albo -1 */
 #define SYS_GETCWD   18  /* ebx=bufor (>=128) -> 0 */
 #define SYS_MKDIR    19  /* ebx=sciezka -> 0 albo -1 */
-#define SYS_KILL     20  /* ebx=pid -> 0 albo -1 */
+#define SYS_KILL     20  /* ebx=pid, ecx=sygnal (0=SIGKILL) -> 0 albo -1 */
 #define SYS_WIN_CREATE 21 /* ebx=cw, ecx=ch, edx=tytul -> winid albo -1 */
 #define SYS_WIN_RECT   22 /* ebx=winid, ecx=&{x,y,w,h,color} -> 0/-1 */
 #define SYS_WIN_TEXT   23 /* ebx=winid, ecx=&{x,y,color,str} -> 0/-1 */
@@ -46,6 +46,8 @@
 #define SYS_FORK        41 /* -> pid dziecka (rodzic) / 0 (dziecko) / -1 */
 #define SYS_EXEC        42 /* ebx=linia polecen; nie wraca albo -1 */
 #define SYS_WAITANY     43 /* ebx=&kod -> pid dziecka albo -1 (brak dzieci) */
+#define SYS_SIGNAL      44 /* ebx=sygnal, ecx=handler, edx=trampolina -> 0/-1 */
+#define SYS_SIGRETURN   45 /* powrot z procedury obslugi (bez argumentow) */
 
 #define SYSCALL_VECTOR 0x80
 

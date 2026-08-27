@@ -23,6 +23,7 @@
 #include "include/paging.h"
 #include "include/kfile.h"
 #include "include/pipe.h"
+#include "include/signal.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -39,6 +40,11 @@ struct task {
     uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     int parent;                  /* pid rodzica (-1 = brak, sierota) */
+    uint32_t sig_pending;        /* maska oczekujacych sygnalow */
+    uint32_t sig_handler[NSIG];  /* SIG_DFL / SIG_IGN / adres procedury */
+    uint32_t sig_tramp;          /* trampolina powrotu (adres w ring 3) */
+    uint32_t sig_frame;          /* ramka przerwanego stanu na stosie */
+    int in_handler;              /* czy procedura obslugi wlasnie dziala */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
@@ -98,6 +104,17 @@ static void task_set_name(struct task *t, const char *name)
     t->name[i] = '\0';
 }
 
+/* Czysta tablica sygnalow: wszystko domyslne, nic nie czeka */
+static void task_init_signals(struct task *t)
+{
+    t->sig_pending = 0;
+    t->sig_tramp = 0;
+    t->sig_frame = 0;
+    t->in_handler = 0;
+    for (int i = 0; i < NSIG; i++)
+        t->sig_handler[i] = SIG_DFL;
+}
+
 /* Standardowe strumienie: 0=klawiatura (read), 1/2=konsola (write) */
 static void task_init_fds(struct task *t)
 {
@@ -147,6 +164,7 @@ void scheduler_init(void)
     main_task->killed = 0;
     main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
     task_init_fds(main_task);
+    task_init_signals(main_task);
     main_task->next = main_task;
     current = main_task;
 }
@@ -165,6 +183,7 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->killed = 0;
     t->priority = 1;            /* domyslnie normalny priorytet */
     task_init_fds(t);
+    task_init_signals(t);
     t->entry = entry;
     t->arg = arg;
     t->state = TASK_READY;
@@ -204,12 +223,125 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     return t;
 }
 
+/* --- sygnaly -------------------------------------------------------- */
+
+/* Wysyla sygnal do procesu o danym pid. SIGKILL idzie stara droga
+   (flaga 'killed'), zeby nie dalo sie go przechwycic ani zignorowac.
+   Spiacego adresata budzimy - inaczej sygnal poczekalby do rana. */
+int task_signal_send(int pid, int sig)
+{
+    if (sig <= 0 || sig >= NSIG)
+        return -1;
+    if (sig == SIGKILL)
+        return task_kill(pid);
+
+    uint32_t flags = irq_save();
+    struct task *t = current;
+    int found = 0;
+    do {
+        if (t->id == pid && t->state != TASK_ZOMBIE) {
+            t->sig_pending |= 1u << sig;
+            if (t->state == TASK_SLEEPING || t->state == TASK_BLOCKED)
+                t->state = TASK_READY;
+            found = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return found ? 0 : -1;
+}
+
+/* Ustawia procedure obslugi sygnalu dla biezacego procesu.
+   'tramp' to adres trampoliny powrotu w ring 3 (z usys.h). */
+int task_signal_set(int sig, uint32_t handler, uint32_t tramp)
+{
+    if (sig <= 0 || sig >= NSIG || sig == SIGKILL)
+        return -1;                  /* SIGKILL-a nie da sie przechwycic */
+    uint32_t flags = irq_save();
+    current->sig_handler[sig] = handler;
+    if (tramp)
+        current->sig_tramp = tramp;
+    irq_restore(flags);
+    return 0;
+}
+
+/* Zdejmuje najnizszy oczekujacy sygnal (0 = zaden nie czeka) */
+int task_signal_take(void)
+{
+    uint32_t flags = irq_save();
+    int sig = 0;
+    for (int i = 1; i < NSIG; i++) {
+        if (current->sig_pending & (1u << i)) {
+            current->sig_pending &= ~(1u << i);
+            sig = i;
+            break;
+        }
+    }
+    irq_restore(flags);
+    return sig;
+}
+
+/* Czy czeka jakis sygnal, ktorego doreczenie cos zmieni? Pyta o to
+   blokujacy odczyt - inaczej proces czekalby na klawisz w nieskonczonosc,
+   a sygnal doreczylby sie dopiero po jego nadejsciu. */
+int task_signal_pending(void)
+{
+    uint32_t flags = irq_save();
+    uint32_t p = current->sig_pending;
+    int any = 0;
+    for (int i = 1; i < NSIG; i++)
+        if ((p & (1u << i)) && current->sig_handler[i] != SIG_IGN) {
+            any = 1;
+            break;
+        }
+    irq_restore(flags);
+    return any;
+}
+
+uint32_t task_signal_handler(int sig)
+{
+    return (sig > 0 && sig < NSIG) ? current->sig_handler[sig] : SIG_DFL;
+}
+
+uint32_t task_signal_tramp(void)
+{
+    return current->sig_tramp;
+}
+
+int task_signal_in_handler(void)
+{
+    return current->in_handler;
+}
+
+void task_signal_enter(uint32_t frame)
+{
+    current->sig_frame = frame;
+    current->in_handler = 1;
+}
+
+uint32_t task_signal_leave(void)
+{
+    uint32_t frame = current->in_handler ? current->sig_frame : 0;
+    current->in_handler = 0;
+    current->sig_frame = 0;
+    return frame;
+}
+
 /* Zmiana nazwy biezacego zadania - exec podmienia program, wiec 'ps'
    ma pokazywac nowy, a nie ten, ktory sie nim stal */
 void task_rename(const char *name)
 {
     uint32_t flags = irq_save();
     task_set_name(current, name);
+    /* Nowy obraz procesu nie ma juz kodu starych procedur obslugi -
+       sygnaly wracaja do reakcji domyslnych (jak w uniksie po exec) */
+    for (int i = 0; i < NSIG; i++)
+        if (current->sig_handler[i] != SIG_IGN)
+            current->sig_handler[i] = SIG_DFL;
+    current->sig_tramp = 0;
+    current->sig_frame = 0;
+    current->in_handler = 0;
     irq_restore(flags);
 }
 
@@ -229,6 +361,12 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     t->mmap_next = current->mmap_next;
     t->cwd = current->cwd;
     t->priority = current->priority;
+    /* Procedury obslugi sygnalow dziedziczy sie po rodzicu; oczekujace
+       sygnaly - nie, to sprawy rodzica. Trampolina jest w tym samym
+       miejscu kodu, bo dziecko ma kopie tego samego obrazu. */
+    t->sig_tramp = current->sig_tramp;
+    for (int i = 0; i < NSIG; i++)
+        t->sig_handler[i] = current->sig_handler[i];
     for (int i = 0; i < TASK_MAX_FD; i++) {
         t->fds[i] = current->fds[i];
         if (t->fds[i].used && t->fds[i].kind == FD_PIPE) {
@@ -438,6 +576,19 @@ void task_exit(int code)
     /* Dzieci, ktore nas przezyly, trafiaja pod opieke wlasnego dziadka
        (a w ostateczonosci watku glownego) - inaczej nikt nigdy nie
        odebralby ich kodu wyjscia. */
+    /* Rodzic dostaje SIGCHLD - domyslnie zignoruje, ale moze chciec
+       wiedziec od razu, ze ma co zbierac przez wait */
+    if (current->parent >= 0) {
+        struct task *p = current->next;
+        while (p != current) {
+            if (p->id == current->parent && p->state != TASK_ZOMBIE) {
+                p->sig_pending |= 1u << SIGCHLD;
+                break;
+            }
+            p = p->next;
+        }
+    }
+
     int grandparent = current->parent >= 0 ? current->parent : 0;
     struct task *t = current->next;
     while (t != current) {
@@ -548,14 +699,19 @@ int task_killed(void)
 
 int task_kill_name(const char *name)
 {
+    int pid = task_find_name(name);
+    return pid >= 0 && task_kill(pid) == 0 ? pid : -1;
+}
+
+/* Pid zywego zadania o danej nazwie (-1 = nie ma takiego). Rozdzielone
+   od zabijania, bo shell umie wyslac pod nazwe dowolny sygnal. */
+int task_find_name(const char *name)
+{
     uint32_t flags = irq_save();
     struct task *t = current;
     int pid = -1;
     do {
         if (t->state != TASK_ZOMBIE && !strcmp(t->name, name)) {
-            t->killed = 1;
-            if (t->state == TASK_SLEEPING || t->state == TASK_BLOCKED)
-                t->state = TASK_READY;
             pid = t->id;
             break;
         }

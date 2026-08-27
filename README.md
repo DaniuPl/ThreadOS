@@ -41,6 +41,7 @@ ProtonOS/
 │   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP + UDP
 │   ├── dhcp.c          # klient DHCP (DISCOVER/OFFER/REQUEST/ACK)
 │   ├── tcp.c           # TCP: klient i serwer, ACK-i, retransmisje, FIN
+│   ├── signal.c        # sygnały: doręczanie, ramka na stosie, sigreturn
 │   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
 │   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
 │   │                   #   ifconfig, arp, ping...
@@ -105,6 +106,7 @@ ProtonOS/
 │   ├── prio.c          # demo schedulera z priorytetami
 │   ├── forktest.c      # fork() i kopiowanie przy zapisie
 │   ├── ptree.c         # drzewo procesów: waitany i sieroty
+│   ├── sigtest.c       # sygnały: handler, SIG_IGN, Ctrl+C
 │   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
 │   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
 │   └── user.ld         # programy linkowane pod 0x08048000
@@ -415,3 +417,14 @@ obrazie dysku.
       i oddaje je w kolejności kończenia (pid + kod wyjścia), a osierocone
       procesy trafiają pod opiekę dziadka - ich kod wyjścia nie przepada
       razem z rodzicem (`run ptree`)
+- [x] Sygnały: `signal()` z własną procedurą obsługi w ring 3, `SIG_IGN`
+      i reakcje domyślne, `kill(pid, sygnal)`, `SIGCHLD` do rodzica po
+      śmierci dziecka, nieprzechwytywalny `SIGKILL`. Jądro doręcza sygnał
+      przy powrocie do ring 3: odkłada ramkę przerwanego stanu na stos
+      procesu i skacze w handler, a trampolina z `usys.h` prosi przez
+      `sigreturn` o odtworzenie tego stanu - z ramki wracają tylko
+      rejestry ogólne, `eip`, `esp` i flagi arytmetyczne, nigdy selektory
+      ani IOPL. **Ctrl+C** z klawiatury idzie jako `SIGINT` do procesu
+      trzymającego konsolę i przerywa jego oczekiwanie na klawisz;
+      `kill P S` w shellu jądra wysyła dowolny sygnał, także pod nazwę
+      procesu (`run sigtest`)

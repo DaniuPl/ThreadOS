@@ -30,6 +30,7 @@
 #include "include/paging.h"
 #include "include/net.h"
 #include "include/tcp.h"
+#include "include/signal.h"
 #include "include/string.h"
 
 /* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
@@ -275,7 +276,19 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_KILL:
-        r->eax = (uint32_t)task_kill((int)r->ebx);
+        /* ecx = numer sygnalu; 0 znaczy "po prostu zabij" (SIGKILL) */
+        r->eax = (uint32_t)task_signal_send((int)r->ebx,
+                                            r->ecx ? (int)r->ecx : SIGKILL);
+        break;
+    case SYS_SIGNAL:
+        /* ebx=sygnal, ecx=procedura obslugi (0=domyslna, 1=ignoruj),
+           edx=trampolina powrotu z ring 3 */
+        r->eax = (uint32_t)task_signal_set((int)r->ebx, r->ecx, r->edx);
+        break;
+    case SYS_SIGRETURN:
+        /* Nie ustawiamy tu eax - caly stan (z eax wlacznie) wraca
+           z ramki odlozonej przy doreczeniu sygnalu */
+        signal_return(r);
         break;
     case SYS_WIN_CREATE: {
         char title[64];

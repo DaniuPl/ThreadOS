@@ -29,6 +29,7 @@
 #include "include/net.h"
 #include "include/dhcp.h"
 #include "include/tcp.h"
+#include "include/signal.h"
 
 #define LINE_MAX 80
 
@@ -74,7 +75,7 @@ static const struct {
     {"netstat",  "polaczenia TCP"},
     {"dhcp",     "adres IP z sieci"},
     {"desktop",  "pulpit graficzny"},
-    {"kill P",   "zabij proces (pid/nazwa)"},
+    {"kill P S", "sygnal do procesu (dom. zabij)"},
     {"clear",    "wyczysc ekran"},
     {"gfx",      "test trybu 13h"},
     {"vesa",     "test trybu VESA"},
@@ -117,29 +118,51 @@ static void cmd_mem(void)
            heap_used_bytes(), heap_total_bytes());
 }
 
-static void cmd_kill(const char *arg)
+static void cmd_kill(char *arg)
 {
     if (!*arg) {
-        printk("uzycie: kill <pid|nazwa>\n");
+        printk("uzycie: kill <pid|nazwa> [sygnal], np. kill 7 15\n");
         return;
+    }
+
+    /* Opcjonalny numer sygnalu za nazwa/pidem; bez niego - SIGKILL */
+    int sig = SIGKILL;
+    char *sp = arg;
+    while (*sp && *sp != ' ')
+        sp++;
+    if (*sp == ' ') {
+        *sp++ = '\0';
+        while (*sp == ' ')
+            sp++;
+        sig = 0;
+        for (const char *p = sp; *p >= '0' && *p <= '9'; p++)
+            sig = sig * 10 + (*p - '0');
+        if (sig <= 0 || sig >= NSIG) {
+            printk("kill: nieznany sygnal '%s'\n", sp);
+            return;
+        }
     }
 
     /* Nazwa zamiast pidu: wygodniejsza, gdy program poszedl z menu
        pulpitu albo gdy numeracja pidow zalezy od kolejnosci startu */
+    int pid;
     if (*arg < '0' || *arg > '9') {
-        int pid = task_kill_name(arg);
-        if (pid < 0)
+        pid = task_find_name(arg);
+        if (pid < 0) {
             printk("kill: nie ma procesu '%s'\n", arg);
-        else
-            printk("kill: proces '%s' ma pid %d\n", arg, pid);
-        return;
+            return;
+        }
+        printk("kill: proces '%s' ma pid %d\n", arg, pid);
+    } else {
+        pid = 0;
+        for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
+            pid = pid * 10 + (*p - '0');
     }
 
-    int pid = 0;
-    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
-        pid = pid * 10 + (*p - '0');
-    if (task_kill(pid) < 0)
+    if (task_signal_send(pid, sig) < 0)
         printk("kill: nie ma procesu o pid %d\n", pid);
+    else if (sig != SIGKILL)
+        printk("kill: %s -> pid %d\n", signal_name(sig), pid);
 }
 
 static void cmd_uptime(void)

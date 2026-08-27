@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "include/isr.h"
 #include "include/paging.h"
+#include "include/signal.h"
 #include "include/pic.h"
 #include "include/printk.h"
 #include "include/syscall.h"
@@ -34,6 +35,7 @@ void isr_handler(struct regs *r)
     if (r->int_no == SYSCALL_VECTOR) {
         syscall_handler(r);
         task_kill_pending();    /* dorecz zabicie takze przy powrocie z syscalla */
+        signal_deliver(r);      /* ...a zaraz po nim oczekujace sygnaly */
         return;
     }
 
@@ -93,6 +95,8 @@ void isr_handler(struct regs *r)
 
     /* Przy powrocie do ring 3 dorecz oczekujace zabicie (kill) -
        proces ginie tu, w punkcie powrotu do trybu uzytkownika */
-    if ((r->cs & 3) == 3)
+    if ((r->cs & 3) == 3) {
         task_kill_pending();
+        signal_deliver(r);
+    }
 }

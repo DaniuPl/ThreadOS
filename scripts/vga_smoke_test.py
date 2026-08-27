@@ -891,6 +891,51 @@ def main():
         check("ps pokazuje rodzica kazdego watku",
               "RODZIC" in screen and re.search(r"\n  0   -", screen) is not None)
 
+        # 'run sigtest': sygnaly. Najostrzejszy punkt to powrot
+        # z procedury obslugi - sygnal przychodzi dokladnie w chwili,
+        # gdy jadro odlozylo juz wynik przerwanego syscalla.
+        q.type_line("clear")
+        q.type_line("mem")
+        used_before_sg = pmm_used(q.screen())
+        q.type_line("run sigtest")
+        screen = q.wait_for("[sigtest] wlasna procedura obslugi", timeout=30)
+        check("wlasna procedura obslugi sygnalu dziala w ring 3 i wraca",
+              "dostala SIGINT i wrocila" in screen)
+        screen = q.wait_for("[sigtest] SIG_IGN", timeout=20)
+        check("SIG_IGN gubi sygnal zamiast go doreczac",
+              "sygnal przepadl" in screen)
+        screen = q.wait_for("[sigtest] rodzic dostal SIGCHLD", timeout=30)
+        check("SIGTERM domyslnie konczy proces (kod -15)",
+              "domyslnie konczy proces (kod -15)" in screen)
+        check("rodzic dostaje SIGCHLD po smierci dziecka", True)
+        screen = q.wait_for("[sigtest] SIGKILL nie do przechwycenia",
+                            timeout=30)
+        check("SIGKILL-a nie da sie przechwycic ani zignorowac", True)
+
+        # Ctrl+C z prawdziwej klawiatury -> SIGINT do procesu, ktory
+        # trzyma konsole; czekanie na klawisz przerywa sie w pol drogi
+        q.wait_for("[sigtest] czekam na Ctrl+C", timeout=20)
+        q.sendkey("ctrl-c")
+        screen = q.wait_for("[sigtest] Ctrl+C dotarl", timeout=20)
+        check("Ctrl+C dociera do procesu jako SIGINT i przerywa odczyt",
+              "dotarl jako SIGINT" in screen)
+        q.wait_for("proces 'sigtest' zakonczyl sie (kod 0)", timeout=20)
+        time.sleep(0.6)
+        q.type_line("mem")
+        used_after_sg = pmm_used(q.screen())
+        check(f"brak wycieku ramek po sygnalach"
+              f" ({used_before_sg} -> {used_after_sg})",
+              used_after_sg is not None and used_after_sg == used_before_sg)
+
+        # Shell jadra umie wyslac dowolny sygnal, takze pod nazwe procesu
+        q.type_line("clear")
+        q.type_line("run spin")
+        q.wait_for("[spin] tik", timeout=20)
+        q.type_line("kill spin 15")
+        screen = q.wait_for("zakonczony przez SIGTERM", timeout=20)
+        check("'kill nazwa 15' z shella jadra wysyla SIGTERM",
+              "kill: SIGTERM -> pid" in screen)
+
         # 'run prio': scheduler z priorytetami. Watek normalny wywlaszcza
         # niski -> przez to samo okno czasu naliczy wielokrotnie wiecej.
         q.type_line("run prio")

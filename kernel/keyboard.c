@@ -12,11 +12,13 @@
 #include "include/isr.h"
 #include "include/pic.h"
 #include "include/task.h"
+#include "include/signal.h"
 
 #define KBD_DATA_PORT 0x60
 
 #define SC_LSHIFT 0x2A
 #define SC_RSHIFT 0x36
+#define SC_CTRL   0x1D
 #define SC_RELEASED 0x80
 #define SC_EXTENDED 0xE0
 
@@ -54,6 +56,7 @@ static char extended_key(uint8_t scancode)
 }
 
 static int shift_pressed;
+static int ctrl_pressed;
 static int extended_next;               /* poprzedni bajt to 0xE0 */
 static keyboard_char_handler_t on_char;
 
@@ -82,6 +85,14 @@ static void deliver(char c)
     if (console_owner_id >= 0 && !task_alive(console_owner_id))
         console_owner_id = -1;
 
+    /* Ctrl+C nie jest znakiem do przeczytania, tylko sygnalem dla
+       procesu trzymajacego konsole. Gdy konsoli nikt nie trzyma,
+       przerywac nie ma kogo - shell jadra znak zignoruje. */
+    if (c == KEY_INTR && console_owner_id >= 0) {
+        task_signal_send(console_owner_id, SIGINT);
+        return;
+    }
+
     if (console_owner_id >= 0) {
         if (khead - ktail < KBD_BUF_SIZE)
             kbuf[khead++ & (KBD_BUF_SIZE - 1)] = c;
@@ -104,17 +115,26 @@ int keyboard_read(char *buf, uint32_t len)
     console_owner_id = task_current_id();
 
     uint32_t got = 0;
+    int interrupted = 0;
     while (!got) {
         while (ktail != khead && got < len)
             buf[got++] = kbuf[ktail++ & (KBD_BUF_SIZE - 1)];
-        if (!got) {
-            kbd_waiter = task_current();
-            task_block();
+        if (got)
+            break;
+        /* Czekanie na klawisz przerywa sygnal (np. Ctrl+C): wracamy
+           z bledem, zeby proces zdazyl wejsc w swoja procedure obslugi */
+        if (task_signal_pending()) {
+            interrupted = 1;
+            break;
         }
+        kbd_waiter = task_current();
+        task_block();
     }
 
+    if (kbd_waiter == task_current())   /* obudzil nas sygnal, nie klawisz */
+        kbd_waiter = (void *)0;
     irq_restore(flags);
-    return (int)got;
+    return interrupted ? -1 : (int)got;
 }
 
 static void keyboard_irq(struct regs *r)
@@ -136,6 +156,14 @@ static void keyboard_irq(struct regs *r)
         return;
     }
 
+    if (scancode == SC_CTRL) {
+        ctrl_pressed = 1;
+        return;
+    }
+    if (scancode == (SC_CTRL | SC_RELEASED)) {
+        ctrl_pressed = 0;
+        return;
+    }
     if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
         shift_pressed = 1;
         return;
@@ -149,6 +177,8 @@ static void keyboard_irq(struct regs *r)
         return;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
+    if (ctrl_pressed && c == 'c')       /* pozostale kombinacje z Ctrl - jeszcze nie */
+        c = KEY_INTR;
     if (c)
         deliver(c);
 }

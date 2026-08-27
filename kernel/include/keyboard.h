@@ -13,6 +13,10 @@
 #define KEY_HOME  0x17
 #define KEY_END   0x18
 
+/* Ctrl+C: nie znak, tylko zadanie przerwania. Sterownik zamienia go
+   na SIGINT dla procesu trzymajacego konsole (zob. keyboard.c). */
+#define KEY_INTR  0x03
+
 /* Instaluje handler IRQ1 i odmaskowuje przerwanie klawiatury */
 void keyboard_init(void);
 
@@ -23,7 +27,8 @@ keyboard_char_handler_t keyboard_get_handler(void);
 
 /* Blokujący odczyt dla procesów (syscall read). Bieżące zadanie
    przejmuje konsolę do swojej śmierci; zwraca >=1 przeczytanych
-   znaków (bez echa - echo robi czytający). */
+   znaków (bez echa - echo robi czytający) albo -1, gdy czekanie
+   przerwał sygnał (proces wejdzie zaraz w procedurę obsługi). */
 int keyboard_read(char *buf, uint32_t len);
 
 #endif

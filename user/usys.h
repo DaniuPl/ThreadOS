@@ -48,6 +48,8 @@
 #define SYS_FORK        41
 #define SYS_EXEC        42
 #define SYS_WAITANY     43
+#define SYS_SIGNAL      44
+#define SYS_SIGRETURN   45
 
 #define FS_NAME_MAX  63
 
@@ -353,12 +355,50 @@ static inline int32_t sys_mkdir(const char *path)
     return ret;
 }
 
-static inline int32_t sys_kill(int pid)
+/* Sygnaly - numery musza zgadzac sie z kernel/include/signal.h */
+#define SIGINT   2      /* przerwanie z klawiatury (Ctrl+C) */
+#define SIGKILL  9      /* zabicie nie do przechwycenia */
+#define SIGTERM 15      /* prosba o zakonczenie */
+#define SIGCHLD 17      /* dziecko sie skonczylo */
+
+#define SIG_DFL 0       /* domyslna reakcja jadra */
+#define SIG_IGN 1       /* zignoruj sygnal */
+
+typedef void (*sighandler_t)(int32_t sig);
+
+/* Wysyla sygnal do procesu; sig=0 znaczy po prostu SIGKILL */
+static inline int32_t sys_kill(int pid, int32_t sig)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_KILL), "b"(pid)
+                     : "a"(SYS_KILL), "b"(pid), "c"(sig)
+                     : "memory");
+    return ret;
+}
+
+/* Trampolina powrotu z procedury obslugi sygnalu.
+ *
+ * Jadro odklada jej adres jako adres powrotu handlera, wiec gdy ten
+ * konczy sie zwyklym 'ret', sterowanie trafia tutaj, a stad przez
+ * syscall z powrotem do jadra - to ono odtwarza stan sprzed sygnalu.
+ * Handler nie moze wiec po prostu wrocic do przerwanego kodu sam. */
+__attribute__((unused, naked))
+static void __sig_tramp(void)
+{
+    __asm__ volatile("movl %0, %%eax\n\t"
+                     "int $0x80" : : "i"(SYS_SIGRETURN));
+}
+
+/* Ustawia procedure obslugi sygnalu (SIG_DFL / SIG_IGN / wlasna).
+   SIGKILL-a przechwycic sie nie da. Zwraca 0 albo -1. */
+static inline int32_t sys_signal(int32_t sig, sighandler_t handler)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SIGNAL), "b"(sig), "c"(handler),
+                       "d"(__sig_tramp)
                      : "memory");
     return ret;
 }

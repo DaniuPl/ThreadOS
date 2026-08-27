@@ -50,7 +50,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gweb.elf \
              $(BUILD)/user/cryptotest.elf \
              $(BUILD)/user/certtest.elf \
-             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf
+             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -88,7 +88,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/rtl8139.o \
         $(BUILD)/net.o \
         $(BUILD)/dhcp.o \
-        $(BUILD)/tcp.o
+        $(BUILD)/tcp.o \
+        $(BUILD)/signal.o
 
 .PHONY: all iso run run-iso test fuzz clean
 
@@ -149,7 +150,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    gweb=$(BUILD)/user/gweb.elf \
 	    cryptotest=$(BUILD)/user/cryptotest.elf \
 	    certtest=$(BUILD)/user/certtest.elf \
-	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf
+	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf \
+	    sigtest=$(BUILD)/user/sigtest.elf
 
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.

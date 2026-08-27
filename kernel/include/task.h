@@ -2,6 +2,7 @@
 #define PROTONOS_TASK_H
 
 #include <stdint.h>
+#include "signal.h"
 
 struct task;
 
@@ -31,6 +32,17 @@ struct file_desc *task_fds(void);
 /* fork: nowe zadanie z podana przestrzenia adresowa, dziedziczace po
    biezacym sterte, katalog roboczy, priorytet i deskryptory */
 struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3);
+
+/* --- sygnaly: stan trzyma zadanie, doreczaniem zajmuje sie signal.c --- */
+int task_signal_send(int pid, int sig);
+int task_signal_set(int sig, uint32_t handler, uint32_t tramp);
+int task_signal_take(void);            /* najnizszy oczekujacy, 0 = brak */
+int task_signal_pending(void);         /* czy cokolwiek czeka na doreczenie */
+uint32_t task_signal_handler(int sig);
+uint32_t task_signal_tramp(void);
+int task_signal_in_handler(void);
+void task_signal_enter(uint32_t frame);
+uint32_t task_signal_leave(void);      /* adres ramki albo 0 */
 
 /* Czeka na dowolne wlasne dziecko: zwraca jego pid, a kod wyjscia
    wpisuje do *code. -1 = brak dzieci, na ktore mozna czekac. */
@@ -63,6 +75,7 @@ void task_exit(int code);           /* zakończ bieżący wątek z kodem */
 int  task_wait(int pid);            /* czekaj na proces, zwróć jego kod */
 int  task_kill(int pid);            /* zaznacz proces do zabicia (0/-1) */
 int  task_kill_name(const char *name); /* to samo po nazwie -> pid albo -1 */
+int  task_find_name(const char *name); /* pid zywego zadania o tej nazwie */
 int  task_killed(void);             /* czy biezace zadanie ma zginac */
 void task_kill_pending(void);       /* dorecz zabicie przy powrocie do ring 3 */
 void task_block(void);              /* śpij, aż ktoś obudzi */
