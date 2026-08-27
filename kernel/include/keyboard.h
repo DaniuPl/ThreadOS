@@ -32,6 +32,10 @@ keyboard_char_handler_t keyboard_console_handler(void);
 /* Pulpit przechwytuje wszystkie klawisze (tryb graficzny nie ma konsol) */
 void keyboard_set_override(keyboard_char_handler_t handler);
 
+/* Znak z innego zrodla niz PS/2 (klawiatura USB) - dalsza droga taka sama */
+void keyboard_inject(char c);
+void keyboard_inject_switch(int vc);
+
 /* Blokujący odczyt dla procesów (syscall read). Bieżące zadanie
    przejmuje konsolę do swojej śmierci; zwraca >=1 przeczytanych
    znaków (bez echa - echo robi czytający) albo -1, gdy czekanie

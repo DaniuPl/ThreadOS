@@ -143,6 +143,26 @@ static void deliver(char c)
     }
 }
 
+/* Wstrzykniecie znaku z innego zrodla niz PS/2 (klawiatura USB).
+   Wolane z watku, wiec sami zamykamy sekcje krytyczna - dalsza droga
+   znaku jest dokladnie ta sama, co przy przerwaniu klawiatury. */
+void keyboard_inject(char c)
+{
+    uint32_t flags = irq_save();
+    deliver(c);
+    irq_restore(flags);
+}
+
+/* Przelaczenie konsoli z innego zrodla (Alt+F1..F4 na klawiaturze USB) */
+void keyboard_inject_switch(int vc)
+{
+    if (override)                       /* pulpit trzyma caly ekran */
+        return;
+    uint32_t flags = irq_save();
+    console_switch(vc);
+    irq_restore(flags);
+}
+
 /* Blokujacy odczyt dla syscalla read - wola proces uzytkownika */
 int keyboard_read(char *buf, uint32_t len)
 {

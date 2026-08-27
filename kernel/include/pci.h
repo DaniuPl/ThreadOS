@@ -10,7 +10,7 @@ uint32_t pci_find_vga_lfb(void);
 
 /* Znalezione urzadzenie PCI (magistrala 0, funkcja 0) */
 struct pci_dev {
-    int bus, slot;
+    int bus, slot, func;   /* jedno gniazdo moze miec kilka funkcji */
     uint16_t vendor, device;
     uint32_t bar0;        /* surowa zawartosc BAR0 (bit 0: 1 = port I/O) */
     uint32_t bar[6];      /* wszystkie rejestry bazowe, surowe */

@@ -50,6 +50,8 @@ ProtonOS/
 │   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
 │   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
 │   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
+│   ├── uhci.c          # kontroler USB: przesyłki sterujące i przerwaniowe
+│   ├── usbkbd.c        # klawiatura USB (HID, protokół rozruchowy)
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
 │   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
@@ -480,3 +482,15 @@ obrazie dysku.
       drogą zapasową. To warunek zobaczenia dysku na nowszej płycie,
       która nie ma trybu zgodności; przy okazji ta sama wymiana 18 MiB
       na maszynie z 16 MiB RAM-u trwa 4,3 s zamiast 8,3 s
+- [x] **Klawiatura USB** (HID, protokół rozruchowy) na kontrolerze UHCI:
+      rozpoznanie urządzenia na magistrali (reset portu, deskryptory,
+      nadanie adresu, odszukanie interfejsu klasy HID i jego punktu
+      końcowego), przełączenie w protokół rozruchowy i tłumaczenie
+      ośmiobajtowych raportów na klawisze - z modyfikatorami, strzałkami,
+      Ctrl+C i Alt+F1..F4. Dla reszty systemu nie ma różnicy, która
+      klawiatura jest podpięta: znaki idą tą samą drogą co z PS/2.
+      Sprawdzone też przy **wyłączonej obsłudze PS/2** - system dawał się
+      wtedy obsługiwać wyłącznie przez USB
+- [x] Skanowanie PCI obejmuje wszystkie funkcje urządzenia, nie tylko
+      zerową - kontrolery wbudowane w mostek siedzą na funkcji 2 albo 3
+      i przeglądanie samych zerowych nie znajdowało ich nigdy

@@ -52,27 +52,38 @@ uint32_t pci_find_vga_lfb(void)
     return 0;
 }
 
-static void fill(struct pci_dev *out, int slot, uint32_t id)
+static void fill(struct pci_dev *out, int slot, int func, uint32_t id)
 {
     out->bus = 0;
     out->slot = slot;
+    out->func = func;
     out->vendor = (uint16_t)(id & 0xFFFF);
     out->device = (uint16_t)(id >> 16);
     for (int i = 0; i < 6; i++)
-        out->bar[i] = pci_config_read(0, slot, 0, 0x10 + i * 4);
+        out->bar[i] = pci_config_read(0, slot, func, 0x10 + i * 4);
     out->bar0 = out->bar[0];
-    out->irq = (uint8_t)(pci_config_read(0, slot, 0, 0x3C) & 0xFF);
+    out->irq = (uint8_t)(pci_config_read(0, slot, func, 0x3C) & 0xFF);
+}
+
+/* Czy gniazdo ma wiecej niz jedna funkcje (bit 7 pola naglowka)?
+   Kontrolery wbudowane w mostek potrafia siedziec na funkcji 2 albo 3 -
+   przegladanie samych zerowych nie znajdzie ich nigdy. */
+static int multifunction(int slot)
+{
+    return (pci_config_read(0, slot, 0, 0x0C) >> 16) & 0x80;
 }
 
 int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out)
 {
     for (int slot = 0; slot < 32; slot++) {
-        uint32_t id = pci_config_read(0, slot, 0, 0x00);
-        if ((id & 0xFFFF) != vendor || (id >> 16) != device)
-            continue;
-
-        fill(out, slot, id);
-        return 1;
+        int funcs = multifunction(slot) ? 8 : 1;
+        for (int func = 0; func < funcs; func++) {
+            uint32_t id = pci_config_read(0, slot, func, 0x00);
+            if ((id & 0xFFFF) != vendor || (id >> 16) != device)
+                continue;
+            fill(out, slot, func, id);
+            return 1;
+        }
     }
     return 0;
 }
@@ -84,24 +95,27 @@ int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out)
 {
     for (int slot = 0; slot < 32; slot++) {
-        uint32_t id = pci_config_read(0, slot, 0, 0x00);
-        if ((id & 0xFFFF) == 0xFFFF)
-            continue;
+        int funcs = multifunction(slot) ? 8 : 1;
+        for (int func = 0; func < funcs; func++) {
+            uint32_t id = pci_config_read(0, slot, func, 0x00);
+            if ((id & 0xFFFF) == 0xFFFF)
+                continue;
 
-        uint32_t class = pci_config_read(0, slot, 0, 0x08);
-        if ((class >> 24) != base || ((class >> 16) & 0xFF) != sub ||
-            ((class >> 8) & 0xFF) != progif)
-            continue;
+            uint32_t class = pci_config_read(0, slot, func, 0x08);
+            if ((class >> 24) != base || ((class >> 16) & 0xFF) != sub ||
+                ((class >> 8) & 0xFF) != progif)
+                continue;
 
-        fill(out, slot, id);
-        return 1;
+            fill(out, slot, func, id);
+            return 1;
+        }
     }
     return 0;
 }
 
 void pci_enable_bus_master(const struct pci_dev *dev)
 {
-    uint32_t cmd = pci_config_read(dev->bus, dev->slot, 0, 0x04);
+    uint32_t cmd = pci_config_read(dev->bus, dev->slot, dev->func, 0x04);
     cmd |= PCI_CMD_IO | PCI_CMD_MEM | PCI_CMD_MASTER;
-    pci_config_write(dev->bus, dev->slot, 0, 0x04, cmd);
+    pci_config_write(dev->bus, dev->slot, dev->func, 0x04, cmd);
 }

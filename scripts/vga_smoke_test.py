@@ -384,7 +384,7 @@ def start_http_server():
 
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
-                 append=None, ram_mib=None, sata=False):
+                 append=None, ram_mib=None, sata=False, usbkbd=False):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         cmd = ["qemu-system-i386", "-kernel", kernel,
@@ -404,6 +404,10 @@ class Qemu:
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
+        if usbkbd:
+            # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
+            # nowsza niz mniej wiecej 2010 rok
+            cmd += ["-usb", "-device", "usb-kbd"]
         if append:
             cmd += ["-append", append]
         if initrd:
@@ -2270,6 +2274,43 @@ def main():
         q15.close()
         if os.path.exists(idisk):
             os.unlink(idisk)
+
+    # --- Klawiatura USB --------------------------------------------
+    # Kontroler USB, rozpoznanie urzadzenia, protokol rozruchowy HID.
+    # QEMU kieruje klawisze do urzadzenia USB, wiec to, ze komenda
+    # w ogole sie wykonuje, jest dowodem, ze przeszly ta droga.
+    print("--- klawiatura USB (HID) ---")
+    udisk = tempfile.mktemp(suffix=".img")
+    with open(udisk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
+    q19 = Qemu(KERNEL, INITRD, udisk, append=TEXT_MODE, usbkbd=True)
+    try:
+        boot = q19.wait_for("Klawiatura USB", timeout=30)
+        check("klawiatura USB rozpoznana na magistrali",
+              re.search(r"Klawiatura USB \(HID\) na porcie \d+", boot)
+              is not None)
+        q19.wait_for("ProtonOS shell", timeout=20)
+        q19.type_line("clear")
+        q19.type_line("uptime")
+        out = q19.wait_for("tyknac timera", timeout=20)
+        check("komenda wpisana z klawiatury USB wykonuje sie",
+              "uptime:" in out)
+        # Wielka litera powstaje z modyfikatora w raporcie HID -
+        # 'type_line' umie tylko male, wiec skladamy klawisze recznie
+        for ch in "write":
+            q19.sendkey(ch)
+        q19.sendkey("spc")
+        q19.sendkey("shift-a")
+        q19.sendkey("spc")
+        q19.sendkey("x")
+        q19.sendkey("ret")
+        saved = q19.wait_for("zapisano", timeout=20)
+        check("modyfikator Shift z raportu HID daje wielkie litery",
+              "do 'A'" in saved)
+    finally:
+        q19.close()
+        if os.path.exists(udisk):
+            os.unlink(udisk)
 
     # --- Dysk za kontrolerem AHCI ----------------------------------
     # Ten sam system plikow i ta sama wymiana stron, tyle ze dane

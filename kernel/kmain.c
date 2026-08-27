@@ -20,6 +20,7 @@
 #include "include/initrd.h"
 #include "include/fs.h"
 #include "include/blk.h"
+#include "include/usbkbd.h"
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
@@ -215,6 +216,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     /* Wymiana stron dopiero tutaj: odzyskiwanie pamieci obchodzi liste
        zadan, wiec scheduler musi juz istniec */
     swap_init();
+
+    /* Klawiatura USB tez potrzebuje schedulera - odpytuje ja watek.
+       Na maszynie bez PS/2 to jedyne wejscie, jakie system ma. */
+    usbkbd_init();
 
     /* Adres IP bierzemy z sieci - klient DHCP czeka na odpowiedzi
        serwera, wiec musi chodzic w watku (po scheduler_init) */
