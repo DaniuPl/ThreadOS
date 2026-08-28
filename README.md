@@ -128,6 +128,10 @@ ProtonOS/
 │   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
+├── user64/             # programy trybu długiego (ELF64 w initrd64)
+│   ├── usys64.h        # syscalle przez instrukcję syscall
+│   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
+│   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO (BIOS)
@@ -153,7 +157,7 @@ make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
 make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
 make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
 make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
-make kernel64 # buduje build/protonos64.bin (tryb długi, x86-64)
+make kernel64 # buduje build/protonos64.bin + initrd64 (tryb długi)
 make iso64    # płyta hybrydowa z jądrem 64-bitowym (BIOS + UEFI)
 make run-iso64-uefi  # uruchamia tę płytę pod firmware UEFI (OVMF)
 make clean
@@ -614,3 +618,22 @@ obrazie dysku.
       BIOS-em, narysowany naszą czcionką piksel po pikselu, bez
       pomocy firmware i bez pamięci znaków spod 0xB8000, której tam
       w ogóle nie ma
+- [x] **Programy z pliku w trybie długim**: jądro 64-bitowe uruchamia
+      ELF-y wczytane z initrd, a nie własny kawałek siebie. Do tej pory
+      w ring 3 działało kilkanaście bajtów wpisanych na stałe w sekcję
+      `.rodata` jądra - dowód, że przejście do pierścienia 3 działa,
+      ale niczego więcej. Teraz `kernel64/elf64.c` czyta nagłówek ELF64
+      i wszystkiego dowiaduje się z pliku: gdzie zacząć, co załadować
+      i **z jakimi prawami**. Prawa biorą się wprost z segmentów, więc
+      kod programu jest tylko do odczytu, a jego dane i stos dostają
+      zakaz wykonywania - pilnuje tego procesor, nie jądro. Doszła
+      biblioteczka `user64/usys64.h`: wejście do jądra idzie instrukcją
+      `syscall` (numer w RAX, argumenty w RDI/RSI, wynik w RAX,
+      a RCX i R11 giną, bo procesor zostawia w nich adres powrotu
+      i flagi). Wskaźnikowi z ring 3 jądro nie wierzy na słowo -
+      `paging64_user_range` sprawdza bit USER na **wszystkich czterech**
+      poziomach tablic, dokładnie tak, jak liczy dostęp procesor;
+      inaczej wystarczyłoby podać adres pamięci jądra, żeby kazać mu ją
+      sobie wypisać. Program `hello64` pisze, liczy, usypia się, pyta
+      o licznik tyknięć i kończy z kodem 7 - i to wszystko przechodzi
+      tak samo pod BIOS-em, jak i pod UEFI

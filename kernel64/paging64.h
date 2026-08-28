@@ -27,6 +27,10 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags);
 /* Adres fizyczny spod adresu wirtualnego (0 = nie zmapowany) */
 uint64_t paging64_lookup(uint64_t virt);
 
+/* Czy caly zakres jest dostepny dla ring 3 (bit USER na kazdym
+   poziomie tablic)? Do sprawdzania wskaznikow z programu. */
+int paging64_user_range(uint64_t virt, uint64_t len);
+
 /* Dokad siega mapowanie identycznosciowe pamieci */
 uint64_t paging64_identity_top(void);
 

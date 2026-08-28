@@ -8,7 +8,17 @@
 #include "include/initrd.h"
 #include "include/string.h"
 #include "include/printk.h"
+
+/* Dokad siega pamiec opisana identycznosciowo, wie stronicowanie -
+   a to jest jedyny plik w tym module zalezny od trybu procesora,
+   bo w trybie dlugim tablice stron buduje zupelnie inny kod. */
+#ifdef __x86_64__
+#include "../kernel64/paging64.h"
+#define IDENTITY_TOP() paging64_identity_top()
+#else
 #include "include/paging.h"
+#define IDENTITY_TOP() paging_identity_limit()
+#endif
 
 struct pird_entry {
     char name[16];
@@ -29,15 +39,15 @@ void initrd_init(const struct multiboot_info *mbi)
     }
 
     const struct multiboot_mod *mod =
-        (const struct multiboot_mod *)mbi->mods_addr;
+        (const struct multiboot_mod *)(uintptr_t)mbi->mods_addr;
 
-    if (mod->end > paging_identity_limit()) {
+    if (mod->end > IDENTITY_TOP()) {
         printk("[ !! ] initrd: modul poza zarzadzana pamiecia (%x)\n",
                mod->start);
         return;
     }
 
-    const uint8_t *p = (const uint8_t *)mod->start;
+    const uint8_t *p = (const uint8_t *)(uintptr_t)mod->start;
     if (p[0] != 'P' || p[1] != 'I' || p[2] != 'R' || p[3] != 'D') {
         printk("[ !! ] initrd: zly magic modulu\n");
         return;

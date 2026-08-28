@@ -99,7 +99,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
 
-.PHONY: all iso iso64 run run-iso run-iso64-uefi test fuzz clean kernel64
+.PHONY: all iso iso64 initrd64 run run-iso run-iso64-uefi test fuzz clean \
+        kernel64
 
 all: $(KERNEL) $(INITRD)
 
@@ -180,12 +181,13 @@ CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap
+SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
           $(BUILD)/64/paging64.o $(BUILD)/64/task64.o \
           $(BUILD)/64/gdt64.o $(BUILD)/64/syscall64.o \
+          $(BUILD)/64/elf64.o \
           $(BUILD)/64/syscall64_stub.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
@@ -204,6 +206,30 @@ $(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64
 $(BUILD)/64/syscall64_stub.o: boot64/syscall64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
+# Programy uzytkownika trybu dlugiego. Buduja sie tak samo jak
+# 32-bitowe, tylko innym linkerem i z wlasna biblioteczka syscalli -
+# w trybie dlugim do jadra wchodzi sie instrukcja syscall, nie
+# bramka przerwania.
+INITRD64 := $(BUILD)/initrd64.img
+USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
+                 -fno-pic -no-pie -static -nostdlib -mno-red-zone \
+                 -O2 -Wall -Wextra \
+                 -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
+USER64_ELFS := $(BUILD)/user64/hello64.elf
+
+$(BUILD)/user64:
+	mkdir -p $(BUILD)/user64
+
+$(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
+                       | $(BUILD)/user64
+	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
+
+$(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
+	python3 scripts/mkinitrd.py $@ hello64=$(BUILD)/user64/hello64.elf
+	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
+
+initrd64: $(INITRD64)
+
 KERNEL64_HEADERS := $(wildcard kernel64/*.h)
 
 $(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) | $(BUILD)/64
@@ -215,7 +241,7 @@ $(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/64
 $(KERNEL64): $(OBJS64) linker64.ld
 	$(CC) $(LDFLAGS64) $(OBJS64) -o $@
 
-kernel64: $(KERNEL64)
+kernel64: $(KERNEL64) $(INITRD64)
 	@echo "Gotowe: $(KERNEL64) (tryb dlugi, ladowany przez GRUB-a)"
 
 # Obraz ISO z jadrem 64-bitowym, startujacy i pod starym BIOS-em,
@@ -225,7 +251,7 @@ kernel64: $(KERNEL64)
 # sprzecie - stary obraz umial tylko droge BIOS-owa.
 ISO64 := $(BUILD)/protonos64.iso
 
-$(ISO64): $(KERNEL64) grub64.cfg
+$(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "BLAD: brak grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -233,6 +259,7 @@ grub-common xorriso mtools"; \
 	    exit 1; }
 	mkdir -p $(BUILD)/isodir64/boot/grub
 	cp $(KERNEL64) $(BUILD)/isodir64/boot/protonos64.bin
+	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	grub-mkrescue -o $@ $(BUILD)/isodir64
 	@echo "Gotowe: $@ (BIOS + UEFI)"
@@ -286,8 +313,9 @@ run-iso: iso $(DISK)
 
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
-test: $(KERNEL) $(INITRD) $(KERNEL64)
-	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD) $(KERNEL64)
+test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
+	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD) $(KERNEL64) \
+	    $(INITRD64)
 
 # Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez
 # sanitizery na hoscie, karmiac uszkodzonymi wejsciami (certyfikaty,

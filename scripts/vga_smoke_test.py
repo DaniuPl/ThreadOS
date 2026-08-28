@@ -38,6 +38,7 @@ import time
 KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/protonos.bin"
 INITRD = sys.argv[2] if len(sys.argv) > 2 else None
 KERNEL64 = sys.argv[3] if len(sys.argv) > 3 else None
+INITRD64 = sys.argv[4] if len(sys.argv) > 4 else None
 VGA_ADDR = 0xB8000
 VGA_BYTES = 80 * 25 * 2
 VIDEO_W = 320
@@ -2643,10 +2644,15 @@ def main():
         try:
             os.makedirs(d64 + "/boot/grub")
             shutil.copy(KERNEL64, d64 + "/boot/protonos64.bin")
+            mod = ""
+            if INITRD64 and os.path.exists(INITRD64):
+                shutil.copy(INITRD64, d64 + "/boot/initrd64.img")
+                mod = "    module2 /boot/initrd64.img initrd64\n"
             with open(d64 + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("set timeout=0\nset default=0\n"
                          'menuentry "ProtonOS 64" {\n'
-                         "    multiboot2 /boot/protonos64.bin\n}\n")
+                         "    multiboot2 /boot/protonos64.bin\n"
+                         + mod + "}\n")
             made = subprocess.run(["grub-mkrescue", "-o", iso64, d64],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
@@ -2737,6 +2743,40 @@ def main():
                           + (f" (cs={m.group(2)})" if m else ""),
                           m is not None and m.group(3) == "3")
 
+                    # Program z PLIKU: jadro nie widzialo go w czasie
+                    # budowy - wszystkiego dowiaduje sie z naglowka ELF
+                    ini = q23.wait_serial("initrd:", timeout=25)
+                    check("jadro 64-bitowe czyta initrd od loadera",
+                          re.search(r"initrd: \d+ plik", ini) is not None)
+                    ld = q23.wait_serial("z initrd:", timeout=25)
+                    m = re.search(r"Program 'hello64' z initrd: (\d+) B, "
+                                  r"wejscie ([0-9a-f]+)", ld)
+                    check("ELF64 z initrd zaladowany"
+                          + (f" ({m.group(1)} B, wejscie {m.group(2)})"
+                             if m else ""),
+                          m is not None and int(m.group(1)) > 0
+                          # punkt wejscia musi lezec w przestrzeni
+                          # uzytkownika, czyli od 1 GiB w gore
+                          and int(m.group(2), 16) >= 0x40000000)
+                    out64 = q23.wait_serial("[hello64] koncze", timeout=30)
+                    check("program z pliku pisze przez wywolanie systemowe",
+                          "[hello64] czesc, jestem ELF-em 64-bitowym"
+                          in out64)
+                    check("program liczy i usypia sam siebie",
+                          "[hello64] licze: 1" in out64
+                          and "[hello64] licze: 3" in out64)
+                    m = re.search(r"uplynelo tyknac: (\d+)", out64)
+                    check("sen programu trwa tyle, ile ma"
+                          + (f" ({m.group(1)} tyknac)" if m else ""),
+                          m is not None and 13 <= int(m.group(1)) <= 25)
+                    fin = q23.wait_serial("ELF64 z initrd:", timeout=25)
+                    m = re.search(r"pierscien (\d), kod wyjscia (\d+)", fin)
+                    check("program z pliku dzialal w ring 3",
+                          m is not None and m.group(1) == "3")
+                    check("kod wyjscia programu dotarl do jadra"
+                          + (f" ({m.group(2)})" if m else ""),
+                          m is not None and m.group(2) == "7")
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"
@@ -2795,6 +2835,10 @@ def main():
         try:
             os.makedirs(due + "/boot/grub")
             shutil.copy(KERNEL64, due + "/boot/protonos64.bin")
+            mod = ""
+            if INITRD64 and os.path.exists(INITRD64):
+                shutil.copy(INITRD64, due + "/boot/initrd64.img")
+                mod = "    module2 /boot/initrd64.img initrd64\n"
             # all_video + gfxpayload=keep: bez tego GRUB pod UEFI nie
             # umie sam ustawic trybu graficznego i konczy sie bledem
             # "no suitable video mode found"
@@ -2802,7 +2846,8 @@ def main():
                 fh.write("insmod all_video\nset gfxpayload=keep\n"
                          "set timeout=0\nset default=0\n"
                          'menuentry "ProtonOS 64" {\n'
-                         "    multiboot2 /boot/protonos64.bin\n}\n")
+                         "    multiboot2 /boot/protonos64.bin\n"
+                         + mod + "}\n")
             made = subprocess.run(["grub-mkrescue", "-o", isoue, due],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
@@ -2848,6 +2893,13 @@ def main():
                     r3 = q24.wait_serial("Program w ring 3:", timeout=40)
                     check("program w ring 3 rusza tak samo jak pod BIOS-em",
                           "pierscien 3" in r3)
+                    if INITRD64 and os.path.exists(INITRD64):
+                        # Modul od GRUB-a EFI dochodzi ta sama droga
+                        # co pod BIOS-em - znacznikiem Multiboota 2
+                        elf = q24.wait_serial("ELF64 z initrd:", timeout=40)
+                        check("program z initrd dziala takze pod UEFI",
+                              "pierscien 3" in elf
+                              and "kod wyjscia 7" in elf)
                     q24.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
                     # I to samo na ekranie - narysowane naszym kodem,
                     # piksel po pikselu, bez pomocy firmware

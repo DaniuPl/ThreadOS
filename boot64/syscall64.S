@@ -80,7 +80,7 @@ user_payload_start:
     movw %cs, %ax                /* selektor kodu: dwa najnizsze bity
                                     to poziom uprawnien */
     movzwq %ax, %rdi
-    movq $1, %rax                /* 1 = powiedz, w ktorym pierscieniu jestem */
+    movq $3, %rax                /* 3 = powiedz, w ktorym pierscieniu jestem */
     syscall
     movq $2, %rax                /* 2 = koniec programu */
     syscall

@@ -26,6 +26,8 @@
 #include "task64.h"
 #include "gdt64.h"
 #include "syscall64.h"
+#include "elf64.h"
+#include "../kernel/include/initrd.h"
 #include "../kernel/include/string.h"
 
 /* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
@@ -109,6 +111,49 @@ static void ring3_thread(void *arg)
     syscall64_set_kernel_stack(kstack & ~0xFULL);
 
     enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16);
+}
+
+/* Watek, ktory uruchamia PROGRAM Z PLIKU.
+ *
+ * Roznica wzgledem watku wyzej jest zasadnicza, choc konczy sie tym
+ * samym skokiem: tam kod lezal w obrazie jadra, tutaj jadro dostaje
+ * plik, ktorego nie widzialo w czasie budowy, i wszystkiego - gdzie
+ * zaczac, co zaladowac, z jakimi prawami - dowiaduje sie z naglowka
+ * ELF. To jest ta granica, za ktora system zaczyna uruchamiac cudze
+ * programy, a nie wlasne kawalki siebie. */
+static const char *elf_name = "hello64";
+static int elf_started;
+
+static void elf_thread(void *arg)
+{
+    (void)arg;
+
+    uint32_t size = 0;
+    const void *image = initrd_find(elf_name, &size);
+    if (!image) {
+        printk("[ !! ] initrd: nie ma pliku '%s'\n", elf_name);
+        task64_exit();
+    }
+
+    uint64_t entry;
+    if (elf64_load(image, size, &entry) < 0)
+        task64_exit();
+
+    uint64_t rsp = elf64_make_stack();
+    if (!rsp) {
+        printk("[ !! ] elf64: brak pamieci na stos programu\n");
+        task64_exit();
+    }
+
+    printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
+           elf_name, size, (uint32_t)entry);
+
+    uint64_t kstack;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
+    syscall64_set_kernel_stack(kstack & ~0xFULL);
+
+    elf_started = 1;
+    enter_ring3_64(entry, rsp);
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -278,6 +323,26 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     uint32_t cs = syscall64_user_cs();
     printk("[ OK ] Program w ring 3: %s, cs=%x, pierscien %u\n",
            syscall64_user_ran() ? "odezwal sie" : "MILCZY", cs, cs & 3);
+
+    /* --- Programy z initrd ------------------------------------- */
+    initrd_init(mbi);
+    if (initrd_file_count())
+        printk("[ OK ] initrd: %u plik(ow) od loadera\n",
+               initrd_file_count());
+
+    if (initrd_file_count()) {
+        /* Program z pliku dostaje czysta karte: to, co powie jadru,
+           mowi juz on, a nie kawalek kodu z obrazu jadra */
+        syscall64_forget_user();
+        task64_create("hello64", elf_thread, 0);
+        for (int i = 0; i < 40 && !syscall64_user_exited(); i++)
+            task64_sleep(50);
+
+        cs = syscall64_user_cs();
+        if (elf_started)
+            printk("[ OK ] ELF64 z initrd: pierscien %u, kod wyjscia %u\n",
+                   cs & 3, (uint32_t)syscall64_user_status());
+    }
 
     task64_dump();
 

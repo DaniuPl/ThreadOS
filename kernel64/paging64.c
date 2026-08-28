@@ -129,6 +129,39 @@ uint64_t paging64_lookup(uint64_t virt)
     return (e & ADDR_MASK) + (virt & 0xFFF);
 }
 
+/* Czy caly zakres jest widoczny dla ring 3?
+ *
+ * Jadro nie ma prawa uwierzyc we wskaznik podany przez program:
+ * proces moglby podsunac adres wlasnych tablic stron albo pamieci
+ * jadra i kazac je sobie wypisac. Prawa dostepu sa iloczynem po
+ * wszystkich czterech poziomach, wiec bit USER musi byc na kazdym
+ * z nich - dokladnie tak, jak sprawdza to procesor. */
+int paging64_user_range(uint64_t virt, uint64_t len)
+{
+    if (!pml4 || len == 0)
+        return len == 0;
+    if (virt + len < virt)                   /* przekrecenie licznika */
+        return 0;
+
+    for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096) {
+        uint64_t e = pml4[(va >> 39) & 0x1FF];
+        if (!(e & PTE_PRESENT) || !(e & PG_USER))
+            return 0;
+        e = table_at(e)[(va >> 30) & 0x1FF];
+        if (!(e & PTE_PRESENT) || !(e & PG_USER))
+            return 0;
+        e = table_at(e)[(va >> 21) & 0x1FF];
+        if (!(e & PTE_PRESENT) || !(e & PG_USER))
+            return 0;
+        if (e & PTE_HUGE)
+            continue;
+        e = table_at(e)[(va >> 12) & 0x1FF];
+        if (!(e & PTE_PRESENT) || !(e & PG_USER))
+            return 0;
+    }
+    return 1;
+}
+
 uint64_t paging64_identity_top(void)
 {
     return identity_top;
