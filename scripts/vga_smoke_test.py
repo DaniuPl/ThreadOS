@@ -3114,6 +3114,27 @@ def main():
                     check("po wyjsciu shella uzytkownika wraca shell jadra",
                           "ush64: pa!" in ex)
 
+                    # Liczby zmiennoprzecinkowe. Na x86-64 SSE jest
+                    # czescia konwencji wywolan, wiec kompilator uzywa
+                    # go bez pytania - a rejestry XMM sa takim samym
+                    # stanem zadania, jak reszta.
+                    sse = q23.wait_serial("Stan SSE przetrwal", timeout=40)
+                    check("jadro wlacza jednostke zmiennoprzecinkowa",
+                          "Jednostka zmiennoprzecinkowa i SSE wlaczone"
+                          in sse)
+                    wyniki = re.findall(r"\[fpu64\] start (\d+): wyszlo "
+                                        r"(\d+), mialo (\d+) - (\S+)", sse)
+                    check(f"dwa procesy licza rownoczesnie "
+                          f"({len(wyniki)})", len(wyniki) == 2)
+                    # Kazdy ma dostac SWOJ wynik - gdyby stan SSE nie
+                    # byl zapisywany, dostalby wynik drugiego
+                    check("kazdy dostaje wlasny wynik, nie cudzy",
+                          len(wyniki) == 2
+                          and wyniki[0][1] != wyniki[1][1]
+                          and all(w[1] == w[2] for w in wyniki))
+                    check("jadro potwierdza brak pomylek",
+                          "2 policzylo, 0 pomylek" in sse)
+
                     # Dysk: te same sterowniki, co w jadrze 32-bitowym,
                     # skompilowane drugi raz. Rejestry kontrolera leza
                     # wysoko, poza pamiecia opisana przy starcie - bez
@@ -3143,6 +3164,11 @@ def main():
                     # Sterta programu. Prosba o pamiec nic nie
                     # kosztuje - placi sie za strony naprawde dotkniete,
                     # bo powstaja dopiero pod palcami.
+                    #
+                    # Ten program jest przy okazji sprawdzianem SSE
+                    # w kodzie uzytkownika: kompilator wektoryzuje jego
+                    # petle przepisujace 4 KiB i wstawia tam movdqa,
+                    # ktore bez wlaczonego SSE konczy sie wyjatkiem.
                     seen = len(q23.serial())
                     q23.type_line("run heap64")
                     hp = q23.wait_serial("[heap64] koniec, kod wyjscia",

@@ -146,7 +146,8 @@ ProtonOS/
 │   ├── fileio64.c      # plik od strony programu: open, write, read
 │   ├── uecho64.c       # wypisuje swoje argumenty
 │   ├── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
-│   └── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
+│   ├── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
+│   └── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -932,3 +933,23 @@ obrazie dysku.
       druga rzecz: reguła budowania programów nie zależała od
       `Makefile`, więc zmiana flag kompilacji **nic nie przebudowywała**
       - dokładnie ta sama pułapka, co kiedyś z nagłówkami jądra
+- [x] **SSE i stan jednostki zmiennoprzecinkowej** - programy budują się
+      znowu normalnie, bez `-mno-sse`. Na x86-64 SSE nie jest dodatkiem,
+      tylko częścią konwencji wywołań: kompilator używa go bez pytania,
+      bo każdy procesor w tym trybie go ma. Procesor jednak startuje
+      z wyłączoną obsługą i każda taka instrukcja kończy się wyjątkiem,
+      dopóki system nie powie wprost, że umie te rejestry obsłużyć -
+      a „umie" znaczy tu jedno: **potrafi je zapisać i odtworzyć przy
+      przełączaniu zadań**. Rejestry XMM są takim samym stanem zadania,
+      jak RAX czy RSP, z tą różnicą, że jest ich dużo i procesor
+      zapisuje je jedną instrukcją do obszaru 512 bajtów. Wyrównanie do
+      szesnastu bajtów nie jest tu grzecznością: `fxsave` i `fxrstor`
+      po prostu odmawiają pracy na źle wyrównanym adresie. Samo jądro
+      zostaje bez SSE - w obsłudze przerwania nie ma czego liczyć,
+      a każda taka instrukcja wymagałaby zapisania stanu przerwanego
+      programu. Dowód: dwie kopie `fpu64test` liczą równocześnie, każda
+      z inną liczbą początkową, oddając po drodze procesor - i **każda
+      dostaje swój wynik**, a nie wynik sąsiada. Działanie dobrane tak,
+      by było dokładne co do jednostki (`v = v*2 + 1` na liczbach
+      całkowitych mieszczących się w podwójnej precyzji), więc test nie
+      musi niczego przybliżać

@@ -30,6 +30,7 @@
 #include "proc64.h"
 #include "keyboard64.h"
 #include "shell64.h"
+#include "fpu64.h"
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
@@ -281,6 +282,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("[ OK ] Timer tyka: %u -> %u tyknac\n", start, pit_ticks());
 
     /* --- Watki -------------------------------------------------- */
+    /* SSE trzeba wlaczyc PRZED schedulerem: pierwsze zadanie od razu
+       dostaje miejsce na stan rejestrow, a jego wzorzec bierze sie
+       ze swiezo zainicjowanej jednostki */
+    if (fpu64_init())
+        printk("[ OK ] Jednostka zmiennoprzecinkowa i SSE wlaczone\n");
+
     scheduler64_init();
     task64_create("licz-A", count_a, 0);
     task64_create("licz-B", count_b, 0);
@@ -425,6 +432,26 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("[ %s ] fork + exec + wait: %u zakonczonych, werdykt %u\n",
            (exits == 2 && verdict == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)verdict);
+
+    /* --- Liczby zmiennoprzecinkowe w dwoch procesach naraz ------ */
+    /* Gdyby rejestry SSE nie byly zapisywane przy przelaczaniu zadan,
+       kazdy z tych procesow dostalby wynik drugiego */
+    base_tasks = task64_count();
+    syscall64_forget_user();
+
+    static struct args64 fpu_a = { 2, { "fpu64test", "3" } };
+    static struct args64 fpu_b = { 2, { "fpu64test", "7" } };
+    proc64_spawn("fpu64test", &fpu_a, 1);
+    proc64_spawn("fpu64test", &fpu_b, 1);
+    for (int i = 0; i < 160 && task64_count() > base_tasks; i++)
+        task64_sleep(50);
+
+    exits = syscall64_user_exits();
+    fails = syscall64_user_failures();
+    printk("[ %s ] Stan SSE przetrwal przelaczanie: %u policzylo, "
+           "%u pomylek\n",
+           (exits == 2 && fails == 0) ? "OK" : "!!",
+           (uint32_t)exits, (uint32_t)fails);
 
     /* fork nie kopiuje juz pamieci - dzieli ja i rozdziela dopiero
        te strony, ktore ktos naprawde zapisal */

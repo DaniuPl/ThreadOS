@@ -15,6 +15,7 @@
 #include "task64.h"
 #include "paging64.h"
 #include "syscall64.h"
+#include "fpu64.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -56,6 +57,7 @@ struct task64 {
     uint64_t sig_handler;        /* procedura programu (0 = zabij) */
     uint64_t sig_restorer;       /* powrot z procedury do jadra */
     struct fd_entry fds[FD_MAX];
+    void *fpu;                   /* stan rejestrow zmiennoprzecinkowych */
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
     char name[NAME_MAX];
@@ -114,6 +116,7 @@ void scheduler64_init(void)
     for (int i = 0; i < FD_MAX; i++)
         main_task->fds[i].used = 0;
     main_task->brk_base = main_task->brk = 0;
+    main_task->fpu = fpu64_alloc();
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -145,6 +148,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     for (int i = 0; i < FD_MAX; i++)
         t->fds[i].used = 0;
     t->brk_base = t->brk = 0;
+    t->fpu = fpu64_alloc();
     t->id = next_id++;
     set_name(t, name);
 
@@ -295,6 +299,7 @@ static void reap_zombies(void)
         if (t->next->state == TASK_ZOMBIE) {
             struct task64 *z = t->next;
             t->next = z->next;
+            fpu64_free(z->fpu);
             kfree(z->stack);
             kfree(z);
         } else {
@@ -414,6 +419,13 @@ void schedule(void)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
     current = next;
+
+    /* Rejestry zmiennoprzecinkowe sa takim samym stanem zadania, jak
+       reszta - z ta roznica, ze procesor zapisuje je jedna instrukcja
+       do obszaru 512 bajtow. Bez tego dwa programy liczace rownoczesnie
+       nadpisywalyby sobie wyniki, nie wiedzac o tym. */
+    fpu64_save(prev->fpu);
+    fpu64_load(next->fpu);
 
     apply_context(next);
     context_switch64(&prev->rsp, next->rsp);
