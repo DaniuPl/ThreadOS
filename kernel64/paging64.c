@@ -423,6 +423,26 @@ void paging64_free_space(uint64_t space)
     pmm_free_frame((uint32_t)space);
 }
 
+/* Doklejenie do mapowania obszaru lezacego poza pamiecia.
+ *
+ * Rejestry urzadzen leza wysoko - grubo ponad tym, co opisuje
+ * mapowanie zbudowane przy starcie, bo tamto siega tylko szczytu
+ * pamieci zarzadzanej przez PMM. Bez tego pierwszy odczyt z BAR-a
+ * konczy sie bledem strony.
+ *
+ * Zapis wolno, wykonywanie nie: w rejestrach urzadzenia nie ma kodu. */
+int paging64_map_phys(uint64_t phys, uint64_t len)
+{
+    uint64_t start = phys & ~0xFFFULL;
+    uint64_t end = (phys + len + PAGE_SIZE - 1) & ~0xFFFULL;
+
+    for (uint64_t a = start; a < end; a += PAGE_SIZE)
+        if (paging64_lookup(a) != a &&
+            paging64_map(a, a, PG_WRITE | PG_NX) < 0)
+            return -1;
+    return 0;
+}
+
 uint64_t paging64_identity_top(void)
 {
     return identity_top;

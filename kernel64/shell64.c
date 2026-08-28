@@ -24,6 +24,7 @@
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/initrd.h"
+#include "../kernel/include/blk.h"
 #include "../kernel/include/vga.h"
 
 #define LINE_MAX 80
@@ -50,7 +51,8 @@ static void prompt(void)
 
 static void cmd_help(void)
 {
-    printk("Polecenia: help, ps, mem, ls, uptime, run <program>, clear\n");
+    printk("Polecenia: help, ps, mem, ls, disk, uptime, "
+           "run <program>, clear\n");
 }
 
 static void cmd_mem(void)
@@ -62,6 +64,42 @@ static void cmd_mem(void)
     printk("Stronicowanie: identycznosciowo %u MiB, rozdzielonych stron %u\n",
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_cow_splits());
+}
+
+/* Zapis i odczyt sektora - jedyny sposob, zeby sprawdzic dysk
+   naprawde, a nie tylko to, ze kontroler sie przedstawil.
+   Ostatni sektor: nic tam jeszcze nie lezy. */
+static void cmd_disk(void)
+{
+    if (!blk_present()) {
+        printk("disk: brak dysku\n");
+        return;
+    }
+    printk("Dysk: %s, %u sektorow (%u MiB)\n",
+           blk_name(), blk_sectors(), blk_sectors() / 2048);
+
+    static uint8_t bufor[512];
+    uint32_t lba = blk_sectors() ? blk_sectors() - 1 : 0;
+
+    for (int i = 0; i < 512; i++)
+        bufor[i] = (uint8_t)(i + 7);
+    if (blk_write(lba, 1, bufor) < 0) {
+        printk("disk: zapis sektora %u nie przeszedl\n", lba);
+        return;
+    }
+
+    for (int i = 0; i < 512; i++)
+        bufor[i] = 0;
+    if (blk_read(lba, 1, bufor) < 0) {
+        printk("disk: odczyt sektora %u nie przeszedl\n", lba);
+        return;
+    }
+
+    int rozne = 0;
+    for (int i = 0; i < 512; i++)
+        if (bufor[i] != (uint8_t)(i + 7))
+            rozne++;
+    printk("disk: sektor %u zapisany i odczytany, roznic %d\n", lba, rozne);
 }
 
 static void cmd_uptime(void)
@@ -92,6 +130,8 @@ static void execute(void)
         cmd_mem();
     } else if (!strcmp(line, "ls")) {
         initrd_ls();
+    } else if (!strcmp(line, "disk")) {
+        cmd_disk();
     } else if (!strcmp(line, "uptime")) {
         cmd_uptime();
     } else if (!strcmp(line, "clear")) {

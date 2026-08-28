@@ -60,6 +60,10 @@ uint64_t paging64_current_space(void);
 void paging64_switch(uint64_t space);
 void paging64_free_space(uint64_t space);
 
+/* Dokleja do mapowania obszar lezacy poza pamiecia (rejestry
+   urzadzen). 0 = gotowe. */
+int paging64_map_phys(uint64_t phys, uint64_t len);
+
 /* Dokad siega mapowanie identycznosciowe pamieci */
 uint64_t paging64_identity_top(void);
 

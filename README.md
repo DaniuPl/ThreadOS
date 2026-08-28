@@ -841,3 +841,18 @@ obrazie dysku.
       shell. Wcześniejszy audyt pętli **przeoczył to miejsce**: sprawdziłem
       w `task64_wait` drogi wpisu o zakończeniu dziecka, a nie ścieżkę
       sygnału, i właśnie ona była dziurą
+- [x] **Dysk w trybie długim**: PCI, ATA PIO, AHCI i warstwa blokowa to
+      te same pliki, co w jądrze 32-bitowym, skompilowane drugi raz.
+      Sterowniki nie wiedzą nic o trybie procesora - gadają z urządzeniem
+      przez porty i pamięć, a jedno i drugie wygląda tak samo po obu
+      stronach. `pci.c`, `ata.c` i `blk.c` przeszły **bez jednej zmiany**;
+      `ahci.c` potrzebował rzutowań przez `uintptr_t` (adresy DMA zostają
+      32-bitowe, bo ramki i tak leżą poniżej 512 MiB) i jednego warunku
+      na tryb: rejestry kontrolera leżą wysoko, poza obszarem opisanym
+      przy starcie, więc trzeba je dokleić do mapowania - bez tego
+      pierwszy odczyt z BAR-a kończy się błędem strony. Doszło
+      `paging64_map_phys`: mapuje zakres fizyczny z prawem zapisu
+      i zakazem wykonywania, bo w rejestrach urządzenia nie ma kodu.
+      Sprawdzone obie drogi - `disk` zapisuje ostatni sektor, czyta go
+      z powrotem i liczy różnice: zero, tak samo przez ATA PIO, jak
+      i przez AHCI z DMA

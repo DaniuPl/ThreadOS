@@ -24,7 +24,17 @@
 #include "include/ahci.h"
 #include "include/pci.h"
 #include "include/pmm.h"
+
+/* Rejestry kontrolera leza wysoko, poza pamiecia opisana z gory -
+   trzeba je doklejic do mapowania. Robi to w kazdym trybie inny kod
+   i to jedyne miejsce w tym pliku, ktore o trybie w ogole wie. */
+#ifdef __x86_64__
+#include "../kernel64/paging64.h"
+#define MAP_PHYS(a, n) paging64_map_phys((a), (n))
+#else
 #include "include/paging.h"
+#define MAP_PHYS(a, n) paging_map_phys((a), (n))
+#endif
 #include "include/printk.h"
 #include "include/string.h"
 
@@ -139,11 +149,11 @@ static int run_command(uint8_t command, uint32_t lba, uint32_t count,
                                    (write ? (1u << 6) : 0));
     cmd_list[0].prdtl = 1;
     cmd_list[0].prdbc = 0;
-    cmd_list[0].ctba = (uint32_t)cmd_tbl;
+    cmd_list[0].ctba = (uint32_t)(uintptr_t)cmd_tbl;
     cmd_list[0].ctbau = 0;
 
     memset(cmd_tbl, 0, sizeof(*cmd_tbl));
-    cmd_tbl->prdt[0].dba = (uint32_t)buf;
+    cmd_tbl->prdt[0].dba = (uint32_t)(uintptr_t)buf;
     cmd_tbl->prdt[0].dbau = 0;
     cmd_tbl->prdt[0].dbc = bytes - 1;        /* licznik liczony od zera */
 
@@ -181,9 +191,10 @@ static void read_capacity(void)
     uint32_t frame = pmm_alloc_frame();
     if (!frame)
         return;
-    memset((void *)frame, 0, SECTOR);
-    if (run_command(CMD_IDENTIFY, 0, 0, (void *)frame, SECTOR, 0) == 0) {
-        const uint16_t *id = (const uint16_t *)frame;
+    memset((void *)(uintptr_t)frame, 0, SECTOR);
+    if (run_command(CMD_IDENTIFY, 0, 0, (void *)(uintptr_t)frame,
+                    SECTOR, 0) == 0) {
+        const uint16_t *id = (const uint16_t *)(uintptr_t)frame;
         /* Slowa 100-103: pojemnosc LBA48. Starsza polowa nas nie
            obchodzi - i tak zarzadzamy dyskiem 32-bitowym adresem. */
         uint32_t lba48 = (uint32_t)id[100] | ((uint32_t)id[101] << 16);
@@ -205,10 +216,10 @@ int ahci_init(void)
         return 0;
 
     pci_enable_bus_master(&dev);
-    if (paging_map_phys(abar, 0x2000) < 0)   /* rejestry lezą wysoko */
+    if (MAP_PHYS(abar, 0x2000) < 0)          /* rejestry lezą wysoko */
         return 0;
 
-    hba = (struct hba_mem *)abar;
+    hba = (struct hba_mem *)(uintptr_t)abar;
     hba->ghc |= (1u << 31);                  /* tryb AHCI, nie zgodnosci */
 
     /* Pierwszy port z podlaczonym dyskiem SATA */
@@ -233,8 +244,8 @@ int ahci_init(void)
             printk("[ !! ] AHCI: brak pamieci na struktury sterownika\n");
             return 0;
         }
-        memset((void *)area, 0, PAGE_SIZE);
-        memset((void *)table, 0, PAGE_SIZE);
+        memset((void *)(uintptr_t)area, 0, PAGE_SIZE);
+        memset((void *)(uintptr_t)table, 0, PAGE_SIZE);
 
         p->clb = area;
         p->clbu = 0;
@@ -246,8 +257,8 @@ int ahci_init(void)
         port_start(p);
 
         port = p;
-        cmd_list = (struct cmd_header *)area;
-        cmd_tbl = (struct cmd_table *)table;
+        cmd_list = (struct cmd_header *)(uintptr_t)area;
+        cmd_tbl = (struct cmd_table *)(uintptr_t)table;
         read_capacity();
         return 1;
     }

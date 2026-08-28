@@ -2673,6 +2673,11 @@ def main():
         d64 = tempfile.mkdtemp()
         iso64 = tempfile.mktemp(suffix=".iso")
         slog64 = tempfile.mktemp(suffix=".log")
+        # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
+        # rejestrow kontrolera do mapowania, wiec ja wlasnie sprawdzamy
+        disk64 = tempfile.mktemp(suffix=".img")
+        with open(disk64, "wb") as fh:
+            fh.write(b"\0" * DISK_SIZE)
         try:
             os.makedirs(d64 + "/boot/grub")
             shutil.copy(KERNEL64, d64 + "/boot/protonos64.bin")
@@ -2691,6 +2696,7 @@ def main():
             check("obraz ISO z jadrem 64-bitowym buduje sie", made)
             if made:
                 q23 = Qemu(KERNEL, INITRD, cdrom=iso64, serial=slog64,
+                           disk=disk64, sata=True,
                            qemu="qemu-system-x86_64")
                 try:
                     out = q23.wait_serial("Tryb dlugi:", timeout=40)
@@ -3100,6 +3106,31 @@ def main():
                     check("po wyjsciu shella uzytkownika wraca shell jadra",
                           "ush64: pa!" in ex)
 
+                    # Dysk: te same sterowniki, co w jadrze 32-bitowym,
+                    # skompilowane drugi raz. Rejestry kontrolera leza
+                    # wysoko, poza pamiecia opisana przy starcie - bez
+                    # doklejenia ich do mapowania pierwszy odczyt z BAR-a
+                    # konczylby sie bledem strony.
+                    dsk = q23.wait_serial("] Dysk:", timeout=30)
+                    # Nazwa sterownika sama zawiera przecinek
+                    # ("AHCI (SATA, DMA)"), wiec rozdzielamy po ostatnim
+                    # - tym przed liczba sektorow
+                    m = re.search(r"\] Dysk: (.+?), (\d+) sektorow po 512 B",
+                                  dsk)
+                    check("jadro 64-bitowe znajduje dysk przez PCI i AHCI"
+                          + (f" ({m.group(1)}, {m.group(2)} sektorow)"
+                             if m else ""),
+                          m is not None and "AHCI" in m.group(1)
+                          and int(m.group(2)) > 0)
+
+                    q23.type_line("disk")
+                    io = q23.wait_serial("disk: sektor", timeout=30)
+                    m = re.search(r"disk: sektor (\d+) zapisany i "
+                                  r"odczytany, roznic (\d+)", io)
+                    check("zapis i odczyt sektora przez DMA oddaja to samo"
+                          + (f" (sektor {m.group(1)})" if m else ""),
+                          m is not None and m.group(2) == "0")
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"
@@ -3117,7 +3148,7 @@ def main():
                     q23.close()
         finally:
             shutil.rmtree(d64, ignore_errors=True)
-            for f in (iso64, slog64):
+            for f in (iso64, slog64, disk64):
                 if os.path.exists(f):
                     os.unlink(f)
 
