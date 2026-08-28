@@ -16,6 +16,12 @@
 #define SYS64_SIGRETURN 10
 #define SYS64_KILL      11
 #define SYS64_READ      12
+#define SYS64_OPEN      13
+#define SYS64_CLOSE     14
+
+/* Numery zajete od zawsze: klawiatura, konsola, bledy */
+#define FD_STDIN   0
+#define FD_STDOUT  1
 
 /* Wejscie do jadra przez instrukcje syscall (zamiast bramki przerwania) */
 void syscall64_init(void);

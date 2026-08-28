@@ -142,7 +142,8 @@ ProtonOS/
 │   ├── spawn64.c       # fork + exec + wait - tak działa każdy shell
 │   ├── sigtest64.c     # przechwytuje Ctrl+C i wraca w przerwane miejsce
 │   ├── spin64.c        # pętla bez końca - do zatrzymania z zewnątrz
-│   └── ush64.c         # shell w ring 3: read + fork + exec + wait
+│   ├── ush64.c         # shell w ring 3: read + fork + exec + wait
+│   └── fileio64.c      # plik od strony programu: open, write, read
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -868,3 +869,23 @@ obrazie dysku.
       rozstrzygający - test uruchamia maszynę **drugi raz na tym samym
       dysku** i sprawdza, że plik tam jest i ma tę samą treść, a system
       plików nie został sformatowany od nowa
+- [x] **Deskryptory plików dla programów** - do dysku sięga już nie
+      tylko jądro. `open`, `close`, `read` i `write` działają w ring 3,
+      a deskryptor jest zwykłym numerem w **tablicy należącej do
+      zadania**: numer jednego procesu nie znaczy nic w drugim, i to
+      jest cała różnica między nim a i-węzłem, który jest wspólny dla
+      całego systemu. Każdy deskryptor niesie własne miejsce w pliku,
+      bo dwa procesy mogą czytać ten sam plik w innym tempie. Trzy
+      pierwsze numery są zajęte od zawsze i nie odnoszą się do żadnego
+      pliku: zero to klawiatura, jeden to konsola. Dzięki temu
+      wypisanie na ekran jest **zwykłym zapisem do deskryptora numer
+      jeden**, dokładnie takim samym jak zapis do pliku - `read`
+      i `write` przyjmują więc deskryptor jako pierwszy argument, tak
+      jak wszędzie. Dziecko `fork`a dziedziczy otwarte pliki razem
+      z miejscem, w którym stoją - tak samo, jak dziedziczy pamięć.
+      `fileio64` sprawdza się sam: zakłada plik, pisze, zamyka, otwiera
+      z powrotem, czyta i porównuje bajt po bajcie - gdyby cokolwiek
+      się nie zgadzało, kończy się błędem, a nie komunikatem, który ktoś
+      musi przeczytać. Plik napisany przez program przeżywa restart tak
+      samo, jak napisany przez jądro: droga przez deskryptor kończy się
+      na tym samym dysku

@@ -22,6 +22,7 @@
 #include "proc64.h"
 #include "signal64.h"
 #include "keyboard64.h"
+#include "../kernel/include/fs.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -142,21 +143,33 @@ static void handle(struct regs *r)
 
     switch (nr) {
     case SYS64_WRITE: {
-        const char *buf = (const char *)(uintptr_t)a1;
-        if (a2 > 4096)
-            a2 = 4096;               /* najpierw ograniczenie, potem
+        const char *buf = (const char *)(uintptr_t)a2;
+        if (a3 > 4096)
+            a3 = 4096;               /* najpierw ograniczenie, potem
                                         sprawdzanie - inaczej dlugosc
                                         rzedu miliardow stron zajelaby
                                         jadro na dobre */
-        if (!paging64_user_range(a1, a2)) {
+        if (!paging64_user_range(a2, a3)) {
             printk("[jadro] write: wskaznik %x nie nalezy do programu\n",
-                   (uint32_t)a1);
+                   (uint32_t)a2);
             r->rax = (uint64_t)-1;
             return;
         }
-        for (uint64_t i = 0; i < a2; i++)
-            printk("%c", buf[i]);
-        r->rax = a2;
+        if (a1 == FD_STDOUT) {
+            for (uint64_t i = 0; i < a3; i++)
+                printk("%c", buf[i]);
+            r->rax = a3;
+            return;
+        }
+        int slot = task64_fd_slot((int)a1);
+        if (slot < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int n = fs_write_at(slot, task64_fd_pos((int)a1), buf, (uint32_t)a3);
+        if (n > 0)
+            task64_fd_advance((int)a1, (uint32_t)n);
+        r->rax = (uint64_t)(int64_t)n;
         return;
     }
     case SYS64_EXIT:
@@ -199,18 +212,54 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_READ: {
-        if (a2 > 4096)
-            a2 = 4096;
-        if (!paging64_user_range(a1, a2)) {
+        if (a3 > 4096)
+            a3 = 4096;
+        if (!paging64_user_range(a2, a3)) {
             printk("[jadro] read: wskaznik %x nie nalezy do programu\n",
-                   (uint32_t)a1);
+                   (uint32_t)a2);
             r->rax = (uint64_t)-1;
             return;
         }
-        int n = keyboard64_read((char *)(uintptr_t)a1, (uint32_t)a2);
+        if (a1 == FD_STDIN) {
+            int n = keyboard64_read((char *)(uintptr_t)a2, (uint32_t)a3);
+            r->rax = (uint64_t)(int64_t)n;
+            return;
+        }
+        int slot = task64_fd_slot((int)a1);
+        if (slot < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int n = fs_read_at(slot, task64_fd_pos((int)a1),
+                           (void *)(uintptr_t)a2, (uint32_t)a3);
+        if (n > 0)
+            task64_fd_advance((int)a1, (uint32_t)n);
         r->rax = (uint64_t)(int64_t)n;
         return;
     }
+    case SYS64_OPEN: {
+        char nazwa[FS_NAME_MAX + 1];
+        if (a2 == 0 || a2 > FS_NAME_MAX ||
+            !paging64_user_range(a1, a2)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        const char *src = (const char *)(uintptr_t)a1;
+        for (uint64_t i = 0; i < a2; i++)
+            nazwa[i] = src[i];
+        nazwa[a2] = '\0';
+
+        int slot = fs_open(FS_ROOT, nazwa, (int)a3);
+        if (slot < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)task64_fd_open(slot);
+        return;
+    }
+    case SYS64_CLOSE:
+        r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);
+        return;
     case SYS64_SIGNAL:
         /* Program podaje swoja procedure obslugi i adres, pod ktory ma
            wrocic po jej zakonczeniu. Ten drugi musi przyjsc od niego:

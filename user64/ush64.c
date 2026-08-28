@@ -132,7 +132,7 @@ void _start(long id)
 
         for (;;) {
             char c;
-            int64_t n = sys_read(&c, 1);
+            int64_t n = sys_read(FD_STDIN, &c, 1);
             if (n <= 0) {
                 /* Czekanie przerwal sygnal. Procedura obslugi juz
                    byla - zostaje porzucic zaczeta linie i zaczac od

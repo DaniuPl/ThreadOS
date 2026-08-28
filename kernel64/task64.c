@@ -24,6 +24,21 @@
 #define STACK_SIZE 16384
 #define NAME_MAX   16
 
+/* Deskryptory otwartych plikow.
+ *
+ * Trzy pierwsze numery sa zajete od zawsze i nie odnosza sie do
+ * zadnego pliku: zero to klawiatura, jeden to konsola, dwa zostaje
+ * na bledy. Reszta to pliki na dysku - kazdy z wlasnym miejscem
+ * w pliku, bo dwa procesy moga czytac ten sam plik w innym tempie. */
+#define FD_MAX   8
+#define FD_FIRST 3
+
+struct fd_entry {
+    int used;
+    int slot;                    /* i-wezel w PFS */
+    uint32_t pos;                /* gdzie stoi ten konkretny czytelnik */
+};
+
 enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
 
 struct task64 {
@@ -40,6 +55,7 @@ struct task64 {
     int sig_pending;             /* sygnal czekajacy na dostarczenie */
     uint64_t sig_handler;        /* procedura programu (0 = zabij) */
     uint64_t sig_restorer;       /* powrot z procedury do jadra */
+    struct fd_entry fds[FD_MAX];
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -93,6 +109,8 @@ void scheduler64_init(void)
     main_task->sig_pending = 0;
     main_task->sig_handler = 0;
     main_task->sig_restorer = 0;
+    for (int i = 0; i < FD_MAX; i++)
+        main_task->fds[i].used = 0;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -121,6 +139,8 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->sig_pending = 0;
     t->sig_handler = 0;
     t->sig_restorer = 0;
+    for (int i = 0; i < FD_MAX; i++)
+        t->fds[i].used = 0;
     t->id = next_id++;
     set_name(t, name);
 
@@ -505,6 +525,66 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer)
 uint64_t task64_sighandler(void)  { return current->sig_handler; }
 uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
 int task64_current_id(void)       { return current ? current->id : -1; }
+
+/* --- Deskryptory --------------------------------------------------
+ *
+ * Tablica nalezy do zadania, wiec deskryptor jednego procesu nie
+ * znaczy nic w drugim - i to jest cala roznica miedzy numerem
+ * deskryptora a i-wezlem, ktory jest wspolny dla calego systemu. */
+int task64_fd_open(int slot)
+{
+    irqflags_t flags = irq_save();
+    int fd = -1;
+    for (int i = FD_FIRST; i < FD_MAX; i++) {
+        if (!current->fds[i].used) {
+            current->fds[i].used = 1;
+            current->fds[i].slot = slot;
+            current->fds[i].pos = 0;
+            fd = i;
+            break;
+        }
+    }
+    irq_restore(flags);
+    return fd;
+}
+
+int task64_fd_slot(int fd)
+{
+    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+        return -1;
+    return current->fds[fd].slot;
+}
+
+uint32_t task64_fd_pos(int fd)
+{
+    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+        return 0;
+    return current->fds[fd].pos;
+}
+
+void task64_fd_advance(int fd, uint32_t n)
+{
+    if (fd >= FD_FIRST && fd < FD_MAX && current->fds[fd].used)
+        current->fds[fd].pos += n;
+}
+
+int task64_fd_close(int fd)
+{
+    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+        return -1;
+    current->fds[fd].used = 0;
+    return 0;
+}
+
+/* Dziecko dziedziczy otwarte pliki razem z miejscem, w ktorym stoja -
+   tak samo, jak dziedziczy pamiec */
+void task64_inherit_fds(struct task64 *child)
+{
+    irqflags_t flags = irq_save();
+    for (int i = 0; i < FD_MAX; i++)
+        child->fds[i] = current->fds[i];
+    irq_restore(flags);
+}
 
 int task64_id(const struct task64 *t)
 {

@@ -81,6 +81,8 @@ int64_t proc64_fork(struct regs *r)
     fa->space = space;
 
     struct task64 *child = task64_create("dziecko", child_start, fa);
+    if (child)
+        task64_inherit_fds(child);   /* otwarte pliki idzie z pamiecia */
     if (!child) {
         kfree(fa);
         paging64_free_space(space);

@@ -55,6 +55,14 @@ uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
 
+/* Deskryptory otwartych plikow - tablica nalezy do zadania */
+int task64_fd_open(int slot);        /* zwraca numer deskryptora albo -1 */
+int task64_fd_slot(int fd);          /* i-wezel w PFS albo -1 */
+uint32_t task64_fd_pos(int fd);
+void task64_fd_advance(int fd, uint32_t n);
+int task64_fd_close(int fd);
+void task64_inherit_fds(struct task64 *child);
+
 int  task64_id(const struct task64 *t);
 int  task64_count(void);            /* ile zadan jest na liscie */
 void task64_dump(void);

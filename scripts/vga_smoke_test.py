@@ -3133,6 +3133,23 @@ def main():
                           + (f" (sektor {m.group(1)})" if m else ""),
                           m is not None and m.group(2) == "0")
 
+                    # Plik od strony PROGRAMU: deskryptor jest zwyklym
+                    # numerem w jego wlasnej tablicy, a i-wezel, na
+                    # ktory numer wskazuje, zna juz tylko jadro
+                    q23.type_line("run fileio64")
+                    fio = q23.wait_serial("[fileio64] koniec, kod wyjscia",
+                                          timeout=45)
+                    check("program w ring 3 zaklada plik i pisze do niego",
+                          "zakladam plik i pisze do niego z ring 3" in fio)
+                    m = re.search(r"zgadza sie co do bajtu \((\d+) B\)", fio)
+                    check("odczyt z pliku oddaje to, co program zapisal"
+                          + (f" ({m.group(1)} B)" if m else ""),
+                          m is not None and int(m.group(1)) > 0)
+                    check("jadro nie otwiera pliku, ktorego nie ma",
+                          "nieistniejacego pliku jadro nie otwiera" in fio)
+                    check("program sam potwierdza wynik kodem wyjscia",
+                          "[fileio64] koniec, kod wyjscia 0" in fio)
+
                     # fs.c przeszedl do trybu dlugiego bez zmiany ani
                     # jednego znaku - dysk widziany przez warstwe blokowa
                     # wyglada tak samo w obu trybach
@@ -3191,6 +3208,15 @@ def main():
                                            timeout=25)[seen:]
                     check("i ma dokladnie te sama tresc",
                           "pisze na dysk" in ct2)
+                    # Plik zapisany przez PROGRAM tez ma przezyc -
+                    # droga przez deskryptor konczy sie na tym samym
+                    # dysku, co droga przez jadro
+                    seen = len(q23b.serial())
+                    q23b.type_line("cat zring3")
+                    ct3 = q23b.wait_serial("plik zapisany z ring 3",
+                                           timeout=25)[seen:]
+                    check("plik zapisany przez program tez przezyl restart",
+                          "ProtonOS 64: plik zapisany z ring 3" in ct3)
                 finally:
                     q23b.close()
         finally:

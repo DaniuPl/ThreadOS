@@ -28,6 +28,12 @@
 #define SYS64_SIGRETURN 10
 #define SYS64_KILL      11
 #define SYS64_READ      12
+#define SYS64_OPEN      13
+#define SYS64_CLOSE     14
+
+/* Numery zajete od zawsze: zero to klawiatura, jeden to konsola */
+#define FD_STDIN   0
+#define FD_STDOUT  1
 
 #define SIGINT   2
 #define SIGKILL  9
@@ -62,9 +68,30 @@ static inline uint64_t ustrlen(const char *s)
     return n;
 }
 
+/* Wypisanie na konsole to zwykly zapis do deskryptora numer jeden -
+   dokladnie taki sam, jak zapis do pliku */
 static inline void print(const char *s)
 {
-    syscall64(SYS64_WRITE, (int64_t)(uintptr_t)s, (int64_t)ustrlen(s));
+    syscall64_3(SYS64_WRITE, FD_STDOUT, (int64_t)(uintptr_t)s,
+                (int64_t)ustrlen(s));
+}
+
+static inline int64_t sys_write(int fd, const void *buf, uint64_t len)
+{
+    return syscall64_3(SYS64_WRITE, fd, (int64_t)(uintptr_t)buf,
+                       (int64_t)len);
+}
+
+/* Otwiera plik w katalogu glownym. create=1 zaklada go, gdy nie ma. */
+static inline int64_t sys_open(const char *nazwa, int create)
+{
+    return syscall64_3(SYS64_OPEN, (int64_t)(uintptr_t)nazwa,
+                       (int64_t)ustrlen(nazwa), create);
+}
+
+static inline int64_t sys_close(int fd)
+{
+    return syscall64(SYS64_CLOSE, fd, 0);
 }
 
 static inline void sys_exit(int code)
@@ -134,9 +161,10 @@ static inline int64_t sys_wait(int *code)
 
 /* Czyta z klawiatury. Blokuje do pierwszego znaku; -1 znaczy, ze
    czekanie przerwal sygnal. Bez echa - echo robi czytajacy. */
-static inline int64_t sys_read(char *buf, uint64_t len)
+static inline int64_t sys_read(int fd, void *buf, uint64_t len)
 {
-    return syscall64(SYS64_READ, (int64_t)(uintptr_t)buf, (int64_t)len);
+    return syscall64_3(SYS64_READ, fd, (int64_t)(uintptr_t)buf,
+                       (int64_t)len);
 }
 
 /* Powrot z procedury obslugi sygnalu.
