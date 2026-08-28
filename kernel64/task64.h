@@ -41,6 +41,15 @@ void task64_rename(const char *name);
 
 /* Zabija biezace zadanie (blad programu w ring 3). Nie wraca. */
 void task64_kill_current(const char *why);
+/* Sygnaly. Wyslanie tylko odklada sygnal i budzi spiace zadanie -
+   dostarcza go dopiero powrot do pierscienia 3. */
+int task64_signal(int id, int sig);
+int task64_take_signal(void);         /* 0 = nic nie czeka */
+void task64_set_sighandler(uint64_t handler, uint64_t restorer);
+uint64_t task64_sighandler(void);
+uint64_t task64_sigrestorer(void);
+int task64_current_id(void);
+
 int  task64_id(const struct task64 *t);
 int  task64_count(void);            /* ile zadan jest na liscie */
 void task64_dump(void);

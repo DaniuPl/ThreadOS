@@ -751,7 +751,7 @@ def main():
 
         # Watek C konczy sie po 2 s
         screen = q.wait_for("watek-C: zakonczony")
-        check("watek C zakonczyl prace", True)
+        check("watek C zakonczyl prace", "watek-C: zakonczony" in screen)
 
         # Klawiatura: wstrzyknij "proton 1" i sprawdz echo
         for key in ["p", "r", "o", "t", "o", "n", "spc", "1"]:
@@ -821,15 +821,18 @@ def main():
         # 'run hello': proces ELF z wlasna przestrzenia adresowa
         q.type_line("run hello")
         screen = q.wait_for("[hello] czesc, jestem procesem ELF")
-        check("proces hello wystartowal z ELF i robi syscall write", True)
+        check("proces hello wystartowal z ELF i robi syscall write",
+              "[hello] czesc, jestem procesem ELF" in screen)
         # Przestrzen uzytkownika zaczyna sie od 1 GiB - ponizej jest juz
         # tylko mapowanie identycznosciowe jadra
         check("program uzytkownika mieszka powyzej 1 GiB",
               re.search(r"entry 4[0-9a-f]{7}", screen) is not None)
-        q.wait_for("[hello] licze: 3")
-        check("syscalle write+sleep dzialaja w petli", True)
-        q.wait_for("proces 'hello' zakonczyl sie (kod 0)")
-        check("hello zakonczyl sie czysto przez sys_exit", True)
+        widok = q.wait_for("[hello] licze: 3")
+        check("syscalle write+sleep dzialaja w petli",
+              "[hello] licze: 3" in widok)
+        widok = q.wait_for("proces 'hello' zakonczyl sie (kod 0)")
+        check("hello zakonczyl sie czysto przez sys_exit",
+              "proces 'hello' zakonczyl sie (kod 0)" in widok)
 
         time.sleep(0.5)  # czas na sprzatniecie zombie
         q.type_line("mem")
@@ -905,7 +908,8 @@ def main():
         q.type_line("run forktest")
         screen = q.wait_for("[forktest] dziecko: wzorzec odziedziczony",
                             timeout=30)
-        check("fork: dziecko wraca z syscalla z pamiecia rodzica", True)
+        check("fork: dziecko wraca z syscalla z pamiecia rodzica",
+              "[forktest] dziecko: wzorzec odziedziczony" in screen)
         m = re.search(r"przyrost RAM po fork: (\d+) KiB", screen)
         check("fork nie kopiuje pamieci procesu"
               + (f" (256 KiB bufora, przyrost {m.group(1)} KiB)" if m else ""),
@@ -913,7 +917,7 @@ def main():
         screen = q.wait_for("[forktest] rodzic: wzorzec nietkniety",
                             timeout=30)
         check("zapisy dziecka nie widac u rodzica (prywatne kopie stron)",
-              True)
+              "[forktest] rodzic: wzorzec nietkniety" in screen)
         # Ten sam wzorzec zostal nietkniety takze tam, gdzie w dziecku
         # pisalo JADRO (syscall) - o to dba bit WP w CR0.
         check("zapis jadra w dziecku tez trafil w prywatna kopie strony",
@@ -955,7 +959,8 @@ def main():
         screen = q.wait_for("[lazymem] mmap tez daje strony", timeout=30)
         check("syscall urzeczywistnia nietknieta strone zamiast zglaszac blad",
               "syscall urzeczywistnil nietknieta strone" in screen)
-        check("mmap tez przydziela strony dopiero przy dotknieciu", True)
+        check("mmap tez przydziela strony dopiero przy dotknieciu",
+              "[lazymem] mmap tez daje strony" in screen)
         q.wait_for("proces 'lazymem' zakonczyl sie (kod 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")
@@ -1011,10 +1016,12 @@ def main():
         screen = q.wait_for("[sigtest] rodzic dostal SIGCHLD", timeout=30)
         check("SIGTERM domyslnie konczy proces (kod -15)",
               "domyslnie konczy proces (kod -15)" in screen)
-        check("rodzic dostaje SIGCHLD po smierci dziecka", True)
+        check("rodzic dostaje SIGCHLD po smierci dziecka",
+              "[sigtest] rodzic dostal SIGCHLD" in screen)
         screen = q.wait_for("[sigtest] SIGKILL nie do przechwycenia",
                             timeout=30)
-        check("SIGKILL-a nie da sie przechwycic ani zignorowac", True)
+        check("SIGKILL-a nie da sie przechwycic ani zignorowac",
+              "[sigtest] SIGKILL nie do przechwycenia" in screen)
 
         # Ctrl+C z prawdziwej klawiatury -> SIGINT do procesu, ktory
         # trzyma konsole; czekanie na klawisz przerywa sie w pol drogi
@@ -1052,8 +1059,10 @@ def main():
         # 'run evil': proba czytania pamieci jadra
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")
-        check("evil czytal pamiec jadra i zostal ubity", True)
-        check("CR2 pokazuje atakowany adres", "siegnal po adres 100000" in screen)
+        check("evil czytal pamiec jadra i zostal ubity",
+              "proces 'evil' ubity" in screen)
+        check("CR2 pokazuje atakowany adres",
+              "siegnal po adres 100000" in screen)
         check("kod po ataku nie wykonal sie",
               "TEGO NIE POWINNO BYC WIDAC" not in screen)
 
@@ -1110,8 +1119,9 @@ def main():
         # Gniazda UDP w ring 3: dwa procesy gadaja przez petle zwrotna,
         # wiec test nie zalezy od zadnej sieci na zewnatrz
         q.type_line("run udpecho")
-        q.wait_for("nasluchuje na porcie 7777", timeout=10)
-        check("proces ring 3 otworzyl gniazdo UDP", True)
+        widok = q.wait_for("nasluchuje na porcie 7777", timeout=10)
+        check("proces ring 3 otworzyl gniazdo UDP",
+              "nasluchuje na porcie 7777" in widok)
 
         q.type_line("run udptest")
         echo = q.wait_for("echo wrocilo", timeout=10)
@@ -1397,15 +1407,17 @@ def main():
         # Shell uzytkownika: sys_read przejmuje konsole
         q.type_line("run sh")
         q.wait_for("ush - shell uzytkownika")
-        q.wait_for("ush:/")  # prompt pokazuje katalog roboczy (root = /)
-        check("ush wystartowal w ring 3", True)
+        widok = q.wait_for("ush:/")  # prompt pokazuje katalog roboczy (root = /)
+        check("ush wystartowal w ring 3", "ush:/" in widok)
 
         q.type_line("pid")
-        check("ush zna swoj pid (sys_getpid)", "moj pid to" in q.wait_for("moj pid to"))
+        check("ush zna swoj pid (sys_getpid)",
+              "moj pid to" in q.wait_for("moj pid to"))
 
         q.type_line("hello")
-        q.wait_for("[hello] koncze sie grzecznie")
-        check("ush odpalil hello przez spawn+wait", True)
+        widok = q.wait_for("[hello] koncze sie grzecznie")
+        check("ush odpalil hello przez spawn+wait",
+              "[hello] koncze sie grzecznie" in widok)
 
         q.type_line("nieistnieje")
         check("ush zglasza nieznany program",
@@ -1571,8 +1583,8 @@ def main():
               q.screen().count("[spin] tik") == base)
 
         q.type_line("exit")
-        q.wait_for("ush: pa!")
-        check("ush wyszedl przez sys_exit", True)
+        widok = q.wait_for("ush: pa!")
+        check("ush wyszedl przez sys_exit", "ush: pa!" in widok)
 
         # Konsola wraca do shella jadra
         before = len(re.findall(r"tyknac timera", q.screen()))
@@ -1647,8 +1659,9 @@ def main():
         q_srv.wait_for("ProtonOS shell")
         q_srv.wait_for("[siec] DHCP", timeout=20)
         q_srv.type_line("run tcpserv")
-        q_srv.wait_for("nasluchuje na porcie 5555", timeout=15)
-        check("ring 3 nasluchuje na porcie TCP", True)
+        widok = q_srv.wait_for("nasluchuje na porcie 5555", timeout=15)
+        check("ring 3 nasluchuje na porcie TCP",
+              "nasluchuje na porcie 5555" in widok)
 
         # Laczy sie prawdziwy stos hosta (przez hostfwd QEMU)
         sock = socket.create_connection(("127.0.0.1", srv_port), timeout=15)
@@ -2454,8 +2467,9 @@ def main():
               "tyknac timera" not in second)
 
         q17.type_line("run spin")
-        q17.wait_for("[spin] tik", timeout=20)
-        check("program uruchomiony na drugiej konsoli pisze na niej", True)
+        widok = q17.wait_for("[spin] tik", timeout=20)
+        check("program uruchomiony na drugiej konsoli pisze na niej",
+              "[spin] tik" in widok)
 
         q17.sendkey("alt-f1")
         time.sleep(1.5)
@@ -2474,8 +2488,9 @@ def main():
               f" widac ({before} -> {after})",
               after != before or before >= 8)
         q17.type_line("kill spin")
-        q17.wait_for("zabity (kod -9)", timeout=20)
-        check("kill z wlasnej konsoli konczy jej program", True)
+        widok = q17.wait_for("zabity (kod -9)", timeout=20)
+        check("kill z wlasnej konsoli konczy jej program",
+              "zabity (kod -9)" in widok)
     finally:
         q17.close()
 
@@ -2954,6 +2969,49 @@ def main():
                     bad = q23.wait_serial("Nieznane polecenie", timeout=20)
                     check("shell nie udaje, ze zna kazde polecenie",
                           "Nieznane polecenie: nieznane" in bad)
+
+                    # Sygnaly: program w petli bez konca musi dac sie
+                    # zatrzymac z zewnatrz, bo od srodka sie nie da
+                    q23.type_line("run spin64")
+                    q23.wait_serial("[spin64] krece sie", timeout=30)
+                    time.sleep(1)
+                    q23.sendkey("ctrl-c")
+                    kill = q23.wait_serial("[spin64] koniec", timeout=30)
+                    check("Ctrl+C wysyla sygnal do programu",
+                          re.search(r"zadanie \d+ dostalo sygnal 2", kill)
+                          is not None)
+                    check("program bez wlasnej procedury ginie od sygnalu",
+                          "(spin64) zabite: sygnal" in kill)
+                    check("shell odzyskuje konsole po zabitym programie",
+                          "[spin64] koniec, kod wyjscia -1" in kill)
+
+                    # A program z wlasna procedura ma po niej wrocic
+                    # tam, gdzie mu przerwano - to jest cala roznica
+                    # miedzy sygnalem a zabiciem
+                    q23.type_line("run sigtest64")
+                    q23.wait_serial("[sigtest64] czekam", timeout=30)
+                    time.sleep(1)
+                    q23.sendkey("ctrl-c")
+                    sig = q23.wait_serial("[sigtest64] koniec", timeout=30)
+                    check("program przechwytuje sygnal wlasna procedura",
+                          "procedura obslugi: dostalem sygnal" in sig)
+                    check("po procedurze program wraca w przerwane miejsce",
+                          "wrocilem do przerwanego miejsca" in sig)
+                    check("przechwycony sygnal nie zabija programu",
+                          "[sigtest64] koniec, kod wyjscia 0" in sig)
+                    check("jadro nie zglasza smierci przechwyconego sygnalu",
+                          "(sigtest64) zabite" not in sig)
+
+                    # Tylko to, co doszlo PO tym poleceniu - wczesniej
+                    # w logu oba programy oczywiscie sa
+                    seen = len(q23.serial())
+                    q23.type_line("ps")
+                    after = q23.wait_serial("shell (biezacy)",
+                                            timeout=20)[seen:]
+                    check("po obu programach nie zostaje zadne zadanie",
+                          "spin64" not in after
+                          and "sigtest64" not in after
+                          and "bezczynny" in after)
 
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)

@@ -24,6 +24,13 @@
 #define SYS64_FORK  6
 #define SYS64_EXEC  7
 #define SYS64_WAIT  8
+#define SYS64_SIGNAL    9
+#define SYS64_SIGRETURN 10
+#define SYS64_KILL      11
+
+#define SIGINT   2
+#define SIGKILL  9
+#define SIGTERM 15
 
 static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
 {
@@ -31,6 +38,17 @@ static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
     __asm__ volatile("syscall"
                      : "=a"(ret)
                      : "a"(nr), "D"(a1), "S"(a2)
+                     : "rcx", "r11", "memory");
+    return ret;
+}
+
+static inline int64_t syscall64_3(int64_t nr, int64_t a1, int64_t a2,
+                                  int64_t a3)
+{
+    int64_t ret;
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(nr), "D"(a1), "S"(a2), "d"(a3)
                      : "rcx", "r11", "memory");
     return ret;
 }
@@ -111,6 +129,33 @@ static inline int64_t sys_exec(const char *name)
 static inline int64_t sys_wait(int *code)
 {
     return syscall64(SYS64_WAIT, (int64_t)(uintptr_t)code, 0);
+}
+
+/* Powrot z procedury obslugi sygnalu.
+ *
+ * Musi lezec w programie, a nie w jadrze: po zakonczeniu procedury
+ * trzeba wykonac instrukcje, a jedyne strony wykonywalne, jakie
+ * proces ma, to jego wlasny kod. Jadro wsuwa adres tej etykiety pod
+ * procedure jako adres powrotu - zwykly ret trafia wiec tutaj,
+ * a stad jednym wywolaniem z powrotem do jadra po ramke. */
+__asm__(".globl protonos_sigreturn\n"
+        "protonos_sigreturn:\n"
+        "    movq $10, %rax\n"          /* SYS64_SIGRETURN */
+        "    syscall\n");
+extern void protonos_sigreturn(void);
+
+/* Ustawia procedure obslugi sygnalow (0 = zabij program, tak jest
+   domyslnie). Adres powrotu podaje biblioteka, bo jadro nie ma go
+   skad wziac. */
+static inline void sys_signal(int sig, void (*handler)(int))
+{
+    syscall64_3(SYS64_SIGNAL, sig, (int64_t)(uintptr_t)handler,
+                (int64_t)(uintptr_t)protonos_sigreturn);
+}
+
+static inline int64_t sys_kill(int64_t id, int sig)
+{
+    return syscall64(SYS64_KILL, id, sig);
 }
 
 /* Liczba szesnastkowa - adresy czyta sie tylko tak */

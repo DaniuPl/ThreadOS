@@ -12,6 +12,9 @@
 #define SYS64_FORK  6
 #define SYS64_EXEC  7
 #define SYS64_WAIT  8
+#define SYS64_SIGNAL    9
+#define SYS64_SIGRETURN 10
+#define SYS64_KILL      11
 
 /* Wejscie do jadra przez instrukcje syscall (zamiast bramki przerwania) */
 void syscall64_init(void);

@@ -140,6 +140,8 @@ ProtonOS/
 │   ├── sep64.c         # dwie kopie naraz, ten sam adres, osobna pamięć
 │   ├── fork64.c        # proces powiela sam siebie i sprawdza kopię
 │   ├── spawn64.c       # fork + exec + wait - tak działa każdy shell
+│   ├── sigtest64.c     # przechwytuje Ctrl+C i wraca w przerwane miejsce
+│   ├── spin64.c        # pętla bez końca - do zatrzymania z zewnątrz
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -781,3 +783,23 @@ obrazie dysku.
       i tak ma być. Przy okazji uruchamianie programów przeniosło się
       z `kmain64` do `proc64_spawn`, gdzie jego miejsce: jądro przy
       starcie i shell na żądanie idą teraz dokładnie tą samą drogą
+- [x] **Sygnały i Ctrl+C** w trybie długim - program w pętli bez końca
+      przestał być nie do zatrzymania. Sygnał nie jest wiadomością do
+      przeczytania, tylko przerwaniem toku programu, i jądro nie może go
+      dostarczyć w chwili wysłania: adresat jest wtedy gdzie indziej -
+      może spać, może siedzieć w środku wywołania systemowego. Czeka
+      więc przy zadaniu do **najbliższego powrotu do pierścienia 3**,
+      bo tylko wtedy ramka opisuje program, a nie jądro. Sprawdzamy to
+      w dwóch miejscach: przy powrocie z wywołania systemowego i przy
+      powrocie z przerwania - to drugie działa nawet wtedy, gdy program
+      o nic jądra nie prosi. Samo dostarczenie to znowu operacja na
+      ramce: odłożyć ją na stosie programu, przestawić na procedurę
+      obsługi i wsunąć pod nią adres powrotu. Adres musi przyjść **od
+      programu**, bo jedyne strony wykonywalne, jakie proces ma, to jego
+      własny kod - stos jest nieskutecznie wykonywalny z założenia (NX).
+      Ramka wraca ze stosu użytkownika, więc program mógłby ją podmienić:
+      rejestry i adres powrotu są jego sprawą, ale segmenty i flagi nie,
+      bo tędy wchodzi się w jądro. Dowód: `spin64` bez własnej procedury
+      ginie od Ctrl+C i shell odzyskuje konsolę, a `sigtest64` sygnał
+      **przechwytuje** - jego procedura wypisuje się i wraca, a program
+      kończy się dalej normalnie, kodem zero

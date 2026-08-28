@@ -15,6 +15,7 @@
 #include "task64.h"
 #include "isr64.h"
 #include "paging64.h"
+#include "signal64.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -129,4 +130,10 @@ void isr64_handler(struct regs *r)
         if (irq_handlers[irq])
             irq_handlers[irq](r);
     }
+
+    /* Program przerwany w pol kroku to najczestszy moment, w ktorym da
+       sie dostarczyc sygnal - i jedyny, ktory dziala takze wtedy, gdy
+       program o nic jadra nie prosi */
+    if ((r->cs & 3) == 3)
+        signal64_deliver(r);
 }

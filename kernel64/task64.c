@@ -37,6 +37,9 @@ struct task64 {
     uint64_t kstack_top;         /* stos jadra dla wejsc z ring 3 */
     int id;
     int parent;                  /* kto je stworzyl - dla czekania na koniec */
+    int sig_pending;             /* sygnal czekajacy na dostarczenie */
+    uint64_t sig_handler;        /* procedura programu (0 = zabij) */
+    uint64_t sig_restorer;       /* powrot z procedury do jadra */
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -87,6 +90,9 @@ void scheduler64_init(void)
     main_task->space = 0;
     main_task->kstack_top = 0;
     main_task->parent = -1;
+    main_task->sig_pending = 0;
+    main_task->sig_handler = 0;
+    main_task->sig_restorer = 0;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -112,6 +118,9 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->space = 0;
     t->kstack_top = 0;
     t->parent = current ? current->id : -1;
+    t->sig_pending = 0;
+    t->sig_handler = 0;
+    t->sig_restorer = 0;
     t->id = next_id++;
     set_name(t, name);
 
@@ -398,6 +407,56 @@ void task64_kill_current(const char *why)
     for (;;)
         __asm__ volatile("hlt");
 }
+
+/* --- Sygnaly ------------------------------------------------------
+ *
+ * Zadanie nosi jeden sygnal czekajacy na dostarczenie. Jeden wystarcza:
+ * sygnal jest zawiadomieniem, a nie wiadomoscia - drugie Ctrl+C przed
+ * dostarczeniem pierwszego nie niesie nowej informacji.
+ *
+ * Dostarczenie nie moze sie odbyc tutaj: zadanie jest w tej chwili
+ * gdzie indziej, moze spiac, moze w srodku wywolania systemowego.
+ * Odbierze go dopiero przy powrocie do pierscienia 3 - i to jest
+ * jedyny moment, w ktorym da sie podmienic mu ramke. */
+int task64_signal(int id, int sig)
+{
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    int found = 0;
+    do {
+        if (t->id == id && t->state != TASK_ZOMBIE) {
+            t->sig_pending = sig;
+            if (t->state == TASK_SLEEPING)
+                t->state = TASK_READY;      /* sygnal przerywa czekanie */
+            found = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return found;
+}
+
+int task64_take_signal(void)
+{
+    irqflags_t flags = irq_save();
+    int sig = current->sig_pending;
+    current->sig_pending = 0;
+    irq_restore(flags);
+    return sig;
+}
+
+void task64_set_sighandler(uint64_t handler, uint64_t restorer)
+{
+    irqflags_t flags = irq_save();
+    current->sig_handler = handler;
+    current->sig_restorer = restorer;
+    irq_restore(flags);
+}
+
+uint64_t task64_sighandler(void)  { return current->sig_handler; }
+uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
+int task64_current_id(void)       { return current ? current->id : -1; }
 
 int task64_id(const struct task64 *t)
 {

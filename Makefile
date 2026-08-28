@@ -191,6 +191,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/gdt64.o $(BUILD)/64/syscall64.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
+          $(BUILD)/64/signal64.o \
           $(BUILD)/64/syscall64_stub.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
@@ -220,7 +221,8 @@ USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
                  -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
 USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/wild64.elf $(BUILD)/user64/sep64.elf \
-               $(BUILD)/user64/fork64.elf $(BUILD)/user64/spawn64.elf
+               $(BUILD)/user64/fork64.elf $(BUILD)/user64/spawn64.elf \
+               $(BUILD)/user64/sigtest64.elf $(BUILD)/user64/spin64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -236,7 +238,9 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    wild64=$(BUILD)/user64/wild64.elf \
 	    sep64=$(BUILD)/user64/sep64.elf \
 	    fork64=$(BUILD)/user64/fork64.elf \
-	    spawn64=$(BUILD)/user64/spawn64.elf
+	    spawn64=$(BUILD)/user64/spawn64.elf \
+	    sigtest64=$(BUILD)/user64/sigtest64.elf \
+	    spin64=$(BUILD)/user64/spin64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

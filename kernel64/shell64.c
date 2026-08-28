@@ -115,8 +115,10 @@ static void execute(void)
         /* Shell czeka na swoje dziecko - tak samo jak zrobilby to
            program przez wywolanie systemowe. Przez ten czas nie
            odpowiada, i tak ma byc. */
+        keyboard64_set_intr_target(id);   /* od teraz Ctrl+C idzie do niego */
         int code = 0;
         int done = task64_wait(&code);
+        keyboard64_set_intr_target(-1);
         if (done < 0)
             printk("run: dziecko przepadlo\n");
         else

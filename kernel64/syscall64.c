@@ -20,6 +20,7 @@
 #include "../kernel/include/pit.h"
 #include "../kernel/include/isr.h"
 #include "proc64.h"
+#include "signal64.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -123,9 +124,20 @@ void syscall64_forget_user(void)
  * z nich przeczyta, pyta tablice stron, czy program w ogole ma prawo
  * tam siegac. Bez tego wystarczyloby podac adres pamieci jadra, zeby
  * kazac mu ja sobie wypisac. */
+static void handle(struct regs *r);
+
+/* Wejscie ze stubu. Sygnal dostarczamy tuz przed powrotem - wtedy
+   i tylko wtedy ramka opisuje program, a nie jadro. */
 void syscall64_handler(struct regs *r)
 {
-    uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi;
+    handle(r);
+    if ((r->cs & 3) == 3)
+        signal64_deliver(r);
+}
+
+static void handle(struct regs *r)
+{
+    uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi, a3 = r->rdx;
 
     switch (nr) {
     case SYS64_WRITE: {
@@ -185,6 +197,22 @@ void syscall64_handler(struct regs *r)
         r->rax = (uint64_t)(int64_t)id;
         return;
     }
+    case SYS64_SIGNAL:
+        /* Program podaje swoja procedure obslugi i adres, pod ktory ma
+           wrocic po jej zakonczeniu. Ten drugi musi przyjsc od niego:
+           kod wykonywalny jest tylko w jego wlasnych stronach. */
+        task64_set_sighandler(a2, a3);
+        r->rax = 0;
+        return;
+    case SYS64_SIGRETURN:
+        if (signal64_return(r) < 0) {
+            printk("[jadro] sigreturn: ramka poza pamiecia programu\n");
+            task64_kill_current("zepsuty sigreturn");
+        }
+        return;                      /* ramka opisuje juz przerwane miejsce */
+    case SYS64_KILL:
+        r->rax = task64_signal((int)a1, (int)a2) ? 0 : (uint64_t)-1;
+        return;
     default:
         printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
         r->rax = (uint64_t)-1;
