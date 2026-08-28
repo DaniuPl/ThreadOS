@@ -24,6 +24,9 @@ int paging64_init(void);
 /* Mapuje pojedyncza strone 4 KiB. 0 = zmapowana. */
 int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags);
 
+/* Zdejmuje mapowanie strony; zwraca ramke, ktora pod nia lezala */
+uint64_t paging64_unmap(uint64_t virt);
+
 /* Adres fizyczny spod adresu wirtualnego (0 = nie zmapowany) */
 uint64_t paging64_lookup(uint64_t virt);
 

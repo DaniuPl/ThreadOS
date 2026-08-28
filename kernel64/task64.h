@@ -22,6 +22,9 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
 void task64_yield(void);
 void task64_sleep(uint32_t ms);
 void task64_exit(void);
+
+/* Zabija biezace zadanie (blad programu w ring 3). Nie wraca. */
+void task64_kill_current(const char *why);
 int  task64_id(const struct task64 *t);
 int  task64_count(void);            /* ile zadan jest na liscie */
 void task64_dump(void);

@@ -129,6 +129,34 @@ uint64_t paging64_lookup(uint64_t virt)
     return (e & ADDR_MASK) + (virt & 0xFFF);
 }
 
+/* Zdejmuje mapowanie strony i zwraca ramke, ktora pod nia lezala
+   (0 = nic tam nie bylo). Tablic posrednich nie zwalniamy: kosztuja
+   po jednej ramce na dwa megabajty i zaraz sie przydadza. */
+uint64_t paging64_unmap(uint64_t virt)
+{
+    if (!pml4)
+        return 0;
+    uint64_t e = pml4[(virt >> 39) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return 0;
+    uint64_t *pdpt = table_at(e);
+    e = pdpt[(virt >> 30) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return 0;
+    uint64_t *pd = table_at(e);
+    e = pd[(virt >> 21) & 0x1FF];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return 0;
+    uint64_t *pt = table_at(e);
+    int i = (int)((virt >> 12) & 0x1FF);
+    if (!(pt[i] & PTE_PRESENT))
+        return 0;
+    uint64_t phys = pt[i] & ADDR_MASK;
+    pt[i] = 0;
+    invlpg(virt);
+    return phys;
+}
+
 /* Czy caly zakres jest widoczny dla ring 3?
  *
  * Jadro nie ma prawa uwierzyc we wskaznik podany przez program:

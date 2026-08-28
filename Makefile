@@ -215,7 +215,8 @@ USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
                  -fno-pic -no-pie -static -nostdlib -mno-red-zone \
                  -O2 -Wall -Wextra \
                  -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
-USER64_ELFS := $(BUILD)/user64/hello64.elf
+USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
+               $(BUILD)/user64/wild64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -225,7 +226,10 @@ $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
 $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
-	python3 scripts/mkinitrd.py $@ hello64=$(BUILD)/user64/hello64.elf
+	python3 scripts/mkinitrd.py $@ \
+	    hello64=$(BUILD)/user64/hello64.elf \
+	    nx64=$(BUILD)/user64/nx64.elf \
+	    wild64=$(BUILD)/user64/wild64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

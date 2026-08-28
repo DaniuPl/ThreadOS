@@ -23,6 +23,22 @@ syscall64_entry:
     pushq %rcx                   /* adres powrotu zostawiony przez syscall */
     pushq %r11                   /* flagi zostawione przez syscall */
 
+    /* Rejestry, ktore niszczy funkcja C - odkladamy je i oddajemy
+       programowi nietkniete.
+     *
+     * Bez tego umowa z programem brzmialaby "syscall psuje polowe
+     * rejestrow" i kazdy program musialby o tym pamietac. Kompilator
+     * o niczym nie wie: trzyma sobie stala w RDX przez cale wywolanie
+     * i uzywa jej potem jako numeru nastepnego wywolania - a tam lezy
+     * juz smiec po jadrze. Taniej jest raz odlozyc szesc rejestrow
+     * niz w kazdym programie pamietac o szesciu pulapkach. */
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %r8
+    pushq %r9
+    pushq %r10
+
     /* Nasza konwencja: numer w rax, argumenty w rdi/rsi. Funkcja C
        oczekuje ich w rdi/rsi/rdx, wiec przesuwamy o jedno w prawo. */
     movq %rsi, %rdx
@@ -30,6 +46,12 @@ syscall64_entry:
     movq %rax, %rdi
     call syscall64_handler
 
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdx
+    popq %rsi
+    popq %rdi
     popq %r11
     popq %rcx
     movq syscall64_user_rsp(%rip), %rsp

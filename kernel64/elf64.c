@@ -152,6 +152,23 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry)
     return 0;
 }
 
+/* Sprzata cala przestrzen uzytkownika.
+ *
+ * Przestrzen adresowa jest na razie jedna i wspolna, wiec kolejny
+ * program musi zastac ja pusta. Bez tego jego segmenty trafialyby
+ * na strony poprzednika - z prawami nadanymi POPRZEDNIKOWI, bo
+ * mapowanie juz by istnialo. Program tylko do odczytu potrafilby
+ * wtedy dostac cudzy zapisywalny obszar, a to jest dokladnie ta
+ * dziura, ktorej ochrona pamieci ma nie miec. */
+void elf64_unload(void)
+{
+    for (uint64_t va = USER64_BASE; va < USER64_STACK_TOP; va += PAGE_SIZE) {
+        uint64_t frame = paging64_unmap(va);
+        if (frame)
+            pmm_free_frame((uint32_t)frame);
+    }
+}
+
 uint64_t elf64_make_stack(void)
 {
     for (int i = 1; i <= USER64_STACK_PAGES; i++) {

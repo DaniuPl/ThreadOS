@@ -215,6 +215,22 @@ void task64_exit(void)
         __asm__ volatile("hlt");
 }
 
+/* Zabija biezace zadanie z podanym powodem. Nie wraca.
+ *
+ * Wolane z obslugi wyjatku, gdy zawinil program w ring 3. Roznica
+ * wzgledem task64_exit jest tylko taka, ze tu jest co powiedziec:
+ * zadanie nie skonczylo sie samo, tylko zostalo zatrzymane. */
+void task64_kill_current(const char *why)
+{
+    irq_save();
+    printk("[jadro] zadanie %d (%s) zabite: %s\n",
+           current->id, current->name, why);
+    current->state = TASK_ZOMBIE;
+    schedule();
+    for (;;)
+        __asm__ volatile("hlt");
+}
+
 int task64_id(const struct task64 *t)
 {
     return t ? t->id : -1;

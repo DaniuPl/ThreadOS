@@ -27,6 +27,7 @@
 #include "gdt64.h"
 #include "syscall64.h"
 #include "elf64.h"
+#include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/string.h"
 
@@ -121,19 +122,23 @@ static void ring3_thread(void *arg)
  * zaczac, co zaladowac, z jakimi prawami - dowiaduje sie z naglowka
  * ELF. To jest ta granica, za ktora system zaczyna uruchamiac cudze
  * programy, a nie wlasne kawalki siebie. */
-static const char *elf_name = "hello64";
 static int elf_started;
 
 static void elf_thread(void *arg)
 {
-    (void)arg;
+    const char *name = (const char *)arg;
 
     uint32_t size = 0;
-    const void *image = initrd_find(elf_name, &size);
+    const void *image = initrd_find(name, &size);
     if (!image) {
-        printk("[ !! ] initrd: nie ma pliku '%s'\n", elf_name);
+        printk("[ !! ] initrd: nie ma pliku '%s'\n", name);
         task64_exit();
     }
+
+    /* Przestrzen adresowa jest jedna i wspolna, wiec kolejny program
+       musi zastac ja pusta - inaczej dostalby strony poprzednika
+       razem z jego prawami */
+    elf64_unload();
 
     uint64_t entry;
     if (elf64_load(image, size, &entry) < 0)
@@ -146,7 +151,7 @@ static void elf_thread(void *arg)
     }
 
     printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
-           elf_name, size, (uint32_t)entry);
+           name, size, (uint32_t)entry);
 
     uint64_t kstack;
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
@@ -154,6 +159,24 @@ static void elf_thread(void *arg)
 
     elf_started = 1;
     enter_ring3_64(entry, rsp);
+}
+
+/* Uruchamia program i czeka, az sie skonczy - sam albo zabity przez
+   jadro. Zwraca 1, gdy w ogole ruszyl. */
+static int run_program(const char *name)
+{
+    syscall64_forget_user();
+    isr64_forget_user_fault();
+    elf_started = 0;
+
+    if (!task64_create(name, elf_thread, (void *)(uintptr_t)name))
+        return 0;
+    for (int i = 0; i < 80; i++) {
+        if (syscall64_user_exited() || isr64_user_fault())
+            break;
+        task64_sleep(50);
+    }
+    return elf_started;
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -326,22 +349,45 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Programy z initrd ------------------------------------- */
     initrd_init(mbi);
-    if (initrd_file_count())
+    if (!initrd_file_count())
+        printk("[ !! ] initrd: brak programow - nie ma czego uruchomic\n");
+    else
         printk("[ OK ] initrd: %u plik(ow) od loadera\n",
                initrd_file_count());
 
     if (initrd_file_count()) {
-        /* Program z pliku dostaje czysta karte: to, co powie jadru,
-           mowi juz on, a nie kawalek kodu z obrazu jadra */
-        syscall64_forget_user();
-        task64_create("hello64", elf_thread, 0);
-        for (int i = 0; i < 40 && !syscall64_user_exited(); i++)
-            task64_sleep(50);
-
+    /* Program z pliku dostaje czysta karte: to, co powie jadru, mowi
+       juz on, a nie kawalek kodu wpisany w obraz jadra */
+    if (run_program("hello64")) {
         cs = syscall64_user_cs();
-        if (elf_started)
-            printk("[ OK ] ELF64 z initrd: pierscien %u, kod wyjscia %u\n",
-                   cs & 3, (uint32_t)syscall64_user_status());
+        printk("[ OK ] ELF64 z initrd: pierscien %u, kod wyjscia %u\n",
+               cs & 3, (uint32_t)syscall64_user_status());
+    }
+
+    /* --- Ochrona pamieci od strony programu ---------------------- */
+    /* Bit zakazu wykonywania byl dotad tylko ustawiony. Teraz program
+       probuje wykonac wlasne dane, a bledy strony z ring 3 zabijaja
+       winnego zamiast zatrzymywac system - wiec da sie to sprawdzic
+       i przezyc. */
+    if (run_program("nx64"))
+        printk("[ %s ] Zakaz wykonywania: %s (err=%x, adres=%x)\n",
+               isr64_user_fault() ? "OK" : "!!",
+               isr64_user_fault() ? "procesor odmowil wykonania danych"
+                                  : "PROGRAM WYKONAL SWOJE DANE",
+               isr64_user_fault_err(), (uint32_t)isr64_user_fault_addr());
+
+    if (run_program("wild64"))
+        printk("[ %s ] Pamiec jadra: %s (err=%x, adres=%x)\n",
+               isr64_user_fault() ? "OK" : "!!",
+               isr64_user_fault() ? "niedostepna dla pierscienia 3"
+                                  : "PROGRAM JA PRZECZYTAL",
+               isr64_user_fault_err(), (uint32_t)isr64_user_fault_addr());
+
+    /* Najwazniejszy dowod: system po tych dwoch zgonach dziala dalej */
+    uint32_t a_before = counter_a;
+    task64_sleep(200);
+    printk("[ %s ] System przezyl smierc programow (licznik %u -> %u)\n",
+           counter_a > a_before ? "OK" : "!!", a_before, counter_a);
     }
 
     task64_dump();

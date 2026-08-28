@@ -2777,6 +2777,49 @@ def main():
                           + (f" ({m.group(2)})" if m else ""),
                           m is not None and m.group(2) == "7")
 
+                    # Ochrona pamieci widziana od strony programu.
+                    # Bit NX byl dotad tylko ustawiony - tu program
+                    # naprawde probuje wykonac swoje dane i ginie.
+                    nx = q23.wait_serial("Zakaz wykonywania:", timeout=30)
+                    check("program probuje wykonac wlasne dane",
+                          "[nx64] i probuje ja wykonac" in nx)
+                    check("procesor odmawia wykonania danych (bit NX)",
+                          "procesor odmowil wykonania danych" in nx)
+                    # 0x15 = strona obecna, dostep z ring 3, pobranie
+                    # instrukcji. Sam bit obecnosci wykluczylby zwykly
+                    # brak mapowania - to naprawde zadzialal NX.
+                    m = re.search(r"Zakaz wykonywania: .*err=([0-9a-f]+)", nx)
+                    check("blad strony mowi: pobranie instrukcji z ring 3"
+                          + (f" (err={m.group(1)})" if m else ""),
+                          m is not None and int(m.group(1), 16) & 0x15 == 0x15)
+                    check("winny program zostaje zabity, nie caly system",
+                          "zabite: Page Fault" in nx)
+
+                    # Druga droga do pamieci jadra: poprosic o nia samo
+                    # jadro. Musi odmowic, bo sprawdza wskaznik.
+                    wild = q23.wait_serial("Pamiec jadra:", timeout=30)
+                    check("jadro odrzuca wskaznik spoza programu",
+                          "nie nalezy do programu" in wild
+                          and "[wild64] jadro odmowilo" in wild)
+                    check("pamiec jadra niedostepna z ring 3",
+                          "niedostepna dla pierscienia 3" in wild)
+                    m = re.search(r"Pamiec jadra: .*err=([0-9a-f]+), "
+                                  r"adres=([0-9a-f]+)", wild)
+                    check("blad strony mowi: odczyt z ring 3 strony jadra"
+                          + (f" (err={m.group(1)}, adres={m.group(2)})"
+                             if m else ""),
+                          m is not None and int(m.group(1), 16) == 0x05
+                          and int(m.group(2), 16) == 0x100000)
+
+                    # I to, po co ta cala obsluga istnieje
+                    surv = q23.wait_serial("System przezyl", timeout=30)
+                    m = re.search(r"licznik (\d+) -> (\d+)", surv)
+                    check("system pracuje po smierci obu programow"
+                          + (f" (licznik {m.group(1)} -> {m.group(2)})"
+                             if m else ""),
+                          m is not None
+                          and int(m.group(2)) > int(m.group(1)))
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

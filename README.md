@@ -131,6 +131,8 @@ ProtonOS/
 ├── user64/             # programy trybu długiego (ELF64 w initrd64)
 │   ├── usys64.h        # syscalle przez instrukcję syscall
 │   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
+│   ├── nx64.c          # próbuje wykonać własne dane - ginie na NX
+│   ├── wild64.c        # sięga po pamięć jądra - ginie na braku USER
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -637,3 +639,30 @@ obrazie dysku.
       sobie wypisać. Program `hello64` pisze, liczy, usypia się, pyta
       o licznik tyknięć i kończy z kodem 7 - i to wszystko przechodzi
       tak samo pod BIOS-em, jak i pod UEFI
+- [x] **Ochrona pamięci, która naprawdę broni** - i przeżywa własny
+      dowód. Wyjątek przychodzący z pierścienia 3 nie zatrzymuje już
+      systemu: jądro wypisuje, co się stało, zabija winne zadanie
+      i pracuje dalej. O tym, skąd przyszedł wyjątek, mówią dwa
+      najniższe bity selektora kodu w ramce przerwania - odkłada je tam
+      procesor, więc program nie ma jak skłamać. Handler z takiego
+      wyjątku nie wraca: `schedule()` przełącza się na inny wątek,
+      a ramka przerwania ginie razem ze stosem martwego zadania.
+      Dopiero to pozwoliło **sprawdzić** ochronę zamiast wierzyć jej na
+      słowo. `nx64` wpisuje instrukcję do swojej tablicy w `.bss`
+      i skacze pod jej adres - zapis przechodzi, skok kończy się błędem
+      strony `err=0x15` (strona obecna, dostęp z ring 3, pobranie
+      instrukcji), czyli zadziałał bit NX, a nie zwykły brak mapowania.
+      `wild64` sięga po pamięć jądra dwiema drogami: najpierw prosi
+      o nią samo jądro (`paging64_user_range` odmawia), potem sięga
+      sam - `err=0x05`, odczyt strony bez bitu USER. Po obu zgonach
+      wątki jądra liczą dalej, i to jest ta asercja, o którą naprawdę
+      chodzi
+- [x] Naprawiony błąd w umowie o wywołaniach systemowych: jądro
+      niszczyło RDX, RSI, RDI i R8-R10, bo tak wolno funkcji C - ale
+      program o tym nie wiedział. Kompilator trzymał sobie stałą w RDX
+      przez całe wywołanie i użył jej potem jako numeru następnego,
+      trafiając na śmieć po jądrze (objawiło się jako „nieznane
+      wywołanie systemowe 1016"). Teraz stub odkłada te rejestry
+      u siebie: poza RAX z wynikiem oraz RCX i R11, które zabiera sam
+      procesor, wszystko wraca nietknięte. Taniej raz odłożyć sześć
+      rejestrów niż w każdym programie pamiętać o sześciu pułapkach

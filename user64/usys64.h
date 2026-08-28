@@ -5,6 +5,10 @@
  * a wynik oddaje w RAX. Niszczy przy tym RCX i R11 - procesor zostawia
  * w nich adres powrotu i flagi - wiec trzeba je wymienic w liscie
  * rejestrow psutych, inaczej kompilator uzna, ze przezyly wywolanie.
+ *
+ * Poza tymi dwoma i RAX z wyniku wszystkie rejestry wracaja
+ * nietkniete: jadro odklada je u siebie. To jest czesc umowy i na niej
+ * opiera sie ta lista.
  */
 
 #ifndef PROTONOS_USYS64_H

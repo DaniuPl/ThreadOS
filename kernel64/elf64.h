@@ -28,6 +28,10 @@
 /* Laduje obraz ELF64. Zwraca 0 i ustawia *entry, albo -1. */
 int elf64_load(const void *image, uint32_t size, uint64_t *entry);
 
+/* Zwalnia cala przestrzen uzytkownika - przed zaladowaniem nastepnego
+   programu, bo przestrzen adresowa jest na razie jedna i wspolna. */
+void elf64_unload(void);
+
 /* Przydziela i mapuje stos programu. Zwraca jego wierzcholek albo 0. */
 uint64_t elf64_make_stack(void);
 
