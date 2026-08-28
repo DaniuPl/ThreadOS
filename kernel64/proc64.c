@@ -23,6 +23,7 @@
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/initrd.h"
 #include "elf64.h"
+#include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
 extern void return_to_user_64(struct regs *frame);
@@ -147,4 +148,90 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len)
     r->r8 = r->r9 = r->r10 = r->r11 = 0;
     r->r12 = r->r13 = r->r14 = r->r15 = 0;
     return 0;
+}
+
+/* --- Uruchamianie programu z initrd -------------------------------
+ *
+ * Nowy proces to nowe zadanie, nowa przestrzen adresowa i program
+ * wczytany z pliku. Jadro robi to przy starcie, a shell na zyczenie -
+ * i jest to dokladnie ta sama droga.
+ */
+struct spawn_req {
+    char name[16];
+    uint64_t arg;
+    int quiet;
+};
+
+static void spawn_thread(void *arg)
+{
+    struct spawn_req *req = (struct spawn_req *)arg;
+    char name[16];
+    uint64_t user_arg = req->arg;
+    int quiet = req->quiet;
+
+    for (int i = 0; i < (int)sizeof(name); i++)
+        name[i] = req->name[i];
+    kfree(req);
+
+    uint32_t size = 0;
+    const void *image = initrd_find(name, &size);
+    if (!image) {
+        printk("[ !! ] initrd: nie ma pliku '%s'\n", name);
+        task64_exit();
+    }
+
+    /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
+       nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
+       we wszystkich przestrzeniach ta sama. */
+    uint64_t space = paging64_new_space();
+    if (!space) {
+        printk("[ !! ] brak pamieci na przestrzen adresowa\n");
+        task64_exit();
+    }
+
+    uint64_t kstack;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
+    task64_enter_space(space, kstack & ~0xFULL);
+
+    uint64_t entry;
+    if (elf64_load(image, size, &entry) < 0)
+        task64_exit();
+
+    uint64_t rsp = elf64_make_stack();
+    if (!rsp) {
+        printk("[ !! ] elf64: brak pamieci na stos programu\n");
+        task64_exit();
+    }
+
+    if (!quiet)
+        printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
+               name, size, (uint32_t)entry);
+
+    enter_ring3_64(entry, rsp, user_arg);
+}
+
+int proc64_spawn(const char *name, uint64_t arg, int quiet)
+{
+    struct spawn_req *req;
+    uint32_t size = 0;
+    int i;
+
+    if (!initrd_find(name, &size))
+        return -1;
+
+    req = kmalloc(sizeof(*req));
+    if (!req)
+        return -1;
+    for (i = 0; i < (int)sizeof(req->name) - 1 && name[i]; i++)
+        req->name[i] = name[i];
+    req->name[i] = '\0';
+    req->arg = arg;
+    req->quiet = quiet;
+
+    struct task64 *t = task64_create(req->name, spawn_thread, req);
+    if (!t) {
+        kfree(req);
+        return -1;
+    }
+    return task64_id(t);
 }

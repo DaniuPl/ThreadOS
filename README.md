@@ -128,6 +128,10 @@ ProtonOS/
 │   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
+├── kernel64/           # jądro trybu długiego (x86-64)
+│   ├── kbdmap.c → kernel/  # tłumaczenie scancode'ów wspólne z 32-bit
+│   ├── keyboard64.c    # IRQ 1 i kolejka znaków
+│   └── shell64.c       # shell jako wątek jądra
 ├── user64/             # programy trybu długiego (ELF64 w initrd64)
 │   ├── usys64.h        # syscalle przez instrukcję syscall
 │   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
@@ -759,3 +763,21 @@ obrazie dysku.
       się, dziecko podmienia swój obraz na `hello64`, a rodzic odbiera
       jego **siódemkę** - i to ta siódemka jest dowodem, że doczekał się
       tego dziecka, a nie dowolnego zakończonego zadania
+- [x] **Klawiatura i shell w trybie długim** - z systemem da się wreszcie
+      rozmawiać, zamiast oglądać scenariusz wpisany w `kmain64`.
+      Tłumaczenie scancode'ów wyprowadziłem ze sterownika do
+      `kernel/kbdmap.c`: to jedyna jego część, która nie zależy od
+      niczego - ani od konsol wirtualnych, ani od zadań, ani od trybu
+      procesora - więc ten sam automat obsługuje klawiaturę w obu
+      jądrach, a decyzja, **dokąd** trafi gotowy znak, zostaje po
+      stronie sterownika. Stan musi w nim siedzieć, bo jedno wciśnięcie
+      klawisza rozkłada się na kilka bajtów: prefiks `0xE0`, osobne kody
+      wciśnięcia i puszczenia modyfikatorów. `kernel64/shell64.c` to
+      zwykły wątek jądra z pętlą - poleceń ma tyle, ile jądro naprawdę
+      umie: `help`, `ps`, `mem`, `ls`, `uptime`, `clear` i `run
+      <program>`. `run` **czeka** na swoje dziecko przez `task64_wait`
+      i podaje jego kod wyjścia, dokładnie tak, jak zrobiłby to program
+      przez wywołanie systemowe - przez ten czas shell nie odpowiada
+      i tak ma być. Przy okazji uruchamianie programów przeniosło się
+      z `kmain64` do `proc64_spawn`, gdzie jego miejsce: jądro przy
+      starcie i shell na żądanie idą teraz dokładnie tą samą drogą

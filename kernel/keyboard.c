@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include "include/keyboard.h"
+#include "include/kbdmap.h"
 #include "include/io.h"
 #include "include/isr.h"
 #include "include/pic.h"
@@ -16,52 +17,6 @@
 #include "include/vga.h"
 
 #define KBD_DATA_PORT 0x60
-
-#define SC_LSHIFT 0x2A
-#define SC_RSHIFT 0x36
-#define SC_CTRL   0x1D
-#define SC_ALT    0x38
-#define SC_F1     0x3B          /* F1..F4 leza kolejno: 0x3B..0x3E */
-#define SC_RELEASED 0x80
-#define SC_EXTENDED 0xE0
-
-/* Mapa scancode -> ASCII dla układu US (indeks = scancode) */
-static const char keymap[128] = {
-    0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
-    '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
-    0 /* ctrl */, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-    0 /* lshift */, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/',
-    0 /* rshift */, '*', 0 /* alt */, ' ',
-};
-
-static const char keymap_shift[128] = {
-    0, 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
-    '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
-    0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
-    0, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?',
-    0, '*', 0, ' ',
-};
-
-/* Scancode rozszerzony (po 0xE0) -> nasz kod sterujacy */
-static char extended_key(uint8_t scancode)
-{
-    switch (scancode) {
-    case 0x48: return KEY_UP;
-    case 0x50: return KEY_DOWN;
-    case 0x4B: return KEY_LEFT;
-    case 0x4D: return KEY_RIGHT;
-    case 0x49: return KEY_PGUP;
-    case 0x51: return KEY_PGDN;
-    case 0x47: return KEY_HOME;
-    case 0x4F: return KEY_END;
-    default:   return 0;
-    }
-}
-
-static int shift_pressed;
-static int ctrl_pressed;
-static int alt_pressed;
-static int extended_next;               /* poprzedni bajt to 0xE0 */
 
 /* Kazda konsola wirtualna ma wlasna kolejke znakow i wlasnego
    wlasciciela. Gdy jakis proces czyta z niej klawiature (sys_read),
@@ -199,65 +154,27 @@ int keyboard_read(char *buf, uint32_t len)
     return interrupted ? -1 : (int)got;
 }
 
+/* Handler IRQ1: tlumaczenie oddajemy kbdmap, sobie zostawiamy decyzje,
+   dokad znak trafi */
 static void keyboard_irq(struct regs *r)
 {
     (void)r;
-    uint8_t scancode = inb(KBD_DATA_PORT);
 
-    if (scancode == SC_EXTENDED) {      /* prefiks klawisza rozszerzonego */
-        extended_next = 1;
-        return;
-    }
-    if (extended_next) {
-        extended_next = 0;
-        if (!(scancode & SC_RELEASED)) {
-            char c = extended_key(scancode);
-            if (c)
-                deliver(c);
-        }
-        return;
-    }
-
-    if (scancode == SC_ALT) {
-        alt_pressed = 1;
-        return;
-    }
-    if (scancode == (SC_ALT | SC_RELEASED)) {
-        alt_pressed = 0;
-        return;
-    }
-    /* Alt+F1..F4 przelacza konsole. W trybie graficznym nie ma czego
-       przelaczac - pulpit trzyma caly ekran dla siebie. */
-    if (alt_pressed && !override &&
-        scancode >= SC_F1 && scancode < SC_F1 + CONSOLE_COUNT) {
-        console_switch(scancode - SC_F1);
-        return;
-    }
-    if (scancode == SC_CTRL) {
-        ctrl_pressed = 1;
-        return;
-    }
-    if (scancode == (SC_CTRL | SC_RELEASED)) {
-        ctrl_pressed = 0;
-        return;
-    }
-    if (scancode == SC_LSHIFT || scancode == SC_RSHIFT) {
-        shift_pressed = 1;
-        return;
-    }
-    if (scancode == (SC_LSHIFT | SC_RELEASED) ||
-        scancode == (SC_RSHIFT | SC_RELEASED)) {
-        shift_pressed = 0;
-        return;
-    }
-    if (scancode & SC_RELEASED)  /* puszczenie klawisza - ignoruj */
-        return;
-
-    char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
-    if (ctrl_pressed && c == 'c')       /* pozostale kombinacje z Ctrl - jeszcze nie */
-        c = KEY_INTR;
-    if (c)
+    char c = 0;
+    int fkey = -1;
+    switch (kbdmap_feed(inb(KBD_DATA_PORT), &c, &fkey)) {
+    case KBD_FKEY:
+        /* Alt+F1..F4 przelacza konsole. W trybie graficznym nie ma
+           czego przelaczac - pulpit trzyma caly ekran dla siebie. */
+        if (!override && fkey >= 0 && fkey < CONSOLE_COUNT)
+            console_switch(fkey);
+        break;
+    case KBD_CHAR:
         deliver(c);
+        break;
+    default:
+        break;
+    }
 }
 
 void keyboard_init(void)

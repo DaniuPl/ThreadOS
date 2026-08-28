@@ -28,6 +28,8 @@
 #include "syscall64.h"
 #include "elf64.h"
 #include "proc64.h"
+#include "keyboard64.h"
+#include "shell64.h"
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/string.h"
@@ -123,80 +125,21 @@ static void ring3_thread(void *arg)
  * zaczac, co zaladowac, z jakimi prawami - dowiaduje sie z naglowka
  * ELF. To jest ta granica, za ktora system zaczyna uruchamiac cudze
  * programy, a nie wlasne kawalki siebie. */
-static int elf_started;
-
-/* Co uruchomic i z jakim argumentem. Argument program zastaje w RDI -
-   to caly nasz "argv" na dzisiaj, ale wystarcza, zeby dwie kopie tego
-   samego programu wiedzialy, ktora jest ktora. */
-struct proc_req {
-    const char *name;
-    uint64_t arg;
-    int quiet;                   /* nie opisuj ladowania - biegna dwa naraz */
-};
-
-static void elf_thread(void *arg)
-{
-    const struct proc_req *req = (const struct proc_req *)arg;
-
-    uint32_t size = 0;
-    const void *image = initrd_find(req->name, &size);
-    if (!image) {
-        printk("[ !! ] initrd: nie ma pliku '%s'\n", req->name);
-        task64_exit();
-    }
-
-    /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
-       nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
-       we wszystkich przestrzeniach ta sama. */
-    uint64_t space = paging64_new_space();
-    if (!space) {
-        printk("[ !! ] brak pamieci na przestrzen adresowa\n");
-        task64_exit();
-    }
-
-    uint64_t kstack;
-    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
-    task64_enter_space(space, kstack & ~0xFULL);
-
-    uint64_t entry;
-    if (elf64_load(image, size, &entry) < 0)
-        task64_exit();
-
-    uint64_t rsp = elf64_make_stack();
-    if (!rsp) {
-        printk("[ !! ] elf64: brak pamieci na stos programu\n");
-        task64_exit();
-    }
-
-    if (!req->quiet)
-        printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
-               req->name, size, (uint32_t)entry);
-
-    elf_started = 1;
-    enter_ring3_64(entry, rsp, req->arg);
-}
-
 /* Uruchamia program i czeka, az sie skonczy - sam albo zabity przez
    jadro. Zwraca 1, gdy w ogole ruszyl. */
 static int run_program(const char *name)
 {
-    static struct proc_req req;
-    req.name = name;
-    req.arg = 0;
-    req.quiet = 0;
-
     syscall64_forget_user();
     isr64_forget_user_fault();
-    elf_started = 0;
 
-    if (!task64_create(name, elf_thread, &req))
+    if (proc64_spawn(name, 0, 0) < 0)
         return 0;
     for (int i = 0; i < 80; i++) {
         if (syscall64_user_exited() || isr64_user_fault())
             break;
         task64_sleep(50);
     }
-    return elf_started;
+    return 1;
 }
 
 /* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
@@ -413,15 +356,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     /* Ta sama kopia tego samego programu, oba pod tym samym adresem
        wirtualnym - i kazdy ze swoja pamiecia. Jedyne, co je rozni, to
        liczba, ktora dostaly w RDI. */
-    static struct proc_req sep_a = { "sep64", 1, 1 };
-    static struct proc_req sep_b = { "sep64", 2, 1 };
-
     uint32_t frames_before = pmm_used_frames();
     int base_tasks = task64_count();
     syscall64_forget_user();
 
-    task64_create("sep64-a", elf_thread, &sep_a);
-    task64_create("sep64-b", elf_thread, &sep_b);
+    proc64_spawn("sep64", 1, 1);
+    proc64_spawn("sep64", 2, 1);
     for (int i = 0; i < 120 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 
@@ -441,13 +381,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     /* --- Proces powielajacy sam siebie -------------------------- */
     /* Tu jadro nie robi juz nic poza podaniem programu: drugi proces
        bierze sie z fork-a, czyli z decyzji samego programu. */
-    static struct proc_req forked = { "fork64", 0, 1 };
-
     frames_before = pmm_used_frames();
     base_tasks = task64_count();
     syscall64_forget_user();
 
-    task64_create("fork64", elf_thread, &forked);
+    proc64_spawn("fork64", 0, 1);
     for (int i = 0; i < 160 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 
@@ -464,12 +402,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     /* --- fork + exec + wait ------------------------------------- */
     /* Stad juz tylko krok do shella: program potrafi uruchomic INNY
        program i doczekac jego konca. */
-    static struct proc_req spawned = { "spawn64", 0, 1 };
-
     base_tasks = task64_count();
     syscall64_forget_user();
 
-    task64_create("spawn64", elf_thread, &spawned);
+    proc64_spawn("spawn64", 0, 1);
     for (int i = 0; i < 200 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 
@@ -495,8 +431,15 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     task64_dump();
 
-    printk("\nSzkielet 64-bitowy stoi. Reszta jadra dochodzi po kolei.\n");
+    /* --- Wejscie z klawiatury ----------------------------------- */
+    keyboard64_init();
+    printk("[ OK ] Klawiatura PS/2 (IRQ 1)\n");
 
+    printk("\nSystem 64-bitowy gotowy - wpisz 'help'.\n");
+    shell64_start();
+
+    /* Watek glowny staje sie od tej chwili watkiem bezczynnosci -
+       robota przejmuje shell, ktory czeka na klawisze */
     for (;;)
         __asm__ volatile("hlt");
 }

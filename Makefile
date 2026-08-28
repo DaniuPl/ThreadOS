@@ -65,6 +65,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/pic.o \
         $(BUILD)/pit.o \
         $(BUILD)/keyboard.o \
+        $(BUILD)/kbdmap.o \
         $(BUILD)/pmm.o \
         $(BUILD)/paging.o \
         $(BUILD)/heap.o \
@@ -181,13 +182,15 @@ CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd
+SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
+            kbdmap
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
           $(BUILD)/64/paging64.o $(BUILD)/64/task64.o \
           $(BUILD)/64/gdt64.o $(BUILD)/64/syscall64.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
+          $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
           $(BUILD)/64/syscall64_stub.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 

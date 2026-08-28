@@ -2922,13 +2922,45 @@ def main():
                           + (f" ({m.group(2)})" if m else ""),
                           m is not None and 1 <= int(m.group(2)) <= 6)
 
+                    # Klawiatura i shell: system, z ktorym da sie
+                    # rozmawiac, a nie tylko odtworzyc scenariusz
+                    ready = q23.wait_serial("proton64>", timeout=40)
+                    check("jadro 64-bitowe uruchamia shella",
+                          "Klawiatura PS/2 (IRQ 1)" in ready
+                          and "System 64-bitowy gotowy" in ready)
+
+                    q23.type_line("mem")
+                    mem = q23.wait_serial("Pamiec:", timeout=20)
+                    check("shell odpowiada na 'mem'",
+                          re.search(r"Pamiec: \d+ KiB RAM, ramki "
+                                    r"\d+/\d+ zajete", mem) is not None)
+                    q23.type_line("ls")
+                    lsout = q23.wait_serial("hello64  (", timeout=20)
+                    check("shell wypisuje programy z initrd",
+                          "spawn64" in lsout and "sep64" in lsout)
+                    q23.type_line("ps")
+                    ps = q23.wait_serial("shell (biezacy)", timeout=20)
+                    check("shell widzi sam siebie na liscie zadan",
+                          "bezczynny" in ps)
+
+                    # Program uruchomiony Z KLAWIATURY, nie ze scenariusza
+                    q23.type_line("run hello64")
+                    run = q23.wait_serial("koniec, kod wyjscia", timeout=40)
+                    check("program uruchomiony z klawiatury dziala",
+                          "[hello64] czesc, jestem ELF-em" in run)
+                    check("shell doczekal programu i podal kod wyjscia",
+                          "[hello64] koniec, kod wyjscia 7" in run)
+                    q23.type_line("nieznane")
+                    bad = q23.wait_serial("Nieznane polecenie", timeout=20)
+                    check("shell nie udaje, ze zna kazde polecenie",
+                          "Nieznane polecenie: nieznane" in bad)
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"
                           + (f" {m.group(1)} -> {m.group(2)})" if m else ")"),
                           m is not None and int(m.group(2)) - int(m.group(1)) >= 100)
                     # I to samo na ekranie: konsola rysowana wlasnym kodem
-                    q23.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
                     w, h, at = q23.screen_raw()
                     x0, y0 = (w - 640) // 2, (h - 200) // 2
                     lit = sum(1 for y in range(y0, y0 + 200)
@@ -3045,7 +3077,7 @@ def main():
                         check("program z initrd dziala takze pod UEFI",
                               "pierscien 3" in elf
                               and "kod wyjscia 7" in elf)
-                    q24.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
+                    q24.wait_serial("System 64-bitowy gotowy", timeout=30)
                     # I to samo na ekranie - narysowane naszym kodem,
                     # piksel po pikselu, bez pomocy firmware
                     w, h, at = q24.screen_raw()

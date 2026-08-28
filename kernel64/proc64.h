@@ -21,4 +21,8 @@ uint32_t proc64_last_fork_cost(void);
    ma do czego wrocic - ramka 'r' opisuje juz nowy program. */
 int64_t proc64_exec(struct regs *r, const char *name, uint64_t len);
 
+/* Uruchamia program z initrd jako nowy proces. Zwraca numer zadania
+   albo -1, gdy takiego pliku nie ma. 'arg' program zastaje w RDI. */
+int proc64_spawn(const char *name, uint64_t arg, int quiet);
+
 #endif
