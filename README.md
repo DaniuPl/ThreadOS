@@ -133,6 +133,7 @@ ProtonOS/
 │   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
 │   ├── nx64.c          # próbuje wykonać własne dane - ginie na NX
 │   ├── wild64.c        # sięga po pamięć jądra - ginie na braku USER
+│   ├── sep64.c         # dwie kopie naraz, ten sam adres, osobna pamięć
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -666,3 +667,30 @@ obrazie dysku.
       u siebie: poza RAX z wynikiem oraz RCX i R11, które zabiera sam
       procesor, wszystko wraca nietknięte. Taniej raz odłożyć sześć
       rejestrów niż w każdym programie pamiętać o sześciu pułapkach
+- [x] **Osobne przestrzenie adresowe procesów** w trybie długim - dwa
+      programy mogą wreszcie działać naraz, każdy z własną pamięcią pod
+      tym samym adresem. Podział wyszedł sam z rozkładu adresów:
+      najwyższy poziom tablic dzieli przestrzeń na kawałki po 512 GiB,
+      drugi - po gigabajcie, a cała pamięć fizyczna, jądro i bufor
+      obrazu mieszczą się w innych gigabajtach niż ten, w którym leżą
+      programy. Proces dostaje więc własną tablicę drugiego poziomu
+      z wyczyszczonym jednym wpisem, a **reszta zostaje wspólna** - te
+      same ramki, co u jądra. Mapowanie dołożone przez jądro po starcie
+      widać natychmiast we wszystkich przestrzeniach naraz, a przy
+      przełączaniu zadań CR3 przeładowuje się tylko wtedy, gdy naprawdę
+      się zmienia (każde przeładowanie wyrzuca cały bufor tłumaczeń
+      adresów). Zadanie nosi teraz też swój stos jądra - `syscall`
+      i przerwanie z ring 3 biorą go z dwóch różnych miejsc, więc oba
+      trzeba ustawić przy każdym przełączeniu. Umierające zadanie
+      najpierw schodzi na przestrzeń jądra, a dopiero potem oddaje
+      swoją - trudno zwalniać tablice, na których się właśnie stoi.
+      Dowód: `sep64` uruchomiony w dwóch kopiach naraz pisze pod ten
+      sam adres `40002060`, każda swoją liczbę, i po oddaniu procesora
+      drugiej kopii **obie znajdują swoją nietkniętą**; po ich śmierci
+      licznik zajętych ramek wraca dokładnie tam, gdzie był
+- [x] Przy okazji: `iretq` do ring 3 zeruje wszystkie rejestry poza
+      tymi, które program ma dostać. Jądro zostawiało w nich adresy
+      własnych struktur, a pierścień 3 nie ma powodu ich nawet znać.
+      Program dostaje w RDI jedną liczbę od jądra - to cały „argv" na
+      dzisiaj, ale wystarcza, żeby dwie kopie tego samego pliku
+      wiedziały, która jest którą

@@ -34,6 +34,7 @@ static int user_ran;
 static uint32_t user_cs;
 static int user_exited;
 static int user_status;
+static int user_exits, user_failures;
 
 static void wrmsr(uint32_t msr, uint64_t value)
 {
@@ -89,12 +90,24 @@ int syscall64_user_status(void)
     return user_status;
 }
 
+int syscall64_user_exits(void)
+{
+    return user_exits;
+}
+
+int syscall64_user_failures(void)
+{
+    return user_failures;
+}
+
 void syscall64_forget_user(void)
 {
     user_ran = 0;
     user_cs = 0;
     user_exited = 0;
     user_status = 0;
+    user_exits = 0;
+    user_failures = 0;
 }
 
 /* Wolane ze stubu w boot64/syscall64.S.
@@ -126,6 +139,9 @@ uint64_t syscall64_handler(uint64_t nr, uint64_t a1, uint64_t a2)
     case SYS64_EXIT:
         user_status = (int)a1;
         user_exited = 1;
+        user_exits++;
+        if (a1)
+            user_failures++;
         task64_exit();               /* nie wraca - scheduler idzie dalej */
         return 0;
     case SYS64_RING:                 /* program mowi, w ktorym pierscieniu jest */

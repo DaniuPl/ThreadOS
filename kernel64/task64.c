@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "task64.h"
+#include "paging64.h"
+#include "syscall64.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -31,6 +33,8 @@ struct task64 {
     void *arg;
     enum task_state state;
     uint32_t wake_at;
+    uint64_t space;              /* wlasna przestrzen adresowa (0 = jadra) */
+    uint64_t kstack_top;         /* stos jadra dla wejsc z ring 3 */
     int id;
     char name[NAME_MAX];
     struct task64 *next;
@@ -79,6 +83,8 @@ void scheduler64_init(void)
     main_task->state = TASK_RUNNING;
     main_task->id = next_id++;
     main_task->wake_at = 0;
+    main_task->space = 0;
+    main_task->kstack_top = 0;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -101,6 +107,8 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->arg = arg;
     t->state = TASK_READY;
     t->wake_at = 0;
+    t->space = 0;
+    t->kstack_top = 0;
     t->id = next_id++;
     set_name(t, name);
 
@@ -160,6 +168,47 @@ static struct task64 *pick_ready(void)
     return found;
 }
 
+/* Ustawia procesorowi to, co nalezy do wybranego zadania: jego
+   przestrzen adresowa i stos, na ktory ma wejsc jadro przy przerwaniu
+   albo wywolaniu systemowym z ring 3.
+ *
+ * CR3 przeladowujemy tylko wtedy, gdy naprawde sie zmienia - kazde
+ * przeladowanie wyrzuca caly bufor tlumaczen adresow, wiec robienie
+ * tego przy przelaczaniu miedzy watkami jadra bylo by czysta strata. */
+static void apply_context(struct task64 *t)
+{
+    uint64_t want = t->space ? t->space : paging64_kernel_space();
+    if (paging64_current_space() != want)
+        paging64_switch(want);
+    if (t->kstack_top)
+        syscall64_set_kernel_stack(t->kstack_top);
+}
+
+/* Oddaje przestrzen zadania i wraca do przestrzeni jadra.
+   Wolane, gdy zadanie umiera - a umiera, stojac jeszcze na wlasnym
+   CR3, wiec najpierw trzeba z niego zejsc. */
+static void drop_space(struct task64 *t)
+{
+    if (!t->space)
+        return;
+    uint64_t doomed = t->space;
+    t->space = 0;
+    t->kstack_top = 0;
+    paging64_switch(paging64_kernel_space());
+    paging64_free_space(doomed);
+}
+
+/* Bierze przestrzen na wlasnosc i od razu na nia przechodzi.
+   Wolane przez watek, ktory wlasnie zaladowal program. */
+void task64_enter_space(uint64_t space, uint64_t kstack_top)
+{
+    irqflags_t flags = irq_save();
+    current->space = space;
+    current->kstack_top = kstack_top;
+    apply_context(current);
+    irq_restore(flags);
+}
+
 /* Wybiera nastepny watek i przelacza kontekst. Wolac z IF=0. */
 void schedule(void)
 {
@@ -187,6 +236,7 @@ void schedule(void)
     next->state = TASK_RUNNING;
     current = next;
 
+    apply_context(next);
     context_switch64(&prev->rsp, next->rsp);
 }
 
@@ -209,6 +259,7 @@ void task64_sleep(uint32_t ms)
 void task64_exit(void)
 {
     irq_save();
+    drop_space(current);
     current->state = TASK_ZOMBIE;
     schedule();
     for (;;)                              /* zombie nie zostanie wybrany */
@@ -225,6 +276,7 @@ void task64_kill_current(const char *why)
     irq_save();
     printk("[jadro] zadanie %d (%s) zabite: %s\n",
            current->id, current->name, why);
+    drop_space(current);
     current->state = TASK_ZOMBIE;
     schedule();
     for (;;)

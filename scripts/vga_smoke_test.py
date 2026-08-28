@@ -2820,6 +2820,38 @@ def main():
                           m is not None
                           and int(m.group(2)) > int(m.group(1)))
 
+                    # Dwa procesy naraz, kazdy we wlasnej przestrzeni.
+                    # Ten sam plik, ten sam adres wirtualny, osobna
+                    # pamiec - i to wlasnie musi byc widac.
+                    sep = q23.wait_serial("Pamiec po procesach", timeout=40)
+                    addrs = re.findall(r"proces (\d): adres ([0-9a-f]+), "
+                                       r"wpisalem (\d+)", sep)
+                    check(f"dwa procesy ruszyly naraz ({len(addrs)})",
+                          len(addrs) == 2)
+                    check("oba pisza pod TEN SAM adres wirtualny"
+                          + (f" ({addrs[0][1]})" if addrs else ""),
+                          len(addrs) == 2 and addrs[0][1] == addrs[1][1])
+                    check("kazdy wpisal co innego"
+                          + (f" ({addrs[0][2]} i {addrs[1][2]})"
+                             if len(addrs) == 2 else ""),
+                          len(addrs) == 2 and addrs[0][2] != addrs[1][2])
+                    kept = re.findall(r"proces \d: nadal (\d+) - moja "
+                                      r"pamiec nietknieta", sep)
+                    check(f"zaden nie zobaczyl pamieci drugiego "
+                          f"({len(kept)}/2)", len(kept) == 2)
+                    check("obie kopie skonczyly sie bez bledu",
+                          "Dwa procesy naraz: 2 zakonczonych, 0 bledow"
+                          in sep)
+                    # Przestrzen musi zniknac razem z procesem, inaczej
+                    # kazdy uruchomiony program zabiera pamiec na zawsze
+                    m = re.search(r"Pamiec po procesach oddana "
+                                  r"\((\d+) -> (\d+) ramek\)", sep)
+                    check("pamiec po procesach wrocila do puli"
+                          + (f" ({m.group(1)} -> {m.group(2)})"
+                             if m else ""),
+                          m is not None
+                          and int(m.group(2)) <= int(m.group(1)))
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

@@ -60,7 +60,8 @@ syscall64_entry:
 .size syscall64_entry, . - syscall64_entry
 
 /* Wejscie w ring 3: iretq ze spreparowana ramka. Nie wraca.
-     rdi = adres pierwszej instrukcji, rsi = wierzcholek stosu programu */
+     rdi = adres pierwszej instrukcji, rsi = wierzcholek stosu programu,
+     rdx = wartosc, ktora program zastanie w RDI (jego argument) */
 .global enter_ring3_64
 .type enter_ring3_64, @function
 enter_ring3_64:
@@ -75,6 +76,26 @@ enter_ring3_64:
     pushq $0x202                 /* rflags z wlaczonymi przerwaniami */
     pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
     pushq %rdi                   /* rip */
+
+    movq %rdx, %rdi              /* argument programu */
+
+    /* Reszta rejestrow na zero. Program nie ma powodu ogladac tego,
+       co jadro w nich zostawilo - a zostawia tam adresy wlasnych
+       struktur, ktorych ring 3 nie powinien nawet znac. */
+    xorl %eax, %eax
+    xorl %ebx, %ebx
+    xorl %ecx, %ecx
+    xorl %edx, %edx
+    xorl %esi, %esi
+    xorl %ebp, %ebp
+    xorl %r8d, %r8d
+    xorl %r9d, %r9d
+    xorl %r10d, %r10d
+    xorl %r11d, %r11d
+    xorl %r12d, %r12d
+    xorl %r13d, %r13d
+    xorl %r14d, %r14d
+    xorl %r15d, %r15d
     iretq
 
 .size enter_ring3_64, . - enter_ring3_64

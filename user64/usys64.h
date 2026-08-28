@@ -87,4 +87,20 @@ static inline int utoa(uint64_t v, char *buf)
     return n;
 }
 
+/* Liczba szesnastkowa - adresy czyta sie tylko tak */
+static inline int uhtoa(uint64_t v, char *buf)
+{
+    static const char digits[] = "0123456789abcdef";
+    char tmp[24];
+    int n = 0;
+    do {
+        tmp[n++] = digits[v & 0xF];
+        v >>= 4;
+    } while (v);
+    for (int i = 0; i < n; i++)
+        buf[i] = tmp[n - 1 - i];
+    buf[n] = 0;
+    return n;
+}
+
 #endif

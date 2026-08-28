@@ -109,9 +109,9 @@ static void ring3_thread(void *arg)
        wejsciu z ring 3 */
     uint64_t kstack;
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
-    syscall64_set_kernel_stack(kstack & ~0xFULL);
+    task64_enter_space(0, kstack & ~0xFULL);   /* przestrzen jadra */
 
-    enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16);
+    enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16, 0);
 }
 
 /* Watek, ktory uruchamia PROGRAM Z PLIKU.
@@ -124,21 +124,38 @@ static void ring3_thread(void *arg)
  * programy, a nie wlasne kawalki siebie. */
 static int elf_started;
 
+/* Co uruchomic i z jakim argumentem. Argument program zastaje w RDI -
+   to caly nasz "argv" na dzisiaj, ale wystarcza, zeby dwie kopie tego
+   samego programu wiedzialy, ktora jest ktora. */
+struct proc_req {
+    const char *name;
+    uint64_t arg;
+    int quiet;                   /* nie opisuj ladowania - biegna dwa naraz */
+};
+
 static void elf_thread(void *arg)
 {
-    const char *name = (const char *)arg;
+    const struct proc_req *req = (const struct proc_req *)arg;
 
     uint32_t size = 0;
-    const void *image = initrd_find(name, &size);
+    const void *image = initrd_find(req->name, &size);
     if (!image) {
-        printk("[ !! ] initrd: nie ma pliku '%s'\n", name);
+        printk("[ !! ] initrd: nie ma pliku '%s'\n", req->name);
         task64_exit();
     }
 
-    /* Przestrzen adresowa jest jedna i wspolna, wiec kolejny program
-       musi zastac ja pusta - inaczej dostalby strony poprzednika
-       razem z jego prawami */
-    elf64_unload();
+    /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
+       nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
+       we wszystkich przestrzeniach ta sama. */
+    uint64_t space = paging64_new_space();
+    if (!space) {
+        printk("[ !! ] brak pamieci na przestrzen adresowa\n");
+        task64_exit();
+    }
+
+    uint64_t kstack;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
+    task64_enter_space(space, kstack & ~0xFULL);
 
     uint64_t entry;
     if (elf64_load(image, size, &entry) < 0)
@@ -150,26 +167,28 @@ static void elf_thread(void *arg)
         task64_exit();
     }
 
-    printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
-           name, size, (uint32_t)entry);
-
-    uint64_t kstack;
-    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
-    syscall64_set_kernel_stack(kstack & ~0xFULL);
+    if (!req->quiet)
+        printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
+               req->name, size, (uint32_t)entry);
 
     elf_started = 1;
-    enter_ring3_64(entry, rsp);
+    enter_ring3_64(entry, rsp, req->arg);
 }
 
 /* Uruchamia program i czeka, az sie skonczy - sam albo zabity przez
    jadro. Zwraca 1, gdy w ogole ruszyl. */
 static int run_program(const char *name)
 {
+    static struct proc_req req;
+    req.name = name;
+    req.arg = 0;
+    req.quiet = 0;
+
     syscall64_forget_user();
     isr64_forget_user_fault();
     elf_started = 0;
 
-    if (!task64_create(name, elf_thread, (void *)(uintptr_t)name))
+    if (!task64_create(name, elf_thread, &req))
         return 0;
     for (int i = 0; i < 80; i++) {
         if (syscall64_user_exited() || isr64_user_fault())
@@ -388,6 +407,35 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     task64_sleep(200);
     printk("[ %s ] System przezyl smierc programow (licznik %u -> %u)\n",
            counter_a > a_before ? "OK" : "!!", a_before, counter_a);
+
+    /* --- Dwa procesy naraz, kazdy we wlasnej przestrzeni ---------- */
+    /* Ta sama kopia tego samego programu, oba pod tym samym adresem
+       wirtualnym - i kazdy ze swoja pamiecia. Jedyne, co je rozni, to
+       liczba, ktora dostaly w RDI. */
+    static struct proc_req sep_a = { "sep64", 1, 1 };
+    static struct proc_req sep_b = { "sep64", 2, 1 };
+
+    uint32_t frames_before = pmm_used_frames();
+    int base_tasks = task64_count();
+    syscall64_forget_user();
+
+    task64_create("sep64-a", elf_thread, &sep_a);
+    task64_create("sep64-b", elf_thread, &sep_b);
+    for (int i = 0; i < 120 && task64_count() > base_tasks; i++)
+        task64_sleep(50);
+
+    int exits = syscall64_user_exits();
+    int fails = syscall64_user_failures();
+    printk("[ %s ] Dwa procesy naraz: %u zakonczonych, %u bledow\n",
+           (exits == 2 && fails == 0) ? "OK" : "!!",
+           (uint32_t)exits, (uint32_t)fails);
+
+    /* Przestrzenie musza zniknac razem z procesami - inaczej kazdy
+       uruchomiony program zabieralby pamiec na zawsze */
+    uint32_t frames_after = pmm_used_frames();
+    printk("[ %s ] Pamiec po procesach oddana (%u -> %u ramek)\n",
+           frames_after <= frames_before ? "OK" : "!!",
+           frames_before, frames_after);
     }
 
     task64_dump();

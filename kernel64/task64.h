@@ -23,6 +23,10 @@ void task64_yield(void);
 void task64_sleep(uint32_t ms);
 void task64_exit(void);
 
+/* Bierze przestrzen adresowa na wlasnosc biezacego zadania i od razu
+   na nia przechodzi. Zwalnia sie sama, gdy zadanie sie skonczy. */
+void task64_enter_space(uint64_t space, uint64_t kstack_top);
+
 /* Zabija biezace zadanie (blad programu w ring 3). Nie wraca. */
 void task64_kill_current(const char *why);
 int  task64_id(const struct task64 *t);
