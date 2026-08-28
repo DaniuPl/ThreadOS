@@ -7,6 +7,11 @@
  * Rysujemy wprost do widocznego bufora, bez bufora roboczego: konsola
  * i kompozytor pulpitu nigdy nie sa widoczne naraz, a przepisywanie
  * calego ekranu po kazdej literze nie mialoby sensu.
+ *
+ * Obslugujemy 32 i 24 bity na piksel. Trzydziesci dwa daje BIOS przez
+ * VBE, dwadziescia cztery potrafi podac firmware UEFI - roznica jest
+ * tylko taka, ze w drugim przypadku piksel nie ma bajtu dopelnienia
+ * i nie wolno go zapisywac slowem, bo zdeptalby sasiada.
  */
 
 #include <stdint.h>
@@ -27,17 +32,40 @@ static const uint32_t console_rgb[16] = {
 
 static uint8_t *fb;
 static uint32_t fb_addr, fb_pitch;
-static int fb_w, fb_h;
+static int fb_w, fb_h, fb_bpp, fb_bypp;
+
+/* Jeden piksel. Kolejnosc bajtow jest ta sama dla obu formatow:
+   niebieski, zielony, czerwony - a przy 32 bitach dochodzi bajt
+   dopelnienia, ktory i tak nic nie znaczy. */
+static inline void put_pixel(uint8_t *p, uint32_t rgb)
+{
+    if (fb_bypp == 4) {
+        *(uint32_t *)p = rgb;
+    } else {
+        p[0] = (uint8_t)(rgb & 0xFF);
+        p[1] = (uint8_t)((rgb >> 8) & 0xFF);
+        p[2] = (uint8_t)((rgb >> 16) & 0xFF);
+    }
+}
+
 static int con_on, con_x0, con_y0;
 
 int fbcon_set_framebuffer(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
 {
-    if (bpp != 32 || !addr || w <= 0 || h <= 0 || pitch < (uint32_t)w * 4)
+    int bypp;
+
+    if (bpp == 32)      bypp = 4;
+    else if (bpp == 24) bypp = 3;
+    else                return -1;
+
+    if (!addr || w <= 0 || h <= 0 || pitch < (uint32_t)w * (uint32_t)bypp)
         return -1;
     fb_addr = addr;
     fb_pitch = pitch;
     fb_w = w;
     fb_h = h;
+    fb_bpp = bpp;
+    fb_bypp = bypp;
     fb = (uint8_t *)(uintptr_t)addr;
     return 0;
 }
@@ -48,6 +76,7 @@ uint32_t fbcon_bytes(void) { return fb_pitch * (uint32_t)fb_h; }
 int fbcon_width(void)    { return fb_w; }
 int fbcon_height(void)   { return fb_h; }
 int fbcon_pitch(void)    { return (int)fb_pitch; }
+int fbcon_bpp(void)      { return fb_bpp; }
 
 int fbcon_enable(void)
 {
@@ -59,9 +88,9 @@ int fbcon_enable(void)
     con_y0 = (fb_h - CON_ROWS * GLYPH) / 2;
 
     for (int y = 0; y < fb_h; y++) {
-        uint32_t *row = (uint32_t *)(fb + (uint32_t)y * fb_pitch);
+        uint8_t *row = fb + (uint32_t)y * fb_pitch;
         for (int x = 0; x < fb_w; x++)
-            row[x] = 0;
+            put_pixel(row + (uint32_t)x * (uint32_t)fb_bypp, 0);
     }
     con_on = 1;
     return 1;
@@ -85,10 +114,11 @@ void fbcon_cell(int col, int row, char ch, uint8_t attr)
     int px = con_x0 + col * GLYPH;
     int py = con_y0 + row * GLYPH;
     for (int y = 0; y < GLYPH; y++) {
-        uint32_t *dst = (uint32_t *)(fb + (uint32_t)(py + y) * fb_pitch +
-                                     (uint32_t)px * 4);
+        uint8_t *dst = fb + (uint32_t)(py + y) * fb_pitch +
+                       (uint32_t)px * (uint32_t)fb_bypp;
         uint8_t bits = glyph[y];
         for (int x = 0; x < GLYPH; x++)
-            dst[x] = (bits & (1 << x)) ? fgc : bgc;
+            put_pixel(dst + (uint32_t)x * (uint32_t)fb_bypp,
+                      (bits & (1 << x)) ? fgc : bgc);
     }
 }

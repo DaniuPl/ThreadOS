@@ -47,13 +47,19 @@ mb2_header:
     .short 0
     .long 8
 
+    /* Tryb obrazu: zero znaczy "bez preferencji". Zadanie konkretnej
+       rozdzielczosci ma sens pod BIOS-em, gdzie karta zna cala liste
+       trybow VESA. Pod UEFI wybor jest taki, jaki firmware akurat
+       wystawia przez GOP - i gdy zazadamy czegos spoza tej listy,
+       loader nie ustawia NICZEGO. A pod UEFI nie ma trybu tekstowego,
+       do ktorego moglibysmy wtedy wrocic: system zostalby bez obrazu. */
     .align 8
     .short 5                         /* tryb obrazu */
     .short 0
     .long 20
-    .long 1024
-    .long 768
-    .long 32
+    .long 0                          /* szerokosc - dowolna */
+    .long 0                          /* wysokosc - dowolna */
+    .long 0                          /* glebia - dowolna */
 
     .align 8
     .short 0

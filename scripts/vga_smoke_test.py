@@ -387,7 +387,8 @@ def start_http_server():
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, usbkbd=False,
-                 cdrom=None, serial=None, qemu="qemu-system-i386"):
+                 cdrom=None, serial=None, qemu="qemu-system-i386",
+                 uefi=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # Jadro 64-bitowe potrzebuje procesora z trybem dlugim, a
@@ -418,6 +419,14 @@ class Qemu:
             # Gdy konsola rysuje sie na buforze obrazu, w buforze znakow
             # VGA nie ma juz nic do czytania - tekst zbieramy z portu
             cmd += ["-serial", "file:" + serial]
+        if uefi:
+            # Zamiast BIOS-u pamiec flash z firmware UEFI (OVMF): osobno
+            # kod (tylko do odczytu) i osobno zmienne, ktore firmware
+            # zapisuje - stad kopia pliku ze zmiennymi dla kazdego biegu
+            code, nvram = uefi
+            cmd += ["-drive", "if=pflash,format=raw,unit=0,readonly=on,"
+                              "file=" + code,
+                    "-drive", "if=pflash,format=raw,unit=1,file=" + nvram]
         if cdrom:
             # Rozruch jak z prawdziwej plyty: jadro wgrywa GRUB, a nie QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
@@ -2747,6 +2756,113 @@ def main():
         finally:
             shutil.rmtree(d64, ignore_errors=True)
             for f in (iso64, slog64):
+                if os.path.exists(f):
+                    os.unlink(f)
+
+    # --- Rozruch przez UEFI (OVMF) ---------------------------------
+    # Nowoczesny sprzet nie ma juz BIOS-u: firmware szuka na plycie
+    # katalogu /EFI/BOOT i uruchamia stamtad program EFI. GRUB potrafi
+    # zlozyc plyte hybrydowa - z sektorem rozruchowym dla BIOS-u i z
+    # partycja EFI obok - i to wlasnie sprawdzamy tutaj, uruchamiajac
+    # ten sam obraz jadra pod firmware OVMF zamiast pod SeaBIOS-em.
+    #
+    # Pod UEFI nie ma tez bufora znakow spod 0xB8000. Jedyne, co
+    # dostajemy, to bufor obrazu - i to taki, jaki firmware ma pod reka
+    # (OVMF daje 24 bity na piksel, a nie 32). Test sprawdza obie
+    # rzeczy: ze jadro w ogole wstalo i ze cos narysowalo na ekranie.
+    print()
+    print("--- rozruch przez UEFI (OVMF) ---")
+    OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+    OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
+    if KERNEL64 is None or not os.path.exists(KERNEL64):
+        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+    elif shutil.which("grub-mkrescue") is None:
+        print("POMINIETE: brak grub-mkrescue")
+    elif not os.path.isdir("/usr/lib/grub/x86_64-efi"):
+        print("POMINIETE: brak GRUB-a dla EFI "
+              "(apt install grub-efi-amd64-bin)")
+    elif shutil.which("mformat") is None:
+        print("POMINIETE: brak mtools (partycji EFI nie ma z czego zlozyc)")
+    elif not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
+        print("POMINIETE: brak firmware OVMF (apt install ovmf)")
+    elif shutil.which("qemu-system-x86_64") is None:
+        print("POMINIETE: brak qemu-system-x86_64")
+    else:
+        due = tempfile.mkdtemp()
+        isoue = tempfile.mktemp(suffix=".iso")
+        slogue = tempfile.mktemp(suffix=".log")
+        nvram = tempfile.mktemp(suffix=".fd")
+        try:
+            os.makedirs(due + "/boot/grub")
+            shutil.copy(KERNEL64, due + "/boot/protonos64.bin")
+            # all_video + gfxpayload=keep: bez tego GRUB pod UEFI nie
+            # umie sam ustawic trybu graficznego i konczy sie bledem
+            # "no suitable video mode found"
+            with open(due + "/boot/grub/grub.cfg", "w") as fh:
+                fh.write("insmod all_video\nset gfxpayload=keep\n"
+                         "set timeout=0\nset default=0\n"
+                         'menuentry "ProtonOS 64" {\n'
+                         "    multiboot2 /boot/protonos64.bin\n}\n")
+            made = subprocess.run(["grub-mkrescue", "-o", isoue, due],
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+            check("plyta hybrydowa (BIOS + UEFI) buduje sie", made)
+            # Partycja EFI musi byc naprawde w srodku, inaczej firmware
+            # nie ma czego uruchomic - szukamy jej podpisu w obrazie
+            if made:
+                with open(isoue, "rb") as fh:
+                    head = fh.read(4 * 1024 * 1024)
+                check("obraz zawiera partycje EFI z programem rozruchowym",
+                      b"EFI PART" in head or b"BOOTX64" in head.upper())
+            if made:
+                # Firmware zapisuje zmienne, wiec pracuje na kopii
+                shutil.copy(OVMF_VARS, nvram)
+                q24 = Qemu(KERNEL, INITRD, cdrom=isoue, serial=slogue,
+                           qemu="qemu-system-x86_64",
+                           uefi=(OVMF_CODE, nvram))
+                try:
+                    out = q24.wait_serial("Multiboot OK", timeout=60)
+                    check("firmware UEFI uruchamia GRUB-a, a GRUB jadro",
+                          "Jadro uruchomione w trybie dlugim" in out)
+                    check("jadro widzi znaczniki Multiboot 2 od GRUB-a EFI",
+                          "Multiboot OK (Multiboot 2)" in out)
+                    # Pod UEFI tablice ACPI to jedyny sposob, zeby
+                    # dowiedziec sie czegokolwiek o plycie
+                    acpi = q24.wait_serial("Wskaznik ACPI", timeout=20)
+                    check("loader podaje wskaznik ACPI",
+                          re.search(r"Wskaznik ACPI od loadera: [0-9a-f]+",
+                                    acpi) is not None)
+                    fbl = q24.wait_serial("Bufor obrazu", timeout=20)
+                    m = re.search(r"Bufor obrazu: (\d+)x(\d+), (\d+) "
+                                  r"bitow na piksel", fbl)
+                    check("bufor obrazu od firmware przyjety"
+                          + (f" ({m.group(1)}x{m.group(2)}, {m.group(3)} b/px)"
+                             if m else ""),
+                          m is not None)
+                    check("format piksela inny niz 32-bitowy tez dziala",
+                          m is not None and m.group(3) in ("24", "32"))
+                    mem = q24.wait_serial("Pamiec fizyczna", timeout=20)
+                    check("mapa pamieci od GRUB-a EFI ma sens",
+                          re.search(r"Pamiec fizyczna: \d{5,} KiB RAM",
+                                    mem) is not None)
+                    r3 = q24.wait_serial("Program w ring 3:", timeout=40)
+                    check("program w ring 3 rusza tak samo jak pod BIOS-em",
+                          "pierscien 3" in r3)
+                    q24.wait_serial("Szkielet 64-bitowy stoi", timeout=20)
+                    # I to samo na ekranie - narysowane naszym kodem,
+                    # piksel po pikselu, bez pomocy firmware
+                    w, h, at = q24.screen_raw()
+                    x0, y0 = (w - 640) // 2, (h - 200) // 2
+                    lit = sum(1 for y in range(y0, y0 + 200)
+                              for x in range(x0, x0 + 640)
+                              if at(x, y) != (0, 0, 0))
+                    check(f"konsola rysuje sie na ekranie UEFI "
+                          f"({lit} pikseli)", lit > 2000)
+                finally:
+                    q24.close()
+        finally:
+            shutil.rmtree(due, ignore_errors=True)
+            for f in (isoue, slogue, nvram):
                 if os.path.exists(f):
                     os.unlink(f)
 

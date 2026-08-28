@@ -25,6 +25,7 @@ uint32_t fbcon_bytes(void);
 int fbcon_width(void);
 int fbcon_height(void);
 int fbcon_pitch(void);
+int fbcon_bpp(void);
 
 /* Wlacza rysowanie konsoli (czysci ekran). 1 = wlaczona. */
 int fbcon_enable(void);

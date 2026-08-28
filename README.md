@@ -129,7 +129,9 @@ ProtonOS/
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
-├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO
+├── linker64.ld         # to samo dla jądra w trybie długim
+├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO (BIOS)
+├── grub64.cfg          # konfiguracja dla płyty 64-bitowej (BIOS + UEFI)
 └── Makefile
 ```
 
@@ -139,6 +141,8 @@ ProtonOS/
 - `make`
 - do uruchomienia: `qemu-system-i386` (pakiet `qemu-system-x86`)
 - do zbudowania ISO: `grub-mkrescue` + `xorriso` (pakiety `grub-pc-bin`, `xorriso`)
+- do płyty i rozruchu przez UEFI: `grub-efi-amd64-bin`, `mtools`, `ovmf`
+  oraz `qemu-system-x86_64`
 
 ## Budowanie i uruchamianie
 
@@ -149,6 +153,9 @@ make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
 make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
 make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
 make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
+make kernel64 # buduje build/protonos64.bin (tryb długi, x86-64)
+make iso64    # płyta hybrydowa z jądrem 64-bitowym (BIOS + UEFI)
+make run-iso64-uefi  # uruchamia tę płytę pod firmware UEFI (OVMF)
 make clean
 ```
 
@@ -587,3 +594,23 @@ obrazie dysku.
       z góry, i to dwa razy, bo przerwanie bierze go skądinąd (z TSS)
       niż wywołanie systemowe. Dowód: program mówi jądru swój selektor
       kodu, którego zna tylko procesor - `cs=23`, pierścień 3
+- [x] **Rozruch przez UEFI** - jądro 64-bitowe startuje na maszynie bez
+      BIOS-u. `make iso64` składa płytę **hybrydową**: z jednej strony
+      sektor rozruchowy dla BIOS-u, z drugiej partycja FAT z programem
+      `BOOTX64.EFI`, którego szuka firmware. Ta sama płyta wstaje więc
+      i na starej, i na nowej maszynie. Dwie rzeczy trzeba było przy tym
+      poprawić. Po pierwsze GRUB pod UEFI nie ustawia sam trybu
+      graficznego i kończy się błędem „no suitable video mode found",
+      dopóki nie każe mu się wczytać sterowników obrazu (`insmod
+      all_video`) i zostawić tryb ustawiony przez firmware
+      (`set gfxpayload=keep`) - a znacznik Multiboota 2 musi prosić
+      o rozdzielczość „dowolną" (0x0x0), bo firmware i tak da to, co ma.
+      Po drugie okazało się, że OVMF podaje bufor obrazu **24-bitowy**,
+      a konsola umiała rysować tylko po 32 bity na piksel i po cichu
+      odmawiała. Różnica jest drobna, ale zasadnicza: przy 24 bitach
+      piksel nie ma bajtu dopełnienia, więc zapis całym słowem zadeptuje
+      sąsiada - trzeba pisać trzema bajtami. Teraz `fbcon` obsługuje oba
+      formaty i pod UEFI widać na ekranie dokładnie ten sam log, co pod
+      BIOS-em, narysowany naszą czcionką piksel po pikselu, bez
+      pomocy firmware i bez pamięci znaków spod 0xB8000, której tam
+      w ogóle nie ma

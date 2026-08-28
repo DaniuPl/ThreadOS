@@ -152,11 +152,12 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
         case TAG_FRAMEBUF: {
             const struct tag_framebuffer *f =
                 (const struct tag_framebuffer *)t;
-            /* Bierzemy tylko tryb z kolorami wprost i adresem, ktory
-               miesci sie w 32 bitach - inny i tak bylby dla nas
-               nieuzyteczny. Typ 2 znaczy, ze loader zostawil tryb
-               tekstowy, wiec zostajemy przy buforze znakow. */
-            if (f->type == 1 && f->bpp == 32 && (f->addr >> 32) == 0) {
+            /* Bierzemy tryb z kolorami wprost i adresem miesczacym sie
+               w 32 bitach. Glebi nie sprawdzamy tutaj - lepiej zapamietac
+               to, co loader dal, i powiedziec potem wprost, czego nie
+               umiemy obsluzyc, niz milczec, jakby bufora nie bylo wcale.
+               Typ 2 znaczy, ze loader zostawil tryb tekstowy. */
+            if (f->type == 1 && (f->addr >> 32) == 0) {
                 framebuffer.addr = (uint32_t)f->addr;
                 framebuffer.pitch = f->pitch;
                 framebuffer.width = f->width;

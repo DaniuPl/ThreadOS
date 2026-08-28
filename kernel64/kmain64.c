@@ -126,8 +126,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     const struct multiboot_info *mbi = mb2_info(magic, info_addr);
 
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
-    if (lfb && fbcon_set_framebuffer(lfb->addr, lfb->pitch, (int)lfb->width,
-                                     (int)lfb->height, (int)lfb->bpp) == 0)
+    int fb_taken = lfb && fbcon_set_framebuffer(lfb->addr, lfb->pitch,
+                                                (int)lfb->width,
+                                                (int)lfb->height,
+                                                (int)lfb->bpp) == 0;
+    if (fb_taken)
         console_use_framebuffer();
 
     vga_init();
@@ -156,9 +159,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ OK ] Moduly od loadera: %u\n", mbi->mods_count);
 
     if (fbcon_have())
-        printk("[ OK ] Bufor obrazu: %ux%u, %u bajtow na wiersz\n",
+        printk("[ OK ] Bufor obrazu: %ux%u, %u bitow na piksel\n",
                (uint32_t)fbcon_width(), (uint32_t)fbcon_height(),
-               (uint32_t)fbcon_pitch());
+               (uint32_t)fbcon_bpp());
+    else if (lfb)
+        printk("[ !! ] Bufor obrazu %ux%u ma %u bitow na piksel - "
+               "umiemy 24 i 32\n", lfb->width, lfb->height, lfb->bpp);
+    else
+        printk("[ !! ] Loader nie dal bufora obrazu - tylko port szeregowy\n");
 
     if (mb2_rsdp())
         printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());

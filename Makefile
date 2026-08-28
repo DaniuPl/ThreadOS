@@ -99,7 +99,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
 
-.PHONY: all iso run run-iso test fuzz clean kernel64 run64
+.PHONY: all iso iso64 run run-iso run-iso64-uefi test fuzz clean kernel64
 
 all: $(KERNEL) $(INITRD)
 
@@ -217,6 +217,35 @@ $(KERNEL64): $(OBJS64) linker64.ld
 
 kernel64: $(KERNEL64)
 	@echo "Gotowe: $(KERNEL64) (tryb dlugi, ladowany przez GRUB-a)"
+
+# Obraz ISO z jadrem 64-bitowym, startujacy i pod starym BIOS-em,
+# i pod UEFI. Ta sama plyta obsluguje obie drogi: grub-mkrescue wklada
+# do niej dwa zestawy plikow GRUB-a i partycje EFI, a firmware wybiera
+# ten, ktory rozumie. To wlasnie brakowalo do rozruchu na nowszym
+# sprzecie - stary obraz umial tylko droge BIOS-owa.
+ISO64 := $(BUILD)/protonos64.iso
+
+$(ISO64): $(KERNEL64) grub64.cfg
+	@command -v grub-mkrescue >/dev/null || { \
+	    echo "BLAD: brak grub-mkrescue."; \
+	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
+grub-common xorriso mtools"; \
+	    exit 1; }
+	mkdir -p $(BUILD)/isodir64/boot/grub
+	cp $(KERNEL64) $(BUILD)/isodir64/boot/protonos64.bin
+	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(BUILD)/isodir64
+	@echo "Gotowe: $@ (BIOS + UEFI)"
+
+iso64: $(ISO64)
+
+# Rozruch przez UEFI wymaga firmware - OVMF udaje je w QEMU tak samo,
+# jak robi to prawdziwa plyta glowna
+run-iso64-uefi: $(ISO64)
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD)/ovmf_vars.fd
+	qemu-system-x86_64 -cdrom $(ISO64) -boot d \
+	    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+	    -drive if=pflash,format=raw,unit=1,file=$(BUILD)/ovmf_vars.fd
 
 # Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
 # PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.
