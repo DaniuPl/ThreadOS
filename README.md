@@ -134,6 +134,7 @@ ProtonOS/
 │   ├── nx64.c          # próbuje wykonać własne dane - ginie na NX
 │   ├── wild64.c        # sięga po pamięć jądra - ginie na braku USER
 │   ├── sep64.c         # dwie kopie naraz, ten sam adres, osobna pamięć
+│   ├── fork64.c        # proces powiela sam siebie i sprawdza kopię
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -694,3 +695,28 @@ obrazie dysku.
       Program dostaje w RDI jedną liczbę od jądra - to cały „argv" na
       dzisiaj, ale wystarcza, żeby dwie kopie tego samego pliku
       wiedziały, która jest którą
+- [x] **`fork()` w trybie długim** - drugi proces bierze się już nie
+      z decyzji jądra, tylko z decyzji samego programu. Żeby to było
+      możliwe, stub wywołań systemowych odkłada teraz **dokładnie taką
+      ramkę, jaką odkłada przerwanie**: instrukcja `syscall` sama nie
+      odkłada niczego (adres powrotu zostawia w RCX, flagi w R11), więc
+      te pięć słów dopisujemy ręcznie. Kosztuje to kilkanaście
+      instrukcji i powrót przez `iretq` zamiast `sysretq`, a daje jedną
+      rzecz: jądro widzi wywołanie systemowe i przerwanie tak samo.
+      `fork` sprowadza się wtedy do skopiowania ramki i kazania nowemu
+      zadaniu wrócić nią do ring 3 - z zerem w RAX. Żadne rejestry nie
+      są odtwarzane „ręcznie": robi to ta sama ścieżka, którą wraca
+      każde inne wywołanie. Pamięć na razie kopiujemy wprost, strona po
+      stronie (kopiowanie przy zapisie przyjdzie po tym, jak samo
+      powielanie zacznie działać). Dowód: `fork64` wpisuje 100, powiela
+      się, dziecko wpisuje 200 - i rodzic po przebudzeniu **nadal ma
+      swoje 100**
+- [x] Naprawiony błąd, który czekał na drugi proces: stos programu był
+      zapamiętywany w jednej globalnej komórce na czas **całego**
+      wywołania systemowego. Wystarczyło, żeby wywołanie uśpiło
+      zadanie, a drugi proces wszedł w tym czasie do jądra - i pierwszy
+      wracał do ring 3 na cudzy stos. Nie wybuchło wcześniej tylko
+      dlatego, że oba procesy miały stos pod tym samym adresem
+      wirtualnym, więc podmieniona wartość była przypadkiem ta sama.
+      Teraz wartość ląduje na stosie jądra tego konkretnego zadania
+      i nikt inny jej nie widzi

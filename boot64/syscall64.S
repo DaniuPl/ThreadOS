@@ -17,47 +17,90 @@
 .global syscall64_entry
 .type syscall64_entry, @function
 syscall64_entry:
-    movq %rsp, syscall64_user_rsp(%rip)      /* zapamietaj stos programu */
-    movq syscall64_kernel_rsp(%rip), %rsp    /* i przesiadz sie na swoj */
+    /* Stos programu zapamietujemy w jednej komorce na krzyz, bo w tej
+       chwili nie mamy ani jednego wolnego rejestru: RAX niesie numer
+       wywolania, RCX adres powrotu, R11 flagi, a reszta to argumenty
+       albo rejestry programu. Przerwania sa tu zgaszone (SFMASK) i az
+       do przelozenia wartosci na wlasny stos nie ma zadnego wywolania,
+       wiec nikt tej komorki miedzy nami nie podmieni.
 
-    pushq %rcx                   /* adres powrotu zostawiony przez syscall */
-    pushq %r11                   /* flagi zostawione przez syscall */
+       Wczesniej ta komorka trzymala stos programu przez CALE wywolanie
+       i to bylo bledem: wystarczylo, ze wywolanie uspilo zadanie,
+       a drugi proces wszedl do jadra w tym samym czasie - i pierwszy
+       wracal do ring 3 na cudzy stos. Teraz wartosc ladu je na stosie
+       jadra tego konkretnego zadania i nikt inny jej nie widzi. */
+    movq %rsp, syscall64_scratch(%rip)
+    movq syscall64_kernel_rsp(%rip), %rsp
 
-    /* Rejestry, ktore niszczy funkcja C - odkladamy je i oddajemy
-       programowi nietkniete.
+    /* Odtwarzamy DOKLADNIE taka ramke, jaka odklada przerwanie.
      *
-     * Bez tego umowa z programem brzmialaby "syscall psuje polowe
-     * rejestrow" i kazdy program musialby o tym pamietac. Kompilator
-     * o niczym nie wie: trzyma sobie stala w RDX przez cale wywolanie
-     * i uzywa jej potem jako numeru nastepnego wywolania - a tam lezy
-     * juz smiec po jadrze. Taniej jest raz odlozyc szesc rejestrow
-     * niz w kazdym programie pamietac o szesciu pulapkach. */
-    pushq %rdi
-    pushq %rsi
+     * Instrukcja syscall nie odklada niczego - adres powrotu zostawia
+     * w RCX, flagi w R11 - wiec te piec slow dopisujemy sami. Kosztuje
+     * to kilkanascie instrukcji i powrot przez iretq zamiast sysretq,
+     * a daje jedna rzecz: jadro widzi wywolanie systemowe i przerwanie
+     * tak samo. Bez tego fork nie mialby skad wziac pelnego stanu
+     * programu, ktory ma powielic. */
+    pushq $0x1B                  /* ss */
+    pushq syscall64_scratch(%rip) /* rsp programu */
+    pushq %r11                   /* rflags zostawione przez syscall */
+    pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
+    pushq %rcx                   /* rip: adres powrotu */
+    pushq $0                     /* err_code - wywolanie go nie ma */
+    pushq $0                     /* int_no  - ani numeru wektora */
+
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
     pushq %rdx
+    pushq %rbp
+    pushq %rsi
+    pushq %rdi
     pushq %r8
     pushq %r9
     pushq %r10
+    pushq %r11
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
 
-    /* Nasza konwencja: numer w rax, argumenty w rdi/rsi. Funkcja C
-       oczekuje ich w rdi/rsi/rdx, wiec przesuwamy o jedno w prawo. */
-    movq %rsi, %rdx
-    movq %rdi, %rsi
-    movq %rax, %rdi
+    movq %rsp, %rdi              /* pierwszy argument: wskaznik na ramke */
     call syscall64_handler
 
+    jmp return_to_user_64_frame
+
+.size syscall64_entry, . - syscall64_entry
+
+/* Powrot do ring 3 z ramki lezacej pod RDI.
+ *
+ * Uzywa tego dziecko fork-a: dostaje kopie ramki rodzica i wraca nia
+ * do ring 3 tak, jakby samo wlasnie wykonalo wywolanie systemowe -
+ * tyle ze z zerem w RAX. */
+.global return_to_user_64
+.type return_to_user_64, @function
+return_to_user_64:
+    movq %rdi, %rsp
+return_to_user_64_frame:
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %r11
     popq %r10
     popq %r9
     popq %r8
-    popq %rdx
-    popq %rsi
     popq %rdi
-    popq %r11
+    popq %rsi
+    popq %rbp
+    popq %rdx
     popq %rcx
-    movq syscall64_user_rsp(%rip), %rsp
-    sysretq
+    popq %rbx
+    popq %rax
 
-.size syscall64_entry, . - syscall64_entry
+    addq $16, %rsp               /* numer wektora i kod bledu */
+    iretq
+
+.size return_to_user_64, . - return_to_user_64
 
 /* Wejscie w ring 3: iretq ze spreparowana ramka. Nie wraca.
      rdi = adres pierwszej instrukcji, rsi = wierzcholek stosu programu,
@@ -103,9 +146,9 @@ enter_ring3_64:
 .section .data
 .align 8
 .global syscall64_kernel_rsp
-.global syscall64_user_rsp
+.global syscall64_scratch
 syscall64_kernel_rsp: .quad 0
-syscall64_user_rsp:   .quad 0
+syscall64_scratch:    .quad 0
 
 /* Kod, ktory ma zadzialac w ring 3.
  *

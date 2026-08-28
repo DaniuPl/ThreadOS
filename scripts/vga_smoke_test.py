@@ -2852,6 +2852,32 @@ def main():
                           m is not None
                           and int(m.group(2)) <= int(m.group(1)))
 
+                    # fork: drugi proces bierze sie juz nie z decyzji
+                    # jadra, tylko z decyzji samego programu
+                    fk = q23.wait_serial("Pamiec po fork-u", timeout=45)
+                    m = re.search(r"rodzic: fork dal numer dziecka (\d+)", fk)
+                    check("rodzic dostaje z fork-a numer dziecka"
+                          + (f" ({m.group(1)})" if m else ""),
+                          m is not None and int(m.group(1)) > 0)
+                    check("dziecko dostaje z fork-a zero",
+                          "dziecko: fork dal 0" in fk)
+                    # Oba wracaja w to samo miejsce z tym samym stanem,
+                    # ale pamiec maja juz osobna
+                    check("dziecko pisze po swojej kopii (200)",
+                          "moja wartosc to 200" in fk)
+                    check("zapis dziecka nie dosiega rodzica (nadal 100)",
+                          "rodzic: nadal 100 - dziecko dostalo kopie" in fk)
+                    check("obie galezie skonczyly sie bez bledu",
+                          "Proces powielil sie sam: 2 zakonczonych, "
+                          "0 bledow" in fk)
+                    m = re.search(r"Pamiec po fork-u oddana "
+                                  r"\((\d+) -> (\d+) ramek\)", fk)
+                    check("kopia pamieci wrocila do puli"
+                          + (f" ({m.group(1)} -> {m.group(2)})"
+                             if m else ""),
+                          m is not None
+                          and int(m.group(2)) <= int(m.group(1)))
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

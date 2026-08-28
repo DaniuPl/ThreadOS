@@ -78,9 +78,9 @@ static void invlpg(uint64_t addr)
     __asm__ volatile("invlpg (%0)" : : "r"((void *)(uintptr_t)addr) : "memory");
 }
 
-int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
+static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
+                  uint64_t flags)
 {
-    uint64_t *top = root_now();
     if (!top)
         return -1;
 
@@ -103,8 +103,16 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
         return -1;
 
     pt[(virt >> 12) & 0x1FF] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
-    invlpg(virt);
     return 0;
+}
+
+int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
+{
+    int rc = map_in(root_now(), virt, phys, flags);
+    if (rc == 0)
+        invlpg(virt);               /* tylko biezaca przestrzen ma co
+                                       uniewazniac w buforze tlumaczen */
+    return rc;
 }
 
 /* Jeden wpis na dwa megabajty - tak opisujemy pamiec i bufor obrazu */
@@ -253,6 +261,60 @@ uint64_t paging64_new_space(void)
        koncu - w tablicy strony */
     top[0] = (uint64_t)mid | PTE_PRESENT | PTE_WRITE | PG_USER;
     return (uint64_t)root;
+}
+
+/* Powiela przestrzen procesu: kazda strona programu dostaje wlasna
+   ramke z ta sama trescia i tymi samymi prawami.
+ *
+ * Kopiujemy wprost, strona po stronie. Jadro 32-bitowe robi to
+ * oszczedniej - dzieli strony miedzy rodzica i dziecko, a rozdziela
+ * je dopiero przy pierwszym zapisie - ale tam byl juz do tego caly
+ * mechanizm bledow strony. Tutaj najpierw ma dzialac samo powielanie
+ * procesu; oszczedzanie przyjdzie po nim.
+ *
+ * Zwraca korzen nowej przestrzeni albo 0. */
+uint64_t paging64_clone_space(uint64_t src)
+{
+    uint64_t dst = paging64_new_space();
+    if (!dst)
+        return 0;
+
+    uint64_t *stop = (uint64_t *)(uintptr_t)src;
+    uint64_t *dtop = (uint64_t *)(uintptr_t)dst;
+    uint64_t e = table_at(stop[0])[PAGING64_USER_PDPT];
+    if (!(e & PTE_PRESENT))
+        return dst;                     /* pusty proces - nic do kopiowania */
+
+    uint64_t *pd = table_at(e);
+    for (int i = 0; i < 512; i++) {
+        if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
+            continue;
+        uint64_t *pt = table_at(pd[i]);
+        for (int j = 0; j < 512; j++) {
+            if (!(pt[j] & PTE_PRESENT))
+                continue;
+
+            uint64_t va = ((uint64_t)PAGING64_USER_PDPT << 30) |
+                          ((uint64_t)i << 21) | ((uint64_t)j << 12);
+            uint32_t frame = pmm_alloc_frame();
+            if (!frame) {
+                paging64_free_space(dst);
+                return 0;
+            }
+            memcpy((void *)(uintptr_t)frame,
+                   (const void *)(uintptr_t)(pt[j] & ADDR_MASK), PAGE_SIZE);
+
+            /* Prawa przenosimy w calosci - lacznie z zakazem
+               wykonywania, ktory siedzi w najwyzszym bicie */
+            uint64_t flags = pt[j] & (PG_WRITE | PG_USER | PG_NX);
+            if (map_in(dtop, va, frame, flags) < 0) {
+                pmm_free_frame(frame);
+                paging64_free_space(dst);
+                return 0;
+            }
+        }
+    }
+    return dst;
 }
 
 uint64_t paging64_current_space(void)

@@ -436,6 +436,29 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("[ %s ] Pamiec po procesach oddana (%u -> %u ramek)\n",
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
+
+    /* --- Proces powielajacy sam siebie -------------------------- */
+    /* Tu jadro nie robi juz nic poza podaniem programu: drugi proces
+       bierze sie z fork-a, czyli z decyzji samego programu. */
+    static struct proc_req forked = { "fork64", 0, 1 };
+
+    frames_before = pmm_used_frames();
+    base_tasks = task64_count();
+    syscall64_forget_user();
+
+    task64_create("fork64", elf_thread, &forked);
+    for (int i = 0; i < 160 && task64_count() > base_tasks; i++)
+        task64_sleep(50);
+
+    exits = syscall64_user_exits();
+    fails = syscall64_user_failures();
+    printk("[ %s ] Proces powielil sie sam: %u zakonczonych, %u bledow\n",
+           (exits == 2 && fails == 0) ? "OK" : "!!",
+           (uint32_t)exits, (uint32_t)fails);
+    frames_after = pmm_used_frames();
+    printk("[ %s ] Pamiec po fork-u oddana (%u -> %u ramek)\n",
+           frames_after <= frames_before ? "OK" : "!!",
+           frames_before, frames_after);
     }
 
     task64_dump();

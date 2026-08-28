@@ -21,6 +21,7 @@
 #define SYS64_RING  3
 #define SYS64_SLEEP 4
 #define SYS64_TICKS 5
+#define SYS64_FORK  6
 
 static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
 {
@@ -85,6 +86,14 @@ static inline int utoa(uint64_t v, char *buf)
         buf[i] = tmp[n - 1 - i];
     buf[n] = 0;
     return n;
+}
+
+/* Powiela proces. W rodzicu zwraca numer dziecka, w dziecku zero.
+   Od tego miejsca sa to dwa programy: ta sama pamiec, ale juz
+   skopiowana - zapis jednego nie jest widoczny dla drugiego. */
+static inline int64_t sys_fork(void)
+{
+    return syscall64(SYS64_FORK, 0, 0);
 }
 
 /* Liczba szesnastkowa - adresy czyta sie tylko tak */

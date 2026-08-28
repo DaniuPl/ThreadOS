@@ -43,6 +43,7 @@ int paging64_user_range(uint64_t virt, uint64_t len);
    wspolna - prywatny jest tylko gigabajt programu. */
 uint64_t paging64_kernel_space(void);
 uint64_t paging64_new_space(void);        /* 0 = nie udalo sie */
+uint64_t paging64_clone_space(uint64_t src);   /* kopia dla fork() */
 uint64_t paging64_current_space(void);
 void paging64_switch(uint64_t space);
 void paging64_free_space(uint64_t space);

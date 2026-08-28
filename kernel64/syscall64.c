@@ -18,6 +18,8 @@
 #include "paging64.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/pit.h"
+#include "../kernel/include/isr.h"
+#include "proc64.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -112,13 +114,19 @@ void syscall64_forget_user(void)
 
 /* Wolane ze stubu w boot64/syscall64.S.
  *
- * Numer wywolania jest w RAX, argumenty w RDI i RSI, wynik wraca
- * w RAX. Wskaznikom z ring 3 nie wolno wierzyc na slowo: zanim jadro
- * cokolwiek z nich przeczyta, pyta tablice stron, czy program w ogole
- * ma prawo tam siegac. Bez tego wystarczyloby podac adres pamieci
- * jadra, zeby kazac mu ja sobie wypisac. */
-uint64_t syscall64_handler(uint64_t nr, uint64_t a1, uint64_t a2)
+ * Stub odklada dokladnie taka ramke, jaka odklada przerwanie, i podaje
+ * na nia wskaznik. Numer wywolania jest w RAX, argumenty w RDI i RSI,
+ * wynik wraca tam, gdzie program go szuka - w polu rax ramki, bo to
+ * z niej procesor odtworzy rejestry przy powrocie.
+ *
+ * Wskaznikom z ring 3 nie wolno wierzyc na slowo: zanim jadro cokolwiek
+ * z nich przeczyta, pyta tablice stron, czy program w ogole ma prawo
+ * tam siegac. Bez tego wystarczyloby podac adres pamieci jadra, zeby
+ * kazac mu ja sobie wypisac. */
+void syscall64_handler(struct regs *r)
 {
+    uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi;
+
     switch (nr) {
     case SYS64_WRITE: {
         const char *buf = (const char *)(uintptr_t)a1;
@@ -130,11 +138,13 @@ uint64_t syscall64_handler(uint64_t nr, uint64_t a1, uint64_t a2)
         if (!paging64_user_range(a1, a2)) {
             printk("[jadro] write: wskaznik %x nie nalezy do programu\n",
                    (uint32_t)a1);
-            return (uint64_t)-1;
+            r->rax = (uint64_t)-1;
+            return;
         }
         for (uint64_t i = 0; i < a2; i++)
             printk("%c", buf[i]);
-        return a2;
+        r->rax = a2;
+        return;
     }
     case SYS64_EXIT:
         user_status = (int)a1;
@@ -143,18 +153,25 @@ uint64_t syscall64_handler(uint64_t nr, uint64_t a1, uint64_t a2)
         if (a1)
             user_failures++;
         task64_exit();               /* nie wraca - scheduler idzie dalej */
-        return 0;
+        return;
     case SYS64_RING:                 /* program mowi, w ktorym pierscieniu jest */
         user_cs = (uint32_t)a1;
         user_ran = 1;
-        return 0;
+        r->rax = 0;
+        return;
     case SYS64_SLEEP:
         task64_sleep((uint32_t)a1);
-        return 0;
+        r->rax = 0;
+        return;
     case SYS64_TICKS:
-        return pit_ticks();
+        r->rax = pit_ticks();
+        return;
+    case SYS64_FORK:
+        r->rax = (uint64_t)proc64_fork(r);
+        return;
     default:
         printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
-        return (uint64_t)-1;
+        r->rax = (uint64_t)-1;
+        return;
     }
 }
