@@ -856,3 +856,15 @@ obrazie dysku.
       Sprawdzone obie drogi - `disk` zapisuje ostatni sektor, czyta go
       z powrotem i liczy różnice: zero, tak samo przez ATA PIO, jak
       i przez AHCI z DMA
+- [x] **System plików w trybie długim** - i pierwszy moment, w którym
+      cokolwiek w tym jądrze przeżywa wyłączenie maszyny. `fs.c`
+      przeszedł **bez zmiany ani jednego znaku**: dysk widziany przez
+      warstwę blokową wygląda tak samo niezależnie od trybu procesora,
+      a PFS nie dotyka ani stronicowania, ani zadań. Shell dostał `fls`,
+      `cat <plik>` i `write <plik> <treść>` - trzy polecenia wystarczą,
+      żeby sprawdzić, czy plik naprawdę leży na dysku, a nie tylko
+      w pamięci: zapisać, wypisać, zobaczyć na liście. Czwarty dowód
+      przychodzi sam, przy ponownym uruchomieniu, i to on jest jedyny
+      rozstrzygający - test uruchamia maszynę **drugi raz na tym samym
+      dysku** i sprawdza, że plik tam jest i ma tę samą treść, a system
+      plików nie został sformatowany od nowa

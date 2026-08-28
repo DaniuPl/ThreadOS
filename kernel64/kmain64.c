@@ -33,6 +33,7 @@
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/fs.h"
 #include "../kernel/include/string.h"
 
 /* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
@@ -437,11 +438,17 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        32-bitowym. Sterowniki nie wiedza nic o trybie procesora: gadaja
        z urzadzeniem przez porty i pamiec, a jedno i drugie wyglada
        tak samo po obu stronach. */
-    if (blk_init())
-        printk("[ OK ] Dysk: %s, %u sektorow po 512 B\n",
-               blk_name(), blk_sectors());
-    else
+    if (blk_init()) {
+        /* System plikow tez jest tym samym plikiem, co w jadrze
+           32-bitowym - i tu akurat nie trzeba bylo zmienic w nim ani
+           jednego znaku. Dysk widziany przez warstwe blokowa wyglada
+           tak samo niezaleznie od trybu procesora. */
+        int fs = fs_init();
+        printk("[ OK ] Dysk %s + PFS %s (%u sektorow)\n",
+               blk_name(), fs ? "gotowy" : "NIEDOSTEPNY", blk_sectors());
+    } else {
         printk("[ !! ] Dysk: zaden kontroler nie odpowiedzial\n");
+    }
 
     /* --- Wejscie z klawiatury ----------------------------------- */
     keyboard64_init();

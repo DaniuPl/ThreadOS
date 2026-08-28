@@ -25,6 +25,7 @@
 #include "../kernel/include/pit.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/fs.h"
 #include "../kernel/include/vga.h"
 
 #define LINE_MAX 80
@@ -51,8 +52,9 @@ static void prompt(void)
 
 static void cmd_help(void)
 {
-    printk("Polecenia: help, ps, mem, ls, disk, uptime, "
-           "run <program>, clear\n");
+    printk("Polecenia: help, ps, mem, ls, disk, fls, cat <plik>,\n");
+    printk("           write <plik> <tresc>, uptime, run <program>, "
+           "clear\n");
 }
 
 static void cmd_mem(void)
@@ -102,6 +104,74 @@ static void cmd_disk(void)
     printk("disk: sektor %u zapisany i odczytany, roznic %d\n", lba, rozne);
 }
 
+/* --- System plikow ------------------------------------------------
+ *
+ * Trzy polecenia wystarcza, zeby sprawdzic, czy plik naprawde lezy na
+ * dysku, a nie tylko w pamieci: zapisac, wypisac, zobaczyc na liscie.
+ * Czwarty dowod przychodzi sam - po ponownym uruchomieniu.
+ */
+static void cmd_fls(void)
+{
+    if (!fs_ready()) {
+        printk("fls: brak systemu plikow\n");
+        return;
+    }
+    fs_list();
+
+    uint32_t uzyte = 0, wszystkie = 0;
+    fs_usage(&uzyte, &wszystkie);
+    printk("Zajetosc: %u/%u blokow po %u B\n", uzyte, wszystkie, FS_BLOCK);
+}
+
+static void cmd_cat(const char *nazwa)
+{
+    static char bufor[512];
+
+    if (!fs_ready()) {
+        printk("cat: brak systemu plikow\n");
+        return;
+    }
+    int n = fs_read(nazwa, bufor, sizeof(bufor) - 1);
+    if (n < 0) {
+        printk("cat: nie ma pliku '%s'\n", nazwa);
+        return;
+    }
+    bufor[n] = '\0';
+    printk("%s", bufor);
+    if (n && bufor[n - 1] != '\n')
+        printk("\n");
+}
+
+/* write <plik> <tresc> - reszta linii idzie do pliku */
+static void cmd_write(char *reszta)
+{
+    if (!fs_ready()) {
+        printk("write: brak systemu plikow\n");
+        return;
+    }
+
+    char *tresc = reszta;
+    while (*tresc && *tresc != ' ')
+        tresc++;
+    if (!*tresc) {
+        printk("write: podaj nazwe i tresc\n");
+        return;
+    }
+    *tresc++ = '\0';                 /* nazwa konczy sie tu */
+    while (*tresc == ' ')
+        tresc++;
+
+    uint32_t len = 0;
+    while (tresc[len])
+        len++;
+    tresc[len++] = '\n';             /* plik tekstowy konczy sie linia */
+
+    if (fs_write(reszta, tresc, len) < 0)
+        printk("write: nie udalo sie zapisac '%s'\n", reszta);
+    else
+        printk("write: '%s' zapisany (%u B)\n", reszta, len);
+}
+
 static void cmd_uptime(void)
 {
     uint32_t t = pit_ticks();
@@ -130,6 +200,20 @@ static void execute(void)
         cmd_mem();
     } else if (!strcmp(line, "ls")) {
         initrd_ls();
+    } else if (!strcmp(line, "fls")) {
+        cmd_fls();
+    } else if (starts_with(line, "cat ")) {
+        const char *nazwa = argument(4);
+        if (nazwa)
+            cmd_cat(nazwa);
+        else
+            printk("cat: podaj nazwe pliku\n");
+    } else if (starts_with(line, "write ")) {
+        char *reszta = (char *)argument(6);
+        if (reszta)
+            cmd_write(reszta);
+        else
+            printk("write: podaj nazwe i tresc\n");
     } else if (!strcmp(line, "disk")) {
         cmd_disk();
     } else if (!strcmp(line, "uptime")) {

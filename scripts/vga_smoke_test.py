@@ -2673,6 +2673,7 @@ def main():
         d64 = tempfile.mkdtemp()
         iso64 = tempfile.mktemp(suffix=".iso")
         slog64 = tempfile.mktemp(suffix=".log")
+        slog64b = tempfile.mktemp(suffix=".log")
         # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
         # rejestrow kontrolera do mapowania, wiec ja wlasnie sprawdzamy
         disk64 = tempfile.mktemp(suffix=".img")
@@ -3111,17 +3112,18 @@ def main():
                     # wysoko, poza pamiecia opisana przy starcie - bez
                     # doklejenia ich do mapowania pierwszy odczyt z BAR-a
                     # konczylby sie bledem strony.
-                    dsk = q23.wait_serial("] Dysk:", timeout=30)
-                    # Nazwa sterownika sama zawiera przecinek
-                    # ("AHCI (SATA, DMA)"), wiec rozdzielamy po ostatnim
-                    # - tym przed liczba sektorow
-                    m = re.search(r"\] Dysk: (.+?), (\d+) sektorow po 512 B",
-                                  dsk)
+                    # Jedna linia mowi o obu warstwach: co znalazl
+                    # sterownik i czy stanal na tym system plikow
+                    dsk = q23.wait_serial("] Dysk ", timeout=30)
+                    m = re.search(r"\] Dysk (.+?) \+ PFS (\w+) "
+                                  r"\((\d+) sektorow\)", dsk)
                     check("jadro 64-bitowe znajduje dysk przez PCI i AHCI"
-                          + (f" ({m.group(1)}, {m.group(2)} sektorow)"
+                          + (f" ({m.group(1)}, {m.group(3)} sektorow)"
                              if m else ""),
                           m is not None and "AHCI" in m.group(1)
-                          and int(m.group(2)) > 0)
+                          and int(m.group(3)) > 0)
+                    check("PFS staje na dysku widzianym przez AHCI",
+                          m is not None and m.group(2) == "gotowy")
 
                     q23.type_line("disk")
                     io = q23.wait_serial("disk: sektor", timeout=30)
@@ -3130,6 +3132,25 @@ def main():
                     check("zapis i odczyt sektora przez DMA oddaja to samo"
                           + (f" (sektor {m.group(1)})" if m else ""),
                           m is not None and m.group(2) == "0")
+
+                    # fs.c przeszedl do trybu dlugiego bez zmiany ani
+                    # jednego znaku - dysk widziany przez warstwe blokowa
+                    # wyglada tak samo w obu trybach
+                    q23.type_line("write notatka pisze na dysk")
+                    wr = q23.wait_serial("write: 'notatka' zapisany",
+                                         timeout=30)
+                    check("shell zapisuje plik na dysku",
+                          re.search(r"write: 'notatka' zapisany \(\d+ B\)",
+                                    wr) is not None)
+                    q23.type_line("fls")
+                    fl = q23.wait_serial("Zajetosc:", timeout=25)
+                    check("plik widac na liscie katalogu glownego",
+                          re.search(r"notatka  \(\d+ B\)", fl) is not None)
+                    seen = len(q23.serial())
+                    q23.type_line("cat notatka")
+                    ct = q23.wait_serial("pisze na dysk", timeout=25)[seen:]
+                    check("odczyt pliku oddaje to, co zapisano",
+                          "pisze na dysk" in ct)
 
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
@@ -3146,9 +3167,35 @@ def main():
                           f"({lit} pikseli)", lit > 2000)
                 finally:
                     q23.close()
+
+                # Drugi rozruch na TYM SAMYM dysku. To jedyny dowod, ze
+                # plik naprawde lezy na dysku, a nie w pamieci - i
+                # pierwszy moment, w ktorym cokolwiek w tym jadrze
+                # przezywa wylaczenie maszyny.
+                q23b = Qemu(KERNEL, INITRD, cdrom=iso64, serial=slog64b,
+                            disk=disk64, sata=True,
+                            qemu="qemu-system-x86_64")
+                try:
+                    again = q23b.wait_serial("+ PFS", timeout=60)
+                    check("drugi rozruch zastaje gotowy system plikow",
+                          "+ PFS gotowy" in again
+                          and "sformatowany" not in again)
+                    q23b.wait_serial("proton64>", timeout=40)
+                    q23b.type_line("fls")
+                    fl2 = q23b.wait_serial("Zajetosc:", timeout=25)
+                    check("plik przezyl wylaczenie maszyny",
+                          re.search(r"notatka  \(\d+ B\)", fl2) is not None)
+                    seen = len(q23b.serial())
+                    q23b.type_line("cat notatka")
+                    ct2 = q23b.wait_serial("pisze na dysk",
+                                           timeout=25)[seen:]
+                    check("i ma dokladnie te sama tresc",
+                          "pisze na dysk" in ct2)
+                finally:
+                    q23b.close()
         finally:
             shutil.rmtree(d64, ignore_errors=True)
-            for f in (iso64, slog64, disk64):
+            for f in (iso64, slog64, slog64b, disk64):
                 if os.path.exists(f):
                     os.unlink(f)
 
