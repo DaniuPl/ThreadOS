@@ -25,8 +25,10 @@
 #define USER64_STACK_PAGES 4
 #define USER64_TOP         (USER64_STACK_TOP - USER64_STACK_PAGES * 4096ULL)
 
-/* Laduje obraz ELF64. Zwraca 0 i ustawia *entry, albo -1. */
-int elf64_load(const void *image, uint32_t size, uint64_t *entry);
+/* Laduje obraz ELF64. Zwraca 0 i ustawia *entry oraz poczatek sterty
+   (pierwsza wolna strona za obrazem), albo -1. */
+int elf64_load(const void *image, uint32_t size, uint64_t *entry,
+               uint64_t *brk_base);
 
 /* Przydziela i mapuje stos programu. Zwraca jego wierzcholek albo 0. */
 uint64_t elf64_make_stack(void);

@@ -56,6 +56,8 @@ struct task64 {
     uint64_t sig_handler;        /* procedura programu (0 = zabij) */
     uint64_t sig_restorer;       /* powrot z procedury do jadra */
     struct fd_entry fds[FD_MAX];
+    uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
+    uint64_t brk;                /* dokad program o nia poprosil */
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -111,6 +113,7 @@ void scheduler64_init(void)
     main_task->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
         main_task->fds[i].used = 0;
+    main_task->brk_base = main_task->brk = 0;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -141,6 +144,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
         t->fds[i].used = 0;
+    t->brk_base = t->brk = 0;
     t->id = next_id++;
     set_name(t, name);
 
@@ -525,6 +529,42 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer)
 uint64_t task64_sighandler(void)  { return current->sig_handler; }
 uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
 int task64_current_id(void)       { return current ? current->id : -1; }
+
+/* --- Sterta programu ----------------------------------------------
+ *
+ * Jadro nie przydziela tu ani jednej strony. Przesuwa tylko granice
+ * i zapamietuje, dokad program o nia poprosil - strony pojawiaja sie
+ * dopiero przy pierwszym dotknieciu, w obsludze bledu strony.
+ *
+ * Roznica jest wieksza, niz wyglada: prosba o megabajt kosztuje zero,
+ * a program, ktory poprosil i nie dotknal, nie zabiera nikomu nic. */
+void task64_set_brk_base(uint64_t base)
+{
+    current->brk_base = base;
+    current->brk = base;
+}
+
+uint64_t task64_brk(void)      { return current->brk; }
+uint64_t task64_brk_base(void) { return current->brk_base; }
+
+void task64_set_brk(uint64_t brk)
+{
+    current->brk = brk;
+}
+
+/* Czy adres nalezy do sterty biezacego zadania? Pyta o to obsluga
+   bledu strony, zanim uzna go za blad programu. */
+int task64_in_heap(uint64_t addr)
+{
+    return current && current->brk_base &&
+           addr >= current->brk_base && addr < current->brk;
+}
+
+void task64_inherit_brk(struct task64 *child)
+{
+    child->brk_base = current->brk_base;
+    child->brk = current->brk;
+}
 
 /* --- Deskryptory --------------------------------------------------
  *

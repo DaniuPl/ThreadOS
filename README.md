@@ -145,7 +145,8 @@ ProtonOS/
 │   ├── ush64.c         # shell w ring 3: read + fork + exec + wait
 │   ├── fileio64.c      # plik od strony programu: open, write, read
 │   ├── uecho64.c       # wypisuje swoje argumenty
-│   └── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
+│   ├── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
+│   └── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -909,3 +910,25 @@ obrazie dysku.
       jądra, jak i z shella użytkownika. `sep64` też przestał dostawać
       swój numer wpisany do rejestru: przychodzi jako `argv[1]`, czyli
       tak, jak dostaje go każdy program
+- [x] **Sterta programów (`sbrk`) z pamięcią na żądanie** - do tej pory
+      każdy bufor musiał być wpisany w program na sztywno. Jądro nie
+      przydziela tu ani jednej strony: przesuwa tylko granicę
+      i zapamiętuje, dokąd program o nią poprosił, a strony powstają
+      dopiero przy pierwszym dotknięciu, w obsłudze błędu strony -
+      zapisywalne i z zakazem wykonywania, bo w danych programu nie ma
+      kodu. Różnica jest większa, niż wygląda: **`heap64` prosi
+      o 4 MiB, czyli 1024 strony, a system przydziela mu cztery** -
+      dokładnie te, które program dotknął. Zwężenie oddaje strony od
+      razu, inaczej pamięć wracałaby do puli dopiero razem z całym
+      procesem. Prośba poniżej własnej sterty albo w stos jest
+      odrzucana
+- [x] Po drodze wyszła różnica x86-64, która nie mogła wyjść wcześniej:
+      **SSE2 jest tam bazowe**, więc GCC wektoryzuje pętle bez pytania -
+      pierwsza pętla przepisująca 4 KiB dostała `movdqa ... %xmm9`
+      i skończyła się wyjątkiem „nieprawidłowa instrukcja", bo jądro
+      nie ustawiło jeszcze `CR4.OSFXSR`. Na razie programy budują się
+      z `-mno-sse`, tak jak jądro; docelowo trzeba włączyć SSE i zacząć
+      zapisywać stan FPU przy przełączaniu zadań. Przy okazji wyszła
+      druga rzecz: reguła budowania programów nie zależała od
+      `Makefile`, więc zmiana flag kompilacji **nic nie przebudowywała**
+      - dokładnie ta sama pułapka, co kiedyś z nagłówkami jądra

@@ -120,7 +120,8 @@ static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
     return 0;
 }
 
-int elf64_load(const void *image, uint32_t size, uint64_t *entry)
+int elf64_load(const void *image, uint32_t size, uint64_t *entry,
+               uint64_t *brk_base)
 {
     const uint8_t *file = (const uint8_t *)image;
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)image;
@@ -133,6 +134,7 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry)
     const struct elf64_phdr *ph =
         (const struct elf64_phdr *)(file + eh->e_phoff);
     int loaded = 0;
+    uint64_t top = USER64_BASE;
     for (uint16_t i = 0; i < eh->e_phnum; i++) {
         if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
             continue;
@@ -142,6 +144,8 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry)
         }
         if (load_segment(file, &ph[i]) < 0)
             return -1;
+        if (ph[i].p_vaddr + ph[i].p_memsz > top)
+            top = ph[i].p_vaddr + ph[i].p_memsz;
         loaded++;
     }
     if (!loaded) {
@@ -155,6 +159,10 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry)
     }
 
     *entry = eh->e_entry;
+    /* Sterta zaczyna sie za obrazem, na najblizszej granicy strony -
+       nizej lezy pamiec programu, wyzej jest wolne az do stosu */
+    if (brk_base)
+        *brk_base = (top + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     return 0;
 }
 

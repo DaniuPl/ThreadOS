@@ -215,8 +215,13 @@ $(BUILD)/64/syscall64_stub.o: boot64/syscall64.S | $(BUILD)/64
 # w trybie dlugim do jadra wchodzi sie instrukcja syscall, nie
 # bramka przerwania.
 INITRD64 := $(BUILD)/initrd64.img
+# -mno-sse: na x86-64 SSE2 jest bazowe i kompilator uzywa go bez
+# pytania (wektoryzuje petle), a jadro go jeszcze nie wlaczylo - kazda
+# taka instrukcja konczy sie wyjatkiem "nieprawidlowa instrukcja".
+# Do zdjecia razem z obsluga stanu FPU przy przelaczaniu zadan.
 USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
                  -fno-pic -no-pie -static -nostdlib -mno-red-zone \
+                 -mno-mmx -mno-sse -mno-sse2 \
                  -O2 -Wall -Wextra \
                  -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
 USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
@@ -224,13 +229,17 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/fork64.elf $(BUILD)/user64/spawn64.elf \
                $(BUILD)/user64/sigtest64.elf $(BUILD)/user64/spin64.elf \
                $(BUILD)/user64/ush64.elf $(BUILD)/user64/fileio64.elf \
-               $(BUILD)/user64/uecho64.elf $(BUILD)/user64/ucat64.elf
+               $(BUILD)/user64/uecho64.elf $(BUILD)/user64/ucat64.elf \
+               $(BUILD)/user64/heap64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
 
+# Makefile jest tu zaleznoscia nie bez powodu: zmiana flag kompilacji
+# musi przebudowac programy, a bez tego wpisu make uznaje, ze skoro
+# zrodla sie nie zmienily, to nie ma nic do roboty.
 $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
-                       | $(BUILD)/user64
+                       Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
 $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
@@ -246,7 +255,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    ush64=$(BUILD)/user64/ush64.elf \
 	    fileio64=$(BUILD)/user64/fileio64.elf \
 	    uecho64=$(BUILD)/user64/uecho64.elf \
-	    ucat64=$(BUILD)/user64/ucat64.elf
+	    ucat64=$(BUILD)/user64/ucat64.elf \
+	    heap64=$(BUILD)/user64/heap64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

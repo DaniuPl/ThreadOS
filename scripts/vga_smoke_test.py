@@ -3140,6 +3140,36 @@ def main():
                           + (f" (sektor {m.group(1)})" if m else ""),
                           m is not None and m.group(2) == "0")
 
+                    # Sterta programu. Prosba o pamiec nic nie
+                    # kosztuje - placi sie za strony naprawde dotkniete,
+                    # bo powstaja dopiero pod palcami.
+                    seen = len(q23.serial())
+                    q23.type_line("run heap64")
+                    hp = q23.wait_serial("[heap64] koniec, kod wyjscia",
+                                         timeout=45)[seen:]
+                    m = re.search(r"prosze o (\d+) KiB \((\d+) stron\)", hp)
+                    check("program prosi jadro o pamiec w biegu"
+                          + (f" ({m.group(1)} KiB)" if m else ""),
+                          m is not None and int(m.group(2)) >= 1000)
+                    check("pamiec oddaje to, co program w nia wpisal",
+                          "wszystkie oddaly to, co wpisalem" in hp)
+                    check("granica sterty wraca po oddaniu pamieci",
+                          "granica wrocila na miejsce" in hp)
+                    check("ponizej wlasnej sterty jadro nie puszcza",
+                          "ponizej wlasnej sterty jadro nie puszcza" in hp)
+                    # I rachunek: 1024 strony poproszone, cztery uzyte
+                    m2 = re.search(r"ramek (\d+) -> (\d+), "
+                                   r"stron sterty (\d+)", hp)
+                    check("strony powstaja dopiero przy dotknieciu"
+                          + (f" (z {m.group(2) if m else '?'} "
+                             f"poproszonych: {m2.group(3)})" if m2 else ""),
+                          m2 is not None and 1 <= int(m2.group(3)) <= 8)
+                    check("po programie nie zostaje ani jedna ramka"
+                          + (f" ({m2.group(1)} -> {m2.group(2)})"
+                             if m2 else ""),
+                          m2 is not None
+                          and int(m2.group(2)) <= int(m2.group(1)))
+
                     # Argumenty programu. Do tej pory 'echo' musialo
                     # byc wbudowane w shell, bo nie bylo jak przekazac
                     # programowi ani jednego slowa.

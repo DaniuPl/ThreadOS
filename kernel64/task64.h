@@ -55,6 +55,15 @@ uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
 
+/* Sterta programu: jadro przesuwa granice, a strony przydziela dopiero
+   obsluga bledu strony, przy pierwszym dotknieciu */
+void task64_set_brk_base(uint64_t base);
+void task64_set_brk(uint64_t brk);
+uint64_t task64_brk(void);
+uint64_t task64_brk_base(void);
+int task64_in_heap(uint64_t addr);
+void task64_inherit_brk(struct task64 *child);
+
 /* Deskryptory otwartych plikow - tablica nalezy do zadania */
 int task64_fd_open(int slot);        /* zwraca numer deskryptora albo -1 */
 int task64_fd_slot(int fd);          /* i-wezel w PFS albo -1 */

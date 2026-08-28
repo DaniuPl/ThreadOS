@@ -16,6 +16,7 @@
 #include "gdt64.h"
 #include "task64.h"
 #include "paging64.h"
+#include "../kernel/include/pmm.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/isr.h"
@@ -23,6 +24,7 @@
 #include "signal64.h"
 #include "keyboard64.h"
 #include "../kernel/include/fs.h"
+#include "elf64.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -256,6 +258,34 @@ static void handle(struct regs *r)
             return;
         }
         r->rax = (uint64_t)(int64_t)task64_fd_open(slot);
+        return;
+    }
+    case SYS64_SBRK: {
+        /* Zwracamy stara granice - program dostaje adres, od ktorego
+           moze pisac. Przesuniecie o zero to pytanie "gdzie jestem". */
+        int64_t delta = (int64_t)a1;
+        uint64_t stara = task64_brk();
+        if (!stara) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint64_t nowa = stara + (uint64_t)delta;
+        if (nowa < task64_brk_base() || nowa >= USER64_TOP) {
+            r->rax = (uint64_t)-1;   /* ponizej wlasnej pamieci albo w stos */
+            return;
+        }
+        /* Zwezenie oddaje strony od razu - inaczej pamiec wracalaby
+           do puli dopiero razem z calym procesem */
+        for (uint64_t va = nowa & ~0xFFFULL; va + 4096 <= stara;
+             va += 4096) {
+            if (va < nowa)
+                continue;
+            uint64_t f = paging64_unmap(va);
+            if (f)
+                pmm_free_frame((uint32_t)f);
+        }
+        task64_set_brk(nowa);
+        r->rax = stara;
         return;
     }
     case SYS64_CLOSE:

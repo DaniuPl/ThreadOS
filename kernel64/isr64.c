@@ -16,6 +16,9 @@
 #include "isr64.h"
 #include "paging64.h"
 #include "signal64.h"
+#include "elf64.h"
+#include "../kernel/include/pmm.h"
+#include "../kernel/include/string.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -37,6 +40,7 @@ static irq_handler_t irq_handlers[16];
    winny program juz nie zyje */
 static int user_fault_seen;
 static uint32_t user_fault_vec, user_fault_err;
+static uint32_t heap_pages;        /* ile stron sterty naprawde powstalo */
 static uint64_t user_fault_addr;
 
 int isr64_user_fault(void)            { return user_fault_seen; }
@@ -44,6 +48,7 @@ uint32_t isr64_user_fault_vector(void) { return user_fault_vec; }
 uint32_t isr64_user_fault_err(void)    { return user_fault_err; }
 uint64_t isr64_user_fault_addr(void)   { return user_fault_addr; }
 void isr64_forget_user_fault(void)     { user_fault_seen = 0; }
+uint32_t isr64_heap_pages(void)        { return heap_pages; }
 
 static uint64_t read_cr2(void)
 {
@@ -77,6 +82,30 @@ void isr64_handler(struct regs *r)
         if (r->int_no == 14 && (r->err_code & 0x02) &&
             paging64_handle_cow(read_cr2()))
             return;
+
+        /* Dotkniecie strony sterty, o ktora program poprosil, ale
+         * ktorej jeszcze nie ma. To nie blad, tylko chwila, w ktorej
+         * pamiec robi sie prawdziwa: prosba o megabajt kosztowala
+         * zero, a placi sie dopiero za strony naprawde uzyte.
+         *
+         * Zapisywalna i bez prawa wykonywania - w danych programu nie
+         * ma kodu, a gdyby byl, procesor go nie wykona. */
+        if (r->int_no == 14 && (r->cs & 3) == 3) {
+            uint64_t adres = read_cr2();
+            if (task64_in_heap(adres) &&
+                paging64_lookup(adres & ~0xFFFULL) == 0) {
+                uint32_t ramka = pmm_alloc_frame();
+                if (ramka) {
+                    memset((void *)(uintptr_t)ramka, 0, 4096);
+                    if (paging64_map(adres & ~0xFFFULL, ramka,
+                                     PG_USER | PG_WRITE | PG_NX) == 0) {
+                        heap_pages++;
+                        return;
+                    }
+                    pmm_free_frame(ramka);
+                }
+            }
+        }
 
         /* Wyjatek z pierscienia 3 to blad PROGRAMU, nie systemu.
          *

@@ -18,6 +18,7 @@
 #include "paging64.h"
 #include "elf64.h"
 #include "proc64.h"
+#include "isr64.h"
 #include "syscall64.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
@@ -259,6 +260,8 @@ static void execute(void)
                 i++;
         }
 
+        uint32_t ramki_przed = pmm_used_frames();
+        uint32_t strony_przed = isr64_heap_pages();
         int id = proc64_spawn(name, args.argc ? &args : 0, 0);
         if (id < 0) {
             printk("run: nie udalo sie uruchomic '%s'\n", name);
@@ -274,7 +277,10 @@ static void execute(void)
         if (done < 0)
             printk("run: dziecko przepadlo\n");
         else
-            printk("[%s] koniec, kod wyjscia %d\n", name, code);
+            printk("[%s] koniec, kod wyjscia %d (ramek %u -> %u, "
+                   "stron sterty %u)\n",
+                   name, code, ramki_przed, pmm_used_frames(),
+                   isr64_heap_pages() - strony_przed);
     } else {
         printk("Nieznane polecenie: %s (sprobuj 'help')\n", line);
     }

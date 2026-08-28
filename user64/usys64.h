@@ -30,6 +30,7 @@
 #define SYS64_READ      12
 #define SYS64_OPEN      13
 #define SYS64_CLOSE     14
+#define SYS64_SBRK      15
 
 /* Numery zajete od zawsze: zero to klawiatura, jeden to konsola */
 #define FD_STDIN   0
@@ -151,6 +152,16 @@ static inline int64_t sys_exec(const char *name, char *const argv[])
 {
     return syscall64_3(SYS64_EXEC, (int64_t)(uintptr_t)name,
                        (int64_t)ustrlen(name), (int64_t)(uintptr_t)argv);
+}
+
+/* Przesuwa granice wlasnej sterty i zwraca STARA - czyli adres,
+   od ktorego wolno pisac. Zero pyta tylko "gdzie jestem".
+   Pamiec robi sie prawdziwa dopiero przy pierwszym dotknieciu, wiec
+   prosba o duzo nie kosztuje nic, dopoki sie tego nie uzyje. */
+static inline void *sys_sbrk(int64_t delta)
+{
+    int64_t r = syscall64(SYS64_SBRK, delta, 0);
+    return r < 0 ? (void *)0 : (void *)(uintptr_t)r;
 }
 
 /* Liczba z napisu; -1 gdy to nie liczba */

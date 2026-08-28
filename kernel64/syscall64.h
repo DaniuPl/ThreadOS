@@ -18,6 +18,7 @@
 #define SYS64_READ      12
 #define SYS64_OPEN      13
 #define SYS64_CLOSE     14
+#define SYS64_SBRK      15
 
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0

@@ -159,8 +159,10 @@ int64_t proc64_fork(struct regs *r)
     fa->space = space;
 
     struct task64 *child = task64_create("dziecko", child_start, fa);
-    if (child)
-        task64_inherit_fds(child);   /* otwarte pliki idzie z pamiecia */
+    if (child) {
+        task64_inherit_fds(child);   /* otwarte pliki ida z pamiecia */
+        task64_inherit_brk(child);
+    }
     if (!child) {
         kfree(fa);
         paging64_free_space(space);
@@ -220,8 +222,9 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     /* Stos jadra zostaje ten sam - stoimy na nim w tej chwili */
     uint64_t old = task64_swap_space(space, 0);
 
-    uint64_t entry, rsp;
-    if (elf64_load(image, size, &entry) < 0 || !(rsp = elf64_make_stack())) {
+    uint64_t entry, rsp, brk_base;
+    if (elf64_load(image, size, &entry, &brk_base) < 0 ||
+        !(rsp = elf64_make_stack())) {
         /* Stary obraz juz nie istnieje, a nowy sie nie zaladowal -
            procesowi nie ma do czego wrocic */
         printk("[jadro] exec: '%s' nie da sie zaladowac\n", kname);
@@ -229,6 +232,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         task64_exit_code(-1);
     }
     paging64_free_space(old);
+    task64_set_brk_base(brk_base);   /* nowy obraz, nowa sterta */
     task64_rename(kname);
 
     uint64_t argv_va = 0;
@@ -289,9 +293,10 @@ static void spawn_thread(void *arg)
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
     task64_enter_space(space, kstack & ~0xFULL);
 
-    uint64_t entry;
-    if (elf64_load(image, size, &entry) < 0)
+    uint64_t entry, brk_base;
+    if (elf64_load(image, size, &entry, &brk_base) < 0)
         task64_exit();
+    task64_set_brk_base(brk_base);
 
     uint64_t rsp = elf64_make_stack();
     if (!rsp) {
