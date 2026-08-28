@@ -461,15 +461,32 @@ class Qemu:
                 if time.time() > deadline:
                     raise
                 time.sleep(0.2)
+        # Limit czasu na odpowiedz. Bez niego odczyt z gniazda czeka
+        # w nieskonczonosc: gdy QEMU zginie albo zawiesi sie w srodku
+        # polecenia, caly test staje na zawsze zamiast zglosic blad -
+        # a nie ma nikogo, kto by go z tego wybudzil.
+        sock.settimeout(self.QMP_TIMEOUT)
+        self.sock = sock
         self.f = sock.makefile("rwb")
         self.f.readline()  # baner QMP
         self.cmd({"execute": "qmp_capabilities"})
+
+    # Najdluzsze polecenie to zrzut ekranu w wysokiej rozdzielczosci -
+    # sekundy wystarcza z ogromnym zapasem
+    QMP_TIMEOUT = 60
 
     def cmd(self, msg):
         self.f.write((json.dumps(msg) + "\n").encode())
         self.f.flush()
         while True:
-            resp = json.loads(self.f.readline())
+            try:
+                raw = self.f.readline()
+            except (socket.timeout, TimeoutError):
+                raise RuntimeError(
+                    f"QMP nie odpowiedzialo w {self.QMP_TIMEOUT} s na: {msg}")
+            if not raw:                  # gniazdo zamkniete = QEMU zginal
+                raise RuntimeError(f"QEMU rozlaczyl sie podczas: {msg}")
+            resp = json.loads(raw)
             if "return" in resp or "error" in resp:
                 if "error" in resp:
                     raise RuntimeError(f"Blad QMP: {resp}")
