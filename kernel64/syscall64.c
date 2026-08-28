@@ -17,6 +17,7 @@
 #include "task64.h"
 #include "paging64.h"
 #include "../kernel/include/pmm.h"
+#include "../kernel/include/string.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/isr.h"
@@ -128,6 +129,18 @@ void syscall64_forget_user(void)
  * z nich przeczyta, pyta tablice stron, czy program w ogole ma prawo
  * tam siegac. Bez tego wystarczyloby podac adres pamieci jadra, zeby
  * kazac mu ja sobie wypisac. */
+/* Nazwa pliku z pamieci programu do jadra. Zwraca 0 albo -1. */
+static int nazwa_z_ring3(uint64_t ptr, uint64_t len, char *out)
+{
+    if (len == 0 || len > FS_NAME_MAX || !paging64_user_range(ptr, len))
+        return -1;
+    const char *src = (const char *)(uintptr_t)ptr;
+    for (uint64_t i = 0; i < len; i++)
+        out[i] = src[i];
+    out[len] = '\0';
+    return 0;
+}
+
 static void handle(struct regs *r);
 
 /* Wejscie ze stubu. Sygnal dostarczamy tuz przed powrotem - wtedy
@@ -252,7 +265,7 @@ static void handle(struct regs *r)
             nazwa[i] = src[i];
         nazwa[a2] = '\0';
 
-        int slot = fs_open(FS_ROOT, nazwa, (int)a3);
+        int slot = fs_open(task64_cwd(), nazwa, (int)a3);
         if (slot < 0) {
             r->rax = (uint64_t)-1;
             return;
@@ -286,6 +299,86 @@ static void handle(struct regs *r)
         }
         task64_set_brk(nowa);
         r->rax = stara;
+        return;
+    }
+    case SYS64_MKDIR: {
+        char nazwa[FS_NAME_MAX + 1];
+        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)fs_mkdir(task64_cwd(), nazwa);
+        return;
+    }
+    case SYS64_CHDIR: {
+        char nazwa[FS_NAME_MAX + 1];
+        int nowy = FS_ROOT;
+        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        if (fs_chdir(task64_cwd(), nazwa, &nowy) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        task64_set_cwd(nowy);
+        r->rax = 0;
+        return;
+    }
+    case SYS64_GETCWD: {
+        char sciezka[FS_NAME_MAX * 4];
+        if (a2 == 0 || !paging64_user_range(a1, a2)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        fs_getpath(task64_cwd(), sciezka);
+        char *dst = (char *)(uintptr_t)a1;
+        uint64_t i = 0;
+        while (i + 1 < a2 && sciezka[i]) {
+            dst[i] = sciezka[i];
+            i++;
+        }
+        dst[i] = '\0';
+        r->rax = i;
+        return;
+    }
+    case SYS64_READDIR: {
+        /* Jeden wpis na wywolanie - program pyta o kolejne numery,
+           dopoki dostaje odpowiedz. Bufor opisuje struct dirent64
+           z usys64.h i jest po stronie programu. */
+        struct {
+            char name[FS_NAME_MAX + 1];
+            uint32_t size;
+            int is_dir;
+        } wpis;
+
+        if (!paging64_user_range(a2, sizeof(wpis))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint32_t rozmiar = 0;
+        int katalog = 0;
+        /* fs_readdir oddaje 1 przy trafieniu i 0 na koncu katalogu -
+           nie ujemna wartosc. Sprawdzanie "mniej niz zero" konczy sie
+           tu petla bez konca, bo koniec katalogu wyglada jak sukces. */
+        if (fs_readdir(task64_cwd(), (int)a1, wpis.name,
+                       &rozmiar, &katalog) != 1) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        wpis.size = rozmiar;
+        wpis.is_dir = katalog;
+        memcpy((void *)(uintptr_t)a2, &wpis, sizeof(wpis));
+        r->rax = 0;
+        return;
+    }
+    case SYS64_UNLINK: {
+        char nazwa[FS_NAME_MAX + 1];
+        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), nazwa);
         return;
     }
     case SYS64_CLOSE:

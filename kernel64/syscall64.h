@@ -19,6 +19,11 @@
 #define SYS64_OPEN      13
 #define SYS64_CLOSE     14
 #define SYS64_SBRK      15
+#define SYS64_MKDIR     16
+#define SYS64_CHDIR     17
+#define SYS64_GETCWD    18
+#define SYS64_READDIR   19
+#define SYS64_UNLINK    20
 
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0

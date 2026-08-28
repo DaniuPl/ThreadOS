@@ -31,6 +31,13 @@
 #define SYS64_OPEN      13
 #define SYS64_CLOSE     14
 #define SYS64_SBRK      15
+#define SYS64_MKDIR     16
+#define SYS64_CHDIR     17
+#define SYS64_GETCWD    18
+#define SYS64_READDIR   19
+#define SYS64_UNLINK    20
+
+#define NAME_MAX64 63
 
 /* Numery zajete od zawsze: zero to klawiatura, jeden to konsola */
 #define FD_STDIN   0
@@ -152,6 +159,44 @@ static inline int64_t sys_exec(const char *name, char *const argv[])
 {
     return syscall64_3(SYS64_EXEC, (int64_t)(uintptr_t)name,
                        (int64_t)ustrlen(name), (int64_t)(uintptr_t)argv);
+}
+
+/* Jeden wpis katalogu. Uklad musi zgadzac sie z tym, co wypelnia
+   jadro w obsludze SYS64_READDIR. */
+struct dirent64 {
+    char name[NAME_MAX64 + 1];
+    uint32_t size;
+    int is_dir;
+};
+
+static inline int64_t sys_mkdir(const char *nazwa)
+{
+    return syscall64(SYS64_MKDIR, (int64_t)(uintptr_t)nazwa,
+                     (int64_t)ustrlen(nazwa));
+}
+
+static inline int64_t sys_chdir(const char *nazwa)
+{
+    return syscall64(SYS64_CHDIR, (int64_t)(uintptr_t)nazwa,
+                     (int64_t)ustrlen(nazwa));
+}
+
+static inline int64_t sys_getcwd(char *buf, uint64_t len)
+{
+    return syscall64(SYS64_GETCWD, (int64_t)(uintptr_t)buf, (int64_t)len);
+}
+
+/* Kolejne wpisy katalogu roboczego: pytamy o numery po kolei,
+   dopoki dostajemy odpowiedz */
+static inline int64_t sys_readdir(int index, struct dirent64 *out)
+{
+    return syscall64(SYS64_READDIR, index, (int64_t)(uintptr_t)out);
+}
+
+static inline int64_t sys_unlink(const char *nazwa)
+{
+    return syscall64(SYS64_UNLINK, (int64_t)(uintptr_t)nazwa,
+                     (int64_t)ustrlen(nazwa));
 }
 
 /* Przesuwa granice wlasnej sterty i zwraca STARA - czyli adres,

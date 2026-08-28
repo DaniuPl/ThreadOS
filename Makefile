@@ -230,7 +230,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/sigtest64.elf $(BUILD)/user64/spin64.elf \
                $(BUILD)/user64/ush64.elf $(BUILD)/user64/fileio64.elf \
                $(BUILD)/user64/uecho64.elf $(BUILD)/user64/ucat64.elf \
-               $(BUILD)/user64/heap64.elf $(BUILD)/user64/fpu64test.elf
+               $(BUILD)/user64/heap64.elf $(BUILD)/user64/fpu64test.elf \
+               $(BUILD)/user64/uls64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -257,7 +258,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    uecho64=$(BUILD)/user64/uecho64.elf \
 	    ucat64=$(BUILD)/user64/ucat64.elf \
 	    heap64=$(BUILD)/user64/heap64.elf \
-	    fpu64test=$(BUILD)/user64/fpu64test.elf
+	    fpu64test=$(BUILD)/user64/fpu64test.elf \
+	    uls64=$(BUILD)/user64/uls64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

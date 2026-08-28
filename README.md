@@ -147,7 +147,8 @@ ProtonOS/
 │   ├── uecho64.c       # wypisuje swoje argumenty
 │   ├── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
 │   ├── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
-│   └── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
+│   ├── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
+│   └── uls64.c         # 'ls' jako program: pyta o wpisy po kolei
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -953,3 +954,17 @@ obrazie dysku.
       by było dokładne co do jednostki (`v = v*2 + 1` na liczbach
       całkowitych mieszczących się w podwójnej precyzji), więc test nie
       musi niczego przybliżać
+- [x] **Katalogi i ścieżki** w trybie długim - system plików przestał
+      być płaski. `mkdir`, `cd`, `pwd`, `rm` i `readdir` działają
+      z ring 3, a **katalog roboczy jest własnością zadania**, tak samo
+      jak deskryptory: dwa procesy mogą stać w innych miejscach drzewa
+      i żadne z nich nie przeszkadza drugiemu. Dziecko zaczyna tam,
+      gdzie stał rodzic - więc `uls64` uruchomiony z shella wypisuje
+      ten katalog, w którym shell akurat stał. `open` też patrzy na
+      katalog roboczy, a nie zawsze na główny. Po drodze błąd wart
+      zapamiętania: `fs_readdir` oddaje **1 przy trafieniu i 0 na
+      końcu** katalogu, a nie ujemną wartość - sprawdzanie „mniej niż
+      zero" zamieniało koniec katalogu w sukces i wypisywanie kręciło
+      się bez końca na starej zawartości bufora. Popełniłem to samo
+      w dwóch miejscach naraz, bo założyłem konwencję zamiast ją
+      przeczytać

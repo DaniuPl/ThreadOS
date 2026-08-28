@@ -16,6 +16,7 @@
 #include "paging64.h"
 #include "syscall64.h"
 #include "fpu64.h"
+#include "../kernel/include/fs.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -60,6 +61,7 @@ struct task64 {
     void *fpu;                   /* stan rejestrow zmiennoprzecinkowych */
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
+    int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -117,6 +119,7 @@ void scheduler64_init(void)
         main_task->fds[i].used = 0;
     main_task->brk_base = main_task->brk = 0;
     main_task->fpu = fpu64_alloc();
+    main_task->cwd = FS_ROOT;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -149,6 +152,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         t->fds[i].used = 0;
     t->brk_base = t->brk = 0;
     t->fpu = fpu64_alloc();
+    t->cwd = current ? current->cwd : FS_ROOT;
     t->id = next_id++;
     set_name(t, name);
 
@@ -541,6 +545,12 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer)
 uint64_t task64_sighandler(void)  { return current->sig_handler; }
 uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
 int task64_current_id(void)       { return current ? current->id : -1; }
+
+/* Katalog roboczy jest wlasnoscia zadania, tak samo jak deskryptory:
+   dwa procesy moga stac w innych miejscach drzewa i zadne z nich nie
+   przeszkadza drugiemu. Dziecko zaczyna tam, gdzie stal rodzic. */
+int task64_cwd(void)          { return current ? current->cwd : FS_ROOT; }
+void task64_set_cwd(int slot) { if (current) current->cwd = slot; }
 
 /* --- Sterta programu ----------------------------------------------
  *

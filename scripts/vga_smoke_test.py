@@ -3229,6 +3229,45 @@ def main():
                           "ucat64: podaj nazwe pliku" in ub
                           and "kod wyjscia 1" in ub)
 
+                    # Katalogi. System plikow przestal byc plaski,
+                    # a katalog roboczy jest wlasnoscia zadania - wiec
+                    # program widzi ten, w ktorym stal shell.
+                    q23.type_line("mkdir projekt")
+                    mk = q23.wait_serial("mkdir: 'projekt' zalozony",
+                                         timeout=25)
+                    check("shell zaklada katalog",
+                          "mkdir: 'projekt' zalozony" in mk)
+                    seen = len(q23.serial())
+                    q23.type_line("cd projekt")
+                    q23.type_line("pwd")
+                    pw = q23.wait_serial("/projekt", timeout=25)[seen:]
+                    check("wejscie do katalogu zmienia sciezke robocza",
+                          "/projekt" in pw)
+
+                    q23.type_line("write plan katalogi dzialaja")
+                    q23.wait_serial("write: 'plan' zapisany", timeout=25)
+                    seen = len(q23.serial())
+                    q23.type_line("run uls64")
+                    ul = q23.wait_serial("uls64: wpisow", timeout=40)[seen:]
+                    check("program dziedziczy katalog roboczy po shellu",
+                          "uls64: /projekt" in ul)
+                    check("i widzi w nim tylko wlasne wpisy",
+                          "plan  (18 B)" in ul and "uls64: wpisow 1" in ul)
+
+                    seen = len(q23.serial())
+                    q23.type_line("cd ..")
+                    q23.type_line("run uls64")
+                    ul2 = q23.wait_serial("uls64: wpisow", timeout=40)[seen:]
+                    check("wyjscie w gore wraca do katalogu glownego",
+                          "uls64: /" in ul2)
+                    check("katalog jest widoczny jako katalog, nie plik",
+                          "projekt/  (katalog)" in ul2)
+
+                    q23.type_line("rm nieistnieje")
+                    rm = q23.wait_serial("rm: nie ma", timeout=25)
+                    check("usuwanie nieistniejacego pliku nie udaje sukcesu",
+                          "rm: nie ma 'nieistnieje'" in rm)
+
                     # Plik od strony PROGRAMU: deskryptor jest zwyklym
                     # numerem w jego wlasnej tablicy, a i-wezel, na
                     # ktory numer wskazuje, zna juz tylko jadro

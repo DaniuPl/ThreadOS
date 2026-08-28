@@ -19,6 +19,7 @@
 #include "elf64.h"
 #include "proc64.h"
 #include "isr64.h"
+#include "task64.h"
 #include "syscall64.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
@@ -53,9 +54,9 @@ static void prompt(void)
 
 static void cmd_help(void)
 {
-    printk("Polecenia: help, ps, mem, ls, disk, fls, cat <plik>,\n");
-    printk("           write <plik> <tresc>, uptime, run <program>, "
-           "clear\n");
+    printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
+    printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
+    printk("           rm <plik>, uptime, run <program>, clear\n");
 }
 
 static void cmd_mem(void)
@@ -111,13 +112,28 @@ static void cmd_disk(void)
  * dysku, a nie tylko w pamieci: zapisac, wypisac, zobaczyc na liscie.
  * Czwarty dowod przychodzi sam - po ponownym uruchomieniu.
  */
+static void cmd_pwd(void)
+{
+    char sciezka[FS_NAME_MAX * 4];
+    fs_getpath(task64_cwd(), sciezka);
+    printk("%s\n", sciezka);
+}
+
 static void cmd_fls(void)
 {
     if (!fs_ready()) {
         printk("fls: brak systemu plikow\n");
         return;
     }
-    fs_list();
+
+    /* Wypisujemy katalog, w ktorym stoi shell - a nie zawsze glowny */
+    char nazwa[FS_NAME_MAX + 1];
+    uint32_t rozmiar = 0;
+    int katalog = 0;
+    cmd_pwd();
+    for (int i = 0; fs_readdir(task64_cwd(), i, nazwa,
+                               &rozmiar, &katalog) == 1; i++)
+        printk("  %s%s  (%u B)\n", nazwa, katalog ? "/" : "", rozmiar);
 
     uint32_t uzyte = 0, wszystkie = 0;
     fs_usage(&uzyte, &wszystkie);
@@ -132,7 +148,8 @@ static void cmd_cat(const char *nazwa)
         printk("cat: brak systemu plikow\n");
         return;
     }
-    int n = fs_read(nazwa, bufor, sizeof(bufor) - 1);
+    int slot = fs_open(task64_cwd(), nazwa, 0);
+    int n = slot < 0 ? -1 : fs_read_at(slot, 0, bufor, sizeof(bufor) - 1);
     if (n < 0) {
         printk("cat: nie ma pliku '%s'\n", nazwa);
         return;
@@ -167,7 +184,9 @@ static void cmd_write(char *reszta)
         len++;
     tresc[len++] = '\n';             /* plik tekstowy konczy sie linia */
 
-    if (fs_write(reszta, tresc, len) < 0)
+    int slot = fs_open(task64_cwd(), reszta, 1);
+    if (slot < 0 || fs_truncate(slot) < 0 ||
+        fs_write_at(slot, 0, tresc, len) < 0)
         printk("write: nie udalo sie zapisac '%s'\n", reszta);
     else
         printk("write: '%s' zapisany (%u B)\n", reszta, len);
@@ -203,6 +222,33 @@ static void execute(void)
         initrd_ls();
     } else if (!strcmp(line, "fls")) {
         cmd_fls();
+    } else if (!strcmp(line, "pwd")) {
+        cmd_pwd();
+    } else if (starts_with(line, "cd ")) {
+        const char *kat = argument(3);
+        int nowy = FS_ROOT;
+        if (!kat)
+            printk("cd: podaj katalog\n");
+        else if (fs_chdir(task64_cwd(), kat, &nowy) < 0)
+            printk("cd: nie ma katalogu '%s'\n", kat);
+        else
+            task64_set_cwd(nowy);
+    } else if (starts_with(line, "mkdir ")) {
+        const char *kat = argument(6);
+        if (!kat)
+            printk("mkdir: podaj nazwe\n");
+        else if (fs_mkdir(task64_cwd(), kat) < 0)
+            printk("mkdir: nie udalo sie zalozyc '%s'\n", kat);
+        else
+            printk("mkdir: '%s' zalozony\n", kat);
+    } else if (starts_with(line, "rm ")) {
+        const char *plik = argument(3);
+        if (!plik)
+            printk("rm: podaj nazwe\n");
+        else if (fs_unlink(task64_cwd(), plik) < 0)
+            printk("rm: nie ma '%s'\n", plik);
+        else
+            printk("rm: '%s' usuniety\n", plik);
     } else if (starts_with(line, "cat ")) {
         const char *nazwa = argument(4);
         if (nazwa)

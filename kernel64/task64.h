@@ -55,6 +55,10 @@ uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
 
+/* Katalog roboczy zadania - dziecko zaczyna tam, gdzie stal rodzic */
+int task64_cwd(void);
+void task64_set_cwd(int slot);
+
 /* Sterta programu: jadro przesuwa granice, a strony przydziela dopiero
    obsluga bledu strony, przy pierwszym dotknieciu */
 void task64_set_brk_base(uint64_t base);
