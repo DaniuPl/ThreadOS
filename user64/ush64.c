@@ -16,6 +16,16 @@
 static char line[LINE_MAX];
 static int line_len;
 static char out[128];
+static volatile int przerwany;
+
+/* Shell nie ginie od Ctrl+C - przerywa tylko to, co wpisywal.
+   Bez wlasnej procedury sygnal zabilby go domyslnie, a wtedy kazde
+   przypadkowe Ctrl+C konczyloby sesje. */
+static void na_sygnal(int sig)
+{
+    (void)sig;
+    przerwany = 1;
+}
 
 static int put(int n, const char *s)
 {
@@ -27,6 +37,13 @@ static int put(int n, const char *s)
 static int putn(int n, int64_t v)
 {
     char tmp[24];
+
+    /* Kod wyjscia bywa ujemny - program zabity sygnalem oddaje minus
+       jeden. Bez tego wychodzi z tego liczba o dwudziestu cyfrach. */
+    if (v < 0) {
+        out[n++] = '-';
+        v = -v;
+    }
     utoa((uint64_t)v, tmp);
     return put(n, tmp);
 }
@@ -106,6 +123,7 @@ void _start(long id)
 {
     (void)id;
 
+    sys_signal(SIGINT, na_sygnal);
     print("ush64 - shell uzytkownika. Wpisz 'help'.\n");
 
     for (;;) {
@@ -115,8 +133,18 @@ void _start(long id)
         for (;;) {
             char c;
             int64_t n = sys_read(&c, 1);
-            if (n <= 0)
-                continue;            /* sygnal - procedura obslugi juz byla */
+            if (n <= 0) {
+                /* Czekanie przerwal sygnal. Procedura obslugi juz
+                   byla - zostaje porzucic zaczeta linie i zaczac od
+                   nowa, dokladnie jak kazdy shell. */
+                if (przerwany) {
+                    przerwany = 0;
+                    print("^C\n");
+                    line_len = 0;
+                    break;
+                }
+                continue;
+            }
 
             if (c == '\n') {
                 print("\n");

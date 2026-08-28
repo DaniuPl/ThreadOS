@@ -819,3 +819,25 @@ obrazie dysku.
       potrzebny, żeby w ogóle było czym sterować systemem, a ten jest
       dowodem, że **już nie musi tam być**. Nieudany `exec` kończy tylko
       dziecko (kod 127), rodzic żyje dalej - jak wszędzie
+- [x] Naprawiony **zawis znaleziony przez użytkownika**: `run ush64`,
+      w nim `spin64`, Ctrl+C - i nic. Program kręcił się dalej, konsola
+      nie wracała. Dwie przyczyny, obie po mojej stronie. Po pierwsze
+      sygnał wysłany do zadania czekającego w `task64_wait` **nigdy nie
+      był dostarczany**: sygnał dostarcza się wyłącznie przy powrocie
+      do pierścienia 3, a ta pętla nigdy tam nie wraca, więc czekał na
+      dostarczenie tak długo, jak długo trwało czekanie - a gdy dziecko
+      nie kończy się samo, znaczy to: na zawsze. `read` sprawdzał
+      oczekujący sygnał i wracał błędem, `wait` nie. Po drugie Ctrl+C
+      trafiał w shella, a nie w program: cel przerwania wskazywał na
+      `ush64`, czyli na tego, kto **czeka**, więc nawet działający
+      sygnał zabiłby shella i zostawił program przy życiu. Doszło
+      `task64_foreground` - schodzi w dół łańcucha dzieci do tego, co na
+      końcu faktycznie działa. Zejście jest skończone samo z siebie
+      (dziecko dostaje numer większy od rodzica), ale ogranicznik
+      głębokości i tak jest: pętla szukająca końca pętli to ostatnie
+      miejsce, w którym chce się polegać na rozumowaniu. `ush64` ma też
+      od teraz własną procedurę na SIGINT, więc przypadkowe Ctrl+C
+      przerywa wpisywaną linię zamiast kończyć sesję - tak jak każdy
+      shell. Wcześniejszy audyt pętli **przeoczył to miejsce**: sprawdziłem
+      w `task64_wait` drogi wpisu o zakończeniu dziecka, a nie ścieżkę
+      sygnału, i właśnie ona była dziurą

@@ -28,6 +28,10 @@ void task64_exit_code(int code);    /* to samo, ale z kodem dla rodzica */
    i wpisuje kod wyjscia; -1 = nie ma na co czekac. */
 int task64_wait(int *code);
 
+/* Najglebszy zywy potomek zadania - to on trzyma konsole i to jemu
+   nalezy sie Ctrl+C, a nie shellowi, ktory na niego czeka */
+int task64_foreground(int root);
+
 /* Bierze przestrzen adresowa na wlasnosc biezacego zadania i od razu
    na nia przechodzi. Zwalnia sie sama, gdy zadanie sie skonczy. */
 void task64_enter_space(uint64_t space, uint64_t kstack_top);

@@ -3070,6 +3070,30 @@ def main():
                           "nie ma programu 'nieistniejacy'" in ne
                           and "ush64: koniec, kod 127" in ne)
 
+                    # Ctrl+C w shellu uzytkownika. Sygnal musi trafic
+                    # w PROGRAM, ktory dziala, a nie w shella, ktory na
+                    # niego czeka - i musi dosiegnac shella czekajacego
+                    # w jadrze, bo inaczej czeka on tam bez konca.
+                    q23.type_line("spin64")
+                    q23.wait_serial("[spin64] krece sie", timeout=30)
+                    time.sleep(1.5)
+                    q23.sendkey("ctrl-c")
+                    ci = q23.wait_serial("ush64: koniec, kod -1", timeout=30)
+                    check("Ctrl+C trafia w program, nie w czekajacy shell",
+                          "(spin64) zabite: sygnal" in ci)
+                    check("kod wyjscia zabitego programu jest ujemny",
+                          "ush64: koniec, kod -1" in ci)
+                    # A sam shell ma to przezyc - inaczej kazde
+                    # przypadkowe Ctrl+C konczyloby sesje
+                    seen = len(q23.serial())
+                    q23.type_line("echo poctrlc")
+                    limit = time.time() + 25
+                    while (time.time() < limit
+                           and q23.serial()[seen:].count("poctrlc") < 2):
+                        time.sleep(0.3)
+                    check("shell uzytkownika przezyl Ctrl+C i czyta dalej",
+                          q23.serial()[seen:].count("poctrlc") >= 2)
+
                     q23.type_line("exit")
                     ex = q23.wait_serial("[ush64] koniec, kod wyjscia 0",
                                          timeout=30)

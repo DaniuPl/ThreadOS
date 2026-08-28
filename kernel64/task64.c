@@ -196,7 +196,14 @@ static int has_children(int id)
 }
 
 /* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer
-   i wpisuje kod wyjscia; -1 znaczy "nie ma na co czekac". */
+   i wpisuje kod wyjscia; -1 znaczy "nie ma na co czekac" albo
+   "czekanie przerwal sygnal".
+ *
+ * To drugie jest tu rownie wazne, co pierwsze. Sygnal dostarcza sie
+ * WYLACZNIE przy powrocie do pierscienia 3, a ta petla nigdy tam nie
+ * wraca - wiec bez tego sprawdzenia sygnal wyslany do czekajacego
+ * procesu czekalby na dostarczenie tak dlugo, jak dlugo trwa
+ * czekanie. Gdy dziecko nie konczy sie samo, znaczy to: na zawsze. */
 int task64_wait(int *code)
 {
     for (;;) {
@@ -212,12 +219,48 @@ int task64_wait(int *code)
             }
         }
         int alive = has_children(current->id);
+        int signalled = current->sig_pending != 0;
         irq_restore(flags);
 
-        if (!alive)
+        if (!alive || signalled)
             return -1;
         task64_sleep(10);
     }
+}
+
+/* Kto naprawde trzyma konsole: najglebszy zywy potomek zadania.
+ *
+ * Shell czeka na swoje dziecko, a to moze czekac na swoje - Ctrl+C ma
+ * trafic w to, co na koncu tego lancucha faktycznie dziala, a nie
+ * w shella, ktory tylko czeka. Inaczej przerwanie programu zabijaloby
+ * shella i zostawialo program przy zyciu.
+ *
+ * Zejscie w dol jest skonczone same z siebie - dziecko dostaje numer
+ * wiekszy od rodzica, wiec 'best' rosnie przy kazdym kroku - ale
+ * ograniczenie zostaje mimo to. Petla szukajaca konca petli to
+ * ostatnie miejsce, w ktorym chce sie polegac na rozumowaniu. */
+int task64_foreground(int root)
+{
+    irqflags_t flags = irq_save();
+    int best = root;
+
+    for (int depth = 0; depth < 64; depth++) {
+        struct task64 *t = current;
+        int found = 0;
+        do {
+            if (t->parent == best && t->id > best &&
+                t->state != TASK_ZOMBIE) {
+                best = t->id;
+                found = 1;
+                break;
+            }
+            t = t->next;
+        } while (t != current);
+        if (!found)
+            break;
+    }
+    irq_restore(flags);
+    return best;
 }
 
 /* Sprzata zakonczone watki - nigdy tego, na ktorego stosie stoimy */

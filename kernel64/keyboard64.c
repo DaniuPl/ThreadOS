@@ -45,8 +45,10 @@ static void keyboard_irq(struct regs *r)
     /* Ctrl+C nie jest znakiem do przeczytania, tylko zadaniem
        przerwania programu, ktory trzyma konsole */
     if (c == KEY_INTR) {
+        /* Nie do shella, ktory czeka, tylko do tego, co na koncu
+           lancucha naprawde dziala */
         if (intr_target >= 0)
-            task64_signal(intr_target, SIGINT);
+            task64_signal(task64_foreground(intr_target), SIGINT);
         return;
     }
 
