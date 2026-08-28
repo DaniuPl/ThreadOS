@@ -22,6 +22,8 @@
 #define SYS64_SLEEP 4
 #define SYS64_TICKS 5
 #define SYS64_FORK  6
+#define SYS64_EXEC  7
+#define SYS64_WAIT  8
 
 static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
 {
@@ -94,6 +96,21 @@ static inline int utoa(uint64_t v, char *buf)
 static inline int64_t sys_fork(void)
 {
     return syscall64(SYS64_FORK, 0, 0);
+}
+
+/* Podmienia wlasny obraz na program z initrd. Przy powodzeniu nie
+   wraca - od nastepnej instrukcji dziala juz tamten program. */
+static inline int64_t sys_exec(const char *name)
+{
+    return syscall64(SYS64_EXEC, (int64_t)(uintptr_t)name,
+                     (int64_t)ustrlen(name));
+}
+
+/* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer
+   i wpisuje kod wyjscia; -1 = nie ma na co czekac. */
+static inline int64_t sys_wait(int *code)
+{
+    return syscall64(SYS64_WAIT, (int64_t)(uintptr_t)code, 0);
 }
 
 /* Liczba szesnastkowa - adresy czyta sie tylko tak */

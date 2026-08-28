@@ -461,6 +461,28 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
 
+    /* --- fork + exec + wait ------------------------------------- */
+    /* Stad juz tylko krok do shella: program potrafi uruchomic INNY
+       program i doczekac jego konca. */
+    static struct proc_req spawned = { "spawn64", 0, 1 };
+
+    base_tasks = task64_count();
+    syscall64_forget_user();
+
+    task64_create("spawn64", elf_thread, &spawned);
+    for (int i = 0; i < 200 && task64_count() > base_tasks; i++)
+        task64_sleep(50);
+
+    /* Tu nie liczymy niezerowych wyjsc: hello64 CELOWO konczy sie
+       siodemka, a to wlasnie ta siodemka jest dowodem, ze rodzic
+       doczekal wlasciwego dziecka. Werdykt wydaje sam spawn64 - jego
+       kod wyjscia jest tym ostatnim. */
+    exits = syscall64_user_exits();
+    int verdict = syscall64_user_status();
+    printk("[ %s ] fork + exec + wait: %u zakonczonych, werdykt %u\n",
+           (exits == 2 && verdict == 0) ? "OK" : "!!",
+           (uint32_t)exits, (uint32_t)verdict);
+
     /* fork nie kopiuje juz pamieci - dzieli ja i rozdziela dopiero
        te strony, ktore ktos naprawde zapisal */
     uint32_t splits = paging64_cow_splits();

@@ -135,6 +135,7 @@ ProtonOS/
 │   ├── wild64.c        # sięga po pamięć jądra - ginie na braku USER
 │   ├── sep64.c         # dwie kopie naraz, ten sam adres, osobna pamięć
 │   ├── fork64.c        # proces powiela sam siebie i sprawdza kopię
+│   ├── spawn64.c       # fork + exec + wait - tak działa każdy shell
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -739,3 +740,22 @@ obrazie dysku.
       strony**: ta, którą dziecko zapisało, i jedna strona stosu.
       Semantyka nie zmieniła się o włos: rodzic po przebudzeniu nadal
       ma swoje 100
+- [x] **`exec` i `wait`** - model procesów się domyka. Program potrafi
+      uruchomić **inny** program i doczekać jego końca, czyli dokładnie
+      to, co robi każdy shell na świecie. `exec` nie potrzebował żadnej
+      osobnej ścieżki powrotu: jesteśmy w obsłudze wywołania
+      systemowego, a ta wraca do ring 3 przez ramkę, którą dostała -
+      wystarczy ją **przepisać** (nowy adres startu, nowy stos,
+      wyzerowane rejestry) i pozwolić wrócić. Program po drugiej
+      stronie nie ma jak zauważyć, że wrócił gdzie indziej, niż wołał.
+      Kolejność jest tu jedyna możliwa: nazwę trzeba przepisać do jądra,
+      **zanim** zniknie pamięć, w której leży, a starą przestrzeń
+      zwolnić dopiero wtedy, gdy procesor z niej zejdzie. `wait`
+      opiera się na śladzie po zakończonym zadaniu: samo zadanie znika
+      z listy przy najbliższym przełączeniu, ale rodzic wcale nie musi
+      zdążyć zapytać, zanim dziecko się skończy - zostaje więc po nim
+      jeden wpis do odebrania. Gdy dzieci nie ma wcale, `wait` mówi to
+      wprost, zamiast czekać w nieskończoność. Dowód: `spawn64` powiela
+      się, dziecko podmienia swój obraz na `hello64`, a rodzic odbiera
+      jego **siódemkę** - i to ta siódemka jest dowodem, że doczekał się
+      tego dziecka, a nie dowolnego zakończonego zadania

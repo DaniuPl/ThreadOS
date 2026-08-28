@@ -2878,6 +2878,32 @@ def main():
                           m is not None
                           and int(m.group(2)) <= int(m.group(1)))
 
+                    # fork + exec + wait: klasyczna trojka, ktora
+                    # wystarcza kazdemu shellowi na swiecie
+                    sp = q23.wait_serial("fork + exec + wait:", timeout=60)
+                    check("proces uruchamia INNY program przez exec",
+                          "powielam sie i uruchamiam w dziecku 'hello64'"
+                          in sp
+                          and "[hello64] czesc, jestem ELF-em" in sp)
+                    m = re.search(r"doczekalem dziecka (\d+), "
+                                  r"kod wyjscia (\d+)", sp)
+                    check("rodzic doczekal wlasnego dziecka"
+                          + (f" (nr {m.group(1)})" if m else ""),
+                          m is not None and int(m.group(1)) > 0)
+                    # hello64 konczy sie siodemka - ta siodemka jest
+                    # dowodem, ze doczekal sie TEGO dziecka, a nie
+                    # dowolnego zakonczonego zadania
+                    check("kod wyjscia doszedl do rodzica przez wait"
+                          + (f" ({m.group(2)})" if m else ""),
+                          m is not None and m.group(2) == "7")
+                    check("wait bez dzieci mowi, ze nie ma na co czekac",
+                          "BLAD: wait wymyslil sobie dziecko" not in sp)
+                    check("program sam potwierdza cala trojke",
+                          "[spawn64] fork + exec + wait dzialaja" in sp)
+                    check("jadro potwierdza werdykt programu",
+                          "fork + exec + wait: 2 zakonczonych, werdykt 0"
+                          in sp)
+
                     # A teraz rachunek: fork NIE kopiuje pamieci.
                     # Program ma siedem stron (kod, dane stale, dane,
                     # cztery strony stosu), wiec kopiowanie wprost

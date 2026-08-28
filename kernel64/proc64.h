@@ -17,4 +17,8 @@ int64_t proc64_fork(struct regs *r);
    tablice stron, bez ani jednej strony pamieci programu */
 uint32_t proc64_last_fork_cost(void);
 
+/* Podmienia obraz procesu na program z initrd. Przy powodzeniu nie
+   ma do czego wrocic - ramka 'r' opisuje juz nowy program. */
+int64_t proc64_exec(struct regs *r, const char *name, uint64_t len);
+
 #endif

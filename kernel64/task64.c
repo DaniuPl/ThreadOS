@@ -36,6 +36,7 @@ struct task64 {
     uint64_t space;              /* wlasna przestrzen adresowa (0 = jadra) */
     uint64_t kstack_top;         /* stos jadra dla wejsc z ring 3 */
     int id;
+    int parent;                  /* kto je stworzyl - dla czekania na koniec */
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -85,6 +86,7 @@ void scheduler64_init(void)
     main_task->wake_at = 0;
     main_task->space = 0;
     main_task->kstack_top = 0;
+    main_task->parent = -1;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -109,6 +111,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->wake_at = 0;
     t->space = 0;
     t->kstack_top = 0;
+    t->parent = current ? current->id : -1;
     t->id = next_id++;
     set_name(t, name);
 
@@ -127,6 +130,85 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     current->next = t;
     irq_restore(flags);
     return t;
+}
+
+/* Slad po zakonczonym zadaniu.
+ *
+ * Samo zadanie znika z listy przy najblizszym przelaczeniu, ale jego
+ * rodzic moze chciec poznac kod wyjscia jeszcze po fakcie - i wcale
+ * nie musi zdazyc zapytac, zanim dziecko sie skonczy. Zostaje wiec
+ * po nim ten jeden wpis, ktory rodzic odbiera przy czekaniu.
+ *
+ * Gdy nikt po niego nie przyjdzie, najstarszy wpis ustepuje miejsca
+ * nowszemu: to jest slad, a nie kolejka, ktora wolno zapchac. */
+#define EXIT_SLOTS 16
+
+struct exit_rec {
+    int used;
+    int id;
+    int parent;
+    int code;
+};
+
+static struct exit_rec finished[EXIT_SLOTS];
+static uint32_t exit_next;
+
+static void record_exit(struct task64 *t, int code)
+{
+    for (int i = 0; i < EXIT_SLOTS; i++) {
+        if (!finished[i].used) {
+            finished[i].used = 1;
+            finished[i].id = t->id;
+            finished[i].parent = t->parent;
+            finished[i].code = code;
+            return;
+        }
+    }
+    /* Wszystko zajete - nadpisujemy po kolei, zeby jeden zapominalski
+       rodzic nie zablokowal rejestru na zawsze */
+    struct exit_rec *r = &finished[exit_next++ % EXIT_SLOTS];
+    r->used = 1;
+    r->id = t->id;
+    r->parent = t->parent;
+    r->code = code;
+}
+
+/* Czy zadanie ma jeszcze zywe dzieci? Bez tego czekanie na nieistniejace
+   dziecko trwaloby wiecznie. */
+static int has_children(int id)
+{
+    struct task64 *t = current;
+    do {
+        if (t != current && t->parent == id && t->state != TASK_ZOMBIE)
+            return 1;
+        t = t->next;
+    } while (t != current);
+    return 0;
+}
+
+/* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer
+   i wpisuje kod wyjscia; -1 znaczy "nie ma na co czekac". */
+int task64_wait(int *code)
+{
+    for (;;) {
+        irqflags_t flags = irq_save();
+        for (int i = 0; i < EXIT_SLOTS; i++) {
+            if (finished[i].used && finished[i].parent == current->id) {
+                int id = finished[i].id;
+                if (code)
+                    *code = finished[i].code;
+                finished[i].used = 0;
+                irq_restore(flags);
+                return id;
+            }
+        }
+        int alive = has_children(current->id);
+        irq_restore(flags);
+
+        if (!alive)
+            return -1;
+        task64_sleep(10);
+    }
 }
 
 /* Sprzata zakonczone watki - nigdy tego, na ktorego stosie stoimy */
@@ -209,6 +291,27 @@ void task64_enter_space(uint64_t space, uint64_t kstack_top)
     irq_restore(flags);
 }
 
+/* Podmienia przestrzen na nowa i oddaje stara - do zwolnienia przez
+   wolajacego, ale dopiero PO tym, jak procesor z niej zejdzie. */
+uint64_t task64_swap_space(uint64_t space, uint64_t kstack_top)
+{
+    irqflags_t flags = irq_save();
+    uint64_t old = current->space;
+    current->space = space;
+    if (kstack_top)              /* zero = zostaw stos jadra bez zmian */
+        current->kstack_top = kstack_top;
+    apply_context(current);
+    irq_restore(flags);
+    return old;
+}
+
+void task64_rename(const char *name)
+{
+    irqflags_t flags = irq_save();
+    set_name(current, name);
+    irq_restore(flags);
+}
+
 /* Wybiera nastepny watek i przelacza kontekst. Wolac z IF=0. */
 void schedule(void)
 {
@@ -256,10 +359,22 @@ void task64_sleep(uint32_t ms)
     irq_restore(flags);
 }
 
+void task64_exit_code(int code)
+{
+    irq_save();
+    drop_space(current);
+    record_exit(current, code);
+    current->state = TASK_ZOMBIE;
+    schedule();
+    for (;;)                              /* zombie nie zostanie wybrany */
+        __asm__ volatile("hlt");
+}
+
 void task64_exit(void)
 {
     irq_save();
     drop_space(current);
+    record_exit(current, 0);
     current->state = TASK_ZOMBIE;
     schedule();
     for (;;)                              /* zombie nie zostanie wybrany */
@@ -277,6 +392,7 @@ void task64_kill_current(const char *why)
     printk("[jadro] zadanie %d (%s) zabite: %s\n",
            current->id, current->name, why);
     drop_space(current);
+    record_exit(current, -1);          /* zabite, czyli nie swoja smiercia */
     current->state = TASK_ZOMBIE;
     schedule();
     for (;;)

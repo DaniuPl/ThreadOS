@@ -10,6 +10,8 @@
 #define SYS64_SLEEP 4
 #define SYS64_TICKS 5
 #define SYS64_FORK  6
+#define SYS64_EXEC  7
+#define SYS64_WAIT  8
 
 /* Wejscie do jadra przez instrukcje syscall (zamiast bramki przerwania) */
 void syscall64_init(void);

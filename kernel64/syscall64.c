@@ -152,7 +152,7 @@ void syscall64_handler(struct regs *r)
         user_exits++;
         if (a1)
             user_failures++;
-        task64_exit();               /* nie wraca - scheduler idzie dalej */
+        task64_exit_code((int)a1);   /* nie wraca - scheduler idzie dalej */
         return;
     case SYS64_RING:                 /* program mowi, w ktorym pierscieniu jest */
         user_cs = (uint32_t)a1;
@@ -169,6 +169,22 @@ void syscall64_handler(struct regs *r)
     case SYS64_FORK:
         r->rax = (uint64_t)proc64_fork(r);
         return;
+    case SYS64_EXEC:
+        /* Przy powodzeniu nie wraca tam, skad wolano: ramka opisuje
+           juz nowy program, a stary nie istnieje */
+        r->rax = (uint64_t)proc64_exec(r, (const char *)(uintptr_t)a1, a2);
+        return;
+    case SYS64_WAIT: {
+        int code = 0;
+        int id = task64_wait(&code);
+        if (id >= 0 && a1) {
+            if (!paging64_user_range(a1, sizeof(int)))
+                return;              /* zly wskaznik - kod przepada */
+            *(int *)(uintptr_t)a1 = code;
+        }
+        r->rax = (uint64_t)(int64_t)id;
+        return;
+    }
     default:
         printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
         r->rax = (uint64_t)-1;
