@@ -44,6 +44,7 @@ void task64_kill_current(const char *why);
 /* Sygnaly. Wyslanie tylko odklada sygnal i budzi spiace zadanie -
    dostarcza go dopiero powrot do pierscienia 3. */
 int task64_signal(int id, int sig);
+int task64_signal_pending(void);      /* czy cos czeka na dostarczenie */
 int task64_take_signal(void);         /* 0 = nic nie czeka */
 void task64_set_sighandler(uint64_t handler, uint64_t restorer);
 uint64_t task64_sighandler(void);

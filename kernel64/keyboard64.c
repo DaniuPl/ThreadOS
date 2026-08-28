@@ -71,6 +71,35 @@ char keyboard64_getchar(void)
     }
 }
 
+/* Odczyt dla programu w ring 3.
+ *
+ * Blokuje do pierwszego znaku, potem oddaje wszystko, co zdazylo sie
+ * uzbierac - tak jak kazde sensowne wejscie: czekamy na cokolwiek,
+ * a nie na pelny bufor.
+ *
+ * Sygnal przerywa czekanie i wraca bledem. Bez tego Ctrl+C nie mialby
+ * jak dosiegnac programu, ktory wlasnie czeka na klawisz - a to jest
+ * dokladnie ten program, ktoremu Ctrl+C jest najczesciej potrzebny. */
+int keyboard64_read(char *out, uint32_t len)
+{
+    if (!len)
+        return 0;
+
+    for (;;) {
+        irqflags_t flags = irq_save();
+        uint32_t got = 0;
+        while (tail != head && got < len)
+            out[got++] = buf[tail++ & (KBD_BUF_SIZE - 1)];
+        irq_restore(flags);
+
+        if (got)
+            return (int)got;
+        if (task64_signal_pending())
+            return -1;
+        task64_sleep(10);
+    }
+}
+
 int keyboard64_pending(void)
 {
     return tail != head;

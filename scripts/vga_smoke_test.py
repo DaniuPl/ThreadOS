@@ -3030,6 +3030,52 @@ def main():
                           and "sigtest64" not in after
                           and "bezczynny" in after)
 
+                    # Shell w PRZESTRZENI UZYTKOWNIKA: zwykly proces
+                    # bez zadnych uprawnien ponad te, ktore ma kazdy
+                    # inny - czyta klawiature wywolaniem systemowym,
+                    # a programy uruchamia przez fork i exec
+                    q23.type_line("run ush64")
+                    u = q23.wait_serial("ush64$", timeout=40)
+                    check("shell uzytkownika startuje jako proces ring 3",
+                          "ush64 - shell uzytkownika" in u)
+
+                    # Slowo musi pojawic sie DWA razy: raz jako echo
+                    # pisania, raz jako odpowiedz programu. Liczymy
+                    # wystapienia zamiast szukac konca linii - port
+                    # szeregowy konczy je sekwencja "\n\r", a wiazanie
+                    # sie z takim szczegolem to proszenie sie o klopoty.
+                    q23.type_line("echo abrakadabra")
+                    limit = time.time() + 25
+                    while (time.time() < limit
+                           and q23.serial().count("abrakadabra") < 2):
+                        time.sleep(0.3)
+                    ec = q23.serial()
+                    check("program czyta klawiature wywolaniem systemowym"
+                          f" ({ec.count('abrakadabra')} wystapien)",
+                          ec.count("abrakadabra") >= 2)
+
+                    q23.type_line("hello64")
+                    hi = q23.wait_serial("ush64: koniec, kod 7", timeout=45)
+                    check("shell uzytkownika uruchamia program (fork+exec)",
+                          "[hello64] czesc, jestem ELF-em" in hi)
+                    check("i odbiera jego kod wyjscia przez wait",
+                          "ush64: koniec, kod 7" in hi)
+
+                    # Nieudany exec nie moze zabic shella - dziecko
+                    # konczy sie samo, rodzic zyje dalej
+                    q23.type_line("nieistniejacy")
+                    ne = q23.wait_serial("ush64: koniec, kod 127",
+                                         timeout=30)
+                    check("nieudany exec konczy tylko dziecko",
+                          "nie ma programu 'nieistniejacy'" in ne
+                          and "ush64: koniec, kod 127" in ne)
+
+                    q23.type_line("exit")
+                    ex = q23.wait_serial("[ush64] koniec, kod wyjscia 0",
+                                         timeout=30)
+                    check("po wyjsciu shella uzytkownika wraca shell jadra",
+                          "ush64: pa!" in ex)
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"

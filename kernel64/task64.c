@@ -437,6 +437,11 @@ int task64_signal(int id, int sig)
     return found;
 }
 
+int task64_signal_pending(void)
+{
+    return current ? current->sig_pending : 0;
+}
+
 int task64_take_signal(void)
 {
     irqflags_t flags = irq_save();

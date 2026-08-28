@@ -27,6 +27,7 @@
 #define SYS64_SIGNAL    9
 #define SYS64_SIGRETURN 10
 #define SYS64_KILL      11
+#define SYS64_READ      12
 
 #define SIGINT   2
 #define SIGKILL  9
@@ -129,6 +130,13 @@ static inline int64_t sys_exec(const char *name)
 static inline int64_t sys_wait(int *code)
 {
     return syscall64(SYS64_WAIT, (int64_t)(uintptr_t)code, 0);
+}
+
+/* Czyta z klawiatury. Blokuje do pierwszego znaku; -1 znaczy, ze
+   czekanie przerwal sygnal. Bez echa - echo robi czytajacy. */
+static inline int64_t sys_read(char *buf, uint64_t len)
+{
+    return syscall64(SYS64_READ, (int64_t)(uintptr_t)buf, (int64_t)len);
 }
 
 /* Powrot z procedury obslugi sygnalu.

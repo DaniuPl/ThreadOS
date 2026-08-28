@@ -142,6 +142,7 @@ ProtonOS/
 │   ├── spawn64.c       # fork + exec + wait - tak działa każdy shell
 │   ├── sigtest64.c     # przechwytuje Ctrl+C i wraca w przerwane miejsce
 │   ├── spin64.c        # pętla bez końca - do zatrzymania z zewnątrz
+│   └── ush64.c         # shell w ring 3: read + fork + exec + wait
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -803,3 +804,18 @@ obrazie dysku.
       ginie od Ctrl+C i shell odzyskuje konsolę, a `sigtest64` sygnał
       **przechwytuje** - jego procedura wypisuje się i wraca, a program
       kończy się dalej normalnie, kodem zero
+- [x] **Wejście dla programów i shell w przestrzeni użytkownika**.
+      `read` blokuje do pierwszego znaku, a potem oddaje wszystko, co
+      zdążyło się uzbierać - tak jak każde sensowne wejście: czeka się
+      na cokolwiek, a nie na pełny bufor. Sygnał przerywa to czekanie
+      i wraca błędem, bo inaczej Ctrl+C nie miałby jak dosięgnąć
+      programu, który właśnie czeka na klawisz - a to jest dokładnie
+      ten program, któremu Ctrl+C jest najczęściej potrzebny.
+      `user64/ush64.c` jest zwykłym programem w ring 3: nie ma żadnych
+      uprawnień ponad te, które ma każdy inny proces - klawiaturę czyta
+      wywołaniem systemowym, programy uruchamia przez `fork` i `exec`,
+      czeka na nie przez `wait`. Wszystko, co robi, mógłby zrobić
+      dowolny inny program, i to jest sedno: shell w jądrze był
+      potrzebny, żeby w ogóle było czym sterować systemem, a ten jest
+      dowodem, że **już nie musi tam być**. Nieudany `exec` kończy tylko
+      dziecko (kod 127), rodzic żyje dalej - jak wszędzie

@@ -21,6 +21,7 @@
 #include "../kernel/include/isr.h"
 #include "proc64.h"
 #include "signal64.h"
+#include "keyboard64.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -195,6 +196,19 @@ static void handle(struct regs *r)
             *(int *)(uintptr_t)a1 = code;
         }
         r->rax = (uint64_t)(int64_t)id;
+        return;
+    }
+    case SYS64_READ: {
+        if (a2 > 4096)
+            a2 = 4096;
+        if (!paging64_user_range(a1, a2)) {
+            printk("[jadro] read: wskaznik %x nie nalezy do programu\n",
+                   (uint32_t)a1);
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int n = keyboard64_read((char *)(uintptr_t)a1, (uint32_t)a2);
+        r->rax = (uint64_t)(int64_t)n;
         return;
     }
     case SYS64_SIGNAL:

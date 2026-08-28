@@ -222,7 +222,8 @@ USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
 USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/wild64.elf $(BUILD)/user64/sep64.elf \
                $(BUILD)/user64/fork64.elf $(BUILD)/user64/spawn64.elf \
-               $(BUILD)/user64/sigtest64.elf $(BUILD)/user64/spin64.elf
+               $(BUILD)/user64/sigtest64.elf $(BUILD)/user64/spin64.elf \
+               $(BUILD)/user64/ush64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -240,7 +241,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    fork64=$(BUILD)/user64/fork64.elf \
 	    spawn64=$(BUILD)/user64/spawn64.elf \
 	    sigtest64=$(BUILD)/user64/sigtest64.elf \
-	    spin64=$(BUILD)/user64/spin64.elf
+	    spin64=$(BUILD)/user64/spin64.elf \
+	    ush64=$(BUILD)/user64/ush64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)
