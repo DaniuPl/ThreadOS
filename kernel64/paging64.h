@@ -18,6 +18,11 @@
 #define PG_USER   0x004
 #define PG_NX     (1ULL << 63)      /* zakaz wykonywania kodu */
 
+/* Bit 9 procesor zostawia do dyspozycji systemu. Znaczy u nas: strona
+   jest wspoldzielona po fork-u i ma zostac rozdzielona przy pierwszej
+   probie zapisu. */
+#define PG_COW    0x200
+
 /* Ktory wpis drugiego poziomu nalezy do programu. Jeden wpis to
    gigabajt, a programy leza od 1 GiB w gore - USER64_BASE
    w kernel64/elf64.h musi sie z tym zgadzac. */
@@ -44,6 +49,13 @@ int paging64_user_range(uint64_t virt, uint64_t len);
 uint64_t paging64_kernel_space(void);
 uint64_t paging64_new_space(void);        /* 0 = nie udalo sie */
 uint64_t paging64_clone_space(uint64_t src);   /* kopia dla fork() */
+
+/* Proba zapisu do strony wspoldzielonej po fork-u. Zwraca 1, gdy
+   strona zostala rozdzielona i program moze sprobowac jeszcze raz. */
+int paging64_handle_cow(uint64_t virt);
+
+/* Ile stron naprawde trzeba bylo skopiowac */
+uint32_t paging64_cow_splits(void);
 uint64_t paging64_current_space(void);
 void paging64_switch(uint64_t space);
 void paging64_free_space(uint64_t space);

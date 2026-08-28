@@ -14,6 +14,7 @@
 #include "../kernel/include/vga.h"
 #include "task64.h"
 #include "isr64.h"
+#include "paging64.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -64,6 +65,17 @@ void isr64_handler(struct regs *r)
             printk("[INT3] breakpoint pod rip=%x\n", (uint32_t)r->rip);
             return;
         }
+
+        /* Zapis do strony wspoldzielonej po fork-u to nie blad, tylko
+         * rachunek do zaplacenia: strone trzeba rozdzielic i pozwolic
+         * programowi powtorzyc instrukcje.
+         *
+         * Sprawdzamy to przed wszystkim innym i niezaleznie od
+         * pierscienia - z wlaczona ochrona zapisu takze jadro dostaje
+         * tu blad, gdy pisze po pamieci procesu. */
+        if (r->int_no == 14 && (r->err_code & 0x02) &&
+            paging64_handle_cow(read_cr2()))
+            return;
 
         /* Wyjatek z pierscienia 3 to blad PROGRAMU, nie systemu.
          *

@@ -27,6 +27,7 @@
 #include "gdt64.h"
 #include "syscall64.h"
 #include "elf64.h"
+#include "proc64.h"
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/string.h"
@@ -459,6 +460,15 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("[ %s ] Pamiec po fork-u oddana (%u -> %u ramek)\n",
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
+
+    /* fork nie kopiuje juz pamieci - dzieli ja i rozdziela dopiero
+       te strony, ktore ktos naprawde zapisal */
+    uint32_t splits = paging64_cow_splits();
+    uint32_t cost = proc64_last_fork_cost();
+    printk("[ %s ] Kopiowanie przy zapisie: fork wzial %u ramek, "
+           "rozdzielono %u stron\n",
+           (splits > 0 && splits < 16 && cost < 8) ? "OK" : "!!",
+           cost, splits);
     }
 
     task64_dump();

@@ -154,8 +154,13 @@ _start:
     wrmsr
 
     /* --- 4. Stronicowanie: procesor wchodzi w tryb zgodnosci --- */
+    /* Razem ze stronicowaniem (bit 31) wlaczamy ochrone zapisu
+       (bit 16). Bez niej jadro moze pisac po stronach oznaczonych jako
+       tylko-do-odczytu, a to zabija kopiowanie przy zapisie: strona
+       wspoldzielona przez dwa procesy zostalaby po cichu nadpisana
+       zamiast rozdzielona. */
     movl %cr0, %eax
-    orl  $(1 << 31), %eax
+    orl  $((1 << 31) | (1 << 16)), %eax
     movl %eax, %cr0
 
     /* --- 5. Dopiero skok daleki przelacza go naprawde --- */

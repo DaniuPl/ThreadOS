@@ -720,3 +720,22 @@ obrazie dysku.
       wirtualnym, więc podmieniona wartość była przypadkiem ta sama.
       Teraz wartość ląduje na stosie jądra tego konkretnego zadania
       i nikt inny jej nie widzi
+- [x] **Kopiowanie przy zapisie** w trybie długim - `fork` przestał
+      kopiować pamięć. Rodzic i dziecko dostają te same ramki, a strona,
+      która była zapisywalna, traci u **obu** prawo zapisu i dostaje
+      znacznik w bicie 9 (procesor zostawia go do dyspozycji systemu).
+      Przy pierwszej próbie zapisu procesor zgłasza błąd strony, a jądro
+      dopiero wtedy robi kopię - i to tylko tej jednej strony. Strony
+      tylko do odczytu (kod, dane stałe) nie potrzebują nawet tego:
+      skoro nikt ich nie zmieni, zostają wspólne na zawsze, a o tym,
+      kiedy wrócą do puli, decyduje licznik właścicieli w PMM. Doszedł
+      bit ochrony zapisu w CR0 (WP): bez niego jądro może pisać po
+      stronach oznaczonych jako tylko do odczytu, więc strona
+      współdzielona zostałaby po cichu nadpisana zamiast rozdzielona.
+      Rachunek z prawdziwego biegu: `fork64` ma siedem stron (kod, dane
+      stałe, dane, cztery strony stosu), więc kopiowanie wprost
+      kosztowałoby siedem ramek plus tablice - **z dzieleniem stron fork
+      bierze pięć ramek, wszystkie na tablice, a rozdzielają się dwie
+      strony**: ta, którą dziecko zapisało, i jedna strona stosu.
+      Semantyka nie zmieniła się o włos: rodzic po przebudzeniu nadal
+      ma swoje 100

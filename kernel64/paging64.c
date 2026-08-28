@@ -31,6 +31,7 @@
 static uint64_t *pml4;             /* przestrzen jadra - wzorzec dla reszty */
 static uint64_t identity_top;
 static int nx_on;
+static uint32_t cow_splits;        /* ile stron rozdzielilo kopiowanie */
 
 /* Przestrzen, na ktorej procesor pracuje w tej chwili.
  *
@@ -263,14 +264,21 @@ uint64_t paging64_new_space(void)
     return (uint64_t)root;
 }
 
-/* Powiela przestrzen procesu: kazda strona programu dostaje wlasna
-   ramke z ta sama trescia i tymi samymi prawami.
+/* Powiela przestrzen procesu - bez kopiowania pamieci.
  *
- * Kopiujemy wprost, strona po stronie. Jadro 32-bitowe robi to
- * oszczedniej - dzieli strony miedzy rodzica i dziecko, a rozdziela
- * je dopiero przy pierwszym zapisie - ale tam byl juz do tego caly
- * mechanizm bledow strony. Tutaj najpierw ma dzialac samo powielanie
- * procesu; oszczedzanie przyjdzie po nim.
+ * Rodzic i dziecko dostaja te same ramki. Strona, ktora byla
+ * zapisywalna, traci u OBU prawo zapisu i dostaje znacznik COW: przy
+ * pierwszej probie zapisu procesor zglosi blad strony, a jadro dopiero
+ * wtedy zrobi kopie - i to tylko tej jednej strony.
+ *
+ * Strony tylko do odczytu (kod, dane stale) nie potrzebuja nawet tego:
+ * skoro nikt ich nie zmieni, moga zostac wspolne na zawsze. Pilnuje
+ * tego licznik wlascicieli w PMM - ramka wraca do puli dopiero, gdy
+ * zwolni ja ostatni.
+ *
+ * Zysk jest wprost proporcjonalny do rozmiaru programu: fork przestaje
+ * kosztowac tyle, ile proces zajmuje pamieci, a zaczyna kosztowac tyle,
+ * ile ma tablic stron.
  *
  * Zwraca korzen nowej przestrzeni albo 0. */
 uint64_t paging64_clone_space(uint64_t src)
@@ -283,7 +291,7 @@ uint64_t paging64_clone_space(uint64_t src)
     uint64_t *dtop = (uint64_t *)(uintptr_t)dst;
     uint64_t e = table_at(stop[0])[PAGING64_USER_PDPT];
     if (!(e & PTE_PRESENT))
-        return dst;                     /* pusty proces - nic do kopiowania */
+        return dst;                     /* pusty proces - nic do dzielenia */
 
     uint64_t *pd = table_at(e);
     for (int i = 0; i < 512; i++) {
@@ -296,25 +304,83 @@ uint64_t paging64_clone_space(uint64_t src)
 
             uint64_t va = ((uint64_t)PAGING64_USER_PDPT << 30) |
                           ((uint64_t)i << 21) | ((uint64_t)j << 12);
-            uint32_t frame = pmm_alloc_frame();
-            if (!frame) {
-                paging64_free_space(dst);
-                return 0;
-            }
-            memcpy((void *)(uintptr_t)frame,
-                   (const void *)(uintptr_t)(pt[j] & ADDR_MASK), PAGE_SIZE);
+            uint64_t frame = pt[j] & ADDR_MASK;
+            uint64_t flags = pt[j] & (PG_WRITE | PG_USER | PG_NX | PG_COW);
 
-            /* Prawa przenosimy w calosci - lacznie z zakazem
-               wykonywania, ktory siedzi w najwyzszym bicie */
-            uint64_t flags = pt[j] & (PG_WRITE | PG_USER | PG_NX);
+            /* Zapisywalna strona idzie do obu jako tylko-do-odczytu
+               ze znacznikiem - inaczej rodzic pisalby dziecku po
+               pamieci, nie wiedzac o tym */
+            if (flags & PG_WRITE) {
+                flags = (flags & ~(uint64_t)PG_WRITE) | PG_COW;
+                pt[j] = frame | PTE_PRESENT | flags;
+                invlpg(va);
+            }
+
+            pmm_frame_ref((uint32_t)frame);
             if (map_in(dtop, va, frame, flags) < 0) {
-                pmm_free_frame(frame);
+                pmm_free_frame((uint32_t)frame);
                 paging64_free_space(dst);
                 return 0;
             }
         }
     }
     return dst;
+}
+
+/* Zapis do strony wspoldzielonej po fork-u.
+ *
+ * Jesli ramka ma juz tylko jednego wlasciciela, nie ma czego
+ * rozdzielac - wystarczy oddac prawo zapisu. To czesty przypadek:
+ * druga strona fork-a zdazyla sie skonczyc albo sama zapisala te
+ * strone wczesniej.
+ *
+ * Zwraca 1, gdy strona zostala rozdzielona i program moze powtorzyc
+ * zapis; 0 znaczy, ze to nie byl blad tego rodzaju. */
+int paging64_handle_cow(uint64_t virt)
+{
+    uint64_t *top = root_now();
+    if (!top)
+        return 0;
+
+    uint64_t e = top[(virt >> 39) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return 0;
+    e = table_at(e)[(virt >> 30) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return 0;
+    e = table_at(e)[(virt >> 21) & 0x1FF];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return 0;
+
+    uint64_t *pt = table_at(e);
+    int i = (int)((virt >> 12) & 0x1FF);
+    if (!(pt[i] & PTE_PRESENT) || !(pt[i] & PG_COW))
+        return 0;
+
+    uint64_t old = pt[i] & ADDR_MASK;
+    uint64_t flags = (pt[i] & (PG_USER | PG_NX)) | PG_WRITE;
+
+    if (pmm_frame_refs((uint32_t)old) <= 1) {
+        pt[i] = old | PTE_PRESENT | flags;      /* jestesmy sami */
+        invlpg(virt);
+        return 1;
+    }
+    cow_splits++;
+
+    uint32_t fresh = pmm_alloc_frame();
+    if (!fresh)
+        return 0;
+    memcpy((void *)(uintptr_t)fresh, (const void *)(uintptr_t)old, PAGE_SIZE);
+    pmm_free_frame((uint32_t)old);              /* jeden wlasciciel mniej */
+
+    pt[i] = (uint64_t)fresh | PTE_PRESENT | flags;
+    invlpg(virt);
+    return 1;
+}
+
+uint32_t paging64_cow_splits(void)
+{
+    return cow_splits;
 }
 
 uint64_t paging64_current_space(void)

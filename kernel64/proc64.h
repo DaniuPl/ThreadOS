@@ -13,4 +13,8 @@ struct regs;
  * Ujemna wartosc znaczy, ze sie nie udalo. */
 int64_t proc64_fork(struct regs *r);
 
+/* Ile ramek kosztowal ostatni fork - z dzieleniem stron sa to same
+   tablice stron, bez ani jednej strony pamieci programu */
+uint32_t proc64_last_fork_cost(void);
+
 #endif

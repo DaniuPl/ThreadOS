@@ -20,9 +20,19 @@
 #include "../kernel/include/heap.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
+#include "../kernel/include/pmm.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
 extern void return_to_user_64(struct regs *frame);
+
+/* Ile ramek kosztowal ostatni fork. Przy dzieleniu stron powinny to
+   byc same tablice stron - pamiec programu nie jest kopiowana wcale. */
+static uint32_t last_cost;
+
+uint32_t proc64_last_fork_cost(void)
+{
+    return last_cost;
+}
 
 struct fork_arg {
     struct regs frame;
@@ -51,7 +61,9 @@ static void child_start(void *arg)
 
 int64_t proc64_fork(struct regs *r)
 {
+    uint32_t before = pmm_used_frames();
     uint64_t space = paging64_clone_space(paging64_current_space());
+    last_cost = pmm_used_frames() - before;
     if (!space) {
         printk("[jadro] fork: brak pamieci na kopie przestrzeni\n");
         return -1;

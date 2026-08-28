@@ -2878,6 +2878,24 @@ def main():
                           m is not None
                           and int(m.group(2)) <= int(m.group(1)))
 
+                    # A teraz rachunek: fork NIE kopiuje pamieci.
+                    # Program ma siedem stron (kod, dane stale, dane,
+                    # cztery strony stosu), wiec kopiowanie wprost
+                    # kosztowaloby ich siedem plus tablice. Z dzieleniem
+                    # stron zostaja same tablice, a kopiuje sie tylko to,
+                    # co ktos naprawde zapisal.
+                    cow = q23.wait_serial("Kopiowanie przy zapisie",
+                                          timeout=30)
+                    m = re.search(r"fork wzial (\d+) ramek, "
+                                  r"rozdzielono (\d+) stron", cow)
+                    check("fork nie kopiuje pamieci programu"
+                          + (f" ({m.group(1)} ramek - same tablice)"
+                             if m else ""),
+                          m is not None and int(m.group(1)) <= 6)
+                    check("rozdzielone tylko strony naprawde zapisane"
+                          + (f" ({m.group(2)})" if m else ""),
+                          m is not None and 1 <= int(m.group(2)) <= 6)
+
                     ticks = q23.wait_serial("Timer tyka:", timeout=25)
                     m = re.search(r"Timer tyka: (\d+) -> (\d+)", ticks)
                     check("przerwania sprzetowe dochodza (timer tyka"
