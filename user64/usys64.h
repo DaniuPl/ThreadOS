@@ -145,11 +145,26 @@ static inline int64_t sys_fork(void)
 }
 
 /* Podmienia wlasny obraz na program z initrd. Przy powodzeniu nie
-   wraca - od nastepnej instrukcji dziala juz tamten program. */
-static inline int64_t sys_exec(const char *name)
+   wraca - od nastepnej instrukcji dziala juz tamten program.
+   argv jest tablica wskaznikow zakonczona zerem (moze byc NULL). */
+static inline int64_t sys_exec(const char *name, char *const argv[])
 {
-    return syscall64(SYS64_EXEC, (int64_t)(uintptr_t)name,
-                     (int64_t)ustrlen(name));
+    return syscall64_3(SYS64_EXEC, (int64_t)(uintptr_t)name,
+                       (int64_t)ustrlen(name), (int64_t)(uintptr_t)argv);
+}
+
+/* Liczba z napisu; -1 gdy to nie liczba */
+static inline int64_t uatoi(const char *s)
+{
+    int64_t v = 0;
+    if (!*s)
+        return -1;
+    for (; *s; s++) {
+        if (*s < '0' || *s > '9')
+            return -1;
+        v = v * 10 + (*s - '0');
+    }
+    return v;
 }
 
 /* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer

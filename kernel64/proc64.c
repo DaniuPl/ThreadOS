@@ -37,6 +37,84 @@ uint32_t proc64_last_fork_cost(void)
     return last_cost;
 }
 
+/* --- Argumenty na stosie programu --------------------------------
+ *
+ * Uklad jest ten sam, co wszedzie: najpierw same napisy, nad nimi
+ * tablica wskaznikow zakonczona zerem, a program dostaje w rejestrach
+ * ich liczbe i adres tablicy. Nic w tym magicznego - to zwykla pamiec
+ * programu, ktora akurat jadro wypelnilo przed jego pierwsza
+ * instrukcja.
+ *
+ * Piszemy wprost pod adresy uzytkownika, bo w tej chwili stoimy juz
+ * w jego przestrzeni. Zwraca nowy wierzcholek stosu i wpisuje adres
+ * tablicy. */
+static uint64_t build_args(uint64_t rsp, const struct args64 *args,
+                           uint64_t *argv_va)
+{
+    uint64_t ptrs[ARG_MAX];
+    int argc = args ? args->argc : 0;
+
+    if (argc > ARG_MAX)
+        argc = ARG_MAX;
+
+    for (int i = 0; i < argc; i++) {
+        uint32_t len = 0;
+        while (args->v[i][len])
+            len++;
+        rsp -= len + 1;
+        for (uint32_t j = 0; j <= len; j++)
+            ((char *)(uintptr_t)rsp)[j] = args->v[i][j];
+        ptrs[i] = rsp;
+    }
+
+    rsp &= ~0xFULL;
+    rsp -= (uint64_t)(argc + 1) * 8;
+    uint64_t *tab = (uint64_t *)(uintptr_t)rsp;
+    for (int i = 0; i < argc; i++)
+        tab[i] = ptrs[i];
+    tab[argc] = 0;                   /* tablica konczy sie zerem */
+
+    *argv_va = rsp;
+    return rsp & ~0xFULL;
+}
+
+/* Przepisanie napisu z pamieci programu do jadra.
+   Sprawdzamy strone po stronie, bo napis moze konczyc sie tuz przed
+   granica tego, co program ma zmapowane. */
+static int copy_user_string(uint64_t ptr, char *dst, int max)
+{
+    for (int i = 0; i < max - 1; i++) {
+        if ((ptr & 0xFFF) == 0 || i == 0) {
+            if (!paging64_user_range(ptr, 1))
+                return -1;
+        }
+        char c = *(const char *)(uintptr_t)ptr++;
+        dst[i] = c;
+        if (!c)
+            return i;
+    }
+    dst[max - 1] = '\0';
+    return max - 1;
+}
+
+/* Zbiera argv podane przez program. Zwraca liczbe argumentow. */
+int proc64_copy_args(uint64_t argv_ptr, struct args64 *out)
+{
+    out->argc = 0;
+    if (!argv_ptr)
+        return 0;
+    if (!paging64_user_range(argv_ptr, (uint64_t)(ARG_MAX + 1) * 8))
+        return 0;
+
+    const uint64_t *tab = (const uint64_t *)(uintptr_t)argv_ptr;
+    for (int i = 0; i < ARG_MAX && tab[i]; i++) {
+        if (copy_user_string(tab[i], out->v[i], ARG_LEN) < 0)
+            break;
+        out->argc++;
+    }
+    return out->argc;
+}
+
 struct fork_arg {
     struct regs frame;
     uint64_t space;
@@ -106,9 +184,11 @@ int64_t proc64_fork(struct regs *r)
  * ZANIM zniknie pamiec, w ktorej lezy, a stara przestrzen zwolnic
  * dopiero wtedy, gdy procesor z niej zejdzie.
  */
-int64_t proc64_exec(struct regs *r, const char *name, uint64_t len)
+int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
+                    uint64_t argv_ptr)
 {
     char kname[16];
+    struct args64 args;
 
     if (len == 0 || len >= sizeof(kname) ||
         !paging64_user_range((uint64_t)(uintptr_t)name, len))
@@ -116,6 +196,15 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len)
     for (uint64_t i = 0; i < len; i++)
         kname[i] = name[i];
     kname[len] = '\0';
+
+    /* Argumenty przepisujemy do jadra ZANIM zniknie pamiec, w ktorej
+       leza - tak samo jak nazwe programu */
+    proc64_copy_args(argv_ptr, &args);
+    if (args.argc == 0) {
+        args.argc = 1;
+        for (uint64_t i = 0; i <= len && i < ARG_LEN - 1; i++)
+            args.v[0][i] = kname[i];
+    }
 
     uint32_t size = 0;
     const void *image = initrd_find(kname, &size);
@@ -142,11 +231,16 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len)
     paging64_free_space(old);
     task64_rename(kname);
 
+    uint64_t argv_va = 0;
+    rsp = build_args(rsp, &args, &argv_va);
+
     /* Ramka powrotu opisuje teraz nowy program */
     r->rip = entry;
     r->rsp = rsp;
     r->rax = r->rbx = r->rcx = r->rdx = 0;
-    r->rsi = r->rdi = r->rbp = 0;
+    r->rbp = 0;
+    r->rdi = (uint64_t)args.argc;
+    r->rsi = argv_va;
     r->r8 = r->r9 = r->r10 = r->r11 = 0;
     r->r12 = r->r13 = r->r14 = r->r15 = 0;
     return 0;
@@ -160,7 +254,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len)
  */
 struct spawn_req {
     char name[16];
-    uint64_t arg;
+    struct args64 args;
     int quiet;
 };
 
@@ -168,7 +262,7 @@ static void spawn_thread(void *arg)
 {
     struct spawn_req *req = (struct spawn_req *)arg;
     char name[16];
-    uint64_t user_arg = req->arg;
+    struct args64 args = req->args;
     int quiet = req->quiet;
 
     for (int i = 0; i < (int)sizeof(name); i++)
@@ -209,10 +303,13 @@ static void spawn_thread(void *arg)
         printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
                name, size, (uint32_t)entry);
 
-    enter_ring3_64(entry, rsp, user_arg);
+    uint64_t argv_va = 0;
+    rsp = build_args(rsp, &args, &argv_va);
+
+    enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
 }
 
-int proc64_spawn(const char *name, uint64_t arg, int quiet)
+int proc64_spawn(const char *name, const struct args64 *args, int quiet)
 {
     struct spawn_req *req;
     uint32_t size = 0;
@@ -227,8 +324,19 @@ int proc64_spawn(const char *name, uint64_t arg, int quiet)
     for (i = 0; i < (int)sizeof(req->name) - 1 && name[i]; i++)
         req->name[i] = name[i];
     req->name[i] = '\0';
-    req->arg = arg;
     req->quiet = quiet;
+    if (args) {
+        req->args = *args;
+    } else {
+        /* Bez argumentow program i tak dostaje swoja nazwe - argv[0]
+           jest tym, czym jest wszedzie */
+        req->args.argc = 1;
+        for (int k = 0; k < ARG_LEN - 1 && req->name[k]; k++)
+            req->args.v[0][k] = req->name[k];
+        req->args.v[0][ARG_LEN - 1] = '\0';
+        for (int k = 0; k < ARG_LEN; k++)
+            if (!req->name[k]) { req->args.v[0][k] = '\0'; break; }
+    }
 
     struct task64 *t = task64_create(req->name, spawn_thread, req);
     if (!t) {

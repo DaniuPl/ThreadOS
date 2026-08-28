@@ -46,9 +46,8 @@ static void blad(const char *co, int64_t v)
     sys_exit(1);
 }
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     uint64_t len = ustrlen(TRESC);
 

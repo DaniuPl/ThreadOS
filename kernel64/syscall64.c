@@ -198,7 +198,8 @@ static void handle(struct regs *r)
     case SYS64_EXEC:
         /* Przy powodzeniu nie wraca tam, skad wolano: ramka opisuje
            juz nowy program, a stary nie istnieje */
-        r->rax = (uint64_t)proc64_exec(r, (const char *)(uintptr_t)a1, a2);
+        r->rax = (uint64_t)proc64_exec(r, (const char *)(uintptr_t)a1,
+                                       a2, a3);
         return;
     case SYS64_WAIT: {
         int code = 0;

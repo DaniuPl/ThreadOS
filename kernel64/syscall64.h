@@ -30,7 +30,8 @@ void syscall64_init(void);
 void syscall64_set_kernel_stack(uint64_t rsp);
 
 /* Skok do ring 3; nie wraca. 'arg' program zastaje w rejestrze RDI. */
-void enter_ring3_64(uint64_t rip, uint64_t rsp, uint64_t arg);
+void enter_ring3_64(uint64_t rip, uint64_t rsp,
+                    uint64_t argc, uint64_t argv);
 
 /* Co program zdazyl powiedziec jadru - do sprawdzenia po jego koncu */
 int syscall64_user_ran(void);

@@ -143,7 +143,9 @@ ProtonOS/
 │   ├── sigtest64.c     # przechwytuje Ctrl+C i wraca w przerwane miejsce
 │   ├── spin64.c        # pętla bez końca - do zatrzymania z zewnątrz
 │   ├── ush64.c         # shell w ring 3: read + fork + exec + wait
-│   └── fileio64.c      # plik od strony programu: open, write, read
+│   ├── fileio64.c      # plik od strony programu: open, write, read
+│   ├── uecho64.c       # wypisuje swoje argumenty
+│   └── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -889,3 +891,21 @@ obrazie dysku.
       musi przeczytać. Plik napisany przez program przeżywa restart tak
       samo, jak napisany przez jądro: droga przez deskryptor kończy się
       na tym samym dysku
+- [x] **Argumenty programów (`argv`)** - narzędzia przestały musieć
+      siedzieć w shellu. Do tej pory `echo` i `cat` były wbudowane, bo
+      nie było jak przekazać programowi ani jednego słowa. Układ na
+      stosie jest ten sam, co wszędzie: najpierw same napisy, nad nimi
+      tablica wskaźników zakończona zerem, a program dostaje
+      w rejestrach ich liczbę i adres tablicy - nic w tym magicznego,
+      to zwykła pamięć programu, którą akurat jądro wypełniło przed
+      jego pierwszą instrukcją. Argumenty kopiujemy do jądra **zanim**
+      zniknie pamięć, w której leżą - tak samo jak nazwę programu, i to
+      jest ta sama pułapka, co przy `exec`. Napisy przepisujemy stroną
+      po stronie, bo napis może kończyć się tuż przed granicą tego, co
+      program ma zmapowane. Limity są skromne i celowo: to ma być
+      `argv`, a nie kanał do przesyłania danych. `uecho64` wypisuje, co
+      dostał, a `ucat64` bierze nazwę pliku z argumentu, otwiera go
+      deskryptorem i czyta - jedno i drugie działa tak samo z shella
+      jądra, jak i z shella użytkownika. `sep64` też przestał dostawać
+      swój numer wpisany do rejestru: przychodzi jako `argv[1]`, czyli
+      tak, jak dostaje go każdy program

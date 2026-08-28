@@ -7,9 +7,8 @@
 
 #include "usys64.h"
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     print("[spin64] krece sie bez konca - zatrzymaj mnie Ctrl+C\n");
     for (;;)

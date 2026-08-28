@@ -5,6 +5,19 @@
 
 struct regs;
 
+/* Argumenty programu.
+ *
+ * Kopiujemy je do jadra, bo w chwili uruchamiania nowego obrazu stara
+ * pamiec - ta, w ktorej leza - juz nie istnieje. Limity sa skromne
+ * i celowo: to ma byc argv, a nie kanal do przesylania danych. */
+#define ARG_MAX 8
+#define ARG_LEN 32
+
+struct args64 {
+    int argc;
+    char v[ARG_MAX][ARG_LEN];
+};
+
 /* Powiela biezacy proces.
  *
  * W rodzicu zwraca numer zadania dziecka, w dziecku - zero. Dziecko
@@ -19,10 +32,14 @@ uint32_t proc64_last_fork_cost(void);
 
 /* Podmienia obraz procesu na program z initrd. Przy powodzeniu nie
    ma do czego wrocic - ramka 'r' opisuje juz nowy program. */
-int64_t proc64_exec(struct regs *r, const char *name, uint64_t len);
+int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
+                    uint64_t argv_ptr);
+
+/* Przepisuje argv z pamieci programu do jadra */
+int proc64_copy_args(uint64_t argv_ptr, struct args64 *out);
 
 /* Uruchamia program z initrd jako nowy proces. Zwraca numer zadania
    albo -1, gdy takiego pliku nie ma. 'arg' program zastaje w RDI. */
-int proc64_spawn(const char *name, uint64_t arg, int quiet);
+int proc64_spawn(const char *name, const struct args64 *args, int quiet);
 
 #endif

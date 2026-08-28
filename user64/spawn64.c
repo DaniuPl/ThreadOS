@@ -27,9 +27,8 @@ static int putn(int n, int64_t v)
     return put(n, tmp);
 }
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     print("[spawn64] powielam sie i uruchamiam w dziecku 'hello64'\n");
 
@@ -43,7 +42,7 @@ void _start(long id)
         /* Dziecko przestaje byc soba: od nastepnej instrukcji dziala
            juz zupelnie inny program. Jesli exec wroci, to znaczy, ze
            sie nie udal. */
-        sys_exec("hello64");
+        sys_exec("hello64", 0);
         print("[spawn64] BLAD: exec wrocil\n");
         sys_exit(1);
     }

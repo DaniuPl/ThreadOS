@@ -29,9 +29,8 @@ static int putn(int n, uint64_t v)
     return put(n, tmp);
 }
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     wartosc = 100;
 

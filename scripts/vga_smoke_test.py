@@ -3061,6 +3061,13 @@ def main():
                           f" ({ec.count('abrakadabra')} wystapien)",
                           ec.count("abrakadabra") >= 2)
 
+                    seen = len(q23.serial())
+                    q23.type_line("uecho64 z shella uzytkownika")
+                    ua = q23.wait_serial("ush64: koniec, kod 0",
+                                         timeout=40)[seen:]
+                    check("shell uzytkownika przekazuje argumenty do exec",
+                          "z shella uzytkownika" in ua)
+
                     q23.type_line("hello64")
                     hi = q23.wait_serial("ush64: koniec, kod 7", timeout=45)
                     check("shell uzytkownika uruchamia program (fork+exec)",
@@ -3132,6 +3139,39 @@ def main():
                     check("zapis i odczyt sektora przez DMA oddaja to samo"
                           + (f" (sektor {m.group(1)})" if m else ""),
                           m is not None and m.group(2) == "0")
+
+                    # Argumenty programu. Do tej pory 'echo' musialo
+                    # byc wbudowane w shell, bo nie bylo jak przekazac
+                    # programowi ani jednego slowa.
+                    seen = len(q23.serial())
+                    q23.type_line("run uecho64 raz dwa trzy")
+                    ue = q23.wait_serial("[uecho64] koniec, kod wyjscia",
+                                         timeout=40)[seen:]
+                    check("program dostaje argumenty z linii polecen",
+                          "raz dwa trzy" in ue)
+                    check("i konczy sie bez bledu",
+                          "[uecho64] koniec, kod wyjscia 0" in ue)
+
+                    # Narzedzie, ktore do niedawna musialo siedziec
+                    # w jadrze: bierze nazwe pliku z argumentu, otwiera
+                    # go deskryptorem i czyta
+                    q23.type_line("write zargv tresc dla ucat")
+                    q23.wait_serial("write: 'zargv' zapisany", timeout=30)
+                    seen = len(q23.serial())
+                    q23.type_line("run ucat64 zargv")
+                    uc = q23.wait_serial("[ucat64] koniec, kod wyjscia",
+                                         timeout=40)[seen:]
+                    check("program czyta plik podany w argumencie",
+                          "tresc dla ucat" in uc
+                          and "[ucat64] koniec, kod wyjscia 0" in uc)
+
+                    seen = len(q23.serial())
+                    q23.type_line("run ucat64")
+                    ub = q23.wait_serial("[ucat64] koniec, kod wyjscia",
+                                         timeout=40)[seen:]
+                    check("bez argumentu program mowi, czego mu brakuje",
+                          "ucat64: podaj nazwe pliku" in ub
+                          and "kod wyjscia 1" in ub)
 
                     # Plik od strony PROGRAMU: deskryptor jest zwyklym
                     # numerem w jego wlasnej tablicy, a i-wezel, na

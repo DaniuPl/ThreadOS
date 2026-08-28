@@ -226,12 +226,40 @@ static void execute(void)
             printk("run: podaj nazwe programu (zobacz 'ls')\n");
             return;
         }
+        /* Nazwa to pierwsze slowo, reszta to argumenty */
+        static char prog[16];
+        int pn = 0;
+        while (name[pn] && name[pn] != ' ' && pn < (int)sizeof(prog) - 1) {
+            prog[pn] = name[pn];
+            pn++;
+        }
+        prog[pn] = '\0';
+        name = prog;
+
         uint32_t size = 0;
         if (!initrd_find(name, &size)) {
             printk("run: nie ma programu '%s'\n", name);
             return;
         }
-        int id = proc64_spawn(name, 0, 0);
+        /* Reszta linii to argumenty programu - shell tylko dzieli
+           ja na slowa, a co z nich wyniknie, jest juz sprawa programu */
+        static struct args64 args;
+        args.argc = 0;
+        for (int i = 4; line[i] && args.argc < ARG_MAX; ) {
+            while (line[i] == ' ')
+                i++;
+            if (!line[i])
+                break;
+            int k = 0;
+            while (line[i] && line[i] != ' ' && k < ARG_LEN - 1)
+                args.v[args.argc][k++] = line[i++];
+            args.v[args.argc][k] = '\0';
+            args.argc++;
+            while (line[i] && line[i] != ' ')
+                i++;
+        }
+
+        int id = proc64_spawn(name, args.argc ? &args : 0, 0);
         if (id < 0) {
             printk("run: nie udalo sie uruchomic '%s'\n", name);
             return;

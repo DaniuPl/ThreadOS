@@ -19,9 +19,8 @@ static void na_sygnal(int sig)
     dostalem = 1;
 }
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     sys_signal(SIGINT, na_sygnal);
     print("[sigtest64] czekam na Ctrl+C\n");

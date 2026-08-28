@@ -116,7 +116,7 @@ static void ring3_thread(void *arg)
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
     task64_enter_space(0, kstack & ~0xFULL);   /* przestrzen jadra */
 
-    enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16, 0);
+    enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16, 0, 0);
 }
 
 /* Watek, ktory uruchamia PROGRAM Z PLIKU.
@@ -362,8 +362,13 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     int base_tasks = task64_count();
     syscall64_forget_user();
 
-    proc64_spawn("sep64", 1, 1);
-    proc64_spawn("sep64", 2, 1);
+    /* Ta sama kopia programu, a rozni je jedno: argument. Numer
+       procesu przychodzi teraz jako argv[1], a nie wpisany do
+       rejestru - czyli tak, jak dostaje go kazdy program. */
+    static struct args64 sep_a = { 2, { "sep64", "1" } };
+    static struct args64 sep_b = { 2, { "sep64", "2" } };
+    proc64_spawn("sep64", &sep_a, 1);
+    proc64_spawn("sep64", &sep_b, 1);
     for (int i = 0; i < 120 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 

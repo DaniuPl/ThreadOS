@@ -37,8 +37,11 @@ static int puth(int n, uint64_t v)
     return put(n, tmp);
 }
 
-void _start(long id)
+void _start(int argc, char **argv)
 {
+    /* Numer przychodzi jako zwykly argument - tak, jak dostaje go
+       kazdy program uruchomiony z linii polecen */
+    int64_t id = argc > 1 ? uatoi(argv[1]) : 0;
     uint64_t mine = 1000 + (uint64_t)id;
     marker = mine;
 

@@ -75,7 +75,35 @@ static int zaczyna_sie(const char *s, const char *p)
 }
 
 /* Uruchomienie programu: fork, exec w dziecku, wait w rodzicu.
-   Dokladnie ten sam schemat, ktorego uzywa kazdy shell. */
+   Dokladnie ten sam schemat, ktorego uzywa kazdy shell.
+   Linie dzielimy na slowa - pierwsze to program, reszta to jego
+   argumenty, i shell nie interesuje sie tym, co z nich wyniknie. */
+#define SH_ARGS 8
+
+static char slowa[SH_ARGS][32];
+static char *argv[SH_ARGS + 1];
+
+static int podziel(char *linia)
+{
+    int n = 0, i = 0;
+    while (linia[i] && n < SH_ARGS) {
+        while (linia[i] == ' ')
+            i++;
+        if (!linia[i])
+            break;
+        int k = 0;
+        while (linia[i] && linia[i] != ' ' && k < 31)
+            slowa[n][k++] = linia[i++];
+        slowa[n][k] = '\0';
+        while (linia[i] && linia[i] != ' ')
+            i++;
+        argv[n] = slowa[n];
+        n++;
+    }
+    argv[n] = 0;
+    return n;
+}
+
 static void uruchom(const char *nazwa)
 {
     int64_t dziecko = sys_fork();
@@ -84,7 +112,7 @@ static void uruchom(const char *nazwa)
         return;
     }
     if (dziecko == 0) {
-        sys_exec(nazwa);
+        sys_exec(nazwa, argv);
         /* exec wraca tylko wtedy, gdy sie nie udal */
         print("ush64: nie ma takiego programu\n");
         sys_exit(127);
@@ -115,13 +143,14 @@ static void wykonaj(void)
         print(line + 5);
         print("\n");
     } else {
-        uruchom(line);
+        int n = podziel(line);
+        if (n)
+            uruchom(argv[0]);
     }
 }
 
-void _start(long id)
+void _start(void)
 {
-    (void)id;
 
     sys_signal(SIGINT, na_sygnal);
     print("ush64 - shell uzytkownika. Wpisz 'help'.\n");

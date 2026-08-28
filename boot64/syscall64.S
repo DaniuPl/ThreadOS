@@ -104,7 +104,8 @@ return_to_user_64_frame:
 
 /* Wejscie w ring 3: iretq ze spreparowana ramka. Nie wraca.
      rdi = adres pierwszej instrukcji, rsi = wierzcholek stosu programu,
-     rdx = wartosc, ktora program zastanie w RDI (jego argument) */
+     rdx i rcx = wartosci, ktore program zastanie w RDI i RSI
+     (czyli argc i argv - dwa pierwsze argumenty konwencji wywolan) */
 .global enter_ring3_64
 .type enter_ring3_64, @function
 enter_ring3_64:
@@ -120,7 +121,8 @@ enter_ring3_64:
     pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
     pushq %rdi                   /* rip */
 
-    movq %rdx, %rdi              /* argument programu */
+    movq %rdx, %rdi              /* argc */
+    movq %rcx, %rsi              /* argv */
 
     /* Reszta rejestrow na zero. Program nie ma powodu ogladac tego,
        co jadro w nich zostawilo - a zostawia tam adresy wlasnych
@@ -129,7 +131,6 @@ enter_ring3_64:
     xorl %ebx, %ebx
     xorl %ecx, %ecx
     xorl %edx, %edx
-    xorl %esi, %esi
     xorl %ebp, %ebp
     xorl %r8d, %r8d
     xorl %r9d, %r9d
