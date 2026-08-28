@@ -3068,6 +3068,34 @@ def main():
                     check("shell uzytkownika przekazuje argumenty do exec",
                           "z shella uzytkownika" in ua)
 
+                    # Potoki: wyjscie jednego programu wchodzi na
+                    # wejscie drugiego, a zaden z nich o tym nie wie.
+                    # uupper64 czyta z numeru zero i pisze na numer
+                    # jeden - to, co po drugiej stronie, jest sprawa
+                    # tego, kto go uruchomil.
+                    seen = len(q23.serial())
+                    q23.type_line("uecho64 proton przez potok | uupper64")
+                    pp = q23.wait_serial("PROTON PRZEZ POTOK",
+                                         timeout=40)[seen:]
+                    check("wyjscie programu wchodzi na wejscie drugiego",
+                          "PROTON PRZEZ POTOK" in pp)
+
+                    # Drugi program musi zobaczyc KONIEC danych - a to
+                    # sie dzieje tylko wtedy, gdy shell zamknie oba
+                    # konce potoku u siebie
+                    seen = len(q23.serial())
+                    q23.type_line("uls64 | uupper64")
+                    pl = q23.wait_serial("ULS64: WPISOW", timeout=40)[seen:]
+                    check("czytajacy widzi koniec danych i konczy sie sam",
+                          "ULS64: WPISOW" in pl)
+
+                    seen = len(q23.serial())
+                    q23.type_line("uecho64 sam |")
+                    pe = q23.wait_serial("po kresce nic nie ma",
+                                         timeout=30)[seen:]
+                    check("pusta strona potoku nie wywraca shella",
+                          "ush64: po kresce nic nie ma" in pe)
+
                     q23.type_line("hello64")
                     hi = q23.wait_serial("ush64: koniec, kod 7", timeout=45)
                     check("shell uzytkownika uruchamia program (fork+exec)",

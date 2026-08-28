@@ -26,6 +26,7 @@
 #include "keyboard64.h"
 #include "../kernel/include/fs.h"
 #include "elf64.h"
+#include "pipe64.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -170,17 +171,30 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        if (a1 == FD_STDOUT) {
+        /* O tym, dokad idzie zapis, decyduje RODZAJ deskryptora,
+           a nie jego numer. Jedynka bez przekierowania to konsola -
+           ale po dup2 moze byc koncem potoku i program tego nie widzi. */
+        int rodzaj = task64_fd_kind((int)a1);
+        if (rodzaj == FDK_WOLNY) {
+            if (a1 != FD_STDOUT) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
             for (uint64_t i = 0; i < a3; i++)
                 printk("%c", buf[i]);
             r->rax = a3;
             return;
         }
-        int slot = task64_fd_slot((int)a1);
-        if (slot < 0) {
-            r->rax = (uint64_t)-1;
+        if (rodzaj == FDK_POTOK_W) {
+            int n = pipe64_write(task64_fd_slot((int)a1), buf, (uint32_t)a3);
+            r->rax = (uint64_t)(int64_t)n;
             return;
         }
+        if (rodzaj != FDK_PLIK) {
+            r->rax = (uint64_t)-1;   /* zapis do konca do czytania */
+            return;
+        }
+        int slot = task64_fd_slot((int)a1);
         int n = fs_write_at(slot, task64_fd_pos((int)a1), buf, (uint32_t)a3);
         if (n > 0)
             task64_fd_advance((int)a1, (uint32_t)n);
@@ -236,16 +250,27 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        if (a1 == FD_STDIN) {
+        int rodzaj = task64_fd_kind((int)a1);
+        if (rodzaj == FDK_WOLNY) {
+            if (a1 != FD_STDIN) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
             int n = keyboard64_read((char *)(uintptr_t)a2, (uint32_t)a3);
             r->rax = (uint64_t)(int64_t)n;
             return;
         }
-        int slot = task64_fd_slot((int)a1);
-        if (slot < 0) {
-            r->rax = (uint64_t)-1;
+        if (rodzaj == FDK_POTOK_R) {
+            int n = pipe64_read(task64_fd_slot((int)a1),
+                                (char *)(uintptr_t)a2, (uint32_t)a3);
+            r->rax = (uint64_t)(int64_t)n;
             return;
         }
+        if (rodzaj != FDK_PLIK) {
+            r->rax = (uint64_t)-1;   /* odczyt z konca do pisania */
+            return;
+        }
+        int slot = task64_fd_slot((int)a1);
         int n = fs_read_at(slot, task64_fd_pos((int)a1),
                            (void *)(uintptr_t)a2, (uint32_t)a3);
         if (n > 0)
@@ -381,6 +406,41 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), nazwa);
         return;
     }
+    case SYS64_PIPE: {
+        /* Program dostaje dwa numery: koniec do czytania i koniec do
+           pisania. Dopoki trzyma oba, potok nie skonczy sie nigdy -
+           dlatego shell zamyka u siebie oba zaraz po rozdaniu ich
+           dzieciom. */
+        if (!paging64_user_range(a1, 2 * sizeof(int))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int idx = pipe64_new();
+        if (idx < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int rfd = task64_fd_pipe(idx, 1);
+        int wfd = task64_fd_pipe(idx, 0);
+        if (rfd < 0 || wfd < 0) {
+            if (rfd >= 0)
+                task64_fd_close(rfd);
+            if (wfd >= 0)
+                task64_fd_close(wfd);
+            else
+                pipe64_unref(idx, 0);
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int *out = (int *)(uintptr_t)a1;
+        out[0] = rfd;
+        out[1] = wfd;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_DUP2:
+        r->rax = (uint64_t)(int64_t)task64_fd_dup2((int)a1, (int)a2);
+        return;
     case SYS64_CLOSE:
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);
         return;

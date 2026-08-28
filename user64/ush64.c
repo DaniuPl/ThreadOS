@@ -104,6 +104,83 @@ static int podziel(char *linia)
     return n;
 }
 
+/* Dwa programy polaczone potokiem.
+ *
+ * Shell zaklada potok, rozdaje jego konce dwojce dzieci i - co
+ * najwazniejsze - zamyka oba u siebie. Gdyby ich nie zamknal, drugi
+ * program czekalby na koniec danych, ktory nigdy by nie nadszedl:
+ * jeden piszacy (sam shell) zostalby przy zyciu na zawsze. */
+static char slowa2[SH_ARGS][32];
+static char *argv2[SH_ARGS + 1];
+
+static void uruchom_potok(char *lewa, char *prawa)
+{
+    int fd[2];
+    if (sys_pipe(fd) < 0) {
+        print("ush64: nie mam z czego zrobic potoku\n");
+        return;
+    }
+
+    /* Prawa strona najpierw: jej argv trzeba zbudowac, zanim podzial
+       lewej nadpisze wspolne bufory */
+    int n2 = 0, i = 0;
+    while (prawa[i] && n2 < SH_ARGS) {
+        while (prawa[i] == ' ')
+            i++;
+        if (!prawa[i])
+            break;
+        int k = 0;
+        while (prawa[i] && prawa[i] != ' ' && k < 31)
+            slowa2[n2][k++] = prawa[i++];
+        slowa2[n2][k] = '\0';
+        argv2[n2] = slowa2[n2];
+        n2++;
+    }
+    argv2[n2] = 0;
+    if (!n2) {
+        print("ush64: po kresce nic nie ma\n");
+        sys_close(fd[0]);
+        sys_close(fd[1]);
+        return;
+    }
+
+    int n1 = podziel(lewa);
+    if (!n1) {
+        print("ush64: przed kreska nic nie ma\n");
+        sys_close(fd[0]);
+        sys_close(fd[1]);
+        return;
+    }
+
+    int64_t a = sys_fork();
+    if (a == 0) {
+        sys_dup2(fd[1], FD_STDOUT);   /* wyjscie idzie do potoku */
+        sys_close(fd[0]);
+        sys_close(fd[1]);
+        sys_exec(argv[0], argv);
+        sys_exit(127);
+    }
+
+    int64_t b = sys_fork();
+    if (b == 0) {
+        sys_dup2(fd[0], FD_STDIN);    /* wejscie bierze sie z potoku */
+        sys_close(fd[0]);
+        sys_close(fd[1]);
+        sys_exec(argv2[0], argv2);
+        sys_exit(127);
+    }
+
+    /* Bez tego drugi program czekalby na koniec danych bez konca */
+    sys_close(fd[0]);
+    sys_close(fd[1]);
+
+    int kod = 0;
+    sys_wait(&kod);
+    sys_wait(&kod);
+    (void)a;
+    (void)b;
+}
+
 static void uruchom(const char *nazwa)
 {
     int64_t dziecko = sys_fork();
@@ -143,9 +220,22 @@ static void wykonaj(void)
         print(line + 5);
         print("\n");
     } else {
-        int n = podziel(line);
-        if (n)
-            uruchom(argv[0]);
+        /* Kreska dzieli linie na dwa programy - wszystko przed nia
+           pisze do tego, co czyta wszystko za nia */
+        int kreska = -1;
+        for (int i = 0; line[i]; i++)
+            if (line[i] == '|') {
+                kreska = i;
+                break;
+            }
+        if (kreska >= 0) {
+            line[kreska] = '\0';
+            uruchom_potok(line, line + kreska + 1);
+        } else {
+            int n = podziel(line);
+            if (n)
+                uruchom(argv[0]);
+        }
     }
 }
 

@@ -148,7 +148,8 @@ ProtonOS/
 │   ├── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
 │   ├── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
 │   ├── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
-│   └── uls64.c         # 'ls' jako program: pyta o wpisy po kolei
+│   ├── uls64.c         # 'ls' jako program: pyta o wpisy po kolei
+│   └── uupper64.c      # filtr: czyta wejście, pisze wielkimi literami
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -968,3 +969,22 @@ obrazie dysku.
       się bez końca na starej zawartości bufora. Popełniłem to samo
       w dwóch miejscach naraz, bo założyłem konwencję zamiast ją
       przeczytać
+- [x] **Potoki** - programy dają się łączyć w łańcuchy. Potok nie jest
+      plikiem i nie ma nic wspólnego z dyskiem: to pierścień w pamięci
+      jądra plus **dwa liczniki właścicieli**, i to one są w nim
+      ważniejsze od samego bufora, bo mówią, kiedy skończyć. Gdy zniknie
+      ostatni piszący, czytający dostaje koniec danych zamiast czekać
+      w nieskończoność. Doszedł `dup2` - to tędy przekierowuje się
+      wejście i wyjście - a o tym, dokąd idzie zapis, decyduje od teraz
+      **rodzaj deskryptora, a nie jego numer**: jedynka bez
+      przekierowania to konsola, ale po `dup2` może być końcem potoku
+      i program tego nie widzi. `uupper64` czyta z numeru zero i pisze
+      na numer jeden; to, że po drugiej stronie siedzi drugi program,
+      a nie klawiatura i ekran, jest sprawą tego, kto go uruchomił.
+      Najłatwiej tu o zawieszenie i dlatego dwie rzeczy są zrobione
+      wprost: shell zamyka **oba** końce potoku u siebie zaraz po
+      rozdaniu ich dzieciom (inaczej jeden piszący - on sam - zostałby
+      przy życiu na zawsze i czytający nigdy nie zobaczyłby końca),
+      a czekanie w `pipe64_read`/`pipe64_write` sprawdza oczekujący
+      sygnał, bo w pętli wewnątrz jądra nikt go za nie nie dostarczy.
+      Zadanie zamyka też wszystkie swoje deskryptory, gdy się kończy

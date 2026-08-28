@@ -69,8 +69,18 @@ int task64_in_heap(uint64_t addr);
 void task64_inherit_brk(struct task64 *child);
 
 /* Deskryptory otwartych plikow - tablica nalezy do zadania */
+/* Rodzaj tego, co siedzi pod numerem (musi zgadzac sie z task64.c) */
+#define FDK_WOLNY   0
+#define FDK_PLIK    1
+#define FDK_POTOK_R 2
+#define FDK_POTOK_W 3
+
 int task64_fd_open(int slot);        /* zwraca numer deskryptora albo -1 */
-int task64_fd_slot(int fd);          /* i-wezel w PFS albo -1 */
+int task64_fd_pipe(int idx, int czytelnik);
+int task64_fd_kind(int fd);
+int task64_fd_dup2(int stary, int nowy);
+void task64_fd_close_all(void);
+int task64_fd_slot(int fd);          /* i-wezel w PFS / numer potoku */
 uint32_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);
 int task64_fd_close(int fd);

@@ -17,6 +17,7 @@
 #include "syscall64.h"
 #include "fpu64.h"
 #include "../kernel/include/fs.h"
+#include "pipe64.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -35,9 +36,12 @@
 #define FD_MAX   8
 #define FD_FIRST 3
 
+/* Rodzaje siedza w naglowku - programy i syscalle tez o nich wiedza.
+   Wolny numer 0, 1 albo 2 znaczy "domyslne wejscie i wyjscie":
+   klawiatura i konsola. Dopiero przekierowanie wstawia tam cos innego. */
 struct fd_entry {
-    int used;
-    int slot;                    /* i-wezel w PFS */
+    int kind;
+    int slot;                    /* i-wezel w PFS albo numer potoku */
     uint32_t pos;                /* gdzie stoi ten konkretny czytelnik */
 };
 
@@ -116,7 +120,7 @@ void scheduler64_init(void)
     main_task->sig_handler = 0;
     main_task->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
-        main_task->fds[i].used = 0;
+        main_task->fds[i].kind = FDK_WOLNY;
     main_task->brk_base = main_task->brk = 0;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
@@ -149,7 +153,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->sig_handler = 0;
     t->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
-        t->fds[i].used = 0;
+        t->fds[i].kind = FDK_WOLNY;
     t->brk_base = t->brk = 0;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
@@ -454,6 +458,7 @@ void task64_sleep(uint32_t ms)
 void task64_exit_code(int code)
 {
     irq_save();
+    task64_fd_close_all();
     drop_space(current);
     record_exit(current, code);
     current->state = TASK_ZOMBIE;
@@ -465,6 +470,7 @@ void task64_exit_code(int code)
 void task64_exit(void)
 {
     irq_save();
+    task64_fd_close_all();
     drop_space(current);
     record_exit(current, 0);
     current->state = TASK_ZOMBIE;
@@ -483,6 +489,7 @@ void task64_kill_current(const char *why)
     irq_save();
     printk("[jadro] zadanie %d (%s) zabite: %s\n",
            current->id, current->name, why);
+    task64_fd_close_all();
     drop_space(current);
     record_exit(current, -1);          /* zabite, czyli nie swoja smiercia */
     current->state = TASK_ZOMBIE;
@@ -598,8 +605,8 @@ int task64_fd_open(int slot)
     irqflags_t flags = irq_save();
     int fd = -1;
     for (int i = FD_FIRST; i < FD_MAX; i++) {
-        if (!current->fds[i].used) {
-            current->fds[i].used = 1;
+        if (current->fds[i].kind == FDK_WOLNY) {
+            current->fds[i].kind = FDK_PLIK;
             current->fds[i].slot = slot;
             current->fds[i].pos = 0;
             fd = i;
@@ -610,41 +617,118 @@ int task64_fd_open(int slot)
     return fd;
 }
 
+/* Numer dla konca potoku. Szukamy od trzeciego, bo zero i jeden maja
+   znaczenie umowne i wstawia sie tam tylko przez dup2. */
+int task64_fd_pipe(int idx, int czytelnik)
+{
+    irqflags_t flags = irq_save();
+    int fd = -1;
+    for (int i = FD_FIRST; i < FD_MAX; i++) {
+        if (current->fds[i].kind == FDK_WOLNY) {
+            current->fds[i].kind = czytelnik ? FDK_POTOK_R : FDK_POTOK_W;
+            current->fds[i].slot = idx;
+            current->fds[i].pos = 0;
+            fd = i;
+            break;
+        }
+    }
+    irq_restore(flags);
+    return fd;
+}
+
+int task64_fd_kind(int fd)
+{
+    if (fd < 0 || fd >= FD_MAX)
+        return FDK_WOLNY;
+    return current->fds[fd].kind;
+}
+
 int task64_fd_slot(int fd)
 {
-    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_WOLNY)
         return -1;
     return current->fds[fd].slot;
 }
 
 uint32_t task64_fd_pos(int fd)
 {
-    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_PLIK)
         return 0;
     return current->fds[fd].pos;
 }
 
 void task64_fd_advance(int fd, uint32_t n)
 {
-    if (fd >= FD_FIRST && fd < FD_MAX && current->fds[fd].used)
+    if (fd >= 0 && fd < FD_MAX && current->fds[fd].kind == FDK_PLIK)
         current->fds[fd].pos += n;
+}
+
+/* Zamkniecie konca potoku zmniejsza liczbe wlascicieli - i to wlasnie
+   ono sprawia, ze czytajacy kiedykolwiek zobaczy koniec danych */
+static void zwolnij(struct task64 *t, int fd)
+{
+    if (t->fds[fd].kind == FDK_POTOK_R)
+        pipe64_unref(t->fds[fd].slot, 1);
+    else if (t->fds[fd].kind == FDK_POTOK_W)
+        pipe64_unref(t->fds[fd].slot, 0);
+    t->fds[fd].kind = FDK_WOLNY;
 }
 
 int task64_fd_close(int fd)
 {
-    if (fd < FD_FIRST || fd >= FD_MAX || !current->fds[fd].used)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_WOLNY)
         return -1;
-    current->fds[fd].used = 0;
+    irqflags_t flags = irq_save();
+    zwolnij(current, fd);
+    irq_restore(flags);
     return 0;
 }
 
+/* Przepisanie numeru: to tedy przekierowuje sie wejscie i wyjscie.
+   Cel jest najpierw zamykany, bo zwykle jest to zero albo jeden. */
+int task64_fd_dup2(int stary, int nowy)
+{
+    if (stary < 0 || stary >= FD_MAX || nowy < 0 || nowy >= FD_MAX)
+        return -1;
+    if (current->fds[stary].kind == FDK_WOLNY)
+        return -1;
+    if (stary == nowy)
+        return nowy;
+
+    irqflags_t flags = irq_save();
+    if (current->fds[nowy].kind != FDK_WOLNY)
+        zwolnij(current, nowy);
+    current->fds[nowy] = current->fds[stary];
+    if (current->fds[nowy].kind == FDK_POTOK_R)
+        pipe64_ref(current->fds[nowy].slot, 1);
+    else if (current->fds[nowy].kind == FDK_POTOK_W)
+        pipe64_ref(current->fds[nowy].slot, 0);
+    irq_restore(flags);
+    return nowy;
+}
+
+/* Zamyka wszystko, co zadanie trzymalo - wolane, gdy sie konczy.
+   Bez tego potok nigdy nie zobaczylby konca piszacych. */
+void task64_fd_close_all(void)
+{
+    for (int i = 0; i < FD_MAX; i++)
+        if (current->fds[i].kind != FDK_WOLNY)
+            zwolnij(current, i);
+}
+
 /* Dziecko dziedziczy otwarte pliki razem z miejscem, w ktorym stoja -
-   tak samo, jak dziedziczy pamiec */
+   tak samo, jak dziedziczy pamiec. Potoki dostaja przy tym kolejnego
+   wlasciciela, bo od teraz trzyma je dwoch. */
 void task64_inherit_fds(struct task64 *child)
 {
     irqflags_t flags = irq_save();
-    for (int i = 0; i < FD_MAX; i++)
+    for (int i = 0; i < FD_MAX; i++) {
         child->fds[i] = current->fds[i];
+        if (child->fds[i].kind == FDK_POTOK_R)
+            pipe64_ref(child->fds[i].slot, 1);
+        else if (child->fds[i].kind == FDK_POTOK_W)
+            pipe64_ref(child->fds[i].slot, 0);
+    }
     irq_restore(flags);
 }
 

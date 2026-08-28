@@ -36,6 +36,8 @@
 #define SYS64_GETCWD    18
 #define SYS64_READDIR   19
 #define SYS64_UNLINK    20
+#define SYS64_PIPE      21
+#define SYS64_DUP2      22
 
 #define NAME_MAX64 63
 
@@ -159,6 +161,20 @@ static inline int64_t sys_exec(const char *name, char *const argv[])
 {
     return syscall64_3(SYS64_EXEC, (int64_t)(uintptr_t)name,
                        (int64_t)ustrlen(name), (int64_t)(uintptr_t)argv);
+}
+
+/* Zaklada potok. Wpisuje dwa numery: fd[0] do czytania, fd[1] do
+   pisania. Dopoki proces trzyma oba, potok nie skonczy sie nigdy. */
+static inline int64_t sys_pipe(int fd[2])
+{
+    return syscall64(SYS64_PIPE, (int64_t)(uintptr_t)fd, 0);
+}
+
+/* Przepisuje numer deskryptora - tedy przekierowuje sie wejscie
+   i wyjscie programu, ktory o niczym nie wie */
+static inline int64_t sys_dup2(int stary, int nowy)
+{
+    return syscall64(SYS64_DUP2, stary, nowy);
 }
 
 /* Jeden wpis katalogu. Uklad musi zgadzac sie z tym, co wypelnia

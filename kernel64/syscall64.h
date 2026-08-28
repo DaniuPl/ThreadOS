@@ -24,6 +24,8 @@
 #define SYS64_GETCWD    18
 #define SYS64_READDIR   19
 #define SYS64_UNLINK    20
+#define SYS64_PIPE      21
+#define SYS64_DUP2      22
 
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
