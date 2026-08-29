@@ -1,8 +1,42 @@
 # ProtonOS
 
-Własny system operacyjny na PC (x86, 32-bit), pisany od zera w C i asemblerze.
-Jądro jest zgodne ze specyfikacją **Multiboot**, więc bootuje je GRUB albo
+Własny system operacyjny na PC, pisany od zera w C i asemblerze.
+
+Są dwa jądra i **jeden zbiór plików źródłowych**. Pierwsze jest
+32-bitowe i startuje w trybie chronionym; drugie wchodzi w tryb długi
+(x86-64) i uruchamia się także na maszynie bez BIOS-u, przez UEFI.
+Nie są to dwie kopie tego samego: sterowniki, system plików, sieć
+i konsola to te same pliki kompilowane drugi raz, a wszystko, co
+naprawdę zależy od trybu procesora - stronicowanie, przerwania,
+przełączanie zadań - ma osobne implementacje i tylko one.
+
+Oba jądra są zgodne z **Multibootem**, więc ładuje je GRUB albo
 bezpośrednio QEMU.
+
+## Co system potrafi
+
+**Wspólne dla obu jąder** (te same pliki, kompilowane dwa razy):
+
+| | |
+|---|---|
+| Sprzęt | PIC, PIT, klawiatura PS/2, port szeregowy, PCI, RTC |
+| Dyski | ATA PIO oraz AHCI (SATA, DMA) za wspólną warstwą blokową |
+| System plików | PFS3 - bitmapa bloków, i-węzły, katalogi, pliki do 64 MiB |
+| Sieć | RTL8139, ARP, ICMP, UDP, DHCP, TCP, DNS |
+| Obraz | tryb 13h (8 bpp) i bufor od loadera (24/32 bity), konsola i grafika |
+
+**Jądro 32-bitowe**: procesy w ring 3 z `fork`/`exec`, kopiowanie przy
+zapisie, wymiana stron na dysk, sygnały, potoki, cztery konsole
+wirtualne, klawiatura USB (UHCI), ACPI, TLS 1.3 z weryfikacją
+certyfikatów, pulpit graficzny z oknami, ikonami, menedżerem plików
+i przeglądarką.
+
+**Jądro 64-bitowe**: tryb długi, stronicowanie czteropoziomowe z zakazem
+wykonywania, `syscall`/`sysret`, procesy z `fork`/`exec`/`wait`
+i kopiowaniem przy zapisie, sygnały, deskryptory plików, potoki, sterta
+na żądanie, SSE ze stanem zapisywanym przy przełączaniu zadań, shell
+w jądrze **i** w przestrzeni użytkownika, sieć z ring 3, rozruch przez
+BIOS i UEFI z jednej płyty.
 
 ## Struktura projektu
 
@@ -127,12 +161,27 @@ ProtonOS/
 │   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
 │   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
-│   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
-├── kernel64/           # jądro trybu długiego (x86-64)
-│   ├── compat64.c      # słownik zadań dla kodu wspólnego (net, tcp)
-│   ├── kbdmap.c → kernel/  # tłumaczenie scancode'ów wspólne z 32-bit
+│   ├── ptest.py        # wspólna część testu: klasa Qemu, serwery, check
+│   ├── run_testy.py    # uruchamia grupy testu równolegle (make test)
+│   └── testy/          # grupy: rdzeń, k64, gfx64, sieć, pulpit, ISO…
+├── boot64/             # wejście w tryb długi, stuby przerwań, syscall
+├── kernel64/           # jądro trybu długiego (x86-64) - tylko to,
+│   │                   # co naprawdę zależy od trybu procesora
+│   ├── kmain64.c       # kolejność startu i sprawdziany podsystemów
+│   ├── paging64.c      # cztery poziomy tablic, NX, przestrzenie procesów
+│   ├── task64.c        # zadania, sygnały, deskryptory, katalog roboczy
+│   ├── proc64.c        # fork, exec, uruchamianie programów z initrd
+│   ├── elf64.c         # ładowanie ELF64 z prawami wprost z segmentów
+│   ├── signal64.c      # dostarczanie sygnału przez podmianę ramki
+│   ├── pipe64.c        # potoki: pierścień plus liczniki właścicieli
+│   ├── fpu64.c         # SSE i stan jednostki zmiennoprzecinkowej
+│   ├── syscall64.c     # wszystkie wywołania systemowe
+│   ├── idt64.c         # bramki 16-bajtowe, IST
+│   ├── gdt64.c         # segmenty w kolejności wymaganej przez sysret
 │   ├── keyboard64.c    # IRQ 1 i kolejka znaków
-│   └── shell64.c       # shell jako wątek jądra
+│   ├── shell64.c       # shell jako wątek jądra
+│   ├── isr64.c         # wyjątki: NX, brak strony, śmierć programu
+│   └── compat64.c      # słownik zadań dla kodu wspólnego (net, tcp)
 ├── user64/             # programy trybu długiego (ELF64 w initrd64)
 │   ├── usys64.h        # syscalle przez instrukcję syscall
 │   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
@@ -174,7 +223,9 @@ ProtonOS/
 ```sh
 make          # buduje build/protonos.bin
 make run      # uruchamia jądro w QEMU (najprostsza droga)
-make test     # automatyczny test: boot headless + weryfikacja ekranu VGA
+make test     # automatyczny test e2e w QEMU (grupy równolegle)
+make test T=k64      # jedna grupa - szybka pętla przy pracy (~80 s)
+make test J=1        # grupy jedna po drugiej, do debugowania
 make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
 make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
 make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
@@ -192,11 +243,44 @@ szeregowy (`make run` + opcja `-serial stdio` w QEMU pokaże je w terminalu).
 Testy uruchamiają część instancji z `-append nodesktop` (sprawdzają
 konsolę), a część bez niej - żeby przejść ścieżkę, którą widzi użytkownik.
 
-`make test` bootuje jądro w QEMU bez okna i przez QMP sprawdza zawartość
-ekranu VGA, tykanie timera oraz echo klawiatury (wstrzykuje klawisze
-poleceniem `sendkey`) - można rozwijać system bez wpatrywania się w okno.
-Test uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**, więc
-weryfikuje też, że pliki zapisane na PFS przeżywają restart.
+### Jądro 64-bitowe
+
+```sh
+make kernel64        # build/protonos64.bin + initrd64.img
+make run-iso64-uefi  # płyta hybrydowa pod firmware UEFI (OVMF)
+make test T=k64      # sprawdzenia tego jądra (~80 s)
+```
+
+Po starcie wita shell `proton64>`. Polecenia: `help`, `ps`, `mem`,
+`uptime`, `clear`, `ls` (initrd), `fls`, `pwd`, `cd`, `mkdir`, `cat`,
+`write`, `rm`, `disk`, `gfx`, `ifconfig`, `arp`, `ping` oraz
+`run <program> [argumenty]`.
+
+W initrd leżą programy: `hello64`, `ush64` (shell w ring 3 - `fork`,
+`exec`, `wait`, potoki przez `|`), `uecho64`, `ucat64`, `uls64`,
+`uupper64`, `unet64`, `heap64`, `fileio64`, `fpu64test`, `sep64`,
+`fork64`, `spawn64` oraz trzy, które **mają zginąć**: `nx64` próbuje
+wykonać własne dane, `wild64` sięga po pamięć jądra, a `spin64` kręci
+się bez końca, dopóki nie dostanie Ctrl+C.
+
+### Jądro 32-bitowe
+
+Wszystko poniżej opisuje jądro 32-bitowe - ono ma pulpit graficzny,
+TLS, przeglądarkę i wymianę stron na dysk.
+
+`make test` uruchamia jądro w QEMU bez okna i przez QMP sprawdza
+zawartość ekranu, tykanie timera oraz echo klawiatury (wstrzykuje
+klawisze poleceniem `sendkey`) - można rozwijać system bez wpatrywania
+się w okno. Ponad czterysta sprawdzeń podzielonych jest na **grupy
+chodzące równolegle**, bo każda potrzebuje własnej maszyny, a te
+większość czasu i tak czekają: na rozruch, na odpowiedź, na
+przerysowanie ekranu. Grupy leżą w `scripts/testy/`, jedna na plik,
+a `T=` wybiera pojedynczą - przy pracy nad jednym podsystemem to
+różnica między osiemdziesięcioma sekundami a pięcioma minutami.
+
+Kilka grup uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**,
+więc weryfikują też, że pliki zapisane na PFS przeżywają restart - i to
+jest jedyny rozstrzygający dowód, że leżą na dysku, a nie w pamięci.
 
 `make run` podpina też kartę sieciową RTL8139 w trybie użytkownika QEMU
 (`-netdev user`). Adres IP nie jest wpisany na sztywno - zaraz po starcie
@@ -246,16 +330,41 @@ obrazie dysku.
 
 ## Jak to działa
 
-1. **GRUB/QEMU** znajduje w pierwszych 8 KiB obrazu nagłówek Multiboot
-   (`boot/boot.S`), ładuje jądro pod adres 1 MiB i skacze do `_start`
-   już w 32-bitowym trybie chronionym.
-2. `_start` ustawia stos (16 KiB w sekcji `.bss`) i woła `kmain()`,
-   przekazując magic Multiboot oraz wskaźnik na strukturę z informacjami
-   od bootloadera (m.in. mapę pamięci).
-3. `kmain()` inicjalizuje sterownik VGA i wypisuje tekst, pisząc
-   bezpośrednio do bufora pod adresem `0xB8000`.
+**Jądro 32-bitowe.** GRUB albo QEMU znajduje w pierwszych 8 KiB obrazu
+nagłówek Multiboot (`boot/boot.S`), ładuje jądro pod adres 1 MiB
+i skacze do `_start` już w trybie chronionym. Stamtąd `kmain()` stawia
+po kolei GDT, IDT, PIC i PIT, buduje mapę pamięci fizycznej ze
+znacznika od loadera, włącza stronicowanie, a na końcu uruchamia
+scheduler i shell.
 
-## Plan rozwoju
+**Jądro 64-bitowe.** Multiboot 2 zostawia procesor w trybie chronionym,
+więc przejście w tryb długi trzeba wykonać samemu i w ściśle określonej
+kolejności (`boot64/boot64.S`): najpierw tablice stron, bo stronicowanie
+jest w trybie długim **obowiązkowe**, potem PAE, potem bit LME w EFER,
+potem samo stronicowanie - i dopiero skok daleki do segmentu z bitem L
+przełącza procesor naprawdę. Że się udało, mówi sam procesor: bit LMA
+w EFER ustawia on, nie my.
+
+**Rozruch przez UEFI.** `make iso64` składa płytę **hybrydową**:
+z jednej strony sektor rozruchowy dla BIOS-u, z drugiej partycja FAT
+z programem `BOOTX64.EFI`. Ta sama płyta wstaje więc i na starej, i na
+nowej maszynie. Pod UEFI nie ma pamięci znaków spod `0xB8000` - jedyne,
+co dostajemy od firmware, to bufor obrazu, więc znaki rysuje sobie
+`fbcon.c` własną czcionką, piksel po pikselu.
+
+**Programy.** Leżą w initrd jako ELF-y i jądro nie wie o nich nic ponad
+to, co przeczyta z nagłówka: gdzie zacząć, co załadować i z jakimi
+prawami. Prawa biorą się wprost z segmentów, więc kod jest tylko do
+odczytu, a dane i stos dostają zakaz wykonywania - i pilnuje tego
+procesor, nie jądro.
+
+## Dziennik rozwoju
+
+Lista jest chronologiczna i opisuje **dlaczego** coś wygląda tak, a nie
+inaczej - łącznie z błędami, które po drodze wyszły, bo one tłumaczą
+kształt kodu lepiej niż sam kod. Wszystko poniżej działa i jest
+sprawdzane przez `make test`.
+
 
 - [x] GDT (Global Descriptor Table) - własne deskryptory segmentów
 - [x] IDT + obsługa wyjątków CPU
@@ -1025,3 +1134,19 @@ obrazie dysku.
       połączenie TCP z serwerem HTTP stojącym na hoście - w sieci
       użytkownika QEMU brama `10.0.2.2` **jest** hostem, więc żadne
       przekierowanie portów nie jest do tego potrzebne
+- [x] **Tryb graficzny w jądrze 64-bitowym** - `video.c` przeszedł jak
+      reszta, ale wyszła przy tym rzecz, która w jądrze 32-bitowym nie
+      mogła wyjść: przyjmując bufor od loadera wpisywał sobie **na
+      sztywno 32 bity na piksel**. Działało to, dopóki bufor przychodził
+      z BIOS-u; firmware UEFI potrafi podać 24, a wtedy zapis całym
+      słowem zadeptuje sąsiedni piksel. Teraz głębia jest taka, jaką
+      loader naprawdę dał - dokładnie ta sama poprawka, co wcześniej
+      w konsoli. Shell dostał `gfx`: cztery prostokąty w rogach, ramka
+      i napis własną czcionką. Rysunek jest prosty celowo, bo każdy błąd
+      w liczeniu adresu piksela widać na nim od razu - zły bajt na
+      piksel rozjeżdża obraz w skos, a zamienione kanały widać po
+      kolorach. Test sprawdza go pod BIOS-em **i** pod UEFI, bo to
+      firmware decyduje, ile bitów ma piksel. Po drodze własna pomyłka
+      warta zapamiętania: pierwszy wzorzec użył numerów kolorów trybu
+      **tekstowego**, a paleta `video.c` ma zdefiniowane własne indeksy
+      0-5 - kod rysował dobrze, to wzorzec był w złych kolorach

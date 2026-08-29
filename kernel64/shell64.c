@@ -28,7 +28,9 @@
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
+#include "../kernel/include/video.h"
 #include "../kernel/include/vga.h"
 
 #define LINE_MAX 80
@@ -58,7 +60,7 @@ static void cmd_help(void)
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
     printk("           rm <plik>, uptime, run <program>, clear,\n");
-    printk("           ifconfig, arp, ping <adres>\n");
+    printk("           ifconfig, arp, ping <adres>, gfx\n");
 }
 
 static void cmd_mem(void)
@@ -194,6 +196,48 @@ static void cmd_write(char *reszta)
         printk("write: '%s' zapisany (%u B)\n", reszta, len);
 }
 
+/* Rysunek sprawdzajacy tryb graficzny.
+ *
+ * Cztery prostokaty w rogach, ramka i napis - tyle wystarczy, zeby
+ * bylo widac, czy kolory trafiaja tam, gdzie trzeba, i czy piksel
+ * o wspolrzednych (x, y) laduje pod (x, y). Zle policzony bajt na
+ * piksel widac tu od razu: obraz rozjezdza sie w skos.
+ */
+static void cmd_gfx(void)
+{
+    if (!video_w()) {
+        printk("gfx: brak trybu graficznego\n");
+        return;
+    }
+    int w = video_w(), h = video_h();
+
+    /* Komunikat PRZED rysunkiem: konsola i rysunek dziela ten sam
+       bufor, a kazdy wypis przerysowuje ja w calosci - wiec wszystko,
+       co napisane po rysunku, wchodzi na niego. */
+    printk("gfx: rysuje %ux%u, %u bitow na piksel\n",
+           (uint32_t)w, (uint32_t)h, (uint32_t)fbcon_bpp());
+
+    /* Paleta video.c ma zdefiniowane indeksy 0-5, a nie szesnascie
+       kolorow trybu tekstowego: 1 czerwony, 2 zielony, 3 niebieski,
+       4 bialy, 5 zolty. */
+    video_clear(3);                                    /* niebieskie tlo */
+    video_fill_rect(0, 0, w / 4, h / 4, 1);            /* lewy gorny  */
+    video_fill_rect(w - w / 4, 0, w / 4, h / 4, 2);    /* prawy gorny */
+    video_fill_rect(0, h - h / 4, w / 4, h / 4, 5);    /* lewy dolny  */
+    video_fill_rect(w - w / 4, h - h / 4, w / 4, h / 4, 4);
+
+    for (int x = 0; x < w; x++) {
+        video_putpixel(x, 0, 4);
+        video_putpixel(x, h - 1, 4);
+    }
+    for (int y = 0; y < h; y++) {
+        video_putpixel(0, y, 4);
+        video_putpixel(w - 1, y, 4);
+    }
+    video_draw_string(w / 2 - 112, h / 2, "ProtonOS 64 - tryb graficzny", 4);
+    video_present();
+}
+
 static void cmd_uptime(void)
 {
     uint32_t t = pit_ticks();
@@ -263,6 +307,8 @@ static void execute(void)
             cmd_write(reszta);
         else
             printk("write: podaj nazwe i tresc\n");
+    } else if (!strcmp(line, "gfx")) {
+        cmd_gfx();
     } else if (!strcmp(line, "ifconfig")) {
         net_ifconfig();
     } else if (!strcmp(line, "arp")) {

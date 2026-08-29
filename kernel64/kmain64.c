@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include "../kernel/include/mb2.h"
 #include "../kernel/include/fbcon.h"
+#include "../kernel/include/video.h"
 #include "../kernel/include/vga.h"
 #include "../kernel/include/serial.h"
 #include "../kernel/include/printk.h"
@@ -164,10 +165,13 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     const struct multiboot_info *mbi = mb2_info(magic, info_addr);
 
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
-    int fb_taken = lfb && fbcon_set_framebuffer(lfb->addr, lfb->pitch,
-                                                (int)lfb->width,
-                                                (int)lfb->height,
-                                                (int)lfb->bpp) == 0;
+    /* Bufor od loadera przejmuje video: ono ustawia i konsole
+       (przez fbcon), i wlasny stan do rysowania. Dzieki temu tryb
+       tekstowy i graficzny to ten sam bufor, tylko inaczej uzyty. */
+    int fb_taken = lfb && video_adopt_lfb(lfb->addr, lfb->pitch,
+                                          (int)lfb->width,
+                                          (int)lfb->height,
+                                          (int)lfb->bpp) == 0;
     if (fb_taken)
         console_use_framebuffer();
 
@@ -213,6 +217,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     pmm_init(mbi);
     printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
+
+    /* Bufor obrazu lezy wysoko, poza pamiecia opisana przy starcie -
+       trzeba go dokleic do mapowania, zanim cokolwiek na nim
+       napiszemy */
+    if (fbcon_have())
+        video_map_lfb();
 
     if (paging64_init() < 0) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);

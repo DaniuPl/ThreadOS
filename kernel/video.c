@@ -12,7 +12,17 @@
 #include "include/font8x8.h"
 #include "include/fbcon.h"
 #include "include/pci.h"
+
+/* Bufor obrazu lezy poza pamiecia zarzadzana przez jadro - trzeba go
+   dokleic do mapowania, a robi to w kazdym trybie inny kod. To jedyne
+   miejsce w tym pliku, ktore o trybie procesora w ogole wie. */
+#ifdef __x86_64__
+#include "../kernel64/paging64.h"
+#define MAP_PHYS(a, n) paging64_map_phys((a), (n))
+#else
 #include "include/paging.h"
+#define MAP_PHYS(a, n) paging_map_phys((a), (n))
+#endif
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/io.h"
@@ -20,11 +30,12 @@
 /* Stan biezacego trybu. Rysujemy do 'fb' (bufor roboczy); 'front' to
    widoczny framebuffer. Gdy sa rozne (podwojne buforowanie), gotowa
    klatke przenosi video_present() - to usuwa migotanie i rozrywanie. */
-static volatile uint8_t *fb = (uint8_t *)0xA0000;
-static volatile uint8_t *front = (uint8_t *)0xA0000;
+static volatile uint8_t *fb = (uint8_t *)(uintptr_t)0xA0000;
+static volatile uint8_t *front = (uint8_t *)(uintptr_t)0xA0000;
 static int vid_w = 320, vid_h = 200;
 static int vid_pitch = 320;          /* bajtow na wiersz */
 static int vid_bpp = 8;
+static int vid_bypp = 1;             /* bajtow na piksel: 1, 3 albo 4 */
 static uint32_t palette_rgb[256];    /* programowa paleta (0x00RRGGBB) */
 
 int video_w(void) { return vid_w; }
@@ -97,7 +108,8 @@ static void set_default_palette(void)
 void video_init(void)
 {
     vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
-    fb = front = (uint8_t *)0xA0000;     /* bez podwojnego buforowania */
+    fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* bez podwojnego buforowania */
+    vid_bypp = 1;
     write_regs(mode13);
     set_default_palette();
     video_clear(0);
@@ -123,7 +135,7 @@ int video_init_vesa(int w, int h)
         uint32_t bytes = (uint32_t)vid_h * vid_pitch;
         uint32_t back = pmm_alloc_contiguous((bytes + 4095) / 4096);
         if (back)
-            fb = (uint8_t *)back;
+            fb = (uint8_t *)(uintptr_t)back;
         video_clear(0);
         video_present();
         return 0;
@@ -132,7 +144,7 @@ int video_init_vesa(int w, int h)
     uint32_t lfb = pci_find_vga_lfb();
     if (!lfb)
         return -1;
-    if (paging_map_phys(lfb, (uint32_t)w * h * 4) < 0)
+    if (MAP_PHYS(lfb, (uint32_t)w * h * 4) < 0)
         return -1;
 
     dispi(4, 0x00);          /* wylacz przed zmiana trybu */
@@ -141,14 +153,14 @@ int video_init_vesa(int w, int h)
     dispi(3, 32);            /* BPP */
     dispi(4, 0x41);          /* ENABLED | LFB */
 
-    vid_w = w; vid_h = h; vid_pitch = w * 4; vid_bpp = 32;
-    front = (uint8_t *)lfb;
+    vid_w = w; vid_h = h; vid_pitch = w * 4; vid_bpp = 32; vid_bypp = 4;
+    front = (uint8_t *)(uintptr_t)lfb;
 
     /* Bufor roboczy w RAM (podwojne buforowanie - bez migotania) */
     uint32_t bytes = (uint32_t)w * h * 4;
     uint32_t pages = (bytes + 4095) / 4096;
     uint32_t back = pmm_alloc_contiguous(pages);
-    fb = back ? (uint8_t *)back : front;   /* bez RAM - rysuj wprost do LFB */
+    fb = back ? (uint8_t *)(uintptr_t)back : front;  /* bez RAM - wprost do LFB */
 
     set_default_palette();
     video_clear(0);
@@ -174,8 +186,13 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     vid_w = w;
     vid_h = h;
     vid_pitch = (int)pitch;
-    vid_bpp = 32;
-    fb = front = (uint8_t *)addr;
+    /* Glebia taka, jaka loader naprawde dal. Wpisywanie tu na sztywno
+       trzydziestu dwoch bitow dzialalo, dopoki bufor przychodzil
+       z BIOS-u - firmware UEFI potrafi podac 24, a wtedy zapis calym
+       slowem zadeptuje sasiedni piksel. */
+    vid_bpp = bpp;
+    vid_bypp = bpp / 8;
+    fb = front = (uint8_t *)(uintptr_t)addr;
     lfb_addr = addr;
     lfb_bytes = pitch * (uint32_t)h;
     lfb_from_loader = 1;
@@ -190,7 +207,7 @@ int video_map_lfb(void)
 {
     if (!lfb_from_loader)
         return 0;
-    return paging_map_phys(lfb_addr, lfb_bytes);
+    return MAP_PHYS(lfb_addr, lfb_bytes);
 }
 
 int video_have_loader_lfb(void)
@@ -221,6 +238,20 @@ void video_present(void)
 
 /* --- Rysowanie (niezalezne od trybu) --- */
 
+/* Jeden piksel pod gotowym adresem. Przy 24 bitach nie ma bajtu
+   dopelnienia, wiec zapis calym slowem zadeptalby sasiada - trzeba
+   pisac trzema bajtami. */
+static inline void put_px(volatile uint8_t *p, uint32_t rgb)
+{
+    if (vid_bypp == 4) {
+        *(volatile uint32_t *)p = rgb;
+    } else {
+        p[0] = (uint8_t)(rgb & 0xFF);
+        p[1] = (uint8_t)((rgb >> 8) & 0xFF);
+        p[2] = (uint8_t)((rgb >> 16) & 0xFF);
+    }
+}
+
 void video_putpixel(int x, int y, uint8_t color)
 {
     if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
@@ -228,7 +259,7 @@ void video_putpixel(int x, int y, uint8_t color)
     if (vid_bpp == 8)
         fb[y * vid_pitch + x] = color;
     else
-        *(volatile uint32_t *)(fb + y * vid_pitch + x * 4) = palette_rgb[color];
+        put_px(fb + y * vid_pitch + x * vid_bypp, palette_rgb[color]);
 }
 
 void video_clear(uint8_t color)
@@ -238,9 +269,11 @@ void video_clear(uint8_t color)
             fb[i] = color;
     } else {
         uint32_t c = palette_rgb[color];
-        volatile uint32_t *p = (volatile uint32_t *)fb;
-        for (int i = 0; i < vid_w * vid_h; i++)
-            p[i] = c;
+        for (int y = 0; y < vid_h; y++) {
+            volatile uint8_t *row = fb + (uint32_t)y * vid_pitch;
+            for (int x = 0; x < vid_w; x++)
+                put_px(row + x * vid_bypp, c);
+        }
     }
 }
 
