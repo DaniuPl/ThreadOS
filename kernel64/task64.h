@@ -54,6 +54,8 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer);
 uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
+int task64_id_current(void);
+int task64_alive(int id);            /* czy zadanie o tym numerze zyje */
 
 /* Katalog roboczy zadania - dziecko zaczyna tam, gdzie stal rodzic */
 int task64_cwd(void);

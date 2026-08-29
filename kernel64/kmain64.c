@@ -35,6 +35,10 @@
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/net.h"
+#include "../kernel/include/rtl8139.h"
+#include "../kernel/include/dhcp.h"
+#include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
 
 /* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
@@ -482,9 +486,31 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ !! ] Dysk: zaden kontroler nie odpowiedzial\n");
     }
 
+    /* --- Siec --------------------------------------------------- */
+    /* Karta, warstwa IP, DHCP i TCP to znowu te same pliki, co
+       w jadrze 32-bitowym. Trzy z czterech przeszly bez jednej
+       zmiany - sterownik karty potrzebowal tylko jawnego rzutowania
+       adresow, bo karta adresuje pamiec 32 bitami, a wskaznik ma tu
+       osiem bajtow. */
+    int siec = net_init();
+    if (siec) {
+        const uint8_t *m = rtl8139_mac();
+        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x\n",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+    } else {
+        printk("[ !! ] Siec: nie znalazlem karty RTL8139\n");
+    }
+
     /* --- Wejscie z klawiatury ----------------------------------- */
     keyboard64_init();
     printk("[ OK ] Klawiatura PS/2 (IRQ 1)\n");
+
+    /* Adres IP bierze sie z sieci, a klient DHCP czeka na odpowiedzi
+       serwera - musi wiec chodzic w watku, czyli po schedulerze */
+    if (siec) {
+        dhcp_start();
+        tcp_init();
+    }
 
     printk("\nSystem 64-bitowy gotowy - wpisz 'help'.\n");
     shell64_start();

@@ -552,6 +552,25 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer)
 uint64_t task64_sighandler(void)  { return current->sig_handler; }
 uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
 int task64_current_id(void)       { return current ? current->id : -1; }
+int task64_id_current(void)       { return current ? current->id : -1; }
+
+/* Czy zadanie o tym numerze wciaz zyje. Zombie sie nie liczy - kod
+   sieciowy pyta o to, zeby posprzatac gniazda po zmarlych. */
+int task64_alive(int id)
+{
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    int zyje = 0;
+    do {
+        if (t->id == id && t->state != TASK_ZOMBIE) {
+            zyje = 1;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return zyje;
+}
 
 /* Katalog roboczy jest wlasnoscia zadania, tak samo jak deskryptory:
    dwa procesy moga stac w innych miejscach drzewa i zadne z nich nie

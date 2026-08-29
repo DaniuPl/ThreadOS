@@ -129,6 +129,7 @@ ProtonOS/
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   └── vga_smoke_test.py  # automatyczny test e2e w QEMU (make test)
 ├── kernel64/           # jądro trybu długiego (x86-64)
+│   ├── compat64.c      # słownik zadań dla kodu wspólnego (net, tcp)
 │   ├── kbdmap.c → kernel/  # tłumaczenie scancode'ów wspólne z 32-bit
 │   ├── keyboard64.c    # IRQ 1 i kolejka znaków
 │   └── shell64.c       # shell jako wątek jądra
@@ -988,3 +989,19 @@ obrazie dysku.
       a czekanie w `pipe64_read`/`pipe64_write` sprawdza oczekujący
       sygnał, bo w pętli wewnątrz jądra nikt go za nie nie dostarczy.
       Zadanie zamyka też wszystkie swoje deskryptory, gdy się kończy
+- [x] **Sieć w trybie długim**: karta RTL8139, warstwa IP, DHCP i TCP -
+      znowu te same pliki, co w jądrze 32-bitowym. **Trzy z czterech
+      przeszły bez jednej zmiany**; sterownik karty potrzebował tylko
+      jawnego rzutowania adresów, bo karta adresuje pamięć 32 bitami,
+      a wskaźnik ma tu osiem bajtów (bufory leżą w obrazie jądra, tuż
+      nad megabajtem, więc adres mieści się z zapasem - ale rzutowanie
+      musi być widoczne). Nie kompilowały się natomiast z innego
+      powodu: kod sieciowy mówi do jądra kilkoma funkcjami - uśpij
+      mnie, czy mam zginąć, czy tamto zadanie jeszcze żyje, zrób nowy
+      wątek - a scheduler nazywa się tu inaczej. Zamiast rozsypywać po
+      nich warunki na tryb, doszedł `kernel64/compat64.c`: **te nazwy
+      są umową, a co za nimi stoi, jest sprawą jądra**. Ten jeden plik
+      jest całą różnicą. Dowód z prawdziwego biegu: DHCP przyznaje
+      adres, `ifconfig` pokazuje maskę, bramę i DNS, `ping` na bramę
+      wraca 3/3, a tablica ARP zna jej adres sprzętowy - czyli ramki
+      naprawdę wychodzą i wracają

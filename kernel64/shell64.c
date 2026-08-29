@@ -28,6 +28,7 @@
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/net.h"
 #include "../kernel/include/vga.h"
 
 #define LINE_MAX 80
@@ -56,7 +57,8 @@ static void cmd_help(void)
 {
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
-    printk("           rm <plik>, uptime, run <program>, clear\n");
+    printk("           rm <plik>, uptime, run <program>, clear,\n");
+    printk("           ifconfig, arp, ping <adres>\n");
 }
 
 static void cmd_mem(void)
@@ -261,6 +263,19 @@ static void execute(void)
             cmd_write(reszta);
         else
             printk("write: podaj nazwe i tresc\n");
+    } else if (!strcmp(line, "ifconfig")) {
+        net_ifconfig();
+    } else if (!strcmp(line, "arp")) {
+        net_arp_dump();
+    } else if (starts_with(line, "ping ")) {
+        const char *adres = argument(5);
+        uint32_t ip = 0;
+        if (!adres)
+            printk("ping: podaj adres\n");
+        else if (!net_parse_ip(adres, &ip))
+            printk("ping: '%s' to nie jest adres IP\n", adres);
+        else
+            net_ping(ip, 3);
     } else if (!strcmp(line, "disk")) {
         cmd_disk();
     } else if (!strcmp(line, "uptime")) {

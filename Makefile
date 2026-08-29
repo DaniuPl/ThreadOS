@@ -183,7 +183,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
-            kbdmap pci ata ahci blk fs
+            kbdmap pci ata ahci blk fs rtl8139 net dhcp tcp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -192,7 +192,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
           $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o \
-          $(BUILD)/64/pipe64.o \
+          $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o \
           $(BUILD)/64/syscall64_stub.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
@@ -349,9 +349,16 @@ run-iso: iso $(DISK)
 
 # Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
 # Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
+# Grupy testu chodza rownolegle, bo kazda ma wlasna maszyne QEMU
+# i wiekszosc czasu i tak czeka: na rozruch, na odpowiedz, na
+# przerysowanie ekranu.
+#
+#   make test            wszystkie grupy
+#   make test T=k64      tylko jadro 64-bitowe (albo k64,uefi)
+#   make test J=1        jedna po drugiej, do debugowania
 test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
-	python3 -u scripts/vga_smoke_test.py $(KERNEL) $(INITRD) $(KERNEL64) \
-	    $(INITRD64)
+	python3 -u scripts/run_testy.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
+	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
 
 # Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez
 # sanitizery na hoscie, karmiac uszkodzonymi wejsciami (certyfikaty,

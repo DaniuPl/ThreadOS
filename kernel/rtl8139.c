@@ -126,7 +126,8 @@ int rtl8139_send(const void *frame, uint16_t len)
         sent = 60;
     }
 
-    outl(io_base + REG_TSAD0 + desc * 4, (uint32_t)tx_buffer[desc]);
+    outl(io_base + REG_TSAD0 + desc * 4,
+         (uint32_t)(uintptr_t)tx_buffer[desc]);
     outl(io_base + REG_TSD0 + desc * 4, sent);   /* zapis kasuje OWN -> start */
 
     tx_used[desc] = 1;
@@ -199,7 +200,11 @@ int rtl8139_init(void)
     rx_offset = 0;
     tx_next = 0;
     memset(tx_used, 0, sizeof(tx_used));
-    outl(io_base + REG_RBSTART, (uint32_t)rx_buffer);
+    /* Karta adresuje pamiec 32 bitami. Bufory leza w obrazie jadra,
+       czyli tuz nad megabajtem, wiec adres miesci sie z zapasem - ale
+       rzutowanie musi byc jawne, bo w trybie dlugim wskaznik jest
+       dwa razy szerszy niz to, co karta potrafi przyjac. */
+    outl(io_base + REG_RBSTART, (uint32_t)(uintptr_t)rx_buffer);
 
     /* AB|AM|APM|AAP (przyjmuj broadcast, multicast, swoje i obce ramki),
        WRAP, maksymalny burst DMA (bity 8-10) i prog FIFO "caly pakiet"
