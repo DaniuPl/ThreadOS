@@ -47,6 +47,10 @@
 #define SYS64_TCP_SEND    29
 #define SYS64_TCP_RECV    30
 #define SYS64_TCP_CLOSE   31
+#define SYS64_WIN_CREATE 32
+#define SYS64_WIN_RECT   33
+#define SYS64_WIN_TEXT   34
+#define SYS64_WIN_POLL   35
 
 #define NAME_MAX64 63
 
@@ -392,6 +396,54 @@ static inline int uhtoa(uint64_t v, char *buf)
         buf[i] = tmp[n - 1 - i];
     buf[n] = 0;
     return n;
+}
+
+/* --- Okna pulpitu -------------------------------------------------
+ *
+ * Program nie rysuje na ekranie: rysuje w buforze swojego okna,
+ * a kompozytor jadra sklada z tych buforow klatke. Wspolrzedne sa
+ * wzgledem obszaru tresci okna, kolory to indeksy palety pulpitu.
+ */
+struct win_rect_cmd {
+    int32_t x, y, w, h, kolor;
+};
+struct win_text_cmd {
+    int32_t x, y, kolor;
+    const char *s;
+};
+
+#define WEV_NONE  0
+#define WEV_CLICK 1
+#define WEV_KEY   2
+struct win_event {
+    int32_t typ;           /* WEV_* */
+    int32_t x, y;          /* wspolrzedne wzgledem obszaru tresci */
+    int32_t val;           /* maska przyciskow albo kod znaku */
+};
+
+/* Tworzy okno o obszarze tresci cw x ch. Zwraca numer okna albo -1. */
+static inline int64_t win_create(int cw, int ch, const char *tytul)
+{
+    return syscall64_3(SYS64_WIN_CREATE, cw, ch,
+                       (int64_t)(uintptr_t)tytul);
+}
+
+static inline void win_rect(int win, int x, int y, int w, int h, int kolor)
+{
+    struct win_rect_cmd c = {x, y, w, h, kolor};
+    syscall64(SYS64_WIN_RECT, win, (int64_t)(uintptr_t)&c);
+}
+
+static inline void win_text(int win, int x, int y, const char *s, int kolor)
+{
+    struct win_text_cmd c = {x, y, kolor, s};
+    syscall64(SYS64_WIN_TEXT, win, (int64_t)(uintptr_t)&c);
+}
+
+/* Pobiera zdarzenie okna (nie blokuje). 1 = jest, 0 = brak, -1 = blad. */
+static inline int64_t win_poll(int win, struct win_event *ev)
+{
+    return syscall64(SYS64_WIN_POLL, win, (int64_t)(uintptr_t)ev);
 }
 
 #endif

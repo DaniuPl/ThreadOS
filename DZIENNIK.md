@@ -1136,3 +1136,33 @@ sprawdzane przez `make test`.
       wołają programy, których w 64-bitowym initrd nie ma, więc klik
       w nie nic nie robi. To wymaga wywołań systemowych okien i pamięci
       współdzielonej, czyli osobnego kroku
+- [x] **Aplikacje graficzne w ring 3 (jądro 64-bitowe)** - ikony
+      pulpitu przestały być martwe. Cztery wywołania systemowe
+      (`win_create`, `win_rect`, `win_text`, `win_poll`) i program
+      `guiapp64` w initrd: rysuje we własnym oknie, dostaje z powrotem
+      kliknięcia i klawisze, liczy je i odpowiada rysunkiem. Kompozytor
+      nie dostał ani jednej nowej linii - `desktop_win_*` istniało od
+      czasów 32-bitowych, tu doszła tylko droga do niego z pierścienia 3.
+      Programu nie trzeba było nawet nazywać inaczej: `mkinitrd` wpisuje
+      go do obrazu pod nazwą `guiapp`, tą samą, którą woła wspólna
+      tablica ikon. Ochrona jest tam, gdzie była: właścicielem okna jest
+      proces, a nie ten, kto poda numer, więc podanie cudzego numeru nic
+      nie daje; napisy i polecenia rysowania jądro przepisuje do siebie,
+      bajt po bajcie sprawdzając, czy program ma prawo tam sięgać -
+      napisu nie da się sprawdzić hurtem, bo może kończyć się na
+      ostatnim bajcie mapowania.
+
+      I przy tym wyszedł błąd, który spał w jądrze od pierwszego
+      programu: pierwszy `movaps` w `guiapp64` kończył się wyjątkiem
+      ochrony ogólnej. Nie w SSE rzecz - stan rejestrów SSE jądro
+      zapisuje od dawna - tylko w **wyrównaniu stosu**. `_start` jest
+      napisany w C, a kompilator traktuje go jak każdą inną funkcję:
+      zakłada stos taki, jaki zastaje się po instrukcji `call`, czyli
+      z adresem powrotu na wierzchu. Jądro dawało wierzchołek wyrównany
+      do szesnastu bajtów, czyli o osiem za dużo, i każde szesnastobajtowe
+      zapisanie rejestru SSE trafiało w adres niewyrównany. Dotychczasowe
+      programy przeżyły tylko dlatego, że kompilator nie miał w nich
+      czego wektoryzować. Ciekawe, że doręczenie sygnału liczyło stos
+      **poprawnie** od początku - tam komentarz wprost mówi "tak, jak
+      zastaje każda funkcja wołana instrukcją call" - a start procesu
+      nie. Jedna linia w `build_args`, ta sama zasada w obu miejscach

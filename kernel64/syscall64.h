@@ -39,6 +39,13 @@
 #define SYS64_TCP_RECV    30
 #define SYS64_TCP_CLOSE   31
 
+/* Okna pulpitu. Kompozytor jest ten sam, co w jadrze 32-bitowym -
+   te wywolania sa tylko droga do niego z pierscienia 3. */
+#define SYS64_WIN_CREATE 32  /* a1=cw, a2=ch, a3=tytul -> winid albo -1 */
+#define SYS64_WIN_RECT   33  /* a1=winid, a2=&{x,y,w,h,kolor} -> 0/-1 */
+#define SYS64_WIN_TEXT   34  /* a1=winid, a2=&{x,y,kolor,napis} -> 0/-1 */
+#define SYS64_WIN_POLL   35  /* a1=winid, a2=&zdarzenie -> 1/0/-1 */
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

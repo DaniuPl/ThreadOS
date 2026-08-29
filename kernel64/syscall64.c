@@ -29,6 +29,7 @@
 #include "pipe64.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/tcp.h"
+#include "../kernel/include/desktop.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -143,6 +144,40 @@ static int nazwa_z_ring3(uint64_t ptr, uint64_t len, char *out)
     out[len] = '\0';
     return 0;
 }
+
+/* Napis zakonczony zerem z pamieci programu do jadra. Dlugosci nie
+   znamy z gory, wiec kazdy bajt trzeba sprawdzic osobno: napis moze
+   siegac ostatniego bajtu mapowania i ani jednego dalej. Zwraca 0
+   albo -1, gdy napis wychodzi poza pamiec programu albo nie miesci
+   sie w buforze. */
+static int napis_z_ring3(uint64_t ptr, char *out, int max)
+{
+    for (int i = 0; i < max - 1; i++) {
+        if (!paging64_user_range(ptr + (uint64_t)i, 1))
+            return -1;
+        out[i] = *(const char *)(uintptr_t)(ptr + (uint64_t)i);
+        if (!out[i])
+            return 0;
+    }
+    out[max - 1] = '\0';
+    return 0;
+}
+
+/* Polecenia rysowania przekazywane przez program. Uklad musi zgadzac
+   sie z tym w user64/usys64.h - w trybie dlugim wskaznik ma osiem
+   bajtow i wymaga wyrownania, stad dziura po trzech liczbach. */
+struct win_rect_cmd64 {
+    int32_t x, y, w, h, kolor;
+};
+struct win_text_cmd64 {
+    int32_t x, y, kolor;
+    uint64_t napis;
+};
+struct win_event64 {
+    int32_t typ;
+    int32_t x, y;
+    int32_t val;
+};
 
 /* Opis gniazda przekazywany przez program. Uklad musi zgadzac sie
    z tym w user64/usys64.h. */
@@ -582,6 +617,60 @@ static void handle(struct regs *r)
     case SYS64_KILL:
         r->rax = task64_signal((int)a1, (int)a2) ? 0 : (uint64_t)-1;
         return;
+    /* Okna. Wlascicielem jest proces, a nie ten, kto poda numer okna:
+       kompozytor sprawdza go przy kazdym rysowaniu, wiec program nie
+       narysuje niczego w cudzym oknie. */
+    case SYS64_WIN_CREATE: {
+        char tytul[64];
+        if (napis_z_ring3(a3, tytul, sizeof(tytul)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_win_create(
+            task64_current_id(), (int)a1, (int)a2, tytul);
+        return;
+    }
+    case SYS64_WIN_RECT: {
+        struct win_rect_cmd64 c;
+        if (!paging64_user_range(a2, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const struct win_rect_cmd64 *)(uintptr_t)a2;
+        r->rax = (uint64_t)(int64_t)desktop_win_rect(
+            (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
+            (uint8_t)c.kolor);
+        return;
+    }
+    case SYS64_WIN_TEXT: {
+        struct win_text_cmd64 c;
+        char s[128];
+        if (!paging64_user_range(a2, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const struct win_text_cmd64 *)(uintptr_t)a2;
+        if (napis_z_ring3(c.napis, s, sizeof(s)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_win_text(
+            (int)a1, task64_current_id(), c.x, c.y, s, (uint8_t)c.kolor);
+        return;
+    }
+    case SYS64_WIN_POLL: {
+        struct win_event64 ev;
+        int jest = desktop_win_poll((int)a1, task64_current_id(), &ev);
+        if (jest == 1) {
+            if (!paging64_user_range(a2, sizeof(ev))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            *(struct win_event64 *)(uintptr_t)a2 = ev;
+        }
+        r->rax = (uint64_t)(int64_t)jest;
+        return;
+    }
     default:
         printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
         r->rax = (uint64_t)-1;

@@ -75,7 +75,16 @@ static uint64_t build_args(uint64_t rsp, const struct args64 *args,
     tab[argc] = 0;                   /* tablica konczy sie zerem */
 
     *argv_va = rsp;
-    return rsp & ~0xFULL;
+
+    /* Wierzcholek wyrownany do szesnastu bajtow, minus osiem.
+       Program zaczyna sie od funkcji _start napisanej w C, a kompilator
+       traktuje ja jak kazda inna: zaklada, ze stos wyglada tak, jak po
+       instrukcji call, czyli z adresem powrotu na wierzchu. Na tym
+       zalozeniu opiera wyrownanie swoich zmiennych - i gdy sie nie
+       zgadza, pierwsza instrukcja SSE zapisujaca szesnascie bajtow
+       (movaps) konczy sie wyjatkiem ochrony ogolnej. Tak samo liczy
+       stos doreczenie sygnalu, i z tego samego powodu. */
+    return (rsp & ~0xFULL) - 8;
 }
 
 /* Przepisanie napisu z pamieci programu do jadra.
