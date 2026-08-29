@@ -1480,3 +1480,36 @@ sprawdzane przez `make test`.
       przepadały i z `write nvmetest tresc-przez-kolejki` do jądra
       docierało `przez-kolejki`. Klawiatura działa od przerwania,
       ale czytać z niej ma kto dopiero od wątku.
+- [x] **Pozostałe procesory: wykrycie i wybudzenie (oba jądra)** -
+      pierwszy krok w stronę SMP, i celowo tylko pierwszy.
+
+      Po włączeniu zasilania pracuje jeden rdzeń - ten, który firmware
+      wybrał na rozruchowy. Reszta stoi i czeka, i to jest decyzja
+      sprzętu: procesor obudzony sygnałem SIPI zaczyna w trybie
+      rzeczywistym, szesnastobitowo, pod adresem `(wektor << 12)` -
+      dokładnie tak, jak zaczynał pecet czterdzieści lat temu. Ile ich
+      jest, mówi tablica MADT w ACPI; budzi się je parą sygnałów przez
+      lokalny APIC.
+
+      Najciekawsze jest to, ile drogi taki rdzeń musi przejść **sam**.
+      W jądrze 32-bitowym: tryb rzeczywisty, własna tablica
+      deskryptorów, tryb chroniony. W 64-bitowym cała droga od nowa -
+      szesnaście bitów, trzydzieści dwa, sześćdziesiąt cztery, z PAE
+      i EFER po drodze. Tablic stron nie buduje: bierze gotowe, te
+      same, po których chodzi jądro, a ich adres dostaje w polu, które
+      procesor rozruchowy wypełnia przed wysłaniem sygnału.
+
+      Trampolina jest linkowana z jądrem, ale wykonuje się pod
+      `0x8000`, więc każdy adres w niej liczy się jako baza plus
+      odległość od początku bloku. Adresy trafiają najpierw do
+      rejestru, a dopiero potem w użycie - asembler ma wtedy jedno
+      oczywiste znaczenie do wyboru zamiast dwóch.
+
+      I na tym ten krok się kończy: obudzony rdzeń zgłasza się
+      w liczniku i staje. Dawanie mu pracy wymaga schedulera per rdzeń
+      i zamków w każdej strukturze jądra - a te pisane były dla jednego
+      rdzenia i cicho na to liczą. Lepiej, żeby procesor stał, niż żeby
+      psuł listę zadań. Dlatego test sprawdza dwie rzeczy naraz: że
+      rdzenie się zgłaszają **oraz** że system po ich obudzeniu działa
+      dokładnie tak samo - samo "widzę cztery procesory" nie byłoby nic
+      warte, gdyby przy okazji coś pękało.

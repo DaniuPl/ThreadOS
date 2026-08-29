@@ -24,6 +24,10 @@ void acpi_set_rsdp(uint32_t addr);
 /* Znajduje tablice ACPI. 1 = mozna wylaczyc komputer. */
 int acpi_init(void);
 
+/* Dowolna tablica ACPI po sygnaturze ("APIC", "HPET", ...), doklejona
+   do mapowania. NULL, gdy takiej nie ma. Wolane po acpi_init. */
+const void *acpi_table(const char *sygnatura);
+
 /* Nazwa producenta z tablicy (do komunikatu startowego); "" gdy brak */
 const char *acpi_oem(void);
 

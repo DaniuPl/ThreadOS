@@ -42,6 +42,7 @@
 #include "../kernel/include/fs.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/netdev.h"
+#include "../kernel/include/smp.h"
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
@@ -529,6 +530,20 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     } else {
         printk("[ !! ] Siec: nie znalazlem karty sieciowej\n");
     }
+
+    /* --- Pozostale procesory ------------------------------------ */
+    /* Tablica MADT wylicza je wszystkie, a kazdy czeka na sygnal
+       INIT-SIPI. Rdzen wtorny zaczyna w trybie rzeczywistym - i musi
+       sam przejsc cala droge do trybu dlugiego, bo nikt mu tu nie
+       pomoze. Tablice stron bierze gotowe, te same, po ktorych chodzi
+       jadro. Obudzony zglasza sie i staje: dawanie mu pracy wymaga
+       schedulera per rdzen i zamkow, a tych jeszcze nie ma. */
+    int rdzeni = smp_init();
+    if (rdzeni > 1)
+        printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
+               rdzeni, smp_started());
+    else
+        printk("[ OK ] Procesory: 1\n");
 
     /* --- Wejscie z klawiatury ----------------------------------- */
     keyboard64_init();

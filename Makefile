@@ -90,6 +90,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/rtl8139.o \
         $(BUILD)/e1000.o \
         $(BUILD)/netdev.o \
+        $(BUILD)/smp.o \
+        $(BUILD)/ap.o \
         $(BUILD)/net.o \
         $(BUILD)/dhcp.o \
         $(BUILD)/tcp.o \
@@ -114,6 +116,11 @@ $(BUILD):
 
 $(BUILD)/boot.o: boot/boot.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
+
+# Trampolina rdzeni wtornych idzie przez gcc, a nie przez as: sa w niej
+# makra preprocesora liczace adresy w miejscu docelowym
+$(BUILD)/ap.o: boot/ap.S | $(BUILD)
+	$(CC) $(ASFLAGS) -c $< -o $@
 
 $(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
@@ -189,7 +196,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci usbkbd swap prog shm rtc \
-            e1000 netdev
+            e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -200,6 +207,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o \
           $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o \
           $(BUILD)/64/syscall64_stub.o \
+          $(BUILD)/64/ap64.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))
 
 $(BUILD)/64:
@@ -209,6 +217,9 @@ $(BUILD)/64/boot64.o: boot64/boot64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 $(BUILD)/64/isr64_stubs.o: boot64/isr64.S | $(BUILD)/64
+	$(CC) -m64 -c $< -o $@
+
+$(BUILD)/64/ap64.o: boot64/ap64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
 $(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64

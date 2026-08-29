@@ -98,6 +98,10 @@ static uint16_t slp_typa, slp_typb;
 static char oem_id[7];
 static int ready;
 
+/* Spis tablic zapamietany przy starcie - MADT szukamy w nim pozniej,
+   juz po tym, jak wiadomo, ze ACPI w ogole jest */
+static const struct sdt_header *rsdt_spis;
+
 /* Tablice ACPI leza zwykle poza pamiecia zarzadzana przez jadro -
    trzeba je najpierw wpuscic do mapowania identycznosciowego */
 static const void *map(uint32_t phys, uint32_t len)
@@ -217,6 +221,7 @@ int acpi_init(void)
     if (!map(rsdp->rsdt, rsdt->length))
         return 0;
 
+    rsdt_spis = rsdt;
     uint32_t count = (rsdt->length - sizeof(*rsdt)) / 4;
     const uint32_t *entries = (const uint32_t *)(rsdt + 1);
     for (uint32_t i = 0; i < count; i++) {
@@ -251,6 +256,26 @@ int acpi_init(void)
 
     ready = fadt->pm1a_cnt_blk != 0;
     return ready;
+}
+
+/* Szuka w spisie tablicy o danej sygnaturze i doklada ja do
+   mapowania. NULL, gdy nie ma. */
+const void *acpi_table(const char *sygnatura)
+{
+    if (!rsdt_spis)
+        return (const void *)0;
+
+    uint32_t count = (rsdt_spis->length - sizeof(*rsdt_spis)) / 4;
+    const uint32_t *entries = (const uint32_t *)(rsdt_spis + 1);
+    for (uint32_t i = 0; i < count; i++) {
+        const struct sdt_header *h = map(entries[i], sizeof(*h));
+        if (!h || memcmp(h->signature, sygnatura, 4) != 0)
+            continue;
+        if (!map(entries[i], h->length))
+            continue;
+        return h;
+    }
+    return (const void *)0;
 }
 
 const char *acpi_oem(void)

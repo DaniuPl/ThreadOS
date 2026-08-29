@@ -28,6 +28,7 @@
 #include "include/desktop.h"
 #include "include/net.h"
 #include "include/netdev.h"
+#include "include/smp.h"
 #include "include/dhcp.h"
 #include "include/tcp.h"
 
@@ -241,6 +242,17 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
                "(komendy 'ifconfig', 'ping', 'dhcp')\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
     }
+
+    /* Pozostale procesory: firmware wylicza je w tablicy ACPI, a kazdy
+       czeka na sygnal INIT-SIPI. Obudzone przechodza w tryb chroniony
+       i staja - dawanie im pracy wymaga schedulera per rdzen i zamkow
+       w calym jadrze, a te pisane byly dla jednego rdzenia. */
+    int rdzeni = smp_init();
+    if (rdzeni > 1)
+        printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
+               rdzeni, smp_started());
+    else
+        printk("[ OK ] Procesory: 1\n");
 
     scheduler_init();
     task_create("demo-A", demo_counter, (void *)0);

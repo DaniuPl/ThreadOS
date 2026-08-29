@@ -50,6 +50,8 @@ def main():
               "Mysz PS/2 gotowa" in screen)
         check("karta sieciowa RTL8139 wykryta przy boocie",
               "Siec: RTL8139" in screen)
+        check("na jednym rdzeniu system mowi to wprost",
+              "Procesory: 1" in q.serial())
 
         # Adres IP przychodzi z serwera DHCP slirpa juz po starcie shella.
         # Czekamy na komunikat, zanim ekran zacznie sluzyc testom
@@ -63,12 +65,18 @@ def main():
         check("DHCP przekazal brame i serwer DNS",
               "brama 10.0.2.2" in lease and "DNS 10.0.2.3" in lease)
 
+        # Komunikaty rozruchowe czytamy z PORTU, nie z ekranu. Wiersz
+        # zerowy nalezy do licznikow watkow demonstracyjnych, a przy
+        # dluzszym rozruchu wyjezdza na niego najstarsza linia i zostaje
+        # przez nie zamazana - dowod, ktory znika, gdy maszyna zwolni,
+        # nie jest zadnym dowodem.
+        dziennik = q.serial()
         for expected in ["Multiboot OK", "GDT zaladowana", "IDT zaladowana",
                          "PIC przemapowany", "Timer PIT", "Klawiatura PS/2",
                          "Przerwania wlaczone"]:
-            check(f"komunikat '{expected}'", expected in screen)
+            check(f"komunikat '{expected}'", expected in dziennik)
 
-        check("obsluga wyjatku int3 (breakpoint)", "[INT3]" in screen)
+        check("obsluga wyjatku int3 (breakpoint)", "[INT3]" in dziennik)
 
         for expected in ["Pamiec fizyczna", "Stronicowanie wlaczone",
                          "kmalloc/kfree dzialaja"]:

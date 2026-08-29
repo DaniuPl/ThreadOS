@@ -398,7 +398,7 @@ class Qemu:
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None, nic="rtl8139"):
+                 uefi=None, nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # Jadro 64-bitowe potrzebuje procesora z trybem dlugim, a
@@ -424,6 +424,10 @@ class Qemu:
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
+        if cpus:
+            # Wiecej niz jeden rdzen. Firmware wylicza je w tablicy ACPI,
+            # a system budzi sygnalem INIT-SIPI
+            cmd += ["-smp", str(cpus)]
         if usbkbd:
             # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
             # nowsza niz mniej wiecej 2010 rok
