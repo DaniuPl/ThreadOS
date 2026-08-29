@@ -55,6 +55,9 @@
 /* Stan maszyny dla programu: a1=&{ram_kib, uzyte_kib, uptime_s} */
 #define SYS64_SYSINFO    38
 
+/* Numer wlasnego zadania */
+#define SYS64_GETPID     39
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

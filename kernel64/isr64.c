@@ -13,10 +13,10 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/vga.h"
 #include "task64.h"
+#include "elf64.h"
 #include "isr64.h"
 #include "paging64.h"
 #include "signal64.h"
-#include "elf64.h"
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/string.h"
 
@@ -41,6 +41,7 @@ static irq_handler_t irq_handlers[16];
 static int user_fault_seen;
 static uint32_t user_fault_vec, user_fault_err;
 static uint32_t heap_pages;        /* ile stron sterty naprawde powstalo */
+static uint32_t stack_pages;       /* i ile stron doszlo stosowi */
 static uint64_t user_fault_addr;
 
 int isr64_user_fault(void)            { return user_fault_seen; }
@@ -49,6 +50,7 @@ uint32_t isr64_user_fault_err(void)    { return user_fault_err; }
 uint64_t isr64_user_fault_addr(void)   { return user_fault_addr; }
 void isr64_forget_user_fault(void)     { user_fault_seen = 0; }
 uint32_t isr64_heap_pages(void)        { return heap_pages; }
+uint32_t isr64_stack_pages(void)       { return stack_pages; }
 
 static uint64_t read_cr2(void)
 {
@@ -96,6 +98,30 @@ void isr64_handler(struct regs *r)
         if (r->int_no == 14 && !(r->err_code & 0x01) &&
             paging64_swap_in(paging64_current_space(), read_cr2()))
             return;
+
+        /* Stos, ktory wlasnie uroslo o strone w dol.
+         *
+         * Program dostaje na start cztery strony, a reszte dokladamy
+         * pod palcami - dokladnie tak, jak sterte. Granica jest po to,
+         * zeby dziki wskaznik nie zamienil sie po cichu w zmapowana
+         * strone: pod nia blad strony pozostaje bledem. */
+        if (r->int_no == 14 && (r->cs & 3) == 3) {
+            uint64_t adres = read_cr2();
+            if (adres < USER64_STACK_TOP &&
+                adres >= USER64_STACK_TOP - USER64_STACK_MAX &&
+                paging64_lookup(adres & ~0xFFFULL) == 0) {
+                uint32_t ramka = pmm_alloc_frame();
+                if (ramka) {
+                    memset((void *)(uintptr_t)ramka, 0, 4096);
+                    if (paging64_map(adres & ~0xFFFULL, ramka,
+                                     PG_USER | PG_WRITE | PG_NX) == 0) {
+                        stack_pages++;
+                        return;
+                    }
+                    pmm_free_frame(ramka);
+                }
+            }
+        }
 
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t adres = read_cr2();

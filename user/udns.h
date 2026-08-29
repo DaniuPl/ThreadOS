@@ -7,7 +7,7 @@
 #ifndef PROTONOS_UDNS_H
 #define PROTONOS_UDNS_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define DNS_PORT      53
 #define DNS_QUERY_MAX 300

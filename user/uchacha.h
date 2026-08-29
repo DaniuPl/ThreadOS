@@ -9,7 +9,7 @@
 #ifndef PROTONOS_UCHACHA_H
 #define PROTONOS_UCHACHA_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define CHACHA_KEY   32
 #define CHACHA_NONCE 12

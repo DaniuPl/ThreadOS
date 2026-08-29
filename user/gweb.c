@@ -13,7 +13,7 @@
  * pulpitu, DNS, TCP, TLS, system plikow i procesy ring 3.
  */
 
-#include "usys.h"
+#include "uapi.h"
 #include "uhttp.h"
 #include "ucert.h"
 #include "uhtml.h"

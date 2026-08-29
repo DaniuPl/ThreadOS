@@ -9,7 +9,7 @@
 #ifndef PROTONOS_URSA_H
 #define PROTONOS_URSA_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 #include "ubignum.h"
 

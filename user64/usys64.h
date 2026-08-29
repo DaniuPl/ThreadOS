@@ -54,6 +54,7 @@
 #define SYS64_SHM        36
 #define SYS64_TIME       37
 #define SYS64_SYSINFO    38
+#define SYS64_GETPID     39
 
 #define NAME_MAX64 63
 
@@ -419,7 +420,7 @@ struct win_text_cmd {
 #define WEV_CLICK 1
 #define WEV_KEY   2
 struct win_event {
-    int32_t typ;           /* WEV_* */
+    int32_t type;          /* WEV_* */
     int32_t x, y;          /* wspolrzedne wzgledem obszaru tresci */
     int32_t val;           /* maska przyciskow albo kod znaku */
 };

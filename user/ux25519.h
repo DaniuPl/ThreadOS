@@ -13,7 +13,7 @@
 #ifndef PROTONOS_UX25519_H
 #define PROTONOS_UX25519_H
 
-#include "usys.h"
+#include "uapi.h"
 
 typedef int64_t gf[16];
 

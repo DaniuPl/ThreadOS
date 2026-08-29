@@ -6,7 +6,7 @@
  * Uzycie: run nslookup example.com
  */
 
-#include "usys.h"
+#include "uapi.h"
 #include "udns.h"
 
 void _start(int argc, char **argv)

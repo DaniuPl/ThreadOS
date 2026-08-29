@@ -13,7 +13,7 @@
 #ifndef PROTONOS_UBIGNUM_H
 #define PROTONOS_UBIGNUM_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define BN_MAX_LIMBS 128                 /* do 4096 bitow */
 

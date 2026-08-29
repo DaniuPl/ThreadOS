@@ -23,7 +23,7 @@
 #ifndef PROTONOS_UTLS_H
 #define PROTONOS_UTLS_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 #include "uchacha.h"
 #include "ux25519.h"

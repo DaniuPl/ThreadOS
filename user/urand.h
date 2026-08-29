@@ -14,7 +14,7 @@
 #ifndef PROTONOS_URAND_H
 #define PROTONOS_URAND_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 
 static uint8_t urand_seed[32];
@@ -31,7 +31,9 @@ static inline void urand_init(void)
     sys_time(&t);
     uint32_t ticks = sys_getticks();
     uint32_t pid = (uint32_t)sys_getpid();
-    uint32_t addr = (uint32_t)(uint32_t *)&stack_marker;
+    /* Adres na stosie - w trybie dlugim wskaznik ma osiem bajtow,
+       wiec przez uintptr_t, a dopiero potem obciecie do 32 bitow */
+    uint32_t addr = (uint32_t)(uintptr_t)&stack_marker;
 
     mix[n++] = (uint8_t)t.year; mix[n++] = (uint8_t)(t.year >> 8);
     mix[n++] = t.month; mix[n++] = t.day;

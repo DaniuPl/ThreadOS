@@ -29,13 +29,25 @@
    maszyna ma RAM-u. */
 #define USER64_BASE        0x0000000040000000ULL
 #define USER64_STACK_TOP   0x0000000060000000ULL
+/* Tyle stron stosu dostaje program na start. Reszta dochodzi sama,
+   gdy jej dotknie: stos rosnie na zadanie, tak samo jak sterta.
+   Zgadywanie z gory, ile go potrzeba, zawsze konczy sie albo
+   marnowaniem pamieci, albo wyjatkiem w srodku glebokiego wywolania -
+   a proba weryfikacji certyfikatu, ktora liczy na liczbach
+   dwutysiacbitowych, siega glebiej, niz ktokolwiek by obstawil. */
 #define USER64_STACK_PAGES 4
+
+/* Dokad stosowi wolno urosnac. Granica jest po to, zeby dziki
+   wskaznik nie zamienil sie po cichu w zmapowana strone: pod nia
+   blad strony pozostaje bledem. */
+#define USER64_STACK_MAX   (256 * 1024ULL)
 
 /* Miedzy sterta a stosem lezy obszar na mapowania: pamiec wspoldzielona
    i wszystko, co po niej przyjdzie. Sterta konczy sie u jego progu,
-   wiec jedno nie ma jak wejsc w drugie. */
+   a obszar mapowan u progu miejsca na stos - zadne z trojga nie ma
+   jak wejsc w drugie. */
 #define USER64_MMAP_BASE   0x0000000050000000ULL
-#define USER64_MMAP_MAX    (USER64_STACK_TOP - USER64_STACK_PAGES * 4096ULL)
+#define USER64_MMAP_MAX    (USER64_STACK_TOP - USER64_STACK_MAX)
 #define USER64_TOP         USER64_MMAP_BASE
 
 /* Laduje obraz ELF64. Zwraca 0 i ustawia *entry oraz poczatek sterty

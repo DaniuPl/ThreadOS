@@ -15,7 +15,7 @@
 #ifndef PROTONOS_UHTML_H
 #define PROTONOS_UHTML_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define HTML_LINKS_MAX 48
 #define HTML_LINES_MAX 400

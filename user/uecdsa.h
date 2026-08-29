@@ -18,7 +18,7 @@
 #ifndef PROTONOS_UECDSA_H
 #define PROTONOS_UECDSA_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "ubignum.h"
 
 /* Krzywa NIST P256 (256 bitow) */

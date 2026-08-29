@@ -10,7 +10,7 @@
  * podpis musi wtedy odpasc.
  */
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 #include "ursa.h"
 #include "ux509.h"

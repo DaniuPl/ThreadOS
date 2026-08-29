@@ -12,7 +12,7 @@
  * uzyjemy -k.
  */
 
-#include "usys.h"
+#include "uapi.h"
 #include "uhttp.h"
 #include "ucert.h"
 

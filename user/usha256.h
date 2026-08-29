@@ -8,7 +8,7 @@
 #ifndef PROTONOS_USHA256_H
 #define PROTONOS_USHA256_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define SHA256_SIZE  32
 #define SHA256_BLOCK 64

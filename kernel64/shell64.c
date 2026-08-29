@@ -65,7 +65,8 @@ static void cmd_help(void)
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
     printk("           rm <plik>, cp <zrodlo> <cel>, uptime, date,\n");
     printk("           run <program>, clear,\n");
-    printk("           ifconfig, arp, ping <adres>, gfx, pulpit,\n");
+    printk("           ifconfig, arp, ping <adres>, dns <ip>,\n");
+    printk("           gfx, pulpit,\n");
     printk("           reboot, poweroff\n");
 }
 
@@ -398,6 +399,19 @@ static void execute(const char *line)
         net_ifconfig();
     } else if (!strcmp(line, "arp")) {
         net_arp_dump();
+    } else if (starts_with(line, "dns ")) {
+        /* Reczna zmiana serwera nazw - DHCP podaje swoj, ale nie
+           zawsze ten jest tym, o ktory chodzi */
+        const char *adres = argument(line, 4);
+        uint32_t ip = 0;
+        if (!adres || !net_parse_ip(adres, &ip)) {
+            printk("uzycie: dns <adres ip serwera>\n");
+        } else {
+            net_set_dns(ip);
+            printk("serwer DNS ustawiony na ");
+            net_print_ip(ip);
+            printk("\n");
+        }
     } else if (starts_with(line, "ping ")) {
         const char *adres = argument(line, 5);
         uint32_t ip = 0;
@@ -467,6 +481,7 @@ static void execute(const char *line)
 
         uint32_t ramki_przed = pmm_used_frames();
         uint32_t strony_przed = isr64_heap_pages();
+        uint32_t stosu_przed = isr64_stack_pages();
         int id = proc64_spawn(name, args.argc ? &args : 0, 0);
         if (id < 0) {
             printk("run: nie udalo sie uruchomic '%s'\n", name);
@@ -483,9 +498,10 @@ static void execute(const char *line)
             printk("run: dziecko przepadlo\n");
         else
             printk("[%s] koniec, kod wyjscia %d (ramek %u -> %u, "
-                   "stron sterty %u)\n",
+                   "stron sterty %u, stosu %u)\n",
                    name, code, ramki_przed, pmm_used_frames(),
-                   isr64_heap_pages() - strony_przed);
+                   isr64_heap_pages() - strony_przed,
+                   isr64_stack_pages() - stosu_przed);
     } else {
         printk("Nieznane polecenie: %s (sprobuj 'help')\n", line);
     }

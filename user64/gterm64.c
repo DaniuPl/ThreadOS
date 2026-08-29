@@ -106,7 +106,7 @@ void _start(void)
     for (;;) {
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
-            if (ev.typ != WEV_KEY)
+            if (ev.type != WEV_KEY)
                 continue;
             char c = (char)ev.val;
             if (c == '\n')

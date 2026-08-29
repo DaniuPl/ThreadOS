@@ -12,7 +12,7 @@
 #ifndef PROTONOS_USHA512_H
 #define PROTONOS_USHA512_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define SHA512_SIZE  64
 #define SHA384_SIZE  48

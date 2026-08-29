@@ -55,11 +55,11 @@ void _start(void)
            wiec oprozniamy ja do konca przy kazdej klatce. */
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
-            if (ev.typ == WEV_CLICK && npt < MAXPT) {
+            if (ev.type == WEV_CLICK && npt < MAXPT) {
                 px[npt] = ev.x;
                 py[npt] = ev.y;
                 npt++;
-            } else if (ev.typ == WEV_KEY) {
+            } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 if (c == '\b') {
                     if (dlug > 0)

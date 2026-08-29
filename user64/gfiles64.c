@@ -77,7 +77,7 @@ void _start(void)
     for (;;) {
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
-            if (ev.typ == WEV_CLICK) {
+            if (ev.type == WEV_CLICK) {
                 int wiersz = (ev.y - WIERSZ_Y0) / WIERSZ_H;
                 if (ev.y >= WIERSZ_Y0 && wiersz >= 0 && wiersz < ile)
                     wczytaj(nazwy[wiersz]);

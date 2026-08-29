@@ -15,7 +15,7 @@
 #ifndef PROTONOS_UCERT_H
 #define PROTONOS_UCERT_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 #include "ursa.h"
 #include "ux509.h"

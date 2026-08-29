@@ -19,4 +19,7 @@ void isr64_forget_user_fault(void);
    o pamiec nie kosztuje nic, placi sie za strony naprawde uzyte */
 uint32_t isr64_heap_pages(void);
 
+/* Ile stron doszlo stosom programow (stos rosnie na zadanie) */
+uint32_t isr64_stack_pages(void);
+
 #endif

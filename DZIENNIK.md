@@ -1331,3 +1331,49 @@ sprawdzane przez `make test`.
 
       Została jedna martwa ikona: Web. Do niej trzeba najpierw TLS
       i klienta HTTP w pierścieniu 3.
+- [x] **TLS 1.3, HTTP i przeglądarka w pierścieniu 3 (jądro
+      64-bitowe)** - i tym samym koniec doganiania: wszystko, co robi
+      jądro 32-bitowe, robi teraz także to w trybie długim.
+
+      Najciekawsze jest to, ile kodu trzeba było napisać: **jeden plik
+      nagłówkowy**. Kryptografia, TLS, HTTP, DNS, X.509 i parser HTML -
+      pięć tysięcy wierszy w `user/*.h` - liczą na bajtach i o trybie
+      procesora nie wiedzą nic. Do jądra mówią kilkoma nazwami: połącz
+      się, wyślij, odbierz, która godzina, otwórz plik. Te nazwy są
+      umową; `user64/uzgodnosc64.h` przekłada je na wywołania trybu
+      długiego, a `user/uapi.h` wybiera stronę. Dokładnie ten sam
+      wzorzec, co `kernel64/compat64.c` po stronie jądra - i drugi raz
+      okazał się tańszy, niż się bałem.
+
+      Zmiany w samym wspólnym kodzie: jedna. Adres na stosie brany do
+      zasiewu generatora szedł przez `(uint32_t)` z wskaźnika - w trybie
+      długim to obcięcie połowy adresu, więc teraz przez `uintptr_t`.
+      Nic więcej.
+
+      Wyszedł za to prawdziwy błąd. `certtest` padał w połowie -
+      wyjątek strony tuż pod szczytem stosu. Program dostawał cztery
+      strony (16 KiB), a weryfikacja podpisu na liczbach
+      dwutysiącbitowych sięga głębiej - i sięga tym głębiej, że
+      wskaźniki mają tu osiem bajtów, więc każda ramka z tablicą
+      wskaźników jest dwa razy większa. Można było podnieść stałą.
+      **Zamiast tego stos rośnie teraz na żądanie**, dokładnie tak jak
+      sterta: program dostaje cztery strony na start, reszta dochodzi
+      pod palcami, a granica (ćwierć megabajta) jest po to, żeby dziki
+      wskaźnik nie zamienił się po cichu w zmapowaną stronę - pod nią
+      błąd strony pozostaje błędem. Zgadywanie z góry, ile stosu
+      potrzeba, zawsze kończy się albo marnowaniem pamięci, albo
+      wyjątkiem w środku głębokiego wywołania.
+
+      Test rozmawia z prawdziwym OpenSSL-em, a nie z własną pętlą, więc
+      dojście uzgodnienia do skutku znaczy, że zgadza się każdy bajt:
+      X25519, ChaCha20-Poly1305, wyprowadzanie kluczy i podpis
+      w Finished. Sprawdzamy też rzecz ważniejszą od samego
+      szyfrowania: obcy certyfikat ma połączenie **zerwać**, bo
+      szyfrowana rozmowa z kimś nieznanym nie jest bezpieczna, tylko
+      prywatna.
+
+      Ostatnia martwa ikona pulpitu ożyła: `gweb` rozwiązuje nazwę
+      przez DNS, pobiera stronę, obdziera ją ze znaczników i rysuje
+      w oknie - a to jeden program spinający naraz kompozytor,
+      klawiaturę, mysz, DNS, TCP, TLS, system plików i własną
+      przestrzeń adresową.

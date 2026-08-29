@@ -687,6 +687,9 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_GETPID:
+        r->rax = (uint64_t)(int64_t)task64_current_id();
+        return;
     case SYS64_TIME: {
         struct rtc_time t;
         if (!paging64_user_range(a1, sizeof(t))) {

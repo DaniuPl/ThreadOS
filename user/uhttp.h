@@ -17,7 +17,7 @@
 #ifndef PROTONOS_UHTTP_H
 #define PROTONOS_UHTTP_H
 
-#include "usys.h"
+#include "uapi.h"
 #include "udns.h"
 #include "utls.h"
 

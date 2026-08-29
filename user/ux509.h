@@ -12,7 +12,7 @@
 #ifndef PROTONOS_UX509_H
 #define PROTONOS_UX509_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define X509_ALG_UNKNOWN     0
 #define X509_ALG_RSA_SHA256  1

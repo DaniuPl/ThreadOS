@@ -7,7 +7,7 @@
  * niezrozumiale "decrypt error" od serwera.
  */
 
-#include "usys.h"
+#include "uapi.h"
 #include "usha256.h"
 #include "uchacha.h"
 #include "ux25519.h"

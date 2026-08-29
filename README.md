@@ -23,6 +23,7 @@ Shared by both kernels (same files, compiled twice):
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
 | Network | RTL8139, ARP, ICMP, UDP, DHCP, TCP, DNS |
+| Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
@@ -34,10 +35,11 @@ desktop with windows, icons, a file manager and a web browser.
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,
 signals, file descriptors, pipes, on-demand heap, SSE with FPU state
 saved across context switches, a shell in the kernel *and* one in user
-space, networking from ring 3, a graphical desktop with ring 3
-applications drawing in their own windows, shared memory, swap to
-disk, four virtual consoles, USB keyboard (UHCI), ACPI power-off, and
-BIOS + UEFI boot from a single hybrid disc.
+space, networking from ring 3, TLS 1.3 with certificate verification,
+a graphical desktop whose six applications all run in ring 3, shared
+memory, a stack that grows on demand, swap to disk, four virtual
+consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
+from a single hybrid disc.
 
 ## Quick start
 
@@ -83,13 +85,9 @@ scripts/           build helpers and the test suite
 
 Roughly in the order I would do them.
 
-**64-bit kernel — catching up with the 32-bit one**
-
-- The last desktop icon: a browser. It needs TLS and the HTTP client
-  first.
-- TLS and the HTTP client in ring 3: the crypto already lives in user
-  space, so this is mostly a matter of building those programs for
-  64-bit.
+The 64-bit kernel has caught up with the 32-bit one: everything the
+older one does, the long-mode one does too. What follows is new
+ground for both.
 
 **Things neither kernel has yet**
 

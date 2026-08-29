@@ -23,7 +23,7 @@
 #ifndef PROTONOS_CAROOTS_H
 #define PROTONOS_CAROOTS_H
 
-#include "usys.h"
+#include "uapi.h"
 
 #define CA_ROOTS_COUNT 14
 

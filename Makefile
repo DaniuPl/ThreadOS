@@ -243,7 +243,12 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gclock64.elf \
                $(BUILD)/user64/gfiles64.elf \
                $(BUILD)/user64/gmon64.elf \
-               $(BUILD)/user64/gterm64.elf
+               $(BUILD)/user64/gterm64.elf \
+               $(BUILD)/user64/cryptotest.elf \
+               $(BUILD)/user64/certtest.elf \
+               $(BUILD)/user64/nslookup.elf \
+               $(BUILD)/user64/httpget.elf \
+               $(BUILD)/user64/gweb.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -252,6 +257,15 @@ $(BUILD)/user64:
 # musi przebudowac programy, a bez tego wpisu make uznaje, ze skoro
 # zrodla sie nie zmienily, to nie ma nic do roboty.
 $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
+                       Makefile | $(BUILD)/user64
+	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
+
+# Programy wspolne dla obu jader: kryptografia, TLS, HTTP i DNS zyja
+# w user/ i nie wiedza nic o trybie procesora. Do jadra mowia przez
+# user/uapi.h, ktore wybiera wlasciwa strone - stad ta druga regula,
+# budujaca te same zrodla drugi raz, tyle ze na 64 bity.
+$(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
+                       user64/uzgodnosc64.h user64/user64.ld $(USER_HEADERS) \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
@@ -281,7 +295,12 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    gclock=$(BUILD)/user64/gclock64.elf \
 	    gfiles=$(BUILD)/user64/gfiles64.elf \
 	    gmon=$(BUILD)/user64/gmon64.elf \
-	    gterm=$(BUILD)/user64/gterm64.elf
+	    gterm=$(BUILD)/user64/gterm64.elf \
+	    cryptotest=$(BUILD)/user64/cryptotest.elf \
+	    certtest=$(BUILD)/user64/certtest.elf \
+	    nslookup=$(BUILD)/user64/nslookup.elf \
+	    httpget=$(BUILD)/user64/httpget.elf \
+	    gweb=$(BUILD)/user64/gweb.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)
