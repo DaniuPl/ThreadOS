@@ -1513,3 +1513,21 @@ sprawdzane przez `make test`.
       rdzenie się zgłaszają **oraz** że system po ich obudzeniu działa
       dokładnie tak samo - samo "widzę cztery procesory" nie byłoby nic
       warte, gdyby przy okazji coś pękało.
+- [x] **Naprawa `make fuzz`** - i lekcja o tym, po co w ogóle jest
+      osobne polecenie, którego nie uruchamia `make test`.
+
+      Fuzzing parserów buduje je **na hoście**, pod ASan i UBSan,
+      podstawiając zaślepkę zamiast wejścia do jądra. Port TLS-a do
+      trybu długiego zmienił to wejście: nagłówki wciągają teraz
+      `uapi.h`, a nie `usys.h`, więc zaślepka podstawiała się pod
+      nazwę, której nikt już nie woła - i harness przestał się
+      budować. Warstwa `netdev` dołożyła drugie takie miejsce po
+      stronie jądra.
+
+      Obie rzeczy przeszły niezauważone przez pełny bieg testów, bo
+      `make fuzz` nie jest jego częścią - i słusznie nie jest, bo trwa
+      swoje i sprawdza co innego. Ale to znaczy, że trzeba go
+      uruchamiać osobno po każdej zmianie w tym, jak kod wspólny
+      rozmawia z jądrem. Zapisuję to tutaj właśnie dlatego, że łatwo
+      o tym zapomnieć: pięćset przypadków na parser, zero błędów -
+      ale tylko wtedy, gdy ktoś je puści.

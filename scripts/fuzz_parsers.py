@@ -31,18 +31,26 @@ CASES = int(sys.argv[1]) if len(sys.argv) > 1 else 400
 
 
 def build(workdir):
-    """Kompiluje harness. Naglowki userspace wciagaja 'usys.h' po nazwie,
-    a ta w wersji dla ProtonOS-a wola syscalle - podstawiamy wiec
-    zaslepke, ustawiajac katalog z dowiazaniami do prawdziwych naglowkow
-    i zaslepka obok nich."""
+    """Kompiluje harness. Naglowki userspace wciagaja 'uapi.h', a ta
+    wybiera wejscie do jadra wlasciwe dla trybu procesora - na hoscie
+    zadne z nich nie ma sensu. Podstawiamy wiec zaslepke: katalog
+    z dowiazaniami do prawdziwych naglowkow, a zamiast wejscia do
+    jadra plik z samymi typami i drobiazgami.
+
+    Zaslepiamy tez 'usys.h' pod jego wlasna nazwa - parsery nie
+    powinny go juz wolac wprost, ale gdyby ktorys wrocil do starego
+    zwyczaju, lepiej zeby trafil w zaslepke niz w syscalle."""
     inc = os.path.join(workdir, "include")
     os.makedirs(inc, exist_ok=True)
 
+    zaslepione = ("usys.h", "uapi.h")
     for name in os.listdir(os.path.join(ROOT, "user")):
-        if name.endswith(".h") and name != "usys.h":
+        if name.endswith(".h") and name not in zaslepione:
             os.symlink(os.path.join(ROOT, "user", name),
                        os.path.join(inc, name))
-    shutil.copy(os.path.join(FUZZ, "stub_usys.h"), os.path.join(inc, "usys.h"))
+    for name in zaslepione:
+        shutil.copy(os.path.join(FUZZ, "stub_usys.h"),
+                    os.path.join(inc, name))
 
     binary = os.path.join(workdir, "harness")
     cmd = ["gcc", "-I", inc, "-fsanitize=address,undefined",
