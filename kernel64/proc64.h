@@ -48,6 +48,11 @@ uint64_t proc64_shm(int klucz, uint64_t rozmiar);
 
 /* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu,
    strony przychodza pod palcami). Zwraca adres albo 0. */
-uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out);
+uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out,
+                           uint64_t zapis);
+
+/* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
+   procesu. Zwraca liczbe odeslanych stron. */
+uint64_t proc64_msync(void);
 
 #endif

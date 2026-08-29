@@ -102,6 +102,20 @@ static uint32_t page_frame_for_ro(uint32_t dir, uint32_t vaddr)
     return frame;
 }
 
+/* Swieza ramka pod strone zapisywalnego odwzorowania pliku: z prawem
+   zapisu, ale oznaczona tak, ze fork ja wspoldzieli, a wymiana omija */
+static uint32_t page_frame_for_plik(uint32_t dir, uint32_t vaddr)
+{
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;
+    if (!paging_map_user_plik_in(dir, vaddr, frame)) {
+        pmm_free_frame(frame);
+        return 0;
+    }
+    return frame;
+}
+
 /* Mapuje (lub odnajduje) ramkę dla strony vaddr procesu */
 static uint32_t page_frame_for(uint32_t dir, uint32_t vaddr)
 {
@@ -379,9 +393,10 @@ int process_demand_page(uint32_t addr)
        dopiero teraz, warstwa blokowa, po numerach ustalonych przy
        zakladaniu odwzorowania. Do kodu systemu plikow tu nie wchodzimy:
        ma on jeden wspolny bufor na blok. */
-    uint32_t pierwszy = 0, zostalo = 0;
-    if (task_mmap_znajdz(addr, &pierwszy, &zostalo)) {
-        uint32_t ramka = page_frame_for_ro(dir, va);
+    uint32_t pierwszy = 0, zostalo = 0, zapis = 0;
+    if (task_mmap_znajdz(addr, &pierwszy, &zostalo, &zapis)) {
+        uint32_t ramka = zapis ? page_frame_for_plik(dir, va)
+                               : page_frame_for_ro(dir, va);
         if (!ramka)
             return 0;
         uint8_t *cel = (uint8_t *)ramka;
@@ -485,10 +500,18 @@ int process_exec(const char *cmdline)
         return -1;                    /* stary obraz caly czas dziala */
 
     /* Od tego miejsca nie ma juz odwrotu */
+    /* Zapisywalne odwzorowania starego obrazu odsylamy, dopoki jego
+       strony jeszcze sa - za chwile przestrzeni adresowej nie bedzie */
+    process_msync();
+
     uint32_t old = task_current_cr3();
     task_rename(tok[0]);              /* 'ps' ma pokazywac nowy program */
     task_set_brk(brk);
     task_set_brk_base(brk);
+    /* Opisy odwzorowan mowily o przestrzeni, ktorej juz nie bedzie,
+       a ich zakresy adresow leza tam, gdzie nowy obraz zaraz zacznie
+       zakladac wlasne - musza zniknac razem ze starym obrazem */
+    task_mmap_zwolnij();
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
 
@@ -549,11 +572,16 @@ uint32_t process_mmap(uint32_t size)
  * strona nie powstaje od razu: numery blokow zapamietujemy, a same
  * bajty przychodza z dysku dopiero przy pierwszym dotknieciu.
  *
- * Odwzorowanie jest tylko do odczytu. Zapis wymagalby odsylania stron
- * z powrotem na dysk i rozstrzygania, kiedy; dopoki tego nie ma,
- * lepiej niech proba zapisu konczy sie bledem, niz cicho ginie.
+ * 'zapis' rozstrzyga, co znaczy dotkniecie pisaniem. Bez niego strona
+ * nie ma prawa zapisu i proba konczy sie bledem ochrony - lepiej tak,
+ * niz zeby zmiana cicho zginela. Z nim strona jest zapisywalna, a jej
+ * tresc wraca do pliku przy process_msync (jawnie albo na wyjsciu
+ * procesu). Kiedy - decyduje program, nie jadro: samo trzymanie
+ * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
+ * bajcie zabiloby caly sens odwzorowania.
  */
-uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out)
+uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out,
+                           uint32_t zapis)
 {
     if (!fs_ready())
         return 0;
@@ -586,13 +614,59 @@ uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out)
         }
     }
 
-    if (task_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow) < 0) {
+    if (task_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow, zapis) < 0) {
         kfree(bloki);
         return 0;
     }
     task_set_mmap_next(koniec);
     *rozmiar_out = (uint32_t)len;
     return baza;
+}
+
+/* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
+ * Idziemy po stronach, nie po blokach: to strona jest jednostka, o
+ * ktorej procesor mowi nam "brudna", i tylko takie tu przepisujemy.
+ * Reszta obchodu jest lustrem wypelniania przy bledzie strony - te
+ * same numery blokow, ustalone przy zakladaniu odwzorowania, tyle ze
+ * blk_write zamiast blk_read.
+ *
+ * Zwraca liczbe odeslanych stron.
+ */
+uint32_t process_msync(void)
+{
+    if (!task_mmap_next())
+        return 0;
+    uint32_t dir = task_current_cr3();
+    uint32_t odeslanych = 0;
+
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        uint32_t start, koniec, rozmiar, zapis;
+        if (!task_mmap_opis(i, &start, &koniec, &rozmiar, &zapis) || !zapis)
+            continue;
+        for (uint32_t va = start; va < koniec; va += PAGE_SIZE) {
+            if (!paging_plik_brudna(dir, va))
+                continue;
+            uint32_t ramka = paging_get_mapping(dir, va);
+            if (!ramka)
+                continue;
+            uint32_t offset = va - start;
+            const uint8_t *zrodlo = (const uint8_t *)ramka;
+            for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
+                /* Za koncem pliku nie ma czego odsylac - blok albo nie
+                   istnieje, albo nalezy juz do kogos innego */
+                if (offset + b * FS_BLOCK >= rozmiar)
+                    break;
+                uint32_t blok = task_mmap_blok(va, offset / FS_BLOCK + b);
+                if (!blok)
+                    break;
+                blk_write(fs_block_lba(blok), FS_BLOCK / 512,
+                          zrodlo + b * FS_BLOCK);
+            }
+            paging_plik_czysta(dir, va);
+            odeslanych++;
+        }
+    }
+    return odeslanych;
 }
 
 /* Watki w procesie: nowe zadanie dzielace przestrzen adresowa, wchodzace

@@ -204,7 +204,11 @@ void syscall64_handler(struct regs *r)
 
 static void handle(struct regs *r)
 {
-    uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi, a3 = r->rdx;
+    /* Czwarty argument jedzie w R10, a nie w RCX: instrukcja syscall
+       wpisuje do RCX adres powrotu, wiec RCX na argument nie ma szans.
+       Tak samo robi Linux i z tego samego powodu. */
+    uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi, a3 = r->rdx,
+             a4 = r->r10;
 
     switch (nr) {
     case SYS64_WRITE: {
@@ -695,12 +699,15 @@ static void handle(struct regs *r)
             return;
         }
         uint64_t rozmiar = 0;
-        uint64_t adres = proc64_mmap_pliku(nazwa, &rozmiar);
+        uint64_t adres = proc64_mmap_pliku(nazwa, &rozmiar, a4);
         if (adres)
             *(uint64_t *)(uintptr_t)a3 = rozmiar;
         r->rax = adres;
         return;
     }
+    case SYS64_MSYNC:
+        r->rax = proc64_msync();
+        return;
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();
         return;

@@ -68,9 +68,11 @@ int task_cr3_shared(uint32_t cr3);
 #define MMAP_PLIKOW 4
 
 int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
-                    uint32_t *bloki, uint32_t ile_blokow);
+                    uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis);
 int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
-                     uint32_t *bajtow);
+                     uint32_t *bajtow, uint32_t *zapis);
+int task_mmap_opis(int i, uint32_t *start, uint32_t *koniec,
+                   uint32_t *rozmiar, uint32_t *zapis);
 uint32_t task_mmap_blok(uint32_t adres, uint32_t indeks);
 void task_mmap_zwolnij(void);
 void task_mmap_dziedzicz(struct task *dziecko);

@@ -52,7 +52,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/certtest.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
-             $(BUILD)/user/gleboko.elf
+             $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -183,7 +183,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    lazymem=$(BUILD)/user/lazymem.elf \
 	    swaptest=$(BUILD)/user/swaptest.elf \
 	    mkmapa=$(BUILD)/user/mkmapa.elf mmapfile=$(BUILD)/user/mmapfile.elf \
-	    gleboko=$(BUILD)/user/gleboko.elf
+	    gleboko=$(BUILD)/user/gleboko.elf \
+	    mmapzap=$(BUILD)/user/mmapzap.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #
@@ -269,7 +270,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/httpget.elf \
                $(BUILD)/user64/gweb.elf \
                $(BUILD)/user64/mkmapa64.elf \
-               $(BUILD)/user64/mmapfile64.elf
+               $(BUILD)/user64/mmapfile64.elf \
+               $(BUILD)/user64/mmapzap64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -323,7 +325,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    httpget=$(BUILD)/user64/httpget.elf \
 	    gweb=$(BUILD)/user64/gweb.elf \
 	    mkmapa64=$(BUILD)/user64/mkmapa64.elf \
-	    mmapfile64=$(BUILD)/user64/mmapfile64.elf
+	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
+	    mmapzap64=$(BUILD)/user64/mmapzap64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

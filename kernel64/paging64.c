@@ -27,6 +27,7 @@
 #define PTE_WRITE   0x002
 #define PTE_HUGE    0x080
 #define PTE_ACCESSED 0x020  /* ustawia procesor przy uzyciu strony */
+#define PTE_DIRTY    0x040  /* ustawia procesor przy zapisie do strony */
 #define ADDR_MASK   0x000FFFFFFFFFF000ULL
 
 #define HUGE_SIZE   (2u * 1024 * 1024)
@@ -153,6 +154,46 @@ uint64_t paging64_lookup(uint64_t virt)
     if (!(e & PTE_PRESENT))
         return 0;
     return (e & ADDR_MASK) + (virt & 0xFFF);
+}
+
+/* Wskaznik na wpis tablicy stron danego adresu albo NULL. Zwracamy
+   wpis, a nie ramke: dzwoniacy chce tez bitow. */
+static uint64_t *wpis_strony(uint64_t virt)
+{
+    uint64_t *top = root_now();
+    if (!top)
+        return (uint64_t *)0;
+    uint64_t e = top[(virt >> 39) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return (uint64_t *)0;
+    e = table_at(e)[(virt >> 30) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return (uint64_t *)0;
+    e = table_at(e)[(virt >> 21) & 0x1FF];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return (uint64_t *)0;
+    return &table_at(e)[(virt >> 12) & 0x1FF];
+}
+
+/* Czy strona zapisywalnego odwzorowania byla ruszana od ostatniego
+   odeslania na dysk? Odpowiada za nas procesor - bit "brudna" ustawia
+   sam przy kazdym zapisie, wiec odsylamy tylko to, co sie zmienilo. */
+int paging64_plik_brudna(uint64_t virt)
+{
+    uint64_t *w = wpis_strony(virt);
+    if (!w)
+        return 0;
+    return (*w & PTE_PRESENT) && (*w & PG_PLIK) && (*w & PTE_DIRTY);
+}
+
+/* Gasi bit "brudna" po odeslaniu strony do pliku */
+void paging64_plik_czysta(uint64_t virt)
+{
+    uint64_t *w = wpis_strony(virt);
+    if (!w)
+        return;
+    *w &= ~(uint64_t)PTE_DIRTY;
+    invlpg(virt);
 }
 
 /* Zdejmuje mapowanie strony i zwraca ramke, ktora pod nia lezala
@@ -308,12 +349,15 @@ uint64_t paging64_clone_space(uint64_t src)
             uint64_t va = ((uint64_t)PAGING64_USER_PDPT << 30) |
                           ((uint64_t)i << 21) | ((uint64_t)j << 12);
             uint64_t frame = pt[j] & ADDR_MASK;
-            uint64_t flags = pt[j] & (PG_WRITE | PG_USER | PG_NX | PG_COW);
+            uint64_t flags = pt[j] &
+                             (PG_WRITE | PG_USER | PG_NX | PG_COW | PG_PLIK);
 
             /* Zapisywalna strona idzie do obu jako tylko-do-odczytu
                ze znacznikiem - inaczej rodzic pisalby dziecku po
-               pamieci, nie wiedzac o tym */
-            if (flags & PG_WRITE) {
+               pamieci, nie wiedzac o tym. Wyjatkiem jest zapisywalne
+               odwzorowanie pliku: tam rodzic i dziecko MAJA pisac po
+               tym samym, bo pisza do jednego pliku. */
+            if ((flags & PG_WRITE) && !(flags & PG_PLIK)) {
                 flags = (flags & ~(uint64_t)PG_WRITE) | PG_COW;
                 pt[j] = frame | PTE_PRESENT | flags;
                 invlpg(va);
@@ -496,6 +540,11 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 int j = (start + k) % 512;
                 uint64_t w = pt[j];
                 if (!(w & PTE_PRESENT) || !(w & PG_USER) || (w & PG_COW))
+                    continue;
+                /* Strony zapisywalnego odwzorowania nie ma po co
+                   wyrzucac na dysk wymiany - jej miejscem na dysku
+                   jest sam odwzorowany plik */
+                if (w & PG_PLIK)
                     continue;
                 uint64_t frame = w & ADDR_MASK;
                 if (shm_is_shared((uint32_t)frame) ||

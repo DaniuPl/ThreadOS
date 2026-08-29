@@ -26,6 +26,7 @@
 #include "../kernel/include/prog.h"
 #include "../kernel/include/shm.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/blk.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -235,6 +236,10 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         return -1;
     }
 
+    /* Zapisywalne odwzorowania starego obrazu odsylamy, dopoki jego
+       strony jeszcze sa - za chwile tej przestrzeni nie bedzie */
+    proc64_msync();
+
     /* Stos jadra zostaje ten sam - stoimy na nim w tej chwili */
     uint64_t old = task64_swap_space(space, 0);
 
@@ -386,11 +391,16 @@ uint64_t proc64_shm(int klucz, uint64_t rozmiar)
  * o odwzorowanie stumegabajtowego pliku kosztuje wiec tyle, co spis
  * jego blokow - a nie sto megabajtow.
  *
- * Odwzorowanie jest tylko do odczytu. Zapis wymagalby odsylania stron
- * z powrotem na dysk i decydowania, kiedy; dopoki tego nie ma, lepiej
- * niech proba zapisu konczy sie bledem, niz cicho ginie.
+ * 'zapis' rozstrzyga, co znaczy dotkniecie pisaniem. Bez niego strona
+ * nie ma prawa zapisu i proba konczy sie bledem ochrony - lepiej tak,
+ * niz zeby zmiana cicho zginela. Z nim strona jest zapisywalna, a jej
+ * tresc wraca do pliku przy proc64_msync (jawnie albo na wyjsciu
+ * procesu). Kiedy - decyduje program, nie jadro: samo trzymanie
+ * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
+ * bajcie zabiloby caly sens odwzorowania.
  */
-uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out)
+uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out,
+                           uint64_t zapis)
 {
     if (!fs_ready())
         return 0;
@@ -423,13 +433,61 @@ uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out)
         }
     }
 
-    if (task64_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow) < 0) {
+    if (task64_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow,
+                          zapis ? 1u : 0u) < 0) {
         kfree(bloki);
         return 0;
     }
     task64_set_mmap_next(koniec);
     *rozmiar_out = (uint64_t)len;
     return baza;
+}
+
+/* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
+ * Idziemy po stronach, nie po blokach: to strona jest jednostka,
+ * o ktorej procesor mowi nam "brudna", i tylko takie tu przepisujemy.
+ * Reszta obchodu jest lustrem wypelniania przy bledzie strony - te
+ * same numery blokow, ustalone przy zakladaniu odwzorowania, tyle ze
+ * blk_write zamiast blk_read.
+ *
+ * Zwraca liczbe odeslanych stron.
+ */
+uint64_t proc64_msync(void)
+{
+    if (!task64_mmap_next())
+        return 0;
+    uint64_t odeslanych = 0;
+
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        uint64_t start, koniec;
+        uint32_t rozmiar, zapis;
+        if (!task64_mmap_opis(i, &start, &koniec, &rozmiar, &zapis) || !zapis)
+            continue;
+        for (uint64_t va = start; va < koniec; va += PAGE_SIZE) {
+            if (!paging64_plik_brudna(va))
+                continue;
+            uint64_t ramka = paging64_lookup(va) & ~0xFFFULL;
+            if (!ramka)
+                continue;
+            uint64_t offset = va - start;
+            const uint8_t *zrodlo = (const uint8_t *)(uintptr_t)ramka;
+            for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
+                /* Za koncem pliku nie ma czego odsylac - blok albo nie
+                   istnieje, albo nalezy juz do kogos innego */
+                if (offset + b * FS_BLOCK >= rozmiar)
+                    break;
+                uint32_t blok = task64_mmap_blok(va,
+                                    (uint32_t)(offset / FS_BLOCK) + b);
+                if (!blok)
+                    break;
+                blk_write(fs_block_lba(blok), FS_BLOCK / 512,
+                          zrodlo + b * FS_BLOCK);
+            }
+            paging64_plik_czysta(va);
+            odeslanych++;
+        }
+    }
+    return odeslanych;
 }
 
 int proc64_spawn(const char *name, const struct args64 *args, int quiet)

@@ -27,13 +27,19 @@
 #define PTE_WRITE   0x2
 #define PTE_USER    0x4
 #define PTE_ACCESSED 0x20   /* ustawia procesor przy uzyciu strony */
-/* Bity 9 i 10 sa do dyspozycji systemu; sprzet je ignoruje.
+#define PTE_DIRTY   0x40    /* ustawia procesor przy zapisie do strony */
+/* Bity 9, 10 i 11 sa do dyspozycji systemu; sprzet je ignoruje.
    Bit 9  - strona oddana na kopiowanie przy zapisie (fork).
    Bit 10 - strona wyrzucona na dysk; numer miejsca siedzi w gornych
             bitach wpisu, ktore przy nieobecnej stronie i tak nikogo
-            nie obchodza. */
+            nie obchodza.
+   Bit 11 - strona zapisywalnego odwzorowania pliku. Takiej strony nie
+            wolno ani skopiowac przy zapisie (fork ma ja WSPOLDZIELIC,
+            bo oba procesy pisza do tego samego pliku), ani wyrzucic na
+            dysk wymiany (jej miejscem na dysku jest sam plik). */
 #define PTE_COW     0x200
 #define PTE_SWAPPED 0x400
+#define PTE_PLIK    0x800
 
 #define NUM_TABLES (PAGING_STATIC_LIMIT / (4096u * 1024))
 
@@ -138,12 +144,23 @@ uint32_t paging_new_address_space(void)
     return dir_phys;
 }
 
-/* Wspolna czesc mapowania strony uzytkownika. 'zapis' rozstrzyga, czy
-   strona ma byc zapisywalna: odwzorowany plik jest tylko do odczytu,
-   wiec proba zapisu ma sie skonczyc bledem ochrony, a nie cichym
-   zgubieniem danych. */
+/* Wskaznik na wpis tablicy stron danego adresu albo NULL, gdy tablicy
+   nie ma. Zwracamy wpis, a nie ramke: dzwoniacy chce tez bitow. */
+static uint32_t *wpis_strony(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    uint32_t pde = vaddr >> 22;
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
+        return (uint32_t *)0;
+    return &((uint32_t *)(dir[pde] & ~0xFFFu))[(vaddr >> 12) & 0x3FF];
+}
+
+/* Wspolna czesc mapowania strony uzytkownika. 'flagi' to dodatkowe bity
+   wpisu: prawo zapisu (odwzorowanie tylko do odczytu ma go nie miec,
+   zeby proba zapisu skonczyla sie bledem ochrony, a nie cichym
+   zgubieniem danych) i znacznik strony pliku. */
 static int mapuj_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
-                      int zapis)
+                      uint32_t flagi)
 {
     /* Nie pozwól zamapować strony użytkownika na obszarze jądra */
     if (vaddr < PAGING_USER_BASE)
@@ -166,8 +183,7 @@ static int mapuj_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
         pt_phys = dir[pde] & ~0xFFFu;
     }
 
-    ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_USER |
-                                 (zapis ? PTE_WRITE : 0);
+    ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_USER | flagi;
     /* Jeśli mapujemy do aktywnej przestrzeni (sbrk), odśwież TLB */
     uint32_t active;
     __asm__ volatile("movl %%cr3, %0" : "=r"(active));
@@ -178,12 +194,43 @@ static int mapuj_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
 
 int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
 {
-    return mapuj_user(dir_phys, vaddr, frame, 1);
+    return mapuj_user(dir_phys, vaddr, frame, PTE_WRITE);
 }
 
 int paging_map_user_ro_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
 {
     return mapuj_user(dir_phys, vaddr, frame, 0);
+}
+
+int paging_map_user_plik_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
+{
+    return mapuj_user(dir_phys, vaddr, frame, PTE_WRITE | PTE_PLIK);
+}
+
+/* Czy strona zapisywalnego odwzorowania byla ruszana od ostatniego
+   odeslania na dysk? Odpowiada za nas procesor: bit "brudna" ustawia
+   sam przy kazdym zapisie, wiec odsylamy tylko to, co naprawde sie
+   zmienilo. */
+int paging_plik_brudna(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *wpis = wpis_strony(dir_phys, vaddr);
+    if (!wpis)
+        return 0;
+    uint32_t e = *wpis;
+    return (e & PTE_PRESENT) && (e & PTE_PLIK) && (e & PTE_DIRTY);
+}
+
+/* Gasi bit "brudna" po odeslaniu strony na dysk */
+void paging_plik_czysta(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *wpis = wpis_strony(dir_phys, vaddr);
+    if (!wpis)
+        return;
+    *wpis &= ~(uint32_t)PTE_DIRTY;
+    uint32_t active;
+    __asm__ volatile("movl %%cr3, %0" : "=r"(active));
+    if (active == dir_phys)
+        __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
 }
 
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
@@ -282,6 +329,15 @@ uint32_t paging_clone_address_space(uint32_t src_phys)
             /* Pamiec wspoldzielona ma zostac wspolna - nie kopiujemy jej */
             if (shm_is_shared(frame)) {
                 dpt[j] = e;
+                continue;
+            }
+            /* Strona zapisywalnego odwzorowania pliku ma zostac
+               WSPOLNA razem z prawem zapisu: oba procesy pisza do tego
+               samego pliku, wiec prywatna kopia u dziecka znaczylaby,
+               ze jego zapisy nigdy nie trafiaja na dysk. */
+            if (e & PTE_PLIK) {
+                dpt[j] = e;
+                pmm_frame_ref(frame);
                 continue;
             }
             /* Strona i tak nie do zapisu (odwzorowany plik) zostaje
@@ -387,6 +443,11 @@ int paging_reclaim_pages(uint32_t dir_phys, int want)
                 uint32_t j = (start + k) % 1024;
                 uint32_t e = pt[j];
                 if (!(e & PTE_PRESENT) || !(e & PTE_USER) || (e & PTE_COW))
+                    continue;
+                /* Strony zapisywalnego odwzorowania nie ma po co
+                   wyrzucac na dysk wymiany - jej miejscem na dysku
+                   jest sam odwzorowany plik */
+                if (e & PTE_PLIK)
                     continue;
                 uint32_t frame = e & ~0xFFFu;
                 if (shm_is_shared(frame) || pmm_frame_refs(frame) != 1)

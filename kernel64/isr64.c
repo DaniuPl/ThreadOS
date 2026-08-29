@@ -111,12 +111,17 @@ void isr64_handler(struct regs *r)
          * na blok, a blad strony potrafi trafic w srodku dowolnej
          * operacji na plikach.
          *
-         * Strona jest tylko do odczytu. Ogon ostatniej zostaje
-         * wyzerowany - plik konczy sie tam, gdzie sie konczy. */
+         * Ogon ostatniej strony zostaje wyzerowany - plik konczy sie
+         * tam, gdzie sie konczy.
+         *
+         * Zapisywalne odwzorowanie dostaje prawo zapisu i znacznik
+         * PG_PLIK; bez niego strona jest tylko do odczytu i proba
+         * zapisu ma sie skonczyc bledem, a nie cichym zgubieniem
+         * danych. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t adres = read_cr2();
-            uint32_t pierwszy = 0, zostalo = 0;
-            if (task64_mmap_znajdz(adres, &pierwszy, &zostalo) &&
+            uint32_t pierwszy = 0, zostalo = 0, zapis = 0;
+            if (task64_mmap_znajdz(adres, &pierwszy, &zostalo, &zapis) &&
                 paging64_lookup(adres & ~0xFFFULL) == 0) {
                 uint32_t ramka = pmm_alloc_frame();
                 if (ramka) {
@@ -130,8 +135,10 @@ void isr64_handler(struct regs *r)
                         blk_read(fs_block_lba(blok), FS_BLOCK / 512,
                                  cel + b * FS_BLOCK);
                     }
-                    if (paging64_map(adres & ~0xFFFULL, ramka,
-                                     PG_USER | PG_NX) == 0) {
+                    uint64_t prawa = PG_USER | PG_NX;
+                    if (zapis)
+                        prawa |= PG_WRITE | PG_PLIK;
+                    if (paging64_map(adres & ~0xFFFULL, ramka, prawa) == 0) {
                         mmap_pages++;
                         return;
                     }

@@ -1596,3 +1596,55 @@ sprawdzane przez `make test`.
       Doszła też para `paging_map_user_in` / `paging_map_user_ro_in`
       nad wspólnym trzonem: to samo mapowanie, jeden bit różnicy,
       wybierany przez wołającego.
+- [x] **Zapis przez plik odwzorowany w pamięci** - droga w drugą
+      stronę, w obu jądrach naraz.
+
+      Dotąd odwzorowanie było jednokierunkowe: plik dawało się czytać
+      jak pamięć, ale próba zapisu kończyła się błędem ochrony. Było
+      to uczciwe (lepszy błąd niż cicho zgubiona zmiana), ale połowiczne.
+      Teraz `sys_mmap_file_w` daje stronom prawo zapisu, a treść wraca
+      do pliku.
+
+      Najważniejsze pytanie brzmi **kiedy**. Odsyłanie po każdym bajcie
+      zabiłoby cały sens odwzorowania - wtedy taniej byłoby wołać
+      `write`. Decyduje więc program, przez `sys_msync`, a jądro
+      dokłada jedno miejsce, o którym program nie musi pamiętać:
+      koniec procesu. Odesłanie musi się zdarzyć **tam**, w `task_exit`
+      i w `exec`, dopóki przestrzeń adresowa procesu jeszcze żyje -
+      sprzątacz zombie ogląda te strony już z cudzego CR3, a `exec`
+      za chwilę tej przestrzeni nie ma.
+
+      Które strony odesłać, wie procesor. Bit "brudna" ustawia sam przy
+      każdym zapisie, więc nie trzeba niczego liczyć ani zgadywać: test
+      czyta cały dwunastokilobajtowy plik, pisze po dwóch pierwszych
+      stronach, i `sys_msync` odsyła **dwie**. Drugie z rzędu odsyła
+      zero, bo bit gaśnie razem z odesłaniem. To jest asercja, która
+      naprawdę coś rozstrzyga - "odesłało się cokolwiek" przeszłoby
+      równie dobrze przy przepisywaniu całego pliku za każdym razem.
+
+      Doszedł trzeci bit programowy we wpisie strony - `PTE_PLIK`
+      (`PG_PLIK` w trybie długim), ostatni wolny. Znaczy dwie rzeczy
+      naraz, obie negatywne:
+
+      - `fork` ma taką stronę **współdzielić**, a nie oznaczać do
+        kopiowania przy zapisie. Oba procesy piszą do jednego pliku,
+        więc prywatna kopia u dziecka znaczyłaby, że jego zapisy nigdy
+        nie wychodzą poza jego własną pamięć. Test rozwidla się i każe
+        pisać dziecku, a sprawdza u rodzica.
+      - wymiana stron ma ją omijać. Miejscem takiej strony na dysku
+        jest sam odwzorowany plik, a nie plik wymiany; wyrzucenie jej
+        do `swap.sys` zgubiłoby i związek z plikiem, i informację
+        o tym, że jest brudna.
+
+      Do jądra 64-bitowego trzeba było przy okazji dołożyć **czwarty
+      argument wywołania systemowego**. Dotąd wystarczały trzy; teraz
+      jedzie w R10, tak jak w Linuksie i z tego samego powodu - RCX
+      zabiera sama instrukcja `syscall` na adres powrotu.
+
+      Wyszedł też błąd starszy niż ta zmiana: `exec` w jądrze
+      32-bitowym zerował licznik wolnych adresów mapowań, ale zostawiał
+      **opisy** odwzorowań starego obrazu. Ich zakresy leżą dokładnie
+      tam, gdzie nowy obraz zaczyna zakładać własne, więc błąd strony
+      w nowej stercie trafiał na opis pliku, którego ten proces już nie
+      otwierał. `task_mmap_zwolnij` istniało od początku i nie było
+      wołane z żadnego miejsca - wersja 64-bitowa wołała swoje.

@@ -94,12 +94,18 @@ void task64_inherit_brk(struct task64 *child);
 /* Zaklada odwzorowanie: zapamietuje zakres adresow i numery blokow.
    Zwraca 0 albo -1. Bloki przechodza na wlasnosc zadania. */
 int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
-                      uint32_t *bloki, uint32_t ile_blokow);
+                      uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis);
 
 /* Czy adres nalezy do ktoregos odwzorowania. Gdy tak, wpisuje numer
-   bloku PFS i ile bajtow pliku zostalo od tego miejsca. */
+   bloku PFS, ile bajtow pliku zostalo od tego miejsca i czy
+   odwzorowanie jest zapisywalne. */
 int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
-                       uint32_t *bajtow);
+                       uint32_t *bajtow, uint32_t *zapis);
+
+/* Opis i-tego odwzorowania biezacego procesu (0 = wolny wpis) - do
+   odsylania brudnych stron, ktore obchodzi je po kolei. */
+int task64_mmap_opis(int i, uint64_t *start, uint64_t *koniec,
+                     uint32_t *rozmiar, uint32_t *zapis);
 
 /* Numer bloku PFS pod danym indeksem w odwzorowaniu obejmujacym adres */
 uint32_t task64_mmap_blok(uint64_t adres, uint32_t indeks);

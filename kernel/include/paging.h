@@ -39,6 +39,18 @@ int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
 
 /* To samo, ale bez prawa zapisu - dla plikow odwzorowanych w pamieci */
 int paging_map_user_ro_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
+
+/* Strona zapisywalnego odwzorowania pliku: z prawem zapisu, ale
+   oznaczona tak, zeby fork ja wspoldzielil zamiast kopiowac, a
+   wymiana jej nie ruszala. */
+int paging_map_user_plik_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
+
+/* Czy taka strona byla zapisywana od ostatniego odeslania na dysk
+   (bit "brudna" ustawiany przez procesor) */
+int paging_plik_brudna(uint32_t dir_phys, uint32_t vaddr);
+
+/* Gasi bit "brudna" - wolane po odeslaniu strony do pliku */
+void paging_plik_czysta(uint32_t dir_phys, uint32_t vaddr);
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr);
 void paging_destroy_address_space(uint32_t dir_phys);
 

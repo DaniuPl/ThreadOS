@@ -56,6 +56,7 @@
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
+#define SYS64_MSYNC      41
 
 #define NAME_MAX64 63
 
@@ -84,6 +85,20 @@ static inline int64_t syscall64_3(int64_t nr, int64_t a1, int64_t a2,
     __asm__ volatile("syscall"
                      : "=a"(ret)
                      : "a"(nr), "D"(a1), "S"(a2), "d"(a3)
+                     : "rcx", "r11", "memory");
+    return ret;
+}
+
+/* Czwarty argument jedzie w R10, bo RCX zabiera sama instrukcja
+   syscall na adres powrotu */
+static inline int64_t syscall64_4(int64_t nr, int64_t a1, int64_t a2,
+                                  int64_t a3, int64_t a4)
+{
+    int64_t ret;
+    register int64_t r10 __asm__("r10") = a4;
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(nr), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
                      : "rcx", "r11", "memory");
     return ret;
 }
@@ -460,14 +475,32 @@ static inline int64_t sys_sysinfo(struct sysinfo64 *out)
  * Zwraca adres, pod ktorym widac zawartosc pliku, i wpisuje jego
  * rozmiar. Zadna strona nie powstaje od razu - bajty przychodza
  * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
- * co spis jego blokow. Tylko do odczytu: proba zapisu konczy sie
- * bledem ochrony, a nie cichym zgubieniem danych. */
+ * co spis jego blokow. Ta wersja jest tylko do odczytu: proba zapisu
+ * konczy sie bledem ochrony, a nie cichym zgubieniem danych. */
 static inline const void *sys_mmap_file(const char *nazwa, uint64_t *rozmiar)
 {
-    int64_t r = syscall64_3(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
+    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
                             (int64_t)ustrlen(nazwa),
-                            (int64_t)(uintptr_t)rozmiar);
+                            (int64_t)(uintptr_t)rozmiar, 0);
     return r <= 0 ? (const void *)0 : (const void *)(uintptr_t)r;
+}
+
+/* To samo, ale z prawem zapisu: zmiany w pamieci wracaja do pliku.
+ * Nie od razu - dopiero przy sys_msync albo na wyjsciu procesu. */
+static inline void *sys_mmap_file_w(const char *nazwa, uint64_t *rozmiar)
+{
+    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
+                            (int64_t)ustrlen(nazwa),
+                            (int64_t)(uintptr_t)rozmiar, 1);
+    return r <= 0 ? (void *)0 : (void *)(uintptr_t)r;
+}
+
+/* Odsyla do plikow zmienione strony zapisywalnych odwzorowan.
+ * Zwraca, ile stron poszlo na dysk - strona nietknieta od ostatniego
+ * razu nie kosztuje nic, bo o tym, ktore sa brudne, mowi procesor. */
+static inline int64_t sys_msync(void)
+{
+    return syscall64(SYS64_MSYNC, 0, 0);
 }
 
 /* Pamiec wspoldzielona po kluczu.

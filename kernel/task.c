@@ -25,6 +25,7 @@
 #include "include/kfile.h"
 #include "include/pipe.h"
 #include "include/signal.h"
+#include "include/exec.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -51,6 +52,7 @@ struct task {
         uint32_t rozmiar;        /* ile bajtow ma sam plik */
         uint32_t ile_blokow;
         uint32_t *bloki;
+        uint32_t zapis;          /* 1 = zmiany wracaja do pliku */
     } mapy[MMAP_PLIKOW];
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     int parent;                  /* pid rodzica (-1 = brak, sierota) */
@@ -633,6 +635,12 @@ int task_alive(int id)
 
 void task_exit(int code)
 {
+    /* Odeslij na dysk to, co proces napisal w zapisywalnym
+       odwzorowaniu pliku, a czego jeszcze nie zdazyl odeslac sam.
+       Musi to sie stac TUTAJ, dopoki jego przestrzen adresowa jest
+       zywa: sprzatacz zombie oglada te strony juz z cudzego CR3. */
+    process_msync();
+
     /* Zamknij deskryptory - konce potokow musza zwolnic druga strone
        (czytelnik dostanie EOF, pisarz - przerwany potok) */
     file_close_all();
@@ -853,7 +861,7 @@ void task_set_brk_base(uint32_t base)
 /* --- Pliki odwzorowane w pamieci ---------------------------------- */
 
 int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
-                    uint32_t *bloki, uint32_t ile_blokow)
+                    uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis)
 {
     if (!current)
         return -1;
@@ -865,6 +873,7 @@ int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
         current->mapy[i].rozmiar = rozmiar;
         current->mapy[i].bloki = bloki;
         current->mapy[i].ile_blokow = ile_blokow;
+        current->mapy[i].zapis = zapis;
         return 0;
     }
     return -1;
@@ -872,7 +881,7 @@ int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
 
 /* Wolane z obslugi bledu strony, wiec krotkie i bez niespodzianek */
 int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
-                     uint32_t *bajtow)
+                     uint32_t *bajtow, uint32_t *zapis)
 {
     if (!current)
         return 0;
@@ -891,6 +900,7 @@ int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
         /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej ma
            zostac wyzerowany, a nie wypelniony smieciem z dysku */
         *bajtow = offset < m->rozmiar ? m->rozmiar - offset : 0;
+        *zapis = m->zapis;
         return 1;
     }
     return 0;
@@ -939,6 +949,20 @@ void task_mmap_dziedzicz(struct task *dziecko)
             kopia[k] = current->mapy[i].bloki[k];
         dziecko->mapy[i].bloki = kopia;
     }
+}
+
+/* Opis i-tego odwzorowania biezacego procesu - do odsylania stron na
+   dysk, ktore musi obejsc kazde po kolei. Zwraca 0, gdy wpis wolny. */
+int task_mmap_opis(int i, uint32_t *start, uint32_t *koniec,
+                   uint32_t *rozmiar, uint32_t *zapis)
+{
+    if (!current || i < 0 || i >= MMAP_PLIKOW || !current->mapy[i].koniec)
+        return 0;
+    *start = current->mapy[i].start;
+    *koniec = current->mapy[i].koniec;
+    *rozmiar = current->mapy[i].rozmiar;
+    *zapis = current->mapy[i].zapis;
+    return 1;
 }
 
 uint32_t task_mmap_next(void)

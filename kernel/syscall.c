@@ -349,12 +349,15 @@ void syscall_handler(struct regs *r)
             break;
         }
         uint32_t rozmiar = 0;
-        uint32_t adres = process_mmap_file(nazwa, &rozmiar);
+        uint32_t adres = process_mmap_file(nazwa, &rozmiar, r->edx);
         if (adres && user_put(r->ecx, &rozmiar, sizeof(rozmiar)) < 0)
             adres = 0;
         r->eax = adres;
         break;
     }
+    case SYS_MSYNC:
+        r->eax = process_msync();
+        break;
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;

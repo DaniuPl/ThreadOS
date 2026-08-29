@@ -30,7 +30,6 @@
 #define SYS_WIN_TEXT   23
 #define SYS_WIN_POLL   24
 #define SYS_MMAP       25
-#define SYS_MMAP_FILE  46
 #define SYS_SHM        26
 #define SYS_SYSINFO    27
 #define SYS_THREAD     28
@@ -51,6 +50,8 @@
 #define SYS_WAITANY     43
 #define SYS_SIGNAL      44
 #define SYS_SIGRETURN   45
+#define SYS_MMAP_FILE   46
+#define SYS_MSYNC       47
 
 #define FS_NAME_MAX  63
 
@@ -238,15 +239,37 @@ static inline void *sys_mmap(uint32_t size)
  * Zwraca adres, pod ktorym widac zawartosc pliku, i wpisuje jego
  * rozmiar. Zadna strona nie powstaje od razu - bajty przychodza
  * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
- * co spis jego blokow. Tylko do odczytu: proba zapisu konczy sie
- * bledem ochrony, a nie cichym zgubieniem danych. */
+ * co spis jego blokow. Ta wersja jest tylko do odczytu: proba zapisu
+ * konczy sie bledem ochrony, a nie cichym zgubieniem danych. */
 static inline const void *sys_mmap_file(const char *nazwa, uint32_t *rozmiar)
 {
     const void *ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar)
+                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar), "d"(0)
                      : "memory");
+    return ret;
+}
+
+/* To samo, ale z prawem zapisu: zmiany w pamieci wracaja do pliku.
+ * Nie od razu - dopiero przy sys_msync albo na wyjsciu procesu. */
+static inline void *sys_mmap_file_w(const char *nazwa, uint32_t *rozmiar)
+{
+    void *ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar), "d"(1)
+                     : "memory");
+    return ret;
+}
+
+/* Odsyla do plikow zmienione strony zapisywalnych odwzorowan.
+ * Zwraca, ile stron poszlo na dysk - strona nietkniete od ostatniego
+ * razu nie kosztuje nic, bo o tym, ktore sa brudne, mowi procesor. */
+static inline int sys_msync(void)
+{
+    int ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_MSYNC) : "memory");
     return ret;
 }
 

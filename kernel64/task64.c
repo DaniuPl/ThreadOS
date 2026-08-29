@@ -19,6 +19,7 @@
 #include "fpu64.h"
 #include "../kernel/include/fs.h"
 #include "pipe64.h"
+#include "proc64.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -72,6 +73,7 @@ struct task64 {
         uint32_t rozmiar;        /* ile bajtow ma sam plik */
         uint32_t ile_blokow;
         uint32_t *bloki;         /* numery blokow PFS, po kolei */
+        uint32_t zapis;          /* 1 = zmiany wracaja do pliku */
     } mapy[MMAP_PLIKOW];
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     int vc;                      /* konsola wirtualna, na ktorej pisze */
@@ -476,6 +478,10 @@ void task64_exit_code(int code)
 {
     irq_save();
     task64_fd_close_all();
+    /* Odeslij na dysk to, co proces napisal w zapisywalnym
+       odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
+       TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
+    proc64_msync();
     task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, code);
@@ -489,6 +495,10 @@ void task64_exit(void)
 {
     irq_save();
     task64_fd_close_all();
+    /* Odeslij na dysk to, co proces napisal w zapisywalnym
+       odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
+       TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
+    proc64_msync();
     task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, 0);
@@ -670,7 +680,7 @@ void task64_set_brk_base(uint64_t base)
  * Kolejne mapowania ida jedno za drugim w gore, bez zwalniania: proces
  * i tak zabiera ze soba caly ten obszar, gdy sie konczy. */
 int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
-                      uint32_t *bloki, uint32_t ile_blokow)
+                      uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis)
 {
     if (!current)
         return -1;
@@ -682,6 +692,7 @@ int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
         current->mapy[i].rozmiar = rozmiar;
         current->mapy[i].bloki = bloki;
         current->mapy[i].ile_blokow = ile_blokow;
+        current->mapy[i].zapis = zapis;
         return 0;
     }
     return -1;
@@ -690,7 +701,7 @@ int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
 /* Wolane z obslugi bledu strony, wiec musi byc krotkie i bez zadnych
    niespodzianek: samo wyszukanie w tablicy czterech wpisow. */
 int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
-                       uint32_t *bajtow)
+                       uint32_t *bajtow, uint32_t *zapis)
 {
     if (!current)
         return 0;
@@ -711,6 +722,7 @@ int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
            z dysku */
         *bajtow = (offset < m->rozmiar)
                       ? (uint32_t)(m->rozmiar - offset) : 0;
+        *zapis = m->zapis;
         return 1;
     }
     return 0;
@@ -762,6 +774,20 @@ void task64_mmap_dziedzicz(struct task64 *dziecko)
             kopia[k] = current->mapy[i].bloki[k];
         dziecko->mapy[i].bloki = kopia;
     }
+}
+
+/* Opis i-tego odwzorowania biezacego procesu - do odsylania stron na
+   dysk, ktore musi obejsc kazde po kolei. Zwraca 0, gdy wpis wolny. */
+int task64_mmap_opis(int i, uint64_t *start, uint64_t *koniec,
+                     uint32_t *rozmiar, uint32_t *zapis)
+{
+    if (!current || i < 0 || i >= MMAP_PLIKOW || !current->mapy[i].koniec)
+        return 0;
+    *start = current->mapy[i].start;
+    *koniec = current->mapy[i].koniec;
+    *rozmiar = current->mapy[i].rozmiar;
+    *zapis = current->mapy[i].zapis;
+    return 1;
 }
 
 uint64_t task64_mmap_next(void)          { return current ? current->mmap : 0; }

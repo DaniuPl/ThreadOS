@@ -42,7 +42,12 @@ uint32_t process_mmap(uint32_t size);
 
 /* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu, strony
    przychodza pod palcami). Zwraca adres albo 0. */
-uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out);
+uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out,
+                           uint32_t zapis);
+
+/* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
+   procesu. Zwraca liczbe odeslanych stron. */
+uint32_t process_msync(void);
 
 /* Ile stron wczytano z odwzorowanych plikow */
 uint32_t process_mmap_pages(void);
