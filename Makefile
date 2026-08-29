@@ -50,7 +50,9 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gweb.elf \
              $(BUILD)/user/cryptotest.elf \
              $(BUILD)/user/certtest.elf \
-             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf
+             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
+             $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
+             $(BUILD)/user/gleboko.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -179,7 +181,9 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf \
 	    sigtest=$(BUILD)/user/sigtest.elf \
 	    lazymem=$(BUILD)/user/lazymem.elf \
-	    swaptest=$(BUILD)/user/swaptest.elf
+	    swaptest=$(BUILD)/user/swaptest.elf \
+	    mkmapa=$(BUILD)/user/mkmapa.elf mmapfile=$(BUILD)/user/mmapfile.elf \
+	    gleboko=$(BUILD)/user/gleboko.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #

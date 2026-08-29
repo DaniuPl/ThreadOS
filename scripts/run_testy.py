@@ -26,7 +26,7 @@ KATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testy")
 # najdluzsze pierwsze, zeby nie zostawaly na koniec same
 GRUPY = ["rdzen", "rdzen2", "tls32", "k64", "pulpit1", "pulpit2", "sterowniki",
          "siec", "siec64", "gfx64", "pulpit64", "gui64", "acpi64",
-         "konsole64", "usbkbd64", "swap64", "dysk", "shm64", "tls64", "mmap64", "e1000", "nvme", "smp",
+         "konsole64", "usbkbd64", "swap64", "dysk", "shm64", "tls64", "mmap", "e1000", "nvme", "smp",
          "iso", "uefi"]
 
 

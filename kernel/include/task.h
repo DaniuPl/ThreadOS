@@ -59,6 +59,22 @@ void task_rename(const char *name);
 int task_cr3_shared(uint32_t cr3);
 
 /* Katalog roboczy biezacego zadania (slot PFS, -1 = root) */
+/* --- Pliki odwzorowane w pamieci ------------------------------------
+ *
+ * Plik widziany jako pamiec: program dostaje adres, a strony pojawiaja
+ * sie pod palcami - tak samo jak sterta, tyle ze wypelnione trescia
+ * z dysku zamiast zerami. MMAP_PLIKOW mowi, ile odwzorowan naraz moze
+ * miec jeden proces. */
+#define MMAP_PLIKOW 4
+
+int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
+                    uint32_t *bloki, uint32_t ile_blokow);
+int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
+                     uint32_t *bajtow);
+uint32_t task_mmap_blok(uint32_t adres, uint32_t indeks);
+void task_mmap_zwolnij(void);
+void task_mmap_dziedzicz(struct task *dziecko);
+
 int task_cwd(void);
 void task_set_cwd(int slot);
 

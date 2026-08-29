@@ -339,6 +339,22 @@ void syscall_handler(struct regs *r)
     case SYS_MMAP:
         r->eax = process_mmap(r->ebx);
         break;
+    case SYS_MMAP_FILE: {
+        /* Plik widziany jako pamiec. Nazwa przychodzi z ring 3, wiec
+           przepisujemy ja do jadra, a rozmiar oddajemy przez wskaznik,
+           bo adres zajmuje juz cala wartosc powrotu. */
+        char nazwa[FS_NAME_MAX + 1];
+        if (user_str(nazwa, r->ebx, sizeof(nazwa)) < 0) {
+            r->eax = 0;
+            break;
+        }
+        uint32_t rozmiar = 0;
+        uint32_t adres = process_mmap_file(nazwa, &rozmiar);
+        if (adres && user_put(r->ecx, &rozmiar, sizeof(rozmiar)) < 0)
+            adres = 0;
+        r->eax = adres;
+        break;
+    }
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;

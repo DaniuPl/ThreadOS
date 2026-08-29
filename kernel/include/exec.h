@@ -40,6 +40,13 @@ uint32_t process_sbrk(int32_t increment);
 /* mmap: mapuje 'size' bajtow swiezej pamieci procesu, zwraca adres albo 0 */
 uint32_t process_mmap(uint32_t size);
 
+/* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu, strony
+   przychodza pod palcami). Zwraca adres albo 0. */
+uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out);
+
+/* Ile stron wczytano z odwzorowanych plikow */
+uint32_t process_mmap_pages(void);
+
 /* shm: mapuje region pamieci wspoldzielonej (po kluczu); adres albo 0 */
 uint32_t process_shm(int key, uint32_t size);
 

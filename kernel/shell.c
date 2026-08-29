@@ -140,6 +140,9 @@ static void cmd_mem(void)
     printk("sterta jadra: %u/%u B zajetych\n",
            heap_used_bytes(), heap_total_bytes());
 
+    printk("z plikow:     %u stron wczytanych z odwzorowan\n",
+           process_mmap_pages());
+
     uint32_t sused, stotal, sout, sin;
     swap_stats(&sused, &stotal, &sout, &sin);
     if (stotal)

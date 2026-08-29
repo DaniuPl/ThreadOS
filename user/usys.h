@@ -30,6 +30,7 @@
 #define SYS_WIN_TEXT   23
 #define SYS_WIN_POLL   24
 #define SYS_MMAP       25
+#define SYS_MMAP_FILE  46
 #define SYS_SHM        26
 #define SYS_SYSINFO    27
 #define SYS_THREAD     28
@@ -228,6 +229,23 @@ static inline void *sys_mmap(uint32_t size)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_MMAP), "b"(size)
+                     : "memory");
+    return ret;
+}
+
+/* Plik widziany jako pamiec.
+ *
+ * Zwraca adres, pod ktorym widac zawartosc pliku, i wpisuje jego
+ * rozmiar. Zadna strona nie powstaje od razu - bajty przychodza
+ * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
+ * co spis jego blokow. Tylko do odczytu: proba zapisu konczy sie
+ * bledem ochrony, a nie cichym zgubieniem danych. */
+static inline const void *sys_mmap_file(const char *nazwa, uint32_t *rozmiar)
+{
+    const void *ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar)
                      : "memory");
     return ret;
 }

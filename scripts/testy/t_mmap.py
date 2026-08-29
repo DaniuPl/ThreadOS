@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: pliki odwzorowane w pamieci (jadro 64-bitowe).
+"""Test dymny ProtonOS: pliki odwzorowane w pamieci.
 
 Loader ELF i system plikow polaczylismy juz wczesniej - program moze
 lezec na dysku. To jest druga polowa tej samej mysli: plik moze byc
@@ -18,6 +18,11 @@ Numery blokow jadro ustala raz, przy zakladaniu odwzorowania, i czyta
 je potem warstwa blokowa z pominieciem kodu PFS - z tego samego
 powodu, co przy wymianie stron: PFS ma jeden wspolny bufor na blok,
 a blad strony potrafi trafic w srodku dowolnej operacji na plikach.
+
+Oba jadra maja to samo, kazde swoim kodem stronicowania - i oba
+sprawdzamy tak samo. Przy okazji sprawdzamy tu drugi obszar rosnacy
+pod palcami: stos. Program dostaje osiem stron, a schodzi rekurencja
+znacznie glebiej.
 """
 
 import os
@@ -122,6 +127,69 @@ def main():
     finally:
         shutil.rmtree(d, ignore_errors=True)
         for f in (iso, slog, disk):
+            if os.path.exists(f):
+                os.unlink(f)
+
+    # --- To samo w jadrze 32-bitowym ---
+    print("--- pliki odwzorowane w pamieci (jadro 32-bitowe) ---")
+    disk32 = tempfile.mktemp(suffix=".img")
+    slog32 = tempfile.mktemp(suffix=".log")
+    with open(disk32, "wb") as fh:
+        fh.truncate(DISK_SIZE)
+    try:
+        q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
+        try:
+            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("[siec] DHCP", timeout=30)
+
+            zrob = q3.polecenie("run mkmapa mapa.txt 12", "zakonczyl sie",
+                                timeout=60)
+            check("plik z wzorcem zalozony na dysku (32-bit)",
+                  "[mkmapa] zapisano 12288 B wzorca" in zrob)
+
+            czyt = q3.polecenie("run mmapfile mapa.txt", "zakonczyl sie",
+                                timeout=90)
+            adres = re.search(r"plik pod adresem (\d+)", czyt)
+            check("plik dostal adres w obszarze mmap (32-bit)",
+                  adres is not None and
+                  0xB0000000 <= int(adres.group(1)) < 0xBF000000)
+            check("wszystkie bajty pliku zgadzaja sie z wzorcem (32-bit)",
+                  "sprawdzone bajty zgadzaja sie, bylo ich 12288" in czyt)
+            check("proba zapisu do odwzorowania zabija proces (32-bit)",
+                  "zapis do odwzorowania odrzucony" in czyt and
+                  "ubity: Page Fault" in czyt)
+            check("tresc pliku po odrzuconym zapisie nietknieta (32-bit)",
+                  "ZLE" not in czyt)
+
+            # Stronicowanie na zadanie: duzy plik, jeden dotkniety bajt
+            przed = q3.polecenie("mem", "z plikow:")
+            m1 = re.search(r"z plikow:\s+(\d+)", przed)
+            q3.polecenie("run mkmapa duza.txt 400", "zakonczyl sie",
+                         timeout=120)
+            malo = q3.polecenie("run mmapfile duza.txt 1", "zakonczyl sie",
+                                timeout=90)
+            check("odwzorowanie duzego pliku sie udaje (32-bit)",
+                  "reszty pliku nie tknalem" in malo)
+            po = q3.polecenie("mem", "z plikow:")
+            m2 = re.search(r"z plikow:\s+(\d+)", po)
+            check("dotkniecie jednego bajtu kosztuje jedna strone (32-bit)",
+                  m1 is not None and m2 is not None and
+                  int(m2.group(1)) - int(m1.group(1)) == 1)
+
+            # Stos tez rosnie pod palcami. Program dostaje osiem stron,
+            # a schodzi rekurencja grubo glebiej - i po powrocie
+            # sprawdza, czy kazda ramka jest wciaz jego. Dokladanie
+            # stron pod nadpisywanie cudzych ramek wygladaloby
+            # w polowie tak samo.
+            stos = q3.polecenie("run gleboko", "zakonczyl sie", timeout=60)
+            check("stos rosnie na zadanie: rekurencja siega poza osiem "
+                  "stron", "[gleboko] zeszlem na poziom 40" in stos)
+            check("i kazda ramka przetrwala nietknieta",
+                  "wszystkie ramki caly" in stos and "ZLE" not in stos)
+        finally:
+            q3.close()
+    finally:
+        for f in (disk32, slog32):
             if os.path.exists(f):
                 os.unlink(f)
 

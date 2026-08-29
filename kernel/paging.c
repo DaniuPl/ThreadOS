@@ -138,7 +138,12 @@ uint32_t paging_new_address_space(void)
     return dir_phys;
 }
 
-int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
+/* Wspolna czesc mapowania strony uzytkownika. 'zapis' rozstrzyga, czy
+   strona ma byc zapisywalna: odwzorowany plik jest tylko do odczytu,
+   wiec proba zapisu ma sie skonczyc bledem ochrony, a nie cichym
+   zgubieniem danych. */
+static int mapuj_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
+                      int zapis)
 {
     /* Nie pozwól zamapować strony użytkownika na obszarze jądra */
     if (vaddr < PAGING_USER_BASE)
@@ -161,13 +166,24 @@ int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
         pt_phys = dir[pde] & ~0xFFFu;
     }
 
-    ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_USER |
+                                 (zapis ? PTE_WRITE : 0);
     /* Jeśli mapujemy do aktywnej przestrzeni (sbrk), odśwież TLB */
     uint32_t active;
     __asm__ volatile("movl %%cr3, %0" : "=r"(active));
     if (active == dir_phys)
         __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
     return 1;
+}
+
+int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
+{
+    return mapuj_user(dir_phys, vaddr, frame, 1);
+}
+
+int paging_map_user_ro_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
+{
+    return mapuj_user(dir_phys, vaddr, frame, 0);
 }
 
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
@@ -266,6 +282,15 @@ uint32_t paging_clone_address_space(uint32_t src_phys)
             /* Pamiec wspoldzielona ma zostac wspolna - nie kopiujemy jej */
             if (shm_is_shared(frame)) {
                 dpt[j] = e;
+                continue;
+            }
+            /* Strona i tak nie do zapisu (odwzorowany plik) zostaje
+               taka, jaka jest. Oznaczenie jej do kopiowania przy
+               zapisie znaczyloby, ze pierwszy zapis ma sie UDAC - a ma
+               sie nie udac, i to jest cala jej wlasnosc. */
+            if (!(e & PTE_WRITE)) {
+                dpt[j] = e;
+                pmm_frame_ref(frame);
                 continue;
             }
             e = (e & ~(uint32_t)PTE_WRITE) | PTE_COW;

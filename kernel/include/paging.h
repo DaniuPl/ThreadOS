@@ -36,6 +36,9 @@ uint32_t paging_kernel_cr3(void);
    jądra (supervisor) + własne strony użytkownika powyżej 64 MiB */
 uint32_t paging_new_address_space(void);
 int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
+
+/* To samo, ale bez prawa zapisu - dla plikow odwzorowanych w pamieci */
+int paging_map_user_ro_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame);
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr);
 void paging_destroy_address_space(uint32_t dir_phys);
 

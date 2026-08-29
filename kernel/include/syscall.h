@@ -48,6 +48,7 @@
 #define SYS_WAITANY     43 /* ebx=&kod -> pid dziecka albo -1 (brak dzieci) */
 #define SYS_SIGNAL      44 /* ebx=sygnal, ecx=handler, edx=trampolina -> 0/-1 */
 #define SYS_SIGRETURN   45 /* powrot z procedury obslugi (bez argumentow) */
+#define SYS_MMAP_FILE   46 /* ebx=nazwa, ecx=&rozmiar -> adres albo 0 */
 
 #define SYSCALL_VECTOR 0x80
 

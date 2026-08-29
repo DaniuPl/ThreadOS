@@ -28,8 +28,9 @@ Shared by both kernels (same files, compiled twice):
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
-(UHCI), ACPI, secondary cores computing from a shared work queue,
-TLS 1.3 with certificate verification, and a graphical desktop with windows,
+(UHCI), ACPI, files mapped into memory, a stack that grows on demand,
+secondary cores computing from a shared work queue, TLS 1.3 with
+certificate verification, and a graphical desktop with windows,
 icons, a file manager and a web browser.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
@@ -96,8 +97,8 @@ ground for both.
 
 - A shared library / dynamic linking story. Every program still
   carries its own copy of the crypto code.
-- `mmap` in the 32-bit kernel too — it maps anonymous memory there,
-  but not files.
+- Writable file mappings. Both kernels map files read-only; writing
+  back would need deciding when pages go to disk.
 - Real SMP. The other cores are found in the ACPI tables, woken with
   INIT-SIPI, and can now run computation from a shared work queue
   behind one spinlock — `smp` in the shell splits a job across all of

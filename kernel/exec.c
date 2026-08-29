@@ -18,6 +18,7 @@
 #include "include/heap.h"
 #include "include/string.h"
 #include "include/fs.h"
+#include "include/blk.h"
 #include "include/kfile.h"
 #include "include/pipe.h"
 #include "include/shm.h"
@@ -30,9 +31,18 @@
    na same liczby robocze. Osiem stron to 32 KiB. */
 #define USER_STACK_PAGES 8
 #define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE)
+
+/* Dokad stosowi wolno urosnac poza te osiem stron. Reszta dochodzi
+   sama, pod palcami - tak samo jak sterta. Zgadywanie z gory, ile
+   stosu potrzeba, zawsze konczy sie albo marnowaniem pamieci, albo
+   wyjatkiem w srodku glebokiego wywolania; a granica jest po to, zeby
+   dziki wskaznik nie zamienil sie po cichu w zmapowana strone - pod
+   nia blad strony pozostaje bledem. */
+#define USER_STACK_MAX   (256 * 1024u)
+#define USER_STACK_DNO   (USER_STACK_TOP - USER_STACK_MAX)
 #define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
 #define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej sterty) */
-#define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej stosu) */
+#define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej miejsca na stos) */
 #define ARG_MAX        16
 #define CMD_MAX        128
 #define MAX_STAGES     5     /* maks. liczba etapow potoku a|b|c|... */
@@ -76,6 +86,20 @@ static int elf_valid(const struct elf_ehdr *eh, uint32_t size)
     if (eh->e_ident[4] != 1)            /* ELFCLASS32 */
         return 0;
     return eh->e_type == ET_EXEC && eh->e_machine == EM_386 && eh->e_phnum;
+}
+
+/* Swieza ramka pod strone vaddr, zamapowana TYLKO DO ODCZYTU -
+   dla plikow odwzorowanych w pamieci */
+static uint32_t page_frame_for_ro(uint32_t dir, uint32_t vaddr)
+{
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;
+    if (!paging_map_user_ro_in(dir, vaddr, frame)) {
+        pmm_free_frame(frame);
+        return 0;
+    }
+    return frame;
 }
 
 /* Mapuje (lub odnajduje) ramkę dla strony vaddr procesu */
@@ -323,6 +347,16 @@ static void exec_task(void *arg)
  * Zwraca 1, gdy strona powstala (mozna wznowic), 0 gdy adres nie nalezy
  * do zadnego obiecanego obszaru albo zabraklo pamieci.
  */
+/* Ile stron wczytano z plikow odwzorowanych w pamieci - do komendy
+   'mem' i do testow: odwzorowanie duzego pliku ma kosztowac tyle, ile
+   sie z niego wzielo, a nie tyle, ile ma stron */
+static uint32_t mmap_pages;
+
+uint32_t process_mmap_pages(void)
+{
+    return mmap_pages;
+}
+
 int process_demand_page(uint32_t addr)
 {
     uint32_t brk = task_brk();
@@ -341,9 +375,35 @@ int process_demand_page(uint32_t addr)
     if (paging_swap_in(dir, va))
         return 1;
 
+    /* Strona pliku odwzorowanego w pamieci: bajty przychodza z dysku
+       dopiero teraz, warstwa blokowa, po numerach ustalonych przy
+       zakladaniu odwzorowania. Do kodu systemu plikow tu nie wchodzimy:
+       ma on jeden wspolny bufor na blok. */
+    uint32_t pierwszy = 0, zostalo = 0;
+    if (task_mmap_znajdz(addr, &pierwszy, &zostalo)) {
+        uint32_t ramka = page_frame_for_ro(dir, va);
+        if (!ramka)
+            return 0;
+        uint8_t *cel = (uint8_t *)ramka;
+        memset(cel, 0, PAGE_SIZE);
+        for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
+                             zostalo > b * FS_BLOCK; b++) {
+            uint32_t blok = task_mmap_blok(addr, pierwszy + b);
+            if (!blok)
+                break;
+            blk_read(fs_block_lba(blok), FS_BLOCK / 512, cel + b * FS_BLOCK);
+        }
+        mmap_pages++;
+        return 1;
+    }
+
     int in_heap = addr >= task_brk_base() && addr < brk;
     int in_mmap = addr >= MMAP_BASE && addr < task_mmap_next();
-    if (!in_heap && !in_mmap)
+    /* Stos rosnie w dol pod palcami - dokladnie tak, jak sterta rosnie
+       w gore. Osiem stron dostaje program na start, reszta dochodzi
+       wtedy, gdy naprawde jej dotknie. */
+    int in_stack = addr >= USER_STACK_DNO && addr < USER_STACK_TOP;
+    if (!in_heap && !in_mmap && !in_stack)
         return 0;
 
     return page_frame_for(dir, va) != 0;
@@ -481,6 +541,58 @@ uint32_t process_mmap(uint32_t size)
 
     task_set_mmap_next(end);        /* strony jak przy sbrk - na zadanie */
     return base;
+}
+
+/* --- Plik odwzorowany w pamieci ------------------------------------
+ *
+ * Program dostaje adres, pod ktorym widzi zawartosc pliku. Zadna
+ * strona nie powstaje od razu: numery blokow zapamietujemy, a same
+ * bajty przychodza z dysku dopiero przy pierwszym dotknieciu.
+ *
+ * Odwzorowanie jest tylko do odczytu. Zapis wymagalby odsylania stron
+ * z powrotem na dysk i rozstrzygania, kiedy; dopoki tego nie ma,
+ * lepiej niech proba zapisu konczy sie bledem, niz cicho ginie.
+ */
+uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out)
+{
+    if (!fs_ready())
+        return 0;
+
+    int f = fs_open(task_cwd(), nazwa, 0);
+    if (f < 0)
+        return 0;
+    int len = fs_size(f);
+    if (len <= 0)
+        return 0;
+
+    uint32_t blokow = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
+    uint32_t stron = ((uint32_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    uint32_t baza = task_mmap_next();
+    uint32_t koniec = baza + stron * PAGE_SIZE;
+    if (!baza || koniec > MMAP_MAX || koniec < baza)
+        return 0;
+
+    uint32_t *bloki = kmalloc(blokow * sizeof(uint32_t));
+    if (!bloki)
+        return 0;
+    for (uint32_t i = 0; i < blokow; i++) {
+        /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
+           strony nie wolno juz wchodzic w kod systemu plikow */
+        bloki[i] = fs_file_block(f, i, 0);
+        if (!bloki[i]) {
+            kfree(bloki);
+            return 0;
+        }
+    }
+
+    if (task_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow) < 0) {
+        kfree(bloki);
+        return 0;
+    }
+    task_set_mmap_next(koniec);
+    *rozmiar_out = (uint32_t)len;
+    return baza;
 }
 
 /* Watki w procesie: nowe zadanie dzielace przestrzen adresowa, wchodzace

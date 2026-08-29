@@ -1570,3 +1570,29 @@ sprawdzane przez `make test`.
       wtórny nie ma jeszcze tablicy wyjątków. Adres idzie teraz przez
       rejestr, tak jak w wersji 64-bitowej, gdzie od początku musiał -
       bo tam skok względny sięga najwyżej dwóch gigabajtów.
+- [x] **Stos rosnący na żądanie i pliki odwzorowane w pamięci - także
+      w jądrze 32-bitowym** - wyrównanie asymetrii, którą sam
+      wprowadziłem, robiąc obie te rzeczy najpierw w trybie długim.
+      Ten projekt stoi na tym, że oba jądra to te same pliki
+      kompilowane dwa razy; różnice, których nie wymusza tryb
+      procesora, są w nim po prostu długiem.
+
+      Stos: osiem stron na start, reszta dochodzi pod palcami, granica
+      ćwierć megabajta. Test schodzi rekurencją na czterdziesty poziom
+      po cztery kilobajty ramki i **po powrocie** sprawdza, czy każda
+      ramka jest wciąż jego - bo dokładanie stron pod nadpisywanie
+      cudzych ramek wyglądałoby w połowie tak samo.
+
+      Odwzorowanie plików wyciągnęło przy okazji prawdziwy błąd, i to
+      w kodzie starszym niż cała ta zmiana. `fork` oznaczał **każdą**
+      stronę procesu jako kopiowaną przy zapisie - także taką, która
+      celowo nie miała prawa zapisu. Dziecko pisało więc do
+      odwzorowanego pliku i zapis się *udawał*: obsługa kopiowania
+      przy zapisie robiła mu prywatną, zapisywalną kopię. Strona bez
+      prawa zapisu zostaje teraz taka, jaka jest - i to jest cała jej
+      własność, więc oznaczanie jej do kopiowania przy zapisie było
+      sprzeczne samo w sobie.
+
+      Doszła też para `paging_map_user_in` / `paging_map_user_ro_in`
+      nad wspólnym trzonem: to samo mapowanie, jeden bit różnicy,
+      wybierany przez wołającego.

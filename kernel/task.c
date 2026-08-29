@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include "include/task.h"
 #include "include/heap.h"
+#include "include/fs.h"
 #include "include/pit.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -40,6 +41,17 @@ struct task {
     uint32_t brk_base;          /* poczatek sterty - stad zaczyna sie obszar
                                    przydzielany dopiero przy pierwszym dotknieciu */
     uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
+    /* Pliki odwzorowane w pamieci. Numery blokow ustalamy raz, przy
+       zakladaniu odwzorowania, i czytamy je potem warstwa blokowa
+       z pominieciem kodu PFS - z tego samego powodu, co przy wymianie
+       stron: PFS ma jeden wspolny bufor na blok, a blad strony potrafi
+       trafic w srodku dowolnej operacji na plikach. */
+    struct mapa_pliku {
+        uint32_t start, koniec;  /* zakres adresow (0 = wolny wpis) */
+        uint32_t rozmiar;        /* ile bajtow ma sam plik */
+        uint32_t ile_blokow;
+        uint32_t *bloki;
+    } mapy[MMAP_PLIKOW];
     int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
     int parent;                  /* pid rodzica (-1 = brak, sierota) */
     int vc;                      /* konsola, na ktorej zadanie pisze */
@@ -184,6 +196,8 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->brk = 0;
     t->brk_base = 0;
     t->mmap_next = 0;
+    for (int i = 0; i < MMAP_PLIKOW; i++)
+        t->mapy[i].start = t->mapy[i].koniec = 0;
     t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
     t->parent = current ? current->id : -1;
     t->vc = current ? current->vc : 0;   /* dziecko pisze tam, co rodzic */
@@ -227,6 +241,7 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     t->brk = current->brk;
     t->brk_base = current->brk_base;
     t->mmap_next = current->mmap_next;
+    task_mmap_dziedzicz(t);
     irq_restore(flags);
     return t;
 }
@@ -410,6 +425,7 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     t->brk = current->brk;
     t->brk_base = current->brk_base;
     t->mmap_next = current->mmap_next;
+    task_mmap_dziedzicz(t);
     t->cwd = current->cwd;
     t->priority = current->priority;
     /* Procedury obslugi sygnalow dziedziczy sie po rodzicu; oczekujace
@@ -474,6 +490,9 @@ static void reap_zombies(void)
                (procesu) jej juz nie uzywa. CR3 zombie nie jest aktywny. */
             if (z->owns_dir && !cr3_in_use(z->cr3, z))
                 paging_destroy_address_space(z->cr3);
+            for (int i = 0; i < MMAP_PLIKOW; i++)
+                if (z->mapy[i].bloki)
+                    kfree(z->mapy[i].bloki);
             kfree(z->stack);
             kfree(z);
         } else {
@@ -829,6 +848,97 @@ uint32_t task_brk_base(void)
 void task_set_brk_base(uint32_t base)
 {
     current->brk_base = base;
+}
+
+/* --- Pliki odwzorowane w pamieci ---------------------------------- */
+
+int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
+                    uint32_t *bloki, uint32_t ile_blokow)
+{
+    if (!current)
+        return -1;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        if (current->mapy[i].koniec)
+            continue;
+        current->mapy[i].start = start;
+        current->mapy[i].koniec = koniec;
+        current->mapy[i].rozmiar = rozmiar;
+        current->mapy[i].bloki = bloki;
+        current->mapy[i].ile_blokow = ile_blokow;
+        return 0;
+    }
+    return -1;
+}
+
+/* Wolane z obslugi bledu strony, wiec krotkie i bez niespodzianek */
+int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
+                     uint32_t *bajtow)
+{
+    if (!current)
+        return 0;
+    uint32_t strona = adres & ~0xFFFu;
+
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        struct mapa_pliku *m = &current->mapy[i];
+        if (!m->koniec || strona < m->start || strona >= m->koniec)
+            continue;
+
+        uint32_t offset = strona - m->start;
+        uint32_t indeks = offset / FS_BLOCK;
+        if (indeks >= m->ile_blokow)
+            return 0;
+        *blok_pierwszy = indeks;
+        /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej ma
+           zostac wyzerowany, a nie wypelniony smieciem z dysku */
+        *bajtow = offset < m->rozmiar ? m->rozmiar - offset : 0;
+        return 1;
+    }
+    return 0;
+}
+
+uint32_t task_mmap_blok(uint32_t adres, uint32_t indeks)
+{
+    uint32_t strona = adres & ~0xFFFu;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        struct mapa_pliku *m = &current->mapy[i];
+        if (!m->koniec || strona < m->start || strona >= m->koniec)
+            continue;
+        return indeks < m->ile_blokow ? m->bloki[indeks] : 0;
+    }
+    return 0;
+}
+
+void task_mmap_zwolnij(void)
+{
+    if (!current)
+        return;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        if (current->mapy[i].bloki)
+            kfree(current->mapy[i].bloki);
+        current->mapy[i].bloki = (uint32_t *)0;
+        current->mapy[i].start = current->mapy[i].koniec = 0;
+    }
+}
+
+/* Dziecko dostaje wlasna kopie opisow: tablice numerow blokow zwalnia
+   kazdy u siebie, wiec nie moga byc wspolne. */
+void task_mmap_dziedzicz(struct task *dziecko)
+{
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        dziecko->mapy[i] = current->mapy[i];
+        dziecko->mapy[i].bloki = (uint32_t *)0;
+        if (!current->mapy[i].koniec)
+            continue;
+        uint32_t n = current->mapy[i].ile_blokow;
+        uint32_t *kopia = kmalloc(n * sizeof(uint32_t));
+        if (!kopia) {
+            dziecko->mapy[i].start = dziecko->mapy[i].koniec = 0;
+            continue;
+        }
+        for (uint32_t k = 0; k < n; k++)
+            kopia[k] = current->mapy[i].bloki[k];
+        dziecko->mapy[i].bloki = kopia;
+    }
 }
 
 uint32_t task_mmap_next(void)
