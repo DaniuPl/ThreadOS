@@ -96,6 +96,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/signal.o \
         $(BUILD)/swap.o \
         $(BUILD)/ahci.o \
+        $(BUILD)/nvme.o \
         $(BUILD)/blk.o \
         $(BUILD)/uhci.o \
         $(BUILD)/usbkbd.o \
@@ -186,7 +187,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
-            kbdmap pci ata ahci blk fs rtl8139 net dhcp tcp video \
+            kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci usbkbd swap prog shm rtc \
             e1000 netdev
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \

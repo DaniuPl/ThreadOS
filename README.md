@@ -19,7 +19,7 @@ Shared by both kernels (same files, compiled twice):
 | | |
 |---|---|
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC |
-| Storage | ATA PIO and AHCI (SATA, DMA) behind one block layer |
+| Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
 | Network | RTL8139 and e1000 behind one netdev layer; ARP, ICMP, UDP, DHCP, TCP, DNS |
@@ -99,8 +99,8 @@ ground for both.
 - More than one CPU: APIC, per-CPU state, real locking. This is the
   largest single item and it touches everything.
 - Preemption inside the kernel, which SMP will force anyway.
-- Newer hardware: NVMe and xHCI. Storage still ends at AHCI and USB
-  at UHCI.
+- Newer hardware: xHCI. USB still ends at UHCI, so only USB 1.1
+  keyboards work.
 
 **Infrastructure**
 

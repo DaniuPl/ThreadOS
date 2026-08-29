@@ -1453,3 +1453,30 @@ sprawdzane przez `make test`.
       Odbiór idzie w drugą stronę niż reszta: sterownik sam woła
       `net_rx`, gdy ramka przyjdzie, i warstwa `netdev` w tym nie
       pośredniczy - byłoby to przekładanie wskaźnika bez powodu.
+- [x] **Dysk NVMe** - trzeci sterownik pod tą samą warstwą blokową
+      i najbardziej niepodobny do dwóch poprzednich: nie ma w nim nic
+      z dziedzictwa ATA. Żadnego "wybierz dysk", żadnych ramek FIS.
+      Są dwie **kolejki w pamięci** - my wkładamy polecenia po 64 bajty
+      do kolejki zgłoszeń, kontroler odkłada odpowiedzi po 16 do
+      kolejki ukończeń - i dwa dzwonki (rejestry doorbell), którymi
+      mówi się drugiej stronie, dokąd się doszło.
+
+      Najładniejszy drobiazg całego standardu to **bit fazy**:
+      kontroler odwraca go przy każdym okrążeniu kolejki, więc żeby
+      wiedzieć, czy odpowiedź jest nowa, nie trzeba niczego zerować
+      ani liczyć. Wystarczy porównać jeden bit z tym, którego się
+      spodziewamy.
+
+      Kolejek jest u nas dwie pary: administracyjna, która powstaje
+      sama przy starcie kontrolera, i jedna do danych, zamawiana
+      poleceniem na tej pierwszej. Bufor jest jeden, wyrównany do
+      strony - wskaźnik PRP opisuje stronę, a nie dowolny kawałek
+      pamięci, więc przepisanie przez własną, wyrównaną stronę jest
+      tańsze niż tłumaczenie każdego cudzego bufora na listę stron.
+
+      Test wpadł przy okazji w pułapkę, która nie ma nic wspólnego
+      z NVMe: pisał polecenia zaraz po komunikacie o gotowym systemie
+      plików, a shell rusza dopiero po schedulerze - pierwsze znaki
+      przepadały i z `write nvmetest tresc-przez-kolejki` do jądra
+      docierało `przez-kolejki`. Klawiatura działa od przerwania,
+      ale czytać z niej ma kto dopiero od wątku.

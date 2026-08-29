@@ -395,7 +395,8 @@ def start_http_server():
 
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
-                 append=None, ram_mib=None, sata=False, usbkbd=False,
+                 append=None, ram_mib=None, sata=False, nvme=False,
+                 usbkbd=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, nic="rtl8139"):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
@@ -449,7 +450,12 @@ class Qemu:
                 cmd += ["-append", append]
             if initrd:
                 cmd += ["-initrd", initrd]
-        if disk and sata:
+        if disk and nvme:
+            # Dysk NVMe: bez kontrolera po drodze - urzadzenie siedzi
+            # wprost na PCI Express
+            cmd += ["-drive", f"id=nvm0,file={disk},if=none,format=raw",
+                    "-device", "nvme,drive=nvm0,serial=protonos"]
+        elif disk and sata:
             # Dysk za kontrolerem AHCI - tak wyglada kazda nowsza plyta
             cmd += ["-device", "ich9-ahci,id=ahci",
                     "-drive", f"id=sata0,file={disk},if=none,format=raw",

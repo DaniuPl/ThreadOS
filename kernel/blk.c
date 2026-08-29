@@ -1,20 +1,26 @@
 /* Warstwa urzadzenia blokowego - wybor sterownika dysku
  *
- * AHCI ma pierwszenstwo: przenosi dane sam, przez DMA, i na nowszych
- * plytach jest jedynym sposobem zobaczenia dysku. Stary ATA w trybie
- * PIO zostaje jako droga zapasowa - dziala wszedzie, ale kazde slowo
- * przepisuje procesor.
+ * Kolejnosc jest od nowszego do starszego. NVMe siedzi wprost na PCI
+ * Express i nie ma w sobie nic z ATA; AHCI przenosi dane sam, przez
+ * DMA, i na nowszych plytach jest jedynym sposobem zobaczenia dysku
+ * SATA; stary ATA w trybie PIO zostaje jako droga zapasowa - dziala
+ * wszedzie, ale kazde slowo przepisuje procesor.
  */
 
 #include "include/blk.h"
+#include "include/nvme.h"
 #include "include/ahci.h"
 #include "include/ata.h"
 
-enum backend { BLK_NONE, BLK_AHCI, BLK_ATA };
+enum backend { BLK_NONE, BLK_NVME, BLK_AHCI, BLK_ATA };
 static enum backend backend;
 
 int blk_init(void)
 {
+    if (nvme_init()) {
+        backend = BLK_NVME;
+        return 1;
+    }
     if (ahci_init()) {
         backend = BLK_AHCI;
         return 1;
@@ -35,6 +41,7 @@ int blk_present(void)
 const char *blk_name(void)
 {
     switch (backend) {
+    case BLK_NVME: return "NVMe (PCIe, kolejki)";
     case BLK_AHCI: return "AHCI (SATA, DMA)";
     case BLK_ATA:  return "ATA PIO";
     default:       return "brak";
@@ -44,6 +51,7 @@ const char *blk_name(void)
 uint32_t blk_sectors(void)
 {
     switch (backend) {
+    case BLK_NVME: return nvme_sectors();
     case BLK_AHCI: return ahci_sectors();
     case BLK_ATA:  return ata_sectors();
     default:       return 0;
@@ -52,6 +60,8 @@ uint32_t blk_sectors(void)
 
 int blk_read(uint32_t lba, uint32_t count, void *buf)
 {
+    if (backend == BLK_NVME)
+        return nvme_read(lba, count, buf);
     if (backend == BLK_AHCI)
         return ahci_read(lba, count, buf);
     if (backend != BLK_ATA)
@@ -65,6 +75,8 @@ int blk_read(uint32_t lba, uint32_t count, void *buf)
 
 int blk_write(uint32_t lba, uint32_t count, const void *buf)
 {
+    if (backend == BLK_NVME)
+        return nvme_write(lba, count, buf);
     if (backend == BLK_AHCI)
         return ahci_write(lba, count, buf);
     if (backend != BLK_ATA)
