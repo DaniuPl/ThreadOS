@@ -1401,3 +1401,29 @@ sprawdzane przez `make test`.
       (test klawiatury złapał to od razu). Port szeregowy jest
       dziennikiem, ekran bieżącą pracą; to nie zawsze jest to samo,
       i dobrze, że akurat ta różnica musiała się tu ujawnić.
+- [x] **Pliki odwzorowane w pamięci (jądro 64-bitowe)** - druga połowa
+      tej samej myśli, co uruchamianie programów z dysku: skoro plik
+      może być programem, może też być **pamięcią**. Program dostaje
+      adres i czyta zawartość jak zwykłą tablicę, bez ani jednego
+      wywołania `read`.
+
+      Najciekawszy jest koszt. Odwzorowanie nie tworzy ani jednej
+      strony: jądro zapamiętuje tylko numery bloków, a bajty
+      przychodzą z dysku pod palcami. Dotknięcie jednego bajtu
+      czterystukilobajtowego pliku kosztuje **jedną stronę**, nie sto -
+      i to jest asercja, którą test sprawdza wprost, bo shell podaje po
+      każdym programie, ile stron wczytano z odwzorowań.
+
+      Numery bloków ustalamy raz, przy zakładaniu odwzorowania, i potem
+      czytamy je warstwą blokową z pominięciem kodu PFS. Powód jest ten
+      sam, co przy wymianie stron i wtedy też był zapisany: PFS ma
+      jeden wspólny bufor na blok, a błąd strony potrafi trafić
+      w środek dowolnej operacji na plikach. Raz opisana zasada
+      oszczędziła tu całą klasę pytań.
+
+      Odwzorowanie jest tylko do odczytu i to jest decyzja, nie
+      niedoróbka: zapis wymagałby odsyłania stron z powrotem na dysk
+      i rozstrzygania, kiedy. Dopóki tego nie ma, lepiej niech próba
+      zapisu kończy się błędem ochrony, niż cicho przepada. Test
+      sprawdza to dzieckiem: dziecko próbuje zapisać i ginie, a rodzic
+      przeżywa i melduje, że treść pliku jest nietknięta.

@@ -25,6 +25,7 @@
 #include "elf64.h"
 #include "../kernel/include/prog.h"
 #include "../kernel/include/shm.h"
+#include "../kernel/include/fs.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -173,6 +174,7 @@ int64_t proc64_fork(struct regs *r)
     if (child) {
         task64_inherit_fds(child);   /* otwarte pliki ida z pamiecia */
         task64_inherit_brk(child);
+        task64_mmap_dziedzicz(child);  /* i odwzorowane pliki */
     }
     if (!child) {
         kfree(fa);
@@ -247,6 +249,9 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         task64_exit_code(-1);
     }
     paging64_free_space(old);
+    /* Odwzorowania plikow opisywaly stara przestrzen, ktorej juz nie
+       ma - nowy obraz zaczyna z pusta tablica */
+    task64_mmap_zwolnij();
     /* Obraz jest juz przepisany do stron programu - kopia w pamieci
        jadra nie jest do niczego potrzebna */
     prog_zwolnij(wczytany);
@@ -370,6 +375,60 @@ uint64_t proc64_shm(int klucz, uint64_t rozmiar)
             return 0;
 
     task64_set_mmap_next(koniec);
+    return baza;
+}
+
+/* --- Plik odwzorowany w pamieci ------------------------------------
+ *
+ * Program dostaje adres, pod ktorym widzi zawartosc pliku. Zadna
+ * strona nie powstaje od razu: numery blokow zapamietujemy, a same
+ * bajty przychodza z dysku dopiero przy pierwszym dotknieciu. Prosba
+ * o odwzorowanie stumegabajtowego pliku kosztuje wiec tyle, co spis
+ * jego blokow - a nie sto megabajtow.
+ *
+ * Odwzorowanie jest tylko do odczytu. Zapis wymagalby odsylania stron
+ * z powrotem na dysk i decydowania, kiedy; dopoki tego nie ma, lepiej
+ * niech proba zapisu konczy sie bledem, niz cicho ginie.
+ */
+uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out)
+{
+    if (!fs_ready())
+        return 0;
+
+    int f = fs_open(task64_cwd(), nazwa, 0);
+    if (f < 0)
+        return 0;
+    int len = fs_size(f);
+    if (len <= 0)
+        return 0;
+
+    uint32_t blokow = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
+    uint64_t stron = ((uint64_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    uint64_t baza = task64_mmap_next();
+    uint64_t koniec = baza + stron * PAGE_SIZE;
+    if (!baza || koniec > USER64_MMAP_MAX || koniec < baza)
+        return 0;
+
+    uint32_t *bloki = kmalloc(blokow * sizeof(uint32_t));
+    if (!bloki)
+        return 0;
+    for (uint32_t i = 0; i < blokow; i++) {
+        /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
+           strony nie wolno juz wchodzic w kod systemu plikow */
+        bloki[i] = fs_file_block(f, i, 0);
+        if (!bloki[i]) {
+            kfree(bloki);
+            return 0;
+        }
+    }
+
+    if (task64_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow) < 0) {
+        kfree(bloki);
+        return 0;
+    }
+    task64_set_mmap_next(koniec);
+    *rozmiar_out = (uint64_t)len;
     return baza;
 }
 

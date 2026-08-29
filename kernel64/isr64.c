@@ -19,6 +19,8 @@
 #include "signal64.h"
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/string.h"
+#include "../kernel/include/fs.h"
+#include "../kernel/include/blk.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -42,6 +44,7 @@ static int user_fault_seen;
 static uint32_t user_fault_vec, user_fault_err;
 static uint32_t heap_pages;        /* ile stron sterty naprawde powstalo */
 static uint32_t stack_pages;       /* i ile stron doszlo stosowi */
+static uint32_t mmap_pages;        /* i ile wczytano z odwzorowanych plikow */
 static uint64_t user_fault_addr;
 
 int isr64_user_fault(void)            { return user_fault_seen; }
@@ -51,6 +54,7 @@ uint64_t isr64_user_fault_addr(void)   { return user_fault_addr; }
 void isr64_forget_user_fault(void)     { user_fault_seen = 0; }
 uint32_t isr64_heap_pages(void)        { return heap_pages; }
 uint32_t isr64_stack_pages(void)       { return stack_pages; }
+uint32_t isr64_mmap_pages(void)        { return mmap_pages; }
 
 static uint64_t read_cr2(void)
 {
@@ -98,6 +102,43 @@ void isr64_handler(struct regs *r)
         if (r->int_no == 14 && !(r->err_code & 0x01) &&
             paging64_swap_in(paging64_current_space(), read_cr2()))
             return;
+
+        /* Strona pliku odwzorowanego w pamieci.
+         *
+         * Bajty przychodza z dysku dopiero teraz - warstwa blokowa,
+         * po numerach ustalonych przy zakladaniu odwzorowania. Do kodu
+         * systemu plikow tu nie wchodzimy: ma on jeden wspolny bufor
+         * na blok, a blad strony potrafi trafic w srodku dowolnej
+         * operacji na plikach.
+         *
+         * Strona jest tylko do odczytu. Ogon ostatniej zostaje
+         * wyzerowany - plik konczy sie tam, gdzie sie konczy. */
+        if (r->int_no == 14 && (r->cs & 3) == 3) {
+            uint64_t adres = read_cr2();
+            uint32_t pierwszy = 0, zostalo = 0;
+            if (task64_mmap_znajdz(adres, &pierwszy, &zostalo) &&
+                paging64_lookup(adres & ~0xFFFULL) == 0) {
+                uint32_t ramka = pmm_alloc_frame();
+                if (ramka) {
+                    uint8_t *cel = (uint8_t *)(uintptr_t)ramka;
+                    memset(cel, 0, PAGE_SIZE);
+                    for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
+                                         zostalo > b * FS_BLOCK; b++) {
+                        uint32_t blok = task64_mmap_blok(adres, pierwszy + b);
+                        if (!blok)
+                            break;
+                        blk_read(fs_block_lba(blok), FS_BLOCK / 512,
+                                 cel + b * FS_BLOCK);
+                    }
+                    if (paging64_map(adres & ~0xFFFULL, ramka,
+                                     PG_USER | PG_NX) == 0) {
+                        mmap_pages++;
+                        return;
+                    }
+                    pmm_free_frame(ramka);
+                }
+            }
+        }
 
         /* Stos, ktory wlasnie uroslo o strone w dol.
          *

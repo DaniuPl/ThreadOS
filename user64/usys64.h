@@ -55,6 +55,7 @@
 #define SYS64_TIME       37
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
+#define SYS64_MMAP_FILE  40
 
 #define NAME_MAX64 63
 
@@ -452,6 +453,21 @@ struct sysinfo64 {
 static inline int64_t sys_sysinfo(struct sysinfo64 *out)
 {
     return syscall64(SYS64_SYSINFO, (int64_t)(uintptr_t)out, 0);
+}
+
+/* Plik widziany jako pamiec.
+ *
+ * Zwraca adres, pod ktorym widac zawartosc pliku, i wpisuje jego
+ * rozmiar. Zadna strona nie powstaje od razu - bajty przychodza
+ * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
+ * co spis jego blokow. Tylko do odczytu: proba zapisu konczy sie
+ * bledem ochrony, a nie cichym zgubieniem danych. */
+static inline const void *sys_mmap_file(const char *nazwa, uint64_t *rozmiar)
+{
+    int64_t r = syscall64_3(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
+                            (int64_t)ustrlen(nazwa),
+                            (int64_t)(uintptr_t)rozmiar);
+    return r <= 0 ? (const void *)0 : (const void *)(uintptr_t)r;
 }
 
 /* Pamiec wspoldzielona po kluczu.

@@ -482,6 +482,7 @@ static void execute(const char *line)
         uint32_t ramki_przed = pmm_used_frames();
         uint32_t strony_przed = isr64_heap_pages();
         uint32_t stosu_przed = isr64_stack_pages();
+        uint32_t plikow_przed = isr64_mmap_pages();
         int id = proc64_spawn(name, args.argc ? &args : 0, 0);
         if (id < 0) {
             printk("run: nie udalo sie uruchomic '%s'\n", name);
@@ -498,10 +499,11 @@ static void execute(const char *line)
             printk("run: dziecko przepadlo\n");
         else
             printk("[%s] koniec, kod wyjscia %d (ramek %u -> %u, "
-                   "stron sterty %u, stosu %u)\n",
+                   "stron sterty %u, stosu %u, z plikow %u)\n",
                    name, code, ramki_przed, pmm_used_frames(),
                    isr64_heap_pages() - strony_przed,
-                   isr64_stack_pages() - stosu_przed);
+                   isr64_stack_pages() - stosu_przed,
+                   isr64_mmap_pages() - plikow_przed);
     } else {
         printk("Nieznane polecenie: %s (sprobuj 'help')\n", line);
     }

@@ -67,6 +67,12 @@ struct task64 {
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
     uint64_t mmap;               /* nastepny wolny adres na mapowania */
+    struct mapa_pliku {
+        uint64_t start, koniec;  /* zakres adresow (0 = wolny wpis) */
+        uint32_t rozmiar;        /* ile bajtow ma sam plik */
+        uint32_t ile_blokow;
+        uint32_t *bloki;         /* numery blokow PFS, po kolei */
+    } mapy[MMAP_PLIKOW];
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     int vc;                      /* konsola wirtualna, na ktorej pisze */
     char name[NAME_MAX];
@@ -126,6 +132,8 @@ void scheduler64_init(void)
         main_task->fds[i].kind = FDK_WOLNY;
     main_task->brk_base = main_task->brk = 0;
     main_task->mmap = USER64_MMAP_BASE;
+    for (int i = 0; i < MMAP_PLIKOW; i++)
+        main_task->mapy[i].start = main_task->mapy[i].koniec = 0;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
     main_task->vc = 0;
@@ -161,6 +169,8 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         t->fds[i].kind = FDK_WOLNY;
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
+    for (int i = 0; i < MMAP_PLIKOW; i++)
+        t->mapy[i].start = t->mapy[i].koniec = 0;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
     t->vc = current ? current->vc : 0;
@@ -466,6 +476,7 @@ void task64_exit_code(int code)
 {
     irq_save();
     task64_fd_close_all();
+    task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, code);
     current->state = TASK_ZOMBIE;
@@ -478,6 +489,7 @@ void task64_exit(void)
 {
     irq_save();
     task64_fd_close_all();
+    task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, 0);
     current->state = TASK_ZOMBIE;
@@ -657,6 +669,101 @@ void task64_set_brk_base(uint64_t base)
  *
  * Kolejne mapowania ida jedno za drugim w gore, bez zwalniania: proces
  * i tak zabiera ze soba caly ten obszar, gdy sie konczy. */
+int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
+                      uint32_t *bloki, uint32_t ile_blokow)
+{
+    if (!current)
+        return -1;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        if (current->mapy[i].koniec)
+            continue;
+        current->mapy[i].start = start;
+        current->mapy[i].koniec = koniec;
+        current->mapy[i].rozmiar = rozmiar;
+        current->mapy[i].bloki = bloki;
+        current->mapy[i].ile_blokow = ile_blokow;
+        return 0;
+    }
+    return -1;
+}
+
+/* Wolane z obslugi bledu strony, wiec musi byc krotkie i bez zadnych
+   niespodzianek: samo wyszukanie w tablicy czterech wpisow. */
+int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
+                       uint32_t *bajtow)
+{
+    if (!current)
+        return 0;
+    uint64_t strona = adres & ~0xFFFULL;
+
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        struct mapa_pliku *m = &current->mapy[i];
+        if (!m->koniec || strona < m->start || strona >= m->koniec)
+            continue;
+
+        uint64_t offset = strona - m->start;
+        uint32_t indeks = (uint32_t)(offset / FS_BLOCK);
+        if (indeks >= m->ile_blokow)
+            return 0;
+        *blok_pierwszy = indeks;
+        /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej
+           strony ma byc wyzerowany, a nie wypelniony smieciem
+           z dysku */
+        *bajtow = (offset < m->rozmiar)
+                      ? (uint32_t)(m->rozmiar - offset) : 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* Numer bloku PFS pod danym indeksem odwzorowania obejmujacego adres */
+uint32_t task64_mmap_blok(uint64_t adres, uint32_t indeks)
+{
+    uint64_t strona = adres & ~0xFFFULL;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        struct mapa_pliku *m = &current->mapy[i];
+        if (!m->koniec || strona < m->start || strona >= m->koniec)
+            continue;
+        return indeks < m->ile_blokow ? m->bloki[indeks] : 0;
+    }
+    return 0;
+}
+
+void task64_mmap_zwolnij(void)
+{
+    if (!current)
+        return;
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        if (current->mapy[i].bloki)
+            kfree(current->mapy[i].bloki);
+        current->mapy[i].bloki = (uint32_t *)0;
+        current->mapy[i].start = current->mapy[i].koniec = 0;
+    }
+}
+
+/* Dziecko dostaje wlasna kopie opisow: tablice numerow blokow zwalnia
+   kazdy u siebie, wiec nie moga byc wspolne. Gdy kopia sie nie uda,
+   dziecko po prostu nie widzi tego pliku - a to lepsze niz dwa
+   zadania zwalniajace ten sam wskaznik. */
+void task64_mmap_dziedzicz(struct task64 *dziecko)
+{
+    for (int i = 0; i < MMAP_PLIKOW; i++) {
+        dziecko->mapy[i] = current->mapy[i];
+        dziecko->mapy[i].bloki = (uint32_t *)0;
+        if (!current->mapy[i].koniec)
+            continue;
+        uint32_t n = current->mapy[i].ile_blokow;
+        uint32_t *kopia = kmalloc(n * sizeof(uint32_t));
+        if (!kopia) {
+            dziecko->mapy[i].start = dziecko->mapy[i].koniec = 0;
+            continue;
+        }
+        for (uint32_t k = 0; k < n; k++)
+            kopia[k] = current->mapy[i].bloki[k];
+        dziecko->mapy[i].bloki = kopia;
+    }
+}
+
 uint64_t task64_mmap_next(void)          { return current ? current->mmap : 0; }
 void task64_set_mmap_next(uint64_t adr)  { if (current) current->mmap = adr; }
 

@@ -687,6 +687,20 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_MMAP_FILE: {
+        char nazwa[FS_NAME_MAX + 1];
+        if (nazwa_z_ring3(a1, a2, nazwa) < 0 ||
+            !paging64_user_range(a3, sizeof(uint64_t))) {
+            r->rax = 0;
+            return;
+        }
+        uint64_t rozmiar = 0;
+        uint64_t adres = proc64_mmap_pliku(nazwa, &rozmiar);
+        if (adres)
+            *(uint64_t *)(uintptr_t)a3 = rozmiar;
+        r->rax = adres;
+        return;
+    }
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();
         return;

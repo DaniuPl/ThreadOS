@@ -37,7 +37,8 @@ signals, file descriptors, pipes, on-demand heap, SSE with FPU state
 saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, TLS 1.3 with certificate verification,
 a graphical desktop whose six applications all run in ring 3, shared
-memory, a stack that grows on demand, swap to disk, four virtual
+memory, files mapped into memory, a stack that grows on demand, swap
+to disk, four virtual
 consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
 from a single hybrid disc.
 
@@ -91,7 +92,10 @@ ground for both.
 
 **Things neither kernel has yet**
 
-- `mmap` of files, and a shared library / dynamic linking story.
+- A shared library / dynamic linking story. Every program still
+  carries its own copy of the crypto code.
+- `mmap` in the 32-bit kernel too — it maps anonymous memory there,
+  but not files.
 - More than one CPU: APIC, per-CPU state, real locking. This is the
   largest single item and it touches everything.
 - Preemption inside the kernel, which SMP will force anyway.

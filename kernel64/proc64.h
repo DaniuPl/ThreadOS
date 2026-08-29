@@ -46,4 +46,8 @@ int proc64_spawn(const char *name, const struct args64 *args, int quiet);
    biezacego procesu. Zwraca adres, pod ktorym go widac, albo 0. */
 uint64_t proc64_shm(int klucz, uint64_t rozmiar);
 
+/* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu,
+   strony przychodza pod palcami). Zwraca adres albo 0. */
+uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out);
+
 #endif

@@ -22,4 +22,7 @@ uint32_t isr64_heap_pages(void);
 /* Ile stron doszlo stosom programow (stos rosnie na zadanie) */
 uint32_t isr64_stack_pages(void);
 
+/* Ile stron wczytano z plikow odwzorowanych w pamieci */
+uint32_t isr64_mmap_pages(void);
+
 #endif

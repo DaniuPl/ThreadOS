@@ -77,6 +77,37 @@ uint64_t task64_brk_base(void);
 int task64_in_heap(uint64_t addr);
 void task64_inherit_brk(struct task64 *child);
 
+/* --- Pliki odwzorowane w pamieci ------------------------------------
+ *
+ * Plik widziany jako pamiec: program dostaje adres, a strony pojawiaja
+ * sie pod palcami - tak samo jak sterta, tyle ze wypelnione trescia
+ * z dysku zamiast zerami.
+ *
+ * Numery blokow ustalamy raz, przy zakladaniu odwzorowania, i od tej
+ * pory czytamy je warstwa blokowa z pominieciem kodu PFS. Powod jest
+ * ten sam, co przy wymianie stron: PFS ma jeden wspolny bufor na blok,
+ * a blad strony potrafi trafic w srodek dowolnej operacji na plikach.
+ *
+ * MMAP_PLIKOW mowi, ile odwzorowan naraz moze miec jeden proces. */
+#define MMAP_PLIKOW 4
+
+/* Zaklada odwzorowanie: zapamietuje zakres adresow i numery blokow.
+   Zwraca 0 albo -1. Bloki przechodza na wlasnosc zadania. */
+int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
+                      uint32_t *bloki, uint32_t ile_blokow);
+
+/* Czy adres nalezy do ktoregos odwzorowania. Gdy tak, wpisuje numer
+   bloku PFS i ile bajtow pliku zostalo od tego miejsca. */
+int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
+                       uint32_t *bajtow);
+
+/* Numer bloku PFS pod danym indeksem w odwzorowaniu obejmujacym adres */
+uint32_t task64_mmap_blok(uint64_t adres, uint32_t indeks);
+
+/* Sprzatanie: przy exec i przy koncu zadania */
+void task64_mmap_zwolnij(void);
+void task64_mmap_dziedzicz(struct task64 *dziecko);
+
 /* Nastepny wolny adres w obszarze mapowan procesu */
 uint64_t task64_mmap_next(void);
 void task64_set_mmap_next(uint64_t adr);

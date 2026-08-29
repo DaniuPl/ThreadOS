@@ -120,7 +120,7 @@ def main():
             # podpisu siega glebiej, niz mozna zgadnac z gory
             m = re.search(r"certtest\] koniec, kod wyjscia 0 "
                           r"\(ramek \d+ -> \d+, stron sterty \d+, "
-                          r"stosu (\d+)\)", ce)
+                          r"stosu (\d+)", ce)
             check("stos programu urosl na zadanie w trakcie liczenia",
                   m is not None and int(m.group(1)) > 0)
         finally:

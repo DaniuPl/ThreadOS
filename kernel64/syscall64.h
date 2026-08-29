@@ -58,6 +58,10 @@
 /* Numer wlasnego zadania */
 #define SYS64_GETPID     39
 
+/* Plik odwzorowany w pamieci: a1=nazwa, a2=dlugosc nazwy,
+   a3=&rozmiar -> adres albo 0 */
+#define SYS64_MMAP_FILE  40
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

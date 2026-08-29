@@ -248,7 +248,9 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
-               $(BUILD)/user64/gweb.elf
+               $(BUILD)/user64/gweb.elf \
+               $(BUILD)/user64/mkmapa64.elf \
+               $(BUILD)/user64/mmapfile64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -300,7 +302,9 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \
 	    httpget=$(BUILD)/user64/httpget.elf \
-	    gweb=$(BUILD)/user64/gweb.elf
+	    gweb=$(BUILD)/user64/gweb.elf \
+	    mkmapa64=$(BUILD)/user64/mkmapa64.elf \
+	    mmapfile64=$(BUILD)/user64/mmapfile64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)
