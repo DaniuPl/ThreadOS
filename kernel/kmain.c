@@ -123,6 +123,17 @@ static void demo_mortal(void *arg)
         vga_write_at(48, 0, "watek-C: zakonczony ");
         task_sleep(500);
     }
+
+    /* Napis w wierszu zerowym znika przy kazdym przewinieciu ekranu,
+       wiec na obciazonej maszynie dowod potrafi wyjechac razem
+       z komunikatami startowymi, zanim ktokolwiek go przeczyta.
+       Zapisujemy go wiec takze tam, skad nic nie wyjezdza.
+
+       Wprost na port szeregowy, a nie przez printk: watek konczy sie
+       juz po starcie shella i wypis na konsoli wpadlby w srodek
+       wiersza, ktory ktos akurat pisze. Port szeregowy jest dziennikiem,
+       ekran - biezaca praca; to nie zawsze jest to samo. */
+    serial_write("[ OK ] Watek demonstracyjny C zakonczyl prace\n");
 }
 
 static void ok(const char *what)

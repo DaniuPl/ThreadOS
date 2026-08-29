@@ -100,9 +100,9 @@ ground for both.
 
 **Infrastructure**
 
-- Split the `rdzen` test group. It runs 166 assertions on a single
-  machine and alone decides how long a full run takes; everything else
-  already finishes sooner.
+- Keep an eye on the longest group. `rdzen2` (network, TCP, big files
+  over HTTP, the filesystem and a second boot on the same disk) now
+  decides how long a full run takes.
 - Run on real hardware, not only under QEMU and OVMF.
 
 ## Documentation

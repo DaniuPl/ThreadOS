@@ -24,8 +24,10 @@ KATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testy")
 
 # Kolejnosc ma znaczenie tylko przy J=1; rownolegle i tak startuja
 # najdluzsze pierwsze, zeby nie zostawaly na koniec same
-GRUPY = ["rdzen", "k64", "pulpit1", "pulpit2", "sterowniki",
-         "siec", "siec64", "gfx64", "pulpit64", "gui64", "acpi64", "konsole64", "usbkbd64", "swap64", "dysk", "shm64", "tls64", "iso", "uefi"]
+GRUPY = ["rdzen", "rdzen2", "tls32", "k64", "pulpit1", "pulpit2", "sterowniki",
+         "siec", "siec64", "gfx64", "pulpit64", "gui64", "acpi64",
+         "konsole64", "usbkbd64", "swap64", "dysk", "shm64", "tls64",
+         "iso", "uefi"]
 
 
 def main():

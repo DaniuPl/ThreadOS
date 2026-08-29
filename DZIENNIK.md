@@ -1377,3 +1377,27 @@ sprawdzane przez `make test`.
       w oknie - a to jeden program spinający naraz kompozytor,
       klawiaturę, mysz, DNS, TCP, TLS, system plików i własną
       przestrzeń adresową.
+- [x] **Podział grupy `rdzen` na trzy** - nie dla porządku, tylko dla
+      czasu: jedna grupa robiła 174 asercje na jednej maszynie i sama
+      decydowała, ile trwa cały bieg, bo wszystkie pozostałe kończyły
+      się dużo wcześniej. Teraz są trzy - rozruch i procesy (`rdzen`),
+      sieć z systemem plików (`rdzen2`) i samo TLS (`tls32`) - a że
+      liczą się równolegle, cały zestaw schodzi w 259 s zamiast 310 s.
+      Asercji tyle samo, 518.
+
+      Podział wyciągnął przy okazji flakę, która czekała tam od dawna.
+      Wątek demonstracyjny C kończy się po dwóch sekundach i przez
+      kilka następnych odrysowuje napis w zerowym wierszu ekranu -
+      i tylko tam był dowód, że się wykonał. Wiersz zerowy znika przy
+      każdym przewinięciu, więc na obciążonej maszynie dowód wyjeżdżał
+      razem z komunikatami startowymi, zanim test zdążył spojrzeć.
+      Przesunięcie sprawdzenia wcześniej nie wystarczyło: pod pełnym
+      obciążeniem samo dojście do promptu trwa dłużej niż całe okno
+      widoczności.
+
+      Wątek pisze więc teraz jedną linię **wprost na port szeregowy** -
+      nie przez `printk`, bo kończy się już po starcie shella i wypis
+      na konsoli wpadałby w środek wiersza, który ktoś akurat pisze
+      (test klawiatury złapał to od razu). Port szeregowy jest
+      dziennikiem, ekran bieżącą pracą; to nie zawsze jest to samo,
+      i dobrze, że akurat ta różnica musiała się tu ujawnić.
