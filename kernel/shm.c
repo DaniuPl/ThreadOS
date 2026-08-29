@@ -7,6 +7,7 @@
  * procesu pomija ich ramki (shm_is_shared).
  */
 
+#include <stdint.h>
 #include "include/shm.h"
 #include "include/pmm.h"
 #include "include/string.h"
@@ -43,7 +44,9 @@ uint32_t shm_get(int key, uint32_t size)
         uint32_t phys = pmm_alloc_contiguous(pages);
         if (!phys)
             break;
-        memset((void *)phys, 0, pages * 4096);   /* <64 MiB, identycznie */
+        /* Region lezy w mapowaniu identycznosciowym, wiec adres
+           fizyczny jest tu takze wirtualnym - w obu jadrach */
+        memset((void *)(uintptr_t)phys, 0, pages * 4096);
         regions[i].used = 1;
         regions[i].key = key;
         regions[i].phys = phys;

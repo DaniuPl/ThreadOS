@@ -46,6 +46,12 @@
 #define SYS64_WIN_TEXT   34  /* a1=winid, a2=&{x,y,kolor,napis} -> 0/-1 */
 #define SYS64_WIN_POLL   35  /* a1=winid, a2=&zdarzenie -> 1/0/-1 */
 
+/* Pamiec wspoldzielona po kluczu: a1=klucz, a2=rozmiar -> adres albo 0 */
+#define SYS64_SHM        36
+
+/* Czas z zegara CMOS: a1=&struct czas -> 0 albo -1 */
+#define SYS64_TIME       37
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

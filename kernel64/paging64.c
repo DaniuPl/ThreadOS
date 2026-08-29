@@ -21,6 +21,7 @@
 #include "../kernel/include/string.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/swap.h"
+#include "../kernel/include/shm.h"
 
 #define PTE_PRESENT 0x001
 #define PTE_WRITE   0x002
@@ -459,9 +460,9 @@ static int clock_pd, clock_pt;
  * jesli do nastepnego obchodu nikt jej nie tknie, poleci. Zabieramy
  * wiec te, ktore naprawde lezaly odlogiem.
  *
- * Nie ruszamy stron oddanych na kopiowanie przy zapisie ani ramek
- * nalezacych do wiecej niz jednej przestrzeni: z nimi wymiana
- * wymagalaby liczenia wlascicieli takze na dysku.
+ * Nie ruszamy stron wspoldzielonych (shm), stron oddanych na kopiowanie
+ * przy zapisie ani ramek nalezacych do wiecej niz jednej przestrzeni:
+ * z nimi wymiana wymagalaby liczenia wlascicieli takze na dysku.
  *
  * Chodzimy wylacznie po gigabajcie programu (PAGING64_USER_PDPT).
  * Pamiec jadra na dysk nie idzie - a nawet gdyby, to nie ma jej kto
@@ -497,7 +498,8 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 if (!(w & PTE_PRESENT) || !(w & PG_USER) || (w & PG_COW))
                     continue;
                 uint64_t frame = w & ADDR_MASK;
-                if (pmm_frame_refs((uint32_t)frame) != 1)
+                if (shm_is_shared((uint32_t)frame) ||
+                    pmm_frame_refs((uint32_t)frame) != 1)
                     continue;
                 if (w & PTE_ACCESSED) {
                     pt[j] = w & ~(uint64_t)PTE_ACCESSED;   /* druga szansa */

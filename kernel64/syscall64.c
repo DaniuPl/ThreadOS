@@ -30,6 +30,8 @@
 #include "../kernel/include/net.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/desktop.h"
+#include "../kernel/include/shm.h"
+#include "../kernel/include/rtc.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -656,6 +658,23 @@ static void handle(struct regs *r)
         }
         r->rax = (uint64_t)(int64_t)desktop_win_text(
             (int)a1, task64_current_id(), c.x, c.y, s, (uint8_t)c.kolor);
+        return;
+    }
+    /* Pamiec wspoldzielona. Region zyje w jadrze i jest wspolny dla
+       wszystkich, kto poda ten sam klucz; proces dostaje go pod
+       kolejnym wolnym adresem swojego obszaru mapowan. */
+    case SYS64_SHM:
+        r->rax = proc64_shm((int)a1, a2);
+        return;
+    case SYS64_TIME: {
+        struct rtc_time t;
+        if (!paging64_user_range(a1, sizeof(t))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        rtc_read(&t);
+        *(struct rtc_time *)(uintptr_t)a1 = t;
+        r->rax = 0;
         return;
     }
     case SYS64_WIN_POLL: {

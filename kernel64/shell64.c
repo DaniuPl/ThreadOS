@@ -30,6 +30,7 @@
 #include "../kernel/include/blk.h"
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/swap.h"
+#include "../kernel/include/rtc.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fbcon.h"
@@ -62,7 +63,7 @@ static void cmd_help(void)
 {
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
-    printk("           rm <plik>, cp <zrodlo> <cel>, uptime,\n");
+    printk("           rm <plik>, cp <zrodlo> <cel>, uptime, date,\n");
     printk("           run <program>, clear,\n");
     printk("           ifconfig, arp, ping <adres>, gfx, pulpit,\n");
     printk("           reboot, poweroff\n");
@@ -300,6 +301,16 @@ static void cmd_gfx(void)
     video_present();
 }
 
+/* date - godzina z zegara plyty glownej */
+static void cmd_date(void)
+{
+    struct rtc_time t;
+    rtc_read(&t);
+    printk("%u-%u-%u %u:%u:%u\n", (uint32_t)t.year, (uint32_t)t.month,
+           (uint32_t)t.day, (uint32_t)t.hour, (uint32_t)t.min,
+           (uint32_t)t.sec);
+}
+
 static void cmd_uptime(void)
 {
     uint32_t t = pit_ticks();
@@ -400,6 +411,8 @@ static void execute(const char *line)
         cmd_disk();
     } else if (!strcmp(line, "uptime")) {
         cmd_uptime();
+    } else if (!strcmp(line, "date")) {
+        cmd_date();
     } else if (!strcmp(line, "clear")) {
         vga_clear();
     } else if (!strcmp(line, "reboot")) {

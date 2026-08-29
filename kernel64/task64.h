@@ -77,6 +77,10 @@ uint64_t task64_brk_base(void);
 int task64_in_heap(uint64_t addr);
 void task64_inherit_brk(struct task64 *child);
 
+/* Nastepny wolny adres w obszarze mapowan procesu */
+uint64_t task64_mmap_next(void);
+void task64_set_mmap_next(uint64_t adr);
+
 /* Deskryptory otwartych plikow - tablica nalezy do zadania */
 /* Rodzaj tego, co siedzi pod numerem (musi zgadzac sie z task64.c) */
 #define FDK_WOLNY   0

@@ -51,6 +51,8 @@
 #define SYS64_WIN_RECT   33
 #define SYS64_WIN_TEXT   34
 #define SYS64_WIN_POLL   35
+#define SYS64_SHM        36
+#define SYS64_TIME       37
 
 #define NAME_MAX64 63
 
@@ -420,6 +422,33 @@ struct win_event {
     int32_t x, y;          /* wspolrzedne wzgledem obszaru tresci */
     int32_t val;           /* maska przyciskow albo kod znaku */
 };
+
+/* Czas z zegara CMOS. Uklad pol musi zgadzac sie ze struct rtc_time
+   w jadrze - idzie przez wywolanie systemowe jako goly blok bajtow. */
+struct czas64 {
+    uint16_t rok;
+    uint8_t miesiac;
+    uint8_t dzien;
+    uint8_t godzina;
+    uint8_t minuta;
+    uint8_t sekunda;
+} __attribute__((packed));
+
+static inline int64_t sys_time(struct czas64 *t)
+{
+    return syscall64(SYS64_TIME, (int64_t)(uintptr_t)t, 0);
+}
+
+/* Pamiec wspoldzielona po kluczu.
+ *
+ * Ten sam klucz to ta sama pamiec fizyczna - dwa procesy dostaja ja
+ * pod swoimi adresami, ale pisza w to samo miejsce. Zwraca adres albo
+ * zero, gdy sie nie udalo. */
+static inline void *sys_shm(int klucz, uint64_t rozmiar)
+{
+    int64_t r = syscall64(SYS64_SHM, klucz, (int64_t)rozmiar);
+    return r <= 0 ? (void *)0 : (void *)(uintptr_t)r;
+}
 
 /* Tworzy okno o obszarze tresci cw x ch. Zwraca numer okna albo -1. */
 static inline int64_t win_create(int cw, int ch, const char *tytul)

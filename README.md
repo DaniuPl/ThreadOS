@@ -35,9 +35,9 @@ desktop with windows, icons, a file manager and a web browser.
 signals, file descriptors, pipes, on-demand heap, SSE with FPU state
 saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, a graphical desktop with ring 3
-applications drawing in their own windows, swap to disk, four virtual
-consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
-from a single hybrid disc.
+applications drawing in their own windows, shared memory, swap to
+disk, four virtual consoles, USB keyboard (UHCI), ACPI power-off, and
+BIOS + UEFI boot from a single hybrid disc.
 
 ## Quick start
 
@@ -85,11 +85,9 @@ Roughly in the order I would do them.
 
 **64-bit kernel — catching up with the 32-bit one**
 
-- More GUI applications in ring 3. The window syscalls work and one
-  app ships in the initrd; the clock, file manager and browser icons
-  still call 32-bit-only binaries.
-- Shared memory for long-mode processes, so a program can hand a
-  buffer to another one instead of drawing everything itself.
+- The last three desktop icons: a resource monitor, a terminal in a
+  window, and a browser. The first two are small; the browser needs
+  TLS and the HTTP client first.
 - TLS and the HTTP client in ring 3: the crypto already lives in user
   space, so this is mostly a matter of building those programs for
   64-bit.

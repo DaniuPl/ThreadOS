@@ -11,10 +11,10 @@ ikony ma dac okno z narysowana paleta, klikniecie w okno ma zostawic
 w nim znacznik (czyli zdarzenie doszlo do procesu i wrocilo rysunkiem),
 a klawisze maja trafiac do okna z fokusem.
 
-Okno aplikacji jest trzecim z kolei (dwa pierwsze to okna jadra), wiec
-kompozytor stawia je pod (94,54); obszar tresci zaczyna sie o piksel
-w prawo i o pasek tytulu nizej - pod (95,65). Wszystkie wspolrzedne
-ekranu ponizej biora sie z tego jednego punktu.
+Okna aplikacji ida po kolei za dwoma oknami jadra: pierwsze staje pod
+(94,54), kazde nastepne dwanascie pikseli nizej i w prawo. Obszar
+tresci zaczyna sie o piksel w prawo i o pasek tytulu nizej. Wszystkie
+wspolrzedne ekranu ponizej biora sie z tej jednej zasady.
 """
 
 import os
@@ -26,7 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, wynik
 
-TRESC_X, TRESC_Y = 95, 65    # lewy gorny rog obszaru tresci okna aplikacji
+# Kompozytor stawia okna kaskadowo: slot i pod (70+12i, 30+12i), a tresc
+# o piksel w prawo i o pasek tytulu (10 px) nizej. Dwa pierwsze sloty
+# zajmuja okna jadra, wiec aplikacje zaczynaja sie od trzeciego.
+def tresc(slot):
+    return 70 + 12 * slot + 1, 30 + 12 * slot + 11
+
+
+TRESC_X, TRESC_Y = tresc(2)  # lewy gorny rog tresci pierwszej aplikacji
 
 CZERWONY = (255, 0, 0)
 ZIELONY = (0, 255, 0)
@@ -58,6 +65,9 @@ def main():
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
     try:
         os.makedirs(d + "/boot/grub")
         shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
@@ -75,10 +85,13 @@ def main():
         if not made:
             return wynik()
 
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
-                 qemu="qemu-system-x86_64")
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
+            # Plik na dysku dla menedzera plikow - po starcie pulpitu
+            # klawiatura nalezy juz do niego, wiec teraz albo wcale
+            q.polecenie("write notatka czesc-z-dysku", "write:")
             q.type_line("pulpit")
             q.wait_serial("Pulpit startuje", timeout=30)
             check("pulpit wstaje w trybie graficznym", q.wait_desktop(30))
@@ -155,6 +168,85 @@ def main():
             po = pole_txt(at3)
             check("klawisze trafiaja do okna z fokusem", przed != po)
 
+            # --- Zegar: druga aplikacja, wlasne okno ---
+            # Ikona 'Zegar' stoi pod (8,60), kafelek 32x24
+            q.mouse_home()
+            q.mouse_goto(24, 72)
+            q.mouse_click()
+            q.mouse_goto(400, 300)
+
+            zx, zy = tresc(3)
+            def okno_zegara(fun):
+                return [fun(zx + 8 + dx, zy + 4 + dy)
+                        for dy in range(8) for dx in range(64)]
+
+            zegar_jest = False
+            koniec = time.time() + 20
+            while time.time() < koniec:
+                _, _, az = q.screen_raw()
+                if any(p != BIALY and p != (227, 227, 227)
+                       for p in okno_zegara(az)):
+                    zegar_jest = True
+                    break
+                time.sleep(0.5)
+            check("ikona 'Zegar' uruchamia druga aplikacje we wlasnym oknie",
+                  zegar_jest)
+
+            # Zegar ma isc: godzina zmienia sie w oknie sama z siebie
+            _, _, az1 = q.screen_raw()
+            pierwszy = okno_zegara(az1)
+            time.sleep(2.5)
+            _, _, az2 = q.screen_raw()
+            check("zegar w oknie idzie (tresc zmienia sie sama)",
+                  okno_zegara(az2) != pierwszy)
+
+            # --- Pliki: trzecia aplikacja, czyta dysk ---
+            q.mouse_home()
+            q.mouse_goto(24, 112)
+            q.mouse_click()
+            q.mouse_goto(400, 300)
+
+            px2, py2 = tresc(4)
+            # Naglowek "Pliki na dysku:" rysowany na zielono pod (4,2)
+            zielonych = 0
+            koniec = time.time() + 20
+            while time.time() < koniec:
+                _, _, ap = q.screen_raw()
+                zielonych = sum(1 for dy in range(8) for dx in range(120)
+                                if ap(px2 + 4 + dx, py2 + 2 + dy) == ZIELONY)
+                if zielonych > 20:
+                    break
+                time.sleep(0.5)
+            check("ikona 'Pliki' uruchamia menedzer plikow "
+                  "(%d zielonych pikseli naglowka)" % zielonych,
+                  zielonych > 20)
+
+            # Na dysku lezy plik zapisany przed startem pulpitu -
+            # menedzer musi go pokazac, a klik na nim wczytac tresc
+            _, _, ap1 = q.screen_raw()
+            def panel_podgladu(fun):
+                return [fun(px2 + 4 + dx, py2 + 102 + dy)
+                        for dy in range(8) for dx in range(140)]
+
+            przed = panel_podgladu(ap1)
+
+            # Na dysku leza tez pliki jadra (swap.sys, icons.pos), ktore
+            # w podgladzie sa puste - klikamy wiec kolejne wiersze, az
+            # tresc pojawi sie naprawde
+            wczytany = False
+            for wiersz in range(4):
+                q.mouse_home()
+                q.mouse_goto(px2 + 20, py2 + 16 + wiersz * 10 + 4)
+                q.mouse_click()
+                q.mouse_goto(400, 300)
+                time.sleep(1.5)
+                _, _, ap2 = q.screen_raw()
+                if panel_podgladu(ap2) != przed:
+                    wczytany = True
+                    break
+            check("klik w nazwe pliku wczytuje jego tresc z dysku",
+                  wczytany)
+
             # Kompozytor przezyl to wszystko: tlo pulpitu dalej jest.
             w, h, at4 = q.screen_raw()
             tlo = at4(w - 20, h // 2)
@@ -164,7 +256,7 @@ def main():
             q.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog):
+        for f in (iso, slog, disk):
             if os.path.exists(f):
                 os.unlink(f)
 

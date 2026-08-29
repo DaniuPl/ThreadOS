@@ -1276,3 +1276,37 @@ sprawdzane przez `make test`.
       polecenie niczego nie znalazło, a wynik poprzedniego leży tam do
       końca biegu. Trzy asercje w tym teście przechodziły z tego
       powodu, zanim funkcja w ogóle zaczęła działać.
+- [x] **Pamięć współdzielona i dwie kolejne aplikacje graficzne
+      (jądro 64-bitowe)** - `kernel/shm.c` przeszedł bez zmian
+      w logice, bo region to po prostu ciągły blok ramek z PMM.
+      Nowa jest droga do niego z pierścienia 3: między stertą a stosem
+      wydzielony został obszar mapowań (od 0x50000000 w górę), a sterta
+      kończy się u jego progu - jedno nie ma jak wejść w drugie.
+      Wymiana stron pomija ramki współdzielone, tak jak w jądrze
+      32-bitowym: z nimi trzeba by liczyć właścicieli także na dysku.
+
+      Test pokazuje to, o co w tym naprawdę chodzi, a nie tylko to, że
+      bajty się zgadzają: pisarz mapuje najpierw region na boku,
+      o innym kluczu, więc **wspólny widzi pod innym adresem niż
+      czytelnik**. Te same bajty pod dwoma różnymi adresami - bo
+      o tym, gdzie coś widać, decyduje przestrzeń adresowa, a nie
+      pamięć. Bez tego test przeszedłby także przy przypadkowej
+      zgodności układu.
+
+      Przy okazji doszedł zegar CMOS (`rtc.c`, czyste porty I/O -
+      przeszedł jak stał), polecenie `date` i wywołanie `SYS64_TIME`.
+
+      Dwie nowe aplikacje w oknach: `gclock64` (godzina ze sprzętu
+      i uptime z tyknięć jądra - dwa niezależne źródła czasu obok
+      siebie) i `gfiles64` (lista plików z dysku, kliknięcie nazwy
+      wczytuje jej treść). Ikony `Zegar` i `Pliki` przestały więc być
+      martwe; zostały trzy: Monitor, Term i Web.
+
+      I znowu ta sama pomyłka, co przy `fs_write_at` i przy
+      `fs_readdir` - **trzeci raz w tym projekcie**. `sys_readdir`
+      w bibliotece programów oddaje ZERO przy trafieniu i -1 na końcu
+      katalogu, a `fs_readdir` w jądrze odwrotnie: jedynkę przy
+      trafieniu. Napisałem `!= 1`, więc pierwszy wpis wyglądał jak
+      koniec katalogu i okno pokazywało "(pusto)". Sąsiedztwo nazw nie
+      jest żadną wskazówką co do konwencji zwrotu; trzeba ją
+      przeczytać, za każdym razem.

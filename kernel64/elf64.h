@@ -30,7 +30,13 @@
 #define USER64_BASE        0x0000000040000000ULL
 #define USER64_STACK_TOP   0x0000000060000000ULL
 #define USER64_STACK_PAGES 4
-#define USER64_TOP         (USER64_STACK_TOP - USER64_STACK_PAGES * 4096ULL)
+
+/* Miedzy sterta a stosem lezy obszar na mapowania: pamiec wspoldzielona
+   i wszystko, co po niej przyjdzie. Sterta konczy sie u jego progu,
+   wiec jedno nie ma jak wejsc w drugie. */
+#define USER64_MMAP_BASE   0x0000000050000000ULL
+#define USER64_MMAP_MAX    (USER64_STACK_TOP - USER64_STACK_PAGES * 4096ULL)
+#define USER64_TOP         USER64_MMAP_BASE
 
 /* Laduje obraz ELF64. Zwraca 0 i ustawia *entry oraz poczatek sterty
    (pierwsza wolna strona za obrazem), albo -1. */

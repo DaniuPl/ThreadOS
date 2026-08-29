@@ -15,6 +15,7 @@
 #include "task64.h"
 #include "paging64.h"
 #include "syscall64.h"
+#include "elf64.h"
 #include "fpu64.h"
 #include "../kernel/include/fs.h"
 #include "pipe64.h"
@@ -65,6 +66,7 @@ struct task64 {
     void *fpu;                   /* stan rejestrow zmiennoprzecinkowych */
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
+    uint64_t mmap;               /* nastepny wolny adres na mapowania */
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     int vc;                      /* konsola wirtualna, na ktorej pisze */
     char name[NAME_MAX];
@@ -123,6 +125,7 @@ void scheduler64_init(void)
     for (int i = 0; i < FD_MAX; i++)
         main_task->fds[i].kind = FDK_WOLNY;
     main_task->brk_base = main_task->brk = 0;
+    main_task->mmap = USER64_MMAP_BASE;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
     main_task->vc = 0;
@@ -157,6 +160,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     for (int i = 0; i < FD_MAX; i++)
         t->fds[i].kind = FDK_WOLNY;
     t->brk_base = t->brk = 0;
+    t->mmap = USER64_MMAP_BASE;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
     t->vc = current ? current->vc : 0;
@@ -644,7 +648,17 @@ void task64_set_brk_base(uint64_t base)
 {
     current->brk_base = base;
     current->brk = base;
+    /* Nowy obraz programu to nowy uklad pamieci - mapowania z poprzedniego
+       zniknely razem z jego przestrzenia */
+    current->mmap = USER64_MMAP_BASE;
 }
+
+/* --- Obszar mapowan ------------------------------------------------
+ *
+ * Kolejne mapowania ida jedno za drugim w gore, bez zwalniania: proces
+ * i tak zabiera ze soba caly ten obszar, gdy sie konczy. */
+uint64_t task64_mmap_next(void)          { return current ? current->mmap : 0; }
+void task64_set_mmap_next(uint64_t adr)  { if (current) current->mmap = adr; }
 
 uint64_t task64_brk(void)      { return current->brk; }
 uint64_t task64_brk_base(void) { return current->brk_base; }
@@ -666,6 +680,7 @@ void task64_inherit_brk(struct task64 *child)
 {
     child->brk_base = current->brk_base;
     child->brk = current->brk;
+    child->mmap = current->mmap;     /* dziecko widzi ten sam uklad */
 }
 
 /* --- Deskryptory --------------------------------------------------

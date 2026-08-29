@@ -24,6 +24,7 @@
 #include "../kernel/include/initrd.h"
 #include "elf64.h"
 #include "../kernel/include/prog.h"
+#include "../kernel/include/shm.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -334,6 +335,42 @@ static void spawn_thread(void *arg)
     rsp = build_args(rsp, &args, &argv_va);
 
     enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
+}
+
+/* --- Pamiec wspoldzielona ------------------------------------------
+ *
+ * Region jest wspolny dla wszystkich, kto poda ten sam klucz: te same
+ * ramki fizyczne wchodza do kilku przestrzeni adresowych naraz. Kazdy
+ * proces widzi je pod SWOIM adresem - kolejnym wolnym w jego obszarze
+ * mapowan - bo adres wirtualny jest sprawa przestrzeni, a nie pamieci.
+ *
+ * Strony nie dostaja zakazu wykonywania: wspoldzielony bufor bywa
+ * miejscem na kod tak samo, jak na dane, a o tym, co w nim lezy,
+ * decyduje ten, kto go zaklada.
+ */
+uint64_t proc64_shm(int klucz, uint64_t rozmiar)
+{
+    if (!rozmiar)
+        rozmiar = PAGE_SIZE;
+    uint64_t stron = (rozmiar + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    uint64_t baza = task64_mmap_next();
+    uint64_t koniec = baza + stron * PAGE_SIZE;
+    if (!baza || koniec > USER64_MMAP_MAX || koniec < baza)
+        return 0;
+
+    uint32_t phys = shm_get(klucz, (uint32_t)(stron * PAGE_SIZE));
+    if (!phys)
+        return 0;
+
+    for (uint64_t i = 0; i < stron; i++)
+        if (paging64_map(baza + i * PAGE_SIZE,
+                         (uint64_t)phys + i * PAGE_SIZE,
+                         PG_USER | PG_WRITE) < 0)
+            return 0;
+
+    task64_set_mmap_next(koniec);
+    return baza;
 }
 
 int proc64_spawn(const char *name, const struct args64 *args, int quiet)
