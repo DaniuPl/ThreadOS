@@ -23,6 +23,11 @@
    probie zapisu. */
 #define PG_COW    0x200
 
+/* Bit 10, tez do dyspozycji systemu. Znaczy: strona poszla na dysk,
+   a w gornych bitach wpisu siedzi numer miejsca w pliku wymiany.
+   Wpisu bez bitu obecnosci procesor i tak nie oglada. */
+#define PG_SWAPPED 0x400
+
 /* Ktory wpis drugiego poziomu nalezy do programu. Jeden wpis to
    gigabajt, a programy leza od 1 GiB w gore - USER64_BASE
    w kernel64/elf64.h musi sie z tym zgadzac. */
@@ -63,6 +68,14 @@ void paging64_free_space(uint64_t space);
 /* Dokleja do mapowania obszar lezacy poza pamiecia (rejestry
    urzadzen). 0 = gotowe. */
 int paging64_map_phys(uint64_t phys, uint64_t len);
+
+/* --- Wymiana stron na dysk ----------------------------------------
+ *
+ * Wyrzuca z podanej przestrzeni najwyzej 'want' stron programu; zwraca,
+ * ile udalo sie oddac. Swap_in sciaga z powrotem te, ktora program
+ * wlasnie probowal dotknac (1 = wrocila, mozna powtorzyc instrukcje). */
+int paging64_reclaim_pages(uint64_t space, int want);
+int paging64_swap_in(uint64_t space, uint64_t virt);
 
 /* Dokad siega mapowanie identycznosciowe pamieci */
 uint64_t paging64_identity_top(void);

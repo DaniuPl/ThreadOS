@@ -47,6 +47,16 @@ mb2_header:
     .short 0
     .long 8
 
+    /* Konsola: jadro umie pisac w pamieci znakow EGA, nie tylko
+       w buforze obrazu. Loader dowiaduje sie z tego, ze wolno mu
+       zostawic tryb tekstowy - inaczej, widzac zadanie trybu obrazu
+       nizej, zawsze przelaczylby na grafike. */
+    .align 8
+    .short 4                         /* flagi konsoli */
+    .short 0
+    .long 12
+    .long 2                          /* obsluga trybu tekstowego EGA */
+
     /* Tryb obrazu: zero znaczy "bez preferencji". Zadanie konkretnej
        rozdzielczosci ma sens pod BIOS-em, gdzie karta zna cala liste
        trybow VESA. Pod UEFI wybor jest taki, jaki firmware akurat

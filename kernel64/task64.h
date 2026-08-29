@@ -55,6 +55,13 @@ uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
 int task64_id_current(void);
+
+/* Konsola wirtualna zadania (dziedziczona po rodzicu) */
+/* Oddanie stron na dysk, gdy PMM nie ma juz wolnych ramek */
+int task64_reclaim_page(void);
+
+int task64_vc(void);
+void task64_set_vc(int vc);
 int task64_alive(int id);            /* czy zadanie o tym numerze zyje */
 
 /* Katalog roboczy zadania - dziecko zaczyna tam, gdzie stal rodzic */

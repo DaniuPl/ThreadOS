@@ -34,8 +34,9 @@ desktop with windows, icons, a file manager and a web browser.
 signals, file descriptors, pipes, on-demand heap, SSE with FPU state
 saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, a graphical desktop with ring 3
-applications drawing in their own windows, and BIOS + UEFI boot from
-a single hybrid disc.
+applications drawing in their own windows, swap to disk, four virtual
+consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
+from a single hybrid disc.
 
 ## Quick start
 
@@ -88,10 +89,6 @@ Roughly in the order I would do them.
   still call 32-bit-only binaries.
 - Shared memory for long-mode processes, so a program can hand a
   buffer to another one instead of drawing everything itself.
-- Swap to disk and virtual consoles — both already exist in 32-bit
-  form and are mostly mode-independent.
-- USB keyboard (UHCI) and ACPI power-off, so a machine without PS/2
-  can be used and shut down cleanly.
 - TLS and the HTTP client in ring 3: the crypto already lives in user
   space, so this is mostly a matter of building those programs for
   64-bit.
@@ -111,8 +108,8 @@ Roughly in the order I would do them.
 **Infrastructure**
 
 - Split the `rdzen` test group. It runs 166 assertions on a single
-  machine and alone decides how long a full run takes (312 s out of
-  312 s); everything else already finishes sooner.
+  machine and alone decides how long a full run takes; everything else
+  already finishes sooner.
 - Run on real hardware, not only under QEMU and OVMF.
 
 ## Documentation

@@ -66,6 +66,7 @@ struct task64 {
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
+    int vc;                      /* konsola wirtualna, na ktorej pisze */
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -124,6 +125,7 @@ void scheduler64_init(void)
     main_task->brk_base = main_task->brk = 0;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
+    main_task->vc = 0;
     set_name(main_task, "main");
     main_task->next = main_task;
     current = main_task;
@@ -157,6 +159,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->brk_base = t->brk = 0;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
+    t->vc = current ? current->vc : 0;
     t->id = next_id++;
     set_name(t, name);
 
@@ -577,6 +580,57 @@ int task64_alive(int id)
    przeszkadza drugiemu. Dziecko zaczyna tam, gdzie stal rodzic. */
 int task64_cwd(void)          { return current ? current->cwd : FS_ROOT; }
 void task64_set_cwd(int slot) { if (current) current->cwd = slot; }
+
+/* Konsola wirtualna jest wlasnoscia zadania z tego samego powodu, co
+   katalog roboczy: program uruchomiony na drugiej konsoli pisze na niej
+   dalej, nawet gdy patrzymy na pierwsza. Przed startem schedulera
+   (komunikaty rozruchowe) nie ma jeszcze zadnego zadania - wtedy
+   pierwsza konsola. */
+/* --- Wymiana stron: kto ma oddac ------------------------------------
+ *
+ * PMM, gdy zabraknie mu ramek, pyta o to jadro. Chodzimy po zadaniach
+ * w kolko i prosimy kazde o oddanie stron na dysk. Zaczynamy od
+ * nastepnego po ostatnio odwiedzonym, zeby nie obdzierac w kolko tego
+ * samego procesu.
+ *
+ * Watki jadra pomijamy: ich przestrzen to przestrzen jadra, a pamiec
+ * jadra na dysk nie idzie - nie ma jej kto sciagnac z powrotem, bo
+ * sciaga ja obsluga bledu strony, ktora sama w jadrze siedzi.
+ *
+ * Wszystko idzie przy wylaczonych przerwaniach i nie jest to tylko
+ * ostroznosc wobec listy zadan: miedzy zgaszeniem wpisu strony
+ * a zapisaniem jej na dysk nikt nie moze dostac procesora. */
+int task64_reclaim_page(void)
+{
+    static struct task64 *kursor;
+    if (!current)                    /* scheduler jeszcze nie wystartowal */
+        return 0;
+
+    irqflags_t flags = irq_save();
+    struct task64 *start = (kursor && kursor->state != TASK_ZOMBIE)
+                               ? kursor : current;
+    struct task64 *t = start;
+    int oddane = 0;
+
+    do {
+        t = t->next;
+        /* Partiami: samo przemiatanie tablic stron kosztuje wiecej niz
+           zapis jednej strony, wiec nie oplaca sie chodzic po nich
+           od nowa dla kazdej brakujacej ramki */
+        if (t->space && t->state != TASK_ZOMBIE &&
+            paging64_reclaim_pages(t->space, 32)) {
+            kursor = t;
+            oddane = 1;
+            break;
+        }
+    } while (t != start);
+
+    irq_restore(flags);
+    return oddane;
+}
+
+int task64_vc(void)          { return current ? current->vc : 0; }
+void task64_set_vc(int vc)   { if (current) current->vc = vc; }
 
 /* --- Sterta programu ----------------------------------------------
  *

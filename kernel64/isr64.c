@@ -90,6 +90,13 @@ void isr64_handler(struct regs *r)
          *
          * Zapisywalna i bez prawa wykonywania - w danych programu nie
          * ma kodu, a gdyby byl, procesor go nie wykona. */
+        /* Strona, ktora poszla na dysk. Sciagamy ja z powrotem i
+         * pozwalamy powtorzyc instrukcje - dla programu nie zdarzylo
+         * sie nic poza chwila zwloki. */
+        if (r->int_no == 14 && !(r->err_code & 0x01) &&
+            paging64_swap_in(paging64_current_space(), read_cr2()))
+            return;
+
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t adres = read_cr2();
             if (task64_in_heap(adres) &&

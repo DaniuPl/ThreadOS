@@ -184,7 +184,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci blk fs rtl8139 net dhcp tcp video \
-            mouse desktop
+            mouse desktop acpi uhci usbkbd swap
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -235,7 +235,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/heap64.elf $(BUILD)/user64/fpu64test.elf \
                $(BUILD)/user64/uls64.elf $(BUILD)/user64/uupper64.elf \
                $(BUILD)/user64/unet64.elf \
-               $(BUILD)/user64/guiapp64.elf
+               $(BUILD)/user64/guiapp64.elf \
+               $(BUILD)/user64/swaptest64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -266,7 +267,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    uls64=$(BUILD)/user64/uls64.elf \
 	    uupper64=$(BUILD)/user64/uupper64.elf \
 	    unet64=$(BUILD)/user64/unet64.elf \
-	    guiapp=$(BUILD)/user64/guiapp64.elf
+	    guiapp=$(BUILD)/user64/guiapp64.elf \
+	    swaptest64=$(BUILD)/user64/swaptest64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

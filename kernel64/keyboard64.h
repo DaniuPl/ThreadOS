@@ -11,8 +11,13 @@ char keyboard64_getchar(void);
    konsoli tekstowej, do ktorej mialyby trafic) */
 void keyboard64_set_override(void (*handler)(char c));
 
-/* Komu wyslac SIGINT po Ctrl+C (-1 = nikomu) */
+/* Komu wyslac SIGINT po Ctrl+C (-1 = nikomu). Dotyczy konsoli, na
+   ktorej pisze wolajace zadanie. */
 void keyboard64_set_intr_target(int id);
+
+/* Znak i przelaczenie konsoli z innego zrodla niz PS/2 (klawiatura USB) */
+void keyboard64_inject(char c);
+void keyboard64_inject_switch(int vc);
 
 /* Odczyt dla programu w ring 3: blokuje do pierwszego znaku, zwraca
    ile ich wzial; -1 = czekanie przerwal sygnal (bez echa - echo robi

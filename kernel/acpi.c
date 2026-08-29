@@ -19,10 +19,23 @@
 
 #include <stdint.h>
 #include "include/acpi.h"
-#include "include/paging.h"
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/io.h"
+
+/* Jedyna rzecz w tym pliku zalezna od trybu procesora: tablice ACPI
+   trzeba doklejac do mapowania, a tablice stron buduje w kazdym
+   z jader inny kod. Sama droga do wylaczenia zasilania - RSDP, RSDT,
+   FADT, _S5_ w bajtkodzie - jest ta sama. */
+#ifdef __x86_64__
+#include "../kernel64/paging64.h"
+#define IDENTITY_TOP()   paging64_identity_top()
+#define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
+#else
+#include "include/paging.h"
+#define IDENTITY_TOP()   paging_identity_limit()
+#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
+#endif
 
 struct rsdp {
     char signature[8];          /* "RSD PTR " */
@@ -91,16 +104,16 @@ static const void *map(uint32_t phys, uint32_t len)
 {
     if (!phys)
         return (void *)0;
-    if (phys + len > paging_identity_limit() &&
-        paging_map_phys(phys, len) < 0)
+    if ((uint64_t)phys + len > IDENTITY_TOP() &&
+        MAP_PHYS(phys, len) < 0)
         return (void *)0;
-    return (const void *)phys;
+    return (const void *)(uintptr_t)phys;
 }
 
 /* Odczyt pojedynczego bajtu spod stalego adresu w pamieci niskiej */
 static uint8_t low_byte(uint32_t addr)
 {
-    const volatile uint8_t *p = (const volatile uint8_t *)addr;
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)addr;
     /* Kompilator widzi tu staly adres i traktuje go jak tablice
        o zerowej dlugosci. Przepuszczenie wskaznika przez pusty wstawek
        odbiera mu te wiedze - adres jest prawdziwy, tyle ze pochodzi
@@ -132,7 +145,7 @@ void acpi_set_rsdp(uint32_t addr)
 static const struct rsdp *find_rsdp(void)
 {
     if (given_rsdp) {
-        const struct rsdp *r = (const struct rsdp *)given_rsdp;
+        const struct rsdp *r = (const struct rsdp *)(uintptr_t)given_rsdp;
         if (!memcmp(r->signature, "RSD PTR ", 8) && checksum_ok(r, 20))
             return r;
     }
@@ -144,14 +157,14 @@ static const struct rsdp *find_rsdp(void)
     uint32_t ebda = ((uint32_t)low_byte(0x40F) << 8 | low_byte(0x40E)) << 4;
     if (ebda >= 0x400 && ebda < 0xA0000) {
         for (uint32_t a = ebda; a < ebda + 1024; a += 16) {
-            const struct rsdp *r = (const struct rsdp *)a;
+            const struct rsdp *r = (const struct rsdp *)(uintptr_t)a;
             if (!memcmp(r->signature, "RSD PTR ", 8) &&
                 checksum_ok(r, 20))
                 return r;
         }
     }
     for (uint32_t a = 0xE0000; a < 0x100000; a += 16) {
-        const struct rsdp *r = (const struct rsdp *)a;
+        const struct rsdp *r = (const struct rsdp *)(uintptr_t)a;
         if (!memcmp(r->signature, "RSD PTR ", 8) && checksum_ok(r, 20))
             return r;
     }
@@ -277,7 +290,8 @@ int acpi_reboot(void)
     if (fadt->reset_reg.space == 0) {           /* rejestr w pamieci */
         if (!map(fadt->reset_reg.addr_low, 4))
             return 0;
-        *(volatile uint8_t *)fadt->reset_reg.addr_low = fadt->reset_value;
+        *(volatile uint8_t *)(uintptr_t)fadt->reset_reg.addr_low =
+            fadt->reset_value;
         return 1;
     }
     return 0;

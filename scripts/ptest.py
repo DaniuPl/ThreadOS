@@ -71,6 +71,28 @@ HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" 
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
 
 
+_FONT8X8 = None
+
+
+def font8x8():
+    """Czcionka konsoli wczytana wprost z naglowka jadra: wzorzec
+    osmiu bajtow -> znak. Jedno zrodlo prawdy - gdy czcionka sie
+    zmieni, testy czytaja nowa."""
+    global _FONT8X8
+    if _FONT8X8 is None:
+        sciezka = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..", "kernel", "include", "font8x8.h")
+        with open(sciezka) as fh:
+            zrodlo = fh.read()
+        wiersze = re.findall(r"\{((?:0x[0-9A-Fa-f]{2},){7}0x[0-9A-Fa-f]{2})\}",
+                             zrodlo)
+        _FONT8X8 = {}
+        for i, w in enumerate(wiersze):
+            wzor = tuple(int(v, 16) for v in w.split(","))
+            _FONT8X8.setdefault(wzor, chr(0x20 + i))
+    return _FONT8X8
+
+
 def start_dns_server(answer_ip=(10, 0, 2, 2)):
     """Prosciutki serwer DNS na hoscie: na kazde pytanie o rekord A
     odpowiada tym samym adresem. Dzieki temu sciezka 'nazwa -> adres'
@@ -619,11 +641,78 @@ class Qemu:
         idx += 1
         w, h, _ = fields
         px = data[idx:]
+        self._ostatnie_piksele = px
 
         def at(x, y):
             o = (y * w + x) * 3
             return (px[o], px[o + 1], px[o + 2])
         return w, h, at
+
+
+    def screen_fbcon(self):
+        """Tekst konsoli odczytany z BUFORA OBRAZU.
+
+        GRUB, widzac w naglowku jadra zadanie trybu obrazu, zawsze daje
+        grafike - pamiec znakow spod 0xB8000 zostaje wtedy pusta i
+        screen() nic z niej nie wyczyta. Konsola rysuje sie wowczas sama,
+        czcionka 8x8, w bloku 80x25 na srodku ekranu (kernel/fbcon.c).
+
+        Czytamy ja tak, jak czytalby czlowiek: kolor, ktorego na calym
+        bloku jest najwiecej, to tlo, reszta to glify - a wzorzec osmiu
+        bajtow wyszukujemy w tej samej czcionce, ktora rysowalo jadro.
+
+        Tlo liczymy dla calego bloku, nie dla pojedynczej komorki: sa
+        znaki, w ktorych pikseli glifu jest WIECEJ niz tla ('0', 'N',
+        'B', 'W'), i liczone osobno wychodzilyby na wspak.
+        """
+        w, h, _ = self.screen_raw()
+        px = self._ostatnie_piksele
+        x0 = (w - 80 * 8) // 2
+        y0 = (h - 25 * 8) // 2
+        if x0 < 0 or y0 < 0:
+            return ""
+
+        ile = {}
+        for y in range(25 * 8):
+            o = ((y0 + y) * w + x0) * 3
+            linia = px[o:o + 80 * 8 * 3]
+            for i in range(0, len(linia), 3):
+                p = linia[i:i + 3]
+                ile[p] = ile.get(p, 0) + 1
+        if not ile:
+            return ""
+        tlo = max(ile, key=ile.get)
+
+        font = font8x8()
+        wiersze = []
+        for row in range(25):
+            znaki = []
+            for col in range(80):
+                wzor = []
+                for y in range(8):
+                    o = ((y0 + row * 8 + y) * w + x0 + col * 8) * 3
+                    linia = px[o:o + 24]
+                    b = 0
+                    for x in range(8):
+                        if linia[x * 3:x * 3 + 3] != tlo:
+                            b |= 1 << x
+                    wzor.append(b)
+                znaki.append(font.get(tuple(wzor), "?"))
+            wiersze.append("".join(znaki).rstrip())
+        return "\n".join(wiersze).rstrip()
+
+    def czekaj_fbcon(self, tekst, timeout=15):
+        """Czeka, az tekst pojawi sie na konsoli rysowanej w buforze
+        obrazu. Zwraca caly ekran (takze po przekroczeniu czasu -
+        asercja nalezy do wolajacego)."""
+        koniec = time.time() + timeout
+        ekran = ""
+        while time.time() < koniec:
+            ekran = self.screen_fbcon()
+            if tekst in ekran:
+                return ekran
+            time.sleep(0.4)
+        return ekran
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 ":": "shift-semicolon",
@@ -688,3 +777,45 @@ def wynik():
         return 1
     return 0
 
+
+
+def zrob_iso64(katalog, iso, grafika=False, tekst=False):
+    """Sklada plyte z jadrem 64-bitowym i jego initrd.
+
+    Jadro 64-bitowe nie da sie uruchomic przez -kernel: QEMU wgrywa tak
+    tylko obrazy Multiboot 1, a to jest Multiboot 2. Kazdy test musi
+    wiec zbudowac plyte GRUB-em, a robil to dotad kazdy na wlasna reke.
+    'grafika' wlacza tryb graficzny od loadera (pulpit i konsola na
+    buforze obrazu). 'tekst' zada trybu tekstowego: GRUB sam z siebie
+    daje bufor obrazu i wtedy konsola rysuje sie w nim zamiast
+    w pamieci znakow VGA, ktorej testy szukaja pod 0xB8000.
+
+    Zwraca True, gdy plyta powstala.
+    """
+    os.makedirs(katalog + "/boot/grub", exist_ok=True)
+    shutil.copy(KERNEL64, katalog + "/boot/protonos64.bin")
+    mod = ""
+    if INITRD64 and os.path.exists(INITRD64):
+        shutil.copy(INITRD64, katalog + "/boot/initrd64.img")
+        mod = "    module2 /boot/initrd64.img initrd64\n"
+    naglowek = ("insmod all_video\nset gfxpayload=keep\n" if grafika
+                else "set gfxpayload=text\n" if tekst else "")
+    with open(katalog + "/boot/grub/grub.cfg", "w") as fh:
+        fh.write(naglowek + "set timeout=0\nset default=0\n"
+                 'menuentry "ProtonOS 64" {\n'
+                 "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+    return subprocess.run(["grub-mkrescue", "-o", iso, katalog],
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+
+
+def brak64():
+    """Powod, dla ktorego testu 64-bitowego nie da sie uruchomic, albo
+    None, gdy da sie. Wszystkie grupy 64-bitowe pytaja o to samo."""
+    if KERNEL64 is None or not os.path.exists(KERNEL64):
+        return "brak obrazu 64-bitowego (make kernel64)"
+    if shutil.which("grub-mkrescue") is None:
+        return "brak grub-mkrescue"
+    if shutil.which("qemu-system-x86_64") is None:
+        return "brak qemu-system-x86_64"
+    return None

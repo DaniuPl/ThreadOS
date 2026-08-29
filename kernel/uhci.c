@@ -139,10 +139,10 @@ int uhci_port_reset(int port)
 static int run_chain(int count, uint32_t *actlen)
 {
     for (int i = 0; i < count; i++)
-        tds[i].link = (i + 1 < count) ? ((uint32_t)&tds[i + 1] | 0x4)
+        tds[i].link = (i + 1 < count) ? ((uint32_t)(uintptr_t)&tds[i + 1] | 0x4)
                                       : LINK_TERMINATE;
 
-    queue->element = (uint32_t)&tds[0];
+    queue->element = (uint32_t)(uintptr_t)&tds[0];
 
     uint32_t total = 0;
     for (uint32_t spin = 0; spin < 2000000u; spin++) {
@@ -188,7 +188,7 @@ static void fill_td(int i, int pid, int addr, int endpoint, int toggle,
     tds[i].token = (uint32_t)pid | ((uint32_t)addr << 8) |
                    ((uint32_t)endpoint << 15) | ((uint32_t)toggle << 19) |
                    ((uint32_t)((len ? len - 1 : 0x7FF) & 0x7FF) << 21);
-    tds[i].buffer = (uint32_t)buf;
+    tds[i].buffer = (uint32_t)(uintptr_t)buf;
 }
 
 int uhci_control(int addr, int lowspeed, int maxpacket,
@@ -257,7 +257,7 @@ int uhci_interrupt_in(int addr, int lowspeed, int endpoint, int maxpacket,
     if (!armed) {
         fill_td(0, PID_IN, addr, endpoint, toggle ? *toggle : 0, len, data,
                 lowspeed);
-        queue->element = (uint32_t)&tds[0];
+        queue->element = (uint32_t)(uintptr_t)&tds[0];
         armed = 1;
         return 0;                        /* odpowiedz przyjdzie za chwile */
     }
@@ -307,10 +307,10 @@ int uhci_init(void)
         base = 0;
         return 0;
     }
-    frame_list = (uint32_t *)mem;
-    queue = (struct qh *)work;
-    tds = (struct td *)(work + 64);
-    memset((void *)work, 0, PAGE_SIZE);
+    frame_list = (uint32_t *)(uintptr_t)mem;
+    queue = (struct qh *)(uintptr_t)work;
+    tds = (struct td *)(uintptr_t)(work + 64);
+    memset((void *)(uintptr_t)work, 0, PAGE_SIZE);
 
     queue->head = LINK_TERMINATE;
     queue->element = LINK_TERMINATE;
@@ -318,7 +318,7 @@ int uhci_init(void)
     /* Ta sama kolejka w kazdej ramce: kontroler zaglada do niej co
        milisekunde, a my wkladamy tam przesylke, gdy jest co wlozyc */
     for (int i = 0; i < 1024; i++)
-        frame_list[i] = (uint32_t)queue | LINK_QH;
+        frame_list[i] = (uint32_t)(uintptr_t)queue | LINK_QH;
 
     wr32(REG_FLBASE, mem);
     wr16(REG_FRNUM, 0);

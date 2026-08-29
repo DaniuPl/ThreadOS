@@ -55,6 +55,19 @@ void shell_refresh(void)
 {
 }
 
+/* Konsole wirtualne pytaja zadanie, na ktorej ma pisac - tak samo jak
+   w jadrze 32-bitowym. Nazwa jest umowa, reszta sprawa jadra. */
+int task_vc(void)
+{
+    return task64_vc();
+}
+
+/* Wymiana stron pyta jadro, kto ma oddac pamiec na dysk */
+int task_reclaim_page(void)
+{
+    return task64_reclaim_page();
+}
+
 /* --- Pulpit --------------------------------------------------------
  *
  * Pulpit uruchamia aplikacje po nazwie i przejmuje klawiature. Jedno
@@ -64,6 +77,19 @@ void shell_refresh(void)
 int exec_spawn(const char *cmdline)
 {
     return proc64_spawn(cmdline, 0, 1);
+}
+
+/* Klawiatura USB podaje gotowe znaki i zadania przelaczenia konsoli.
+   Dalsza droga jest ta sama, co przy przerwaniu PS/2 - sterownik USB
+   nie musi wiedziec, ze kolejek jest kilka. */
+void keyboard_inject(char c)
+{
+    keyboard64_inject(c);
+}
+
+void keyboard_inject_switch(int vc)
+{
+    keyboard64_inject_switch(vc);
 }
 
 void keyboard_set_override(keyboard_char_handler_t handler)

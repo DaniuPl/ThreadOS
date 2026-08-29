@@ -32,6 +32,9 @@
 #include "proc64.h"
 #include "keyboard64.h"
 #include "shell64.h"
+#include "../kernel/include/acpi.h"
+#include "../kernel/include/usbkbd.h"
+#include "../kernel/include/swap.h"
 #include "fpu64.h"
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
@@ -42,13 +45,6 @@
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
-
-/* Konsole wirtualne pytaja zadanie, na ktorej ma pisac. Konsola jest
-   na razie jedna, wiec wszystko idzie na pierwsza. */
-int task_vc(void)
-{
-    return 0;
-}
 
 /* Watki demonstracyjne: dwa liczace bez konca i jeden, ktory sam sie
    konczy - po to, zeby bylo widac, ze zombie znika z listy. */
@@ -211,8 +207,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     else
         printk("[ !! ] Loader nie dal bufora obrazu - tylko port szeregowy\n");
 
-    if (mb2_rsdp())
+    /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
+       tablice ACPI podaje wtedy wylacznie loader. Same tablice czyta
+       sie pozniej: leza wysoko i trzeba je najpierw dokleic do
+       mapowania, a stronicowania jeszcze tu nie ma. */
+    if (mb2_rsdp()) {
         printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());
+        acpi_set_rsdp(mb2_rsdp());
+    }
 
     /* --- Pamiec ------------------------------------------------- */
     pmm_init(mbi);
@@ -480,6 +482,17 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     task64_dump();
 
+    /* --- Zasilanie ---------------------------------------------- */
+    /* acpi.c przeszlo jak reszta wspolnego kodu: droga do wylaczenia
+       zasilania - RSDP, spis tablic, FADT, obiekt _S5_ w bajtkodzie -
+       nie zalezy od trybu procesora. Zalezy od niego tylko doklejanie
+       tablic do mapowania, i tyle w tym pliku widac o trybie. */
+    if (acpi_init())
+        printk("[ OK ] ACPI: tablice od '%s' (polecenia 'poweroff', "
+               "'reboot')\n", acpi_oem());
+    else
+        printk("[ !! ] ACPI: brak tablic - komputera nie wylaczymy\n");
+
     /* --- Dysk --------------------------------------------------- */
     /* PCI, ATA, AHCI i warstwa blokowa to te same pliki, co w jadrze
        32-bitowym. Sterowniki nie wiedza nic o trybie procesora: gadaja
@@ -493,6 +506,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         int fs = fs_init();
         printk("[ OK ] Dysk %s + PFS %s (%u sektorow)\n",
                blk_name(), fs ? "gotowy" : "NIEDOSTEPNY", blk_sectors());
+        /* Wymiana stron: miejsce rezerwujemy przez system plikow, ale
+           same strony wedruja tam wprost przez warstwe blokowa. Musi
+           byc po fs_init, bo bez systemu plikow nie ma gdzie. */
+        if (fs)
+            swap_init();
     } else {
         printk("[ !! ] Dysk: zaden kontroler nie odpowiedzial\n");
     }
@@ -516,6 +534,13 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     keyboard64_init();
     mouse_init();
     printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12)\n");
+
+    /* Maszyny nowsze niz mniej wiecej 2010 rok nie maja juz zlacza
+       PS/2. Sterownik USB i klasa HID to znowu te same pliki, co
+       w jadrze 32-bitowym: struktury kontrolera musza lezec pod
+       adresem, ktory rozumie on sam, a to w obu trybach znaczy
+       mapowanie identycznosciowe. */
+    usbkbd_init();          /* sam melduje, gdy cos znajdzie */
 
     /* Adres IP bierze sie z sieci, a klient DHCP czeka na odpowiedzi
        serwera - musi wiec chodzic w watku, czyli po schedulerze */

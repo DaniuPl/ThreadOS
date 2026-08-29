@@ -20,10 +20,12 @@
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/printk.h"
+#include "../kernel/include/swap.h"
 
 #define PTE_PRESENT 0x001
 #define PTE_WRITE   0x002
 #define PTE_HUGE    0x080
+#define PTE_ACCESSED 0x020  /* ustawia procesor przy uzyciu strony */
 #define ADDR_MASK   0x000FFFFFFFFFF000ULL
 
 #define HUGE_SIZE   (2u * 1024 * 1024)
@@ -412,15 +414,158 @@ void paging64_free_space(uint64_t space)
             if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
                 continue;
             uint64_t *pt = table_at(pd[i]);
-            for (int j = 0; j < 512; j++)
+            for (int j = 0; j < 512; j++) {
                 if (pt[j] & PTE_PRESENT)
                     pmm_free_frame((uint32_t)(pt[j] & ADDR_MASK));
+                else if (pt[j] & PG_SWAPPED)
+                    swap_free_slot((int)((pt[j] & ADDR_MASK) >> 12));
+            }
             pmm_free_frame((uint32_t)(pd[i] & ADDR_MASK));
         }
         pmm_free_frame((uint32_t)(e & ADDR_MASK));
     }
     pmm_free_frame((uint32_t)((uint64_t)(uintptr_t)pdpt & ADDR_MASK));
     pmm_free_frame((uint32_t)space);
+}
+
+/* --- Wymiana stron na dysk ------------------------------------------
+ *
+ * Wpis strony wyrzuconej na dysk: bez bitu obecnosci, ze znacznikiem
+ * i numerem miejsca w gornych bitach. Procesor takiego wpisu nie
+ * oglada - dla niego to po prostu strona, ktorej nie ma.
+ *
+ * Prawa dostepu jada z nia razem. Nie wolno ich zgadnac przy powrocie:
+ * strona kodu programu jest tylko do odczytu i wykonywalna, a strona
+ * danych odwrotnie. Oddanie wszystkim jednych i tych samych praw konczy
+ * sie tym, ze program po sciagnieciu wlasnego kodu z dysku dostaje
+ * wyjatek przy pierwszej instrukcji - bo kod wrocil z zakazem
+ * wykonywania.
+ */
+static uint64_t swap_pte(int slot, uint64_t prawa)
+{
+    return ((uint64_t)slot << 12) | PG_SWAPPED |
+           (prawa & (PG_WRITE | PG_USER | PG_NX));
+}
+
+/* Wskaznik zegara: gdzie skonczylismy ostatnie szukanie ofiary. Bez
+   niego kazde szukanie zaczynaloby sie od poczatku i wyrzucalo w kolko
+   te same, najnizej lezace strony. */
+static int clock_pd, clock_pt;
+
+/* Wyrzuca na dysk najwyzej 'want' stron z podanej przestrzeni.
+ *
+ * Algorytm drugiej szansy: procesor sam zaznacza w kazdym uzytym wpisie
+ * bit "odwiedzona". Strone z tym bitem zostawiamy, tylko go gasimy -
+ * jesli do nastepnego obchodu nikt jej nie tknie, poleci. Zabieramy
+ * wiec te, ktore naprawde lezaly odlogiem.
+ *
+ * Nie ruszamy stron oddanych na kopiowanie przy zapisie ani ramek
+ * nalezacych do wiecej niz jednej przestrzeni: z nimi wymiana
+ * wymagalaby liczenia wlascicieli takze na dysku.
+ *
+ * Chodzimy wylacznie po gigabajcie programu (PAGING64_USER_PDPT).
+ * Pamiec jadra na dysk nie idzie - a nawet gdyby, to nie ma jej kto
+ * sciagnac z powrotem, bo sciaga ja obsluga bledu strony. */
+int paging64_reclaim_pages(uint64_t space, int want)
+{
+    if (!space || space == (uint64_t)(uintptr_t)pml4)
+        return 0;
+
+    uint64_t *top = (uint64_t *)(uintptr_t)space;
+    if (!(top[0] & PTE_PRESENT))
+        return 0;
+    uint64_t e = table_at(top[0])[PAGING64_USER_PDPT];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return 0;
+    uint64_t *pd = table_at(e);
+    int freed = 0;
+
+    /* Dwa obchody: pierwszy gasi bity "odwiedzona", drugi zabiera */
+    for (int pass = 0; pass < 2 && freed < want; pass++) {
+        for (int n = 0; n < 512 && freed < want; n++) {
+            int i = (clock_pd + n) % 512;
+            if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
+                continue;
+            uint64_t *pt = table_at(pd[i]);
+            /* Wewnatrz tablicy tez zaczynamy tam, gdzie skonczylismy -
+               inaczej kazde szukanie przemiataloby od nowa strony,
+               ktore juz dawno poszly na dysk */
+            int start = (n == 0) ? clock_pt : 0;
+            for (int k = 0; k < 512 && freed < want; k++) {
+                int j = (start + k) % 512;
+                uint64_t w = pt[j];
+                if (!(w & PTE_PRESENT) || !(w & PG_USER) || (w & PG_COW))
+                    continue;
+                uint64_t frame = w & ADDR_MASK;
+                if (pmm_frame_refs((uint32_t)frame) != 1)
+                    continue;
+                if (w & PTE_ACCESSED) {
+                    pt[j] = w & ~(uint64_t)PTE_ACCESSED;   /* druga szansa */
+                    continue;
+                }
+
+                int slot = swap_alloc_slot();
+                if (slot < 0)
+                    goto koniec;              /* plik wymiany pelny */
+                if (swap_write(slot, (const void *)(uintptr_t)frame) < 0) {
+                    swap_free_slot(slot);
+                    goto koniec;
+                }
+                pt[j] = swap_pte(slot, w);
+                pmm_free_frame((uint32_t)frame);
+                clock_pd = i;
+                clock_pt = j + 1;
+                freed++;
+            }
+        }
+        /* Po pierwszym obchodzie wszystkie bity sa juz zgaszone -
+           drugi obchod znajdzie ofiary, o ile w ogole jest co brac */
+    }
+koniec:
+    if (freed && space == (uint64_t)(uintptr_t)root_now())
+        __asm__ volatile("movq %%cr3, %%rax; movq %%rax, %%cr3"
+                         : : : "rax", "memory");
+    return freed;
+}
+
+/* Sciaga z dysku strone, ktora program wlasnie probowal dotknac.
+   Zwraca 1, gdy strona wrocila i mozna wznowic instrukcje. */
+int paging64_swap_in(uint64_t space, uint64_t virt)
+{
+    if (!space)
+        return 0;
+
+    uint64_t *top = (uint64_t *)(uintptr_t)space;
+    uint64_t e = top[(virt >> 39) & 0x1FF];
+    if (!(e & PTE_PRESENT))
+        return 0;
+    e = table_at(e)[(virt >> 30) & 0x1FF];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return 0;
+    e = table_at(e)[(virt >> 21) & 0x1FF];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return 0;
+
+    uint64_t *pt = table_at(e);
+    int i = (int)((virt >> 12) & 0x1FF);
+    uint64_t w = pt[i];
+    if ((w & PTE_PRESENT) || !(w & PG_SWAPPED))
+        return 0;
+
+    /* Adres wycinamy maska: gorne bity wpisu niosa prawa dostepu */
+    int slot = (int)((w & ADDR_MASK) >> 12);
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;                       /* brak pamieci nawet na powrot */
+    if (swap_read(slot, (void *)(uintptr_t)frame) < 0) {
+        pmm_free_frame(frame);
+        return 0;
+    }
+    pt[i] = (uint64_t)frame | PTE_PRESENT |
+            (w & (PG_WRITE | PG_USER | PG_NX));
+    swap_free_slot(slot);
+    invlpg(virt);
+    return 1;
 }
 
 /* Doklejenie do mapowania obszaru lezacego poza pamiecia.

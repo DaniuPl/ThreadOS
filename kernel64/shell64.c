@@ -27,6 +27,9 @@
 #include "../kernel/include/pit.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/acpi.h"
+#include "../kernel/include/swap.h"
+#include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
@@ -46,8 +49,6 @@ static int starts_with(const char *s, const char *prefix)
     return 1;
 }
 
-static char line[LINE_MAX];
-static int line_len;
 
 static void prompt(void)
 {
@@ -61,7 +62,8 @@ static void cmd_help(void)
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
     printk("           rm <plik>, uptime, run <program>, clear,\n");
-    printk("           ifconfig, arp, ping <adres>, gfx, pulpit\n");
+    printk("           ifconfig, arp, ping <adres>, gfx, pulpit,\n");
+    printk("           reboot, poweroff\n");
 }
 
 static void cmd_mem(void)
@@ -73,6 +75,14 @@ static void cmd_mem(void)
     printk("Stronicowanie: identycznosciowo %u MiB, rozdzielonych stron %u\n",
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_cow_splits());
+
+    uint32_t wuz, wcal, wout, win;
+    swap_stats(&wuz, &wcal, &wout, &win);
+    if (wcal)
+        printk("Wymiana: %u/%u stron na dysku "
+               "(wyrzuconych %u, sciagnietych %u)\n", wuz, wcal, wout, win);
+    else
+        printk("Wymiana: brak pliku wymiany\n");
 }
 
 /* Zapis i odczyt sektora - jedyny sposob, zeby sprawdzic dysk
@@ -246,7 +256,7 @@ static void cmd_uptime(void)
 }
 
 /* Argument polecenia: pierwsze slowo za nazwa, bez spacji przed nim */
-static const char *argument(int cmd_len)
+static const char *argument(const char *line, int cmd_len)
 {
     int i = cmd_len;
     while (line[i] == ' ')
@@ -254,7 +264,7 @@ static const char *argument(int cmd_len)
     return line[i] ? &line[i] : (const char *)0;
 }
 
-static void execute(void)
+static void execute(const char *line)
 {
     if (!line[0])
         return;
@@ -272,7 +282,7 @@ static void execute(void)
     } else if (!strcmp(line, "pwd")) {
         cmd_pwd();
     } else if (starts_with(line, "cd ")) {
-        const char *kat = argument(3);
+        const char *kat = argument(line, 3);
         int nowy = FS_ROOT;
         if (!kat)
             printk("cd: podaj katalog\n");
@@ -281,7 +291,7 @@ static void execute(void)
         else
             task64_set_cwd(nowy);
     } else if (starts_with(line, "mkdir ")) {
-        const char *kat = argument(6);
+        const char *kat = argument(line, 6);
         if (!kat)
             printk("mkdir: podaj nazwe\n");
         else if (fs_mkdir(task64_cwd(), kat) < 0)
@@ -289,7 +299,7 @@ static void execute(void)
         else
             printk("mkdir: '%s' zalozony\n", kat);
     } else if (starts_with(line, "rm ")) {
-        const char *plik = argument(3);
+        const char *plik = argument(line, 3);
         if (!plik)
             printk("rm: podaj nazwe\n");
         else if (fs_unlink(task64_cwd(), plik) < 0)
@@ -297,13 +307,13 @@ static void execute(void)
         else
             printk("rm: '%s' usuniety\n", plik);
     } else if (starts_with(line, "cat ")) {
-        const char *nazwa = argument(4);
+        const char *nazwa = argument(line, 4);
         if (nazwa)
             cmd_cat(nazwa);
         else
             printk("cat: podaj nazwe pliku\n");
     } else if (starts_with(line, "write ")) {
-        char *reszta = (char *)argument(6);
+        char *reszta = (char *)argument(line, 6);
         if (reszta)
             cmd_write(reszta);
         else
@@ -321,7 +331,7 @@ static void execute(void)
     } else if (!strcmp(line, "arp")) {
         net_arp_dump();
     } else if (starts_with(line, "ping ")) {
-        const char *adres = argument(5);
+        const char *adres = argument(line, 5);
         uint32_t ip = 0;
         if (!adres)
             printk("ping: podaj adres\n");
@@ -335,8 +345,19 @@ static void execute(void)
         cmd_uptime();
     } else if (!strcmp(line, "clear")) {
         vga_clear();
+    } else if (!strcmp(line, "reboot")) {
+        printk("Restart...\n");
+        /* Gdy tablice ACPI nie maja rejestru resetu, zostaje sposob
+           starszy od nich: impuls przez kontroler klawiatury. */
+        if (!acpi_reboot())
+            outb(0x64, 0xFE);
+    } else if (!strcmp(line, "poweroff")) {
+        printk("Wylaczanie zasilania...\n");
+        acpi_poweroff();
+        printk("poweroff: nie udalo sie - "
+               "mozna wylaczyc zasilanie recznie\n");
     } else if (starts_with(line, "run ")) {
-        const char *name = argument(4);
+        const char *name = argument(line, 4);
         if (!name) {
             printk("run: podaj nazwe programu (zobacz 'ls')\n");
             return;
@@ -402,10 +423,24 @@ static void execute(void)
 
 static void shell_thread(void *arg)
 {
-    (void)arg;
+    int vc = (int)(long)arg;
+    task64_set_vc(vc);          /* od teraz piszemy na swojej konsoli */
 
-    printk("\n");
-    cmd_help();
+    /* Wiersz polecenia jest wlasnoscia watku, nie jadra: kazda konsola
+       ma wlasny shell, wiec kazdy ma i wlasny bufor - na wlasnym stosie,
+       bez tablic indeksowanych numerem konsoli. */
+    char line[LINE_MAX];
+    int line_len = 0;
+
+    /* Pierwsza konsola dostaje pelne powitanie ze spisem polecen,
+       pozostale krotka notke: cztery spisy pod rzad na porcie
+       szeregowym nikomu nie sa potrzebne. */
+    if (vc == 0) {
+        printk("\n");
+        cmd_help();
+    } else {
+        printk("ProtonOS 64 - konsola %d. Alt+F1..F4 przelacza.\n", vc + 1);
+    }
     prompt();
 
     for (;;) {
@@ -414,7 +449,7 @@ static void shell_thread(void *arg)
         if (c == '\n') {
             printk("\n");
             line[line_len] = '\0';
-            execute();
+            execute(line);
             line_len = 0;
             prompt();
         } else if (c == '\b') {
@@ -432,5 +467,6 @@ static void shell_thread(void *arg)
 
 void shell64_start(void)
 {
-    task64_create("shell", shell_thread, 0);
+    for (int vc = 0; vc < CONSOLE_COUNT; vc++)
+        task64_create("shell", shell_thread, (void *)(long)vc);
 }

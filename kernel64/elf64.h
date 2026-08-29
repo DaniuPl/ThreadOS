@@ -19,9 +19,16 @@
 
 /* Przestrzen uzytkownika: od 1 GiB w gore. Stos siedzi na jej szczycie
    i rosnie w dol, wiec segmenty programu musza sie skonczyc pod nim -
-   inaczej pierwsze glebsze wywolanie zadeptaloby wlasny kod. */
+   inaczej pierwsze glebsze wywolanie zadeptaloby wlasny kod.
+
+   Szczyt stoi w polowie gigabajta przydzielonego programowi (wpis
+   PAGING64_USER_PDPT), a nie tuz nad obrazem: pod nim zostaje wtedy
+   pol gigabajta na sterte. Osiem megabajtow, ktore bylo tu wczesniej,
+   wystarczalo, dopoki nie bylo wymiany stron - a wymiana ma sens
+   dopiero wtedy, gdy program moze poprosic o wiecej pamieci, niz
+   maszyna ma RAM-u. */
 #define USER64_BASE        0x0000000040000000ULL
-#define USER64_STACK_TOP   0x0000000040800000ULL
+#define USER64_STACK_TOP   0x0000000060000000ULL
 #define USER64_STACK_PAGES 4
 #define USER64_TOP         (USER64_STACK_TOP - USER64_STACK_PAGES * 4096ULL)
 

@@ -1166,3 +1166,70 @@ sprawdzane przez `make test`.
       **poprawnie** od początku - tam komentarz wprost mówi "tak, jak
       zastaje każda funkcja wołana instrukcją call" - a start procesu
       nie. Jedna linia w `build_args`, ta sama zasada w obu miejscach
+- [x] **ACPI, konsole wirtualne, klawiatura USB i wymiana stron
+      w jądrze 64-bitowym** - cztery rzeczy, które 32-bitowe jądro
+      miało od dawna, przeszły jedna po drugiej. Trzy z nich prawie za
+      darmo, czwarta pokazała błąd, którego 32-bitowa wersja nie mogła
+      pokazać.
+
+      **ACPI** to `kernel/acpi.c` bez zmian w logice: droga do
+      wyłączenia zasilania - RSDP, spis tablic, FADT, obiekt `_S5_`
+      w bajtkodzie AML - nie zależy od trybu procesora. Zależy od niego
+      tylko doklejanie tablic do mapowania, więc plik dostał ten sam
+      wzorzec makr, co `initrd.c` i `video.c`, plus jawne rzutowania
+      adresów na wskaźniki. `poweroff` gasi maszynę, `reboot` ją
+      resetuje - i tego drugiego nie da się sprawdzić inaczej niż tym,
+      że QEMU (z `-no-reboot`) po prostu znika.
+
+      **Konsole wirtualne** siedziały już w `kernel/vga.c`, wspólnym od
+      początku - jądro 64-bitowe po prostu miało tylko jedną, bo
+      `task_vc()` zwracało zero na sztywno. Doszła więc własność
+      zadania (konsola dziedziczy się po rodzicu, tak samo jak katalog
+      roboczy), osobna kolejka klawiszy na każdą konsolę i Alt+F1..F4
+      w obsłudze przerwania. Shell przy okazji przestał trzymać wiersz
+      polecenia w zmiennej globalnej: cztery shelle to cztery wątki,
+      a wiersz jest własnością wątku i leży na jego stosie.
+
+      **Klawiatura USB** wymagała w `uhci.c` tego samego, co wcześniej
+      karta sieciowa: kontroler adresuje pamięć 32 bitami, wskaźnik ma
+      tu osiem bajtów, więc każdy adres struktury idzie do niego przez
+      jawne rzutowanie. `usbkbd.c` przeszedł bez zmian.
+
+      **Wymiana stron** to jedyna pozycja z prawdziwą nową robotą po
+      stronie trybu długiego. Magazyn (`kernel/swap.c`) jest wspólny,
+      ale polityka wyrzucania musiała powstać od nowa: obchód czterech
+      poziomów tablic zamiast dwóch, algorytm drugiej szansy na bicie
+      "odwiedzona" i wpis strony leżącej na dysku - bez bitu obecności,
+      więc procesor go nie ogląda, a numer miejsca siedzi w górnych
+      bitach.
+
+      I tu wyszedł błąd wart zapamiętania. Pierwsza wersja wpisu na
+      dysk niosła sam numer miejsca, a przy powrocie strona dostawała
+      prawa "zapisywalna, bez wykonywania" - bo takie ma większość
+      stron. Program padał zaraz po starcie z wyjątkiem 14 o kodzie
+      `0x15`. Przeczytałem to najpierw jako **piętnaście dziesiętnie**
+      i szukałem naruszenia bitu zarezerwowanego, którego tam nie było;
+      szesnastkowo to jest obecna strona, dostęp z pierścienia 3 i
+      **pobranie instrukcji**. Wyrzucona została strona *kodu*, a
+      wróciła z zakazem wykonywania. Prawa dostępu jadą więc teraz na
+      dysk razem ze stroną - i to jest właściwa zasada, nie łatka:
+      strona kodu jest tylko do odczytu i wykonywalna, strona danych
+      dokładnie odwrotnie, a jądro nie ma prawa zgadywać, która jest
+      która, skoro samo je wcześniej rozdało.
+
+      Przy okazji przestrzeń programu urosła z ośmiu megabajtów do pół
+      gigabajta - wymiana ma sens dopiero wtedy, gdy program może
+      poprosić o więcej pamięci, niż maszyna ma RAM-u. Test bierze 18
+      MiB na maszynie z 16 MiB i sprawdza dwie rzeczy: że każda strona
+      wróciła z dysku bez zmiany choć jednego bajtu, i że wymiana
+      **naprawdę ruszyła** - bo bez tej drugiej asercji przeszedłby
+      także test, w którym wszystko zmieściło się w pamięci.
+
+      Testów przybyło pięć osobnych grup: `gui64`, `acpi64`,
+      `konsole64`, `usbkbd64`, `swap64`. Wszystkie 64-bitowe czytają
+      teraz ekran tak, jak widzi go człowiek: GRUB, widząc w nagłówku
+      jądra żądanie trybu obrazu, zawsze daje grafikę, więc pamięć
+      znaków spod `0xB8000` jest pusta, a konsola rysuje się sama
+      czcionką 8x8. Test rozpoznaje te glify tą samą tablicą, z której
+      korzysta jądro - jedno źródło prawdy, i odczyt z tego, co
+      naprawdę widać.

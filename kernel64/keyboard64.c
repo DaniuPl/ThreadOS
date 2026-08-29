@@ -4,9 +4,13 @@
  * (kernel/kbdmap.c) - tutaj zostaje tylko to, co zalezy od systemu:
  * odebranie przerwania i zdecydowanie, dokad trafi gotowy znak.
  *
- * Konsola jest na razie jedna, wiec decyzja jest krotka: znak idzie do
- * shella. Przerwanie tylko wklada go do kolejki i budzi czekajacego -
- * w obsludze przerwania nie ma czego drukowac ani na co czekac.
+ * Konsol jest cztery i kazda ma wlasna kolejke znakow. Klawisz trafia
+ * do tej, na ktora akurat patrzymy, a czyta z niej ten, kto na niej
+ * pisze - program uruchomiony na drugiej konsoli czeka wiec na swoje
+ * klawisze i nie zabiera cudzych. Alt+F1..F4 przelacza obraz.
+ *
+ * Przerwanie tylko wklada znak do kolejki: w jego obsludze nie ma czego
+ * drukowac ani na co czekac.
  */
 
 #include <stdint.h>
@@ -16,17 +20,34 @@
 #include "../kernel/include/io.h"
 #include "../kernel/include/isr.h"
 #include "../kernel/include/pic.h"
+#include "../kernel/include/vga.h"
 #include "signal64.h"
 
 #define KBD_DATA_PORT 0x60
 #define KBD_BUF_SIZE  128
 
-static char buf[KBD_BUF_SIZE];
-static uint32_t head, tail;
+/* Jedna kolejka na konsole. Kto dostanie Ctrl+C, tez jest sprawa
+   konsoli: shell ustawia to na czas, w ktorym czeka na swoje dziecko -
+   poza tym czasem przerywac nie ma kogo. */
+struct kolejka {
+    char buf[KBD_BUF_SIZE];
+    uint32_t head, tail;
+    int intr_target;
+};
+static struct kolejka kolejki[CONSOLE_COUNT];
+static int kolejki_gotowe;
 
-/* Kto dostanie Ctrl+C. Shell ustawia to na czas, w ktorym czeka na
-   swoje dziecko - poza tym czasem przerywac nie ma kogo. */
-static int intr_target = -1;
+static struct kolejka *konsola(int n)
+{
+    if (!kolejki_gotowe) {              /* -1 zamiast zera dla celu Ctrl+C */
+        for (int i = 0; i < CONSOLE_COUNT; i++)
+            kolejki[i].intr_target = -1;
+        kolejki_gotowe = 1;
+    }
+    if (n < 0 || n >= CONSOLE_COUNT)
+        n = 0;
+    return &kolejki[n];
+}
 
 /* Pulpit dziala w trybie graficznym, gdzie konsola tekstowa nie ma
    sensu - przechwytuje wiec wszystkie klawisze, zanim trafia do
@@ -38,9 +59,46 @@ void keyboard64_set_override(void (*handler)(char c))
     override = handler;
 }
 
+/* Cel Ctrl+C ustawia shell tej konsoli, na ktorej sam pisze */
 void keyboard64_set_intr_target(int id)
 {
-    intr_target = id;
+    konsola(task64_vc())->intr_target = id;
+}
+
+/* Doreczenie gotowego znaku. Wolane z przerwania klawiatury i z watku
+   klawiatury USB - droga znaku jest w obu przypadkach ta sama. */
+static void dorecz(char c)
+{
+    if (override) {                      /* pulpit bierze wszystko */
+        override(c);
+        return;
+    }
+
+    /* Klawisz idzie na konsole, na ktora patrzymy - to ona jest pod
+       palcami piszacego */
+    struct kolejka *k = konsola(console_active());
+
+    /* Ctrl+C nie jest znakiem do przeczytania, tylko zadaniem
+       przerwania programu, ktory trzyma konsole */
+    if (c == KEY_INTR) {
+        /* Nie do shella, ktory czeka, tylko do tego, co na koncu
+           lancucha naprawde dziala */
+        if (k->intr_target >= 0)
+            task64_signal(task64_foreground(k->intr_target), SIGINT);
+        return;
+    }
+
+    if (k->head - k->tail < KBD_BUF_SIZE)
+        k->buf[k->head++ & (KBD_BUF_SIZE - 1)] = c;
+}
+
+/* Przelaczenie obrazu na inna konsole. Pulpit trzyma caly ekran, wiec
+   przy nim przelaczac nie ma czego. */
+static void przelacz(int vc)
+{
+    if (override)
+        return;
+    console_switch(vc);
 }
 
 static void keyboard_irq(struct regs *r)
@@ -49,26 +107,33 @@ static void keyboard_irq(struct regs *r)
 
     char c = 0;
     int fkey = -1;
-    if (kbdmap_feed(inb(KBD_DATA_PORT), &c, &fkey) != KBD_CHAR)
-        return;
+    int co = kbdmap_feed(inb(KBD_DATA_PORT), &c, &fkey);
 
-    /* Ctrl+C nie jest znakiem do przeczytania, tylko zadaniem
-       przerwania programu, ktory trzyma konsole */
-    if (c == KEY_INTR) {
-        /* Nie do shella, ktory czeka, tylko do tego, co na koncu
-           lancucha naprawde dziala */
-        if (intr_target >= 0)
-            task64_signal(task64_foreground(intr_target), SIGINT);
+    if (co == KBD_FKEY) {
+        if (fkey >= 0 && fkey < CONSOLE_COUNT)
+            przelacz(fkey);
         return;
     }
-
-    if (override) {
-        override(c);
+    if (co != KBD_CHAR)
         return;
-    }
 
-    if (head - tail < KBD_BUF_SIZE)
-        buf[head++ & (KBD_BUF_SIZE - 1)] = c;
+    dorecz(c);
+}
+
+/* Znak z innego zrodla niz PS/2 (klawiatura USB). Wolane z watku, wiec
+   sekcje krytyczna zamykamy sami. */
+void keyboard64_inject(char c)
+{
+    irqflags_t flags = irq_save();
+    dorecz(c);
+    irq_restore(flags);
+}
+
+void keyboard64_inject_switch(int vc)
+{
+    irqflags_t flags = irq_save();
+    przelacz(vc);
+    irq_restore(flags);
 }
 
 /* Czeka na klawisz. Odpytujemy z uspieniem zamiast blokowac zadanie:
@@ -78,8 +143,9 @@ char keyboard64_getchar(void)
 {
     for (;;) {
         irqflags_t flags = irq_save();
-        if (tail != head) {
-            char c = buf[tail++ & (KBD_BUF_SIZE - 1)];
+        struct kolejka *k = konsola(task64_vc());
+        if (k->tail != k->head) {
+            char c = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
             irq_restore(flags);
             return c;
         }
@@ -104,9 +170,13 @@ int keyboard64_read(char *out, uint32_t len)
 
     for (;;) {
         irqflags_t flags = irq_save();
+        /* Program czyta z WLASNEJ konsoli, nie z tej, na ktora akurat
+           patrzymy - inaczej przelaczenie ekranu przekierowywaloby
+           klawiature w srodku czyjegos odczytu */
+        struct kolejka *k = konsola(task64_vc());
         uint32_t got = 0;
-        while (tail != head && got < len)
-            out[got++] = buf[tail++ & (KBD_BUF_SIZE - 1)];
+        while (k->tail != k->head && got < len)
+            out[got++] = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
         irq_restore(flags);
 
         if (got)
@@ -119,7 +189,8 @@ int keyboard64_read(char *out, uint32_t len)
 
 int keyboard64_pending(void)
 {
-    return tail != head;
+    struct kolejka *k = konsola(task64_vc());
+    return k->tail != k->head;
 }
 
 void keyboard64_init(void)
