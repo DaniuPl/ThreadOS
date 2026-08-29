@@ -53,6 +53,7 @@
 #define SYS64_WIN_POLL   35
 #define SYS64_SHM        36
 #define SYS64_TIME       37
+#define SYS64_SYSINFO    38
 
 #define NAME_MAX64 63
 
@@ -437,6 +438,19 @@ struct czas64 {
 static inline int64_t sys_time(struct czas64 *t)
 {
     return syscall64(SYS64_TIME, (int64_t)(uintptr_t)t, 0);
+}
+
+/* Stan maszyny: ile pamieci jest, ile zajete, jak dlugo dziala.
+   Uklad musi zgadzac sie z tym w kernel64/syscall64.c. */
+struct sysinfo64 {
+    uint32_t ram_kib;
+    uint32_t uzyte_kib;
+    uint32_t uptime_s;
+};
+
+static inline int64_t sys_sysinfo(struct sysinfo64 *out)
+{
+    return syscall64(SYS64_SYSINFO, (int64_t)(uintptr_t)out, 0);
 }
 
 /* Pamiec wspoldzielona po kluczu.

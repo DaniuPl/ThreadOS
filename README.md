@@ -85,9 +85,8 @@ Roughly in the order I would do them.
 
 **64-bit kernel — catching up with the 32-bit one**
 
-- The last three desktop icons: a resource monitor, a terminal in a
-  window, and a browser. The first two are small; the browser needs
-  TLS and the HTTP client first.
+- The last desktop icon: a browser. It needs TLS and the HTTP client
+  first.
 - TLS and the HTTP client in ring 3: the crypto already lives in user
   space, so this is mostly a matter of building those programs for
   64-bit.

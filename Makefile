@@ -241,7 +241,9 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/shmpisz64.elf \
                $(BUILD)/user64/shmczytaj64.elf \
                $(BUILD)/user64/gclock64.elf \
-               $(BUILD)/user64/gfiles64.elf
+               $(BUILD)/user64/gfiles64.elf \
+               $(BUILD)/user64/gmon64.elf \
+               $(BUILD)/user64/gterm64.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -277,7 +279,9 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    shmpisz64=$(BUILD)/user64/shmpisz64.elf \
 	    shmczytaj64=$(BUILD)/user64/shmczytaj64.elf \
 	    gclock=$(BUILD)/user64/gclock64.elf \
-	    gfiles=$(BUILD)/user64/gfiles64.elf
+	    gfiles=$(BUILD)/user64/gfiles64.elf \
+	    gmon=$(BUILD)/user64/gmon64.elf \
+	    gterm=$(BUILD)/user64/gterm64.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

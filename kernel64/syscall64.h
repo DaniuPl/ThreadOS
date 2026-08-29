@@ -52,6 +52,9 @@
 /* Czas z zegara CMOS: a1=&struct czas -> 0 albo -1 */
 #define SYS64_TIME       37
 
+/* Stan maszyny dla programu: a1=&{ram_kib, uzyte_kib, uptime_s} */
+#define SYS64_SYSINFO    38
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

@@ -1310,3 +1310,24 @@ sprawdzane przez `make test`.
       koniec katalogu i okno pokazywało "(pusto)". Sąsiedztwo nazw nie
       jest żadną wskazówką co do konwencji zwrotu; trzeba ją
       przeczytać, za każdym razem.
+- [x] **Monitor zasobów i terminal w oknie (jądro 64-bitowe)** - piąta
+      i szósta aplikacja graficzna, a przy okazji wywołanie
+      `SYS64_SYSINFO`: ile pamięci jest, ile zajęte, jak długo maszyna
+      działa. Nic z tego nie jest tajemnicą - liczby opisują maszynę,
+      a nie cudze procesy - więc program z pierścienia 3 dostaje je bez
+      żadnych uprawnień.
+
+      `gterm64` jest tu najciekawszy, bo nie ma w nim ani jednej rzeczy,
+      której jądro nie umiałoby wcześniej, a jest wszystko naraz:
+      klawiatura przez zdarzenia okna, `fork`, `exec`, przekierowanie
+      wyjścia przez `dup2` do pliku, czekanie na dziecko, odczyt pliku
+      i rysowanie. Terminal jest zwykłym programem i o kompozytorze nie
+      wie nic poza czterema wywołaniami okien - a jednak z tych
+      klocków wychodzi powłoka w okienku.
+
+      Kompozytor trzyma najwyżej sześć okien, a dwa zajmuje jądro, więc
+      pięć aplikacji naraz się nie mieści - test dostał drugi rozruch
+      i to jest właściwa odpowiedź, nie podnoszenie limitu.
+
+      Została jedna martwa ikona: Web. Do niej trzeba najpierw TLS
+      i klienta HTTP w pierścieniu 3.

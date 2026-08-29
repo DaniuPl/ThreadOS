@@ -666,6 +666,27 @@ static void handle(struct regs *r)
     case SYS64_SHM:
         r->rax = proc64_shm((int)a1, a2);
         return;
+    case SYS64_SYSINFO: {
+        /* To samo, co pokazuje 'mem' i 'uptime' - tyle ze programowi.
+           Nic tu nie jest tajemnica: liczby opisuja maszyne, a nie
+           cudze procesy. */
+        struct {
+            uint32_t ram_kib;
+            uint32_t uzyte_kib;
+            uint32_t uptime_s;
+        } info;
+
+        if (!paging64_user_range(a1, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        info.ram_kib = pmm_ram_kib();
+        info.uzyte_kib = pmm_used_frames() * 4;
+        info.uptime_s = pit_ticks() / 100;
+        *(typeof(info) *)(uintptr_t)a1 = info;
+        r->rax = 0;
+        return;
+    }
     case SYS64_TIME: {
         struct rtc_time t;
         if (!paging64_user_range(a1, sizeof(t))) {

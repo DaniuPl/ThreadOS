@@ -254,6 +254,97 @@ def main():
                   all(abs(tlo[i] - (0, 130, 162)[i]) <= 40 for i in range(3)))
         finally:
             q.close()
+        # --- Drugi rozruch: monitor i terminal ---
+        # Kompozytor trzyma najwyzej szesc okien, a dwa zajmuje jadro -
+        # piec aplikacji naraz sie nie zmiesci, wiec te dwie dostaja
+        # wlasna maszyne
+        print("--- monitor zasobow i terminal w oknie ---")
+        slog2 = tempfile.mktemp(suffix=".log")
+        q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
+                  sata=True, qemu="qemu-system-x86_64")
+        try:
+            q2.wait_serial("proton64>", timeout=60)
+            q2.type_line("pulpit")
+            q2.wait_serial("Pulpit startuje", timeout=30)
+            check("pulpit wstaje po raz drugi", q2.wait_desktop(30))
+
+            # Ikona 'Monitor' pod (8,140)
+            q2.mouse_home()
+            q2.mouse_goto(24, 152)
+            q2.mouse_click()
+            q2.mouse_goto(400, 300)
+
+            mx, my = tresc(2)
+            # Pasek zajetosci pamieci: czerwone tlo, niebieska czesc
+            # uzyta. Obie barwy naraz znacza, ze liczby doszly i ze
+            # nie sa ani zerem, ani caloscia.
+            czerwony = q2.wait_pixel(mx + 150, my + 52, CZERWONY, timeout=20)
+            niebieski = q2.wait_pixel(mx + 6, my + 52, NIEBIESKI, timeout=5)
+            check("ikona 'Monitor' uruchamia wskaznik zasobow "
+                  "(pasek pamieci)", czerwony and niebieski)
+
+            # Uptime rosnie: okno zyje, a nie pokazuje jednego zdjecia
+            def pole_uptime(fun):
+                return [fun(mx + 96 + dx, my + 28 + dy)
+                        for dy in range(8) for dx in range(40)]
+
+            _, _, am1 = q2.screen_raw()
+            u1 = pole_uptime(am1)
+            time.sleep(2.5)
+            _, _, am2 = q2.screen_raw()
+            check("monitor jest zywy (uptime w oknie rosnie)",
+                  pole_uptime(am2) != u1)
+
+            # --- Terminal: klawiatura, fork, exec, dup2, plik ---
+            q2.mouse_home()
+            q2.mouse_goto(24, 192)          # ikona 'Term' pod (8,180)
+            q2.mouse_click()
+            q2.mouse_goto(400, 300)
+
+            tx, ty = tresc(3)
+            # Znak zachety '>' na zielono na dole okna (240x150).
+            # Liczymy piksele w calej komorce znaku zamiast celowac
+            # w jeden - ksztalt glifu to nie jest rzecz do zgadywania.
+            zachety = 0
+            koniec = time.time() + 20
+            while time.time() < koniec:
+                _, _, ah = q2.screen_raw()
+                zachety = sum(1 for dy in range(8) for dx in range(8)
+                              if ah(tx + 4 + dx, ty + 138 + dy) == ZIELONY)
+                if zachety > 3:
+                    break
+                time.sleep(0.5)
+            check("ikona 'Term' uruchamia terminal w oknie "
+                  "(znak zachety: %d pikseli)" % zachety, zachety > 3)
+
+            # Okno terminala ma fokus zaraz po powstaniu - wpisujemy
+            # polecenie i patrzymy, czy jego wyjscie pojawi sie
+            # w oknie. Idzie przez plik: fork, dup2, exec, wait.
+            def pole_wyniku(fun):
+                return sum(1 for dy in range(40) for dx in range(200)
+                           if fun(tx + 4 + dx, ty + 4 + dy) == BIALY)
+
+            _, _, at1 = q2.screen_raw()
+            pusto = pole_wyniku(at1)
+            for znak in "uls64":
+                q2.sendkey(znak)
+                time.sleep(0.15)
+            q2.sendkey("ret")
+
+            wypisal = 0
+            koniec = time.time() + 25
+            while time.time() < koniec:
+                _, _, at2 = q2.screen_raw()
+                wypisal = pole_wyniku(at2)
+                if wypisal > pusto + 100:
+                    break
+                time.sleep(0.5)
+            check("polecenie wpisane w terminalu wypisuje wynik w oknie "
+                  "(%d bialych pikseli)" % wypisal, wypisal > pusto + 100)
+        finally:
+            q2.close()
+            if os.path.exists(slog2):
+                os.unlink(slog2)
     finally:
         shutil.rmtree(d, ignore_errors=True)
         for f in (iso, slog, disk):
