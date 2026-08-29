@@ -397,7 +397,7 @@ class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, usbkbd=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None):
+                 uefi=None, nic="rtl8139"):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # Jadro 64-bitowe potrzebuje procesora z trybem dlugim, a
@@ -415,7 +415,11 @@ class Qemu:
                "-netdev",
                "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:{hostfwd_port}"
                                if hostfwd_port else ""),
-               "-device", "rtl8139,netdev=n0",
+               # Karta sieciowa: domyslnie RTL8139, ale system umie tez
+               # e1000 - i to jest jedyna roznica w wywolaniu QEMU,
+               # bo o tym, ktora karta siedzi w gniezdzie, decyduje
+               # warstwa netdev, a nie kod sieciowy
+               "-device", nic + ",netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]

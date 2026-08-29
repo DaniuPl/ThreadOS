@@ -13,7 +13,7 @@
  */
 
 #include "include/net.h"
-#include "include/rtl8139.h"
+#include "include/netdev.h"
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/io.h"
@@ -277,7 +277,7 @@ static const uint8_t *arp_resolve(uint32_t ip);
 static int eth_header(uint8_t *frame, const uint8_t *dst_mac, uint16_t type)
 {
     memcpy(frame, dst_mac, 6);
-    memcpy(frame + 6, rtl8139_mac(), 6);
+    memcpy(frame + 6, netdev_mac(), 6);
     put16(frame + 12, type);
     return ETH_HDR_LEN;
 }
@@ -294,12 +294,12 @@ static void arp_send(uint16_t op, uint32_t target_ip, const uint8_t *target_mac)
     a[4] = 6;
     a[5] = 4;
     put16(a + 6, op);
-    memcpy(a + 8, rtl8139_mac(), 6);
+    memcpy(a + 8, netdev_mac(), 6);
     put32(a + 14, my_ip);
     memcpy(a + 18, op == ARP_REQUEST ? bcast_mac : target_mac, 6);
     put32(a + 24, target_ip);
 
-    rtl8139_send(frame, sizeof(frame));
+    netdev_send(frame, sizeof(frame));
 }
 
 /* Sklada i wysyla pakiet IPv4 z gotowa zawartoscia (payload).
@@ -336,7 +336,7 @@ static int ip_send_from(uint32_t src_ip, uint32_t dst_ip,
     put16(ip + 10, checksum(ip, 20));
 
     memcpy(ip + 20, payload, payload_len);
-    int ret = rtl8139_send(tx_frame, (uint16_t)(ETH_HDR_LEN + 20 + payload_len));
+    int ret = netdev_send(tx_frame, (uint16_t)(ETH_HDR_LEN + 20 + payload_len));
 
     irq_restore(flags);
     return ret;
@@ -748,7 +748,7 @@ static const uint8_t *arp_resolve(uint32_t ip)
 
 void net_ping(uint32_t ip, int count)
 {
-    if (!rtl8139_present()) {
+    if (!netdev_present()) {
         printk("ping: brak karty sieciowej\n");
         return;
     }
@@ -825,12 +825,13 @@ void net_ping(uint32_t ip, int count)
 
 void net_ifconfig(void)
 {
-    if (!rtl8139_present()) {
-        printk("brak karty sieciowej (QEMU: -device rtl8139)\n");
+    if (!netdev_present()) {
+        printk("brak karty sieciowej (QEMU: -device e1000 albo rtl8139)\n");
         return;
     }
-    const uint8_t *m = rtl8139_mac();
-    printk("eth0  MAC %x:%x:%x:%x:%x:%x\n", m[0], m[1], m[2], m[3], m[4], m[5]);
+    const uint8_t *m = netdev_mac();
+    printk("eth0  %s, MAC %x:%x:%x:%x:%x:%x\n", netdev_name(),
+           m[0], m[1], m[2], m[3], m[4], m[5]);
     if (!my_ip) {
         printk("      brak adresu IP - konfiguracja przez DHCP w toku\n");
         return;
@@ -844,13 +845,13 @@ void net_ifconfig(void)
     printk("  DNS ");
     net_print_ip(my_dns);
     printk("\n      RX %u pakietow, TX %u pakietow, odrzucone %u+%u\n",
-           rtl8139_rx_packets(), rtl8139_tx_packets(), rx_dropped,
+           netdev_rx_packets(), netdev_tx_packets(), rx_dropped,
            udp_dropped);
 }
 
 int net_init(void)
 {
-    if (!rtl8139_init())
+    if (!netdev_init())
         return 0;
     return 1;
 }

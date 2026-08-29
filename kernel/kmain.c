@@ -27,7 +27,7 @@
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
-#include "include/rtl8139.h"
+#include "include/netdev.h"
 #include "include/dhcp.h"
 #include "include/tcp.h"
 
@@ -236,9 +236,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     int has_net = net_init();
     if (has_net) {
-        const uint8_t *m = rtl8139_mac();
-        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x "
-               "(komendy 'ifconfig', 'ping', 'dhcp')\n",
+        const uint8_t *m = netdev_mac();
+        printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x "
+               "(komendy 'ifconfig', 'ping', 'dhcp')\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
     }
 

@@ -22,7 +22,7 @@ Shared by both kernels (same files, compiled twice):
 | Storage | ATA PIO and AHCI (SATA, DMA) behind one block layer |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
-| Network | RTL8139, ARP, ICMP, UDP, DHCP, TCP, DNS |
+| Network | RTL8139 and e1000 behind one netdev layer; ARP, ICMP, UDP, DHCP, TCP, DNS |
 | Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 
@@ -99,8 +99,8 @@ ground for both.
 - More than one CPU: APIC, per-CPU state, real locking. This is the
   largest single item and it touches everything.
 - Preemption inside the kernel, which SMP will force anyway.
-- Newer hardware: virtio-net or e1000, NVMe, xHCI. The RTL8139 and
-  AHCI drivers exist mainly because QEMU offers them.
+- Newer hardware: NVMe and xHCI. Storage still ends at AHCI and USB
+  at UHCI.
 
 **Infrastructure**
 

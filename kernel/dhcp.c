@@ -13,7 +13,7 @@
 
 #include "include/dhcp.h"
 #include "include/net.h"
-#include "include/rtl8139.h"
+#include "include/netdev.h"
 #include "include/task.h"
 #include "include/pit.h"
 #include "include/printk.h"
@@ -72,7 +72,7 @@ static int bootp_header(uint8_t *pkt, uint32_t xid)
     pkt[10] = 0x80;                  /* flaga broadcast: odpowiedz rozglosnie
                                         (nie mamy jeszcze adresu, wiec nie
                                         odebralibysmy pakietu unicast) */
-    memcpy(pkt + 28, rtl8139_mac(), 6);
+    memcpy(pkt + 28, netdev_mac(), 6);
     put32be(pkt + BOOTP_FIXED, MAGIC_COOKIE);
     return BOOTP_FIXED + 4;
 }
@@ -149,7 +149,7 @@ int dhcp_configure(void)
     }
 
     /* xid ma odrozniac nasze wymiany od cudzych - miesza MAC z zegarem */
-    const uint8_t *mac = rtl8139_mac();
+    const uint8_t *mac = netdev_mac();
     uint32_t xid = (uint32_t)(mac[3] << 24 | mac[4] << 16 | mac[5] << 8) ^
                    (pit_ticks() * 2654435761u);
 

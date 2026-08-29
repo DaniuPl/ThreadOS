@@ -1427,3 +1427,29 @@ sprawdzane przez `make test`.
       zapisu kończy się błędem ochrony, niż cicho przepada. Test
       sprawdza to dzieckiem: dziecko próbuje zapisać i ginie, a rodzic
       przeżywa i melduje, że treść pliku jest nietknięta.
+- [x] **Karta e1000 i warstwa `netdev`** - dyski miały warstwę blokową
+      od dawna: ATA i AHCI stoją pod jedną nazwą, a który kontroler
+      odpowiedział, jest sprawą rozruchu. Sieć takiej warstwy nie
+      miała i było to widać w każdej linii, która potrzebowała adresu
+      MAC - `rtl8139_mac()` wprost w kodzie IP i DHCP. Teraz jest
+      `netdev.c`, dokładnie z tego samego pomysłu.
+
+      Intel 82540EM jest zbudowany zupełnie inaczej niż RTL8139
+      i dlatego był dobrym sprawdzianem dla tej warstwy. Rejestry ma
+      w pamięci, nie w portach I/O - trzeba je najpierw dokleić do
+      mapowania, bo leżą wysoko. Ruch chodzi przez dwa **pierścienie
+      deskryptorów**, po jednym na kierunek, zamiast jednego pierścienia
+      bajtów: deskryptor mówi, gdzie leży bufor i co się z nim stało,
+      a kto go ma na własność, wynika ze wskaźników głowy i ogona.
+      Wygodniejsze od RTL8139 o tyle, że pakiety nie sklejają się ze
+      sobą i nie trzeba przepisywać końca bufora na początek.
+
+      Dla ARP-a, IP, DHCP i TCP nie zmieniło się nic - i to jest
+      właściwa treść tego kroku. Test uruchamia ten sam zestaw
+      sprawdzeń z `-device e1000` na obu jądrach: dzierżawa DHCP,
+      ping do bramy, tablica ARP, HTTP z pierścienia 3. Ta sama droga
+      pakietu, inna karta pod spodem.
+
+      Odbiór idzie w drugą stronę niż reszta: sterownik sam woła
+      `net_rx`, gdy ramka przyjdzie, i warstwa `netdev` w tym nie
+      pośredniczy - byłoby to przekładanie wskaźnika bez powodu.

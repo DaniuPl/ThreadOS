@@ -41,7 +41,7 @@
 #include "../kernel/include/blk.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/net.h"
-#include "../kernel/include/rtl8139.h"
+#include "../kernel/include/netdev.h"
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
@@ -523,11 +523,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        osiem bajtow. */
     int siec = net_init();
     if (siec) {
-        const uint8_t *m = rtl8139_mac();
-        printk("[ OK ] Siec: RTL8139 %x:%x:%x:%x:%x:%x\n",
+        const uint8_t *m = netdev_mac();
+        printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
     } else {
-        printk("[ !! ] Siec: nie znalazlem karty RTL8139\n");
+        printk("[ !! ] Siec: nie znalazlem karty sieciowej\n");
     }
 
     /* --- Wejscie z klawiatury ----------------------------------- */

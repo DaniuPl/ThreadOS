@@ -53,7 +53,9 @@ def main():
         # Siec: ARP + ICMP przez karte RTL8139. Brama slirpa (10.0.2.2)
         # odpowiada na oba, wiec test nie potrzebuje sieci na hoscie.
         q.type_line("ifconfig")
-        ifc = q.wait_for("eth0  MAC")
+        ifc = q.wait_for("eth0  RTL8139, MAC")
+        check("ifconfig nazywa karte, ktora odpowiedziala",
+              "eth0  RTL8139, MAC" in ifc)
         check("ifconfig pokazuje adres IP", "IP 10.0.2.15" in ifc)
         check("ifconfig pokazuje brame", "brama 10.0.2.2" in ifc)
         check("ifconfig pokazuje serwer DNS z DHCP", "DNS 10.0.2.3" in ifc)
