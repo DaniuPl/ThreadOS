@@ -76,6 +76,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/usermode.o \
         $(BUILD)/initrd.o \
         $(BUILD)/exec.o \
+        $(BUILD)/prog.o \
         $(BUILD)/ata.o \
         $(BUILD)/fs.o \
         $(BUILD)/kfile.o \
@@ -184,7 +185,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci usbkbd swap
+            mouse desktop acpi uhci usbkbd swap prog
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \

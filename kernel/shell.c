@@ -18,6 +18,7 @@
 #include "include/paging.h"
 #include "include/swap.h"
 #include "include/acpi.h"
+#include "include/prog.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -78,6 +79,7 @@ static const struct {
     {"fls",      "pliki na dysku"},
     {"cat F",    "wypisz plik"},
     {"write F",  "zapisz tekst do pliku"},
+    {"cp A B",   "przepisz plik na dysk"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -299,6 +301,42 @@ static void cmd_write(char *args)
         printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
 }
 
+/* cp <zrodlo> <cel> - przepisanie pliku na dysk
+ *
+ * Zrodlo szukamy tam, gdzie szuka go 'run': najpierw w initrd, potem
+ * na dysku. Dzieki temu program wgrany razem z jadrem da sie przeniesc
+ * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad. */
+static void cmd_cp(char *args)
+{
+    char *cel = args;
+    while (*cel && *cel != ' ')
+        cel++;
+    if (*cel == ' ')
+        *cel++ = '\0';
+    while (*cel == ' ')
+        cel++;
+
+    if (!*args || !*cel) {
+        printk("uzycie: cp <zrodlo> <cel>\n");
+        return;
+    }
+
+    uint32_t rozmiar = 0;
+    void *wczytany = (void *)0;
+    const void *obraz = prog_obraz(args, &rozmiar, &wczytany);
+    if (!obraz) {
+        printk("cp: nie ma '%s'\n", args);
+        return;
+    }
+    int ok = fs_write(cel, obraz, rozmiar) == 0;
+    prog_zwolnij(wczytany);
+
+    if (ok)
+        printk("cp: '%s' -> '%s' (%u B)\n", args, cel, rozmiar);
+    else
+        printk("cp: nie udalo sie zapisac '%s'\n", cel);
+}
+
 static void cmd_dhcp(void)
 {
     if (!dhcp_configure())
@@ -371,6 +409,8 @@ static void run_command(char *cmd)
         cmd_df();
     else if (!strcmp(cmd, "write"))
         cmd_write(arg);
+    else if (!strcmp(cmd, "cp"))
+        cmd_cp(arg);
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))

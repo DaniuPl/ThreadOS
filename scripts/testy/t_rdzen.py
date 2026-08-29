@@ -433,7 +433,8 @@ def main():
               "BLAD" not in crypto)
 
         q.type_line("run brak")
-        check("run zgasza brak pliku", "brak pliku 'brak'" in q.screen())
+        check("run zgasza brak pliku - i szuka go w obu miejscach",
+              "nie ma 'brak' ani w initrd, ani na dysku" in q.screen())
 
         # Siec: ARP + ICMP przez karte RTL8139. Brama slirpa (10.0.2.2)
         # odpowiada na oba, wiec test nie potrzebuje sieci na hoscie.

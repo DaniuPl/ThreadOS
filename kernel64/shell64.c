@@ -18,6 +18,7 @@
 #include "paging64.h"
 #include "elf64.h"
 #include "proc64.h"
+#include "../kernel/include/prog.h"
 #include "isr64.h"
 #include "task64.h"
 #include "syscall64.h"
@@ -61,7 +62,8 @@ static void cmd_help(void)
 {
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
-    printk("           rm <plik>, uptime, run <program>, clear,\n");
+    printk("           rm <plik>, cp <zrodlo> <cel>, uptime,\n");
+    printk("           run <program>, clear,\n");
     printk("           ifconfig, arp, ping <adres>, gfx, pulpit,\n");
     printk("           reboot, poweroff\n");
 }
@@ -207,6 +209,55 @@ static void cmd_write(char *reszta)
         printk("write: '%s' zapisany (%u B)\n", reszta, len);
 }
 
+/* cp <zrodlo> <cel> - przepisanie pliku na dysk
+ *
+ * Zrodlo szukamy tam, gdzie szuka go 'run': najpierw w initrd, potem
+ * na dysku. Dzieki temu program wgrany razem z jadrem da sie przeniesc
+ * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad,
+ * takze wtedy, gdy w initrd go juz nie ma. */
+static void cmd_cp(char *reszta)
+{
+    if (!fs_ready()) {
+        printk("cp: brak systemu plikow\n");
+        return;
+    }
+
+    char *cel = reszta;
+    while (*cel && *cel != ' ')
+        cel++;
+    if (!*cel) {
+        printk("cp: podaj zrodlo i cel, np. 'cp hello64 hello64'\n");
+        return;
+    }
+    *cel++ = '\0';                    /* nazwa zrodla konczy sie tu */
+    while (*cel == ' ')
+        cel++;
+    if (!*cel) {
+        printk("cp: podaj cel\n");
+        return;
+    }
+
+    uint32_t rozmiar = 0;
+    void *wczytany = (void *)0;
+    const void *obraz = prog_obraz(reszta, &rozmiar, &wczytany);
+    if (!obraz) {
+        printk("cp: nie ma '%s'\n", reszta);
+        return;
+    }
+
+    /* fs_write_at oddaje LICZBE zapisanych bajtow, nie zero - plik
+       skrocony w polowie tez trzeba uznac za bledny */
+    int slot = fs_open(task64_cwd(), cel, 1);
+    int ok = slot >= 0 && fs_truncate(slot) >= 0 &&
+             fs_write_at(slot, 0, obraz, rozmiar) == (int)rozmiar;
+    prog_zwolnij(wczytany);
+
+    if (ok)
+        printk("cp: '%s' -> '%s' (%u B)\n", reszta, cel, rozmiar);
+    else
+        printk("cp: nie udalo sie zapisac '%s'\n", cel);
+}
+
 /* Rysunek sprawdzajacy tryb graficzny.
  *
  * Cztery prostokaty w rogach, ramka i napis - tyle wystarczy, zeby
@@ -312,6 +363,12 @@ static void execute(const char *line)
             cmd_cat(nazwa);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (starts_with(line, "cp ")) {
+        char *arg = (char *)argument(line, 3);
+        if (!arg)
+            printk("cp: podaj zrodlo i cel\n");
+        else
+            cmd_cp(arg);
     } else if (starts_with(line, "write ")) {
         char *reszta = (char *)argument(line, 6);
         if (reszta)
@@ -372,9 +429,9 @@ static void execute(const char *line)
         prog[pn] = '\0';
         name = prog;
 
-        uint32_t size = 0;
-        if (!initrd_find(name, &size)) {
-            printk("run: nie ma programu '%s'\n", name);
+        if (!prog_istnieje(name)) {
+            printk("run: nie ma programu '%s' "
+                   "(zobacz 'ls' i 'fls')\n", name);
             return;
         }
         /* Reszta linii to argumenty programu - shell tylko dzieli

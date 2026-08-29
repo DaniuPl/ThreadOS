@@ -732,6 +732,26 @@ class Qemu:
         with open(self.serial_path, "rb") as fh:
             return fh.read().decode("latin1")
 
+    def polecenie(self, cmd, tekst=None, timeout=20):
+        """Wpisuje polecenie i oddaje TO, CO PRZYBYLO na porcie po nim.
+
+        Bez odcinania starszej tresci latwo o falszywy alarm: shell
+        odbija wpisany wiersz, wiec nazwa pliku jest na porcie takze
+        wtedy, gdy polecenie niczego nie znalazlo - a wynik poprzedniego
+        polecenia lezy tam do konca biegu."""
+        start = len(self.serial())
+        self.type_line(cmd)
+        if tekst is None:
+            time.sleep(0.5)
+            return self.serial()[start:]
+        koniec = time.time() + timeout
+        while time.time() < koniec:
+            nowe = self.serial()[start:]
+            if tekst in nowe:
+                return nowe
+            time.sleep(0.3)
+        return self.serial()[start:]
+
     def wait_serial(self, text, timeout=20):
         deadline = time.time() + timeout
         while time.time() < deadline:

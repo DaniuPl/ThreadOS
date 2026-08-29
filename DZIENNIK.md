@@ -1233,3 +1233,46 @@ sprawdzane przez `make test`.
       czcionką 8x8. Test rozpoznaje te glify tą samą tablicą, z której
       korzysta jądro - jedno źródło prawdy, i odczyt z tego, co
       naprawdę widać.
+- [x] **Programy z dysku, nie tylko z initrd** - loader ELF i system
+      plików leżały obok siebie od dawna i nigdy nie były połączone:
+      `run` zaglądał wyłącznie do initrd, czyli do obrazu wgrywanego
+      razem z jądrem i tylko do odczytu. Teraz program może leżeć na
+      dysku - `cp hello64 cokolwiek`, a potem `run cokolwiek`.
+
+      Całe połączenie to jeden plik, `kernel/prog.c`, i nie ma w nim
+      ani słowa o trybie procesora: decyduje tylko, skąd wziąć bajty,
+      a co z nimi zrobić, wie już loader. Dlatego używają go **oba
+      jądra** - w 64-bitowym przez słownik zgodności (`task_cwd`),
+      w 32-bitowym wprost. Kolejność jest ustalona: najpierw initrd,
+      potem dysk. Initrd jest zawsze i zawsze działa, więc zepsuty
+      plik na dysku nie ma jak przykryć programu wgranego razem
+      z jądrem - a to znaczy, że nie ma jak odebrać systemu.
+
+      Program szuka się w katalogu roboczym **zadania**, tak samo jak
+      przy `cat` czy `ls`: katalog jest własnością procesu, więc `run`
+      znaczy to samo, co znaczyłby po `cd`.
+
+      I znowu ta sama pomyłka, co przy `fs_readdir` - a przecież już
+      raz ją tu opisałem. `fs_write_at` zwraca **liczbę zapisanych
+      bajtów**, nie zero, a ja sprawdzałem `== 0`; `fs_read_at` tak
+      samo. Pierwsze `cp` "nie udało się" mimo poprawnego zapisu.
+      Wniosek na przyszłość jest chyba tylko jeden: konwencji zwrotu
+      nie wolno zgadywać z podobieństwa do sąsiedniej funkcji - trzeba
+      ją przeczytać. Teraz jeden warunek sprawdza, że zapisało się
+      **tyle, ile miało**, bo plik ucięty w połowie to nie jest ten
+      sam program.
+
+      Test bierze najmocniejszy dowód, jaki tu jest: drugi rozruch tej
+      samej maszyny z tym samym obrazem dysku. Program, który po
+      restarcie dalej się uruchamia, a którego nie ma w initrd, może
+      pochodzić już tylko z talerza. Sprawdzamy też drogę z pierścienia
+      3 - `ush64` robi `fork` i `exec`, a `exec` szuka programu tak
+      samo jak jądro.
+
+      Przy okazji dorobiłem testom `q.polecenie(...)`: wpisuje
+      polecenie i oddaje **tylko to, co przybyło po nim**. Bez tego
+      łatwo o fałszywy alarm w drugą stronę - shell odbija wpisany
+      wiersz, więc nazwa pliku jest na porcie także wtedy, gdy
+      polecenie niczego nie znalazło, a wynik poprzedniego leży tam do
+      końca biegu. Trzy asercje w tym teście przechodziły z tego
+      powodu, zanim funkcja w ogóle zaczęła działać.

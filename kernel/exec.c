@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include "include/exec.h"
 #include "include/initrd.h"
+#include "include/prog.h"
 #include "include/paging.h"
 #include "include/pmm.h"
 #include "include/task.h"
@@ -199,21 +200,25 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
                             uint32_t *esp_out, uint32_t *brk_out)
 {
     uint32_t size;
-    const uint8_t *file = initrd_find(tok[0], &size);
+    void *wczytany = (void *)0;
+    const uint8_t *file = prog_obraz(tok[0], &size, &wczytany);
     if (!file) {
-        printk("exec: brak pliku '%s' w initrd (sprawdz 'ls')\n", tok[0]);
+        printk("exec: nie ma '%s' ani w initrd, ani na dysku "
+               "(sprawdz 'ls' i 'fls')\n", tok[0]);
         return 0;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
         printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
+        prog_zwolnij(wczytany);
         return 0;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
+        prog_zwolnij(wczytany);
         return 0;
     }
 
@@ -227,6 +232,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
+            prog_zwolnij(wczytany);
             return 0;
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
@@ -241,6 +247,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         if (!frame) {
             printk("exec: brak pamieci na stos\n");
             paging_destroy_address_space(dir);
+            prog_zwolnij(wczytany);
             return 0;
         }
         if (i == 0)
@@ -250,8 +257,11 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     *esp_out = build_argv_stack(sframe, tok, argc);
     *entry_out = eh->e_entry;
     *brk_out = brk;
-    printk("[jadro] exec '%s': ELF %u B, entry %x, argc=%d\n",
-           tok[0], size, eh->e_entry, argc);
+    printk("[jadro] exec '%s' z %s: ELF %u B, entry %x, argc=%d\n",
+           tok[0], prog_skad(), size, eh->e_entry, argc);
+    /* Segmenty sa juz w stronach procesu - kopia w pamieci jadra
+       nie jest do niczego potrzebna */
+    prog_zwolnij(wczytany);
     return dir;
 }
 
@@ -552,8 +562,9 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
 
     if (!prog[0])
         return (void *)0;
-    if (!initrd_find(prog, (void *)0)) {
-        printk("run: brak pliku '%s' w initrd (sprawdz 'ls')\n", prog);
+    if (!prog_istnieje(prog)) {
+        printk("run: nie ma '%s' ani w initrd, ani na dysku "
+               "(sprawdz 'ls' i 'fls')\n", prog);
         return (void *)0;
     }
 

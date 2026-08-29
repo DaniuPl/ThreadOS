@@ -62,6 +62,13 @@ int task_vc(void)
     return task64_vc();
 }
 
+/* Szukanie programu pyta o katalog roboczy zadania - program z dysku
+   szuka sie tam, gdzie stoi ten, kto go uruchamia */
+int task_cwd(void)
+{
+    return task64_cwd();
+}
+
 /* Wymiana stron pyta jadro, kto ma oddac pamiec na dysk */
 int task_reclaim_page(void)
 {

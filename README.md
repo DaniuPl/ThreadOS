@@ -21,6 +21,7 @@ Shared by both kernels (same files, compiled twice):
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC |
 | Storage | ATA PIO and AHCI (SATA, DMA) behind one block layer |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
+| Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
 | Network | RTL8139, ARP, ICMP, UDP, DHCP, TCP, DNS |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 
@@ -95,9 +96,6 @@ Roughly in the order I would do them.
 
 **Things neither kernel has yet**
 
-- Loading programs from disk, not just from the initrd — the
-  filesystem and the ELF loader are both there, they have never been
-  connected.
 - `mmap` of files, and a shared library / dynamic linking story.
 - More than one CPU: APIC, per-CPU state, real locking. This is the
   largest single item and it touches everything.

@@ -23,6 +23,7 @@
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/initrd.h"
 #include "elf64.h"
+#include "../kernel/include/prog.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -218,15 +219,18 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     }
 
     uint32_t size = 0;
-    const void *image = initrd_find(kname, &size);
+    void *wczytany = (void *)0;
+    const void *image = prog_obraz(kname, &size, &wczytany);
     if (!image) {
         printk("[jadro] exec: nie ma programu '%s'\n", kname);
         return -1;
     }
 
     uint64_t space = paging64_new_space();
-    if (!space)
+    if (!space) {
+        prog_zwolnij(wczytany);
         return -1;
+    }
 
     /* Stos jadra zostaje ten sam - stoimy na nim w tej chwili */
     uint64_t old = task64_swap_space(space, 0);
@@ -238,9 +242,13 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
            procesowi nie ma do czego wrocic */
         printk("[jadro] exec: '%s' nie da sie zaladowac\n", kname);
         paging64_free_space(old);
+        prog_zwolnij(wczytany);
         task64_exit_code(-1);
     }
     paging64_free_space(old);
+    /* Obraz jest juz przepisany do stron programu - kopia w pamieci
+       jadra nie jest do niczego potrzebna */
+    prog_zwolnij(wczytany);
     task64_set_brk_base(brk_base);   /* nowy obraz, nowa sterta */
     task64_rename(kname);
 
@@ -283,11 +291,14 @@ static void spawn_thread(void *arg)
     kfree(req);
 
     uint32_t size = 0;
-    const void *image = initrd_find(name, &size);
+    void *wczytany = (void *)0;
+    const void *image = prog_obraz(name, &size, &wczytany);
     if (!image) {
-        printk("[ !! ] initrd: nie ma pliku '%s'\n", name);
+        printk("[ !! ] nie ma programu '%s' ani w initrd, ani na dysku\n",
+               name);
         task64_exit();
     }
+    const char *skad = prog_skad();
 
     /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
        nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
@@ -303,7 +314,9 @@ static void spawn_thread(void *arg)
     task64_enter_space(space, kstack & ~0xFULL);
 
     uint64_t entry, brk_base;
-    if (elf64_load(image, size, &entry, &brk_base) < 0)
+    int zaladowany = elf64_load(image, size, &entry, &brk_base) == 0;
+    prog_zwolnij(wczytany);        /* obraz jest juz w stronach programu */
+    if (!zaladowany)
         task64_exit();
     task64_set_brk_base(brk_base);
 
@@ -314,8 +327,8 @@ static void spawn_thread(void *arg)
     }
 
     if (!quiet)
-        printk("[ OK ] Program '%s' z initrd: %u B, wejscie %x\n",
-               name, size, (uint32_t)entry);
+        printk("[ OK ] Program '%s' z %s: %u B, wejscie %x\n",
+               name, skad, size, (uint32_t)entry);
 
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
@@ -326,10 +339,9 @@ static void spawn_thread(void *arg)
 int proc64_spawn(const char *name, const struct args64 *args, int quiet)
 {
     struct spawn_req *req;
-    uint32_t size = 0;
     int i;
 
-    if (!initrd_find(name, &size))
+    if (!prog_istnieje(name))
         return -1;
 
     req = kmalloc(sizeof(*req));
