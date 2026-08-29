@@ -13,7 +13,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "task64.h"
+#include "proc64.h"
+#include "keyboard64.h"
 #include "../kernel/include/printk.h"
+#include "../kernel/include/keyboard.h"
 
 struct task;
 
@@ -50,4 +53,28 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
    nastepnym poleceniu */
 void shell_refresh(void)
 {
+}
+
+/* --- Pulpit --------------------------------------------------------
+ *
+ * Pulpit uruchamia aplikacje po nazwie i przejmuje klawiature. Jedno
+ * i drugie ma juz w tym jadrze swoja postac - tu jest tylko przeklad
+ * nazw, tak samo jak przy sieci.
+ */
+int exec_spawn(const char *cmdline)
+{
+    return proc64_spawn(cmdline, 0, 1);
+}
+
+void keyboard_set_override(keyboard_char_handler_t handler)
+{
+    keyboard64_set_override(handler);
+}
+
+/* Shell jadra 64-bitowego czyta znaki z kolejki, a nie przez funkcje
+   zwrotna - nie ma wiec czego oddac pulpitowi na przechowanie. Gdy
+   pulpit sie skonczy, klawisze same wracaja do kolejki. */
+keyboard_char_handler_t keyboard_console_handler(void)
+{
+    return (keyboard_char_handler_t)0;
 }

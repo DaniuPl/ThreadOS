@@ -28,6 +28,16 @@ static uint32_t head, tail;
    swoje dziecko - poza tym czasem przerywac nie ma kogo. */
 static int intr_target = -1;
 
+/* Pulpit dziala w trybie graficznym, gdzie konsola tekstowa nie ma
+   sensu - przechwytuje wiec wszystkie klawisze, zanim trafia do
+   kolejki, z ktorej czyta shell. */
+static void (*override)(char c);
+
+void keyboard64_set_override(void (*handler)(char c))
+{
+    override = handler;
+}
+
 void keyboard64_set_intr_target(int id)
 {
     intr_target = id;
@@ -49,6 +59,11 @@ static void keyboard_irq(struct regs *r)
            lancucha naprawde dziala */
         if (intr_target >= 0)
             task64_signal(task64_foreground(intr_target), SIGINT);
+        return;
+    }
+
+    if (override) {
+        override(c);
         return;
     }
 

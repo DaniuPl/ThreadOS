@@ -15,6 +15,7 @@
 #include "../kernel/include/mb2.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/video.h"
+#include "../kernel/include/mouse.h"
 #include "../kernel/include/vga.h"
 #include "../kernel/include/serial.h"
 #include "../kernel/include/printk.h"
@@ -513,7 +514,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Wejscie z klawiatury ----------------------------------- */
     keyboard64_init();
-    printk("[ OK ] Klawiatura PS/2 (IRQ 1)\n");
+    mouse_init();
+    printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12)\n");
 
     /* Adres IP bierze sie z sieci, a klient DHCP czeka na odpowiedzi
        serwera - musi wiec chodzic w watku, czyli po schedulerze */

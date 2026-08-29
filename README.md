@@ -33,8 +33,8 @@ desktop with windows, icons, a file manager and a web browser.
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,
 signals, file descriptors, pipes, on-demand heap, SSE with FPU state
 saved across context switches, a shell in the kernel *and* one in user
-space, networking from ring 3, and BIOS + UEFI boot from a single
-hybrid disc.
+space, networking from ring 3, a graphical desktop, and BIOS + UEFI
+boot from a single hybrid disc.
 
 ## Quick start
 
@@ -82,9 +82,9 @@ Roughly in the order I would do them.
 
 **64-bit kernel — catching up with the 32-bit one**
 
-- Graphical desktop: `video.c` is already ported, `desktop.c` needs a
-  compatibility layer for tasks, `exec` and keyboard, plus the window
-  syscalls.
+- Ring 3 GUI applications. The desktop itself runs, but the icons call
+  programs that only exist as 32-bit binaries; this needs the window
+  syscalls and shared memory exposed to long-mode processes.
 - Swap to disk and virtual consoles — both already exist in 32-bit
   form and are mostly mode-independent.
 - USB keyboard (UHCI) and ACPI power-off, so a machine without PS/2

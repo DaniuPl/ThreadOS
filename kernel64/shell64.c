@@ -31,6 +31,7 @@
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
+#include "../kernel/include/desktop.h"
 #include "../kernel/include/vga.h"
 
 #define LINE_MAX 80
@@ -60,7 +61,7 @@ static void cmd_help(void)
     printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
     printk("           rm <plik>, uptime, run <program>, clear,\n");
-    printk("           ifconfig, arp, ping <adres>, gfx\n");
+    printk("           ifconfig, arp, ping <adres>, gfx, pulpit\n");
 }
 
 static void cmd_mem(void)
@@ -307,6 +308,12 @@ static void execute(void)
             cmd_write(reszta);
         else
             printk("write: podaj nazwe i tresc\n");
+    } else if (!strcmp(line, "pulpit")) {
+        /* Przejscie w tryb graficzny jest jednokierunkowe: od tej
+           chwili klawiature przejmuje pulpit, a konsola tekstowa
+           przestaje byc widoczna */
+        printk("Pulpit startuje - konsola znika\n");
+        desktop_start();
     } else if (!strcmp(line, "gfx")) {
         cmd_gfx();
     } else if (!strcmp(line, "ifconfig")) {

@@ -7,6 +7,10 @@ void keyboard64_init(void);
 /* Czeka na klawisz i zwraca go (usypia, gdy nic nie ma) */
 char keyboard64_getchar(void);
 
+/* Pulpit przechwytuje wszystkie klawisze (w trybie graficznym nie ma
+   konsoli tekstowej, do ktorej mialyby trafic) */
+void keyboard64_set_override(void (*handler)(char c));
+
 /* Komu wyslac SIGINT po Ctrl+C (-1 = nikomu) */
 void keyboard64_set_intr_target(int id);
 

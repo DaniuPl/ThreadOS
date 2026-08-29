@@ -1120,3 +1120,19 @@ sprawdzane przez `make test`.
       warta zapamiętania: pierwszy wzorzec użył numerów kolorów trybu
       **tekstowego**, a paleta `video.c` ma zdefiniowane własne indeksy
       0-5 - kod rysował dobrze, to wzorzec był w złych kolorach
+- [x] **Pulpit graficzny w jądrze 64-bitowym** - i to jest ta pozycja,
+      przy której najbardziej opłacił się cały sposób prowadzenia tego
+      portu. `desktop.c` (736 wierszy: kompozytor, okna, paski tytułu,
+      ikony, pasek zadań, menu, przeciąganie) i `mouse.c` przeszły
+      **bez jednej zmiany**. Cała różnica zamknęła się w trzech
+      funkcjach dopisanych do słownika zgodności: `exec_spawn` po
+      nazwie, przejęcie klawiatury przez pulpit i oddanie jej z
+      powrotem. Reszta - zadania, sen, system plików do zapisu pozycji
+      ikon - była już na miejscu z portu sieci. Bałem się tego kroku
+      i okazał się najtańszy z dotychczasowych: nie dlatego, że pulpit
+      jest prosty, tylko dlatego, że nie zależy od trybu procesora
+      w niczym poza nazwami, którymi woła jądro. Czego jeszcze nie ma:
+      aplikacji graficznych w ring 3 - ikony `App`, `Zegar`, `Pliki`
+      wołają programy, których w 64-bitowym initrd nie ma, więc klik
+      w nie nic nie robi. To wymaga wywołań systemowych okien i pamięci
+      współdzielonej, czyli osobnego kroku
