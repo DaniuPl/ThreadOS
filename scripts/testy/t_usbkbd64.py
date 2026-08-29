@@ -2,6 +2,9 @@
 """Test dymny ProtonOS: klawiatura USB w jadrze 64-bitowym.
 
 Maszyna nowsza niz mniej wiecej 2010 rok nie ma juz zlacza PS/2.
+Ta grupa pilnuje starszej magistrali - UHCI. Nowsza, xHCI, ma wlasna
+(t_xhci.py); wazne jest, ze WYZEJ nie widac miedzy nimi roznicy.
+
 Sterownik UHCI i klasa HID w protokole rozruchowym to te same pliki,
 co w jadrze 32-bitowym - w trybie dlugim trzeba bylo tylko jawnie
 rzutowac adresy struktur, bo kontroler adresuje pamiec 32 bitami,
@@ -46,8 +49,8 @@ def main():
         try:
             start = q.wait_serial("Klawiatura USB", timeout=60)
             check("klawiatura USB rozpoznana na magistrali",
-                  re.search(r"Klawiatura USB \(HID\) na porcie \d+", start)
-                  is not None)
+                  re.search(r"Klawiatura USB \(HID, UHCI\) na porcie \d+",
+                            start) is not None)
 
             q.wait_serial("proton64>", timeout=30)
             q.type_line("uptime")

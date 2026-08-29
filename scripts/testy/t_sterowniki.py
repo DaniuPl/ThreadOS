@@ -47,7 +47,7 @@ def main():
     try:
         boot = q19.wait_for("Klawiatura USB", timeout=30)
         check("klawiatura USB rozpoznana na magistrali",
-              re.search(r"Klawiatura USB \(HID\) na porcie \d+", boot)
+              re.search(r"Klawiatura USB \(HID, UHCI\) na porcie \d+", boot)
               is not None)
         q19.wait_for("ProtonOS shell", timeout=20)
         q19.type_line("clear")

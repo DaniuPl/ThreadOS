@@ -103,6 +103,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/nvme.o \
         $(BUILD)/blk.o \
         $(BUILD)/uhci.o \
+        $(BUILD)/xhci.o \
+        $(BUILD)/usbhc.o \
         $(BUILD)/usbkbd.o \
         $(BUILD)/acpi.o \
         $(BUILD)/mb2.o \
@@ -200,7 +202,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci usbkbd swap prog shm rtc \
+            mouse desktop acpi uhci xhci usbhc usbkbd swap prog shm rtc \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \

@@ -19,6 +19,7 @@ Shared by both kernels (same files, compiled twice):
 | | |
 |---|---|
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC, local APIC |
+| USB | xHCI and UHCI behind one host-controller layer; HID boot keyboard |
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
@@ -28,11 +29,11 @@ Shared by both kernels (same files, compiled twice):
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
-(UHCI), ACPI, files mapped into memory for reading *and writing*,
-a stack that grows on demand,
-secondary cores computing from a shared work queue, TLS 1.3 with
-certificate verification, and a graphical desktop with windows,
-icons, a file manager and a web browser.
+(xHCI or UHCI), ACPI, files mapped into memory for reading *and
+writing*, a stack that grows on demand, secondary cores computing from
+a shared work queue, TLS 1.3 with certificate verification, and a
+graphical desktop with windows, icons, a file manager and a web
+browser.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,
@@ -41,11 +42,9 @@ saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, TLS 1.3 with certificate verification,
 a graphical desktop whose six applications all run in ring 3, shared
 memory, files mapped into memory for reading *and writing*, a stack
-that grows on demand, swap
-to disk, secondary cores computing from a shared work queue, four
-virtual
-consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
-from a single hybrid disc.
+that grows on demand, swap to disk, secondary cores computing from a
+shared work queue, four virtual consoles, USB keyboard (xHCI or UHCI),
+ACPI power-off, and BIOS + UEFI boot from a single hybrid disc.
 
 ## Quick start
 
@@ -107,8 +106,6 @@ ground for both.
   most of the kernel were written for one core. That part is still the
   largest single item and it touches everything.
 - Preemption inside the kernel, which SMP will force anyway.
-- Newer hardware: xHCI. USB still ends at UHCI, so only USB 1.1
-  keyboards work.
 
 **Infrastructure**
 

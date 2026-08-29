@@ -17,7 +17,7 @@
 
 #include <stdint.h>
 #include "include/usbkbd.h"
-#include "include/uhci.h"
+#include "include/usbhc.h"
 #include "include/keyboard.h"
 #include "include/task.h"
 #include "include/printk.h"
@@ -28,11 +28,8 @@
 static uint8_t desc_buf[256] __attribute__((aligned(16)));
 static uint8_t report[8] __attribute__((aligned(16)));
 
-static int dev_addr;
-static int dev_lowspeed;
-static int dev_maxpacket = 8;
-static int ep_num, ep_maxpacket;
-static int toggle;
+static int dev;                  /* uchwyt urzadzenia od warstwy kontrolera */
+static int ep_num, ep_maxpacket, ep_interval = 8;
 
 static void setup_packet(uint8_t *p, uint8_t type, uint8_t req,
                          uint16_t value, uint16_t index, uint16_t len)
@@ -47,22 +44,20 @@ static void setup_packet(uint8_t *p, uint8_t type, uint8_t req,
     p[7] = (uint8_t)(len >> 8);
 }
 
-static int get_descriptor(int addr, uint8_t type, uint8_t index,
-                          void *buf, int len)
+static int get_descriptor(uint8_t type, uint8_t index, void *buf, int len)
 {
     uint8_t setup[8];
     setup_packet(setup, 0x80, 0x06, (uint16_t)(type << 8 | index), 0,
                  (uint16_t)len);
-    return uhci_control(addr, dev_lowspeed, dev_maxpacket, setup, buf, len, 1);
+    return usbhc_control(dev, setup, buf, len, 1);
 }
 
-static int no_data_request(int addr, uint8_t type, uint8_t req,
+static int no_data_request(uint8_t type, uint8_t req,
                            uint16_t value, uint16_t index)
 {
     uint8_t setup[8];
     setup_packet(setup, type, req, value, index, 0);
-    return uhci_control(addr, dev_lowspeed, dev_maxpacket, setup,
-                        (void *)0, 0, 0);
+    return usbhc_control(dev, setup, (void *)0, 0, 0);
 }
 
 /* Szuka w konfiguracji interfejsu HID w wersji rozruchowej i jego
@@ -90,6 +85,7 @@ static int find_boot_keyboard(const uint8_t *cfg, int total)
                 ep_maxpacket = cfg[i + 4] | (cfg[i + 5] << 8);
                 if (ep_maxpacket > 8)
                     ep_maxpacket = 8;                  /* raport ma 8 bajtow */
+                ep_interval = cfg[i + 6];
                 return iface;
             }
         }
@@ -189,9 +185,7 @@ static void poll_thread(void *arg)
            czeka w kolejce kontrolera bez przerwy, wiec raporty
            kolejkuja sie w urzadzeniu, a nie gina. Piecdziesiat obiegow
            na sekunde odbiera je szybciej, niz da sie pisac. */
-        int n = uhci_interrupt_in(dev_addr, dev_lowspeed, ep_num,
-                                  ep_maxpacket, report, ep_maxpacket,
-                                  &toggle);
+        int n = usbhc_int_in(dev, ep_num, report, ep_maxpacket);
         if (n >= 8)
             handle_report();
         task_sleep(20);
@@ -200,40 +194,23 @@ static void poll_thread(void *arg)
 
 int usbkbd_init(void)
 {
-    if (!uhci_init())
+    if (!usbhc_init())
         return 0;
 
-    for (int port = 0; port < uhci_ports(); port++) {
-        if (!uhci_port_reset(port))
+    for (int port = 0; port < usbhc_ports(); port++) {
+        /* Reset portu, adres urzadzenia i rozmiar pakietu punktu
+           zerowego zalatwia warstwa kontrolera - w kazdym z nich
+           wyglada to inaczej, a stad nie widac roznicy */
+        dev = usbhc_attach(port);
+        if (dev < 0)
             continue;
 
-        dev_lowspeed = uhci_port_lowspeed(port);
-        dev_maxpacket = 8;
-        dev_addr = 0;
-
-        /* Pierwsze osiem bajtow deskryptora wystarczy, zeby poznac
-           rozmiar pakietu punktu zerowego - reszty jeszcze nie umiemy
-           poprawnie odebrac */
-        if (get_descriptor(0, 0x01, 0, desc_buf, 8) < 8)
-            continue;
-        if (desc_buf[7])
-            dev_maxpacket = desc_buf[7];
-
-        /* Kazdy port dostaje inny adres: gdyby na pierwszym wisialo
-           cos, co klawiatura nie jest, drugi nie moze po nim odziedziczyc
-           tego samego numeru */
-        int addr = port + 1;
-        if (no_data_request(0, 0x00, 0x05, (uint16_t)addr, 0) < 0)
-            continue;
-        dev_addr = addr;
-        task_sleep(20);
-
-        if (get_descriptor(dev_addr, 0x02, 0, desc_buf, 9) < 9)
+        if (get_descriptor(0x02, 0, desc_buf, 9) < 9)
             continue;
         int total = desc_buf[2] | (desc_buf[3] << 8);
         if (total > (int)sizeof(desc_buf))
             total = (int)sizeof(desc_buf);
-        if (get_descriptor(dev_addr, 0x02, 0, desc_buf, total) < total)
+        if (get_descriptor(0x02, 0, desc_buf, total) < total)
             continue;
 
         int iface = find_boot_keyboard(desc_buf, total);
@@ -241,18 +218,20 @@ int usbkbd_init(void)
             continue;                    /* cos innego niz klawiatura */
 
         uint8_t cfg_value = desc_buf[5];
-        if (no_data_request(dev_addr, 0x00, 0x09, cfg_value, 0) < 0)
+        if (no_data_request(0x00, 0x09, cfg_value, 0) < 0)
             continue;                    /* SET_CONFIGURATION */
 
         /* SET_IDLE 0 - zglaszaj tylko zmiany, nie powtarzaj w kolko */
-        no_data_request(dev_addr, 0x21, 0x0A, 0, (uint16_t)iface);
+        no_data_request(0x21, 0x0A, 0, (uint16_t)iface);
         /* SET_PROTOCOL 0 - protokol rozruchowy, staly raport 8 bajtow */
-        no_data_request(dev_addr, 0x21, 0x0B, 0, (uint16_t)iface);
+        no_data_request(0x21, 0x0B, 0, (uint16_t)iface);
 
-        toggle = 0;
+        if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)
+            continue;
+
         task_create("usbkbd", poll_thread, 0);
-        printk("[ OK ] Klawiatura USB (HID) na porcie %d, punkt koncowy %d\n",
-               port + 1, ep_num);
+        printk("[ OK ] Klawiatura USB (HID, %s) na porcie %d, "
+               "punkt koncowy %d\n", usbhc_name(), port + 1, ep_num);
         return 1;
     }
     return 0;

@@ -57,7 +57,9 @@ ProtonOS/
 │   ├── fbcon.c         # konsola tekstowa rysowana na buforze obrazu
 │   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
-│   ├── uhci.c          # kontroler USB: przesyłki sterujące i przerwaniowe
+│   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
+│   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
+│   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
 │   ├── usbkbd.c        # klawiatura USB (HID, protokół rozruchowy)
 │   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
 │   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
@@ -1648,3 +1650,51 @@ sprawdzane przez `make test`.
       w nowej stercie trafiał na opis pliku, którego ten proces już nie
       otwierał. `task_mmap_zwolnij` istniało od początku i nie było
       wołane z żadnego miejsca - wersja 64-bitowa wołała swoje.
+- [x] **xHCI - trzeci kontroler USB** i warstwa, ktora go zaslania.
+
+      UHCI wystarczał do tej pory tylko dlatego, że QEMU go udaje.
+      Maszyna nowsza niż mniej więcej 2010 rok nie ma już ani PS/2,
+      ani UHCI - jest tylko xHCI. Bez niego "działa na prawdziwym
+      sprzęcie" zostałoby na zawsze pustym punktem listy.
+
+      Różnica między tymi kontrolerami nie leży w szczegółach, tylko
+      w **podziale pracy**. W UHCI to sterownik układał deskryptory
+      przesyłek w liście ramek, którą kontroler przemiatał co
+      milisekundę, i sam wymyślał urządzeniom adresy. W xHCI rozmawia
+      się poleceniami wkładanymi do pierścienia, odpowiedzi przychodzą
+      drugim pierścieniem - zdarzeń - a adresy nadaje kontroler.
+
+      Pierścień to najładniejsza rzecz w tym sterowniku. Jest tablicą
+      TRB, której ostatni element jest skokiem na początek, a o tym,
+      które wpisy należą już do kontrolera, rozstrzyga jeden bit -
+      bit cyklu. Skok ma znacznik, który przy każdym obrocie przewraca
+      znaczenie tego bitu na przeciwne. Dzięki temu pierścienia nigdy
+      nie trzeba czyścić ani liczyć, ile w nim czego zostało: ten sam
+      bit raz znaczy "moje", raz "twoje".
+
+      Dokładanie sterownika ODSŁONIŁO granicę, której wcześniej nie
+      było widać. `usbkbd.c` wołał `uhci_*` wprost, ale nie dlatego,
+      że rozpoznawanie klawiatury ma cokolwiek wspólnego z kontrolerem
+      - po prostu kontroler był jeden. Nowy `usbhc.c` stawia tę
+      granicę tam, gdzie kończy się różnica: reset portu, nadanie
+      adresu i ustalenie rozmiaru pakietu punktu zerowego wyglądają
+      w obu kontrolerach zupełnie inaczej, więc siedzą pod jednym
+      słowem `podlacz`. Wyżej zostaje już tylko rozmowa z urządzeniem,
+      ta sama niezależnie od magistrali - i dlatego cały kod HID,
+      tablice kodów i wątek odpytujący nie zmieniły się ani o linijkę.
+      To ten sam wzorzec, co `blk.c` i `netdev.c`, i po raz trzeci
+      okazuje się, że da się go postawić dopiero wtedy, gdy naprawdę
+      są dwie rzeczy do schowania.
+
+      Przy zapisie do PORTSC trzeba uważać na coś, czego w UHCI nie
+      było: część bitów **kasuje się zapisem jedynki**, a bit
+      włączenia portu zapisem jedynki się port WYŁĄCZA. Zwykłe
+      odczytaj-zmień-zapisz wyłączyłoby więc port przy okazji
+      ustawienia czegokolwiek innego. Stąd `portsc_bezpiecznie`.
+
+      Test jest podwójny z rozmysłem. Sprawdza, że klawiatura na xHCI
+      w ogóle mówi - ale przede wszystkim, że mówi **tak samo**: ta
+      sama grupa sprawdzeń co przy UHCI, ten sam znak, ten sam Shift,
+      ten sam Alt+F2. Osobne grupy `usbkbd64` i `xhci` pilnują dwóch
+      magistral i jednego wniosku: wyżej nie widać, która jest pod
+      spodem.

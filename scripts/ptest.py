@@ -428,7 +428,13 @@ class Qemu:
             # Wiecej niz jeden rdzen. Firmware wylicza je w tablicy ACPI,
             # a system budzi sygnalem INIT-SIPI
             cmd += ["-smp", str(cpus)]
-        if usbkbd:
+        if usbkbd == "xhci":
+            # Kontroler xHCI: jedyny, jaki maja nowsze plyty. To ta sama
+            # klawiatura, tylko na innej magistrali - i o tym, ze system
+            # widzi ja tak samo, ma rozstrzygac test, a nie zalozenie
+            cmd += ["-device", "qemu-xhci,id=xhci",
+                    "-device", "usb-kbd,bus=xhci.0"]
+        elif usbkbd:
             # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
             # nowsza niz mniej wiecej 2010 rok
             cmd += ["-usb", "-device", "usb-kbd"]
