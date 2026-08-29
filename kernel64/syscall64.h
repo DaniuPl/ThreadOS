@@ -27,6 +27,18 @@
 #define SYS64_PIPE      21
 #define SYS64_DUP2      22
 
+/* Siec. Numery gniazd sa numerami w tablicach jadra, nie
+   deskryptorami - siec i pliki zyja na razie osobno. */
+#define SYS64_NETINFO     23
+#define SYS64_UDP_OPEN    24
+#define SYS64_UDP_SEND    25
+#define SYS64_UDP_RECV    26
+#define SYS64_UDP_CLOSE   27
+#define SYS64_TCP_CONNECT 28
+#define SYS64_TCP_SEND    29
+#define SYS64_TCP_RECV    30
+#define SYS64_TCP_CLOSE   31
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

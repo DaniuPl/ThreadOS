@@ -27,6 +27,8 @@
 #include "../kernel/include/fs.h"
 #include "elf64.h"
 #include "pipe64.h"
+#include "../kernel/include/net.h"
+#include "../kernel/include/tcp.h"
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -141,6 +143,16 @@ static int nazwa_z_ring3(uint64_t ptr, uint64_t len, char *out)
     out[len] = '\0';
     return 0;
 }
+
+/* Opis gniazda przekazywany przez program. Uklad musi zgadzac sie
+   z tym w user64/usys64.h. */
+struct udp_opis {
+    int sock;
+    uint32_t ip;
+    uint16_t port;
+    uint16_t _wyrownanie;
+    uint32_t timeout;
+};
 
 static void handle(struct regs *r);
 
@@ -440,6 +452,116 @@ static void handle(struct regs *r)
     }
     case SYS64_DUP2:
         r->rax = (uint64_t)(int64_t)task64_fd_dup2((int)a1, (int)a2);
+        return;
+    /* --- Siec ---------------------------------------------------
+     *
+     * Gniazdo nalezy do zadania, ktore je otworzylo - jadro trzyma
+     * jego numer i sprzata po jego smierci. Dzieki temu program nie
+     * moze siegnac po cudze gniazdo, podajac jego numer. */
+    case SYS64_NETINFO: {
+        /* Cztery adresy: wlasny, maska, brama, DNS */
+        if (!paging64_user_range(a1, 4 * sizeof(uint32_t))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint32_t *out = (uint32_t *)(uintptr_t)a1;
+        out[0] = net_ip();
+        out[1] = net_mask();
+        out[2] = net_gw();
+        out[3] = net_dns();
+        r->rax = (uint64_t)net_configured();
+        return;
+    }
+    case SYS64_UDP_OPEN:
+        r->rax = (uint64_t)(int64_t)net_udp_open((uint16_t)a1,
+                                                 task64_current_id());
+        return;
+    case SYS64_UDP_CLOSE:
+        net_udp_close((int)a1, task64_current_id());
+        r->rax = 0;
+        return;
+    case SYS64_UDP_SEND: {
+        /* Wszystko poza samymi danymi idzie w jednym opisie. Trzy
+           rejestry na argumenty to za malo na gniazdo, adres, port,
+           dlugosc i limit czasu - a upychanie po dwie rzeczy w jeden
+           rejestr czyta sie fatalnie i psuje przy pierwszej zmianie. */
+        struct udp_opis opis;
+        if (!paging64_user_range(a1, sizeof(opis))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
+        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)net_udp_send(
+            opis.sock, task64_current_id(), opis.ip, opis.port,
+            (const void *)(uintptr_t)a2, (uint16_t)a3);
+        return;
+    }
+    case SYS64_UDP_RECV: {
+        struct udp_opis opis;
+        if (!paging64_user_range(a1, sizeof(opis))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
+        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+
+        uint32_t skad_ip = 0;
+        uint16_t skad_port = 0;
+        int n = net_udp_recv(opis.sock, task64_current_id(),
+                             &skad_ip, &skad_port,
+                             (void *)(uintptr_t)a2, (uint16_t)a3,
+                             opis.timeout);
+        if (n > 0) {
+            /* Kto przyslal - program pyta o to przez ten sam opis */
+            opis.ip = skad_ip;
+            opis.port = skad_port;
+            memcpy((void *)(uintptr_t)a1, &opis, sizeof(opis));
+        }
+        r->rax = (uint64_t)(int64_t)n;
+        return;
+    }
+    case SYS64_TCP_CONNECT: {
+        /* Ten sam opis, co przy UDP - port i limit czasu maja tam
+           swoje miejsce, a adres jest tam, gdzie go widac */
+        struct udp_opis opis;
+        if (!paging64_user_range(a1, sizeof(opis))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
+        r->rax = (uint64_t)(int64_t)tcp_connect(opis.ip, opis.port,
+                                                task64_current_id(),
+                                                opis.timeout);
+        return;
+    }
+    case SYS64_TCP_SEND:
+        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)tcp_send(
+            (int)a1, task64_current_id(), (const void *)(uintptr_t)a2,
+            (uint16_t)a3, 5000);
+        return;
+    case SYS64_TCP_RECV:
+        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)tcp_recv(
+            (int)a1, task64_current_id(), (void *)(uintptr_t)a2,
+            (uint16_t)a3, 5000);
+        return;
+    case SYS64_TCP_CLOSE:
+        tcp_close((int)a1, task64_current_id());
+        r->rax = 0;
         return;
     case SYS64_CLOSE:
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);

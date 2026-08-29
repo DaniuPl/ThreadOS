@@ -150,7 +150,8 @@ ProtonOS/
 │   ├── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
 │   ├── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
 │   ├── uls64.c         # 'ls' jako program: pyta o wpisy po kolei
-│   └── uupper64.c      # filtr: czyta wejście, pisze wielkimi literami
+│   ├── uupper64.c      # filtr: czyta wejście, pisze wielkimi literami
+│   └── unet64.c        # sieć z ring 3: DHCP, UDP i TCP przez syscalle
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
@@ -1005,3 +1006,22 @@ obrazie dysku.
       adres, `ifconfig` pokazuje maskę, bramę i DNS, `ping` na bramę
       wraca 3/3, a tablica ARP zna jej adres sprzętowy - czyli ramki
       naprawdę wychodzą i wracają
+- [x] **Sieć od strony programu** - z sieci korzystało dotąd tylko
+      jądro, bo `ping` i `ifconfig` to jego własne polecenia. Teraz
+      program w ring 3 pyta o swój adres, otwiera gniazdo UDP, wysyła
+      datagram i łączy się po TCP - bez żadnych szczególnych uprawnień.
+      Gniazdo należy do zadania, które je otworzyło: jądro trzyma jego
+      numer i sprząta po jego śmierci, więc program nie sięgnie po cudze
+      gniazdo, podając jego numer. Przy okazji lekcja o ABI: pierwsza
+      wersja upychała numer gniazda i limit czasu w jednym rejestrze,
+      bo trzy rejestry na argumenty to za mało na gniazdo, adres, port,
+      długość i limit naraz. Czytało się to fatalnie i psuło przy
+      pierwszej zmianie - teraz wszystko poza samymi danymi idzie
+      w jednym opisie przekazywanym wskaźnikiem, a jądro wpisuje w ten
+      sam opis adres nadawcy przy odbiorze. `unet64` sprawdza trzy
+      rzeczy po kolei i sam wystawia sobie ocenę: adres z DHCP,
+      datagram wysłany **do samego siebie** (pętla zwrotna nie wychodzi
+      na kabel, więc próba dotyczy stosu, a nie sieci dookoła) oraz
+      połączenie TCP z serwerem HTTP stojącym na hoście - w sieci
+      użytkownika QEMU brama `10.0.2.2` **jest** hostem, więc żadne
+      przekierowanie portów nie jest do tego potrzebne

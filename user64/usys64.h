@@ -38,6 +38,15 @@
 #define SYS64_UNLINK    20
 #define SYS64_PIPE      21
 #define SYS64_DUP2      22
+#define SYS64_NETINFO     23
+#define SYS64_UDP_OPEN    24
+#define SYS64_UDP_SEND    25
+#define SYS64_UDP_RECV    26
+#define SYS64_UDP_CLOSE   27
+#define SYS64_TCP_CONNECT 28
+#define SYS64_TCP_SEND    29
+#define SYS64_TCP_RECV    30
+#define SYS64_TCP_CLOSE   31
 
 #define NAME_MAX64 63
 
@@ -161,6 +170,94 @@ static inline int64_t sys_exec(const char *name, char *const argv[])
 {
     return syscall64_3(SYS64_EXEC, (int64_t)(uintptr_t)name,
                        (int64_t)ustrlen(name), (int64_t)(uintptr_t)argv);
+}
+
+/* --- Siec ---------------------------------------------------------
+ *
+ * Opis gniazda w jednym miejscu, bo trzy rejestry na argumenty to za
+ * malo na gniazdo, adres, port, dlugosc i limit czasu naraz. Uklad
+ * musi zgadzac sie z tym w kernel64/syscall64.c.
+ *
+ * Przy odbiorze jadro wpisuje tu z powrotem adres i port nadawcy.
+ */
+struct udp_opis {
+    int sock;
+    uint32_t ip;
+    uint16_t port;
+    uint16_t _wyrownanie;
+    uint32_t timeout;
+};
+
+/* Wlasny adres, maska, brama i DNS. Zwraca 1, gdy system ma juz
+   adres z sieci. */
+static inline int64_t sys_netinfo(uint32_t adresy[4])
+{
+    return syscall64(SYS64_NETINFO, (int64_t)(uintptr_t)adresy, 0);
+}
+
+static inline int64_t sys_udp_open(uint16_t port)
+{
+    return syscall64(SYS64_UDP_OPEN, port, 0);
+}
+
+static inline int64_t sys_udp_send(struct udp_opis *o, const void *buf,
+                                   uint64_t len)
+{
+    return syscall64_3(SYS64_UDP_SEND, (int64_t)(uintptr_t)o,
+                       (int64_t)(uintptr_t)buf, (int64_t)len);
+}
+
+static inline int64_t sys_udp_recv(struct udp_opis *o, void *buf,
+                                   uint64_t max)
+{
+    return syscall64_3(SYS64_UDP_RECV, (int64_t)(uintptr_t)o,
+                       (int64_t)(uintptr_t)buf, (int64_t)max);
+}
+
+static inline int64_t sys_udp_close(int sock)
+{
+    return syscall64(SYS64_UDP_CLOSE, sock, 0);
+}
+
+static inline int64_t sys_tcp_connect(struct udp_opis *o)
+{
+    return syscall64(SYS64_TCP_CONNECT, (int64_t)(uintptr_t)o, 0);
+}
+
+static inline int64_t sys_tcp_send(int conn, const void *buf, uint64_t len)
+{
+    return syscall64_3(SYS64_TCP_SEND, conn, (int64_t)(uintptr_t)buf,
+                       (int64_t)len);
+}
+
+static inline int64_t sys_tcp_recv(int conn, void *buf, uint64_t max)
+{
+    return syscall64_3(SYS64_TCP_RECV, conn, (int64_t)(uintptr_t)buf,
+                       (int64_t)max);
+}
+
+static inline int64_t sys_tcp_close(int conn)
+{
+    return syscall64(SYS64_TCP_CLOSE, conn, 0);
+}
+
+/* Adres z napisu "10.0.2.2"; -1 gdy to nie adres */
+static inline int64_t uparse_ip(const char *s)
+{
+    uint32_t ip = 0;
+    for (int czlon = 0; czlon < 4; czlon++) {
+        int v = 0, cyfr = 0;
+        while (*s >= '0' && *s <= '9') {
+            v = v * 10 + (*s++ - '0');
+            cyfr++;
+        }
+        if (!cyfr || v > 255)
+            return -1;
+        ip = (ip << 8) | (uint32_t)v;
+        if (czlon < 3 && *s++ != '.')
+            return -1;
+    }
+    return *s ? -1 : (int64_t)ip;
 }
 
 /* Zaklada potok. Wpisuje dwa numery: fd[0] do czytania, fd[1] do
