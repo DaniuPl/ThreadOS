@@ -28,6 +28,7 @@
 .globl ap_licznik
 .globl ap_stos
 .globl ap_cr3
+.globl ap_numer
 
 .code16
 ap_trampolina:
@@ -97,8 +98,18 @@ ap_dlugi:
     movq $OFF(ap_licznik), %rax
     lock incl (%rax)
 
-    /* Rdzen staje: rozdzielanie mu pracy wymaga schedulera per rdzen
-       i zamkow w calym jadrze, a tych jeszcze nie ma */
+    /* I do roboty. Numer rdzenia w RDI - tak, jak kaze konwencja
+       wywolan trybu dlugiego - a sama petla robocza siedzi juz
+       w jadrze, gdzie kod pisze sie w C.
+
+       Adres funkcji przez rejestr: skok wzgledny siegnie najwyzej
+       dwa gigabajty, a jadro lezy poza tym zasiegiem od miejsca,
+       w ktorym ten kod sie wykonuje. */
+    movq $OFF(ap_numer), %rax
+    movl (%rax), %edi
+    movabsq $smp_ap_glowna, %rax
+    call *%rax
+
 1:  hlt
     jmp 1b
 
@@ -120,6 +131,8 @@ ap_gdtr:
 ap_stos:
     .quad 0
 ap_cr3:
+    .long 0
+ap_numer:
     .long 0
 ap_licznik:
     .long 0

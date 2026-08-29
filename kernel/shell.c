@@ -19,6 +19,7 @@
 #include "include/swap.h"
 #include "include/acpi.h"
 #include "include/prog.h"
+#include "include/smp.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -80,6 +81,7 @@ static const struct {
     {"cat F",    "wypisz plik"},
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
+    {"smp",      "policz cos na wszystkich rdzeniach"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -337,6 +339,68 @@ static void cmd_cp(char *args)
         printk("cp: nie udalo sie zapisac '%s'\n", cel);
 }
 
+/* smp - rozdzielenie liczenia na wszystkie rdzenie
+ *
+ * Kazda jednostka pracy liczy sume kontrolna kawalka ciagu
+ * pseudolosowego - roboty na tyle, zeby rdzen mial co robic, i na
+ * tyle prostej, zeby wynik dalo sie sprawdzic.
+ *
+ * Wynik porownujemy z policzonym na jednym rdzeniu. Zgadza sie, gdy
+ * jednostki policzono dokladnie raz kazda i nikt nie zadeptal cudzej
+ * komorki - a to jest wlasciwe pytanie o wspolbieznosc, nie to, czy
+ * cos sie w ogole policzylo.
+ */
+
+#define SMP_JEDNOSTEK 64
+#define SMP_KROKOW    200000
+
+static uint32_t smp_wyniki[SMP_JEDNOSTEK];
+
+/* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
+   numeru, wiec wynik nie zalezy od tego, ktory rdzen go policzyl */
+static uint32_t smp_licz_kawalek(uint32_t numer)
+{
+    uint32_t stan = numer * 2654435761u + 12345u;
+    uint32_t suma = 0;
+    for (uint32_t i = 0; i < SMP_KROKOW; i++) {
+        stan = stan * 1103515245u + 12345u;
+        suma += stan >> 16;
+    }
+    return suma;
+}
+
+static void smp_jednostka(uint32_t numer, void *dane)
+{
+    (void)dane;
+    if (numer < SMP_JEDNOSTEK)
+        smp_wyniki[numer] = smp_licz_kawalek(numer);
+}
+
+static void cmd_smp(void)
+{
+    uint32_t wzorzec = 0;
+    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
+        wzorzec += smp_licz_kawalek(i);
+
+    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
+        smp_wyniki[i] = 0;
+    smp_praca(smp_jednostka, 0, SMP_JEDNOSTEK);
+
+    uint32_t razem = 0;
+    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
+        razem += smp_wyniki[i];
+
+    printk("Rdzeni: %d (obudzonych %d), jednostek %u\n",
+           smp_cpus(), smp_started(), (uint32_t)SMP_JEDNOSTEK);
+    printk("Udzial:");
+    for (int i = 0; i < smp_cpus(); i++)
+        printk(" rdzen%d=%u", i, smp_udzial(i));
+    printk("\n");
+    printk("Wynik: %u, wzorzec: %u - %s\n", razem, wzorzec,
+           razem == wzorzec ? "zgadza sie" : "NIE ZGADZA SIE");
+    printk("Liczylo rdzeni: %d\n", smp_pracujacych());
+}
+
 static void cmd_dhcp(void)
 {
     if (!dhcp_configure())
@@ -411,6 +475,8 @@ static void run_command(char *cmd)
         cmd_write(arg);
     else if (!strcmp(cmd, "cp"))
         cmd_cp(arg);
+    else if (!strcmp(cmd, "smp"))
+        cmd_smp();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))

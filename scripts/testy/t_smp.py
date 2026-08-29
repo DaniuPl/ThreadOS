@@ -12,10 +12,21 @@ droga do trybu chronionego, zglasza sie i staje. Dawanie mu pracy
 wymaga schedulera per rdzen i zamkow w kazdej strukturze jadra, a te
 pisane byly dla jednego rdzenia i cicho na to licza.
 
-Dlatego test sprawdza dwie rzeczy naraz: ze rdzenie sie zglaszaja
-ORAZ ze system po ich obudzeniu dziala dokladnie tak samo, jak
-dzialal. Samo "widze cztery procesory" nie byloby nic warte, gdyby
-przy okazji cos w systemie pekalo.
+Rdzenie wtorne nie prowadza wlasnych zadan - scheduler i lista
+procesow pisane byly dla jednego rdzenia. Dostaja za to prace
+policzalna: wspolna kolejke jednostek, z ktorej kazdy bierze kolejny
+numer pod zamkiem. To jest caly stan dzielony miedzy rdzeniami - jedna
+liczba i jeden zamek.
+
+Wlasciwe pytanie o wspolbieznosc nie brzmi "czy cos sie policzylo",
+tylko "czy policzylo sie DOKLADNIE RAZ kazde". Dlatego wynik pracy
+rozdzielonej porownujemy z policzonym na jednym rdzeniu: zgadza sie
+tylko wtedy, gdy zadna jednostka nie przepadla ani nie zostala
+policzona dwa razy, i nikt nie zadeptal cudzej komorki.
+
+Test sprawdza tez, ze system po tym wszystkim dziala dokladnie tak
+samo. Samo "widze cztery procesory" nie byloby nic warte, gdyby przy
+okazji cos w systemie pekalo.
 """
 
 import os
@@ -65,6 +76,22 @@ def main():
         odczyt = q.polecenie("cat smptest", "wielordzeniowo")
         check("i oddaje to, co zapisano", "wielordzeniowo" in odczyt)
 
+        # Praca rozdzielona na rdzenie: wynik ma sie zgadzac co do bitu
+        # z policzonym na jednym rdzeniu
+        praca = q.polecenie("smp", "Liczylo rdzeni", timeout=90)
+        check("wynik pracy rozdzielonej zgadza sie z jednordzeniowym",
+              "zgadza sie" in praca and "NIE ZGADZA SIE" not in praca)
+
+        m = re.search(r"Liczylo rdzeni: (\d+)", praca)
+        check("liczyly wszystkie cztery rdzenie",
+              m is not None and int(m.group(1)) == 4)
+
+        udzialy = [int(x) for x in re.findall(r"rdzen\d+=(\d+)", praca)]
+        check("kazdy rdzen wzial czesc jednostek (%s)" % udzialy,
+              len(udzialy) == 4 and all(u > 0 for u in udzialy))
+        check("razem policzono dokladnie tyle jednostek, ile zlecono",
+              sum(udzialy) == 64)
+
         # Liczniki watkow rosna dalej - scheduler nie stanal
         def licznik():
             m = re.findall(r"watek-A: (\d+)", q.screen())
@@ -112,6 +139,15 @@ def main():
                                          timeout=40)
                     check("program w ring 3 dziala jak dotad",
                           "[hello64] koncze sie grzecznie" in prog)
+
+                    praca = q64.polecenie("smp", "Liczylo rdzeni",
+                                          timeout=90)
+                    check("praca rozdzielona na rdzenie takze w trybie "
+                          "dlugim", "zgadza sie" in praca and
+                          "NIE ZGADZA SIE" not in praca)
+                    m2 = re.search(r"Liczylo rdzeni: (\d+)", praca)
+                    check("liczyly wszystkie cztery rdzenie (tryb dlugi)",
+                          m2 is not None and int(m2.group(1)) == 4)
                 finally:
                     q64.close()
         finally:

@@ -28,8 +28,8 @@ Shared by both kernels (same files, compiled twice):
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
-(UHCI), ACPI, secondary cores woken through the local APIC, TLS 1.3
-with certificate verification, and a graphical desktop with windows,
+(UHCI), ACPI, secondary cores computing from a shared work queue,
+TLS 1.3 with certificate verification, and a graphical desktop with windows,
 icons, a file manager and a web browser.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
@@ -39,7 +39,8 @@ saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, TLS 1.3 with certificate verification,
 a graphical desktop whose six applications all run in ring 3, shared
 memory, files mapped into memory, a stack that grows on demand, swap
-to disk, secondary cores woken through the local APIC, four virtual
+to disk, secondary cores computing from a shared work queue, four
+virtual
 consoles, USB keyboard (UHCI), ACPI power-off, and BIOS + UEFI boot
 from a single hybrid disc.
 
@@ -97,11 +98,13 @@ ground for both.
   carries its own copy of the crypto code.
 - `mmap` in the 32-bit kernel too — it maps anonymous memory there,
   but not files.
-- Real SMP. The other cores are now found in the ACPI tables and woken
-  with INIT-SIPI — they come up, report in and halt. Giving them work
-  needs a scheduler per core and locks in every kernel structure, and
-  those were written for one core. This is still the largest single
-  item and it touches everything.
+- Real SMP. The other cores are found in the ACPI tables, woken with
+  INIT-SIPI, and can now run computation from a shared work queue
+  behind one spinlock — `smp` in the shell splits a job across all of
+  them and checks the result against the single-core answer. What they
+  still cannot do is run *tasks*: the scheduler, the process list and
+  most of the kernel were written for one core. That part is still the
+  largest single item and it touches everything.
 - Preemption inside the kernel, which SMP will force anyway.
 - Newer hardware: xHCI. USB still ends at UHCI, so only USB 1.1
   keyboards work.

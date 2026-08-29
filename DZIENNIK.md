@@ -1531,3 +1531,42 @@ sprawdzane przez `make test`.
       rozmawia z jądrem. Zapisuję to tutaj właśnie dlatego, że łatwo
       o tym zapomnieć: pięćset przypadków na parser, zero błędów -
       ale tylko wtedy, gdy ktoś je puści.
+- [x] **Rdzenie wtórne dostają pracę** - i pierwszy zamek w tym
+      systemie.
+
+      Wyłączenie przerwań wystarczało, dopóki rdzeń był jeden: nikt
+      inny nie mógł wejść w środek operacji. Teraz może - i to
+      naprawdę **jednocześnie**, a nie tylko pozornie. Stąd
+      `spinlock.h`: instrukcja `xchg` jest niepodzielna z definicji
+      i przy okazji stanowi barierę dla porządku zapisów, więc nie
+      trzeba tu żadnych dodatkowych ogrodzeń - to, co rdzeń zapisał
+      przed zwolnieniem zamka, drugi zobaczy po jego wzięciu.
+
+      Rdzenie wtórne nie prowadzą własnych zadań i długo jeszcze nie
+      będą: scheduler, lista procesów i większość jądra pisane były dla
+      jednego rdzenia. Dostają za to pracę **policzalną**: wspólną
+      kolejkę jednostek, z której każdy bierze kolejny numer pod
+      zamkiem i liczy go u siebie. Cały stan dzielony między rdzeniami
+      to jedna liczba i jeden zamek - i właśnie dlatego da się o nim
+      myśleć.
+
+      Rdzeń rozruchowy liczy razem z pozostałymi; bez tego na maszynie
+      jednordzeniowej nie policzyłby nikt. Przerwania gasną na czas
+      trzymania zamka także na nim: gdyby timer wywłaszczył wątek
+      trzymający zamek, każdy inny chętny czekałby do jego następnej
+      kolejki.
+
+      Polecenie `smp` rozdziela 64 jednostki i porównuje wynik
+      z policzonym na jednym rdzeniu. To jest właściwe pytanie
+      o współbieżność - nie "czy coś się policzyło", tylko "czy
+      policzyło się **dokładnie raz każde**". Cztery rdzenie, po
+      szesnaście jednostek, suma co do bitu ta sama.
+
+      Błąd po drodze wart zapamiętania: pierwsza wersja trampoliny
+      wołała funkcję jądra skokiem względnym. Przesunięcie policzone
+      przy linkowaniu opisuje odległość od miejsca, w którym kod
+      **leży w obrazie jądra** - a wykonuje się pod `0x8000`. Skok
+      trafiał więc w próżnię i maszyna resetowała się w ciszy, bo rdzeń
+      wtórny nie ma jeszcze tablicy wyjątków. Adres idzie teraz przez
+      rejestr, tak jak w wersji 64-bitowej, gdzie od początku musiał -
+      bo tam skok względny sięga najwyżej dwóch gigabajtów.

@@ -22,6 +22,7 @@
 .globl ap_trampolina_koniec
 .globl ap_licznik
 .globl ap_stos
+.globl ap_numer
 
 .code16
 ap_trampolina:
@@ -63,8 +64,21 @@ ap_chroniony:
     movl $OFF(ap_licznik), %eax
     lock incl (%eax)
 
-    /* Tyle na razie: procesor staje i czeka. Do rozdzielania mu pracy
-       trzeba wlasnego schedulera i zamkow, a tych jeszcze nie ma. */
+    /* I do roboty. Numer rdzenia idzie na stos jako argument, a sama
+       petla robocza siedzi juz w jadrze - tam, gdzie kod pisze sie
+       w C, a nie w adresach liczonych na piechote.
+
+       Ten rdzen nie ma tablicy wyjatkow ani przerwan, wiec funkcja
+       po drugiej stronie nie moze sie mylic i nie wraca. */
+    movl $OFF(ap_numer), %eax
+    pushl (%eax)
+    /* Adres funkcji przez rejestr, nie skokiem wzglednym: ten kod
+       wykonuje sie pod 0x8000, a przesuniecie policzone przy
+       linkowaniu opisuje odleglosc od miejsca, w ktorym LEZY
+       w obrazie jadra. Skok wzgledny trafilby wiec w prozne. */
+    movl $smp_ap_glowna, %eax
+    call *%eax
+
 1:  hlt
     jmp 1b
 
@@ -82,6 +96,8 @@ ap_gdtr:
 /* Wypelniane przez procesor rozruchowy przed kazdym SIPI */
 .align 4
 ap_stos:
+    .long 0
+ap_numer:
     .long 0
 ap_licznik:
     .long 0

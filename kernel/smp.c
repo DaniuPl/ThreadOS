@@ -26,6 +26,7 @@
 #include "include/io.h"
 #include "include/printk.h"
 #include "include/string.h"
+#include "include/spinlock.h"
 
 /* Rejestry APIC leza wysoko, poza pamiecia opisana przy starcie -
    doklejenie ich do mapowania robi w kazdym trybie inny kod. Rdzen
@@ -73,10 +74,110 @@ struct madt_lapic {
 extern uint8_t ap_trampolina[], ap_trampolina_koniec[];
 extern volatile uint32_t ap_licznik;
 extern volatile uint32_t ap_stos;
+extern volatile uint32_t ap_numer;
 
 static volatile uint8_t *apic;
 static int cpus, started;
 static uint8_t apic_id[MAX_CPU];
+
+/* --- Wspolna kolejka pracy ------------------------------------------
+ *
+ * Caly stan dzielony miedzy rdzeniami to te kilka pol. Numer nastepnej
+ * jednostki bierze sie pod zamkiem, a liczy juz bez niego - inaczej
+ * rdzenie czekalyby na siebie zamiast pracowac.
+ */
+static struct spinlock zamek = SPINLOCK_WOLNY;
+static void (*praca_fn)(uint32_t, void *);
+static void *praca_dane;
+static volatile uint32_t praca_ile;      /* ile jednostek w zleceniu */
+static volatile uint32_t praca_nastepna; /* pierwsza jeszcze nie wzieta */
+static volatile uint32_t praca_zrobione;
+static volatile uint32_t udzial[MAX_CPU];
+
+uint32_t smp_udzial(int rdzen)
+{
+    return (rdzen >= 0 && rdzen < MAX_CPU) ? udzial[rdzen] : 0;
+}
+
+int smp_pracujacych(void)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_CPU; i++)
+        if (udzial[i])
+            n++;
+    return n;
+}
+
+/* Bierze jedna jednostke do policzenia. Zwraca 0, gdy nie ma juz nic.
+ *
+ * Przerwania gasimy na czas trzymania zamka takze na rdzeniu
+ * rozruchowym: gdyby timer wywlaszczyl watek trzymajacy zamek, kazdy
+ * inny checny musialby czekac do jego nastepnej kolejki. */
+static int wez_jednostke(uint32_t *numer)
+{
+    uint32_t flags = irq_save();
+    spin_lock(&zamek);
+    int jest = praca_nastepna < praca_ile;
+    if (jest)
+        *numer = praca_nastepna++;
+    spin_unlock(&zamek);
+    irq_restore(flags);
+    return jest;
+}
+
+/* Petla robocza - ta sama dla rdzenia rozruchowego i dla wtornych */
+static void rob_co_jest(int rdzen)
+{
+    uint32_t numer;
+    while (wez_jednostke(&numer)) {
+        praca_fn(numer, praca_dane);
+        udzial[rdzen]++;
+        __atomic_add_fetch(&praca_zrobione, 1, __ATOMIC_SEQ_CST);
+    }
+}
+
+/* Wejscie rdzenia wtornego z trampoliny. Nie wraca.
+ *
+ * Ten rdzen nie ma tablicy wyjatkow ani przerwan - kazdy blad konczy
+ * sie potrojnym bledem i resetem maszyny. Dlatego robi tu jedna
+ * rzecz: czeka na zlecenie i liczy to, co dostal. */
+void smp_ap_glowna(uint32_t numer)
+{
+    if (numer >= MAX_CPU)
+        numer = MAX_CPU - 1;
+
+    for (;;) {
+        if (praca_ile)
+            rob_co_jest((int)numer);
+        __asm__ volatile("pause" ::: "memory");
+    }
+}
+
+void smp_praca(void (*funkcja)(uint32_t numer, void *dane), void *dane,
+               uint32_t ile)
+{
+    if (!funkcja || !ile)
+        return;
+
+    for (int i = 0; i < MAX_CPU; i++)
+        udzial[i] = 0;
+
+    praca_fn = funkcja;
+    praca_dane = dane;
+    praca_nastepna = 0;
+    praca_zrobione = 0;
+    __atomic_store_n(&praca_ile, ile, __ATOMIC_SEQ_CST);
+
+    /* Rdzen rozruchowy liczy razem z pozostalymi: na maszynie
+       jednordzeniowej nie policzylby inaczej nikt */
+    rob_co_jest(0);
+
+    /* Czekamy na tych, ktorzy wzieli jednostke tuz przed nami */
+    while (__atomic_load_n(&praca_zrobione, __ATOMIC_SEQ_CST) < ile)
+        __asm__ volatile("pause" ::: "memory");
+
+    __atomic_store_n(&praca_ile, 0, __ATOMIC_SEQ_CST);
+}
 
 int smp_cpus(void)    { return cpus ? cpus : 1; }
 int smp_started(void) { return started; }
@@ -173,10 +274,13 @@ int smp_init(void)
     uint32_t off_licznik =
         (uint32_t)((uint8_t *)&ap_licznik - ap_trampolina);
     uint32_t off_stos = (uint32_t)((uint8_t *)&ap_stos - ap_trampolina);
+    uint32_t off_numer = (uint32_t)((uint8_t *)&ap_numer - ap_trampolina);
     volatile uint32_t *licznik =
         (volatile uint32_t *)(uintptr_t)(AP_BASE + off_licznik);
     volatile uintptr_t *stos =
         (volatile uintptr_t *)(uintptr_t)(AP_BASE + off_stos);
+    volatile uint32_t *numer =
+        (volatile uint32_t *)(uintptr_t)(AP_BASE + off_numer);
     *licznik = 0;
 
 #ifdef __x86_64__
@@ -200,6 +304,10 @@ int smp_init(void)
         if (!pamiec)
             break;
         *stos = (uintptr_t)pamiec + AP_STACK;
+        /* Rdzen rozruchowy ma numer zero, wtorne dostaja kolejne -
+           kazdy liczy swoj udzial w osobnym slowie, wiec nie musza
+           sie o nie bic */
+        *numer = (uint32_t)(started + 1);
 
         uint32_t bylo = *licznik;
         obudz(apic_id[i], AP_BASE >> 12);
