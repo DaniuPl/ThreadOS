@@ -1,17 +1,18 @@
-/* Obsługa syscalli (int 0x80)
+/* Syscall handling (int 0x80)
  *
- * Konwencja jak w starym Linuksie: numer w eax, argumenty w ebx/ecx/edx,
- * wynik w eax. Handler dostaje wskaźnik na zapisane rejestry użytkownika
- * i modyfikuje eax w ramce - stub przerwania odtworzy go przy iret.
+ * The convention is the old Linux one: the number in eax, arguments in
+ * ebx/ecx/edx, the result in eax. The handler gets a pointer to the
+ * saved user registers and modifies eax in the frame - the interrupt
+ * stub restores it on iret.
  *
- * Granica jądro/użytkownik: proces w ring 3 nie może sięgnąć po pamięć
- * jądra sam (pilnuje tego stronicowanie), ale mógłby to zrobić cudzymi
- * rękami - podając w syscallu wskaźnik na pamięć jądra. Jądro pisałoby
- * wtedy pod ten adres w ring 0, z pełnymi prawami. Dlatego każdy adres
- * przychodzący z ring 3 przechodzi przez user_ok()/user_str(): musi
- * leżeć w przestrzeni użytkownika i być realnie zamapowany w katalogu
- * stron procesu. Zły wskaźnik = błąd -1 (EFAULT), a nie page fault
- * w jądrze albo cicha kradzież pamięci.
+ * The kernel/user border: a process in ring 3 cannot reach kernel
+ * memory itself (paging sees to that), but it could do so by proxy -
+ * by passing a pointer to kernel memory in a syscall. The kernel would
+ * then write to that address in ring 0, with full rights. That is why
+ * every address arriving from ring 3 goes through user_ok()/user_str():
+ * it has to lie in user space and be really mapped in the process's
+ * page directory. A bad pointer = error -1 (EFAULT), not a page fault
+ * inside the kernel or a quiet theft of memory.
  */
 
 #include <stdint.h>
@@ -34,41 +35,42 @@
 #include "include/signal.h"
 #include "include/string.h"
 
-/* --- ktore wywolania nie potrzebuja wielkiego zamka jadra ----------
+/* --- which calls do not need the big kernel lock -------------------
  *
- * Zamek jest jeden na cale jadro i bierze go kazde wejscie z
- * pierscienia 3, bo sterowniki, system plikow i wymiana stron pisane
- * byly dla jednego rdzenia i cicho na to licza. Ale nie kazde
- * wywolanie tam siega. Te ponizej dotykaja WYLACZNIE stanu wolajacego
- * zadania oraz rzeczy, ktore maja wlasne zamki - dwa rdzenie moga byc
- * w nich naraz i nic z tego nie wyniknie.
+ * There is one lock for the whole kernel and every entry from ring 3
+ * takes it, because the drivers, the filesystem and the swapper were
+ * written for a single core and quietly count on it. But not every
+ * call reaches there. The ones below touch ONLY the calling task's
+ * state and things that have locks of their own - two cores can be
+ * inside them at once and nothing will come of it.
  *
- * Lista jest krotka i jawna z rozmyslem: dopisanie do niej wywolania
- * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
- * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
+ * The list is short and explicit on purpose: adding a call to it is a
+ * promise that it has been read to the end, together with what it
+ * calls further down. The default answer is "with the lock" and that
+ * is how it is to stay.
  */
 int syscall_lockless(uint32_t nr)
 {
     switch (nr) {
-    case SYS_GETPID:     /* wlasny numer, jedno pole zadania */
-    case SYS_GETTICKS:   /* licznik przerwan zegara, jedno slowo */
-    case SYS_CORE:      /* pytanie do wlasnego lokalnego APIC */
-    case SYS_SLEEP:      /* wlasne "obudz mnie" i scheduler, ktory ma
-                            swoj zamek - a przez przelaczenie kontekstu
-                            wielkiego zamka i tak sie nie trzyma */
+    case SYS_GETPID:     /* its own number, one task field */
+    case SYS_GETTICKS:   /* the timer interrupt counter, one word */
+    case SYS_CORE:      /* a question to its own local APIC */
+    case SYS_SLEEP:      /* its own "wake me" and the scheduler, which has
+                            a lock of its own - and the big lock is not
+                            held across a context switch anyway */
         return 1;
     default:
         return 0;
     }
 }
 
-/* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
+/* Drawing commands passed by pointer (layout matching usys.h) */
 struct win_rect_cmd {
     int32_t x, y, w, h, color;
 };
 struct win_text_cmd {
     int32_t x, y, color;
-    uint32_t s;                 /* wskaznik na lancuch (char *) */
+    uint32_t s;                 /* pointer to a string (char *) */
 };
 struct sysinfo_buf {
     uint32_t ram_kib;
@@ -83,7 +85,7 @@ struct udp_send_cmd {
 };
 struct udp_recv_cmd {
     uint32_t buf, max, timeout_ms;
-    uint32_t from_ip, from_port;    /* wypelniane przez jadro */
+    uint32_t from_ip, from_port;    /* filled in by the kernel */
 };
 struct netinfo_buf {
     uint32_t ip, mask, gw, dns;
@@ -92,17 +94,17 @@ struct tcp_io_cmd {
     uint32_t buf, len, timeout_ms;
 };
 
-#define IO_MAX     4096          /* limit na jeden read/write */
-#define PATH_MAX   128           /* najdluzsza sciezka/linia polecen */
-#define USER_TOP   0xC0000000u   /* szczyt przestrzeni uzytkownika (stos) */
+#define IO_MAX     4096          /* limit for a single read/write */
+#define PATH_MAX   128           /* the longest path/command line */
+#define USER_TOP   0xC0000000u   /* top of user space (the stack) */
 #define EFAULT     ((uint32_t)-1)
 
-/* --- walidacja wskaznikow z ring 3 ------------------------------------ */
+/* --- validating pointers from ring 3 ---------------------------------- */
 
-/* Czy [addr, addr+len) w calosci lezy w pamieci uzytkownika biezacego
-   procesu? paging_get_mapping() zwraca ramke tylko dla stron z wlasnych
-   tablic procesu - strony jadra (wspoldzielone PDE) daja 0, wiec adres
-   z obszaru jadra odpada automatycznie. */
+/* Does [addr, addr+len) lie entirely in the current process's user
+   memory? paging_get_mapping() returns a frame only for pages from the
+   process's own tables - kernel pages (shared PDEs) give 0, so an
+   address in the kernel area is rejected automatically. */
 static int user_ok(uint32_t addr, uint32_t len)
 {
     if (!len)
@@ -112,17 +114,17 @@ static int user_ok(uint32_t addr, uint32_t len)
 
     uint32_t cr3 = task_current_cr3();
     for (uint32_t page = addr & ~0xFFFu; page < addr + len; page += 0x1000) {
-        /* Strona moze byc procesowi obiecana, ale jeszcze nietknieta
-           (sterta/mmap) - wtedy urzeczywistniamy ja tu, zamiast uznawac
-           swiezo przydzielony bufor za zly wskaznik */
+        /* A page may be promised to the process but not yet touched
+           (heap/mmap) - we then make it real here instead of treating a
+           freshly allocated buffer as a bad pointer */
         if (!paging_get_mapping(cr3, page) && !process_demand_page(page))
             return 0;
     }
     return 1;
 }
 
-/* Kopiuje lancuch z przestrzeni uzytkownika do bufora jadra.
-   0 = OK, -1 = zly wskaznik albo lancuch dluzszy niz max-1. */
+/* Copies a string from user space into a kernel buffer.
+   0 = OK, -1 = bad pointer or a string longer than max-1. */
 static int user_str(char *dst, uint32_t uaddr, uint32_t max)
 {
     uint32_t cr3 = task_current_cr3();
@@ -131,7 +133,7 @@ static int user_str(char *dst, uint32_t uaddr, uint32_t max)
         uint32_t va = uaddr + i;
         if (!va || va >= USER_TOP)
             return -1;
-        /* Sprawdzaj mapowanie na starcie i przy kazdym przejsciu strony */
+        /* Check the mapping at the start and at every page crossing */
         if (i == 0 || (va & 0xFFF) == 0) {
             if (!paging_get_mapping(cr3, va & ~0xFFFu) &&
                 !process_demand_page(va))
@@ -141,10 +143,10 @@ static int user_str(char *dst, uint32_t uaddr, uint32_t max)
         if (!dst[i])
             return 0;
     }
-    return -1;                   /* brak zera w limicie - odrzuc */
+    return -1;                   /* no zero within the limit - reject */
 }
 
-/* Zapis do pamieci uzytkownika po sprawdzeniu adresu. 0 = OK, -1 = blad. */
+/* A write into user memory after checking the address. 0 = OK, -1 = error. */
 static int user_put(uint32_t uaddr, const void *src, uint32_t len)
 {
     if (!user_ok(uaddr, len))
@@ -153,7 +155,7 @@ static int user_put(uint32_t uaddr, const void *src, uint32_t len)
     return 0;
 }
 
-/* Odczyt z pamieci uzytkownika po sprawdzeniu adresu. 0 = OK, -1 = blad. */
+/* A read from user memory after checking the address. 0 = OK, -1 = error. */
 static int user_get(void *dst, uint32_t uaddr, uint32_t len)
 {
     if (!user_ok(uaddr, len))
@@ -196,9 +198,9 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_SPAWN: {
-        /* Linia polecen (i nazwa pliku na stdout) ida do buforow jadra -
-           exec zaklada wlasna przestrzen adresowa, wiec pamiec procesu
-           wolajacego nie moze byc pod nia potrzebna. */
+        /* The command line (and the stdout file name) go into kernel
+           buffers - exec sets up an address space of its own, so the
+           calling process's memory must not be needed under it. */
         char cmd[PATH_MAX], out[PATH_MAX];
         if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
             r->eax = EFAULT;
@@ -216,7 +218,7 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_WAIT:
-        r->eax = (uint32_t)task_wait((int)r->ebx);  /* -> kod wyjscia */
+        r->eax = (uint32_t)task_wait((int)r->ebx);  /* -> exit code */
         break;
     case SYS_GETPID:
         r->eax = (uint32_t)task_current_id();
@@ -256,13 +258,13 @@ void syscall_handler(struct regs *r)
         uint32_t size;
         int is_d;
         if (!fs_readdir(task_cwd(), (int)r->ebx, nb, &size, &is_d)) {
-            r->eax = (uint32_t)-1;       /* brak kolejnego wpisu */
+            r->eax = (uint32_t)-1;       /* no further entry */
             break;
         }
         if (user_put(r->ecx, nb, strlen(nb) + 1) < 0)
             r->eax = EFAULT;
         else
-            r->eax = is_d ? (uint32_t)-2 : size;  /* -2 = katalog */
+            r->eax = is_d ? (uint32_t)-2 : size;  /* -2 = a directory */
         break;
     }
     case SYS_UNLINK: {
@@ -309,18 +311,18 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_KILL:
-        /* ecx = numer sygnalu; 0 znaczy "po prostu zabij" (SIGKILL) */
+        /* ecx = signal number; 0 means "just kill" (SIGKILL) */
         r->eax = (uint32_t)task_signal_send((int)r->ebx,
                                             r->ecx ? (int)r->ecx : SIGKILL);
         break;
     case SYS_SIGNAL:
-        /* ebx=sygnal, ecx=procedura obslugi (0=domyslna, 1=ignoruj),
-           edx=trampolina powrotu z ring 3 */
+        /* ebx=signal, ecx=handler (0=default, 1=ignore),
+           edx=the ring 3 return trampoline */
         r->eax = (uint32_t)task_signal_set((int)r->ebx, r->ecx, r->edx);
         break;
     case SYS_SIGRETURN:
-        /* Nie ustawiamy tu eax - caly stan (z eax wlacznie) wraca
-           z ramki odlozonej przy doreczeniu sygnalu */
+        /* We do not set eax here - the whole state (eax included) comes
+           back from the frame pushed when the signal was delivered */
         signal_return(r);
         break;
     case SYS_WIN_CREATE: {
@@ -369,9 +371,10 @@ void syscall_handler(struct regs *r)
         r->eax = process_mmap(r->ebx);
         break;
     case SYS_MMAP_FILE: {
-        /* Plik widziany jako pamiec. Nazwa przychodzi z ring 3, wiec
-           przepisujemy ja do jadra, a rozmiar oddajemy przez wskaznik,
-           bo adres zajmuje juz cala wartosc powrotu. */
+        /* A file seen as memory. The name arrives from ring 3, so we copy
+           it into the kernel, and hand the size back through a pointer,
+           because the address already takes up the whole return
+           value. */
         char name[FS_NAME_MAX + 1];
         if (user_str(name, r->ebx, sizeof(name)) < 0) {
             r->eax = 0;
@@ -387,9 +390,9 @@ void syscall_handler(struct regs *r)
     case SYS_MSYNC:
         r->eax = process_msync();
         break;
-    /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
-       APIC jest poza jego przestrzenia - a bez tego nie da sie
-       pokazac, ze proces naprawde biegl gdzie indziej. */
+    /* The core number. A program has no way of reading it itself - the
+       local APIC is outside its address space - and without it there
+       is no way to show that a process really ran somewhere else. */
     case SYS_CORE:
         r->eax = (uint32_t)smp_core();
         break;
@@ -397,7 +400,7 @@ void syscall_handler(struct regs *r)
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;
     case SYS_THREAD:
-        /* Watek startuje w ring 3 - punkt wejscia musi byc kodem procesu */
+        /* A thread starts in ring 3 - the entry point must be process code */
         if (!user_ok(r->ebx, 1))
             r->eax = EFAULT;
         else
@@ -437,10 +440,11 @@ void syscall_handler(struct regs *r)
             r->eax = EFAULT;
             break;
         }
-        /* Odbior czeka (task_sleep), ale pisze do bufora dopiero po
-           obudzeniu - a wtedy znowu aktywna jest przestrzen adresowa
-           tego procesu. Wskaznik uzytkownika jest juz sprawdzony, wiec
-           dane moga isc prosto do niego, bez posrednika w jadrze. */
+        /* Receiving waits (task_sleep) but writes into the buffer only
+           after waking - and by then this process's address space is
+           active again. The user pointer has already been checked, so
+           the data can go straight there, without an intermediary in
+           the kernel. */
         uint32_t from_ip = 0;
         uint16_t from_port = 0;
         int n = net_udp_recv((int)r->ebx, task_current_id(), &from_ip,
@@ -462,7 +466,7 @@ void syscall_handler(struct regs *r)
     case SYS_NETINFO: {
         struct netinfo_buf ni;
         if (!net_configured()) {
-            r->eax = (uint32_t)-1;      /* siec jeszcze bez adresu */
+            r->eax = (uint32_t)-1;      /* the network has no address yet */
             break;
         }
         ni.ip = net_ip();
@@ -501,8 +505,8 @@ void syscall_handler(struct regs *r)
             r->eax = EFAULT;
             break;
         }
-        /* Jak przy UDP: po obudzeniu znowu aktywna jest przestrzen tego
-           procesu, wiec dane moga isc prosto do sprawdzonego bufora. */
+        /* As with UDP: after waking, this process's space is active
+           again, so the data can go straight into the checked buffer. */
         r->eax = (uint32_t)tcp_recv((int)r->ebx, task_current_id(),
                                     (void *)c.buf, (uint16_t)c.len,
                                     c.timeout_ms);
@@ -519,23 +523,23 @@ void syscall_handler(struct regs *r)
             r->eax = EFAULT;
             break;
         }
-        r->eax = (uint32_t)pid;      /* -1 = nie ma juz dzieci */
+        r->eax = (uint32_t)pid;      /* -1 = there are no children left */
         break;
     }
     case SYS_EXEC: {
-        /* Linia polecen do bufora jadra: pamiec procesu zaraz zniknie
-           razem z cala jego przestrzenia adresowa */
+        /* The command line into a kernel buffer: the process's memory is
+           about to vanish along with its whole address space */
         char cmd[PATH_MAX];
         if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
             r->eax = EFAULT;
             break;
         }
-        r->eax = (uint32_t)process_exec(cmd);   /* przy powodzeniu nie wraca */
+        r->eax = (uint32_t)process_exec(cmd);   /* on success it does not return */
         break;
     }
     case SYS_FORK:
-        /* Jedyny syscall, ktoremu potrzebna jest cala ramka rejestrow:
-           z niej dziecko wraca do ring 3 tam, gdzie rodzic */
+        /* The only syscall that needs the whole register frame: the child
+           returns from it into ring 3 where the parent did */
         r->eax = (uint32_t)process_fork(r);
         break;
     default:

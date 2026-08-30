@@ -1,11 +1,12 @@
-/* Prosty shell jądra
+/* A simple kernel shell
  *
- * Buforuje znaki z klawiatury do końca linii i wykonuje komendę.
- * Shell jest zwykłym wątkiem jądra: przerwanie klawiatury tylko wrzuca
- * znak do bufora kołowego i budzi wątek, a cała reszta - echo, edycja
- * linii i wykonanie komendy - dzieje się już przy włączonych
- * przerwaniach. Dzięki temu komenda może spać, czytać dysk albo czekać
- * na sieć, nie blokując przy tym timera ani reszty systemu.
+ * It buffers characters from the keyboard until the end of a line and
+ * runs the command. The shell is an ordinary kernel thread: the
+ * keyboard interrupt only drops a character into a ring buffer and
+ * wakes the thread, while all the rest - echo, line editing and
+ * running the command - happens with interrupts enabled. Thanks to
+ * that a command may sleep, read the disk or wait for the network
+ * without blocking the timer or the rest of the system.
  */
 
 #include <stdint.h>
@@ -40,9 +41,9 @@
 
 #define LINE_MAX 80
 
-/* Każda konsola wirtualna ma własny shell: własną edytowaną linię,
-   własny bufor klawiszy i własny wątek. Bufor musi mieć rozmiar
-   będący potęgą dwójki - indeksy liczymy modulo maską. */
+/* Every virtual console has its own shell: its own line being edited,
+   its own key buffer and its own thread. The buffer size must be a
+   power of two - indices are taken modulo a mask. */
 #define SHELL_BUF 128
 
 struct shell {
@@ -50,12 +51,12 @@ struct shell {
     int line_len;
     char keybuf[SHELL_BUF];
     uint32_t kb_head, kb_tail;
-    struct task *waiter;            /* != NULL tylko gdy wątek śpi */
+    struct task *waiter;            /* != NULL only while the thread sleeps */
 };
 
 static struct shell shells[CONSOLE_COUNT];
 
-/* Shell konsoli, na której pisze bieżące zadanie */
+/* The shell of the console the current task writes to */
 static struct shell *my_shell(void)
 {
     int vc = task_vc();
@@ -69,8 +70,8 @@ static void prompt(void)
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
-/* Lista komend rosnie, a ekran ma 25 wierszy - dlatego dwie kolumny:
-   caly spis miesci sie bez przewijania. */
+/* The command list grows and the screen has 25 rows - hence two
+   columns: the whole listing fits without scrolling. */
 static const struct {
     const char *name;
     const char *desc;
@@ -164,7 +165,7 @@ static void cmd_kill(char *arg)
         return;
     }
 
-    /* Opcjonalny numer sygnalu za nazwa/pidem; bez niego - SIGKILL */
+    /* An optional signal number after the name/pid; without it - SIGKILL */
     int sig = SIGKILL;
     char *sp = arg;
     while (*sp && *sp != ' ')
@@ -182,8 +183,9 @@ static void cmd_kill(char *arg)
         }
     }
 
-    /* Nazwa zamiast pidu: wygodniejsza, gdy program poszedl z menu
-       pulpitu albo gdy numeracja pidow zalezy od kolejnosci startu */
+    /* A name instead of a pid: handier when a program was launched
+       from the desktop menu, or when pid numbering depends on the
+       order of startup */
     int pid;
     if (*arg < '0' || *arg > '9') {
         pid = task_find_name(arg);
@@ -212,25 +214,25 @@ static void cmd_uptime(void)
 
 static void cmd_gfx(void)
 {
-    /* Przelacz w tryb graficzny 13h i narysuj wzorzec testowy.
-       To przejscie jednokierunkowe - tekstowa konsola znika. */
+    /* Switch into graphics mode 13h and draw a test pattern.
+       This is a one-way move - the text console disappears. */
     video_init();
-    video_clear(3);                       /* tlo niebieskie */
-    video_fill_rect(120, 70, 80, 60, 1);  /* czerwony prostokat na srodku */
-    video_fill_rect(10, 10, 40, 40, 2);   /* zielony w rogu */
-    video_fill_rect(270, 10, 40, 40, 5);  /* zolty w drugim rogu */
+    video_clear(3);                       /* blue background */
+    video_fill_rect(120, 70, 80, 60, 1);  /* a red rectangle in the middle */
+    video_fill_rect(10, 10, 40, 40, 2);   /* green in a corner */
+    video_fill_rect(270, 10, 40, 40, 5);  /* yellow in the other corner */
 }
 
 static void cmd_vesa(void)
 {
-    /* Tryb VESA 640x480x32 + wzorzec testowy (jednokierunkowe). */
+    /* VESA mode 640x480x32 plus a test pattern (one-way). */
     if (video_init_vesa(640, 480) < 0) {
         printk("vesa: brak framebuffera (PCI)\n");
         return;
     }
-    video_clear(3);                        /* tlo niebieskie */
-    video_fill_rect(200, 150, 240, 180, 1); /* czerwony na srodku */
-    video_fill_rect(20, 20, 60, 60, 2);    /* zielony w rogu */
+    video_clear(3);                        /* blue background */
+    video_fill_rect(200, 150, 240, 180, 1); /* red in the middle */
+    video_fill_rect(20, 20, 60, 60, 2);    /* green in a corner */
     video_draw_string(210, 235, "ProtonOS VESA 640x480", 4);
     video_present();
 }
@@ -255,8 +257,8 @@ static void cmd_date(void)
 
 static void cmd_cat(const char *name)
 {
-    /* Pliki moga miec setki kilobajtow, wiec czytamy kawalkami zamiast
-       trzymac caly plik w buforze jadra */
+    /* Files may be hundreds of kilobytes, so we read them in chunks
+       instead of holding the whole file in a kernel buffer */
     int slot = fs_open(FS_ROOT, name, 0);
     if (slot < 0) {
         printk("cat: brak pliku '%s' (lista: 'fls')\n", name);
@@ -294,7 +296,7 @@ static void cmd_df(void)
 
 static void cmd_write(char *args)
 {
-    /* args = "nazwa tekst..." */
+    /* args = "name text..." */
     char *text = args;
     while (*text && *text != ' ')
         text++;
@@ -311,11 +313,12 @@ static void cmd_write(char *args)
         printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
 }
 
-/* cp <zrodlo> <cel> - przepisanie pliku na dysk
+/* cp <source> <destination> - copying a file onto the disk
  *
- * Zrodlo szukamy tam, gdzie szuka go 'run': najpierw w initrd, potem
- * na dysku. Dzieki temu program wgrany razem z jadrem da sie przeniesc
- * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad. */
+ * We look for the source where 'run' looks for it: in the initrd
+ * first, then on the disk. Thanks to that a program shipped with the
+ * kernel can be moved onto the disk with one command - and run from
+ * there afterwards. */
 static void cmd_cp(char *args)
 {
     char *dst = args;
@@ -347,16 +350,16 @@ static void cmd_cp(char *args)
         printk("cp: nie udalo sie zapisac '%s'\n", dst);
 }
 
-/* smp - rozdzielenie liczenia na wszystkie rdzenie
+/* smp - spreading computation across all cores
  *
- * Kazda jednostka pracy liczy sume kontrolna kawalka ciagu
- * pseudolosowego - roboty na tyle, zeby rdzen mial co robic, i na
- * tyle prostej, zeby wynik dalo sie sprawdzic.
+ * Every unit of work computes the checksum of a chunk of a
+ * pseudo-random sequence - enough work to keep a core busy, and simple
+ * enough that the result can be checked.
  *
- * Wynik porownujemy z policzonym na jednym rdzeniu. Zgadza sie, gdy
- * jednostki policzono dokladnie raz kazda i nikt nie zadeptal cudzej
- * komorki - a to jest wlasciwe pytanie o wspolbieznosc, nie to, czy
- * cos sie w ogole policzylo.
+ * We compare the result against the one computed on a single core. It
+ * matches when every unit was computed exactly once and nobody
+ * trampled somebody else's cell - and that is the right question to
+ * ask about concurrency, not whether anything got computed at all.
  */
 
 #define SMP_UNITS 64
@@ -364,8 +367,8 @@ static void cmd_cp(char *args)
 
 static uint32_t smp_results[SMP_UNITS];
 
-/* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
-   numeru, wiec wynik nie zalezy od tego, ktory rdzen go policzyl */
+/* A linear congruential generator - always the same sequence for a
+   given number, so the result does not depend on which core computed it */
 static uint32_t smp_run_chunk(uint32_t number)
 {
     uint32_t stan = number * 2654435761u + 12345u;
@@ -408,9 +411,9 @@ static void cmd_smp(void)
            total == pattern ? "zgadza sie" : "NIE ZGADZA SIE");
     printk("Liczylo rdzeni: %d\n", smp_workers());
 
-    /* Wlasny zegar kazdego rdzenia. Rdzen rozruchowy chodzi z PIT
-       i tu ma zero - wtorne licza swoje tykniecia w lokalnym APIC,
-       i to jest jedyny dowod na to, ze w ogole dostaja przerwania. */
+    /* Every core's own timer. The boot core runs on the PIT and has
+       zero here - secondary ones count their ticks in the local APIC,
+       and that is the only proof that they get interrupts at all. */
     printk("Zegary rdzeni:");
     for (int i = 0; i < smp_cpus(); i++)
         printk(" rdzen%d=%u", i, smp_ticks(i));
@@ -436,10 +439,11 @@ static void cmd_dns(const char *arg)
     printk("\n");
 }
 
-/* Ping i DHCP czekaja na odpowiedzi (task_sleep). Kiedys shell dzialal
-   w kontekscie przerwania i nie wolno mu bylo spac - obie komendy szly
-   wiec do osobnych watkow. Teraz shell jest watkiem i po prostu czeka,
-   a znaki wpisane w miedzyczasie czekaja w buforze klawiatury. */
+/* Ping and DHCP wait for answers (task_sleep). The shell used to run
+   in interrupt context and was not allowed to sleep - both commands
+   therefore went into threads of their own. Now the shell is a thread
+   and simply waits, while characters typed in the meantime wait in the
+   keyboard buffer. */
 static void cmd_ping(const char *arg)
 {
     uint32_t ip;
@@ -455,7 +459,7 @@ static void run_command(char *cmd)
     if (!*cmd)
         return;
 
-    /* Oddziel pierwsze slowo od argumentu */
+    /* Separate the first word from the argument */
     char *arg = cmd;
     while (*arg && *arg != ' ')
         arg++;
@@ -477,9 +481,9 @@ static void run_command(char *cmd)
         else
             printk("uzycie: run <plik> (lista: 'ls')\n");
     }
-    /* To samo, ale programowi wolno biec na kazdym rdzeniu. Jego
-       strona jadrowa i tak chodzi pod wielkim zamkiem - rownolegle
-       idzie liczenie w pierscieniu 3. */
+    /* The same, but the program may run on any core. Its kernel side
+       runs under the big lock anyway - what goes in parallel is the
+       computing in ring 3. */
     else if (!strcmp(cmd, "runw")) {
         if (*arg)
             exec_spawn_anycore(arg);
@@ -538,11 +542,11 @@ static void run_command(char *cmd)
     else if (!strcmp(cmd, "clear"))
         vga_clear();
     else if (!strcmp(cmd, "crash"))
-        *(volatile uint32_t *)0xE0000000 = 1;  /* poza mapowaniem -> #PF */
+        *(volatile uint32_t *)0xE0000000 = 1;  /* outside the mapping -> #PF */
     else if (!strcmp(cmd, "reboot")) {
         printk("Restart...\n");
         if (!acpi_reboot())
-            outb(0x64, 0xFE);  /* zapasowo: impuls przez kontroler klawiatury */
+            outb(0x64, 0xFE);  /* fallback: a pulse through the keyboard controller */
     }
     else if (!strcmp(cmd, "poweroff")) {
         printk("Wylaczanie zasilania...\n");
@@ -570,7 +574,7 @@ static void shell_handle_char(struct shell *sh, char c)
         }
         return;
     }
-    if (c < 0x20)                       /* strzalki i spolka - nie dla shella */
+    if (c < 0x20)                       /* arrows and friends - not for the shell */
         return;
     if (sh->line_len < LINE_MAX - 1) {
         sh->line[sh->line_len++] = c;
@@ -578,8 +582,9 @@ static void shell_handle_char(struct shell *sh, char c)
     }
 }
 
-/* Po asynchronicznym wypisie jadra (DHCP, ping w tle) prompt zostaje
-   gdzies wyzej na ekranie - odrysuj go razem z niedokonczona linia. */
+/* After an asynchronous kernel message (DHCP, a background ping) the
+   prompt is left somewhere higher on the screen - redraw it together
+   with the unfinished line. */
 void shell_refresh(void)
 {
     struct shell *sh = my_shell();
@@ -589,8 +594,9 @@ void shell_refresh(void)
         printk("%s", sh->line);
 }
 
-/* Kontekst przerwania klawiatury (IF=0): tylko odloz znak i obudz
-   watek. Znak przychodzi z konsoli, ktora akurat widac. */
+/* Keyboard interrupt context (IF=0): only park the character and
+   wake the thread. The character comes from the console currently
+   visible. */
 static void shell_on_char(char c)
 {
     struct shell *sh = &shells[console_active()];
@@ -602,7 +608,7 @@ static void shell_on_char(char c)
     }
 }
 
-/* Kontekst watku: czeka na znak z bufora wlasnej konsoli */
+/* Thread context: waits for a character from its own console's buffer */
 static char shell_getchar(struct shell *sh)
 {
     uint32_t flags = irq_save();
@@ -618,12 +624,12 @@ static char shell_getchar(struct shell *sh)
 static void shell_thread(void *arg)
 {
     int vc = (int)arg;
-    task_set_vc(vc);                    /* od teraz piszemy na swojej konsoli */
+    task_set_vc(vc);                    /* from now on we write to our own console */
     struct shell *sh = &shells[vc];
 
-    /* Pierwsza konsola dostala powitanie jeszcze w shell_init, zeby
-       komunikaty startowe i prompt ustawily sie w przewidywalnej
-       kolejnosci. Pozostale witaja sie same. */
+    /* The first console got its greeting back in shell_init, so that
+       the startup messages and the prompt settle in a predictable
+       order. The others greet themselves. */
     if (vc) {
         printk("ProtonOS - konsola %d. Alt+F1..F4 przelacza.\n", vc + 1);
         prompt();

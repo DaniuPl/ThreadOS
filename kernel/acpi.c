@@ -1,20 +1,20 @@
-/* ACPI - wylaczanie i restart komputera
+/* ACPI - turning the computer off and rebooting it
  *
- * Droga do wylaczenia zasilania wiedzie przez trzy struktury:
+ * The road to switching the power off leads through three structures:
  *
- *   RSDP - wskaznik lezacy gdzies w pamieci ponizej megabajta,
- *          rozpoznawany po napisie "RSD PTR " i sumie kontrolnej,
- *   RSDT - spis wszystkich tablic; szukamy w nim FADT ("FACP"),
- *   FADT - mowi, pod ktore porty pisac i gdzie lezy DSDT.
+ *   RSDP - a pointer lying somewhere in memory below one megabyte,
+ *          recognised by the string "RSD PTR " and a checksum,
+ *   RSDT - the listing of all tables; in it we look for the FADT ("FACP"),
+ *   FADT - says which ports to write to and where the DSDT lies.
  *
- * Brakuje jeszcze jednego: samej wartosci, ktora trzeba wpisac.
- * Siedzi ona w DSDT, w bajtkodzie AML, pod nazwa _S5_ - stanem
- * "wylaczony". Pelnego interpretera AML nie mamy i nie potrzebujemy:
- * ten jeden obiekt to krotka paczka, ktora da sie odczytac wprost.
+ * One thing is still missing: the value that has to be written. It
+ * sits in the DSDT, in AML bytecode, under the name _S5_ - the "off"
+ * state. We do not have a full AML interpreter and do not need one:
+ * that single object is a short package that can be read directly.
  *
- * Tablice leza czesto poza obszarem, ktory jadro zarzadza jako pamiec
- * (firmware oznacza go jako zarezerwowany), wiec kazda doklejamy do
- * mapowania identycznosciowego, zanim ja przeczytamy.
+ * The tables often lie outside the area the kernel manages as memory
+ * (the firmware marks it as reserved), so we glue each of them onto
+ * the identity mapping before reading it.
  */
 
 #include <stdint.h>
@@ -23,10 +23,11 @@
 #include "include/string.h"
 #include "include/io.h"
 
-/* Jedyna rzecz w tym pliku zalezna od trybu procesora: tablice ACPI
-   trzeba doklejac do mapowania, a tablice stron buduje w kazdym
-   z jader inny kod. Sama droga do wylaczenia zasilania - RSDP, RSDT,
-   FADT, _S5_ w bajtkodzie - jest ta sama. */
+/* The only thing in this file that depends on the processor mode: the
+   ACPI tables have to be glued onto the mapping, and the page tables
+   are built by different code in each kernel. The road to switching
+   the power off itself - RSDP, RSDT, FADT, _S5_ in bytecode - is the
+   same. */
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP()   paging64_identity_top()
@@ -57,10 +58,10 @@ struct sdt_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
-/* Adres rejestru w opisie ogolnym (ACPI 2.0) - uzywamy go tylko
-   dla rejestru resetu */
+/* A register address in the generic description (ACPI 2.0) - we use it
+   only for the reset register */
 struct gas {
-    uint8_t space;              /* 0 = pamiec, 1 = porty I/O */
+    uint8_t space;              /* 0 = memory, 1 = I/O ports */
     uint8_t width, offset, size;
     uint32_t addr_low, addr_high;
 } __attribute__((packed));
@@ -98,12 +99,12 @@ static uint16_t slp_typa, slp_typb;
 static char oem_id[7];
 static int ready;
 
-/* Spis tablic zapamietany przy starcie - MADT szukamy w nim pozniej,
-   juz po tym, jak wiadomo, ze ACPI w ogole jest */
+/* The table listing remembered at startup - we look for the MADT in it
+   later, once it is known that there is ACPI at all */
 static const struct sdt_header *rsdt_spis;
 
-/* Tablice ACPI leza zwykle poza pamiecia zarzadzana przez jadro -
-   trzeba je najpierw wpuscic do mapowania identycznosciowego */
+/* ACPI tables usually lie outside the memory the kernel manages -
+   they have to be let into the identity mapping first */
 static const void *map(uint32_t phys, uint32_t len)
 {
     if (!phys)
@@ -114,14 +115,14 @@ static const void *map(uint32_t phys, uint32_t len)
     return (const void *)(uintptr_t)phys;
 }
 
-/* Odczyt pojedynczego bajtu spod stalego adresu w pamieci niskiej */
+/* Reading a single byte from a fixed address in low memory */
 static uint8_t low_byte(uint32_t addr)
 {
     const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)addr;
-    /* Kompilator widzi tu staly adres i traktuje go jak tablice
-       o zerowej dlugosci. Przepuszczenie wskaznika przez pusty wstawek
-       odbiera mu te wiedze - adres jest prawdziwy, tyle ze pochodzi
-       spoza jezyka. */
+    /* The compiler sees a constant address here and treats it as an
+       array of zero length. Passing the pointer through an empty asm
+       statement takes that knowledge away from it - the address is
+       real, it just comes from outside the language. */
     __asm__("" : "+r"(p));
     return *p;
 }
@@ -135,10 +136,11 @@ static int checksum_ok(const void *p, uint32_t len)
     return sum == 0;
 }
 
-/* RSDP lezy albo w obszarze danych BIOS-u, albo w pamieci ROM
-   miedzy 0xE0000 a 0xFFFFF; zawsze na granicy 16 bajtow. */
-/* Wskaznik podany przez loader (Multiboot 2) - ma pierwszenstwo przed
-   szukaniem na wlasna reke, bo pod UEFI szukac nie ma gdzie */
+/* The RSDP lies either in the BIOS data area or in ROM between 0xE0000
+   and 0xFFFFF; always on a 16-byte boundary. */
+/* The pointer supplied by the loader (Multiboot 2) - it takes
+   precedence over searching on our own, because under UEFI there is
+   nowhere to search */
 static uint32_t given_rsdp;
 
 void acpi_set_rsdp(uint32_t addr)
@@ -154,10 +156,10 @@ static const struct rsdp *find_rsdp(void)
             return r;
     }
 
-    /* Adres obszaru danych BIOS-u lezy pod stalym adresem 0x40E.
-       Czytamy go bajt po bajcie: dla kompilatora staly adres wygrany
-       na wskaznik to "tablica o zerowej dlugosci" i slusznie sie
-       przy niej krzywi. */
+    /* The address of the BIOS data area lies at the fixed address
+       0x40E. We read it byte by byte: for the compiler a constant
+       address cast to a pointer is an "array of zero length", and it
+       rightly frowns at it. */
     uint32_t ebda = ((uint32_t)low_byte(0x40F) << 8 | low_byte(0x40E)) << 4;
     if (ebda >= 0x400 && ebda < 0xA0000) {
         for (uint32_t a = ebda; a < ebda + 1024; a += 16) {
@@ -175,12 +177,12 @@ static const struct rsdp *find_rsdp(void)
     return (const struct rsdp *)0;
 }
 
-/* Wyluskuje z bajtkodu AML wartosci stanu _S5_ - "wylaczony".
+/* Extracts from the AML bytecode the values of the _S5_ state - "off".
  *
- * Obiekt wyglada tak: nazwa "_S5_", znacznik paczki (0x12), jej dlugosc,
- * liczba elementow, a potem dwie liczby - jedna dla kazdego z dwoch
- * blokow sterujacych. Liczby moga byc zapisane wprost (0..7 maja wlasne
- * znaczniki) albo poprzedzone znacznikiem bajtu (0x0A).
+ * The object looks like this: the name "_S5_", a package tag (0x12),
+ * its length, the element count, and then two numbers - one for each
+ * of the two control blocks. The numbers may be written directly
+ * (0..7 have tags of their own) or preceded by a byte tag (0x0A).
  */
 static int parse_s5(const uint8_t *dsdt, uint32_t len)
 {
@@ -189,12 +191,12 @@ static int parse_s5(const uint8_t *dsdt, uint32_t len)
             continue;
 
         const uint8_t *p = dsdt + i + 4;
-        if (*p != 0x12)                 /* nie paczka - szukaj dalej */
+        if (*p != 0x12)                 /* not a package - keep looking */
             continue;
         p++;
-        p += ((*p & 0xC0) >> 6) + 2;    /* dlugosc paczki + licznik elementow */
+        p += ((*p & 0xC0) >> 6) + 2;    /* package length + element count */
 
-        if (*p == 0x0A)                 /* znacznik "liczba jednobajtowa" */
+        if (*p == 0x0A)                 /* the "one-byte number" tag */
             p++;
         slp_typa = (uint16_t)(*p++ << 10);
         if (*p == 0x0A)
@@ -241,9 +243,9 @@ int acpi_init(void)
         parse_s5((const uint8_t *)(dsdt + 1),
                  dsdt->length - sizeof(*dsdt));
 
-    /* Wlaczenie ACPI: gdy firmware zostawil sterowanie sobie, trzeba
-       je odebrac, pisac do portu SMI. Maszyna wirtualna zwykle oddaje
-       je od razu i tego kroku nie ma. */
+    /* Enabling ACPI: when the firmware kept control to itself, it has
+       to be taken away by writing to the SMI port. A virtual machine
+       usually hands it over at once and this step is absent. */
     if (fadt->smi_cmd && fadt->acpi_enable && fadt->pm1a_cnt_blk &&
         !(inw((uint16_t)fadt->pm1a_cnt_blk) & SCI_EN)) {
         outb((uint16_t)fadt->smi_cmd, fadt->acpi_enable);
@@ -258,8 +260,8 @@ int acpi_init(void)
     return ready;
 }
 
-/* Szuka w spisie tablicy o danej sygnaturze i doklada ja do
-   mapowania. NULL, gdy nie ma. */
+/* Looks in the listing for a table with the given signature and glues
+   it onto the mapping. NULL when there is none. */
 const void *acpi_table(const char *sig)
 {
     if (!rsdt_spis)
@@ -293,9 +295,9 @@ void acpi_poweroff(void)
     if (fadt->pm1b_cnt_blk)
         outw((uint16_t)fadt->pm1b_cnt_blk, slp_typb | SLP_EN);
 
-    /* Zasilanie nie gasnie w tej samej instrukcji, w ktorej o to
-       prosimy - bez tej chwili zwloki zdazylibysmy jeszcze wypisac,
-       ze sie nie udalo, tuz przed tym, jak sie udaje. */
+    /* The power does not go out in the same instruction in which we
+       ask for it - without this moment's delay we would still manage
+       to print that it failed, right before it succeeds. */
     for (volatile uint32_t i = 0; i < 50000000u; i++)
         ;
     irq_restore(flags);
@@ -303,16 +305,17 @@ void acpi_poweroff(void)
 
 int acpi_reboot(void)
 {
-    /* Rejestr resetu jest dopiero od ACPI 2.0 i nie kazdy go wypelnia */
+    /* The reset register only exists from ACPI 2.0 and not everyone fills
+   it in */
     if (!fadt || fadt->header.length < sizeof(struct fadt) ||
         !fadt->reset_reg.addr_low)
         return 0;
 
-    if (fadt->reset_reg.space == 1) {           /* port I/O */
+    if (fadt->reset_reg.space == 1) {           /* an I/O port */
         outb((uint16_t)fadt->reset_reg.addr_low, fadt->reset_value);
         return 1;
     }
-    if (fadt->reset_reg.space == 0) {           /* rejestr w pamieci */
+    if (fadt->reset_reg.space == 0) {           /* a register in memory */
         if (!map(fadt->reset_reg.addr_low, 4))
             return 0;
         *(volatile uint8_t *)(uintptr_t)fadt->reset_reg.addr_low =

@@ -1,22 +1,24 @@
-/* Biblioteka wspoldzielona: wyszukiwanie symboli i relokacje
+/* The shared library: symbol lookup and relocations
  *
- * Caly ten plik jest czytaniem ELF-a - i to dwoch naraz. Z biblioteki
- * bierze tablice symboli dynamicznych: nazwa funkcji -> adres, pod
- * ktorym ta funkcja lezy. Z programu bierze liste relokacji: adres
- * pustego miejsca w jego tablicy skokow -> nazwa funkcji, ktora ma sie
- * tam znalezc. Zlozenie jednego z drugim to jest cale wiazanie.
+ * This whole file is ELF reading - and of two of them at once. From
+ * the library it takes the dynamic symbol table: a function name ->
+ * the address that function lies at. From the program it takes the
+ * relocation list: the address of an empty slot in its jump table ->
+ * the name of the function that belongs there. Putting one together
+ * with the other is the whole of binding.
  *
- * Biblioteka jest konsolidowana pod STALYM adresem (USER_LIB_BASE),
- * a nie dowolnym. To upraszcza rzecz o cala warstwe: adresy w jej
- * tablicy symboli sa juz ostateczne, wiec ona sama nie ma zadnych
- * relokacji do zalatwienia. Ceny za to sa dwie i obie akceptowalne:
- * biblioteka moze byc tylko jedna i zawsze widac ja pod tym samym
- * adresem. Prawdziwy system tak nie robi, bo chce ich wiele i chce
- * losowac adresy - ale prawdziwy system ma na to konsolidator
- * w przestrzeni uzytkownika.
+ * The library is linked at a FIXED address (USER_LIB_BASE) rather than
+ * an arbitrary one. That simplifies the matter by a whole layer: the
+ * addresses in its symbol table are already final, so the library
+ * itself has no relocations to settle. There are two prices for this
+ * and both are acceptable: there can be only one library and it is
+ * always visible at the same address. A real system does not do this,
+ * because it wants many of them and wants to randomise the addresses -
+ * but a real system has a linker in user space for that.
  *
- * Struktury ELF-a roznia sie miedzy trybami procesora szerokoscia pol,
- * ale nie ukladem - stad jeden zestaw nazw i #ifdef nad definicjami.
+ * ELF structures differ between processor modes in field width but not
+ * in layout - hence one set of names and an #ifdef over the
+ * definitions.
  */
 
 #include <stdint.h>
@@ -36,7 +38,7 @@
 
 #define LIB_FILE   "libproton.so"
 
-/* --- naglowki ELF ---------------------------------------------------- */
+/* --- ELF headers ------------------------------------------------------ */
 
 #ifdef __x86_64__
 struct ehdr {
@@ -68,7 +70,7 @@ struct sym {
     uint64_t st_value, st_size;
 } __attribute__((packed));
 
-/* Relokacje z dopelnieniem - tryb dlugi uzywa tylko takich */
+/* Relocations with addends - long mode uses only these */
 struct rel {
     uint64_t r_offset, r_info;
     int64_t  r_addend;
@@ -106,7 +108,7 @@ struct sym {
     uint16_t st_shndx;
 } __attribute__((packed));
 
-/* Relokacje bez dopelnienia - i386 uzywa tylko takich */
+/* Relocations without addends - i386 uses only these */
 struct rel {
     uint32_t r_offset, r_info;
 } __attribute__((packed));
@@ -127,10 +129,10 @@ struct rel {
 #define PF_X      1
 #define SHT_DYNSYM 11
 
-/* --- stan ------------------------------------------------------------ */
+/* --- state ------------------------------------------------------------ */
 
 #define SEGMENTS  4
-#define PAGES_MAX  128                  /* pol megabajta biblioteki wystarczy */
+#define PAGES_MAX  128                  /* half a megabyte of library is enough */
 
 struct segment {
     dyn_addr vaddr;
@@ -147,14 +149,14 @@ static const char *lib_str;
 static struct segment segmenty[SEGMENTS];
 static int nsegments;
 
-/* Ramki stron biblioteki tylko do odczytu - jedne dla calego systemu */
+/* Frames of the library's read-only pages - one set for the whole system */
 static dyn_addr shared_vaddr[PAGES_MAX];
 static uint32_t shared_frame[PAGES_MAX];
 static uint32_t shared_pages;
 
 static int gotowa;
 
-/* --- czytanie ELF ---------------------------------------------------- */
+/* --- reading the ELF --------------------------------------------------- */
 
 static const struct shdr *section(const uint8_t *image, int i)
 {
@@ -180,15 +182,16 @@ static int elf_sane(const uint8_t *image, uint32_t size, int typ)
 #endif
     if (eh->e_machine != EM_OURS || eh->e_type != typ)
         return 0;
-    /* Tablica sekcji musi miescic sie w pliku - bez niej nie znajdziemy
-       ani symboli, ani relokacji, a smieciom nie mozna wierzyc */
+    /* The section table has to fit inside the file - without it we will
+       find neither symbols nor relocations, and rubbish cannot be
+       trusted */
     if (!eh->e_shnum || eh->e_shoff + (uint64_t)eh->e_shnum * eh->e_shentsize
                         > size)
         return 0;
     return 1;
 }
 
-/* --- biblioteka ------------------------------------------------------ */
+/* --- the library ------------------------------------------------------ */
 
 int dyn_present(void)
 {
@@ -226,14 +229,15 @@ uint32_t dyn_frame(dyn_addr vaddr)
     return 0;
 }
 
-/* Ramki segmentow tylko do odczytu powstaja RAZ i zyja do konca pracy
-   systemu - kazdy proces dostaje te same. Wypelniamy je od razu, zeby
-   nie trzeba bylo pamietac przy kazdym procesie, skad wziac tresc. */
+/* The frames of the read-only segments are created ONCE and live until
+   the system stops - every process gets the same ones. We fill them in
+   straight away, so that there is no need to remember for every
+   process where to get the content from. */
 static int setup_frames(void)
 {
     for (int s = 0; s < nsegments; s++) {
         if (segmenty[s].right & DYN_WRITE)
-            continue;                   /* dane pisemne dostaje kazdy swoje */
+            continue;                   /* everyone gets their own writable data */
         dyn_addr start = segmenty[s].vaddr & ~(dyn_addr)0xFFF;
         dyn_addr end = segmenty[s].vaddr + segmenty[s].memsz;
         for (dyn_addr va = start; va < end; va += 4096) {
@@ -246,7 +250,7 @@ static int setup_frames(void)
                 return -1;
             memset((void *)(uintptr_t)frame, 0, 4096);
 
-            /* Przepisz kawalek pliku przypadajacy na te strone */
+            /* Copy the part of the file that falls on this page */
             dyn_addr od = va > segmenty[s].vaddr ? va : segmenty[s].vaddr;
             dyn_addr file_to = segmenty[s].vaddr + segmenty[s].filesz;
             if (od < file_to) {
@@ -268,7 +272,7 @@ int dyn_init(void)
     uint32_t size = 0;
     const void *file = initrd_find(LIB_FILE, &size);
     if (!file)
-        return 0;                       /* nie ma - programy niosa swoje */
+        return 0;                       /* there is none - programs carry their own */
 
     const uint8_t *image = file;
     if (!elf_sane(image, size, ET_DYN)) {
@@ -281,9 +285,9 @@ int dyn_init(void)
     for (int i = 0; i < eh->e_phnum && nsegments < SEGMENTS; i++) {
         if (ph[i].p_type != PT_LOAD || !ph[i].p_memsz)
             continue;
-        /* Biblioteka jest konsolidowana pod stalym adresem; gdyby
-           trafila gdzie indziej, jej wlasne odwolania wskazywalyby
-           w prozne miejsce - lepiej powiedziec to teraz */
+        /* The library is linked at a fixed address; had it landed
+           somewhere else, its own references would point into thin
+           air - better to say so now */
         if (ph[i].p_vaddr < LIB_BASE) {
             printk("[jadro] %s ma segment pod %x - poza obszarem "
                    "biblioteki\n", LIB_FILE, (uint32_t)ph[i].p_vaddr);
@@ -301,8 +305,8 @@ int dyn_init(void)
     if (!nsegments)
         return 0;
 
-    /* Tablica symboli dynamicznych - to ona odpowiada na pytanie
-       "gdzie lezy funkcja o tej nazwie" */
+    /* The dynamic symbol table - it is the one that answers the
+       question "where does the function with this name lie" */
     for (int i = 0; i < eh->e_shnum; i++) {
         const struct shdr *sh = section(image, i);
         if (sh->sh_type != SHT_DYNSYM || !sh->sh_entsize)
@@ -318,18 +322,19 @@ int dyn_init(void)
         return 0;
     }
 
-    /* Biblioteka nie moze miec NIC do rozwiazania u siebie.
+    /* The library must have NOTHING left to resolve in itself.
      *
-     * Wywolania miedzy jej wlasnymi funkcjami wiaza sie przy
-     * konsolidacji (-Bsymbolic); gdyby ktores zostalo do rozwiazania
-     * przy ladowaniu, skakaloby przez jej wlasna tablice skokow, ktora
-     * u nas nie ma komu wypelnic - i program wpadlby w pustke przy
-     * pierwszym uzyciu.
+     * Calls between its own functions are bound at link time
+     * (-Bsymbolic); if one of them were left to be resolved at load
+     * time, it would jump through the library's own jump table, which
+     * here has nobody to fill it in - and the program would fall into
+     * the void on first use.
      *
-     * Relokacje przesuwajace adres o polozenie biblioteki (RELATIVE)
-     * sa czym innym i sa nieszkodliwe: biblioteka lezy dokladnie tam,
-     * gdzie ja skonsolidowano, wiec przesuniecie wynosi zero, a same
-     * miejsca konsolidator wypelnil juz gotowa wartoscia. */
+     * Relocations that shift an address by the library's position
+     * (RELATIVE) are something else and are harmless: the library lies
+     * exactly where it was linked, so the shift is zero, and the slots
+     * themselves were already filled in with the final value by the
+     * linker. */
     for (int i = 0; i < eh->e_shnum; i++) {
         const struct shdr *sh = section(image, i);
         if (sh->sh_type != SHT_REL_OURS || !sh->sh_entsize)
@@ -359,11 +364,12 @@ int dyn_init(void)
     return 1;
 }
 
-/* Adres funkcji o danej nazwie w bibliotece; 0 gdy nie ma takiej */
+/* The address of a function with a given name in the library; 0 when
+   there is none */
 static dyn_addr find(const char *name)
 {
     for (uint32_t i = 1; i < lib_nsyms; i++) {
-        if (!lib_sym[i].st_shndx)       /* symbol nieokreslony - nie nasz */
+        if (!lib_sym[i].st_shndx)       /* an undefined symbol - not ours */
             continue;
         if (!strcmp(lib_str + lib_sym[i].st_name, name))
             return (dyn_addr)lib_sym[i].st_value;
@@ -371,7 +377,7 @@ static dyn_addr find(const char *name)
     return 0;
 }
 
-/* --- relokacje programu ---------------------------------------------- */
+/* --- the program's relocations ----------------------------------------- */
 
 int dyn_is_dynamic(const uint8_t *image, uint32_t size)
 {
@@ -396,8 +402,8 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
         if (sh->sh_type != SHT_REL_OURS || !sh->sh_entsize)
             continue;
 
-        /* Kazda tablica relokacji wskazuje swoja tablice symboli,
-           a ta swoja tablice napisow - nie trzeba niczego zgadywac */
+        /* Every relocation table points at its own symbol table, and
+           that at its own string table - nothing has to be guessed */
         const struct shdr *ss = section(image, (int)sh->sh_link);
         if (ss->sh_type != SHT_DYNSYM || !ss->sh_entsize)
             continue;
@@ -412,16 +418,16 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
             uint32_t nr = REL_SYM(r[k].r_info);
             if (typ != R_JUMP && typ != R_DATA) {
                 if (typ == R_COPY) {
-                    /* Kopiowanie DANYCH z biblioteki do programu.
-                       Biblioteka celowo nie wystawia zmiennych - gdyby
-                       ktoras sie tam znalazla, kazdy proces mialby
-                       wlasna kopie i nikt by o tym nie wiedzial. */
+                    /* Copying DATA from the library into the program.
+                       The library deliberately exports no variables -
+                       if one ended up there, every process would have
+                       a copy of its own and nobody would know. */
                     printk("[jadro] relokacja kopiujaca dane '%s' - "
                            "biblioteka ma wystawiac tylko funkcje\n",
                            texts + syms_tab[nr].st_name);
                     return -1;
                 }
-                continue;               /* nie nasza sprawa */
+                continue;               /* none of our business */
             }
             if (nr >= (uint32_t)(ss->sh_size / ss->sh_entsize))
                 return -1;

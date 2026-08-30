@@ -1,15 +1,16 @@
-/* Stos sieciowy ProtonOS: Ethernet + ARP + IPv4 + ICMP + UDP + TCP
+/* The ProtonOS network stack: Ethernet + ARP + IPv4 + ICMP + UDP + TCP
  *
- * Minimalny, ale prawdziwy: system sam odpowiada na zapytania ARP i na
- * pingi z zewnatrz, a komenda 'ping' rozwiazuje adres MAC przez ARP
- * i mierzy czas odpowiedzi na ICMP echo.
+ * Minimal but real: the system answers ARP queries and pings from
+ * outside on its own, and the 'ping' command resolves a MAC address
+ * through ARP and measures the round-trip time of an ICMP echo.
  *
- * Domyslna konfiguracja pasuje do sieci uzytkownika QEMU
- * (-netdev user): 10.0.2.15/24, brama 10.0.2.2.
+ * The default configuration matches QEMU's user network
+ * (-netdev user): 10.0.2.15/24, gateway 10.0.2.2.
  *
- * Ramki przychodzace trafiaja tu z przerwania karty, wiec obsluga jest
- * krotka: odpowiedz albo zapis do tablicy ARP / stanu pinga. Czekanie
- * dzieje sie w watku, ktory wywolal net_ping().
+ * Incoming frames arrive here from the card's interrupt, so the
+ * handling is short: an answer, or a write into the ARP table / the
+ * ping state. The waiting happens in the thread that called
+ * net_ping().
  */
 
 #include "include/net.h"
@@ -37,13 +38,14 @@
 
 #define ARP_CACHE_SIZE 8
 
-/* Awaryjna konfiguracja, gdyby w sieci nie bylo serwera DHCP -
-   wartosci sieci uzytkownika QEMU */
+/* A fallback configuration in case there is no DHCP server on the
+   network - the values of QEMU's user network */
 #define FALLBACK_IP   IP4(10, 0, 2, 15)
 #define FALLBACK_MASK IP4(255, 255, 255, 0)
 #define FALLBACK_GW   IP4(10, 0, 2, 2)
 
-/* Start bez adresu: dopiero DHCP (albo fallback) nadaje systemowi IP */
+/* We start without an address: only DHCP (or the fallback) gives the
+   system an IP */
 static uint32_t my_ip, my_mask, my_gw, my_dns;
 
 static const uint8_t bcast_mac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
@@ -55,15 +57,15 @@ struct arp_entry {
 };
 
 static struct arp_entry arp_cache[ARP_CACHE_SIZE];
-static int arp_next;                 /* nadpisujemy najstarszy wpis */
+static int arp_next;                 /* we overwrite the oldest entry */
 
-/* Gniazda UDP: kazde ma port i krotka kolejke datagramow, ktora
-   wypelnia przerwanie karty, a oprozniaja odbiorcy (jadro albo proces
-   ring 3 przez syscall). */
+/* UDP sockets: each has a port and a short datagram queue, filled by
+   the card's interrupt and drained by receivers (the kernel or a
+   ring 3 process through a syscall). */
 #define UDP_SOCKS     8
 #define UDP_QUEUE     4
 #define UDP_DATA_MAX  1024
-#define UDP_PORT_MIN  49152        /* porty efemeryczne */
+#define UDP_PORT_MIN  49152        /* ephemeral ports */
 
 struct udp_dgram {
     uint32_t from_ip;
@@ -74,9 +76,9 @@ struct udp_dgram {
 
 struct udp_sock {
     int used;
-    int owner;                     /* pid procesu; -1 = gniazdo jadra */
+    int owner;                     /* the process pid; -1 = a kernel socket */
     uint16_t port;
-    int head, count;               /* kolejka kolowa */
+    int head, count;               /* a ring queue */
     struct udp_dgram q[UDP_QUEUE];
 };
 
@@ -84,7 +86,7 @@ static struct udp_sock udp_socks[UDP_SOCKS];
 static uint16_t udp_next_port = UDP_PORT_MIN;
 static uint32_t udp_dropped;
 
-/* Stan biezacego pinga (wypelniany z przerwania karty) */
+/* The state of the current ping (filled in from the card's interrupt) */
 static volatile int ping_waiting;
 static volatile uint16_t ping_id, ping_seq;
 static volatile int ping_got;
@@ -93,7 +95,7 @@ static volatile uint8_t ping_ttl;
 
 static uint32_t rx_dropped;
 
-/* --- konwersje kolejnosci bajtow -------------------------------------- */
+/* --- byte order conversions -------------------------------------------- */
 
 static inline uint16_t hton16(uint16_t v)
 {
@@ -105,7 +107,7 @@ static inline uint16_t ntoh16(uint16_t v)
     return hton16(v);
 }
 
-static void put32(uint8_t *p, uint32_t v)      /* IP -> siec (big endian) */
+static void put32(uint8_t *p, uint32_t v)      /* IP -> network (big endian) */
 {
     p[0] = (uint8_t)(v >> 24);
     p[1] = (uint8_t)(v >> 16);
@@ -130,7 +132,7 @@ static uint16_t get16(const uint8_t *p)
     return (uint16_t)((p[0] << 8) | p[1]);
 }
 
-/* Suma kontrolna internetowa: dopelnienie jedynkowe sumy 16-bitowych slow */
+/* The Internet checksum: the one's complement of a sum of 16-bit words */
 static uint16_t checksum(const uint8_t *data, uint32_t len)
 {
     uint32_t sum = 0;
@@ -146,7 +148,7 @@ static uint16_t checksum(const uint8_t *data, uint32_t len)
     return (uint16_t)~sum;
 }
 
-/* --- adresy ----------------------------------------------------------- */
+/* --- addresses ---------------------------------------------------------- */
 
 uint32_t net_ip(void)
 {
@@ -183,8 +185,8 @@ void net_set_config(uint32_t ip, uint32_t mask, uint32_t gw, uint32_t dns)
         arp_cache[i].used = 0;
 }
 
-/* Reczne wskazanie serwera DNS (komenda 'dns') - przydaje sie, gdy
-   DHCP go nie podal albo chcemy odpytac inny */
+/* Pointing at a DNS server by hand (the 'dns' command) - useful when
+   DHCP did not supply one or we want to query a different one */
 void net_set_dns(uint32_t ip)
 {
     my_dns = ip;
@@ -227,7 +229,7 @@ int net_parse_ip(const char *s, uint32_t *out)
     return 1;
 }
 
-/* --- tablica ARP ------------------------------------------------------ */
+/* --- the ARP table ------------------------------------------------------ */
 
 static const uint8_t *arp_lookup(uint32_t ip)
 {
@@ -267,13 +269,13 @@ void net_arp_dump(void)
         printk("tablica ARP pusta (sprobuj 'ping <ip>')\n");
 }
 
-/* --- wysylanie -------------------------------------------------------- */
+/* --- sending ------------------------------------------------------------ */
 
-/* Rozwiazanie MAC-a (definicja nizej, przy pingu) - blokuje, wiec wolno
-   go uzywac tylko z kontekstu watku */
+/* Resolving a MAC (defined below, next to ping) - it blocks, so it may
+   only be used from a thread context */
 static const uint8_t *arp_resolve(uint32_t ip);
 
-/* Sklada naglowek ethernetowy w buforze i zwraca dlugosc naglowka */
+/* Assembles an Ethernet header in a buffer and returns its length */
 static int eth_header(uint8_t *frame, const uint8_t *dst_mac, uint16_t type)
 {
     memcpy(frame, dst_mac, 6);
@@ -289,8 +291,8 @@ static void arp_send(uint16_t op, uint32_t target_ip, const uint8_t *target_mac)
 
     eth_header(frame, op == ARP_REQUEST ? bcast_mac : target_mac, ETH_P_ARP);
 
-    put16(a + 0, 1);                 /* sprzet: Ethernet */
-    put16(a + 2, ETH_P_IP);          /* protokol: IPv4 */
+    put16(a + 0, 1);                 /* hardware: Ethernet */
+    put16(a + 2, ETH_P_IP);          /* protocol: IPv4 */
     a[4] = 6;
     a[5] = 4;
     put16(a + 6, op);
@@ -302,11 +304,12 @@ static void arp_send(uint16_t op, uint32_t target_ip, const uint8_t *target_mac)
     netdev_send(frame, sizeof(frame));
 }
 
-/* Sklada i wysyla pakiet IPv4 z gotowa zawartoscia (payload).
-   Ramka idzie przez wspolny bufor statyczny - budowanie i oddanie jej
-   karcie odbywa sie z wylaczonymi przerwaniami, wiec ping z watku i
-   odpowiedz skladana w przerwaniu karty nie wchodza sobie w droge
-   (stos watku jadra ma tylko 8 KiB, nie ma na nim miejsca na ramki). */
+/* Assembles and sends an IPv4 packet with a ready payload.
+   The frame goes through a shared static buffer - building it and
+   handing it to the card happens with interrupts disabled, so a ping
+   from a thread and an answer assembled in the card's interrupt do not
+   get in each other's way (a kernel thread stack is only 8 KiB, there
+   is no room for frames on it). */
 #define IP_PAYLOAD_MAX 1480
 
 static uint8_t tx_frame[ETH_HDR_LEN + 20 + IP_PAYLOAD_MAX];
@@ -326,7 +329,7 @@ static int ip_send_from(uint32_t src_ip, uint32_t dst_ip,
     uint8_t *ip = tx_frame + ETH_HDR_LEN;
 
     memset(ip, 0, 20);
-    ip[0] = 0x45;                    /* IPv4, naglowek 20 B */
+    ip[0] = 0x45;                    /* IPv4, a 20 B header */
     put16(ip + 2, (uint16_t)(20 + payload_len));
     put16(ip + 4, ++ip_id);
     ip[8] = 64;                      /* TTL */
@@ -348,10 +351,11 @@ static int ip_send(uint32_t dst_ip, const uint8_t *dst_mac, uint8_t proto,
     return ip_send_from(my_ip, dst_ip, dst_mac, proto, payload, payload_len);
 }
 
-/* --- UDP -------------------------------------------------------------- */
+/* --- UDP ---------------------------------------------------------------- */
 
-/* Suma kontrolna UDP liczy sie po pseudonaglowku (adresy IP, protokol,
-   dlugosc) doklejonym do samego datagramu - stad osobna funkcja. */
+/* The UDP checksum is computed over a pseudo-header (IP addresses,
+   protocol, length) glued onto the datagram itself - hence a separate
+   function. */
 static uint16_t udp_checksum(uint32_t src_ip, uint32_t dst_ip,
                              const uint8_t *udp, uint16_t len)
 {
@@ -373,11 +377,12 @@ static uint16_t udp_checksum(uint32_t src_ip, uint32_t dst_ip,
         sum = (sum & 0xFFFF) + (sum >> 16);
 
     uint16_t csum = (uint16_t)~sum;
-    return csum ? csum : 0xFFFF;     /* 0 znaczy "brak sumy" */
+    return csum ? csum : 0xFFFF;     /* 0 means "no checksum" */
 }
 
-/* Wysyla datagram UDP z podanym adresem zrodlowym i docelowym MAC.
-   Uzywane wprost przez klienta DHCP (nie ma jeszcze IP ani ARP-a). */
+/* Sends a UDP datagram with a given source address and destination
+   MAC. Used directly by the DHCP client (which has neither an IP nor
+   an ARP entry yet). */
 int net_udp_send_raw(uint32_t src_ip, uint32_t dst_ip, const uint8_t *dst_mac,
                      uint16_t src_port, uint16_t dst_port,
                      const void *data, uint16_t len)
@@ -405,7 +410,8 @@ int net_udp_send_raw(uint32_t src_ip, uint32_t dst_ip, const uint8_t *dst_mac,
 static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
                         const uint8_t *data, uint16_t len);
 
-/* Zwalnia gniazda po procesach, ktore juz nie zyja (jak okna pulpitu) */
+/* Releases sockets of processes that are no longer alive (like desktop
+   windows) */
 static void udp_reap(void)
 {
     for (int i = 0; i < UDP_SOCKS; i++)
@@ -429,9 +435,9 @@ int net_udp_open(uint16_t port, int owner)
 
     if (port && udp_port_taken(port)) {
         irq_restore(flags);
-        return -1;                   /* port juz zajety */
+        return -1;                   /* the port is already taken */
     }
-    if (!port) {                     /* port efemeryczny */
+    if (!port) {                     /* an ephemeral port */
         for (int tries = 0; tries < 1000; tries++) {
             if (udp_next_port < UDP_PORT_MIN)
                 udp_next_port = UDP_PORT_MIN;
@@ -459,7 +465,7 @@ int net_udp_open(uint16_t port, int owner)
         return i;
     }
     irq_restore(flags);
-    return -1;                       /* brak wolnych gniazd */
+    return -1;                       /* no free sockets */
 }
 
 void net_udp_close(int sock, int owner)
@@ -486,11 +492,12 @@ int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
         udp_socks[sock].owner != owner)
         return -1;
     if (!my_ip)
-        return -1;                   /* system nie ma jeszcze adresu */
+        return -1;                   /* the system has no address yet */
 
-    /* Petla zwrotna: datagram do wlasnego adresu (albo 127.x) wraca
-       prosto do kolejek gniazd, bez wychodzenia na kabel. Dzieki temu
-       dwa procesy moga gadac po UDP nawet bez sieci. */
+    /* Loopback: a datagram to our own address (or to 127.x) comes back
+       straight into the socket queues, without going out on the wire.
+       Thanks to that two processes can talk over UDP even without a
+       network. */
     if (ip == my_ip || (ip >> 24) == 127) {
         if (len > UDP_DATA_MAX)
             return -1;
@@ -508,8 +515,9 @@ int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
                             data, len);
 }
 
-/* Odbior z gniazda: czeka do timeout_ms na datagram. Wolane z watku
-   (task_sleep), nigdy z przerwania. Zwraca dlugosc albo -1. */
+/* Receiving from a socket: waits up to timeout_ms for a datagram.
+   Called from a thread (task_sleep), never from an interrupt. Returns
+   the length or -1. */
 int net_udp_recv(int sock, int owner, uint32_t *from_ip, uint16_t *from_port,
                  void *buf, uint16_t max, uint32_t timeout_ms)
 {
@@ -542,13 +550,13 @@ int net_udp_recv(int sock, int owner, uint32_t *from_ip, uint16_t *from_port,
         task_sleep(10);
         waited += 10;
         if (!s->used || s->owner != owner)
-            return -1;               /* gniazdo zamkniete w miedzyczasie */
+            return -1;               /* the socket was closed in the meantime */
         if (task_killed())
-            return -1;               /* proces ma zginac - nie czekaj do konca */
+            return -1;               /* the process is due to die - do not wait to the end */
     }
 }
 
-/* Wklada odebrany datagram do kolejki gniazda (kontekst przerwania) */
+/* Puts a received datagram into a socket's queue (interrupt context) */
 static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
                         const uint8_t *data, uint16_t len)
 {
@@ -557,7 +565,7 @@ static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
         if (!s->used || s->port != port)
             continue;
         if (s->count == UDP_QUEUE) {
-            udp_dropped++;           /* odbiorca nie nadaza */
+            udp_dropped++;           /* the receiver cannot keep up */
             return;
         }
         struct udp_dgram *d = &s->q[(s->head + s->count) % UDP_QUEUE];
@@ -568,7 +576,7 @@ static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
         s->count++;
         return;
     }
-    udp_dropped++;                   /* nikt nie slucha na tym porcie */
+    udp_dropped++;                   /* nobody is listening on that port */
 }
 
 static void handle_udp(uint32_t src_ip, const uint8_t *udp, uint16_t len)
@@ -583,9 +591,9 @@ static void handle_udp(uint32_t src_ip, const uint8_t *udp, uint16_t len)
     udp_deliver(dst_port, src_ip, src_port, udp + 8, (uint16_t)(ulen - 8));
 }
 
-/* --- uslugi dla warstwy TCP ------------------------------------------- */
+/* --- services for the TCP layer ----------------------------------------- */
 
-/* Suma kontrolna z pseudonaglowkiem - taka sama dla UDP i TCP */
+/* A checksum with a pseudo-header - the same for UDP and TCP */
 uint16_t net_transport_checksum(uint32_t src_ip, uint32_t dst_ip,
                                 uint8_t proto, const uint8_t *seg,
                                 uint16_t len)
@@ -609,17 +617,19 @@ uint16_t net_transport_checksum(uint32_t src_ip, uint32_t dst_ip,
     return (uint16_t)~sum;
 }
 
-/* Wysyla gotowy segment do znanego juz MAC-a odbiorcy. TCP potwierdza
-   segmenty z przerwania karty, a rozwiazywanie ARP blokuje - dlatego
-   MAC jest zapamietywany w polaczeniu przy jego zestawianiu. */
+/* Sends a ready segment to an already known destination MAC. TCP
+   acknowledges segments from the card's interrupt, and ARP resolution
+   blocks - that is why the MAC is remembered in the connection when it
+   is set up. */
 int net_ip_send_mac(uint32_t dst_ip, const uint8_t *dst_mac, uint8_t proto,
                     const void *payload, uint16_t len)
 {
     return ip_send_from(my_ip, dst_ip, dst_mac, proto, payload, len);
 }
 
-/* Rozwiazuje MAC dla adresu (przez brame, gdy adres jest poza siecia).
-   Blokuje - tylko z kontekstu watku. Kopiuje 6 bajtow do out. */
+/* Resolves the MAC for an address (through the gateway when the
+   address is off-network). Blocks - from a thread context only. Copies
+   6 bytes into out. */
 int net_resolve_mac(uint32_t ip, uint8_t *out)
 {
     const uint8_t *mac = arp_resolve(ip);
@@ -629,7 +639,7 @@ int net_resolve_mac(uint32_t ip, uint8_t *out)
     return 0;
 }
 
-/* --- odbior ----------------------------------------------------------- */
+/* --- receiving ---------------------------------------------------------- */
 
 static void handle_arp(const uint8_t *a, uint16_t len)
 {
@@ -642,7 +652,7 @@ static void handle_arp(const uint8_t *a, uint16_t len)
     uint32_t sender_ip = get32(a + 14);
     uint32_t target_ip = get32(a + 24);
 
-    arp_store(sender_ip, a + 8);     /* nadawca sam sie przedstawil */
+    arp_store(sender_ip, a + 8);     /* the sender introduced itself */
 
     if (op == ARP_REQUEST && target_ip == my_ip)
         arp_send(ARP_REPLY, sender_ip, a + 8);
@@ -655,7 +665,7 @@ static void handle_icmp(uint32_t src_ip, const uint8_t *src_mac, uint8_t ttl,
         return;
 
     if (icmp[0] == ICMP_ECHO_REQUEST) {
-        /* Ktos pinguje ProtonOS - odbijamy pakiet jako echo reply */
+        /* Somebody is pinging ProtonOS - we bounce the packet back as an echo reply */
         uint8_t reply[64];
         uint16_t n = len > sizeof(reply) ? (uint16_t)sizeof(reply) : len;
         memcpy(reply, icmp, n);
@@ -689,7 +699,7 @@ static void handle_ip(const uint8_t *ip, uint16_t len, const uint8_t *src_mac)
 
     uint32_t dst_ip = get32(ip + 16);
     if (dst_ip != my_ip && dst_ip != 0xFFFFFFFFu)
-        return;                      /* nie do nas */
+        return;                      /* not for us */
 
     if (ip[9] == IP_PROTO_ICMP)
         handle_icmp(get32(ip + 12), src_mac, ip[8], ip + ihl,
@@ -720,10 +730,11 @@ void net_rx(const uint8_t *frame, uint16_t len)
         rx_dropped++;
 }
 
-/* --- ping ------------------------------------------------------------- */
+/* --- ping --------------------------------------------------------------- */
 
-/* Rozwiazuje adres MAC dla IP (przez brame, gdy adres jest poza siecia).
-   Zwraca wskaznik na 6 bajtow MAC albo 0 przy braku odpowiedzi. */
+/* Resolves the MAC address for an IP (through the gateway when the
+   address is off-network). Returns a pointer to 6 MAC bytes or 0 when
+   there was no answer. */
 static const uint8_t *arp_resolve(uint32_t ip)
 {
     uint32_t target = ((ip & my_mask) == (my_ip & my_mask)) ? ip : my_gw;
@@ -792,9 +803,9 @@ void net_ping(uint32_t ip, int count)
             return;
         }
 
-        for (int i = 0; i < 100 && !ping_got; i++) { /* do 1 s */
+        for (int i = 0; i < 100 && !ping_got; i++) { /* up to 1 s */
             task_sleep(10);
-            if (task_killed()) {      /* 'kill ping' ma dzialac od razu */
+            if (task_killed()) {      /* 'kill ping' is to work at once */
                 ping_waiting = 0;
                 printk("ping: przerwane\n");
                 return;
@@ -821,7 +832,7 @@ void net_ping(uint32_t ip, int count)
            (uint32_t)count, (uint32_t)received);
 }
 
-/* --- init i ifconfig -------------------------------------------------- */
+/* --- init and ifconfig --------------------------------------------------- */
 
 void net_ifconfig(void)
 {
