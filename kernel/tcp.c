@@ -1,22 +1,23 @@
-/* TCP - minimalna, ale prawdziwa implementacja
+/* TCP - a minimal but real implementation
  *
- * Obsluguje obie strony: aktywne otwarcie (klient: SYN -> SYN|ACK -> ACK)
- * i pasywne (serwer: nasluch, kolejka nawiazanych polaczen), przesyl
- * danych z numerami sekwencyjnymi i potwierdzeniami, retransmisje oraz
- * zamkniecie przez FIN.
+ * It handles both sides: the active open (client: SYN -> SYN|ACK ->
+ * ACK) and the passive one (server: listening, a queue of established
+ * connections), data transfer with sequence numbers and
+ * acknowledgements, retransmissions and closing through FIN.
  *
- * Swiadome uproszczenia zabawkowego stosu:
- *  - okno nadawcze "wyslij i czekaj": jeden niepotwierdzony kawalek na raz,
- *    wiec nie ma kolejki retransmisji ani szacowania RTT,
- *  - segmenty spoza kolejnosci sa odrzucane (nadawca je powtorzy),
- *    dzieki czemu nie ma kolejki skladania,
- *  - brak TIME_WAIT i kontroli przeciazenia.
- * Wszystko, co widzi druga strona, jest jednak zgodne z RFC 793 -
- * po drugiej stronie stoi zwykly Linux i rozmowa dziala.
+ * Deliberate simplifications of a toy stack:
+ *  - a "send and wait" send window: one unacknowledged chunk at a
+ *    time, so there is no retransmission queue and no RTT estimation,
+ *  - out-of-order segments are dropped (the sender will repeat them),
+ *    which means there is no reassembly queue,
+ *  - no TIME_WAIT and no congestion control.
+ * Everything the other side sees is nevertheless in line with RFC 793 -
+ * an ordinary Linux stands on the other end and the conversation works.
  *
- * Stan zmieniaja dwa swiaty: przerwanie karty (tcp_input) i watki
- * wolajace syscalle - kazdy dostep do tablicy polaczen idzie wiec przy
- * wylaczonych przerwaniach. Retransmisjami zajmuje sie watek 'tcpd'.
+ * The state is changed by two worlds: the card's interrupt (tcp_input)
+ * and threads making syscalls - so every access to the connection
+ * table happens with interrupts disabled. Retransmissions are handled
+ * by the 'tcpd' thread.
  */
 
 #include "include/tcp.h"
@@ -29,7 +30,7 @@
 
 #define TCP_CONNS     6
 #define RX_BUF        8192
-#define TX_BUF        1460      /* jeden segment danych na raz */
+#define TX_BUF        1460      /* one data segment at a time */
 #define ACCEPT_QUEUE  4
 #define MSS           1460
 
@@ -39,8 +40,8 @@
 #define PSH 0x08
 #define ACK 0x10
 
-#define RETRANS_MS    500       /* co ile powtarzac niepotwierdzone */
-#define RETRANS_MAX   8         /* po tylu probach polaczenie pada */
+#define RETRANS_MS    500       /* how often to repeat the unacknowledged */
+#define RETRANS_MAX   8         /* after this many attempts the connection dies */
 #define PORT_MIN      49152
 
 enum tcp_state {
@@ -61,38 +62,38 @@ static const char *state_name[] = {
 
 struct tcp_conn {
     int used;
-    int owner;                  /* pid wlasciciela, -1 = jadro */
+    int owner;                  /* the owner's pid, -1 = the kernel */
     enum tcp_state state;
-    int error;                  /* 1 = RST albo wyczerpane retransmisje */
+    int error;                  /* 1 = RST or retransmissions exhausted */
 
     uint32_t remote_ip;
     uint16_t remote_port, local_port;
     uint8_t remote_mac[6];
 
-    uint32_t snd_una;           /* najstarszy niepotwierdzony bajt */
-    uint32_t snd_nxt;           /* nastepny numer do wyslania */
-    uint32_t rcv_nxt;           /* czego oczekujemy od drugiej strony */
-    uint16_t snd_wnd;           /* okno rozglaszane przez druga strone */
+    uint32_t snd_una;           /* the oldest unacknowledged byte */
+    uint32_t snd_nxt;           /* the next number to send */
+    uint32_t rcv_nxt;           /* what we expect from the other side */
+    uint16_t snd_wnd;           /* the window advertised by the other side */
 
     uint8_t rx[RX_BUF];
     int rx_len;
     int fin_received;
 
-    uint8_t tx[TX_BUF];         /* dane czekajace na potwierdzenie */
+    uint8_t tx[TX_BUF];         /* data awaiting acknowledgement */
     int tx_len;
-    uint8_t pending_flags;      /* SYN/FIN czekajace na potwierdzenie */
-    uint32_t last_send;         /* tyknicie ostatniej wysylki */
+    uint8_t pending_flags;      /* a SYN/FIN awaiting acknowledgement */
+    uint32_t last_send;         /* the tick of the last send */
     int retries;
 
-    uint16_t adv_wnd;           /* okno rozglaszane w ostatnim ACK */
-    int listener;               /* dla polaczen z nasluchu: id gniazda */
-    int accepted;               /* czy odebrane przez tcp_accept */
+    uint16_t adv_wnd;           /* the window advertised in the last ACK */
+    int listener;               /* for connections from a listener: the socket id */
+    int accepted;               /* has it been taken by tcp_accept */
 };
 
 static struct tcp_conn conns[TCP_CONNS];
 static uint16_t next_port = PORT_MIN;
 
-/* --- pomocnicze ------------------------------------------------------- */
+/* --- helpers ------------------------------------------------------- */
 
 static void put16(uint8_t *p, uint16_t v)
 {
@@ -119,7 +120,7 @@ static uint32_t get32(const uint8_t *p)
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-/* Porownanie numerow sekwencyjnych odporne na przewiniecie licznika */
+/* Comparing sequence numbers in a way that survives counter wraparound */
 static int seq_le(uint32_t a, uint32_t b)
 {
     return (int32_t)(a - b) <= 0;
@@ -141,7 +142,7 @@ static struct tcp_conn *conn_at(int id, int owner)
     return c;
 }
 
-/* Zwalnia polaczenia po procesach, ktore juz nie zyja */
+/* Releases connections of processes that are no longer alive */
 static void tcp_reap(void)
 {
     for (int i = 0; i < TCP_CONNS; i++)
@@ -178,7 +179,7 @@ static int port_taken(uint16_t port)
     return 0;
 }
 
-/* --- wysylanie segmentow ---------------------------------------------- */
+/* --- sending segments ---------------------------------------------- */
 
 static void tcp_out(struct tcp_conn *c, uint8_t flags, uint32_t seq,
                     const uint8_t *data, uint16_t len)
@@ -194,7 +195,7 @@ static void tcp_out(struct tcp_conn *c, uint8_t flags, uint32_t seq,
     put16(seg + 2, c->remote_port);
     put32(seg + 4, seq);
     put32(seg + 8, c->rcv_nxt);
-    seg[12] = 5 << 4;                    /* naglowek 20 B, brak opcji */
+    seg[12] = 5 << 4;                    /* a 20 B header, no options */
     seg[13] = flags;
     uint16_t wnd = rx_window(c);
     c->adv_wnd = wnd;
@@ -212,7 +213,7 @@ static void tcp_out(struct tcp_conn *c, uint8_t flags, uint32_t seq,
     irq_restore(irq);
 }
 
-/* Powtarza to, co czeka na potwierdzenie (SYN, dane albo FIN) */
+/* Repeats whatever is awaiting acknowledgement (SYN, data or FIN) */
 static void tcp_retransmit(struct tcp_conn *c)
 {
     if (c->pending_flags & SYN) {
@@ -229,7 +230,7 @@ static void tcp_retransmit(struct tcp_conn *c)
     c->retries++;
 }
 
-/* Odpowiedz RST na segment, ktory nie pasuje do zadnego polaczenia */
+/* An RST answer to a segment that matches no connection */
 static void tcp_reset(uint32_t dst_ip, const uint8_t *dst_mac,
                       uint16_t local_port, uint16_t remote_port,
                       uint32_t seq, uint32_t ack, int had_ack)
@@ -250,7 +251,7 @@ static void tcp_reset(uint32_t dst_ip, const uint8_t *dst_mac,
     net_ip_send_mac(dst_ip, dst_mac, 6, seg, 20);
 }
 
-/* --- odbior (kontekst przerwania karty) -------------------------------- */
+/* --- receiving (card interrupt context) ------------------------------ */
 
 static struct tcp_conn *find_conn(uint16_t local_port, uint32_t remote_ip,
                                   uint16_t remote_port)
@@ -268,10 +269,10 @@ static struct tcp_conn *find_conn(uint16_t local_port, uint32_t remote_ip,
         if (c->remote_ip == remote_ip && c->remote_port == remote_port)
             return c;
     }
-    return listener;                     /* nowe polaczenie do nasluchu */
+    return listener;                     /* a new connection for a listener */
 }
 
-/* Nowe polaczenie przychodzace: SYN trafil na gniazdo nasluchujace */
+/* A new incoming connection: a SYN landed on a listening socket */
 static void accept_syn(struct tcp_conn *lis, uint32_t src_ip,
                        const uint8_t *src_mac, const uint8_t *seg,
                        uint16_t src_port)
@@ -282,7 +283,7 @@ static void accept_syn(struct tcp_conn *lis, uint32_t src_ip,
             !conns[i].accepted)
             queued++;
     if (queued >= ACCEPT_QUEUE)
-        return;                          /* kolejka pelna - niech powtorzy */
+        return;                          /* the queue is full - let it repeat */
 
     struct tcp_conn *c = conn_alloc();
     if (!c)
@@ -293,9 +294,9 @@ static void accept_syn(struct tcp_conn *lis, uint32_t src_ip,
     c->local_port = lis->local_port;
     c->remote_ip = src_ip;
     c->remote_port = src_port;
-    memcpy(c->remote_mac, src_mac, 6);   /* MAC wprost z ramki - nie ma
-                                            po co pytac ARP-a o kogos,
-                                            kto wlasnie sie odezwal */
+    memcpy(c->remote_mac, src_mac, 6);   /* the MAC straight from the frame - there
+                                            is no point asking ARP about
+                                            somebody who has just spoken */
     c->rcv_nxt = get32(seg + 4) + 1;
     c->snd_una = c->snd_nxt = pit_ticks() * 2654435761u;
     c->snd_wnd = get16(seg + 14);
@@ -303,7 +304,7 @@ static void accept_syn(struct tcp_conn *lis, uint32_t src_ip,
     c->pending_flags = SYN;
 
     tcp_out(c, SYN | ACK, c->snd_nxt, 0, 0);
-    c->snd_nxt++;                        /* SYN zajmuje jeden numer */
+    c->snd_nxt++;                        /* a SYN takes up one number */
     c->last_send = pit_ticks();
 }
 
@@ -313,7 +314,7 @@ static void deliver_data(struct tcp_conn *c, const uint8_t *data, uint16_t len)
         return;
     int space = RX_BUF - c->rx_len;
     if (len > space)
-        len = (uint16_t)space;           /* reszte nadawca powtorzy */
+        len = (uint16_t)space;           /* the sender will repeat the rest */
     memcpy(c->rx + c->rx_len, data, len);
     c->rx_len += len;
     c->rcv_nxt += len;
@@ -342,8 +343,8 @@ void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
 
     struct tcp_conn *c = find_conn(dst_port, src_ip, src_port);
     if (!c) {
-        /* Nikt nie slucha na tym porcie - odeslij RST, tak jak wypada */
-        if (!(flags & RST))              /* na RST nie odpowiada sie RST-em */
+        /* Nobody is listening on that port - send an RST back, as is proper */
+        if (!(flags & RST))              /* one does not answer an RST with an RST */
             tcp_reset(src_ip, src_mac, dst_port, src_port,
                       seq + dlen + ((flags & (SYN | FIN)) ? 1 : 0), ack,
                       flags & ACK ? 1 : 0);
@@ -364,14 +365,14 @@ void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
 
     c->snd_wnd = wnd;
 
-    /* Potwierdzenia: przesuwaja okno nadawcze */
+    /* Acknowledgements: they move the send window */
     if (flags & ACK) {
         if (seq_le(c->snd_una, ack) && seq_le(ack, c->snd_nxt)) {
             if (ack != c->snd_una) {
                 c->snd_una = ack;
                 c->retries = 0;
                 if (c->tx_len && seq_le(c->snd_una, c->snd_nxt))
-                    c->tx_len = 0;       /* dane potwierdzone */
+                    c->tx_len = 0;       /* the data is acknowledged */
                 if (c->pending_flags && seq_le(c->snd_nxt, c->snd_una))
                     c->pending_flags = 0;
             }
@@ -403,8 +404,9 @@ void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
         c->state != TCP_CLOSE_WAIT && c->state != TCP_LAST_ACK)
         return;
 
-    /* Dane przyjmujemy wylacznie w kolejnosci - segment "z przyszlosci"
-       albo powtorzony odrzucamy i przypominamy, czego oczekujemy. */
+    /* We accept data strictly in order - a segment "from the future" or
+       a repeated one is dropped and we remind the sender what we
+       expect. */
     if (dlen) {
         if (seq == c->rcv_nxt) {
             deliver_data(c, data, dlen);
@@ -432,9 +434,10 @@ void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
         c->state = TCP_CLOSED;
 }
 
-/* --- API dla syscalli (kontekst watku) --------------------------------- */
+/* --- API for syscalls (thread context) -------------------------------- */
 
-/* Czeka, az warunek 'stan' przestanie byc przejsciowy albo minie czas */
+/* Waits until the 'state' condition stops being transitional or the
+   time runs out */
 static int wait_established(struct tcp_conn *c, uint32_t timeout_ms)
 {
     uint32_t waited = 0;
@@ -480,7 +483,7 @@ int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms)
     c->snd_wnd = MSS;
 
     tcp_out(c, SYN, c->snd_nxt, 0, 0);
-    c->snd_nxt++;                        /* SYN zajmuje jeden numer */
+    c->snd_nxt++;                        /* a SYN takes up one number */
     c->last_send = pit_ticks();
     int id = conn_id(c);
     irq_restore(irq);
@@ -553,7 +556,7 @@ int tcp_send(int conn, int owner, const void *data, uint16_t len,
         len = TX_BUF;
 
     uint32_t irq = irq_save();
-    if (c->tx_len) {                     /* poprzedni kawalek jeszcze wisi */
+    if (c->tx_len) {                     /* the previous chunk is still outstanding */
         irq_restore(irq);
         return -1;
     }
@@ -566,13 +569,14 @@ int tcp_send(int conn, int owner, const void *data, uint16_t len,
     c->last_send = pit_ticks();
     irq_restore(irq);
 
-    /* Czekamy na potwierdzenie - retransmisjami zajmuje sie watek tcpd */
+    /* We wait for the acknowledgement - retransmissions are the tcpd
+           thread's job */
     uint32_t waited = 0;
     while (waited < timeout_ms) {
         if (c->error || !c->used)
             return -1;
         if (!c->tx_len)
-            return len;                  /* potwierdzone */
+            return len;                  /* acknowledged */
         task_sleep(10);
         waited += 10;
         if (task_killed())
@@ -597,10 +601,10 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
                 memcpy(c->rx, c->rx + n, c->rx_len - n);
             c->rx_len -= n;
 
-            /* Aktualizacja okna: jesli ostatni ACK oglaszal ciasno, a
-               teraz jest miejsce, powiedz o tym od razu. Inaczej nadawca
-               czeka z pelnym buforem az do swojego probnika i transfer
-               zwalnia do kilku kilobajtow na sekunde. */
+            /* Updating the window: if the last ACK advertised a tight one
+               and there is room now, say so at once. Otherwise the
+               sender sits with a full buffer until its own probe and
+               the transfer drops to a few kilobytes a second. */
             int announce = (c->adv_wnd < MSS && rx_window(c) >= MSS &&
                             c->state == TCP_ESTABLISHED);
             irq_restore(irq);
@@ -615,7 +619,7 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
         if (failed)
             return -1;
         if (done)
-            return 0;                    /* koniec strumienia */
+            return 0;                    /* end of stream */
         if (waited >= timeout_ms)
             return -1;
         task_sleep(10);
@@ -643,7 +647,7 @@ void tcp_close(int conn, int owner)
         c->state = last ? TCP_LAST_ACK : TCP_FIN_WAIT;
         irq_restore(irq);
 
-        /* Daj chwile na potwierdzenie, ale nie blokuj w nieskonczonosc */
+        /* Give it a moment to acknowledge, but do not block forever */
         for (int i = 0; i < 50 && c->state != TCP_CLOSED; i++)
             task_sleep(10);
         irq = irq_save();
@@ -652,7 +656,7 @@ void tcp_close(int conn, int owner)
     irq_restore(irq);
 }
 
-/* --- watek retransmisji ------------------------------------------------ */
+/* --- the retransmission thread ------------------------------------------ */
 
 static void tcpd(void *arg)
 {
