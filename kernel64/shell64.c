@@ -32,6 +32,7 @@
 #include "../kernel/include/swap.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/smpmem.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fbcon.h"
@@ -68,7 +69,7 @@ static void cmd_help(void)
     printk("           run <program>, clear,\n");
     printk("           ifconfig, arp, ping <adres>, dns <ip>,\n");
     printk("           gfx, pulpit,\n");
-    printk("           reboot, poweroff, smp\n");
+    printk("           reboot, poweroff, smp, smpmem\n");
 }
 
 static void cmd_mem(void)
@@ -440,6 +441,8 @@ static void execute(const char *line)
             printk("cat: podaj nazwe pliku\n");
     } else if (!strcmp(line, "smp")) {
         cmd_smp();
+    } else if (!strcmp(line, "smpmem")) {
+        smpmem_test();
     } else if (starts_with(line, "cp ")) {
         char *arg = (char *)argument(line, 3);
         if (!arg)

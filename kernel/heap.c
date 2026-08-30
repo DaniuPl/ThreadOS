@@ -13,6 +13,7 @@
 #include "include/pmm.h"
 #include "include/printk.h"
 #include "include/io.h"
+#include "include/spinlock.h"
 
 #define HEAP_SIZE (1024u * 1024)
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((a) - 1))
@@ -44,8 +45,12 @@ void heap_init(void)
     heap_head->next = (void *)0;
 }
 
-/* Sterta bywa używana i przez wątki, i przez handlery IRQ (scheduler
-   sprząta zombie) - sekcja krytyczna z wyłączonymi przerwaniami. */
+/* Sterta bywa uzywana i przez watki, i przez handlery IRQ (scheduler
+   sprzata zombie) - stad wygaszanie przerwan. Od kiedy rdzeni jest
+   wiecej niz jeden, dochodzi zamek: lista blokow jest jedna, a dwa
+   rdzenie dzielace ten sam blok jednoczesnie zostawilyby po sobie
+   liste, ktorej nikt juz nie przejdzie. */
+static struct spinlock zamek = SPINLOCK_WOLNY;
 
 void *kmalloc(size_t size)
 {
@@ -53,7 +58,7 @@ void *kmalloc(size_t size)
         return (void *)0;
     size = ALIGN_UP(size, 8);
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     void *result = (void *)0;
 
     for (struct block *b = heap_head; b; b = b->next) {
@@ -76,7 +81,7 @@ void *kmalloc(size_t size)
         break;
     }
 
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return result;
 }
 
@@ -88,7 +93,7 @@ void kfree(void *ptr)
     if (addr < heap_start + sizeof(struct block) || addr >= heap_end)
         return;
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
 
     struct block *b = (struct block *)(addr - sizeof(struct block));
     if (!b->free) {
@@ -102,7 +107,7 @@ void kfree(void *ptr)
         }
     }
 
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
 }
 
 uint32_t heap_total_bytes(void) { return HEAP_SIZE; }

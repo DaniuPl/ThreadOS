@@ -16,6 +16,7 @@
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
+#include "include/spinlock.h"
 
 #define MANAGED_LIMIT PAGING_MANAGED_MAX
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
@@ -115,7 +116,12 @@ uint32_t pmm_alloc_frame(void)
 }
 
 /* Alokacje i zwalnianie biegna tez z kontekstu IRQ (exec, sprzatanie
-   przestrzeni adresowych zombie) - stad sekcje krytyczne. */
+   przestrzeni adresowych zombie) - stad wygaszanie przerwan. Od kiedy
+   rdzeni jest wiecej niz jeden, to juz nie wystarcza: dwa rdzenie
+   moga wejsc tu naprawde jednoczesnie i wydac te sama ramke dwa razy.
+   Stad zamek. Mapa ramek jest jedna dla calej maszyny, wiec i zamek
+   jest jeden. */
+static struct spinlock zamek = SPINLOCK_WOLNY;
 
 /* Kogo prosic o pamiec, gdy jej zabraknie (ustawia to wymiana stron).
    PMM nie wie nic o procesach ani o dysku - dostaje tylko funkcje,
@@ -129,7 +135,7 @@ void pmm_set_reclaim(int (*fn)(void))
 
 static uint32_t alloc_contiguous_raw(uint32_t n)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     uint32_t run = 0;
     for (uint32_t f = 0; f < MAX_FRAMES; f++) {
         if (frame_test(f)) {
@@ -143,11 +149,11 @@ static uint32_t alloc_contiguous_raw(uint32_t n)
                 refs[i] = 1;
             }
             used_frames += n;
-            irq_restore(flags);
+            spin_unlock_irq(&zamek, flags);
             return first * PAGE_SIZE;
         }
     }
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return 0;
 }
 
@@ -172,7 +178,7 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
 
 void pmm_free_frame(uint32_t addr)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     uint32_t frame = addr / PAGE_SIZE;
     /* Bezpiecznik: obraz jadra nigdy nie wraca do puli. Gdyby jakas
        tablica stron pokazywala na wlasny kod albo dane jadra, ramka
@@ -180,9 +186,9 @@ void pmm_free_frame(uint32_t addr)
        zaprotestowac, niz po cichu oddac system do przepisania. */
     if (addr >= (uint32_t)(uintptr_t)_kernel_start &&
         addr < (uint32_t)(uintptr_t)_kernel_end) {
+        spin_unlock_irq(&zamek, flags);
         printk("[PMM] proba zwolnienia ramki obrazu jadra (%x) - odmawiam\n",
                addr);
-        irq_restore(flags);
         return;
     }
     if (frame < MAX_FRAMES && frame_test(frame)) {
@@ -194,17 +200,17 @@ void pmm_free_frame(uint32_t addr)
             used_frames--;
         }
     }
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
 }
 
 /* Dopisuje wlasciciela ramki (fork: dziecko dziedziczy strony rodzica) */
 void pmm_frame_ref(uint32_t addr)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     uint32_t frame = addr / PAGE_SIZE;
     if (frame < MAX_FRAMES && frame_test(frame) && refs[frame] < 0xFFFF)
         refs[frame]++;
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
 }
 
 /* Ilu wlascicieli ma ramka (0 = wolna) */

@@ -106,12 +106,15 @@ ground for both.
 **Things neither kernel has yet**
 
 - Real SMP. The other cores are found in the ACPI tables, woken with
-  INIT-SIPI, and can now run computation from a shared work queue
-  behind one spinlock — `smp` in the shell splits a job across all of
-  them and checks the result against the single-core answer. What they
-  still cannot do is run *tasks*: the scheduler, the process list and
-  most of the kernel were written for one core. That part is still the
-  largest single item and it touches everything.
+  INIT-SIPI, and run computation from a shared work queue behind a
+  spinlock — `smp` splits a job across all of them and checks the
+  result against the single-core answer. They can now also **call into
+  the kernel**: the frame map, the kernel heap and the console are
+  behind locks, and `smpmem` hammers all three from every core at once
+  (a frame handed out twice shows up as a pattern mismatch). What they
+  still cannot do is run *tasks*: the scheduler and the process list
+  were written for one core, `current` is a single global, and there is
+  no per-CPU state or TLB shootdown yet.
 - Preemption inside the kernel, which SMP will force anyway.
 
 **Infrastructure**

@@ -58,6 +58,7 @@ ProtonOS/
 │   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── dynlink.c       # biblioteka współdzielona: symbole i relokacje
+│   ├── smpmem.c        # próba zamków: pamięć jądra ze wszystkich rdzeni
 │   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
 │   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
 │   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
@@ -1790,3 +1791,59 @@ sprawdzane przez `make test`.
       licznik generatora znów od zera (dane prywatne). Zapis do kodu
       biblioteki kończy się błędem ochrony - inaczej jeden program
       podmieniłby funkcję wszystkim naraz.
+- [x] **Zamki na wspólnych strukturach jądra** - pierwszy krok, bez
+      którego prawdziwego SMP nie da się zacząć.
+
+      Rdzenie wtórne umiały dotąd tylko liczyć na tym, co dostały. Cały
+      dzielony między nimi stan to była jedna liczba i jeden zamek -
+      i właśnie dlatego dało się o nim myśleć. Żeby kiedykolwiek mogły
+      prowadzić zadania, muszą najpierw umieć bezpiecznie **wołać
+      jądro**; a jądro musi to wytrzymać.
+
+      Wygaszenie przerwań, które wystarczało od początku, chroni przed
+      czymś innym niż zamek i warto to nazwać wprost. Zamek chroni
+      przed INNYM RDZENIEM, który naprawdę biegnie jednocześnie.
+      Wygaszenie przerwań chroni przed SAMYM SOBĄ: timer wchodzący
+      w środek sekcji czekałby na zamek trzymany przez kod, który
+      właśnie przerwał - i to na tym samym rdzeniu, jedynym, który
+      mógłby go zwolnić. Stąd `spin_lock_irq` robiące obie rzeczy
+      w jednej kolejności: przerwania gasną PRZED wzięciem zamka
+      i wracają PO zwolnieniu.
+
+      Zamki dostały trzy struktury, po które sięga wszystko inne: mapa
+      ramek fizycznych, sterta jądra i konsola. Każda z nich jest jedna
+      dla całej maszyny, więc i zamek jest jeden.
+
+      **Próba, która naprawdę coś rozstrzyga.** Komenda `smpmem` każe
+      każdemu rdzeniowi przydzielać ramki i bloki sterty trzy tysiące
+      razy naraz. Nie pytamy jednak, czy się nie wysypało - na to
+      odpowiedź bywa przypadkowa. Każdy przydział dostaje wzorzec
+      zależny od numeru jednostki i zaraz potem jest czytany: ramka
+      wydana dwóm rdzeniom naraz ma dwóch piszących i wzorzec się nie
+      zgadza. Na koniec liczymy ramki i bajty sterty - tyle samo przed
+      co po.
+
+      Sprawdziłem, czy ta próba w ogóle może paść, wyjmując zamki
+      z powrotem. Bez zamka w mapie ramek: sześćdziesiąt jeden
+      niezgodności wzorca i pięćdziesiąt osiem ramek, które nie
+      wróciły. Bez zamka na stercie: jądro ginie na błędzie strony pod
+      adresem `aaa9a8ab`, bo lista wolnych bloków przestaje trzymać się
+      kupy w połowie dzielenia bloku. To jest jedyny sposób, żeby
+      wiedzieć, że test czegokolwiek pilnuje.
+
+      **Czego rdzeniowi wtórnemu nadal nie wolno.** Nie ma on tablicy
+      wyjątków ani przerwań, więc wolno mu wołać tylko to, co nie śpi
+      i nie czeka na sprzęt. Przydział pamięci - tak. Dysk, sieć,
+      cokolwiek, co mogłoby sięgnąć po wymianę stron - nie. Granica
+      jest dziś taka, a nie inna, i przesunie ją dopiero scheduler na
+      rdzeń.
+
+      **Asercja, która była wyścigiem.** Pierwsza wersja testu żądała,
+      by KAŻDY rdzeń wziął część pracy. Przeszła, ale na jądrze
+      64-bitowym udział wyszedł `[1, 20, 21, 22]`: rdzeń rozruchowy
+      prowadzi w tym czasie wątek shella i bywa wywłaszczony przez
+      timer, podczas gdy wtórne kręcą się w ciasnej pętli i rozbierają
+      zlecenie, zanim zdąży sięgnąć. Asercja mówi teraz to, co jest
+      prawdą niezależnie od tego, kto wygra wyścig: pracę wzięło więcej
+      niż jeden rdzeń, a wszystkie jednostki policzyły się **dokładnie
+      raz**.

@@ -2,6 +2,7 @@
 #define PROTONOS_SPINLOCK_H
 
 #include <stdint.h>
+#include "io.h"
 
 /* Zamek wirujacy
  *
@@ -49,6 +50,33 @@ static inline void spin_unlock(struct spinlock *z)
     __asm__ volatile("xchgl %0, %1"
                      : "+r"(zero), "+m"(z->zajety)
                      : : "memory");
+}
+
+/* Zamek brany razem z wygaszeniem przerwan - i tak wyglada prawie
+ * kazde uzycie w jadrze.
+ *
+ * Dwie rzeczy chronia przed dwiema roznymi. Zamek chroni przed INNYM
+ * RDZENIEM, ktory naprawde biegnie jednoczesnie. Wygaszenie przerwan
+ * chroni przed SAMYM SOBA: struktury jadra dotyka i watek, i obsluga
+ * przerwania, wiec timer, ktory wszedlby w srodek sekcji trzymajacej
+ * zamek, czekalby na zamek trzymany przez przerwany wlasnie kod - i to
+ * na tym samym rdzeniu, ktory jako jedyny moglby go zwolnic.
+ *
+ * Kolejnosc nie jest dowolna: przerwania gasna PRZED wzieciem zamka
+ * i wracaja PO jego zwolnieniu. Odwrotnie zostawialoby okno, w ktorym
+ * przerwanie zastaje zamek juz wziety.
+ */
+static inline irqflags_t spin_lock_irq(struct spinlock *z)
+{
+    irqflags_t flagi = irq_save();
+    spin_lock(z);
+    return flagi;
+}
+
+static inline void spin_unlock_irq(struct spinlock *z, irqflags_t flagi)
+{
+    spin_unlock(z);
+    irq_restore(flagi);
 }
 
 #endif

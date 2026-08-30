@@ -20,6 +20,7 @@
 #include "include/acpi.h"
 #include "include/prog.h"
 #include "include/smp.h"
+#include "include/smpmem.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -82,6 +83,7 @@ static const struct {
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
     {"smp",      "policz cos na wszystkich rdzeniach"},
+    {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -480,6 +482,8 @@ static void run_command(char *cmd)
         cmd_cp(arg);
     else if (!strcmp(cmd, "smp"))
         cmd_smp();
+    else if (!strcmp(cmd, "smpmem"))
+        smpmem_test();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))
