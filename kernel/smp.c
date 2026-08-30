@@ -33,6 +33,7 @@
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/spinlock.h"
+#include "include/task.h"
 #include "include/pit.h"
 
 
@@ -43,6 +44,7 @@
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #include "../kernel64/gdt64.h"
+#include "../kernel64/task64.h"
 #include "../kernel64/idt64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
 #define IDENTITY_TOP()   paging64_identity_top()
@@ -61,7 +63,7 @@ extern volatile uint32_t ap_cr3;
 
 #define AP_BASE       0x8000        /* dokad kopiujemy trampoline */
 #define AP_STACK      8192          /* stos na kazdy obudzony rdzen */
-#define MAX_CPU       8
+#define MAX_CPU       SMP_RDZENI
 
 /* Rejestry lokalnego APIC (przesuniecia od jego bazy) */
 #define APIC_ID       0x020
@@ -219,6 +221,11 @@ void smp_zegar_tyk(void)
     tykniec[r]++;
     if (apic)
         apic_wr(APIC_EOI, 0);
+    /* Potwierdzenie idzie PRZED przelaczeniem zadan: schedule moze nie
+       wrocic tu przez dluzszy czas, a lokalny APIC nie ma na co czekac.
+       Tak samo robi obsluga timera na rdzeniu rozruchowym. */
+    if (task_scheduler_gotowy())
+        schedule();
 }
 
 /* Pobudka dla wszystkich pozostalych rdzeni.
@@ -314,6 +321,20 @@ void smp_ap_glowna(uint32_t numer)
     zegar_wlacz();
     __asm__ volatile("sti");
 
+    /* Scheduler wstaje pozniej niz rdzenie - do tej chwili ten rdzen
+       umie tylko policzyc, co mu zlecono */
+    while (!task_scheduler_gotowy()) {
+        if (praca_ile)
+            rob_co_jest((int)numer);
+        else
+            __asm__ volatile("hlt");
+    }
+
+    /* Odtad rdzen jest pelnoprawnym procesorem jadra: ma wlasne
+       zadanie bezczynne i bierze z listy to, co wolno mu prowadzic.
+       Ta funkcja nie wraca. */
+    task_rdzen_wejdz((int)numer);
+
     for (;;) {
         if (praca_ile) {
             rob_co_jest((int)numer);
@@ -334,6 +355,12 @@ void smp_ap_glowna(uint32_t numer)
          * spieszyc, skoro chodzi o prace liczona w setkach milisekund. */
         __asm__ volatile("hlt");
     }
+}
+
+void smp_rob_zlecenie(int rdzen)
+{
+    if (praca_ile)
+        rob_co_jest(rdzen);
 }
 
 void smp_praca(void (*funkcja)(uint32_t numer, void *dane), void *dane,

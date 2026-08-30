@@ -17,6 +17,16 @@
 struct task64;
 
 void scheduler64_init(void);
+/* Zadanie, ktore wolno prowadzic kazdemu rdzeniowi */
+struct task64 *task64_create_wszedzie(const char *name,
+                                      void (*entry)(void *), void *arg);
+
+/* Czy scheduler juz wstal (rdzen wtorny czeka, zanim dolaczy) */
+int task_scheduler_gotowy(void);
+
+/* Rdzen wtorny dolacza do schedulera. Nie wraca. */
+void task_rdzen_wejdz(int nr);
+
 struct task64 *task64_create(const char *name, void (*entry)(void *),
                              void *arg);
 void task64_yield(void);

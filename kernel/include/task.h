@@ -77,6 +77,17 @@ uint32_t task_mmap_blok(uint32_t adres, uint32_t indeks);
 void task_mmap_zwolnij(void);
 void task_mmap_dziedzicz(struct task *dziecko);
 
+/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
+   rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
+struct task *task_create_wszedzie(const char *name, void (*entry)(void *),
+                                  void *arg);
+
+/* Czy scheduler juz wstal (rdzen wtorny czeka, zanim do niego dolaczy) */
+int task_scheduler_gotowy(void);
+
+/* Rdzen wtorny dolacza do schedulera. Nie wraca. */
+void task_rdzen_wejdz(int nr);
+
 int task_cwd(void);
 void task_set_cwd(int slot);
 

@@ -26,6 +26,8 @@
 #include "include/pipe.h"
 #include "include/signal.h"
 #include "include/exec.h"
+#include "include/spinlock.h"
+#include "include/smp.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -68,6 +70,16 @@ struct task {
     uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
     int id;
     int priority;               /* 0=wysoki, 1=normalny, 2=niski (idle) */
+    /* Gdzie wolno prowadzic to zadanie.
+       'wszedzie' = 1 znaczy, ze moze je wziac kazdy rdzen. Domyslnie
+       jest zero i tak ma byc: zadanie, ktore siega po dysk, siec albo
+       cokolwiek innego pisanego dla jednego rdzenia, ma zostac tam,
+       gdzie bylo. Rdzen wtorny bierze tylko to, co ktos jawnie na to
+       pozwolil.
+       'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne TEGO
+       rdzenia - nikt inny go nie prowadzi, bo stoi na jego stosie. */
+    int wszedzie;
+    int bezczynny_rdzenia;
     int exit_code;              /* kod zwrocony przez task_exit */
     int killed;                 /* oczekujace zabicie (kill) */
     char name[NAME_MAX];
@@ -81,8 +93,34 @@ extern char stack_top[];
 
 extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
 
-static struct task *current;
+/* --- Co rdzen ma swojego ---------------------------------------------
+ *
+ * Przez cala historie tego jadra biezace zadanie bylo JEDNA zmienna
+ * globalna - i wlasnie dlatego wiecej niz jeden rdzen nie mial jak
+ * prowadzic zadan. Teraz jest ich tyle, ile rdzeni, a ktore z nich
+ * jest moje, mowi sam procesor (numer w jego lokalnym APIC).
+ *
+ * Makro 'current' zostaje, bo caly kod jadra mowi tym slowem i nie ma
+ * powodu, zeby przestal. Zmienilo sie tylko to, na co pokazuje.
+ */
+struct rdzen {
+    struct task *biezace;
+    struct task *bezczynne;      /* to, do ktorego rdzen wraca bez pracy */
+};
+static struct rdzen rdzenie[SMP_RDZENI];
+
+#define current (rdzenie[smp_rdzen()].biezace)
+
+/* Lista zadan jest jedna dla calej maszyny, wiec i zamek jest jeden.
+ *
+ * Trzyma sie go PRZEZ przelaczenie kontekstu, a zwalnia go ten, kto po
+ * drugiej stronie przyjdzie. Inaczej zostawaloby okno, w ktorym zadanie
+ * jest juz oznaczone jako gotowe, a jego stos wciaz uzywany - i drugi
+ * rdzen wskoczylby na stos, po ktorym pierwszy jeszcze chodzi. */
+static struct spinlock zamek = SPINLOCK_WOLNY;
+
 static int next_id;
+static int scheduler_wstal;
 
 /* Tablica kodow wyjscia zakonczonych procesow - wait je stad odczytuje.
    Kazdy wpis pamieta tez rodzica, bo zadanie znika z listy szybciej,
@@ -159,6 +197,10 @@ void task_set_cwd(int slot)
 /* Pierwszy kod każdego nowego wątku - context_switch "wraca" tutaj */
 static void task_trampoline(void)
 {
+    /* Zamek listy zadan trzyma jeszcze ten, kto nas tu przelaczyl -
+       i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
+       kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
+    spin_unlock(&zamek);
     __asm__ volatile("sti");
     current->entry(current->arg);
     task_exit(0);
@@ -184,8 +226,17 @@ void scheduler_init(void)
     main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
     task_init_fds(main_task);
     task_init_signals(main_task);
+    main_task->wszedzie = 0;             /* watek glowny zostaje na swoim */
+    main_task->bezczynny_rdzenia = 0;    /* to on jest bezczynnym rdzenia 0 */
     main_task->next = main_task;
-    current = main_task;
+    rdzenie[0].biezace = main_task;
+    rdzenie[0].bezczynne = main_task;
+    scheduler_wstal = 1;
+}
+
+int task_scheduler_gotowy(void)
+{
+    return scheduler_wstal;
 }
 
 struct task *task_create(const char *name, void (*entry)(void *), void *arg)
@@ -205,6 +256,8 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->vc = current ? current->vc : 0;   /* dziecko pisze tam, co rodzic */
     t->killed = 0;
     t->priority = 1;            /* domyslnie normalny priorytet */
+    t->wszedzie = 0;            /* dopoki ktos nie powie inaczej */
+    t->bezczynny_rdzenia = -1;
     task_init_fds(t);
     task_init_signals(t);
     t->entry = entry;
@@ -223,10 +276,24 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     *--sp = 0;                          /* edi */
     t->esp = (uint32_t)sp;
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     t->next = current->next;
     current->next = t;
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
+    return t;
+}
+
+/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi.
+ *
+ * Zwykle zadanie jadra zostaje na rdzeniu rozruchowym i tak ma byc:
+ * siega po sterowniki, system plikow i cala reszte pisana dla jednego
+ * rdzenia. Tutaj wolajacy bierze na siebie, ze jego watek dotyka tylko
+ * tego, co zniesie dwa rdzenie naraz. */
+struct task *task_create_wszedzie(const char *name, void (*entry)(void *),
+                                  void *arg)
+{
+    struct task *t = task_create(name, entry, arg);
+    t->wszedzie = 1;
     return t;
 }
 
@@ -260,7 +327,7 @@ int task_signal_send(int pid, int sig)
     if (sig == SIGKILL)
         return task_kill(pid);
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     struct task *t = current;
     int found = 0;
     do {
@@ -273,7 +340,7 @@ int task_signal_send(int pid, int sig)
         }
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return found ? 0 : -1;
 }
 
@@ -370,6 +437,12 @@ int task_reclaim_page(void)
     static struct task *cursor;
     if (!current)                   /* scheduler jeszcze nie wystartowal */
         return 0;
+    /* Wyrzucanie stron na dysk zostaje na rdzeniu rozruchowym. Siega
+       po plik wymiany i po warstwe blokowa, a te pisane byly dla
+       jednego rdzenia; rdzen wtorny, ktoremu zabraknie pamieci, ma
+       powiedziec o tym wprost, a nie po cichu ruszyc dysk. */
+    if (smp_rdzen() != 0)
+        return 0;
     uint32_t flags = irq_save();
 
     struct task *start = cursor && cursor->state != TASK_ZOMBIE
@@ -453,7 +526,7 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
    exec przed zniszczeniem starego obrazu procesu. */
 int task_cr3_shared(uint32_t cr3)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     int shared = 0;
     struct task *t = current->next;
     while (t != current) {
@@ -463,7 +536,7 @@ int task_cr3_shared(uint32_t cr3)
         }
         t = t->next;
     }
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return shared;
 }
 
@@ -507,11 +580,26 @@ static void reap_zombies(void)
    wyzszy priorytet (mniejsza liczba) wywlaszcza nizszy; rownorzedne
    chodza round-robin; biezace zadanie zostaje, gdy jest scisle wyzsze
    od wszystkich gotowych. */
-static struct task *pick_next(void)
+/* Czy rdzen 'nr' moze wziac to zadanie?
+ *
+ * Rdzen rozruchowy prowadzi wszystko, tak jak dotad. Rdzen wtorny -
+ * tylko to, co ktos jawnie na to pozwolil, bo reszta jadra pisana jest
+ * dla jednego rdzenia i cicho na to liczy.
+ *
+ * Zadanie bezczynne nalezy do swojego rdzenia i do nikogo innego:
+ * stoi na stosie, ktory ten rdzen dostal przy rozruchu. */
+static int wolno_wziac(const struct task *t, int nr)
+{
+    if (t->bezczynny_rdzenia >= 0)
+        return t->bezczynny_rdzenia == nr;
+    return nr == 0 || t->wszedzie;
+}
+
+static struct task *pick_next(int nr)
 {
     uint32_t now = pit_ticks();
 
-    /* Obudz spioch ow, ktorych czas minal */
+    /* Obudz spiochow, ktorych czas minal */
     struct task *t = current->next;
     do {
         if (t->state == TASK_SLEEPING && (int32_t)(now - t->wake_at) >= 0)
@@ -523,7 +611,7 @@ static struct task *pick_next(void)
     int best = 1 << 30;
     t = current;
     do {
-        if (t->state == TASK_READY && t->priority < best)
+        if (t->state == TASK_READY && wolno_wziac(t, nr) && t->priority < best)
             best = t->priority;
         t = t->next;
     } while (t != current);
@@ -537,7 +625,8 @@ static struct task *pick_next(void)
     /* Round-robin wsrod gotowych o priorytecie 'best', zaczynajac za current */
     t = current->next;
     do {
-        if (t->state == TASK_READY && t->priority == best)
+        if (t->state == TASK_READY && wolno_wziac(t, nr) &&
+            t->priority == best)
             return t;
         t = t->next;
     } while (t != current->next);
@@ -545,29 +634,118 @@ static struct task *pick_next(void)
     return NULL;
 }
 
-void schedule(void)
+/* Wybor nastepnego zadania i przelaczenie sie na nie.
+ *
+ * Wolane ZAWSZE z wygaszonymi przerwaniami - albo z obslugi przerwania,
+ * albo spod irq_save. Zamek listy zadan bierzemy bez ruszania IF: gdyby
+ * timer wszedl w srodek sekcji trzymajacej ten zamek, czekalby na niego
+ * w nieskonczonosc, bo zwolnic go moze tylko przerwany wlasnie kod.
+ *
+ * Zamek trzymamy PRZEZ przelaczenie i zwalnia go ten, kto po drugiej
+ * stronie przyjdzie - bo dopiero wtedy stos poprzedniego zadania jest
+ * naprawde wolny. Zadanie, ktore sie konczy, nie wraca tu nigdy i nie
+ * zwalnia niczego; zrobi to za nie jego nastepca.
+ */
+static void przelacz(int nowy_stan)
 {
-    if (!current)   /* timer tyka, zanim scheduler wystartuje */
+    int nr = smp_rdzen();
+    if (!rdzenie[nr].biezace)   /* timer tyka, zanim scheduler wystartuje */
         return;
 
+    spin_lock(&zamek);
+    /* Stan biezacego zadania zmieniamy JUZ POD ZAMKIEM, razem z wyborem
+       nastepnego. Ustawiony wczesniej dawalby okno, w ktorym zadanie
+       jest oznaczone jako spiace, a jego stos wciaz uzywany - i drugi
+       rdzen moglby je w tym czasie obudzic i na ten stos wejsc. */
+    if (nowy_stan >= 0)
+        rdzenie[nr].biezace->state = (enum task_state)nowy_stan;
     reap_zombies();
 
-    struct task *next = pick_next();
-    if (!next)      /* nikt inny nie jest gotowy - bież dalej */
+    struct task *next = pick_next(nr);
+    if (!next) {                /* nikt inny nie jest gotowy - biez dalej */
+        spin_unlock(&zamek);
         return;
+    }
 
-    struct task *prev = current;
+    struct task *prev = rdzenie[nr].biezace;
     if (prev->state == TASK_RUNNING)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
-    current = next;
-    /* Przerwanie z ring 3 tego wątku ma wylądować na jego stosie jądra */
-    tss_set_esp0(next->kstack_top);
+    rdzenie[nr].biezace = next;
+    /* Przerwanie z ring 3 tego watku ma wyladowac na jego stosie jadra.
+       Segment stanu zadania jest jeden i nalezy do rdzenia rozruchowego -
+       tylko on wchodzi w ring 3, wiec tylko on ma tu co ustawiac. */
+    if (nr == 0)
+        tss_set_esp0(next->kstack_top);
     /* Zmiana przestrzeni adresowej tylko, gdy trzeba (przeladowanie
        CR3 oproznia TLB - szkoda cykli miedzy watkami jadra) */
     if (next->cr3 != prev->cr3)
         __asm__ volatile("movl %0, %%cr3" : : "r"(next->cr3) : "memory");
     context_switch(&prev->esp, next->esp);
+    spin_unlock(&zamek);
+}
+
+void schedule(void)
+{
+    przelacz(-1);
+}
+
+/* --- Rdzen wtorny dolacza do schedulera ------------------------------
+ *
+ * Kazdy rdzen potrzebuje zadania, na ktore ma wrocic, gdy nie ma nic do
+ * roboty - inaczej nie byloby dokad odlozyc jego kontekstu. To zadanie
+ * jest jego wlasnoscia: stoi na stosie, ktory rdzen dostal przy
+ * obudzeniu, i nikt inny nie ma prawa go prowadzic.
+ *
+ * Ta funkcja nie wraca. Rdzen ma odtad dwie rzeczy do roboty: policzyc,
+ * co mu zlecono, i poprowadzic zadanie, jesli jakies jest dla niego.
+ */
+void task_rdzen_wejdz(int nr)
+{
+    if (nr <= 0 || nr >= SMP_RDZENI || !scheduler_wstal)
+        return;
+
+    struct task *t = kmalloc(sizeof(*t));
+    if (!t)
+        return;
+    t->id = -nr;                 /* ujemny numer: to nie jest proces */
+    task_set_name(t, "bezczynny");
+    t->name[9] = (char)('0' + nr);
+    t->name[10] = '\0';
+    t->state = TASK_RUNNING;
+    t->stack = NULL;             /* stos ma z trampoliny rozruchowej */
+    t->kstack_top = 0;
+    t->cr3 = paging_kernel_cr3();
+    t->owns_dir = 0;
+    t->brk = t->brk_base = t->mmap_next = 0;
+    for (int i = 0; i < MMAP_PLIKOW; i++)
+        t->mapy[i].start = t->mapy[i].koniec = 0;
+    t->cwd = -1;
+    t->parent = -1;
+    t->vc = 0;
+    t->killed = 0;
+    t->priority = 2;
+    t->wszedzie = 0;
+    t->bezczynny_rdzenia = nr;
+    task_init_fds(t);
+    task_init_signals(t);
+
+    irqflags_t flags = spin_lock_irq(&zamek);
+    t->next = rdzenie[0].biezace->next;
+    rdzenie[0].biezace->next = t;
+    rdzenie[nr].biezace = t;
+    rdzenie[nr].bezczynne = t;
+    spin_unlock_irq(&zamek, flags);
+
+    __asm__ volatile("sti");
+    for (;;) {
+        smp_rob_zlecenie(nr);
+        task_yield();
+        /* Nic dla mnie nie ma - stoj do najblizszego przerwania.
+           Zegar tego rdzenia tyka sto razy na sekunde, a pobudka od
+           rdzenia rozruchowego przychodzi od razu. */
+        __asm__ volatile("hlt");
+    }
 }
 
 void task_yield(void)
@@ -581,8 +759,7 @@ void task_sleep(uint32_t ms)
 {
     uint32_t flags = irq_save();
     current->wake_at = pit_ticks() + (ms + 9) / 10;  /* tyknięcie = 10 ms */
-    current->state = TASK_SLEEPING;
-    schedule();
+    przelacz(TASK_SLEEPING);
     irq_restore(flags);
 }
 
@@ -590,8 +767,7 @@ void task_sleep(uint32_t ms)
 void task_block(void)
 {
     uint32_t flags = irq_save();
-    current->state = TASK_BLOCKED;
-    schedule();
+    przelacz(TASK_BLOCKED);
     irq_restore(flags);
 }
 
@@ -619,7 +795,7 @@ int task_current_id(void)
 
 int task_alive(int id)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     int alive = 0;
     struct task *t = current;
     do {
@@ -629,7 +805,7 @@ int task_alive(int id)
         }
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return alive;
 }
 
@@ -645,7 +821,7 @@ void task_exit(int code)
        (czytelnik dostanie EOF, pisarz - przerwany potok) */
     file_close_all();
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     current->exit_code = code;
     /* Zapamietaj kod od razu - wait widzi 'nieaktywny' juz przy ZOMBIE,
        a reaper moze sprzatnac zadanie zanim wait zdazy je odczytac */
@@ -677,8 +853,12 @@ void task_exit(int code)
     for (int i = 0; i < EXIT_SLOTS; i++)
         if (exit_codes[i].valid && exit_codes[i].parent == current->id)
             exit_codes[i].parent = grandparent;
-    current->state = TASK_ZOMBIE;
-    schedule();
+    /* Zamek zwalniamy PRZED przelaczeniem: przelacz bierze go sam,
+       a wziecie go dwa razy na tym samym rdzeniu nie skonczyloby sie
+       nigdy. Przerwania zostaja wygaszone - to zadanie i tak nie ma
+       juz dokad wrocic. */
+    spin_unlock(&zamek);
+    przelacz(TASK_ZOMBIE);
     (void)flags;
     /* zombie nigdy nie zostanie wybrany ponownie */
     for (;;)
@@ -696,7 +876,7 @@ int task_wait(int pid)
 /* Czy biezace zadanie ma jeszcze zywe dzieci? */
 static int has_children(void)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     int any = 0;
     struct task *t = current->next;
     while (t != current) {
@@ -706,7 +886,7 @@ static int has_children(void)
         }
         t = t->next;
     }
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return any;
 }
 
@@ -714,7 +894,7 @@ static int has_children(void)
    jeszcze nie skonczylo */
 static int take_child_exit(int *code)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     int pid = -1;
     for (int i = 0; i < EXIT_SLOTS; i++) {
         if (exit_codes[i].valid && exit_codes[i].parent == current->id) {
@@ -724,7 +904,7 @@ static int take_child_exit(int *code)
             break;
         }
     }
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return pid;
 }
 
@@ -747,7 +927,7 @@ int task_wait_any(int *code)
    Budzi go, gdy spi/czeka, by szybciej trafil w punkt powrotu. */
 int task_kill(int pid)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     struct task *t = current;
     int found = 0;
     do {
@@ -760,7 +940,7 @@ int task_kill(int pid)
         }
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return found ? 0 : -1;
 }
 
@@ -785,7 +965,7 @@ int task_kill_name(const char *name)
    od zabijania, bo shell umie wyslac pod nazwe dowolny sygnal. */
 int task_find_name(const char *name)
 {
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     struct task *t = current;
     int pid = -1;
     do {
@@ -795,7 +975,7 @@ int task_find_name(const char *name)
         }
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
     return pid;
 }
 
@@ -994,7 +1174,7 @@ void task_dump(void)
     static const char *state_names[] = { "gotowy", "dziala", "spi",
                                          "czeka", "zombie" };
 
-    uint32_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     printk("  ID  RODZIC  STAN    NAZWA\n");
     struct task *t = current;
     do {
@@ -1009,5 +1189,5 @@ void task_dump(void)
         printk("%s%s\n", t->name, t == current ? " (biezacy)" : "");
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
 }

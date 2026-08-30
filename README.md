@@ -105,22 +105,18 @@ ground for both.
 
 **Things neither kernel has yet**
 
-- Real SMP. The other cores are found in the ACPI tables, woken with
-  INIT-SIPI, and run computation from a shared work queue behind a
-  spinlock — `smp` splits a job across all of them and checks the
-  result against the single-core answer. They can now also **call into
-  the kernel**: the frame map, the kernel heap and the console are
-  behind locks, and `smpmem` hammers all three from every core at once
-  (a frame handed out twice shows up as a pattern mismatch). Each core
-  now loads the kernel's descriptor tables, so a fault on a secondary
-  core is *reported* instead of resetting the machine, and each has its
-  own clock in its local APIC — the PIT interrupt only ever reaches one
-  processor. An idle core halts and is woken by an inter-processor
-  interrupt when there is work. What they still cannot do is run
-  *tasks*: the scheduler and the process list were written for one
-  core, `current` is a single global, and there is no per-CPU state or
-  TLB shootdown yet.
-- Preemption inside the kernel, which SMP will force anyway.
+- Ring 3 on the secondary cores. Kernel threads already run on all of
+  them — `current` is per-CPU, the task list is behind a lock held
+  across the context switch, and each core has its own idle task, its
+  own clock in its local APIC and the kernel's descriptor tables, so a
+  fault there is *reported* instead of resetting the machine. `smpmem`
+  hammers the frame map and the kernel heap from every core at once;
+  `smpwatki` runs four compute threads and shows four portions of work
+  finishing in the time of one. What is still boot-core-only is user
+  space: one TSS, no TLB shootdown, and every driver written for a
+  single core. A thread opts in with `task_create_wszedzie`; everything
+  else stays where it was, on purpose.
+- Preemption inside the kernel, which the above will force anyway.
 
 **Infrastructure**
 

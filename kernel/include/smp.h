@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+/* Ile rdzeni system obsluguje. Tablice indeksowane numerem rdzenia
+   leza w kilku plikach, wiec liczba musi byc widoczna dla wszystkich. */
+#define SMP_RDZENI 8
+
 /* Pozostale procesory
  *
  * Do tej pory system pracowal na jednym rdzeniu i nie wiedzial nawet,
@@ -42,6 +46,10 @@ void smp_zegar_tyk(void);
    potwierdzeniem: cala jej tresc to fakt, ze przyszla i wyrwala
    procesor z instrukcji hlt. */
 void smp_pobudka_odbierz(void);
+
+/* Wykonuje to, co zostalo ze zlecenia smp_praca (albo nic, gdy nie ma
+   zlecenia). Wola to petla bezczynna rdzenia. */
+void smp_rob_zlecenie(int rdzen);
 
 /* --- Praca rozdzielana na rdzenie -----------------------------------
  *

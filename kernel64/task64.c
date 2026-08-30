@@ -20,6 +20,8 @@
 #include "../kernel/include/fs.h"
 #include "pipe64.h"
 #include "proc64.h"
+#include "../kernel/include/spinlock.h"
+#include "../kernel/include/smp.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -77,15 +79,44 @@ struct task64 {
     } mapy[MMAP_PLIKOW];
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     int vc;                      /* konsola wirtualna, na ktorej pisze */
+    /* Gdzie wolno prowadzic to zadanie.
+       'wszedzie' = 1 znaczy, ze moze je wziac kazdy rdzen. Domyslnie
+       jest zero i tak ma byc: zadanie siegajace po dysk, siec albo
+       cokolwiek innego pisanego dla jednego rdzenia zostaje tam, gdzie
+       bylo. 'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne
+       TEGO rdzenia - stoi na jego stosie i nikt inny go nie prowadzi. */
+    int wszedzie;
+    int bezczynny_rdzenia;
     char name[NAME_MAX];
     struct task64 *next;
 };
 
 extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
 
-static struct task64 *current;
-static struct task64 *idle_task;
+/* --- Co rdzen ma swojego ---------------------------------------------
+ *
+ * Przez cala historie tego jadra biezace zadanie bylo JEDNA zmienna
+ * globalna - i wlasnie dlatego wiecej niz jeden rdzen nie mial jak
+ * prowadzic zadan. Teraz jest ich tyle, ile rdzeni, a ktore z nich
+ * jest moje, mowi sam procesor (numer w jego lokalnym APIC).
+ */
+struct rdzen {
+    struct task64 *biezace;
+    struct task64 *bezczynne;
+};
+static struct rdzen rdzenie[SMP_RDZENI];
+
+#define current   (rdzenie[smp_rdzen()].biezace)
+#define idle_task (rdzenie[smp_rdzen()].bezczynne)
+
+/* Lista zadan jest jedna dla calej maszyny, wiec i zamek jest jeden.
+   Trzyma sie go PRZEZ przelaczenie kontekstu, a zwalnia go ten, kto po
+   drugiej stronie przyjdzie - dopiero wtedy stos poprzedniego zadania
+   jest naprawde wolny. */
+static struct spinlock zamek = SPINLOCK_WOLNY;
+
 static int next_id;
+static int scheduler_wstal;
 
 static void set_name(struct task64 *t, const char *name)
 {
@@ -98,6 +129,10 @@ static void set_name(struct task64 *t, const char *name)
 /* Pierwszy kod kazdego nowego watku - context_switch64 "wraca" tutaj */
 static void trampoline(void)
 {
+    /* Zamek listy zadan trzyma jeszcze ten, kto nas tu przelaczyl -
+       i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
+       kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
+    spin_unlock(&zamek);
     __asm__ volatile("sti");
     current->entry(current->arg);
     task64_exit();
@@ -140,10 +175,19 @@ void scheduler64_init(void)
     main_task->cwd = FS_ROOT;
     main_task->vc = 0;
     set_name(main_task, "main");
+    main_task->wszedzie = 0;
+    main_task->bezczynny_rdzenia = -1;
     main_task->next = main_task;
-    current = main_task;
+    rdzenie[0].biezace = main_task;
 
-    idle_task = task64_create("bezczynny", idle_loop, 0);
+    rdzenie[0].bezczynne = task64_create("bezczynny", idle_loop, 0);
+    rdzenie[0].bezczynne->bezczynny_rdzenia = 0;
+    scheduler_wstal = 1;
+}
+
+int task_scheduler_gotowy(void)
+{
+    return scheduler_wstal;
 }
 
 struct task64 *task64_create(const char *name, void (*entry)(void *),
@@ -177,6 +221,8 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->cwd = current ? current->cwd : FS_ROOT;
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
+    t->wszedzie = 0;            /* dopoki ktos nie powie inaczej */
+    t->bezczynny_rdzenia = -1;
     set_name(t, name);
 
     /* Stos ukladamy tak, by context_switch64 zdjal z niego szesc zer
@@ -189,10 +235,21 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         *--sp = 0;                        /* rbp, rbx, r12-r15 */
     t->rsp = (uint64_t)(uintptr_t)sp;
 
-    irqflags_t flags = irq_save();
+    irqflags_t flags = spin_lock_irq(&zamek);
     t->next = current->next;
     current->next = t;
-    irq_restore(flags);
+    spin_unlock_irq(&zamek, flags);
+    return t;
+}
+
+/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
+   rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
+struct task64 *task64_create_wszedzie(const char *name,
+                                      void (*entry)(void *), void *arg)
+{
+    struct task64 *t = task64_create(name, entry, arg);
+    if (t)
+        t->wszedzie = 1;
     return t;
 }
 
@@ -339,22 +396,38 @@ static void reap_zombies(void)
    pierwszego gotowego poza biezacym. Watek bezczynnosci bierzemy
    dopiero wtedy, gdy nie ma nikogo innego - inaczej zjadalby polowe
    czasu procesora, nic nie robiac. */
-static struct task64 *pick_ready(void)
+/* Czy rdzen 'nr' moze wziac to zadanie?
+ *
+ * Rdzen rozruchowy prowadzi wszystko, tak jak dotad. Rdzen wtorny -
+ * tylko to, co ktos jawnie na to pozwolil, bo reszta jadra pisana jest
+ * dla jednego rdzenia i cicho na to liczy. Zadanie bezczynne nalezy do
+ * swojego rdzenia i do nikogo innego. */
+static int wolno_wziac(const struct task64 *t, int nr)
+{
+    if (t->bezczynny_rdzenia >= 0)
+        return t->bezczynny_rdzenia == nr;
+    return nr == 0 || t->wszedzie;
+}
+
+static struct task64 *pick_ready(int nr)
 {
     uint32_t now = pit_ticks();
-    struct task64 *t = current->next;
+    struct task64 *ja = rdzenie[nr].biezace;
+    struct task64 *moje_bezczynne = rdzenie[nr].bezczynne;
+    struct task64 *t = ja->next;
     struct task64 *found = NULL;
 
-    while (t != current) {
+    while (t != ja) {
         if (t->state == TASK_SLEEPING && now >= t->wake_at)
             t->state = TASK_READY;
-        if (t->state == TASK_READY && !found && t != idle_task)
+        if (t->state == TASK_READY && !found && t != moje_bezczynne &&
+            wolno_wziac(t, nr))
             found = t;
         t = t->next;
     }
-    if (!found && idle_task && idle_task != current &&
-        idle_task->state == TASK_READY)
-        found = idle_task;
+    if (!found && moje_bezczynne && moje_bezczynne != ja &&
+        moje_bezczynne->state == TASK_READY)
+        found = moje_bezczynne;
     return found;
 }
 
@@ -365,12 +438,16 @@ static struct task64 *pick_ready(void)
  * CR3 przeladowujemy tylko wtedy, gdy naprawde sie zmienia - kazde
  * przeladowanie wyrzuca caly bufor tlumaczen adresow, wiec robienie
  * tego przy przelaczaniu miedzy watkami jadra bylo by czysta strata. */
-static void apply_context(struct task64 *t)
+static void apply_context(struct task64 *t, int nr)
 {
     uint64_t want = t->space ? t->space : paging64_kernel_space();
     if (paging64_current_space() != want)
         paging64_switch(want);
-    if (t->kstack_top)
+    /* Stos jadra dla wejsc z ring 3 zapisuje sie w jednym segmencie
+       stanu zadania, wspolnym dla calej maszyny. Nalezy on do rdzenia
+       rozruchowego - i tylko on wchodzi w ring 3, wiec tylko on ma tu
+       co ustawiac. */
+    if (t->kstack_top && nr == 0)
         syscall64_set_kernel_stack(t->kstack_top);
 }
 
@@ -395,7 +472,7 @@ void task64_enter_space(uint64_t space, uint64_t kstack_top)
     irqflags_t flags = irq_save();
     current->space = space;
     current->kstack_top = kstack_top;
-    apply_context(current);
+    apply_context(current, smp_rdzen());
     irq_restore(flags);
 }
 
@@ -408,7 +485,7 @@ uint64_t task64_swap_space(uint64_t space, uint64_t kstack_top)
     current->space = space;
     if (kstack_top)              /* zero = zostaw stos jadra bez zmian */
         current->kstack_top = kstack_top;
-    apply_context(current);
+    apply_context(current, smp_rdzen());
     irq_restore(flags);
     return old;
 }
@@ -420,32 +497,48 @@ void task64_rename(const char *name)
     irq_restore(flags);
 }
 
-/* Wybiera nastepny watek i przelacza kontekst. Wolac z IF=0. */
-void schedule(void)
+/* Wybiera nastepny watek i przelacza kontekst. Wolac z IF=0.
+ *
+ * Zamek listy zadan bierzemy bez ruszania IF: gdyby timer wszedl
+ * w srodek sekcji trzymajacej ten zamek, czekalby na niego bez konca,
+ * bo zwolnic go moze tylko przerwany wlasnie kod. Trzymamy go PRZEZ
+ * przelaczenie, a zwalnia go ten, kto po drugiej stronie przyjdzie -
+ * dopiero wtedy stos poprzedniego zadania jest naprawde wolny.
+ */
+static void przelacz(int nowy_stan)
 {
-    if (!current)
+    int nr = smp_rdzen();
+    if (!rdzenie[nr].biezace)
         return;
 
+    spin_lock(&zamek);
+    /* Stan biezacego zadania zmieniamy juz pod zamkiem, razem z wyborem
+       nastepnego: ustawiony wczesniej dawalby okno, w ktorym zadanie
+       jest oznaczone jako spiace, a jego stos wciaz uzywany. */
+    if (nowy_stan >= 0)
+        rdzenie[nr].biezace->state = (enum task_state)nowy_stan;
     reap_zombies();
 
-    struct task64 *next = pick_ready();
+    struct task64 *next = pick_ready(nr);
 
     /* Nie ma nikogo innego - zostajemy, o ile sami mozemy biec dalej.
        Watek bezczynnosci sprawia, ze przypadek "nie ma nikogo, a my nie
        mozemy" po prostu nie wystepuje. */
     if (!next)
-        next = current;
+        next = rdzenie[nr].biezace;
 
-    if (next == current) {
-        current->state = TASK_RUNNING;
+    if (next == rdzenie[nr].biezace) {
+        if (nowy_stan < 0)
+            next->state = TASK_RUNNING;
+        spin_unlock(&zamek);
         return;
     }
 
-    struct task64 *prev = current;
+    struct task64 *prev = rdzenie[nr].biezace;
     if (prev->state == TASK_RUNNING)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
-    current = next;
+    rdzenie[nr].biezace = next;
 
     /* Rejestry zmiennoprzecinkowe sa takim samym stanem zadania, jak
        reszta - z ta roznica, ze procesor zapisuje je jedna instrukcja
@@ -454,8 +547,71 @@ void schedule(void)
     fpu64_save(prev->fpu);
     fpu64_load(next->fpu);
 
-    apply_context(next);
+    apply_context(next, nr);
     context_switch64(&prev->rsp, next->rsp);
+    spin_unlock(&zamek);
+}
+
+void schedule(void)
+{
+    przelacz(-1);
+}
+
+/* --- Rdzen wtorny dolacza do schedulera ------------------------------
+ *
+ * Kazdy rdzen potrzebuje zadania, na ktore ma wrocic, gdy nie ma nic do
+ * roboty - inaczej nie byloby dokad odlozyc jego kontekstu. To zadanie
+ * jest jego wlasnoscia: stoi na stosie, ktory rdzen dostal przy
+ * obudzeniu, i nikt inny nie ma prawa go prowadzic. Ta funkcja nie
+ * wraca.
+ */
+void task_rdzen_wejdz(int nr)
+{
+    if (nr <= 0 || nr >= SMP_RDZENI || !scheduler_wstal)
+        return;
+
+    struct task64 *t = kmalloc(sizeof(*t));
+    if (!t)
+        return;
+    t->stack = NULL;             /* stos ma z trampoliny rozruchowej */
+    t->state = TASK_RUNNING;
+    t->id = -nr;                 /* ujemny numer: to nie jest proces */
+    t->wake_at = 0;
+    t->space = 0;
+    t->kstack_top = 0;
+    t->parent = -1;
+    t->sig_pending = 0;
+    t->sig_handler = 0;
+    t->sig_restorer = 0;
+    for (int i = 0; i < FD_MAX; i++)
+        t->fds[i].kind = FDK_WOLNY;
+    t->brk_base = t->brk = 0;
+    t->mmap = USER64_MMAP_BASE;
+    for (int i = 0; i < MMAP_PLIKOW; i++)
+        t->mapy[i].start = t->mapy[i].koniec = 0;
+    t->fpu = fpu64_alloc();
+    t->cwd = FS_ROOT;
+    t->vc = 0;
+    t->wszedzie = 0;
+    t->bezczynny_rdzenia = nr;
+    set_name(t, "bezczynny");
+    t->name[9] = (char)('0' + nr);
+    t->name[10] = '\0';
+
+    irqflags_t flags = spin_lock_irq(&zamek);
+    t->next = rdzenie[0].biezace->next;
+    rdzenie[0].biezace->next = t;
+    rdzenie[nr].biezace = t;
+    rdzenie[nr].bezczynne = t;
+    spin_unlock_irq(&zamek, flags);
+
+    __asm__ volatile("sti");
+    for (;;) {
+        smp_rob_zlecenie(nr);
+        task64_yield();
+        /* Nic dla mnie nie ma - stoj do najblizszego przerwania */
+        __asm__ volatile("hlt");
+    }
 }
 
 void task64_yield(void)
@@ -469,8 +625,7 @@ void task64_sleep(uint32_t ms)
 {
     irqflags_t flags = irq_save();
     current->wake_at = pit_ticks() + (ms + 9) / 10;   /* tykniecie = 10 ms */
-    current->state = TASK_SLEEPING;
-    schedule();
+    przelacz(TASK_SLEEPING);
     irq_restore(flags);
 }
 
@@ -485,8 +640,7 @@ void task64_exit_code(int code)
     task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, code);
-    current->state = TASK_ZOMBIE;
-    schedule();
+    przelacz(TASK_ZOMBIE);
     for (;;)                              /* zombie nie zostanie wybrany */
         __asm__ volatile("hlt");
 }
@@ -502,8 +656,7 @@ void task64_exit(void)
     task64_mmap_zwolnij();
     drop_space(current);
     record_exit(current, 0);
-    current->state = TASK_ZOMBIE;
-    schedule();
+    przelacz(TASK_ZOMBIE);
     for (;;)                              /* zombie nie zostanie wybrany */
         __asm__ volatile("hlt");
 }
@@ -521,8 +674,7 @@ void task64_kill_current(const char *why)
     task64_fd_close_all();
     drop_space(current);
     record_exit(current, -1);          /* zabite, czyli nie swoja smiercia */
-    current->state = TASK_ZOMBIE;
-    schedule();
+    przelacz(TASK_ZOMBIE);
     for (;;)
         __asm__ volatile("hlt");
 }

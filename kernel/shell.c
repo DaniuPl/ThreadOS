@@ -21,6 +21,7 @@
 #include "include/prog.h"
 #include "include/smp.h"
 #include "include/smpmem.h"
+#include "include/smpwatki.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -84,6 +85,7 @@ static const struct {
     {"cp A B",   "przepisz plik na dysk"},
     {"smp",      "policz cos na wszystkich rdzeniach"},
     {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
+    {"smpwatki", "watki jadra na wszystkich rdzeniach"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -492,6 +494,8 @@ static void run_command(char *cmd)
         cmd_smp();
     else if (!strcmp(cmd, "smpmem"))
         smpmem_test();
+    else if (!strcmp(cmd, "smpwatki"))
+        smpwatki_test();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))

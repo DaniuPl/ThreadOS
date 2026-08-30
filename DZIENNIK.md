@@ -1909,3 +1909,67 @@ sprawdzane przez `make test`.
       niezależnie od wyścigu: pracę wzięło więcej niż jeden rdzeń,
       a wszystkie jednostki policzyły się dokładnie raz. Tego pilnuje
       porównanie z wynikiem jednordzeniowym, co do bitu.
+- [x] **Wątki jądra na wszystkich rdzeniach** - to, na co czekały trzy
+      poprzednie kroki.
+
+      Rdzeń wtórny miał już tablicę wyjątków, własny zegar i zamki na
+      wspólnych strukturach. Brakowało jednej rzeczy, i to najbardziej
+      niepozornej: **bieżące zadanie było pojedynczą zmienną globalną**.
+      Dopóki nią było, więcej niż jeden rdzeń nie miał dokąd zapisać
+      tego, co właśnie prowadzi. Teraz jest ich tyle, ile rdzeni, a
+      który jest mój, mówi sam procesor - numer w jego lokalnym APIC.
+
+      Słowo `current` zostało, bo całe jądro mówi tym słowem i nie ma
+      powodu, żeby przestało. Zmieniło się tylko to, na co pokazuje:
+      z jednej zmiennej na pole bloku rdzenia. Sto trzydzieści dziewięć
+      miejsc w każdym z dwóch jąder nie musiało o tym wiedzieć.
+
+      **Zamek trzymany przez przełączenie.** To jest ta część, której
+      nie da się zrobić po połowie. Lista zadań jest jedna, więc chroni
+      ją jeden zamek - ale nie wystarczy wziąć go na czas wyboru
+      następnego zadania i zaraz oddać. Zostawałoby okno, w którym
+      poprzednie zadanie jest już oznaczone jako gotowe, a jego stos
+      wciąż używany: drugi rdzeń wskoczyłby na stos, po którym pierwszy
+      jeszcze chodzi. Zamek trzymamy więc **przez** przełączenie
+      kontekstu, a zwalnia go ten, kto po drugiej stronie przyjdzie.
+      Nowe zadanie nie wraca z przełączenia jak wszystkie inne, więc
+      zwalnia zamek samo, w swojej trampolinie. Zadanie, które się
+      kończy, nie wraca nigdy - i nie musi: zrobi to za nie jego
+      następca.
+
+      Z tego samego powodu stan bieżącego zadania zmienia się teraz
+      **pod zamkiem**, razem z wyborem następnego (`przelacz(stan)`).
+      Ustawiony wcześniej dawałby okno, w którym zadanie jest oznaczone
+      jako śpiące, a jego stos wciąż zajęty - i drugi rdzeń mógłby je
+      w tym czasie obudzić.
+
+      **Czego rdzeniowi wtórnemu nadal nie wolno, i dlaczego to jest
+      decyzja, a nie niedoróbka.** Zwykłe zadanie zostaje na rdzeniu
+      rozruchowym. Rdzeń wtórny bierze tylko to, co ktoś jawnie na to
+      pozwolił przez `task_create_wszedzie` - bo reszta jądra sięga po
+      sterowniki, system plików i wymianę stron, a te pisane były dla
+      jednego rdzenia i cicho na to liczą. Segment stanu zadania jest
+      jeden i należy do rdzenia rozruchowego, więc ring 3 też zostaje
+      u niego. Wołający, który prosi o zadanie „wszędzie", bierze na
+      siebie, że jego wątek dotyka tylko tego, co zniesie dwa rdzenie
+      naraz.
+
+      Każdy rdzeń dostaje własne zadanie bezczynne - inaczej nie byłoby
+      dokąd odłożyć jego kontekstu. Stoi ono na stosie, który rdzeń
+      dostał przy obudzeniu, i nikt inny nie ma prawa go prowadzić.
+      Widać je w `ps` pod ujemnym numerem: to nie są procesy.
+
+      **Dowód jest trzyczęściowy, bo każda część z osobna dałaby się
+      podrobić.** Wątek sam zapisuje, na którym rdzeniu właśnie liczy -
+      ale gdyby scheduler tylko przerzucał go między rdzeniami po
+      kolei, maska wyglądałaby tak samo. Wynik każdej porcji jest co do
+      bitu ten sam, co porcji policzonej w wątku shella - ale to
+      dowodzi tylko poprawności. Rozstrzyga dopiero **czas**: cztery
+      porcje puszczone równolegle mają zająć wyraźnie mniej niż cztery
+      razy tyle, co jedna.
+
+      Liczby są ładniejsze, niż się spodziewałem. W trybie długim jedna
+      porcja to 64 tyknięcia, a cztery naraz - **61**. Cztery razy
+      więcej pracy w tym samym czasie. Ta sama próba na jednym rdzeniu:
+      28 tyknięć jedna, 185 cztery. To jest ta różnica, o którą chodzi,
+      i widać ją w teście wprost.
