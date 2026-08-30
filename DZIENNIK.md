@@ -59,6 +59,8 @@ ProtonOS/
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── dynlink.c       # biblioteka współdzielona: symbole i relokacje
 │   ├── smpmem.c        # próba zamków: pamięć jądra ze wszystkich rdzeni
+│   ├── smpwatki.c      # próba schedulera: wątki jądra na wszystkich rdzeniach
+│   ├── zamekjadra.c    # wielki zamek jądra (zagnieżdżalny, jeden na system)
 │   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
 │   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
 │   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
@@ -90,6 +92,7 @@ ProtonOS/
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
+│   ├── rdzen.c         # rozwidla się i mówi, które rdzenie go prowadziły
 │   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
 │   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
@@ -1973,3 +1976,77 @@ sprawdzane przez `make test`.
       więcej pracy w tym samym czasie. Ta sama próba na jednym rdzeniu:
       28 tyknięć jedna, 185 cztery. To jest ta różnica, o którą chodzi,
       i widać ją w teście wprost.
+- [x] **Ring 3 na wszystkich rdzeniach** - programy użytkownika
+      przestały być własnością rdzenia rozruchowego.
+
+      Trzeba było na to czterech rzeczy. Pierwsza: **segment stanu
+      zadania na każdy rdzeń**. Procesor czyta z niego stos jądra przy
+      wejściu z pierścienia 3, a każdy rdzeń wchodzi tam z innego
+      zadania i na inny stos - jeden wspólny segment znaczyłby, że dwa
+      rdzenie wchodzą do jądra na ten sam stos. Deskryptorów też musi
+      być tyle, ile rdzeni: instrukcja `ltr` oznacza deskryptor jako
+      **zajęty**, więc drugi rdzeń ładujący ten sam selektor dostałby
+      wyjątek ochrony.
+
+      Druga: **własne wejście w `syscall`**. W trybie długim rejestry
+      wejścia (`IA32_LSTAR`, `IA32_STAR`) są własnością rdzenia i ten,
+      który ich nie ustawi, nie przyjmie wywołania systemowego wcale.
+      Sam stos jądra bierze się przez `swapgs` i `IA32_KERNEL_GS_BASE`,
+      czyli jedyny mechanizm, jaki procesor daje na "to jest mój
+      rdzeń": tablica bloków po 16 bajtów, po jednym na rdzeń.
+
+      Trzecia: **wielki zamek jądra**. Reszta jądra - sterowniki,
+      system plików, wymiana stron - pisana była dla jednego rdzenia
+      i cicho na to liczy. Zamek jest zagnieżdżalny, bo musi: przerwanie
+      trafia w środek wywołania systemowego, a rdzeń, który już go
+      trzyma, nie może na siebie czekać. Bierze go każde wejście z
+      pierścienia 3 i oddaje każde wyjście, a `przelacz` oddaje go **na
+      czas przełączenia** - inaczej zadanie usypiające w środku
+      syscalla zamykałoby jądro dla wszystkich aż do swojego
+      przebudzenia. Głębokość leży na stosie tego zadania, więc każde
+      odzyskuje dokładnie swoją.
+
+      Czwarta okazała się prawdziwa i kosztowała dzień. **Rdzeń wtórny
+      w trybie chronionym nie miał włączonego stronicowania.**
+      Trampolina rozruchowa przechodziła w tryb chroniony i na tym
+      kończyła; nikt nigdy nie ustawił mu CR3 ani bitu PG. Dla kodu
+      jądra wychodziło to na jedno, bo dolna pamięć jest odwzorowana
+      jeden do jednego - i dlatego wątki jądra na rdzeniach wtórnych
+      działały bez zarzutu przez cały poprzedni krok. Ale adres programu
+      użytkownika (0x40000000 w górę) bez tablic stron nie znaczy nic:
+      rdzeń czytał stamtąd to, co leży pod tym adresem **fizycznie**,
+      czyli zera.
+
+      Objaw był myląco odległy od przyczyny. Proces ginął pod losowym,
+      dzikim adresem, za każdym razem innym - bo `iret` wchodził w
+      pierścień 3 na poprawnym adresie, a procesor wykonywał tam zera
+      i skakał, gdzie popadnie. Wielki zamek wyglądał na winnego, więc
+      go wyłączyłem - i nic to nie dało, co było pierwszą dobrą
+      wiadomością. Rozstrzygnął dopiero zrzut, w którym te same dane
+      czytane na dwa sposoby dały dwie różne odpowiedzi: przez adres
+      wirtualny **zero**, a przez tę samą ramkę odczytaną wprost -
+      poprawny kod. Katalog stron się zgadzał, wpis się zgadzał, CR3 się
+      zgadzało, `invlpg` i przeładowanie CR3 nic nie zmieniały. Została
+      jedna możliwość: tłumaczenie adresów w ogóle nie działa. Naprawa
+      to sześć instrukcji w trampolinie i jedno pole na CR3 - dokładnie
+      to samo, co rdzeń 64-bitowy dostał od początku, bo bez
+      stronicowania tryb długi po prostu nie rusza.
+
+      **Wątek a proces to teraz dwie różne zgody.** Zadanie jądra
+      utworzone przez `task_create_wszedzie` jest *samodzielne*: nie
+      bierze wielkiego zamka, bo ten, kto o nie poprosił, wziął na
+      siebie, że jego wątek dotyka wyłącznie rzeczy znoszących dwa
+      rdzenie naraz. Gdyby brało, cztery wątki liczące równolegle
+      liczyłyby się po kolei - a po to ich nie ma. Proces uruchomiony
+      przez `runw` ma odwrotnie: jego strona jądrowa chodzi pod zamkiem,
+      równolegle idzie samo liczenie w pierścieniu 3, a tam program i
+      tak spędza większość czasu.
+
+      **Dowód znów jest porównaniem, nie pomiarem.** `run rdzen` i
+      `runw rdzen` w tej samej maszynie: ten sam program, ta sama suma
+      kontrolna co do bitu, ta sama liczba kroków. Różni je tylko to,
+      ilu rdzeniom wolno go prowadzić. W trybie długim 86 tyknięć wobec
+      **33** i maska wszystkich czterech rdzeni; w trybie chronionym 42
+      wobec **26**. Na maszynie jednordzeniowej `runw` nie zmienia nic
+      i tego też pilnuje asercja - obietnica "wolno wszędzie" nie jest
+      obietnicą "musi gdzie indziej".

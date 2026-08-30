@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "include/syscall.h"
+#include "include/smp.h"
 #include "include/isr.h"
 #include "include/task.h"
 #include "include/pit.h"
@@ -357,6 +358,12 @@ void syscall_handler(struct regs *r)
     }
     case SYS_MSYNC:
         r->eax = process_msync();
+        break;
+    /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
+       APIC jest poza jego przestrzenia - a bez tego nie da sie
+       pokazac, ze proces naprawde biegl gdzie indziej. */
+    case SYS_RDZEN:
+        r->eax = (uint32_t)smp_rdzen();
         break;
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);

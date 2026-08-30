@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 #include "syscall64.h"
+#include "../kernel/include/smp.h"
+#include "../kernel/include/zamekjadra.h"
 #include "gdt64.h"
 #include "task64.h"
 #include "paging64.h"
@@ -37,12 +39,22 @@
 #define MSR_STAR   0xC0000081
 #define MSR_LSTAR  0xC0000082
 #define MSR_SFMASK 0xC0000084
+#define MSR_KERNEL_GS 0xC0000102
 
 #define EFER_SCE   (1u << 0)
 #define RFLAGS_IF  0x200
 
 extern void syscall64_entry(void);
-extern uint64_t syscall64_kernel_rsp;
+
+/* Blok danych rdzenia widziany przez stub wejsciowy przez rejestr GS.
+   Uklad musi zgadzac sie z boot64/syscall64.S. */
+struct rdzen_syscall {
+    uint64_t kernel_rsp;     /* przesuniecie 0 */
+    uint64_t scratch;        /* przesuniecie 8 */
+};
+extern struct rdzen_syscall syscall64_bloki[];
+_Static_assert(sizeof(struct rdzen_syscall) == 16,
+               "stub liczy po szesnascie bajtow na rdzen");
 
 static int user_ran;
 static uint32_t user_cs;
@@ -64,9 +76,16 @@ static uint64_t rdmsr(uint32_t msr)
     return ((uint64_t)high << 32) | low;
 }
 
+/* Wolane na KAZDYM rdzeniu: wszystkie te rejestry sa jego wlasne.
+   Rdzen, ktory ich nie ustawi, nie przyjmie instrukcji syscall wcale. */
 void syscall64_init(void)
 {
     wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SCE);
+
+    /* Wskaznik na blok tego rdzenia. Stub wejsciowy siega po niego
+       przez swapgs - to jedyna droga bez wolnego rejestru. */
+    wrmsr(MSR_KERNEL_GS,
+          (uint64_t)(uintptr_t)&syscall64_bloki[smp_rdzen()]);
 
     /* Bity 47-32: selektor kodu jadra przy wejsciu.
        Bity 63-48: podstawa, z ktorej sysret sklada selektory programu -
@@ -80,7 +99,7 @@ void syscall64_init(void)
 
 void syscall64_set_kernel_stack(uint64_t rsp)
 {
-    syscall64_kernel_rsp = rsp;
+    syscall64_bloki[smp_rdzen()].kernel_rsp = rsp;
     gdt64_set_kernel_stack(rsp);   /* to samo dla przerwan z ring 3 */
 }
 
@@ -197,9 +216,16 @@ static void handle(struct regs *r);
    i tylko wtedy ramka opisuje program, a nie jadro. */
 void syscall64_handler(struct regs *r)
 {
+    /* Wywolanie systemowe przychodzi z pierscienia 3, wiec bierze
+       wielki zamek jadra: program moze biec na kazdym rdzeniu, ale
+       w jadrze ma byc naraz jeden. Instrukcja syscall nie idzie przez
+       tablice przerwan, wiec to jedyne miejsce, w ktorym da sie to
+       zrobic dla niej. */
+    jadro_wejdz();
     handle(r);
     if ((r->cs & 3) == 3)
         signal64_deliver(r);
+    jadro_wyjdz();
 }
 
 static void handle(struct regs *r)
@@ -707,6 +733,11 @@ static void handle(struct regs *r)
     }
     case SYS64_MSYNC:
         r->rax = proc64_msync();
+        return;
+    /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
+       APIC jest poza jego przestrzenia. */
+    case SYS64_RDZEN:
+        r->rax = (uint64_t)(uint32_t)smp_rdzen();
         return;
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();

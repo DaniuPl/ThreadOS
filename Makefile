@@ -53,7 +53,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
              $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf \
-             $(BUILD)/user/dynlib.elf
+             $(BUILD)/user/dynlib.elf $(BUILD)/user/rdzen.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -110,6 +110,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/dynlink.o \
         $(BUILD)/smpmem.o \
         $(BUILD)/smpwatki.o \
+        $(BUILD)/zamekjadra.o \
         $(BUILD)/acpi.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
@@ -254,7 +255,8 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    mkmapa=$(BUILD)/user/mkmapa.elf mmapfile=$(BUILD)/user/mmapfile.elf \
 	    gleboko=$(BUILD)/user/gleboko.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
-	    dynlib=$(BUILD)/user/dynlib.elf
+	    dynlib=$(BUILD)/user/dynlib.elf \
+	    rdzen=$(BUILD)/user/rdzen.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #
@@ -271,7 +273,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci xhci usbhc usbkbd swap prog shm rtc \
-            dynlink smpmem smpwatki \
+            dynlink smpmem smpwatki zamekjadra \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
@@ -343,7 +345,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/mkmapa64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
-               $(BUILD)/user64/dynlib.elf
+               $(BUILD)/user64/dynlib.elf \
+               $(BUILD)/user64/rdzen.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -431,7 +434,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    mkmapa64=$(BUILD)/user64/mkmapa64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
-	    dynlib=$(BUILD)/user64/dynlib.elf
+	    dynlib=$(BUILD)/user64/dynlib.elf \
+	    rdzen=$(BUILD)/user64/rdzen.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

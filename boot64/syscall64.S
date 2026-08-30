@@ -29,8 +29,17 @@ syscall64_entry:
        a drugi proces wszedl do jadra w tym samym czasie - i pierwszy
        wracal do ring 3 na cudzy stos. Teraz wartosc ladu je na stosie
        jadra tego konkretnego zadania i nikt inny jej nie widzi. */
-    movq %rsp, syscall64_scratch(%rip)
-    movq syscall64_kernel_rsp(%rip), %rsp
+    /* Stos jadra i komorka na stos programu naleza do RDZENIA, a nie do
+       calej maszyny: dwa rdzenie moga wejsc tu naprawde jednoczesnie
+       i jedna wspolna komorka znaczylaby, ze drugi wraca do ring 3 na
+       cudzy stos.
+       Instrukcja swapgs zamienia GS_BASE z KERNEL_GS_BASE - kazdy rdzen
+       ma w tym drugim wskaznik na SWOJ blok, ustawiony przy rozruchu.
+       To jedyny sposob, zeby dostac wskaznik bez ani jednego wolnego
+       rejestru i bez dotykania stosu programu, ktoremu nie ufamy. */
+    swapgs
+    movq %rsp, %gs:8                  /* stos programu na bok */
+    movq %gs:0, %rsp                  /* wlasny stos jadra tego rdzenia */
 
     /* Odtwarzamy DOKLADNIE taka ramke, jaka odklada przerwanie.
      *
@@ -41,7 +50,8 @@ syscall64_entry:
      * tak samo. Bez tego fork nie mialby skad wziac pelnego stanu
      * programu, ktory ma powielic. */
     pushq $0x1B                  /* ss */
-    pushq syscall64_scratch(%rip) /* rsp programu */
+    pushq %gs:8                  /* rsp programu */
+    swapgs                       /* GS wraca do programowego */
     pushq %r11                   /* rflags zostawione przez syscall */
     pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
     pushq %rcx                   /* rip: adres powrotu */
@@ -146,10 +156,12 @@ enter_ring3_64:
 
 .section .data
 .align 8
-.global syscall64_kernel_rsp
-.global syscall64_scratch
-syscall64_kernel_rsp: .quad 0
-syscall64_scratch:    .quad 0
+/* Blok na rdzen: stos jadra (przesuniecie 0) i komorka na stos programu
+   (przesuniecie 8). Uklad musi zgadzac sie ze struct rdzen_syscall
+   w kernel64/syscall64.c - pilnuje tego tam _Static_assert. */
+.global syscall64_bloki
+syscall64_bloki:
+    .fill 8 * 16, 1, 0
 
 /* Kod, ktory ma zadzialac w ring 3.
  *

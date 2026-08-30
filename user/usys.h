@@ -52,6 +52,7 @@
 #define SYS_SIGRETURN   45
 #define SYS_MMAP_FILE   46
 #define SYS_MSYNC       47
+#define SYS_RDZEN       48
 
 #define FS_NAME_MAX  63
 
@@ -193,6 +194,13 @@ static inline int32_t sys_waitany(int32_t *code)
     return ret;
 }
 
+/* Czekanie na dowolne wlasne dziecko - jednym slowem po obu stronach
+   (w trybie dlugim to sys_wait; zob. user64/uzgodnosc64.h) */
+static inline int32_t sys_wait_dziecka(int *kod)
+{
+    return sys_waitany((int32_t *)kod);
+}
+
 /* Podmienia program biezacego procesu (pid i deskryptory zostaja).
    Przy powodzeniu nie wraca; -1 oznacza, ze programu nie da sie
    uruchomic i stary obraz dziala dalej. */
@@ -260,6 +268,16 @@ static inline void *sys_mmap_file_w(const char *nazwa, uint32_t *rozmiar)
                      : "=a"(ret)
                      : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar), "d"(1)
                      : "memory");
+    return ret;
+}
+
+/* Na ktorym rdzeniu procesora program wlasnie biegnie.
+ * Sam nie ma jak tego sprawdzic - lokalny APIC lezy poza jego
+ * przestrzenia adresowa. */
+static inline int sys_rdzen(void)
+{
+    int ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_RDZEN) : "memory");
     return ret;
 }
 

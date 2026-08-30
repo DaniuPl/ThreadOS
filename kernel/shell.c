@@ -86,6 +86,7 @@ static const struct {
     {"smp",      "policz cos na wszystkich rdzeniach"},
     {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
     {"smpwatki", "watki jadra na wszystkich rdzeniach"},
+    {"runw",     "jak run, ale program moze biec na kazdym rdzeniu"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -475,6 +476,16 @@ static void run_command(char *cmd)
             exec_spawn(arg);
         else
             printk("uzycie: run <plik> (lista: 'ls')\n");
+    }
+    /* To samo, ale programowi wolno biec na kazdym rdzeniu. Jego
+       strona jadrowa i tak chodzi pod wielkim zamkiem - rownolegle
+       idzie liczenie w pierscieniu 3. */
+    else if (!strcmp(cmd, "runw")) {
+        if (*arg)
+            exec_spawn_wszedzie(arg);
+        else
+            printk("uzycie: runw <plik> (jak 'run', ale na kazdym "
+                   "rdzeniu)\n");
     }
     else if (!strcmp(cmd, "fls"))
         fs_list();

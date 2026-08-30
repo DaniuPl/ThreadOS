@@ -65,6 +65,9 @@
 /* Odeslanie brudnych stron zapisywalnych odwzorowan -> ile stron */
 #define SYS64_MSYNC      41
 
+/* Numer rdzenia, na ktorym program wlasnie biegnie */
+#define SYS64_RDZEN      42
+
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0
 #define FD_STDOUT  1

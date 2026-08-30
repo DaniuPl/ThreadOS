@@ -57,6 +57,7 @@
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
 #define SYS64_MSYNC      41
+#define SYS64_RDZEN      42
 
 #define NAME_MAX64 63
 
@@ -493,6 +494,12 @@ static inline void *sys_mmap_file_w(const char *nazwa, uint64_t *rozmiar)
                             (int64_t)ustrlen(nazwa),
                             (int64_t)(uintptr_t)rozmiar, 1);
     return r <= 0 ? (void *)0 : (void *)(uintptr_t)r;
+}
+
+/* Na ktorym rdzeniu procesora program wlasnie biegnie */
+static inline int64_t sys_rdzen(void)
+{
+    return syscall64(SYS64_RDZEN, 0, 0);
 }
 
 /* Odsyla do plikow zmienione strony zapisywalnych odwzorowan.

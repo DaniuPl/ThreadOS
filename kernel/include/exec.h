@@ -13,6 +13,11 @@
    argumenty rozdzielone spacjami). Zwraca pid albo -1. */
 int exec_spawn(const char *cmdline);
 
+/* To samo, ale proces wolno prowadzic kazdemu rdzeniowi. Jego strona
+   jadrowa zostaje pod wielkim zamkiem; rownolegle idzie liczenie
+   w pierscieniu 3. */
+int exec_spawn_wszedzie(const char *cmdline);
+
 /* Jak exec_spawn, ale stdout (fd 1) procesu jest przekierowany do
    pliku outfile. append=0 obcina plik, append=1 dopisuje (>>). */
 int exec_spawn_redirect(const char *cmdline, const char *outfile, int append);

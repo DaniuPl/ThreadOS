@@ -71,6 +71,7 @@ static void cmd_help(void)
     printk("           ifconfig, arp, ping <adres>, dns <ip>,\n");
     printk("           gfx, pulpit,\n");
     printk("           reboot, poweroff, smp, smpmem, smpwatki\n");
+    printk("           runw <prog> - program na dowolnym rdzeniu\n");
 }
 
 static void cmd_mem(void)
@@ -519,6 +520,29 @@ static void execute(const char *line)
         acpi_poweroff();
         printk("poweroff: nie udalo sie - "
                "mozna wylaczyc zasilanie recznie\n");
+    } else if (starts_with(line, "runw ")) {
+        /* Jak 'run', ale programowi wolno biec na kazdym rdzeniu -
+           i nie czekamy na niego, zeby dalo sie puscic kilka naraz.
+           Jego strona jadrowa i tak chodzi pod wielkim zamkiem;
+           rownolegle idzie liczenie w pierscieniu 3. */
+        const char *nazwa = argument(line, 5);
+        if (!nazwa) {
+            printk("runw: podaj nazwe programu (zobacz 'ls')\n");
+            return;
+        }
+        static char progw[16];
+        int pw = 0;
+        while (nazwa[pw] && nazwa[pw] != ' ' && pw < (int)sizeof(progw) - 1) {
+            progw[pw] = nazwa[pw];
+            pw++;
+        }
+        progw[pw] = '\0';
+        if (!prog_istnieje(progw)) {
+            printk("runw: nie ma programu '%s'\n", progw);
+            return;
+        }
+        if (proc64_spawn_wszedzie(progw, 0, 1) < 0)
+            printk("runw: nie udalo sie uruchomic '%s'\n", progw);
     } else if (starts_with(line, "run ")) {
         const char *name = argument(line, 4);
         if (!name) {

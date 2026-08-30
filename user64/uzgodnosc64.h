@@ -84,6 +84,14 @@ static inline uint32_t sys_getticks(void)
 
 /* --- Wypisywanie liczb ---------------------------------------------- */
 
+/* Czekanie na dowolne wlasne dziecko. W jadrze 32-bitowym nazywa sie
+   to sys_waitany, w 64-bitowym sys_wait - kod wspolny mowi jednym
+   slowem, a ten plik tlumaczy je na wlasciwa strone. */
+static inline int64_t sys_wait_dziecka(int *kod)
+{
+    return sys_wait(kod);
+}
+
 static inline void print_dec(uint32_t v)
 {
     char buf[24];

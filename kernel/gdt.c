@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include "include/gdt.h"
+#include "include/smp.h"
 
 struct gdt_entry {
     uint16_t limit_low;
@@ -32,9 +33,20 @@ struct tss {
     uint32_t unused[23];
 } __attribute__((packed));
 
-static struct gdt_entry gdt[6];
+/* Segment stanu zadania na KAZDY rdzen.
+ *
+ * Procesor czyta z niego stos jadra przy wejsciu z ring 3 - a kazdy
+ * rdzen wchodzi tam z innego zadania i na inny stos. Jeden wspolny
+ * segment znaczylby, ze dwa rdzenie wchodza do jadra na ten sam stos,
+ * i to jest dokladnie ten rodzaj bledu, ktory nie objawia sie od razu.
+ *
+ * Deskryptorow tez musi byc tyle, ile rdzeni: instrukcja ltr oznacza
+ * deskryptor jako ZAJETY, wiec drugi rdzen ladujacy ten sam selektor
+ * dostalby wyjatek ochrony. Tablica zostaje jedna - rozne sa tylko
+ * wpisy i selektory. */
+static struct gdt_entry gdt[5 + SMP_RDZENI];
 static struct gdt_ptr gdt_pointer;
-static struct tss tss;
+static struct tss tss[SMP_RDZENI];
 
 static void gdt_set_entry(int i, uint32_t base, uint32_t limit,
                           uint8_t access, uint8_t gran)
@@ -59,9 +71,12 @@ void gdt_init(void)
     gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);       /* kod użytkownika, ring 3 */
     gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);       /* dane użytkownika, ring 3 */
 
-    tss.ss0 = GDT_KERNEL_DATA;
-    /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
-    gdt_set_entry(5, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x00);
+    for (int i = 0; i < SMP_RDZENI; i++) {
+        tss[i].ss0 = GDT_KERNEL_DATA;
+        /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
+        gdt_set_entry(5 + i, (uint32_t)&tss[i], sizeof(tss[i]) - 1,
+                      0x89, 0x00);
+    }
 
     gdt_zaladuj();
 
@@ -70,9 +85,15 @@ void gdt_init(void)
        sie zaladowac dwa razy - a i tak nie ma po co: TSS jest jeden,
        bo sluzy wejsciu w ring 0 z ring 3, a programy uzytkownika
        chodza na razie tylko na rdzeniu rozruchowym. */
-    __asm__ volatile("movw %0, %%ax\n\t"
-                     "ltr %%ax\n\t"
-                     : : "i"(GDT_TSS) : "eax", "memory");
+    gdt_zaladuj_tss();
+}
+
+/* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
+   z jego numeru: piaty wpis tablicy plus tyle, ile wynosi numer. */
+void gdt_zaladuj_tss(void)
+{
+    uint16_t sel = (uint16_t)(GDT_TSS + smp_rdzen() * 8);
+    __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu i przeladowuje
@@ -98,5 +119,5 @@ void gdt_zaladuj(void)
 
 void tss_set_esp0(uint32_t esp0)
 {
-    tss.esp0 = esp0;
+    tss[smp_rdzen()].esp0 = esp0;
 }

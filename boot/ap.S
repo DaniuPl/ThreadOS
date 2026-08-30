@@ -6,6 +6,15 @@
  * juz jest w trybie chronionym, musi przejsc te sama droge, co
  * procesor rozruchowy - tyle ze sam i bez pomocy BIOS-u.
  *
+ * Trybu chronionego samego nie starczy. Jadro chodzi po tablicach
+ * stron i to one nadaja adresom znaczenie - rdzen bez wlaczonego
+ * stronicowania czyta pod adresem jadra to, co lezy pod nim FIZYCZNIE.
+ * Dla samego jadra wychodzi na jedno, bo dolna pamiec jest odwzorowana
+ * jeden do jednego, ale program uzytkownika lezy tam, gdzie bez tablic
+ * stron nie ma niczego. Dlatego rdzen wtorny wlacza stronicowanie na
+ * tych samych tablicach, po ktorych chodzi jadro - ich adres podaje mu
+ * procesor rozruchowy w polu ap_cr3.
+ *
  * Ten kod jest linkowany razem z jadrem, ale WYKONUJE sie pod
  * adresem 0x8000, dokad kopiuje go smp.c. Dlatego kazdy adres, ktory
  * tu pada, liczy sie jako AP_BASE plus odleglosc od poczatku bloku:
@@ -23,6 +32,7 @@
 .globl ap_licznik
 .globl ap_stos
 .globl ap_numer
+.globl ap_cr3
 
 .code16
 ap_trampolina:
@@ -53,6 +63,22 @@ ap_chroniony:
     movw %ax, %fs
     movw %ax, %gs
     movw %ax, %ss
+
+    /* Stronicowanie - te same tablice, co ma jadro. Bit PG wlacza
+       tlumaczenie adresow, bit WP kaze przestrzegac zakazu zapisu
+       takze w pierscieniu 0; oba musza byc ustawione tak samo jak na
+       rdzeniu rozruchowym, inaczej kopiowanie przy zapisie zachowuje
+       sie na kazdym rdzeniu inaczej. Kod trampoliny lezy w dolnej
+       pamieci, odwzorowanej jeden do jednego, wiec nastepna instrukcja
+       jest pod tym samym adresem co przed chwila. */
+    movl $OFF(ap_cr3), %eax
+    movl (%eax), %eax
+    movl %eax, %cr3
+    movl %cr0, %eax
+    orl $0x80010000, %eax
+    movl %eax, %cr0
+    jmp 1f
+1:
 
     /* Stos podaje procesor rozruchowy, po jednym na kazdy obudzony:
        tutaj nie ma jeszcze zadnego sposobu, zeby go sobie przydzielic */
@@ -100,6 +126,8 @@ ap_stos:
 ap_numer:
     .long 0
 ap_licznik:
+    .long 0
+ap_cr3:
     .long 0
 
 ap_trampolina_koniec:

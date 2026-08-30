@@ -45,12 +45,14 @@
 #include "../kernel64/paging64.h"
 #include "../kernel64/gdt64.h"
 #include "../kernel64/task64.h"
+#include "../kernel64/syscall64.h"
 #include "../kernel64/idt64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
 #define IDENTITY_TOP()   paging64_identity_top()
 #define ZALADUJ_GDT()    gdt64_zaladuj()
 #define ZALADUJ_IDT()    idt64_zaladuj()
-extern volatile uint32_t ap_cr3;
+#define ZALADUJ_TSS()    gdt64_zaladuj_tss()
+#define WEJSCIE_SYSCALL() syscall64_init()
 #else
 #include "include/paging.h"
 #define MAP_PHYS(a, n)   paging_map_phys((a), (n))
@@ -59,6 +61,8 @@ extern volatile uint32_t ap_cr3;
 #include "include/idt.h"
 #define ZALADUJ_GDT()    gdt_zaladuj()
 #define ZALADUJ_IDT()    idt_zaladuj()
+#define ZALADUJ_TSS()    gdt_zaladuj_tss()
+#define WEJSCIE_SYSCALL() do { } while (0)   /* i386 wchodzi bramka int 0x80 */
 #endif
 
 #define AP_BASE       0x8000        /* dokad kopiujemy trampoline */
@@ -104,6 +108,7 @@ extern uint8_t ap_trampolina[], ap_trampolina_koniec[];
 extern volatile uint32_t ap_licznik;
 extern volatile uint32_t ap_stos;
 extern volatile uint32_t ap_numer;
+extern volatile uint32_t ap_cr3;
 
 static volatile uint8_t *apic;
 static int cpus, started;
@@ -315,6 +320,10 @@ void smp_ap_glowna(uint32_t numer)
        wystarczy je tutaj wskazac. */
     ZALADUJ_GDT();
     ZALADUJ_IDT();
+    ZALADUJ_TSS();
+    /* Rejestry wejscia przez instrukcje syscall sa wlasnoscia rdzenia -
+       ten, ktory ich nie ustawi, nie przyjmie jej wcale */
+    WEJSCIE_SYSCALL();
 
     /* Wlasny zegar. Przerwanie z PIT idzie przez kontroler PIC do
        JEDNEGO procesora - ten go nie zobaczy nigdy. */
@@ -491,14 +500,18 @@ int smp_init(void)
         (volatile uint32_t *)(uintptr_t)(AP_BASE + off_numer);
     *licznik = 0;
 
-#ifdef __x86_64__
-    /* Rdzen wtorny wlacza sobie tryb dlugi sam i potrzebuje do tego
-       tablic stron - bierze te, po ktorych chodzi jadro */
+    /* Tablice stron rdzen wtorny bierze te same, po ktorych chodzi
+       jadro: w trybie dlugim bez nich nie ruszy wcale, a w trybie
+       chronionym ruszylby, tyle ze adresy programow uzytkownika nie
+       znaczylyby dla niego nic. */
     uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampolina);
-    uint64_t cr3;
+    uintptr_t cr3;
+#ifdef __x86_64__
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
-    *(volatile uint32_t *)(uintptr_t)(AP_BASE + off_cr3) = (uint32_t)cr3;
+#else
+    __asm__ volatile("movl %%cr3, %0" : "=r"(cr3));
 #endif
+    *(volatile uint32_t *)(uintptr_t)(AP_BASE + off_cr3) = (uint32_t)cr3;
 
     uint8_t moj = (uint8_t)(apic_rd(APIC_ID) >> 24);
 

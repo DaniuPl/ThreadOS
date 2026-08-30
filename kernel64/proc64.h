@@ -42,6 +42,10 @@ int proc64_copy_args(uint64_t argv_ptr, struct args64 *out);
    albo -1, gdy takiego pliku nie ma. 'arg' program zastaje w RDI. */
 int proc64_spawn(const char *name, const struct args64 *args, int quiet);
 
+/* To samo, ale proces wolno prowadzic kazdemu rdzeniowi */
+int proc64_spawn_wszedzie(const char *name, const struct args64 *args,
+                          int quiet);
+
 /* Mapuje region pamieci wspoldzielonej o danym kluczu w przestrzeni
    biezacego procesu. Zwraca adres, pod ktorym go widac, albo 0. */
 uint64_t proc64_shm(int klucz, uint64_t rozmiar);

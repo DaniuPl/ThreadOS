@@ -50,6 +50,7 @@
 #define SYS_SIGRETURN   45 /* powrot z procedury obslugi (bez argumentow) */
 #define SYS_MMAP_FILE   46 /* ebx=nazwa, ecx=&rozmiar, edx=zapis -> adres albo 0 */
 #define SYS_MSYNC       47 /* odsyla brudne strony odwzorowan -> ile stron */
+#define SYS_RDZEN       48 /* numer rdzenia, na ktorym program wlasnie biegnie */
 
 #define SYSCALL_VECTOR 0x80
 

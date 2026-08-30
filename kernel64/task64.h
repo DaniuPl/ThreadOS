@@ -22,6 +22,9 @@ struct task64 *task64_create_wszedzie(const char *name,
                                       void (*entry)(void *), void *arg);
 
 /* Czy scheduler juz wstal (rdzen wtorny czeka, zanim dolaczy) */
+/* Biezace zadanie wolno odtad prowadzic kazdemu rdzeniowi */
+void task_wszedzie_dla_mnie(void);
+
 int task_scheduler_gotowy(void);
 
 /* Rdzen wtorny dolacza do schedulera. Nie wraca. */

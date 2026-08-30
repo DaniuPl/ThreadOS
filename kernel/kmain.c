@@ -25,6 +25,7 @@
 #include "include/mb2.h"
 #include "include/usbkbd.h"
 #include "include/dynlink.h"
+#include "include/zamekjadra.h"
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
@@ -297,7 +298,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (!text_mode)
         desktop_start();
 
-    /* Watek main jest watkiem bezczynnosci - hlt do najblizszego IRQ */
+    /* Watek main staje sie watkiem bezczynnosci - a taki nie moze
+       trzymac wielkiego zamka jadra: rdzen stojacy na hlt z zamkiem
+       w garsci zamknalby jadro dla wszystkich pozostalych. */
+    jadro_wyjdz();
     for (;;)
         __asm__ volatile("hlt");
 }

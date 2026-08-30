@@ -22,6 +22,7 @@
 #include "proc64.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/zamekjadra.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -86,6 +87,12 @@ struct task64 {
        bylo. 'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne
        TEGO rdzenia - stoi na jego stosie i nikt inny go nie prowadzi. */
     int wszedzie;
+    /* 'samodzielny' = 1 znaczy, ze watek nie bierze wielkiego zamka
+       jadra: ten, kto o niego poprosil, wzial na siebie, ze watek
+       dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. Proces
+       ring 3 tego NIE ma - jego strona jadrowa to zwykly kod jadra,
+       ktory ma byc chroniony jak kazdy inny. */
+    int samodzielny;
     int bezczynny_rdzenia;
     char name[NAME_MAX];
     struct task64 *next;
@@ -133,6 +140,13 @@ static void trampoline(void)
        i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
        kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
     spin_unlock(&zamek);
+    /* Nowe zadanie zaczyna w kodzie jadra, wiec bierze wielki zamek.
+     *
+     * Nie bierze go tylko to, ktore wolno prowadzic kazdemu rdzeniowi -
+     * bo ten, kto o nie poprosil, wzial juz na siebie, ze jego watek
+     * dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. */
+    if (!current->samodzielny)
+        jadro_wejdz();
     __asm__ volatile("sti");
     current->entry(current->arg);
     task64_exit();
@@ -176,6 +190,7 @@ void scheduler64_init(void)
     main_task->vc = 0;
     set_name(main_task, "main");
     main_task->wszedzie = 0;
+    main_task->samodzielny = 0;
     main_task->bezczynny_rdzenia = -1;
     main_task->next = main_task;
     rdzenie[0].biezace = main_task;
@@ -183,6 +198,10 @@ void scheduler64_init(void)
     rdzenie[0].bezczynne = task64_create("bezczynny", idle_loop, 0);
     rdzenie[0].bezczynne->bezczynny_rdzenia = 0;
     scheduler_wstal = 1;
+
+    /* Watek glowny konczy rozruch, wiec od tej chwili jest zwyklym
+       zadaniem w kodzie jadra */
+    jadro_wejdz();
 }
 
 int task_scheduler_gotowy(void)
@@ -222,6 +241,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
     t->wszedzie = 0;            /* dopoki ktos nie powie inaczej */
+    t->samodzielny = 0;
     t->bezczynny_rdzenia = -1;
     set_name(t, name);
 
@@ -248,9 +268,21 @@ struct task64 *task64_create_wszedzie(const char *name,
                                       void (*entry)(void *), void *arg)
 {
     struct task64 *t = task64_create(name, entry, arg);
-    if (t)
+    if (t) {
         t->wszedzie = 1;
+        t->samodzielny = 1;
+    }
     return t;
+}
+
+/* Oznacza BIEZACE zadanie jako takie, ktore wolno prowadzic kazdemu
+   rdzeniowi. Uzywa tego proces ring 3: jego strona jadrowa zostaje
+   zwyklym kodem jadra pod wielkim zamkiem, ale samo liczenie w ring 3
+   moze isc rownolegle z innymi. */
+void task_wszedzie_dla_mnie(void)
+{
+    if (current)
+        current->wszedzie = 1;
 }
 
 /* Slad po zakonczonym zadaniu.
@@ -443,11 +475,10 @@ static void apply_context(struct task64 *t, int nr)
     uint64_t want = t->space ? t->space : paging64_kernel_space();
     if (paging64_current_space() != want)
         paging64_switch(want);
-    /* Stos jadra dla wejsc z ring 3 zapisuje sie w jednym segmencie
-       stanu zadania, wspolnym dla calej maszyny. Nalezy on do rdzenia
-       rozruchowego - i tylko on wchodzi w ring 3, wiec tylko on ma tu
-       co ustawiac. */
-    if (t->kstack_top && nr == 0)
+    /* Stos jadra dla wejsc z ring 3 - w segmencie stanu zadania TEGO
+       rdzenia, bo kazdy ma swoj */
+    (void)nr;
+    if (t->kstack_top)
         syscall64_set_kernel_stack(t->kstack_top);
 }
 
@@ -511,6 +542,12 @@ static void przelacz(int nowy_stan)
     if (!rdzenie[nr].biezace)
         return;
 
+    /* Wielki zamek jadra oddajemy NA CZAS PRZELACZENIA - trzymanie go
+       przez zmiane kontekstu zamykaloby jadro dla wszystkich az do
+       przebudzenia tego zadania. Glebokosc lezy na stosie TEGO
+       zadania, wiec kazde odzyska dokladnie swoja. */
+    int glebokosc = jadro_zwolnij_wszystko();
+
     spin_lock(&zamek);
     /* Stan biezacego zadania zmieniamy juz pod zamkiem, razem z wyborem
        nastepnego: ustawiony wczesniej dawalby okno, w ktorym zadanie
@@ -531,6 +568,7 @@ static void przelacz(int nowy_stan)
         if (nowy_stan < 0)
             next->state = TASK_RUNNING;
         spin_unlock(&zamek);
+        jadro_przywroc(glebokosc);
         return;
     }
 
@@ -550,6 +588,9 @@ static void przelacz(int nowy_stan)
     apply_context(next, nr);
     context_switch64(&prev->rsp, next->rsp);
     spin_unlock(&zamek);
+    /* Od tej chwili biegnie juz zadanie, ktore tu wrocilo - i to ono
+       odbiera swoja glebokosc ze swojego stosu */
+    jadro_przywroc(glebokosc);
 }
 
 void schedule(void)
@@ -593,6 +634,7 @@ void task_rdzen_wejdz(int nr)
     t->cwd = FS_ROOT;
     t->vc = 0;
     t->wszedzie = 0;
+    t->samodzielny = 1;         /* zadanie bezczynne nie bierze zamka */
     t->bezczynny_rdzenia = nr;
     set_name(t, "bezczynny");
     t->name[9] = (char)('0' + nr);
@@ -966,6 +1008,9 @@ void task64_inherit_brk(struct task64 *child)
     child->brk_base = current->brk_base;
     child->brk = current->brk;
     child->mmap = current->mmap;     /* dziecko widzi ten sam uklad */
+    /* Dziecko dziedziczy prawo do biegania na kazdym rdzeniu: to
+       wlasnosc programu, a nie pojedynczego zadania */
+    child->wszedzie = current->wszedzie;
 }
 
 /* --- Deskryptory --------------------------------------------------

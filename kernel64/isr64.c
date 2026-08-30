@@ -11,6 +11,7 @@
 #include "../kernel/include/isr.h"
 #include "../kernel/include/pic.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/zamekjadra.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/vga.h"
 #include "task64.h"
@@ -70,7 +71,24 @@ void irq_install_handler(int irq, irq_handler_t handler)
         irq_handlers[irq] = handler;
 }
 
+static void isr64_obsluz(struct regs *r);
+
+/* Wejscie do jadra z pierscienia 3 bierze wielki zamek jadra.
+ *
+ * Program moze biec na kazdym rdzeniu, ale w jadrze ma byc naraz
+ * jeden. Przerwanie, ktore zastalo procesor juz w jadrze, nie bierze
+ * niczego nowego: zamek jest zagniezdzalny. */
 void isr64_handler(struct regs *r)
+{
+    int z_ring3 = (r->cs & 3) == 3;
+    if (z_ring3)
+        jadro_wejdz();
+    isr64_obsluz(r);
+    if (z_ring3)
+        jadro_wyjdz();
+}
+
+static void isr64_obsluz(struct regs *r)
 {
     if (r->int_no < 32) {
         /* Breakpoint to wyjatek-pulapka: zglos i jedz dalej */

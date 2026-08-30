@@ -27,6 +27,7 @@
 #include "../kernel/include/shm.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/zamekjadra.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -150,6 +151,8 @@ static void child_start(void *arg)
     task64_enter_space(space, kstack & ~0xFULL);
 
     frame.rax = 0;                   /* dziecko poznaje sie po zerze */
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
+    jadro_wyjdz();
     return_to_user_64(&frame);       /* nie wraca */
 }
 
@@ -288,6 +291,7 @@ struct spawn_req {
     char name[16];
     struct args64 args;
     int quiet;
+    int wszedzie;                /* 1 = wolno go prowadzic kazdemu rdzeniowi */
 };
 
 static void spawn_thread(void *arg)
@@ -296,6 +300,12 @@ static void spawn_thread(void *arg)
     char name[16];
     struct args64 args = req->args;
     int quiet = req->quiet;
+
+    /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
+       zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
+       wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
+    if (req->wszedzie)
+        task_wszedzie_dla_mnie();
 
     for (int i = 0; i < (int)sizeof(name); i++)
         name[i] = req->name[i];
@@ -344,6 +354,8 @@ static void spawn_thread(void *arg)
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
 
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
+    jadro_wyjdz();
     enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
 }
 
@@ -490,7 +502,8 @@ uint64_t proc64_msync(void)
     return odeslanych;
 }
 
-int proc64_spawn(const char *name, const struct args64 *args, int quiet)
+static int spawn_wewn(const char *name, const struct args64 *args,
+                      int quiet, int wszedzie)
 {
     struct spawn_req *req;
     int i;
@@ -505,6 +518,7 @@ int proc64_spawn(const char *name, const struct args64 *args, int quiet)
         req->name[i] = name[i];
     req->name[i] = '\0';
     req->quiet = quiet;
+    req->wszedzie = wszedzie;
     if (args) {
         req->args = *args;
     } else {
@@ -524,4 +538,16 @@ int proc64_spawn(const char *name, const struct args64 *args, int quiet)
         return -1;
     }
     return task64_id(t);
+}
+
+int proc64_spawn(const char *name, const struct args64 *args, int quiet)
+{
+    return spawn_wewn(name, args, quiet, 0);
+}
+
+/* To samo, ale proces wolno prowadzic KAZDEMU rdzeniowi */
+int proc64_spawn_wszedzie(const char *name, const struct args64 *args,
+                          int quiet)
+{
+    return spawn_wewn(name, args, quiet, 1);
 }

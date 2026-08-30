@@ -13,6 +13,8 @@
 #include "include/prog.h"
 #include "include/paging.h"
 #include "include/dynlink.h"
+#include "include/zamekjadra.h"
+#include "include/smp.h"
 #include "include/pmm.h"
 #include "include/task.h"
 #include "include/usermode.h"
@@ -62,6 +64,7 @@ struct exec_args {
     int out_pipe;                 /* stdout do potoku (idx) albo -1 */
     char out_file[FS_NAME_MAX + 1]; /* stdout do pliku ("" = brak) */
     int out_append;               /* 1 = dopisuj (>>), 0 = obcinaj (>) */
+    int wszedzie;                 /* 1 = wolno go prowadzic kazdemu rdzeniowi */
 };
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
@@ -399,6 +402,12 @@ static void exec_task(void *arg)
 {
     struct exec_args *a = arg;
 
+    /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
+       zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
+       wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
+    if (a->wszedzie)
+        task_wszedzie_dla_mnie();
+
     /* Tokenizacja w miejscu: a->cmd to nasza kopia */
     char *tok[ARG_MAX];
     int argc = tokenize(a->cmd, tok);
@@ -430,6 +439,10 @@ static void exec_task(void *arg)
     task_set_brk_base(brk);
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
+       Program moze biec rownolegle z innymi; do jadra wroci przez
+       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    jadro_wyjdz();
     enter_ring3(entry, esp);
 }
 
@@ -515,6 +528,7 @@ int process_demand_page(uint32_t addr)
     return page_frame_for(dir, va) != 0;
 }
 
+
 /* --- fork: rozwidlenie procesu --------------------------------------
  *
  * Dziecko nie jest ladowane od nowa - dostaje klon przestrzeni adresowej
@@ -529,6 +543,10 @@ static void fork_child(void *arg)
     struct regs *saved = arg;
     struct regs frame = *saved;       /* na wlasny stos jadra */
     kfree(saved);
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
+       Program moze biec rownolegle z innymi; do jadra wroci przez
+       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    jadro_wyjdz();
     enter_ring3_regs(&frame);
 }
 
@@ -611,6 +629,10 @@ int process_exec(const char *cmdline)
     if (!task_cr3_shared(old))
         paging_destroy_address_space(old);
 
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
+       Program moze biec rownolegle z innymi; do jadra wroci przez
+       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    jadro_wyjdz();
     enter_ring3(entry, esp);       /* nie wraca */
     return 0;
 }
@@ -777,6 +799,10 @@ static void thread_trampoline(void *a)
     uint32_t *sp = (uint32_t *)ts.ustack_top;
     *--sp = ts.arg;                  /* argument funkcji watku */
     *--sp = 0;                       /* atrapa adresu powrotu */
+    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
+       Program moze biec rownolegle z innymi; do jadra wroci przez
+       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    jadro_wyjdz();
     enter_ring3(ts.entry, (uint32_t)sp);
 }
 
@@ -856,6 +882,7 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
     a->out_pipe = -1;
     a->out_file[0] = '\0';
     a->out_append = 0;
+    a->wszedzie = 0;
     return a;
 }
 
@@ -877,6 +904,22 @@ int exec_spawn(const char *cmdline)
     struct exec_args *a = make_args(cmdline, prog);
     if (!a)
         return -1;
+    return task_id_of(task_create(prog, exec_task, a));
+}
+
+/* To samo, ale proces wolno prowadzic KAZDEMU rdzeniowi.
+ *
+ * Jego strona jadrowa zostaje zwyklym kodem jadra pod wielkim zamkiem -
+ * inaczej byloby to obietnica, ktorej nikt nie moze dotrzymac. Rownolegle
+ * idzie samo liczenie w pierscieniu 3, a tam program i tak spedza
+ * wieksza czesc czasu. */
+int exec_spawn_wszedzie(const char *cmdline)
+{
+    char prog[16];
+    struct exec_args *a = make_args(cmdline, prog);
+    if (!a)
+        return -1;
+    a->wszedzie = 1;
     return task_id_of(task_create(prog, exec_task, a));
 }
 

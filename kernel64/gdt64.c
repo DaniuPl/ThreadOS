@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "gdt64.h"
 #include "../kernel/include/string.h"
+#include "../kernel/include/smp.h"
 
 struct tss64 {
     uint32_t reserved0;
@@ -35,9 +36,18 @@ struct gdt_ptr {
     uint64_t base;
 } __attribute__((packed));
 
-/* Piec zwyklych wpisow po osiem bajtow plus TSS, ktory zajmuje dwa */
-static uint64_t gdt[7];
-static struct tss64 tss;
+/* Segment stanu zadania na KAZDY rdzen.
+ *
+ * Procesor czyta z niego stos jadra przy wejsciu z ring 3 - a kazdy
+ * rdzen wchodzi tam z innego zadania i na inny stos. Deskryptorow tez
+ * musi byc tyle, ile rdzeni: ltr oznacza deskryptor jako ZAJETY, wiec
+ * drugi rdzen ladujacy ten sam selektor dostalby wyjatek ochrony.
+ *
+ * Piec zwyklych wpisow po osiem bajtow, a potem po DWA na kazdy TSS -
+ * jego adres ma szescdziesiat cztery bity i w jeden wpis sie nie
+ * miesci. */
+static uint64_t gdt[5 + 2 * SMP_RDZENI];
+static struct tss64 tss[SMP_RDZENI];
 static struct gdt_ptr gdtp;
 
 static uint64_t entry(uint8_t access, uint8_t flags)
@@ -48,13 +58,14 @@ static uint64_t entry(uint8_t access, uint8_t flags)
 
 void gdt64_set_kernel_stack(uint64_t rsp)
 {
-    tss.rsp0 = rsp;
+    tss[smp_rdzen()].rsp0 = rsp;
 }
 
 void gdt64_init(void)
 {
-    memset(&tss, 0, sizeof(tss));
-    tss.iomap_base = sizeof(tss);        /* brak mapy portow */
+    memset(tss, 0, sizeof(tss));
+    for (int i = 0; i < SMP_RDZENI; i++)
+        tss[i].iomap_base = sizeof(tss[i]);   /* brak mapy portow */
 
     gdt[0] = 0;
     gdt[1] = entry(0x9A, 0x2);           /* kod jadra, bit L */
@@ -63,26 +74,31 @@ void gdt64_init(void)
     gdt[4] = entry(0xFA, 0x2);           /* kod uzytkownika, bit L */
 
     /* Deskryptor TSS zajmuje dwa wpisy - adres ma 64 bity */
-    uint64_t base = (uint64_t)(uintptr_t)&tss;
-    uint64_t limit = sizeof(tss) - 1;
-    gdt[5] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) |
-             ((uint64_t)0x89 << 40) | (((limit >> 16) & 0xF) << 48) |
-             (((base >> 24) & 0xFF) << 56);
-    gdt[6] = base >> 32;
+    for (int i = 0; i < SMP_RDZENI; i++) {
+        uint64_t base = (uint64_t)(uintptr_t)&tss[i];
+        uint64_t limit = sizeof(tss[i]) - 1;
+        gdt[5 + 2 * i] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) |
+                         ((uint64_t)0x89 << 40) |
+                         (((limit >> 16) & 0xF) << 48) |
+                         (((base >> 24) & 0xFF) << 56);
+        gdt[6 + 2 * i] = base >> 32;
+    }
 
     gdtp.limit = sizeof(gdt) - 1;
     gdtp.base = (uint64_t)(uintptr_t)gdt;
 
     gdt64_zaladuj();
 
-    /* Segment stanu zadania laduje TYLKO rdzen rozruchowy. Instrukcja
-       ltr oznacza deskryptor jako zajety, wiec tej samej tablicy nie da
-       sie zaladowac dwa razy - a i tak nie ma po co: TSS sluzy wejsciu
-       w ring 0 z ring 3, a programy chodza na razie tylko na rdzeniu
-       rozruchowym. */
-    __asm__ volatile("movw %w0, %%ax\n\t"
-                     "ltr %%ax"
-                     : : "i"(GDT64_TSS) : "rax", "memory");
+    gdt64_zaladuj_tss();
+}
+
+/* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
+   z jego numeru: piaty wpis tablicy plus po szesnascie bajtow na
+   kazdy poprzedni rdzen. */
+void gdt64_zaladuj_tss(void)
+{
+    uint16_t sel = (uint16_t)(GDT64_TSS + smp_rdzen() * 16);
+    __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu. Rdzen wtorny wola

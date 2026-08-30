@@ -15,6 +15,11 @@ void gdt_init(void);
 /* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
 void gdt_zaladuj(void);
 
+/* Laduje segment stanu zadania NALEZACY DO TEGO RDZENIA. Kazdy ma swoj:
+   procesor czyta z niego stos jadra przy wejsciu z ring 3, a kazdy
+   rdzen wchodzi tam z innego zadania. */
+void gdt_zaladuj_tss(void);
+
 /* Ustawia stos jądra, na który CPU przeskoczy przy przerwaniu z ring 3 */
 void tss_set_esp0(uint32_t esp0);
 

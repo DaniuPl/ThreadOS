@@ -35,6 +35,7 @@
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/usbkbd.h"
 #include "../kernel/include/dynlink.h"
+#include "../kernel/include/zamekjadra.h"
 #include "../kernel/include/swap.h"
 #include "fpu64.h"
 #include "isr64.h"
@@ -575,7 +576,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     shell64_start();
 
     /* Watek glowny staje sie od tej chwili watkiem bezczynnosci -
-       robota przejmuje shell, ktory czeka na klawisze */
+       robota przejmuje shell, ktory czeka na klawisze. Taki watek nie
+       moze trzymac wielkiego zamka jadra: rdzen stojacy na hlt z
+       zamkiem w garsci zamknalby jadro dla wszystkich pozostalych. */
+    jadro_wyjdz();
     for (;;)
         __asm__ volatile("hlt");
 }

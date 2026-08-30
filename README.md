@@ -39,8 +39,8 @@ share.
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
 (xHCI or UHCI), ACPI, files mapped into memory for reading *and
-writing*, a stack that grows on demand, secondary cores computing from
-a shared work queue, TLS 1.3 with certificate verification, and a
+writing*, a stack that grows on demand, processes that run in ring 3 on
+every core, TLS 1.3 with certificate verification, and a
 graphical desktop with windows, icons, a file manager and a web
 browser.
 
@@ -51,8 +51,8 @@ saved across context switches, a shell in the kernel *and* one in user
 space, networking from ring 3, TLS 1.3 with certificate verification,
 a graphical desktop whose six applications all run in ring 3, shared
 memory, files mapped into memory for reading *and writing*, a stack
-that grows on demand, swap to disk, secondary cores computing from a
-shared work queue, four virtual consoles, USB keyboard (xHCI or UHCI),
+that grows on demand, swap to disk, processes that run in ring 3 on
+every core, four virtual consoles, USB keyboard (xHCI or UHCI),
 ACPI power-off, and BIOS + UEFI boot from a single hybrid disc.
 
 ## Quick start
@@ -105,18 +105,19 @@ ground for both.
 
 **Things neither kernel has yet**
 
-- Ring 3 on the secondary cores. Kernel threads already run on all of
-  them — `current` is per-CPU, the task list is behind a lock held
-  across the context switch, and each core has its own idle task, its
-  own clock in its local APIC and the kernel's descriptor tables, so a
-  fault there is *reported* instead of resetting the machine. `smpmem`
-  hammers the frame map and the kernel heap from every core at once;
-  `smpwatki` runs four compute threads and shows four portions of work
-  finishing in the time of one. What is still boot-core-only is user
-  space: one TSS, no TLB shootdown, and every driver written for a
-  single core. A thread opts in with `task_create_wszedzie`; everything
-  else stays where it was, on purpose.
-- Preemption inside the kernel, which the above will force anyway.
+- Preemption inside the kernel. Ring 3 now runs on every core: each one
+  has its own task state segment, its own syscall entry stack, its own
+  clock and the kernel's descriptor tables, and everything a process
+  does inside the kernel is serialised by one big kernel lock. `runw
+  rdzen` forks and shows two processes finishing in the time of one,
+  each reporting the cores that carried it. That lock is the next thing
+  to go: it is what still stops two processes from being *inside* the
+  kernel at the same time. The drivers, written for a single core, come
+  after it.
+- TLB shootdown. A process that changes its own page tables invalidates
+  them on the core it happens to be running on; no other core is told.
+  Today nothing suffers, because one process runs on one core at a
+  time — threads sharing an address space would be the first to notice.
 
 **Infrastructure**
 
