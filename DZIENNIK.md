@@ -2116,3 +2116,48 @@ sprawdzane przez `make test`.
       którą zamek do tej pory zasłaniał: dwa rdzenie, które mylą się co
       do tego, które zadanie prowadzą. Dwa miliony zgodnych odpowiedzi
       znaczą więcej niż każdy pomiar czasu.
+- [x] **Nazwy po angielsku, testy rozdzielone** - zmiana konwencji, nie
+      zachowania.
+
+      Identyfikatory, nazwy plikow i nazwy programow sa teraz po
+      angielsku; po polsku zostaje to, co system mowi do czlowieka:
+      komunikaty jadra, opisy asercji w testach i ten dziennik. Kod
+      pisze sie po angielsku, bo tak sie go czyta.
+
+      Zamiane zrobilem narzedziem swiadomym skladni - dla C wlasnym
+      skanerem pomijajacym napisy i komentarze, dla Pythona
+      tokenizerem z biblioteki standardowej. Wynik porownalem
+      maszynowo z czysta zamiana nazw na wersji z repozytorium: rozne
+      mialy byc tylko te pliki, ktore poprawialem recznie, i tylko one
+      byly.
+
+      Recznych poprawek bylo cztery i wszystkie z jednego powodu: nowa
+      nazwa zderzala sie z istniejaca. Jedna z nich zmieniala
+      ZNACZENIE kodu i nie zglosil jej ani kompilator, ani zaden test.
+      W sterowniku NVMe bufor DMA z zakresu pliku dostawal nazwe `buf`,
+      ktora nosi juz parametr `nvme_write` - i przeslanialby go tak, ze
+      zapis szedlby do bufora wolajacego zamiast do DMA. Napisalem
+      wiec osobne narzedzie, ktore szuka NOWYCH przeslonien w calym
+      drzewie: poza jednym miejscem w ush64 zaden plik zadnego nie
+      zyskal.
+
+      Po stronie Pythona byla jeszcze jedna pulapka. Tokenizer oddaje
+      caly f-napis jako jeden znacznik, wiec nazwy w klamrach zostaly
+      nietkniete i `run_tests.py` wywrocil sie na `sek`. Drugie
+      przejscie podmienia je osobno, tylko w nawiasach klamrowych.
+
+      **Testy rozdzielone na pliki po jednej rzeczy.** Trzy grupy byly
+      workami: `rdzen` (174 asercje), `rdzen2` i `k64` (795 wierszy).
+      Kazda z nich robila wszystko na jednej maszynie, wiec awaria
+      wskazywala grupe pokrywajaca trzecia systemu, a nie zepsuta
+      rzecz. Zostaly z nich osobne grupy: rozruch, shell, procesy,
+      fork, pamiec na zadanie, sygnaly, ochrona, siec, HTTP, mysz,
+      ush, system plikow - i po stronie 64-bitowej rdzen trybu
+      dlugiego, procesy, shell i dysk. Sterowniki tez sie rozeszly na
+      ACPI, klawiature USB, AHCI, konsole i wymiane stron.
+
+      Cena jest uczciwa i widac ja w liczbach: grup jest 49 zamiast 32,
+      a caly bieg trwa 361 zamiast 326 sekund, bo kazda grupa musi
+      wystartowac wlasna maszyne. Za to najdluzsza grupa skrocila sie
+      ze 174 do 87 sekund, a nieprzechodzaca asercja mowi teraz, co
+      sie zepsulo.

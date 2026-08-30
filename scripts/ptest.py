@@ -804,6 +804,12 @@ class Qemu:
 failures = []
 
 
+def pmm_used(screen_text):
+    """Ile ramek zajetych wedlug ostatniej linii PMM na ekranie 'mem'."""
+    m = re.findall(r"PMM:\s+(\d+)/", screen_text)
+    return int(m[-1]) if m else None
+
+
 def check(name, cond):
     print(("OK:   " if cond else "BLAD: ") + name)
     if not cond:

@@ -24,10 +24,16 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 
 # Kolejnosc ma znaczenie tylko przy J=1; rownolegle i tak startuja
 # najdluzsze pierwsze, zeby nie zostawaly na koniec same
-GROUPS = ["rdzen", "rdzen2", "tls32", "k64", "desktop1", "desktop2", "drivers",
-         "net", "net64", "gfx64", "desktop64", "gui64", "acpi64",
-         "consoles64", "usbkbd64", "xhci", "swap64", "disk", "shm64", "tls64", "mmap", "mmapwrite", "dynlink", "e1000", "nvme", "smp", "locks", "kthreads", "proccores", "lockless",
-         "iso", "uefi"]
+GROUPS = [
+    "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
+    "net32", "http32", "mouse", "ush", "pfs", "k64core", "k64proc",
+    "k64shell", "k64disk", "acpi", "usbkbd", "ahci", "consoles", "swap",
+    "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "disk",
+    "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
+    "kthreads", "proccores", "lockless", "gfx64", "desktop1",
+    "desktop2", "desktop64", "gui64", "acpi64", "consoles64",
+    "usbkbd64", "iso", "uefi"
+]
 
 
 def main():

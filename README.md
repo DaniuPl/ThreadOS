@@ -62,7 +62,7 @@ make run              # 32-bit kernel in QEMU
 make kernel64         # build the long-mode kernel + its initrd
 make run-iso64-uefi   # boot the hybrid disc under UEFI firmware (OVMF)
 make test             # full test suite, groups in parallel (~5 min)
-make test T=k64       # one group only (~80 s)
+make test T=ush       # one group only
 ```
 
 Requirements: `gcc` with `-m32` (`gcc-multilib`), `make`,
@@ -71,14 +71,16 @@ Requirements: `gcc` with `-m32` (`gcc-multilib`), `make`,
 
 ## Testing
 
-Over 400 assertions run real kernels in QEMU and check the result
+Nearly 800 assertions run real kernels in QEMU and check the result
 through QMP: screen contents, pixel colours, serial output, injected
 keystrokes. Nothing is mocked — a failing assertion means the system
 misbehaved, not that a stub drifted.
 
 The checks are split into groups under `scripts/tests/`, one file per
-group, running in parallel because each needs its own virtual machine
-and those spend most of their time waiting. Several groups boot QEMU
+feature, running in parallel because each needs its own virtual machine
+and those spend most of their time waiting. One file per feature costs
+a few extra boots, and buys a failure that names the thing that broke
+instead of a group that covers a third of the system. Several groups boot QEMU
 **twice against the same disk image**, which is the only conclusive
 proof that files live on the disk rather than in memory.
 
