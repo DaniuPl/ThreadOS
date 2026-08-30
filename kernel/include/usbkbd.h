@@ -1,17 +1,17 @@
 #ifndef PROTONOS_USBKBD_H
 #define PROTONOS_USBKBD_H
 
-/* Klawiatura USB (klasa HID, protokol rozruchowy)
+/* USB keyboard (HID class, boot protocol)
  *
- * Rozpoznaje urzadzenie na magistrali USB, przelacza je w protokol
- * rozruchowy - ten, ktorego uzywa BIOS, o stalym osmiobajtowym
- * raporcie - i podaje wcisniete klawisze tam, gdzie trafiaja te
- * z PS/2. Dla reszty systemu nie ma zadnej roznicy, ktora klawiatura
- * jest podpieta.
+ * Recognises the device on the USB bus, switches it into the boot
+ * protocol - the one the BIOS uses, with a fixed eight-byte report -
+ * and hands the pressed keys to the same place PS/2 keys go. For the
+ * rest of the system it makes no difference which keyboard is plugged
+ * in.
  */
 
-/* Szuka klawiatury na magistrali i uruchamia watek odpytujacy.
-   1 = znaleziona. */
+/* Looks for a keyboard on the bus and starts the polling thread.
+   1 = found. */
 int usbkbd_init(void);
 
 #endif

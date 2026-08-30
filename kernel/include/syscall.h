@@ -1,56 +1,56 @@
 #ifndef PROTONOS_SYSCALL_H
 #define PROTONOS_SYSCALL_H
 
-/* Numery syscalli (w eax przy int 0x80; argumenty: ebx, ecx, edx;
-   wynik wraca w eax) */
-#define SYS_WRITE    1   /* ebx=fd, ecx=bufor, edx=len -> zapisane bajty */
-#define SYS_EXIT     2   /* ebx=kod wyjscia */
-#define SYS_SLEEP    3   /* ebx=milisekundy */
-#define SYS_GETTICKS 4   /* -> tykniecia timera od startu */
-#define SYS_READ     5   /* ebx=fd, ecx=bufor, edx=max -> bajty (blokuje fd 0) */
-#define SYS_SPAWN    6   /* ebx=linia polecen, ecx=plik na stdout (0=brak) -> pid */
-#define SYS_WAIT     7   /* ebx=pid - blokuje az proces sie skonczy */
-#define SYS_GETPID   8   /* -> pid biezacego procesu */
-#define SYS_SBRK     9   /* ebx=increment -> stary brk albo -1 */
-#define SYS_OPEN     10  /* ebx=nazwa, ecx=flagi O_* -> fd albo -1 */
-#define SYS_CLOSE    11  /* ebx=fd -> 0 albo -1 */
-#define SYS_SEEK     12  /* ebx=fd, ecx=offset -> nowy offset albo -1 */
-#define SYS_PIPELINE 13  /* ebx=linia z '|', ecx=plik na stdout -> pid ostatniego */
-#define SYS_READDIR  14  /* ebx=index, ecx=bufor nazwy -> rozmiar (dir: -2) albo -1 */
-#define SYS_UNLINK   15  /* ebx=sciezka -> 0 albo -1 */
-#define SYS_TIME     16  /* ebx=bufor struct rtc_time -> 0 */
-#define SYS_CHDIR    17  /* ebx=sciezka -> 0 albo -1 */
-#define SYS_GETCWD   18  /* ebx=bufor (>=128) -> 0 */
-#define SYS_MKDIR    19  /* ebx=sciezka -> 0 albo -1 */
-#define SYS_KILL     20  /* ebx=pid, ecx=sygnal (0=SIGKILL) -> 0 albo -1 */
-#define SYS_WIN_CREATE 21 /* ebx=cw, ecx=ch, edx=tytul -> winid albo -1 */
+/* Syscall numbers (in eax for int 0x80; arguments: ebx, ecx, edx;
+   the result comes back in eax) */
+#define SYS_WRITE    1   /* ebx=fd, ecx=buffer, edx=len -> bytes written */
+#define SYS_EXIT     2   /* ebx=exit code */
+#define SYS_SLEEP    3   /* ebx=milliseconds */
+#define SYS_GETTICKS 4   /* -> timer ticks since startup */
+#define SYS_READ     5   /* ebx=fd, ecx=buffer, edx=max -> bytes (blocks on fd 0) */
+#define SYS_SPAWN    6   /* ebx=command line, ecx=file for stdout (0=none) -> pid */
+#define SYS_WAIT     7   /* ebx=pid - blocks until the process ends */
+#define SYS_GETPID   8   /* -> pid of the current process */
+#define SYS_SBRK     9   /* ebx=increment -> old brk or -1 */
+#define SYS_OPEN     10  /* ebx=name, ecx=O_* flags -> fd or -1 */
+#define SYS_CLOSE    11  /* ebx=fd -> 0 or -1 */
+#define SYS_SEEK     12  /* ebx=fd, ecx=offset -> new offset or -1 */
+#define SYS_PIPELINE 13  /* ebx=line with '|', ecx=file for stdout -> pid of the last stage */
+#define SYS_READDIR  14  /* ebx=index, ecx=name buffer -> size (dir: -2) or -1 */
+#define SYS_UNLINK   15  /* ebx=path -> 0 or -1 */
+#define SYS_TIME     16  /* ebx=struct rtc_time buffer -> 0 */
+#define SYS_CHDIR    17  /* ebx=path -> 0 or -1 */
+#define SYS_GETCWD   18  /* ebx=buffer (>=128) -> 0 */
+#define SYS_MKDIR    19  /* ebx=path -> 0 or -1 */
+#define SYS_KILL     20  /* ebx=pid, ecx=signal (0=SIGKILL) -> 0 or -1 */
+#define SYS_WIN_CREATE 21 /* ebx=cw, ecx=ch, edx=title -> winid or -1 */
 #define SYS_WIN_RECT   22 /* ebx=winid, ecx=&{x,y,w,h,color} -> 0/-1 */
 #define SYS_WIN_TEXT   23 /* ebx=winid, ecx=&{x,y,color,str} -> 0/-1 */
-#define SYS_WIN_POLL   24 /* ebx=winid, ecx=&event -> 1 (jest), 0 (brak), -1 */
-#define SYS_MMAP       25 /* ebx=rozmiar -> adres albo 0 */
-#define SYS_SHM        26 /* ebx=klucz, ecx=rozmiar -> adres wspoldzielony */
-#define SYS_SYSINFO    27 /* ebx=bufor {ram_kib,used_kib,uptime_s} -> 0 */
-#define SYS_THREAD     28 /* ebx=entry, ecx=arg -> tid watku albo -1 */
-#define SYS_SETPRIO    29 /* ebx=poziom (0/1/2) -> 0 */
-#define SYS_UDP_OPEN   30 /* ebx=port (0=efemeryczny) -> gniazdo albo -1 */
-#define SYS_UDP_SEND   31 /* ebx=gniazdo, ecx=&{ip,port,buf,len} -> bajty/-1 */
-#define SYS_UDP_RECV   32 /* ebx=gniazdo, ecx=&{buf,max,ms,ip,port} -> bajty/-1 */
-#define SYS_UDP_CLOSE  33 /* ebx=gniazdo -> 0 */
-#define SYS_NETINFO    34 /* ebx=&{ip,mask,gw,dns} -> 0 albo -1 (brak sieci) */
-#define SYS_TCP_CONNECT 35 /* ebx=ip, ecx=port, edx=timeout_ms -> polaczenie/-1 */
-#define SYS_TCP_LISTEN  36 /* ebx=port -> gniazdo nasluchujace albo -1 */
-#define SYS_TCP_ACCEPT  37 /* ebx=gniazdo, ecx=timeout_ms -> polaczenie/-1 */
-#define SYS_TCP_SEND    38 /* ebx=polaczenie, ecx=&{buf,len,timeout} -> bajty/-1 */
-#define SYS_TCP_RECV    39 /* ebx=polaczenie, ecx=&{buf,max,timeout} -> bajty/0/-1 */
-#define SYS_TCP_CLOSE   40 /* ebx=polaczenie -> 0 */
-#define SYS_FORK        41 /* -> pid dziecka (rodzic) / 0 (dziecko) / -1 */
-#define SYS_EXEC        42 /* ebx=linia polecen; nie wraca albo -1 */
-#define SYS_WAITANY     43 /* ebx=&kod -> pid dziecka albo -1 (brak dzieci) */
-#define SYS_SIGNAL      44 /* ebx=sygnal, ecx=handler, edx=trampolina -> 0/-1 */
-#define SYS_SIGRETURN   45 /* powrot z procedury obslugi (bez argumentow) */
-#define SYS_MMAP_FILE   46 /* ebx=nazwa, ecx=&rozmiar, edx=zapis -> adres albo 0 */
-#define SYS_MSYNC       47 /* odsyla brudne strony odwzorowan -> ile stron */
-#define SYS_CORE       48 /* numer rdzenia, na ktorym program wlasnie biegnie */
+#define SYS_WIN_POLL   24 /* ebx=winid, ecx=&event -> 1 (got one), 0 (none), -1 */
+#define SYS_MMAP       25 /* ebx=size -> address or 0 */
+#define SYS_SHM        26 /* ebx=key, ecx=size -> shared address */
+#define SYS_SYSINFO    27 /* ebx=buffer {ram_kib,used_kib,uptime_s} -> 0 */
+#define SYS_THREAD     28 /* ebx=entry, ecx=arg -> thread tid or -1 */
+#define SYS_SETPRIO    29 /* ebx=level (0/1/2) -> 0 */
+#define SYS_UDP_OPEN   30 /* ebx=port (0=ephemeral) -> socket or -1 */
+#define SYS_UDP_SEND   31 /* ebx=socket, ecx=&{ip,port,buf,len} -> bytes/-1 */
+#define SYS_UDP_RECV   32 /* ebx=socket, ecx=&{buf,max,ms,ip,port} -> bytes/-1 */
+#define SYS_UDP_CLOSE  33 /* ebx=socket -> 0 */
+#define SYS_NETINFO    34 /* ebx=&{ip,mask,gw,dns} -> 0 or -1 (no network) */
+#define SYS_TCP_CONNECT 35 /* ebx=ip, ecx=port, edx=timeout_ms -> connection/-1 */
+#define SYS_TCP_LISTEN  36 /* ebx=port -> listening socket or -1 */
+#define SYS_TCP_ACCEPT  37 /* ebx=socket, ecx=timeout_ms -> connection/-1 */
+#define SYS_TCP_SEND    38 /* ebx=connection, ecx=&{buf,len,timeout} -> bytes/-1 */
+#define SYS_TCP_RECV    39 /* ebx=connection, ecx=&{buf,max,timeout} -> bytes/0/-1 */
+#define SYS_TCP_CLOSE   40 /* ebx=connection -> 0 */
+#define SYS_FORK        41 /* -> child pid (parent) / 0 (child) / -1 */
+#define SYS_EXEC        42 /* ebx=command line; never returns, or -1 */
+#define SYS_WAITANY     43 /* ebx=&code -> child pid or -1 (no children) */
+#define SYS_SIGNAL      44 /* ebx=signal, ecx=handler, edx=trampoline -> 0/-1 */
+#define SYS_SIGRETURN   45 /* return from a signal handler (no arguments) */
+#define SYS_MMAP_FILE   46 /* ebx=name, ecx=&size, edx=writable -> address or 0 */
+#define SYS_MSYNC       47 /* writes back dirty pages of mappings -> how many pages */
+#define SYS_CORE       48 /* number of the core the program is running on right now */
 
 #define SYSCALL_VECTOR 0x80
 
@@ -58,7 +58,7 @@
 #include <stdint.h>
 struct regs;
 void syscall_handler(struct regs *r);
-/* Czy to wywolanie wolno wykonac bez wielkiego zamka jadra */
+/* May this call be made without the big kernel lock */
 int syscall_lockless(uint32_t nr);
 #endif
 

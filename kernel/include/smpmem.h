@@ -1,22 +1,24 @@
 #ifndef PROTONOS_SMPMEM_H
 #define PROTONOS_SMPMEM_H
 
-/* Proba zamkow: wspolne struktury jadra pod obstrzalem wszystkich rdzeni
+/* A trial of the locks: shared kernel structures under fire from every core
  *
- * Rdzenie wtorne umialy dotad tylko liczyc na tym, co dostaly - caly
- * dzielony miedzy nimi stan to byla jedna liczba i jeden zamek. Zeby
- * mogly kiedykolwiek prowadzic zadania, musza najpierw umiec bezpiecznie
- * wolac jadro; a jadro musi to wytrzymac.
+ * Until now secondary cores could only compute on what they were
+ * given - the entire state shared between them was one number and one
+ * lock. For them to ever run tasks, they must first be able to call
+ * into the kernel safely; and the kernel must survive it.
  *
- * Ta proba bierze dwie struktury, po ktore siega wszystko inne - mape
- * ramek fizycznych i sterte jadra - i kaze kazdemu rdzeniowi przydzielac
- * z nich i oddawac tysiace razy naraz. Sprawdzanie nie polega na tym,
- * czy sie nie wysypalo: kazdy przydzial dostaje wzorzec zalezny od tego,
- * kto go wzial, i zaraz potem jest czytany. Ramka wydana dwom rdzeniom
- * naraz ma dwoch piszacych i wzorzec sie nie zgadza.
+ * This trial takes the two structures everything else reaches for -
+ * the physical frame map and the kernel heap - and makes every core
+ * allocate from them and hand back thousands of times at once. The
+ * check is not "did it crash": every allocation gets a pattern that
+ * depends on who took it and is read back immediately after. A frame
+ * handed to two cores at once has two writers and the pattern does not
+ * match.
  */
 
-/* Puszcza probe i wypisuje wynik. Wolane z shella obu jader. */
+/* Runs the trial and prints the result. Called from the shell of both
+   kernels. */
 void smpmem_test(void);
 
 #endif

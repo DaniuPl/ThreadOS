@@ -4,22 +4,22 @@
 #include <stdint.h>
 #include "io.h"
 
-/* Zamek wirujacy
+/* Spinlock
  *
- * Pierwsza rzecz, ktorej system potrzebuje, gdy procesorow jest wiecej
- * niz jeden. Wylaczenie przerwan wystarczalo, dopoki rdzen byl jeden:
- * nikt inny nie mogl wejsc w srodek operacji. Teraz moze - i to
- * naprawde JEDNOCZESNIE, a nie tylko pozornie.
+ * The first thing a system needs once there is more than one CPU.
+ * Turning off interrupts was enough while there was a single core:
+ * nobody else could step into the middle of an operation. Now somebody
+ * can - and really SIMULTANEOUSLY, not just apparently so.
  *
- * Instrukcja xchg jest niepodzielna z definicji i na dodatek stanowi
- * barierę dla porzadku zapisow, wiec nie trzeba tu zadnych dodatkowych
- * ogrodzen: to, co rdzen zapisal przed zwolnieniem zamka, drugi rdzen
- * zobaczy po jego wzieciu.
+ * The xchg instruction is atomic by definition and on top of that acts
+ * as a barrier for store ordering, so no extra fences are needed here:
+ * whatever a core wrote before releasing the lock, the next core sees
+ * after taking it.
  *
- * Czekamy wirujac, bo zamek trzymany jest przez kilka instrukcji -
- * usypianie kosztowaloby wiecej niz samo czekanie. Z tego samego
- * powodu pod zamkiem nie wolno robic niczego dlugiego i niczego, co
- * moze uspic zadanie.
+ * We wait by spinning, because the lock is held for a handful of
+ * instructions - going to sleep would cost more than the wait itself.
+ * For the same reason nothing long, and nothing that can put the task
+ * to sleep, may happen while the lock is held.
  */
 
 struct spinlock {
@@ -38,8 +38,8 @@ static inline void spin_lock(struct spinlock *z)
                          : : "memory");
         if (!was)
             break;
-        /* Podpowiedz dla procesora, ze to petla czekania: oszczedza
-           energie i nie zapycha magistrali odczytami */
+        /* Tell the CPU this is a wait loop: it saves power and stops the
+           bus from being flooded with reads */
         __asm__ volatile("pause" ::: "memory");
     } while (1);
 }
@@ -52,19 +52,20 @@ static inline void spin_unlock(struct spinlock *z)
                      : : "memory");
 }
 
-/* Zamek brany razem z wygaszeniem przerwan - i tak wyglada prawie
- * kazde uzycie w jadrze.
+/* The lock taken together with interrupts turned off - which is what
+ * almost every use inside the kernel looks like.
  *
- * Dwie rzeczy chronia przed dwiema roznymi. Zamek chroni przed INNYM
- * RDZENIEM, ktory naprawde biegnie jednoczesnie. Wygaszenie przerwan
- * chroni przed SAMYM SOBA: struktury jadra dotyka i watek, i obsluga
- * przerwania, wiec timer, ktory wszedlby w srodek sekcji trzymajacej
- * zamek, czekalby na zamek trzymany przez przerwany wlasnie kod - i to
- * na tym samym rdzeniu, ktory jako jedyny moglby go zwolnic.
+ * The two guard against two different things. The lock guards against
+ * ANOTHER CORE, one that really is running at the same time. Turning
+ * interrupts off guards against OURSELVES: kernel structures are
+ * touched both by threads and by interrupt handlers, so a timer that
+ * stepped into the middle of a locked section would wait for a lock
+ * held by the very code it interrupted - on the same core, the only
+ * one that could ever release it.
  *
- * Kolejnosc nie jest dowolna: przerwania gasna PRZED wzieciem zamka
- * i wracaja PO jego zwolnieniu. Odwrotnie zostawialoby okno, w ktorym
- * przerwanie zastaje zamek juz wziety.
+ * The order is not arbitrary: interrupts go off BEFORE the lock is
+ * taken and come back AFTER it is released. The other way round would
+ * leave a window in which an interrupt finds the lock already held.
  */
 static inline irqflags_t spin_lock_irq(struct spinlock *z)
 {

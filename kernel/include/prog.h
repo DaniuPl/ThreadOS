@@ -3,31 +3,31 @@
 
 #include <stdint.h>
 
-/* Skad wziac obraz programu
+/* Where to get a program image from
  *
- * Do tej pory odpowiedz byla jedna: z initrd. Initrd jest jednak
- * obrazem tylko do odczytu, wgrywanym razem z jadrem - system, ktory
- * ma dysk i system plikow, powinien umiec uruchomic takze to, co na
- * tym dysku lezy.
+ * Until now the answer was one: from the initrd. The initrd, though,
+ * is a read-only image loaded together with the kernel - a system that
+ * has a disk and a filesystem ought to be able to run what lies on
+ * that disk too.
  *
- * Kolejnosc jest taka: najpierw initrd, potem dysk. Initrd jest
- * zawsze i zawsze dziala, wiec program o tej samej nazwie wgrany
- * razem z jadrem nie da sie przykryc plikiem z dysku - a to znaczy,
- * ze zepsuty plik na dysku nie odbierze systemu.
+ * The order is: initrd first, then disk. The initrd is always there
+ * and always works, so a program of the same name shipped with the
+ * kernel cannot be shadowed by a file on disk - which means a broken
+ * file on disk cannot take the system away.
  */
 
-/* Znajduje obraz programu. Zwraca wskaznik do niego i rozmiar, albo
-   NULL. Gdy obraz przyszedl z dysku, w *bufor wraca adres do oddania
-   przez prog_zwolnij - obraz z initrd niczego nie wymaga i zostawia
-   tam zero. */
+/* Finds a program image. Returns a pointer to it and its size, or
+   NULL. When the image came from disk, *buf_out receives the address
+   to hand back through prog_release - an image from the initrd needs
+   nothing and leaves zero there. */
 const void *prog_image(const char *name, uint32_t *size_out, void **buf_out);
 void prog_release(void *buf);
 
-/* Czy program o tej nazwie w ogole gdzies jest. Sprawdzenie tanie:
-   nie wczytuje pliku, tylko pyta o niego initrd i system plikow. */
+/* Is a program of this name anywhere at all. A cheap check: it does
+   not read the file, only asks the initrd and the filesystem. */
 int prog_exists(const char *name);
 
-/* Skad przyszedl ostatnio znaleziony obraz - do komunikatow */
+/* Where the last image found came from - for messages */
 const char *prog_source(void);
 
 #endif

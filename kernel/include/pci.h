@@ -3,30 +3,30 @@
 
 #include <stdint.h>
 
-/* Znajduje liniowy framebuffer karty graficznej (BAR0 urzadzenia klasy
-   display) przez przestrzen konfiguracyjna PCI. Zwraca adres fizyczny
-   albo 0, gdy nie znaleziono. */
+/* Finds the linear framebuffer of a graphics card (BAR0 of a display
+   class device) through PCI configuration space. Returns a physical
+   address or 0 when nothing was found. */
 uint32_t pci_find_vga_lfb(void);
 
-/* Znalezione urzadzenie PCI (magistrala 0, funkcja 0) */
+/* A PCI device that was found (bus 0, function 0) */
 struct pci_dev {
-    int bus, slot, func;   /* jedno gniazdo moze miec kilka funkcji */
+    int bus, slot, func;   /* one slot may have several functions */
     uint16_t vendor, device;
-    uint32_t bar0;        /* surowa zawartosc BAR0 (bit 0: 1 = port I/O) */
-    uint32_t bar[6];      /* wszystkie rejestry bazowe, surowe */
-    uint8_t irq;          /* linia IRQ z pola Interrupt Line */
+    uint32_t bar0;        /* raw contents of BAR0 (bit 0: 1 = I/O port) */
+    uint32_t bar[6];      /* all base registers, raw */
+    uint8_t irq;          /* the IRQ line from the Interrupt Line field */
 };
 
-/* Szuka urzadzenia o danym vendor/device. 1 = znaleziono. */
+/* Looks for a device with the given vendor/device. 1 = found. */
 int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
 
-/* Szuka urzadzenia po klasie (klasa/podklasa/interfejs programowy) -
-   tak znajduje sie kontroler, ktorego numeru modelu nie znamy z gory,
-   np. dowolny kontroler AHCI (0x01/0x06/0x01). 1 = znaleziono. */
+/* Looks for a device by class (class/subclass/programming interface) -
+   this is how one finds a controller whose model number is not known
+   up front, e.g. any AHCI controller (0x01/0x06/0x01). 1 = found. */
 int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out);
 
-/* Wlacza dostep do portow I/O, pamieci i bus mastering (DMA) */
+/* Enables I/O port access, memory access and bus mastering (DMA) */
 void pci_enable_bus_master(const struct pci_dev *dev);
 
 uint32_t pci_config_read(int bus, int slot, int func, int off);

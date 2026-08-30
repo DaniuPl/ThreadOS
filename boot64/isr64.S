@@ -1,12 +1,13 @@
-/* Stuby przerwan dla trybu dlugiego
+/* Interrupt stubs for long mode
  *
- * Procesor odklada przy przerwaniu rip, cs, rflags, rsp i ss - i robi to
- * ZAWSZE, takze bez zmiany poziomu uprawnien. To roznica wobec trybu
- * 32-bitowego, gdzie stos byl odkladany tylko przy przejsciu z ring 3.
+ * On an interrupt the processor pushes rip, cs, rflags, rsp and ss -
+ * and it does so ALWAYS, even without a change of privilege level.
+ * That is a difference from 32-bit mode, where the stack was only
+ * pushed when coming from ring 3.
  *
- * Drugiej roznicy nie widac na pierwszy rzut oka: w trybie dlugim nie
- * ma juz instrukcji pushal. Szesnascie rejestrow trzeba odlozyc recznie
- * i w tej samej kolejnosci, w jakiej opisuje je struct regs.
+ * The second difference is less obvious at first glance: long mode no
+ * longer has the pushal instruction. Sixteen registers have to be
+ * pushed by hand, and in exactly the order struct regs describes them.
  */
 
 .macro ISR_NOERR n
@@ -27,7 +28,7 @@ isr64_\n:
 .section .text
 .code64
 
-/* Wyjatki 0-31; kod bledu odkladaja: 8, 10-14, 17, 21 */
+/* Exceptions 0-31; the ones that push an error code: 8, 10-14, 17, 21 */
 ISR_NOERR 0
 ISR_NOERR 1
 ISR_NOERR 2
@@ -61,7 +62,7 @@ ISR_NOERR 29
 ISR_NOERR 30
 ISR_NOERR 31
 
-/* Przerwania sprzetowe: IRQ 0-15 na wektorach 32-47 */
+/* Hardware interrupts: IRQ 0-15 on vectors 32-47 */
 ISR_NOERR 32
 ISR_NOERR 33
 ISR_NOERR 34
@@ -79,17 +80,17 @@ ISR_NOERR 45
 ISR_NOERR 46
 ISR_NOERR 47
 
-/* Zegar lokalnego APIC - kazdy rdzen ma swoj wlasny, wiec nie idzie
-   przez PIC i nie ma numeru IRQ. Wektor 48 lezy tuz za nimi. */
+/* The local APIC timer - every core has its own, so it does not go
+   through the PIC and has no IRQ number. Vector 48 sits just past them. */
 ISR_NOERR 48
 
-/* Pobudka miedzy rdzeniami: rdzen rozruchowy budzi nia spiace rdzenie,
-   gdy zlozy im prace. Nie niesie zadnej tresci - liczy sie samo to,
-   ze przerwanie wyrywa procesor z instrukcji hlt. */
+/* Inter-core wake-up: the boot core uses it to wake sleeping cores once
+   it has work for them. It carries no content - what matters is only
+   that an interrupt pulls the processor out of the hlt instruction. */
 ISR_NOERR 49
 
 isr64_common:
-    /* Kolejnosc odwrotna do pol struct regs - stos rosnie w dol */
+    /* Reverse order of the struct regs fields - the stack grows down */
     pushq %rax
     pushq %rbx
     pushq %rcx
@@ -106,7 +107,7 @@ isr64_common:
     pushq %r14
     pushq %r15
 
-    movq %rsp, %rdi              /* pierwszy argument: wskaznik na ramke */
+    movq %rsp, %rdi              /* first argument: pointer to the frame */
     call isr64_handler
 
     popq %r15
@@ -125,7 +126,7 @@ isr64_common:
     popq %rbx
     popq %rax
 
-    addq $16, %rsp               /* numer wektora i kod bledu */
+    addq $16, %rsp               /* vector number and error code */
     iretq
 
 .section .note.GNU-stack, "", @progbits

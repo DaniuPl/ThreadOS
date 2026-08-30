@@ -3,16 +3,16 @@
 
 #include <stdint.h>
 
-/* Pamiec wspoldzielona miedzy procesami, identyfikowana kluczem.
-   Pierwsze uzycie klucza alokuje ramki fizyczne; kolejne (z dowolnego
-   procesu) wskazuja te same ramki. */
+/* Memory shared between processes, identified by a key. The first use
+   of a key allocates physical frames; later ones (from any process)
+   point at the same frames. */
 
-/* Zwraca fizyczny adres bazowy regionu dla klucza (alokuje przy
-   pierwszym uzyciu); 0 przy bledzie. */
+/* Returns the physical base address of the region for a key
+   (allocating it on first use); 0 on error. */
 uint32_t shm_get(int key, uint32_t size);
 
-/* Czy dana ramka nalezy do regionu wspoldzielonego (destroy jej nie
-   zwalnia, dopoki moga jej uzywac inne procesy). */
+/* Does a given frame belong to a shared region (destroy does not free
+   it while other processes may still be using it). */
 int shm_is_shared(uint32_t frame);
 
 #endif

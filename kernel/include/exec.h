@@ -3,69 +3,70 @@
 
 #include <stdint.h>
 
-/* Gdzie w przestrzeni procesu lezy biblioteka wspoldzielona.
-   Pod obszarem mapowan (0xB0000000) i nad sterta, ktora konczy sie
-   u jej progu. Musi zgadzac sie z user/libproton.ld. */
+/* Where the shared library sits in a process's address space.
+   Below the mapping area (0xB0000000) and above the heap, which ends
+   at its doorstep. Must agree with user/libproton.ld. */
 #define USER_LIB_BASE  0xAF000000u
 
-/* Uruchamia program ELF z initrd jako proces uzytkownika (ring 3,
-   wlasna przestrzen adresowa). Argument to linia polecen (program +
-   argumenty rozdzielone spacjami). Zwraca pid albo -1. */
+/* Runs an ELF program from the initrd as a user process (ring 3, its
+   own address space). The argument is a command line (program plus
+   arguments separated by spaces). Returns a pid or -1. */
 int exec_spawn(const char *cmdline);
 
-/* To samo, ale proces wolno prowadzic kazdemu rdzeniowi. Jego strona
-   jadrowa zostaje pod wielkim zamkiem; rownolegle idzie liczenie
-   w pierscieniu 3. */
+/* The same, but every core may run the process. Its kernel side stays
+   under the big kernel lock; what runs in parallel is the computing it
+   does in ring 3. */
 int exec_spawn_anycore(const char *cmdline);
 
-/* Jak exec_spawn, ale stdout (fd 1) procesu jest przekierowany do
-   pliku outfile. append=0 obcina plik, append=1 dopisuje (>>). */
+/* Like exec_spawn, but the process's stdout (fd 1) is redirected to
+   the file outfile. append=0 truncates the file, append=1 appends (>>). */
 int exec_spawn_redirect(const char *cmdline, const char *outfile, int append);
 
-/* Uruchamia wielostopniowy potok 'a | b | c | ...' (procesy rownolegle).
-   'pipeline' to cala linia z separatorami '|'. Gdy outfile != NULL,
-   stdout ostatniego etapu idzie dodatkowo do pliku. Zwraca pid
-   ostatniego etapu albo -1. */
+/* Runs a multi-stage pipeline 'a | b | c | ...' (parallel processes).
+   'pipeline' is the whole line with '|' separators. When outfile is
+   not NULL, the last stage's stdout also goes to the file. Returns the
+   pid of the last stage or -1. */
 int exec_spawn_pipeline(const char *pipeline, const char *outfile);
 
-/* fork: rozwidla biezacy proces. Dziecko dostaje klon przestrzeni
-   adresowej rodzica (kopiowanie przy zapisie) i wraca z syscalla
-   w tym samym miejscu programu. Zwraca pid dziecka (u rodzica),
-   zero (u dziecka) albo -1. 'r' to ramka rejestrow syscalla. */
+/* fork: forks the current process. The child gets a clone of the
+   parent's address space (copy-on-write) and returns from the syscall
+   at the same point of the program. Returns the child's pid (in the
+   parent), zero (in the child) or -1. 'r' is the syscall register
+   frame. */
 struct regs;
 int process_fork(struct regs *r);
 
-/* exec: podmienia program biezacego procesu (pid, deskryptory i katalog
-   roboczy zostaja). Przy powodzeniu nie wraca; -1 przy bledzie. */
+/* exec: replaces the current process's program (pid, descriptors and
+   working directory stay). On success it does not return; -1 on error. */
 int process_exec(const char *cmdline);
 
-/* Stronicowanie na zadanie: przydziela ramke pod adres nalezacy do
-   sterty albo obszaru mmap biezacego procesu. 1 = strona powstala. */
+/* Demand paging: allocates a frame for an address belonging to the
+   heap or the mmap area of the current process. 1 = the page appeared. */
 int process_demand_page(uint32_t addr);
 
-/* sbrk: przesuwa koniec sterty biezacego procesu o increment bajtow
-   (>=0). Zwraca stary brk albo (uint32_t)-1 przy bledzie. */
+/* sbrk: moves the end of the current process's heap by increment bytes
+   (>=0). Returns the old brk or (uint32_t)-1 on error. */
 uint32_t process_sbrk(int32_t increment);
 
-/* mmap: mapuje 'size' bajtow swiezej pamieci procesu, zwraca adres albo 0 */
+/* mmap: maps 'size' bytes of fresh process memory, returns the address or 0 */
 uint32_t process_mmap(uint32_t size);
 
-/* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu, strony
-   przychodza pod palcami). Zwraca adres albo 0. */
+/* Maps a file from disk into the process's memory (read-only, pages
+   arrive under the program's fingers). Returns the address or 0. */
 uint32_t process_mmap_file(const char *name, uint32_t *size_out,
                            uint32_t write);
 
-/* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
-   procesu. Zwraca liczbe odeslanych stron. */
+/* Writes back to their files the dirty pages of the current process's
+   writable mappings. Returns the number of pages written back. */
 uint32_t process_msync(void);
 
-/* Ile stron wczytano z odwzorowanych plikow */
+/* How many pages have been read in from mapped files */
 uint32_t process_mmap_pages(void);
 
-/* shm: mapuje region pamieci wspoldzielonej (po kluczu); adres albo 0 */
+/* shm: maps a shared memory region (by key); the address or 0 */
 uint32_t process_shm(int key, uint32_t size);
 
-/* Tworzy watek w przestrzeni biezacego procesu; zwraca tid albo -1 */
+/* Creates a thread in the current process's address space; tid or -1 */
 int process_thread(uint32_t entry, uint32_t arg);
 
 #endif

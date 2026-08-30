@@ -1,18 +1,18 @@
-/* Przelaczenie kontekstu w trybie dlugim
+/* Context switch in long mode
  *
- * Zapisujemy tylko rejestry, ktore wedlug konwencji wywolan musi
- * zachowac funkcja wolana - reszta i tak nalezy do wolajacego i lezy
- * juz na jego stosie. Rejestrow tych jest szesc zamiast czterech,
- * co jest cala roznica wobec wersji 32-bitowej.
+ * We save only the registers the calling convention requires a callee
+ * to preserve - the rest belong to the caller anyway and already sit on
+ * its stack. There are six of them instead of four, which is the whole
+ * difference from the 32-bit version.
  *
- * Reszta stanu watku - wszystko, co dzialo sie miedzy wywolaniami -
- * zostaje na jego wlasnym stosie. Dlatego wystarczy przestawic RSP:
- * watek wywlaszczony przerwaniem ma tam pelna ramke przerwania
- * i wroci przez iretq, a watek, ktory sam oddal procesor, wroci
- * ze zwyklego wywolania.
+ * The rest of a thread's state - everything that happened between
+ * calls - stays on its own stack. That is why moving RSP is enough:
+ * a thread preempted by an interrupt has a full interrupt frame there
+ * and will return through iretq, while a thread that gave up the CPU
+ * itself returns from an ordinary call.
  *
- *   rdi = gdzie zapisac RSP starego watku
- *   rsi = RSP watku, ktory ma ruszyc
+ *   rdi = where to store the old thread's RSP
+ *   rsi = RSP of the thread that is to run
  */
 
 .section .text
@@ -27,8 +27,8 @@ context_switch64:
     pushq %r14
     pushq %r15
 
-    movq %rsp, (%rdi)            /* zapamietaj stos starego watku */
-    movq %rsi, %rsp              /* i przejdz na stos nowego */
+    movq %rsp, (%rdi)            /* remember the old thread's stack */
+    movq %rsi, %rsp              /* and move onto the new one's */
 
     popq %r15
     popq %r14

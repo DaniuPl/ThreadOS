@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Dostęp do portów I/O x86 */
+/* Access to x86 I/O ports */
 
 static inline void outb(uint16_t port, uint8_t value)
 {
@@ -41,19 +41,20 @@ static inline uint32_t inl(uint16_t port)
     return value;
 }
 
-/* Krótkie opóźnienie - zapis do nieużywanego portu 0x80.
-   Daje staremu sprzętowi (np. PIC) czas na przetworzenie komendy. */
+/* A short delay - a write to the unused port 0x80.
+   Gives old hardware (e.g. the PIC) time to digest a command. */
 static inline void io_wait(void)
 {
     outb(0x80, 0);
 }
 
-/* Wyłącza przerwania, zwracając poprzedni stan flag -
-   do krytycznych sekcji współdzielonych z handlerami IRQ.
+/* Turns interrupts off and returns the previous flag state -
+   for critical sections shared with IRQ handlers.
 
-   W trybie długim rejestr flag jest 64-bitowy i instrukcje zdejmujące
-   go ze stosu mają inny sufiks; poza tym sekwencja jest ta sama, więc
-   różnicę zamyka jeden warunek zamiast osobnej wersji pliku. */
+   In long mode the flags register is 64 bits wide and the instructions
+   taking it off the stack have a different suffix; otherwise the
+   sequence is the same, so one conditional closes the difference
+   instead of a separate version of the file. */
 #ifdef __x86_64__
 typedef unsigned long irqflags_t;
 #define IRQ_PUSHF "pushfq; popq %0; cli"

@@ -1,9 +1,9 @@
 #ifndef PROTONOS_MOUSE_H
 #define PROTONOS_MOUSE_H
 
-/* Sterownik myszy PS/2 (IRQ12). Pozycja akumulowana z ruchow wzglednych,
-   przycinana do zakresu ekranu (domyslnie 320x200 - gotowe pod tryb
-   graficzny). Stan czytany przez mouse_get. */
+/* PS/2 mouse driver (IRQ12). The position is accumulated from relative
+   movements and clamped to the screen range (320x200 by default -
+   ready for graphics mode). The state is read through mouse_get. */
 void mouse_init(void);
 void mouse_get(int *x, int *y, int *buttons);
 

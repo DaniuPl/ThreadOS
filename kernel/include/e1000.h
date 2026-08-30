@@ -3,17 +3,17 @@
 
 #include <stdint.h>
 
-/* Sterownik karty Intel 82540EM ("e1000", QEMU: -device e1000)
+/* Driver for the Intel 82540EM card ("e1000", QEMU: -device e1000)
  *
- * Karta o pokolenie nowsza niz RTL8139 i zbudowana zupelnie inaczej:
- * zamiast portow I/O ma rejestry w pamieci, a zamiast jednego
- * pierscienia bajtow - dwa pierscienie DESKRYPTOROW, po jednym na
- * kazda strone ruchu. Deskryptor mowi, gdzie lezy bufor i co sie
- * z nim stalo; kto go ma na wlasnosc, wynika z tego, kto ostatni
- * przesunal wskaznik ogona.
+ * A generation newer than the RTL8139 and built completely
+ * differently: instead of I/O ports it has registers in memory, and
+ * instead of a single ring of bytes - two rings of DESCRIPTORS, one
+ * for each direction of traffic. A descriptor says where the buffer
+ * lies and what happened to it; who owns it follows from who last
+ * moved the tail pointer.
  *
- * Interfejs jest ten sam, co RTL8139 - i o to chodzi: warstwa wyzej
- * ma nie wiedziec, ktora karta akurat siedzi w gniezdzie.
+ * The interface is the same as the RTL8139's - and that is the point:
+ * the layer above is not to know which card happens to be in the slot.
  */
 
 int e1000_init(void);

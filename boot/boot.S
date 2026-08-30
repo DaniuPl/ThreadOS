@@ -1,35 +1,37 @@
-/* ProtonOS - punkt wejścia jądra (Multiboot 1)
+/* ProtonOS - kernel entry point (Multiboot 1)
  *
- * GRUB ładuje jądro i skacze do _start w trybie chronionym 32-bit.
- * Tutaj ustawiamy stos i wołamy kmain() z kodu C.
+ * GRUB loads the kernel and jumps to _start in 32-bit protected mode.
+ * Here we set up a stack and call kmain() written in C.
  */
 
-/* Stałe nagłówka Multiboot */
-.set MB_ALIGN,    1 << 0             /* wyrównaj załadowane moduły do granic stron */
-.set MB_MEMINFO,  1 << 1             /* przekaż mapę pamięci */
+/* Multiboot header constants */
+.set MB_ALIGN,    1 << 0             /* align loaded modules on page boundaries */
+.set MB_MEMINFO,  1 << 1             /* hand over the memory map */
 .set MB_FLAGS,    MB_ALIGN | MB_MEMINFO
 .set MB_MAGIC,    0x1BADB002
 .set MB_CHECKSUM, -(MB_MAGIC + MB_FLAGS)
 
-/* Nagłówek Multiboot - musi być w pierwszych 8 KiB obrazu */
+/* Multiboot header - must be within the first 8 KiB of the image */
 .section .multiboot, "a", @progbits
 .align 4
 .long MB_MAGIC
 .long MB_FLAGS
 .long MB_CHECKSUM
 
-/* Nagłówek Multiboot 2
+/* Multiboot 2 header
  *
- * Obraz nosi oba nagłówki naraz i to jest celowe: QEMU uruchamiane
- * z opcją -kernel rozumie tylko starszy, a GRUB woli nowszy. Loader
- * wybiera ten, który zna, i przekazuje inny magic w eax - jądro
- * rozpoznaje po nim, w której postaci dostało informacje o maszynie.
+ * The image carries both headers at once, and that is deliberate: QEMU
+ * started with -kernel understands only the older one, while GRUB
+ * prefers the newer. The loader picks the one it knows and passes a
+ * different magic in eax - the kernel tells from it which form the
+ * machine description arrived in.
  *
- * Nowszy jest drogą do UEFI: tam nie ma ani BIOS-u, ani starego
- * Multiboota, a wskaźnik na tablice ACPI podaje właśnie loader.
+ * The newer one is the road to UEFI: there is neither a BIOS nor old
+ * Multiboot there, and the pointer to the ACPI tables comes from the
+ * loader and nowhere else.
  */
 .set MB2_MAGIC, 0xE85250D6
-.set MB2_ARCH,  0                    /* tryb chroniony i386 */
+.set MB2_ARCH,  0                    /* i386 protected mode */
 
 .align 8
 mb2_header:
@@ -38,43 +40,45 @@ mb2_header:
 .long mb2_header_end - mb2_header
 .long -(MB2_MAGIC + MB2_ARCH + (mb2_header_end - mb2_header))
 
-    /* O co prosimy loader: linia poleceń, moduły, mapa pamięci
-       i wskaźnik na tablice ACPI (pod UEFI nie ma go gdzie szukać) */
+    /* What we ask the loader for: command line, modules, memory map
+       and a pointer to the ACPI tables (under UEFI there is nowhere
+       else to look for it) */
     .align 8
-    .short 1                         /* znacznik: żądanie informacji */
+    .short 1                         /* tag: information request */
     .short 0
     .long 8 + 5 * 4
-    .long 1                          /* linia poleceń */
-    .long 3                          /* moduły */
-    .long 6                          /* mapa pamięci */
+    .long 1                          /* command line */
+    .long 3                          /* modules */
+    .long 6                          /* memory map */
     .long 14                         /* RSDP (ACPI 1.0) */
     .long 15                         /* RSDP (ACPI 2.0) */
 
-    /* Moduły wyrównane do granic stron - tak samo jak w Multiboot 1 */
+    /* Modules aligned on page boundaries - same as in Multiboot 1 */
     .align 8
     .short 6
     .short 0
     .long 8
 
-    /* Prośba o tryb graficzny z liniowym buforem obrazu.
-       Pod UEFI nie ma trybu tekstowego VGA - bufor znaków pod 0xB8000
-       po prostu nie istnieje - więc jedyną drogą do pokazania czegokolwiek
-       jest bufor obrazu podany przez loader. Znaki rysujemy wtedy sami. */
+    /* A request for a graphics mode with a linear framebuffer.
+       Under UEFI there is no VGA text mode - the character buffer at
+       0xB8000 simply does not exist - so the only way to show anything
+       is the framebuffer handed over by the loader. We then draw the
+       characters ourselves. */
     .align 8
-    .short 5                         /* znacznik: tryb obrazu */
+    .short 5                         /* tag: video mode */
     .short 0
     .long 20
-    .long 1024                       /* szerokość */
-    .long 768                        /* wysokość */
-    .long 32                         /* bitów na piksel */
+    .long 1024                       /* width */
+    .long 768                        /* height */
+    .long 32                         /* bits per pixel */
 
     .align 8
-    .short 0                         /* znacznik końca */
+    .short 0                         /* end tag */
     .short 0
     .long 8
 mb2_header_end:
 
-/* Stos jądra - 16 KiB, wyrównany do 16 bajtów (wymóg ABI System V) */
+/* Kernel stack - 16 KiB, aligned to 16 bytes (System V ABI rule) */
 .section .bss
 .align 16
 stack_bottom:
@@ -88,17 +92,17 @@ stack_top:
 _start:
     movl $stack_top, %esp
 
-    /* Argumenty dla kmain: magic (eax) i wskaźnik na info Multiboot (ebx) */
+    /* Arguments for kmain: magic (eax) and the Multiboot info pointer (ebx) */
     pushl %ebx
     pushl %eax
     call kmain
 
-    /* kmain nie powinno wrócić - jeśli wróci, zatrzymaj CPU */
+    /* kmain should never return - if it does, stop the CPU */
     cli
 1:  hlt
     jmp 1b
 
 .size _start, . - _start
 
-/* Zaznacz, że ten plik nie potrzebuje wykonywalnego stosu */
+/* Mark this file as not needing an executable stack */
 .section .note.GNU-stack, "", @progbits

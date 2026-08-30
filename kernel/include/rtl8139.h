@@ -3,20 +3,21 @@
 
 #include <stdint.h>
 
-/* Sterownik karty sieciowej Realtek RTL8139 (QEMU: -device rtl8139).
-   Zwraca 1, gdy karta zostala znaleziona i zainicjalizowana. */
+/* Driver for the Realtek RTL8139 network card (QEMU: -device rtl8139).
+   Returns 1 when the card was found and initialised. */
 int rtl8139_init(void);
 
 int rtl8139_present(void);
 
-/* Adres MAC karty (6 bajtow) */
+/* The card's MAC address (6 bytes) */
 const uint8_t *rtl8139_mac(void);
 
-/* Wysyla gotowa ramke ethernetowa (bez CRC - karta dolicza je sama).
-   Zwraca 0 przy sukcesie, -1 gdy nie ma wolnego deskryptora TX. */
+/* Sends a finished Ethernet frame (without a CRC - the card adds it
+   itself). Returns 0 on success, -1 when there is no free TX
+   descriptor. */
 int rtl8139_send(const void *frame, uint16_t len);
 
-/* Statystyki (komenda 'ifconfig') */
+/* Statistics (the 'ifconfig' command) */
 uint32_t rtl8139_rx_packets(void);
 uint32_t rtl8139_tx_packets(void);
 

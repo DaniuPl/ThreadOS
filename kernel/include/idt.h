@@ -3,7 +3,7 @@
 
 void idt_init(void);
 
-/* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
+/* Loads the already-built table on the current core (secondary cores) */
 void idt_load(void);
 
 #endif

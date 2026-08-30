@@ -3,19 +3,19 @@
 
 #include <stdint.h>
 
-/* Struktura informacji od bootloadera (Multiboot 1).
-   Pola powyżej mmap_* nie są nam na razie potrzebne, ale muszą
-   być obecne, żeby offsety się zgadzały. */
+/* The bootloader information structure (Multiboot 1).
+   The fields above mmap_* are of no use to us yet, but they have to be
+   present so that the offsets line up. */
 struct multiboot_info {
     uint32_t flags;
-    uint32_t mem_lower;     /* KiB pamięci poniżej 1 MiB (flaga bit 0) */
-    uint32_t mem_upper;     /* KiB pamięci powyżej 1 MiB (flaga bit 0) */
+    uint32_t mem_lower;     /* KiB of memory below 1 MiB (flag bit 0) */
+    uint32_t mem_upper;     /* KiB of memory above 1 MiB (flag bit 0) */
     uint32_t boot_device;
     uint32_t cmdline;
     uint32_t mods_count;
     uint32_t mods_addr;
     uint32_t syms[4];
-    uint32_t mmap_length;   /* mapa pamięci (flaga bit 6) */
+    uint32_t mmap_length;   /* memory map (flag bit 6) */
     uint32_t mmap_addr;
 } __attribute__((packed));
 
@@ -24,7 +24,7 @@ struct multiboot_info {
 #define MULTIBOOT_FLAG_MODS (1 << 3)
 #define MULTIBOOT_FLAG_MMAP (1 << 6)
 
-/* Moduł załadowany przez bootloader (np. initrd z opcji -initrd QEMU) */
+/* A module loaded by the bootloader (e.g. an initrd from QEMU's -initrd) */
 struct multiboot_mod {
     uint32_t start;
     uint32_t end;
@@ -32,8 +32,8 @@ struct multiboot_mod {
     uint32_t reserved;
 } __attribute__((packed));
 
-/* Wpis mapy pamięci. Uwaga: pole size opisuje rozmiar reszty wpisu,
-   więc następny wpis leży pod adresem +size+4. */
+/* A memory map entry. Note: the size field describes the size of the
+   rest of the entry, so the next one lies at +size+4. */
 struct multiboot_mmap_entry {
     uint32_t size;
     uint64_t addr;

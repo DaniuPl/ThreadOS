@@ -6,65 +6,65 @@
 
 struct task;
 
-/* Tablica deskryptorow plikow procesu. fd 0/1/2 = klawiatura/konsola,
-   wyzsze fd = pliki na dysku albo konce potoku. */
+/* The process file descriptor table. fd 0/1/2 = keyboard/console,
+   higher fds = files on disk or pipe ends. */
 #define TASK_MAX_FD 8
 
 enum fd_kind {
-    FD_CONSOLE,           /* klawiatura (read) / ekran (write) */
-    FD_FILE,              /* plik na dysku PFS */
-    FD_PIPE,              /* koniec potoku miedzyprocesowego */
+    FD_CONSOLE,           /* keyboard (read) / screen (write) */
+    FD_FILE,              /* file on the PFS disk */
+    FD_PIPE,              /* end of an inter-process pipe */
 };
 
 struct file_desc {
     int used;
     enum fd_kind kind;
-    int inode;            /* FD_FILE: indeks i-wezla PFS */
-    uint32_t off;         /* FD_FILE: biezacy offset */
-    int pipe;             /* FD_PIPE: indeks potoku */
+    int inode;            /* FD_FILE: PFS inode index */
+    uint32_t off;         /* FD_FILE: current offset */
+    int pipe;             /* FD_PIPE: pipe index */
     int readable;
     int writable;
 };
 
-/* Tablica fd biezacego zadania (do warstwy syscalli plikowych) */
+/* The current task's fd table (for the file syscall layer) */
 struct file_desc *task_fds(void);
 
-/* fork: nowe zadanie z podana przestrzenia adresowa, dziedziczace po
-   biezacym sterte, katalog roboczy, priorytet i deskryptory */
+/* fork: a new task with the given address space, inheriting the
+   current one's heap, working directory, priority and descriptors */
 struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3);
 
-/* --- sygnaly: stan trzyma zadanie, doreczaniem zajmuje sie signal.c --- */
+/* --- signals: the task holds the state, signal.c does the delivery --- */
 int task_signal_send(int pid, int sig);
 int task_signal_set(int sig, uint32_t handler, uint32_t tramp);
-int task_signal_take(void);            /* najnizszy oczekujacy, 0 = brak */
-int task_signal_pending(void);         /* czy cokolwiek czeka na doreczenie */
+int task_signal_take(void);            /* lowest pending one, 0 = none */
+int task_signal_pending(void);         /* is anything waiting to be delivered */
 uint32_t task_signal_handler(int sig);
 uint32_t task_signal_tramp(void);
 int task_signal_in_handler(void);
 void task_signal_enter(uint32_t frame);
-uint32_t task_signal_leave(void);      /* adres ramki albo 0 */
+uint32_t task_signal_leave(void);      /* frame address or 0 */
 
-/* Czeka na dowolne wlasne dziecko: zwraca jego pid, a kod wyjscia
-   wpisuje do *code. -1 = brak dzieci, na ktore mozna czekac. */
+/* Waits for any child of its own: returns its pid and writes the exit
+   code into *code. -1 = no children left to wait for. */
 int task_wait_any(int *code);
 
-/* Wyrzuca na dysk jedna nieuzywana strone ktoregos z procesow.
-   1 = zwolniono ramke. Wola to PMM, gdy zabraknie pamieci. */
+/* Evicts one unused page of some process to disk.
+   1 = a frame was freed. The PMM calls this when memory runs out. */
 int task_reclaim_page(void);
 
-/* Zmienia nazwe biezacego zadania (exec podmienia program) */
+/* Renames the current task (exec replaces the program) */
 void task_rename(const char *name);
 
-/* Czy tej przestrzeni adresowej uzywa jeszcze jakis inny watek? */
+/* Is this address space still used by some other thread? */
 int task_cr3_shared(uint32_t cr3);
 
-/* Katalog roboczy biezacego zadania (slot PFS, -1 = root) */
-/* --- Pliki odwzorowane w pamieci ------------------------------------
+/* Working directory of the current task (PFS slot, -1 = root) */
+/* --- Memory-mapped files --------------------------------------------
  *
- * Plik widziany jako pamiec: program dostaje adres, a strony pojawiaja
- * sie pod palcami - tak samo jak sterta, tyle ze wypelnione trescia
- * z dysku zamiast zerami. MMAP_PLIKOW mowi, ile odwzorowan naraz moze
- * miec jeden proces. */
+ * A file seen as memory: the program gets an address and the pages
+ * appear under its fingers - just like the heap, only filled with
+ * content from disk instead of zeros. MMAP_FILES says how many
+ * mappings one process may hold at a time. */
 #define MMAP_FILES 4
 
 int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
@@ -77,72 +77,72 @@ uint32_t task_mmap_block(uint32_t addr, uint32_t index);
 void task_mmap_release(void);
 void task_mmap_inherit(struct task *child);
 
-/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
-   rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
+/* A task that EVERY core may run. An ordinary one stays on the boot
+   core: the rest of the kernel is written for a single core. */
 struct task *task_create_anycore(const char *name, void (*entry)(void *),
                                   void *arg);
 
-/* Czy scheduler juz wstal (rdzen wtorny czeka, zanim do niego dolaczy) */
-/* Biezace zadanie wolno odtad prowadzic kazdemu rdzeniowi */
+/* Is the scheduler up yet (a secondary core waits before joining) */
+/* From now on any core may run the current task */
 void task_set_anycore(void);
 
 int task_scheduler_ready(void);
 
-/* Rdzen wtorny dolacza do schedulera. Nie wraca. */
+/* A secondary core joins the scheduler. Never returns. */
 void task_core_enter(int nr);
 
 int task_cwd(void);
 void task_set_cwd(int slot);
 
-/* Zamienia bieżący tok wykonania (kmain) w pierwszy wątek systemu */
+/* Turns the current thread of execution (kmain) into the first task */
 void scheduler_init(void);
 
-/* Tworzy wątek jądra z własnym stosem; zacznie działać od następnego
-   tyknięcia timera */
+/* Creates a kernel thread with its own stack; it starts running on the
+   next timer tick */
 struct task *task_create(const char *name, void (*entry)(void *), void *arg);
 
-/* Tworzy watek dzielacy przestrzen adresowa (cr3) biezacego procesu */
+/* Creates a thread sharing the current process's address space (cr3) */
 struct task *task_create_thread(const char *name, void (*entry)(void *),
                                 void *arg, uint32_t cr3);
 
-void task_yield(void);              /* oddaj dobrowolnie procesor */
-void task_sleep(uint32_t ms);       /* uśpij bieżący wątek */
-void task_exit(int code);           /* zakończ bieżący wątek z kodem */
-int  task_wait(int pid);            /* czekaj na proces, zwróć jego kod */
-int  task_kill(int pid);            /* zaznacz proces do zabicia (0/-1) */
-int  task_kill_name(const char *name); /* to samo po nazwie -> pid albo -1 */
-int  task_find_name(const char *name); /* pid zywego zadania o tej nazwie */
-int  task_killed(void);             /* czy biezace zadanie ma zginac */
-void task_kill_pending(void);       /* dorecz zabicie przy powrocie do ring 3 */
-void task_block(void);              /* śpij, aż ktoś obudzi */
-void task_unblock(struct task *t);  /* obudź (wołać z IF=0) */
+void task_yield(void);              /* give up the CPU voluntarily */
+void task_sleep(uint32_t ms);       /* put the current thread to sleep */
+void task_exit(int code);           /* end the current thread with a code */
+int  task_wait(int pid);            /* wait for a process, return its code */
+int  task_kill(int pid);            /* mark a process to be killed (0/-1) */
+int  task_kill_name(const char *name); /* the same by name -> pid or -1 */
+int  task_find_name(const char *name); /* pid of a live task with this name */
+int  task_killed(void);             /* is the current task due to die */
+void task_kill_pending(void);       /* deliver the kill on return to ring 3 */
+void task_block(void);              /* sleep until somebody wakes us */
+void task_unblock(struct task *t);  /* wake up (call with IF=0) */
 
 struct task *task_current(void);
 int task_id_of(struct task *t);
 int task_current_id(void);
-int task_alive(int id);             /* czy zadanie o tym id wciąż żyje */
+int task_alive(int id);             /* is the task with this id still alive */
 
-/* Wybiera następny wątek i przełącza kontekst. Wołać z IF=0. */
+/* Picks the next thread and switches context. Call with IF=0. */
 void schedule(void);
 
-/* Wypisuje listę wątków (komenda 'ps' w shellu) */
+/* Prints the list of threads (the 'ps' shell command) */
 void task_dump(void);
 
 const char *task_current_name(void);
 
-/* Bieżące zadanie przechodzi na własną przestrzeń adresową;
-   katalog stron zostanie zwolniony przy sprzątaniu zombie */
+/* The current task moves to an address space of its own; the page
+   directory will be released when the zombie is reaped */
 void task_use_address_space(uint32_t dir_phys);
 
-uint32_t task_current_cr3(void);    /* CR3 bieżącego zadania */
-int task_vc(void);                  /* konsola, na ktorej zadanie pisze */
+uint32_t task_current_cr3(void);    /* CR3 of the current task */
+int task_vc(void);                  /* the console this task writes to */
 void task_set_vc(int vc);
-uint32_t task_brk(void);            /* koniec sterty procesu (0 = wątek jądra) */
+uint32_t task_brk(void);            /* end of the process heap (0 = kernel thread) */
 void task_set_brk(uint32_t brk);
-uint32_t task_brk_base(void);       /* poczatek sterty procesu */
+uint32_t task_brk_base(void);       /* start of the process heap */
 void task_set_brk_base(uint32_t base);
-uint32_t task_mmap_next(void);      /* nastepny wolny adres mmap */
+uint32_t task_mmap_next(void);      /* next free mmap address */
 void task_set_mmap_next(uint32_t addr);
-void task_set_priority(int prio);   /* 0=wysoki, 1=normalny, 2=niski */
+void task_set_priority(int prio);   /* 0=high, 1=normal, 2=low */
 
 #endif

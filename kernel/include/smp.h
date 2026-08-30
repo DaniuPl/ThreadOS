@@ -3,86 +3,88 @@
 
 #include <stdint.h>
 
-/* Ile rdzeni system obsluguje. Tablice indeksowane numerem rdzenia
-   leza w kilku plikach, wiec liczba musi byc widoczna dla wszystkich. */
+/* How many cores the system supports. Tables indexed by core number
+   live in several files, so the count must be visible to all of them. */
 #define SMP_CORES 8
 
-/* Pozostale procesory
+/* The remaining processors
  *
- * Do tej pory system pracowal na jednym rdzeniu i nie wiedzial nawet,
- * ze sa inne. Tablica MADT w ACPI wylicza je wszystkie, a kazdy z nich
- * czeka na sygnal INIT-SIPI od procesora rozruchowego - dopoki go nie
- * dostanie, stoi.
+ * Until now the system ran on one core and did not even know the
+ * others existed. The MADT table in ACPI lists them all, and each of
+ * them waits for an INIT-SIPI signal from the boot processor - until
+ * it arrives, it just sits there.
  *
- * Obudzone rdzenie nie prowadza wlasnych zadan - scheduler, lista
- * procesow i cala reszta jadra pisane byly dla jednego rdzenia i cicho
- * na to licza. Dostaja za to prace policzalna: wspolna kolejke
- * jednostek, z ktorej kazdy bierze kolejny numer pod zamkiem i liczy
- * go u siebie. To jest caly wspoldzielony stan miedzy rdzeniami -
- * jedna liczba i jeden zamek - i dlatego da sie o nim myslec.
+ * Woken cores do not run tasks of their own - the scheduler, the
+ * process list and the whole rest of the kernel were written for a
+ * single core and quietly count on it. What they get instead is
+ * countable work: a shared queue of units, from which each takes the
+ * next number under a lock and computes it locally. That is the entire
+ * state shared between cores - one number and one lock - and that is
+ * why it can be reasoned about.
  */
 
-/* Czyta MADT i budzi pozostale procesory. Zwraca, ile ich w sumie
-   jest (razem z rozruchowym); 1 = maszyna jednordzeniowa albo brak
-   ACPI. Wolane po acpi_init i po starcie sterty. */
+/* Reads the MADT and wakes the remaining processors. Returns how many
+   there are in total (including the boot one); 1 = a single-core
+   machine or no ACPI. Called after acpi_init and after the heap is up. */
 int smp_init(void);
 
-/* Ile procesorow wylicza firmware i ile faktycznie sie zglosilo */
+/* How many processors the firmware lists and how many actually reported in */
 int smp_cpus(void);
 int smp_started(void);
 
-/* Numer rdzenia, na ktorym biegnie wolajacy.
+/* The number of the core the caller is running on.
  *
- * Pyta o to cale jadro i pyta bez przerwy: slowo 'current' znaczy
- * "zadanie tego rdzenia", wiec kazde jego uzycie to jedno takie
- * pytanie. Odpowiedz musi byc wiec tania, a odczyt z lokalnego APIC
- * tani nie jest - to rejestr sprzetowy poza pamiecia podreczna,
- * setki cykli za kazdym razem.
+ * The whole kernel asks this, and asks it constantly: the word
+ * 'current' means "this core's task", so every use of it is one such
+ * question. The answer therefore has to be cheap, and a read from the
+ * local APIC is not - it is a hardware register outside the caches,
+ * hundreds of cycles every time.
  *
- * Numer bierzemy wiec z rejestru zadania procesora: kazdy rdzen ma
- * WLASNY segment stanu zadania i wlasny selektor, a instrukcja str
- * czyta go z samego procesora, bez jednego dostepu do pamieci.
- * Zanim rdzen zaladuje swoj segment, str daje zero - i to jest
- * poprawna odpowiedz, bo do tej chwili biegnie tylko rdzen
- * rozruchowy. */
+ * So we take the number from the processor's task register: every core
+ * has its OWN task state segment and its own selector, and the str
+ * instruction reads it from the processor itself, without a single
+ * memory access. Before a core loads its segment, str gives zero - and
+ * that is the correct answer, because until then only the boot core is
+ * running. */
 int smp_core(void);
 
-/* To samo pytanie zadane lokalnemu APIC. Kosztuje odczyt rejestru
-   sprzetowego, ale jest jedyna odpowiedzia, jaka rdzen ma, zanim
-   zaladuje swoj segment stanu zadania - i to wlasnie po to sluzy. */
+/* The same question asked of the local APIC. It costs a hardware
+   register read, but it is the only answer a core has before it loads
+   its task state segment - and that is exactly what it is for. */
 int smp_core_apic(void);
 
-/* Tykniecia wlasnego zegara danego rdzenia. Rdzen rozruchowy chodzi
-   z PIT i tu ma zero; wtorne licza swoje zegary w APIC. */
+/* Ticks of a given core's own timer. The boot core runs on the PIT and
+   has zero here; secondary ones count their own APIC timers. */
 uint32_t smp_ticks(int core);
 
-/* Obsluga tykniecia zegara APIC (wektor 48) - wola to isr_handler */
+/* Handling of an APIC timer tick (vector 48) - called by isr_handler */
 void smp_timer_tick(void);
 
-/* Obsluga pobudki od innego rdzenia (wektor 49). Nie robi nic poza
-   potwierdzeniem: cala jej tresc to fakt, ze przyszla i wyrwala
-   procesor z instrukcji hlt. */
+/* Handling of a wake-up from another core (vector 49). It does nothing
+   beyond acknowledging: its entire content is the fact that it arrived
+   and pulled the processor out of the hlt instruction. */
 void smp_wakeup_recv(void);
 
-/* Wykonuje to, co zostalo ze zlecenia smp_praca (albo nic, gdy nie ma
-   zlecenia). Wola to petla bezczynna rdzenia. */
+/* Runs whatever is left of the smp_work order (or nothing, if there is
+   no order). Called from a core's idle loop. */
 void smp_run_work(int core);
 
-/* --- Praca rozdzielana na rdzenie -----------------------------------
+/* --- Work spread across cores ---------------------------------------
  *
- * Zleca 'ile' jednostek pracy i wraca, gdy wszystkie sa policzone.
- * Kazda jednostka dostaje swoj numer; co z nim zrobi, jest sprawa
- * funkcji. Rdzen rozruchowy liczy razem z pozostalymi - inaczej na
- * maszynie jednordzeniowej nie policzylby nikt.
+ * Orders 'count' units of work and returns once all of them are
+ * computed. Each unit gets its number; what it does with it is the
+ * function's business. The boot core computes along with the rest -
+ * otherwise on a single-core machine nobody would compute at all.
  *
- * Funkcja biegnie na rdzeniu bez przerwan i bez tablicy wyjatkow:
- * nie wolno jej usypiac, wolac jadra ani sie mylic w adresach. Ma
- * liczyc na tym, co dostala, i tyle. */
+ * The function runs on a core with interrupts off and without an
+ * exception table: it may not sleep, may not call into the kernel and
+ * may not get an address wrong. It is to compute what it was given,
+ * and that is all. */
 void smp_work(void (*fn)(uint32_t number, void *data), void *data,
                uint32_t ile);
 
-/* Ile jednostek policzyl kazdy rdzen w ostatnim zleceniu (indeks 0 to
-   rdzen rozruchowy) i ile rdzeni w ogole wzielo w nim udzial */
+/* How many units each core computed in the last order (index 0 is the
+   boot core) and how many cores took part in it at all */
 uint32_t smp_share(int core);
 int smp_workers(void);
 

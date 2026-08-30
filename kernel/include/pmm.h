@@ -6,36 +6,36 @@
 
 #define PAGE_SIZE 4096u
 
-/* Buduje bitmapę ramek na podstawie mapy pamięci Multiboot */
+/* Builds the frame bitmap from the Multiboot memory map */
 void pmm_init(const struct multiboot_info *mbi);
 
-/* Zwraca adres fizyczny wolnej ramki 4 KiB (0 = brak pamięci) */
+/* Returns the physical address of a free 4 KiB frame (0 = out of memory) */
 uint32_t pmm_alloc_frame(void);
 
-/* Kogo prosic o pamiec przy braku wolnych ramek. Funkcja ma zwolnic
-   co najmniej jedna ramke i zwrocic 1; 0 znaczy "nie ma juz czego
-   oddac". Ustawia to wymiana stron (swap_init). */
+/* Whom to ask for memory when there are no free frames. The function
+   must free at least one frame and return 1; 0 means "there is nothing
+   left to give back". Set by the swapper (swap_init). */
 void pmm_set_reclaim(int (*fn)(void));
 
-/* Zwraca adres pierwszej z n kolejnych wolnych ramek (0 = brak) */
+/* Returns the address of the first of n consecutive free frames (0 = none) */
 uint32_t pmm_alloc_contiguous(uint32_t n);
 
-/* Zwalnia jednego wlasciciela ramki; ramka wraca do puli dopiero,
-   gdy byl ostatni (zob. pmm_frame_ref - kopiowanie przy zapisie) */
+/* Releases one owner of a frame; the frame goes back to the pool only
+   when it was the last one (see pmm_frame_ref - copy-on-write) */
 void pmm_free_frame(uint32_t addr);
 
-/* Dopisuje wlasciciela ramki (strona wspoldzielona po fork) */
+/* Adds an owner to a frame (a page shared after fork) */
 void pmm_frame_ref(uint32_t addr);
 
-/* Liczba wlascicieli ramki (0 = wolna) */
+/* Number of owners of a frame (0 = free) */
 uint32_t pmm_frame_refs(uint32_t addr);
 
 uint32_t pmm_total_frames(void);
 uint32_t pmm_used_frames(void);
-uint32_t pmm_ram_kib(void);    /* cala wykryta pamiec RAM w KiB */
+uint32_t pmm_ram_kib(void);    /* all detected RAM in KiB */
 
-/* Adres tuz za ostatnia zarzadzana ramka - stad stronicowanie wie,
-   dokad ciagnac mapowanie identycznosciowe */
+/* The address just past the last managed frame - from this paging
+   knows how far to stretch the identity mapping */
 uint32_t pmm_managed_top(void);
 
 #endif

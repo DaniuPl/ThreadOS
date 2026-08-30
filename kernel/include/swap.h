@@ -3,28 +3,29 @@
 
 #include <stdint.h>
 
-/* Wymiana stron na dysk
+/* Swapping pages to disk
  *
- * Magazyn stron wyrzuconych z pamieci. Miejsce rezerwujemy przez system
- * plikow (plik 'swap.sys'), zeby 'df' i 'fls' mowily prawde i zeby nikt
- * nam po nim nie pisal - ale same strony wedruja tam i z powrotem
- * wprost przez ATA, z pominieciem kodu PFS. PFS ma jeden wspolny bufor
- * na blok, a wymiana potrafi ruszyc w srodku dowolnej operacji na
- * plikach; wchodzenie mu tam w droge skonczyloby sie polamanym dyskiem.
+ * A store for pages evicted from memory. We reserve the space through
+ * the filesystem (a file 'swap.sys') so that 'df' and 'fls' tell the
+ * truth and so that nobody writes over it - but the pages themselves
+ * travel back and forth directly through ATA, bypassing the PFS code.
+ * PFS has one shared block buffer, and swapping can start in the
+ * middle of any file operation; getting in its way there would end in
+ * a broken disk.
  */
 
-/* Zaklada plik wymiany (po fs_init, w kontekscie watku). */
+/* Creates the swap file (after fs_init, in a thread context). */
 void swap_init(void);
 
-/* Rezerwuje wolne miejsce na strone; -1 gdy nie ma. */
+/* Reserves a free slot for a page; -1 when there is none. */
 int swap_alloc_slot(void);
 void swap_free_slot(int slot);
 
-/* Przenosi 4 KiB miedzy ramka a dyskiem. 0 = OK, -1 = blad. */
+/* Moves 4 KiB between a frame and the disk. 0 = OK, -1 = error. */
 int swap_write(int slot, const void *frame);
 int swap_read(int slot, void *frame);
 
-/* Statystyki do komendy 'mem' */
+/* Statistics for the 'mem' command */
 void swap_stats(uint32_t *used, uint32_t *total,
                 uint32_t *out, uint32_t *in);
 

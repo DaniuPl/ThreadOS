@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-/* Skok do ring 3 przez iret. Nie wraca. */
+/* Jump into ring 3 through iret. Never returns. */
 void enter_ring3(uint32_t entry, uint32_t user_stack_top);
 
-/* Powrót do ring 3 z gotowej ramki rejestrów (fork - dziecko wraca
-   z syscalla tam, gdzie rodzic). Nie wraca. */
+/* Return to ring 3 from a prepared register frame (fork - the child
+   returns from the syscall where the parent did). Never returns. */
 struct regs;
 void enter_ring3_regs(const struct regs *r);
 

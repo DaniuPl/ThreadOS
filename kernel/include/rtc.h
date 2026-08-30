@@ -3,8 +3,9 @@
 
 #include <stdint.h>
 
-/* Czas odczytany z zegara CMOS (RTC). Uklad pol musi byc identyczny
-   ze struct utime w user/usys.h - przekazujemy go przez syscall. */
+/* Time read from the CMOS clock (RTC). The field layout must be
+   identical to struct utime in user/usys.h - we pass it through a
+   syscall. */
 struct rtc_time {
     uint16_t year;
     uint8_t month;

@@ -3,25 +3,26 @@
 
 #include <stdint.h>
 
-/* Sterownik AHCI (SATA)
+/* AHCI (SATA) driver
  *
- * Nastepca ATA PIO. Roznica jest zasadnicza: przy PIO to procesor
- * przepisuje kazde slowo przez port I/O, przy AHCI kontroler sam
- * siega do pamieci (DMA) po tablicy opisow, ktora mu podajemy.
- * Nowoczesne plyty nie maja juz trybu zgodnosci - bez tego sterownika
- * dysk w takiej maszynie jest po prostu niewidoczny.
+ * The successor to ATA PIO. The difference is fundamental: with PIO
+ * the processor copies every word through an I/O port, with AHCI the
+ * controller reaches into memory itself (DMA) following a table of
+ * descriptors we hand it. Modern boards no longer have a compatibility
+ * mode - without this driver a disk in such a machine is simply
+ * invisible.
  */
 
-/* Szuka kontrolera AHCI po PCI i przygotowuje pierwszy port z dyskiem.
-   1 = jest dysk gotowy do pracy. */
+/* Looks for an AHCI controller on the PCI bus and prepares the first
+   port with a disk. 1 = there is a disk ready to work. */
 int ahci_init(void);
 
-/* Pojemnosc dysku w sektorach 512 B (0 = nieznana) */
+/* Disk capacity in 512 B sectors (0 = unknown) */
 uint32_t ahci_sectors(void);
 
-/* Odczyt/zapis 'count' kolejnych sektorow. Bufor musi lezec w pamieci
-   ciaglej fizycznie - kontroler czyta go sam, bez udzialu stronicowania.
-   0 = OK, -1 = blad. */
+/* Read/write 'count' consecutive sectors. The buffer must lie in
+   physically contiguous memory - the controller reads it itself,
+   without any help from paging. 0 = OK, -1 = error. */
 int ahci_read(uint32_t lba, uint32_t count, void *buf);
 int ahci_write(uint32_t lba, uint32_t count, const void *buf);
 

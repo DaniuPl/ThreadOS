@@ -1,16 +1,17 @@
-/* Trampolina rozruchowa rdzeni wtornych - tryb dlugi
+/* Boot trampoline for secondary cores - long mode
  *
- * Procesor obudzony sygnalem SIPI zaczyna w trybie rzeczywistym, i nie
- * ma znaczenia, ze reszta systemu pracuje od dawna w trybie dlugim.
- * Musi przejsc cala droge sam: szesnascie bitow, potem trzydziesci
- * dwa, potem szescdziesiat cztery - te sama, ktora przy starcie
- * przeszedl procesor rozruchowy, tylko bez pomocy loadera.
+ * A processor woken by a SIPI starts in real mode, and it makes no
+ * difference that the rest of the system has long been running in long
+ * mode. It has to walk the whole road on its own: sixteen bits, then
+ * thirty-two, then sixty-four - the same road the boot processor took
+ * at startup, only without any help from the loader.
  *
- * Tablic stron nie buduje: bierze gotowe, te same, ktorych uzywa
- * jadro. Ich adres podaje mu procesor rozruchowy w polu ap_cr3.
+ * It does not build page tables: it takes the ready ones, the very
+ * tables the kernel uses. Their address is handed to it by the boot
+ * processor in the ap_cr3 field.
  *
- * Blok jest linkowany z jadrem, ale wykonuje sie pod adresem 0x8000-
- * stad przeliczanie kazdego adresu na miejsce docelowe.
+ * The block is linked with the kernel but executes at address 0x8000 -
+ * hence every address being recomputed for its destination.
  */
 
 #define AP_BASE 0x8000
@@ -57,35 +58,36 @@ ap_protected:
     movw %ax, %gs
     movw %ax, %ss
 
-    /* Adresowanie fizyczne z rozszerzeniem: bez tego nie ma trybu
-       dlugiego, bo wpisy tablic stron maja tam po osiem bajtow */
+    /* Physical address extension: without it there is no long mode,
+       because page table entries are eight bytes wide there */
     movl %cr4, %eax
     orl $CR4_PAE, %eax
     movl %eax, %cr4
 
-    /* Tablice stron biezemy gotowe - te same, po ktorych chodzi
-       jadro. Rdzen wtorny nie ma czego dokladac do mapowania. */
+    /* We take the page tables ready-made - the same ones the kernel
+       walks. A secondary core has nothing to add to the mapping. */
     movl $OFF(ap_cr3), %eax
     movl (%eax), %eax
     movl %eax, %cr3
 
-    /* Zgoda na tryb dlugi (bit LME) i na zakaz wykonywania (bit NXE).
+    /* Consent to long mode (bit LME) and to no-execute (bit NXE).
      *
-     * NXE nie jest ozdoba. Jadro mapuje tym bitem wszystko, co nie ma
-     * byc kodem - miedzy innymi rejestry sprzetu doklejone do mapowania
-     * identycznosciowego. Gdy NXE jest wylaczone, bit 63 wpisu tablicy
-     * stron jest ZAREZERWOWANY, a nie "zakaz wykonywania": kazdy dostep
-     * przez taki wpis konczy sie bledem strony. Ten rdzen chodzi po tych
-     * samych tablicach, co rozruchowy, wiec musi miec ten sam EFER -
-     * inaczej pierwsze siegniecie po lokalny APIC zabija maszyne. */
+     * NXE is not decoration. The kernel uses that bit to map everything
+     * that is not meant to be code - among others the hardware
+     * registers glued onto the identity mapping. With NXE off, bit 63
+     * of a page table entry is RESERVED rather than "no execute": every
+     * access through such an entry ends in a page fault. This core
+     * walks the same tables as the boot one, so it must have the same
+     * EFER - otherwise the first touch of the local APIC kills the
+     * machine. */
     movl $MSR_EFER, %ecx
     rdmsr
     orl $EFER_LME | EFER_NXE, %eax
     wrmsr
 
-    /* Wlaczenie stronicowania przelacza procesor w tryb dlugi -
-       ale dopiero skok dalekomorski na deskryptor 64-bitowy sprawia,
-       ze zaczyna wykonywac kod jako 64-bitowy */
+    /* Turning paging on switches the processor into long mode - but
+       only a far jump to a 64-bit descriptor makes it start executing
+       code as 64-bit */
     movl %cr0, %eax
     orl $CR0_PG, %eax
     movl %eax, %cr0
@@ -107,13 +109,13 @@ ap_long:
     movq $OFF(ap_counter), %rax
     lock incl (%rax)
 
-    /* I do roboty. Numer rdzenia w RDI - tak, jak kaze konwencja
-       wywolan trybu dlugiego - a sama petla robocza siedzi juz
-       w jadrze, gdzie kod pisze sie w C.
+    /* And to work. The core number goes in RDI - as the long mode
+       calling convention demands - while the work loop itself already
+       lives in the kernel, where code is written in C.
 
-       Adres funkcji przez rejestr: skok wzgledny siegnie najwyzej
-       dwa gigabajty, a jadro lezy poza tym zasiegiem od miejsca,
-       w ktorym ten kod sie wykonuje. */
+       The function address goes through a register: a relative jump
+       reaches two gigabytes at most, and the kernel lies beyond that
+       range from where this code executes. */
     movq $OFF(ap_number), %rax
     movl (%rax), %edi
     movabsq $smp_ap_main, %rax
@@ -124,18 +126,18 @@ ap_long:
 
 .align 16
 ap_gdt:
-    .quad 0x0000000000000000      /* deskryptor zerowy */
-    .quad 0x00CF9A000000FFFF      /* 0x08: kod 32-bitowy */
-    .quad 0x00CF92000000FFFF      /* 0x10: dane 32-bitowe */
-    .quad 0x00AF9A000000FFFF      /* 0x18: kod 64-bitowy (bit L) */
-    .quad 0x00CF92000000FFFF      /* 0x20: dane */
+    .quad 0x0000000000000000      /* null descriptor */
+    .quad 0x00CF9A000000FFFF      /* 0x08: 32-bit code */
+    .quad 0x00CF92000000FFFF      /* 0x10: 32-bit data */
+    .quad 0x00AF9A000000FFFF      /* 0x18: 64-bit code (L bit) */
+    .quad 0x00CF92000000FFFF      /* 0x20: data */
 ap_gdt_end:
 
 ap_gdtr:
     .word ap_gdt_end - ap_gdt - 1
     .long OFF(ap_gdt)
 
-/* Wypelniane przez procesor rozruchowy przed kazdym SIPI */
+/* Filled in by the boot processor before every SIPI */
 .align 8
 ap_stack:
     .quad 0
@@ -148,5 +150,5 @@ ap_counter:
 
 ap_trampoline_end:
 
-/* Stos tego bloku nie jest wykonywalny - linker chce to slyszec */
+/* This block's stack is not executable - the linker wants to hear it */
 .section .note.GNU-stack,"",@progbits

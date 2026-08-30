@@ -1,47 +1,47 @@
 #ifndef PROTONOS_BIGLOCK_H
 #define PROTONOS_BIGLOCK_H
 
-/* Wielki zamek jadra
+/* The big kernel lock
  *
- * Rdzenie wtorne umieja juz prowadzic watki jadra, ale tylko takie,
- * ktore ktos jawnie na to pozwolil - bo reszta jadra pisana byla dla
- * jednego rdzenia. Zeby wpuscic tam PROGRAMY, trzeba rozstrzygnac ten
- * sam problem dla calego jadra naraz.
+ * Secondary cores can already run kernel threads, but only the ones
+ * somebody explicitly allowed there - because the rest of the kernel
+ * was written for a single core. To let PROGRAMS in, the same problem
+ * has to be settled for the whole kernel at once.
  *
- * Odpowiedz jest ta sama, ktora dawaly kiedys wszystkie systemy
- * przechodzace na wiele rdzeni: jeden zamek na cale jadro. Kod
- * uzytkownika chodzi wtedy naprawde rownolegle - i to w nim programy
- * spedzaja wieksza czesc czasu - a kod jadra po staremu, po jednym
- * rdzeniu naraz. To nie jest cel docelowy, tylko poprawna droga do
- * niego: kazdy podsystem, ktory dostanie wlasny zamek, mozna spod
- * tego wyjac, i az do konca system dziala.
+ * The answer is the one every system moving to many cores once gave:
+ * a single lock around the entire kernel. User code then really does
+ * run in parallel - and that is where programs spend most of their
+ * time - while kernel code runs as before, one core at a time. This is
+ * not the destination, it is the correct road to it: every subsystem
+ * that gets a lock of its own can be lifted out from under this one,
+ * and the system keeps working the whole way.
  *
- * Zamek jest ZAGNIEZDZALNY. Rdzen, ktory juz go ma, bierze go po raz
- * kolejny bez czekania - inaczej przerwanie, ktore trafia w srodek
- * wywolania systemowego, czekaloby na zamek trzymany przez przerwany
- * wlasnie kod.
+ * The lock is RECURSIVE. A core that already holds it takes it again
+ * without waiting - otherwise an interrupt landing in the middle of a
+ * system call would wait for a lock held by the very code it
+ * interrupted.
  *
- * Zasada, na ktorej to wszystko stoi: zadanie trzyma ten zamek przez
- * caly czas, kiedy wykonuje kod jadra, i oddaje go NA CZAS
- * PRZELACZENIA. Zadania bezczynne nie biora go nigdy - rdzen stojacy
- * na hlt z zamkiem w garsci zatrzymalby caly system.
+ * The rule everything rests on: a task holds this lock for as long as
+ * it runs kernel code, and gives it up FOR THE DURATION OF A CONTEXT
+ * SWITCH. Idle tasks never take it - a core sitting in hlt with the
+ * lock in its hand would stop the whole system.
  */
 
-/* Wchodze w kod jadra (albo juz w nim jestem - wtedy tylko licznik) */
+/* Entering kernel code (or already inside it - then just the count) */
 void biglock_enter(void);
 
-/* Wychodze; zamek zwalnia sie dopiero przy ostatnim wyjsciu */
+/* Leaving; the lock is only released on the outermost exit */
 void biglock_leave(void);
 
-/* Czy ten rdzen trzyma zamek */
+/* Does this core hold the lock */
 int biglock_held(void);
 
-/* Oddaje zamek CALKOWICIE i zwraca, ile razy byl wziety - do uzycia
-   przy przelaczaniu kontekstu, gdzie zadanie musi go puscic, zeby inne
-   moglo wejsc do jadra. */
+/* Give the lock up COMPLETELY and return how many times it was taken -
+   for use around a context switch, where a task has to let go so that
+   another one can enter the kernel. */
 int biglock_release_all(void);
 
-/* Bierze go z powrotem na te sama glebokosc */
+/* Take it back to the same depth */
 void biglock_restore(int depth);
 
 #endif

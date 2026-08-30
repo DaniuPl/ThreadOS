@@ -1,24 +1,25 @@
-/* ProtonOS 64 - wejscie w tryb dlugi
+/* ProtonOS 64 - entering long mode
  *
- * GRUB zostawia nas w trybie chronionym 32-bit, bo tak stanowi
- * Multiboot 2. Przejscie w tryb dlugi wymaga kilku krokow w scisle
- * okreslonej kolejnosci:
+ * GRUB leaves us in 32-bit protected mode, because that is what
+ * Multiboot 2 prescribes. Getting into long mode takes several steps
+ * in a strictly fixed order:
  *
- *   1. tablice stron - w trybie dlugim stronicowanie jest OBOWIAZKOWE,
- *      wiec musi byc gotowe, zanim go wlaczymy,
- *   2. PAE w CR4 - bez niego wpisy sa 32-bitowe i tryb dlugi nie ruszy,
- *   3. bit LME w rejestrze EFER - zgoda na tryb dlugi,
- *   4. PG w CR0 - stronicowanie; procesor wchodzi wtedy w tryb
- *      zgodnosci, nie jeszcze w pelny tryb dlugi,
- *   5. skok daleki do segmentu z bitem L - dopiero on przelacza
- *      procesor naprawde.
+ *   1. page tables - in long mode paging is MANDATORY, so they must be
+ *      ready before it is turned on,
+ *   2. PAE in CR4 - without it entries are 32-bit and long mode will
+ *      not start,
+ *   3. the LME bit in the EFER register - consent to long mode,
+ *   4. PG in CR0 - paging; the processor then enters compatibility
+ *      mode, not full long mode yet,
+ *   5. a far jump to a segment with the L bit - only that really
+ *      switches the processor over.
  *
- * Mapujemy identycznosciowo pierwsze cztery gigabajty stronami po
- * 2 MiB. Nie chodzi o pamiec - tyle jej nie ma - tylko o to, ze wysoko
- * pod czterema gigabajtami leza rejestry urzadzen i bufor obrazu.
- * Cztery tablice po 512 wpisow opisuja to w komplecie i mieszcza sie
- * w obrazie jadra, bez zadnego przydzielania pamieci, ktorego na tym
- * etapie jeszcze nie umiemy.
+ * We identity-map the first four gigabytes with 2 MiB pages. This is
+ * not about memory - there is not that much of it - but about the fact
+ * that device registers and the framebuffer sit high, just below four
+ * gigabytes. Four tables of 512 entries describe all of it and fit
+ * inside the kernel image, without any memory allocation, which we do
+ * not know how to do at this stage yet.
  */
 
 .set MB2_MAGIC, 0xE85250D6
@@ -33,43 +34,44 @@ mb2_header:
 .long -(MB2_MAGIC + MB2_ARCH + (mb2_header_end - mb2_header))
 
     .align 8
-    .short 1                         /* zadanie informacji */
+    .short 1                         /* information request */
     .short 0
     .long 8 + 5 * 4
-    .long 1                          /* linia polecen */
-    .long 3                          /* moduly */
-    .long 6                          /* mapa pamieci */
+    .long 1                          /* command line */
+    .long 3                          /* modules */
+    .long 6                          /* memory map */
     .long 14                         /* RSDP (ACPI 1.0) */
     .long 15                         /* RSDP (ACPI 2.0) */
 
     .align 8
-    .short 6                         /* moduly wyrownane do stron */
+    .short 6                         /* modules aligned on pages */
     .short 0
     .long 8
 
-    /* Konsola: jadro umie pisac w pamieci znakow EGA, nie tylko
-       w buforze obrazu. Loader dowiaduje sie z tego, ze wolno mu
-       zostawic tryb tekstowy - inaczej, widzac zadanie trybu obrazu
-       nizej, zawsze przelaczylby na grafike. */
+    /* Console: the kernel can write into EGA character memory, not only
+       into a framebuffer. This is how the loader learns it may leave
+       text mode alone - otherwise, seeing the video mode request
+       below, it would always switch to graphics. */
     .align 8
-    .short 4                         /* flagi konsoli */
+    .short 4                         /* console flags */
     .short 0
     .long 12
-    .long 2                          /* obsluga trybu tekstowego EGA */
+    .long 2                          /* EGA text mode support */
 
-    /* Tryb obrazu: zero znaczy "bez preferencji". Zadanie konkretnej
-       rozdzielczosci ma sens pod BIOS-em, gdzie karta zna cala liste
-       trybow VESA. Pod UEFI wybor jest taki, jaki firmware akurat
-       wystawia przez GOP - i gdy zazadamy czegos spoza tej listy,
-       loader nie ustawia NICZEGO. A pod UEFI nie ma trybu tekstowego,
-       do ktorego moglibysmy wtedy wrocic: system zostalby bez obrazu. */
+    /* Video mode: zero means "no preference". Asking for a particular
+       resolution makes sense under a BIOS, where the card knows the
+       whole list of VESA modes. Under UEFI the choice is whatever the
+       firmware happens to expose through GOP - and when we ask for
+       something outside that list, the loader sets up NOTHING. And
+       under UEFI there is no text mode to fall back to: the system
+       would be left without a picture. */
     .align 8
-    .short 5                         /* tryb obrazu */
+    .short 5                         /* video mode */
     .short 0
     .long 20
-    .long 0                          /* szerokosc - dowolna */
-    .long 0                          /* wysokosc - dowolna */
-    .long 0                          /* glebia - dowolna */
+    .long 0                          /* width - any */
+    .long 0                          /* height - any */
+    .long 0                          /* depth - any */
 
     .align 8
     .short 0
@@ -77,14 +79,14 @@ mb2_header:
     .long 8
 mb2_header_end:
 
-/* Tablice stron: po jednej ramce na poziom. Wyrownanie do 4 KiB jest
-   wymagane - procesor bierze z wpisu tylko starsze bity adresu. */
+/* Page tables: one frame per level. The 4 KiB alignment is required -
+   the processor takes only the upper address bits from an entry. */
 .section .bss
 .align 4096
 .global boot_pml4
 boot_pml4:  .skip 4096
 boot_pdpt:  .skip 4096
-boot_pd:    .skip 4 * 4096          /* cztery tablice = cztery gigabajty */
+boot_pd:    .skip 4 * 4096          /* four tables = four gigabytes */
 
 .align 16
 stack_bottom:
@@ -94,16 +96,16 @@ stack_top:
 
 .section .rodata
 .align 8
-/* Tablica deskryptorow trybu dlugiego. W trybie dlugim baza i limit
-   nie znacza juz nic - liczy sie bit L (64-bitowy kod) i poziom
-   uprawnien. Deskryptor danych jest tylko po to, zeby bylo co
-   zaladowac do rejestrow segmentowych. */
+/* The long mode descriptor table. In long mode the base and limit no
+   longer mean anything - what counts is the L bit (64-bit code) and
+   the privilege level. The data descriptor exists only so that there
+   is something to load into the segment registers. */
 gdt64:
-    .quad 0                                  /* wpis zerowy */
+    .quad 0                                  /* null entry */
 gdt64_code:
-    .quad (1<<43) | (1<<44) | (1<<47) | (1<<53)   /* kod, obecny, 64-bit */
+    .quad (1<<43) | (1<<44) | (1<<47) | (1<<53)   /* code, present, 64-bit */
 gdt64_data:
-    .quad (1<<44) | (1<<47) | (1<<41)             /* dane, obecne, zapis */
+    .quad (1<<44) | (1<<47) | (1<<41)             /* data, present, writable */
 gdt64_end:
 gdt64_ptr:
     .short gdt64_end - gdt64 - 1
@@ -115,15 +117,15 @@ gdt64_ptr:
 .type _start, @function
 _start:
     movl $stack_top, %esp
-    movl %eax, %edi                  /* magic - do przekazania dalej */
-    movl %ebx, %esi                  /* wskaznik na informacje od loadera */
+    movl %eax, %edi                  /* magic - to be passed on */
+    movl %ebx, %esi                  /* pointer to the loader's information */
 
-    /* --- 1. Tablice stron: pierwszy gigabajt stronami po 2 MiB --- */
+    /* --- 1. Page tables: the first gigabyte in 2 MiB pages --- */
     movl $boot_pdpt, %eax
-    orl  $0x03, %eax                 /* obecna + zapis */
+    orl  $0x03, %eax                 /* present + writable */
     movl %eax, boot_pml4
 
-    /* Cztery wpisy katalogu nadrzednego - po jednym na gigabajt */
+    /* Four entries of the top-level directory - one per gigabyte */
     movl $boot_pd, %eax
     orl  $0x03, %eax
     movl $0, %ecx
@@ -135,14 +137,14 @@ _start:
     cmpl $4, %ecx
     jne 2b
 
-    /* 2048 stron po 2 MiB: adres kazdej to jej numer przesuniety o 21
-       bitow - najwyzszy wypada na 0xFFE00000, wiec starsza polowa
-       wpisu zostaje zerem */
+    /* 2048 pages of 2 MiB: the address of each is its number shifted by
+       21 bits - the highest comes out at 0xFFE00000, so the upper half
+       of the entry stays zero */
     movl $0, %ecx
 1:
     movl %ecx, %eax
     shll $21, %eax
-    orl  $0x83, %eax                 /* obecna + zapis + STRONA WIELKA */
+    orl  $0x83, %eax                 /* present + writable + HUGE PAGE */
     movl %eax, boot_pd(, %ecx, 8)
     movl $0, boot_pd + 4(, %ecx, 8)
     incl %ecx
@@ -157,30 +159,29 @@ _start:
     orl  $(1 << 5), %eax
     movl %eax, %cr4
 
-    /* --- 3. Bit LME w EFER (rejestr modelu 0xC0000080) --- */
+    /* --- 3. The LME bit in EFER (model register 0xC0000080) --- */
     movl $0xC0000080, %ecx
     rdmsr
     orl  $(1 << 8), %eax
     wrmsr
 
-    /* --- 4. Stronicowanie: procesor wchodzi w tryb zgodnosci --- */
-    /* Razem ze stronicowaniem (bit 31) wlaczamy ochrone zapisu
-       (bit 16). Bez niej jadro moze pisac po stronach oznaczonych jako
-       tylko-do-odczytu, a to zabija kopiowanie przy zapisie: strona
-       wspoldzielona przez dwa procesy zostalaby po cichu nadpisana
-       zamiast rozdzielona. */
+    /* --- 4. Paging: the processor enters compatibility mode --- */
+    /* Together with paging (bit 31) we turn on write protection
+       (bit 16). Without it the kernel may write over pages marked
+       read-only, and that kills copy-on-write: a page shared by two
+       processes would be quietly overwritten instead of being split. */
     movl %cr0, %eax
     orl  $((1 << 31) | (1 << 16)), %eax
     movl %eax, %cr0
 
-    /* --- 5. Dopiero skok daleki przelacza go naprawde --- */
+    /* --- 5. Only a far jump really switches it over --- */
     lgdt gdt64_ptr
     ljmp $0x08, $long_start
 
 .code64
 long_start:
-    /* W trybie dlugim rejestry segmentowe sa niemal bez znaczenia,
-       ale muszą wskazywać na poprawny deskryptor */
+    /* In long mode the segment registers mean almost nothing, but
+       they still have to point at a valid descriptor */
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -189,8 +190,8 @@ long_start:
     movw %ax, %gs
 
     movq $stack_top, %rsp
-    /* magic i wskaznik czekaja juz w edi/esi - gorne polowy zerujemy,
-       bo w trybie 32-bitowym nie istnialy */
+    /* the magic and the pointer already wait in edi/esi - we clear the
+       upper halves, because in 32-bit mode they did not exist */
     movl %edi, %edi
     movl %esi, %esi
     call kmain64

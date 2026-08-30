@@ -3,27 +3,28 @@
 
 #include <stdint.h>
 
-/* Warstwa urzadzenia blokowego
+/* The block device layer
  *
- * System plikow i wymiana stron nie musza wiedziec, czy dysk siedzi za
- * kontrolerem AHCI, czy za starym ATA w trybie PIO. Wybor zapada raz,
- * przy starcie: AHCI ma pierwszenstwo (jest szybszy i to jedyne, co
- * widac na nowszych plytach), ATA zostaje jako droga zapasowa.
+ * The filesystem and the swapper do not need to know whether the disk
+ * sits behind an AHCI controller or behind old ATA in PIO mode. The
+ * choice is made once, at startup: AHCI has priority (it is faster and
+ * it is the only thing visible on newer boards), ATA remains as a
+ * fallback.
  */
 
-/* Wykrywa dysk i wybiera sterownik. 1 = jest dysk. */
+/* Detects a disk and picks a driver. 1 = there is a disk. */
 int blk_init(void);
 int blk_present(void);
 
-/* Nazwa wybranego sterownika (do komunikatu startowego) */
+/* Name of the chosen driver (for the startup message) */
 const char *blk_name(void);
 
-/* Pojemnosc w sektorach 512 B (0 = nieznana) */
+/* Capacity in 512 B sectors (0 = unknown) */
 uint32_t blk_sectors(void);
 
-/* Odczyt/zapis 'count' kolejnych sektorow. Bufor musi lezec w pamieci
-   ciaglej fizycznie - przy AHCI kontroler siega po niego sam.
-   0 = OK, -1 = blad. */
+/* Read/write 'count' consecutive sectors. The buffer must lie in
+   physically contiguous memory - with AHCI the controller reaches for
+   it itself. 0 = OK, -1 = error. */
 int blk_read(uint32_t lba, uint32_t count, void *buf);
 int blk_write(uint32_t lba, uint32_t count, const void *buf);
 

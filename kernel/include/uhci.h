@@ -3,35 +3,35 @@
 
 #include <stdint.h>
 
-/* Kontroler USB (UHCI) - warstwa transportowa
+/* USB host controller (UHCI) - the transport layer
  *
- * Umie tyle, ile potrzeba, zeby dogadac sie z urzadzeniem: przesylki
- * sterujace (zapytania o deskryptory, ustawienia) i przerwaniowe
- * (dane naplywajace z klawiatury). Nie ma tu nic o klawiaturach -
- * co z tych bajtow wynika, rozstrzyga usbkbd.c.
+ * It knows just enough to talk to a device: control transfers
+ * (descriptor queries, settings) and interrupt transfers (data
+ * arriving from a keyboard). There is nothing about keyboards here -
+ * what those bytes mean is decided by usbkbd.c.
  *
- * UHCI to najstarszy z trzech kontrolerow USB i najprostszy: sterujemy
- * nim przez porty I/O, a opisy przesylek uklada sie w liscie ramek.
- * Nowsze plyty maja tylko xHCI - ale caly kod rozpoznawania urzadzen
- * i tlumaczenia raportow HID jest od kontrolera niezalezny i przy
- * dokladaniu xHCI zostaje bez zmian.
+ * UHCI is the oldest of the three USB controllers and the simplest: we
+ * drive it through I/O ports, and transfer descriptors are arranged in
+ * a frame list. Newer boards have only xHCI - but all the code for
+ * recognising devices and translating HID reports is independent of
+ * the controller and stays unchanged when xHCI is added.
  */
 
-/* Szuka kontrolera po PCI i uruchamia go. 1 = gotowy. */
+/* Looks for the controller on the PCI bus and starts it. 1 = ready. */
 int uhci_init(void);
 
-/* Ile portow ma kontroler i czy na danym cos wisi */
+/* How many ports the controller has and whether anything hangs on one */
 int uhci_ports(void);
-int uhci_port_reset(int port);          /* 1 = urzadzenie gotowe do rozmowy */
+int uhci_port_reset(int port);          /* 1 = the device is ready to talk */
 int uhci_port_lowspeed(int port);
 
-/* Przesylka sterujaca. 'setup' to 8 bajtow zapytania, dane moga isc
-   w obie strony (in=1 czyta). Zwraca liczbe bajtow danych albo -1. */
+/* A control transfer. 'setup' is the 8-byte request, data may go
+   either way (in=1 reads). Returns the number of data bytes or -1. */
 int uhci_control(int addr, int lowspeed, int maxpacket,
                  const void *setup, void *data, int len, int in);
 
-/* Jednorazowy odczyt z punktu koncowego przerwaniowego. Zwraca liczbe
-   bajtow, 0 gdy urzadzenie nie ma nic do powiedzenia, -1 przy bledzie. */
+/* A single read from an interrupt endpoint. Returns the number of
+   bytes, 0 when the device has nothing to say, -1 on error. */
 int uhci_interrupt_in(int addr, int lowspeed, int endpoint, int maxpacket,
                       void *data, int len, int *toggle);
 

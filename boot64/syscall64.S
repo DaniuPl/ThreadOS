@@ -1,14 +1,15 @@
-/* Wejscie do jadra przez instrukcje syscall
+/* Kernel entry through the syscall instruction
  *
- * W trybie dlugim nie uzywa sie juz bramki przerwania do wolania jadra.
- * Instrukcja syscall jest szybsza, bo nie siega do pamieci: procesor
- * bierze adres procedury wprost z rejestru modelu (LSTAR), a adres
- * powrotu i flagi zostawia w rejestrach RCX i R11.
+ * In long mode an interrupt gate is no longer used to call the kernel.
+ * The syscall instruction is faster because it touches no memory: the
+ * processor takes the handler address straight from a model-specific
+ * register (LSTAR) and leaves the return address and flags in RCX and
+ * R11.
  *
- * Ma to jednak cene: syscall NIE przelacza stosu. Wchodzimy do jadra
- * ze stosem programu i pierwsze, co trzeba zrobic, to przesiasc sie na
- * wlasny - inaczej caly kod jadra dzialalby na pamieci, ktora proces
- * moze sobie dowolnie podmienic.
+ * There is a price, though: syscall does NOT switch stacks. We enter
+ * the kernel on the program's stack, and the first thing to do is move
+ * onto our own - otherwise all kernel code would run on memory the
+ * process can swap out from under it at will.
  */
 
 .section .text
@@ -17,46 +18,49 @@
 .global syscall64_entry
 .type syscall64_entry, @function
 syscall64_entry:
-    /* Stos programu zapamietujemy w jednej komorce na krzyz, bo w tej
-       chwili nie mamy ani jednego wolnego rejestru: RAX niesie numer
-       wywolania, RCX adres powrotu, R11 flagi, a reszta to argumenty
-       albo rejestry programu. Przerwania sa tu zgaszone (SFMASK) i az
-       do przelozenia wartosci na wlasny stos nie ma zadnego wywolania,
-       wiec nikt tej komorki miedzy nami nie podmieni.
+    /* The program's stack is parked in a single scratch cell, because
+       at this moment there is not one free register: RAX carries the
+       call number, RCX the return address, R11 the flags, and the rest
+       are arguments or the program's own registers. Interrupts are off
+       here (SFMASK) and there is no call until the value is moved onto
+       our own stack, so nobody can swap that cell out from under us.
 
-       Wczesniej ta komorka trzymala stos programu przez CALE wywolanie
-       i to bylo bledem: wystarczylo, ze wywolanie uspilo zadanie,
-       a drugi proces wszedl do jadra w tym samym czasie - i pierwszy
-       wracal do ring 3 na cudzy stos. Teraz wartosc ladu je na stosie
-       jadra tego konkretnego zadania i nikt inny jej nie widzi. */
-    /* Stos jadra i komorka na stos programu naleza do RDZENIA, a nie do
-       calej maszyny: dwa rdzenie moga wejsc tu naprawde jednoczesnie
-       i jedna wspolna komorka znaczylaby, ze drugi wraca do ring 3 na
-       cudzy stos.
-       Instrukcja swapgs zamienia GS_BASE z KERNEL_GS_BASE - kazdy rdzen
-       ma w tym drugim wskaznik na SWOJ blok, ustawiony przy rozruchu.
-       To jedyny sposob, zeby dostac wskaznik bez ani jednego wolnego
-       rejestru i bez dotykania stosu programu, ktoremu nie ufamy. */
+       Earlier this cell held the program's stack for the WHOLE call,
+       and that was a bug: it was enough for a call to put the task to
+       sleep while another process entered the kernel at the same time -
+       and the first one returned to ring 3 on somebody else's stack.
+       Now the value lands on the kernel stack of that particular task
+       and nobody else sees it. */
+    /* The kernel stack and the scratch cell belong to the CORE, not to
+       the whole machine: two cores really can enter here at the same
+       time, and one shared cell would mean the second returns to
+       ring 3 on somebody else's stack.
+       The swapgs instruction exchanges GS_BASE with KERNEL_GS_BASE -
+       every core has a pointer to ITS OWN block in the latter, set at
+       startup. This is the only way to get that pointer without a
+       single free register and without touching the program's stack,
+       which we do not trust. */
     swapgs
-    movq %rsp, %gs:8                  /* stos programu na bok */
-    movq %gs:0, %rsp                  /* wlasny stos jadra tego rdzenia */
+    movq %rsp, %gs:8                  /* park the program's stack */
+    movq %gs:0, %rsp                  /* this core's own kernel stack */
 
-    /* Odtwarzamy DOKLADNIE taka ramke, jaka odklada przerwanie.
+    /* We rebuild EXACTLY the frame an interrupt would have pushed.
      *
-     * Instrukcja syscall nie odklada niczego - adres powrotu zostawia
-     * w RCX, flagi w R11 - wiec te piec slow dopisujemy sami. Kosztuje
-     * to kilkanascie instrukcji i powrot przez iretq zamiast sysretq,
-     * a daje jedna rzecz: jadro widzi wywolanie systemowe i przerwanie
-     * tak samo. Bez tego fork nie mialby skad wziac pelnego stanu
-     * programu, ktory ma powielic. */
+     * The syscall instruction pushes nothing - it leaves the return
+     * address in RCX and the flags in R11 - so we write those five
+     * words ourselves. It costs a dozen or so instructions and a return
+     * through iretq rather than sysretq, and it buys one thing: the
+     * kernel sees a system call and an interrupt the same way. Without
+     * it fork would have nowhere to take the full program state it is
+     * supposed to duplicate. */
     pushq $0x1B                  /* ss */
-    pushq %gs:8                  /* rsp programu */
-    swapgs                       /* GS wraca do programowego */
-    pushq %r11                   /* rflags zostawione przez syscall */
-    pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
-    pushq %rcx                   /* rip: adres powrotu */
-    pushq $0                     /* err_code - wywolanie go nie ma */
-    pushq $0                     /* int_no  - ani numeru wektora */
+    pushq %gs:8                  /* the program's rsp */
+    swapgs                       /* GS goes back to the program's */
+    pushq %r11                   /* rflags as left by syscall */
+    pushq $0x23                  /* cs: user code, RPL 3 */
+    pushq %rcx                   /* rip: return address */
+    pushq $0                     /* err_code - a call has none */
+    pushq $0                     /* int_no  - nor a vector number */
 
     pushq %rax
     pushq %rbx
@@ -74,18 +78,18 @@ syscall64_entry:
     pushq %r14
     pushq %r15
 
-    movq %rsp, %rdi              /* pierwszy argument: wskaznik na ramke */
+    movq %rsp, %rdi              /* first argument: pointer to the frame */
     call syscall64_handler
 
     jmp return_to_user_64_frame
 
 .size syscall64_entry, . - syscall64_entry
 
-/* Powrot do ring 3 z ramki lezacej pod RDI.
+/* Return to ring 3 from the frame pointed to by RDI.
  *
- * Uzywa tego dziecko fork-a: dostaje kopie ramki rodzica i wraca nia
- * do ring 3 tak, jakby samo wlasnie wykonalo wywolanie systemowe -
- * tyle ze z zerem w RAX. */
+ * This is what a fork child uses: it gets a copy of the parent's frame
+ * and returns through it into ring 3 as if it had just made the system
+ * call itself - only with zero in RAX. */
 .global return_to_user_64
 .type return_to_user_64, @function
 return_to_user_64:
@@ -107,19 +111,20 @@ return_to_user_64_frame:
     popq %rbx
     popq %rax
 
-    addq $16, %rsp               /* numer wektora i kod bledu */
+    addq $16, %rsp               /* vector number and error code */
     iretq
 
 .size return_to_user_64, . - return_to_user_64
 
-/* Wejscie w ring 3: iretq ze spreparowana ramka. Nie wraca.
-     rdi = adres pierwszej instrukcji, rsi = wierzcholek stosu programu,
-     rdx i rcx = wartosci, ktore program zastanie w RDI i RSI
-     (czyli argc i argv - dwa pierwsze argumenty konwencji wywolan) */
+/* Entering ring 3: iretq with a hand-built frame. Never returns.
+     rdi = address of the first instruction, rsi = top of the program
+     stack, rdx and rcx = the values the program will find in RDI and
+     RSI (that is argc and argv - the first two arguments of the
+     calling convention) */
 .global enter_ring3_64
 .type enter_ring3_64, @function
 enter_ring3_64:
-    movq $0x1B, %rax             /* dane uzytkownika, RPL 3 */
+    movq $0x1B, %rax             /* user data, RPL 3 */
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
@@ -127,16 +132,17 @@ enter_ring3_64:
 
     pushq $0x1B                  /* ss */
     pushq %rsi                   /* rsp */
-    pushq $0x202                 /* rflags z wlaczonymi przerwaniami */
-    pushq $0x23                  /* cs: kod uzytkownika, RPL 3 */
+    pushq $0x202                 /* rflags with interrupts enabled */
+    pushq $0x23                  /* cs: user code, RPL 3 */
     pushq %rdi                   /* rip */
 
     movq %rdx, %rdi              /* argc */
     movq %rcx, %rsi              /* argv */
 
-    /* Reszta rejestrow na zero. Program nie ma powodu ogladac tego,
-       co jadro w nich zostawilo - a zostawia tam adresy wlasnych
-       struktur, ktorych ring 3 nie powinien nawet znac. */
+    /* The remaining registers go to zero. The program has no reason to
+       see what the kernel left in them - and what it leaves there are
+       addresses of its own structures, which ring 3 should not even
+       know about. */
     xorl %eax, %eax
     xorl %ebx, %ebx
     xorl %ecx, %ecx
@@ -156,34 +162,36 @@ enter_ring3_64:
 
 .section .data
 .align 8
-/* Blok na rdzen: stos jadra (przesuniecie 0) i komorka na stos programu
-   (przesuniecie 8). Uklad musi zgadzac sie ze struct rdzen_syscall
-   w kernel64/syscall64.c - pilnuje tego tam _Static_assert. */
+/* Per-core block: the kernel stack (offset 0) and the scratch cell for
+   the program's stack (offset 8). The layout must match struct
+   core_syscall in kernel64/syscall64.c - a _Static_assert there
+   watches over it. */
 .global syscall64_bloki
 syscall64_bloki:
     .fill 8 * 16, 1, 0
 
-/* Kod, ktory ma zadzialac w ring 3.
+/* Code meant to run in ring 3.
  *
- * Lezy w obrazie jadra tylko po to, zeby go stamtad skopiowac do ramki
- * oznaczonej jako dostepna dla uzytkownika. Nie ma w nim ani jednego
- * adresu bezwzglednego, wiec zadziala pod dowolnym adresem.
+ * It sits in the kernel image only so that it can be copied out of
+ * there into a frame marked as user accessible. It contains not one
+ * absolute address, so it works wherever it lands.
  *
- * Najpierw pyta procesor, w ktorym pierscieniu naprawde jest - selektor
- * CS zna tylko on - i mowi to jadru. Potem prosi o zakonczenie. */
+ * First it asks the processor which ring it is really in - only the
+ * processor knows the CS selector - and tells the kernel. Then it asks
+ * to be terminated. */
 .section .rodata
 .align 16
 .global user_payload_start
 .global user_payload_end
 user_payload_start:
-    movw %cs, %ax                /* selektor kodu: dwa najnizsze bity
-                                    to poziom uprawnien */
+    movw %cs, %ax                /* code selector: the two lowest bits
+                                    are the privilege level */
     movzwq %ax, %rdi
-    movq $3, %rax                /* 3 = powiedz, w ktorym pierscieniu jestem */
+    movq $3, %rax                /* 3 = tell me which ring I am in */
     syscall
-    movq $2, %rax                /* 2 = koniec programu */
+    movq $2, %rax                /* 2 = end of program */
     syscall
-1:  jmp 1b                       /* jadro tu nie wroci */
+1:  jmp 1b                       /* the kernel never returns here */
 user_payload_end:
 
 .section .note.GNU-stack, "", @progbits

@@ -1,9 +1,9 @@
 #ifndef PROTONOS_KEYBOARD_H
 #define PROTONOS_KEYBOARD_H
 
-/* Klawisze bez odpowiednika w ASCII (strzalki, PgUp/PgDn, Home/End)
-   dostarczane sa jako kody sterujace - programy rozpoznaja je po
-   wartosci, a shell je ignoruje. */
+/* Keys with no ASCII equivalent (arrows, PgUp/PgDn, Home/End) are
+   delivered as control codes - programs recognise them by value and
+   the shell ignores them. */
 #define KEY_UP    0x11
 #define KEY_DOWN  0x12
 #define KEY_LEFT  0x13
@@ -13,33 +13,35 @@
 #define KEY_HOME  0x17
 #define KEY_END   0x18
 
-/* Ctrl+C: nie znak, tylko zadanie przerwania. Sterownik zamienia go
-   na SIGINT dla procesu trzymajacego konsole (zob. keyboard.c). */
+/* Ctrl+C: not a character but a request to interrupt. The driver turns
+   it into a SIGINT for the process holding the console (see keyboard.c). */
 #define KEY_INTR  0x03
 
-/* Instaluje handler IRQ1 i odmaskowuje przerwanie klawiatury */
+/* Installs the IRQ1 handler and unmasks the keyboard interrupt */
 void keyboard_init(void);
 
-/* Odbiorca znakow danej konsoli wirtualnej (shell tej konsoli).
-   Znak trafia tam tylko wtedy, gdy konsoli nie trzyma zaden proces. */
+/* The character sink of a given virtual console (that console's
+   shell). A character goes there only when no process holds the
+   console. */
 typedef void (*keyboard_char_handler_t)(char c);
 void keyboard_set_handler(int vc, keyboard_char_handler_t handler);
 
-/* Handler widocznej konsoli - pulpit oddaje mu klawisze, gdy zadne
-   okno nie ma fokusu */
+/* Handler of the visible console - the desktop hands keys to it when
+   no window has focus */
 keyboard_char_handler_t keyboard_console_handler(void);
 
-/* Pulpit przechwytuje wszystkie klawisze (tryb graficzny nie ma konsol) */
+/* The desktop grabs all keys (graphics mode has no consoles) */
 void keyboard_set_override(keyboard_char_handler_t handler);
 
-/* Znak z innego zrodla niz PS/2 (klawiatura USB) - dalsza droga taka sama */
+/* A character from a source other than PS/2 (a USB keyboard) - the
+   road onward is the same */
 void keyboard_inject(char c);
 void keyboard_inject_switch(int vc);
 
-/* Blokujący odczyt dla procesów (syscall read). Bieżące zadanie
-   przejmuje konsolę do swojej śmierci; zwraca >=1 przeczytanych
-   znaków (bez echa - echo robi czytający) albo -1, gdy czekanie
-   przerwał sygnał (proces wejdzie zaraz w procedurę obsługi). */
+/* Blocking read for processes (the read syscall). The current task
+   takes the console over until it dies; returns >=1 characters read
+   (without echo - the reader does the echo) or -1 when the wait was
+   interrupted by a signal (the process is about to enter a handler). */
 int keyboard_read(char *buf, uint32_t len);
 
 #endif

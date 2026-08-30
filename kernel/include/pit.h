@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-/* Programuje PIT na zadaną częstotliwość i odmaskowuje IRQ0 */
+/* Programs the PIT to a given frequency and unmasks IRQ0 */
 void pit_init(uint32_t frequency_hz);
 
-/* Liczba tyknięć od startu (przy 100 Hz: 1 tyknięcie = 10 ms) */
+/* Number of ticks since startup (at 100 Hz: 1 tick = 10 ms) */
 uint32_t pit_ticks(void);
 
 #endif

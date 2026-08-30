@@ -5,15 +5,15 @@
 
 #define ATA_SECTOR_SIZE 512
 
-/* Czy na pierwszej magistrali (master) jest dysk */
+/* Is there a disk on the first bus (master) */
 int ata_present(void);
 
-/* Pojemnosc dysku w sektorach (IDENTIFY DEVICE, LBA28).
-   0 = nie udalo sie odczytac. */
+/* Disk capacity in sectors (IDENTIFY DEVICE, LBA28).
+   0 = could not be read. */
 uint32_t ata_sectors(void);
 
-/* Odczyt/zapis pojedynczego sektora 512 B (LBA28, tryb PIO, polling).
-   Zwraca 0 przy sukcesie, -1 przy bledzie. */
+/* Read/write of a single 512 B sector (LBA28, PIO mode, polling).
+   Returns 0 on success, -1 on error. */
 int ata_read_sector(uint32_t lba, void *buf);
 int ata_write_sector(uint32_t lba, const void *buf);
 

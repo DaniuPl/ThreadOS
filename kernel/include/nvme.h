@@ -3,14 +3,15 @@
 
 #include <stdint.h>
 
-/* Sterownik NVMe (QEMU: -device nvme)
+/* NVMe driver (QEMU: -device nvme)
  *
- * Dysk podlaczony wprost do PCI Express, bez calego dziedzictwa ATA.
- * Nie ma tu rejestrow "wybierz dysk" ani ramek FIS - jest para
- * KOLEJEK w pamieci: my wkladamy polecenia do kolejki zgloszen,
- * kontroler odklada odpowiedzi do kolejki ukonczen. O tym, ze cos
- * doszlo, mowi dzwonek (rejestr doorbell), a o tym, ze cos wrocilo -
- * bit fazy w odpowiedzi.
+ * A disk plugged straight into PCI Express, without any of the ATA
+ * legacy. There are no "select drive" registers here and no FIS
+ * frames - there is a pair of QUEUES in memory: we put commands into
+ * the submission queue, the controller puts answers into the
+ * completion queue. That something has arrived is announced by a
+ * doorbell register, and that something has come back - by a phase bit
+ * in the answer.
  */
 
 int nvme_init(void);

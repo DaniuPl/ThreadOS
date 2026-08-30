@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Remapuje PIC: IRQ 0-15 na wektory 32-47 i maskuje wszystkie IRQ */
+/* Remaps the PIC: IRQ 0-15 onto vectors 32-47 and masks all IRQs */
 void pic_init(void);
 
 void pic_send_eoi(uint8_t irq);

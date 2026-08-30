@@ -1,48 +1,49 @@
 #ifndef PROTONOS_USBHC_H
 #define PROTONOS_USBHC_H
 
-/* Kontroler USB - warstwa wyboru
+/* USB host controller - the selection layer
  *
- * Tak samo jak blk.c wybiera miedzy ATA, AHCI i NVMe, a netdev.c
- * miedzy RTL8139 a e1000: wyzej nikogo nie obchodzi, ktory kontroler
- * siedzi w gniezdzie. Probujemy najpierw xHCI (nowsze plyty nie maja
- * juz nic innego), potem UHCI.
+ * Just like blk.c chooses between ATA, AHCI and NVMe, and netdev.c
+ * between RTL8139 and e1000: nobody above cares which controller sits
+ * in the slot. We try xHCI first (newer boards have nothing else any
+ * more), then UHCI.
  *
- * Granica biegnie tam, gdzie konczy sie ROZNICA. Reset portu, nadanie
- * urzadzeniu adresu i ustalenie rozmiaru pakietu punktu zerowego
- * wygladaja w obu kontrolerach zupelnie inaczej - w UHCI adres nadaje
- * sterownik zwyklym zapytaniem, w xHCI robi to kontroler przy okazji
- * przydzielania slotu. Wszystko to jest wiec po tej stronie granicy,
- * pod jednym slowem 'podlacz'. Powyzej zostaje juz tylko rozmowa
- * z urzadzeniem, ktora jest ta sama niezaleznie od kontrolera - i to
- * dlatego usbkbd.c nie wie, przez co mowi.
+ * The border runs where the DIFFERENCE ends. Resetting a port, giving
+ * a device an address and finding the endpoint zero packet size look
+ * completely different in the two controllers - in UHCI the driver
+ * assigns the address with an ordinary request, in xHCI the controller
+ * does it while allocating a slot. All of that is therefore on this
+ * side of the border, under the single word 'attach'. Above it there
+ * is only the conversation with the device, which is the same
+ * regardless of the controller - and that is why usbkbd.c does not
+ * know what it is talking through.
  */
 
-/* Szuka kontrolera i uruchamia go. 1 = gotowy. */
+/* Looks for a controller and starts it. 1 = ready. */
 int usbhc_init(void);
 
-/* Nazwa znalezionego kontrolera - do wypisania przy rozruchu */
+/* Name of the controller found - to be printed at startup */
 const char *usbhc_name(void);
 
-/* Ile portow ma kontroler */
+/* How many ports the controller has */
 int usbhc_ports(void);
 
-/* Podlacza urzadzenie z portu: reset, adres, rozmiar pakietu punktu
-   zerowego. Zwraca uchwyt urzadzenia (>= 0) albo -1, gdy na porcie
-   niczego nie ma albo nie dalo sie go obudzic. */
+/* Attaches the device on a port: reset, address, endpoint zero packet
+   size. Returns a device handle (>= 0) or -1 when there is nothing on
+   the port or it could not be woken. */
 int usbhc_attach(int port);
 
-/* Przesylka sterujaca do urzadzenia. 'setup' to 8 bajtow zapytania,
-   dane moga isc w obie strony (in=1 czyta). Zwraca liczbe bajtow
-   danych albo -1. */
+/* A control transfer to a device. 'setup' is the 8-byte request, data
+   may go either way (in=1 reads). Returns the number of data bytes
+   or -1. */
 int usbhc_control(int dev, const void *setup, void *data, int len, int in);
 
-/* Zglasza punkt koncowy przerwaniowy do uzycia. xHCI musi go poznac,
-   zanim cokolwiek nim posle; UHCI tylko zapamietuje. 0 = gotowe. */
+/* Declares an interrupt endpoint for use. xHCI has to learn about it
+   before anything is sent through it; UHCI only remembers. 0 = done. */
 int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval);
 
-/* Jednorazowe zajrzenie do punktu przerwaniowego. Zwraca liczbe
-   bajtow, 0 gdy urzadzenie nie ma nic do powiedzenia, -1 przy bledzie. */
+/* A single look into an interrupt endpoint. Returns the number of
+   bytes, 0 when the device has nothing to say, -1 on error. */
 int usbhc_int_in(int dev, int ep, void *data, int len);
 
 #endif

@@ -4,12 +4,12 @@
 #include <stdint.h>
 #include "multiboot.h"
 
-/* Initrd w formacie PIRD (scripts/mkinitrd.py):
-   "PIRD" | u32 liczba | wpisy {name[16], u32 offset, u32 size} | dane */
+/* An initrd in the PIRD format (scripts/mkinitrd.py):
+   "PIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data */
 
 void initrd_init(const struct multiboot_info *mbi);
 uint32_t initrd_file_count(void);
 const void *initrd_find(const char *name, uint32_t *size);
-void initrd_ls(void);   /* komenda 'ls' w shellu */
+void initrd_ls(void);   /* the 'ls' shell command */
 
 #endif

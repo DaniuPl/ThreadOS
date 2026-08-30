@@ -4,22 +4,22 @@
 #include <stdint.h>
 #include "keyboard.h"
 
-/* Tlumaczenie scancode'ow PS/2 (zestaw 1) na znaki
+/* Translating PS/2 scancodes (set 1) into characters
  *
- * Sam automat: bierze bajt po bajcie i mowi, co z niego wyszlo. Nie wie
- * nic ani o konsolach, ani o zadaniach, ani o pulpicie - i dlatego
- * uzywaja go oba jadra, 32- i 64-bitowe. Decyzja, DOKAD trafi znak,
- * nalezy do wolajacego.
+ * A pure state machine: it takes byte after byte and says what came
+ * out. It knows nothing about consoles, tasks or the desktop - and
+ * that is why both kernels, 32- and 64-bit, use it. The decision WHERE
+ * a character goes belongs to the caller.
  *
- * Stan (wcisniety Shift, Ctrl, Alt, prefiks klawisza rozszerzonego)
- * siedzi w srodku, bo rozklada sie na kilka kolejnych bajtow.
+ * The state (Shift, Ctrl, Alt held down, the extended-key prefix) sits
+ * inside, because it spreads over several consecutive bytes.
  */
 
-#define KBD_NOTHING  0      /* prefiks, modyfikator albo puszczenie klawisza */
-#define KBD_CHAR     1      /* znak ASCII albo kod sterujacy KEY_* */
-#define KBD_FKEY     2      /* Alt + klawisz funkcyjny (numer w *fkey) */
+#define KBD_NOTHING  0      /* a prefix, a modifier or a key release */
+#define KBD_CHAR     1      /* an ASCII character or a KEY_* control code */
+#define KBD_FKEY     2      /* Alt + a function key (the number in *fkey) */
 
-/* Podaje jeden bajt ze sterownika. Zwraca ktoras ze stalych wyzej. */
+/* Feeds one byte from the driver. Returns one of the constants above. */
 int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey);
 
 #endif
