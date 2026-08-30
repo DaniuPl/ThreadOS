@@ -1,14 +1,15 @@
-/* Shell jadra 64-bitowego
+/* The 64-bit kernel's shell
  *
- * Zwykly watek jadra: czyta znaki z klawiatury, sklada z nich linie
- * i wykonuje polecenia. Nie ma w nim ani przerwan, ani stanu globalnego
- * poza wlasnym buforem linii - to zwykla petla, ktora akurat dziala
- * rownolegle z reszta systemu.
+ * An ordinary kernel thread: it reads characters from the keyboard,
+ * assembles lines out of them and runs commands. There are no
+ * interrupts in it and no global state beyond its own line buffer -
+ * it is a plain loop that happens to run in parallel with the rest of
+ * the system.
  *
- * Polecen jest tyle, ile jadro naprawde umie. Kazde z nich pokazuje
- * cos, czego nie da sie zobaczyc inaczej niz pytajac system w biegu -
- * i to jest cala roznica miedzy shellem a scenariuszem wypisanym przy
- * starcie.
+ * There are as many commands as the kernel really knows how to do.
+ * Each of them shows something that cannot be seen any other way than
+ * by asking the system while it runs - and that is the whole
+ * difference between a shell and a script printed out at startup.
  */
 
 #include <stdint.h>
@@ -44,8 +45,8 @@
 
 #define LINE_MAX 80
 
-/* Czy linia zaczyna sie od danego slowa? (strncmp jadro nie ma -
-   i nie ma po co miec dla jednego miejsca) */
+/* Does the line start with the given word? (the kernel has no strncmp
+   - and has no reason to have one for a single place) */
 static int starts_with(const char *s, const char *prefix)
 {
     while (*prefix)
@@ -93,9 +94,9 @@ static void cmd_mem(void)
         printk("Wymiana: brak pliku wymiany\n");
 }
 
-/* Zapis i odczyt sektora - jedyny sposob, zeby sprawdzic dysk
-   naprawde, a nie tylko to, ze kontroler sie przedstawil.
-   Ostatni sektor: nic tam jeszcze nie lezy. */
+/* Writing and reading a sector - the only way to check the disk for
+   real rather than merely that the controller introduced itself.
+   The last sector: nothing lies there yet. */
 static void cmd_disk(void)
 {
     if (!blk_present()) {
@@ -129,11 +130,11 @@ static void cmd_disk(void)
     printk("disk: sektor %u zapisany i odczytany, roznic %d\n", lba, differ);
 }
 
-/* --- System plikow ------------------------------------------------
+/* --- File system --------------------------------------------------
  *
- * Trzy polecenia wystarcza, zeby sprawdzic, czy plik naprawde lezy na
- * dysku, a nie tylko w pamieci: zapisac, wypisac, zobaczyc na liscie.
- * Czwarty dowod przychodzi sam - po ponownym uruchomieniu.
+ * Three commands are enough to check whether a file really lies on the
+ * disk and not only in memory: write it, print it, see it in the
+ * listing. The fourth proof arrives by itself - after a restart.
  */
 static void cmd_pwd(void)
 {
@@ -149,7 +150,8 @@ static void cmd_fls(void)
         return;
     }
 
-    /* Wypisujemy katalog, w ktorym stoi shell - a nie zawsze glowny */
+    /* We list the directory the shell is standing in - not always the
+   root one */
     char name[FS_NAME_MAX + 1];
     uint32_t size = 0;
     int dir = 0;
@@ -183,7 +185,7 @@ static void cmd_cat(const char *name)
         printk("\n");
 }
 
-/* write <plik> <tresc> - reszta linii idzie do pliku */
+/* write <file> <text> - the rest of the line goes into the file */
 static void cmd_write(char *rest)
 {
     if (!fs_ready()) {
@@ -198,14 +200,14 @@ static void cmd_write(char *rest)
         printk("write: podaj nazwe i tresc\n");
         return;
     }
-    *body++ = '\0';                 /* nazwa konczy sie tu */
+    *body++ = '\0';                 /* the name ends here */
     while (*body == ' ')
         body++;
 
     uint32_t len = 0;
     while (body[len])
         len++;
-    body[len++] = '\n';             /* plik tekstowy konczy sie linia */
+    body[len++] = '\n';             /* a text file ends with a newline */
 
     int slot = fs_open(task64_cwd(), rest, 1);
     if (slot < 0 || fs_truncate(slot) < 0 ||
@@ -215,16 +217,16 @@ static void cmd_write(char *rest)
         printk("write: '%s' zapisany (%u B)\n", rest, len);
 }
 
-/* smp - rozdzielenie liczenia na wszystkie rdzenie
+/* smp - spreading the counting across all cores
  *
- * Kazda jednostka pracy liczy sume kontrolna kawalka ciagu
- * pseudolosowego - roboty na tyle, zeby rdzen mial co robic, i na
- * tyle prostej, zeby wynik dalo sie sprawdzic.
+ * Every work item computes a checksum over a piece of a pseudorandom
+ * sequence - enough work for a core to have something to do, and
+ * simple enough that the result can be verified.
  *
- * Wynik porownujemy z policzonym na jednym rdzeniu. Zgadza sie, gdy
- * jednostki policzono dokladnie raz kazda i nikt nie zadeptal cudzej
- * komorki - a to jest wlasciwe pytanie o wspolbieznosc, nie to, czy
- * cos sie w ogole policzylo.
+ * We compare the result with one computed on a single core. It matches
+ * when every item was computed exactly once and nobody trampled
+ * somebody else's cell - and that is the right question to ask about
+ * concurrency, not whether anything got computed at all.
  */
 
 #define SMP_UNITS 64
@@ -232,8 +234,9 @@ static void cmd_write(char *rest)
 
 static uint32_t smp_results[SMP_UNITS];
 
-/* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
-   numeru, wiec wynik nie zalezy od tego, ktory rdzen go policzyl */
+/* A linear congruential generator - always the same sequence for a
+   given number, so the result does not depend on which core computed
+   it */
 static uint32_t smp_run_chunk(uint32_t number)
 {
     uint32_t stan = number * 2654435761u + 12345u;
@@ -276,21 +279,23 @@ static void cmd_smp(void)
            total == pattern ? "zgadza sie" : "NIE ZGADZA SIE");
     printk("Liczylo rdzeni: %d\n", smp_workers());
 
-    /* Wlasny zegar kazdego rdzenia. Rdzen rozruchowy chodzi z PIT
-       i tu ma zero - wtorne licza swoje tykniecia w lokalnym APIC,
-       i to jest jedyny dowod na to, ze w ogole dostaja przerwania. */
+    /* Every core's own clock. The bootstrap core runs off the PIT and
+       has zero here - the secondary ones count their own ticks in the
+       local APIC, and that is the only proof that they receive
+       interrupts at all. */
     printk("Zegary rdzeni:");
     for (int i = 0; i < smp_cpus(); i++)
         printk(" rdzen%d=%u", i, smp_ticks(i));
     printk("\n");
 }
 
-/* cp <zrodlo> <cel> - przepisanie pliku na dysk
+/* cp <source> <target> - copying a file onto the disk
  *
- * Zrodlo szukamy tam, gdzie szuka go 'run': najpierw w initrd, potem
- * na dysku. Dzieki temu program wgrany razem z jadrem da sie przeniesc
- * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad,
- * takze wtedy, gdy w initrd go juz nie ma. */
+ * We look for the source where 'run' looks for it: first in the
+ * initrd, then on the disk. Thanks to that a program shipped together
+ * with the kernel can be moved onto the disk with a single command -
+ * and run from there from then on, including when it is no longer in
+ * the initrd. */
 static void cmd_cp(char *rest)
 {
     if (!fs_ready()) {
@@ -305,7 +310,7 @@ static void cmd_cp(char *rest)
         printk("cp: podaj zrodlo i cel, np. 'cp hello64 hello64'\n");
         return;
     }
-    *dst++ = '\0';                    /* nazwa zrodla konczy sie tu */
+    *dst++ = '\0';                    /* the source name ends here */
     while (*dst == ' ')
         dst++;
     if (!*dst) {
@@ -321,8 +326,8 @@ static void cmd_cp(char *rest)
         return;
     }
 
-    /* fs_write_at oddaje LICZBE zapisanych bajtow, nie zero - plik
-       skrocony w polowie tez trzeba uznac za bledny */
+    /* fs_write_at returns the NUMBER of bytes written, not zero - a
+       file cut off halfway has to count as an error too */
     int slot = fs_open(task64_cwd(), dst, 1);
     int ok = slot >= 0 && fs_truncate(slot) >= 0 &&
              fs_write_at(slot, 0, image, size) == (int)size;
@@ -334,12 +339,12 @@ static void cmd_cp(char *rest)
         printk("cp: nie udalo sie zapisac '%s'\n", dst);
 }
 
-/* Rysunek sprawdzajacy tryb graficzny.
+/* A drawing that checks graphics mode.
  *
- * Cztery prostokaty w rogach, ramka i napis - tyle wystarczy, zeby
- * bylo widac, czy kolory trafiaja tam, gdzie trzeba, i czy piksel
- * o wspolrzednych (x, y) laduje pod (x, y). Zle policzony bajt na
- * piksel widac tu od razu: obraz rozjezdza sie w skos.
+ * Four rectangles in the corners, a frame and a caption - that is
+ * enough to see whether the colours land where they should and
+ * whether the pixel at (x, y) ends up at (x, y). A wrongly computed
+ * bytes-per-pixel shows up here immediately: the image skews.
  */
 static void cmd_gfx(void)
 {
@@ -349,19 +354,18 @@ static void cmd_gfx(void)
     }
     int w = video_w(), h = video_h();
 
-    /* Komunikat PRZED rysunkiem: konsola i rysunek dziela ten sam
-       bufor, a kazdy wypis przerysowuje ja w calosci - wiec wszystko,
-       co napisane po rysunku, wchodzi na niego. */
+    /* The message goes BEFORE the drawing: the console and the drawing
+       share the same buffer and every print redraws it in full - so
+       anything written after the drawing lands on top of it. */
     printk("gfx: rysuje %ux%u, %u bitow na piksel\n",
            (uint32_t)w, (uint32_t)h, (uint32_t)fbcon_bpp());
 
-    /* Paleta video.c ma zdefiniowane indeksy 0-5, a nie szesnascie
-       kolorow trybu tekstowego: 1 czerwony, 2 zielony, 3 niebieski,
-       4 bialy, 5 zolty. */
-    video_clear(3);                                    /* niebieskie tlo */
-    video_fill_rect(0, 0, w / 4, h / 4, 1);            /* lewy gorny  */
-    video_fill_rect(w - w / 4, 0, w / 4, h / 4, 2);    /* prawy gorny */
-    video_fill_rect(0, h - h / 4, w / 4, h / 4, 5);    /* lewy dolny  */
+    /* video.c's palette defines indices 0-5, not the sixteen colours of
+       text mode: 1 red, 2 green, 3 blue, 4 white, 5 yellow. */
+    video_clear(3);                                    /* blue background */
+    video_fill_rect(0, 0, w / 4, h / 4, 1);            /* top left     */
+    video_fill_rect(w - w / 4, 0, w / 4, h / 4, 2);    /* top right    */
+    video_fill_rect(0, h - h / 4, w / 4, h / 4, 5);    /* bottom left  */
     video_fill_rect(w - w / 4, h - h / 4, w / 4, h / 4, 4);
 
     for (int x = 0; x < w; x++) {
@@ -376,7 +380,7 @@ static void cmd_gfx(void)
     video_present();
 }
 
-/* date - godzina z zegara plyty glownej */
+/* date - the time from the motherboard clock */
 static void cmd_date(void)
 {
     struct rtc_time t;
@@ -392,7 +396,8 @@ static void cmd_uptime(void)
     printk("Uptime: %u s (%u tyknac po 10 ms)\n", t / 100, t);
 }
 
-/* Argument polecenia: pierwsze slowo za nazwa, bez spacji przed nim */
+/* The command's argument: the first word after the name, with no
+   space before it */
 static const char *argument(const char *line, int cmd_len)
 {
     int i = cmd_len;
@@ -468,9 +473,9 @@ static void execute(const char *line)
         else
             printk("write: podaj nazwe i tresc\n");
     } else if (!strcmp(line, "pulpit")) {
-        /* Przejscie w tryb graficzny jest jednokierunkowe: od tej
-           chwili klawiature przejmuje pulpit, a konsola tekstowa
-           przestaje byc widoczna */
+        /* Switching to graphics mode is one-way: from this moment the
+           desktop takes over the keyboard and the text console stops
+           being visible */
         printk("Pulpit startuje - konsola znika\n");
         desktop_start();
     } else if (!strcmp(line, "gfx")) {
@@ -480,8 +485,8 @@ static void execute(const char *line)
     } else if (!strcmp(line, "arp")) {
         net_arp_dump();
     } else if (starts_with(line, "dns ")) {
-        /* Reczna zmiana serwera nazw - DHCP podaje swoj, ale nie
-           zawsze ten jest tym, o ktory chodzi */
+        /* Setting the name server by hand - DHCP supplies one, but it is
+           not always the one that was meant */
         const char *addr = argument(line, 4);
         uint32_t ip = 0;
         if (!addr || !net_parse_ip(addr, &ip)) {
@@ -511,8 +516,9 @@ static void execute(const char *line)
         vga_clear();
     } else if (!strcmp(line, "reboot")) {
         printk("Restart...\n");
-        /* Gdy tablice ACPI nie maja rejestru resetu, zostaje sposob
-           starszy od nich: impuls przez kontroler klawiatury. */
+        /* When the ACPI tables have no reset register, there is a way
+           older than they are: a pulse through the keyboard
+           controller. */
         if (!acpi_reboot())
             outb(0x64, 0xFE);
     } else if (!strcmp(line, "poweroff")) {
@@ -521,10 +527,10 @@ static void execute(const char *line)
         printk("poweroff: nie udalo sie - "
                "mozna wylaczyc zasilanie recznie\n");
     } else if (starts_with(line, "runw ")) {
-        /* Jak 'run', ale programowi wolno biec na kazdym rdzeniu -
-           i nie czekamy na niego, zeby dalo sie puscic kilka naraz.
-           Jego strona jadrowa i tak chodzi pod wielkim zamkiem;
-           rownolegle idzie liczenie w pierscieniu 3. */
+        /* Like 'run', but the program may run on any core - and we do not
+           wait for it, so that several can be started at once. Its
+           kernel side runs under the big lock anyway; what goes in
+           parallel is the counting in ring 3. */
         const char *name = argument(line, 5);
         if (!name) {
             printk("runw: podaj nazwe programu (zobacz 'ls')\n");
@@ -549,7 +555,7 @@ static void execute(const char *line)
             printk("run: podaj nazwe programu (zobacz 'ls')\n");
             return;
         }
-        /* Nazwa to pierwsze slowo, reszta to argumenty */
+        /* The name is the first word, the rest are arguments */
         static char prog[16];
         int pn = 0;
         while (name[pn] && name[pn] != ' ' && pn < (int)sizeof(prog) - 1) {
@@ -564,8 +570,9 @@ static void execute(const char *line)
                    "(zobacz 'ls' i 'fls')\n", name);
             return;
         }
-        /* Reszta linii to argumenty programu - shell tylko dzieli
-           ja na slowa, a co z nich wyniknie, jest juz sprawa programu */
+        /* The rest of the line is the program's arguments - the shell
+           only splits it into words, and what comes of them is the
+           program's business */
         static struct args64 args;
         args.argc = 0;
         for (int i = 4; line[i] && args.argc < ARG_MAX; ) {
@@ -591,10 +598,10 @@ static void execute(const char *line)
             printk("run: nie udalo sie uruchomic '%s'\n", name);
             return;
         }
-        /* Shell czeka na swoje dziecko - tak samo jak zrobilby to
-           program przez wywolanie systemowe. Przez ten czas nie
-           odpowiada, i tak ma byc. */
-        keyboard64_set_intr_target(id);   /* od teraz Ctrl+C idzie do niego */
+        /* The shell waits for its child - exactly as a program would do
+           through a system call. It does not respond in the meantime,
+           and that is how it should be. */
+        keyboard64_set_intr_target(id);   /* from now on Ctrl+C goes to it */
         int code = 0;
         int done = task64_wait(&code);
         keyboard64_set_intr_target(-1);
@@ -615,17 +622,17 @@ static void execute(const char *line)
 static void shell_thread(void *arg)
 {
     int vc = (int)(long)arg;
-    task64_set_vc(vc);          /* od teraz piszemy na swojej konsoli */
+    task64_set_vc(vc);          /* from now on we write on our own console */
 
-    /* Wiersz polecenia jest wlasnoscia watku, nie jadra: kazda konsola
-       ma wlasny shell, wiec kazdy ma i wlasny bufor - na wlasnym stosie,
-       bez tablic indeksowanych numerem konsoli. */
+    /* The command line belongs to the thread, not to the kernel: every
+       console has its own shell, so every one has its own buffer too -
+       on its own stack, with no tables indexed by console number. */
     char line[LINE_MAX];
     int line_len = 0;
 
-    /* Pierwsza konsola dostaje pelne powitanie ze spisem polecen,
-       pozostale krotka notke: cztery spisy pod rzad na porcie
-       szeregowym nikomu nie sa potrzebne. */
+    /* The first console gets a full greeting with the command list, the
+       others a short note: four listings in a row on the serial port
+       are of no use to anyone. */
     if (vc == 0) {
         printk("\n");
         cmd_help();
@@ -652,7 +659,7 @@ static void shell_thread(void *arg)
             line[line_len++] = c;
             printk("%c", c);
         }
-        /* Klawisze sterujace (strzalki, Ctrl+C) shell na razie mija */
+        /* Control keys (arrows, Ctrl+C) are skipped by the shell for now */
     }
 }
 

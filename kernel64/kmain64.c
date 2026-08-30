@@ -1,14 +1,14 @@
-/* ProtonOS 64 - pierwszy krok portu na tryb dlugi
+/* ProtonOS 64 - the first step of the port to long mode
  *
- * Do tego miejsca procesor doszedl juz przez boot64/boot64.S: ma
- * wlaczony tryb dlugi, wlasna tablice deskryptorow i pierwsze cztery
- * gigabajty zamapowane identycznosciowo stronami po 2 MiB.
+ * By this point the processor has come all the way through
+ * boot64/boot64.S: long mode is on, it has its own descriptor table
+ * and the first four gigabytes mapped one to one with 2 MiB pages.
  *
- * Ten plik jest jeszcze szkieletem. Wazne jest to, czego tu NIE MA:
- * zadnej kopii kodu z jadra 32-bitowego. Wypisywanie, konsola na
- * buforze obrazu, odczyt znacznikow Multiboota 2 i obsluga lancuchow
- * to te same pliki, kompilowane drugi raz - roznice miedzy trybami
- * zamykaja sie w naglowku io.h i w kilku rzutowaniach.
+ * This file is still a skeleton. What matters is what is NOT here:
+ * not a single copy of code from the 32-bit kernel. Printing, the
+ * framebuffer console, reading Multiboot 2 tags and string handling
+ * are the same files, compiled a second time - the differences
+ * between the modes fit inside the io.h header and a few casts.
  */
 
 #include <stdint.h>
@@ -49,8 +49,8 @@
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
 
-/* Watki demonstracyjne: dwa liczace bez konca i jeden, ktory sam sie
-   konczy - po to, zeby bylo widac, ze zombie znika z listy. */
+/* Demonstration threads: two counting forever and one that ends by
+   itself - so that a zombie can be seen disappearing from the list. */
 static volatile uint32_t counter_a, counter_b;
 static volatile int mortal_done;
 
@@ -79,16 +79,17 @@ static void mortal(void *arg)
     mortal_done = 1;
 }
 
-/* Watek, ktory schodzi do ring 3.
+/* A thread that drops down to ring 3.
  *
- * Kod programu lezy w obrazie jadra, ale ring 3 nie ma prawa go tam
- * czytac - kopiujemy go wiec do swiezej ramki i mapujemy ja jako
- * dostepna dla uzytkownika. Stos programu to druga taka ramka.
+ * The program code lies in the kernel image, but ring 3 has no right
+ * to read it there - so we copy it into a fresh frame and map that
+ * frame as user-accessible. The program stack is a second such frame.
  *
- * Ze stosem jadra jest inaczej niz przy bramce przerwania: instrukcja
- * syscall stosu nie przelacza, wiec adres wlasnego stosu trzeba
- * procesorowi podac z gory - i to dwa razy, bo przerwanie z ring 3
- * bierze go skad indziej (z TSS) niz wywolanie systemowe. */
+ * The kernel stack works differently than with an interrupt gate: the
+ * syscall instruction does not switch stacks, so the processor has to
+ * be told the address of our own stack up front - and twice, because
+ * an interrupt from ring 3 takes it from somewhere else (from the TSS)
+ * than a system call does. */
 extern const uint8_t user_payload_start[], user_payload_end[];
 
 #define USER_CODE_VA  0x0000000040000000ULL
@@ -108,33 +109,34 @@ static void ring3_thread(void *arg)
     uint64_t len = (uint64_t)(user_payload_end - user_payload_start);
     memcpy((void *)(uintptr_t)code, user_payload_start, (uint32_t)len);
 
-    /* Kod bez prawa zapisu, stos bez prawa wykonywania - jedno i drugie
-       ring 3 widzi, ale zadne nie jest jednoczesnie i pisane, i wykonywane */
+    /* Code with no write permission, stack with no execute permission -
+       ring 3 sees both, but neither is written and executed at once */
     if (paging64_map(USER_CODE_VA, code, PG_USER) < 0 ||
         paging64_map(USER_STACK_VA, stack, PG_USER | PG_WRITE | PG_NX) < 0) {
         printk("[ !! ] Ring 3: nie da sie zmapowac programu\n");
         task64_exit();
     }
 
-    /* Wierzcholek wlasnego stosu - stad jadro wystartuje przy kazdym
-       wejsciu z ring 3 */
+    /* Top of our own stack - the kernel starts here on every entry
+       from ring 3 */
     uint64_t kstack;
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
-    task64_enter_space(0, kstack & ~0xFULL);   /* przestrzen jadra */
+    task64_enter_space(0, kstack & ~0xFULL);   /* kernel space */
 
     enter_ring3_64(USER_CODE_VA, USER_STACK_VA + PAGE_SIZE - 16, 0, 0);
 }
 
-/* Watek, ktory uruchamia PROGRAM Z PLIKU.
+/* A thread that runs a PROGRAM FROM A FILE.
  *
- * Roznica wzgledem watku wyzej jest zasadnicza, choc konczy sie tym
- * samym skokiem: tam kod lezal w obrazie jadra, tutaj jadro dostaje
- * plik, ktorego nie widzialo w czasie budowy, i wszystkiego - gdzie
- * zaczac, co zaladowac, z jakimi prawami - dowiaduje sie z naglowka
- * ELF. To jest ta granica, za ktora system zaczyna uruchamiac cudze
- * programy, a nie wlasne kawalki siebie. */
-/* Uruchamia program i czeka, az sie skonczy - sam albo zabity przez
-   jadro. Zwraca 1, gdy w ogole ruszyl. */
+ * The difference from the thread above is fundamental, even though it
+ * ends with the same jump: there the code lay in the kernel image,
+ * here the kernel is handed a file it never saw at build time, and
+ * everything - where to start, what to load, with what permissions -
+ * it learns from the ELF header. This is the line beyond which the
+ * system starts running somebody else's programs rather than pieces
+ * of itself. */
+/* Runs a program and waits for it to finish - on its own or killed by
+   the kernel. Returns 1 if it started at all. */
 static int run_program(const char *name)
 {
     syscall64_forget_user();
@@ -150,8 +152,8 @@ static int run_program(const char *name)
     return 1;
 }
 
-/* Czy procesor naprawde jest w trybie dlugim? Pyta o to sam siebie:
-   bit LMA w rejestrze EFER ustawia procesor, a nie my. */
+/* Is the processor really in long mode? It asks itself: the LMA bit in
+   the EFER register is set by the processor, not by us. */
 static int long_mode_active(void)
 {
     uint32_t low, high;
@@ -165,9 +167,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     const struct multiboot_info *mbi = mb2_info(magic, info_addr);
 
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
-    /* Bufor od loadera przejmuje video: ono ustawia i konsole
-       (przez fbcon), i wlasny stan do rysowania. Dzieki temu tryb
-       tekstowy i graficzny to ten sam bufor, tylko inaczej uzyty. */
+    /* The loader's buffer is taken over by video: it sets up both the
+       console (through fbcon) and its own drawing state. That way text
+       mode and graphics mode are the same buffer, only used
+       differently. */
     int fb_taken = lfb && video_adopt_lfb(lfb->addr, lfb->pitch,
                                           (int)lfb->width,
                                           (int)lfb->height,
@@ -210,23 +213,23 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     else
         printk("[ !! ] Loader nie dal bufora obrazu - tylko port szeregowy\n");
 
-    /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
-       tablice ACPI podaje wtedy wylacznie loader. Same tablice czyta
-       sie pozniej: leza wysoko i trzeba je najpierw dokleic do
-       mapowania, a stronicowania jeszcze tu nie ma. */
+    /* Under UEFI there is no BIOS memory to search - the pointer to the
+       ACPI tables is then supplied by the loader alone. The tables
+       themselves are read later: they lie high up and first have to be
+       added to the mapping, and there is no paging here yet. */
     if (mb2_rsdp()) {
         printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());
         acpi_set_rsdp(mb2_rsdp());
     }
 
-    /* --- Pamiec ------------------------------------------------- */
+    /* --- Memory ------------------------------------------------- */
     pmm_init(mbi);
     printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
-    /* Bufor obrazu lezy wysoko, poza pamiecia opisana przy starcie -
-       trzeba go dokleic do mapowania, zanim cokolwiek na nim
-       napiszemy */
+    /* The framebuffer lies high up, outside the memory described at
+       startup - it has to be added to the mapping before we write
+       anything to it */
     if (fbcon_have())
         video_map_lfb();
 
@@ -241,11 +244,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_nx_enabled() ? "wlaczony" : "wylaczony");
 
-    /* Mapowanie drobne: ramka wstawiona wysoko, daleko poza obszar
-       opisany identycznosciowo. Zapis i odczyt przez ten adres to
-       dowod, ze cala czterostopniowa sciezka dziala. */
+    /* Fine-grained mapping: a frame placed high up, far beyond the area
+       described one to one. Writing and reading through that address
+       proves the whole four-level path works. */
     uint32_t frame = pmm_alloc_frame();
-    uint64_t high = 0x0000000200000000ULL;      /* osiem gigabajtow */
+    uint64_t high = 0x0000000200000000ULL;      /* eight gigabytes */
     if (frame && paging64_map(high, frame, PG_WRITE | PG_NX) == 0) {
         volatile uint64_t *p = (volatile uint64_t *)(uintptr_t)high;
         *p = 0x0123456789ABCDEFULL;
@@ -258,8 +261,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     }
 
     heap_init();
-    /* Szybki sprawdzian sterty: przydziel, zapisz, zwolnij i sprawdz,
-       czy pamiec wraca do puli - ten sam test, co w jadrze 32-bitowym */
+    /* A quick heap check: allocate, write, free and see whether the
+       memory returns to the pool - the same test as in the 32-bit
+       kernel */
     char *a = kmalloc(1024);
     char *b = kmalloc(4096);
     int heap_ok = a && b && a != b;
@@ -277,7 +281,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            heap_ok ? "kmalloc/kfree dzialaja" : "BLAD", used,
            heap_used_bytes());
 
-    /* --- Przerwania --------------------------------------------- */
+    /* --- Interrupts --------------------------------------------- */
     idt64_init();
     printk("[ OK ] IDT zaladowana (wyjatki 0-31, IRQ 32-47)\n");
 
@@ -290,21 +294,23 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     __asm__ volatile("sti");
     printk("[ OK ] Przerwania wlaczone (sti)\n");
 
-    /* Wyjatek-pulapka: sprawdza cala droge - stub, tablice, ramke
-       rejestrow i powrot przez iretq - nie zatrzymujac systemu */
+    /* A trap exception: it exercises the whole path - stub, tables,
+       register frame and the return through iretq - without stopping
+       the system */
     __asm__ volatile("int $3");
 
-    /* Timer musi tykac sam z siebie: czekamy na przerwania i patrzymy,
-       czy licznik rusza. To dowod, ze przerwania sprzetowe dochodza. */
+    /* The timer has to tick on its own: we wait for interrupts and watch
+       whether the counter moves. That is the proof that hardware
+       interrupts arrive. */
     uint32_t start = pit_ticks();
     for (int i = 0; i < 200; i++)
         __asm__ volatile("hlt");
     printk("[ OK ] Timer tyka: %u -> %u tyknac\n", start, pit_ticks());
 
-    /* --- Watki -------------------------------------------------- */
-    /* SSE trzeba wlaczyc PRZED schedulerem: pierwsze zadanie od razu
-       dostaje miejsce na stan rejestrow, a jego wzorzec bierze sie
-       ze swiezo zainicjowanej jednostki */
+    /* --- Threads ------------------------------------------------ */
+    /* SSE has to be enabled BEFORE the scheduler: the first task gets
+       room for the register state right away, and its pattern comes
+       from a freshly initialized unit */
     if (fpu64_init())
         printk("[ OK ] Jednostka zmiennoprzecinkowa i SSE wlaczone\n");
 
@@ -314,9 +320,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     task64_create("krotki", mortal, 0);
     printk("[ OK ] Scheduler: %d zadania na liscie\n", task64_count());
 
-    /* Watek glowny zasypia; procesor musi w tym czasie pojsc do innych.
-       Gdyby przelaczanie kontekstu bylo zepsute, liczniki zostalyby
-       na zerze albo system zawisl. */
+    /* The main thread goes to sleep; the processor has to move on to the
+       others meanwhile. If context switching were broken, the counters
+       would stay at zero or the system would hang. */
     task64_sleep(600);
     printk("[ OK ] Watki licza rownolegle: A=%u, B=%u\n",
            counter_a, counter_b);
@@ -333,13 +339,13 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     task64_create("ring3", ring3_thread, 0);
     task64_sleep(200);
 
-    /* Selektor kodu zna tylko procesor - dwa najnizsze bity mowia,
-       w ktorym pierscieniu naprawde dzialal program */
+    /* Only the processor knows the code selector - the two lowest bits
+       say which ring the program really ran in */
     uint32_t cs = syscall64_user_cs();
     printk("[ OK ] Program w ring 3: %s, cs=%x, pierscien %u\n",
            syscall64_user_ran() ? "odezwal sie" : "MILCZY", cs, cs & 3);
 
-    /* --- Programy z initrd ------------------------------------- */
+    /* --- Programs from the initrd ------------------------------- */
     initrd_init(mbi);
     if (!initrd_file_count())
         printk("[ !! ] initrd: brak programow - nie ma czego uruchomic\n");
@@ -347,26 +353,27 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ OK ] initrd: %u plik(ow) od loadera\n",
                initrd_file_count());
 
-    /* Biblioteka wspoldzielona musi byc gotowa, zanim ruszy pierwszy
-       program - jej ramki sa wspolne dla wszystkich procesow */
+    /* The shared library has to be ready before the first program
+       starts - its frames are common to all processes */
     if (dyn_init())
         printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
                dyn_name(), dyn_pages());
 
     if (initrd_file_count()) {
-    /* Program z pliku dostaje czysta karte: to, co powie jadru, mowi
-       juz on, a nie kawalek kodu wpisany w obraz jadra */
+    /* A program from a file gets a clean slate: whatever it tells the
+       kernel, it says on its own, not as a piece of code built into
+       the kernel image */
     if (run_program("hello64")) {
         cs = syscall64_user_cs();
         printk("[ OK ] ELF64 z initrd: pierscien %u, kod wyjscia %u\n",
                cs & 3, (uint32_t)syscall64_user_status());
     }
 
-    /* --- Ochrona pamieci od strony programu ---------------------- */
-    /* Bit zakazu wykonywania byl dotad tylko ustawiony. Teraz program
-       probuje wykonac wlasne dane, a bledy strony z ring 3 zabijaja
-       winnego zamiast zatrzymywac system - wiec da sie to sprawdzic
-       i przezyc. */
+    /* --- Memory protection as seen from the program -------------- */
+    /* The no-execute bit had only been set so far. Now a program tries
+       to execute its own data, and page faults from ring 3 kill the
+       guilty one instead of stopping the system - so this can be
+       checked and survived. */
     if (run_program("nx64"))
         printk("[ %s ] Zakaz wykonywania: %s (err=%x, adres=%x)\n",
                isr64_user_fault() ? "OK" : "!!",
@@ -381,23 +388,25 @@ void kmain64(uint32_t magic, uint32_t info_addr)
                                   : "PROGRAM JA PRZECZYTAL",
                isr64_user_fault_err(), (uint32_t)isr64_user_fault_addr());
 
-    /* Najwazniejszy dowod: system po tych dwoch zgonach dziala dalej */
+    /* The most important proof: after those two deaths the system keeps
+       running */
     uint32_t a_before = counter_a;
     task64_sleep(200);
     printk("[ %s ] System przezyl smierc programow (licznik %u -> %u)\n",
            counter_a > a_before ? "OK" : "!!", a_before, counter_a);
 
-    /* --- Dwa procesy naraz, kazdy we wlasnej przestrzeni ---------- */
-    /* Ta sama kopia tego samego programu, oba pod tym samym adresem
-       wirtualnym - i kazdy ze swoja pamiecia. Jedyne, co je rozni, to
-       liczba, ktora dostaly w RDI. */
+    /* --- Two processes at once, each in its own space ------------ */
+    /* The same copy of the same program, both at the same virtual
+       address - and each with its own memory. The only thing that
+       tells them apart is the number they were given in RDI. */
     uint32_t frames_before = pmm_used_frames();
     int base_tasks = task64_count();
     syscall64_forget_user();
 
-    /* Ta sama kopia programu, a rozni je jedno: argument. Numer
-       procesu przychodzi teraz jako argv[1], a nie wpisany do
-       rejestru - czyli tak, jak dostaje go kazdy program. */
+    /* The same copy of the program, and one thing tells them apart: the
+       argument. The process number now arrives as argv[1] rather than
+       written into a register - that is, the way every program gets
+       it. */
     static struct args64 sep_a = { 2, { "sep64", "1" } };
     static struct args64 sep_b = { 2, { "sep64", "2" } };
     proc64_spawn("sep64", &sep_a, 1);
@@ -411,16 +420,17 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            (exits == 2 && fails == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)fails);
 
-    /* Przestrzenie musza zniknac razem z procesami - inaczej kazdy
-       uruchomiony program zabieralby pamiec na zawsze */
+    /* The spaces have to disappear along with the processes - otherwise
+       every program that ran would take memory away forever */
     uint32_t frames_after = pmm_used_frames();
     printk("[ %s ] Pamiec po procesach oddana (%u -> %u ramek)\n",
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
 
-    /* --- Proces powielajacy sam siebie -------------------------- */
-    /* Tu jadro nie robi juz nic poza podaniem programu: drugi proces
-       bierze sie z fork-a, czyli z decyzji samego programu. */
+    /* --- A process that duplicates itself ----------------------- */
+    /* Here the kernel does nothing beyond handing over the program: the
+       second process comes from a fork, that is, from the program's
+       own decision. */
     frames_before = pmm_used_frames();
     base_tasks = task64_count();
     syscall64_forget_user();
@@ -440,8 +450,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            frames_before, frames_after);
 
     /* --- fork + exec + wait ------------------------------------- */
-    /* Stad juz tylko krok do shella: program potrafi uruchomic INNY
-       program i doczekac jego konca. */
+    /* From here it is only a step to a shell: a program can run ANOTHER
+       program and wait for it to end. */
     base_tasks = task64_count();
     syscall64_forget_user();
 
@@ -449,19 +459,19 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     for (int i = 0; i < 200 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 
-    /* Tu nie liczymy niezerowych wyjsc: hello64 CELOWO konczy sie
-       siodemka, a to wlasnie ta siodemka jest dowodem, ze rodzic
-       doczekal wlasciwego dziecka. Werdykt wydaje sam spawn64 - jego
-       kod wyjscia jest tym ostatnim. */
+    /* We are not counting non-zero exits here: hello64 ends with a seven
+       ON PURPOSE, and that seven is exactly the proof that the parent
+       waited for the right child. The verdict is passed by spawn64
+       itself - its exit code is the last one. */
     exits = syscall64_user_exits();
     int verdict = syscall64_user_status();
     printk("[ %s ] fork + exec + wait: %u zakonczonych, werdykt %u\n",
            (exits == 2 && verdict == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)verdict);
 
-    /* --- Liczby zmiennoprzecinkowe w dwoch procesach naraz ------ */
-    /* Gdyby rejestry SSE nie byly zapisywane przy przelaczaniu zadan,
-       kazdy z tych procesow dostalby wynik drugiego */
+    /* --- Floating-point numbers in two processes at once -------- */
+    /* If the SSE registers were not saved on a task switch, each of
+       these processes would get the other one's result */
     base_tasks = task64_count();
     syscall64_forget_user();
 
@@ -479,8 +489,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            (exits == 2 && fails == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)fails);
 
-    /* fork nie kopiuje juz pamieci - dzieli ja i rozdziela dopiero
-       te strony, ktore ktos naprawde zapisal */
+    /* fork no longer copies memory - it shares it and separates only
+       those pages somebody actually wrote to */
     uint32_t splits = paging64_cow_splits();
     uint32_t cost = proc64_last_fork_cost();
     printk("[ %s ] Kopiowanie przy zapisie: fork wzial %u ramek, "
@@ -491,45 +501,47 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     task64_dump();
 
-    /* --- Zasilanie ---------------------------------------------- */
-    /* acpi.c przeszlo jak reszta wspolnego kodu: droga do wylaczenia
-       zasilania - RSDP, spis tablic, FADT, obiekt _S5_ w bajtkodzie -
-       nie zalezy od trybu procesora. Zalezy od niego tylko doklejanie
-       tablic do mapowania, i tyle w tym pliku widac o trybie. */
+    /* --- Power -------------------------------------------------- */
+    /* acpi.c came across like the rest of the shared code: the path to
+       powering off - RSDP, the table list, the FADT, the _S5_ object
+       in bytecode - does not depend on the processor mode. The only
+       thing that does is adding tables to the mapping, and that is all
+       this file shows about the mode. */
     if (acpi_init())
         printk("[ OK ] ACPI: tablice od '%s' (polecenia 'poweroff', "
                "'reboot')\n", acpi_oem());
     else
         printk("[ !! ] ACPI: brak tablic - komputera nie wylaczymy\n");
 
-    /* --- Dysk --------------------------------------------------- */
-    /* PCI, ATA, AHCI i warstwa blokowa to te same pliki, co w jadrze
-       32-bitowym. Sterowniki nie wiedza nic o trybie procesora: gadaja
-       z urzadzeniem przez porty i pamiec, a jedno i drugie wyglada
-       tak samo po obu stronach. */
+    /* --- Disk --------------------------------------------------- */
+    /* PCI, ATA, AHCI and the block layer are the same files as in the
+       32-bit kernel. The drivers know nothing about the processor
+       mode: they talk to the device through ports and memory, and both
+       look the same on either side. */
     if (blk_init()) {
-        /* System plikow tez jest tym samym plikiem, co w jadrze
-           32-bitowym - i tu akurat nie trzeba bylo zmienic w nim ani
-           jednego znaku. Dysk widziany przez warstwe blokowa wyglada
-           tak samo niezaleznie od trybu procesora. */
+        /* The file system is the same file as in the 32-bit kernel too -
+           and here not a single character had to change in it. The disk
+           seen through the block layer looks the same regardless of the
+           processor mode. */
         int fs = fs_init();
         printk("[ OK ] Dysk %s + PFS %s (%u sektorow)\n",
                blk_name(), fs ? "gotowy" : "NIEDOSTEPNY", blk_sectors());
-        /* Wymiana stron: miejsce rezerwujemy przez system plikow, ale
-           same strony wedruja tam wprost przez warstwe blokowa. Musi
-           byc po fs_init, bo bez systemu plikow nie ma gdzie. */
+        /* Page swapping: the space is reserved through the file system, but
+           the pages themselves travel there straight through the block
+           layer. It has to come after fs_init, because without a file
+           system there is nowhere to put them. */
         if (fs)
             swap_init();
     } else {
         printk("[ !! ] Dysk: zaden kontroler nie odpowiedzial\n");
     }
 
-    /* --- Siec --------------------------------------------------- */
-    /* Karta, warstwa IP, DHCP i TCP to znowu te same pliki, co
-       w jadrze 32-bitowym. Trzy z czterech przeszly bez jednej
-       zmiany - sterownik karty potrzebowal tylko jawnego rzutowania
-       adresow, bo karta adresuje pamiec 32 bitami, a wskaznik ma tu
-       osiem bajtow. */
+    /* --- Network ------------------------------------------------ */
+    /* The card, the IP layer, DHCP and TCP are again the same files as
+       in the 32-bit kernel. Three of the four came across without a
+       single change - the card driver only needed explicit casts of
+       addresses, because the card addresses memory with 32 bits while
+       a pointer here is eight bytes wide. */
     int net = net_init();
     if (net) {
         const uint8_t *m = netdev_mac();
@@ -539,13 +551,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ !! ] Siec: nie znalazlem karty sieciowej\n");
     }
 
-    /* --- Pozostale procesory ------------------------------------ */
-    /* Tablica MADT wylicza je wszystkie, a kazdy czeka na sygnal
-       INIT-SIPI. Rdzen wtorny zaczyna w trybie rzeczywistym - i musi
-       sam przejsc cala droge do trybu dlugiego, bo nikt mu tu nie
-       pomoze. Tablice stron bierze gotowe, te same, po ktorych chodzi
-       jadro. Obudzony zglasza sie i staje: dawanie mu pracy wymaga
-       schedulera per rdzen i zamkow, a tych jeszcze nie ma. */
+    /* --- The remaining processors ------------------------------- */
+    /* The MADT table lists them all, and each one waits for an
+       INIT-SIPI signal. A secondary core starts in real mode - and has
+       to walk the whole road to long mode itself, because nobody here
+       will help it. It takes the page tables ready-made, the same ones
+       the kernel walks. Once woken it reports in and stands by: giving
+       it work needs a per-core scheduler and locks, and there are none
+       of those yet. */
     int ncores = smp_init();
     if (ncores > 1)
         printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
@@ -553,20 +566,21 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     else
         printk("[ OK ] Procesory: 1\n");
 
-    /* --- Wejscie z klawiatury ----------------------------------- */
+    /* --- Keyboard input ----------------------------------------- */
     keyboard64_init();
     mouse_init();
     printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12)\n");
 
-    /* Maszyny nowsze niz mniej wiecej 2010 rok nie maja juz zlacza
-       PS/2. Sterownik USB i klasa HID to znowu te same pliki, co
-       w jadrze 32-bitowym: struktury kontrolera musza lezec pod
-       adresem, ktory rozumie on sam, a to w obu trybach znaczy
-       mapowanie identycznosciowe. */
-    usbkbd_init();          /* sam melduje, gdy cos znajdzie */
+    /* Machines newer than roughly 2010 no longer have a PS/2 connector.
+       The USB driver and the HID class are again the same files as in
+       the 32-bit kernel: the controller structures have to lie at an
+       address the controller itself understands, and in both modes
+       that means an identity mapping. */
+    usbkbd_init();          /* it reports in by itself when it finds something */
 
-    /* Adres IP bierze sie z sieci, a klient DHCP czeka na odpowiedzi
-       serwera - musi wiec chodzic w watku, czyli po schedulerze */
+    /* The IP address comes from the network, and the DHCP client waits
+       for the server's replies - so it has to run in a thread, that is,
+       after the scheduler */
     if (net) {
         dhcp_start();
         tcp_init();
@@ -575,10 +589,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("\nSystem 64-bitowy gotowy - wpisz 'help'.\n");
     shell64_start();
 
-    /* Watek glowny staje sie od tej chwili watkiem bezczynnosci -
-       robota przejmuje shell, ktory czeka na klawisze. Taki watek nie
-       moze trzymac wielkiego zamka jadra: rdzen stojacy na hlt z
-       zamkiem w garsci zamknalby jadro dla wszystkich pozostalych. */
+    /* From this moment on the main thread becomes the idle thread - the
+       work is taken over by the shell, which waits for keys. Such a
+       thread must not hold the big kernel lock: a core sitting on hlt
+       with the lock in hand would close the kernel off to everyone
+       else. */
     biglock_leave();
     for (;;)
         __asm__ volatile("hlt");

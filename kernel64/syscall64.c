@@ -1,14 +1,15 @@
-/* Obsluga wywolan systemowych w trybie dlugim
+/* System call handling in long mode
  *
- * Instrukcje syscall/sysret trzeba najpierw wlaczyc i powiedziec
- * procesorowi trzy rzeczy:
+ * The syscall/sysret instructions have to be enabled first, and the
+ * processor told three things:
  *
- *   EFER.SCE - zgoda na uzywanie tych instrukcji w ogole,
- *   STAR     - z jakich selektorow skladac segmenty przy wejsciu
- *              i przy powrocie,
- *   LSTAR    - pod jaki adres skakac,
- *   SFMASK   - ktore flagi zgasic po wejsciu; gasimy IF, zeby jadro
- *              zaczynalo prace bez przerwan, tak jak przy bramce.
+ *   EFER.SCE - permission to use these instructions at all,
+ *   STAR     - which selectors to build the segments from on entry
+ *              and on return,
+ *   LSTAR    - what address to jump to,
+ *   SFMASK   - which flags to clear on entry; we clear IF so that the
+ *              kernel starts work with interrupts off, just as with a
+ *              gate.
  */
 
 #include <stdint.h>
@@ -46,11 +47,11 @@
 
 extern void syscall64_entry(void);
 
-/* Blok danych rdzenia widziany przez stub wejsciowy przez rejestr GS.
-   Uklad musi zgadzac sie z boot64/syscall64.S. */
+/* The core's data block, seen by the entry stub through the GS
+   register. The layout has to match boot64/syscall64.S. */
 struct core_syscall {
-    uint64_t kernel_rsp;     /* przesuniecie 0 */
-    uint64_t scratch;        /* przesuniecie 8 */
+    uint64_t kernel_rsp;     /* offset 0 */
+    uint64_t scratch;        /* offset 8 */
 };
 extern struct core_syscall syscall64_bloki[];
 _Static_assert(sizeof(struct core_syscall) == 16,
@@ -76,21 +77,21 @@ static uint64_t rdmsr(uint32_t msr)
     return ((uint64_t)high << 32) | low;
 }
 
-/* Wolane na KAZDYM rdzeniu: wszystkie te rejestry sa jego wlasne.
-   Rdzen, ktory ich nie ustawi, nie przyjmie instrukcji syscall wcale. */
+/* Called on EVERY core: all these registers are its own. A core that
+   does not set them will not accept the syscall instruction at all. */
 void syscall64_init(void)
 {
     wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SCE);
 
-    /* Wskaznik na blok tego rdzenia. Stub wejsciowy siega po niego
-       przez swapgs - to jedyna droga bez wolnego rejestru. */
+    /* Pointer to this core's block. The entry stub reaches for it
+       through swapgs - the only way with no free register. */
     wrmsr(MSR_KERNEL_GS,
           (uint64_t)(uintptr_t)&syscall64_bloki[smp_core()]);
 
-    /* Bity 47-32: selektor kodu jadra przy wejsciu.
-       Bity 63-48: podstawa, z ktorej sysret sklada selektory programu -
-       dane to podstawa + 8, kod to podstawa + 16. Dlatego wpisujemy
-       tu selektor DANYCH jadra, a nie kodu uzytkownika. */
+    /* Bits 47-32: the kernel code selector on entry.
+       Bits 63-48: the base from which sysret builds the program's
+       selectors - data is base + 8, code is base + 16. That is why we
+       write the kernel DATA selector here, not the user code one. */
     wrmsr(MSR_STAR, ((uint64_t)GDT64_KERNEL_DATA << 48) |
                     ((uint64_t)GDT64_KERNEL_CODE << 32));
     wrmsr(MSR_LSTAR, (uint64_t)(uintptr_t)syscall64_entry);
@@ -100,7 +101,7 @@ void syscall64_init(void)
 void syscall64_set_kernel_stack(uint64_t rsp)
 {
     syscall64_bloki[smp_core()].kernel_rsp = rsp;
-    gdt64_set_kernel_stack(rsp);   /* to samo dla przerwan z ring 3 */
+    gdt64_set_kernel_stack(rsp);   /* the same for interrupts from ring 3 */
 }
 
 int syscall64_user_ran(void)
@@ -143,18 +144,19 @@ void syscall64_forget_user(void)
     user_failures = 0;
 }
 
-/* Wolane ze stubu w boot64/syscall64.S.
+/* Called from the stub in boot64/syscall64.S.
  *
- * Stub odklada dokladnie taka ramke, jaka odklada przerwanie, i podaje
- * na nia wskaznik. Numer wywolania jest w RAX, argumenty w RDI i RSI,
- * wynik wraca tam, gdzie program go szuka - w polu rax ramki, bo to
- * z niej procesor odtworzy rejestry przy powrocie.
+ * The stub lays down exactly the frame an interrupt lays down and
+ * passes a pointer to it. The call number is in RAX, the arguments in
+ * RDI and RSI, and the result goes back where the program looks for it
+ * - into the frame's rax field, because that is what the processor
+ * restores the registers from on return.
  *
- * Wskaznikom z ring 3 nie wolno wierzyc na slowo: zanim jadro cokolwiek
- * z nich przeczyta, pyta tablice stron, czy program w ogole ma prawo
- * tam siegac. Bez tego wystarczyloby podac adres pamieci jadra, zeby
- * kazac mu ja sobie wypisac. */
-/* Nazwa pliku z pamieci programu do jadra. Zwraca 0 albo -1. */
+ * Pointers from ring 3 must not be taken on trust: before the kernel
+ * reads anything through them, it asks the page tables whether the
+ * program has any right to reach there at all. Without that it would
+ * be enough to pass a kernel memory address to have it printed out. */
+/* A file name from program memory into the kernel. Returns 0 or -1. */
 static int name_from_ring3(uint64_t ptr, uint64_t len, char *out)
 {
     if (len == 0 || len > FS_NAME_MAX || !paging64_user_range(ptr, len))
@@ -166,11 +168,11 @@ static int name_from_ring3(uint64_t ptr, uint64_t len, char *out)
     return 0;
 }
 
-/* Napis zakonczony zerem z pamieci programu do jadra. Dlugosci nie
-   znamy z gory, wiec kazdy bajt trzeba sprawdzic osobno: napis moze
-   siegac ostatniego bajtu mapowania i ani jednego dalej. Zwraca 0
-   albo -1, gdy napis wychodzi poza pamiec programu albo nie miesci
-   sie w buforze. */
+/* A zero-terminated string from program memory into the kernel. We do
+   not know the length up front, so every byte has to be checked
+   separately: the string may reach the last byte of a mapping and not
+   one further. Returns 0, or -1 when the string runs past the
+   program's memory or does not fit in the buffer. */
 static int text_from_ring3(uint64_t ptr, char *out, int max)
 {
     for (int i = 0; i < max - 1; i++) {
@@ -184,9 +186,9 @@ static int text_from_ring3(uint64_t ptr, char *out, int max)
     return 0;
 }
 
-/* Polecenia rysowania przekazywane przez program. Uklad musi zgadzac
-   sie z tym w user64/usys64.h - w trybie dlugim wskaznik ma osiem
-   bajtow i wymaga wyrownania, stad dziura po trzech liczbach. */
+/* Drawing commands passed by the program. The layout has to match the
+   one in user64/usys64.h - in long mode a pointer is eight bytes wide
+   and needs alignment, hence the hole after the three numbers. */
 struct win_rect_cmd64 {
     int32_t x, y, w, h, color;
 };
@@ -200,8 +202,8 @@ struct win_event64 {
     int32_t val;
 };
 
-/* Opis gniazda przekazywany przez program. Uklad musi zgadzac sie
-   z tym w user64/usys64.h. */
+/* A socket description passed by the program. The layout has to match
+   the one in user64/usys64.h. */
 struct udp_info {
     int sock;
     uint32_t ip;
@@ -212,49 +214,51 @@ struct udp_info {
 
 static void handle(struct regs *r);
 
-/* Wejscie ze stubu. Sygnal dostarczamy tuz przed powrotem - wtedy
-   i tylko wtedy ramka opisuje program, a nie jadro. */
-/* --- ktore wywolania nie potrzebuja wielkiego zamka jadra ----------
+/* Entry from the stub. We deliver the signal just before returning -
+   then and only then does the frame describe the program, not the
+   kernel. */
+/* --- which calls do not need the big kernel lock ------------------
  *
- * Zamek jest jeden na cale jadro i bierze go kazde wejscie z
- * pierscienia 3, bo sterowniki, system plikow i wymiana stron pisane
- * byly dla jednego rdzenia i cicho na to licza. Ale nie kazde
- * wywolanie tam siega. Te ponizej dotykaja WYLACZNIE stanu wolajacego
- * zadania oraz rzeczy, ktore maja wlasne zamki - dwa rdzenie moga byc
- * w nich naraz i nic z tego nie wyniknie.
+ * There is one lock for the whole kernel and every entry from ring 3
+ * takes it, because the drivers, the file system and page swapping
+ * were written for a single core and quietly count on it. But not
+ * every call reaches there. The ones below touch ONLY the calling
+ * task's state and things that have locks of their own - two cores can
+ * be inside them at once and nothing comes of it.
  *
- * Lista jest krotka i jawna z rozmyslem: dopisanie do niej wywolania
- * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
- * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
+ * The list is short and explicit on purpose: adding a call to it is a
+ * promise that it was read to the end, together with whatever it calls
+ * further on. The default answer is "with the lock" and that is how it
+ * should stay.
  */
 static int lockless(uint64_t nr)
 {
     switch (nr) {
-    case SYS64_GETPID:   /* wlasny numer, jedno pole zadania */
-    case SYS64_TICKS:    /* licznik przerwan zegara, jedno slowo */
-    case SYS64_RING:     /* wlasny selektor kodu z ramki przerwania */
-    case SYS64_CORE:    /* pytanie do wlasnego lokalnego APIC */
-    case SYS64_SLEEP:    /* wlasne "obudz mnie" i scheduler, ktory ma
-                            swoj zamek - a przez przelaczenie kontekstu
-                            wielkiego zamka i tak sie nie trzyma */
+    case SYS64_GETPID:   /* own number, a single task field */
+    case SYS64_TICKS:    /* the timer interrupt counter, a single word */
+    case SYS64_RING:     /* own code selector from the interrupt frame */
+    case SYS64_CORE:    /* a question to our own local APIC */
+    case SYS64_SLEEP:    /* our own "wake me up" and the scheduler, which
+                            has a lock of its own - and across a context
+                            switch the big lock is not held anyway */
         return 1;
     default:
         return 0;
     }
 }
 
-/* Wywolanie systemowe przychodzi z pierscienia 3, wiec bierze wielki
-   zamek jadra: program moze biec na kazdym rdzeniu, ale w jadrze ma
-   byc naraz jeden. Instrukcja syscall nie idzie przez tablice
-   przerwan, wiec to jedyne miejsce, w ktorym da sie to dla niej
-   zrobic. */
+/* A system call comes from ring 3, so it takes the big kernel lock:
+   a program may run on any core, but inside the kernel there is to be
+   one at a time. The syscall instruction does not go through the
+   interrupt table, so this is the only place where that can be done
+   for it. */
 void syscall64_handler(struct regs *r)
 {
     if (lockless(r->rax)) {
         handle(r);
-        /* Sygnal przestawia programowi stos i adres powrotu - to juz
-           nie jest praca "tylko na swoim". Zamek bierzemy jednak
-           dopiero wtedy, gdy naprawde jest co doreczyc. */
+        /* A signal changes the program's stack and return address - that
+           is no longer work "on our own only". We take the lock only
+           when there really is something to deliver, though. */
         if ((r->cs & 3) == 3 && task64_signal_pending()) {
             biglock_enter();
             signal64_deliver(r);
@@ -272,9 +276,10 @@ void syscall64_handler(struct regs *r)
 
 static void handle(struct regs *r)
 {
-    /* Czwarty argument jedzie w R10, a nie w RCX: instrukcja syscall
-       wpisuje do RCX adres powrotu, wiec RCX na argument nie ma szans.
-       Tak samo robi Linux i z tego samego powodu. */
+    /* The fourth argument travels in R10, not in RCX: the syscall
+       instruction writes the return address into RCX, so RCX has no
+       chance of carrying an argument. Linux does the same and for the
+       same reason. */
     uint64_t nr = r->rax, a1 = r->rdi, a2 = r->rsi, a3 = r->rdx,
              a4 = r->r10;
 
@@ -282,19 +287,20 @@ static void handle(struct regs *r)
     case SYS64_WRITE: {
         const char *buf = (const char *)(uintptr_t)a2;
         if (a3 > 4096)
-            a3 = 4096;               /* najpierw ograniczenie, potem
-                                        sprawdzanie - inaczej dlugosc
-                                        rzedu miliardow stron zajelaby
-                                        jadro na dobre */
+            a3 = 4096;               /* clamp first, check second -
+                                        otherwise a length of the order
+                                        of billions of pages would tie
+                                        the kernel up for good */
         if (!paging64_user_range(a2, a3)) {
             printk("[jadro] write: wskaznik %x nie nalezy do programu\n",
                    (uint32_t)a2);
             r->rax = (uint64_t)-1;
             return;
         }
-        /* O tym, dokad idzie zapis, decyduje RODZAJ deskryptora,
-           a nie jego numer. Jedynka bez przekierowania to konsola -
-           ale po dup2 moze byc koncem potoku i program tego nie widzi. */
+        /* Where a write goes is decided by the KIND of the descriptor,
+           not by its number. One with no redirection is the console -
+           but after a dup2 it may be the end of a pipe, and the program
+           does not see that. */
         int kind = task64_fd_kind((int)a1);
         if (kind == FDK_WOLNY) {
             if (a1 != FD_STDOUT) {
@@ -312,7 +318,7 @@ static void handle(struct regs *r)
             return;
         }
         if (kind != FDK_FILE) {
-            r->rax = (uint64_t)-1;   /* zapis do konca do czytania */
+            r->rax = (uint64_t)-1;   /* write into the read end */
             return;
         }
         int slot = task64_fd_slot((int)a1);
@@ -328,9 +334,9 @@ static void handle(struct regs *r)
         user_exits++;
         if (a1)
             user_failures++;
-        task64_exit_code((int)a1);   /* nie wraca - scheduler idzie dalej */
+        task64_exit_code((int)a1);   /* does not return - the scheduler goes on */
         return;
-    case SYS64_RING:                 /* program mowi, w ktorym pierscieniu jest */
+    case SYS64_RING:                 /* the program says which ring it is in */
         user_cs = (uint32_t)a1;
         user_ran = 1;
         r->rax = 0;
@@ -346,8 +352,9 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)proc64_fork(r);
         return;
     case SYS64_EXEC:
-        /* Przy powodzeniu nie wraca tam, skad wolano: ramka opisuje
-           juz nowy program, a stary nie istnieje */
+        /* On success it does not return where it was called from: the
+           frame already describes the new program and the old one does
+           not exist */
         r->rax = (uint64_t)proc64_exec(r, (const char *)(uintptr_t)a1,
                                        a2, a3);
         return;
@@ -356,7 +363,7 @@ static void handle(struct regs *r)
         int id = task64_wait(&code);
         if (id >= 0 && a1) {
             if (!paging64_user_range(a1, sizeof(int)))
-                return;              /* zly wskaznik - kod przepada */
+                return;              /* a bad pointer - the code is lost */
             *(int *)(uintptr_t)a1 = code;
         }
         r->rax = (uint64_t)(int64_t)id;
@@ -388,7 +395,7 @@ static void handle(struct regs *r)
             return;
         }
         if (kind != FDK_FILE) {
-            r->rax = (uint64_t)-1;   /* odczyt z konca do pisania */
+            r->rax = (uint64_t)-1;   /* read from the write end */
             return;
         }
         int slot = task64_fd_slot((int)a1);
@@ -420,8 +427,9 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_SBRK: {
-        /* Zwracamy stara granice - program dostaje adres, od ktorego
-           moze pisac. Przesuniecie o zero to pytanie "gdzie jestem". */
+        /* We return the old limit - the program gets the address it may
+           start writing from. A shift of zero is the question "where am
+           I". */
         int64_t delta = (int64_t)a1;
         uint64_t old_one = task64_brk();
         if (!old_one) {
@@ -430,11 +438,12 @@ static void handle(struct regs *r)
         }
         uint64_t fresh = old_one + (uint64_t)delta;
         if (fresh < task64_brk_base() || fresh >= USER64_TOP) {
-            r->rax = (uint64_t)-1;   /* ponizej wlasnej pamieci albo w stos */
+            r->rax = (uint64_t)-1;   /* below its own memory or into the stack */
             return;
         }
-        /* Zwezenie oddaje strony od razu - inaczej pamiec wracalaby
-           do puli dopiero razem z calym procesem */
+        /* Shrinking gives the pages back at once - otherwise the memory
+           would return to the pool only together with the whole
+           process */
         for (uint64_t va = fresh & ~0xFFFULL; va + 4096 <= old_one;
              va += 4096) {
             if (va < fresh)
@@ -489,9 +498,10 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_READDIR: {
-        /* Jeden wpis na wywolanie - program pyta o kolejne numery,
-           dopoki dostaje odpowiedz. Bufor opisuje struct dirent64
-           z usys64.h i jest po stronie programu. */
+        /* One entry per call - the program asks for successive numbers
+           as long as it keeps getting an answer. The buffer is described
+           by struct dirent64 from usys64.h and lives on the program's
+           side. */
         struct {
             char name[FS_NAME_MAX + 1];
             uint32_t size;
@@ -504,9 +514,10 @@ static void handle(struct regs *r)
         }
         uint32_t size = 0;
         int dir = 0;
-        /* fs_readdir oddaje 1 przy trafieniu i 0 na koncu katalogu -
-           nie ujemna wartosc. Sprawdzanie "mniej niz zero" konczy sie
-           tu petla bez konca, bo koniec katalogu wyglada jak sukces. */
+        /* fs_readdir returns 1 on a hit and 0 at the end of the
+           directory - not a negative value. Checking for "less than
+           zero" ends in an endless loop here, because the end of the
+           directory looks like success. */
         if (fs_readdir(task64_cwd(), (int)a1, entry.name,
                        &size, &dir) != 1) {
             r->rax = (uint64_t)-1;
@@ -528,10 +539,10 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_PIPE: {
-        /* Program dostaje dwa numery: koniec do czytania i koniec do
-           pisania. Dopoki trzyma oba, potok nie skonczy sie nigdy -
-           dlatego shell zamyka u siebie oba zaraz po rozdaniu ich
-           dzieciom. */
+        /* The program gets two numbers: the read end and the write end.
+           As long as it holds both, the pipe will never end - which is
+           why the shell closes both of its own as soon as it has handed
+           them to the children. */
         if (!paging64_user_range(a1, 2 * sizeof(int))) {
             r->rax = (uint64_t)-1;
             return;
@@ -562,13 +573,14 @@ static void handle(struct regs *r)
     case SYS64_DUP2:
         r->rax = (uint64_t)(int64_t)task64_fd_dup2((int)a1, (int)a2);
         return;
-    /* --- Siec ---------------------------------------------------
+    /* --- Network ------------------------------------------------
      *
-     * Gniazdo nalezy do zadania, ktore je otworzylo - jadro trzyma
-     * jego numer i sprzata po jego smierci. Dzieki temu program nie
-     * moze siegnac po cudze gniazdo, podajac jego numer. */
+     * A socket belongs to the task that opened it - the kernel keeps
+     * its number and cleans up after its death. Thanks to that a
+     * program cannot reach somebody else's socket by passing its
+     * number. */
     case SYS64_NETINFO: {
-        /* Cztery adresy: wlasny, maska, brama, DNS */
+        /* Four addresses: own, mask, gateway, DNS */
         if (!paging64_user_range(a1, 4 * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;
             return;
@@ -590,10 +602,11 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     case SYS64_UDP_SEND: {
-        /* Wszystko poza samymi danymi idzie w jednym opisie. Trzy
-           rejestry na argumenty to za malo na gniazdo, adres, port,
-           dlugosc i limit czasu - a upychanie po dwie rzeczy w jeden
-           rejestr czyta sie fatalnie i psuje przy pierwszej zmianie. */
+        /* Everything except the data itself travels in one description.
+           Three registers for arguments are too few for a socket, an
+           address, a port, a length and a timeout - and packing two
+           things into one register reads terribly and breaks at the
+           first change. */
         struct udp_info info;
         if (!paging64_user_range(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
@@ -628,7 +641,8 @@ static void handle(struct regs *r)
                              (void *)(uintptr_t)a2, (uint16_t)a3,
                              info.timeout);
         if (n > 0) {
-            /* Kto przyslal - program pyta o to przez ten sam opis */
+            /* Who sent it - the program asks about that through the same
+           description */
             info.ip = from_ip;
             info.port = from_port;
             memcpy((void *)(uintptr_t)a1, &info, sizeof(info));
@@ -637,8 +651,8 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_TCP_CONNECT: {
-        /* Ten sam opis, co przy UDP - port i limit czasu maja tam
-           swoje miejsce, a adres jest tam, gdzie go widac */
+        /* The same description as for UDP - the port and the timeout have
+           their place there, and the address is where it can be seen */
         struct udp_info info;
         if (!paging64_user_range(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
@@ -676,9 +690,9 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);
         return;
     case SYS64_SIGNAL:
-        /* Program podaje swoja procedure obslugi i adres, pod ktory ma
-           wrocic po jej zakonczeniu. Ten drugi musi przyjsc od niego:
-           kod wykonywalny jest tylko w jego wlasnych stronach. */
+        /* The program supplies its own handler and the address to return
+           to once it finishes. The latter has to come from it:
+           executable code lives only in its own pages. */
         task64_set_sighandler(a2, a3);
         r->rax = 0;
         return;
@@ -687,13 +701,13 @@ static void handle(struct regs *r)
             printk("[jadro] sigreturn: ramka poza pamiecia programu\n");
             task64_kill_current("zepsuty sigreturn");
         }
-        return;                      /* ramka opisuje juz przerwane miejsce */
+        return;                      /* the frame already describes the interrupted spot */
     case SYS64_KILL:
         r->rax = task64_signal((int)a1, (int)a2) ? 0 : (uint64_t)-1;
         return;
-    /* Okna. Wlascicielem jest proces, a nie ten, kto poda numer okna:
-       kompozytor sprawdza go przy kazdym rysowaniu, wiec program nie
-       narysuje niczego w cudzym oknie. */
+    /* Windows. The owner is the process, not whoever passes a window
+       number: the compositor checks it on every draw, so a program will
+       not draw anything in somebody else's window. */
     case SYS64_WIN_CREATE: {
         char title[64];
         if (text_from_ring3(a3, title, sizeof(title)) < 0) {
@@ -732,16 +746,16 @@ static void handle(struct regs *r)
             (int)a1, task64_current_id(), c.x, c.y, s, (uint8_t)c.color);
         return;
     }
-    /* Pamiec wspoldzielona. Region zyje w jadrze i jest wspolny dla
-       wszystkich, kto poda ten sam klucz; proces dostaje go pod
-       kolejnym wolnym adresem swojego obszaru mapowan. */
+    /* Shared memory. The region lives in the kernel and is common to
+       everyone who gives the same key; a process gets it at the next
+       free address of its mapping area. */
     case SYS64_SHM:
         r->rax = proc64_shm((int)a1, a2);
         return;
     case SYS64_SYSINFO: {
-        /* To samo, co pokazuje 'mem' i 'uptime' - tyle ze programowi.
-           Nic tu nie jest tajemnica: liczby opisuja maszyne, a nie
-           cudze procesy. */
+        /* The same thing 'mem' and 'uptime' show - only to a program.
+           Nothing here is a secret: the numbers describe the machine,
+           not somebody else's processes. */
         struct {
             uint32_t ram_kib;
             uint32_t used_kib;
@@ -776,8 +790,8 @@ static void handle(struct regs *r)
     case SYS64_MSYNC:
         r->rax = proc64_msync();
         return;
-    /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
-       APIC jest poza jego przestrzenia. */
+    /* The core number. The program has no way of reading it itself -
+       the local APIC is outside its space. */
     case SYS64_CORE:
         r->rax = (uint64_t)(uint32_t)smp_core();
         return;

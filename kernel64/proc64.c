@@ -1,14 +1,15 @@
-/* Powielanie procesu (fork) w trybie dlugim
+/* Duplicating a process (fork) in long mode
  *
- * Dziecko rozni sie od rodzica dwiema rzeczami i niczym wiecej:
- * ma wlasna kopie pamieci i zero zamiast numeru dziecka w RAX.
+ * The child differs from the parent in two things and nothing more:
+ * it has its own copy of memory and zero instead of the child number
+ * in RAX.
  *
- * Cala sztuczka polega na tym, ze jadro ma pod reka pelny stan
- * programu. Stub wywolan systemowych odklada dokladnie taka ramke,
- * jaka odklada przerwanie - wiec wystarczy ja skopiowac i kazac
- * nowemu zadaniu wrocic nia do ring 3. Zadne rejestry nie musza byc
- * przy tym odtwarzane "recznie": robi to ta sama sciezka, ktora
- * wraca z kazdego innego wywolania.
+ * The whole trick is that the kernel has the program's complete state
+ * at hand. The syscall stub lays down exactly the frame an interrupt
+ * lays down - so it is enough to copy it and tell the new task to
+ * return to ring 3 through it. No registers have to be restored "by
+ * hand" along the way: that is done by the same path that returns from
+ * every other call.
  */
 
 #include <stddef.h>
@@ -30,11 +31,11 @@
 #include "../kernel/include/biglock.h"
 #include "syscall64.h"
 
-/* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
+/* Return to ring 3 from a frame given by pointer (boot64/syscall64.S) */
 extern void return_to_user_64(struct regs *frame);
 
-/* Ile ramek kosztowal ostatni fork. Przy dzieleniu stron powinny to
-   byc same tablice stron - pamiec programu nie jest kopiowana wcale. */
+/* How many frames the last fork cost. With shared pages these should
+   be page tables only - the program's memory is not copied at all. */
 static uint32_t last_cost;
 
 uint32_t proc64_last_fork_cost(void)
@@ -42,17 +43,17 @@ uint32_t proc64_last_fork_cost(void)
     return last_cost;
 }
 
-/* --- Argumenty na stosie programu --------------------------------
+/* --- Arguments on the program stack ------------------------------
  *
- * Uklad jest ten sam, co wszedzie: najpierw same napisy, nad nimi
- * tablica wskaznikow zakonczona zerem, a program dostaje w rejestrach
- * ich liczbe i adres tablicy. Nic w tym magicznego - to zwykla pamiec
- * programu, ktora akurat jadro wypelnilo przed jego pierwsza
- * instrukcja.
+ * The layout is the same as everywhere: first the strings themselves,
+ * above them an array of pointers terminated by zero, and the program
+ * receives their count and the array address in registers. There is
+ * nothing magic about it - this is ordinary program memory that the
+ * kernel happened to fill in before its first instruction.
  *
- * Piszemy wprost pod adresy uzytkownika, bo w tej chwili stoimy juz
- * w jego przestrzeni. Zwraca nowy wierzcholek stosu i wpisuje adres
- * tablicy. */
+ * We write straight to user addresses, because at this moment we are
+ * already standing in its space. Returns the new stack top and writes
+ * out the array address. */
 static uint64_t build_args(uint64_t rsp, const struct args64 *args,
                            uint64_t *argv_va)
 {
@@ -77,24 +78,25 @@ static uint64_t build_args(uint64_t rsp, const struct args64 *args,
     uint64_t *tab = (uint64_t *)(uintptr_t)rsp;
     for (int i = 0; i < argc; i++)
         tab[i] = ptrs[i];
-    tab[argc] = 0;                   /* tablica konczy sie zerem */
+    tab[argc] = 0;                   /* the array ends with a zero */
 
     *argv_va = rsp;
 
-    /* Wierzcholek wyrownany do szesnastu bajtow, minus osiem.
-       Program zaczyna sie od funkcji _start napisanej w C, a kompilator
-       traktuje ja jak kazda inna: zaklada, ze stos wyglada tak, jak po
-       instrukcji call, czyli z adresem powrotu na wierzchu. Na tym
-       zalozeniu opiera wyrownanie swoich zmiennych - i gdy sie nie
-       zgadza, pierwsza instrukcja SSE zapisujaca szesnascie bajtow
-       (movaps) konczy sie wyjatkiem ochrony ogolnej. Tak samo liczy
-       stos doreczenie sygnalu, i z tego samego powodu. */
+    /* Top aligned to sixteen bytes, minus eight.
+       A program starts at a _start function written in C, and the
+       compiler treats it like any other: it assumes the stack looks the
+       way it does after a call instruction, that is, with a return
+       address on top. It bases the alignment of its variables on that
+       assumption - and when it does not hold, the first SSE instruction
+       writing sixteen bytes (movaps) ends in a general protection
+       fault. Signal delivery computes the stack the same way, and for
+       the same reason. */
     return (rsp & ~0xFULL) - 8;
 }
 
-/* Przepisanie napisu z pamieci programu do jadra.
-   Sprawdzamy strone po stronie, bo napis moze konczyc sie tuz przed
-   granica tego, co program ma zmapowane. */
+/* Copying a string from program memory into the kernel.
+   We check page by page, because the string may end just before the
+   boundary of what the program has mapped. */
 static int copy_user_string(uint64_t ptr, char *dst, int max)
 {
     for (int i = 0; i < max - 1; i++) {
@@ -111,7 +113,7 @@ static int copy_user_string(uint64_t ptr, char *dst, int max)
     return max - 1;
 }
 
-/* Zbiera argv podane przez program. Zwraca liczbe argumentow. */
+/* Gathers the argv given by the program. Returns the argument count. */
 int proc64_copy_args(uint64_t argv_ptr, struct args64 *out)
 {
     out->argc = 0;
@@ -134,8 +136,9 @@ struct fork_arg {
     uint64_t space;
 };
 
-/* Pierwszy kod dziecka. Dziala jeszcze w jadrze, na wlasnym stosie -
-   bierze przestrzen na wlasnosc i wraca do ring 3 kopia ramki rodzica. */
+/* The child's first code. It still runs in the kernel, on its own
+   stack - it takes ownership of the space and returns to ring 3 through
+   a copy of the parent's frame. */
 static void child_start(void *arg)
 {
     struct fork_arg *fa = (struct fork_arg *)arg;
@@ -143,17 +146,18 @@ static void child_start(void *arg)
     uint64_t space = fa->space;
     kfree(fa);
 
-    /* Stos jadra dziecka - stad ruszy przy kazdym nastepnym wejsciu
-       z ring 3. Bierzemy go, zanim ramka trafi na stos, zeby lezala
-       ponizej i nie zostala nadpisana. */
+    /* The child's kernel stack - it starts from here on every subsequent
+       entry from ring 3. We take it before the frame goes onto the
+       stack, so that the frame lies below it and does not get
+       overwritten. */
     uint64_t kstack;
     __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
     task64_enter_space(space, kstack & ~0xFULL);
 
-    frame.rax = 0;                   /* dziecko poznaje sie po zerze */
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
+    frame.rax = 0;                   /* the child is recognized by the zero */
+    /* We enter user code - the big kernel lock stays here */
     biglock_leave();
-    return_to_user_64(&frame);       /* nie wraca */
+    return_to_user_64(&frame);       /* does not return */
 }
 
 int64_t proc64_fork(struct regs *r)
@@ -176,9 +180,9 @@ int64_t proc64_fork(struct regs *r)
 
     struct task64 *child = task64_create("dziecko", child_start, fa);
     if (child) {
-        task64_inherit_fds(child);   /* otwarte pliki ida z pamiecia */
+        task64_inherit_fds(child);   /* open files go with the memory */
         task64_inherit_brk(child);
-        task64_mmap_inherit(child);  /* i odwzorowane pliki */
+        task64_mmap_inherit(child);  /* and mapped files too */
     }
     if (!child) {
         kfree(fa);
@@ -188,20 +192,21 @@ int64_t proc64_fork(struct regs *r)
     return task64_id(child);
 }
 
-/* Podmiana obrazu procesu (exec)
+/* Replacing the process image (exec)
  *
- * Proces zostaje ten sam - ten sam numer zadania, ten sam rodzic,
- * ten sam stos jadra - a zmienia sie wszystko, co ma w pamieci.
+ * The process stays the same - the same task number, the same parent,
+ * the same kernel stack - and everything it has in memory changes.
  *
- * Powrot do nowego programu nie wymaga zadnej osobnej sciezki: jestesmy
- * w obsludze wywolania systemowego, a ta wraca do ring 3 przez ramke,
- * ktora dostala. Wystarczy ja przepisac - nowy adres startu, nowy stos,
- * wyzerowane rejestry - i pozwolic jej wrocic. Program po drugiej
- * stronie nie ma jak zauwazyc, ze wrocil gdzie indziej, niz wolal.
+ * Returning to the new program needs no separate path of its own: we
+ * are inside a system call handler, and that handler returns to ring 3
+ * through the frame it was given. It is enough to rewrite it - a new
+ * start address, a new stack, zeroed registers - and let it return.
+ * The program on the other side has no way of noticing that it
+ * returned somewhere other than where it called from.
  *
- * Kolejnosc jest tu jedyna mozliwa: nazwe trzeba przepisac do jadra,
- * ZANIM zniknie pamiec, w ktorej lezy, a stara przestrzen zwolnic
- * dopiero wtedy, gdy procesor z niej zejdzie.
+ * The order here is the only possible one: the name has to be copied
+ * into the kernel BEFORE the memory it lies in disappears, and the old
+ * space may be freed only once the processor has left it.
  */
 int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
                     uint64_t argv_ptr)
@@ -216,8 +221,8 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         kname[i] = name[i];
     kname[len] = '\0';
 
-    /* Argumenty przepisujemy do jadra ZANIM zniknie pamiec, w ktorej
-       leza - tak samo jak nazwe programu */
+    /* We copy the arguments into the kernel BEFORE the memory they lie
+       in disappears - just like the program name */
     proc64_copy_args(argv_ptr, &args);
     if (args.argc == 0) {
         args.argc = 1;
@@ -239,37 +244,37 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         return -1;
     }
 
-    /* Zapisywalne odwzorowania starego obrazu odsylamy, dopoki jego
-       strony jeszcze sa - za chwile tej przestrzeni nie bedzie */
+    /* Writable mappings of the old image are flushed while its pages are
+       still there - in a moment this space will be gone */
     proc64_msync();
 
-    /* Stos jadra zostaje ten sam - stoimy na nim w tej chwili */
+    /* The kernel stack stays the same - we are standing on it right now */
     uint64_t old = task64_swap_space(space, 0);
 
     uint64_t entry, rsp, brk_base;
     if (elf64_load(image, size, &entry, &brk_base) < 0 ||
         !(rsp = elf64_make_stack())) {
-        /* Stary obraz juz nie istnieje, a nowy sie nie zaladowal -
-           procesowi nie ma do czego wrocic */
+        /* The old image no longer exists and the new one did not load -
+           the process has nothing to return to */
         printk("[jadro] exec: '%s' nie da sie zaladowac\n", kname);
         paging64_free_space(old);
         prog_release(loaded);
         task64_exit_code(-1);
     }
     paging64_free_space(old);
-    /* Odwzorowania plikow opisywaly stara przestrzen, ktorej juz nie
-       ma - nowy obraz zaczyna z pusta tablica */
+    /* The file mappings described the old space, which is gone - the new
+       image starts with an empty table */
     task64_mmap_release();
-    /* Obraz jest juz przepisany do stron programu - kopia w pamieci
-       jadra nie jest do niczego potrzebna */
+    /* The image has already been copied into the program's pages - the
+       copy in kernel memory is not needed for anything */
     prog_release(loaded);
-    task64_set_brk_base(brk_base);   /* nowy obraz, nowa sterta */
+    task64_set_brk_base(brk_base);   /* new image, new heap */
     task64_rename(kname);
 
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
 
-    /* Ramka powrotu opisuje teraz nowy program */
+    /* The return frame now describes the new program */
     r->rip = entry;
     r->rsp = rsp;
     r->rax = r->rbx = r->rcx = r->rdx = 0;
@@ -281,17 +286,17 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     return 0;
 }
 
-/* --- Uruchamianie programu z initrd -------------------------------
+/* --- Running a program from the initrd ----------------------------
  *
- * Nowy proces to nowe zadanie, nowa przestrzen adresowa i program
- * wczytany z pliku. Jadro robi to przy starcie, a shell na zyczenie -
- * i jest to dokladnie ta sama droga.
+ * A new process means a new task, a new address space and a program
+ * read from a file. The kernel does this at startup and the shell on
+ * request - and it is exactly the same path.
  */
 struct spawn_req {
     char name[16];
     struct args64 args;
     int quiet;
-    int anycore;                /* 1 = wolno go prowadzic kazdemu rdzeniowi */
+    int anycore;                /* 1 = any core is allowed to run it */
 };
 
 static void spawn_thread(void *arg)
@@ -301,9 +306,9 @@ static void spawn_thread(void *arg)
     struct args64 args = req->args;
     int quiet = req->quiet;
 
-    /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
-       zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
-       wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
+    /* A process allowed to run on any core says so now - before it does
+       anything. Its kernel side runs under the big lock anyway; what
+       goes in parallel is the counting itself, in ring 3. */
     if (req->anycore)
         task_set_anycore();
 
@@ -321,9 +326,9 @@ static void spawn_thread(void *arg)
     }
     const char *from_where = prog_source();
 
-    /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
-       nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
-       we wszystkich przestrzeniach ta sama. */
+    /* Its own address space. From this moment the program's gigabyte
+       belongs to it alone - and kernel memory is still visible, because
+       it is the same in every space. */
     uint64_t space = paging64_new_space();
     if (!space) {
         printk("[ !! ] brak pamieci na przestrzen adresowa\n");
@@ -336,7 +341,7 @@ static void spawn_thread(void *arg)
 
     uint64_t entry, brk_base;
     int loaded_flag = elf64_load(image, size, &entry, &brk_base) == 0;
-    prog_release(loaded);        /* obraz jest juz w stronach programu */
+    prog_release(loaded);        /* the image is already in the program's pages */
     if (!loaded_flag)
         task64_exit();
     task64_set_brk_base(brk_base);
@@ -354,21 +359,22 @@ static void spawn_thread(void *arg)
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
 
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
+    /* We enter user code - the big kernel lock stays here */
     biglock_leave();
     enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
 }
 
-/* --- Pamiec wspoldzielona ------------------------------------------
+/* --- Shared memory ------------------------------------------------
  *
- * Region jest wspolny dla wszystkich, kto poda ten sam klucz: te same
- * ramki fizyczne wchodza do kilku przestrzeni adresowych naraz. Kazdy
- * proces widzi je pod SWOIM adresem - kolejnym wolnym w jego obszarze
- * mapowan - bo adres wirtualny jest sprawa przestrzeni, a nie pamieci.
+ * A region is common to everyone who gives the same key: the same
+ * physical frames enter several address spaces at once. Every process
+ * sees them at ITS OWN address - the next free one in its mapping area
+ * - because a virtual address is a matter of the space, not of the
+ * memory.
  *
- * Strony nie dostaja zakazu wykonywania: wspoldzielony bufor bywa
- * miejscem na kod tak samo, jak na dane, a o tym, co w nim lezy,
- * decyduje ten, kto go zaklada.
+ * The pages do not get the no-execute bit: a shared buffer is as often
+ * a place for code as for data, and what lies in it is decided by
+ * whoever sets it up.
  */
 uint64_t proc64_shm(int key, uint64_t size)
 {
@@ -395,21 +401,22 @@ uint64_t proc64_shm(int key, uint64_t size)
     return base;
 }
 
-/* --- Plik odwzorowany w pamieci ------------------------------------
+/* --- A file mapped into memory ------------------------------------
  *
- * Program dostaje adres, pod ktorym widzi zawartosc pliku. Zadna
- * strona nie powstaje od razu: numery blokow zapamietujemy, a same
- * bajty przychodza z dysku dopiero przy pierwszym dotknieciu. Prosba
- * o odwzorowanie stumegabajtowego pliku kosztuje wiec tyle, co spis
- * jego blokow - a nie sto megabajtow.
+ * The program is given an address at which it sees the file's
+ * contents. No page is created right away: we remember the block
+ * numbers, and the bytes themselves come from disk only on the first
+ * touch. Asking to map a hundred-megabyte file therefore costs as much
+ * as a list of its blocks - not a hundred megabytes.
  *
- * 'zapis' rozstrzyga, co znaczy dotkniecie pisaniem. Bez niego strona
- * nie ma prawa zapisu i proba konczy sie bledem ochrony - lepiej tak,
- * niz zeby zmiana cicho zginela. Z nim strona jest zapisywalna, a jej
- * tresc wraca do pliku przy proc64_msync (jawnie albo na wyjsciu
- * procesu). Kiedy - decyduje program, nie jadro: samo trzymanie
- * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
- * bajcie zabiloby caly sens odwzorowania.
+ * 'write' decides what touching it with a write means. Without it the
+ * page has no write permission and the attempt ends in a protection
+ * fault - better that than a change quietly dying. With it the page is
+ * writable and its contents go back to the file at proc64_msync
+ * (explicitly or when the process exits). When - that is the program's
+ * decision, not the kernel's: merely holding a dirty page costs
+ * nothing, while flushing it after every byte would kill the whole
+ * point of a mapping.
  */
 uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
                            uint64_t write)
@@ -436,8 +443,8 @@ uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
     if (!blocks)
         return 0;
     for (uint32_t i = 0; i < nblocks; i++) {
-        /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
-           strony nie wolno juz wchodzic w kod systemu plikow */
+        /* We work the numbers out NOW, at leisure - inside a page fault
+           handler we may no longer step into file system code */
         blocks[i] = fs_file_block(f, i, 0);
         if (!blocks[i]) {
             kfree(blocks);
@@ -455,14 +462,14 @@ uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
     return base;
 }
 
-/* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
- * Idziemy po stronach, nie po blokach: to strona jest jednostka,
- * o ktorej procesor mowi nam "brudna", i tylko takie tu przepisujemy.
- * Reszta obchodu jest lustrem wypelniania przy bledzie strony - te
- * same numery blokow, ustalone przy zakladaniu odwzorowania, tyle ze
- * blk_write zamiast blk_read.
+/* Flushes the pages of the current process's writable mappings back to
+ * the file. We walk pages, not blocks: the page is the unit the
+ * processor calls "dirty" for us, and only such pages are copied here.
+ * The rest of the walk mirrors the fill on a page fault - the same
+ * block numbers, worked out when the mapping was set up, only with
+ * blk_write instead of blk_read.
  *
- * Zwraca liczbe odeslanych stron.
+ * Returns the number of pages flushed.
  */
 uint64_t proc64_msync(void)
 {
@@ -484,8 +491,9 @@ uint64_t proc64_msync(void)
             uint64_t offset = va - start;
             const uint8_t *src = (const uint8_t *)(uintptr_t)frame;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
-                /* Za koncem pliku nie ma czego odsylac - blok albo nie
-                   istnieje, albo nalezy juz do kogos innego */
+                /* Past the end of the file there is nothing to flush - the block
+                   either does not exist or already belongs to somebody
+                   else */
                 if (offset + b * FS_BLOCK >= size)
                     break;
                 uint32_t blok = task64_mmap_block(va,
@@ -522,8 +530,8 @@ static int spawn_inner(const char *name, const struct args64 *args,
     if (args) {
         req->args = *args;
     } else {
-        /* Bez argumentow program i tak dostaje swoja nazwe - argv[0]
-           jest tym, czym jest wszedzie */
+        /* With no arguments a program still gets its own name - argv[0]
+           is what it is everywhere */
         req->args.argc = 1;
         for (int k = 0; k < ARG_LEN - 1 && req->name[k]; k++)
             req->args.v[0][k] = req->name[k];
@@ -545,7 +553,7 @@ int proc64_spawn(const char *name, const struct args64 *args, int quiet)
     return spawn_inner(name, args, quiet, 0);
 }
 
-/* To samo, ale proces wolno prowadzic KAZDEMU rdzeniowi */
+/* The same, but the process may be run by ANY core */
 int proc64_spawn_anycore(const char *name, const struct args64 *args,
                           int quiet)
 {
