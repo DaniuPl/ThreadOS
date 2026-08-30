@@ -1,7 +1,7 @@
-/* gmon - wskaznik zasobow (ring 3)
+/* gmon - a resource monitor (ring 3)
  *
- * Co pol sekundy odpytuje jadro o statystyki (sys_sysinfo) i rysuje w
- * oknie zuzycie RAM oraz uptime na zywo, z paskiem wykorzystania pamieci.
+ * Every half second it asks the kernel for statistics (sys_sysinfo) and
+ * draws RAM usage and uptime live in a window, with a memory usage bar.
  */
 
 #include "usys.h"
@@ -12,7 +12,7 @@
 #define C_RED   1
 #define C_BLUE  3
 
-/* Rysuje liczbe dziesietna w oknie */
+/* Draws a decimal number in the window */
 static void draw_num(int w, int x, int y, uint32_t v, int col)
 {
     char tmp[12], s[12];
@@ -45,7 +45,7 @@ void _start(void)
         win_text(w, 4, 28, "uptime (s):", C_GREEN);
         draw_num(w, 96, 28, si.uptime_s, C_WHITE);
 
-        /* Pasek wykorzystania RAM (procent z used/total) */
+        /* The RAM usage bar (the percentage from used/total) */
         uint32_t pct = si.ram_kib ? (si.used_kib * 160 / si.ram_kib) : 0;
         win_rect(w, 4, 48, 160, 12, C_RED);
         win_rect(w, 4, 48, (int)pct, 12, C_BLUE);

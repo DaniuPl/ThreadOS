@@ -1,9 +1,10 @@
-/* nslookup - zapytanie DNS z ring 3 (UDP, port 53)
+/* nslookup - a DNS query from ring 3 (UDP, port 53)
  *
- * Cala rozmowa dzieje sie w procesie uzytkownika: jadro daje tylko
- * gniazdo. Serwer DNS bierzemy z konfiguracji przyznanej przez DHCP.
+ * The whole conversation happens in a user process: the kernel only
+ * provides a socket. The DNS server we take from the configuration
+ * granted by DHCP.
  *
- * Uzycie: run nslookup example.com
+ * Usage: run nslookup example.com
  */
 
 #include "uapi.h"

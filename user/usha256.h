@@ -1,8 +1,8 @@
-/* SHA-256, HMAC-SHA256 i HKDF (RFC 6234, 2104, 5869)
+/* SHA-256, HMAC-SHA256 and HKDF (RFC 6234, 2104, 5869)
  *
- * Pierwsza cegielka pod TLS 1.3: cala jego kryptografia stoi na funkcji
- * skrotu i wyprowadzaniu kluczy. Kod jest 32-bitowy i bez zaleznosci -
- * programy ring 3 nie maja libc.
+ * The first brick under TLS 1.3: all of its cryptography stands on a
+ * hash function and key derivation. The code is 32-bit and has no
+ * dependencies - ring 3 programs have no libc.
  */
 
 #ifndef PROTONOS_USHA256_H
@@ -15,7 +15,7 @@
 
 struct sha256 {
     uint32_t state[8];
-    uint32_t len_lo, len_hi;      /* dlugosc w bitach (64 bity w dwoch) */
+    uint32_t len_lo, len_hi;      /* the length in bits (64 bits in two) */
     uint8_t buf[SHA256_BLOCK];
     uint32_t buflen;
 };
@@ -125,7 +125,7 @@ static inline void sha256_final(struct sha256 *c, uint8_t *out)
 
     uint8_t pad = 0x80;
     sha256_update(c, &pad, 1);
-    c->len_lo = lo; c->len_hi = hi;        /* dopelnienie nie liczy sie */
+    c->len_lo = lo; c->len_hi = hi;        /* the padding does not count */
 
     uint8_t zero = 0;
     while (c->buflen != 56) {
@@ -189,7 +189,7 @@ static inline void hmac_sha256(const uint8_t *key, uint32_t keylen,
     sha256_final(&c, out);
 }
 
-/* HKDF (RFC 5869): wyciagniecie i rozwiniecie */
+/* HKDF (RFC 5869): extract and expand */
 static inline void hkdf_extract(const uint8_t *salt, uint32_t saltlen,
                                 const uint8_t *ikm, uint32_t ikmlen,
                                 uint8_t *prk)
@@ -232,7 +232,7 @@ static inline void hkdf_expand(const uint8_t *prk, const uint8_t *info,
     }
 }
 
-/* HKDF-Expand-Label z TLS 1.3 (RFC 8446 7.1) */
+/* HKDF-Expand-Label from TLS 1.3 (RFC 8446 7.1) */
 static inline void hkdf_expand_label(const uint8_t *secret, const char *label,
                                      const uint8_t *ctx, uint32_t ctxlen,
                                      uint8_t *out, uint32_t outlen)
@@ -246,7 +246,7 @@ static inline void hkdf_expand_label(const uint8_t *secret, const char *label,
     uint32_t llen = 0;
     while (label[llen])
         llen++;
-    info[n++] = (uint8_t)(6 + llen);          /* "tls13 " + etykieta */
+    info[n++] = (uint8_t)(6 + llen);          /* "tls13 " + the label */
     const char *pre = "tls13 ";
     for (int i = 0; i < 6; i++)
         info[n++] = (uint8_t)pre[i];

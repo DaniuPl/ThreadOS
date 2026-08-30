@@ -1,7 +1,9 @@
-/* udptest - klient UDP: wysyla datagram do udpecho i czeka na echo
+/* udptest - a UDP client: it sends a datagram to udpecho and waits for
+ * the echo
  *
- * Domyslnie gada z wlasnym systemem (petla zwrotna), wiec dziala nawet
- * bez sieci na zewnatrz. Z argumentem wysyla pod wskazany adres.
+ * By default it talks to its own system (a loopback), so it works even
+ * with no network outside. With an argument it sends to the given
+ * address.
  */
 
 #include "usys.h"
@@ -9,7 +11,8 @@
 #define PORT 7777
 #define MSG  "proton-udp"
 
-/* Prosty parser adresu IPv4 (bez walidacji zakresow - to demo) */
+/* A simple IPv4 address parser (with no range validation - this is a
+   demo) */
 static uint32_t parse_ip(const char *s)
 {
     uint32_t ip = 0, part = 0;
@@ -40,7 +43,7 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    int32_t sock = udp_open(0);         /* port efemeryczny */
+    int32_t sock = udp_open(0);         /* an ephemeral port */
     if (sock < 0) {
         print("[udptest] brak wolnego gniazda\n");
         sys_exit(1);

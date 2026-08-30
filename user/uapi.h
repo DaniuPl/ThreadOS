@@ -1,10 +1,11 @@
-/* Wejscie do jadra dla kodu wspolnego programow
+/* The entry into the kernel for the programs' shared code
  *
- * Kryptografia, TLS, HTTP, DNS i parser HTML sa te same po obu
- * stronach - licza na bajtach i o trybie procesora nie wiedza nic.
- * Do jadra mowia jednak kilkoma nazwami, a te w trybie dlugim maja
- * inny ksztalt. Ten plik wybiera wlasciwa strone, zeby zaden
- * z tamtych naglowkow nie musial o tym wiedziec.
+ * The cryptography, TLS, HTTP, DNS and the HTML parser are the same on
+ * both sides - they compute on bytes and know nothing about the
+ * processor mode. They do talk to the kernel through a handful of
+ * names, though, and those have a different shape in long mode. This
+ * file picks the right side, so that none of those headers has to know
+ * about it.
  */
 
 #ifndef PROTONOS_UAPI_H

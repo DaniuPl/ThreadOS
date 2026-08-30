@@ -1,9 +1,10 @@
-/* prio - demonstracja schedulera z priorytetami
+/* prio - a demonstration of the scheduler with priorities
  *
- * Watek glowny ustawia sobie wysoki priorytet (by moc zatrzymac test),
- * tworzy dwa watki liczace w petli: jeden normalny, drugi niski. Przez
- * okno czasu watek normalny wywlaszcza niski, wiec naliczy znacznie
- * wiecej. Po czasie glowny ustawia 'stop' i wypisuje oba liczniki.
+ * The main thread gives itself a high priority (so as to be able to
+ * stop the test), then creates two threads counting in a loop: one
+ * normal, the other low. Over the time window the normal thread
+ * preempts the low one, so it will count considerably more. After the
+ * time is up the main one sets 'stop' and prints both counters.
  */
 
 #include "usys.h"
@@ -21,7 +22,7 @@ static void worker_normal(void *arg)
 static void worker_low(void *arg)
 {
     (void)arg;
-    sys_setprio(2);              /* niski priorytet */
+    sys_setprio(2);              /* low priority */
     while (!stop)
         cnt_low++;
     sys_exit(0);
@@ -29,7 +30,7 @@ static void worker_low(void *arg)
 
 void _start(void)
 {
-    sys_setprio(0);             /* glowny watek: wysoki priorytet */
+    sys_setprio(0);             /* the main thread: high priority */
     int n = sys_thread(worker_normal, 0);
     int l = sys_thread(worker_low, 0);
     if (n < 0 || l < 0) {
@@ -37,7 +38,7 @@ void _start(void)
         sys_exit(1);
     }
 
-    sys_sleep(800);             /* okno pomiaru - glowny spi */
+    sys_sleep(800);             /* the measurement window - the main one sleeps */
     stop = 1;
     sys_wait(n);
     sys_wait(l);

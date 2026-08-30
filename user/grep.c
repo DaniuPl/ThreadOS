@@ -1,5 +1,6 @@
-/* grep - przepuszcza ze stdin tylko wiersze zawierajace wzorzec (argv[1]).
- * Filtr potoku: 'seq 20 | grep 1', 'cat plik | grep slowo'.
+/* grep - passes through from stdin only the lines containing a pattern
+ * (argv[1]).
+ * A pipeline filter: 'seq 20 | grep 1', 'cat file | grep word'.
  */
 
 #include "usys.h"
@@ -8,7 +9,7 @@
 
 static char line[LINE_MAX];
 static int len;
-static int matched;             /* czy cokolwiek dopasowano */
+static int matched;             /* was anything matched */
 
 static void flush_line(const char *pattern)
 {
@@ -38,8 +39,8 @@ void _start(int argc, char **argv)
                 line[len++] = buf[i];
         }
     }
-    if (len)            /* ostatni wiersz bez nowej linii */
+    if (len)            /* the last line with no newline */
         flush_line(argv[1]);
 
-    sys_exit(matched ? 0 : 1);  /* jak prawdziwy grep: 1 = brak dopasowan */
+    sys_exit(matched ? 0 : 1);  /* like the real grep: 1 = no matches */
 }

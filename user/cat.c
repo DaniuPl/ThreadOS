@@ -1,5 +1,5 @@
-/* cat - wypisuje plik z dysku na konsole (czysty model fd: read pliku
- * -> write na fd 1). Uruchamiane z ush: 'cat <plik>'.
+/* cat - prints a file from disk to the console (a pure fd model: read
+ * the file -> write to fd 1). Started from ush: 'cat <file>'.
  */
 
 #include "usys.h"

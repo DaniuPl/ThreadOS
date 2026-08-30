@@ -1,8 +1,9 @@
-/* tcpserv - serwer TCP w ring 3 (port 5555)
+/* tcpserv - a TCP server in ring 3 (port 5555)
  *
- * Wita klienta, odsyla to, co dostal, i konczy polaczenie. Dowod, ze
- * ProtonOS obsluguje takze pasywne otwarcie: SYN od obcego hosta,
- * SYN|ACK, kolejka nawiazanych polaczen i strumien w obie strony.
+ * It greets a client, echoes back what it received and ends the
+ * connection. Proof that ProtonOS handles a passive open too: a SYN
+ * from a foreign host, SYN|ACK, a queue of established connections and
+ * a stream in both directions.
  */
 
 #include "usys.h"
@@ -23,7 +24,7 @@ void _start(void)
     while (served < 3) {
         int32_t conn = tcp_accept(lis, 30000);
         if (conn < 0)
-            break;                       /* nikt nie przyszedl - konczymy */
+            break;                       /* nobody came - we finish */
 
         print("[tcpserv] polaczenie przyjete\n");
         tcp_send(conn, GREETING, sizeof(GREETING) - 1, 5000);

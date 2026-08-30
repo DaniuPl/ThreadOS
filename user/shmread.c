@@ -1,7 +1,7 @@
-/* shmread - czytelnik pamieci wspoldzielonej
+/* shmread - the shared memory reader
  *
- * Mapuje ten sam region shm (klucz 42) co shmtest i wypisuje wartosc,
- * ktora zapisal tam inny proces. To samo fizyczne miejsce w pamieci.
+ * It maps the same shm region (key 42) as shmtest and prints the value
+ * another process wrote there. The same physical place in memory.
  */
 
 #include "usys.h"

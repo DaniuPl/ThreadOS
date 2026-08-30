@@ -1,4 +1,4 @@
-/* rm - usuwa plik z dysku (sys_unlink). */
+/* rm - removes a file from the disk (sys_unlink). */
 
 #include "usys.h"
 

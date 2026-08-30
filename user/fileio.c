@@ -1,8 +1,10 @@
-/* fileio - dowod, ze proces ring 3 obsluguje pliki przez deskryptory
+/* fileio - proof that a ring 3 process handles files through
+ * descriptors
  *
- * Otwiera plik do zapisu (tworzac go), pisze przez fd, zamyka. Potem
- * otwiera do odczytu i czyta przez fd na konsole. Plik zostaje na
- * dysku - widoczny przez 'cat ring3.txt' takze po restarcie.
+ * It opens a file for writing (creating it), writes through the fd and
+ * closes it. Then it opens it for reading and reads through the fd to
+ * the console. The file stays on the disk - visible through
+ * 'cat ring3.txt' after a restart too.
  */
 
 #include "usys.h"

@@ -1,14 +1,14 @@
-/* memtest - dowod, ze sbrk/malloc daje procesowi rosnaca pamiec
+/* memtest - proof that sbrk/malloc gives a process growing memory
  *
- * Alokuje kilka blokow przez malloc (oparte o sys_sbrk), zapisuje
- * wzorzec i sprawdza, czy przetrwal - czyli ze strony zostaly
- * naprawde zmapowane i sa zapisywalne z ring 3.
+ * It allocates several blocks through malloc (built on sys_sbrk),
+ * writes a pattern and checks whether it survived - that is, that the
+ * pages really were mapped and are writable from ring 3.
  */
 
 #include "usys.h"
 
 #define BLOCKS    8
-#define BLOCK_LEN 4096   /* po jednej stronie kazdy - wymusza wzrost brk */
+#define BLOCK_LEN 4096   /* one page each - it forces brk to grow */
 
 void _start(void)
 {
@@ -32,7 +32,7 @@ void _start(void)
     print_dec((uint32_t)sys_sbrk(0));
     print("\n");
 
-    /* Weryfikacja wzorca - kazdy bajt musi byc nienaruszony */
+    /* Verifying the pattern - every byte has to be intact */
     for (int b = 0; b < BLOCKS; b++)
         for (int i = 0; i < BLOCK_LEN; i++)
             if (blk[b][i] != (unsigned char)(b * 31 + i)) {

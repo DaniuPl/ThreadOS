@@ -1,5 +1,7 @@
-/* ls - wypisuje wpisy katalogu roboczego. Katalogi konczy '/'.
- * Enumeracje udostepnia jadro syscallem sys_readdir (index-based).
+/* ls - prints the entries of the working directory. Directories end
+ * with '/'.
+ * The enumeration is provided by the kernel through the sys_readdir
+ * syscall (index-based).
  */
 
 #include "usys.h"
@@ -11,9 +13,9 @@ void _start(void)
         char name[FS_NAME_MAX + 1];
         int32_t r = sys_readdir(i, name);
         if (r == -1)
-            break;                 /* koniec wpisow */
+            break;                 /* the end of the entries */
         print(name);
-        if (r == -2) {             /* katalog */
+        if (r == -2) {             /* a directory */
             print("/\n");
         } else {
             print("  ");

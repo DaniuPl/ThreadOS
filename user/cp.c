@@ -1,4 +1,4 @@
-/* cp - kopiuje plik (src -> dst) przez deskryptory plikow. */
+/* cp - copies a file (src -> dst) through file descriptors. */
 
 #include "usys.h"
 

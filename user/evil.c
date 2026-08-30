@@ -1,4 +1,4 @@
-/* evil - niegrzeczny program: siega po pamiec jadra i ginie */
+/* evil - a naughty program: it reaches for kernel memory and dies */
 
 #include "usys.h"
 
@@ -10,7 +10,8 @@ void _start(void)
     volatile uint32_t probe = *(volatile uint32_t *)0x100000;
     (void)probe;
 
-    /* Tu nie docieramy - jadro ubija proces page faultem */
+    /* We do not get here - the kernel kills the process with a page
+   fault */
     print("[evil] TEGO NIE POWINNO BYC WIDAC\n");
     sys_exit(1);
 }

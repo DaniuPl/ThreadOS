@@ -1,13 +1,15 @@
-/* deep - stos rosnacy na zadanie
+/* deep - a stack growing on demand
  *
- * Program dostaje na start osiem stron stosu. Ta rekurencja siega
- * grubo glebiej: kazde wywolanie zajmuje cztery kilobajty ramki
- * i zapisuje w niej wzorzec, a po powrocie sprawdza, czy wzorzec
- * przetrwal. Jesli jadro dokladalo strony pod palcami, wszystko sie
- * zgadza; jesli nie, program ginie po pierwszym przekroczeniu granicy.
+ * The program gets eight pages of stack to start with. This recursion
+ * reaches far deeper: every call takes four kilobytes of frame and
+ * writes a pattern into it, and on the way back checks whether the
+ * pattern survived. If the kernel added pages under its fingers,
+ * everything matches; if not, the program dies at the first crossing of
+ * the limit.
  *
- * Sprawdzanie wzorca PO powrocie jest tu istotne: dokladanie stron
- * pod nadpisywanie cudzych ramek wygladaloby w polowie tak samo.
+ * Checking the pattern ON THE WAY BACK matters here: adding pages on
+ * top of overwriting somebody else's frames would look the same
+ * halfway.
  */
 
 #include "usys.h"
@@ -26,7 +28,7 @@ static uint32_t descend(uint32_t level)
     deepest = level;
     uint32_t below = level < DEEP ? descend(level + 1) : 0;
 
-    /* Po powrocie: czy ramka jest wciaz nasza i nietknieta? */
+    /* On the way back: is the frame still ours and untouched? */
     for (uint32_t i = 0; i < FRAME; i += 512)
         if (frame[i] != (unsigned char)(level + i))
             return below + 1000000;

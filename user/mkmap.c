@@ -1,10 +1,10 @@
-/* mkmap - zaklada plik z wzorcem do sprawdzania odwzorowan
+/* mkmap - creates a file with a pattern for checking mappings
  *
- * Bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF - ten sam wzorzec,
- * ktorego szuka mmapfile. Plik jest wiekszy niz jedna strona, wiec
- * jego odczyt przez odwzorowanie musi odbyc sie w kilku ratach.
+ * The byte with number i has the value (i * 7 + 13) & 0xFF - the same
+ * pattern mmapfile looks for. The file is larger than a single page, so
+ * reading it through a mapping has to happen in several instalments.
  *
- * Uzycie: run mkmap <plik> [ile KiB] (domyslnie 12)
+ * Usage: run mkmap <file> [how many KiB] (12 by default)
  */
 
 #include "usys.h"

@@ -1,5 +1,6 @@
-/* mv - przenosi plik: kopiuje src -> dst, po czym usuwa src.
- * (PFS nie ma osobnego rename, wiec robimy kopie i kasujemy oryginal.)
+/* mv - moves a file: it copies src -> dst, then removes src.
+ * (PFS has no separate rename, so we make a copy and delete the
+ * original.)
  */
 
 #include "usys.h"
@@ -33,6 +34,6 @@ void _start(int argc, char **argv)
 
     sys_close(src);
     sys_close(dst);
-    sys_unlink(argv[1]);            /* usun oryginal */
+    sys_unlink(argv[1]);            /* remove the original */
     sys_exit(0);
 }

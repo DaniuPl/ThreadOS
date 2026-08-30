@@ -1,8 +1,8 @@
-/* udpecho - serwer UDP w ring 3: odsyla to, co dostal
+/* udpecho - a UDP server in ring 3: it echoes back what it received
  *
- * Pokazuje, ze siec wyszla z jadra do procesow: gniazdo nalezy do
- * procesu, jadro sprzata je po jego smierci, a dane chodza przez
- * sprawdzone wskazniki.
+ * It shows that the network has moved out of the kernel into
+ * processes: a socket belongs to a process, the kernel cleans it up
+ * after its death, and the data travel through checked pointers.
  */
 
 #include "usys.h"
@@ -23,7 +23,7 @@ void _start(void)
     uint32_t from_ip, from_port;
     int served = 0;
 
-    /* Kilka datagramow albo 15 s - potem konczymy, zeby nie wisiec */
+    /* A few datagrams or 15 s - then we finish, so as not to hang */
     while (served < 4) {
         int32_t n = udp_recv(sock, buf, sizeof(buf) - 1, 15000,
                              &from_ip, &from_port);

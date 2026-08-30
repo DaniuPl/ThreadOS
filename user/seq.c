@@ -1,5 +1,5 @@
-/* seq - wypisuje liczby 1..N (argv[1]), kazda w osobnym wierszu.
- * Wygodny producent potoku: 'seq 5 | wc', 'seq 9 | grep 3'.
+/* seq - prints the numbers 1..N (argv[1]), each on its own line.
+ * A convenient pipeline producer: 'seq 5 | wc', 'seq 9 | grep 3'.
  */
 
 #include "usys.h"

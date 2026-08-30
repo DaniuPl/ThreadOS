@@ -1,6 +1,7 @@
-/* head - przepuszcza tylko pierwsze N wierszy ze stdin (argv[1], domyslnie 10).
- * Po wypisaniu limitu zamyka sie - producent w potoku dostanie wtedy
- * przerwany potok i tez zakonczy zapis.
+/* head - passes through only the first N lines from stdin (argv[1], 10
+ * by default).
+ * Once the limit is printed it closes - the producer in the pipeline
+ * then gets a broken pipe and stops writing too.
  */
 
 #include "usys.h"

@@ -1,9 +1,10 @@
-/* gterm - terminal w oknie graficznym (ring 3)
+/* gterm - a terminal in a graphical window (ring 3)
  *
- * Przyjmuje klawisze (gdy okno ma fokus) do linii polecen. Po Enter
- * uruchamia program z wyjsciem przekierowanym do pliku 'termout',
- * czeka, czyta plik i rysuje wynik w oknie. Spina klawiature, procesy,
- * przekierowania i system plikow w jednym GUI.
+ * It takes keys (when the window has focus) into a command line. On
+ * Enter it runs a program with its output redirected to the file
+ * 'termout', waits, reads the file and draws the result in the window.
+ * It ties the keyboard, processes, redirection and the file system
+ * together in one GUI.
  */
 
 #include "usys.h"
@@ -24,7 +25,7 @@ static void run_line(void)
     line[len] = '\0';
     if (len == 0)
         return;
-    int32_t pid = sys_spawn(line, "termout", 0);   /* stdout -> plik */
+    int32_t pid = sys_spawn(line, "termout", 0);   /* stdout -> a file */
     if (pid >= 0)
         sys_wait(pid);
 
@@ -37,7 +38,7 @@ static void run_line(void)
     len = 0;
 }
 
-/* Rysuje bufor wyjscia rozbity na wiersze po '\n' */
+/* Draws the output buffer split into lines on '\n' */
 static void draw_output(int w)
 {
     char buf[40];

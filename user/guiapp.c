@@ -1,14 +1,15 @@
-/* guiapp - interaktywna aplikacja graficzna w ring 3
+/* guiapp - an interactive graphical application in ring 3
  *
- * Tworzy wlasne okno i rysuje przez syscalle. Kompozytor jadra dostarcza
- * jej zdarzenia (klikniecia w obszar okna) przez win_poll - aplikacja
- * reaguje: w miejscu kazdego klikniecia rysuje bialy znacznik i zlicza
- * je. Konczy sie przez kill; kompozytor sprzata okno.
+ * It creates a window of its own and draws through syscalls. The
+ * kernel's compositor delivers events to it (clicks in the window's
+ * area) through win_poll - the application reacts: at the place of
+ * every click it draws a white marker and counts them. It is ended by
+ * kill; the compositor cleans the window up.
  */
 
 #include "usys.h"
 
-#define C_BG    8    /* szare tlo okna */
+#define C_BG    8    /* the window's grey background */
 #define C_RED   1
 #define C_GREEN 2
 #define C_BLUE  3
@@ -42,7 +43,7 @@ void _start(void)
         sys_exit(1);
 
     for (;;) {
-        /* Odbierz zdarzenia: klikniecia i klawisze (okno z fokusem) */
+        /* Receive events: clicks and keys (a window with focus) */
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLICK && npt < MAXPT) {
@@ -61,7 +62,8 @@ void _start(void)
         }
         typed[tlen] = '\0';
 
-        /* Przerysuj okno: tlo, paleta kwadratow, podpisy, dane */
+        /* Redraw the window: the background, the palette of squares, the
+   captions, the data */
         win_rect(w, 0, 0, 120, 60, C_BG);
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
@@ -71,7 +73,7 @@ void _start(void)
         win_text(w, 6, 38, "txt:", C_GREEN);
         win_text(w, 40, 38, typed, C_WHITE);
 
-        /* Znaczniki w miejscach klikniec */
+        /* Markers at the places of the clicks */
         for (int i = 0; i < npt; i++)
             win_rect(w, px[i] - 2, py[i] - 2, 5, 5, C_WHITE);
 

@@ -1,11 +1,11 @@
-/* mmaptest - sprawdza syscall mmap: mapuje swiezy obszar pamieci,
- * zapisuje wzorzec, weryfikuje i wypisuje wynik. Dowod, ze mmap daje
- * procesowi nowe, zapisywalne, wyzerowane strony.
+/* mmaptest - checks the mmap syscall: it maps a fresh area of memory,
+ * writes a pattern, verifies it and prints the result. Proof that mmap
+ * gives a process new, writable, zeroed pages.
  */
 
 #include "usys.h"
 
-#define LEN (3 * 4096)   /* 3 strony - wymusza kilka mapowan */
+#define LEN (3 * 4096)   /* 3 pages - it forces several mappings */
 
 void _start(void)
 {
@@ -15,7 +15,7 @@ void _start(void)
         sys_exit(1);
     }
 
-    /* swieza pamiec ma byc wyzerowana */
+    /* fresh memory is to be zeroed */
     for (int i = 0; i < LEN; i++)
         if (p[i] != 0) {
             print("[mmaptest] pamiec nie jest wyzerowana!\n");

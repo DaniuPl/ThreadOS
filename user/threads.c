@@ -1,8 +1,9 @@
-/* threads - watki w jednym procesie (wspolna przestrzen adresowa)
+/* threads - threads within one process (a shared address space)
  *
- * Tworzy dwa watki przez sys_thread; kazdy ustawia inna zmienna globalna.
- * Glowny watek czeka na oba i sumuje wyniki - widzi zapisy watkow, bo
- * dziela te sama pamiec. Oczekiwany wynik: 11 + 22 = 33.
+ * It creates two threads through sys_thread; each sets a different
+ * global variable. The main thread waits for both and adds the results
+ * up - it sees the threads' writes, because they share the same memory.
+ * The expected result: 11 + 22 = 33.
  */
 
 #include "usys.h"
@@ -35,7 +36,7 @@ void _start(void)
     sys_wait(t2);
 
     print("[threads] watki zapisaly, suma=");
-    print_dec((uint32_t)(va + vb));   /* 33 = oba watki widzialy ta sama pamiec */
+    print_dec((uint32_t)(va + vb));   /* 33 = both threads saw the same memory */
     print("\n");
     sys_exit(0);
 }

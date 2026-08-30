@@ -1,8 +1,8 @@
-/* shmtest - pisarz pamieci wspoldzielonej
+/* shmtest - the shared memory writer
  *
- * Mapuje region shm (klucz 42), zapisuje znana wartosc, po czym
- * uruchamia 'shmread' - osobny proces, ktory mapuje ten sam klucz
- * i czyta wartosc. Dowod, ze dwa procesy widza te sama pamiec.
+ * It maps an shm region (key 42), writes a known value, then starts
+ * 'shmread' - a separate process which maps the same key and reads the
+ * value. Proof that two processes see the same memory.
  */
 
 #include "usys.h"

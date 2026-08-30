@@ -1,4 +1,4 @@
-/* echo - wypisuje swoje argumenty (dowod, ze argc/argv dziala) */
+/* echo - prints its arguments (proof that argc/argv works) */
 
 #include "usys.h"
 
