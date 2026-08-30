@@ -76,7 +76,7 @@ through QMP: screen contents, pixel colours, serial output, injected
 keystrokes. Nothing is mocked — a failing assertion means the system
 misbehaved, not that a stub drifted.
 
-The checks are split into groups under `scripts/testy/`, one file per
+The checks are split into groups under `scripts/tests/`, one file per
 group, running in parallel because each needs its own virtual machine
 and those spend most of their time waiting. Several groups boot QEMU
 **twice against the same disk image**, which is the only conclusive

@@ -140,7 +140,7 @@ ProtonOS/
 │   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
 │   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
 │   ├── ptest.py        # wspólna część testu: klasa Qemu, serwery, check
-│   ├── run_testy.py    # uruchamia grupy testu równolegle (make test)
+│   ├── run_tests.py    # uruchamia grupy testu równolegle (make test)
 │   └── testy/          # grupy: rdzeń, k64, gfx64, sieć, pulpit, ISO…
 ├── boot64/             # wejście w tryb długi, stuby przerwań, syscall
 ├── kernel64/           # jądro trybu długiego (x86-64) - tylko to,
@@ -252,7 +252,7 @@ klawisze poleceniem `sendkey`) - można rozwijać system bez wpatrywania
 się w okno. Ponad czterysta sprawdzeń podzielonych jest na **grupy
 chodzące równolegle**, bo każda potrzebuje własnej maszyny, a te
 większość czasu i tak czekają: na rozruch, na odpowiedź, na
-przerysowanie ekranu. Grupy leżą w `scripts/testy/`, jedna na plik,
+przerysowanie ekranu. Grupy leżą w `scripts/tests/`, jedna na plik,
 a `T=` wybiera pojedynczą - przy pracy nad jednym podsystemem to
 różnica między osiemdziesięcioma sekundami a pięcioma minutami.
 

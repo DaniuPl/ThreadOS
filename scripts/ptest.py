@@ -4,7 +4,7 @@ Wszystko, co potrzebne, zeby uruchomic maszyne i cos na niej sprawdzic:
 klasa Qemu, serwery HTTP i DNS dla testow sieciowych, generowanie
 certyfikatow oraz sama funkcja check.
 
-Same sprawdzenia leza w scripts/testy/ - kazda grupa w osobnym pliku,
+Same sprawdzenia leza w scripts/tests/ - kazda grupa w osobnym pliku,
 bo kazda potrzebuje wlasnej maszyny, a te uruchamiaja sie rownolegle.
 """
 
@@ -80,16 +80,16 @@ def font8x8():
     zmieni, testy czytaja nowa."""
     global _FONT8X8
     if _FONT8X8 is None:
-        sciezka = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "..", "kernel", "include", "font8x8.h")
-        with open(sciezka) as fh:
-            zrodlo = fh.read()
-        wiersze = re.findall(r"\{((?:0x[0-9A-Fa-f]{2},){7}0x[0-9A-Fa-f]{2})\}",
-                             zrodlo)
+        with open(path) as fh:
+            src = fh.read()
+        rows = re.findall(r"\{((?:0x[0-9A-Fa-f]{2},){7}0x[0-9A-Fa-f]{2})\}",
+                             src)
         _FONT8X8 = {}
-        for i, w in enumerate(wiersze):
-            wzor = tuple(int(v, 16) for v in w.split(","))
-            _FONT8X8.setdefault(wzor, chr(0x20 + i))
+        for i, w in enumerate(rows):
+            pattern = tuple(int(v, 16) for v in w.split(","))
+            _FONT8X8.setdefault(pattern, chr(0x20 + i))
     return _FONT8X8
 
 
@@ -695,44 +695,44 @@ class Qemu:
         ile = {}
         for y in range(25 * 8):
             o = ((y0 + y) * w + x0) * 3
-            linia = px[o:o + 80 * 8 * 3]
-            for i in range(0, len(linia), 3):
-                p = linia[i:i + 3]
+            line_text = px[o:o + 80 * 8 * 3]
+            for i in range(0, len(line_text), 3):
+                p = line_text[i:i + 3]
                 ile[p] = ile.get(p, 0) + 1
         if not ile:
             return ""
         tlo = max(ile, key=ile.get)
 
         font = font8x8()
-        wiersze = []
+        rows = []
         for row in range(25):
-            znaki = []
+            chars = []
             for col in range(80):
-                wzor = []
+                pattern = []
                 for y in range(8):
                     o = ((y0 + row * 8 + y) * w + x0 + col * 8) * 3
-                    linia = px[o:o + 24]
+                    line_text = px[o:o + 24]
                     b = 0
                     for x in range(8):
-                        if linia[x * 3:x * 3 + 3] != tlo:
+                        if line_text[x * 3:x * 3 + 3] != tlo:
                             b |= 1 << x
-                    wzor.append(b)
-                znaki.append(font.get(tuple(wzor), "?"))
-            wiersze.append("".join(znaki).rstrip())
-        return "\n".join(wiersze).rstrip()
+                    pattern.append(b)
+                chars.append(font.get(tuple(pattern), "?"))
+            rows.append("".join(chars).rstrip())
+        return "\n".join(rows).rstrip()
 
-    def czekaj_fbcon(self, tekst, timeout=15):
+    def wait_fbcon(self, text, timeout=15):
         """Czeka, az tekst pojawi sie na konsoli rysowanej w buforze
         obrazu. Zwraca caly ekran (takze po przekroczeniu czasu -
         asercja nalezy do wolajacego)."""
-        koniec = time.time() + timeout
-        ekran = ""
-        while time.time() < koniec:
-            ekran = self.screen_fbcon()
-            if tekst in ekran:
-                return ekran
+        end = time.time() + timeout
+        screen_text = ""
+        while time.time() < end:
+            screen_text = self.screen_fbcon()
+            if text in screen_text:
+                return screen_text
             time.sleep(0.4)
-        return ekran
+        return screen_text
 
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
                 ":": "shift-semicolon",
@@ -752,7 +752,7 @@ class Qemu:
         with open(self.serial_path, "rb") as fh:
             return fh.read().decode("latin1")
 
-    def polecenie(self, cmd, tekst=None, timeout=20):
+    def command(self, cmd, text=None, timeout=20):
         """Wpisuje polecenie i oddaje TO, CO PRZYBYLO na porcie po nim.
 
         Bez odcinania starszej tresci latwo o falszywy alarm: shell
@@ -761,14 +761,14 @@ class Qemu:
         polecenia lezy tam do konca biegu."""
         start = len(self.serial())
         self.type_line(cmd)
-        if tekst is None:
+        if text is None:
             time.sleep(0.5)
             return self.serial()[start:]
-        koniec = time.time() + timeout
-        while time.time() < koniec:
-            nowe = self.serial()[start:]
-            if tekst in nowe:
-                return nowe
+        end = time.time() + timeout
+        while time.time() < end:
+            fresh = self.serial()[start:]
+            if text in fresh:
+                return fresh
             time.sleep(0.3)
         return self.serial()[start:]
 
@@ -810,7 +810,7 @@ def check(name, cond):
         failures.append(name)
 
 
-def wynik():
+def summary():
     """Konczy proces grupy: 0 = wszystko przeszlo."""
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
@@ -819,7 +819,7 @@ def wynik():
 
 
 
-def zrob_iso64(katalog, iso, grafika=False, tekst=False):
+def make_iso64(workdir, iso, graphics=False, text=False):
     """Sklada plyte z jadrem 64-bitowym i jego initrd.
 
     Jadro 64-bitowe nie da sie uruchomic przez -kernel: QEMU wgrywa tak
@@ -832,24 +832,24 @@ def zrob_iso64(katalog, iso, grafika=False, tekst=False):
 
     Zwraca True, gdy plyta powstala.
     """
-    os.makedirs(katalog + "/boot/grub", exist_ok=True)
-    shutil.copy(KERNEL64, katalog + "/boot/protonos64.bin")
+    os.makedirs(workdir + "/boot/grub", exist_ok=True)
+    shutil.copy(KERNEL64, workdir + "/boot/protonos64.bin")
     mod = ""
     if INITRD64 and os.path.exists(INITRD64):
-        shutil.copy(INITRD64, katalog + "/boot/initrd64.img")
+        shutil.copy(INITRD64, workdir + "/boot/initrd64.img")
         mod = "    module2 /boot/initrd64.img initrd64\n"
-    naglowek = ("insmod all_video\nset gfxpayload=keep\n" if grafika
-                else "set gfxpayload=text\n" if tekst else "")
-    with open(katalog + "/boot/grub/grub.cfg", "w") as fh:
-        fh.write(naglowek + "set timeout=0\nset default=0\n"
+    header = ("insmod all_video\nset gfxpayload=keep\n" if graphics
+                else "set gfxpayload=text\n" if text else "")
+    with open(workdir + "/boot/grub/grub.cfg", "w") as fh:
+        fh.write(header + "set timeout=0\nset default=0\n"
                  'menuentry "ProtonOS 64" {\n'
                  "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
-    return subprocess.run(["grub-mkrescue", "-o", iso, katalog],
+    return subprocess.run(["grub-mkrescue", "-o", iso, workdir],
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL).returncode == 0
 
 
-def brak64():
+def no64():
     """Powod, dla ktorego testu 64-bitowego nie da sie uruchomic, albo
     None, gdy da sie. Wszystkie grupy 64-bitowe pytaja o to samo."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):

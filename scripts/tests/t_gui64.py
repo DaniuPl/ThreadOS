@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""Test dymny ProtonOS: aplikacje graficzne w pierscieniu 3 (jadro 64-bit).
+
+Pulpit dzialal do tej pory sam ze soba - kompozytor siedzial w jadrze,
+a ikony wskazywaly programy, ktorych w trybie dlugim nie bylo. Teraz
+ikona uruchamia prawdziwy proces z initrd, ktory rysuje we wlasnym
+oknie przez wywolania systemowe i dostaje z powrotem zdarzenia.
+
+Sprawdzamy cala te droge tak, jak widzi ja uzytkownik: klikniecie
+ikony ma dac okno z narysowana paleta, klikniecie w okno ma zostawic
+w nim znacznik (czyli zdarzenie doszlo do procesu i wrocilo rysunkiem),
+a klawisze maja trafiac do okna z fokusem.
+
+Okna aplikacji ida po kolei za dwoma oknami jadra: pierwsze staje pod
+(94,54), kazde nastepne dwanascie pikseli nizej i w prawo. Obszar
+tresci zaczyna sie o piksel w prawo i o pasek tytulu nizej. Wszystkie
+wspolrzedne ekranu ponizej biora sie z tej jednej zasady.
+"""
+
+import os
+import sys
+import tempfile
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ptest import *          # noqa: F401,F403
+from ptest import check, summary
+
+# Kompozytor stawia okna kaskadowo: slot i pod (70+12i, 30+12i), a tresc
+# o piksel w prawo i o pasek tytulu (10 px) nizej. Dwa pierwsze sloty
+# zajmuja okna jadra, wiec aplikacje zaczynaja sie od trzeciego.
+def body_text(slot):
+    return 70 + 12 * slot + 1, 30 + 12 * slot + 11
+
+
+BODY_X, BODY_Y = body_text(2)  # lewy gorny rog tresci pierwszej aplikacji
+
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+BIALY = (255, 255, 255)
+
+
+def scr(cx, cy):
+    """Wspolrzedne ekranu punktu (cx,cy) obszaru tresci okna."""
+    return BODY_X + cx, BODY_Y + cy
+
+
+def main():
+    print("--- aplikacja graficzna w ring 3 (jadro 64-bitowe) ---")
+
+    if KERNEL64 is None or not os.path.exists(KERNEL64):
+        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        return 0
+    if INITRD64 is None or not os.path.exists(INITRD64):
+        print("POMINIETE: brak initrd 64-bitowego")
+        return 0
+    if shutil.which("grub-mkrescue") is None:
+        print("POMINIETE: brak grub-mkrescue")
+        return 0
+    if shutil.which("qemu-system-x86_64") is None:
+        print("POMINIETE: brak qemu-system-x86_64")
+        return 0
+
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
+    try:
+        os.makedirs(d + "/boot/grub")
+        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(INITRD64, d + "/boot/initrd64.img")
+        with open(d + "/boot/grub/grub.cfg", "w") as fh:
+            fh.write("insmod all_video\nset gfxpayload=keep\n"
+                     "set timeout=0\nset default=0\n"
+                     'menuentry "ProtonOS 64" {\n'
+                     "    multiboot2 /boot/protonos64.bin\n"
+                     "    module2 /boot/initrd64.img initrd64\n}\n")
+        made = subprocess.run(["grub-mkrescue", "-o", iso, d],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+        check("plyta z jadrem 64-bitowym buduje sie", made)
+        if not made:
+            return summary()
+
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("proton64>", timeout=60)
+            # Plik na dysku dla menedzera plikow - po starcie pulpitu
+            # klawiatura nalezy juz do niego, wiec teraz albo wcale
+            q.command("write notatka czesc-z-dysku", "write:")
+            q.type_line("pulpit")
+            q.wait_serial("Pulpit startuje", timeout=30)
+            check("pulpit wstaje w trybie graficznym", q.wait_desktop(30))
+
+            # Mysz jest wzgledna: najpierw dosun kursor do rogu, zeby
+            # wiedziec, gdzie w ogole jest.
+            q.mouse_home()
+            q.mouse_goto(24, 32)          # ikona 'App' (kafelek 8,20,32x24)
+            q.mouse_click()
+            q.mouse_goto(400, 300)        # odsun kursor od okna
+
+            # Aplikacja rysuje palete trzech kwadratow u gory okna.
+            # Kazdy z innego wywolania systemowego, wiec kazdy osobno.
+            cx, cy = scr(10, 10)
+            check("klik ikony uruchamia program z initrd (czerwony kwadrat)",
+                  q.wait_pixel(cx, cy, RED, timeout=20))
+            cx, cy = scr(38, 10)
+            check("program rysuje drugi kwadrat (zielony)",
+                  q.wait_pixel(cx, cy, GREEN, timeout=5))
+            cx, cy = scr(66, 10)
+            check("program rysuje trzeci kwadrat (niebieski)",
+                  q.wait_pixel(cx, cy, BLUE, timeout=5))
+
+            # Podpis 'klikniec:' rysowany przez win_text - bialy tekst
+            # na szarym tle; szukamy w jego pasie bialych pikseli.
+            _, _, at = q.screen_raw()
+            tx, ty = scr(6, 24)
+            whites = sum(1 for dy in range(8) for dx in range(72)
+                          if at(tx + dx, ty + dy) == BIALY)
+            check(f"program pisze tekst w oknie ({whites} bialych pikseli)",
+                  whites > 20)
+
+            # Licznik klikniec przed kliknieciem - zapamietujemy komorke
+            # z cyfra, zeby bylo z czym porownac
+            lx, ly = scr(80, 24)
+
+            def counter_cell(fun):
+                return [fun(lx + dx, ly + dy)
+                        for dy in range(8) for dx in range(8)]
+
+            counter_before = counter_cell(at)
+
+            # Zdarzenie w druga strone: klik w obszar tresci ma dojsc do
+            # procesu, ktory odpowiada bialym znacznikiem w tym miejscu.
+            # Tolerancja musi tu byc waska: szare tlo okna (227,227,227)
+            # miesci sie w domyslnej i przepusciloby test, w ktorym nie
+            # dzieje sie nic.
+            kx, ky = scr(20, 50)
+            q.mouse_goto(kx, ky)
+            q.mouse_click()
+            q.mouse_goto(400, 300)
+            check("klik w okno wraca do programu jako zdarzenie (znacznik)",
+                  q.wait_pixel(kx, ky, BIALY, tol=8, timeout=10))
+
+            # Licznik klikniec przestaje byc zerem - program policzyl
+            # zdarzenie, a nie tylko odrysowal okno
+            _, _, at2 = q.screen_raw()
+            check("licznik klikniec w oknie rosnie",
+                  counter_cell(at2) != counter_before)
+
+            # Klawiatura: okno ma fokus po kliknieciu, wiec wpisane
+            # znaki maja pojawic sie w polu 'txt:'.
+            px, py = scr(40, 38)
+
+            def pole_txt(fun):
+                return [fun(px + dx, py + dy)
+                        for dy in range(8) for dx in range(40)]
+
+            before = pole_txt(at2)
+            q.sendkey("o")
+            q.sendkey("k")
+            time.sleep(1.5)
+            _, _, at3 = q.screen_raw()
+            po = pole_txt(at3)
+            check("klawisze trafiaja do okna z fokusem", before != po)
+
+            # --- Zegar: druga aplikacja, wlasne okno ---
+            # Ikona 'Zegar' stoi pod (8,60), kafelek 32x24
+            q.mouse_home()
+            q.mouse_goto(24, 72)
+            q.mouse_click()
+            q.mouse_goto(400, 300)
+
+            zx, zy = body_text(3)
+            def clock_window(fun):
+                return [fun(zx + 8 + dx, zy + 4 + dy)
+                        for dy in range(8) for dx in range(64)]
+
+            clock_present = False
+            end = time.time() + 20
+            while time.time() < end:
+                _, _, az = q.screen_raw()
+                if any(p != BIALY and p != (227, 227, 227)
+                       for p in clock_window(az)):
+                    clock_present = True
+                    break
+                time.sleep(0.5)
+            check("ikona 'Zegar' uruchamia druga aplikacje we wlasnym oknie",
+                  clock_present)
+
+            # Zegar ma isc: godzina zmienia sie w oknie sama z siebie
+            _, _, az1 = q.screen_raw()
+            first = clock_window(az1)
+            time.sleep(2.5)
+            _, _, az2 = q.screen_raw()
+            check("zegar w oknie idzie (tresc zmienia sie sama)",
+                  clock_window(az2) != first)
+
+            # --- Pliki: trzecia aplikacja, czyta dysk ---
+            q.mouse_home()
+            q.mouse_goto(24, 112)
+            q.mouse_click()
+            q.mouse_goto(400, 300)
+
+            px2, py2 = body_text(4)
+            # Naglowek "Pliki na dysku:" rysowany na zielono pod (4,2)
+            greens = 0
+            end = time.time() + 20
+            while time.time() < end:
+                _, _, ap = q.screen_raw()
+                greens = sum(1 for dy in range(8) for dx in range(120)
+                                if ap(px2 + 4 + dx, py2 + 2 + dy) == GREEN)
+                if greens > 20:
+                    break
+                time.sleep(0.5)
+            check("ikona 'Pliki' uruchamia menedzer plikow "
+                  "(%d zielonych pikseli naglowka)" % greens,
+                  greens > 20)
+
+            # Na dysku lezy plik zapisany przed startem pulpitu -
+            # menedzer musi go pokazac, a klik na nim wczytac tresc
+            _, _, ap1 = q.screen_raw()
+            def preview_panel(fun):
+                return [fun(px2 + 4 + dx, py2 + 102 + dy)
+                        for dy in range(8) for dx in range(140)]
+
+            before = preview_panel(ap1)
+
+            # Na dysku leza tez pliki jadra (swap.sys, icons.pos), ktore
+            # w podgladzie sa puste - klikamy wiec kolejne wiersze, az
+            # tresc pojawi sie naprawde
+            loaded = False
+            for row in range(4):
+                q.mouse_home()
+                q.mouse_goto(px2 + 20, py2 + 16 + row * 10 + 4)
+                q.mouse_click()
+                q.mouse_goto(400, 300)
+                time.sleep(1.5)
+                _, _, ap2 = q.screen_raw()
+                if preview_panel(ap2) != before:
+                    loaded = True
+                    break
+            check("klik w nazwe pliku wczytuje jego tresc z dysku",
+                  loaded)
+
+            # Kompozytor przezyl to wszystko: tlo pulpitu dalej jest.
+            w, h, at4 = q.screen_raw()
+            tlo = at4(w - 20, h // 2)
+            check("kompozytor dalej rysuje pulpit",
+                  all(abs(tlo[i] - (0, 130, 162)[i]) <= 40 for i in range(3)))
+        finally:
+            q.close()
+        # --- Drugi rozruch: monitor i terminal ---
+        # Kompozytor trzyma najwyzej szesc okien, a dwa zajmuje jadro -
+        # piec aplikacji naraz sie nie zmiesci, wiec te dwie dostaja
+        # wlasna maszyne
+        print("--- monitor zasobow i terminal w oknie ---")
+        slog2 = tempfile.mktemp(suffix=".log")
+        q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
+                  sata=True, qemu="qemu-system-x86_64")
+        try:
+            q2.wait_serial("proton64>", timeout=60)
+            q2.type_line("pulpit")
+            q2.wait_serial("Pulpit startuje", timeout=30)
+            check("pulpit wstaje po raz drugi", q2.wait_desktop(30))
+
+            # Ikona 'Monitor' pod (8,140)
+            q2.mouse_home()
+            q2.mouse_goto(24, 152)
+            q2.mouse_click()
+            q2.mouse_goto(400, 300)
+
+            mx, my = body_text(2)
+            # Pasek zajetosci pamieci: czerwone tlo, niebieska czesc
+            # uzyta. Obie barwy naraz znacza, ze liczby doszly i ze
+            # nie sa ani zerem, ani caloscia.
+            red = q2.wait_pixel(mx + 150, my + 52, RED, timeout=20)
+            blue = q2.wait_pixel(mx + 6, my + 52, BLUE, timeout=5)
+            check("ikona 'Monitor' uruchamia wskaznik zasobow "
+                  "(pasek pamieci)", red and blue)
+
+            # Uptime rosnie: okno zyje, a nie pokazuje jednego zdjecia
+            def pole_uptime(fun):
+                return [fun(mx + 96 + dx, my + 28 + dy)
+                        for dy in range(8) for dx in range(40)]
+
+            _, _, am1 = q2.screen_raw()
+            u1 = pole_uptime(am1)
+            time.sleep(2.5)
+            _, _, am2 = q2.screen_raw()
+            check("monitor jest zywy (uptime w oknie rosnie)",
+                  pole_uptime(am2) != u1)
+
+            # --- Terminal: klawiatura, fork, exec, dup2, plik ---
+            q2.mouse_home()
+            q2.mouse_goto(24, 192)          # ikona 'Term' pod (8,180)
+            q2.mouse_click()
+            q2.mouse_goto(400, 300)
+
+            tx, ty = body_text(3)
+            # Znak zachety '>' na zielono na dole okna (240x150).
+            # Liczymy piksele w calej komorce znaku zamiast celowac
+            # w jeden - ksztalt glifu to nie jest rzecz do zgadywania.
+            prompts = 0
+            end = time.time() + 20
+            while time.time() < end:
+                _, _, ah = q2.screen_raw()
+                prompts = sum(1 for dy in range(8) for dx in range(8)
+                              if ah(tx + 4 + dx, ty + 138 + dy) == GREEN)
+                if prompts > 3:
+                    break
+                time.sleep(0.5)
+            check("ikona 'Term' uruchamia terminal w oknie "
+                  "(znak zachety: %d pikseli)" % prompts, prompts > 3)
+
+            # Okno terminala ma fokus zaraz po powstaniu - wpisujemy
+            # polecenie i patrzymy, czy jego wyjscie pojawi sie
+            # w oknie. Idzie przez plik: fork, dup2, exec, wait.
+            def result_field(fun):
+                return sum(1 for dy in range(40) for dx in range(200)
+                           if fun(tx + 4 + dx, ty + 4 + dy) == BIALY)
+
+            _, _, at1 = q2.screen_raw()
+            empty = result_field(at1)
+            for ch in "uls64":
+                q2.sendkey(ch)
+                time.sleep(0.15)
+            q2.sendkey("ret")
+
+            printed = 0
+            end = time.time() + 25
+            while time.time() < end:
+                _, _, at2 = q2.screen_raw()
+                printed = result_field(at2)
+                if printed > empty + 100:
+                    break
+                time.sleep(0.5)
+            check("polecenie wpisane w terminalu wypisuje wynik w oknie "
+                  "(%d bialych pikseli)" % printed, printed > empty + 100)
+        finally:
+            q2.close()
+            if os.path.exists(slog2):
+                os.unlink(slog2)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+        for f in (iso, slog, disk):
+            if os.path.exists(f):
+                os.unlink(f)
+
+    return summary()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

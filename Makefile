@@ -169,7 +169,7 @@ $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 # 'static inline'. Kazdy program niosl je dotad w sobie - httpget i gweb
 # to po osiemdziesiat kilobajtow tego samego kodu.
 #
-# Zrodlo zostaje jedno. scripts/rozdziel.py robi z kazdego naglowka dwie
+# Zrodlo zostaje jedno. scripts/split_headers.py robi z kazdego naglowka dwie
 # wersje: dla biblioteki (te same funkcje, ale widoczne z zewnatrz) i dla
 # programu (same zapowiedzi, bez cial). Zadna z nich nie jest pisana
 # recznie, wiec nie ma jak sie rozjechac ze zrodlem.
@@ -181,17 +181,17 @@ LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h urand.h ux25519.h \
                ursa.h uecdsa.h ux509.h ucert.h utls.h uhttp.h uhtml.h \
                udns.h caroots.h uproton.h
 LIB_SRC  := $(patsubst %,$(BUILD)/libsrc/%,$(LIB_HEADERS))
-LIB_DEKL := $(patsubst %,$(BUILD)/dekl/%,$(LIB_HEADERS))
+LIB_DECL := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 LIBPROTON := $(BUILD)/libproton.so
 
-$(BUILD)/libsrc $(BUILD)/dekl $(BUILD)/dyn:
+$(BUILD)/libsrc $(BUILD)/decl $(BUILD)/dyn:
 	mkdir -p $@
 
-$(BUILD)/libsrc/%.h: user/%.h scripts/rozdziel.py | $(BUILD)/libsrc
-	python3 scripts/rozdziel.py --lib $< > $@
+$(BUILD)/libsrc/%.h: user/%.h scripts/split_headers.py | $(BUILD)/libsrc
+	python3 scripts/split_headers.py --lib $< > $@
 
-$(BUILD)/dekl/%.h: user/%.h scripts/rozdziel.py | $(BUILD)/dekl
-	python3 scripts/rozdziel.py --dekl $< > $@
+$(BUILD)/decl/%.h: user/%.h scripts/split_headers.py | $(BUILD)/decl
+	python3 scripts/split_headers.py --decl $< > $@
 
 $(BUILD)/libsrc/libproton.c: user/libproton.c | $(BUILD)/libsrc
 	cp $< $@
@@ -220,9 +220,9 @@ USER_DYN_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
 USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
 USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
 
-$(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DEKL) \
+$(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL) \
                      $(LIBPROTON) user/userdyn.ld Makefile | $(BUILD)/user
-	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/dekl -Iuser -T user/userdyn.ld \
+	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/decl -Iuser -T user/userdyn.ld \
 	    $< $(LIBPROTON) -o $@
 
 $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
@@ -376,7 +376,7 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
 # rozny jest tylko adres, pod ktorym biblioteka lezy, i szerokosc
 # rejestrow. Zrodla nikt drugi raz nie pisze.
 LIBPROTON64 := $(BUILD)/libproton64.so
-LIB_DEKL64  := $(patsubst %,$(BUILD)/dekl/%,$(LIB_HEADERS))
+LIB_DECL64  := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 
 $(LIBPROTON64): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user64/libproton64.ld \
                 $(USER_HEADERS) Makefile
@@ -395,10 +395,10 @@ USER64_DYN_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
 
 USER64_DYN_ELFS := $(patsubst %,$(BUILD)/user64/%.elf,$(USER_DYN))
 
-$(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DEKL64) \
+$(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL64) \
                      $(LIBPROTON64) user64/userdyn64.ld Makefile \
                      | $(BUILD)/user64
-	$(CC) $(USER64_DYN_CFLAGS) -I$(BUILD)/dekl -Iuser \
+	$(CC) $(USER64_DYN_CFLAGS) -I$(BUILD)/decl -Iuser \
 	    -T user64/userdyn64.ld $< $(LIBPROTON64) -o $@
 
 $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
@@ -535,7 +535,7 @@ run-iso: iso $(DISK)
 #   make test T=k64      tylko jadro 64-bitowe (albo k64,uefi)
 #   make test J=1        jedna po drugiej, do debugowania
 test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
-	python3 -u scripts/run_testy.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
+	python3 -u scripts/run_tests.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
 	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
 
 # Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez

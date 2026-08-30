@@ -43,12 +43,12 @@ def build(workdir):
     inc = os.path.join(workdir, "include")
     os.makedirs(inc, exist_ok=True)
 
-    zaslepione = ("usys.h", "uapi.h")
+    stubbed = ("usys.h", "uapi.h")
     for name in os.listdir(os.path.join(ROOT, "user")):
-        if name.endswith(".h") and name not in zaslepione:
+        if name.endswith(".h") and name not in stubbed:
             os.symlink(os.path.join(ROOT, "user", name),
                        os.path.join(inc, name))
-    for name in zaslepione:
+    for name in stubbed:
         shutil.copy(os.path.join(FUZZ, "stub_usys.h"),
                     os.path.join(inc, name))
 
