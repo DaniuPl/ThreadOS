@@ -1,23 +1,26 @@
-/* Sterownik AHCI (SATA)
+/* The AHCI (SATA) driver
  *
- * Kontroler dostaje od nas liste polecen w pamieci i sam po nia siega
- * przez DMA - procesor nie przepisuje juz danych slowo po slowie, jak
- * przy ATA PIO. Na jedno polecenie skladaja sie trzy struktury:
+ * The controller gets a list of commands from us in memory and reaches
+ * for it itself through DMA - the processor no longer copies data word
+ * by word as with ATA PIO. One command is made of three structures:
  *
- *   naglowek polecenia  - w liscie 32 pozycji (rejestr CLB portu),
- *                         mowi gdzie lezy tablica polecenia i ile ma
- *                         opisow obszarow danych,
- *   tablica polecenia   - ramka FIS z rozkazem ATA plus tablica PRDT
- *                         (adres i dlugosc kazdego kawalka bufora),
- *   obszar odbiorczy FIS - tam kontroler odklada odpowiedzi (rejestr FB).
+ *   the command header  - in a list of 32 slots (the port's CLB
+ *                         register), it says where the command table
+ *                         lies and how many data region descriptors it
+ *                         has,
+ *   the command table   - a FIS frame with the ATA command plus the
+ *                         PRDT table (the address and length of every
+ *                         chunk of the buffer),
+ *   the FIS receive area - where the controller parks its answers (the
+ *                         FB register).
  *
- * Wszystko to musi lezec w pamieci ciaglej fizycznie i pod adresem,
- * ktory kontroler rozumie wprost - a wiec w naszym mapowaniu
- * identycznosciowym, gdzie adres wirtualny rowna sie fizycznemu.
+ * All of it has to lie in physically contiguous memory and at an
+ * address the controller understands directly - that is, in our
+ * identity mapping, where the virtual address equals the physical one.
  *
- * Czekamy odpytywaniem, bez przerwan: dysk obslugujemy takze z wnetrza
- * obslugi bledu strony (wymiana stron), gdzie przerwania sa wylaczone
- * i nikt nas nie obudzi.
+ * We wait by polling, without interrupts: the disk is also served from
+ * inside the page fault handler (swapping), where interrupts are off
+ * and nobody would wake us.
  */
 
 #include <stdint.h>
@@ -25,9 +28,10 @@
 #include "include/pci.h"
 #include "include/pmm.h"
 
-/* Rejestry kontrolera leza wysoko, poza pamiecia opisana z gory -
-   trzeba je doklejic do mapowania. Robi to w kazdym trybie inny kod
-   i to jedyne miejsce w tym pliku, ktore o trybie w ogole wie. */
+/* The controller registers lie high, beyond the memory described up
+   front - they have to be glued onto the mapping. Different code does
+   that in each mode, and this is the only place in this file that
+   knows about the mode at all. */
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n) paging64_map_phys((a), (n))
@@ -40,7 +44,8 @@
 
 #define SECTOR 512
 
-/* Rejestry portu (0x100 + port * 0x80 od poczatku obszaru kontrolera) */
+/* Port registers (0x100 + port * 0x80 from the start of the
+   controller's area) */
 struct hba_port {
     volatile uint32_t clb, clbu, fb, fbu;
     volatile uint32_t is, ie, cmd, rsv0;
@@ -59,16 +64,16 @@ struct hba_mem {
 };
 
 struct cmd_header {
-    uint16_t flags;              /* bity 0-4: dlugosc FIS w slowach, 6: zapis */
-    uint16_t prdtl;              /* ile opisow obszarow danych */
-    volatile uint32_t prdbc;     /* ile bajtow kontroler przeniosl */
-    uint32_t ctba, ctbau;        /* adres tablicy polecenia */
+    uint16_t flags;              /* bits 0-4: FIS length in words, 6: write */
+    uint16_t prdtl;              /* how many data region descriptors */
+    volatile uint32_t prdbc;     /* how many bytes the controller moved */
+    uint32_t ctba, ctbau;        /* the command table's address */
     uint32_t rsv[4];
 } __attribute__((packed));
 
 struct prdt_entry {
     uint32_t dba, dbau, rsv;
-    uint32_t dbc;                /* bity 0-21: liczba bajtow - 1 */
+    uint32_t dbc;                /* bits 0-21: byte count - 1 */
 } __attribute__((packed));
 
 #define PRDT_MAX 8
@@ -80,10 +85,10 @@ struct cmd_table {
     struct prdt_entry prdt[PRDT_MAX];
 } __attribute__((packed));
 
-/* Ramka rozkazu: host -> urzadzenie, rejestrowa */
+/* A command frame: host -> device, register type */
 struct fis_h2d {
     uint8_t type;                /* 0x27 */
-    uint8_t pmport_c;            /* bit 7: to rozkaz, nie zmiana rejestrow */
+    uint8_t pmport_c;            /* bit 7: this is a command, not a register change */
     uint8_t command;
     uint8_t featurel;
     uint8_t lba0, lba1, lba2, device;
@@ -97,11 +102,11 @@ struct fis_h2d {
 #define CMD_WRITE_DMA  0x35      /* WRITE DMA EXT (LBA48) */
 #define CMD_IDENTIFY   0xEC
 
-#define PORT_CMD_ST    0x0001    /* start - kontroler przetwarza polecenia */
-#define PORT_CMD_FRE   0x0010    /* odbieranie ramek FIS */
-#define PORT_CMD_FR    0x4000    /* odbieranie faktycznie ruszylo */
-#define PORT_CMD_CR    0x8000    /* przetwarzanie faktycznie ruszylo */
-#define PORT_IS_TFES   0x40000000u  /* blad zglaszony przez urzadzenie */
+#define PORT_CMD_ST    0x0001    /* start - the controller processes commands */
+#define PORT_CMD_FRE   0x0010    /* receiving FIS frames */
+#define PORT_CMD_FR    0x4000    /* receiving has really started */
+#define PORT_CMD_CR    0x8000    /* processing has really started */
+#define PORT_IS_TFES   0x40000000u  /* an error reported by the device */
 
 #define SIG_SATA       0x00000101u
 
@@ -111,8 +116,8 @@ static struct cmd_header *cmd_list;
 static struct cmd_table *cmd_tbl;
 static uint32_t disk_sectors;
 
-/* Kontroler potrafi czekac; nie mamy zegara z rozdzielczoscia mniejsza
-   niz 10 ms, wiec odliczamy obrotami petli. Wartosci z duzym zapasem. */
+/* The controller can take its time; we have no clock finer than 10 ms,
+   so we count loop iterations. The values have plenty of margin. */
 static int wait_clear(volatile uint32_t *reg, uint32_t mask)
 {
     for (uint32_t i = 0; i < 20000000u; i++)
@@ -135,15 +140,15 @@ static void port_start(struct hba_port *p)
     p->cmd |= PORT_CMD_ST;
 }
 
-/* Sklada polecenie w slocie 0 i czeka na jego koniec.
-   'write' = kierunek, 'buf' musi byc ciagly fizycznie. */
+/* Assembles a command in slot 0 and waits for it to finish.
+   'write' = the direction, 'buf' must be physically contiguous. */
 static int run_command(uint8_t command, uint32_t lba, uint32_t count,
                        void *buf, uint32_t bytes, int write)
 {
     if (!port || bytes == 0 || bytes > PRDT_MAX * 4u * 1024 * 1024)
         return -1;
 
-    port->is = (uint32_t)-1;                 /* zgas stare zgloszenia */
+    port->is = (uint32_t)-1;                 /* clear the old notifications */
 
     cmd_list[0].flags = (uint16_t)((sizeof(struct fis_h2d) / 4) |
                                    (write ? (1u << 6) : 0));
@@ -155,7 +160,7 @@ static int run_command(uint8_t command, uint32_t lba, uint32_t count,
     memset(cmd_tbl, 0, sizeof(*cmd_tbl));
     cmd_tbl->prdt[0].dba = (uint32_t)(uintptr_t)buf;
     cmd_tbl->prdt[0].dbau = 0;
-    cmd_tbl->prdt[0].dbc = bytes - 1;        /* licznik liczony od zera */
+    cmd_tbl->prdt[0].dbc = bytes - 1;        /* the count is taken from zero */
 
     struct fis_h2d *fis = (struct fis_h2d *)cmd_tbl->cfis;
     fis->type = FIS_TYPE_H2D;
@@ -164,12 +169,12 @@ static int run_command(uint8_t command, uint32_t lba, uint32_t count,
     fis->lba0 = (uint8_t)lba;
     fis->lba1 = (uint8_t)(lba >> 8);
     fis->lba2 = (uint8_t)(lba >> 16);
-    fis->device = 0x40;                      /* tryb LBA */
+    fis->device = 0x40;                      /* LBA mode */
     fis->lba3 = (uint8_t)(lba >> 24);
     fis->countl = (uint8_t)count;
     fis->counth = (uint8_t)(count >> 8);
 
-    /* Urzadzenie musi byc gotowe: ani zajete, ani z danymi do oddania */
+    /* The device has to be ready: neither busy nor with data to hand over */
     if (wait_clear(&port->tfd, 0x88) < 0)
         return -1;
 
@@ -182,7 +187,7 @@ static int run_command(uint8_t command, uint32_t lba, uint32_t count,
             return -1;
     }
     if (port->ci & 1)
-        return -1;                           /* nie doczekalismy sie */
+        return -1;                           /* nothing arrived in time */
     return (port->is & PORT_IS_TFES) ? -1 : 0;
 }
 
@@ -195,8 +200,8 @@ static void read_capacity(void)
     if (run_command(CMD_IDENTIFY, 0, 0, (void *)(uintptr_t)frame,
                     SECTOR, 0) == 0) {
         const uint16_t *id = (const uint16_t *)(uintptr_t)frame;
-        /* Slowa 100-103: pojemnosc LBA48. Starsza polowa nas nie
-           obchodzi - i tak zarzadzamy dyskiem 32-bitowym adresem. */
+        /* Words 100-103: the LBA48 capacity. The upper half is of no
+           concern to us - we address the disk with 32 bits anyway. */
         uint32_t lba48 = (uint32_t)id[100] | ((uint32_t)id[101] << 16);
         uint32_t lba28 = (uint32_t)id[60] | ((uint32_t)id[61] << 16);
         disk_sectors = lba48 ? lba48 : lba28;
@@ -207,37 +212,37 @@ static void read_capacity(void)
 int ahci_init(void)
 {
     struct pci_dev dev;
-    /* Klasa 0x01 (pamiec masowa), podklasa 0x06 (SATA), interfejs 0x01 (AHCI) */
+    /* Class 0x01 (mass storage), subclass 0x06 (SATA), interface 0x01 (AHCI) */
     if (!pci_find_class(0x01, 0x06, 0x01, &dev))
         return 0;
 
     uint32_t abar = dev.bar[5] & 0xFFFFFFF0u;
-    if (!abar || (dev.bar[5] & 0x01))        /* BAR portowy - nie nasz przypadek */
+    if (!abar || (dev.bar[5] & 0x01))        /* an I/O port BAR - not our case */
         return 0;
 
     pci_enable_bus_master(&dev);
-    if (MAP_PHYS(abar, 0x2000) < 0)          /* rejestry lezą wysoko */
+    if (MAP_PHYS(abar, 0x2000) < 0)          /* the registers lie high */
         return 0;
 
     hba = (struct hba_mem *)(uintptr_t)abar;
-    hba->ghc |= (1u << 31);                  /* tryb AHCI, nie zgodnosci */
+    hba->ghc |= (1u << 31);                  /* AHCI mode, not compatibility */
 
-    /* Pierwszy port z podlaczonym dyskiem SATA */
+    /* The first port with a SATA disk attached */
     uint32_t implemented = hba->pi;
     for (int i = 0; i < 32; i++) {
         if (!(implemented & (1u << i)))
             continue;
         struct hba_port *p = &hba->ports[i];
-        if ((p->ssts & 0x0F) != 3)           /* brak lacza z urzadzeniem */
+        if ((p->ssts & 0x0F) != 3)           /* no link to a device */
             continue;
-        if (p->sig != SIG_SATA)              /* np. naped optyczny */
+        if (p->sig != SIG_SATA)              /* e.g. an optical drive */
             continue;
 
         port_stop(p);
 
-        /* Jedna ramka na liste polecen (1 KiB) i obszar odbiorczy FIS
-           (256 B) - ramka jest wyrownana do 4 KiB, wiec spelnia
-           wymagania obu. Druga ramka na tablice polecenia. */
+        /* One frame for the command list (1 KiB) and the FIS receive area
+           (256 B) - the frame is 4 KiB aligned, so it satisfies both
+           requirements. A second frame for the command table. */
         uint32_t area = pmm_alloc_frame();
         uint32_t table = pmm_alloc_frame();
         if (!area || !table) {
@@ -251,7 +256,7 @@ int ahci_init(void)
         p->clbu = 0;
         p->fb = area + 1024;
         p->fbu = 0;
-        p->serr = (uint32_t)-1;              /* skasuj stare bledy lacza */
+        p->serr = (uint32_t)-1;              /* clear the old link errors */
         p->is = (uint32_t)-1;
 
         port_start(p);

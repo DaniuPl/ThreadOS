@@ -1,4 +1,4 @@
-/* ProtonOS - główny punkt wejścia jądra w C */
+/* ProtonOS - the kernel's main entry point in C */
 
 #include <stdint.h>
 #include "include/vga.h"
@@ -36,8 +36,9 @@
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
-/* Czy linia polecen jadra zawiera dane slowo?
-   QEMU przekazuje ja opcja -append, GRUB - wpisem w grub.cfg. */
+/* Does the kernel command line contain a given word?
+   QEMU passes it with the -append option, GRUB with an entry in
+   grub.cfg. */
 static int cmdline_has(const struct multiboot_info *mbi, const char *word)
 {
     if (!(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)
@@ -48,7 +49,7 @@ static int cmdline_has(const struct multiboot_info *mbi, const char *word)
 
     for (int i = 0; cmd[i]; i++) {
         if (i && cmd[i - 1] != ' ')
-            continue;                    /* dopasowuj tylko cale slowa */
+            continue;                    /* match whole words only */
         size_t k = 0;
         while (k < wlen && cmd[i + k] == word[k])
             k++;
@@ -58,7 +59,7 @@ static int cmdline_has(const struct multiboot_info *mbi, const char *word)
     return 0;
 }
 
-/* Szybki test sterty: alokacja, zapis, zwolnienie, ponowne uzycie */
+/* A quick heap test: allocate, write, free, reuse */
 static int kmalloc_selftest(void)
 {
     char *a = kmalloc(64);
@@ -70,17 +71,17 @@ static int kmalloc_selftest(void)
     if ((uint8_t)a[63] != 0xAA || (uint8_t)b[0] != 0x55)
         return 0;
     kfree(a);
-    char *c = kmalloc(32);   /* powinno trafic w zwolniona dziure */
+    char *c = kmalloc(32);   /* it should land in the freed hole */
     int reused = (c == a);
     kfree(b);
     kfree(c);
     return reused;
 }
 
-/* Wątki demonstracyjne: A i B liczą w swoim tempie, C wita się, żyje
-   2 sekundy i kończy (test task_exit + sprzątania).
-   Rysują w wierszu 0 (jak uptime) - kursor konsoli nigdy tam nie
-   stoi, więc nie nadpisują promptu. */
+/* Demonstration threads: A and B count at their own pace, C says
+   hello, lives for 2 seconds and finishes (a test of task_exit plus
+   cleanup). They draw in row 0 (like uptime) - the console cursor
+   never stands there, so they do not overwrite the prompt. */
 
 static void draw_labeled_counter(int x, const char *label, uint32_t n)
 {
@@ -118,24 +119,25 @@ static void demo_mortal(void *arg)
     (void)arg;
     vga_write_at(48, 0, "watek-C: czesc!     ");
     task_sleep(2000);
-    /* Napis odrysowujemy jeszcze chwile. Wiersz 0 znika przy kazdym
-       przewinieciu ekranu, a komunikaty startowe sypia sie jeszcze
-       dobra sekunde po tym, jak watek konczy robote - inaczej dowod
-       na to, ze zdazyl sie wykonac, wyjezdzalby razem z nimi. */
+    /* We keep redrawing the text for a while. Row 0 disappears on every
+       scroll of the screen, and startup messages keep coming for a good
+       second after the thread finishes its work - otherwise the proof
+       that it ran at all would scroll away with them. */
     for (int i = 0; i < 12; i++) {
         vga_write_at(48, 0, "watek-C: zakonczony ");
         task_sleep(500);
     }
 
-    /* Napis w wierszu zerowym znika przy kazdym przewinieciu ekranu,
-       wiec na obciazonej maszynie dowod potrafi wyjechac razem
-       z komunikatami startowymi, zanim ktokolwiek go przeczyta.
-       Zapisujemy go wiec takze tam, skad nic nie wyjezdza.
+    /* The text in row zero disappears on every scroll of the screen, so
+       on a loaded machine the proof can scroll away together with the
+       startup messages before anybody reads it. So we also write it
+       where nothing ever scrolls away.
 
-       Wprost na port szeregowy, a nie przez printk: watek konczy sie
-       juz po starcie shella i wypis na konsoli wpadlby w srodek
-       wiersza, ktory ktos akurat pisze. Port szeregowy jest dziennikiem,
-       ekran - biezaca praca; to nie zawsze jest to samo. */
+       Straight to the serial port rather than through printk: the
+       thread finishes after the shell has started and console output
+       would land in the middle of a line somebody is typing. The
+       serial port is the log, the screen is the work in progress; the
+       two are not always the same. */
     serial_write("[ OK ] Watek demonstracyjny C zakonczyl prace\n");
 }
 
@@ -149,14 +151,14 @@ static void ok(const char *what)
 
 void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 {
-    /* Loader mowi w magicu, w ktorej postaci przekazal informacje;
-       dalej caly system widzi je juz jednakowo */
+    /* The loader says in the magic which form it passed the information
+       in; from here on the whole system sees it the same way */
     const struct multiboot_info *mbi = mb2_info(magic, multiboot_info_addr);
 
-    /* Gdy loader ustawil tryb graficzny, konsola musi na nim rysowac -
-       i to zanim padnie pierwszy komunikat. Stronicowanie jeszcze nie
-       dziala, wiec bufor jest osiagalny wprost; doklejenie go do
-       mapowania przychodzi zaraz po paging_init. */
+    /* When the loader set a graphics mode, the console has to draw on
+       it - and before the first message is printed. Paging is not
+       running yet, so the buffer is reachable directly; gluing it onto
+       the mapping comes right after paging_init. */
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
     if (lfb && video_adopt_lfb(lfb->addr, lfb->pitch, (int)lfb->width,
                                (int)lfb->height, (int)lfb->bpp) == 0)
@@ -199,7 +201,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     __asm__ volatile("sti");
     ok("Przerwania wlaczone (sti)");
 
-    /* Test IDT: int3 powinno wydrukowac komunikat i wrocic */
+    /* An IDT test: int3 should print a message and come back */
     __asm__ volatile("int $3");
 
     pmm_init(mbi);
@@ -207,7 +209,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     paging_init();
-    video_map_lfb();          /* zanim cokolwiek napiszemy na ekranie */
+    video_map_lfb();          /* before we write anything on the screen */
     printk("[ OK ] Stronicowanie wlaczone (identycznosciowe %u MiB)\n",
            paging_identity_limit() / (1024 * 1024));
 
@@ -222,14 +224,14 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
                initrd_file_count());
 
-    /* Biblioteka wspoldzielona musi byc gotowa, zanim ruszy pierwszy
-       program - jej ramki sa wspolne dla wszystkich procesow */
+    /* The shared library has to be ready before the first program
+       starts - its frames are shared by all processes */
     if (dyn_init())
         printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
                dyn_name(), dyn_pages());
 
-    /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
-       tablice ACPI podaje wtedy wylacznie loader */
+    /* Under UEFI there is no BIOS memory to search - the pointer to
+       the ACPI tables then comes from the loader and nowhere else */
     if (mb2_rsdp())
         acpi_set_rsdp(mb2_rsdp());
     if (acpi_init())
@@ -251,10 +253,11 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
                m[0], m[1], m[2], m[3], m[4], m[5]);
     }
 
-    /* Pozostale procesory: firmware wylicza je w tablicy ACPI, a kazdy
-       czeka na sygnal INIT-SIPI. Obudzone przechodza w tryb chroniony
-       i staja - dawanie im pracy wymaga schedulera per rdzen i zamkow
-       w calym jadrze, a te pisane byly dla jednego rdzenia. */
+    /* The remaining processors: the firmware lists them in an ACPI
+       table and each waits for an INIT-SIPI signal. Woken ones enter
+       protected mode and stop - giving them work needs a per-core
+       scheduler and locks throughout the kernel, and those were
+       written for a single core. */
     int ncores = smp_init();
     if (ncores > 1)
         printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
@@ -268,25 +271,27 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     task_create("demo-C", demo_mortal, (void *)0);
     ok("Scheduler: watki jadra, wywlaszczanie co 10 ms");
 
-    /* Wymiana stron dopiero tutaj: odzyskiwanie pamieci obchodzi liste
-       zadan, wiec scheduler musi juz istniec */
+    /* Swapping only here: memory reclaim walks the task list, so the
+       scheduler has to exist already */
     swap_init();
 
-    /* Klawiatura USB tez potrzebuje schedulera - odpytuje ja watek.
-       Na maszynie bez PS/2 to jedyne wejscie, jakie system ma. */
+    /* A USB keyboard needs the scheduler too - a thread polls it. On a
+       machine without PS/2 it is the only input the system has. */
     usbkbd_init();
 
-    /* Adres IP bierzemy z sieci - klient DHCP czeka na odpowiedzi
-       serwera, wiec musi chodzic w watku (po scheduler_init) */
+    /* We take the IP address from the network - the DHCP client waits
+       for the server's answers, so it has to run in a thread (after
+       scheduler_init) */
     if (has_net) {
         dhcp_start();
-        tcp_init();        /* watek retransmisji TCP */
+        tcp_init();        /* the TCP retransmission thread */
     }
 
-    /* Docelowo system startuje prosto na pulpit; 'nodesktop' w linii
-       polecen jadra zostawia konsole tekstowa (uzywa tego test dymny
-       i komendy, ktore wypisuja duzo tekstu). Komunikat idzie przed
-       shell_init, zeby ostatnia rzecza na ekranie byl prompt. */
+    /* By design the system boots straight into the desktop; 'nodesktop'
+       on the kernel command line leaves the text console (the smoke
+       test and commands that print a lot of text use it). The message
+       goes before shell_init, so that the last thing on the screen is
+       the prompt. */
     int text_mode = cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text");
     if (text_mode)
         printk("Tryb tekstowy (linia polecen jadra) - pulpit: 'desktop'\n");
@@ -298,9 +303,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (!text_mode)
         desktop_start();
 
-    /* Watek main staje sie watkiem bezczynnosci - a taki nie moze
-       trzymac wielkiego zamka jadra: rdzen stojacy na hlt z zamkiem
-       w garsci zamknalby jadro dla wszystkich pozostalych. */
+    /* The main thread becomes the idle thread - and such a thread may
+       not hold the big kernel lock: a core standing on hlt with the
+       lock in its hand would close the kernel for everybody else. */
     biglock_leave();
     for (;;)
         __asm__ volatile("hlt");
