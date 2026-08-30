@@ -122,7 +122,7 @@ void _start(void)
     t0 = sys_getticks();
     sha256(ec.tbs, ec.tbs_len, hash);
     result("podpis wlasny certyfikatu (ECDSA P-256)",
-           ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+           ecdsa_verify_der(ec_krzywa_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec.sig, ec.sig_len));
     t1 = sys_getticks();
     print("      sprawdzenie podpisu ECDSA zajelo ~");
@@ -131,12 +131,12 @@ void _start(void)
 
     hash[0] ^= 0x01;
     result("ECDSA: zly skrot odrzucony",
-           !ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+           !ecdsa_verify_der(ec_krzywa_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                              ec.sig, ec.sig_len));
 
     sha256(pss_msg, msglen, hash);
     result("podpis ECDSA wiadomosci (osobny wektor)",
-           ecdsa_verify_der(&ec_p256, ec.ec_point, ec.ec_point_len, hash, 32,
+           ecdsa_verify_der(ec_krzywa_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec_sig, sizeof(ec_sig)));
 
     /* --- certyfikat na krzywej P-384 (SHA-384) --- */
@@ -154,7 +154,7 @@ void _start(void)
     t0 = sys_getticks();
     sha384(ec384.tbs, ec384.tbs_len, hash384);
     result("podpis wlasny certyfikatu (ECDSA P-384)",
-           ecdsa_verify_der(&ec_p384, ec384.ec_point, ec384.ec_point_len,
+           ecdsa_verify_der(ec_krzywa_p384(), ec384.ec_point, ec384.ec_point_len,
                             hash384, 48, ec384.sig, ec384.sig_len));
     t1 = sys_getticks();
     print("      sprawdzenie podpisu P-384 zajelo ~");
@@ -163,7 +163,7 @@ void _start(void)
 
     hash384[0] ^= 0x01;
     result("P-384: zly skrot odrzucony",
-           !ecdsa_verify_der(&ec_p384, ec384.ec_point, ec384.ec_point_len,
+           !ecdsa_verify_der(ec_krzywa_p384(), ec384.ec_point, ec384.ec_point_len,
                              hash384, 48, ec384.sig, ec384.sig_len));
 
     /* SHA-384 na znanym wektorze (FIPS 180-4) */
@@ -181,8 +181,8 @@ void _start(void)
 
     /* --- wbudowany magazyn zaufania --- */
     int roots_ok = 0, roots_bad = 0;
-    const uint8_t *p = ca_roots_der;
-    uint32_t left = sizeof(ca_roots_der);
+    uint32_t left = 0;
+    const uint8_t *p = cert_korzenie_wbudowane(&left);
     while (left > 4 && p[0] == 0x30) {
         uint32_t l = p[1], rlen;
         if (l & 0x80) {

@@ -48,7 +48,13 @@
    jak wejsc w drugie. */
 #define USER64_MMAP_BASE   0x0000000050000000ULL
 #define USER64_MMAP_MAX    (USER64_STACK_TOP - USER64_STACK_MAX)
-#define USER64_TOP         USER64_MMAP_BASE
+
+/* Biblioteka wspoldzielona lezy tuz pod obszarem mapowan, pod stalym
+   adresem - ten sam we wszystkich procesach, bo tylko wtedy jej kod
+   moze byc naprawde jeden. Sterta i segmenty programu koncza sie u jej
+   progu; user64/libproton64.ld musi sie z tym zgadzac. */
+#define USER64_LIB_BASE    0x000000004F000000ULL
+#define USER64_TOP         USER64_LIB_BASE
 
 /* Laduje obraz ELF64. Zwraca 0 i ustawia *entry oraz poczatek sterty
    (pierwsza wolna strona za obrazem), albo -1. */

@@ -12,6 +12,7 @@
 #include "include/initrd.h"
 #include "include/prog.h"
 #include "include/paging.h"
+#include "include/dynlink.h"
 #include "include/pmm.h"
 #include "include/task.h"
 #include "include/usermode.h"
@@ -40,8 +41,13 @@
    nia blad strony pozostaje bledem. */
 #define USER_STACK_MAX   (256 * 1024u)
 #define USER_STACK_DNO   (USER_STACK_TOP - USER_STACK_MAX)
-#define USER_BRK_MAX   0xB0000000u   /* sufit sterty procesu (sbrk) */
-#define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej sterty) */
+/* Biblioteka wspoldzielona lezy pod stalym adresem, ten sam we
+   wszystkich procesach - tylko dzieki temu jej kod moze byc naprawde
+   jeden. Miejsce jest tuz pod obszarem mapowan, a sterta konczy sie
+   u jej progu; USER_LIB_BASE w kernel/include/exec.h i adres w skrypcie
+   konsolidatora user/libproton.ld musza sie zgadzac. */
+#define USER_BRK_MAX   USER_LIB_BASE /* sufit sterty procesu (sbrk) */
+#define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej biblioteki) */
 #define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej miejsca na stos) */
 #define ARG_MAX        16
 #define CMD_MAX        128
@@ -164,6 +170,69 @@ static int load_segment(uint32_t dir, const uint8_t *file,
     return 1;
 }
 
+/* --- biblioteka wspoldzielona w przestrzeni procesu ------------------
+ *
+ * Segmenty bez prawa zapisu (kod i stale) dostaja RAMKI WSPOLNE: te
+ * same, ktore widzi kazdy inny proces. To jest cala oszczednosc -
+ * kryptografia i TLS leza w pamieci raz, a nie raz na proces.
+ *
+ * Segment z danymi jest inny i musi byc: biblioteka ma w nim wlasny
+ * stan (ziarno generatora losowego, ustawienia TLS), a stan jednego
+ * procesu nie ma prawa byc widoczny w drugim. Kazdy dostaje wiec
+ * swieza kopie - dokladnie tak, jak robi to kazdy inny system.
+ */
+static int mapuj_biblioteke(uint32_t dir)
+{
+    dyn_adres vaddr;
+    uint32_t memsz, filesz;
+    int prawa;
+    const uint8_t *dane;
+
+    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &prawa, &dane);
+         i++) {
+        uint32_t start = vaddr & ~0xFFFu;
+        uint32_t koniec = vaddr + memsz;
+        for (uint32_t va = start; va < koniec; va += PAGE_SIZE) {
+            if (!(prawa & DYN_ZAPIS)) {
+                uint32_t ramka = dyn_ramka(va);
+                if (!ramka)
+                    return 0;
+                if (!paging_map_user_ro_in(dir, va, ramka))
+                    return 0;
+                /* Ramka ma przezyc smierc procesu - nalezy do systemu,
+                   a nie do niego */
+                pmm_frame_ref(ramka);
+                continue;
+            }
+
+            uint32_t ramka = page_frame_for(dir, va);
+            if (!ramka)
+                return 0;
+            uint32_t od = va > vaddr ? va : vaddr;
+            uint32_t plik_do = vaddr + filesz;
+            if (od < plik_do) {
+                uint32_t do_ = va + PAGE_SIZE < plik_do ? va + PAGE_SIZE
+                                                       : plik_do;
+                memcpy((void *)(ramka + (od - va)), dane + (od - vaddr),
+                       do_ - od);
+            }
+        }
+    }
+    return 1;
+}
+
+/* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
+   procesu nie jest jeszcze aktywna, wiec idziemy przez ramke. */
+static int wpisz_adres(void *ctx, dyn_adres adres, dyn_adres wartosc)
+{
+    uint32_t dir = *(uint32_t *)ctx;
+    uint32_t ramka = paging_get_mapping(dir, adres & ~0xFFFu);
+    if (!ramka)
+        return -1;
+    *(uint32_t *)(ramka + (adres & 0xFFFu)) = wartosc;
+    return 0;
+}
+
 /* Zapis 32-bitowej wartości na stos użytkownika - jądro pisze przez
    adres fizyczny ramki, bo przestrzeń procesu nie jest jeszcze aktywna */
 static void stack_write32(uint32_t sframe, uint32_t sp, uint32_t val)
@@ -275,6 +344,28 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
             brk = ph[i].p_vaddr + ph[i].p_memsz;
+    }
+
+    /* Program moze nie niesc kodu, ktorego uzywa, tylko puste miejsca
+       na adresy funkcji z biblioteki. Wtedy trzeba te miejsca
+       wypelnic - i zrobic to TERAZ, przed pierwsza instrukcja, bo
+       skok przez niewypelniona pozycje nie ma dokad prowadzic. */
+    if (dyn_program_dynamiczny(file, size)) {
+        if (!dyn_obecna()) {
+            printk("exec: '%s' potrzebuje biblioteki %s, ktorej nie ma\n",
+                   tok[0], dyn_nazwa());
+            paging_destroy_address_space(dir);
+            prog_zwolnij(wczytany);
+            return 0;
+        }
+        if (!mapuj_biblioteke(dir) ||
+            dyn_relokuj(file, size, &dir, wpisz_adres) < 0) {
+            printk("exec: '%s' - nie da sie zwiazac z %s\n",
+                   tok[0], dyn_nazwa());
+            paging_destroy_address_space(dir);
+            prog_zwolnij(wczytany);
+            return 0;
+        }
     }
 
     /* Najwyzsza strona stosu (tam trafiaja argumenty), a pod nia reszta */

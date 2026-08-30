@@ -18,7 +18,7 @@
 #include "usha256.h"
 
 static uint8_t urand_seed[32];
-static uint32_t urand_counter;
+static uint32_t urand_counter;   /* ile blokow juz wydano - stan procesu */
 static int urand_ready;
 
 static inline void urand_init(void)

@@ -25,7 +25,16 @@ Shared by both kernels (same files, compiled twice):
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
 | Network | RTL8139 and e1000 behind one netdev layer; ARP, ICMP, UDP, DHCP, TCP, DNS |
 | Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
+| Linking | `libproton.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
+
+Programs that use crypto link against a real shared object: the kernel
+loads `libproton.so` once at a fixed address, maps its code and
+constants into every process as the *same physical frames*, gives each
+process a private copy of its writable data, and fills in the jump
+tables from the ELF relocations before the first instruction runs. The
+four heaviest programs together are now smaller than the library they
+share.
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
@@ -96,8 +105,6 @@ ground for both.
 
 **Things neither kernel has yet**
 
-- A shared library / dynamic linking story. Every program still
-  carries its own copy of the crypto code.
 - Real SMP. The other cores are found in the ACPI tables, woken with
   INIT-SIPI, and can now run computation from a shared work queue
   behind one spinlock — `smp` in the shell splits a job across all of

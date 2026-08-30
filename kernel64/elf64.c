@@ -19,6 +19,7 @@
 _Static_assert((USER64_BASE >> 30) == PAGING64_USER_PDPT,
                "USER64_BASE musi lezec w gigabajcie PAGING64_USER_PDPT");
 #include "../kernel/include/pmm.h"
+#include "../kernel/include/dynlink.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 
@@ -81,6 +82,70 @@ static uint64_t page_frame_for(uint64_t va, uint64_t flags)
         return 0;
     }
     return frame;
+}
+
+/* --- biblioteka wspoldzielona w przestrzeni procesu ------------------
+ *
+ * Segmenty bez prawa zapisu (kod i stale) dostaja RAMKI WSPOLNE: te
+ * same, ktore widzi kazdy inny proces - i to jest cala oszczednosc.
+ * Segment z danymi jest inny i musi byc: biblioteka trzyma w nim swoj
+ * stan, a stan jednego procesu nie ma prawa byc widoczny w drugim.
+ */
+static int mapuj_biblioteke(void)
+{
+    uint64_t vaddr;
+    uint32_t memsz, filesz;
+    int prawa;
+    const uint8_t *dane;
+
+    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &prawa, &dane);
+         i++) {
+        /* Prawa podaje sam ELF - tak samo jak przy segmentach programu.
+           Dane biblioteki nie sa wiec wykonywalne, a jej kod nie jest
+           zapisywalny, i pilnuje tego procesor. */
+        uint64_t flagi = PG_USER;
+        if (prawa & DYN_ZAPIS)
+            flagi |= PG_WRITE;
+        if (!(prawa & DYN_WYKON))
+            flagi |= PG_NX;
+
+        uint64_t start = vaddr & ~(uint64_t)(PAGE_SIZE - 1);
+        uint64_t koniec = vaddr + memsz;
+        for (uint64_t va = start; va < koniec; va += PAGE_SIZE) {
+            if (!(prawa & DYN_ZAPIS)) {
+                uint64_t ramka = dyn_ramka(va);
+                if (!ramka || paging64_map(va, ramka, flagi) < 0)
+                    return -1;
+                /* Ramka ma przezyc smierc procesu - nalezy do systemu */
+                pmm_frame_ref((uint32_t)ramka);
+                continue;
+            }
+
+            uint64_t ramka = page_frame_for(va, flagi);
+            if (!ramka)
+                return -1;
+            uint64_t od = va > vaddr ? va : vaddr;
+            uint64_t plik_do = vaddr + filesz;
+            if (od < plik_do) {
+                uint64_t do_ = va + PAGE_SIZE < plik_do ? va + PAGE_SIZE
+                                                       : plik_do;
+                memcpy((void *)(uintptr_t)(ramka + (od - va)),
+                       dane + (od - vaddr), (uint32_t)(do_ - od));
+            }
+        }
+    }
+    return 0;
+}
+
+/* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
+   procesu jest juz aktywna, wiec piszemy wprost. */
+static int wpisz_adres(void *ctx, uint64_t adres, uint64_t wartosc)
+{
+    (void)ctx;
+    if (!paging64_user_range(adres, sizeof(uint64_t)))
+        return -1;
+    *(uint64_t *)(uintptr_t)adres = wartosc;
+    return 0;
 }
 
 static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
@@ -156,6 +221,23 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
         printk("[jadro] elf64: punkt wejscia poza programem (%x)\n",
                (uint32_t)eh->e_entry);
         return -1;
+    }
+
+    /* Program moze nie niesc kodu, ktorego uzywa, tylko puste miejsca
+       na adresy funkcji z biblioteki wspoldzielonej. Trzeba je
+       wypelnic TERAZ, przed pierwsza instrukcja - skok przez
+       niewypelniona pozycje nie ma dokad prowadzic. */
+    if (dyn_program_dynamiczny(file, size)) {
+        if (!dyn_obecna()) {
+            printk("[jadro] elf64: program potrzebuje biblioteki %s, "
+                   "ktorej nie ma\n", dyn_nazwa());
+            return -1;
+        }
+        if (mapuj_biblioteke() < 0 ||
+            dyn_relokuj(file, size, (void *)0, wpisz_adres) < 0) {
+            printk("[jadro] elf64: nie da sie zwiazac z %s\n", dyn_nazwa());
+            return -1;
+        }
     }
 
     *entry = eh->e_entry;

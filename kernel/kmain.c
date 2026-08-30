@@ -24,6 +24,7 @@
 #include "include/acpi.h"
 #include "include/mb2.h"
 #include "include/usbkbd.h"
+#include "include/dynlink.h"
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
@@ -219,6 +220,12 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (initrd_file_count())
         printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
                initrd_file_count());
+
+    /* Biblioteka wspoldzielona musi byc gotowa, zanim ruszy pierwszy
+       program - jej ramki sa wspolne dla wszystkich procesow */
+    if (dyn_init())
+        printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
+               dyn_nazwa(), dyn_stron());
 
     /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
        tablice ACPI podaje wtedy wylacznie loader */

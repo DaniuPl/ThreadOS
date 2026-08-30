@@ -34,6 +34,7 @@
 #include "shell64.h"
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/usbkbd.h"
+#include "../kernel/include/dynlink.h"
 #include "../kernel/include/swap.h"
 #include "fpu64.h"
 #include "isr64.h"
@@ -344,6 +345,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     else
         printk("[ OK ] initrd: %u plik(ow) od loadera\n",
                initrd_file_count());
+
+    /* Biblioteka wspoldzielona musi byc gotowa, zanim ruszy pierwszy
+       program - jej ramki sa wspolne dla wszystkich procesow */
+    if (dyn_init())
+        printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
+               dyn_nazwa(), dyn_stron());
 
     if (initrd_file_count()) {
     /* Program z pliku dostaje czysta karte: to, co powie jadru, mowi

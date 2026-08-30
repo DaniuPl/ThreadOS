@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+/* Gdzie w przestrzeni procesu lezy biblioteka wspoldzielona.
+   Pod obszarem mapowan (0xB0000000) i nad sterta, ktora konczy sie
+   u jej progu. Musi zgadzac sie z user/libproton.ld. */
+#define USER_LIB_BASE  0xAF000000u
+
 /* Uruchamia program ELF z initrd jako proces uzytkownika (ring 3,
    wlasna przestrzen adresowa). Argument to linia polecen (program +
    argumenty rozdzielone spacjami). Zwraca pid albo -1. */

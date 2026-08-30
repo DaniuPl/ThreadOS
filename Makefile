@@ -52,7 +52,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/certtest.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
-             $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf
+             $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf \
+             $(BUILD)/user/dynlib.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -106,6 +107,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/xhci.o \
         $(BUILD)/usbhc.o \
         $(BUILD)/usbkbd.o \
+        $(BUILD)/dynlink.o \
         $(BUILD)/acpi.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
@@ -157,8 +159,71 @@ USER_HEADERS := $(wildcard user/*.h)
 $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
-$(INITRD): $(USER_ELFS) scripts/mkinitrd.py
+# --- Biblioteka wspoldzielona ----------------------------------------
+#
+# Kryptografia, TLS, HTTP i DNS zyja w naglowkach user/*.h jako funkcje
+# 'static inline'. Kazdy program niosl je dotad w sobie - httpget i gweb
+# to po osiemdziesiat kilobajtow tego samego kodu.
+#
+# Zrodlo zostaje jedno. scripts/rozdziel.py robi z kazdego naglowka dwie
+# wersje: dla biblioteki (te same funkcje, ale widoczne z zewnatrz) i dla
+# programu (same zapowiedzi, bez cial). Zadna z nich nie jest pisana
+# recznie, wiec nie ma jak sie rozjechac ze zrodlem.
+#
+# Kopiowanie zrodel do build/ nie jest ozdoba: '#include "utls.h"' szuka
+# najpierw w katalogu pliku, ktory je wciaga. Gdyby libproton.c lezal
+# w user/, znalazlby oryginal zamiast wersji wygenerowanej.
+LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h urand.h ux25519.h \
+               ursa.h uecdsa.h ux509.h ucert.h utls.h uhttp.h uhtml.h \
+               udns.h caroots.h uproton.h
+LIB_SRC  := $(patsubst %,$(BUILD)/libsrc/%,$(LIB_HEADERS))
+LIB_DEKL := $(patsubst %,$(BUILD)/dekl/%,$(LIB_HEADERS))
+LIBPROTON := $(BUILD)/libproton.so
+
+$(BUILD)/libsrc $(BUILD)/dekl $(BUILD)/dyn:
+	mkdir -p $@
+
+$(BUILD)/libsrc/%.h: user/%.h scripts/rozdziel.py | $(BUILD)/libsrc
+	python3 scripts/rozdziel.py --lib $< > $@
+
+$(BUILD)/dekl/%.h: user/%.h scripts/rozdziel.py | $(BUILD)/dekl
+	python3 scripts/rozdziel.py --dekl $< > $@
+
+$(BUILD)/libsrc/libproton.c: user/libproton.c | $(BUILD)/libsrc
+	cp $< $@
+
+# -Bsymbolic: wywolania wewnatrz biblioteki wiaza sie od razu, przy
+# konsolidacji. Bez tego szlyby przez jej wlasna tablice skokow, a te
+# wypelnia sie dopiero przy ladowaniu - czym u nas nie ma komu sie zajac.
+$(LIBPROTON): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user/libproton.ld \
+              $(USER_HEADERS) Makefile
+	$(CC) -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC -O2 \
+	    -Wall -Wextra -I$(BUILD)/libsrc -Iuser -c $< -o $(BUILD)/libproton.o
+	$(CC) -m32 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
+	    -Wl,-soname,libproton.so -Wl,--no-warn-rwx-segments \
+	    -T user/libproton.ld -o $@ $(BUILD)/libproton.o
+
+$(BUILD)/dyn/%.c: user/%.c | $(BUILD)/dyn
+	cp $< $@
+
+# Programy, ktore biora kryptografie z biblioteki zamiast niesc ja same
+USER_DYN_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
+                   -fno-pic -no-pie -nostdlib -O2 -Wall -Wextra \
+                   -Wl,--build-id=none -Wl,--no-warn-rwx-segments
+
+# Regula wzorcowa ograniczona do tych pieciu nazw: reszta programow
+# buduje sie jak dotad, ze wszystkim w srodku
+USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
+USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
+
+$(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DEKL) \
+                     $(LIBPROTON) user/userdyn.ld Makefile | $(BUILD)/user
+	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/dekl -Iuser -T user/userdyn.ld \
+	    $< $(LIBPROTON) -o $@
+
+$(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
+	    libproton.so=$(LIBPROTON) \
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    evil2=$(BUILD)/user/evil2.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
@@ -186,7 +251,8 @@ $(INITRD): $(USER_ELFS) scripts/mkinitrd.py
 	    swaptest=$(BUILD)/user/swaptest.elf \
 	    mkmapa=$(BUILD)/user/mkmapa.elf mmapfile=$(BUILD)/user/mmapfile.elf \
 	    gleboko=$(BUILD)/user/gleboko.elf \
-	    mmapzap=$(BUILD)/user/mmapzap.elf
+	    mmapzap=$(BUILD)/user/mmapzap.elf \
+	    dynlib=$(BUILD)/user/dynlib.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #
@@ -203,6 +269,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci xhci usbhc usbkbd swap prog shm rtc \
+            dynlink \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
@@ -273,7 +340,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gweb.elf \
                $(BUILD)/user64/mkmapa64.elf \
                $(BUILD)/user64/mmapfile64.elf \
-               $(BUILD)/user64/mmapzap64.elf
+               $(BUILD)/user64/mmapzap64.elf \
+               $(BUILD)/user64/dynlib.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -294,8 +362,40 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
-$(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
+# --- Biblioteka wspoldzielona w trybie dlugim -------------------------
+#
+# Ten sam zabieg, co w jadrze 32-bitowym i z tych samych naglowkow -
+# rozny jest tylko adres, pod ktorym biblioteka lezy, i szerokosc
+# rejestrow. Zrodla nikt drugi raz nie pisze.
+LIBPROTON64 := $(BUILD)/libproton64.so
+LIB_DEKL64  := $(patsubst %,$(BUILD)/dekl/%,$(LIB_HEADERS))
+
+$(LIBPROTON64): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user64/libproton64.ld \
+                $(USER_HEADERS) Makefile
+	$(CC) -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC \
+	    -mno-red-zone -O2 -Wall -Wextra -I$(BUILD)/libsrc -Iuser \
+	    -c $< -o $(BUILD)/libproton64.o
+	$(CC) -m64 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
+	    -Wl,-soname,libproton.so -Wl,--no-warn-rwx-segments \
+	    -Wl,-z,max-page-size=0x1000 \
+	    -T user64/libproton64.ld -o $@ $(BUILD)/libproton64.o
+
+USER64_DYN_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
+                     -fno-pic -no-pie -nostdlib -mno-red-zone \
+                     -O2 -Wall -Wextra \
+                     -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
+
+USER64_DYN_ELFS := $(patsubst %,$(BUILD)/user64/%.elf,$(USER_DYN))
+
+$(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DEKL64) \
+                     $(LIBPROTON64) user64/userdyn64.ld Makefile \
+                     | $(BUILD)/user64
+	$(CC) $(USER64_DYN_CFLAGS) -I$(BUILD)/dekl -Iuser \
+	    -T user64/userdyn64.ld $< $(LIBPROTON64) -o $@
+
+$(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
+	    libproton.so=$(LIBPROTON64) \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \
@@ -328,7 +428,8 @@ $(INITRD64): $(USER64_ELFS) scripts/mkinitrd.py
 	    gweb=$(BUILD)/user64/gweb.elf \
 	    mkmapa64=$(BUILD)/user64/mkmapa64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
-	    mmapzap64=$(BUILD)/user64/mmapzap64.elf
+	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
+	    dynlib=$(BUILD)/user64/dynlib.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

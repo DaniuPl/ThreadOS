@@ -89,6 +89,17 @@ static struct ec_curve ec_p384 = {
     {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, 0, 0, 0
 };
 
+/* Krzywe wystawiamy funkcjami, a nie wprost.
+ *
+ * Powod jest w bibliotece wspoldzielonej: to sa DANE, i to zmienne -
+ * krzywa doliczaja sobie stale Montgomery'ego przy pierwszym uzyciu.
+ * Program, ktory siegalby po nie po nazwie, dostalby wlasna kopie
+ * (relokacja kopiujaca), i od tej chwili biblioteka liczylaby na
+ * jednym egzemplarzu, a program patrzyl na drugi. Przez funkcje
+ * wszyscy widza ten sam. */
+static inline struct ec_curve *ec_krzywa_p256(void) { return &ec_p256; }
+static inline struct ec_curve *ec_krzywa_p384(void) { return &ec_p384; }
+
 /* Punkt w postaci Jacobiego, wspolrzedne w dziedzinie Montgomery'ego */
 struct ec_point {
     struct bignum x, y, z;

@@ -116,7 +116,10 @@ def main():
         q64 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, disk=disk64,
                    nvme=True, qemu="qemu-system-x86_64")
         try:
-            start = q64.wait_serial("PFS", timeout=90)
+            # Czekamy na CALY wiersz, a nie na sam skrot "PFS": ten
+            # pojawia sie juz przy formatowaniu dysku, wiec czekanie na
+            # niego bylo wyscigiem z wypisem o sterowniku
+            start = q64.wait_serial("+ PFS gotowy", timeout=90)
             check("jadro 64-bitowe tez widzi dysk NVMe",
                   "Dysk NVMe (PCIe, kolejki) + PFS gotowy" in start)
             q64.wait_serial("proton64>", timeout=30)

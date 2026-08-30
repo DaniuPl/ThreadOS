@@ -57,6 +57,7 @@ ProtonOS/
 │   ├── fbcon.c         # konsola tekstowa rysowana na buforze obrazu
 │   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
+│   ├── dynlink.c       # biblioteka współdzielona: symbole i relokacje
 │   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
 │   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
 │   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
@@ -1698,3 +1699,94 @@ sprawdzane przez `make test`.
       ten sam Alt+F2. Osobne grupy `usbkbd64` i `xhci` pilnują dwóch
       magistral i jednego wniosku: wyżej nie widać, która jest pod
       spodem.
+- [x] **Biblioteka współdzielona i wiązanie symboli przy ładowaniu** -
+      koniec z kopią kryptografii w każdym programie.
+
+      `httpget` ważył 82 kilobajty, `gweb` 89, `certtest` 51. Prawie
+      wszystko w nich to była ta sama kryptografia i ten sam TLS,
+      wkompilowane po raz kolejny - raz w initrd i raz w pamięci,
+      osobno dla każdego procesu. Teraz te trzy plus `cryptotest` ważą
+      razem mniej niż jedna biblioteka, którą dzielą.
+
+      **Skąd wzięło się źródło biblioteki.** Kryptografia żyje
+      w ProtonOS w nagłówkach, jako `static inline`. To była dobra
+      decyzja i nie chciałem jej cofać: jedno źródło prawdy, zero
+      plików pośrednich. Biblioteka potrzebuje jednak dwóch różnych
+      spojrzeń na ten sam plik - z ciałami (żeby je skompilować
+      i dało się je w niej odnaleźć po nazwie) i bez ciał (żeby
+      program zawierał wywołania, a nie kopie). Rozbicie czternastu
+      nagłówków na pary .c/.h ręcznie znaczyłoby cztery tysiące linii
+      przepisanych i dwa miejsca, które od tej pory mogą się
+      rozjechać. Robi to więc `scripts/rozdziel.py` przy każdym
+      budowaniu: dopasowuje klamry, omijając te w napisach
+      i komentarzach, i wypluwa obie wersje. Źródło zostaje jedno
+      i nietknięte.
+
+      **Dlaczego biblioteka ma stały adres.** Konsolidujemy ją pod
+      adresem, pod którym jądro ją potem kładzie w każdym procesie.
+      Dzięki temu adresy w jej tablicy symboli są już ostateczne -
+      ani ona, ani jądro nie mają przy ładowaniu nic do przeliczania.
+      Ceny są dwie i obie akceptowalne: biblioteka może być tylko
+      jedna i zawsze widać ją pod tym samym adresem. Prawdziwy system
+      tak nie robi, bo chce ich wiele i chce losować adresy - ale
+      prawdziwy system ma na to konsolidator w przestrzeni użytkownika,
+      a u nas rolę `ld.so` pełni kilkadziesiąt linii w jądrze.
+
+      **Co dokładnie robi jądro.** Czyta z biblioteki tablicę symboli
+      dynamicznych (nazwa funkcji -> adres), a z programu listę
+      relokacji (adres pustego miejsca w jego tablicy skoków -> nazwa
+      funkcji). Złożenie jednego z drugim to całe wiązanie. Wiążemy
+      wszystko od razu, przy starcie: leniwe wiązanie wymagałoby, żeby
+      kawałek konsolidatora siedział w przestrzeni procesu i był wołany
+      z zaślepki PLT - cały osobny mechanizm po to, żeby oszczędzić
+      mikrosekundy przy starcie.
+
+      **Podział na wspólne i prywatne.** Segment bez prawa zapisu (kod
+      i stałe) dostaje RAMKI WSPÓLNE - te same fizyczne strony widzi
+      każdy proces, i to jest cała oszczędność. Segment z danymi musi
+      być prywatny, bo biblioteka trzyma w nim swój stan: ziarno
+      generatora losowego, ustawienia TLS. Stan jednego procesu nie ma
+      prawa być widoczny w drugim. Ogon zer (`.bss`) powstaje przy tym
+      pod palcami, tak samo jak sterta - program biorący z biblioteki
+      sam skrót SHA-256 nie ma powodu płacić za bufory TLS-a.
+
+      **Dwie rzeczy, które trzeba było wyjąć z nagłówków.** Krzywe
+      eliptyczne i wbudowany magazyn zaufania były w nich zmiennymi.
+      Program, który sięgnąłby po nie po nazwie, dostałby własną kopię
+      (relokacja kopiująca) - i od tej chwili biblioteka liczyłaby na
+      jednym egzemplarzu, a program patrzył na drugi. Teraz wystawiamy
+      je funkcjami, a jądro odmawia załadowania programu, w którym
+      taka relokacja by się pojawiła. Lepiej głośno przy starcie niż
+      cicho w połowie uzgodnienia TLS.
+
+      **Pułapka, którą widać tylko w liczbach.** Pierwsza wersja
+      raportowała "0 stron wspólnych" i nikomu by to nie przeszkadzało,
+      bo wszystko działało. Konsolidator wrzucił `.dynamic` do tego
+      samego segmentu co kod, a `.dynamic` jest zapisywalne - więc cały
+      segment stał się zapisywalny i jądro słusznie dawało każdemu
+      procesowi własną kopię. Współdzielenia nie było ani przez chwilę.
+      Stąd wyrównanie do granicy strony w skrypcie konsolidatora
+      i stąd ta liczba w komunikacie rozruchowym: bez niej ta pomyłka
+      nie miała jak wyjść na jaw.
+
+      **Druga pułapka, i ta wyszła dopiero na teście.** Dane biblioteki
+      dostawały początkowo strony pod palcami - ogon zer (`.bss`)
+      powstawał dopiero przy pierwszym dotknięciu, jak sterta. TLS
+      w jądrze 32-bitowym działał, w 64-bitowym nie. Powód: sprawdzanie
+      wskaźników z ring 3 wygląda w obu jądrach inaczej. Jądro
+      32-bitowe URZECZYWISTNIA stronę, o którą pyta program;
+      64-bitowe tylko sprawdza, czy jest, i odmawia, gdy jej nie ma.
+      Bufor, do którego pisze wyłącznie jądro - jak ten na odebrane
+      bajty TCP - nie zostaje więc dotknięty przez nikogo i syscall go
+      odrzuca. Cały segment danych jest teraz zakładany od razu;
+      trzydzieści kilka ramek na proces to cena za jeden mechanizm
+      mniej i za to, że oba jądra robią to samo.
+
+      Test nie pyta "czy działa", tylko o rzeczy, których nie da się
+      sfałszować. Adres wykonywanego kodu leży POZA obrazem programu -
+      i podać go musi sama biblioteka, bo program nieprzemieszczalny,
+      który bierze adres jej funkcji, dostaje adres własnej zaślepki
+      skoku. Drugi proces widzi ten sam adres kodu (ramki wspólne), ale
+      licznik generatora znów od zera (dane prywatne). Zapis do kodu
+      biblioteki kończy się błędem ochrony - inaczej jeden program
+      podmieniłby funkcję wszystkim naraz.
