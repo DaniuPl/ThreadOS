@@ -1,25 +1,26 @@
-/* PFS3 - ProtonOS File System z przydzialem blokow
+/* PFS3 - the ProtonOS File System with block allocation
  *
- * Poprzednia wersja dawala kazdemu plikowi staly obszar 32 sektorow:
- * bez fragmentacji, ale z twardym sufitem 16 KiB i 16 plikow. Odkad
- * system sciaga rzeczy z sieci, to za malo - wiec bloki sa przydzielane
- * z bitmapy, a i-wezel trzyma ich liste.
+ * The previous version gave every file a fixed area of 32 sectors: no
+ * fragmentation, but a hard ceiling of 16 KiB and 16 files. Since the
+ * system started pulling things off the network that is too little -
+ * so blocks are allocated from a bitmap and an inode holds their list.
  *
- * Uklad dysku (blok = 1 KiB = 2 sektory):
- *   blok 0        - superblok (magic "PFS3")
- *   bloki 1..4    - bitmapa blokow (4 KiB = 32768 bitow)
- *   bloki 5..12   - tablica i-wezlow (64 x 128 B)
- *   bloki 13..    - dane
+ * Disk layout (block = 1 KiB = 2 sectors):
+ *   block 0        - the superblock (magic "PFS3")
+ *   blocks 1..4    - the block bitmap (4 KiB = 32768 bits)
+ *   blocks 5..12   - the inode table (64 x 128 B)
+ *   blocks 13..    - data
  *
- * Plik ma 12 blokow bezposrednich, blok posredni (256 wskaznikow) i blok
- * podwojnie posredni (256 blokow po 256 wskaznikow), czyli do 64 MiB. Katalogi to i-wezly typu DIR; kazdy i-wezel pamieta
- * slot rodzica (FS_ROOT = -1 dla korzenia). Sciezki rozwiazuje sie
- * chodzeniem po komponentach ("." i ".." obslugiwane).
+ * A file has 12 direct blocks, an indirect block (256 pointers) and a
+ * doubly indirect block (256 blocks of 256 pointers), that is up to
+ * 64 MiB. Directories are inodes of type DIR; every inode remembers
+ * its parent's slot (FS_ROOT = -1 for the root). Paths are resolved by
+ * walking the components ("." and ".." are handled).
  *
- * Bitmapa i tablica i-wezlow siedza w pamieci i sa zapisywane na dysk
- * przy kazdej zmianie - przy tej skali to prostsze i bezpieczniejsze niz
- * pamiec podreczna z odroczonym zapisem. Operacje dyskowe biegna z
- * wylaczonymi przerwaniami.
+ * The bitmap and the inode table sit in memory and are written to disk
+ * on every change - at this scale that is simpler and safer than a
+ * cache with deferred writes. Disk operations run with interrupts
+ * disabled.
  */
 
 #include "include/fs.h"
@@ -45,24 +46,24 @@
 #define FS_NOTFOUND  (-2)
 
 struct inode {
-    char name[FS_NAME_MAX + 1];   /* 64 B, z NUL */
+    char name[FS_NAME_MAX + 1];   /* 64 B, with a NUL */
     uint32_t size;                /* 4 B */
     uint8_t used;                 /* 1 B */
     uint8_t type;                 /* 1 B: FS_TYPE_FILE / FS_TYPE_DIR */
-    int16_t parent;               /* 2 B: slot rodzica, -1 = root */
-    uint32_t direct[FS_DIRECT];   /* 48 B: numery blokow */
-    uint32_t indirect;            /* 4 B: blok ze wskaznikami (0 = brak) */
-    uint32_t dindirect;           /* 4 B: blok blokow ze wskaznikami */
-} __attribute__((packed));        /* 128 B -> 8 i-wezlow na blok */
+    int16_t parent;               /* 2 B: the parent's slot, -1 = root */
+    uint32_t direct[FS_DIRECT];   /* 48 B: block numbers */
+    uint32_t indirect;            /* 4 B: a block of pointers (0 = none) */
+    uint32_t dindirect;           /* 4 B: a block of blocks of pointers */
+} __attribute__((packed));        /* 128 B -> 8 inodes per block */
 
 struct superblock {
     char magic[8];
     uint32_t ninodes;
-    uint32_t nblocks;             /* ile blokow obejmuje bitmapa */
+    uint32_t nblocks;             /* how many blocks the bitmap covers */
     uint32_t data_start;
 } __attribute__((packed));
 
-/* Uklad na dysku zalezy od rozmiaru i-wezla - niech kompilator pilnuje */
+/* The on-disk layout depends on the inode size - let the compiler watch it */
 _Static_assert(sizeof(struct inode) == INODE_SIZE,
                "i-wezel musi miec dokladnie INODE_SIZE bajtow");
 
@@ -72,10 +73,10 @@ static uint8_t bitmap[BITMAP_BLOCKS * FS_BLOCK];
 static uint32_t total_blocks;
 static uint8_t block_buf[FS_BLOCK];
 
-/* --- dostep do blokow ------------------------------------------------- */
+/* --- block access ------------------------------------------------------ */
 
-/* Caly blok jednym poleceniem: przy AHCI to jeden transfer DMA zamiast
-   dwoch osobnych rozkazow na sektor */
+/* A whole block in one command: with AHCI that is a single DMA
+   transfer instead of two separate per-sector requests */
 static int block_read(uint32_t block, void *buf)
 {
     return blk_read(block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
@@ -93,9 +94,10 @@ static void flush_inodes(void)
         block_write(INODE_START + i, src + i * FS_BLOCK);
 }
 
-/* Zapisuje tylko blok z danym i-wezlem. Przy zapisie pliku i-wezel
-   zmienia sie co blok danych, wiec przepisywanie calej tablicy (8 KiB
-   przez PIO) kosztowaloby wiecej niz same dane. */
+/* Writes only the block holding a given inode. While a file is being
+   written the inode changes with every data block, so rewriting the
+   whole table (8 KiB through PIO) would cost more than the data
+   itself. */
 static void flush_inode(int slot)
 {
     uint32_t blk = (uint32_t)slot * INODE_SIZE / FS_BLOCK;
@@ -109,15 +111,15 @@ static void flush_bitmap(void)
         block_write(BITMAP_START + i, bitmap + i * FS_BLOCK);
 }
 
-/* Jak wyzej: przy przydziale bloku wystarczy zapisac ten kawalek
-   bitmapy, w ktorym zmienil sie bit */
+/* As above: when allocating a block it is enough to write the piece of
+   the bitmap in which a bit changed */
 static void flush_bitmap_bit(uint32_t b)
 {
     uint32_t blk = b / 8 / FS_BLOCK;
     block_write(BITMAP_START + blk, bitmap + blk * FS_BLOCK);
 }
 
-/* --- bitmapa blokow --------------------------------------------------- */
+/* --- the block bitmap --------------------------------------------------- */
 
 static int bit_get(uint32_t b)
 {
@@ -132,7 +134,7 @@ static void bit_set(uint32_t b, int v)
         bitmap[b / 8] &= (uint8_t)~(1 << (b % 8));
 }
 
-/* Przydziela wyzerowany blok; 0 = brak miejsca (blok 0 to superblok) */
+/* Allocates a zeroed block; 0 = out of space (block 0 is the superblock) */
 static uint32_t block_alloc(void)
 {
     for (uint32_t b = DATA_START; b < total_blocks; b++) {
@@ -155,7 +157,7 @@ static void block_free(uint32_t b)
     flush_bitmap_bit(b);
 }
 
-/* Zwalnia wszystkie bloki pliku */
+/* Frees all of a file's blocks */
 static void inode_free_blocks(struct inode *in)
 {
     for (int i = 0; i < FS_DIRECT; i++) {
@@ -193,8 +195,9 @@ static void inode_free_blocks(struct inode *in)
     in->size = 0;
 }
 
-/* Numer bloku dysku dla n-tego bloku pliku; alloc=1 przydziela brakujace.
-   Zwraca 0, gdy bloku nie ma (albo nie da sie przydzielic). */
+/* The disk block number for a file's n-th block; alloc=1 allocates a
+   missing one. Returns 0 when the block does not exist (or cannot be
+   allocated). */
 static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
 {
     if (n < FS_DIRECT) {
@@ -208,7 +211,7 @@ static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
     static uint32_t ptrs[FS_INDIRECT];
     static uint32_t ptrs2[FS_INDIRECT];
 
-    if (n < FS_INDIRECT) {               /* blok posredni */
+    if (n < FS_INDIRECT) {               /* the indirect block */
         if (!in->indirect) {
             if (!alloc)
                 return 0;
@@ -229,9 +232,9 @@ static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
         return ptrs[n];
     }
 
-    n -= FS_INDIRECT;                    /* blok podwojnie posredni */
+    n -= FS_INDIRECT;                    /* the doubly indirect block */
     if (n >= (uint32_t)FS_DINDIRECT)
-        return 0;                        /* poza sufitem rozmiaru pliku */
+        return 0;                        /* beyond the file size ceiling */
 
     uint32_t hi = n / FS_INDIRECT, lo = n % FS_INDIRECT;
 
@@ -265,7 +268,7 @@ static uint32_t inode_block(struct inode *in, uint32_t n, int alloc)
     return ptrs2[lo];
 }
 
-/* --- start i formatowanie --------------------------------------------- */
+/* --- startup and formatting --------------------------------------------- */
 
 static void format_disk(void)
 {
@@ -281,7 +284,7 @@ static void format_disk(void)
     block_write(0, block_buf);
 
     memset(bitmap, 0, sizeof(bitmap));
-    for (uint32_t b = 0; b < DATA_START; b++)  /* metadane zajete */
+    for (uint32_t b = 0; b < DATA_START; b++)  /* metadata taken */
         bit_set(b, 1);
     flush_bitmap();
 
@@ -301,7 +304,7 @@ int fs_init(void)
     uint32_t sectors = blk_sectors();
     total_blocks = sectors / SECTORS_PER_BLOCK;
     if (total_blocks > BITMAP_BITS)
-        total_blocks = BITMAP_BITS;        /* tyle obejmuje bitmapa */
+        total_blocks = BITMAP_BITS;        /* this much the bitmap covers */
     if (total_blocks <= DATA_START) {
         printk("[ !! ] FS: dysk za maly (%u blokow)\n", total_blocks);
         return 0;
@@ -343,7 +346,7 @@ void fs_usage(uint32_t *used, uint32_t *total)
         *total = total_blocks;
 }
 
-/* --- Pomocnicze: katalogi i rozwiazywanie sciezek --- */
+/* --- Helpers: directories and path resolution --- */
 
 static int alloc_inode(void)
 {
@@ -363,7 +366,8 @@ static int parent_of(int slot)
     return slot == FS_ROOT ? FS_ROOT : inodes[slot].parent;
 }
 
-/* Szuka wpisu o nazwie s (dlugosc len) w katalogu 'parent'; -1 gdy brak */
+/* Looks for an entry named s (length len) in directory 'parent';
+   -1 when there is none */
 static int dir_find(int parent, const char *s, int len)
 {
     if (len <= 0 || len > FS_NAME_MAX)
@@ -378,7 +382,7 @@ static int dir_find(int parent, const char *s, int len)
     return -1;
 }
 
-/* Rozwiazuje cala sciezke do slotu (>=0 albo FS_ROOT) lub FS_NOTFOUND */
+/* Resolves a whole path to a slot (>=0 or FS_ROOT) or FS_NOTFOUND */
 static int resolve(int cwd, const char *path)
 {
     int cur = (path[0] == '/') ? FS_ROOT : cwd;
@@ -408,8 +412,9 @@ static int resolve(int cwd, const char *path)
     return cur;
 }
 
-/* Rozwiazuje katalog-rodzica ostatniego komponentu i wyodrebnia nazwe
-   bazowa. Zwraca slot katalogu (>=0 albo FS_ROOT) lub FS_NOTFOUND. */
+/* Resolves the parent directory of the last component and extracts the
+   base name. Returns the directory's slot (>=0 or FS_ROOT) or
+   FS_NOTFOUND. */
 static int resolve_parent(int cwd, const char *path, char *base)
 {
     const char *last = (void *)0;
@@ -457,7 +462,7 @@ static int create_inode(int dir, const char *base, int type)
     return idx;
 }
 
-/* --- Publiczne operacje na sciezkach --- */
+/* --- Public path operations --- */
 
 int fs_open(int cwd, const char *path, int create)
 {
@@ -468,11 +473,11 @@ int fs_open(int cwd, const char *path, int create)
     int slot = resolve(cwd, path);
     if (slot >= 0 && inodes[slot].type == FS_TYPE_FILE) {
         irq_restore(flags);
-        return slot;                       /* istniejacy plik */
+        return slot;                       /* an existing file */
     }
     if (slot == FS_ROOT || (slot >= 0 && inodes[slot].type == FS_TYPE_DIR)) {
         irq_restore(flags);
-        return -1;                         /* to katalog, nie plik */
+        return -1;                         /* that is a directory, not a file */
     }
     if (!create) {
         irq_restore(flags);
@@ -495,7 +500,7 @@ int fs_mkdir(int cwd, const char *path)
     if (!ready)
         return -1;
     uint32_t flags = irq_save();
-    if (resolve(cwd, path) != FS_NOTFOUND) {   /* juz istnieje */
+    if (resolve(cwd, path) != FS_NOTFOUND) {   /* it already exists */
         irq_restore(flags);
         return -1;
     }
@@ -529,11 +534,11 @@ int fs_unlink(int cwd, const char *path)
         return -1;
     uint32_t flags = irq_save();
     int slot = resolve(cwd, path);
-    if (slot < 0) {                        /* brak albo katalog glowny */
+    if (slot < 0) {                        /* none, or the root directory */
         irq_restore(flags);
         return -1;
     }
-    if (inodes[slot].type == FS_TYPE_DIR) { /* katalog musi byc pusty */
+    if (inodes[slot].type == FS_TYPE_DIR) { /* a directory has to be empty */
         for (int i = 0; i < FS_MAX_FILES; i++)
             if (inodes[i].used && inodes[i].parent == slot) {
                 irq_restore(flags);
@@ -554,7 +559,7 @@ void fs_getpath(int slot, char *buf)
         buf[1] = '\0';
         return;
     }
-    /* Zbierz nazwy od slotu do korzenia, potem odwroc kolejnosc */
+    /* Collect the names from the slot up to the root, then reverse the order */
     int chain[FS_MAX_FILES];
     int n = 0;
     int cur = slot;
@@ -601,13 +606,15 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
     return 0;
 }
 
-/* --- Operacje po slocie --- */
+/* --- Operations by slot --- */
 
-/* Numer bloku dysku, pod ktorym lezy 'index'-ty blok pliku. alloc=1
-   przydziela go, gdy plik jeszcze tam nie siega. 0 = blad.
-   Korzysta z tego swap: miejsce rezerwuje przez system plikow (wiec
-   'df' i 'fls' mowia prawde), a pisze po nim juz wprost przez ATA -
-   bez wchodzenia w kod PFS, ktory ma jeden wspolny bufor na blok. */
+/* The disk block number at which a file's 'index'-th block lies.
+   alloc=1 allocates it when the file does not reach that far yet.
+   0 = error.
+   Swapping uses this: it reserves space through the filesystem (so
+   'df' and 'fls' tell the truth) and then writes over it directly
+   through ATA - without stepping into the PFS code, which has one
+   shared block buffer. */
 uint32_t fs_file_block(int slot, uint32_t index, int alloc)
 {
     if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
@@ -618,7 +625,7 @@ uint32_t fs_file_block(int slot, uint32_t index, int alloc)
     return blk;
 }
 
-/* Pierwszy sektor ATA danego bloku PFS */
+/* The first ATA sector of a given PFS block */
 uint32_t fs_block_lba(uint32_t block)
 {
     return block * SECTORS_PER_BLOCK;
@@ -667,7 +674,7 @@ int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len)
         if (chunk > len - done)
             chunk = len - done;
 
-        if (!bno) {                        /* dziura w pliku - zera */
+        if (!bno) {                        /* a hole in the file - zeros */
             memset(dst + done, 0, chunk);
         } else {
             if (block_read(bno, block_buf) < 0) {
@@ -705,12 +712,12 @@ int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len)
         uint32_t had = inode_block(in, pos / FS_BLOCK, 0);
         uint32_t bno = had ? had : inode_block(in, pos / FS_BLOCK, 1);
         if (!had && bno)
-            meta_dirty = 1;                /* doszedl nowy blok do i-wezla */
-        if (!bno) {                        /* brak miejsca na dysku */
+            meta_dirty = 1;                /* a new block was added to the inode */
+        if (!bno) {                        /* the disk is full */
             break;
         }
 
-        if (chunk != FS_BLOCK) {           /* czesciowy blok - doczytaj */
+        if (chunk != FS_BLOCK) {           /* a partial block - read it in first */
             if (block_read(bno, block_buf) < 0) {
                 irq_restore(flags);
                 return -1;
@@ -734,7 +741,7 @@ int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len)
     return done ? (int)done : -1;
 }
 
-/* --- Wygoda dla shella jadra (katalog glowny) --- */
+/* --- Convenience for the kernel shell (the root directory) --- */
 
 int fs_write(const char *name, const void *data, uint32_t len)
 {

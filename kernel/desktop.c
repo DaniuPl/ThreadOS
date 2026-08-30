@@ -1,9 +1,9 @@
-/* Graficzny pulpit ProtonOS - prosty kompozytor
+/* The ProtonOS graphical desktop - a simple compositor
  *
- * Dziala jako watek jadra: w petli przerysowuje cala klatke do
- * framebuffera (tlo -> kursor) i oddaje procesor na ~30 ms. Przy
- * 320x200 pelne przerysowanie to 64 KB - tanio, wiec nie bawimy sie
- * w zapamietywanie tla pod kursorem.
+ * It runs as a kernel thread: in a loop it redraws the whole frame
+ * into the framebuffer (background -> cursor) and gives up the CPU for
+ * ~30 ms. At 320x200 a full redraw is 64 KB - cheap enough that we do
+ * not bother saving the background under the cursor.
  */
 
 #include <stdint.h>
@@ -19,19 +19,19 @@
 #include "include/fs.h"
 #include "include/io.h"
 
-/* Indeksy palety pulpitu (ustawiane w desktop_thread) */
+/* Desktop palette indices (set in desktop_thread) */
 #define COL_BLACK  0
-#define COL_TITLE  3      /* pasek tytulu okna (niebieski) */
+#define COL_TITLE  3      /* the window title bar (blue) */
 #define COL_WHITE  4
-#define COL_DESK   6      /* tlo pulpitu (ciemny blekit) */
-#define COL_BAR    7      /* gorny pasek (jasnoszary) */
-#define COL_WIN    8      /* tlo okna (szary) */
-#define COL_TBBTN  9      /* przycisk okna na pasku zadan (ciemnoszary) */
-#define COL_ICON   10     /* ikona pulpitu (pomaranczowa) */
+#define COL_DESK   6      /* the desktop background (dark blue) */
+#define COL_BAR    7      /* the top bar (light grey) */
+#define COL_WIN    8      /* the window background (grey) */
+#define COL_TBBTN  9      /* a window button on the taskbar (dark grey) */
+#define COL_ICON   10     /* a desktop icon (orange) */
 
 #define TITLE_H 10
 
-/* Ikony pulpitu: klikniecie uruchamia aplikacje */
+/* Desktop icons: clicking one launches an application */
 #define ICON_W 32
 #define ICON_H 24
 struct icon {
@@ -49,14 +49,15 @@ static struct icon icons[] = {
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
-/* Plik na dysku z zapamietanymi pozycjami ikon (pary x,y w kolejnosci) */
+/* The disk file with the remembered icon positions (x,y pairs in order) */
 #define ICON_POS_FILE "icons.pos"
 
-static int icon_drag = -1;      /* przeciagana ikona (-1 = brak) */
-static int icon_dx, icon_dy;    /* uchwyt: offset kursora w ikonie */
-static int icon_press_x, icon_press_y;   /* pozycja wcisniecia (klik vs drag) */
+static int icon_drag = -1;      /* the icon being dragged (-1 = none) */
+static int icon_dx, icon_dy;    /* the grab: the cursor's offset within the icon */
+static int icon_press_x, icon_press_y;   /* the press position (click vs drag) */
 
-/* Wczytuje pozycje ikon z dysku (jesli plik istnieje i pasuje rozmiarem) */
+/* Reads the icon positions from disk (if the file exists and its size
+   matches) */
 static void icons_load(void)
 {
     if (!fs_ready())
@@ -70,7 +71,7 @@ static void icons_load(void)
     }
 }
 
-/* Zapisuje biezace pozycje ikon na dysk */
+/* Writes the current icon positions to disk */
 static void icons_save(void)
 {
     if (!fs_ready())
@@ -83,13 +84,13 @@ static void icons_save(void)
     fs_write(ICON_POS_FILE, buf, sizeof(buf));
 }
 
-#define COL_RED    1      /* przycisk zamkniecia */
+#define COL_RED    1      /* the close button */
 
-/* Zdarzenie dla aplikacji (uklad zgodny z usys.h struct win_event) */
+/* An event for an application (layout matching struct win_event in usys.h) */
 struct wevent {
-    int32_t type;          /* 0 = brak, 1 = klik myszy */
-    int32_t x, y;          /* wspolrzedne wzgledem obszaru treści */
-    int32_t val;           /* maska przyciskow */
+    int32_t type;          /* 0 = none, 1 = a mouse click */
+    int32_t x, y;          /* coordinates relative to the content area */
+    int32_t val;           /* the button mask */
 };
 #define WEV_NONE  0
 #define WEV_CLICK 1
@@ -100,32 +101,33 @@ struct window {
     int x, y, w, h;
     char title[24];
     int used;
-    int has_button;        /* czy okno ma przycisk akcji */
-    int counter;           /* licznik klikniec przycisku */
-    int owner;             /* pid procesu-wlasciciela; -1 = okno jadra */
-    uint8_t *content;      /* bufor treści aplikacji (NULL = okno jadra) */
-    int cw, ch;            /* wymiary obszaru treści */
-    int z;                 /* porzadek rysowania (wyzszy = na wierzchu) */
-    int minimized;         /* czy zwiniete (ukryte, widoczne na pasku) */
-    struct wevent evq[WEV_QLEN];  /* kolejka zdarzen dla aplikacji */
+    int has_button;        /* does the window have an action button */
+    int counter;           /* the button's click counter */
+    int owner;             /* the owning process's pid; -1 = a kernel window */
+    uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
+    int cw, ch;            /* dimensions of the content area */
+    int z;                 /* drawing order (higher = on top) */
+    int minimized;         /* is it minimised (hidden, visible on the bar) */
+    struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
 
 #define MAX_WIN 6
 static struct window wins[MAX_WIN];
 
-/* Stan przeciagania: indeks okna i uchwyt (offset kursora w oknie) */
+/* Drag state: the window index and the grab (the cursor's offset
+   within the window) */
 static int drag_idx = -1;
 static int resize_idx = -1;
 static int drag_dx, drag_dy;
-static int prev_pressed;    /* poprzedni stan LPM - do wykrycia klikniecia */
-static int focus_idx = -1;  /* okno z fokusem klawiatury */
+static int prev_pressed;    /* the previous left-button state - to detect a click */
+static int focus_idx = -1;  /* the window with keyboard focus */
 
-/* Pasek zadan i menu uruchamiania */
-#define TB_H 12                       /* wysokosc paska zadan */
-#define MENU_BW 40                    /* szerokosc przycisku "Menu" */
-#define MENU_ROW 12                   /* wysokosc wpisu menu */
-#define MENU_W 80                     /* szerokosc rozwinietego menu */
+/* The taskbar and the launch menu */
+#define TB_H 12                       /* the taskbar height */
+#define MENU_BW 40                    /* the width of the "Menu" button */
+#define MENU_ROW 12                   /* the height of a menu entry */
+#define MENU_W 80                     /* the width of the opened menu */
 static int menu_open;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
@@ -133,27 +135,27 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 static int taskbar_y(void) { return video_h() - TB_H; }
 static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
 
-/* Lista przyciskow okien na pasku zadan (po przycisku Menu) */
+/* The list of window buttons on the taskbar (after the Menu button) */
 #define TBL_X0 (2 + MENU_BW + 4)
 #define TBL_W  52
 
-static int z_top;           /* najwyzszy przydzielony porzadek Z */
+static int z_top;           /* the highest Z order handed out */
 
-/* Wynosi okno na wierzch (najwyzszy Z) */
+/* Brings a window to the top (the highest Z) */
 static void raise_win(int i)
 {
     wins[i].z = ++z_top;
 }
 
-/* Wypelnia out[] slotami uzywanych okien w kolejnosci Z (od spodu);
-   zwraca ich liczbe */
+/* Fills out[] with the slots of used windows in Z order (from the
+   bottom); returns their count */
 static int zorder(int *out)
 {
     int n = 0;
     for (int i = 0; i < MAX_WIN; i++)
         if (wins[i].used)
             out[n++] = i;
-    for (int a = 1; a < n; a++) {     /* sortowanie przez wstawianie po z */
+    for (int a = 1; a < n; a++) {     /* insertion sort by z */
         int key = out[a], b = a - 1;
         while (b >= 0 && wins[out[b]].z > wins[key].z) {
             out[b + 1] = out[b];
@@ -164,8 +166,8 @@ static int zorder(int *out)
     return n;
 }
 
-/* Wstawia zdarzenie do kolejki okna (chronione - wolane z kompozytora,
-   IRQ klawiatury i posrednio z syscalla) */
+/* Puts an event into a window's queue (protected - called from the
+   compositor, the keyboard IRQ and indirectly from a syscall) */
 static void win_enqueue(struct window *w, int type, int x, int y, int val)
 {
     if (!w->content)
@@ -179,8 +181,8 @@ static void win_enqueue(struct window *w, int type, int x, int y, int val)
     irq_restore(flags);
 }
 
-#define CLOSE_SZ 8          /* przyciski paska [_] [x] */
-#define GRIP_SZ  8          /* uchwyt zmiany rozmiaru (prawy dolny rog) */
+#define CLOSE_SZ 8          /* the bar buttons [_] [x] */
+#define GRIP_SZ  8          /* the resize grip (bottom right corner) */
 #define BTN_W 40
 #define BTN_H 12
 #define WIN_MIN_W 60
@@ -200,8 +202,8 @@ static int resizable(const struct window *w) { return w->content == (void *)0; }
 static int btn_x(const struct window *w)   { return w->x + 8; }
 static int btn_y(const struct window *w)    { return w->y + TITLE_H + 8; }
 
-/* Strzalka kursora 8x12: bity ustawione = piksel kursora.
-   Bit najstarszy (0x80) to lewa kolumna. */
+/* An 8x12 cursor arrow: set bits = cursor pixels.
+   The highest bit (0x80) is the leftmost column. */
 static const uint8_t cursor_bmp[12] = {
     0x80, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC,
     0xFE, 0xFF, 0xF8, 0xD8, 0x88, 0x18,
@@ -213,8 +215,8 @@ static void draw_cursor(int mx, int my)
         for (int col = 0; col < 8; col++) {
             if (!(cursor_bmp[row] & (0x80 >> col)))
                 continue;
-            /* Czarny kontur (sasiednie piksele) dla widocznosci na
-               kazdym tle, bialy srodek na wierzchu */
+            /* A black outline (neighbouring pixels) for visibility on any
+               background, with a white middle on top */
             video_putpixel(mx + col - 1, my + row, COL_BLACK);
             video_putpixel(mx + col + 1, my + row, COL_BLACK);
             video_putpixel(mx + col, my + row - 1, COL_BLACK);
@@ -227,7 +229,7 @@ static void draw_cursor(int mx, int my)
                 video_putpixel(mx + col, my + row, COL_WHITE);
 }
 
-/* Rysuje liczbe dziesietna jako tekst */
+/* Draws a decimal number as text */
 static void draw_int(int x, int y, int v, uint8_t col)
 {
     char tmp[12];
@@ -244,7 +246,7 @@ static void draw_int(int x, int y, int v, uint8_t col)
     video_draw_string(x, y, s, col);
 }
 
-/* --- Rysowanie do bufora treści aplikacji (indeksy palety) --- */
+/* --- Drawing into an application's content buffer (palette indices) --- */
 
 static void buf_rect(struct window *w, int x, int y, int rw, int rh, uint8_t c)
 {
@@ -282,28 +284,28 @@ static void buf_text(struct window *w, int x, int y, const char *s, uint8_t c)
 
 static void draw_window(const struct window *win)
 {
-    if (win->minimized)            /* zwiniete - widoczne tylko na pasku */
+    if (win->minimized)            /* minimised - visible only on the bar */
         return;
-    /* Tlo okna z czarna ramka */
+    /* The window background with a black frame */
     video_fill_rect(win->x, win->y, win->w, win->h, COL_WIN);
     video_fill_rect(win->x, win->y, win->w, 1, COL_BLACK);
     video_fill_rect(win->x, win->y + win->h - 1, win->w, 1, COL_BLACK);
     video_fill_rect(win->x, win->y, 1, win->h, COL_BLACK);
     video_fill_rect(win->x + win->w - 1, win->y, 1, win->h, COL_BLACK);
-    /* Pasek tytulu + nazwa */
+    /* The title bar plus the name */
     video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H, COL_TITLE);
     video_draw_string(win->x + 3, win->y + 2, win->title, COL_WHITE);
-    /* Przycisk zwijania [_] obok zamkniecia */
+    /* The minimise button [_] next to the close one */
     video_fill_rect(min_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
     video_draw_char(min_x(win), close_y(win), '_', COL_WHITE);
-    /* Przycisk zamkniecia [x] w prawym rogu paska */
+    /* The close button [x] in the right corner of the bar */
     video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_RED);
     video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
-    /* Uchwyt zmiany rozmiaru (prawy dolny rog) dla okien jadra */
+    /* The resize grip (bottom right corner) for kernel windows */
     if (resizable(win))
         video_fill_rect(grip_x(win), grip_y(win), GRIP_SZ, GRIP_SZ, COL_BAR);
 
-    /* Opcjonalny przycisk akcji + licznik klikniec */
+    /* An optional action button plus a click counter */
     if (win->has_button) {
         video_fill_rect(btn_x(win), btn_y(win), BTN_W, BTN_H, COL_BAR);
         video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
@@ -311,7 +313,7 @@ static void draw_window(const struct window *win)
                  COL_WHITE);
     }
 
-    /* Okno aplikacji: skomponuj jej bufor treści w obszarze roboczym */
+    /* An application window: compose its content buffer into the work area */
     if (win->content) {
         int bx = win->x + 1;
         int by = win->y + TITLE_H + 1;
@@ -322,22 +324,22 @@ static void draw_window(const struct window *win)
     }
 }
 
-/* Czy punkt jest na pasku tytulu okna (uchwyt do przeciagania) */
+/* Is the point on a window's title bar (the drag handle) */
 static int on_titlebar(const struct window *win, int x, int y)
 {
     return x >= win->x && x < win->x + win->w &&
            y >= win->y && y < win->y + TITLE_H;
 }
 
-/* Obsluga myszy: klikniecia (zamkniecie, przycisk) i przeciaganie okien.
-   Klikniecia maja pierwszenstwo przed przeciaganiem; oba liczone na
-   zboczu wcisniecia LPM, by jeden klik = jedna akcja. */
+/* Mouse handling: clicks (close, buttons) and window dragging.
+   Clicks take precedence over dragging; both are counted on the
+   left-button press edge, so that one click = one action. */
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
 
-    if (pressed && !prev_pressed) {     /* zbocze wcisniecia = klik */
-        /* Pasek zadan / menu uruchamiania ma pierwszenstwo (na wierzchu) */
+    if (pressed && !prev_pressed) {     /* a press edge = a click */
+        /* The taskbar / launch menu takes precedence (it is on top) */
         if (in_rect(mx, my, 2, taskbar_y() + 2, MENU_BW, TB_H - 4)) {
             menu_open = !menu_open;
             prev_pressed = pressed;
@@ -346,15 +348,15 @@ static void handle_input(int mx, int my, int buttons)
         if (menu_open) {
             for (int i = 0; i < MENU_N; i++) {
                 if (in_rect(mx, my, 2, menu_item_y(i), MENU_W, MENU_ROW)) {
-                    exec_spawn(menu_items[i]);   /* uruchom aplikacje */
+                    exec_spawn(menu_items[i]);   /* launch the application */
                     menu_open = 0;
                     prev_pressed = pressed;
                     return;
                 }
             }
-            menu_open = 0;                /* klik poza menu - zamknij */
+            menu_open = 0;                /* a click outside the menu - close it */
         }
-        /* Przyciski okien na pasku zadan: fokus + wyniesienie na wierzch */
+        /* Window buttons on the taskbar: focus plus bring to top */
         if (my >= taskbar_y()) {
             int j = 0;
             for (int i = 0; i < MAX_WIN; i++) {
@@ -362,7 +364,7 @@ static void handle_input(int mx, int my, int buttons)
                     continue;
                 if (in_rect(mx, my, TBL_X0 + j * TBL_W, taskbar_y(),
                             TBL_W - 2, TB_H)) {
-                    wins[i].minimized = 0;   /* przywroc, jesli zwiniete */
+                    wins[i].minimized = 0;   /* restore it if minimised */
                     focus_idx = i;
                     raise_win(i);
                     prev_pressed = pressed;
@@ -375,18 +377,18 @@ static void handle_input(int mx, int my, int buttons)
         int hit = 0;
         int ord[MAX_WIN];
         int n = zorder(ord);
-        for (int k = n - 1; k >= 0; k--) {  /* od okna na wierzchu w dol */
+        for (int k = n - 1; k >= 0; k--) {  /* from the topmost window downwards */
             int i = ord[k];
             struct window *w = &wins[i];
-            if (w->minimized)               /* zwiniete - poza zasiegiem */
+            if (w->minimized)               /* minimised - out of reach */
                 continue;
-            /* przycisk zamkniecia [x] */
+            /* the close button [x] */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->used = 0;
                 hit = 1;
                 break;
             }
-            /* przycisk zwijania [_] */
+            /* the minimise button [_] */
             if (in_rect(mx, my, min_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->minimized = 1;
                 if (focus_idx == i)
@@ -394,7 +396,7 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* uchwyt zmiany rozmiaru (prawy dolny rog) */
+            /* the resize grip (bottom right corner) */
             if (resizable(w) &&
                 in_rect(mx, my, grip_x(w), grip_y(w), GRIP_SZ, GRIP_SZ)) {
                 resize_idx = i;
@@ -403,7 +405,7 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* przycisk akcji w oknie */
+            /* an action button inside the window */
             if (w->has_button &&
                 in_rect(mx, my, btn_x(w), btn_y(w), BTN_W, BTN_H)) {
                 w->counter++;
@@ -412,7 +414,7 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* pasek tytulu -> rozpocznij przeciaganie (i fokus) */
+            /* the title bar -> start dragging (and focus) */
             if (on_titlebar(w, mx, my)) {
                 drag_idx = i;
                 drag_dx = mx - w->x;
@@ -422,7 +424,8 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* klik w cialo okna aplikacji -> fokus + zdarzenie do procesu */
+            /* a click into an application window's body -> focus plus an event
+                   to the process */
             if (in_rect(mx, my, w->x, w->y, w->w, w->h)) {
                 focus_idx = i;
                 raise_win(i);
@@ -431,12 +434,12 @@ static void handle_input(int mx, int my, int buttons)
                 int cy = my - (w->y + TITLE_H + 1);
                 if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch)
                     win_enqueue(w, WEV_CLICK, cx, cy, buttons & 0x07);
-                break;            /* pochlon - nie przebijaj do nizszych */
+                break;            /* swallow it - do not fall through to lower ones */
             }
         }
         if (!hit) {
-            /* Klik w tlo pulpitu: chwyt ikony (uruchomienie lub przeniesienie
-               rozstrzygane przy puszczeniu), inaczej utrata fokusu */
+            /* A click on the desktop background: grabbing an icon (launch or
+               move is decided on release), otherwise a loss of focus */
             focus_idx = -1;
             for (int k = 0; k < ICON_N; k++)
                 if (in_rect(mx, my, icons[k].x, icons[k].y, ICON_W, ICON_H)) {
@@ -453,28 +456,28 @@ static void handle_input(int mx, int my, int buttons)
     if (!pressed) {
         drag_idx = -1;
         resize_idx = -1;
-        if (icon_drag >= 0) {       /* puszczenie ikony: klik czy przeniesienie? */
+        if (icon_drag >= 0) {       /* releasing an icon: a click or a move? */
             int ddx = mx - icon_press_x, ddy = my - icon_press_y;
             if (ddx * ddx + ddy * ddy < 9)
-                exec_spawn(icons[icon_drag].app);   /* ledwie ruszona -> klik */
+                exec_spawn(icons[icon_drag].app);   /* barely moved -> a click */
             else
-                icons_save();                       /* przeniesiona -> zapisz uklad */
+                icons_save();                       /* moved -> save the layout */
             icon_drag = -1;
         }
     }
 
-    if (pressed && icon_drag >= 0) {    /* ikona podaza za kursorem */
+    if (pressed && icon_drag >= 0) {    /* the icon follows the cursor */
         int nx = mx - icon_dx;
         int ny = my - icon_dy;
         if (nx < 0) nx = 0;
-        if (ny < 10) ny = 10;                       /* pod gornym paskiem */
+        if (ny < 10) ny = 10;                       /* below the top bar */
         if (nx > video_w() - ICON_W) nx = video_w() - ICON_W;
         if (ny > video_h() - TB_H - ICON_H) ny = video_h() - TB_H - ICON_H;
         icons[icon_drag].x = nx;
         icons[icon_drag].y = ny;
     }
 
-    if (pressed && drag_idx >= 0) {     /* w trakcie: okno podaza za kursorem */
+    if (pressed && drag_idx >= 0) {     /* in progress: the window follows the cursor */
         int nx = mx - drag_dx;
         int ny = my - drag_dy;
         if (nx < 0) nx = 0;
@@ -485,7 +488,7 @@ static void handle_input(int mx, int my, int buttons)
         wins[drag_idx].y = ny;
     }
 
-    if (pressed && resize_idx >= 0) {   /* w trakcie: prawy dolny rog za kursorem */
+    if (pressed && resize_idx >= 0) {   /* in progress: the bottom right corner follows the cursor */
         struct window *w = &wins[resize_idx];
         int nw = mx - w->x + 1;
         int nh = my - w->y + 1;
@@ -500,8 +503,8 @@ static void handle_input(int mx, int my, int buttons)
     prev_pressed = pressed;
 }
 
-/* Rysuje pasek zadan na dole i (jesli otwarte) menu uruchamiania */
-/* Rysuje ikony na tle pulpitu (kafelek + podpis) */
+/* Draws the taskbar at the bottom and (if open) the launch menu */
+/* Draws the icons on the desktop background (a tile plus a caption) */
 static void draw_icons(void)
 {
     for (int k = 0; k < ICON_N; k++) {
@@ -520,7 +523,8 @@ static void draw_taskbar(void)
     video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
     video_draw_string(6, ty + 3, "Menu", COL_WHITE);
 
-    /* Lista otwartych okien - przycisk na okno; fokus podswietlony */
+    /* The list of open windows - one button per window; the focused one is
+       highlighted */
     int j = 0;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!wins[i].used)
@@ -528,7 +532,7 @@ static void draw_taskbar(void)
         int bx = TBL_X0 + j * TBL_W;
         video_fill_rect(bx, ty, TBL_W - 2, TB_H,
                         i == focus_idx ? COL_TITLE : COL_TBBTN);
-        /* tytul przyciety do szerokosci przycisku (6 znakow) */
+        /* the title trimmed to the button width (6 characters) */
         char label[7];
         int k = 0;
         for (; wins[i].title[k] && k < 6; k++)
@@ -549,7 +553,7 @@ static void draw_taskbar(void)
     }
 }
 
-/* Kopiuje tytul do okna (z przycieciem) */
+/* Copies a title into a window (trimming it) */
 static void set_title(struct window *w, const char *t)
 {
     int i = 0;
@@ -558,7 +562,7 @@ static void set_title(struct window *w, const char *t)
     w->title[i] = '\0';
 }
 
-/* Zwalnia okna, ktorych proces-wlasciciel juz nie zyje */
+/* Releases windows whose owning process is no longer alive */
 static void reap_windows(void)
 {
     for (int i = 0; i < MAX_WIN; i++) {
@@ -572,10 +576,10 @@ static void reap_windows(void)
     }
 }
 
-/* Handler klawiatury pulpitu: klawisz trafia do okna aplikacji z fokusem.
-   Gdy nic nie ma fokusu, przekazujemy klawisz do poprzedniego handlera
-   (shell jadra) - dzieki temu komendy ('run ...') dalej dzialaja.
-   Biegnie w kontekscie IRQ1. */
+/* The desktop's keyboard handler: a key goes to the focused
+   application window. When nothing has focus, we pass the key on to
+   the previous handler (the kernel shell) - thanks to that commands
+   ('run ...') still work. Runs in IRQ1 context. */
 static keyboard_char_handler_t prev_key_handler;
 
 static void desktop_on_key(char c)
@@ -588,7 +592,7 @@ static void desktop_on_key(char c)
     }
 }
 
-/* --- API dla syscalli aplikacji (kontekst syscalla = IF=0) --- */
+/* --- API for application syscalls (syscall context = IF=0) --- */
 
 int desktop_win_create(int owner, int cw, int ch, const char *title)
 {
@@ -600,9 +604,9 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         uint8_t *buf = kmalloc(cw * ch);
         if (!buf)
             return -1;
-        memset(buf, COL_WIN, cw * ch);     /* startowo szare tlo */
+        memset(buf, COL_WIN, cw * ch);     /* a grey background to start with */
         struct window *w = &wins[i];
-        /* kaskadowe ustawienie nowych okien aplikacji */
+        /* new application windows are placed in a cascade */
         w->x = 70 + i * 12;
         w->y = 30 + i * 12;
         w->w = cw + 2;
@@ -615,14 +619,14 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->cw = cw;
         w->ch = ch;
         w->used = 1;
-        raise_win(i);              /* nowe okno na wierzchu */
-        focus_idx = i;             /* i z fokusem */
+        raise_win(i);              /* a new window on top */
+        focus_idx = i;             /* and with focus */
         return i;
     }
     return -1;
 }
 
-/* Sprawdza, czy winid jest oknem aplikacji owner */
+/* Checks that winid is a window of application owner */
 static struct window *app_window(int winid, int owner)
 {
     if (winid < 0 || winid >= MAX_WIN)
@@ -653,7 +657,8 @@ int desktop_win_text(int winid, int owner, int x, int y, const char *s,
     return 0;
 }
 
-/* Pobiera kolejne zdarzenie okna do *out. Zwraca 1, gdy bylo, inaczej 0. */
+/* Takes the next window event into *out. Returns 1 when there was one,
+   otherwise 0. */
 int desktop_win_poll(int winid, int owner, void *out)
 {
     struct window *win = app_window(winid, owner);
@@ -673,19 +678,19 @@ int desktop_win_poll(int winid, int owner, void *out)
 static void desktop_thread(void *arg)
 {
     (void)arg;
-    /* Sprobuj wysokiej rozdzielczosci VESA (640x480x32); gdy brak
-       framebuffera - wroc do trybu 13h (320x200) */
+    /* Try the high VESA resolution (640x480x32); when there is no
+       framebuffer - fall back to mode 13h (320x200) */
     if (video_init_vesa(640, 480) < 0)
         video_init();
-    video_set_palette(COL_DESK, 0, 32, 40);   /* ciemny blekit pulpitu */
-    video_set_palette(COL_BAR, 48, 48, 48);   /* jasnoszary gorny pasek */
-    video_set_palette(COL_WIN, 56, 56, 56);   /* szare tlo okna */
-    video_set_palette(COL_TBBTN, 26, 26, 26); /* ciemnoszary przycisk paska */
-    video_set_palette(COL_ICON, 63, 40, 0);   /* pomaranczowa ikona */
+    video_set_palette(COL_DESK, 0, 32, 40);   /* the dark blue of the desktop */
+    video_set_palette(COL_BAR, 48, 48, 48);   /* the light grey top bar */
+    video_set_palette(COL_WIN, 56, 56, 56);   /* the grey window background */
+    video_set_palette(COL_TBBTN, 26, 26, 26); /* the dark grey bar button */
+    video_set_palette(COL_ICON, 63, 40, 0);   /* the orange icon */
 
-    icons_load();              /* przywroc zapamietane pozycje ikon z dysku */
+    icons_load();              /* restore the remembered icon positions from disk */
 
-    /* Dwa okna jadra (bez wlasciciela, bez bufora treści) */
+    /* Two kernel windows (no owner, no content buffer) */
     wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
                               .used = 1, .has_button = 1, .owner = -1};
     set_title(&wins[0], "Terminal");
@@ -704,33 +709,33 @@ static void desktop_thread(void *arg)
 
         video_clear(COL_DESK);
 
-        /* Gorny pasek z tytulem systemu */
+        /* The top bar with the system title */
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
-        draw_icons();                         /* ikony na tle (pod oknami) */
+        draw_icons();                         /* icons on the background (below the windows) */
 
         int ord[MAX_WIN];
         int n = zorder(ord);
-        for (int k = 0; k < n; k++)      /* od spodu na wierzch (porzadek Z) */
+        for (int k = 0; k < n; k++)      /* from the bottom up (Z order) */
             draw_window(&wins[ord[k]]);
 
         draw_taskbar();
         draw_cursor(mx, my);
 
-        video_present();                      /* gotowa klatka -> ekran */
-        task_sleep(30);                       /* ~33 klatek/s */
+        video_present();                      /* the finished frame -> the screen */
+        task_sleep(30);                       /* ~33 frames/s */
     }
 }
 
 void desktop_start(void)
 {
-    static int running;                          /* jeden kompozytor wystarczy */
+    static int running;                          /* one compositor is enough */
     if (running)
         return;
     running = 1;
 
-    prev_key_handler = keyboard_console_handler();  /* shell widocznej konsoli */
-    keyboard_set_override(desktop_on_key);          /* klawisze -> okno z fokusem */
+    prev_key_handler = keyboard_console_handler();  /* the shell of the visible console */
+    keyboard_set_override(desktop_on_key);          /* keys -> the focused window */
     task_create("desktop", desktop_thread, (void *)0);
 }
