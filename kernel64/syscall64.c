@@ -214,13 +214,55 @@ static void handle(struct regs *r);
 
 /* Wejscie ze stubu. Sygnal dostarczamy tuz przed powrotem - wtedy
    i tylko wtedy ramka opisuje program, a nie jadro. */
+/* --- ktore wywolania nie potrzebuja wielkiego zamka jadra ----------
+ *
+ * Zamek jest jeden na cale jadro i bierze go kazde wejscie z
+ * pierscienia 3, bo sterowniki, system plikow i wymiana stron pisane
+ * byly dla jednego rdzenia i cicho na to licza. Ale nie kazde
+ * wywolanie tam siega. Te ponizej dotykaja WYLACZNIE stanu wolajacego
+ * zadania oraz rzeczy, ktore maja wlasne zamki - dwa rdzenie moga byc
+ * w nich naraz i nic z tego nie wyniknie.
+ *
+ * Lista jest krotka i jawna z rozmyslem: dopisanie do niej wywolania
+ * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
+ * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
+ */
+static int bez_zamka(uint64_t nr)
+{
+    switch (nr) {
+    case SYS64_GETPID:   /* wlasny numer, jedno pole zadania */
+    case SYS64_TICKS:    /* licznik przerwan zegara, jedno slowo */
+    case SYS64_RING:     /* wlasny selektor kodu z ramki przerwania */
+    case SYS64_RDZEN:    /* pytanie do wlasnego lokalnego APIC */
+    case SYS64_SLEEP:    /* wlasne "obudz mnie" i scheduler, ktory ma
+                            swoj zamek - a przez przelaczenie kontekstu
+                            wielkiego zamka i tak sie nie trzyma */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Wywolanie systemowe przychodzi z pierscienia 3, wiec bierze wielki
+   zamek jadra: program moze biec na kazdym rdzeniu, ale w jadrze ma
+   byc naraz jeden. Instrukcja syscall nie idzie przez tablice
+   przerwan, wiec to jedyne miejsce, w ktorym da sie to dla niej
+   zrobic. */
 void syscall64_handler(struct regs *r)
 {
-    /* Wywolanie systemowe przychodzi z pierscienia 3, wiec bierze
-       wielki zamek jadra: program moze biec na kazdym rdzeniu, ale
-       w jadrze ma byc naraz jeden. Instrukcja syscall nie idzie przez
-       tablice przerwan, wiec to jedyne miejsce, w ktorym da sie to
-       zrobic dla niej. */
+    if (bez_zamka(r->rax)) {
+        handle(r);
+        /* Sygnal przestawia programowi stos i adres powrotu - to juz
+           nie jest praca "tylko na swoim". Zamek bierzemy jednak
+           dopiero wtedy, gdy naprawde jest co doreczyc. */
+        if ((r->cs & 3) == 3 && task64_signal_pending()) {
+            jadro_wejdz();
+            signal64_deliver(r);
+            jadro_wyjdz();
+        }
+        return;
+    }
+
     jadro_wejdz();
     handle(r);
     if ((r->cs & 3) == 3)

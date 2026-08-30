@@ -157,7 +157,7 @@ def main():
                   "sprawdzone bajty zgadzaja sie, bylo ich 12288" in czyt)
             check("proba zapisu do odwzorowania zabija proces (32-bit)",
                   "zapis do odwzorowania odrzucony" in czyt and
-                  "ubity: Page Fault" in czyt)
+                  re.search(r"ubity na rdzeniu \d+: Page Fault", czyt) is not None)
             check("tresc pliku po odrzuconym zapisie nietknieta (32-bit)",
                   "ZLE" not in czyt)
 

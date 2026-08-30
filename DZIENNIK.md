@@ -93,6 +93,7 @@ ProtonOS/
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
 │   ├── rdzen.c         # rozwidla się i mówi, które rdzenie go prowadziły
+│   ├── wywolania.c     # mierzy same wejścia do jądra (milion sys_getpid)
 │   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
 │   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
@@ -2050,3 +2051,68 @@ sprawdzane przez `make test`.
       wobec **26**. Na maszynie jednordzeniowej `runw` nie zmienia nic
       i tego też pilnuje asercja - obietnica "wolno wszędzie" nie jest
       obietnicą "musi gdzie indziej".
+- [x] **Wywołania systemowe bez wielkiego zamka** - pierwszy kęs z tego,
+      co poprzedni krok postawił na drodze.
+
+      Zacząć trzeba było od przyznania się do błędu. Sprzątając kod
+      diagnostyczny po poprzednim kroku cofnąłem `kernel/isr.c` do
+      wersji z repozytorium - razem z opakowaniem, które brało wielki
+      zamek przy wejściu z pierścienia 3. Jądro 32-bitowe wjechało więc
+      do repozytorium z ring 3 na wszystkich rdzeniach i **bez żadnego
+      zamka**, mimo że opis mówił co innego. Wszystkie testy przeszły,
+      bo nic w nich nie naciskało na to miejsce dostatecznie mocno -
+      i to jest właśnie ten rodzaj zieleni, który nic nie znaczy.
+      Zamek wrócił na miejsce w tym kroku.
+
+      **Najpierw pomiar, który pokazał coś zupełnie innego.** Program
+      `wywolania` wola jądro milion razy i nic poza tym nie robi. Pod
+      wielkim zamkiem dwa procesy na czterech rdzeniach kończyły w 1080
+      tyknięciach, a te same dwa na jednym rdzeniu w 594. Cztery
+      rdzenie były więc **dwa razy wolniejsze** niż jeden. Ale gdy
+      zdjąłem zamek z tego wywołania, poprawa wyszła znikoma - czyli
+      zamek nie był tu wcale największym kosztem.
+
+      Był nim `smp_rdzen()`. Całe jądro mówi słowem `current`, a to
+      słowo znaczy "zadanie TEGO rdzenia" - więc każde jego użycie
+      pytało procesor o numer rdzenia, a pytanie szło **odczytem
+      z lokalnego APIC**. To rejestr sprzętowy poza pamięcią podręczną:
+      setki cykli na realnej maszynie, a pod emulatorem jeszcze więcej,
+      bo dostęp do sprzętu bierze jego własny zamek. Jądro płaciło to
+      po kilka razy na każde wywołanie systemowe.
+
+      Numer był jednak przez cały czas pod ręką i za darmo. Każdy rdzeń
+      ma **własny segment stanu zadania** - dostał go w poprzednim
+      kroku - a jego selektor siedzi w rejestrze zadania procesora.
+      Instrukcja `str` czyta go bez ani jednego dostępu do pamięci.
+      Zanim rdzeń załaduje swój segment, `str` daje zero, i to jest
+      poprawna odpowiedź, bo do tej chwili biegnie tylko rdzeń
+      rozruchowy. Sam rozruch segmentów pyta dalej APIC - inaczej
+      byłoby to pytanie o numer po to, żeby go dopiero ustawić.
+
+      Efekt: milion wywołań na jednym rdzeniu z 594 tyknięć do 286
+      w trybie chronionym i z 288 do 159 w trybie długim. Dwa razy
+      taniej, w każdym wywołaniu systemowym i w każdym przerwaniu.
+
+      **Dopiero potem zamek.** Lista wywołań, które nie potrzebują
+      wielkiego zamka, jest krótka i jawna: numer procesu, licznik
+      zegara, numer rdzenia, uśpienie. Każde z nich dotyka wyłącznie
+      stanu wołającego zadania albo rzeczy, które mają własne zamki.
+      Domyślna odpowiedź brzmi "z zamkiem" i tak ma zostać - dopisanie
+      się do tej listy jest obietnicą, że wywołanie przeczytało się do
+      końca, razem z tym, co woła dalej.
+
+      Doręczenie zabicia i sygnału zostaje pod zamkiem, bo jedno kończy
+      proces, a drugie przestawia mu stos - ale zamek bierzemy dopiero
+      wtedy, gdy naprawdę jest co doręczyć. Bez tego ta ścieżka nie
+      różniłaby się od zwykłej niczym poza nazwą.
+
+      **Liczby.** Milion wywołań w każdym z dwóch procesów: w trybie
+      chronionym 287 tyknięć po kolei wobec **192** naraz, w trybie
+      długim 147 wobec **62**. Przed całą zmianą było w tym miejscu
+      wolniej na czterech rdzeniach niż na jednym.
+
+      Test pilnuje jednak nie tylko czasu. Każde z miliona wywołań ma
+      zwrócić numer TEGO procesu - a to jest dokładnie ta pomyłka,
+      którą zamek do tej pory zasłaniał: dwa rdzenie, które mylą się co
+      do tego, które zadanie prowadzą. Dwa miliony zgodnych odpowiedzi
+      znaczą więcej niż każdy pomiar czasu.

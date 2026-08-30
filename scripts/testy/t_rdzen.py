@@ -169,13 +169,22 @@ def main():
         check("zombie po watku C zostal sprzatniety",
               "demo-C" not in screen)
 
-        # initrd: 'ls' pokazuje spakowane programy. Plikow jest duzo,
-        # wiec wczesne (hello/evil) sie przewijaja - sprawdzamy pozne,
-        # ktore zostaja na dole ekranu.
+        # initrd: 'ls' pokazuje spakowane programy. Plikow jest wiecej,
+        # niz miesci sie na ekranie, wiec wczesne sie przewijaja -
+        # i przewija ich sie tym wiecej, im wiecej programow przybywa.
+        # Pytamy wiec o KSZTALT listy, a nie o konkretne nazwy: kazdy
+        # wiersz to nazwa i niezerowy rozmiar, wierszy jest kilkanascie,
+        # a wsrod nich znajome programy.
         q.type_line("ls")
         screen = q.screen()
-        check("komenda 'ls' pokazuje pliki initrd",
-              "gmon" in screen and "shmread" in screen)
+        wpisy = re.findall(r"(\w+)\s+\((\d+) B\)", screen)
+        znane = {"forktest", "ptree", "sigtest", "lazymem", "swaptest",
+                 "mkmapa", "mmapfile", "gleboko", "mmapzap", "dynlib"}
+        check("komenda 'ls' pokazuje pliki initrd (%d wpisow, %d znanych)"
+              % (len(wpisy), len({n for n, _ in wpisy} & znane)),
+              len(wpisy) >= 15 and
+              all(int(rozmiar) > 0 for _, rozmiar in wpisy) and
+              len({n for n, _ in wpisy} & znane) >= 3)
 
         # Wyciek ramek: zmierz uzycie PMM przed i po zyciu procesu
         def pmm_used(s):

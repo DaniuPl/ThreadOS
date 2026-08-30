@@ -31,9 +31,26 @@ int smp_init(void);
 int smp_cpus(void);
 int smp_started(void);
 
-/* Numer rdzenia, na ktorym biegnie wolajacy. Odpowiedz daje sam
-   procesor - numer w jego lokalnym APIC ustala sprzet. */
+/* Numer rdzenia, na ktorym biegnie wolajacy.
+ *
+ * Pyta o to cale jadro i pyta bez przerwy: slowo 'current' znaczy
+ * "zadanie tego rdzenia", wiec kazde jego uzycie to jedno takie
+ * pytanie. Odpowiedz musi byc wiec tania, a odczyt z lokalnego APIC
+ * tani nie jest - to rejestr sprzetowy poza pamiecia podreczna,
+ * setki cykli za kazdym razem.
+ *
+ * Numer bierzemy wiec z rejestru zadania procesora: kazdy rdzen ma
+ * WLASNY segment stanu zadania i wlasny selektor, a instrukcja str
+ * czyta go z samego procesora, bez jednego dostepu do pamieci.
+ * Zanim rdzen zaladuje swoj segment, str daje zero - i to jest
+ * poprawna odpowiedz, bo do tej chwili biegnie tylko rdzen
+ * rozruchowy. */
 int smp_rdzen(void);
+
+/* To samo pytanie zadane lokalnemu APIC. Kosztuje odczyt rejestru
+   sprzetowego, ale jest jedyna odpowiedzia, jaka rdzen ma, zanim
+   zaladuje swoj segment stanu zadania - i to wlasnie po to sluzy. */
+int smp_rdzen_apic(void);
 
 /* Tykniecia wlasnego zegara danego rdzenia. Rdzen rozruchowy chodzi
    z PIT i tu ma zero; wtorne licza swoje zegary w APIC. */

@@ -55,8 +55,11 @@
 #define SYSCALL_VECTOR 0x80
 
 #ifndef __ASSEMBLER__
+#include <stdint.h>
 struct regs;
 void syscall_handler(struct regs *r);
+/* Czy to wywolanie wolno wykonac bez wielkiego zamka jadra */
+int syscall_bez_zamka(uint32_t nr);
 #endif
 
 #endif

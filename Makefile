@@ -53,7 +53,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
              $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf \
-             $(BUILD)/user/dynlib.elf $(BUILD)/user/rdzen.elf
+             $(BUILD)/user/dynlib.elf $(BUILD)/user/rdzen.elf \
+             $(BUILD)/user/wywolania.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -256,7 +257,8 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    gleboko=$(BUILD)/user/gleboko.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
-	    rdzen=$(BUILD)/user/rdzen.elf
+	    rdzen=$(BUILD)/user/rdzen.elf \
+	    wywolania=$(BUILD)/user/wywolania.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #
@@ -346,7 +348,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
                $(BUILD)/user64/dynlib.elf \
-               $(BUILD)/user64/rdzen.elf
+               $(BUILD)/user64/rdzen.elf \
+               $(BUILD)/user64/wywolania.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -435,7 +438,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \
-	    rdzen=$(BUILD)/user64/rdzen.elf
+	    rdzen=$(BUILD)/user64/rdzen.elf \
+	    wywolania=$(BUILD)/user64/wywolania.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

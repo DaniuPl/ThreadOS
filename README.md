@@ -105,15 +105,18 @@ ground for both.
 
 **Things neither kernel has yet**
 
-- Preemption inside the kernel. Ring 3 now runs on every core: each one
-  has its own task state segment, its own syscall entry stack, its own
-  clock and the kernel's descriptor tables, and everything a process
-  does inside the kernel is serialised by one big kernel lock. `runw
-  rdzen` forks and shows two processes finishing in the time of one,
-  each reporting the cores that carried it. That lock is the next thing
-  to go: it is what still stops two processes from being *inside* the
-  kernel at the same time. The drivers, written for a single core, come
-  after it.
+- Getting rid of the big kernel lock. Ring 3 runs on every core: each
+  one has its own task state segment, its own syscall entry stack, its
+  own clock and the kernel's descriptor tables, and `runw rdzen` forks
+  and shows two processes finishing in the time of one. What a process
+  does *inside* the kernel is still serialised by one lock, because the
+  drivers, the filesystem and the swapper were written for a single
+  core. The first syscalls are out of it already — the ones that read
+  nothing but the calling task's own state are on an explicit, audited
+  list, and `runw wywolania` shows a million syscalls per process
+  running two-and-a-half times faster on four cores than on one. Every
+  further syscall taken off that lock has to be read to the end first;
+  the subsystems come after.
 - TLB shootdown. A process that changes its own page tables invalidates
   them on the core it happens to be running on; no other core is told.
   Today nothing suffers, because one process runs on one core at a

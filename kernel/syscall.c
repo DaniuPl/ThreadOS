@@ -34,6 +34,34 @@
 #include "include/signal.h"
 #include "include/string.h"
 
+/* --- ktore wywolania nie potrzebuja wielkiego zamka jadra ----------
+ *
+ * Zamek jest jeden na cale jadro i bierze go kazde wejscie z
+ * pierscienia 3, bo sterowniki, system plikow i wymiana stron pisane
+ * byly dla jednego rdzenia i cicho na to licza. Ale nie kazde
+ * wywolanie tam siega. Te ponizej dotykaja WYLACZNIE stanu wolajacego
+ * zadania oraz rzeczy, ktore maja wlasne zamki - dwa rdzenie moga byc
+ * w nich naraz i nic z tego nie wyniknie.
+ *
+ * Lista jest krotka i jawna z rozmyslem: dopisanie do niej wywolania
+ * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
+ * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
+ */
+int syscall_bez_zamka(uint32_t nr)
+{
+    switch (nr) {
+    case SYS_GETPID:     /* wlasny numer, jedno pole zadania */
+    case SYS_GETTICKS:   /* licznik przerwan zegara, jedno slowo */
+    case SYS_RDZEN:      /* pytanie do wlasnego lokalnego APIC */
+    case SYS_SLEEP:      /* wlasne "obudz mnie" i scheduler, ktory ma
+                            swoj zamek - a przez przelaczenie kontekstu
+                            wielkiego zamka i tak sie nie trzyma */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* Polecenia rysowania przekazywane przez wskaznik (uklad zgodny z usys.h) */
 struct win_rect_cmd {
     int32_t x, y, w, h, color;

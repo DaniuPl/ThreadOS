@@ -92,7 +92,7 @@ void gdt_init(void)
    z jego numeru: piaty wpis tablicy plus tyle, ile wynosi numer. */
 void gdt_zaladuj_tss(void)
 {
-    uint16_t sel = (uint16_t)(GDT_TSS + smp_rdzen() * 8);
+    uint16_t sel = (uint16_t)(GDT_TSS + smp_rdzen_apic() * 8);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 

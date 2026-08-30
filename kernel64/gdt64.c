@@ -97,7 +97,7 @@ void gdt64_init(void)
    kazdy poprzedni rdzen. */
 void gdt64_zaladuj_tss(void)
 {
-    uint16_t sel = (uint16_t)(GDT64_TSS + smp_rdzen() * 16);
+    uint16_t sel = (uint16_t)(GDT64_TSS + smp_rdzen_apic() * 16);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 

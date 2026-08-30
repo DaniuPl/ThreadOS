@@ -10,6 +10,7 @@
 #include "include/smp.h"
 #include "include/syscall.h"
 #include "include/task.h"
+#include "include/zamekjadra.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -32,7 +33,48 @@ void irq_install_handler(int irq, irq_handler_t handler)
     irq_handlers[irq] = handler;
 }
 
+static void isr_obsluz(struct regs *r);
+
+/* Wejscie do jadra z pierscienia 3 bierze wielki zamek jadra.
+ *
+ * Program moze biec na kazdym rdzeniu, ale w jadrze ma byc naraz
+ * jeden: sterowniki, system plikow i wymiana stron pisane byly dla
+ * jednego rdzenia i cicho na to licza. Przerwanie, ktore zastalo
+ * procesor juz w jadrze, nie bierze niczego nowego - zamek jest
+ * zagniezdzalny i rdzen, ktory go ma, przechodzi dalej bez czekania.
+ */
 void isr_handler(struct regs *r)
+{
+    if ((r->cs & 3) != 3) {         /* jadro przerwane w jadrze */
+        isr_obsluz(r);
+        return;
+    }
+
+    /* Wywolanie systemowe, ktore siega tylko po stan wolajacego
+       zadania, zamka nie potrzebuje - i dopiero to sprawia, ze dwa
+       procesy moga byc w jadrze naraz. Reszta wchodzi po staremu. */
+    if (r->int_no == SYSCALL_VECTOR && syscall_bez_zamka(r->eax)) {
+        syscall_handler(r);
+        /* Zabicie i sygnal to juz nie jest praca "tylko na swoim":
+           jedno konczy proces, drugie przestawia mu stos. Zamek
+           bierzemy jednak dopiero wtedy, gdy naprawde jest co
+           doreczyc - inaczej ta sciezka nie roznilaby sie od zwyklej
+           niczym poza nazwa. */
+        if (task_killed() || task_signal_pending()) {
+            jadro_wejdz();
+            task_kill_pending();
+            signal_deliver(r);
+            jadro_wyjdz();
+        }
+        return;
+    }
+
+    jadro_wejdz();
+    isr_obsluz(r);
+    jadro_wyjdz();
+}
+
+static void isr_obsluz(struct regs *r)
 {
     if (r->int_no == SYSCALL_VECTOR) {
         syscall_handler(r);
@@ -65,9 +107,10 @@ void isr_handler(struct regs *r)
 
         /* Wyjątek w ring 3: ginie tylko proces użytkownika, nie system */
         if ((r->cs & 3) == 3) {
-            printk("\n[jadro] proces '%s' ubity: %s (err=%x, eip=%x)\n",
-                   task_current_name(), exception_names[r->int_no],
-                   r->err_code, r->eip);
+            printk("\n[jadro] proces '%s' ubity na rdzeniu %d: "
+                   "%s (err=%x, eip=%x)\n",
+                   task_current_name(), smp_rdzen(),
+                   exception_names[r->int_no], r->err_code, r->eip);
             if (r->int_no == 14) {
                 uint32_t cr2;
                 __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));

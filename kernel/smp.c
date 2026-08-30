@@ -52,6 +52,8 @@
 #define ZALADUJ_GDT()    gdt64_zaladuj()
 #define ZALADUJ_IDT()    idt64_zaladuj()
 #define ZALADUJ_TSS()    gdt64_zaladuj_tss()
+#define TSS_SEL_BAZA     GDT64_TSS
+#define TSS_SEL_KROK     16
 #define WEJSCIE_SYSCALL() syscall64_init()
 #else
 #include "include/paging.h"
@@ -62,6 +64,8 @@
 #define ZALADUJ_GDT()    gdt_zaladuj()
 #define ZALADUJ_IDT()    idt_zaladuj()
 #define ZALADUJ_TSS()    gdt_zaladuj_tss()
+#define TSS_SEL_BAZA     GDT_TSS
+#define TSS_SEL_KROK     8
 #define WEJSCIE_SYSCALL() do { } while (0)   /* i386 wchodzi bramka int 0x80 */
 #endif
 
@@ -149,7 +153,7 @@ static uint32_t apic_rd(uint32_t reg)
  * Przed uruchomieniem APIC (i na maszynie, ktora go nie ma) rdzen jest
  * jeden i ma numer zero.
  */
-int smp_rdzen(void)
+int smp_rdzen_apic(void)
 {
     if (!apic)
         return 0;
@@ -158,6 +162,16 @@ int smp_rdzen(void)
         if (apic_id[i] == id)
             return i;
     return 0;
+}
+
+int smp_rdzen(void)
+{
+    uint16_t tr;
+    __asm__ volatile("str %0" : "=r"(tr));
+    if (tr < TSS_SEL_BAZA)
+        return 0;                    /* segment jeszcze niezaladowany */
+    int nr = (tr - TSS_SEL_BAZA) / TSS_SEL_KROK;
+    return (nr >= 0 && nr < SMP_RDZENI) ? nr : 0;
 }
 
 /* --- Zegar rdzenia ---------------------------------------------------
