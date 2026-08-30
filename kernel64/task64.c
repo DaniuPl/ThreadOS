@@ -1,13 +1,13 @@
-/* Watki jadra w trybie dlugim
+/* Kernel threads in long mode
  *
- * Lista jest cykliczna, a watek glowny - ten, ktory przyszedl prosto
- * z rozruchu - nigdy nie spi i pelni role watku bezczynnosci. Dzieki
- * temu scheduler zawsze ma kogo wybrac i nie musi znac przypadku
- * "nie ma nikogo gotowego".
+ * The list is circular, and the main thread - the one that came
+ * straight from the boot - never sleeps and plays the part of the idle
+ * thread. Thanks to that the scheduler always has somebody to pick and
+ * need not know the case "nobody is ready".
  *
- * Zakonczone watki zostaja na liscie jako zombie i znikaja przy
- * kolejnym przelaczeniu - nigdy nie sprzatamy tego, na ktorego stosie
- * wlasnie stoimy.
+ * Finished threads stay on the list as zombies and disappear at the
+ * next switch - we never clean up the one on whose stack we are
+ * standing.
  */
 
 #include <stddef.h>
@@ -32,66 +32,68 @@
 #define STACK_SIZE 16384
 #define NAME_MAX   16
 
-/* Deskryptory otwartych plikow.
+/* Open file descriptors.
  *
- * Trzy pierwsze numery sa zajete od zawsze i nie odnosza sie do
- * zadnego pliku: zero to klawiatura, jeden to konsola, dwa zostaje
- * na bledy. Reszta to pliki na dysku - kazdy z wlasnym miejscem
- * w pliku, bo dwa procesy moga czytac ten sam plik w innym tempie. */
+ * The first three numbers are taken from the outset and refer to no
+ * file: zero is the keyboard, one is the console, two is left for
+ * errors. The rest are files on disk - each with its own position in
+ * the file, because two processes may read the same file at different
+ * paces. */
 #define FD_MAX   8
 #define FD_FIRST 3
 
-/* Rodzaje siedza w naglowku - programy i syscalle tez o nich wiedza.
-   Wolny numer 0, 1 albo 2 znaczy "domyslne wejscie i wyjscie":
-   klawiatura i konsola. Dopiero przekierowanie wstawia tam cos innego. */
+/* The kinds live in the header - programs and syscalls know about them
+   too. A free number 0, 1 or 2 means "the default input and output":
+   the keyboard and the console. Only a redirection puts something else
+   there. */
 struct fd_entry {
     int kind;
-    int slot;                    /* i-wezel w PFS albo numer potoku */
-    uint32_t pos;                /* gdzie stoi ten konkretny czytelnik */
+    int slot;                    /* a PFS inode or a pipe number */
+    uint32_t pos;                /* where this particular reader stands */
 };
 
 enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
 
 struct task64 {
-    uint64_t rsp;                /* wierzcholek stosu, gdy watek nie biegnie */
-    void *stack;                 /* NULL dla watku glownego - ma stos z rozruchu */
+    uint64_t rsp;                /* the top of the stack while the thread is not running */
+    void *stack;                 /* NULL for the main thread - its stack comes from the boot */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
     uint32_t wake_at;
-    uint64_t space;              /* wlasna przestrzen adresowa (0 = jadra) */
-    uint64_t kstack_top;         /* stos jadra dla wejsc z ring 3 */
+    uint64_t space;              /* its own address space (0 = the kernel's) */
+    uint64_t kstack_top;         /* the kernel stack for entries from ring 3 */
     int id;
-    int parent;                  /* kto je stworzyl - dla czekania na koniec */
-    int sig_pending;             /* sygnal czekajacy na dostarczenie */
-    uint64_t sig_handler;        /* procedura programu (0 = zabij) */
-    uint64_t sig_restorer;       /* powrot z procedury do jadra */
+    int parent;                  /* who created it - for waiting on its end */
+    int sig_pending;             /* a signal awaiting delivery */
+    uint64_t sig_handler;        /* the program's handler (0 = kill) */
+    uint64_t sig_restorer;       /* the return from the handler into the kernel */
     struct fd_entry fds[FD_MAX];
-    void *fpu;                   /* stan rejestrow zmiennoprzecinkowych */
-    uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
-    uint64_t brk;                /* dokad program o nia poprosil */
-    uint64_t mmap;               /* nastepny wolny adres na mapowania */
+    void *fpu;                   /* the floating-point register state */
+    uint64_t brk_base;           /* the start of the heap (past the program image) */
+    uint64_t brk;                /* how far the program has asked for it */
+    uint64_t mmap;               /* the next free address for mappings */
     struct file_map {
-        uint64_t start, end;  /* zakres adresow (0 = wolny wpis) */
-        uint32_t size;        /* ile bajtow ma sam plik */
+        uint64_t start, end;  /* the address range (0 = a free entry) */
+        uint32_t size;        /* how many bytes the file itself has */
         uint32_t nblocks_of;
-        uint32_t *blocks;         /* numery blokow PFS, po kolei */
-        uint32_t write;          /* 1 = zmiany wracaja do pliku */
+        uint32_t *blocks;         /* the PFS block numbers, in order */
+        uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
-    int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
-    int vc;                      /* konsola wirtualna, na ktorej pisze */
-    /* Gdzie wolno prowadzic to zadanie.
-       'wszedzie' = 1 znaczy, ze moze je wziac kazdy rdzen. Domyslnie
-       jest zero i tak ma byc: zadanie siegajace po dysk, siec albo
-       cokolwiek innego pisanego dla jednego rdzenia zostaje tam, gdzie
-       bylo. 'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne
-       TEGO rdzenia - stoi na jego stosie i nikt inny go nie prowadzi. */
+    int cwd;                     /* the working directory (an inode, FS_ROOT = /) */
+    int vc;                      /* the virtual console it writes to */
+    /* Where this task may be run.
+       'anycore' = 1 means any core may take it. The default is zero
+       and that is how it should be: a task reaching for the disk, the
+       network or anything else written for a single core stays where
+       it was. 'idle_for_core' >= 0 means this is THIS core's idle
+       task - it stands on that core's stack and nobody else runs it. */
     int anycore;
-    /* 'samodzielny' = 1 znaczy, ze watek nie bierze wielkiego zamka
-       jadra: ten, kto o niego poprosil, wzial na siebie, ze watek
-       dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. Proces
-       ring 3 tego NIE ma - jego strona jadrowa to zwykly kod jadra,
-       ktory ma byc chroniony jak kazdy inny. */
+    /* 'nolock' = 1 means the thread does not take the big kernel lock:
+       whoever asked for it took on the promise that the thread touches
+       only things that survive two cores at once. A ring 3 process
+       does NOT have this - its kernel side is ordinary kernel code and
+       is to be protected like any other. */
     int nolock;
     int idle_for_core;
     char name[NAME_MAX];
@@ -100,12 +102,13 @@ struct task64 {
 
 extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
 
-/* --- Co rdzen ma swojego ---------------------------------------------
+/* --- What belongs to a core ------------------------------------------
  *
- * Przez cala historie tego jadra biezace zadanie bylo JEDNA zmienna
- * globalna - i wlasnie dlatego wiecej niz jeden rdzen nie mial jak
- * prowadzic zadan. Teraz jest ich tyle, ile rdzeni, a ktore z nich
- * jest moje, mowi sam procesor (numer w jego lokalnym APIC).
+ * Through this kernel's whole history the current task was ONE global
+ * variable - and that is exactly why more than one core had no way to
+ * run tasks. Now there are as many of them as there are cores, and
+ * which one is mine the processor says itself (the number in its local
+ * APIC).
  */
 struct core {
     struct task64 *running;
@@ -116,10 +119,10 @@ static struct core cores[SMP_CORES];
 #define current   (cores[smp_core()].running)
 #define idle_task (cores[smp_core()].idle)
 
-/* Lista zadan jest jedna dla calej maszyny, wiec i zamek jest jeden.
-   Trzyma sie go PRZEZ przelaczenie kontekstu, a zwalnia go ten, kto po
-   drugiej stronie przyjdzie - dopiero wtedy stos poprzedniego zadania
-   jest naprawde wolny. */
+/* The task list is one for the whole machine, so the lock is one too.
+   It is held ACROSS a context switch and released by whoever arrives
+   on the other side - only then is the previous task's stack really
+   free. */
 static struct spinlock lock = SPINLOCK_FREE;
 
 static int next_id;
@@ -133,18 +136,19 @@ static void set_name(struct task64 *t, const char *name)
     t->name[i] = '\0';
 }
 
-/* Pierwszy kod kazdego nowego watku - context_switch64 "wraca" tutaj */
+/* The first code of every new thread - context_switch64 "returns" here */
 static void trampoline(void)
 {
-    /* Zamek listy zadan trzyma jeszcze ten, kto nas tu przelaczyl -
-       i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
-       kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
+    /* The task list lock is still held by whoever switched us in here -
+       and it is up to us to release it. A new task does not return
+       from a context switch the way all the others do, so it has to do
+       the same thing here. */
     spin_unlock(&lock);
-    /* Nowe zadanie zaczyna w kodzie jadra, wiec bierze wielki zamek.
+    /* A new task starts in kernel code, so it takes the big lock.
      *
-     * Nie bierze go tylko to, ktore wolno prowadzic kazdemu rdzeniowi -
-     * bo ten, kto o nie poprosil, wzial juz na siebie, ze jego watek
-     * dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. */
+     * The only one that does not is a task any core may run - because
+     * whoever asked for it has already taken on that its thread
+     * touches only things that survive two cores at once. */
     if (!current->nolock)
         biglock_enter();
     __asm__ volatile("sti");
@@ -152,13 +156,14 @@ static void trampoline(void)
     task64_exit();
 }
 
-/* Watek bezczynnosci: nie robi nic i nigdy nie spi.
+/* The idle thread: it does nothing and never sleeps.
  *
- * Jest po to, zeby scheduler zawsze mial kogo wybrac. Bez niego
- * musialby umiec przypadek "nikt nie jest gotowy" - a jedyne, co
- * moglby wtedy zrobic, to czekac na przerwanie w srodku wlasnego
- * wywolania. Gdyby to wywolanie przyszlo z obslugi przerwania timera,
- * kolejne tykniecie wchodziloby w nie samo, i tak bez konca. */
+ * It exists so that the scheduler always has somebody to pick. Without
+ * it the scheduler would have to handle the case "nobody is ready" -
+ * and the only thing it could do then would be to wait for an
+ * interrupt inside its own call. Had that call come from the timer
+ * interrupt handler, the next tick would step into it, and so on
+ * without end. */
 static void idle_loop(void *arg)
 {
     (void)arg;
@@ -199,8 +204,8 @@ void scheduler64_init(void)
     cores[0].idle->idle_for_core = 0;
     scheduler_up = 1;
 
-    /* Watek glowny konczy rozruch, wiec od tej chwili jest zwyklym
-       zadaniem w kodzie jadra */
+    /* The main thread is finishing the boot, so from now on it is an
+       ordinary task inside kernel code */
     biglock_enter();
 }
 
@@ -240,17 +245,17 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->cwd = current ? current->cwd : FS_ROOT;
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
-    t->anycore = 0;            /* dopoki ktos nie powie inaczej */
+    t->anycore = 0;            /* until somebody says otherwise */
     t->nolock = 0;
     t->idle_for_core = -1;
     set_name(t, name);
 
-    /* Stos ukladamy tak, by context_switch64 zdjal z niego szesc zer
-       i "wrocil" do trampoliny. Jedno slowo zapasu na gorze pilnuje
-       wyrownania stosu, ktorego wymaga konwencja wywolan. */
+    /* We lay the stack out so that context_switch64 takes six zeros off
+       it and "returns" into the trampoline. One spare word at the top
+       maintains the stack alignment the calling convention requires. */
     uint64_t *sp = (uint64_t *)((uint8_t *)t->stack + STACK_SIZE);
-    *--sp = 0;                            /* wyrownanie do 16 bajtow */
-    *--sp = (uint64_t)(uintptr_t)trampoline;   /* adres powrotu */
+    *--sp = 0;                            /* alignment to 16 bytes */
+    *--sp = (uint64_t)(uintptr_t)trampoline;   /* the return address */
     for (int i = 0; i < 6; i++)
         *--sp = 0;                        /* rbp, rbx, r12-r15 */
     t->rsp = (uint64_t)(uintptr_t)sp;
@@ -262,8 +267,8 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     return t;
 }
 
-/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
-   rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
+/* A task that EVERY core may run. An ordinary one stays on the boot
+   core: the rest of the kernel is written for a single core. */
 struct task64 *task64_create_anycore(const char *name,
                                       void (*entry)(void *), void *arg)
 {
@@ -275,25 +280,25 @@ struct task64 *task64_create_anycore(const char *name,
     return t;
 }
 
-/* Oznacza BIEZACE zadanie jako takie, ktore wolno prowadzic kazdemu
-   rdzeniowi. Uzywa tego proces ring 3: jego strona jadrowa zostaje
-   zwyklym kodem jadra pod wielkim zamkiem, ale samo liczenie w ring 3
-   moze isc rownolegle z innymi. */
+/* Marks the CURRENT task as one that any core may run. A ring 3
+   process uses this: its kernel side stays ordinary kernel code under
+   the big lock, but the computing it does in ring 3 may go in parallel
+   with others. */
 void task_set_anycore(void)
 {
     if (current)
         current->anycore = 1;
 }
 
-/* Slad po zakonczonym zadaniu.
+/* The trace of a finished task.
  *
- * Samo zadanie znika z listy przy najblizszym przelaczeniu, ale jego
- * rodzic moze chciec poznac kod wyjscia jeszcze po fakcie - i wcale
- * nie musi zdazyc zapytac, zanim dziecko sie skonczy. Zostaje wiec
- * po nim ten jeden wpis, ktory rodzic odbiera przy czekaniu.
+ * The task itself leaves the list at the next switch, but its parent
+ * may want to learn the exit code after the fact - and need not get
+ * round to asking before the child finishes. So this one entry is left
+ * behind, which the parent collects when it waits.
  *
- * Gdy nikt po niego nie przyjdzie, najstarszy wpis ustepuje miejsca
- * nowszemu: to jest slad, a nie kolejka, ktora wolno zapchac. */
+ * When nobody comes for it, the oldest entry gives way to a newer one:
+ * this is a trace, not a queue that may be filled up. */
 #define EXIT_SLOTS 16
 
 struct exit_rec {
@@ -317,8 +322,8 @@ static void record_exit(struct task64 *t, int code)
             return;
         }
     }
-    /* Wszystko zajete - nadpisujemy po kolei, zeby jeden zapominalski
-       rodzic nie zablokowal rejestru na zawsze */
+    /* Everything taken - we overwrite in turn, so that one forgetful
+       parent does not block the register forever */
     struct exit_rec *r = &finished[exit_next++ % EXIT_SLOTS];
     r->used = 1;
     r->id = t->id;
@@ -326,8 +331,8 @@ static void record_exit(struct task64 *t, int code)
     r->code = code;
 }
 
-/* Czy zadanie ma jeszcze zywe dzieci? Bez tego czekanie na nieistniejace
-   dziecko trwaloby wiecznie. */
+/* Does the task still have live children? Without this, waiting for a
+   non-existent child would last forever. */
 static int has_children(int id)
 {
     struct task64 *t = current;
@@ -339,15 +344,15 @@ static int has_children(int id)
     return 0;
 }
 
-/* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer
-   i wpisuje kod wyjscia; -1 znaczy "nie ma na co czekac" albo
-   "czekanie przerwal sygnal".
+/* Waits for any child of its own to end. Returns its number and writes
+   the exit code; -1 means "there is nothing to wait for" or "the wait
+   was interrupted by a signal".
  *
- * To drugie jest tu rownie wazne, co pierwsze. Sygnal dostarcza sie
- * WYLACZNIE przy powrocie do pierscienia 3, a ta petla nigdy tam nie
- * wraca - wiec bez tego sprawdzenia sygnal wyslany do czekajacego
- * procesu czekalby na dostarczenie tak dlugo, jak dlugo trwa
- * czekanie. Gdy dziecko nie konczy sie samo, znaczy to: na zawsze. */
+ * The second of those matters here as much as the first. A signal is
+ * delivered ONLY on the return to ring 3, and this loop never returns
+ * there - so without this check a signal sent to a waiting process
+ * would wait for delivery as long as the wait lasts. When the child
+ * does not finish by itself, that means: forever. */
 int task64_wait(int *code)
 {
     for (;;) {
@@ -372,17 +377,18 @@ int task64_wait(int *code)
     }
 }
 
-/* Kto naprawde trzyma konsole: najglebszy zywy potomek zadania.
+/* Who really holds the console: the deepest live descendant of a task.
  *
- * Shell czeka na swoje dziecko, a to moze czekac na swoje - Ctrl+C ma
- * trafic w to, co na koncu tego lancucha faktycznie dziala, a nie
- * w shella, ktory tylko czeka. Inaczej przerwanie programu zabijaloby
- * shella i zostawialo program przy zyciu.
+ * A shell waits for its child, and that one may wait for its own -
+ * Ctrl+C is to hit whatever at the end of that chain is actually
+ * running, not the shell that is merely waiting. Otherwise
+ * interrupting a program would kill the shell and leave the program
+ * alive.
  *
- * Zejscie w dol jest skonczone same z siebie - dziecko dostaje numer
- * wiekszy od rodzica, wiec 'best' rosnie przy kazdym kroku - ale
- * ograniczenie zostaje mimo to. Petla szukajaca konca petli to
- * ostatnie miejsce, w ktorym chce sie polegac na rozumowaniu. */
+ * The descent terminates on its own - a child gets a higher number
+ * than its parent, so 'best' grows at every step - but the bound stays
+ * anyway. A loop looking for the end of a loop is the last place where
+ * one wants to rely on reasoning. */
 int task64_foreground(int root)
 {
     irqflags_t flags = irq_save();
@@ -407,7 +413,7 @@ int task64_foreground(int root)
     return best;
 }
 
-/* Sprzata zakonczone watki - nigdy tego, na ktorego stosie stoimy */
+/* Reaps finished threads - never the one on whose stack we stand */
 static void reap_zombies(void)
 {
     struct task64 *t = current;
@@ -424,16 +430,16 @@ static void reap_zombies(void)
     }
 }
 
-/* Obchodzi liste, budzac tych, ktorym minal czas snu, i zwraca
-   pierwszego gotowego poza biezacym. Watek bezczynnosci bierzemy
-   dopiero wtedy, gdy nie ma nikogo innego - inaczej zjadalby polowe
-   czasu procesora, nic nie robiac. */
-/* Czy rdzen 'nr' moze wziac to zadanie?
+/* Walks the list, waking those whose sleep is over, and returns the
+   first ready one other than the current. We take the idle thread only
+   when there is nobody else - otherwise it would eat half the CPU time
+   doing nothing. */
+/* May core 'nr' take this task?
  *
- * Rdzen rozruchowy prowadzi wszystko, tak jak dotad. Rdzen wtorny -
- * tylko to, co ktos jawnie na to pozwolil, bo reszta jadra pisana jest
- * dla jednego rdzenia i cicho na to liczy. Zadanie bezczynne nalezy do
- * swojego rdzenia i do nikogo innego. */
+ * The boot core runs everything, as it always has. A secondary core -
+ * only what somebody explicitly allowed, because the rest of the
+ * kernel is written for a single core and quietly counts on it. An
+ * idle task belongs to its own core and to nobody else. */
 static int may_run(const struct task64 *t, int nr)
 {
     if (t->idle_for_core >= 0)
@@ -463,28 +469,28 @@ static struct task64 *pick_ready(int nr)
     return found;
 }
 
-/* Ustawia procesorowi to, co nalezy do wybranego zadania: jego
-   przestrzen adresowa i stos, na ktory ma wejsc jadro przy przerwaniu
-   albo wywolaniu systemowym z ring 3.
+/* Sets on the processor what belongs to the chosen task: its address
+   space and the stack the kernel is to enter on an interrupt or a
+   system call from ring 3.
  *
- * CR3 przeladowujemy tylko wtedy, gdy naprawde sie zmienia - kazde
- * przeladowanie wyrzuca caly bufor tlumaczen adresow, wiec robienie
- * tego przy przelaczaniu miedzy watkami jadra bylo by czysta strata. */
+ * We reload CR3 only when it really changes - every reload throws away
+ * the whole address translation buffer, so doing it while switching
+ * between kernel threads would be a pure loss. */
 static void apply_context(struct task64 *t, int nr)
 {
     uint64_t want = t->space ? t->space : paging64_kernel_space();
     if (paging64_current_space() != want)
         paging64_switch(want);
-    /* Stos jadra dla wejsc z ring 3 - w segmencie stanu zadania TEGO
-       rdzenia, bo kazdy ma swoj */
+    /* The kernel stack for entries from ring 3 - in THIS core's task
+       state segment, because each has its own */
     (void)nr;
     if (t->kstack_top)
         syscall64_set_kernel_stack(t->kstack_top);
 }
 
-/* Oddaje przestrzen zadania i wraca do przestrzeni jadra.
-   Wolane, gdy zadanie umiera - a umiera, stojac jeszcze na wlasnym
-   CR3, wiec najpierw trzeba z niego zejsc. */
+/* Gives up the task's address space and returns to the kernel's.
+   Called when a task dies - and it dies while still standing on its
+   own CR3, so it has to step off it first. */
 static void drop_space(struct task64 *t)
 {
     if (!t->space)
@@ -496,8 +502,8 @@ static void drop_space(struct task64 *t)
     paging64_free_space(doomed);
 }
 
-/* Bierze przestrzen na wlasnosc i od razu na nia przechodzi.
-   Wolane przez watek, ktory wlasnie zaladowal program. */
+/* Takes ownership of an address space and moves onto it at once.
+   Called by a thread that has just loaded a program. */
 void task64_enter_space(uint64_t space, uint64_t kstack_top)
 {
     irqflags_t flags = irq_save();
@@ -507,14 +513,15 @@ void task64_enter_space(uint64_t space, uint64_t kstack_top)
     irq_restore(flags);
 }
 
-/* Podmienia przestrzen na nowa i oddaje stara - do zwolnienia przez
-   wolajacego, ale dopiero PO tym, jak procesor z niej zejdzie. */
+/* Replaces the address space with a new one and hands back the old -
+   for the caller to free, but only AFTER the processor has stepped off
+   it. */
 uint64_t task64_swap_space(uint64_t space, uint64_t kstack_top)
 {
     irqflags_t flags = irq_save();
     uint64_t old = current->space;
     current->space = space;
-    if (kstack_top)              /* zero = zostaw stos jadra bez zmian */
+    if (kstack_top)              /* zero = leave the kernel stack unchanged */
         current->kstack_top = kstack_top;
     apply_context(current, smp_core());
     irq_restore(flags);
@@ -528,13 +535,14 @@ void task64_rename(const char *name)
     irq_restore(flags);
 }
 
-/* Wybiera nastepny watek i przelacza kontekst. Wolac z IF=0.
+/* Picks the next thread and switches context. Call with IF=0.
  *
- * Zamek listy zadan bierzemy bez ruszania IF: gdyby timer wszedl
- * w srodek sekcji trzymajacej ten zamek, czekalby na niego bez konca,
- * bo zwolnic go moze tylko przerwany wlasnie kod. Trzymamy go PRZEZ
- * przelaczenie, a zwalnia go ten, kto po drugiej stronie przyjdzie -
- * dopiero wtedy stos poprzedniego zadania jest naprawde wolny.
+ * We take the task list lock without touching IF: if the timer stepped
+ * into the middle of a section holding that lock, it would wait for it
+ * forever, because only the code it just interrupted could release it.
+ * We hold it ACROSS the switch, and it is released by whoever arrives
+ * on the other side - only then is the previous task's stack really
+ * free.
  */
 static void switch_to(int new_state)
 {
@@ -542,25 +550,26 @@ static void switch_to(int new_state)
     if (!cores[nr].running)
         return;
 
-    /* Wielki zamek jadra oddajemy NA CZAS PRZELACZENIA - trzymanie go
-       przez zmiane kontekstu zamykaloby jadro dla wszystkich az do
-       przebudzenia tego zadania. Glebokosc lezy na stosie TEGO
-       zadania, wiec kazde odzyska dokladnie swoja. */
+    /* We give the big kernel lock up FOR THE DURATION OF THE SWITCH -
+       holding it across a context change would close the kernel for
+       everybody until this task wakes again. The depth lives on THIS
+       task's stack, so each one gets exactly its own back. */
     int depth = biglock_release_all();
 
     spin_lock(&lock);
-    /* Stan biezacego zadania zmieniamy juz pod zamkiem, razem z wyborem
-       nastepnego: ustawiony wczesniej dawalby okno, w ktorym zadanie
-       jest oznaczone jako spiace, a jego stos wciaz uzywany. */
+    /* We change the current task's state already under the lock,
+       together with picking the next one: setting it earlier would
+       leave a window in which the task is marked as sleeping while its
+       stack is still in use. */
     if (new_state >= 0)
         cores[nr].running->state = (enum task_state)new_state;
     reap_zombies();
 
     struct task64 *next = pick_ready(nr);
 
-    /* Nie ma nikogo innego - zostajemy, o ile sami mozemy biec dalej.
-       Watek bezczynnosci sprawia, ze przypadek "nie ma nikogo, a my nie
-       mozemy" po prostu nie wystepuje. */
+    /* There is nobody else - we stay, provided we can carry on
+       ourselves. The idle thread makes the case "there is nobody and
+       we cannot" simply not arise. */
     if (!next)
         next = cores[nr].running;
 
@@ -578,18 +587,20 @@ static void switch_to(int new_state)
     next->state = TASK_RUNNING;
     cores[nr].running = next;
 
-    /* Rejestry zmiennoprzecinkowe sa takim samym stanem zadania, jak
-       reszta - z ta roznica, ze procesor zapisuje je jedna instrukcja
-       do obszaru 512 bajtow. Bez tego dwa programy liczace rownoczesnie
-       nadpisywalyby sobie wyniki, nie wiedzac o tym. */
+    /* The floating-point registers are as much part of a task's state
+       as the rest - with the difference that the processor saves them
+       with one instruction into a 512-byte area. Without this two
+       programs computing at the same time would overwrite each other's
+       results without knowing it. */
     fpu64_save(prev->fpu);
     fpu64_load(next->fpu);
 
     apply_context(next, nr);
     context_switch64(&prev->rsp, next->rsp);
     spin_unlock(&lock);
-    /* Od tej chwili biegnie juz zadanie, ktore tu wrocilo - i to ono
-       odbiera swoja glebokosc ze swojego stosu */
+    /* From this moment on it is the task that came back here that is
+       running - and it is the one that takes its own depth off its own
+       stack */
     biglock_restore(depth);
 }
 
@@ -598,13 +609,13 @@ void schedule(void)
     switch_to(-1);
 }
 
-/* --- Rdzen wtorny dolacza do schedulera ------------------------------
+/* --- A secondary core joins the scheduler -----------------------------
  *
- * Kazdy rdzen potrzebuje zadania, na ktore ma wrocic, gdy nie ma nic do
- * roboty - inaczej nie byloby dokad odlozyc jego kontekstu. To zadanie
- * jest jego wlasnoscia: stoi na stosie, ktory rdzen dostal przy
- * obudzeniu, i nikt inny nie ma prawa go prowadzic. Ta funkcja nie
- * wraca.
+ * Every core needs a task to fall back on when there is nothing to
+ * do - otherwise there would be nowhere to put its context. That task
+ * is its property: it stands on the stack the core was given when it
+ * was woken, and nobody else has the right to run it. This function
+ * does not return.
  */
 void task_core_enter(int nr)
 {
@@ -614,9 +625,9 @@ void task_core_enter(int nr)
     struct task64 *t = kmalloc(sizeof(*t));
     if (!t)
         return;
-    t->stack = NULL;             /* stos ma z trampoliny rozruchowej */
+    t->stack = NULL;             /* its stack comes from the boot trampoline */
     t->state = TASK_RUNNING;
-    t->id = -nr;                 /* ujemny numer: to nie jest proces */
+    t->id = -nr;                 /* a negative number: this is not a process */
     t->wake_at = 0;
     t->space = 0;
     t->kstack_top = 0;
@@ -634,7 +645,7 @@ void task_core_enter(int nr)
     t->cwd = FS_ROOT;
     t->vc = 0;
     t->anycore = 0;
-    t->nolock = 1;         /* zadanie bezczynne nie bierze zamka */
+    t->nolock = 1;         /* an idle task does not take the lock */
     t->idle_for_core = nr;
     set_name(t, "bezczynny");
     t->name[9] = (char)('0' + nr);
@@ -651,7 +662,7 @@ void task_core_enter(int nr)
     for (;;) {
         smp_run_work(nr);
         task64_yield();
-        /* Nic dla mnie nie ma - stoj do najblizszego przerwania */
+        /* Nothing for me - stand still until the next interrupt */
         __asm__ volatile("hlt");
     }
 }
@@ -666,7 +677,7 @@ void task64_yield(void)
 void task64_sleep(uint32_t ms)
 {
     irqflags_t flags = irq_save();
-    current->wake_at = pit_ticks() + (ms + 9) / 10;   /* tykniecie = 10 ms */
+    current->wake_at = pit_ticks() + (ms + 9) / 10;   /* one tick = 10 ms */
     switch_to(TASK_SLEEPING);
     irq_restore(flags);
 }
@@ -675,15 +686,15 @@ void task64_exit_code(int code)
 {
     irq_save();
     task64_fd_close_all();
-    /* Odeslij na dysk to, co proces napisal w zapisywalnym
-       odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
-       TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
+    /* Write back to disk what the process wrote into a writable
+       mapping and did not manage to write back itself - this has to
+       happen NOW, while its address space is still alive */
     proc64_msync();
     task64_mmap_release();
     drop_space(current);
     record_exit(current, code);
     switch_to(TASK_ZOMBIE);
-    for (;;)                              /* zombie nie zostanie wybrany */
+    for (;;)                              /* a zombie will not be picked */
         __asm__ volatile("hlt");
 }
 
@@ -691,23 +702,23 @@ void task64_exit(void)
 {
     irq_save();
     task64_fd_close_all();
-    /* Odeslij na dysk to, co proces napisal w zapisywalnym
-       odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
-       TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
+    /* Write back to disk what the process wrote into a writable
+       mapping and did not manage to write back itself - this has to
+       happen NOW, while its address space is still alive */
     proc64_msync();
     task64_mmap_release();
     drop_space(current);
     record_exit(current, 0);
     switch_to(TASK_ZOMBIE);
-    for (;;)                              /* zombie nie zostanie wybrany */
+    for (;;)                              /* a zombie will not be picked */
         __asm__ volatile("hlt");
 }
 
-/* Zabija biezace zadanie z podanym powodem. Nie wraca.
+/* Kills the current task with a given reason. Does not return.
  *
- * Wolane z obslugi wyjatku, gdy zawinil program w ring 3. Roznica
- * wzgledem task64_exit jest tylko taka, ze tu jest co powiedziec:
- * zadanie nie skonczylo sie samo, tylko zostalo zatrzymane. */
+ * Called from an exception handler when a ring 3 program was at fault.
+ * The only difference from task64_exit is that here there is something
+ * to say: the task did not finish by itself, it was stopped. */
 void task64_kill_current(const char *why)
 {
     irq_save();
@@ -715,22 +726,22 @@ void task64_kill_current(const char *why)
            current->id, current->name, why);
     task64_fd_close_all();
     drop_space(current);
-    record_exit(current, -1);          /* zabite, czyli nie swoja smiercia */
+    record_exit(current, -1);          /* killed, that is not of its own death */
     switch_to(TASK_ZOMBIE);
     for (;;)
         __asm__ volatile("hlt");
 }
 
-/* --- Sygnaly ------------------------------------------------------
+/* --- Signals -------------------------------------------------------
  *
- * Zadanie nosi jeden sygnal czekajacy na dostarczenie. Jeden wystarcza:
- * sygnal jest zawiadomieniem, a nie wiadomoscia - drugie Ctrl+C przed
- * dostarczeniem pierwszego nie niesie nowej informacji.
+ * A task carries one signal awaiting delivery. One is enough: a signal
+ * is a notification, not a message - a second Ctrl+C before the first
+ * is delivered carries no new information.
  *
- * Dostarczenie nie moze sie odbyc tutaj: zadanie jest w tej chwili
- * gdzie indziej, moze spiac, moze w srodku wywolania systemowego.
- * Odbierze go dopiero przy powrocie do pierscienia 3 - i to jest
- * jedyny moment, w ktorym da sie podmienic mu ramke. */
+ * Delivery cannot happen here: the task is somewhere else at this
+ * moment, it may be asleep, it may be in the middle of a system call.
+ * It will receive it only on the return to ring 3 - and that is the
+ * only moment at which its frame can be replaced. */
 int task64_signal(int id, int sig)
 {
     irqflags_t flags = irq_save();
@@ -740,7 +751,7 @@ int task64_signal(int id, int sig)
         if (t->id == id && t->state != TASK_ZOMBIE) {
             t->sig_pending = sig;
             if (t->state == TASK_SLEEPING)
-                t->state = TASK_READY;      /* sygnal przerywa czekanie */
+                t->state = TASK_READY;      /* a signal interrupts the wait */
             found = 1;
             break;
         }
@@ -777,8 +788,9 @@ uint64_t task64_sigrestorer(void) { return current->sig_restorer; }
 int task64_current_id(void)       { return current ? current->id : -1; }
 int task64_id_current(void)       { return current ? current->id : -1; }
 
-/* Czy zadanie o tym numerze wciaz zyje. Zombie sie nie liczy - kod
-   sieciowy pyta o to, zeby posprzatac gniazda po zmarlych. */
+/* Is the task with this number still alive. A zombie does not count -
+   the network code asks this in order to clean up the sockets of the
+   dead. */
 int task64_alive(int id)
 {
     irqflags_t flags = irq_save();
@@ -795,35 +807,37 @@ int task64_alive(int id)
     return alive;
 }
 
-/* Katalog roboczy jest wlasnoscia zadania, tak samo jak deskryptory:
-   dwa procesy moga stac w innych miejscach drzewa i zadne z nich nie
-   przeszkadza drugiemu. Dziecko zaczyna tam, gdzie stal rodzic. */
+/* The working directory is a property of a task, just like its
+   descriptors: two processes may stand in different places of the tree
+   and neither gets in the other's way. A child starts where its parent
+   stood. */
 int task64_cwd(void)          { return current ? current->cwd : FS_ROOT; }
 void task64_set_cwd(int slot) { if (current) current->cwd = slot; }
 
-/* Konsola wirtualna jest wlasnoscia zadania z tego samego powodu, co
-   katalog roboczy: program uruchomiony na drugiej konsoli pisze na niej
-   dalej, nawet gdy patrzymy na pierwsza. Przed startem schedulera
-   (komunikaty rozruchowe) nie ma jeszcze zadnego zadania - wtedy
-   pierwsza konsola. */
-/* --- Wymiana stron: kto ma oddac ------------------------------------
+/* The virtual console is a property of a task for the same reason as
+   the working directory: a program started on the second console keeps
+   writing to it even while we are looking at the first. Before the
+   scheduler starts (boot messages) there is no task yet - then it is
+   the first console. */
+/* --- Swapping: who is to give something back ------------------------
  *
- * PMM, gdy zabraknie mu ramek, pyta o to jadro. Chodzimy po zadaniach
- * w kolko i prosimy kazde o oddanie stron na dysk. Zaczynamy od
- * nastepnego po ostatnio odwiedzonym, zeby nie obdzierac w kolko tego
- * samego procesu.
+ * The PMM asks the kernel about this when it runs out of frames. We go
+ * round the tasks in a circle and ask each one to give pages to disk.
+ * We start from the one after the last visited, so as not to strip the
+ * same process over and over.
  *
- * Watki jadra pomijamy: ich przestrzen to przestrzen jadra, a pamiec
- * jadra na dysk nie idzie - nie ma jej kto sciagnac z powrotem, bo
- * sciaga ja obsluga bledu strony, ktora sama w jadrze siedzi.
+ * Kernel threads are skipped: their space is the kernel's space, and
+ * kernel memory does not go to disk - there would be nobody to bring
+ * it back, because it is brought back by the page fault handler, which
+ * itself sits inside the kernel.
  *
- * Wszystko idzie przy wylaczonych przerwaniach i nie jest to tylko
- * ostroznosc wobec listy zadan: miedzy zgaszeniem wpisu strony
- * a zapisaniem jej na dysk nikt nie moze dostac procesora. */
+ * Everything runs with interrupts off, and that is not merely caution
+ * about the task list: between clearing a page entry and writing the
+ * page to disk nobody may get the CPU. */
 int task64_reclaim_page(void)
 {
     static struct task64 *cursor;
-    if (!current)                    /* scheduler jeszcze nie wystartowal */
+    if (!current)                    /* the scheduler has not started yet */
         return 0;
 
     irqflags_t flags = irq_save();
@@ -834,9 +848,9 @@ int task64_reclaim_page(void)
 
     do {
         t = t->next;
-        /* Partiami: samo przemiatanie tablic stron kosztuje wiecej niz
-           zapis jednej strony, wiec nie oplaca sie chodzic po nich
-           od nowa dla kazdej brakujacej ramki */
+        /* In batches: sweeping the page tables alone costs more than
+           writing one page, so it does not pay to walk them from
+           scratch for every missing frame */
         if (t->space && t->state != TASK_ZOMBIE &&
             paging64_reclaim_pages(t->space, 32)) {
             cursor = t;
@@ -852,27 +866,28 @@ int task64_reclaim_page(void)
 int task64_vc(void)          { return current ? current->vc : 0; }
 void task64_set_vc(int vc)   { if (current) current->vc = vc; }
 
-/* --- Sterta programu ----------------------------------------------
+/* --- The program heap ----------------------------------------------
  *
- * Jadro nie przydziela tu ani jednej strony. Przesuwa tylko granice
- * i zapamietuje, dokad program o nia poprosil - strony pojawiaja sie
- * dopiero przy pierwszym dotknieciu, w obsludze bledu strony.
+ * The kernel allocates not one page here. It only moves the boundary
+ * and remembers how far the program has asked for it - the pages
+ * appear on first touch, in the page fault handler.
  *
- * Roznica jest wieksza, niz wyglada: prosba o megabajt kosztuje zero,
- * a program, ktory poprosil i nie dotknal, nie zabiera nikomu nic. */
+ * The difference is bigger than it looks: asking for a megabyte costs
+ * zero, and a program that asked and did not touch takes nothing away
+ * from anybody. */
 void task64_set_brk_base(uint64_t base)
 {
     current->brk_base = base;
     current->brk = base;
-    /* Nowy obraz programu to nowy uklad pamieci - mapowania z poprzedniego
-       zniknely razem z jego przestrzenia */
+    /* A new program image is a new memory layout - the mappings from
+       the previous one vanished with its address space */
     current->mmap = USER64_MMAP_BASE;
 }
 
-/* --- Obszar mapowan ------------------------------------------------
+/* --- The mapping area ------------------------------------------------
  *
- * Kolejne mapowania ida jedno za drugim w gore, bez zwalniania: proces
- * i tak zabiera ze soba caly ten obszar, gdy sie konczy. */
+ * Successive mappings go one after another upwards, without freeing:
+ * the process takes this whole area with it when it ends anyway. */
 int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
                       uint32_t *blocks, uint32_t nblocks_of, uint32_t write)
 {
@@ -892,8 +907,8 @@ int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
     return -1;
 }
 
-/* Wolane z obslugi bledu strony, wiec musi byc krotkie i bez zadnych
-   niespodzianek: samo wyszukanie w tablicy czterech wpisow. */
+/* Called from the page fault handler, so it has to be short and
+   without any surprises: just a lookup in a table of four entries. */
 int task64_mmap_find(uint64_t addr, uint32_t *first_block,
                        uint32_t *nbytes, uint32_t *write)
 {
@@ -911,9 +926,9 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
         if (index >= m->nblocks_of)
             return 0;
         *first_block = index;
-        /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej
-           strony ma byc wyzerowany, a nie wypelniony smieciem
-           z dysku */
+        /* How much of the file is left from the start of this page - the
+           tail of the last page is to be zeroed, not filled with
+           rubbish from disk */
         *nbytes = (offset < m->size)
                       ? (uint32_t)(m->size - offset) : 0;
         *write = m->write;
@@ -922,7 +937,7 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
     return 0;
 }
 
-/* Numer bloku PFS pod danym indeksem odwzorowania obejmujacego adres */
+/* The PFS block number at a given index of the mapping covering an address */
 uint32_t task64_mmap_block(uint64_t addr, uint32_t index)
 {
     uint64_t page = addr & ~0xFFFULL;
@@ -947,10 +962,10 @@ void task64_mmap_release(void)
     }
 }
 
-/* Dziecko dostaje wlasna kopie opisow: tablice numerow blokow zwalnia
-   kazdy u siebie, wiec nie moga byc wspolne. Gdy kopia sie nie uda,
-   dziecko po prostu nie widzi tego pliku - a to lepsze niz dwa
-   zadania zwalniajace ten sam wskaznik. */
+/* The child gets its own copy of the descriptions: each one frees its
+   block number table itself, so they cannot be shared. When the copy
+   fails, the child simply does not see that file - and that is better
+   than two tasks freeing the same pointer. */
 void task64_mmap_inherit(struct task64 *child)
 {
     for (int i = 0; i < MMAP_FILES; i++) {
@@ -970,8 +985,9 @@ void task64_mmap_inherit(struct task64 *child)
     }
 }
 
-/* Opis i-tego odwzorowania biezacego procesu - do odsylania stron na
-   dysk, ktore musi obejsc kazde po kolei. Zwraca 0, gdy wpis wolny. */
+/* The description of the current process's i-th mapping - for writing
+   pages back to disk, which has to go through each of them in turn.
+   Returns 0 when the entry is free. */
 int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
                      uint32_t *size, uint32_t *write)
 {
@@ -995,8 +1011,8 @@ void task64_set_brk(uint64_t brk)
     current->brk = brk;
 }
 
-/* Czy adres nalezy do sterty biezacego zadania? Pyta o to obsluga
-   bledu strony, zanim uzna go za blad programu. */
+/* Does the address belong to the current task's heap? The page fault
+   handler asks this before calling it a program error. */
 int task64_in_heap(uint64_t addr)
 {
     return current && current->brk_base &&
@@ -1007,17 +1023,18 @@ void task64_inherit_brk(struct task64 *child)
 {
     child->brk_base = current->brk_base;
     child->brk = current->brk;
-    child->mmap = current->mmap;     /* dziecko widzi ten sam uklad */
-    /* Dziecko dziedziczy prawo do biegania na kazdym rdzeniu: to
-       wlasnosc programu, a nie pojedynczego zadania */
+    child->mmap = current->mmap;     /* the child sees the same layout */
+    /* The child inherits the right to run on any core: that is a
+       property of the program, not of a single task */
     child->anycore = current->anycore;
 }
 
-/* --- Deskryptory --------------------------------------------------
+/* --- Descriptors ---------------------------------------------------
  *
- * Tablica nalezy do zadania, wiec deskryptor jednego procesu nie
- * znaczy nic w drugim - i to jest cala roznica miedzy numerem
- * deskryptora a i-wezlem, ktory jest wspolny dla calego systemu. */
+ * The table belongs to a task, so one process's descriptor means
+ * nothing in another - and that is the whole difference between a
+ * descriptor number and an inode, which is shared by the whole
+ * system. */
 int task64_fd_open(int slot)
 {
     irqflags_t flags = irq_save();
@@ -1035,8 +1052,9 @@ int task64_fd_open(int slot)
     return fd;
 }
 
-/* Numer dla konca potoku. Szukamy od trzeciego, bo zero i jeden maja
-   znaczenie umowne i wstawia sie tam tylko przez dup2. */
+/* A number for a pipe end. We look from the third, because zero and
+   one have a conventional meaning and are only put there through
+   dup2. */
 int task64_fd_pipe(int idx, int reader_task)
 {
     irqflags_t flags = irq_save();
@@ -1081,8 +1099,8 @@ void task64_fd_advance(int fd, uint32_t n)
         current->fds[fd].pos += n;
 }
 
-/* Zamkniecie konca potoku zmniejsza liczbe wlascicieli - i to wlasnie
-   ono sprawia, ze czytajacy kiedykolwiek zobaczy koniec danych */
+/* Closing a pipe end decreases the owner count - and it is exactly
+   that which lets a reader ever see the end of the data */
 static void release(struct task64 *t, int fd)
 {
     if (t->fds[fd].kind == FDK_POTOK_R)
@@ -1102,8 +1120,8 @@ int task64_fd_close(int fd)
     return 0;
 }
 
-/* Przepisanie numeru: to tedy przekierowuje sie wejscie i wyjscie.
-   Cel jest najpierw zamykany, bo zwykle jest to zero albo jeden. */
+/* Copying a number: this is how input and output are redirected. The
+   destination is closed first, because it is usually zero or one. */
 int task64_fd_dup2(int old, int fresh_one)
 {
     if (old < 0 || old >= FD_MAX || fresh_one < 0 || fresh_one >= FD_MAX)
@@ -1125,8 +1143,8 @@ int task64_fd_dup2(int old, int fresh_one)
     return fresh_one;
 }
 
-/* Zamyka wszystko, co zadanie trzymalo - wolane, gdy sie konczy.
-   Bez tego potok nigdy nie zobaczylby konca piszacych. */
+/* Closes everything the task held - called when it ends. Without this
+   a pipe would never see the end of its writers. */
 void task64_fd_close_all(void)
 {
     for (int i = 0; i < FD_MAX; i++)
@@ -1134,9 +1152,9 @@ void task64_fd_close_all(void)
             release(current, i);
 }
 
-/* Dziecko dziedziczy otwarte pliki razem z miejscem, w ktorym stoja -
-   tak samo, jak dziedziczy pamiec. Potoki dostaja przy tym kolejnego
-   wlasciciela, bo od teraz trzyma je dwoch. */
+/* A child inherits open files together with the position they stand
+   at - just as it inherits memory. Pipes get one more owner in the
+   process, because from now on two hold them. */
 void task64_inherit_fds(struct task64 *child)
 {
     irqflags_t flags = irq_save();

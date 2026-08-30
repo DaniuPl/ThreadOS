@@ -1,17 +1,17 @@
-/* Stronicowanie czteropoziomowe
+/* Four-level paging
  *
- * Adres wirtualny to cztery indeksy po dziewiec bitow i przesuniecie
- * w stronie. Kazdy poziom to jedna ramka 4 KiB z 512 wpisami po 64 bity.
+ * A virtual address is four nine-bit indices plus an offset within a
+ * page. Every level is one 4 KiB frame with 512 entries of 64 bits.
  *
- * Pamiec opisujemy stronami po 2 MiB - jeden wpis zamiast 512, wiec
- * caly stumegabajtowy obszar mieści sie w kilku tablicach zamiast
- * w setkach. Drobniejsze mapowania robi paging64_map(), i to wlasnie
- * one beda potrzebne procesom.
+ * We describe memory with 2 MiB pages - one entry instead of 512, so a
+ * whole hundred-megabyte area fits in a few tables rather than in
+ * hundreds. Finer mappings are done by paging64_map(), and those are
+ * exactly what processes will need.
  *
- * Doszedl bit, ktorego stronicowanie 32-bitowe nie mialo: zakaz
- * wykonywania. Strona z danymi moze byc od teraz oznaczona tak, ze
- * procesor odmowi wykonania czegokolwiek, co w niej lezy - bufor
- * obrazu czy sterta nie sa juz potencjalnym miejscem na cudzy kod.
+ * There is a bit that 32-bit paging did not have: no-execute. A data
+ * page can now be marked so that the processor refuses to execute
+ * anything lying in it - a framebuffer or a heap is no longer a
+ * potential home for somebody else's code.
  */
 
 #include <stdint.h>
@@ -26,22 +26,22 @@
 #define PTE_PRESENT 0x001
 #define PTE_WRITE   0x002
 #define PTE_HUGE    0x080
-#define PTE_ACCESSED 0x020  /* ustawia procesor przy uzyciu strony */
-#define PTE_DIRTY    0x040  /* ustawia procesor przy zapisie do strony */
+#define PTE_ACCESSED 0x020  /* set by the processor when a page is used */
+#define PTE_DIRTY    0x040  /* set by the processor on a write to a page */
 #define ADDR_MASK   0x000FFFFFFFFFF000ULL
 
 #define HUGE_SIZE   (2u * 1024 * 1024)
 
-static uint64_t *pml4;             /* przestrzen jadra - wzorzec dla reszty */
+static uint64_t *pml4;             /* the kernel's space - the template for the rest */
 static uint64_t identity_top;
 static int nx_on;
-static uint32_t cow_splits;        /* ile stron rozdzielilo kopiowanie */
+static uint32_t cow_splits;        /* how many pages copying has split */
 
-/* Przestrzen, na ktorej procesor pracuje w tej chwili.
+/* The address space the processor is working on right now.
  *
- * Nie trzymamy jej w zmiennej: jedyna prawda jest rejestr CR3, a jego
- * zawartosc jest adresem fizycznym - ktory przy mapowaniu
- * identycznosciowym jest zarazem adresem wirtualnym tablicy. */
+ * We do not keep it in a variable: the only truth is the CR3 register,
+ * and its contents are a physical address - which, under the identity
+ * mapping, is also the table's virtual address. */
 static uint64_t *root_now(void)
 {
     uint64_t cr3;
@@ -54,16 +54,17 @@ static uint64_t *table_at(uint64_t entry)
     return (uint64_t *)(uintptr_t)(entry & ADDR_MASK);
 }
 
-/* Zwraca tablice nizszego poziomu, tworzac ja, gdy jeszcze nie ma.
+/* Returns the lower-level table, creating it when it does not exist yet.
  *
- * 'extra' to prawa, ktore musza byc otwarte po drodze. Procesor liczy
- * dostep jako iloczyn wpisow ze WSZYSTKICH poziomow, wiec zamkniety
- * wpis posredni uniewaznia najhojniejszy wpis konca sciezki - strona
- * oznaczona jako dostepna dla uzytkownika i tak byla dla niego
- * niewidoczna, bo tablica po drodze nie miala tego bitu.
+ * 'extra' are the permissions that have to be open along the way. The
+ * processor computes access as the intersection of the entries from
+ * ALL levels, so a closed intermediate entry invalidates the most
+ * generous entry at the end of the path - a page marked as accessible
+ * to the user was invisible to it anyway, because a table along the
+ * way did not have that bit.
  *
- * Otwieramy je na wyrost i to jest bezpieczne: o dostepie rozstrzyga
- * i tak najbardziej restrykcyjny wpis, a tym jest zawsze ten ostatni. */
+ * We open them generously, and that is safe: access is decided by the
+ * most restrictive entry anyway, and that is always the last one. */
 static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
 {
     if (!(table[idx] & PTE_PRESENT)) {
@@ -73,7 +74,7 @@ static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
         memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
         table[idx] = (uint64_t)frame | PTE_PRESENT | PTE_WRITE | extra;
     } else {
-        table[idx] |= extra;        /* dolozenie praw do istniejacej sciezki */
+        table[idx] |= extra;        /* adding permissions to an existing path */
     }
     return table_at(table[idx]);
 }
@@ -89,8 +90,8 @@ static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
     if (!top)
         return -1;
 
-    /* Bit uzytkownika musi isc przez cala sciezke - inaczej ring 3
-       nie zobaczy strony, choc jej wlasny wpis na to pozwala */
+    /* The user bit has to run the whole path - otherwise ring 3 will
+       not see the page even though its own entry allows it */
     uint64_t path = flags & PG_USER;
 
     uint64_t *pdpt = ensure(top, (int)((virt >> 39) & 0x1FF), path);
@@ -102,7 +103,7 @@ static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
 
     int i2 = (int)((virt >> 21) & 0x1FF);
     if (pd[i2] & PTE_HUGE)
-        return -1;              /* obszar opisany juz strona 2 MiB */
+        return -1;              /* an area already described by a 2 MiB page */
     uint64_t *pt = ensure(pd, i2, path);
     if (!pt)
         return -1;
@@ -115,12 +116,13 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
 {
     int rc = map_in(root_now(), virt, phys, flags);
     if (rc == 0)
-        invlpg(virt);               /* tylko biezaca przestrzen ma co
-                                       uniewazniac w buforze tlumaczen */
+        invlpg(virt);               /* only the current space has anything to
+                                       invalidate in the translation buffer */
     return rc;
 }
 
-/* Jeden wpis na dwa megabajty - tak opisujemy pamiec i bufor obrazu */
+/* One entry per two megabytes - that is how we describe memory and the
+   framebuffer */
 static int map_huge(uint64_t virt, uint64_t phys, uint64_t flags)
 {
     uint64_t *pdpt = ensure(pml4, (int)((virt >> 39) & 0x1FF), 0);
@@ -156,8 +158,9 @@ uint64_t paging64_lookup(uint64_t virt)
     return (e & ADDR_MASK) + (virt & 0xFFF);
 }
 
-/* Wskaznik na wpis tablicy stron danego adresu albo NULL. Zwracamy
-   wpis, a nie ramke: dzwoniacy chce tez bitow. */
+/* A pointer to the page table entry of a given address, or NULL. We
+   return the entry rather than the frame: the caller wants the bits
+   too. */
 static uint64_t *page_entry(uint64_t virt)
 {
     uint64_t *top = root_now();
@@ -175,9 +178,10 @@ static uint64_t *page_entry(uint64_t virt)
     return &table_at(e)[(virt >> 12) & 0x1FF];
 }
 
-/* Czy strona zapisywalnego odwzorowania byla ruszana od ostatniego
-   odeslania na dysk? Odpowiada za nas procesor - bit "brudna" ustawia
-   sam przy kazdym zapisie, wiec odsylamy tylko to, co sie zmienilo. */
+/* Has a page of a writable mapping been touched since it was last
+   written back to disk? The processor answers for us - it sets the
+   "dirty" bit itself on every write, so we write back only what
+   changed. */
 int paging64_file_dirty(uint64_t virt)
 {
     uint64_t *w = page_entry(virt);
@@ -186,7 +190,7 @@ int paging64_file_dirty(uint64_t virt)
     return (*w & PTE_PRESENT) && (*w & PG_FILE) && (*w & PTE_DIRTY);
 }
 
-/* Gasi bit "brudna" po odeslaniu strony do pliku */
+/* Clears the "dirty" bit after a page has been written back to its file */
 void paging64_file_clean(uint64_t virt)
 {
     uint64_t *w = page_entry(virt);
@@ -196,9 +200,9 @@ void paging64_file_clean(uint64_t virt)
     invlpg(virt);
 }
 
-/* Zdejmuje mapowanie strony i zwraca ramke, ktora pod nia lezala
-   (0 = nic tam nie bylo). Tablic posrednich nie zwalniamy: kosztuja
-   po jednej ramce na dwa megabajty i zaraz sie przydadza. */
+/* Removes a page's mapping and returns the frame that lay under it
+   (0 = there was nothing). We do not free the intermediate tables:
+   they cost one frame per two megabytes and will soon come in handy. */
 uint64_t paging64_unmap(uint64_t virt)
 {
     uint64_t *top = root_now();
@@ -225,19 +229,19 @@ uint64_t paging64_unmap(uint64_t virt)
     return phys;
 }
 
-/* Czy caly zakres jest widoczny dla ring 3?
+/* Is the whole range visible to ring 3?
  *
- * Jadro nie ma prawa uwierzyc we wskaznik podany przez program:
- * proces moglby podsunac adres wlasnych tablic stron albo pamieci
- * jadra i kazac je sobie wypisac. Prawa dostepu sa iloczynem po
- * wszystkich czterech poziomach, wiec bit USER musi byc na kazdym
- * z nich - dokladnie tak, jak sprawdza to procesor. */
+ * The kernel has no right to believe a pointer supplied by a program:
+ * a process could slip in the address of its own page tables or of
+ * kernel memory and have them printed out for it. Access rights are
+ * the intersection over all four levels, so the USER bit has to be on
+ * each of them - exactly as the processor checks it. */
 int paging64_user_range(uint64_t virt, uint64_t len)
 {
     uint64_t *top = root_now();
     if (!top || len == 0)
         return len == 0;
-    if (virt + len < virt)                   /* przekrecenie licznika */
+    if (virt + len < virt)                   /* the counter wrapped around */
         return 0;
 
     for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096) {
@@ -259,20 +263,20 @@ int paging64_user_range(uint64_t virt, uint64_t len)
     return 1;
 }
 
-/* --- Przestrzenie adresowe procesow ------------------------------
+/* --- Process address spaces --------------------------------------
  *
- * Kazdy proces dostaje wlasny korzen tablic, ale pamiec jadra musi byc
- * widoczna z kazdego z nich - inaczej pierwsze przerwanie po
- * przelaczeniu CR3 wykonaloby sie w prozni.
+ * Every process gets its own table root, but kernel memory has to be
+ * visible from each of them - otherwise the first interrupt after a
+ * CR3 switch would execute in a void.
  *
- * Podzial wychodzi sam z rozkladu adresow. Najwyzszy poziom dzieli
- * przestrzen na kawalki po 512 GiB, a drugi - po gigabajcie. Cala
- * pamiec fizyczna, jadro i bufor obrazu mieszcza sie w kawalkach
- * innych niz ten drugi gigabajt, w ktorym leza programy. Wystarczy
- * wiec dac procesowi wlasna tablice drugiego poziomu i wyczyscic
- * w niej ten jeden wpis: reszta zostaje WSPOLNA, bo wskazuje na te
- * same ramki, co u jadra. Mapowanie dolozone przez jadro po starcie
- * widac natychmiast we wszystkich przestrzeniach naraz.
+ * The division falls out of the address layout itself. The top level
+ * splits the space into chunks of 512 GiB, the second into gigabytes.
+ * All physical memory, the kernel and the framebuffer fit into chunks
+ * other than that second gigabyte where the programs live. So it is
+ * enough to give a process its own second-level table and clear that
+ * one entry in it: the rest stays SHARED, because it points at the
+ * same frames as the kernel's. A mapping added by the kernel after
+ * startup is visible at once in all the spaces at the same time.
  */
 
 uint64_t paging64_kernel_space(void)
@@ -297,34 +301,35 @@ uint64_t paging64_new_space(void)
     uint64_t *top = (uint64_t *)(uintptr_t)root;
     uint64_t *pdpt = (uint64_t *)(uintptr_t)mid;
 
-    memcpy(top, pml4, PAGE_SIZE);                 /* wszystko od jadra */
-    memcpy(pdpt, table_at(pml4[0]), PAGE_SIZE);   /* pierwsze 512 GiB */
-    pdpt[PAGING64_USER_PDPT] = 0;                 /* gigabajt programu - pusty */
+    memcpy(top, pml4, PAGE_SIZE);                 /* everything from the kernel */
+    memcpy(pdpt, table_at(pml4[0]), PAGE_SIZE);   /* the first 512 GiB */
+    pdpt[PAGING64_USER_PDPT] = 0;                 /* the program's gigabyte - empty */
 
-    /* Bit uzytkownika na tej sciezce otwiera ja tylko z gory: o dostepie
-       rozstrzyga i tak najbardziej restrykcyjny wpis, a ten lezy na
-       koncu - w tablicy strony */
+    /* The user bit on this path opens it only from above: access is
+       decided by the most restrictive entry anyway, and that lies at
+       the end - in the page table */
     top[0] = (uint64_t)mid | PTE_PRESENT | PTE_WRITE | PG_USER;
     return (uint64_t)root;
 }
 
-/* Powiela przestrzen procesu - bez kopiowania pamieci.
+/* Duplicates a process's address space - without copying memory.
  *
- * Rodzic i dziecko dostaja te same ramki. Strona, ktora byla
- * zapisywalna, traci u OBU prawo zapisu i dostaje znacznik COW: przy
- * pierwszej probie zapisu procesor zglosi blad strony, a jadro dopiero
- * wtedy zrobi kopie - i to tylko tej jednej strony.
+ * The parent and the child get the same frames. A page that was
+ * writable loses its write permission in BOTH and gets the COW marker:
+ * on the first attempt to write, the processor reports a page fault,
+ * and only then does the kernel make a copy - and only of that one
+ * page.
  *
- * Strony tylko do odczytu (kod, dane stale) nie potrzebuja nawet tego:
- * skoro nikt ich nie zmieni, moga zostac wspolne na zawsze. Pilnuje
- * tego licznik wlascicieli w PMM - ramka wraca do puli dopiero, gdy
- * zwolni ja ostatni.
+ * Read-only pages (code, constants) do not even need that: since
+ * nobody will change them, they can stay shared forever. The owner
+ * counter in the PMM sees to that - a frame goes back to the pool only
+ * when the last one releases it.
  *
- * Zysk jest wprost proporcjonalny do rozmiaru programu: fork przestaje
- * kosztowac tyle, ile proces zajmuje pamieci, a zaczyna kosztowac tyle,
- * ile ma tablic stron.
+ * The gain is directly proportional to the program's size: fork stops
+ * costing as much as the process occupies in memory and starts costing
+ * as much as it has page tables.
  *
- * Zwraca korzen nowej przestrzeni albo 0. */
+ * Returns the root of the new space or 0. */
 uint64_t paging64_clone_space(uint64_t src)
 {
     uint64_t dst = paging64_new_space();
@@ -335,7 +340,7 @@ uint64_t paging64_clone_space(uint64_t src)
     uint64_t *dtop = (uint64_t *)(uintptr_t)dst;
     uint64_t e = table_at(stop[0])[PAGING64_USER_PDPT];
     if (!(e & PTE_PRESENT))
-        return dst;                     /* pusty proces - nic do dzielenia */
+        return dst;                     /* an empty process - nothing to share */
 
     uint64_t *pd = table_at(e);
     for (int i = 0; i < 512; i++) {
@@ -352,11 +357,12 @@ uint64_t paging64_clone_space(uint64_t src)
             uint64_t flags = pt[j] &
                              (PG_WRITE | PG_USER | PG_NX | PG_COW | PG_FILE);
 
-            /* Zapisywalna strona idzie do obu jako tylko-do-odczytu
-               ze znacznikiem - inaczej rodzic pisalby dziecku po
-               pamieci, nie wiedzac o tym. Wyjatkiem jest zapisywalne
-               odwzorowanie pliku: tam rodzic i dziecko MAJA pisac po
-               tym samym, bo pisza do jednego pliku. */
+            /* A writable page goes to both as read-only with the
+               marker - otherwise the parent would write over the
+               child's memory without knowing it. The exception is a
+               writable file mapping: there the parent and the child
+               ARE to write over the same thing, because they write to
+               one file. */
             if ((flags & PG_WRITE) && !(flags & PG_FILE)) {
                 flags = (flags & ~(uint64_t)PG_WRITE) | PG_COW;
                 pt[j] = frame | PTE_PRESENT | flags;
@@ -374,15 +380,15 @@ uint64_t paging64_clone_space(uint64_t src)
     return dst;
 }
 
-/* Zapis do strony wspoldzielonej po fork-u.
+/* A write to a page shared after a fork.
  *
- * Jesli ramka ma juz tylko jednego wlasciciela, nie ma czego
- * rozdzielac - wystarczy oddac prawo zapisu. To czesty przypadek:
- * druga strona fork-a zdazyla sie skonczyc albo sama zapisala te
- * strone wczesniej.
+ * If the frame has only one owner left, there is nothing to split -
+ * handing back write permission is enough. That is a common case: the
+ * other side of the fork has already finished or wrote that page
+ * itself earlier.
  *
- * Zwraca 1, gdy strona zostala rozdzielona i program moze powtorzyc
- * zapis; 0 znaczy, ze to nie byl blad tego rodzaju. */
+ * Returns 1 when the page was split and the program can retry the
+ * write; 0 means this was not a fault of that kind. */
 int paging64_handle_cow(uint64_t virt)
 {
     uint64_t *top = root_now();
@@ -408,7 +414,7 @@ int paging64_handle_cow(uint64_t virt)
     uint64_t flags = (pt[i] & (PG_USER | PG_NX)) | PG_WRITE;
 
     if (pmm_frame_refs((uint32_t)old) <= 1) {
-        pt[i] = old | PTE_PRESENT | flags;      /* jestesmy sami */
+        pt[i] = old | PTE_PRESENT | flags;      /* we are alone */
         invlpg(virt);
         return 1;
     }
@@ -418,7 +424,7 @@ int paging64_handle_cow(uint64_t virt)
     if (!fresh)
         return 0;
     memcpy((void *)(uintptr_t)fresh, (const void *)(uintptr_t)old, PAGE_SIZE);
-    pmm_free_frame((uint32_t)old);              /* jeden wlasciciel mniej */
+    pmm_free_frame((uint32_t)old);              /* one owner fewer */
 
     pt[i] = (uint64_t)fresh | PTE_PRESENT | flags;
     invlpg(virt);
@@ -442,8 +448,9 @@ void paging64_switch(uint64_t space)
     __asm__ volatile("movq %0, %%cr3" : : "r"(space) : "memory");
 }
 
-/* Zwalnia przestrzen procesu: strony programu, jego tablice i korzen.
-   Tablic jadra nie dotyka - sa wspolne i zyja dalej. */
+/* Releases a process's address space: the program's pages, its tables
+   and the root. It does not touch the kernel tables - those are shared
+   and live on. */
 void paging64_free_space(uint64_t space)
 {
     if (!space || space == (uint64_t)(uintptr_t)pml4)
@@ -473,18 +480,19 @@ void paging64_free_space(uint64_t space)
     pmm_free_frame((uint32_t)space);
 }
 
-/* --- Wymiana stron na dysk ------------------------------------------
+/* --- Swapping pages to disk -------------------------------------------
  *
- * Wpis strony wyrzuconej na dysk: bez bitu obecnosci, ze znacznikiem
- * i numerem miejsca w gornych bitach. Procesor takiego wpisu nie
- * oglada - dla niego to po prostu strona, ktorej nie ma.
+ * The entry of a page evicted to disk: without the present bit, with a
+ * marker and the slot number in the upper bits. The processor does not
+ * look at such an entry - to it that is simply a page that is not
+ * there.
  *
- * Prawa dostepu jada z nia razem. Nie wolno ich zgadnac przy powrocie:
- * strona kodu programu jest tylko do odczytu i wykonywalna, a strona
- * danych odwrotnie. Oddanie wszystkim jednych i tych samych praw konczy
- * sie tym, ze program po sciagnieciu wlasnego kodu z dysku dostaje
- * wyjatek przy pierwszej instrukcji - bo kod wrocil z zakazem
- * wykonywania.
+ * The access rights travel with it. They must not be guessed on the
+ * way back: a page of program code is read-only and executable, a data
+ * page the other way round. Giving everybody one and the same set of
+ * rights ends with a program taking an exception at its first
+ * instruction after pulling its own code back from disk - because the
+ * code came back with a no-execute mark.
  */
 static uint64_t swap_pte(int slot, uint64_t right)
 {
@@ -492,25 +500,26 @@ static uint64_t swap_pte(int slot, uint64_t right)
            (right & (PG_WRITE | PG_USER | PG_NX));
 }
 
-/* Wskaznik zegara: gdzie skonczylismy ostatnie szukanie ofiary. Bez
-   niego kazde szukanie zaczynaloby sie od poczatku i wyrzucalo w kolko
-   te same, najnizej lezace strony. */
+/* The clock hand: where the last search for a victim stopped. Without
+   it every search would start from the beginning and evict the same
+   lowest-lying pages over and over. */
 static int clock_pd, clock_pt;
 
-/* Wyrzuca na dysk najwyzej 'want' stron z podanej przestrzeni.
+/* Evicts at most 'want' pages of the given space to disk.
  *
- * Algorytm drugiej szansy: procesor sam zaznacza w kazdym uzytym wpisie
- * bit "odwiedzona". Strone z tym bitem zostawiamy, tylko go gasimy -
- * jesli do nastepnego obchodu nikt jej nie tknie, poleci. Zabieramy
- * wiec te, ktore naprawde lezaly odlogiem.
+ * The second-chance algorithm: the processor marks the "accessed" bit
+ * in every entry it uses. A page with that bit is spared, we only
+ * clear it - if nobody touches it before the next sweep, it goes. So
+ * we take the ones that really lay fallow.
  *
- * Nie ruszamy stron wspoldzielonych (shm), stron oddanych na kopiowanie
- * przy zapisie ani ramek nalezacych do wiecej niz jednej przestrzeni:
- * z nimi wymiana wymagalaby liczenia wlascicieli takze na dysku.
+ * We leave alone shared pages (shm), pages given over to copy-on-write
+ * and frames belonging to more than one space: with those, swapping
+ * would require counting owners on disk as well.
  *
- * Chodzimy wylacznie po gigabajcie programu (PAGING64_USER_PDPT).
- * Pamiec jadra na dysk nie idzie - a nawet gdyby, to nie ma jej kto
- * sciagnac z powrotem, bo sciaga ja obsluga bledu strony. */
+ * We walk only the program's gigabyte (PAGING64_USER_PDPT). Kernel
+ * memory does not go to disk - and even if it did, there would be
+ * nobody to bring it back, because it is brought back by the page
+ * fault handler. */
 int paging64_reclaim_pages(uint64_t space, int want)
 {
     if (!space || space == (uint64_t)(uintptr_t)pml4)
@@ -525,25 +534,25 @@ int paging64_reclaim_pages(uint64_t space, int want)
     uint64_t *pd = table_at(e);
     int freed = 0;
 
-    /* Dwa obchody: pierwszy gasi bity "odwiedzona", drugi zabiera */
+    /* Two sweeps: the first clears the "accessed" bits, the second takes */
     for (int pass = 0; pass < 2 && freed < want; pass++) {
         for (int n = 0; n < 512 && freed < want; n++) {
             int i = (clock_pd + n) % 512;
             if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
                 continue;
             uint64_t *pt = table_at(pd[i]);
-            /* Wewnatrz tablicy tez zaczynamy tam, gdzie skonczylismy -
-               inaczej kazde szukanie przemiataloby od nowa strony,
-               ktore juz dawno poszly na dysk */
+            /* Inside a table we also start where we stopped - otherwise
+               every search would sweep again over pages that went to
+               disk long ago */
             int start = (n == 0) ? clock_pt : 0;
             for (int k = 0; k < 512 && freed < want; k++) {
                 int j = (start + k) % 512;
                 uint64_t w = pt[j];
                 if (!(w & PTE_PRESENT) || !(w & PG_USER) || (w & PG_COW))
                     continue;
-                /* Strony zapisywalnego odwzorowania nie ma po co
-                   wyrzucac na dysk wymiany - jej miejscem na dysku
-                   jest sam odwzorowany plik */
+                /* There is no point evicting a page of a writable mapping
+                   to the swap file - its place on disk is the mapped
+                   file itself */
                 if (w & PG_FILE)
                     continue;
                 uint64_t frame = w & ADDR_MASK;
@@ -551,13 +560,13 @@ int paging64_reclaim_pages(uint64_t space, int want)
                     pmm_frame_refs((uint32_t)frame) != 1)
                     continue;
                 if (w & PTE_ACCESSED) {
-                    pt[j] = w & ~(uint64_t)PTE_ACCESSED;   /* druga szansa */
+                    pt[j] = w & ~(uint64_t)PTE_ACCESSED;   /* second chance */
                     continue;
                 }
 
                 int slot = swap_alloc_slot();
                 if (slot < 0)
-                    goto end;              /* plik wymiany pelny */
+                    goto end;              /* the swap file is full */
                 if (swap_write(slot, (const void *)(uintptr_t)frame) < 0) {
                     swap_free_slot(slot);
                     goto end;
@@ -569,8 +578,9 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 freed++;
             }
         }
-        /* Po pierwszym obchodzie wszystkie bity sa juz zgaszone -
-           drugi obchod znajdzie ofiary, o ile w ogole jest co brac */
+        /* After the first sweep all the bits are cleared - the second
+           sweep will find victims, if there is anything to take at
+           all */
     }
 end:
     if (freed && space == (uint64_t)(uintptr_t)root_now())
@@ -579,8 +589,8 @@ end:
     return freed;
 }
 
-/* Sciaga z dysku strone, ktora program wlasnie probowal dotknac.
-   Zwraca 1, gdy strona wrocila i mozna wznowic instrukcje. */
+/* Pulls back from disk a page the program has just tried to touch.
+   Returns 1 when the page is back and the instruction can be resumed. */
 int paging64_swap_in(uint64_t space, uint64_t virt)
 {
     if (!space)
@@ -603,11 +613,12 @@ int paging64_swap_in(uint64_t space, uint64_t virt)
     if ((w & PTE_PRESENT) || !(w & PG_SWAPPED))
         return 0;
 
-    /* Adres wycinamy maska: gorne bity wpisu niosa prawa dostepu */
+    /* We cut the address out with a mask: the upper bits of the entry
+   carry the access rights */
     int slot = (int)((w & ADDR_MASK) >> 12);
     uint32_t frame = pmm_alloc_frame();
     if (!frame)
-        return 0;                       /* brak pamieci nawet na powrot */
+        return 0;                       /* not even enough memory to bring it back */
     if (swap_read(slot, (void *)(uintptr_t)frame) < 0) {
         pmm_free_frame(frame);
         return 0;
@@ -619,14 +630,15 @@ int paging64_swap_in(uint64_t space, uint64_t virt)
     return 1;
 }
 
-/* Doklejenie do mapowania obszaru lezacego poza pamiecia.
+/* Gluing onto the mapping an area lying outside memory.
  *
- * Rejestry urzadzen leza wysoko - grubo ponad tym, co opisuje
- * mapowanie zbudowane przy starcie, bo tamto siega tylko szczytu
- * pamieci zarzadzanej przez PMM. Bez tego pierwszy odczyt z BAR-a
- * konczy sie bledem strony.
+ * Device registers lie high - well above what the mapping built at
+ * startup describes, because that one reaches only the top of the
+ * memory the PMM manages. Without this the first read from a BAR ends
+ * in a page fault.
  *
- * Zapis wolno, wykonywanie nie: w rejestrach urzadzenia nie ma kodu. */
+ * Writing yes, executing no: there is no code in a device's
+ * registers. */
 int paging64_map_phys(uint64_t phys, uint64_t len)
 {
     uint64_t start = phys & ~0xFFFULL;
@@ -651,8 +663,8 @@ int paging64_nx_enabled(void)
 
 int paging64_init(void)
 {
-    /* Zakaz wykonywania trzeba najpierw wlaczyc w EFER - inaczej bit 63
-       wpisu jest zarezerwowany i jego ustawienie konczy sie bledem */
+    /* No-execute has to be enabled in EFER first - otherwise bit 63 of
+       an entry is reserved and setting it ends in a fault */
     uint32_t low, high;
     __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(0xC0000080));
     low |= (1u << 11);                       /* NXE */
@@ -665,24 +677,24 @@ int paging64_init(void)
     memset((void *)(uintptr_t)root, 0, PAGE_SIZE);
     pml4 = (uint64_t *)(uintptr_t)root;
 
-    /* Cala pamiec, ktora zarzadza PMM - identycznosciowo. Jadro,
-       jego stos i wszystkie tablice stron leza w tym obszarze, wiec
-       po przelaczeniu CR3 nic nam nie znika spod nog. */
+    /* All the memory the PMM manages - identity-mapped. The kernel,
+       its stack and all the page tables lie in that area, so nothing
+       vanishes from under our feet after a CR3 switch. */
     uint64_t top = (pmm_managed_top() + HUGE_SIZE - 1) & ~(uint64_t)(HUGE_SIZE - 1);
     for (uint64_t a = 0; a < top; a += HUGE_SIZE)
         if (map_huge(a, a, PTE_WRITE | PG_NX) < 0)
             return -1;
     identity_top = top;
 
-    /* Kod jadra musi zostac wykonywalny - pierwsze dwa megabajty nad
-       megabajtem to obraz jadra, wiec temu jednemu wpisowi zdejmujemy
-       zakaz wykonywania */
+    /* The kernel code has to stay executable - the first two
+       megabytes above one megabyte are the kernel image, so we lift
+       the no-execute mark from that one entry */
     if (map_huge(0, 0, PTE_WRITE) < 0 ||
         map_huge(HUGE_SIZE, HUGE_SIZE, PTE_WRITE) < 0)
         return -1;
 
-    /* Bufor obrazu lezy wysoko, poza pamiecia - i na pewno nie ma
-       w nim kodu do wykonania */
+    /* The framebuffer lies high, outside memory - and it certainly has
+       no code in it to execute */
     if (fbcon_have()) {
         uint64_t fb = fbcon_addr();
         uint64_t end = fb + fbcon_bytes();
