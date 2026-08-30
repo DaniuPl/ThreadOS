@@ -27,6 +27,22 @@ int smp_init(void);
 int smp_cpus(void);
 int smp_started(void);
 
+/* Numer rdzenia, na ktorym biegnie wolajacy. Odpowiedz daje sam
+   procesor - numer w jego lokalnym APIC ustala sprzet. */
+int smp_rdzen(void);
+
+/* Tykniecia wlasnego zegara danego rdzenia. Rdzen rozruchowy chodzi
+   z PIT i tu ma zero; wtorne licza swoje zegary w APIC. */
+uint32_t smp_tykniec(int rdzen);
+
+/* Obsluga tykniecia zegara APIC (wektor 48) - wola to isr_handler */
+void smp_zegar_tyk(void);
+
+/* Obsluga pobudki od innego rdzenia (wektor 49). Nie robi nic poza
+   potwierdzeniem: cala jej tresc to fakt, ze przyszla i wyrwala
+   procesor z instrukcji hlt. */
+void smp_pobudka_odbierz(void);
+
 /* --- Praca rozdzielana na rdzenie -----------------------------------
  *
  * Zleca 'ile' jednostek pracy i wraca, gdy wszystkie sa policzone.

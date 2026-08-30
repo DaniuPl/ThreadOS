@@ -58,14 +58,25 @@ static void set_gate(int n, void (*handler)(void))
     X(40) X(41) X(42) X(43) X(44) X(45) X(46) X(47)
 
 LIST(DECL)
+extern void isr64_48(void);   /* zegar lokalnego APIC (rdzenie wtorne) */
+extern void isr64_49(void);   /* pobudka miedzy rdzeniami */
 
 #define ENTRY(n) set_gate(n, isr64_##n);
 
 void idt64_init(void)
 {
     LIST(ENTRY)
+    set_gate(48, isr64_48);              /* zegar lokalnego APIC */
+    set_gate(49, isr64_49);              /* pobudka miedzy rdzeniami */
 
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (uint64_t)(uintptr_t)idt;
+    idt64_zaladuj();
+}
+
+/* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
+   juz nie zmienia, wiec kazdy rdzen moze pokazywac na te sama. */
+void idt64_zaladuj(void)
+{
     __asm__ volatile("lidt %0" : : "m"(idtp));
 }

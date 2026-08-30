@@ -73,6 +73,23 @@ void gdt64_init(void)
     gdtp.limit = sizeof(gdt) - 1;
     gdtp.base = (uint64_t)(uintptr_t)gdt;
 
+    gdt64_zaladuj();
+
+    /* Segment stanu zadania laduje TYLKO rdzen rozruchowy. Instrukcja
+       ltr oznacza deskryptor jako zajety, wiec tej samej tablicy nie da
+       sie zaladowac dwa razy - a i tak nie ma po co: TSS sluzy wejsciu
+       w ring 0 z ring 3, a programy chodza na razie tylko na rdzeniu
+       rozruchowym. */
+    __asm__ volatile("movw %w0, %%ax\n\t"
+                     "ltr %%ax"
+                     : : "i"(GDT64_TSS) : "rax", "memory");
+}
+
+/* Laduje juz zbudowana tablice na biezacym rdzeniu. Rdzen wtorny wola
+   to po dojsciu do trybu dlugiego, zeby zejsc z tymczasowej tablicy
+   z trampoliny na wspolna tablice jadra. */
+void gdt64_zaladuj(void)
+{
     __asm__ volatile(
         "lgdt %0\n\t"
         /* Przeladowanie CS wymaga skoku dalekiego; w trybie dlugim
@@ -88,10 +105,8 @@ void gdt64_init(void)
         "movw %%ax, %%ss\n\t"
         "movw %%ax, %%fs\n\t"
         "movw %%ax, %%gs\n\t"
-        "movw %w3, %%ax\n\t"
-        "ltr %%ax"
         :
         : "m"(gdtp), "i"((uint64_t)GDT64_KERNEL_CODE),
-          "i"(GDT64_KERNEL_DATA), "i"(GDT64_TSS)
+          "i"(GDT64_KERNEL_DATA)
         : "rax", "memory");
 }

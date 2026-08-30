@@ -36,6 +36,8 @@ static struct idt_ptr idt_pointer;
     X(40) X(41) X(42) X(43) X(44) X(45) X(46) X(47)
 STUB_LIST(DECLARE_STUB)
 extern void isr128(void);
+extern void isr48(void);      /* zegar lokalnego APIC (rdzenie wtorne) */
+extern void isr49(void);      /* pobudka miedzy rdzeniami */
 
 static void idt_set_gate(int n, void (*handler)(void), uint8_t flags)
 {
@@ -58,8 +60,22 @@ void idt_init(void)
     STUB_LIST(SET_GATE)
 #undef SET_GATE
 
+    /* Zegar lokalnego APIC: jeden na rdzen, poza numeracja IRQ */
+    idt_set_gate(48, isr48, 0x8E);
+    idt_set_gate(49, isr49, 0x8E);       /* pobudka miedzy rdzeniami */
+
     /* Syscall: 0xEE = DPL 3, wiec int 0x80 wolno wykonac z ring 3 */
     idt_set_gate(0x80, isr128, 0xEE);
 
+    idt_zaladuj();
+}
+
+/* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
+   juz nie zmienia, wiec kazdy rdzen moze pokazywac na te sama. Rdzen
+   wtorny wola to tuz po przejsciu w tryb chroniony: do tej chwili nie
+   ma zadnej obslugi wyjatkow, wiec kazdy blad konczy sie potrojnym
+   bledem i cichym resetem maszyny. */
+void idt_zaladuj(void)
+{
     __asm__ volatile("lidt %0" : : "m"(idt_pointer));
 }

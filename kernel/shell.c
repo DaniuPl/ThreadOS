@@ -404,6 +404,14 @@ static void cmd_smp(void)
     printk("Wynik: %u, wzorzec: %u - %s\n", razem, wzorzec,
            razem == wzorzec ? "zgadza sie" : "NIE ZGADZA SIE");
     printk("Liczylo rdzeni: %d\n", smp_pracujacych());
+
+    /* Wlasny zegar kazdego rdzenia. Rdzen rozruchowy chodzi z PIT
+       i tu ma zero - wtorne licza swoje tykniecia w lokalnym APIC,
+       i to jest jedyny dowod na to, ze w ogole dostaja przerwania. */
+    printk("Zegary rdzeni:");
+    for (int i = 0; i < smp_cpus(); i++)
+        printk(" rdzen%d=%u", i, smp_tykniec(i));
+    printk("\n");
 }
 
 static void cmd_dhcp(void)

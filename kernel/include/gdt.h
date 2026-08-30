@@ -12,6 +12,9 @@
 
 void gdt_init(void);
 
+/* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
+void gdt_zaladuj(void);
+
 /* Ustawia stos jądra, na który CPU przeskoczy przy przerwaniu z ring 3 */
 void tss_set_esp0(uint32_t esp0);
 

@@ -63,7 +63,24 @@ void gdt_init(void)
     /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
     gdt_set_entry(5, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x00);
 
-    /* Załaduj GDT, przeładuj rejestry segmentowe; CS wymaga dalekiego skoku */
+    gdt_zaladuj();
+
+    /* Segment stanu zadania laduje TYLKO rdzen rozruchowy. Instrukcja
+       ltr oznacza deskryptor jako zajety, wiec ta sama tablica nie da
+       sie zaladowac dwa razy - a i tak nie ma po co: TSS jest jeden,
+       bo sluzy wejsciu w ring 0 z ring 3, a programy uzytkownika
+       chodza na razie tylko na rdzeniu rozruchowym. */
+    __asm__ volatile("movw %0, %%ax\n\t"
+                     "ltr %%ax\n\t"
+                     : : "i"(GDT_TSS) : "eax", "memory");
+}
+
+/* Laduje juz zbudowana tablice na biezacym rdzeniu i przeladowuje
+   rejestry segmentowe; CS wymaga dalekiego skoku. Rdzen wtorny wola to
+   po przejsciu w tryb chroniony, zeby zejsc z tymczasowej tablicy
+   z trampoliny na wspolna tablice jadra. */
+void gdt_zaladuj(void)
+{
     __asm__ volatile(
         "lgdt %0\n\t"
         "movw %1, %%ax\n\t"
@@ -74,11 +91,8 @@ void gdt_init(void)
         "movw %%ax, %%ss\n\t"
         "ljmpl %2, $1f\n\t"
         "1:\n\t"
-        "movw %3, %%ax\n\t"
-        "ltr %%ax\n\t"
         :
-        : "m"(gdt_pointer), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE),
-          "i"(GDT_TSS)
+        : "m"(gdt_pointer), "i"(GDT_KERNEL_DATA), "i"(GDT_KERNEL_CODE)
         : "eax", "memory");
 }
 

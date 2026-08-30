@@ -42,6 +42,18 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, wynik, zrob_iso64, brak64
 
 
+def wartosci(tekst, etykieta):
+    """Liczby z JEDNEGO wiersza wypisu 'smp'.
+
+    Komenda podaje teraz dwa wiersze w tym samym ksztalcie - udzial
+    w pracy i tykniecia wlasnych zegarow - wiec szukanie 'rdzenN=' po
+    calym tekscie zlepialoby jedno z drugim."""
+    for w in tekst.replace("\r", "").split("\n"):
+        if w.startswith(etykieta):
+            return [int(x) for x in re.findall(r"rdzen\d+=(\d+)", w)]
+    return []
+
+
 def main():
     print("--- pozostale procesory (INIT-SIPI) ---")
 
@@ -83,14 +95,39 @@ def main():
               "zgadza sie" in praca and "NIE ZGADZA SIE" not in praca)
 
         m = re.search(r"Liczylo rdzeni: (\d+)", praca)
-        check("liczyly wszystkie cztery rdzenie",
-              m is not None and int(m.group(1)) == 4)
+        check("prace liczylo kilka rdzeni naraz",
+              m is not None and int(m.group(1)) >= 2)
 
-        udzialy = [int(x) for x in re.findall(r"rdzen\d+=(\d+)", praca)]
-        check("kazdy rdzen wzial czesc jednostek (%s)" % udzialy,
-              len(udzialy) == 4 and all(u > 0 for u in udzialy))
+        # Ile rdzeni naprawde wzielo prace. Nie zadamy, zeby wzial ja
+        # KAZDY: rdzen bezczynny stoi na instrukcji hlt i budzi go
+        # dopiero przerwanie, a jak szybko dojdzie, zalezy od maszyny
+        # wirtualnej pod spodem. To wyscig, a wyscigi nie sa asercjami.
+        udzialy = wartosci(praca, "Udzial:")
+        check("prace wzielo wiecej niz jeden rdzen (%s)" % udzialy,
+              len(udzialy) == 4 and sum(1 for u in udzialy if u) >= 2)
         check("razem policzono dokladnie tyle jednostek, ile zlecono",
               sum(udzialy) == 64)
+
+        # --- Wlasny zegar kazdego rdzenia -------------------------
+        # Rdzen wtorny nie moze korzystac z PIT: to przerwanie idzie
+        # przez kontroler PIC do JEDNEGO procesora. Ma za to wlasny
+        # zegar w lokalnym APIC - i dopiero on daje mu przerwania,
+        # bez ktorych nigdy nie dalby sie wywlaszczyc.
+        zegary = wartosci(praca, "Zegary rdzeni:")
+        check("kazdy rdzen wtorny ma wlasny zegar, ktory tyka (%s)"
+              % zegary,
+              len(zegary) == 4 and all(z > 0 for z in zegary[1:]))
+        check("rdzen rozruchowy chodzi z PIT, nie z APIC",
+              len(zegary) == 4 and zegary[0] == 0)
+
+        # Jedno odczytanie niczego nie dowodzi - liczniki maja ROSNAC
+        time.sleep(1.5)
+        znowu = wartosci(q.polecenie("smp", "Zegary rdzeni", timeout=90),
+                         "Zegary rdzeni:")
+        check("zegary rdzeni wtornych ida dalej (%s -> %s)"
+              % (zegary, znowu),
+              len(znowu) == 4 and
+              all(znowu[i] > zegary[i] for i in range(1, 4)))
 
         # Liczniki watkow rosna dalej - scheduler nie stanal
         def licznik():
@@ -146,8 +183,29 @@ def main():
                           "dlugim", "zgadza sie" in praca and
                           "NIE ZGADZA SIE" not in praca)
                     m2 = re.search(r"Liczylo rdzeni: (\d+)", praca)
-                    check("liczyly wszystkie cztery rdzenie (tryb dlugi)",
-                          m2 is not None and int(m2.group(1)) == 4)
+                    check("prace liczylo kilka rdzeni naraz (tryb dlugi)",
+                          m2 is not None and int(m2.group(1)) >= 2)
+
+                    # Wlasny zegar rdzenia w trybie dlugim.
+                    #
+                    # Kosztowal osobny blad i to taki, ktorego nie widac
+                    # z boku: rdzen wtorny nie wlaczal sobie w EFER bitu
+                    # zakazu wykonywania. Jadro mapuje tym bitem rejestry
+                    # sprzetu, a bez NXE bit 63 wpisu tablicy stron jest
+                    # ZAREZERWOWANY - wiec pierwsze siegniecie po lokalny
+                    # APIC konczylo sie bledem strony i cichym zgonem
+                    # calej maszyny.
+                    zeg = wartosci(praca, "Zegary rdzeni:")
+                    check("kazdy rdzen wtorny ma wlasny zegar takze "
+                          "w trybie dlugim (%s)" % zeg,
+                          len(zeg) == 4 and all(z > 0 for z in zeg[1:]))
+                    time.sleep(1.5)
+                    zeg2 = wartosci(q64.polecenie("smp", "Zegary rdzeni",
+                                                  timeout=90),
+                                    "Zegary rdzeni:")
+                    check("i tykaja dalej (%s -> %s)" % (zeg, zeg2),
+                          len(zeg2) == 4 and
+                          all(zeg2[i] > zeg[i] for i in range(1, 4)))
                 finally:
                     q64.close()
         finally:

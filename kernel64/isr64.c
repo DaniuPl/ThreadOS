@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include "../kernel/include/isr.h"
 #include "../kernel/include/pic.h"
+#include "../kernel/include/smp.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/vga.h"
 #include "task64.h"
@@ -231,6 +232,22 @@ void isr64_handler(struct regs *r)
         printk("System zatrzymany.\n");
         for (;;)
             __asm__ volatile("cli; hlt");
+    }
+
+    /* Zegar lokalnego APIC. Nie przeszedl przez kontroler PIC, wiec nie
+       ma tam czego zamykac - potwierdzenie idzie do wlasnego APIC tego
+       rdzenia. Na rdzeniu wtornym to jedyne przerwanie, jakie w ogole
+       przychodzi. */
+    if (r->int_no == 48) {
+        smp_zegar_tyk();
+        return;
+    }
+
+    /* Pobudka od innego rdzenia. Nie niesie zadnej tresci: chodzilo
+       tylko o to, zeby wyrwac ten procesor z instrukcji hlt. */
+    if (r->int_no == 49) {
+        smp_pobudka_odbierz();
+        return;
     }
 
     if (r->int_no >= IRQ_BASE && r->int_no < IRQ_BASE + 16) {

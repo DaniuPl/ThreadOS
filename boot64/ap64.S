@@ -21,6 +21,7 @@
 #define CR0_PE    (1 << 0)
 #define MSR_EFER  0xC0000080
 #define EFER_LME  (1 << 8)
+#define EFER_NXE  (1 << 11)
 
 .section .text
 .globl ap_trampolina
@@ -68,10 +69,18 @@ ap_chroniony:
     movl (%eax), %eax
     movl %eax, %cr3
 
-    /* Zgoda na tryb dlugi (bit LME w rejestrze EFER) */
+    /* Zgoda na tryb dlugi (bit LME) i na zakaz wykonywania (bit NXE).
+     *
+     * NXE nie jest ozdoba. Jadro mapuje tym bitem wszystko, co nie ma
+     * byc kodem - miedzy innymi rejestry sprzetu doklejone do mapowania
+     * identycznosciowego. Gdy NXE jest wylaczone, bit 63 wpisu tablicy
+     * stron jest ZAREZERWOWANY, a nie "zakaz wykonywania": kazdy dostep
+     * przez taki wpis konczy sie bledem strony. Ten rdzen chodzi po tych
+     * samych tablicach, co rozruchowy, wiec musi miec ten sam EFER -
+     * inaczej pierwsze siegniecie po lokalny APIC zabija maszyne. */
     movl $MSR_EFER, %ecx
     rdmsr
-    orl $EFER_LME, %eax
+    orl $EFER_LME | EFER_NXE, %eax
     wrmsr
 
     /* Wlaczenie stronicowania przelacza procesor w tryb dlugi -

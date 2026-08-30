@@ -77,6 +77,15 @@ ISR_NOERR 45
 ISR_NOERR 46
 ISR_NOERR 47
 
+/* Zegar lokalnego APIC - kazdy rdzen ma swoj wlasny, wiec nie idzie
+   przez PIC i nie ma numeru IRQ. Wektor 48 lezy tuz za nimi. */
+ISR_NOERR 48
+
+/* Pobudka miedzy rdzeniami: rdzen rozruchowy budzi nia spiace rdzenie,
+   gdy zlozy im prace. Nie niesie zadnej tresci - liczy sie samo to,
+   ze przerwanie wyrywa procesor z instrukcji hlt. */
+ISR_NOERR 49
+
 /* Syscalle: int 0x80 (bramka z DPL=3, dostępna z ring 3) */
 ISR_NOERR 128
 

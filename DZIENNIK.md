@@ -1847,3 +1847,65 @@ sprawdzane przez `make test`.
       prawdą niezależnie od tego, kto wygra wyścig: pracę wzięło więcej
       niż jeden rdzeń, a wszystkie jednostki policzyły się **dokładnie
       raz**.
+- [x] **Rdzeń wtórny dostaje tablicę wyjątków i własny zegar** - drugi
+      krok w stronę prawdziwego SMP.
+
+      Obudzony rdzeń był dotąd w dziwnym położeniu: wykonywał kod
+      jądra, ale nie miał ani tablicy segmentów jądra (siedział na
+      tymczasowej z trampoliny), ani żadnej tablicy wyjątków. Każdy
+      jego błąd kończył się potrójnym błędem i **cichym resetem całej
+      maszyny** - bez jednego słowa na ekranie. Obie tablice są jedne
+      dla całego systemu i po zbudowaniu nikt ich nie zmienia, więc
+      wystarczyło je wskazać. Segmentu stanu zadania (TSS) rdzeń wtórny
+      NIE ładuje: `ltr` oznacza deskryptor jako zajęty, więc tej samej
+      tablicy nie da się załadować dwa razy - a i tak nie ma po co,
+      skoro programy ring 3 chodzą na razie tylko na rdzeniu
+      rozruchowym.
+
+      **Własny zegar.** Przerwanie z PIT idzie przez kontroler PIC do
+      JEDNEGO procesora - rdzeń wtórny nie zobaczyłby go nigdy, a bez
+      przerwań nie da się go kiedykolwiek wywłaszczyć. Każdy procesor
+      ma za to własny zegar w lokalnym APIC. Jego częstotliwości nie da
+      się odczytać, więc trzeba ją zmierzyć: rdzeń rozruchowy puszcza
+      licznik APIC i patrzy, ile zdąży odliczyć przez znaną liczbę
+      tyknięć PIT. Mierzy tylko on, bo tylko on ma czym.
+
+      **Błąd, który kosztował najwięcej czasu i był tego wart.**
+      W trybie długim rdzeń wtórny umierał przy pierwszym sięgnięciu po
+      lokalny APIC - cicho, razem z całą maszyną. Powód: trampolina
+      ustawiała w rejestrze EFER bit zgody na tryb długi, ale nie bit
+      NXE. A jądro mapuje bitem zakazu wykonywania wszystko, co nie ma
+      być kodem - w tym rejestry sprzętu doklejone do mapowania
+      identycznościowego. Bez NXE bit 63 wpisu tablicy stron nie znaczy
+      "zakaz wykonywania", tylko jest **zarezerwowany**: każdy dostęp
+      przez taki wpis to błąd strony. Ten sam adres, te same tablice,
+      ten sam CR3 - a jeden procesor czyta, drugi ginie. Różnicę robił
+      jeden bit w rejestrze, którego nikt nie kopiował.
+
+      Znalezienie tego wymagało zejścia do najprostszego możliwego
+      wypisu: jednego bajtu prosto na port szeregowy, bez zamków, bez
+      funkcji, bez niczego, co samo może paść. Litera po literze widać
+      było, dokąd rdzeń dochodzi.
+
+      **Bezczynny rdzeń ma stać, a nie kręcić się w kółko.** Do tej
+      pory rdzeń bez pracy wirował na `pause`. Na maszynie wirtualnej
+      kosztuje to dokładnie tyle, co praca: trzy rdzenie kręcące się bez
+      celu zabierały rdzeniowi rozruchowemu trzy czwarte maszyny, przez
+      co zwykły zapis na dysk trwał cztery razy dłużej. **Rozruch do
+      shella na czterech rdzeniach: 22 sekundy z okładem przed zmianą,
+      6,5 sekundy po.** Teraz rdzeń staje na `hlt`, a budzi go
+      przerwanie międzyrdzeniowe wysłane w chwili złożenia pracy -
+      najprostsze przerwanie, jakie można komuś posłać, bo cała jego
+      treść to fakt, że przyszło.
+
+      Kolejność ma znaczenie i jest w kodzie napisana wprost: pobudka
+      idzie PO zapisaniu zlecenia. Wysłana przed zastałaby jeszcze
+      pustą kolejkę.
+
+      **I znów wyścig w asercji.** Odkąd rdzenie śpią, podział pracy
+      zależy od tego, jak szybko dojdzie do nich pobudka - a to jest
+      sprawa emulatora, nie jądra. Asercja "każdy rdzeń wziął część"
+      przestała więc cokolwiek znaczyć i mówi teraz to, co jest prawdą
+      niezależnie od wyścigu: pracę wzięło więcej niż jeden rdzeń,
+      a wszystkie jednostki policzyły się dokładnie raz. Tego pilnuje
+      porównanie z wynikiem jednordzeniowym, co do bitu.

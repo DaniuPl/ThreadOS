@@ -16,6 +16,9 @@
 /* Laduje tablice deskryptorow z segmentami ring 3 i zadaniem TSS */
 void gdt64_init(void);
 
+/* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
+void gdt64_zaladuj(void);
+
 /* Stos jadra, na ktory procesor przejdzie przy przerwaniu z ring 3 */
 void gdt64_set_kernel_stack(uint64_t rsp);
 
