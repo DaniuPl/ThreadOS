@@ -1,11 +1,12 @@
-/* Tablica deskryptorow przerwan w trybie dlugim
+/* The interrupt descriptor table in long mode
  *
- * Wpis ma szesnascie bajtow zamiast osmiu - adres procedury jest
- * 64-bitowy i musi sie w nim zmiescic w trzech kawalkach. Doszlo tez
- * pole IST: pozwala kazdemu wektorowi zazadac wlasnego, z gory
- * wybranego stosu. Nie korzystamy z niego jeszcze (zero = ten sam stos,
- * co przerwany kod), ale to wlasnie ono ratuje system przy bledzie
- * stosu, gdy dotychczasowemu nie mozna juz ufac.
+ * An entry is sixteen bytes instead of eight - the handler address is
+ * 64-bit and has to fit into it in three pieces. An IST field has been
+ * added too: it lets every vector demand its own, chosen up front,
+ * stack. We do not use it yet (zero = the same stack as the
+ * interrupted code), but it is exactly that field which saves the
+ * system on a stack fault, when the existing stack can no longer be
+ * trusted.
  */
 
 #include <stdint.h>
@@ -14,13 +15,14 @@
 
 #define IDT_ENTRIES 256
 #define KERNEL_CS   0x08
-/* Obecny, ring 0, bramka przerwania (gasi przerwania na czas obslugi) */
+/* Present, ring 0, an interrupt gate (it clears interrupts for the
+   duration of the handler) */
 #define GATE_INTERRUPT 0x8E
 
 struct idt_entry {
     uint16_t offset_low;
     uint16_t selector;
-    uint8_t  ist;                /* 0 = zwykly stos */
+    uint8_t  ist;                /* 0 = the ordinary stack */
     uint8_t  type_attr;
     uint16_t offset_mid;
     uint32_t offset_high;
@@ -47,7 +49,8 @@ static void set_gate(int n, void (*handler)(void))
     idt[n].zero = 0;
 }
 
-/* Stuby z boot64/isr64.S - wyjatki 0-31 i przerwania sprzetowe 32-47 */
+/* Stubs from boot64/isr64.S - exceptions 0-31 and hardware interrupts
+   32-47 */
 #define DECL(n) extern void isr64_##n(void);
 #define LIST(X) \
     X(0)  X(1)  X(2)  X(3)  X(4)  X(5)  X(6)  X(7)  \
@@ -58,24 +61,25 @@ static void set_gate(int n, void (*handler)(void))
     X(40) X(41) X(42) X(43) X(44) X(45) X(46) X(47)
 
 LIST(DECL)
-extern void isr64_48(void);   /* zegar lokalnego APIC (rdzenie wtorne) */
-extern void isr64_49(void);   /* pobudka miedzy rdzeniami */
+extern void isr64_48(void);   /* the local APIC timer (secondary cores) */
+extern void isr64_49(void);   /* the inter-core wake-up */
 
 #define ENTRY(n) set_gate(n, isr64_##n);
 
 void idt64_init(void)
 {
     LIST(ENTRY)
-    set_gate(48, isr64_48);              /* zegar lokalnego APIC */
-    set_gate(49, isr64_49);              /* pobudka miedzy rdzeniami */
+    set_gate(48, isr64_48);              /* the local APIC timer */
+    set_gate(49, isr64_49);              /* the inter-core wake-up */
 
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (uint64_t)(uintptr_t)idt;
     idt64_load();
 }
 
-/* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
-   juz nie zmienia, wiec kazdy rdzen moze pokazywac na te sama. */
+/* The table itself is a single one for the whole machine - once built
+   nobody changes it any more, so every core can point at the same
+   one. */
 void idt64_load(void)
 {
     __asm__ volatile("lidt %0" : : "m"(idtp));

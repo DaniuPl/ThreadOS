@@ -1,21 +1,22 @@
-/* Ladowanie programow ELF64 z initrd
+/* Loading ELF64 programs from the initrd
  *
- * Program dotychczas dzialajacy w ring 3 lezal wpisany na sztywno
- * w obrazie jadra - kilkanascie bajtow w sekcji .rodata. To dowodzilo,
- * ze przejscie do ring 3 dziala, ale niczego wiecej: system, ktory
- * umie uruchomic tylko wlasny kawalek siebie, nie uruchamia programow.
+ * The program that has run in ring 3 so far lay hard-coded in the
+ * kernel image - a dozen or so bytes in the .rodata section. That
+ * proved the switch to ring 3 works, but nothing more: a system that
+ * can only run a piece of itself does not run programs.
  *
- * Tutaj program jest juz osobnym plikiem: zbudowanym osobno, wlozonym
- * do initrd i wczytanym przez jadro dopiero po starcie. Jadro nie wie
- * o nim nic ponad to, co przeczyta z naglowka ELF.
+ * Here the program is already a separate file: built separately, put
+ * into the initrd and read by the kernel only after startup. The
+ * kernel knows nothing about it beyond what it reads from the ELF
+ * header.
  */
 
 #include "elf64.h"
 #include "paging64.h"
 
-/* Przestrzen adresowa procesu jest prywatna od granicy jednego
-   gigabajta - a ta granica jest jednoczesnie podzialem tablic
-   drugiego poziomu. Obie liczby musza sie zgadzac. */
+/* A process's address space is private from the one-gigabyte
+   boundary - and that boundary is at the same time the split of the
+   second-level tables. The two numbers have to agree. */
 _Static_assert((USER64_BASE >> 30) == PAGING64_USER_PDPT,
                "USER64_BASE musi lezec w gigabajcie PAGING64_USER_PDPT");
 #include "../kernel/include/pmm.h"
@@ -23,10 +24,10 @@ _Static_assert((USER64_BASE >> 30) == PAGING64_USER_PDPT,
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 
-/* Naglowki ELF64 - tylko te pola, ktorych naprawde uzywamy.
-   Wzgledem ELF32 zmienil sie nie tylko rozmiar adresow: w naglowku
-   segmentu pole z prawami dostepu przenioslo sie tuz za typ, zeby
-   szescdziesieciocztero-bitowe adresy lezaly wyrownane. */
+/* ELF64 headers - only the fields we really use. Compared to ELF32
+   more than the size of addresses changed: in the segment header the
+   access-permission field moved to just after the type, so that the
+   sixty-four-bit addresses would lie aligned. */
 struct elf64_ehdr {
     uint8_t  e_ident[16];
     uint16_t e_type, e_machine;
@@ -65,9 +66,10 @@ static int elf_valid(const struct elf64_ehdr *eh, uint32_t size)
     return eh->e_type == ET_EXEC && eh->e_machine == EM_X86_64 && eh->e_phnum;
 }
 
-/* Ramka pod strone programu: albo juz jest (dwa segmenty potrafia
-   siegnac tej samej strony), albo bierzemy nowa i zerujemy - dzieki
-   temu .bss nie musi byc niczym wypelniany osobno. */
+/* A frame for a program page: either it is already there (two
+   segments can reach the same page) or we take a new one and zero
+   it - thanks to which .bss does not have to be filled in
+   separately. */
 static uint64_t page_frame_for(uint64_t va, uint64_t flags)
 {
     uint64_t frame = paging64_lookup(va);
@@ -84,12 +86,13 @@ static uint64_t page_frame_for(uint64_t va, uint64_t flags)
     return frame;
 }
 
-/* --- biblioteka wspoldzielona w przestrzeni procesu ------------------
+/* --- a shared library in the process's space ------------------------
  *
- * Segmenty bez prawa zapisu (kod i stale) dostaja RAMKI WSPOLNE: te
- * same, ktore widzi kazdy inny proces - i to jest cala oszczednosc.
- * Segment z danymi jest inny i musi byc: biblioteka trzyma w nim swoj
- * stan, a stan jednego procesu nie ma prawa byc widoczny w drugim.
+ * Segments with no write permission (code and constants) get SHARED
+ * FRAMES: the same ones every other process sees - and that is the
+ * whole saving. The data segment is different and has to be: the
+ * library keeps its state in it, and one process's state must not be
+ * visible in another.
  */
 static int map_library(void)
 {
@@ -100,9 +103,10 @@ static int map_library(void)
 
     for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &right, &data);
          i++) {
-        /* Prawa podaje sam ELF - tak samo jak przy segmentach programu.
-           Dane biblioteki nie sa wiec wykonywalne, a jej kod nie jest
-           zapisywalny, i pilnuje tego procesor. */
+        /* The permissions are supplied by the ELF itself - just as with the
+           program's segments. So the library's data is not executable
+           and its code is not writable, and the processor sees to
+           that. */
         uint64_t flags = PG_USER;
         if (right & DYN_WRITE)
             flags |= PG_WRITE;
@@ -116,7 +120,8 @@ static int map_library(void)
                 uint64_t frame = dyn_frame(va);
                 if (!frame || paging64_map(va, frame, flags) < 0)
                     return -1;
-                /* Ramka ma przezyc smierc procesu - nalezy do systemu */
+                /* The frame is to outlive the process's death - it belongs to the
+   system */
                 pmm_frame_ref((uint32_t)frame);
                 continue;
             }
@@ -137,8 +142,8 @@ static int map_library(void)
     return 0;
 }
 
-/* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
-   procesu jest juz aktywna, wiec piszemy wprost. */
+/* Writes the resolved address into the program's jump table. The
+   process's space is already active, so we write straight to it. */
 static int write_addr(void *ctx, uint64_t addr, uint64_t value)
 {
     (void)ctx;
@@ -151,15 +156,16 @@ static int write_addr(void *ctx, uint64_t addr, uint64_t value)
 static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
 {
     if (ph->p_vaddr < USER64_BASE ||
-        ph->p_vaddr + ph->p_memsz < ph->p_vaddr ||     /* przekrecenie */
+        ph->p_vaddr + ph->p_memsz < ph->p_vaddr ||     /* overflow */
         ph->p_vaddr + ph->p_memsz > USER64_TOP) {
         printk("[jadro] elf64: segment poza zakresem uzytkownika (%x)\n",
                (uint32_t)ph->p_vaddr);
         return -1;
     }
 
-    /* Prawa podaje sam plik. Brak bitu "wykonywalny" znaczy zakaz
-       wykonywania - i to procesor egzekwuje, nie my. */
+    /* The permissions are supplied by the file itself. A missing
+       "executable" bit means execution is forbidden - and it is the
+       processor that enforces that, not us. */
     uint64_t flags = PG_USER;
     if (ph->p_flags & PF_W)
         flags |= PG_WRITE;
@@ -223,10 +229,10 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
         return -1;
     }
 
-    /* Program moze nie niesc kodu, ktorego uzywa, tylko puste miejsca
-       na adresy funkcji z biblioteki wspoldzielonej. Trzeba je
-       wypelnic TERAZ, przed pierwsza instrukcja - skok przez
-       niewypelniona pozycje nie ma dokad prowadzic. */
+    /* A program may not carry the code it uses, only empty slots for
+       the addresses of functions from a shared library. They have to be
+       filled in NOW, before the first instruction - a jump through an
+       unfilled slot has nowhere to lead. */
     if (dyn_is_dynamic(file, size)) {
         if (!dyn_present()) {
             printk("[jadro] elf64: program potrzebuje biblioteki %s, "
@@ -241,8 +247,9 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
     }
 
     *entry = eh->e_entry;
-    /* Sterta zaczyna sie za obrazem, na najblizszej granicy strony -
-       nizej lezy pamiec programu, wyzej jest wolne az do stosu */
+    /* The heap starts past the image, at the nearest page boundary -
+       below lies the program's memory, above it is free all the way up
+       to the stack */
     if (brk_base)
         *brk_base = (top + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     return 0;
@@ -252,11 +259,11 @@ uint64_t elf64_make_stack(void)
 {
     for (int i = 1; i <= USER64_STACK_PAGES; i++) {
         uint64_t va = USER64_STACK_TOP - (uint64_t)i * PAGE_SIZE;
-        /* Stos jest zapisywalny, ale nigdy wykonywalny */
+        /* The stack is writable but never executable */
         if (!page_frame_for(va, PG_USER | PG_WRITE | PG_NX))
             return 0;
     }
-    /* Szesnaście bajtow zapasu: wierzcholek stosu ma byc wyrownany,
-       a program ma gdzie odlozyc pierwsze wartosci */
+    /* Sixteen bytes of slack: the stack top is to be aligned and the
+       program is to have somewhere to put its first values */
     return USER64_STACK_TOP - 16;
 }

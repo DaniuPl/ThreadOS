@@ -5,16 +5,16 @@
 
 struct regs;
 
-#define SIGINT   2      /* przerwanie z klawiatury (Ctrl+C) */
-#define SIGKILL  9      /* zabicie nie do przechwycenia */
-#define SIGTERM 15      /* prosba o zakonczenie */
+#define SIGINT   2      /* an interrupt from the keyboard (Ctrl+C) */
+#define SIGKILL  9      /* a kill that cannot be caught */
+#define SIGTERM 15      /* a request to finish */
 
-/* Dostarcza czekajacy sygnal, jesli jakis jest. Wolane tuz przed
-   powrotem do pierscienia 3 - i tylko wtedy, bo tylko wtedy ramka
-   w 'r' opisuje program, a nie jadro. */
+/* Delivers a waiting signal, if there is one. Called just before the
+   return to ring 3 - and only then, because only then does the frame
+   in 'r' describe the program and not the kernel. */
 void signal64_deliver(struct regs *r);
 
-/* Powrot z procedury obslugi: odtwarza ramke odlozona przy dostarczeniu */
+/* Return from a handler: restores the frame put down at delivery */
 int signal64_return(struct regs *r);
 
 #endif

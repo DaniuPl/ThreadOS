@@ -1,17 +1,17 @@
-/* Sygnaly w trybie dlugim
+/* Signals in long mode
  *
- * Sygnal nie jest wiadomoscia do przeczytania, tylko przerwaniem toku
- * programu. Jadro nie moze go dostarczyc w chwili wyslania: adresat
- * jest wtedy gdzie indziej - moze spac, moze siedziec w srodku
- * wywolania systemowego, moze w ogole nie biec. Sygnal czeka wiec przy
- * zadaniu do NAJBLIZSZEGO powrotu do pierscienia 3.
+ * A signal is not a message to be read but an interruption of a
+ * program's course. The kernel cannot deliver it at the moment it is
+ * sent: the addressee is somewhere else then - it may be asleep, it
+ * may be sitting inside a system call, it may not be running at all.
+ * So the signal waits at the task until the NEAREST return to ring 3.
  *
- * Sam powrot znowu sprowadza sie do ramki. Dostarczenie sygnalu to:
- * odlozyc ramke programu na jego wlasnym stosie, przestawic ja na
- * procedure obslugi i wsunac pod nia adres powrotu, ktory wywola
- * jadro z powrotem. Program po drugiej stronie nie ma jak zauwazyc,
- * ze cokolwiek go przerwalo - a po zakonczeniu procedury wraca
- * dokladnie tam, gdzie mu przerwano, co do rejestru.
+ * That return again comes down to a frame. Delivering a signal means:
+ * put the program's frame on its own stack, point it at the handler
+ * and slip underneath it a return address that will call the kernel
+ * back. The program on the other side has no way of noticing that
+ * anything interrupted it - and when the handler finishes it returns
+ * exactly where it was interrupted, down to the register.
  */
 
 #include <stdint.h>
@@ -22,11 +22,12 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 
-/* Flagi, ktore program moze sobie sam ustawic. Reszty - w tym zgody na
-   przerwania i poziomu dostepu do portow - nie oddajemy nigdy: ramka
-   wraca ze stosu uzytkownika, wiec program moglby ja podmienic. */
+/* Flags a program may set for itself. The rest - including permission
+   for interrupts and the port access level - we never hand over: the
+   frame comes back from the user stack, so the program could swap it
+   out. */
 #define RFLAGS_USER_MASK 0x0CD5
-#define RFLAGS_ALWAYS    0x0202          /* bit staly + przerwania wlaczone */
+#define RFLAGS_ALWAYS    0x0202          /* the fixed bit + interrupts enabled */
 
 void signal64_deliver(struct regs *r)
 {
@@ -37,18 +38,18 @@ void signal64_deliver(struct regs *r)
     uint64_t handler = task64_sighandler();
     uint64_t restorer = task64_sigrestorer();
 
-    /* Bez wlasnej procedury zostaje reakcja domyslna. SIGKILL nie ma
-       innej z zalozenia - dlatego jest nie do przechwycenia. */
+    /* Without a handler of its own the default reaction is left. SIGKILL
+       has no other by design - which is why it cannot be caught. */
     if (!handler || sig == SIGKILL) {
         printk("[jadro] zadanie %d dostalo sygnal %d\n",
                task64_current_id(), sig);
-        task64_kill_current("sygnal");     /* nie wraca */
+        task64_kill_current("sygnal");     /* does not return */
     }
 
-    /* Miejsce na ramke i adres powrotu na stosie programu. Wierzcholek
-       wyrownujemy do szesnastu bajtow, a potem odejmujemy osiem na
-       adres powrotu - procedura ma zastac stos dokladnie taki, jaki
-       zastaje kazda funkcja wolana instrukcja call. */
+    /* Room for the frame and the return address on the program's stack.
+       We align the top to sixteen bytes and then subtract eight for the
+       return address - the handler is to find the stack exactly as
+       every function called by a call instruction finds it. */
     uint64_t frame = (r->rsp - sizeof(struct regs)) & ~0xFULL;
     uint64_t sp = frame - 8;
 
@@ -62,13 +63,13 @@ void signal64_deliver(struct regs *r)
 
     r->rsp = sp;
     r->rip = handler;
-    r->rdi = (uint64_t)sig;              /* numer sygnalu dla procedury */
+    r->rdi = (uint64_t)sig;              /* the signal number for the handler */
 }
 
 int signal64_return(struct regs *r)
 {
-    /* Procedura skonczyla sie zwyklym powrotem, wiec stos wskazuje
-       teraz dokladnie na odlozona ramke */
+    /* The handler finished with an ordinary return, so the stack now
+       points exactly at the frame that was put there */
     uint64_t src = r->rsp;
     if (!paging64_user_range(src, sizeof(struct regs)))
         return -1;
@@ -76,9 +77,10 @@ int signal64_return(struct regs *r)
     struct regs saved;
     memcpy(&saved, (const void *)(uintptr_t)src, sizeof(saved));
 
-    /* Ramka lezala na stosie uzytkownika, wiec program mogl ja
-       podmienic. Rejestry i adres powrotu sa jego sprawa - segmenty
-       i flagi nie, bo tedy wchodzi sie w jadro. */
+    /* The frame lay on the user stack, so the program could have
+       swapped it out. The registers and the return address are its
+       business - the segments and flags are not, because that is the
+       way into the kernel. */
     saved.cs = 0x23;
     saved.ss = 0x1B;
     saved.rflags = (saved.rflags & RFLAGS_USER_MASK) | RFLAGS_ALWAYS;

@@ -1,14 +1,14 @@
-/* Potoki
+/* Pipes
  *
- * Pierscien w pamieci jadra plus dwa liczniki: ilu jest czytajacych
- * i ilu piszacych. Te liczniki sa wazniejsze od samego bufora, bo to
- * one mowia, kiedy skonczyc.
+ * A ring in kernel memory plus two counters: how many readers and how
+ * many writers there are. Those counters matter more than the buffer
+ * itself, because it is they that say when to finish.
  *
- * Czekanie musi dac sie przerwac sygnalem. Bez tego program czekajacy
- * na dane od drugiego, ktory sie zawiesil, byiby nie do zatrzymania -
- * a to dokladnie ten rodzaj zawieszenia, ktory juz raz w tym jadrze
- * byl: sygnal dostarcza sie tylko przy powrocie do pierscienia 3,
- * wiec petla czekajaca w jadrze musi sprawdzac go sama.
+ * Waiting has to be interruptible by a signal. Without that a program
+ * waiting for data from another one that has hung would be impossible
+ * to stop - and that is exactly the kind of hang this kernel has
+ * already had once: a signal is delivered only on the return to ring
+ * 3, so a loop waiting inside the kernel has to check for it itself.
  */
 
 #include "pipe64.h"
@@ -96,7 +96,7 @@ int pipe64_read(int idx, char *buf, uint32_t len)
         if (taken_n)
             return (int)taken_n;
         if (end)
-            return 0;                /* nie ma juz kto pisac - koniec danych */
+            return 0;                /* there is nobody left to write - end of data */
         if (task64_signal_pending())
             return -1;
         task64_sleep(10);
@@ -112,7 +112,7 @@ int pipe64_write(int idx, const char *buf, uint32_t len)
 
     while (given_back_n < len) {
         irqflags_t flags = irq_save();
-        if (!p->reader) {         /* nikt tego juz nie przeczyta */
+        if (!p->reader) {         /* nobody is going to read this any more */
             irq_restore(flags);
             return given_back_n ? (int)given_back_n : -1;
         }
@@ -124,7 +124,7 @@ int pipe64_write(int idx, const char *buf, uint32_t len)
             break;
         if (task64_signal_pending())
             return given_back_n ? (int)given_back_n : -1;
-        task64_sleep(10);            /* pelny - czekamy na czytajacego */
+        task64_sleep(10);            /* full - we wait for a reader */
     }
     return (int)given_back_n;
 }

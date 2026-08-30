@@ -3,31 +3,32 @@
 
 #include <stdint.h>
 
-/* Watki jadra w trybie dlugim
+/* Kernel threads in long mode
  *
- * Ten sam pomysl, co w jadrze 32-bitowym: lista cykliczna, wywlaszczanie
- * co tykniecie timera, watek glowny nigdy nie spi i pelni role watku
- * bezczynnosci. Rozni sie tylko przelaczanie kontekstu - szesc
- * rejestrow zamiast czterech i osiem bajtow na kazdy.
+ * The same idea as in the 32-bit kernel: a circular list, preemption
+ * on every timer tick, a main thread that never sleeps and serves as
+ * the idle thread. The only difference is the context switch - six
+ * registers instead of four and eight bytes each.
  *
- * Nie ma tu jeszcze procesow: ani przestrzeni adresowych, ani
- * deskryptorow, ani sygnalow. To przyjdzie razem z ring 3.
+ * There are no processes here yet: no address spaces, no descriptors,
+ * no signals. That comes together with ring 3.
  */
 
 struct task64;
 
 void scheduler64_init(void);
-/* Zadanie, ktore wolno prowadzic kazdemu rdzeniowi */
+/* A task that any core is allowed to run */
 struct task64 *task64_create_anycore(const char *name,
                                       void (*entry)(void *), void *arg);
 
-/* Czy scheduler juz wstal (rdzen wtorny czeka, zanim dolaczy) */
-/* Biezace zadanie wolno odtad prowadzic kazdemu rdzeniowi */
+/* Has the scheduler started yet (a secondary core waits before it
+   joins) */
+/* From now on the current task may be run by any core */
 void task_set_anycore(void);
 
 int task_scheduler_ready(void);
 
-/* Rdzen wtorny dolacza do schedulera. Nie wraca. */
+/* A secondary core joins the scheduler. Does not return. */
 void task_core_enter(int nr);
 
 struct task64 *task64_create(const char *name, void (*entry)(void *),
@@ -35,54 +36,57 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
 void task64_yield(void);
 void task64_sleep(uint32_t ms);
 void task64_exit(void);
-void task64_exit_code(int code);    /* to samo, ale z kodem dla rodzica */
+void task64_exit_code(int code);    /* the same, but with an exit code for the parent */
 
-/* Czeka na koniec dowolnego wlasnego dziecka. Zwraca jego numer
-   i wpisuje kod wyjscia; -1 = nie ma na co czekac. */
+/* Waits for any of our own children to end. Returns its number and
+   writes out the exit code; -1 = there is nothing to wait for. */
 int task64_wait(int *code);
 
-/* Najglebszy zywy potomek zadania - to on trzyma konsole i to jemu
-   nalezy sie Ctrl+C, a nie shellowi, ktory na niego czeka */
+/* The deepest living descendant of a task - it is the one holding the
+   console and the one Ctrl+C belongs to, not the shell waiting for it */
 int task64_foreground(int root);
 
-/* Bierze przestrzen adresowa na wlasnosc biezacego zadania i od razu
-   na nia przechodzi. Zwalnia sie sama, gdy zadanie sie skonczy. */
+/* Takes an address space into the current task's ownership and
+   switches to it right away. It frees itself when the task ends. */
 void task64_enter_space(uint64_t space, uint64_t kstack_top);
 
-/* Podmienia przestrzen i oddaje stara - do zwolnienia przez wolajacego
-   dopiero po tym, jak procesor z niej zejdzie (exec) */
+/* Replaces the space and hands back the old one - to be freed by the
+   caller only after the processor has left it (exec) */
 uint64_t task64_swap_space(uint64_t space, uint64_t kstack_top);
 
-/* Zmienia nazwe biezacego zadania (po exec widac, co naprawde biegnie) */
+/* Changes the current task's name (after an exec it shows what is
+   really running) */
 void task64_rename(const char *name);
 
-/* Zabija biezace zadanie (blad programu w ring 3). Nie wraca. */
+/* Kills the current task (a program error in ring 3). Does not
+   return. */
 void task64_kill_current(const char *why);
-/* Sygnaly. Wyslanie tylko odklada sygnal i budzi spiace zadanie -
-   dostarcza go dopiero powrot do pierscienia 3. */
+/* Signals. Sending merely queues a signal and wakes a sleeping task -
+   it is delivered only by the return to ring 3. */
 int task64_signal(int id, int sig);
-int task64_signal_pending(void);      /* czy cos czeka na dostarczenie */
-int task64_take_signal(void);         /* 0 = nic nie czeka */
+int task64_signal_pending(void);      /* is anything waiting for delivery */
+int task64_take_signal(void);         /* 0 = nothing is waiting */
 void task64_set_sighandler(uint64_t handler, uint64_t restorer);
 uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);
 int task64_current_id(void);
 int task64_id_current(void);
 
-/* Konsola wirtualna zadania (dziedziczona po rodzicu) */
-/* Oddanie stron na dysk, gdy PMM nie ma juz wolnych ramek */
+/* The task's virtual console (inherited from the parent) */
+/* Handing pages out to disk when the PMM has no free frames left */
 int task64_reclaim_page(void);
 
 int task64_vc(void);
 void task64_set_vc(int vc);
-int task64_alive(int id);            /* czy zadanie o tym numerze zyje */
+int task64_alive(int id);            /* is the task with this number alive */
 
-/* Katalog roboczy zadania - dziecko zaczyna tam, gdzie stal rodzic */
+/* The task's working directory - a child starts where the parent
+   stood */
 int task64_cwd(void);
 void task64_set_cwd(int slot);
 
-/* Sterta programu: jadro przesuwa granice, a strony przydziela dopiero
-   obsluga bledu strony, przy pierwszym dotknieciu */
+/* The program's heap: the kernel moves the limit, and the pages are
+   allocated only by the page fault handler, on the first touch */
 void task64_set_brk_base(uint64_t base);
 void task64_set_brk(uint64_t brk);
 uint64_t task64_brk(void);
@@ -90,67 +94,70 @@ uint64_t task64_brk_base(void);
 int task64_in_heap(uint64_t addr);
 void task64_inherit_brk(struct task64 *child);
 
-/* --- Pliki odwzorowane w pamieci ------------------------------------
+/* --- Files mapped into memory --------------------------------------
  *
- * Plik widziany jako pamiec: program dostaje adres, a strony pojawiaja
- * sie pod palcami - tak samo jak sterta, tyle ze wypelnione trescia
- * z dysku zamiast zerami.
+ * A file seen as memory: the program gets an address and the pages
+ * appear under its fingers - just like the heap, only filled with
+ * content from disk instead of zeros.
  *
- * Numery blokow ustalamy raz, przy zakladaniu odwzorowania, i od tej
- * pory czytamy je warstwa blokowa z pominieciem kodu PFS. Powod jest
- * ten sam, co przy wymianie stron: PFS ma jeden wspolny bufor na blok,
- * a blad strony potrafi trafic w srodek dowolnej operacji na plikach.
+ * We work the block numbers out once, when the mapping is set up, and
+ * from then on read them through the block layer, bypassing the PFS
+ * code. The reason is the same as with page swapping: PFS has one
+ * shared buffer for a block, and a page fault can land in the middle
+ * of any file operation.
  *
- * MMAP_PLIKOW mowi, ile odwzorowan naraz moze miec jeden proces. */
+ * MMAP_FILES says how many mappings one process may have at a time. */
 #define MMAP_FILES 4
 
-/* Zaklada odwzorowanie: zapamietuje zakres adresow i numery blokow.
-   Zwraca 0 albo -1. Bloki przechodza na wlasnosc zadania. */
+/* Sets up a mapping: remembers the address range and the block
+   numbers. Returns 0 or -1. The blocks pass into the task's
+   ownership. */
 int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
                       uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
 
-/* Czy adres nalezy do ktoregos odwzorowania. Gdy tak, wpisuje numer
-   bloku PFS, ile bajtow pliku zostalo od tego miejsca i czy
-   odwzorowanie jest zapisywalne. */
+/* Does the address belong to one of the mappings. If so, it writes out
+   the PFS block number, how many bytes of the file are left from that
+   point and whether the mapping is writable. */
 int task64_mmap_find(uint64_t addr, uint32_t *first_block,
                        uint32_t *nbytes, uint32_t *write);
 
-/* Opis i-tego odwzorowania biezacego procesu (0 = wolny wpis) - do
-   odsylania brudnych stron, ktore obchodzi je po kolei. */
+/* A description of the current process's i-th mapping (0 = a free
+   entry) - for flushing dirty pages, which walks them in turn. */
 int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
                      uint32_t *size, uint32_t *write);
 
-/* Numer bloku PFS pod danym indeksem w odwzorowaniu obejmujacym adres */
+/* The PFS block number at the given index in the mapping covering an
+   address */
 uint32_t task64_mmap_block(uint64_t addr, uint32_t index);
 
-/* Sprzatanie: przy exec i przy koncu zadania */
+/* Cleanup: on exec and at the end of a task */
 void task64_mmap_release(void);
 void task64_mmap_inherit(struct task64 *child);
 
-/* Nastepny wolny adres w obszarze mapowan procesu */
+/* The next free address in the process's mapping area */
 uint64_t task64_mmap_next(void);
 void task64_set_mmap_next(uint64_t adr);
 
-/* Deskryptory otwartych plikow - tablica nalezy do zadania */
-/* Rodzaj tego, co siedzi pod numerem (musi zgadzac sie z task64.c) */
+/* Descriptors of open files - the table belongs to the task */
+/* The kind of thing sitting under a number (has to match task64.c) */
 #define FDK_WOLNY   0
 #define FDK_FILE    1
 #define FDK_POTOK_R 2
 #define FDK_POTOK_W 3
 
-int task64_fd_open(int slot);        /* zwraca numer deskryptora albo -1 */
+int task64_fd_open(int slot);        /* returns a descriptor number or -1 */
 int task64_fd_pipe(int idx, int reader_task);
 int task64_fd_kind(int fd);
 int task64_fd_dup2(int old, int fresh_one);
 void task64_fd_close_all(void);
-int task64_fd_slot(int fd);          /* i-wezel w PFS / numer potoku */
+int task64_fd_slot(int fd);          /* PFS inode / pipe number */
 uint32_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);
 int task64_fd_close(int fd);
 void task64_inherit_fds(struct task64 *child);
 
 int  task64_id(const struct task64 *t);
-int  task64_count(void);            /* ile zadan jest na liscie */
+int  task64_count(void);            /* how many tasks are on the list */
 void task64_dump(void);
 
 #endif

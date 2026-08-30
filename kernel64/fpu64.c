@@ -1,12 +1,13 @@
-/* Stan jednostki zmiennoprzecinkowej i SSE
+/* The state of the floating-point and SSE unit
  *
- * Rejestry XMM sa takim samym stanem zadania, jak RAX czy RSP - z ta
- * roznica, ze jest ich duzo i procesor zapisuje je jedna instrukcja
- * do obszaru 512 bajtow. Bez tego zapisu dwa programy liczace
- * rownoczesnie nadpisywalyby sobie wyniki, nie wiedzac o tym.
+ * The XMM registers are as much a task's state as RAX or RSP - with
+ * the difference that there are a lot of them and the processor saves
+ * them with a single instruction into a 512-byte area. Without that
+ * save, two programs computing at the same time would overwrite each
+ * other's results without knowing it.
  *
- * Wyrownanie do szesnastu bajtow nie jest tu grzecznoscia: fxsave
- * i fxrstor po prostu odmawiaja pracy na zle wyrownanym adresie.
+ * Alignment to sixteen bytes is not a courtesy here: fxsave and
+ * fxrstor simply refuse to work at a badly aligned address.
  */
 
 #include "fpu64.h"
@@ -15,8 +16,8 @@
 
 #define FPU_AREA 512
 
-/* Stan swiezo zainicjowanej jednostki - kazde nowe zadanie dostaje
-   jego kopie, zamiast zaczynac od przypadkowych bitow */
+/* The state of a freshly initialized unit - every new task gets a copy
+   of it instead of starting from random bits */
 static uint8_t clean[FPU_AREA] __attribute__((aligned(16)));
 static int enabled;
 
@@ -25,14 +26,14 @@ int fpu64_init(void)
     uint64_t cr0, cr4;
 
     __asm__ volatile("movq %%cr0, %0" : "=r"(cr0));
-    cr0 &= ~(uint64_t)(1 << 2);      /* EM: koniec z emulacja koprocesora */
-    cr0 |= (1 << 1);                 /* MP: monitorowanie koprocesora */
-    cr0 |= (1 << 5);                 /* NE: bledy przez wyjatek, nie IRQ */
+    cr0 &= ~(uint64_t)(1 << 2);      /* EM: no more coprocessor emulation */
+    cr0 |= (1 << 1);                 /* MP: coprocessor monitoring */
+    cr0 |= (1 << 5);                 /* NE: errors through an exception, not an IRQ */
     __asm__ volatile("movq %0, %%cr0" : : "r"(cr0));
 
     __asm__ volatile("movq %%cr4, %0" : "=r"(cr4));
-    cr4 |= (1 << 9);                 /* OSFXSR: umiemy fxsave/fxrstor */
-    cr4 |= (1 << 10);                /* OSXMMEXCPT: i bledy SIMD */
+    cr4 |= (1 << 9);                 /* OSFXSR: we know how to fxsave/fxrstor */
+    cr4 |= (1 << 10);                /* OSXMMEXCPT: and SIMD errors */
     __asm__ volatile("movq %0, %%cr4" : : "r"(cr4));
 
     __asm__ volatile("fninit");
@@ -49,12 +50,12 @@ int fpu64_enabled(void)
 
 void *fpu64_alloc(void)
 {
-    /* Zapasu jest 32 bajty, nie 16, i to nie z ostroznosci. Adres
-       surowy chowamy tuz PRZED wyrownanym obszarem, bo inaczej nie
-       byloby go jak zwolnic - a gdyby sterta oddala adres juz
-       wyrowany, obszar zaczynalby sie dokladnie na nim i ten zapis
-       trafilby poza przydzielona pamiec. Przesuniecie o 16 sprawia,
-       ze miejsce na wskaznik jest zawsze wlasne. */
+    /* The slack is 32 bytes, not 16, and not out of caution. We hide
+       the raw address just BEFORE the aligned area, because otherwise
+       there would be no way to free it - and if the heap handed back an
+       already aligned address, the area would start exactly on it and
+       that write would land outside the allocated memory. The shift by
+       16 makes the room for the pointer always our own. */
     uint8_t *raw = kmalloc(FPU_AREA + 32);
     if (!raw)
         return (void *)0;

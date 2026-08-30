@@ -1,19 +1,20 @@
-/* Tablica deskryptorow trybu dlugiego
+/* The long mode descriptor table
  *
- * W trybie dlugim baza i limit segmentu nie znacza juz nic - procesor
- * ich nie sprawdza. Zostaly trzy rzeczy: poziom uprawnien, bit L
- * (kod 64-bitowy) i to, czy deskryptor opisuje kod czy dane.
+ * In long mode a segment's base and limit no longer mean anything -
+ * the processor does not check them. Three things are left: the
+ * privilege level, the L bit (64-bit code) and whether the descriptor
+ * describes code or data.
  *
- * Kolejnosc wpisow nie jest dowolna. Instrukcja sysret, ktora wraca
- * z jadra do programu, nie bierze selektorow z pamieci - sklada je
- * z jednej wartosci zapisanej w rejestrze STAR: dane to ta wartosc
- * plus osiem, kod plus szesnascie. Segment danych uzytkownika musi
- * wiec lezec przed jego segmentem kodu, choc intuicja podpowiada
- * odwrotnie.
+ * The order of the entries is not arbitrary. The sysret instruction,
+ * which returns from the kernel to a program, does not take the
+ * selectors from memory - it builds them out of a single value written
+ * into the STAR register: data is that value plus eight, code plus
+ * sixteen. So the user data segment has to lie before its code
+ * segment, even though intuition suggests the opposite.
  *
- * TSS w trybie dlugim nie sluzy juz do przelaczania zadan. Zostalo mu
- * jedno, ale niezbywalne zadanie: powiedziec procesorowi, na ktory stos
- * ma przejsc, gdy przerwanie zastanie go w ring 3.
+ * The TSS in long mode no longer serves to switch tasks. It has been
+ * left one job, but an indispensable one: to tell the processor which
+ * stack to move to when an interrupt catches it in ring 3.
  */
 
 #include <stdint.h>
@@ -36,23 +37,24 @@ struct gdt_ptr {
     uint64_t base;
 } __attribute__((packed));
 
-/* Segment stanu zadania na KAZDY rdzen.
+/* A task state segment for EVERY core.
  *
- * Procesor czyta z niego stos jadra przy wejsciu z ring 3 - a kazdy
- * rdzen wchodzi tam z innego zadania i na inny stos. Deskryptorow tez
- * musi byc tyle, ile rdzeni: ltr oznacza deskryptor jako ZAJETY, wiec
- * drugi rdzen ladujacy ten sam selektor dostalby wyjatek ochrony.
+ * The processor reads the kernel stack from it on entry from ring 3 -
+ * and every core enters there from a different task and onto a
+ * different stack. There have to be as many descriptors as cores too:
+ * ltr marks a descriptor as BUSY, so a second core loading the same
+ * selector would get a protection fault.
  *
- * Piec zwyklych wpisow po osiem bajtow, a potem po DWA na kazdy TSS -
- * jego adres ma szescdziesiat cztery bity i w jeden wpis sie nie
- * miesci. */
+ * Five ordinary entries of eight bytes each, and then TWO for every
+ * TSS - its address is sixty-four bits wide and does not fit into a
+ * single entry. */
 static uint64_t gdt[5 + 2 * SMP_CORES];
 static struct tss64 tss[SMP_CORES];
 static struct gdt_ptr gdtp;
 
 static uint64_t entry(uint8_t access, uint8_t flags)
 {
-    /* Baza zero, limit maksymalny - i tak nikt ich nie oglada */
+    /* Base zero, maximum limit - nobody looks at them anyway */
     return ((uint64_t)access << 40) | ((uint64_t)flags << 52) | 0xFFFFULL;
 }
 
@@ -65,15 +67,15 @@ void gdt64_init(void)
 {
     memset(tss, 0, sizeof(tss));
     for (int i = 0; i < SMP_CORES; i++)
-        tss[i].iomap_base = sizeof(tss[i]);   /* brak mapy portow */
+        tss[i].iomap_base = sizeof(tss[i]);   /* no port map */
 
     gdt[0] = 0;
-    gdt[1] = entry(0x9A, 0x2);           /* kod jadra, bit L */
-    gdt[2] = entry(0x92, 0x0);           /* dane jadra */
-    gdt[3] = entry(0xF2, 0x0);           /* dane uzytkownika (ring 3) */
-    gdt[4] = entry(0xFA, 0x2);           /* kod uzytkownika, bit L */
+    gdt[1] = entry(0x9A, 0x2);           /* kernel code, the L bit */
+    gdt[2] = entry(0x92, 0x0);           /* kernel data */
+    gdt[3] = entry(0xF2, 0x0);           /* user data (ring 3) */
+    gdt[4] = entry(0xFA, 0x2);           /* user code, the L bit */
 
-    /* Deskryptor TSS zajmuje dwa wpisy - adres ma 64 bity */
+    /* A TSS descriptor takes up two entries - the address is 64 bits */
     for (int i = 0; i < SMP_CORES; i++) {
         uint64_t base = (uint64_t)(uintptr_t)&tss[i];
         uint64_t limit = sizeof(tss[i]) - 1;
@@ -92,24 +94,24 @@ void gdt64_init(void)
     gdt64_load_tss();
 }
 
-/* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
-   z jego numeru: piaty wpis tablicy plus po szesnascie bajtow na
-   kazdy poprzedni rdzen. */
+/* Every core loads ITS OWN task state segment. The selector is
+   computed from its number: the fifth entry of the table plus sixteen
+   bytes for every preceding core. */
 void gdt64_load_tss(void)
 {
     uint16_t sel = (uint16_t)(GDT64_TSS + smp_core_apic() * 16);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
-/* Laduje juz zbudowana tablice na biezacym rdzeniu. Rdzen wtorny wola
-   to po dojsciu do trybu dlugiego, zeby zejsc z tymczasowej tablicy
-   z trampoliny na wspolna tablice jadra. */
+/* Loads an already built table on the current core. A secondary core
+   calls this once it reaches long mode, to move off the temporary
+   table from the trampoline onto the kernel's common one. */
 void gdt64_load(void)
 {
     __asm__ volatile(
         "lgdt %0\n\t"
-        /* Przeladowanie CS wymaga skoku dalekiego; w trybie dlugim
-           robi sie go przez powrot z odlozonym selektorem */
+        /* Reloading CS requires a far jump; in long mode that is done
+           through a return with the selector pushed */
         "pushq %1\n\t"
         "leaq 1f(%%rip), %%rax\n\t"
         "pushq %%rax\n\t"

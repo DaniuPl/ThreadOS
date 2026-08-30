@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Numery wywolan - musza zgadzac sie z user64/usys64.h */
+/* Call numbers - they have to match user64/usys64.h */
 #define SYS64_WRITE 1
 #define SYS64_EXIT  2
 #define SYS64_RING  3
@@ -27,8 +27,8 @@
 #define SYS64_PIPE      21
 #define SYS64_DUP2      22
 
-/* Siec. Numery gniazd sa numerami w tablicach jadra, nie
-   deskryptorami - siec i pliki zyja na razie osobno. */
+/* Network. Socket numbers are numbers in the kernel's tables, not
+   descriptors - the network and files live separately for now. */
 #define SYS64_NETINFO     23
 #define SYS64_UDP_OPEN    24
 #define SYS64_UDP_SEND    25
@@ -39,56 +39,59 @@
 #define SYS64_TCP_RECV    30
 #define SYS64_TCP_CLOSE   31
 
-/* Okna pulpitu. Kompozytor jest ten sam, co w jadrze 32-bitowym -
-   te wywolania sa tylko droga do niego z pierscienia 3. */
-#define SYS64_WIN_CREATE 32  /* a1=cw, a2=ch, a3=tytul -> winid albo -1 */
-#define SYS64_WIN_RECT   33  /* a1=winid, a2=&{x,y,w,h,kolor} -> 0/-1 */
-#define SYS64_WIN_TEXT   34  /* a1=winid, a2=&{x,y,kolor,napis} -> 0/-1 */
-#define SYS64_WIN_POLL   35  /* a1=winid, a2=&zdarzenie -> 1/0/-1 */
+/* Desktop windows. The compositor is the same as in the 32-bit
+   kernel - these calls are only the way to it from ring 3. */
+#define SYS64_WIN_CREATE 32  /* a1=cw, a2=ch, a3=title -> winid or -1 */
+#define SYS64_WIN_RECT   33  /* a1=winid, a2=&{x,y,w,h,color} -> 0/-1 */
+#define SYS64_WIN_TEXT   34  /* a1=winid, a2=&{x,y,color,text} -> 0/-1 */
+#define SYS64_WIN_POLL   35  /* a1=winid, a2=&event -> 1/0/-1 */
 
-/* Pamiec wspoldzielona po kluczu: a1=klucz, a2=rozmiar -> adres albo 0 */
+/* Shared memory by key: a1=key, a2=size -> address or 0 */
 #define SYS64_SHM        36
 
-/* Czas z zegara CMOS: a1=&struct czas -> 0 albo -1 */
+/* The time from the CMOS clock: a1=&struct rtc_time -> 0 or -1 */
 #define SYS64_TIME       37
 
-/* Stan maszyny dla programu: a1=&{ram_kib, uzyte_kib, uptime_s} */
+/* Machine state for a program: a1=&{ram_kib, used_kib, uptime_s} */
 #define SYS64_SYSINFO    38
 
-/* Numer wlasnego zadania */
+/* Our own task number */
 #define SYS64_GETPID     39
 
-/* Plik odwzorowany w pamieci: a1=nazwa, a2=dlugosc nazwy,
-   a3=&rozmiar, a4=zapis -> adres albo 0 */
+/* A file mapped into memory: a1=name, a2=name length,
+   a3=&size, a4=write -> address or 0 */
 #define SYS64_MMAP_FILE  40
 
-/* Odeslanie brudnych stron zapisywalnych odwzorowan -> ile stron */
+/* Flushing the dirty pages of writable mappings -> how many pages */
 #define SYS64_MSYNC      41
 
-/* Numer rdzenia, na ktorym program wlasnie biegnie */
+/* The number of the core the program is running on right now */
 #define SYS64_CORE      42
 
-/* Numery zajete od zawsze: klawiatura, konsola, bledy */
+/* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1
 
-/* Wejscie do jadra przez instrukcje syscall (zamiast bramki przerwania) */
+/* Entry into the kernel through the syscall instruction (instead of an
+   interrupt gate) */
 void syscall64_init(void);
 
-/* Stos jadra dla wywolan z ring 3 - ustawiany przed wejsciem w ring 3 */
+/* The kernel stack for calls from ring 3 - set before entering ring 3 */
 void syscall64_set_kernel_stack(uint64_t rsp);
 
-/* Skok do ring 3; nie wraca. 'arg' program zastaje w rejestrze RDI. */
+/* A jump to ring 3; does not return. The program finds 'arg' in the
+   RDI register. */
 void enter_ring3_64(uint64_t rip, uint64_t rsp,
                     uint64_t argc, uint64_t argv);
 
-/* Co program zdazyl powiedziec jadru - do sprawdzenia po jego koncu */
+/* What a program managed to tell the kernel - to be checked after it
+   ends */
 int syscall64_user_ran(void);
 uint32_t syscall64_user_cs(void);
 int syscall64_user_exited(void);
 int syscall64_user_status(void);
-int syscall64_user_exits(void);      /* ile programow skonczylo sie samo */
-int syscall64_user_failures(void);   /* ile z nich z kodem innym niz zero */
+int syscall64_user_exits(void);      /* how many programs ended by themselves */
+int syscall64_user_failures(void);   /* how many of them with a code other than zero */
 void syscall64_forget_user(void);
 
 #endif

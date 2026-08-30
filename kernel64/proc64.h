@@ -5,11 +5,12 @@
 
 struct regs;
 
-/* Argumenty programu.
+/* Program arguments.
  *
- * Kopiujemy je do jadra, bo w chwili uruchamiania nowego obrazu stara
- * pamiec - ta, w ktorej leza - juz nie istnieje. Limity sa skromne
- * i celowo: to ma byc argv, a nie kanal do przesylania danych. */
+ * We copy them into the kernel, because at the moment a new image is
+ * started the old memory - the one they lie in - no longer exists. The
+ * limits are modest and deliberately so: this is meant to be argv, not
+ * a channel for shipping data. */
 #define ARG_MAX 8
 #define ARG_LEN 32
 
@@ -18,45 +19,47 @@ struct args64 {
     char v[ARG_MAX][ARG_LEN];
 };
 
-/* Powiela biezacy proces.
+/* Duplicates the current process.
  *
- * W rodzicu zwraca numer zadania dziecka, w dziecku - zero. Dziecko
- * dostaje kopie calej przestrzeni adresowej i kopie ramki rejestrow,
- * wiec wraca do ring 3 tam, gdzie rodzic, i z tym samym stanem.
- * Ujemna wartosc znaczy, ze sie nie udalo. */
+ * In the parent it returns the child's task number, in the child -
+ * zero. The child gets a copy of the whole address space and a copy of
+ * the register frame, so it returns to ring 3 where the parent does
+ * and with the same state. A negative value means it failed. */
 int64_t proc64_fork(struct regs *r);
 
-/* Ile ramek kosztowal ostatni fork - z dzieleniem stron sa to same
-   tablice stron, bez ani jednej strony pamieci programu */
+/* How many frames the last fork cost - with shared pages these are
+   page tables only, without a single page of the program's memory */
 uint32_t proc64_last_fork_cost(void);
 
-/* Podmienia obraz procesu na program z initrd. Przy powodzeniu nie
-   ma do czego wrocic - ramka 'r' opisuje juz nowy program. */
+/* Replaces the process image with a program from the initrd. On
+   success there is nothing to return to - the frame 'r' already
+   describes the new program. */
 int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
                     uint64_t argv_ptr);
 
-/* Przepisuje argv z pamieci programu do jadra */
+/* Copies argv from program memory into the kernel */
 int proc64_copy_args(uint64_t argv_ptr, struct args64 *out);
 
-/* Uruchamia program z initrd jako nowy proces. Zwraca numer zadania
-   albo -1, gdy takiego pliku nie ma. 'arg' program zastaje w RDI. */
+/* Runs a program from the initrd as a new process. Returns the task
+   number, or -1 when there is no such file. The program finds 'arg' in
+   RDI. */
 int proc64_spawn(const char *name, const struct args64 *args, int quiet);
 
-/* To samo, ale proces wolno prowadzic kazdemu rdzeniowi */
+/* The same, but the process may be run by any core */
 int proc64_spawn_anycore(const char *name, const struct args64 *args,
                           int quiet);
 
-/* Mapuje region pamieci wspoldzielonej o danym kluczu w przestrzeni
-   biezacego procesu. Zwraca adres, pod ktorym go widac, albo 0. */
+/* Maps the shared memory region with the given key into the current
+   process's space. Returns the address at which it is visible, or 0. */
 uint64_t proc64_shm(int key, uint64_t size);
 
-/* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu,
-   strony przychodza pod palcami). Zwraca adres albo 0. */
+/* Maps a file from disk into the process's memory (read-only, the
+   pages arrive under its fingers). Returns the address or 0. */
 uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
                            uint64_t write);
 
-/* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
-   procesu. Zwraca liczbe odeslanych stron. */
+/* Flushes to their files the dirty pages of the current process's
+   writable mappings. Returns the number of pages flushed. */
 uint64_t proc64_msync(void);
 
 #endif

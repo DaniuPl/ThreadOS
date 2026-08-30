@@ -1,16 +1,18 @@
-/* Klawiatura PS/2 w trybie dlugim
+/* The PS/2 keyboard in long mode
  *
- * Tlumaczenie scancode'ow jest wspolne z jadrem 32-bitowym
- * (kernel/kbdmap.c) - tutaj zostaje tylko to, co zalezy od systemu:
- * odebranie przerwania i zdecydowanie, dokad trafi gotowy znak.
+ * Scancode translation is shared with the 32-bit kernel
+ * (kernel/kbdmap.c) - what stays here is only what depends on the
+ * system: taking the interrupt and deciding where the finished
+ * character goes.
  *
- * Konsol jest cztery i kazda ma wlasna kolejke znakow. Klawisz trafia
- * do tej, na ktora akurat patrzymy, a czyta z niej ten, kto na niej
- * pisze - program uruchomiony na drugiej konsoli czeka wiec na swoje
- * klawisze i nie zabiera cudzych. Alt+F1..F4 przelacza obraz.
+ * There are four consoles and each has its own character queue. A key
+ * lands in the one we are currently looking at, and is read by
+ * whoever is typing on it - so a program started on the second console
+ * waits for its own keys and does not take somebody else's.
+ * Alt+F1..F4 switches the picture.
  *
- * Przerwanie tylko wklada znak do kolejki: w jego obsludze nie ma czego
- * drukowac ani na co czekac.
+ * The interrupt only puts the character into the queue: inside its
+ * handler there is nothing to print and nothing to wait for.
  */
 
 #include <stdint.h>
@@ -26,9 +28,9 @@
 #define KBD_DATA_PORT 0x60
 #define KBD_BUF_SIZE  128
 
-/* Jedna kolejka na konsole. Kto dostanie Ctrl+C, tez jest sprawa
-   konsoli: shell ustawia to na czas, w ktorym czeka na swoje dziecko -
-   poza tym czasem przerywac nie ma kogo. */
+/* One queue per console. Who gets Ctrl+C is a matter of the console
+   too: the shell sets that for the time it waits for its child -
+   outside that time there is nobody to interrupt. */
 struct queue {
     char buf[KBD_BUF_SIZE];
     uint32_t head, tail;
@@ -39,7 +41,7 @@ static int queues_ready;
 
 static struct queue *console(int n)
 {
-    if (!queues_ready) {              /* -1 zamiast zera dla celu Ctrl+C */
+    if (!queues_ready) {              /* -1 instead of zero for the Ctrl+C target */
         for (int i = 0; i < CONSOLE_COUNT; i++)
             queues[i].intr_target = -1;
         queues_ready = 1;
@@ -49,9 +51,9 @@ static struct queue *console(int n)
     return &queues[n];
 }
 
-/* Pulpit dziala w trybie graficznym, gdzie konsola tekstowa nie ma
-   sensu - przechwytuje wiec wszystkie klawisze, zanim trafia do
-   kolejki, z ktorej czyta shell. */
+/* The desktop runs in graphics mode, where a text console makes no
+   sense - so it intercepts all keys before they reach the queue the
+   shell reads from. */
 static void (*override)(char c);
 
 void keyboard64_set_override(void (*handler)(char c))
@@ -59,30 +61,32 @@ void keyboard64_set_override(void (*handler)(char c))
     override = handler;
 }
 
-/* Cel Ctrl+C ustawia shell tej konsoli, na ktorej sam pisze */
+/* The Ctrl+C target is set by the shell of the console it types on
+   itself */
 void keyboard64_set_intr_target(int id)
 {
     console(task64_vc())->intr_target = id;
 }
 
-/* Doreczenie gotowego znaku. Wolane z przerwania klawiatury i z watku
-   klawiatury USB - droga znaku jest w obu przypadkach ta sama. */
+/* Delivering a finished character. Called from the keyboard interrupt
+   and from the USB keyboard thread - the character's path is the same
+   in both cases. */
 static void dorecz(char c)
 {
-    if (override) {                      /* pulpit bierze wszystko */
+    if (override) {                      /* the desktop takes everything */
         override(c);
         return;
     }
 
-    /* Klawisz idzie na konsole, na ktora patrzymy - to ona jest pod
-       palcami piszacego */
+    /* The key goes to the console we are looking at - that is the one
+       under the typist's fingers */
     struct queue *k = console(console_active());
 
-    /* Ctrl+C nie jest znakiem do przeczytania, tylko zadaniem
-       przerwania programu, ktory trzyma konsole */
+    /* Ctrl+C is not a character to be read but a request to interrupt
+       the program holding the console */
     if (c == KEY_INTR) {
-        /* Nie do shella, ktory czeka, tylko do tego, co na koncu
-           lancucha naprawde dziala */
+        /* Not to the shell that is waiting, but to whatever is really
+           running at the end of the chain */
         if (k->intr_target >= 0)
             task64_signal(task64_foreground(k->intr_target), SIGINT);
         return;
@@ -92,8 +96,8 @@ static void dorecz(char c)
         k->buf[k->head++ & (KBD_BUF_SIZE - 1)] = c;
 }
 
-/* Przelaczenie obrazu na inna konsole. Pulpit trzyma caly ekran, wiec
-   przy nim przelaczac nie ma czego. */
+/* Switching the picture to another console. The desktop holds the
+   whole screen, so with it there is nothing to switch. */
 static void switch_to(int vc)
 {
     if (override)
@@ -120,8 +124,8 @@ static void keyboard_irq(struct regs *r)
     dorecz(c);
 }
 
-/* Znak z innego zrodla niz PS/2 (klawiatura USB). Wolane z watku, wiec
-   sekcje krytyczna zamykamy sami. */
+/* A character from a source other than PS/2 (a USB keyboard). Called
+   from a thread, so we close the critical section ourselves. */
 void keyboard64_inject(char c)
 {
     irqflags_t flags = irq_save();
@@ -136,9 +140,10 @@ void keyboard64_inject_switch(int vc)
     irq_restore(flags);
 }
 
-/* Czeka na klawisz. Odpytujemy z uspieniem zamiast blokowac zadanie:
-   przy jednym czytelniku roznica jest niewidoczna, a kodu o polowe
-   mniej - budzenie z przerwania przyjdzie razem z drugim czytelnikiem. */
+/* Waits for a key. We poll with sleeping instead of blocking the task:
+   with a single reader the difference is invisible and there is half
+   as much code - waking from an interrupt will come along with the
+   second reader. */
 char keyboard64_getchar(void)
 {
     for (;;) {
@@ -154,15 +159,16 @@ char keyboard64_getchar(void)
     }
 }
 
-/* Odczyt dla programu w ring 3.
+/* A read for a program in ring 3.
  *
- * Blokuje do pierwszego znaku, potem oddaje wszystko, co zdazylo sie
- * uzbierac - tak jak kazde sensowne wejscie: czekamy na cokolwiek,
- * a nie na pelny bufor.
+ * It blocks until the first character, then hands over everything that
+ * managed to accumulate - like every sensible input: we wait for
+ * anything at all, not for a full buffer.
  *
- * Sygnal przerywa czekanie i wraca bledem. Bez tego Ctrl+C nie mialby
- * jak dosiegnac programu, ktory wlasnie czeka na klawisz - a to jest
- * dokladnie ten program, ktoremu Ctrl+C jest najczesciej potrzebny. */
+ * A signal interrupts the wait and returns an error. Without that
+ * Ctrl+C would have no way of reaching a program that is waiting for a
+ * key - and that is exactly the program that needs Ctrl+C most
+ * often. */
 int keyboard64_read(char *out, uint32_t len)
 {
     if (!len)
@@ -170,9 +176,9 @@ int keyboard64_read(char *out, uint32_t len)
 
     for (;;) {
         irqflags_t flags = irq_save();
-        /* Program czyta z WLASNEJ konsoli, nie z tej, na ktora akurat
-           patrzymy - inaczej przelaczenie ekranu przekierowywaloby
-           klawiature w srodku czyjegos odczytu */
+        /* A program reads from ITS OWN console, not from the one we happen
+           to be looking at - otherwise switching the screen would
+           redirect the keyboard in the middle of somebody's read */
         struct queue *k = console(task64_vc());
         uint32_t got = 0;
         while (k->tail != k->head && got < len)

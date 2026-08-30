@@ -1,9 +1,9 @@
-/* Wspolna obsluga przerwan w trybie dlugim
+/* Common interrupt handling in long mode
  *
- * Rola ta sama, co w jadrze 32-bitowym: wyjatek procesora zatrzymuje
- * system z diagnostyka, a przerwanie sprzetowe trafia do handlera
- * zarejestrowanego przez sterownik. Rozni sie tylko ramka rejestrow
- * i to, ze adresy sa 64-bitowe.
+ * The role is the same as in the 32-bit kernel: a processor exception
+ * stops the system with a diagnostic, and a hardware interrupt goes to
+ * the handler registered by a driver. The only differences are the
+ * register frame and the fact that addresses are 64-bit.
  */
 
 #include <stddef.h>
@@ -40,13 +40,13 @@ static const char *exception_names[32] = {
 
 static irq_handler_t irq_handlers[16];
 
-/* Slad po ostatnim wyjatku z ring 3 - do sprawdzenia po tym, jak
-   winny program juz nie zyje */
+/* The trace left by the last exception from ring 3 - to be inspected
+   after the guilty program is no longer alive */
 static int user_fault_seen;
 static uint32_t user_fault_vec, user_fault_err;
-static uint32_t heap_pages;        /* ile stron sterty naprawde powstalo */
-static uint32_t stack_pages;       /* i ile stron doszlo stosowi */
-static uint32_t mmap_pages;        /* i ile wczytano z odwzorowanych plikow */
+static uint32_t heap_pages;        /* how many heap pages really came into being */
+static uint32_t stack_pages;       /* and how many pages the stack gained */
+static uint32_t mmap_pages;        /* and how many were read from mapped files */
 static uint64_t user_fault_addr;
 
 int isr64_user_fault(void)            { return user_fault_seen; }
@@ -73,11 +73,11 @@ void irq_install_handler(int irq, irq_handler_t handler)
 
 static void isr64_dispatch(struct regs *r);
 
-/* Wejscie do jadra z pierscienia 3 bierze wielki zamek jadra.
+/* Entry into the kernel from ring 3 takes the big kernel lock.
  *
- * Program moze biec na kazdym rdzeniu, ale w jadrze ma byc naraz
- * jeden. Przerwanie, ktore zastalo procesor juz w jadrze, nie bierze
- * niczego nowego: zamek jest zagniezdzalny. */
+ * A program may run on any core, but inside the kernel there is to be
+ * one at a time. An interrupt that caught the processor already in the
+ * kernel takes nothing new: the lock is recursive. */
 void isr64_handler(struct regs *r)
 {
     int z_ring3 = (r->cs & 3) == 3;
@@ -91,52 +91,53 @@ void isr64_handler(struct regs *r)
 static void isr64_dispatch(struct regs *r)
 {
     if (r->int_no < 32) {
-        /* Breakpoint to wyjatek-pulapka: zglos i jedz dalej */
+        /* A breakpoint is a trap exception: report it and carry on */
         if (r->int_no == 3) {
             printk("[INT3] breakpoint pod rip=%x\n", (uint32_t)r->rip);
             return;
         }
 
-        /* Zapis do strony wspoldzielonej po fork-u to nie blad, tylko
-         * rachunek do zaplacenia: strone trzeba rozdzielic i pozwolic
-         * programowi powtorzyc instrukcje.
+        /* A write to a page shared after a fork is not an error but a bill
+         * to be paid: the page has to be split and the program allowed
+         * to repeat the instruction.
          *
-         * Sprawdzamy to przed wszystkim innym i niezaleznie od
-         * pierscienia - z wlaczona ochrona zapisu takze jadro dostaje
-         * tu blad, gdy pisze po pamieci procesu. */
+         * We check this before anything else and regardless of the
+         * ring - with write protection enabled the kernel gets a fault
+         * here too when it writes to a process's memory. */
         if (r->int_no == 14 && (r->err_code & 0x02) &&
             paging64_handle_cow(read_cr2()))
             return;
 
-        /* Dotkniecie strony sterty, o ktora program poprosil, ale
-         * ktorej jeszcze nie ma. To nie blad, tylko chwila, w ktorej
-         * pamiec robi sie prawdziwa: prosba o megabajt kosztowala
-         * zero, a placi sie dopiero za strony naprawde uzyte.
+        /* A touch of a heap page the program asked for but which does not
+         * exist yet. This is not an error but the moment memory becomes
+         * real: asking for a megabyte cost zero, and payment is due
+         * only for the pages actually used.
          *
-         * Zapisywalna i bez prawa wykonywania - w danych programu nie
-         * ma kodu, a gdyby byl, procesor go nie wykona. */
-        /* Strona, ktora poszla na dysk. Sciagamy ja z powrotem i
-         * pozwalamy powtorzyc instrukcje - dla programu nie zdarzylo
-         * sie nic poza chwila zwloki. */
+         * Writable and with no execute permission - there is no code
+         * in a program's data, and if there were, the processor would
+         * not run it. */
+        /* A page that went out to disk. We fetch it back and let the
+         * instruction be repeated - as far as the program is concerned
+         * nothing happened beyond a moment's delay. */
         if (r->int_no == 14 && !(r->err_code & 0x01) &&
             paging64_swap_in(paging64_current_space(), read_cr2()))
             return;
 
-        /* Strona pliku odwzorowanego w pamieci.
+        /* A page of a file mapped into memory.
          *
-         * Bajty przychodza z dysku dopiero teraz - warstwa blokowa,
-         * po numerach ustalonych przy zakladaniu odwzorowania. Do kodu
-         * systemu plikow tu nie wchodzimy: ma on jeden wspolny bufor
-         * na blok, a blad strony potrafi trafic w srodku dowolnej
-         * operacji na plikach.
+         * The bytes come from disk only now - through the block layer,
+         * by the numbers worked out when the mapping was set up. We do
+         * not step into file system code here: it has one shared buffer
+         * for a block, and a page fault can land in the middle of any
+         * file operation.
          *
-         * Ogon ostatniej strony zostaje wyzerowany - plik konczy sie
-         * tam, gdzie sie konczy.
+         * The tail of the last page is zeroed out - a file ends where
+         * it ends.
          *
-         * Zapisywalne odwzorowanie dostaje prawo zapisu i znacznik
-         * PG_PLIK; bez niego strona jest tylko do odczytu i proba
-         * zapisu ma sie skonczyc bledem, a nie cichym zgubieniem
-         * danych. */
+         * A writable mapping gets write permission and the PG_FILE
+         * flag; without it the page is read-only and an attempted write
+         * has to end in a fault rather than in data quietly getting
+         * lost. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t addr = read_cr2();
             uint32_t first = 0, remaining = 0, write = 0;
@@ -166,12 +167,12 @@ static void isr64_dispatch(struct regs *r)
             }
         }
 
-        /* Stos, ktory wlasnie uroslo o strone w dol.
+        /* The stack, which has just grown by one page downwards.
          *
-         * Program dostaje na start cztery strony, a reszte dokladamy
-         * pod palcami - dokladnie tak, jak sterte. Granica jest po to,
-         * zeby dziki wskaznik nie zamienil sie po cichu w zmapowana
-         * strone: pod nia blad strony pozostaje bledem. */
+         * A program gets four pages to start with and we add the rest
+         * under its fingers - exactly like the heap. The limit is there
+         * so that a wild pointer does not quietly turn into a mapped
+         * page: below it a page fault stays a fault. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t addr = read_cr2();
             if (addr < USER64_STACK_TOP &&
@@ -207,18 +208,20 @@ static void isr64_dispatch(struct regs *r)
             }
         }
 
-        /* Wyjatek z pierscienia 3 to blad PROGRAMU, nie systemu.
+        /* An exception from ring 3 is the PROGRAM's error, not the
+         * system's.
          *
-         * Dwa najnizsze bity selektora kodu mowia, skad przyszlo
-         * przerwanie - a odklada go tam procesor, wiec program nie ma
-         * jak sklamac. Jesli to on zawinil, ginie tylko on: jadro
-         * wypisuje, co sie stalo, i wraca do pracy. Zatrzymywanie
-         * calego systemu dlatego, ze jeden program siegnal nie tam,
-         * gdzie wolno, bylo dobre w czasach bez ochrony pamieci.
+         * The two lowest bits of the code selector say where the
+         * interrupt came from - and it is the processor that puts them
+         * there, so the program has no way of lying. If it was at
+         * fault, only it dies: the kernel prints what happened and
+         * goes back to work. Stopping the whole system because one
+         * program reached where it must not was fine in the days
+         * before memory protection.
          *
-         * Handler juz z tego wyjatku nie wraca: schedule() przelacza
-         * sie na inny watek i ramka przerwania zostaje porzucona razem
-         * ze stosem martwego zadania. */
+         * The handler does not return from this exception: schedule()
+         * switches to another thread and the interrupt frame is
+         * abandoned together with the dead task's stack. */
         if ((r->cs & 3) == 3) {
             user_fault_seen = 1;
             user_fault_vec = (uint32_t)r->int_no;
@@ -252,17 +255,17 @@ static void isr64_dispatch(struct regs *r)
             __asm__ volatile("cli; hlt");
     }
 
-    /* Zegar lokalnego APIC. Nie przeszedl przez kontroler PIC, wiec nie
-       ma tam czego zamykac - potwierdzenie idzie do wlasnego APIC tego
-       rdzenia. Na rdzeniu wtornym to jedyne przerwanie, jakie w ogole
-       przychodzi. */
+    /* The local APIC timer. It did not come through the PIC, so there is
+       nothing to close there - the acknowledgement goes to this core's
+       own APIC. On a secondary core this is the only interrupt that
+       arrives at all. */
     if (r->int_no == 48) {
         smp_timer_tick();
         return;
     }
 
-    /* Pobudka od innego rdzenia. Nie niesie zadnej tresci: chodzilo
-       tylko o to, zeby wyrwac ten procesor z instrukcji hlt. */
+    /* A wake-up from another core. It carries no content: the point was
+       only to pull this processor out of a hlt instruction. */
     if (r->int_no == 49) {
         smp_wakeup_recv();
         return;
@@ -270,15 +273,15 @@ static void isr64_dispatch(struct regs *r)
 
     if (r->int_no >= IRQ_BASE && r->int_no < IRQ_BASE + 16) {
         int irq = (int)(r->int_no - IRQ_BASE);
-        /* EOI przed handlerem - tak samo jak w jadrze 32-bitowym */
+        /* EOI before the handler - just as in the 32-bit kernel */
         pic_send_eoi(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](r);
     }
 
-    /* Program przerwany w pol kroku to najczestszy moment, w ktorym da
-       sie dostarczyc sygnal - i jedyny, ktory dziala takze wtedy, gdy
-       program o nic jadra nie prosi */
+    /* A program interrupted mid-step is the most frequent moment at
+       which a signal can be delivered - and the only one that works
+       even when the program asks the kernel for nothing */
     if ((r->cs & 3) == 3)
         signal64_deliver(r);
 }

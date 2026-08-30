@@ -1,30 +1,31 @@
 #ifndef PROTONOS_KEYBOARD64_H
 #define PROTONOS_KEYBOARD64_H
 
-/* Instaluje handler IRQ1 i odmaskowuje przerwanie klawiatury */
+/* Installs the IRQ1 handler and unmasks the keyboard interrupt */
 void keyboard64_init(void);
 
-/* Czeka na klawisz i zwraca go (usypia, gdy nic nie ma) */
+/* Waits for a key and returns it (sleeps while there is nothing) */
 char keyboard64_getchar(void);
 
-/* Pulpit przechwytuje wszystkie klawisze (w trybie graficznym nie ma
-   konsoli tekstowej, do ktorej mialyby trafic) */
+/* The desktop intercepts all keys (in graphics mode there is no text
+   console for them to reach) */
 void keyboard64_set_override(void (*handler)(char c));
 
-/* Komu wyslac SIGINT po Ctrl+C (-1 = nikomu). Dotyczy konsoli, na
-   ktorej pisze wolajace zadanie. */
+/* Whom to send SIGINT to after Ctrl+C (-1 = nobody). It concerns the
+   console the calling task types on. */
 void keyboard64_set_intr_target(int id);
 
-/* Znak i przelaczenie konsoli z innego zrodla niz PS/2 (klawiatura USB) */
+/* A character and a console switch from a source other than PS/2 (a
+   USB keyboard) */
 void keyboard64_inject(char c);
 void keyboard64_inject_switch(int vc);
 
-/* Odczyt dla programu w ring 3: blokuje do pierwszego znaku, zwraca
-   ile ich wzial; -1 = czekanie przerwal sygnal (bez echa - echo robi
-   czytajacy) */
+/* A read for a program in ring 3: it blocks until the first character
+   and returns how many it took; -1 = a signal interrupted the wait (no
+   echo - the echo is done by the reader) */
 int keyboard64_read(char *out, uint32_t len);
 
-/* Czy cokolwiek czeka w kolejce */
+/* Is anything waiting in the queue */
 int keyboard64_pending(void);
 
 #endif

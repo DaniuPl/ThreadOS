@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-/* Slad po ostatnim wyjatku, ktory przyszedl z pierscienia 3
+/* The trace left by the last exception that came from ring 3
  *
- * Program, ktory zlamie ochrone pamieci, ginie sam - a jadro pracuje
- * dalej. Te funkcje pozwalaja sprawdzic, co dokladnie sie stalo, juz
- * po jego smierci.
+ * A program that breaks memory protection dies alone - and the kernel
+ * carries on working. These functions make it possible to check what
+ * exactly happened, after its death.
  */
 int isr64_user_fault(void);
 uint32_t isr64_user_fault_vector(void);
@@ -15,14 +15,15 @@ uint32_t isr64_user_fault_err(void);
 uint64_t isr64_user_fault_addr(void);
 void isr64_forget_user_fault(void);
 
-/* Ile stron sterty powstalo przy pierwszym dotknieciu - prosba
-   o pamiec nie kosztuje nic, placi sie za strony naprawde uzyte */
+/* How many heap pages came into being on the first touch - asking for
+   memory costs nothing, payment is for the pages actually used */
 uint32_t isr64_heap_pages(void);
 
-/* Ile stron doszlo stosom programow (stos rosnie na zadanie) */
+/* How many pages the programs' stacks gained (a stack grows on
+   demand) */
 uint32_t isr64_stack_pages(void);
 
-/* Ile stron wczytano z plikow odwzorowanych w pamieci */
+/* How many pages were read from files mapped into memory */
 uint32_t isr64_mmap_pages(void);
 
 #endif

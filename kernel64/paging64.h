@@ -3,97 +3,102 @@
 
 #include <stdint.h>
 
-/* Stronicowanie czteropoziomowe (tryb dlugi)
+/* Four-level paging (long mode)
  *
- * Adres wirtualny rozklada sie na cztery indeksy po dziewiec bitow
- * plus przesuniecie w stronie: PML4 -> PDPT -> PD -> PT -> strona.
- * Kazdy wpis ma 64 bity, wiec w ramce 4 KiB miesci sie ich 512.
+ * A virtual address breaks down into four nine-bit indices plus an
+ * offset within the page: PML4 -> PDPT -> PD -> PT -> page. Every
+ * entry is 64 bits wide, so 512 of them fit in a 4 KiB frame.
  *
- * Tablice ulozone w obrazie jadra przez boot64.S wystarczyly, zeby
- * w ogole ruszyc. Teraz budujemy wlasne, z ramek od PMM - dopiero one
- * pozwalaja mapowac cokolwiek po starcie.
+ * The tables laid out in the kernel image by boot64.S were enough to
+ * get going at all. Now we build our own, out of frames from the PMM -
+ * only those make it possible to map anything after startup.
  */
 
 #define PG_WRITE  0x002
 #define PG_USER   0x004
-#define PG_NX     (1ULL << 63)      /* zakaz wykonywania kodu */
+#define PG_NX     (1ULL << 63)      /* no code execution */
 
-/* Bit 9 procesor zostawia do dyspozycji systemu. Znaczy u nas: strona
-   jest wspoldzielona po fork-u i ma zostac rozdzielona przy pierwszej
-   probie zapisu. */
+/* Bit 9 is left by the processor at the system's disposal. For us it
+   means: the page is shared after a fork and is to be split on the
+   first attempt to write. */
 #define PG_COW    0x200
 
-/* Bit 10, tez do dyspozycji systemu. Znaczy: strona poszla na dysk,
-   a w gornych bitach wpisu siedzi numer miejsca w pliku wymiany.
-   Wpisu bez bitu obecnosci procesor i tak nie oglada. */
+/* Bit 10, also at the system's disposal. It means: the page went out
+   to disk, and the upper bits of the entry hold the number of its slot
+   in the swap file. The processor never looks at an entry without the
+   present bit anyway. */
 #define PG_SWAPPED 0x400
 
-/* Bit 11, ostatni z wolnych. Znaczy: strona zapisywalnego odwzorowania
-   pliku. Takiej nie wolno ani skopiowac przy zapisie (fork ma ja
-   WSPOLDZIELIC, bo oba procesy pisza do tego samego pliku), ani
-   wyrzucic na dysk wymiany - jej miejscem na dysku jest sam plik. */
+/* Bit 11, the last of the free ones. It means: a page of a writable
+   file mapping. Such a page must neither be copied on write (fork is
+   to SHARE it, because both processes write to the same file) nor
+   thrown out to the swap file - its place on disk is the file
+   itself. */
 #define PG_FILE   0x800
 
-/* Ktory wpis drugiego poziomu nalezy do programu. Jeden wpis to
-   gigabajt, a programy leza od 1 GiB w gore - USER64_BASE
-   w kernel64/elf64.h musi sie z tym zgadzac. */
+/* Which second-level entry belongs to the program. One entry is a
+   gigabyte, and programs lie from 1 GiB upwards - USER64_BASE in
+   kernel64/elf64.h has to agree with this. */
 #define PAGING64_USER_PDPT 1
 
-/* Buduje wlasne tablice i przelacza na nie procesor. 0 = gotowe. */
+/* Builds our own tables and switches the processor over to them.
+   0 = done. */
 int paging64_init(void);
 
-/* Mapuje pojedyncza strone 4 KiB. 0 = zmapowana. */
+/* Maps a single 4 KiB page. 0 = mapped. */
 int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags);
 
-/* Zdejmuje mapowanie strony; zwraca ramke, ktora pod nia lezala */
+/* Removes a page's mapping; returns the frame that lay under it */
 uint64_t paging64_unmap(uint64_t virt);
 
-/* Adres fizyczny spod adresu wirtualnego (0 = nie zmapowany) */
+/* The physical address behind a virtual one (0 = not mapped) */
 uint64_t paging64_lookup(uint64_t virt);
 
-/* Czy strona zapisywalnego odwzorowania byla zapisywana od ostatniego
-   odeslania na dysk (bit "brudna" ustawiany przez procesor) */
+/* Has a page of a writable mapping been written to since the last
+   flush to disk (the "dirty" bit set by the processor) */
 int paging64_file_dirty(uint64_t virt);
 
-/* Gasi bit "brudna" - wolane po odeslaniu strony do pliku */
+/* Clears the "dirty" bit - called after a page has been flushed to
+   the file */
 void paging64_file_clean(uint64_t virt);
 
-/* Czy caly zakres jest dostepny dla ring 3 (bit USER na kazdym
-   poziomie tablic)? Do sprawdzania wskaznikow z programu. */
+/* Is the whole range accessible to ring 3 (the USER bit at every level
+   of the tables)? For checking pointers from a program. */
 int paging64_user_range(uint64_t virt, uint64_t len);
 
-/* Przestrzenie adresowe procesow. Pamiec jadra jest w kazdej z nich
-   wspolna - prywatny jest tylko gigabajt programu. */
+/* Process address spaces. Kernel memory is common to every one of
+   them - only the program's gigabyte is private. */
 uint64_t paging64_kernel_space(void);
-uint64_t paging64_new_space(void);        /* 0 = nie udalo sie */
-uint64_t paging64_clone_space(uint64_t src);   /* kopia dla fork() */
+uint64_t paging64_new_space(void);        /* 0 = it did not work */
+uint64_t paging64_clone_space(uint64_t src);   /* a copy for fork() */
 
-/* Proba zapisu do strony wspoldzielonej po fork-u. Zwraca 1, gdy
-   strona zostala rozdzielona i program moze sprobowac jeszcze raz. */
+/* An attempted write to a page shared after a fork. Returns 1 when the
+   page has been split and the program may try again. */
 int paging64_handle_cow(uint64_t virt);
 
-/* Ile stron naprawde trzeba bylo skopiowac */
+/* How many pages really had to be copied */
 uint32_t paging64_cow_splits(void);
 uint64_t paging64_current_space(void);
 void paging64_switch(uint64_t space);
 void paging64_free_space(uint64_t space);
 
-/* Dokleja do mapowania obszar lezacy poza pamiecia (rejestry
-   urzadzen). 0 = gotowe. */
+/* Adds to the mapping an area lying outside memory (device
+   registers). 0 = done. */
 int paging64_map_phys(uint64_t phys, uint64_t len);
 
-/* --- Wymiana stron na dysk ----------------------------------------
+/* --- Swapping pages out to disk -----------------------------------
  *
- * Wyrzuca z podanej przestrzeni najwyzej 'want' stron programu; zwraca,
- * ile udalo sie oddac. Swap_in sciaga z powrotem te, ktora program
- * wlasnie probowal dotknac (1 = wrocila, mozna powtorzyc instrukcje). */
+ * Throws at most 'want' program pages out of the given space; returns
+ * how many it managed to hand over. Swap_in fetches back the one the
+ * program has just tried to touch (1 = it is back, the instruction can
+ * be repeated). */
 int paging64_reclaim_pages(uint64_t space, int want);
 int paging64_swap_in(uint64_t space, uint64_t virt);
 
-/* Dokad siega mapowanie identycznosciowe pamieci */
+/* How far the identity mapping of memory reaches */
 uint64_t paging64_identity_top(void);
 
-/* Czy zakaz wykonywania jest wlaczony (bit NXE w EFER) */
+/* Is no-execute enabled (the NXE bit in EFER) */
 int paging64_nx_enabled(void);
 
 #endif
