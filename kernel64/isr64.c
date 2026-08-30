@@ -11,7 +11,7 @@
 #include "../kernel/include/isr.h"
 #include "../kernel/include/pic.h"
 #include "../kernel/include/smp.h"
-#include "../kernel/include/zamekjadra.h"
+#include "../kernel/include/biglock.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/vga.h"
 #include "task64.h"
@@ -71,7 +71,7 @@ void irq_install_handler(int irq, irq_handler_t handler)
         irq_handlers[irq] = handler;
 }
 
-static void isr64_obsluz(struct regs *r);
+static void isr64_dispatch(struct regs *r);
 
 /* Wejscie do jadra z pierscienia 3 bierze wielki zamek jadra.
  *
@@ -82,13 +82,13 @@ void isr64_handler(struct regs *r)
 {
     int z_ring3 = (r->cs & 3) == 3;
     if (z_ring3)
-        jadro_wejdz();
-    isr64_obsluz(r);
+        biglock_enter();
+    isr64_dispatch(r);
     if (z_ring3)
-        jadro_wyjdz();
+        biglock_leave();
 }
 
-static void isr64_obsluz(struct regs *r)
+static void isr64_dispatch(struct regs *r)
 {
     if (r->int_no < 32) {
         /* Breakpoint to wyjatek-pulapka: zglos i jedz dalej */
@@ -138,30 +138,30 @@ static void isr64_obsluz(struct regs *r)
          * zapisu ma sie skonczyc bledem, a nie cichym zgubieniem
          * danych. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t adres = read_cr2();
-            uint32_t pierwszy = 0, zostalo = 0, zapis = 0;
-            if (task64_mmap_znajdz(adres, &pierwszy, &zostalo, &zapis) &&
-                paging64_lookup(adres & ~0xFFFULL) == 0) {
-                uint32_t ramka = pmm_alloc_frame();
-                if (ramka) {
-                    uint8_t *cel = (uint8_t *)(uintptr_t)ramka;
-                    memset(cel, 0, PAGE_SIZE);
+            uint64_t addr = read_cr2();
+            uint32_t first = 0, remaining = 0, write = 0;
+            if (task64_mmap_find(addr, &first, &remaining, &write) &&
+                paging64_lookup(addr & ~0xFFFULL) == 0) {
+                uint32_t frame = pmm_alloc_frame();
+                if (frame) {
+                    uint8_t *dst = (uint8_t *)(uintptr_t)frame;
+                    memset(dst, 0, PAGE_SIZE);
                     for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
-                                         zostalo > b * FS_BLOCK; b++) {
-                        uint32_t blok = task64_mmap_blok(adres, pierwszy + b);
+                                         remaining > b * FS_BLOCK; b++) {
+                        uint32_t blok = task64_mmap_block(addr, first + b);
                         if (!blok)
                             break;
                         blk_read(fs_block_lba(blok), FS_BLOCK / 512,
-                                 cel + b * FS_BLOCK);
+                                 dst + b * FS_BLOCK);
                     }
-                    uint64_t prawa = PG_USER | PG_NX;
-                    if (zapis)
-                        prawa |= PG_WRITE | PG_PLIK;
-                    if (paging64_map(adres & ~0xFFFULL, ramka, prawa) == 0) {
+                    uint64_t right = PG_USER | PG_NX;
+                    if (write)
+                        right |= PG_WRITE | PG_FILE;
+                    if (paging64_map(addr & ~0xFFFULL, frame, right) == 0) {
                         mmap_pages++;
                         return;
                     }
-                    pmm_free_frame(ramka);
+                    pmm_free_frame(frame);
                 }
             }
         }
@@ -173,36 +173,36 @@ static void isr64_obsluz(struct regs *r)
          * zeby dziki wskaznik nie zamienil sie po cichu w zmapowana
          * strone: pod nia blad strony pozostaje bledem. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t adres = read_cr2();
-            if (adres < USER64_STACK_TOP &&
-                adres >= USER64_STACK_TOP - USER64_STACK_MAX &&
-                paging64_lookup(adres & ~0xFFFULL) == 0) {
-                uint32_t ramka = pmm_alloc_frame();
-                if (ramka) {
-                    memset((void *)(uintptr_t)ramka, 0, 4096);
-                    if (paging64_map(adres & ~0xFFFULL, ramka,
+            uint64_t addr = read_cr2();
+            if (addr < USER64_STACK_TOP &&
+                addr >= USER64_STACK_TOP - USER64_STACK_MAX &&
+                paging64_lookup(addr & ~0xFFFULL) == 0) {
+                uint32_t frame = pmm_alloc_frame();
+                if (frame) {
+                    memset((void *)(uintptr_t)frame, 0, 4096);
+                    if (paging64_map(addr & ~0xFFFULL, frame,
                                      PG_USER | PG_WRITE | PG_NX) == 0) {
                         stack_pages++;
                         return;
                     }
-                    pmm_free_frame(ramka);
+                    pmm_free_frame(frame);
                 }
             }
         }
 
         if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t adres = read_cr2();
-            if (task64_in_heap(adres) &&
-                paging64_lookup(adres & ~0xFFFULL) == 0) {
-                uint32_t ramka = pmm_alloc_frame();
-                if (ramka) {
-                    memset((void *)(uintptr_t)ramka, 0, 4096);
-                    if (paging64_map(adres & ~0xFFFULL, ramka,
+            uint64_t addr = read_cr2();
+            if (task64_in_heap(addr) &&
+                paging64_lookup(addr & ~0xFFFULL) == 0) {
+                uint32_t frame = pmm_alloc_frame();
+                if (frame) {
+                    memset((void *)(uintptr_t)frame, 0, 4096);
+                    if (paging64_map(addr & ~0xFFFULL, frame,
                                      PG_USER | PG_WRITE | PG_NX) == 0) {
                         heap_pages++;
                         return;
                     }
-                    pmm_free_frame(ramka);
+                    pmm_free_frame(frame);
                 }
             }
         }
@@ -257,14 +257,14 @@ static void isr64_obsluz(struct regs *r)
        rdzenia. Na rdzeniu wtornym to jedyne przerwanie, jakie w ogole
        przychodzi. */
     if (r->int_no == 48) {
-        smp_zegar_tyk();
+        smp_timer_tick();
         return;
     }
 
     /* Pobudka od innego rdzenia. Nie niesie zadnej tresci: chodzilo
        tylko o to, zeby wyrwac ten procesor z instrukcji hlt. */
     if (r->int_no == 49) {
-        smp_pobudka_odbierz();
+        smp_wakeup_recv();
         return;
     }
 

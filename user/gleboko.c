@@ -12,38 +12,38 @@
 
 #include "usys.h"
 
-#define RAMKA   4096
-#define GLEBOKO 40
+#define FRAME   4096
+#define DEEP 40
 
-static uint32_t najglebiej;
+static uint32_t deepest;
 
-static uint32_t schodz(uint32_t poziom)
+static uint32_t descend(uint32_t level)
 {
-    volatile unsigned char ramka[RAMKA];
-    for (uint32_t i = 0; i < RAMKA; i += 512)
-        ramka[i] = (unsigned char)(poziom + i);
+    volatile unsigned char frame[FRAME];
+    for (uint32_t i = 0; i < FRAME; i += 512)
+        frame[i] = (unsigned char)(level + i);
 
-    najglebiej = poziom;
-    uint32_t nizej = poziom < GLEBOKO ? schodz(poziom + 1) : 0;
+    deepest = level;
+    uint32_t below = level < DEEP ? descend(level + 1) : 0;
 
     /* Po powrocie: czy ramka jest wciaz nasza i nietknieta? */
-    for (uint32_t i = 0; i < RAMKA; i += 512)
-        if (ramka[i] != (unsigned char)(poziom + i))
-            return nizej + 1000000;
-    return nizej;
+    for (uint32_t i = 0; i < FRAME; i += 512)
+        if (frame[i] != (unsigned char)(level + i))
+            return below + 1000000;
+    return below;
 }
 
 void _start(void)
 {
-    uint32_t zle = schodz(1);
+    uint32_t bad = descend(1);
 
     print("[gleboko] zeszlem na poziom ");
-    print_dec(najglebiej);
+    print_dec(deepest);
     print(", ramek po ");
-    print_dec(RAMKA);
+    print_dec(FRAME);
     print(" B\n");
 
-    if (zle) {
+    if (bad) {
         print("[gleboko] ZLE: ramki nie przetrwaly\n");
         sys_exit(1);
     }

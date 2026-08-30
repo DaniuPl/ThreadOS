@@ -11,57 +11,57 @@
  * przypadkach odpowiedz "czy to ja" jest poprawna.
  */
 
-#include "include/zamekjadra.h"
+#include "include/biglock.h"
 #include "include/spinlock.h"
 #include "include/smp.h"
 
-static struct spinlock zamek = SPINLOCK_WOLNY;
-static volatile int wlasciciel = -1;
-static volatile int glebokosc;
+static struct spinlock lock = SPINLOCK_FREE;
+static volatile int owner = -1;
+static volatile int depth;
 
-int jadro_trzymam(void)
+int biglock_held(void)
 {
-    return wlasciciel == smp_rdzen();
+    return owner == smp_core();
 }
 
-void jadro_wejdz(void)
+void biglock_enter(void)
 {
-    int nr = smp_rdzen();
-    if (wlasciciel == nr) {
-        glebokosc++;
+    int nr = smp_core();
+    if (owner == nr) {
+        depth++;
         return;
     }
-    spin_lock(&zamek);
-    wlasciciel = nr;
-    glebokosc = 1;
+    spin_lock(&lock);
+    owner = nr;
+    depth = 1;
 }
 
-void jadro_wyjdz(void)
+void biglock_leave(void)
 {
-    if (wlasciciel != smp_rdzen())
+    if (owner != smp_core())
         return;
-    if (--glebokosc > 0)
+    if (--depth > 0)
         return;
-    wlasciciel = -1;
-    spin_unlock(&zamek);
+    owner = -1;
+    spin_unlock(&lock);
 }
 
-int jadro_zwolnij_wszystko(void)
+int biglock_release_all(void)
 {
-    if (wlasciciel != smp_rdzen())
+    if (owner != smp_core())
         return 0;
-    int ile = glebokosc;
-    glebokosc = 0;
-    wlasciciel = -1;
-    spin_unlock(&zamek);
+    int ile = depth;
+    depth = 0;
+    owner = -1;
+    spin_unlock(&lock);
     return ile;
 }
 
-void jadro_przywroc(int ile)
+void biglock_restore(int ile)
 {
     if (ile <= 0)
         return;
-    spin_lock(&zamek);
-    wlasciciel = smp_rdzen();
-    glebokosc = ile;
+    spin_lock(&lock);
+    owner = smp_core();
+    depth = ile;
 }

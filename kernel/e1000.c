@@ -94,22 +94,22 @@
 /* Deskryptory maja ustalony przez sprzet uklad pol - to karta je
    czyta i pisze, nie my */
 struct rx_desc {
-    uint64_t adres;
-    uint16_t dlugosc;
-    uint16_t suma;
+    uint64_t addr;
+    uint16_t len;
+    uint16_t sum;
     uint8_t status;
-    uint8_t bledy;
-    uint16_t specjalne;
+    uint8_t errors;
+    uint16_t special;
 } __attribute__((packed));
 
 struct tx_desc {
-    uint64_t adres;
-    uint16_t dlugosc;
+    uint64_t addr;
+    uint16_t len;
     uint8_t cso;
-    uint8_t polecenie;
+    uint8_t command;
     uint8_t status;
     uint8_t css;
-    uint16_t specjalne;
+    uint16_t special;
 } __attribute__((packed));
 
 /* Pierscienie i bufory w .bss: jadro siedzi w mapowaniu
@@ -118,24 +118,24 @@ struct tx_desc {
    wymaga sprzet. */
 static struct rx_desc rx_ring[RX_DESC] __attribute__((aligned(16)));
 static struct tx_desc tx_ring[TX_DESC] __attribute__((aligned(16)));
-static uint8_t rx_bufory[RX_DESC][BUF_SIZE] __attribute__((aligned(16)));
-static uint8_t tx_bufory[TX_DESC][BUF_SIZE] __attribute__((aligned(16)));
+static uint8_t rx_bufs[RX_DESC][BUF_SIZE] __attribute__((aligned(16)));
+static uint8_t tx_bufs[TX_DESC][BUF_SIZE] __attribute__((aligned(16)));
 
-static volatile uint8_t *baza;
+static volatile uint8_t *base;
 static int present;
 static uint8_t mac[6];
 static uint32_t rx_packets, tx_packets;
-static uint32_t rx_biezacy;        /* ktory deskryptor ogladamy */
-static uint32_t tx_nastepny;
+static uint32_t rx_current;        /* ktory deskryptor ogladamy */
+static uint32_t tx_next;
 
-static void wr(uint32_t reg, uint32_t wartosc)
+static void wr(uint32_t reg, uint32_t value)
 {
-    *(volatile uint32_t *)(baza + reg) = wartosc;
+    *(volatile uint32_t *)(base + reg) = value;
 }
 
 static uint32_t rd(uint32_t reg)
 {
-    return *(volatile uint32_t *)(baza + reg);
+    return *(volatile uint32_t *)(base + reg);
 }
 
 int e1000_present(void)          { return present; }
@@ -145,9 +145,9 @@ uint32_t e1000_tx_packets(void)  { return tx_packets; }
 
 /* Slowo z pamieci EEPROM. Zwraca -1, gdy karta nie odpowiada -
    niektore maszyny wirtualne nie udaja tej pamieci w ogole. */
-static int32_t eeprom(uint8_t adres)
+static int32_t eeprom(uint8_t addr)
 {
-    wr(REG_EERD, ((uint32_t)adres << 8) | 1);
+    wr(REG_EERD, ((uint32_t)addr << 8) | 1);
     for (int i = 0; i < 100000; i++) {
         uint32_t v = rd(REG_EERD);
         if (v & (1u << 4))                     /* bit gotowosci */
@@ -157,7 +157,7 @@ static int32_t eeprom(uint8_t adres)
     return -1;
 }
 
-static void czytaj_mac(void)
+static void read_mac(void)
 {
     int32_t w0 = eeprom(0);
     if (w0 >= 0) {
@@ -190,61 +190,61 @@ int e1000_send(const void *frame, uint16_t len)
         return -1;
 
     uint32_t flags = irq_save();
-    uint32_t i = tx_nastepny;
+    uint32_t i = tx_next;
 
     /* Deskryptor jest nasz, gdy karta odeslala go z bitem DD. Swiezy,
        nigdy nieuzywany ma status zero i tez jest wolny - dlatego
        czekamy tylko wtedy, gdy cokolwiek w nim polozylismy. */
-    if (tx_ring[i].dlugosc && !(tx_ring[i].status & TXD_STA_DD)) {
-        int wolny = 0;
+    if (tx_ring[i].len && !(tx_ring[i].status & TXD_STA_DD)) {
+        int free_one = 0;
         for (int spin = 0; spin < 200000; spin++) {
             if (tx_ring[i].status & TXD_STA_DD) {
-                wolny = 1;
+                free_one = 1;
                 break;
             }
             io_wait();
         }
-        if (!wolny) {
+        if (!free_one) {
             irq_restore(flags);
             return -1;
         }
     }
 
-    memcpy(tx_bufory[i], frame, len);
-    tx_ring[i].adres = (uint64_t)(uintptr_t)tx_bufory[i];
-    tx_ring[i].dlugosc = len;
+    memcpy(tx_bufs[i], frame, len);
+    tx_ring[i].addr = (uint64_t)(uintptr_t)tx_bufs[i];
+    tx_ring[i].len = len;
     tx_ring[i].cso = 0;
     tx_ring[i].css = 0;
-    tx_ring[i].specjalne = 0;
+    tx_ring[i].special = 0;
     tx_ring[i].status = 0;
     /* Dopelnianie krotkich ramek i doliczanie CRC zalatwia karta -
        stad PSP w TCTL i bit IFCS tutaj */
-    tx_ring[i].polecenie = TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS;
+    tx_ring[i].command = TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS;
 
-    tx_nastepny = (i + 1) % TX_DESC;
-    wr(REG_TDT, tx_nastepny);          /* przesuniecie ogona = "jedz" */
+    tx_next = (i + 1) % TX_DESC;
+    wr(REG_TDT, tx_next);          /* przesuniecie ogona = "jedz" */
     tx_packets++;
 
     irq_restore(flags);
     return 0;
 }
 
-static void e1000_odbierz(void)
+static void e1000_receive(void)
 {
-    while (rx_ring[rx_biezacy].status & RXD_STA_DD) {
-        struct rx_desc *d = &rx_ring[rx_biezacy];
-        uint16_t len = d->dlugosc;
+    while (rx_ring[rx_current].status & RXD_STA_DD) {
+        struct rx_desc *d = &rx_ring[rx_current];
+        uint16_t len = d->len;
 
-        if ((d->status & RXD_STA_EOP) && !d->bledy && len && len <= BUF_SIZE) {
+        if ((d->status & RXD_STA_EOP) && !d->errors && len && len <= BUF_SIZE) {
             rx_packets++;
-            net_rx(rx_bufory[rx_biezacy], len);
+            net_rx(rx_bufs[rx_current], len);
         }
 
         d->status = 0;                 /* deskryptor znowu nasz */
         /* Ogon wskazuje OSTATNI oddany karcie, wiec zawsze o jeden
            w tyle za tym, ktory wlasnie ogladamy */
-        wr(REG_RDT, rx_biezacy);
-        rx_biezacy = (rx_biezacy + 1) % RX_DESC;
+        wr(REG_RDT, rx_current);
+        rx_current = (rx_current + 1) % RX_DESC;
     }
 }
 
@@ -253,7 +253,7 @@ static void e1000_irq(struct regs *r)
     (void)r;
     uint32_t icr = rd(REG_ICR);        /* odczyt kasuje zgloszenia */
     if (icr & ICR_RXT0)
-        e1000_odbierz();
+        e1000_receive();
 }
 
 int e1000_init(void)
@@ -269,7 +269,7 @@ int e1000_init(void)
         return 0;
 
     pci_enable_bus_master(&dev);
-    baza = (volatile uint8_t *)(uintptr_t)mmio;
+    base = (volatile uint8_t *)(uintptr_t)mmio;
 
     wr(REG_IMC, 0xFFFFFFFF);           /* cisza na czas ustawiania */
     wr(REG_CTRL, rd(REG_CTRL) | CTRL_RST);
@@ -281,7 +281,7 @@ int e1000_init(void)
 
     wr(REG_CTRL, rd(REG_CTRL) | CTRL_SLU | CTRL_ASDE);
 
-    czytaj_mac();
+    read_mac();
 
     /* Filtr multicast na zero: nie chcemy niczyjej grupy */
     for (int i = 0; i < 128; i++)
@@ -295,7 +295,7 @@ int e1000_init(void)
     /* Pierscien odbioru: kazdy deskryptor od razu z buforem i oddany
        karcie. Ogon na ostatnim - wszystkie sa jej. */
     for (int i = 0; i < RX_DESC; i++) {
-        rx_ring[i].adres = (uint64_t)(uintptr_t)rx_bufory[i];
+        rx_ring[i].addr = (uint64_t)(uintptr_t)rx_bufs[i];
         rx_ring[i].status = 0;
     }
     wr(REG_RDBAL, (uint32_t)(uintptr_t)rx_ring);
@@ -303,7 +303,7 @@ int e1000_init(void)
     wr(REG_RDLEN, RX_DESC * (uint32_t)sizeof(struct rx_desc));
     wr(REG_RDH, 0);
     wr(REG_RDT, RX_DESC - 1);
-    rx_biezacy = 0;
+    rx_current = 0;
     wr(REG_RCTL, RCTL_EN | RCTL_BAM | RCTL_SECRC);   /* bufor 2 KiB = 00 */
 
     /* Pierscien nadawania: pusty, ogon rowny glowie */
@@ -313,7 +313,7 @@ int e1000_init(void)
     wr(REG_TDLEN, TX_DESC * (uint32_t)sizeof(struct tx_desc));
     wr(REG_TDH, 0);
     wr(REG_TDT, 0);
-    tx_nastepny = 0;
+    tx_next = 0;
     /* Prog kolizji i odstep miedzy ramkami - wartosci z dokumentacji
        karty dla trybu pelnego dupleksu */
     wr(REG_TCTL, TCTL_EN | TCTL_PSP | (0x0F << 4) | (0x40 << 12));

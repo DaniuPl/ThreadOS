@@ -66,7 +66,7 @@
 #define SYS64_MSYNC      41
 
 /* Numer rdzenia, na ktorym program wlasnie biegnie */
-#define SYS64_RDZEN      42
+#define SYS64_CORE      42
 
 /* Numery zajete od zawsze: klawiatura, konsola, bledy */
 #define FD_STDIN   0

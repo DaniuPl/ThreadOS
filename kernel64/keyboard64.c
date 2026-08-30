@@ -29,24 +29,24 @@
 /* Jedna kolejka na konsole. Kto dostanie Ctrl+C, tez jest sprawa
    konsoli: shell ustawia to na czas, w ktorym czeka na swoje dziecko -
    poza tym czasem przerywac nie ma kogo. */
-struct kolejka {
+struct queue {
     char buf[KBD_BUF_SIZE];
     uint32_t head, tail;
     int intr_target;
 };
-static struct kolejka kolejki[CONSOLE_COUNT];
-static int kolejki_gotowe;
+static struct queue queues[CONSOLE_COUNT];
+static int queues_ready;
 
-static struct kolejka *konsola(int n)
+static struct queue *console(int n)
 {
-    if (!kolejki_gotowe) {              /* -1 zamiast zera dla celu Ctrl+C */
+    if (!queues_ready) {              /* -1 zamiast zera dla celu Ctrl+C */
         for (int i = 0; i < CONSOLE_COUNT; i++)
-            kolejki[i].intr_target = -1;
-        kolejki_gotowe = 1;
+            queues[i].intr_target = -1;
+        queues_ready = 1;
     }
     if (n < 0 || n >= CONSOLE_COUNT)
         n = 0;
-    return &kolejki[n];
+    return &queues[n];
 }
 
 /* Pulpit dziala w trybie graficznym, gdzie konsola tekstowa nie ma
@@ -62,7 +62,7 @@ void keyboard64_set_override(void (*handler)(char c))
 /* Cel Ctrl+C ustawia shell tej konsoli, na ktorej sam pisze */
 void keyboard64_set_intr_target(int id)
 {
-    konsola(task64_vc())->intr_target = id;
+    console(task64_vc())->intr_target = id;
 }
 
 /* Doreczenie gotowego znaku. Wolane z przerwania klawiatury i z watku
@@ -76,7 +76,7 @@ static void dorecz(char c)
 
     /* Klawisz idzie na konsole, na ktora patrzymy - to ona jest pod
        palcami piszacego */
-    struct kolejka *k = konsola(console_active());
+    struct queue *k = console(console_active());
 
     /* Ctrl+C nie jest znakiem do przeczytania, tylko zadaniem
        przerwania programu, ktory trzyma konsole */
@@ -94,7 +94,7 @@ static void dorecz(char c)
 
 /* Przelaczenie obrazu na inna konsole. Pulpit trzyma caly ekran, wiec
    przy nim przelaczac nie ma czego. */
-static void przelacz(int vc)
+static void switch_to(int vc)
 {
     if (override)
         return;
@@ -111,7 +111,7 @@ static void keyboard_irq(struct regs *r)
 
     if (co == KBD_FKEY) {
         if (fkey >= 0 && fkey < CONSOLE_COUNT)
-            przelacz(fkey);
+            switch_to(fkey);
         return;
     }
     if (co != KBD_CHAR)
@@ -132,7 +132,7 @@ void keyboard64_inject(char c)
 void keyboard64_inject_switch(int vc)
 {
     irqflags_t flags = irq_save();
-    przelacz(vc);
+    switch_to(vc);
     irq_restore(flags);
 }
 
@@ -143,7 +143,7 @@ char keyboard64_getchar(void)
 {
     for (;;) {
         irqflags_t flags = irq_save();
-        struct kolejka *k = konsola(task64_vc());
+        struct queue *k = console(task64_vc());
         if (k->tail != k->head) {
             char c = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
             irq_restore(flags);
@@ -173,7 +173,7 @@ int keyboard64_read(char *out, uint32_t len)
         /* Program czyta z WLASNEJ konsoli, nie z tej, na ktora akurat
            patrzymy - inaczej przelaczenie ekranu przekierowywaloby
            klawiature w srodku czyjegos odczytu */
-        struct kolejka *k = konsola(task64_vc());
+        struct queue *k = console(task64_vc());
         uint32_t got = 0;
         while (k->tail != k->head && got < len)
             out[got++] = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
@@ -189,7 +189,7 @@ int keyboard64_read(char *out, uint32_t len)
 
 int keyboard64_pending(void)
 {
-    struct kolejka *k = konsola(task64_vc());
+    struct queue *k = console(task64_vc());
     return k->tail != k->head;
 }
 

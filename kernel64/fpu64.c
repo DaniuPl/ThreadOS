@@ -17,8 +17,8 @@
 
 /* Stan swiezo zainicjowanej jednostki - kazde nowe zadanie dostaje
    jego kopie, zamiast zaczynac od przypadkowych bitow */
-static uint8_t czysty[FPU_AREA] __attribute__((aligned(16)));
-static int wlaczone;
+static uint8_t clean[FPU_AREA] __attribute__((aligned(16)));
+static int enabled;
 
 int fpu64_init(void)
 {
@@ -36,15 +36,15 @@ int fpu64_init(void)
     __asm__ volatile("movq %0, %%cr4" : : "r"(cr4));
 
     __asm__ volatile("fninit");
-    __asm__ volatile("fxsave (%0)" : : "r"(czysty) : "memory");
+    __asm__ volatile("fxsave (%0)" : : "r"(clean) : "memory");
 
-    wlaczone = 1;
+    enabled = 1;
     return 1;
 }
 
 int fpu64_enabled(void)
 {
-    return wlaczone;
+    return enabled;
 }
 
 void *fpu64_alloc(void)
@@ -59,7 +59,7 @@ void *fpu64_alloc(void)
     if (!raw)
         return (void *)0;
     uint8_t *area = (uint8_t *)(((uintptr_t)raw + 16 + 15) & ~(uintptr_t)15);
-    memcpy(area, czysty, FPU_AREA);
+    memcpy(area, clean, FPU_AREA);
 
     ((uint8_t **)area)[-1] = raw;
     return area;
@@ -73,12 +73,12 @@ void fpu64_free(void *area)
 
 void fpu64_save(void *area)
 {
-    if (wlaczone && area)
+    if (enabled && area)
         __asm__ volatile("fxsave (%0)" : : "r"(area) : "memory");
 }
 
 void fpu64_load(const void *area)
 {
-    if (wlaczone && area)
+    if (enabled && area)
         __asm__ volatile("fxrstor (%0)" : : "r"(area) : "memory");
 }

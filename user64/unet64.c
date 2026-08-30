@@ -15,10 +15,10 @@
 
 #include "usys64.h"
 
-#define MOJ_PORT 7777
+#define MY_PORT 7777
 
 static char out[192];
-static char bufor[512];
+static char buf[512];
 
 static int put(int n, const char *s)
 {
@@ -44,7 +44,7 @@ static int put_ip(int n, uint32_t ip)
     return n;
 }
 
-static void blad(const char *co, int64_t v)
+static void err(const char *co, int64_t v)
 {
     int n = put(0, "[unet64] BLAD: ");
     n = put(n, co);
@@ -58,47 +58,47 @@ static void blad(const char *co, int64_t v)
 
 void _start(int argc, char **argv)
 {
-    uint32_t adresy[4];
+    uint32_t addrs[4];
 
     /* 1. Wlasny adres - ten, ktory przyszedl z sieci przez DHCP */
-    if (sys_netinfo(adresy) != 1)
-        blad("system nie ma adresu IP", 0);
+    if (sys_netinfo(addrs) != 1)
+        err("system nie ma adresu IP", 0);
 
     int n = put(0, "[unet64] moj adres ");
-    n = put_ip(n, adresy[0]);
+    n = put_ip(n, addrs[0]);
     n = put(n, ", brama ");
-    n = put_ip(n, adresy[2]);
+    n = put_ip(n, addrs[2]);
     n = put(n, "\n");
     out[n] = 0;
     print(out);
 
     /* 2. Datagram do samego siebie. Petla zwrotna nie wychodzi na
           kabel, wiec proba nie zalezy od zadnej sieci na zewnatrz. */
-    int64_t s = sys_udp_open(MOJ_PORT);
+    int64_t s = sys_udp_open(MY_PORT);
     if (s < 0)
-        blad("nie moge otworzyc gniazda UDP", s);
+        err("nie moge otworzyc gniazda UDP", s);
 
-    static const char tresc[] = "datagram z ring 3";
-    struct udp_opis o;
+    static const char body[] = "datagram z ring 3";
+    struct udp_info o;
     o.sock = (int)s;
-    o.ip = adresy[0];
-    o.port = MOJ_PORT;
+    o.ip = addrs[0];
+    o.port = MY_PORT;
     o.timeout = 3000;
 
-    if (sys_udp_send(&o, tresc, ustrlen(tresc)) < 0)
-        blad("wysylka datagramu nie przeszla", -1);
+    if (sys_udp_send(&o, body, ustrlen(body)) < 0)
+        err("wysylka datagramu nie przeszla", -1);
 
     o.sock = (int)s;
     o.timeout = 3000;
-    int64_t got = sys_udp_recv(&o, bufor, sizeof(bufor));
+    int64_t got = sys_udp_recv(&o, buf, sizeof(buf));
     if (got <= 0)
-        blad("datagram nie wrocil", got);
+        err("datagram nie wrocil", got);
 
-    if ((uint64_t)got != ustrlen(tresc))
-        blad("wrocil datagram innej dlugosci", got);
+    if ((uint64_t)got != ustrlen(body))
+        err("wrocil datagram innej dlugosci", got);
     for (int64_t i = 0; i < got; i++)
-        if (bufor[i] != tresc[i])
-            blad("tresc datagramu sie nie zgadza", i);
+        if (buf[i] != body[i])
+            err("tresc datagramu sie nie zgadza", i);
 
     n = put(0, "[unet64] datagram wrocil do mnie (");
     n = putn(n, (uint64_t)got);
@@ -119,38 +119,38 @@ void _start(int argc, char **argv)
     int64_t ip = uparse_ip(argv[1]);
     int64_t port = uatoi(argv[2]);
     if (ip < 0 || port <= 0)
-        blad("zly adres albo port serwera", 0);
+        err("zly adres albo port serwera", 0);
 
     o.ip = (uint32_t)ip;
     o.port = (uint16_t)port;
     o.timeout = 5000;
     int64_t c = sys_tcp_connect(&o);
     if (c < 0)
-        blad("nie moge sie polaczyc", c);
+        err("nie moge sie polaczyc", c);
 
-    static const char zadanie[] = "GET / HTTP/1.0\r\n\r\n";
-    if (sys_tcp_send((int)c, zadanie, ustrlen(zadanie)) < 0)
-        blad("wysylka zadania nie przeszla", -1);
+    static const char task[] = "GET / HTTP/1.0\r\n\r\n";
+    if (sys_tcp_send((int)c, task, ustrlen(task)) < 0)
+        err("wysylka zadania nie przeszla", -1);
 
-    int64_t razem = 0;
+    int64_t total = 0;
     for (;;) {
-        int64_t k = sys_tcp_recv((int)c, bufor, sizeof(bufor) - 1);
+        int64_t k = sys_tcp_recv((int)c, buf, sizeof(buf) - 1);
         if (k <= 0)
             break;
-        razem += k;
-        if (razem > 16)
+        total += k;
+        if (total > 16)
             break;                   /* naglowek wystarczy za dowod */
     }
     sys_tcp_close((int)c);
 
-    if (razem <= 0)
-        blad("serwer nic nie odpowiedzial", razem);
+    if (total <= 0)
+        err("serwer nic nie odpowiedzial", total);
 
-    bufor[16] = 0;
+    buf[16] = 0;
     n = put(0, "[unet64] serwer odpowiedzial (");
-    n = putn(n, (uint64_t)razem);
+    n = putn(n, (uint64_t)total);
     n = put(n, " B): ");
-    n = put(n, bufor);
+    n = put(n, buf);
     n = put(n, "\n");
     out[n] = 0;
     print(out);

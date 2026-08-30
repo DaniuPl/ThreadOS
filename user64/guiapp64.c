@@ -18,17 +18,17 @@
 #define C_WHITE 4
 #define C_BG    8    /* szare tlo okna */
 
-#define OKNO_W 120
-#define OKNO_H 60
+#define WINDOW_W 120
+#define WINDOW_H 60
 
 #define MAXPT 64
 static int px[MAXPT], py[MAXPT];
 static int npt;
 
-static char wpisane[16];
-static int dlug;
+static char written[16];
+static int length;
 
-static void rysuj_liczbe(int w, int x, int y, int v, int kolor)
+static void draw_number(int w, int x, int y, int v, int color)
 {
     char tmp[12], s[12];
     int n = 0, j = 0;
@@ -39,12 +39,12 @@ static void rysuj_liczbe(int w, int x, int y, int v, int kolor)
     while (n)
         s[j++] = tmp[--n];
     s[j] = '\0';
-    win_text(w, x, y, s, kolor);
+    win_text(w, x, y, s, color);
 }
 
 void _start(void)
 {
-    int w = (int)win_create(OKNO_W, OKNO_H, "App64");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "App64");
     if (w < 0) {
         print("guiapp64: pulpit nie dal okna\n");
         sys_exit(1);
@@ -62,25 +62,25 @@ void _start(void)
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 if (c == '\b') {
-                    if (dlug > 0)
-                        dlug--;
+                    if (length > 0)
+                        length--;
                 } else if (c >= 0x20 && c < 0x7F &&
-                           dlug < (int)sizeof(wpisane) - 1) {
-                    wpisane[dlug++] = c;
+                           length < (int)sizeof(written) - 1) {
+                    written[length++] = c;
                 }
             }
         }
-        wpisane[dlug] = '\0';
+        written[length] = '\0';
 
         /* Cala tresc okna od nowa: tlo, paleta, podpisy, licznik */
-        win_rect(w, 0, 0, OKNO_W, OKNO_H, C_BG);
+        win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
         win_rect(w, 62, 6, 24, 12, C_BLUE);
         win_text(w, 6, 24, "klikniec:", C_WHITE);
-        rysuj_liczbe(w, 80, 24, npt, C_WHITE);
+        draw_number(w, 80, 24, npt, C_WHITE);
         win_text(w, 6, 38, "txt:", C_GREEN);
-        win_text(w, 40, 38, wpisane, C_WHITE);
+        win_text(w, 40, 38, written, C_WHITE);
 
         /* Znaczniki w miejscach klikniec */
         for (int i = 0; i < npt; i++)

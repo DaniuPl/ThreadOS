@@ -12,8 +12,8 @@
  */
 
 int pipe64_new(void);                    /* numer potoku albo -1 */
-void pipe64_ref(int idx, int czytelnik);
-void pipe64_unref(int idx, int czytelnik);
+void pipe64_ref(int idx, int reader_task);
+void pipe64_unref(int idx, int reader_task);
 
 /* Blokuja, ale daja sie przerwac sygnalem (-1). Odczyt zwraca 0, gdy
    nie ma juz kto pisac - to koniec danych, nie blad. */

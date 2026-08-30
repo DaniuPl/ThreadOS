@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include "syscall64.h"
 #include "../kernel/include/smp.h"
-#include "../kernel/include/zamekjadra.h"
+#include "../kernel/include/biglock.h"
 #include "gdt64.h"
 #include "task64.h"
 #include "paging64.h"
@@ -48,12 +48,12 @@ extern void syscall64_entry(void);
 
 /* Blok danych rdzenia widziany przez stub wejsciowy przez rejestr GS.
    Uklad musi zgadzac sie z boot64/syscall64.S. */
-struct rdzen_syscall {
+struct core_syscall {
     uint64_t kernel_rsp;     /* przesuniecie 0 */
     uint64_t scratch;        /* przesuniecie 8 */
 };
-extern struct rdzen_syscall syscall64_bloki[];
-_Static_assert(sizeof(struct rdzen_syscall) == 16,
+extern struct core_syscall syscall64_bloki[];
+_Static_assert(sizeof(struct core_syscall) == 16,
                "stub liczy po szesnascie bajtow na rdzen");
 
 static int user_ran;
@@ -85,7 +85,7 @@ void syscall64_init(void)
     /* Wskaznik na blok tego rdzenia. Stub wejsciowy siega po niego
        przez swapgs - to jedyna droga bez wolnego rejestru. */
     wrmsr(MSR_KERNEL_GS,
-          (uint64_t)(uintptr_t)&syscall64_bloki[smp_rdzen()]);
+          (uint64_t)(uintptr_t)&syscall64_bloki[smp_core()]);
 
     /* Bity 47-32: selektor kodu jadra przy wejsciu.
        Bity 63-48: podstawa, z ktorej sysret sklada selektory programu -
@@ -99,7 +99,7 @@ void syscall64_init(void)
 
 void syscall64_set_kernel_stack(uint64_t rsp)
 {
-    syscall64_bloki[smp_rdzen()].kernel_rsp = rsp;
+    syscall64_bloki[smp_core()].kernel_rsp = rsp;
     gdt64_set_kernel_stack(rsp);   /* to samo dla przerwan z ring 3 */
 }
 
@@ -155,7 +155,7 @@ void syscall64_forget_user(void)
  * tam siegac. Bez tego wystarczyloby podac adres pamieci jadra, zeby
  * kazac mu ja sobie wypisac. */
 /* Nazwa pliku z pamieci programu do jadra. Zwraca 0 albo -1. */
-static int nazwa_z_ring3(uint64_t ptr, uint64_t len, char *out)
+static int name_from_ring3(uint64_t ptr, uint64_t len, char *out)
 {
     if (len == 0 || len > FS_NAME_MAX || !paging64_user_range(ptr, len))
         return -1;
@@ -171,7 +171,7 @@ static int nazwa_z_ring3(uint64_t ptr, uint64_t len, char *out)
    siegac ostatniego bajtu mapowania i ani jednego dalej. Zwraca 0
    albo -1, gdy napis wychodzi poza pamiec programu albo nie miesci
    sie w buforze. */
-static int napis_z_ring3(uint64_t ptr, char *out, int max)
+static int text_from_ring3(uint64_t ptr, char *out, int max)
 {
     for (int i = 0; i < max - 1; i++) {
         if (!paging64_user_range(ptr + (uint64_t)i, 1))
@@ -188,11 +188,11 @@ static int napis_z_ring3(uint64_t ptr, char *out, int max)
    sie z tym w user64/usys64.h - w trybie dlugim wskaznik ma osiem
    bajtow i wymaga wyrownania, stad dziura po trzech liczbach. */
 struct win_rect_cmd64 {
-    int32_t x, y, w, h, kolor;
+    int32_t x, y, w, h, color;
 };
 struct win_text_cmd64 {
-    int32_t x, y, kolor;
-    uint64_t napis;
+    int32_t x, y, color;
+    uint64_t text;
 };
 struct win_event64 {
     int32_t typ;
@@ -202,11 +202,11 @@ struct win_event64 {
 
 /* Opis gniazda przekazywany przez program. Uklad musi zgadzac sie
    z tym w user64/usys64.h. */
-struct udp_opis {
+struct udp_info {
     int sock;
     uint32_t ip;
     uint16_t port;
-    uint16_t _wyrownanie;
+    uint16_t _padding;
     uint32_t timeout;
 };
 
@@ -227,13 +227,13 @@ static void handle(struct regs *r);
  * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
  * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
  */
-static int bez_zamka(uint64_t nr)
+static int lockless(uint64_t nr)
 {
     switch (nr) {
     case SYS64_GETPID:   /* wlasny numer, jedno pole zadania */
     case SYS64_TICKS:    /* licznik przerwan zegara, jedno slowo */
     case SYS64_RING:     /* wlasny selektor kodu z ramki przerwania */
-    case SYS64_RDZEN:    /* pytanie do wlasnego lokalnego APIC */
+    case SYS64_CORE:    /* pytanie do wlasnego lokalnego APIC */
     case SYS64_SLEEP:    /* wlasne "obudz mnie" i scheduler, ktory ma
                             swoj zamek - a przez przelaczenie kontekstu
                             wielkiego zamka i tak sie nie trzyma */
@@ -250,24 +250,24 @@ static int bez_zamka(uint64_t nr)
    zrobic. */
 void syscall64_handler(struct regs *r)
 {
-    if (bez_zamka(r->rax)) {
+    if (lockless(r->rax)) {
         handle(r);
         /* Sygnal przestawia programowi stos i adres powrotu - to juz
            nie jest praca "tylko na swoim". Zamek bierzemy jednak
            dopiero wtedy, gdy naprawde jest co doreczyc. */
         if ((r->cs & 3) == 3 && task64_signal_pending()) {
-            jadro_wejdz();
+            biglock_enter();
             signal64_deliver(r);
-            jadro_wyjdz();
+            biglock_leave();
         }
         return;
     }
 
-    jadro_wejdz();
+    biglock_enter();
     handle(r);
     if ((r->cs & 3) == 3)
         signal64_deliver(r);
-    jadro_wyjdz();
+    biglock_leave();
 }
 
 static void handle(struct regs *r)
@@ -295,8 +295,8 @@ static void handle(struct regs *r)
         /* O tym, dokad idzie zapis, decyduje RODZAJ deskryptora,
            a nie jego numer. Jedynka bez przekierowania to konsola -
            ale po dup2 moze byc koncem potoku i program tego nie widzi. */
-        int rodzaj = task64_fd_kind((int)a1);
-        if (rodzaj == FDK_WOLNY) {
+        int kind = task64_fd_kind((int)a1);
+        if (kind == FDK_WOLNY) {
             if (a1 != FD_STDOUT) {
                 r->rax = (uint64_t)-1;
                 return;
@@ -306,12 +306,12 @@ static void handle(struct regs *r)
             r->rax = a3;
             return;
         }
-        if (rodzaj == FDK_POTOK_W) {
+        if (kind == FDK_POTOK_W) {
             int n = pipe64_write(task64_fd_slot((int)a1), buf, (uint32_t)a3);
             r->rax = (uint64_t)(int64_t)n;
             return;
         }
-        if (rodzaj != FDK_PLIK) {
+        if (kind != FDK_FILE) {
             r->rax = (uint64_t)-1;   /* zapis do konca do czytania */
             return;
         }
@@ -371,8 +371,8 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        int rodzaj = task64_fd_kind((int)a1);
-        if (rodzaj == FDK_WOLNY) {
+        int kind = task64_fd_kind((int)a1);
+        if (kind == FDK_WOLNY) {
             if (a1 != FD_STDIN) {
                 r->rax = (uint64_t)-1;
                 return;
@@ -381,13 +381,13 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)(int64_t)n;
             return;
         }
-        if (rodzaj == FDK_POTOK_R) {
+        if (kind == FDK_POTOK_R) {
             int n = pipe64_read(task64_fd_slot((int)a1),
                                 (char *)(uintptr_t)a2, (uint32_t)a3);
             r->rax = (uint64_t)(int64_t)n;
             return;
         }
-        if (rodzaj != FDK_PLIK) {
+        if (kind != FDK_FILE) {
             r->rax = (uint64_t)-1;   /* odczyt z konca do pisania */
             return;
         }
@@ -400,7 +400,7 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_OPEN: {
-        char nazwa[FS_NAME_MAX + 1];
+        char name[FS_NAME_MAX + 1];
         if (a2 == 0 || a2 > FS_NAME_MAX ||
             !paging64_user_range(a1, a2)) {
             r->rax = (uint64_t)-1;
@@ -408,10 +408,10 @@ static void handle(struct regs *r)
         }
         const char *src = (const char *)(uintptr_t)a1;
         for (uint64_t i = 0; i < a2; i++)
-            nazwa[i] = src[i];
-        nazwa[a2] = '\0';
+            name[i] = src[i];
+        name[a2] = '\0';
 
-        int slot = fs_open(task64_cwd(), nazwa, (int)a3);
+        int slot = fs_open(task64_cwd(), name, (int)a3);
         if (slot < 0) {
             r->rax = (uint64_t)-1;
             return;
@@ -423,65 +423,65 @@ static void handle(struct regs *r)
         /* Zwracamy stara granice - program dostaje adres, od ktorego
            moze pisac. Przesuniecie o zero to pytanie "gdzie jestem". */
         int64_t delta = (int64_t)a1;
-        uint64_t stara = task64_brk();
-        if (!stara) {
+        uint64_t old_one = task64_brk();
+        if (!old_one) {
             r->rax = (uint64_t)-1;
             return;
         }
-        uint64_t nowa = stara + (uint64_t)delta;
-        if (nowa < task64_brk_base() || nowa >= USER64_TOP) {
+        uint64_t fresh = old_one + (uint64_t)delta;
+        if (fresh < task64_brk_base() || fresh >= USER64_TOP) {
             r->rax = (uint64_t)-1;   /* ponizej wlasnej pamieci albo w stos */
             return;
         }
         /* Zwezenie oddaje strony od razu - inaczej pamiec wracalaby
            do puli dopiero razem z calym procesem */
-        for (uint64_t va = nowa & ~0xFFFULL; va + 4096 <= stara;
+        for (uint64_t va = fresh & ~0xFFFULL; va + 4096 <= old_one;
              va += 4096) {
-            if (va < nowa)
+            if (va < fresh)
                 continue;
             uint64_t f = paging64_unmap(va);
             if (f)
                 pmm_free_frame((uint32_t)f);
         }
-        task64_set_brk(nowa);
-        r->rax = stara;
+        task64_set_brk(fresh);
+        r->rax = old_one;
         return;
     }
     case SYS64_MKDIR: {
-        char nazwa[FS_NAME_MAX + 1];
-        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+        char name[FS_NAME_MAX + 1];
+        if (name_from_ring3(a1, a2, name) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        r->rax = (uint64_t)(int64_t)fs_mkdir(task64_cwd(), nazwa);
+        r->rax = (uint64_t)(int64_t)fs_mkdir(task64_cwd(), name);
         return;
     }
     case SYS64_CHDIR: {
-        char nazwa[FS_NAME_MAX + 1];
-        int nowy = FS_ROOT;
-        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+        char name[FS_NAME_MAX + 1];
+        int fresh_one = FS_ROOT;
+        if (name_from_ring3(a1, a2, name) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        if (fs_chdir(task64_cwd(), nazwa, &nowy) < 0) {
+        if (fs_chdir(task64_cwd(), name, &fresh_one) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        task64_set_cwd(nowy);
+        task64_set_cwd(fresh_one);
         r->rax = 0;
         return;
     }
     case SYS64_GETCWD: {
-        char sciezka[FS_NAME_MAX * 4];
+        char path[FS_NAME_MAX * 4];
         if (a2 == 0 || !paging64_user_range(a1, a2)) {
             r->rax = (uint64_t)-1;
             return;
         }
-        fs_getpath(task64_cwd(), sciezka);
+        fs_getpath(task64_cwd(), path);
         char *dst = (char *)(uintptr_t)a1;
         uint64_t i = 0;
-        while (i + 1 < a2 && sciezka[i]) {
-            dst[i] = sciezka[i];
+        while (i + 1 < a2 && path[i]) {
+            dst[i] = path[i];
             i++;
         }
         dst[i] = '\0';
@@ -496,35 +496,35 @@ static void handle(struct regs *r)
             char name[FS_NAME_MAX + 1];
             uint32_t size;
             int is_dir;
-        } wpis;
+        } entry;
 
-        if (!paging64_user_range(a2, sizeof(wpis))) {
+        if (!paging64_user_range(a2, sizeof(entry))) {
             r->rax = (uint64_t)-1;
             return;
         }
-        uint32_t rozmiar = 0;
-        int katalog = 0;
+        uint32_t size = 0;
+        int dir = 0;
         /* fs_readdir oddaje 1 przy trafieniu i 0 na koncu katalogu -
            nie ujemna wartosc. Sprawdzanie "mniej niz zero" konczy sie
            tu petla bez konca, bo koniec katalogu wyglada jak sukces. */
-        if (fs_readdir(task64_cwd(), (int)a1, wpis.name,
-                       &rozmiar, &katalog) != 1) {
+        if (fs_readdir(task64_cwd(), (int)a1, entry.name,
+                       &size, &dir) != 1) {
             r->rax = (uint64_t)-1;
             return;
         }
-        wpis.size = rozmiar;
-        wpis.is_dir = katalog;
-        memcpy((void *)(uintptr_t)a2, &wpis, sizeof(wpis));
+        entry.size = size;
+        entry.is_dir = dir;
+        memcpy((void *)(uintptr_t)a2, &entry, sizeof(entry));
         r->rax = 0;
         return;
     }
     case SYS64_UNLINK: {
-        char nazwa[FS_NAME_MAX + 1];
-        if (nazwa_z_ring3(a1, a2, nazwa) < 0) {
+        char name[FS_NAME_MAX + 1];
+        if (name_from_ring3(a1, a2, name) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), nazwa);
+        r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), name);
         return;
     }
     case SYS64_PIPE: {
@@ -594,44 +594,44 @@ static void handle(struct regs *r)
            rejestry na argumenty to za malo na gniazdo, adres, port,
            dlugosc i limit czasu - a upychanie po dwie rzeczy w jeden
            rejestr czyta sie fatalnie i psuje przy pierwszej zmianie. */
-        struct udp_opis opis;
-        if (!paging64_user_range(a1, sizeof(opis))) {
+        struct udp_info info;
+        if (!paging64_user_range(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
-        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
+        memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
         if (a3 > 1400 || !paging64_user_range(a2, a3)) {
             r->rax = (uint64_t)-1;
             return;
         }
         r->rax = (uint64_t)(int64_t)net_udp_send(
-            opis.sock, task64_current_id(), opis.ip, opis.port,
+            info.sock, task64_current_id(), info.ip, info.port,
             (const void *)(uintptr_t)a2, (uint16_t)a3);
         return;
     }
     case SYS64_UDP_RECV: {
-        struct udp_opis opis;
-        if (!paging64_user_range(a1, sizeof(opis))) {
+        struct udp_info info;
+        if (!paging64_user_range(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
-        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
+        memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
         if (a3 > 1400 || !paging64_user_range(a2, a3)) {
             r->rax = (uint64_t)-1;
             return;
         }
 
-        uint32_t skad_ip = 0;
-        uint16_t skad_port = 0;
-        int n = net_udp_recv(opis.sock, task64_current_id(),
-                             &skad_ip, &skad_port,
+        uint32_t from_ip = 0;
+        uint16_t from_port = 0;
+        int n = net_udp_recv(info.sock, task64_current_id(),
+                             &from_ip, &from_port,
                              (void *)(uintptr_t)a2, (uint16_t)a3,
-                             opis.timeout);
+                             info.timeout);
         if (n > 0) {
             /* Kto przyslal - program pyta o to przez ten sam opis */
-            opis.ip = skad_ip;
-            opis.port = skad_port;
-            memcpy((void *)(uintptr_t)a1, &opis, sizeof(opis));
+            info.ip = from_ip;
+            info.port = from_port;
+            memcpy((void *)(uintptr_t)a1, &info, sizeof(info));
         }
         r->rax = (uint64_t)(int64_t)n;
         return;
@@ -639,15 +639,15 @@ static void handle(struct regs *r)
     case SYS64_TCP_CONNECT: {
         /* Ten sam opis, co przy UDP - port i limit czasu maja tam
            swoje miejsce, a adres jest tam, gdzie go widac */
-        struct udp_opis opis;
-        if (!paging64_user_range(a1, sizeof(opis))) {
+        struct udp_info info;
+        if (!paging64_user_range(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
-        memcpy(&opis, (const void *)(uintptr_t)a1, sizeof(opis));
-        r->rax = (uint64_t)(int64_t)tcp_connect(opis.ip, opis.port,
+        memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
+        r->rax = (uint64_t)(int64_t)tcp_connect(info.ip, info.port,
                                                 task64_current_id(),
-                                                opis.timeout);
+                                                info.timeout);
         return;
     }
     case SYS64_TCP_SEND:
@@ -695,13 +695,13 @@ static void handle(struct regs *r)
        kompozytor sprawdza go przy kazdym rysowaniu, wiec program nie
        narysuje niczego w cudzym oknie. */
     case SYS64_WIN_CREATE: {
-        char tytul[64];
-        if (napis_z_ring3(a3, tytul, sizeof(tytul)) < 0) {
+        char title[64];
+        if (text_from_ring3(a3, title, sizeof(title)) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
         r->rax = (uint64_t)(int64_t)desktop_win_create(
-            task64_current_id(), (int)a1, (int)a2, tytul);
+            task64_current_id(), (int)a1, (int)a2, title);
         return;
     }
     case SYS64_WIN_RECT: {
@@ -713,7 +713,7 @@ static void handle(struct regs *r)
         c = *(const struct win_rect_cmd64 *)(uintptr_t)a2;
         r->rax = (uint64_t)(int64_t)desktop_win_rect(
             (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
-            (uint8_t)c.kolor);
+            (uint8_t)c.color);
         return;
     }
     case SYS64_WIN_TEXT: {
@@ -724,12 +724,12 @@ static void handle(struct regs *r)
             return;
         }
         c = *(const struct win_text_cmd64 *)(uintptr_t)a2;
-        if (napis_z_ring3(c.napis, s, sizeof(s)) < 0) {
+        if (text_from_ring3(c.text, s, sizeof(s)) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
         r->rax = (uint64_t)(int64_t)desktop_win_text(
-            (int)a1, task64_current_id(), c.x, c.y, s, (uint8_t)c.kolor);
+            (int)a1, task64_current_id(), c.x, c.y, s, (uint8_t)c.color);
         return;
     }
     /* Pamiec wspoldzielona. Region zyje w jadrze i jest wspolny dla
@@ -744,7 +744,7 @@ static void handle(struct regs *r)
            cudze procesy. */
         struct {
             uint32_t ram_kib;
-            uint32_t uzyte_kib;
+            uint32_t used_kib;
             uint32_t uptime_s;
         } info;
 
@@ -753,24 +753,24 @@ static void handle(struct regs *r)
             return;
         }
         info.ram_kib = pmm_ram_kib();
-        info.uzyte_kib = pmm_used_frames() * 4;
+        info.used_kib = pmm_used_frames() * 4;
         info.uptime_s = pit_ticks() / 100;
         *(typeof(info) *)(uintptr_t)a1 = info;
         r->rax = 0;
         return;
     }
     case SYS64_MMAP_FILE: {
-        char nazwa[FS_NAME_MAX + 1];
-        if (nazwa_z_ring3(a1, a2, nazwa) < 0 ||
+        char name[FS_NAME_MAX + 1];
+        if (name_from_ring3(a1, a2, name) < 0 ||
             !paging64_user_range(a3, sizeof(uint64_t))) {
             r->rax = 0;
             return;
         }
-        uint64_t rozmiar = 0;
-        uint64_t adres = proc64_mmap_pliku(nazwa, &rozmiar, a4);
-        if (adres)
-            *(uint64_t *)(uintptr_t)a3 = rozmiar;
-        r->rax = adres;
+        uint64_t size = 0;
+        uint64_t addr = proc64_mmap_file(name, &size, a4);
+        if (addr)
+            *(uint64_t *)(uintptr_t)a3 = size;
+        r->rax = addr;
         return;
     }
     case SYS64_MSYNC:
@@ -778,8 +778,8 @@ static void handle(struct regs *r)
         return;
     /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
        APIC jest poza jego przestrzenia. */
-    case SYS64_RDZEN:
-        r->rax = (uint64_t)(uint32_t)smp_rdzen();
+    case SYS64_CORE:
+        r->rax = (uint64_t)(uint32_t)smp_core();
         return;
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();

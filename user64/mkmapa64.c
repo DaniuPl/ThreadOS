@@ -9,32 +9,32 @@
 
 #include "usys64.h"
 
-#define KAWALEK 512
+#define CHUNK 512
 
-static unsigned char buf[KAWALEK];
+static unsigned char buf[CHUNK];
 static char out[96];
 
 void _start(int argc, char **argv)
 {
-    const char *nazwa = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "mapa.txt";
     uint64_t kib = 12;
     if (argc > 2) {
         int64_t v = uatoi(argv[2]);
         if (v > 0)
             kib = (uint64_t)v;
     }
-    uint64_t bajtow = kib * 1024;
+    uint64_t nbytes = kib * 1024;
 
-    int fd = (int)sys_open(nazwa, 1);
+    int fd = (int)sys_open(name, 1);
     if (fd < 0) {
         print("[mkmapa64] nie da sie zalozyc pliku\n");
         sys_exit(1);
     }
 
-    for (uint64_t off = 0; off < bajtow; off += KAWALEK) {
-        for (uint64_t i = 0; i < KAWALEK; i++)
+    for (uint64_t off = 0; off < nbytes; off += CHUNK) {
+        for (uint64_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
-        if (sys_write(fd, buf, KAWALEK) != KAWALEK) {
+        if (sys_write(fd, buf, CHUNK) != CHUNK) {
             print("[mkmapa64] zapis sie nie udal\n");
             sys_exit(1);
         }
@@ -46,7 +46,7 @@ void _start(int argc, char **argv)
     while (*a)
         out[n++] = *a++;
     char tmp[24];
-    utoa(bajtow, tmp);
+    utoa(nbytes, tmp);
     for (int i = 0; tmp[i]; i++)
         out[n++] = tmp[i];
     const char *b = " B wzorca\n";

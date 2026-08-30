@@ -47,14 +47,14 @@ static void print_uint(uintptr_t value, uint32_t base)
     kputs(&buf[i]);
 }
 
-static struct spinlock zamek = SPINLOCK_WOLNY;
+static struct spinlock lock = SPINLOCK_FREE;
 
 void printk(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
 
-    irqflags_t irq = spin_lock_irq(&zamek);
+    irqflags_t irq = spin_lock_irq(&lock);
 
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
@@ -92,7 +92,7 @@ void printk(const char *fmt, ...)
             break;
         case '\0':
             va_end(args);
-            spin_unlock_irq(&zamek, irq);
+            spin_unlock_irq(&lock, irq);
             return;
         default:
             kputchar('%');
@@ -101,5 +101,5 @@ void printk(const char *fmt, ...)
     }
 
     va_end(args);
-    spin_unlock_irq(&zamek, irq);
+    spin_unlock_irq(&lock, irq);
 }

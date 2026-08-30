@@ -52,7 +52,7 @@
 #define SYS_SIGRETURN   45
 #define SYS_MMAP_FILE   46
 #define SYS_MSYNC       47
-#define SYS_RDZEN       48
+#define SYS_CORE       48
 
 #define FS_NAME_MAX  63
 
@@ -195,10 +195,10 @@ static inline int32_t sys_waitany(int32_t *code)
 }
 
 /* Czekanie na dowolne wlasne dziecko - jednym slowem po obu stronach
-   (w trybie dlugim to sys_wait; zob. user64/uzgodnosc64.h) */
-static inline int32_t sys_wait_dziecka(int *kod)
+   (w trybie dlugim to sys_wait; zob. user64/compat64.h) */
+static inline int32_t sys_wait_child(int *code)
 {
-    return sys_waitany((int32_t *)kod);
+    return sys_waitany((int32_t *)code);
 }
 
 /* Podmienia program biezacego procesu (pid i deskryptory zostaja).
@@ -249,24 +249,24 @@ static inline void *sys_mmap(uint32_t size)
  * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
  * co spis jego blokow. Ta wersja jest tylko do odczytu: proba zapisu
  * konczy sie bledem ochrony, a nie cichym zgubieniem danych. */
-static inline const void *sys_mmap_file(const char *nazwa, uint32_t *rozmiar)
+static inline const void *sys_mmap_file(const char *name, uint32_t *size)
 {
     const void *ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar), "d"(0)
+                     : "a"(SYS_MMAP_FILE), "b"(name), "c"(size), "d"(0)
                      : "memory");
     return ret;
 }
 
 /* To samo, ale z prawem zapisu: zmiany w pamieci wracaja do pliku.
  * Nie od razu - dopiero przy sys_msync albo na wyjsciu procesu. */
-static inline void *sys_mmap_file_w(const char *nazwa, uint32_t *rozmiar)
+static inline void *sys_mmap_file_w(const char *name, uint32_t *size)
 {
     void *ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_MMAP_FILE), "b"(nazwa), "c"(rozmiar), "d"(1)
+                     : "a"(SYS_MMAP_FILE), "b"(name), "c"(size), "d"(1)
                      : "memory");
     return ret;
 }
@@ -274,10 +274,10 @@ static inline void *sys_mmap_file_w(const char *nazwa, uint32_t *rozmiar)
 /* Na ktorym rdzeniu procesora program wlasnie biegnie.
  * Sam nie ma jak tego sprawdzic - lokalny APIC lezy poza jego
  * przestrzenia adresowa. */
-static inline int sys_rdzen(void)
+static inline int sys_core(void)
 {
     int ret;
-    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_RDZEN) : "memory");
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_CORE) : "memory");
     return ret;
 }
 

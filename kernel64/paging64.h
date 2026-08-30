@@ -32,7 +32,7 @@
    pliku. Takiej nie wolno ani skopiowac przy zapisie (fork ma ja
    WSPOLDZIELIC, bo oba procesy pisza do tego samego pliku), ani
    wyrzucic na dysk wymiany - jej miejscem na dysku jest sam plik. */
-#define PG_PLIK   0x800
+#define PG_FILE   0x800
 
 /* Ktory wpis drugiego poziomu nalezy do programu. Jeden wpis to
    gigabajt, a programy leza od 1 GiB w gore - USER64_BASE
@@ -53,10 +53,10 @@ uint64_t paging64_lookup(uint64_t virt);
 
 /* Czy strona zapisywalnego odwzorowania byla zapisywana od ostatniego
    odeslania na dysk (bit "brudna" ustawiany przez procesor) */
-int paging64_plik_brudna(uint64_t virt);
+int paging64_file_dirty(uint64_t virt);
 
 /* Gasi bit "brudna" - wolane po odeslaniu strony do pliku */
-void paging64_plik_czysta(uint64_t virt);
+void paging64_file_clean(uint64_t virt);
 
 /* Czy caly zakres jest dostepny dla ring 3 (bit USER na kazdym
    poziomie tablic)? Do sprawdzania wskaznikow z programu. */

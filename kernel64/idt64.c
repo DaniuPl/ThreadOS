@@ -71,12 +71,12 @@ void idt64_init(void)
 
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (uint64_t)(uintptr_t)idt;
-    idt64_zaladuj();
+    idt64_load();
 }
 
 /* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
    juz nie zmienia, wiec kazdy rdzen moze pokazywac na te sama. */
-void idt64_zaladuj(void)
+void idt64_load(void)
 {
     __asm__ volatile("lidt %0" : : "m"(idtp));
 }

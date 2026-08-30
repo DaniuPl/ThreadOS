@@ -28,29 +28,29 @@ static int putn(int n, uint64_t v)
 
 void _start(void)
 {
-    char sciezka[128];
-    struct dirent64 wpis;
+    char path[128];
+    struct dirent64 entry;
 
-    if (sys_getcwd(sciezka, sizeof(sciezka)) < 0) {
+    if (sys_getcwd(path, sizeof(path)) < 0) {
         print("uls64: nie wiem, gdzie stoje\n");
         sys_exit(1);
     }
 
     int n = put(0, "uls64: ");
-    n = put(n, sciezka);
+    n = put(n, path);
     n = put(n, "\n");
     out[n] = 0;
     print(out);
 
     int ile = 0;
-    for (int i = 0; sys_readdir(i, &wpis) == 0; i++) {
+    for (int i = 0; sys_readdir(i, &entry) == 0; i++) {
         n = put(0, "  ");
-        n = put(n, wpis.name);
-        if (wpis.is_dir) {
+        n = put(n, entry.name);
+        if (entry.is_dir) {
             n = put(n, "/  (katalog)");
         } else {
             n = put(n, "  (");
-            n = putn(n, wpis.size);
+            n = putn(n, entry.size);
             n = put(n, " B)");
         }
         n = put(n, "\n");

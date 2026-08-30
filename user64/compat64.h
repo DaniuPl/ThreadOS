@@ -14,8 +14,8 @@
  * rejestrow jest wiecej i wiekszosc opisow zmiescila sie wprost.
  */
 
-#ifndef PROTONOS_UZGODNOSC64_H
-#define PROTONOS_UZGODNOSC64_H
+#ifndef PROTONOS_COMPAT64_H
+#define PROTONOS_COMPAT64_H
 
 #include "usys64.h"
 
@@ -32,11 +32,11 @@
 #define STDIN   FD_STDIN
 #define STDOUT  FD_STDOUT
 
-static inline int32_t uz_open(const char *nazwa, int flagi)
+static inline int32_t uz_open(const char *name, int flags)
 {
-    return (int32_t)sys_open(nazwa, (flagi & O_CREATE) ? 1 : 0);
+    return (int32_t)sys_open(name, (flags & O_CREATE) ? 1 : 0);
 }
-#define sys_open(nazwa, flagi) uz_open((nazwa), (flagi))
+#define sys_open(name, flags) uz_open((name), (flags))
 
 /* --- Klawisze bez odpowiednika w ASCII -----------------------------
  *
@@ -87,9 +87,9 @@ static inline uint32_t sys_getticks(void)
 /* Czekanie na dowolne wlasne dziecko. W jadrze 32-bitowym nazywa sie
    to sys_waitany, w 64-bitowym sys_wait - kod wspolny mowi jednym
    slowem, a ten plik tlumaczy je na wlasciwa strone. */
-static inline int64_t sys_wait_dziecka(int *kod)
+static inline int64_t sys_wait_child(int *code)
 {
-    return sys_wait(kod);
+    return sys_wait(code);
 }
 
 static inline void print_dec(uint32_t v)
@@ -132,7 +132,7 @@ static inline int32_t udp_open(uint32_t port)
 static inline int32_t udp_send(int32_t sock, uint32_t ip, uint32_t port,
                                const void *buf, uint32_t len)
 {
-    struct udp_opis o = {(int)sock, ip, (uint16_t)port, 0, 0};
+    struct udp_info o = {(int)sock, ip, (uint16_t)port, 0, 0};
     return (int32_t)sys_udp_send(&o, buf, len);
 }
 
@@ -140,7 +140,7 @@ static inline int32_t udp_recv(int32_t sock, void *buf, uint32_t max,
                                uint32_t timeout_ms, uint32_t *from_ip,
                                uint32_t *from_port)
 {
-    struct udp_opis o = {(int)sock, 0, 0, 0, timeout_ms};
+    struct udp_info o = {(int)sock, 0, 0, 0, timeout_ms};
     int32_t n = (int32_t)sys_udp_recv(&o, buf, max);
     if (n >= 0) {
         /* Adres nadawcy jadro wpisuje z powrotem w ten sam opis */
@@ -162,7 +162,7 @@ static inline void udp_close(int32_t sock)
 static inline int32_t tcp_connect(uint32_t ip, uint32_t port,
                                   uint32_t timeout_ms)
 {
-    struct udp_opis o = {0, ip, (uint16_t)port, 0, timeout_ms};
+    struct udp_info o = {0, ip, (uint16_t)port, 0, timeout_ms};
     return (int32_t)sys_tcp_connect(&o);
 }
 
@@ -193,13 +193,13 @@ struct netinfo {
 
 static inline int32_t netinfo(struct netinfo *ni)
 {
-    uint32_t adresy[4];
-    if (sys_netinfo(adresy) != 1)
+    uint32_t addrs[4];
+    if (sys_netinfo(addrs) != 1)
         return -1;
-    ni->ip = adresy[0];
-    ni->mask = adresy[1];
-    ni->gw = adresy[2];
-    ni->dns = adresy[3];
+    ni->ip = addrs[0];
+    ni->mask = addrs[1];
+    ni->gw = addrs[2];
+    ni->dns = addrs[3];
     return 0;
 }
 

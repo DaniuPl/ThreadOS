@@ -26,35 +26,35 @@
 #include "include/printk.h"
 #include "include/string.h"
 
-#define JEDNOSTEK   64
-#define POWTORZEN   48
+#define UNITS   64
+#define RETRIES   48
 #define SLOW        (4096 / 4)      /* slow w ramce */
 
-struct proba {
-    volatile uint32_t bledow;       /* niezgodnosci wzorca */
-    volatile uint32_t nieudanych;   /* przydzialy, ktore sie nie udaly */
-    volatile uint32_t przydzialow;
+struct attempt {
+    volatile uint32_t nerrors;       /* niezgodnosci wzorca */
+    volatile uint32_t failed;   /* przydzialy, ktore sie nie udaly */
+    volatile uint32_t allocs;
 };
 
-static uint32_t wzorzec(uint32_t numer, uint32_t krok)
+static uint32_t pattern(uint32_t number, uint32_t step)
 {
-    return numer * 2654435761u + krok * 40503u + 1u;
+    return number * 2654435761u + step * 40503u + 1u;
 }
 
-static void jednostka(uint32_t numer, void *dane)
+static void unit(uint32_t number, void *data)
 {
-    struct proba *p = dane;
+    struct attempt *p = data;
 
-    for (uint32_t i = 0; i < POWTORZEN; i++) {
-        __atomic_add_fetch(&p->przydzialow, 1, __ATOMIC_RELAXED);
+    for (uint32_t i = 0; i < RETRIES; i++) {
+        __atomic_add_fetch(&p->allocs, 1, __ATOMIC_RELAXED);
 
         /* --- ramka fizyczna --- */
-        uint32_t ramka = pmm_alloc_frame();
-        if (!ramka) {
-            __atomic_add_fetch(&p->nieudanych, 1, __ATOMIC_RELAXED);
+        uint32_t frame = pmm_alloc_frame();
+        if (!frame) {
+            __atomic_add_fetch(&p->failed, 1, __ATOMIC_RELAXED);
         } else {
-            uint32_t w = wzorzec(numer, i);
-            volatile uint32_t *s = (volatile uint32_t *)(uintptr_t)ramka;
+            uint32_t w = pattern(number, i);
+            volatile uint32_t *s = (volatile uint32_t *)(uintptr_t)frame;
             for (uint32_t k = 0; k < SLOW; k++)
                 s[k] = w + k;
             /* Drugi obieg czyta to samo. Gdyby ta sama ramka trafila
@@ -62,25 +62,25 @@ static void jednostka(uint32_t numer, void *dane)
                i wlasnie tu by to wyszlo. */
             for (uint32_t k = 0; k < SLOW; k++)
                 if (s[k] != w + k) {
-                    __atomic_add_fetch(&p->bledow, 1, __ATOMIC_RELAXED);
+                    __atomic_add_fetch(&p->nerrors, 1, __ATOMIC_RELAXED);
                     break;
                 }
-            pmm_free_frame(ramka);
+            pmm_free_frame(frame);
         }
 
         /* --- blok sterty --- */
-        uint32_t ile = 32 + (numer * 7 + i * 13) % 192;
+        uint32_t ile = 32 + (number * 7 + i * 13) % 192;
         uint8_t *b = kmalloc(ile);
         if (!b) {
-            __atomic_add_fetch(&p->nieudanych, 1, __ATOMIC_RELAXED);
+            __atomic_add_fetch(&p->failed, 1, __ATOMIC_RELAXED);
             continue;
         }
-        uint8_t znak = (uint8_t)(numer * 31 + i);
+        uint8_t ch = (uint8_t)(number * 31 + i);
         for (uint32_t k = 0; k < ile; k++)
-            b[k] = (uint8_t)(znak + k);
+            b[k] = (uint8_t)(ch + k);
         for (uint32_t k = 0; k < ile; k++)
-            if (b[k] != (uint8_t)(znak + k)) {
-                __atomic_add_fetch(&p->bledow, 1, __ATOMIC_RELAXED);
+            if (b[k] != (uint8_t)(ch + k)) {
+                __atomic_add_fetch(&p->nerrors, 1, __ATOMIC_RELAXED);
                 break;
             }
         kfree(b);
@@ -89,30 +89,30 @@ static void jednostka(uint32_t numer, void *dane)
 
 void smpmem_test(void)
 {
-    struct proba p = { 0, 0, 0 };
+    struct attempt p = { 0, 0, 0 };
 
-    uint32_t ramek_przed = pmm_used_frames();
-    uint32_t sterty_przed = heap_used_bytes();
+    uint32_t frames_at_start = pmm_used_frames();
+    uint32_t heap_before = heap_used_bytes();
 
-    smp_praca(jednostka, &p, JEDNOSTEK);
+    smp_work(unit, &p, UNITS);
 
-    uint32_t ramek_po = pmm_used_frames();
-    uint32_t sterty_po = heap_used_bytes();
+    uint32_t frames_after = pmm_used_frames();
+    uint32_t heap_after = heap_used_bytes();
 
     printk("Rdzeni: %d (obudzonych %d), jednostek %u po %u przydzialow\n",
-           smp_cpus(), smp_started(), (uint32_t)JEDNOSTEK,
-           (uint32_t)POWTORZEN);
+           smp_cpus(), smp_started(), (uint32_t)UNITS,
+           (uint32_t)RETRIES);
     printk("Udzial:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_udzial(i));
+        printk(" rdzen%d=%u", i, smp_share(i));
     printk("\n");
-    printk("Przydzialow: %u, nieudanych: %u\n", p.przydzialow, p.nieudanych);
+    printk("Przydzialow: %u, nieudanych: %u\n", p.allocs, p.failed);
     printk("Wzorzec: %s (bledow %u)\n",
-           p.bledow ? "NIE ZGADZA SIE" : "zgadza sie", p.bledow);
+           p.nerrors ? "NIE ZGADZA SIE" : "zgadza sie", p.nerrors);
     printk("Ramki: %u -> %u, sterta: %u -> %u B\n",
-           ramek_przed, ramek_po, sterty_przed, sterty_po);
+           frames_at_start, frames_after, heap_before, heap_after);
     printk("Nic nie wycieklo: %s\n",
-           (ramek_przed == ramek_po && sterty_przed == sterty_po)
+           (frames_at_start == frames_after && heap_before == heap_after)
                ? "tak" : "NIE");
-    printk("Liczylo rdzeni: %d\n", smp_pracujacych());
+    printk("Liczylo rdzeni: %d\n", smp_workers());
 }

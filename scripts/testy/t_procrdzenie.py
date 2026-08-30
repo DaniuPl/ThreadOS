@@ -11,9 +11,9 @@ programu uzytkownika bez tablic stron nie znaczyl nic i proces ginal.
 
 Sprawdzamy cztery rzeczy:
 
-  1. 'run rdzen' - dwa procesy trzymane na rdzeniu rozruchowym. Maska
+  1. 'run cores' - dwa procesy trzymane na rdzeniu rozruchowym. Maska
      rdzeni ma byc rowna 1, czyli mechanizm domyslnie NIE rozprasza.
-  2. 'runw rdzen' - te same dwa procesy, wolno im biec wszedzie. Maska
+  2. 'runw cores' - te same dwa procesy, wolno im biec wszedzie. Maska
      ma miec wiecej niz jeden bit, czyli pierscien 3 naprawde byl poza
      rdzeniem rozruchowym.
   3. Czas. Oba procesy licza tyle samo, wiec na jednym rdzeniu kazdy
@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, wynik, zrob_iso64, brak64
 
-WZOR = re.compile(r"\[rdzen\] (dziecko|rodzic ): rdzenie (\d+), "
+WZOR = re.compile(r"\[cores\] (dziecko|rodzic ): rdzenie (\d+), "
                   r"tyknac (\d+), suma (\d+)")
 
 
@@ -71,7 +71,7 @@ def proba(q, rdzeni, etykieta):
     naraz = None
 
     po_kolei = sprawdz_pare(
-        q.polecenie("run rdzen", "gotowe", timeout=180), " ('run')" + etykieta)
+        q.polecenie("run cores", "gotowe", timeout=180), " ('run')" + etykieta)
     if po_kolei:
         maska, tyknac, _ = po_kolei
         check("bez 'runw' oba procesy zostaly na rdzeniu rozruchowym "
@@ -80,7 +80,7 @@ def proba(q, rdzeni, etykieta):
               "(%d tyknac)%s" % (tyknac, etykieta), tyknac >= 20)
 
     naraz = sprawdz_pare(
-        q.polecenie("runw rdzen", "gotowe", timeout=180),
+        q.polecenie("runw cores", "gotowe", timeout=180),
         " ('runw')" + etykieta)
     if not (po_kolei and naraz):
         return

@@ -47,12 +47,12 @@
  * jest obietnica, ze przeczytalo sie je do konca, razem z tym, co wola
  * dalej. Domyslna odpowiedz brzmi "z zamkiem" i tak ma zostac.
  */
-int syscall_bez_zamka(uint32_t nr)
+int syscall_lockless(uint32_t nr)
 {
     switch (nr) {
     case SYS_GETPID:     /* wlasny numer, jedno pole zadania */
     case SYS_GETTICKS:   /* licznik przerwan zegara, jedno slowo */
-    case SYS_RDZEN:      /* pytanie do wlasnego lokalnego APIC */
+    case SYS_CORE:      /* pytanie do wlasnego lokalnego APIC */
     case SYS_SLEEP:      /* wlasne "obudz mnie" i scheduler, ktory ma
                             swoj zamek - a przez przelaczenie kontekstu
                             wielkiego zamka i tak sie nie trzyma */
@@ -372,16 +372,16 @@ void syscall_handler(struct regs *r)
         /* Plik widziany jako pamiec. Nazwa przychodzi z ring 3, wiec
            przepisujemy ja do jadra, a rozmiar oddajemy przez wskaznik,
            bo adres zajmuje juz cala wartosc powrotu. */
-        char nazwa[FS_NAME_MAX + 1];
-        if (user_str(nazwa, r->ebx, sizeof(nazwa)) < 0) {
+        char name[FS_NAME_MAX + 1];
+        if (user_str(name, r->ebx, sizeof(name)) < 0) {
             r->eax = 0;
             break;
         }
-        uint32_t rozmiar = 0;
-        uint32_t adres = process_mmap_file(nazwa, &rozmiar, r->edx);
-        if (adres && user_put(r->ecx, &rozmiar, sizeof(rozmiar)) < 0)
-            adres = 0;
-        r->eax = adres;
+        uint32_t size = 0;
+        uint32_t addr = process_mmap_file(name, &size, r->edx);
+        if (addr && user_put(r->ecx, &size, sizeof(size)) < 0)
+            addr = 0;
+        r->eax = addr;
         break;
     }
     case SYS_MSYNC:
@@ -390,8 +390,8 @@ void syscall_handler(struct regs *r)
     /* Numer rdzenia. Program nie ma jak przeczytac go sam - lokalny
        APIC jest poza jego przestrzenia - a bez tego nie da sie
        pokazac, ze proces naprawde biegl gdzie indziej. */
-    case SYS_RDZEN:
-        r->eax = (uint32_t)smp_rdzen();
+    case SYS_CORE:
+        r->eax = (uint32_t)smp_core();
         break;
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);

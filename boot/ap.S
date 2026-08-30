@@ -24,18 +24,18 @@
  */
 
 #define AP_BASE 0x8000
-#define OFF(x)  (AP_BASE + ((x) - ap_trampolina))
+#define OFF(x)  (AP_BASE + ((x) - ap_trampoline))
 
 .section .text
-.globl ap_trampolina
-.globl ap_trampolina_koniec
-.globl ap_licznik
-.globl ap_stos
-.globl ap_numer
+.globl ap_trampoline
+.globl ap_trampoline_end
+.globl ap_counter
+.globl ap_stack
+.globl ap_number
 .globl ap_cr3
 
 .code16
-ap_trampolina:
+ap_trampoline:
     cli
     cld
     xorw %ax, %ax
@@ -53,10 +53,10 @@ ap_trampolina:
     movl %eax, %cr0
 
     /* Skok dalekomorski przelacza deskryptor kodu na 32-bitowy */
-    ljmpl $0x08, $OFF(ap_chroniony)
+    ljmpl $0x08, $OFF(ap_protected)
 
 .code32
-ap_chroniony:
+ap_protected:
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -82,12 +82,12 @@ ap_chroniony:
 
     /* Stos podaje procesor rozruchowy, po jednym na kazdy obudzony:
        tutaj nie ma jeszcze zadnego sposobu, zeby go sobie przydzielic */
-    movl $OFF(ap_stos), %eax
+    movl $OFF(ap_stack), %eax
     movl (%eax), %esp
 
     /* Zglos sie. Licznik rosnie niepodzielnie, bo procesorow moze
        ruszac kilka i kazdy pisze w to samo slowo. */
-    movl $OFF(ap_licznik), %eax
+    movl $OFF(ap_counter), %eax
     lock incl (%eax)
 
     /* I do roboty. Numer rdzenia idzie na stos jako argument, a sama
@@ -96,13 +96,13 @@ ap_chroniony:
 
        Ten rdzen nie ma tablicy wyjatkow ani przerwan, wiec funkcja
        po drugiej stronie nie moze sie mylic i nie wraca. */
-    movl $OFF(ap_numer), %eax
+    movl $OFF(ap_number), %eax
     pushl (%eax)
     /* Adres funkcji przez rejestr, nie skokiem wzglednym: ten kod
        wykonuje sie pod 0x8000, a przesuniecie policzone przy
        linkowaniu opisuje odleglosc od miejsca, w ktorym LEZY
        w obrazie jadra. Skok wzgledny trafilby wiec w prozne. */
-    movl $smp_ap_glowna, %eax
+    movl $smp_ap_main, %eax
     call *%eax
 
 1:  hlt
@@ -113,24 +113,24 @@ ap_gdt:
     .quad 0x0000000000000000      /* deskryptor zerowy */
     .quad 0x00CF9A000000FFFF      /* kod 32-bitowy, caly zakres */
     .quad 0x00CF92000000FFFF      /* dane 32-bitowe, caly zakres */
-ap_gdt_koniec:
+ap_gdt_end:
 
 ap_gdtr:
-    .word ap_gdt_koniec - ap_gdt - 1
+    .word ap_gdt_end - ap_gdt - 1
     .long OFF(ap_gdt)
 
 /* Wypelniane przez procesor rozruchowy przed kazdym SIPI */
 .align 4
-ap_stos:
+ap_stack:
     .long 0
-ap_numer:
+ap_number:
     .long 0
-ap_licznik:
+ap_counter:
     .long 0
 ap_cr3:
     .long 0
 
-ap_trampolina_koniec:
+ap_trampoline_end:
 
 /* Stos tego bloku nie jest wykonywalny - linker chce to slyszec */
 .section .note.GNU-stack,"",@progbits

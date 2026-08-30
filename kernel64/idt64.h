@@ -5,6 +5,6 @@
 void idt64_init(void);
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
-void idt64_zaladuj(void);
+void idt64_load(void);
 
 #endif

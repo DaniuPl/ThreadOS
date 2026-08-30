@@ -68,8 +68,8 @@ static inline void sha256_block(struct sha256 *c, const uint8_t *p)
         uint32_t ch = (e & f) ^ (~e & g);
         uint32_t t1 = h + S1 + ch + sha256_k[i] + w[i];
         uint32_t S0 = sha256_ror(a, 2) ^ sha256_ror(a, 13) ^ sha256_ror(a, 22);
-        uint32_t maj = (a & b) ^ (a & cc) ^ (b & cc);
-        uint32_t t2 = S0 + maj;
+        uint32_t may_flag = (a & b) ^ (a & cc) ^ (b & cc);
+        uint32_t t2 = S0 + may_flag;
 
         h = g; g = f; f = e;
         e = d + t1;

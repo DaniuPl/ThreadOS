@@ -67,23 +67,23 @@
 #define IO_QID    1
 
 /* Polecenie: 64 bajty o ukladzie narzuconym przez standard */
-struct polecenie {
+struct command {
     uint8_t opcode;
-    uint8_t flagi;
+    uint8_t flags;
     uint16_t cid;
     uint32_t nsid;
-    uint64_t rezerwa;
-    uint64_t metadane;
+    uint64_t reserve;
+    uint64_t metadata;
     uint64_t prp1;
     uint64_t prp2;
     uint32_t cdw10, cdw11, cdw12, cdw13, cdw14, cdw15;
 } __attribute__((packed));
 
 /* Odpowiedz: 16 bajtow, z bitem fazy w polu stanu */
-struct ukonczenie {
-    uint32_t wynik;
-    uint32_t rezerwa;
-    uint16_t glowa_sq;
+struct completion {
+    uint32_t result;
+    uint32_t reserve;
+    uint16_t sq_head;
     uint16_t id_sq;
     uint16_t cid;
     uint16_t stan;             /* bit 0 = faza, bity 1-15 = kod bledu */
@@ -93,36 +93,36 @@ struct ukonczenie {
    wyrownane do strony - kontroler siega po nie sam, a adresy podaje
    sie mu wskaznikami PRP, ktore opisuja strony, a nie dowolne
    kawalki. */
-static struct polecenie adm_sq[QSIZE] __attribute__((aligned(4096)));
-static struct ukonczenie adm_cq[QSIZE] __attribute__((aligned(4096)));
-static struct polecenie io_sq[QSIZE] __attribute__((aligned(4096)));
-static struct ukonczenie io_cq[QSIZE] __attribute__((aligned(4096)));
+static struct command adm_sq[QSIZE] __attribute__((aligned(4096)));
+static struct completion adm_cq[QSIZE] __attribute__((aligned(4096)));
+static struct command io_sq[QSIZE] __attribute__((aligned(4096)));
+static struct completion io_cq[QSIZE] __attribute__((aligned(4096)));
 
 /* Bufor posredniczacy. Wskaznik PRP opisuje strone, a wolajacy podaje
    nam bufory lezace gdziekolwiek - przepisanie przez wlasna, wyrownana
    strone jest tansze niz tlumaczenie kazdego takiego bufora na liste
    stron. Osiem sektorow to dokladnie jedna strona. */
-static uint8_t bufor[4096] __attribute__((aligned(4096)));
-#define BUF_SEKTOROW (4096 / SECTOR)
+static uint8_t dma_buf[4096] __attribute__((aligned(4096)));
+#define BUF_SECTORS (4096 / SECTOR)
 
-static volatile uint8_t *baza;
+static volatile uint8_t *base;
 static int present;
-static uint32_t sektorow;
+static uint32_t nsectors;
 static uint32_t db_krok;        /* odstep miedzy dzwonkami */
 
-static uint16_t adm_ogon, io_ogon;
-static uint16_t adm_glowa, io_glowa;
-static uint8_t adm_faza = 1, io_faza = 1;
-static uint16_t nastepny_cid = 1;
+static uint16_t adm_tail, io_tail;
+static uint16_t adm_head, io_head;
+static uint8_t adm_phase = 1, io_phase = 1;
+static uint16_t next_cid = 1;
 
 static uint32_t rd32(uint32_t reg)
 {
-    return *(volatile uint32_t *)(baza + reg);
+    return *(volatile uint32_t *)(base + reg);
 }
 
 static void wr32(uint32_t reg, uint32_t v)
 {
-    *(volatile uint32_t *)(baza + reg) = v;
+    *(volatile uint32_t *)(base + reg) = v;
 }
 
 static uint64_t rd64(uint32_t reg)
@@ -137,70 +137,70 @@ static void wr64(uint32_t reg, uint64_t v)
 }
 
 /* Dzwonek: dwa na kolejke (ogon zgloszen, glowa ukonczen) */
-static void dzwon_sq(int qid, uint16_t ogon)
+static void doorbell_sq(int qid, uint16_t tail)
 {
-    wr32(REG_DB + (uint32_t)(2 * qid) * db_krok, ogon);
+    wr32(REG_DB + (uint32_t)(2 * qid) * db_krok, tail);
 }
 
-static void dzwon_cq(int qid, uint16_t glowa)
+static void doorbell_cq(int qid, uint16_t head)
 {
-    wr32(REG_DB + (uint32_t)(2 * qid + 1) * db_krok, glowa);
+    wr32(REG_DB + (uint32_t)(2 * qid + 1) * db_krok, head);
 }
 
 /* Wklada polecenie i czeka na odpowiedz. Zwraca kod bledu (0 = dobrze)
    albo -1, gdy kontroler w ogole nie odpowiedzial. */
-static int wykonaj(struct polecenie *sq, struct ukonczenie *cq, int qid,
-                   uint16_t *ogon, uint16_t *glowa, uint8_t *faza,
-                   const struct polecenie *co)
+static int execute(struct command *sq, struct completion *cq, int qid,
+                   uint16_t *tail, uint16_t *head, uint8_t *phase,
+                   const struct command *co)
 {
-    uint16_t cid = nastepny_cid++;
-    sq[*ogon] = *co;
-    sq[*ogon].cid = cid;
+    uint16_t cid = next_cid++;
+    sq[*tail] = *co;
+    sq[*tail].cid = cid;
 
-    *ogon = (uint16_t)((*ogon + 1) % QSIZE);
-    dzwon_sq(qid, *ogon);
+    *tail = (uint16_t)((*tail + 1) % QSIZE);
+    doorbell_sq(qid, *tail);
 
     for (int spin = 0; spin < 20000000; spin++) {
-        volatile struct ukonczenie *u = &cq[*glowa];
-        if ((u->stan & 1) != *faza)
+        volatile struct completion *u = &cq[*head];
+        if ((u->stan & 1) != *phase)
             continue;
 
-        int kod = (u->stan >> 1) & 0x7FF;
-        uint16_t wrocil = u->cid;
+        int code = (u->stan >> 1) & 0x7FF;
+        uint16_t returned = u->cid;
 
-        *glowa = (uint16_t)((*glowa + 1) % QSIZE);
-        if (*glowa == 0)
-            *faza ^= 1;            /* okrazenie odwraca faze */
-        dzwon_cq(qid, *glowa);
+        *head = (uint16_t)((*head + 1) % QSIZE);
+        if (*head == 0)
+            *phase ^= 1;            /* okrazenie odwraca faze */
+        doorbell_cq(qid, *head);
 
-        if (wrocil != cid)
+        if (returned != cid)
             return -1;             /* odpowiedz nie na to pytanie */
-        return kod;
+        return code;
     }
     return -1;
 }
 
-static int adm(const struct polecenie *co)
+static int adm(const struct command *co)
 {
-    return wykonaj(adm_sq, adm_cq, 0, &adm_ogon, &adm_glowa, &adm_faza, co);
+    return execute(adm_sq, adm_cq, 0, &adm_tail, &adm_head, &adm_phase, co);
 }
 
-static int io(const struct polecenie *co)
+static int io(const struct command *co)
 {
-    return wykonaj(io_sq, io_cq, IO_QID, &io_ogon, &io_glowa, &io_faza, co);
+    return execute(io_sq, io_cq, IO_QID, &io_tail, &io_head, &io_phase, co);
 }
 
 int nvme_present(void)      { return present; }
-uint32_t nvme_sectors(void) { return sektorow; }
+uint32_t nvme_sectors(void) { return nsectors; }
 
 /* Jedna partia: najwyzej strona danych, bo tyle opisuje jeden PRP */
-static int partia(uint32_t lba, uint32_t count, int zapis)
+static int batch(uint32_t lba, uint32_t count, int write)
 {
-    struct polecenie p;
+    struct command p;
     memset(&p, 0, sizeof(p));
-    p.opcode = zapis ? IO_WRITE : IO_READ;
+    p.opcode = write ? IO_WRITE : IO_READ;
     p.nsid = 1;
-    p.prp1 = (uint64_t)(uintptr_t)bufor;
+    p.prp1 = (uint64_t)(uintptr_t)dma_buf;
     p.cdw10 = lba;                 /* mlodsze 32 bity adresu bloku */
     p.cdw11 = 0;
     p.cdw12 = count - 1;           /* liczba blokow, liczona od zera */
@@ -211,14 +211,14 @@ int nvme_read(uint32_t lba, uint32_t count, void *buf)
 {
     if (!present)
         return -1;
-    uint8_t *cel = buf;
+    uint8_t *dst = buf;
 
     while (count) {
-        uint32_t ile = count > BUF_SEKTOROW ? BUF_SEKTOROW : count;
-        if (partia(lba, ile, 0) < 0)
+        uint32_t ile = count > BUF_SECTORS ? BUF_SECTORS : count;
+        if (batch(lba, ile, 0) < 0)
             return -1;
-        memcpy(cel, bufor, ile * SECTOR);
-        cel += ile * SECTOR;
+        memcpy(dst, dma_buf, ile * SECTOR);
+        dst += ile * SECTOR;
         lba += ile;
         count -= ile;
     }
@@ -229,14 +229,14 @@ int nvme_write(uint32_t lba, uint32_t count, const void *buf)
 {
     if (!present)
         return -1;
-    const uint8_t *zrodlo = buf;
+    const uint8_t *src = buf;
 
     while (count) {
-        uint32_t ile = count > BUF_SEKTOROW ? BUF_SEKTOROW : count;
-        memcpy(bufor, zrodlo, ile * SECTOR);
-        if (partia(lba, ile, 1) < 0)
+        uint32_t ile = count > BUF_SECTORS ? BUF_SECTORS : count;
+        memcpy(dma_buf, src, ile * SECTOR);
+        if (batch(lba, ile, 1) < 0)
             return -1;
-        zrodlo += ile * SECTOR;
+        src += ile * SECTOR;
         lba += ile;
         count -= ile;
     }
@@ -244,45 +244,45 @@ int nvme_write(uint32_t lba, uint32_t count, const void *buf)
 }
 
 /* Pyta o opis przestrzeni nazw numer 1: ile ma blokow i jak duzych */
-static int poznaj_dysk(void)
+static int identify_disk(void)
 {
-    struct polecenie p;
+    struct command p;
     memset(&p, 0, sizeof(p));
     p.opcode = ADM_IDENTIFY;
     p.nsid = 1;
-    p.prp1 = (uint64_t)(uintptr_t)bufor;
+    p.prp1 = (uint64_t)(uintptr_t)dma_buf;
     p.cdw10 = 0;                   /* opis przestrzeni nazw */
     if (adm(&p) != 0)
         return 0;
 
-    uint64_t blokow = 0;
+    uint64_t nblocks = 0;
     for (int i = 0; i < 8; i++)
-        blokow |= (uint64_t)bufor[i] << (8 * i);
+        nblocks |= (uint64_t)dma_buf[i] << (8 * i);
 
     /* Rozmiar bloku siedzi w tablicy formatow: numer uzywanego formatu
        jest w bajcie 26, a sam format - cztery bajty - od 128. Jego
        bajt 2 mowi, ile to bitow adresu w bloku (potega dwojki). */
-    uint32_t format = bufor[26] & 0x0F;
-    uint32_t bity = bufor[128 + format * 4 + 2];
-    uint32_t rozmiar = bity < 32 ? (1u << bity) : 0;
+    uint32_t format = dma_buf[26] & 0x0F;
+    uint32_t bits = dma_buf[128 + format * 4 + 2];
+    uint32_t size = bits < 32 ? (1u << bits) : 0;
 
-    if (rozmiar != SECTOR) {
+    if (size != SECTOR) {
         printk("[ !! ] NVMe: blok %u B, a system pracuje na %u B\n",
-               rozmiar, (uint32_t)SECTOR);
+               size, (uint32_t)SECTOR);
         return 0;
     }
-    if (!blokow)
+    if (!nblocks)
         return 0;
 
-    sektorow = blokow > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)blokow;
+    nsectors = nblocks > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)nblocks;
     return 1;
 }
 
 /* Zamawia pare kolejek na dane. Ukonczen najpierw - kolejka zgloszen
    musi wiedziec, dokad odsylac odpowiedzi. */
-static int zaloz_kolejki(void)
+static int setup_queues(void)
 {
-    struct polecenie p;
+    struct command p;
 
     memset(&p, 0, sizeof(p));
     p.opcode = ADM_CREATE_CQ;
@@ -316,7 +316,7 @@ int nvme_init(void)
         return 0;
 
     pci_enable_bus_master(&dev);
-    baza = (volatile uint8_t *)(uintptr_t)mmio;
+    base = (volatile uint8_t *)(uintptr_t)mmio;
 
     uint64_t cap = rd64(REG_CAP);
     db_krok = 4u << ((uint32_t)(cap >> 32) & 0x0F);   /* CAP.DSTRD */
@@ -332,8 +332,8 @@ int nvme_init(void)
     memset(adm_cq, 0, sizeof(adm_cq));
     memset(io_sq, 0, sizeof(io_sq));
     memset(io_cq, 0, sizeof(io_cq));
-    adm_ogon = adm_glowa = io_ogon = io_glowa = 0;
-    adm_faza = io_faza = 1;
+    adm_tail = adm_head = io_tail = io_head = 0;
+    adm_phase = io_phase = 1;
 
     wr32(REG_AQA, ((QSIZE - 1) << 16) | (QSIZE - 1));
     wr64(REG_ASQ, (uint64_t)(uintptr_t)adm_sq);
@@ -351,7 +351,7 @@ int nvme_init(void)
     if (!(rd32(REG_CSTS) & CSTS_RDY))
         return 0;
 
-    if (!poznaj_dysk() || !zaloz_kolejki())
+    if (!identify_disk() || !setup_queues())
         return 0;
 
     present = 1;

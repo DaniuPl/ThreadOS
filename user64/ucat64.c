@@ -8,7 +8,7 @@
 
 #include "usys64.h"
 
-static char bufor[256];
+static char buf[256];
 
 void _start(int argc, char **argv)
 {
@@ -28,8 +28,8 @@ void _start(int argc, char **argv)
     /* Czytamy porcjami az do konca - deskryptor sam pamieta, gdzie
        stanal, wiec kolejny odczyt zaczyna tam, gdzie skonczyl poprzedni */
     int64_t n;
-    while ((n = sys_read((int)fd, bufor, sizeof(bufor))) > 0)
-        sys_write(FD_STDOUT, bufor, (uint64_t)n);
+    while ((n = sys_read((int)fd, buf, sizeof(buf))) > 0)
+        sys_write(FD_STDOUT, buf, (uint64_t)n);
 
     sys_close((int)fd);
     sys_exit(0);

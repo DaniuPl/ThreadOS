@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ZAMEKJADRA_H
-#define PROTONOS_ZAMEKJADRA_H
+#ifndef PROTONOS_BIGLOCK_H
+#define PROTONOS_BIGLOCK_H
 
 /* Wielki zamek jadra
  *
@@ -28,20 +28,20 @@
  */
 
 /* Wchodze w kod jadra (albo juz w nim jestem - wtedy tylko licznik) */
-void jadro_wejdz(void);
+void biglock_enter(void);
 
 /* Wychodze; zamek zwalnia sie dopiero przy ostatnim wyjsciu */
-void jadro_wyjdz(void);
+void biglock_leave(void);
 
 /* Czy ten rdzen trzyma zamek */
-int jadro_trzymam(void);
+int biglock_held(void);
 
 /* Oddaje zamek CALKOWICIE i zwraca, ile razy byl wziety - do uzycia
    przy przelaczaniu kontekstu, gdzie zadanie musi go puscic, zeby inne
    moglo wejsc do jadra. */
-int jadro_zwolnij_wszystko(void);
+int biglock_release_all(void);
 
 /* Bierze go z powrotem na te sama glebokosc */
-void jadro_przywroc(int glebokosc);
+void biglock_restore(int depth);
 
 #endif

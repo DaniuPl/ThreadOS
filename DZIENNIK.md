@@ -59,8 +59,8 @@ ProtonOS/
 │   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
 │   ├── dynlink.c       # biblioteka współdzielona: symbole i relokacje
 │   ├── smpmem.c        # próba zamków: pamięć jądra ze wszystkich rdzeni
-│   ├── smpwatki.c      # próba schedulera: wątki jądra na wszystkich rdzeniach
-│   ├── zamekjadra.c    # wielki zamek jądra (zagnieżdżalny, jeden na system)
+│   ├── smpthreads.c    # próba schedulera: wątki jądra na wszystkich rdzeniach
+│   ├── biglock.c       # wielki zamek jądra (zagnieżdżalny, jeden na system)
 │   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
 │   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
 │   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
@@ -92,8 +92,8 @@ ProtonOS/
 │   ├── mv.c            # przenosi plik (kopia + unlink źródła)
 │   ├── mkdir.c         # tworzy katalog (sys_mkdir)
 │   ├── spin.c          # długo żyjący proces do demonstracji kill
-│   ├── rdzen.c         # rozwidla się i mówi, które rdzenie go prowadziły
-│   ├── wywolania.c     # mierzy same wejścia do jądra (milion sys_getpid)
+│   ├── cores.c         # rozwidla się i mówi, które rdzenie go prowadziły
+│   ├── syscalls.c      # mierzy same wejścia do jądra (milion sys_getpid)
 │   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
 │   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
 │   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
@@ -1348,7 +1348,7 @@ sprawdzane przez `make test`.
       pięć tysięcy wierszy w `user/*.h` - liczą na bajtach i o trybie
       procesora nie wiedzą nic. Do jądra mówią kilkoma nazwami: połącz
       się, wyślij, odbierz, która godzina, otwórz plik. Te nazwy są
-      umową; `user64/uzgodnosc64.h` przekłada je na wywołania trybu
+      umową; `user64/compat64.h` przekłada je na wywołania trybu
       długiego, a `user/uapi.h` wybiera stronę. Dokładnie ten sam
       wzorzec, co `kernel64/compat64.c` po stronie jądra - i drugi raz
       okazał się tańszy, niż się bałem.
@@ -1942,7 +1942,7 @@ sprawdzane przez `make test`.
       następca.
 
       Z tego samego powodu stan bieżącego zadania zmienia się teraz
-      **pod zamkiem**, razem z wyborem następnego (`przelacz(stan)`).
+      **pod zamkiem**, razem z wyborem następnego (`switch_to(stan)`).
       Ustawiony wcześniej dawałby okno, w którym zadanie jest oznaczone
       jako śpiące, a jego stos wciąż zajęty - i drugi rdzeń mógłby je
       w tym czasie obudzić.
@@ -1950,7 +1950,7 @@ sprawdzane przez `make test`.
       **Czego rdzeniowi wtórnemu nadal nie wolno, i dlaczego to jest
       decyzja, a nie niedoróbka.** Zwykłe zadanie zostaje na rdzeniu
       rozruchowym. Rdzeń wtórny bierze tylko to, co ktoś jawnie na to
-      pozwolił przez `task_create_wszedzie` - bo reszta jądra sięga po
+      pozwolił przez `task_create_anycore` - bo reszta jądra sięga po
       sterowniki, system plików i wymianę stron, a te pisane były dla
       jednego rdzenia i cicho na to liczą. Segment stanu zadania jest
       jeden i należy do rdzenia rozruchowego, więc ring 3 też zostaje
@@ -2001,7 +2001,7 @@ sprawdzane przez `make test`.
       i cicho na to liczy. Zamek jest zagnieżdżalny, bo musi: przerwanie
       trafia w środek wywołania systemowego, a rdzeń, który już go
       trzyma, nie może na siebie czekać. Bierze go każde wejście z
-      pierścienia 3 i oddaje każde wyjście, a `przelacz` oddaje go **na
+      pierścienia 3 i oddaje każde wyjście, a `switch_to` oddaje go **na
       czas przełączenia** - inaczej zadanie usypiające w środku
       syscalla zamykałoby jądro dla wszystkich aż do swojego
       przebudzenia. Głębokość leży na stosie tego zadania, więc każde
@@ -2034,7 +2034,7 @@ sprawdzane przez `make test`.
       stronicowania tryb długi po prostu nie rusza.
 
       **Wątek a proces to teraz dwie różne zgody.** Zadanie jądra
-      utworzone przez `task_create_wszedzie` jest *samodzielne*: nie
+      utworzone przez `task_create_anycore` jest *samodzielne*: nie
       bierze wielkiego zamka, bo ten, kto o nie poprosił, wziął na
       siebie, że jego wątek dotyka wyłącznie rzeczy znoszących dwa
       rdzenie naraz. Gdyby brało, cztery wątki liczące równolegle
@@ -2043,8 +2043,8 @@ sprawdzane przez `make test`.
       równolegle idzie samo liczenie w pierścieniu 3, a tam program i
       tak spędza większość czasu.
 
-      **Dowód znów jest porównaniem, nie pomiarem.** `run rdzen` i
-      `runw rdzen` w tej samej maszynie: ten sam program, ta sama suma
+      **Dowód znów jest porównaniem, nie pomiarem.** `run cores` i
+      `runw cores` w tej samej maszynie: ten sam program, ta sama suma
       kontrolna co do bitu, ta sama liczba kroków. Różni je tylko to,
       ilu rdzeniom wolno go prowadzić. W trybie długim 86 tyknięć wobec
       **33** i maska wszystkich czterech rdzeni; w trybie chronionym 42
@@ -2065,14 +2065,14 @@ sprawdzane przez `make test`.
       Zamek wrócił na miejsce w tym kroku.
 
       **Najpierw pomiar, który pokazał coś zupełnie innego.** Program
-      `wywolania` wola jądro milion razy i nic poza tym nie robi. Pod
+      `syscalls` wola jądro milion razy i nic poza tym nie robi. Pod
       wielkim zamkiem dwa procesy na czterech rdzeniach kończyły w 1080
       tyknięciach, a te same dwa na jednym rdzeniu w 594. Cztery
       rdzenie były więc **dwa razy wolniejsze** niż jeden. Ale gdy
       zdjąłem zamek z tego wywołania, poprawa wyszła znikoma - czyli
       zamek nie był tu wcale największym kosztem.
 
-      Był nim `smp_rdzen()`. Całe jądro mówi słowem `current`, a to
+      Był nim `smp_core()`. Całe jądro mówi słowem `current`, a to
       słowo znaczy "zadanie TEGO rdzenia" - więc każde jego użycie
       pytało procesor o numer rdzenia, a pytanie szło **odczytem
       z lokalnego APIC**. To rejestr sprzętowy poza pamięcią podręczną:

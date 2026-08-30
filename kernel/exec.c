@@ -13,7 +13,7 @@
 #include "include/prog.h"
 #include "include/paging.h"
 #include "include/dynlink.h"
-#include "include/zamekjadra.h"
+#include "include/biglock.h"
 #include "include/smp.h"
 #include "include/pmm.h"
 #include "include/task.h"
@@ -42,7 +42,7 @@
    dziki wskaznik nie zamienil sie po cichu w zmapowana strone - pod
    nia blad strony pozostaje bledem. */
 #define USER_STACK_MAX   (256 * 1024u)
-#define USER_STACK_DNO   (USER_STACK_TOP - USER_STACK_MAX)
+#define USER_STACK_BOTTOM   (USER_STACK_TOP - USER_STACK_MAX)
 /* Biblioteka wspoldzielona lezy pod stalym adresem, ten sam we
    wszystkich procesach - tylko dzieki temu jej kod moze byc naprawde
    jeden. Miejsce jest tuz pod obszarem mapowan, a sterta konczy sie
@@ -64,7 +64,7 @@ struct exec_args {
     int out_pipe;                 /* stdout do potoku (idx) albo -1 */
     char out_file[FS_NAME_MAX + 1]; /* stdout do pliku ("" = brak) */
     int out_append;               /* 1 = dopisuj (>>), 0 = obcinaj (>) */
-    int wszedzie;                 /* 1 = wolno go prowadzic kazdemu rdzeniowi */
+    int anycore;                 /* 1 = wolno go prowadzic kazdemu rdzeniowi */
 };
 
 /* Nagłówki ELF32 (tylko pola, których używamy) */
@@ -113,12 +113,12 @@ static uint32_t page_frame_for_ro(uint32_t dir, uint32_t vaddr)
 
 /* Swieza ramka pod strone zapisywalnego odwzorowania pliku: z prawem
    zapisu, ale oznaczona tak, ze fork ja wspoldzieli, a wymiana omija */
-static uint32_t page_frame_for_plik(uint32_t dir, uint32_t vaddr)
+static uint32_t page_frame_for_file(uint32_t dir, uint32_t vaddr)
 {
     uint32_t frame = pmm_alloc_frame();
     if (!frame)
         return 0;
-    if (!paging_map_user_plik_in(dir, vaddr, frame)) {
+    if (!paging_map_user_file_in(dir, vaddr, frame)) {
         pmm_free_frame(frame);
         return 0;
     }
@@ -184,39 +184,39 @@ static int load_segment(uint32_t dir, const uint8_t *file,
  * procesu nie ma prawa byc widoczny w drugim. Kazdy dostaje wiec
  * swieza kopie - dokladnie tak, jak robi to kazdy inny system.
  */
-static int mapuj_biblioteke(uint32_t dir)
+static int map_library(uint32_t dir)
 {
-    dyn_adres vaddr;
+    dyn_addr vaddr;
     uint32_t memsz, filesz;
-    int prawa;
-    const uint8_t *dane;
+    int right;
+    const uint8_t *data;
 
-    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &prawa, &dane);
+    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &right, &data);
          i++) {
         uint32_t start = vaddr & ~0xFFFu;
-        uint32_t koniec = vaddr + memsz;
-        for (uint32_t va = start; va < koniec; va += PAGE_SIZE) {
-            if (!(prawa & DYN_ZAPIS)) {
-                uint32_t ramka = dyn_ramka(va);
-                if (!ramka)
+        uint32_t end = vaddr + memsz;
+        for (uint32_t va = start; va < end; va += PAGE_SIZE) {
+            if (!(right & DYN_WRITE)) {
+                uint32_t frame = dyn_frame(va);
+                if (!frame)
                     return 0;
-                if (!paging_map_user_ro_in(dir, va, ramka))
+                if (!paging_map_user_ro_in(dir, va, frame))
                     return 0;
                 /* Ramka ma przezyc smierc procesu - nalezy do systemu,
                    a nie do niego */
-                pmm_frame_ref(ramka);
+                pmm_frame_ref(frame);
                 continue;
             }
 
-            uint32_t ramka = page_frame_for(dir, va);
-            if (!ramka)
+            uint32_t frame = page_frame_for(dir, va);
+            if (!frame)
                 return 0;
             uint32_t od = va > vaddr ? va : vaddr;
-            uint32_t plik_do = vaddr + filesz;
-            if (od < plik_do) {
-                uint32_t do_ = va + PAGE_SIZE < plik_do ? va + PAGE_SIZE
-                                                       : plik_do;
-                memcpy((void *)(ramka + (od - va)), dane + (od - vaddr),
+            uint32_t file_to = vaddr + filesz;
+            if (od < file_to) {
+                uint32_t do_ = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
+                                                       : file_to;
+                memcpy((void *)(frame + (od - va)), data + (od - vaddr),
                        do_ - od);
             }
         }
@@ -226,13 +226,13 @@ static int mapuj_biblioteke(uint32_t dir)
 
 /* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
    procesu nie jest jeszcze aktywna, wiec idziemy przez ramke. */
-static int wpisz_adres(void *ctx, dyn_adres adres, dyn_adres wartosc)
+static int write_addr(void *ctx, dyn_addr addr, dyn_addr value)
 {
     uint32_t dir = *(uint32_t *)ctx;
-    uint32_t ramka = paging_get_mapping(dir, adres & ~0xFFFu);
-    if (!ramka)
+    uint32_t frame = paging_get_mapping(dir, addr & ~0xFFFu);
+    if (!frame)
         return -1;
-    *(uint32_t *)(ramka + (adres & 0xFFFu)) = wartosc;
+    *(uint32_t *)(frame + (addr & 0xFFFu)) = value;
     return 0;
 }
 
@@ -310,8 +310,8 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
                             uint32_t *esp_out, uint32_t *brk_out)
 {
     uint32_t size;
-    void *wczytany = (void *)0;
-    const uint8_t *file = prog_obraz(tok[0], &size, &wczytany);
+    void *loaded = (void *)0;
+    const uint8_t *file = prog_image(tok[0], &size, &loaded);
     if (!file) {
         printk("exec: nie ma '%s' ani w initrd, ani na dysku "
                "(sprawdz 'ls' i 'fls')\n", tok[0]);
@@ -321,14 +321,14 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
         printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
-        prog_zwolnij(wczytany);
+        prog_release(loaded);
         return 0;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
         printk("exec: brak pamieci na katalog stron\n");
-        prog_zwolnij(wczytany);
+        prog_release(loaded);
         return 0;
     }
 
@@ -342,7 +342,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
             continue;
         if (!load_segment(dir, file, &ph[i])) {
             paging_destroy_address_space(dir);
-            prog_zwolnij(wczytany);
+            prog_release(loaded);
             return 0;
         }
         if (ph[i].p_vaddr + ph[i].p_memsz > brk)
@@ -353,20 +353,20 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
        na adresy funkcji z biblioteki. Wtedy trzeba te miejsca
        wypelnic - i zrobic to TERAZ, przed pierwsza instrukcja, bo
        skok przez niewypelniona pozycje nie ma dokad prowadzic. */
-    if (dyn_program_dynamiczny(file, size)) {
-        if (!dyn_obecna()) {
+    if (dyn_is_dynamic(file, size)) {
+        if (!dyn_present()) {
             printk("exec: '%s' potrzebuje biblioteki %s, ktorej nie ma\n",
-                   tok[0], dyn_nazwa());
+                   tok[0], dyn_name());
             paging_destroy_address_space(dir);
-            prog_zwolnij(wczytany);
+            prog_release(loaded);
             return 0;
         }
-        if (!mapuj_biblioteke(dir) ||
-            dyn_relokuj(file, size, &dir, wpisz_adres) < 0) {
+        if (!map_library(dir) ||
+            dyn_relocate(file, size, &dir, write_addr) < 0) {
             printk("exec: '%s' - nie da sie zwiazac z %s\n",
-                   tok[0], dyn_nazwa());
+                   tok[0], dyn_name());
             paging_destroy_address_space(dir);
-            prog_zwolnij(wczytany);
+            prog_release(loaded);
             return 0;
         }
     }
@@ -379,7 +379,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         if (!frame) {
             printk("exec: brak pamieci na stos\n");
             paging_destroy_address_space(dir);
-            prog_zwolnij(wczytany);
+            prog_release(loaded);
             return 0;
         }
         if (i == 0)
@@ -390,10 +390,10 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     *entry_out = eh->e_entry;
     *brk_out = brk;
     printk("[jadro] exec '%s' z %s: ELF %u B, entry %x, argc=%d\n",
-           tok[0], prog_skad(), size, eh->e_entry, argc);
+           tok[0], prog_source(), size, eh->e_entry, argc);
     /* Segmenty sa juz w stronach procesu - kopia w pamieci jadra
        nie jest do niczego potrzebna */
-    prog_zwolnij(wczytany);
+    prog_release(loaded);
     return dir;
 }
 
@@ -405,8 +405,8 @@ static void exec_task(void *arg)
     /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
        zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
        wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
-    if (a->wszedzie)
-        task_wszedzie_dla_mnie();
+    if (a->anycore)
+        task_set_anycore();
 
     /* Tokenizacja w miejscu: a->cmd to nasza kopia */
     char *tok[ARG_MAX];
@@ -442,7 +442,7 @@ static void exec_task(void *arg)
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
        Program moze biec rownolegle z innymi; do jadra wroci przez
        przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
-    jadro_wyjdz();
+    biglock_leave();
     enter_ring3(entry, esp);
 }
 
@@ -497,20 +497,20 @@ int process_demand_page(uint32_t addr)
        dopiero teraz, warstwa blokowa, po numerach ustalonych przy
        zakladaniu odwzorowania. Do kodu systemu plikow tu nie wchodzimy:
        ma on jeden wspolny bufor na blok. */
-    uint32_t pierwszy = 0, zostalo = 0, zapis = 0;
-    if (task_mmap_znajdz(addr, &pierwszy, &zostalo, &zapis)) {
-        uint32_t ramka = zapis ? page_frame_for_plik(dir, va)
+    uint32_t first = 0, remaining = 0, write = 0;
+    if (task_mmap_find(addr, &first, &remaining, &write)) {
+        uint32_t frame = write ? page_frame_for_file(dir, va)
                                : page_frame_for_ro(dir, va);
-        if (!ramka)
+        if (!frame)
             return 0;
-        uint8_t *cel = (uint8_t *)ramka;
-        memset(cel, 0, PAGE_SIZE);
+        uint8_t *dst = (uint8_t *)frame;
+        memset(dst, 0, PAGE_SIZE);
         for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
-                             zostalo > b * FS_BLOCK; b++) {
-            uint32_t blok = task_mmap_blok(addr, pierwszy + b);
+                             remaining > b * FS_BLOCK; b++) {
+            uint32_t blok = task_mmap_block(addr, first + b);
             if (!blok)
                 break;
-            blk_read(fs_block_lba(blok), FS_BLOCK / 512, cel + b * FS_BLOCK);
+            blk_read(fs_block_lba(blok), FS_BLOCK / 512, dst + b * FS_BLOCK);
         }
         mmap_pages++;
         return 1;
@@ -521,7 +521,7 @@ int process_demand_page(uint32_t addr)
     /* Stos rosnie w dol pod palcami - dokladnie tak, jak sterta rosnie
        w gore. Osiem stron dostaje program na start, reszta dochodzi
        wtedy, gdy naprawde jej dotknie. */
-    int in_stack = addr >= USER_STACK_DNO && addr < USER_STACK_TOP;
+    int in_stack = addr >= USER_STACK_BOTTOM && addr < USER_STACK_TOP;
     if (!in_heap && !in_mmap && !in_stack)
         return 0;
 
@@ -546,7 +546,7 @@ static void fork_child(void *arg)
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
        Program moze biec rownolegle z innymi; do jadra wroci przez
        przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
-    jadro_wyjdz();
+    biglock_leave();
     enter_ring3_regs(&frame);
 }
 
@@ -620,7 +620,7 @@ int process_exec(const char *cmdline)
     /* Opisy odwzorowan mowily o przestrzeni, ktorej juz nie bedzie,
        a ich zakresy adresow leza tam, gdzie nowy obraz zaraz zacznie
        zakladac wlasne - musza zniknac razem ze starym obrazem */
-    task_mmap_zwolnij();
+    task_mmap_release();
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
 
@@ -632,7 +632,7 @@ int process_exec(const char *cmdline)
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
        Program moze biec rownolegle z innymi; do jadra wroci przez
        przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
-    jadro_wyjdz();
+    biglock_leave();
     enter_ring3(entry, esp);       /* nie wraca */
     return 0;
 }
@@ -693,47 +693,47 @@ uint32_t process_mmap(uint32_t size)
  * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
  * bajcie zabiloby caly sens odwzorowania.
  */
-uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out,
-                           uint32_t zapis)
+uint32_t process_mmap_file(const char *name, uint32_t *size_out,
+                           uint32_t write)
 {
     if (!fs_ready())
         return 0;
 
-    int f = fs_open(task_cwd(), nazwa, 0);
+    int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return 0;
     int len = fs_size(f);
     if (len <= 0)
         return 0;
 
-    uint32_t blokow = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
-    uint32_t stron = ((uint32_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t nblocks = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
+    uint32_t pages = ((uint32_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
 
-    uint32_t baza = task_mmap_next();
-    uint32_t koniec = baza + stron * PAGE_SIZE;
-    if (!baza || koniec > MMAP_MAX || koniec < baza)
+    uint32_t base = task_mmap_next();
+    uint32_t end = base + pages * PAGE_SIZE;
+    if (!base || end > MMAP_MAX || end < base)
         return 0;
 
-    uint32_t *bloki = kmalloc(blokow * sizeof(uint32_t));
-    if (!bloki)
+    uint32_t *blocks = kmalloc(nblocks * sizeof(uint32_t));
+    if (!blocks)
         return 0;
-    for (uint32_t i = 0; i < blokow; i++) {
+    for (uint32_t i = 0; i < nblocks; i++) {
         /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
            strony nie wolno juz wchodzic w kod systemu plikow */
-        bloki[i] = fs_file_block(f, i, 0);
-        if (!bloki[i]) {
-            kfree(bloki);
+        blocks[i] = fs_file_block(f, i, 0);
+        if (!blocks[i]) {
+            kfree(blocks);
             return 0;
         }
     }
 
-    if (task_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow, zapis) < 0) {
-        kfree(bloki);
+    if (task_mmap_add(base, end, (uint32_t)len, blocks, nblocks, write) < 0) {
+        kfree(blocks);
         return 0;
     }
-    task_set_mmap_next(koniec);
-    *rozmiar_out = (uint32_t)len;
-    return baza;
+    task_set_mmap_next(end);
+    *size_out = (uint32_t)len;
+    return base;
 }
 
 /* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
@@ -750,36 +750,36 @@ uint32_t process_msync(void)
     if (!task_mmap_next())
         return 0;
     uint32_t dir = task_current_cr3();
-    uint32_t odeslanych = 0;
+    uint32_t sent_back_n = 0;
 
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        uint32_t start, koniec, rozmiar, zapis;
-        if (!task_mmap_opis(i, &start, &koniec, &rozmiar, &zapis) || !zapis)
+    for (int i = 0; i < MMAP_FILES; i++) {
+        uint32_t start, end, size, write;
+        if (!task_mmap_info(i, &start, &end, &size, &write) || !write)
             continue;
-        for (uint32_t va = start; va < koniec; va += PAGE_SIZE) {
-            if (!paging_plik_brudna(dir, va))
+        for (uint32_t va = start; va < end; va += PAGE_SIZE) {
+            if (!paging_file_dirty(dir, va))
                 continue;
-            uint32_t ramka = paging_get_mapping(dir, va);
-            if (!ramka)
+            uint32_t frame = paging_get_mapping(dir, va);
+            if (!frame)
                 continue;
             uint32_t offset = va - start;
-            const uint8_t *zrodlo = (const uint8_t *)ramka;
+            const uint8_t *src = (const uint8_t *)frame;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
                 /* Za koncem pliku nie ma czego odsylac - blok albo nie
                    istnieje, albo nalezy juz do kogos innego */
-                if (offset + b * FS_BLOCK >= rozmiar)
+                if (offset + b * FS_BLOCK >= size)
                     break;
-                uint32_t blok = task_mmap_blok(va, offset / FS_BLOCK + b);
+                uint32_t blok = task_mmap_block(va, offset / FS_BLOCK + b);
                 if (!blok)
                     break;
                 blk_write(fs_block_lba(blok), FS_BLOCK / 512,
-                          zrodlo + b * FS_BLOCK);
+                          src + b * FS_BLOCK);
             }
-            paging_plik_czysta(dir, va);
-            odeslanych++;
+            paging_file_clean(dir, va);
+            sent_back_n++;
         }
     }
-    return odeslanych;
+    return sent_back_n;
 }
 
 /* Watki w procesie: nowe zadanie dzielace przestrzen adresowa, wchodzace
@@ -802,7 +802,7 @@ static void thread_trampoline(void *a)
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
        Program moze biec rownolegle z innymi; do jadra wroci przez
        przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
-    jadro_wyjdz();
+    biglock_leave();
     enter_ring3(ts.entry, (uint32_t)sp);
 }
 
@@ -865,7 +865,7 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
 
     if (!prog[0])
         return (void *)0;
-    if (!prog_istnieje(prog)) {
+    if (!prog_exists(prog)) {
         printk("run: nie ma '%s' ani w initrd, ani na dysku "
                "(sprawdz 'ls' i 'fls')\n", prog);
         return (void *)0;
@@ -882,7 +882,7 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
     a->out_pipe = -1;
     a->out_file[0] = '\0';
     a->out_append = 0;
-    a->wszedzie = 0;
+    a->anycore = 0;
     return a;
 }
 
@@ -913,13 +913,13 @@ int exec_spawn(const char *cmdline)
  * inaczej byloby to obietnica, ktorej nikt nie moze dotrzymac. Rownolegle
  * idzie samo liczenie w pierscieniu 3, a tam program i tak spedza
  * wieksza czesc czasu. */
-int exec_spawn_wszedzie(const char *cmdline)
+int exec_spawn_anycore(const char *cmdline)
 {
     char prog[16];
     struct exec_args *a = make_args(cmdline, prog);
     if (!a)
         return -1;
-    a->wszedzie = 1;
+    a->anycore = 1;
     return task_id_of(task_create(prog, exec_task, a));
 }
 

@@ -17,29 +17,29 @@
 #define C_WHITE 4
 #define C_BG    8
 
-#define OKNO_W 240
-#define OKNO_H 150
+#define WINDOW_W 240
+#define WINDOW_H 150
 
-#define WIERSZ_MAX 60
-#define PLIK "termout"
+#define ROWS_MAX 60
+#define FILE_MARK "termout"
 
-static char wiersz[WIERSZ_MAX];
-static int dlug;
-static char wynik[1024];
+static char row_text[ROWS_MAX];
+static int length;
+static char result[1024];
 
 /* Uruchamia wpisane polecenie z wyjsciem do pliku i wczytuje wynik */
-static void uruchom(void)
+static void run(void)
 {
-    wiersz[dlug] = '\0';
-    dlug = 0;
-    if (!wiersz[0])
+    row_text[length] = '\0';
+    length = 0;
+    if (!row_text[0])
         return;
 
     /* Plik od nowa: inaczej krotszy wynik zostawilby ogon
        poprzedniego. Kasujemy i zakladamy jeszcze raz - to samo, co
        zrobilby 'rm' przed przekierowaniem. */
-    sys_unlink(PLIK);
-    int fd = (int)sys_open(PLIK, 1);
+    sys_unlink(FILE_MARK);
+    int fd = (int)sys_open(FILE_MARK, 1);
     if (fd < 0)
         return;
 
@@ -50,43 +50,43 @@ static void uruchom(void)
            dalej jest deskryptor numer jeden. */
         sys_dup2(fd, FD_STDOUT);
         sys_close(fd);
-        char *argv[2] = {wiersz, 0};
-        sys_exec(wiersz, argv);
+        char *argv[2] = {row_text, 0};
+        sys_exec(row_text, argv);
         sys_exit(127);               /* exec wraca tylko przy bledzie */
     }
     sys_close(fd);
     if (pid > 0) {
-        int kod = 0;
-        sys_wait(&kod);
+        int code = 0;
+        sys_wait(&code);
     }
 
-    int rd = (int)sys_open(PLIK, 0);
+    int rd = (int)sys_open(FILE_MARK, 0);
     if (rd < 0) {
-        wynik[0] = '\0';
+        result[0] = '\0';
         return;
     }
-    int64_t n = sys_read(rd, wynik, sizeof(wynik) - 1);
+    int64_t n = sys_read(rd, result, sizeof(result) - 1);
     sys_close(rd);
-    wynik[n < 0 ? 0 : n] = '\0';
+    result[n < 0 ? 0 : n] = '\0';
 }
 
 /* Rysuje bufor wyjscia rozbity na wiersze po znaku nowej linii */
-static void rysuj_wynik(int w)
+static void print_result(int w)
 {
     char buf[40];
-    int kol = 0, rzad = 0, y = 4;
+    int kol = 0, row = 0, y = 4;
 
-    for (int i = 0; wynik[i] && rzad < 12; i++) {
-        if (wynik[i] == '\n' || kol >= (int)sizeof(buf) - 1) {
+    for (int i = 0; result[i] && row < 12; i++) {
+        if (result[i] == '\n' || kol >= (int)sizeof(buf) - 1) {
             buf[kol] = '\0';
             win_text(w, 4, y, buf, C_WHITE);
             y += 10;
-            rzad++;
+            row++;
             kol = 0;
-            if (wynik[i] != '\n')
-                buf[kol++] = wynik[i];
-        } else if (wynik[i] != '\r') {
-            buf[kol++] = wynik[i];
+            if (result[i] != '\n')
+                buf[kol++] = result[i];
+        } else if (result[i] != '\r') {
+            buf[kol++] = result[i];
         }
     }
     if (kol) {
@@ -97,7 +97,7 @@ static void rysuj_wynik(int w)
 
 void _start(void)
 {
-    int w = (int)win_create(OKNO_W, OKNO_H, "Terminal");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "Terminal");
     if (w < 0) {
         print("gterm64: pulpit nie dal okna\n");
         sys_exit(1);
@@ -110,20 +110,20 @@ void _start(void)
                 continue;
             char c = (char)ev.val;
             if (c == '\n')
-                uruchom();
+                run();
             else if (c == '\b') {
-                if (dlug > 0)
-                    dlug--;
-            } else if (c >= 0x20 && c < 0x7F && dlug < WIERSZ_MAX - 1) {
-                wiersz[dlug++] = c;
+                if (length > 0)
+                    length--;
+            } else if (c >= 0x20 && c < 0x7F && length < ROWS_MAX - 1) {
+                row_text[length++] = c;
             }
         }
 
-        win_rect(w, 0, 0, OKNO_W, OKNO_H, C_BG);
-        rysuj_wynik(w);
-        wiersz[dlug] = '\0';
-        win_text(w, 4, OKNO_H - 12, ">", C_GREEN);
-        win_text(w, 16, OKNO_H - 12, wiersz, C_WHITE);
+        win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
+        print_result(w);
+        row_text[length] = '\0';
+        win_text(w, 4, WINDOW_H - 12, ">", C_GREEN);
+        win_text(w, 16, WINDOW_H - 12, row_text, C_WHITE);
 
         sys_sleep(60);
     }

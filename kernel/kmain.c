@@ -25,7 +25,7 @@
 #include "include/mb2.h"
 #include "include/usbkbd.h"
 #include "include/dynlink.h"
-#include "include/zamekjadra.h"
+#include "include/biglock.h"
 #include "include/swap.h"
 #include "include/desktop.h"
 #include "include/net.h"
@@ -226,7 +226,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        program - jej ramki sa wspolne dla wszystkich procesow */
     if (dyn_init())
         printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
-               dyn_nazwa(), dyn_stron());
+               dyn_name(), dyn_pages());
 
     /* Pod UEFI nie ma pamieci BIOS-u do przeszukania - wskaznik na
        tablice ACPI podaje wtedy wylacznie loader */
@@ -255,10 +255,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        czeka na sygnal INIT-SIPI. Obudzone przechodza w tryb chroniony
        i staja - dawanie im pracy wymaga schedulera per rdzen i zamkow
        w calym jadrze, a te pisane byly dla jednego rdzenia. */
-    int rdzeni = smp_init();
-    if (rdzeni > 1)
+    int ncores = smp_init();
+    if (ncores > 1)
         printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
-               rdzeni, smp_started());
+               ncores, smp_started());
     else
         printk("[ OK ] Procesory: 1\n");
 
@@ -301,7 +301,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     /* Watek main staje sie watkiem bezczynnosci - a taki nie moze
        trzymac wielkiego zamka jadra: rdzen stojacy na hlt z zamkiem
        w garsci zamknalby jadro dla wszystkich pozostalych. */
-    jadro_wyjdz();
+    biglock_leave();
     for (;;)
         __asm__ volatile("hlt");
 }

@@ -21,7 +21,7 @@
 #include "urand.h"
 #include "uproton.h"
 
-static void powiedz(const char *co, uint32_t v)
+static void report(const char *co, uint32_t v)
 {
     print(co);
     print_dec(v);
@@ -30,35 +30,35 @@ static void powiedz(const char *co, uint32_t v)
 
 /* Punkt odniesienia: wlasna funkcja programu, zeby bylo z czym
    porownac adres kodu biblioteki */
-static void nasza_funkcja(void)
+static void our_fn(void)
 {
     print("");
 }
 
 void _start(int argc, char **argv)
 {
-    nasza_funkcja();
+    our_fn();
 
-    uint32_t kod = (uint32_t)proton_adres_kodu();
-    uint32_t dane = (uint32_t)proton_adres_danych();
-    uint32_t moj = (uint32_t)(uintptr_t)nasza_funkcja;
+    uint32_t code = (uint32_t)proton_code_addr();
+    uint32_t data = (uint32_t)proton_data_addr();
+    uint32_t mine = (uint32_t)(uintptr_t)our_fn;
 
-    powiedz("[dynlib] kod programu pod ", moj);
-    powiedz("[dynlib] kod biblioteki pod ", kod);
-    powiedz("[dynlib] dane biblioteki pod ", dane);
+    report("[dynlib] kod programu pod ", mine);
+    report("[dynlib] kod biblioteki pod ", code);
+    report("[dynlib] dane biblioteki pod ", data);
 
-    if (kod <= moj) {
+    if (code <= mine) {
         print("[dynlib] ZLE: kod biblioteki lezy w obrazie programu\n");
         sys_exit(1);
     }
 
     /* Znany wektor: SHA-256('abc') zaczyna sie od ba 78 16 bf */
-    static const uint8_t chce[8] = { 0xba, 0x78, 0x16, 0xbf,
+    static const uint8_t want[8] = { 0xba, 0x78, 0x16, 0xbf,
                                      0x8f, 0x01, 0xcf, 0xea };
-    uint8_t skrot[32];
-    sha256("abc", 3, skrot);
+    uint8_t digest[32];
+    sha256("abc", 3, digest);
     for (int i = 0; i < 8; i++) {
-        if (skrot[i] != chce[i]) {
+        if (digest[i] != want[i]) {
             print("[dynlib] ZLE: SHA-256 z biblioteki daje nie to, co trzeba\n");
             sys_exit(1);
         }
@@ -70,22 +70,22 @@ void _start(int argc, char **argv)
        wszystkim naraz. Ma sie wiec nie dac, i to ma go zabic. */
     if (argc > 1 && argv[1][0] == 'p') {
         print("[dynlib] probuje pisac po kodzie biblioteki\n");
-        *(volatile uint8_t *)(uintptr_t)kod = 0x90;
+        *(volatile uint8_t *)(uintptr_t)code = 0x90;
         print("[dynlib] ZLE: zapis do kodu biblioteki sie udal\n");
         sys_exit(1);
     }
 
     /* Licznik generatora to stan biblioteki. W swiezym procesie ma byc
        zerowy - bez tego nie wiadomo by bylo, czy dane sa prywatne. */
-    if (proton_licznik_losowosci() != 0) {
+    if (proton_random_counter() != 0) {
         print("[dynlib] ZLE: licznik biblioteki nie zaczyna od zera\n");
         sys_exit(1);
     }
-    uint8_t losowe[64];
+    uint8_t random[64];
     urand_init();
-    urand_bytes(losowe, sizeof(losowe));
-    powiedz("[dynlib] licznik po pobraniu bajtow: ",
-            proton_licznik_losowosci());
+    urand_bytes(random, sizeof(random));
+    report("[dynlib] licznik po pobraniu bajtow: ",
+            proton_random_counter());
 
     print("[dynlib] gotowe\n");
     sys_exit(0);

@@ -17,10 +17,10 @@
 void gdt64_init(void);
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
-void gdt64_zaladuj(void);
+void gdt64_load(void);
 
 /* Laduje segment stanu zadania NALEZACY DO TEGO RDZENIA */
-void gdt64_zaladuj_tss(void);
+void gdt64_load_tss(void);
 
 /* Stos jadra, na ktory procesor przejdzie przy przerwaniu z ring 3 */
 void gdt64_set_kernel_stack(uint64_t rsp);

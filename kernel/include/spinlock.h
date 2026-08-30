@@ -23,20 +23,20 @@
  */
 
 struct spinlock {
-    volatile uint32_t zajety;
+    volatile uint32_t taken;
 };
 
-#define SPINLOCK_WOLNY { 0 }
+#define SPINLOCK_FREE { 0 }
 
 static inline void spin_lock(struct spinlock *z)
 {
-    uint32_t bylo;
+    uint32_t was;
     do {
-        bylo = 1;
+        was = 1;
         __asm__ volatile("xchgl %0, %1"
-                         : "+r"(bylo), "+m"(z->zajety)
+                         : "+r"(was), "+m"(z->taken)
                          : : "memory");
-        if (!bylo)
+        if (!was)
             break;
         /* Podpowiedz dla procesora, ze to petla czekania: oszczedza
            energie i nie zapycha magistrali odczytami */
@@ -48,7 +48,7 @@ static inline void spin_unlock(struct spinlock *z)
 {
     uint32_t zero = 0;
     __asm__ volatile("xchgl %0, %1"
-                     : "+r"(zero), "+m"(z->zajety)
+                     : "+r"(zero), "+m"(z->taken)
                      : : "memory");
 }
 
@@ -68,15 +68,15 @@ static inline void spin_unlock(struct spinlock *z)
  */
 static inline irqflags_t spin_lock_irq(struct spinlock *z)
 {
-    irqflags_t flagi = irq_save();
+    irqflags_t flags = irq_save();
     spin_lock(z);
-    return flagi;
+    return flags;
 }
 
-static inline void spin_unlock_irq(struct spinlock *z, irqflags_t flagi)
+static inline void spin_unlock_irq(struct spinlock *z, irqflags_t flags)
 {
     spin_unlock(z);
-    irq_restore(flagi);
+    irq_restore(flags);
 }
 
 #endif

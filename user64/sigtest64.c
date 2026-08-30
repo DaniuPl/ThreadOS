@@ -10,9 +10,9 @@
 #include "usys64.h"
 
 static volatile int dostalem;
-static volatile uint64_t obroty;
+static volatile uint64_t spins;
 
-static void na_sygnal(int sig)
+static void on_signal(int sig)
 {
     (void)sig;
     print("[sigtest64] procedura obslugi: dostalem sygnal\n");
@@ -22,13 +22,13 @@ static void na_sygnal(int sig)
 void _start(void)
 {
 
-    sys_signal(SIGINT, na_sygnal);
+    sys_signal(SIGINT, on_signal);
     print("[sigtest64] czekam na Ctrl+C\n");
 
     /* Petla bez konca: gdyby sygnal nie dzialal, program zostalby
        tu na zawsze. Licznik pokazuje, ze petla naprawde biegla. */
     while (!dostalem) {
-        obroty++;
+        spins++;
         sys_sleep(10);
     }
 

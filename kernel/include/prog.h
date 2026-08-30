@@ -20,14 +20,14 @@
    NULL. Gdy obraz przyszedl z dysku, w *bufor wraca adres do oddania
    przez prog_zwolnij - obraz z initrd niczego nie wymaga i zostawia
    tam zero. */
-const void *prog_obraz(const char *nazwa, uint32_t *rozmiar, void **bufor);
-void prog_zwolnij(void *bufor);
+const void *prog_image(const char *name, uint32_t *size_out, void **buf_out);
+void prog_release(void *buf);
 
 /* Czy program o tej nazwie w ogole gdzies jest. Sprawdzenie tanie:
    nie wczytuje pliku, tylko pyta o niego initrd i system plikow. */
-int prog_istnieje(const char *nazwa);
+int prog_exists(const char *name);
 
 /* Skad przyszedl ostatnio znaleziony obraz - do komunikatow */
-const char *prog_skad(void);
+const char *prog_source(void);
 
 #endif

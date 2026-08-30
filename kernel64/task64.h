@@ -18,17 +18,17 @@ struct task64;
 
 void scheduler64_init(void);
 /* Zadanie, ktore wolno prowadzic kazdemu rdzeniowi */
-struct task64 *task64_create_wszedzie(const char *name,
+struct task64 *task64_create_anycore(const char *name,
                                       void (*entry)(void *), void *arg);
 
 /* Czy scheduler juz wstal (rdzen wtorny czeka, zanim dolaczy) */
 /* Biezace zadanie wolno odtad prowadzic kazdemu rdzeniowi */
-void task_wszedzie_dla_mnie(void);
+void task_set_anycore(void);
 
-int task_scheduler_gotowy(void);
+int task_scheduler_ready(void);
 
 /* Rdzen wtorny dolacza do schedulera. Nie wraca. */
-void task_rdzen_wejdz(int nr);
+void task_core_enter(int nr);
 
 struct task64 *task64_create(const char *name, void (*entry)(void *),
                              void *arg);
@@ -102,30 +102,30 @@ void task64_inherit_brk(struct task64 *child);
  * a blad strony potrafi trafic w srodek dowolnej operacji na plikach.
  *
  * MMAP_PLIKOW mowi, ile odwzorowan naraz moze miec jeden proces. */
-#define MMAP_PLIKOW 4
+#define MMAP_FILES 4
 
 /* Zaklada odwzorowanie: zapamietuje zakres adresow i numery blokow.
    Zwraca 0 albo -1. Bloki przechodza na wlasnosc zadania. */
-int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
-                      uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis);
+int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
+                      uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
 
 /* Czy adres nalezy do ktoregos odwzorowania. Gdy tak, wpisuje numer
    bloku PFS, ile bajtow pliku zostalo od tego miejsca i czy
    odwzorowanie jest zapisywalne. */
-int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
-                       uint32_t *bajtow, uint32_t *zapis);
+int task64_mmap_find(uint64_t addr, uint32_t *first_block,
+                       uint32_t *nbytes, uint32_t *write);
 
 /* Opis i-tego odwzorowania biezacego procesu (0 = wolny wpis) - do
    odsylania brudnych stron, ktore obchodzi je po kolei. */
-int task64_mmap_opis(int i, uint64_t *start, uint64_t *koniec,
-                     uint32_t *rozmiar, uint32_t *zapis);
+int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
+                     uint32_t *size, uint32_t *write);
 
 /* Numer bloku PFS pod danym indeksem w odwzorowaniu obejmujacym adres */
-uint32_t task64_mmap_blok(uint64_t adres, uint32_t indeks);
+uint32_t task64_mmap_block(uint64_t addr, uint32_t index);
 
 /* Sprzatanie: przy exec i przy koncu zadania */
-void task64_mmap_zwolnij(void);
-void task64_mmap_dziedzicz(struct task64 *dziecko);
+void task64_mmap_release(void);
+void task64_mmap_inherit(struct task64 *child);
 
 /* Nastepny wolny adres w obszarze mapowan procesu */
 uint64_t task64_mmap_next(void);
@@ -134,14 +134,14 @@ void task64_set_mmap_next(uint64_t adr);
 /* Deskryptory otwartych plikow - tablica nalezy do zadania */
 /* Rodzaj tego, co siedzi pod numerem (musi zgadzac sie z task64.c) */
 #define FDK_WOLNY   0
-#define FDK_PLIK    1
+#define FDK_FILE    1
 #define FDK_POTOK_R 2
 #define FDK_POTOK_W 3
 
 int task64_fd_open(int slot);        /* zwraca numer deskryptora albo -1 */
-int task64_fd_pipe(int idx, int czytelnik);
+int task64_fd_pipe(int idx, int reader_task);
 int task64_fd_kind(int fd);
-int task64_fd_dup2(int stary, int nowy);
+int task64_fd_dup2(int old, int fresh_one);
 void task64_fd_close_all(void);
 int task64_fd_slot(int fd);          /* i-wezel w PFS / numer potoku */
 uint32_t task64_fd_pos(int fd);

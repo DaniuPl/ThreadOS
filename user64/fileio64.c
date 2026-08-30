@@ -12,8 +12,8 @@
 
 #include "usys64.h"
 
-static const char TRESC[] = "ProtonOS 64: plik zapisany z ring 3\n";
-static char bufor[128];
+static const char BODY[] = "ProtonOS 64: plik zapisany z ring 3\n";
+static char buf[128];
 static char out[160];
 
 static int put(int n, const char *s)
@@ -34,7 +34,7 @@ static int putn(int n, int64_t v)
     return put(n, tmp);
 }
 
-static void blad(const char *co, int64_t v)
+static void err(const char *co, int64_t v)
 {
     int n = put(0, "[fileio64] BLAD: ");
     n = put(n, co);
@@ -49,16 +49,16 @@ static void blad(const char *co, int64_t v)
 void _start(void)
 {
 
-    uint64_t len = ustrlen(TRESC);
+    uint64_t len = ustrlen(BODY);
 
     print("[fileio64] zakladam plik i pisze do niego z ring 3\n");
     int64_t fd = sys_open("zring3", 1);
     if (fd < 0)
-        blad("open do zapisu", fd);
+        err("open do zapisu", fd);
 
-    int64_t n = sys_write((int)fd, TRESC, len);
+    int64_t n = sys_write((int)fd, BODY, len);
     if (n != (int64_t)len)
-        blad("write", n);
+        err("write", n);
     sys_close((int)fd);
 
     /* Drugie otwarcie zaczyna od poczatku pliku - miejsce, w ktorym
@@ -66,16 +66,16 @@ void _start(void)
     print("[fileio64] otwieram go z powrotem i czytam\n");
     fd = sys_open("zring3", 0);
     if (fd < 0)
-        blad("open do odczytu", fd);
+        err("open do odczytu", fd);
 
-    n = sys_read((int)fd, bufor, sizeof(bufor));
+    n = sys_read((int)fd, buf, sizeof(buf));
     sys_close((int)fd);
     if (n != (int64_t)len)
-        blad("read oddal inna dlugosc", n);
+        err("read oddal inna dlugosc", n);
 
     for (uint64_t i = 0; i < len; i++)
-        if (bufor[i] != TRESC[i])
-            blad("tresc sie nie zgadza na pozycji", (int64_t)i);
+        if (buf[i] != BODY[i])
+            err("tresc sie nie zgadza na pozycji", (int64_t)i);
 
     int m = put(0, "[fileio64] zapisane i odczytane zgadza sie co do bajtu (");
     m = putn(m, (int64_t)len);
@@ -85,7 +85,7 @@ void _start(void)
 
     /* Plik ma nie istniec dopiero wtedy, gdy go nie ma */
     if (sys_open("nie-ma-takiego", 0) >= 0)
-        blad("open wymyslil sobie plik", 0);
+        err("open wymyslil sobie plik", 0);
     print("[fileio64] nieistniejacego pliku jadro nie otwiera\n");
 
     sys_exit(0);

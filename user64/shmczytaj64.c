@@ -7,12 +7,12 @@
 
 #include "usys64.h"
 
-#define KLUCZ  42
-#define WZORZEC 12345
+#define KEY  42
+#define PATTERN 12345
 
 static char out[96];
 
-static void powiedz(const char *a, uint64_t v)
+static void report(const char *a, uint64_t v)
 {
     int n = 0;
     while (*a)
@@ -28,20 +28,20 @@ static void powiedz(const char *a, uint64_t v)
 
 void _start(void)
 {
-    volatile uint32_t *p = sys_shm(KLUCZ, 4096);
+    volatile uint32_t *p = sys_shm(KEY, 4096);
     if (!p) {
         print("[shmczytaj64] brak pamieci wspoldzielonej\n");
         sys_exit(1);
     }
 
-    powiedz("[shmczytaj64] region pod adresem ", (uint64_t)(uintptr_t)p);
-    powiedz("[shmczytaj64] wartosc=", p[0]);
+    report("[shmczytaj64] region pod adresem ", (uint64_t)(uintptr_t)p);
+    report("[shmczytaj64] wartosc=", p[0]);
 
-    if (p[0] != WZORZEC) {
+    if (p[0] != PATTERN) {
         print("[shmczytaj64] ZLE: to nie ta wartosc\n");
         sys_exit(1);
     }
-    p[2] = WZORZEC + 1;              /* odpowiedz ta sama droga */
+    p[2] = PATTERN + 1;              /* odpowiedz ta sama droga */
     print("[shmczytaj64] zgadza sie - dwa procesy, jedna pamiec\n");
     sys_exit(0);
 }

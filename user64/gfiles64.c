@@ -13,18 +13,18 @@
 #define C_GREEN 2
 #define C_WHITE 4
 
-#define OKNO_W 180
-#define OKNO_H 120
-#define WIERSZ_Y0 16
-#define WIERSZ_H  10
+#define WINDOW_W 180
+#define WINDOW_H 120
+#define ROW_Y0 16
+#define ROW_H_PX  10
 #define MAXP      6
 
-static char nazwy[MAXP][NAME_MAX64 + 1];
+static char names[MAXP][NAME_MAX64 + 1];
 static int ile;
-static char zaznaczony[NAME_MAX64 + 1];
-static char podglad[96];
+static char selected[NAME_MAX64 + 1];
+static char preview[96];
 
-static void skopiuj(char *d, const char *s, int max)
+static void copy_out(char *d, const char *s, int max)
 {
     int i = 0;
     while (s[i] && i < max - 1) {
@@ -34,7 +34,7 @@ static void skopiuj(char *d, const char *s, int max)
     d[i] = '\0';
 }
 
-static int takie_same(const char *a, const char *b)
+static int same(const char *a, const char *b)
 {
     while (*a && *a == *b) {
         a++;
@@ -44,31 +44,31 @@ static int takie_same(const char *a, const char *b)
 }
 
 /* Otwiera zaznaczony plik i wczytuje jego poczatek do podgladu */
-static void wczytaj(const char *nazwa)
+static void load(const char *name)
 {
-    skopiuj(zaznaczony, nazwa, sizeof(zaznaczony));
+    copy_out(selected, name, sizeof(selected));
 
-    int fd = (int)sys_open(nazwa, 0);
+    int fd = (int)sys_open(name, 0);
     if (fd < 0) {
-        skopiuj(podglad, "(nie da sie otworzyc)", sizeof(podglad));
+        copy_out(preview, "(nie da sie otworzyc)", sizeof(preview));
         return;
     }
-    int64_t n = sys_read(fd, podglad, sizeof(podglad) - 1);
+    int64_t n = sys_read(fd, preview, sizeof(preview) - 1);
     sys_close(fd);
     if (n < 0)
         n = 0;
-    podglad[n] = '\0';
+    preview[n] = '\0';
     /* Podglad rysuje sie w jednej linii - koniec na pierwszym enterze */
-    for (int i = 0; podglad[i]; i++)
-        if (podglad[i] == '\n') {
-            podglad[i] = '\0';
+    for (int i = 0; preview[i]; i++)
+        if (preview[i] == '\n') {
+            preview[i] = '\0';
             break;
         }
 }
 
 void _start(void)
 {
-    int w = (int)win_create(OKNO_W, OKNO_H, "Pliki");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "Pliki");
     if (w < 0) {
         print("gfiles64: pulpit nie dal okna\n");
         sys_exit(1);
@@ -78,36 +78,36 @@ void _start(void)
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLICK) {
-                int wiersz = (ev.y - WIERSZ_Y0) / WIERSZ_H;
-                if (ev.y >= WIERSZ_Y0 && wiersz >= 0 && wiersz < ile)
-                    wczytaj(nazwy[wiersz]);
+                int row_text = (ev.y - ROW_Y0) / ROW_H_PX;
+                if (ev.y >= ROW_Y0 && row_text >= 0 && row_text < ile)
+                    load(names[row_text]);
             }
         }
 
-        win_rect(w, 0, 0, OKNO_W, OKNO_H, C_BG);
+        win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_text(w, 4, 2, "Pliki na dysku:", C_GREEN);
 
         ile = 0;
-        struct dirent64 wpis;
+        struct dirent64 entry;
         for (int i = 0; i < 32 && ile < MAXP; i++) {
             /* sys_readdir oddaje ZERO przy trafieniu, a -1 na koncu
                katalogu - inaczej niz fs_readdir w jadrze, ktore oddaje
                jedynke. Pomylenie tych dwoch konwencji konczy sie
                pustym oknem, bo pierwszy wpis wyglada jak koniec. */
-            if (sys_readdir(i, &wpis) != 0)
+            if (sys_readdir(i, &entry) != 0)
                 break;
-            skopiuj(nazwy[ile], wpis.name, sizeof(nazwy[0]));
-            int kolor = takie_same(wpis.name, zaznaczony) ? C_BLUE : C_WHITE;
-            win_text(w, 8, WIERSZ_Y0 + ile * WIERSZ_H, nazwy[ile], kolor);
+            copy_out(names[ile], entry.name, sizeof(names[0]));
+            int color = same(entry.name, selected) ? C_BLUE : C_WHITE;
+            win_text(w, 8, ROW_Y0 + ile * ROW_H_PX, names[ile], color);
             ile++;
         }
         if (ile == 0)
-            win_text(w, 8, WIERSZ_Y0, "(pusto)", C_WHITE);
+            win_text(w, 8, ROW_Y0, "(pusto)", C_WHITE);
 
-        win_rect(w, 0, 86, OKNO_W, 1, C_WHITE);
-        if (zaznaczony[0]) {
+        win_rect(w, 0, 86, WINDOW_W, 1, C_WHITE);
+        if (selected[0]) {
             win_text(w, 4, 90, "tresc:", C_GREEN);
-            win_text(w, 4, 102, podglad, C_WHITE);
+            win_text(w, 4, 102, preview, C_WHITE);
         }
 
         sys_sleep(120);

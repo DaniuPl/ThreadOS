@@ -33,7 +33,7 @@
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/smp.h"
 #include "../kernel/include/smpmem.h"
-#include "../kernel/include/smpwatki.h"
+#include "../kernel/include/smpthreads.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fbcon.h"
@@ -70,7 +70,7 @@ static void cmd_help(void)
     printk("           run <program>, clear,\n");
     printk("           ifconfig, arp, ping <adres>, dns <ip>,\n");
     printk("           gfx, pulpit,\n");
-    printk("           reboot, poweroff, smp, smpmem, smpwatki\n");
+    printk("           reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("           runw <prog> - program na dowolnym rdzeniu\n");
 }
 
@@ -84,11 +84,11 @@ static void cmd_mem(void)
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_cow_splits());
 
-    uint32_t wuz, wcal, wout, win;
-    swap_stats(&wuz, &wcal, &wout, &win);
-    if (wcal)
+    uint32_t wuz, not_at_all, wout, win;
+    swap_stats(&wuz, &not_at_all, &wout, &win);
+    if (not_at_all)
         printk("Wymiana: %u/%u stron na dysku "
-               "(wyrzuconych %u, sciagnietych %u)\n", wuz, wcal, wout, win);
+               "(wyrzuconych %u, sciagnietych %u)\n", wuz, not_at_all, wout, win);
     else
         printk("Wymiana: brak pliku wymiany\n");
 }
@@ -105,28 +105,28 @@ static void cmd_disk(void)
     printk("Dysk: %s, %u sektorow (%u MiB)\n",
            blk_name(), blk_sectors(), blk_sectors() / 2048);
 
-    static uint8_t bufor[512];
+    static uint8_t buf[512];
     uint32_t lba = blk_sectors() ? blk_sectors() - 1 : 0;
 
     for (int i = 0; i < 512; i++)
-        bufor[i] = (uint8_t)(i + 7);
-    if (blk_write(lba, 1, bufor) < 0) {
+        buf[i] = (uint8_t)(i + 7);
+    if (blk_write(lba, 1, buf) < 0) {
         printk("disk: zapis sektora %u nie przeszedl\n", lba);
         return;
     }
 
     for (int i = 0; i < 512; i++)
-        bufor[i] = 0;
-    if (blk_read(lba, 1, bufor) < 0) {
+        buf[i] = 0;
+    if (blk_read(lba, 1, buf) < 0) {
         printk("disk: odczyt sektora %u nie przeszedl\n", lba);
         return;
     }
 
-    int rozne = 0;
+    int differ = 0;
     for (int i = 0; i < 512; i++)
-        if (bufor[i] != (uint8_t)(i + 7))
-            rozne++;
-    printk("disk: sektor %u zapisany i odczytany, roznic %d\n", lba, rozne);
+        if (buf[i] != (uint8_t)(i + 7))
+            differ++;
+    printk("disk: sektor %u zapisany i odczytany, roznic %d\n", lba, differ);
 }
 
 /* --- System plikow ------------------------------------------------
@@ -137,9 +137,9 @@ static void cmd_disk(void)
  */
 static void cmd_pwd(void)
 {
-    char sciezka[FS_NAME_MAX * 4];
-    fs_getpath(task64_cwd(), sciezka);
-    printk("%s\n", sciezka);
+    char path[FS_NAME_MAX * 4];
+    fs_getpath(task64_cwd(), path);
+    printk("%s\n", path);
 }
 
 static void cmd_fls(void)
@@ -150,69 +150,69 @@ static void cmd_fls(void)
     }
 
     /* Wypisujemy katalog, w ktorym stoi shell - a nie zawsze glowny */
-    char nazwa[FS_NAME_MAX + 1];
-    uint32_t rozmiar = 0;
-    int katalog = 0;
+    char name[FS_NAME_MAX + 1];
+    uint32_t size = 0;
+    int dir = 0;
     cmd_pwd();
-    for (int i = 0; fs_readdir(task64_cwd(), i, nazwa,
-                               &rozmiar, &katalog) == 1; i++)
-        printk("  %s%s  (%u B)\n", nazwa, katalog ? "/" : "", rozmiar);
+    for (int i = 0; fs_readdir(task64_cwd(), i, name,
+                               &size, &dir) == 1; i++)
+        printk("  %s%s  (%u B)\n", name, dir ? "/" : "", size);
 
     uint32_t uzyte = 0, wszystkie = 0;
     fs_usage(&uzyte, &wszystkie);
     printk("Zajetosc: %u/%u blokow po %u B\n", uzyte, wszystkie, FS_BLOCK);
 }
 
-static void cmd_cat(const char *nazwa)
+static void cmd_cat(const char *name)
 {
-    static char bufor[512];
+    static char buf[512];
 
     if (!fs_ready()) {
         printk("cat: brak systemu plikow\n");
         return;
     }
-    int slot = fs_open(task64_cwd(), nazwa, 0);
-    int n = slot < 0 ? -1 : fs_read_at(slot, 0, bufor, sizeof(bufor) - 1);
+    int slot = fs_open(task64_cwd(), name, 0);
+    int n = slot < 0 ? -1 : fs_read_at(slot, 0, buf, sizeof(buf) - 1);
     if (n < 0) {
-        printk("cat: nie ma pliku '%s'\n", nazwa);
+        printk("cat: nie ma pliku '%s'\n", name);
         return;
     }
-    bufor[n] = '\0';
-    printk("%s", bufor);
-    if (n && bufor[n - 1] != '\n')
+    buf[n] = '\0';
+    printk("%s", buf);
+    if (n && buf[n - 1] != '\n')
         printk("\n");
 }
 
 /* write <plik> <tresc> - reszta linii idzie do pliku */
-static void cmd_write(char *reszta)
+static void cmd_write(char *rest)
 {
     if (!fs_ready()) {
         printk("write: brak systemu plikow\n");
         return;
     }
 
-    char *tresc = reszta;
-    while (*tresc && *tresc != ' ')
-        tresc++;
-    if (!*tresc) {
+    char *body = rest;
+    while (*body && *body != ' ')
+        body++;
+    if (!*body) {
         printk("write: podaj nazwe i tresc\n");
         return;
     }
-    *tresc++ = '\0';                 /* nazwa konczy sie tu */
-    while (*tresc == ' ')
-        tresc++;
+    *body++ = '\0';                 /* nazwa konczy sie tu */
+    while (*body == ' ')
+        body++;
 
     uint32_t len = 0;
-    while (tresc[len])
+    while (body[len])
         len++;
-    tresc[len++] = '\n';             /* plik tekstowy konczy sie linia */
+    body[len++] = '\n';             /* plik tekstowy konczy sie linia */
 
-    int slot = fs_open(task64_cwd(), reszta, 1);
+    int slot = fs_open(task64_cwd(), rest, 1);
     if (slot < 0 || fs_truncate(slot) < 0 ||
-        fs_write_at(slot, 0, tresc, len) < 0)
-        printk("write: nie udalo sie zapisac '%s'\n", reszta);
+        fs_write_at(slot, 0, body, len) < 0)
+        printk("write: nie udalo sie zapisac '%s'\n", rest);
     else
-        printk("write: '%s' zapisany (%u B)\n", reszta, len);
+        printk("write: '%s' zapisany (%u B)\n", rest, len);
 }
 
 /* smp - rozdzielenie liczenia na wszystkie rdzenie
@@ -227,61 +227,61 @@ static void cmd_write(char *reszta)
  * cos sie w ogole policzylo.
  */
 
-#define SMP_JEDNOSTEK 64
-#define SMP_KROKOW    200000
+#define SMP_UNITS 64
+#define SMP_STEPS    200000
 
-static uint32_t smp_wyniki[SMP_JEDNOSTEK];
+static uint32_t smp_results[SMP_UNITS];
 
 /* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
    numeru, wiec wynik nie zalezy od tego, ktory rdzen go policzyl */
-static uint32_t smp_licz_kawalek(uint32_t numer)
+static uint32_t smp_run_chunk(uint32_t number)
 {
-    uint32_t stan = numer * 2654435761u + 12345u;
-    uint32_t suma = 0;
-    for (uint32_t i = 0; i < SMP_KROKOW; i++) {
+    uint32_t stan = number * 2654435761u + 12345u;
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < SMP_STEPS; i++) {
         stan = stan * 1103515245u + 12345u;
-        suma += stan >> 16;
+        sum += stan >> 16;
     }
-    return suma;
+    return sum;
 }
 
-static void smp_jednostka(uint32_t numer, void *dane)
+static void smp_unit(uint32_t number, void *data)
 {
-    (void)dane;
-    if (numer < SMP_JEDNOSTEK)
-        smp_wyniki[numer] = smp_licz_kawalek(numer);
+    (void)data;
+    if (number < SMP_UNITS)
+        smp_results[number] = smp_run_chunk(number);
 }
 
 static void cmd_smp(void)
 {
-    uint32_t wzorzec = 0;
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        wzorzec += smp_licz_kawalek(i);
+    uint32_t pattern = 0;
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        pattern += smp_run_chunk(i);
 
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        smp_wyniki[i] = 0;
-    smp_praca(smp_jednostka, 0, SMP_JEDNOSTEK);
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        smp_results[i] = 0;
+    smp_work(smp_unit, 0, SMP_UNITS);
 
-    uint32_t razem = 0;
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        razem += smp_wyniki[i];
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        total += smp_results[i];
 
     printk("Rdzeni: %d (obudzonych %d), jednostek %u\n",
-           smp_cpus(), smp_started(), (uint32_t)SMP_JEDNOSTEK);
+           smp_cpus(), smp_started(), (uint32_t)SMP_UNITS);
     printk("Udzial:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_udzial(i));
+        printk(" rdzen%d=%u", i, smp_share(i));
     printk("\n");
-    printk("Wynik: %u, wzorzec: %u - %s\n", razem, wzorzec,
-           razem == wzorzec ? "zgadza sie" : "NIE ZGADZA SIE");
-    printk("Liczylo rdzeni: %d\n", smp_pracujacych());
+    printk("Wynik: %u, wzorzec: %u - %s\n", total, pattern,
+           total == pattern ? "zgadza sie" : "NIE ZGADZA SIE");
+    printk("Liczylo rdzeni: %d\n", smp_workers());
 
     /* Wlasny zegar kazdego rdzenia. Rdzen rozruchowy chodzi z PIT
        i tu ma zero - wtorne licza swoje tykniecia w lokalnym APIC,
        i to jest jedyny dowod na to, ze w ogole dostaja przerwania. */
     printk("Zegary rdzeni:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_tykniec(i));
+        printk(" rdzen%d=%u", i, smp_ticks(i));
     printk("\n");
 }
 
@@ -291,47 +291,47 @@ static void cmd_smp(void)
  * na dysku. Dzieki temu program wgrany razem z jadrem da sie przeniesc
  * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad,
  * takze wtedy, gdy w initrd go juz nie ma. */
-static void cmd_cp(char *reszta)
+static void cmd_cp(char *rest)
 {
     if (!fs_ready()) {
         printk("cp: brak systemu plikow\n");
         return;
     }
 
-    char *cel = reszta;
-    while (*cel && *cel != ' ')
-        cel++;
-    if (!*cel) {
+    char *dst = rest;
+    while (*dst && *dst != ' ')
+        dst++;
+    if (!*dst) {
         printk("cp: podaj zrodlo i cel, np. 'cp hello64 hello64'\n");
         return;
     }
-    *cel++ = '\0';                    /* nazwa zrodla konczy sie tu */
-    while (*cel == ' ')
-        cel++;
-    if (!*cel) {
+    *dst++ = '\0';                    /* nazwa zrodla konczy sie tu */
+    while (*dst == ' ')
+        dst++;
+    if (!*dst) {
         printk("cp: podaj cel\n");
         return;
     }
 
-    uint32_t rozmiar = 0;
-    void *wczytany = (void *)0;
-    const void *obraz = prog_obraz(reszta, &rozmiar, &wczytany);
-    if (!obraz) {
-        printk("cp: nie ma '%s'\n", reszta);
+    uint32_t size = 0;
+    void *loaded = (void *)0;
+    const void *image = prog_image(rest, &size, &loaded);
+    if (!image) {
+        printk("cp: nie ma '%s'\n", rest);
         return;
     }
 
     /* fs_write_at oddaje LICZBE zapisanych bajtow, nie zero - plik
        skrocony w polowie tez trzeba uznac za bledny */
-    int slot = fs_open(task64_cwd(), cel, 1);
+    int slot = fs_open(task64_cwd(), dst, 1);
     int ok = slot >= 0 && fs_truncate(slot) >= 0 &&
-             fs_write_at(slot, 0, obraz, rozmiar) == (int)rozmiar;
-    prog_zwolnij(wczytany);
+             fs_write_at(slot, 0, image, size) == (int)size;
+    prog_release(loaded);
 
     if (ok)
-        printk("cp: '%s' -> '%s' (%u B)\n", reszta, cel, rozmiar);
+        printk("cp: '%s' -> '%s' (%u B)\n", rest, dst, size);
     else
-        printk("cp: nie udalo sie zapisac '%s'\n", cel);
+        printk("cp: nie udalo sie zapisac '%s'\n", dst);
 }
 
 /* Rysunek sprawdzajacy tryb graficzny.
@@ -420,13 +420,13 @@ static void execute(const char *line)
         cmd_pwd();
     } else if (starts_with(line, "cd ")) {
         const char *kat = argument(line, 3);
-        int nowy = FS_ROOT;
+        int fresh_one = FS_ROOT;
         if (!kat)
             printk("cd: podaj katalog\n");
-        else if (fs_chdir(task64_cwd(), kat, &nowy) < 0)
+        else if (fs_chdir(task64_cwd(), kat, &fresh_one) < 0)
             printk("cd: nie ma katalogu '%s'\n", kat);
         else
-            task64_set_cwd(nowy);
+            task64_set_cwd(fresh_one);
     } else if (starts_with(line, "mkdir ")) {
         const char *kat = argument(line, 6);
         if (!kat)
@@ -436,25 +436,25 @@ static void execute(const char *line)
         else
             printk("mkdir: '%s' zalozony\n", kat);
     } else if (starts_with(line, "rm ")) {
-        const char *plik = argument(line, 3);
-        if (!plik)
+        const char *file = argument(line, 3);
+        if (!file)
             printk("rm: podaj nazwe\n");
-        else if (fs_unlink(task64_cwd(), plik) < 0)
-            printk("rm: nie ma '%s'\n", plik);
+        else if (fs_unlink(task64_cwd(), file) < 0)
+            printk("rm: nie ma '%s'\n", file);
         else
-            printk("rm: '%s' usuniety\n", plik);
+            printk("rm: '%s' usuniety\n", file);
     } else if (starts_with(line, "cat ")) {
-        const char *nazwa = argument(line, 4);
-        if (nazwa)
-            cmd_cat(nazwa);
+        const char *name = argument(line, 4);
+        if (name)
+            cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
     } else if (!strcmp(line, "smp")) {
         cmd_smp();
     } else if (!strcmp(line, "smpmem")) {
         smpmem_test();
-    } else if (!strcmp(line, "smpwatki")) {
-        smpwatki_test();
+    } else if (!strcmp(line, "smpthreads")) {
+        smpthreads_test();
     } else if (starts_with(line, "cp ")) {
         char *arg = (char *)argument(line, 3);
         if (!arg)
@@ -462,9 +462,9 @@ static void execute(const char *line)
         else
             cmd_cp(arg);
     } else if (starts_with(line, "write ")) {
-        char *reszta = (char *)argument(line, 6);
-        if (reszta)
-            cmd_write(reszta);
+        char *rest = (char *)argument(line, 6);
+        if (rest)
+            cmd_write(rest);
         else
             printk("write: podaj nazwe i tresc\n");
     } else if (!strcmp(line, "pulpit")) {
@@ -482,9 +482,9 @@ static void execute(const char *line)
     } else if (starts_with(line, "dns ")) {
         /* Reczna zmiana serwera nazw - DHCP podaje swoj, ale nie
            zawsze ten jest tym, o ktory chodzi */
-        const char *adres = argument(line, 4);
+        const char *addr = argument(line, 4);
         uint32_t ip = 0;
-        if (!adres || !net_parse_ip(adres, &ip)) {
+        if (!addr || !net_parse_ip(addr, &ip)) {
             printk("uzycie: dns <adres ip serwera>\n");
         } else {
             net_set_dns(ip);
@@ -493,12 +493,12 @@ static void execute(const char *line)
             printk("\n");
         }
     } else if (starts_with(line, "ping ")) {
-        const char *adres = argument(line, 5);
+        const char *addr = argument(line, 5);
         uint32_t ip = 0;
-        if (!adres)
+        if (!addr)
             printk("ping: podaj adres\n");
-        else if (!net_parse_ip(adres, &ip))
-            printk("ping: '%s' to nie jest adres IP\n", adres);
+        else if (!net_parse_ip(addr, &ip))
+            printk("ping: '%s' to nie jest adres IP\n", addr);
         else
             net_ping(ip, 3);
     } else if (!strcmp(line, "disk")) {
@@ -525,23 +525,23 @@ static void execute(const char *line)
            i nie czekamy na niego, zeby dalo sie puscic kilka naraz.
            Jego strona jadrowa i tak chodzi pod wielkim zamkiem;
            rownolegle idzie liczenie w pierscieniu 3. */
-        const char *nazwa = argument(line, 5);
-        if (!nazwa) {
+        const char *name = argument(line, 5);
+        if (!name) {
             printk("runw: podaj nazwe programu (zobacz 'ls')\n");
             return;
         }
         static char progw[16];
         int pw = 0;
-        while (nazwa[pw] && nazwa[pw] != ' ' && pw < (int)sizeof(progw) - 1) {
-            progw[pw] = nazwa[pw];
+        while (name[pw] && name[pw] != ' ' && pw < (int)sizeof(progw) - 1) {
+            progw[pw] = name[pw];
             pw++;
         }
         progw[pw] = '\0';
-        if (!prog_istnieje(progw)) {
+        if (!prog_exists(progw)) {
             printk("runw: nie ma programu '%s'\n", progw);
             return;
         }
-        if (proc64_spawn_wszedzie(progw, 0, 1) < 0)
+        if (proc64_spawn_anycore(progw, 0, 1) < 0)
             printk("runw: nie udalo sie uruchomic '%s'\n", progw);
     } else if (starts_with(line, "run ")) {
         const char *name = argument(line, 4);
@@ -559,7 +559,7 @@ static void execute(const char *line)
         prog[pn] = '\0';
         name = prog;
 
-        if (!prog_istnieje(name)) {
+        if (!prog_exists(name)) {
             printk("run: nie ma programu '%s' "
                    "(zobacz 'ls' i 'fls')\n", name);
             return;
@@ -582,10 +582,10 @@ static void execute(const char *line)
                 i++;
         }
 
-        uint32_t ramki_przed = pmm_used_frames();
-        uint32_t strony_przed = isr64_heap_pages();
-        uint32_t stosu_przed = isr64_stack_pages();
-        uint32_t plikow_przed = isr64_mmap_pages();
+        uint32_t frames_before = pmm_used_frames();
+        uint32_t pages_before = isr64_heap_pages();
+        uint32_t stack_before = isr64_stack_pages();
+        uint32_t files_before = isr64_mmap_pages();
         int id = proc64_spawn(name, args.argc ? &args : 0, 0);
         if (id < 0) {
             printk("run: nie udalo sie uruchomic '%s'\n", name);
@@ -603,10 +603,10 @@ static void execute(const char *line)
         else
             printk("[%s] koniec, kod wyjscia %d (ramek %u -> %u, "
                    "stron sterty %u, stosu %u, z plikow %u)\n",
-                   name, code, ramki_przed, pmm_used_frames(),
-                   isr64_heap_pages() - strony_przed,
-                   isr64_stack_pages() - stosu_przed,
-                   isr64_mmap_pages() - plikow_przed);
+                   name, code, frames_before, pmm_used_frames(),
+                   isr64_heap_pages() - pages_before,
+                   isr64_stack_pages() - stack_before,
+                   isr64_mmap_pages() - files_before);
     } else {
         printk("Nieznane polecenie: %s (sprobuj 'help')\n", line);
     }

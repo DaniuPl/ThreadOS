@@ -14,7 +14,7 @@
  */
 
 #define AP_BASE 0x8000
-#define OFF(x)  (AP_BASE + ((x) - ap_trampolina))
+#define OFF(x)  (AP_BASE + ((x) - ap_trampoline))
 
 #define CR4_PAE   (1 << 5)
 #define CR0_PG    (1 << 31)
@@ -24,15 +24,15 @@
 #define EFER_NXE  (1 << 11)
 
 .section .text
-.globl ap_trampolina
-.globl ap_trampolina_koniec
-.globl ap_licznik
-.globl ap_stos
+.globl ap_trampoline
+.globl ap_trampoline_end
+.globl ap_counter
+.globl ap_stack
 .globl ap_cr3
-.globl ap_numer
+.globl ap_number
 
 .code16
-ap_trampolina:
+ap_trampoline:
     cli
     cld
     xorw %ax, %ax
@@ -46,10 +46,10 @@ ap_trampolina:
     movl %cr0, %eax
     orl $CR0_PE, %eax
     movl %eax, %cr0
-    ljmpl $0x08, $OFF(ap_chroniony)
+    ljmpl $0x08, $OFF(ap_protected)
 
 .code32
-ap_chroniony:
+ap_protected:
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -90,10 +90,10 @@ ap_chroniony:
     orl $CR0_PG, %eax
     movl %eax, %cr0
 
-    ljmpl $0x18, $OFF(ap_dlugi)
+    ljmpl $0x18, $OFF(ap_long)
 
 .code64
-ap_dlugi:
+ap_long:
     movw $0x20, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -101,10 +101,10 @@ ap_dlugi:
     movw %ax, %gs
     movw %ax, %ss
 
-    movq $OFF(ap_stos), %rax
+    movq $OFF(ap_stack), %rax
     movq (%rax), %rsp
 
-    movq $OFF(ap_licznik), %rax
+    movq $OFF(ap_counter), %rax
     lock incl (%rax)
 
     /* I do roboty. Numer rdzenia w RDI - tak, jak kaze konwencja
@@ -114,9 +114,9 @@ ap_dlugi:
        Adres funkcji przez rejestr: skok wzgledny siegnie najwyzej
        dwa gigabajty, a jadro lezy poza tym zasiegiem od miejsca,
        w ktorym ten kod sie wykonuje. */
-    movq $OFF(ap_numer), %rax
+    movq $OFF(ap_number), %rax
     movl (%rax), %edi
-    movabsq $smp_ap_glowna, %rax
+    movabsq $smp_ap_main, %rax
     call *%rax
 
 1:  hlt
@@ -129,24 +129,24 @@ ap_gdt:
     .quad 0x00CF92000000FFFF      /* 0x10: dane 32-bitowe */
     .quad 0x00AF9A000000FFFF      /* 0x18: kod 64-bitowy (bit L) */
     .quad 0x00CF92000000FFFF      /* 0x20: dane */
-ap_gdt_koniec:
+ap_gdt_end:
 
 ap_gdtr:
-    .word ap_gdt_koniec - ap_gdt - 1
+    .word ap_gdt_end - ap_gdt - 1
     .long OFF(ap_gdt)
 
 /* Wypelniane przez procesor rozruchowy przed kazdym SIPI */
 .align 8
-ap_stos:
+ap_stack:
     .quad 0
 ap_cr3:
     .long 0
-ap_numer:
+ap_number:
     .long 0
-ap_licznik:
+ap_counter:
     .long 0
 
-ap_trampolina_koniec:
+ap_trampoline_end:
 
 /* Stos tego bloku nie jest wykonywalny - linker chce to slyszec */
 .section .note.GNU-stack,"",@progbits

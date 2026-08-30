@@ -13,7 +13,7 @@
 
 #include "usys64.h"
 
-#define OBROTOW 20
+#define SPINS 20
 
 static char out[128];
 
@@ -38,28 +38,28 @@ void _start(int argc, char **argv)
         start = 1;
 
     double v = (double)start;
-    for (int i = 0; i < OBROTOW; i++) {
+    for (int i = 0; i < SPINS; i++) {
         v = v * 2.0 + 1.0;
         sys_sleep(20);               /* tu wchodzi drugi proces */
     }
 
     /* To samo na liczbach calkowitych - wynik musi byc identyczny */
-    uint64_t oczekiwane = (uint64_t)start;
-    for (int i = 0; i < OBROTOW; i++)
-        oczekiwane = oczekiwane * 2 + 1;
+    uint64_t expected = (uint64_t)start;
+    for (int i = 0; i < SPINS; i++)
+        expected = expected * 2 + 1;
 
-    uint64_t wynik = (uint64_t)v;
+    uint64_t result = (uint64_t)v;
 
     int n = put(0, "[fpu64] start ");
     n = putn(n, (uint64_t)start);
     n = put(n, ": wyszlo ");
-    n = putn(n, wynik);
+    n = putn(n, result);
     n = put(n, ", mialo ");
-    n = putn(n, oczekiwane);
-    n = put(n, wynik == oczekiwane ? " - zgadza sie\n"
+    n = putn(n, expected);
+    n = put(n, result == expected ? " - zgadza sie\n"
                                    : " - NIE ZGADZA SIE\n");
     out[n] = 0;
     print(out);
 
-    sys_exit(wynik == oczekiwane ? 0 : 1);
+    sys_exit(result == expected ? 0 : 1);
 }

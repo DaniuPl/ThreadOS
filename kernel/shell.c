@@ -21,7 +21,7 @@
 #include "include/prog.h"
 #include "include/smp.h"
 #include "include/smpmem.h"
-#include "include/smpwatki.h"
+#include "include/smpthreads.h"
 #include "include/pit.h"
 #include "include/heap.h"
 #include "include/task.h"
@@ -85,7 +85,7 @@ static const struct {
     {"cp A B",   "przepisz plik na dysk"},
     {"smp",      "policz cos na wszystkich rdzeniach"},
     {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
-    {"smpwatki", "watki jadra na wszystkich rdzeniach"},
+    {"smpthreads", "watki jadra na wszystkich rdzeniach"},
     {"runw",     "jak run, ale program moze biec na kazdym rdzeniu"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
@@ -318,33 +318,33 @@ static void cmd_write(char *args)
  * na dysk jednym poleceniem - i od tej chwili uruchamiac go stamtad. */
 static void cmd_cp(char *args)
 {
-    char *cel = args;
-    while (*cel && *cel != ' ')
-        cel++;
-    if (*cel == ' ')
-        *cel++ = '\0';
-    while (*cel == ' ')
-        cel++;
+    char *dst = args;
+    while (*dst && *dst != ' ')
+        dst++;
+    if (*dst == ' ')
+        *dst++ = '\0';
+    while (*dst == ' ')
+        dst++;
 
-    if (!*args || !*cel) {
+    if (!*args || !*dst) {
         printk("uzycie: cp <zrodlo> <cel>\n");
         return;
     }
 
-    uint32_t rozmiar = 0;
-    void *wczytany = (void *)0;
-    const void *obraz = prog_obraz(args, &rozmiar, &wczytany);
-    if (!obraz) {
+    uint32_t size = 0;
+    void *loaded = (void *)0;
+    const void *image = prog_image(args, &size, &loaded);
+    if (!image) {
         printk("cp: nie ma '%s'\n", args);
         return;
     }
-    int ok = fs_write(cel, obraz, rozmiar) == 0;
-    prog_zwolnij(wczytany);
+    int ok = fs_write(dst, image, size) == 0;
+    prog_release(loaded);
 
     if (ok)
-        printk("cp: '%s' -> '%s' (%u B)\n", args, cel, rozmiar);
+        printk("cp: '%s' -> '%s' (%u B)\n", args, dst, size);
     else
-        printk("cp: nie udalo sie zapisac '%s'\n", cel);
+        printk("cp: nie udalo sie zapisac '%s'\n", dst);
 }
 
 /* smp - rozdzielenie liczenia na wszystkie rdzenie
@@ -359,61 +359,61 @@ static void cmd_cp(char *args)
  * cos sie w ogole policzylo.
  */
 
-#define SMP_JEDNOSTEK 64
-#define SMP_KROKOW    200000
+#define SMP_UNITS 64
+#define SMP_STEPS    200000
 
-static uint32_t smp_wyniki[SMP_JEDNOSTEK];
+static uint32_t smp_results[SMP_UNITS];
 
 /* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
    numeru, wiec wynik nie zalezy od tego, ktory rdzen go policzyl */
-static uint32_t smp_licz_kawalek(uint32_t numer)
+static uint32_t smp_run_chunk(uint32_t number)
 {
-    uint32_t stan = numer * 2654435761u + 12345u;
-    uint32_t suma = 0;
-    for (uint32_t i = 0; i < SMP_KROKOW; i++) {
+    uint32_t stan = number * 2654435761u + 12345u;
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < SMP_STEPS; i++) {
         stan = stan * 1103515245u + 12345u;
-        suma += stan >> 16;
+        sum += stan >> 16;
     }
-    return suma;
+    return sum;
 }
 
-static void smp_jednostka(uint32_t numer, void *dane)
+static void smp_unit(uint32_t number, void *data)
 {
-    (void)dane;
-    if (numer < SMP_JEDNOSTEK)
-        smp_wyniki[numer] = smp_licz_kawalek(numer);
+    (void)data;
+    if (number < SMP_UNITS)
+        smp_results[number] = smp_run_chunk(number);
 }
 
 static void cmd_smp(void)
 {
-    uint32_t wzorzec = 0;
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        wzorzec += smp_licz_kawalek(i);
+    uint32_t pattern = 0;
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        pattern += smp_run_chunk(i);
 
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        smp_wyniki[i] = 0;
-    smp_praca(smp_jednostka, 0, SMP_JEDNOSTEK);
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        smp_results[i] = 0;
+    smp_work(smp_unit, 0, SMP_UNITS);
 
-    uint32_t razem = 0;
-    for (uint32_t i = 0; i < SMP_JEDNOSTEK; i++)
-        razem += smp_wyniki[i];
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < SMP_UNITS; i++)
+        total += smp_results[i];
 
     printk("Rdzeni: %d (obudzonych %d), jednostek %u\n",
-           smp_cpus(), smp_started(), (uint32_t)SMP_JEDNOSTEK);
+           smp_cpus(), smp_started(), (uint32_t)SMP_UNITS);
     printk("Udzial:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_udzial(i));
+        printk(" rdzen%d=%u", i, smp_share(i));
     printk("\n");
-    printk("Wynik: %u, wzorzec: %u - %s\n", razem, wzorzec,
-           razem == wzorzec ? "zgadza sie" : "NIE ZGADZA SIE");
-    printk("Liczylo rdzeni: %d\n", smp_pracujacych());
+    printk("Wynik: %u, wzorzec: %u - %s\n", total, pattern,
+           total == pattern ? "zgadza sie" : "NIE ZGADZA SIE");
+    printk("Liczylo rdzeni: %d\n", smp_workers());
 
     /* Wlasny zegar kazdego rdzenia. Rdzen rozruchowy chodzi z PIT
        i tu ma zero - wtorne licza swoje tykniecia w lokalnym APIC,
        i to jest jedyny dowod na to, ze w ogole dostaja przerwania. */
     printk("Zegary rdzeni:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_tykniec(i));
+        printk(" rdzen%d=%u", i, smp_ticks(i));
     printk("\n");
 }
 
@@ -482,7 +482,7 @@ static void run_command(char *cmd)
        idzie liczenie w pierscieniu 3. */
     else if (!strcmp(cmd, "runw")) {
         if (*arg)
-            exec_spawn_wszedzie(arg);
+            exec_spawn_anycore(arg);
         else
             printk("uzycie: runw <plik> (jak 'run', ale na kazdym "
                    "rdzeniu)\n");
@@ -505,8 +505,8 @@ static void run_command(char *cmd)
         cmd_smp();
     else if (!strcmp(cmd, "smpmem"))
         smpmem_test();
-    else if (!strcmp(cmd, "smpwatki"))
-        smpwatki_test();
+    else if (!strcmp(cmd, "smpthreads"))
+        smpthreads_test();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
     else if (!strcmp(cmd, "uptime"))

@@ -91,46 +91,46 @@ static uint64_t page_frame_for(uint64_t va, uint64_t flags)
  * Segment z danymi jest inny i musi byc: biblioteka trzyma w nim swoj
  * stan, a stan jednego procesu nie ma prawa byc widoczny w drugim.
  */
-static int mapuj_biblioteke(void)
+static int map_library(void)
 {
     uint64_t vaddr;
     uint32_t memsz, filesz;
-    int prawa;
-    const uint8_t *dane;
+    int right;
+    const uint8_t *data;
 
-    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &prawa, &dane);
+    for (int i = 0; dyn_segment(i, &vaddr, &memsz, &filesz, &right, &data);
          i++) {
         /* Prawa podaje sam ELF - tak samo jak przy segmentach programu.
            Dane biblioteki nie sa wiec wykonywalne, a jej kod nie jest
            zapisywalny, i pilnuje tego procesor. */
-        uint64_t flagi = PG_USER;
-        if (prawa & DYN_ZAPIS)
-            flagi |= PG_WRITE;
-        if (!(prawa & DYN_WYKON))
-            flagi |= PG_NX;
+        uint64_t flags = PG_USER;
+        if (right & DYN_WRITE)
+            flags |= PG_WRITE;
+        if (!(right & DYN_EXEC))
+            flags |= PG_NX;
 
         uint64_t start = vaddr & ~(uint64_t)(PAGE_SIZE - 1);
-        uint64_t koniec = vaddr + memsz;
-        for (uint64_t va = start; va < koniec; va += PAGE_SIZE) {
-            if (!(prawa & DYN_ZAPIS)) {
-                uint64_t ramka = dyn_ramka(va);
-                if (!ramka || paging64_map(va, ramka, flagi) < 0)
+        uint64_t end = vaddr + memsz;
+        for (uint64_t va = start; va < end; va += PAGE_SIZE) {
+            if (!(right & DYN_WRITE)) {
+                uint64_t frame = dyn_frame(va);
+                if (!frame || paging64_map(va, frame, flags) < 0)
                     return -1;
                 /* Ramka ma przezyc smierc procesu - nalezy do systemu */
-                pmm_frame_ref((uint32_t)ramka);
+                pmm_frame_ref((uint32_t)frame);
                 continue;
             }
 
-            uint64_t ramka = page_frame_for(va, flagi);
-            if (!ramka)
+            uint64_t frame = page_frame_for(va, flags);
+            if (!frame)
                 return -1;
             uint64_t od = va > vaddr ? va : vaddr;
-            uint64_t plik_do = vaddr + filesz;
-            if (od < plik_do) {
-                uint64_t do_ = va + PAGE_SIZE < plik_do ? va + PAGE_SIZE
-                                                       : plik_do;
-                memcpy((void *)(uintptr_t)(ramka + (od - va)),
-                       dane + (od - vaddr), (uint32_t)(do_ - od));
+            uint64_t file_to = vaddr + filesz;
+            if (od < file_to) {
+                uint64_t do_ = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
+                                                       : file_to;
+                memcpy((void *)(uintptr_t)(frame + (od - va)),
+                       data + (od - vaddr), (uint32_t)(do_ - od));
             }
         }
     }
@@ -139,12 +139,12 @@ static int mapuj_biblioteke(void)
 
 /* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
    procesu jest juz aktywna, wiec piszemy wprost. */
-static int wpisz_adres(void *ctx, uint64_t adres, uint64_t wartosc)
+static int write_addr(void *ctx, uint64_t addr, uint64_t value)
 {
     (void)ctx;
-    if (!paging64_user_range(adres, sizeof(uint64_t)))
+    if (!paging64_user_range(addr, sizeof(uint64_t)))
         return -1;
-    *(uint64_t *)(uintptr_t)adres = wartosc;
+    *(uint64_t *)(uintptr_t)addr = value;
     return 0;
 }
 
@@ -227,15 +227,15 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
        na adresy funkcji z biblioteki wspoldzielonej. Trzeba je
        wypelnic TERAZ, przed pierwsza instrukcja - skok przez
        niewypelniona pozycje nie ma dokad prowadzic. */
-    if (dyn_program_dynamiczny(file, size)) {
-        if (!dyn_obecna()) {
+    if (dyn_is_dynamic(file, size)) {
+        if (!dyn_present()) {
             printk("[jadro] elf64: program potrzebuje biblioteki %s, "
-                   "ktorej nie ma\n", dyn_nazwa());
+                   "ktorej nie ma\n", dyn_name());
             return -1;
         }
-        if (mapuj_biblioteke() < 0 ||
-            dyn_relokuj(file, size, (void *)0, wpisz_adres) < 0) {
-            printk("[jadro] elf64: nie da sie zwiazac z %s\n", dyn_nazwa());
+        if (map_library() < 0 ||
+            dyn_relocate(file, size, (void *)0, write_addr) < 0) {
+            printk("[jadro] elf64: nie da sie zwiazac z %s\n", dyn_name());
             return -1;
         }
     }

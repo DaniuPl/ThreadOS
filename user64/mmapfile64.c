@@ -24,7 +24,7 @@
 
 static char out[128];
 
-static void powiedz(const char *a, uint64_t v, const char *b)
+static void report(const char *a, uint64_t v, const char *b)
 {
     int n = 0;
     while (*a)
@@ -42,41 +42,41 @@ static void powiedz(const char *a, uint64_t v, const char *b)
 
 void _start(int argc, char **argv)
 {
-    const char *nazwa = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "mapa.txt";
 
-    uint64_t rozmiar = 0;
-    const unsigned char *p = sys_mmap_file(nazwa, &rozmiar);
+    uint64_t size = 0;
+    const unsigned char *p = sys_mmap_file(name, &size);
     if (!p) {
         print("[mmapfile64] nie da sie odwzorowac pliku\n");
         sys_exit(1);
     }
-    powiedz("[mmapfile64] plik pod adresem ", (uint64_t)(uintptr_t)p, "");
-    powiedz("[mmapfile64] rozmiar ", rozmiar, " B");
+    report("[mmapfile64] plik pod adresem ", (uint64_t)(uintptr_t)p, "");
+    report("[mmapfile64] rozmiar ", size, " B");
 
     /* Ile bajtow sprawdzic. Domyslnie caly plik - ale przy jawnie
        podanej liczbie dotykamy tylko tylu, i wtedy widac, ile stron
        jadro naprawde wczytalo. */
-    uint64_t ile = rozmiar;
+    uint64_t ile = size;
     if (argc > 2) {
         int64_t v = uatoi(argv[2]);
-        if (v > 0 && (uint64_t)v < rozmiar)
+        if (v > 0 && (uint64_t)v < size)
             ile = (uint64_t)v;
     }
 
     /* Wzorzec pliku: bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF.
        Zapisal go mkmapa64, zanim plik trafil na dysk. */
-    uint64_t zle = 0;
+    uint64_t bad = 0;
     for (uint64_t i = 0; i < ile; i++)
         if (p[i] != (unsigned char)(i * 7 + 13))
-            zle++;
+            bad++;
 
-    if (zle) {
-        powiedz("[mmapfile64] ZLE: bajtow nie tak, jak trzeba: ", zle, "");
+    if (bad) {
+        report("[mmapfile64] ZLE: bajtow nie tak, jak trzeba: ", bad, "");
         sys_exit(1);
     }
-    powiedz("[mmapfile64] sprawdzone bajty zgadzaja sie, bylo ich ",
+    report("[mmapfile64] sprawdzone bajty zgadzaja sie, bylo ich ",
             ile, "");
-    if (ile != rozmiar) {
+    if (ile != size) {
         print("[mmapfile64] reszty pliku nie tknalem\n");
         sys_exit(0);
     }
@@ -85,14 +85,14 @@ void _start(int argc, char **argv)
        i opowie, co z tego wyszlo. */
     int64_t pid = sys_fork();
     if (pid == 0) {
-        unsigned char *psuj = (unsigned char *)p;
-        psuj[0] = 0xFF;                  /* tu proces ma zginac */
+        unsigned char *corrupt = (unsigned char *)p;
+        corrupt[0] = 0xFF;                  /* tu proces ma zginac */
         print("[mmapfile64] ZLE: zapis do odwzorowania sie udal\n");
         sys_exit(1);
     }
     if (pid > 0) {
-        int kod = 0;
-        sys_wait(&kod);
+        int code = 0;
+        sys_wait(&code);
         if (p[0] != (unsigned char)13) {
             print("[mmapfile64] ZLE: tresc pliku zostala zmieniona\n");
             sys_exit(1);

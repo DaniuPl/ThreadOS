@@ -96,20 +96,20 @@
 #define TRB_ADDRESS_DEV 11
 #define TRB_CONFIG_EP   12
 #define TRB_EVAL_CTX    13
-#define TRB_ZD_PRZESYLKI 32         /* zdarzenie: przesylka gotowa */
-#define TRB_ZD_POLECENIA 33         /* zdarzenie: polecenie wykonane */
+#define TRB_EV_TRANSFER 32         /* zdarzenie: przesylka gotowa */
+#define TRB_EV_COMMAND 33         /* zdarzenie: polecenie wykonane */
 
 #define TRB_IOC         (1u << 5)   /* daj znac, gdy skonczone */
 #define TRB_IDT         (1u << 6)   /* dane siedza w samym TRB */
 #define TRB_ISP         (1u << 2)   /* krotszy pakiet tez konczy przesylke */
 #define TRB_TC          (1u << 1)   /* skok przewraca bit cyklu */
 
-#define KOD_SUKCES      1
-#define KOD_KROTKI      13          /* przyszlo mniej, niz prosilismy - to nie blad */
+#define CODE_OK      1
+#define CODE_SHORT      13          /* przyszlo mniej, niz prosilismy - to nie blad */
 
-#define SLOTOW          4           /* tyle urzadzen naraz nam wystarczy */
-#define TRB_W_PIER      16          /* z czego ostatni to skok na poczatek */
-#define CTX_BAJTOW      2112        /* najwiekszy mozliwy zestaw opisow */
+#define SLOTS          4           /* tyle urzadzen naraz nam wystarczy */
+#define TRB_CHAIN      16          /* z czego ostatni to skok na poczatek */
+#define CTX_BYTES      2112        /* najwiekszy mozliwy zestaw opisow */
 
 struct trb {
     volatile uint32_t p0, p1, status, control;
@@ -117,54 +117,54 @@ struct trb {
 
 /* Pierscien od strony piszacego: gdzie wlozyc nastepny TRB i z jakim
    bitem cyklu */
-struct pierscien {
+struct ring {
     struct trb *trb;
-    uint32_t indeks;
-    uint32_t cykl;
+    uint32_t index;
+    uint32_t cycle;
 };
 
-static uintptr_t baza;              /* czesc opisowa */
+static uintptr_t base;              /* czesc opisowa */
 static uintptr_t op;                /* czesc robocza */
 static uintptr_t rt;                /* czesc czasu rzeczywistego */
-static volatile uint32_t *dzwonki;
-static int portow;
-static int ctx_rozmiar = 32;        /* 32 albo 64 B na opis - mowi o tym HCCPARAMS1 */
+static volatile uint32_t *doorbells;
+static int nports;
+static int ctx_size = 32;        /* 32 albo 64 B na opis - mowi o tym HCCPARAMS1 */
 
-static uint64_t dcbaa[SLOTOW + 1] __attribute__((aligned(64)));
-static struct trb cmd_trb[TRB_W_PIER] __attribute__((aligned(64)));
-static struct trb evt_trb[TRB_W_PIER] __attribute__((aligned(64)));
+static uint64_t dcbaa[SLOTS + 1] __attribute__((aligned(64)));
+static struct trb cmd_trb[TRB_CHAIN] __attribute__((aligned(64)));
+static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(64)));
 static uint32_t erst[4] __attribute__((aligned(64)));
-static uint8_t dev_ctx[SLOTOW][CTX_BAJTOW] __attribute__((aligned(64)));
-static uint8_t in_ctx[SLOTOW][CTX_BAJTOW] __attribute__((aligned(64)));
+static uint8_t dev_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
+static uint8_t in_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
 /* Pierscienie przesylek: [0] punkt zerowy, [1] przerwaniowy */
-static struct trb ep_trb[SLOTOW][2][TRB_W_PIER] __attribute__((aligned(64)));
+static struct trb ep_trb[SLOTS][2][TRB_CHAIN] __attribute__((aligned(64)));
 
-static struct pierscien cmd_pier;
-static struct pierscien ep_pier[SLOTOW][2];
-static uint32_t evt_indeks, evt_cykl;
-static int uzbrojony[SLOTOW];       /* czy w punkcie przerwaniowym czeka odczyt */
+static struct ring cmd_pier;
+static struct ring ep_pier[SLOTS][2];
+static uint32_t evt_index, evt_cycle;
+static int armed[SLOTS];       /* czy w punkcie przerwaniowym czeka odczyt */
 
 /* Bufor na dane przesylek sterujacych: kontroler siega po niego sam */
-static uint8_t bufor[512] __attribute__((aligned(64)));
+static uint8_t buf[512] __attribute__((aligned(64)));
 
 /* --- dostep do rejestrow -------------------------------------------- */
 
-static uint32_t rd(uintptr_t adres)
+static uint32_t rd(uintptr_t addr)
 {
-    return *(volatile uint32_t *)adres;
+    return *(volatile uint32_t *)addr;
 }
 
-static void wr(uintptr_t adres, uint32_t v)
+static void wr(uintptr_t addr, uint32_t v)
 {
-    *(volatile uint32_t *)adres = v;
+    *(volatile uint32_t *)addr = v;
 }
 
 /* Rejestry 64-bitowe wolno zapisywac dwoma polowkami i tak wlasnie
    robimy - inaczej ten sam kod nie zadzialalby w trybie 32-bitowym */
-static void wr64(uintptr_t adres, uint64_t v)
+static void wr64(uintptr_t addr, uint64_t v)
 {
-    wr(adres, (uint32_t)v);
-    wr(adres + 4, (uint32_t)(v >> 32));
+    wr(addr, (uint32_t)v);
+    wr(addr + 4, (uint32_t)(v >> 32));
 }
 
 static uint64_t fiz(const void *p)
@@ -172,7 +172,7 @@ static uint64_t fiz(const void *p)
     return (uint64_t)(uintptr_t)p;
 }
 
-static void czekaj_ms(uint32_t ms)
+static void wait_ms(uint32_t ms)
 {
     uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
     while (pit_ticks() < az)
@@ -187,87 +187,87 @@ static uintptr_t port_reg(int port)
 /* Zapis do PORTSC musi omijac bity, ktore zapisem sie KASUJA: zgloszenia
    zmian i samo wlaczenie portu. Inaczej odczyt-modyfikacja-zapis
    wylaczalby port przy okazji zwyklego ustawienia czegokolwiek. */
-static uint32_t portsc_bezpiecznie(uint32_t v)
+static uint32_t portsc_safe(uint32_t v)
 {
     return v & ~(PORT_ZMIANY | PORT_PED);
 }
 
 /* --- pierscienie ---------------------------------------------------- */
 
-static void pierscien_zaloz(struct pierscien *p, struct trb *trb)
+static void ring_setup(struct ring *p, struct trb *trb)
 {
-    memset(trb, 0, sizeof(struct trb) * TRB_W_PIER);
+    memset(trb, 0, sizeof(struct trb) * TRB_CHAIN);
     p->trb = trb;
-    p->indeks = 0;
-    p->cykl = 1;
+    p->index = 0;
+    p->cycle = 1;
 
     /* Ostatni TRB jest skokiem na poczatek. Bit "przewroc cykl" sprawia,
        ze przy kazdym obrocie znaczenie bitu cyklu zmienia sie na
        przeciwne - i dlatego pierscienia nigdy nie trzeba czyscic. */
-    struct trb *skok = &trb[TRB_W_PIER - 1];
-    skok->p0 = (uint32_t)fiz(trb);
-    skok->p1 = (uint32_t)(fiz(trb) >> 32);
-    skok->status = 0;
-    skok->control = ((uint32_t)TRB_LINK << 10) | TRB_TC;
+    struct trb *jump = &trb[TRB_CHAIN - 1];
+    jump->p0 = (uint32_t)fiz(trb);
+    jump->p1 = (uint32_t)(fiz(trb) >> 32);
+    jump->status = 0;
+    jump->control = ((uint32_t)TRB_LINK << 10) | TRB_TC;
 }
 
-static void wloz(struct pierscien *p, uint64_t param, uint32_t status,
+static void insert(struct ring *p, uint64_t param, uint32_t status,
                  uint32_t control)
 {
-    struct trb *t = &p->trb[p->indeks];
+    struct trb *t = &p->trb[p->index];
     t->p0 = (uint32_t)param;
     t->p1 = (uint32_t)(param >> 32);
     t->status = status;
     /* Bit cyklu na samym koncu: dopiero on oddaje TRB kontrolerowi,
        wiec reszta pol musi juz w nim byc */
-    t->control = control | p->cykl;
+    t->control = control | p->cycle;
 
-    p->indeks++;
-    if (p->indeks == TRB_W_PIER - 1) {
-        struct trb *skok = &p->trb[TRB_W_PIER - 1];
-        skok->control = (skok->control & ~1u) | p->cykl;
-        p->indeks = 0;
-        p->cykl ^= 1;
+    p->index++;
+    if (p->index == TRB_CHAIN - 1) {
+        struct trb *jump = &p->trb[TRB_CHAIN - 1];
+        jump->control = (jump->control & ~1u) | p->cycle;
+        p->index = 0;
+        p->cycle ^= 1;
     }
 }
 
 /* Zdejmuje jedno zdarzenie z pierscienia zdarzen. 1 = bylo. */
-static int zdarzenie(struct trb *wynik)
+static int event(struct trb *result)
 {
-    struct trb *t = &evt_trb[evt_indeks];
-    if ((t->control & 1u) != evt_cykl)
+    struct trb *t = &evt_trb[evt_index];
+    if ((t->control & 1u) != evt_cycle)
         return 0;                        /* to jeszcze nie nasze */
 
-    wynik->p0 = t->p0;
-    wynik->p1 = t->p1;
-    wynik->status = t->status;
-    wynik->control = t->control;
+    result->p0 = t->p0;
+    result->p1 = t->p1;
+    result->status = t->status;
+    result->control = t->control;
 
-    evt_indeks++;
-    if (evt_indeks == TRB_W_PIER) {
-        evt_indeks = 0;
-        evt_cykl ^= 1;
+    evt_index++;
+    if (evt_index == TRB_CHAIN) {
+        evt_index = 0;
+        evt_cycle ^= 1;
     }
     /* Kontroler musi wiedziec, dokad juz doczytalismy - inaczej po
        pelnym obrocie nadpisalby zdarzenia, ktorych nikt nie widzial */
-    wr64(rt + RT_ERDP, fiz(&evt_trb[evt_indeks]) | 0x8);
+    wr64(rt + RT_ERDP, fiz(&evt_trb[evt_index]) | 0x8);
     return 1;
 }
 
 /* Czeka na zdarzenie danego rodzaju. Inne po drodze przepadaja i tak
    ma byc: przez ten pierscien ida jeszcze zgloszenia zmian na portach,
    ktorych nikt nie zamawial i o ktore nikt nie pyta. */
-static int czekaj_na(int rodzaj, struct trb *wynik, uint32_t ms)
+static int wait_for(int kind, struct trb *result, uint32_t ms)
 {
     uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
     while (pit_ticks() < az) {
         struct trb t;
-        if (!zdarzenie(&t)) {
+        if (!event(&t)) {
             io_wait();
             continue;
         }
-        if ((int)((t.control >> 10) & 0x3F) == rodzaj) {
-            *wynik = t;
+        if ((int)((t.control >> 10) & 0x3F) == kind) {
+            *result = t;
             return 1;
         }
     }
@@ -276,16 +276,16 @@ static int czekaj_na(int rodzaj, struct trb *wynik, uint32_t ms)
 
 /* Wklada polecenie i czeka na jego wynik. Zwraca kod ukonczenia
    (KOD_SUKCES gdy dobrze) albo -1, gdy nie doczekalismy sie. */
-static int polecenie(uint64_t param, uint32_t control, struct trb *odp)
+static int command(uint64_t param, uint32_t control, struct trb *reply)
 {
-    wloz(&cmd_pier, param, 0, control);
-    dzwonki[0] = 0;                      /* dzwonek pierscienia polecen */
+    insert(&cmd_pier, param, 0, control);
+    doorbells[0] = 0;                      /* dzwonek pierscienia polecen */
 
     struct trb t;
-    if (!czekaj_na(TRB_ZD_POLECENIA, &t, 1000))
+    if (!wait_for(TRB_EV_COMMAND, &t, 1000))
         return -1;
-    if (odp)
-        *odp = t;
+    if (reply)
+        *reply = t;
     return (int)(t.status >> 24);
 }
 
@@ -293,9 +293,9 @@ static int polecenie(uint64_t param, uint32_t control, struct trb *odp)
 
 /* Opis numer 'i' w zestawie: zerowy jest opis sterujacy (tylko
    w zestawie wejsciowym), potem urzadzenia, potem punkty koncowe */
-static uint32_t *opis(uint8_t *zestaw, int i)
+static uint32_t *info(uint8_t *set, int i)
 {
-    return (uint32_t *)(zestaw + (uintptr_t)i * (uintptr_t)ctx_rozmiar);
+    return (uint32_t *)(set + (uintptr_t)i * (uintptr_t)ctx_size);
 }
 
 /* Numer punktu koncowego w opisie: zerowy ma 1, kolejne IN maja 2n+1 */
@@ -308,7 +308,7 @@ static int dci(int ep)
 
 int xhci_ports(void)
 {
-    return portow;
+    return nports;
 }
 
 int xhci_init(void)
@@ -321,63 +321,63 @@ int xhci_init(void)
 
     /* xHCI siedzi w pamieci - BAR0, ewentualnie 64-bitowy (bity 2:1
        rowne 2 znacza, ze gorna polowa adresu jest w BAR1) */
-    uint64_t adres = dev.bar[0] & ~0xFULL;
+    uint64_t addr = dev.bar[0] & ~0xFULL;
     if (dev.bar[0] & 0x01)
         return 0;                        /* to nie jest okno w pamieci */
     if (((dev.bar[0] >> 1) & 0x3) == 0x2)
-        adres |= (uint64_t)dev.bar[1] << 32;
-    if (!adres || adres > 0xFFFFFFFFull)
+        addr |= (uint64_t)dev.bar[1] << 32;
+    if (!addr || addr > 0xFFFFFFFFull)
         return 0;                        /* wyzej i tak nie siegniemy */
 
-    if (MAP_PHYS((uint32_t)adres, 0x10000) < 0)
+    if (MAP_PHYS((uint32_t)addr, 0x10000) < 0)
         return 0;
     pci_enable_bus_master(&dev);
 
-    baza = (uintptr_t)adres;
-    op = baza + (rd(baza + CAP_CAPLENGTH) & 0xFF);
-    rt = baza + (rd(baza + CAP_RTSOFF) & ~0x1Fu);
-    dzwonki = (volatile uint32_t *)(baza + (rd(baza + CAP_DBOFF) & ~0x3u));
+    base = (uintptr_t)addr;
+    op = base + (rd(base + CAP_CAPLENGTH) & 0xFF);
+    rt = base + (rd(base + CAP_RTSOFF) & ~0x1Fu);
+    doorbells = (volatile uint32_t *)(base + (rd(base + CAP_DBOFF) & ~0x3u));
 
-    uint32_t hcs1 = rd(baza + CAP_HCSPARAMS1);
-    portow = (int)((hcs1 >> 24) & 0xFF);
-    if (portow > 32)
-        portow = 32;
-    ctx_rozmiar = (rd(baza + CAP_HCCPARAMS1) & 0x4) ? 64 : 32;
+    uint32_t hcs1 = rd(base + CAP_HCSPARAMS1);
+    nports = (int)((hcs1 >> 24) & 0xFF);
+    if (nports > 32)
+        nports = 32;
+    ctx_size = (rd(base + CAP_HCCPARAMS1) & 0x4) ? 64 : 32;
 
     /* Zatrzymaj i wyzeruj kontroler - po BIOS-ie moze byc w dowolnym
        stanie, a reset jest jedynym stanem, ktory znamy */
     wr(op + OP_USBCMD, rd(op + OP_USBCMD) & ~(uint32_t)CMD_RS);
     for (int i = 0; i < 200 && !(rd(op + OP_USBSTS) & STS_HCH); i++)
-        czekaj_ms(1);
+        wait_ms(1);
     wr(op + OP_USBCMD, CMD_HCRST);
     for (int i = 0; i < 200 && (rd(op + OP_USBCMD) & CMD_HCRST); i++)
-        czekaj_ms(1);
+        wait_ms(1);
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_CNR); i++)
-        czekaj_ms(1);
+        wait_ms(1);
     if (rd(op + OP_USBCMD) & CMD_HCRST)
         return 0;
 
     memset(dcbaa, 0, sizeof(dcbaa));
     memset(dev_ctx, 0, sizeof(dev_ctx));
     memset(in_ctx, 0, sizeof(in_ctx));
-    for (int s = 0; s < SLOTOW; s++)
+    for (int s = 0; s < SLOTS; s++)
         for (int e = 0; e < 2; e++)
-            pierscien_zaloz(&ep_pier[s][e], ep_trb[s][e]);
+            ring_setup(&ep_pier[s][e], ep_trb[s][e]);
 
-    wr(op + OP_CONFIG, SLOTOW);
+    wr(op + OP_CONFIG, SLOTS);
     wr64(op + OP_DCBAAP, fiz(dcbaa));
 
-    pierscien_zaloz(&cmd_pier, cmd_trb);
+    ring_setup(&cmd_pier, cmd_trb);
     /* Bit zerowy CRCR to bit cyklu, od ktorego kontroler zaczyna
        czytac pierscien polecen - musi zgadzac sie z naszym */
     wr64(op + OP_CRCR, fiz(cmd_trb) | 1);
 
     memset(evt_trb, 0, sizeof(evt_trb));
-    evt_indeks = 0;
-    evt_cykl = 1;
+    evt_index = 0;
+    evt_cycle = 1;
     erst[0] = (uint32_t)fiz(evt_trb);
     erst[1] = (uint32_t)(fiz(evt_trb) >> 32);
-    erst[2] = TRB_W_PIER;
+    erst[2] = TRB_CHAIN;
     erst[3] = 0;
     wr(rt + RT_ERSTSZ, 1);
     wr64(rt + RT_ERDP, fiz(evt_trb) | 0x8);
@@ -386,17 +386,17 @@ int xhci_init(void)
     wr(op + OP_DNCTRL, 0);
     wr(op + OP_USBCMD, CMD_RS);          /* bez CMD_INTE - odpytujemy */
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_HCH); i++)
-        czekaj_ms(1);
+        wait_ms(1);
     if (rd(op + OP_USBSTS) & STS_HCH)
         return 0;
 
     /* Zasilanie portow: bez niego na porcie nigdy nic sie nie zglosi */
-    for (int i = 0; i < portow; i++) {
+    for (int i = 0; i < nports; i++) {
         uint32_t v = rd(port_reg(i));
         if (!(v & PORT_PP))
-            wr(port_reg(i), portsc_bezpiecznie(v) | PORT_PP);
+            wr(port_reg(i), portsc_safe(v) | PORT_PP);
     }
-    czekaj_ms(20);
+    wait_ms(20);
     return 1;
 }
 
@@ -405,9 +405,9 @@ int xhci_init(void)
 /* Domyslny rozmiar pakietu punktu zerowego wynika z predkosci portu.
    Przy pelnej predkosci moze byc inny - poprawimy go, gdy urzadzenie
    samo o tym powie w swoim opisie. */
-static int pakiet_dla_predkosci(int predkosc)
+static int packet_for_speed(int speed)
 {
-    switch (predkosc) {
+    switch (speed) {
     case 2:  return 8;                   /* niska */
     case 3:  return 64;                  /* wysoka */
     case 4:
@@ -416,7 +416,7 @@ static int pakiet_dla_predkosci(int predkosc)
     }
 }
 
-static int reset_portu(int port)
+static int port_reset(int port)
 {
     uintptr_t reg = port_reg(port);
     uint32_t v = rd(reg);
@@ -425,9 +425,9 @@ static int reset_portu(int port)
     if (v & PORT_PED)
         return 1;                        /* port zglosil sie sam (USB 3) */
 
-    wr(reg, portsc_bezpiecznie(v) | PORT_PR);
+    wr(reg, portsc_safe(v) | PORT_PR);
     for (int i = 0; i < 100; i++) {
-        czekaj_ms(2);
+        wait_ms(2);
         v = rd(reg);
         if (!(v & PORT_CCS))
             return 0;                    /* urzadzenie zniklo w trakcie */
@@ -437,29 +437,29 @@ static int reset_portu(int port)
     if (!(v & PORT_PED))
         return 0;
 
-    wr(reg, portsc_bezpiecznie(v) | PORT_ZMIANY);   /* skasuj zgloszenia */
-    czekaj_ms(10);
+    wr(reg, portsc_safe(v) | PORT_ZMIANY);   /* skasuj zgloszenia */
+    wait_ms(10);
     return 1;
 }
 
 /* Sklada zestaw wejsciowy pod polecenie: co dodajemy, opis urzadzenia
    i opis punktu zerowego. */
-static void zloz_wejscie(int slot, int port, int predkosc, int maxpakiet)
+static void make_input(int slot, int port, int speed, int maxpacket)
 {
     uint8_t *we = in_ctx[slot - 1];
-    memset(we, 0, CTX_BAJTOW);
+    memset(we, 0, CTX_BYTES);
 
-    uint32_t *sterowanie = opis(we, 0);
-    sterowanie[1] = 0x3;                 /* dodajemy opis urzadzenia i punkt 0 */
+    uint32_t *control = info(we, 0);
+    control[1] = 0x3;                 /* dodajemy opis urzadzenia i punkt 0 */
 
-    uint32_t *urzadzenie = opis(we, 1);
-    urzadzenie[0] = ((uint32_t)predkosc << 20) | (1u << 27);  /* jeden punkt */
-    urzadzenie[1] = (uint32_t)(port + 1) << 16;
+    uint32_t *device = info(we, 1);
+    device[0] = ((uint32_t)speed << 20) | (1u << 27);  /* jeden punkt */
+    device[1] = (uint32_t)(port + 1) << 16;
 
-    uint32_t *punkt0 = opis(we, 2);
+    uint32_t *punkt0 = info(we, 2);
     punkt0[1] = (3u << 1) |              /* trzy proby przy bledzie */
                 (4u << 3) |              /* rodzaj: sterujacy */
-                ((uint32_t)maxpakiet << 16);
+                ((uint32_t)maxpacket << 16);
     uint64_t p = fiz(ep_trb[slot - 1][0]) | 1;   /* bit cyklu producenta */
     punkt0[2] = (uint32_t)p;
     punkt0[3] = (uint32_t)(p >> 32);
@@ -468,29 +468,29 @@ static void zloz_wejscie(int slot, int port, int predkosc, int maxpakiet)
 
 int xhci_attach(int port)
 {
-    if (!baza || port < 0 || port >= portow)
+    if (!base || port < 0 || port >= nports)
         return -1;
-    if (!reset_portu(port))
-        return -1;
-
-    struct trb odp;
-    if (polecenie(0, (uint32_t)TRB_ENABLE_SLOT << 10, &odp) != KOD_SUKCES)
-        return -1;
-    int slot = (int)(odp.control >> 24);
-    if (slot < 1 || slot > SLOTOW)
+    if (!port_reset(port))
         return -1;
 
-    int predkosc = (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
-    int maxpakiet = pakiet_dla_predkosci(predkosc);
+    struct trb reply;
+    if (command(0, (uint32_t)TRB_ENABLE_SLOT << 10, &reply) != CODE_OK)
+        return -1;
+    int slot = (int)(reply.control >> 24);
+    if (slot < 1 || slot > SLOTS)
+        return -1;
+
+    int speed = (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
+    int maxpacket = packet_for_speed(speed);
 
     dcbaa[slot] = fiz(dev_ctx[slot - 1]);
-    memset(dev_ctx[slot - 1], 0, CTX_BAJTOW);
-    pierscien_zaloz(&ep_pier[slot - 1][0], ep_trb[slot - 1][0]);
+    memset(dev_ctx[slot - 1], 0, CTX_BYTES);
+    ring_setup(&ep_pier[slot - 1][0], ep_trb[slot - 1][0]);
 
-    zloz_wejscie(slot, port, predkosc, maxpakiet);
-    if (polecenie(fiz(in_ctx[slot - 1]),
+    make_input(slot, port, speed, maxpacket);
+    if (command(fiz(in_ctx[slot - 1]),
                   ((uint32_t)TRB_ADDRESS_DEV << 10) | ((uint32_t)slot << 24),
-                  (struct trb *)0) != KOD_SUKCES)
+                  (struct trb *)0) != CODE_OK)
         return -1;
 
     /* Osiem pierwszych bajtow opisu urzadzenia mowi, jak duze pakiety
@@ -498,17 +498,17 @@ int xhci_attach(int port)
        osiem - i wtedy trzeba kontrolerowi o tym powiedziec, bo inaczej
        dluzsze odpowiedzi rozjada sie na pakietach. */
     uint8_t setup[8] = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 8, 0x00 };
-    uint8_t opis8[8];
-    if (xhci_control(slot, setup, opis8, 8, 1) < 8)
+    uint8_t info8[8];
+    if (xhci_control(slot, setup, info8, 8, 1) < 8)
         return -1;
-    if (opis8[7] && opis8[7] != maxpakiet) {
+    if (info8[7] && info8[7] != maxpacket) {
         uint8_t *we = in_ctx[slot - 1];
-        uint32_t *sterowanie = opis(we, 0);
-        sterowanie[0] = 0;
-        sterowanie[1] = 0x2;             /* poprawiamy tylko punkt zerowy */
-        uint32_t *punkt0 = opis(we, 2);
-        punkt0[1] = (punkt0[1] & 0xFFFFu) | ((uint32_t)opis8[7] << 16);
-        polecenie(fiz(we),
+        uint32_t *control = info(we, 0);
+        control[0] = 0;
+        control[1] = 0x2;             /* poprawiamy tylko punkt zerowy */
+        uint32_t *punkt0 = info(we, 2);
+        punkt0[1] = (punkt0[1] & 0xFFFFu) | ((uint32_t)info8[7] << 16);
+        command(fiz(we),
                   ((uint32_t)TRB_EVAL_CTX << 10) | ((uint32_t)slot << 24),
                   (struct trb *)0);
     }
@@ -519,80 +519,80 @@ int xhci_attach(int port)
 
 int xhci_control(int slot, const void *setup, void *data, int len, int in)
 {
-    if (!baza || slot < 1 || slot > SLOTOW)
+    if (!base || slot < 1 || slot > SLOTS)
         return -1;
-    if (len < 0 || len > (int)sizeof(bufor))
+    if (len < 0 || len > (int)sizeof(buf))
         return -1;
 
     const uint8_t *s = setup;
-    uint64_t zapytanie = 0;
+    uint64_t query = 0;
     for (int i = 0; i < 8; i++)
-        zapytanie |= (uint64_t)s[i] << (i * 8);
+        query |= (uint64_t)s[i] << (i * 8);
 
     if (len && !in)
-        memcpy(bufor, data, (uint32_t)len);
+        memcpy(buf, data, (uint32_t)len);
 
-    struct pierscien *p = &ep_pier[slot - 1][0];
+    struct ring *p = &ep_pier[slot - 1][0];
     /* Rodzaj przesylki: 0 bez danych, 2 dane w dol, 3 dane w gore */
-    uint32_t rodzaj = len ? (in ? 3u : 2u) : 0u;
-    wloz(p, zapytanie, 8, ((uint32_t)TRB_SETUP << 10) | TRB_IDT |
-                          (rodzaj << 16));
+    uint32_t kind = len ? (in ? 3u : 2u) : 0u;
+    insert(p, query, 8, ((uint32_t)TRB_SETUP << 10) | TRB_IDT |
+                          (kind << 16));
     if (len)
-        wloz(p, fiz(bufor), (uint32_t)len,
+        insert(p, fiz(buf), (uint32_t)len,
              ((uint32_t)TRB_DATA << 10) | TRB_IOC | TRB_ISP |
              ((uint32_t)(in ? 1 : 0) << 16));
-    wloz(p, 0, 0, ((uint32_t)TRB_STATUS << 10) | TRB_IOC |
+    insert(p, 0, 0, ((uint32_t)TRB_STATUS << 10) | TRB_IOC |
                   ((uint32_t)(in ? 0 : 1) << 16));
 
-    dzwonki[slot] = 1;                   /* punkt zerowy ma numer 1 */
+    doorbells[slot] = 1;                   /* punkt zerowy ma numer 1 */
 
-    int przeszlo = 0;
+    int passed = 0;
     if (len) {
         struct trb t;
-        if (!czekaj_na(TRB_ZD_PRZESYLKI, &t, 1000))
+        if (!wait_for(TRB_EV_TRANSFER, &t, 1000))
             return -1;
-        int kod = (int)(t.status >> 24);
-        if (kod != KOD_SUKCES && kod != KOD_KROTKI)
+        int code = (int)(t.status >> 24);
+        if (code != CODE_OK && code != CODE_SHORT)
             return -1;
         /* Kontroler podaje, ILE ZOSTALO, a nie ile przeszlo */
-        przeszlo = len - (int)(t.status & 0xFFFFFF);
+        passed = len - (int)(t.status & 0xFFFFFF);
         if (in)
-            memcpy(data, bufor, (uint32_t)(przeszlo > 0 ? przeszlo : 0));
+            memcpy(data, buf, (uint32_t)(passed > 0 ? passed : 0));
     }
 
     struct trb t;
-    if (!czekaj_na(TRB_ZD_PRZESYLKI, &t, 1000))
+    if (!wait_for(TRB_EV_TRANSFER, &t, 1000))
         return -1;
-    int kod = (int)(t.status >> 24);
-    if (kod != KOD_SUKCES && kod != KOD_KROTKI)
+    int code = (int)(t.status >> 24);
+    if (code != CODE_OK && code != CODE_SHORT)
         return -1;
-    return przeszlo;
+    return passed;
 }
 
 int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
 {
-    if (!baza || slot < 1 || slot > SLOTOW || ep < 1)
+    if (!base || slot < 1 || slot > SLOTS || ep < 1)
         return -1;
-    int numer = dci(ep);
-    if (numer > 31)
+    int number = dci(ep);
+    if (number > 31)
         return -1;
 
-    pierscien_zaloz(&ep_pier[slot - 1][1], ep_trb[slot - 1][1]);
-    uzbrojony[slot - 1] = 0;
+    ring_setup(&ep_pier[slot - 1][1], ep_trb[slot - 1][1]);
+    armed[slot - 1] = 0;
 
     uint8_t *we = in_ctx[slot - 1];
-    memset(we, 0, CTX_BAJTOW);
-    uint32_t *sterowanie = opis(we, 0);
-    sterowanie[1] = 0x1u | (1u << numer);   /* urzadzenie + ten punkt */
+    memset(we, 0, CTX_BYTES);
+    uint32_t *control = info(we, 0);
+    control[1] = 0x1u | (1u << number);   /* urzadzenie + ten punkt */
 
     /* Opis urzadzenia trzeba podac na nowo, bo zmienia sie liczba
        punktow koncowych - kontroler nie domysli sie jej sam */
-    uint32_t *zrodlo = opis(dev_ctx[slot - 1], 0);
-    uint32_t *urzadzenie = opis(we, 1);
-    urzadzenie[0] = (zrodlo[0] & 0x07FFFFFFu) | ((uint32_t)numer << 27);
-    urzadzenie[1] = zrodlo[1];
+    uint32_t *src = info(dev_ctx[slot - 1], 0);
+    uint32_t *device = info(we, 1);
+    device[0] = (src[0] & 0x07FFFFFFu) | ((uint32_t)number << 27);
+    device[1] = src[1];
 
-    uint32_t *punkt = opis(we, numer + 1);
+    uint32_t *punkt = info(we, number + 1);
     punkt[0] = (uint32_t)(interval > 0 ? interval : 8) << 16;
     punkt[1] = (3u << 1) |               /* trzy proby przy bledzie */
                (7u << 3) |               /* rodzaj: przerwaniowy w gore */
@@ -602,9 +602,9 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
     punkt[3] = (uint32_t)(p >> 32);
     punkt[4] = (uint32_t)maxpacket | ((uint32_t)maxpacket << 16);
 
-    if (polecenie(fiz(we),
+    if (command(fiz(we),
                   ((uint32_t)TRB_CONFIG_EP << 10) | ((uint32_t)slot << 24),
-                  (struct trb *)0) != KOD_SUKCES)
+                  (struct trb *)0) != CODE_OK)
         return -1;
     return 0;
 }
@@ -618,30 +618,30 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
  */
 int xhci_int_in(int slot, int ep, void *data, int len)
 {
-    if (!baza || slot < 1 || slot > SLOTOW || len <= 0 ||
-        len > (int)sizeof(bufor))
+    if (!base || slot < 1 || slot > SLOTS || len <= 0 ||
+        len > (int)sizeof(buf))
         return -1;
 
-    if (!uzbrojony[slot - 1]) {
-        wloz(&ep_pier[slot - 1][1], fiz(bufor), (uint32_t)len,
+    if (!armed[slot - 1]) {
+        insert(&ep_pier[slot - 1][1], fiz(buf), (uint32_t)len,
              ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
-        dzwonki[slot] = (uint32_t)dci(ep);
-        uzbrojony[slot - 1] = 1;
+        doorbells[slot] = (uint32_t)dci(ep);
+        armed[slot - 1] = 1;
         return 0;                        /* odpowiedz przyjdzie za chwile */
     }
 
     struct trb t;
-    if (!zdarzenie(&t))
+    if (!event(&t))
         return 0;                        /* urzadzenie milczy - czekamy dalej */
-    uzbrojony[slot - 1] = 0;
-    if ((int)((t.control >> 10) & 0x3F) != TRB_ZD_PRZESYLKI)
+    armed[slot - 1] = 0;
+    if ((int)((t.control >> 10) & 0x3F) != TRB_EV_TRANSFER)
         return 0;                        /* zgloszenie z portu, nie nasze dane */
 
-    int kod = (int)(t.status >> 24);
-    if (kod != KOD_SUKCES && kod != KOD_KROTKI)
+    int code = (int)(t.status >> 24);
+    if (code != CODE_OK && code != CODE_SHORT)
         return -1;
-    int przeszlo = len - (int)(t.status & 0xFFFFFF);
-    if (przeszlo > 0)
-        memcpy(data, bufor, (uint32_t)przeszlo);
-    return przeszlo;
+    int passed = len - (int)(t.status & 0xFFFFFF);
+    if (passed > 0)
+        memcpy(data, buf, (uint32_t)passed);
+    return passed;
 }

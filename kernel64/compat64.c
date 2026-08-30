@@ -48,10 +48,10 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     return (struct task *)task64_create(name, entry, arg);
 }
 
-struct task *task_create_wszedzie(const char *name, void (*entry)(void *),
+struct task *task_create_anycore(const char *name, void (*entry)(void *),
                                   void *arg)
 {
-    return (struct task *)task64_create_wszedzie(name, entry, arg);
+    return (struct task *)task64_create_anycore(name, entry, arg);
 }
 
 /* Shell jadra 64-bitowego nie przerysowuje promptu po cudzym wypisie -

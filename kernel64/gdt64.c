@@ -46,8 +46,8 @@ struct gdt_ptr {
  * Piec zwyklych wpisow po osiem bajtow, a potem po DWA na kazdy TSS -
  * jego adres ma szescdziesiat cztery bity i w jeden wpis sie nie
  * miesci. */
-static uint64_t gdt[5 + 2 * SMP_RDZENI];
-static struct tss64 tss[SMP_RDZENI];
+static uint64_t gdt[5 + 2 * SMP_CORES];
+static struct tss64 tss[SMP_CORES];
 static struct gdt_ptr gdtp;
 
 static uint64_t entry(uint8_t access, uint8_t flags)
@@ -58,13 +58,13 @@ static uint64_t entry(uint8_t access, uint8_t flags)
 
 void gdt64_set_kernel_stack(uint64_t rsp)
 {
-    tss[smp_rdzen()].rsp0 = rsp;
+    tss[smp_core()].rsp0 = rsp;
 }
 
 void gdt64_init(void)
 {
     memset(tss, 0, sizeof(tss));
-    for (int i = 0; i < SMP_RDZENI; i++)
+    for (int i = 0; i < SMP_CORES; i++)
         tss[i].iomap_base = sizeof(tss[i]);   /* brak mapy portow */
 
     gdt[0] = 0;
@@ -74,7 +74,7 @@ void gdt64_init(void)
     gdt[4] = entry(0xFA, 0x2);           /* kod uzytkownika, bit L */
 
     /* Deskryptor TSS zajmuje dwa wpisy - adres ma 64 bity */
-    for (int i = 0; i < SMP_RDZENI; i++) {
+    for (int i = 0; i < SMP_CORES; i++) {
         uint64_t base = (uint64_t)(uintptr_t)&tss[i];
         uint64_t limit = sizeof(tss[i]) - 1;
         gdt[5 + 2 * i] = (limit & 0xFFFF) | ((base & 0xFFFFFF) << 16) |
@@ -87,24 +87,24 @@ void gdt64_init(void)
     gdtp.limit = sizeof(gdt) - 1;
     gdtp.base = (uint64_t)(uintptr_t)gdt;
 
-    gdt64_zaladuj();
+    gdt64_load();
 
-    gdt64_zaladuj_tss();
+    gdt64_load_tss();
 }
 
 /* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
    z jego numeru: piaty wpis tablicy plus po szesnascie bajtow na
    kazdy poprzedni rdzen. */
-void gdt64_zaladuj_tss(void)
+void gdt64_load_tss(void)
 {
-    uint16_t sel = (uint16_t)(GDT64_TSS + smp_rdzen_apic() * 16);
+    uint16_t sel = (uint16_t)(GDT64_TSS + smp_core_apic() * 16);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu. Rdzen wtorny wola
    to po dojsciu do trybu dlugiego, zeby zejsc z tymczasowej tablicy
    z trampoliny na wspolna tablice jadra. */
-void gdt64_zaladuj(void)
+void gdt64_load(void)
 {
     __asm__ volatile(
         "lgdt %0\n\t"

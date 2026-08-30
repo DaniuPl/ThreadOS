@@ -26,7 +26,7 @@ int acpi_init(void);
 
 /* Dowolna tablica ACPI po sygnaturze ("APIC", "HPET", ...), doklejona
    do mapowania. NULL, gdy takiej nie ma. Wolane po acpi_init. */
-const void *acpi_table(const char *sygnatura);
+const void *acpi_table(const char *signature);
 
 /* Nazwa producenta z tablicy (do komunikatu startowego); "" gdy brak */
 const char *acpi_oem(void);

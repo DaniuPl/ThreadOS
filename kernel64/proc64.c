@@ -27,7 +27,7 @@
 #include "../kernel/include/shm.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/blk.h"
-#include "../kernel/include/zamekjadra.h"
+#include "../kernel/include/biglock.h"
 #include "syscall64.h"
 
 /* Powrot do ring 3 z ramki podanej wskaznikiem (boot64/syscall64.S) */
@@ -152,7 +152,7 @@ static void child_start(void *arg)
 
     frame.rax = 0;                   /* dziecko poznaje sie po zerze */
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
-    jadro_wyjdz();
+    biglock_leave();
     return_to_user_64(&frame);       /* nie wraca */
 }
 
@@ -178,7 +178,7 @@ int64_t proc64_fork(struct regs *r)
     if (child) {
         task64_inherit_fds(child);   /* otwarte pliki ida z pamiecia */
         task64_inherit_brk(child);
-        task64_mmap_dziedzicz(child);  /* i odwzorowane pliki */
+        task64_mmap_inherit(child);  /* i odwzorowane pliki */
     }
     if (!child) {
         kfree(fa);
@@ -226,8 +226,8 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     }
 
     uint32_t size = 0;
-    void *wczytany = (void *)0;
-    const void *image = prog_obraz(kname, &size, &wczytany);
+    void *loaded = (void *)0;
+    const void *image = prog_image(kname, &size, &loaded);
     if (!image) {
         printk("[jadro] exec: nie ma programu '%s'\n", kname);
         return -1;
@@ -235,7 +235,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
 
     uint64_t space = paging64_new_space();
     if (!space) {
-        prog_zwolnij(wczytany);
+        prog_release(loaded);
         return -1;
     }
 
@@ -253,16 +253,16 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
            procesowi nie ma do czego wrocic */
         printk("[jadro] exec: '%s' nie da sie zaladowac\n", kname);
         paging64_free_space(old);
-        prog_zwolnij(wczytany);
+        prog_release(loaded);
         task64_exit_code(-1);
     }
     paging64_free_space(old);
     /* Odwzorowania plikow opisywaly stara przestrzen, ktorej juz nie
        ma - nowy obraz zaczyna z pusta tablica */
-    task64_mmap_zwolnij();
+    task64_mmap_release();
     /* Obraz jest juz przepisany do stron programu - kopia w pamieci
        jadra nie jest do niczego potrzebna */
-    prog_zwolnij(wczytany);
+    prog_release(loaded);
     task64_set_brk_base(brk_base);   /* nowy obraz, nowa sterta */
     task64_rename(kname);
 
@@ -291,7 +291,7 @@ struct spawn_req {
     char name[16];
     struct args64 args;
     int quiet;
-    int wszedzie;                /* 1 = wolno go prowadzic kazdemu rdzeniowi */
+    int anycore;                /* 1 = wolno go prowadzic kazdemu rdzeniowi */
 };
 
 static void spawn_thread(void *arg)
@@ -304,22 +304,22 @@ static void spawn_thread(void *arg)
     /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
        zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
        wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
-    if (req->wszedzie)
-        task_wszedzie_dla_mnie();
+    if (req->anycore)
+        task_set_anycore();
 
     for (int i = 0; i < (int)sizeof(name); i++)
         name[i] = req->name[i];
     kfree(req);
 
     uint32_t size = 0;
-    void *wczytany = (void *)0;
-    const void *image = prog_obraz(name, &size, &wczytany);
+    void *loaded = (void *)0;
+    const void *image = prog_image(name, &size, &loaded);
     if (!image) {
         printk("[ !! ] nie ma programu '%s' ani w initrd, ani na dysku\n",
                name);
         task64_exit();
     }
-    const char *skad = prog_skad();
+    const char *from_where = prog_source();
 
     /* Wlasna przestrzen adresowa. Od tej chwili gigabajt programu
        nalezy tylko do niego - a pamiec jadra widac dalej, bo jest
@@ -335,9 +335,9 @@ static void spawn_thread(void *arg)
     task64_enter_space(space, kstack & ~0xFULL);
 
     uint64_t entry, brk_base;
-    int zaladowany = elf64_load(image, size, &entry, &brk_base) == 0;
-    prog_zwolnij(wczytany);        /* obraz jest juz w stronach programu */
-    if (!zaladowany)
+    int loaded_flag = elf64_load(image, size, &entry, &brk_base) == 0;
+    prog_release(loaded);        /* obraz jest juz w stronach programu */
+    if (!loaded_flag)
         task64_exit();
     task64_set_brk_base(brk_base);
 
@@ -349,13 +349,13 @@ static void spawn_thread(void *arg)
 
     if (!quiet)
         printk("[ OK ] Program '%s' z %s: %u B, wejscie %x\n",
-               name, skad, size, (uint32_t)entry);
+               name, from_where, size, (uint32_t)entry);
 
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
 
     /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj */
-    jadro_wyjdz();
+    biglock_leave();
     enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
 }
 
@@ -370,29 +370,29 @@ static void spawn_thread(void *arg)
  * miejscem na kod tak samo, jak na dane, a o tym, co w nim lezy,
  * decyduje ten, kto go zaklada.
  */
-uint64_t proc64_shm(int klucz, uint64_t rozmiar)
+uint64_t proc64_shm(int key, uint64_t size)
 {
-    if (!rozmiar)
-        rozmiar = PAGE_SIZE;
-    uint64_t stron = (rozmiar + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (!size)
+        size = PAGE_SIZE;
+    uint64_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
 
-    uint64_t baza = task64_mmap_next();
-    uint64_t koniec = baza + stron * PAGE_SIZE;
-    if (!baza || koniec > USER64_MMAP_MAX || koniec < baza)
+    uint64_t base = task64_mmap_next();
+    uint64_t end = base + pages * PAGE_SIZE;
+    if (!base || end > USER64_MMAP_MAX || end < base)
         return 0;
 
-    uint32_t phys = shm_get(klucz, (uint32_t)(stron * PAGE_SIZE));
+    uint32_t phys = shm_get(key, (uint32_t)(pages * PAGE_SIZE));
     if (!phys)
         return 0;
 
-    for (uint64_t i = 0; i < stron; i++)
-        if (paging64_map(baza + i * PAGE_SIZE,
+    for (uint64_t i = 0; i < pages; i++)
+        if (paging64_map(base + i * PAGE_SIZE,
                          (uint64_t)phys + i * PAGE_SIZE,
                          PG_USER | PG_WRITE) < 0)
             return 0;
 
-    task64_set_mmap_next(koniec);
-    return baza;
+    task64_set_mmap_next(end);
+    return base;
 }
 
 /* --- Plik odwzorowany w pamieci ------------------------------------
@@ -411,48 +411,48 @@ uint64_t proc64_shm(int klucz, uint64_t rozmiar)
  * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
  * bajcie zabiloby caly sens odwzorowania.
  */
-uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out,
-                           uint64_t zapis)
+uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
+                           uint64_t write)
 {
     if (!fs_ready())
         return 0;
 
-    int f = fs_open(task64_cwd(), nazwa, 0);
+    int f = fs_open(task64_cwd(), name, 0);
     if (f < 0)
         return 0;
     int len = fs_size(f);
     if (len <= 0)
         return 0;
 
-    uint32_t blokow = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
-    uint64_t stron = ((uint64_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t nblocks = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
+    uint64_t pages = ((uint64_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
 
-    uint64_t baza = task64_mmap_next();
-    uint64_t koniec = baza + stron * PAGE_SIZE;
-    if (!baza || koniec > USER64_MMAP_MAX || koniec < baza)
+    uint64_t base = task64_mmap_next();
+    uint64_t end = base + pages * PAGE_SIZE;
+    if (!base || end > USER64_MMAP_MAX || end < base)
         return 0;
 
-    uint32_t *bloki = kmalloc(blokow * sizeof(uint32_t));
-    if (!bloki)
+    uint32_t *blocks = kmalloc(nblocks * sizeof(uint32_t));
+    if (!blocks)
         return 0;
-    for (uint32_t i = 0; i < blokow; i++) {
+    for (uint32_t i = 0; i < nblocks; i++) {
         /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
            strony nie wolno juz wchodzic w kod systemu plikow */
-        bloki[i] = fs_file_block(f, i, 0);
-        if (!bloki[i]) {
-            kfree(bloki);
+        blocks[i] = fs_file_block(f, i, 0);
+        if (!blocks[i]) {
+            kfree(blocks);
             return 0;
         }
     }
 
-    if (task64_mmap_dodaj(baza, koniec, (uint32_t)len, bloki, blokow,
-                          zapis ? 1u : 0u) < 0) {
-        kfree(bloki);
+    if (task64_mmap_add(base, end, (uint32_t)len, blocks, nblocks,
+                          write ? 1u : 0u) < 0) {
+        kfree(blocks);
         return 0;
     }
-    task64_set_mmap_next(koniec);
-    *rozmiar_out = (uint64_t)len;
-    return baza;
+    task64_set_mmap_next(end);
+    *size_out = (uint64_t)len;
+    return base;
 }
 
 /* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
@@ -468,47 +468,47 @@ uint64_t proc64_msync(void)
 {
     if (!task64_mmap_next())
         return 0;
-    uint64_t odeslanych = 0;
+    uint64_t sent_back_n = 0;
 
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        uint64_t start, koniec;
-        uint32_t rozmiar, zapis;
-        if (!task64_mmap_opis(i, &start, &koniec, &rozmiar, &zapis) || !zapis)
+    for (int i = 0; i < MMAP_FILES; i++) {
+        uint64_t start, end;
+        uint32_t size, write;
+        if (!task64_mmap_info(i, &start, &end, &size, &write) || !write)
             continue;
-        for (uint64_t va = start; va < koniec; va += PAGE_SIZE) {
-            if (!paging64_plik_brudna(va))
+        for (uint64_t va = start; va < end; va += PAGE_SIZE) {
+            if (!paging64_file_dirty(va))
                 continue;
-            uint64_t ramka = paging64_lookup(va) & ~0xFFFULL;
-            if (!ramka)
+            uint64_t frame = paging64_lookup(va) & ~0xFFFULL;
+            if (!frame)
                 continue;
             uint64_t offset = va - start;
-            const uint8_t *zrodlo = (const uint8_t *)(uintptr_t)ramka;
+            const uint8_t *src = (const uint8_t *)(uintptr_t)frame;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
                 /* Za koncem pliku nie ma czego odsylac - blok albo nie
                    istnieje, albo nalezy juz do kogos innego */
-                if (offset + b * FS_BLOCK >= rozmiar)
+                if (offset + b * FS_BLOCK >= size)
                     break;
-                uint32_t blok = task64_mmap_blok(va,
+                uint32_t blok = task64_mmap_block(va,
                                     (uint32_t)(offset / FS_BLOCK) + b);
                 if (!blok)
                     break;
                 blk_write(fs_block_lba(blok), FS_BLOCK / 512,
-                          zrodlo + b * FS_BLOCK);
+                          src + b * FS_BLOCK);
             }
-            paging64_plik_czysta(va);
-            odeslanych++;
+            paging64_file_clean(va);
+            sent_back_n++;
         }
     }
-    return odeslanych;
+    return sent_back_n;
 }
 
-static int spawn_wewn(const char *name, const struct args64 *args,
-                      int quiet, int wszedzie)
+static int spawn_inner(const char *name, const struct args64 *args,
+                      int quiet, int anycore)
 {
     struct spawn_req *req;
     int i;
 
-    if (!prog_istnieje(name))
+    if (!prog_exists(name))
         return -1;
 
     req = kmalloc(sizeof(*req));
@@ -518,7 +518,7 @@ static int spawn_wewn(const char *name, const struct args64 *args,
         req->name[i] = name[i];
     req->name[i] = '\0';
     req->quiet = quiet;
-    req->wszedzie = wszedzie;
+    req->anycore = anycore;
     if (args) {
         req->args = *args;
     } else {
@@ -542,12 +542,12 @@ static int spawn_wewn(const char *name, const struct args64 *args,
 
 int proc64_spawn(const char *name, const struct args64 *args, int quiet)
 {
-    return spawn_wewn(name, args, quiet, 0);
+    return spawn_inner(name, args, quiet, 0);
 }
 
 /* To samo, ale proces wolno prowadzic KAZDEMU rdzeniowi */
-int proc64_spawn_wszedzie(const char *name, const struct args64 *args,
+int proc64_spawn_anycore(const char *name, const struct args64 *args,
                           int quiet)
 {
-    return spawn_wewn(name, args, quiet, 1);
+    return spawn_inner(name, args, quiet, 1);
 }

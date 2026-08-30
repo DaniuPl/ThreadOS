@@ -43,17 +43,17 @@ int proc64_copy_args(uint64_t argv_ptr, struct args64 *out);
 int proc64_spawn(const char *name, const struct args64 *args, int quiet);
 
 /* To samo, ale proces wolno prowadzic kazdemu rdzeniowi */
-int proc64_spawn_wszedzie(const char *name, const struct args64 *args,
+int proc64_spawn_anycore(const char *name, const struct args64 *args,
                           int quiet);
 
 /* Mapuje region pamieci wspoldzielonej o danym kluczu w przestrzeni
    biezacego procesu. Zwraca adres, pod ktorym go widac, albo 0. */
-uint64_t proc64_shm(int klucz, uint64_t rozmiar);
+uint64_t proc64_shm(int key, uint64_t size);
 
 /* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu,
    strony przychodza pod palcami). Zwraca adres albo 0. */
-uint64_t proc64_mmap_pliku(const char *nazwa, uint64_t *rozmiar_out,
-                           uint64_t zapis);
+uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
+                           uint64_t write);
 
 /* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
    procesu. Zwraca liczbe odeslanych stron. */

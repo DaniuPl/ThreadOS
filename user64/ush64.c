@@ -16,15 +16,15 @@
 static char line[LINE_MAX];
 static int line_len;
 static char out[128];
-static volatile int przerwany;
+static volatile int interrupted;
 
 /* Shell nie ginie od Ctrl+C - przerywa tylko to, co wpisywal.
    Bez wlasnej procedury sygnal zabilby go domyslnie, a wtedy kazde
    przypadkowe Ctrl+C konczyloby sesje. */
-static void na_sygnal(int sig)
+static void on_signal(int sig)
 {
     (void)sig;
-    przerwany = 1;
+    interrupted = 1;
 }
 
 static int put(int n, const char *s)
@@ -57,7 +57,7 @@ static void say(const char *a, int64_t v, const char *b)
     print(out);
 }
 
-static int rowne(const char *a, const char *b)
+static int equal(const char *a, const char *b)
 {
     while (*a && *a == *b) {
         a++;
@@ -66,7 +66,7 @@ static int rowne(const char *a, const char *b)
     return *a == *b;
 }
 
-static int zaczyna_sie(const char *s, const char *p)
+static int starts_with(const char *s, const char *p)
 {
     while (*p)
         if (*s++ != *p++)
@@ -80,24 +80,24 @@ static int zaczyna_sie(const char *s, const char *p)
    argumenty, i shell nie interesuje sie tym, co z nich wyniknie. */
 #define SH_ARGS 8
 
-static char slowa[SH_ARGS][32];
+static char words[SH_ARGS][32];
 static char *argv[SH_ARGS + 1];
 
-static int podziel(char *linia)
+static int split(char *text)
 {
     int n = 0, i = 0;
-    while (linia[i] && n < SH_ARGS) {
-        while (linia[i] == ' ')
+    while (text[i] && n < SH_ARGS) {
+        while (text[i] == ' ')
             i++;
-        if (!linia[i])
+        if (!text[i])
             break;
         int k = 0;
-        while (linia[i] && linia[i] != ' ' && k < 31)
-            slowa[n][k++] = linia[i++];
-        slowa[n][k] = '\0';
-        while (linia[i] && linia[i] != ' ')
+        while (text[i] && text[i] != ' ' && k < 31)
+            words[n][k++] = text[i++];
+        words[n][k] = '\0';
+        while (text[i] && text[i] != ' ')
             i++;
-        argv[n] = slowa[n];
+        argv[n] = words[n];
         n++;
     }
     argv[n] = 0;
@@ -110,10 +110,10 @@ static int podziel(char *linia)
  * najwazniejsze - zamyka oba u siebie. Gdyby ich nie zamknal, drugi
  * program czekalby na koniec danych, ktory nigdy by nie nadszedl:
  * jeden piszacy (sam shell) zostalby przy zyciu na zawsze. */
-static char slowa2[SH_ARGS][32];
+static char words2[SH_ARGS][32];
 static char *argv2[SH_ARGS + 1];
 
-static void uruchom_potok(char *lewa, char *prawa)
+static void run_pipe(char *left, char *right)
 {
     int fd[2];
     if (sys_pipe(fd) < 0) {
@@ -124,16 +124,16 @@ static void uruchom_potok(char *lewa, char *prawa)
     /* Prawa strona najpierw: jej argv trzeba zbudowac, zanim podzial
        lewej nadpisze wspolne bufory */
     int n2 = 0, i = 0;
-    while (prawa[i] && n2 < SH_ARGS) {
-        while (prawa[i] == ' ')
+    while (right[i] && n2 < SH_ARGS) {
+        while (right[i] == ' ')
             i++;
-        if (!prawa[i])
+        if (!right[i])
             break;
         int k = 0;
-        while (prawa[i] && prawa[i] != ' ' && k < 31)
-            slowa2[n2][k++] = prawa[i++];
-        slowa2[n2][k] = '\0';
-        argv2[n2] = slowa2[n2];
+        while (right[i] && right[i] != ' ' && k < 31)
+            words2[n2][k++] = right[i++];
+        words2[n2][k] = '\0';
+        argv2[n2] = words2[n2];
         n2++;
     }
     argv2[n2] = 0;
@@ -144,7 +144,7 @@ static void uruchom_potok(char *lewa, char *prawa)
         return;
     }
 
-    int n1 = podziel(lewa);
+    int n1 = split(left);
     if (!n1) {
         print("ush64: przed kreska nic nie ma\n");
         sys_close(fd[0]);
@@ -174,67 +174,67 @@ static void uruchom_potok(char *lewa, char *prawa)
     sys_close(fd[0]);
     sys_close(fd[1]);
 
-    int kod = 0;
-    sys_wait(&kod);
-    sys_wait(&kod);
+    int code = 0;
+    sys_wait(&code);
+    sys_wait(&code);
     (void)a;
     (void)b;
 }
 
-static void uruchom(const char *nazwa)
+static void run(const char *name)
 {
-    int64_t dziecko = sys_fork();
-    if (dziecko < 0) {
+    int64_t child = sys_fork();
+    if (child < 0) {
         print("ush64: nie mam z czego zrobic procesu\n");
         return;
     }
-    if (dziecko == 0) {
-        sys_exec(nazwa, argv);
+    if (child == 0) {
+        sys_exec(name, argv);
         /* exec wraca tylko wtedy, gdy sie nie udal */
         print("ush64: nie ma takiego programu\n");
         sys_exit(127);
     }
 
-    int kod = 0;
-    int64_t kto = sys_wait(&kod);
-    if (kto >= 0)
-        say("ush64: koniec, kod ", kod, "\n");
+    int code = 0;
+    int64_t who = sys_wait(&code);
+    if (who >= 0)
+        say("ush64: koniec, kod ", code, "\n");
 }
 
-static void wykonaj(void)
+static void execute(void)
 {
     if (!line[0])
         return;
 
-    if (rowne(line, "help")) {
+    if (equal(line, "help")) {
         print("ush64: help, echo <tekst>, pid, exit, "
               "albo nazwa programu z initrd\n");
-    } else if (rowne(line, "pid")) {
+    } else if (equal(line, "pid")) {
         /* Numer procesu poznajemy po tym, co fork mowi rodzicowi -
            tak samo jak kazdy inny program */
         print("ush64: jestem procesem w ring 3\n");
-    } else if (rowne(line, "exit")) {
+    } else if (equal(line, "exit")) {
         print("ush64: pa!\n");
         sys_exit(0);
-    } else if (zaczyna_sie(line, "echo ")) {
+    } else if (starts_with(line, "echo ")) {
         print(line + 5);
         print("\n");
     } else {
         /* Kreska dzieli linie na dwa programy - wszystko przed nia
            pisze do tego, co czyta wszystko za nia */
-        int kreska = -1;
+        int dash = -1;
         for (int i = 0; line[i]; i++)
             if (line[i] == '|') {
-                kreska = i;
+                dash = i;
                 break;
             }
-        if (kreska >= 0) {
-            line[kreska] = '\0';
-            uruchom_potok(line, line + kreska + 1);
+        if (dash >= 0) {
+            line[dash] = '\0';
+            run_pipe(line, line + dash + 1);
         } else {
-            int n = podziel(line);
+            int n = split(line);
             if (n)
-                uruchom(argv[0]);
+                run(argv[0]);
         }
     }
 }
@@ -242,7 +242,7 @@ static void wykonaj(void)
 void _start(void)
 {
 
-    sys_signal(SIGINT, na_sygnal);
+    sys_signal(SIGINT, on_signal);
     print("ush64 - shell uzytkownika. Wpisz 'help'.\n");
 
     for (;;) {
@@ -256,8 +256,8 @@ void _start(void)
                 /* Czekanie przerwal sygnal. Procedura obslugi juz
                    byla - zostaje porzucic zaczeta linie i zaczac od
                    nowa, dokladnie jak kazdy shell. */
-                if (przerwany) {
-                    przerwany = 0;
+                if (interrupted) {
+                    interrupted = 0;
                     print("^C\n");
                     line_len = 0;
                     break;
@@ -285,6 +285,6 @@ void _start(void)
         }
 
         line[line_len] = '\0';
-        wykonaj();
+        execute();
     }
 }

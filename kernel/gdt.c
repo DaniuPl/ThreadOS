@@ -44,9 +44,9 @@ struct tss {
  * deskryptor jako ZAJETY, wiec drugi rdzen ladujacy ten sam selektor
  * dostalby wyjatek ochrony. Tablica zostaje jedna - rozne sa tylko
  * wpisy i selektory. */
-static struct gdt_entry gdt[5 + SMP_RDZENI];
+static struct gdt_entry gdt[5 + SMP_CORES];
 static struct gdt_ptr gdt_pointer;
-static struct tss tss[SMP_RDZENI];
+static struct tss tss[SMP_CORES];
 
 static void gdt_set_entry(int i, uint32_t base, uint32_t limit,
                           uint8_t access, uint8_t gran)
@@ -71,28 +71,28 @@ void gdt_init(void)
     gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);       /* kod użytkownika, ring 3 */
     gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);       /* dane użytkownika, ring 3 */
 
-    for (int i = 0; i < SMP_RDZENI; i++) {
+    for (int i = 0; i < SMP_CORES; i++) {
         tss[i].ss0 = GDT_KERNEL_DATA;
         /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
         gdt_set_entry(5 + i, (uint32_t)&tss[i], sizeof(tss[i]) - 1,
                       0x89, 0x00);
     }
 
-    gdt_zaladuj();
+    gdt_load();
 
     /* Segment stanu zadania laduje TYLKO rdzen rozruchowy. Instrukcja
        ltr oznacza deskryptor jako zajety, wiec ta sama tablica nie da
        sie zaladowac dwa razy - a i tak nie ma po co: TSS jest jeden,
        bo sluzy wejsciu w ring 0 z ring 3, a programy uzytkownika
        chodza na razie tylko na rdzeniu rozruchowym. */
-    gdt_zaladuj_tss();
+    gdt_load_tss();
 }
 
 /* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
    z jego numeru: piaty wpis tablicy plus tyle, ile wynosi numer. */
-void gdt_zaladuj_tss(void)
+void gdt_load_tss(void)
 {
-    uint16_t sel = (uint16_t)(GDT_TSS + smp_rdzen_apic() * 8);
+    uint16_t sel = (uint16_t)(GDT_TSS + smp_core_apic() * 8);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
@@ -100,7 +100,7 @@ void gdt_zaladuj_tss(void)
    rejestry segmentowe; CS wymaga dalekiego skoku. Rdzen wtorny wola to
    po przejsciu w tryb chroniony, zeby zejsc z tymczasowej tablicy
    z trampoliny na wspolna tablice jadra. */
-void gdt_zaladuj(void)
+void gdt_load(void)
 {
     __asm__ volatile(
         "lgdt %0\n\t"
@@ -119,5 +119,5 @@ void gdt_zaladuj(void)
 
 void tss_set_esp0(uint32_t esp0)
 {
-    tss[smp_rdzen()].esp0 = esp0;
+    tss[smp_core()].esp0 = esp0;
 }

@@ -16,7 +16,7 @@ int exec_spawn(const char *cmdline);
 /* To samo, ale proces wolno prowadzic kazdemu rdzeniowi. Jego strona
    jadrowa zostaje pod wielkim zamkiem; rownolegle idzie liczenie
    w pierscieniu 3. */
-int exec_spawn_wszedzie(const char *cmdline);
+int exec_spawn_anycore(const char *cmdline);
 
 /* Jak exec_spawn, ale stdout (fd 1) procesu jest przekierowany do
    pliku outfile. append=0 obcina plik, append=1 dopisuje (>>). */
@@ -52,8 +52,8 @@ uint32_t process_mmap(uint32_t size);
 
 /* Odwzorowuje plik z dysku w pamieci procesu (tylko do odczytu, strony
    przychodza pod palcami). Zwraca adres albo 0. */
-uint32_t process_mmap_file(const char *nazwa, uint32_t *rozmiar_out,
-                           uint32_t zapis);
+uint32_t process_mmap_file(const char *name, uint32_t *size_out,
+                           uint32_t write);
 
 /* Odsyla do plikow brudne strony zapisywalnych odwzorowan biezacego
    procesu. Zwraca liczbe odeslanych stron. */

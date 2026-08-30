@@ -67,7 +67,7 @@ void idt_init(void)
     /* Syscall: 0xEE = DPL 3, wiec int 0x80 wolno wykonac z ring 3 */
     idt_set_gate(0x80, isr128, 0xEE);
 
-    idt_zaladuj();
+    idt_load();
 }
 
 /* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
@@ -75,7 +75,7 @@ void idt_init(void)
    wtorny wola to tuz po przejsciu w tryb chroniony: do tej chwili nie
    ma zadnej obslugi wyjatkow, wiec kazdy blad konczy sie potrojnym
    bledem i cichym resetem maszyny. */
-void idt_zaladuj(void)
+void idt_load(void)
 {
     __asm__ volatile("lidt %0" : : "m"(idt_pointer));
 }

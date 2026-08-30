@@ -16,11 +16,11 @@
 
 #include "usys64.h"
 
-#define STRONA 4096
+#define PAGE_MARK 4096
 
 static char out[96];
 
-static void powiedz(const char *a, uint64_t v, const char *b)
+static void report(const char *a, uint64_t v, const char *b)
 {
     int n = 0;
     while (*a)
@@ -35,9 +35,9 @@ static void powiedz(const char *a, uint64_t v, const char *b)
     print(out);
 }
 
-static unsigned char znacznik(uint64_t strona)
+static unsigned char tag(uint64_t page)
 {
-    return (unsigned char)(strona * 7 + 13);
+    return (unsigned char)(page * 7 + 13);
 }
 
 void _start(int argc, char **argv)
@@ -48,30 +48,30 @@ void _start(int argc, char **argv)
         if (v > 0)
             mib = (uint64_t)v;
     }
-    uint64_t bajtow = mib * 1024u * 1024u;
-    uint64_t stron = bajtow / STRONA;
+    uint64_t nbytes = mib * 1024u * 1024u;
+    uint64_t pages = nbytes / PAGE_MARK;
 
-    unsigned char *p = sys_sbrk((int64_t)bajtow);
+    unsigned char *p = sys_sbrk((int64_t)nbytes);
     if (!p) {
         print("[swaptest64] sbrk odmowil\n");
         sys_exit(1);
     }
-    p = (unsigned char *)(((uintptr_t)p + STRONA - 1) & ~(uintptr_t)(STRONA - 1));
+    p = (unsigned char *)(((uintptr_t)p + PAGE_MARK - 1) & ~(uintptr_t)(PAGE_MARK - 1));
 
-    powiedz("[swaptest64] zapisuje ", mib, " MiB\n");
-    for (uint64_t i = 0; i < stron; i++)
-        p[i * STRONA] = znacznik(i);
+    report("[swaptest64] zapisuje ", mib, " MiB\n");
+    for (uint64_t i = 0; i < pages; i++)
+        p[i * PAGE_MARK] = tag(i);
 
     print("[swaptest64] czytam z powrotem\n");
-    uint64_t zle = 0;
-    for (uint64_t i = 0; i < stron; i++)
-        if (p[i * STRONA] != znacznik(i))
-            zle++;
+    uint64_t bad = 0;
+    for (uint64_t i = 0; i < pages; i++)
+        if (p[i * PAGE_MARK] != tag(i))
+            bad++;
 
-    if (zle) {
-        powiedz("[swaptest64] ZLE: stron z bledna zawartoscia ", zle, "\n");
+    if (bad) {
+        report("[swaptest64] ZLE: stron z bledna zawartoscia ", bad, "\n");
         sys_exit(1);
     }
-    powiedz("[swaptest64] wszystkie ", stron, " stron wrocilo w calosci\n");
+    report("[swaptest64] wszystkie ", pages, " stron wrocilo w calosci\n");
     sys_exit(0);
 }

@@ -12,7 +12,7 @@
 
 #include "usys64.h"
 
-static volatile uint64_t wartosc;
+static volatile uint64_t value;
 static char buf[96];
 
 static int put(int n, const char *s)
@@ -32,20 +32,20 @@ static int putn(int n, uint64_t v)
 void _start(void)
 {
 
-    wartosc = 100;
+    value = 100;
 
-    int64_t dziecko = sys_fork();
-    if (dziecko < 0) {
+    int64_t child = sys_fork();
+    if (child < 0) {
         print("[fork64] BLAD: fork sie nie udal\n");
         sys_exit(1);
     }
 
-    if (dziecko == 0) {
+    if (child == 0) {
         /* Dziecko. Nadpisuje wartosc u siebie - rodzic nie ma prawa
            tego zobaczyc, bo dostal wlasna kopie strony. */
-        wartosc = 200;
+        value = 200;
         int n = put(0, "[fork64] dziecko: fork dal 0, moja wartosc to ");
-        n = putn(n, wartosc);
+        n = putn(n, value);
         buf[n++] = '\n';
         buf[n] = 0;
         print(buf);
@@ -54,20 +54,20 @@ void _start(void)
 
     /* Rodzic. Daje dziecku czas na zapis i sprawdza swoja pamiec. */
     int n = put(0, "[fork64] rodzic: fork dal numer dziecka ");
-    n = putn(n, (uint64_t)dziecko);
+    n = putn(n, (uint64_t)child);
     buf[n++] = '\n';
     buf[n] = 0;
     print(buf);
 
     sys_sleep(300);
 
-    n = put(0, wartosc == 100 ? "[fork64] rodzic: nadal "
+    n = put(0, value == 100 ? "[fork64] rodzic: nadal "
                               : "[fork64] rodzic: BLAD, teraz ");
-    n = putn(n, wartosc);
-    n = put(n, wartosc == 100 ? " - dziecko dostalo kopie\n"
+    n = putn(n, value);
+    n = put(n, value == 100 ? " - dziecko dostalo kopie\n"
                               : " - dziecko pisze po mojej pamieci\n");
     buf[n] = 0;
     print(buf);
 
-    sys_exit(wartosc == 100 ? 0 : 1);
+    sys_exit(value == 100 ? 0 : 1);
 }

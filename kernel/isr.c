@@ -10,7 +10,7 @@
 #include "include/smp.h"
 #include "include/syscall.h"
 #include "include/task.h"
-#include "include/zamekjadra.h"
+#include "include/biglock.h"
 
 static const char *exception_names[32] = {
     "Divide Error", "Debug", "NMI", "Breakpoint",
@@ -33,7 +33,7 @@ void irq_install_handler(int irq, irq_handler_t handler)
     irq_handlers[irq] = handler;
 }
 
-static void isr_obsluz(struct regs *r);
+static void isr_dispatch(struct regs *r);
 
 /* Wejscie do jadra z pierscienia 3 bierze wielki zamek jadra.
  *
@@ -46,14 +46,14 @@ static void isr_obsluz(struct regs *r);
 void isr_handler(struct regs *r)
 {
     if ((r->cs & 3) != 3) {         /* jadro przerwane w jadrze */
-        isr_obsluz(r);
+        isr_dispatch(r);
         return;
     }
 
     /* Wywolanie systemowe, ktore siega tylko po stan wolajacego
        zadania, zamka nie potrzebuje - i dopiero to sprawia, ze dwa
        procesy moga byc w jadrze naraz. Reszta wchodzi po staremu. */
-    if (r->int_no == SYSCALL_VECTOR && syscall_bez_zamka(r->eax)) {
+    if (r->int_no == SYSCALL_VECTOR && syscall_lockless(r->eax)) {
         syscall_handler(r);
         /* Zabicie i sygnal to juz nie jest praca "tylko na swoim":
            jedno konczy proces, drugie przestawia mu stos. Zamek
@@ -61,20 +61,20 @@ void isr_handler(struct regs *r)
            doreczyc - inaczej ta sciezka nie roznilaby sie od zwyklej
            niczym poza nazwa. */
         if (task_killed() || task_signal_pending()) {
-            jadro_wejdz();
+            biglock_enter();
             task_kill_pending();
             signal_deliver(r);
-            jadro_wyjdz();
+            biglock_leave();
         }
         return;
     }
 
-    jadro_wejdz();
-    isr_obsluz(r);
-    jadro_wyjdz();
+    biglock_enter();
+    isr_dispatch(r);
+    biglock_leave();
 }
 
-static void isr_obsluz(struct regs *r)
+static void isr_dispatch(struct regs *r)
 {
     if (r->int_no == SYSCALL_VECTOR) {
         syscall_handler(r);
@@ -109,7 +109,7 @@ static void isr_obsluz(struct regs *r)
         if ((r->cs & 3) == 3) {
             printk("\n[jadro] proces '%s' ubity na rdzeniu %d: "
                    "%s (err=%x, eip=%x)\n",
-                   task_current_name(), smp_rdzen(),
+                   task_current_name(), smp_core(),
                    exception_names[r->int_no], r->err_code, r->eip);
             if (r->int_no == 14) {
                 uint32_t cr2;
@@ -136,14 +136,14 @@ static void isr_obsluz(struct regs *r)
        rdzenia. Na rdzeniu wtornym to jedyne przerwanie, jakie w ogole
        przychodzi. */
     if (r->int_no == 48) {
-        smp_zegar_tyk();
+        smp_timer_tick();
         return;
     }
 
     /* Pobudka od innego rdzenia. Nie niesie zadnej tresci: chodzilo
        tylko o to, zeby wyrwac ten procesor z instrukcji hlt. */
     if (r->int_no == 49) {
-        smp_pobudka_odbierz();
+        smp_wakeup_recv();
         return;
     }
 

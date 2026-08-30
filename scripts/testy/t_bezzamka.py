@@ -19,9 +19,9 @@ Sprawdzamy trzy rzeczy:
      mylily sie co do tego, ktore zadanie prowadza - a to jest dokladnie
      to ryzyko, ktore zamek do tej pory zaslanial - widac by to bylo
      tutaj natychmiast.
-  2. 'run wywolania' trzyma oba procesy na rdzeniu rozruchowym, wiec
+  2. 'run syscalls' trzyma oba procesy na rdzeniu rozruchowym, wiec
      maska rdzeni ma byc rowna 1. To jest pomiar odniesienia.
-  3. 'runw wywolania' pozwala im biec wszedzie. Ma byc WYRAZNIE
+  3. 'runw syscalls' pozwala im biec wszedzie. Ma byc WYRAZNIE
      szybciej, a nie tylko troche - i to jest cala roznica, bo przed
      ta zmiana bylo w tym miejscu WOLNIEJ niz na jednym rdzeniu.
 
@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, wynik, zrob_iso64, brak64
 
-WZOR = re.compile(r"\[wywolania\] (dziecko|rodzic ): rdzenie (\d+), "
+WZOR = re.compile(r"\[syscalls\] (dziecko|rodzic ): rdzenie (\d+), "
                   r"tyknac (\d+), wywolan (\d+), zgodnych (\d+)")
 
 
@@ -64,14 +64,14 @@ def zmierz(q, komenda, etykieta):
 
 
 def proba(q, rdzeni, etykieta):
-    po_kolei = zmierz(q, "run wywolania", " ('run')" + etykieta)
+    po_kolei = zmierz(q, "run syscalls", " ('run')" + etykieta)
     if po_kolei:
         check("bez 'runw' oba procesy zostaly na rdzeniu rozruchowym "
               "(maska %d)%s" % (po_kolei[0], etykieta), po_kolei[0] == 1)
         check("pomiar odniesienia trwal dosc dlugo, by cos znaczyc "
               "(%d tyknac)%s" % (po_kolei[1], etykieta), po_kolei[1] >= 20)
 
-    naraz = zmierz(q, "runw wywolania", " ('runw')" + etykieta)
+    naraz = zmierz(q, "runw syscalls", " ('runw')" + etykieta)
     if not (po_kolei and naraz):
         return
 

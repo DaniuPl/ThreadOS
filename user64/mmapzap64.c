@@ -28,15 +28,15 @@
 
 #include "usys64.h"
 
-#define ZMIENIONE 8192u          /* dokladnie dwie strony */
-#define ZNAK_A    0xA5
-#define ZNAK_B    0x5A
+#define CHANGED 8192u          /* dokladnie dwie strony */
+#define CH_A    0xA5
+#define CH_B    0x5A
 #define OFF_B     (4096u + 7)
-#define OFF_DZIECKA 100u
+#define OFF_CHILD 100u
 
 static char out[128];
 
-static void powiedz(const char *a, uint64_t v, const char *b)
+static void report(const char *a, uint64_t v, const char *b)
 {
     int n = 0;
     while (*a)
@@ -52,10 +52,10 @@ static void powiedz(const char *a, uint64_t v, const char *b)
     print(out);
 }
 
-static unsigned char stary(uint64_t i)  { return (unsigned char)(i * 7 + 13); }
-static unsigned char nowy(uint64_t i)   { return (unsigned char)(i * 11 + 5); }
+static unsigned char old(uint64_t i)  { return (unsigned char)(i * 7 + 13); }
+static unsigned char fresh_one(uint64_t i)   { return (unsigned char)(i * 11 + 5); }
 
-static int rowne(const char *a, const char *b)
+static int equal(const char *a, const char *b)
 {
     while (*a && *a == *b) {
         a++;
@@ -64,78 +64,78 @@ static int rowne(const char *a, const char *b)
     return *a == *b;
 }
 
-static unsigned char bufor[512];
+static unsigned char buf[512];
 
 /* Czyta plik zwyklym sys_read i oddaje bajt spod danego miejsca.
    Zwraca -1, gdy pliku nie ma albo jest za krotki. */
-static int czytaj_bajt(const char *nazwa, uint64_t offset)
+static int read_byte(const char *name, uint64_t offset)
 {
-    int64_t fd = sys_open(nazwa, 0);
+    int64_t fd = sys_open(name, 0);
     if (fd < 0)
         return -1;
     uint64_t doszlo = 0;
-    int wynik = -1;
+    int result = -1;
     for (;;) {
-        int64_t n = sys_read((int)fd, bufor, sizeof(bufor));
+        int64_t n = sys_read((int)fd, buf, sizeof(buf));
         if (n <= 0)
             break;
         if (offset >= doszlo && offset < doszlo + (uint64_t)n) {
-            wynik = bufor[offset - doszlo];
+            result = buf[offset - doszlo];
             break;
         }
         doszlo += (uint64_t)n;
     }
     sys_close((int)fd);
-    return wynik;
+    return result;
 }
 
 /* Sprawdza caly plik zwyklym odczytem wobec oczekiwanego wzorca */
-static uint64_t sprawdz_czytajac(const char *nazwa)
+static uint64_t check_by_reading(const char *name)
 {
-    int64_t fd = sys_open(nazwa, 0);
+    int64_t fd = sys_open(name, 0);
     if (fd < 0)
         return (uint64_t)-1;
-    uint64_t doszlo = 0, zle = 0;
+    uint64_t doszlo = 0, bad = 0;
     for (;;) {
-        int64_t n = sys_read((int)fd, bufor, sizeof(bufor));
+        int64_t n = sys_read((int)fd, buf, sizeof(buf));
         if (n <= 0)
             break;
         for (int64_t i = 0; i < n; i++) {
             uint64_t poz = doszlo + (uint64_t)i;
-            unsigned char ma = poz < ZMIENIONE ? nowy(poz) : stary(poz);
-            if (bufor[i] != ma)
-                zle++;
+            unsigned char ma = poz < CHANGED ? fresh_one(poz) : old(poz);
+            if (buf[i] != ma)
+                bad++;
         }
         doszlo += (uint64_t)n;
     }
     sys_close((int)fd);
     /* Pusty odczyt nie jest zgodnoscia: petla, ktora nie obejrzala ani
        jednego bajtu, zawsze naliczy zero bledow */
-    if (doszlo < ZMIENIONE)
+    if (doszlo < CHANGED)
         return (uint64_t)-1;
-    return zle;
+    return bad;
 }
 
 void _start(int argc, char **argv)
 {
-    const char *nazwa = argc > 1 ? argv[1] : "zapis.txt";
-    const char *tryb = argc > 2 ? argv[2] : "pisz";
+    const char *name = argc > 1 ? argv[1] : "zapis.txt";
+    const char *mode = argc > 2 ? argv[2] : "pisz";
 
-    if (rowne(tryb, "spr")) {
-        uint64_t zle = sprawdz_czytajac(nazwa);
-        if (zle) {
-            powiedz("[mmapzap64] ZLE: zwykly odczyt widzi inne bajty: ",
-                    zle, "");
+    if (equal(mode, "spr")) {
+        uint64_t bad = check_by_reading(name);
+        if (bad) {
+            report("[mmapzap64] ZLE: zwykly odczyt widzi inne bajty: ",
+                    bad, "");
             sys_exit(1);
         }
         print("[mmapzap64] zwykly odczyt widzi to, co wpisala pamiec\n");
         sys_exit(0);
     }
 
-    if (rowne(tryb, "spr2")) {
-        int a = czytaj_bajt(nazwa, 0);
-        int b = czytaj_bajt(nazwa, OFF_B);
-        if (a != ZNAK_A || b != ZNAK_B) {
+    if (equal(mode, "spr2")) {
+        int a = read_byte(name, 0);
+        int b = read_byte(name, OFF_B);
+        if (a != CH_A || b != CH_B) {
             print("[mmapzap64] ZLE: bajty bez msync nie doszly na dysk\n");
             sys_exit(1);
         }
@@ -144,33 +144,33 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    uint64_t rozmiar = 0;
-    unsigned char *p = sys_mmap_file_w(nazwa, &rozmiar);
-    if (!p || !rozmiar) {
+    uint64_t size = 0;
+    unsigned char *p = sys_mmap_file_w(name, &size);
+    if (!p || !size) {
         print("[mmapzap64] nie da sie odwzorowac pliku do zapisu\n");
         sys_exit(1);
     }
 
-    if (rowne(tryb, "bez")) {
-        p[0] = ZNAK_A;
-        p[OFF_B] = ZNAK_B;
+    if (equal(mode, "bez")) {
+        p[0] = CH_A;
+        p[OFF_B] = CH_B;
         print("[mmapzap64] dwa bajty wpisane, koncze bez msync\n");
         sys_exit(0);
     }
 
-    if (rowne(tryb, "widac")) {
+    if (equal(mode, "widac")) {
         int64_t pid = sys_fork();
         if (pid == 0) {
-            p[OFF_DZIECKA] = ZNAK_B;
+            p[OFF_CHILD] = CH_B;
             sys_exit(0);
         }
         if (pid < 0) {
             print("[mmapzap64] ZLE: fork sie nie udal\n");
             sys_exit(1);
         }
-        int kod = 0;
-        sys_wait(&kod);
-        if (p[OFF_DZIECKA] != ZNAK_B) {
+        int code = 0;
+        sys_wait(&code);
+        if (p[OFF_CHILD] != CH_B) {
             print("[mmapzap64] ZLE: rodzic nie widzi zapisu dziecka\n");
             sys_exit(1);
         }
@@ -181,32 +181,32 @@ void _start(int argc, char **argv)
 
     /* Tryb 'pisz': czytamy caly plik, ale piszemy tylko po dwoch
        pierwszych stronach - i to ma byc widac w liczbie odeslanych */
-    if (rozmiar <= ZMIENIONE) {
+    if (size <= CHANGED) {
         print("[mmapzap64] ZLE: plik za maly na ten test\n");
         sys_exit(1);
     }
-    uint64_t zle = 0;
-    for (uint64_t i = 0; i < rozmiar; i++)
-        if (p[i] != stary(i))
-            zle++;
-    if (zle) {
-        powiedz("[mmapzap64] ZLE: stary wzorzec sie nie zgadza: ", zle, "");
+    uint64_t bad = 0;
+    for (uint64_t i = 0; i < size; i++)
+        if (p[i] != old(i))
+            bad++;
+    if (bad) {
+        report("[mmapzap64] ZLE: stary wzorzec sie nie zgadza: ", bad, "");
         sys_exit(1);
     }
-    powiedz("[mmapzap64] stary wzorzec przeczytany, bajtow ", rozmiar, "");
+    report("[mmapzap64] stary wzorzec przeczytany, bajtow ", size, "");
 
-    for (uint64_t i = 0; i < ZMIENIONE; i++)
-        p[i] = nowy(i);
+    for (uint64_t i = 0; i < CHANGED; i++)
+        p[i] = fresh_one(i);
 
-    int64_t odeslane = sys_msync();
-    powiedz("[mmapzap64] odeslanych stron: ", (uint64_t)odeslane, "");
+    int64_t sent_back = sys_msync();
+    report("[mmapzap64] odeslanych stron: ", (uint64_t)sent_back, "");
 
     int64_t drugie = sys_msync();
-    powiedz("[mmapzap64] drugie msync odeslalo: ", (uint64_t)drugie, "");
+    report("[mmapzap64] drugie msync odeslalo: ", (uint64_t)drugie, "");
 
     /* Pamiec ma dalej pokazywac to, co wpisalismy - odeslanie na dysk
        niczego w niej nie rusza */
-    if (p[0] != nowy(0) || p[ZMIENIONE - 1] != nowy(ZMIENIONE - 1)) {
+    if (p[0] != fresh_one(0) || p[CHANGED - 1] != fresh_one(CHANGED - 1)) {
         print("[mmapzap64] ZLE: pamiec zgubila zapisane bajty\n");
         sys_exit(1);
     }

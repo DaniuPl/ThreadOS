@@ -49,29 +49,29 @@
 #include "../kernel64/idt64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
 #define IDENTITY_TOP()   paging64_identity_top()
-#define ZALADUJ_GDT()    gdt64_zaladuj()
-#define ZALADUJ_IDT()    idt64_zaladuj()
-#define ZALADUJ_TSS()    gdt64_zaladuj_tss()
-#define TSS_SEL_BAZA     GDT64_TSS
-#define TSS_SEL_KROK     16
-#define WEJSCIE_SYSCALL() syscall64_init()
+#define LOAD_GDT()    gdt64_load()
+#define LOAD_IDT()    idt64_load()
+#define LOAD_TSS()    gdt64_load_tss()
+#define TSS_SEL_BASE     GDT64_TSS
+#define TSS_SEL_STEP     16
+#define SYSCALL_ENTRY() syscall64_init()
 #else
 #include "include/paging.h"
 #define MAP_PHYS(a, n)   paging_map_phys((a), (n))
 #define IDENTITY_TOP()   paging_identity_limit()
 #include "include/gdt.h"
 #include "include/idt.h"
-#define ZALADUJ_GDT()    gdt_zaladuj()
-#define ZALADUJ_IDT()    idt_zaladuj()
-#define ZALADUJ_TSS()    gdt_zaladuj_tss()
-#define TSS_SEL_BAZA     GDT_TSS
-#define TSS_SEL_KROK     8
-#define WEJSCIE_SYSCALL() do { } while (0)   /* i386 wchodzi bramka int 0x80 */
+#define LOAD_GDT()    gdt_load()
+#define LOAD_IDT()    idt_load()
+#define LOAD_TSS()    gdt_load_tss()
+#define TSS_SEL_BASE     GDT_TSS
+#define TSS_SEL_STEP     8
+#define SYSCALL_ENTRY() do { } while (0)   /* i386 wchodzi bramka int 0x80 */
 #endif
 
 #define AP_BASE       0x8000        /* dokad kopiujemy trampoline */
 #define AP_STACK      8192          /* stos na kazdy obudzony rdzen */
-#define MAX_CPU       SMP_RDZENI
+#define MAX_CPU       SMP_CORES
 
 /* Rejestry lokalnego APIC (przesuniecia od jego bazy) */
 #define APIC_ID       0x020
@@ -84,11 +84,11 @@
 #define APIC_TIM_CUR  0x390         /* biezaca wartosc licznika */
 #define APIC_TIM_DIV  0x3E0         /* dzielnik zegara */
 
-#define LVT_OKRESOWY  (1u << 17)    /* licznik startuje od nowa sam */
-#define LVT_ZAMASKOWANY (1u << 16)
-#define SMP_WEKTOR_ZEGARA 48
-#define SMP_WEKTOR_POBUDKI 49
-#define ICR_WSZYSTKIM_POZA_MNA 0x000C0000u
+#define LVT_PERIODIC  (1u << 17)    /* licznik startuje od nowa sam */
+#define LVT_MASKED (1u << 16)
+#define SMP_VEC_TIMER 48
+#define SMP_VEC_WAKE 49
+#define ICR_ALL_BUT_SELF 0x000C0000u
 
 #define ICR_INIT      0x00000500
 #define ICR_STARTUP   0x00000600
@@ -98,27 +98,27 @@
 /* Naglowek wpisu w MADT: kazdy zaczyna sie tak samo */
 struct madt_wpis {
     uint8_t typ;
-    uint8_t dlugosc;
+    uint8_t len;
 } __attribute__((packed));
 
 struct madt_lapic {
-    struct madt_wpis naglowek;
+    struct madt_wpis header;
     uint8_t acpi_id;
     uint8_t apic_id;
-    uint32_t flagi;
+    uint32_t flags;
 } __attribute__((packed));
 
-extern uint8_t ap_trampolina[], ap_trampolina_koniec[];
-extern volatile uint32_t ap_licznik;
-extern volatile uint32_t ap_stos;
-extern volatile uint32_t ap_numer;
+extern uint8_t ap_trampoline[], ap_trampoline_end[];
+extern volatile uint32_t ap_counter;
+extern volatile uint32_t ap_stack;
+extern volatile uint32_t ap_number;
 extern volatile uint32_t ap_cr3;
 
 static volatile uint8_t *apic;
 static int cpus, started;
 static uint8_t apic_id[MAX_CPU];
-static uint32_t zegar_krok;              /* ile tykniec APIC na 10 ms */
-static volatile uint32_t tykniec[MAX_CPU];
+static uint32_t timer_step;              /* ile tykniec APIC na 10 ms */
+static volatile uint32_t ticks_of_core[MAX_CPU];
 
 /* --- Wspolna kolejka pracy ------------------------------------------
  *
@@ -126,13 +126,13 @@ static volatile uint32_t tykniec[MAX_CPU];
  * jednostki bierze sie pod zamkiem, a liczy juz bez niego - inaczej
  * rdzenie czekalyby na siebie zamiast pracowac.
  */
-static struct spinlock zamek = SPINLOCK_WOLNY;
-static void (*praca_fn)(uint32_t, void *);
-static void *praca_dane;
-static volatile uint32_t praca_ile;      /* ile jednostek w zleceniu */
-static volatile uint32_t praca_nastepna; /* pierwsza jeszcze nie wzieta */
-static volatile uint32_t praca_zrobione;
-static volatile uint32_t udzial[MAX_CPU];
+static struct spinlock lock = SPINLOCK_FREE;
+static void (*work_fn)(uint32_t, void *);
+static void *work_arg;
+static volatile uint32_t work_count;      /* ile jednostek w zleceniu */
+static volatile uint32_t work_next; /* pierwsza jeszcze nie wzieta */
+static volatile uint32_t work_done;
+static volatile uint32_t share[MAX_CPU];
 
 static void apic_wr(uint32_t reg, uint32_t v)
 {
@@ -153,7 +153,7 @@ static uint32_t apic_rd(uint32_t reg)
  * Przed uruchomieniem APIC (i na maszynie, ktora go nie ma) rdzen jest
  * jeden i ma numer zero.
  */
-int smp_rdzen_apic(void)
+int smp_core_apic(void)
 {
     if (!apic)
         return 0;
@@ -164,14 +164,14 @@ int smp_rdzen_apic(void)
     return 0;
 }
 
-int smp_rdzen(void)
+int smp_core(void)
 {
     uint16_t tr;
     __asm__ volatile("str %0" : "=r"(tr));
-    if (tr < TSS_SEL_BAZA)
+    if (tr < TSS_SEL_BASE)
         return 0;                    /* segment jeszcze niezaladowany */
-    int nr = (tr - TSS_SEL_BAZA) / TSS_SEL_KROK;
-    return (nr >= 0 && nr < SMP_RDZENI) ? nr : 0;
+    int nr = (tr - TSS_SEL_BASE) / TSS_SEL_STEP;
+    return (nr >= 0 && nr < SMP_CORES) ? nr : 0;
 }
 
 /* --- Zegar rdzenia ---------------------------------------------------
@@ -185,47 +185,47 @@ int smp_rdzen(void)
  * Robi to rdzen rozruchowy, bo tylko on ma czym mierzyc: puszcza licznik
  * APIC i patrzy, ile zdazy odliczyc przez znana liczbe tykniec PIT.
  */
-static void zmierz_zegar(void)
+static void timer_measure(void)
 {
     /* Czekanie na PIT musi byc ograniczone. Ten pomiar biegnie bardzo
        wczesnie i na maszynie, na ktorej PIT nie tyka (albo jego
        przerwanie jeszcze nigdzie nie dochodzi), petla bez granicy
        zawiesilaby caly rozruch - i to w miejscu, ktore niczego o sobie
        nie mowi. */
-#define ZWLOKA_MAX 20000000u
+#define DELAY_MAX 20000000u
 
     apic_wr(APIC_TIM_DIV, 0x3);                  /* dzielnik 16 */
-    apic_wr(APIC_LVT_TIM, LVT_ZAMASKOWANY);      /* liczy, ale nie zglasza */
+    apic_wr(APIC_LVT_TIM, LVT_MASKED);      /* liczy, ale nie zglasza */
 
     uint32_t start = pit_ticks();
-    uint32_t obiegow = 0;
-    while (pit_ticks() == start && obiegow < ZWLOKA_MAX)  /* granica tykniecia */
-        obiegow++;
+    uint32_t rounds = 0;
+    while (pit_ticks() == start && rounds < DELAY_MAX)  /* granica tykniecia */
+        rounds++;
     apic_wr(APIC_TIM_INIT, 0xFFFFFFFFu);
 
     start = pit_ticks();
-    obiegow = 0;
-    while (pit_ticks() - start < 10 && obiegow < ZWLOKA_MAX)   /* 100 ms */
-        obiegow++;
-    uint32_t zostalo = apic_rd(APIC_TIM_CUR);
+    rounds = 0;
+    while (pit_ticks() - start < 10 && rounds < DELAY_MAX)   /* 100 ms */
+        rounds++;
+    uint32_t remaining = apic_rd(APIC_TIM_CUR);
     apic_wr(APIC_TIM_INIT, 0);                   /* stop */
 
-    uint32_t na_100ms = 0xFFFFFFFFu - zostalo;
-    zegar_krok = na_100ms / 10;                  /* na dziesiec milisekund */
+    uint32_t na_100ms = 0xFFFFFFFFu - remaining;
+    timer_step = na_100ms / 10;                  /* na dziesiec milisekund */
     /* Gdy pomiar sie nie udal, lepiej dac zegarowi wartosc z sufitu niz
        zadna: rdzen bez przerwan nie da sie nigdy wywlaszczyc. */
-    if (obiegow >= ZWLOKA_MAX || zegar_krok < 1000 || zegar_krok > 0x10000000u)
-        zegar_krok = 1000000;
-#undef ZWLOKA_MAX
+    if (rounds >= DELAY_MAX || timer_step < 1000 || timer_step > 0x10000000u)
+        timer_step = 1000000;
+#undef DELAY_MAX
 }
 
 /* Wlacza lokalny APIC i jego zegar na biezacym rdzeniu */
-static void zegar_wlacz(void)
+static void timer_start(void)
 {
     apic_wr(APIC_SVR, apic_rd(APIC_SVR) | 0x100 | 0xFF);
     apic_wr(APIC_TIM_DIV, 0x3);
-    apic_wr(APIC_LVT_TIM, SMP_WEKTOR_ZEGARA | LVT_OKRESOWY);
-    apic_wr(APIC_TIM_INIT, zegar_krok);
+    apic_wr(APIC_LVT_TIM, SMP_VEC_TIMER | LVT_PERIODIC);
+    apic_wr(APIC_TIM_INIT, timer_step);
 }
 
 /* Obsluga tykniecia zegara APIC - wolana z isr_handler dla wektora 48.
@@ -234,16 +234,16 @@ static void zegar_wlacz(void)
  * Potwierdzenie idzie do WLASNEGO APIC tego rdzenia, a nie do PIC:
  * przerwanie nie przeszlo przez kontroler, wiec nie ma go tam komu
  * zamknac. */
-void smp_zegar_tyk(void)
+void smp_timer_tick(void)
 {
-    int r = smp_rdzen();
-    tykniec[r]++;
+    int r = smp_core();
+    ticks_of_core[r]++;
     if (apic)
         apic_wr(APIC_EOI, 0);
     /* Potwierdzenie idzie PRZED przelaczeniem zadan: schedule moze nie
        wrocic tu przez dluzszy czas, a lokalny APIC nie ma na co czekac.
        Tak samo robi obsluga timera na rdzeniu rozruchowym. */
-    if (task_scheduler_gotowy())
+    if (task_scheduler_ready())
         schedule();
 }
 
@@ -256,35 +256,35 @@ void smp_zegar_tyk(void)
  *
  * Skrot "wszystkim poza mna" oszczedza wyliczania, kto jeszcze zyje -
  * rdzen, ktory sie nie obudzil, i tak nic z tym nie zrobi. */
-static void pobudka_dla_reszty(void)
+static void wake_others(void)
 {
     if (!apic)
         return;
     apic_wr(APIC_ICR_HI, 0);
-    apic_wr(APIC_ICR_LO, ICR_WSZYSTKIM_POZA_MNA | SMP_WEKTOR_POBUDKI);
+    apic_wr(APIC_ICR_LO, ICR_ALL_BUT_SELF | SMP_VEC_WAKE);
 }
 
-void smp_pobudka_odbierz(void)
+void smp_wakeup_recv(void)
 {
     if (apic)
         apic_wr(APIC_EOI, 0);
 }
 
-uint32_t smp_tykniec(int rdzen)
+uint32_t smp_ticks(int core)
 {
-    return (rdzen >= 0 && rdzen < MAX_CPU) ? tykniec[rdzen] : 0;
+    return (core >= 0 && core < MAX_CPU) ? ticks_of_core[core] : 0;
 }
 
-uint32_t smp_udzial(int rdzen)
+uint32_t smp_share(int core)
 {
-    return (rdzen >= 0 && rdzen < MAX_CPU) ? udzial[rdzen] : 0;
+    return (core >= 0 && core < MAX_CPU) ? share[core] : 0;
 }
 
-int smp_pracujacych(void)
+int smp_workers(void)
 {
     int n = 0;
     for (int i = 0; i < MAX_CPU; i++)
-        if (udzial[i])
+        if (share[i])
             n++;
     return n;
 }
@@ -294,26 +294,26 @@ int smp_pracujacych(void)
  * Przerwania gasimy na czas trzymania zamka takze na rdzeniu
  * rozruchowym: gdyby timer wywlaszczyl watek trzymajacy zamek, kazdy
  * inny checny musialby czekac do jego nastepnej kolejki. */
-static int wez_jednostke(uint32_t *numer)
+static int take_unit(uint32_t *number)
 {
     uint32_t flags = irq_save();
-    spin_lock(&zamek);
-    int jest = praca_nastepna < praca_ile;
+    spin_lock(&lock);
+    int jest = work_next < work_count;
     if (jest)
-        *numer = praca_nastepna++;
-    spin_unlock(&zamek);
+        *number = work_next++;
+    spin_unlock(&lock);
     irq_restore(flags);
     return jest;
 }
 
 /* Petla robocza - ta sama dla rdzenia rozruchowego i dla wtornych */
-static void rob_co_jest(int rdzen)
+static void run_available(int core)
 {
-    uint32_t numer;
-    while (wez_jednostke(&numer)) {
-        praca_fn(numer, praca_dane);
-        udzial[rdzen]++;
-        __atomic_add_fetch(&praca_zrobione, 1, __ATOMIC_SEQ_CST);
+    uint32_t number;
+    while (take_unit(&number)) {
+        work_fn(number, work_arg);
+        share[core]++;
+        __atomic_add_fetch(&work_done, 1, __ATOMIC_SEQ_CST);
     }
 }
 
@@ -322,33 +322,33 @@ static void rob_co_jest(int rdzen)
  * Ten rdzen nie ma tablicy wyjatkow ani przerwan - kazdy blad konczy
  * sie potrojnym bledem i resetem maszyny. Dlatego robi tu jedna
  * rzecz: czeka na zlecenie i liczy to, co dostal. */
-void smp_ap_glowna(uint32_t numer)
+void smp_ap_main(uint32_t number)
 {
-    if (numer >= MAX_CPU)
-        numer = MAX_CPU - 1;
+    if (number >= MAX_CPU)
+        number = MAX_CPU - 1;
 
     /* Trampolina zostawila ten rdzen na wlasnej, tymczasowej tablicy
        segmentow i bez zadnej tablicy wyjatkow - kazdy blad konczyl sie
        potrojnym bledem i cichym resetem calej maszyny. Obie tablice sa
        jedne dla systemu i po zbudowaniu nikt ich nie zmienia, wiec
        wystarczy je tutaj wskazac. */
-    ZALADUJ_GDT();
-    ZALADUJ_IDT();
-    ZALADUJ_TSS();
+    LOAD_GDT();
+    LOAD_IDT();
+    LOAD_TSS();
     /* Rejestry wejscia przez instrukcje syscall sa wlasnoscia rdzenia -
        ten, ktory ich nie ustawi, nie przyjmie jej wcale */
-    WEJSCIE_SYSCALL();
+    SYSCALL_ENTRY();
 
     /* Wlasny zegar. Przerwanie z PIT idzie przez kontroler PIC do
        JEDNEGO procesora - ten go nie zobaczy nigdy. */
-    zegar_wlacz();
+    timer_start();
     __asm__ volatile("sti");
 
     /* Scheduler wstaje pozniej niz rdzenie - do tej chwili ten rdzen
        umie tylko policzyc, co mu zlecono */
-    while (!task_scheduler_gotowy()) {
-        if (praca_ile)
-            rob_co_jest((int)numer);
+    while (!task_scheduler_ready()) {
+        if (work_count)
+            run_available((int)number);
         else
             __asm__ volatile("hlt");
     }
@@ -356,11 +356,11 @@ void smp_ap_glowna(uint32_t numer)
     /* Odtad rdzen jest pelnoprawnym procesorem jadra: ma wlasne
        zadanie bezczynne i bierze z listy to, co wolno mu prowadzic.
        Ta funkcja nie wraca. */
-    task_rdzen_wejdz((int)numer);
+    task_core_enter((int)number);
 
     for (;;) {
-        if (praca_ile) {
-            rob_co_jest((int)numer);
+        if (work_count) {
+            run_available((int)number);
             continue;
         }
         /* Bezczynny rdzen ma STAC, a nie krecic sie w kolko.
@@ -380,41 +380,41 @@ void smp_ap_glowna(uint32_t numer)
     }
 }
 
-void smp_rob_zlecenie(int rdzen)
+void smp_run_work(int core)
 {
-    if (praca_ile)
-        rob_co_jest(rdzen);
+    if (work_count)
+        run_available(core);
 }
 
-void smp_praca(void (*funkcja)(uint32_t numer, void *dane), void *dane,
+void smp_work(void (*fn)(uint32_t number, void *data), void *data,
                uint32_t ile)
 {
-    if (!funkcja || !ile)
+    if (!fn || !ile)
         return;
 
     for (int i = 0; i < MAX_CPU; i++)
-        udzial[i] = 0;
+        share[i] = 0;
 
-    praca_fn = funkcja;
-    praca_dane = dane;
-    praca_nastepna = 0;
-    praca_zrobione = 0;
-    __atomic_store_n(&praca_ile, ile, __ATOMIC_SEQ_CST);
+    work_fn = fn;
+    work_arg = data;
+    work_next = 0;
+    work_done = 0;
+    __atomic_store_n(&work_count, ile, __ATOMIC_SEQ_CST);
 
     /* Zlecenie jest juz widoczne - teraz trzeba obudzic tych, ktorzy
        na nie czekaja spiac. Kolejnosc nie jest dowolna: pobudka wyslana
        przed zapisem zastalaby jeszcze pusta kolejke. */
-    pobudka_dla_reszty();
+    wake_others();
 
     /* Rdzen rozruchowy liczy razem z pozostalymi: na maszynie
        jednordzeniowej nie policzylby inaczej nikt */
-    rob_co_jest(0);
+    run_available(0);
 
     /* Czekamy na tych, ktorzy wzieli jednostke tuz przed nami */
-    while (__atomic_load_n(&praca_zrobione, __ATOMIC_SEQ_CST) < ile)
+    while (__atomic_load_n(&work_done, __ATOMIC_SEQ_CST) < ile)
         __asm__ volatile("pause" ::: "memory");
 
-    __atomic_store_n(&praca_ile, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&work_count, 0, __ATOMIC_SEQ_CST);
 }
 
 int smp_cpus(void)    { return cpus ? cpus : 1; }
@@ -422,13 +422,13 @@ int smp_started(void) { return started; }
 
 /* Zwloka liczona portem 0x80 - PIT moze byc jeszcze zajety czym
    innym, a tu chodzi o rzad wielkosci, nie o dokladnosc */
-static void zwloka(uint32_t petli)
+static void delay(uint32_t loops)
 {
-    for (uint32_t i = 0; i < petli; i++)
+    for (uint32_t i = 0; i < loops; i++)
         io_wait();
 }
 
-static void czekaj_na_wyslanie(void)
+static void wait_sent(void)
 {
     for (int i = 0; i < 100000; i++) {
         if (!(apic_rd(APIC_ICR_LO) & ICR_PENDING))
@@ -438,18 +438,18 @@ static void czekaj_na_wyslanie(void)
 }
 
 /* INIT, a po nim dwa SIPI - tak, jak kaze dokumentacja procesora */
-static void obudz(uint8_t id, uint8_t wektor)
+static void wake_cpu(uint8_t id, uint8_t vector)
 {
     apic_wr(APIC_ICR_HI, (uint32_t)id << 24);
     apic_wr(APIC_ICR_LO, ICR_INIT | ICR_ASSERT);
-    czekaj_na_wyslanie();
-    zwloka(20000);                        /* rzedu dziesieciu milisekund */
+    wait_sent();
+    delay(20000);                        /* rzedu dziesieciu milisekund */
 
     for (int i = 0; i < 2; i++) {
         apic_wr(APIC_ICR_HI, (uint32_t)id << 24);
-        apic_wr(APIC_ICR_LO, ICR_STARTUP | wektor);
-        czekaj_na_wyslanie();
-        zwloka(600);                      /* rzedu dwustu mikrosekund */
+        apic_wr(APIC_ICR_LO, ICR_STARTUP | vector);
+        wait_sent();
+        delay(600);                      /* rzedu dwustu mikrosekund */
     }
 }
 
@@ -459,31 +459,31 @@ int smp_init(void)
     if (!madt)
         return 1;
 
-    uint32_t dlugosc = (uint32_t)madt[4] | ((uint32_t)madt[5] << 8) |
+    uint32_t len = (uint32_t)madt[4] | ((uint32_t)madt[5] << 8) |
                        ((uint32_t)madt[6] << 16) | ((uint32_t)madt[7] << 24);
-    uint32_t apic_baza = (uint32_t)madt[36] | ((uint32_t)madt[37] << 8) |
+    uint32_t apic_base = (uint32_t)madt[36] | ((uint32_t)madt[37] << 8) |
                          ((uint32_t)madt[38] << 16) |
                          ((uint32_t)madt[39] << 24);
-    if (dlugosc < 44 || !apic_baza)
+    if (len < 44 || !apic_base)
         return 1;
 
     /* Rejestry APIC leza wysoko, poza pamiecia opisana przy starcie */
-    if ((uint64_t)apic_baza + 0x1000 > IDENTITY_TOP() &&
-        MAP_PHYS(apic_baza, 0x1000) < 0)
+    if ((uint64_t)apic_base + 0x1000 > IDENTITY_TOP() &&
+        MAP_PHYS(apic_base, 0x1000) < 0)
         return 1;
-    apic = (volatile uint8_t *)(uintptr_t)apic_baza;
+    apic = (volatile uint8_t *)(uintptr_t)apic_base;
 
     /* Spis procesorow zaczyna sie za naglowkiem tablicy */
-    for (uint32_t off = 44; off + 2 <= dlugosc && cpus < MAX_CPU; ) {
+    for (uint32_t off = 44; off + 2 <= len && cpus < MAX_CPU; ) {
         const struct madt_wpis *w = (const struct madt_wpis *)(madt + off);
-        if (!w->dlugosc)
+        if (!w->len)
             break;
-        if (w->typ == 0 && w->dlugosc >= sizeof(struct madt_lapic)) {
+        if (w->typ == 0 && w->len >= sizeof(struct madt_lapic)) {
             const struct madt_lapic *l = (const struct madt_lapic *)w;
-            if (l->flagi & 1)                 /* procesor wlaczony */
+            if (l->flags & 1)                 /* procesor wlaczony */
                 apic_id[cpus++] = l->apic_id;
         }
-        off += w->dlugosc;
+        off += w->len;
     }
     if (cpus <= 1)
         return cpus ? cpus : 1;
@@ -493,32 +493,32 @@ int smp_init(void)
     apic_wr(APIC_SVR, apic_rd(APIC_SVR) | 0x100 | 0xFF);
 
     /* Zmierz zegar APIC, dopoki mamy czym: PIT jest tylko tutaj */
-    zmierz_zegar();
+    timer_measure();
 
-    uint32_t rozmiar = (uint32_t)(ap_trampolina_koniec - ap_trampolina);
-    if (rozmiar > 4096)
+    uint32_t size = (uint32_t)(ap_trampoline_end - ap_trampoline);
+    if (size > 4096)
         return cpus;
-    memcpy((void *)(uintptr_t)AP_BASE, ap_trampolina, rozmiar);
+    memcpy((void *)(uintptr_t)AP_BASE, ap_trampoline, size);
 
     /* Licznik i wskaznik stosu leza w skopiowanym bloku, nie w jadrze -
        procesor w trybie rzeczywistym nie siegnie tam, gdzie oryginal */
-    uint32_t off_licznik =
-        (uint32_t)((uint8_t *)&ap_licznik - ap_trampolina);
-    uint32_t off_stos = (uint32_t)((uint8_t *)&ap_stos - ap_trampolina);
-    uint32_t off_numer = (uint32_t)((uint8_t *)&ap_numer - ap_trampolina);
-    volatile uint32_t *licznik =
-        (volatile uint32_t *)(uintptr_t)(AP_BASE + off_licznik);
-    volatile uintptr_t *stos =
-        (volatile uintptr_t *)(uintptr_t)(AP_BASE + off_stos);
-    volatile uint32_t *numer =
-        (volatile uint32_t *)(uintptr_t)(AP_BASE + off_numer);
-    *licznik = 0;
+    uint32_t off_counter =
+        (uint32_t)((uint8_t *)&ap_counter - ap_trampoline);
+    uint32_t off_stack = (uint32_t)((uint8_t *)&ap_stack - ap_trampoline);
+    uint32_t off_number = (uint32_t)((uint8_t *)&ap_number - ap_trampoline);
+    volatile uint32_t *counter =
+        (volatile uint32_t *)(uintptr_t)(AP_BASE + off_counter);
+    volatile uintptr_t *stack =
+        (volatile uintptr_t *)(uintptr_t)(AP_BASE + off_stack);
+    volatile uint32_t *number =
+        (volatile uint32_t *)(uintptr_t)(AP_BASE + off_number);
+    *counter = 0;
 
     /* Tablice stron rdzen wtorny bierze te same, po ktorych chodzi
        jadro: w trybie dlugim bez nich nie ruszy wcale, a w trybie
        chronionym ruszylby, tyle ze adresy programow uzytkownika nie
        znaczylyby dla niego nic. */
-    uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampolina);
+    uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampoline);
     uintptr_t cr3;
 #ifdef __x86_64__
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
@@ -527,29 +527,29 @@ int smp_init(void)
 #endif
     *(volatile uint32_t *)(uintptr_t)(AP_BASE + off_cr3) = (uint32_t)cr3;
 
-    uint8_t moj = (uint8_t)(apic_rd(APIC_ID) >> 24);
+    uint8_t mine = (uint8_t)(apic_rd(APIC_ID) >> 24);
 
     /* Budzimy po jednym i czekamy na zgloszenie: stos jest jeden,
        wiec dwa procesory naraz zadeptalyby sobie ramki */
     for (int i = 0; i < cpus; i++) {
-        if (apic_id[i] == moj)
+        if (apic_id[i] == mine)
             continue;
 
-        void *pamiec = kmalloc(AP_STACK);
-        if (!pamiec)
+        void *memory = kmalloc(AP_STACK);
+        if (!memory)
             break;
-        *stos = (uintptr_t)pamiec + AP_STACK;
+        *stack = (uintptr_t)memory + AP_STACK;
         /* Rdzen rozruchowy ma numer zero, wtorne dostaja kolejne -
            kazdy liczy swoj udzial w osobnym slowie, wiec nie musza
            sie o nie bic */
-        *numer = (uint32_t)(started + 1);
+        *number = (uint32_t)(started + 1);
 
-        uint32_t bylo = *licznik;
-        obudz(apic_id[i], AP_BASE >> 12);
+        uint32_t was = *counter;
+        wake_cpu(apic_id[i], AP_BASE >> 12);
 
-        for (int spin = 0; spin < 400000 && *licznik == bylo; spin++)
+        for (int spin = 0; spin < 400000 && *counter == was; spin++)
             io_wait();
-        if (*licznik > bylo)
+        if (*counter > was)
             started++;
     }
 

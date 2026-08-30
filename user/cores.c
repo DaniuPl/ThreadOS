@@ -14,41 +14,41 @@
  * ktore go prowadzily, liczbe tykniec (czyli czy naprawde szlo
  * rownolegle) i sume kontrolna (czyli czy policzyl to, co mial).
  *
- * Uzycie: run rdzen   - oba procesy na rdzeniu rozruchowym
- *         runw rdzen  - wolno im biec na kazdym rdzeniu
+ * Uzycie: run cores   - oba procesy na rdzeniu rozruchowym
+ *         runw cores  - wolno im biec na kazdym rdzeniu
  */
 
 #include "uapi.h"
 
-#define KROKOW  60000000u
+#define STEPS  60000000u
 
-static uint32_t policz(uint32_t *maska_out)
+static uint32_t compute(uint32_t *mask_out)
 {
-    uint32_t stan = 12345u, suma = 0, maska = 0;
-    for (uint32_t i = 0; i < KROKOW; i++) {
+    uint32_t stan = 12345u, sum = 0, mask = 0;
+    for (uint32_t i = 0; i < STEPS; i++) {
         stan = stan * 1103515245u + 12345u;
-        suma += stan >> 16;
+        sum += stan >> 16;
         /* Pytanie o rdzen to wywolanie systemowe, a te chodza pod
            wielkim zamkiem jadra - pytamy wiec rzadko, zeby mierzyc
            liczenie, a nie czekanie na zamek */
         if ((i & 0x1FFFFF) == 0)
-            maska |= 1u << (uint32_t)sys_rdzen();
+            mask |= 1u << (uint32_t)sys_core();
     }
-    *maska_out = maska;
-    return suma;
+    *mask_out = mask;
+    return sum;
 }
 
-static void powiedz(const char *kto, uint32_t maska, uint32_t tyknac,
-                    uint32_t suma)
+static void report(const char *who, uint32_t mask, uint32_t ticks,
+                    uint32_t sum)
 {
-    print("[rdzen] ");
-    print(kto);
+    print("[cores] ");
+    print(who);
     print(": rdzenie ");
-    print_dec(maska);
+    print_dec(mask);
     print(", tyknac ");
-    print_dec(tyknac);
+    print_dec(ticks);
     print(", suma ");
-    print_dec(suma);
+    print_dec(sum);
     print("\n");
 }
 
@@ -56,23 +56,23 @@ void _start(void)
 {
     int32_t pid = sys_fork();
     if (pid < 0) {
-        print("[rdzen] ZLE: fork sie nie udal\n");
+        print("[cores] ZLE: fork sie nie udal\n");
         sys_exit(1);
     }
 
     uint32_t start = sys_getticks();
-    uint32_t maska = 0;
-    uint32_t suma = policz(&maska);
-    uint32_t tyknac = sys_getticks() - start;
+    uint32_t mask = 0;
+    uint32_t sum = compute(&mask);
+    uint32_t ticks = sys_getticks() - start;
 
     if (pid == 0) {
-        powiedz("dziecko", maska, tyknac, suma);
+        report("dziecko", mask, ticks, sum);
         sys_exit(0);
     }
 
-    int kod = 0;
-    sys_wait_dziecka(&kod);
-    powiedz("rodzic ", maska, tyknac, suma);
-    print("[rdzen] gotowe\n");
+    int code = 0;
+    sys_wait_child(&code);
+    report("rodzic ", mask, ticks, sum);
+    print("[cores] gotowe\n");
     sys_exit(0);
 }

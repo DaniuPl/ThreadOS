@@ -97,8 +97,8 @@ static struct ec_curve ec_p384 = {
  * (relokacja kopiujaca), i od tej chwili biblioteka liczylaby na
  * jednym egzemplarzu, a program patrzyl na drugi. Przez funkcje
  * wszyscy widza ten sam. */
-static inline struct ec_curve *ec_krzywa_p256(void) { return &ec_p256; }
-static inline struct ec_curve *ec_krzywa_p384(void) { return &ec_p384; }
+static inline struct ec_curve *ec_curve_p256(void) { return &ec_p256; }
+static inline struct ec_curve *ec_curve_p384(void) { return &ec_p384; }
 
 /* Punkt w postaci Jacobiego, wspolrzedne w dziedzinie Montgomery'ego */
 struct ec_point {

@@ -65,31 +65,31 @@ int task_cr3_shared(uint32_t cr3);
  * sie pod palcami - tak samo jak sterta, tyle ze wypelnione trescia
  * z dysku zamiast zerami. MMAP_PLIKOW mowi, ile odwzorowan naraz moze
  * miec jeden proces. */
-#define MMAP_PLIKOW 4
+#define MMAP_FILES 4
 
-int task_mmap_dodaj(uint32_t start, uint32_t koniec, uint32_t rozmiar,
-                    uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis);
-int task_mmap_znajdz(uint32_t adres, uint32_t *blok_pierwszy,
-                     uint32_t *bajtow, uint32_t *zapis);
-int task_mmap_opis(int i, uint32_t *start, uint32_t *koniec,
-                   uint32_t *rozmiar, uint32_t *zapis);
-uint32_t task_mmap_blok(uint32_t adres, uint32_t indeks);
-void task_mmap_zwolnij(void);
-void task_mmap_dziedzicz(struct task *dziecko);
+int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
+                    uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
+int task_mmap_find(uint32_t addr, uint32_t *first_block,
+                     uint32_t *nbytes, uint32_t *write);
+int task_mmap_info(int i, uint32_t *start, uint32_t *end,
+                   uint32_t *size, uint32_t *write);
+uint32_t task_mmap_block(uint32_t addr, uint32_t index);
+void task_mmap_release(void);
+void task_mmap_inherit(struct task *child);
 
 /* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
    rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
-struct task *task_create_wszedzie(const char *name, void (*entry)(void *),
+struct task *task_create_anycore(const char *name, void (*entry)(void *),
                                   void *arg);
 
 /* Czy scheduler juz wstal (rdzen wtorny czeka, zanim do niego dolaczy) */
 /* Biezace zadanie wolno odtad prowadzic kazdemu rdzeniowi */
-void task_wszedzie_dla_mnie(void);
+void task_set_anycore(void);
 
-int task_scheduler_gotowy(void);
+int task_scheduler_ready(void);
 
 /* Rdzen wtorny dolacza do schedulera. Nie wraca. */
-void task_rdzen_wejdz(int nr);
+void task_core_enter(int nr);
 
 int task_cwd(void);
 void task_set_cwd(int slot);

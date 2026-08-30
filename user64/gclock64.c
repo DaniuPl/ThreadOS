@@ -11,10 +11,10 @@
 #define C_GREEN 2
 #define C_WHITE 4
 
-#define OKNO_W 100
-#define OKNO_H 34
+#define WINDOW_W 100
+#define WINDOW_H 34
 
-static void dwie_cyfry(char *d, int v)
+static void two_digits(char *d, int v)
 {
     d[0] = (char)('0' + (v / 10) % 10);
     d[1] = (char)('0' + v % 10);
@@ -22,22 +22,22 @@ static void dwie_cyfry(char *d, int v)
 
 void _start(void)
 {
-    int w = (int)win_create(OKNO_W, OKNO_H, "Zegar");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "Zegar");
     if (w < 0) {
         print("gclock64: pulpit nie dal okna\n");
         sys_exit(1);
     }
 
     for (;;) {
-        struct czas64 t;
+        struct time64 t;
         sys_time(&t);
 
         char s[9];
-        dwie_cyfry(s, t.godzina);
+        two_digits(s, t.hour);
         s[2] = ':';
-        dwie_cyfry(s + 3, t.minuta);
+        two_digits(s + 3, t.minute);
         s[5] = ':';
-        dwie_cyfry(s + 6, t.sekunda);
+        two_digits(s + 6, t.second);
         s[8] = '\0';
 
         char up[24];
@@ -53,7 +53,7 @@ void _start(void)
         up[n++] = 's';
         up[n] = '\0';
 
-        win_rect(w, 0, 0, OKNO_W, OKNO_H, C_BG);
+        win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_text(w, 8, 4, s, C_GREEN);
         win_text(w, 8, 20, up, C_WHITE);
 

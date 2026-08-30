@@ -107,13 +107,13 @@ ground for both.
 
 - Getting rid of the big kernel lock. Ring 3 runs on every core: each
   one has its own task state segment, its own syscall entry stack, its
-  own clock and the kernel's descriptor tables, and `runw rdzen` forks
+  own clock and the kernel's descriptor tables, and `runw cores` forks
   and shows two processes finishing in the time of one. What a process
   does *inside* the kernel is still serialised by one lock, because the
   drivers, the filesystem and the swapper were written for a single
   core. The first syscalls are out of it already — the ones that read
   nothing but the calling task's own state are on an explicit, audited
-  list, and `runw wywolania` shows a million syscalls per process
+  list, and `runw syscalls` shows a million syscalls per process
   running two-and-a-half times faster on four cores than on one. Every
   further syscall taken off that lock has to be read to the end first;
   the subsystems come after.

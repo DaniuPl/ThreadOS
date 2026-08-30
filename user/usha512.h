@@ -119,8 +119,8 @@ static inline void sha512_block(struct sha512 *c, const uint8_t *p)
         uint64_t ch = (e & f) ^ (~e & g);
         uint64_t t1 = h + S1 + ch + sha512_k[i] + w[i];
         uint64_t S0 = s512_ror(a, 28) ^ s512_ror(a, 34) ^ s512_ror(a, 39);
-        uint64_t maj = (a & b) ^ (a & cc) ^ (b & cc);
-        uint64_t t2 = S0 + maj;
+        uint64_t may_flag = (a & b) ^ (a & cc) ^ (b & cc);
+        uint64_t t2 = S0 + may_flag;
 
         h = g; g = f; f = e;
         e = d + t1;

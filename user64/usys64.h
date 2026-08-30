@@ -57,7 +57,7 @@
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
 #define SYS64_MSYNC      41
-#define SYS64_RDZEN      42
+#define SYS64_CORE      42
 
 #define NAME_MAX64 63
 
@@ -127,10 +127,10 @@ static inline int64_t sys_write(int fd, const void *buf, uint64_t len)
 }
 
 /* Otwiera plik w katalogu glownym. create=1 zaklada go, gdy nie ma. */
-static inline int64_t sys_open(const char *nazwa, int create)
+static inline int64_t sys_open(const char *name, int create)
 {
-    return syscall64_3(SYS64_OPEN, (int64_t)(uintptr_t)nazwa,
-                       (int64_t)ustrlen(nazwa), create);
+    return syscall64_3(SYS64_OPEN, (int64_t)(uintptr_t)name,
+                       (int64_t)ustrlen(name), create);
 }
 
 static inline int64_t sys_close(int fd)
@@ -205,19 +205,19 @@ static inline int64_t sys_exec(const char *name, char *const argv[])
  *
  * Przy odbiorze jadro wpisuje tu z powrotem adres i port nadawcy.
  */
-struct udp_opis {
+struct udp_info {
     int sock;
     uint32_t ip;
     uint16_t port;
-    uint16_t _wyrownanie;
+    uint16_t _padding;
     uint32_t timeout;
 };
 
 /* Wlasny adres, maska, brama i DNS. Zwraca 1, gdy system ma juz
    adres z sieci. */
-static inline int64_t sys_netinfo(uint32_t adresy[4])
+static inline int64_t sys_netinfo(uint32_t addrs[4])
 {
-    return syscall64(SYS64_NETINFO, (int64_t)(uintptr_t)adresy, 0);
+    return syscall64(SYS64_NETINFO, (int64_t)(uintptr_t)addrs, 0);
 }
 
 static inline int64_t sys_udp_open(uint16_t port)
@@ -225,14 +225,14 @@ static inline int64_t sys_udp_open(uint16_t port)
     return syscall64(SYS64_UDP_OPEN, port, 0);
 }
 
-static inline int64_t sys_udp_send(struct udp_opis *o, const void *buf,
+static inline int64_t sys_udp_send(struct udp_info *o, const void *buf,
                                    uint64_t len)
 {
     return syscall64_3(SYS64_UDP_SEND, (int64_t)(uintptr_t)o,
                        (int64_t)(uintptr_t)buf, (int64_t)len);
 }
 
-static inline int64_t sys_udp_recv(struct udp_opis *o, void *buf,
+static inline int64_t sys_udp_recv(struct udp_info *o, void *buf,
                                    uint64_t max)
 {
     return syscall64_3(SYS64_UDP_RECV, (int64_t)(uintptr_t)o,
@@ -244,7 +244,7 @@ static inline int64_t sys_udp_close(int sock)
     return syscall64(SYS64_UDP_CLOSE, sock, 0);
 }
 
-static inline int64_t sys_tcp_connect(struct udp_opis *o)
+static inline int64_t sys_tcp_connect(struct udp_info *o)
 {
     return syscall64(SYS64_TCP_CONNECT, (int64_t)(uintptr_t)o, 0);
 }
@@ -270,16 +270,16 @@ static inline int64_t sys_tcp_close(int conn)
 static inline int64_t uparse_ip(const char *s)
 {
     uint32_t ip = 0;
-    for (int czlon = 0; czlon < 4; czlon++) {
-        int v = 0, cyfr = 0;
+    for (int part = 0; part < 4; part++) {
+        int v = 0, digits = 0;
         while (*s >= '0' && *s <= '9') {
             v = v * 10 + (*s++ - '0');
-            cyfr++;
+            digits++;
         }
-        if (!cyfr || v > 255)
+        if (!digits || v > 255)
             return -1;
         ip = (ip << 8) | (uint32_t)v;
-        if (czlon < 3 && *s++ != '.')
+        if (part < 3 && *s++ != '.')
             return -1;
     }
     return *s ? -1 : (int64_t)ip;
@@ -294,9 +294,9 @@ static inline int64_t sys_pipe(int fd[2])
 
 /* Przepisuje numer deskryptora - tedy przekierowuje sie wejscie
    i wyjscie programu, ktory o niczym nie wie */
-static inline int64_t sys_dup2(int stary, int nowy)
+static inline int64_t sys_dup2(int old, int fresh_one)
 {
-    return syscall64(SYS64_DUP2, stary, nowy);
+    return syscall64(SYS64_DUP2, old, fresh_one);
 }
 
 /* Jeden wpis katalogu. Uklad musi zgadzac sie z tym, co wypelnia
@@ -307,16 +307,16 @@ struct dirent64 {
     int is_dir;
 };
 
-static inline int64_t sys_mkdir(const char *nazwa)
+static inline int64_t sys_mkdir(const char *name)
 {
-    return syscall64(SYS64_MKDIR, (int64_t)(uintptr_t)nazwa,
-                     (int64_t)ustrlen(nazwa));
+    return syscall64(SYS64_MKDIR, (int64_t)(uintptr_t)name,
+                     (int64_t)ustrlen(name));
 }
 
-static inline int64_t sys_chdir(const char *nazwa)
+static inline int64_t sys_chdir(const char *name)
 {
-    return syscall64(SYS64_CHDIR, (int64_t)(uintptr_t)nazwa,
-                     (int64_t)ustrlen(nazwa));
+    return syscall64(SYS64_CHDIR, (int64_t)(uintptr_t)name,
+                     (int64_t)ustrlen(name));
 }
 
 static inline int64_t sys_getcwd(char *buf, uint64_t len)
@@ -331,10 +331,10 @@ static inline int64_t sys_readdir(int index, struct dirent64 *out)
     return syscall64(SYS64_READDIR, index, (int64_t)(uintptr_t)out);
 }
 
-static inline int64_t sys_unlink(const char *nazwa)
+static inline int64_t sys_unlink(const char *name)
 {
-    return syscall64(SYS64_UNLINK, (int64_t)(uintptr_t)nazwa,
-                     (int64_t)ustrlen(nazwa));
+    return syscall64(SYS64_UNLINK, (int64_t)(uintptr_t)name,
+                     (int64_t)ustrlen(name));
 }
 
 /* Przesuwa granice wlasnej sterty i zwraca STARA - czyli adres,
@@ -426,10 +426,10 @@ static inline int uhtoa(uint64_t v, char *buf)
  * wzgledem obszaru tresci okna, kolory to indeksy palety pulpitu.
  */
 struct win_rect_cmd {
-    int32_t x, y, w, h, kolor;
+    int32_t x, y, w, h, color;
 };
 struct win_text_cmd {
-    int32_t x, y, kolor;
+    int32_t x, y, color;
     const char *s;
 };
 
@@ -444,16 +444,16 @@ struct win_event {
 
 /* Czas z zegara CMOS. Uklad pol musi zgadzac sie ze struct rtc_time
    w jadrze - idzie przez wywolanie systemowe jako goly blok bajtow. */
-struct czas64 {
+struct time64 {
     uint16_t rok;
-    uint8_t miesiac;
-    uint8_t dzien;
-    uint8_t godzina;
-    uint8_t minuta;
-    uint8_t sekunda;
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
 } __attribute__((packed));
 
-static inline int64_t sys_time(struct czas64 *t)
+static inline int64_t sys_time(struct time64 *t)
 {
     return syscall64(SYS64_TIME, (int64_t)(uintptr_t)t, 0);
 }
@@ -462,7 +462,7 @@ static inline int64_t sys_time(struct czas64 *t)
    Uklad musi zgadzac sie z tym w kernel64/syscall64.c. */
 struct sysinfo64 {
     uint32_t ram_kib;
-    uint32_t uzyte_kib;
+    uint32_t used_kib;
     uint32_t uptime_s;
 };
 
@@ -478,28 +478,28 @@ static inline int64_t sys_sysinfo(struct sysinfo64 *out)
  * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
  * co spis jego blokow. Ta wersja jest tylko do odczytu: proba zapisu
  * konczy sie bledem ochrony, a nie cichym zgubieniem danych. */
-static inline const void *sys_mmap_file(const char *nazwa, uint64_t *rozmiar)
+static inline const void *sys_mmap_file(const char *name, uint64_t *size)
 {
-    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
-                            (int64_t)ustrlen(nazwa),
-                            (int64_t)(uintptr_t)rozmiar, 0);
+    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)name,
+                            (int64_t)ustrlen(name),
+                            (int64_t)(uintptr_t)size, 0);
     return r <= 0 ? (const void *)0 : (const void *)(uintptr_t)r;
 }
 
 /* To samo, ale z prawem zapisu: zmiany w pamieci wracaja do pliku.
  * Nie od razu - dopiero przy sys_msync albo na wyjsciu procesu. */
-static inline void *sys_mmap_file_w(const char *nazwa, uint64_t *rozmiar)
+static inline void *sys_mmap_file_w(const char *name, uint64_t *size)
 {
-    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)nazwa,
-                            (int64_t)ustrlen(nazwa),
-                            (int64_t)(uintptr_t)rozmiar, 1);
+    int64_t r = syscall64_4(SYS64_MMAP_FILE, (int64_t)(uintptr_t)name,
+                            (int64_t)ustrlen(name),
+                            (int64_t)(uintptr_t)size, 1);
     return r <= 0 ? (void *)0 : (void *)(uintptr_t)r;
 }
 
 /* Na ktorym rdzeniu procesora program wlasnie biegnie */
-static inline int64_t sys_rdzen(void)
+static inline int64_t sys_core(void)
 {
-    return syscall64(SYS64_RDZEN, 0, 0);
+    return syscall64(SYS64_CORE, 0, 0);
 }
 
 /* Odsyla do plikow zmienione strony zapisywalnych odwzorowan.
@@ -515,28 +515,28 @@ static inline int64_t sys_msync(void)
  * Ten sam klucz to ta sama pamiec fizyczna - dwa procesy dostaja ja
  * pod swoimi adresami, ale pisza w to samo miejsce. Zwraca adres albo
  * zero, gdy sie nie udalo. */
-static inline void *sys_shm(int klucz, uint64_t rozmiar)
+static inline void *sys_shm(int key, uint64_t size)
 {
-    int64_t r = syscall64(SYS64_SHM, klucz, (int64_t)rozmiar);
+    int64_t r = syscall64(SYS64_SHM, key, (int64_t)size);
     return r <= 0 ? (void *)0 : (void *)(uintptr_t)r;
 }
 
 /* Tworzy okno o obszarze tresci cw x ch. Zwraca numer okna albo -1. */
-static inline int64_t win_create(int cw, int ch, const char *tytul)
+static inline int64_t win_create(int cw, int ch, const char *title)
 {
     return syscall64_3(SYS64_WIN_CREATE, cw, ch,
-                       (int64_t)(uintptr_t)tytul);
+                       (int64_t)(uintptr_t)title);
 }
 
-static inline void win_rect(int win, int x, int y, int w, int h, int kolor)
+static inline void win_rect(int win, int x, int y, int w, int h, int color)
 {
-    struct win_rect_cmd c = {x, y, w, h, kolor};
+    struct win_rect_cmd c = {x, y, w, h, color};
     syscall64(SYS64_WIN_RECT, win, (int64_t)(uintptr_t)&c);
 }
 
-static inline void win_text(int win, int x, int y, const char *s, int kolor)
+static inline void win_text(int win, int x, int y, const char *s, int color)
 {
-    struct win_text_cmd c = {x, y, kolor, s};
+    struct win_text_cmd c = {x, y, color, s};
     syscall64(SYS64_WIN_TEXT, win, (int64_t)(uintptr_t)&c);
 }
 

@@ -50,7 +50,7 @@ void heap_init(void)
    wiecej niz jeden, dochodzi zamek: lista blokow jest jedna, a dwa
    rdzenie dzielace ten sam blok jednoczesnie zostawilyby po sobie
    liste, ktorej nikt juz nie przejdzie. */
-static struct spinlock zamek = SPINLOCK_WOLNY;
+static struct spinlock lock = SPINLOCK_FREE;
 
 void *kmalloc(size_t size)
 {
@@ -58,7 +58,7 @@ void *kmalloc(size_t size)
         return (void *)0;
     size = ALIGN_UP(size, 8);
 
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
     void *result = (void *)0;
 
     for (struct block *b = heap_head; b; b = b->next) {
@@ -81,7 +81,7 @@ void *kmalloc(size_t size)
         break;
     }
 
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
     return result;
 }
 
@@ -93,7 +93,7 @@ void kfree(void *ptr)
     if (addr < heap_start + sizeof(struct block) || addr >= heap_end)
         return;
 
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
 
     struct block *b = (struct block *)(addr - sizeof(struct block));
     if (!b->free) {
@@ -107,7 +107,7 @@ void kfree(void *ptr)
         }
     }
 
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
 }
 
 uint32_t heap_total_bytes(void) { return HEAP_SIZE; }

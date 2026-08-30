@@ -12,7 +12,7 @@
 
 #ifdef __x86_64__
 #include "../user64/usys64.h"
-#include "../user64/uzgodnosc64.h"
+#include "../user64/compat64.h"
 #else
 #include "usys.h"
 #endif

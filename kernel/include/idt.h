@@ -4,6 +4,6 @@
 void idt_init(void);
 
 /* Laduje juz zbudowana tablice na biezacym rdzeniu (rdzenie wtorne) */
-void idt_zaladuj(void);
+void idt_load(void);
 
 #endif

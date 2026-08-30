@@ -9,13 +9,13 @@
 
 #include "usys.h"
 
-#define KAWALEK 512
+#define CHUNK 512
 
-static unsigned char buf[KAWALEK];
+static unsigned char buf[CHUNK];
 
 void _start(int argc, char **argv)
 {
-    const char *nazwa = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "mapa.txt";
     uint32_t kib = 12;
     if (argc > 2) {
         kib = 0;
@@ -24,18 +24,18 @@ void _start(int argc, char **argv)
         if (!kib)
             kib = 12;
     }
-    uint32_t bajtow = kib * 1024;
+    uint32_t nbytes = kib * 1024;
 
-    int32_t fd = sys_open(nazwa, O_WRITE | O_CREATE | O_TRUNC);
+    int32_t fd = sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
         print("[mkmapa] nie da sie zalozyc pliku\n");
         sys_exit(1);
     }
 
-    for (uint32_t off = 0; off < bajtow; off += KAWALEK) {
-        for (uint32_t i = 0; i < KAWALEK; i++)
+    for (uint32_t off = 0; off < nbytes; off += CHUNK) {
+        for (uint32_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
-        if (sys_write(fd, buf, KAWALEK) != (int32_t)KAWALEK) {
+        if (sys_write(fd, buf, CHUNK) != (int32_t)CHUNK) {
             print("[mkmapa] zapis sie nie udal\n");
             sys_exit(1);
         }
@@ -43,7 +43,7 @@ void _start(int argc, char **argv)
     sys_close(fd);
 
     print("[mkmapa] zapisano ");
-    print_dec(bajtow);
+    print_dec(nbytes);
     print(" B wzorca\n");
     sys_exit(0);
 }

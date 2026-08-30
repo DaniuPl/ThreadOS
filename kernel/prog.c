@@ -24,33 +24,33 @@
    przestrzenia. */
 #define PROG_MAX (2 * 1024 * 1024)
 
-static const char *skad = "initrd";
+static const char *from_where = "initrd";
 
-const char *prog_skad(void)
+const char *prog_source(void)
 {
-    return skad;
+    return from_where;
 }
 
-int prog_istnieje(const char *nazwa)
+int prog_exists(const char *name)
 {
     uint32_t size = 0;
-    if (initrd_find(nazwa, &size))
+    if (initrd_find(name, &size))
         return 1;
     if (!fs_ready())
         return 0;
-    return fs_open(task_cwd(), nazwa, 0) >= 0;
+    return fs_open(task_cwd(), name, 0) >= 0;
 }
 
-const void *prog_obraz(const char *nazwa, uint32_t *rozmiar, void **bufor)
+const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
 {
-    *bufor = (void *)0;
+    *buf_out = (void *)0;
 
     uint32_t size = 0;
-    const void *obraz = initrd_find(nazwa, &size);
-    if (obraz) {
-        skad = "initrd";
-        *rozmiar = size;
-        return obraz;
+    const void *image = initrd_find(name, &size);
+    if (image) {
+        from_where = "initrd";
+        *size_out = size;
+        return image;
     }
 
     if (!fs_ready())
@@ -58,38 +58,38 @@ const void *prog_obraz(const char *nazwa, uint32_t *rozmiar, void **bufor)
 
     /* Program szukamy tam, gdzie stoi zadanie - katalog roboczy jest
        jego wlasnoscia, tak samo jak przy 'cat' czy 'ls' */
-    int f = fs_open(task_cwd(), nazwa, 0);
+    int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return (const void *)0;
 
     int len = fs_size(f);
     if (len <= 0 || len > PROG_MAX) {
         printk("[jadro] '%s' na dysku ma %d B - to nie jest program\n",
-               nazwa, len);
+               name, len);
         return (const void *)0;
     }
 
     void *buf = kmalloc((uint32_t)len);
     if (!buf) {
-        printk("[jadro] brak pamieci na wczytanie '%s' (%d B)\n", nazwa, len);
+        printk("[jadro] brak pamieci na wczytanie '%s' (%d B)\n", name, len);
         return (const void *)0;
     }
     /* fs_read_at oddaje LICZBE przeczytanych bajtow - obraz krotszy
        niz plik to nie jest ten sam program */
     if (fs_read_at(f, 0, buf, (uint32_t)len) != len) {
         kfree(buf);
-        printk("[jadro] '%s' nie da sie odczytac z dysku\n", nazwa);
+        printk("[jadro] '%s' nie da sie odczytac z dysku\n", name);
         return (const void *)0;
     }
 
-    skad = "dysku";
-    *bufor = buf;
-    *rozmiar = (uint32_t)len;
+    from_where = "dysku";
+    *buf_out = buf;
+    *size_out = (uint32_t)len;
     return buf;
 }
 
-void prog_zwolnij(void *bufor)
+void prog_release(void *buf)
 {
-    if (bufor)
-        kfree(bufor);
+    if (buf)
+        kfree(buf);
 }

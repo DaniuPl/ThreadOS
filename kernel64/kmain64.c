@@ -35,7 +35,7 @@
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/usbkbd.h"
 #include "../kernel/include/dynlink.h"
-#include "../kernel/include/zamekjadra.h"
+#include "../kernel/include/biglock.h"
 #include "../kernel/include/swap.h"
 #include "fpu64.h"
 #include "isr64.h"
@@ -351,7 +351,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        program - jej ramki sa wspolne dla wszystkich procesow */
     if (dyn_init())
         printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
-               dyn_nazwa(), dyn_stron());
+               dyn_name(), dyn_pages());
 
     if (initrd_file_count()) {
     /* Program z pliku dostaje czysta karte: to, co powie jadru, mowi
@@ -530,8 +530,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        zmiany - sterownik karty potrzebowal tylko jawnego rzutowania
        adresow, bo karta adresuje pamiec 32 bitami, a wskaznik ma tu
        osiem bajtow. */
-    int siec = net_init();
-    if (siec) {
+    int net = net_init();
+    if (net) {
         const uint8_t *m = netdev_mac();
         printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -546,10 +546,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        pomoze. Tablice stron bierze gotowe, te same, po ktorych chodzi
        jadro. Obudzony zglasza sie i staje: dawanie mu pracy wymaga
        schedulera per rdzen i zamkow, a tych jeszcze nie ma. */
-    int rdzeni = smp_init();
-    if (rdzeni > 1)
+    int ncores = smp_init();
+    if (ncores > 1)
         printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
-               rdzeni, smp_started());
+               ncores, smp_started());
     else
         printk("[ OK ] Procesory: 1\n");
 
@@ -567,7 +567,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* Adres IP bierze sie z sieci, a klient DHCP czeka na odpowiedzi
        serwera - musi wiec chodzic w watku, czyli po schedulerze */
-    if (siec) {
+    if (net) {
         dhcp_start();
         tcp_init();
     }
@@ -579,7 +579,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        robota przejmuje shell, ktory czeka na klawisze. Taki watek nie
        moze trzymac wielkiego zamka jadra: rdzen stojacy na hlt z
        zamkiem w garsci zamknalby jadro dla wszystkich pozostalych. */
-    jadro_wyjdz();
+    biglock_leave();
     for (;;)
         __asm__ volatile("hlt");
 }

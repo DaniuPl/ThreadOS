@@ -14,20 +14,20 @@
 #define C_WHITE 4
 #define C_BG    8
 
-#define OKNO_W 170
-#define OKNO_H 80
-#define PASEK_W 160
+#define WINDOW_W 170
+#define WINDOW_H 80
+#define BAR_W 160
 
-static void liczba(int w, int x, int y, uint64_t v, int kolor)
+static void num(int w, int x, int y, uint64_t v, int color)
 {
     char s[24];
     utoa(v, s);
-    win_text(w, x, y, s, kolor);
+    win_text(w, x, y, s, color);
 }
 
 void _start(void)
 {
-    int w = (int)win_create(OKNO_W, OKNO_H, "Monitor");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "Monitor");
     if (w < 0) {
         print("gmon64: pulpit nie dal okna\n");
         sys_exit(1);
@@ -38,18 +38,18 @@ void _start(void)
         if (sys_sysinfo(&si) < 0)
             sys_exit(1);
 
-        win_rect(w, 0, 0, OKNO_W, OKNO_H, C_BG);
+        win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_text(w, 4, 4, "RAM uzyte (KiB):", C_GREEN);
-        liczba(w, 136, 4, si.uzyte_kib, C_WHITE);
+        num(w, 136, 4, si.used_kib, C_WHITE);
         win_text(w, 4, 16, "RAM razem (KiB):", C_GREEN);
-        liczba(w, 136, 16, si.ram_kib, C_WHITE);
+        num(w, 136, 16, si.ram_kib, C_WHITE);
         win_text(w, 4, 28, "uptime (s):", C_GREEN);
-        liczba(w, 96, 28, si.uptime_s, C_WHITE);
+        num(w, 96, 28, si.uptime_s, C_WHITE);
 
         /* Pasek zajetosci: czerwone tlo, niebieska czesc uzyta */
         uint32_t ile = si.ram_kib
-                           ? si.uzyte_kib * PASEK_W / si.ram_kib : 0;
-        win_rect(w, 4, 48, PASEK_W, 12, C_RED);
+                           ? si.used_kib * BAR_W / si.ram_kib : 0;
+        win_rect(w, 4, 48, BAR_W, 12, C_RED);
         win_rect(w, 4, 48, (int)ile, 12, C_BLUE);
 
         sys_sleep(500);

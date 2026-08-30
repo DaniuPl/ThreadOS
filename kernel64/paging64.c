@@ -158,7 +158,7 @@ uint64_t paging64_lookup(uint64_t virt)
 
 /* Wskaznik na wpis tablicy stron danego adresu albo NULL. Zwracamy
    wpis, a nie ramke: dzwoniacy chce tez bitow. */
-static uint64_t *wpis_strony(uint64_t virt)
+static uint64_t *page_entry(uint64_t virt)
 {
     uint64_t *top = root_now();
     if (!top)
@@ -178,18 +178,18 @@ static uint64_t *wpis_strony(uint64_t virt)
 /* Czy strona zapisywalnego odwzorowania byla ruszana od ostatniego
    odeslania na dysk? Odpowiada za nas procesor - bit "brudna" ustawia
    sam przy kazdym zapisie, wiec odsylamy tylko to, co sie zmienilo. */
-int paging64_plik_brudna(uint64_t virt)
+int paging64_file_dirty(uint64_t virt)
 {
-    uint64_t *w = wpis_strony(virt);
+    uint64_t *w = page_entry(virt);
     if (!w)
         return 0;
-    return (*w & PTE_PRESENT) && (*w & PG_PLIK) && (*w & PTE_DIRTY);
+    return (*w & PTE_PRESENT) && (*w & PG_FILE) && (*w & PTE_DIRTY);
 }
 
 /* Gasi bit "brudna" po odeslaniu strony do pliku */
-void paging64_plik_czysta(uint64_t virt)
+void paging64_file_clean(uint64_t virt)
 {
-    uint64_t *w = wpis_strony(virt);
+    uint64_t *w = page_entry(virt);
     if (!w)
         return;
     *w &= ~(uint64_t)PTE_DIRTY;
@@ -350,14 +350,14 @@ uint64_t paging64_clone_space(uint64_t src)
                           ((uint64_t)i << 21) | ((uint64_t)j << 12);
             uint64_t frame = pt[j] & ADDR_MASK;
             uint64_t flags = pt[j] &
-                             (PG_WRITE | PG_USER | PG_NX | PG_COW | PG_PLIK);
+                             (PG_WRITE | PG_USER | PG_NX | PG_COW | PG_FILE);
 
             /* Zapisywalna strona idzie do obu jako tylko-do-odczytu
                ze znacznikiem - inaczej rodzic pisalby dziecku po
                pamieci, nie wiedzac o tym. Wyjatkiem jest zapisywalne
                odwzorowanie pliku: tam rodzic i dziecko MAJA pisac po
                tym samym, bo pisza do jednego pliku. */
-            if ((flags & PG_WRITE) && !(flags & PG_PLIK)) {
+            if ((flags & PG_WRITE) && !(flags & PG_FILE)) {
                 flags = (flags & ~(uint64_t)PG_WRITE) | PG_COW;
                 pt[j] = frame | PTE_PRESENT | flags;
                 invlpg(va);
@@ -486,10 +486,10 @@ void paging64_free_space(uint64_t space)
  * wyjatek przy pierwszej instrukcji - bo kod wrocil z zakazem
  * wykonywania.
  */
-static uint64_t swap_pte(int slot, uint64_t prawa)
+static uint64_t swap_pte(int slot, uint64_t right)
 {
     return ((uint64_t)slot << 12) | PG_SWAPPED |
-           (prawa & (PG_WRITE | PG_USER | PG_NX));
+           (right & (PG_WRITE | PG_USER | PG_NX));
 }
 
 /* Wskaznik zegara: gdzie skonczylismy ostatnie szukanie ofiary. Bez
@@ -544,7 +544,7 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 /* Strony zapisywalnego odwzorowania nie ma po co
                    wyrzucac na dysk wymiany - jej miejscem na dysku
                    jest sam odwzorowany plik */
-                if (w & PG_PLIK)
+                if (w & PG_FILE)
                     continue;
                 uint64_t frame = w & ADDR_MASK;
                 if (shm_is_shared((uint32_t)frame) ||
@@ -557,10 +557,10 @@ int paging64_reclaim_pages(uint64_t space, int want)
 
                 int slot = swap_alloc_slot();
                 if (slot < 0)
-                    goto koniec;              /* plik wymiany pelny */
+                    goto end;              /* plik wymiany pelny */
                 if (swap_write(slot, (const void *)(uintptr_t)frame) < 0) {
                     swap_free_slot(slot);
-                    goto koniec;
+                    goto end;
                 }
                 pt[j] = swap_pte(slot, w);
                 pmm_free_frame((uint32_t)frame);
@@ -572,7 +572,7 @@ int paging64_reclaim_pages(uint64_t space, int want)
         /* Po pierwszym obchodzie wszystkie bity sa juz zgaszone -
            drugi obchod znajdzie ofiary, o ile w ogole jest co brac */
     }
-koniec:
+end:
     if (freed && space == (uint64_t)(uintptr_t)root_now())
         __asm__ volatile("movq %%cr3, %%rax; movq %%rax, %%cr3"
                          : : : "rax", "memory");

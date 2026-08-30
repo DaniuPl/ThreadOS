@@ -22,7 +22,7 @@
 #include "proc64.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/smp.h"
-#include "../kernel/include/zamekjadra.h"
+#include "../kernel/include/biglock.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/printk.h"
@@ -71,13 +71,13 @@ struct task64 {
     uint64_t brk_base;           /* poczatek sterty (za obrazem programu) */
     uint64_t brk;                /* dokad program o nia poprosil */
     uint64_t mmap;               /* nastepny wolny adres na mapowania */
-    struct mapa_pliku {
-        uint64_t start, koniec;  /* zakres adresow (0 = wolny wpis) */
-        uint32_t rozmiar;        /* ile bajtow ma sam plik */
-        uint32_t ile_blokow;
-        uint32_t *bloki;         /* numery blokow PFS, po kolei */
-        uint32_t zapis;          /* 1 = zmiany wracaja do pliku */
-    } mapy[MMAP_PLIKOW];
+    struct file_map {
+        uint64_t start, end;  /* zakres adresow (0 = wolny wpis) */
+        uint32_t size;        /* ile bajtow ma sam plik */
+        uint32_t nblocks_of;
+        uint32_t *blocks;         /* numery blokow PFS, po kolei */
+        uint32_t write;          /* 1 = zmiany wracaja do pliku */
+    } maps[MMAP_FILES];
     int cwd;                     /* katalog roboczy (i-wezel, FS_ROOT = /) */
     int vc;                      /* konsola wirtualna, na ktorej pisze */
     /* Gdzie wolno prowadzic to zadanie.
@@ -86,14 +86,14 @@ struct task64 {
        cokolwiek innego pisanego dla jednego rdzenia zostaje tam, gdzie
        bylo. 'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne
        TEGO rdzenia - stoi na jego stosie i nikt inny go nie prowadzi. */
-    int wszedzie;
+    int anycore;
     /* 'samodzielny' = 1 znaczy, ze watek nie bierze wielkiego zamka
        jadra: ten, kto o niego poprosil, wzial na siebie, ze watek
        dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. Proces
        ring 3 tego NIE ma - jego strona jadrowa to zwykly kod jadra,
        ktory ma byc chroniony jak kazdy inny. */
-    int samodzielny;
-    int bezczynny_rdzenia;
+    int nolock;
+    int idle_for_core;
     char name[NAME_MAX];
     struct task64 *next;
 };
@@ -107,23 +107,23 @@ extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
  * prowadzic zadan. Teraz jest ich tyle, ile rdzeni, a ktore z nich
  * jest moje, mowi sam procesor (numer w jego lokalnym APIC).
  */
-struct rdzen {
-    struct task64 *biezace;
-    struct task64 *bezczynne;
+struct core {
+    struct task64 *running;
+    struct task64 *idle;
 };
-static struct rdzen rdzenie[SMP_RDZENI];
+static struct core cores[SMP_CORES];
 
-#define current   (rdzenie[smp_rdzen()].biezace)
-#define idle_task (rdzenie[smp_rdzen()].bezczynne)
+#define current   (cores[smp_core()].running)
+#define idle_task (cores[smp_core()].idle)
 
 /* Lista zadan jest jedna dla calej maszyny, wiec i zamek jest jeden.
    Trzyma sie go PRZEZ przelaczenie kontekstu, a zwalnia go ten, kto po
    drugiej stronie przyjdzie - dopiero wtedy stos poprzedniego zadania
    jest naprawde wolny. */
-static struct spinlock zamek = SPINLOCK_WOLNY;
+static struct spinlock lock = SPINLOCK_FREE;
 
 static int next_id;
-static int scheduler_wstal;
+static int scheduler_up;
 
 static void set_name(struct task64 *t, const char *name)
 {
@@ -139,14 +139,14 @@ static void trampoline(void)
     /* Zamek listy zadan trzyma jeszcze ten, kto nas tu przelaczyl -
        i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
        kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
-    spin_unlock(&zamek);
+    spin_unlock(&lock);
     /* Nowe zadanie zaczyna w kodzie jadra, wiec bierze wielki zamek.
      *
      * Nie bierze go tylko to, ktore wolno prowadzic kazdemu rdzeniowi -
      * bo ten, kto o nie poprosil, wzial juz na siebie, ze jego watek
      * dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. */
-    if (!current->samodzielny)
-        jadro_wejdz();
+    if (!current->nolock)
+        biglock_enter();
     __asm__ volatile("sti");
     current->entry(current->arg);
     task64_exit();
@@ -183,30 +183,30 @@ void scheduler64_init(void)
         main_task->fds[i].kind = FDK_WOLNY;
     main_task->brk_base = main_task->brk = 0;
     main_task->mmap = USER64_MMAP_BASE;
-    for (int i = 0; i < MMAP_PLIKOW; i++)
-        main_task->mapy[i].start = main_task->mapy[i].koniec = 0;
+    for (int i = 0; i < MMAP_FILES; i++)
+        main_task->maps[i].start = main_task->maps[i].end = 0;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
     main_task->vc = 0;
     set_name(main_task, "main");
-    main_task->wszedzie = 0;
-    main_task->samodzielny = 0;
-    main_task->bezczynny_rdzenia = -1;
+    main_task->anycore = 0;
+    main_task->nolock = 0;
+    main_task->idle_for_core = -1;
     main_task->next = main_task;
-    rdzenie[0].biezace = main_task;
+    cores[0].running = main_task;
 
-    rdzenie[0].bezczynne = task64_create("bezczynny", idle_loop, 0);
-    rdzenie[0].bezczynne->bezczynny_rdzenia = 0;
-    scheduler_wstal = 1;
+    cores[0].idle = task64_create("bezczynny", idle_loop, 0);
+    cores[0].idle->idle_for_core = 0;
+    scheduler_up = 1;
 
     /* Watek glowny konczy rozruch, wiec od tej chwili jest zwyklym
        zadaniem w kodzie jadra */
-    jadro_wejdz();
+    biglock_enter();
 }
 
-int task_scheduler_gotowy(void)
+int task_scheduler_ready(void)
 {
-    return scheduler_wstal;
+    return scheduler_up;
 }
 
 struct task64 *task64_create(const char *name, void (*entry)(void *),
@@ -234,15 +234,15 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         t->fds[i].kind = FDK_WOLNY;
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
-    for (int i = 0; i < MMAP_PLIKOW; i++)
-        t->mapy[i].start = t->mapy[i].koniec = 0;
+    for (int i = 0; i < MMAP_FILES; i++)
+        t->maps[i].start = t->maps[i].end = 0;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
-    t->wszedzie = 0;            /* dopoki ktos nie powie inaczej */
-    t->samodzielny = 0;
-    t->bezczynny_rdzenia = -1;
+    t->anycore = 0;            /* dopoki ktos nie powie inaczej */
+    t->nolock = 0;
+    t->idle_for_core = -1;
     set_name(t, name);
 
     /* Stos ukladamy tak, by context_switch64 zdjal z niego szesc zer
@@ -255,22 +255,22 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         *--sp = 0;                        /* rbp, rbx, r12-r15 */
     t->rsp = (uint64_t)(uintptr_t)sp;
 
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
     t->next = current->next;
     current->next = t;
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
     return t;
 }
 
 /* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi. Zwykle zostaje na
    rozruchowym: reszta jadra pisana jest dla jednego rdzenia. */
-struct task64 *task64_create_wszedzie(const char *name,
+struct task64 *task64_create_anycore(const char *name,
                                       void (*entry)(void *), void *arg)
 {
     struct task64 *t = task64_create(name, entry, arg);
     if (t) {
-        t->wszedzie = 1;
-        t->samodzielny = 1;
+        t->anycore = 1;
+        t->nolock = 1;
     }
     return t;
 }
@@ -279,10 +279,10 @@ struct task64 *task64_create_wszedzie(const char *name,
    rdzeniowi. Uzywa tego proces ring 3: jego strona jadrowa zostaje
    zwyklym kodem jadra pod wielkim zamkiem, ale samo liczenie w ring 3
    moze isc rownolegle z innymi. */
-void task_wszedzie_dla_mnie(void)
+void task_set_anycore(void)
 {
     if (current)
-        current->wszedzie = 1;
+        current->anycore = 1;
 }
 
 /* Slad po zakonczonym zadaniu.
@@ -434,32 +434,32 @@ static void reap_zombies(void)
  * tylko to, co ktos jawnie na to pozwolil, bo reszta jadra pisana jest
  * dla jednego rdzenia i cicho na to liczy. Zadanie bezczynne nalezy do
  * swojego rdzenia i do nikogo innego. */
-static int wolno_wziac(const struct task64 *t, int nr)
+static int may_run(const struct task64 *t, int nr)
 {
-    if (t->bezczynny_rdzenia >= 0)
-        return t->bezczynny_rdzenia == nr;
-    return nr == 0 || t->wszedzie;
+    if (t->idle_for_core >= 0)
+        return t->idle_for_core == nr;
+    return nr == 0 || t->anycore;
 }
 
 static struct task64 *pick_ready(int nr)
 {
     uint32_t now = pit_ticks();
-    struct task64 *ja = rdzenie[nr].biezace;
-    struct task64 *moje_bezczynne = rdzenie[nr].bezczynne;
+    struct task64 *ja = cores[nr].running;
+    struct task64 *my_idle = cores[nr].idle;
     struct task64 *t = ja->next;
     struct task64 *found = NULL;
 
     while (t != ja) {
         if (t->state == TASK_SLEEPING && now >= t->wake_at)
             t->state = TASK_READY;
-        if (t->state == TASK_READY && !found && t != moje_bezczynne &&
-            wolno_wziac(t, nr))
+        if (t->state == TASK_READY && !found && t != my_idle &&
+            may_run(t, nr))
             found = t;
         t = t->next;
     }
-    if (!found && moje_bezczynne && moje_bezczynne != ja &&
-        moje_bezczynne->state == TASK_READY)
-        found = moje_bezczynne;
+    if (!found && my_idle && my_idle != ja &&
+        my_idle->state == TASK_READY)
+        found = my_idle;
     return found;
 }
 
@@ -503,7 +503,7 @@ void task64_enter_space(uint64_t space, uint64_t kstack_top)
     irqflags_t flags = irq_save();
     current->space = space;
     current->kstack_top = kstack_top;
-    apply_context(current, smp_rdzen());
+    apply_context(current, smp_core());
     irq_restore(flags);
 }
 
@@ -516,7 +516,7 @@ uint64_t task64_swap_space(uint64_t space, uint64_t kstack_top)
     current->space = space;
     if (kstack_top)              /* zero = zostaw stos jadra bez zmian */
         current->kstack_top = kstack_top;
-    apply_context(current, smp_rdzen());
+    apply_context(current, smp_core());
     irq_restore(flags);
     return old;
 }
@@ -536,24 +536,24 @@ void task64_rename(const char *name)
  * przelaczenie, a zwalnia go ten, kto po drugiej stronie przyjdzie -
  * dopiero wtedy stos poprzedniego zadania jest naprawde wolny.
  */
-static void przelacz(int nowy_stan)
+static void switch_to(int new_state)
 {
-    int nr = smp_rdzen();
-    if (!rdzenie[nr].biezace)
+    int nr = smp_core();
+    if (!cores[nr].running)
         return;
 
     /* Wielki zamek jadra oddajemy NA CZAS PRZELACZENIA - trzymanie go
        przez zmiane kontekstu zamykaloby jadro dla wszystkich az do
        przebudzenia tego zadania. Glebokosc lezy na stosie TEGO
        zadania, wiec kazde odzyska dokladnie swoja. */
-    int glebokosc = jadro_zwolnij_wszystko();
+    int depth = biglock_release_all();
 
-    spin_lock(&zamek);
+    spin_lock(&lock);
     /* Stan biezacego zadania zmieniamy juz pod zamkiem, razem z wyborem
        nastepnego: ustawiony wczesniej dawalby okno, w ktorym zadanie
        jest oznaczone jako spiace, a jego stos wciaz uzywany. */
-    if (nowy_stan >= 0)
-        rdzenie[nr].biezace->state = (enum task_state)nowy_stan;
+    if (new_state >= 0)
+        cores[nr].running->state = (enum task_state)new_state;
     reap_zombies();
 
     struct task64 *next = pick_ready(nr);
@@ -562,21 +562,21 @@ static void przelacz(int nowy_stan)
        Watek bezczynnosci sprawia, ze przypadek "nie ma nikogo, a my nie
        mozemy" po prostu nie wystepuje. */
     if (!next)
-        next = rdzenie[nr].biezace;
+        next = cores[nr].running;
 
-    if (next == rdzenie[nr].biezace) {
-        if (nowy_stan < 0)
+    if (next == cores[nr].running) {
+        if (new_state < 0)
             next->state = TASK_RUNNING;
-        spin_unlock(&zamek);
-        jadro_przywroc(glebokosc);
+        spin_unlock(&lock);
+        biglock_restore(depth);
         return;
     }
 
-    struct task64 *prev = rdzenie[nr].biezace;
+    struct task64 *prev = cores[nr].running;
     if (prev->state == TASK_RUNNING)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
-    rdzenie[nr].biezace = next;
+    cores[nr].running = next;
 
     /* Rejestry zmiennoprzecinkowe sa takim samym stanem zadania, jak
        reszta - z ta roznica, ze procesor zapisuje je jedna instrukcja
@@ -587,15 +587,15 @@ static void przelacz(int nowy_stan)
 
     apply_context(next, nr);
     context_switch64(&prev->rsp, next->rsp);
-    spin_unlock(&zamek);
+    spin_unlock(&lock);
     /* Od tej chwili biegnie juz zadanie, ktore tu wrocilo - i to ono
        odbiera swoja glebokosc ze swojego stosu */
-    jadro_przywroc(glebokosc);
+    biglock_restore(depth);
 }
 
 void schedule(void)
 {
-    przelacz(-1);
+    switch_to(-1);
 }
 
 /* --- Rdzen wtorny dolacza do schedulera ------------------------------
@@ -606,9 +606,9 @@ void schedule(void)
  * obudzeniu, i nikt inny nie ma prawa go prowadzic. Ta funkcja nie
  * wraca.
  */
-void task_rdzen_wejdz(int nr)
+void task_core_enter(int nr)
 {
-    if (nr <= 0 || nr >= SMP_RDZENI || !scheduler_wstal)
+    if (nr <= 0 || nr >= SMP_CORES || !scheduler_up)
         return;
 
     struct task64 *t = kmalloc(sizeof(*t));
@@ -628,28 +628,28 @@ void task_rdzen_wejdz(int nr)
         t->fds[i].kind = FDK_WOLNY;
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
-    for (int i = 0; i < MMAP_PLIKOW; i++)
-        t->mapy[i].start = t->mapy[i].koniec = 0;
+    for (int i = 0; i < MMAP_FILES; i++)
+        t->maps[i].start = t->maps[i].end = 0;
     t->fpu = fpu64_alloc();
     t->cwd = FS_ROOT;
     t->vc = 0;
-    t->wszedzie = 0;
-    t->samodzielny = 1;         /* zadanie bezczynne nie bierze zamka */
-    t->bezczynny_rdzenia = nr;
+    t->anycore = 0;
+    t->nolock = 1;         /* zadanie bezczynne nie bierze zamka */
+    t->idle_for_core = nr;
     set_name(t, "bezczynny");
     t->name[9] = (char)('0' + nr);
     t->name[10] = '\0';
 
-    irqflags_t flags = spin_lock_irq(&zamek);
-    t->next = rdzenie[0].biezace->next;
-    rdzenie[0].biezace->next = t;
-    rdzenie[nr].biezace = t;
-    rdzenie[nr].bezczynne = t;
-    spin_unlock_irq(&zamek, flags);
+    irqflags_t flags = spin_lock_irq(&lock);
+    t->next = cores[0].running->next;
+    cores[0].running->next = t;
+    cores[nr].running = t;
+    cores[nr].idle = t;
+    spin_unlock_irq(&lock, flags);
 
     __asm__ volatile("sti");
     for (;;) {
-        smp_rob_zlecenie(nr);
+        smp_run_work(nr);
         task64_yield();
         /* Nic dla mnie nie ma - stoj do najblizszego przerwania */
         __asm__ volatile("hlt");
@@ -667,7 +667,7 @@ void task64_sleep(uint32_t ms)
 {
     irqflags_t flags = irq_save();
     current->wake_at = pit_ticks() + (ms + 9) / 10;   /* tykniecie = 10 ms */
-    przelacz(TASK_SLEEPING);
+    switch_to(TASK_SLEEPING);
     irq_restore(flags);
 }
 
@@ -679,10 +679,10 @@ void task64_exit_code(int code)
        odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
        TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
     proc64_msync();
-    task64_mmap_zwolnij();
+    task64_mmap_release();
     drop_space(current);
     record_exit(current, code);
-    przelacz(TASK_ZOMBIE);
+    switch_to(TASK_ZOMBIE);
     for (;;)                              /* zombie nie zostanie wybrany */
         __asm__ volatile("hlt");
 }
@@ -695,10 +695,10 @@ void task64_exit(void)
        odwzorowaniu, a czego nie zdazyl odeslac sam - musi to sie stac
        TERAZ, dopoki jego przestrzen adresowa jeszcze zyje */
     proc64_msync();
-    task64_mmap_zwolnij();
+    task64_mmap_release();
     drop_space(current);
     record_exit(current, 0);
-    przelacz(TASK_ZOMBIE);
+    switch_to(TASK_ZOMBIE);
     for (;;)                              /* zombie nie zostanie wybrany */
         __asm__ volatile("hlt");
 }
@@ -716,7 +716,7 @@ void task64_kill_current(const char *why)
     task64_fd_close_all();
     drop_space(current);
     record_exit(current, -1);          /* zabite, czyli nie swoja smiercia */
-    przelacz(TASK_ZOMBIE);
+    switch_to(TASK_ZOMBIE);
     for (;;)
         __asm__ volatile("hlt");
 }
@@ -783,16 +783,16 @@ int task64_alive(int id)
 {
     irqflags_t flags = irq_save();
     struct task64 *t = current;
-    int zyje = 0;
+    int alive = 0;
     do {
         if (t->id == id && t->state != TASK_ZOMBIE) {
-            zyje = 1;
+            alive = 1;
             break;
         }
         t = t->next;
     } while (t != current);
     irq_restore(flags);
-    return zyje;
+    return alive;
 }
 
 /* Katalog roboczy jest wlasnoscia zadania, tak samo jak deskryptory:
@@ -822,15 +822,15 @@ void task64_set_cwd(int slot) { if (current) current->cwd = slot; }
  * a zapisaniem jej na dysk nikt nie moze dostac procesora. */
 int task64_reclaim_page(void)
 {
-    static struct task64 *kursor;
+    static struct task64 *cursor;
     if (!current)                    /* scheduler jeszcze nie wystartowal */
         return 0;
 
     irqflags_t flags = irq_save();
-    struct task64 *start = (kursor && kursor->state != TASK_ZOMBIE)
-                               ? kursor : current;
+    struct task64 *start = (cursor && cursor->state != TASK_ZOMBIE)
+                               ? cursor : current;
     struct task64 *t = start;
-    int oddane = 0;
+    int given_back = 0;
 
     do {
         t = t->next;
@@ -839,14 +839,14 @@ int task64_reclaim_page(void)
            od nowa dla kazdej brakujacej ramki */
         if (t->space && t->state != TASK_ZOMBIE &&
             paging64_reclaim_pages(t->space, 32)) {
-            kursor = t;
-            oddane = 1;
+            cursor = t;
+            given_back = 1;
             break;
         }
     } while (t != start);
 
     irq_restore(flags);
-    return oddane;
+    return given_back;
 }
 
 int task64_vc(void)          { return current ? current->vc : 0; }
@@ -873,20 +873,20 @@ void task64_set_brk_base(uint64_t base)
  *
  * Kolejne mapowania ida jedno za drugim w gore, bez zwalniania: proces
  * i tak zabiera ze soba caly ten obszar, gdy sie konczy. */
-int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
-                      uint32_t *bloki, uint32_t ile_blokow, uint32_t zapis)
+int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
+                      uint32_t *blocks, uint32_t nblocks_of, uint32_t write)
 {
     if (!current)
         return -1;
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        if (current->mapy[i].koniec)
+    for (int i = 0; i < MMAP_FILES; i++) {
+        if (current->maps[i].end)
             continue;
-        current->mapy[i].start = start;
-        current->mapy[i].koniec = koniec;
-        current->mapy[i].rozmiar = rozmiar;
-        current->mapy[i].bloki = bloki;
-        current->mapy[i].ile_blokow = ile_blokow;
-        current->mapy[i].zapis = zapis;
+        current->maps[i].start = start;
+        current->maps[i].end = end;
+        current->maps[i].size = size;
+        current->maps[i].blocks = blocks;
+        current->maps[i].nblocks_of = nblocks_of;
+        current->maps[i].write = write;
         return 0;
     }
     return -1;
@@ -894,56 +894,56 @@ int task64_mmap_dodaj(uint64_t start, uint64_t koniec, uint32_t rozmiar,
 
 /* Wolane z obslugi bledu strony, wiec musi byc krotkie i bez zadnych
    niespodzianek: samo wyszukanie w tablicy czterech wpisow. */
-int task64_mmap_znajdz(uint64_t adres, uint32_t *blok_pierwszy,
-                       uint32_t *bajtow, uint32_t *zapis)
+int task64_mmap_find(uint64_t addr, uint32_t *first_block,
+                       uint32_t *nbytes, uint32_t *write)
 {
     if (!current)
         return 0;
-    uint64_t strona = adres & ~0xFFFULL;
+    uint64_t page = addr & ~0xFFFULL;
 
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        struct mapa_pliku *m = &current->mapy[i];
-        if (!m->koniec || strona < m->start || strona >= m->koniec)
+    for (int i = 0; i < MMAP_FILES; i++) {
+        struct file_map *m = &current->maps[i];
+        if (!m->end || page < m->start || page >= m->end)
             continue;
 
-        uint64_t offset = strona - m->start;
-        uint32_t indeks = (uint32_t)(offset / FS_BLOCK);
-        if (indeks >= m->ile_blokow)
+        uint64_t offset = page - m->start;
+        uint32_t index = (uint32_t)(offset / FS_BLOCK);
+        if (index >= m->nblocks_of)
             return 0;
-        *blok_pierwszy = indeks;
+        *first_block = index;
         /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej
            strony ma byc wyzerowany, a nie wypelniony smieciem
            z dysku */
-        *bajtow = (offset < m->rozmiar)
-                      ? (uint32_t)(m->rozmiar - offset) : 0;
-        *zapis = m->zapis;
+        *nbytes = (offset < m->size)
+                      ? (uint32_t)(m->size - offset) : 0;
+        *write = m->write;
         return 1;
     }
     return 0;
 }
 
 /* Numer bloku PFS pod danym indeksem odwzorowania obejmujacego adres */
-uint32_t task64_mmap_blok(uint64_t adres, uint32_t indeks)
+uint32_t task64_mmap_block(uint64_t addr, uint32_t index)
 {
-    uint64_t strona = adres & ~0xFFFULL;
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        struct mapa_pliku *m = &current->mapy[i];
-        if (!m->koniec || strona < m->start || strona >= m->koniec)
+    uint64_t page = addr & ~0xFFFULL;
+    for (int i = 0; i < MMAP_FILES; i++) {
+        struct file_map *m = &current->maps[i];
+        if (!m->end || page < m->start || page >= m->end)
             continue;
-        return indeks < m->ile_blokow ? m->bloki[indeks] : 0;
+        return index < m->nblocks_of ? m->blocks[index] : 0;
     }
     return 0;
 }
 
-void task64_mmap_zwolnij(void)
+void task64_mmap_release(void)
 {
     if (!current)
         return;
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        if (current->mapy[i].bloki)
-            kfree(current->mapy[i].bloki);
-        current->mapy[i].bloki = (uint32_t *)0;
-        current->mapy[i].start = current->mapy[i].koniec = 0;
+    for (int i = 0; i < MMAP_FILES; i++) {
+        if (current->maps[i].blocks)
+            kfree(current->maps[i].blocks);
+        current->maps[i].blocks = (uint32_t *)0;
+        current->maps[i].start = current->maps[i].end = 0;
     }
 }
 
@@ -951,36 +951,36 @@ void task64_mmap_zwolnij(void)
    kazdy u siebie, wiec nie moga byc wspolne. Gdy kopia sie nie uda,
    dziecko po prostu nie widzi tego pliku - a to lepsze niz dwa
    zadania zwalniajace ten sam wskaznik. */
-void task64_mmap_dziedzicz(struct task64 *dziecko)
+void task64_mmap_inherit(struct task64 *child)
 {
-    for (int i = 0; i < MMAP_PLIKOW; i++) {
-        dziecko->mapy[i] = current->mapy[i];
-        dziecko->mapy[i].bloki = (uint32_t *)0;
-        if (!current->mapy[i].koniec)
+    for (int i = 0; i < MMAP_FILES; i++) {
+        child->maps[i] = current->maps[i];
+        child->maps[i].blocks = (uint32_t *)0;
+        if (!current->maps[i].end)
             continue;
-        uint32_t n = current->mapy[i].ile_blokow;
-        uint32_t *kopia = kmalloc(n * sizeof(uint32_t));
-        if (!kopia) {
-            dziecko->mapy[i].start = dziecko->mapy[i].koniec = 0;
+        uint32_t n = current->maps[i].nblocks_of;
+        uint32_t *copy = kmalloc(n * sizeof(uint32_t));
+        if (!copy) {
+            child->maps[i].start = child->maps[i].end = 0;
             continue;
         }
         for (uint32_t k = 0; k < n; k++)
-            kopia[k] = current->mapy[i].bloki[k];
-        dziecko->mapy[i].bloki = kopia;
+            copy[k] = current->maps[i].blocks[k];
+        child->maps[i].blocks = copy;
     }
 }
 
 /* Opis i-tego odwzorowania biezacego procesu - do odsylania stron na
    dysk, ktore musi obejsc kazde po kolei. Zwraca 0, gdy wpis wolny. */
-int task64_mmap_opis(int i, uint64_t *start, uint64_t *koniec,
-                     uint32_t *rozmiar, uint32_t *zapis)
+int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
+                     uint32_t *size, uint32_t *write)
 {
-    if (!current || i < 0 || i >= MMAP_PLIKOW || !current->mapy[i].koniec)
+    if (!current || i < 0 || i >= MMAP_FILES || !current->maps[i].end)
         return 0;
-    *start = current->mapy[i].start;
-    *koniec = current->mapy[i].koniec;
-    *rozmiar = current->mapy[i].rozmiar;
-    *zapis = current->mapy[i].zapis;
+    *start = current->maps[i].start;
+    *end = current->maps[i].end;
+    *size = current->maps[i].size;
+    *write = current->maps[i].write;
     return 1;
 }
 
@@ -1010,7 +1010,7 @@ void task64_inherit_brk(struct task64 *child)
     child->mmap = current->mmap;     /* dziecko widzi ten sam uklad */
     /* Dziecko dziedziczy prawo do biegania na kazdym rdzeniu: to
        wlasnosc programu, a nie pojedynczego zadania */
-    child->wszedzie = current->wszedzie;
+    child->anycore = current->anycore;
 }
 
 /* --- Deskryptory --------------------------------------------------
@@ -1024,7 +1024,7 @@ int task64_fd_open(int slot)
     int fd = -1;
     for (int i = FD_FIRST; i < FD_MAX; i++) {
         if (current->fds[i].kind == FDK_WOLNY) {
-            current->fds[i].kind = FDK_PLIK;
+            current->fds[i].kind = FDK_FILE;
             current->fds[i].slot = slot;
             current->fds[i].pos = 0;
             fd = i;
@@ -1037,13 +1037,13 @@ int task64_fd_open(int slot)
 
 /* Numer dla konca potoku. Szukamy od trzeciego, bo zero i jeden maja
    znaczenie umowne i wstawia sie tam tylko przez dup2. */
-int task64_fd_pipe(int idx, int czytelnik)
+int task64_fd_pipe(int idx, int reader_task)
 {
     irqflags_t flags = irq_save();
     int fd = -1;
     for (int i = FD_FIRST; i < FD_MAX; i++) {
         if (current->fds[i].kind == FDK_WOLNY) {
-            current->fds[i].kind = czytelnik ? FDK_POTOK_R : FDK_POTOK_W;
+            current->fds[i].kind = reader_task ? FDK_POTOK_R : FDK_POTOK_W;
             current->fds[i].slot = idx;
             current->fds[i].pos = 0;
             fd = i;
@@ -1070,20 +1070,20 @@ int task64_fd_slot(int fd)
 
 uint32_t task64_fd_pos(int fd)
 {
-    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_PLIK)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_FILE)
         return 0;
     return current->fds[fd].pos;
 }
 
 void task64_fd_advance(int fd, uint32_t n)
 {
-    if (fd >= 0 && fd < FD_MAX && current->fds[fd].kind == FDK_PLIK)
+    if (fd >= 0 && fd < FD_MAX && current->fds[fd].kind == FDK_FILE)
         current->fds[fd].pos += n;
 }
 
 /* Zamkniecie konca potoku zmniejsza liczbe wlascicieli - i to wlasnie
    ono sprawia, ze czytajacy kiedykolwiek zobaczy koniec danych */
-static void zwolnij(struct task64 *t, int fd)
+static void release(struct task64 *t, int fd)
 {
     if (t->fds[fd].kind == FDK_POTOK_R)
         pipe64_unref(t->fds[fd].slot, 1);
@@ -1097,32 +1097,32 @@ int task64_fd_close(int fd)
     if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_WOLNY)
         return -1;
     irqflags_t flags = irq_save();
-    zwolnij(current, fd);
+    release(current, fd);
     irq_restore(flags);
     return 0;
 }
 
 /* Przepisanie numeru: to tedy przekierowuje sie wejscie i wyjscie.
    Cel jest najpierw zamykany, bo zwykle jest to zero albo jeden. */
-int task64_fd_dup2(int stary, int nowy)
+int task64_fd_dup2(int old, int fresh_one)
 {
-    if (stary < 0 || stary >= FD_MAX || nowy < 0 || nowy >= FD_MAX)
+    if (old < 0 || old >= FD_MAX || fresh_one < 0 || fresh_one >= FD_MAX)
         return -1;
-    if (current->fds[stary].kind == FDK_WOLNY)
+    if (current->fds[old].kind == FDK_WOLNY)
         return -1;
-    if (stary == nowy)
-        return nowy;
+    if (old == fresh_one)
+        return fresh_one;
 
     irqflags_t flags = irq_save();
-    if (current->fds[nowy].kind != FDK_WOLNY)
-        zwolnij(current, nowy);
-    current->fds[nowy] = current->fds[stary];
-    if (current->fds[nowy].kind == FDK_POTOK_R)
-        pipe64_ref(current->fds[nowy].slot, 1);
-    else if (current->fds[nowy].kind == FDK_POTOK_W)
-        pipe64_ref(current->fds[nowy].slot, 0);
+    if (current->fds[fresh_one].kind != FDK_WOLNY)
+        release(current, fresh_one);
+    current->fds[fresh_one] = current->fds[old];
+    if (current->fds[fresh_one].kind == FDK_POTOK_R)
+        pipe64_ref(current->fds[fresh_one].slot, 1);
+    else if (current->fds[fresh_one].kind == FDK_POTOK_W)
+        pipe64_ref(current->fds[fresh_one].slot, 0);
     irq_restore(flags);
-    return nowy;
+    return fresh_one;
 }
 
 /* Zamyka wszystko, co zadanie trzymalo - wolane, gdy sie konczy.
@@ -1131,7 +1131,7 @@ void task64_fd_close_all(void)
 {
     for (int i = 0; i < FD_MAX; i++)
         if (current->fds[i].kind != FDK_WOLNY)
-            zwolnij(current, i);
+            release(current, i);
 }
 
 /* Dziecko dziedziczy otwarte pliki razem z miejscem, w ktorym stoja -

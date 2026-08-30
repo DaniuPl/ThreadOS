@@ -119,7 +119,7 @@ def main():
                 check("kazdy rdzen wtorny ma wlasne zadanie bezczynne",
                       bezczynne_rdzeni(ps, 4))
 
-                out = q.polecenie("smpwatki", "Watki poza", timeout=180)
+                out = q.polecenie("smpthreads", "Watki poza", timeout=180)
                 sprawdz_watki(out, "", 4)
 
                 # System ma po tym wszystkim dzialac jak dotad
@@ -144,7 +144,7 @@ def main():
             check("kazdy rdzen wtorny ma wlasne zadanie bezczynne (32-bit)",
                   bezczynne_rdzeni(ps, 4))
 
-            out = q3.polecenie("smpwatki", "Watki poza", timeout=180)
+            out = q3.polecenie("smpthreads", "Watki poza", timeout=180)
             sprawdz_watki(out, " (32-bit)", 4)
 
             dalej = q3.polecenie("run hello", "zakonczyl sie", timeout=60)
@@ -165,7 +165,7 @@ def main():
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
             q1.wait_for("ProtonOS shell", timeout=40)
-            out = q1.polecenie("smpwatki", "Watki poza", timeout=180)
+            out = q1.polecenie("smpthreads", "Watki poza", timeout=180)
             sprawdz_watki(out, " (jeden rdzen)", 1)
         finally:
             q1.close()

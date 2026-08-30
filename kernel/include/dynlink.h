@@ -28,9 +28,9 @@
  */
 
 #ifdef __x86_64__
-typedef uint64_t dyn_adres;
+typedef uint64_t dyn_addr;
 #else
-typedef uint32_t dyn_adres;
+typedef uint32_t dyn_addr;
 #endif
 
 /* Wczytuje biblioteke z initrd (albo z dysku). Wolane raz, przy
@@ -38,34 +38,34 @@ typedef uint32_t dyn_adres;
 int dyn_init(void);
 
 /* Czy biblioteka jest zaladowana */
-int dyn_obecna(void);
+int dyn_present(void);
 
 /* Nazwa pliku biblioteki - do komunikatow */
-const char *dyn_nazwa(void);
+const char *dyn_name(void);
 
 /* Ile stron zajmuje biblioteka i ile z nich jest wspoldzielonych */
-uint32_t dyn_stron(void);
+uint32_t dyn_pages(void);
 
 /* Prawa segmentu biblioteki - te same, ktore podaje sam ELF */
-#define DYN_ZAPIS   1
-#define DYN_WYKON   2
+#define DYN_WRITE   1
+#define DYN_EXEC   2
 
 /* Segmenty biblioteki do zamapowania w przestrzeni procesu.
    Zwraca 0, gdy segmentu o tym numerze nie ma. */
-int dyn_segment(int i, dyn_adres *vaddr, uint32_t *memsz, uint32_t *filesz,
-                int *prawa, const uint8_t **dane);
+int dyn_segment(int i, dyn_addr *vaddr, uint32_t *memsz, uint32_t *filesz,
+                int *right, const uint8_t **data);
 
 /* Ramka fizyczna strony biblioteki tylko do odczytu (wspolna dla
    wszystkich procesow). 0 = nie ma takiej strony. */
-uint32_t dyn_ramka(dyn_adres vaddr);
+uint32_t dyn_frame(dyn_addr vaddr);
 
 /* Czy obraz programu w ogole potrzebuje biblioteki (ma relokacje) */
-int dyn_program_dynamiczny(const uint8_t *obraz, uint32_t rozmiar);
+int dyn_is_dynamic(const uint8_t *image, uint32_t size);
 
 /* Przechodzi relokacje programu i dla kazdej wola 'zapisz' z adresem
    miejsca w przestrzeni procesu i wartoscia, ktora ma tam trafic.
    Zwraca 0, gdy wszystko sie rozwiazalo, albo -1. */
-int dyn_relokuj(const uint8_t *obraz, uint32_t rozmiar, void *ctx,
-                int (*zapisz)(void *ctx, dyn_adres adres, dyn_adres wartosc));
+int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
+                int (*store)(void *ctx, dyn_addr addr, dyn_addr value));
 
 #endif

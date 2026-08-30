@@ -11,12 +11,12 @@
 
 #include "usys64.h"
 
-#define KLUCZ  42
-#define WZORZEC 12345
+#define KEY  42
+#define PATTERN 12345
 
 static char out[96];
 
-static void powiedz(const char *a, uint64_t v)
+static void report(const char *a, uint64_t v)
 {
     int n = 0;
     while (*a)
@@ -40,16 +40,16 @@ void _start(void)
        wspoldzielenie, a nie przypadkowa zgodnosc ukladu. */
     sys_shm(7, 4096);
 
-    volatile uint32_t *p = sys_shm(KLUCZ, 4096);
+    volatile uint32_t *p = sys_shm(KEY, 4096);
     if (!p) {
         print("[shmpisz64] brak pamieci wspoldzielonej\n");
         sys_exit(1);
     }
 
-    p[0] = WZORZEC;
+    p[0] = PATTERN;
     p[2] = 0;                        /* miejsce na odpowiedz czytelnika */
-    powiedz("[shmpisz64] region pod adresem ", (uint64_t)(uintptr_t)p);
-    powiedz("[shmpisz64] zapisalem ", WZORZEC);
+    report("[shmpisz64] region pod adresem ", (uint64_t)(uintptr_t)p);
+    report("[shmpisz64] zapisalem ", PATTERN);
 
     /* Dziecko z wlasna przestrzenia adresowa - fork i exec, tak jak
        robi to shell */
@@ -61,14 +61,14 @@ void _start(void)
         sys_exit(1);
     }
     if (pid > 0) {
-        int kod = 0;
-        sys_wait(&kod);
+        int code = 0;
+        sys_wait(&code);
     }
 
     /* Czytelnik odbil wartosc przez to samo miejsce - jesli doszla,
        widac ja teraz tutaj */
-    if (p[2] != WZORZEC + 1) {
-        powiedz("[shmpisz64] ZLE: czytelnik nie odpisal, jest ", p[2]);
+    if (p[2] != PATTERN + 1) {
+        report("[shmpisz64] ZLE: czytelnik nie odpisal, jest ", p[2]);
         sys_exit(1);
     }
     print("[shmpisz64] czytelnik odpisal przez te sama pamiec\n");

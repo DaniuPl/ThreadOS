@@ -15,68 +15,68 @@
 #include "include/rtl8139.h"
 #include "include/e1000.h"
 
-enum { KARTA_BRAK, KARTA_E1000, KARTA_RTL8139 };
+enum { NIC_NONE, NIC_E1000, NIC_RTL8139 };
 
-static int karta;
+static int nic;
 
 int netdev_init(void)
 {
-    if (karta)
+    if (nic)
         return 1;
     if (e1000_init())
-        karta = KARTA_E1000;
+        nic = NIC_E1000;
     else if (rtl8139_init())
-        karta = KARTA_RTL8139;
-    return karta != KARTA_BRAK;
+        nic = NIC_RTL8139;
+    return nic != NIC_NONE;
 }
 
 int netdev_present(void)
 {
-    return karta != KARTA_BRAK;
+    return nic != NIC_NONE;
 }
 
 const char *netdev_name(void)
 {
-    switch (karta) {
-    case KARTA_E1000:   return "e1000";
-    case KARTA_RTL8139: return "RTL8139";
+    switch (nic) {
+    case NIC_E1000:   return "e1000";
+    case NIC_RTL8139: return "RTL8139";
     default:            return "brak";
     }
 }
 
 const uint8_t *netdev_mac(void)
 {
-    static const uint8_t zera[6];
-    switch (karta) {
-    case KARTA_E1000:   return e1000_mac();
-    case KARTA_RTL8139: return rtl8139_mac();
-    default:            return zera;
+    static const uint8_t zeros[6];
+    switch (nic) {
+    case NIC_E1000:   return e1000_mac();
+    case NIC_RTL8139: return rtl8139_mac();
+    default:            return zeros;
     }
 }
 
 int netdev_send(const void *frame, uint16_t len)
 {
-    switch (karta) {
-    case KARTA_E1000:   return e1000_send(frame, len);
-    case KARTA_RTL8139: return rtl8139_send(frame, len);
+    switch (nic) {
+    case NIC_E1000:   return e1000_send(frame, len);
+    case NIC_RTL8139: return rtl8139_send(frame, len);
     default:            return -1;
     }
 }
 
 uint32_t netdev_rx_packets(void)
 {
-    switch (karta) {
-    case KARTA_E1000:   return e1000_rx_packets();
-    case KARTA_RTL8139: return rtl8139_rx_packets();
+    switch (nic) {
+    case NIC_E1000:   return e1000_rx_packets();
+    case NIC_RTL8139: return rtl8139_rx_packets();
     default:            return 0;
     }
 }
 
 uint32_t netdev_tx_packets(void)
 {
-    switch (karta) {
-    case KARTA_E1000:   return e1000_tx_packets();
-    case KARTA_RTL8139: return rtl8139_tx_packets();
+    switch (nic) {
+    case NIC_E1000:   return e1000_tx_packets();
+    case NIC_RTL8139: return rtl8139_tx_packets();
     default:            return 0;
     }
 }

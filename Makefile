@@ -53,8 +53,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
              $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf \
-             $(BUILD)/user/dynlib.elf $(BUILD)/user/rdzen.elf \
-             $(BUILD)/user/wywolania.elf
+             $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
+             $(BUILD)/user/syscalls.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -110,8 +110,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/usbkbd.o \
         $(BUILD)/dynlink.o \
         $(BUILD)/smpmem.o \
-        $(BUILD)/smpwatki.o \
-        $(BUILD)/zamekjadra.o \
+        $(BUILD)/smpthreads.o \
+        $(BUILD)/biglock.o \
         $(BUILD)/acpi.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
@@ -257,8 +257,8 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    gleboko=$(BUILD)/user/gleboko.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
-	    rdzen=$(BUILD)/user/rdzen.elf \
-	    wywolania=$(BUILD)/user/wywolania.elf
+	    cores=$(BUILD)/user/cores.elf \
+	    syscalls=$(BUILD)/user/syscalls.elf
 
 # --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
 #
@@ -275,7 +275,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci xhci usbhc usbkbd swap prog shm rtc \
-            dynlink smpmem smpwatki zamekjadra \
+            dynlink smpmem smpthreads biglock \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
@@ -348,8 +348,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
                $(BUILD)/user64/dynlib.elf \
-               $(BUILD)/user64/rdzen.elf \
-               $(BUILD)/user64/wywolania.elf
+               $(BUILD)/user64/cores.elf \
+               $(BUILD)/user64/syscalls.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -366,7 +366,7 @@ $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
 # user/uapi.h, ktore wybiera wlasciwa strone - stad ta druga regula,
 # budujaca te same zrodla drugi raz, tyle ze na 64 bity.
 $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
-                       user64/uzgodnosc64.h user64/user64.ld $(USER_HEADERS) \
+                       user64/compat64.h user64/user64.ld $(USER_HEADERS) \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
@@ -438,8 +438,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \
-	    rdzen=$(BUILD)/user64/rdzen.elf \
-	    wywolania=$(BUILD)/user64/wywolania.elf
+	    cores=$(BUILD)/user64/cores.elf \
+	    syscalls=$(BUILD)/user64/syscalls.elf
 	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

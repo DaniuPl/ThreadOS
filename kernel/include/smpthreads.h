@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SMPWATKI_H
-#define PROTONOS_SMPWATKI_H
+#ifndef PROTONOS_SMPTHREADS_H
+#define PROTONOS_SMPTHREADS_H
 
 /* Watki jadra na wszystkich rdzeniach
  *
@@ -16,6 +16,6 @@
  */
 
 /* Puszcza probe i wypisuje wynik. Wolane z shella obu jader. */
-void smpwatki_test(void);
+void smpthreads_test(void);
 
 #endif

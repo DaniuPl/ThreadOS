@@ -18,16 +18,16 @@
 #define PIPE_MAX 8
 #define PIPE_BUF 2048
 
-struct potok {
+struct pipe {
     int uzyty;
     uint8_t buf[PIPE_BUF];
     uint32_t head, tail;
-    int czytajacy, piszacy;
+    int reader, writer;
 };
 
-static struct potok potoki[PIPE_MAX];
+static struct pipe pipes[PIPE_MAX];
 
-static uint32_t ile_w_srodku(const struct potok *p)
+static uint32_t inner_count(const struct pipe *p)
 {
     return p->head - p->tail;
 }
@@ -37,11 +37,11 @@ int pipe64_new(void)
     irqflags_t flags = irq_save();
     int idx = -1;
     for (int i = 0; i < PIPE_MAX; i++) {
-        if (!potoki[i].uzyty) {
-            potoki[i].uzyty = 1;
-            potoki[i].head = potoki[i].tail = 0;
-            potoki[i].czytajacy = 1;
-            potoki[i].piszacy = 1;
+        if (!pipes[i].uzyty) {
+            pipes[i].uzyty = 1;
+            pipes[i].head = pipes[i].tail = 0;
+            pipes[i].reader = 1;
+            pipes[i].writer = 1;
             idx = i;
             break;
         }
@@ -50,31 +50,31 @@ int pipe64_new(void)
     return idx;
 }
 
-void pipe64_ref(int idx, int czytelnik)
+void pipe64_ref(int idx, int reader_task)
 {
     if (idx < 0 || idx >= PIPE_MAX)
         return;
     irqflags_t flags = irq_save();
-    if (czytelnik)
-        potoki[idx].czytajacy++;
+    if (reader_task)
+        pipes[idx].reader++;
     else
-        potoki[idx].piszacy++;
+        pipes[idx].writer++;
     irq_restore(flags);
 }
 
-void pipe64_unref(int idx, int czytelnik)
+void pipe64_unref(int idx, int reader_task)
 {
     if (idx < 0 || idx >= PIPE_MAX)
         return;
     irqflags_t flags = irq_save();
-    struct potok *p = &potoki[idx];
-    if (czytelnik) {
-        if (p->czytajacy)
-            p->czytajacy--;
-    } else if (p->piszacy) {
-        p->piszacy--;
+    struct pipe *p = &pipes[idx];
+    if (reader_task) {
+        if (p->reader)
+            p->reader--;
+    } else if (p->writer) {
+        p->writer--;
     }
-    if (!p->czytajacy && !p->piszacy)
+    if (!p->reader && !p->writer)
         p->uzyty = 0;
     irq_restore(flags);
 }
@@ -83,19 +83,19 @@ int pipe64_read(int idx, char *buf, uint32_t len)
 {
     if (idx < 0 || idx >= PIPE_MAX || !len)
         return -1;
-    struct potok *p = &potoki[idx];
+    struct pipe *p = &pipes[idx];
 
     for (;;) {
         irqflags_t flags = irq_save();
-        uint32_t wzieto = 0;
-        while (ile_w_srodku(p) && wzieto < len)
-            buf[wzieto++] = (char)p->buf[p->tail++ % PIPE_BUF];
-        int koniec = !p->piszacy;
+        uint32_t taken_n = 0;
+        while (inner_count(p) && taken_n < len)
+            buf[taken_n++] = (char)p->buf[p->tail++ % PIPE_BUF];
+        int end = !p->writer;
         irq_restore(flags);
 
-        if (wzieto)
-            return (int)wzieto;
-        if (koniec)
+        if (taken_n)
+            return (int)taken_n;
+        if (end)
             return 0;                /* nie ma juz kto pisac - koniec danych */
         if (task64_signal_pending())
             return -1;
@@ -107,24 +107,24 @@ int pipe64_write(int idx, const char *buf, uint32_t len)
 {
     if (idx < 0 || idx >= PIPE_MAX || !len)
         return -1;
-    struct potok *p = &potoki[idx];
-    uint32_t oddano = 0;
+    struct pipe *p = &pipes[idx];
+    uint32_t given_back_n = 0;
 
-    while (oddano < len) {
+    while (given_back_n < len) {
         irqflags_t flags = irq_save();
-        if (!p->czytajacy) {         /* nikt tego juz nie przeczyta */
+        if (!p->reader) {         /* nikt tego juz nie przeczyta */
             irq_restore(flags);
-            return oddano ? (int)oddano : -1;
+            return given_back_n ? (int)given_back_n : -1;
         }
-        while (ile_w_srodku(p) < PIPE_BUF && oddano < len)
-            p->buf[p->head++ % PIPE_BUF] = (uint8_t)buf[oddano++];
+        while (inner_count(p) < PIPE_BUF && given_back_n < len)
+            p->buf[p->head++ % PIPE_BUF] = (uint8_t)buf[given_back_n++];
         irq_restore(flags);
 
-        if (oddano == len)
+        if (given_back_n == len)
             break;
         if (task64_signal_pending())
-            return oddano ? (int)oddano : -1;
+            return given_back_n ? (int)given_back_n : -1;
         task64_sleep(10);            /* pelny - czekamy na czytajacego */
     }
-    return (int)oddano;
+    return (int)given_back_n;
 }

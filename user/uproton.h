@@ -16,14 +16,14 @@
 
 /* Adres kodu biblioteki - ten sam we wszystkich procesach, bo to te
    same ramki fizyczne */
-static inline uintptr_t proton_adres_kodu(void)
+static inline uintptr_t proton_code_addr(void)
 {
     return (uintptr_t)sha256;
 }
 
 /* Adres danych biblioteki. Adres wirtualny tez jest wszedzie ten sam,
    ale ramki pod nim juz nie - kazdy proces ma swoje. */
-static inline uintptr_t proton_adres_danych(void)
+static inline uintptr_t proton_data_addr(void)
 {
     return (uintptr_t)urand_seed;
 }
@@ -31,7 +31,7 @@ static inline uintptr_t proton_adres_danych(void)
 /* Licznik generatora losowego. Rosnie z kazdym pobraniem bajtow, wiec
    pokazuje, ile ten proces wzial z biblioteki - i jest dobrym probnikiem
    tego, czy dane naprawde sa prywatne. */
-static inline uint32_t proton_licznik_losowosci(void)
+static inline uint32_t proton_random_counter(void)
 {
     return urand_counter;
 }

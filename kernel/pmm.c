@@ -121,7 +121,7 @@ uint32_t pmm_alloc_frame(void)
    moga wejsc tu naprawde jednoczesnie i wydac te sama ramke dwa razy.
    Stad zamek. Mapa ramek jest jedna dla calej maszyny, wiec i zamek
    jest jeden. */
-static struct spinlock zamek = SPINLOCK_WOLNY;
+static struct spinlock lock = SPINLOCK_FREE;
 
 /* Kogo prosic o pamiec, gdy jej zabraknie (ustawia to wymiana stron).
    PMM nie wie nic o procesach ani o dysku - dostaje tylko funkcje,
@@ -135,7 +135,7 @@ void pmm_set_reclaim(int (*fn)(void))
 
 static uint32_t alloc_contiguous_raw(uint32_t n)
 {
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
     uint32_t run = 0;
     for (uint32_t f = 0; f < MAX_FRAMES; f++) {
         if (frame_test(f)) {
@@ -149,11 +149,11 @@ static uint32_t alloc_contiguous_raw(uint32_t n)
                 refs[i] = 1;
             }
             used_frames += n;
-            spin_unlock_irq(&zamek, flags);
+            spin_unlock_irq(&lock, flags);
             return first * PAGE_SIZE;
         }
     }
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
     return 0;
 }
 
@@ -178,7 +178,7 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
 
 void pmm_free_frame(uint32_t addr)
 {
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
     uint32_t frame = addr / PAGE_SIZE;
     /* Bezpiecznik: obraz jadra nigdy nie wraca do puli. Gdyby jakas
        tablica stron pokazywala na wlasny kod albo dane jadra, ramka
@@ -186,7 +186,7 @@ void pmm_free_frame(uint32_t addr)
        zaprotestowac, niz po cichu oddac system do przepisania. */
     if (addr >= (uint32_t)(uintptr_t)_kernel_start &&
         addr < (uint32_t)(uintptr_t)_kernel_end) {
-        spin_unlock_irq(&zamek, flags);
+        spin_unlock_irq(&lock, flags);
         printk("[PMM] proba zwolnienia ramki obrazu jadra (%x) - odmawiam\n",
                addr);
         return;
@@ -200,17 +200,17 @@ void pmm_free_frame(uint32_t addr)
             used_frames--;
         }
     }
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
 }
 
 /* Dopisuje wlasciciela ramki (fork: dziecko dziedziczy strony rodzica) */
 void pmm_frame_ref(uint32_t addr)
 {
-    irqflags_t flags = spin_lock_irq(&zamek);
+    irqflags_t flags = spin_lock_irq(&lock);
     uint32_t frame = addr / PAGE_SIZE;
     if (frame < MAX_FRAMES && frame_test(frame) && refs[frame] < 0xFFFF)
         refs[frame]++;
-    spin_unlock_irq(&zamek, flags);
+    spin_unlock_irq(&lock, flags);
 }
 
 /* Ilu wlascicieli ma ramka (0 = wolna) */

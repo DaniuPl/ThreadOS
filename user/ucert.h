@@ -27,7 +27,7 @@
    Tak samo jak krzywe w uecdsa.h: to sa dane, a dane siedza wewnatrz
    biblioteki wspoldzielonej i tam maja zostac - program dostaje na nie
    wskaznik, a nie wlasna kopie kilkunastu kilobajtow certyfikatow. */
-static inline const uint8_t *cert_korzenie_wbudowane(uint32_t *ile)
+static inline const uint8_t *cert_builtin_roots(uint32_t *ile)
 {
     *ile = (uint32_t)sizeof(ca_roots_der);
     return ca_roots_der;

@@ -260,7 +260,7 @@ int acpi_init(void)
 
 /* Szuka w spisie tablicy o danej sygnaturze i doklada ja do
    mapowania. NULL, gdy nie ma. */
-const void *acpi_table(const char *sygnatura)
+const void *acpi_table(const char *sig)
 {
     if (!rsdt_spis)
         return (const void *)0;
@@ -269,7 +269,7 @@ const void *acpi_table(const char *sygnatura)
     const uint32_t *entries = (const uint32_t *)(rsdt_spis + 1);
     for (uint32_t i = 0; i < count; i++) {
         const struct sdt_header *h = map(entries[i], sizeof(*h));
-        if (!h || memcmp(h->signature, sygnatura, 4) != 0)
+        if (!h || memcmp(h->signature, sig, 4) != 0)
             continue;
         if (!map(entries[i], h->length))
             continue;

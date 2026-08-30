@@ -19,36 +19,36 @@
 
 void _start(int argc, char **argv)
 {
-    const char *nazwa = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "mapa.txt";
 
-    uint32_t rozmiar = 0;
-    const unsigned char *p = sys_mmap_file(nazwa, &rozmiar);
-    if (!p || !rozmiar) {
+    uint32_t size = 0;
+    const unsigned char *p = sys_mmap_file(name, &size);
+    if (!p || !size) {
         print("[mmapfile] nie da sie odwzorowac pliku\n");
         sys_exit(1);
     }
     print("[mmapfile] plik pod adresem ");
     print_dec((uint32_t)p);
     print("\n[mmapfile] rozmiar ");
-    print_dec(rozmiar);
+    print_dec(size);
     print(" B\n");
 
-    uint32_t ile = rozmiar;
+    uint32_t ile = size;
     if (argc > 2) {
         uint32_t v = 0;
         for (const char *q = argv[2]; *q >= '0' && *q <= '9'; q++)
             v = v * 10 + (uint32_t)(*q - '0');
-        if (v && v < rozmiar)
+        if (v && v < size)
             ile = v;
     }
 
-    uint32_t zle = 0;
+    uint32_t bad = 0;
     for (uint32_t i = 0; i < ile; i++)
         if (p[i] != (unsigned char)(i * 7 + 13))
-            zle++;
-    if (zle) {
+            bad++;
+    if (bad) {
         print("[mmapfile] ZLE: bajtow nie tak, jak trzeba: ");
-        print_dec(zle);
+        print_dec(bad);
         print("\n");
         sys_exit(1);
     }
@@ -56,7 +56,7 @@ void _start(int argc, char **argv)
     print("[mmapfile] sprawdzone bajty zgadzaja sie, bylo ich ");
     print_dec(ile);
     print("\n");
-    if (ile != rozmiar) {
+    if (ile != size) {
         print("[mmapfile] reszty pliku nie tknalem\n");
         sys_exit(0);
     }
@@ -65,14 +65,14 @@ void _start(int argc, char **argv)
        i opowie, co z tego wyszlo. */
     int32_t pid = sys_fork();
     if (pid == 0) {
-        unsigned char *psuj = (unsigned char *)p;
-        psuj[0] = 0xFF;                  /* tu proces ma zginac */
+        unsigned char *corrupt = (unsigned char *)p;
+        corrupt[0] = 0xFF;                  /* tu proces ma zginac */
         print("[mmapfile] ZLE: zapis do odwzorowania sie udal\n");
         sys_exit(1);
     }
     if (pid > 0) {
-        int kod = 0;
-        sys_waitany(&kod);
+        int code = 0;
+        sys_waitany(&code);
         if (p[0] != (unsigned char)13) {
             print("[mmapfile] ZLE: tresc pliku zostala zmieniona\n");
             sys_exit(1);
