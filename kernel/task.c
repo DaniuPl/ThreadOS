@@ -1,15 +1,15 @@
-/* Wątki jądra i scheduler (round-robin z wywłaszczaniem)
+/* Kernel threads and the scheduler (preemptive round-robin)
  *
- * Każdy wątek ma własny stos 8 KiB. Przełączenie kontekstu (switch.S)
- * zapisuje rejestry callee-saved i ESP - resztę stanu trzyma stos:
- * wątek wywłaszczony przerwaniem ma na stosie pełną ramkę przerwania
- * i wznowi się przez iret, wątek po task_sleep/yield wróci ze
- * zwykłego wywołania schedule().
+ * Every thread has its own 8 KiB stack. A context switch (switch.S)
+ * saves the callee-saved registers and ESP - the rest of the state is
+ * held by the stack: a thread preempted by an interrupt has a full
+ * interrupt frame there and resumes through iret, while a thread that
+ * called task_sleep/yield returns from an ordinary call to schedule().
  *
- * Lista wątków jest cykliczna; "main" (dawne kmain) nigdy nie śpi
- * i pełni rolę wątku bezczynności (hlt), więc scheduler zawsze ma
- * kogo wybrać. Zakończone wątki (zombie) są sprzątane przy kolejnych
- * wywołaniach schedule() - nigdy nie sprzątamy bieżącego.
+ * The task list is circular; "main" (the former kmain) never sleeps
+ * and plays the part of the idle thread (hlt), so the scheduler always
+ * has somebody to pick. Finished threads (zombies) are reaped on later
+ * calls to schedule() - we never reap the current one.
  */
 
 #include <stddef.h>
@@ -38,101 +38,104 @@ enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_BLOCKED,
 
 struct task {
     uint32_t esp;
-    uint32_t kstack_top;        /* dla TSS.esp0 (przerwania z ring 3) */
-    uint32_t cr3;               /* przestrzeń adresowa zadania */
-    int owns_dir;               /* czy katalog stron zwolnić przy reap */
-    uint32_t brk;               /* koniec sterty procesu (sbrk); 0 = wątek jądra */
-    uint32_t brk_base;          /* poczatek sterty - stad zaczyna sie obszar
-                                   przydzielany dopiero przy pierwszym dotknieciu */
-    uint32_t mmap_next;         /* nastepny wolny adres mmap (0 = wątek jądra) */
-    /* Pliki odwzorowane w pamieci. Numery blokow ustalamy raz, przy
-       zakladaniu odwzorowania, i czytamy je potem warstwa blokowa
-       z pominieciem kodu PFS - z tego samego powodu, co przy wymianie
-       stron: PFS ma jeden wspolny bufor na blok, a blad strony potrafi
-       trafic w srodku dowolnej operacji na plikach. */
+    uint32_t kstack_top;        /* for TSS.esp0 (interrupts from ring 3) */
+    uint32_t cr3;               /* the task's address space */
+    int owns_dir;               /* free the page directory on reap? */
+    uint32_t brk;               /* end of the process heap (sbrk); 0 = kernel thread */
+    uint32_t brk_base;          /* start of the heap - from here begins the area
+                                   handed out only on first touch */
+    uint32_t mmap_next;         /* next free mmap address (0 = kernel thread) */
+    /* Memory-mapped files. Block numbers are fixed once, when the
+       mapping is created, and read afterwards through the block layer,
+       bypassing the PFS code - for the same reason as with swapping:
+       PFS has one shared block buffer, and a page fault can land in
+       the middle of any file operation. */
     struct file_map {
-        uint32_t start, end;  /* zakres adresow (0 = wolny wpis) */
-        uint32_t size;        /* ile bajtow ma sam plik */
+        uint32_t start, end;  /* address range (0 = free entry) */
+        uint32_t size;        /* how many bytes the file itself has */
         uint32_t nblocks_of;
         uint32_t *blocks;
-        uint32_t write;          /* 1 = zmiany wracaja do pliku */
+        uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
-    int cwd;                     /* katalog roboczy (slot PFS, -1 = root) */
-    int parent;                  /* pid rodzica (-1 = brak, sierota) */
-    int vc;                      /* konsola, na ktorej zadanie pisze */
-    uint32_t sig_pending;        /* maska oczekujacych sygnalow */
-    uint32_t sig_handler[NSIG];  /* SIG_DFL / SIG_IGN / adres procedury */
-    uint32_t sig_tramp;          /* trampolina powrotu (adres w ring 3) */
-    uint32_t sig_frame;          /* ramka przerwanego stanu na stosie */
-    int in_handler;              /* czy procedura obslugi wlasnie dziala */
+    int cwd;                     /* working directory (PFS slot, -1 = root) */
+    int parent;                  /* parent pid (-1 = none, an orphan) */
+    int vc;                      /* the console this task writes to */
+    uint32_t sig_pending;        /* mask of pending signals */
+    uint32_t sig_handler[NSIG];  /* SIG_DFL / SIG_IGN / handler address */
+    uint32_t sig_tramp;          /* return trampoline (an address in ring 3) */
+    uint32_t sig_frame;          /* frame of the interrupted state on the stack */
+    int in_handler;              /* is a handler running right now */
     void (*entry)(void *);
     void *arg;
     enum task_state state;
-    uint32_t wake_at;           /* tyknięcie, przy którym obudzić */
+    uint32_t wake_at;           /* the tick at which to wake up */
     int id;
-    int priority;               /* 0=wysoki, 1=normalny, 2=niski (idle) */
-    /* Gdzie wolno prowadzic to zadanie.
-       'wszedzie' = 1 znaczy, ze moze je wziac kazdy rdzen. Domyslnie
-       jest zero i tak ma byc: zadanie, ktore siega po dysk, siec albo
-       cokolwiek innego pisanego dla jednego rdzenia, ma zostac tam,
-       gdzie bylo. Rdzen wtorny bierze tylko to, co ktos jawnie na to
-       pozwolil.
-       'bezczynny_rdzenia' >= 0 znaczy, ze to zadanie bezczynne TEGO
-       rdzenia - nikt inny go nie prowadzi, bo stoi na jego stosie. */
+    int priority;               /* 0=high, 1=normal, 2=low (idle) */
+    /* Where this task may be run.
+       'anycore' = 1 means any core may take it. The default is zero
+       and that is how it should be: a task that reaches for the disk,
+       the network or anything else written for a single core is to
+       stay where it was. A secondary core takes only what somebody
+       explicitly allowed.
+       'idle_for_core' >= 0 means this is THIS core's idle task -
+       nobody else runs it, because it stands on that core's stack. */
     int anycore;
-    /* 'samodzielny' = 1 znaczy, ze watek nie bierze wielkiego zamka
-       jadra: ten, kto o niego poprosil, wzial na siebie, ze watek
-       dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. Proces
-       ring 3 tego NIE ma - jego strona jadrowa to zwykly kod jadra,
-       ktory ma byc chroniony jak kazdy inny. */
+    /* 'nolock' = 1 means the thread does not take the big kernel lock:
+       whoever asked for it took on the promise that the thread touches
+       only things that survive two cores at once. A ring 3 process
+       does NOT have this - its kernel side is ordinary kernel code and
+       is to be protected like any other. */
     int nolock;
     int idle_for_core;
-    int exit_code;              /* kod zwrocony przez task_exit */
-    int killed;                 /* oczekujace zabicie (kill) */
+    int exit_code;              /* the code returned by task_exit */
+    int killed;                 /* a pending kill */
     char name[NAME_MAX];
-    void *stack;                /* NULL dla wątku main (stos z boot.S) */
+    void *stack;                /* NULL for the main thread (stack from boot.S) */
     struct file_desc fds[TASK_MAX_FD];
     struct task *next;
 };
 
-/* Stos rozruchowy z boot.S - wątek main kontynuuje na nim */
+/* The boot stack from boot.S - the main thread carries on using it */
 extern char stack_top[];
 
 extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
 
-/* --- Co rdzen ma swojego ---------------------------------------------
+/* --- What belongs to a core ------------------------------------------
  *
- * Przez cala historie tego jadra biezace zadanie bylo JEDNA zmienna
- * globalna - i wlasnie dlatego wiecej niz jeden rdzen nie mial jak
- * prowadzic zadan. Teraz jest ich tyle, ile rdzeni, a ktore z nich
- * jest moje, mowi sam procesor (numer w jego lokalnym APIC).
+ * Through this kernel's whole history the current task was ONE global
+ * variable - and that is exactly why more than one core had no way to
+ * run tasks. Now there are as many of them as there are cores, and
+ * which one is mine the processor says itself (the number in its local
+ * APIC).
  *
- * Makro 'current' zostaje, bo caly kod jadra mowi tym slowem i nie ma
- * powodu, zeby przestal. Zmienilo sie tylko to, na co pokazuje.
+ * The 'current' macro stays, because all kernel code speaks that word
+ * and there is no reason for it to stop. All that changed is what it
+ * points at.
  */
 struct core {
     struct task *running;
-    struct task *idle;      /* to, do ktorego rdzen wraca bez pracy */
+    struct task *idle;      /* the one a core returns to when it has no work */
 };
 static struct core cores[SMP_CORES];
 
 #define current (cores[smp_core()].running)
 
-/* Lista zadan jest jedna dla calej maszyny, wiec i zamek jest jeden.
+/* The task list is one for the whole machine, so the lock is one too.
  *
- * Trzyma sie go PRZEZ przelaczenie kontekstu, a zwalnia go ten, kto po
- * drugiej stronie przyjdzie. Inaczej zostawaloby okno, w ktorym zadanie
- * jest juz oznaczone jako gotowe, a jego stos wciaz uzywany - i drugi
- * rdzen wskoczylby na stos, po ktorym pierwszy jeszcze chodzi. */
+ * It is held ACROSS a context switch, and released by whoever arrives
+ * on the other side. Otherwise there would be a window in which a task
+ * is already marked ready while its stack is still in use - and a
+ * second core would step onto a stack the first is still walking. */
 static struct spinlock lock = SPINLOCK_FREE;
 
 static int next_id;
 static int scheduler_up;
 
-/* Tablica kodow wyjscia zakonczonych procesow - wait je stad odczytuje.
-   Kazdy wpis pamieta tez rodzica, bo zadanie znika z listy szybciej,
-   niz rodzic zdazy po niego przyjsc (task_wait_any pyta wlasnie tu).
-   Maly bufor cykliczny; przy przepelnieniu nadpisuje najstarszy wpis. */
+/* The table of exit codes of finished processes - wait reads them from
+   here. Each entry also remembers the parent, because a task leaves
+   the list sooner than the parent gets round to it (task_wait_any asks
+   exactly here). A small ring buffer; on overflow it overwrites the
+   oldest entry. */
 #define EXIT_SLOTS 16
 static struct { int pid; int parent; int code; int valid; } exit_codes[EXIT_SLOTS];
 static int exit_next;
@@ -146,7 +149,7 @@ static void exit_record(int pid, int parent, int code)
     exit_next = (exit_next + 1) % EXIT_SLOTS;
 }
 
-/* Pobiera (i kasuje) zapamietany kod wyjscia danego pid; 0 gdy brak */
+/* Takes (and clears) the remembered exit code of a given pid; 0 if none */
 static int exit_take(int pid)
 {
     for (int i = 0; i < EXIT_SLOTS; i++) {
@@ -166,7 +169,7 @@ static void task_set_name(struct task *t, const char *name)
     t->name[i] = '\0';
 }
 
-/* Czysta tablica sygnalow: wszystko domyslne, nic nie czeka */
+/* A clean signal table: everything default, nothing pending */
 static void task_init_signals(struct task *t)
 {
     t->sig_pending = 0;
@@ -177,7 +180,7 @@ static void task_init_signals(struct task *t)
         t->sig_handler[i] = SIG_DFL;
 }
 
-/* Standardowe strumienie: 0=klawiatura (read), 1/2=konsola (write) */
+/* Standard streams: 0=keyboard (read), 1/2=console (write) */
 static void task_init_fds(struct task *t)
 {
     memset(t->fds, 0, sizeof(t->fds));         /* kind=FD_CONSOLE (=0) */
@@ -201,20 +204,22 @@ void task_set_cwd(int slot)
     current->cwd = slot;
 }
 
-/* Pierwszy kod każdego nowego wątku - context_switch "wraca" tutaj */
+/* The first code of every new thread - context_switch "returns" here */
 static void task_trampoline(void)
 {
-    /* Zamek listy zadan trzyma jeszcze ten, kto nas tu przelaczyl -
-       i to my mamy go zwolnic. Nowe zadanie nie wraca z przelaczenia
-       kontekstu jak wszystkie inne, wiec musi zrobic to samo tutaj. */
+    /* The task list lock is still held by whoever switched us in here -
+       and it is up to us to release it. A new task does not return
+       from a context switch the way all the others do, so it has to do
+       the same thing here. */
     spin_unlock(&lock);
-    /* Nowe zadanie zaczyna w kodzie jadra, wiec bierze wielki zamek.
+    /* A new task starts in kernel code, so it takes the big lock.
      *
-     * Nie bierze go tylko to, ktore wolno prowadzic kazdemu rdzeniowi -
-     * bo ten, kto o nie poprosil, wzial juz na siebie, ze jego watek
-     * dotyka wylacznie rzeczy znoszacych dwa rdzenie naraz. Gdyby
-     * i takie zadanie bralo wielki zamek, cztery watki liczace
-     * rownolegle liczylyby sie po kolei - a po to ich nie ma. */
+     * The only one that does not is a task any core may run - because
+     * whoever asked for it has already taken on that its thread
+     * touches only things that survive two cores at once. If such a
+     * task took the big lock too, four threads computing in parallel
+     * would compute one after another - and that is not what they are
+     * for. */
     if (!current->nolock)
         biglock_enter();
     __asm__ volatile("sti");
@@ -235,24 +240,24 @@ void scheduler_init(void)
     main_task->brk = 0;
     main_task->brk_base = 0;
     main_task->mmap_next = 0;
-    main_task->cwd = -1;        /* katalog glowny */
-    main_task->parent = -1;     /* korzen drzewa procesow */
+    main_task->cwd = -1;        /* the root directory */
+    main_task->parent = -1;     /* the root of the process tree */
     main_task->vc = 0;
     main_task->killed = 0;
-    main_task->priority = 2;    /* watek glowny = idle, najnizszy priorytet */
+    main_task->priority = 2;    /* the main thread = idle, lowest priority */
     task_init_fds(main_task);
     task_init_signals(main_task);
-    main_task->anycore = 0;             /* watek glowny zostaje na swoim */
+    main_task->anycore = 0;             /* the main thread stays on its own */
     main_task->nolock = 0;
-    main_task->idle_for_core = 0;    /* to on jest bezczynnym rdzenia 0 */
+    main_task->idle_for_core = 0;    /* it is core 0's idle task */
     main_task->next = main_task;
     cores[0].running = main_task;
     cores[0].idle = main_task;
     scheduler_up = 1;
 
-    /* Watek glowny konczy rozruch, wiec od tej chwili jest zwyklym
-       zadaniem w kodzie jadra. Zamek odda dopiero wtedy, gdy stanie sie
-       zadaniem bezczynnym (koniec kmain). */
+    /* The main thread is finishing the boot, so from now on it is an
+       ordinary task inside kernel code. It gives the lock back only
+       once it becomes the idle task (the end of kmain). */
     biglock_enter();
 }
 
@@ -273,12 +278,12 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->mmap_next = 0;
     for (int i = 0; i < MMAP_FILES; i++)
         t->maps[i].start = t->maps[i].end = 0;
-    t->cwd = current ? current->cwd : -1;  /* dziecko dziedziczy cwd */
+    t->cwd = current ? current->cwd : -1;  /* the child inherits cwd */
     t->parent = current ? current->id : -1;
-    t->vc = current ? current->vc : 0;   /* dziecko pisze tam, co rodzic */
+    t->vc = current ? current->vc : 0;   /* the child writes where the parent does */
     t->killed = 0;
-    t->priority = 1;            /* domyslnie normalny priorytet */
-    t->anycore = 0;            /* dopoki ktos nie powie inaczej */
+    t->priority = 1;            /* normal priority by default */
+    t->anycore = 0;            /* until somebody says otherwise */
     t->nolock = 0;
     t->idle_for_core = -1;
     task_init_fds(t);
@@ -289,10 +294,10 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->id = next_id++;
     task_set_name(t, name);
 
-    /* Spreparuj stos tak, by context_switch zdjął zerowe rejestry
-       i "wrócił" do trampoliny */
+    /* Prepare the stack so that context_switch pops zeroed registers
+       and "returns" into the trampoline */
     uint32_t *sp = (uint32_t *)((uint32_t)t->stack + STACK_SIZE);
-    *--sp = (uint32_t)task_trampoline;  /* adres powrotu z context_switch */
+    *--sp = (uint32_t)task_trampoline;  /* return address from context_switch */
     *--sp = 0;                          /* ebp */
     *--sp = 0;                          /* ebx */
     *--sp = 0;                          /* esi */
@@ -306,12 +311,12 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     return t;
 }
 
-/* Zadanie, ktore wolno prowadzic KAZDEMU rdzeniowi.
+/* A task that EVERY core may run.
  *
- * Zwykle zadanie jadra zostaje na rdzeniu rozruchowym i tak ma byc:
- * siega po sterowniki, system plikow i cala reszte pisana dla jednego
- * rdzenia. Tutaj wolajacy bierze na siebie, ze jego watek dotyka tylko
- * tego, co zniesie dwa rdzenie naraz. */
+ * An ordinary kernel task stays on the boot core, and rightly so: it
+ * reaches for drivers, the filesystem and all the rest written for a
+ * single core. Here the caller takes on that its thread touches only
+ * what survives two cores at once. */
 struct task *task_create_anycore(const char *name, void (*entry)(void *),
                                   void *arg)
 {
@@ -321,19 +326,20 @@ struct task *task_create_anycore(const char *name, void (*entry)(void *),
     return t;
 }
 
-/* Oznacza BIEZACE zadanie jako takie, ktore wolno prowadzic kazdemu
-   rdzeniowi. Uzywa tego proces ring 3: jego strona jadrowa zostaje
-   zwyklym kodem jadra pod wielkim zamkiem, ale samo liczenie w ring 3
-   moze isc rownolegle z innymi. */
+/* Marks the CURRENT task as one that any core may run. A ring 3
+   process uses this: its kernel side stays ordinary kernel code under
+   the big lock, but the computing it does in ring 3 may go in parallel
+   with others. */
 void task_set_anycore(void)
 {
     if (current)
         current->anycore = 1;
 }
 
-/* Tworzy zadanie-watek dzielace przestrzen adresowa (cr3) biezacego
-   procesu. owns_dir=1, ale przestrzen zniszczy dopiero ostatni watek
-   (reap sprawdza cr3_in_use). Dziedziczy brk/mmap_next procesu. */
+/* Creates a thread-task sharing the current process's address space
+   (cr3). owns_dir=1, but the space is destroyed only by the last
+   thread (reap checks cr3_in_use). It inherits the process's
+   brk/mmap_next. */
 struct task *task_create_thread(const char *name, void (*entry)(void *),
                                 void *arg, uint32_t cr3)
 {
@@ -349,11 +355,12 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     return t;
 }
 
-/* --- sygnaly -------------------------------------------------------- */
+/* --- signals -------------------------------------------------------- */
 
-/* Wysyla sygnal do procesu o danym pid. SIGKILL idzie stara droga
-   (flaga 'killed'), zeby nie dalo sie go przechwycic ani zignorowac.
-   Spiacego adresata budzimy - inaczej sygnal poczekalby do rana. */
+/* Sends a signal to the process with the given pid. SIGKILL goes the
+   old way (the 'killed' flag) so that it cannot be caught or ignored.
+   A sleeping addressee is woken - otherwise the signal would wait
+   until morning. */
 int task_signal_send(int pid, int sig)
 {
     if (sig <= 0 || sig >= NSIG)
@@ -378,12 +385,13 @@ int task_signal_send(int pid, int sig)
     return found ? 0 : -1;
 }
 
-/* Ustawia procedure obslugi sygnalu dla biezacego procesu.
-   'tramp' to adres trampoliny powrotu w ring 3 (z usys.h). */
+/* Sets a signal handler for the current process.
+   'tramp' is the address of the return trampoline in ring 3 (from
+   usys.h). */
 int task_signal_set(int sig, uint32_t handler, uint32_t tramp)
 {
     if (sig <= 0 || sig >= NSIG || sig == SIGKILL)
-        return -1;                  /* SIGKILL-a nie da sie przechwycic */
+        return -1;                  /* SIGKILL cannot be caught */
     uint32_t flags = irq_save();
     current->sig_handler[sig] = handler;
     if (tramp)
@@ -392,7 +400,7 @@ int task_signal_set(int sig, uint32_t handler, uint32_t tramp)
     return 0;
 }
 
-/* Zdejmuje najnizszy oczekujacy sygnal (0 = zaden nie czeka) */
+/* Takes the lowest pending signal (0 = none waiting) */
 int task_signal_take(void)
 {
     uint32_t flags = irq_save();
@@ -408,9 +416,9 @@ int task_signal_take(void)
     return sig;
 }
 
-/* Czy czeka jakis sygnal, ktorego doreczenie cos zmieni? Pyta o to
-   blokujacy odczyt - inaczej proces czekalby na klawisz w nieskonczonosc,
-   a sygnal doreczylby sie dopiero po jego nadejsciu. */
+/* Is any signal waiting whose delivery would change something? The
+   blocking read asks this - otherwise a process would wait for a key
+   forever and the signal would only be delivered once one arrived. */
 int task_signal_pending(void)
 {
     uint32_t flags = irq_save();
@@ -454,27 +462,28 @@ uint32_t task_signal_leave(void)
     return frame;
 }
 
-/* Odzyskiwanie pamieci: obchodzi przestrzenie adresowe procesow
-   i prosi kazda o oddanie jednej strony na dysk. Zaczyna od nastepnej
-   po ostatnio odwiedzonej, zeby nie obdzierac w kolko tego samego
-   procesu. Zwraca 1, gdy udalo sie zwolnic ramke.
+/* Memory reclaim: walks the address spaces of processes and asks each
+   of them for one page to give to disk. It starts from the one after
+   the last visited so as not to strip the same process over and over.
+   Returns 1 when a frame was freed.
 
-   Watki jadra (cr3 jadra) pomijamy - pamiec jadra na dysk nie idzie.
+   Kernel threads (the kernel cr3) are skipped - kernel memory does not
+   go to disk.
 
-   Cala robota idzie przy wylaczonych przerwaniach i nie jest to tylko
-   ostroznosc wobec listy zadan: miedzy zgaszeniem wpisu strony
-   a zapisaniem jej na dysk nikt nie moze dostac procesora. Inaczej
-   watek dzielacy te przestrzen trafilby na strone "juz na dysku",
-   ktorej tam jeszcze nie ma. */
+   The whole job runs with interrupts off, and that is not merely
+   caution about the task list: between clearing a page entry and
+   writing the page to disk nobody may get the CPU. Otherwise a thread
+   sharing that space would find a page marked "already on disk" that
+   is not there yet. */
 int task_reclaim_page(void)
 {
     static struct task *cursor;
-    if (!current)                   /* scheduler jeszcze nie wystartowal */
+    if (!current)                   /* the scheduler has not started yet */
         return 0;
-    /* Wyrzucanie stron na dysk zostaje na rdzeniu rozruchowym. Siega
-       po plik wymiany i po warstwe blokowa, a te pisane byly dla
-       jednego rdzenia; rdzen wtorny, ktoremu zabraknie pamieci, ma
-       powiedziec o tym wprost, a nie po cichu ruszyc dysk. */
+    /* Evicting pages to disk stays on the boot core. It reaches for the
+       swap file and the block layer, and those were written for a
+       single core; a secondary core running out of memory is to say so
+       plainly rather than quietly stir the disk. */
     if (smp_core() != 0)
         return 0;
     uint32_t flags = irq_save();
@@ -487,9 +496,9 @@ int task_reclaim_page(void)
 
     do {
         t = t->next;
-        /* Partiami: samo przemiatanie tablic stron kosztuje wiecej niz
-           zapis jednej strony, wiec nie oplaca sie chodzic po nich
-           od nowa dla kazdej brakujacej ramki */
+        /* In batches: sweeping the page tables alone costs more than
+           writing one page, so it does not pay to walk them from
+           scratch for every missing frame */
         if (t->cr3 != kernel_cr3 && t->state != TASK_ZOMBIE &&
             paging_reclaim_pages(t->cr3, 32)) {
             cursor = t;
@@ -502,14 +511,15 @@ int task_reclaim_page(void)
     return freed;
 }
 
-/* Zmiana nazwy biezacego zadania - exec podmienia program, wiec 'ps'
-   ma pokazywac nowy, a nie ten, ktory sie nim stal */
+/* Renaming the current task - exec replaces the program, so 'ps' is to
+   show the new one, not the one it grew out of */
 void task_rename(const char *name)
 {
     uint32_t flags = irq_save();
     task_set_name(current, name);
-    /* Nowy obraz procesu nie ma juz kodu starych procedur obslugi -
-       sygnaly wracaja do reakcji domyslnych (jak w uniksie po exec) */
+    /* The new process image no longer contains the code of the old
+       handlers - signals go back to their default reactions (as in
+       Unix after exec) */
     for (int i = 0; i < NSIG; i++)
         if (current->sig_handler[i] != SIG_IGN)
             current->sig_handler[i] = SIG_DFL;
@@ -519,12 +529,12 @@ void task_rename(const char *name)
     irq_restore(flags);
 }
 
-/* Rozwidlenie procesu (fork): dziecko dostaje gotowa kopie przestrzeni
-   adresowej (cr3, zob. paging_clone_address_space), a poza tym wszystko
-   po rodzicu - sterte, obszar mmap, katalog roboczy, priorytet i tablice
-   deskryptorow. Konce potokow dziedziczone przez dziecko dostaja
-   dodatkowego wlasciciela, inaczej zamkniecie u dziecka dawaloby
-   przedwczesny EOF rodzicowi. */
+/* Forking a process (fork): the child gets a ready copy of the address
+   space (cr3, see paging_clone_address_space) and everything else from
+   the parent - the heap, the mmap area, the working directory, the
+   priority and the descriptor table. Pipe ends inherited by the child
+   get one more owner, otherwise closing them in the child would give
+   the parent a premature EOF. */
 struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
 {
     struct task *t = task_create(current->name, entry, arg);
@@ -537,12 +547,13 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     task_mmap_inherit(t);
     t->cwd = current->cwd;
     t->priority = current->priority;
-    /* Dziecko dziedziczy prawo do biegania na kazdym rdzeniu: to
-       wlasnosc programu, a nie pojedynczego zadania */
+    /* The child inherits the right to run on any core: that is a
+       property of the program, not of a single task */
     t->anycore = current->anycore;
-    /* Procedury obslugi sygnalow dziedziczy sie po rodzicu; oczekujace
-       sygnaly - nie, to sprawy rodzica. Trampolina jest w tym samym
-       miejscu kodu, bo dziecko ma kopie tego samego obrazu. */
+    /* Signal handlers are inherited from the parent; pending signals are
+       not - those are the parent's business. The trampoline is at the
+       same place in the code, because the child has a copy of the same
+       image. */
     t->sig_tramp = current->sig_tramp;
     for (int i = 0; i < NSIG; i++)
         t->sig_handler[i] = current->sig_handler[i];
@@ -559,8 +570,8 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     return t;
 }
 
-/* Czy przestrzeni adresowej uzywa jeszcze jakis inny watek? Pyta o to
-   exec przed zniszczeniem starego obrazu procesu. */
+/* Is the address space still used by some other thread? exec asks this
+   before destroying the old process image. */
 int task_cr3_shared(uint32_t cr3)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -577,9 +588,9 @@ int task_cr3_shared(uint32_t cr3)
     return shared;
 }
 
-/* Czy jakies inne zadanie wciaz uzywa tej przestrzeni adresowej (CR3)?
-   Watki procesu wspoldziela CR3 - przestrzen niszczymy dopiero, gdy
-   konczy sie ostatni z nich. */
+/* Is some other task still using this address space (CR3)? The threads
+   of a process share a CR3 - we destroy the space only when the last
+   of them finishes. */
 static int cr3_in_use(uint32_t cr3, struct task *except)
 {
     struct task *t = current;
@@ -598,8 +609,8 @@ static void reap_zombies(void)
         if (t->next->state == TASK_ZOMBIE) {
             struct task *z = t->next;
             t->next = z->next;
-            /* Niszcz przestrzen adresowa tylko, gdy zaden inny watek
-               (procesu) jej juz nie uzywa. CR3 zombie nie jest aktywny. */
+            /* Destroy the address space only when no other (process) thread
+               is using it any more. A zombie's CR3 is not active. */
             if (z->owns_dir && !cr3_in_use(z->cr3, z))
                 paging_destroy_address_space(z->cr3);
             for (int i = 0; i < MMAP_FILES; i++)
@@ -613,18 +624,18 @@ static void reap_zombies(void)
     }
 }
 
-/* Budzi zaspane watki i wybiera nastepne zadanie wedlug priorytetu:
-   wyzszy priorytet (mniejsza liczba) wywlaszcza nizszy; rownorzedne
-   chodza round-robin; biezace zadanie zostaje, gdy jest scisle wyzsze
-   od wszystkich gotowych. */
-/* Czy rdzen 'nr' moze wziac to zadanie?
+/* Wakes sleepers whose time has come and picks the next task by
+   priority: a higher priority (a smaller number) preempts a lower one;
+   equals run round-robin; the current task stays when it is strictly
+   higher than everything ready. */
+/* May core 'nr' take this task?
  *
- * Rdzen rozruchowy prowadzi wszystko, tak jak dotad. Rdzen wtorny -
- * tylko to, co ktos jawnie na to pozwolil, bo reszta jadra pisana jest
- * dla jednego rdzenia i cicho na to liczy.
+ * The boot core runs everything, as it always has. A secondary core -
+ * only what somebody explicitly allowed, because the rest of the
+ * kernel is written for a single core and quietly counts on it.
  *
- * Zadanie bezczynne nalezy do swojego rdzenia i do nikogo innego:
- * stoi na stosie, ktory ten rdzen dostal przy rozruchu. */
+ * An idle task belongs to its own core and to nobody else: it stands
+ * on the stack that core was given at startup. */
 static int may_run(const struct task *t, int nr)
 {
     if (t->idle_for_core >= 0)
@@ -636,7 +647,7 @@ static struct task *pick_next(int nr)
 {
     uint32_t now = pit_ticks();
 
-    /* Obudz spiochow, ktorych czas minal */
+    /* Wake the sleepers whose time has passed */
     struct task *t = current->next;
     do {
         if (t->state == TASK_SLEEPING && (int32_t)(now - t->wake_at) >= 0)
@@ -644,7 +655,7 @@ static struct task *pick_next(int nr)
         t = t->next;
     } while (t != current->next);
 
-    /* Najwyzszy priorytet (najmniejsza liczba) wsrod gotowych */
+    /* The highest priority (smallest number) among the ready ones */
     int best = 1 << 30;
     t = current;
     do {
@@ -653,13 +664,13 @@ static struct task *pick_next(int nr)
         t = t->next;
     } while (t != current);
     if (best == (1 << 30))
-        return NULL;                  /* nikt gotowy - biezace bieży dalej */
+        return NULL;                  /* nobody is ready - the current one carries on */
 
-    /* Biezace zadanie scisle wyzsze niz cokolwiek gotowego -> zostaje */
+    /* The current task strictly higher than anything ready -> it stays */
     if (current->state == TASK_RUNNING && current->priority < best)
         return NULL;
 
-    /* Round-robin wsrod gotowych o priorytecie 'best', zaczynajac za current */
+    /* Round-robin among the ready ones of priority 'best', starting after current */
     t = current->next;
     do {
         if (t->state == TASK_READY && may_run(t, nr) &&
@@ -671,42 +682,44 @@ static struct task *pick_next(int nr)
     return NULL;
 }
 
-/* Wybor nastepnego zadania i przelaczenie sie na nie.
+/* Choosing the next task and switching to it.
  *
- * Wolane ZAWSZE z wygaszonymi przerwaniami - albo z obslugi przerwania,
- * albo spod irq_save. Zamek listy zadan bierzemy bez ruszania IF: gdyby
- * timer wszedl w srodek sekcji trzymajacej ten zamek, czekalby na niego
- * w nieskonczonosc, bo zwolnic go moze tylko przerwany wlasnie kod.
+ * ALWAYS called with interrupts off - either from an interrupt handler
+ * or from under irq_save. We take the task list lock without touching
+ * IF: if the timer stepped into the middle of a section holding that
+ * lock, it would wait for it forever, because only the code it just
+ * interrupted could release it.
  *
- * Zamek trzymamy PRZEZ przelaczenie i zwalnia go ten, kto po drugiej
- * stronie przyjdzie - bo dopiero wtedy stos poprzedniego zadania jest
- * naprawde wolny. Zadanie, ktore sie konczy, nie wraca tu nigdy i nie
- * zwalnia niczego; zrobi to za nie jego nastepca.
+ * We hold the lock ACROSS the switch and it is released by whoever
+ * arrives on the other side - because only then is the previous task's
+ * stack really free. A task that is ending never returns here and
+ * releases nothing; its successor does it for it.
  */
 static void switch_to(int new_state)
 {
     int nr = smp_core();
-    if (!cores[nr].running)   /* timer tyka, zanim scheduler wystartuje */
+    if (!cores[nr].running)   /* the timer ticks before the scheduler starts */
         return;
 
-    /* Wielki zamek jadra oddajemy NA CZAS PRZELACZENIA. Trzymanie go
-       przez zmiane kontekstu znaczyloby, ze zadanie usypiajace w srodku
-       wywolania systemowego zamyka jadro dla wszystkich az do swojego
-       przebudzenia. Zmienna 'glebokosc' lezy na stosie TEGO zadania,
-       wiec kazde odzyska dokladnie swoja. */
+    /* We give the big kernel lock up FOR THE DURATION OF THE SWITCH.
+       Holding it across a context change would mean that a task going
+       to sleep in the middle of a system call closes the kernel for
+       everybody until it wakes up again. The 'depth' variable lives on
+       THIS task's stack, so each one gets exactly its own back. */
     int depth = biglock_release_all();
 
     spin_lock(&lock);
-    /* Stan biezacego zadania zmieniamy JUZ POD ZAMKIEM, razem z wyborem
-       nastepnego. Ustawiony wczesniej dawalby okno, w ktorym zadanie
-       jest oznaczone jako spiace, a jego stos wciaz uzywany - i drugi
-       rdzen moglby je w tym czasie obudzic i na ten stos wejsc. */
+    /* We change the current task's state ALREADY UNDER THE LOCK,
+       together with picking the next one. Setting it earlier would
+       leave a window in which the task is marked as sleeping while its
+       stack is still in use - and a second core could wake it in the
+       meantime and step onto that stack. */
     if (new_state >= 0)
         cores[nr].running->state = (enum task_state)new_state;
     reap_zombies();
 
     struct task *next = pick_next(nr);
-    if (!next) {                /* nikt inny nie jest gotowy - biez dalej */
+    if (!next) {                /* nobody else is ready - carry on */
         spin_unlock(&lock);
         biglock_restore(depth);
         return;
@@ -717,17 +730,18 @@ static void switch_to(int new_state)
         prev->state = TASK_READY;
     next->state = TASK_RUNNING;
     cores[nr].running = next;
-    /* Przerwanie z ring 3 tego watku ma wyladowac na JEGO stosie jadra,
-       i to w segmencie stanu zadania TEGO rdzenia - kazdy ma swoj */
+    /* An interrupt from this thread's ring 3 is to land on ITS kernel
+       stack, and in THIS core's task state segment - each has its own */
     tss_set_esp0(next->kstack_top);
-    /* Zmiana przestrzeni adresowej tylko, gdy trzeba (przeladowanie
-       CR3 oproznia TLB - szkoda cykli miedzy watkami jadra) */
+    /* Change the address space only when needed (reloading CR3 empties
+       the TLB - a waste of cycles between kernel threads) */
     if (next->cr3 != prev->cr3)
         __asm__ volatile("movl %0, %%cr3" : : "r"(next->cr3) : "memory");
     context_switch(&prev->esp, next->esp);
     spin_unlock(&lock);
-    /* Od tej chwili biegnie juz zadanie, ktore tu wrocilo - i to ono
-       odbiera swoja glebokosc ze swojego stosu */
+    /* From this moment on it is the task that came back here that is
+       running - and it is the one that takes its own depth off its own
+       stack */
     biglock_restore(depth);
 }
 
@@ -736,15 +750,16 @@ void schedule(void)
     switch_to(-1);
 }
 
-/* --- Rdzen wtorny dolacza do schedulera ------------------------------
+/* --- A secondary core joins the scheduler -----------------------------
  *
- * Kazdy rdzen potrzebuje zadania, na ktore ma wrocic, gdy nie ma nic do
- * roboty - inaczej nie byloby dokad odlozyc jego kontekstu. To zadanie
- * jest jego wlasnoscia: stoi na stosie, ktory rdzen dostal przy
- * obudzeniu, i nikt inny nie ma prawa go prowadzic.
+ * Every core needs a task to fall back on when there is nothing to
+ * do - otherwise there would be nowhere to put its context. That task
+ * is its property: it stands on the stack the core was given when it
+ * was woken, and nobody else has the right to run it.
  *
- * Ta funkcja nie wraca. Rdzen ma odtad dwie rzeczy do roboty: policzyc,
- * co mu zlecono, i poprowadzic zadanie, jesli jakies jest dla niego.
+ * This function does not return. From now on the core has two things
+ * to do: compute what it was ordered to, and run a task if there is
+ * one for it.
  */
 void task_core_enter(int nr)
 {
@@ -754,12 +769,12 @@ void task_core_enter(int nr)
     struct task *t = kmalloc(sizeof(*t));
     if (!t)
         return;
-    t->id = -nr;                 /* ujemny numer: to nie jest proces */
+    t->id = -nr;                 /* a negative number: this is not a process */
     task_set_name(t, "bezczynny");
     t->name[9] = (char)('0' + nr);
     t->name[10] = '\0';
     t->state = TASK_RUNNING;
-    t->stack = NULL;             /* stos ma z trampoliny rozruchowej */
+    t->stack = NULL;             /* its stack comes from the boot trampoline */
     t->kstack_top = 0;
     t->cr3 = paging_kernel_cr3();
     t->owns_dir = 0;
@@ -772,7 +787,7 @@ void task_core_enter(int nr)
     t->killed = 0;
     t->priority = 2;
     t->anycore = 0;
-    t->nolock = 1;         /* zadanie bezczynne nie bierze zamka */
+    t->nolock = 1;         /* an idle task does not take the lock */
     t->idle_for_core = nr;
     task_init_fds(t);
     task_init_signals(t);
@@ -788,9 +803,9 @@ void task_core_enter(int nr)
     for (;;) {
         smp_run_work(nr);
         task_yield();
-        /* Nic dla mnie nie ma - stoj do najblizszego przerwania.
-           Zegar tego rdzenia tyka sto razy na sekunde, a pobudka od
-           rdzenia rozruchowego przychodzi od razu. */
+        /* Nothing for me - stand still until the next interrupt.
+           This core's timer ticks a hundred times a second, and a
+           wake-up from the boot core arrives at once. */
         __asm__ volatile("hlt");
     }
 }
@@ -805,12 +820,12 @@ void task_yield(void)
 void task_sleep(uint32_t ms)
 {
     uint32_t flags = irq_save();
-    current->wake_at = pit_ticks() + (ms + 9) / 10;  /* tyknięcie = 10 ms */
+    current->wake_at = pit_ticks() + (ms + 9) / 10;  /* one tick = 10 ms */
     switch_to(TASK_SLEEPING);
     irq_restore(flags);
 }
 
-/* Blokowanie bez terminu - ktoś musi obudzić przez task_unblock */
+/* Blocking with no deadline - somebody has to wake us via task_unblock */
 void task_block(void)
 {
     uint32_t flags = irq_save();
@@ -818,7 +833,7 @@ void task_block(void)
     irq_restore(flags);
 }
 
-/* Wołane z IF=0 (kontekst IRQ albo sekcja krytyczna) */
+/* Called with IF=0 (IRQ context or a critical section) */
 void task_unblock(struct task *t)
 {
     if (t->state == TASK_BLOCKED)
@@ -858,27 +873,28 @@ int task_alive(int id)
 
 void task_exit(int code)
 {
-    /* Odeslij na dysk to, co proces napisal w zapisywalnym
-       odwzorowaniu pliku, a czego jeszcze nie zdazyl odeslac sam.
-       Musi to sie stac TUTAJ, dopoki jego przestrzen adresowa jest
-       zywa: sprzatacz zombie oglada te strony juz z cudzego CR3. */
+    /* Write back to disk what the process wrote into a writable file
+       mapping and has not managed to write back itself. This has to
+       happen HERE, while its address space is still alive: the zombie
+       reaper looks at those pages from somebody else's CR3 already. */
     process_msync();
 
-    /* Zamknij deskryptory - konce potokow musza zwolnic druga strone
-       (czytelnik dostanie EOF, pisarz - przerwany potok) */
+    /* Close the descriptors - pipe ends have to release the other side
+       (the reader gets EOF, the writer a broken pipe) */
     file_close_all();
 
     irqflags_t flags = spin_lock_irq(&lock);
     current->exit_code = code;
-    /* Zapamietaj kod od razu - wait widzi 'nieaktywny' juz przy ZOMBIE,
-       a reaper moze sprzatnac zadanie zanim wait zdazy je odczytac */
+    /* Remember the code straight away - wait sees 'not alive' already at
+       ZOMBIE, and the reaper may clean the task up before wait reads it */
     exit_record(current->id, current->parent, code);
 
-    /* Dzieci, ktore nas przezyly, trafiaja pod opieke wlasnego dziadka
-       (a w ostateczonosci watku glownego) - inaczej nikt nigdy nie
-       odebralby ich kodu wyjscia. */
-    /* Rodzic dostaje SIGCHLD - domyslnie zignoruje, ale moze chciec
-       wiedziec od razu, ze ma co zbierac przez wait */
+    /* Children that outlived us are put in the care of their own
+       grandparent (and, failing that, of the main thread) - otherwise
+       nobody would ever collect their exit codes. */
+    /* The parent gets a SIGCHLD - by default it will ignore it, but it
+       may want to know at once that there is something to collect
+       through wait */
     if (current->parent >= 0) {
         struct task *p = current->next;
         while (p != current) {
@@ -900,19 +916,18 @@ void task_exit(int code)
     for (int i = 0; i < EXIT_SLOTS; i++)
         if (exit_codes[i].valid && exit_codes[i].parent == current->id)
             exit_codes[i].parent = grandparent;
-    /* Zamek zwalniamy PRZED przelaczeniem: przelacz bierze go sam,
-       a wziecie go dwa razy na tym samym rdzeniu nie skonczyloby sie
-       nigdy. Przerwania zostaja wygaszone - to zadanie i tak nie ma
-       juz dokad wrocic. */
+    /* We release the lock BEFORE the switch: switch_to takes it itself,
+       and taking it twice on the same core would never end. Interrupts
+       stay off - this task has nowhere left to return to anyway. */
     spin_unlock(&lock);
     switch_to(TASK_ZOMBIE);
     (void)flags;
-    /* zombie nigdy nie zostanie wybrany ponownie */
+    /* a zombie will never be picked again */
     for (;;)
         __asm__ volatile("hlt");
 }
 
-/* Czeka na zakonczenie procesu o danym pid i zwraca jego kod wyjscia */
+/* Waits for the process with the given pid to end and returns its exit code */
 int task_wait(int pid)
 {
     while (task_alive(pid))
@@ -920,7 +935,7 @@ int task_wait(int pid)
     return exit_take(pid);
 }
 
-/* Czy biezace zadanie ma jeszcze zywe dzieci? */
+/* Does the current task still have live children? */
 static int has_children(void)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -937,8 +952,8 @@ static int has_children(void)
     return any;
 }
 
-/* Zdejmuje kod wyjscia dowolnego zakonczonego dziecka; -1 gdy zadne
-   jeszcze nie skonczylo */
+/* Takes the exit code of any finished child; -1 when none has finished
+   yet */
 static int take_child_exit(int *code)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -955,8 +970,9 @@ static int take_child_exit(int *code)
     return pid;
 }
 
-/* Czeka na dowolne wlasne dziecko i zwraca jego pid (kod wyjscia do
-   *code). -1 oznacza, ze nie ma juz na co czekac - zadnych dzieci. */
+/* Waits for any child of its own and returns its pid (the exit code
+   goes into *code). -1 means there is nothing left to wait for - no
+   children at all. */
 int task_wait_any(int *code)
 {
     for (;;) {
@@ -969,9 +985,10 @@ int task_wait_any(int *code)
     }
 }
 
-/* Zaznacza proces o danym pid do zabicia. Faktyczne zakonczenie nastapi,
-   gdy ten proces wroci do trybu uzytkownika (task_kill_pending).
-   Budzi go, gdy spi/czeka, by szybciej trafil w punkt powrotu. */
+/* Marks the process with the given pid to be killed. The actual end
+   happens when that process returns to user mode (task_kill_pending).
+   It is woken if sleeping/waiting, so that it reaches the return point
+   sooner. */
 int task_kill(int pid)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -991,12 +1008,12 @@ int task_kill(int pid)
     return found ? 0 : -1;
 }
 
-/* Zabija pierwsze zyjace zadanie o podanej nazwie i zwraca jego pid
-   (albo -1). Przydatne, gdy pid nie jest znany - np. aplikacja zostala
-   odpalona z menu pulpitu, a nie z shella. */
-/* Czy biezace zadanie zostalo zaznaczone do zabicia? Pozwala dlugim
-   oczekiwaniom w jadrze (np. odbior z gniazda) przerwac czekanie
-   zamiast trzymac proces przy zyciu az do wlasnego timeoutu. */
+/* Kills the first live task with the given name and returns its pid
+   (or -1). Useful when the pid is not known - e.g. an application was
+   launched from the desktop menu rather than from a shell. */
+/* Has the current task been marked to be killed? This lets long waits
+   inside the kernel (e.g. receiving from a socket) break off instead
+   of keeping the process alive until their own timeout. */
 int task_killed(void)
 {
     return current->killed;
@@ -1008,8 +1025,9 @@ int task_kill_name(const char *name)
     return pid >= 0 && task_kill(pid) == 0 ? pid : -1;
 }
 
-/* Pid zywego zadania o danej nazwie (-1 = nie ma takiego). Rozdzielone
-   od zabijania, bo shell umie wyslac pod nazwe dowolny sygnal. */
+/* Pid of a live task with the given name (-1 = there is none).
+   Separate from killing, because the shell can send any signal by
+   name. */
 int task_find_name(const char *name)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -1026,8 +1044,8 @@ int task_find_name(const char *name)
     return pid;
 }
 
-/* Wolane przy powrocie do ring 3: jesli proces ma oczekujace zabicie,
-   konczy go tutaj (w jego wlasnym kontekscie). */
+/* Called on return to ring 3: if the process has a pending kill, it
+   ends here (in its own context). */
 void task_kill_pending(void)
 {
     if (current->killed) {
@@ -1051,8 +1069,8 @@ uint32_t task_current_cr3(void)
     return current->cr3;
 }
 
-/* Konsola biezacego zadania. Przed startem schedulera nie ma jeszcze
-   zadnego - wypisy rozruchowe ida na pierwsza. */
+/* The current task's console. Before the scheduler starts there is
+   none yet - boot messages go to the first one. */
 int task_vc(void)
 {
     return current ? current->vc : 0;
@@ -1078,14 +1096,15 @@ uint32_t task_brk_base(void)
     return current->brk_base;
 }
 
-/* Poczatek sterty ustawia exec razem z jej koncem - obszar miedzy nimi
-   nalezy do procesu, ale ramki dostaje dopiero przy pierwszym dotknieciu */
+/* The start of the heap is set by exec together with its end - the
+   area between them belongs to the process, but gets frames only on
+   first touch */
 void task_set_brk_base(uint32_t base)
 {
     current->brk_base = base;
 }
 
-/* --- Pliki odwzorowane w pamieci ---------------------------------- */
+/* --- Memory-mapped files ------------------------------------------ */
 
 int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
                     uint32_t *blocks, uint32_t nblocks_of, uint32_t write)
@@ -1106,7 +1125,7 @@ int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
     return -1;
 }
 
-/* Wolane z obslugi bledu strony, wiec krotkie i bez niespodzianek */
+/* Called from the page fault handler, so short and without surprises */
 int task_mmap_find(uint32_t addr, uint32_t *first_block,
                      uint32_t *nbytes, uint32_t *write)
 {
@@ -1124,8 +1143,9 @@ int task_mmap_find(uint32_t addr, uint32_t *first_block,
         if (index >= m->nblocks_of)
             return 0;
         *first_block = index;
-        /* Ile pliku zostalo od poczatku tej strony - ogon ostatniej ma
-           zostac wyzerowany, a nie wypelniony smieciem z dysku */
+        /* How much of the file is left from the start of this page - the
+           tail of the last one is to be zeroed, not filled with
+           rubbish from disk */
         *nbytes = offset < m->size ? m->size - offset : 0;
         *write = m->write;
         return 1;
@@ -1157,8 +1177,8 @@ void task_mmap_release(void)
     }
 }
 
-/* Dziecko dostaje wlasna kopie opisow: tablice numerow blokow zwalnia
-   kazdy u siebie, wiec nie moga byc wspolne. */
+/* The child gets its own copy of the descriptions: each one frees its
+   block number table itself, so they cannot be shared. */
 void task_mmap_inherit(struct task *child)
 {
     for (int i = 0; i < MMAP_FILES; i++) {
@@ -1178,8 +1198,9 @@ void task_mmap_inherit(struct task *child)
     }
 }
 
-/* Opis i-tego odwzorowania biezacego procesu - do odsylania stron na
-   dysk, ktore musi obejsc kazde po kolei. Zwraca 0, gdy wpis wolny. */
+/* The description of the current process's i-th mapping - for writing
+   pages back to disk, which has to go through each of them in turn.
+   Returns 0 when the entry is free. */
 int task_mmap_info(int i, uint32_t *start, uint32_t *end,
                    uint32_t *size, uint32_t *write)
 {
@@ -1233,7 +1254,7 @@ void task_dump(void)
         printk("       %s", state_names[t->state]);
         for (int pad = 8 - (int)strlen(state_names[t->state]); pad > 0; pad--)
             printk(" ");
-        /* Gwiazdka: zadanie, ktore wolno prowadzic kazdemu rdzeniowi */
+        /* An asterisk: a task that any core may run */
         printk("%s%s%s\n", t->name, t->anycore ? " *" : "",
                t == current ? " (biezacy)" : "");
         t = t->next;

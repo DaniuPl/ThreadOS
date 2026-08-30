@@ -1,28 +1,28 @@
-/* Budzenie pozostalych procesorow
+/* Waking the remaining processors
  *
- * Po wlaczeniu zasilania pracuje jeden rdzen - ten, ktory firmware
- * wybral na rozruchowy. Reszta czeka w miejscu na sygnal, i to jest
- * decyzja sprzetu, nie systemu: procesor obudzony sygnalem SIPI
- * zaczyna w trybie rzeczywistym pod adresem (wektor << 12), czyli
- * dokladnie tak, jak zaczynal pecet czterdziesci lat temu.
+ * After power-on a single core is running - the one the firmware chose
+ * as the boot processor. The rest wait in place for a signal, and that
+ * is a decision of the hardware, not of the system: a processor woken
+ * by a SIPI starts in real mode at address (vector << 12), which is
+ * exactly how a PC started forty years ago.
  *
- * Ile ich jest, mowi tablica MADT w ACPI. Budzi sie je przez lokalny
- * kontroler przerwan (APIC) para sygnalow: INIT stawia procesor
- * w stanie poczatkowym, SIPI mowi mu, od ktorego adresu ma ruszyc.
- * Zalecenie producenta jest takie, by SIPI wyslac dwa razy - drugi
- * jest nieszkodliwy, gdy pierwszy wystarczyl.
+ * How many there are is stated by the MADT table in ACPI. They are
+ * woken through the local interrupt controller (APIC) by a pair of
+ * signals: INIT puts the processor into its initial state, SIPI tells
+ * it which address to start from. The manufacturer recommends sending
+ * SIPI twice - the second is harmless when the first was enough.
  *
- * Obudzony procesor nie zostaje juz jednak sam z niczym. Bierze
- * wspolna tablice segmentow i wspolna tablice wyjatkow jadra - do tej
- * chwili kazdy jego blad konczyl sie potrojnym bledem i cichym resetem
- * maszyny - a potem wlacza sobie WLASNY zegar w lokalnym APIC.
- * Przerwanie z PIT idzie przez kontroler PIC do jednego procesora,
- * wiec bez tego rdzen wtorny nie dostalby nigdy zadnego.
+ * A woken processor is no longer left with nothing, though. It takes
+ * the kernel's shared segment table and shared exception table - until
+ * that moment every fault of its own ended in a triple fault and a
+ * silent reset of the machine - and then turns on its OWN timer in the
+ * local APIC. A PIT interrupt goes through the PIC to one processor,
+ * so without that a secondary core would never get any.
  *
- * Zadan wciaz nie prowadzi: scheduler i lista procesow pisane byly dla
- * jednego rdzenia i cicho na to licza. Ma za to wszystko, czego taki
- * scheduler bedzie potrzebowal - tablice wyjatkow, zegar i wlasny
- * numer.
+ * It still does not run tasks: the scheduler and the process list were
+ * written for a single core and quietly count on it. What it does have
+ * is everything such a scheduler will need - an exception table, a
+ * timer and a number of its own.
  */
 
 #include <stdint.h>
@@ -37,10 +37,10 @@
 #include "include/pit.h"
 
 
-/* Rejestry APIC leza wysoko, poza pamiecia opisana przy starcie -
-   doklejenie ich do mapowania robi w kazdym trybie inny kod. Rdzen
-   wtorny w trybie dlugim potrzebuje przy okazji adresu tablic stron,
-   bo buduje sobie droge do trybu dlugiego sam. */
+/* The APIC registers lie high, beyond the memory described at startup -
+   gluing them onto the mapping takes different code in each mode. A
+   secondary core in long mode also needs the page table address,
+   because it builds its own road into long mode. */
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #include "../kernel64/gdt64.h"
@@ -66,25 +66,25 @@
 #define LOAD_TSS()    gdt_load_tss()
 #define TSS_SEL_BASE     GDT_TSS
 #define TSS_SEL_STEP     8
-#define SYSCALL_ENTRY() do { } while (0)   /* i386 wchodzi bramka int 0x80 */
+#define SYSCALL_ENTRY() do { } while (0)   /* i386 enters through the int 0x80 gate */
 #endif
 
-#define AP_BASE       0x8000        /* dokad kopiujemy trampoline */
-#define AP_STACK      8192          /* stos na kazdy obudzony rdzen */
+#define AP_BASE       0x8000        /* where we copy the trampoline to */
+#define AP_STACK      8192          /* one stack per woken core */
 #define MAX_CPU       SMP_CORES
 
-/* Rejestry lokalnego APIC (przesuniecia od jego bazy) */
+/* Local APIC registers (offsets from its base) */
 #define APIC_ID       0x020
-#define APIC_SVR      0x0F0         /* rejestr przerwania widmowego */
-#define APIC_EOI      0x0B0         /* potwierdzenie obsluzenia */
+#define APIC_SVR      0x0F0         /* the spurious interrupt register */
+#define APIC_EOI      0x0B0         /* end-of-interrupt acknowledgement */
 #define APIC_ICR_LO   0x300
 #define APIC_ICR_HI   0x310
-#define APIC_LVT_TIM  0x320         /* wpis zegara w tablicy przerwan APIC */
-#define APIC_TIM_INIT 0x380         /* wartosc poczatkowa licznika */
-#define APIC_TIM_CUR  0x390         /* biezaca wartosc licznika */
-#define APIC_TIM_DIV  0x3E0         /* dzielnik zegara */
+#define APIC_LVT_TIM  0x320         /* the timer entry in the APIC interrupt table */
+#define APIC_TIM_INIT 0x380         /* the counter's initial value */
+#define APIC_TIM_CUR  0x390         /* the counter's current value */
+#define APIC_TIM_DIV  0x3E0         /* the timer divisor */
 
-#define LVT_PERIODIC  (1u << 17)    /* licznik startuje od nowa sam */
+#define LVT_PERIODIC  (1u << 17)    /* the counter restarts by itself */
 #define LVT_MASKED (1u << 16)
 #define SMP_VEC_TIMER 48
 #define SMP_VEC_WAKE 49
@@ -93,9 +93,9 @@
 #define ICR_INIT      0x00000500
 #define ICR_STARTUP   0x00000600
 #define ICR_ASSERT    0x00004000
-#define ICR_PENDING   0x00001000    /* sygnal jeszcze w drodze */
+#define ICR_PENDING   0x00001000    /* the signal is still on its way */
 
-/* Naglowek wpisu w MADT: kazdy zaczyna sie tak samo */
+/* An MADT entry header: every one starts the same way */
 struct madt_wpis {
     uint8_t typ;
     uint8_t len;
@@ -117,20 +117,21 @@ extern volatile uint32_t ap_cr3;
 static volatile uint8_t *apic;
 static int cpus, started;
 static uint8_t apic_id[MAX_CPU];
-static uint32_t timer_step;              /* ile tykniec APIC na 10 ms */
+static uint32_t timer_step;              /* how many APIC ticks in 10 ms */
 static volatile uint32_t ticks_of_core[MAX_CPU];
 
-/* --- Wspolna kolejka pracy ------------------------------------------
+/* --- The shared work queue -------------------------------------------
  *
- * Caly stan dzielony miedzy rdzeniami to te kilka pol. Numer nastepnej
- * jednostki bierze sie pod zamkiem, a liczy juz bez niego - inaczej
- * rdzenie czekalyby na siebie zamiast pracowac.
+ * The entire state shared between cores is these few fields. The
+ * number of the next unit is taken under a lock, but computed without
+ * it - otherwise the cores would wait for one another instead of
+ * working.
  */
 static struct spinlock lock = SPINLOCK_FREE;
 static void (*work_fn)(uint32_t, void *);
 static void *work_arg;
-static volatile uint32_t work_count;      /* ile jednostek w zleceniu */
-static volatile uint32_t work_next; /* pierwsza jeszcze nie wzieta */
+static volatile uint32_t work_count;      /* how many units in the order */
+static volatile uint32_t work_next; /* the first one not yet taken */
 static volatile uint32_t work_done;
 static volatile uint32_t share[MAX_CPU];
 
@@ -144,14 +145,15 @@ static uint32_t apic_rd(uint32_t reg)
     return *(volatile uint32_t *)(apic + reg);
 }
 
-/* --- Ktory rdzen wlasnie biegnie -------------------------------------
+/* --- Which core is running right now ----------------------------------
  *
- * Odpowiedz daje sam procesor: numer w jego lokalnym APIC jest ustalony
- * przez sprzet i kazdy czyta wlasny. Tlumaczymy go na numer porzadkowy
- * w naszej tablicy, bo numery od sprzetu nie musza byc kolejne.
+ * The processor answers itself: the number in its local APIC is fixed
+ * by the hardware and each one reads its own. We translate it into an
+ * ordinal in our table, because the hardware numbers need not be
+ * consecutive.
  *
- * Przed uruchomieniem APIC (i na maszynie, ktora go nie ma) rdzen jest
- * jeden i ma numer zero.
+ * Before the APIC is started (and on a machine that has none) there is
+ * one core and its number is zero.
  */
 int smp_core_apic(void)
 {
@@ -169,37 +171,39 @@ int smp_core(void)
     uint16_t tr;
     __asm__ volatile("str %0" : "=r"(tr));
     if (tr < TSS_SEL_BASE)
-        return 0;                    /* segment jeszcze niezaladowany */
+        return 0;                    /* the segment has not been loaded yet */
     int nr = (tr - TSS_SEL_BASE) / TSS_SEL_STEP;
     return (nr >= 0 && nr < SMP_CORES) ? nr : 0;
 }
 
-/* --- Zegar rdzenia ---------------------------------------------------
+/* --- A core's timer ---------------------------------------------------
  *
- * Rdzen rozruchowy ma PIT i to on odmierza czas calego systemu. Rdzenie
- * wtorne nie moga z niego korzystac: przerwanie z PIT trafia przez
- * kontroler PIC do jednego procesora, a nie do wszystkich. Kazdy z nich
- * ma za to WLASNY zegar w lokalnym APIC - i to on daje mu przerwania.
+ * The boot core has the PIT and it is the PIT that measures time for
+ * the whole system. Secondary cores cannot use it: a PIT interrupt goes
+ * through the PIC to one processor, not to all of them. Each of them
+ * does have its OWN timer in the local APIC - and that is what gives
+ * it interrupts.
  *
- * Czestotliwosci tego zegara nie da sie odczytac; trzeba ja zmierzyc.
- * Robi to rdzen rozruchowy, bo tylko on ma czym mierzyc: puszcza licznik
- * APIC i patrzy, ile zdazy odliczyc przez znana liczbe tykniec PIT.
+ * The frequency of that timer cannot be read; it has to be measured.
+ * The boot core does it, because only it has anything to measure with:
+ * it starts the APIC counter and watches how far it gets during a
+ * known number of PIT ticks.
  */
 static void timer_measure(void)
 {
-    /* Czekanie na PIT musi byc ograniczone. Ten pomiar biegnie bardzo
-       wczesnie i na maszynie, na ktorej PIT nie tyka (albo jego
-       przerwanie jeszcze nigdzie nie dochodzi), petla bez granicy
-       zawiesilaby caly rozruch - i to w miejscu, ktore niczego o sobie
-       nie mowi. */
+    /* Waiting for the PIT has to be bounded. This measurement runs very
+       early, and on a machine where the PIT does not tick (or where its
+       interrupt does not yet reach anywhere) an unbounded loop would
+       hang the whole boot - and in a place that says nothing about
+       itself. */
 #define DELAY_MAX 20000000u
 
-    apic_wr(APIC_TIM_DIV, 0x3);                  /* dzielnik 16 */
-    apic_wr(APIC_LVT_TIM, LVT_MASKED);      /* liczy, ale nie zglasza */
+    apic_wr(APIC_TIM_DIV, 0x3);                  /* divisor 16 */
+    apic_wr(APIC_LVT_TIM, LVT_MASKED);      /* counts, but does not report */
 
     uint32_t start = pit_ticks();
     uint32_t rounds = 0;
-    while (pit_ticks() == start && rounds < DELAY_MAX)  /* granica tykniecia */
+    while (pit_ticks() == start && rounds < DELAY_MAX)  /* the tick boundary */
         rounds++;
     apic_wr(APIC_TIM_INIT, 0xFFFFFFFFu);
 
@@ -211,15 +215,16 @@ static void timer_measure(void)
     apic_wr(APIC_TIM_INIT, 0);                   /* stop */
 
     uint32_t na_100ms = 0xFFFFFFFFu - remaining;
-    timer_step = na_100ms / 10;                  /* na dziesiec milisekund */
-    /* Gdy pomiar sie nie udal, lepiej dac zegarowi wartosc z sufitu niz
-       zadna: rdzen bez przerwan nie da sie nigdy wywlaszczyc. */
+    timer_step = na_100ms / 10;                  /* per ten milliseconds */
+    /* When the measurement failed, giving the timer a value off the
+       ceiling is better than none: a core without interrupts can never
+       be preempted. */
     if (rounds >= DELAY_MAX || timer_step < 1000 || timer_step > 0x10000000u)
         timer_step = 1000000;
 #undef DELAY_MAX
 }
 
-/* Wlacza lokalny APIC i jego zegar na biezacym rdzeniu */
+/* Turns on the local APIC and its timer on the current core */
 static void timer_start(void)
 {
     apic_wr(APIC_SVR, apic_rd(APIC_SVR) | 0x100 | 0xFF);
@@ -228,34 +233,34 @@ static void timer_start(void)
     apic_wr(APIC_TIM_INIT, timer_step);
 }
 
-/* Obsluga tykniecia zegara APIC - wolana z isr_handler dla wektora 48.
+/* Handling an APIC timer tick - called from isr_handler for vector 48.
  *
- * Kazdy rdzen liczy swoje w osobnym slowie, wiec nie potrzeba tu zamka.
- * Potwierdzenie idzie do WLASNEGO APIC tego rdzenia, a nie do PIC:
- * przerwanie nie przeszlo przez kontroler, wiec nie ma go tam komu
- * zamknac. */
+ * Every core counts its own in a separate word, so no lock is needed
+ * here. The acknowledgement goes to THIS core's OWN APIC, not to the
+ * PIC: the interrupt did not pass through the controller, so there is
+ * nobody there to close it. */
 void smp_timer_tick(void)
 {
     int r = smp_core();
     ticks_of_core[r]++;
     if (apic)
         apic_wr(APIC_EOI, 0);
-    /* Potwierdzenie idzie PRZED przelaczeniem zadan: schedule moze nie
-       wrocic tu przez dluzszy czas, a lokalny APIC nie ma na co czekac.
-       Tak samo robi obsluga timera na rdzeniu rozruchowym. */
+    /* The acknowledgement goes BEFORE switching tasks: schedule may not
+       come back here for a long while, and the local APIC has nothing
+       to wait for. The timer handler on the boot core does the same. */
     if (task_scheduler_ready())
         schedule();
 }
 
-/* Pobudka dla wszystkich pozostalych rdzeni.
+/* A wake-up for all the other cores.
  *
- * Rdzen bezczynny stoi na instrukcji hlt - nie kreci sie w kolko, wiec
- * nie zauwazy sam, ze pojawila sie praca. Wyrywa go stad przerwanie,
- * a najprostsze przerwanie, jakie mozna komus poslac, to takie, ktore
- * nic nie znaczy: cala jego tresc to fakt, ze przyszlo.
+ * An idle core stands on a hlt instruction - it is not spinning, so it
+ * will not notice by itself that work has appeared. An interrupt pulls
+ * it out of there, and the simplest interrupt one can send is one that
+ * means nothing: its entire content is the fact that it arrived.
  *
- * Skrot "wszystkim poza mna" oszczedza wyliczania, kto jeszcze zyje -
- * rdzen, ktory sie nie obudzil, i tak nic z tym nie zrobi. */
+ * The "all but self" shorthand saves working out who is still alive -
+ * a core that never woke up will do nothing with it anyway. */
 static void wake_others(void)
 {
     if (!apic)
@@ -289,11 +294,11 @@ int smp_workers(void)
     return n;
 }
 
-/* Bierze jedna jednostke do policzenia. Zwraca 0, gdy nie ma juz nic.
+/* Takes one unit to compute. Returns 0 when there is nothing left.
  *
- * Przerwania gasimy na czas trzymania zamka takze na rdzeniu
- * rozruchowym: gdyby timer wywlaszczyl watek trzymajacy zamek, kazdy
- * inny checny musialby czekac do jego nastepnej kolejki. */
+ * We turn interrupts off while holding the lock on the boot core too:
+ * if the timer preempted the thread holding the lock, every other
+ * taker would have to wait until its next turn. */
 static int take_unit(uint32_t *number)
 {
     uint32_t flags = irq_save();
@@ -306,7 +311,7 @@ static int take_unit(uint32_t *number)
     return jest;
 }
 
-/* Petla robocza - ta sama dla rdzenia rozruchowego i dla wtornych */
+/* The work loop - the same for the boot core and for the secondary ones */
 static void run_available(int core)
 {
     uint32_t number;
@@ -317,35 +322,36 @@ static void run_available(int core)
     }
 }
 
-/* Wejscie rdzenia wtornego z trampoliny. Nie wraca.
+/* Entry of a secondary core from the trampoline. Never returns.
  *
- * Ten rdzen nie ma tablicy wyjatkow ani przerwan - kazdy blad konczy
- * sie potrojnym bledem i resetem maszyny. Dlatego robi tu jedna
- * rzecz: czeka na zlecenie i liczy to, co dostal. */
+ * This core has neither an exception nor an interrupt table - every
+ * fault ends in a triple fault and a reset of the machine. That is why
+ * it does one thing here: waits for an order and computes what it was
+ * given. */
 void smp_ap_main(uint32_t number)
 {
     if (number >= MAX_CPU)
         number = MAX_CPU - 1;
 
-    /* Trampolina zostawila ten rdzen na wlasnej, tymczasowej tablicy
-       segmentow i bez zadnej tablicy wyjatkow - kazdy blad konczyl sie
-       potrojnym bledem i cichym resetem calej maszyny. Obie tablice sa
-       jedne dla systemu i po zbudowaniu nikt ich nie zmienia, wiec
-       wystarczy je tutaj wskazac. */
+    /* The trampoline left this core on its own temporary segment table
+       and with no exception table at all - every fault ended in a
+       triple fault and a silent reset of the whole machine. Both
+       tables are single for the system and nobody changes them once
+       built, so pointing at them here is enough. */
     LOAD_GDT();
     LOAD_IDT();
     LOAD_TSS();
-    /* Rejestry wejscia przez instrukcje syscall sa wlasnoscia rdzenia -
-       ten, ktory ich nie ustawi, nie przyjmie jej wcale */
+    /* The entry registers for the syscall instruction belong to the
+       core - one that does not set them will not accept a call at all */
     SYSCALL_ENTRY();
 
-    /* Wlasny zegar. Przerwanie z PIT idzie przez kontroler PIC do
-       JEDNEGO procesora - ten go nie zobaczy nigdy. */
+    /* Its own timer. A PIT interrupt goes through the PIC to ONE
+       processor - this one will never see it. */
     timer_start();
     __asm__ volatile("sti");
 
-    /* Scheduler wstaje pozniej niz rdzenie - do tej chwili ten rdzen
-       umie tylko policzyc, co mu zlecono */
+    /* The scheduler comes up later than the cores - until then this
+       core can only compute what it was ordered to */
     while (!task_scheduler_ready()) {
         if (work_count)
             run_available((int)number);
@@ -353,9 +359,9 @@ void smp_ap_main(uint32_t number)
             __asm__ volatile("hlt");
     }
 
-    /* Odtad rdzen jest pelnoprawnym procesorem jadra: ma wlasne
-       zadanie bezczynne i bierze z listy to, co wolno mu prowadzic.
-       Ta funkcja nie wraca. */
+    /* From now on the core is a full kernel processor: it has an idle
+       task of its own and takes from the list whatever it is allowed
+       to run. This function does not return. */
     task_core_enter((int)number);
 
     for (;;) {
@@ -363,19 +369,20 @@ void smp_ap_main(uint32_t number)
             run_available((int)number);
             continue;
         }
-        /* Bezczynny rdzen ma STAC, a nie krecic sie w kolko.
+        /* An idle core is to STAND STILL, not spin.
          *
-         * Wirowanie kosztuje tyle samo, co praca - na maszynie
-         * wirtualnej dokladnie tyle samo, bo kazdy obieg trzeba
-         * naprawde wykonac. Trzy rdzenie kreciace sie bez celu zabieraly
-         * rdzeniowi rozruchowemu trzy czwarte maszyny i zwykly zapis na
-         * dysk trwal cztery razy dluzej.
+         * Spinning costs as much as work - on a virtual machine
+         * exactly as much, because every round really has to be
+         * executed. Three cores spinning to no purpose took
+         * three quarters of the machine away from the boot core, and
+         * an ordinary disk write took four times as long.
          *
-         * Instrukcja hlt zatrzymuje rdzen do najblizszego przerwania,
-         * a te przychodza teraz sto razy na sekunde z jego wlasnego
-         * zegara. Zlecenie zlozone tuz po sprawdzeniu warunku poczeka
-         * wiec najwyzej jedno tykniecie - a nie ma sie do czego
-         * spieszyc, skoro chodzi o prace liczona w setkach milisekund. */
+         * The hlt instruction stops the core until the next interrupt,
+         * and those now arrive a hundred times a second from its own
+         * timer. An order placed just after the condition was checked
+         * will therefore wait one tick at most - and there is nothing
+         * to hurry for when the work is measured in hundreds of
+         * milliseconds. */
         __asm__ volatile("hlt");
     }
 }
@@ -401,16 +408,16 @@ void smp_work(void (*fn)(uint32_t number, void *data), void *data,
     work_done = 0;
     __atomic_store_n(&work_count, ile, __ATOMIC_SEQ_CST);
 
-    /* Zlecenie jest juz widoczne - teraz trzeba obudzic tych, ktorzy
-       na nie czekaja spiac. Kolejnosc nie jest dowolna: pobudka wyslana
-       przed zapisem zastalaby jeszcze pusta kolejke. */
+    /* The order is already visible - now the ones sleeping through it
+       have to be woken. The order is not arbitrary: a wake-up sent
+       before the write would find the queue still empty. */
     wake_others();
 
-    /* Rdzen rozruchowy liczy razem z pozostalymi: na maszynie
-       jednordzeniowej nie policzylby inaczej nikt */
+    /* The boot core computes along with the rest: on a single-core
+       machine nobody else would compute at all */
     run_available(0);
 
-    /* Czekamy na tych, ktorzy wzieli jednostke tuz przed nami */
+    /* We wait for those who took a unit just before we did */
     while (__atomic_load_n(&work_done, __ATOMIC_SEQ_CST) < ile)
         __asm__ volatile("pause" ::: "memory");
 
@@ -420,8 +427,9 @@ void smp_work(void (*fn)(uint32_t number, void *data), void *data,
 int smp_cpus(void)    { return cpus ? cpus : 1; }
 int smp_started(void) { return started; }
 
-/* Zwloka liczona portem 0x80 - PIT moze byc jeszcze zajety czym
-   innym, a tu chodzi o rzad wielkosci, nie o dokladnosc */
+/* A delay counted out on port 0x80 - the PIT may still be busy with
+   something else, and what matters here is the order of magnitude, not
+   accuracy */
 static void delay(uint32_t loops)
 {
     for (uint32_t i = 0; i < loops; i++)
@@ -437,19 +445,19 @@ static void wait_sent(void)
     }
 }
 
-/* INIT, a po nim dwa SIPI - tak, jak kaze dokumentacja procesora */
+/* INIT, and after it two SIPIs - as the processor documentation says */
 static void wake_cpu(uint8_t id, uint8_t vector)
 {
     apic_wr(APIC_ICR_HI, (uint32_t)id << 24);
     apic_wr(APIC_ICR_LO, ICR_INIT | ICR_ASSERT);
     wait_sent();
-    delay(20000);                        /* rzedu dziesieciu milisekund */
+    delay(20000);                        /* on the order of ten milliseconds */
 
     for (int i = 0; i < 2; i++) {
         apic_wr(APIC_ICR_HI, (uint32_t)id << 24);
         apic_wr(APIC_ICR_LO, ICR_STARTUP | vector);
         wait_sent();
-        delay(600);                      /* rzedu dwustu mikrosekund */
+        delay(600);                      /* on the order of two hundred microseconds */
     }
 }
 
@@ -467,20 +475,20 @@ int smp_init(void)
     if (len < 44 || !apic_base)
         return 1;
 
-    /* Rejestry APIC leza wysoko, poza pamiecia opisana przy starcie */
+    /* The APIC registers lie high, beyond the memory described at startup */
     if ((uint64_t)apic_base + 0x1000 > IDENTITY_TOP() &&
         MAP_PHYS(apic_base, 0x1000) < 0)
         return 1;
     apic = (volatile uint8_t *)(uintptr_t)apic_base;
 
-    /* Spis procesorow zaczyna sie za naglowkiem tablicy */
+    /* The processor listing begins after the table header */
     for (uint32_t off = 44; off + 2 <= len && cpus < MAX_CPU; ) {
         const struct madt_wpis *w = (const struct madt_wpis *)(madt + off);
         if (!w->len)
             break;
         if (w->typ == 0 && w->len >= sizeof(struct madt_lapic)) {
             const struct madt_lapic *l = (const struct madt_lapic *)w;
-            if (l->flags & 1)                 /* procesor wlaczony */
+            if (l->flags & 1)                 /* the processor is enabled */
                 apic_id[cpus++] = l->apic_id;
         }
         off += w->len;
@@ -488,11 +496,12 @@ int smp_init(void)
     if (cpus <= 1)
         return cpus ? cpus : 1;
 
-    /* Wlacz lokalny APIC procesora rozruchowego: bez tego nie ma czym
-       wyslac sygnalu. Wektor widmowy 0xFF i bit wlaczenia. */
+    /* Turn on the boot processor's local APIC: without it there is
+       nothing to send the signal with. Spurious vector 0xFF and the
+       enable bit. */
     apic_wr(APIC_SVR, apic_rd(APIC_SVR) | 0x100 | 0xFF);
 
-    /* Zmierz zegar APIC, dopoki mamy czym: PIT jest tylko tutaj */
+    /* Measure the APIC timer while we still can: the PIT is only here */
     timer_measure();
 
     uint32_t size = (uint32_t)(ap_trampoline_end - ap_trampoline);
@@ -500,8 +509,9 @@ int smp_init(void)
         return cpus;
     memcpy((void *)(uintptr_t)AP_BASE, ap_trampoline, size);
 
-    /* Licznik i wskaznik stosu leza w skopiowanym bloku, nie w jadrze -
-       procesor w trybie rzeczywistym nie siegnie tam, gdzie oryginal */
+    /* The counter and the stack pointer lie in the copied block, not in
+       the kernel - a processor in real mode will not reach where the
+       original sits */
     uint32_t off_counter =
         (uint32_t)((uint8_t *)&ap_counter - ap_trampoline);
     uint32_t off_stack = (uint32_t)((uint8_t *)&ap_stack - ap_trampoline);
@@ -514,10 +524,10 @@ int smp_init(void)
         (volatile uint32_t *)(uintptr_t)(AP_BASE + off_number);
     *counter = 0;
 
-    /* Tablice stron rdzen wtorny bierze te same, po ktorych chodzi
-       jadro: w trybie dlugim bez nich nie ruszy wcale, a w trybie
-       chronionym ruszylby, tyle ze adresy programow uzytkownika nie
-       znaczylyby dla niego nic. */
+    /* The secondary core takes the same page tables the kernel walks:
+       in long mode it will not start at all without them, and in
+       protected mode it would start, only user program addresses
+       would mean nothing to it. */
     uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampoline);
     uintptr_t cr3;
 #ifdef __x86_64__
@@ -529,8 +539,9 @@ int smp_init(void)
 
     uint8_t mine = (uint8_t)(apic_rd(APIC_ID) >> 24);
 
-    /* Budzimy po jednym i czekamy na zgloszenie: stos jest jeden,
-       wiec dwa procesory naraz zadeptalyby sobie ramki */
+    /* We wake them one at a time and wait for each to report in: there
+       is one stack, so two processors at once would trample each
+       other's frames */
     for (int i = 0; i < cpus; i++) {
         if (apic_id[i] == mine)
             continue;
@@ -539,9 +550,9 @@ int smp_init(void)
         if (!memory)
             break;
         *stack = (uintptr_t)memory + AP_STACK;
-        /* Rdzen rozruchowy ma numer zero, wtorne dostaja kolejne -
-           kazdy liczy swoj udzial w osobnym slowie, wiec nie musza
-           sie o nie bic */
+        /* The boot core has number zero, secondary ones get the next -
+           each counts its share in a separate word, so they need not
+           fight over it */
         *number = (uint32_t)(started + 1);
 
         uint32_t was = *counter;

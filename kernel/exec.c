@@ -1,10 +1,10 @@
-/* exec - ładowanie programów ELF z initrd
+/* exec - loading ELF programs from the initrd
  *
- * Każdy proces dostaje własny katalog stron (mapowania jądra
- * współdzielone jako supervisor, segmenty programu i stos jako USER).
- * Loader działa w wątku jądra świeżo utworzonego zadania: buduje
- * przestrzeń adresową, kopiuje segmenty PT_LOAD do nowych ramek,
- * mapuje stos pod 0xC0000000 i skacze do ring 3 przez iret.
+ * Every process gets its own page directory (kernel mappings shared as
+ * supervisor, program segments and stack as USER). The loader runs in
+ * the kernel thread of a freshly created task: it builds the address
+ * space, copies PT_LOAD segments into new frames, maps the stack at
+ * 0xC0000000 and jumps into ring 3 through iret.
  */
 
 #include <stdint.h>
@@ -29,45 +29,47 @@
 #include "include/isr.h"
 
 #define USER_STACK_TOP 0xC0000000u
-/* Stos procesu: jedna strona wystarczala, dopoki programy nie zaczely
-   liczyc kryptografii - RSA na 2048 bitach potrzebuje kilku kilobajtow
-   na same liczby robocze. Osiem stron to 32 KiB. */
+/* The process stack: one page was enough until programs started doing
+   crypto - RSA on 2048 bits needs a few kilobytes for the working
+   numbers alone. Eight pages is 32 KiB. */
 #define USER_STACK_PAGES 8
 #define USER_STACK_BASE  (USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE)
 
-/* Dokad stosowi wolno urosnac poza te osiem stron. Reszta dochodzi
-   sama, pod palcami - tak samo jak sterta. Zgadywanie z gory, ile
-   stosu potrzeba, zawsze konczy sie albo marnowaniem pamieci, albo
-   wyjatkiem w srodku glebokiego wywolania; a granica jest po to, zeby
-   dziki wskaznik nie zamienil sie po cichu w zmapowana strone - pod
-   nia blad strony pozostaje bledem. */
+/* How far the stack may grow beyond those eight pages. The rest
+   arrives on its own, under the program's fingers - exactly as the
+   heap grows upward. Guessing up front how much stack is needed always
+   ends either in wasted memory or in an exception in the middle of a
+   deep call; and the limit is there so that a wild pointer does not
+   quietly turn into a mapped page - below it a page fault stays a
+   fault. */
 #define USER_STACK_MAX   (256 * 1024u)
 #define USER_STACK_BOTTOM   (USER_STACK_TOP - USER_STACK_MAX)
-/* Biblioteka wspoldzielona lezy pod stalym adresem, ten sam we
-   wszystkich procesach - tylko dzieki temu jej kod moze byc naprawde
-   jeden. Miejsce jest tuz pod obszarem mapowan, a sterta konczy sie
-   u jej progu; USER_LIB_BASE w kernel/include/exec.h i adres w skrypcie
-   konsolidatora user/libproton.ld musza sie zgadzac. */
-#define USER_BRK_MAX   USER_LIB_BASE /* sufit sterty procesu (sbrk) */
-#define MMAP_BASE      0xB0000000u   /* obszar mmap (powyzej biblioteki) */
-#define MMAP_MAX       0xBF000000u   /* sufit mmap (ponizej miejsca na stos) */
+/* The shared library lies at a fixed address, the same in every
+   process - only thanks to that can its code really be one. The place
+   is just below the mapping area, and the heap ends at its doorstep;
+   USER_LIB_BASE in kernel/include/exec.h and the address in the linker
+   script user/libproton.ld must agree. */
+#define USER_BRK_MAX   USER_LIB_BASE /* ceiling of the process heap (sbrk) */
+#define MMAP_BASE      0xB0000000u   /* the mmap area (above the library) */
+#define MMAP_MAX       0xBF000000u   /* mmap ceiling (below the space for the stack) */
 #define ARG_MAX        16
 #define CMD_MAX        128
-#define MAX_STAGES     5     /* maks. liczba etapow potoku a|b|c|... */
+#define MAX_STAGES     5     /* max number of pipeline stages a|b|c|... */
 
-/* Argumenty przekazywane do watka-procesu: linia polecen plus
-   niezalezne ustawienie stdin/stdout. Pozwala laczyc przekierowania,
-   np. konsument potoku z wyjsciem do pliku ('a | b > plik'). */
+/* Arguments passed to a process thread: the command line plus
+   independent stdin/stdout settings. This allows redirections to be
+   combined, e.g. a pipe consumer with output to a file
+   ('a | b > file'). */
 struct exec_args {
     char cmd[CMD_MAX];
-    int in_pipe;                  /* stdin z potoku (idx) albo -1 */
-    int out_pipe;                 /* stdout do potoku (idx) albo -1 */
-    char out_file[FS_NAME_MAX + 1]; /* stdout do pliku ("" = brak) */
-    int out_append;               /* 1 = dopisuj (>>), 0 = obcinaj (>) */
-    int anycore;                 /* 1 = wolno go prowadzic kazdemu rdzeniowi */
+    int in_pipe;                  /* stdin from a pipe (idx) or -1 */
+    int out_pipe;                 /* stdout to a pipe (idx) or -1 */
+    char out_file[FS_NAME_MAX + 1]; /* stdout to a file ("" = none) */
+    int out_append;               /* 1 = append (>>), 0 = truncate (>) */
+    int anycore;                 /* 1 = any core may run it */
 };
 
-/* Nagłówki ELF32 (tylko pola, których używamy) */
+/* ELF32 headers (only the fields we use) */
 struct elf_ehdr {
     uint8_t  e_ident[16];
     uint16_t e_type, e_machine;
@@ -97,8 +99,8 @@ static int elf_valid(const struct elf_ehdr *eh, uint32_t size)
     return eh->e_type == ET_EXEC && eh->e_machine == EM_386 && eh->e_phnum;
 }
 
-/* Swieza ramka pod strone vaddr, zamapowana TYLKO DO ODCZYTU -
-   dla plikow odwzorowanych w pamieci */
+/* A fresh frame for page vaddr, mapped READ-ONLY - for memory-mapped
+   files */
 static uint32_t page_frame_for_ro(uint32_t dir, uint32_t vaddr)
 {
     uint32_t frame = pmm_alloc_frame();
@@ -111,8 +113,8 @@ static uint32_t page_frame_for_ro(uint32_t dir, uint32_t vaddr)
     return frame;
 }
 
-/* Swieza ramka pod strone zapisywalnego odwzorowania pliku: z prawem
-   zapisu, ale oznaczona tak, ze fork ja wspoldzieli, a wymiana omija */
+/* A fresh frame for a page of a writable file mapping: writable, but
+   marked so that fork shares it and swapping passes it by */
 static uint32_t page_frame_for_file(uint32_t dir, uint32_t vaddr)
 {
     uint32_t frame = pmm_alloc_frame();
@@ -125,7 +127,7 @@ static uint32_t page_frame_for_file(uint32_t dir, uint32_t vaddr)
     return frame;
 }
 
-/* Mapuje (lub odnajduje) ramkę dla strony vaddr procesu */
+/* Maps (or finds) the frame for the process's page vaddr */
 static uint32_t page_frame_for(uint32_t dir, uint32_t vaddr)
 {
     uint32_t frame = paging_get_mapping(dir, vaddr);
@@ -159,8 +161,8 @@ static int load_segment(uint32_t dir, const uint8_t *file,
         if (!frame)
             return 0;
 
-        /* Skopiuj fragment pliku przypadający na tę stronę
-           (reszta zostaje wyzerowana - to .bss) */
+        /* Copy the part of the file that falls on this page
+           (the rest stays zeroed - that is .bss) */
         uint32_t copy_from = va > ph->p_vaddr ? va : ph->p_vaddr;
         if (copy_from < file_end) {
             uint32_t copy_to = va + PAGE_SIZE < file_end
@@ -173,16 +175,16 @@ static int load_segment(uint32_t dir, const uint8_t *file,
     return 1;
 }
 
-/* --- biblioteka wspoldzielona w przestrzeni procesu ------------------
+/* --- the shared library in a process's address space ------------------
  *
- * Segmenty bez prawa zapisu (kod i stale) dostaja RAMKI WSPOLNE: te
- * same, ktore widzi kazdy inny proces. To jest cala oszczednosc -
- * kryptografia i TLS leza w pamieci raz, a nie raz na proces.
+ * Segments without write permission (code and constants) get SHARED
+ * FRAMES: the very ones every other process sees. That is the whole
+ * saving - crypto and TLS lie in memory once, not once per process.
  *
- * Segment z danymi jest inny i musi byc: biblioteka ma w nim wlasny
- * stan (ziarno generatora losowego, ustawienia TLS), a stan jednego
- * procesu nie ma prawa byc widoczny w drugim. Kazdy dostaje wiec
- * swieza kopie - dokladnie tak, jak robi to kazdy inny system.
+ * The data segment is different, and has to be: the library keeps its
+ * own state there (the random generator seed, TLS settings), and one
+ * process's state has no business being visible in another. Each one
+ * therefore gets a fresh copy - exactly as every other system does it.
  */
 static int map_library(uint32_t dir)
 {
@@ -202,8 +204,8 @@ static int map_library(uint32_t dir)
                     return 0;
                 if (!paging_map_user_ro_in(dir, va, frame))
                     return 0;
-                /* Ramka ma przezyc smierc procesu - nalezy do systemu,
-                   a nie do niego */
+                /* The frame has to outlive the process - it belongs to the
+                   system, not to it */
                 pmm_frame_ref(frame);
                 continue;
             }
@@ -224,8 +226,8 @@ static int map_library(uint32_t dir)
     return 1;
 }
 
-/* Zapisuje rozwiazany adres w tablicy skokow programu. Przestrzen
-   procesu nie jest jeszcze aktywna, wiec idziemy przez ramke. */
+/* Stores a resolved address in the program's jump table. The process's
+   address space is not active yet, so we go through the frame. */
 static int write_addr(void *ctx, dyn_addr addr, dyn_addr value)
 {
     uint32_t dir = *(uint32_t *)ctx;
@@ -236,15 +238,16 @@ static int write_addr(void *ctx, dyn_addr addr, dyn_addr value)
     return 0;
 }
 
-/* Zapis 32-bitowej wartości na stos użytkownika - jądro pisze przez
-   adres fizyczny ramki, bo przestrzeń procesu nie jest jeszcze aktywna */
+/* Writing a 32-bit value onto the user stack - the kernel writes
+   through the frame's physical address, because the process's address
+   space is not active yet */
 static void stack_write32(uint32_t sframe, uint32_t sp, uint32_t val)
 {
     *(uint32_t *)(sframe + (sp - (USER_STACK_TOP - PAGE_SIZE))) = val;
 }
 
-/* Układa argumenty na stosie procesu (konwencja cdecl dla
-   _start(int argc, char **argv)) i zwraca początkowy ESP */
+/* Lays the arguments out on the process stack (the cdecl convention
+   for _start(int argc, char **argv)) and returns the initial ESP */
 static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
 {
     uint32_t stack_base = USER_STACK_TOP - PAGE_SIZE;
@@ -258,8 +261,8 @@ static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
         uargv[i] = sp;
     }
 
-    sp &= ~3u;                          /* wyrównanie do 4 B */
-    sp -= 4 * (argc + 1);               /* argv[] + NULL na końcu */
+    sp &= ~3u;                          /* align to 4 B */
+    sp -= 4 * (argc + 1);               /* argv[] plus a NULL at the end */
     uint32_t argv_base = sp;
     for (int i = 0; i < argc; i++)
         stack_write32(sframe, argv_base + 4 * i, uargv[i]);
@@ -270,12 +273,12 @@ static uint32_t build_argv_stack(uint32_t sframe, char **tok, int argc)
     sp -= 4;
     stack_write32(sframe, sp, (uint32_t)argc);
     sp -= 4;
-    stack_write32(sframe, sp, 0);           /* atrapa adresu powrotu */
+    stack_write32(sframe, sp, 0);           /* a dummy return address */
     return sp;
 }
 
-/* Sprzatniecie po nieudanym starcie: jesli proces mial przejac konce
-   potoku, trzeba je zwolnic, inaczej druga strona zawisnie */
+/* Cleaning up after a failed start: if the process was to take over
+   pipe ends, they have to be released, otherwise the other side hangs */
 static void exec_fail(struct exec_args *a)
 {
     if (a->out_pipe >= 0)
@@ -285,7 +288,7 @@ static void exec_fail(struct exec_args *a)
     kfree(a);
 }
 
-/* Dzieli linie polecen na slowa w miejscu; zwraca argc */
+/* Splits a command line into words in place; returns argc */
 static int tokenize(char *cmd, char **tok)
 {
     int argc = 0;
@@ -302,10 +305,11 @@ static int tokenize(char *cmd, char **tok)
     return argc;
 }
 
-/* Buduje swiezy obraz procesu: nowa przestrzen adresowa, segmenty ELF
-   z initrd, stos i argumenty na nim. Zwraca CR3 (0 przy bledzie)
-   i wypelnia entry/esp/brk. Uzywaja tego dwie drogi - start nowego
-   procesu (exec_task) i podmiana obrazu biezacego (process_exec). */
+/* Builds a fresh process image: a new address space, the ELF segments
+   from the initrd, the stack and the arguments on it. Returns CR3
+   (0 on error) and fills in entry/esp/brk. Two paths use this - the
+   start of a new process (exec_task) and replacing the current image
+   (process_exec). */
 static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
                             uint32_t *esp_out, uint32_t *brk_out)
 {
@@ -332,8 +336,8 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         return 0;
     }
 
-    /* Załaduj segmenty, śledząc koniec obrazu - tam zacznie się
-       sterta procesu (sbrk) */
+    /* Load the segments, tracking the end of the image - that is where
+       the process heap (sbrk) will begin */
     uint32_t brk = 0;
     const struct elf_phdr *ph =
         (const struct elf_phdr *)(file + eh->e_phoff);
@@ -349,10 +353,10 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
             brk = ph[i].p_vaddr + ph[i].p_memsz;
     }
 
-    /* Program moze nie niesc kodu, ktorego uzywa, tylko puste miejsca
-       na adresy funkcji z biblioteki. Wtedy trzeba te miejsca
-       wypelnic - i zrobic to TERAZ, przed pierwsza instrukcja, bo
-       skok przez niewypelniona pozycje nie ma dokad prowadzic. */
+    /* The program may carry not the code it uses but only empty slots
+       for the addresses of library functions. Those slots then have to
+       be filled in - and NOW, before the first instruction, because a
+       jump through an unfilled entry has nowhere to lead. */
     if (dyn_is_dynamic(file, size)) {
         if (!dyn_present()) {
             printk("exec: '%s' potrzebuje biblioteki %s, ktorej nie ma\n",
@@ -371,7 +375,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         }
     }
 
-    /* Najwyzsza strona stosu (tam trafiaja argumenty), a pod nia reszta */
+    /* The topmost stack page (where the arguments go), and the rest below it */
     uint32_t sframe = 0;
     for (int i = 0; i < USER_STACK_PAGES; i++) {
         uint32_t va = USER_STACK_TOP - (uint32_t)(i + 1) * PAGE_SIZE;
@@ -391,24 +395,24 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     *brk_out = brk;
     printk("[jadro] exec '%s' z %s: ELF %u B, entry %x, argc=%d\n",
            tok[0], prog_source(), size, eh->e_entry, argc);
-    /* Segmenty sa juz w stronach procesu - kopia w pamieci jadra
-       nie jest do niczego potrzebna */
+    /* The segments are already in the process's pages - the copy in
+       kernel memory is of no further use */
     prog_release(loaded);
     return dir;
 }
 
-/* Wątek jądra nowego procesu: zbuduj przestrzeń adresową i wejdź w ring 3 */
+/* Kernel thread of a new process: build the address space and enter ring 3 */
 static void exec_task(void *arg)
 {
     struct exec_args *a = arg;
 
-    /* Proces, ktoremu wolno biec na kazdym rdzeniu, mowi o tym teraz -
-       zanim cokolwiek zrobi. Jego strona jadrowa i tak chodzi pod
-       wielkim zamkiem; rownolegle idzie samo liczenie w ring 3. */
+    /* A process that may run on any core says so now - before it does
+       anything. Its kernel side runs under the big lock anyway; what
+       goes in parallel is the computing it does in ring 3. */
     if (a->anycore)
         task_set_anycore();
 
-    /* Tokenizacja w miejscu: a->cmd to nasza kopia */
+    /* Tokenising in place: a->cmd is our own copy */
     char *tok[ARG_MAX];
     int argc = tokenize(a->cmd, tok);
     if (!argc) {
@@ -423,51 +427,52 @@ static void exec_task(void *arg)
         return;
     }
 
-    /* Przekierowanie strumieni przed wejsciem w ring 3 (niezaleznie) */
+    /* Redirecting the streams before entering ring 3 (independently) */
     if (a->in_pipe >= 0)
-        file_set_pipe(0, a->in_pipe, 0);    /* stdin <- koniec odczytu */
+        file_set_pipe(0, a->in_pipe, 0);    /* stdin <- the read end */
     if (a->out_pipe >= 0)
-        file_set_pipe(1, a->out_pipe, 1);   /* stdout -> koniec zapisu */
+        file_set_pipe(1, a->out_pipe, 1);   /* stdout -> the write end */
     else if (a->out_file[0] &&
              file_redirect_stdout(a->out_file, a->out_append) < 0)
         printk("exec: nie moge przekierowac stdout do '%s'\n", a->out_file);
     kfree(a);
 
-    /* Od teraz to zadanie ma wlasna przestrzen adresowa; jej ramki
-       zostana zwolnione przy sprzataniu zombie */
+    /* From now on this task has an address space of its own; its frames
+       will be released when the zombie is reaped */
     task_set_brk(brk);
     task_set_brk_base(brk);
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
-       Program moze biec rownolegle z innymi; do jadra wroci przez
-       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    /* We are entering user code - the big kernel lock stays here. The
+       program may run in parallel with others; it will come back into
+       the kernel through an interrupt or a system call and take the
+       lock again there. */
     biglock_leave();
     enter_ring3(entry, esp);
 }
 
-/* --- stronicowanie na zadanie --------------------------------------
+/* --- demand paging --------------------------------------------------
  *
- * Sterta (sbrk) i obszar mmap sa procesowi obiecane, ale puste: zaden
- * z tych adresow nie ma jeszcze ramki. Pierwszy dostep konczy sie
- * bledem strony, a jadro dopiero wtedy przydziela wyzerowana ramke
- * i wznawia instrukcje.
+ * The heap (sbrk) and the mmap area are promised to the process but
+ * empty: none of those addresses has a frame yet. The first access
+ * ends in a page fault, and only then does the kernel hand out a
+ * zeroed frame and resume the instruction.
  *
- * Ten sam punkt obsluguje strony, ktore nie tyle jeszcze nie powstaly,
- * co zostaly wyrzucone na dysk - wtedy zamiast swiezego zera wraca ich
- * dawna zawartosc.
+ * The same point handles pages that are not so much yet to be created
+ * as evicted to disk - then, instead of a fresh zero, their former
+ * content comes back.
  *
- * Wola to zarowno obsluga wyjatku (dostep z ring 3), jak i walidacja
- * wskaznikow w syscallach: jadro, ktore ma zaraz wypelnic bufor
- * procesu, musi go najpierw urzeczywistnic - inaczej swiezo
- * przydzielony, nietkniety bufor wygladalby jak zly wskaznik.
+ * This is called both from the exception handler (an access from
+ * ring 3) and from pointer validation in syscalls: a kernel about to
+ * fill a process's buffer has to make it real first - otherwise a
+ * freshly allocated, untouched buffer would look like a bad pointer.
  *
- * Zwraca 1, gdy strona powstala (mozna wznowic), 0 gdy adres nie nalezy
- * do zadnego obiecanego obszaru albo zabraklo pamieci.
+ * Returns 1 when the page appeared (execution can resume), 0 when the
+ * address belongs to no promised area or memory ran out.
  */
-/* Ile stron wczytano z plikow odwzorowanych w pamieci - do komendy
-   'mem' i do testow: odwzorowanie duzego pliku ma kosztowac tyle, ile
-   sie z niego wzielo, a nie tyle, ile ma stron */
+/* How many pages have been read in from memory-mapped files - for the
+   'mem' command and for the tests: mapping a large file is to cost as
+   much as was actually taken from it, not as much as it has pages */
 static uint32_t mmap_pages;
 
 uint32_t process_mmap_pages(void)
@@ -478,25 +483,24 @@ uint32_t process_mmap_pages(void)
 int process_demand_page(uint32_t addr)
 {
     uint32_t brk = task_brk();
-    if (!brk)                       /* watek jadra - nie ma sterty */
+    if (!brk)                       /* a kernel thread - it has no heap */
         return 0;
 
     uint32_t dir = task_current_cr3();
     uint32_t va = addr & ~(PAGE_SIZE - 1);
     if (paging_get_mapping(dir, va))
-        return 0;                   /* strona juz jest - blad z innego powodu */
+        return 0;                   /* the page is already there - the fault has another cause */
 
-    /* Najpierw dysk, i to dla KAZDEGO adresu uzytkownika: wymiana
-       zabiera tez strony kodu i stosu, ktore do zadnego obiecanego
-       obszaru nie naleza. Sprawdzenie zakresu ponizej dotyczy tylko
-       stron, ktore maja dopiero powstac. */
+    /* Disk first, and for EVERY user address: swapping also takes code
+       and stack pages, which belong to no promised area. The range
+       check below concerns only pages that are yet to be created. */
     if (paging_swap_in(dir, va))
         return 1;
 
-    /* Strona pliku odwzorowanego w pamieci: bajty przychodza z dysku
-       dopiero teraz, warstwa blokowa, po numerach ustalonych przy
-       zakladaniu odwzorowania. Do kodu systemu plikow tu nie wchodzimy:
-       ma on jeden wspolny bufor na blok. */
+    /* A page of a memory-mapped file: the bytes come from disk only
+       now, through the block layer, by the numbers fixed when the
+       mapping was created. We do not step into the filesystem code
+       here: it has one shared block buffer. */
     uint32_t first = 0, remaining = 0, write = 0;
     if (task_mmap_find(addr, &first, &remaining, &write)) {
         uint32_t frame = write ? page_frame_for_file(dir, va)
@@ -518,9 +522,9 @@ int process_demand_page(uint32_t addr)
 
     int in_heap = addr >= task_brk_base() && addr < brk;
     int in_mmap = addr >= MMAP_BASE && addr < task_mmap_next();
-    /* Stos rosnie w dol pod palcami - dokladnie tak, jak sterta rosnie
-       w gore. Osiem stron dostaje program na start, reszta dochodzi
-       wtedy, gdy naprawde jej dotknie. */
+    /* The stack grows down under the program's fingers - exactly as the
+       heap grows up. Eight pages the program gets at the start, the
+       rest arrives when it really touches them. */
     int in_stack = addr >= USER_STACK_BOTTOM && addr < USER_STACK_TOP;
     if (!in_heap && !in_mmap && !in_stack)
         return 0;
@@ -529,39 +533,41 @@ int process_demand_page(uint32_t addr)
 }
 
 
-/* --- fork: rozwidlenie procesu --------------------------------------
+/* --- fork: forking a process ----------------------------------------
  *
- * Dziecko nie jest ladowane od nowa - dostaje klon przestrzeni adresowej
- * rodzica (kopiowanie przy zapisie, zob. paging_clone_address_space) i
- * startuje jako watek jadra, ktory natychmiast wraca do ring 3 z ramka
- * rejestrow zapamietana w chwili syscalla. Wraca wiec w tym samym
- * miejscu programu co rodzic - rozni ich tylko zawartosc eax: rodzic
- * dostaje pid dziecka, dziecko zero.
+ * The child is not loaded afresh - it gets a clone of the parent's
+ * address space (copy-on-write, see paging_clone_address_space) and
+ * starts as a kernel thread that immediately returns to ring 3 with
+ * the register frame remembered at the moment of the syscall. It
+ * therefore returns at the same point of the program as the parent -
+ * all that differs is the contents of eax: the parent gets the child's
+ * pid, the child gets zero.
  */
 static void fork_child(void *arg)
 {
     struct regs *saved = arg;
-    struct regs frame = *saved;       /* na wlasny stos jadra */
+    struct regs frame = *saved;       /* onto its own kernel stack */
     kfree(saved);
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
-       Program moze biec rownolegle z innymi; do jadra wroci przez
-       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    /* We are entering user code - the big kernel lock stays here. The
+       program may run in parallel with others; it will come back into
+       the kernel through an interrupt or a system call and take the
+       lock again there. */
     biglock_leave();
     enter_ring3_regs(&frame);
 }
 
 int process_fork(struct regs *r)
 {
-    if (!task_brk())                  /* watek jadra nie ma czego rozwidlac */
+    if (!task_brk())                  /* a kernel thread has nothing to fork */
         return -1;
-    if ((r->cs & 3) != 3)             /* fork wolany spoza ring 3 */
+    if ((r->cs & 3) != 3)             /* fork called from outside ring 3 */
         return -1;
 
     struct regs *saved = kmalloc(sizeof(*saved));
     if (!saved)
         return -1;
     *saved = *r;
-    saved->eax = 0;                   /* fork() zwraca w dziecku zero */
+    saved->eax = 0;                   /* fork() returns zero in the child */
 
     uint32_t dir = paging_clone_address_space(task_current_cr3());
     if (!dir) {
@@ -578,16 +584,17 @@ int process_fork(struct regs *r)
     return task_id_of(t);
 }
 
-/* --- exec: podmiana obrazu biezacego procesu ------------------------
+/* --- exec: replacing the current process image ----------------------
  *
- * Odpowiednik uniksowego execv: pid, deskryptory i katalog roboczy
- * zostaja, wymienia sie tylko program i cala przestrzen adresowa.
- * Razem z fork() daje to klasyczna pare - rozwidl sie, a w dziecku
- * wskocz w nowy program. Przy powodzeniu nie wraca.
+ * The equivalent of Unix execv: the pid, the descriptors and the
+ * working directory stay, only the program and the whole address space
+ * are exchanged. Together with fork() this gives the classic pair -
+ * fork, and in the child jump into a new program. On success it does
+ * not return.
  */
 int process_exec(const char *cmdline)
 {
-    if (!task_brk())                  /* watek jadra nie ma czego podmieniac */
+    if (!task_brk())                  /* a kernel thread has nothing to replace */
         return -1;
 
     char buf[CMD_MAX];
@@ -606,68 +613,69 @@ int process_exec(const char *cmdline)
     uint32_t entry, esp, brk;
     uint32_t dir = build_image(tok, argc, &entry, &esp, &brk);
     if (!dir)
-        return -1;                    /* stary obraz caly czas dziala */
+        return -1;                    /* the old image is still running */
 
-    /* Od tego miejsca nie ma juz odwrotu */
-    /* Zapisywalne odwzorowania starego obrazu odsylamy, dopoki jego
-       strony jeszcze sa - za chwile przestrzeni adresowej nie bedzie */
+    /* From here on there is no way back */
+    /* We write back the old image's writable mappings while its pages
+       are still there - in a moment the address space will be gone */
     process_msync();
 
     uint32_t old = task_current_cr3();
-    task_rename(tok[0]);              /* 'ps' ma pokazywac nowy program */
+    task_rename(tok[0]);              /* 'ps' is to show the new program */
     task_set_brk(brk);
     task_set_brk_base(brk);
-    /* Opisy odwzorowan mowily o przestrzeni, ktorej juz nie bedzie,
-       a ich zakresy adresow leza tam, gdzie nowy obraz zaraz zacznie
-       zakladac wlasne - musza zniknac razem ze starym obrazem */
+    /* The mapping descriptions spoke of an address space that will no
+       longer exist, and their address ranges lie where the new image
+       is about to set up its own - they have to go with the old image */
     task_mmap_release();
     task_set_mmap_next(MMAP_BASE);
     task_use_address_space(dir);
 
-    /* Stara przestrzen znika, o ile nie kreci sie w niej jeszcze jakis
-       watek tego procesu (sys_thread) */
+    /* The old space disappears, unless some thread of this process is
+       still moving around in it (sys_thread) */
     if (!task_cr3_shared(old))
         paging_destroy_address_space(old);
 
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
-       Program moze biec rownolegle z innymi; do jadra wroci przez
-       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    /* We are entering user code - the big kernel lock stays here. The
+       program may run in parallel with others; it will come back into
+       the kernel through an interrupt or a system call and take the
+       lock again there. */
     biglock_leave();
-    enter_ring3(entry, esp);       /* nie wraca */
+    enter_ring3(entry, esp);       /* does not return */
     return 0;
 }
 
-/* sbrk: przesuwa koniec sterty procesu, mapując nowe strony.
-   Zwraca stary brk albo -1. */
+/* sbrk: moves the end of the process heap, mapping new pages.
+   Returns the old brk or -1. */
 uint32_t process_sbrk(int32_t increment)
 {
     uint32_t brk = task_brk();
-    if (!brk)                       /* nie-proces (watek jadra) */
+    if (!brk)                       /* not a process (a kernel thread) */
         return (uint32_t)-1;
     if (increment == 0)
         return brk;
-    if (increment < 0)              /* zmniejszanie: nieobslugiwane */
+    if (increment < 0)              /* shrinking: not supported */
         return (uint32_t)-1;
 
     uint32_t new_brk = brk + (uint32_t)increment;
     if (new_brk < brk || new_brk > USER_BRK_MAX)
         return (uint32_t)-1;
 
-    /* Zadnej ramki tu nie przydzielamy: sterta rosnie na papierze,
-       a strony pojawiaja sie dopiero przy pierwszym dotknieciu
-       (process_demand_page). Program, ktory prosi o 200 MiB i uzywa
-       jednego, zajmie tez jeden. */
+    /* We allocate no frame here: the heap grows on paper, and the
+       pages appear only on first touch (process_demand_page). A
+       program that asks for 200 MiB and uses one will also occupy
+       one. */
     task_set_brk(new_brk);
     return brk;
 }
 
-/* mmap: mapuje 'size' bajtow swiezej (wyzerowanej) pamieci procesu w
-   obszarze mmap i zwraca jej adres albo 0. Zwolnienie nastepuje wraz
-   z przestrzenia adresowa przy koncu procesu. */
+/* mmap: maps 'size' bytes of fresh (zeroed) process memory in the mmap
+   area and returns its address or 0. It is released together with the
+   address space at the end of the process. */
 uint32_t process_mmap(uint32_t size)
 {
     uint32_t base = task_mmap_next();
-    if (!base || !size)             /* nie-proces albo zerowy rozmiar */
+    if (!base || !size)             /* not a process, or a zero size */
         return 0;
 
     uint32_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -675,23 +683,24 @@ uint32_t process_mmap(uint32_t size)
     if (end > MMAP_MAX || end < base)
         return 0;
 
-    task_set_mmap_next(end);        /* strony jak przy sbrk - na zadanie */
+    task_set_mmap_next(end);        /* pages as with sbrk - on demand */
     return base;
 }
 
-/* --- Plik odwzorowany w pamieci ------------------------------------
+/* --- A memory-mapped file ------------------------------------------
  *
- * Program dostaje adres, pod ktorym widzi zawartosc pliku. Zadna
- * strona nie powstaje od razu: numery blokow zapamietujemy, a same
- * bajty przychodza z dysku dopiero przy pierwszym dotknieciu.
+ * The program gets an address at which it sees the contents of a file.
+ * No page appears at once: we remember the block numbers, and the
+ * bytes themselves come from disk only on first touch.
  *
- * 'zapis' rozstrzyga, co znaczy dotkniecie pisaniem. Bez niego strona
- * nie ma prawa zapisu i proba konczy sie bledem ochrony - lepiej tak,
- * niz zeby zmiana cicho zginela. Z nim strona jest zapisywalna, a jej
- * tresc wraca do pliku przy process_msync (jawnie albo na wyjsciu
- * procesu). Kiedy - decyduje program, nie jadro: samo trzymanie
- * brudnej strony niczego nie kosztuje, a odsylanie jej po kazdym
- * bajcie zabiloby caly sens odwzorowania.
+ * 'writable' decides what touching by writing means. Without it the
+ * page has no write permission and the attempt ends in a protection
+ * fault - better that than a change dying quietly. With it the page is
+ * writable and its content goes back to the file at process_msync
+ * (explicitly or when the process exits). When - is the program's
+ * decision, not the kernel's: merely holding a dirty page costs
+ * nothing, and writing it back after every byte would kill the whole
+ * point of a mapping.
  */
 uint32_t process_mmap_file(const char *name, uint32_t *size_out,
                            uint32_t write)
@@ -718,8 +727,8 @@ uint32_t process_mmap_file(const char *name, uint32_t *size_out,
     if (!blocks)
         return 0;
     for (uint32_t i = 0; i < nblocks; i++) {
-        /* Numery ustalamy TERAZ, na spokojnie - w obsludze bledu
-           strony nie wolno juz wchodzic w kod systemu plikow */
+        /* We fix the numbers NOW, at leisure - inside the page fault
+           handler we may no longer step into the filesystem code */
         blocks[i] = fs_file_block(f, i, 0);
         if (!blocks[i]) {
             kfree(blocks);
@@ -736,14 +745,16 @@ uint32_t process_mmap_file(const char *name, uint32_t *size_out,
     return base;
 }
 
-/* Odsyla do pliku strony zapisywalnych odwzorowan biezacego procesu.
- * Idziemy po stronach, nie po blokach: to strona jest jednostka, o
- * ktorej procesor mowi nam "brudna", i tylko takie tu przepisujemy.
- * Reszta obchodu jest lustrem wypelniania przy bledzie strony - te
- * same numery blokow, ustalone przy zakladaniu odwzorowania, tyle ze
- * blk_write zamiast blk_read.
+/* Writes back to their files the pages of the current process's
+ * writable mappings.
  *
- * Zwraca liczbe odeslanych stron.
+ * We walk pages, not blocks: the page is the unit the processor calls
+ * "dirty", and only such pages are copied here. The rest of the walk
+ * mirrors the filling done on a page fault - the same block numbers,
+ * fixed when the mapping was created, only with blk_write instead of
+ * blk_read.
+ *
+ * Returns the number of pages written back.
  */
 uint32_t process_msync(void)
 {
@@ -765,8 +776,9 @@ uint32_t process_msync(void)
             uint32_t offset = va - start;
             const uint8_t *src = (const uint8_t *)frame;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
-                /* Za koncem pliku nie ma czego odsylac - blok albo nie
-                   istnieje, albo nalezy juz do kogos innego */
+                /* Beyond the end of the file there is nothing to write back - the
+                   block either does not exist or already belongs to
+                   somebody else */
                 if (offset + b * FS_BLOCK >= size)
                     break;
                 uint32_t blok = task_mmap_block(va, offset / FS_BLOCK + b);
@@ -782,8 +794,8 @@ uint32_t process_msync(void)
     return sent_back_n;
 }
 
-/* Watki w procesie: nowe zadanie dzielace przestrzen adresowa, wchodzace
-   w ring 3 pod 'entry' z wlasnym stosem. */
+/* Threads within a process: a new task sharing the address space,
+   entering ring 3 at 'entry' with a stack of its own. */
 struct thread_start {
     uint32_t entry;
     uint32_t arg;
@@ -792,26 +804,29 @@ struct thread_start {
 
 static void thread_trampoline(void *a)
 {
-    /* Biegniemy juz w przestrzeni adresowej procesu (scheduler zaladowal
-       jej CR3). Ulozmy stos uzytkownika i wejdzmy w ring 3. */
+    /* We are already running in the process's address space (the
+       scheduler loaded its CR3). Let us lay out the user stack and
+       enter ring 3. */
     struct thread_start ts = *(struct thread_start *)a;
     kfree(a);
     uint32_t *sp = (uint32_t *)ts.ustack_top;
-    *--sp = ts.arg;                  /* argument funkcji watku */
-    *--sp = 0;                       /* atrapa adresu powrotu */
-    /* Wchodzimy w kod uzytkownika - wielki zamek jadra zostaje tutaj.
-       Program moze biec rownolegle z innymi; do jadra wroci przez
-       przerwanie albo wywolanie systemowe i tam wezmie go z powrotem. */
+    *--sp = ts.arg;                  /* the thread function's argument */
+    *--sp = 0;                       /* a dummy return address */
+    /* We are entering user code - the big kernel lock stays here. The
+       program may run in parallel with others; it will come back into
+       the kernel through an interrupt or a system call and take the
+       lock again there. */
     biglock_leave();
     enter_ring3(ts.entry, (uint32_t)sp);
 }
 
-/* Tworzy watek biegnacy w przestrzeni biezacego procesu. Zwraca tid albo -1. */
+/* Creates a thread running in the current process's address space.
+   Returns a tid or -1. */
 int process_thread(uint32_t entry, uint32_t arg)
 {
-    if (!task_mmap_next())                  /* tylko z procesu ring 3 */
+    if (!task_mmap_next())                  /* from a ring 3 process only */
         return -1;
-    uint32_t stack = process_mmap(8192);    /* stos watku w przestrzeni procesu */
+    uint32_t stack = process_mmap(8192);    /* the thread stack in the process's space */
     if (!stack)
         return -1;
 
@@ -823,9 +838,10 @@ int process_thread(uint32_t entry, uint32_t arg)
                                          task_current_cr3()));
 }
 
-/* Mapuje region pamieci wspoldzielonej (po kluczu) do przestrzeni
-   biezacego procesu i zwraca jego adres wirtualny albo 0. Rozne procesy
-   wskazuja te same ramki fizyczne -> widza te sama pamiec. */
+/* Maps a shared memory region (by key) into the current process's
+   address space and returns its virtual address or 0. Different
+   processes point at the same physical frames -> they see the same
+   memory. */
 uint32_t process_shm(int key, uint32_t size)
 {
     uint32_t base = task_mmap_next();
@@ -850,8 +866,9 @@ uint32_t process_shm(int key, uint32_t size)
     return base;
 }
 
-/* Buduje exec_args dla zadanej linii polecen, kopiujac nazwe programu
-   do prog[16]. Zwraca NULL, gdy program nie istnieje w initrd. */
+/* Builds exec_args for a given command line, copying the program name
+   into prog[16]. Returns NULL when the program does not exist in the
+   initrd. */
 static struct exec_args *make_args(const char *cmdline, char *prog)
 {
     uint32_t i = 0;
@@ -907,12 +924,12 @@ int exec_spawn(const char *cmdline)
     return task_id_of(task_create(prog, exec_task, a));
 }
 
-/* To samo, ale proces wolno prowadzic KAZDEMU rdzeniowi.
+/* The same, but EVERY core may run the process.
  *
- * Jego strona jadrowa zostaje zwyklym kodem jadra pod wielkim zamkiem -
- * inaczej byloby to obietnica, ktorej nikt nie moze dotrzymac. Rownolegle
- * idzie samo liczenie w pierscieniu 3, a tam program i tak spedza
- * wieksza czesc czasu. */
+ * Its kernel side stays ordinary kernel code under the big lock -
+ * otherwise this would be a promise nobody could keep. What goes in
+ * parallel is the computing in ring 3, and that is where the program
+ * spends most of its time anyway. */
 int exec_spawn_anycore(const char *cmdline)
 {
     char prog[16];
@@ -934,15 +951,15 @@ int exec_spawn_redirect(const char *cmdline, const char *outfile, int append)
     return task_id_of(task_create(prog, exec_task, a));
 }
 
-/* Uruchamia wielostopniowy potok 'a | b | c | ...': stdout kazdego
-   etapu plynie do stdin nastepnego. Wszystkie etapy dzialaja rownolegle.
-   'pipeline' to cala linia z separatorami '|'. Gdy outfile != NULL,
-   stdout ostatniego etapu idzie dodatkowo do pliku. Zwraca pid
-   ostatniego etapu albo -1.
+/* Runs a multi-stage pipeline 'a | b | c | ...': every stage's stdout
+   flows into the next one's stdin. All stages run in parallel.
+   'pipeline' is the whole line with '|' separators. When outfile is
+   not NULL, the last stage's stdout also goes to the file. Returns the
+   pid of the last stage or -1.
 
-   Najpierw przygotowujemy argumenty WSZYSTKICH etapow (walidujac, ze
-   programy istnieja) i dopiero potem tworzymy zadania - dzieki temu
-   blad w ktoryms etapie nie zostawia polowy uruchomionego potoku. */
+   We first prepare the arguments of ALL stages (validating that the
+   programs exist) and only then create the tasks - so that an error in
+   one stage does not leave half a pipeline running. */
 int exec_spawn_pipeline(const char *pipeline, const char *outfile)
 {
     char buf[CMD_MAX * MAX_STAGES];
@@ -953,7 +970,7 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile)
     }
     buf[bl] = '\0';
 
-    /* Podziel na etapy po '|' (z przycieciem spacji) */
+    /* Split into stages at '|' (trimming spaces) */
     char *seg[MAX_STAGES];
     int nseg = 0;
     char *start = buf;
@@ -976,7 +993,7 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile)
     if (nseg < 2)
         return -1;
 
-    /* Przygotuj argumenty wszystkich etapow (walidacja istnienia) */
+    /* Prepare the arguments of all stages (validating existence) */
     struct exec_args *args[MAX_STAGES];
     char prog[MAX_STAGES][16];
     for (int i = 0; i < nseg; i++) {
@@ -988,14 +1005,14 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile)
         }
     }
 
-    /* Potoki miedzy sasiednimi etapami: pipe[i] laczy etap i z i+1 */
+    /* Pipes between neighbouring stages: pipe[i] joins stage i to i+1 */
     for (int i = 0; i + 1 < nseg; i++) {
         int pidx = pipe_alloc();
         if (pidx < 0) {
             printk("run: brak wolnego potoku\n");
             for (int j = 0; j < nseg; j++)
                 kfree(args[j]);
-            /* zwolnij juz przydzielone potoki przez zamkniecie obu koncow */
+            /* release the pipes already allocated by closing both ends */
             for (int j = 0; j < i; j++) {
                 pipe_close_reader(args[j + 1]->in_pipe);
                 pipe_close_writer(args[j]->out_pipe);
@@ -1006,7 +1023,7 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile)
         args[i + 1]->in_pipe = pidx;
     }
 
-    set_outfile(args[nseg - 1], outfile);  /* stdout ostatniego -> plik */
+    set_outfile(args[nseg - 1], outfile);  /* the last one's stdout -> a file */
 
     int last_pid = -1;
     for (int i = 0; i < nseg; i++)
