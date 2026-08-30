@@ -1,21 +1,24 @@
-/* Proba zamkow: mapa ramek i sterta jadra pod obstrzalem wszystkich rdzeni
+/* A trial of the locks: the frame map and the kernel heap under fire
+ * from every core
  *
- * Zamek chroni przed czyms, czego nie widac inaczej niz probujac.
- * Wygaszenie przerwan wystarczalo, dopoki rdzen byl jeden - nikt nie
- * mogl wejsc w srodek operacji. Teraz dwa rdzenie moga byc w tej samej
- * petli szukajacej wolnej ramki naprawde jednoczesnie, znalezc te sama
- * i oba uznac ja za swoja.
+ * A lock guards against something that cannot be seen except by
+ * trying. Turning interrupts off was enough while there was one core -
+ * nobody could step into the middle of an operation. Now two cores can
+ * really be inside the same loop looking for a free frame at the same
+ * time, find the same one and both take it for their own.
  *
- * Stad ksztalt tej proby. Nie pyta "czy sie nie wysypalo", bo na to
- * odpowiedz bywa przypadkowa. Kazdy przydzial dostaje wzorzec zalezny
- * od numeru jednostki i zaraz potem jest czytany: ramka wydana dwa razy
- * ma dwoch piszacych i wzorzec sie nie zgodzi. Na koniec liczymy jeszcze
- * ramki i bajty sterty - tyle samo przed co po, inaczej cos wycieklo
- * albo wrocilo dwa razy.
+ * Hence the shape of this trial. It does not ask "did it crash",
+ * because the answer to that is sometimes accidental. Every allocation
+ * gets a pattern that depends on the unit number and is read back
+ * immediately after: a frame handed out twice has two writers and the
+ * pattern will not match. At the end we also count the frames and the
+ * heap bytes - the same before as after, otherwise something leaked or
+ * came back twice.
  *
- * Praca biegnie przez smp_praca, wiec na rdzeniu wtornym nie ma ani
- * przerwan, ani tablicy wyjatkow. Wolno tu wiec wolac tylko to, co nie
- * spi i nie czeka na sprzet: przydzial pamieci tak, dysk czy siec nie.
+ * The work runs through smp_work, so on a secondary core there are
+ * neither interrupts nor an exception table. Only things that do not
+ * sleep and do not wait for hardware may be called here: memory
+ * allocation yes, disk or network no.
  */
 
 #include <stdint.h>
@@ -28,11 +31,11 @@
 
 #define UNITS   64
 #define RETRIES   48
-#define SLOW        (4096 / 4)      /* slow w ramce */
+#define SLOW        (4096 / 4)      /* words in a frame */
 
 struct attempt {
-    volatile uint32_t nerrors;       /* niezgodnosci wzorca */
-    volatile uint32_t failed;   /* przydzialy, ktore sie nie udaly */
+    volatile uint32_t nerrors;       /* pattern mismatches */
+    volatile uint32_t failed;   /* allocations that failed */
     volatile uint32_t allocs;
 };
 
@@ -48,7 +51,7 @@ static void unit(uint32_t number, void *data)
     for (uint32_t i = 0; i < RETRIES; i++) {
         __atomic_add_fetch(&p->allocs, 1, __ATOMIC_RELAXED);
 
-        /* --- ramka fizyczna --- */
+        /* --- a physical frame --- */
         uint32_t frame = pmm_alloc_frame();
         if (!frame) {
             __atomic_add_fetch(&p->failed, 1, __ATOMIC_RELAXED);
@@ -57,9 +60,10 @@ static void unit(uint32_t number, void *data)
             volatile uint32_t *s = (volatile uint32_t *)(uintptr_t)frame;
             for (uint32_t k = 0; k < SLOW; k++)
                 s[k] = w + k;
-            /* Drugi obieg czyta to samo. Gdyby ta sama ramka trafila
-               tez do innego rdzenia, wpisalby w nia swoj wzorzec -
-               i wlasnie tu by to wyszlo. */
+            /* The second round reads the same thing. If the same frame had
+               also gone to another core, it would have written its own
+               pattern into it - and this is exactly where that would
+               show. */
             for (uint32_t k = 0; k < SLOW; k++)
                 if (s[k] != w + k) {
                     __atomic_add_fetch(&p->nerrors, 1, __ATOMIC_RELAXED);
@@ -68,7 +72,7 @@ static void unit(uint32_t number, void *data)
             pmm_free_frame(frame);
         }
 
-        /* --- blok sterty --- */
+        /* --- a heap block --- */
         uint32_t ile = 32 + (number * 7 + i * 13) % 192;
         uint8_t *b = kmalloc(ile);
         if (!b) {

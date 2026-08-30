@@ -1,10 +1,10 @@
-/* Pamiec wspoldzielona miedzy procesami (regiony po kluczu)
+/* Memory shared between processes (regions by key)
  *
- * Region to ciagly blok ramek fizycznych z PMM, zaalokowany przy
- * pierwszym uzyciu danego klucza. Kazdy proces moze go zmapowac do
- * swojej przestrzeni (process_shm w exec.c), wiec rozne procesy widza
- * te sama pamiec. Regiony zyja do konca dzialania systemu - sprzatanie
- * procesu pomija ich ramki (shm_is_shared).
+ * A region is a contiguous block of physical frames from the PMM,
+ * allocated on the first use of a given key. Every process can map it
+ * into its own space (process_shm in exec.c), so different processes
+ * see the same memory. Regions live until the system stops - cleaning
+ * up a process passes their frames by (shm_is_shared).
  */
 
 #include <stdint.h>
@@ -32,7 +32,7 @@ uint32_t shm_get(int key, uint32_t size)
         if (regions[i].used && regions[i].key == key) {
             uint32_t p = regions[i].phys;
             irq_restore(flags);
-            return p;                  /* istniejacy region */
+            return p;                  /* an existing region */
         }
 
     if (!size)
@@ -44,8 +44,8 @@ uint32_t shm_get(int key, uint32_t size)
         uint32_t phys = pmm_alloc_contiguous(pages);
         if (!phys)
             break;
-        /* Region lezy w mapowaniu identycznosciowym, wiec adres
-           fizyczny jest tu takze wirtualnym - w obu jadrach */
+        /* The region lies in the identity mapping, so the physical
+           address is also the virtual one here - in both kernels */
         memset((void *)(uintptr_t)phys, 0, pages * 4096);
         regions[i].used = 1;
         regions[i].key = key;

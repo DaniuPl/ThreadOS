@@ -1,14 +1,16 @@
-/* Szukanie programu: initrd, potem dysk
+/* Looking for a program: the initrd, then the disk
  *
- * Loader ELF i system plikow istnialy obok siebie od dawna i nigdy
- * nie byly polaczone: 'run' zagladal wylacznie do initrd. Ten plik
- * jest tym polaczeniem i niczym wiecej - decyduje, skad wziac bajty,
- * a co z nimi zrobic, wie juz loader. Dlatego uzywaja go oba jadra:
- * o trybie procesora nie ma tu ani slowa.
+ * The ELF loader and the filesystem had existed side by side for a
+ * long time and were never joined: 'run' looked into the initrd and
+ * nowhere else. This file is that joining and nothing more - it
+ * decides where to get the bytes from, and what to do with them the
+ * loader already knows. That is why both kernels use it: there is not
+ * one word about the processor mode here.
  *
- * Plik z dysku trzeba wczytac w calosci do pamieci jadra, bo loader
- * chce widziec caly obraz naraz (naglowki leza na poczatku, segmenty
- * gdziekolwiek). Initrd tego nie wymaga: on juz jest w pamieci.
+ * A file from disk has to be read into kernel memory in full, because
+ * the loader wants to see the whole image at once (the headers lie at
+ * the start, the segments anywhere). The initrd does not require that:
+ * it is in memory already.
  */
 
 #include <stdint.h>
@@ -19,9 +21,9 @@
 #include "include/heap.h"
 #include "include/printk.h"
 
-/* Sufit na program z dysku. Sterta jadra nie jest z gumy, a program
-   wiekszy niz to i tak nie zmiescilby sie w pamieci wraz z wlasna
-   przestrzenia. */
+/* The ceiling for a program from disk. The kernel heap is not made of
+   rubber, and a program larger than that would not fit in memory
+   together with its own address space anyway. */
 #define PROG_MAX (2 * 1024 * 1024)
 
 static const char *from_where = "initrd";
@@ -56,8 +58,8 @@ const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
     if (!fs_ready())
         return (const void *)0;
 
-    /* Program szukamy tam, gdzie stoi zadanie - katalog roboczy jest
-       jego wlasnoscia, tak samo jak przy 'cat' czy 'ls' */
+    /* We look for the program where the task stands - the working
+       directory is its property, just as with 'cat' or 'ls' */
     int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return (const void *)0;
@@ -74,8 +76,8 @@ const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
         printk("[jadro] brak pamieci na wczytanie '%s' (%d B)\n", name, len);
         return (const void *)0;
     }
-    /* fs_read_at oddaje LICZBE przeczytanych bajtow - obraz krotszy
-       niz plik to nie jest ten sam program */
+    /* fs_read_at returns the NUMBER of bytes read - an image shorter
+       than the file is not the same program */
     if (fs_read_at(f, 0, buf, (uint32_t)len) != len) {
         kfree(buf);
         printk("[jadro] '%s' nie da sie odczytac z dysku\n", name);

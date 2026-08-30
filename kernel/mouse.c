@@ -1,14 +1,16 @@
-/* Sterownik myszy PS/2 (IRQ12)
+/* PS/2 mouse driver (IRQ12)
  *
- * Mysz wisi na drugim porcie kontrolera 8042 (urzadzenie pomocnicze).
- * Sterujemy nia przez te same porty co klawiatura: 0x60 (dane) i 0x64
- * (status/komendy), z prefiksem 0xD4 dla bajtow kierowanych do myszy.
- * Po wlaczeniu raportowania mysz przysyla 3-bajtowe pakiety na IRQ12:
- *   bajt0 - przyciski + bity znaku/przepelnienia,
- *   bajt1 - przesuniecie X (dx), bajt2 - przesuniecie Y (dy).
+ * The mouse hangs off the second port of the 8042 controller (the
+ * auxiliary device). We drive it through the same ports as the
+ * keyboard: 0x60 (data) and 0x64 (status/commands), with the 0xD4
+ * prefix for bytes addressed to the mouse. Once reporting is turned
+ * on, the mouse sends 3-byte packets on IRQ12:
+ *   byte0 - the buttons plus sign/overflow bits,
+ *   byte1 - the X movement (dx), byte2 - the Y movement (dy).
  *
- * Pozycje akumulujemy w zakresie 320x200 (gotowe pod tryb graficzny);
- * w trybie tekstowym pokazujemy ja w lewym gornym rogu ekranu.
+ * We accumulate the position within a 320x200 range (ready for
+ * graphics mode); in text mode we show it in the top left corner of
+ * the screen.
  */
 
 #include <stdint.h>
@@ -29,7 +31,7 @@ static int mouse_buttons;
 static int cycle;
 static uint8_t packet[3];
 
-/* Czeka, az bufor wejsciowy kontrolera bedzie pusty (mozna pisac) */
+/* Waits until the controller's input buffer is empty (writing is possible) */
 static void wait_write(void)
 {
     for (int i = 0; i < 100000; i++)
@@ -37,7 +39,7 @@ static void wait_write(void)
             return;
 }
 
-/* Czeka, az pojawia sie dane do odczytu */
+/* Waits until there is data to read */
 static void wait_read(void)
 {
     for (int i = 0; i < 100000; i++)
@@ -45,7 +47,7 @@ static void wait_read(void)
             return;
 }
 
-/* Wysyla bajt do samej myszy (prefiks 0xD4) */
+/* Sends a byte to the mouse itself (the 0xD4 prefix) */
 static void mouse_command(uint8_t cmd)
 {
     wait_write();
@@ -57,10 +59,10 @@ static void mouse_command(uint8_t cmd)
 static uint8_t mouse_ack(void)
 {
     wait_read();
-    return inb(0x60);          /* mysz odpowiada 0xFA (ACK) */
+    return inb(0x60);          /* the mouse answers 0xFA (ACK) */
 }
 
-/* Rysuje pozycje i przyciski myszy w lewym gornym rogu (tryb tekstowy) */
+/* Draws the mouse position and buttons in the top left corner (text mode) */
 static void draw_status(void)
 {
     char buf[20];
@@ -91,7 +93,7 @@ static void draw_status(void)
 static void mouse_irq(struct regs *r)
 {
     (void)r;
-    /* Czytaj tylko, gdy dane pochodza od myszy (bit 5 statusu) */
+    /* Read only when the data comes from the mouse (status bit 5) */
     uint8_t status = inb(0x64);
     if (!(status & 0x01) || !(status & 0x20))
         return;
@@ -99,8 +101,8 @@ static void mouse_irq(struct regs *r)
     uint8_t data = inb(0x60);
     switch (cycle) {
     case 0:
-        if (!(data & 0x08))    /* bit3 zawsze 1 - synchronizacja pakietu */
-            return;            /* desync: pomijamy do nastepnego bajtu */
+        if (!(data & 0x08))    /* bit3 is always 1 - packet synchronisation */
+            return;            /* out of sync: skip to the next byte */
         packet[0] = data;
         cycle = 1;
         break;
@@ -112,19 +114,19 @@ static void mouse_irq(struct regs *r)
         packet[2] = data;
         cycle = 0;
 
-        if (packet[0] & 0xC0)  /* przepelnienie X/Y - odrzuc pakiet */
+        if (packet[0] & 0xC0)  /* an X/Y overflow - drop the packet */
             break;
 
         int dx = packet[1];
         if (packet[0] & 0x10)
-            dx -= 256;         /* znak X */
+            dx -= 256;         /* the X sign */
         int dy = packet[2];
         if (packet[0] & 0x20)
-            dy -= 256;         /* znak Y */
+            dy -= 256;         /* the Y sign */
 
         mouse_x += dx;
-        mouse_y -= dy;         /* os Y ekranu rosnie w dol */
-        int mw = video_w(), mh = video_h();   /* przycinaj do trybu */
+        mouse_y -= dy;         /* the screen's Y axis grows downwards */
+        int mw = video_w(), mh = video_h();   /* clamp to the mode */
         if (mouse_x < 0) mouse_x = 0;
         if (mouse_x >= mw) mouse_x = mw - 1;
         if (mouse_y < 0) mouse_y = 0;
@@ -139,23 +141,23 @@ static void mouse_irq(struct regs *r)
 void mouse_init(void)
 {
     wait_write();
-    outb(0x64, 0xA8);          /* wlacz urzadzenie pomocnicze */
+    outb(0x64, 0xA8);          /* enable the auxiliary device */
 
-    /* Wlacz przerwanie IRQ12 w bajcie konfiguracyjnym kontrolera */
+    /* Enable IRQ12 in the controller's configuration byte */
     wait_write();
-    outb(0x64, 0x20);          /* odczytaj bajt konfiguracyjny */
+    outb(0x64, 0x20);          /* read the configuration byte */
     wait_read();
     uint8_t cfg = inb(0x60);
-    cfg |= 0x02;               /* bit1: IRQ12 wlaczone */
-    cfg &= ~0x20;              /* bit5: zegar myszy wlaczony */
+    cfg |= 0x02;               /* bit1: IRQ12 enabled */
+    cfg &= ~0x20;              /* bit5: the mouse clock enabled */
     wait_write();
-    outb(0x64, 0x60);          /* zapisz bajt konfiguracyjny */
+    outb(0x64, 0x60);          /* write the configuration byte */
     wait_write();
     outb(0x60, cfg);
 
-    mouse_command(0xF6);       /* ustawienia domyslne */
+    mouse_command(0xF6);       /* default settings */
     mouse_ack();
-    mouse_command(0xF4);       /* wlacz raportowanie ruchu */
+    mouse_command(0xF4);       /* enable movement reporting */
     mouse_ack();
 
     irq_install_handler(12, mouse_irq);

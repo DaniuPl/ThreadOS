@@ -1,17 +1,19 @@
-/* Konsola tekstowa na buforze obrazu
+/* A text console on a framebuffer
  *
- * Osiem na osiem pikseli na znak, ta sama czcionka, co w reszcie
- * grafiki, szesnascie kolorow trybu tekstowego przeliczonych na RGB.
- * Blok 80x25 laduje na srodku ekranu - reszta zostaje czarna.
+ * Eight by eight pixels per character, the same font as in the rest of
+ * the graphics, sixteen text-mode colours converted to RGB. The 80x25
+ * block lands in the middle of the screen - the rest stays black.
  *
- * Rysujemy wprost do widocznego bufora, bez bufora roboczego: konsola
- * i kompozytor pulpitu nigdy nie sa widoczne naraz, a przepisywanie
- * calego ekranu po kazdej literze nie mialoby sensu.
+ * We draw straight into the visible buffer, without a working buffer:
+ * the console and the desktop compositor are never visible at the same
+ * time, and copying the whole screen after every letter would make no
+ * sense.
  *
- * Obslugujemy 32 i 24 bity na piksel. Trzydziesci dwa daje BIOS przez
- * VBE, dwadziescia cztery potrafi podac firmware UEFI - roznica jest
- * tylko taka, ze w drugim przypadku piksel nie ma bajtu dopelnienia
- * i nie wolno go zapisywac slowem, bo zdeptalby sasiada.
+ * We handle 32 and 24 bits per pixel. Thirty-two is what a BIOS gives
+ * through VBE, twenty-four is what UEFI firmware can report - the only
+ * difference being that in the second case a pixel has no padding byte
+ * and must not be written as a word, because it would trample its
+ * neighbour.
  */
 
 #include <stdint.h>
@@ -22,7 +24,7 @@
 #define CON_ROWS 25
 #define GLYPH    8
 
-/* Szesnascie kolorow trybu tekstowego VGA w postaci RGB */
+/* The sixteen VGA text-mode colours in RGB form */
 static const uint32_t console_rgb[16] = {
     0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
     0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
@@ -34,9 +36,9 @@ static uint8_t *fb;
 static uint32_t fb_addr, fb_pitch;
 static int fb_w, fb_h, fb_bpp, fb_bypp;
 
-/* Jeden piksel. Kolejnosc bajtow jest ta sama dla obu formatow:
-   niebieski, zielony, czerwony - a przy 32 bitach dochodzi bajt
-   dopelnienia, ktory i tak nic nie znaczy. */
+/* One pixel. The byte order is the same for both formats: blue,
+   green, red - and at 32 bits there is an extra padding byte which
+   means nothing anyway. */
 static inline void put_pixel(uint8_t *p, uint32_t rgb)
 {
     if (fb_bypp == 4) {
@@ -83,7 +85,7 @@ int fbcon_enable(void)
     if (!fb || fb_w < CON_COLS * GLYPH || fb_h < CON_ROWS * GLYPH)
         return 0;
 
-    /* Blok tekstu na srodku ekranu */
+    /* The text block in the middle of the screen */
     con_x0 = (fb_w - CON_COLS * GLYPH) / 2;
     con_y0 = (fb_h - CON_ROWS * GLYPH) / 2;
 

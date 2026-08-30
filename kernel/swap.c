@@ -1,15 +1,17 @@
-/* Wymiana stron na dysk - magazyn
+/* Swapping pages to disk - the store
  *
- * Plik 'swap.sys' powstaje raz, przy starcie: prosimy system plikow
- * o kolejne bloki i zapamietujemy ich numery. Od tej pory strony ida
- * na dysk wprost przez ATA, po zapamietanych numerach blokow.
+ * The file 'swap.sys' is created once, at startup: we ask the
+ * filesystem for successive blocks and remember their numbers. From
+ * then on pages go to disk directly through ATA, by the remembered
+ * block numbers.
  *
- * Robimy tak dlatego, ze wymiana rusza w najgorszych momentach - gdy
- * zabraklo ramki, a wiec potencjalnie w srodku obslugi bledu strony,
- * ktory sam trafil sie w srodku operacji na pliku. PFS ma jeden wspolny
- * bufor na blok; wejscie mu tam w droge zostawiloby na dysku bloki
- * z mieszanka dwoch zapisow. Rezerwacja miejsca przez PFS dzieje sie
- * wiec raz, na spokojnie, a potem juz tylko surowe sektory.
+ * We do it this way because swapping starts at the worst moments -
+ * when a frame ran out, and therefore potentially in the middle of a
+ * page fault handler that itself landed in the middle of a file
+ * operation. PFS has one shared block buffer; getting in its way there
+ * would leave blocks on disk with a mixture of two writes. Reserving
+ * space through PFS therefore happens once, at leisure, and after that
+ * it is only raw sectors.
  */
 
 #include <stdint.h>
@@ -21,9 +23,9 @@
 #include "include/task.h"
 #include "include/printk.h"
 
-#define SLOT_BLOCKS   (PAGE_SIZE / FS_BLOCK)          /* 4 bloki PFS na strone */
-#define SECT_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)   /* 2 sektory na blok */
-#define SLOTS_MAX     4096                            /* sufit: 16 MiB */
+#define SLOT_BLOCKS   (PAGE_SIZE / FS_BLOCK)          /* 4 PFS blocks per page */
+#define SECT_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)   /* 2 sectors per block */
+#define SLOTS_MAX     4096                            /* ceiling: 16 MiB */
 
 static uint32_t slot_blk[SLOTS_MAX][SLOT_BLOCKS];
 static uint8_t  slot_used[SLOTS_MAX];
@@ -36,8 +38,8 @@ void swap_init(void)
     if (!fs_ready())
         return;
 
-    /* Bierzemy czwarta czesc wolnego miejsca - dosc, by wymiana miala
-       sens, a za malo, by dysk przestal sluzyc do czegokolwiek innego */
+    /* We take a quarter of the free space - enough for swapping to make
+       sense, too little for the disk to stop serving anything else */
     uint32_t used, total;
     fs_usage(&used, &total);
     uint32_t slots = (total - used) / 4 / SLOT_BLOCKS;
@@ -59,7 +61,7 @@ void swap_init(void)
         for (uint32_t b = 0; b < SLOT_BLOCKS; b++) {
             uint32_t blk = fs_file_block(f, s * SLOT_BLOCKS + b, 1);
             if (!blk) {
-                slots = s;              /* dysk sie skonczyl wczesniej */
+                slots = s;              /* the disk ran out sooner */
                 goto ready;
             }
             slot_blk[s][b] = blk;
@@ -70,7 +72,7 @@ ready:
         printk("[ !! ] Wymiana: nie udalo sie przydzielic blokow\n");
         return;
     }
-    /* Ustaw rozmiar pliku, zeby 'fls' i 'df' pokazywaly zajete miejsce */
+    /* Set the file size so that 'fls' and 'df' show the space as taken */
     char zero = 0;
     fs_write_at(f, slots * PAGE_SIZE - 1, &zero, 1);
     slot_count = slots;

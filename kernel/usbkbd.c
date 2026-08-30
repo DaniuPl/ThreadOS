@@ -1,18 +1,18 @@
-/* Klawiatura USB (HID, protokol rozruchowy)
+/* USB keyboard (HID, boot protocol)
  *
- * Rozpoznanie urzadzenia przebiega tak, jak w kazdym systemie: reset
- * portu, pytanie o deskryptor urzadzenia pod adresem zerowym, nadanie
- * adresu, pytanie o konfiguracje i odszukanie w niej interfejsu klasy
- * HID w wersji rozruchowej. Potem przelaczamy urzadzenie w protokol
- * rozruchowy - ten, ktorego uzywa BIOS - i od tej pory dostajemy staly
- * raport osmiu bajtow: modyfikatory i do szesciu wcisnietych klawiszy.
+ * Recognising the device goes the way it goes in every system: reset
+ * the port, ask for the device descriptor at address zero, assign an
+ * address, ask for the configuration and find in it an interface of
+ * the HID class in its boot version. Then we switch the device into
+ * the boot protocol - the one the BIOS uses - and from then on we get
+ * a fixed eight-byte report: the modifiers and up to six pressed keys.
  *
- * Raport mowi, co JEST wcisniete, a nie co sie wlasnie zmienilo -
- * porownujemy go wiec z poprzednim i zglaszamy tylko nowe klawisze.
+ * The report says what IS pressed, not what has just changed - so we
+ * compare it with the previous one and report only the new keys.
  *
- * Odpytujemy z watku, kilkadziesiat razy na sekunde. Klawiatura i tak
- * nie ma nic pilniejszego do powiedzenia, a brak przerwan oznacza jedna
- * droge mniej, ktora moze cos pojsc nie tak.
+ * We poll from a thread, a few dozen times a second. The keyboard has
+ * nothing more urgent to say anyway, and having no interrupts means
+ * one road fewer along which something can go wrong.
  */
 
 #include <stdint.h>
@@ -23,12 +23,13 @@
 #include "include/printk.h"
 #include "include/string.h"
 
-/* Bufory sa statyczne, bo kontroler siega po nie sam - musza lezec
-   w pamieci ciaglej i pod adresem, ktory rozumie wprost */
+/* The buffers are static, because the controller reaches for them
+   itself - they have to lie in contiguous memory and at an address it
+   understands directly */
 static uint8_t desc_buf[256] __attribute__((aligned(16)));
 static uint8_t report[8] __attribute__((aligned(16)));
 
-static int dev;                  /* uchwyt urzadzenia od warstwy kontrolera */
+static int dev;                  /* the device handle from the controller layer */
 static int ep_num, ep_maxpacket, ep_interval = 8;
 
 static void setup_packet(uint8_t *p, uint8_t type, uint8_t req,
@@ -60,8 +61,8 @@ static int no_data_request(uint8_t type, uint8_t req,
     return usbhc_control(dev, setup, (void *)0, 0, 0);
 }
 
-/* Szuka w konfiguracji interfejsu HID w wersji rozruchowej i jego
-   punktu koncowego przerwaniowego. Zwraca numer interfejsu albo -1. */
+/* Looks in the configuration for a HID interface in its boot version
+   and its interrupt endpoint. Returns the interface number or -1. */
 static int find_boot_keyboard(const uint8_t *cfg, int total)
 {
     int iface = -1;
@@ -71,8 +72,8 @@ static int find_boot_keyboard(const uint8_t *cfg, int total)
         if (dlen < 2)
             break;
 
-        if (dtype == 0x04 && i + 8 < total) {          /* interfejs */
-            /* klasa 3 = HID, podklasa 1 = rozruchowa, protokol 1 = klawiatura */
+        if (dtype == 0x04 && i + 8 < total) {          /* an interface */
+            /* class 3 = HID, subclass 1 = boot, protocol 1 = keyboard */
             if (cfg[i + 5] == 3 && cfg[i + 6] == 1 && cfg[i + 7] == 1)
                 iface = cfg[i + 2];
             else
@@ -80,11 +81,11 @@ static int find_boot_keyboard(const uint8_t *cfg, int total)
         } else if (dtype == 0x05 && iface >= 0 && i + 6 < total) {
             uint8_t addr = cfg[i + 2];
             uint8_t attr = cfg[i + 3];
-            if ((addr & 0x80) && (attr & 0x03) == 0x03) {  /* IN, przerwaniowy */
+            if ((addr & 0x80) && (attr & 0x03) == 0x03) {  /* IN, interrupt */
                 ep_num = addr & 0x0F;
                 ep_maxpacket = cfg[i + 4] | (cfg[i + 5] << 8);
                 if (ep_maxpacket > 8)
-                    ep_maxpacket = 8;                  /* raport ma 8 bajtow */
+                    ep_maxpacket = 8;                  /* the report is 8 bytes */
                 ep_interval = cfg[i + 6];
                 return iface;
             }
@@ -94,8 +95,8 @@ static int find_boot_keyboard(const uint8_t *cfg, int total)
     return -1;
 }
 
-/* Kod uzycia HID -> nasz znak. Tablica obejmuje to, co ma znaczenie
-   na klawiaturze rozruchowej; reszta jest ignorowana. */
+/* A HID usage code -> our character. The table covers what matters on
+   a boot keyboard; the rest is ignored. */
 static const char hid_map[0x40] = {
     0, 0, 0, 0, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
     'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
@@ -112,7 +113,7 @@ static const char hid_map_shift[0x40] = {
     '~', '<', '>', '?', 0,
 };
 
-/* Klawisze bez odpowiednika w ASCII - te same kody, co przy PS/2 */
+/* Keys with no ASCII equivalent - the same codes as with PS/2 */
 static char special_key(uint8_t usage)
 {
     switch (usage) {
@@ -130,11 +131,11 @@ static char special_key(uint8_t usage)
 
 static void handle_key(uint8_t usage, uint8_t mods)
 {
-    int shift = (mods & 0x22) != 0;      /* lewy albo prawy Shift */
+    int shift = (mods & 0x22) != 0;      /* the left or the right Shift */
     int ctrl  = (mods & 0x11) != 0;
     int alt   = (mods & 0x44) != 0;
 
-    /* Alt+F1..F4 przelacza konsole - tak samo jak z PS/2 */
+    /* Alt+F1..F4 switches consoles - just as with PS/2 */
     if (alt && usage >= 0x3A && usage < 0x3A + 4) {
         keyboard_inject_switch(usage - 0x3A);
         return;
@@ -154,8 +155,8 @@ static uint8_t prev[6];
 static void handle_report(void)
 {
     uint8_t mods = report[0];
-    /* Raport mowi, co jest wcisniete TERAZ - nowy klawisz to taki,
-       ktorego nie bylo w poprzednim */
+    /* The report says what is pressed NOW - a new key is one that was
+       not in the previous report */
     for (int i = 0; i < 6; i++) {
         uint8_t k = report[2 + i];
         if (!k)
@@ -176,15 +177,15 @@ static void poll_thread(void *arg)
     (void)arg;
 
     for (;;) {
-        /* Klawiatura kolejkuje raporty i oddaje po jednym na zapytanie.
-           Jedno zapytanie na obieg gubiloby klawisze przy szybkim
-           pisaniu - a przy przepelnieniu kolejki urzadzenie po prostu
-           wyrzuca to, czego nie zdazylismy odebrac. Opozniamy sie wiec
-           dopiero wtedy, gdy naprawde nie ma juz nic do wziecia. */
-        /* Jeden raport na obieg. Wiecej nie trzeba: deskryptor odczytu
-           czeka w kolejce kontrolera bez przerwy, wiec raporty
-           kolejkuja sie w urzadzeniu, a nie gina. Piecdziesiat obiegow
-           na sekunde odbiera je szybciej, niz da sie pisac. */
+        /* The keyboard queues reports and hands over one per request.
+           One request per round would lose keys during fast typing -
+           and when the queue overflows the device simply throws away
+           what we failed to collect. So we only pause once there is
+           really nothing left to take. */
+        /* One report per round. More is not needed: a read descriptor
+           waits in the controller's queue at all times, so reports
+           queue up in the device rather than being lost. Fifty rounds
+           a second collect them faster than anyone can type. */
         int n = usbhc_int_in(dev, ep_num, report, ep_maxpacket);
         if (n >= 8)
             handle_report();
@@ -198,9 +199,10 @@ int usbkbd_init(void)
         return 0;
 
     for (int port = 0; port < usbhc_ports(); port++) {
-        /* Reset portu, adres urzadzenia i rozmiar pakietu punktu
-           zerowego zalatwia warstwa kontrolera - w kazdym z nich
-           wyglada to inaczej, a stad nie widac roznicy */
+        /* The port reset, the device address and the endpoint zero packet
+           size are handled by the controller layer - each of them
+           looks different there, and from here the difference is
+           invisible */
         dev = usbhc_attach(port);
         if (dev < 0)
             continue;
@@ -215,15 +217,15 @@ int usbkbd_init(void)
 
         int iface = find_boot_keyboard(desc_buf, total);
         if (iface < 0)
-            continue;                    /* cos innego niz klawiatura */
+            continue;                    /* something other than a keyboard */
 
         uint8_t cfg_value = desc_buf[5];
         if (no_data_request(0x00, 0x09, cfg_value, 0) < 0)
             continue;                    /* SET_CONFIGURATION */
 
-        /* SET_IDLE 0 - zglaszaj tylko zmiany, nie powtarzaj w kolko */
+        /* SET_IDLE 0 - report changes only, do not repeat endlessly */
         no_data_request(0x21, 0x0A, 0, (uint16_t)iface);
-        /* SET_PROTOCOL 0 - protokol rozruchowy, staly raport 8 bajtow */
+        /* SET_PROTOCOL 0 - the boot protocol, a fixed 8-byte report */
         no_data_request(0x21, 0x0B, 0, (uint16_t)iface);
 
         if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)

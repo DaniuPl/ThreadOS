@@ -1,7 +1,8 @@
-/* PIT 8253/8254 - programowalny timer
+/* PIT 8253/8254 - the programmable timer
  *
- * Kanał 0 generuje IRQ0 z zadaną częstotliwością. To serce przyszłego
- * schedulera; na razie liczy czas i pokazuje uptime w rogu ekranu.
+ * Channel 0 generates IRQ0 at a given frequency. This is the heart of
+ * the future scheduler; for now it counts time and shows the uptime in
+ * a corner of the screen.
  */
 
 #include "include/pit.h"
@@ -23,7 +24,7 @@ uint32_t pit_ticks(void)
     return ticks;
 }
 
-/* Rysuje "uptime: Ns" w prawym górnym rogu, raz na sekundę */
+/* Draws "uptime: Ns" in the top right corner, once a second */
 static void draw_uptime(uint32_t seconds)
 {
     char buf[24] = "uptime: ";
@@ -50,7 +51,7 @@ static void pit_irq(struct regs *r)
     if (ticks % frequency == 0)
         draw_uptime(ticks / frequency);
 
-    /* Wywłaszczenie: co tyknięcie oddaj procesor następnemu wątkowi */
+    /* Preemption: on every tick give the CPU to the next thread */
     schedule();
 }
 
@@ -59,7 +60,7 @@ void pit_init(uint32_t frequency_hz)
     frequency = frequency_hz;
     uint32_t divisor = PIT_BASE_HZ / frequency_hz;
 
-    /* kanał 0, lobyte/hibyte, tryb 3 (fala prostokątna) */
+    /* channel 0, lobyte/hibyte, mode 3 (square wave) */
     outb(PIT_COMMAND, 0x36);
     outb(PIT_CHANNEL0, divisor & 0xFF);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF);

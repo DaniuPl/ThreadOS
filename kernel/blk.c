@@ -1,10 +1,10 @@
-/* Warstwa urzadzenia blokowego - wybor sterownika dysku
+/* The block device layer - choosing a disk driver
  *
- * Kolejnosc jest od nowszego do starszego. NVMe siedzi wprost na PCI
- * Express i nie ma w sobie nic z ATA; AHCI przenosi dane sam, przez
- * DMA, i na nowszych plytach jest jedynym sposobem zobaczenia dysku
- * SATA; stary ATA w trybie PIO zostaje jako droga zapasowa - dziala
- * wszedzie, ale kazde slowo przepisuje procesor.
+ * The order goes from newer to older. NVMe sits straight on PCI
+ * Express and has nothing of ATA in it; AHCI moves data itself,
+ * through DMA, and on newer boards is the only way to see a SATA disk;
+ * old ATA in PIO mode remains as a fallback - it works everywhere, but
+ * the processor copies every word.
  */
 
 #include "include/blk.h"

@@ -1,14 +1,14 @@
-/* PMM - zarządzanie pamięcią fizyczną
+/* PMM - physical memory management
  *
- * Bitmapa ramek 4 KiB: bit ustawiony = ramka zajęta. Na podstawie mapy
- * pamięci z Multiboot oznaczamy dostępne obszary jako wolne, po czym
- * rezerwujemy pierwszy 1 MiB (BIOS, VGA) i obraz jądra.
+ * A bitmap of 4 KiB frames: a set bit = the frame is taken. Using the
+ * Multiboot memory map we mark the available areas as free, and then
+ * reserve the first 1 MiB (BIOS, VGA) and the kernel image.
  *
- * Zarządzamy pamięcią do PAGING_MANAGED_MAX - tyle stronicowanie umie
- * objąć mapowaniem identycznościowym, nie wchodząc w przestrzeń
- * użytkownika (zob. paging.c). Bitmapa i liczniki właścicieli są
- * statyczne na tę górną granicę; ile ramek naprawdę istnieje, mówi
- * dopiero mapa pamięci od bootloadera.
+ * We manage memory up to PAGING_MANAGED_MAX - that is as much as
+ * paging can cover with the identity mapping without stepping into
+ * user space (see paging.c). The bitmap and the owner counters are
+ * static for that upper bound; how many frames really exist is stated
+ * only by the memory map from the bootloader.
  */
 
 #include "include/pmm.h"
@@ -21,18 +21,18 @@
 #define MANAGED_LIMIT PAGING_MANAGED_MAX
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
 
-/* Symbole z linker.ld wyznaczające obraz jądra w pamięci */
+/* Symbols from linker.ld marking out the kernel image in memory */
 extern char _kernel_start[], _kernel_end[];
 
 static uint32_t bitmap[MAX_FRAMES / 32];
-/* Licznik wlascicieli ramki. Zwykla ramka ma 1; przy kopiowaniu przy
-   zapisie (fork) ta sama ramka fizyczna trafia do kilku przestrzeni
-   adresowych naraz i zwalnia sie dopiero, gdy odda ja ostatnia. */
+/* A frame's owner count. An ordinary frame has 1; with copy-on-write
+   (fork) the same physical frame ends up in several address spaces at
+   once and is freed only when the last one gives it back. */
 static uint16_t refs[MAX_FRAMES];
-static uint32_t total_frames;   /* ramki dostępne dla PMM */
+static uint32_t total_frames;   /* frames available to the PMM */
 static uint32_t used_frames;
-static uint32_t ram_kib;        /* cała wykryta pamięć */
-static uint32_t managed_top;    /* adres tuż za ostatnią zarządzaną ramką */
+static uint32_t ram_kib;        /* all detected memory */
+static uint32_t managed_top;    /* the address just past the last managed frame */
 
 static void frame_set(uint32_t frame)   { bitmap[frame / 32] |=  (1u << (frame % 32)); }
 static void frame_clear(uint32_t frame) { bitmap[frame / 32] &= ~(1u << (frame % 32)); }
@@ -53,7 +53,7 @@ static void reserve_range(uint32_t start, uint32_t end)
 
 void pmm_init(const struct multiboot_info *mbi)
 {
-    /* Wszystko zajęte, dopóki mapa pamięci nie powie inaczej */
+    /* Everything taken, until the memory map says otherwise */
     memset(bitmap, 0xFF, sizeof(bitmap));
 
     if (!(mbi->flags & MULTIBOOT_FLAG_MMAP)) {
@@ -77,7 +77,7 @@ void pmm_init(const struct multiboot_info *mbi)
             if (start < MANAGED_LIMIT) {
                 if (end > MANAGED_LIMIT)
                     end = MANAGED_LIMIT;
-                /* tylko całe ramki w obrębie obszaru */
+                /* whole frames within the area only */
                 uint32_t f_start = ((uint32_t)start + PAGE_SIZE - 1) / PAGE_SIZE;
                 uint32_t f_end = (uint32_t)(end / PAGE_SIZE);
                 for (uint32_t f = f_start; f < f_end; f++) {
@@ -93,13 +93,13 @@ void pmm_init(const struct multiboot_info *mbi)
 
     used_frames = 0;
 
-    /* Pierwszy 1 MiB: wektory BIOS, bufor VGA, struktury bootloadera */
+    /* The first 1 MiB: BIOS vectors, the VGA buffer, bootloader structures */
     reserve_range(0, 1024 * 1024);
-    /* Obraz jądra (kod + dane + bss) */
+    /* The kernel image (code + data + bss) */
     reserve_range((uint32_t)(uintptr_t)_kernel_start,
                   (uint32_t)(uintptr_t)_kernel_end);
 
-    /* Moduły bootloadera (initrd) - nie wolno ich nadpisać */
+    /* Bootloader modules (the initrd) - they must not be overwritten */
     if (mbi->flags & MULTIBOOT_FLAG_MODS) {
         const struct multiboot_mod *mods =
             (const struct multiboot_mod *)(uintptr_t)mbi->mods_addr;
@@ -115,17 +115,17 @@ uint32_t pmm_alloc_frame(void)
     return pmm_alloc_contiguous(1);
 }
 
-/* Alokacje i zwalnianie biegna tez z kontekstu IRQ (exec, sprzatanie
-   przestrzeni adresowych zombie) - stad wygaszanie przerwan. Od kiedy
-   rdzeni jest wiecej niz jeden, to juz nie wystarcza: dwa rdzenie
-   moga wejsc tu naprawde jednoczesnie i wydac te sama ramke dwa razy.
-   Stad zamek. Mapa ramek jest jedna dla calej maszyny, wiec i zamek
-   jest jeden. */
+/* Allocation and freeing also run from IRQ context (exec, cleaning up
+   zombie address spaces) - hence the interrupts being turned off.
+   Since there is more than one core, that is no longer enough: two
+   cores can really enter here at the same time and hand out the same
+   frame twice. Hence the lock. The frame map is one for the whole
+   machine, so the lock is one too. */
 static struct spinlock lock = SPINLOCK_FREE;
 
-/* Kogo prosic o pamiec, gdy jej zabraknie (ustawia to wymiana stron).
-   PMM nie wie nic o procesach ani o dysku - dostaje tylko funkcje,
-   ktora ma zwolnic co najmniej jedna ramke. */
+/* Whom to ask for memory when it runs out (set by the swapper). The
+   PMM knows nothing about processes or disks - it is only given a
+   function that has to free at least one frame. */
 static int (*reclaim)(void);
 
 void pmm_set_reclaim(int (*fn)(void))
@@ -163,9 +163,9 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
     if (addr || !reclaim)
         return addr;
 
-    /* Brak wolnych ramek: sprobuj odzyskac tyle, ile trzeba, wyrzucajac
-       nieuzywane strony procesow na dysk. Gdy odzyskiwanie przestaje
-       cokolwiek dawac, pamieci naprawde nie ma. */
+    /* No free frames: try to reclaim as many as are needed by
+       evicting unused process pages to disk. When reclaiming stops
+       yielding anything, there really is no memory. */
     for (uint32_t tries = 0; tries < n + 4; tries++) {
         if (!reclaim())
             break;
@@ -180,10 +180,11 @@ void pmm_free_frame(uint32_t addr)
 {
     irqflags_t flags = spin_lock_irq(&lock);
     uint32_t frame = addr / PAGE_SIZE;
-    /* Bezpiecznik: obraz jadra nigdy nie wraca do puli. Gdyby jakas
-       tablica stron pokazywala na wlasny kod albo dane jadra, ramka
-       trafilaby do pierwszego lepszego procesu - lepiej glosno
-       zaprotestowac, niz po cichu oddac system do przepisania. */
+    /* A safety catch: the kernel image never goes back into the pool.
+       If some page table pointed at the kernel's own code or data, the
+       frame would end up in the first process to come along - better
+       to protest loudly than to quietly hand the system over to be
+       rewritten. */
     if (addr >= (uint32_t)(uintptr_t)_kernel_start &&
         addr < (uint32_t)(uintptr_t)_kernel_end) {
         spin_unlock_irq(&lock, flags);
@@ -193,7 +194,7 @@ void pmm_free_frame(uint32_t addr)
     }
     if (frame < MAX_FRAMES && frame_test(frame)) {
         if (refs[frame] > 1) {
-            refs[frame]--;              /* ramka ma jeszcze wlascicieli */
+            refs[frame]--;              /* the frame still has owners */
         } else {
             refs[frame] = 0;
             frame_clear(frame);
@@ -203,7 +204,7 @@ void pmm_free_frame(uint32_t addr)
     spin_unlock_irq(&lock, flags);
 }
 
-/* Dopisuje wlasciciela ramki (fork: dziecko dziedziczy strony rodzica) */
+/* Adds an owner to a frame (fork: the child inherits the parent's pages) */
 void pmm_frame_ref(uint32_t addr)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -213,7 +214,7 @@ void pmm_frame_ref(uint32_t addr)
     spin_unlock_irq(&lock, flags);
 }
 
-/* Ilu wlascicieli ma ramka (0 = wolna) */
+/* How many owners a frame has (0 = free) */
 uint32_t pmm_frame_refs(uint32_t addr)
 {
     uint32_t frame = addr / PAGE_SIZE;

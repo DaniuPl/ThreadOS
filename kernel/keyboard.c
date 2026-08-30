@@ -1,9 +1,9 @@
-/* Sterownik klawiatury PS/2 (scancode set 1)
+/* PS/2 keyboard driver (scancode set 1)
  *
- * Każde wciśnięcie klawisza jest tłumaczone na ASCII i przekazywane
- * dalej. Klawisze bez odpowiednika w ASCII - strzałki, PgUp/PgDn,
- * Home/End - przychodzą jako scancode poprzedzony bajtem 0xE0
- * i zamieniane są na własne kody sterujące (KEY_* w keyboard.h).
+ * Every key press is translated into ASCII and passed on. Keys with no
+ * ASCII equivalent - arrows, PgUp/PgDn, Home/End - arrive as a
+ * scancode preceded by the byte 0xE0 and are turned into control codes
+ * of our own (KEY_* in keyboard.h).
  */
 
 #include <stdint.h>
@@ -18,27 +18,27 @@
 
 #define KBD_DATA_PORT 0x60
 
-/* Kazda konsola wirtualna ma wlasna kolejke znakow i wlasnego
-   wlasciciela. Gdy jakis proces czyta z niej klawiature (sys_read),
-   znaki ladaja w kolejce zamiast u shella tej konsoli; po smierci
-   wlasciciela konsola wraca do shella. */
+/* Every virtual console has its own character queue and its own owner.
+   When some process reads the keyboard from it (sys_read), characters
+   land in the queue instead of at that console's shell; once the owner
+   dies the console goes back to the shell. */
 #define KBD_BUF_SIZE 128
 
 struct kbd_console {
     char buf[KBD_BUF_SIZE];
     uint32_t head, tail;
-    int owner_id;                       /* proces czytajacy, -1 = shell */
+    int owner_id;                       /* the reading process, -1 = the shell */
     struct task *waiter;
-    keyboard_char_handler_t on_char;    /* shell tej konsoli */
+    keyboard_char_handler_t on_char;    /* this console's shell */
 };
 
 static struct kbd_console cons[CONSOLE_COUNT];
-static keyboard_char_handler_t override;   /* pulpit zabiera wszystkie klawisze */
+static keyboard_char_handler_t override;   /* the desktop takes all keys */
 static int cons_ready;
 
 static struct kbd_console *console(int n)
 {
-    if (!cons_ready) {                  /* -1 zamiast zera dla wlasciciela */
+    if (!cons_ready) {                  /* -1 rather than zero for the owner */
         for (int i = 0; i < CONSOLE_COUNT; i++)
             cons[i].owner_id = -1;
         cons_ready = 1;
@@ -53,8 +53,8 @@ void keyboard_set_handler(int vc, keyboard_char_handler_t handler)
     console(vc)->on_char = handler;
 }
 
-/* Pulpit dziala w trybie graficznym, gdzie konsole tekstowe nie maja
-   sensu - przechwytuje wiec wszystkie klawisze, zanim trafia gdziekolwiek */
+/* The desktop runs in graphics mode, where text consoles make no
+   sense - so it grabs all keys before they go anywhere */
 void keyboard_set_override(keyboard_char_handler_t handler)
 {
     override = handler;
@@ -65,11 +65,12 @@ keyboard_char_handler_t keyboard_console_handler(void)
     return console(console_active())->on_char;
 }
 
-/* Dostarczenie znaku - kontekst IRQ (IF=0). Znak trafia na konsole,
-   ktora akurat widac; ta decyduje, czy nalezy do procesu, czy do shella. */
+/* Delivering a character - IRQ context (IF=0). The character goes to
+   the console currently visible; that console decides whether it
+   belongs to a process or to the shell. */
 static void deliver(char c)
 {
-    if (override) {                     /* pulpit */
+    if (override) {                     /* the desktop */
         override(c);
         return;
     }
@@ -78,9 +79,10 @@ static void deliver(char c)
     if (k->owner_id >= 0 && !task_alive(k->owner_id))
         k->owner_id = -1;
 
-    /* Ctrl+C nie jest znakiem do przeczytania, tylko sygnalem dla
-       procesu trzymajacego konsole. Gdy konsoli nikt nie trzyma,
-       przerywac nie ma kogo - shell jadra znak zignoruje. */
+    /* Ctrl+C is not a character to be read but a signal for the
+       process holding the console. When nobody holds the console there
+       is nobody to interrupt - the kernel shell ignores the
+       character. */
     if (c == KEY_INTR && k->owner_id >= 0) {
         task_signal_send(k->owner_id, SIGINT);
         return;
@@ -98,9 +100,10 @@ static void deliver(char c)
     }
 }
 
-/* Wstrzykniecie znaku z innego zrodla niz PS/2 (klawiatura USB).
-   Wolane z watku, wiec sami zamykamy sekcje krytyczna - dalsza droga
-   znaku jest dokladnie ta sama, co przy przerwaniu klawiatury. */
+/* Injecting a character from a source other than PS/2 (a USB
+   keyboard). Called from a thread, so we close the critical section
+   ourselves - the character's road onward is exactly the same as with
+   a keyboard interrupt. */
 void keyboard_inject(char c)
 {
     uint32_t flags = irq_save();
@@ -108,26 +111,26 @@ void keyboard_inject(char c)
     irq_restore(flags);
 }
 
-/* Przelaczenie konsoli z innego zrodla (Alt+F1..F4 na klawiaturze USB) */
+/* Switching consoles from another source (Alt+F1..F4 on a USB keyboard) */
 void keyboard_inject_switch(int vc)
 {
-    if (override)                       /* pulpit trzyma caly ekran */
+    if (override)                       /* the desktop holds the whole screen */
         return;
     uint32_t flags = irq_save();
     console_switch(vc);
     irq_restore(flags);
 }
 
-/* Blokujacy odczyt dla syscalla read - wola proces uzytkownika */
+/* A blocking read for the read syscall - called by a user process */
 int keyboard_read(char *buf, uint32_t len)
 {
     if (!len)
         return 0;
 
     uint32_t flags = irq_save();
-    /* Proces czyta z WLASNEJ konsoli, nie z tej, na ktora akurat
-       patrzymy - inaczej przelaczenie ekranu przekierowywaloby
-       klawiature w srodku czyjegos odczytu */
+    /* A process reads from ITS OWN console, not from the one we
+       happen to be looking at - otherwise switching the screen would
+       redirect the keyboard in the middle of somebody's read */
     struct kbd_console *k = console(task_vc());
     k->owner_id = task_current_id();
 
@@ -138,8 +141,9 @@ int keyboard_read(char *buf, uint32_t len)
             buf[got++] = k->buf[k->tail++ & (KBD_BUF_SIZE - 1)];
         if (got)
             break;
-        /* Czekanie na klawisz przerywa sygnal (np. Ctrl+C): wracamy
-           z bledem, zeby proces zdazyl wejsc w swoja procedure obslugi */
+        /* Waiting for a key is interrupted by a signal (e.g. Ctrl+C): we
+           return with an error, so that the process gets a chance to
+           enter its handler */
         if (task_signal_pending()) {
             interrupted = 1;
             break;
@@ -148,14 +152,14 @@ int keyboard_read(char *buf, uint32_t len)
         task_block();
     }
 
-    if (k->waiter == task_current())    /* obudzil nas sygnal, nie klawisz */
+    if (k->waiter == task_current())    /* a signal woke us, not a key */
         k->waiter = (void *)0;
     irq_restore(flags);
     return interrupted ? -1 : (int)got;
 }
 
-/* Handler IRQ1: tlumaczenie oddajemy kbdmap, sobie zostawiamy decyzje,
-   dokad znak trafi */
+/* The IRQ1 handler: we leave the translation to kbdmap and keep the
+   decision of where the character goes for ourselves */
 static void keyboard_irq(struct regs *r)
 {
     (void)r;
@@ -164,8 +168,9 @@ static void keyboard_irq(struct regs *r)
     int fkey = -1;
     switch (kbdmap_feed(inb(KBD_DATA_PORT), &c, &fkey)) {
     case KBD_FKEY:
-        /* Alt+F1..F4 przelacza konsole. W trybie graficznym nie ma
-           czego przelaczac - pulpit trzyma caly ekran dla siebie. */
+        /* Alt+F1..F4 switches consoles. In graphics mode there is
+           nothing to switch - the desktop keeps the whole screen to
+           itself. */
         if (!override && fkey >= 0 && fkey < CONSOLE_COUNT)
             console_switch(fkey);
         break;

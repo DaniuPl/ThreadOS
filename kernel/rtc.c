@@ -1,14 +1,16 @@
-/* Sterownik zegara czasu rzeczywistego (RTC / CMOS)
+/* Real-time clock (RTC / CMOS) driver
  *
- * Uklad RTC udostepnia rejestry przez parę portow: do 0x70 piszemy
- * numer rejestru, z 0x71 czytamy/zapisujemy jego wartosc. Rejestry
- * 0-9 to czas (sekundy, minuty, godziny, dzien, miesiac, rok).
+ * The RTC chip exposes its registers through a pair of ports: we write
+ * a register number to 0x70 and read/write its value at 0x71.
+ * Registers 0-9 are the time (seconds, minutes, hours, day, month,
+ * year).
  *
- * Dwie pulapki, ktore tu obslugujemy:
- *  - aktualizacja w toku (UIP, bit 7 rejestru A) - czytanie w jej
- *    trakcie da niespojny czas; czekamy, az opadnie, i czytamy dwa
- *    razy az do zgodnosci,
- *  - format BCD vs binarny (rejestr B, bit 2) - QEMU domyslnie BCD.
+ * Two traps that we handle here:
+ *  - an update in progress (UIP, bit 7 of register A) - reading during
+ *    one gives an inconsistent time; we wait for it to fall and read
+ *    twice until the two agree,
+ *  - BCD versus binary format (register B, bit 2) - QEMU uses BCD by
+ *    default.
  */
 
 #include "include/rtc.h"
@@ -53,7 +55,7 @@ void rtc_read(struct rtc_time *t)
     a.month = cmos_read(RTC_MONTH);
     a.year = cmos_read(RTC_YEAR);
 
-    /* Czytaj ponownie, az dwa odczyty sie zgodza (czas mogl tyknac) */
+    /* Read again until two reads agree (the clock may have ticked) */
     do {
         b = a;
         while (update_in_progress())
@@ -66,17 +68,17 @@ void rtc_read(struct rtc_time *t)
              a.day != b.day || a.month != b.month || a.year != b.year);
 
     uint8_t regb = cmos_read(RTC_STB);
-    if (!(regb & 0x04)) {         /* tryb BCD -> przelicz na binarny */
+    if (!(regb & 0x04)) {         /* BCD mode -> convert to binary */
         a.sec = bcd_to_bin(a.sec);
         a.min = bcd_to_bin(a.min);
-        /* zachowaj bit PM (0x80) przy dekodowaniu godziny w 12h */
+        /* keep the PM bit (0x80) while decoding a 12h hour */
         a.hour = (bcd_to_bin(a.hour & 0x7F)) | (a.hour & 0x80);
         a.day = bcd_to_bin(a.day);
         a.month = bcd_to_bin(a.month);
         a.year = bcd_to_bin((uint8_t)a.year);
     }
 
-    if (!(regb & 0x02) && (a.hour & 0x80))   /* tryb 12h, PM */
+    if (!(regb & 0x02) && (a.hour & 0x80))   /* 12h mode, PM */
         a.hour = ((a.hour & 0x7F) + 12) % 24;
 
     t->sec = a.sec;
@@ -84,5 +86,5 @@ void rtc_read(struct rtc_time *t)
     t->hour = a.hour;
     t->day = a.day;
     t->month = a.month;
-    t->year = (uint16_t)a.year + 2000;       /* rejestr trzyma 2 cyfry */
+    t->year = (uint16_t)a.year + 2000;       /* the register holds 2 digits */
 }

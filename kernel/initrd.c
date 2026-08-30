@@ -1,17 +1,19 @@
-/* Initrd - obraz z programami użytkownika ładowany przez bootloader
+/* The initrd - an image of user programs loaded by the bootloader
  *
- * QEMU (-initrd) i GRUB (module) przekazują plik jako moduł Multiboot.
- * Format PIRD jest celowo trywialny: nagłówek, spis plików, dane.
- * PMM rezerwuje ramki modułu, więc nikt nam go nie nadpisze.
+ * QEMU (-initrd) and GRUB (module) pass the file as a Multiboot
+ * module. The PIRD format is deliberately trivial: a header, a file
+ * listing, the data. The PMM reserves the module's frames, so nobody
+ * overwrites it for us.
  */
 
 #include "include/initrd.h"
 #include "include/string.h"
 #include "include/printk.h"
 
-/* Dokad siega pamiec opisana identycznosciowo, wie stronicowanie -
-   a to jest jedyny plik w tym module zalezny od trybu procesora,
-   bo w trybie dlugim tablice stron buduje zupelnie inny kod. */
+/* How far the identity-described memory reaches is known to paging -
+   and this is the only file in this module that depends on the
+   processor mode, because in long mode the page tables are built by
+   completely different code. */
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP() paging64_identity_top()

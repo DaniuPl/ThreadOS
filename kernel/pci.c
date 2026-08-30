@@ -1,10 +1,10 @@
-/* Minimalny dostep do PCI (mechanizm 1, porty 0xCF8/0xCFC)
+/* Minimal PCI access (mechanism 1, ports 0xCF8/0xCFC)
  *
- * Uzywany dwojako:
- *  - znalezienie adresu liniowego framebuffera karty graficznej
- *    (klasa 0x03, BAR0 -> fizyczny adres pamieci obrazu),
- *  - znalezienie karty sieciowej RTL8139 po vendor/device oraz
- *    wlaczenie jej bus masteringu (DMA), bez ktorego nie ruszy.
+ * Used in two ways:
+ *  - finding the linear framebuffer address of a graphics card
+ *    (class 0x03, BAR0 -> the physical address of video memory),
+ *  - finding the RTL8139 network card by vendor/device and enabling
+ *    its bus mastering (DMA), without which it will not start.
  */
 
 #include "include/pci.h"
@@ -38,16 +38,16 @@ uint32_t pci_find_vga_lfb(void)
     for (int dev = 0; dev < 32; dev++) {
         uint32_t id = pci_config_read(0, dev, 0, 0x00);
         if ((id & 0xFFFF) == 0xFFFF)
-            continue;                       /* brak urzadzenia */
+            continue;                       /* no device */
 
         uint32_t class = pci_config_read(0, dev, 0, 0x08);
-        if ((class >> 24) != 0x03)          /* klasa bazowa 0x03 = display */
+        if ((class >> 24) != 0x03)          /* base class 0x03 = display */
             continue;
 
         uint32_t bar0 = pci_config_read(0, dev, 0, 0x10);
-        if (bar0 & 0x01)                    /* BAR I/O, nie pamieciowy */
+        if (bar0 & 0x01)                    /* an I/O BAR, not a memory one */
             continue;
-        return bar0 & 0xFFFFFFF0u;          /* adres = BAR bez bitow flag */
+        return bar0 & 0xFFFFFFF0u;          /* the address = the BAR without the flag bits */
     }
     return 0;
 }
@@ -65,9 +65,9 @@ static void fill(struct pci_dev *out, int slot, int func, uint32_t id)
     out->irq = (uint8_t)(pci_config_read(0, slot, func, 0x3C) & 0xFF);
 }
 
-/* Czy gniazdo ma wiecej niz jedna funkcje (bit 7 pola naglowka)?
-   Kontrolery wbudowane w mostek potrafia siedziec na funkcji 2 albo 3 -
-   przegladanie samych zerowych nie znajdzie ich nigdy. */
+/* Does the slot have more than one function (bit 7 of the header
+   field)? Controllers built into the bridge can sit on function 2 or
+   3 - scanning only the zero ones will never find them. */
 static int multifunction(int slot)
 {
     return (pci_config_read(0, slot, 0, 0x0C) >> 16) & 0x80;
@@ -88,9 +88,9 @@ int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out)
     return 0;
 }
 
-/* Szuka po klasie: tak trafiamy na kontroler, ktorego modelu nie znamy
-   z gory - kazdy kontroler AHCI zglasza sie jako 0x01/0x06/0x01,
-   niezaleznie od tego, czyj jest. */
+/* Searching by class: this is how we come upon a controller whose
+   model we do not know up front - every AHCI controller reports itself
+   as 0x01/0x06/0x01, no matter whose it is. */
 int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out)
 {

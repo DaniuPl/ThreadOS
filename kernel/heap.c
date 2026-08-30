@@ -1,12 +1,13 @@
-/* Sterta jądra - kmalloc/kfree
+/* The kernel heap - kmalloc/kfree
  *
- * Prosty alokator first-fit na liście bloków. Sterta zajmuje 1 MiB
- * ciągłej pamięci fizycznej z PMM (jesteśmy w mapowaniu
- * identycznościowym, więc adres fizyczny == wirtualny).
+ * A simple first-fit allocator over a list of blocks. The heap takes
+ * 1 MiB of physically contiguous memory from the PMM (we are in the
+ * identity mapping, so the physical address == the virtual one).
  *
- * Każdy blok ma nagłówek z rozmiarem i flagą "wolny". Przy alokacji
- * blok jest dzielony, jeśli reszta ma sens; przy zwalnianiu blok
- * skleja się z wolnym sąsiadem z prawej (proste łagodzenie fragmentacji).
+ * Every block has a header with a size and a "free" flag. On
+ * allocation a block is split if the remainder makes sense; on freeing
+ * a block is merged with a free neighbour on the right (simple
+ * fragmentation relief).
  */
 
 #include "include/heap.h"
@@ -17,10 +18,10 @@
 
 #define HEAP_SIZE (1024u * 1024)
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((a) - 1))
-#define MIN_SPLIT 16u   /* nie twórz wolnych ścinków mniejszych niż to */
+#define MIN_SPLIT 16u   /* do not create free scraps smaller than this */
 
 struct block {
-    uint32_t size;          /* rozmiar danych za nagłówkiem */
+    uint32_t size;          /* the data size after the header */
     uint32_t free;
     struct block *next;
 };
@@ -45,11 +46,11 @@ void heap_init(void)
     heap_head->next = (void *)0;
 }
 
-/* Sterta bywa uzywana i przez watki, i przez handlery IRQ (scheduler
-   sprzata zombie) - stad wygaszanie przerwan. Od kiedy rdzeni jest
-   wiecej niz jeden, dochodzi zamek: lista blokow jest jedna, a dwa
-   rdzenie dzielace ten sam blok jednoczesnie zostawilyby po sobie
-   liste, ktorej nikt juz nie przejdzie. */
+/* The heap is used both by threads and by IRQ handlers (the scheduler
+   reaps zombies) - hence the interrupts being turned off. Since there
+   is more than one core, a lock is needed too: the block list is one,
+   and two cores splitting the same block at the same time would leave
+   behind a list nobody could walk. */
 static struct spinlock lock = SPINLOCK_FREE;
 
 void *kmalloc(size_t size)
@@ -65,7 +66,7 @@ void *kmalloc(size_t size)
         if (!b->free || b->size < size)
             continue;
 
-        /* Podziel blok, jeśli reszta pomieści nagłówek i sensowne dane */
+        /* Split the block if the remainder can hold a header and sensible data */
         if (b->size >= size + sizeof(struct block) + MIN_SPLIT) {
             struct block *rest =
                 (struct block *)((uintptr_t)b + sizeof(struct block) + size);
@@ -100,7 +101,7 @@ void kfree(void *ptr)
         b->free = 1;
         used_bytes -= b->size;
 
-        /* Sklej z wolnym następnikiem */
+        /* Merge with a free successor */
         while (b->next && b->next->free) {
             b->size += sizeof(struct block) + b->next->size;
             b->next = b->next->next;

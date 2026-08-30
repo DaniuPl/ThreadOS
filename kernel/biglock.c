@@ -1,14 +1,14 @@
-/* Wielki zamek jadra - jeden zamek na caly kod jadra
+/* The big kernel lock - one lock for all kernel code
  *
- * Zagniezdzalny, bo musi byc: przerwanie potrafi trafic w srodek
- * wywolania systemowego, a rdzen, ktory juz zamek trzyma, nie moze na
- * siebie czekac. Licznik glebokosci i numer wlasciciela sa chronione
- * samym zamkiem - pisze do nich tylko ten, kto go ma.
+ * Recursive, because it has to be: an interrupt can land in the middle
+ * of a system call, and a core that already holds the lock cannot wait
+ * for itself. The depth counter and the owner number are protected by
+ * the lock itself - only whoever holds it writes to them.
  *
- * Odczyt 'wlasciciel' bez zamka jest bezpieczny i tak ma byc: gdy
- * trzyma go inny rdzen, przeczytamy jego numer, ktory nie jest naszym,
- * i pojdziemy czekac. Gdy nie trzyma go nikt, przeczytamy -1. W obu
- * przypadkach odpowiedz "czy to ja" jest poprawna.
+ * Reading 'owner' without the lock is safe and is meant to be: when
+ * another core holds it we read its number, which is not ours, and go
+ * and wait. When nobody holds it we read -1. In both cases the answer
+ * to "is that me" is correct.
  */
 
 #include "include/biglock.h"

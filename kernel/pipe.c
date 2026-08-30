@@ -1,14 +1,15 @@
-/* Potoki miedzyprocesowe (anonimowe)
+/* Inter-process (anonymous) pipes
  *
- * Kazdy potok to bufor kolowy plus liczniki otwartych koncow.
- * Producent pisze na swoj stdout (koniec zapisu), konsument czyta
- * ze swojego stdin (koniec odczytu); dane plyna przez bufor jadra.
+ * Every pipe is a ring buffer plus counters of open ends. The producer
+ * writes to its stdout (the write end), the consumer reads from its
+ * stdin (the read end); the data flows through a kernel buffer.
  *
- * Synchronizacja jak przy klawiaturze: gdy konsument trafi na pusty
- * potok, a sa jeszcze pisarze - blokuje sie i czeka, az zapis go
- * obudzi. Gdy ostatni pisarz zamknie koniec, czytelnik dostaje EOF.
- * Symetrycznie pisarz czeka na pelnym buforze, az czytelnik zrobi
- * miejsce. Operacje biegna pod irq_save - krotkie sekcje krytyczne.
+ * The synchronisation is as with the keyboard: when a consumer finds
+ * an empty pipe while there are still writers - it blocks and waits
+ * for a write to wake it. When the last writer closes its end, the
+ * reader gets EOF. Symmetrically a writer waits on a full buffer until
+ * the reader makes room. The operations run under irq_save - short
+ * critical sections.
  */
 
 #include "include/pipe.h"
@@ -22,8 +23,8 @@
 struct pipe {
     int used;
     uint8_t buf[PIPE_CAP];
-    uint32_t head;              /* zapisane bajty (monotonicznie) */
-    uint32_t tail;              /* przeczytane bajty */
+    uint32_t head;              /* bytes written (monotonically) */
+    uint32_t tail;              /* bytes read */
     int readers;
     int writers;
     struct task *read_waiter;
@@ -59,7 +60,7 @@ int pipe_read(int idx, void *buf, uint32_t len)
     uint8_t *dst = buf;
 
     uint32_t flags = irq_save();
-    /* Czekaj na dane, dopoki bufor pusty a ktos jeszcze moze pisac */
+    /* Wait for data while the buffer is empty and somebody can still write */
     while (pipe_count(p) == 0 && p->writers > 0) {
         p->read_waiter = task_current();
         task_block();
@@ -69,12 +70,12 @@ int pipe_read(int idx, void *buf, uint32_t len)
     while (got < len && pipe_count(p) > 0)
         dst[got++] = p->buf[p->tail++ % PIPE_CAP];
 
-    if (got && p->write_waiter) {       /* zrobilismy miejsce */
+    if (got && p->write_waiter) {       /* we made room */
         task_unblock(p->write_waiter);
         p->write_waiter = (void *)0;
     }
     irq_restore(flags);
-    return (int)got;                    /* 0 = EOF (brak pisarzy) */
+    return (int)got;                    /* 0 = EOF (no writers) */
 }
 
 int pipe_write(int idx, const void *buf, uint32_t len)
@@ -87,11 +88,11 @@ int pipe_write(int idx, const void *buf, uint32_t len)
     uint32_t flags = irq_save();
     uint32_t put = 0;
     while (put < len) {
-        if (p->readers == 0) {          /* potok przerwany */
+        if (p->readers == 0) {          /* a broken pipe */
             irq_restore(flags);
             return put ? (int)put : -1;
         }
-        if (pipe_count(p) == PIPE_CAP) {  /* pelny - poczekaj na czytelnika */
+        if (pipe_count(p) == PIPE_CAP) {  /* full - wait for the reader */
             if (p->read_waiter) {
                 task_unblock(p->read_waiter);
                 p->read_waiter = (void *)0;
@@ -103,7 +104,7 @@ int pipe_write(int idx, const void *buf, uint32_t len)
         p->buf[p->head++ % PIPE_CAP] = src[put++];
     }
 
-    if (p->read_waiter) {               /* obudz czytelnika - sa dane */
+    if (p->read_waiter) {               /* wake the reader - there is data */
         task_unblock(p->read_waiter);
         p->read_waiter = (void *)0;
     }
@@ -117,8 +118,8 @@ static void pipe_maybe_free(struct pipe *p)
         p->used = 0;
 }
 
-/* Dopisuje wlasciciela konca potoku - po fork obie strony trzymaja
-   ten sam koniec i dopiero zamkniecie obu daje EOF drugiej stronie. */
+/* Adds an owner to a pipe end - after fork both sides hold the same
+   end and only closing both gives the other side EOF. */
 void pipe_add_reader(int idx)
 {
     if (idx >= 0 && idx < MAX_PIPES && pipes[idx].used)
@@ -139,7 +140,7 @@ void pipe_close_reader(int idx)
     uint32_t flags = irq_save();
     if (p->readers > 0)
         p->readers--;
-    if (p->write_waiter) {              /* pisarz nie ma juz po co czekac */
+    if (p->write_waiter) {              /* the writer has nothing left to wait for */
         task_unblock(p->write_waiter);
         p->write_waiter = (void *)0;
     }
@@ -155,7 +156,7 @@ void pipe_close_writer(int idx)
     uint32_t flags = irq_save();
     if (p->writers > 0)
         p->writers--;
-    if (p->read_waiter) {               /* obudz - niech zobaczy EOF */
+    if (p->read_waiter) {               /* wake it - let it see the EOF */
         task_unblock(p->read_waiter);
         p->read_waiter = (void *)0;
     }

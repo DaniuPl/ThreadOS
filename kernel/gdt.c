@@ -1,9 +1,9 @@
-/* GDT - Global Descriptor Table
+/* GDT - the Global Descriptor Table
  *
- * GRUB zostawia nam swoją GDT, ale nie mamy gwarancji, gdzie leży
- * i co zawiera - jądro musi załadować własną. Używamy płaskiego
- * modelu pamięci: wszystkie segmenty obejmują pełne 4 GiB.
- * Segmenty użytkownika (ring 3) już przygotowane pod przyszłe procesy.
+ * GRUB leaves us its own GDT, but there is no guarantee where it lies
+ * or what it holds - the kernel has to load one of its own. We use a
+ * flat memory model: all segments span the full 4 GiB. The user
+ * (ring 3) segments are already prepared for future processes.
  */
 
 #include <stdint.h>
@@ -15,7 +15,7 @@ struct gdt_entry {
     uint16_t base_low;
     uint8_t  base_middle;
     uint8_t  access;
-    uint8_t  granularity;   /* górne 4 bity limitu + flagi */
+    uint8_t  granularity;   /* the upper 4 bits of the limit plus flags */
     uint8_t  base_high;
 } __attribute__((packed));
 
@@ -24,8 +24,8 @@ struct gdt_ptr {
     uint32_t base;
 } __attribute__((packed));
 
-/* TSS - w trybie chronionym używany tylko po to, by CPU wiedział,
-   na jaki stos jądra (ss0:esp0) przeskoczyć przy przerwaniu z ring 3 */
+/* The TSS - in protected mode used only so that the CPU knows which
+   kernel stack (ss0:esp0) to jump to on an interrupt from ring 3 */
 struct tss {
     uint32_t prev_tss;
     uint32_t esp0;
@@ -33,17 +33,18 @@ struct tss {
     uint32_t unused[23];
 } __attribute__((packed));
 
-/* Segment stanu zadania na KAZDY rdzen.
+/* A task state segment for EVERY core.
  *
- * Procesor czyta z niego stos jadra przy wejsciu z ring 3 - a kazdy
- * rdzen wchodzi tam z innego zadania i na inny stos. Jeden wspolny
- * segment znaczylby, ze dwa rdzenie wchodza do jadra na ten sam stos,
- * i to jest dokladnie ten rodzaj bledu, ktory nie objawia sie od razu.
+ * The processor reads the kernel stack from it on entry from ring 3 -
+ * and every core enters there from a different task and onto a
+ * different stack. One shared segment would mean two cores entering
+ * the kernel on the same stack, and that is exactly the kind of bug
+ * that does not show itself at once.
  *
- * Deskryptorow tez musi byc tyle, ile rdzeni: instrukcja ltr oznacza
- * deskryptor jako ZAJETY, wiec drugi rdzen ladujacy ten sam selektor
- * dostalby wyjatek ochrony. Tablica zostaje jedna - rozne sa tylko
- * wpisy i selektory. */
+ * There have to be as many descriptors as cores too: the ltr
+ * instruction marks a descriptor as BUSY, so a second core loading the
+ * same selector would take a protection fault. The table stays one -
+ * only the entries and the selectors differ. */
 static struct gdt_entry gdt[5 + SMP_CORES];
 static struct gdt_ptr gdt_pointer;
 static struct tss tss[SMP_CORES];
@@ -64,42 +65,43 @@ void gdt_init(void)
     gdt_pointer.limit = sizeof(gdt) - 1;
     gdt_pointer.base  = (uint32_t)&gdt;
 
-    /* access: P | DPL | S | typ; gran: G (strony 4K) | D (32-bit) */
+    /* access: P | DPL | S | type; gran: G (4K pages) | D (32-bit) */
     gdt_set_entry(0, 0, 0, 0, 0);                   /* null */
-    gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0xC0);       /* kod jądra, ring 0 */
-    gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0xC0);       /* dane jądra, ring 0 */
-    gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);       /* kod użytkownika, ring 3 */
-    gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);       /* dane użytkownika, ring 3 */
+    gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0xC0);       /* kernel code, ring 0 */
+    gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0xC0);       /* kernel data, ring 0 */
+    gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);       /* user code, ring 3 */
+    gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);       /* user data, ring 3 */
 
     for (int i = 0; i < SMP_CORES; i++) {
         tss[i].ss0 = GDT_KERNEL_DATA;
-        /* access 0x89 = obecny, 32-bit TSS; gran 0x00 = limit w bajtach */
+        /* access 0x89 = present, 32-bit TSS; gran 0x00 = the limit in bytes */
         gdt_set_entry(5 + i, (uint32_t)&tss[i], sizeof(tss[i]) - 1,
                       0x89, 0x00);
     }
 
     gdt_load();
 
-    /* Segment stanu zadania laduje TYLKO rdzen rozruchowy. Instrukcja
-       ltr oznacza deskryptor jako zajety, wiec ta sama tablica nie da
-       sie zaladowac dwa razy - a i tak nie ma po co: TSS jest jeden,
-       bo sluzy wejsciu w ring 0 z ring 3, a programy uzytkownika
-       chodza na razie tylko na rdzeniu rozruchowym. */
+    /* ONLY the boot core loads a task state segment. The ltr
+       instruction marks a descriptor as busy, so the same table cannot
+       be loaded twice - and there is no point anyway: there is one
+       TSS, because it serves entry into ring 0 from ring 3, and user
+       programs run only on the boot core for now. */
     gdt_load_tss();
 }
 
-/* Kazdy rdzen laduje SWOJ segment stanu zadania. Selektor liczy sie
-   z jego numeru: piaty wpis tablicy plus tyle, ile wynosi numer. */
+/* Every core loads ITS OWN task state segment. The selector is
+   computed from its number: the fifth table entry plus as much as the
+   number is. */
 void gdt_load_tss(void)
 {
     uint16_t sel = (uint16_t)(GDT_TSS + smp_core_apic() * 8);
     __asm__ volatile("ltr %0" : : "r"(sel) : "memory");
 }
 
-/* Laduje juz zbudowana tablice na biezacym rdzeniu i przeladowuje
-   rejestry segmentowe; CS wymaga dalekiego skoku. Rdzen wtorny wola to
-   po przejsciu w tryb chroniony, zeby zejsc z tymczasowej tablicy
-   z trampoliny na wspolna tablice jadra. */
+/* Loads the already-built table on the current core and reloads the
+   segment registers; CS requires a far jump. A secondary core calls
+   this after entering protected mode, to step off the trampoline's
+   temporary table onto the kernel's shared one. */
 void gdt_load(void)
 {
     __asm__ volatile(

@@ -1,14 +1,15 @@
-/* Multiboot 2 - przepisanie informacji od loadera
+/* Multiboot 2 - copying over the loader's information
  *
- * Nowsza postac to ciag znacznikow: kazdy ma typ, dlugosc i tresc,
- * a kolejny lezy pod adresem wyrownanym do osmiu bajtow. Bierzemy
- * z nich to samo, co dawala starsza postac - linie polecen, moduly
- * i mape pamieci - i przepisujemy do struktury, ktorej reszta jadra
- * uzywa od poczatku.
+ * The newer form is a sequence of tags: each has a type, a length and
+ * a body, and the next one lies at an address aligned to eight bytes.
+ * We take from them the same things the older form gave - the command
+ * line, the modules and the memory map - and copy them into the
+ * structure the rest of the kernel has used from the start.
  *
- * Jedna rzecz jest nowa i wazna: wskaznik na tablice ACPI. Pod BIOS-em
- * dalo sie go znalezc samemu, przeszukujac pamiec ponizej megabajta.
- * Pod UEFI tej pamieci nie ma - wskaznik podaje wylacznie loader.
+ * One thing is new and important: the pointer to the ACPI tables.
+ * Under a BIOS it could be found by ourselves, by searching memory
+ * below one megabyte. Under UEFI that memory does not exist - the
+ * pointer comes from the loader and nowhere else.
  */
 
 #include <stdint.h>
@@ -49,7 +50,7 @@ struct tag_framebuffer {
     uint32_t pitch;
     uint32_t width, height;
     uint8_t bpp;
-    uint8_t type;                /* 1 = kolory wprost, 2 = tekst EGA */
+    uint8_t type;                /* 1 = direct colours, 2 = EGA text */
     uint16_t reserved;
 } __attribute__((packed));
 
@@ -99,8 +100,8 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
 
     uint32_t nmods = 0, nmmap = 0;
 
-    /* Pierwsze osiem bajtow to calkowity rozmiar i pole zerowe;
-       znaczniki zaczynaja sie zaraz za nimi */
+    /* The first eight bytes are the total size and a zero field;
+       the tags begin right after them */
     uint32_t total = *(const uint32_t *)(uintptr_t)addr;
     uint32_t pos = addr + 8;
     uint32_t end = addr + total;
@@ -138,8 +139,8 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
                     break;
                 const struct mmap_entry2 *e =
                     (const struct mmap_entry2 *)(uintptr_t)(pos + o);
-                /* Starsza postac liczy rozmiar wpisu OD POLA za nim,
-                   wiec kolejny lezy pod adresem +size+4 */
+                /* The older form counts an entry's size FROM THE FIELD after
+                   it, so the next one lies at +size+4 */
                 mmap[nmmap].size = sizeof(struct multiboot_mmap_entry) - 4;
                 mmap[nmmap].addr = e->addr;
                 mmap[nmmap].len = e->len;
@@ -152,11 +153,11 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
         case TAG_FRAMEBUF: {
             const struct tag_framebuffer *f =
                 (const struct tag_framebuffer *)t;
-            /* Bierzemy tryb z kolorami wprost i adresem miesczacym sie
-               w 32 bitach. Glebi nie sprawdzamy tutaj - lepiej zapamietac
-               to, co loader dal, i powiedziec potem wprost, czego nie
-               umiemy obsluzyc, niz milczec, jakby bufora nie bylo wcale.
-               Typ 2 znaczy, ze loader zostawil tryb tekstowy. */
+            /* We take a mode with direct colours and an address that fits
+               in 32 bits. We do not check the depth here - better to
+               remember what the loader gave and say plainly later what
+               we cannot handle than to stay silent as if there were no
+               buffer at all. Type 2 means the loader left text mode. */
             if (f->type == 1 && (f->addr >> 32) == 0) {
                 framebuffer.addr = (uint32_t)f->addr;
                 framebuffer.pitch = f->pitch;
@@ -177,7 +178,7 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
             break;
         }
 
-        pos += (t->size + 7) & ~7u;      /* znaczniki co osiem bajtow */
+        pos += (t->size + 7) & ~7u;      /* tags every eight bytes */
     }
 
     if (nmods) {

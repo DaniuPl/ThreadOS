@@ -1,14 +1,15 @@
-/* Warstwa kart sieciowych: jedna nazwa, kilka sterownikow
+/* The network card layer: one name, several drivers
  *
- * Dokladnie ten sam pomysl, co blk.c dla dyskow. Kod sieciowy pytal
- * dotad wprost o RTL8139 i to bylo widac w kazdej linii, ktora
- * potrzebowala adresu MAC. Kart bywa jednak wiecej niz jedna i roznia
- * sie wszystkim: RTL8139 konfiguruje sie portami I/O i ma jeden
- * pierscien bajtow, e1000 ma rejestry w pamieci i dwa pierscienie
- * deskryptorow. Dla ARP-a i IP nie ma to zadnego znaczenia.
+ * Exactly the same idea as blk.c for disks. Until now the network code
+ * asked for the RTL8139 directly, and that showed in every line that
+ * needed a MAC address. There is more than one kind of card, though,
+ * and they differ in everything: the RTL8139 is configured through I/O
+ * ports and has one ring of bytes, the e1000 has registers in memory
+ * and two rings of descriptors. To ARP and IP that makes no difference
+ * whatsoever.
  *
- * Kolejnosc prob jest od nowszej do starszej: gdy w maszynie sa obie
- * karty, lepiej wziac te, ktora umie wiecej.
+ * The order of attempts goes from newer to older: when a machine has
+ * both cards, it is better to take the one that can do more.
  */
 
 #include "include/netdev.h"

@@ -1,15 +1,16 @@
-/* Tryb tekstowy VGA i konsole wirtualne
+/* VGA text mode and virtual consoles
  *
- * Sprzet ma jeden ekran (bufor pod 0xB8000), ale system trzyma ich
- * kilka: kazda konsola ma wlasne 80x25 znakow, wlasny kursor i wlasny
- * kolor. Widoczna jest jedna - jej zapisy ida rownolegle do wlasnego
- * bufora i do pamieci karty; pozostale pisza tylko u siebie i czekaja
- * na swoja kolej (Alt+F1..F4).
+ * The hardware has one screen (the buffer at 0xB8000), but the system
+ * keeps several: every console has its own 80x25 characters, its own
+ * cursor and its own colour. One is visible - its writes go both into
+ * its own buffer and into the card's memory; the others write only
+ * into their own and wait their turn (Alt+F1..F4).
  *
- * Ktora konsola dostaje wypis, decyduje ZADANIE, ktore pisze - tak jak
- * w uniksie terminal jest wlasnoscia procesu, a nie odwrotnie. Dzieki
- * temu program uruchomiony na drugiej konsoli pisze na niej dalej,
- * nawet gdy patrzymy na pierwsza.
+ * Which console receives output is decided by the TASK doing the
+ * writing - just as in Unix a terminal is a property of a process
+ * rather than the other way round. Thanks to that a program started on
+ * the second console keeps writing to it even while we are looking at
+ * the first.
  */
 
 #include "include/vga.h"
@@ -32,9 +33,10 @@ struct console {
 static struct console consoles[CONSOLE_COUNT];
 static int active;
 
-/* Gdy nie ma trybu tekstowego VGA (np. pod UEFI), znaki rysujemy sami
-   na buforze obrazu. Bufor znakow konsoli zostaje bez zmian - rozni
-   sie tylko to, dokad trafia gotowa komorka. */
+/* When there is no VGA text mode (e.g. under UEFI), we draw the
+   characters ourselves on the framebuffer. The console character
+   buffer stays unchanged - all that differs is where a finished cell
+   goes. */
 static int on_framebuffer;
 
 static uint16_t vga_entry(char c, uint8_t color)
@@ -42,8 +44,8 @@ static uint16_t vga_entry(char c, uint8_t color)
     return (uint16_t)c | (uint16_t)color << 8;
 }
 
-/* Konsola biezacego zadania. Przed startem schedulera (komunikaty
-   rozruchowe) task_vc() zwraca zero - pierwsza konsola. */
+/* The current task's console. Before the scheduler starts (boot
+   messages) task_vc() returns zero - the first console. */
 static struct console *mine(void)
 {
     int n = task_vc();
@@ -64,8 +66,8 @@ static void put(struct console *c, size_t idx, uint16_t cell)
         vga_buffer[idx] = cell;
 }
 
-/* Przerysowuje cala widoczna konsole - po przewinieciu i po
-   przelaczeniu ekranu */
+/* Redraws the whole visible console - after a scroll and after
+   switching the screen */
 static void redraw(const struct console *c)
 {
     if (on_framebuffer) {
@@ -79,8 +81,8 @@ static void redraw(const struct console *c)
     }
 }
 
-/* Wlacza rysowanie konsol na buforze obrazu. Wolane przy starcie,
-   zanim cokolwiek zostanie wypisane. */
+/* Turns on drawing consoles on the framebuffer. Called at startup,
+   before anything is printed. */
 void console_use_framebuffer(void)
 {
     if (fbcon_enable())
@@ -119,7 +121,7 @@ int console_active(void)
     return active;
 }
 
-/* Przelacza widoczna konsole - wolane z przerwania klawiatury */
+/* Switches the visible console - called from the keyboard interrupt */
 void console_switch(int n)
 {
     if (n < 0 || n >= CONSOLE_COUNT || n == active)
@@ -128,7 +130,7 @@ void console_switch(int n)
     redraw(&consoles[n]);
 }
 
-/* Przewija konsole o jedna linie w gore */
+/* Scrolls a console one line up */
 static void scroll(struct console *c)
 {
     for (size_t i = VGA_WIDTH; i < VGA_CELLS; i++)

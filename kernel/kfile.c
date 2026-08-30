@@ -1,13 +1,14 @@
-/* Warstwa deskryptorow plikow (model uniksowy)
+/* The file descriptor layer (the Unix model)
  *
- * Spina cztery swiaty pod jednym interfejsem read/write:
- *   fd 0       - klawiatura (blokujacy odczyt)
- *   fd 1, 2    - konsola (VGA + port szeregowy)
- *   fd >= 3    - pliki na dysku PFS (z wlasnym offsetem)
- *   dowolny fd - koniec potoku miedzyprocesowego (FD_PIPE)
+ * It joins four worlds under one read/write interface:
+ *   fd 0       - the keyboard (a blocking read)
+ *   fd 1, 2    - the console (VGA plus the serial port)
+ *   fd >= 3    - files on the PFS disk (each with its own offset)
+ *   any fd     - an end of an inter-process pipe (FD_PIPE)
  *
- * Dzieki temu program pisze tak samo na ekran (write(1,...)), do pliku
- * (write(fd,...)) i do potoku - rozni je tylko rodzaj deskryptora.
+ * Thanks to that a program writes the same way to the screen
+ * (write(1,...)), to a file (write(fd,...)) and to a pipe - all that
+ * differs is the descriptor's kind.
  */
 
 #include "include/kfile.h"
@@ -35,7 +36,7 @@ int file_open(const char *name, int flags)
         }
     }
     if (fd < 0)
-        return -1;                       /* brak wolnego deskryptora */
+        return -1;                       /* no free descriptor */
 
     int idx = fs_open(task_cwd(), name, flags & O_CREATE);
     if (idx < 0)
@@ -52,7 +53,7 @@ int file_open(const char *name, int flags)
     return fd;
 }
 
-/* Zamyka deskryptor, zwalniajac zasoby (koniec potoku) */
+/* Closes a descriptor, releasing its resources (a pipe end) */
 static void release_fd(struct file_desc *fd)
 {
     if (fd->kind == FD_PIPE) {
@@ -68,13 +69,13 @@ int file_close(int fd)
 {
     struct file_desc *fds = task_fds();
     if (fd < 3 || fd >= TASK_MAX_FD || !fds[fd].used)
-        return -1;                       /* 0/1/2 zostaja otwarte */
+        return -1;                       /* 0/1/2 stay open */
     release_fd(&fds[fd]);
     return 0;
 }
 
-/* Zamyka wszystkie deskryptory zadania - wolane przy jego koncu,
-   zeby konce potokow zostaly zwolnione (druga strona dostaje EOF) */
+/* Closes all of a task's descriptors - called when it ends, so that
+   pipe ends are released (the other side gets EOF) */
 void file_close_all(void)
 {
     struct file_desc *fds = task_fds();
@@ -91,7 +92,7 @@ int file_read(int fd, void *buf, uint32_t len)
 
     switch (fds[fd].kind) {
     case FD_CONSOLE:
-        return keyboard_read(buf, len);  /* fd 0: klawiatura */
+        return keyboard_read(buf, len);  /* fd 0: the keyboard */
     case FD_PIPE:
         return pipe_read(fds[fd].pipe, buf, len);
     case FD_FILE: {
@@ -111,7 +112,7 @@ int file_write(int fd, const void *buf, uint32_t len)
         return -1;
 
     switch (fds[fd].kind) {
-    case FD_CONSOLE:                     /* fd 1/2: konsola */
+    case FD_CONSOLE:                     /* fd 1/2: the console */
         console_write(buf, len);
         return (int)len;
     case FD_PIPE:
@@ -144,7 +145,7 @@ int file_redirect_stdout(const char *name, int append)
     uint32_t off = 0;
     if (append) {
         int sz = fs_size(idx);
-        off = sz > 0 ? (uint32_t)sz : 0;   /* dopisuj na koncu pliku */
+        off = sz > 0 ? (uint32_t)sz : 0;   /* append at the end of the file */
     } else {
         fs_truncate(idx);
     }

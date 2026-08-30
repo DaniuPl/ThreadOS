@@ -1,11 +1,12 @@
-/* Sterownik trybu graficznego: VGA 13h (320x200x8) albo VESA liniowy
- * (np. 640x480x32) przez interfejs Bochs/QEMU DISPI.
+/* Graphics mode driver: VGA 13h (320x200x8) or a linear VESA mode
+ * (e.g. 640x480x32) through the Bochs/QEMU DISPI interface.
  *
- * Aby kod pulpitu pozostal niezalezny od trybu, rysuje on indeksami
- * palety (0..255). W trybie 8bpp indeks trafia wprost do bufora i do
- * DAC; w trybie 32bpp trzymamy programowa palete index->RGB i piszemy
- * 32-bitowy kolor. Framebuffer 13h jest pod 0xA0000 (w mapowaniu
- * jadra), a liniowy VESA - pod adresem z PCI (mapowany osobno).
+ * So that the desktop code stays independent of the mode, it draws
+ * with palette indices (0..255). In 8bpp mode an index goes straight
+ * into the buffer and into the DAC; in 32bpp mode we keep a software
+ * index->RGB palette and write a 32-bit colour. The 13h framebuffer is
+ * at 0xA0000 (within the kernel mapping), while a linear VESA one is
+ * at an address from PCI (mapped separately).
  */
 
 #include "include/video.h"
@@ -13,9 +14,10 @@
 #include "include/fbcon.h"
 #include "include/pci.h"
 
-/* Bufor obrazu lezy poza pamiecia zarzadzana przez jadro - trzeba go
-   dokleic do mapowania, a robi to w kazdym trybie inny kod. To jedyne
-   miejsce w tym pliku, ktore o trybie procesora w ogole wie. */
+/* The framebuffer lies outside the memory the kernel manages - it has
+   to be glued onto the mapping, and different code does that in each
+   mode. This is the only place in this file that knows about the
+   processor mode at all. */
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n) paging64_map_phys((a), (n))
@@ -27,21 +29,22 @@
 #include "include/string.h"
 #include "include/io.h"
 
-/* Stan biezacego trybu. Rysujemy do 'fb' (bufor roboczy); 'front' to
-   widoczny framebuffer. Gdy sa rozne (podwojne buforowanie), gotowa
-   klatke przenosi video_present() - to usuwa migotanie i rozrywanie. */
+/* The state of the current mode. We draw into 'fb' (the working
+   buffer); 'front' is the visible framebuffer. When they differ
+   (double buffering), the finished frame is moved by video_present() -
+   which removes flicker and tearing. */
 static volatile uint8_t *fb = (uint8_t *)(uintptr_t)0xA0000;
 static volatile uint8_t *front = (uint8_t *)(uintptr_t)0xA0000;
 static int vid_w = 320, vid_h = 200;
-static int vid_pitch = 320;          /* bajtow na wiersz */
+static int vid_pitch = 320;          /* bytes per row */
 static int vid_bpp = 8;
-static int vid_bypp = 1;             /* bajtow na piksel: 1, 3 albo 4 */
-static uint32_t palette_rgb[256];    /* programowa paleta (0x00RRGGBB) */
+static int vid_bypp = 1;             /* bytes per pixel: 1, 3 or 4 */
+static uint32_t palette_rgb[256];    /* the software palette (0x00RRGGBB) */
 
 int video_w(void) { return vid_w; }
 int video_h(void) { return vid_h; }
 
-/* --- Tryb 13h (rejestry VGA) --- */
+/* --- Mode 13h (VGA registers) --- */
 static uint8_t mode13[] = {
     0x63,
     0x03, 0x01, 0x0F, 0x00, 0x0E,
@@ -83,7 +86,7 @@ static void write_regs(uint8_t *r)
 
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b)
 {
-    /* skladowe 6-bitowe (0..63) -> 8-bitowe w programowej palecie */
+    /* 6-bit components (0..63) -> 8-bit in the software palette */
     palette_rgb[idx] = ((uint32_t)((r << 2) | (r >> 4)) << 16) |
                        ((uint32_t)((g << 2) | (g >> 4)) << 8) |
                        (uint32_t)((b << 2) | (b >> 4));
@@ -108,14 +111,14 @@ static void set_default_palette(void)
 void video_init(void)
 {
     vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
-    fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* bez podwojnego buforowania */
+    fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* no double buffering */
     vid_bypp = 1;
     write_regs(mode13);
     set_default_palette();
     video_clear(0);
 }
 
-/* --- Tryb VESA liniowy (Bochs/QEMU DISPI) --- */
+/* --- Linear VESA mode (Bochs/QEMU DISPI) --- */
 #define VBE_INDEX 0x01CE
 #define VBE_DATA  0x01CF
 
@@ -127,10 +130,10 @@ static void dispi(uint16_t idx, uint16_t val)
 
 int video_init_vesa(int w, int h)
 {
-    /* Gdy tryb ustawil juz loader, nie ruszamy go: jego bufor dziala
-       na kazdym sprzecie, a interfejs Bochs/QEMU tylko na maszynie
-       wirtualnej. Dokladamy jedynie bufor roboczy, zeby kompozytor
-       nie migotal. */
+    /* When the loader has already set a mode, we leave it alone: its
+       buffer works on any hardware, while the Bochs/QEMU interface
+       only works on a virtual machine. We merely add a working
+       buffer so that the compositor does not flicker. */
     if (video_have_loader_lfb()) {
         uint32_t bytes = (uint32_t)vid_h * vid_pitch;
         uint32_t back = pmm_alloc_contiguous((bytes + 4095) / 4096);
@@ -147,7 +150,7 @@ int video_init_vesa(int w, int h)
     if (MAP_PHYS(lfb, (uint32_t)w * h * 4) < 0)
         return -1;
 
-    dispi(4, 0x00);          /* wylacz przed zmiana trybu */
+    dispi(4, 0x00);          /* disable before changing the mode */
     dispi(1, (uint16_t)w);   /* XRES */
     dispi(2, (uint16_t)h);   /* YRES */
     dispi(3, 32);            /* BPP */
@@ -156,11 +159,11 @@ int video_init_vesa(int w, int h)
     vid_w = w; vid_h = h; vid_pitch = w * 4; vid_bpp = 32; vid_bypp = 4;
     front = (uint8_t *)(uintptr_t)lfb;
 
-    /* Bufor roboczy w RAM (podwojne buforowanie - bez migotania) */
+    /* A working buffer in RAM (double buffering - no flicker) */
     uint32_t bytes = (uint32_t)w * h * 4;
     uint32_t pages = (bytes + 4095) / 4096;
     uint32_t back = pmm_alloc_contiguous(pages);
-    fb = back ? (uint8_t *)(uintptr_t)back : front;  /* bez RAM - wprost do LFB */
+    fb = back ? (uint8_t *)(uintptr_t)back : front;  /* without RAM - straight into the LFB */
 
     set_default_palette();
     video_clear(0);
@@ -168,13 +171,14 @@ int video_init_vesa(int w, int h)
     return 0;
 }
 
-/* --- Bufor obrazu podany przez bootloader ---------------------------
+/* --- The framebuffer supplied by the bootloader ----------------------
  *
- * Tryb ustawia wtedy loader, a nie my. Ma to jedna wielka zalete: nie
- * wymaga zadnego konkretnego sprzetu. Nasze video_init_vesa siega po
- * interfejs Bochs/QEMU, ktorego na prawdziwej plycie nie ma; bufor
- * podany przez GRUB-a dziala wszedzie - i to jedyna droga pod UEFI,
- * gdzie trybu tekstowego VGA nie ma w ogole.
+ * The mode is then set by the loader rather than by us. That has one
+ * great advantage: it requires no particular hardware. Our
+ * video_init_vesa reaches for the Bochs/QEMU interface, which a real
+ * board does not have; a buffer supplied by GRUB works everywhere -
+ * and it is the only road under UEFI, where there is no VGA text mode
+ * at all.
  */
 static int lfb_from_loader;
 static uint32_t lfb_addr, lfb_bytes;
@@ -186,10 +190,10 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     vid_w = w;
     vid_h = h;
     vid_pitch = (int)pitch;
-    /* Glebia taka, jaka loader naprawde dal. Wpisywanie tu na sztywno
-       trzydziestu dwoch bitow dzialalo, dopoki bufor przychodzil
-       z BIOS-u - firmware UEFI potrafi podac 24, a wtedy zapis calym
-       slowem zadeptuje sasiedni piksel. */
+    /* The depth the loader really gave. Hardcoding thirty-two bits
+       here worked while the buffer came from the BIOS - UEFI firmware
+       can report 24, and then a full-word write tramples the
+       neighbouring pixel. */
     vid_bpp = bpp;
     vid_bypp = bpp / 8;
     fb = front = (uint8_t *)(uintptr_t)addr;
@@ -200,9 +204,9 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     return 0;
 }
 
-/* Bufor lezy zwykle wysoko, poza pamiecia zarzadzana przez jadro -
-   po wlaczeniu stronicowania trzeba go doklejic do mapowania.
-   Wolane zaraz po paging_init, zanim cokolwiek na nim napiszemy. */
+/* The buffer usually lies high, outside the memory the kernel manages -
+   once paging is on it has to be glued onto the mapping. Called right
+   after paging_init, before we write anything on it. */
 int video_map_lfb(void)
 {
     if (!lfb_from_loader)
@@ -236,11 +240,11 @@ void video_present(void)
         memcpy((void *)front, (const void *)fb, (uint32_t)vid_h * vid_pitch);
 }
 
-/* --- Rysowanie (niezalezne od trybu) --- */
+/* --- Drawing (independent of the mode) --- */
 
-/* Jeden piksel pod gotowym adresem. Przy 24 bitach nie ma bajtu
-   dopelnienia, wiec zapis calym slowem zadeptalby sasiada - trzeba
-   pisac trzema bajtami. */
+/* One pixel at a ready address. At 24 bits there is no padding byte,
+   so a full-word write would trample the neighbour - it has to be
+   written as three bytes. */
 static inline void put_px(volatile uint8_t *p, uint32_t rgb)
 {
     if (vid_bypp == 4) {

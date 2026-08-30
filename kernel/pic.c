@@ -1,7 +1,7 @@
-/* PIC 8259 - kontroler przerwań sprzętowych
+/* PIC 8259 - the hardware interrupt controller
  *
- * Po starcie BIOS mapuje IRQ 0-7 na wektory 8-15, które kolidują
- * z wyjątkami CPU w trybie chronionym. Remapujemy je na 32-47.
+ * After startup the BIOS maps IRQ 0-7 onto vectors 8-15, which collide
+ * with CPU exceptions in protected mode. We remap them onto 32-47.
  */
 
 #include "include/pic.h"
@@ -16,20 +16,20 @@
 
 void pic_init(void)
 {
-    /* ICW1: inicjalizacja, będzie ICW4 */
+    /* ICW1: initialisation, an ICW4 will follow */
     outb(PIC1_CMD, 0x11); io_wait();
     outb(PIC2_CMD, 0x11); io_wait();
-    /* ICW2: offsety wektorów */
+    /* ICW2: vector offsets */
     outb(PIC1_DATA, 32); io_wait();
     outb(PIC2_DATA, 40); io_wait();
-    /* ICW3: slave na linii IRQ2 mastera */
+    /* ICW3: the slave on the master's IRQ2 line */
     outb(PIC1_DATA, 0x04); io_wait();
     outb(PIC2_DATA, 0x02); io_wait();
-    /* ICW4: tryb 8086 */
+    /* ICW4: 8086 mode */
     outb(PIC1_DATA, 0x01); io_wait();
     outb(PIC2_DATA, 0x01); io_wait();
 
-    /* Zamaskuj wszystkie IRQ - sterowniki odmaskują swoje */
+    /* Mask all IRQs - the drivers will unmask their own */
     outb(PIC1_DATA, 0xFF);
     outb(PIC2_DATA, 0xFF);
 }
@@ -46,7 +46,7 @@ void pic_unmask(uint8_t irq)
     uint16_t port = irq < 8 ? PIC1_DATA : PIC2_DATA;
     uint8_t bit = irq < 8 ? irq : irq - 8;
     outb(port, inb(port) & ~(1 << bit));
-    /* IRQ slave'a wymagają drożnej linii kaskady (IRQ2) na masterze */
+    /* Slave IRQs need the cascade line (IRQ2) open on the master */
     if (irq >= 8)
         outb(PIC1_DATA, inb(PIC1_DATA) & ~(1 << 2));
 }

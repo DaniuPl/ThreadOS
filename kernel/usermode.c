@@ -1,15 +1,15 @@
-/* Wejście w tryb użytkownika (ring 3)
+/* Entering user mode (ring 3)
  *
- * "Powrót" na niższy poziom uprawnień przez iret ze spreparowaną
- * ramką: ss, esp, eflags (IF=1), cs, eip. Segmenty danych trzeba
- * załadować ręcznie - iret ich nie rusza.
+ * A "return" to a lower privilege level through iret with a hand-built
+ * frame: ss, esp, eflags (IF=1), cs, eip. The data segments have to be
+ * loaded by hand - iret does not touch them.
  */
 
 #include "include/usermode.h"
 #include "include/gdt.h"
 #include "include/isr.h"
 
-#define USER_CS (GDT_USER_CODE | 3)   /* selektory z RPL=3 */
+#define USER_CS (GDT_USER_CODE | 3)   /* selectors with RPL=3 */
 #define USER_DS (GDT_USER_DATA | 3)
 
 void enter_ring3(uint32_t entry, uint32_t user_stack_top)
@@ -34,17 +34,18 @@ void enter_ring3(uint32_t entry, uint32_t user_stack_top)
     __builtin_unreachable();
 }
 
-/* Powrót do ring 3 z zapisanej ramki rejestrów.
+/* Return to ring 3 from a saved register frame.
  *
- * Używa tego fork(): dziecko jest osobnym wątkiem jądra, który od razu
- * "wraca z syscalla" w tym samym miejscu programu co rodzic. Ramkę
- * układamy w kolejności, jakiej oczekuje popal, i dokładamy na koniec
- * to, co zdejmuje iret (eip, cs, eflags, esp, ss).
+ * fork() uses this: the child is a separate kernel thread that
+ * immediately "returns from a syscall" at the same point of the
+ * program as the parent. We lay the frame out in the order popal
+ * expects and add at the end what iret takes off (eip, cs, eflags,
+ * esp, ss).
  */
 void enter_ring3_regs(const struct regs *r)
 {
     volatile uint32_t f[13];
-    f[0] = r->edi;  f[1] = r->esi;  f[2] = r->ebp;  f[3] = 0; /* esp - popal je pomija */
+    f[0] = r->edi;  f[1] = r->esi;  f[2] = r->ebp;  f[3] = 0; /* esp - popal skips it */
     f[4] = r->ebx;  f[5] = r->edx;  f[6] = r->ecx;  f[7] = r->eax;
     f[8] = r->eip;  f[9] = r->cs;   f[10] = r->eflags | 0x200; /* IF=1 */
     f[11] = r->useresp;

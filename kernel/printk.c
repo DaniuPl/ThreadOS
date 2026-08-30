@@ -1,16 +1,18 @@
-/* printk - formatowane wypisywanie jądra
+/* printk - formatted kernel printing
  *
- * Każdy znak idzie jednocześnie na ekran VGA i port szeregowy,
- * więc komunikaty widać też przy uruchomieniu QEMU z -serial stdio.
+ * Every character goes to the VGA screen and to the serial port at the
+ * same time, so the messages are also visible when QEMU is started
+ * with -serial stdio.
  *
- * Cały wypis jest niepodzielny. Bez tego komunikat z wątku - na
- * przykład dzierżawa DHCP - potrafił wejść w środek linii wypisywanej
- * właśnie przez inny wątek albo przez obsługę przerwania, i na ekranie
- * zostawała sieczka.
+ * The whole print is atomic. Without that a message from a thread -
+ * a DHCP lease, for instance - could land in the middle of a line
+ * being printed by another thread or by an interrupt handler, and what
+ * was left on the screen was a mess.
  *
- * Odkąd rdzeni jest więcej niż jeden, samo wygaszenie przerwań już nie
- * wystarcza: dwa rdzenie piszą naprawdę jednocześnie i przeplatają się
- * co znak. Konsola jest jedna, więc i zamek jest jeden.
+ * Since there is more than one core, turning interrupts off is no
+ * longer enough: two cores really do write at the same time and
+ * interleave character by character. The console is one, so the lock
+ * is one too.
  */
 
 #include <stdarg.h>
@@ -35,7 +37,7 @@ static void kputs(const char *s)
 
 static void print_uint(uintptr_t value, uint32_t base)
 {
-    char buf[11]; /* max 10 cyfr dziesiętnych + NUL */
+    char buf[11]; /* at most 10 decimal digits plus a NUL */
     static const char digits[] = "0123456789abcdef";
     int i = sizeof(buf) - 1;
 

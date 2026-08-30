@@ -1,14 +1,16 @@
-/* Klient DHCP
+/* The DHCP client
  *
- * Zamiast wpisanego na sztywno adresu system prosi o niego siec:
+ * Instead of a hardcoded address the system asks the network for one:
  *   DISCOVER (broadcast) -> OFFER -> REQUEST -> ACK
- * Z odpowiedzi bierzemy adres (yiaddr) oraz opcje: maske (1), brame (3)
- * i serwer DNS (6). Bez tego ProtonOS dzialalby tylko w sieci
- * uzytkownika QEMU, gdzie adresy sa z gory znane.
+ * From the answer we take the address (yiaddr) and the options: the
+ * netmask (1), the gateway (3) and the DNS server (6). Without this
+ * ProtonOS would only work in QEMU's user network, where the addresses
+ * are known up front.
  *
- * DHCP chodzi po UDP (68 -> 67), wiec korzysta ze zwyklych gniazd stosu.
- * Dopoki nie mamy adresu, pakiety musza isc rozglosnie i z adresem
- * zrodlowym 0.0.0.0 - stad net_udp_send_raw() zamiast net_udp_send().
+ * DHCP runs over UDP (68 -> 67), so it uses the stack's ordinary
+ * sockets. Until we have an address, packets have to go out as
+ * broadcasts and with the source address 0.0.0.0 - hence
+ * net_udp_send_raw() instead of net_udp_send().
  */
 
 #include "include/dhcp.h"
@@ -41,7 +43,7 @@
 #define OPT_PARAMLIST 55
 #define OPT_END       255
 
-#define BOOTP_FIXED   236            /* czesc stala pakietu (przed opcjami) */
+#define BOOTP_FIXED   236            /* the fixed part of the packet (before the options) */
 #define PKT_MAX       548
 #define MAGIC_COOKIE  0x63825363u
 
@@ -61,23 +63,25 @@ static uint32_t get32be(const uint8_t *p)
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-/* Sklada czesc stala pakietu; zwraca offset pierwszej opcji */
+/* Assembles the fixed part of the packet; returns the offset of the
+   first option */
 static int bootp_header(uint8_t *pkt, uint32_t xid)
 {
     memset(pkt, 0, PKT_MAX);
     pkt[0] = BOOTREQUEST;
     pkt[1] = 1;                      /* Ethernet */
-    pkt[2] = 6;                      /* dlugosc adresu sprzetowego */
+    pkt[2] = 6;                      /* hardware address length */
     put32be(pkt + 4, xid);
-    pkt[10] = 0x80;                  /* flaga broadcast: odpowiedz rozglosnie
-                                        (nie mamy jeszcze adresu, wiec nie
-                                        odebralibysmy pakietu unicast) */
+    pkt[10] = 0x80;                  /* the broadcast flag: answer by broadcast
+                                        (we have no address yet, so we
+                                        would not receive a unicast
+                                        packet) */
     memcpy(pkt + 28, netdev_mac(), 6);
     put32be(pkt + BOOTP_FIXED, MAGIC_COOKIE);
     return BOOTP_FIXED + 4;
 }
 
-/* Wyszukuje opcje w pakiecie; zwraca wskaznik na dane albo 0 */
+/* Looks up an option in the packet; returns a pointer to the data or 0 */
 static const uint8_t *find_option(const uint8_t *pkt, int len, uint8_t want,
                                   uint8_t *out_len)
 {
@@ -86,7 +90,7 @@ static const uint8_t *find_option(const uint8_t *pkt, int len, uint8_t want,
         uint8_t code = pkt[i];
         if (code == OPT_END)
             break;
-        if (code == 0) {             /* wypelniacz */
+        if (code == 0) {             /* padding */
             i++;
             continue;
         }
@@ -117,7 +121,7 @@ static uint32_t option_ip(const uint8_t *pkt, int len, uint8_t code)
     return (p && olen >= 4) ? get32be(p) : 0;
 }
 
-/* Czeka na odpowiedz serwera o naszym xid i zadanym typie */
+/* Waits for a server answer with our xid and of the requested type */
 static int wait_reply(int sock, uint8_t *pkt, uint32_t xid, uint8_t want,
                       uint32_t timeout_ms)
 {
@@ -140,7 +144,7 @@ static int wait_reply(int sock, uint8_t *pkt, uint32_t xid, uint8_t want,
 
 int dhcp_configure(void)
 {
-    static uint8_t pkt[PKT_MAX];     /* .bss - na stos watku (8 KiB) za duzy */
+    static uint8_t pkt[PKT_MAX];     /* .bss - too large for a thread stack (8 KiB) */
 
     int sock = net_udp_open(DHCP_CLIENT_PORT, -1);
     if (sock < 0) {
@@ -148,7 +152,8 @@ int dhcp_configure(void)
         return 0;
     }
 
-    /* xid ma odrozniac nasze wymiany od cudzych - miesza MAC z zegarem */
+    /* The xid has to tell our exchanges apart from other people's - it
+   mixes the MAC with the clock */
     const uint8_t *mac = netdev_mac();
     uint32_t xid = (uint32_t)(mac[3] << 24 | mac[4] << 16 | mac[5] << 8) ^
                    (pit_ticks() * 2654435761u);
@@ -171,7 +176,7 @@ int dhcp_configure(void)
 
         int n = wait_reply(sock, pkt, xid, DHCP_OFFER, 2000);
         if (n < 0)
-            continue;                /* brak oferty - sprobuj jeszcze raz */
+            continue;                /* no offer - try again */
 
         uint32_t offered = get32be(pkt + 16);          /* yiaddr */
         uint32_t server = option_ip(pkt, n, OPT_SERVERID);
@@ -240,7 +245,7 @@ static void dhcp_thread(void *arg)
         net_print_ip(net_ip());
         printk("\n");
     }
-    /* Komunikat wpadl w linie promptu - odrysuj zachete shella */
+    /* The message landed in the prompt's line - redraw the shell prompt */
     shell_refresh();
 }
 

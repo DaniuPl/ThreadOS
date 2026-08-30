@@ -1,18 +1,18 @@
-/* Watki jadra na wszystkich rdzeniach - proba
+/* Kernel threads on all cores - a trial
  *
- * Zadanie utworzone przez task_create_wszedzie wolno poprowadzic
- * kazdemu rdzeniowi. Zwykle zadanie zostaje na rozruchowym i tak ma
- * byc: siega po sterowniki i system plikow, a te pisane byly dla
- * jednego rdzenia. Tutaj wolajacy bierze na siebie, ze jego watek
- * dotyka tylko tego, co zniesie dwa rdzenie naraz - a ten dotyka
- * wlasnej komorki w tablicy i niczego wiecej.
+ * A task created by task_create_anycore may be run by any core. An
+ * ordinary task stays on the boot one, and rightly so: it reaches for
+ * drivers and the filesystem, and those were written for a single
+ * core. Here the caller takes on that its thread touches only what
+ * survives two cores at once - and this one touches its own cell in a
+ * table and nothing more.
  *
- * Dowod jest dwuczesciowy, bo kazda czesc z osobna dalaby sie podrobic.
- * Numer rdzenia watek zapisuje sam, w trakcie liczenia - ale gdyby
- * scheduler tylko przerzucal go miedzy rdzeniami po kolei, maska
- * wygladalaby tak samo. Dlatego mierzymy jeszcze czas: ta sama praca
- * puszczona rownolegle ma skonczyc sie szybciej niz zrobiona po kolei.
- * Jednego rdzenia nie da sie o to oszukac.
+ * The proof has two parts, because each on its own could be faked. The
+ * core number is written down by the thread itself, while computing -
+ * but if the scheduler merely shuffled it between cores in turn, the
+ * mask would look exactly the same. So we also measure time: the same
+ * work run in parallel is to finish sooner than the same work done one
+ * piece after another. A single core cannot fake that.
  */
 
 #include <stdint.h>
@@ -25,12 +25,12 @@
 #define THREADS   4
 #define STEPS   100000000u
 
-static volatile uint32_t mask[THREADS];    /* rdzenie, ktore go prowadzily */
+static volatile uint32_t mask[THREADS];    /* the cores that ran it */
 static volatile uint32_t result[THREADS];
 static volatile uint32_t finished;
 
-/* Liniowy generator kongruencyjny - zawsze ten sam ciag dla danego
-   numeru, wiec wynik nie zalezy od tego, kto go policzyl */
+/* A linear congruential generator - always the same sequence for a
+   given number, so the result does not depend on who computed it */
 static uint32_t count(uint32_t number, volatile uint32_t *where_i_was)
 {
     uint32_t stan = number * 2654435761u + 12345u;
@@ -38,8 +38,9 @@ static uint32_t count(uint32_t number, volatile uint32_t *where_i_was)
     for (uint32_t i = 0; i < STEPS; i++) {
         stan = stan * 1103515245u + 12345u;
         sum += stan >> 16;
-        /* Co jakis czas zapisz, na ktorym rdzeniu wlasnie jestesmy.
-           Rzadko, bo odczyt numeru idzie przez lokalny APIC. */
+        /* Now and then write down which core we are on right now.
+           Rarely, because reading the number goes through the local
+           APIC. */
         if (where_i_was && (i & 0xFFFF) == 0)
             *where_i_was |= 1u << smp_core();
     }
@@ -61,15 +62,16 @@ void smpthreads_test(void)
     }
     finished = 0;
 
-    /* --- ile trwa JEDNA porcja, policzona tu, w watku shella ---
-       To jest miara odniesienia. Cztery porcje puszczone rownolegle
-       maja zajac tyle samo czasu, co jedna; zrobione po kolei zajelyby
-       cztery razy tyle. Miedzy jednym a drugim jest cala roznica. */
+    /* --- how long ONE portion takes, computed here, in the shell thread ---
+       This is the reference measurement. Four portions run in parallel
+       are to take the same time as one; done one after another they
+       would take four times as long. Between the one and the other
+       lies the whole difference. */
     uint32_t start = pit_ticks();
     uint32_t pattern = count(0, (volatile uint32_t *)0);
     uint32_t time_one = pit_ticks() - start;
 
-    /* --- cztery porcje naraz, kazda we wlasnym watku --- */
+    /* --- four portions at once, each in its own thread --- */
     start = pit_ticks();
     for (uint32_t i = 0; i < THREADS; i++)
         task_create_anycore("liczy", thread, (void *)(uintptr_t)i);
@@ -81,9 +83,9 @@ void smpthreads_test(void)
     int matches = 1;
     for (int i = 0; i < THREADS; i++) {
         all_cores |= mask[i];
-        /* Kazdy watek liczyl te sama porcje, co watek odniesienia -
-           wynik ma byc co do bitu ten sam, niezaleznie od tego, ktory
-           rdzen go policzyl */
+        /* Every thread computed the same portion as the reference
+           thread - the result is to be the same to the bit, no matter
+           which core computed it */
         if (result[i] != pattern)
             matches = 0;
         printk("  watek%d: rdzenie %x, wynik %u\n", i, mask[i], result[i]);

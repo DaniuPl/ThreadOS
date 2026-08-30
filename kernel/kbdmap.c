@@ -1,14 +1,14 @@
-/* Tlumaczenie scancode'ow PS/2 na znaki (zestaw 1)
+/* Translating PS/2 scancodes into characters (set 1)
  *
- * Wydzielone ze sterownika klawiatury, bo to jedyna jego czesc, ktora
- * nie zalezy od niczego: ani od konsol wirtualnych, ani od zadan, ani
- * od trybu procesora. Dzieki temu ten sam automat obsluguje klawiature
- * w obu jadrach - a decyzja, dokad trafi gotowy znak, zostaje po
- * stronie sterownika.
+ * Split out of the keyboard driver, because it is the one part of it
+ * that depends on nothing: neither on virtual consoles, nor on tasks,
+ * nor on the processor mode. Thanks to that the same state machine
+ * serves the keyboard in both kernels - and the decision where a
+ * finished character goes stays with the driver.
  *
- * Stan musi tu byc, bo jedno wcisniecie klawisza rozklada sie na kilka
- * bajtow: prefiks 0xE0 dla klawiszy rozszerzonych, osobne kody
- * wcisniecia i puszczenia modyfikatorow.
+ * State has to live here, because one key press spreads over several
+ * bytes: the 0xE0 prefix for extended keys, separate press and release
+ * codes for the modifiers.
  */
 
 #include "include/kbdmap.h"
@@ -17,11 +17,11 @@
 #define SC_RSHIFT 0x36
 #define SC_CTRL   0x1D
 #define SC_ALT    0x38
-#define SC_F1     0x3B          /* F1..F12 leza kolejno od 0x3B */
+#define SC_F1     0x3B          /* F1..F12 lie consecutively from 0x3B */
 #define SC_RELEASED 0x80
 #define SC_EXTENDED 0xE0
 
-/* Mapa scancode -> ASCII dla układu US (indeks = scancode) */
+/* The scancode -> ASCII map for the US layout (index = scancode) */
 static const char keymap[128] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
     '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
@@ -38,7 +38,7 @@ static const char keymap_shift[128] = {
     0, '*', 0, ' ',
 };
 
-/* Scancode rozszerzony (po 0xE0) -> nasz kod sterujacy */
+/* An extended scancode (after 0xE0) -> our control code */
 static char extended_key(uint8_t scancode)
 {
     switch (scancode) {
@@ -57,11 +57,11 @@ static char extended_key(uint8_t scancode)
 static int shift_pressed;
 static int ctrl_pressed;
 static int alt_pressed;
-static int extended_next;               /* poprzedni bajt to 0xE0 */
+static int extended_next;               /* the previous byte was 0xE0 */
 
 int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
 {
-    if (scancode == SC_EXTENDED) {      /* prefiks klawisza rozszerzonego */
+    if (scancode == SC_EXTENDED) {      /* the extended key prefix */
         extended_next = 1;
         return KBD_NOTHING;
     }
@@ -85,8 +85,8 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         alt_pressed = 0;
         return KBD_NOTHING;
     }
-    /* Alt + klawisz funkcyjny. Co to znaczy, decyduje wolajacy - my
-       podajemy tylko numer klawisza, liczony od zera. */
+    /* Alt plus a function key. What that means is the caller's
+       decision - we only report the key number, counted from zero. */
     if (alt_pressed && scancode >= SC_F1 && scancode < SC_F1 + 12) {
         *fkey = scancode - SC_F1;
         return KBD_FKEY;
@@ -108,11 +108,11 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         shift_pressed = 0;
         return KBD_NOTHING;
     }
-    if (scancode & SC_RELEASED)         /* puszczenie klawisza - ignoruj */
+    if (scancode & SC_RELEASED)         /* a key release - ignore */
         return KBD_NOTHING;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
-    if (ctrl_pressed && c == 'c')       /* pozostale kombinacje z Ctrl - jeszcze nie */
+    if (ctrl_pressed && c == 'c')       /* the other Ctrl combinations - not yet */
         c = KEY_INTR;
     if (!c)
         return KBD_NOTHING;

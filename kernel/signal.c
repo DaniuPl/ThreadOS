@@ -1,21 +1,23 @@
-/* Sygnaly
+/* Signals
  *
- * Sygnal to najprostsza forma zdarzenia asynchronicznego: jeden bit
- * w masce oczekujacych. Doreczamy go zawsze w tym samym, bezpiecznym
- * miejscu - przy powrocie do ring 3, gdy na stosie jadra lezy pelna
- * ramka rejestrow procesu.
+ * A signal is the simplest form of an asynchronous event: one bit in a
+ * pending mask. We always deliver it at the same safe place - on the
+ * return to ring 3, when a full frame of the process's registers lies
+ * on the kernel stack.
  *
- * Gdy proces ma wlasna procedure obslugi, jadro odklada te ramke na
- * jego wlasny stos, dokladajac numer sygnalu jako argument i adres
- * trampoliny jako adres powrotu. Handler wykonuje sie wiec w ring 3,
- * na wlasnym stosie procesu. Kiedy wraca, trampolina wola sigreturn,
- * a jadro odtwarza z tej ramki przerwany stan - proces wraca dokladnie
- * tam, gdzie sygnal go zastal.
+ * When the process has a handler of its own, the kernel pushes that
+ * frame onto the process's own stack, adding the signal number as an
+ * argument and the trampoline address as the return address. The
+ * handler therefore runs in ring 3, on the process's own stack. When
+ * it returns, the trampoline calls sigreturn and the kernel restores
+ * the interrupted state from that frame - the process comes back
+ * exactly where the signal found it.
  *
- * Do procesu nie wraca nic, czego nie zapisalismy sami: przy odtwarzaniu
- * bierzemy z ramki wylacznie rejestry ogolne, eip, esp i flagi
- * arytmetyczne. Selektory segmentow i IOPL zostaja jadrowe, inaczej
- * proces podstawilby sobie w sigreturn wlasny stan uprzywilejowany.
+ * Nothing we did not write ourselves goes back to the process: when
+ * restoring we take from the frame only the general registers, eip,
+ * esp and the arithmetic flags. The segment selectors and IOPL stay
+ * the kernel's, otherwise a process could substitute a privileged
+ * state of its own in sigreturn.
  */
 
 #include <stdint.h>
@@ -28,8 +30,8 @@
 
 #define USER_TOP 0xC0000000u
 
-/* Flagi eflags, ktore proces moze sobie przywrocic: same arytmetyczne
-   plus kierunek. Bez TF (pulapka krokowa), bez IOPL, bez NT. */
+/* The eflags a process may restore for itself: the arithmetic ones
+   plus the direction flag. No TF (single-step trap), no IOPL, no NT. */
 #define EFLAGS_USER_MASK 0xCD5u
 
 const char *signal_name(int sig)
@@ -43,7 +45,7 @@ const char *signal_name(int sig)
     }
 }
 
-/* Czy caly zakres lezy w zamapowanej pamieci uzytkownika? */
+/* Does the whole range lie in mapped user memory? */
 static int user_range_ok(uint32_t addr, uint32_t len)
 {
     if (!addr || addr >= USER_TOP || len > USER_TOP - addr)
@@ -55,11 +57,11 @@ static int user_range_ok(uint32_t addr, uint32_t len)
     return 1;
 }
 
-/* Domyslna reakcja jadra na sygnal bez procedury obslugi */
+/* The kernel's default reaction to a signal with no handler */
 static void default_action(int sig)
 {
     if (sig == SIGCHLD)
-        return;                     /* domyslnie nikogo nie obchodzi */
+        return;                     /* by default nobody cares */
     printk("[jadro] proces '%s' (pid %d) zakonczony przez %s\n",
            task_current_name(), task_current_id(), signal_name(sig));
     task_exit(-sig);
@@ -67,9 +69,9 @@ static void default_action(int sig)
 
 void signal_deliver(struct regs *r)
 {
-    if ((r->cs & 3) != 3)               /* tylko przy powrocie do ring 3 */
+    if ((r->cs & 3) != 3)               /* only on the return to ring 3 */
         return;
-    if (task_signal_in_handler())       /* nie zagniezdzamy procedur obslugi */
+    if (task_signal_in_handler())       /* we do not nest handlers */
         return;
 
     int sig = task_signal_take();
@@ -84,7 +86,7 @@ void signal_deliver(struct regs *r)
         return;
     }
 
-    /* Ramka przerwanego stanu i dwa slowa wywolania handlera */
+    /* The interrupted state's frame plus the two words of the handler call */
     uint32_t frame = (r->useresp - sizeof(struct regs)) & ~3u;
     uint32_t sp = frame - 8;
     if (!user_range_ok(sp, sizeof(struct regs) + 8)) {
@@ -95,12 +97,12 @@ void signal_deliver(struct regs *r)
     }
 
     memcpy((void *)frame, r, sizeof(struct regs));
-    ((uint32_t *)sp)[1] = (uint32_t)sig;          /* argument handlera */
-    ((uint32_t *)sp)[0] = task_signal_tramp();    /* adres powrotu */
+    ((uint32_t *)sp)[1] = (uint32_t)sig;          /* the handler's argument */
+    ((uint32_t *)sp)[0] = task_signal_tramp();    /* the return address */
 
     r->useresp = sp;
     r->eip = handler;
-    r->eflags |= 0x200;                           /* handler chodzi z IF=1 */
+    r->eflags |= 0x200;                           /* the handler runs with IF=1 */
     task_signal_enter(frame);
 }
 

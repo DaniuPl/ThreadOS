@@ -1,10 +1,10 @@
-/* Sterownik dysku ATA (IDE) w trybie PIO z odpytywaniem
+/* ATA (IDE) disk driver in PIO mode with polling
  *
- * Obsluguje pierwsza magistrale (porty 0x1F0-0x1F7), dysk master,
- * adresowanie LBA28. To najprostszy mozliwy sterownik: bez przerwan,
- * bez DMA - czytamy/zapisujemy 256 slow przez port danych, czekajac
- * w petli az kontroler zglosi gotowosc. Dla zabawkowego systemu i
- * dyskow QEMU w zupelnosci wystarczy.
+ * It handles the first bus (ports 0x1F0-0x1F7), the master drive and
+ * LBA28 addressing. This is the simplest possible driver: no
+ * interrupts, no DMA - we read/write 256 words through the data port,
+ * waiting in a loop until the controller reports readiness. For a toy
+ * system and QEMU disks that is entirely enough.
  */
 
 #include "include/ata.h"
@@ -17,9 +17,9 @@
 #define ATA_LBA_MID   0x1F4
 #define ATA_LBA_HI    0x1F5
 #define ATA_DRIVE     0x1F6
-#define ATA_STATUS    0x1F7   /* odczyt: status; zapis: komenda */
+#define ATA_STATUS    0x1F7   /* read: status; write: command */
 #define ATA_CMD       0x1F7
-#define ATA_ALTSTATUS 0x3F6   /* status bez kasowania zadania przerwania */
+#define ATA_ALTSTATUS 0x3F6   /* status without clearing the interrupt request */
 
 #define ST_BSY  0x80
 #define ST_DRDY 0x40
@@ -33,14 +33,15 @@
 
 int ata_present(void)
 {
-    /* Pusta magistrala zwraca 0xFF (linie w stanie wysokim) */
+    /* An empty bus returns 0xFF (the lines held high) */
     return inb(ATA_STATUS) != 0xFF;
 }
 
 static int ata_wait_drq(void);
 
-/* Pojemnosc dysku: komenda IDENTIFY DEVICE zwraca 256 slow opisu,
-   z ktorych slowa 60-61 to liczba sektorow adresowalnych w LBA28. */
+/* Disk capacity: the IDENTIFY DEVICE command returns 256 descriptor
+   words, of which words 60-61 are the number of LBA28 addressable
+   sectors. */
 uint32_t ata_sectors(void)
 {
     static uint32_t cached;
@@ -49,14 +50,14 @@ uint32_t ata_sectors(void)
     if (!ata_present())
         return 0;
 
-    outb(ATA_DRIVE, 0xA0);              /* master, tryb CHS/LBA bez znaczenia */
+    outb(ATA_DRIVE, 0xA0);              /* master, CHS/LBA mode irrelevant */
     outb(ATA_SECCOUNT, 0);
     outb(ATA_LBA_LO, 0);
     outb(ATA_LBA_MID, 0);
     outb(ATA_LBA_HI, 0);
     outb(ATA_CMD, CMD_IDENTIFY);
 
-    if (inb(ATA_STATUS) == 0)           /* brak dysku */
+    if (inb(ATA_STATUS) == 0)           /* no disk */
         return 0;
     if (ata_wait_drq() < 0)
         return 0;
@@ -69,20 +70,22 @@ uint32_t ata_sectors(void)
     return cached;
 }
 
-/* Odczyt alt-status 4x daje wymagane ~400 ns na ustabilizowanie BSY
-   po wyborze dysku lub wydaniu komendy (i nie kasuje zadania IRQ) */
+/* Reading alt-status 4x gives the required ~400 ns for BSY to settle
+   after selecting a drive or issuing a command (and does not clear the
+   IRQ request) */
 static void ata_delay(void)
 {
     for (int i = 0; i < 4; i++)
         inb(ATA_ALTSTATUS);
 }
 
-/* Czeka az BSY opadnie i DRQ wstanie; -1 gdy kontroler zglosi blad */
+/* Waits for BSY to fall and DRQ to rise; -1 when the controller
+   reports an error */
 static int ata_wait_drq(void)
 {
     for (int i = 0; i < 1000000; i++) {
         uint8_t st = inb(ATA_STATUS);
-        if (st & (ST_ERR | 0x20))   /* ERR albo DF (device fault) */
+        if (st & (ST_ERR | 0x20))   /* ERR or DF (device fault) */
             return -1;
         if (!(st & ST_BSY) && (st & ST_DRQ))
             return 0;
@@ -98,8 +101,9 @@ static int ata_wait_not_busy(void)
     return -1;
 }
 
-/* Wybor dysku master + zaladowanie adresu LBA28, licznik sektorow = 1.
-   Wybor dysku MUSI poprzedzac komende, a po nim trzeba odczekac. */
+/* Selecting the master drive plus loading the LBA28 address, sector
+   count = 1. The drive selection MUST precede the command, and one has
+   to wait after it. */
 static int ata_setup(uint32_t lba)
 {
     outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));  /* master, LBA */
@@ -144,8 +148,8 @@ int ata_write_sector(uint32_t lba, const void *buf)
     for (int i = 0; i < ATA_SECTOR_SIZE / 2; i++)
         outw(ATA_DATA, in[i]);
 
-    /* Wymus zrzut bufora kontrolera na talerz - bez tego zapis moze
-       nie przetrwac restartu */
+    /* Force the controller's buffer onto the platter - without this a
+       write may not survive a restart */
     outb(ATA_CMD, CMD_FLUSH);
     ata_delay();
     return ata_wait_not_busy();

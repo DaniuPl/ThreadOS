@@ -1,17 +1,17 @@
-/* Wybor kontrolera USB
+/* Choosing a USB host controller
  *
- * Tak samo jak blk.c wybiera miedzy ATA, AHCI i NVMe: probujemy
- * najpierw xHCI, bo nowsze plyty nie maja juz nic innego, a potem
- * UHCI. Wyzej nikogo nie obchodzi, ktory z nich odpowiedzial.
+ * Just as blk.c chooses between ATA, AHCI and NVMe: we try xHCI first,
+ * because newer boards have nothing else, and then UHCI. Nobody above
+ * cares which of them answered.
  *
- * Ten plik jest tez miejscem, w ktorym mieszka rozmowa POWITALNA
- * z urzadzeniem - a wiec ta jedyna czesc rozpoznawania, ktora
- * w obu kontrolerach wyglada zupelnie inaczej. W UHCI adres nadaje
- * sterownik zwyklym zapytaniem i sam musi go sobie wymyslic; w xHCI
- * robi to kontroler przy okazji przydzielania slotu, a sterownik
- * dostaje tylko numer. Powyzej tej granicy jest juz tylko rozmowa
- * z urzadzeniem, ta sama niezaleznie od kontrolera - i dlatego
- * usbkbd.c nie wie, przez co mowi.
+ * This file is also where the GREETING conversation with a device
+ * lives - that is, the one part of device recognition that looks
+ * completely different in the two controllers. In UHCI the driver
+ * assigns the address with an ordinary request and has to invent it
+ * itself; in xHCI the controller does it while allocating a slot and
+ * the driver only gets a number. Above that border there is only the
+ * conversation with the device, the same regardless of the controller -
+ * and that is why usbkbd.c does not know what it is talking through.
  */
 
 #include <stdint.h>
@@ -24,9 +24,10 @@ enum { NONE, XHCI, UHCI };
 
 static int controller;
 
-/* Urzadzenia po stronie UHCI trzeba opisywac samemu: kontroler nie
-   pamieta o nich nic. Przy xHCI cala ta wiedza siedzi w kontrolerze,
-   a nam wystarczy numer slotu. */
+/* Devices on the UHCI side have to be described by hand: the
+   controller remembers nothing about them. With xHCI all that
+   knowledge sits inside the controller and a slot number is enough for
+   us. */
 #define DEVICES 4
 
 struct device {
@@ -86,10 +87,11 @@ static void query(uint8_t *p, uint8_t typ, uint8_t req,
     p[7] = (uint8_t)(len >> 8);
 }
 
-/* Powitanie urzadzenia na UHCI: osiem pierwszych bajtow opisu mowi,
-   jak duze pakiety przyjmuje punkt zerowy, a potem nadajemy adres.
-   Kazdy port dostaje inny numer - gdyby na pierwszym wisialo cos,
-   co klawiatura nie jest, drugi nie moze po nim odziedziczyc adresu. */
+/* Greeting a device on UHCI: the first eight bytes of the descriptor
+   say how large the packets endpoint zero accepts are, and then we
+   assign an address. Every port gets a different number - if the first
+   one had something that is not a keyboard hanging off it, the second
+   must not inherit its address. */
 static int uhci_greet(int port, struct device *u)
 {
     if (!uhci_port_reset(port))
@@ -121,8 +123,9 @@ int usbhc_attach(int port)
         int slot = xhci_attach(port);
         if (slot < 0)
             return -1;
-        /* Uchwyt to numer slotu; zeby nie mieszal sie z uchwytami
-           UHCI, przechowujemy go tak samo - kazdy backend czyta swoje */
+        /* The handle is the slot number; so that it does not get
+           confused with UHCI handles, we store it the same way - each
+           backend reads its own */
         return slot;
     }
     if (controller != UHCI)
@@ -162,8 +165,8 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval)
         return xhci_int_endpoint(dev, ep, maxpacket, interval);
     if (controller != UHCI || dev > DEVICES)
         return -1;
-    /* UHCI nie ma czego zakladac: o punkcie koncowym mowi sie mu przy
-       kazdej przesylce z osobna */
+    /* UHCI has nothing to set up: an endpoint is described to it with
+       every transfer separately */
     struct device *u = &list[dev - 1];
     u->ep = ep;
     u->ep_maxpacket = maxpacket;

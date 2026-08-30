@@ -1,5 +1,5 @@
-/* Minimalne funkcje z biblioteki standardowej - w środowisku freestanding
- * nie mamy libc, a GCC i tak może emitować wywołania memset/memcpy. */
+/* Minimal standard library functions - in a freestanding environment
+ * we have no libc, and GCC may emit calls to memset/memcpy anyway. */
 
 #include "include/string.h"
 

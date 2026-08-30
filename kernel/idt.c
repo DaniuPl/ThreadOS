@@ -1,7 +1,7 @@
-/* IDT - Interrupt Descriptor Table
+/* IDT - the Interrupt Descriptor Table
  *
- * Tablica 256 bramek mówiących CPU, dokąd skoczyć przy każdym
- * wektorze przerwania. Wypełniamy wyjątki 0-31 i IRQ 32-47.
+ * A table of 256 gates telling the CPU where to jump for every
+ * interrupt vector. We fill in exceptions 0-31 and IRQs 32-47.
  */
 
 #include <stdint.h>
@@ -11,9 +11,9 @@
 
 struct idt_entry {
     uint16_t base_low;
-    uint16_t selector;      /* selektor segmentu kodu w GDT */
+    uint16_t selector;      /* the code segment selector in the GDT */
     uint8_t  zero;
-    uint8_t  flags;         /* P | DPL | typ bramki */
+    uint8_t  flags;         /* P | DPL | gate type */
     uint16_t base_high;
 } __attribute__((packed));
 
@@ -25,7 +25,7 @@ struct idt_ptr {
 static struct idt_entry idt[256];
 static struct idt_ptr idt_pointer;
 
-/* Stuby z kernel/isr.S */
+/* Stubs from kernel/isr.S */
 #define DECLARE_STUB(n) extern void isr##n(void);
 #define STUB_LIST(X) \
     X(0)  X(1)  X(2)  X(3)  X(4)  X(5)  X(6)  X(7) \
@@ -36,8 +36,8 @@ static struct idt_ptr idt_pointer;
     X(40) X(41) X(42) X(43) X(44) X(45) X(46) X(47)
 STUB_LIST(DECLARE_STUB)
 extern void isr128(void);
-extern void isr48(void);      /* zegar lokalnego APIC (rdzenie wtorne) */
-extern void isr49(void);      /* pobudka miedzy rdzeniami */
+extern void isr48(void);      /* the local APIC timer (secondary cores) */
+extern void isr49(void);      /* the inter-core wake-up */
 
 static void idt_set_gate(int n, void (*handler)(void), uint8_t flags)
 {
@@ -55,26 +55,26 @@ void idt_init(void)
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base  = (uint32_t)&idt;
 
-    /* 0x8E = obecna, ring 0, 32-bitowa bramka przerwania */
+    /* 0x8E = present, ring 0, a 32-bit interrupt gate */
 #define SET_GATE(n) idt_set_gate(n, isr##n, 0x8E);
     STUB_LIST(SET_GATE)
 #undef SET_GATE
 
-    /* Zegar lokalnego APIC: jeden na rdzen, poza numeracja IRQ */
+    /* The local APIC timer: one per core, outside the IRQ numbering */
     idt_set_gate(48, isr48, 0x8E);
-    idt_set_gate(49, isr49, 0x8E);       /* pobudka miedzy rdzeniami */
+    idt_set_gate(49, isr49, 0x8E);       /* the inter-core wake-up */
 
-    /* Syscall: 0xEE = DPL 3, wiec int 0x80 wolno wykonac z ring 3 */
+    /* Syscall: 0xEE = DPL 3, so int 0x80 may be executed from ring 3 */
     idt_set_gate(0x80, isr128, 0xEE);
 
     idt_load();
 }
 
-/* Sama tablica jest jedna dla calej maszyny - po zbudowaniu nikt jej
-   juz nie zmienia, wiec kazdy rdzen moze pokazywac na te sama. Rdzen
-   wtorny wola to tuz po przejsciu w tryb chroniony: do tej chwili nie
-   ma zadnej obslugi wyjatkow, wiec kazdy blad konczy sie potrojnym
-   bledem i cichym resetem maszyny. */
+/* The table itself is one for the whole machine - once built nobody
+   changes it, so every core can point at the same one. A secondary
+   core calls this right after entering protected mode: until that
+   moment there is no exception handling at all, so every fault ends in
+   a triple fault and a silent reset of the machine. */
 void idt_load(void)
 {
     __asm__ volatile("lidt %0" : : "m"(idt_pointer));
