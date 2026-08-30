@@ -1,13 +1,13 @@
-/* certtest - sprawdzanie certyfikatow X.509 i podpisow RSA
+/* certtest - checking X.509 certificates and RSA signatures
  *
- * Bierze prawdziwy certyfikat (wygenerowany openssl-em, wbudowany w
- * certdata.h), rozbiera go parserem DER i sprawdza jego wlasny podpis.
- * Certyfikat jest samopodpisany, wiec do weryfikacji wystarczy klucz,
- * ktory sam w sobie niesie - nie trzeba zadnego magazynu zaufania.
+ * It takes a real certificate (generated with openssl, built into
+ * certdata.h), takes it apart with the DER parser and checks its own
+ * signature. The certificate is self-signed, so the key it carries
+ * itself is enough for verification - no trust store is needed.
  *
- * Dodatkowo: podpis w schemacie PSS (tego wymaga TLS 1.3), to samo dla
- * certyfikatu na krzywej P-256 (ECDSA) oraz proba podmiany bajtu -
- * podpis musi wtedy odpasc.
+ * Additionally: a signature in the PSS scheme (which TLS 1.3
+ * requires), the same for a certificate on the P-256 curve (ECDSA) and
+ * an attempt to swap a byte - the signature then has to fall apart.
  */
 
 #include "uapi.h"
@@ -62,13 +62,14 @@ void _start(void)
     result("dlugosc podpisu zgadza sie z kluczem",
            cert.sig_len == cert.mod_len);
 
-    /* Podpis pokrywa bajty tbsCertificate */
+    /* The signature covers the tbsCertificate bytes */
     sha256(cert.tbs, cert.tbs_len, hash);
     result("podpis wlasny certyfikatu (PKCS#1 v1.5)",
            rsa_verify_pkcs1_sha256(cert.mod, cert.mod_len, cert.exp,
                                    cert.sig, cert.sig_len, hash));
 
-    /* Ta sama weryfikacja po podmianie bajtu tresci musi odpasc */
+    /* The same verification after swapping a byte of the body has to fall
+   apart */
     static uint8_t tampered[4096];
     for (uint32_t i = 0; i < sizeof(cert_der); i++)
         tampered[i] = cert_der[i];
@@ -84,7 +85,8 @@ void _start(void)
         result("podmieniona tresc odrzucona (juz na parserze)", 1);
     }
 
-    /* Podpis PSS - tego wymaga TLS 1.3 w CertificateVerify */
+    /* A PSS signature - that is what TLS 1.3 requires in
+   CertificateVerify */
     uint32_t msglen = 0;
     while (pss_msg[msglen])
         msglen++;
@@ -98,7 +100,7 @@ void _start(void)
            !rsa_verify_pss_sha256(cert.mod, cert.mod_len, cert.exp,
                                   pss_sig, sizeof(pss_sig), hash, 2048));
 
-    /* Dopasowanie nazwy hosta z SubjectAltName albo jej brak */
+    /* A host name match from SubjectAltName, or the lack of one */
     if (cert.san) {
         result("SubjectAltName: pasuje 'protonos.test'",
                x509_matches_host(&cert, "protonos.test"));
@@ -108,7 +110,7 @@ void _start(void)
         print_str("      ", "certyfikat bez SubjectAltName (stary styl)");
     }
 
-    /* --- certyfikat na krzywej P-256 --- */
+    /* --- a certificate on the P-256 curve --- */
     struct x509_cert ec;
     result("rozbior certyfikatu ECDSA",
            x509_parse(&ec, ec_cert_der, sizeof(ec_cert_der)) == 0);
@@ -139,7 +141,7 @@ void _start(void)
            ecdsa_verify_der(ec_curve_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec_sig, sizeof(ec_sig)));
 
-    /* --- certyfikat na krzywej P-384 (SHA-384) --- */
+    /* --- a certificate on the P-384 curve (SHA-384) --- */
     struct x509_cert ec384;
     uint8_t hash384[48];
 
@@ -166,7 +168,7 @@ void _start(void)
            !ecdsa_verify_der(ec_curve_p384(), ec384.ec_point, ec384.ec_point_len,
                              hash384, 48, ec384.sig, ec384.sig_len));
 
-    /* SHA-384 na znanym wektorze (FIPS 180-4) */
+    /* SHA-384 on a known vector (FIPS 180-4) */
     static const uint8_t want384[] = {
         0xcb,0x00,0x75,0x3f,0x45,0xa3,0x5e,0x8b,0xb5,0xa0,0x3d,0x69,0x9a,0xc6,
         0x50,0x07,0x27,0x2c,0x32,0xab,0x0e,0xde,0xd1,0x63,0x1a,0x8b,0x60,0x5a,
@@ -179,7 +181,7 @@ void _start(void)
             same = 0;
     result("SHA-384('abc') zgadza sie z FIPS 180-4", same);
 
-    /* --- wbudowany magazyn zaufania --- */
+    /* --- the built-in trust store --- */
     int roots_ok = 0, roots_bad = 0;
     uint32_t left = 0;
     const uint8_t *p = cert_builtin_roots(&left);

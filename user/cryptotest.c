@@ -1,10 +1,10 @@
-/* cryptotest - wektory testowe kryptografii (pierwsza cegielka pod TLS)
+/* cryptotest - cryptographic test vectors (the first brick under TLS)
  *
- * Sprawdza SHA-256 (FIPS 180-4), HMAC-SHA256 (RFC 4231), HKDF
- * (RFC 5869), ChaCha20 i Poly1305 (RFC 8439) oraz X25519 (RFC 7748)
- * na oficjalnych wektorach. Bez tego nie ma sensu zabierac sie za
- * handshake - blad w kryptografii objawia sie dopiero jako
- * niezrozumiale "decrypt error" od serwera.
+ * It checks SHA-256 (FIPS 180-4), HMAC-SHA256 (RFC 4231), HKDF
+ * (RFC 5869), ChaCha20 and Poly1305 (RFC 8439) and X25519 (RFC 7748)
+ * against the official vectors. Without that there is no point starting
+ * on the handshake - an error in the cryptography shows up only as an
+ * incomprehensible "decrypt error" from the server.
  */
 
 #include "uapi.h"
@@ -63,7 +63,7 @@ void _start(void)
     sha256("abc", 3, out);
     check("SHA-256('abc')", out, abc, 32);
 
-    /* SHA-256 pustego wejscia */
+    /* SHA-256 of an empty input */
     static const uint8_t empty[] = {
         0xe3,0xb0,0xc4,0x42,0x98,0xfc,0x1c,0x14,0x9a,0xfb,0xf4,0xc8,0x99,0x6f,
         0xb9,0x24,0x27,0xae,0x41,0xe4,0x64,0x9b,0x93,0x4c,0xa4,0x95,0x99,0x1b,
@@ -71,7 +71,7 @@ void _start(void)
     sha256("", 0, out);
     check("SHA-256('')", out, empty, 32);
 
-    /* SHA-256 dwoch blokow (448+ bitow) - test dopelnienia */
+    /* SHA-256 of two blocks (448+ bits) - a padding test */
     static const uint8_t twoblk[] = {
         0x24,0x8d,0x6a,0x61,0xd2,0x06,0x38,0xb8,0xe5,0xc0,0x26,0x93,0x0c,0x3e,
         0x60,0x39,0xa3,0x3c,0xe4,0x59,0x64,0xff,0x21,0x67,0xf6,0xec,0xed,0xd4,
@@ -79,7 +79,7 @@ void _start(void)
     sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56, out);
     check("SHA-256 (dwa bloki)", out, twoblk, 32);
 
-    /* HMAC-SHA256, przypadek 1 z RFC 4231 */
+    /* HMAC-SHA256, case 1 from RFC 4231 */
     uint8_t key[20];
     for (int i = 0; i < 20; i++)
         key[i] = 0x0b;
@@ -90,7 +90,7 @@ void _start(void)
     hmac_sha256(key, 20, "Hi There", 8, out);
     check("HMAC-SHA256 (RFC 4231 #1)", out, hmac1, 32);
 
-    /* HMAC z kluczem dluzszym niz blok - przypadek 6 z RFC 4231 */
+    /* HMAC with a key longer than a block - case 6 from RFC 4231 */
     static uint8_t longkey[131];
     for (int i = 0; i < 131; i++)
         longkey[i] = 0xaa;
@@ -103,7 +103,7 @@ void _start(void)
                 out);
     check("HMAC-SHA256 (RFC 4231 #6)", out, hmac6, 32);
 
-    /* HKDF-SHA256, przypadek 1 z RFC 5869 */
+    /* HKDF-SHA256, case 1 from RFC 5869 */
     uint8_t ikm[22], salt[13], info[10], prk[32];
     for (int i = 0; i < 22; i++)
         ikm[i] = 0x0b;
@@ -189,7 +189,7 @@ void _start(void)
         print("AEAD odszyfrowanie: OK\n");
     }
 
-    atag[0] ^= 1;                        /* podmieniony znacznik ma odpasc */
+    atag[0] ^= 1;                        /* a swapped tag has to fall apart */
     if (aead_decrypt(akey, anonce, aad, 12, act, apt, 114, atag)) {
         print("AEAD wykrycie podmiany: BLAD (przeszlo mimo zmiany)\n");
         failures++;
@@ -213,7 +213,8 @@ void _start(void)
     x25519(out, sc, pt);
     check("X25519 (RFC 7748 5.2)", out, want_shared, 32);
 
-    /* Wspolny sekret liczony z obu stron musi wyjsc taki sam */
+    /* The shared secret computed from both sides has to come out the
+   same */
     uint8_t priv_a[32], priv_b[32], pub_a[32], pub_b[32], sh_a[32], sh_b[32];
     for (int i = 0; i < 32; i++) {
         priv_a[i] = (uint8_t)(i + 1);
@@ -225,8 +226,8 @@ void _start(void)
     x25519(sh_b, priv_b, pub_a);
     check("X25519: obie strony licza ten sam sekret", sh_a, sh_b, 32);
 
-    /* Ile kosztuje jedno mnozenie skalarne - handshake TLS potrzebuje
-       dwoch (klucz publiczny i wspolny sekret) */
+    /* What one scalar multiplication costs - a TLS handshake needs two
+       (the public key and the shared secret) */
     uint32_t t0 = sys_getticks();
     x25519_base(pub_a, priv_a);
     uint32_t t1 = sys_getticks();

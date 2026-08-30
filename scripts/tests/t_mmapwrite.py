@@ -62,10 +62,10 @@ def main():
                 q.wait_serial("proton64>", timeout=90)
                 q.wait_serial("PFS gotowy", timeout=30)
 
-                make_it = q.command("run mkmapa64 zapis.txt 12", "kod wyjscia",
+                make_it = q.command("run mkmap64 zapis.txt 12", "kod wyjscia",
                                    timeout=60)
                 check("plik z wzorcem zalozony na dysku",
-                      "[mkmapa64] zapisano 12288 B wzorca" in make_it)
+                      "[mkmap64] zapisano 12288 B wzorca" in make_it)
 
                 write_it = q.command("run mmapzap64 zapis.txt pisz",
                                    "kod wyjscia", timeout=90)
@@ -85,7 +85,7 @@ def main():
                       "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
 
                 # Bez jawnego msync - odsyla jadro na koncu procesu
-                q.command("run mkmapa64 bezsync.txt 12", "kod wyjscia",
+                q.command("run mkmap64 bezsync.txt 12", "kod wyjscia",
                             timeout=60)
                 without = q.command("run mmapzap64 bezsync.txt bez",
                                   "kod wyjscia", timeout=60)
@@ -97,7 +97,7 @@ def main():
                       "doszly na dysk przy koncu procesu" in probe2)
 
                 # Po fork-u odwzorowanie jest wspolne, a nie kopiowane
-                q.command("run mkmapa64 wspolny.txt 12", "kod wyjscia",
+                q.command("run mkmap64 wspolny.txt 12", "kod wyjscia",
                             timeout=60)
                 visible = q.command("run mmapzap64 wspolny.txt widac",
                                     "kod wyjscia", timeout=60)
@@ -124,10 +124,10 @@ def main():
             q3.wait_for("ProtonOS shell", timeout=40)
             q3.wait_for("[siec] DHCP", timeout=30)
 
-            make_it = q3.command("run mkmapa zapis.txt 12", "zakonczyl sie",
+            make_it = q3.command("run mkmap zapis.txt 12", "zakonczyl sie",
                                 timeout=60)
             check("plik z wzorcem zalozony na dysku (32-bit)",
-                  "[mkmapa] zapisano 12288 B wzorca" in make_it)
+                  "[mkmap] zapisano 12288 B wzorca" in make_it)
 
             write_it = q3.command("run mmapzap zapis.txt pisz", "zakonczyl sie",
                                 timeout=90)
@@ -146,7 +146,7 @@ def main():
             check("zwykly odczyt widzi to, co wpisala pamiec (32-bit)",
                   "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
 
-            q3.command("run mkmapa bezsync.txt 12", "zakonczyl sie",
+            q3.command("run mkmap bezsync.txt 12", "zakonczyl sie",
                          timeout=60)
             without = q3.command("run mmapzap bezsync.txt bez", "zakonczyl sie",
                                timeout=60)
@@ -157,7 +157,7 @@ def main():
             check("jadro odsyla brudne strony przy koncu procesu (32-bit)",
                   "doszly na dysk przy koncu procesu" in probe2)
 
-            q3.command("run mkmapa wspolny.txt 12", "zakonczyl sie",
+            q3.command("run mkmap wspolny.txt 12", "zakonczyl sie",
                          timeout=60)
             visible = q3.command("run mmapzap wspolny.txt widac",
                                  "zakonczyl sie", timeout=60)

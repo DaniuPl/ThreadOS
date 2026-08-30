@@ -1,15 +1,16 @@
-/* Zamiana HTML na tekst do czytania w oknie
+/* Turning HTML into text to be read in a window
  *
- * Wyciete z przegladarki, zeby dalo sie to sprawdzac osobno: kod dostaje
- * dane prosto z sieci, wiec musi znosic dowolne smieci - urwane
- * znaczniki, brak zamkniec, encje bez srednika, bajty spoza ASCII,
- * atrybuty bez konca. Kazdy odczyt jest ograniczony dlugoscia wejscia,
- * a kazda petla ma warunek, ktory na pewno sie skonczy.
+ * Cut out of the browser so that it can be tested separately: the code
+ * receives data straight from the network, so it has to withstand any
+ * rubbish - broken tags, missing closes, entities without a semicolon,
+ * non-ASCII bytes, attributes that never end. Every read is bounded by
+ * the input length, and every loop has a condition that is certain to
+ * be reached.
  *
- * Co robi: wycina znaczniki (pomijajac zawartosc <title>, <script> i
- * <style>), sklada biale znaki, rozwija najczestsze encje, zapamietuje
- * zakresy odnosnikow <a href> i lamie tekst na wiersze zadanej
- * szerokosci, na granicy slow.
+ * What it does: it strips tags (skipping the contents of <title>,
+ * <script> and <style>), collapses whitespace, expands the most common
+ * entities, remembers the ranges of <a href> links and breaks the text
+ * into lines of a given width, on word boundaries.
  */
 
 #ifndef PROTONOS_UHTML_H
@@ -22,19 +23,19 @@
 #define HTML_HREF_MAX  96
 
 struct html_link {
-    int start, end;              /* zakres w tekscie wynikowym */
+    int start, end;              /* a range in the resulting text */
     char href[HTML_HREF_MAX];
 };
 
 struct html_line {
-    int start, len;              /* zakres w tekscie wynikowym */
+    int start, len;              /* a range in the resulting text */
 };
 
 struct html_doc {
-    const char *src;             /* wejscie: surowy HTML */
+    const char *src;             /* input: raw HTML */
     int src_len;
 
-    char *text;                  /* wyjscie: tekst do rysowania */
+    char *text;                  /* output: text to be drawn */
     int text_max;
     int text_len;
 
@@ -45,15 +46,15 @@ struct html_doc {
     int line_count;
 };
 
-/* --- pomocnicze, wszystkie w granicach wejscia --- */
+/* --- helpers, all within the input's bounds --- */
 
 static inline char html_lower(char c)
 {
     return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
 }
 
-/* Czy pod indeksem i stoi nazwa znacznika? Po nazwie musi byc bialy
-   znak, '>' albo '/' - inaczej "a" pasowaloby do "article". */
+/* Is there a tag name at index i? After the name there must be
+   whitespace, '>' or '/' - otherwise "a" would match "article". */
 static inline int html_tag_is(const struct html_doc *d, int i,
                               const char *name)
 {
@@ -66,13 +67,13 @@ static inline int html_tag_is(const struct html_doc *d, int i,
         k++;
     }
     if (i + k >= d->src_len)
-        return 1;                /* znacznik urwany na koncu danych */
+        return 1;                /* a tag cut short at the end of the data */
     char after = d->src[i + k];
     return after == '>' || after == ' ' || after == '\n' || after == '\r' ||
            after == '\t' || after == '/';
 }
 
-/* Nazwa atrybutu - po niej moze stac '=' albo bialy znak */
+/* An attribute name - it may be followed by '=' or whitespace */
 static inline int html_attr_is(const struct html_doc *d, int i,
                                const char *name)
 {
@@ -90,8 +91,8 @@ static inline int html_attr_is(const struct html_doc *d, int i,
     return after == '=' || after == ' ';
 }
 
-/* Znaczniki blokowe rozdzielaja tekst - bez tego "<h1>Tytul</h1><p>Tresc"
-   skleilby sie w "TytulTresc" */
+/* Block tags separate text - without that "<h1>Title</h1><p>Body"
+   would glue into "TitleBody" */
 static inline int html_block_tag(const struct html_doc *d, int i)
 {
     static const char *tags[] = {
@@ -107,7 +108,7 @@ static inline int html_block_tag(const struct html_doc *d, int i)
     return 0;
 }
 
-/* Wyciaga wartosc href="..." z wnetrza znacznika <a ...> */
+/* Extracts the href="..." value from inside an <a ...> tag */
 static inline void html_grab_href(const struct html_doc *d, int i, char *out,
                                   int max)
 {
@@ -139,7 +140,7 @@ static inline void html_grab_href(const struct html_doc *d, int i, char *out,
     }
 }
 
-/* --- glowna czesc: HTML -> tekst + odnosniki --- */
+/* --- the main part: HTML -> text + links --- */
 
 static inline void html_extract(struct html_doc *d)
 {
@@ -196,7 +197,7 @@ static inline void html_extract(struct html_doc *d)
         if (in_tag || skip)
             continue;
 
-        if (c == '&') {              /* encja: &amp; &nbsp; &#39; ... */
+        if (c == '&') {              /* an entity: &amp; &nbsp; &#39; ... */
             int j = i + 1, len = 0;
             char ent[10];
             while (j < d->src_len && d->src[j] != ';' && len < 9 &&
@@ -204,7 +205,7 @@ static inline void html_extract(struct html_doc *d)
                 ent[len++] = d->src[j++];
             ent[len] = '\0';
             if (j < d->src_len && d->src[j] == ';' && len > 0) {
-                i = j;               /* zjedz cala encje */
+                i = j;               /* swallow the whole entity */
                 char rep;
                 if (ent[0] == 'a' && ent[1] == 'm')       rep = '&';
                 else if (ent[0] == 'l' && ent[1] == 't')  rep = '<';
@@ -224,7 +225,7 @@ static inline void html_extract(struct html_doc *d)
                 continue;
             }
         }
-        if ((unsigned char)c >= 0x80) {   /* UTF-8: czcionka zna ASCII */
+        if ((unsigned char)c >= 0x80) {   /* UTF-8: the font knows ASCII */
             if (((unsigned char)c & 0xC0) != 0x80) {
                 d->text[out++] = '.';
                 space = 0;
@@ -238,14 +239,14 @@ static inline void html_extract(struct html_doc *d)
             }
             continue;
         }
-        if (c < 0x20)                /* inne znaki sterujace pomijamy */
+        if (c < 0x20)                /* other control characters we skip */
             continue;
 
         d->text[out++] = c;
         space = 0;
     }
 
-    /* odnosnik bez zamkniecia konczy sie na koncu tekstu */
+    /* a link with no close ends at the end of the text */
     if (open_link >= 0 && d->link_count < HTML_LINKS_MAX) {
         d->links[open_link].end = out;
         if (d->links[open_link].end > d->links[open_link].start)
@@ -256,7 +257,7 @@ static inline void html_extract(struct html_doc *d)
     d->text_len = out;
 }
 
-/* --- lamanie tekstu na wiersze (na granicy slow) --- */
+/* --- breaking the text into lines (on word boundaries) --- */
 
 static inline void html_layout(struct html_doc *d, int cols)
 {
@@ -276,7 +277,7 @@ static inline void html_layout(struct html_doc *d, int cols)
         }
         int end = i;
         if (i < d->text_len && d->text[i] != ' ' && last_space > start)
-            end = last_space;        /* zawin na granicy slowa */
+            end = last_space;        /* wrap on a word boundary */
 
         d->lines[d->line_count].start = start;
         d->lines[d->line_count].len = end - start;
@@ -284,11 +285,11 @@ static inline void html_layout(struct html_doc *d, int cols)
 
         i = end;
         while (i < d->text_len && d->text[i] == ' ')
-            i++;                     /* zjedz spacje na zawinieciu */
+            i++;                     /* swallow the space at the wrap */
     }
 }
 
-/* Do ktorego odnosnika nalezy znak o indeksie i (-1 = do zadnego)? */
+/* Which link does the character at index i belong to (-1 = none)? */
 static inline int html_link_at(const struct html_doc *d, int i)
 {
     for (int k = 0; k < d->link_count; k++)

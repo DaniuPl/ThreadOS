@@ -1,9 +1,9 @@
-/* Wbudowany magazyn zaufania - PLIK GENEROWANY.
+/* The built-in trust store - A GENERATED FILE.
  *
- * Zrodlo: /etc/ssl/certs/ca-certificates.crt
- * Odswiezenie: python3 scripts/mkcaroots.py
+ * Source: /etc/ssl/certs/ca-certificates.crt
+ * To refresh: python3 scripts/mkcaroots.py
  *
- * Korzenie w srodku:
+ * The roots inside:
  *   - C = US, O = Amazon, CN = Amazon Root CA 1 (837 B)
  *   - C = IE, O = Baltimore, OU = CyberTrust, CN = Baltimore CyberTrust Root (891 B)
  *   - C = PL, O = Unizeto Technologies S.A., OU = Certum Certification Authority, CN = Certum Trusted Network CA (959 B)

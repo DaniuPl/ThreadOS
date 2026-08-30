@@ -1,18 +1,19 @@
-/* ECDSA na krzywych NIST P-256 i P-384 (sprawdzanie podpisow)
+/* ECDSA on the NIST P-256 and P-384 curves (signature verification)
  *
- * Certyfikaty na krzywej eliptycznej sa dzis czestsze niz RSA, a czesc
- * urzedow (np. ISRG Root X2) podpisuje na P-384 skrotem SHA-384.
+ * Elliptic curve certificates are more common today than RSA, and some
+ * authorities (ISRG Root X2, say) sign on P-384 with a SHA-384 digest.
  *
- * Arytmetyka stoi na tych samych wielkich liczbach co RSA: mnozenie
- * Montgomery'ego modulo p. Wspolrzedne punktow trzymamy w postaci
- * Jacobiego (x = X/Z^2, y = Y/Z^3), dzieki czemu dodawanie punktow nie
- * wymaga odwrotnosci - ta liczy sie raz, na samym koncu.
+ * The arithmetic stands on the same big numbers as RSA: Montgomery
+ * multiplication modulo p. Point coordinates are kept in Jacobian form
+ * (x = X/Z^2, y = Y/Z^3), thanks to which adding points needs no
+ * inversion - that is computed once, at the very end.
  *
- * Obie krzywe maja a = -3, wiec jeden komplet wzorow obsluguje je
- * razem; rozni je tylko modulus, rzad grupy i punkt bazowy.
+ * Both curves have a = -3, so one set of formulas handles them
+ * together; the only differences are the modulus, the group order and
+ * the base point.
  *
- * To weryfikacja publicznych danych, wiec kod nie musi byc odporny na
- * pomiar czasu - i nie jest.
+ * This is verification of public data, so the code does not have to be
+ * resistant to timing measurement - and it is not.
  */
 
 #ifndef PROTONOS_UECDSA_H
@@ -21,7 +22,7 @@
 #include "uapi.h"
 #include "ubignum.h"
 
-/* Krzywa NIST P256 (256 bitow) */
+/* The NIST P256 curve (256 bits) */
 static const uint8_t p256_p_bytes[32] = {
     0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,
@@ -43,7 +44,7 @@ static const uint8_t p256_gy_bytes[32] = {
     0x40,0x68,0x37,0xbf,0x51,0xf5,
 };
 
-/* Krzywa NIST P384 (384 bitow) */
+/* The NIST P384 curve (384 bits) */
 static const uint8_t p384_p_bytes[48] = {
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
@@ -69,10 +70,10 @@ static const uint8_t p384_gy_bytes[48] = {
     0x9d,0x7a,0x43,0x1d,0x7c,0x90,0xea,0x0e,0x5f,
 };
 
-/* Komplet parametrow krzywej; liczby robocze wyliczaja sie przy
-   pierwszym uzyciu (ec_init) */
+/* The full set of curve parameters; the working numbers are computed
+   on first use (ec_init) */
 struct ec_curve {
-    uint32_t size;                       /* dlugosc wspolrzednej w bajtach */
+    uint32_t size;                       /* the coordinate length in bytes */
     const uint8_t *p_bytes, *n_bytes, *gx_bytes, *gy_bytes;
     struct bignum p, n, r2p, r2n, one_mont;
     uint32_t pinv, ninv;
@@ -89,24 +90,24 @@ static struct ec_curve ec_p384 = {
     {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, 0, 0, 0
 };
 
-/* Krzywe wystawiamy funkcjami, a nie wprost.
+/* We expose the curves through functions rather than directly.
  *
- * Powod jest w bibliotece wspoldzielonej: to sa DANE, i to zmienne -
- * krzywa doliczaja sobie stale Montgomery'ego przy pierwszym uzyciu.
- * Program, ktory siegalby po nie po nazwie, dostalby wlasna kopie
- * (relokacja kopiujaca), i od tej chwili biblioteka liczylaby na
- * jednym egzemplarzu, a program patrzyl na drugi. Przez funkcje
- * wszyscy widza ten sam. */
+ * The reason lies in the shared library: these are DATA, and mutable
+ * data at that - a curve computes its Montgomery constants on first
+ * use. A program reaching for them by name would get its own copy (a
+ * copy relocation), and from then on the library would compute on one
+ * instance while the program looked at another. Through a function
+ * everybody sees the same one. */
 static inline struct ec_curve *ec_curve_p256(void) { return &ec_p256; }
 static inline struct ec_curve *ec_curve_p384(void) { return &ec_p384; }
 
-/* Punkt w postaci Jacobiego, wspolrzedne w dziedzinie Montgomery'ego */
+/* A point in Jacobian form, coordinates in the Montgomery domain */
 struct ec_point {
     struct bignum x, y, z;
     int infinity;
 };
 
-/* R^2 mod m - brama do dziedziny Montgomery'ego */
+/* R^2 mod m - the gateway into the Montgomery domain */
 static inline void ec_calc_r2(struct bignum *r2, const struct bignum *m)
 {
     bn_zero(r2);
@@ -147,7 +148,7 @@ static inline void ec_init(struct ec_curve *c)
     c->ready = 1;
 }
 
-/* --- cialo modulo p, wartosci w dziedzinie Montgomery'ego --- */
+/* --- the field modulo p, values in the Montgomery domain --- */
 
 static inline void fp_mul(const struct ec_curve *c, struct bignum *o,
                           const struct bignum *a, const struct bignum *b)
@@ -183,15 +184,15 @@ static inline void fp_leave(const struct ec_curve *c, struct bignum *o,
     bn_mont_mul(o, a, &one, &c->p, c->pinv);
 }
 
-/* Odwrotnosc przez male twierdzenie Fermata: a^(p-2).
-   Obie krzywe maja p konczace sie na ...ff, wiec p-2 to odjecie
-   dwoch od ostatniego bajtu. */
+/* Inversion through Fermat's little theorem: a^(p-2).
+   Both curves have a p ending in ...ff, so p-2 is a subtraction of two
+   from the last byte. */
 static inline void fp_inv(const struct ec_curve *c, struct bignum *o,
                           const struct bignum *a)
 {
     uint8_t e[64];
 
-    if (c->size == 0 || c->size > sizeof(e)) {   /* parametry z kosmosu */
+    if (c->size == 0 || c->size > sizeof(e)) {   /* parameters out of nowhere */
         bn_zero(o);
         return;
     }
@@ -220,7 +221,7 @@ static inline void fp_inv(const struct ec_curve *c, struct bignum *o,
     *o = acc;
 }
 
-/* --- arytmetyka punktow (Jacobi, a = -3) --- */
+/* --- point arithmetic (Jacobian, a = -3) --- */
 
 static inline void ec_double(const struct ec_curve *c, struct ec_point *r,
                              const struct ec_point *p)
@@ -299,10 +300,10 @@ static inline void ec_add(const struct ec_curve *c, struct ec_point *r,
 
     if (bn_is_zero(&h)) {
         if (bn_is_zero(&rr)) {
-            ec_double(c, r, p);          /* ten sam punkt */
+            ec_double(c, r, p);          /* the same point */
             return;
         }
-        r->infinity = 1;                 /* punkty przeciwne */
+        r->infinity = 1;                 /* opposite points */
         return;
     }
 
@@ -335,7 +336,7 @@ static inline void ec_add(const struct ec_curve *c, struct ec_point *r,
     r->infinity = 0;
 }
 
-/* r = k*p (podwajaj i dodawaj, od najstarszego bitu) */
+/* r = k*p (double and add, from the highest bit) */
 static inline void ec_mul(const struct ec_curve *c, struct ec_point *r,
                           const struct bignum *k, const struct ec_point *p)
 {
@@ -363,9 +364,10 @@ static inline void ec_mul(const struct ec_curve *c, struct ec_point *r,
     *r = acc;
 }
 
-/* --- podpis --- */
+/* --- the signature --- */
 
-/* Mnozenie modulo n (rzad grupy) - poza dziedzina Montgomery'ego */
+/* Multiplication modulo n (the group order) - outside the Montgomery
+   domain */
 static inline void mod_n_mul(const struct ec_curve *c, struct bignum *o,
                              const struct bignum *a, const struct bignum *b)
 {
@@ -374,8 +376,8 @@ static inline void mod_n_mul(const struct ec_curve *c, struct bignum *o,
     bn_mont_mul(o, &t, &c->r2n, &c->n, c->ninv);
 }
 
-/* Sprawdza podpis (r,s) pod skrotem dla klucza publicznego podanego
-   jako punkt nieskompresowany: 0x04 || X || Y. 1 = podpis dobry. */
+/* Checks the signature (r,s) over a digest for a public key given as
+   an uncompressed point: 0x04 || X || Y. 1 = the signature is good. */
 static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
                                uint32_t publen, const uint8_t *hash,
                                uint32_t hashlen, const uint8_t *r_bytes,
@@ -385,7 +387,7 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     ec_init(c);
 
     if (publen != 1 + 2 * c->size || pub[0] != 0x04)
-        return 0;                        /* tylko postac nieskompresowana */
+        return 0;                        /* uncompressed form only */
 
     struct bignum r, s, e, w, u1, u2, qx, qy;
     if (bn_from_bytes(&r, r_bytes, rlen) < 0 ||
@@ -396,7 +398,8 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     if (bn_cmp(&r, &c->n) >= 0 || bn_cmp(&s, &c->n) >= 0)
         return 0;
 
-    /* Z dluzszego skrotu bierzemy tyle najstarszych bajtow, ile ma rzad */
+    /* From a longer digest we take as many of the highest bytes as the
+   order has */
     uint32_t use = hashlen < c->size ? hashlen : c->size;
     bn_from_bytes(&e, hash, use);
     if (bn_cmp(&e, &c->n) >= 0)
@@ -415,7 +418,7 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     mod_n_mul(c, &u1, &e, &w);
     mod_n_mul(c, &u2, &r, &w);
 
-    /* punkty: G i klucz publiczny */
+    /* the points: G and the public key */
     struct ec_point g, q, t1, t2, sum;
     struct bignum tmp;
 
@@ -441,7 +444,7 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     if (sum.infinity)
         return 0;
 
-    /* x afiniczny = X / Z^2, potem wyjscie z dziedziny Montgomery'ego */
+    /* affine x = X / Z^2, then out of the Montgomery domain */
     struct bignum zinv, zinv2, x_aff;
     fp_inv(c, &zinv, &sum.z);
     fp_mul(c, &zinv2, &zinv, &zinv);
@@ -454,7 +457,8 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     return bn_cmp(&x_aff, &r) == 0;
 }
 
-/* Podpis w certyfikacie jest w DER: SEQUENCE { INTEGER r, INTEGER s } */
+/* The signature in a certificate is in DER: SEQUENCE { INTEGER r,
+   INTEGER s } */
 static inline int ecdsa_verify_der(struct ec_curve *c, const uint8_t *pub,
                                    uint32_t publen, const uint8_t *hash,
                                    uint32_t hashlen, const uint8_t *der,

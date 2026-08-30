@@ -1,15 +1,15 @@
-/* Weryfikacja lancucha certyfikatow
+/* Certificate chain verification
  *
- * Sam szyfrowany kanal nic nie daje, jesli nie wiadomo, z kim sie
- * rozmawia. Tu sprawdzamy trzy rzeczy:
- *   1. czy certyfikat obejmuje nazwe, pod ktora sie laczylismy,
- *   2. czy jest wazny wedlug zegara systemu,
- *   3. czy prowadzi lancuch podpisow do certyfikatu, ktoremu ufamy.
+ * An encrypted channel by itself gives nothing if it is not known who
+ * is on the other side. Here we check three things:
+ *   1. does the certificate cover the name we connected to,
+ *   2. is it valid according to the system clock,
+ *   3. does it lead a chain of signatures to a certificate we trust.
  *
- * Magazyn zaufania to konkatenacja certyfikatow w DER. Czesc jest
- * wbudowana w system (caroots.h - korzenie publicznych CA), a dodatkowe
- * mozna dolozyc plikiem "roots.der" na dysku - przydaje sie do wlasnych
- * certyfikatow w sieci lokalnej.
+ * A trust store is a concatenation of certificates in DER. Some of
+ * them are built into the system (caroots.h - the roots of public CAs),
+ * and more can be added with a "roots.der" file on disk - useful for
+ * one's own certificates on a local network.
  */
 
 #ifndef PROTONOS_UCERT_H
@@ -23,10 +23,11 @@
 #include "usha512.h"
 #include "caroots.h"
 
-/* Wbudowany magazyn zaufania wystawiamy funkcja, nie tablica.
-   Tak samo jak krzywe w uecdsa.h: to sa dane, a dane siedza wewnatrz
-   biblioteki wspoldzielonej i tam maja zostac - program dostaje na nie
-   wskaznik, a nie wlasna kopie kilkunastu kilobajtow certyfikatow. */
+/* We expose the built-in trust store through a function, not an array.
+   Just like the curves in uecdsa.h: these are data, and data sit inside
+   the shared library and are to stay there - a program gets a pointer
+   to them rather than its own copy of a dozen or so kilobytes of
+   certificates. */
 static inline const uint8_t *cert_builtin_roots(uint32_t *ile)
 {
     *ile = (uint32_t)sizeof(ca_roots_der);
@@ -59,7 +60,7 @@ static inline const char *cert_error_text(int err)
     }
 }
 
-/* Biezacy czas z RTC w postaci YYYYMMDDHHMMSS */
+/* The current time from the RTC in the form YYYYMMDDHHMMSS */
 static inline void cert_now(char *out)
 {
     struct utime t;
@@ -93,7 +94,7 @@ static inline int cert_str_cmp(const char *a, const char *b)
     return a[i] ? 1 : -1;
 }
 
-/* Czy certyfikat 'sub' zostal podpisany kluczem z 'issuer'? */
+/* Was the certificate 'sub' signed with the key from 'issuer'? */
 static inline int cert_signed_by(const struct x509_cert *sub,
                                  const struct x509_cert *issuer)
 {
@@ -116,7 +117,8 @@ static inline int cert_signed_by(const struct x509_cert *sub,
         if (!issuer->ec_point)
             return 0;
 
-        /* skrot dobiera algorytm podpisu, nie krzywa */
+        /* the digest is chosen by the signature algorithm, not by the
+   curve */
         if (sub->sig_alg == X509_ALG_ECDSA_SHA256) {
             sha256(sub->tbs, sub->tbs_len, hash);
             hashlen = 32;
@@ -144,10 +146,10 @@ static inline int cert_signed_by(const struct x509_cert *sub,
         return rsa_verify_pss_sha256(issuer->mod, issuer->mod_len, issuer->exp,
                                      sub->sig, sub->sig_len, hash,
                                      issuer->mod_len * 8);
-    return 0;                            /* inny algorytm - nie umiemy */
+    return 0;                            /* a different algorithm - we do not know it */
 }
 
-/* Sprawdza waznosc wedlug zegara */
+/* Checks validity against the clock */
 static inline int cert_check_dates(const struct x509_cert *c, const char *now)
 {
     if (c->not_before[0] && cert_str_cmp(now, c->not_before) < 0)
@@ -157,9 +159,9 @@ static inline int cert_check_dates(const struct x509_cert *c, const char *now)
     return CERT_OK;
 }
 
-/* Czy ktorys z certyfikatow w magazynie podpisal 'cur'? Magazyn to
-   sklejone certyfikaty DER - idziemy po nich, czytajac dlugosc z
-   naglowka kazdego. */
+/* Did any of the certificates in the store sign 'cur'? The store is
+   DER certificates glued together - we walk them, reading the length
+   from each one's header. */
 static inline int cert_in_store(const struct x509_cert *cur,
                                 const uint8_t *store, uint32_t len,
                                 const char *now)
@@ -199,8 +201,8 @@ static inline int cert_in_store(const struct x509_cert *cur,
     return 0;
 }
 
-/* Pelne sprawdzenie: nazwa, daty i lancuch do zaufanego korzenia.
-   chain[0] to certyfikat serwera. */
+/* The full check: the name, the dates and the chain to a trusted root.
+   chain[0] is the server's certificate. */
 static inline int cert_verify_chain(struct x509_cert *chain, int n,
                                     const uint8_t *roots, uint32_t roots_len,
                                     const char *host)
@@ -218,15 +220,15 @@ static inline int cert_verify_chain(struct x509_cert *chain, int n,
     if (err != CERT_OK)
         return err;
 
-    /* Wchodzimy w gore lancucha, az trafimy na kogos zaufanego */
+    /* We climb up the chain until we hit somebody trusted */
     for (int i = 0; i < n; i++) {
         struct x509_cert *cur = &chain[i];
 
         if (cert_in_store(cur, roots, roots_len, now) ||
             cert_in_store(cur, ca_roots_der, sizeof(ca_roots_der), now))
-            return CERT_OK;              /* lancuch domkniety */
+            return CERT_OK;              /* the chain is closed */
 
-        /* jak nie korzen, to moze nastepny w lancuchu */
+        /* if not a root, then maybe the next one in the chain */
         if (i + 1 < n) {
             struct x509_cert *up = &chain[i + 1];
             if (!up->is_ca)
@@ -243,10 +245,11 @@ static inline int cert_verify_chain(struct x509_cert *chain, int n,
         }
     }
 
-    return CERT_ERR_UNTRUSTED;           /* lancuch nie doszedl do korzenia */
+    return CERT_ERR_UNTRUSTED;           /* the chain did not reach a root */
 }
 
-/* Wczytuje magazyn zaufania z pliku na dysku. Zwraca liczbe bajtow. */
+/* Reads a trust store from a file on disk. Returns the number of
+   bytes. */
 static inline uint32_t cert_load_roots(const char *path, uint8_t *buf,
                                        uint32_t max)
 {

@@ -1,12 +1,12 @@
-/* SHA-512 i SHA-384 (FIPS 180-4)
+/* SHA-512 and SHA-384 (FIPS 180-4)
  *
- * Certyfikaty na krzywej P-384 podpisywane sa skrotem SHA-384, wiec bez
- * tego nie da sie ich sprawdzic. Rodzina SHA-512 liczy na slowach
- * 64-bitowych - na 32-bitowym procesorze kompilator rozbija je na pary
- * rejestrow, ale kod pozostaje ten sam.
+ * Certificates on the P-384 curve are signed with a SHA-384 digest, so
+ * without this they cannot be checked. The SHA-512 family computes on
+ * 64-bit words - on a 32-bit processor the compiler breaks them into
+ * register pairs, but the code stays the same.
  *
- * Stale (K oraz wektory poczatkowe) to czesci ulamkowe pierwiastkow
- * kolejnych liczb pierwszych - wygenerowane, nie przepisane recznie.
+ * The constants (K and the initial vectors) are the fractional parts of
+ * the roots of successive primes - generated, not copied out by hand.
  */
 
 #ifndef PROTONOS_USHA512_H
@@ -77,10 +77,10 @@ static const uint64_t sha384_h0[8] = {
 
 struct sha512 {
     uint64_t state[8];
-    uint64_t len_lo, len_hi;      /* dlugosc w bitach (128 bitow w dwoch) */
+    uint64_t len_lo, len_hi;      /* the length in bits (128 bits in two) */
     uint8_t buf[SHA512_BLOCK];
     uint32_t buflen;
-    uint32_t outlen;              /* 64 dla SHA-512, 48 dla SHA-384 */
+    uint32_t outlen;              /* 64 for SHA-512, 48 for SHA-384 */
 };
 
 static inline uint64_t s512_ror(uint64_t x, int n)
@@ -185,10 +185,10 @@ static inline void sha512_final(struct sha512 *c, uint8_t *out)
 
     uint8_t pad = 0x80;
     sha512_update(c, &pad, 1);
-    c->len_lo = lo; c->len_hi = hi;      /* dopelnienie nie liczy sie */
+    c->len_lo = lo; c->len_hi = hi;      /* the padding does not count */
 
     uint8_t zero = 0;
-    while (c->buflen != 112) {           /* 128 - 16 na dlugosc */
+    while (c->buflen != 112) {           /* 128 - 16 for the length */
         sha512_update(c, &zero, 1);
         c->len_lo = lo; c->len_hi = hi;
     }

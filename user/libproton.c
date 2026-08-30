@@ -1,22 +1,23 @@
-/* libproton - biblioteka wspoldzielona ProtonOS
+/* libproton - the ProtonOS shared library
  *
- * Nie ma tu ani jednej linijki wlasnego kodu i tak ma byc. Caly
- * material lezy tam, gdzie lezal od zawsze - w naglowkach z katalogu user -
- * a ten plik jest tylko miejscem, w ktorym raz sie go kompiluje.
+ * There is not a single line of code of its own here, and that is how
+ * it should be. All the material lies where it has always lain - in
+ * the headers in the user directory - and this file is only the place
+ * where it is compiled once.
  *
- * Naglowki wciagane sa w wersji 'lib' (scripts/rozdziel.py): te same
- * funkcje, ale z wiazaniem zewnetrznym, zeby dalo sie je w gotowej
- * bibliotece odnalezc po nazwie. Program dostaje te same naglowki
- * w wersji 'dekl' - same zapowiedzi, bez cial.
+ * The headers are pulled in in their 'lib' variant
+ * (scripts/split_headers.py): the same functions, but with external
+ * linkage, so that they can be found by name in the finished library.
+ * The program gets the same headers in their 'decl' variant -
+ * declarations only, with no bodies.
  *
- * Czego tu NIE MA i dlaczego:
+ * What is NOT here and why:
  *
- *   usys.h - wywolania systemowe. To dwie instrukcje na sztuke,
- *   wpisane wprost w kod; przepuszczanie ich przez tablice skokow
- *   biblioteki kosztowaloby wiecej niz oszczedzalo.
+ *   usys.h - the system calls. Those are two instructions apiece,
+ *   written straight into the code; putting them through the library's
+ *   jump table would cost more than it saved.
  *
- *   certdata.h - dane testowe jednego programu, nie kod uzywany
- *   przez kilka.
+ *   certdata.h - test data for one program, not code used by several.
  */
 
 #include "uapi.h"

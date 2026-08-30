@@ -1,21 +1,23 @@
-/* forktest - rozwidlenie procesu (fork) z kopiowaniem przy zapisie
+/* forktest - forking a process with copy on write
  *
- * Program zajmuje 256 KiB sterty, wypelnia ja wzorcem i rozwidla sie.
- * Dziecko wraca z sys_fork() z zerem, rodzic z pidem dziecka - obaj
- * w tym samym miejscu kodu, z ta sama pamiecia.
+ * The program takes 256 KiB of heap, fills it with a pattern and
+ * forks. The child returns from sys_fork() with zero, the parent with
+ * the child's pid - both at the same point in the code, with the same
+ * memory.
  *
- * Pamiec nie jest jednak kopiowana: obie przestrzenie adresowe wskazuja
- * na te same ramki, tyle ze bez prawa zapisu. Widac to po zajetosci RAM
- * tuz po fork - rosnie o kilka KiB (tablice stron), a nie o 256. Dopiero
- * gdy dziecko nadpisuje wzorzec, jadro robi mu prywatne kopie stron;
- * rodzic widzi swoj wzorzec nietkniety.
+ * The memory is not copied, though: both address spaces point at the
+ * same frames, only without write permission. That can be seen in the
+ * RAM usage right after the fork - it grows by a few KiB (page tables),
+ * not by 256. Only when the child overwrites the pattern does the
+ * kernel make it private copies of the pages; the parent sees its
+ * pattern untouched.
  */
 
 #include "usys.h"
 
 #define BUF_KIB 256
 #define BUF     (BUF_KIB * 1024)
-#define STEP    4096              /* jeden bajt na strone wystarczy */
+#define STEP    4096              /* one byte per page is enough */
 
 static unsigned char pattern(uint32_t i) { return (unsigned char)(0xA5 ^ (i >> 12)); }
 
@@ -50,16 +52,17 @@ void _start(void)
     }
 
     if (pid == 0) {
-        /* Dziecko: daj rodzicowi zmierzyc pamiec, zanim zaczniesz pisac */
+        /* The child: let the parent measure memory before you start writing */
         sys_sleep(400);
         if (!check(buf, 1)) {
             print("[forktest] dziecko: wzorzec rodzica NIE dotarl\n");
             sys_exit(1);
         }
-        /* Zapis JADRA do strony, ktora wciaz czeka na skopiowanie:
-           syscall wypelnia bufor w srodku sterty. Bez bitu WP w CR0
-           jadro pisaloby prosto w ramke wspoldzielona z rodzicem
-           i po cichu zepsulo mu pamiec. */
+        /* A KERNEL write to a page that is still waiting to be copied:
+           the syscall fills a buffer in the middle of the heap. Without
+           the WP bit in CR0 the kernel would write straight into the
+           frame shared with the parent and quietly corrupt its
+           memory. */
         char *slot = (char *)(buf + BUF / 2);
         sys_getcwd(slot);
         if (slot[0] != '/') {
@@ -76,7 +79,7 @@ void _start(void)
         sys_exit(7);
     }
 
-    /* Rodzic */
+    /* The parent */
     sys_sysinfo(&si);
     uint32_t grew = si.used_kib - before;
     print("[forktest] bufor ");
@@ -99,9 +102,10 @@ void _start(void)
     print_dec((uint32_t)code);
     print("\n");
 
-    /* Klasyczna para uniksowa: rozwidl sie, a w dziecku wskocz w inny
-       program. Pid, deskryptory i katalog roboczy zostaja - wymienia
-       sie tylko obraz procesu, wiec rodzic czeka na ten sam pid. */
+    /* The classic Unix pair: fork, and in the child jump into another
+       program. The pid, the descriptors and the working directory stay -
+       only the process image is exchanged, so the parent waits for the
+       same pid. */
     int32_t pid2 = sys_fork();
     if (pid2 < 0) {
         print("[forktest] drugi fork sie nie udal\n");
@@ -109,7 +113,7 @@ void _start(void)
     }
     if (pid2 == 0) {
         sys_exec("echo [forktest] po exec: inny program, ten sam pid");
-        print("[forktest] exec sie nie udal\n");    /* tu nie powinno dojsc */
+        print("[forktest] exec sie nie udal\n");    /* this should not be reached */
         sys_exit(1);
     }
     sys_wait(pid2);

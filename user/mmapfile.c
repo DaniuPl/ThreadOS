@@ -1,18 +1,18 @@
-/* mmapfile - plik widziany jako pamiec
+/* mmapfile - a file seen as memory
  *
- * Odwzorowuje plik z dysku pod adres w swojej przestrzeni i czyta go
- * jak zwykla tablice - bez ani jednego wywolania read. Sprawdza trzy
- * rzeczy, kazda innym sposobem:
+ * It maps a file from disk to an address in its own space and reads it
+ * like an ordinary array - without a single read call. It checks three
+ * things, each a different way:
  *
- *   1. bajty zgadzaja sie z tym, co w pliku naprawde lezy,
- *   2. przy podanej liczbie bajtow dotyka tylko tylu - wtedy widac,
- *      ile stron jadro naprawde wczytalo z dysku,
- *   3. zapis do odwzorowania jest bledem: to odwzorowanie tylko do
- *      odczytu, wiec proba zapisu ma zabic proces, a nie po cichu
- *      przepasc. Probuje tego DZIECKO, zeby bylo komu opowiedziec,
- *      jak poszlo.
+ *   1. the bytes match what really lies in the file,
+ *   2. with a given byte count it touches only that many - then it can
+ *      be seen how many pages the kernel really read from disk,
+ *   3. a write into the mapping is an error: this mapping is read-only,
+ *      so an attempted write is to kill the process rather than quietly
+ *      vanish. It is the CHILD that tries it, so that there is somebody
+ *      left to tell how it went.
  *
- * Uzycie: run mmapfile <plik> [ile bajtow sprawdzic]
+ * Usage: run mmapfile <file> [how many bytes to check]
  */
 
 #include "usys.h"
@@ -61,12 +61,12 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    /* Zapis ma sie nie udac. Probuje dziecko - rodzic przezyje
-       i opowie, co z tego wyszlo. */
+    /* The write is to fail. The child tries it - the parent will
+       survive and tell what came of it. */
     int32_t pid = sys_fork();
     if (pid == 0) {
         unsigned char *corrupt = (unsigned char *)p;
-        corrupt[0] = 0xFF;                  /* tu proces ma zginac */
+        corrupt[0] = 0xFF;                  /* the process is to die here */
         print("[mmapfile] ZLE: zapis do odwzorowania sie udal\n");
         sys_exit(1);
     }

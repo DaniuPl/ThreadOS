@@ -64,7 +64,7 @@ void _start(int argc, char **argv)
     }
 
     /* Wzorzec pliku: bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF.
-       Zapisal go mkmapa64, zanim plik trafil na dysk. */
+       Zapisal go mkmap64, zanim plik trafil na dysk. */
     uint64_t bad = 0;
     for (uint64_t i = 0; i < ile; i++)
         if (p[i] != (unsigned char)(i * 7 + 13))

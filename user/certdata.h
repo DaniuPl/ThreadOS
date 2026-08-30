@@ -1,16 +1,18 @@
-/* Dane testowe do sprawdzania certyfikatow - wygenerowane openssl-em.
+/* Test data for certificate checking - generated with openssl.
  *
- * cert_der: certyfikat samopodpisany (RSA-2048, sha256WithRSAEncryption)
- *   z SubjectAltName na protonos.test i *.protonos.test. Skoro podpisal
- *   go wlasny klucz, mozna sprawdzic podpis bez zadnego magazynu
- *   zaufania - a przy okazji caly parser DER.
- * pss_sig: podpis tej samej wiadomosci w schemacie PSS (tego wymaga
- *   TLS 1.3 w wiadomosci CertificateVerify).
- * ec_cert_der: to samo, ale na krzywej P-256 (ecdsa-with-SHA256) - coraz
- *   wiecej serwerow wystawia wlasnie takie certyfikaty.
- * ec_sig: podpis ECDSA tej samej wiadomosci (DER: SEQUENCE { r, s }).
- * p384_cert_der: krzywa P-384 podpisana skrotem SHA-384 - tak wystawia
- *   m.in. ISRG Root X2.
+ * cert_der: a self-signed certificate (RSA-2048,
+ *   sha256WithRSAEncryption) with a SubjectAltName on protonos.test and
+ *   *.protonos.test. Since its own key signed it, the signature can be
+ *   checked without any trust store - and the whole DER parser along
+ *   the way.
+ * pss_sig: a signature over the same message in the PSS scheme (which
+ *   TLS 1.3 requires in the CertificateVerify message).
+ * ec_cert_der: the same, but on the P-256 curve (ecdsa-with-SHA256) -
+ *   more and more servers issue exactly such certificates.
+ * ec_sig: an ECDSA signature over the same message (DER: SEQUENCE
+ *   { r, s }).
+ * p384_cert_der: the P-384 curve signed with a SHA-384 digest - that is
+ *   how ISRG Root X2, among others, is issued.
  */
 
 #ifndef PROTONOS_CERTDATA_H

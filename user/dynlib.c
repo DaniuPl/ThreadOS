@@ -1,19 +1,20 @@
-/* dynlib - dowod na to, ze biblioteka wspoldzielona naprawde jest wspolna
+/* dynlib - proof that a shared library really is shared
  *
- * Program nie niesie w sobie kryptografii; niesie tylko wywolania.
- * Sprawdzamy to trzema rzeczami, ktorych nie da sie sfalszowac:
+ * The program carries no cryptography in itself; it carries only
+ * calls. We check that with three things that cannot be faked:
  *
- *   1. Kod, ktory wykonujemy, lezy POZA obrazem programu. Adres musi
- *      podac sama biblioteka - program nieprzemieszczalny, ktory
- *      bierze adres jej funkcji, dostaje adres wlasnej zaslepki skoku.
- *   2. Wynik jest poprawny: SHA-256('abc') to znany wektor z FIPS
- *      180-4. Skok przez niewypelniona pozycje albo w zly kod nie ma
- *      jak dac wlasciwej odpowiedzi.
- *   3. Dane biblioteki sa PRYWATNE. Licznik generatora losowego zaczyna
- *      w kazdym procesie od zera; gdyby dane byly wspolne, drugi bieg
- *      zastalby licznik z pierwszego.
+ *   1. The code we execute lies OUTSIDE the program's image. The
+ *      address has to be supplied by the library itself - a
+ *      non-relocatable program taking the address of its function gets
+ *      the address of its own jump stub.
+ *   2. The result is correct: SHA-256('abc') is a known vector from
+ *      FIPS 180-4. A jump through an unfilled slot or into the wrong
+ *      code has no way of giving the right answer.
+ *   3. The library's data are PRIVATE. The random generator's counter
+ *      starts from zero in every process; if the data were shared, the
+ *      second run would find the counter from the first.
  *
- * Uzycie: run dynlib
+ * Usage: run dynlib
  */
 
 #include "uapi.h"
@@ -28,8 +29,8 @@ static void report(const char *co, uint32_t v)
     print("\n");
 }
 
-/* Punkt odniesienia: wlasna funkcja programu, zeby bylo z czym
-   porownac adres kodu biblioteki */
+/* A point of reference: the program's own function, so that there is
+   something to compare the library code's address with */
 static void our_fn(void)
 {
     print("");
@@ -52,7 +53,7 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    /* Znany wektor: SHA-256('abc') zaczyna sie od ba 78 16 bf */
+    /* A known vector: SHA-256('abc') starts with ba 78 16 bf */
     static const uint8_t want[8] = { 0xba, 0x78, 0x16, 0xbf,
                                      0x8f, 0x01, 0xcf, 0xea };
     uint8_t digest[32];
@@ -65,9 +66,10 @@ void _start(int argc, char **argv)
     }
     print("[dynlib] SHA-256('abc') z biblioteki zgadza sie z FIPS 180-4\n");
 
-    /* Kod biblioteki jest WSPOLNY - te same ramki widzi kazdy proces.
-       Gdyby dalo sie w nich pisac, jeden program podmienilby funkcje
-       wszystkim naraz. Ma sie wiec nie dac, i to ma go zabic. */
+    /* The library's code is SHARED - every process sees the same
+       frames. If they could be written to, one program would swap a
+       function out for everybody at once. So it has to be impossible,
+       and it has to kill that program. */
     if (argc > 1 && argv[1][0] == 'p') {
         print("[dynlib] probuje pisac po kodzie biblioteki\n");
         *(volatile uint8_t *)(uintptr_t)code = 0x90;
@@ -75,8 +77,9 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    /* Licznik generatora to stan biblioteki. W swiezym procesie ma byc
-       zerowy - bez tego nie wiadomo by bylo, czy dane sa prywatne. */
+    /* The generator's counter is the library's state. In a fresh
+       process it is to be zero - without that there would be no telling
+       whether the data are private. */
     if (proton_random_counter() != 0) {
         print("[dynlib] ZLE: licznik biblioteki nie zaczyna od zera\n");
         sys_exit(1);

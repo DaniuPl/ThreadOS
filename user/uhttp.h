@@ -1,17 +1,18 @@
-/* Klient HTTP/1.1 dla programow ring 3
+/* An HTTP/1.1 client for ring 3 programs
  *
- * Wspoldzielony przez 'httpget' i przegladarke 'gweb'. Obsluguje to,
- * czego wymagaja prawdziwe serwery:
- *   - HTTP/1.1 z 'Connection: close' (koniec tresci po FIN),
- *   - kodowanie 'chunked' (serwery uzywaja go, gdy nie znaja z gory
- *     dlugosci odpowiedzi) sklejane przez granice pakietow,
- *   - naglowek Location, zeby dalo sie isc za przekierowaniem,
- *   - rozbior adresu "http://host[:port]/sciezka" oraz https://,
- *   - polaczenie po TLS 1.3, gdy adres jest https (patrz utls.h).
+ * Shared by 'httpget' and the 'gweb' browser. It handles what real
+ * servers require:
+ *   - HTTP/1.1 with 'Connection: close' (the body ends at FIN),
+ *   - 'chunked' encoding (servers use it when they do not know the
+ *     response length up front) glued across packet boundaries,
+ *   - the Location header, so that a redirect can be followed,
+ *   - parsing an address "http://host[:port]/path" and https://,
+ *   - a connection over TLS 1.3 when the address is https (see
+ *     utls.h).
  *
- * Tresc idzie strumieniem do funkcji zwrotnej - dzieki temu program
- * moze ja od razu zapisywac na dysk albo skladac do okna, bez trzymania
- * calej strony w pamieci.
+ * The body goes as a stream into a callback - thanks to that a program
+ * can write it straight to disk or assemble it into a window, without
+ * holding the whole page in memory.
  */
 
 #ifndef PROTONOS_UHTTP_H
@@ -24,7 +25,7 @@
 #define HTTP_HDR_MAX  2048
 #define HTTP_CHUNK    1024
 
-/* Jedno miejsce, przez ktore ida bajty - zwykly TCP albo TLS */
+/* One place the bytes travel through - plain TCP or TLS */
 struct http_transport {
     int tls;
     int32_t sock;
@@ -67,15 +68,15 @@ static inline void http_tp_close(struct http_transport *tp)
 }
 
 struct http_result {
-    int status;                  /* kod odpowiedzi albo 0 */
-    uint32_t body_len;           /* odebranych bajtow tresci */
-    int chunked;                 /* czy tresc byla w kawalkach */
-    int verified;                /* https: czy certyfikat sie obronil */
-    int verify_err;              /* https: powod, gdy nie */
-    char location[192];          /* naglowek Location (przekierowanie) */
+    int status;                  /* the response code or 0 */
+    uint32_t body_len;           /* body bytes received */
+    int chunked;                 /* was the body in chunks */
+    int verified;                /* https: did the certificate hold up */
+    int verify_err;              /* https: the reason, when it did not */
+    char location[192];          /* the Location header (a redirect) */
 };
 
-/* Wolane dla kolejnych kawalkow tresci */
+/* Called for successive pieces of the body */
 typedef void (*http_sink)(const char *data, uint32_t len, void *arg);
 
 static inline int uhttp_lower(int c)
@@ -83,8 +84,8 @@ static inline int uhttp_lower(int c)
     return (c >= 'A' && c <= 'Z') ? c + 32 : c;
 }
 
-/* Czy linia naglowka zaczyna sie od danej nazwy (bez rozroznienia
-   wielkosci liter)? Zwraca wskaznik na wartosc albo 0. */
+/* Does a header line start with the given name (case-insensitively)?
+   Returns a pointer to the value or 0. */
 static inline const char *uhttp_header(const char *line, const char *name)
 {
     int i = 0;
@@ -101,8 +102,8 @@ static inline const char *uhttp_header(const char *line, const char *name)
     return line + i;
 }
 
-/* Rozbior "http://host[:port]/sciezka", "https://..." albo samego
-   "host[:port]/sciezka". W *tls wraca 1 dla https (i port 443). */
+/* Parsing "http://host[:port]/path", "https://..." or a bare
+   "host[:port]/path". *tls comes back as 1 for https (and port 443). */
 static inline int http_parse_url(const char *url, char *host, int hmax,
                                  uint32_t *port, char *path, int pmax,
                                  int *tls)
@@ -118,7 +119,7 @@ static inline int http_parse_url(const char *url, char *host, int hmax,
         if (url[j] == ':' && url[j + 1] == '/' && url[j + 2] == '/')
             i = j + 3;
         else
-            secure = 0;           /* to nie byl schemat, tylko nazwa hosta */
+            secure = 0;           /* that was not a scheme but a host name */
     }
     if (tls)
         *tls = secure;
@@ -148,9 +149,10 @@ static inline int http_parse_url(const char *url, char *host, int hmax,
     return *port ? 1 : 0;
 }
 
-/* Stosuje naglowek Location: adres bezwzgledny zmienia host i port,
-   adres zaczynajacy sie od "/" tylko sciezke (tak wysyla przekierowania
-   wiekszosc serwerow). Zwraca 1, gdy udalo sie ustalic nowy cel. */
+/* Applies the Location header: an absolute address changes the host
+   and the port, an address starting with "/" only the path (that is how
+   most servers send redirects). Returns 1 when a new target could be
+   worked out. */
 static inline int http_apply_location(const char *loc, char *host, int hmax,
                                       uint32_t *port, char *path, int pmax,
                                       int *tls)
@@ -162,18 +164,20 @@ static inline int http_apply_location(const char *loc, char *host, int hmax,
 
     int t = 0;
     if (loc[0] != '/')
-        path[t++] = '/';               /* adres wzgledny bez ukosnika */
+        path[t++] = '/';               /* a relative address with no slash */
     for (int i = 0; loc[i] && t < pmax - 1; i++)
         path[t++] = loc[i];
     path[t] = '\0';
     return t > 0;
 }
 
-/* Pobiera zasob. Zwraca 0 przy powodzeniu, -1 gdy nie udalo sie
-   polaczyc albo wyslac zadania. Kod HTTP i Location w 'res'. */
-/* Ustawienia weryfikacji dla polaczen https - wspolne dla programu.
-   Gdy roots_len == 0, certyfikat jest sprawdzany "na sucho": wynik
-   trafia do res->verified, ale polaczenie nie jest zrywane. */
+/* Fetches a resource. Returns 0 on success, -1 when it failed to
+   connect or to send the request. The HTTP code and Location are in
+   'res'. */
+/* Verification settings for https connections - common to the whole
+   program. When roots_len == 0, the certificate is checked "dry": the
+   result lands in res->verified, but the connection is not torn
+   down. */
 static struct tls_config http_tls_cfg;
 
 static inline void http_set_roots(const uint8_t *roots, uint32_t len,
@@ -237,7 +241,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     }
 
     int hlen = 0, headers_done = 0;
-    /* stany dekodera 'chunked' */
+    /* the 'chunked' decoder's states */
     enum { CH_SIZE, CH_DATA, CH_CRLF, CH_DONE } cstate = CH_SIZE;
     uint32_t cremain = 0;
     char sizeline[16];
@@ -246,7 +250,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     for (;;) {
         int n = http_tp_recv(&tp, buf, sizeof(buf));
         if (n <= 0)
-            break;                     /* 0 = koniec strumienia, -1 = timeout */
+            break;                     /* 0 = end of stream, -1 = timeout */
 
         int i = 0;
 
@@ -264,12 +268,12 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
 
             hdr[hlen] = '\0';
 
-            /* status: "HTTP/1.x NNN ..." */
+            /* the status: "HTTP/1.x NNN ..." */
             if (hlen > 12)
                 res->status = (hdr[9] - '0') * 100 + (hdr[10] - '0') * 10 +
                               (hdr[11] - '0');
 
-            /* naglowki linia po linii */
+            /* headers line by line */
             for (int p = 0; p < hlen;) {
                 int q = p;
                 while (q < hlen && hdr[q] != '\r')
@@ -297,7 +301,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                 }
 
                 hdr[q] = save;
-                p = q + 2;             /* przeskocz CRLF */
+                p = q + 2;             /* skip the CRLF */
                 if (q + 1 >= hlen)
                     break;
             }
@@ -305,7 +309,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                 cstate = CH_SIZE;
         }
 
-        /* tresc */
+        /* the body */
         while (i < n) {
             if (!res->chunked) {
                 sink(buf + i, (uint32_t)(n - i), arg);
@@ -332,7 +336,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                         else if (d >= 'A' && d <= 'F')
                             digit = (uint32_t)(d - 'A' + 10);
                         else
-                            break;     /* rozszerzenia po sredniku itp. */
+                            break;     /* extensions after a semicolon and so on */
                         v = v * 16 + digit;
                     }
                     sizelen = 0;
@@ -356,7 +360,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                 continue;
             }
 
-            /* CH_CRLF: pomin znaczniki konca kawalka */
+            /* CH_CRLF: skip the chunk-end markers */
             if (buf[i] == '\n')
                 cstate = CH_SIZE;
             i++;
@@ -370,7 +374,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     return 0;
 }
 
-/* Rozwiazuje nazwe (albo bierze adres wprost). 0 = nie udalo sie. */
+/* Resolves a name (or takes an address directly). 0 = it failed. */
 static inline uint32_t http_resolve(const char *host)
 {
     uint32_t ip = uparse_ip(host);

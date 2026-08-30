@@ -1,12 +1,14 @@
-/* Parser certyfikatow X.509 (DER) - tyle, ile trzeba do TLS
+/* An X.509 certificate parser (DER) - as much as TLS needs
  *
- * Certyfikat to zagniezdzone struktury w zapisie DER: kazdy element ma
- * znacznik, dlugosc i tresc. Wyciagamy z niego: bajty podpisane przez
- * wystawce (tbsCertificate), sam podpis i jego algorytm, klucz publiczny,
- * daty waznosci, nazwy wystawcy i podmiotu (do sklejenia lancucha),
- * SubjectAltName (do sprawdzenia nazwy hosta) i flage CA.
+ * A certificate is nested structures in DER encoding: every element
+ * has a tag, a length and a body. What we pull out of it: the bytes
+ * signed by the issuer (tbsCertificate), the signature itself and its
+ * algorithm, the public key, the validity dates, the issuer's and the
+ * subject's names (for gluing the chain together), the SubjectAltName
+ * (for checking the host name) and the CA flag.
  *
- * Nie kopiujemy niczego - pola wskazuja w oryginalny bufor certyfikatu.
+ * We copy nothing - the fields point into the certificate's original
+ * buffer.
  */
 
 #ifndef PROTONOS_UX509_H
@@ -33,10 +35,10 @@ struct x509_cert {
     const uint8_t *subject;  uint32_t subject_len;
 
     int key_type;
-    const uint8_t *mod;      uint32_t mod_len;    /* RSA: modulus */
-    uint32_t exp;                                 /* RSA: wykladnik */
+    const uint8_t *mod;      uint32_t mod_len;    /* RSA: the modulus */
+    uint32_t exp;                                 /* RSA: the exponent */
     const uint8_t *ec_point; uint32_t ec_point_len; /* EC: 0x04||X||Y */
-    int ec_bits;                                  /* 256 albo 384; 0 = obca */
+    int ec_bits;                                  /* 256 or 384; 0 = a foreign one */
 
     char not_before[16], not_after[16];           /* YYYYMMDDHHMMSS */
 
@@ -44,9 +46,9 @@ struct x509_cert {
     int is_ca;
 };
 
-/* --- podstawy DER --- */
+/* --- the basics of DER --- */
 
-/* Czyta jeden element: znacznik, tresc i dlugosc; przesuwa *p dalej */
+/* Reads one element: the tag, the body and the length; moves *p on */
 static inline int der_next(const uint8_t **p, const uint8_t *end,
                            uint8_t *tag, const uint8_t **content,
                            uint32_t *clen)
@@ -57,7 +59,7 @@ static inline int der_next(const uint8_t **p, const uint8_t *end,
 
     *tag = *q++;
     uint32_t len = *q++;
-    if (len & 0x80) {                    /* dluga postac dlugosci */
+    if (len & 0x80) {                    /* the long form of the length */
         uint32_t nbytes = len & 0x7f;
         if (nbytes == 0 || nbytes > 4 || q + nbytes > end)
             return -1;
@@ -74,7 +76,7 @@ static inline int der_next(const uint8_t **p, const uint8_t *end,
     return 0;
 }
 
-/* Wchodzi do wnetrza elementu (SEQUENCE, SET, [n] EXPLICIT) */
+/* Steps inside an element (SEQUENCE, SET, [n] EXPLICIT) */
 static inline int der_enter(const uint8_t **p, const uint8_t *end,
                             uint8_t want_tag, const uint8_t **inner,
                             const uint8_t **inner_end)
@@ -102,7 +104,7 @@ static inline int der_oid_is(const uint8_t *oid, uint32_t len,
     return 1;
 }
 
-/* Rozpoznanie AlgorithmIdentifier po identyfikatorze obiektu */
+/* Recognizing an AlgorithmIdentifier by its object identifier */
 static inline int x509_alg_from_oid(const uint8_t *oid, uint32_t len)
 {
     static const uint8_t rsa_sha256[] =
@@ -125,12 +127,12 @@ static inline int x509_alg_from_oid(const uint8_t *oid, uint32_t len)
     return X509_ALG_UNKNOWN;
 }
 
-/* Czas: UTCTime (YYMMDD...) albo GeneralizedTime (YYYYMMDD...) */
+/* Time: UTCTime (YYMMDD...) or GeneralizedTime (YYYYMMDD...) */
 static inline void x509_time(uint8_t tag, const uint8_t *p, uint32_t len,
                              char *out)
 {
     int n = 0;
-    if (tag == 0x17 && len >= 12) {      /* UTCTime: rok dwucyfrowy */
+    if (tag == 0x17 && len >= 12) {      /* UTCTime: a two-digit year */
         int yy = (p[0] - '0') * 10 + (p[1] - '0');
         const char *century = (yy >= 50) ? "19" : "20";
         out[n++] = century[0];
@@ -144,7 +146,7 @@ static inline void x509_time(uint8_t tag, const uint8_t *p, uint32_t len,
     out[n] = '\0';
 }
 
-/* --- rozbior certyfikatu --- */
+/* --- taking a certificate apart --- */
 
 static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
                              uint32_t len)
@@ -158,8 +160,8 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     if (der_enter(&p, end, 0x30, &cert, &cert_end) < 0)
         return -1;
 
-    /* tbsCertificate - zapamietujemy caly element razem z naglowkiem,
-       bo to jego bajty podpisuje wystawca */
+    /* tbsCertificate - we remember the whole element together with its
+       header, because it is its bytes that the issuer signs */
     const uint8_t *tbs_start = cert;
     const uint8_t *tbs, *tbs_end;
     const uint8_t *q = cert;
@@ -179,7 +181,8 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
         return -1;
     c->sig_alg = x509_alg_from_oid(oid, oidlen);
 
-    /* signatureValue (BIT STRING - pierwszy bajt to liczba nieuzywanych bitow) */
+    /* signatureValue (a BIT STRING - the first byte is the number of
+   unused bits) */
     const uint8_t *sig;
     uint32_t siglen;
     if (der_next(&q, cert_end, &tag, &sig, &siglen) < 0 || tag != 0x03 ||
@@ -188,7 +191,7 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     c->sig = sig + 1;
     c->sig_len = siglen - 1;
 
-    /* --- wnetrze tbsCertificate --- */
+    /* --- the inside of tbsCertificate --- */
     const uint8_t *t = tbs;
     const uint8_t *content;
     uint32_t clen;
@@ -235,8 +238,8 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     if (der_next(&kalg, kalg_end, &tag, &oid, &oidlen) < 0 || tag != 0x06)
         return -1;
 
-    /* Dla krzywych po identyfikatorze algorytmu idzie identyfikator
-       krzywej - umiemy prime256v1 (P-256) i secp384r1 (P-384) */
+    /* For curves the algorithm identifier is followed by the curve
+       identifier - we know prime256v1 (P-256) and secp384r1 (P-384) */
     if (kalg < kalg_end) {
         const uint8_t *curve;
         uint32_t curvelen;
@@ -267,7 +270,7 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
         bitlen < 2)
         return -1;
 
-    if (c->key_type == X509_KEY_EC) {    /* punkt: 0x04 || X || Y */
+    if (c->key_type == X509_KEY_EC) {    /* the point: 0x04 || X || Y */
         c->ec_point = bits + 1;
         c->ec_point_len = bitlen - 1;
     }
@@ -279,7 +282,7 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
             return -1;
         if (der_next(&rsa, rsa_end, &tag, &content, &clen) < 0 || tag != 0x02)
             return -1;
-        while (clen > 0 && *content == 0) {   /* wiodace zero znaku */
+        while (clen > 0 && *content == 0) {   /* a leading sign zero */
             content++;
             clen--;
         }
@@ -293,7 +296,7 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
         c->exp = e;
     }
 
-    /* rozszerzenia: [3] EXPLICIT SEQUENCE OF Extension */
+    /* extensions: [3] EXPLICIT SEQUENCE OF Extension */
     while (t < tbs_end) {
         const uint8_t *saved = t;
         if (der_next(&t, tbs_end, &tag, &content, &clen) < 0)
@@ -348,19 +351,19 @@ static inline int x509_parse(struct x509_cert *c, const uint8_t *der,
     return 0;
 }
 
-/* --- dopasowanie nazwy hosta --- */
+/* --- host name matching --- */
 
 static inline int x509_name_eq(const char *pattern, uint32_t plen,
                                const char *host)
 {
-    /* wieloznacznik tylko na poczatku: *.przyklad.pl */
+    /* a wildcard only at the start: *.example.com */
     if (plen > 2 && pattern[0] == '*' && pattern[1] == '.') {
         const char *dot = host;
         while (*dot && *dot != '.')
             dot++;
         if (!*dot)
             return 0;
-        pattern += 1;                    /* zostaw kropke */
+        pattern += 1;                    /* leave the dot */
         plen -= 1;
         host = dot;
     }
@@ -376,7 +379,8 @@ static inline int x509_name_eq(const char *pattern, uint32_t plen,
     return i == plen && !host[i];
 }
 
-/* Czy certyfikat obejmuje dana nazwe? Sprawdzamy SubjectAltName. */
+/* Does the certificate cover the given name? We check the
+   SubjectAltName. */
 static inline int x509_matches_host(const struct x509_cert *c, const char *host)
 {
     if (!c->san)
@@ -400,7 +404,8 @@ static inline int x509_matches_host(const struct x509_cert *c, const char *host)
     return 0;
 }
 
-/* Porownanie nazw wyroznionych (bajt w bajt - tak robi wiekszosc) */
+/* Comparing distinguished names (byte for byte - that is what most
+   do) */
 static inline int x509_name_match(const uint8_t *a, uint32_t alen,
                                   const uint8_t *b, uint32_t blen)
 {

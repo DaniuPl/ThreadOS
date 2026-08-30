@@ -1,16 +1,17 @@
-/* ptree - drzewo procesow: fork, wait na dowolne dziecko, sieroty
+/* ptree - the process tree: fork, wait for any child, orphans
  *
- * Rodzic rozwidla sie trzy razy. Kazde dziecko spi inna chwile
- * i konczy sie wlasnym kodem, wiec koncza sie w odwrotnej kolejnosci,
- * niz powstaly. Rodzic zbiera je przez sys_waitany() - nie musi
- * zgadywac, kto skonczy pierwszy - a na koniec sprawdza, ze gdy dzieci
- * juz nie ma, waitany mowi o tym wprost (-1), zamiast czekac w
- * nieskonczonosc.
+ * The parent forks three times. Every child sleeps a different while
+ * and ends with its own code, so they finish in the reverse order to
+ * the one they were created in. The parent collects them through
+ * sys_waitany() - it does not have to guess who will finish first - and
+ * at the end checks that once there are no children left, waitany says
+ * so outright (-1) instead of waiting forever.
  *
- * Druga czesc sprawdza sieroty: dziecko rozwidla wnuka i ginie
- * natychmiast, zostawiajac go samego. Wnuk zostaje przygarniety przez
- * dziadka, wiec jego kod wyjscia odbiera ten sam waitany - inaczej
- * przepadlby, a wnuk nie mialby komu zdac raportu.
+ * The second part checks orphans: a child forks a grandchild and dies
+ * immediately, leaving it alone. The grandchild is adopted by the
+ * grandparent, so its exit code is collected by the same waitany -
+ * otherwise it would be lost and the grandchild would have nobody to
+ * report to.
  */
 
 #include "usys.h"
@@ -28,7 +29,7 @@ void _start(void)
             sys_exit(1);
         }
         if (p == 0) {
-            /* Ostatnie dziecko spi najkrocej - skonczy jako pierwsze */
+            /* The last child sleeps the shortest - it will finish first */
             sys_sleep((uint32_t)(KIDS - i) * 300);
             sys_exit(20 + i);
         }
@@ -48,9 +49,9 @@ void _start(void)
         int32_t code = -1;
         int32_t who = sys_waitany(&code);
         if (who < 0)
-            break;                      /* nie ma juz dzieci */
+            break;                      /* there are no children left */
 
-        /* Kod wyjscia musi pasowac do tego, kim jest dziecko */
+        /* The exit code has to match which child it is */
         int idx = -1;
         for (int i = 0; i < KIDS; i++)
             if (pid[i] == who)
@@ -76,7 +77,7 @@ void _start(void)
     }
     print("[ptree] zebrane wszystkie dzieci, waitany zglosil koniec\n");
 
-    /* Sierota: dziecko robi wnuka i od razu ginie */
+    /* An orphan: the child makes a grandchild and dies at once */
     int32_t mid = sys_fork();
     if (mid < 0) {
         print("[ptree] fork sieroty sie nie udal\n");
@@ -85,7 +86,7 @@ void _start(void)
     if (mid == 0) {
         int32_t grand = sys_fork();
         if (grand == 0) {
-            sys_sleep(500);         /* przezyje wlasnego rodzica */
+            sys_sleep(500);         /* it will outlive its own parent */
             sys_exit(99);
         }
         print("[ptree] dziecko robi wnuka ");
@@ -103,7 +104,7 @@ void _start(void)
         if (code == 30 && who == mid)
             seen_child = 1;
         else if (code == 99)
-            seen_orphan = 1;         /* wnuka przygarnal dziadek */
+            seen_orphan = 1;         /* the grandchild was adopted by the grandparent */
         print("[ptree] odebrane od ");
         print_dec((uint32_t)who);
         print(" z kodem ");

@@ -70,10 +70,10 @@ def main():
             q.wait_serial("PFS gotowy", timeout=30)
 
             # --- Maly plik: caly czytany przez odwzorowanie ---
-            make_it = q.command("run mkmapa64 mapa.txt 12", "kod wyjscia",
+            make_it = q.command("run mkmap64 mapa.txt 12", "kod wyjscia",
                                timeout=60)
             check("plik z wzorcem zalozony na dysku",
-                  "[mkmapa64] zapisano 12288 B wzorca" in make_it)
+                  "[mkmap64] zapisano 12288 B wzorca" in make_it)
 
             read_out = q.command("run mmapfile64 mapa.txt", "kod wyjscia",
                                timeout=90)
@@ -96,7 +96,7 @@ def main():
             # --- Duzy plik, jeden dotkniety bajt ---
             # To jest wlasciwy dowod na stronicowanie na zadanie:
             # odwzorowanie kosztuje tyle, ile sie z niego wzielo
-            q.command("run mkmapa64 duza.txt 400", "kod wyjscia",
+            q.command("run mkmap64 duza.txt 400", "kod wyjscia",
                         timeout=120)
             malo = q.command("run mmapfile64 duza.txt 1", "kod wyjscia",
                                timeout=90)
@@ -142,10 +142,10 @@ def main():
             q3.wait_for("ProtonOS shell", timeout=40)
             q3.wait_for("[siec] DHCP", timeout=30)
 
-            make_it = q3.command("run mkmapa mapa.txt 12", "zakonczyl sie",
+            make_it = q3.command("run mkmap mapa.txt 12", "zakonczyl sie",
                                 timeout=60)
             check("plik z wzorcem zalozony na dysku (32-bit)",
-                  "[mkmapa] zapisano 12288 B wzorca" in make_it)
+                  "[mkmap] zapisano 12288 B wzorca" in make_it)
 
             read_out = q3.command("run mmapfile mapa.txt", "zakonczyl sie",
                                 timeout=90)
@@ -164,7 +164,7 @@ def main():
             # Stronicowanie na zadanie: duzy plik, jeden dotkniety bajt
             before = q3.command("mem", "z plikow:")
             m1 = re.search(r"z plikow:\s+(\d+)", before)
-            q3.command("run mkmapa duza.txt 400", "zakonczyl sie",
+            q3.command("run mkmap duza.txt 400", "zakonczyl sie",
                          timeout=120)
             malo = q3.command("run mmapfile duza.txt 1", "zakonczyl sie",
                                 timeout=90)
@@ -181,9 +181,9 @@ def main():
             # sprawdza, czy kazda ramka jest wciaz jego. Dokladanie
             # stron pod nadpisywanie cudzych ramek wygladaloby
             # w polowie tak samo.
-            stack = q3.command("run gleboko", "zakonczyl sie", timeout=60)
+            stack = q3.command("run deep", "zakonczyl sie", timeout=60)
             check("stos rosnie na zadanie: rekurencja siega poza osiem "
-                  "stron", "[gleboko] zeszlem na poziom 40" in stack)
+                  "stron", "[deep] zeszlem na poziom 40" in stack)
             check("i kazda ramka przetrwala nietknieta",
                   "wszystkie ramki caly" in stack and "ZLE" not in stack)
         finally:

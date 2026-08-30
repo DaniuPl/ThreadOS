@@ -1,23 +1,24 @@
-/* Klient TLS 1.3 (RFC 8446) - minimalny, ale prawdziwy
+/* A TLS 1.3 client (RFC 8446) - minimal, but real
  *
- * Zestaw: X25519 do wymiany kluczy, TLS_CHACHA20_POLY1305_SHA256 do
- * szyfrowania, SHA-256 w transkrypcie i harmonogramie kluczy. Tyle
- * wystarcza, zeby dogadac sie z dowolnym wspolczesnym serwerem -
- * TLS 1.3 wyrzucil z protokolu cala starzyzne.
+ * The set: X25519 for key exchange, TLS_CHACHA20_POLY1305_SHA256 for
+ * encryption, SHA-256 in the transcript and the key schedule. That is
+ * enough to reach agreement with any modern server - TLS 1.3 threw all
+ * the old junk out of the protocol.
  *
- * Przebieg: ClientHello z kluczem publicznym -> ServerHello z jego
- * kluczem -> obie strony licza ten sam sekret -> reszta uzgodnien
- * leci juz zaszyfrowana -> Finished po obu stronach -> dane aplikacji
- * na osobnych kluczach.
+ * The course of it: ClientHello with a public key -> ServerHello with
+ * its key -> both sides compute the same secret -> the rest of the
+ * handshake goes encrypted -> Finished on both sides -> application
+ * data on separate keys.
  *
- * Certyfikat serwera jest sprawdzany, gdy podamy magazyn zaufania:
- * podpis w CertificateVerify (kluczem z certyfikatu), lancuch podpisow
- * do zaufanego korzenia, daty waznosci i nazwa hosta. Bez magazynu
- * polaczenie jest tylko szyfrowane - i wtedy jest to jasno powiedziane
- * wolajacemu (pole 'verified').
+ * The server's certificate is verified when we supply a trust store:
+ * the signature in CertificateVerify (with the key from the
+ * certificate), the chain of signatures up to a trusted root, the
+ * validity dates and the host name. Without a store the connection is
+ * merely encrypted - and that is then said plainly to the caller (the
+ * 'verified' field).
  *
- * Czego jeszcze nie ma: podpisow ECDSA (czesc serwerow ich uzywa),
- * odwolan certyfikatow i sprawdzania ograniczen nazw.
+ * What is still missing: ECDSA signatures (some servers use them),
+ * certificate revocation and name constraint checking.
  */
 
 #ifndef PROTONOS_UTLS_H
@@ -32,15 +33,15 @@
 
 #define TLS_PLAINTEXT_MAX 16384
 #define TLS_RECORD_MAX    (TLS_PLAINTEXT_MAX + 256)
-#define TLS_HS_MAX        20480          /* lancuch certyfikatow bywa duzy */
+#define TLS_HS_MAX        20480          /* a certificate chain can be large */
 
-/* Typy rekordow */
+/* Record types */
 #define REC_CCS       20
 #define REC_ALERT     21
 #define REC_HANDSHAKE 22
 #define REC_APPDATA   23
 
-/* Typy wiadomosci uzgodnien */
+/* Handshake message types */
 #define HS_CLIENT_HELLO   1
 #define HS_SERVER_HELLO   2
 #define HS_NEW_TICKET     4
@@ -53,30 +54,30 @@
 #define TLS_CHACHA20_SHA256  0x1303
 #define GROUP_X25519         0x001d
 
-/* Co i wzgledem czego sprawdzac */
+/* What to check and against what */
 struct tls_config {
-    int verify;                          /* 1 = wymagaj poprawnego lancucha */
-    const uint8_t *roots;                /* certyfikaty DER, jeden za drugim */
+    int verify;                          /* 1 = require a valid chain */
+    const uint8_t *roots;                /* DER certificates, one after another */
     uint32_t roots_len;
 };
 
 struct tls_conn {
     int32_t sock;
     int established;
-    int verified;                        /* 1 = certyfikat sprawdzony */
-    int verify_err;                      /* CERT_* gdy sie nie udalo */
+    int verified;                        /* 1 = the certificate was verified */
+    int verify_err;                      /* CERT_* when it failed */
 
-    uint8_t key_c[32], iv_c[12];         /* klucze aplikacyjne */
+    uint8_t key_c[32], iv_c[12];         /* application keys */
     uint8_t key_s[32], iv_s[12];
-    uint32_t seq_c, seq_s;               /* liczniki rekordow */
+    uint32_t seq_c, seq_s;               /* record counters */
 
-    uint8_t app[TLS_RECORD_MAX];         /* odszyfrowane dane aplikacji */
+    uint8_t app[TLS_RECORD_MAX];         /* decrypted application data */
     uint32_t applen, appoff;
 
     const char *error;
 };
 
-/* --- pomocnicze: zapis liczb --- */
+/* --- helpers: writing numbers --- */
 
 static inline void tls_put16(uint8_t *p, uint32_t v)
 {
@@ -94,7 +95,7 @@ static inline uint32_t tls_get24(const uint8_t *p)
     return ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
 }
 
-/* --- warstwa gniazda --- */
+/* --- the socket layer --- */
 
 static inline int tls_write_all(struct tls_conn *c, const uint8_t *data,
                                 uint32_t len)
@@ -102,7 +103,7 @@ static inline int tls_write_all(struct tls_conn *c, const uint8_t *data,
     uint32_t done = 0;
     while (done < len) {
         uint32_t take = len - done;
-        if (take > 1024)                 /* jadro wysyla po kawalku i czeka */
+        if (take > 1024)                 /* the kernel sends piece by piece and waits */
             take = 1024;
         if (tcp_send(c->sock, data + done, take, 10000) < 0)
             return -1;
@@ -123,7 +124,7 @@ static inline int tls_read_all(struct tls_conn *c, uint8_t *buf, uint32_t len)
     return 0;
 }
 
-/* Odbiera jeden rekord: naglowek 5 B + tresc */
+/* Receives one record: a 5 B header + the body */
 static inline int tls_read_record(struct tls_conn *c, uint8_t *type,
                                   uint8_t *hdr, uint8_t *buf, uint32_t *len)
 {
@@ -139,9 +140,9 @@ static inline int tls_read_record(struct tls_conn *c, uint8_t *type,
     return 0;
 }
 
-/* --- szyfrowanie rekordow --- */
+/* --- record encryption --- */
 
-/* nonce = iv XOR licznik rekordu (na osmiu ostatnich bajtach) */
+/* nonce = iv XOR the record counter (on the last eight bytes) */
 static inline void tls_nonce(const uint8_t *iv, uint32_t seq, uint8_t *out)
 {
     for (int i = 0; i < 12; i++)
@@ -150,7 +151,7 @@ static inline void tls_nonce(const uint8_t *iv, uint32_t seq, uint8_t *out)
         out[11 - i] ^= (uint8_t)(seq >> (i * 8));
 }
 
-/* Wysyla zaszyfrowany rekord: tresc || wlasciwy typ */
+/* Sends an encrypted record: body || the real type */
 static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
                                      const uint8_t *data, uint32_t len)
 {
@@ -166,7 +167,7 @@ static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
     plain[len] = inner_type;
     uint32_t plen = len + 1;
 
-    out[0] = REC_APPDATA;                /* na zewnatrz zawsze "dane" */
+    out[0] = REC_APPDATA;                /* on the outside always "data" */
     out[1] = 0x03;
     out[2] = 0x03;
     tls_put16(out + 3, plen + 16);
@@ -180,8 +181,8 @@ static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
     return tls_write_all(c, out, 5 + plen + 16);
 }
 
-/* Odbiera i odszyfrowuje rekord. Zwraca dlugosc tresci albo -1;
-   wlasciwy typ wiadomosci ladnie w *inner_type. */
+/* Receives and decrypts a record. Returns the body length or -1; the
+   real message type lands in *inner_type. */
 static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
                                      uint8_t *out, uint32_t max)
 {
@@ -194,7 +195,7 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
         if (tls_read_record(c, &type, hdr, buf, &len) < 0)
             return -1;
         if (type == REC_CCS)
-            continue;                    /* zgodnosc ze starym sprzetem */
+            continue;                    /* compatibility with old hardware */
         if (type == REC_ALERT && len >= 2) {
             c->error = "serwer zerwal polaczenie (alert)";
             return -1;
@@ -211,7 +212,7 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
         }
         c->seq_s++;
 
-        while (ctlen > 0 && out[ctlen - 1] == 0)   /* dopelnienie zerami */
+        while (ctlen > 0 && out[ctlen - 1] == 0)   /* padding with zeros */
             ctlen--;
         if (!ctlen)
             continue;
@@ -220,7 +221,7 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
     }
 }
 
-/* --- harmonogram kluczy (RFC 8446 7.1) --- */
+/* --- the key schedule (RFC 8446 7.1) --- */
 
 static inline void tls_traffic_keys(const uint8_t *secret, uint8_t *key,
                                     uint8_t *iv)
@@ -229,11 +230,12 @@ static inline void tls_traffic_keys(const uint8_t *secret, uint8_t *key,
     hkdf_expand_label(secret, "iv", 0, 0, iv, 12);
 }
 
-/* --- sprawdzenie certyfikatow --- */
+/* --- certificate verification --- */
 
-/* Rozbiera wiadomosc Certificate, sprawdza podpis z CertificateVerify
-   (to on dowodzi, ze serwer ma klucz prywatny do certyfikatu) i caly
-   lancuch. Zwraca CERT_OK albo kod bledu. */
+/* Takes the Certificate message apart, checks the signature from
+   CertificateVerify (it is that signature which proves the server has
+   the certificate's private key) and the whole chain. Returns CERT_OK
+   or an error code. */
 static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
                                   const uint8_t *cv, uint32_t cvlen,
                                   const uint8_t *cv_hash, const char *host,
@@ -245,7 +247,7 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
     if (certlen < 8)
         return CERT_ERR_PARSE;
 
-    const uint8_t *p = certmsg + 4;      /* za naglowkiem wiadomosci */
+    const uint8_t *p = certmsg + 4;      /* past the message header */
     const uint8_t *end = certmsg + certlen;
     p += 1 + p[0];                       /* certificate_request_context */
     if (p + 3 > end)
@@ -266,13 +268,13 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
         p += clen;
         if (p + 2 > list_end)
             break;
-        uint32_t extlen = tls_get16(p);  /* rozszerzenia wpisu */
+        uint32_t extlen = tls_get16(p);  /* the entry's extensions */
         p += 2 + extlen;
     }
     if (!n)
         return CERT_ERR_PARSE;
 
-    /* CertificateVerify: algorytm, dlugosc, podpis */
+    /* CertificateVerify: algorithm, length, signature */
     if (cvlen < 8)
         return CERT_ERR_PARSE;
     uint32_t alg = tls_get16(cv + 4);
@@ -281,7 +283,7 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
     if (8 + siglen > cvlen)
         return CERT_ERR_PARSE;
 
-    /* Podpisywana tresc wedlug RFC 8446 4.4.3 */
+    /* The signed content per RFC 8446 4.4.3 */
     static uint8_t tosign[64 + 34 + 32];
     uint32_t m = 0;
     for (int i = 0; i < 64; i++)
@@ -312,7 +314,7 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
             hashlen = 32;
         } else if (alg == 0x0503 && leaf->ec_bits == 384) {
             cv = &ec_p384;
-            sha384(tosign, m, echash);   /* P-384 podpisuje sie SHA-384 */
+            sha384(tosign, m, echash);   /* P-384 is signed with SHA-384 */
             hashlen = 48;
         } else {
             return CERT_ERR_ALG;
@@ -343,10 +345,11 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
     return cert_verify_chain(chain, n, roots, roots_len, host);
 }
 
-/* --- uzgodnienie --- */
+/* --- the handshake --- */
 
-/* Zamyka polaczenie po nieudanym uzgodnieniu - inaczej gniazdo TCP
-   zostaje otwarte az do konca zycia procesu (a slotow jest kilka) */
+/* Closes the connection after a failed handshake - otherwise the TCP
+   socket stays open until the end of the process's life (and there are
+   only a few slots) */
 static inline void tls_abort(struct tls_conn *c)
 {
     if (c->sock >= 0)
@@ -387,7 +390,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     /* --- ClientHello --- */
     uint32_t n = 0;
     msg[n++] = HS_CLIENT_HELLO;
-    n += 3;                              /* miejsce na dlugosc */
+    n += 3;                              /* room for the length */
     uint32_t body = n;
 
     msg[n++] = 0x03; msg[n++] = 0x03;    /* legacy_version */
@@ -396,9 +399,9 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     msg[n++] = 32;                       /* legacy_session_id */
     urand_bytes(msg + n, 32);
     n += 32;
-    tls_put16(msg + n, 2); n += 2;       /* jeden zestaw szyfrow */
+    tls_put16(msg + n, 2); n += 2;       /* a single cipher suite */
     tls_put16(msg + n, TLS_CHACHA20_SHA256); n += 2;
-    msg[n++] = 1; msg[n++] = 0;          /* brak kompresji */
+    msg[n++] = 1; msg[n++] = 0;          /* no compression */
 
     uint32_t ext_len_at = n;
     n += 2;
@@ -416,7 +419,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     for (uint32_t i = 0; i < sni_len; i++)
         msg[n++] = (uint8_t)sni[i];
 
-    /* supported_versions: tylko TLS 1.3 */
+    /* supported_versions: TLS 1.3 only */
     tls_put16(msg + n, 0x002b); n += 2;
     tls_put16(msg + n, 3); n += 2;
     msg[n++] = 2;
@@ -428,16 +431,16 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     tls_put16(msg + n, 2); n += 2;
     tls_put16(msg + n, GROUP_X25519); n += 2;
 
-    /* signature_algorithms - serwer bez tego odmawia */
+    /* signature_algorithms - a server refuses without it */
     tls_put16(msg + n, 0x000d); n += 2;
-    tls_put16(msg + n, 10); n += 2;      /* dlugosc rozszerzenia */
-    tls_put16(msg + n, 8); n += 2;       /* dlugosc listy algorytmow */
+    tls_put16(msg + n, 10); n += 2;      /* the extension's length */
+    tls_put16(msg + n, 8); n += 2;       /* the algorithm list's length */
     tls_put16(msg + n, 0x0804); n += 2;  /* rsa_pss_rsae_sha256 */
     tls_put16(msg + n, 0x0403); n += 2;  /* ecdsa_secp256r1_sha256 */
     tls_put16(msg + n, 0x0503); n += 2;  /* ecdsa_secp384r1_sha384 */
     tls_put16(msg + n, 0x0401); n += 2;  /* rsa_pkcs1_sha256 */
 
-    /* key_share z naszym kluczem publicznym */
+    /* key_share with our public key */
     tls_put16(msg + n, 0x0033); n += 2;
     tls_put16(msg + n, 38); n += 2;
     tls_put16(msg + n, 36); n += 2;
@@ -486,7 +489,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     p += 1 + msg[p];                     /* legacy_session_id */
     uint32_t suite = tls_get16(msg + p);
     p += 2;
-    p += 1;                              /* kompresja */
+    p += 1;                              /* compression */
     if (suite != TLS_CHACHA20_SHA256) {
         c->error = "serwer wybral inny zestaw szyfrow";
         tls_abort(c);
@@ -519,7 +522,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         return -1;
     }
 
-    /* --- wspolny sekret i klucze uzgodnien --- */
+    /* --- the shared secret and the handshake keys --- */
     x25519(shared, priv, server_pub);
 
     uint8_t zeros[32];
@@ -531,14 +534,14 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     hkdf_expand_label(early, "derived", empty_hash, 32, derived, 32);
     hkdf_extract(derived, 32, shared, 32, hs_secret);
 
-    struct sha256 snap = tr;             /* transkrypt: ClientHello..ServerHello */
+    struct sha256 snap = tr;             /* the transcript: ClientHello..ServerHello */
     sha256_final(&snap, transcript);
     hkdf_expand_label(hs_secret, "c hs traffic", transcript, 32, c_hs, 32);
     hkdf_expand_label(hs_secret, "s hs traffic", transcript, 32, s_hs, 32);
     tls_traffic_keys(c_hs, hs_key_c, hs_iv_c);
     tls_traffic_keys(s_hs, hs_key_s, hs_iv_s);
 
-    /* Od tej chwili rekordy sa szyfrowane kluczami uzgodnien */
+    /* From this moment records are encrypted with the handshake keys */
     for (int i = 0; i < 32; i++) {
         c->key_s[i] = hs_key_s[i];
         c->key_c[i] = hs_key_c[i];
@@ -549,7 +552,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     }
     c->seq_c = c->seq_s = 0;
 
-    /* --- reszta uzgodnien (juz zaszyfrowana) --- */
+    /* --- the rest of the handshake (already encrypted) --- */
     static uint8_t cert_msg[TLS_HS_MAX];
     static uint8_t cv_msg[1024];
     uint32_t cert_msg_len = 0, cv_msg_len = 0;
@@ -575,12 +578,12 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         for (int i = 0; i < got && hslen < TLS_HS_MAX; i++)
             hs[hslen++] = msg[i];
 
-        /* w jednym rekordzie moze byc kilka wiadomosci - i odwrotnie */
+        /* one record may hold several messages - and the other way round */
         uint32_t off = 0;
         while (off + 4 <= hslen) {
             uint32_t mlen = tls_get24(hs + off + 1);
             if (off + 4 + mlen > hslen)
-                break;                   /* wiadomosc jeszcze nie w calosci */
+                break;                   /* the message is not complete yet */
 
             uint8_t mtype = hs[off];
 
@@ -589,8 +592,9 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                 for (uint32_t i = 0; i < cert_msg_len; i++)
                     cert_msg[i] = hs[off + i];
             } else if (mtype == HS_CERT_VERIFY && 4 + mlen <= sizeof(cv_msg)) {
-                /* podpis pokrywa transkrypt do konca wiadomosci
-                   Certificate - czyli stan sprzed tej wiadomosci */
+                /* the signature covers the transcript up to the end of the
+                   Certificate message - that is, the state before this
+                   message */
                 struct sha256 sc = tr;
                 sha256_final(&sc, cv_hash);
                 cv_msg_len = 4 + mlen;
@@ -599,7 +603,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
             }
 
             if (mtype == HS_FINISHED) {
-                struct sha256 s2 = tr;   /* transkrypt bez Finished serwera */
+                struct sha256 s2 = tr;   /* the transcript without the server's Finished */
                 sha256_final(&s2, before_finished);
 
                 uint8_t fkey[32], expect[32];
@@ -626,14 +630,14 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                 break;
         }
 
-        /* przesun to, co zostalo niedokonczone */
+        /* move what was left unfinished */
         uint32_t rest = hslen - off;
         for (uint32_t i = 0; i < rest; i++)
             hs[i] = hs[off + i];
         hslen = rest;
     }
 
-    /* --- czy to na pewno ten serwer? --- */
+    /* --- is this really that server? --- */
     if (cert_msg_len && cv_msg_len) {
         c->verify_err = tls_check_certs(cert_msg, cert_msg_len, cv_msg,
                                         cv_msg_len, cv_hash, sni,
@@ -650,8 +654,8 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         return -1;
     }
 
-    /* --- nasze Finished --- */
-    struct sha256 s3 = tr;               /* transkrypt z Finished serwera */
+    /* --- our Finished --- */
+    struct sha256 s3 = tr;               /* the transcript with the server's Finished */
     sha256_final(&s3, transcript);
 
     uint8_t fkey_c[32], verify[32];
@@ -669,7 +673,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         return -1;
     }
 
-    /* --- klucze aplikacyjne --- */
+    /* --- the application keys --- */
     hkdf_expand_label(hs_secret, "derived", empty_hash, 32, derived, 32);
     hkdf_extract(derived, 32, zeros, 32, master);
     hkdf_expand_label(master, "c ap traffic", transcript, 32, c_ap, 32);
@@ -682,7 +686,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     return 0;
 }
 
-/* --- dane aplikacji --- */
+/* --- application data --- */
 
 static inline int tls_send(struct tls_conn *c, const void *data, uint32_t len)
 {
@@ -691,12 +695,12 @@ static inline int tls_send(struct tls_conn *c, const void *data, uint32_t len)
     return tls_send_encrypted(c, REC_APPDATA, data, len);
 }
 
-/* Zwraca >0 = bajty, 0 = koniec strumienia, -1 = blad */
+/* Returns >0 = bytes, 0 = end of stream, -1 = error */
 static inline int tls_recv(struct tls_conn *c, void *buf, uint32_t max)
 {
     uint8_t *out = buf;
 
-    if (c->appoff < c->applen) {         /* zostalo z poprzedniego rekordu */
+    if (c->appoff < c->applen) {         /* left over from the previous record */
         uint32_t take = c->applen - c->appoff;
         if (take > max)
             take = max;
@@ -712,9 +716,9 @@ static inline int tls_recv(struct tls_conn *c, void *buf, uint32_t max)
         if (got < 0)
             return c->error ? -1 : 0;
         if (inner == REC_HANDSHAKE)
-            continue;                    /* np. bilet sesyjny - pomijamy */
+            continue;                    /* a session ticket, say - we skip it */
         if (inner == REC_ALERT)
-            return 0;                    /* close_notify albo blad */
+            return 0;                    /* close_notify or an error */
         if (inner != REC_APPDATA)
             continue;
 

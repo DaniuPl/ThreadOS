@@ -86,7 +86,7 @@ def main():
         screen = q.screen()
         entries = re.findall(r"(\w+)\s+\((\d+) B\)", screen)
         known = {"forktest", "ptree", "sigtest", "lazymem", "swaptest",
-                 "mkmapa", "mmapfile", "gleboko", "mmapzap", "dynlib"}
+                 "mkmap", "mmapfile", "deep", "mmapzap", "dynlib"}
         check("komenda 'ls' pokazuje pliki initrd (%d wpisow, %d znanych)"
               % (len(entries), len({n for n, _ in entries} & known)),
               len(entries) >= 15

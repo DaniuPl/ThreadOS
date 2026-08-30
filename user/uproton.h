@@ -1,10 +1,11 @@
-/* Co program moze powiedziec o bibliotece wspoldzielonej
+/* What a program can say about the shared library
  *
- * Wszystko tutaj musi byc policzone WEWNATRZ biblioteki i nie da sie
- * tego obejsc. Program nieprzemieszczalny, ktory bierze adres funkcji
- * z biblioteki, dostaje adres wlasnej zaslepki skoku - miejsca, przez
- * ktore skacze - a nie tego, gdzie funkcja naprawde lezy. Na pytanie
- * "gdzie jestes" odpowiedziec moze wiec tylko ona sama.
+ * Everything here has to be computed INSIDE the library and there is
+ * no way around it. A non-relocatable program taking the address of a
+ * function from the library gets the address of its own jump stub - the
+ * place it jumps through - and not the place where the function really
+ * lies. So the question "where are you" can only be answered by the
+ * library itself.
  */
 
 #ifndef PROTONOS_UPROTON_H
@@ -14,23 +15,24 @@
 #include "usha256.h"
 #include "urand.h"
 
-/* Adres kodu biblioteki - ten sam we wszystkich procesach, bo to te
-   same ramki fizyczne */
+/* The address of the library's code - the same in every process,
+   because these are the same physical frames */
 static inline uintptr_t proton_code_addr(void)
 {
     return (uintptr_t)sha256;
 }
 
-/* Adres danych biblioteki. Adres wirtualny tez jest wszedzie ten sam,
-   ale ramki pod nim juz nie - kazdy proces ma swoje. */
+/* The address of the library's data. The virtual address is the same
+   everywhere too, but the frames under it are not - every process has
+   its own. */
 static inline uintptr_t proton_data_addr(void)
 {
     return (uintptr_t)urand_seed;
 }
 
-/* Licznik generatora losowego. Rosnie z kazdym pobraniem bajtow, wiec
-   pokazuje, ile ten proces wzial z biblioteki - i jest dobrym probnikiem
-   tego, czy dane naprawde sa prywatne. */
+/* The random generator's counter. It grows with every fetch of bytes,
+   so it shows how much this process took from the library - and it is a
+   good probe for whether the data really are private. */
 static inline uint32_t proton_random_counter(void)
 {
     return urand_counter;

@@ -1,34 +1,37 @@
-/* mmapzap - zapis przez plik odwzorowany w pamieci
+/* mmapzap - writing through a file mapped into memory
  *
- * Odwzorowanie z prawem zapisu: program zmienia bajty w pamieci, a one
- * maja trafic do pliku na dysku. Nie po kazdym bajcie - o tym, kiedy,
- * decyduje sam program przez sys_msync (albo jadro, gdy proces sie
- * konczy). Ktore strony odeslac, wie procesor: brudna jest ta, do
- * ktorej naprawde ktos pisal.
+ * A mapping with write permission: the program changes bytes in memory
+ * and they are to land in the file on disk. Not after every byte - the
+ * program itself decides when, through sys_msync (or the kernel does,
+ * when the process ends). Which pages to flush is known to the
+ * processor: dirty is the one somebody really wrote to.
  *
- * Tryby (drugi argument, domyslnie 'pisz'):
+ * Modes (the second argument, 'pisz' by default):
  *
- *   pisz   - sprawdza stary wzorzec, wpisuje nowy w pierwsze dwie
- *            strony i odsyla je jawnie. Odeslac ma DWIE strony, nie
- *            wszystkie: reszte pliku tylko czytalismy, a czytanie
- *            brudnym nie robi. Drugie sys_msync ma dac zero - po
- *            odeslaniu strona przestaje byc brudna.
- *   spr    - otwiera plik ZWYKLYM sys_read i sprawdza, ze widzi tam
- *            nowy wzorzec w pierwszych dwoch stronach, a stary dalej.
- *   bez    - pisze dwa bajty i konczy sie BEZ sys_msync. Odeslac ma
- *            je jadro przy koncu procesu.
- *   spr2   - sprawdza zwyklym odczytem, ze te dwa bajty tam sa.
- *   widac  - rozwidla sie; dziecko pisze przez odwzorowanie, a rodzic
- *            ma to zobaczyc u siebie. Zapisywalne odwzorowanie jest
- *            WSPOLNE, a nie kopiowane przy zapisie - inaczej zapisy
- *            dziecka nigdy nie trafilyby do pliku.
+ *   pisz   - checks the old pattern, writes a new one into the first
+ *            two pages and flushes them explicitly. It is to flush TWO
+ *            pages, not all of them: the rest of the file we only read,
+ *            and reading does not make anything dirty. The second
+ *            sys_msync is to return zero - once flushed, a page stops
+ *            being dirty.
+ *   spr    - opens the file with an ORDINARY sys_read and checks that
+ *            it sees the new pattern there in the first two pages, and
+ *            the old one further on.
+ *   bez    - writes two bytes and finishes WITHOUT sys_msync. It is the
+ *            kernel that is to flush them when the process ends.
+ *   spr2   - checks with an ordinary read that those two bytes are
+ *            there.
+ *   widac  - forks; the child writes through the mapping and the parent
+ *            is to see it in its own. A writable mapping is SHARED, not
+ *            copied on write - otherwise the child's writes would never
+ *            reach the file.
  *
- * Uzycie: run mmapzap <plik> [tryb]
+ * Usage: run mmapzap <file> [mode]
  */
 
 #include "usys.h"
 
-#define CHANGED 8192u          /* dokladnie dwie strony */
+#define CHANGED 8192u          /* exactly two pages */
 #define CH_A    0xA5
 #define CH_B    0x5A
 #define OFF_B     (4096u + 7)
@@ -48,8 +51,9 @@ static int equal(const char *a, const char *b)
 
 static unsigned char buf[512];
 
-/* Czyta plik zwyklym sys_read i oddaje bajt spod danego miejsca.
-   Zwraca -1, gdy pliku nie ma albo jest za krotki. */
+/* Reads the file with an ordinary sys_read and hands back the byte at
+   the given place. Returns -1 when the file does not exist or is too
+   short. */
 static int read_byte(const char *name, uint32_t offset)
 {
     int32_t fd = sys_open(name, O_READ);
@@ -71,7 +75,8 @@ static int read_byte(const char *name, uint32_t offset)
     return result;
 }
 
-/* Sprawdza caly plik zwyklym odczytem wobec oczekiwanego wzorca */
+/* Checks the whole file with an ordinary read against the expected
+   pattern */
 static uint32_t check_by_reading(const char *name)
 {
     int32_t fd = sys_open(name, O_READ);
@@ -91,8 +96,8 @@ static uint32_t check_by_reading(const char *name)
         doszlo += (uint32_t)n;
     }
     sys_close(fd);
-    /* Pusty odczyt nie jest zgodnoscia: petla, ktora nie obejrzala ani
-       jednego bajtu, zawsze naliczy zero bledow */
+    /* An empty read is not a match: a loop that has not looked at a
+       single byte will always count zero errors */
     if (doszlo < CHANGED)
         return 0xFFFFFFFFu;
     return bad;
@@ -160,8 +165,8 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    /* Tryb 'pisz': czytamy caly plik, ale piszemy tylko po dwoch
-       pierwszych stronach - i to ma byc widac w liczbie odeslanych */
+    /* Mode 'pisz': we read the whole file but write only over the two
+       first pages - and that is what the flushed count is to show */
     if (size <= CHANGED) {
         print("[mmapzap] ZLE: plik za maly na ten test\n");
         sys_exit(1);
@@ -193,8 +198,8 @@ void _start(int argc, char **argv)
     print_dec((uint32_t)drugie);
     print("\n");
 
-    /* Pamiec ma dalej pokazywac to, co wpisalismy - odeslanie na dysk
-       niczego w niej nie rusza */
+    /* Memory is still to show what we wrote - flushing to disk does not
+       touch anything in it */
     if (p[0] != fresh_one(0) || p[CHANGED - 1] != fresh_one(CHANGED - 1)) {
         print("[mmapzap] ZLE: pamiec zgubila zapisane bajty\n");
         sys_exit(1);

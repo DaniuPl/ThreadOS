@@ -1,9 +1,9 @@
-/* ChaCha20 i Poly1305 (RFC 8439) - szyfr AEAD dla TLS 1.3
+/* ChaCha20 and Poly1305 (RFC 8439) - the AEAD cipher for TLS 1.3
  *
- * Wybrany zamiast AES-GCM, bo caly liczy sie na 32-bitowych dodawaniach,
- * obrotach i XOR-ach: bez tablic podstawien, bez mnozen w ciele
- * skonczonym i bez ryzyka, ze zabraknie nam pamieci na tablice.
- * Serwery TLS 1.3 powszechnie go akceptuja.
+ * Chosen instead of AES-GCM, because the whole of it computes on
+ * 32-bit additions, rotations and XORs: no substitution tables, no
+ * multiplication in a finite field and no risk of running out of memory
+ * for tables. TLS 1.3 servers accept it universally.
  */
 
 #ifndef PROTONOS_UCHACHA_H
@@ -41,7 +41,7 @@ static inline void cc_put32(uint8_t *p, uint32_t v)
         c += d; b ^= c; b = cc_rotl(b, 7);            \
     } while (0)
 
-/* Jeden blok strumienia klucza (64 B) dla licznika 'counter' */
+/* One block of the key stream (64 B) for the counter 'counter' */
 static inline void chacha20_block(const uint8_t key[32], uint32_t counter,
                                   const uint8_t nonce[12], uint8_t out[64])
 {
@@ -59,7 +59,7 @@ static inline void chacha20_block(const uint8_t key[32], uint32_t counter,
     for (int i = 0; i < 16; i++)
         x[i] = s[i];
 
-    for (int r = 0; r < 10; r++) {          /* 20 rund = 10 podwojnych */
+    for (int r = 0; r < 10; r++) {          /* 20 rounds = 10 double ones */
         CC_QR(x[0], x[4], x[8],  x[12]);
         CC_QR(x[1], x[5], x[9],  x[13]);
         CC_QR(x[2], x[6], x[10], x[14]);
@@ -74,7 +74,7 @@ static inline void chacha20_block(const uint8_t key[32], uint32_t counter,
         cc_put32(out + i * 4, x[i] + s[i]);
 }
 
-/* Szyfrowanie strumieniowe (deszyfrowanie to ta sama operacja) */
+/* Stream encryption (decryption is the same operation) */
 static inline void chacha20_xor(const uint8_t key[32], uint32_t counter,
                                 const uint8_t nonce[12], const uint8_t *in,
                                 uint8_t *out, uint32_t len)
@@ -161,7 +161,7 @@ static inline void poly1305_init(struct poly1305 *st, const uint8_t key[32])
     uint32_t t0 = cc_le32(key + 0), t1 = cc_le32(key + 4);
     uint32_t t2 = cc_le32(key + 8), t3 = cc_le32(key + 12);
 
-    /* r jest "przycinane" zgodnie z RFC 8439 */
+    /* r is "clamped" as per RFC 8439 */
     st->r[0] = t0 & 0x3ffffff;
     st->r[1] = ((t0 >> 26) | (t1 << 6)) & 0x3ffff03;
     st->r[2] = ((t1 >> 20) | (t2 << 12)) & 0x3ffc0ff;
@@ -219,7 +219,7 @@ static inline void poly1305_final(struct poly1305 *st, uint8_t tag[16])
     st->h[0] += c * 5; c = st->h[0] >> 26; st->h[0] &= 0x3ffffff;
     st->h[1] += c;
 
-    /* h - p (p = 2^130 - 5) i wybor mniejszej wartosci */
+    /* h - p (p = 2^130 - 5) and picking the smaller value */
     uint32_t g[5];
     g[0] = st->h[0] + 5; c = g[0] >> 26; g[0] &= 0x3ffffff;
     g[1] = st->h[1] + c; c = g[1] >> 26; g[1] &= 0x3ffffff;
@@ -227,7 +227,7 @@ static inline void poly1305_final(struct poly1305 *st, uint8_t tag[16])
     g[3] = st->h[3] + c; c = g[3] >> 26; g[3] &= 0x3ffffff;
     g[4] = st->h[4] + c - (1u << 26);
 
-    uint32_t mask = (g[4] >> 31) - 1;      /* 0 gdy h < p, same jedynki gdy >= */
+    uint32_t mask = (g[4] >> 31) - 1;      /* 0 when h < p, all ones when >= */
     for (int i = 0; i < 5; i++)
         g[i] &= mask;
     mask = ~mask;
@@ -274,7 +274,7 @@ static inline void aead_tag(const uint8_t key[32], const uint8_t nonce[12],
     uint8_t lens[16];
     struct poly1305 st;
 
-    chacha20_block(key, 0, nonce, polykey);   /* licznik 0 = klucz Poly1305 */
+    chacha20_block(key, 0, nonce, polykey);   /* counter 0 = the Poly1305 key */
     poly1305_init(&st, polykey);
 
     poly1305_update(&st, aad, aadlen);
@@ -293,17 +293,17 @@ static inline void aead_tag(const uint8_t key[32], const uint8_t nonce[12],
     poly1305_final(&st, tag);
 }
 
-/* Szyfruje w miejscu i dopisuje 16-bajtowy znacznik do 'tag' */
+/* Encrypts in place and appends a 16-byte tag to 'tag' */
 static inline void aead_encrypt(const uint8_t key[32], const uint8_t nonce[12],
                                 const uint8_t *aad, uint32_t aadlen,
                                 const uint8_t *pt, uint8_t *ct, uint32_t len,
                                 uint8_t tag[16])
 {
-    chacha20_xor(key, 1, nonce, pt, ct, len);  /* dane od licznika 1 */
+    chacha20_xor(key, 1, nonce, pt, ct, len);  /* the data from counter 1 */
     aead_tag(key, nonce, aad, aadlen, ct, len, tag);
 }
 
-/* Sprawdza znacznik i odszyfrowuje. 1 = OK, 0 = znacznik sie nie zgadza. */
+/* Checks the tag and decrypts. 1 = OK, 0 = the tag does not match. */
 static inline int aead_decrypt(const uint8_t key[32], const uint8_t nonce[12],
                                const uint8_t *aad, uint32_t aadlen,
                                const uint8_t *ct, uint8_t *pt, uint32_t len,

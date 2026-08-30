@@ -1,12 +1,12 @@
-/* swaptest - wymiana stron na dysk
+/* swaptest - swapping pages out to disk
  *
- * Bierze wiecej pamieci, niz maszyna ma RAM-u, i zapisuje w niej wzorzec
- * zalezny od numeru strony. Jadro musi po drodze wyrzucic czesc stron
- * na dysk. Potem program czyta wszystko z powrotem: kazda strona, ktora
- * poszla na dysk, wraca przy pierwszym dotknieciu - i musi wrocic
- * z dokladnie ta sama zawartoscia.
+ * It takes more memory than the machine has RAM and writes into it a
+ * pattern that depends on the page number. Along the way the kernel has
+ * to throw some of the pages out to disk. Then the program reads
+ * everything back: every page that went out to disk comes back on the
+ * first touch - and has to come back with exactly the same contents.
  *
- * Uzycie: run swaptest [MiB] (domyslnie 14).
+ * Usage: run swaptest [MiB] (14 by default).
  */
 
 #include "usys.h"

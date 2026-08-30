@@ -1,4 +1,4 @@
-/* Biblioteczka programow uzytkownika ProtonOS - syscalle int 0x80 */
+/* The ProtonOS user program library - int 0x80 syscalls */
 
 #ifndef PROTONOS_USYS_H
 #define PROTONOS_USYS_H
@@ -56,7 +56,7 @@
 
 #define FS_NAME_MAX  63
 
-/* Klawisze bez odpowiednika w ASCII - musza zgadzac sie z
+/* Keys with no ASCII equivalent - they have to match
    kernel/include/keyboard.h */
 #define KEY_UP    0x11
 #define KEY_DOWN  0x12
@@ -73,7 +73,7 @@ struct sysinfo {
     uint32_t uptime_s;
 };
 
-/* Uklad pol musi byc zgodny ze struct rtc_time w jadrze */
+/* The field layout has to match struct rtc_time in the kernel */
 struct utime {
     uint16_t year;
     uint8_t month;
@@ -83,13 +83,13 @@ struct utime {
     uint8_t sec;
 } __attribute__((packed));
 
-/* Flagi open() */
+/* open() flags */
 #define O_READ   1
 #define O_WRITE  2
 #define O_CREATE 4
 #define O_TRUNC  8
 
-/* Standardowe deskryptory */
+/* Standard descriptors */
 #define STDIN  0
 #define STDOUT 1
 #define STDERR 2
@@ -137,8 +137,8 @@ static inline int32_t sys_read(int fd, void *buf, uint32_t len)
     return ret;
 }
 
-/* Uruchamia program; outfile != NULL kieruje stdout do pliku
-   (append=1 dopisuje na koncu zamiast obcinac) */
+/* Runs a program; outfile != NULL redirects stdout to a file
+   (append=1 adds at the end instead of truncating) */
 static inline int32_t sys_spawn(const char *cmdline, const char *outfile,
                                 int append)
 {
@@ -150,7 +150,8 @@ static inline int32_t sys_spawn(const char *cmdline, const char *outfile,
     return ret;
 }
 
-/* Potok 'a | b | c'; outfile != NULL kieruje stdout ostatniego do pliku */
+/* A pipeline 'a | b | c'; outfile != NULL redirects the last one's
+   stdout to a file */
 static inline int32_t sys_pipeline(const char *pipeline, const char *outfile)
 {
     int32_t ret;
@@ -161,7 +162,7 @@ static inline int32_t sys_pipeline(const char *pipeline, const char *outfile)
     return ret;
 }
 
-/* Czeka na proces 'pid' i zwraca jego kod wyjscia */
+/* Waits for process 'pid' and returns its exit code */
 static inline int32_t sys_wait(int32_t pid)
 {
     int32_t ret;
@@ -172,9 +173,9 @@ static inline int32_t sys_wait(int32_t pid)
     return ret;
 }
 
-/* Rozwidla proces. Zwraca pid dziecka rodzicowi, zero dziecku,
-   -1 przy bledzie. Dziecko dostaje wlasna kopie pamieci (fizycznie
-   te sama az do pierwszego zapisu - kopiowanie przy zapisie). */
+/* Forks the process. Returns the child's pid to the parent, zero to
+   the child, -1 on error. The child gets its own copy of memory
+   (physically the same one until the first write - copy on write). */
 static inline int32_t sys_fork(void)
 {
     int32_t ret;
@@ -182,8 +183,9 @@ static inline int32_t sys_fork(void)
     return ret;
 }
 
-/* Czeka na dowolne wlasne dziecko. Zwraca jego pid, a kod wyjscia
-   wpisuje pod 'code' (moze byc NULL). -1 = nie ma juz dzieci. */
+/* Waits for any of our own children. Returns its pid and writes the
+   exit code to 'code' (which may be NULL). -1 = there are no children
+   left. */
 static inline int32_t sys_waitany(int32_t *code)
 {
     int32_t ret;
@@ -194,16 +196,16 @@ static inline int32_t sys_waitany(int32_t *code)
     return ret;
 }
 
-/* Czekanie na dowolne wlasne dziecko - jednym slowem po obu stronach
-   (w trybie dlugim to sys_wait; zob. user64/compat64.h) */
+/* Waiting for any of our own children - one word on both sides (in
+   long mode this is sys_wait; see user64/compat64.h) */
 static inline int32_t sys_wait_child(int *code)
 {
     return sys_waitany((int32_t *)code);
 }
 
-/* Podmienia program biezacego procesu (pid i deskryptory zostaja).
-   Przy powodzeniu nie wraca; -1 oznacza, ze programu nie da sie
-   uruchomic i stary obraz dziala dalej. */
+/* Replaces the current process's program (the pid and the descriptors
+   stay). On success it does not return; -1 means the program cannot be
+   started and the old image carries on running. */
 static inline int32_t sys_exec(const char *cmdline)
 {
     int32_t ret;
@@ -231,7 +233,7 @@ static inline void *sys_sbrk(int32_t increment)
     return ret;
 }
 
-/* mmap: swieza, wyzerowana pamiec procesu; zwraca adres albo NULL */
+/* mmap: fresh, zeroed process memory; returns the address or NULL */
 static inline void *sys_mmap(uint32_t size)
 {
     void *ret;
@@ -242,13 +244,14 @@ static inline void *sys_mmap(uint32_t size)
     return ret;
 }
 
-/* Plik widziany jako pamiec.
+/* A file seen as memory.
  *
- * Zwraca adres, pod ktorym widac zawartosc pliku, i wpisuje jego
- * rozmiar. Zadna strona nie powstaje od razu - bajty przychodza
- * z dysku pod palcami, wiec odwzorowanie duzego pliku kosztuje tyle,
- * co spis jego blokow. Ta wersja jest tylko do odczytu: proba zapisu
- * konczy sie bledem ochrony, a nie cichym zgubieniem danych. */
+ * Returns the address at which the file's contents are visible and
+ * writes out its size. No page is created right away - the bytes come
+ * from disk under your fingers, so mapping a large file costs as much
+ * as a list of its blocks. This version is read-only: an attempted
+ * write ends in a protection fault rather than in data quietly getting
+ * lost. */
 static inline const void *sys_mmap_file(const char *name, uint32_t *size)
 {
     const void *ret;
@@ -259,8 +262,9 @@ static inline const void *sys_mmap_file(const char *name, uint32_t *size)
     return ret;
 }
 
-/* To samo, ale z prawem zapisu: zmiany w pamieci wracaja do pliku.
- * Nie od razu - dopiero przy sys_msync albo na wyjsciu procesu. */
+/* The same, but with write permission: changes in memory go back to
+ * the file. Not right away - only at sys_msync or when the process
+ * exits. */
 static inline void *sys_mmap_file_w(const char *name, uint32_t *size)
 {
     void *ret;
@@ -271,9 +275,9 @@ static inline void *sys_mmap_file_w(const char *name, uint32_t *size)
     return ret;
 }
 
-/* Na ktorym rdzeniu procesora program wlasnie biegnie.
- * Sam nie ma jak tego sprawdzic - lokalny APIC lezy poza jego
- * przestrzenia adresowa. */
+/* Which processor core the program is running on right now.
+ * It has no way of checking that itself - the local APIC lies outside
+ * its address space. */
 static inline int sys_core(void)
 {
     int ret;
@@ -281,9 +285,10 @@ static inline int sys_core(void)
     return ret;
 }
 
-/* Odsyla do plikow zmienione strony zapisywalnych odwzorowan.
- * Zwraca, ile stron poszlo na dysk - strona nietkniete od ostatniego
- * razu nie kosztuje nic, bo o tym, ktore sa brudne, mowi procesor. */
+/* Flushes to their files the changed pages of writable mappings.
+ * Returns how many pages went out to disk - a page untouched since
+ * last time costs nothing, because it is the processor that says which
+ * ones are dirty. */
 static inline int sys_msync(void)
 {
     int ret;
@@ -291,7 +296,7 @@ static inline int sys_msync(void)
     return ret;
 }
 
-/* shm: pamiec wspoldzielona po kluczu; ten sam klucz = ta sama pamiec */
+/* shm: shared memory by key; the same key = the same memory */
 static inline void *sys_shm(int key, uint32_t size)
 {
     void *ret;
@@ -302,8 +307,8 @@ static inline void *sys_shm(int key, uint32_t size)
     return ret;
 }
 
-/* thread: tworzy watek w tym samym procesie (wspolna pamiec). entry to
-   funkcja void(*)(void*). Zwraca tid albo -1. */
+/* thread: creates a thread in the same process (shared memory). entry
+   is a void(*)(void*) function. Returns a tid or -1. */
 static inline int32_t sys_thread(void (*entry)(void *), void *arg)
 {
     int32_t ret;
@@ -314,7 +319,7 @@ static inline int32_t sys_thread(void (*entry)(void *), void *arg)
     return ret;
 }
 
-/* setprio: priorytet biezacego zadania (0=wysoki, 1=normalny, 2=niski) */
+/* setprio: the current task's priority (0=high, 1=normal, 2=low) */
 static inline void sys_setprio(int level)
 {
     int32_t ret;
@@ -325,7 +330,7 @@ static inline void sys_setprio(int level)
     (void)ret;
 }
 
-/* sysinfo: statystyki systemu (RAM, uptime) do wskazanego bufora */
+/* sysinfo: system statistics (RAM, uptime) into the given buffer */
 static inline void sys_sysinfo(struct sysinfo *si)
 {
     int32_t ret;
@@ -336,8 +341,8 @@ static inline void sys_sysinfo(struct sysinfo *si)
     (void)ret;
 }
 
-/* Najprostszy bump-allocator na sbrk: tylko alokuje, nie zwalnia.
-   W zupelnosci wystarczy dla zabawkowych programow. */
+/* The simplest bump allocator on top of sbrk: it only allocates, it
+   never frees. That is entirely enough for toy programs. */
 static inline void *malloc(uint32_t size)
 {
     size = (size + 7) & ~7u;
@@ -372,8 +377,9 @@ static inline int32_t sys_seek(int fd, uint32_t off)
     return ret;
 }
 
-/* Enumeracja katalogu roboczego: kolejny wpis o numerze 'index'.
-   Zwraca rozmiar pliku, -2 dla katalogu albo -1 gdy nie ma wiecej wpisow. */
+/* Enumerating the working directory: the next entry with number
+   'index'. Returns the file size, -2 for a directory, or -1 when there
+   are no more entries. */
 static inline int32_t sys_readdir(int index, char *name)
 {
     int32_t ret;
@@ -414,18 +420,18 @@ static inline int32_t sys_mkdir(const char *path)
     return ret;
 }
 
-/* Sygnaly - numery musza zgadzac sie z kernel/include/signal.h */
-#define SIGINT   2      /* przerwanie z klawiatury (Ctrl+C) */
-#define SIGKILL  9      /* zabicie nie do przechwycenia */
-#define SIGTERM 15      /* prosba o zakonczenie */
-#define SIGCHLD 17      /* dziecko sie skonczylo */
+/* Signals - the numbers have to match kernel/include/signal.h */
+#define SIGINT   2      /* an interrupt from the keyboard (Ctrl+C) */
+#define SIGKILL  9      /* a kill that cannot be caught */
+#define SIGTERM 15      /* a request to finish */
+#define SIGCHLD 17      /* a child has ended */
 
-#define SIG_DFL 0       /* domyslna reakcja jadra */
-#define SIG_IGN 1       /* zignoruj sygnal */
+#define SIG_DFL 0       /* the kernel's default reaction */
+#define SIG_IGN 1       /* ignore the signal */
 
 typedef void (*sighandler_t)(int32_t sig);
 
-/* Wysyla sygnal do procesu; sig=0 znaczy po prostu SIGKILL */
+/* Sends a signal to a process; sig=0 simply means SIGKILL */
 static inline int32_t sys_kill(int pid, int32_t sig)
 {
     int32_t ret;
@@ -436,12 +442,13 @@ static inline int32_t sys_kill(int pid, int32_t sig)
     return ret;
 }
 
-/* Trampolina powrotu z procedury obslugi sygnalu.
+/* The trampoline that returns from a signal handler.
  *
- * Jadro odklada jej adres jako adres powrotu handlera, wiec gdy ten
- * konczy sie zwyklym 'ret', sterowanie trafia tutaj, a stad przez
- * syscall z powrotem do jadra - to ono odtwarza stan sprzed sygnalu.
- * Handler nie moze wiec po prostu wrocic do przerwanego kodu sam. */
+ * The kernel puts its address down as the handler's return address, so
+ * when the handler ends with an ordinary 'ret', control lands here,
+ * and from here goes through a syscall back into the kernel - it is
+ * the kernel that restores the state from before the signal. So a
+ * handler cannot simply return to the interrupted code on its own. */
 __attribute__((unused, naked))
 static void __sig_tramp(void)
 {
@@ -449,8 +456,8 @@ static void __sig_tramp(void)
                      "int $0x80" : : "i"(SYS_SIGRETURN));
 }
 
-/* Ustawia procedure obslugi sygnalu (SIG_DFL / SIG_IGN / wlasna).
-   SIGKILL-a przechwycic sie nie da. Zwraca 0 albo -1. */
+/* Sets a signal handler (SIG_DFL / SIG_IGN / your own). SIGKILL cannot
+   be caught. Returns 0 or -1. */
 static inline int32_t sys_signal(int32_t sig, sighandler_t handler)
 {
     int32_t ret;
@@ -462,7 +469,7 @@ static inline int32_t sys_signal(int32_t sig, sighandler_t handler)
     return ret;
 }
 
-/* --- GUI: okno aplikacji rysowane na pulpicie --- */
+/* --- GUI: an application window drawn on the desktop --- */
 
 struct win_rect_cmd {
     int32_t x, y, w, h, color;
@@ -472,7 +479,8 @@ struct win_text_cmd {
     const char *s;
 };
 
-/* Tworzy okno o obszarze treści cw x ch; zwraca winid albo -1 */
+/* Creates a window with a content area of cw x ch; returns a winid or
+   -1 */
 static inline int32_t win_create(int cw, int ch, const char *title)
 {
     int32_t ret;
@@ -510,11 +518,12 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
 #define WEV_KEY   2
 struct win_event {
     int32_t type;          /* WEV_* */
-    int32_t x, y;          /* wspolrzedne wzgledem obszaru treści */
-    int32_t val;           /* maska przyciskow */
+    int32_t x, y;          /* coordinates relative to the content area */
+    int32_t val;           /* a mask of buttons */
 };
 
-/* Pobiera zdarzenie okna (nieblokujace). Zwraca 1 = jest, 0 = brak. */
+/* Fetches a window event (non-blocking). Returns 1 = there is one,
+   0 = none. */
 static inline int32_t win_poll(int winid, struct win_event *ev)
 {
     int32_t ret;
@@ -562,7 +571,7 @@ static inline uint32_t ustrlen(const char *s)
     return n;
 }
 
-/* Czy w 'hay' wystepuje podlancuch 'needle' */
+/* Does the substring 'needle' occur in 'hay' */
 static inline int ustrstr(const char *hay, const char *needle)
 {
     if (!*needle)
@@ -587,7 +596,7 @@ static inline int uatoi(const char *s)
     return v;
 }
 
-/* Wypisuje liczbe dziesietna na stdout */
+/* Prints a decimal number to stdout */
 static inline void print_dec(uint32_t v)
 {
     char buf[12];
@@ -605,8 +614,8 @@ static inline void print(const char *s)
     sys_write(STDOUT, s, ustrlen(s));
 }
 
-/* --- siec: gniazda UDP -------------------------------------------------
-   Adresy IPv4 sa w kolejnosci hosta (10.0.2.3 == 0x0A000203). */
+/* --- network: UDP sockets ----------------------------------------------
+   IPv4 addresses are in host order (10.0.2.3 == 0x0A000203). */
 
 struct netinfo {
     uint32_t ip, mask, gw, dns;
@@ -618,10 +627,10 @@ struct udp_send_cmd {
 
 struct udp_recv_cmd {
     uint32_t buf, max, timeout_ms;
-    uint32_t from_ip, from_port;    /* wypelnia jadro */
+    uint32_t from_ip, from_port;    /* filled in by the kernel */
 };
 
-/* Otwiera gniazdo UDP na porcie (0 = przydziel dowolny wolny). */
+/* Opens a UDP socket on a port (0 = allocate any free one). */
 static inline int32_t udp_open(uint32_t port)
 {
     int32_t ret;
@@ -644,8 +653,9 @@ static inline int32_t udp_send(int32_t sock, uint32_t ip, uint32_t port,
     return ret;
 }
 
-/* Czeka do timeout_ms na datagram; zwraca dlugosc albo -1.
-   from_ip/from_port moga byc zerowe, gdy nadawca nas nie interesuje. */
+/* Waits up to timeout_ms for a datagram; returns the length or -1.
+   from_ip/from_port may be zero when the sender does not interest
+   us. */
 static inline int32_t udp_recv(int32_t sock, void *buf, uint32_t max,
                                uint32_t timeout_ms, uint32_t *from_ip,
                                uint32_t *from_port)
@@ -673,7 +683,8 @@ static inline void udp_close(int32_t sock)
                      : "memory");
 }
 
-/* Konfiguracja sieci (z DHCP). 0 = OK, -1 = system nie ma jeszcze adresu. */
+/* The network configuration (from DHCP). 0 = OK, -1 = the system has
+   no address yet. */
 static inline int32_t netinfo(struct netinfo *ni)
 {
     int32_t ret;
@@ -684,7 +695,7 @@ static inline int32_t netinfo(struct netinfo *ni)
     return ret;
 }
 
-/* Wypisuje adres IPv4 w postaci a.b.c.d */
+/* Prints an IPv4 address in the form a.b.c.d */
 static inline void print_ip(uint32_t ip)
 {
     for (int i = 3; i >= 0; i--) {
@@ -694,13 +705,13 @@ static inline void print_ip(uint32_t ip)
     }
 }
 
-/* --- siec: polaczenia TCP --------------------------------------------- */
+/* --- network: TCP connections ----------------------------------------- */
 
 struct tcp_io_cmd {
     uint32_t buf, len, timeout_ms;
 };
 
-/* Nawiazuje polaczenie; zwraca uchwyt albo -1 */
+/* Establishes a connection; returns a handle or -1 */
 static inline int32_t tcp_connect(uint32_t ip, uint32_t port,
                                   uint32_t timeout_ms)
 {
@@ -712,7 +723,7 @@ static inline int32_t tcp_connect(uint32_t ip, uint32_t port,
     return ret;
 }
 
-/* Otwiera gniazdo nasluchujace na porcie */
+/* Opens a listening socket on a port */
 static inline int32_t tcp_listen(uint32_t port)
 {
     int32_t ret;
@@ -723,7 +734,7 @@ static inline int32_t tcp_listen(uint32_t port)
     return ret;
 }
 
-/* Odbiera nawiazane polaczenie z kolejki gniazda nasluchujacego */
+/* Accepts an established connection from a listening socket's queue */
 static inline int32_t tcp_accept(int32_t listener, uint32_t timeout_ms)
 {
     int32_t ret;
@@ -734,7 +745,7 @@ static inline int32_t tcp_accept(int32_t listener, uint32_t timeout_ms)
     return ret;
 }
 
-/* Wysyla dane i czeka na potwierdzenie drugiej strony */
+/* Sends data and waits for the other side's acknowledgement */
 static inline int32_t tcp_send(int32_t conn, const void *buf, uint32_t len,
                                uint32_t timeout_ms)
 {
@@ -747,7 +758,8 @@ static inline int32_t tcp_send(int32_t conn, const void *buf, uint32_t len,
     return ret;
 }
 
-/* Odbiera dane: >0 = bajty, 0 = druga strona zamknela, -1 = blad/timeout */
+/* Receives data: >0 = bytes, 0 = the other side closed, -1 = error or
+   timeout */
 static inline int32_t tcp_recv(int32_t conn, void *buf, uint32_t max,
                                uint32_t timeout_ms)
 {
@@ -768,7 +780,7 @@ static inline void tcp_close(int32_t conn)
                      : "memory");
 }
 
-/* "10.0.2.2" -> 0x0A000202 (0 = zly zapis) */
+/* "10.0.2.2" -> 0x0A000202 (0 = a bad spelling) */
 static inline uint32_t uparse_ip(const char *s)
 {
     uint32_t ip = 0, part = 0;

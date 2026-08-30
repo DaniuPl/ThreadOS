@@ -1,21 +1,22 @@
-/* rdzen - na ktorym rdzeniu procesora naprawde biegne
+/* cores - which processor core am I really running on
  *
- * Program rozwidla sie i liczy w dwoch procesach naraz. Kazdy z nich
- * sam sprawdza, gdzie go prowadza - numeru rdzenia nie ma jak
- * przeczytac z pierscienia 3, bo lokalny APIC lezy poza przestrzenia
- * adresowa programu, wiec pyta o niego jadro.
+ * The program forks and counts in two processes at once. Each of them
+ * checks for itself where it is being run - the core number cannot be
+ * read from ring 3, because the local APIC lies outside the program's
+ * address space, so it asks the kernel about it.
  *
- * Rozwidlenie nie jest ozdoba. Zadanie, ktore biegnie samo, zostaje
- * tam, gdzie ruszylo: scheduler nie ma powodu go przenosic, skoro nikt
- * inny nie czeka. Dopiero DWA liczace naraz musza trafic na dwa
- * rdzenie - i wtedy oba konczy sie w czasie jednego, a nie dwoch.
+ * The fork is not decoration. A task that runs alone stays where it
+ * started: the scheduler has no reason to move it when nobody else is
+ * waiting. Only TWO counting at once have to land on two cores - and
+ * then both finish in the time of one, not of two.
  *
- * Kazdy proces wypisuje trzy rzeczy i kazda jest po cos: maske rdzeni,
- * ktore go prowadzily, liczbe tykniec (czyli czy naprawde szlo
- * rownolegle) i sume kontrolna (czyli czy policzyl to, co mial).
+ * Each process prints three things and each of them is for something:
+ * the mask of cores that ran it, the tick count (that is, whether it
+ * really went in parallel) and the checksum (that is, whether it
+ * computed what it was supposed to).
  *
- * Uzycie: run cores   - oba procesy na rdzeniu rozruchowym
- *         runw cores  - wolno im biec na kazdym rdzeniu
+ * Usage: run cores   - both processes on the bootstrap core
+ *        runw cores  - they are allowed to run on any core
  */
 
 #include "uapi.h"
@@ -28,9 +29,9 @@ static uint32_t compute(uint32_t *mask_out)
     for (uint32_t i = 0; i < STEPS; i++) {
         stan = stan * 1103515245u + 12345u;
         sum += stan >> 16;
-        /* Pytanie o rdzen to wywolanie systemowe, a te chodza pod
-           wielkim zamkiem jadra - pytamy wiec rzadko, zeby mierzyc
-           liczenie, a nie czekanie na zamek */
+        /* Asking about the core is a system call, and those run under the
+           big kernel lock - so we ask rarely, in order to measure the
+           counting rather than the wait for the lock */
         if ((i & 0x1FFFFF) == 0)
             mask |= 1u << (uint32_t)sys_core();
     }

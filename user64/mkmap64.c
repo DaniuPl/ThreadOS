@@ -1,10 +1,10 @@
-/* mkmapa64 - zaklada plik z wzorcem do sprawdzania odwzorowan
+/* mkmap64 - zaklada plik z wzorcem do sprawdzania odwzorowan
  *
  * Bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF - ten sam wzorzec,
  * ktorego szuka mmapfile64. Plik jest wiekszy niz jedna strona, wiec
  * jego odczyt przez odwzorowanie musi sie odbyc w kilku ratach.
  *
- * Uzycie: run mkmapa64 <plik> [ile KiB] (domyslnie 12)
+ * Uzycie: run mkmap64 <plik> [ile KiB] (domyslnie 12)
  */
 
 #include "usys64.h"
@@ -27,7 +27,7 @@ void _start(int argc, char **argv)
 
     int fd = (int)sys_open(name, 1);
     if (fd < 0) {
-        print("[mkmapa64] nie da sie zalozyc pliku\n");
+        print("[mkmap64] nie da sie zalozyc pliku\n");
         sys_exit(1);
     }
 
@@ -35,14 +35,14 @@ void _start(int argc, char **argv)
         for (uint64_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
         if (sys_write(fd, buf, CHUNK) != CHUNK) {
-            print("[mkmapa64] zapis sie nie udal\n");
+            print("[mkmap64] zapis sie nie udal\n");
             sys_exit(1);
         }
     }
     sys_close(fd);
 
     int n = 0;
-    const char *a = "[mkmapa64] zapisano ";
+    const char *a = "[mkmap64] zapisano ";
     while (*a)
         out[n++] = *a++;
     char tmp[24];

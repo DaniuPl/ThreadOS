@@ -1,8 +1,9 @@
-/* gfiles - graficzny menedzer plikow (ring 3)
+/* gfiles - a graphical file manager (ring 3)
  *
- * Listuje pliki z dysku (PFS) w oknie. Klikniecie nazwy otwiera plik
- * (sys_open/read) i pokazuje jego tresc w panelu podgladu. Spina FS,
- * zdarzenia myszy i GUI: FS -> klik -> odczyt -> rysowanie w oknie.
+ * It lists files from the disk (PFS) in a window. Clicking a name opens
+ * the file (sys_open/read) and shows its contents in the preview panel.
+ * It ties the FS, mouse events and the GUI together: FS -> click ->
+ * read -> drawing in a window.
  */
 
 #include "usys.h"
@@ -32,7 +33,7 @@ static int ustrcpy(char *d, const char *s, int max)
     return i;
 }
 
-/* Otwiera zaznaczony plik i wczytuje jego tresc do podgladu */
+/* Opens the selected file and reads its contents into the preview */
 static void load_preview(const char *name)
 {
     ustrcpy(selected, name, sizeof(selected));
@@ -55,7 +56,7 @@ void _start(void)
         sys_exit(1);
 
     for (;;) {
-        /* Zdarzenia: klik w wiersz pliku -> wczytaj podglad */
+        /* Events: a click on a file's row -> load the preview */
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLICK) {
@@ -65,7 +66,7 @@ void _start(void)
             }
         }
 
-        /* Odswiez liste plikow z dysku */
+        /* Refresh the file list from the disk */
         win_rect(w, 0, 0, 180, 120, C_BG);
         win_text(w, 4, 2, "Pliki na dysku:", C_GREEN);
         nfiles = 0;
@@ -82,7 +83,7 @@ void _start(void)
         if (nfiles == 0)
             win_text(w, 8, ROW_Y0, "(pusto)", C_WHITE);
 
-        /* Panel podgladu zaznaczonego pliku */
+        /* The preview panel for the selected file */
         win_rect(w, 0, 86, 180, 1, C_WHITE);
         if (selected[0]) {
             win_text(w, 4, 90, "tresc:", C_GREEN);

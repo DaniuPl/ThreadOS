@@ -1,10 +1,10 @@
-/* mkmapa - zaklada plik z wzorcem do sprawdzania odwzorowan
+/* mkmap - zaklada plik z wzorcem do sprawdzania odwzorowan
  *
  * Bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF - ten sam wzorzec,
  * ktorego szuka mmapfile. Plik jest wiekszy niz jedna strona, wiec
  * jego odczyt przez odwzorowanie musi odbyc sie w kilku ratach.
  *
- * Uzycie: run mkmapa <plik> [ile KiB] (domyslnie 12)
+ * Uzycie: run mkmap <plik> [ile KiB] (domyslnie 12)
  */
 
 #include "usys.h"
@@ -28,7 +28,7 @@ void _start(int argc, char **argv)
 
     int32_t fd = sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        print("[mkmapa] nie da sie zalozyc pliku\n");
+        print("[mkmap] nie da sie zalozyc pliku\n");
         sys_exit(1);
     }
 
@@ -36,13 +36,13 @@ void _start(int argc, char **argv)
         for (uint32_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
         if (sys_write(fd, buf, CHUNK) != (int32_t)CHUNK) {
-            print("[mkmapa] zapis sie nie udal\n");
+            print("[mkmap] zapis sie nie udal\n");
             sys_exit(1);
         }
     }
     sys_close(fd);
 
-    print("[mkmapa] zapisano ");
+    print("[mkmap] zapisano ");
     print_dec(nbytes);
     print(" B wzorca\n");
     sys_exit(0);

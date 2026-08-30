@@ -1,16 +1,18 @@
-/* gweb - przegladarka w oknie pulpitu (ring 3)
+/* gweb - a browser in a desktop window (ring 3)
  *
- * Wpisz adres w postaci host[:port][/sciezka] (albo https://...) i
- * nacisnij Enter: program rozwiazuje nazwe przez DNS, laczy sie po TCP
- * (dla https przez TLS 1.3 ze sprawdzeniem certyfikatu), obdziera
- * odpowiedz z naglowkow i znacznikow HTML, po czym rysuje tekst w oknie
- * i zapisuje cala tresc na dysk (plik 'strona.htm').
+ * Type an address in the form host[:port][/path] (or https://...) and
+ * press Enter: the program resolves the name through DNS, connects
+ * over TCP (for https through TLS 1.3 with certificate verification),
+ * strips the response of headers and HTML tags, then draws the text in
+ * the window and writes the whole body to disk (the file
+ * 'strona.htm').
  *
- * Strona da sie przewijac (strzalki, PgUp/PgDn, Home), a odnosniki sa
- * klikalne - klikniecie idzie za adresem z <a href>.
+ * The page can be scrolled (arrows, PgUp/PgDn, Home), and links are
+ * clickable - a click follows the address from <a href>.
  *
- * Spina wszystkie warstwy naraz: klawiature i mysz z kompozytora
- * pulpitu, DNS, TCP, TLS, system plikow i procesy ring 3.
+ * It ties all the layers together at once: the keyboard and mouse from
+ * the desktop compositor, DNS, TCP, TLS, the file system and ring 3
+ * processes.
  */
 
 #include "uapi.h"
@@ -25,15 +27,15 @@
 #define C_GREEN  2
 #define C_RED    1
 #define C_TITLE  3
-#define C_LINK   5            /* odnosniki - inny kolor niz reszta tekstu */
+#define C_LINK   5            /* links - a different colour from the rest of the text */
 
 #define ADDR_MAX  80
 #define PAGE_MAX  8192
-#define COLS      38          /* znakow w wierszu przy czcionce 8x8 */
+#define COLS      38          /* characters per line with an 8x8 font */
 #define ROWS      15
 #define ROW_H     10
-#define PAGE_Y    30          /* pierwszy wiersz tresci w oknie */
-/* --- stan --- */
+#define PAGE_Y    30          /* the first line of content in the window */
+/* --- state --- */
 
 static char addr[ADDR_MAX] = "protonos.test/";
 static int addr_len = 14;
@@ -43,11 +45,11 @@ static uint32_t cur_port = 80;
 static char cur_path[96] = "/";
 static int cur_tls;
 
-static char page[PAGE_MAX];   /* surowa odpowiedz (bez naglowkow) */
+static char page[PAGE_MAX];   /* the raw response (without headers) */
 static int page_len;
 
-static char text[PAGE_MAX];   /* tresc po odarciu ze znacznikow */
-static struct html_doc doc;   /* tekst, odnosniki i podzial na wiersze */
+static char text[PAGE_MAX];   /* the body once stripped of tags */
+static struct html_doc doc;   /* the text, the links and the split into lines */
 static int scroll;
 
 static char status[64] = "Wpisz adres i nacisnij Enter";
@@ -63,7 +65,7 @@ static void set_status(const char *s)
     status[i] = '\0';
 }
 
-/* --- pobieranie --- */
+/* --- fetching --- */
 
 static void page_sink(const char *data, uint32_t len, void *arg)
 {
@@ -72,7 +74,7 @@ static void page_sink(const char *data, uint32_t len, void *arg)
         page[page_len++] = data[i];
 }
 
-/* Odswieza pasek adresu z biezacego celu */
+/* Refreshes the address bar from the current target */
 static void rebuild_addr(void)
 {
     int n = 0;
@@ -106,9 +108,9 @@ static void fetch(void)
     static int roots_loaded;
 
     if (cur_tls && !roots_loaded) {
-        /* Wbudowane korzenie publicznych CA + ewentualne wlasne z dysku.
-           Certyfikat, ktory sie nie obroni, konczy polaczenie - tak jak
-           w prawdziwej przegladarce. */
+        /* The built-in public CA roots plus any of our own from disk. A
+           certificate that does not hold up ends the connection - just
+           as in a real browser. */
         uint32_t n = cert_load_roots("roots.der", roots, sizeof(roots));
         http_set_roots(roots, n, 1);
         roots_loaded = 1;
@@ -189,7 +191,8 @@ static void fetch(void)
     html_layout(&doc, COLS);
     scroll = 0;
 
-    /* Pasek stanu: "TLS+" = certyfikat sprawdzony, "TLS?" = tylko szyfr */
+    /* The status bar: "TLS+" = the certificate was verified, "TLS?" =
+   encryption only */
     char st[64];
     int i = 0;
     const char *lead = cur_tls ? (res.verified ? "TLS+ HTTP " : "TLS? HTTP ")
@@ -226,7 +229,7 @@ static void fetch(void)
     set_status(st);
 }
 
-/* Ustawia nowy cel z paska adresu i pobiera strone */
+/* Sets a new target from the address bar and fetches the page */
 static void navigate_from_addr(void)
 {
     addr[addr_len] = '\0';
@@ -239,7 +242,7 @@ static void navigate_from_addr(void)
     fetch();
 }
 
-/* Klikniety odnosnik: adres wzgledny albo pelny */
+/* A clicked link: a relative or a full address */
 static void follow_link(int k)
 {
     if (!http_apply_location(doc.links[k].href, cur_host, sizeof(cur_host),
@@ -252,7 +255,7 @@ static void follow_link(int k)
     fetch();
 }
 
-/* --- rysowanie --- */
+/* --- drawing --- */
 
 static void draw_page(int w)
 {
@@ -267,7 +270,7 @@ static void draw_page(int w)
         int i = doc.lines[li].start;
         int end = i + doc.lines[li].len;
 
-        while (i < end) {                /* rysuj kawalkami o jednym kolorze */
+        while (i < end) {                /* draw in pieces of a single colour */
             int k = html_link_at(&doc, i);
             int run = 0;
             while (i + run < end && html_link_at(&doc, i + run) == k &&
@@ -285,7 +288,8 @@ static void draw_page(int w)
     }
 }
 
-/* Klikniecie w tresc: przeliczamy na indeks znaku i szukamy odnosnika */
+/* A click in the content: we convert it to a character index and look
+   for a link */
 static void handle_click(int x, int y)
 {
     if (y < PAGE_Y)
@@ -304,8 +308,8 @@ static void handle_click(int x, int y)
 
 static void scroll_by(int delta)
 {
-    /* Ostatni ekran zostaje w calosci widoczny - zjezdzanie do samego
-       konca tekstu zostawialoby jeden wiersz na pustym oknie */
+    /* The last screen stays fully visible - scrolling to the very end
+       of the text would leave one line on an empty window */
     int max_scroll = doc.line_count - ROWS;
     if (max_scroll < 0)
         max_scroll = 0;
@@ -350,7 +354,7 @@ void _start(void)
             } else if (c == KEY_HOME) {
                 scroll = 0;
             } else if (c == KEY_END) {
-                scroll_by(doc.line_count);   /* i tak przytnie do ostatniego ekranu */
+                scroll_by(doc.line_count);   /* it will clamp to the last screen anyway */
             } else if (c >= 0x20 && c < 0x7F && addr_len < ADDR_MAX - 1) {
                 addr[addr_len++] = c;
             }

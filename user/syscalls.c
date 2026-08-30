@@ -1,24 +1,26 @@
-/* wywolania - ile wejsc do jadra da sie zrobic naraz
+/* syscalls - how many entries into the kernel can be made at once
  *
- * Program rdzen mierzyl LICZENIE w pierscieniu 3: tam dwa procesy na
- * dwoch rdzeniach ida obok siebie, bo jadra nie dotykaja wcale. Ten
- * mierzy co innego - samo WCHODZENIE DO JADRA. Petla nie liczy prawie
- * niczego, tylko wola jadro tak czesto, jak sie da.
+ * The 'cores' program measured COUNTING in ring 3: there two processes
+ * on two cores go side by side, because they do not touch the kernel
+ * at all. This one measures something else - ENTERING THE KERNEL
+ * itself. The loop computes almost nothing, it only calls the kernel
+ * as often as it can.
  *
- * Roznice robi wielki zamek jadra. Dopoki bral go kazdy syscall, dwa
- * procesy na dwoch rdzeniach czekaly na siebie po kolei i 'runw' nie
- * dawal nic - a nawet szkodzil, bo do czekania dochodzilo bicie sie
- * o te sama linie pamieci. Wywolanie, ktore siega tylko po stan
- * wolajacego zadania, zamka nie potrzebuje.
+ * The difference is made by the big kernel lock. As long as every
+ * syscall took it, two processes on two cores waited for each other in
+ * turn and 'runw' gave nothing - it even hurt, because on top of the
+ * waiting came a fight over the same memory line. A call that reaches
+ * only for the calling task's state does not need the lock.
  *
- * Mierzymy sys_getpid, bo to najczystsze wejscie do jadra, jakie jest:
- * czyta jedno pole wlasnego zadania i wraca. Przy okazji jest wlasnym
- * sprawdzianem poprawnosci - kazde z miliona wywolan ma zwrocic numer
- * TEGO procesu. Gdyby dwa rdzenie mylily sie co do tego, ktore zadanie
- * prowadza, widac by to bylo tutaj i to od razu.
+ * We measure sys_getpid, because it is the cleanest entry into the
+ * kernel there is: it reads one field of its own task and returns.
+ * Along the way it is its own correctness check - each of the million
+ * calls is to return THIS process's number. If two cores disagreed
+ * about which task they are running, it would show up here and show up
+ * at once.
  *
- * Uzycie: run syscalls   - oba procesy na rdzeniu rozruchowym
- *         runw syscalls  - wolno im biec na kazdym rdzeniu
+ * Usage: run syscalls   - both processes on the bootstrap core
+ *        runw syscalls  - they are allowed to run on any core
  */
 
 #include "uapi.h"
@@ -33,9 +35,9 @@ static uint32_t loop(uint32_t *mask_out, uint32_t *matching_out)
     for (uint32_t i = 0; i < CALLS; i++) {
         if (sys_getpid() == mine)
             matching++;
-        /* O rdzen pytamy rzadko: to wywolanie siega do lokalnego APIC,
-           czyli do rejestru sprzetowego, a tego nie chcemy w petli
-           pomiarowej */
+        /* We ask about the core rarely: that call reaches into the local
+           APIC, that is, into a hardware register, and we do not want
+           that in a measurement loop */
         if ((i & 0xFFFFu) == 0)
             mask |= 1u << (uint32_t)sys_core();
     }

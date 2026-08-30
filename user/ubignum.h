@@ -1,13 +1,13 @@
-/* Arytmetyka wielkich liczb dla RSA (mnozenie modularne Montgomery'ego)
+/* Big number arithmetic for RSA (Montgomery modular multiplication)
  *
- * Do sprawdzenia podpisu RSA wystarczy potegowanie modularne z malym
- * wykladnikiem publicznym (zwykle 65537). Uzywamy postaci
- * Montgomery'ego, bo pozwala liczyc reszte z dzielenia samymi
- * mnozeniami i przesunieciami - dzielenia wielkich liczb nie trzeba
- * wtedy pisac wcale.
+ * To verify an RSA signature, modular exponentiation with a small
+ * public exponent (usually 65537) is enough. We use the Montgomery
+ * form, because it makes it possible to compute a remainder with
+ * multiplications and shifts alone - division of big numbers then does
+ * not have to be written at all.
  *
- * Liczby trzymamy jako tablice 32-bitowych czlonow, od najmniej
- * znaczacego. 2048 bitow = 64 czlony; z zapasem na 4096-bitowe klucze.
+ * Numbers are kept as arrays of 32-bit limbs, least significant first.
+ * 2048 bits = 64 limbs; with room to spare for 4096-bit keys.
  */
 
 #ifndef PROTONOS_UBIGNUM_H
@@ -15,11 +15,11 @@
 
 #include "uapi.h"
 
-#define BN_MAX_LIMBS 128                 /* do 4096 bitow */
+#define BN_MAX_LIMBS 128                 /* up to 4096 bits */
 
 struct bignum {
     uint32_t n[BN_MAX_LIMBS];
-    int len;                             /* liczba uzywanych czlonow */
+    int len;                             /* the number of limbs in use */
 };
 
 static inline void bn_zero(struct bignum *a)
@@ -35,10 +35,11 @@ static inline void bn_trim(struct bignum *a)
         a->len--;
 }
 
-/* Wczytuje liczbe z zapisu big-endian (tak jak leza w certyfikacie) */
+/* Reads a number from a big-endian representation (as they lie in a
+   certificate) */
 static inline int bn_from_bytes(struct bignum *a, const uint8_t *p, uint32_t len)
 {
-    while (len > 0 && *p == 0) {         /* wiodace zera nic nie wnosza */
+    while (len > 0 && *p == 0) {         /* leading zeros contribute nothing */
         p++;
         len--;
     }
@@ -55,7 +56,7 @@ static inline int bn_from_bytes(struct bignum *a, const uint8_t *p, uint32_t len
     return 0;
 }
 
-/* Zapisuje liczbe big-endian na dokladnie 'len' bajtach (z zerami) */
+/* Writes a number big-endian into exactly 'len' bytes (with zeros) */
 static inline void bn_to_bytes(const struct bignum *a, uint8_t *out,
                                uint32_t len)
 {
@@ -79,7 +80,7 @@ static inline int bn_cmp(const struct bignum *a, const struct bignum *b)
     return 0;
 }
 
-/* a = a - b (zaklada a >= b) */
+/* a = a - b (assumes a >= b) */
 static inline void bn_sub(struct bignum *a, const struct bignum *b)
 {
     uint64_t borrow = 0;
@@ -87,21 +88,21 @@ static inline void bn_sub(struct bignum *a, const struct bignum *b)
         uint64_t bi = (i < b->len) ? b->n[i] : 0;
         uint64_t cur = (uint64_t)a->n[i] - bi - borrow;
         a->n[i] = (uint32_t)cur;
-        borrow = (cur >> 63) & 1;        /* pozyczka, gdy wynik ujemny */
+        borrow = (cur >> 63) & 1;        /* a borrow, when the result is negative */
     }
     bn_trim(a);
 }
 
-/* Odwrotnosc -n[0] modulo 2^32 (potrzebna w REDC) */
+/* The inverse of -n[0] modulo 2^32 (needed in REDC) */
 static inline uint32_t bn_inv32(uint32_t n0)
 {
     uint32_t x = 1;
-    for (int i = 0; i < 5; i++)          /* Newton: podwaja liczbe bitow */
+    for (int i = 0; i < 5; i++)          /* Newton: it doubles the number of bits */
         x *= 2 - n0 * x;
     return (uint32_t)(0 - x);
 }
 
-/* Mnozenie Montgomery'ego: out = a * b * R^-1 mod m */
+/* Montgomery multiplication: out = a * b * R^-1 mod m */
 static inline void bn_mont_mul(struct bignum *out, const struct bignum *a,
                                const struct bignum *b, const struct bignum *m,
                                uint32_t m_inv)
@@ -126,7 +127,7 @@ static inline void bn_mont_mul(struct bignum *out, const struct bignum *a,
         t[i + n] = (uint32_t)sum;
         t[i + n + 1] += (uint32_t)(sum >> 32);
 
-        /* zerowanie najnizszego czlonu: t += (t[i] * m_inv) * m */
+        /* zeroing the lowest limb: t += (t[i] * m_inv) * m */
         uint32_t u = t[i] * m_inv;
         carry = 0;
         for (int j = 0; j < n; j++) {
@@ -149,7 +150,7 @@ static inline void bn_mont_mul(struct bignum *out, const struct bignum *a,
         bn_sub(out, m);
 }
 
-/* a = a + b (mod nic - czysta suma; zaklada zapas na przeniesienie) */
+/* a = a + b (mod nothing - a plain sum; assumes room for a carry) */
 static inline void bn_add_raw(struct bignum *a, const struct bignum *b)
 {
     int len = a->len > b->len ? a->len : b->len;
@@ -167,10 +168,11 @@ static inline void bn_add_raw(struct bignum *a, const struct bignum *b)
         a->n[a->len++] = (uint32_t)carry;
 }
 
-/* Dodawanie i odejmowanie modulo (wartosci musza byc juz zredukowane).
-   Wynik powstaje w kopii roboczej, bo wolajacy czesto podaje ten sam
-   obiekt jako wynik i argument (np. fp_add(&a, &b, &a)) - zapis wprost
-   do 'out' zniszczylby wtedy drugi argument. */
+/* Modular addition and subtraction (the values have to be reduced
+   already). The result is built in a working copy, because the caller
+   often passes the same object as the result and an argument (say
+   fp_add(&a, &b, &a)) - writing straight into 'out' would then destroy
+   the second argument. */
 static inline void bn_add_mod(struct bignum *out, const struct bignum *a,
                               const struct bignum *b, const struct bignum *m)
 {
@@ -187,7 +189,7 @@ static inline void bn_sub_mod(struct bignum *out, const struct bignum *a,
 {
     struct bignum t = *a, u = *b;
 
-    if (bn_cmp(&t, &u) < 0) {            /* pozycz modulus */
+    if (bn_cmp(&t, &u) < 0) {            /* borrow the modulus */
         struct bignum mm = *m;
         bn_add_raw(&t, &mm);
     }
@@ -195,21 +197,21 @@ static inline void bn_sub_mod(struct bignum *out, const struct bignum *a,
     *out = t;
 }
 
-/* Potegowanie modularne: out = base^exp mod m (wykladnik 32-bitowy) */
+/* Modular exponentiation: out = base^exp mod m (a 32-bit exponent) */
 static inline int bn_modexp(struct bignum *out, const struct bignum *base,
                             uint32_t exp, const struct bignum *m)
 {
     struct bignum r2, x, acc, one;
 
-    if (m->len == 0 || !(m->n[0] & 1))   /* modulus musi byc nieparzysty */
+    if (m->len == 0 || !(m->n[0] & 1))   /* the modulus has to be odd */
         return -1;
 
     uint32_t m_inv = bn_inv32(m->n[0]);
     int n = m->len;
 
-    /* R^2 mod m liczymy podwajaniem jedynki 64n razy: 2^(64n) mod m.
-       Kazde podwojenie konczy sie najwyzej jednym odjeciem modulusa,
-       wiec nie potrzeba tu dzielenia wielkich liczb. */
+    /* R^2 mod m we compute by doubling one 64n times: 2^(64n) mod m.
+       Every doubling ends in at most one subtraction of the modulus, so
+       no division of big numbers is needed here. */
     bn_zero(&r2);
     r2.len = 1;
     r2.n[0] = 1;
@@ -227,13 +229,13 @@ static inline int bn_modexp(struct bignum *out, const struct bignum *base,
             bn_sub(&r2, m);
     }
 
-    /* przejscie do postaci Montgomery'ego */
+    /* the move into Montgomery form */
     bn_mont_mul(&x, base, &r2, m, m_inv);
 
     bn_zero(&one);
     one.len = 1;
     one.n[0] = 1;
-    bn_mont_mul(&acc, &one, &r2, m, m_inv);   /* acc = 1 w postaci Montgomery'ego */
+    bn_mont_mul(&acc, &one, &r2, m, m_inv);   /* acc = 1 in Montgomery form */
 
     int started = 0;
     for (int i = 31; i >= 0; i--) {
@@ -249,12 +251,12 @@ static inline int bn_modexp(struct bignum *out, const struct bignum *base,
         }
     }
 
-    bn_mont_mul(out, &acc, &one, m, m_inv);   /* powrot z postaci Montgomery'ego */
+    bn_mont_mul(out, &acc, &one, m, m_inv);   /* the return from Montgomery form */
     return 0;
 }
 
-/* Potegowanie z wykladnikiem dowolnej dlugosci (big-endian).
-   Potrzebne do odwrotnosci modulo w ciele krzywej: a^(p-2). */
+/* Exponentiation with an exponent of any length (big-endian). Needed
+   for modular inversion in the curve's field: a^(p-2). */
 static inline int bn_modexp_bytes(struct bignum *out, const struct bignum *base,
                                   const uint8_t *exp, uint32_t explen,
                                   const struct bignum *m)
@@ -305,7 +307,7 @@ static inline int bn_modexp_bytes(struct bignum *out, const struct bignum *base,
             }
         }
     }
-    if (!started) {                      /* wykladnik zerowy -> 1 */
+    if (!started) {                      /* a zero exponent -> 1 */
         bn_zero(out);
         out->len = 1;
         out->n[0] = 1;

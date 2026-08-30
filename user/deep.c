@@ -1,4 +1,4 @@
-/* gleboko - stos rosnacy na zadanie
+/* deep - stos rosnacy na zadanie
  *
  * Program dostaje na start osiem stron stosu. Ta rekurencja siega
  * grubo glebiej: kazde wywolanie zajmuje cztery kilobajty ramki
@@ -37,16 +37,16 @@ void _start(void)
 {
     uint32_t bad = descend(1);
 
-    print("[gleboko] zeszlem na poziom ");
+    print("[deep] zeszlem na poziom ");
     print_dec(deepest);
     print(", ramek po ");
     print_dec(FRAME);
     print(" B\n");
 
     if (bad) {
-        print("[gleboko] ZLE: ramki nie przetrwaly\n");
+        print("[deep] ZLE: ramki nie przetrwaly\n");
         sys_exit(1);
     }
-    print("[gleboko] stos urosl pod palcami, wszystkie ramki caly\n");
+    print("[deep] stos urosl pod palcami, wszystkie ramki caly\n");
     sys_exit(0);
 }

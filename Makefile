@@ -51,8 +51,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/cryptotest.elf \
              $(BUILD)/user/certtest.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
-             $(BUILD)/user/mkmapa.elf $(BUILD)/user/mmapfile.elf \
-             $(BUILD)/user/gleboko.elf $(BUILD)/user/mmapzap.elf \
+             $(BUILD)/user/mkmap.elf $(BUILD)/user/mmapfile.elf \
+             $(BUILD)/user/deep.elf $(BUILD)/user/mmapzap.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
              $(BUILD)/user/syscalls.elf
 
@@ -253,8 +253,8 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    sigtest=$(BUILD)/user/sigtest.elf \
 	    lazymem=$(BUILD)/user/lazymem.elf \
 	    swaptest=$(BUILD)/user/swaptest.elf \
-	    mkmapa=$(BUILD)/user/mkmapa.elf mmapfile=$(BUILD)/user/mmapfile.elf \
-	    gleboko=$(BUILD)/user/gleboko.elf \
+	    mkmap=$(BUILD)/user/mkmap.elf mmapfile=$(BUILD)/user/mmapfile.elf \
+	    deep=$(BUILD)/user/deep.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
@@ -344,7 +344,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
                $(BUILD)/user64/gweb.elf \
-               $(BUILD)/user64/mkmapa64.elf \
+               $(BUILD)/user64/mkmap64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
                $(BUILD)/user64/dynlib.elf \
@@ -434,7 +434,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    nslookup=$(BUILD)/user64/nslookup.elf \
 	    httpget=$(BUILD)/user64/httpget.elf \
 	    gweb=$(BUILD)/user64/gweb.elf \
-	    mkmapa64=$(BUILD)/user64/mkmapa64.elf \
+	    mkmap64=$(BUILD)/user64/mkmap64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \

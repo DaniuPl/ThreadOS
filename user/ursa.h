@@ -1,9 +1,10 @@
-/* Sprawdzanie podpisow RSA (RFC 8017): PKCS#1 v1.5 i PSS
+/* RSA signature verification (RFC 8017): PKCS#1 v1.5 and PSS
  *
- * Do weryfikacji wystarcza klucz publiczny: podnosimy podpis do potegi
- * e modulo n i porownujemy wynik z tym, co powinno tam byc dla naszego
- * skrotu. Certyfikaty CA podpisywane sa zwykle w wersji v1.5, a TLS 1.3
- * wymaga PSS w wiadomosci CertificateVerify - stad obie sciezki.
+ * The public key is enough for verification: we raise the signature to
+ * the power e modulo n and compare the result with what should be there
+ * for our digest. CA certificates are usually signed in the v1.5
+ * variant, and TLS 1.3 requires PSS in the CertificateVerify message -
+ * hence both paths.
  */
 
 #ifndef PROTONOS_URSA_H
@@ -13,15 +14,16 @@
 #include "usha256.h"
 #include "ubignum.h"
 
-#define RSA_MAX_BYTES 512                /* do 4096 bitow */
+#define RSA_MAX_BYTES 512                /* up to 4096 bits */
 
-/* Naglowek DigestInfo dla SHA-256 (staly ciag z RFC 8017) */
+/* The DigestInfo header for SHA-256 (a fixed sequence from
+   RFC 8017) */
 static const uint8_t rsa_sha256_prefix[] = {
     0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65,
     0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20
 };
 
-/* Wspolna czesc: sig^e mod n -> em */
+/* The common part: sig^e mod n -> em */
 static inline int rsa_public(const uint8_t *mod, uint32_t modlen, uint32_t exp,
                              const uint8_t *sig, uint32_t siglen, uint8_t *em)
 {
@@ -54,7 +56,7 @@ static inline int rsa_verify_pkcs1_sha256(const uint8_t *mod, uint32_t modlen,
         return 0;
 
     uint32_t prefix_len = sizeof(rsa_sha256_prefix);
-    uint32_t need = 3 + 8 + prefix_len + 32;      /* minimalne dopelnienie */
+    uint32_t need = 3 + 8 + prefix_len + 32;      /* the minimum padding */
     if (modlen < need)
         return 0;
 
@@ -64,7 +66,7 @@ static inline int rsa_verify_pkcs1_sha256(const uint8_t *mod, uint32_t modlen,
     uint32_t i = 2;
     while (i < modlen && em[i] == 0xff)
         i++;
-    if (i < 10 || i >= modlen || em[i] != 0x00)   /* min. 8 bajtow 0xFF */
+    if (i < 10 || i >= modlen || em[i] != 0x00)   /* at least 8 bytes of 0xFF */
         return 0;
     i++;
 
@@ -80,7 +82,7 @@ static inline int rsa_verify_pkcs1_sha256(const uint8_t *mod, uint32_t modlen,
     return diff == 0;
 }
 
-/* MGF1 z SHA-256 (RFC 8017 B.2.1) */
+/* MGF1 with SHA-256 (RFC 8017 B.2.1) */
 static inline void rsa_mgf1(const uint8_t *seed, uint32_t seedlen,
                             uint8_t *mask, uint32_t masklen)
 {
@@ -108,7 +110,8 @@ static inline void rsa_mgf1(const uint8_t *seed, uint32_t seedlen,
     }
 }
 
-/* EMSA-PSS-VERIFY z SHA-256 i sol dlugosci skrotu (tak robi TLS 1.3) */
+/* EMSA-PSS-VERIFY with SHA-256 and a salt the length of the digest
+   (that is what TLS 1.3 does) */
 static inline int rsa_verify_pss_sha256(const uint8_t *mod, uint32_t modlen,
                                         uint32_t exp, const uint8_t *sig,
                                         uint32_t siglen, const uint8_t *hash,
@@ -135,7 +138,7 @@ static inline int rsa_verify_pss_sha256(const uint8_t *mod, uint32_t modlen,
     for (uint32_t i = 0; i < dblen; i++)
         db[i] = (uint8_t)(em[i] ^ mask[i]);
 
-    /* wyzeruj bity ponad emBits = modbits - 1 */
+    /* zero the bits above emBits = modbits - 1 */
     uint32_t unused = 8 * modlen - (modbits - 1);
     if (unused > 0 && unused < 8)
         db[0] &= (uint8_t)(0xff >> unused);

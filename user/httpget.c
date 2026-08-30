@@ -1,15 +1,15 @@
-/* httpget - klient HTTP/HTTPS w ring 3
+/* httpget - an HTTP/HTTPS client in ring 3
  *
- * Uzycie: run httpget <adres> [port] [sciezka] [plik]
- *   run httpget 10.0.2.2 8000 /                - na konsole
- *   run httpget https://przyklad.pl / str.htm  - przez TLS 1.3, do pliku
+ * Usage: run httpget <address> [port] [path] [file]
+ *   run httpget 10.0.2.2 8000 /                - to the console
+ *   run httpget https://example.com / str.htm  - over TLS 1.3, to a file
  *
- * Nazwe hosta rozwiazuje przez DNS, radzi sobie z kodowaniem 'chunked'
- * i idzie za przekierowaniami (do trzech). Dla adresow https laczy sie
- * przez TLS 1.3 i sprawdza certyfikat: wbudowane korzenie publicznych
- * CA plus to, co ewentualnie lezy w pliku "roots.der" na dysku.
- * Certyfikat, ktory sie nie obroni, konczy polaczenie - chyba ze
- * uzyjemy -k.
+ * It resolves the host name through DNS, copes with 'chunked' encoding
+ * and follows redirects (up to three). For https addresses it connects
+ * over TLS 1.3 and verifies the certificate: the built-in public CA
+ * roots plus whatever happens to lie in a "roots.der" file on disk. A
+ * certificate that does not hold up ends the connection - unless we use
+ * -k.
  */
 
 #include "uapi.h"
@@ -19,7 +19,7 @@
 #define MAX_REDIRECTS 3
 
 struct sink_state {
-    int fd;                  /* -1 = pisz na konsole */
+    int fd;                  /* -1 = write to the console */
     uint32_t written;
 };
 
@@ -37,7 +37,7 @@ void _start(int argc, char **argv)
 {
     int insecure = 0;
     if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'k') {
-        insecure = 1;                    /* jak -k w curlu */
+        insecure = 1;                    /* like -k in curl */
         argv++;
         argc--;
     }
@@ -52,7 +52,7 @@ void _start(int argc, char **argv)
     uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 0;
     const char *outfile = argc > 4 ? argv[4] : 0;
 
-    /* Host moze byc sam ("przyklad.pl") albo pelnym adresem */
+    /* The host may be bare ("example.com") or a full address */
     uint32_t parsed_port = port;
     int use_tls = 0;
     if (!http_parse_url(argv[1], host, sizeof(host), &parsed_port,
@@ -61,7 +61,7 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
     if (port)
-        parsed_port = port;              /* port z argumentu ma pierwszenstwo */
+        parsed_port = port;              /* the port from the argument takes precedence */
     if (argc > 3) {
         int i = 0;
         while (argv[3][i] && i < (int)sizeof(path) - 1) {
@@ -87,7 +87,7 @@ void _start(int argc, char **argv)
 
     static uint8_t roots[16384];
     if (use_tls) {
-        /* Wbudowane korzenie sa zawsze; z dysku dokladamy wlasne */
+        /* The built-in roots are always there; from disk we add our own */
         uint32_t roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
         http_set_roots(roots, roots_len, !insecure);
         if (insecure)
@@ -140,7 +140,7 @@ void _start(int argc, char **argv)
         if (!http_apply_location(res.location, host, sizeof(host),
                                  &parsed_port, path, sizeof(path), &use_tls))
             break;
-        st.written = 0;                  /* tresc przekierowania nie liczy sie */
+        st.written = 0;                  /* the body of a redirect does not count */
     }
 
     if (st.fd >= 0)

@@ -1,13 +1,13 @@
-/* X25519 - wymiana kluczy na krzywej Curve25519 (RFC 7748)
+/* X25519 - key exchange on the Curve25519 curve (RFC 7748)
  *
- * TLS 1.3 zaczyna sie od tego, ze obie strony wymieniaja klucze
- * publiczne i niezaleznie licza ten sam sekret. X25519 jest tu
- * najwygodniejszy: klucz to 32 bajty, nie ma kodowania punktow ani
- * sprawdzania, czy punkt lezy na krzywej.
+ * TLS 1.3 starts with both sides exchanging public keys and
+ * independently computing the same secret. X25519 is the most
+ * convenient one here: a key is 32 bytes, there is no point encoding
+ * and no checking whether a point lies on the curve.
  *
- * Arytmetyka w ciele 2^255-19 na 16 czlonach po 16 bitow - takie
- * czlony mnozy sie bez przepelnienia w 64 bitach, co na 32-bitowym
- * procesorze bez koprocesora jest najprostsza droga.
+ * The arithmetic is in the field 2^255-19 on 16 limbs of 16 bits -
+ * such limbs multiply without overflow in 64 bits, which on a 32-bit
+ * processor with no coprocessor is the simplest way.
  */
 
 #ifndef PROTONOS_UX25519_H
@@ -19,7 +19,7 @@ typedef int64_t gf[16];
 
 static const gf gf_121665 = { 0xDB41, 1 };
 
-/* Przeniesienia miedzy czlonami; 2^256 = 38 (mod 2^255-19) */
+/* Carries between limbs; 2^256 = 38 (mod 2^255-19) */
 static inline void x_carry(gf o)
 {
     for (int i = 0; i < 16; i++) {
@@ -30,7 +30,7 @@ static inline void x_carry(gf o)
     }
 }
 
-/* Zamiana warunkowa bez rozgalezien (b = 0 albo 1) */
+/* A conditional swap with no branches (b = 0 or 1) */
 static inline void x_swap(gf p, gf q, int b)
 {
     int64_t mask = ~((int64_t)b - 1);
@@ -62,7 +62,7 @@ static inline void x_mul(gf o, const gf a, const gf b)
     for (int i = 0; i < 16; i++)
         for (int j = 0; j < 16; j++)
             t[i + j] += a[i] * b[j];
-    for (int i = 0; i < 15; i++)         /* zwiniecie gornej polowy */
+    for (int i = 0; i < 15; i++)         /* folding the upper half */
         t[i] += 38 * t[i + 16];
     for (int i = 0; i < 16; i++)
         o[i] = t[i];
@@ -75,7 +75,7 @@ static inline void x_sq(gf o, const gf a)
     x_mul(o, a, a);
 }
 
-/* Odwrotnosc przez podniesienie do potegi p-2 */
+/* Inversion by raising to the power p-2 */
 static inline void x_inv(gf o, const gf i)
 {
     gf c;
@@ -94,7 +94,7 @@ static inline void x_unpack(gf o, const uint8_t *n)
 {
     for (int i = 0; i < 16; i++)
         o[i] = n[2 * i] + ((int64_t)n[2 * i + 1] << 8);
-    o[15] &= 0x7fff;                     /* najwyzszy bit sie ignoruje */
+    o[15] &= 0x7fff;                     /* the highest bit is ignored */
 }
 
 static inline void x_pack(uint8_t *o, const gf n)
@@ -107,7 +107,7 @@ static inline void x_pack(uint8_t *o, const gf n)
     x_carry(t);
     x_carry(t);
 
-    for (int j = 0; j < 2; j++) {        /* pelna redukcja modulo p */
+    for (int j = 0; j < 2; j++) {        /* a full reduction modulo p */
         m[0] = t[0] - 0xffed;
         for (int i = 1; i < 15; i++) {
             m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1);
@@ -125,7 +125,7 @@ static inline void x_pack(uint8_t *o, const gf n)
     }
 }
 
-/* Drabina Montgomery'ego: q = skalar * punkt (oba po 32 bajty) */
+/* The Montgomery ladder: q = scalar * point (both 32 bytes) */
 static inline void x25519(uint8_t *q, const uint8_t *scalar,
                           const uint8_t *point)
 {
@@ -134,7 +134,7 @@ static inline void x25519(uint8_t *q, const uint8_t *scalar,
 
     for (int i = 0; i < 31; i++)
         z[i] = scalar[i];
-    z[31] = (uint8_t)((scalar[31] & 127) | 64);   /* przyciecie skalara */
+    z[31] = (uint8_t)((scalar[31] & 127) | 64);   /* clamping the scalar */
     z[0] &= 248;
 
     x_unpack(x, point);
@@ -175,7 +175,8 @@ static inline void x25519(uint8_t *q, const uint8_t *scalar,
     x_pack(q, a);
 }
 
-/* Klucz publiczny z prywatnego: mnozenie przez punkt bazowy u = 9 */
+/* The public key from the private one: multiplication by the base
+   point u = 9 */
 static inline void x25519_base(uint8_t *pub, const uint8_t *priv)
 {
     uint8_t base[32];

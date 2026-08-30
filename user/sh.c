@@ -1,8 +1,9 @@
-/* ush - shell uzytkownika ProtonOS, dziala w ring 3
+/* ush - the ProtonOS user shell, running in ring 3
  *
- * Czyta klawiature syscallem read (przejmujac konsole od shella
- * jadra), uruchamia programy z initrd przez spawn i czeka na nie
- * przez wait. Komenda 'exit' oddaje konsole jadru.
+ * It reads the keyboard with the read syscall (taking the console over
+ * from the kernel's shell), starts programs from the initrd through
+ * spawn and waits for them through wait. The 'exit' command hands the
+ * console back to the kernel.
  */
 
 #include "usys.h"
@@ -38,7 +39,7 @@ static void print_pid(void)
     print("\n");
 }
 
-/* Pokazuje niezerowy kod wyjscia ostatniego polecenia (jak $? w bash) */
+/* Shows the non-zero exit code of the last command (like $? in bash) */
 static void report_code(int32_t code)
 {
     if (code == 0)
@@ -72,7 +73,7 @@ static uint32_t read_line(void)
         }
         if (n < LINE_MAX - 1) {
             line[n++] = c;
-            sys_write(STDOUT, &c, 1);   /* echo robi shell, nie jadro */
+            sys_write(STDOUT, &c, 1);   /* the echo is done by the shell, not by the kernel */
         }
     }
     line[n] = '\0';
@@ -110,7 +111,7 @@ void _start(void)
             print("\n");
             continue;
         }
-        /* cd [katalog] - wbudowane, bo zmienia cwd samego shella */
+        /* cd [directory] - built in, because it changes the shell's own cwd */
         if (line[0] == 'c' && line[1] == 'd' &&
             (line[2] == '\0' || line[2] == ' ')) {
             char *arg = line + 2;
@@ -124,7 +125,7 @@ void _start(void)
             }
             continue;
         }
-        /* kill <pid> - zaznacz proces do zabicia */
+        /* kill <pid> - mark a process to be killed */
         if (line[0] == 'k' && line[1] == 'i' && line[2] == 'l' &&
             line[3] == 'l' && (line[4] == ' ' || line[4] == '\0')) {
             char *a = line + 4;
@@ -140,7 +141,8 @@ void _start(void)
             continue;
         }
 
-        /* Uruchomienie w tle: koncowe '&' (shell nie czeka na proces) */
+        /* Starting in the background: a trailing '&' (the shell does not wait
+   for the process) */
         int bg = 0;
         {
             int e = (int)ustrlen(line) - 1;
@@ -154,9 +156,9 @@ void _start(void)
             }
         }
 
-        /* Potok wielostopniowy: 'a | b | c' (opcjonalnie '... > plik').
-           Jadro rozbija linie po '|', wiec tu tylko wykrywamy '|',
-           odcinamy koncowe '> plik' i oddajemy reszte. */
+        /* A multi-stage pipeline: 'a | b | c' (optionally '... > file').
+           The kernel splits the line on '|', so here we only detect '|',
+           cut off a trailing '> file' and hand the rest over. */
         int has_pipe = 0;
         for (char *s = line; *s; s++)
             if (*s == '|') {
@@ -169,7 +171,7 @@ void _start(void)
                 if (*r == '>') {
                     *r = '\0';
                     char *f = r + 1;
-                    if (*f == '>')      /* '>>' w potoku: obcina jak '>' */
+                    if (*f == '>')      /* '>>' in a pipeline: it truncates like '>' */
                         f++;
                     while (*f == ' ')
                         f++;
@@ -189,21 +191,21 @@ void _start(void)
             goto next;
         }
 
-        /* Przekierowanie: '> plik' obcina, '>> plik' dopisuje */
+        /* Redirection: '> file' truncates, '>> file' appends */
         char *outfile = (void *)0;
         int append = 0;
         for (char *s = line; *s; s++) {
             if (*s == '>') {
                 *s = '\0';
                 char *f = s + 1;
-                if (*f == '>') {        /* '>>' = dopisywanie */
+                if (*f == '>') {        /* '>>' = appending */
                     append = 1;
                     f++;
                 }
                 while (*f == ' ')
                     f++;
                 outfile = f;
-                /* utnij spacje na koncu nazwy pliku */
+                /* trim the spaces at the end of the file name */
                 for (char *e = f; *e; e++)
                     if (*e == ' ') {
                         *e = '\0';
@@ -220,7 +222,7 @@ void _start(void)
             print("'\n");
             continue;
         }
-        if (bg) {                  /* w tle: nie czekamy, pokazujemy pid */
+        if (bg) {                  /* in the background: we do not wait, we show the pid */
             print("ush: w tle, pid=");
             print_dec((uint32_t)pid);
             print("\n");

@@ -1,14 +1,14 @@
-/* Zrodlo losowosci dla programow ring 3
+/* A source of randomness for ring 3 programs
  *
- * TLS potrzebuje nieprzewidywalnych bajtow (klucz prywatny, losowa
- * czesc ClientHello). ProtonOS nie ma sprzetowego generatora, wiec
- * mieszamy to, czym dysponujemy: zegar czasu rzeczywistego, licznik
- * tyknięc timera, pid procesu i adresy ze stosu. Kolejne bajty
- * wychodza z SHA-256 licznika i ziarna.
+ * TLS needs unpredictable bytes (the private key, the random part of
+ * ClientHello). ProtonOS has no hardware generator, so we mix whatever
+ * we have at hand: the real-time clock, the timer tick counter, the
+ * process's pid and addresses from the stack. Successive bytes come out
+ * of SHA-256 of a counter and a seed.
  *
- * Uczciwie: to nie jest generator kryptograficzny z prawdziwego
- * zdarzenia - entropii jest tu niewiele. Wystarcza do zabawkowego
- * klienta TLS, ale nie do ochrony czegokolwiek wartosciowego.
+ * Honestly: this is not a cryptographic generator in any real sense -
+ * there is not much entropy here. It is enough for a toy TLS client,
+ * but not for protecting anything valuable.
  */
 
 #ifndef PROTONOS_URAND_H
@@ -18,7 +18,7 @@
 #include "usha256.h"
 
 static uint8_t urand_seed[32];
-static uint32_t urand_counter;   /* ile blokow juz wydano - stan procesu */
+static uint32_t urand_counter;   /* how many blocks have been handed out - the process's state */
 static int urand_ready;
 
 static inline void urand_init(void)
@@ -31,8 +31,8 @@ static inline void urand_init(void)
     sys_time(&t);
     uint32_t ticks = sys_getticks();
     uint32_t pid = (uint32_t)sys_getpid();
-    /* Adres na stosie - w trybie dlugim wskaznik ma osiem bajtow,
-       wiec przez uintptr_t, a dopiero potem obciecie do 32 bitow */
+    /* An address on the stack - in long mode a pointer is eight bytes,
+       so through uintptr_t, and only then truncated to 32 bits */
     uint32_t addr = (uint32_t)(uintptr_t)&stack_marker;
 
     mix[n++] = (uint8_t)t.year; mix[n++] = (uint8_t)(t.year >> 8);
@@ -42,7 +42,7 @@ static inline void urand_init(void)
     for (int i = 0; i < 4; i++) mix[n++] = (uint8_t)(pid >> (i * 8));
     for (int i = 0; i < 4; i++) mix[n++] = (uint8_t)(addr >> (i * 8));
 
-    /* Odczyty zegara w petli lapia jeszcze troche zmiennosci */
+    /* Clock reads in a loop catch a little more variability */
     for (int k = 0; k < 8 && n < (uint32_t)sizeof(mix); k++)
         mix[n++] = (uint8_t)sys_getticks();
 

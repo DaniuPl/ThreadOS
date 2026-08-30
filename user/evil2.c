@@ -1,19 +1,21 @@
-/* evil2 - niegrzeczny inaczej: nie siega po pamiec jadra sam (od tego
- * jest 'evil' i page fault), tylko probuje zalatwic to cudzymi rekami.
+/* evil2 - naughty in another way: it does not reach for kernel memory
+ * itself (that is what 'evil' and a page fault are for), it tries to
+ * get it done by somebody else's hands.
  *
- * Podaje w syscallach wskazniki na pamiec jadra: gdyby jadro ufalo im
- * naiwnie, zapisywaloby i czytalo pod te adresy w ring 0, z pelnymi
- * prawami - ochrona stronicowania nic by nie dala. Kazda taka proba
- * musi skonczyc sie bledem -1, a proces ma to przezyc.
+ * It passes pointers to kernel memory in syscalls: if the kernel
+ * trusted them naively, it would write and read at those addresses in
+ * ring 0, with full rights - paging protection would give nothing.
+ * Every such attempt has to end in a -1 error, and the process has to
+ * survive it.
  */
 
 #include "usys.h"
 
-#define KERNEL_ADDR 0x100000u    /* poczatek obrazu jadra */
-#define VGA_ADDR    0xB8000u     /* bufor trybu tekstowego VGA */
+#define KERNEL_ADDR 0x100000u    /* the start of the kernel image */
+#define VGA_ADDR    0xB8000u     /* the VGA text mode buffer */
 
-/* Surowy syscall - potrzebny, bo chcemy widziec eax nawet tam, gdzie
-   biblioteczka usys.h zwraca void (sys_time, sys_getcwd). */
+/* A raw syscall - needed because we want to see eax even where the
+   usys.h library returns void (sys_time, sys_getcwd). */
 static inline int32_t raw(int32_t nr, uint32_t a, uint32_t b, uint32_t c)
 {
     int32_t ret;
@@ -44,26 +46,27 @@ void _start(void)
 {
     print("[evil2] probuje oszukac jadro wskaznikami na jego wlasna pamiec\n");
 
-    /* Wypis pamieci jadra na konsole cudzymi rekami */
+    /* Printing kernel memory to the console by somebody else's hands */
     expect_refused("write(1, jadro, 32)",
                    raw(SYS_WRITE, 1, KERNEL_ADDR, 32));
 
-    /* Nadpisanie pamieci jadra data z RTC */
+    /* Overwriting kernel memory with the date from the RTC */
     expect_refused("time(-> jadro)", raw(SYS_TIME, KERNEL_ADDR, 0, 0));
 
-    /* Nadpisanie bufora VGA statystykami pamieci */
+    /* Overwriting the VGA buffer with memory statistics */
     expect_refused("sysinfo(-> VGA)", raw(SYS_SYSINFO, VGA_ADDR, 0, 0));
 
-    /* Zapis sciezki katalogu pod adres zerowy */
+    /* Writing a directory path to address zero */
     expect_refused("getcwd(NULL)", raw(SYS_GETCWD, 0, 0, 0));
 
-    /* Sciezka pliku wskazujaca w pamiec jadra */
+    /* A file path pointing into kernel memory */
     expect_refused("open(jadro)", raw(SYS_OPEN, KERNEL_ADDR, 0, 0));
 
-    /* Punkt wejscia watku w kodzie jadra */
+    /* A thread entry point inside kernel code */
     expect_refused("thread(-> jadro)", raw(SYS_THREAD, KERNEL_ADDR, 0, 0));
 
-    /* Kontrola pozytywna: zwykly, uczciwy wskaznik ma dzialac dalej */
+    /* A positive control: an ordinary, honest pointer is to keep
+   working */
     struct utime t;
     if (raw(SYS_TIME, (uint32_t)&t, 0, 0) != 0) {
         print("[evil2] BLAD: uczciwy wskaznik tez zostal odrzucony!\n");

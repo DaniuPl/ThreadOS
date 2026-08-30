@@ -1,14 +1,14 @@
-/* lazymem - stronicowanie na zadanie
+/* lazymem - paging on demand
  *
- * Proces prosi o 64 MiB sterty i nie dotyka jej wcale: zajetosc RAM-u
- * nie drgnie, bo sterta jest na razie tylko obietnica. Dopiero pierwszy
- * zapis pod dany adres kosztuje ramke - zapisujemy wiec 1 MiB i tyle
- * wlasnie przybywa.
+ * The process asks for 64 MiB of heap and does not touch it at all:
+ * RAM usage does not move, because the heap is for now only a promise.
+ * Only the first write to a given address costs a frame - so we write
+ * 1 MiB and exactly that much is added.
  *
- * Osobno sprawdzamy strone, ktorej program nie dotknal ani razu,
- * a ktora wypelnia jadro w syscallu: walidacja wskaznikow musi umiec
- * ja urzeczywistnic, inaczej swiezo przydzielony bufor wygladalby
- * z jadra jak zly wskaznik.
+ * Separately we check a page the program never touched once, but which
+ * the kernel fills in inside a syscall: pointer validation has to be
+ * able to make it real, otherwise a freshly allocated buffer would look
+ * like a bad pointer from the kernel.
  */
 
 #include "usys.h"
@@ -39,9 +39,9 @@ void _start(void)
     unsigned char *p = sys_sbrk(ASK_MIB * 1024 * 1024);
     if (p == (void *)-1)
         fail("sbrk odmowil 64 MiB");
-    /* Poczatek sterty wypada zwykle w srodku strony, ktora proces juz
-       ma (koniec obrazu ELF) - liczymy od nastepnej granicy, zeby kazda
-       dotknieta strona byla naprawde nowa */
+    /* The start of the heap usually falls in the middle of a page the
+       process already has (the end of the ELF image) - we count from the
+       next boundary, so that every touched page is really new */
     p = (unsigned char *)(((uint32_t)p + PAGE - 1) & ~(uint32_t)(PAGE - 1));
 
     uint32_t after_ask = used_kib();
@@ -53,7 +53,7 @@ void _start(void)
     if (after_ask - before > 64)
         fail("sama prosba o pamiec juz cos kosztowala");
 
-    /* Dotknij pierwszego megabajta - kazda strona to jedna ramka */
+    /* Touch the first megabyte - every page is one frame */
     for (uint32_t i = 0; i < TOUCH_MIB * 1024u * 1024u; i += PAGE)
         p[i] = (unsigned char)(i >> 12);
     uint32_t after_touch = used_kib();
@@ -70,14 +70,14 @@ void _start(void)
         if (p[i] != (unsigned char)(i >> 12))
             fail("dane w dotknietych stronach sie nie zgadzaja");
 
-    /* Strona daleko poza dotknietym obszarem, wypelniana przez jadro */
+    /* A page far beyond the touched area, filled in by the kernel */
     char *far = (char *)(p + 32u * 1024 * 1024);
     sys_getcwd(far);
     if (far[0] != '/')
         fail("syscall nie zapisal nietknietej strony sterty");
     print("[lazymem] syscall urzeczywistnil nietknieta strone sterty\n");
 
-    /* To samo dla mmap: obszar obiecany, ramki na zadanie */
+    /* The same for mmap: the area is promised, the frames on demand */
     uint32_t before_map = used_kib();
     unsigned char *m = sys_mmap(8 * 1024 * 1024);
     if (!m)
