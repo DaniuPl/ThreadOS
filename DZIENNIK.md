@@ -3186,3 +3186,39 @@ sprawdzane przez `make test`.
       podswietla, ze wybrany z niego program naprawde chodzi (zegar
       rysuje cyfry, nie samo okno sie pojawia) i ze przy krawedzi menu
       sie miesci.
+
+- [x] **Okno przyciagane do krawedzi** - czyli dwa okna obok siebie
+      jednym ruchem.
+
+      Dwa okna obok siebie znaczylo dotad dwa przeciagniecia i dwa
+      ciagniecia za rog, na oko - a oko jest kiepskie w polowach. Teraz
+      okno dociagniete do lewej krawedzi bierze lewa polowe, do prawej
+      prawa, a do gory caly ekran. Nie ma tu czego sie uczyc: okno idzie
+      tam, gdzie sie je popchnelo.
+
+      Dopoki przycisk jest wcisniety, miejsce, ktore okno ZAJMIE, jest
+      rysowane jako obrys w kolorze akcentu. Okno, ktore po puszczeniu
+      skacze gdzie indziej bez uprzedzenia, to okno, ktore uciekło -
+      obrys jest pytaniem, a puszczenie przycisku odpowiedzia.
+
+      Decyzja zapada z polozenia OKNA, nie kursora. Kursor moze byc juz
+      przy samej krawedzi, gdy okno jeszcze do niej nie doszlo (ciagniete
+      okno nigdy nie wychodzi poza ekran), a czlowiek celuje oknem.
+      Kursor mowi tylko, o ktora krawedz chodzilo - inaczej okno na tyle
+      szerokie, ze dotyka obu naraz, przyciagaloby sie gdziekolwiek je
+      puscic. Rogi daja polowe, nie caly ekran: dwa okna obok siebie to
+      to, po co sie tam celuje, a caly ekran jest i tak jeden przycisk
+      dalej.
+
+      Rozmiar sprzed przyciagniecia jest pamietany tak samo, jak przy
+      maksymalizacji, wiec przycisk [] oddaje oknu jego wlasny rozmiar -
+      okno trzymane na polowie ekranu nie stracilo swojego rozmiaru
+      bardziej niz zmaksymalizowane.
+
+      Nowa grupa 'snap' sprawdza, ze w srodku ekranu obrysu nie ma, ze
+      przy krawedzi jest i konczy sie nad paskiem zadan, ze okno naprawde
+      zajmuje polowe (szare z jednej strony, pulpit z drugiej), ze
+      program przerysowuje sie w nowym rozmiarze, ze [] oddaje wlasna
+      szerokosc (360, a nie 320 czy 640) i - na koniec - to, po co to
+      wszystko: terminal na lewej polowie, ustawienia na prawej, granica
+      dokladnie w polowie.

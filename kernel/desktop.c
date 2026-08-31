@@ -386,6 +386,7 @@ static struct window wins[MAX_WIN];
 static int resize_content(struct window *w);
 static void toggle_max(int i);
 static void close_window(int i);
+static void snap_window(int i, int where);
 
 static int drag_idx = -1;
 static int resize_idx = -1;
@@ -771,6 +772,64 @@ static int on_titlebar(const struct window *win, int x, int y)
            y >= win->y && y < win->y + TITLE_H;
 }
 
+/* Snapping a window to an edge of the screen.
+ *
+ * A window pulled against the left edge takes the left half, against
+ * the right edge the right half, against the top the whole screen.
+ * It is the fastest way there is to put two things side by side, and
+ * it costs nothing to learn: the window goes where it was pushed.
+ *
+ * While the button is still down the place the window WOULD take is
+ * drawn as an outline. A window that jumps somewhere on release,
+ * unannounced, is a window that got away - the outline is the
+ * question, and letting go is the answer.
+ *
+ * The decision is made from the WINDOW's position, not the pointer's:
+ * the pointer can be at the very edge while the window is still short
+ * of it (a drag is clamped so a window never leaves the screen), and
+ * what a person is aiming with is the window. The pointer only says
+ * which edge was meant, so that a window wide enough to touch both
+ * sides at once does not snap wherever it happens to be let go. */
+#define SNAP_NONE  0
+#define SNAP_LEFT  1
+#define SNAP_RIGHT 2
+#define SNAP_FULL  3
+#define SNAP_EDGE  8              /* how near the edge counts as at it */
+static int snap_hint;             /* where the dragged window would land */
+
+/* What the window would become. The halves stop at the taskbar, like
+   a maximised window does - the bar is not somewhere a window may go. */
+static void snap_geom(int where, int *x, int *y, int *w, int *h)
+{
+    *x = 0;
+    *y = 0;
+    *w = video_w();
+    *h = taskbar_y();
+    if (where == SNAP_LEFT)
+        *w = video_w() / 2;
+    else if (where == SNAP_RIGHT) {
+        *x = video_w() / 2;
+        *w = video_w() - *x;
+    }
+}
+
+static int snap_where(int i, int mx, int my)
+{
+    const struct window *win = &wins[i];
+    int sw = video_w(), sh = video_h();
+
+    if (mx < sw / 4 && win->x <= SNAP_EDGE)
+        return SNAP_LEFT;
+    if (mx > sw - sw / 4 && win->x + win->w >= sw - SNAP_EDGE)
+        return SNAP_RIGHT;
+    /* The top comes last, so that a corner gives a half - two windows
+       side by side is what somebody dragging into a corner wants, and
+       the whole screen is one button away anyway. */
+    if (my < sh / 4 && win->y <= TITLE_H + SNAP_EDGE)
+        return SNAP_FULL;
+    return SNAP_NONE;
+}
+
 /* Mouse handling: clicks (close, buttons) and window dragging.
    Clicks take precedence over dragging; both are counted on the
    left-button press edge, so that one click = one action. */
@@ -969,6 +1028,12 @@ static void handle_input(int mx, int my, int buttons)
     }
 
     if (!pressed) {
+        /* Let go against an edge: the window takes that edge's place.
+           This has to happen before drag_idx is forgotten - it is the
+           whole of what the drag was for. */
+        if (drag_idx >= 0 && snap_hint != SNAP_NONE)
+            snap_window(drag_idx, snap_hint);
+        snap_hint = SNAP_NONE;
         drag_idx = -1;
         /* The end of a drag inside a window: the application is told
            where the pointer was let go, and that is the whole of what
@@ -1044,6 +1109,7 @@ static void handle_input(int mx, int my, int buttons)
         if (ny > video_h() - wins[drag_idx].h) ny = video_h() - wins[drag_idx].h;
         wins[drag_idx].x = nx;
         wins[drag_idx].y = ny;
+        snap_hint = snap_where(drag_idx, mx, my);
     }
 
     if (pressed && resize_idx >= 0) {   /* in progress: the bottom right corner follows the cursor */
@@ -1146,6 +1212,43 @@ static void toggle_max(int i)
         resize_content(w);             /* shrinking always has the memory */
     }
 
+    w->minimized = 0;
+    focus_idx = i;
+    raise_win(i);
+}
+
+/* Puts the window where the edge it was dragged to says. The size it
+   had before is kept the way maximising keeps it, so the [] button
+   gives the window its own size back - a window held at half the
+   screen has no more lost its size than a maximised one has. */
+static void snap_window(int i, int where)
+{
+    struct window *w = &wins[i];
+    int nx, ny, nw, nh;
+
+    snap_geom(where, &nx, &ny, &nw, &nh);
+    if (w->x == nx && w->y == ny && w->w == nw && w->h == nh)
+        return;
+
+    int ox = w->x, oy = w->y, ow = w->w, oh = w->h;
+    w->x = nx;
+    w->y = ny;
+    w->w = nw;
+    w->h = nh;
+    if (resize_content(w) < 0) {       /* no memory for that buffer */
+        w->x = ox;
+        w->y = oy;
+        w->w = ow;
+        w->h = oh;
+        return;
+    }
+    if (!w->maxed) {                   /* remember where it came from */
+        w->rx = ox;
+        w->ry = oy;
+        w->rw = ow;
+        w->rh = oh;
+    }
+    w->maxed = 1;
     w->minimized = 0;
     focus_idx = i;
     raise_win(i);
@@ -1751,6 +1854,18 @@ static void desktop_thread(void *arg)
         int n = zorder(ord);
         for (int k = 0; k < n; k++)      /* from the bottom up (Z order) */
             draw_window(&wins[ord[k]]);
+
+        /* The place a dragged window would take, drawn as an outline
+           in the accent colour: the same colour that everywhere else
+           means "this is the one". */
+        if (snap_hint != SNAP_NONE) {
+            int sx, sy, sw2, sh2;
+            snap_geom(snap_hint, &sx, &sy, &sw2, &sh2);
+            video_fill_rect(sx, sy, sw2, 2, COL_TITLE);
+            video_fill_rect(sx, sy + sh2 - 2, sw2, 2, COL_TITLE);
+            video_fill_rect(sx, sy, 2, sh2, COL_TITLE);
+            video_fill_rect(sx + sw2 - 2, sy, 2, sh2, COL_TITLE);
+        }
 
         draw_taskbar();
         draw_hint();               /* above everything, including the menu */
