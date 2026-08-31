@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: fork, exec i drzewo procesow.
+"""ProtonOS smoke test: fork, exec and the process tree.
 
-Uniksowa para fork/exec jest najciezsza czescia zarzadzania procesami,
-bo dotyka wszystkiego naraz: przestrzeni adresowej, kopiowania przy
-zapisie, tablicy deskryptorow, sygnalow i schedulera.
+The Unix fork/exec pair is the heaviest part of process management,
+because it touches everything at once: the address space, copy on write,
+the descriptor table, signals and the scheduler.
 
-Dwie asercje sa tu wazniejsze od pozostalych. Pierwsza: fork ma NIE
-kopiowac pamieci - program zajmuje 256 KiB, a przyrost RAM tuz po
-rozwidleniu ma byc rzedu tablic stron, nie bufora. Druga: wzorzec
-rodzica ma zostac nietkniety takze tam, gdzie w dziecku pisalo JADRO,
-czyli w buforze wypelnianym przez wywolanie systemowe - o to dba bit WP
-w rejestrze CR0 i latwo go przeoczyc.
+Two assertions matter more than the rest here. The first: fork is NOT to
+copy memory - the program takes 256 KiB, and the RAM growth right after
+the fork is to be of the order of page tables, not of the buffer. The
+second: the parent's pattern is to stay untouched also where it was the
+KERNEL that wrote in the child, that is, in a buffer filled in by a
+system call - that is looked after by the WP bit in the CR0 register and
+it is easy to miss.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -39,9 +40,9 @@ def main():
         q.wait_for("[siec] DHCP", timeout=20)
         time.sleep(0.5)
 
-        # 'run forktest': fork() z kopiowaniem przy zapisie. Program
-        # zajmuje 256 KiB, rozwidla sie i sprawdza, ze dziecko dostalo
-        # wzorzec rodzica, a wlasne zapisy zostaly u niego.
+        # 'run forktest': fork() with copy on write. The program takes
+        # 256 KiB, forks and checks that the child got the parent's
+        # pattern and that its own writes stayed with it.
         q.type_line("clear")
         q.type_line("mem")
         used_before_fk = pmm_used(q.screen())
@@ -63,8 +64,9 @@ def main():
         check("rodzic odbiera kod wyjscia dziecka przez wait",
               "kod dziecka=7" in screen)
 
-        # Druga polowa pary uniksowej: dziecko podmienia sie w inny
-        # program przez exec, a rodzic czeka na ten sam pid.
+        # The other half of the Unix pair: the child turns itself into
+        # another program through exec, and the parent waits for the same
+        # pid.
         screen = q.wait_for("[forktest] rodzic doczekal sie pidu", timeout=30)
         check("exec podmienia obraz procesu w miejscu",
               "[forktest] po exec: inny program, ten sam pid" in screen)
@@ -80,8 +82,9 @@ def main():
               f" ({used_before_fk} -> {used_after_fk})",
               used_after_fk is not None and used_after_fk == used_before_fk)
 
-        # 'run ptree': drzewo procesow. Trzy dzieci koncza sie w innej
-        # kolejnosci, niz powstaly, a rodzic zbiera je przez waitany.
+        # 'run ptree': the process tree. Three children finish in a
+        # different order than they were created in, and the parent
+        # collects them through waitany.
         q.type_line("clear")
         q.type_line("mem")
         used_before_pt = pmm_used(q.screen())

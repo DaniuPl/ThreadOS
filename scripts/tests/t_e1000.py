@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: karta sieciowa e1000 (Intel 82540EM).
+"""ProtonOS smoke test: the e1000 network card (Intel 82540EM).
 
-Do tej pory system mial jedna karte i widac to bylo w kazdej linii,
-ktora potrzebowala adresu MAC. Teraz nad sterownikami stoi warstwa
-netdev - to samo, co blk.c robi dla dyskow - a ktory sterownik
-odpowiedzial, jest sprawa rozruchu.
+Until now the system had one card and that could be seen in every line
+that needed a MAC address. Now above the drivers stands the netdev layer
+- the same thing blk.c does for disks - and which driver answered is a
+matter of the boot.
 
-e1000 jest zbudowana zupelnie inaczej niz RTL8139: rejestry ma
-w pamieci zamiast w portach I/O, a ruch chodzi przez dwa pierscienie
-deskryptorow zamiast jednego pierscienia bajtow. Dla ARP-a i IP nie
-ma to zadnego znaczenia i wlasnie to sprawdzamy: ten sam kod sieciowy,
-ta sama droga pakietu, inna karta pod spodem.
+The e1000 is built completely differently from the RTL8139: its
+registers are in memory instead of in I/O ports, and the traffic goes
+through two descriptor rings instead of one ring of bytes. For ARP and
+IP that means nothing at all, and that is exactly what we check: the
+same network code, the same path for a packet, a different card
+underneath.
 
-Sprawdzamy obie strony ruchu na obu jadrach - odbior bez odbioru nie
-znaczy nic, a nadawanie bez odpowiedzi nie dowodzi niczego poza tym,
-ze cos wyszlo w kabel.
+We check both directions of traffic on both kernels - receiving with no
+reception means nothing, and sending with no answer proves nothing
+beyond that something went out on the wire.
 """
 
 import os
@@ -31,7 +32,7 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    # --- Jadro 32-bitowe ---
+    # --- The 32-bit kernel ---
     print("--- karta e1000 (jadro 32-bitowe) ---")
     slog = tempfile.mktemp(suffix=".log")
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, nic="e1000")
@@ -40,8 +41,8 @@ def main():
         check("jadro znajduje karte e1000 i mowi, ktora to",
               re.search(r"Siec: e1000 ([0-9a-f]+:){5}", start) is not None)
 
-        # DHCP to pelna droga w obie strony: pytanie w rozglaszaniu,
-        # odpowiedz serwera, przyjecie dzierzawy
+        # DHCP is a full round trip: a question by broadcast, the
+        # server's answer, accepting the lease
         lease = q.wait_for("[siec] DHCP", timeout=30)
         time.sleep(0.5)
         lease = q.screen()
@@ -53,8 +54,8 @@ def main():
         check("ifconfig nazywa karte po imieniu",
               "eth0  e1000, MAC" in ifc)
 
-        # ICMP: brama slirpa odpowiada, wiec ramka naprawde wyszla
-        # i naprawde wrocila
+        # ICMP: slirp's gateway answers, so the frame really went out
+        # and really came back
         q.type_line("clear")
         q.type_line("ping 10.0.2.2")
         pong = q.wait_for("40 B od 10.0.2.2", timeout=30)
@@ -69,7 +70,7 @@ def main():
         check("tablica ARP zna adres sprzetowy bramy",
               re.search(r"10\.0\.2\.2\s+([0-9a-f]+:){5}", arp) is not None)
 
-        # TCP na hosta: najdluzsza droga, jaka ta karta ma do przebycia
+        # TCP to the host: the longest path this card has to travel
         http_port, http_stop = start_http_server()
         try:
             q.type_line("clear")
@@ -91,10 +92,11 @@ def main():
         if os.path.exists(slog):
             os.unlink(slog)
 
-    # --- Jadro 64-bitowe ---
-    # Rejestry karty leza wysoko i trzeba je dokleic do mapowania,
-    # a tablice stron buduje w kazdym z jader inny kod - to jedyna
-    # rzecz w tym sterowniku zalezna od trybu procesora
+    # --- The 64-bit kernel ---
+    # The card's registers lie high up and have to be added to the
+    # mapping, and the page tables are built by different code in each
+    # kernel - that is the only thing in this driver that depends on the
+    # processor mode
     print("--- karta e1000 (jadro 64-bitowe) ---")
     reason = no64()
     if reason:

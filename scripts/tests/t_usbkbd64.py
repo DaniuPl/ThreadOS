@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: klawiatura USB w jadrze 64-bitowym.
+"""ProtonOS smoke test: a USB keyboard in the 64-bit kernel.
 
-Maszyna nowsza niz mniej wiecej 2010 rok nie ma juz zlacza PS/2.
-Ta grupa pilnuje starszej magistrali - UHCI. Nowsza, xHCI, ma wlasna
-(t_xhci.py); wazne jest, ze WYZEJ nie widac miedzy nimi roznicy.
+A machine newer than roughly 2010 no longer has a PS/2 connector. This
+group looks after the older bus - UHCI. The newer one, xHCI, has its own
+(t_xhci.py); what matters is that HIGHER UP no difference between them
+can be seen.
 
-Sterownik UHCI i klasa HID w protokole rozruchowym to te same pliki,
-co w jadrze 32-bitowym - w trybie dlugim trzeba bylo tylko jawnie
-rzutowac adresy struktur, bo kontroler adresuje pamiec 32 bitami,
-a wskaznik ma tu osiem bajtow.
+The UHCI driver and the HID class in the boot protocol are the same
+files as in the 32-bit kernel - in long mode the only thing needed was
+explicit casts of the structures' addresses, because the controller
+addresses memory with 32 bits while a pointer here is eight bytes wide.
 
-QEMU dostaje 'usb-kbd' i kieruje do niego klawisze, wiec samo to, ze
-polecenie sie wykonuje, jest dowodem, ze przeszly cala droge: przez
-kolejke deskryptorow kontrolera, raport HID i kolejke konsoli.
+QEMU is given a 'usb-kbd' and directs keys to it, so the mere fact that
+a command runs is proof that they went the whole way: through the
+controller's descriptor queue, an HID report and the console's queue.
 """
 
 import os
@@ -58,11 +59,11 @@ def main():
             check("polecenie wpisane z klawiatury USB wykonuje sie",
                   "tyknac po" in out_text)
 
-            # Wielka litera powstaje z modyfikatora w raporcie HID.
-            # Klawiature odpytujemy piecdziesiat razy na sekunde,
-            # a QEMU trzyma klawisz okolo stu milisekund - przy zbyt
-            # szybkim nadawaniu press i release sasiednich klawiszy
-            # zachodza na siebie. Stad wolniejsze tempo i druga proba.
+            # A capital letter comes from a modifier in the HID report. We
+            # poll the keyboard fifty times a second, and QEMU holds a key
+            # for about a hundred milliseconds - with too fast a rate the
+            # press and release of neighbouring keys overlap. Hence the
+            # slower pace and a second attempt.
             def type_shifted():
                 for ch in "echo":
                     q.sendkey(ch)
@@ -81,8 +82,9 @@ def main():
                     break
             check("modyfikator Shift z raportu HID daje wielka litere", big_one)
 
-            # Alt+F2 z klawiatury USB przelacza konsole - to inna droga
-            # w jadrze niz zwykly znak (przelaczenie, nie kolejka)
+            # Alt+F2 from a USB keyboard switches the console - that is a
+            # different path inside the kernel than an ordinary character
+            # (a switch, not the queue)
             q.sendkey("alt-f2")
             time.sleep(1.0)
             second_one = q.screen_fbcon()

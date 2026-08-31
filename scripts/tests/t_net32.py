@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: siec w jadrze 32-bitowym (ARP, ICMP, UDP, DNS).
+"""ProtonOS smoke test: the network in the 32-bit kernel (ARP, ICMP,
+UDP, DNS).
 
-Wszystko tutaj rozmawia z brama slirpa (10.0.2.2) albo z serwerem
-postawionym przez sam test na hoscie, wiec zaden ze sprawdzianow nie
-zalezy od tego, czy maszyna, na ktorej to biegnie, ma internet.
+Everything here talks to slirp's gateway (10.0.2.2) or to a server the
+test itself puts up on the host, so none of the checks depends on
+whether the machine this runs on has internet.
 
-Jedna asercja nie dotyczy sieci wcale i jest tu z rozmyslem: 'ping' spi
-w watku shella przez cztery sekundy, a komenda wpisana w tym czasie ma
-czekac w buforze klawiatury i wykonac sie zaraz po nim. Dawniej shell
-dzialal w kontekscie przerwania, wiec spac nie mogl.
+One assertion is not about the network at all and is here on purpose:
+'ping' sleeps in the shell's thread for four seconds, and a command
+typed during that time is to wait in the keyboard buffer and run right
+after it. In the old days the shell ran in interrupt context, so it
+could not sleep.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -33,9 +35,9 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         q.wait_for("ProtonOS shell", timeout=40)
-        # Adres IP przychodzi z serwera DHCP slirpa juz po starcie
-        # shella - bez czekania na niego kazdy test sieciowy bylby
-        # wyscigiem z dzierzawa
+        # The IP address comes from slirp's DHCP server only after the
+        # shell has started - without waiting for it every network test
+        # would be a race with the lease
         q.wait_for("[siec] DHCP", timeout=30)
         time.sleep(0.5)
 
@@ -48,7 +50,7 @@ def main():
         check("ifconfig pokazuje serwer DNS z DHCP", "DNS 10.0.2.3" in ifc)
 
         q.type_line("ping 10.0.2.2")
-        q.type_line("dns 10.0.2.3")     # pisanie na zapas w trakcie pinga
+        q.type_line("dns 10.0.2.3")     # typing ahead during the ping
         pong = q.wait_for("40 B od 10.0.2.2: seq=1", timeout=20)
         check("ping: odpowiedz ICMP echo od bramy",
               "40 B od 10.0.2.2" in pong)
@@ -63,8 +65,8 @@ def main():
         check("tablica ARP zna MAC bramy",
               "10.0.2.2" in q.wait_for("10.0.2.2  "))
 
-        # Gniazda UDP w ring 3: dwa procesy gadaja przez petle zwrotna,
-        # wiec test nie zalezy od zadnej sieci na zewnatrz
+        # UDP sockets in ring 3: two processes talk through the loopback,
+        # so the test does not depend on any network outside
         q.type_line("run udpecho")
         view = q.wait_for("nasluchuje na porcie 7777", timeout=10)
         check("proces ring 3 otworzyl gniazdo UDP",
@@ -79,10 +81,11 @@ def main():
         check("klient zakonczyl sie bez bledu",
               "proces 'udptest' zakonczyl sie (kod 0)" in echo)
 
-        # Gniazdo ma wlasciciela: po smierci procesu port musi sie zwolnic
+        # A socket has an owner: after the process dies the port has to be
+        # freed
         q.type_line("kill udpecho")
         time.sleep(0.5)
-        q.type_line("clear")          # czysty ekran: stare "nasluchuje" znika
+        q.type_line("clear")          # a clear screen: the old "nasluchuje" disappears
         q.type_line("run udpecho")
         again = q.wait_for("porcie 7777", timeout=10)
         check("port zwolniony po smierci wlasciciela gniazda",
@@ -90,8 +93,9 @@ def main():
               and "nie udalo sie otworzyc gniazda" not in again)
         q.type_line("kill udpecho")
 
-        # DNS z ring 3. Pytamy wlasny serwer stojacy na hoscie (10.0.2.2),
-        # wiec test nie zalezy od internetu ani od resolvera maszyny.
+        # DNS from ring 3. We ask our own server standing on the host
+        # (10.0.2.2), so the test depends neither on the internet nor on
+        # the machine's resolver.
         dns_stop = start_dns_server()
         try:
             q.type_line("clear")
@@ -106,8 +110,9 @@ def main():
 
         q.type_line("ifconfig")
         ifc = q.wait_for("RX ")
-        # Na ekranie wisi tez wyjscie poprzedniego 'ifconfig' (sprzed
-        # pinga) - liczy sie ostatnie, najswiezsze wystapienie
+        # The output of the previous 'ifconfig' (from before the ping)
+        # hangs on the screen too - what counts is the last, freshest
+        # occurrence
         rx = re.findall(r"RX (\d+) pakietow, TX (\d+) pakietow", ifc)
         check(f"licznik pakietow RX/TX rosnie"
               f" (ostatni: {rx[-1] if rx else None})",

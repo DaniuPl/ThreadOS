@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: system plikow PFS na dysku.
+"""ProtonOS smoke test: the PFS file system on the disk.
 
-Plik zapisany przez proces pierscienia 3 i plik zapisany z shella jadra
-maja byc tym samym plikiem widzianym przez oba - i oba maja przetrwac
-restart maszyny. To ostatnie jest tu najwazniejsze: wszystko inne da
-sie podrobic pamiecia podreczna, a DRUGI ROZRUCH na tym samym obrazie
-dysku juz nie.
+A file written by a ring 3 process and a file written from the kernel's
+shell are to be the same file seen by both - and both are to survive a
+restart of the machine. That last part matters most here: everything
+else can be faked with a cache, and a SECOND BOOT on the same disk image
+cannot.
 
-Na koniec pierwszego rozruchu wolamy 'crash', czyli umyslny blad
-strony w jadrze. Diagnostyka ma podac numer wyjatku i adres z CR2,
-a system ma sie zatrzymac zamiast brnac dalej.
+At the end of the first boot we call 'crash', that is, a deliberate page
+fault in the kernel. The diagnostic is to give the exception number and
+the address from CR2, and the system is to stop rather than blunder on.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -34,14 +34,14 @@ def main():
     try:
         q.wait_for("ProtonOS shell", timeout=40)
 
-        # --- System plikow na dysku (PFS) ---
-        # Proces ring 3 pisze i czyta plik syscallami
+        # --- The file system on the disk (PFS) ---
+        # A ring 3 process writes and reads a file with syscalls
         q.type_line("run fileio")
         screen = q.wait_for("[fileio] OK")
         check("proces ring3 zapisal i odczytal plik z dysku",
               "odczytano z dysku: plik zapisany przez proces ring3" in screen)
 
-        # Shell jadra: write -> cat (zapis i odczyt w obrebie jednego boota)
+        # The kernel's shell: write -> cat (a write and a read within one boot)
         q.type_line("write greeting witaj-z-dysku-pfs")
         check("zapis pliku z shella jadra",
               "zapisano" in q.wait_for("zapisano"))
@@ -49,20 +49,21 @@ def main():
         check("odczyt zapisanego pliku (cat)",
               "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs"))
 
-        # fls pokazuje oba pliki
+        # fls shows both files
         q.type_line("fls")
         screen = q.wait_for("Katalog glowny")
         check("fls listuje pliki na dysku",
               "greeting" in screen and "ring3.txt" in screen)
 
-        # cat nieistniejacego pliku
+        # cat of a file that does not exist
         q.type_line("cat niema")
         check("cat zglasza brak pliku",
               "brak pliku 'niema'" in q.wait_for("brak pliku"))
 
-        # Program 'cat' w ring 3: czyta plik przez fd, pisze na fd 1
-        # (zunifikowany model I/O: read pliku -> write na konsole).
-        # Czyscimy ekran, by nie zlapac starego echa 'witaj-z-dysku-pfs'.
+        # The 'cat' program in ring 3: it reads a file through an fd and
+        # writes to fd 1 (a unified I/O model: read the file -> write to
+        # the console). We clear the screen so as not to catch the old
+        # echo of 'witaj-z-dysku-pfs'.
         q.type_line("clear")
         time.sleep(0.3)
         q.type_line("run cat greeting")
@@ -70,7 +71,7 @@ def main():
               "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs",
                                                 timeout=20))
 
-        # Na koncu: crash powinien wywolac page fault z diagnostyka
+        # At the end: crash should cause a page fault with a diagnostic
         q.type_line("crash")
         screen = q.screen()
         check("page fault obsluzony (wyjatek 14)",
@@ -81,7 +82,7 @@ def main():
     finally:
         q.close()
 
-    # --- Persystencja: drugi boot na TYM SAMYM dysku ---
+    # --- Persistence: a second boot on THE SAME disk ---
     print("--- drugi boot (ten sam dysk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:

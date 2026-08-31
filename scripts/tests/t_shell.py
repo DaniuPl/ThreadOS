@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: komendy shella jadra.
+"""ProtonOS smoke test: the kernel shell's commands.
 
-Shell jadra jest jedynym wejsciem do systemu, dopoki nie ruszy ush
-w pierscieniu 3 - i pierwszym, ktore przestaje dzialac, gdy cos sie
-zepsuje glebiej. Sprawdzamy, ze wypisuje to, co ma, i ze liczby, ktore
-pokazuje, zgadzaja sie z rzeczywistoscia.
+The kernel's shell is the only way into the system until ush starts in
+ring 3 - and the first thing to stop working when something breaks
+deeper down. We check that it prints what it should and that the numbers
+it shows agree with reality.
 
-Najmocniejsza asercja jest tu ta o pamieci zarzadzanej: mapowanie
-identycznosciowe ma siegac az po szczyt wykrytego RAM-u, a nie po
-pierwsze 64 MiB.
+The strongest assertion here is the one about managed memory: the
+identity mapping is to reach all the way to the top of the detected RAM,
+not to the first 64 MiB.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -34,8 +34,8 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
         q.wait_for("ProtonOS shell")
-        # Komunikat DHCP wchodzi w srodek pisanej linii, wiec czekamy
-        # na niego, zanim zaczniemy pisac
+        # The DHCP message falls into the middle of a line being typed, so
+        # we wait for it before we start typing
         q.wait_for("[siec] DHCP", timeout=20)
         time.sleep(0.5)
 
@@ -49,9 +49,9 @@ def main():
         check("komenda 'mem' pokazuje RAM i ramki",
               "RAM wykryty" in screen and "ramek 4 KiB" in screen)
         check("komenda 'mem' pokazuje sterte", "sterta jadra" in screen)
-        # Cala wykryta pamiec jest pod zarzadem, nie tylko pierwsze
-        # 64 MiB: mapowanie identycznosciowe ciagnie sie az po szczyt
-        # RAM-u.
+        # All the detected memory is under management, not only the first
+        # 64 MiB: the identity mapping stretches all the way to the top of
+        # the RAM.
         mm = re.search(r"zarzadzane (\d+) MiB", screen)
         ram = re.search(r"RAM wykryty:\s+(\d+) KiB", screen)
         check("zarzadzana pamiec siega szczytu wykrytego RAM-u"
@@ -76,12 +76,12 @@ def main():
               "RODZIC" in screen
               and re.search(r"\n  0   -", screen) is not None)
 
-        # initrd: 'ls' pokazuje spakowane programy. Plikow jest wiecej,
-        # niz miesci sie na ekranie, wiec wczesne sie przewijaja -
-        # i przewija ich sie tym wiecej, im wiecej programow przybywa.
-        # Pytamy wiec o KSZTALT listy, a nie o konkretne nazwy: kazdy
-        # wiersz to nazwa i niezerowy rozmiar, wierszy jest kilkanascie,
-        # a wsrod nich znajome programy.
+        # initrd: 'ls' shows the packed programs. There are more files than
+        # fit on the screen, so the early ones scroll away - and the more
+        # programs are added, the more of them scroll. So we ask about the
+        # SHAPE of the list rather than about particular names: every line
+        # is a name and a non-zero size, there are a dozen or so lines, and
+        # among them familiar programs.
         q.type_line("ls")
         screen = q.screen()
         entries = re.findall(r"(\w+)\s+\((\d+) B\)", screen)

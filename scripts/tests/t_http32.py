@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: TCP i HTTP w jadrze 32-bitowym.
+"""ProtonOS smoke test: TCP and HTTP in the 32-bit kernel.
 
-Po drugiej stronie stoi prawdziwy stos - serwer HTTP w Pythonie na
-hoscie - a nie nasza wlasna petla zwrotna. Klient musi wiec dogadac sie
-z czyms, czego nie pisalismy: uzgodnic polaczenie, przeczytac
-odpowiedz, pojsc za przekierowaniem 302 i zlozyc tresc nadana
-w kawalkach.
+On the other side stands a real stack - an HTTP server in Python on the
+host - and not a loopback of our own. So the client has to reach
+agreement with something we did not write: negotiate a connection, read
+the response, follow a 302 redirect and assemble a body sent in pieces.
 
-Druga rzecz, o ktora tu chodzi, to droga siec -> dysk. Pobrane pliki
-lądują na PFS, a ich rozmiary sa dobrane tak, zeby przejsc przez
-wszystkie trzy poziomy adresowania i-wezla: zwykly, posredni
-i podwojnie posredni. Na koniec maszyna wstaje drugi raz na tym samym
-dysku - najwiekszy plik ma po restarcie miec pelny rozmiar.
+The second thing this is about is the path network -> disk. The files
+fetched land on PFS, and their sizes are chosen so as to go through all
+three levels of an inode's addressing: direct, indirect and doubly
+indirect. At the end the machine comes up a second time on the same
+disk - the largest file is to have its full size after the restart.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -51,7 +50,7 @@ def main():
             check("httpget zakonczyl sie bez bledu",
                   "proces 'httpget' zakonczyl sie (kod 0)" in page)
 
-            # Siec -> dysk: tresc HTTP zapisana na PFS i odczytana z niego
+            # Network -> disk: an HTTP body written to PFS and read back from it
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d / strona.htm" % http_port)
             q.wait_for("tresc ", timeout=30)
@@ -62,11 +61,11 @@ def main():
             check("do pliku poszla sama tresc, bez naglowkow HTTP",
                   "Content-Length" not in saved)
 
-            # PFS3: plik grubo ponad stary limit 16 KiB na plik
+            # PFS3: a file well above the old limit of 16 KiB per file
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /duza duza.htm" % http_port)
             big = q.wait_for("tresc ", timeout=90)
-            # httpget podaje dlugosc samej tresci (bez naglowkow)
+            # httpget gives the length of the body alone (without the headers)
             got = re.search(r"tresc (\d+) B", big)
             check("duza strona pobrana w calosci (%d B tresci)"
                   % len(BIG_PAGE),
@@ -80,8 +79,8 @@ def main():
             check("df pokazuje zajetosc dysku w blokach",
                   "bloki po 1024 B" in usage and "zajete" in usage)
 
-            # Plik ponad dawny sufit 268 KiB: dane trafiaja do bloku
-            # podwojnie posredniego, a potem czytamy je z powrotem
+            # A file above the old ceiling of 268 KiB: the data reach the
+            # doubly indirect block, and then we read them back
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /ogromna ogromna.htm"
                         % http_port)
@@ -104,8 +103,8 @@ def main():
             q.type_line("exit")
             q.wait_for("ush: pa!", timeout=20)
 
-            # HTTP/1.1: przekierowanie 302 i tresc w kawalkach (chunked) -
-            # tak odpowiada wiekszosc prawdziwych serwerow
+            # HTTP/1.1: a 302 redirect and a body in pieces (chunked) - that
+            # is how most real servers answer
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /stara" % http_port)
             hop = q.wait_for("tresc ", timeout=30)
@@ -124,8 +123,9 @@ def main():
     finally:
         q.close()
 
-    # Duzy plik ma przetrwac restart z pelnym rozmiarem: jego i-wezel
-    # siega bloku posredniego, a bitmapa zajetosci wraca z dysku
+    # The large file is to survive a restart with its full size: its inode
+    # reaches into an indirect block, and the allocation bitmap comes back
+    # from the disk
     print("--- drugi boot (ten sam dysk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
