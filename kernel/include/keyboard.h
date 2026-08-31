@@ -18,6 +18,13 @@
    where there is no desktop, nothing reads it. */
 #define KEY_NEXTWIN 0x19
 
+/* The clipboard, from the keyboard: Ctrl+Insert copies what is being
+   typed, Shift+Insert pastes it. The oldest pair of keys for it, and
+   the one that does not collide with Ctrl+C - which here means 'stop
+   that program' and nothing else. */
+#define KEY_COPY  0x1A
+#define KEY_PASTE 0x1B
+
 /* Ctrl+C: not a character but a request to interrupt. The driver turns
    it into a SIGINT for the process holding the console (see keyboard.c). */
 #define KEY_INTR  0x03

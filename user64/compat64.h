@@ -79,6 +79,21 @@ static inline int32_t sys_level(void)
     return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
 }
 
+/* The clipboard - the same two calls as in protected mode */
+#define CLIP_MAX 512
+
+static inline int32_t sys_clip_set(const char *text, uint32_t len)
+{
+    return (int32_t)syscall64(SYS64_CLIP_SET, (int64_t)(uintptr_t)text,
+                              (int64_t)len);
+}
+
+static inline int32_t sys_clip_get(char *out, uint32_t max)
+{
+    return (int32_t)syscall64(SYS64_CLIP_GET, (int64_t)(uintptr_t)out,
+                              (int64_t)max);
+}
+
 /* Where the next read from that file starts */
 static inline int32_t sys_seek(int fd, uint32_t pos)
 {

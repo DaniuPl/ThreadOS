@@ -16,6 +16,8 @@
 #include "shell64.h"
 #include "keyboard64.h"
 #include "../kernel/include/user.h"
+#include "../kernel/include/clip.h"
+#include "../kernel/include/keyboard.h"
 #include "task64.h"
 #include "paging64.h"
 #include "elf64.h"
@@ -883,6 +885,19 @@ static void shell_thread(void *arg)
             if (line_len) {
                 line_len--;
                 printk("\b");
+            }
+        } else if (c == KEY_COPY) {
+            /* The clipboard is the system's, not one window's */
+            if (line_len)
+                clip_set(line, (uint32_t)line_len);
+        } else if (c == KEY_PASTE) {
+            char got[CLIP_MAX + 1];
+            uint32_t n = clip_get(got, sizeof(got));
+            for (uint32_t i = 0; i < n && line_len < LINE_MAX - 1; i++) {
+                if (got[i] < ' ' || got[i] > 0x7E)
+                    continue;
+                line[line_len++] = got[i];
+                printk("%c", got[i]);
             }
         } else if (c >= ' ' && c < 0x7F && line_len < LINE_MAX - 1) {
             line[line_len++] = c;

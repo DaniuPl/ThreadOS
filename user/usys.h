@@ -60,6 +60,8 @@
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
+#define SYS_CLIP_SET   56
+#define SYS_CLIP_GET   57
 
 #define FS_NAME_MAX  63
 
@@ -648,6 +650,33 @@ static inline int32_t sys_level(void)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_LEVEL) : "memory");
+    return ret;
+}
+
+/* The clipboard - the one place text waits between two windows.
+ *
+ * Neither program may touch the other's memory and neither knows the
+ * other exists, so what they share is the kernel's. Text and nothing
+ * else, at most 512 bytes of it. */
+#define CLIP_MAX 512
+
+static inline int32_t sys_clip_set(const char *text, uint32_t len)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_CLIP_SET), "b"(text), "c"(len)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_clip_get(char *out, uint32_t max)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_CLIP_GET), "b"(out), "c"(max)
+                     : "memory");
     return ret;
 }
 

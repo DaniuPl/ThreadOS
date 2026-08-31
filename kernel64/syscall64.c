@@ -16,6 +16,7 @@
 #include "syscall64.h"
 #include "../kernel/include/smp.h"
 #include "../kernel/include/user.h"
+#include "../kernel/include/clip.h"
 #include "../kernel/include/config.h"
 #include "../kernel/include/biglock.h"
 #include "gdt64.h"
@@ -760,6 +761,24 @@ static void handle(struct regs *r)
     case SYS64_LEVEL:
         r->rax = (uint64_t)(int64_t)task64_level();
         return;
+    case SYS64_CLIP_SET: {
+        uint64_t len = a2 > CLIP_MAX ? CLIP_MAX : a2;
+        if (len && !paging64_user_range(a1, len)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = clip_set((const char *)(uintptr_t)a1, (uint32_t)len);
+        return;
+    }
+    case SYS64_CLIP_GET: {
+        uint64_t max = a2 > CLIP_MAX + 1 ? CLIP_MAX + 1 : a2;
+        if (!max || !paging64_user_range(a1, max)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = clip_get((char *)(uintptr_t)a1, (uint32_t)max);
+        return;
+    }
     case SYS64_SEEK:
         r->rax = (uint64_t)(int64_t)task64_fd_seek((int)a1, (uint32_t)a2);
         return;

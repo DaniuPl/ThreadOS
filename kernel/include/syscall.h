@@ -71,6 +71,10 @@
    whose write end comes back as a descriptor of ours - closing it is
    how the program is told there will be no more input. -> pid */
 #define SYS_SPAWN_TALK 55
+/* The clipboard: ebx=text, ecx=length -> how much was taken;
+   and ebx=buffer, ecx=size -> how much is there */
+#define SYS_CLIP_SET   56
+#define SYS_CLIP_GET   57
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

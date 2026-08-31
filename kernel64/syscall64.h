@@ -88,6 +88,10 @@
 /* Where in the file the next read starts: a1=fd, a2=position */
 #define SYS64_SEEK      49
 
+/* The clipboard: a1=text, a2=length -> taken; a1=buffer, a2=size -> length */
+#define SYS64_CLIP_SET  50
+#define SYS64_CLIP_GET  51
+
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1

@@ -25,6 +25,7 @@
 #include "include/isr.h"
 #include "include/config.h"
 #include "include/user.h"
+#include "include/clip.h"
 #include "include/smpmem.h"
 #include "include/smpthreads.h"
 #include "include/pit.h"
@@ -802,6 +803,24 @@ static void shell_handle_char(struct shell *sh, char c)
         if (sh->line_len > 0) {
             sh->line_len--;
             printk("\b");
+        }
+        return;
+    }
+    /* The clipboard is the system's, not one window's - so the console
+       reaches it with the same two keys as everything else. */
+    if (c == KEY_COPY) {
+        if (sh->line_len)
+            clip_set(sh->line, (uint32_t)sh->line_len);
+        return;
+    }
+    if (c == KEY_PASTE) {
+        char got[CLIP_MAX + 1];
+        uint32_t n = clip_get(got, sizeof(got));
+        for (uint32_t i = 0; i < n && sh->line_len < LINE_MAX - 1; i++) {
+            if (got[i] < 0x20 || got[i] > 0x7E)
+                continue;               /* one line, so no newlines */
+            sh->line[sh->line_len++] = got[i];
+            printk("%c", got[i]);
         }
         return;
     }

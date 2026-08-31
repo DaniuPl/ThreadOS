@@ -2869,3 +2869,32 @@ sprawdzane przez `make test`.
       wewnatrz terminala pisze do tego samego okna, a Ctrl+D konczy
       calosc. Nowa grupa 'gtermsh'; ta sama droga w trybie dlugim
       dopisana do 'gterm64'.
+
+- [x] **Schowek** - tekst, ktory przechodzi z okna do okna.
+
+      Kopiowanie i wklejanie to najprostsza rzecz, jaka dwa programy
+      robia razem - i jedyna, ktorej nie zrobia same: zaden nie moze
+      dotknac pamieci drugiego i zaden nie wie, ze ten drugi istnieje.
+      Wiec tekst musi czekac w miejscu nalezacym do obu, czyli w jadrze.
+
+      Piecset dwanascie bajtow tekstu i dwa wywolania systemowe, w obu
+      jadrach. Bez formatow, bez wlascicieli, bez negocjowania, co
+      znaczy zaznaczenie - tyle wystarcza, zeby nazwe wpisana w
+      terminalu wkleic do okna ustawien, a wszystko ponad to byloby
+      protokolem, ktorego tu jeszcze nikt nie potrzebuje.
+
+      Klawisze najstarsze z mozliwych: Ctrl+Insert kopiuje, Shift+Insert
+      wkleja. Nie Ctrl+C - w terminalu Ctrl+C znaczy "zatrzymaj ten
+      program" i nic innego. Insert jest jedynym klawiszem rozszerzonym,
+      ktorego znaczenie zalezy od tego, co jest wcisniete razem z nim,
+      wiec rozstrzyga sie to tam, gdzie ten stan jest znany - w
+      kbdmap.c, wspolnym dla obu jader.
+
+      Siega po niego terminal, okno ustawien i OBA shelle jadra: schowek
+      nalezy do systemu, a nie do jednego okna. Widac to najlepiej na
+      konsolach tekstowych - linia skopiowana na pierwszej wkleja sie na
+      drugiej, ktora ma wlasny bufor i wlasny shell.
+
+      Nowa grupa 'clip'. Najwazniejsza asercja jest ta ostatnia: okno, z
+      ktorego tekst pochodzil, zostaje ZAMKNIETE, a tekst dalej sie
+      wkleja - bo nigdy nie byl tego okna.

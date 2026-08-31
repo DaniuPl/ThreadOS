@@ -221,6 +221,25 @@ void _start(void)
                     }
                     continue;
                 }
+                if (c == 0x1A) {           /* Ctrl+Insert: copy */
+                    edit[elen] = 0;
+                    if (elen)
+                        sys_clip_set(edit, (uint32_t)elen);
+                    continue;
+                }
+                if (c == 0x1B) {           /* Shift+Insert: paste */
+                    char got[CLIP_MAX + 1];
+                    int n = (int)sys_clip_get(got, sizeof(got));
+                    for (int i = 0; i < n &&
+                                    elen < (int)sizeof(edit) - 1; i++) {
+                        if (got[i] < 0x20 || got[i] > 0x7E)
+                            continue;
+                        edit[elen++] = got[i];
+                    }
+                    edit[elen] = 0;
+                    saved = 0;
+                    continue;
+                }
                 if (c == '\n' || c == '\r') {
                     save_all();
                 } else if (c == '\b') {

@@ -775,6 +775,32 @@ static void on_key(char c)
         run_line();
         return;
     }
+    /* The clipboard. Ctrl+Insert takes the line being typed, and
+       Shift+Insert puts what is there into it - at the cursor, like
+       any other typing. The text goes through the kernel, so the
+       other end of it can be any other window. */
+    if (c == 0x1A) {                    /* KEY_COPY */
+        input[ilen] = 0;
+        if (ilen)
+            sys_clip_set(input, (uint32_t)ilen);
+        return;
+    }
+    if (c == 0x1B) {                    /* KEY_PASTE */
+        char got[CLIP_MAX + 1];
+        int n = (int)sys_clip_get(got, sizeof(got));
+        for (int i = 0; i < n && ilen < LINE_MAX - 1; i++) {
+            char ch = got[i];
+            if (ch < 0x20 || ch > 0x7E)
+                continue;               /* one line, so no newlines */
+            for (int k = ilen; k > icur; k--)
+                input[k] = input[k - 1];
+            input[icur++] = ch;
+            ilen++;
+        }
+        input[ilen] = 0;
+        view = 0;
+        return;
+    }
     /* Ctrl+D: no more input. The pipe closes and whoever was reading
        sees the end of it - which for a shell means 'that is all'. */
     if (c == 0x04) {

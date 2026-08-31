@@ -40,8 +40,22 @@ static const char keymap_shift[128] = {
 };
 
 /* An extended scancode (after 0xE0) -> our control code */
+/* Insert is the only extended key whose meaning depends on what is
+   held down with it, so it is decided where the state is known. */
+static char extended_key(uint8_t scancode);
+
+static int shift_pressed;
+static int ctrl_pressed;
+
 static char extended_key(uint8_t scancode)
 {
+    if (scancode == 0x52) {              /* Insert */
+        if (ctrl_pressed)
+            return KEY_COPY;
+        if (shift_pressed)
+            return KEY_PASTE;
+        return 0;                        /* plain Insert: nothing yet */
+    }
     switch (scancode) {
     case 0x48: return KEY_UP;
     case 0x50: return KEY_DOWN;
@@ -55,8 +69,6 @@ static char extended_key(uint8_t scancode)
     }
 }
 
-static int shift_pressed;
-static int ctrl_pressed;
 static int alt_pressed;
 static int extended_next;               /* the previous byte was 0xE0 */
 

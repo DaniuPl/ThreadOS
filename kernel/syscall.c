@@ -20,6 +20,7 @@
 #include "include/smp.h"
 #include "include/config.h"
 #include "include/user.h"
+#include "include/clip.h"
 #include "include/isr.h"
 #include "include/task.h"
 #include "include/pit.h"
@@ -529,6 +530,30 @@ void syscall_handler(struct regs *r)
             break;
         }
         r->eax = (uint32_t)pid;
+        break;
+    }
+    /* --- the clipboard: text waiting between two windows --------- */
+    case SYS_CLIP_SET: {
+        uint32_t len = r->ecx > CLIP_MAX ? CLIP_MAX : r->ecx;
+        char buf[CLIP_MAX];
+        if (len && !user_ok(r->ebx, len)) {
+            r->eax = EFAULT;
+            break;
+        }
+        for (uint32_t i = 0; i < len; i++)
+            buf[i] = ((const char *)r->ebx)[i];
+        r->eax = clip_set(buf, len);
+        break;
+    }
+    case SYS_CLIP_GET: {
+        uint32_t max = r->ecx > CLIP_MAX + 1 ? CLIP_MAX + 1 : r->ecx;
+        char buf[CLIP_MAX + 1];
+        uint32_t n = clip_get(buf, max);
+        if (max && user_put(r->ebx, buf, n + 1) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = n;
         break;
     }
     case SYS_TRYWAIT: {
