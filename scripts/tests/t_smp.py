@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: wykrycie i wybudzenie pozostalych procesorow.
+"""ProtonOS smoke test: detecting and waking the remaining processors.
 
-Po wlaczeniu zasilania pracuje jeden rdzen - ten, ktory firmware
-wybral na rozruchowy. Reszta stoi i czeka na sygnal, i to jest decyzja
-sprzetu, nie systemu: procesor obudzony sygnalem SIPI zaczyna w trybie
-rzeczywistym, szesnastobitowo, pod adresem (wektor << 12) - dokladnie
-tak, jak zaczynal pecet czterdziesci lat temu.
+After power on one core works - the one the firmware chose as the
+bootstrap. The rest stand and wait for a signal, and that is the
+hardware's decision, not the system's: a processor woken by a SIPI
+signal starts in real mode, sixteen bits wide, at the address
+(vector << 12) - exactly the way a PC started forty years ago.
 
-To jest pierwszy krok, nie caly SMP. Obudzony rdzen przechodzi wlasna
-droga do trybu chronionego, zglasza sie i staje. Dawanie mu pracy
-wymaga schedulera per rdzen i zamkow w kazdej strukturze jadra, a te
-pisane byly dla jednego rdzenia i cicho na to licza.
+This is the first step, not the whole of SMP. A woken core walks its own
+road to protected mode, reports in and stands by. Giving it work needs a
+per-core scheduler and locks in every kernel structure, and those were
+written for a single core and quietly count on it.
 
-Rdzenie wtorne nie prowadza wlasnych zadan - scheduler i lista
-procesow pisane byly dla jednego rdzenia. Dostaja za to prace
-policzalna: wspolna kolejke jednostek, z ktorej kazdy bierze kolejny
-numer pod zamkiem. To jest caly stan dzielony miedzy rdzeniami - jedna
-liczba i jeden zamek.
+The secondary cores do not run tasks of their own - the scheduler and
+the process list were written for a single core. What they do get is
+countable work: a shared queue of items, from which each takes the next
+number under a lock. That is all the state shared between the cores -
+one number and one lock.
 
-Wlasciwe pytanie o wspolbieznosc nie brzmi "czy cos sie policzylo",
-tylko "czy policzylo sie DOKLADNIE RAZ kazde". Dlatego wynik pracy
-rozdzielonej porownujemy z policzonym na jednym rdzeniu: zgadza sie
-tylko wtedy, gdy zadna jednostka nie przepadla ani nie zostala
-policzona dwa razy, i nikt nie zadeptal cudzej komorki.
+The right question to ask about concurrency is not "did anything get
+computed", but "was every item computed EXACTLY ONCE". That is why we
+compare the result of the distributed work with the one computed on a
+single core: it matches only when no item was lost or counted twice, and
+nobody trampled somebody else's cell.
 
-Test sprawdza tez, ze system po tym wszystkim dziala dokladnie tak
-samo. Samo "widze cztery procesory" nie byloby nic warte, gdyby przy
-okazji cos w systemie pekalo.
+The test also checks that the system works exactly the same after all
+this. "I see four processors" by itself would be worth nothing if
+something in the system broke along the way.
 """
 
 import os
@@ -43,11 +43,11 @@ from ptest import check, summary, make_iso64, no64
 
 
 def values(text, label):
-    """Liczby z JEDNEGO wiersza wypisu 'smp'.
+    """The numbers from ONE line of the 'smp' output.
 
-    Komenda podaje teraz dwa wiersze w tym samym ksztalcie - udzial
-    w pracy i tykniecia wlasnych zegarow - wiec szukanie 'rdzenN=' po
-    calym tekscie zlepialoby jedno z drugim."""
+    The command now gives two lines of the same shape - the share of the
+    work and the ticks of the cores' own clocks - so looking for
+    'rdzenN=' across the whole text would glue one to the other."""
     for w in text.replace("\r", "").split("\n"):
         if w.startswith(label):
             return [int(x) for x in re.findall(r"rdzen\d+=(\d+)", w)]
@@ -57,7 +57,7 @@ def values(text, label):
 def main():
     print("--- pozostale procesory (INIT-SIPI) ---")
 
-    # --- Cztery rdzenie ---
+    # --- Four cores ---
     slog = tempfile.mktemp(suffix=".log")
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
@@ -74,7 +74,7 @@ def main():
         q.wait_for("ProtonOS shell", timeout=30)
         q.wait_for("[siec] DHCP", timeout=30)
 
-        # System po obudzeniu rdzeni ma dzialac jak dotad
+        # After waking the cores the system is to work as it did before
         up1 = q.command("uptime", "tyknac timera")
         check("timer tyka po obudzeniu pozostalych rdzeni",
               "tyknac timera" in up1)
@@ -88,8 +88,8 @@ def main():
         read_res = q.command("cat smptest", "wielordzeniowo")
         check("i oddaje to, co zapisano", "wielordzeniowo" in read_res)
 
-        # Praca rozdzielona na rdzenie: wynik ma sie zgadzac co do bitu
-        # z policzonym na jednym rdzeniu
+        # The work distributed across the cores: the result is to match bit
+        # for bit the one computed on a single core
         work = q.command("smp", "Liczylo rdzeni", timeout=90)
         check("wynik pracy rozdzielonej zgadza sie z jednordzeniowym",
               "zgadza sie" in work and "NIE ZGADZA SIE" not in work)
@@ -98,21 +98,22 @@ def main():
         check("prace liczylo kilka rdzeni naraz",
               m is not None and int(m.group(1)) >= 2)
 
-        # Ile rdzeni naprawde wzielo prace. Nie zadamy, zeby wzial ja
-        # KAZDY: rdzen bezczynny stoi na instrukcji hlt i budzi go
-        # dopiero przerwanie, a jak szybko dojdzie, zalezy od maszyny
-        # wirtualnej pod spodem. To wyscig, a wyscigi nie sa asercjami.
+        # How many cores really took work. We do not demand that EVERY
+        # one took it: an idle core stands on a hlt instruction and is
+        # woken only by an interrupt, and how quickly that arrives
+        # depends on the virtual machine underneath. That is a race, and
+        # races are not assertions.
         shares = values(work, "Udzial:")
         check("prace wzielo wiecej niz jeden rdzen (%s)" % shares,
               len(shares) == 4 and sum(1 for u in shares if u) >= 2)
         check("razem policzono dokladnie tyle jednostek, ile zlecono",
               sum(shares) == 64)
 
-        # --- Wlasny zegar kazdego rdzenia -------------------------
-        # Rdzen wtorny nie moze korzystac z PIT: to przerwanie idzie
-        # przez kontroler PIC do JEDNEGO procesora. Ma za to wlasny
-        # zegar w lokalnym APIC - i dopiero on daje mu przerwania,
-        # bez ktorych nigdy nie dalby sie wywlaszczyc.
+        # --- Every core's own clock -------------------------------
+        # A secondary core cannot use the PIT: that interrupt goes
+        # through the PIC to ONE processor. What it does have is its own
+        # clock in the local APIC - and only that gives it the
+        # interrupts without which it could never be preempted.
         clocks = values(work, "Zegary rdzeni:")
         check("kazdy rdzen wtorny ma wlasny zegar, ktory tyka (%s)"
               % clocks,
@@ -120,7 +121,7 @@ def main():
         check("rdzen rozruchowy chodzi z PIT, nie z APIC",
               len(clocks) == 4 and clocks[0] == 0)
 
-        # Jedno odczytanie niczego nie dowodzi - liczniki maja ROSNAC
+        # A single reading proves nothing - the counters are to GROW
         time.sleep(1.5)
         again = values(q.command("smp", "Zegary rdzeni", timeout=90),
                          "Zegary rdzeni:")
@@ -129,7 +130,7 @@ def main():
               len(again) == 4 and
               all(again[i] > clocks[i] for i in range(1, 4)))
 
-        # Liczniki watkow rosna dalej - scheduler nie stanal
+        # The threads' counters keep growing - the scheduler did not stop
         def counter():
             m = re.findall(r"watek-A: (\d+)", q.screen())
             return int(m[-1]) if m else None
@@ -145,11 +146,11 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    # --- Tryb dlugi ---
-    # Rdzen wtorny startuje w trybie rzeczywistym takze wtedy, gdy
-    # reszta systemu pracuje od dawna 64-bitowo: musi przejsc sam cala
-    # droge, szesnascie bitow -> trzydziesci dwa -> szescdziesiat
-    # cztery. Tablice stron bierze gotowe, te same, co jadro.
+    # --- Long mode ---
+    # A secondary core starts in real mode even when the rest of the
+    # system has long been running in 64 bits: it has to walk the whole
+    # road itself, sixteen bits -> thirty-two -> sixty-four. It takes the
+    # page tables ready-made, the same ones the kernel uses.
     print("--- pozostale procesory w trybie dlugim ---")
     reason = no64()
     if reason:
@@ -186,15 +187,15 @@ def main():
                     check("prace liczylo kilka rdzeni naraz (tryb dlugi)",
                           m2 is not None and int(m2.group(1)) >= 2)
 
-                    # Wlasny zegar rdzenia w trybie dlugim.
+                    # The core's own clock in long mode.
                     #
-                    # Kosztowal osobny blad i to taki, ktorego nie widac
-                    # z boku: rdzen wtorny nie wlaczal sobie w EFER bitu
-                    # zakazu wykonywania. Jadro mapuje tym bitem rejestry
-                    # sprzetu, a bez NXE bit 63 wpisu tablicy stron jest
-                    # ZAREZERWOWANY - wiec pierwsze siegniecie po lokalny
-                    # APIC konczylo sie bledem strony i cichym zgonem
-                    # calej maszyny.
+                    # It cost a separate bug, and one that cannot be seen
+                    # from the side: a secondary core did not enable the
+                    # no-execute bit in EFER for itself. The kernel maps
+                    # hardware registers with that bit, and without NXE
+                    # bit 63 of a page table entry is RESERVED - so the
+                    # first reach for the local APIC ended in a page
+                    # fault and the quiet death of the whole machine.
                     clock = values(work, "Zegary rdzeni:")
                     check("kazdy rdzen wtorny ma wlasny zegar takze "
                           "w trybie dlugim (%s)" % clock,
@@ -214,7 +215,7 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    # --- Jeden rdzen: nic sie nie zmienia ---
+    # --- One core: nothing changes ---
     print("--- maszyna jednordzeniowa ---")
     slog1 = tempfile.mktemp(suffix=".log")
     q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)

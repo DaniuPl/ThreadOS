@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: dysk, system plikow i siec (jadro 64-bitowe).
+"""ProtonOS smoke test: the disk, the file system and the network
+(64-bit kernel).
 
-Te same sterowniki, co w jadrze 32-bitowym, skompilowane drugi raz.
-Rejestry kontrolera leza wysoko, poza pamiecia opisana przy starcie -
-bez doklejenia ich do mapowania pierwszy odczyt z BAR-a konczylby sie
-bledem strony.
+The same drivers as in the 32-bit kernel, compiled a second time. The
+controller's registers lie high up, outside the memory described at
+startup - without adding them to the mapping the first read from a BAR
+would end in a page fault.
 
-Na koniec drugi rozruch na TYM SAMYM dysku. To jedyny dowod, ze plik
-naprawde lezy na dysku, a nie w pamieci - i pierwszy moment, w ktorym
-cokolwiek w tym jadrze przezywa wylaczenie maszyny.
+At the end a second boot on THE SAME disk. That is the only proof that a
+file really lies on the disk and not in memory - and the first moment at
+which anything in this kernel survives the machine being switched off.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -36,8 +37,8 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
-    # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
-    # rejestrow kontrolera do mapowania
+    # A disk behind an AHCI controller: it was this path that required
+    # adding the controller's registers to the mapping
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.write(b"\0" * DISK_SIZE)
@@ -50,17 +51,17 @@ def main():
         q23 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                    sata=True, qemu="qemu-system-x86_64")
         try:
-            # Jadro dochodzi do shella samo; wszystko, co ta grupa
-            # sprawdza, dzieje sie dopiero potem
+            # The kernel reaches the shell by itself; everything this
+            # group checks happens only afterwards
             q23.wait_serial("proton64>", timeout=90)
 
-            # Dysk: te same sterowniki, co w jadrze 32-bitowym,
-            # skompilowane drugi raz. Rejestry kontrolera leza
-            # wysoko, poza pamiecia opisana przy starcie - bez
-            # doklejenia ich do mapowania pierwszy odczyt z BAR-a
-            # konczylby sie bledem strony.
-            # Jedna linia mowi o obu warstwach: co znalazl
-            # sterownik i czy stanal na tym system plikow
+            # The disk: the same drivers as in the 32-bit kernel,
+            # compiled a second time. The controller's registers lie
+            # high up, outside the memory described at startup -
+            # without adding them to the mapping the first read from
+            # a BAR would end in a page fault.
+            # One line speaks about both layers: what the driver
+            # found and whether the file system stood on it
             dsk = q23.wait_serial("] Dysk ", timeout=30)
             m = re.search(r"\] Dysk (.+?) \+ PFS (\w+) "
                           r"\((\d+) sektorow\)", dsk)
@@ -80,14 +81,14 @@ def main():
                   + (f" (sektor {m.group(1)})" if m else ""),
                   m is not None and m.group(2) == "0")
 
-            # Sterta programu. Prosba o pamiec nic nie
-            # kosztuje - placi sie za strony naprawde dotkniete,
-            # bo powstaja dopiero pod palcami.
+            # The program's heap. Asking for memory costs
+            # nothing - payment is for the pages actually touched,
+            # because they come into being only under your fingers.
             #
-            # Ten program jest przy okazji sprawdzianem SSE
-            # w kodzie uzytkownika: kompilator wektoryzuje jego
-            # petle przepisujace 4 KiB i wstawia tam movdqa,
-            # ktore bez wlaczonego SSE konczy sie wyjatkiem.
+            # This program is also a test of SSE in user code along
+            # the way: the compiler vectorizes its loop copying 4 KiB
+            # and puts a movdqa there, which without SSE enabled ends
+            # in an exception.
             seen = len(q23.serial())
             q23.type_line("run heap64")
             hp = q23.wait_serial("[heap64] koniec, kod wyjscia",
@@ -102,7 +103,7 @@ def main():
                   "granica wrocila na miejsce" in hp)
             check("ponizej wlasnej sterty jadro nie puszcza",
                   "ponizej wlasnej sterty jadro nie puszcza" in hp)
-            # I rachunek: 1024 strony poproszone, cztery uzyte
+            # And the bill: 1024 pages asked for, four used
             m2 = re.search(r"ramek (\d+) -> (\d+), "
                            r"stron sterty (\d+)", hp)
             check("strony powstaja dopiero przy dotknieciu"
@@ -115,9 +116,9 @@ def main():
                   m2 is not None
                   and int(m2.group(2)) <= int(m2.group(1)))
 
-            # Argumenty programu. Do tej pory 'echo' musialo
-            # byc wbudowane w shell, bo nie bylo jak przekazac
-            # programowi ani jednego slowa.
+            # The program's arguments. Until now 'echo' had to be
+            # built into the shell, because there was no way of
+            # passing a program a single word.
             seen = len(q23.serial())
             q23.type_line("run uecho64 raz dwa trzy")
             ue = q23.wait_serial("[uecho64] koniec, kod wyjscia",
@@ -127,9 +128,9 @@ def main():
             check("i konczy sie bez bledu",
                   "[uecho64] koniec, kod wyjscia 0" in ue)
 
-            # Narzedzie, ktore do niedawna musialo siedziec
-            # w jadrze: bierze nazwe pliku z argumentu, otwiera
-            # go deskryptorem i czyta
+            # A tool that until recently had to sit inside the
+            # kernel: it takes the file name from an argument, opens
+            # it with a descriptor and reads
             q23.type_line("write zargv tresc dla ucat")
             q23.wait_serial("write: 'zargv' zapisany", timeout=30)
             seen = len(q23.serial())
@@ -148,11 +149,11 @@ def main():
                   "ucat64: podaj nazwe pliku" in ub
                   and "kod wyjscia 1" in ub)
 
-            # Siec: karta, warstwa IP, DHCP i TCP to znowu te
-            # same pliki, co w jadrze 32-bitowym. Trzy z czterech
-            # przeszly bez jednej zmiany - sterownik karty
-            # potrzebowal tylko jawnego rzutowania adresow, bo
-            # karta adresuje pamiec 32 bitami.
+            # The network: the card, the IP layer, DHCP and TCP
+            # are again the same files as in the 32-bit kernel. Three
+            # of the four came across without a single change - the
+            # card driver only needed explicit casts of addresses,
+            # because the card addresses memory with 32 bits.
             kar = q23.wait_serial("] Siec: RTL8139", timeout=40)
             check("jadro 64-bitowe znajduje karte sieciowa",
                   re.search(r"Siec: RTL8139 ([0-9a-f]+:){5}",
@@ -172,8 +173,8 @@ def main():
                   re.search(r"IP \d+\.\d+\.\d+\.\d+  maska ", ifc)
                   is not None)
 
-            # Odpowiedz bramy to jedyny dowod, ze ramki naprawde
-            # wychodza i wracaja - reszta to tylko konfiguracja
+            # The gateway's answer is the only proof that frames really
+            # go out and come back - the rest is only configuration
             seen = len(q23.serial())
             q23.type_line("ping 10.0.2.2")
             pg = q23.wait_serial("--- statystyki", timeout=40)[seen:]
@@ -190,9 +191,9 @@ def main():
                   re.search(r"10\.0\.2\.2  ([0-9a-f]+:){5}", ar)
                   is not None)
 
-            # Katalogi. System plikow przestal byc plaski,
-            # a katalog roboczy jest wlasnoscia zadania - wiec
-            # program widzi ten, w ktorym stal shell.
+            # Directories. The file system stopped being flat,
+            # and the working directory belongs to the task - so a
+            # program sees the one the shell stood in.
             q23.type_line("mkdir projekt")
             mk = q23.wait_serial("mkdir: 'projekt' zalozony",
                                  timeout=25)
@@ -229,9 +230,9 @@ def main():
             check("usuwanie nieistniejacego pliku nie udaje sukcesu",
                   "rm: nie ma 'nieistnieje'" in rm)
 
-            # Plik od strony PROGRAMU: deskryptor jest zwyklym
-            # numerem w jego wlasnej tablicy, a i-wezel, na
-            # ktory numer wskazuje, zna juz tylko jadro
+            # A file as seen by the PROGRAM: a descriptor is an
+            # ordinary number in its own table, and the inode that
+            # number points at is known only to the kernel
             q23.type_line("run fileio64")
             fio = q23.wait_serial("[fileio64] koniec, kod wyjscia",
                                   timeout=45)
@@ -246,9 +247,9 @@ def main():
             check("program sam potwierdza wynik kodem wyjscia",
                   "[fileio64] koniec, kod wyjscia 0" in fio)
 
-            # fs.c przeszedl do trybu dlugiego bez zmiany ani
-            # jednego znaku - dysk widziany przez warstwe blokowa
-            # wyglada tak samo w obu trybach
+            # fs.c came across to long mode without a single
+            # character changed - the disk seen through the block
+            # layer looks the same in both modes
             q23.type_line("write notatka pisze na dysk")
             wr = q23.wait_serial("write: 'notatka' zapisany",
                                  timeout=30)
@@ -270,7 +271,7 @@ def main():
             check("przerwania sprzetowe dochodza (timer tyka"
                   + (f" {m.group(1)} -> {m.group(2)})" if m else ")"),
                   m is not None and int(m.group(2)) - int(m.group(1)) >= 100)
-            # I to samo na ekranie: konsola rysowana wlasnym kodem
+            # And the same on the screen: the console drawn by our own code
             w, h, at = q23.screen_raw()
             x0, y0 = (w - 640) // 2, (h - 200) // 2
             lit = sum(1 for y in range(y0, y0 + 200)
@@ -281,9 +282,10 @@ def main():
         finally:
             q23.close()
 
-        # Drugi rozruch na TYM SAMYM dysku. To jedyny dowod, ze plik
-        # naprawde lezy na dysku, a nie w pamieci - i pierwszy moment,
-        # w ktorym cokolwiek w tym jadrze przezywa wylaczenie maszyny.
+        # A second boot on THE SAME disk. That is the only proof that a
+        # file really lies on the disk and not in memory - and the first
+        # moment at which anything in this kernel survives the machine
+        # being switched off.
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
@@ -302,9 +304,9 @@ def main():
                                    timeout=25)[seen:]
             check("i ma dokladnie te sama tresc",
                   "pisze na dysk" in ct2)
-            # Plik zapisany przez PROGRAM tez ma przezyc -
-            # droga przez deskryptor konczy sie na tym samym
-            # dysku, co droga przez jadro
+            # A file written by a PROGRAM is to survive too - the
+            # path through a descriptor ends on the same disk as the
+            # path through the kernel
             seen = len(q2.serial())
             q2.type_line("cat zring3")
             ct3 = q2.wait_serial("plik zapisany z ring 3",

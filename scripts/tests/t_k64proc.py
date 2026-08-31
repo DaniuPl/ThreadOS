@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: procesy w pierscieniu 3 (jadro 64-bitowe).
+"""ProtonOS smoke test: processes in ring 3 (64-bit kernel).
 
-Selektor kodu zna tylko procesor, a jego dwa najnizsze bity mowia,
-w ktorym pierscieniu program NAPRAWDE dzialal - i zeby to powiedziec,
-musial wejsc do jadra instrukcja syscall.
+Only the processor knows the code selector, and its two lowest bits say
+which ring the program REALLY ran in - and to say that, it had to enter
+the kernel with a syscall instruction.
 
-Dalej idzie wszystko, co proces dostaje i czego mu nie wolno: program
-wczytany z pliku (jadro nie widzialo go w czasie budowy), bit NX
-sprawdzony wykonaniem wlasnych danych, odmowa na wskazniki do pamieci
-jadra, dwa procesy pod tym samym adresem wirtualnym w osobnych
-przestrzeniach, oraz fork z kopiowaniem przy zapisie - z rachunkiem
-stron, ktory pokazuje, ze kopiuje sie tylko to, co ktos zapisal.
+After that comes everything a process gets and everything it must not
+do: a program read from a file (the kernel did not see it at build
+time), the NX bit checked by executing its own data, a refusal for
+pointers into kernel memory, two processes at the same virtual address
+in separate spaces, and a fork with copy on write - with a page bill
+that shows only what somebody wrote gets copied.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -38,8 +38,8 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
-    # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
-    # rejestrow kontrolera do mapowania
+    # A disk behind an AHCI controller: it was this path that required
+    # adding the controller's registers to the mapping
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.write(b"\0" * DISK_SIZE)
@@ -52,14 +52,14 @@ def main():
         q23 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                    sata=True, qemu="qemu-system-x86_64")
         try:
-            # Jadro dochodzi do shella samo; wszystko, co ta grupa
-            # sprawdza, dzieje sie dopiero potem
+            # The kernel reaches the shell by itself; everything this
+            # group checks happens only afterwards
             q23.wait_serial("proton64>", timeout=90)
 
-            # Ring 3: selektor kodu zna tylko procesor, a jego
-            # dwa najnizsze bity mowia, w ktorym pierscieniu
-            # program NAPRAWDE dzialal. Zeby to powiedziec,
-            # musial wejsc do jadra instrukcja syscall.
+            # Ring 3: only the processor knows the code selector,
+            # and its two lowest bits say which ring the program
+            # REALLY ran in. To say that, it had to enter the kernel
+            # with a syscall instruction.
             q23.wait_serial("Wywolania systemowe przez instrukcje",
                             timeout=20)
             r3 = q23.wait_serial("Program w ring 3:", timeout=25)
@@ -71,8 +71,8 @@ def main():
                   + (f" (cs={m.group(2)})" if m else ""),
                   m is not None and m.group(3) == "3")
 
-            # Program z PLIKU: jadro nie widzialo go w czasie
-            # budowy - wszystkiego dowiaduje sie z naglowka ELF
+            # A program from a FILE: the kernel did not see it at
+            # build time - it learns everything from the ELF header
             ini = q23.wait_serial("initrd:", timeout=25)
             check("jadro 64-bitowe czyta initrd od loadera",
                   re.search(r"initrd: \d+ plik", ini) is not None)
@@ -83,8 +83,8 @@ def main():
                   + (f" ({m.group(1)} B, wejscie {m.group(2)})"
                      if m else ""),
                   m is not None and int(m.group(1)) > 0
-                  # punkt wejscia musi lezec w przestrzeni
-                  # uzytkownika, czyli od 1 GiB w gore
+                  # the entry point has to lie in user space, that
+                  # is, from 1 GiB upwards
                   and int(m.group(2), 16) >= 0x40000000)
             out64 = q23.wait_serial("[hello64] koncze", timeout=30)
             check("program z pliku pisze przez wywolanie systemowe",
@@ -105,17 +105,17 @@ def main():
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and m.group(2) == "7")
 
-            # Ochrona pamieci widziana od strony programu.
-            # Bit NX byl dotad tylko ustawiony - tu program
-            # naprawde probuje wykonac swoje dane i ginie.
+            # Memory protection as seen from the program. The NX
+            # bit had only been set so far - here a program really
+            # tries to execute its data and dies.
             nx = q23.wait_serial("Zakaz wykonywania:", timeout=30)
             check("program probuje wykonac wlasne dane",
                   "[nx64] i probuje ja wykonac" in nx)
             check("procesor odmawia wykonania danych (bit NX)",
                   "procesor odmowil wykonania danych" in nx)
-            # 0x15 = strona obecna, dostep z ring 3, pobranie
-            # instrukcji. Sam bit obecnosci wykluczylby zwykly
-            # brak mapowania - to naprawde zadzialal NX.
+            # 0x15 = page present, access from ring 3, an
+            # instruction fetch. The present bit alone would rule out
+            # an ordinary missing mapping - this really was NX.
             m = re.search(r"Zakaz wykonywania: .*err=([0-9a-f]+)", nx)
             check("blad strony mowi: pobranie instrukcji z ring 3"
                   + (f" (err={m.group(1)})" if m else ""),
@@ -123,8 +123,9 @@ def main():
             check("winny program zostaje zabity, nie caly system",
                   "zabite: Page Fault" in nx)
 
-            # Druga droga do pamieci jadra: poprosic o nia samo
-            # jadro. Musi odmowic, bo sprawdza wskaznik.
+            # The other road to kernel memory: ask the kernel
+            # itself for it. It has to refuse, because it checks the
+            # pointer.
             wild = q23.wait_serial("Pamiec jadra:", timeout=30)
             check("jadro odrzuca wskaznik spoza programu",
                   "nie nalezy do programu" in wild
@@ -139,7 +140,7 @@ def main():
                   m is not None and int(m.group(1), 16) == 0x05
                   and int(m.group(2), 16) == 0x100000)
 
-            # I to, po co ta cala obsluga istnieje
+            # And what this whole handling exists for
             surv = q23.wait_serial("System przezyl", timeout=30)
             m = re.search(r"licznik (\d+) -> (\d+)", surv)
             check("system pracuje po smierci obu programow"
@@ -148,9 +149,9 @@ def main():
                   m is not None
                   and int(m.group(2)) > int(m.group(1)))
 
-            # Dwa procesy naraz, kazdy we wlasnej przestrzeni.
-            # Ten sam plik, ten sam adres wirtualny, osobna
-            # pamiec - i to wlasnie musi byc widac.
+            # Two processes at once, each in its own space. The
+            # same file, the same virtual address, separate memory -
+            # and that is exactly what has to be visible.
             sep = q23.wait_serial("Pamiec po procesach", timeout=40)
             addrs = re.findall(r"proces (\d): adres ([0-9a-f]+), "
                                r"wpisalem (\d+)", sep)
@@ -170,8 +171,8 @@ def main():
             check("obie kopie skonczyly sie bez bledu",
                   "Dwa procesy naraz: 2 zakonczonych, 0 bledow"
                   in sep)
-            # Przestrzen musi zniknac razem z procesem, inaczej
-            # kazdy uruchomiony program zabiera pamiec na zawsze
+            # The space has to disappear along with the process,
+            # otherwise every program that ran takes memory forever
             m = re.search(r"Pamiec po procesach oddana "
                           r"\((\d+) -> (\d+) ramek\)", sep)
             check("pamiec po procesach wrocila do puli"
@@ -180,8 +181,8 @@ def main():
                   m is not None
                   and int(m.group(2)) <= int(m.group(1)))
 
-            # fork: drugi proces bierze sie juz nie z decyzji
-            # jadra, tylko z decyzji samego programu
+            # fork: the second process comes no longer from the
+            # kernel's decision but from the program's own
             fk = q23.wait_serial("Pamiec po fork-u", timeout=45)
             m = re.search(r"rodzic: fork dal numer dziecka (\d+)", fk)
             check("rodzic dostaje z fork-a numer dziecka"
@@ -189,8 +190,8 @@ def main():
                   m is not None and int(m.group(1)) > 0)
             check("dziecko dostaje z fork-a zero",
                   "dziecko: fork dal 0" in fk)
-            # Oba wracaja w to samo miejsce z tym samym stanem,
-            # ale pamiec maja juz osobna
+            # Both return to the same place with the same state,
+            # but their memory is already separate
             check("dziecko pisze po swojej kopii (200)",
                   "moja wartosc to 200" in fk)
             check("zapis dziecka nie dosiega rodzica (nadal 100)",
@@ -206,8 +207,8 @@ def main():
                   m is not None
                   and int(m.group(2)) <= int(m.group(1)))
 
-            # fork + exec + wait: klasyczna trojka, ktora
-            # wystarcza kazdemu shellowi na swiecie
+            # fork + exec + wait: the classic three that are
+            # enough for every shell in the world
             sp = q23.wait_serial("fork + exec + wait:", timeout=60)
             check("proces uruchamia INNY program przez exec",
                   "powielam sie i uruchamiam w dziecku 'hello64'"
@@ -218,9 +219,8 @@ def main():
             check("rodzic doczekal wlasnego dziecka"
                   + (f" (nr {m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) > 0)
-            # hello64 konczy sie siodemka - ta siodemka jest
-            # dowodem, ze doczekal sie TEGO dziecka, a nie
-            # dowolnego zakonczonego zadania
+            # hello64 ends with a seven - that seven is the proof
+            # that it waited for THAT child, not for any finished task
             check("kod wyjscia doszedl do rodzica przez wait"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and m.group(2) == "7")
@@ -232,12 +232,12 @@ def main():
                   "fork + exec + wait: 2 zakonczonych, werdykt 0"
                   in sp)
 
-            # A teraz rachunek: fork NIE kopiuje pamieci.
-            # Program ma siedem stron (kod, dane stale, dane,
-            # cztery strony stosu), wiec kopiowanie wprost
-            # kosztowaloby ich siedem plus tablice. Z dzieleniem
-            # stron zostaja same tablice, a kopiuje sie tylko to,
-            # co ktos naprawde zapisal.
+            # And now the bill: fork does NOT copy memory. The
+            # program has seven pages (code, constants, data, four
+            # stack pages), so copying outright would cost seven of
+            # them plus the tables. With shared pages only the tables
+            # are left, and only what somebody really wrote gets
+            # copied.
             cow = q23.wait_serial("Kopiowanie przy zapisie",
                                   timeout=30)
             m = re.search(r"fork wzial (\d+) ramek, "

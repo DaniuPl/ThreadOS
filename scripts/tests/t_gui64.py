@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: aplikacje graficzne w pierscieniu 3 (jadro 64-bit).
+"""ProtonOS smoke test: graphical applications in ring 3 (64-bit kernel).
 
-Pulpit dzialal do tej pory sam ze soba - kompozytor siedzial w jadrze,
-a ikony wskazywaly programy, ktorych w trybie dlugim nie bylo. Teraz
-ikona uruchamia prawdziwy proces z initrd, ktory rysuje we wlasnym
-oknie przez wywolania systemowe i dostaje z powrotem zdarzenia.
+The desktop has so far worked with itself alone - the compositor sat in
+the kernel, and the icons pointed at programs that did not exist in long
+mode. Now an icon starts a real process from the initrd, which draws in
+a window of its own through system calls and gets events back.
 
-Sprawdzamy cala te droge tak, jak widzi ja uzytkownik: klikniecie
-ikony ma dac okno z narysowana paleta, klikniecie w okno ma zostawic
-w nim znacznik (czyli zdarzenie doszlo do procesu i wrocilo rysunkiem),
-a klawisze maja trafiac do okna z fokusem.
+We check that whole path the way a user sees it: clicking an icon is to
+give a window with a palette drawn in it, clicking in the window is to
+leave a marker in it (that is, the event reached the process and came
+back as a drawing), and keys are to reach the window with focus.
 
-Okna aplikacji ida po kolei za dwoma oknami jadra: pierwsze staje pod
-(94,54), kazde nastepne dwanascie pikseli nizej i w prawo. Obszar
-tresci zaczyna sie o piksel w prawo i o pasek tytulu nizej. Wszystkie
-wspolrzedne ekranu ponizej biora sie z tej jednej zasady.
+The application windows follow in turn behind the two kernel windows:
+the first stands at (94,54), each next one twelve pixels lower and to
+the right. The content area starts a pixel to the right and a title bar
+lower. All the screen coordinates below come from that one rule.
 """
 
 import os
@@ -26,14 +26,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-# Kompozytor stawia okna kaskadowo: slot i pod (70+12i, 30+12i), a tresc
-# o piksel w prawo i o pasek tytulu (10 px) nizej. Dwa pierwsze sloty
-# zajmuja okna jadra, wiec aplikacje zaczynaja sie od trzeciego.
+# The compositor places the windows in a cascade: slot i at
+# (70+12i, 30+12i), and the content a pixel to the right and a title bar
+# (10 px) lower. The first two slots are taken by the kernel's windows,
+# so the applications start from the third.
 def body_text(slot):
     return 70 + 12 * slot + 1, 30 + 12 * slot + 11
 
 
-BODY_X, BODY_Y = body_text(2)  # lewy gorny rog tresci pierwszej aplikacji
+BODY_X, BODY_Y = body_text(2)  # the top left corner of the first application's content
 
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
@@ -42,7 +43,8 @@ BIALY = (255, 255, 255)
 
 
 def scr(cx, cy):
-    """Wspolrzedne ekranu punktu (cx,cy) obszaru tresci okna."""
+    """The screen coordinates of the point (cx,cy) of a window's content
+    area."""
     return BODY_X + cx, BODY_Y + cy
 
 
@@ -89,22 +91,23 @@ def main():
                  sata=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            # Plik na dysku dla menedzera plikow - po starcie pulpitu
-            # klawiatura nalezy juz do niego, wiec teraz albo wcale
+            # A file on the disk for the file manager - once the desktop
+            # starts the keyboard belongs to it, so it is now or never
             q.command("write notatka czesc-z-dysku", "write:")
             q.type_line("pulpit")
             q.wait_serial("Pulpit startuje", timeout=30)
             check("pulpit wstaje w trybie graficznym", q.wait_desktop(30))
 
-            # Mysz jest wzgledna: najpierw dosun kursor do rogu, zeby
-            # wiedziec, gdzie w ogole jest.
+            # The mouse is relative: first push the cursor into the
+            # corner, so as to know where it is at all.
             q.mouse_home()
-            q.mouse_goto(24, 32)          # ikona 'App' (kafelek 8,20,32x24)
+            q.mouse_goto(24, 32)          # the 'App' icon (the tile 8,20,32x24)
             q.mouse_click()
-            q.mouse_goto(400, 300)        # odsun kursor od okna
+            q.mouse_goto(400, 300)        # move the cursor away from the window
 
-            # Aplikacja rysuje palete trzech kwadratow u gory okna.
-            # Kazdy z innego wywolania systemowego, wiec kazdy osobno.
+            # The application draws a palette of three squares at the top
+            # of the window. Each from a different system call, so each
+            # separately.
             cx, cy = scr(10, 10)
             check("klik ikony uruchamia program z initrd (czerwony kwadrat)",
                   q.wait_pixel(cx, cy, RED, timeout=20))
@@ -115,8 +118,8 @@ def main():
             check("program rysuje trzeci kwadrat (niebieski)",
                   q.wait_pixel(cx, cy, BLUE, timeout=5))
 
-            # Podpis 'klikniec:' rysowany przez win_text - bialy tekst
-            # na szarym tle; szukamy w jego pasie bialych pikseli.
+            # The caption 'klikniec:' drawn by win_text - white text on a
+            # grey background; we look for white pixels in its band.
             _, _, at = q.screen_raw()
             tx, ty = scr(6, 24)
             whites = sum(1 for dy in range(8) for dx in range(72)
@@ -124,8 +127,8 @@ def main():
             check(f"program pisze tekst w oknie ({whites} bialych pikseli)",
                   whites > 20)
 
-            # Licznik klikniec przed kliknieciem - zapamietujemy komorke
-            # z cyfra, zeby bylo z czym porownac
+            # The click counter before the click - we remember the cell
+            # with the digit, so that there is something to compare with
             lx, ly = scr(80, 24)
 
             def counter_cell(fun):
@@ -134,11 +137,12 @@ def main():
 
             counter_before = counter_cell(at)
 
-            # Zdarzenie w druga strone: klik w obszar tresci ma dojsc do
-            # procesu, ktory odpowiada bialym znacznikiem w tym miejscu.
-            # Tolerancja musi tu byc waska: szare tlo okna (227,227,227)
-            # miesci sie w domyslnej i przepusciloby test, w ktorym nie
-            # dzieje sie nic.
+            # An event the other way: a click in the content area is to
+            # reach the process, which answers with a white marker at
+            # that place. The tolerance has to be narrow here: the
+            # window's grey background (227,227,227) fits inside the
+            # default one and would pass a test in which nothing
+            # happens.
             kx, ky = scr(20, 50)
             q.mouse_goto(kx, ky)
             q.mouse_click()
@@ -146,14 +150,14 @@ def main():
             check("klik w okno wraca do programu jako zdarzenie (znacznik)",
                   q.wait_pixel(kx, ky, BIALY, tol=8, timeout=10))
 
-            # Licznik klikniec przestaje byc zerem - program policzyl
-            # zdarzenie, a nie tylko odrysowal okno
+            # The click counter stops being zero - the program counted the
+            # event rather than merely redrawing the window
             _, _, at2 = q.screen_raw()
             check("licznik klikniec w oknie rosnie",
                   counter_cell(at2) != counter_before)
 
-            # Klawiatura: okno ma fokus po kliknieciu, wiec wpisane
-            # znaki maja pojawic sie w polu 'txt:'.
+            # The keyboard: the window has focus after the click, so the
+            # typed characters are to appear in the 'txt:' field.
             px, py = scr(40, 38)
 
             def pole_txt(fun):
@@ -168,8 +172,8 @@ def main():
             po = pole_txt(at3)
             check("klawisze trafiaja do okna z fokusem", before != po)
 
-            # --- Zegar: druga aplikacja, wlasne okno ---
-            # Ikona 'Zegar' stoi pod (8,60), kafelek 32x24
+            # --- The clock: a second application, its own window ---
+            # The 'Zegar' icon stands at (8,60), a 32x24 tile
             q.mouse_home()
             q.mouse_goto(24, 72)
             q.mouse_click()
@@ -192,7 +196,8 @@ def main():
             check("ikona 'Zegar' uruchamia druga aplikacje we wlasnym oknie",
                   clock_present)
 
-            # Zegar ma isc: godzina zmienia sie w oknie sama z siebie
+            # The clock is to run: the time changes in the window of its own
+# accord
             _, _, az1 = q.screen_raw()
             first = clock_window(az1)
             time.sleep(2.5)
@@ -200,14 +205,14 @@ def main():
             check("zegar w oknie idzie (tresc zmienia sie sama)",
                   clock_window(az2) != first)
 
-            # --- Pliki: trzecia aplikacja, czyta dysk ---
+            # --- Files: a third application, it reads the disk ---
             q.mouse_home()
             q.mouse_goto(24, 112)
             q.mouse_click()
             q.mouse_goto(400, 300)
 
             px2, py2 = body_text(4)
-            # Naglowek "Pliki na dysku:" rysowany na zielono pod (4,2)
+            # The heading "Pliki na dysku:" drawn in green at (4,2)
             greens = 0
             end = time.time() + 20
             while time.time() < end:
@@ -221,8 +226,9 @@ def main():
                   "(%d zielonych pikseli naglowka)" % greens,
                   greens > 20)
 
-            # Na dysku lezy plik zapisany przed startem pulpitu -
-            # menedzer musi go pokazac, a klik na nim wczytac tresc
+            # On the disk lies a file written before the desktop started -
+            # the manager has to show it, and a click on it has to load
+            # the contents
             _, _, ap1 = q.screen_raw()
             def preview_panel(fun):
                 return [fun(px2 + 4 + dx, py2 + 102 + dy)
@@ -230,9 +236,9 @@ def main():
 
             before = preview_panel(ap1)
 
-            # Na dysku leza tez pliki jadra (swap.sys, icons.pos), ktore
-            # w podgladzie sa puste - klikamy wiec kolejne wiersze, az
-            # tresc pojawi sie naprawde
+            # On the disk there are also kernel files (swap.sys, icons.pos)
+            # which are empty in the preview - so we click successive
+            # rows until content really appears
             loaded = False
             for row in range(4):
                 q.mouse_home()
@@ -247,17 +253,18 @@ def main():
             check("klik w nazwe pliku wczytuje jego tresc z dysku",
                   loaded)
 
-            # Kompozytor przezyl to wszystko: tlo pulpitu dalej jest.
+            # The compositor survived all this: the desktop's background is still
+# there.
             w, h, at4 = q.screen_raw()
             tlo = at4(w - 20, h // 2)
             check("kompozytor dalej rysuje pulpit",
                   all(abs(tlo[i] - (0, 130, 162)[i]) <= 40 for i in range(3)))
         finally:
             q.close()
-        # --- Drugi rozruch: monitor i terminal ---
-        # Kompozytor trzyma najwyzej szesc okien, a dwa zajmuje jadro -
-        # piec aplikacji naraz sie nie zmiesci, wiec te dwie dostaja
-        # wlasna maszyne
+        # --- A second boot: the monitor and the terminal ---
+        # The compositor holds at most six windows, and two are taken by
+        # the kernel - five applications at once will not fit, so these
+        # two get a machine of their own
         print("--- monitor zasobow i terminal w oknie ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
@@ -268,22 +275,23 @@ def main():
             q2.wait_serial("Pulpit startuje", timeout=30)
             check("pulpit wstaje po raz drugi", q2.wait_desktop(30))
 
-            # Ikona 'Monitor' pod (8,140)
+            # The 'Monitor' icon at (8,140)
             q2.mouse_home()
             q2.mouse_goto(24, 152)
             q2.mouse_click()
             q2.mouse_goto(400, 300)
 
             mx, my = body_text(2)
-            # Pasek zajetosci pamieci: czerwone tlo, niebieska czesc
-            # uzyta. Obie barwy naraz znacza, ze liczby doszly i ze
-            # nie sa ani zerem, ani caloscia.
+            # The memory usage bar: a red background, the used part in
+            # blue. Both colours at once mean the numbers arrived and
+            # that they are neither zero nor everything.
             red = q2.wait_pixel(mx + 150, my + 52, RED, timeout=20)
             blue = q2.wait_pixel(mx + 6, my + 52, BLUE, timeout=5)
             check("ikona 'Monitor' uruchamia wskaznik zasobow "
                   "(pasek pamieci)", red and blue)
 
-            # Uptime rosnie: okno zyje, a nie pokazuje jednego zdjecia
+            # The uptime grows: the window is alive rather than showing one
+# photograph
             def pole_uptime(fun):
                 return [fun(mx + 96 + dx, my + 28 + dy)
                         for dy in range(8) for dx in range(40)]
@@ -295,16 +303,17 @@ def main():
             check("monitor jest zywy (uptime w oknie rosnie)",
                   pole_uptime(am2) != u1)
 
-            # --- Terminal: klawiatura, fork, exec, dup2, plik ---
+            # --- The terminal: keyboard, fork, exec, dup2, a file ---
             q2.mouse_home()
-            q2.mouse_goto(24, 192)          # ikona 'Term' pod (8,180)
+            q2.mouse_goto(24, 192)          # the 'Term' icon at (8,180)
             q2.mouse_click()
             q2.mouse_goto(400, 300)
 
             tx, ty = body_text(3)
-            # Znak zachety '>' na zielono na dole okna (240x150).
-            # Liczymy piksele w calej komorce znaku zamiast celowac
-            # w jeden - ksztalt glifu to nie jest rzecz do zgadywania.
+            # The prompt '>' in green at the bottom of the window
+            # (240x150). We count the pixels in the whole character cell
+            # instead of aiming at one - the shape of a glyph is not a
+            # thing to guess at.
             prompts = 0
             end = time.time() + 20
             while time.time() < end:
@@ -317,9 +326,9 @@ def main():
             check("ikona 'Term' uruchamia terminal w oknie "
                   "(znak zachety: %d pikseli)" % prompts, prompts > 3)
 
-            # Okno terminala ma fokus zaraz po powstaniu - wpisujemy
-            # polecenie i patrzymy, czy jego wyjscie pojawi sie
-            # w oknie. Idzie przez plik: fork, dup2, exec, wait.
+            # The terminal's window has focus right after it appears - we
+            # type a command and watch whether its output appears in the
+            # window. It goes through a file: fork, dup2, exec, wait.
             def result_field(fun):
                 return sum(1 for dy in range(40) for dx in range(200)
                            if fun(tx + 4 + dx, ty + 4 + dy) == BIALY)

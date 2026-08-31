@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: shell, sygnaly i SSE (jadro 64-bitowe).
+"""ProtonOS smoke test: the shell, signals and SSE (64-bit kernel).
 
-System, z ktorym da sie rozmawiac, a nie tylko odtworzyc scenariusz:
-program uruchamiany Z KLAWIATURY, sygnal zatrzymujacy petle bez konca
-od zewnatrz, wlasna procedura obslugi wracajaca dokladnie tam, gdzie
-przerwano, i shell uzytkownika laczacy programy potokami.
+A system one can talk to rather than merely watch replay a script: a
+program started FROM THE KEYBOARD, a signal stopping an endless loop
+from the outside, a handler of one's own returning exactly where it was
+interrupted, and a user shell joining programs with pipes.
 
-Na koncu liczby zmiennoprzecinkowe. Na x86-64 SSE jest czescia
-konwencji wywolan, wiec kompilator uzywa go bez pytania - a rejestry
-XMM sa takim samym stanem zadania, jak reszta, i musza przezyc
-przelaczenie kontekstu.
+At the end floating-point numbers. On x86-64 SSE is part of the calling
+convention, so the compiler uses it without asking - and the XMM
+registers are as much a task's state as the rest, and have to survive a
+context switch.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -37,8 +37,8 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
-    # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
-    # rejestrow kontrolera do mapowania
+    # A disk behind an AHCI controller: it was this path that required
+    # adding the controller's registers to the mapping
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.write(b"\0" * DISK_SIZE)
@@ -51,12 +51,12 @@ def main():
         q23 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                    sata=True, qemu="qemu-system-x86_64")
         try:
-            # Jadro dochodzi do shella samo; wszystko, co ta grupa
-            # sprawdza, dzieje sie dopiero potem
+            # The kernel reaches the shell by itself; everything this
+            # group checks happens only afterwards
             q23.wait_serial("proton64>", timeout=90)
 
-            # Klawiatura i shell: system, z ktorym da sie
-            # rozmawiac, a nie tylko odtworzyc scenariusz
+            # The keyboard and the shell: a system one can talk
+            # to rather than merely watch replay a script
             ready = q23.wait_serial("proton64>", timeout=40)
             check("jadro 64-bitowe uruchamia shella",
                   "Klawiatura PS/2 (IRQ 1)" in ready
@@ -76,7 +76,7 @@ def main():
             check("shell widzi sam siebie na liscie zadan",
                   "bezczynny" in ps)
 
-            # Program uruchomiony Z KLAWIATURY, nie ze scenariusza
+            # A program started FROM THE KEYBOARD, not from a script
             q23.type_line("run hello64")
             run = q23.wait_serial("koniec, kod wyjscia", timeout=40)
             check("program uruchomiony z klawiatury dziala",
@@ -88,8 +88,9 @@ def main():
             check("shell nie udaje, ze zna kazde polecenie",
                   "Nieznane polecenie: nieznane" in bad)
 
-            # Sygnaly: program w petli bez konca musi dac sie
-            # zatrzymac z zewnatrz, bo od srodka sie nie da
+            # Signals: a program in an endless loop has to be
+            # stoppable from the outside, because from the inside it
+            # cannot be
             q23.type_line("run spin64")
             q23.wait_serial("[spin64] krece sie", timeout=30)
             time.sleep(1)
@@ -103,9 +104,9 @@ def main():
             check("shell odzyskuje konsole po zabitym programie",
                   "[spin64] koniec, kod wyjscia -1" in kill)
 
-            # A program z wlasna procedura ma po niej wrocic
-            # tam, gdzie mu przerwano - to jest cala roznica
-            # miedzy sygnalem a zabiciem
+            # And a program with a handler of its own is to return
+            # after it to where it was interrupted - that is the whole
+            # difference between a signal and a kill
             q23.type_line("run sigtest64")
             q23.wait_serial("[sigtest64] czekam", timeout=30)
             time.sleep(1)
@@ -120,8 +121,8 @@ def main():
             check("jadro nie zglasza smierci przechwyconego sygnalu",
                   "(sigtest64) zabite" not in sig)
 
-            # Tylko to, co doszlo PO tym poleceniu - wczesniej
-            # w logu oba programy oczywiscie sa
+            # Only what arrived AFTER this command - earlier in
+            # the log both programs are there, of course
             seen = len(q23.serial())
             q23.type_line("ps")
             after = q23.wait_serial("shell (biezacy)",
@@ -131,20 +132,20 @@ def main():
                   and "sigtest64" not in after
                   and "bezczynny" in after)
 
-            # Shell w PRZESTRZENI UZYTKOWNIKA: zwykly proces
-            # bez zadnych uprawnien ponad te, ktore ma kazdy
-            # inny - czyta klawiature wywolaniem systemowym,
-            # a programy uruchamia przez fork i exec
+            # A shell in USER SPACE: an ordinary process with no
+            # rights beyond those every other one has - it reads the
+            # keyboard with a system call, and starts programs
+            # through fork and exec
             q23.type_line("run ush64")
             u = q23.wait_serial("ush64$", timeout=40)
             check("shell uzytkownika startuje jako proces ring 3",
                   "ush64 - shell uzytkownika" in u)
 
-            # Slowo musi pojawic sie DWA razy: raz jako echo
-            # pisania, raz jako odpowiedz programu. Liczymy
-            # wystapienia zamiast szukac konca linii - port
-            # szeregowy konczy je sekwencja "\n\r", a wiazanie
-            # sie z takim szczegolem to proszenie sie o klopoty.
+            # The word has to appear TWICE: once as the echo of
+            # the typing, once as the program's answer. We count the
+            # occurrences instead of looking for the end of a line -
+            # the serial port ends them with the sequence "\n\r", and
+            # tying oneself to such a detail is asking for trouble.
             q23.type_line("echo abrakadabra")
             limit = time.time() + 25
             while (time.time() < limit
@@ -162,11 +163,11 @@ def main():
             check("shell uzytkownika przekazuje argumenty do exec",
                   "z shella uzytkownika" in ua)
 
-            # Potoki: wyjscie jednego programu wchodzi na
-            # wejscie drugiego, a zaden z nich o tym nie wie.
-            # uupper64 czyta z numeru zero i pisze na numer
-            # jeden - to, co po drugiej stronie, jest sprawa
-            # tego, kto go uruchomil.
+            # Pipes: one program's output enters another's
+            # input, and neither of them knows about it. uupper64
+            # reads from number zero and writes to number one - what
+            # is on the other side is the business of whoever started
+            # it.
             seen = len(q23.serial())
             q23.type_line("uecho64 proton przez potok | uupper64")
             pp = q23.wait_serial("PROTON PRZEZ POTOK",
@@ -174,9 +175,9 @@ def main():
             check("wyjscie programu wchodzi na wejscie drugiego",
                   "PROTON PRZEZ POTOK" in pp)
 
-            # Drugi program musi zobaczyc KONIEC danych - a to
-            # sie dzieje tylko wtedy, gdy shell zamknie oba
-            # konce potoku u siebie
+            # The second program has to see the END of the data -
+            # and that happens only when the shell closes both ends of
+            # the pipe at its own end
             seen = len(q23.serial())
             q23.type_line("uls64 | uupper64")
             pl = q23.wait_serial("ULS64: WPISOW", timeout=40)[seen:]
@@ -197,8 +198,8 @@ def main():
             check("i odbiera jego kod wyjscia przez wait",
                   "ush64: koniec, kod 7" in hi)
 
-            # Nieudany exec nie moze zabic shella - dziecko
-            # konczy sie samo, rodzic zyje dalej
+            # A failed exec must not kill the shell - the child
+            # ends by itself, the parent lives on
             q23.type_line("nieistniejacy")
             ne = q23.wait_serial("ush64: koniec, kod 127",
                                  timeout=30)
@@ -206,10 +207,10 @@ def main():
                   "nie ma programu 'nieistniejacy'" in ne
                   and "ush64: koniec, kod 127" in ne)
 
-            # Ctrl+C w shellu uzytkownika. Sygnal musi trafic
-            # w PROGRAM, ktory dziala, a nie w shella, ktory na
-            # niego czeka - i musi dosiegnac shella czekajacego
-            # w jadrze, bo inaczej czeka on tam bez konca.
+            # Ctrl+C in the user shell. The signal has to reach
+            # the PROGRAM that is running, not the shell waiting for
+            # it - and it has to reach a shell waiting inside the
+            # kernel, because otherwise it waits there forever.
             q23.type_line("spin64")
             q23.wait_serial("[spin64] krece sie", timeout=30)
             time.sleep(1.5)
@@ -219,8 +220,8 @@ def main():
                   "(spin64) zabite: sygnal" in ci)
             check("kod wyjscia zabitego programu jest ujemny",
                   "ush64: koniec, kod -1" in ci)
-            # A sam shell ma to przezyc - inaczej kazde
-            # przypadkowe Ctrl+C konczyloby sesje
+            # And the shell itself is to survive it - otherwise
+            # every accidental Ctrl+C would end the session
             seen = len(q23.serial())
             q23.type_line("echo poctrlc")
             limit = time.time() + 25
@@ -236,10 +237,10 @@ def main():
             check("po wyjsciu shella uzytkownika wraca shell jadra",
                   "ush64: pa!" in ex)
 
-            # Liczby zmiennoprzecinkowe. Na x86-64 SSE jest
-            # czescia konwencji wywolan, wiec kompilator uzywa
-            # go bez pytania - a rejestry XMM sa takim samym
-            # stanem zadania, jak reszta.
+            # Floating-point numbers. On x86-64 SSE is part of
+            # the calling convention, so the compiler uses it without
+            # asking - and the XMM registers are as much a task's
+            # state as the rest.
             sse = q23.wait_serial("Stan SSE przetrwal", timeout=40)
             check("jadro wlacza jednostke zmiennoprzecinkowa",
                   "Jednostka zmiennoprzecinkowa i SSE wlaczone"
@@ -248,8 +249,8 @@ def main():
                                 r"(\d+), mialo (\d+) - (\S+)", sse)
             check(f"dwa procesy licza rownoczesnie "
                   f"({len(results)})", len(results) == 2)
-            # Kazdy ma dostac SWOJ wynik - gdyby stan SSE nie
-            # byl zapisywany, dostalby wynik drugiego
+            # Each is to get ITS OWN result - if the SSE state
+            # were not saved, it would get the other one's
             check("kazdy dostaje wlasny wynik, nie cudzy",
                   len(results) == 2
                   and results[0][1] != results[1][1]
