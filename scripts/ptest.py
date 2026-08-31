@@ -543,8 +543,14 @@ class Qemu:
             lines.append(chars.decode("cp437", "replace").rstrip())
         return "\n".join(lines).rstrip()
 
-    def wait_for(self, text, timeout=15):
-        """Waits until the given text appears on the VGA screen."""
+    def wait_for(self, text, timeout=30):
+        """Waits until the given text appears on the VGA screen.
+
+        Thirty seconds, not fifteen: a full run starts four machines at
+        once, and four kernels booting on one host take longer than one
+        does. The wait is for a THING TO HAPPEN, so waiting longer
+        weakens nothing - it only stops a busy host from being reported
+        as a broken kernel."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             screen = self.screen()

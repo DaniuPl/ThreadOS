@@ -100,6 +100,11 @@ static char pending[LINE_MAX];
 static int32_t running;
 static int32_t helper;         /* the other half of a pipe, 0 = none */
 static uint32_t shown;
+/* The way IN to the running program: the write end of the pipe that is
+   its stdin. What is typed while it runs goes there, which is the
+   whole difference between running a program and talking to one. -1
+   when there is nobody to talk to. */
+static int in_fd = -1;
 static int  cw = W0, ch = H0;  /* the content area, as it is now */
 static int  cols = 48, rows = 23;
 
@@ -264,17 +269,34 @@ static int32_t start_one(char *cmd)
     if (fd < 0)
         return -2;
 
+    /* A pipe for what the person types: the child reads its end as
+       descriptor zero and knows nothing about where the bytes come
+       from - which is exactly how a terminal is supposed to look from
+       inside a program. */
+    int pin[2];
+    if (sys_pipe(pin) < 0) {
+        sys_close(fd);
+        return -2;
+    }
+
     int64_t pid = sys_fork();
     if (pid == 0) {
         sys_dup2(fd, FD_STDOUT);
         sys_close(fd);
+        sys_dup2(pin[0], FD_STDIN);
+        sys_close(pin[0]);
+        sys_close(pin[1]);         /* the child must not hold OUR end */
         split(cmd);
         sys_exec(argv[0], argv);
         sys_exit(127);             /* exec comes back only on an error */
     }
     sys_close(fd);
-    if (pid < 0)
+    sys_close(pin[0]);
+    if (pid < 0) {
+        sys_close(pin[1]);
         return -2;
+    }
+    in_fd = pin[1];
     return (int32_t)pid;
 }
 
@@ -358,8 +380,12 @@ static void empty_out_file(void)
 static int32_t start_one(char *cmd)
 {
     empty_out_file();
-    int32_t pid = sys_spawn(cmd, OUTFILE, 0);
-    return pid < 0 ? -1 : pid;
+    int fd = -1;
+    int32_t pid = sys_spawn_talk(cmd, OUTFILE, &fd);
+    if (pid < 0)
+        return -1;
+    in_fd = fd;                    /* the way in to what we started */
+    return pid;
 }
 
 static int32_t start_pipe(char *left, char *right)
@@ -607,6 +633,10 @@ static void watch_running(void)
 
     show_new_output();             /* the last of it */
     running = 0;
+    if (in_fd >= 0) {
+        sys_close(in_fd);          /* nobody left to talk to */
+        in_fd = -1;
+    }
 
     /* The other half of a pipe has nothing left to do once the right
        side is over; collecting it keeps the process table clean. */
@@ -724,12 +754,35 @@ static void on_key(char c)
         return;
     }
     if (c == '\n' || c == '\r') {
-        /* One at a time: a second command while the first is still
-           running would have nowhere to put its output - both write to
-           the same file. */
-        if (running)
+        /* While a program runs, a line is not a command - it is what
+           the program is being told. It goes down the pipe and onto
+           the screen, because a terminal shows what was typed into it
+           whether a program is reading it or not. */
+        if (running) {
+            if (in_fd >= 0) {
+                input[ilen] = 0;
+                put_str(input);
+                put_char('\n');
+                input[ilen++] = '\n';
+                sys_write(in_fd, input, (uint32_t)ilen);
+            }
+            ilen = 0;
+            icur = 0;
+            input[0] = 0;
+            view = 0;
             return;
+        }
         run_line();
+        return;
+    }
+    /* Ctrl+D: no more input. The pipe closes and whoever was reading
+       sees the end of it - which for a shell means 'that is all'. */
+    if (c == 0x04) {
+        if (running && in_fd >= 0) {
+            put_str("^D\n");
+            sys_close(in_fd);
+            in_fd = -1;
+        }
         return;
     }
     if (c == '\b') {

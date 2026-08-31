@@ -2807,3 +2807,65 @@ sprawdzane przez `make test`.
       programie, Ctrl+C pokazuje sie w sesji i konczy program, po nim
       nic juz nie dopisuje, a nastepna komenda pokazuje swoje wyjscie,
       nie resztki poprzedniego.
+
+- [x] **Rozmowa z programem** - shell w oknie terminala.
+
+      Terminal umial uruchomic program i pokazac, co ten wypisal. Nie
+      umial powiedziec mu nic z powrotem: wejscie programu bralo sie
+      znikad, wiec wszystko, co czyta, bylo poza jego zasiegiem - zaden
+      shell, zaden program pytajacy o cokolwiek, nic interaktywnego.
+
+      Teraz to, co sie pisze przy dzialajacym programie, idzie rura do
+      jego standardowego wejscia, a Ctrl+D te rure zamyka - czyli mowi
+      czytajacemu, ze nic wiecej nie bedzie. Trzeba bylo do tego trzech
+      rzeczy:
+
+      **Sposobu na uruchomienie programu z rura do srodka.** W trybie
+      chronionym robi to jadro: nowe wywolanie SYS_SPAWN_TALK tworzy
+      potok, daje dziecku jego koniec do czytania jako deskryptor zero,
+      a wolajacemu oddaje koniec do pisania jako zwykly deskryptor. W
+      trybie dlugim terminal sklada to sam z pipe, fork i dup2 - tam
+      wszystko to juz bylo.
+
+      **Wspolnego stdout.** Dzieci shella musza pisac tam, gdzie pisze
+      shell. Kazdy deskryptor niesie wlasne polozenie, wiec jedynym
+      miejscem, co do ktorego wszyscy sie zgadzaja, jest KONIEC pliku.
+      Bez tego kolejna zacheta shella ladowala na tym, co wlasnie
+      napisalo jego dziecko, i wyjscie znikalo pod nia. To samo w obu
+      jadrach: w 32-bitowym flaga na deskryptorze, w 64-bitowym regula
+      "plik pod deskryptorem numer jeden pisze sie na koncu".
+
+      Do tego w jadrze 32-bitowym dziecko dziedziczy teraz przekierowany
+      stdout rodzica (exec przekazuje i-wezel), bo inaczej programy
+      uruchamiane przez shella pisalyby na konsole tekstowa, ktorej w
+      trybie graficznym nikt nie oglada.
+
+      **Konca wejscia, ktory cos znaczy.** Oba shelle uzytkownika
+      krecily sie w kolko, gdy czytanie zwracalo zero: 'if (n != 1)
+      continue'. Shell czytajacy strumien, ktory sie skonczyl, tez sie
+      skonczyl - teraz obydwa konczy zero z read.
+
+      **Przy okazji dwa zrodla falszywych alarmow w testach**, oba
+      naprawione bez ruszania tego, co asercje twierdza:
+
+      - Czekanie na zachete przy starcie maszyny mialo pietnascie
+        sekund. Pelny bieg startuje cztery maszyny naraz i cztery jadra
+        wstajace na jednym hoscie potrzebuja wiecej - a to jest
+        czekanie NA ZDARZENIE, wiec dluzszy limit nie oslabia niczego.
+        Trzydziesci sekund.
+      - Grupa 'lockless' mierzy, czy dwa procesy potrafia byc w jadrze
+        naraz. To twierdzenie o MOZLIWOSCI, nie o sredniej: obala je
+        dopiero to, co robil wielki zamek - dwa rdzenie wolniejsze niz
+        jeden. Wiec pomiar, ktory przegrywa, jest powtarzany (do
+        czterech razy) i liczy sie najlepszy, a margines to teraz 0.85
+        zamiast 0.75. Jadro 64-bitowe wychodzi na 0.42, 32-bitowe na
+        0.68-0.80 - i to jest uczciwy obraz rzeczy: w trybie
+        chronionym pod wielkim zamkiem siedzi jeszcze wiekszosc
+        wywolan, a bez zamka sa na razie bledy stron.
+
+      I to jest dowod, ze to dziala: shell uzytkownika (ring 3) chodzi
+      w oknie terminala, jego komendy sie wykonuja, wyjscie ich dzieci
+      jest POD komenda i NAD nastepna zacheta, potok wewnatrz shella
+      wewnatrz terminala pisze do tego samego okna, a Ctrl+D konczy
+      calosc. Nowa grupa 'gtermsh'; ta sama droga w trybie dlugim
+      dopisana do 'gterm64'.

@@ -65,6 +65,11 @@ struct exec_args {
     int in_pipe;                  /* stdin from a pipe (idx) or -1 */
     int out_pipe;                 /* stdout to a pipe (idx) or -1 */
     char out_file[FS_NAME_MAX + 1]; /* stdout to a file ("" = none) */
+    /* stdout inherited from whoever started us: the PFS inode of the
+       file the parent writes to, or -1. A program started by a
+       redirected program writes where its parent writes - which is
+       what makes a shell inside a terminal show anything at all. */
+    int out_inode;
     int out_append;               /* 1 = append (>>), 0 = truncate (>) */
     int anycore;                 /* 1 = any core may run it */
 };
@@ -432,9 +437,15 @@ static void exec_task(void *arg)
         file_set_pipe(0, a->in_pipe, 0);    /* stdin <- the read end */
     if (a->out_pipe >= 0)
         file_set_pipe(1, a->out_pipe, 1);   /* stdout -> the write end */
-    else if (a->out_file[0] &&
-             file_redirect_stdout(a->out_file, a->out_append) < 0)
-        printk("exec: nie moge przekierowac stdout do '%s'\n", a->out_file);
+    else if (a->out_file[0]) {
+        if (file_redirect_stdout(a->out_file, a->out_append) < 0)
+            printk("exec: nie moge przekierowac stdout do '%s'\n",
+                   a->out_file);
+    } else if (a->out_inode >= 0) {
+        /* Nobody said where to write, but whoever started us writes to
+           a file - so we write there too, after what is in it */
+        file_inherit_stdout(a->out_inode);
+    }
     kfree(a);
 
     /* From now on this task has an address space of its own; its frames
@@ -956,6 +967,9 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
     a->out_file[0] = '\0';
     a->out_append = 0;
     a->anycore = 0;
+    /* Whatever our own stdout is, the child gets the same - unless the
+       caller says otherwise a line further on */
+    a->out_inode = file_stdout_inode();
     return a;
 }
 
@@ -1005,6 +1019,46 @@ int exec_spawn_redirect(const char *cmdline, const char *outfile, int append)
     set_outfile(a, outfile);
     a->out_append = append;
     return task_id_of(task_create(prog, exec_task, a));
+}
+
+/* Starts a program whose stdin is a pipe held by the caller.
+ *
+ * Everything about the program is ordinary: it reads descriptor zero
+ * and knows nothing about where the bytes come from. What is new is
+ * that the other end belongs to a PROGRAM rather than to another stage
+ * of a pipeline - so a terminal can hand a running program what
+ * somebody is typing, letter by letter or line by line.
+ *
+ * The caller becomes the pipe's writer. Closing it is how the program
+ * is told there will be no more input; forgetting to close it leaves
+ * the program waiting for a line that will never come. */
+int exec_spawn_talk(const char *cmdline, const char *outfile, int *in_pipe)
+{
+    char prog[16];
+    struct exec_args *a = make_args(cmdline, prog);
+    if (!a)
+        return -1;
+
+    int idx = pipe_alloc();
+    if (idx < 0) {
+        kfree(a);
+        return -1;
+    }
+    a->in_pipe = idx;
+    set_outfile(a, outfile);
+
+    int pid = task_id_of(task_create(prog, exec_task, a));
+    if (pid < 0) {
+        /* Nobody was created, so nobody will free the arguments or
+           close the pipe - both are ours to undo */
+        pipe_close_reader(idx);
+        pipe_close_writer(idx);
+        kfree(a);
+        return -1;
+    }
+    if (in_pipe)
+        *in_pipe = idx;
+    return pid;
 }
 
 /* Runs a multi-stage pipeline 'a | b | c | ...': every stage's stdout

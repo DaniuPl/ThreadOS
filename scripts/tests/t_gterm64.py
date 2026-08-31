@@ -167,6 +167,33 @@ def main():
                   "(kod 127 od dziecka po nieudanym exec)",
                   "no such program" in "\n".join(rows))
 
+            # --- talking to a program: the shell inside the terminal ---
+            # The way in is built here, not by the kernel: pipe, fork,
+            # dup2. And the way out is a shared stdout - the shell's
+            # children write where the shell writes, at the end of it.
+            q.type_line("ush64")
+            rows = wait_for(q, "ush64$", geom)
+            check("shell uzytkownika wstal w oknie terminala",
+                  "ush64$" in "\n".join(rows))
+
+            q.type_line("uecho64 czesc")
+            rows = wait_for(q, "czesc", geom)
+            body = "\n".join(rows)
+            check("to, co wpisano, doszlo do shella i wykonalo sie",
+                  "ush64$ uecho64 czesc" in body)
+            cmd_at = next((i for i, r in enumerate(rows)
+                           if "ush64$ uecho64 czesc" in r), -1)
+            out_at = next((i for i in range(cmd_at + 1, len(rows))
+                           if rows[i] == "czesc"), -1)
+            check("a jego wyjscie jest POD komenda, nie nadpisane zacheta",
+                  cmd_at >= 0 and out_at > cmd_at)
+
+            q.sendkey("ctrl-d")
+            time.sleep(3)
+            rows = read_rows(q, **geom)
+            check("Ctrl+D konczy shella takze w trybie dlugim",
+                  "^D" in "\n".join(rows))
+
             # --- and the desktop is alive after all that --------------
             w, h, at = q.screen_raw()
             check("pulpit dziala dalej",

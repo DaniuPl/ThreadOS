@@ -324,9 +324,20 @@ static void handle(struct regs *r)
             return;
         }
         int slot = task64_fd_slot((int)a1);
-        int n = fs_write_at(slot, task64_fd_pos((int)a1), buf, (uint32_t)a3);
+        /* A file behind descriptor ONE is a redirected stdout, and a
+           redirected stdout is shared: the program and everything it
+           starts write into it. Each of them keeps an offset of its
+           own, so the only place they can all agree on is the end -
+           otherwise a shell's next prompt lands on top of what its
+           child has just written. */
+        uint32_t at = task64_fd_pos((int)a1);
+        if (a1 == FD_STDOUT) {
+            int sz = fs_size(slot);
+            at = sz > 0 ? (uint32_t)sz : 0;
+        }
+        int n = fs_write_at(slot, at, buf, (uint32_t)a3);
         if (n > 0)
-            task64_fd_advance((int)a1, (uint32_t)n);
+            task64_fd_seek((int)a1, at + (uint32_t)n);
         r->rax = (uint64_t)(int64_t)n;
         return;
     }

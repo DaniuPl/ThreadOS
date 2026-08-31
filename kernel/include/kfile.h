@@ -12,6 +12,13 @@
 /* The process file descriptor layer. fd 0/1/2 = keyboard/console,
    higher fds refer to PFS files. They operate on the fd table of the
    current task. */
+/* A free descriptor number, taken but not yet given a meaning - the
+   caller puts something behind it at once (see kfile.c) */
+int  file_reserve(void);
+/* stdout of a child of a redirected program: the same file, from its
+   end (see kfile.c) */
+int  file_inherit_stdout(int inode);
+int  file_stdout_inode(void);
 int  file_open(const char *name, int flags);
 int  file_close(int fd);
 int  file_read(int fd, void *buf, uint32_t len);

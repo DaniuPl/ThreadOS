@@ -22,6 +22,10 @@
    it into a SIGINT for the process holding the console (see keyboard.c). */
 #define KEY_INTR  0x03
 
+/* Ctrl+D: the end of what is being typed. Not a character either - it
+   is what closes the input of a program that is reading. */
+#define KEY_EOF   0x04
+
 /* Installs the IRQ1 handler and unmasks the keyboard interrupt */
 void keyboard_init(void);
 

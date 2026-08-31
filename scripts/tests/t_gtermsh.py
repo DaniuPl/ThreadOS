@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""ProtonOS smoke test: talking to a program from the terminal window.
+
+The terminal could start a program and show what it printed. What it
+could not do is say anything back to it - the program's input came from
+nowhere, so anything that reads is anything the terminal could not run:
+no shell, no program that asks a question, nothing interactive at all.
+
+Now what is typed while a program runs goes down a pipe into that
+program's stdin, and Ctrl+D closes it, which is how a reader is told
+there will be no more. Two things had to be built for it:
+
+  A way to START a program with a pipe into it. In protected mode the
+  kernel does it (spawn keeps the write end and hands it back as an
+  ordinary descriptor); in long mode the terminal builds it itself out
+  of pipe, fork and dup2.
+
+  A shared stdout. A shell's children have to write where the shell
+  writes - and each descriptor carries an offset of its own, so the
+  only place they can all agree on is the END of the file. Without that
+  the shell's next prompt lands on top of what its child has just
+  written, and the output disappears under it.
+
+Which is why the proof here is the user shell running INSIDE the
+terminal window: it reads what is typed, its children's output appears
+under the command that made it and above the next prompt, and Ctrl+D
+ends it.
+
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
+"""
+
+import os
+import sys
+import tempfile
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ptest import *          # noqa: F401,F403
+from ptest import check, summary, font8x8
+
+WX, WY = 94, 54
+CX, CY = WX + 1, WY + 11
+PAD, ROW_H = 4, 10
+COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
+
+
+def read_rows(q, ox, oy, cols, rows):
+    w, h, at = q.screen_raw()
+    font = font8x8()
+    counts = {}
+    for r in range(rows):
+        for y in range(8):
+            for x in range(ox, ox + cols * 8, 2):
+                p = at(x, oy + r * ROW_H + y)
+                counts[p] = counts.get(p, 0) + 1
+    bg = max(counts, key=counts.get)
+
+    out = []
+    for r in range(rows):
+        line = ""
+        for c in range(cols):
+            pattern = []
+            for y in range(8):
+                bits = 0
+                for x in range(8):
+                    if at(ox + c * 8 + x, oy + r * ROW_H + y) != bg:
+                        bits |= 1 << x
+                pattern.append(bits)
+            line += font.get(tuple(pattern), " " if not any(pattern) else "?")
+        out.append(line.rstrip())
+    return out
+
+
+def wait_line(q, want, geom, tries=20):
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **geom)
+        if any(want in r for r in seen):
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
+def index_of(rows, want):
+    for i, r in enumerate(rows):
+        if want in r:
+            return i
+    return -1
+
+
+def main():
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+    slog = tempfile.mktemp(suffix=".log")
+    geom = dict(ox=CX + PAD, oy=CY + PAD, cols=COLS, rows=ROWS)
+
+    try:
+        q = Qemu(KERNEL, INITRD, disk, serial=slog)
+        try:
+            check("pulpit wstal", q.wait_desktop(timeout=40))
+            q.mouse_home()
+
+            q.mouse_goto(24, 192)          # the 'Term' icon
+            q.mouse_click()
+            time.sleep(3)
+            q.mouse_goto(CX + 200, CY + 150)
+            q.mouse_click()                # focus
+            time.sleep(1)
+            q.mouse_goto(600, 380)
+            time.sleep(1)
+
+            # --- a shell inside the terminal --------------------------
+            q.type_line("sh")
+            rows = wait_line(q, "ush:", geom)
+            body = "\n".join(rows)
+            check("shell uzytkownika wstal w oknie terminala",
+                  "shell uzytkownika" in body)
+            check("i pokazal wlasna zachete", "ush:/>" in body)
+            check("terminal wie, ze cos w nim chodzi", "running" in body)
+
+            # --- what is typed reaches it -----------------------------
+            q.type_line("echo czesc")
+            rows = wait_line(q, "czesc", geom)
+            check("to, co wpisano, doszlo do shella (odbil komende)",
+                  index_of(rows, "ush:/> echo czesc") >= 0)
+
+            # The order is the point: the command, then its output, then
+            # the next prompt. Getting this wrong means the child's
+            # output was written over by the shell.
+            cmd_at = index_of(rows, "ush:/> echo czesc")
+            out_at = -1
+            for i in range(cmd_at + 1, len(rows)):
+                if rows[i] == "czesc":
+                    out_at = i
+                    break
+            check("wyjscie programu jest POD komenda, ktora go wywolala",
+                  out_at > cmd_at)
+            nxt = -1
+            for i in range(out_at + 1, len(rows)):
+                if rows[i].startswith("ush:/>"):
+                    nxt = i
+                    break
+            check("a nastepna zacheta pod wyjsciem, nie na nim",
+                  nxt > out_at)
+
+            # --- and a real command with more output ------------------
+            q.type_line("seq 3")
+            rows = wait_line(q, "seq 3", geom)
+            time.sleep(1.5)
+            rows = read_rows(q, **geom)
+            check("liczby z 'seq 3' widac w kolejnosci",
+                  "1" in rows and "2" in rows and "3" in rows)
+
+            # A pipeline INSIDE the shell inside the terminal
+            q.type_line("seq 9 | wc")
+            rows = wait_line(q, "wierszy=9", geom)
+            check("potok wewnatrz shella tez pisze do okna",
+                  "wierszy=9" in "\n".join(rows))
+
+            # --- Ctrl+D ends it ---------------------------------------
+            q.sendkey("ctrl-d")
+            time.sleep(3)
+            rows = read_rows(q, **geom)
+            body = "\n".join(rows)
+            check("Ctrl+D widac w sesji", "^D" in body)
+            check("shell skonczyl sie i terminal przestal go pilnowac",
+                  "running" not in body)
+
+            # --- the terminal is its own again ------------------------
+            q.type_line("date")
+            rows = wait_line(q, "2030-", geom)
+            check("po zakonczonym shellu terminal bierze wlasne komendy",
+                  "2030-06-13" in "\n".join(rows))
+        finally:
+            q.close()
+    finally:
+        for f in (disk, slog):
+            if os.path.exists(f):
+                os.unlink(f)
+
+    return summary()
+
+
+sys.exit(main())

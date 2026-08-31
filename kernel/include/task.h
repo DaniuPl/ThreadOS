@@ -22,6 +22,12 @@ struct file_desc {
     int inode;            /* FD_FILE: PFS inode index */
     uint32_t off;         /* FD_FILE: current offset */
     int pipe;             /* FD_PIPE: pipe index */
+    /* FD_FILE: every write goes to the END of the file, whatever the
+       offset says. A stream shared by a program and its children -
+       stdout redirected to a file - needs this: they each keep an
+       offset of their own, so the only place they can all agree on is
+       the end. */
+    int at_end;
     int readable;
     int writable;
 };

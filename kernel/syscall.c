@@ -27,6 +27,7 @@
 #include "include/keyboard.h"
 #include "include/exec.h"
 #include "include/kfile.h"
+#include "include/pipe.h"
 #include "include/fs.h"
 #include "include/pmm.h"
 #include "include/rtc.h"
@@ -496,6 +497,40 @@ void syscall_handler(struct regs *r)
     case SYS_LEVEL:
         r->eax = (uint32_t)task_level();
         break;
+    case SYS_SPAWN_TALK: {
+        char cmd[PATH_MAX], out[PATH_MAX];
+        if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        out[0] = '\0';
+        if (r->ecx && user_str(out, r->ecx, sizeof(out)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        int idx = -1;
+        int pid = exec_spawn_talk(cmd, r->ecx ? out : (const char *)0, &idx);
+        if (pid < 0) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        /* The write end becomes an ordinary descriptor of ours, so
+           writing to the program is writing to a file number - which is
+           what every other program already knows how to do. */
+        int fd = file_reserve();
+        if (fd < 0) {
+            pipe_close_writer(idx);
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        file_set_pipe(fd, idx, 1);
+        if (r->edx && user_put(r->edx, &fd, sizeof(fd)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)pid;
+        break;
+    }
     case SYS_TRYWAIT: {
         if (task_alive((int)r->ebx)) {
             r->eax = (uint32_t)-3;         /* still running */

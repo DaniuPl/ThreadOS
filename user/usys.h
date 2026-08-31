@@ -59,6 +59,7 @@
 #define SYS_DROP       52
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
+#define SYS_SPAWN_TALK 55
 
 #define FS_NAME_MAX  63
 
@@ -647,6 +648,21 @@ static inline int32_t sys_level(void)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_LEVEL) : "memory");
+    return ret;
+}
+
+/* Starts a program and keeps a way to TALK to it: its stdin is a pipe
+   whose write end comes back in '*fd'. Writing to that descriptor is
+   the program's input; closing it tells the program there will be no
+   more. Returns the pid, or -1. */
+static inline int32_t sys_spawn_talk(const char *cmdline, const char *outfile,
+                                     int *fd)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SPAWN_TALK), "b"(cmdline), "c"(outfile), "d"(fd)
+                     : "memory");
     return ret;
 }
 

@@ -58,7 +58,16 @@ static uint32_t read_line(void)
     uint32_t n = 0;
     for (;;) {
         char c;
-        if (sys_read(STDIN, &c, 1) != 1)
+        int32_t got = sys_read(STDIN, &c, 1);
+        /* Nothing more will come: whoever was typing has closed the
+           input (Ctrl+D in the terminal, or a pipe that has ended). A
+           shell reading a stream that has finished has finished too -
+           spinning here forever is what it used to do. */
+        if (got == 0) {
+            print("\n");
+            sys_exit(0);
+        }
+        if (got != 1)
             continue;
         if (c == '\n') {
             print("\n");

@@ -66,6 +66,11 @@
    running. Without it a program watching another one has to choose
    between blocking and not knowing. */
 #define SYS_TRYWAIT    54
+/* Starts a program and keeps a way to TALK to it: ebx=command line,
+   ecx=file for its stdout, edx=&fd. The program's stdin is a pipe
+   whose write end comes back as a descriptor of ours - closing it is
+   how the program is told there will be no more input. -> pid */
+#define SYS_SPAWN_TALK 55
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

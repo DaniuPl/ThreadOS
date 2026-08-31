@@ -121,8 +121,12 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         return KBD_NOTHING;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
-    if (ctrl_pressed && c == 'c')       /* the other Ctrl combinations - not yet */
+    if (ctrl_pressed && c == 'c')
         c = KEY_INTR;
+    /* Ctrl+D: not a character but 'that is all I am going to type'.
+       Whoever is reading turns it into the end of the input. */
+    if (ctrl_pressed && c == 'd')
+        c = KEY_EOF;
     if (!c)
         return KBD_NOTHING;
 

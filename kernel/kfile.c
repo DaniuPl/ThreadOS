@@ -24,6 +24,18 @@ static void console_write(const char *buf, uint32_t len)
         printk("%c", buf[i]);
 }
 
+/* A free descriptor number, taken but not yet given a meaning. Whoever
+   asks for it puts something behind it at once (a pipe, say) - and
+   until they do, the descriptor is not usable for anything. */
+int file_reserve(void)
+{
+    struct file_desc *fds = task_fds();
+    for (int i = 3; i < TASK_MAX_FD; i++)
+        if (!fds[i].used)
+            return i;
+    return -1;
+}
+
 int file_open(const char *name, int flags)
 {
     struct file_desc *fds = task_fds();
@@ -46,6 +58,7 @@ int file_open(const char *name, int flags)
 
     fds[fd].used = 1;
     fds[fd].kind = FD_FILE;
+    fds[fd].at_end = 0;
     fds[fd].inode = idx;
     fds[fd].off = 0;
     fds[fd].readable = (flags & O_READ) ? 1 : 0;
@@ -118,9 +131,14 @@ int file_write(int fd, const void *buf, uint32_t len)
     case FD_PIPE:
         return pipe_write(fds[fd].pipe, buf, len);
     case FD_FILE: {
-        int n = fs_write_at(fds[fd].inode, fds[fd].off, buf, len);
+        uint32_t at = fds[fd].off;
+        if (fds[fd].at_end) {
+            int sz = fs_size(fds[fd].inode);
+            at = sz > 0 ? (uint32_t)sz : 0;
+        }
+        int n = fs_write_at(fds[fd].inode, at, buf, len);
         if (n > 0)
-            fds[fd].off += (uint32_t)n;
+            fds[fd].off = at + (uint32_t)n;
         return n;
     }
     }
@@ -134,6 +152,42 @@ int file_seek(int fd, uint32_t off)
         return -1;
     fds[fd].off = off;
     return (int)off;
+}
+
+/* The same, but for a file that is already open somewhere else: the
+ * child of a redirected program writes into the SAME file its parent
+ * writes into, starting at the end of what is already there.
+ *
+ * Real systems share one open file between parent and child, offset
+ * and all. Here every descriptor carries its own offset, so what is
+ * shared is the file and the rule 'append': two programs writing at
+ * once would tread on each other, one after another - which is how a
+ * shell runs them - do not.
+ */
+/* The file the running task writes its stdout into, or -1 when its
+   stdout is the console or a pipe. */
+int file_stdout_inode(void)
+{
+    struct file_desc *fds = task_fds();
+    if (fds[1].used && fds[1].kind == FD_FILE)
+        return fds[1].inode;
+    return -1;
+}
+
+int file_inherit_stdout(int inode)
+{
+    if (inode < 0)
+        return -1;
+    int sz = fs_size(inode);
+    struct file_desc *fds = task_fds();
+    fds[1].used = 1;
+    fds[1].kind = FD_FILE;
+    fds[1].inode = inode;
+    fds[1].off = sz > 0 ? (uint32_t)sz : 0;
+    fds[1].readable = 0;
+    fds[1].writable = 1;
+    fds[1].at_end = 1;
+    return 0;
 }
 
 int file_redirect_stdout(const char *name, int append)
@@ -157,6 +211,10 @@ int file_redirect_stdout(const char *name, int append)
     fds[1].off = off;
     fds[1].readable = 0;
     fds[1].writable = 1;
+    /* Everything that writes into this file - this program and every
+       program it starts - writes at its end. Otherwise the parent's
+       next line lands on top of what its child has just written. */
+    fds[1].at_end = 1;
     return 0;
 }
 

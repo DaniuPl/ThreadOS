@@ -22,6 +22,15 @@ int exec_spawn_anycore(const char *cmdline);
    the file outfile. append=0 truncates the file, append=1 appends (>>). */
 int exec_spawn_redirect(const char *cmdline, const char *outfile, int append);
 
+/* The same, plus a pipe into the program's stdin.
+ *
+ * The caller gets the write end and can put into it whatever a person
+ * types - which is the whole difference between running a program and
+ * talking to one. '*in_pipe' comes back as the pipe's index; the
+ * caller is then its writer and has to close it (pipe_close_writer),
+ * or the program will wait for more input forever. */
+int exec_spawn_talk(const char *cmdline, const char *outfile, int *in_pipe);
+
 /* Runs a multi-stage pipeline 'a | b | c | ...' (parallel processes).
    'pipeline' is the whole line with '|' separators. When outfile is
    not NULL, the last stage's stdout also goes to the file. Returns the

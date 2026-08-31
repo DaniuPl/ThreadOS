@@ -257,6 +257,13 @@ void _start(void)
         for (;;) {
             char c;
             int64_t n = sys_read(FD_STDIN, &c, 1);
+            /* Nothing more will come: the input has been closed (Ctrl+D
+               in the terminal, or a pipe that has ended). A shell
+               reading a stream that has finished has finished too. */
+            if (n == 0 && !interrupted) {
+                print("\n");
+                sys_exit(0);
+            }
             if (n <= 0) {
                 /* A signal interrupted the wait. The handler has already run -
                    what is left is to abandon the line begun and start
