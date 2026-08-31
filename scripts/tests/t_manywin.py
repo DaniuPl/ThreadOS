@@ -120,7 +120,7 @@ def main():
 
             w, h, at = q.screen_raw()
             ty = h - TB_H
-            row = ty + 1                  # above the letters on the buttons
+            row = ty + 10                 # below the letters on the buttons
 
             before = buttons(at, w, row)
             # The kernel's own two windows are there from the start - so

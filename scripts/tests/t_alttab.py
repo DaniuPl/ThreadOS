@@ -103,7 +103,7 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 1
+            row = h - TB_H + 10
             spans = buttons(at, w, row)
             check("trzy aplikacje maja swoje przyciski (razem %d z oknami "
                   "jadra)" % len(spans), len(spans) == 5)

@@ -54,7 +54,10 @@ def read_clock(q):
     """The digits off the taskbar, read through the kernel's own font."""
     w, h, at = q.screen_raw()
     x0 = clock_x0(w)
-    y0 = h - TB_H + 3
+    # Two pixels down from the top of the bar: the clock sits in a
+    # field sunk into it, and the field's bottom edge would otherwise
+    # run through the last row of the digits
+    y0 = h - TB_H + 2
 
     counts = {}
     for y in range(y0, y0 + 8):
@@ -145,7 +148,12 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 1
+            # The bottom row of a button: its top edge is a lit line
+            # the colour of the bar itself (so a scan along the top row
+            # finds nothing), and the rows between carry the label -
+            # whose white letters cut a button into pieces. The bottom
+            # edge is one colour all the way across.
+            row = h - TB_H + 10
             got = buttons(at, w, row)
             check("dziewiec okien ma swoje przyciski na pasku (jest %d)"
                   % len(got), len(got) >= 9)

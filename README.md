@@ -43,7 +43,11 @@ swap to disk, signals, pipes, four virtual consoles, USB keyboard
 writing*, a stack that grows on demand, processes **and the threads of
 one process** running in ring 3 on every core — a changed mapping is
 sent to the other cores and awaited before the frame is reused — TLS
-1.3 with certificate verification, and a graphical desktop with
+1.3 with certificate verification, and a graphical desktop drawn flat — one colour to a surface, one line
+between two of them, no shadows, a background that darkens towards the
+floor, and a single accent colour saying the one thing worth saying:
+which window is listening, on its title bar and on its taskbar button
+alike. Icons carry pictures rather than labels. With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end
 and insists if it will not — twelve of them at once, on a taskbar that

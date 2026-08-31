@@ -2925,3 +2925,97 @@ sprawdzane przez `make test`.
       sasiedni nie ma), wklejone jest dokladnie to, co bylo pod mysza,
       zaznaczenie przez dwie linie bierze obie, a samo klikniecie
       zaznaczenie kasuje.
+
+- [x] **Wyglad pulpitu** - glebia zamiast plaskich prostokatow.
+
+      Wszystko na ekranie bylo rysowane jednym wywolaniem: wypelnij ten
+      prostokat tym kolorem. Dzialalo i tak wygladalo - plaskie tlo,
+      plaskie okna z czarna obwodka, kafelki z napisem pod spodem. Nie
+      bylo czym powiedziec, ktore okno slucha, ani ze okno jest NAD
+      pulpitem, a nie w nim, ani co jest na ikonie poza jej podpisem.
+
+      Ekran ma osiem bitow na piksel i wlasna palete, wiec odcien
+      kosztuje jeden indeks i nic wiecej. Z tego zrobiona jest cala ta
+      glebia:
+
+      **Swiatlo pada z gory z lewej** - i pada tak wszedzie. Krawedz
+      jasna u gory i po lewej, ciemna u dolu i po prawej, to okno
+      wypukle; odwrocenie tych dwoch linii to okno wglebione. Stad
+      przycisk, ktory wystaje, i pole zegara, ktore jest wpuszczone w
+      pasek - i stad przycisk okna z ogniskiem, ktory jest WCISNIETY,
+      a nie tylko innego koloru.
+
+      **Cien pod oknem**: nie czarny, tylko przyciemnione tlo - czern na
+      ciemnym pulpicie jest dziura, a nie cieniem.
+
+      **Tlo to szesnascie pasm**, ciemniejacych ku dolowi. Szesnascie, a
+      nie szesc, bo szesc daje sie policzyc okiem: stopnie musza byc
+      dosc male, zeby to bylo zbocze, a nie schody. Zakres jest waski
+      celowo - maszyna ustawiona na morskie ma wygladac morsko z kazdego
+      miejsca ekranu.
+
+      **Pasek tytulu w dwoch kolorach, i w innej parze, gdy okno nie ma
+      ogniska.** To jest zmiana funkcjonalna, nie ozdoba: przedtem nie
+      dalo sie zobaczyc, ktore okno przyjmie klawisz. Teraz widac to z
+      drugiego konca ekranu.
+
+      **Ikony maja rysunki.** Kolorowy prostokat z wyrazem pod spodem to
+      etykieta, a nie ikona - nic nie mowi, dopoki nie zostanie
+      przeczytana. Obrazek rozpoznaje sie przed przeczytaniem i po to
+      wlasnie sa ikony. Dwanascie na dwanascie pikseli to nie jest duzo
+      miejsca, wiec kazdy z nich to jedna mysl bez szczegolow: okno,
+      tarcza zegara, teczka, slupki wykresu, znak zachety, kula ziemska,
+      kolo zebate.
+
+      Nowa grupa 'look'. Wygladu nie da sie zapisac jako "ladny", wiec
+      asercje mowia o STRUKTURZE, ktora oko czyta: tlo ciemnieje ku
+      dolowi stopniami, ktorych nie widac; okno rzuca cien ciemniejszy
+      od tla obok; krawedzie sa jasne u gory i ciemne u dolu; przycisk z
+      ogniskiem ma to odwrocone; niebieski pasek tytulu jest dokladnie
+      jeden i przenosi sie klikiem; ikona ma na sobie ciemne piksele, a
+      dwie ikony maja rozne.
+
+      Poprawek w starych testach bylo sporo i wszystkie tego samego
+      rodzaju: sondy trafialy w piksel, ktory zmienil znaczenie -
+      pasek tytulu okna bez ogniska nie jest juz niebieski, przyciski
+      paska maja teraz krawedzie, a napisy przesunely sie o piksel, zeby
+      krawedz nie przecinala ostatniego rzedu liter. Zadna z tych
+      asercji nie zostala oslabiona: kazda mowi to samo co przedtem, w
+      miejscu, w ktorym to teraz widac.
+
+- [x] **Plasko i czysto** - to samo powiedziane kolorem zamiast reliefem.
+
+      Poprzedni krok dodal glebie: swiatlo z gory z lewej, cienie pod
+      oknami, wypukle przyciski, wglebione pola. Dzialalo, ale wygladalo
+      jak system sprzed trzydziestu lat - a chcemy nowoczesnie i czysto.
+      Wiec relief poszedl, a zostalo to, co mowil:
+
+      **Powierzchnia to jeden kolor.** Zadnych gradientow na przyciskach,
+      zadnych krawedzi jasnych u gory i ciemnych u dolu. To, co dzieli
+      dwie powierzchnie, to jedna linia o odcien ciemniejsza.
+
+      **Cieni nie ma.** Ani pod oknem, ani pod ikona, ani pod menu.
+
+      **Akcent jest jeden i mowi jedna rzecz**: ktore okno slucha. Pasek
+      tytulu i przycisk na pasku zadan tego okna sa niebieskie, reszta
+      jest szara. Skoro to jedyna rzecz, ktora krzyczy, to nic z nia nie
+      konkuruje.
+
+      **Przyciski w pasku tytulu to same znaki** - bez ramek dookola. Co
+      robia, mowi znak; ramka dokladalaby tylko tuszu. Wyjatkiem jest
+      zamkniecie, ktore zostaje czerwone, bo akurat ono ma byc nie do
+      pomylenia.
+
+      **Ikony to plaskie kafelki z bialym rysunkiem.** Bez cienia, bez
+      krawedzi - ksztalt w kolorze akcentu i tak rozni sie od pulpitu
+      dosc, zeby byc rzecza.
+
+      Zostalo jedno z poprzedniego kroku, bo nie jest reliefem tylko
+      przestrzenia: tlo w szesnastu pasmach, ciemniejacych ku dolowi.
+
+      Grupa 'look' mowi teraz to, co widac naprawde: wnetrze okna jest
+      JEDNYM kolorem (cztery odczyty, wszystkie rowne - inaczej byloby
+      to gradientem albo krawedzia), dzieli je od pulpitu jedna linia,
+      pod oknem nie ma nic, przycisk z ogniskiem ma kolor akcentu i jest
+      plaski (gora i dol tego samego koloru), a kafelek ikony jest
+      plaski i ma na sobie biale piksele rysunku.

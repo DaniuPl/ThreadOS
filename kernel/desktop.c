@@ -21,15 +21,44 @@
 #include "include/config.h"
 #include "include/rtc.h"
 
-/* Desktop palette indices (set in desktop_thread) */
+/* Desktop palette indices (set in desktop_thread)
+ *
+ * The screen is eight bits per pixel with a palette of our own, so a
+ * shade costs an index and nothing else. That is what the depth here
+ * is made of: an edge lit from the top left and shaded at the bottom
+ * right, a title bar that is not one flat colour, a background that
+ * darkens towards the floor. Every one of them is a rectangle in a
+ * slightly different entry of the same table.
+ */
 #define COL_BLACK  0
 #define COL_TITLE  3      /* the window title bar (blue) */
 #define COL_WHITE  4
-#define COL_DESK   6      /* the desktop background (dark blue) */
+#define COL_DESK   6      /* the desktop background (the middle shade) */
 #define COL_BAR    7      /* the top bar (light grey) */
 #define COL_WIN    8      /* the window background (grey) */
 #define COL_TBBTN  9      /* a window button on the taskbar (dark grey) */
 #define COL_ICON   10     /* a desktop icon (orange) */
+
+/* --- the few tones a flat surface needs -----------------------------
+ *
+ * No lit and shaded edges, no shadows, no gradient on a button: a
+ * surface is one colour, and what separates two surfaces is a single
+ * line a shade darker. What is left to say with colour is then the
+ * only thing worth saying with it - which window is listening.
+ */
+#define COL_LINE     11   /* the line between one surface and the next */
+#define COL_WIN_HI   12   /* a lighter surface: fields, the menu */
+#define COL_TITLE_OFF 13  /* the title bar of a window without focus */
+#define COL_TBBTN_OFF 14  /* a taskbar button that is not the focused one */
+#define COL_DIM      15   /* text on a surface that is not the accent */
+#define COL_ICON_LO  16   /* the icon tile, a shade down */
+
+/* The background is a gradient: sixteen bands, sixteen entries,
+   darkening towards the floor. Sixteen rather than six because six can
+   be counted with the eye - the steps have to be small enough that
+   what is seen is a slope and not a staircase. */
+#define COL_DESK0    20
+#define COL_DESK_N   16
 
 #define TITLE_H 10
 
@@ -49,6 +78,49 @@ static struct icon icons[] = {
     {8, 180, "Term", "gterm"},
     {8, 220, "Web", "gweb"},
     {8, 260, "Ustaw", "gsettings"},
+};
+
+/* What each icon has drawn on it: twelve rows of twelve pixels, in the
+ * order of the table above.
+ *
+ * A coloured rectangle with a word under it is a label, not an icon -
+ * it says nothing until it is read. A picture is recognised before it
+ * is read, which is the whole reason icons exist. Twelve by twelve is
+ * not much room, so each of these is one idea and no detail: a window,
+ * a clock face, a folder, bars of a chart, a prompt, a globe, a
+ * cogwheel.
+ *
+ * The bits are read from the top: 0x800 is the leftmost pixel.
+ */
+static const uint16_t icon_art[][12] = {
+    {   /* App - a little window */
+        0xFFF, 0x801, 0xFFF, 0x801, 0x801, 0x801,
+        0x801, 0x801, 0x801, 0x801, 0x801, 0xFFF,
+    },
+    {   /* Zegar - a clock face with hands */
+        0x1F8, 0x30C, 0x606, 0xC23, 0xC23, 0xC23,
+        0xC3B, 0xC03, 0x606, 0x30C, 0x1F8, 0x000,
+    },
+    {   /* Pliki - a folder */
+        0x000, 0xF00, 0xFFE, 0x802, 0x802, 0x802,
+        0x802, 0x802, 0x802, 0x802, 0xFFE, 0x000,
+    },
+    {   /* Monitor - bars of a chart */
+        0x000, 0x030, 0x030, 0x0F0, 0x0F0, 0x3F0,
+        0x3FC, 0xFFC, 0xFFC, 0xFFF, 0xFFF, 0x000,
+    },
+    {   /* Term - a prompt and a place to type */
+        0x000, 0xC00, 0x600, 0x300, 0x180, 0x0C0,
+        0x180, 0x300, 0x600, 0xC00, 0x000, 0x0FC,
+    },
+    {   /* Web - a globe with meridians */
+        0x1F8, 0x3FC, 0x6DE, 0xCDB, 0xCDB, 0xFFF,
+        0xCDB, 0xCDB, 0x6DE, 0x3FC, 0x1F8, 0x000,
+    },
+    {   /* Ustaw - a cogwheel */
+        0x0F0, 0x2F4, 0x7FE, 0xFFF, 0xF0F, 0xE07,
+        0xE07, 0xF0F, 0xFFF, 0x7FE, 0x2F4, 0x0F0,
+    },
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
@@ -299,7 +371,7 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 }
 
 static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
-static int close_y(const struct window *w) { return w->y + 1; }
+static int close_y(const struct window *w) { return w->y + 2; }
 static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
 static int max_x(const struct window *w)   { return w->x + w->w - 3 * CLOSE_SZ - 3; }
 static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
@@ -395,34 +467,60 @@ static void draw_window(const struct window *win)
 {
     if (win->minimized)            /* minimised - visible only on the bar */
         return;
-    /* The window background with a black frame */
+
+    /* A flat surface with one line around it. No shadow underneath and
+       no lit edge: what tells a window from the desktop is that it is
+       a different colour, and one line is enough to say where it
+       ends. */
     video_fill_rect(win->x, win->y, win->w, win->h, COL_WIN);
-    video_fill_rect(win->x, win->y, win->w, 1, COL_BLACK);
-    video_fill_rect(win->x, win->y + win->h - 1, win->w, 1, COL_BLACK);
-    video_fill_rect(win->x, win->y, 1, win->h, COL_BLACK);
-    video_fill_rect(win->x + win->w - 1, win->y, 1, win->h, COL_BLACK);
-    /* The title bar plus the name */
-    video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H, COL_TITLE);
-    video_draw_string(win->x + 3, win->y + 2, win->title, COL_WHITE);
+    video_fill_rect(win->x, win->y, win->w, 1, COL_LINE);
+    video_fill_rect(win->x, win->y + win->h - 1, win->w, 1, COL_LINE);
+    video_fill_rect(win->x, win->y, 1, win->h, COL_LINE);
+    video_fill_rect(win->x + win->w - 1, win->y, 1, win->h, COL_LINE);
+
+    /* The title bar: the accent colour when the window is listening,
+       plain grey when it is not. One flat colour either way - the
+       difference is the whole message, so nothing else should be
+       competing with it. */
+    int focused = focus_idx >= 0 && win == &wins[focus_idx];
+    video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H,
+                    focused ? COL_TITLE : COL_TITLE_OFF);
+    video_fill_rect(win->x + 1, win->y + 1 + TITLE_H, win->w - 2, 1,
+                    COL_LINE);
+    video_draw_string(win->x + 4, win->y + 2, win->title,
+                      focused ? COL_WHITE : COL_DIM);
     /* The maximise button, and the minimise one next to the close.
        'O' means it will fill the screen, 'o' that it will go back to
        the size it had - the same button, and which of the two it is
        has to be visible without clicking it. */
-    video_fill_rect(max_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
-    video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O',
-                    COL_WHITE);
-    video_fill_rect(min_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
-    video_draw_char(min_x(win), close_y(win), '_', COL_WHITE);
-    /* The close button [x] in the right corner of the bar */
+    /* The buttons are the glyphs themselves - no boxes drawn round
+       them. What they do is said by the sign; a frame adds nothing but
+       ink. The one exception is the close button, which is red,
+       because that one had better be unmistakable. */
+    uint8_t sign = focused ? COL_WHITE : COL_DIM;
+    video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O', sign);
+    video_draw_char(min_x(win), close_y(win), '_', sign);
     video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_RED);
     video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
-    /* The resize grip (bottom right corner) for kernel windows */
-    if (resizable(win))
-        video_fill_rect(grip_x(win), grip_y(win), GRIP_SZ, GRIP_SZ, COL_BAR);
+    /* The grip: three plain lines running the way the corner is
+       pulled. One colour, no shading - it is a hint, not a handle to
+       be modelled. */
+    if (resizable(win)) {
+        int gx = grip_x(win), gy = grip_y(win);
+        for (int d = 2; d < GRIP_SZ; d += 3)
+            for (int k = 0; k <= GRIP_SZ - 2 - d; k++)
+                video_putpixel(gx + d + k, gy + GRIP_SZ - 2 - k, COL_LINE);
+    }
 
     /* An optional action button plus a click counter */
     if (win->has_button) {
-        video_fill_rect(btn_x(win), btn_y(win), BTN_W, BTN_H, COL_BAR);
+        video_fill_rect(btn_x(win), btn_y(win), BTN_W, BTN_H, COL_WIN_HI);
+        video_fill_rect(btn_x(win), btn_y(win), BTN_W, 1, COL_LINE);
+        video_fill_rect(btn_x(win), btn_y(win) + BTN_H - 1, BTN_W, 1,
+                        COL_LINE);
+        video_fill_rect(btn_x(win), btn_y(win), 1, BTN_H, COL_LINE);
+        video_fill_rect(btn_x(win) + BTN_W - 1, btn_y(win), 1, BTN_H,
+                        COL_LINE);
         video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
         draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
                  COL_WHITE);
@@ -798,14 +896,53 @@ static void toggle_max(int i)
 }
 
 /* Draws the taskbar at the bottom and (if open) the launch menu */
+/* The background: sixteen bands, darkening towards the floor.
+ *
+ * A flat colour is what a machine draws when nobody has thought about
+ * it. Sixteen rectangles cost sixteen palette entries and one loop,
+ * and the screen stops looking like a fill. */
+static void draw_background(void)
+{
+    int h = taskbar_y();
+    for (int i = 0; i < COL_DESK_N; i++) {
+        int y0 = i * h / COL_DESK_N;
+        int y1 = (i + 1) * h / COL_DESK_N;
+        video_fill_rect(0, y0, video_w(), y1 - y0,
+                        (uint8_t)(COL_DESK0 + i));
+    }
+    /* Under the bar there is nothing to see, but the bar is drawn last
+       and this keeps the frame whole if it is ever moved */
+    video_fill_rect(0, h, video_w(), video_h() - h,
+                    (uint8_t)(COL_DESK0 + COL_DESK_N - 1));
+}
+
 /* Draws the icons on the desktop background (a tile plus a caption) */
+/* One icon's picture, drawn where the tile is */
+static void draw_icon_art(int k, int x, int y)
+{
+    if (k < 0 || k >= (int)(sizeof(icon_art) / sizeof(icon_art[0])))
+        return;
+    for (int row = 0; row < 12; row++)
+        for (int col = 0; col < 12; col++)
+            if (icon_art[k][row] & (0x800 >> col))
+                /* White on the tile's colour: one flat mark, nothing
+                   behind it and nothing under it */
+                video_putpixel(x + col, y + row, COL_WHITE);
+}
+
 static void draw_icons(void)
 {
     for (int k = 0; k < ICON_N; k++) {
         const struct icon *ic = &icons[k];
+        /* The tile: one flat colour with the picture on it. No
+           shadow, no edge - a shape in the accent colour is already
+           different enough from a desktop to be a thing. */
         video_fill_rect(ic->x, ic->y, ICON_W, ICON_H, COL_ICON);
-        video_fill_rect(ic->x, ic->y, ICON_W, 1, COL_BLACK);
-        video_fill_rect(ic->x, ic->y + ICON_H - 1, ICON_W, 1, COL_BLACK);
+        draw_icon_art(k, ic->x + (ICON_W - 12) / 2, ic->y + (ICON_H - 12) / 2);
+        /* The caption gets a shadow of its own: white on a light
+           background is not text, it is a rumour */
+        video_draw_string(ic->x + 1, ic->y + ICON_H + 3, ic->label,
+                          COL_BLACK);
         video_draw_string(ic->x, ic->y + ICON_H + 2, ic->label, COL_WHITE);
     }
 }
@@ -843,8 +980,10 @@ static void draw_taskbar(void)
 {
     int ty = taskbar_y();
     video_fill_rect(0, ty, video_w(), TB_H, COL_BAR);
+    video_fill_rect(0, ty, video_w(), 1, COL_LINE);   /* where the bar starts */
+    /* The Menu button: the accent colour, flat */
     video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
-    video_draw_string(6, ty + 3, "Menu", COL_WHITE);
+    video_draw_string(6, ty + 2, "Menu", COL_WHITE);
 
     /* The list of open windows - one button per window; the focused one is
        highlighted */
@@ -857,27 +996,46 @@ static void draw_taskbar(void)
         int bx = TBL_X0 + j * bw;
         if (bx + bw - 2 > video_w())
             break;                    /* the bar has run out - draw no further */
-        video_fill_rect(bx, ty, bw - 2, TB_H,
-                        i == focus_idx ? COL_TITLE : COL_TBBTN);
+        /* The window with the focus wears the accent colour and the
+           rest a plain grey. One flat rectangle each: the colour is
+           the message, and an edge drawn round it would only be in the
+           way of reading it. */
+        /* One row taller than the letters on it, top and bottom: a
+           label that touches the edge of its own field reads as
+           cramped, and a test scanning the bar for buttons needs one
+           row that is button and nothing else. */
+        video_fill_rect(bx, ty + 1, bw - 2, TB_H - 2,
+                        i == focus_idx ? COL_TITLE : COL_TBBTN_OFF);
         /* the title trimmed to what the button is wide enough to hold */
         char label[TBL_LABEL_MAX + 1];
         int k = 0;
         for (; wins[i].title[k] && k < max; k++)
             label[k] = wins[i].title[k];
         label[k] = '\0';
-        video_draw_string(bx + 2, ty + 3, label,
+        video_draw_string(bx + 2, ty + 2, label,
                           i == focus_idx ? COL_WHITE : COL_BLACK);
         j++;
     }
 
+    /* The clock: no field, no frame - just the time, at the end of the
+       bar where nothing else is */
     clock_refresh();
-    video_draw_string(clock_x(), ty + 3, clock_text, COL_BLACK);
+    video_draw_string(clock_x(), ty + 2, clock_text, COL_BLACK);
 
     if (menu_open) {
+        /* One flat panel with a line round it, and a line between the
+           entries - a menu is a list, and a list needs no relief */
+        int top = menu_item_y(0);
+        int hgt = MENU_N * MENU_ROW;
+        video_fill_rect(2, top, MENU_W, hgt, COL_WIN);
+        video_fill_rect(2, top, MENU_W, 1, COL_LINE);
+        video_fill_rect(2, top + hgt - 1, MENU_W, 1, COL_LINE);
+        video_fill_rect(2, top, 1, hgt, COL_LINE);
+        video_fill_rect(2 + MENU_W - 1, top, 1, hgt, COL_LINE);
         for (int i = 0; i < MENU_N; i++) {
             int iy = menu_item_y(i);
-            video_fill_rect(2, iy, MENU_W, MENU_ROW, COL_WIN);
-            video_fill_rect(2, iy, MENU_W, 1, COL_BLACK);
+            if (i)
+                video_fill_rect(3, iy, MENU_W - 2, 1, COL_LINE);
             video_draw_string(6, iy + 2, menu_items[i], COL_BLACK);
         }
     }
@@ -1091,10 +1249,36 @@ static void desktop_thread(void *arg)
         bg = 0;
     video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
                       backgrounds[bg].b);
-    video_set_palette(COL_BAR, 48, 48, 48);   /* the light grey top bar */
+    video_set_palette(COL_BAR, 52, 52, 52);   /* the light grey bars */
     video_set_palette(COL_WIN, 56, 56, 56);   /* the grey window background */
     video_set_palette(COL_TBBTN, 26, 26, 26); /* the dark grey bar button */
     video_set_palette(COL_ICON, 63, 40, 0);   /* the orange icon */
+
+    /* Flat tones. One line colour, one lighter surface, one dim text -
+       and the accent blue, which is the only thing that shouts. */
+    video_set_palette(COL_LINE, 37, 37, 37);       /* surface boundaries */
+    video_set_palette(COL_WIN_HI, 61, 61, 61);     /* a lighter field */
+    video_set_palette(COL_TITLE_OFF, 44, 44, 44);  /* no focus - plain grey */
+    video_set_palette(COL_TBBTN_OFF, 36, 36, 36);  /* a quiet button */
+    video_set_palette(COL_DIM, 18, 18, 18);        /* text without weight */
+    video_set_palette(COL_ICON_LO, 46, 28, 0);
+
+    /* The background: from a little brighter at the top to a little
+       darker at the floor. A narrow range on purpose - a machine set to
+       teal still has to look teal from anywhere on the screen, not just
+       in the middle. */
+    for (int i = 0; i < COL_DESK_N; i++) {
+        /* 115% at the top, 75% at the bottom, in even steps */
+        int num = 115 - i * (115 - 75) / (COL_DESK_N - 1);
+        int r = backgrounds[bg].r * num / 100;
+        int g = backgrounds[bg].g * num / 100;
+        int b = backgrounds[bg].b * num / 100;
+        video_set_palette((uint8_t)(COL_DESK0 + i),
+                          (uint8_t)(r > 63 ? 63 : r),
+                          (uint8_t)(g > 63 ? 63 : g),
+                          (uint8_t)(b > 63 ? 63 : b));
+    }
+
 
     icons_load();              /* restore the remembered icon positions from disk */
 
@@ -1115,10 +1299,12 @@ static void desktop_thread(void *arg)
         mouse_get(&mx, &my, &buttons);
         handle_input(mx, my, buttons);
 
-        video_clear(COL_DESK);
+        draw_background();
 
-        /* The top bar with the system title */
+        /* The top bar with the system title, lit along its top edge and
+           shaded along the bottom - the same light as everything else */
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
+        video_fill_rect(0, 9, video_w(), 1, COL_LINE);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
         draw_icons();                         /* icons on the background (below the windows) */

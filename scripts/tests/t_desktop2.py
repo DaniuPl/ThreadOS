@@ -189,9 +189,11 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # win0 "Terminal" (40,60,120x70): the title bar blue at the start
-        check("okno 0: pasek tytulu niebieski przed zwinieciem (80,64)",
-              q13.wait_pixel(80, 64, (0, 0, 255)))
+        # win0 "Terminal" (40,60,120x70). A title bar is the accent
+        # blue for the window with the focus and plain grey for the
+        # rest; at boot nothing has the focus. Read past the name.
+        check("okno 0: pasek tytulu narysowany przed zwinieciem (115,64)",
+              q13.wait_pixel(115, 64, (178, 178, 178), 25))
 
         # win0's collapse button [_]: min_x = x+w-2*8-2 = 142, y=61 (8x8).
         # A click on the centre (146,65) collapses the window -> the bar
@@ -207,8 +209,10 @@ def main():
         q13.mouse_goto(60, 473)
         q13.mouse_click()
         q13.mouse_goto(400, 300)
-        check("klik na pasku zadan przywraca zwiniete okno (80,64 niebieski)",
-              q13.wait_pixel(80, 64, (0, 0, 255)))
+        # Restoring it from the bar also gives it the focus, so the bar
+        # comes back BLUE
+        check("klik na pasku zadan przywraca zwiniete okno (115,68)",
+              q13.wait_pixel(115, 68, (0, 0, 255), 30))
 
         # Resizing: win0's grip in the bottom right corner
         # grip_x = x+w-8 = 152, grip_y = y+h-8 = 122. Before the change
@@ -253,8 +257,10 @@ def main():
         q14.mouse_goto(416, 312)
         q14.mouse_button(False)
         q14.mouse_goto(100, 250)          # move the cursor away from the icon
-        check("ikona przeniesiona na nowa pozycje (410,310 pomaranczowy)",
-              q14.wait_pixel(410, 310, (255, 162, 0)))
+        # The tile, off its picture: the icon now has one drawn in the
+        # middle of it, and that is not orange
+        check("ikona przeniesiona na nowa pozycje (404,304 pomaranczowy)",
+              q14.wait_pixel(404, 304, (255, 162, 0)))
         check("stara pozycja ikony wyczyszczona (20,30 teal)",
               q14.wait_pixel(20, 30, (0, 128, 160)))
     finally:
@@ -269,8 +275,8 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        check("pozycja ikony przetrwala restart (410,310 pomaranczowy)",
-              q15.wait_pixel(410, 310, (255, 162, 0)))
+        check("pozycja ikony przetrwala restart (404,304 pomaranczowy)",
+              q15.wait_pixel(404, 304, (255, 162, 0)))
         check("domyslna pozycja ikony pusta po restarcie (20,30 teal)",
               q15.wait_pixel(20, 30, (0, 128, 160)))
     finally:

@@ -102,13 +102,21 @@ def main():
 
         # The windows: win0 (40,60,120x70) and win1 (180,95). The mouse
 # starts at (160,100).
-        check("okno 0: pasek tytulu niebieski (80,64)",
-              q5.wait_pixel(80, 64, (0, 0, 255)))
+        #
+        # A title bar is now one of two colours: blue for the window
+        # with the focus, a dim slate for the rest - so that WHICH
+        # window is listening can be seen instead of remembered. At
+        # boot nothing has the focus, so both of these are slate.
+        # Past the name written on the bar, so that what is read is the
+        # bar and not a letter of it
+        GREY = (178, 178, 178)
+        check("okno 0: pasek tytulu narysowany (115,64)",
+              q5.wait_pixel(115, 64, GREY, 25))
         _, _, at = q5.screen_raw()
         check("okno 0: tlo szare (80,100)",
               near(at(80, 100), (224, 224, 224)))
-        check("okno 1: pasek tytulu niebieski (220,99)",
-              near(at(220, 99), (0, 0, 255)))
+        check("okno 1: pasek tytulu narysowany (240,99)",
+              near(at(240, 99), GREY, 25))
 
         # Dragging window 0: the cursor (160,100) -> win0's bar (60,64),
         # press the left button, move (+80,+50), release. The window ->
@@ -118,13 +126,17 @@ def main():
         q5.mouse_move(80, 50)
         q5.mouse_button(False)
         # win0's new bar in the visible (unobscured) part: (150,114)
-        check("okno 0 przeciagniete na nowa pozycje (pasek ~150,114)",
-              q5.wait_pixel(150, 114, (0, 0, 255)))
+        # Dragging a window's bar focuses it, so from here that bar is
+        # the blue one - which is itself the thing worth seeing
+        # Dragging a window's bar gives it the focus, so from here that
+        # bar is the accent blue - which is itself worth seeing
+        check("okno 0 przeciagniete na nowa pozycje (pasek ~200,118)",
+              q5.wait_pixel(200, 118, (0, 0, 255), 30))
         _, _, at = q5.screen_raw()
         check("stare miejsce okna 0 wyczyszczone (teal ~60,90)",
               near(at(60, 90), (0, 128, 160)))
-        check("okno 1 nieruszone podczas przeciagania (220,99)",
-              near(at(220, 99), (0, 0, 255)))
+        check("okno 1 nieruszone podczas przeciagania (240,99)",
+              near(at(240, 99), GREY, 25))
     finally:
         q5.close()
 
@@ -163,8 +175,10 @@ def main():
               q6.wait_pixel(220, 99, (0, 128, 160)))
         _, _, at = q6.screen_raw()
         # window 0 is still there (the click did not touch other windows)
-        check("inne okno pozostaje otwarte po zamknieciu (win0 pasek 80,64)",
-              near(at(80, 64), (0, 0, 255)))
+        # Clicking its button gave window 0 the focus, so its bar is
+        # the accent blue
+        check("inne okno pozostaje otwarte po zamknieciu (win0 pasek 115,68)",
+              near(at(115, 68), (0, 0, 255)))
     finally:
         q6.close()
 
@@ -252,8 +266,11 @@ def main():
 
         # The taskbar at the bottom (640x480 -> y=468); the 'Menu' button
 # x2..42
-        check("pasek zadan: przycisk 'Menu' (niebieski, 30,470)",
-              q8.wait_pixel(30, 470, (0, 0, 255)))
+        # The Menu button is raised now: its top row is the lit edge, so
+        # the blue itself is a row lower
+        # Past the word 'Menu' (six pixels in, four characters wide)
+        check("pasek zadan: przycisk 'Menu' (niebieski, 38,471)",
+              q8.wait_pixel(38, 471, (0, 0, 255), 30))
         _, _, at = q8.screen_raw()
         # before the application starts, slot 2 is empty (the kernel window's
         # background)
@@ -282,10 +299,14 @@ def main():
         # kernel's window.
         q8.mouse_goto(60, 473)
         q8.mouse_click()
+        # Two pixels lower than the red was read: the raised window's
+        # title bar ends with a line, and the line is where y=71 falls
         check("klik przycisku na pasku wynosi okno na wierzch (czerwony zakryty)",
-              q8.wait_pixel(101, 71, (224, 224, 224), 15))
-        check("fokusowane okno podswietlone na pasku zadan (niebieski 90,469)",
-              q8.wait_pixel(90, 469, (0, 0, 255)))
+              q8.wait_pixel(101, 73, (224, 224, 224), 15))
+        # The focused window's button wears the accent colour; the
+        # bottom row of it carries no letters
+        check("fokusowane okno podswietlone na pasku zadan (90,478)",
+              q8.wait_pixel(90, 478, (0, 0, 255), 30))
     finally:
         q8.close()
 
