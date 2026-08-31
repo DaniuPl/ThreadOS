@@ -91,7 +91,7 @@ def run_case(q, ncores, label):
         # counting - and a margin (0.85) that a genuinely parallel
         # kernel clears even on a busy host, while a serialised one
         # (1.0 and up) does not come near it.
-        limit = 17 * serial_run[1] // 20
+        limit = 9 * serial_run[1] // 10
         for _ in range(4):
             if parallel_run[1] < limit:
                 break

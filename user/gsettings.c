@@ -32,8 +32,11 @@
 
 /* The size the window is created with. From then on it is whatever the
    person pulled it to, and the desktop says so with WEV_SIZE. */
-#define W0  330
-#define H0  160
+/* Room for the settings there are, the two lines of description under
+   them and the line that says what happened - and room for one more
+   setting before this has to be thought about again. */
+#define W0  360
+#define H0  210
 
 #define ROW_Y   22            /* the first row */
 #define ROW_H   14
@@ -57,14 +60,32 @@ static int cw = W0, ch = H0;  /* the content area, as it is now */
 /* Which settings are cycled rather than typed, and how far they go.
    The kernel knows the names; here we only know which of them a person
    picks from a list instead of writing out. */
+static int same(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
 static int cycle_limit(const char *name)
 {
-    if (name[0] == 't' && name[1] == 'l' && name[2] == 'o' && !name[3])
+    if (same(name, "tlo"))
         return 6;                     /* tlo: six backgrounds */
-    if (name[0] == 'k' && name[1] == 'o' && name[2] == 'l')
+    if (same(name, "kolor"))
         return 16;                    /* kolor: sixteen text colours */
+    if (same(name, "ikony"))
+        return 3;                     /* od lewej, na srodku, od prawej */
     return 0;                         /* everything else is typed */
 }
+
+/* The width of the taskbar is not a run of numbers but three of them,
+   so clicking its row steps between those three rather than counting */
+static const char *bar_widths[] = { "100", "75", "50" };
+#define BAR_W_N 3
+
+static int is_bar_width(const char *name) { return same(name, "pasek"); }
 
 static void num_to_text(uint32_t v, char *out)
 {
@@ -181,6 +202,21 @@ void _start(void)
                     if (row == chosen) {
                         /* A second click on the same row: for a setting
                            picked from a list, that is the way to pick */
+                        if (is_bar_width(cfg[row].name)) {
+                            int k = 0;
+                            for (int i = 0; i < BAR_W_N; i++)
+                                if (same(edit, bar_widths[i]))
+                                    k = i;
+                            const char *next = bar_widths[(k + 1) % BAR_W_N];
+                            elen = 0;
+                            while (next[elen]) {
+                                edit[elen] = next[elen];
+                                elen++;
+                            }
+                            edit[elen] = 0;
+                            saved = 0;
+                            continue;
+                        }
                         int limit = cycle_limit(cfg[row].name);
                         if (limit) {
                             uint32_t v = (text_to_num(edit) + 1) %
@@ -295,7 +331,8 @@ void _start(void)
                     h++;
             }
             win_text(w, 6, y + 3,
-                     cycle_limit(cfg[chosen].name)
+                     (cycle_limit(cfg[chosen].name) ||
+                      is_bar_width(cfg[chosen].name))
                          ? "klik w wiersz zmienia, Enter zapisuje"
                          : "pisz na klawiaturze, Enter zapisuje",
                      C_BLUE);

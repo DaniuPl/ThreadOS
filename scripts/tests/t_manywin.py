@@ -41,7 +41,7 @@ from ptest import check, summary
 
 # The taskbar: 12 px high at the bottom of a 640x480 screen, the window
 # buttons starting after the 'Menu' button (2 + 40 + 4).
-TB_H = 12
+TB_H = 18
 TBL_X0 = 46
 # The clock sits at the right-hand end of the bar ("12:34:56", an
 # 8-pixel font plus air), and the buttons share out what is left - so
@@ -120,7 +120,7 @@ def main():
 
             w, h, at = q.screen_raw()
             ty = h - TB_H
-            row = ty + 10                 # below the letters on the buttons
+            row = ty + 2                  # above the picture on the buttons
 
             before = buttons(at, w, row)
             # The kernel's own two windows are there from the start - so
@@ -152,9 +152,13 @@ def main():
             check("przyciski nie nachodza na siebie",
                   all(got[i][1] < got[i + 1][0] for i in range(len(got) - 1)))
             # Narrower, but still wide enough to hold a letter or two
+            # Every button is the same size, because what is on it is a
+            # picture and a picture has one size. Nine of them fit with
+            # room to spare where nine names never would have.
             widths = [b - a + 1 for a, b in got]
-            check("przyciski sa wezsze, ale nie znikly (%d px)"
-                  % min(widths), min(widths) >= 16)
+            check("kazdy przycisk ma te sama szerokosc (%d px)"
+                  % widths[0],
+                  min(widths) == max(widths) and widths[0] >= 14)
 
             # --- a click on the LAST button ---------------------------
             # This is the one that exists only because the buttons got
@@ -214,17 +218,21 @@ def main():
                   % len(full), len(full) == 12)
             check("i ani jednego wiecej, bo tyle jest slotow",
                   len(full) <= 12)
+            # Twelve fit WITHOUT being squeezed: pictures take a third
+            # of what trimmed names took, so the bar does not have to
+            # give anything up
             fw = [b - a + 1 for a, b in full]
-            check("przyciski sie zwezily, zeby sie zmiescic (%d px < 50)"
-                  % max(fw), max(fw) < 50)
+            check("dwanascie miesci sie bez zwezania (%d px, tyle co przy "
+                  "dziewieciu)" % fw[0],
+                  min(fw) == max(fw) == widths[0])
             check("caly pasek nadal miesci sie obok zegara",
                   full[-1][1] < w - CLOCK_W and full[0][0] >= TBL_X0)
             check("i nadal sie nie nachodza",
                   all(full[i][1] < full[i + 1][0]
                       for i in range(len(full) - 1)))
 
-            # The narrowed last button - the one whose position depends
-            # entirely on the shared width - still answers a click
+            # The last button - the one whose position depends entirely
+            # on the shared width - still answers a click
             span = full[-1]
             q.mouse_goto((span[0] + span[1]) // 2, ty + 6)
             time.sleep(0.5)
@@ -234,7 +242,7 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             narrow = buttons(at, w, row)
-            check("zwezony ostatni przycisk trafia we wlasne okno",
+            check("ostatni przycisk trafia we wlasne okno",
                   len(narrow) == 12 and focused(at, row, narrow[-1]))
             check("i nie w sasiada", not focused(at, row, narrow[-2]))
 

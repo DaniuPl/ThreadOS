@@ -50,7 +50,7 @@ RTC_DATE = "2030-06-13"
 
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
 MENU_ROW = 12
-MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
+MENU_TASKBAR_Y = 462   # video_h() - TB_H (kernel/desktop.c)
 
 
 def menu_y(name):

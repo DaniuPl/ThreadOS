@@ -124,8 +124,53 @@ static const uint16_t icon_art[][12] = {
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
+static int icon_of_app(const char *app)
+{
+    for (int k = 0; k < ICON_N; k++) {
+        const char *a = icons[k].app, *b = app;
+        while (*a && *a == *b) {
+            a++;
+            b++;
+        }
+        if (*a == *b)
+            return k;
+    }
+    return -1;
+}
+
 /* The disk file with the remembered icon positions (x,y pairs in order) */
 #define ICON_POS_FILE "icons.pos"
+
+/* Which picture belongs to which running program.
+ *
+ * A window knows the process that owns it and nothing else - not what
+ * was clicked to start it. So the desktop remembers, when it launches
+ * something, which icon it came from; the window created a moment
+ * later by that process takes the same picture. Nothing else can
+ * connect the two: the compositor sees a pid, and the icons are the
+ * only place where a program has a face.
+ */
+#define LAUNCH_MAX 16
+static struct { int pid; int icon; } launched[LAUNCH_MAX];
+static int launch_next;
+
+static void remember_launch(int pid, int icon)
+{
+    if (pid < 0 || icon < 0)
+        return;
+    launched[launch_next].pid = pid;
+    launched[launch_next].icon = icon;
+    launch_next = (launch_next + 1) % LAUNCH_MAX;
+}
+
+/* The icon a program was started from, or -1 */
+static int icon_of_pid(int pid)
+{
+    for (int i = 0; i < LAUNCH_MAX; i++)
+        if (launched[i].pid == pid)
+            return launched[i].icon;
+    return -1;
+}
 
 static int icon_drag = -1;      /* the icon being dragged (-1 = none) */
 static int icon_dx, icon_dy;    /* the grab: the cursor's offset within the icon */
@@ -249,7 +294,18 @@ static int prev_pressed;    /* the previous left-button state - to detect a clic
 static int focus_idx = -1;  /* the window with keyboard focus */
 
 /* The taskbar and the launch menu */
-#define TB_H 12                       /* the taskbar height */
+/* The taskbar.
+ *
+ * Eighteen pixels rather than twelve, because what is on it now is
+ * pictures and not words: a twelve-pixel picture needs room around it,
+ * and a bar the height of one line of text was only ever the height of
+ * the text on it.
+ *
+ * How WIDE it is, and where the buttons sit on it, are settings - see
+ * bar_x0() below. A bar that fills the screen is what a system has when
+ * nobody has thought about it; half a screen, centred, is a dock. */
+#define TB_H 18                       /* the taskbar height */
+#define TB_ICON 12                    /* the picture on a button */
 #define MENU_BW 40                    /* the width of the "Menu" button */
 #define MENU_ROW 12                   /* the height of a menu entry */
 #define MENU_W 80                     /* the width of the opened menu */
@@ -258,23 +314,73 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 static int taskbar_y(void) { return video_h() - TB_H; }
-static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
+
+/* How wide the bar is, from the settings: 100, 75 or 50 percent of the
+   screen. Anything else is read as the whole width - a setting that
+   cannot be understood is not a reason to draw nothing. */
+static int bar_w(void)
+{
+    uint32_t p = config_get_num("pasek", 100);
+    if (p != 75 && p != 50)
+        p = 100;
+    int w = (int)((uint32_t)video_w() * p / 100);
+    return w < 160 ? 160 : w;
+}
+
+/* Where it starts. A bar narrower than the screen is centred on it:
+   that is what makes it a dock rather than a bar with a gap. */
+static int bar_x0(void)
+{
+    return (video_w() - bar_w()) / 2;
+}
+
+static int menu_item_y(int i)
+{
+    return taskbar_y() - (MENU_N - i) * MENU_ROW;
+}
 
 /* The list of window buttons on the taskbar (after the Menu button).
    The buttons share out what is left of the bar, so a twelfth window
    makes them narrower instead of putting them past the right edge -
    where they would be drawn nowhere and clickable nowhere. */
-#define TBL_X0 (2 + MENU_BW + 4)
-#define TBL_W_MAX 52                  /* wide enough for six characters */
-#define TBL_W_MIN 20                  /* narrower than this says nothing */
-
 /* The clock at the right-hand end of the bar: "12:34:56", eight
    characters of an 8-pixel font plus a little air on each side. It is
    taken out of what the window buttons have to share, because a clock
    drawn over a button would be a clock that hides one. */
 #define TB_CLOCK_CH 8
 #define TB_CLOCK_W (TB_CLOCK_CH * 8 + 6)
-static int clock_x(void) { return video_w() - TB_CLOCK_W + 3; }
+static int clock_x(void)
+{
+    return bar_x0() + bar_w() - TB_CLOCK_W + 3;
+}
+
+#define TBL_W_MAX 22                  /* a picture and air on both sides */
+#define TBL_W_MIN 14                  /* narrower than this loses the picture */
+
+/* Where the first window button goes: after the Menu button, or
+   wherever the setting says. 0 = from the left, 1 = in the middle of
+   what is left, 2 = up against the clock. */
+static int win_count(void);
+static int tbl_width(void);
+
+static int tbl_x0(void)
+{
+    int left = bar_x0() + 2 + MENU_BW + 4;
+    int right = bar_x0() + bar_w() - TB_CLOCK_W - 2;
+    int strip = win_count() * tbl_width();
+    uint32_t how = config_get_num("ikony", 0);
+
+    if (how == 1) {                   /* centred between menu and clock */
+        int x = left + (right - left - strip) / 2;
+        return x < left ? left : x;
+    }
+    if (how == 2) {                   /* pushed up against the clock */
+        int x = right - strip;
+        return x < left ? left : x;
+    }
+    return left;                      /* from the left, as it always was */
+}
+
 
 static int win_count(void)
 {
@@ -293,7 +399,7 @@ static int tbl_width(void)
     int n = win_count();
     if (n < 1)
         n = 1;
-    int space = video_w() - TBL_X0 - 2 - TB_CLOCK_W;
+    int space = bar_w() - (2 + MENU_BW + 4) - 2 - TB_CLOCK_W;
     int w = space / n;
     if (w > TBL_W_MAX)
         w = TBL_W_MAX;
@@ -302,19 +408,6 @@ static int tbl_width(void)
     return w;
 }
 
-/* How many characters fit on a button of that width: the font is 8 px
-   wide, the button is 2 px narrower than its slot and the text starts
-   2 px in. */
-#define TBL_LABEL_MAX 8
-static int tbl_chars(int bw)
-{
-    int n = (bw - 4) / 8;
-    if (n < 1)
-        n = 1;
-    if (n > TBL_LABEL_MAX)
-        n = TBL_LABEL_MAX;
-    return n;
-}
 
 static int z_top;           /* the highest Z order handed out */
 
@@ -553,15 +646,20 @@ static void handle_input(int mx, int my, int buttons)
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
         /* The taskbar / launch menu takes precedence (it is on top) */
-        if (in_rect(mx, my, 2, taskbar_y() + 2, MENU_BW, TB_H - 4)) {
+        if (in_rect(mx, my, bar_x0() + 2, taskbar_y() + 3, MENU_BW,
+                    TB_H - 6)) {
             menu_open = !menu_open;
             prev_pressed = pressed;
             return;
         }
         if (menu_open) {
             for (int i = 0; i < MENU_N; i++) {
-                if (in_rect(mx, my, 2, menu_item_y(i), MENU_W, MENU_ROW)) {
-                    exec_spawn(menu_items[i]);   /* launch the application */
+                if (in_rect(mx, my, bar_x0() + 2, menu_item_y(i), MENU_W,
+                            MENU_ROW)) {
+                    /* Started from the menu, which names programs -
+                       so its face is looked up by name */
+                    remember_launch(exec_spawn(menu_items[i]),
+                                    icon_of_app(menu_items[i]));
                     menu_open = 0;
                     prev_pressed = pressed;
                     return;
@@ -569,14 +667,17 @@ static void handle_input(int mx, int my, int buttons)
             }
             menu_open = 0;                /* a click outside the menu - close it */
         }
-        /* Window buttons on the taskbar: focus plus bring to top */
+        /* Window buttons on the taskbar: focus plus bring to top. The
+           same two functions the drawing asks, so a button is clickable
+           exactly where it is - wherever the settings have put it. */
         if (my >= taskbar_y()) {
             int bw = tbl_width();
+            int x0 = tbl_x0();
             int j = 0;
             for (int i = 0; i < MAX_WIN; i++) {
                 if (!wins[i].used)
                     continue;
-                if (in_rect(mx, my, TBL_X0 + j * bw, taskbar_y(),
+                if (in_rect(mx, my, x0 + j * bw, taskbar_y(),
                             bw - 2, TB_H)) {
                     wins[i].minimized = 0;   /* restore it if minimised */
                     focus_idx = i;
@@ -743,7 +844,9 @@ static void handle_input(int mx, int my, int buttons)
         if (icon_drag >= 0) {       /* releasing an icon: a click or a move? */
             int ddx = mx - icon_press_x, ddy = my - icon_press_y;
             if (ddx * ddx + ddy * ddy < 9)
-                exec_spawn(icons[icon_drag].app);   /* barely moved -> a click */
+                /* barely moved -> a click, and the window it opens
+                   will wear the picture from this very tile */
+                remember_launch(exec_spawn(icons[icon_drag].app), icon_drag);
             else
                 icons_save();                       /* moved -> save the layout */
             icon_drag = -1;
@@ -917,17 +1020,24 @@ static void draw_background(void)
 }
 
 /* Draws the icons on the desktop background (a tile plus a caption) */
-/* One icon's picture, drawn where the tile is */
-static void draw_icon_art(int k, int x, int y)
+/* One icon's picture, in whatever colour the place it is drawn in
+   calls for - white on a tile, white or black on a bar button */
+static void draw_icon_art_col(int k, int x, int y, uint8_t col)
 {
     if (k < 0 || k >= (int)(sizeof(icon_art) / sizeof(icon_art[0])))
         return;
     for (int row = 0; row < 12; row++)
-        for (int col = 0; col < 12; col++)
-            if (icon_art[k][row] & (0x800 >> col))
-                /* White on the tile's colour: one flat mark, nothing
-                   behind it and nothing under it */
-                video_putpixel(x + col, y + row, COL_WHITE);
+        for (int c = 0; c < 12; c++)
+            if (icon_art[k][row] & (0x800 >> c))
+                video_putpixel(x + c, y + row, col);
+}
+
+/* One icon's picture, drawn where the tile is */
+static void draw_icon_art(int k, int x, int y)
+{
+    /* White on the tile's colour: one flat mark, nothing behind it and
+       nothing under it */
+    draw_icon_art_col(k, x, y, COL_WHITE);
 }
 
 static void draw_icons(void)
@@ -979,40 +1089,37 @@ static void clock_refresh(void)
 static void draw_taskbar(void)
 {
     int ty = taskbar_y();
-    video_fill_rect(0, ty, video_w(), TB_H, COL_BAR);
-    video_fill_rect(0, ty, video_w(), 1, COL_LINE);   /* where the bar starts */
+    int bx0 = bar_x0(), bwid = bar_w();
+    video_fill_rect(bx0, ty, bwid, TB_H, COL_BAR);
+    video_fill_rect(bx0, ty, bwid, 1, COL_LINE);   /* where the bar starts */
     /* The Menu button: the accent colour, flat */
-    video_fill_rect(2, ty + 2, MENU_BW, TB_H - 4, COL_TITLE);
-    video_draw_string(6, ty + 2, "Menu", COL_WHITE);
+    video_fill_rect(bx0 + 2, ty + 3, MENU_BW, TB_H - 6, COL_TITLE);
+    video_draw_string(bx0 + 6, ty + 5, "Menu", COL_WHITE);
 
-    /* The list of open windows - one button per window; the focused one is
-       highlighted */
+    /* The open windows - one button each, carrying the picture of the
+       program the window belongs to.
+     *
+     * A name trimmed to six letters says 'Ustawi'; a picture says what
+     * it is at a glance and takes a third of the room. Which is what a
+     * taskbar is for - to be read without being studied. */
     int bw = tbl_width();
-    int max = tbl_chars(bw);
+    int x0 = tbl_x0();
     int j = 0;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!wins[i].used)
             continue;
-        int bx = TBL_X0 + j * bw;
-        if (bx + bw - 2 > video_w())
+        int bx = x0 + j * bw;
+        if (bx + bw - 2 > bx0 + bwid)
             break;                    /* the bar has run out - draw no further */
-        /* The window with the focus wears the accent colour and the
-           rest a plain grey. One flat rectangle each: the colour is
-           the message, and an edge drawn round it would only be in the
-           way of reading it. */
-        /* One row taller than the letters on it, top and bottom: a
-           label that touches the edge of its own field reads as
-           cramped, and a test scanning the bar for buttons needs one
-           row that is button and nothing else. */
-        video_fill_rect(bx, ty + 1, bw - 2, TB_H - 2,
+        video_fill_rect(bx, ty + 2, bw - 2, TB_H - 4,
                         i == focus_idx ? COL_TITLE : COL_TBBTN_OFF);
-        /* the title trimmed to what the button is wide enough to hold */
-        char label[TBL_LABEL_MAX + 1];
-        int k = 0;
-        for (; wins[i].title[k] && k < max; k++)
-            label[k] = wins[i].title[k];
-        label[k] = '\0';
-        video_draw_string(bx + 2, ty + 2, label,
+        /* The window's own picture, or - for the kernel's own windows
+           and anything started from a shell - the plain window mark */
+        int art = wins[i].owner >= 0 ? icon_of_pid(wins[i].owner) : 0;
+        if (art < 0)
+            art = 0;
+        draw_icon_art_col(art, bx + (bw - 2 - TB_ICON) / 2,
+                          ty + (TB_H - TB_ICON) / 2,
                           i == focus_idx ? COL_WHITE : COL_BLACK);
         j++;
     }
@@ -1020,23 +1127,23 @@ static void draw_taskbar(void)
     /* The clock: no field, no frame - just the time, at the end of the
        bar where nothing else is */
     clock_refresh();
-    video_draw_string(clock_x(), ty + 2, clock_text, COL_BLACK);
+    video_draw_string(clock_x(), ty + (TB_H - 8) / 2, clock_text, COL_BLACK);
 
     if (menu_open) {
         /* One flat panel with a line round it, and a line between the
            entries - a menu is a list, and a list needs no relief */
         int top = menu_item_y(0);
         int hgt = MENU_N * MENU_ROW;
-        video_fill_rect(2, top, MENU_W, hgt, COL_WIN);
-        video_fill_rect(2, top, MENU_W, 1, COL_LINE);
-        video_fill_rect(2, top + hgt - 1, MENU_W, 1, COL_LINE);
-        video_fill_rect(2, top, 1, hgt, COL_LINE);
-        video_fill_rect(2 + MENU_W - 1, top, 1, hgt, COL_LINE);
+        video_fill_rect(bx0 + 2, top, MENU_W, hgt, COL_WIN);
+        video_fill_rect(bx0 + 2, top, MENU_W, 1, COL_LINE);
+        video_fill_rect(bx0 + 2, top + hgt - 1, MENU_W, 1, COL_LINE);
+        video_fill_rect(bx0 + 2, top, 1, hgt, COL_LINE);
+        video_fill_rect(bx0 + 2 + MENU_W - 1, top, 1, hgt, COL_LINE);
         for (int i = 0; i < MENU_N; i++) {
             int iy = menu_item_y(i);
             if (i)
-                video_fill_rect(3, iy, MENU_W - 2, 1, COL_LINE);
-            video_draw_string(6, iy + 2, menu_items[i], COL_BLACK);
+                video_fill_rect(bx0 + 3, iy, MENU_W - 2, 1, COL_LINE);
+            video_draw_string(bx0 + 6, iy + 2, menu_items[i], COL_BLACK);
         }
     }
 }

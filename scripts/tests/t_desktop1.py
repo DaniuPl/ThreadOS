@@ -303,10 +303,11 @@ def main():
         # title bar ends with a line, and the line is where y=71 falls
         check("klik przycisku na pasku wynosi okno na wierzch (czerwony zakryty)",
               q8.wait_pixel(101, 73, (224, 224, 224), 15))
-        # The focused window's button wears the accent colour; the
-        # bottom row of it carries no letters
-        check("fokusowane okno podswietlone na pasku zadan (90,478)",
-              q8.wait_pixel(90, 478, (0, 0, 255), 30))
+        # The focused window's button wears the accent colour. Its top
+        # row carries nothing: the picture on it starts three pixels
+        # down. The bar is eighteen tall now, so it begins at 462.
+        check("fokusowane okno podswietlone na pasku zadan (60,464)",
+              q8.wait_pixel(60, 464, (0, 0, 255), 30))
     finally:
         q8.close()
 

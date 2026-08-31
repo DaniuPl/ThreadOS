@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-TB_H = 12
+TB_H = 18
 BLUE = (0, 0, 255)
 
 
@@ -132,16 +132,17 @@ def main():
             # --- the taskbar says the same thing with colour ---------
             # Window 1 has the focus, so its button (the second one)
             # wears the accent and the first one does not
-            b1x = 46 + 52 + 10
+            # Buttons are a picture wide now, not a name: 22 pixels
+            b1x = 46 + 22 + 10
             b0x = 46 + 10
             check("przycisk okna z ogniskiem ma kolor akcentu",
-                  is_blue(at(b1x, ty + 10)))
+                  is_blue(at(b1x, ty + 2)))
             check("a przycisk bez ogniska jest szary",
-                  not is_blue(at(b0x, ty + 10)))
-            # Flat means flat: the button is the same colour top and
-            # bottom, with no edge drawn round it
+                  not is_blue(at(b0x, ty + 2)))
+            # Flat means flat: the button is the same colour at its top
+            # and at its bottom, with no edge drawn round it
             check("i przyciski sa plaskie (bez krawedzi)",
-                  at(b0x, ty + 1) == at(b0x, ty + 10))
+                  at(b0x, ty + 2) == at(b0x, ty + 15))
 
             # --- an icon has a picture on it -------------------------
             # The tile is orange; the picture in the middle of it is not

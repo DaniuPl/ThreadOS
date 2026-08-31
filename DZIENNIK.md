@@ -3019,3 +3019,57 @@ sprawdzane przez `make test`.
       pod oknem nie ma nic, przycisk z ogniskiem ma kolor akcentu i jest
       plaski (gora i dol tego samego koloru), a kafelek ikony jest
       plaski i ma na sobie biale piksele rysunku.
+
+- [x] **Obrazki na pasku zadan i pasek do ustawienia.**
+
+      Pasek nosil nazwy, przyciete do szesciu liter, wiec "Ustawienia"
+      czytalo sie "Ustawi", a dwa terminale czytaly sie tak samo. Nosil
+      je dlatego, ze okno zna swoj tytul i nic wiecej - nie wie, w co
+      kliknieto, zeby je uruchomic.
+
+      Teraz pulpit pamieta. Uruchamiajac cos z ikony zapisuje, z ktorej
+      ikony to bylo; okno, ktore ten proces otworzy chwile pozniej,
+      dostaje ten sam obrazek. Nic innego tych dwoch rzeczy nie polaczy:
+      kompozytor widzi pid, a ikony sa jedynym miejscem, gdzie program
+      ma twarz. Okna jadra i wszystko uruchomione z shella dostaja
+      domyslny znak okna.
+
+      Pasek urosl z dwunastu pikseli na osiemnascie, bo to, co na nim
+      teraz jest, to obrazki, a nie slowa: dwunastopikselowy rysunek
+      potrzebuje miejsca dookola. Przy okazji przycisk zmiescil sie w
+      jednej trzeciej tego, co zajmowala przycieta nazwa - dwanascie
+      okien miesci sie teraz BEZ zwezania.
+
+      **I pasek stal sie sprawa gustu, a nie losu.** Dwa ustawienia,
+      trzymane na dysku jak reszta:
+
+      - 'pasek' - 100, 75 albo 50 procent szerokosci ekranu. Wezszy niz
+        ekran jest wysrodkowany, i to wlasnie robi z niego dok.
+      - 'ikony' - 0 od lewej, 1 na srodku, 2 dosuniete do zegara.
+
+      Czyta je rysowanie i czyta je obsluga klikniecia - te same dwie
+      funkcje, wiec przycisk klika sie dokladnie tam, gdzie go widac,
+      w kazdym z tych ustawien. To jest ta asercja, ktora w nowej
+      grupie 'bar' znaczy najwiecej; reszta mowi, ze pasek naprawde ma
+      te szerokosc, ze obrazki naprawde sie przesuwaja i ze dwa okna
+      roznych programow maja rozne obrazki, a dwa okna jadra ten sam.
+
+      Okno ustawien umie te dwa ustawienia przelaczac klikiem: 'ikony'
+      jak kazde inne cykliczne, a 'pasek' po swojemu - bo to nie jest
+      ciag liczb, tylko trzy z nich. Samo okno uroslo, bo szesc ustawien
+      z opisem i wierszem o tym, co sie stalo, przestalo sie miescic w
+      stu szescdziesieciu pikselach.
+
+      Do tego jeszcze jedna asercja czasowa - "cztery porcje naraz
+      szybciej niz po kolei" w grupie 'kthreads' - dostala to samo, co
+      dostal wczesniej 'lockless': przegrany pomiar jest powtarzany i
+      liczy sie lepszy stosunek. Prog stoi tam, gdzie stal (polowa
+      drogi miedzy jednym a czterema); zmienilo sie tylko to, ile
+      odczytow trzeba, zeby w jeden uwierzyc na hoscie, na ktorym stoja
+      cztery maszyny naraz.
+
+      Przy okazji dwie asercje w starych testach przestaly liczyc
+      polozenie wiersza i zaczely go SZUKAC w pasie, w ktorym moze byc:
+      to, gdzie program pisze "zapisane na dysku", zalezy od liczby
+      ustawien i dlugosci opisu jednego z nich - czyli od ukladu, ktory
+      jest sprawa programu. Komunikat jest sprawa testu.

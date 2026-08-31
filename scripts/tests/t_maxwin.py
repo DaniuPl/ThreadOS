@@ -43,7 +43,7 @@ from ptest import check, summary
 # The window opens in slot 2: the compositor cascades at (70+12i, 30+12i)
 # and gsettings asks for 330x160 of content, so the frame is 332x172.
 WX, WY = 94, 54
-WW, WH = 332, 172
+WW, WH = 362, 222
 
 # The bar buttons are 8x8 in the right-hand corner of the title bar:
 # [O] maximise, [_] minimise, [x] close.

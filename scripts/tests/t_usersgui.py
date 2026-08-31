@@ -228,7 +228,7 @@ def main():
             # setting, so its exact row depends on how long that is -
             # we look through the band it can be in.
             check("okno ustawien mowi, ze potrzeba admina",
-                  window_says(q, SX + 6, SY + 108, SY + 150, "haslo admina"))
+                  window_says(q, SX + 6, SY + 100, SY + 200, "haslo admina"))
 
             typed(q, "zlehaslo")
             q.sendkey("ret")
@@ -236,7 +236,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
             check("zle haslo w oknie tez niczego nie zapisuje",
-                  window_says(q, SX + 6, SY + 108, SY + 150, "NIE zapisane"))
+                  window_says(q, SX + 6, SY + 100, SY + 200, "NIE zapisane"))
 
             q.sendkey("ret")               # ask again
             time.sleep(1.5)
@@ -246,7 +246,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
             check("dobre haslo zapisuje ustawienie",
-                  window_says(q, SX + 6, SY + 108, SY + 150,
+                  window_says(q, SX + 6, SY + 100, SY + 200,
                               "zapisane na dysku"))
         finally:
             q.close()

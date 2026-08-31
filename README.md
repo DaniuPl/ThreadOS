@@ -47,7 +47,12 @@ sent to the other cores and awaited before the frame is reused — TLS
 between two of them, no shadows, a background that darkens towards the
 floor, and a single accent colour saying the one thing worth saying:
 which window is listening, on its title bar and on its taskbar button
-alike. Icons carry pictures rather than labels. With
+alike. Icons carry pictures rather than labels, and so do the taskbar's
+buttons — the desktop remembers which icon started which process, so a
+window wears the face of the program it belongs to. How wide the bar is
+(100, 75 or 50 percent of the screen, centred) and where its buttons
+sit (left, middle, or up against the clock) are settings kept on the
+disk. With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end
 and insists if it will not — twelve of them at once, on a taskbar that

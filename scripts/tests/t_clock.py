@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8, RTC_BASE
 
-TB_H = 12
+TB_H = 18
 TBL_X0 = 46
 CLOCK_CH = 8
 CLOCK_W = CLOCK_CH * 8 + 6
@@ -54,10 +54,9 @@ def read_clock(q):
     """The digits off the taskbar, read through the kernel's own font."""
     w, h, at = q.screen_raw()
     x0 = clock_x0(w)
-    # Two pixels down from the top of the bar: the clock sits in a
-    # field sunk into it, and the field's bottom edge would otherwise
-    # run through the last row of the digits
-    y0 = h - TB_H + 2
+    # The bar is eighteen pixels tall now and the digits are eight, so
+    # they sit five down from its top edge
+    y0 = h - TB_H + 5
 
     counts = {}
     for y in range(y0, y0 + 8):
@@ -148,12 +147,9 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            # The bottom row of a button: its top edge is a lit line
-            # the colour of the bar itself (so a scan along the top row
-            # finds nothing), and the rows between carry the label -
-            # whose white letters cut a button into pieces. The bottom
-            # edge is one colour all the way across.
-            row = h - TB_H + 10
+            # The top row of a button: the picture on it starts three
+            # pixels down, so this row is button and nothing else.
+            row = h - TB_H + 2
             got = buttons(at, w, row)
             check("dziewiec okien ma swoje przyciski na pasku (jest %d)"
                   % len(got), len(got) >= 9)

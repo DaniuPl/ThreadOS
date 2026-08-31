@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
-TB_H = 12
+TB_H = 18
 TBL_X0 = 46
 CLOCK_W = 8 * 8 + 6
 
@@ -103,7 +103,7 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 10
+            row = h - TB_H + 2
             spans = buttons(at, w, row)
             check("trzy aplikacje maja swoje przyciski (razem %d z oknami "
                   "jadra)" % len(spans), len(spans) == 5)

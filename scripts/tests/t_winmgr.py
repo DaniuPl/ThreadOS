@@ -43,7 +43,7 @@ from ptest import check, summary
 # The application window is slot 2: the compositor cascades them at
 # (70+12i, 30+12i), so (94,54). gsettings asks for 330x160 content.
 WX, WY = 94, 54
-WW, WH = 332, 172
+WW, WH = 362, 222
 
 # Where to look, and why there. The kernel's own windows sit at
 # (40,60) 120x70 and (180,95) 120x70, so a probe has to fall inside the
