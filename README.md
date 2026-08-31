@@ -71,7 +71,10 @@ output that appears while the program is still writing it, Ctrl+C to
 stop it, and a pipe into what it started — so the ring 3 shell runs
 inside the terminal window, its children writing where it writes, and
 Ctrl+D ends it. One program compiled for both kernels, differing only
-in how a command is started. Alt+Tab moves the focus from the keyboard, and Ctrl+Insert /
+in how a command is started. Alt+Tab moves the focus from the keyboard,
+Alt+F4 closes the window that has it — by asking the application, the
+same way its [x] does — the right mouse button opens the launch menu
+where the pointer is, and Ctrl+Insert /
 Shift+Insert move text between windows through a clipboard the kernel
 holds, and dragging the mouse across a terminal's output selects it —
 which copies it, the way it does everywhere else. Two privilege levels: changing the system —

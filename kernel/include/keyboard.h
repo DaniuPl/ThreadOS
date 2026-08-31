@@ -49,6 +49,12 @@ keyboard_char_handler_t keyboard_console_handler(void);
 /* The desktop grabs all keys (graphics mode has no consoles) */
 void keyboard_set_override(keyboard_char_handler_t handler);
 
+/* And the function keys with Alt, which in text mode switch consoles
+   and in graphics mode have nothing to switch. The number is counted
+   from zero, so Alt+F4 arrives as 3. */
+typedef void (*keyboard_fkey_handler_t)(int fkey);
+void keyboard_set_fkey_override(keyboard_fkey_handler_t handler);
+
 /* A character from a source other than PS/2 (a USB keyboard) - the
    road onward is the same */
 void keyboard_inject(char c);

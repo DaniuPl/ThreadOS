@@ -55,10 +55,16 @@ static struct queue *console(int n)
    sense - so it intercepts all keys before they reach the queue the
    shell reads from. */
 static void (*override)(char c);
+static void (*fkey_override)(int fkey);
 
 void keyboard64_set_override(void (*handler)(char c))
 {
     override = handler;
+}
+
+void keyboard64_set_fkey_override(void (*handler)(int fkey))
+{
+    fkey_override = handler;
 }
 
 /* The Ctrl+C target is set by the shell of the console it types on
@@ -114,7 +120,12 @@ static void keyboard_irq(struct regs *r)
     int co = kbdmap_feed(inb(KBD_DATA_PORT), &c, &fkey);
 
     if (co == KBD_FKEY) {
-        if (fkey >= 0 && fkey < CONSOLE_COUNT)
+        /* In graphics mode there are no consoles to switch between, so
+           Alt+F4 and its neighbours go where the keys go: to whoever
+           took the keyboard over. */
+        if (override && fkey_override)
+            fkey_override(fkey);
+        else if (fkey >= 0 && fkey < CONSOLE_COUNT)
             switch_to(fkey);
         return;
     }

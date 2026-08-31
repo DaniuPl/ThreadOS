@@ -34,6 +34,7 @@ struct kbd_console {
 
 static struct kbd_console cons[CONSOLE_COUNT];
 static keyboard_char_handler_t override;   /* the desktop takes all keys */
+static keyboard_fkey_handler_t fkey_override;   /* ...and the F-keys too */
 static int cons_ready;
 
 static struct kbd_console *console(int n)
@@ -55,6 +56,11 @@ void keyboard_set_handler(int vc, keyboard_char_handler_t handler)
 
 /* The desktop runs in graphics mode, where text consoles make no
    sense - so it grabs all keys before they go anywhere */
+void keyboard_set_fkey_override(keyboard_fkey_handler_t handler)
+{
+    fkey_override = handler;
+}
+
 void keyboard_set_override(keyboard_char_handler_t handler)
 {
     override = handler;
@@ -170,9 +176,14 @@ static void keyboard_irq(struct regs *r)
     case KBD_FKEY:
         /* Alt+F1..F4 switches consoles. In graphics mode there is
            nothing to switch - the desktop keeps the whole screen to
-           itself. */
-        if (!override && fkey >= 0 && fkey < CONSOLE_COUNT)
+           itself - so there the same keys go to the desktop, which
+           knows what Alt+F4 has meant everywhere for thirty years. */
+        if (override) {
+            if (fkey_override)
+                fkey_override(fkey);
+        } else if (fkey >= 0 && fkey < CONSOLE_COUNT) {
             console_switch(fkey);
+        }
         break;
     case KBD_CHAR:
         deliver(c);

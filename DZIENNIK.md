@@ -3151,3 +3151,38 @@ sprawdzane przez `make test`.
       shift i litera, a '#' to shift i trojka - bez tego wpisywany tekst
       po cichu gubil znaki, i widac to bylo dopiero jako "erminal"
       zamiast "Terminal" w pliku, ktory test sam napisal.
+
+- [x] **Alt+F4 i menu pod prawym przyciskiem** - dwa gesty, ktore kazdy
+      zna, a ktorych ten pulpit nie mial.
+
+      Klawisze byly na miejscu od dawna: Alt z klawiszem funkcyjnym
+      przelaczal konsole tekstowe. Tyle ze na pulpicie nie ma czego
+      przelaczac - ekran jest jeden - wiec te nacisniecia szly donikad.
+      Teraz, gdy ktos przejal klawiature (a na pulpicie przejmuje ja
+      kompozytor), te same klawisze ida do niego, i F4 znaczy to, co
+      znaczy wszedzie od trzydziestu lat.
+
+      Zamyka DOKLADNIE tak, jak [x] w rogu okna: program dostaje
+      pytanie i konczy sie sam, ze swoim kodem wyjscia. Wyrwanie okna
+      spod dzialajacego procesu byloby czyms innym niz to, co robi
+      mysz, a jeden gest i drugi maja robic to samo - inaczej sa dwie
+      rzeczy do zapamietania zamiast jednej.
+
+      Prawy przycisk na pustym pulpicie otwiera menu tam, gdzie stoi
+      kursor. To ta sama lista, co pod przyciskiem "Menu" w rogu, bo
+      druga lista bylaby druga rzecza do nauczenia - tylko przychodzi
+      do reki, zamiast kazac rece isc w rog. Menu nie wychodzi poza
+      krawedz ekranu i nie wchodzi na pasek zadan: przy kliknieciu w
+      rogu zjezdza w lewo i w gore. Na oknie prawy przycisk nie otwiera
+      niczego (wlasne menu okna to sprawa okna, a zadne go nie ma) i
+      zamyka to, ktore bylo otwarte.
+
+      Droga klawiszy nie jest wspolna - long mode ma wlasny sterownik
+      klawiatury - wiec Alt+F4 trzeba bylo przepuscic przez niego
+      osobno. Nowa grupa 'winkeys' sprawdza oba jadra: ze program
+      zamkniety Alt+F4 konczy sie SAM z kodem zero (a wiec byl pytany),
+      ze okno znika z ekranu i z paska zadan, ze menu stoi pod kursorem
+      a nie nad przyciskiem "Menu", ze pozycja pod kursorem sie
+      podswietla, ze wybrany z niego program naprawde chodzi (zegar
+      rysuje cyfry, nie samo okno sie pojawia) i ze przy krawedzi menu
+      sie miesci.

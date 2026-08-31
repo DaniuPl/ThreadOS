@@ -604,9 +604,9 @@ class Qemu:
         self.mouse_move(-800, -600)
         self.mx, self.my = 0, 0
 
-    def mouse_button(self, down):
+    def mouse_button(self, down, button="left"):
         self.cmd({"execute": "input-send-event", "arguments": {"events": [
-            {"type": "btn", "data": {"button": "left", "down": down}}]}})
+            {"type": "btn", "data": {"button": button, "down": down}}]}})
         time.sleep(0.2)
 
     # Tracking the cursor's position (the desktop starts in the middle of
@@ -620,6 +620,10 @@ class Qemu:
     def mouse_click(self):
         self.mouse_button(True)
         self.mouse_button(False)
+
+    def mouse_right_click(self):
+        self.mouse_button(True, "right")
+        self.mouse_button(False, "right")
 
     def screen_pixels(self):
         """A screenshot (QMP screendump) -> (scale_x, scale_y, a pixel

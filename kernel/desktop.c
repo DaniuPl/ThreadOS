@@ -385,6 +385,7 @@ static struct window wins[MAX_WIN];
    within the window) */
 static int resize_content(struct window *w);
 static void toggle_max(int i);
+static void close_window(int i);
 
 static int drag_idx = -1;
 static int resize_idx = -1;
@@ -420,6 +421,11 @@ static int focus_idx = -1;  /* the window with keyboard focus */
 #define MENU_ROW 16                   /* the height of a menu entry */
 #define MENU_W 110                    /* the width of the opened menu */
 static int menu_open;
+/* Where the menu hangs. Opened from the Menu button it stands over it;
+   opened with the right button on the desktop it stands where the
+   pointer is - the same list either way, because a second list would
+   be a second thing to learn. */
+static int menu_px, menu_py;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
@@ -446,7 +452,25 @@ static int bar_x0(void)
 
 static int menu_item_y(int i)
 {
-    return taskbar_y() - (MENU_N - i) * MENU_ROW;
+    return menu_py + i * MENU_ROW;
+}
+
+/* Puts the menu somewhere it fits: never off the right-hand edge,
+   never over the taskbar. */
+static void menu_at(int x, int y)
+{
+    int hgt = MENU_N * MENU_ROW;
+    if (x + MENU_W > video_w())
+        x = video_w() - MENU_W;
+    if (x < 0)
+        x = 0;
+    if (y + hgt > taskbar_y())
+        y = taskbar_y() - hgt;
+    if (y < 0)
+        y = 0;
+    menu_px = x;
+    menu_py = y;
+    menu_open = 1;
 }
 
 /* The list of window buttons on the taskbar (after the Menu button).
@@ -750,24 +774,47 @@ static int on_titlebar(const struct window *win, int x, int y)
 /* Mouse handling: clicks (close, buttons) and window dragging.
    Clicks take precedence over dragging; both are counted on the
    left-button press edge, so that one click = one action. */
+static int prev_right;      /* the previous right-button state */
+
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
+    int right = buttons & 0x02;
 
     mouse_x = mx;
     mouse_y = my;
+
+    /* The right button on the desktop opens the same menu where the
+       pointer is. On a window it does nothing yet - a window's own
+       menu is the window's business, and none of them has one. */
+    if (right && !prev_right) {
+        int on_window = 0;
+        for (int i = 0; i < MAX_WIN; i++)
+            if (wins[i].used && !wins[i].minimized &&
+                in_rect(mx, my, wins[i].x, wins[i].y, wins[i].w, wins[i].h))
+                on_window = 1;
+        if (!on_window && my < taskbar_y())
+            menu_at(mx, my);
+        else
+            menu_open = 0;
+    }
+    prev_right = right;
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
         /* The taskbar / launch menu takes precedence (it is on top) */
         if (in_rect(mx, my, bar_x0() + 2, taskbar_y() + 3, MENU_BW,
                     TB_H - 6)) {
-            menu_open = !menu_open;
+            if (menu_open)
+                menu_open = 0;
+            else
+                menu_at(bar_x0() + 2,
+                        taskbar_y() - MENU_N * MENU_ROW);
             prev_pressed = pressed;
             return;
         }
         if (menu_open) {
             for (int i = 0; i < MENU_N; i++) {
-                if (in_rect(mx, my, bar_x0() + 2, menu_item_y(i), MENU_W,
+                if (in_rect(mx, my, menu_px, menu_item_y(i), MENU_W,
                             MENU_ROW)) {
                     /* Started from the menu, which names programs -
                        so its face is looked up by name */
@@ -818,14 +865,7 @@ static void handle_input(int mx, int my, int buttons)
              * window that no longer exists. So we ASK - and only insist
              * when the asking goes unanswered. */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
-                if (w->content && w->owner >= 0) {
-                    win_enqueue(w, WEV_CLOSE, 0, 0, 0);
-                    w->closing = CLOSE_FRAMES;
-                    if (focus_idx == i)
-                        focus_idx = -1;
-                } else {
-                    w->used = 0;
-                }
+                close_window(i);
                 hit = 1;
                 break;
             }
@@ -1379,11 +1419,12 @@ static void draw_taskbar(void)
            like three different things is three things to remember. */
         int top = menu_item_y(0);
         int hgt = MENU_N * MENU_ROW;
-        video_fill_rect(bx0 + 2, top, MENU_W, hgt, COL_WIN);
-        video_fill_rect(bx0 + 2, top, MENU_W, 1, COL_LINE);
-        video_fill_rect(bx0 + 2, top + hgt - 1, MENU_W, 1, COL_LINE);
-        video_fill_rect(bx0 + 2, top, 1, hgt, COL_LINE);
-        video_fill_rect(bx0 + 2 + MENU_W - 1, top, 1, hgt, COL_LINE);
+        int mx0 = menu_px;
+        video_fill_rect(mx0, top, MENU_W, hgt, COL_WIN);
+        video_fill_rect(mx0, top, MENU_W, 1, COL_LINE);
+        video_fill_rect(mx0, top + hgt - 1, MENU_W, 1, COL_LINE);
+        video_fill_rect(mx0, top, 1, hgt, COL_LINE);
+        video_fill_rect(mx0 + MENU_W - 1, top, 1, hgt, COL_LINE);
         for (int i = 0; i < MENU_N; i++) {
             int iy = menu_item_y(i);
             int from = icon_of_app(menu_items[i]);
@@ -1391,21 +1432,20 @@ static void draw_taskbar(void)
             /* The entry under the pointer wears the accent colour.
                Without it a menu is a list of words that happens to be
                clickable; with it, it answers. */
-            int over = in_rect(mouse_x, mouse_y, bx0 + 2, iy, MENU_W,
-                               MENU_ROW);
+            int over = in_rect(mouse_x, mouse_y, mx0, iy, MENU_W, MENU_ROW);
             if (over)
-                video_fill_rect(bx0 + 3, iy, MENU_W - 2, MENU_ROW,
+                video_fill_rect(mx0 + 1, iy, MENU_W - 2, MENU_ROW,
                                 COL_TITLE);
             else if (i)
-                video_fill_rect(bx0 + 3, iy, MENU_W - 2, 1, COL_LINE);
-            draw_icon_art_col(art, bx0 + 6, iy + 2,
+                video_fill_rect(mx0 + 1, iy, MENU_W - 2, 1, COL_LINE);
+            draw_icon_art_col(art, mx0 + 4, iy + 2,
                               over ? COL_WHITE : COL_BLACK);
             /* The name a person knows it by, which is the one written
                under its icon - the program's own name is for the
                shell */
             const char *label = from >= 0 ? icons[from].label
                                           : menu_items[i];
-            video_draw_string(bx0 + 22, iy + 4, label,
+            video_draw_string(mx0 + 20, iy + 4, label,
                               over ? COL_WHITE : COL_BLACK);
         }
     }
@@ -1480,6 +1520,32 @@ static void focus_next(void)
         raise_win(i);
         return;
     }
+}
+
+/* Asks the window to close, exactly as its [x] does: an application
+   is told and given time to end; a kernel window simply goes. */
+static void close_window(int i)
+{
+    struct window *w = &wins[i];
+    if (!w->used)
+        return;
+    if (w->content && w->owner >= 0) {
+        win_enqueue(w, WEV_CLOSE, 0, 0, 0);
+        w->closing = CLOSE_FRAMES;
+    } else {
+        w->used = 0;
+    }
+    if (focus_idx == i)
+        focus_idx = -1;
+}
+
+/* Alt and a function key. In text mode these switch consoles; here
+   there is one screen and nothing to switch, so Alt+F4 means what it
+   has meant everywhere for thirty years. */
+static void desktop_on_fkey(int fkey)
+{
+    if (fkey == 3 && focus_idx >= 0)      /* F4 counted from zero */
+        close_window(focus_idx);
 }
 
 static void desktop_on_key(char c)
@@ -1704,5 +1770,6 @@ void desktop_start(void)
 
     prev_key_handler = keyboard_console_handler();  /* the shell of the visible console */
     keyboard_set_override(desktop_on_key);          /* keys -> the focused window */
+    keyboard_set_fkey_override(desktop_on_fkey);    /* ...and Alt+F4 */
     task_create("desktop", desktop_thread, (void *)0);
 }

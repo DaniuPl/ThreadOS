@@ -10,6 +10,7 @@ char keyboard64_getchar(void);
 /* The desktop intercepts all keys (in graphics mode there is no text
    console for them to reach) */
 void keyboard64_set_override(void (*handler)(char c));
+void keyboard64_set_fkey_override(void (*handler)(int fkey));
 
 /* Whom to send SIGINT to after Ctrl+C (-1 = nobody). It concerns the
    console the calling task types on. */

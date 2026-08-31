@@ -118,6 +118,11 @@ void keyboard_inject_switch(int vc)
     keyboard64_inject_switch(vc);
 }
 
+void keyboard_set_fkey_override(keyboard_fkey_handler_t handler)
+{
+    keyboard64_set_fkey_override(handler);
+}
+
 void keyboard_set_override(keyboard_char_handler_t handler)
 {
     keyboard64_set_override(handler);
