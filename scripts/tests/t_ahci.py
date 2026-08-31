@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: dysk za kontrolerem AHCI (SATA).
+"""ProtonOS smoke test: a disk behind an AHCI controller (SATA).
 
-Ten sam system plikow i ta sama wymiana stron, tyle ze dane przenosi
-kontroler przez DMA zamiast procesora slowo po slowie.
+The same file system and the same page swapping, only the data are
+carried by the controller through DMA instead of by the processor word
+by word.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -20,9 +21,10 @@ from ptest import check, summary
 
 
 def main():
-    # --- Dysk za kontrolerem AHCI ----------------------------------
-    # Ten sam system plikow i ta sama wymiana stron, tyle ze dane
-    # przenosi kontroler przez DMA zamiast procesora slowo po slowie.
+    # --- A disk behind an AHCI controller --------------------------
+    # The same file system and the same page swapping, only the data are
+    # carried by the controller through DMA instead of by the processor
+    # word by word.
     print("--- kontroler AHCI (SATA) ---")
     sdisk = tempfile.mktemp(suffix=".img")
     with open(sdisk, "wb") as fh:
@@ -47,7 +49,7 @@ def main():
         check("zapis i odczyt pliku przez DMA oddaja te same dane",
               "proton przez dma" in back)
 
-        # Wymiana stron przez AHCI: te same 18 MiB na maszynie z 16 MiB
+        # Page swapping through AHCI: the same 18 MiB on a machine with 16 MiB
         q18.type_line("clear")
         q18.type_line("run swaptest 18")
         out = q18.wait_for("[swaptest] wszystkie", timeout=120)

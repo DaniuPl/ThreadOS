@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: ACPI w jadrze 64-bitowym.
+"""ProtonOS smoke test: ACPI in the 64-bit kernel.
 
-Wylaczenie zasilania to jedyna rzecz, ktorej nie da sie sprawdzic
-napisem na ekranie: albo maszyna gasnie, albo nie. QEMU konczy sie
-wtedy sam i to jest cala asercja - reszta testu tylko doprowadza
-system do momentu, w ktorym mozna o to poprosic.
+Powering off is the one thing that cannot be checked with text on the
+screen: either the machine goes dark or it does not. QEMU then ends by
+itself and that is the whole assertion - the rest of the test only
+brings the system to the point where it can be asked for it.
 
-Droga do tego wiedzie przez tablice firmware'u: RSDP, spis tablic,
-FADT i obiekt _S5_ w bajtkodzie AML. Ten sam plik acpi.c obsluguje
-oba jadra - w trybie dlugim rozni sie tylko tym, ze tablice doklejane
-sa do mapowania innym kodem.
+The road to it leads through the firmware's tables: RSDP, the table
+list, the FADT and the _S5_ object in AML bytecode. The same acpi.c file
+serves both kernels - in long mode the only difference is that the
+tables are added to the mapping by different code.
 """
 
 import os
@@ -39,7 +39,7 @@ def main():
         if not os.path.exists(iso):
             return summary()
 
-        # --- Tablice i wylaczenie zasilania ---
+        # --- The tables and powering off ---
         slog = tempfile.mktemp(suffix=".log")
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
@@ -59,9 +59,10 @@ def main():
             if os.path.exists(slog):
                 os.unlink(slog)
 
-        # --- Restart ---
-        # QEMU dostaje -no-reboot, wiec reset konczy maszyne zamiast ja
-        # podnosic: to, ze proces znika, jest dowodem na sam reset.
+        # --- Reset ---
+        # QEMU is given -no-reboot, so a reset ends the machine instead of
+        # bringing it up: the process disappearing is the proof of the
+        # reset itself.
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2,
                   qemu="qemu-system-x86_64")

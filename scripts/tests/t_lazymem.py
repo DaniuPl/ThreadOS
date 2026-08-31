@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: stronicowanie na zadanie.
+"""ProtonOS smoke test: paging on demand.
 
-Sterta i obszar mmap sa procesowi OBIECANE, a nie dane: prosba o 64 MiB
-nie ma kosztowac ani jednej ramki. Placi sie dopiero za strony, ktorych
-program naprawde dotknal - i dokladnie za tyle, ile dotknal.
+The heap and the mmap area are PROMISED to a process, not given: asking
+for 64 MiB is not to cost a single frame. Payment is only for the pages
+the program really touched - and for exactly as many as it touched.
 
-Trzecia asercja pilnuje przypadku, ktory latwo przeoczyc: bufor
-obiecany, ale nietkniety przez program, podany jadru w wywolaniu
-systemowym. Jadro musi go najpierw urzeczywistnic, a nie uznac za zly
-wskaznik.
+The third assertion looks after a case that is easy to miss: a buffer
+promised but untouched by the program, passed to the kernel in a system
+call. The kernel has to make it real first rather than treat it as a bad
+pointer.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os

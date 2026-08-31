@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: klawiatura USB (HID).
+"""ProtonOS smoke test: a USB keyboard (HID).
 
-Kontroler USB, rozpoznanie urzadzenia i protokol rozruchowy HID.
-QEMU kieruje klawisze do urzadzenia USB, wiec to, ze komenda w ogole
-sie wykonuje, jest dowodem, ze przeszly cala te droge.
+The USB controller, device enumeration and the HID boot protocol. QEMU
+directs keys to the USB device, so the mere fact that a command runs at
+all is proof that they went that whole way.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -21,10 +21,10 @@ from ptest import check, summary
 
 
 def main():
-    # --- Klawiatura USB --------------------------------------------
-    # Kontroler USB, rozpoznanie urzadzenia, protokol rozruchowy HID.
-    # QEMU kieruje klawisze do urzadzenia USB, wiec to, ze komenda
-    # w ogole sie wykonuje, jest dowodem, ze przeszly ta droga.
+    # --- The USB keyboard ------------------------------------------
+    # The USB controller, device enumeration, the HID boot protocol.
+    # QEMU directs keys to the USB device, so the mere fact that a
+    # command runs at all is proof that they went that way.
     print("--- klawiatura USB (HID) ---")
     udisk = tempfile.mktemp(suffix=".img")
     with open(udisk, "wb") as fh:
@@ -41,12 +41,12 @@ def main():
         out = q19.wait_for("tyknac timera", timeout=20)
         check("komenda wpisana z klawiatury USB wykonuje sie",
               "uptime:" in out)
-        # Wielka litera powstaje z modyfikatora w raporcie HID -
-        # 'type_line' umie tylko male, wiec skladamy klawisze recznie.
-        # Klawiature odpytujemy piecdziesiat razy na sekunde, a QEMU
-        # trzyma klawisz okolo stu milisekund - przy zbyt szybkim
-        # nadawaniu press i release sasiednich klawiszy zachodza na
-        # siebie. Stad wolniejsze tempo i druga proba.
+        # A capital letter comes from a modifier in the HID report -
+        # 'type_line' knows only lower case, so we assemble the keys by
+        # hand. We poll the keyboard fifty times a second, and QEMU holds
+        # a key for about a hundred milliseconds - with too fast a rate
+        # the press and release of neighbouring keys overlap. Hence the
+        # slower pace and a second attempt.
         def type_shift_a():
             for ch in "write":
                 q19.sendkey(ch)

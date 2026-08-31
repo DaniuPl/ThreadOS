@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: mysz PS/2.
+"""ProtonOS smoke test: the PS/2 mouse.
 
-Mysz podaje delty wzgledne, a nie polozenie - to jadro musi je zliczac
-i przycinac do rozmiaru ekranu. Start wypada na srodku 320x200, czyli
-(160,100), a QEMU przekazuje delty jeden do jednego, wiec kazdy ruch da
-sie sprawdzic arytmetycznie zamiast "na oko".
+A mouse gives relative deltas rather than a position - it is the kernel
+that has to add them up and clamp them to the screen's size. The start
+falls in the middle of 320x200, that is (160,100), and QEMU passes the
+deltas one to one, so every movement can be checked arithmetically
+rather than by eye.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os

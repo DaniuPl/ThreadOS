@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: tryb graficzny w jadrze 64-bitowym.
+"""ProtonOS smoke test: graphics mode in the 64-bit kernel.
 
-Rysunek sprawdzajacy jest prosty celowo: cztery prostokaty w rogach,
-ramka i napis wlasna czcionka. Kazdy blad w liczeniu adresu piksela
-widac na nim od razu - zly bajt na piksel rozjezdza obraz w skos,
-a zamienione kanaly widac po kolorach.
+The check drawing is simple on purpose: four rectangles in the corners,
+a frame and a caption in our own font. Every error in computing a
+pixel's address shows on it at once - a wrong bytes-per-pixel skews the
+image, and swapped channels can be seen in the colours.
 
-Sprawdzamy pod BIOS-em i pod UEFI, bo to wlasnie firmware decyduje,
-ile bitow ma piksel, a 24 bity to przypadek, w ktorym zapis calym
-slowem zadeptuje sasiada.
+We check under BIOS and under UEFI, because it is the firmware that
+decides how many bits a pixel has, and 24 bits is the case in which a
+whole-word write tramples the neighbour.
 """
 
 import os
@@ -24,8 +24,7 @@ from ptest import check, summary
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
-# Kolory palety video.c: 1 czerwony, 2 zielony, 3 niebieski,
-# 4 bialy, 5 zolty
+# video.c's palette colours: 1 red, 2 green, 3 blue, 4 white, 5 yellow
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
@@ -38,7 +37,7 @@ def near(a, b, tol=30):
 
 
 def inspect(iso, via_uefi):
-    """Rysuje wzorzec i sprawdza, gdzie wyladowaly kolory."""
+    """Draws the pattern and checks where the colours landed."""
     label = "UEFI" if via_uefi else "BIOS"
     slog = tempfile.mktemp(suffix=".log")
     nvram = tempfile.mktemp(suffix=".fd")
@@ -63,8 +62,8 @@ def inspect(iso, via_uefi):
         time.sleep(1.5)
 
         w, h, at = q.screen_raw()
-        # Rogi: kazdy inny kolor, wiec pomylka w adresie piksela
-        # przestawia je miedzy soba albo rozmazuje
+        # The corners: each a different colour, so a mistake in a pixel's
+        # address swaps them around or smears them
         check(f"{label}: lewy gorny rog czerwony",
               near(at(w // 8, h // 8), RED))
         check(f"{label}: prawy gorny rog zielony",
@@ -76,8 +75,9 @@ def inspect(iso, via_uefi):
         check(f"{label}: tlo miedzy rogami niebieskie",
               near(at(w // 2, h // 8), BLUE))
 
-        # Napis wlasna czcionka: liczymy jasne piksele w jego pasie.
-        # Zly bajt na piksel zostawilby tam smieci albo pustke.
+        # The caption in our own font: we count the bright pixels in its
+        # band. A wrong bytes-per-pixel would leave rubbish or emptiness
+        # there.
         pas = sum(1 for y in range(h // 2, h // 2 + 8)
                   for x in range(w // 2 - 120, w // 2 + 120)
                   if near(at(x, y), BIALY))

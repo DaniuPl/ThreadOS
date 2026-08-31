@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: pamiec wspoldzielona w jadrze 64-bitowym.
+"""ProtonOS smoke test: shared memory in the 64-bit kernel.
 
-Do tej pory kazdy proces widzial wylacznie swoja pamiec i to bylo
-zamierzone - o to chodzi w osobnych przestrzeniach adresowych. Pamiec
-wspoldzielona jest wyjatkiem robionym swiadomie: te same ramki
-fizyczne wchodza do kilku przestrzeni naraz, bo oba procesy poprosily
-o ten sam klucz.
+Until now every process saw only its own memory and that was intended -
+that is the point of separate address spaces. Shared memory is an
+exception made deliberately: the same physical frames enter several
+spaces at once, because both processes asked for the same key.
 
-Kazdy widzi je pod SWOIM adresem - adres wirtualny jest sprawa
-przestrzeni, a nie pamieci - i wlasnie to sprawdzamy najpierw, bo
-gdyby adresy musialy sie zgadzac, nie byloby to zadne wspoldzielenie,
-tylko przypadek.
+Each sees them at ITS OWN address - a virtual address is a matter of the
+space, not of the memory - and that is exactly what we check first,
+because if the addresses had to match, this would be no sharing at all
+but a coincidence.
 
-Droga jest w obie strony: pisarz zapisuje wzorzec, czytelnik go
-odczytuje i odpisuje w to samo miejsce, a pisarz widzi odpowiedz.
+The road goes both ways: the writer writes a pattern, the reader reads
+it and writes back into the same place, and the writer sees the answer.
 """
 
 import os
@@ -62,15 +61,16 @@ def main():
             check("oba procesy skonczyly sie bez bledu",
                   "koniec, kod wyjscia 0" in out and "ZLE" not in out)
 
-            # Region lezy w obszarze mapowan (od 0x50000000 w gore),
-            # a nie w stercie ani na stosie - i to widac po adresie
+            # The region lies in the mapping area (from 0x50000000
+            # upwards), not in the heap or on the stack - and that can be
+            # seen from the address
             adresy = re.findall(r"region pod adresem (\d+)", out)
             check("oba procesy dostaly adres z obszaru mapowan",
                   len(adresy) == 2 and
                   all(0x50000000 <= int(a) < 0x60000000 for a in adresy))
-            # Pisarz zmapowal wczesniej region na boku, wiec wspolny
-            # widzi wyzej niz czytelnik. Te same bajty pod dwoma
-            # roznymi adresami - o to w tym chodzi.
+            # The writer mapped a region on the side earlier, so it sees
+            # the shared one higher up than the reader does. The same
+            # bytes at two different addresses - that is the point.
             check("kazdy widzi te sama pamiec pod SWOIM adresem",
                   len(adresy) == 2 and adresy[0] != adresy[1])
         finally:

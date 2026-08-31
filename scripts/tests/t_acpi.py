@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: ACPI - wylaczanie zasilania.
+"""ProtonOS smoke test: ACPI - powering off.
 
-Najuczciwszy dowod, jaki mozna miec: maszyna ma po prostu zniknac.
-Emulator konczy dzialanie, a nie udaje, ze cos sie stalo.
+The most honest proof one can have: the machine is simply to disappear.
+The emulator ends, rather than pretending something happened.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os

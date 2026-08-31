@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: konsole wirtualne (Alt+F1..F4).
+"""ProtonOS smoke test: virtual consoles (Alt+F1..F4).
 
-Alt+F1..F4 przelacza ekran, ale kazda konsola ma wlasna tresc, wlasny
-shell i wlasnych "swoich" pisarzy: program uruchomiony na drugiej pisze
-na niej dalej, kiedy patrzymy na pierwsza.
+Alt+F1..F4 switches the screen, but every console has its own content,
+its own shell and its own "own" writers: a program started on the second
+keeps writing on it while we look at the first.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -21,10 +21,10 @@ from ptest import check, summary
 
 
 def main():
-    # --- Konsole wirtualne -----------------------------------------
-    # Alt+F1..F4 przelacza ekran, ale kazda konsola ma wlasna tresc,
-    # wlasny shell i wlasnych "swoich" pisarzy: program uruchomiony na
-    # drugiej pisze na niej dalej, kiedy patrzymy na pierwsza.
+    # --- Virtual consoles ------------------------------------------
+    # Alt+F1..F4 switches the screen, but every console has its own
+    # content, its own shell and its own "own" writers: a program started
+    # on the second keeps writing on it while we look at the first.
     print("--- konsole wirtualne (Alt+F1..F4) ---")
     q17 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:

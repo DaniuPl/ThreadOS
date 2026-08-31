@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: sygnaly.
+"""ProtonOS smoke test: signals.
 
-Najostrzejszy punkt jest tu jeden: powrot z procedury obslugi. Sygnal
-przychodzi dokladnie w chwili, gdy jadro odlozylo juz wynik
-przerwanego wywolania systemowego, a procedura obslugi biegnie w
-pierscieniu 3 na stosie programu - i musi wrocic tak, zeby program
-niczego nie zauwazyl.
+There is one sharpest point here: the return from a handler. The signal
+arrives exactly at the moment the kernel has already put down the result
+of the interrupted system call, and the handler runs in ring 3 on the
+program's stack - and has to return in such a way that the program
+notices nothing.
 
-Ctrl+C idzie przez prawdziwa klawiature, a nie przez skrot w jadrze:
-klawisz ma trafic do procesu trzymajacego konsole jako SIGINT i
-przerwac mu czekanie na znak w pol drogi.
+Ctrl+C goes through a real keyboard, not through a shortcut inside the
+kernel: the key is to reach the process holding the console as a SIGINT
+and interrupt its wait for a character halfway.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -57,8 +57,8 @@ def main():
         check("SIGKILL-a nie da sie przechwycic ani zignorowac",
               "[sigtest] SIGKILL nie do przechwycenia" in screen)
 
-        # Ctrl+C z prawdziwej klawiatury -> SIGINT do procesu, ktory
-        # trzyma konsole; czekanie na klawisz przerywa sie w pol drogi
+        # Ctrl+C from a real keyboard -> a SIGINT to the process holding
+        # the console; the wait for a key is interrupted halfway
         q.wait_for("[sigtest] czekam na Ctrl+C", timeout=20)
         q.sendkey("ctrl-c")
         screen = q.wait_for("[sigtest] Ctrl+C dotarl", timeout=20)
@@ -72,7 +72,7 @@ def main():
               f" ({used_before_sg} -> {used_after_sg})",
               used_after_sg is not None and used_after_sg == used_before_sg)
 
-        # Shell jadra umie wyslac dowolny sygnal, takze pod nazwe procesu
+        # The kernel's shell can send any signal, by a process's name too
         q.type_line("clear")
         q.type_line("run spin")
         q.wait_for("[spin] tik", timeout=20)

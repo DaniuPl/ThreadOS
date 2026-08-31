@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: granica miedzy jadrem a programem.
+"""ProtonOS smoke test: the line between the kernel and a program.
 
-Program w pierscieniu 3 nie siegnie po pamiec jadra sam - pilnuje tego
-stronicowanie. Moze to jednak zrobic cudzymi rekami: podac w wywolaniu
-systemowym wskaznik na pamiec jadra i liczyc na to, ze jadro zapisze
-tam cos w swoim imieniu, z pelnymi prawami.
+A program in ring 3 will not reach for kernel memory itself - paging
+sees to that. It can, however, do it by somebody else's hands: pass a
+pointer to kernel memory in a system call and count on the kernel
+writing something there on its behalf, with full rights.
 
-Dlatego sprawdzamy obie drogi. 'evil' siega wprost i ma zginac,
-a jadro ma pokazac adres, po ktory siegnal. 'evil2' podaje takie
-wskazniki w syscallach - kazdy ma wrocic z bledem, ale sam proces ma to
-PRZEZYC i wyjsc z kodem zero. Odrzucenie, ktore zabija proces, tez by
-tu przeszlo, a nie o to chodzi.
+That is why we check both roads. 'evil' reaches directly and is to die,
+and the kernel is to show the address it reached for. 'evil2' passes
+such pointers in syscalls - each is to come back with an error, but the
+process itself is to SURVIVE it and exit with code zero. A refusal that
+kills the process would pass here too, and that is not the point.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -38,7 +38,7 @@ def main():
         q.wait_for("[siec] DHCP", timeout=20)
         time.sleep(0.5)
 
-        # 'run evil': proba czytania pamieci jadra wprost
+        # 'run evil': an attempt to read kernel memory directly
         q.type_line("clear")
         q.type_line("run evil")
         screen = q.wait_for("proces 'evil' ubity")
@@ -49,7 +49,8 @@ def main():
         check("kod po ataku nie wykonal sie",
               "TEGO NIE POWINNO BYC WIDAC" not in screen)
 
-        # 'run evil2': te same adresy, ale podane jadru w syscallach
+        # 'run evil2': the same addresses, but passed to the kernel in
+        # syscalls
         q.type_line("run evil2")
         ev2 = q.wait_for("granica trzyma", timeout=20)
         check("syscalle odrzucaja wskazniki na pamiec jadra",

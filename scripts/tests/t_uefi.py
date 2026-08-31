@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: rozruch przez UEFI (OVMF).
+"""ProtonOS smoke test: booting through UEFI (OVMF).
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -19,7 +19,8 @@ from ptest import check, summary
 
 
 def main():
-    # rzeczy: ze jadro w ogole wstalo i ze cos narysowalo na ekranie.
+    # things: that the kernel came up at all and that it drew something on
+# the screen.
     print()
     print("--- rozruch przez UEFI (OVMF) ---")
     OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
@@ -49,8 +50,8 @@ def main():
             if INITRD64 and os.path.exists(INITRD64):
                 shutil.copy(INITRD64, due + "/boot/initrd64.img")
                 mod = "    module2 /boot/initrd64.img initrd64\n"
-            # all_video + gfxpayload=keep: bez tego GRUB pod UEFI nie
-            # umie sam ustawic trybu graficznego i konczy sie bledem
+            # all_video + gfxpayload=keep: without those GRUB under UEFI
+            # cannot set a graphics mode by itself and ends with the error
             # "no suitable video mode found"
             with open(due + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("insmod all_video\nset gfxpayload=keep\n"
@@ -62,15 +63,16 @@ def main():
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
             check("plyta hybrydowa (BIOS + UEFI) buduje sie", made)
-            # Partycja EFI musi byc naprawde w srodku, inaczej firmware
-            # nie ma czego uruchomic - szukamy jej podpisu w obrazie
+            # The EFI partition really has to be inside, otherwise the
+            # firmware has nothing to start - we look for its signature in
+            # the image
             if made:
                 with open(isoue, "rb") as fh:
                     head = fh.read(4 * 1024 * 1024)
                 check("obraz zawiera partycje EFI z programem rozruchowym",
                       b"EFI PART" in head or b"BOOTX64" in head.upper())
             if made:
-                # Firmware zapisuje zmienne, wiec pracuje na kopii
+                # The firmware writes variables, so it works on a copy
                 shutil.copy(OVMF_VARS, nvram)
                 q24 = Qemu(KERNEL, INITRD, cdrom=isoue, serial=slogue,
                            qemu="qemu-system-x86_64",
@@ -81,8 +83,8 @@ def main():
                           "Jadro uruchomione w trybie dlugim" in out)
                     check("jadro widzi znaczniki Multiboot 2 od GRUB-a EFI",
                           "Multiboot OK (Multiboot 2)" in out)
-                    # Pod UEFI tablice ACPI to jedyny sposob, zeby
-                    # dowiedziec sie czegokolwiek o plycie
+                    # Under UEFI the ACPI tables are the only way to learn
+                    # anything about the board
                     acpi = q24.wait_serial("Wskaznik ACPI", timeout=20)
                     check("loader podaje wskaznik ACPI",
                           re.search(r"Wskaznik ACPI od loadera: [0-9a-f]+",
@@ -104,15 +106,15 @@ def main():
                     check("program w ring 3 rusza tak samo jak pod BIOS-em",
                           "pierscien 3" in r3)
                     if INITRD64 and os.path.exists(INITRD64):
-                        # Modul od GRUB-a EFI dochodzi ta sama droga
-                        # co pod BIOS-em - znacznikiem Multiboota 2
+                        # The module from GRUB EFI arrives by the same path
+                        # as under BIOS - through a Multiboot 2 tag
                         elf = q24.wait_serial("ELF64 z initrd:", timeout=40)
                         check("program z initrd dziala takze pod UEFI",
                               "pierscien 3" in elf
                               and "kod wyjscia 7" in elf)
                     q24.wait_serial("System 64-bitowy gotowy", timeout=30)
-                    # I to samo na ekranie - narysowane naszym kodem,
-                    # piksel po pikselu, bez pomocy firmware
+                    # And the same on the screen - drawn by our code,
+                    # pixel by pixel, with no help from the firmware
                     w, h, at = q24.screen_raw()
                     x0, y0 = (w - 640) // 2, (h - 200) // 2
                     lit = sum(1 for y in range(y0, y0 + 200)

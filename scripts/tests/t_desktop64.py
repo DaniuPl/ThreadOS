@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: pulpit graficzny w jadrze 64-bitowym.
+"""ProtonOS smoke test: the graphical desktop in the 64-bit kernel.
 
-Kompozytor, okna i pasek zadan to ten sam desktop.c, co w jadrze
-32-bitowym - przeszedl bez jednej zmiany. Cala roznica siedzi
-w slowniku zgodnosci: pulpit uruchamia aplikacje po nazwie i przejmuje
-klawiature, a jedno i drugie ma w tym jadrze inna nazwe.
+The compositor, the windows and the taskbar are the same desktop.c as in
+the 32-bit kernel - it came across without a single change. The whole
+difference sits in the compatibility dictionary: the desktop starts
+applications by name and takes the keyboard over, and both of those have
+a different name in this kernel.
 
-Sprawdzamy to, co widac: tlo, paski, okna, ich kolejnosc po kliknieciu
-i to, ze kursor rusza sie za mysza.
+We check what can be seen: the background, the bars, the windows, their
+order after a click and that the cursor moves with the mouse.
 """
 
 import os
@@ -20,9 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-TLO = (0, 130, 162)          # blekit pulpitu
-BAR = (195, 195, 195)      # jasnoszary pasek
-IKONA = (255, 162, 0)        # pomaranczowa ikona
+TLO = (0, 130, 162)          # the desktop's blue
+BAR = (195, 195, 195)      # the light grey bar
+IKONA = (255, 162, 0)        # the orange icon
 
 
 def near(a, b, tol=40):
@@ -81,21 +82,21 @@ def main():
                   near(at(w // 2, 4), BAR))
             check("pasek zadan na dole narysowany",
                   near(at(w // 2, h - 8), BAR))
-            # Ikony stoja w kolumnie po lewej; ta pomaranczowa plama
-            # to pierwsza z nich
+            # The icons stand in a column on the left; that orange
+            # patch is the first of them
             check("ikony na pulpicie",
                   near(at(24, 32), IKONA))
 
-            # Okna jadra: dwa, jedno na drugim. Szare tlo okna
-            # w miejscu, gdzie stoi pierwsze z nich.
+            # The kernel's windows: two, one on top of the other. The
+            # window's grey background at the place the first one stands.
             WINDOW = (235, 235, 235)
             check("okno 'Terminal' narysowane",
                   near(at(100, 100), WINDOW, 60))
             check("okno 'Pliki' narysowane",
                   near(at(240, 140), WINDOW, 60))
 
-            # Mysz: kursor ma pojsc tam, gdzie go przesuniemy.
-            # Sprawdzamy przez zmiane pikseli w miejscu docelowym.
+            # The mouse: the cursor is to go where we move it. We check
+            # that through a change of pixels at the destination.
             q.mouse_goto(400, 300)
             time.sleep(1.5)
             _, _, at2 = q.screen_raw()
@@ -104,8 +105,8 @@ def main():
             check(f"kursor idzie za mysza ({differ} pikseli zmienionych)",
                   differ > 8)
 
-            # Klikniecie w pasek tytulu drugiego okna wynosi je na
-            # wierzch - a to widac po tym, ze przykrywa pierwsze
+            # A click on the second window's title bar brings it to the
+            # top - and that can be seen from it covering the first
             q.mouse_goto(240, 100)
             q.mouse_button(True)
             time.sleep(0.3)

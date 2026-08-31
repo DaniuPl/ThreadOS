@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: siec od strony programu w trybie dlugim.
+"""ProtonOS smoke test: the network as seen from a program in long mode.
 
-Do tej pory z sieci korzystalo tylko jadro - 'ping' i 'ifconfig' to
-jego wlasne polecenia. Tutaj sprawdzamy droge przez wywolania
-systemowe: program w ring 3 pyta o swoj adres, wysyla datagram do
-samego siebie i laczy sie z serwerem po TCP.
+Until now only the kernel used the network - 'ping' and 'ifconfig' are
+its own commands. Here we check the path through system calls: a program
+in ring 3 asks for its own address, sends a datagram to itself and
+connects to a server over TCP.
 
-Serwer HTTP stawiamy na hoscie i przekierowujemy do niego port, wiec
-proba nie zalezy od zadnej sieci na zewnatrz.
+We put the HTTP server up on the host and forward a port to it, so the
+attempt does not depend on any network outside.
 """
 
 import os
@@ -56,9 +56,9 @@ def main():
         if not made:
             return summary()
 
-        # W sieci uzytkownika QEMU brama 10.0.2.2 JEST hostem, wiec
-        # program laczy sie z serwerem stojacym tu obok bez zadnego
-        # przekierowania - te sa od ruchu w druga strone
+        # On QEMU's user network the gateway 10.0.2.2 IS the host, so the
+        # program connects to the server standing right here without any
+        # forwarding - those are for traffic the other way
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
@@ -76,8 +76,8 @@ def main():
                   + (f" ({m.group(1)})" if m else ""),
                   m is not None)
 
-            # Petla zwrotna nie wychodzi na kabel, wiec ta proba
-            # sprawdza sam stos, a nie siec dookola
+            # The loopback does not go out on the wire, so this attempt
+            # checks the stack itself, not the network around it
             m = re.search(r"datagram wrocil do mnie \((\d+) B\) "
                           r"od (\d+\.\d+\.\d+\.\d+)", out)
             check("datagram wyslany do siebie wraca taki sam"

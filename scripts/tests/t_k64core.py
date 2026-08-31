@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: rozruch trybu dlugiego (jadro 64-bitowe).
+"""ProtonOS smoke test: the long mode boot (64-bit kernel).
 
-Pierwszy krok kazdego jadra 64-bitowego: procesor ma sam potwierdzic,
-ze jest w trybie dlugim (LMA=1), tablice stron maja byc zbudowane
-z ramek wzietych od menedzera pamieci, a nie ulozone na sztywno
-w obrazie jadra, i musi dzialac przerwanie.
+The first step of every 64-bit kernel: the processor is to confirm by
+itself that it is in long mode (LMA=1), the page tables are to be built
+out of frames taken from the memory manager rather than laid out
+statically in the kernel image, and an interrupt has to work.
 
-Najmocniejsza asercja dotyczy strony wstawionej osiem gigabajtow ponad
-obszar opisany identycznosciowo: zapis i odczyt przez nia przechodza
-cala czterostopniowa sciezke tlumaczenia adresow, a nie skrot.
+The strongest assertion concerns a page placed eight gigabytes above the
+area described one to one: writing and reading through it go the whole
+four-level address translation path, not a shortcut.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -36,8 +36,8 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
-    # Dysk za kontrolerem AHCI: to ta droga wymagala doklejenia
-    # rejestrow kontrolera do mapowania
+    # A disk behind an AHCI controller: it was this path that required
+    # adding the controller's registers to the mapping
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.write(b"\0" * DISK_SIZE)
@@ -53,7 +53,7 @@ def main():
             out = q23.wait_serial("Tryb dlugi:", timeout=40)
             check("jadro startuje w trybie dlugim",
                   "Jadro uruchomione w trybie dlugim" in out)
-            # LMA ustawia sam procesor - to jego zdanie, nie nasze
+            # LMA is set by the processor itself - it is its word, not ours
             check("procesor potwierdza tryb dlugi (LMA=1)",
                   "LMA=1" in out)
             check("wskazniki maja osiem bajtow",
@@ -67,8 +67,8 @@ def main():
                             q23.wait_serial("Bufor obrazu",
                                             timeout=20)) is not None)
 
-            # Pamiec: wlasne tablice zbudowane z ramek od PMM,
-            # a nie te ulozone na sztywno w obrazie jadra
+            # Memory: our own tables built out of frames from the PMM,
+            # not the ones laid out statically in the kernel image
             mem = q23.wait_serial("Stronicowanie czteropoziomowe",
                                   timeout=20)
             m = re.search(r"czteropoziomowe: (\d+) MiB, zakaz "
@@ -78,9 +78,9 @@ def main():
                   m is not None and int(m.group(1)) >= 100)
             check("zakaz wykonywania wlaczony (bit NXE)",
                   m is not None and m.group(2) == "wlaczony")
-            # Strona wstawiona osiem gigabajtow ponad obszar
-            # opisany identycznosciowo - zapis i odczyt przez
-            # nia przechodza cala czterostopniowa sciezke
+            # A page placed eight gigabytes above the area described
+            # one to one - writing and reading through it go the whole
+            # four-level path
             hi = q23.wait_serial("Mapowanie 4 KiB", timeout=20)
             check("mapowanie 4 KiB daleko poza pamiecia dziala",
                   "odczyt 123456789abcdef" in hi)
@@ -89,21 +89,22 @@ def main():
                   "kmalloc/kfree dzialaja" in heap
                   and "po zwolnieniu 0 B" in heap)
 
-            # Przerwania w trybie dlugim: pulapka int3 przechodzi
-            # cala droge - stub, tablice, ramke rejestrow, iretq -
-            # i wraca, nie zatrzymujac systemu
+            # Interrupts in long mode: an int3 trap goes the whole
+            # way - stub, tables, register frame, iretq - and comes
+            # back without stopping the system
             trap = q23.wait_serial("[INT3]", timeout=20)
             check("wyjatek-pulapka obsluzony i wznowiony",
                   re.search(r"\[INT3\] breakpoint pod rip=",
                             trap) is not None)
-            # A timer musi tykac sam z siebie - to dowod, ze
-            # przerwania sprzetowe dochodza przez nowa tablice
+            # And the timer has to tick of its own accord - that is
+            # the proof that hardware interrupts arrive through the new
+            # table
 
-            # Watki: liczniki musza zgadzac sie z dlugoscia snu
-            # co do jednego. Przez 600 ms watek spiacy po 20 ms
-            # zdazy 30 razy, a ten po 50 ms - 12. Zepsute
-            # przelaczanie kontekstu albo usypianie od razu
-            # wypycha te liczby poza zakres.
+            # Threads: the counters have to match the length of the
+            # sleep exactly. Over 600 ms a thread sleeping 20 ms at a
+            # time manages 30 turns, and one sleeping 50 ms - 12. Broken
+            # context switching or sleeping pushes those numbers out of
+            # range at once.
             sch = q23.wait_serial("Watki licza rownolegle",
                                   timeout=25)
             m = re.search(r"A=(\d+), B=(\d+)", sch)

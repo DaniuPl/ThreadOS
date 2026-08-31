@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: wymiana stron na dysk.
+"""ProtonOS smoke test: swapping pages out to disk.
 
-Maszyna z 16 MiB RAM-u i program, ktory bierze 18 MiB: bez wymiany nie
-ma prawa sie udac. Wzorzec zalezy od numeru strony, wiec strona
-wczytana z niewlasciwego miejsca od razu sie wysypie.
+A machine with 16 MiB of RAM and a program that takes 18 MiB: without
+swapping it has no right to succeed. The pattern depends on the page
+number, so a page read back from the wrong place falls apart at once.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -21,10 +21,11 @@ from ptest import check, summary
 
 
 def main():
-    # --- Wymiana stron na dysk -------------------------------------
-    # Maszyna z 16 MiB RAM-u i program, ktory bierze 18 MiB: bez wymiany
-    # nie ma prawa sie udac. Wzorzec zalezy od numeru strony, wiec strona
-    # wczytana z niewlasciwego miejsca od razu sie wysypie.
+    # --- Swapping pages out to disk --------------------------------
+    # A machine with 16 MiB of RAM and a program that takes 18 MiB:
+    # without swapping it has no right to succeed. The pattern depends on
+    # the page number, so a page read back from the wrong place falls
+    # apart at once.
     print("--- wymiana stron na dysk ---")
     swdisk = tempfile.mktemp(suffix=".img")
     with open(swdisk, "wb") as fh:
@@ -48,7 +49,7 @@ def main():
               + (f" (-{m.group(1)} +{m.group(2)})" if m else ""),
               m is not None and int(m.group(1)) > 1000
               and int(m.group(2)) > 1000)
-        # Program skonczyl sie, wiec jego miejsca w pliku wymiany wrocily
+        # The program has finished, so its slots in the swap file came back
         m = re.search(r"wymiana:\s+(\d+)/(\d+) stron", stats)
         check("miejsca w pliku wymiany zwolnione po smierci procesu"
               + (f" ({m.group(1)}/{m.group(2)})" if m else ""),

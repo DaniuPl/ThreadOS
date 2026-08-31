@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: rozruch z plyty (Multiboot 2).
+"""ProtonOS smoke test: booting from a disc (Multiboot 2).
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -19,7 +19,7 @@ from ptest import check, summary
 
 
 def main():
-    # ACPI przychodza jako znaczniki Multiboot 2.
+    # ACPI arrives as Multiboot 2 tags.
     print("--- rozruch z ISO (Multiboot 2) ---")
     if shutil.which("grub-mkrescue") is None:
         print("POMINIETE: brak grub-mkrescue "
@@ -31,8 +31,8 @@ def main():
             os.makedirs(isodir + "/boot/grub")
             shutil.copy(KERNEL, isodir + "/boot/protonos.bin")
             shutil.copy(INITRD, isodir + "/boot/initrd.img")
-            # Wlasne menu: bez odliczania i od razu w tryb tekstowy,
-            # zeby dalo sie czytac ekran
+            # A menu of our own: with no countdown and straight into text
+            # mode, so that the screen can be read
             with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("set timeout=0\nset default=0\n"
                          'menuentry "ProtonOS" {\n'
@@ -66,9 +66,9 @@ def main():
                           "uptime:" in q21.wait_serial("tyknac timera",
                                                        timeout=20))
 
-                    # Konsola rysowana na buforze obrazu od GRUB-a:
-                    # tryb tekstowy VGA w ogole tu nie dziala, wiec
-                    # kazdy zapalony piksel to znak narysowany przez nas
+                    # The console drawn on the framebuffer from GRUB: VGA
+                    # text mode does not work here at all, so every lit
+                    # pixel is a character drawn by us
                     w, h, at = q21.screen_raw()
                     check(f"loader ustawil tryb graficzny ({w}x{h})",
                           w >= 640 and h >= 400)
@@ -92,8 +92,9 @@ def main():
                     if os.path.exists(slog):
                         os.unlink(slog)
 
-                # Pulpit na tym samym buforze: video_init_vesa nie ma
-                # tu czego ustawiac, bo tryb ustawil juz loader
+                # The desktop on the same buffer: video_init_vesa has
+                # nothing to set here, because the loader has already set
+                # the mode
                 with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                     fh.write("set timeout=0\nset default=0\n"
                              'menuentry "ProtonOS" {\n'
