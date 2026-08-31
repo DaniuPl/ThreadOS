@@ -1,36 +1,37 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: biblioteka wspoldzielona i wiazanie symboli.
+"""ProtonOS smoke test: the shared library and symbol binding.
 
-Do tej pory kazdy program niosl w sobie wszystko, czego uzywal.
-Kryptografia i TLS znaczyly po kilkadziesiat kilobajtow tego samego
-kodu w kazdym z kilku programow - raz w initrd i raz w pamieci,
-osobno dla kazdego procesu.
+Until now every program carried inside itself everything it used. The
+cryptography and TLS meant dozens of kilobytes of the same code in each
+of several programs - once in the initrd and once in memory, separately
+for every process.
 
-Teraz kod lezy raz, pod stalym adresem, w ramkach wspolnych dla
-wszystkich przestrzeni adresowych. Program ma zamiast niego tablice
-pustych miejsc, ktore jadro wypelnia przy ladowaniu.
+Now the code lies once, at a fixed address, in frames shared by all the
+address spaces. Instead of it a program has a table of empty slots,
+which the kernel fills in at load time.
 
-Sprawdzamy to rzeczami, ktorych nie da sie sfalszowac:
+We check that with things that cannot be faked:
 
-  1. Kod, ktory program wykonuje, lezy POZA jego obrazem. Adres musi
-     podac sama biblioteka: program nieprzemieszczalny, ktory bierze
-     adres jej funkcji, dostaje adres wlasnej zaslepki skoku.
-  2. Wynik jest poprawny - SHA-256('abc') z FIPS 180-4. Skok przez
-     niewypelniona pozycje nie ma jak dac wlasciwej odpowiedzi.
-  3. Dane biblioteki sa PRYWATNE. Licznik generatora losowego zaczyna
-     w kazdym procesie od zera; gdyby dane byly wspolne, drugi bieg
-     zastalby licznik pierwszego.
-  4. Kodu biblioteki nie da sie nadpisac. Ramki sa wspolne, wiec zapis
-     do nich podmienialby funkcje wszystkim naraz - ma sie nie udac
-     i ma zabic tego, kto probuje.
-  5. Programy naprawde schudly: cztery najciezsze razem waza mniej
-     niz sama biblioteka.
+  1. The code the program executes lies OUTSIDE its image. The address
+     has to be supplied by the library itself: a non-relocatable program
+     taking the address of its function gets the address of its own jump
+     stub.
+  2. The result is correct - SHA-256('abc') from FIPS 180-4. A jump
+     through an unfilled slot has no way of giving the right answer.
+  3. The library's data are PRIVATE. The random generator's counter
+     starts from zero in every process; if the data were shared, the
+     second run would find the first one's counter.
+  4. The library's code cannot be overwritten. The frames are shared, so
+     a write into them would swap a function out for everybody at once -
+     it is to fail and to kill whoever tries.
+  5. The programs really did slim down: the four heaviest together weigh
+     less than the library itself.
 
-Oba jadra dostaja swoja biblioteke z tych samych naglowkow - rozny
-jest tylko adres i szerokosc rejestrow.
+Both kernels get their library from the same headers - the only
+differences are the address and the width of the registers.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -45,13 +46,13 @@ from ptest import check, summary, make_iso64, no64
 
 
 def size(listing, name):
-    """Rozmiar pliku z wypisu 'ls' initrd."""
+    """A file's size from the 'ls' listing of the initrd."""
     m = re.search(r"\b" + re.escape(name) + r"\s+\((\d+) B\)", listing)
     return int(m.group(1)) if m else None
 
 
 def adresy(text):
-    """Trzy adresy, ktore wypisuje dynlib."""
+    """The three addresses dynlib prints."""
     def one_core(co):
         m = re.search(r"kod programu pod (\d+)" if co == "prog" else
                       (r"kod biblioteki pod (\d+)" if co == "kod" else
@@ -61,7 +62,8 @@ def adresy(text):
 
 
 def check_shared(q, marker, suffix, lib_base):
-    """Wspolna czesc dla obu jader: program dynlib i wypis initrd."""
+    """The part common to both kernels: the dynlib program and the initrd
+    listing."""
     first = q.command("run dynlib", marker, timeout=60)
     prog, code, dane = adresy(first)
     check("program podaje wszystkie trzy adresy" + suffix,
@@ -69,8 +71,9 @@ def check_shared(q, marker, suffix, lib_base):
     if code is None:
         return
 
-    # Kod biblioteki lezy w JEJ obszarze, a nie w obrazie programu.
-    # To jest cala rzecz: program tego kodu w sobie nie ma.
+    # The library's code lies in ITS area, not in the program's image.
+    # That is the whole point: the program does not have that code inside
+    # itself.
     check("kod biblioteki lezy poza obrazem programu" + suffix,
           code >= lib_base and code < lib_base + 16 * 1024 * 1024)
     check("kod programu lezy tam, gdzie zawsze" + suffix,
@@ -84,9 +87,9 @@ def check_shared(q, marker, suffix, lib_base):
     check("program doszedl do konca" + suffix,
           "[dynlib] gotowe" in first and counter is not None)
 
-    # Drugi bieg: ten sam kod pod tym samym adresem (ramki wspolne),
-    # ale licznik znow od zera (dane prywatne). Gdyby dane byly wspolne,
-    # zastalby stan poprzedniego procesu.
+    # The second run: the same code at the same address (shared frames),
+    # but the counter from zero again (private data). If the data were
+    # shared, it would find the previous process's state.
     second = q.command("run dynlib", marker, timeout=60)
     prog2, code2, dane2 = adresy(second)
     counter2 = re.search(r"licznik po pobraniu bajtow: (\d+)", second)
@@ -96,13 +99,13 @@ def check_shared(q, marker, suffix, lib_base):
           counter is not None and counter2 is not None and
           counter2.group(1) == counter.group(1))
 
-    # Zapis do wspolnego kodu musi zabic tego, kto probuje
+    # A write into the shared code has to kill whoever tries
     corrupt = q.command("run dynlib pisz", "Page Fault", timeout=60)
     check("zapis do kodu biblioteki konczy sie bledem ochrony" + suffix,
           "probuje pisac po kodzie" in corrupt and "Page Fault" in corrupt and
           "zapis do kodu biblioteki sie udal" not in corrupt)
 
-    # Rozmiary: cztery najciezsze programy razem lzejsze niz biblioteka
+    # Sizes: the four heaviest programs together lighter than the library
     listing = q.command("ls", "dynlib", timeout=20)
     lib = size(listing, "libproton.so")
     check("biblioteka jest w initrd i wazy swoje" + suffix,
@@ -148,7 +151,7 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    # --- To samo w jadrze 32-bitowym ---
+    # --- The same in the 32-bit kernel ---
     print("--- biblioteka wspoldzielona (jadro 32-bitowe) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     disk32 = tempfile.mktemp(suffix=".img")

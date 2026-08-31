@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: pliki odwzorowane w pamieci.
+"""ProtonOS smoke test: files mapped into memory.
 
-Loader ELF i system plikow polaczylismy juz wczesniej - program moze
-lezec na dysku. To jest druga polowa tej samej mysli: plik moze byc
-PAMIECIA. Program dostaje adres i czyta zawartosc jak zwykla tablice,
-bez ani jednego wywolania read.
+The ELF loader and the file system we joined earlier - a program can lie
+on the disk. This is the other half of the same thought: a file can be
+MEMORY. The program gets an address and reads the contents like an
+ordinary array, without a single read call.
 
-Sprawdzamy trzy rzeczy, kazda innym sposobem:
+We check three things, each a different way:
 
-  1. bajty pod adresem zgadzaja sie z tym, co lezy w pliku,
-  2. strony przychodza POD PALCAMI - dotkniecie jednego bajtu
-     stustronicowego pliku ma kosztowac jedna strone, nie sto,
-  3. odwzorowanie jest tylko do odczytu i proba zapisu ma zabic
-     proces, a nie po cichu przepasc.
+  1. the bytes at the address match what lies in the file,
+  2. the pages arrive UNDER YOUR FINGERS - touching one byte of a
+     hundred-page file is to cost one page, not a hundred,
+  3. the mapping is read-only and an attempted write is to kill the
+     process rather than quietly vanish.
 
-Numery blokow jadro ustala raz, przy zakladaniu odwzorowania, i czyta
-je potem warstwa blokowa z pominieciem kodu PFS - z tego samego
-powodu, co przy wymianie stron: PFS ma jeden wspolny bufor na blok,
-a blad strony potrafi trafic w srodku dowolnej operacji na plikach.
+The kernel works the block numbers out once, when the mapping is set up,
+and reads them afterwards through the block layer, bypassing the PFS
+code - for the same reason as with page swapping: PFS has one shared
+buffer for a block, and a page fault can land in the middle of any file
+operation.
 
-Oba jadra maja to samo, kazde swoim kodem stronicowania - i oba
-sprawdzamy tak samo. Przy okazji sprawdzamy tu drugi obszar rosnacy
-pod palcami: stos. Program dostaje osiem stron, a schodzi rekurencja
-znacznie glebiej.
+Both kernels have the same thing, each with its own paging code - and we
+check both the same way. Along the way we check here the other area that
+grows under your fingers: the stack. A program gets eight pages, and a
+recursion goes considerably deeper.
 """
 
 import os
@@ -38,8 +39,8 @@ from ptest import check, summary, make_iso64, no64
 
 
 def pages_from_files(text):
-    """Ile stron jadro wczytalo z odwzorowanych plikow - shell podaje
-    to w podsumowaniu po kazdym programie."""
+    """How many pages the kernel read from mapped files - the shell gives
+    that in the summary after every program."""
     m = re.search(r"z plikow (\d+)\)", text)
     return int(m.group(1)) if m else None
 
@@ -69,7 +70,7 @@ def main():
             q.wait_serial("proton64>", timeout=90)
             q.wait_serial("PFS gotowy", timeout=30)
 
-            # --- Maly plik: caly czytany przez odwzorowanie ---
+            # --- A small file: read whole through a mapping ---
             make_it = q.command("run mkmap64 mapa.txt 12", "kod wyjscia",
                                timeout=60)
             check("plik z wzorcem zalozony na dysku",
@@ -93,9 +94,9 @@ def main():
             check("dwanascie kilobajtow to dokladnie trzy strony z dysku",
                   pages_from_files(read_out) == 3)
 
-            # --- Duzy plik, jeden dotkniety bajt ---
-            # To jest wlasciwy dowod na stronicowanie na zadanie:
-            # odwzorowanie kosztuje tyle, ile sie z niego wzielo
+            # --- A large file, one byte touched ---
+            # This is the real proof of paging on demand: a mapping
+            # costs as much as was taken from it
             q.command("run mkmap64 duza.txt 400", "kod wyjscia",
                         timeout=120)
             malo = q.command("run mmapfile64 duza.txt 1", "kod wyjscia",
@@ -105,19 +106,20 @@ def main():
             check("dotkniecie jednego bajtu kosztuje jedna strone, "
                   "a nie caly plik", pages_from_files(malo) == 1)
 
-            # ...a przeczytanie calego kosztuje juz tyle, ile ma stron
+            # ...and reading the whole of it costs as much as it has pages
             many = q.command("run mmapfile64 duza.txt", "kod wyjscia",
                                timeout=120)
             check("przeczytanie calego pliku wciaga wszystkie jego strony",
                   pages_from_files(many) == 400 * 1024 // 4096)
 
-            # Odwzorowanie nie przezywa procesu: pamiec wraca do puli
+            # A mapping does not outlive the process: the memory returns to the
+# pool
             m = re.search(r"mmapfile64\] koniec, kod wyjscia 0 "
                           r"\(ramek (\d+) -> (\d+)", many)
             check("po koncu programu ramki wrocily do puli",
                   m is not None and m.group(1) == m.group(2))
 
-            # Plik, ktorego nie ma, jest bledem, a nie pustym adresem
+            # A file that does not exist is an error, not an empty address
             missing = q.command("run mmapfile64 niczegotakiego",
                                "kod wyjscia", timeout=60)
             check("nieistniejacy plik zglaszany jako blad",
@@ -130,7 +132,7 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    # --- To samo w jadrze 32-bitowym ---
+    # --- The same in the 32-bit kernel ---
     print("--- pliki odwzorowane w pamieci (jadro 32-bitowe) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
@@ -161,7 +163,7 @@ def main():
             check("tresc pliku po odrzuconym zapisie nietknieta (32-bit)",
                   "ZLE" not in read_out)
 
-            # Stronicowanie na zadanie: duzy plik, jeden dotkniety bajt
+            # Paging on demand: a large file, one byte touched
             before = q3.command("mem", "z plikow:")
             m1 = re.search(r"z plikow:\s+(\d+)", before)
             q3.command("run mkmap duza.txt 400", "zakonczyl sie",
@@ -176,11 +178,11 @@ def main():
                   m1 is not None and m2 is not None and
                   int(m2.group(1)) - int(m1.group(1)) == 1)
 
-            # Stos tez rosnie pod palcami. Program dostaje osiem stron,
-            # a schodzi rekurencja grubo glebiej - i po powrocie
-            # sprawdza, czy kazda ramka jest wciaz jego. Dokladanie
-            # stron pod nadpisywanie cudzych ramek wygladaloby
-            # w polowie tak samo.
+            # The stack grows under your fingers too. A program gets eight
+            # pages, and a recursion goes far deeper - and on the way
+            # back it checks whether every frame is still its own.
+            # Adding pages on top of overwriting somebody else's frames
+            # would look the same halfway.
             stack = q3.command("run deep", "zakonczyl sie", timeout=60)
             check("stos rosnie na zadanie: rekurencja siega poza osiem "
                   "stron", "[deep] zeszlem na poziom 40" in stack)

@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: klawiatura USB na kontrolerze xHCI.
+"""ProtonOS smoke test: a USB keyboard on an xHCI controller.
 
-xHCI to trzeci i ostatni kontroler USB - jedyny, jaki maja nowsze
-plyty. Rozni sie od UHCI nie szczegolami, tylko podzialem pracy: tam
-sterownik ukladal deskryptory przesylek w liscie ramek i sam nadawal
-urzadzeniom adresy, tu wklada polecenia do pierscienia, a odpowiedzi
-odbiera drugim pierscieniem - zdarzen.
+xHCI is the third and last USB controller - the only one newer boards
+have. It differs from UHCI not in details but in the division of labour:
+there the driver laid transfer descriptors out in a frame list and
+assigned addresses to devices itself, here it puts commands into a ring
+and collects the answers through a second ring - of events.
 
-Sprawdzamy dwie rzeczy naraz:
+We check two things at once:
 
-  1. ze sterownik doprowadza klawiature do rozmowy - reset portu,
-     przydzial slotu, nadanie adresu, opis konfiguracji, protokol
-     rozruchowy, a potem raporty HID lecace pierscieniem przesylek;
-  2. ze WYZEJ nie widac zadnej roznicy. Ta sama grupa sprawdzen, co
-     przy UHCI (t_usbkbd64.py), na tej samej klawiaturze i tym samym
-     kodzie HID - inna jest tylko magistrala pod spodem. Warstwa
-     usbhc.c ma to ukryc i wlasnie to tu mierzymy.
+  1. that the driver brings the keyboard to a conversation - a port
+     reset, a slot assignment, an address, reading the configuration, the
+     boot protocol, and then HID reports travelling through the transfer
+     ring;
+  2. that HIGHER UP no difference can be seen. The same group of checks
+     as with UHCI (t_usbkbd64.py), on the same keyboard and the same HID
+     code - the only difference is the bus underneath. The usbhc.c layer
+     is to hide that, and that is exactly what we measure here.
 
-Robimy to w obu jadrach: kontroler adresuje pamiec 64 bitami, wiec
-w trybie 32-bitowym gorne polowki adresow sa zerami, a rejestry
-64-bitowe zapisuje sie dwoma polowkami. Jesli cos w tym jest nie tak,
-tylko jedno z jader ruszy.
+We do it in both kernels: the controller addresses memory with 64 bits,
+so in 32-bit mode the upper halves of the addresses are zeros, and the
+64-bit registers are written in two halves. If something in that is
+wrong, only one of the kernels will start.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -65,8 +66,9 @@ def main():
                      qemu="qemu-system-x86_64")
             try:
                 start = q.wait_serial("Klawiatura USB", timeout=60)
-                # Warstwa wyboru sama mowi, przez co gada - i ma tu
-                # powiedziec xHCI, bo UHCI na tej maszynie nie ma
+                # The selection layer says by itself what it is talking
+                # through - and it is to say xHCI here, because there is
+                # no UHCI on this machine
                 check("klawiatura znaleziona na kontrolerze xHCI",
                       re.search(r"Klawiatura USB \(HID, xHCI\) na porcie \d+",
                                 start) is not None)
@@ -80,11 +82,11 @@ def main():
                 check("polecenie wpisane przez xHCI wykonuje sie",
                       "Uptime:" in po)
 
-                # Wielka litera powstaje z modyfikatora w raporcie HID -
-                # to inna droga przez raport niz zwykly kod klawisza.
-                # QEMU trzyma klawisz okolo stu milisekund, wiec przy
-                # zbyt szybkim nadawaniu sasiednie klawisze zachodza na
-                # siebie; stad wolniejsze tempo i druga proba.
+                # A capital letter comes from a modifier in the HID report -
+                # that is a different path through a report than an
+                # ordinary key code. QEMU holds a key for about a hundred
+                # milliseconds, so with too fast a rate neighbouring keys
+                # overlap; hence the slower pace and a second attempt.
                 big_one = False
                 for _ in range(3):
                     before = len(q.serial())
@@ -101,8 +103,9 @@ def main():
                 check("modyfikator Shift z raportu HID daje wielka litere",
                       big_one)
 
-                # Alt+F2 to inna droga w jadrze niz zwykly znak
-                # (przelaczenie konsoli, a nie kolejka wejscia)
+                # Alt+F2 is a different path inside the kernel than an
+                # ordinary character (a console switch, not the input
+                # queue)
                 q.sendkey("alt-f2")
                 time.sleep(1.0)
                 check("Alt+F2 z klawiatury na xHCI przelacza konsole",
@@ -116,7 +119,7 @@ def main():
             if os.path.exists(slog):
                 os.unlink(slog)
 
-    # --- To samo w jadrze 32-bitowym ---
+    # --- The same in the 32-bit kernel ---
     print("--- klawiatura USB na xHCI (jadro 32-bitowe) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     try:
@@ -139,8 +142,8 @@ def main():
             check("polecenie wpisane przez xHCI wykonuje sie (32-bit)",
                   "uptime:" in po and "tyknac" in po)
 
-            # Kilka klawiszy po kolei: raporty musza isc jeden za drugim
-            # przez ten sam pierscien przesylek, a nie tylko pierwszy
+            # Several keys in a row: the reports have to go one after another
+            # through the same transfer ring, not just the first one
             before = len(q3.serial())
             type_text(q3, "help")
             time.sleep(1.5)

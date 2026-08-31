@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: programy uzytkownika na wszystkich rdzeniach.
+"""ProtonOS smoke test: user programs on all the cores.
 
-Watki jadra chodzily po wszystkich rdzeniach juz wczesniej. Program
-w pierscieniu 3 to jednak co innego: potrzebuje wlasnego segmentu stanu
-zadania na kazdym rdzeniu, wlasnego wejscia w wywolania systemowe -
-i, co okazalo sie najwazniejsze, WLASCZONEGO STRONICOWANIA. Rdzen
-wtorny w trybie chronionym startowal bez niego: dla kodu jadra wyszlo to
-na jedno, bo dolna pamiec jest odwzorowana jeden do jednego, ale adres
-programu uzytkownika bez tablic stron nie znaczyl nic i proces ginal.
+Kernel threads ran on all the cores earlier already. A program in ring 3
+is another matter, though: it needs its own task state segment on every
+core, its own entry into the system calls - and, as turned out to matter
+most, PAGING ENABLED. A secondary core in protected mode started without
+it: for kernel code that came to the same thing, because low memory is
+mapped one to one, but a user program's address meant nothing without
+page tables and the process died.
 
-Sprawdzamy cztery rzeczy:
+We check four things:
 
-  1. 'run cores' - dwa procesy trzymane na rdzeniu rozruchowym. Maska
-     rdzeni ma byc rowna 1, czyli mechanizm domyslnie NIE rozprasza.
-  2. 'runw cores' - te same dwa procesy, wolno im biec wszedzie. Maska
-     ma miec wiecej niz jeden bit, czyli pierscien 3 naprawde byl poza
-     rdzeniem rozruchowym.
-  3. Czas. Oba procesy licza tyle samo, wiec na jednym rdzeniu kazdy
-     widzi dwa razy dluzej niz na dwoch. Porownujemy 'run' z 'runw'
-     w tej samej maszynie, wiec nie mierzymy szybkosci gospodarza.
-  4. Suma kontrolna. Program, ktory policzyl swoje na innym rdzeniu, ma
-     dac dokladnie te sama liczbe, co policzony na rdzeniu rozruchowym.
-     Bez tego punkty 2 i 3 mowilyby tylko, ze cos szlo szybciej.
+  1. 'run cores' - two processes held on the bootstrap core. The core
+     mask is to be equal to 1, that is, the mechanism does NOT spread
+     things out by default.
+  2. 'runw cores' - the same two processes, allowed to run anywhere. The
+     mask is to have more than one bit, that is, ring 3 really was off
+     the bootstrap core.
+  3. Time. Both processes compute the same amount, so on one core each
+     sees twice as long as on two. We compare 'run' with 'runw' in the
+     same machine, so we are not measuring the host's speed.
+  4. The checksum. A program that computed its share on another core is
+     to give exactly the same number as one computed on the bootstrap
+     core. Without that, points 2 and 3 would only say that something
+     went faster.
 
-Na maszynie jednordzeniowej 'runw' ma dzialac tak samo jak 'run' -
-obietnica "wolno wszedzie" nie jest obietnica "musi gdzie indziej".
+On a single-core machine 'runw' is to work the same as 'run' - the
+promise "allowed anywhere" is not a promise "must be somewhere else".
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -45,14 +47,15 @@ PATTERN = re.compile(r"\[cores\] (dziecko|rodzic ): rdzenie (\d+), "
 
 
 def parse_lines(out):
-    """[(maska, tyknac, suma), ...] dla obu procesow."""
+    """[(mask, ticks, checksum), ...] for both processes."""
     return [(int(m.group(2)), int(m.group(3)), int(m.group(4)))
             for m in PATTERN.finditer(out)]
 
 
 def check_pair(out, label):
-    """Wspolne dla 'run' i 'runw': oba procesy doszly do konca i zgadzaja
-    sie co do wyniku. Zwraca (maska_lacznie, najwiecej_tykniec, suma)."""
+    """Common to 'run' and 'runw': both processes reached the end and
+    agree on the result. Returns (mask_together, most_ticks,
+    checksum)."""
     proc = parse_lines(out)
     check("oba procesy doszly do konca" + label, len(proc) == 2)
     if len(proc) != 2:
@@ -67,7 +70,7 @@ def check_pair(out, label):
 
 
 def run_case(q, ncores, label):
-    """Jedna maszyna: 'run' obok 'runw' i porownanie."""
+    """One machine: 'run' next to 'runw' and the comparison."""
     parallel_run = None
 
     serial_run = check_pair(
@@ -96,8 +99,8 @@ def run_case(q, ncores, label):
         check("prowadzil go wiecej niz jeden rdzen (%d)%s"
               % (bin(mask).count("1"), label),
               bin(mask).count("1") >= 2)
-        # Dwa procesy na jednym rdzeniu licza sie po kolei, na dwoch -
-        # naraz. Prog stoi w polowie drogi miedzy jednym a drugim.
+        # Two processes on one core compute in turn, on two - at once. The
+        # threshold stands halfway between one and the other.
         check("dwa procesy naraz szybciej niz po kolei (%d wobec %d "
               "tykniec)%s" % (parallel_run[1], serial_run[1], label),
               parallel_run[1] < 3 * serial_run[1] // 4)

@@ -1,34 +1,33 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: wywolania systemowe bez wielkiego zamka jadra.
+"""ProtonOS smoke test: system calls without the big kernel lock.
 
-Poprzedni krok wpuscil programy uzytkownika na wszystkie rdzenie, ale
-kazde wejscie do jadra bralo jeden zamek na cale jadro. Liczenie
-w pierscieniu 3 szlo wiec rownolegle, a wszystko, co dotykalo jadra -
-po kolei. Program, ktory czesto wola jadro, nie zyskiwal na czterech
-rdzeniach nic; tracil, bo do czekania dochodzilo bicie sie o te sama
-linie pamieci.
+The previous step let user programs onto all the cores, but every entry
+into the kernel took one lock for the whole kernel. So the counting in
+ring 3 went in parallel, and everything that touched the kernel - in
+turn. A program that calls the kernel often gained nothing from four
+cores; it lost, because on top of the waiting came a fight over the same
+memory line.
 
-Teraz wywolanie, ktore siega wylacznie po stan wolajacego zadania,
-przechodzi bez zamka. Lista takich wywolan jest krotka i jawna, a
-domyslna odpowiedz brzmi "z zamkiem".
+Now a call that reaches only for the calling task's state goes through
+without the lock. The list of such calls is short and explicit, and the
+default answer is "with the lock".
 
-Sprawdzamy trzy rzeczy:
+We check three things:
 
-  1. Poprawnosc, i to jest najwazniejsze. Kazde z miliona wywolan
-     sys_getpid ma zwrocic numer TEGO procesu. Gdyby dwa rdzenie
-     mylily sie co do tego, ktore zadanie prowadza - a to jest dokladnie
-     to ryzyko, ktore zamek do tej pory zaslanial - widac by to bylo
-     tutaj natychmiast.
-  2. 'run syscalls' trzyma oba procesy na rdzeniu rozruchowym, wiec
-     maska rdzeni ma byc rowna 1. To jest pomiar odniesienia.
-  3. 'runw syscalls' pozwala im biec wszedzie. Ma byc WYRAZNIE
-     szybciej, a nie tylko troche - i to jest cala roznica, bo przed
-     ta zmiana bylo w tym miejscu WOLNIEJ niz na jednym rdzeniu.
+  1. Correctness, and that matters most. Each of the million sys_getpid
+     calls is to return THIS process's number. If two cores disagreed
+     about which task they are running - and that is exactly the risk the
+     lock had been covering up - it would show here immediately.
+  2. 'run syscalls' holds both processes on the bootstrap core, so the
+     core mask is to be equal to 1. That is the reference measurement.
+  3. 'runw syscalls' lets them run anywhere. It is to be CLEARLY faster,
+     not merely a little - and that is the whole difference, because
+     before this change it was SLOWER here than on a single core.
 
-Na maszynie jednordzeniowej obie komendy maja dac to samo.
+On a single-core machine both commands are to give the same thing.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -46,7 +45,7 @@ PATTERN = re.compile(r"\[syscalls\] (dziecko|rodzic ): rdzenie (\d+), "
 
 
 def measure(q, cmd_text, label):
-    """Jedno uruchomienie: (maska_lacznie, najdluzszy_czas) albo None."""
+    """One run: (mask_together, longest_time) or None."""
     out = q.command(cmd_text, "gotowe", timeout=300)
     proc = [(int(m.group(2)), int(m.group(3)), int(m.group(4)),
              int(m.group(5))) for m in PATTERN.finditer(out)]
@@ -78,9 +77,9 @@ def run_case(q, ncores, label):
     if ncores > 1:
         check("wywolania szly takze poza rdzeniem rozruchowym (maska %d)%s"
               % (parallel_run[0], label), (parallel_run[0] & ~1) != 0)
-        # Prog jest z zapasem, ale nie z takim, zeby przepuscil brak
-        # zmiany: pod wielkim zamkiem wychodzilo tu WIECEJ niz na jednym
-        # rdzeniu, a nie cztery piate.
+        # The threshold has room to spare, but not so much that it would let
+        # no change through: under the big lock this came out as MORE than
+        # on a single core, not four fifths.
         check("dwa procesy wolaly jadro naraz, nie po kolei (%d wobec %d "
               "tykniec)%s" % (parallel_run[1], serial_run[1], label),
               parallel_run[1] < 4 * serial_run[1] // 5)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: kursor, okna, kontrolki, aplikacja ring 3, pasek zadan.
+"""ProtonOS smoke test: the cursor, windows, controls, a ring 3
+application, the taskbar.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -19,7 +20,7 @@ from ptest import check, summary
 
 
 def main():
-    # --- Tryb graficzny (osobny boot: 'gfx' jest jednokierunkowy) ---
+    # --- Graphics mode (a separate boot: 'gfx' is one-way) ---
     print("--- tryb graficzny (screendump) ---")
     q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
@@ -44,7 +45,7 @@ def main():
     finally:
         q3.close()
 
-    # --- Pulpit graficzny: kursor myszy (osobny boot) ---
+    # --- The graphical desktop: the mouse cursor (a separate boot) ---
     print("--- pulpit: kursor myszy ---")
     q4 = Qemu(KERNEL, INITRD)
     try:
@@ -54,28 +55,29 @@ def main():
         def near(px, want, tol=40):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # Pulpit dziala w wysokiej rozdzielczosci VESA (640x480)
+        # The desktop runs at a high VESA resolution (640x480)
         gw, gh, _ = q4.screen_raw()
         check(f"pulpit w trybie VESA wysokiej rozdzielczosci ({gw}x{gh})",
               gw == 640 and gh == 480)
 
-        # mysz startuje na srodku (160,100); przesun do ~(50,40)
+        # the mouse starts in the middle (160,100); move it to ~(50,40)
         q4.mouse_move(-110, -60)
         check("kursor rysowany w pozycji myszy (bialy ~50,41)",
               q4.wait_pixel(50, 41, (255, 255, 255)))
         _, _, at = q4.screen_raw()
         check("tlo pulpitu (teal) z dala od kursora, ikon i okien",
               near(at(350, 200), (0, 128, 160)))
-        # przesun w inne miejsce - kursor podaza
+        # move it somewhere else - the cursor follows
         q4.mouse_move(150, 80)
         check("kursor podaza za mysza (bialy ~200,121)",
               q4.wait_pixel(200, 121, (255, 255, 255)))
         check("poprzednia pozycja kursora wyczyszczona (teal ~50,41)",
               q4.wait_pixel(50, 41, (0, 128, 160)))
 
-        # Tekst (czcionka 8x8): pasek tytulu z napisem "ProtonOS".
-        # Pasek jasnoszary; glif czarny -> komorka litery ma i czarne,
-        # i szare piksele (czyli to ksztalt, nie pelny prostokat).
+        # Text (an 8x8 font): the title bar with the caption "ProtonOS".
+        # The bar is light grey; the glyph black -> a letter's cell has
+        # both black and grey pixels (that is, it is a shape, not a solid
+        # rectangle).
         _, _, at = q4.screen_raw()
         check("pasek tytulu narysowany (jasnoszary, puste miejsce)",
               near(at(200, 4), (192, 192, 192)))
@@ -87,7 +89,8 @@ def main():
     finally:
         q4.close()
 
-    # --- Pulpit: okna i przeciaganie mysza (osobny boot) ---
+    # --- The desktop: windows and dragging with the mouse (a separate
+# boot) ---
     print("--- pulpit: okna + drag ---")
     q5 = Qemu(KERNEL, INITRD)
     try:
@@ -97,7 +100,8 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # Okna: win0 (40,60,120x70) i win1 (180,95). Mysz startuje (160,100).
+        # The windows: win0 (40,60,120x70) and win1 (180,95). The mouse
+# starts at (160,100).
         check("okno 0: pasek tytulu niebieski (80,64)",
               q5.wait_pixel(80, 64, (0, 0, 255)))
         _, _, at = q5.screen_raw()
@@ -106,13 +110,14 @@ def main():
         check("okno 1: pasek tytulu niebieski (220,99)",
               near(at(220, 99), (0, 0, 255)))
 
-        # Przeciaganie okna 0: kursor (160,100) -> pasek win0 (60,64),
-        # wcisnij LPM, przesun (+80,+50), pusc. Okno -> (120,110).
+        # Dragging window 0: the cursor (160,100) -> win0's bar (60,64),
+        # press the left button, move (+80,+50), release. The window ->
+        # (120,110).
         q5.mouse_move(-100, -36)
         q5.mouse_button(True)
         q5.mouse_move(80, 50)
         q5.mouse_button(False)
-        # nowy pasek win0 w widocznej (niezaslonietej) czesci: (150,114)
+        # win0's new bar in the visible (unobscured) part: (150,114)
         check("okno 0 przeciagniete na nowa pozycje (pasek ~150,114)",
               q5.wait_pixel(150, 114, (0, 0, 255)))
         _, _, at = q5.screen_raw()
@@ -123,7 +128,7 @@ def main():
     finally:
         q5.close()
 
-    # --- Pulpit: klikalne kontrolki (przycisk akcji + zamkniecie) ---
+    # --- The desktop: clickable controls (an action button + closing) ---
     print("--- pulpit: kontrolki (klik) ---")
     q6 = Qemu(KERNEL, INITRD)
     try:
@@ -133,14 +138,15 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # win0 (40,60,120x70): przycisk [x] czerwony w prawym rogu paska
+        # win0 (40,60,120x70): the [x] button in red in the bar's right corner
         check("przycisk zamkniecia [x] (czerwony, ~153,63)",
               q6.wait_pixel(153, 63, (255, 0, 0)))
         _, _, at = q6.screen_raw()
 
-        # Licznik przy przycisku 'Klik' (komorka ~94,80). Klikamy 3x.
+        # The counter next to the 'Klik' button (the cell ~94,80). We click
+# 3 times.
         cell_before = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
-        q6.mouse_goto(68, 84)            # srodek przycisku 'Klik'
+        q6.mouse_goto(68, 84)            # the centre of the 'Klik' button
         for _ in range(3):
             q6.mouse_click()
         time.sleep(0.6)
@@ -150,19 +156,20 @@ def main():
         check("przycisk akcji reaguje na klik (licznik zmienil cyfre)",
               cell_before != cell_after and white_after > 0)
 
-        # Zamkniecie okna: klik [x] okna 1 (close box ~293,99)
+        # Closing a window: a click on window 1's [x] (the close box ~293,99)
         q6.mouse_goto(293, 99)
         q6.mouse_click()
         check("klik [x] zamyka okno (pasek win1 znika, wraca tlo)",
               q6.wait_pixel(220, 99, (0, 128, 160)))
         _, _, at = q6.screen_raw()
-        # okno 0 nadal jest (klik nie ruszyl innych okien)
+        # window 0 is still there (the click did not touch other windows)
         check("inne okno pozostaje otwarte po zamknieciu (win0 pasek 80,64)",
               near(at(80, 64), (0, 0, 255)))
     finally:
         q6.close()
 
-    # --- Aplikacja ring 3 z wlasnym oknem (rysowanie przez syscalle) ---
+    # --- A ring 3 application with its own window (drawing through
+# syscalls) ---
     print("--- pulpit: aplikacja ring 3 ---")
     q7 = Qemu(KERNEL, INITRD)
     try:
@@ -174,21 +181,23 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # guiapp -> slot 2 (sloty 0/1 to okna jadra): okno (94,54),
-        # obszar treści od (95,65). Kwadraty RGB rysowane przez syscalle.
+        # guiapp -> slot 2 (slots 0/1 are the kernel's windows): the window
+        # (94,54), the content area from (95,65). The RGB squares are
+        # drawn through syscalls.
         check("aplikacja ring3 narysowala czerwony kwadrat (101,71)",
               q7.wait_pixel(101, 71, (255, 0, 0)))
         check("aplikacja ring3 narysowala niebieski kwadrat (170,75)",
               q7.wait_pixel(170, 75, (0, 0, 255)))
 
-        # Zdarzenia: klik w cialo okna trafia do aplikacji (win_poll),
-        # ktora rysuje bialy znacznik w miejscu klikniecia. Licznik
-        # 'klikniec:' przy (175,89) rosnie. Kursor odsuwamy, by nie
-        # zaslonil znacznika przy zrzucie.
+        # Events: a click in the window's body reaches the application
+        # (win_poll), which draws a white marker at the place of the
+        # click. The counter 'klikniec:' at (175,89) grows. We move the
+        # cursor away so that it does not cover the marker in the
+        # screenshot.
         cnt_before = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
         q7.mouse_goto(150, 110)
         q7.mouse_click()
-        q7.mouse_goto(60, 140)            # odsun kursor od znacznika
+        q7.mouse_goto(60, 140)            # move the cursor away from the marker
         check("klik dostarczony do aplikacji: znacznik w miejscu (149,109)",
               q7.wait_pixel(149, 109, (255, 255, 255)))
         _, _, at = q7.screen_raw()
@@ -196,8 +205,9 @@ def main():
         check("aplikacja zliczyla klikniecie (licznik zmienil cyfre)",
               cnt_before != cnt_after)
 
-        # Klawiatura do okna z fokusem: okno jest sfokusowane (klikniete
-        # wyzej). Po wpisaniu znakow pole 'txt:' (~135,103) pokazuje tekst.
+        # The keyboard to the window with focus: the window is focused
+        # (clicked above). After typing characters the field 'txt:'
+        # (~135,103) shows the text.
         for k in ("a", "b", "c"):
             q7.sendkey(k)
 
@@ -207,7 +217,7 @@ def main():
                        if near(a(x, y), (255, 255, 255), 10))
 
         appeared = False
-        for _ in range(15):          # poll: tekst pojawia sie po kilku klatkach
+        for _ in range(15):          # poll: the text appears after a few frames
             if txt_white() > 0:
                 appeared = True
                 break
@@ -215,21 +225,23 @@ def main():
         check("klawiatura trafia do okna z fokusem (tekst pojawil sie)",
               appeared)
 
-        # Klik w pulpit (puste tlo) zdejmuje fokus, by 'kill' trafilo
-        # do shella jadra, a nie do okna aplikacji
+        # A click on the desktop (the empty background) removes the focus, so
+        # that 'kill' reaches the kernel's shell rather than the
+        # application's window
         q7.mouse_goto(60, 140)
         q7.mouse_click()
         time.sleep(0.2)
 
-        # Zabicie aplikacji: kompozytor sprzata jej okno. Zabijamy po
-        # nazwie - pid zalezy od tego, ile watkow wystartowalo wczesniej
+        # Killing the application: the compositor cleans its window up. We
+        # kill by name - the pid depends on how many threads started
+        # earlier
         q7.type_line("kill guiapp")
         check("po zabiciu aplikacji jej okno zostaje sprzatniete (170,75 teal)",
               q7.wait_pixel(170, 75, (0, 128, 160)))
     finally:
         q7.close()
 
-    # --- Pasek zadan i menu uruchamiania (osobny boot) ---
+    # --- The taskbar and the start menu (a separate boot) ---
     print("--- pulpit: pasek zadan + menu ---")
     q8 = Qemu(KERNEL, INITRD)
     try:
@@ -238,21 +250,23 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # Pasek zadan na dole (640x480 -> y=468); przycisk 'Menu' x2..42
+        # The taskbar at the bottom (640x480 -> y=468); the 'Menu' button
+# x2..42
         check("pasek zadan: przycisk 'Menu' (niebieski, 30,470)",
               q8.wait_pixel(30, 470, (0, 0, 255)))
         _, _, at = q8.screen_raw()
-        # przed uruchomieniem aplikacji slot 2 jest pusty (tlo okna jadra)
+        # before the application starts, slot 2 is empty (the kernel window's
+        # background)
         check("przed launchem brak okna aplikacji (101,71 nie czerwone)",
               not near(at(101, 71), (255, 0, 0)))
 
-        # Wpisy menu liczone z MENU_ITEMS (patrz menu_y)
+        # The menu entries are computed from MENU_ITEMS (see menu_y)
         q8.mouse_goto(10, 472)
         q8.mouse_click()
         check("klik 'Menu' rozwija menu (wpis szary)",
               q8.wait_pixel(70, menu_y("guiapp"), (224, 224, 224)))
 
-        # Klik wpisu 'guiapp' (entry0) -> uruchamia aplikacje
+        # A click on the 'guiapp' entry (entry0) -> starts the application
         q8.mouse_goto(40, menu_y("guiapp"))
         q8.mouse_click()
         check("wybor z menu uruchamia aplikacje (czerwony kwadrat 101,71)",
@@ -261,10 +275,11 @@ def main():
         check("menu zamyka sie po wyborze (wpis znika)",
               not near(at(70, menu_y("guiapp")), (224, 224, 224)))
 
-        # Lista okien na pasku zadan: przyciski Terminal/Pliki/guiapp.
-        # guiapp jest na wierzchu (swiezo uruchomione) - czerwony przy (101,71).
-        # Klik przycisku 'Terminal' (slot0, j0, x46..96, y468) wynosi je na
-        # wierzch i fokusuje: czerwony guiappa zostaje zakryty oknem jadra.
+        # The window list on the taskbar: the Terminal/Pliki/guiapp buttons.
+        # guiapp is on top (freshly started) - red at (101,71). A click on
+        # the 'Terminal' button (slot0, j0, x46..96, y468) brings it to
+        # the top and focuses it: guiapp's red gets covered by the
+        # kernel's window.
         q8.mouse_goto(60, 473)
         q8.mouse_click()
         check("klik przycisku na pasku wynosi okno na wierzch (czerwony zakryty)",

@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: zamki na wspolnych strukturach jadra.
+"""ProtonOS smoke test: locks on the kernel's shared structures.
 
-Rdzenie wtorne umialy dotad tylko liczyc na tym, co dostaly - caly
-dzielony miedzy nimi stan to byla jedna liczba i jeden zamek. Zeby
-mogly kiedykolwiek prowadzic zadania, musza najpierw umiec bezpiecznie
-WOLAC JADRO; a jadro musi to wytrzymac.
+The secondary cores could so far only compute on what they were given -
+all the state shared between them was one number and one lock. For them
+ever to be able to run tasks, they first have to be able to CALL THE
+KERNEL safely; and the kernel has to withstand it.
 
-Komenda 'smpmem' bierze dwie struktury, po ktore siega wszystko inne -
-mape ramek fizycznych i sterte jadra - i kaze kazdemu rdzeniowi
-przydzielac z nich i oddawac trzy tysiace razy naraz.
+The 'smpmem' command takes the two structures everything else reaches
+for - the physical frame map and the kernel heap - and tells every core
+to allocate from them and give back three thousand times at once.
 
-Sprawdzenie nie polega na tym, czy sie nie wysypalo: na to odpowiedz
-bywa przypadkowa. Kazdy przydzial dostaje wzorzec zalezny od numeru
-jednostki i zaraz potem jest czytany - ramka wydana dwom rdzeniom
-naraz ma dwoch piszacych i wzorzec sie nie zgadza. Na koniec liczymy
-ramki i bajty sterty: tyle samo przed co po.
+The check does not rest on whether it fell over: the answer to that is
+sometimes accidental. Every allocation gets a pattern that depends on
+the item's number and is read back right afterwards - a frame handed to
+two cores at once has two writers and the pattern does not match. At the
+end we count the frames and the heap bytes: the same before as after.
 
-Ta proba naprawde cos rozstrzyga. Bez zamka w mapie ramek daje
-kilkadziesiat niezgodnosci wzorca i kilkadziesiat ramek, ktore nie
-wrocily; bez zamka na stercie jadro ginie na bledzie strony, bo lista
-wolnych blokow przestaje trzymac sie kupy.
+This attempt really settles something. Without a lock in the frame map
+it gives dozens of pattern mismatches and dozens of frames that did not
+come back; without a lock on the heap the kernel dies on a page fault,
+because the free block list stops holding together.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -46,7 +46,7 @@ def verify(out, suffix, ncores):
           m is not None and int(m.group(1)) == 64 * 48 and
           int(m.group(2)) == 0)
 
-    # Sedno: ramka wydana dwa razy ma dwoch piszacych
+    # The heart of it: a frame handed out twice has two writers
     check("kazdy przydzial trafil do jednego rdzenia" + suffix,
           "Wzorzec: zgadza sie (bledow 0)" in out)
 
@@ -62,11 +62,11 @@ def verify(out, suffix, ncores):
           re.search(r"Rdzeni: %d \(obudzonych %d\)" % (ncores, ncores - 1),
                     out) is not None)
 
-    # Ile rdzeni naprawde wzielo prace. Nie zadamy, zeby wzial ja KAZDY:
-    # rdzen rozruchowy prowadzi w tym czasie watek shella i bywa
-    # wywlaszczony przez timer, podczas gdy wtorne kreca sie w ciasnej
-    # petli i rozbieraja zlecenie, zanim zdazy siegnac. To wyscig,
-    # a wyscigi nie sa asercjami.
+    # How many cores really took work. We do not demand that EVERY one
+    # took it: the bootstrap core is running the shell's thread at that
+    # time and is sometimes preempted by the timer, while the secondary
+    # ones spin in a tight loop and take the job apart before it can
+    # reach for it. That is a race, and races are not assertions.
     share = [int(v) for v in re.findall(r"rdzen\d+=(\d+)", out)]
     check(("caly zestaw policzyl jedyny rdzen (%s)%s" if ncores == 1
            else "prace wzielo wiecej niz jeden rdzen (%s)%s")
@@ -74,8 +74,8 @@ def verify(out, suffix, ncores):
           len(share) == ncores and
           (ncores == 1 or sum(1 for v in share if v) >= 2))
 
-    # To jest wlasciwe pytanie o wspolbieznosc: nie "czy cos sie
-    # policzylo", tylko czy policzylo sie DOKLADNIE RAZ KAZDE
+    # This is the right question to ask about concurrency: not "did
+    # anything get computed", but was EVERY ITEM computed EXACTLY ONCE
     check("wszystkie 64 jednostki policzone dokladnie raz" + suffix,
           sum(share) == 64)
 
@@ -102,9 +102,9 @@ def main():
                 out = q.command("smpmem", "Liczylo rdzeni", timeout=120)
                 verify(out, "", 4)
 
-                # System ma po tym wszystkim zyc dalej: gdyby zamki
-                # zostawily po sobie polamana sterte, nastepny program
-                # nie mialby z czego powstac
+                # The system is to live on after all this: if the locks
+                # left a broken heap behind them, the next program would
+                # have nothing to come into being from
                 after_run = q.command("run hello64", "kod wyjscia", timeout=60)
                 check("jadro dziala dalej po probie",
                       "czesc, jestem ELF-em" in after_run)
@@ -133,9 +133,9 @@ def main():
         if os.path.exists(slog32):
             os.unlink(slog32)
 
-    # --- Maszyna jednordzeniowa ---
-    # Ten sam kod, jeden rdzen: zamek ma byc nieszkodliwy tam, gdzie
-    # nie ma z kim rywalizowac
+    # --- A single-core machine ---
+    # The same code, one core: the lock is to be harmless where there is
+    # nobody to compete with
     print("--- ta sama proba na jednym rdzeniu ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:

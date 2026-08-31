@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: TLS 1.3 w pierscieniu 3 (jadro 32-bitowe).
+"""ProtonOS smoke test: TLS 1.3 in ring 3 (32-bit kernel).
 
-Wydzielone z grupy 'rdzen2', bo uzgodnienia TLS sa najdrozsza rzecza
-w calym zestawie: kazde z nich liczy X25519 i sprawdza podpis RSA albo
-ECDSA programowo, a robimy ich kilkanascie. Osobna maszyna liczy to
-rownolegle z reszta zamiast przedluzac jeden dlugi bieg.
+Split out of the 'rdzen2' group, because TLS handshakes are the most
+expensive thing in the whole set: each of them computes X25519 and
+checks an RSA or ECDSA signature in software, and we do a dozen or so of
+them. A separate machine computes that in parallel with the rest instead
+of lengthening one long run.
 
-Po drugiej stronie kabla stoi prawdziwy OpenSSL, wiec dojscie
-uzgodnienia do skutku znaczy, ze zgadza sie kazdy bajt. Sprawdzamy tez
-rzecz wazniejsza od samego szyfrowania: obcy certyfikat ma polaczenie
-ZERWAC - szyfrowana rozmowa z kims nieznanym nie jest bezpieczna,
-tylko prywatna.
+On the other side of the wire stands a real OpenSSL, so a handshake
+reaching completion means every byte matches. We also check something
+more important than the encryption itself: a foreign certificate is to
+TEAR the connection DOWN - an encrypted conversation with somebody
+unknown is not secure, only private.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -30,9 +31,9 @@ from ptest import check, summary
 
 
 def main():
-    # Dysk jest tu potrzebny na magazyn zaufania: certyfikat wystawcy
-    # sciagamy po HTTP i zapisujemy na PFS, a dopiero potem sprawdzamy
-    # nim tozsamosc serwera
+    # The disk is needed here for the trust store: we fetch the issuer's
+    # certificate over HTTP and write it to PFS, and only then check the
+    # server's identity with it
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
@@ -43,12 +44,12 @@ def main():
         q.wait_for("[siec] DHCP", timeout=30)
         time.sleep(0.5)
 
-        # Zwykly serwer HTTP na hoscie - stad biora sie certyfikaty
-        # wkladane do magazynu zaufania
+        # An ordinary HTTP server on the host - this is where the
+        # certificates put into the trust store come from
         http_port, http_stop = start_http_server()
         try:
-            # HTTPS: pelne uzgodnienie TLS 1.3 z prawdziwym OpenSSL-em po
-            # drugiej stronie (X25519 + ChaCha20-Poly1305, sprawdzone Finished)
+            # HTTPS: a full TLS 1.3 handshake with a real OpenSSL on the other
+            # side (X25519 + ChaCha20-Poly1305, a verified Finished)
             https_port, https_stop = start_https_server()
             if https_port is None:
                 print("INFO: brak openssl - pomijam testy TLS")
@@ -58,9 +59,9 @@ def main():
                     q.type_line("dns 10.0.2.2")
                     q.wait_for("serwer DNS ustawiony", timeout=10)
 
-                    # 1. Certyfikat samopodpisany, a w systemie tylko
-                    #    wbudowane korzenie publicznych CA: polaczenie ma
-                    #    zostac zerwane
+                    # 1. A self-signed certificate, and in the system only the
+                    #    built-in public CA roots: the connection is to be
+                    #    torn down
                     q.type_line("clear")
                     q.type_line("run httpget https://protonos.test %d /"
                                 % https_port)
@@ -69,7 +70,7 @@ def main():
                           "magazyn zaufania",
                           "brak zaufanego wystawcy" in reg)
 
-                    # ... chyba ze swiadomie pominiemy sprawdzanie (-k)
+                    # ... unless we deliberately skip the check (-k)
                     q.type_line("clear")
                     q.type_line("run httpget -k https://protonos.test %d /"
                                 % https_port)
@@ -83,7 +84,7 @@ def main():
                     check("-k mowi wprost, ze tozsamosc nie jest sprawdzona",
                           "certyfikat NIESPRAWDZONY" in sec)
 
-                    # 2. Pobranie certyfikatu wystawcy prosto na dysk
+                    # 2. Fetching the issuer's certificate straight to the disk
                     q.type_line("clear")
                     q.type_line("run httpget 10.0.2.2 %d /cert.der roots.der"
                                 % http_port)
@@ -92,7 +93,8 @@ def main():
                     check("magazyn zaufania zapisany na dysku",
                           "roots.der" in q.wait_for("roots.der", timeout=10))
 
-                    # 3. Z magazynem: pelna weryfikacja lancucha, dat i nazwy
+                    # 3. With the store: full verification of the chain, the
+                    #    dates and the name
                     q.type_line("clear")
                     q.type_line("run httpget https://protonos.test %d /"
                                 % https_port)
@@ -106,8 +108,9 @@ def main():
                     check("tresc pobrana po zweryfikowanym TLS",
                           "HTTP 200, tresc %d B" % len(PAGE) in ver)
 
-                    # 4. Serwer z certyfikatem na krzywej P-256: caly
-                    #    lancuch i CertificateVerify ida przez ECDSA
+                    # 4. A server with a certificate on the P-256 curve: the
+                    #    whole chain and CertificateVerify go through
+                    #    ECDSA
                     ec_port, ec_stop = start_https_server(ec=True)
                     if ec_port is not None:
                         try:
@@ -127,14 +130,14 @@ def main():
                         finally:
                             ec_stop()
 
-                        # wroc do magazynu z certyfikatem RSA
+                        # go back to the store with the RSA certificate
                         q.type_line("clear")
                         q.type_line("run httpget 10.0.2.2 %d /cert.der "
                                     "roots.der" % http_port)
                         q.wait_for("tresc ", timeout=30)
 
-                    # 4b. Krzywa P-384 (podpisy SHA-384) - taka jest m.in.
-                    #     ISRG Root X2
+                    # 4b. The P-384 curve (SHA-384 signatures) - ISRG Root X2,
+                    #     among others, is like that
                     p384_port, p384_stop = start_https_server(ec=True,
                                                               p384=True)
                     if p384_port is not None:
@@ -153,8 +156,8 @@ def main():
                         finally:
                             p384_stop()
 
-                    # 5. Lancuch dwupoziomowy: ufamy tylko korzeniowi,
-                    #    wiec system musi przejsc przez posrednika
+                    # 5. A two-level chain: we trust only the root, so the
+                    #    system has to go through the intermediate
                     ch_port, ch_stop = start_https_chain_server()
                     if ch_port is not None:
                         try:
@@ -177,8 +180,8 @@ def main():
                                     "roots.der" % http_port)
                         q.wait_for("tresc ", timeout=30)
 
-                    # 6. Ten sam serwer pod adresem IP - nazwa sie nie zgadza,
-                    #    wiec polaczenie ma zostac zerwane
+                    # 6. The same server at an IP address - the name does not
+                    #    match, so the connection is to be torn down
                     q.type_line("clear")
                     q.type_line("run httpget https://10.0.2.2 %d /" % https_port)
                     bad = q.wait_for("nie udalo sie polaczyc", timeout=60)
