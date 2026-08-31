@@ -755,13 +755,32 @@ class Qemu:
             time.sleep(0.4)
         return screen_text
 
+    # What a character is called on the way to QEMU. Anything with a
+    # name of its own is here; a capital letter is handled in
+    # type_line, because there are twenty-six of those and one rule.
     KEYNAMES = {" ": "spc", "\n": "ret", "-": "minus", ".": "dot",
-                ":": "shift-semicolon",
+                ":": "shift-semicolon", ";": "semicolon",
                 "/": "slash", ">": "shift-dot", "<": "shift-comma",
-                "|": "shift-backslash", "&": "shift-7"}
+                "|": "shift-backslash", "&": "shift-7",
+                "#": "shift-3", "!": "shift-1", "@": "shift-2",
+                "$": "shift-4", "%": "shift-5", "^": "shift-6",
+                "*": "shift-8", "(": "shift-9", ")": "shift-0",
+                "_": "shift-minus", "+": "shift-equal", "=": "equal",
+                "?": "shift-slash", "'": "apostrophe",
+                '"': "shift-apostrophe", ",": "comma",
+                "[": "bracket_left", "]": "bracket_right",
+                "{": "shift-bracket_left", "}": "shift-bracket_right",
+                "\\": "backslash", "`": "grave_accent",
+                "~": "shift-grave_accent"}
 
     def type_line(self, text):
         for ch in text:
+            if ch.isupper():
+                # QEMU has no key called 'T' - a capital is the shift
+                # key and the letter, and typing one without saying so
+                # simply loses it
+                self.sendkey("shift-" + ch.lower())
+                continue
             self.sendkey(self.KEYNAMES.get(ch, ch))
         self.sendkey("ret")
         time.sleep(0.3)

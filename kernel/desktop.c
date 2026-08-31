@@ -66,20 +66,33 @@
 /* Desktop icons: clicking one launches an application */
 #define ICON_W 32
 #define ICON_H 24
+/* An icon: where it sits, what it says, what it starts, and which of
+   the pictures below it wears.
+ *
+ * The list of them used to be this array and nothing else - seven
+ * programs decided when the kernel was built. It is now a file on the
+ * disk (see icons_read_list), and this array is what a machine
+ * without that file gets. */
+#define ICON_MAX 12
 struct icon {
     int x, y;
     const char *label;
     const char *app;
+    int art;                   /* which picture, -1 = by position */
+    char store[2][24];         /* room for a label and a name read from
+                                  the disk - the built-in ones point at
+                                  their own literals */
 };
-static struct icon icons[] = {
-    {8, 20, "App", "guiapp"},
-    {8, 60, "Zegar", "gclock"},
-    {8, 100, "Pliki", "gfiles"},
-    {8, 140, "Monitor", "gmon"},
-    {8, 180, "Term", "gterm"},
-    {8, 220, "Web", "gweb"},
-    {8, 260, "Ustaw", "gsettings"},
+static struct icon icons[ICON_MAX] = {
+    {8, 20, "App", "guiapp", 0, {{0}}},
+    {8, 60, "Zegar", "gclock", 1, {{0}}},
+    {8, 100, "Pliki", "gfiles", 2, {{0}}},
+    {8, 140, "Monitor", "gmon", 3, {{0}}},
+    {8, 180, "Term", "gterm", 4, {{0}}},
+    {8, 220, "Web", "gweb", 5, {{0}}},
+    {8, 260, "Ustaw", "gsettings", 6, {{0}}},
 };
+static int icon_n = 7;         /* how many of them there are */
 
 /* What each icon has drawn on it: twelve rows of twelve pixels, in the
  * order of the table above.
@@ -123,7 +136,7 @@ static const uint16_t icon_art[][12] = {
         0xE07, 0xF0F, 0xFFF, 0x7FE, 0x2F4, 0x0F0,
     },
 };
-#define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
+#define ICON_N icon_n
 
 static int icon_of_app(const char *app)
 {
@@ -177,14 +190,104 @@ static int icon_drag = -1;      /* the icon being dragged (-1 = none) */
 static int icon_dx, icon_dy;    /* the grab: the cursor's offset within the icon */
 static int icon_press_x, icon_press_y;   /* the press position (click vs drag) */
 
+/* The file that says which icons there are: one line per icon,
+ *
+ *     program  napis  numer-obrazka
+ *
+ * and nothing else. Lines that do not parse are passed over, an empty
+ * or missing file leaves the built-in seven - a desktop with no icons
+ * would be a machine with nothing to click, and that is not something
+ * a broken line should be able to do.
+ *
+ * It is plain text on purpose, like everything else the system keeps:
+ * it can be read with 'cat' and built with 'echo ... >> pulpit.ikony'
+ * from the shell in the terminal.
+ */
+#define ICON_LIST_FILE "pulpit.ikony"
+#define ICON_LIST_MAX 512
+
+static int icons_read_list(void)
+{
+    if (!fs_ready())
+        return 0;
+
+    char buf[ICON_LIST_MAX];
+    int n = fs_read(ICON_LIST_FILE, buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return 0;
+    buf[n] = 0;
+
+    int count = 0;
+    int i = 0;
+    while (i < n && count < ICON_MAX) {
+        int start = i;
+        while (i < n && buf[i] != '\n')
+            i++;
+        int end = i;
+        if (i < n)
+            i++;
+        if (end > start && buf[end - 1] == '\r')
+            end--;
+
+        /* Three words: the program, what to call it, which picture */
+        char *word[3];
+        int nw = 0;
+        int k = start;
+        while (k < end && nw < 3) {
+            while (k < end && buf[k] == ' ')
+                k++;
+            if (k >= end)
+                break;
+            word[nw++] = &buf[k];
+            while (k < end && buf[k] != ' ')
+                k++;
+            if (k < end)
+                buf[k++] = 0;
+        }
+        buf[end] = 0;
+        if (nw < 3 || word[0][0] == '#')
+            continue;                  /* a comment, or not three words */
+
+        int art = 0;
+        for (const char *p = word[2]; *p >= '0' && *p <= '9'; p++)
+            art = art * 10 + (*p - '0');
+        if (art >= (int)(sizeof(icon_art) / sizeof(icon_art[0])))
+            art = 0;
+
+        struct icon *ic = &icons[count];
+        int j = 0;
+        for (; word[1][j] && j < (int)sizeof(ic->store[0]) - 1; j++)
+            ic->store[0][j] = word[1][j];
+        ic->store[0][j] = 0;
+        j = 0;
+        for (; word[0][j] && j < (int)sizeof(ic->store[1]) - 1; j++)
+            ic->store[1][j] = word[0][j];
+        ic->store[1][j] = 0;
+
+        ic->label = ic->store[0];
+        ic->app = ic->store[1];
+        ic->art = art;
+        ic->x = 8;
+        ic->y = 20 + count * 40;
+        count++;
+    }
+
+    if (!count)
+        return 0;                      /* nothing usable - keep the seven */
+    icon_n = count;
+    printk("[pulpit] ikony z pliku '%s': %d\n", ICON_LIST_FILE, count);
+    return 1;
+}
+
 /* Reads the icon positions from disk (if the file exists and its size
-   matches) */
+   matches the number of icons there are) */
 static void icons_load(void)
 {
     if (!fs_ready())
         return;
-    int32_t buf[ICON_N * 2];
-    if (fs_read(ICON_POS_FILE, buf, sizeof(buf)) < (int)sizeof(buf))
+    int32_t buf[ICON_MAX * 2];
+    int want = ICON_N * 2 * (int)sizeof(int32_t);
+    if (fs_read(ICON_POS_FILE, buf, (uint32_t)want) < want)
         return;
     for (int k = 0; k < ICON_N; k++) {
         icons[k].x = buf[k * 2];
@@ -197,12 +300,12 @@ static void icons_save(void)
 {
     if (!fs_ready())
         return;
-    int32_t buf[ICON_N * 2];
+    int32_t buf[ICON_MAX * 2];
     for (int k = 0; k < ICON_N; k++) {
         buf[k * 2] = icons[k].x;
         buf[k * 2 + 1] = icons[k].y;
     }
-    fs_write(ICON_POS_FILE, buf, sizeof(buf));
+    fs_write(ICON_POS_FILE, buf, (uint32_t)(ICON_N * 2 * sizeof(int32_t)));
 }
 
 #define COL_RED    1      /* the close button */
@@ -1145,7 +1248,8 @@ static void draw_icons(void)
            shadow, no edge - a shape in the accent colour is already
            different enough from a desktop to be a thing. */
         video_fill_rect(ic->x, ic->y, ICON_W, ICON_H, COL_ICON);
-        draw_icon_art(k, ic->x + (ICON_W - 12) / 2, ic->y + (ICON_H - 12) / 2);
+        draw_icon_art(ic->art, ic->x + (ICON_W - 12) / 2,
+                      ic->y + (ICON_H - 12) / 2);
         /* The caption gets a shadow of its own: white on a light
            background is not text, it is a rumour */
         video_draw_string(ic->x + 1, ic->y + ICON_H + 3, ic->label,
@@ -1250,9 +1354,8 @@ static void draw_taskbar(void)
                         i == focus_idx ? COL_TITLE : COL_TBBTN_OFF);
         /* The window's own picture, or - for the kernel's own windows
            and anything started from a shell - the plain window mark */
-        int art = wins[i].owner >= 0 ? icon_of_pid(wins[i].owner) : 0;
-        if (art < 0)
-            art = 0;
+        int from = wins[i].owner >= 0 ? icon_of_pid(wins[i].owner) : -1;
+        int art = from >= 0 ? icons[from].art : 0;
         draw_icon_art_col(art, bx + (bw - 2 - TB_ICON) / 2,
                           ty + (TB_H - TB_ICON) / 2,
                           i == focus_idx ? COL_WHITE : COL_BLACK);
@@ -1283,7 +1386,8 @@ static void draw_taskbar(void)
         video_fill_rect(bx0 + 2 + MENU_W - 1, top, 1, hgt, COL_LINE);
         for (int i = 0; i < MENU_N; i++) {
             int iy = menu_item_y(i);
-            int art = icon_of_app(menu_items[i]);
+            int from = icon_of_app(menu_items[i]);
+            int art = from >= 0 ? icons[from].art : 0;
             /* The entry under the pointer wears the accent colour.
                Without it a menu is a list of words that happens to be
                clickable; with it, it answers. */
@@ -1299,7 +1403,8 @@ static void draw_taskbar(void)
             /* The name a person knows it by, which is the one written
                under its icon - the program's own name is for the
                shell */
-            const char *label = art >= 0 ? icons[art].label : menu_items[i];
+            const char *label = from >= 0 ? icons[from].label
+                                          : menu_items[i];
             video_draw_string(bx0 + 22, iy + 4, label,
                               over ? COL_WHITE : COL_BLACK);
         }
@@ -1545,6 +1650,7 @@ static void desktop_thread(void *arg)
     }
 
 
+    icons_read_list();         /* which icons there are, if the disk says */
     icons_load();              /* restore the remembered icon positions from disk */
     wallpaper_load();          /* and the wallpaper, if the settings name one */
 

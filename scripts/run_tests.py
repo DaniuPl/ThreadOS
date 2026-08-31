@@ -30,7 +30,7 @@ GROUPS = [
     "k64shell", "k64disk", "acpi", "usbkbd", "ahci", "consoles", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
-    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "look", "bar", "wall", "users", "usersgui", "gfx64", "desktop1",
+    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
     "usbkbd64", "iso", "uefi"
 ]

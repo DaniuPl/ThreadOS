@@ -55,7 +55,10 @@ sit (left, middle, or up against the clock) are settings kept on the
 disk, and so is the wallpaper — a small indexed picture computed by a
 program in ring 3, written to the disk and stretched over the screen
 behind everything else. Hovering a taskbar button names the window;
-the launch menu carries the same pictures as the icons. With
+the launch menu carries the same pictures as the icons. Which icons the
+desktop has is a text file on the disk — one line per icon, buildable
+from the machine's own shell — falling back to the built-in seven when
+it says nothing usable. With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end
 and insists if it will not — twelve of them at once, on a taskbar that

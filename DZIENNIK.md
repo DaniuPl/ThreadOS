@@ -3115,3 +3115,39 @@ sprawdzane przez `make test`.
       plik ma rozmiar wynikajacy z formatu, jadro mowi przy starcie, co
       wczytalo, okno na tapecie ma nadal swoj kolor, a tapeta, ktorej
       nie ma, nie psuje niczego - wraca gradient.
+
+- [x] **Ikony pulpitu z pliku** - i koniec z lista wpisana w jadro.
+
+      Siedem programow, ustalonych w chwili budowania jadra. Dodanie
+      osmego znaczylo edycje kernel/desktop.c i zbudowanie jadra - czyli
+      tyle samo, co "nie da sie dodac".
+
+      Teraz lista to plik na dysku, jeden wiersz na ikone:
+
+          program  napis  numer-obrazka
+
+      i nic wiecej. Zwykly tekst, jak wszystko, co ten system pamieta -
+      da sie przeczytac przez 'cat' i, co wazniejsze, DA SIE ZROBIC NA
+      TEJ MASZYNIE: shell w terminalu ma przekierowania, wiec
+
+          echo gterm Terminal 4 > pulpit.ikony
+          echo gweb Internet 5 >> pulpit.ikony
+
+      wystarczy. Format, ktorego nikt na maszynie nie umie wyprodukowac,
+      jest formatem dla czyjejs innej maszyny.
+
+      Wiersz, ktory sie nie parsuje, jest pomijany; plik pusty albo bez
+      sensownych wierszy zostawia wbudowana siodemke. Pulpit bez ikon to
+      maszyna, w ktora nie ma w co kliknac, i zaden zepsuty wiersz nie
+      powinien miec takiej wladzy.
+
+      Nowa grupa 'icons' buduje plik dokladnie tak, jak zrobilby to
+      czlowiek - przez 'run sh' i echo z '>' oraz '>>' - a potem czyta z
+      EKRANU, ze kafelki maja napisy i obrazki z pliku, ze jest ich tyle,
+      ile wierszy, i ze klik w taka ikone uruchamia jej program.
+
+      Przy okazji dwie dziury w samym harnessie testowym, obie tego
+      samego rodzaju: QEMU nie zna klawisza 'T' ani '#'. Wielka litera to
+      shift i litera, a '#' to shift i trojka - bez tego wpisywany tekst
+      po cichu gubil znaki, i widac to bylo dopiero jako "erminal"
+      zamiast "Terminal" w pliku, ktory test sam napisal.
