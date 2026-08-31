@@ -185,7 +185,7 @@ void scheduler64_init(void)
     main_task->sig_handler = 0;
     main_task->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
-        main_task->fds[i].kind = FDK_WOLNY;
+        main_task->fds[i].kind = FDK_FREE;
     main_task->brk_base = main_task->brk = 0;
     main_task->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -236,7 +236,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->sig_handler = 0;
     t->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
-        t->fds[i].kind = FDK_WOLNY;
+        t->fds[i].kind = FDK_FREE;
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -636,7 +636,7 @@ void task_core_enter(int nr)
     t->sig_handler = 0;
     t->sig_restorer = 0;
     for (int i = 0; i < FD_MAX; i++)
-        t->fds[i].kind = FDK_WOLNY;
+        t->fds[i].kind = FDK_FREE;
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -1040,7 +1040,7 @@ int task64_fd_open(int slot)
     irqflags_t flags = irq_save();
     int fd = -1;
     for (int i = FD_FIRST; i < FD_MAX; i++) {
-        if (current->fds[i].kind == FDK_WOLNY) {
+        if (current->fds[i].kind == FDK_FREE) {
             current->fds[i].kind = FDK_FILE;
             current->fds[i].slot = slot;
             current->fds[i].pos = 0;
@@ -1060,7 +1060,7 @@ int task64_fd_pipe(int idx, int reader_task)
     irqflags_t flags = irq_save();
     int fd = -1;
     for (int i = FD_FIRST; i < FD_MAX; i++) {
-        if (current->fds[i].kind == FDK_WOLNY) {
+        if (current->fds[i].kind == FDK_FREE) {
             current->fds[i].kind = reader_task ? FDK_POTOK_R : FDK_POTOK_W;
             current->fds[i].slot = idx;
             current->fds[i].pos = 0;
@@ -1075,13 +1075,13 @@ int task64_fd_pipe(int idx, int reader_task)
 int task64_fd_kind(int fd)
 {
     if (fd < 0 || fd >= FD_MAX)
-        return FDK_WOLNY;
+        return FDK_FREE;
     return current->fds[fd].kind;
 }
 
 int task64_fd_slot(int fd)
 {
-    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_WOLNY)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_FREE)
         return -1;
     return current->fds[fd].slot;
 }
@@ -1107,12 +1107,12 @@ static void release(struct task64 *t, int fd)
         pipe64_unref(t->fds[fd].slot, 1);
     else if (t->fds[fd].kind == FDK_POTOK_W)
         pipe64_unref(t->fds[fd].slot, 0);
-    t->fds[fd].kind = FDK_WOLNY;
+    t->fds[fd].kind = FDK_FREE;
 }
 
 int task64_fd_close(int fd)
 {
-    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_WOLNY)
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_FREE)
         return -1;
     irqflags_t flags = irq_save();
     release(current, fd);
@@ -1126,13 +1126,13 @@ int task64_fd_dup2(int old, int fresh_one)
 {
     if (old < 0 || old >= FD_MAX || fresh_one < 0 || fresh_one >= FD_MAX)
         return -1;
-    if (current->fds[old].kind == FDK_WOLNY)
+    if (current->fds[old].kind == FDK_FREE)
         return -1;
     if (old == fresh_one)
         return fresh_one;
 
     irqflags_t flags = irq_save();
-    if (current->fds[fresh_one].kind != FDK_WOLNY)
+    if (current->fds[fresh_one].kind != FDK_FREE)
         release(current, fresh_one);
     current->fds[fresh_one] = current->fds[old];
     if (current->fds[fresh_one].kind == FDK_POTOK_R)
@@ -1148,7 +1148,7 @@ int task64_fd_dup2(int old, int fresh_one)
 void task64_fd_close_all(void)
 {
     for (int i = 0; i < FD_MAX; i++)
-        if (current->fds[i].kind != FDK_WOLNY)
+        if (current->fds[i].kind != FDK_FREE)
             release(current, i);
 }
 

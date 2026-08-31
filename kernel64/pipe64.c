@@ -19,7 +19,7 @@
 #define PIPE_BUF 2048
 
 struct pipe {
-    int uzyty;
+    int used;
     uint8_t buf[PIPE_BUF];
     uint32_t head, tail;
     int reader, writer;
@@ -37,8 +37,8 @@ int pipe64_new(void)
     irqflags_t flags = irq_save();
     int idx = -1;
     for (int i = 0; i < PIPE_MAX; i++) {
-        if (!pipes[i].uzyty) {
-            pipes[i].uzyty = 1;
+        if (!pipes[i].used) {
+            pipes[i].used = 1;
             pipes[i].head = pipes[i].tail = 0;
             pipes[i].reader = 1;
             pipes[i].writer = 1;
@@ -75,7 +75,7 @@ void pipe64_unref(int idx, int reader_task)
         p->writer--;
     }
     if (!p->reader && !p->writer)
-        p->uzyty = 0;
+        p->used = 0;
     irq_restore(flags);
 }
 

@@ -140,7 +140,7 @@ void task64_set_mmap_next(uint64_t adr);
 
 /* Descriptors of open files - the table belongs to the task */
 /* The kind of thing sitting under a number (has to match task64.c) */
-#define FDK_WOLNY   0
+#define FDK_FREE   0
 #define FDK_FILE    1
 #define FDK_POTOK_R 2
 #define FDK_POTOK_W 3

@@ -302,7 +302,7 @@ static void handle(struct regs *r)
            but after a dup2 it may be the end of a pipe, and the program
            does not see that. */
         int kind = task64_fd_kind((int)a1);
-        if (kind == FDK_WOLNY) {
+        if (kind == FDK_FREE) {
             if (a1 != FD_STDOUT) {
                 r->rax = (uint64_t)-1;
                 return;
@@ -379,7 +379,7 @@ static void handle(struct regs *r)
             return;
         }
         int kind = task64_fd_kind((int)a1);
-        if (kind == FDK_WOLNY) {
+        if (kind == FDK_FREE) {
             if (a1 != FD_STDIN) {
                 r->rax = (uint64_t)-1;
                 return;

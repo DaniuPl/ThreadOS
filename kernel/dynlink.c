@@ -154,7 +154,7 @@ static dyn_addr shared_vaddr[PAGES_MAX];
 static uint32_t shared_frame[PAGES_MAX];
 static uint32_t shared_pages;
 
-static int gotowa;
+static int ready;
 
 /* --- reading the ELF --------------------------------------------------- */
 
@@ -195,7 +195,7 @@ static int elf_sane(const uint8_t *image, uint32_t size, int typ)
 
 int dyn_present(void)
 {
-    return gotowa;
+    return ready;
 }
 
 const char *dyn_name(void)
@@ -360,7 +360,7 @@ int dyn_init(void)
         return 0;
     }
 
-    gotowa = 1;
+    ready = 1;
     return 1;
 }
 
@@ -393,7 +393,7 @@ int dyn_is_dynamic(const uint8_t *image, uint32_t size)
 int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
                 int (*store)(void *ctx, dyn_addr addr, dyn_addr value))
 {
-    if (!gotowa || !elf_sane(image, size, ET_EXEC))
+    if (!ready || !elf_sane(image, size, ET_EXEC))
         return -1;
 
     const struct ehdr *eh = (const struct ehdr *)image;

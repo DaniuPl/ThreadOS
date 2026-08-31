@@ -160,9 +160,9 @@ static void cmd_fls(void)
                                &size, &dir) == 1; i++)
         printk("  %s%s  (%u B)\n", name, dir ? "/" : "", size);
 
-    uint32_t uzyte = 0, wszystkie = 0;
-    fs_usage(&uzyte, &wszystkie);
-    printk("Zajetosc: %u/%u blokow po %u B\n", uzyte, wszystkie, FS_BLOCK);
+    uint32_t used = 0, total = 0;
+    fs_usage(&used, &total);
+    printk("Zajetosc: %u/%u blokow po %u B\n", used, total, FS_BLOCK);
 }
 
 static void cmd_cat(const char *name)

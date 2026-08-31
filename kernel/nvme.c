@@ -111,7 +111,7 @@ static uint8_t dma_buf[4096] __attribute__((aligned(4096)));
 static volatile uint8_t *base;
 static int present;
 static uint32_t nsectors;
-static uint32_t db_krok;        /* the stride between doorbells */
+static uint32_t db_stride;        /* the stride between doorbells */
 
 static uint16_t adm_tail, io_tail;
 static uint16_t adm_head, io_head;
@@ -142,12 +142,12 @@ static void wr64(uint32_t reg, uint64_t v)
 /* A doorbell: two per queue (submission tail, completion head) */
 static void doorbell_sq(int qid, uint16_t tail)
 {
-    wr32(REG_DB + (uint32_t)(2 * qid) * db_krok, tail);
+    wr32(REG_DB + (uint32_t)(2 * qid) * db_stride, tail);
 }
 
 static void doorbell_cq(int qid, uint16_t head)
 {
-    wr32(REG_DB + (uint32_t)(2 * qid + 1) * db_krok, head);
+    wr32(REG_DB + (uint32_t)(2 * qid + 1) * db_stride, head);
 }
 
 /* Places a command and waits for the answer. Returns the error code
@@ -325,7 +325,7 @@ int nvme_init(void)
     base = (volatile uint8_t *)(uintptr_t)mmio;
 
     uint64_t cap = rd64(REG_CAP);
-    db_krok = 4u << ((uint32_t)(cap >> 32) & 0x0F);   /* CAP.DSTRD */
+    db_stride = 4u << ((uint32_t)(cap >> 32) & 0x0F);   /* CAP.DSTRD */
 
     /* The controller has to be stopped before anything can be set on it */
     wr32(REG_CC, rd32(REG_CC) & ~CC_EN);

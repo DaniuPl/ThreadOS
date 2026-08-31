@@ -31,7 +31,7 @@ static int controller;
 #define DEVICES 4
 
 struct device {
-    int uzyte;
+    int used;
     int addr;
     int lowspeed;
     int maxpacket;
@@ -132,12 +132,12 @@ int usbhc_attach(int port)
         return -1;
 
     for (int i = 0; i < DEVICES; i++) {
-        if (list[i].uzyte)
+        if (list[i].used)
             continue;
         struct device u = { 0, 0, 0, 8, 0, 8, 0 };
         if (uhci_greet(port, &u) < 0)
             return -1;
-        u.uzyte = 1;
+        u.used = 1;
         list[i] = u;
         return i + 1;
     }
