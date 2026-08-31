@@ -39,10 +39,11 @@ share.
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
 (xHCI or UHCI), ACPI, files mapped into memory for reading *and
-writing*, a stack that grows on demand, processes that run in ring 3 on
-every core, TLS 1.3 with certificate verification, and a
-graphical desktop with windows, icons, a file manager and a web
-browser.
+writing*, a stack that grows on demand, processes **and the threads of
+one process** running in ring 3 on every core — a changed mapping is
+sent to the other cores and awaited before the frame is reused — TLS
+1.3 with certificate verification, and a graphical desktop with
+windows, icons, a file manager and a web browser.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,
@@ -119,16 +120,17 @@ ground for both.
   running two-and-a-half times faster on four cores than on one. Every
   further syscall taken off that lock has to be read to the end first;
   the subsystems come after.
-- TLB shootdown. A process that changes its own page tables invalidates
-  them on the core it happens to be running on; no other core is told.
-  Today nothing suffers, because one process runs on one core at a
-  time — threads sharing an address space would be the first to notice.
+- Threads in the 64-bit kernel. The 32-bit one has them, and with the
+  shootdown in place they run on every core; the long-mode kernel has
+  no `sys_thread` yet, so two cores cannot be put into one address
+  space there at all.
 
 **Infrastructure**
 
-- Keep an eye on the longest group. `rdzen2` (network, TCP, big files
-  over HTTP, the filesystem and a second boot on the same disk) now
-  decides how long a full run takes.
+- Keep an eye on the longest group. `ush` and `tls32` (a ring 3 shell
+  driving pipes and redirections, and a dozen TLS 1.3 handshakes
+  against a real OpenSSL) now decide how long a full run takes — about
+  90 seconds each, out of some 385 for all 50 groups.
 - Run on real hardware, not only under QEMU and OVMF.
 
 ## Documentation

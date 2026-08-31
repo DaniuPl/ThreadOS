@@ -2161,3 +2161,111 @@ sprawdzane przez `make test`.
       wystartowac wlasna maszyne. Za to najdluzsza grupa skrocila sie
       ze 174 do 87 sekund, a nieprzechodzaca asercja mowi teraz, co
       sie zepsulo.
+- [x] **Komentarze po angielsku** - domkniecie poprzedniego kroku.
+
+      Nazwy przeszly na angielski wczesniej, komentarze zostaly po
+      polsku i przez chwile plik wygladal tak, jakby pisaly go dwie
+      osoby. Teraz po polsku jest tylko to, co system mowi do
+      czlowieka: komunikaty jadra, opisy asercji w testach i ten
+      dziennik.
+
+      Przeszlo przez to wszystko - kernel64/, user/, user64/, oba
+      pliki .S w kernel/, ktore umknely poprzedniemu przejsciu, oraz
+      komentarze i docstringi w scripts/. Robilem to narzedziem, ktore
+      wycina z pliku same komentarze i wkleja z powrotem tlumaczenia
+      pod tymi samymi numerami: dla C wlasnym skanerem, dla Pythona
+      tokenizerem z biblioteki standardowej. Raz pomylilem numeracje o
+      jeden i nadpisalem naglowek sekcji w t_e1000.py cudzym tekstem -
+      widac to bylo od razu, bo w pliku zostal jeden komentarz po
+      polsku, ktorego juz nie mialo byc.
+
+      Przy okazji wyszly nazwy, ktore poprzedni pass ominal, bo nie
+      byly identyfikatorami w kodzie, tylko nazwami plikow i
+      programow: mkmapa, gleboko, shmpisz64, shmczytaj64. Do tego
+      argumenty trybow mmapzap (pisz/spr/bez/spr2/widac) i garstka
+      identyfikatorow z polskim rdzeniem, ktora przeszla przez sito:
+      db_krok, FDK_WOLNY, gotowa, uzyte, uzyty, wszystkie, uz_open,
+      uz_time.
+
+      Automatyczna zamiana nazw ma swoja cene i tu tez ja zaplacilem:
+      zamiana 'bez' na 'nosync' weszla w polskie napisy runtime i
+      zrobila z "bajty bez msync" - "bajty nosync msync". Wylapalem to
+      przegladajac diff, nie test. Tego rodzaju szkody zaden test nie
+      zlapie, bo tekst komunikatu nie jest niczyja asercja.
+
+      768 asercji, 49 grup, bez zmian w zachowaniu.
+
+- [x] **Zmiana mapowania dochodzi do pozostalych rdzeni (TLB shootdown)**
+      - i watki moga wreszcie wyjsc poza rdzen rozruchowy.
+
+      Tablica stron jest pamiecia, a pamiec jest wspolna. Tlumaczenie
+      WYLICZONE z tej tablicy juz nie: kazdy rdzen trzyma swoje, w
+      podrecznej pamieci, do ktorej jadro nie ma zadnej instrukcji.
+      Zmiana wpisu zmienia wiec to, co mowia tablice, i nic w tym, w
+      co wierzy sasiad - a sasiad pisze dalej do ramki, ktora jadro
+      zdazylo juz zwolnic albo oddac komus innemu.
+
+      Dopoki proces bieglo na jednym rdzeniu, nikt na tym nie cierpial.
+      I wlasnie dlatego watki byly trzymane na rdzeniu rozruchowym:
+      dziela przestrzen adresowa, wiec to one wchodza w to pierwsze.
+
+      Jedyna droga do cudzej pamieci podrecznej to zapytac jej
+      wlasciciela - wyslac przerwanie i POCZEKAC na odpowiedz. To
+      czekanie jest cala rzecza. Prosba wyslana i nieodczekana nie mowi
+      nic o tym, kiedy zostanie spelniona, a "kiedy" jest dokladnie
+      tym, co wolajacy musi wiedziec: za chwile zwalnia ramke.
+
+      Placi za to tylko ten, kto jest winien. Kazdy rdzen oglasza, w
+      ktorej przestrzeni stoi, wiec zmiana w przestrzeni, ktorej nikt
+      inny nie trzyma, nie wysyla zadnego przerwania - czyli kazdy
+      proces jednowatkowy, czyli prawie wszystkie.
+
+      **Maska nie moze byc zla, i to jest cale rozumowanie.** Pytamy
+      tylko te rdzenie, ktore mowia, ze stoja w danej przestrzeni, a
+      rdzen moze zmienic zdanie w trakcie pytania. Oba kierunki sa
+      bezpieczne z tego samego powodu: rdzen, ktory z przestrzeni
+      WYSZEDL po policzeniu, uniewaznia adres w przestrzeni, ktorej juz
+      nie prowadzi - jedno zmarnowane chybienie, a samo przejscie i tak
+      wyrzucilo mu cala pamiec podreczna. Rdzen, ktory WSZEDL po
+      policzeniu, musial zaladowac CR3, a to wyrzuca wszystko - nie ma
+      jak wejsc, trzymajac cos starszego niz chwila wejscia.
+
+      **Zakleszczenie, ktore to zatrzymalo.** Pierwsze uruchomienie
+      zawieszalo maszyne. Rdzen czekajacy na wielki zamek jadra robi to
+      z wylaczonymi przerwaniami - wchodzi bramka przerwania - wiec nie
+      slyszy nic. Bylo to nieszkodliwe, dopoki jedyne, na co mozna bylo
+      czekac, to sam zamek: trzymajacy dziala i predzej czy pozniej
+      puszcza. Przestalo byc w chwili, gdy trzymajacy zaczal czekac na
+      NAS. Petla czekania na zamek odpowiada teraz w trakcie: jedna
+      proba, odpowiedz, kolejna proba.
+
+      **Drugi blad, znaleziony przy okazji i starszy od calej zmiany.**
+      Program testowy pokazal 7296 niezgodnosci pamieci - i nie mialy
+      one nic wspolnego z TLB. Granica sterty i nastepny wolny adres
+      mmap opisuja PRZESTRZEN adresowa, a watki dziela jedna; trzymane
+      per zadanie byly kopiowane przy tworzeniu watku i przesuwane
+      osobno, wiec dwa watki proszace o pamiec w tej samej chwili
+      dostawaly TEN SAM adres, kazdy przekonany, ze jest pierwszy. Blad
+      byl bledem od dnia, w ktorym pojawily sie watki - tylko trudno
+      bylo go trafic, dopoki proces stal na jednym rdzeniu.
+
+      **Liczby.** Grupa 'tlb' i program 'tlbtest': cztery watki jednego
+      procesu, w kazdej rundzie swieza pamiec, czyli swieze zmiany
+      mapowan w przestrzeni, w ktorej stoja trzy inne rdzenie.
+
+      | proba | maska rdzeni | zdalnie | odpowiedzi | bledy pamieci |
+      |---|---|---|---|---|
+      | `run tlbtest`, 4 rdzenie | 1 | 0 | 0 | 0 |
+      | `runw tlbtest`, 4 rdzenie | 15 | 124 | 203 | 0 |
+      | `runw tlbtest`, 1 rdzen | 1 | 0 | 0 | 0 |
+
+      Maska 15 to cztery rdzenie w JEDNEJ przestrzeni adresowej. Zera w
+      wierszu pierwszym i trzecim sa tu rownie wazne, co 124 w drugim:
+      mechanizm nie kosztuje nic tam, gdzie nie ma komu mowic.
+
+      Jadro 64-bitowe dostalo ten sam mechanizm i te same liczniki, ale
+      nie ma w nim jeszcze watkow - nie da sie wiec wsadzic dwoch
+      rdzeni do jednej przestrzeni i test sprawdza tam tylko tyle, ze
+      maszyneria stoi i milczy, kiedy ma milczec.
+
+      796 asercji, 50 grup, 385 s.
