@@ -30,8 +30,10 @@
 #define C_WHITE  4
 #define C_BLACK  0
 
-#define W  330
-#define H  160
+/* The size the window is created with. From then on it is whatever the
+   person pulled it to, and the desktop says so with WEV_SIZE. */
+#define W0  330
+#define H0  160
 
 #define ROW_Y   22            /* the first row */
 #define ROW_H   14
@@ -43,6 +45,7 @@ static int chosen;            /* the selected row */
 static char edit[CFG_VAL_MAX];
 static int elen;
 static int saved;             /* 1 = written down since the last change */
+static int cw = W0, ch = H0;  /* the content area, as it is now */
 
 /* Which settings are cycled rather than typed, and how far they go.
    The kernel knows the names; here we only know which of them a person
@@ -117,7 +120,7 @@ static void save_all(void)
 
 void _start(void)
 {
-    int w = win_create(W, H, "Ustawienia");
+    int w = win_create(W0, H0, "Ustawienia");
     if (w < 0)
         sys_exit(1);
 
@@ -149,6 +152,14 @@ void _start(void)
                         saved = 0;
                     }
                 }
+            } else if (ev.type == WEV_CLOSE) {
+                /* Asked to end - so we end. There is nothing to save:
+                   Enter writes to disk, and what was not written was
+                   not meant to be. */
+                sys_exit(0);
+            } else if (ev.type == WEV_SIZE) {
+                cw = ev.x;
+                ch = ev.y;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 if (c == '\n' || c == '\r') {
@@ -168,7 +179,7 @@ void _start(void)
         edit[elen] = 0;
 
         /* --- drawing --- */
-        win_rect(w, 0, 0, W, H, C_BG);
+        win_rect(w, 0, 0, cw, ch, C_BG);
         win_text(w, 6, 6, "Ustawienia systemu:", C_BLUE);
 
         for (int i = 0; i < ncfg; i++) {
@@ -176,7 +187,7 @@ void _start(void)
             /* The selected row is marked, so that clicking and typing
                have a visible target */
             if (i == chosen)
-                win_rect(w, 2, y - 2, W - 4, ROW_H - 1, C_BLUE);
+                win_rect(w, 2, y - 2, cw - 4, ROW_H - 1, C_BLUE);
             /* Black on grey reads; white on grey does not. The
                selected row has a blue field under it, so there white
                is the one that reads. */

@@ -452,6 +452,13 @@ struct win_text_cmd {
 #define WEV_NONE  0
 #define WEV_CLICK 1
 #define WEV_KEY   2
+/* The window is being closed - the program is being ASKED to end. It
+   has about two seconds; after that the desktop stops asking, because
+   a window nobody can close is worse than a program that loses its
+   say. */
+#define WEV_CLOSE 3
+/* The content area has a new size: x and y carry it. */
+#define WEV_SIZE  4
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */

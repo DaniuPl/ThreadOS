@@ -330,6 +330,9 @@ void _start(void)
     for (;;) {
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
+            /* Asked to end by the desktop - so we end */
+            if (ev.type == WEV_CLOSE)
+                sys_exit(0);
             if (ev.type == WEV_CLICK) {
                 handle_click(ev.x, ev.y);
                 continue;

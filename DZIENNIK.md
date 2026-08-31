@@ -2439,3 +2439,49 @@ sprawdzane przez `make test`.
       zlapal, bo testu jeszcze nie bylo; zlapalo oko na wydruku.
 
       849 asercji, 52 grupy, 483 s.
+
+- [x] **Zamykanie i zmiana rozmiaru okien aplikacji** - pulpit zaczyna
+      zachowywac sie jak pulpit.
+
+      Okno, ktore da sie otworzyc i nie da zamknac, nie jest oknem. A
+      dokladnie tak bylo: przycisk [x] kompozytora wyjmowal okno spod
+      dzialajacego procesu, ktory rysowal dalej - w cos, czego juz nie
+      bylo. Zmiana rozmiaru dzialala wylacznie dla okien jadra.
+
+      **Zamkniecie jest PROSBA.** Kompozytor mowi aplikacji, ze jej
+      okno jest zamykane, i daje jej czas skonczyc po swojemu. Program,
+      ktory odpowiada, konczy sie wlasnym kodem wyjscia, posprzatawszy
+      po sobie.
+
+      **Program, ktory nie odpowiada, ginie.** Okno, ktorego nikt nie
+      moze zamknac, jest gorsze niz aplikacja tracaca glos - wiec po
+      okolo dwoch sekundach pulpit przestaje prosic. Do sprawdzenia
+      tego jest osobny program 'gdeaf': otwiera okno i nie slucha
+      niczego. Ginie z kodem -9 i o to chodzi.
+
+      **Zmiana rozmiaru** robi oknu nowy bufor tresci i mowi aplikacji
+      nowy rozmiar - raz, w chwili puszczenia rogu, a nie przy kazdej
+      klatce ciagniecia. Starej tresci nie przenosimy: program zaraz i
+      tak przerysuje calosc, a przeciagnieta kopia byloby widac tylko
+      do tej chwili.
+
+      Po drodze dwa bledy warte zapisania, oba tego samego rodzaju -
+      wspolny plik kompilowany dwa razy:
+
+      - desktop.c jest wspolny dla obu jader, wiec siegniecie po
+        task_kill zerwalo linkowanie jadra 64-bitowego, gdzie ta nazwa
+        nie istnieje. Slownik zgodnosci dostal ja jako sygnal nie do
+        przechwycenia. Zobaczylem to dopiero po pelnym biegu, bo
+        wczesniejsze budowanie puscilem z wyciszonym stderr - i to jest
+        wlasciwa lekcja z tego bledu.
+      - Programy graficzne tez kompiluja sie dwa razy, wiec nowe
+        zdarzenia trzeba bylo dodac takze do user64/usys64.h.
+
+      **Asercje czasowe dostaly powtorke.** Grupa 'lockless' i
+      'proccores' przegrywaly czasem z obciazeniem gospodarza - przy 53
+      grupach i czterech maszynach naraz pomiar czasu w maszynie
+      wirtualnej stojacej obok trzech innych nie jest niczym pewnym.
+      Prog sie NIE zmienil; zmienilo sie to, ile odczytow trzeba, zeby
+      w jeden uwierzyc: gdy pierwszy przegrywa, mierzymy jeszcze raz.
+
+      862 asercje, 53 grupy, 480 s.

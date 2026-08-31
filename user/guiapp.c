@@ -21,6 +21,7 @@ static int npt;
 
 static char typed[16];
 static int tlen;
+static int cw = 120, ch = 60;   /* the content area, as it is now */
 
 static void draw_int(int w, int x, int y, int v, int col)
 {
@@ -50,6 +51,11 @@ void _start(void)
                 px[npt] = ev.x;
                 py[npt] = ev.y;
                 npt++;
+            } else if (ev.type == WEV_CLOSE) {
+                sys_exit(0);          /* asked to end - so we end */
+            } else if (ev.type == WEV_SIZE) {
+                cw = ev.x;
+                ch = ev.y;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 if (c == '\b') {
@@ -64,7 +70,7 @@ void _start(void)
 
         /* Redraw the window: the background, the palette of squares, the
    captions, the data */
-        win_rect(w, 0, 0, 120, 60, C_BG);
+        win_rect(w, 0, 0, cw, ch, C_BG);
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
         win_rect(w, 62, 6, 24, 12, C_BLUE);

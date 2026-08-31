@@ -44,8 +44,10 @@ writing*, a stack that grows on demand, processes **and the threads of
 one process** running in ring 3 on every core — a changed mapping is
 sent to the other cores and awaited before the frame is reused — TLS
 1.3 with certificate verification, and a graphical desktop with
-windows, icons, a file manager, a web browser and a settings window
-whose changes survive a restart.
+windows that can be closed and resized like anywhere else — the
+compositor asks an application to end and insists if it will not — icons,
+a file manager, a web browser and a settings window whose changes
+survive a restart.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,
@@ -130,6 +132,9 @@ ground for both.
 
 **Infrastructure**
 
+- More than six windows at once. The compositor holds six and the
+  kernel takes two of them, so five applications will not fit — which
+  is already fewer than there are icons on the desktop.
 - Keep an eye on the longest group. `ush` and `tls32` (a ring 3 shell
   driving pipes and redirections, and a dozen TLS 1.3 handshakes
   against a real OpenSSL) now decide how long a full run takes — about

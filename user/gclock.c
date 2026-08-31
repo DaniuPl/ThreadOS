@@ -23,6 +23,14 @@ void _start(void)
         sys_exit(1);
 
     for (;;) {
+        /* The desktop may ask us to end - a window with a close button
+           that does nothing is a window that lies. Nothing else comes
+           this way, so one look per frame is enough. */
+        struct win_event ev;
+        while (win_poll(w, &ev) == 1)
+            if (ev.type == WEV_CLOSE)
+                sys_exit(0);
+
         struct utime t;
         sys_time(&t);
 

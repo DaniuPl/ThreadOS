@@ -59,6 +59,9 @@ void _start(void)
         /* Events: a click on a file's row -> load the preview */
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
+            /* Asked to end by the desktop - so we end */
+            if (ev.type == WEV_CLOSE)
+                sys_exit(0);
             if (ev.type == WEV_CLICK) {
                 int row = (ev.y - ROW_Y0) / ROW_H;
                 if (ev.y >= ROW_Y0 && row >= 0 && row < nfiles)

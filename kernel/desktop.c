@@ -97,6 +97,13 @@ struct wevent {
 #define WEV_NONE  0
 #define WEV_CLICK 1
 #define WEV_KEY   2
+/* The window is being closed - the application is being ASKED to end.
+   The compositor does not drop it from under a running process: first
+   it says so, and only insists if nothing happens. */
+#define WEV_CLOSE 3
+/* The content area has a new size; x and y carry it. Sent once, when
+   the drag ends - not on every frame of it. */
+#define WEV_SIZE  4
 #define WEV_QLEN  8
 
 struct window {
@@ -110,15 +117,28 @@ struct window {
     int cw, ch;            /* dimensions of the content area */
     int z;                 /* drawing order (higher = on top) */
     int minimized;         /* is it minimised (hidden, visible on the bar) */
+    /* The application has been asked to close and has not yet ended.
+       'closing' counts down the frames it has left; when it runs out we
+       stop asking - an application that does not answer must not hold
+       the screen forever. */
+    int closing;
     struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
+
+/* How long an application has to end after being asked. The desktop
+   redraws about twenty times a second, so this is roughly two seconds -
+   long enough for a program that is doing something else, short enough
+   that a hung one does not hold the screen. */
+#define CLOSE_FRAMES 40
 
 #define MAX_WIN 6
 static struct window wins[MAX_WIN];
 
 /* Drag state: the window index and the grab (the cursor's offset
    within the window) */
+static void resize_content(struct window *w);
+
 static int drag_idx = -1;
 static int resize_idx = -1;
 static int drag_dx, drag_dy;
@@ -200,7 +220,10 @@ static int close_y(const struct window *w) { return w->y + 1; }
 static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
 static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
 static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
-static int resizable(const struct window *w) { return w->content == (void *)0; }
+/* Every window may be resized. An application window costs more than a
+   kernel one - its content buffer has to be made anew - so that is done
+   once, when the drag ends, and not on every frame of it. */
+static int resizable(const struct window *w) { (void)w; return 1; }
 static int btn_x(const struct window *w)   { return w->x + 8; }
 static int btn_y(const struct window *w)    { return w->y + TITLE_H + 8; }
 
@@ -384,9 +407,22 @@ static void handle_input(int mx, int my, int buttons)
             struct window *w = &wins[i];
             if (w->minimized)               /* minimised - out of reach */
                 continue;
-            /* the close button [x] */
+            /* the close button [x]
+             *
+             * A kernel window owns nothing, so it simply goes. An
+             * application window belongs to a running process: dropping
+             * it from under that process would leave it drawing into a
+             * window that no longer exists. So we ASK - and only insist
+             * when the asking goes unanswered. */
             if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
-                w->used = 0;
+                if (w->content && w->owner >= 0) {
+                    win_enqueue(w, WEV_CLOSE, 0, 0, 0);
+                    w->closing = CLOSE_FRAMES;
+                    if (focus_idx == i)
+                        focus_idx = -1;
+                } else {
+                    w->used = 0;
+                }
                 hit = 1;
                 break;
             }
@@ -457,7 +493,14 @@ static void handle_input(int mx, int my, int buttons)
 
     if (!pressed) {
         drag_idx = -1;
-        resize_idx = -1;
+        if (resize_idx >= 0) {
+            /* The drag is over - only now does the application window
+               get a new content buffer. Doing it on every frame of the
+               drag would mean allocating and freeing dozens of times
+               for one pull of the mouse. */
+            resize_content(&wins[resize_idx]);
+            resize_idx = -1;
+        }
         if (icon_drag >= 0) {       /* releasing an icon: a click or a move? */
             int ddx = mx - icon_press_x, ddy = my - icon_press_y;
             if (ddx * ddx + ddy * ddy < 9)
@@ -503,6 +546,43 @@ static void handle_input(int mx, int my, int buttons)
     }
 
     prev_pressed = pressed;
+}
+
+/* Gives an application window a content buffer matching its new size
+   and tells the application about it.
+ *
+ * The old content is not carried over. A program lays its window out
+ * itself and is about to be told the new size, so it will draw the
+ * whole thing again in a moment - copying the old picture would only
+ * mean showing a stretched one until it does.
+ *
+ * When there is no memory for the new buffer, the window keeps the size
+ * it had. Better a window that will not grow than one that has nothing
+ * to draw into. */
+static void resize_content(struct window *w)
+{
+    if (!w->content || w->owner < 0)
+        return;                        /* a kernel window has no buffer */
+
+    int cw = w->w - 2;
+    int ch = w->h - TITLE_H - 2;
+    if (cw < 8) cw = 8;
+    if (ch < 8) ch = 8;
+    if (cw == w->cw && ch == w->ch)
+        return;                        /* the drag changed nothing */
+
+    uint8_t *buf = kmalloc(cw * ch);
+    if (!buf) {
+        w->w = w->cw + 2;              /* back to the size that has a buffer */
+        w->h = w->ch + TITLE_H + 2;
+        return;
+    }
+    memset(buf, COL_WIN, cw * ch);
+    kfree(w->content);
+    w->content = buf;
+    w->cw = cw;
+    w->ch = ch;
+    win_enqueue(w, WEV_SIZE, cw, ch, 0);
 }
 
 /* Draws the taskbar at the bottom and (if open) the launch menu */
@@ -564,16 +644,34 @@ static void set_title(struct window *w, const char *t)
     w->title[i] = '\0';
 }
 
-/* Releases windows whose owning process is no longer alive */
+/* Releases windows whose owning process is no longer alive, and
+   insists on the ones that were asked to close and did not.
+
+   The insisting is the part that matters. An application that answers
+   WEV_CLOSE by ending is reaped here a frame later, having tidied up
+   after itself; one that does not answer is killed, because a window
+   nobody can close is worse than an application that loses its say. */
 static void reap_windows(void)
 {
     for (int i = 0; i < MAX_WIN; i++) {
-        if (wins[i].used && wins[i].owner >= 0 && !task_alive(wins[i].owner)) {
-            kfree(wins[i].content);
-            wins[i].content = (void *)0;
-            wins[i].used = 0;
+        struct window *w = &wins[i];
+        if (!w->used || w->owner < 0)
+            continue;
+
+        if (!task_alive(w->owner)) {
+            kfree(w->content);
+            w->content = (void *)0;
+            w->used = 0;
+            w->closing = 0;
             if (focus_idx == i)
                 focus_idx = -1;
+            continue;
+        }
+
+        if (w->closing > 0 && --w->closing == 0) {
+            /* Time is up. The process is killed and the window goes
+               with it on the next pass through here. */
+            task_kill(w->owner);
         }
     }
 }

@@ -16,6 +16,7 @@
 #include "task64.h"
 #include "proc64.h"
 #include "keyboard64.h"
+#include "signal64.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/keyboard.h"
 
@@ -30,6 +31,15 @@ void task_sleep(uint32_t ms)
    inside the kernel ask about that themselves, because a signal is
    delivered only on the return to ring 3 - and they do not return
    there. */
+/* Killing a process by number. The desktop reaches for this when an
+   application does not answer a request to close its window - a window
+   nobody can close must not exist. In the 32-bit kernel the name is
+   task_kill; here the same thing is an uncatchable signal. */
+int task_kill(int id)
+{
+    return task64_signal(id, SIGKILL);
+}
+
 int task_killed(void)
 {
     return task64_signal_pending();

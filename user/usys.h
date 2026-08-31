@@ -518,6 +518,14 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
 #define WEV_NONE  0
 #define WEV_CLICK 1
 #define WEV_KEY   2
+/* The window is being closed - the program is being ASKED to end. It
+   has about two seconds to do it; after that the desktop stops asking
+   and kills it, because a window nobody can close is worse than a
+   program that loses its say. */
+#define WEV_CLOSE 3
+/* The content area has a new size: x and y carry it. Sent once, when
+   the pulling of the corner ends. */
+#define WEV_SIZE  4
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */
