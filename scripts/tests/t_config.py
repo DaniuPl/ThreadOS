@@ -93,12 +93,20 @@ def main():
             check("domyslna nazwa maszyny to 'proton'",
                   re.search(r"nazwa = proton\b", out) is not None)
 
-            changed = q.command("set nazwa maszyna", "zapisane", timeout=30)
+            # Changing a setting is changing the system, so it goes
+            # through 'sudo' - the password is asked for on the next
+            # line and never shown (see t_users.py for that road)
+            def set_as_admin(command, wait="zapisane"):
+                q.type_line("sudo " + command)
+                time.sleep(1)
+                return q.command("proton", wait, timeout=30)
+
+            changed = set_as_admin("set nazwa maszyna")
             check("zmiana nazwy przyjeta", "nazwa = maszyna (zapisane)"
                   in changed)
-            q.command("set kolor 14", "zapisane", timeout=30)
-            q.command("set dns 10.0.2.3", "zapisane", timeout=30)
-            q.command("set tlo 3", "zapisane", timeout=30)
+            set_as_admin("set kolor 14")
+            set_as_admin("set dns 10.0.2.3")
+            set_as_admin("set tlo 3")
 
             # The change is in force at once, not only after a restart:
             # the prompt says the new name from the next line on
@@ -106,7 +114,7 @@ def main():
             check("zacheta od razu mowi nowa nazwa", "maszyna>" in after)
 
             # An unknown name is an error, not a new setting
-            bad = q.command("set nieistniejace 7", "set:", timeout=30)
+            bad = set_as_admin("set nieistniejace 7", "set:")
             check("nieznane ustawienie odrzucone",
                   "nie ma ustawienia" in bad or "nie udalo sie" in bad)
 
@@ -181,7 +189,15 @@ def main():
             for _ in range(3):          # cycle 0 -> 3 (green)
                 q.mouse_click()
                 time.sleep(0.6)
-            q.sendkey("ret")            # Enter writes it to the disk
+            q.sendkey("ret")            # Enter asks the kernel to write it
+            time.sleep(2)
+            # The kernel refuses a plain user, so the window asks for
+            # the admin's password - see t_users_gui.py for that on its
+            # own; here it is simply the way to the disk
+            for ch in "proton":
+                q.sendkey(ch)
+                time.sleep(0.15)
+            q.sendkey("ret")
             time.sleep(2)
             q.mouse_goto(560, 420)
             time.sleep(1)

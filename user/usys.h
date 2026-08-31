@@ -55,6 +55,9 @@
 #define SYS_CORE       48
 #define SYS_CFG_GET    49
 #define SYS_CFG_SET    50
+#define SYS_AUTH       51
+#define SYS_DROP       52
+#define SYS_LEVEL      53
 
 #define FS_NAME_MAX  63
 
@@ -609,6 +612,43 @@ static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
 }
 
 /* Changes a setting and writes them all back to the disk. 0 or -1. */
+/* --- who is at the machine -----------------------------------------
+ *
+ * USER_ADMIN may change the system - the settings the kernel reads at
+ * boot, and the files it keeps them in. Everybody else may do
+ * everything else.
+ *
+ * A program goes up by a password and down for nothing. The way down
+ * is never checked: giving up a right is always allowed. */
+#define LEVEL_ADMIN 0
+#define LEVEL_PLAIN 1
+
+/* 0 = an admin from now on; -2 = wrong password (or too many tries too
+   quickly, which the kernel answers the same way) */
+static inline int32_t sys_auth(const char *password)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_AUTH), "b"(password)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_drop(void)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_DROP) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_level(void)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_LEVEL) : "memory");
+    return ret;
+}
+
 static inline int32_t sys_cfg_set(const char *name, const char *value)
 {
     int32_t ret;

@@ -77,6 +77,13 @@ static int  hist_pos;          /* where we are walking through them */
 
 static char prompt[48];
 static int  plen;
+
+/* Asking for the password: the next line typed is not a command but a
+   password, and the command it is for waits here. Nothing else about
+   the terminal changes - the same buffer, the same editing; only what
+   is drawn and what is done with it. */
+static int  asking;
+static char pending[LINE_MAX];
 static int  cw = W0, ch = H0;  /* the content area, as it is now */
 static int  cols = 48, rows = 23;
 
@@ -358,7 +365,9 @@ static void refresh_prompt(void)
         prompt[i] = dir[i];
         i++;
     }
-    prompt[i++] = '>';
+    /* '#' for an admin and '>' for everybody else - so that what you
+       are is on the screen and not something to remember */
+    prompt[i++] = sys_level() == LEVEL_ADMIN ? '#' : '>';
     prompt[i++] = ' ';
     prompt[i] = 0;
     plen = i;
@@ -398,6 +407,12 @@ static void remember(const char *cmd)
     hist_n++;
 }
 
+/* Runs what was waiting for the password, as an admin, and steps back
+   down at once. One command, not a session - the right is given to the
+   thing that was asked for and to nothing else. */
+static void run_pending(void);
+static void run_program(char *line);
+
 static void run_line(void)
 {
     char cmd[LINE_MAX];
@@ -407,6 +422,22 @@ static void run_line(void)
     icur = 0;
     input[0] = 0;              /* the line is gone, not merely 'empty' */
     view = 0;
+
+    /* The password: never echoed, never remembered, never put on the
+       screen - the line above shows stars and this one shows nothing */
+    if (asking) {
+        asking = 0;
+        put_char('\n');
+        if (sys_auth(cmd) != 0) {
+            put_str("sudo: wrong password\n");
+            pending[0] = 0;
+            return;
+        }
+        run_pending();
+        sys_drop();
+        refresh_prompt();
+        return;
+    }
 
     /* The command goes onto the screen with its prompt, the way it
        happened - so that what is above the cursor is a record of the
@@ -425,6 +456,30 @@ static void run_line(void)
     remember(line);
     hist_pos = hist_n;
 
+    if (t_eq(line, "whoami")) {
+        put_str(sys_level() == LEVEL_ADMIN
+                    ? "admin - you can change the system\n"
+                    : "plain user - use 'sudo' to change the system\n");
+        return;
+    }
+    if (t_eq(line, "sudo") || t_starts(line, "sudo ")) {
+        const char *rest = line + 4;
+        while (*rest == ' ')
+            rest++;
+        if (!*rest) {
+            put_str("sudo: which command?\n");
+            return;
+        }
+        if (sys_level() == LEVEL_ADMIN) {   /* already, so no asking */
+            t_copy(pending, rest, LINE_MAX);
+            run_pending();
+            return;
+        }
+        t_copy(pending, rest, LINE_MAX);
+        asking = 1;
+        put_str("password: ");
+        return;
+    }
     if (t_eq(line, "clear")) {
         first = 0;
         count = 0;
@@ -434,7 +489,8 @@ static void run_line(void)
         sys_exit(0);
     }
     if (t_eq(line, "help")) {
-        put_str("built in: cd <dir>, clear, exit, help\n");
+        put_str("built in: cd <dir>, clear, exit, help, whoami, "
+                "sudo <command>\n");
         put_str("everything else is a program from the disk or the "
                 "initrd; 'a | b' works\n");
         put_str("arrows: history and moving in the line; "
@@ -457,6 +513,14 @@ static void run_line(void)
         return;
     }
 
+    run_program(line);
+}
+
+/* Starts a program (or two joined by a pipe) and shows what it wrote.
+   Kept apart from the line above it because 'sudo' runs a command that
+   was typed a moment earlier, not the line that has just been read. */
+static void run_program(char *line)
+{
     /* 'a | b' - one pipe, which is what a person types */
     char *bar = (char *)0;
     for (char *s = line; *s; s++)
@@ -495,6 +559,21 @@ static void run_line(void)
         put_num(code);
         put_str("]\n");
     }
+}
+
+/* What was waiting for the password. It is echoed here rather than
+   when it was typed, so that the record reads in the order things
+   happened: the ask, then the command, then its output. */
+static void run_pending(void)
+{
+    if (!pending[0])
+        return;
+    put_str(prompt);
+    put_str("sudo ");
+    put_str(pending);
+    put_char('\n');
+    run_program(pending);
+    pending[0] = 0;
 }
 
 /* --- keys ----------------------------------------------------------- */
@@ -624,21 +703,32 @@ static void draw(int w)
     /* The line being edited always sits at the bottom, whether or not
        there is enough above it to fill the window */
     int iy = PAD + text_rows * ROW_H;
-    win_text(w, PAD, iy, prompt, C_PROMPT);
+    /* While a password is being typed the line says so instead of
+       saying where you are: what is being asked for matters more than
+       which directory it happens in. */
+    const char *lead = asking ? "password: " : prompt;
+    int leadn = asking ? 10 : plen;
+    win_text(w, PAD, iy, lead, C_PROMPT);
 
     /* A line longer than the window slides under the cursor, so the
        cursor is always somewhere a person can see it */
-    int room = cols - plen;
+    int room = cols - leadn;
     if (room < 4)
         room = 4;
     int off = icur >= room ? icur - room + 1 : 0;
     t_copy(buf, input + off, room + 1);
-    win_text(w, PAD + plen * 8, iy, buf, C_TEXT);
+    /* A password is typed in the same line as everything else and shown
+       in none of it: stars are what a person needs - that the keys are
+       arriving - and all they need. */
+    if (asking)
+        for (int i = 0; buf[i]; i++)
+            buf[i] = '*';
+    win_text(w, PAD + leadn * 8, iy, buf, C_TEXT);
 
     /* The cursor: a line under the character it stands on. It does not
        blink - a blinking cursor is a nicety, and one that is on half
        the time is one that can be photographed absent. */
-    win_rect(w, PAD + (plen + icur - off) * 8, iy + ROW_H - 2, 8, 2,
+    win_rect(w, PAD + (leadn + icur - off) * 8, iy + ROW_H - 2, 8, 2,
              C_PROMPT);
 
     /* Scrolled up, the last thing on the screen is not the last thing

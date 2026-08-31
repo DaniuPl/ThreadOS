@@ -76,6 +76,11 @@
    -> its task number or -1 */
 #define SYS64_THREAD    44
 
+/* Who is at the machine (see kernel/include/user.h) */
+#define SYS64_AUTH      45   /* a1=password, a2=length -> 0 / -2 */
+#define SYS64_DROP      46   /* back to a plain user; always succeeds */
+#define SYS64_LEVEL     47   /* -> 0 = admin, 1 = a plain user */
+
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1

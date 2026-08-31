@@ -14,6 +14,7 @@
 
 #include <stddef.h>
 #include "include/task.h"
+#include "include/user.h"
 #include "include/heap.h"
 #include "include/fs.h"
 #include "include/pit.h"
@@ -59,6 +60,10 @@ struct task {
         uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
     int cwd;                     /* working directory (PFS slot, -1 = root) */
+    /* What this task is allowed to do: USER_ADMIN or USER_PLAIN. A
+       child gets what its parent had - the level travels with the
+       process, not with the program. */
+    int level;
     int parent;                  /* parent pid (-1 = none, an orphan) */
     int vc;                      /* the console this task writes to */
     uint32_t sig_pending;        /* mask of pending signals */
@@ -200,6 +205,41 @@ int task_cwd(void)
     return current->cwd;
 }
 
+/* What the running task may do, and the two ways it changes: up by a
+   password (checked by the caller - only the caller knows what was
+   typed), down for free. */
+int task_level(void)
+{
+    return current ? current->level : USER_ADMIN;
+}
+
+void task_set_level(int level)
+{
+    if (current)
+        current->level = level;
+}
+
+/* The level of the process with that pid - so that a caller can ask
+   whether the process it is about to signal is its own. A pid nobody
+   holds answers with the caller's own level: there is nothing there to
+   protect, and 'no such process' is the answer the caller will get
+   from the send itself. */
+int task_level_of(int pid)
+{
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    int level = task_level();
+    do {
+        if (t->id == pid) {
+            level = t->level;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+    return level;
+}
+
 void task_set_cwd(int slot)
 {
     current->cwd = slot;
@@ -242,6 +282,7 @@ void scheduler_init(void)
     main_task->brk_base = 0;
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* the root directory */
+    main_task->level = USER_ADMIN;
     main_task->parent = -1;     /* the root of the process tree */
     main_task->vc = 0;
     main_task->killed = 0;
@@ -280,6 +321,13 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     for (int i = 0; i < MMAP_FILES; i++)
         t->maps[i].start = t->maps[i].end = 0;
     t->cwd = current ? current->cwd : -1;  /* the child inherits cwd */
+    /* Started from a shell, a program gets the shell's level; started
+       by another program, the level that one had. The kernel shell is
+       not a task of its own - it runs inside a kernel thread - so a
+       thread standing in the kernel's own address space is a shell as
+       far as this is concerned. */
+    t->level = (current && current->cr3 != paging_kernel_cr3())
+                   ? current->level : user_shell_level();
     t->parent = current ? current->id : -1;
     t->vc = current ? current->vc : 0;   /* the child writes where the parent does */
     t->killed = 0;
@@ -553,6 +601,7 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     t->mmap_next = current->mmap_next;
     task_mmap_inherit(t);
     t->cwd = current->cwd;
+    t->level = current->level;
     t->priority = current->priority;
     /* The child inherits the right to run on any core: that is a
        property of the program, not of a single task */
@@ -789,6 +838,7 @@ void task_core_enter(int nr)
     for (int i = 0; i < MMAP_FILES; i++)
         t->maps[i].start = t->maps[i].end = 0;
     t->cwd = -1;
+    t->level = USER_ADMIN;       /* a kernel thread is the kernel */
     t->parent = -1;
     t->vc = 0;
     t->killed = 0;

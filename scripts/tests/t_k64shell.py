@@ -88,6 +88,28 @@ def main():
             check("shell nie udaje, ze zna kazde polecenie",
                   "Nieznane polecenie: nieznane" in bad)
 
+            # Who is at the machine - the same two levels and the same
+            # password as in protected mode, because it is the same
+            # user.c on both sides
+            q23.type_line("kim")
+            who = q23.wait_serial("uzytkownik", timeout=20)
+            check("jadro 64-bitowe tez wstaje jako zwykly uzytkownik",
+                  "uzytkownik (zmiana systemu" in who)
+            q23.type_line("set kolor 13")
+            no = q23.wait_serial("wymaga admina", timeout=20)
+            check("zmiana ustawienia bez admina odrzucona",
+                  "wymaga admina" in no)
+            q23.type_line("sudo set kolor 13")
+            q23.wait_serial("haslo:", timeout=20)
+            q23.type_line("proton")
+            yes = q23.wait_serial("zapisane", timeout=30)
+            check("po podaniu hasla ustawienie zapisane",
+                  "kolor = 13 (zapisane)" in yes)
+            q23.type_line("kim")
+            back = q23.wait_serial("uzytkownik", timeout=20)
+            check("i prawo trwalo jedna komende",
+                  "uzytkownik (zmiana systemu" in back)
+
             # Signals: a program in an endless loop has to be
             # stoppable from the outside, because from the inside it
             # cannot be

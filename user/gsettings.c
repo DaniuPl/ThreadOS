@@ -45,6 +45,13 @@ static int chosen;            /* the selected row */
 static char edit[CFG_VAL_MAX];
 static int elen;
 static int saved;             /* 1 = written down since the last change */
+/* The kernel refused the write because whoever is at the machine is
+   not an admin. So we ask - here, in the window, the same way the
+   terminal asks - and try once more. The password is never kept: it
+   goes to the kernel and the buffer is cleared behind it. */
+static int asking;
+static char pass[CFG_VAL_MAX];
+static int plen;
 static int cw = W0, ch = H0;  /* the content area, as it is now */
 
 /* Which settings are cycled rather than typed, and how far they go.
@@ -108,14 +115,52 @@ static void save_all(void)
        file holds */
     if (chosen >= 0 && chosen < ncfg) {
         edit[elen] = 0;
-        if (sys_cfg_set(cfg[chosen].name, edit) == 0) {
+        int32_t rc = sys_cfg_set(cfg[chosen].name, edit);
+        if (rc == 0) {
             saved = 1;
+            asking = 0;
             load();
             take_value();
             return;
         }
+        if (rc == -2) {
+            /* Not allowed - which is not the same as 'it did not
+               work', and the answer to it is a password rather than a
+               different value */
+            asking = 1;
+            plen = 0;
+            pass[0] = 0;
+            saved = 0;
+            return;
+        }
     }
     saved = -1;                        /* refused - the name or the value */
+}
+
+/* The password typed in the window: if it is right, the same write is
+   tried again - and the right is given back at once, because it was
+   asked for one setting and not for the rest of the session. */
+static void try_password(void)
+{
+    pass[plen] = 0;
+    if (!plen) {                       /* nothing typed - never mind */
+        asking = 0;
+        return;
+    }
+    if (sys_auth(pass) != 0) {
+        for (int i = 0; i < plen; i++)
+            pass[i] = 0;
+        plen = 0;
+        saved = -1;
+        asking = 0;
+        return;
+    }
+    for (int i = 0; i < plen; i++)
+        pass[i] = 0;
+    plen = 0;
+    asking = 0;
+    save_all();
+    sys_drop();
 }
 
 void _start(void)
@@ -162,6 +207,20 @@ void _start(void)
                 ch = ev.y;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
+                if (asking) {
+                    /* Everything typed now is the password, and none of
+                       it goes anywhere near the value being edited */
+                    if (c == '\n' || c == '\r')
+                        try_password();
+                    else if (c == '\b') {
+                        if (plen > 0)
+                            pass[--plen] = 0;
+                    } else if (c >= 0x20 && c < 0x7F &&
+                               plen < (int)sizeof(pass) - 1) {
+                        pass[plen++] = c;
+                    }
+                    continue;
+                }
                 if (c == '\n' || c == '\r') {
                     save_all();
                 } else if (c == '\b') {
@@ -224,10 +283,24 @@ void _start(void)
             y += 3;
         }
 
-        if (saved > 0)
+        if (asking) {
+            /* Stars, not what was typed: the person needs to see that
+               the keys are arriving, and nothing more than that */
+            char stars[CFG_VAL_MAX];
+            int i = 0;
+            for (; i < plen && i < (int)sizeof(stars) - 1; i++)
+                stars[i] = '*';
+            stars[i] = 0;
+            win_text(w, 6, y + 15, "haslo admina:", C_BLUE);
+            win_text(w, 6 + 14 * 8, y + 15, stars, C_BLACK);
+            win_text(w, 6, y + 26, "zmiana ustawien wymaga admina; "
+                                   "Enter zatwierdza", C_BLACK);
+        } else if (saved > 0) {
             win_text(w, 6, y + 15, "zapisane na dysku", C_GREEN);
-        else if (saved < 0)
-            win_text(w, 6, y + 15, "NIE zapisane", C_RED);
+        } else if (saved < 0) {
+            win_text(w, 6, y + 15, "NIE zapisane (zle haslo albo "
+                                   "zla wartosc)", C_RED);
+        }
 
         sys_sleep(80);
     }

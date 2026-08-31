@@ -24,6 +24,7 @@
 #include "include/tlb.h"
 #include "include/isr.h"
 #include "include/config.h"
+#include "include/user.h"
 #include "include/smpmem.h"
 #include "include/smpthreads.h"
 #include "include/pit.h"
@@ -72,7 +73,10 @@ static void prompt(void)
 {
     vga_set_color((enum vga_color)(config_get_num("kolor", VGA_LIGHT_CYAN) & 15),
                   VGA_BLACK);
-    printk("%s> ", config_get("nazwa"));
+    /* '#' for an admin, '>' for everybody else - the oldest way of
+       saying it, and the one that is seen without being read. */
+    printk("%s%c ", config_get("nazwa"),
+           user_shell_level() == USER_ADMIN ? '#' : '>');
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
@@ -91,6 +95,10 @@ static const struct {
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
     {"set",      "ustawienia systemu (pamietane na dysku)"},
+    {"kim",      "kim jestes: adminem czy uzytkownikiem"},
+    {"sudo",     "wykonaj komende jako admin (pyta o haslo)"},
+    {"wyloguj",  "przestan byc adminem"},
+    {"haslo",    "zmien haslo admina"},
     {"smp",      "policz cos na wszystkich rdzeniach"},
     {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
     {"smpthreads", "watki jadra na wszystkich rdzeniach"},
@@ -301,6 +309,18 @@ static void cmd_df(void)
            total * kib, used * kib, (total - used) * kib, FS_BLOCK);
 }
 
+/* The system's own files: reading them is nobody's business but
+   writing to them is changing the system. The shell asks the same
+   question the syscalls ask - otherwise the console would be the way
+   round every rule the rest of the machine keeps. */
+static int may_touch(const char *name)
+{
+    if (!user_is_system_file(name) || user_shell_level() == USER_ADMIN)
+        return 1;
+    printk("brak uprawnien do '%s' - sprobuj przez sudo\n", name);
+    return 0;
+}
+
 static void cmd_write(char *args)
 {
     /* args = "name text..." */
@@ -314,6 +334,8 @@ static void cmd_write(char *args)
         printk("uzycie: write <plik> <tekst>\n");
         return;
     }
+    if (!may_touch(args))
+        return;
     if (fs_write(args, text, strlen(text)) < 0)
         printk("write: blad zapisu '%s'\n", args);
     else
@@ -340,6 +362,9 @@ static void cmd_cp(char *args)
         printk("uzycie: cp <zrodlo> <cel>\n");
         return;
     }
+
+    if (!may_touch(dst))
+        return;
 
     uint32_t size = 0;
     void *loaded = (void *)0;
@@ -479,6 +504,16 @@ static void cmd_set(const char *arg)
         return;
     }
 
+    if (user_shell_level() != USER_ADMIN) {
+        printk("set: zmiana ustawien wymaga admina - 'sudo set %s ...'\n",
+               name);
+        return;
+    }
+    if (config_is_hidden(name)) {
+        printk("set: '%s' nie zmienia sie tak - zobacz komende 'haslo'\n",
+               name);
+        return;
+    }
     if (config_set(name, arg + i) < 0) {
         printk("set: nie udalo sie zapisac '%s' (zla nazwa, za dluga "
                "wartosc albo brak dysku)\n", name);
@@ -524,6 +559,122 @@ static void cmd_ping(const char *arg)
     net_ping(ip, 4);
 }
 
+/* --- who is at the machine ------------------------------------------
+ *
+ * The shell reads its characters one at a time from its own console,
+ * in its own thread, so a password can simply be read here: a blocking
+ * read inside the command, with stars instead of what was typed. There
+ * is nothing asynchronous about it and nothing to remember afterwards.
+ */
+static char shell_getchar(struct shell *sh);
+
+static void read_secret(char *out, int max)
+{
+    struct shell *sh = my_shell();
+    int n = 0;
+    for (;;) {
+        char c = shell_getchar(sh);
+        if (c == '\n')
+            break;
+        if (c == '\b') {
+            if (n) {
+                n--;
+                printk("\b");
+            }
+            continue;
+        }
+        if (c < 0x20)
+            continue;
+        if (n < max - 1) {
+            out[n++] = c;
+            printk("*");           /* something is seen; what, is not */
+        }
+    }
+    out[n] = 0;
+    printk("\n");
+}
+
+static void run_command(char *cmd);
+
+static void cmd_whoami(void)
+{
+    printk("%s\n", user_shell_level() == USER_ADMIN
+                        ? "admin (mozesz zmieniac system)"
+                        : "uzytkownik (zmiana systemu przez 'sudo')");
+}
+
+/* sudo <komenda> - one command as an admin, and back down at once.
+   sudo alone - an admin until 'wyloguj'. */
+static void cmd_sudo(char *arg)
+{
+    if (user_shell_level() == USER_ADMIN) {
+        if (*arg)
+            run_command(arg);
+        else
+            printk("juz jestes adminem\n");
+        return;
+    }
+
+    char pass[CONFIG_VAL_MAX];
+    printk("haslo: ");
+    read_secret(pass, sizeof(pass));
+    if (!user_password_ok(pass)) {
+        printk("sudo: zle haslo\n");
+        return;
+    }
+
+    user_shell_set(USER_ADMIN);
+    if (!*arg) {
+        printk("jestes adminem; 'wyloguj' konczy\n");
+        return;
+    }
+    run_command(arg);
+    user_shell_set(USER_PLAIN);     /* one command, not a session */
+}
+
+static void cmd_logout(void)
+{
+    if (user_shell_level() != USER_ADMIN) {
+        printk("nie jestes adminem\n");
+        return;
+    }
+    user_shell_set(USER_PLAIN);
+    printk("znowu zwykly uzytkownik\n");
+}
+
+/* Changing the password: the old one first, unless the person asking
+   is already an admin - they have shown it once already. */
+static void cmd_password(void)
+{
+    char pass[CONFIG_VAL_MAX], again[CONFIG_VAL_MAX];
+
+    if (user_shell_level() != USER_ADMIN) {
+        printk("stare haslo: ");
+        read_secret(pass, sizeof(pass));
+        if (!user_password_ok(pass)) {
+            printk("haslo: zle haslo\n");
+            return;
+        }
+    }
+    printk("nowe haslo: ");
+    read_secret(pass, sizeof(pass));
+    if (!pass[0]) {
+        printk("haslo: puste haslo to brak hasla - nie zmieniam\n");
+        return;
+    }
+    printk("powtorz: ");
+    read_secret(again, sizeof(again));
+    if (strcmp(pass, again)) {
+        printk("haslo: te dwa nie sa takie same - nie zmieniam\n");
+        return;
+    }
+    if (user_set_password(pass) < 0) {
+        printk("haslo: nie udalo sie zapisac (brak dysku?)\n");
+        return;
+    }
+    printk("haslo zmienione\n");
+}
+
 static void run_command(char *cmd)
 {
     if (!*cmd)
@@ -541,6 +692,14 @@ static void run_command(char *cmd)
 
     if (!strcmp(cmd, "help"))
         cmd_help();
+    else if (!strcmp(cmd, "kim"))
+        cmd_whoami();
+    else if (!strcmp(cmd, "sudo"))
+        cmd_sudo(arg);
+    else if (!strcmp(cmd, "wyloguj"))
+        cmd_logout();
+    else if (!strcmp(cmd, "haslo"))
+        cmd_password();
     else if (!strcmp(cmd, "ps"))
         task_dump();
     else if (!strcmp(cmd, "ls"))

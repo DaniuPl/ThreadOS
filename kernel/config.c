@@ -25,17 +25,28 @@ struct setting {
     const char *name;
     const char *fallback;
     const char *help;
+    /* Hidden settings are kept and written like the rest, but nothing
+       lists them and nothing sets them by name: they are not a value a
+       person types, they are a value the system computes. */
+    int hidden;
     char value[CONFIG_VAL_MAX];
 };
 
 /* Every one of these is read somewhere. In order: the shell prompt,
    the network, the console and the desktop. */
 static struct setting settings[] = {
-    { "nazwa",  "proton",   "nazwa maszyny - widac ja w zachecie", { 0 } },
-    { "dns",    "0.0.0.0",  "serwer nazw; 0.0.0.0 = ten z DHCP",  { 0 } },
-    { "kolor",  "11",       "kolor zachety shella, 0-15",         { 0 } },
+    { "nazwa",  "proton",   "nazwa maszyny - widac ja w zachecie", 0, { 0 } },
+    { "dns",    "0.0.0.0",  "serwer nazw; 0.0.0.0 = ten z DHCP",  0, { 0 } },
+    { "kolor",  "11",       "kolor zachety shella, 0-15",         0, { 0 } },
     { "tlo",    "0",        "tlo pulpitu: 0 morskie, 1 granat,\n"
-                            "2 fiolet, 3 zielen, 4 braz, 5 szarosc", { 0 } },
+                            "2 fiolet, 3 zielen, 4 braz, 5 szarosc", 0, { 0 } },
+    /* Not the password - a number computed from it. The default is the
+       number for 'proton', so a machine on which nobody ever set one
+       still has a password. Hidden, because a number nobody can type
+       back is not a setting: it is changed by the 'haslo' command. */
+    { "haslo",  "12265581074349227503",
+                            "haslo admina (liczba policzona z hasla)",
+                            1, { 0 } },
 };
 
 #define NSETTINGS ((int)(sizeof(settings) / sizeof(settings[0])))
@@ -109,23 +120,53 @@ uint32_t config_get_num(const char *key, uint32_t fallback)
     return parts[0];
 }
 
-int config_count(void)               { return NSETTINGS; }
+/* Walking the settings passes over the hidden ones, so that whoever
+   lists them - the shell, the window on the desktop - sees exactly
+   what a person can set. */
+static struct setting *visible(int i)
+{
+    for (int k = 0; k < NSETTINGS; k++) {
+        if (settings[k].hidden)
+            continue;
+        if (i-- == 0)
+            return &settings[k];
+    }
+    return (struct setting *)0;
+}
+
+int config_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < NSETTINGS; i++)
+        if (!settings[i].hidden)
+            n++;
+    return n;
+}
 
 const char *config_name(int i)
 {
-    return (i >= 0 && i < NSETTINGS) ? settings[i].name : (const char *)0;
+    struct setting *s = visible(i);
+    return s ? s->name : (const char *)0;
 }
 
 const char *config_value(int i)
 {
-    if (i < 0 || i >= NSETTINGS)
+    struct setting *s = visible(i);
+    if (!s)
         return (const char *)0;
-    return settings[i].value[0] ? settings[i].value : settings[i].fallback;
+    return s->value[0] ? s->value : s->fallback;
 }
 
 const char *config_help(int i)
 {
-    return (i >= 0 && i < NSETTINGS) ? settings[i].help : (const char *)0;
+    struct setting *s = visible(i);
+    return s ? s->help : (const char *)0;
+}
+
+int config_is_hidden(const char *key)
+{
+    struct setting *s = find(key);
+    return s ? s->hidden : 0;
 }
 
 /* --- the file ------------------------------------------------------- */
@@ -206,7 +247,8 @@ int config_set(const char *key, const char *value)
         at = append(out, at, settings[i].name);
         if (at < CONFIG_MAX_FILE - 1)
             out[at++] = '=';
-        at = append(out, at, config_value(i));
+        at = append(out, at, settings[i].value[0] ? settings[i].value
+                                                  : settings[i].fallback);
         if (at < CONFIG_MAX_FILE - 1)
             out[at++] = '\n';
     }

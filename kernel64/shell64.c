@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "shell64.h"
 #include "keyboard64.h"
+#include "../kernel/include/user.h"
 #include "task64.h"
 #include "paging64.h"
 #include "elf64.h"
@@ -60,13 +61,27 @@ static int starts_with(const char *s, const char *prefix)
 }
 
 
+/* The system's own files: reading them is nobody's business, writing
+   to them is changing the system - so the console asks the same
+   question the syscalls ask. */
+static int may_touch(const char *name)
+{
+    if (!user_is_system_file(name) || user_shell_level() == USER_ADMIN)
+        return 1;
+    printk("brak uprawnien do '%s' - sprobuj przez sudo\n", name);
+    return 0;
+}
+
 static void prompt(void)
 {
     /* The prompt says the machine's name and wears the colour it was
        given - both come from the settings, so both survive a restart */
     vga_set_color((enum vga_color)(config_get_num("kolor", VGA_LIGHT_GREEN) & 15),
                   VGA_BLACK);
-    printk("%s64> ", config_get("nazwa"));
+    /* '#' for an admin, '>' for everybody else - the oldest way of
+       saying it, and the one that is seen without being read */
+    printk("%s64%c ", config_get("nazwa"),
+           user_shell_level() == USER_ADMIN ? '#' : '>');
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
@@ -80,6 +95,7 @@ static void cmd_help(void)
     printk("           gfx, pulpit,\n");
     printk("           reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("           runw <prog> - program na dowolnym rdzeniu\n");
+    printk("           kim, sudo <komenda>, wyloguj, haslo\n");
 }
 
 static void cmd_mem(void)
@@ -216,6 +232,9 @@ static void cmd_write(char *rest)
         len++;
     body[len++] = '\n';             /* a text file ends with a newline */
 
+    if (!may_touch(rest))
+        return;
+
     int slot = fs_open(task64_cwd(), rest, 1);
     if (slot < 0 || fs_truncate(slot) < 0 ||
         fs_write_at(slot, 0, body, len) < 0)
@@ -336,6 +355,9 @@ static void cmd_cp(char *rest)
         return;
     }
 
+    if (!may_touch(dst))
+        return;
+
     uint32_t size = 0;
     void *loaded = (void *)0;
     const void *image = prog_image(rest, &size, &loaded);
@@ -435,6 +457,16 @@ static void cmd_set(const char *arg)
         return;
     }
 
+    if (user_shell_level() != USER_ADMIN) {
+        printk("set: zmiana ustawien wymaga admina - 'sudo set %s ...'\n",
+               name);
+        return;
+    }
+    if (config_is_hidden(name)) {
+        printk("set: '%s' nie zmienia sie tak - zobacz komende 'haslo'\n",
+               name);
+        return;
+    }
     if (config_set(name, arg + i) < 0) {
         printk("set: nie udalo sie zapisac '%s' (zla nazwa, za dluga "
                "wartosc albo brak dysku)\n", name);
@@ -468,10 +500,139 @@ static const char *argument(const char *line, int cmd_len)
     return line[i] ? &line[i] : (const char *)0;
 }
 
+/* --- who is at the machine ------------------------------------------
+ *
+ * The shell reads characters one at a time in its own thread, so a
+ * password is simply a blocking read here, with stars in place of what
+ * was typed. Nothing asynchronous, nothing kept afterwards.
+ */
+static void read_secret(char *out, int max)
+{
+    int n = 0;
+    for (;;) {
+        char c = keyboard64_getchar();
+        if (c == '\n')
+            break;
+        if (c == '\b') {
+            if (n) {
+                n--;
+                printk("\b");
+            }
+            continue;
+        }
+        if (c < 0x20)
+            continue;
+        if (n < max - 1) {
+            out[n++] = c;
+            printk("*");
+        }
+    }
+    out[n] = 0;
+    printk("\n");
+}
+
+static void execute(const char *line);
+
+static void cmd_whoami(void)
+{
+    printk("%s\n", user_shell_level() == USER_ADMIN
+                        ? "admin (mozesz zmieniac system)"
+                        : "uzytkownik (zmiana systemu przez 'sudo')");
+}
+
+static void cmd_sudo(const char *arg)
+{
+    if (user_shell_level() == USER_ADMIN) {
+        if (*arg)
+            execute(arg);
+        else
+            printk("juz jestes adminem\n");
+        return;
+    }
+
+    char pass[CONFIG_VAL_MAX];
+    printk("haslo: ");
+    read_secret(pass, sizeof(pass));
+    if (!user_password_ok(pass)) {
+        printk("sudo: zle haslo\n");
+        return;
+    }
+
+    user_shell_set(USER_ADMIN);
+    if (!*arg) {
+        printk("jestes adminem; 'wyloguj' konczy\n");
+        return;
+    }
+    execute(arg);
+    user_shell_set(USER_PLAIN);        /* one command, not a session */
+}
+
+static void cmd_logout(void)
+{
+    if (user_shell_level() != USER_ADMIN) {
+        printk("nie jestes adminem\n");
+        return;
+    }
+    user_shell_set(USER_PLAIN);
+    printk("znowu zwykly uzytkownik\n");
+}
+
+static void cmd_password(void)
+{
+    char pass[CONFIG_VAL_MAX], again[CONFIG_VAL_MAX];
+
+    if (user_shell_level() != USER_ADMIN) {
+        printk("stare haslo: ");
+        read_secret(pass, sizeof(pass));
+        if (!user_password_ok(pass)) {
+            printk("haslo: zle haslo\n");
+            return;
+        }
+    }
+    printk("nowe haslo: ");
+    read_secret(pass, sizeof(pass));
+    if (!pass[0]) {
+        printk("haslo: puste haslo to brak hasla - nie zmieniam\n");
+        return;
+    }
+    printk("powtorz: ");
+    read_secret(again, sizeof(again));
+    if (strcmp(pass, again)) {
+        printk("haslo: te dwa nie sa takie same - nie zmieniam\n");
+        return;
+    }
+    if (user_set_password(pass) < 0) {
+        printk("haslo: nie udalo sie zapisac (brak dysku?)\n");
+        return;
+    }
+    printk("haslo zmienione\n");
+}
+
 static void execute(const char *line)
 {
     if (!line[0])
         return;
+
+    if (!strcmp(line, "kim")) {
+        cmd_whoami();
+        return;
+    }
+    if (!strcmp(line, "sudo")) {
+        cmd_sudo("");
+        return;
+    }
+    if (starts_with(line, "sudo ")) {
+        cmd_sudo(line + 5);
+        return;
+    }
+    if (!strcmp(line, "wyloguj")) {
+        cmd_logout();
+        return;
+    }
+    if (!strcmp(line, "haslo")) {
+        cmd_password();
+        return;
+    }
 
     if (!strcmp(line, "help")) {
         cmd_help();
@@ -506,6 +667,8 @@ static void execute(const char *line)
         const char *file = argument(line, 3);
         if (!file)
             printk("rm: podaj nazwe\n");
+        else if (!may_touch(file))
+            ;                        /* said so already */
         else if (fs_unlink(task64_cwd(), file) < 0)
             printk("rm: nie ma '%s'\n", file);
         else

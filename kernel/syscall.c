@@ -19,6 +19,7 @@
 #include "include/syscall.h"
 #include "include/smp.h"
 #include "include/config.h"
+#include "include/user.h"
 #include "include/isr.h"
 #include "include/task.h"
 #include "include/pit.h"
@@ -99,6 +100,9 @@ struct tcp_io_cmd {
 #define PATH_MAX   128           /* the longest path/command line */
 #define USER_TOP   0xC0000000u   /* top of user space (the stack) */
 #define EFAULT     ((uint32_t)-1)
+/* Not allowed - a different thing from 'it did not work'. A program
+   gets -2, so that it can say which of the two happened. */
+#define EPERM      ((uint32_t)-2)
 
 /* --- validating pointers from ring 3 ---------------------------------- */
 
@@ -241,10 +245,19 @@ void syscall_handler(struct regs *r)
         break;
     case SYS_OPEN: {
         char path[PATH_MAX];
-        if (user_str(path, r->ebx, sizeof(path)) < 0)
+        if (user_str(path, r->ebx, sizeof(path)) < 0) {
             r->eax = EFAULT;
-        else
-            r->eax = (uint32_t)file_open(path, (int)r->ecx);
+            break;
+        }
+        /* The system's own files may be READ by anybody - there is
+           nothing secret in them - but opening one to write is the
+           same act as changing the setting inside it. */
+        if ((int)r->ecx != O_READ && user_is_system_file(path) &&
+            task_level() != USER_ADMIN) {
+            r->eax = EPERM;
+            break;
+        }
+        r->eax = (uint32_t)file_open(path, (int)r->ecx);
         break;
     }
     case SYS_CLOSE:
@@ -282,10 +295,15 @@ void syscall_handler(struct regs *r)
     }
     case SYS_UNLINK: {
         char path[PATH_MAX];
-        if (user_str(path, r->ebx, sizeof(path)) < 0)
+        if (user_str(path, r->ebx, sizeof(path)) < 0) {
             r->eax = EFAULT;
-        else
-            r->eax = (uint32_t)fs_unlink(task_cwd(), path);
+            break;
+        }
+        if (user_is_system_file(path) && task_level() != USER_ADMIN) {
+            r->eax = EPERM;
+            break;
+        }
+        r->eax = (uint32_t)fs_unlink(task_cwd(), path);
         break;
     }
     case SYS_TIME: {
@@ -324,7 +342,14 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_KILL:
-        /* ecx = signal number; 0 means "just kill" (SIGKILL) */
+        /* ecx = signal number; 0 means "just kill" (SIGKILL).
+           A plain user may signal only their own processes: a level of
+           its own is exactly what makes a process somebody else's. */
+        if (task_level() != USER_ADMIN &&
+            task_level_of((int)r->ebx) != task_level()) {
+            r->eax = EPERM;
+            break;
+        }
         r->eax = (uint32_t)task_signal_send((int)r->ebx,
                                             r->ecx ? (int)r->ecx : SIGKILL);
         break;
@@ -436,9 +461,41 @@ void syscall_handler(struct regs *r)
             r->eax = EFAULT;
             break;
         }
+        /* Changing what the system reads at boot is changing the
+           system. A password can be typed into the program that asks
+           for it - and then this same call goes through. */
+        if (task_level() != USER_ADMIN || config_is_hidden(name)) {
+            r->eax = EPERM;
+            break;
+        }
         r->eax = (uint32_t)config_set(name, value);
         break;
     }
+    /* --- who is at the machine ------------------------------------
+     *
+     * Up by a password, down for nothing. Going down is never a thing
+     * to check: giving up a right is always allowed. */
+    case SYS_AUTH: {
+        char pass[CFG_VAL_MAX];
+        if (user_str(pass, r->ebx, sizeof(pass)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        if (!user_password_ok(pass)) {
+            r->eax = EPERM;
+            break;
+        }
+        task_set_level(USER_ADMIN);
+        r->eax = 0;
+        break;
+    }
+    case SYS_DROP:
+        task_set_level(USER_PLAIN);
+        r->eax = 0;
+        break;
+    case SYS_LEVEL:
+        r->eax = (uint32_t)task_level();
+        break;
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;

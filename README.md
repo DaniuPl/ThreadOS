@@ -54,7 +54,10 @@ restart. The terminal in a window is a dark screen with light text and
 a session in it: scrollback, history, a movable cursor, `cd` and pipes
 — one program compiled for both kernels, differing only in how a
 command is started. Alt+Tab moves the focus from the keyboard, the way
-it does everywhere else.
+it does everywhere else. Two privilege levels: changing the system —
+its settings and the files it keeps them in — needs an admin, and the
+way up is a password, asked for by the shell, by the terminal and by
+the settings window alike (`sudo`), for one command at a time.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,

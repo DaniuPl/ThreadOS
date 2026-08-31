@@ -55,6 +55,30 @@ static inline int32_t u_open(const char *name, int flags)
 #define KEY_HOME  0x17
 #define KEY_END   0x18
 
+/* --- Who is at the machine -----------------------------------------
+ *
+ * The same three calls as in protected mode, only the arguments travel
+ * in registers: the password goes with its length, because that is how
+ * every text does in long mode. */
+#define LEVEL_ADMIN 0
+#define LEVEL_PLAIN 1
+
+static inline int32_t sys_auth(const char *password)
+{
+    return (int32_t)syscall64_3(SYS64_AUTH, (int64_t)(uintptr_t)password,
+                                (int64_t)ustrlen(password), 0);
+}
+
+static inline int32_t sys_drop(void)
+{
+    return (int32_t)syscall64(SYS64_DROP, 0, 0);
+}
+
+static inline int32_t sys_level(void)
+{
+    return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
+}
+
 /* --- Time ---------------------------------------------------------- */
 
 struct utime {

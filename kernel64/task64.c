@@ -18,6 +18,7 @@
 #include "elf64.h"
 #include "fpu64.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/user.h"
 #include "pipe64.h"
 #include "proc64.h"
 #include "../kernel/include/spinlock.h"
@@ -82,6 +83,9 @@ struct task64 {
     } maps[MMAP_FILES];
     int cwd;                     /* the working directory (an inode, FS_ROOT = /) */
     int vc;                      /* the virtual console it writes to */
+    /* What this task may do: USER_ADMIN or USER_PLAIN. A child gets
+       what its parent had - the level travels with the process. */
+    int level;
     /* Where this task may be run.
        'anycore' = 1 means any core may take it. The default is zero
        and that is how it should be: a task reaching for the disk, the
@@ -192,6 +196,7 @@ void scheduler64_init(void)
         main_task->maps[i].start = main_task->maps[i].end = 0;
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
+    main_task->level = USER_ADMIN;
     main_task->vc = 0;
     set_name(main_task, "main");
     main_task->anycore = 0;
@@ -243,6 +248,12 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
         t->maps[i].start = t->maps[i].end = 0;
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
+    /* A thread standing in the kernel's own address space is the kernel
+       shell as far as this is concerned - the shell is not a task of
+       its own, so its level lives beside it. */
+    t->level = (current && current->space &&
+                current->space != paging64_kernel_space())
+                   ? current->level : user_shell_level();
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
     t->anycore = 0;            /* until somebody says otherwise */
@@ -288,6 +299,7 @@ struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
     t->brk = current->brk;
     t->mmap = current->mmap;
     t->cwd = current->cwd;
+    t->level = current->level;
     t->vc = current->vc;
     t->anycore = current->anycore;
     for (int i = 0; i < FD_MAX; i++)
@@ -690,6 +702,7 @@ void task_core_enter(int nr)
         t->maps[i].start = t->maps[i].end = 0;
     t->fpu = fpu64_alloc();
     t->cwd = FS_ROOT;
+    t->level = USER_ADMIN;       /* a kernel thread is the kernel */
     t->vc = 0;
     t->anycore = 0;
     t->nolock = 1;         /* an idle task does not take the lock */
@@ -908,6 +921,29 @@ int task64_reclaim_page(void)
 
     irq_restore(flags);
     return given_back;
+}
+
+int task64_level(void)       { return current ? current->level : USER_ADMIN; }
+void task64_set_level(int l)  { if (current) current->level = l; }
+
+/* The level of the process with that pid, so that a caller can ask
+   whether what it is about to signal is its own. */
+int task64_level_of(int pid)
+{
+    if (!current)
+        return USER_ADMIN;
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    int level = current->level;
+    do {
+        if (t->id == pid) {
+            level = t->level;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return level;
 }
 
 int task64_vc(void)          { return current ? current->vc : 0; }

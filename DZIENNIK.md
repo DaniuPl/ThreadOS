@@ -2701,3 +2701,69 @@ sprawdzane przez `make test`.
       nie polowa spod sasiada) i ze KLAWISZE ZA NIM IDA - po Alt+Tab
       wpisana komenda laduje w terminalu, ktory chwile wczesniej
       byl pod dwoma innymi oknami.
+
+- [x] **Kto jest przy maszynie** - dwa poziomy, haslo i sudo.
+
+      Wszystko, co dzialalo, moglo wszystko. Program w pierscieniu
+      trzecim mogl nadpisac plik, z ktorego system czyta ustawienia przy
+      starcie, skasowac plik wymiany albo zmienic nazwe maszyny - i tak
+      samo kazdy, kto cos wpisal. Nie bylo kogo pytac, bo nie bylo
+      nikogo.
+
+      Teraz sa dwa poziomy: admin, ktory moze zmieniac system, i zwykly
+      uzytkownik, ktory moze cala reszte. Bez grup, bez wlascicieli
+      plikow, bez listy uprawnien - dwa poziomy wystarcza, zeby
+      powiedziec to jedno, co warto: ze zmiana systemu to inna czynnosc
+      niz uzywanie go.
+
+      **Poziom nalezy do procesu i wedruje do dzieci.** Nowe pole w
+      strukturze zadania w obu jadrach; fork i exec je dziedzicza.
+      Shell jadra nie jest procesem, wiec ma swoj wlasny poziom obok -
+      i program uruchomiony z shella dostaje jego poziom, bo watek
+      stojacy w przestrzeni jadra jest z tego punktu widzenia shellem.
+
+      **W gore przez haslo, w dol za darmo.** Trzy wywolania systemowe:
+      auth, drop, level. Zejscie nizej nigdy nie jest sprawdzane -
+      oddanie uprawnienia zawsze wolno.
+
+      **Haslo lezy w pliku jako liczba**, nie jako tekst - i warto
+      powiedziec wprost, czym to jest: skrotem na osmiu bajtach (FNV-1a
+      z sola), a nie funkcja zrobiona do hasel. Chroni przed
+      PRZECZYTANIEM hasla z pliku, ktory kazdy moze obejrzec. Nie
+      chroni przed kims, kto zabierze dysk i weznie sie za te liczbe ze
+      slownikiem, i nic tu tego nie udaje. Zgadywanie kosztuje czas:
+      trzy zle proby i maszyna przez kilka sekund odpowiada "nie",
+      nawet nie patrzac - inaczej szescioznakowe haslo jest dla
+      programu w ringu 3 kwestia popoludnia.
+
+      **Czego pilnujemy:** ustawien (SYS_CFG_SET i komenda 'set'),
+      wlasnych plikow systemu (system.cfg, swap.sys, icons.pos - przy
+      otwarciu do zapisu i przy kasowaniu), oraz sygnalow do cudzych
+      procesow. Konsola pilnuje tego samego co wywolania systemowe -
+      inaczej byloby obejsciem wszystkich regul, ktorych reszta maszyny
+      przestrzega. Czytac te pliki moze kazdy: nie ma w nich nic
+      tajnego, a zmiana to co innego niz zajrzenie.
+
+      **Trzy miejsca, w ktorych sie o to prosi**, i wszystkie pytaja tak
+      samo - gwiazdkami zamiast tekstu:
+
+      - shell jadra: 'sudo <komenda>' (jedna komenda), 'sudo' (sesja do
+        'wyloguj'), 'kim', 'haslo'. Zacheta konczy sie '#' zamiast '>',
+        gdy jestes adminem - najstarszy sposob powiedzenia tego i taki,
+        ktory sie widzi, nie czyta.
+      - terminal w oknie: 'sudo <komenda>' zamienia linie w linie hasla.
+        Program w ringu 3 nie moze podniesc sobie uprawnien sam - moze
+        tylko dostac odmowe i cos z nia zrobic. Robi to, o co chodzi:
+        pyta i probuje raz jeszcze, po czym od razu schodzi z powrotem.
+      - okno ustawien: zapis wraca z odmowa, wiec okno mowi o tym i
+        pyta o haslo pod zmienianym ustawieniem.
+
+      Do tego 'rm' i 'cp' rozrozniaja teraz odmowe od "nie ma pliku" -
+      to dwie rozne odpowiedzi i czlowiek robi po nich co innego.
+
+      Dwie nowe grupy: 'users' (konsola: odmowa, ktora naprawde nie
+      zmienia wartosci; zle haslo; jedna komenda, nie sesja; blokada po
+      trzech probach; zmiana hasla przezywajaca restart; plik bez hasla
+      otwartym tekstem) i 'usersgui' (terminal i okno ustawien). Grupa
+      'k64shell' dostala te same asercje dla trybu dlugiego, bo to ten
+      sam user.c po obu stronach.

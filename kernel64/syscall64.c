@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include "syscall64.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/user.h"
+#include "../kernel/include/config.h"
 #include "../kernel/include/biglock.h"
 #include "gdt64.h"
 #include "task64.h"
@@ -418,6 +420,14 @@ static void handle(struct regs *r)
             name[i] = src[i];
         name[a2] = '\0';
 
+        /* The system's own files may be read by anybody; opening one
+           to create or truncate it is changing the system. */
+        if (a3 && user_is_system_file(name) &&
+            task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)-2;              /* not allowed */
+            return;
+        }
+
         int slot = fs_open(task64_cwd(), name, (int)a3);
         if (slot < 0) {
             r->rax = (uint64_t)-1;
@@ -533,6 +543,10 @@ static void handle(struct regs *r)
         char name[FS_NAME_MAX + 1];
         if (name_from_ring3(a1, a2, name) < 0) {
             r->rax = (uint64_t)-1;
+            return;
+        }
+        if (user_is_system_file(name) && task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)-2;
             return;
         }
         r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), name);
@@ -703,7 +717,37 @@ static void handle(struct regs *r)
         }
         return;                      /* the frame already describes the interrupted spot */
     case SYS64_KILL:
+        /* A plain user may signal only their own processes: a level of
+           its own is what makes a process somebody else's. */
+        if (task64_level() != USER_ADMIN &&
+            task64_level_of((int)a1) != task64_level()) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
         r->rax = task64_signal((int)a1, (int)a2) ? 0 : (uint64_t)-1;
+        return;
+
+    /* --- who is at the machine: up by a password, down for free --- */
+    case SYS64_AUTH: {
+        char pass[CONFIG_VAL_MAX];
+        if (text_from_ring3(a1, pass, sizeof(pass)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        if (!user_password_ok(pass)) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
+        task64_set_level(USER_ADMIN);
+        r->rax = 0;
+        return;
+    }
+    case SYS64_DROP:
+        task64_set_level(USER_PLAIN);
+        r->rax = 0;
+        return;
+    case SYS64_LEVEL:
+        r->rax = (uint64_t)(int64_t)task64_level();
         return;
     /* Windows. The owner is the process, not whoever passes a window
        number: the compositor checks it on every draw, so a program will

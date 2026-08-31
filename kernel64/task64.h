@@ -86,6 +86,12 @@ int task64_id_current(void);
 int task64_reclaim_page(void);
 
 int task64_vc(void);
+
+/* What the running task may do (USER_ADMIN / USER_PLAIN, see
+   kernel/include/user.h). Inherited by every child. */
+int task64_level(void);
+void task64_set_level(int level);
+int task64_level_of(int pid);
 void task64_set_vc(int vc);
 int task64_alive(int id);            /* is the task with this number alive */
 

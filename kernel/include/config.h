@@ -52,6 +52,9 @@ int config_set(const char *key, const char *value);
 /* Walking the settings, for whoever wants to show them all. Returns 0
    past the last one. */
 int config_count(void);
+
+/* A setting nobody lists and nobody sets by name - see config.c */
+int config_is_hidden(const char *key);
 const char *config_name(int i);
 const char *config_value(int i);
 const char *config_help(int i);

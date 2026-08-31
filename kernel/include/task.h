@@ -94,6 +94,12 @@ void task_core_enter(int nr);
 int task_cwd(void);
 void task_set_cwd(int slot);
 
+/* The running task's privilege level (USER_ADMIN / USER_PLAIN, see
+   user.h). Inherited by every child. */
+int task_level(void);
+void task_set_level(int level);
+int task_level_of(int pid);
+
 /* Turns the current thread of execution (kmain) into the first task */
 void scheduler_init(void);
 

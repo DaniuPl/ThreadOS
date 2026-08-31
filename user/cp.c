@@ -17,6 +17,12 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
     int dst = sys_open(argv[2], O_WRITE | O_CREATE | O_TRUNC);
+    if (dst == -2) {
+        print("cp: brak uprawnien do '");
+        print(argv[2]);
+        print("' (sprobuj przez sudo)\n");
+        sys_exit(2);
+    }
     if (dst < 0) {
         print("cp: nie moge utworzyc '");
         print(argv[2]);

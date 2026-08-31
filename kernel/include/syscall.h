@@ -58,6 +58,9 @@
    ask about it - and that is the whole point: one place decides. */
 #define SYS_CFG_GET    49 /* ebx=index, ecx=&struct cfg_entry -> 0/-1 */
 #define SYS_CFG_SET    50 /* ebx=name, ecx=value -> 0/-1 */
+#define SYS_AUTH       51 /* ebx=password -> 0 = admin from now on, -2 = no */
+#define SYS_DROP       52 /* back to a plain user; always succeeds */
+#define SYS_LEVEL      53 /* -> 0 = admin, 1 = a plain user */
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

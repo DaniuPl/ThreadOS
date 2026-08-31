@@ -55,6 +55,9 @@
 #define SYS64_WIN_POLL   35
 #define SYS64_SHM        36
 #define SYS64_TIME       37
+#define SYS64_AUTH       45
+#define SYS64_DROP       46
+#define SYS64_LEVEL      47
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
