@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include "include/syscall.h"
 #include "include/smp.h"
+#include "include/config.h"
 #include "include/isr.h"
 #include "include/task.h"
 #include "include/pit.h"
@@ -125,6 +126,18 @@ static int user_ok(uint32_t addr, uint32_t len)
 
 /* Copies a string from user space into a kernel buffer.
    0 = OK, -1 = bad pointer or a string longer than max-1. */
+/* A bounded copy into a buffer going out to ring 3: what does not fit
+   is cut, and the terminating zero is always there. */
+static void cfg_copy(char *dst, const char *src, uint32_t max)
+{
+    uint32_t i = 0;
+    while (src && src[i] && i < max - 1) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
 static int user_str(char *dst, uint32_t uaddr, uint32_t max)
 {
     uint32_t cr3 = task_current_cr3();
@@ -396,6 +409,36 @@ void syscall_handler(struct regs *r)
     case SYS_CORE:
         r->eax = (uint32_t)smp_core();
         break;
+    /* --- System settings ------------------------------------------
+     *
+     * A program may ask about them and change them, but it holds none
+     * of them: what the machine remembers about itself is one place,
+     * and it is the kernel's. The names are fixed, so an unknown one
+     * is an error and not a new setting. */
+    case SYS_CFG_GET: {
+        struct cfg_entry out;
+        const char *name = config_name((int)r->ebx);
+        if (!name) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        memset(&out, 0, sizeof(out));
+        cfg_copy(out.name, name, sizeof(out.name));
+        cfg_copy(out.value, config_value((int)r->ebx), sizeof(out.value));
+        cfg_copy(out.help, config_help((int)r->ebx), sizeof(out.help));
+        r->eax = user_put(r->ecx, &out, sizeof(out)) < 0 ? EFAULT : 0;
+        break;
+    }
+    case SYS_CFG_SET: {
+        char name[CFG_NAME_MAX], value[CFG_VAL_MAX];
+        if (user_str(name, r->ebx, sizeof(name)) < 0 ||
+            user_str(value, r->ecx, sizeof(value)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)config_set(name, value);
+        break;
+    }
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;

@@ -27,6 +27,7 @@ Shared by both kernels (same files, compiled twice):
 | Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
 | Linking | `libproton.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
+| Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background |
 
 Programs that use crypto link against a real shared object: the kernel
 loads `libproton.so` once at a fixed address, maps its code and
@@ -43,7 +44,8 @@ writing*, a stack that grows on demand, processes **and the threads of
 one process** running in ring 3 on every core — a changed mapping is
 sent to the other cores and awaited before the frame is reused — TLS
 1.3 with certificate verification, and a graphical desktop with
-windows, icons, a file manager and a web browser.
+windows, icons, a file manager, a web browser and a settings window
+whose changes survive a restart.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,

@@ -35,6 +35,8 @@
 #include "../kernel/include/smp.h"
 #include "../kernel/include/tlb.h"
 #include "../kernel/include/isr.h"
+#include "../kernel/include/config.h"
+#include "../kernel/include/vga.h"
 #include "../kernel/include/smpmem.h"
 #include "../kernel/include/smpthreads.h"
 #include "../kernel/include/io.h"
@@ -60,14 +62,17 @@ static int starts_with(const char *s, const char *prefix)
 
 static void prompt(void)
 {
-    vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
-    printk("proton64> ");
+    /* The prompt says the machine's name and wears the colour it was
+       given - both come from the settings, so both survive a restart */
+    vga_set_color((enum vga_color)(config_get_num("kolor", VGA_LIGHT_GREEN) & 15),
+                  VGA_BLACK);
+    printk("%s64> ", config_get("nazwa"));
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
 static void cmd_help(void)
 {
-    printk("Polecenia: help, ps, mem, ls, disk, fls, pwd, cd <kat>,\n");
+    printk("Polecenia: help, ps, mem, set, ls, disk, fls, pwd, cd <kat>,\n");
     printk("           mkdir <kat>, cat <plik>, write <plik> <tresc>,\n");
     printk("           rm <plik>, cp <zrodlo> <cel>, uptime, date,\n");
     printk("           run <program>, clear,\n");
@@ -394,6 +399,50 @@ static void cmd_gfx(void)
 }
 
 /* date - the time from the motherboard clock */
+/* set - what the machine remembers about itself
+ *
+ * Without arguments it shows everything, with a name and a value it
+ * changes one and writes them all back to the disk. The proof that it
+ * worked is not the line it prints but the next boot. */
+static void cmd_set(const char *arg)
+{
+    while (*arg == ' ')
+        arg++;
+    if (!*arg) {
+        printk("Ustawienia (plik %s):\n", CONFIG_FILE);
+        for (int i = 0; i < config_count(); i++)
+            printk("  %s = %s   (%s)\n", config_name(i), config_value(i),
+                   config_help(i));
+        printk("uzycie: set <nazwa> <wartosc>\n");
+        return;
+    }
+
+    char name[32];
+    int i = 0;
+    while (arg[i] && arg[i] != ' ' && i < (int)sizeof(name) - 1) {
+        name[i] = arg[i];
+        i++;
+    }
+    name[i] = 0;
+    while (arg[i] == ' ')
+        i++;
+    if (!arg[i]) {
+        const char *v = config_get(name);
+        if (v)
+            printk("%s = %s\n", name, v);
+        else
+            printk("set: nie ma ustawienia '%s'\n", name);
+        return;
+    }
+
+    if (config_set(name, arg + i) < 0) {
+        printk("set: nie udalo sie zapisac '%s' (zla nazwa, za dluga "
+               "wartosc albo brak dysku)\n", name);
+        return;
+    }
+    printk("%s = %s (zapisane)\n", name, config_get(name));
+}
+
 static void cmd_date(void)
 {
     struct rtc_time t;
@@ -467,6 +516,10 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "set")) {
+        cmd_set("");
+    } else if (starts_with(line, "set ")) {
+        cmd_set(line + 4);
     } else if (!strcmp(line, "smp")) {
         cmd_smp();
     } else if (!strcmp(line, "smpmem")) {

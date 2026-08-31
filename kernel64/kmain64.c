@@ -26,6 +26,7 @@
 #include "idt64.h"
 #include "paging64.h"
 #include "../kernel/include/tlb.h"
+#include "../kernel/include/config.h"
 #include "task64.h"
 #include "gdt64.h"
 #include "syscall64.h"
@@ -530,6 +531,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         int fs = fs_init();
         printk("[ OK ] Dysk %s + PFS %s (%u sektorow)\n",
                blk_name(), fs ? "gotowy" : "NIEDOSTEPNY", blk_sectors());
+
+        /* What the machine remembers about itself. Right after the file
+           system, because that is where it is written. */
+        config_load();
+        printk("[ OK ] Ustawienia: %s (%d pozycji, komenda 'set')\n",
+               config_get("nazwa"), config_count());
         /* Page swapping: the space is reserved through the file system, but
            the pages themselves travel there straight through the block
            layer. It has to come after fs_init, because without a file

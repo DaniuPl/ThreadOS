@@ -18,6 +18,7 @@
 #include "include/exec.h"
 #include "include/fs.h"
 #include "include/io.h"
+#include "include/config.h"
 
 /* Desktop palette indices (set in desktop_thread) */
 #define COL_BLACK  0
@@ -46,6 +47,7 @@ static struct icon icons[] = {
     {8, 140, "Monitor", "gmon"},
     {8, 180, "Term", "gterm"},
     {8, 220, "Web", "gweb"},
+    {8, 260, "Ustaw", "gsettings"},
 };
 #define ICON_N ((int)(sizeof(icons) / sizeof(icons[0])))
 
@@ -682,7 +684,23 @@ static void desktop_thread(void *arg)
        framebuffer - fall back to mode 13h (320x200) */
     if (video_init_vesa(640, 480) < 0)
         video_init();
-    video_set_palette(COL_DESK, 0, 32, 40);   /* the dark blue of the desktop */
+    /* The desktop's background comes from the settings, so it survives
+       a restart. A small set of choices rather than a free colour: a
+       number that means one of six things can be checked, and 'a red
+       component of 41' cannot. */
+    static const struct { uint8_t r, g, b; } backgrounds[] = {
+        {  0, 32, 40 },      /* 0 - teal, as it always was */
+        {  0,  0, 32 },      /* 1 - navy */
+        { 20,  0, 30 },      /* 2 - purple */
+        {  0, 28,  0 },      /* 3 - green */
+        { 40, 20,  0 },      /* 4 - brown */
+        { 12, 12, 12 },      /* 5 - grey */
+    };
+    uint32_t bg = config_get_num("tlo", 0);
+    if (bg >= sizeof(backgrounds) / sizeof(backgrounds[0]))
+        bg = 0;
+    video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
+                      backgrounds[bg].b);
     video_set_palette(COL_BAR, 48, 48, 48);   /* the light grey top bar */
     video_set_palette(COL_WIN, 56, 56, 56);   /* the grey window background */
     video_set_palette(COL_TBBTN, 26, 26, 26); /* the dark grey bar button */

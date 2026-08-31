@@ -15,6 +15,7 @@
 #include "include/pmm.h"
 #include "include/paging.h"
 #include "include/tlb.h"
+#include "include/config.h"
 #include "include/heap.h"
 #include "include/shell.h"
 #include "include/string.h"
@@ -249,8 +250,21 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] Dysk %s + PFS gotowy (komendy 'fls', 'cat', 'write')\n",
                blk_name());
 
+    /* What the machine remembers about itself. Right after the file
+       system, because that is where it is written - and before the
+       network, because one of the settings is for the network. */
+    config_load();
+    printk("[ OK ] Ustawienia: %s (%d pozycji, komenda 'set')\n",
+           config_get("nazwa"), config_count());
+
     int has_net = net_init();
     if (has_net) {
+        /* A name server from the settings takes precedence over the one
+           DHCP hands out: it was written down by somebody on purpose,
+           and that outranks what the network volunteers. */
+        uint32_t dns = config_get_num("dns", 0);
+        if (dns)
+            net_set_dns(dns);
         const uint8_t *m = netdev_mac();
         printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x "
                "(komendy 'ifconfig', 'ping', 'dhcp')\n", netdev_name(),

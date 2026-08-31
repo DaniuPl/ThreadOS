@@ -2388,3 +2388,54 @@ sprawdzane przez `make test`.
       przy progu 3/4). Osobno przechodza z zapasem. Prog nie jest zly -
       to pomiar czasu w maszynie wirtualnej stojacej obok trzech innych
       nie jest niczym pewnym.
+
+- [x] **Ustawienia systemu** - maszyna zaczyna pamietac cos o sobie.
+
+      Wszystko, co system o sobie wiedzial, bylo w niego wpisane w
+      czasie budowania. Serwer nazw dalo sie zmienic komenda i zmiana
+      zyla dokladnie tyle, co maszyna - wylaczenie wystarczylo, zeby
+      zapomniec.
+
+      Ustawienie to linia w pliku tekstowym na dysku: nazwa=wartosc, i
+      nic wiecej. Zwykly tekst z rozmyslem - da sie go przeczytac przez
+      'cat' i zmienic przez 'write', a gdy cos pojdzie nie tak, widac
+      co. Jadro czyta ten plik raz, przy starcie, zaraz po systemie
+      plikow.
+
+      Zbior nazw jest staly i jawny, i to tez z rozmyslem: kazda z nich
+      ma gdzies w systemie miejsce, ktore ja czyta i cos z nia robi.
+      Nazwa, ktorej nikt nie czyta, nie jest ustawieniem - jest linia w
+      pliku. Stad cztery, a nie czterdziesci: nazwa maszyny (zacheta),
+      serwer nazw (siec), kolor zachety (konsola) i tlo pulpitu
+      (kompozytor).
+
+      **Okno na pulpicie.** Program 'gsettings' w pierscieniu 3 nie
+      trzyma z tego niczego: pyta jadro o i-te ustawienie i prosi jadro
+      o zmiane. Jest jedno miejsce, ktore decyduje, czym jest
+      ustawienie, i nie jest nim program. Program ma za to te czesc,
+      dla ktorej okno w ogole istnieje: ktory wiersz jest wybrany, co
+      wpisano i czy zdazylo to trafic na dysk.
+
+      Dwa sposoby zmiany, bo ustawienia sa dwojakie. Liczba z malego
+      zbioru - tlo, kolor - przeklikuje sie w wierszu: nie ma czego
+      pisac, gdy mozliwosci jest szesc. Tekst - nazwa maszyny, adres
+      serwera - wpisuje sie, bo zgadnac go nie sposob.
+
+      **Asercje nie dotycza pliku, tylko SKUTKOW.** Plik z linia
+      'nazwa=maszyna' nie dowodzi niczego; zacheta mowiaca 'maszyna>'
+      po restarcie dowodzi wszystkiego. Kazde ustawienie sprawdzane
+      jest wiec tam, gdzie jest uzywane: nazwa w zachecie, kolor w jej
+      barwie, tlo w pikselach pulpitu, a serwer nazw w tym, co mowi
+      'ifconfig' - i kazde przez RESTART na tym samym obrazie dysku.
+
+      Okno sprawdzane jest tak samo: ikona je otwiera, klik przeklikuje
+      wartosc, Enter zapisuje, a po restarcie pulpit ma inny kolor.
+
+      Po drodze jeden blad wart zapisania, bo pokazuje, jak latwo
+      pomylic sie o jedna konwencje: fs_write oddaje zero przy
+      powodzeniu, a nie liczbe bajtow. Sprawdzalem "wiecej niz zero",
+      wiec kazdy udany zapis meldowal porazke - plik na dysku byl
+      poprawny, a komunikat mowil, ze sie nie udalo. Test tego nie
+      zlapal, bo testu jeszcze nie bylo; zlapalo oko na wydruku.
+
+      849 asercji, 52 grupy, 483 s.

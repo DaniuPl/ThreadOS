@@ -23,6 +23,7 @@
 #include "include/smp.h"
 #include "include/tlb.h"
 #include "include/isr.h"
+#include "include/config.h"
 #include "include/smpmem.h"
 #include "include/smpthreads.h"
 #include "include/pit.h"
@@ -65,10 +66,13 @@ static struct shell *my_shell(void)
     return &shells[(vc >= 0 && vc < CONSOLE_COUNT) ? vc : 0];
 }
 
+/* The prompt says the machine's name and wears the colour it was
+   given - both come from the settings, so both survive a restart */
 static void prompt(void)
 {
-    vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    printk("> ");
+    vga_set_color((enum vga_color)(config_get_num("kolor", VGA_LIGHT_CYAN) & 15),
+                  VGA_BLACK);
+    printk("%s> ", config_get("nazwa"));
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
 
@@ -86,6 +90,7 @@ static const struct {
     {"cat F",    "wypisz plik"},
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
+    {"set",      "ustawienia systemu (pamietane na dysku)"},
     {"smp",      "policz cos na wszystkich rdzeniach"},
     {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
     {"smpthreads", "watki jadra na wszystkich rdzeniach"},
@@ -439,6 +444,58 @@ static void cmd_dhcp(void)
         printk("dhcp: brak odpowiedzi serwera\n");
 }
 
+/* set - what the machine remembers about itself
+ *
+ * Without arguments it shows everything, with a name and a value it
+ * changes one and writes them all back to the disk. The proof that it
+ * worked is not the line it prints but the next boot. */
+static void cmd_set(const char *arg)
+{
+    if (!*arg) {
+        printk("Ustawienia (plik %s):\n", CONFIG_FILE);
+        for (int i = 0; i < config_count(); i++)
+            printk("  %s = %s   (%s)\n", config_name(i), config_value(i),
+                   config_help(i));
+        printk("uzycie: set <nazwa> <wartosc>\n");
+        return;
+    }
+
+    /* The name is the first word, the value is what follows it */
+    char name[32];
+    int i = 0;
+    while (arg[i] && arg[i] != ' ' && i < (int)sizeof(name) - 1) {
+        name[i] = arg[i];
+        i++;
+    }
+    name[i] = 0;
+    while (arg[i] == ' ')
+        i++;
+    if (!arg[i]) {
+        const char *v = config_get(name);
+        if (v)
+            printk("%s = %s\n", name, v);
+        else
+            printk("set: nie ma ustawienia '%s'\n", name);
+        return;
+    }
+
+    if (config_set(name, arg + i) < 0) {
+        printk("set: nie udalo sie zapisac '%s' (zla nazwa, za dluga "
+               "wartosc albo brak dysku)\n", name);
+        return;
+    }
+    printk("%s = %s (zapisane)\n", name, config_get(name));
+
+    /* Some settings are read the moment they are needed and some were
+       handed to a subsystem once, at boot - those have to be handed
+       over again */
+    if (!strcmp(name, "dns")) {
+        uint32_t ip = config_get_num("dns", 0);
+        if (ip)
+            net_set_dns(ip);
+    }
+}
+
 static void cmd_dns(const char *arg)
 {
     uint32_t ip;
@@ -518,6 +575,8 @@ static void run_command(char *cmd)
         cmd_write(arg);
     else if (!strcmp(cmd, "cp"))
         cmd_cp(arg);
+    else if (!strcmp(cmd, "set"))
+        cmd_set(arg);
     else if (!strcmp(cmd, "smp"))
         cmd_smp();
     else if (!strcmp(cmd, "smpmem"))

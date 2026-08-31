@@ -53,6 +53,8 @@
 #define SYS_MMAP_FILE   46
 #define SYS_MSYNC       47
 #define SYS_CORE       48
+#define SYS_CFG_GET    49
+#define SYS_CFG_SET    50
 
 #define FS_NAME_MAX  63
 
@@ -569,6 +571,44 @@ static inline uint32_t ustrlen(const char *s)
     while (s[n])
         n++;
     return n;
+}
+
+/* --- System settings ------------------------------------------------
+ *
+ * What the machine remembers about itself: its name, the name server,
+ * the colour of the prompt, the desktop's background. They live in the
+ * kernel and in a file on the disk, so a program only asks - and a
+ * change it makes is there after the next boot. */
+#define CFG_NAME_MAX 32
+#define CFG_VAL_MAX  32
+#define CFG_HELP_MAX 80
+
+struct cfg_entry {
+    char name[CFG_NAME_MAX];
+    char value[CFG_VAL_MAX];
+    char help[CFG_HELP_MAX];
+};
+
+/* The i-th setting. Returns 0, or -1 past the last one. */
+static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_CFG_GET), "b"(index), "c"(out)
+                     : "memory");
+    return ret;
+}
+
+/* Changes a setting and writes them all back to the disk. 0 or -1. */
+static inline int32_t sys_cfg_set(const char *name, const char *value)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_CFG_SET), "b"(name), "c"(value)
+                     : "memory");
+    return ret;
 }
 
 /* Does the substring 'needle' occur in 'hay' */

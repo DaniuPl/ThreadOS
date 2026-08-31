@@ -52,6 +52,25 @@
 #define SYS_MSYNC       47 /* writes back dirty pages of mappings -> how many pages */
 #define SYS_CORE       48 /* number of the core the program is running on right now */
 
+/* System settings. The i-th one by number (name, value, description
+   into the program's buffer), and a change by name. What the machine
+   remembers about itself lives in the kernel, so a program can only
+   ask about it - and that is the whole point: one place decides. */
+#define SYS_CFG_GET    49 /* ebx=index, ecx=&struct cfg_entry -> 0/-1 */
+#define SYS_CFG_SET    50 /* ebx=name, ecx=value -> 0/-1 */
+
+/* One setting as the program sees it. The layout has to match struct
+   cfg_entry in user/usys.h. */
+#define CFG_NAME_MAX 32
+#define CFG_VAL_MAX  32
+#define CFG_HELP_MAX 80
+
+struct cfg_entry {
+    char name[CFG_NAME_MAX];
+    char value[CFG_VAL_MAX];
+    char help[CFG_HELP_MAX];
+};
+
 #define SYSCALL_VECTOR 0x80
 
 #ifndef __ASSEMBLER__
