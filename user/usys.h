@@ -533,6 +533,13 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
 /* The content area has a new size: x and y carry it. Sent once, when
    the pulling of the corner ends. */
 #define WEV_SIZE  4
+
+/* Dragging inside the window's content: down, moved, up. x and y are
+   in the content's coordinates, as with a click. Selecting text is
+   what these are for; the compositor only reports the pointer. */
+#define WEV_PRESS   5
+#define WEV_DRAG    6
+#define WEV_RELEASE 7
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */

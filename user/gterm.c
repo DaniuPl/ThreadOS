@@ -105,6 +105,21 @@ static uint32_t shown;
    whole difference between running a program and talking to one. -1
    when there is nobody to talk to. */
 static int in_fd = -1;
+
+/* Selecting with the mouse.
+ *
+ * A selection is two places in the ring of lines - not two places on
+ * the screen: what is selected stays selected when the view scrolls
+ * under it. 'sel_line' is an index into the ring (0 = the oldest line
+ * kept), 'sel_col' a column in that line.
+ *
+ * Letting the button go copies what is between them, the way it works
+ * in a terminal that has had a mouse for forty years: selecting IS
+ * copying, and there is nothing else to press. */
+static int sel_on;             /* is there a selection at all */
+static int sel_drag;           /* is the button still down */
+static int sel_line0, sel_col0;   /* where it started */
+static int sel_line1, sel_col1;   /* where it is now */
 static int  cw = W0, ch = H0;  /* the content area, as it is now */
 static int  cols = 48, rows = 23;
 
@@ -836,6 +851,86 @@ static void on_key(char c)
 
 /* --- drawing -------------------------------------------------------- */
 
+/* --- selecting with the mouse --------------------------------------- */
+
+/* The first line of the view: what the drawing starts from, and what a
+   pointer position has to be measured against. */
+static int view_first(int text_rows)
+{
+    int last = count - view;
+    if (last < 0)
+        last = 0;
+    int from = last - text_rows;
+    return from < 0 ? 0 : from;
+}
+
+/* A place in the window turned into a place in the ring of lines. */
+static void where(int x, int y, int *line, int *col)
+{
+    int text_rows = rows - 1;
+    int r = (y - PAD) / ROW_H;
+    if (r < 0)
+        r = 0;
+    if (r > text_rows - 1)
+        r = text_rows - 1;
+    int c = (x - PAD + 4) / 8;          /* rounded to the nearest gap */
+    if (c < 0)
+        c = 0;
+    if (c > cols)
+        c = cols;
+    *line = view_first(text_rows) + r;
+    *col = c;
+}
+
+/* Is 'a' before 'b'? A selection made upwards is the same selection as
+   one made downwards - it is a range, and a range has no direction. */
+static int before(int la, int ca, int lb, int cb)
+{
+    return la < lb || (la == lb && ca <= cb);
+}
+
+static void sel_range(int *la, int *ca, int *lb, int *cb)
+{
+    if (before(sel_line0, sel_col0, sel_line1, sel_col1)) {
+        *la = sel_line0; *ca = sel_col0;
+        *lb = sel_line1; *cb = sel_col1;
+    } else {
+        *la = sel_line1; *ca = sel_col1;
+        *lb = sel_line0; *cb = sel_col0;
+    }
+}
+
+/* Puts what is selected into the clipboard - the kernel's, so it can
+   be pasted into any other window. */
+static void sel_copy(void)
+{
+    if (!sel_on)
+        return;
+    int la, ca, lb, cb;
+    sel_range(&la, &ca, &lb, &cb);
+    if (la == lb && ca == cb)
+        return;                        /* a click, not a selection */
+
+    char out[CLIP_MAX];
+    int n = 0;
+    for (int i = la; i <= lb && i < count && n < CLIP_MAX; i++) {
+        const char *src = lines[at(i)];
+        int len = line_len[at(i)];
+        int from = (i == la) ? ca : 0;
+        int to = (i == lb) ? cb : len;
+        if (from > len)
+            from = len;
+        if (to > len)
+            to = len;
+        for (int k = from; k < to && n < CLIP_MAX; k++)
+            out[n++] = src[k];
+        if (i != lb && n < CLIP_MAX)
+            out[n++] = '\n';
+    }
+    if (n)
+        sys_clip_set(out, (uint32_t)n);
+}
+
 static void measure(void)
 {
     cols = (cw - 2 * PAD) / 8;
@@ -864,8 +959,25 @@ static void draw(int w)
     if (from < 0)
         from = 0;
 
+    int la = 0, ca = 0, lb = 0, cb = 0;
+    if (sel_on)
+        sel_range(&la, &ca, &lb, &cb);
+
     int y = PAD;
     for (int i = from; i < last; i++) {
+        /* What is selected gets a field behind it, drawn before the
+           text - win_text puts down the glyph's own pixels and nothing
+           else, so the field shows through around them. */
+        if (sel_on && i >= la && i <= lb) {
+            int len = line_len[at(i)];
+            int f = (i == la) ? ca : 0;
+            int t = (i == lb) ? cb : len;
+            if (f > len) f = len;
+            if (t > len) t = len;
+            if (t > f)
+                win_rect(w, PAD + f * 8, y - 1, (t - f) * 8, ROW_H - 1,
+                         C_BLUE);
+        }
         t_copy(buf, lines[at(i)], cols + 1);
         win_text(w, PAD, y, buf, C_TEXT);
         y += ROW_H;
@@ -938,7 +1050,26 @@ void _start(void)
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLOSE)
                 sys_exit(0);
-            if (ev.type == WEV_SIZE) {
+            if (ev.type == WEV_PRESS) {
+                where(ev.x, ev.y, &sel_line0, &sel_col0);
+                sel_line1 = sel_line0;
+                sel_col1 = sel_col0;
+                sel_on = 1;
+                sel_drag = 1;
+            } else if (ev.type == WEV_DRAG) {
+                if (sel_drag)
+                    where(ev.x, ev.y, &sel_line1, &sel_col1);
+            } else if (ev.type == WEV_RELEASE) {
+                if (sel_drag) {
+                    where(ev.x, ev.y, &sel_line1, &sel_col1);
+                    sel_drag = 0;
+                    /* Selecting is copying - there is no second key to
+                       press, and never was in a terminal */
+                    sel_copy();
+                    if (sel_line0 == sel_line1 && sel_col0 == sel_col1)
+                        sel_on = 0;     /* a click clears it instead */
+                }
+            } else if (ev.type == WEV_SIZE) {
                 cw = ev.x;
                 ch = ev.y;
                 measure();

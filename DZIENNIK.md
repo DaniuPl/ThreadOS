@@ -2898,3 +2898,30 @@ sprawdzane przez `make test`.
       Nowa grupa 'clip'. Najwazniejsza asercja jest ta ostatnia: okno, z
       ktorego tekst pochodzil, zostaje ZAMKNIETE, a tekst dalej sie
       wkleja - bo nigdy nie byl tego okna.
+
+- [x] **Zaznaczanie mysza** - schowek siega wreszcie po to, co napisal
+      program.
+
+      Schowek umial wziac linie, ktora sie WPISUJE. Nie umial wziac
+      niczego, co napisal program - czyli wiekszosci tego, co jest w
+      terminalu, i akurat tej czesci, ktora czlowiek chce skopiowac:
+      adresu, liczby, nazwy pliku z listingu.
+
+      Zaznaczanie potrzebuje czegos, czego kompozytor nie mowil. Klik
+      mowi, GDZIE cos sie stalo; zaznaczenie jest tym, co sie stalo
+      MIEDZY dwoma miejscami. Wiec pulpit wysyla teraz trzy zdarzenia
+      dla przeciagniecia wewnatrz tresci okna - przycisk w dol, ruch z
+      trzymanym przyciskiem, przycisk w gore - we wspolrzednych tresci,
+      tak samo jak klik. Co one znacza, jest sprawa aplikacji:
+      kompozytor nie wie nic o zaznaczeniach i nie musi.
+
+      Terminal zamienia je na zakres w SWOIM PIERSCIENIU LINII, a nie na
+      ekranie - dzieki temu zaznaczenie zostaje na swoim tekscie, gdy
+      widok przewija sie pod nim. A puszczenie przycisku kopiuje: w
+      terminalu zaznaczenie JEST kopiowaniem od czterdziestu lat i nie
+      ma zadnego drugiego klawisza do nacisniecia.
+
+      Nowa grupa 'gtermsel': zaznaczony kawalek ma pod soba pole (a
+      sasiedni nie ma), wklejone jest dokladnie to, co bylo pod mysza,
+      zaznaczenie przez dwie linie bierze obie, a samo klikniecie
+      zaznaczenie kasuje.

@@ -105,6 +105,18 @@ struct wevent {
 /* The content area has a new size; x and y carry it. Sent once, when
    the drag ends - not on every frame of it. */
 #define WEV_SIZE  4
+
+/* Dragging inside a window's content: the button went down, the
+   pointer moved with it held, the button came up. x and y are in the
+   content's own coordinates, as with a click.
+ *
+ * A click alone says WHERE something happened; these three say what
+ * happened BETWEEN two places, which is what selecting text is. The
+ * compositor knows nothing about selections - it reports the pointer,
+ * and what that means is the application's business. */
+#define WEV_PRESS   5
+#define WEV_DRAG    6
+#define WEV_RELEASE 7
 #define WEV_QLEN  8
 
 struct window {
@@ -155,6 +167,11 @@ static void toggle_max(int i);
 
 static int drag_idx = -1;
 static int resize_idx = -1;
+/* A drag INSIDE a window's content: the slot whose application is
+   being dragged in, or -1. Kept apart from drag_idx, which moves the
+   window itself - here the window stays put and the application is
+   told where the pointer goes. */
+static int content_drag = -1;
 static int drag_dx, drag_dy;
 static int prev_pressed;    /* the previous left-button state - to detect a click */
 static int focus_idx = -1;  /* the window with keyboard focus */
@@ -572,8 +589,14 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 int cx = mx - (w->x + 1);
                 int cy = my - (w->y + TITLE_H + 1);
-                if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch)
+                if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch) {
                     win_enqueue(w, WEV_CLICK, cx, cy, buttons & 0x07);
+                    /* And the beginning of a possible drag. A program
+                       that does not care about dragging sees only the
+                       click it already knew about. */
+                    win_enqueue(w, WEV_PRESS, cx, cy, buttons & 0x07);
+                    content_drag = i;
+                }
                 break;            /* swallow it - do not fall through to lower ones */
             }
         }
@@ -595,6 +618,22 @@ static void handle_input(int mx, int my, int buttons)
 
     if (!pressed) {
         drag_idx = -1;
+        /* The end of a drag inside a window: the application is told
+           where the pointer was let go, and that is the whole of what
+           the compositor has to say about it. */
+        if (content_drag >= 0) {
+            struct window *w = &wins[content_drag];
+            if (w->used && w->content) {
+                int cx = mx - (w->x + 1);
+                int cy = my - (w->y + TITLE_H + 1);
+                if (cx < 0) cx = 0;
+                if (cy < 0) cy = 0;
+                if (cx >= w->cw) cx = w->cw - 1;
+                if (cy >= w->ch) cy = w->ch - 1;
+                win_enqueue(w, WEV_RELEASE, cx, cy, 0);
+            }
+            content_drag = -1;
+        }
         if (resize_idx >= 0) {
             /* The drag is over - only now does the application window
                get a new content buffer. Doing it on every frame of the
@@ -610,6 +649,24 @@ static void handle_input(int mx, int my, int buttons)
             else
                 icons_save();                       /* moved -> save the layout */
             icon_drag = -1;
+        }
+    }
+
+    /* Dragging inside a window: the pointer's place, once per frame.
+       Clamped to the content, so an application dragging past the edge
+       gets its own edge rather than somebody else's coordinates. */
+    if (pressed && content_drag >= 0) {
+        struct window *w = &wins[content_drag];
+        if (!w->used || !w->content) {
+            content_drag = -1;
+        } else {
+            int cx = mx - (w->x + 1);
+            int cy = my - (w->y + TITLE_H + 1);
+            if (cx < 0) cx = 0;
+            if (cy < 0) cy = 0;
+            if (cx >= w->cw) cx = w->cw - 1;
+            if (cy >= w->ch) cy = w->ch - 1;
+            win_enqueue(w, WEV_DRAG, cx, cy, 0);
         }
     }
 

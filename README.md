@@ -58,7 +58,8 @@ inside the terminal window, its children writing where it writes, and
 Ctrl+D ends it. One program compiled for both kernels, differing only
 in how a command is started. Alt+Tab moves the focus from the keyboard, and Ctrl+Insert /
 Shift+Insert move text between windows through a clipboard the kernel
-holds — the way they do everywhere else. Two privilege levels: changing the system —
+holds, and dragging the mouse across a terminal's output selects it —
+which copies it, the way it does everywhere else. Two privilege levels: changing the system —
 its settings and the files it keeps them in — needs an admin, and the
 way up is a password, asked for by the shell, by the terminal and by
 the settings window alike (`sudo`), for one command at a time.
