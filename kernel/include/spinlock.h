@@ -44,6 +44,17 @@ static inline void spin_lock(struct spinlock *z)
     } while (1);
 }
 
+/* One attempt, no waiting: 1 = taken. For a caller that has something
+   to do while it waits - answering another core, for instance. */
+static inline int spin_trylock(struct spinlock *z)
+{
+    uint32_t was = 1;
+    __asm__ volatile("xchgl %0, %1"
+                     : "+r"(was), "+m"(z->taken)
+                     : : "memory");
+    return !was;
+}
+
 static inline void spin_unlock(struct spinlock *z)
 {
     uint32_t zero = 0;

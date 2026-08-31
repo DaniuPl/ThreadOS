@@ -21,6 +21,7 @@
 #include "include/acpi.h"
 #include "include/prog.h"
 #include "include/smp.h"
+#include "include/tlb.h"
 #include "include/smpmem.h"
 #include "include/smpthreads.h"
 #include "include/pit.h"
@@ -418,6 +419,13 @@ static void cmd_smp(void)
     for (int i = 0; i < smp_cpus(); i++)
         printk(" rdzen%d=%u", i, smp_ticks(i));
     printk("\n");
+
+    /* What the changed mappings cost. 'lokalnie' are the ones nobody
+       else was holding - no interrupt, no waiting; 'zdalnie' are the
+       ones that had to reach another core, and 'odpowiedzi' is how many
+       cores answered. */
+    printk("TLB: lokalnie %u, zdalnie %u, odpowiedzi %u\n",
+           tlb_local_only(), tlb_shootdowns(), tlb_remote_acks());
 }
 
 static void cmd_dhcp(void)

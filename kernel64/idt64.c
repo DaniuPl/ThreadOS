@@ -63,6 +63,7 @@ static void set_gate(int n, void (*handler)(void))
 LIST(DECL)
 extern void isr64_48(void);   /* the local APIC timer (secondary cores) */
 extern void isr64_49(void);   /* the inter-core wake-up */
+extern void isr64_50(void);   /* a changed mapping (TLB shootdown) */
 
 #define ENTRY(n) set_gate(n, isr64_##n);
 
@@ -71,6 +72,7 @@ void idt64_init(void)
     LIST(ENTRY)
     set_gate(48, isr64_48);              /* the local APIC timer */
     set_gate(49, isr64_49);              /* the inter-core wake-up */
+    set_gate(50, isr64_50);              /* a changed mapping */
 
     idtp.limit = sizeof(idt) - 1;
     idtp.base = (uint64_t)(uintptr_t)idt;

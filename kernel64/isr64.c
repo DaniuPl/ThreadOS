@@ -11,6 +11,7 @@
 #include "../kernel/include/isr.h"
 #include "../kernel/include/pic.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/tlb.h"
 #include "../kernel/include/biglock.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/vga.h"
@@ -268,6 +269,14 @@ static void isr64_dispatch(struct regs *r)
        only to pull this processor out of a hlt instruction. */
     if (r->int_no == 49) {
         smp_wakeup_recv();
+        return;
+    }
+
+    /* A mapping has changed on another core and it is waiting for our
+       answer. Nothing here may take a lock: the core on the other side
+       is holding one and standing still until we reply. */
+    if (r->int_no == 50) {
+        tlb_ipi_recv();
         return;
     }
 

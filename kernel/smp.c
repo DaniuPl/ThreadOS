@@ -35,6 +35,7 @@
 #include "include/spinlock.h"
 #include "include/task.h"
 #include "include/pit.h"
+#include "include/tlb.h"
 
 
 /* The APIC registers lie high, beyond the memory described at startup -
@@ -88,6 +89,7 @@
 #define LVT_MASKED (1u << 16)
 #define SMP_VEC_TIMER 48
 #define SMP_VEC_WAKE 49
+#define SMP_VEC_TLB   50    /* a changed mapping - see kernel/tlb.c */
 #define ICR_ALL_BUT_SELF 0x000C0000u
 
 #define ICR_INIT      0x00000500
@@ -269,6 +271,28 @@ static void wake_others(void)
     apic_wr(APIC_ICR_LO, ICR_ALL_BUT_SELF | SMP_VEC_WAKE);
 }
 
+/* The shootdown call: a mapping has changed and the other cores are
+ * still holding the old one.
+ *
+ * The same "all but self" shorthand as above, and for the same reason:
+ * working out which cores to name would cost more than the interrupt
+ * itself, and a core the request does not concern sees that from the
+ * request and goes back to what it was doing. Who is really waited for
+ * is decided by tlb.c, not by the address of the signal. */
+void smp_send_tlb(void)
+{
+    if (!apic)
+        return;
+    apic_wr(APIC_ICR_HI, 0);
+    apic_wr(APIC_ICR_LO, ICR_ALL_BUT_SELF | SMP_VEC_TLB);
+}
+
+void smp_tlb_eoi(void)
+{
+    if (apic)
+        apic_wr(APIC_EOI, 0);
+}
+
 void smp_wakeup_recv(void)
 {
     if (apic)
@@ -341,6 +365,13 @@ void smp_ap_main(uint32_t number)
     LOAD_GDT();
     LOAD_IDT();
     LOAD_TSS();
+    /* Say which space this core is running. The trampoline put the
+       kernel's tables into CR3; until the core says so out loud, a
+       shootdown has no way of knowing it is there. It goes through the
+       same one door as every other switch, so that the published value
+       and the processor's cannot drift apart - the cost is one flush of
+       a cache that holds nothing yet. */
+    tlb_switch(tlb_current_space());
     /* The entry registers for the syscall instruction belong to the
        core - one that does not set them will not accept a call at all */
     SYSCALL_ENTRY();

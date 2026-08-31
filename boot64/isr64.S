@@ -89,6 +89,11 @@ ISR_NOERR 48
    that an interrupt pulls the processor out of the hlt instruction. */
 ISR_NOERR 49
 
+/* A changed mapping: the core that changed it asks the others to throw
+   away what they worked out from the old entry - and waits for the
+   answer. See kernel/tlb.c. */
+ISR_NOERR 50
+
 isr64_common:
     /* Reverse order of the struct regs fields - the stack grows down */
     pushq %rax

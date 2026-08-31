@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "paging64.h"
+#include "../kernel/include/tlb.h"
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/string.h"
@@ -79,9 +80,15 @@ static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
     return table_at(table[idx]);
 }
 
-static void invlpg(uint64_t addr)
+/* A changed entry of the CURRENT space.
+ *
+ * Every caller below works on the space the core is standing in - the
+ * table walk starts from CR3 - so the one to be told is whoever else is
+ * standing in it. On a machine where nobody else is, this costs exactly
+ * one invlpg, the same as before. */
+static void invalidate(uint64_t addr)
 {
-    __asm__ volatile("invlpg (%0)" : : "r"((void *)(uintptr_t)addr) : "memory");
+    tlb_invalidate((uintptr_t)paging64_current_space(), (uintptr_t)addr);
 }
 
 static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
@@ -116,7 +123,7 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
 {
     int rc = map_in(root_now(), virt, phys, flags);
     if (rc == 0)
-        invlpg(virt);               /* only the current space has anything to
+        invalidate(virt);               /* only the current space has anything to
                                        invalidate in the translation buffer */
     return rc;
 }
@@ -197,7 +204,7 @@ void paging64_file_clean(uint64_t virt)
     if (!w)
         return;
     *w &= ~(uint64_t)PTE_DIRTY;
-    invlpg(virt);
+    invalidate(virt);
 }
 
 /* Removes a page's mapping and returns the frame that lay under it
@@ -225,7 +232,7 @@ uint64_t paging64_unmap(uint64_t virt)
         return 0;
     uint64_t phys = pt[i] & ADDR_MASK;
     pt[i] = 0;
-    invlpg(virt);
+    invalidate(virt);
     return phys;
 }
 
@@ -366,7 +373,7 @@ uint64_t paging64_clone_space(uint64_t src)
             if ((flags & PG_WRITE) && !(flags & PG_FILE)) {
                 flags = (flags & ~(uint64_t)PG_WRITE) | PG_COW;
                 pt[j] = frame | PTE_PRESENT | flags;
-                invlpg(va);
+                invalidate(va);
             }
 
             pmm_frame_ref((uint32_t)frame);
@@ -415,7 +422,7 @@ int paging64_handle_cow(uint64_t virt)
 
     if (pmm_frame_refs((uint32_t)old) <= 1) {
         pt[i] = old | PTE_PRESENT | flags;      /* we are alone */
-        invlpg(virt);
+        invalidate(virt);
         return 1;
     }
     cow_splits++;
@@ -427,7 +434,7 @@ int paging64_handle_cow(uint64_t virt)
     pmm_free_frame((uint32_t)old);              /* one owner fewer */
 
     pt[i] = (uint64_t)fresh | PTE_PRESENT | flags;
-    invlpg(virt);
+    invalidate(virt);
     return 1;
 }
 
@@ -445,7 +452,7 @@ uint64_t paging64_current_space(void)
 
 void paging64_switch(uint64_t space)
 {
-    __asm__ volatile("movq %0, %%cr3" : : "r"(space) : "memory");
+    tlb_switch((uintptr_t)space);
 }
 
 /* Releases a process's address space: the program's pages, its tables
@@ -583,9 +590,11 @@ int paging64_reclaim_pages(uint64_t space, int want)
            all */
     }
 end:
-    if (freed && space == (uint64_t)(uintptr_t)root_now())
-        __asm__ volatile("movq %%cr3, %%rax; movq %%rax, %%cr3"
-                         : : : "rax", "memory");
+    /* Many entries changed at once and the frames behind them are gone
+       - throwing the whole cache away is cheaper than naming them one
+       by one, and it has to reach every core running this space. */
+    if (freed)
+        tlb_flush_space((uintptr_t)space);
     return freed;
 }
 
@@ -626,7 +635,7 @@ int paging64_swap_in(uint64_t space, uint64_t virt)
     pt[i] = (uint64_t)frame | PTE_PRESENT |
             (w & (PG_WRITE | PG_USER | PG_NX));
     swap_free_slot(slot);
-    invlpg(virt);
+    invalidate(virt);
     return 1;
 }
 
@@ -644,10 +653,14 @@ int paging64_map_phys(uint64_t phys, uint64_t len)
     uint64_t start = phys & ~0xFFFULL;
     uint64_t end = (phys + len + PAGE_SIZE - 1) & ~0xFFFULL;
 
-    for (uint64_t a = start; a < end; a += PAGE_SIZE)
-        if (paging64_lookup(a) != a &&
-            paging64_map(a, a, PG_WRITE | PG_NX) < 0)
+    for (uint64_t a = start; a < end; a += PAGE_SIZE) {
+        if (paging64_lookup(a) == a)
+            continue;
+        if (paging64_map(a, a, PG_WRITE | PG_NX) < 0)
             return -1;
+        /* A kernel table - every space has it, so every core does */
+        tlb_flush_kernel((uintptr_t)a);
+    }
     return 0;
 }
 

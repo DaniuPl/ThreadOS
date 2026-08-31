@@ -1,12 +1,14 @@
-/* Stuby przerwań
+/* Interrupt stubs
  *
- * CPU przy przerwaniu odkłada na stos eflags/cs/eip (+ kod błędu dla
- * niektórych wyjątków). Stub dokłada numer wektora (i zerowy kod błędu
- * tam, gdzie CPU go nie daje), zapisuje rejestry i woła isr_handler()
- * z kodu C, przekazując wskaźnik na strukturę regs.
+ * On an interrupt the CPU puts eflags/cs/eip on the stack (plus an
+ * error code for some exceptions). The stub adds the vector number
+ * (and a zero error code where the CPU does not supply one), saves the
+ * registers and calls isr_handler() in C, passing a pointer to a regs
+ * structure.
  */
 
-/* Wyjątek bez kodu błędu od CPU - dokładamy zerowy dla spójności ramki */
+/* An exception with no error code from the CPU - we add a zero one so
+   that the frame always looks the same */
 .macro ISR_NOERR n
 .global isr\n
 isr\n:
@@ -15,7 +17,7 @@ isr\n:
     jmp isr_common
 .endm
 
-/* Wyjątek, przy którym CPU sam odkłada kod błędu */
+/* An exception for which the CPU puts an error code down itself */
 .macro ISR_ERR n
 .global isr\n
 isr\n:
@@ -25,7 +27,7 @@ isr\n:
 
 .section .text
 
-/* Wyjątki CPU 0-31. Kod błędu odkładają: 8, 10-14, 17 */
+/* CPU exceptions 0-31. The ones that push an error code: 8, 10-14, 17 */
 ISR_NOERR 0
 ISR_NOERR 1
 ISR_NOERR 2
@@ -59,7 +61,7 @@ ISR_NOERR 29
 ISR_NOERR 30
 ISR_NOERR 31
 
-/* IRQ 0-15 po remapowaniu PIC trafiają na wektory 32-47 */
+/* IRQ 0-15 land on vectors 32-47 after the PIC is remapped */
 ISR_NOERR 32
 ISR_NOERR 33
 ISR_NOERR 34
@@ -77,16 +79,21 @@ ISR_NOERR 45
 ISR_NOERR 46
 ISR_NOERR 47
 
-/* Zegar lokalnego APIC - kazdy rdzen ma swoj wlasny, wiec nie idzie
-   przez PIC i nie ma numeru IRQ. Wektor 48 lezy tuz za nimi. */
+/* The local APIC timer - every core has its own, so it does not go
+   through the PIC and has no IRQ number. Vector 48 sits just past them. */
 ISR_NOERR 48
 
-/* Pobudka miedzy rdzeniami: rdzen rozruchowy budzi nia spiace rdzenie,
-   gdy zlozy im prace. Nie niesie zadnej tresci - liczy sie samo to,
-   ze przerwanie wyrywa procesor z instrukcji hlt. */
+/* Inter-core wake-up: the boot core uses it to wake sleeping cores once
+   it has work for them. It carries no content - what matters is only
+   that an interrupt pulls the processor out of the hlt instruction. */
 ISR_NOERR 49
 
-/* Syscalle: int 0x80 (bramka z DPL=3, dostępna z ring 3) */
+/* A changed mapping: the core that changed it asks the others to throw
+   away what they worked out from the old entry - and waits for the
+   answer. See kernel/tlb.c. */
+ISR_NOERR 50
+
+/* Syscalls: int 0x80 (a gate with DPL=3, reachable from ring 3) */
 ISR_NOERR 128
 
 isr_common:
@@ -96,14 +103,14 @@ isr_common:
     pushl %fs
     pushl %gs
 
-    /* Załaduj segmenty danych jądra (istotne, gdy dojdzie ring 3) */
+    /* Load the kernel data segments (it matters once ring 3 arrives) */
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
 
-    pushl %esp          /* argument: wskaźnik na struct regs */
+    pushl %esp          /* the argument: a pointer to struct regs */
     call isr_handler
     addl $4, %esp
 
@@ -112,7 +119,7 @@ isr_common:
     popl %es
     popl %ds
     popal
-    addl $8, %esp       /* zdejmij int_no i err_code */
+    addl $8, %esp       /* drop int_no and err_code */
     iret
 
 .section .note.GNU-stack, "", @progbits

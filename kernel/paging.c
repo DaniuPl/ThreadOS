@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include "include/paging.h"
+#include "include/tlb.h"
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/shm.h"
@@ -109,7 +110,8 @@ int paging_map_phys(uint32_t phys, uint32_t size)
         }
         uint32_t *pt = (uint32_t *)(page_directory[pde] & ~0xFFFu);
         pt[pte] = a | PTE_PRESENT | PTE_WRITE;
-        __asm__ volatile("invlpg (%0)" : : "r"(a) : "memory");
+        /* A kernel table - every space has it, so every core does */
+        tlb_flush_kernel(a);
     }
     return 0;
 }
@@ -191,11 +193,10 @@ static int map_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
     }
 
     ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_USER | flags;
-    /* If we map into the active space (sbrk), refresh the TLB */
-    uint32_t active;
-    __asm__ volatile("movl %%cr3, %0" : "=r"(active));
-    if (active == dir_phys)
-        __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    /* The entry may be replacing one that was already there, and
+       another core may be holding it. A new mapping costs the same
+       here as a changed one and is not worth telling apart. */
+    tlb_invalidate(dir_phys, vaddr);
     return 1;
 }
 
@@ -234,10 +235,11 @@ void paging_file_clean(uint32_t dir_phys, uint32_t vaddr)
     if (!entry)
         return;
     *entry &= ~(uint32_t)PTE_DIRTY;
-    uint32_t active;
-    __asm__ volatile("movl %%cr3, %0" : "=r"(active));
-    if (active == dir_phys)
-        __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    /* A core still holding the old entry has the dirty bit set in it,
+       and the processor sets that bit only once - so its next write
+       would not be recorded and the change would be lost at the next
+       msync. */
+    tlb_invalidate(dir_phys, vaddr);
 }
 
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
@@ -286,12 +288,12 @@ void paging_destroy_address_space(uint32_t dir_phys)
  * of that one page.
  */
 
+/* Many entries of one space changed at once - throwing the whole
+   cache away is cheaper than naming them one by one, and it has to
+   reach every core running that space, not only this one. */
 static void flush_if_active(uint32_t dir_phys)
 {
-    uint32_t active;
-    __asm__ volatile("movl %%cr3, %0" : "=r"(active));
-    if (active == dir_phys)
-        __asm__ volatile("movl %0, %%cr3" : : "r"(active) : "memory");
+    tlb_flush_space(dir_phys);
 }
 
 uint32_t paging_clone_address_space(uint32_t src_phys)
@@ -400,7 +402,10 @@ int paging_handle_cow(uint32_t vaddr, uint32_t err_code)
         pmm_free_frame(frame);          /* one owner fewer */
         pt[idx] = copy | (e & 0xFFFu & ~(uint32_t)PTE_COW) | PTE_WRITE;
     }
-    __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    /* The sharpest case there is: the address stays, the frame under it
+       does not. A core holding the old entry would go on writing into
+       memory that now belongs to somebody else. */
+    tlb_invalidate(dir_phys, vaddr);
     return 1;
 }
 
@@ -515,6 +520,6 @@ int paging_swap_in(uint32_t dir_phys, uint32_t vaddr)
     }
     pt[idx] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
     swap_free_slot(slot);
-    __asm__ volatile("invlpg (%0)" : : "r"(vaddr) : "memory");
+    tlb_invalidate(dir_phys, vaddr);
     return 1;
 }

@@ -38,6 +38,7 @@ STUB_LIST(DECLARE_STUB)
 extern void isr128(void);
 extern void isr48(void);      /* the local APIC timer (secondary cores) */
 extern void isr49(void);      /* the inter-core wake-up */
+extern void isr50(void);      /* a changed mapping (TLB shootdown) */
 
 static void idt_set_gate(int n, void (*handler)(void), uint8_t flags)
 {
@@ -63,6 +64,7 @@ void idt_init(void)
     /* The local APIC timer: one per core, outside the IRQ numbering */
     idt_set_gate(48, isr48, 0x8E);
     idt_set_gate(49, isr49, 0x8E);       /* the inter-core wake-up */
+    idt_set_gate(50, isr50, 0x8E);       /* a changed mapping */
 
     /* Syscall: 0xEE = DPL 3, so int 0x80 may be executed from ring 3 */
     idt_set_gate(0x80, isr128, 0xEE);

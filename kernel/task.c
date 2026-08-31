@@ -22,6 +22,7 @@
 #include "include/io.h"
 #include "include/gdt.h"
 #include "include/paging.h"
+#include "include/tlb.h"
 #include "include/kfile.h"
 #include "include/pipe.h"
 #include "include/signal.h"
@@ -351,6 +352,12 @@ struct task *task_create_thread(const char *name, void (*entry)(void *),
     t->brk_base = current->brk_base;
     t->mmap_next = current->mmap_next;
     task_mmap_inherit(t);
+    /* The right to run on any core is a property of the program, and a
+       thread is the same program. It could not be given away before:
+       two cores standing in ONE address space is exactly the case in
+       which a changed mapping had to reach a cache the kernel could not
+       reach - which is what the shootdown is for. */
+    t->anycore = current->anycore;
     irq_restore(flags);
     return t;
 }
@@ -736,7 +743,7 @@ static void switch_to(int new_state)
     /* Change the address space only when needed (reloading CR3 empties
        the TLB - a waste of cycles between kernel threads) */
     if (next->cr3 != prev->cr3)
-        __asm__ volatile("movl %0, %%cr3" : : "r"(next->cr3) : "memory");
+        tlb_switch(next->cr3);
     context_switch(&prev->esp, next->esp);
     spin_unlock(&lock);
     /* From this moment on it is the task that came back here that is
@@ -1060,7 +1067,7 @@ void task_use_address_space(uint32_t dir_phys)
     uint32_t flags = irq_save();
     current->cr3 = dir_phys;
     current->owns_dir = 1;
-    __asm__ volatile("movl %0, %%cr3" : : "r"(dir_phys) : "memory");
+    tlb_switch(dir_phys);
     irq_restore(flags);
 }
 
@@ -1086,9 +1093,36 @@ uint32_t task_brk(void)
     return current->brk;
 }
 
+/* --- what belongs to the SPACE, not to the task ----------------------
+ *
+ * The heap limit and the next free mmap address describe an address
+ * space, and threads share one. Kept per task they were copied at
+ * creation and advanced separately afterwards - so two threads asking
+ * for memory at the same moment were handed the SAME address, each
+ * convinced it was the first there.
+ *
+ * It was wrong the day threads appeared; it was merely hard to hit
+ * while a process could only be on one core. So it is written to every
+ * task standing in the same space, and read from whoever asks. */
+static void set_in_space(uint32_t off_brk, uint32_t value)
+{
+    uint32_t flags = irq_save();
+    struct task *t = current;
+    do {
+        if (t->cr3 == current->cr3) {
+            if (off_brk)
+                t->brk = value;
+            else
+                t->mmap_next = value;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}
+
 void task_set_brk(uint32_t brk)
 {
-    current->brk = brk;
+    set_in_space(1, brk);
 }
 
 uint32_t task_brk_base(void)
@@ -1220,7 +1254,7 @@ uint32_t task_mmap_next(void)
 
 void task_set_mmap_next(uint32_t addr)
 {
-    current->mmap_next = addr;
+    set_in_space(0, addr);
 }
 
 void task_set_priority(int prio)

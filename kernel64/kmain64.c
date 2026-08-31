@@ -25,6 +25,7 @@
 #include "../kernel/include/heap.h"
 #include "idt64.h"
 #include "paging64.h"
+#include "../kernel/include/tlb.h"
 #include "task64.h"
 #include "gdt64.h"
 #include "syscall64.h"
@@ -239,6 +240,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         for (;;)
             __asm__ volatile("cli; hlt");
     }
+    /* From now on every change of a mapping can be told to the other
+       cores - and to do that they have to know what each is running */
+    tlb_switch(paging64_kernel_space());
     printk("[ OK ] Stronicowanie czteropoziomowe: %u MiB, zakaz "
            "wykonywania %s\n",
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),

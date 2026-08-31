@@ -53,6 +53,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmap.elf $(BUILD)/user/mmapfile.elf \
              $(BUILD)/user/deep.elf $(BUILD)/user/mmapzap.elf \
+             $(BUILD)/user/tlbtest.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
              $(BUILD)/user/syscalls.elf
 
@@ -112,6 +113,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/smpmem.o \
         $(BUILD)/smpthreads.o \
         $(BUILD)/biglock.o \
+        $(BUILD)/tlb.o \
         $(BUILD)/acpi.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
@@ -254,7 +256,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    lazymem=$(BUILD)/user/lazymem.elf \
 	    swaptest=$(BUILD)/user/swaptest.elf \
 	    mkmap=$(BUILD)/user/mkmap.elf mmapfile=$(BUILD)/user/mmapfile.elf \
-	    deep=$(BUILD)/user/deep.elf \
+	    deep=$(BUILD)/user/deep.elf tlbtest=$(BUILD)/user/tlbtest.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
@@ -275,7 +277,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci xhci usbhc usbkbd swap prog shm rtc \
-            dynlink smpmem smpthreads biglock \
+            dynlink smpmem smpthreads biglock tlb \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \

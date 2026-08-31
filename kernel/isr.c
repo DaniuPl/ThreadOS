@@ -8,6 +8,7 @@
 #include "include/pic.h"
 #include "include/printk.h"
 #include "include/smp.h"
+#include "include/tlb.h"
 #include "include/syscall.h"
 #include "include/task.h"
 #include "include/biglock.h"
@@ -147,6 +148,14 @@ static void isr_dispatch(struct regs *r)
        was only to pull this processor out of the hlt instruction. */
     if (r->int_no == 49) {
         smp_wakeup_recv();
+        return;
+    }
+
+    /* A mapping has changed on another core and it is waiting for our
+       answer. Nothing here may take a lock: the core on the other side
+       is holding one and standing still until we reply. */
+    if (r->int_no == 50) {
+        tlb_ipi_recv();
         return;
     }
 

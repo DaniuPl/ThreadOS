@@ -60,6 +60,14 @@ uint32_t smp_ticks(int core);
 /* Handling of an APIC timer tick (vector 48) - called by isr_handler */
 void smp_timer_tick(void);
 
+/* Sends the shootdown signal (vector 50) to all the other cores: a
+   mapping has changed and they may still be holding the old one. Who
+   is actually waited for is decided by kernel/tlb.c. */
+void smp_send_tlb(void);
+
+/* Acknowledges the shootdown interrupt to this core's own APIC */
+void smp_tlb_eoi(void);
+
 /* Handling of a wake-up from another core (vector 49). It does nothing
    beyond acknowledging: its entire content is the fact that it arrived
    and pulled the processor out of the hlt instruction. */

@@ -33,6 +33,7 @@
 #include "../kernel/include/swap.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/smp.h"
+#include "../kernel/include/tlb.h"
 #include "../kernel/include/smpmem.h"
 #include "../kernel/include/smpthreads.h"
 #include "../kernel/include/io.h"
@@ -287,6 +288,13 @@ static void cmd_smp(void)
     for (int i = 0; i < smp_cpus(); i++)
         printk(" rdzen%d=%u", i, smp_ticks(i));
     printk("\n");
+
+    /* What the changed mappings cost. 'lokalnie' are the ones nobody
+       else was holding - no interrupt, no waiting; 'zdalnie' are the
+       ones that had to reach another core, and 'odpowiedzi' is how many
+       cores answered. */
+    printk("TLB: lokalnie %u, zdalnie %u, odpowiedzi %u\n",
+           tlb_local_only(), tlb_shootdowns(), tlb_remote_acks());
 }
 
 /* cp <source> <target> - copying a file onto the disk

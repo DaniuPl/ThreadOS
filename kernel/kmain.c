@@ -14,6 +14,7 @@
 #include "include/multiboot.h"
 #include "include/pmm.h"
 #include "include/paging.h"
+#include "include/tlb.h"
 #include "include/heap.h"
 #include "include/shell.h"
 #include "include/string.h"
@@ -209,6 +210,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     paging_init();
+    /* From now on every change of a mapping can be told to the other
+       cores - and to do that they have to know what each is running */
+    tlb_switch(paging_kernel_cr3());
     video_map_lfb();          /* before we write anything on the screen */
     printk("[ OK ] Stronicowanie wlaczone (identycznosciowe %u MiB)\n",
            paging_identity_limit() / (1024 * 1024));
