@@ -2485,3 +2485,127 @@ sprawdzane przez `make test`.
       w jeden uwierzyc: gdy pierwszy przegrywa, mierzymy jeszcze raz.
 
       862 asercje, 53 grupy, 480 s.
+
+- [x] **Dwanascie okien naraz i pasek zadan, ktory je miesci** - koniec
+      z limitem, o ktory dalo sie uderzyc samym klikaniem w ikony.
+
+      Kompozytor trzymal szesc okien, a dwa z nich sa jego wlasne. Czyli
+      cztery aplikacje - przy siedmiu ikonach na pulpicie. Piata nie
+      wstawala i nie mowila dlaczego: win_create oddawalo -1, program
+      konczyl sie po cichu, na ekranie nie dzialo sie nic. Najgorszy
+      rodzaj granicy: taki, ktorego nie widac, dopoki sie w niego nie
+      wejdzie.
+
+      Sama liczba to jedna zmiana, ale sensownie to trzy rzeczy:
+
+      **Wiecej slotow** - dwanascie zamiast szesciu, czyli siedem ikon
+      plus jeszcze troche z menu.
+
+      **Kaskada, ktora nie wychodzi poza ekran.** Okna sa stawiane
+      schodkiem w prawo i w dol; dosc daleko po tym schodku i okno
+      trafia pod pasek zadan albo za prawa krawedz - tam, gdzie nie
+      widac go i nie da sie go zlapac. Teraz schodek cofa sie o trzy
+      pozycje, dopoki okno sie miesci, a na koniec i tak dociskamy je do
+      krawedzi. Cofanie liczy sie z NUMERU SLOTU, a nie z licznika
+      otwarc - dzieki temu slot 2 nadal daje (94,54) i wspolrzedne, na
+      ktorych stoja starsze testy graficzne, sie nie ruszyly.
+
+      **Pasek zadan, ktory dzieli sie szerokoscia.** Pasek to staly
+      kawalek pikseli: 640 minus przycisk "Menu" to 592 px. Dwanascie
+      przyciskow po 52 px to 624 - czyli ostatnie dwa rysowaly sie za
+      ekranem. Szerokosc przycisku liczy sie wiec teraz z liczby
+      otwartych okien i tego, ile miejsca zostalo, a dlugosc napisu z
+      tej szerokosci (czcionka ma 8 px). Przy dziewieciu oknach wychodzi
+      52 px jak dotad, przy dwunastu 49.
+
+      I najwazniejsze w tym: szerokosc liczy JEDNA funkcja, a pyta o nia
+      i rysowanie, i obsluga klikniecia. Dwa miejsca liczace to samo
+      osobno rozjezdzaja sie po cichu - przycisk widac tam, gdzie nie
+      dziala, i nikt nie umie powiedziec, co jest zepsute. Test celuje
+      dokladnie w to: klika w OSTATNI przycisk (ten, ktory istnieje
+      tylko dlatego, ze przyciski sie zwezily) i sprawdza, ze ognisko
+      dostalo jego okno, a nie sasiad.
+
+      Nowa grupa 'manywin': siedem ikon otwiera siedem okien, menu
+      doklada trzy, pasek pokazuje dwanascie przyciskow, zadne dwa sie
+      nie nachodza, wszystkie mieszcza sie w ekranie, i klikniecie w
+      ostatni, w srodkowy oraz w zwezony ostatni trafia za kazdym razem
+      we wlasciwe okno. Asercje sa o pikselach paska, bo to jedyne
+      miejsce, gdzie widac jednoczesnie i to, co narysowane, i to, co
+      klikalne.
+
+- [x] **Okno na caly ekran** - ostatnia rzecz, ktorej okno nie umialo, a
+      ktora robi sie z oknem najczesciej.
+
+      Okno dalo sie przesunac, zlapac za rog, zwinac do paska i zamknac.
+      Nie dalo sie go rozciagnac na caly ekran - a to jest to, co czlowiek
+      robi z oknem, w ktorym naprawde pracuje. Ciagniecie rogu az do
+      krawedzi to nie to samo, i te roznice warto wypisac, bo one sa
+      cala trescia tej zmiany:
+
+      **Do paska zadan, ani piksela dalej.** Pasek to jedyna droga do
+      pozostalych okien. Okno narysowane na nim byloby oknem, z ktorego
+      nie ma wyjscia.
+
+      **Okno PAMIETA, skad przyszlo.** Ten sam przycisk odklada je
+      dokladnie tam, gdzie stalo - nie w miejsce rozsadne, tylko w to
+      samo. Stad cztery pola w strukturze okna, a nie jedna flaga.
+
+      **Aplikacja dostaje nowy rozmiar.** Okno to nie tylko prostokat,
+      ale i bufor tresci, wiec bufor rosnie i leci WEV_SIZE. Program,
+      ktoremu by tego nie powiedziano, rysowalby dalej na 330 pikselach
+      w oknie szerokim na 638, a reszta byla by pustym szarym polem -
+      wygladajacym jak blad rysowania, a bedacym brakiem wiadomosci.
+
+      I to jest to, na czym stoja asercje. 'gsettings' rysuje zaznaczony
+      wiersz jako niebieski pasek przez CALA szerokosc swojej tresci -
+      wiec ten pasek jest miarka: po maksymalizacji ma siegac prawej
+      krawedzi ekranu, po powrocie konczyc sie tam, gdzie konczy sie
+      mniejsze okno. Jedno i drugie widac w pikselach.
+
+      Dwie rzeczy przy okazji, obie z gatunku "a co, jesli":
+
+      - Nie ma pamieci na bufor 638x456 (a sterta jadra ma 1 MiB)? Wtedy
+        nie dzieje sie NIC: okno zostaje takie, jakie bylo. Polowa
+        maksymalizacji - okno wieksze niz jego bufor - rysowalaby cudza
+        pamiec na ekranie. resize_content oddaje teraz -1 zamiast
+        milczec.
+      - Zlapanie zmaksymalizowanego okna za pasek tytulu przywraca mu
+        wlasny rozmiar, jak wszedzie indziej - i okno wraca pod kursor w
+        tym samym miejscu swojego paska, wiec nie ucieka spod reki.
+        Pociagniecie za rog po prostu przestaje byc maksymalizacja: to,
+        co wyjdzie z ciagniecia, jest nowym rozmiarem okna.
+
+      Nowa grupa 'maxwin'.
+
+- [x] **Zegar na pasku zadan** - maszyna miala zegar, ale trzeba go
+      bylo pytac.
+
+      'date' go drukowal, program mogl go dostac przez wywolanie
+      systemowe. Nie bylo go tam, gdzie zegar jest potrzebny - na
+      wierzchu, bez pytania. Teraz siedzi na prawym koncu paska i
+      pokazuje czas co do sekundy.
+
+      Odczyt zegara CMOS to odczekanie trwajacej aktualizacji i
+      czytanie do skutku, az dwa odczyty sie zgodza - a pulpit
+      przerysowuje sie ze trzydziesci razy na sekunde. Wiec czas jest
+      czytany co szosta klatke (okolo pieciu razy na sekunde) i
+      trzymany w buforze. Zadna sekunda przez to nie ginie, a CMOS nie
+      jest odpytywany trzydziesci razy na sekunde o cyfre, ktora zmienia
+      sie raz.
+
+      Miejsce na zegar jest ODJETE od tego, co dziela miedzy siebie
+      przyciski okien - to ta sama funkcja, ktora liczy ich szerokosc.
+      Przy dwunastu oknach przycisk ma teraz 41 pikseli zamiast 47.
+      Zegar narysowany na przycisku bylby zegarem, ktory jeden przycisk
+      chowa.
+
+      Test czyta cyfry Z EKRANU: wzorzec osmiu bajtow kazdego znaku
+      szuka sie w tej samej czcionce, ktora rysowalo jadro (tak samo
+      dzialaja testy konsoli w trybie graficznym). Maszyna wstaje z
+      zegarem ustawionym na staly moment, wiec cyfry musza mowic ten
+      moment - a po czterech sekundach o kilka sekund wiecej. Zegar
+      narysowany raz i nigdy nieodswiezany przeszedlby pierwsza asercje
+      i polegl na drugiej.
+
+      Nowa grupa 'clock'.

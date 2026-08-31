@@ -61,7 +61,9 @@ def taskbar_ready(q, timeout=40):
     while time.time() < deadline:
         try:
             w, _, at = q.screen_raw()
-            if w >= 640 and at(600, 474)[0] > 150:
+            # Not at x=600: the clock is drawn there. x=520 is bar
+            # between the window buttons and the clock.
+            if w >= 640 and at(520, 474)[0] > 150:
                 return True
         except Exception:
             pass

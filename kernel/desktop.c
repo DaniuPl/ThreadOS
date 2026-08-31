@@ -19,6 +19,7 @@
 #include "include/fs.h"
 #include "include/io.h"
 #include "include/config.h"
+#include "include/rtc.h"
 
 /* Desktop palette indices (set in desktop_thread) */
 #define COL_BLACK  0
@@ -117,6 +118,12 @@ struct window {
     int cw, ch;            /* dimensions of the content area */
     int z;                 /* drawing order (higher = on top) */
     int minimized;         /* is it minimised (hidden, visible on the bar) */
+    /* Maximised: the window fills the desktop down to the taskbar. The
+       geometry it came from is kept here, because restoring it has to
+       put the window back exactly where it was - not somewhere
+       reasonable. */
+    int maxed;
+    int rx, ry, rw, rh;
     /* The application has been asked to close and has not yet ended.
        'closing' counts down the frames it has left; when it runs out we
        stop asking - an application that does not answer must not hold
@@ -132,12 +139,19 @@ struct window {
    that a hung one does not hold the screen. */
 #define CLOSE_FRAMES 40
 
-#define MAX_WIN 6
+/* How many windows the compositor holds at once.
+ *
+ * Two of them are the kernel's own, so this is the number of
+ * applications plus two - and there are seven icons on the desktop. Six
+ * meant that opening a fifth application failed for no reason a person
+ * could see. */
+#define MAX_WIN 12
 static struct window wins[MAX_WIN];
 
 /* Drag state: the window index and the grab (the cursor's offset
    within the window) */
-static void resize_content(struct window *w);
+static int resize_content(struct window *w);
+static void toggle_max(int i);
 
 static int drag_idx = -1;
 static int resize_idx = -1;
@@ -157,9 +171,61 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 static int taskbar_y(void) { return video_h() - TB_H; }
 static int menu_item_y(int i) { return taskbar_y() - (MENU_N - i) * MENU_ROW; }
 
-/* The list of window buttons on the taskbar (after the Menu button) */
+/* The list of window buttons on the taskbar (after the Menu button).
+   The buttons share out what is left of the bar, so a twelfth window
+   makes them narrower instead of putting them past the right edge -
+   where they would be drawn nowhere and clickable nowhere. */
 #define TBL_X0 (2 + MENU_BW + 4)
-#define TBL_W  52
+#define TBL_W_MAX 52                  /* wide enough for six characters */
+#define TBL_W_MIN 20                  /* narrower than this says nothing */
+
+/* The clock at the right-hand end of the bar: "12:34:56", eight
+   characters of an 8-pixel font plus a little air on each side. It is
+   taken out of what the window buttons have to share, because a clock
+   drawn over a button would be a clock that hides one. */
+#define TB_CLOCK_CH 8
+#define TB_CLOCK_W (TB_CLOCK_CH * 8 + 6)
+static int clock_x(void) { return video_w() - TB_CLOCK_W + 3; }
+
+static int win_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used)
+            n++;
+    return n;
+}
+
+/* The width of one button, the gap between them included. Everything
+   that draws a button or looks for one under the cursor asks here, so
+   a button is clickable exactly where it is drawn. */
+static int tbl_width(void)
+{
+    int n = win_count();
+    if (n < 1)
+        n = 1;
+    int space = video_w() - TBL_X0 - 2 - TB_CLOCK_W;
+    int w = space / n;
+    if (w > TBL_W_MAX)
+        w = TBL_W_MAX;
+    if (w < TBL_W_MIN)
+        w = TBL_W_MIN;
+    return w;
+}
+
+/* How many characters fit on a button of that width: the font is 8 px
+   wide, the button is 2 px narrower than its slot and the text starts
+   2 px in. */
+#define TBL_LABEL_MAX 8
+static int tbl_chars(int bw)
+{
+    int n = (bw - 4) / 8;
+    if (n < 1)
+        n = 1;
+    if (n > TBL_LABEL_MAX)
+        n = TBL_LABEL_MAX;
+    return n;
+}
 
 static int z_top;           /* the highest Z order handed out */
 
@@ -218,6 +284,7 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
 static int close_y(const struct window *w) { return w->y + 1; }
 static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
+static int max_x(const struct window *w)   { return w->x + w->w - 3 * CLOSE_SZ - 3; }
 static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
 static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
 /* Every window may be resized. An application window costs more than a
@@ -320,7 +387,13 @@ static void draw_window(const struct window *win)
     /* The title bar plus the name */
     video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H, COL_TITLE);
     video_draw_string(win->x + 3, win->y + 2, win->title, COL_WHITE);
-    /* The minimise button [_] next to the close one */
+    /* The maximise button, and the minimise one next to the close.
+       'O' means it will fill the screen, 'o' that it will go back to
+       the size it had - the same button, and which of the two it is
+       has to be visible without clicking it. */
+    video_fill_rect(max_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
+    video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O',
+                    COL_WHITE);
     video_fill_rect(min_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_TBBTN);
     video_draw_char(min_x(win), close_y(win), '_', COL_WHITE);
     /* The close button [x] in the right corner of the bar */
@@ -383,12 +456,13 @@ static void handle_input(int mx, int my, int buttons)
         }
         /* Window buttons on the taskbar: focus plus bring to top */
         if (my >= taskbar_y()) {
+            int bw = tbl_width();
             int j = 0;
             for (int i = 0; i < MAX_WIN; i++) {
                 if (!wins[i].used)
                     continue;
-                if (in_rect(mx, my, TBL_X0 + j * TBL_W, taskbar_y(),
-                            TBL_W - 2, TB_H)) {
+                if (in_rect(mx, my, TBL_X0 + j * bw, taskbar_y(),
+                            bw - 2, TB_H)) {
                     wins[i].minimized = 0;   /* restore it if minimised */
                     focus_idx = i;
                     raise_win(i);
@@ -426,6 +500,13 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
+            /* the maximise button [O] - and the same button puts it
+               back, so one click undoes the other */
+            if (in_rect(mx, my, max_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
+                toggle_max(i);
+                hit = 1;
+                break;
+            }
             /* the minimise button [_] */
             if (in_rect(mx, my, min_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
                 w->minimized = 1;
@@ -434,9 +515,14 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* the resize grip (bottom right corner) */
+            /* the resize grip (bottom right corner). Pulling a
+               maximised window's corner means it is no longer
+               maximised - what it is now is whatever it is pulled to,
+               and the size it came from is no longer worth going back
+               to. */
             if (resizable(w) &&
                 in_rect(mx, my, grip_x(w), grip_y(w), GRIP_SZ, GRIP_SZ)) {
+                w->maxed = 0;
                 resize_idx = i;
                 focus_idx = i;
                 raise_win(i);
@@ -452,8 +538,24 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* the title bar -> start dragging (and focus) */
+            /* the title bar -> start dragging (and focus).
+               Dragging a maximised window puts it back to its own size
+               first - as everywhere else - and it comes back under the
+               cursor at the same place along its bar, so it does not
+               jump out from under the hand. */
             if (on_titlebar(w, mx, my)) {
+                if (w->maxed) {
+                    int along = w->w > 0 ? (mx - w->x) * w->rw / w->w : 0;
+                    toggle_max(i);
+                    w->x = mx - along;
+                    w->y = my - 3;
+                    if (w->x < 0)
+                        w->x = 0;
+                    if (w->x + w->w > video_w())
+                        w->x = video_w() - w->w;
+                    if (w->y < 0)
+                        w->y = 0;
+                }
                 drag_idx = i;
                 drag_dx = mx - w->x;
                 drag_dy = my - w->y;
@@ -559,23 +661,27 @@ static void handle_input(int mx, int my, int buttons)
  * When there is no memory for the new buffer, the window keeps the size
  * it had. Better a window that will not grow than one that has nothing
  * to draw into. */
-static void resize_content(struct window *w)
+/* Gives the window's content buffer the size the window now has.
+   Returns -1 when there is no memory for the new buffer - and then the
+   window keeps the size it had, because a window bigger than its buffer
+   would be drawn from memory belonging to something else. */
+static int resize_content(struct window *w)
 {
     if (!w->content || w->owner < 0)
-        return;                        /* a kernel window has no buffer */
+        return 0;                      /* a kernel window has no buffer */
 
     int cw = w->w - 2;
     int ch = w->h - TITLE_H - 2;
     if (cw < 8) cw = 8;
     if (ch < 8) ch = 8;
     if (cw == w->cw && ch == w->ch)
-        return;                        /* the drag changed nothing */
+        return 0;                      /* the drag changed nothing */
 
     uint8_t *buf = kmalloc(cw * ch);
     if (!buf) {
         w->w = w->cw + 2;              /* back to the size that has a buffer */
         w->h = w->ch + TITLE_H + 2;
-        return;
+        return -1;
     }
     memset(buf, COL_WIN, cw * ch);
     kfree(w->content);
@@ -583,6 +689,55 @@ static void resize_content(struct window *w)
     w->cw = cw;
     w->ch = ch;
     win_enqueue(w, WEV_SIZE, cw, ch, 0);
+    return 0;
+}
+
+/* Maximises the window, or puts it back where it came from.
+ *
+ * Maximised means: from the top left corner of the screen down to the
+ * taskbar - not over it. The bar is how a person reaches every other
+ * window, so a window that covered it would be a window there was no
+ * way out of.
+ *
+ * An application's window is a buffer as well as a rectangle, so the
+ * buffer has to grow too and the application has to be told. If there
+ * is no memory for a buffer that size, nothing happens at all: the
+ * window keeps its size and its old buffer, and stays where it was.
+ * Half a maximise would be worse than none. */
+static void toggle_max(int i)
+{
+    struct window *w = &wins[i];
+
+    if (!w->maxed) {
+        int ox = w->x, oy = w->y, ow = w->w, oh = w->h;
+        w->x = 0;
+        w->y = 0;
+        w->w = video_w();
+        w->h = taskbar_y();
+        if (resize_content(w) < 0) {   /* no memory for that buffer */
+            w->x = ox;
+            w->y = oy;
+            w->w = ow;
+            w->h = oh;
+            return;
+        }
+        w->rx = ox;
+        w->ry = oy;
+        w->rw = ow;
+        w->rh = oh;
+        w->maxed = 1;
+    } else {
+        w->x = w->rx;
+        w->y = w->ry;
+        w->w = w->rw;
+        w->h = w->rh;
+        w->maxed = 0;
+        resize_content(w);             /* shrinking always has the memory */
+    }
+
+    w->minimized = 0;
+    focus_idx = i;
+    raise_win(i);
 }
 
 /* Draws the taskbar at the bottom and (if open) the launch menu */
@@ -598,6 +753,35 @@ static void draw_icons(void)
     }
 }
 
+/* The time on the bar.
+ *
+ * Reading the CMOS clock means waiting out an update in progress and
+ * then reading it twice until two reads agree, so it is not something
+ * to do thirty times a second for a digit that changes once a second.
+ * The reading is kept and refreshed about five times a second, which is
+ * often enough that no second is ever skipped on screen. */
+static char clock_text[TB_CLOCK_CH + 1] = "--:--:--";
+static int clock_wait;
+
+static void clock_refresh(void)
+{
+    if (--clock_wait > 0)
+        return;
+    clock_wait = 6;
+
+    struct rtc_time t;
+    rtc_read(&t);
+    clock_text[0] = (char)('0' + (t.hour / 10) % 10);
+    clock_text[1] = (char)('0' + t.hour % 10);
+    clock_text[2] = ':';
+    clock_text[3] = (char)('0' + (t.min / 10) % 10);
+    clock_text[4] = (char)('0' + t.min % 10);
+    clock_text[5] = ':';
+    clock_text[6] = (char)('0' + (t.sec / 10) % 10);
+    clock_text[7] = (char)('0' + t.sec % 10);
+    clock_text[8] = 0;
+}
+
 static void draw_taskbar(void)
 {
     int ty = taskbar_y();
@@ -607,23 +791,30 @@ static void draw_taskbar(void)
 
     /* The list of open windows - one button per window; the focused one is
        highlighted */
+    int bw = tbl_width();
+    int max = tbl_chars(bw);
     int j = 0;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!wins[i].used)
             continue;
-        int bx = TBL_X0 + j * TBL_W;
-        video_fill_rect(bx, ty, TBL_W - 2, TB_H,
+        int bx = TBL_X0 + j * bw;
+        if (bx + bw - 2 > video_w())
+            break;                    /* the bar has run out - draw no further */
+        video_fill_rect(bx, ty, bw - 2, TB_H,
                         i == focus_idx ? COL_TITLE : COL_TBBTN);
-        /* the title trimmed to the button width (6 characters) */
-        char label[7];
+        /* the title trimmed to what the button is wide enough to hold */
+        char label[TBL_LABEL_MAX + 1];
         int k = 0;
-        for (; wins[i].title[k] && k < 6; k++)
+        for (; wins[i].title[k] && k < max; k++)
             label[k] = wins[i].title[k];
         label[k] = '\0';
         video_draw_string(bx + 2, ty + 3, label,
                           i == focus_idx ? COL_WHITE : COL_BLACK);
         j++;
     }
+
+    clock_refresh();
+    video_draw_string(clock_x(), ty + 3, clock_text, COL_BLACK);
 
     if (menu_open) {
         for (int i = 0; i < MENU_N; i++) {
@@ -706,11 +897,27 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
             return -1;
         memset(buf, COL_WIN, cw * ch);     /* a grey background to start with */
         struct window *w = &wins[i];
-        /* new application windows are placed in a cascade */
-        w->x = 70 + i * 12;
-        w->y = 30 + i * 12;
         w->w = cw + 2;
         w->h = ch + TITLE_H + 2;
+        /* New windows go in a cascade, twelve pixels apart. Far enough
+           down that cascade, or with a window large enough, the next
+           step would put it off the screen - so we walk back up until
+           it fits. Walking back rather than clamping keeps the windows
+           apart: two clamped to the same corner would look like one. */
+        int k = i;
+        while (k > 0 && (70 + k * 12 + w->w > video_w() ||
+                         30 + k * 12 + w->h > taskbar_y()))
+            k -= 3;
+        if (k < 0)
+            k = 0;
+        w->x = 70 + k * 12;
+        w->y = 30 + k * 12;
+        /* Bigger than the screen even at the start of the cascade - all
+           that is left is to push it against the edge */
+        if (w->x + w->w > video_w())
+            w->x = video_w() > w->w ? video_w() - w->w : 0;
+        if (w->y + w->h > taskbar_y())
+            w->y = taskbar_y() > w->h ? taskbar_y() - w->h : 0;
         set_title(w, title);
         w->has_button = 0;
         w->counter = 0;
