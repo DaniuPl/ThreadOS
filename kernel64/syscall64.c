@@ -795,6 +795,17 @@ static void handle(struct regs *r)
     case SYS64_CORE:
         r->rax = (uint64_t)(uint32_t)smp_core();
         return;
+    case SYS64_MMAP:
+        r->rax = proc64_mmap(a1);
+        return;
+    case SYS64_THREAD:
+        /* A thread starts in ring 3, so its entry point has to be the
+           program's own code - and the program is the only one that
+           can say where that is */
+        r->rax = paging64_user_range(a1, 1)
+                     ? (uint64_t)(int64_t)proc64_thread(a1, a2)
+                     : (uint64_t)(int64_t)-1;
+        return;
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();
         return;

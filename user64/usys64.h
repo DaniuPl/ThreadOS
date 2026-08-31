@@ -60,6 +60,8 @@
 #define SYS64_MMAP_FILE  40
 #define SYS64_MSYNC      41
 #define SYS64_CORE      42
+#define SYS64_MMAP      43
+#define SYS64_THREAD    44
 
 #define NAME_MAX64 63
 
@@ -518,6 +520,27 @@ static inline void *sys_mmap_file_w(const char *name, uint64_t *size)
 static inline int64_t sys_core(void)
 {
     return syscall64(SYS64_CORE, 0, 0);
+}
+
+/* Fresh, zeroed memory of the process: returns the address or NULL.
+ * Nothing is allocated on asking - only the addresses are reserved,
+ * and the pages appear the moment they are touched. */
+static inline void *sys_mmap(uint64_t size)
+{
+    return (void *)(uintptr_t)syscall64(SYS64_MMAP, (int64_t)size, 0);
+}
+
+/* A thread in the same process: it sees the same memory, and has its
+ * own stack. 'entry' is a void(*)(void*) function of this program.
+ * Returns its task number or -1.
+ *
+ * A thread carries the process's right to run on any core, so two of
+ * them really can stand in one address space at once - and a mapping
+ * changed by one of them reaches the cores running the others. */
+static inline int64_t sys_thread(void (*entry)(void *), void *arg)
+{
+    return syscall64(SYS64_THREAD, (int64_t)(uintptr_t)entry,
+                     (int64_t)(uintptr_t)arg);
 }
 
 /* Flushes to their files the changed pages of writable mappings.

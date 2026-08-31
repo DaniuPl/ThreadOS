@@ -53,8 +53,9 @@ space, networking from ring 3, TLS 1.3 with certificate verification,
 a graphical desktop whose six applications all run in ring 3, shared
 memory, files mapped into memory for reading *and writing*, a stack
 that grows on demand, swap to disk, processes that run in ring 3 on
-every core, four virtual consoles, USB keyboard (xHCI or UHCI),
-ACPI power-off, and BIOS + UEFI boot from a single hybrid disc.
+every core, **threads sharing one address space across cores**, four
+virtual consoles, USB keyboard (xHCI or UHCI), ACPI power-off, and
+BIOS + UEFI boot from a single hybrid disc.
 
 ## Quick start
 
@@ -120,10 +121,6 @@ ground for both.
   running two-and-a-half times faster on four cores than on one. Every
   further syscall taken off that lock has to be read to the end first;
   the subsystems come after.
-- Threads in the 64-bit kernel. The 32-bit one has them, and with the
-  shootdown in place they run on every core; the long-mode kernel has
-  no `sys_thread` yet, so two cores cannot be put into one address
-  space there at all.
 
 **Infrastructure**
 

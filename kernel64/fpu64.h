@@ -17,6 +17,11 @@
 /* Enables SSE in the control registers. 1 = enabled. */
 int fpu64_init(void);
 
+/* Enables SSE on THIS core. CR0 and CR4 belong to the core, so every
+   one has to be told separately - a core that is not told answers an
+   ordinary XMM instruction with an invalid opcode. */
+void fpu64_enable_core(void);
+
 /* Room for one task's state (512 B, aligned to 16). Returns NULL when
    out of memory. */
 void *fpu64_alloc(void);

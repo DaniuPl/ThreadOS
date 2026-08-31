@@ -2269,3 +2269,52 @@ sprawdzane przez `make test`.
       maszyneria stoi i milczy, kiedy ma milczec.
 
       796 asercji, 50 grup, 385 s.
+
+- [x] **Watki w jadrze 64-bitowym** - i dopiero teraz widac, ze strzal
+      w TLB dziala takze tam.
+
+      Poprzedni krok wbudowal w oba jadra rozsylanie zmian mapowan, ale
+      pokazac dzialanie umial tylko w 32-bitowym: w trybie dlugim nie
+      bylo watkow, wiec nie dalo sie wsadzic dwoch rdzeni do JEDNEJ
+      przestrzeni adresowej. Test sprawdzal tam tylko tyle, ze
+      maszyneria stoi i milczy - a to zaden dowod.
+
+      Watek to nowe zadanie z TA SAMA przestrzenia i wlasnym stosem.
+      Cala trudnosc lezy poza samym utworzeniem: przestrzen musi
+      przezyc smierc pierwszego watku (zwalnia ja ten, kto konczy
+      ostatni), granica sterty i nastepny wolny adres musza byc jednym
+      licznikiem dla wszystkich, a nie kopia u kazdego - dokladnie ten
+      sam blad, ktory tydzien wczesniej wyszedl po stronie 32-bitowej.
+      Naprawiony tu od razu, zanim zdazyl kogokolwiek ugryzc.
+
+      Przy okazji doszla pamiec anonimowa (SYS64_MMAP): zarezerwowane
+      adresy, strony pod palcami - bo z czegos ten stos musi byc.
+
+      **Dwa bledy po drodze, oba starsze od tej zmiany.**
+
+      Pierwszy: watki ginely na "Invalid Opcode" pod adresem, ktory
+      okazal sie zwyklym `movdqa %xmm7`. CR0 i CR4 naleza do RDZENIA, a
+      SSE wlaczal tylko rdzen rozruchowy - wiec kazdy program uzywajacy
+      XMM, ktory trafil na rdzen wtorny, ginal na instrukcji zupelnie
+      poprawnej. Blad byl tam od chwili, gdy programy zaczely biegac po
+      wszystkich rdzeniach; nie trafil go dotad zaden test, bo zaden
+      program 64-bitowy uruchamiany przez 'runw' nie siegal po XMM w
+      widocznym miejscu. To jest ta kategoria bledow, ktora nie objawia
+      sie wcale, dopoki nie zrobi sie czegos nowego.
+
+      Drugi: watki ginely potem na "General Protection Fault" na
+      instrukcji `movaps %xmm0, 0xe0(%rsp)`. Wierzcholek stosu byl
+      wyrownany do szesnastu bajtow - i wlasnie o osiem bajtow za
+      dobrze. Funkcja w C zaklada stos taki, jak PO instrukcji call,
+      czyli z adresem powrotu na wierzchu; na tym opiera wyrownanie
+      swoich zmiennych. Stos programu byl juz od dawna ukladany
+      poprawnie, ja po prostu nie przepisalem tego minus osiem.
+
+      **Liczby.** 'runw tlbtest64' na czterech rdzeniach: maska rdzeni
+      15, 40 kawalkow pamieci sprawdzonych dwa razy, zero bledow, 140
+      zmian mapowan, ktore musialy dojsc do innych rdzeni, i 221
+      odpowiedzi. 'run tlbtest64' - maska 1 i ani jednego przerwania.
+      Te same cztery sprawdzenia po obu stronach, i po obu stronach
+      cos znacza.
+
+      809 asercji, 50 grup, 492 s.

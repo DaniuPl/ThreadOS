@@ -56,6 +56,8 @@
 #define TSS_SEL_BASE     GDT64_TSS
 #define TSS_SEL_STEP     16
 #define SYSCALL_ENTRY() syscall64_init()
+#include "../kernel64/fpu64.h"
+#define ENABLE_SSE()  fpu64_enable_core()
 #else
 #include "include/paging.h"
 #define MAP_PHYS(a, n)   paging_map_phys((a), (n))
@@ -68,6 +70,7 @@
 #define TSS_SEL_BASE     GDT_TSS
 #define TSS_SEL_STEP     8
 #define SYSCALL_ENTRY() do { } while (0)   /* i386 enters through the int 0x80 gate */
+#define ENABLE_SSE()  do { } while (0)     /* i386 programs do not need XMM */
 #endif
 
 #define AP_BASE       0x8000        /* where we copy the trampoline to */
@@ -375,6 +378,10 @@ void smp_ap_main(uint32_t number)
     /* The entry registers for the syscall instruction belong to the
        core - one that does not set them will not accept a call at all */
     SYSCALL_ENTRY();
+    /* CR0 and CR4 belong to the core. Without this a ring 3 program
+       that lands here dies of an ordinary XMM instruction - and on
+       x86-64 the compiler uses those without asking. */
+    ENABLE_SSE();
 
     /* Its own timer. A PIT interrupt goes through the PIC to ONE
        processor - this one will never see it. */

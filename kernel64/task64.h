@@ -46,6 +46,15 @@ int task64_wait(int *code);
    console and the one Ctrl+C belongs to, not the shell waiting for it */
 int task64_foreground(int root);
 
+/* A thread of the current process: the same address space, its own
+   kernel stack. The space is freed by whichever of them ends last. */
+struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
+                                    void *arg, uint64_t space);
+
+/* Does the address lie in anonymous memory the process asked for and
+   has now touched for the first time? The page fault handler asks. */
+int task64_in_mmap(uint64_t addr);
+
 /* Takes an address space into the current task's ownership and
    switches to it right away. It frees itself when the task ends. */
 void task64_enter_space(uint64_t space, uint64_t kstack_top);

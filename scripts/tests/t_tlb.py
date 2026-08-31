@@ -29,6 +29,10 @@ anything:
      keeps the process on the boot core and must not send a single
      interrupt; on a single-core machine neither must 'runw'.
 
+Both kernels, and the same four checks in each: long mode had no
+threads at all until now, so the mechanism could be built into it but
+not shown working.
+
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -43,9 +47,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
-HEAD = re.compile(r"\[tlbtest\] watkow (\d+), kawalkow (\d+) po (\d+) stron, "
-                  r"maska rdzeni (\d+)")
-BAD = re.compile(r"\[tlbtest\] bledow przy pisaniu (\d+), po wszystkim (\d+)")
+HEAD = re.compile(r"\[tlbtest(?:64)?\] watkow (\d+), kawalkow (\d+) po (\d+) "
+                  r"stron, maska rdzeni (\d+)")
+BAD = re.compile(r"\[tlbtest(?:64)?\] bledow przy pisaniu (\d+), "
+                 r"po wszystkim (\d+)")
 COUNTERS = re.compile(r"TLB: lokalnie (\d+), zdalnie (\d+), odpowiedzi (\d+)")
 
 
@@ -149,10 +154,9 @@ def main():
         if os.path.exists(slog1):
             os.unlink(slog1)
 
-    # The 64-bit kernel has the same mechanism and the same counters,
-    # but no threads - so there is no way to put two cores into one
-    # address space there yet. What can be checked is that the machinery
-    # is in place and that it stays quiet when it should.
+    # The same thing in long mode. Until now there were no threads
+    # there at all, so two cores could not be put into one address
+    # space and the mechanism could be built in but not shown working.
     print("--- to samo w jadrze 64-bitowym ---")
     reason = no64()
     if reason:
@@ -173,12 +177,36 @@ def main():
             before = counters(q, "TLB:")
             check("jadro 64-bitowe tez liczy zmiany mapowan",
                   before is not None and before[0] > 0)
-            q.command("runw hello64", "kod wyjscia", timeout=60)
+
+            out = q.command("run tlbtest64", "kod wyjscia", timeout=180)
+            res = run_case(q, out, " (64-bit, 'run')")
+            mid = counters(q, "TLB:")
+            if res:
+                check("bez 'runw' proces zostaje na rdzeniu rozruchowym "
+                      "(64-bit, maska %d)" % res[0], res[0] == 1)
+            check("i nie kosztuje ani jednego przerwania (64-bit, %d -> %d)"
+                  % (before[1], mid[1]), mid[1] == before[1] == 0)
+
+            out = q.command("runw tlbtest64", "kod wyjscia", timeout=180)
+            res = run_case(q, out, " (64-bit, 'runw')")
             after = counters(q, "TLB:")
-            check("pojedynczy proces nie kosztuje przerwan (%d -> %d)"
-                  % (before[1], after[1]), after[1] == before[1] == 0)
-            check("a mapowan zmienil sporo (%d -> %d lokalnych)"
-                  % (before[0], after[0]), after[0] > before[0])
+            if res:
+                mask = res[0]
+                check("watki jednego procesu bieglyby poza rdzeniem "
+                      "rozruchowym (64-bit, maska %d)" % mask,
+                      (mask & ~1) != 0)
+                check("i niosl je wiecej niz jeden rdzen (64-bit, %d)"
+                      % bin(mask).count("1"), bin(mask).count("1") >= 2)
+            check("zmiany mapowan musialy dojsc do innych rdzeni "
+                  "(64-bit, %d -> %d)" % (mid[1], after[1]),
+                  after[1] > mid[1])
+            check("i kazda z nich doczekala sie odpowiedzi (64-bit, %d -> %d)"
+                  % (mid[2], after[2]),
+                  after[2] - mid[2] >= after[1] - mid[1])
+
+            check("jadro dziala dalej po probie (64-bit)",
+                  "czesc, jestem ELF-em" in
+                  q.command("run hello64", "kod wyjscia", timeout=60))
         finally:
             q.close()
     finally:

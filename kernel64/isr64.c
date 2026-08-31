@@ -109,14 +109,6 @@ static void isr64_dispatch(struct regs *r)
             paging64_handle_cow(read_cr2()))
             return;
 
-        /* A touch of a heap page the program asked for but which does not
-         * exist yet. This is not an error but the moment memory becomes
-         * real: asking for a megabyte cost zero, and payment is due
-         * only for the pages actually used.
-         *
-         * Writable and with no execute permission - there is no code
-         * in a program's data, and if there were, the processor would
-         * not run it. */
         /* A page that went out to disk. We fetch it back and let the
          * instruction be repeated - as far as the program is concerned
          * nothing happened beyond a moment's delay. */
@@ -168,6 +160,30 @@ static void isr64_dispatch(struct regs *r)
             }
         }
 
+        /* Anonymous memory the process asked for in the mapping area.
+         *
+         * The same bargain as the heap: asking reserved addresses and
+         * nothing more, and the page appears the moment somebody
+         * touches it. This is what a thread's stack is made of, so it
+         * has to come AFTER the mapped-file case - both live in the
+         * same area, and a file has contents while this has zeros. */
+        if (r->int_no == 14 && (r->cs & 3) == 3) {
+            uint64_t addr = read_cr2();
+            if (task64_in_mmap(addr) &&
+                paging64_lookup(addr & ~0xFFFULL) == 0) {
+                uint32_t frame = pmm_alloc_frame();
+                if (frame) {
+                    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+                    if (paging64_map(addr & ~0xFFFULL, frame,
+                                     PG_USER | PG_WRITE | PG_NX) == 0) {
+                        mmap_pages++;
+                        return;
+                    }
+                    pmm_free_frame(frame);
+                }
+            }
+        }
+
         /* The stack, which has just grown by one page downwards.
          *
          * A program gets four pages to start with and we add the rest
@@ -192,6 +208,14 @@ static void isr64_dispatch(struct regs *r)
             }
         }
 
+        /* A touch of a heap page the program asked for but which does
+         * not exist yet. This is not an error but the moment memory
+         * becomes real: asking for a megabyte cost zero, and payment is
+         * due only for the pages actually used.
+         *
+         * Writable and with no execute permission - there is no code in
+         * a program's data, and if there were, the processor would not
+         * run it. */
         if (r->int_no == 14 && (r->cs & 3) == 3) {
             uint64_t addr = read_cr2();
             if (task64_in_heap(addr) &&

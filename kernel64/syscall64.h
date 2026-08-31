@@ -68,6 +68,14 @@
 /* The number of the core the program is running on right now */
 #define SYS64_CORE      42
 
+/* Fresh, zeroed memory in the mapping area: a1=size -> address or 0.
+   Only the addresses are reserved; the pages appear on first touch. */
+#define SYS64_MMAP      43
+
+/* A thread of this process (the same memory): a1=entry, a2=argument
+   -> its task number or -1 */
+#define SYS64_THREAD    44
+
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1

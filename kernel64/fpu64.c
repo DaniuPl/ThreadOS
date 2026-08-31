@@ -21,7 +21,15 @@
 static uint8_t clean[FPU_AREA] __attribute__((aligned(16)));
 static int enabled;
 
-int fpu64_init(void)
+/* The control registers are the CORE's, not the system's.
+ *
+ * Every core has its own CR0 and CR4, so every one has to be told
+ * separately that these instructions are allowed. A core that is not
+ * told answers an ordinary movdqa with an invalid opcode - and on
+ * x86-64 the compiler reaches for XMM without asking, because the
+ * calling convention says it may. So a program running on a secondary
+ * core would die of an instruction that is perfectly correct. */
+void fpu64_enable_core(void)
 {
     uint64_t cr0, cr4;
 
@@ -37,6 +45,13 @@ int fpu64_init(void)
     __asm__ volatile("movq %0, %%cr4" : : "r"(cr4));
 
     __asm__ volatile("fninit");
+}
+
+int fpu64_init(void)
+{
+    fpu64_enable_core();
+    /* The pattern for a new task is taken once, from the boot core -
+       a freshly initialized unit looks the same on every one of them */
     __asm__ volatile("fxsave (%0)" : : "r"(clean) : "memory");
 
     enabled = 1;

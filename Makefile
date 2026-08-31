@@ -347,6 +347,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/httpget.elf \
                $(BUILD)/user64/gweb.elf \
                $(BUILD)/user64/mkmap64.elf \
+               $(BUILD)/user64/tlbtest64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
                $(BUILD)/user64/dynlib.elf \
@@ -437,6 +438,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    httpget=$(BUILD)/user64/httpget.elf \
 	    gweb=$(BUILD)/user64/gweb.elf \
 	    mkmap64=$(BUILD)/user64/mkmap64.elf \
+	    tlbtest64=$(BUILD)/user64/tlbtest64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \

@@ -376,6 +376,101 @@ static void spawn_thread(void *arg)
  * a place for code as for data, and what lies in it is decided by
  * whoever sets it up.
  */
+/* --- Anonymous memory ---------------------------------------------
+ *
+ * Fresh, zeroed memory in the process's mapping area. Nothing is
+ * allocated here: we only reserve the addresses, and the pages appear
+ * on the first touch - exactly like the heap. A program that asks for
+ * a megabyte and uses one page will also occupy one.
+ *
+ * That is what a thread's stack comes from, and it is the reason this
+ * exists at all: a thread needs a piece of the process's space that is
+ * nobody else's, and 'nobody else's' is decided by the one counter
+ * every thread of the process shares.
+ */
+uint64_t proc64_mmap(uint64_t size)
+{
+    if (!size)
+        return 0;
+    uint64_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    uint64_t base = task64_mmap_next();
+    uint64_t end = base + pages * PAGE_SIZE;
+    if (!base || end > USER64_MMAP_MAX || end < base)
+        return 0;
+
+    task64_set_mmap_next(end);
+    return base;
+}
+
+/* --- A thread of the process ---------------------------------------
+ *
+ * The same address space, its own stack. Everything hard about this
+ * lies elsewhere: the space has to outlive the first thread to end
+ * (task64.c), the next free address has to be one counter for all of
+ * them and not a copy each (task64.c), and a mapping changed by one of
+ * them has to reach the cores running the others (kernel/tlb.c).
+ * What is left here is handing out a stack and going down to ring 3.
+ */
+#define THREAD_STACK (8 * PAGE_SIZE)
+
+struct thread64_start {
+    uint64_t entry;
+    uint64_t arg;
+    uint64_t ustack_top;
+};
+
+static void thread64_trampoline(void *a)
+{
+    struct thread64_start ts = *(struct thread64_start *)a;
+    kfree(a);
+
+    /* The kernel stack of THIS thread - the processor has to be told
+       where to come back to on an interrupt from ring 3, and on a
+       syscall, and each thread has its own */
+    uint64_t kstack;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(kstack));
+    task64_enter_space(paging64_current_space(), kstack & ~0xFULL);
+
+    /* We enter user code - the big kernel lock stays here */
+    biglock_leave();
+    enter_ring3_64(ts.entry, ts.ustack_top, ts.arg, 0);
+}
+
+int proc64_thread(uint64_t entry, uint64_t arg)
+{
+    uint64_t space = paging64_current_space();
+    if (!task64_mmap_next() || !space)      /* from a ring 3 process only */
+        return -1;
+
+    uint64_t stack = proc64_mmap(THREAD_STACK);
+    if (!stack)
+        return -1;
+
+    struct thread64_start *ts = kmalloc(sizeof(*ts));
+    if (!ts)
+        return -1;
+    ts->entry = entry;
+    ts->arg = arg;
+    /* Aligned to sixteen bytes, minus eight - and the minus eight is
+       the whole point. A thread starts at an ordinary C function, and
+       the compiler treats it like any other: it assumes the stack looks
+       the way it does after a call instruction, with a return address
+       on top. It bases the alignment of its own variables on that, and
+       when it does not hold, the first movaps writing sixteen bytes
+       ends in a general protection fault. The program's own stack is
+       laid out the same way and for the same reason. */
+    ts->ustack_top = ((stack + THREAD_STACK - 16) & ~0xFULL) - 8;
+
+    struct task64 *t = task64_create_thread("thread", thread64_trampoline,
+                                            ts, space);
+    if (!t) {
+        kfree(ts);
+        return -1;
+    }
+    return task64_id(t);
+}
+
 uint64_t proc64_shm(int key, uint64_t size)
 {
     if (!size)

@@ -267,6 +267,35 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     return t;
 }
 
+/* A thread of the current process: the SAME address space, its own
+   kernel stack, and everything else the process has - the working
+   directory, the console, the descriptors it inherits from the parent.
+   The space is freed by whichever of them ends last.
+
+   The right to run on any core comes along: a thread is the same
+   program, and since a changed mapping now reaches the other cores
+   (kernel/tlb.c), two cores standing in one space is no longer a
+   thing to be afraid of. */
+struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
+                                    void *arg, uint64_t space)
+{
+    struct task64 *t = task64_create(name, entry, arg);
+    if (!t)
+        return NULL;
+    irqflags_t flags = irq_save();
+    t->space = space;
+    t->brk_base = current->brk_base;
+    t->brk = current->brk;
+    t->mmap = current->mmap;
+    t->cwd = current->cwd;
+    t->vc = current->vc;
+    t->anycore = current->anycore;
+    for (int i = 0; i < FD_MAX; i++)
+        t->fds[i] = current->fds[i];
+    irq_restore(flags);
+    return t;
+}
+
 /* A task that EVERY core may run. An ordinary one stays on the boot
    core: the rest of the kernel is written for a single core. */
 struct task64 *task64_create_anycore(const char *name,
@@ -491,15 +520,33 @@ static void apply_context(struct task64 *t, int nr)
 /* Gives up the task's address space and returns to the kernel's.
    Called when a task dies - and it dies while still standing on its
    own CR3, so it has to step off it first. */
+/* Is anybody else still standing in this space?
+ *
+ * Threads share one, so the last one out turns the lights off. Freeing
+ * it on the first thread's death would pull the tables out from under
+ * the others - and they are still running in them. */
+static int space_in_use(uint64_t space, struct task64 *except)
+{
+    struct task64 *t = current;
+    do {
+        if (t != except && t->space == space && t->state != TASK_ZOMBIE)
+            return 1;
+        t = t->next;
+    } while (t != current);
+    return 0;
+}
+
 static void drop_space(struct task64 *t)
 {
     if (!t->space)
         return;
     uint64_t doomed = t->space;
+    int last = !space_in_use(doomed, t);
     t->space = 0;
     t->kstack_top = 0;
     paging64_switch(paging64_kernel_space());
-    paging64_free_space(doomed);
+    if (last)
+        paging64_free_space(doomed);
 }
 
 /* Takes ownership of an address space and moves onto it at once.
@@ -1000,15 +1047,47 @@ int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
     return 1;
 }
 
+/* --- what belongs to the SPACE, not to the task ----------------------
+ *
+ * The heap limit and the next free mapping address describe an address
+ * space, and threads share one. Kept per task they would be copied at
+ * creation and moved separately afterwards - so two threads asking for
+ * memory at the same moment would be handed the SAME address, each
+ * convinced it was the first there. So it is written to every task
+ * standing in the same space. */
+static void set_in_space(int which_brk, uint64_t value)
+{
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    do {
+        if (t->space == current->space) {
+            if (which_brk)
+                t->brk = value;
+            else
+                t->mmap = value;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}
+
 uint64_t task64_mmap_next(void)          { return current ? current->mmap : 0; }
-void task64_set_mmap_next(uint64_t adr)  { if (current) current->mmap = adr; }
+void task64_set_mmap_next(uint64_t adr)  { if (current) set_in_space(0, adr); }
 
 uint64_t task64_brk(void)      { return current->brk; }
 uint64_t task64_brk_base(void) { return current->brk_base; }
 
 void task64_set_brk(uint64_t brk)
 {
-    current->brk = brk;
+    set_in_space(1, brk);
+}
+
+/* Does the address lie in the part of the mapping area already handed
+   out, but not covered by a mapped file? Then it is anonymous memory
+   the process asked for and has now touched for the first time. */
+int task64_in_mmap(uint64_t addr)
+{
+    return current && addr >= USER64_MMAP_BASE && addr < current->mmap;
 }
 
 /* Does the address belong to the current task's heap? The page fault

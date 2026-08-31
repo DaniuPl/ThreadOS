@@ -51,6 +51,15 @@ int proc64_spawn_anycore(const char *name, const struct args64 *args,
 
 /* Maps the shared memory region with the given key into the current
    process's space. Returns the address at which it is visible, or 0. */
+/* Fresh, zeroed memory in the process's mapping area: only the
+   addresses are reserved, the pages appear on the first touch.
+   Returns the address or 0. */
+uint64_t proc64_mmap(uint64_t size);
+
+/* A thread of the current process: the same address space, its own
+   stack. Returns its task number or -1. */
+int proc64_thread(uint64_t entry, uint64_t arg);
+
 uint64_t proc64_shm(int key, uint64_t size);
 
 /* Maps a file from disk into the process's memory (read-only, the
