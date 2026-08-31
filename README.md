@@ -50,7 +50,10 @@ and insists if it will not — twelve of them at once, on a taskbar that
 shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. Icons, a file
 manager, a web browser and a settings window whose changes survive a
-restart.
+restart. The terminal in a window is a dark screen with light text and
+a session in it: scrollback, history, a movable cursor, `cd` and pipes
+— one program compiled for both kernels, differing only in how a
+command is started.
 
 **64-bit kernel** — long mode, four-level paging with NX, `syscall`/
 `sysret`, processes with `fork`/`exec`/`wait` and copy-on-write,

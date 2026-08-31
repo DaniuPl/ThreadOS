@@ -344,7 +344,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gclock64.elf \
                $(BUILD)/user64/gfiles64.elf \
                $(BUILD)/user64/gmon64.elf \
-               $(BUILD)/user64/gterm64.elf \
+               $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/nslookup.elf \
@@ -435,7 +435,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    gclock=$(BUILD)/user64/gclock64.elf \
 	    gfiles=$(BUILD)/user64/gfiles64.elf \
 	    gmon=$(BUILD)/user64/gmon64.elf \
-	    gterm=$(BUILD)/user64/gterm64.elf \
+	    gterm=$(BUILD)/user64/gterm.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \

@@ -310,16 +310,18 @@ def main():
             q2.mouse_goto(400, 300)
 
             tx, ty = body_text(3)
-            # The prompt '>' in green at the bottom of the window
-            # (240x150). We count the pixels in the whole character cell
-            # instead of aiming at one - the shape of a glyph is not a
-            # thing to guess at.
+            # The prompt in green on the last line of the window. The
+            # terminal's content is 400x240, its rows are 10 apart and
+            # the line being edited is the last of them: 4 + 22*10.
+            # We count the pixels of the whole character cell instead of
+            # aiming at one - the shape of a glyph is not a thing to
+            # guess at.
             prompts = 0
             end = time.time() + 20
             while time.time() < end:
                 _, _, ah = q2.screen_raw()
                 prompts = sum(1 for dy in range(8) for dx in range(8)
-                              if ah(tx + 4 + dx, ty + 138 + dy) == GREEN)
+                              if ah(tx + 4 + dx, ty + 224 + dy) == GREEN)
                 if prompts > 3:
                     break
                 time.sleep(0.5)

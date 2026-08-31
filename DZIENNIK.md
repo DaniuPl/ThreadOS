@@ -2609,3 +2609,69 @@ sprawdzane przez `make test`.
       i polegl na drugiej.
 
       Nowa grupa 'clock'.
+
+- [x] **Terminal, ktory jest terminalem** - i jeden program zamiast
+      dwoch.
+
+      To, co bylo, uruchamialo jedna komende i rysowalo to, co
+      wypisala. Kazda nastepna kasowala poprzednia, okno mialo 240x150
+      niezaleznie od tego, co czlowiek z nim zrobil, nie bylo kursora,
+      historii, powrotu do tego, co zjechalo, ani zmiany katalogu.
+      Dowodzilo, ze program w pierscieniu trzecim potrafi uruchomic
+      inny i przeczytac jego wyjscie. Nie bylo terminalem.
+
+      Terminal to sesja. To, co bylo uruchomione, zostaje na ekranie nad
+      tym, co sie wlasnie pisze; zacheta mowi, gdzie jestes; strzalki
+      wracaja do tego, co sie pisalo; a ile z tego widac, decyduje
+      rozmiar okna, a nie liczba wpisana w program.
+
+      Wiec: pierscien linii (SCROLL, najstarsza wypada - przesuwanie
+      czternastu kilobajtow przy kazdym nowym wierszu byloby tym
+      drugim sposobem), odbicie zachety i komendy tak, jak sie stalo,
+      dopisywanie wyjscia w miare czytania, PgUp/PgDn po tym, co
+      zjechalo (z napisem, ze nie patrzymy na koniec - inaczej terminal
+      wyglada na zawieszony), strzalki w bok, Home i End, pisanie W
+      MIEJSCU KURSORA, cd zmieniajace zachete od razu, potok 'a | b'
+      oraz komunikat zamiast ciszy, gdy programu nie ma.
+
+      **I jeden plik zamiast dwoch.** Byly dwa terminale: user/gterm.c
+      i user64/gterm64.c, kazdy z wlasnym bledem do poprawienia
+      osobno. Zostal jeden, kompilowany dwa razy - dokladnie jak
+      wspolne pliki jadra. Rozni sie w nim jedna rzecz, ta, ktora
+      naprawde zalezy od trybu: jak uruchomic komende i zlapac jej
+      wyjscie. W trybie chronionym jadro ma na to wywolanie (spawn z
+      przekierowaniem, a caly potok jednym wywolaniem); w trybie dlugim
+      nie ma - wiec terminal sklada to sam z fork, dup2, exec i pipe,
+      tak jak robi to powloka. Reszta - pierscien, edycja, historia,
+      rysowanie - to jeden kawalek kodu.
+
+      Trzy rzeczy, ktore test zlapal, a oko nie:
+
+      - Po uruchomieniu komendy linia wejscia byla "pusta" tylko przez
+        wyzerowanie dlugosci; w buforze dalej stal poprzedni tekst i
+        rysowal sie pod kursorem. Pusta linia to taka, ktorej pierwszy
+        bajt jest zerem.
+      - Napis "^ przewiniete" rysowal sie wprost na pierwszym wierszu i
+        oba teksty dzielily te same piksele. Teraz najpierw czysci pod
+        soba tlo. Widac to bylo dopiero przy czytaniu ekranu przez
+        czcionke - czlowiek widzi "cos tam jest", test widzi
+        "co^u????winiete".
+      - Napis o przewinieciu ma pietnascie znakow, a czyszczone pod nim
+        tlo mialo czternascie - wiec ostatnia litera rysowala sie poza
+        wyczyszczonym polem i gubila sie przy krawedzi. Test czytajacy
+        napis literka po literce widzi taka roznice; oko nie.
+
+      **Ciemny motyw i angielski.** Terminal ma tlo w kolorze czerni z
+      palety i jasny tekst - tak, jak terminal wyglada. Okna pulpitu sa
+      szare, wiec widac od razu, ze to nie jest formularz, tylko ekran w
+      oknie. Jego wlasne komunikaty sa po angielsku ('no such program',
+      'cd: no such directory', '[code N]', '^ scrolled back') - w
+      odroznieniu od komunikatow jadra, ktore zostaja po polsku.
+
+      Testy czytaja CYFRY I LITERY Z EKRANU - wzorzec osmiu bajtow
+      kazdej komorki szuka sie w tej samej czcionce, ktora rysowalo
+      jadro. Wiec asercje mowia o tym, co widzi czlowiek, a nie o tym,
+      w co wierzy program. Dwie grupy: 'gterm' (sesja, historia, ruch w
+      linii, cd, potok, przewijanie, wiecej linii po rozciagnieciu
+      okna) i 'gterm64' (ta sama sesja przez fork, dup2, exec i pipe w
+      trybie dlugim).

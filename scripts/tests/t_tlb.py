@@ -61,9 +61,22 @@ def counters(q, wait, timeout=60):
 
 
 def run_case(q, out, label):
-    """What the program itself reports: (mask, chunks, early, late)."""
+    """What the program itself reports: (mask, chunks, early, late).
+
+    The screen holds twenty-five lines, and the kernel says something of
+    its own about every thread that ends - so under a loaded host the
+    report can scroll off the top before we read it. The serial log
+    keeps everything, so when the screen has lost it we read that
+    instead, taking the LAST report in it: that is the run we have just
+    made."""
     h = HEAD.search(out)
     b = BAD.search(out)
+    if not h or not b:
+        log = q.serial()
+        hits = list(HEAD.finditer(log))
+        bits = list(BAD.finditer(log))
+        h = hits[-1] if hits else None
+        b = bits[-1] if bits else None
     check("tlbtest zdal raport%s" % label, bool(h) and bool(b))
     if not h or not b:
         return None
