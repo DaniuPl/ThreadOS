@@ -22,6 +22,7 @@
 #include "include/prog.h"
 #include "include/smp.h"
 #include "include/tlb.h"
+#include "include/isr.h"
 #include "include/smpmem.h"
 #include "include/smpthreads.h"
 #include "include/pit.h"
@@ -426,6 +427,10 @@ static void cmd_smp(void)
        cores answered. */
     printk("TLB: lokalnie %u, zdalnie %u, odpowiedzi %u\n",
            tlb_local_only(), tlb_shootdowns(), tlb_remote_acks());
+    /* The commonest way into the kernel there is. 'bez zamka' are the
+       faults served before the big kernel lock was taken at all. */
+    printk("Bledy stron: bez zamka %u, z zamkiem %u\n",
+           isr_faults_nolock(), isr_faults_locked());
 }
 
 static void cmd_dhcp(void)

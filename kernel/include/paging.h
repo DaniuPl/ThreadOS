@@ -50,6 +50,18 @@ int paging_file_dirty(uint32_t dir_phys, uint32_t vaddr);
 /* Clears the "dirty" bit - called after a page is written back to its file */
 void paging_file_clean(uint32_t dir_phys, uint32_t vaddr);
 uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr);
+
+/* Maps only if there is nothing at that address yet. Returns 0 when
+   somebody was there first - two cores can fault on the same page of
+   one address space at the same moment, and the loser has to learn
+   that it lost. */
+int paging_map_user_if_absent(uint32_t dir_phys, uint32_t vaddr,
+                              uint32_t frame);
+
+/* Is there nothing at all at that address? Stricter than 'not
+   present': a page evicted to disk is absent too, and filling it with
+   zeros would lose what is on the disk. */
+int paging_entry_empty(uint32_t dir_phys, uint32_t vaddr);
 void paging_destroy_address_space(uint32_t dir_phys);
 
 /* Clones an address space for fork(): not one page of the process is

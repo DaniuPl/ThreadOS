@@ -79,15 +79,91 @@ static void isr64_dispatch(struct regs *r);
  * A program may run on any core, but inside the kernel there is to be
  * one at a time. An interrupt that caught the processor already in the
  * kernel takes nothing new: the lock is recursive. */
+/* --- the fault causes that need no big kernel lock -------------------
+ *
+ * The same list as in the 32-bit kernel (kernel/exec.c): heap, stack
+ * and anonymous memory in the mapping area. A frame, four kilobytes of
+ * zeros and one entry in a table - and all three have locks of their
+ * own. Everything else reaches for the disk or for the task list and
+ * goes in as before.
+ *
+ * Returns 1 when it dealt with the fault.
+ */
+static int demand_page_nolock(uint64_t addr)
+{
+    uint64_t page = addr & ~0xFFFULL;
+    uint32_t first = 0, remaining = 0, write = 0;
+
+    int in_heap = task64_in_heap(addr);
+    int in_mmap = task64_in_mmap(addr);
+    int in_stack = addr < USER64_STACK_TOP &&
+                   addr >= USER64_STACK_TOP - USER64_STACK_MAX;
+    if (!in_heap && !in_mmap && !in_stack)
+        return 0;
+    if (in_mmap && task64_mmap_find(addr, &first, &remaining, &write))
+        return 0;                   /* a file - that one reaches for the disk */
+    if (!paging64_entry_empty(page))
+        return 0;                   /* present, or on the disk - not ours */
+
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;                   /* out of memory - let the locked path try */
+    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+    if (paging64_map_if_absent(page, frame, PG_USER | PG_WRITE | PG_NX)) {
+        if (in_stack)
+            stack_pages++;
+        else if (in_mmap)
+            mmap_pages++;
+        else
+            heap_pages++;
+    } else {
+        /* Another core got here first with its own frame. The page is
+           there, the instruction may be repeated - ours is spare. */
+        pmm_free_frame(frame);
+    }
+    return 1;
+}
+
+/* How many page faults were served without the big kernel lock, and
+   how many had to take it. Nothing depends on these; they are here so
+   that the question "is the lock really not being taken" has an answer
+   that is not a stopwatch. */
+static uint32_t faults_nolock;
+static uint32_t faults_locked;
+
+uint32_t isr_faults_nolock(void) { return faults_nolock; }
+uint32_t isr_faults_locked(void) { return faults_locked; }
+
 void isr64_handler(struct regs *r)
 {
     int z_ring3 = (r->cs & 3) == 3;
+
+    /* A page fault is the commonest way into the kernel there is, and
+       most of them are not errors. Those causes are served before the
+       lock is taken - the tables, the frame allocator and the
+       translation buffers have locks of their own. Copy-on-write goes
+       the same way, and it is the sharper case: there the page is
+       present and the frame under it changes. */
+    if (r->int_no == 14) {
+        uint64_t cr2 = read_cr2();
+        if ((r->err_code & 0x02) && paging64_handle_cow(cr2)) {
+            faults_nolock++;
+            return;
+        }
+        if (z_ring3 && !(r->err_code & 0x01) && demand_page_nolock(cr2)) {
+            faults_nolock++;
+            return;
+        }
+        faults_locked++;
+    }
+
     if (z_ring3)
         biglock_enter();
     isr64_dispatch(r);
     if (z_ring3)
         biglock_leave();
 }
+
 
 static void isr64_dispatch(struct regs *r)
 {

@@ -34,6 +34,7 @@
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/smp.h"
 #include "../kernel/include/tlb.h"
+#include "../kernel/include/isr.h"
 #include "../kernel/include/smpmem.h"
 #include "../kernel/include/smpthreads.h"
 #include "../kernel/include/io.h"
@@ -295,6 +296,10 @@ static void cmd_smp(void)
        cores answered. */
     printk("TLB: lokalnie %u, zdalnie %u, odpowiedzi %u\n",
            tlb_local_only(), tlb_shootdowns(), tlb_remote_acks());
+    /* The commonest way into the kernel there is. 'bez zamka' are the
+       faults served before the big kernel lock was taken at all. */
+    printk("Bledy stron: bez zamka %u, z zamkiem %u\n",
+           isr_faults_nolock(), isr_faults_locked());
 }
 
 /* cp <source> <target> - copying a file onto the disk

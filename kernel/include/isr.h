@@ -40,4 +40,11 @@ typedef void (*irq_handler_t)(struct regs *r);
 
 void irq_install_handler(int irq, irq_handler_t handler);
 
+/* How many page faults were served without the big kernel lock, and how
+   many had to take it. The commonest way into the kernel there is - so
+   the question of whether it still closes the kernel for everybody
+   deserves an answer that is not a stopwatch. */
+uint32_t isr_faults_nolock(void);
+uint32_t isr_faults_locked(void);
+
 #endif

@@ -48,6 +48,15 @@ int paging64_init(void);
 /* Maps a single 4 KiB page. 0 = mapped. */
 int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags);
 
+/* Maps only if there is nothing at that address yet. Returns 1 when it
+   mapped, 0 when somebody was there first - two cores can fault on the
+   same page of one space at the same moment. */
+int paging64_map_if_absent(uint64_t virt, uint64_t phys, uint64_t flags);
+
+/* Is there nothing at all at that address? Stricter than 'not
+   present': a page evicted to disk is absent too. */
+int paging64_entry_empty(uint64_t virt);
+
 /* Removes a page's mapping; returns the frame that lay under it */
 uint64_t paging64_unmap(uint64_t virt);
 

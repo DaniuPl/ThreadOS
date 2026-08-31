@@ -118,9 +118,13 @@ ground for both.
   core. The first syscalls are out of it already — the ones that read
   nothing but the calling task's own state are on an explicit, audited
   list, and `runw syscalls` shows a million syscalls per process
-  running two-and-a-half times faster on four cores than on one. Every
-  further syscall taken off that lock has to be read to the end first;
-  the subsystems come after.
+  running two-and-a-half times faster on four cores than on one. The
+  page fault — the commonest way into the kernel there is — is off it
+  too: heap, stack, anonymous memory and copy-on-write are served
+  before the lock is taken, and the page tables have a lock of their
+  own. Eighteen thousand faults, none of them taking the big lock. What
+  is left under it are the drivers, the filesystem and the swapper, and
+  each has to be read to the end before it can follow.
 
 **Infrastructure**
 

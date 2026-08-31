@@ -480,6 +480,62 @@ uint32_t process_mmap_pages(void)
     return mmap_pages;
 }
 
+/* --- the fault causes that need no big kernel lock -------------------
+ *
+ * A page fault is the hottest way into the kernel there is: every
+ * program touching memory goes through it thousands of times. Most of
+ * those faults are not errors and not even work worth the name - a
+ * frame from the allocator, four kilobytes of zeros and one entry in a
+ * table, and all three have locks of their own.
+ *
+ * So the list below, exactly like the list of system calls that need
+ * no lock: heap, stack, and anonymous memory in the mapping area.
+ * Everything else - a page from the swap file, a page of a mapped
+ * file, and every real error - goes in as before, because it reaches
+ * for the disk or for the task list.
+ *
+ * 'Anonymous' is the awkward one: file mappings live in the same area,
+ * so it is not the address that decides but the absence of a mapping
+ * covering it. And the entry has to be EMPTY, not merely absent: a
+ * page evicted to disk is absent too, and handing it a fresh page of
+ * zeros would lose what is on the disk.
+ *
+ * Returns 1 when it dealt with the fault.
+ */
+int process_demand_page_nolock(uint32_t addr)
+{
+    uint32_t brk = task_brk();
+    if (!brk)                       /* a kernel thread - it has no heap */
+        return 0;
+
+    uint32_t va = addr & ~(PAGE_SIZE - 1);
+    int in_heap = addr >= task_brk_base() && addr < brk;
+    int in_mmap = addr >= MMAP_BASE && addr < task_mmap_next();
+    int in_stack = addr >= USER_STACK_BOTTOM && addr < USER_STACK_TOP;
+    if (!in_heap && !in_mmap && !in_stack)
+        return 0;
+
+    uint32_t first = 0, remaining = 0, write = 0;
+    if (in_mmap && task_mmap_find(addr, &first, &remaining, &write))
+        return 0;                   /* a file - that one reaches for the disk */
+
+    uint32_t dir = task_current_cr3();
+    if (!paging_entry_empty(dir, va))
+        return 0;                   /* present, or on the disk - not ours */
+
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;                   /* out of memory - let the locked path try */
+    memset((void *)frame, 0, PAGE_SIZE);
+    if (!paging_map_user_if_absent(dir, va, frame)) {
+        /* Another core got here first with its own frame. That is not a
+           failure: the page is there, and the instruction may be
+           repeated. Ours is the one that turns out to be spare. */
+        pmm_free_frame(frame);
+    }
+    return 1;
+}
+
 int process_demand_page(uint32_t addr)
 {
     uint32_t brk = task_brk();

@@ -45,6 +45,16 @@ static void isr_dispatch(struct regs *r);
  * the lock is recursive and a core that holds it walks straight
  * through without waiting.
  */
+/* How many page faults were served without the big kernel lock, and
+   how many had to take it. Nothing depends on these; they are here so
+   that the question "is the lock really not being taken" has an answer
+   that is not a stopwatch. */
+static uint32_t faults_nolock;
+static uint32_t faults_locked;
+
+uint32_t isr_faults_nolock(void) { return faults_nolock; }
+uint32_t isr_faults_locked(void) { return faults_locked; }
+
 void isr_handler(struct regs *r)
 {
     if ((r->cs & 3) != 3) {         /* the kernel interrupted inside the kernel */
@@ -70,6 +80,29 @@ void isr_handler(struct regs *r)
             biglock_leave();
         }
         return;
+    }
+
+    /* A page fault is the commonest way into the kernel there is, and
+       most of them are not errors: a frame, four kilobytes of zeros
+       and one entry in a table. Those causes are on an explicit list
+       (process_demand_page_nolock) and are served before the lock is
+       taken - the tables, the frame allocator and the translation
+       buffers have locks of their own.
+
+       Copy-on-write goes the same way, and it is the sharper case:
+       there the page is present and the frame under it changes. */
+    if (r->int_no == 14) {
+        uint32_t cr2;
+        __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
+        if (paging_handle_cow(cr2, r->err_code)) {
+            faults_nolock++;
+            return;
+        }
+        if (!(r->err_code & 0x1) && process_demand_page_nolock(cr2)) {
+            faults_nolock++;
+            return;
+        }
+        faults_locked++;
     }
 
     biglock_enter();

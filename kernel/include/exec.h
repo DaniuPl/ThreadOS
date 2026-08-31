@@ -44,6 +44,12 @@ int process_exec(const char *cmdline);
    heap or the mmap area of the current process. 1 = the page appeared. */
 int process_demand_page(uint32_t addr);
 
+/* The same, but only for the causes that reach neither the disk nor
+   the task list: heap, stack and anonymous memory in the mapping area.
+   Tried BEFORE the big kernel lock - so a page fault, the commonest
+   way into the kernel there is, does not close it for everybody. */
+int process_demand_page_nolock(uint32_t addr);
+
 /* sbrk: moves the end of the current process's heap by increment bytes
    (>=0). Returns the old brk or (uint32_t)-1 on error. */
 uint32_t process_sbrk(int32_t increment);

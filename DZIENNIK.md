@@ -2318,3 +2318,73 @@ sprawdzane przez `make test`.
       cos znacza.
 
       809 asercji, 50 grup, 492 s.
+
+- [x] **Bledy stron bez wielkiego zamka** - i pierwszy podsystem, ktory
+      dostal wlasny.
+
+      Blad strony to najczestsze wejscie do jadra, jakie jest. Kazdy
+      program dotykajacy pamieci przechodzi tedy tysiace razy, a
+      wiekszosc tych bledow to nie sa bledy ani nawet praca z nazwy:
+      ramka od alokatora, cztery kilobajty zer i jeden wpis w tablicy.
+      Wszystkie trzy maja wlasne zamki.
+
+      A mimo to kazde takie wejscie bralo wielki zamek jadra - wiec dwa
+      procesy dotykajace WLASNEJ pamieci, w WLASNYCH przestrzeniach
+      adresowych, bez niczego wspolnego, i tak szly po kolei.
+
+      Lista przyczyn obslugiwanych bez zamka jest krotka i jawna, tak
+      samo jak lista wywolan systemowych: sterta, stos, pamiec
+      anonimowa w obszarze mapowan i kopiowanie przy zapisie. Reszta -
+      strona z pliku wymiany, strona odwzorowanego pliku i kazdy
+      prawdziwy blad - wchodzi jak dotad, bo siega po dysk albo po
+      liste zadan.
+
+      **Tablice stron dostaly wlasny zamek.** Byly wlasnoscia wielkiego
+      zamka tak dlugo, jak dlugo bral go kazdy blad strony; skoro juz
+      nie bierze, potrzebuja swojego. Jeden na cale jadro i z
+      rozmyslem: sekcja pod nim to przejscie dwoch (albo czterech)
+      poziomow i jeden zapis. Czego pod nim byc nie moze, to dysku -
+      wiec wymiana stron bierze go wokol wpisu i puszcza na czas
+      odczytu.
+
+      **Dwa rdzenie na TEJ SAMEJ stronie.** To jest nowy wyscig i
+      trzeba go bylo obsluzyc wprost: oba widza brak mapowania, oba
+      przynosza ramke, i przegrany musi sie dowiedziec, ze przegral -
+      inaczej strona zwyciezcy, juz zapisana, zostaje zastapiona pusta.
+      Stad mapowanie "tylko jesli nic tam nie ma".
+
+      **Wpis musi byc PUSTY, nie tylko nieobecny.** Strona wyrzucona na
+      dysk tez jest nieobecna, a danie jej swiezej strony zer zgubiloby
+      to, co lezy na dysku. Osobne pytanie i osobna odpowiedz.
+
+      **Alokator ramek skanowal bitmape od zera przy kazdym
+      przydziale.** Przydzielenie N ramek kosztowalo N do kwadratu, i
+      to pod zamkiem trzymanym przez caly czas. Program dotykajacy
+      dziewieciu tysiecy stron spedzal wiecej czasu na chodzeniu po
+      bitmapie, po ktorej juz chodzil, niz na czymkolwiek innym. Kursor
+      pamietajacy, gdzie skonczylo sie ostatnie szukanie, zalatwia to
+      dla przypadku jednej ramki - czyli dla prawie kazdego wolajacego.
+      To akurat pomaga takze na jednym rdzeniu.
+
+      **Czego NIE twierdze.** Pomiar czasu jest tu niestabilny i mowie
+      to wprost: w swiezej maszynie 'run faults' dawal 21, 45 i 51
+      tykniec, a 'runw faults' 12, 12 i 25. Kierunek jest widoczny,
+      liczba nie. Dlatego asercja nie stoi na stoperze, tylko na
+      liczniku: jadro liczy, ile bledow obsluzylo ktora droga. Po
+      'runw faults' rosnie o 18001 bez zamka i o ZERO z zamkiem - dwa
+      procesy po dziewiec tysiecy stron. To mowi wprost to, co stoper
+      moze najwyzej zasugerowac.
+
+      Poprawnosc pilnowana jest rownie mocno i to ona nadaje licznikom
+      wartosc: kazda strona ma wrocic z tym, co w nia wpisano, a swieza
+      ma byc wyzerowana. Ramka wydana dwom procesom naraz wychodzi tu
+      jako zla suma.
+
+      830 asercji, 51 grup, 493 s.
+
+      Uwaga na przyszlosc: przy 51 grupach i czterech maszynach naraz
+      asercje czasowe w 'proccores' i 'lockless' zaczely raz na jakis
+      czas przegrywac z obciazeniem gospodarza (35 wobec 44 tykniec
+      przy progu 3/4). Osobno przechodza z zapasem. Prog nie jest zly -
+      to pomiar czasu w maszynie wirtualnej stojacej obok trzech innych
+      nie jest niczym pewnym.

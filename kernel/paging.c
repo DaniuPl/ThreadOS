@@ -24,6 +24,8 @@
 #include "include/shm.h"
 #include "include/swap.h"
 #include "include/printk.h"
+#include "include/spinlock.h"
+#include "include/smp.h"
 
 #define PTE_PRESENT 0x1
 #define PTE_WRITE   0x2
@@ -43,6 +45,38 @@
 #define PTE_COW     0x200
 #define PTE_SWAPPED 0x400
 #define PTE_FILE    0x800
+
+/* --- The lock on the page tables -------------------------------------
+ *
+ * The tables were the big kernel lock's property for as long as every
+ * entry into the kernel took that lock. A page fault no longer does -
+ * the causes that only need a frame and one entry are served without
+ * it - so the tables need a lock of their own.
+ *
+ * One for the whole kernel, and deliberately. The section under it is
+ * a walk of two levels and a single write; splitting it per address
+ * space would buy microseconds and cost a structure that has to be
+ * created, found and destroyed. What it must NOT cover is disk I/O -
+ * so swapping takes it around the entry and lets it go for the read.
+ *
+ * Waiting under it we keep answering shootdowns. A fault arrives
+ * through an interrupt gate, so with interrupts off, and a core that
+ * goes deaf while it waits is a core somebody else waits for forever.
+ */
+static struct spinlock tables = SPINLOCK_FREE;
+
+static void tables_lock(void)
+{
+    while (!spin_trylock(&tables)) {
+        tlb_service();
+        __asm__ volatile("pause" ::: "memory");
+    }
+}
+
+static void tables_unlock(void)
+{
+    spin_unlock(&tables);
+}
 
 #define NUM_TABLES (PAGING_STATIC_LIMIT / (4096u * 1024))
 
@@ -168,8 +202,15 @@ static uint32_t *page_entry(uint32_t dir_phys, uint32_t vaddr)
    bits: write permission (a read-only mapping must not have it, so
    that a write attempt ends in a protection fault rather than a
    quietly lost change) and the file page marker. */
-static int map_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
-                      uint32_t flags)
+/* 'only_absent' = 1 means: map only if there is nothing there yet.
+ *
+ * That is what a page fault needs. Two cores can fault on the SAME
+ * page of one address space at the same moment, both find it missing,
+ * and both bring a frame. Whoever loses has to learn that it lost -
+ * otherwise the winner's page, already written to, is replaced by the
+ * loser's empty one. */
+static int map_user_flags(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
+                          uint32_t flags, int only_absent)
 {
     /* Do not allow a user page to be mapped over the kernel area */
     if (vaddr < PAGING_USER_BASE)
@@ -180,24 +221,68 @@ static int map_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
     uint32_t pte = (vaddr >> 12) & 0x3FF;
     uint32_t pt_phys;
 
+    tables_lock();
     if (!(dir[pde] & PTE_PRESENT)) {
         pt_phys = pmm_alloc_frame();
-        if (!pt_phys)
+        if (!pt_phys) {
+            tables_unlock();
             return 0;
+        }
         memset((void *)pt_phys, 0, 4096);
         dir[pde] = pt_phys | PTE_PRESENT | PTE_WRITE | PTE_USER;
     } else {
-        if (kernel_table(dir[pde]))   /* a kernel table - leave it alone */
+        if (kernel_table(dir[pde])) {  /* a kernel table - leave it alone */
+            tables_unlock();
             return 0;
+        }
         pt_phys = dir[pde] & ~0xFFFu;
     }
 
+    if (only_absent && ((uint32_t *)pt_phys)[pte] != 0) {
+        tables_unlock();
+        return 0;                     /* somebody was here first */
+    }
+
     ((uint32_t *)pt_phys)[pte] = frame | PTE_PRESENT | PTE_USER | flags;
+    tables_unlock();
     /* The entry may be replacing one that was already there, and
        another core may be holding it. A new mapping costs the same
        here as a changed one and is not worth telling apart. */
     tlb_invalidate(dir_phys, vaddr);
     return 1;
+}
+
+static int map_user(uint32_t dir_phys, uint32_t vaddr, uint32_t frame,
+                      uint32_t flags)
+{
+    return map_user_flags(dir_phys, vaddr, frame, flags, 0);
+}
+
+int paging_map_user_if_absent(uint32_t dir_phys, uint32_t vaddr,
+                              uint32_t frame)
+{
+    return map_user_flags(dir_phys, vaddr, frame, PTE_WRITE, 1);
+}
+
+/* Is there nothing at all at this address?
+ *
+ * 'Nothing' is stricter than 'not present': a page evicted to disk is
+ * absent too, and filling it with zeros would lose what is on the
+ * disk. The fault path asks this before it decides it may simply hand
+ * over a fresh page. */
+int paging_entry_empty(uint32_t dir_phys, uint32_t vaddr)
+{
+    uint32_t *dir = (uint32_t *)dir_phys;
+    uint32_t pde = vaddr >> 22;
+    int empty;
+
+    tables_lock();
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
+        empty = !(dir[pde] & PTE_PRESENT);
+    else
+        empty = ((uint32_t *)(dir[pde] & ~0xFFFu))[(vaddr >> 12) & 0x3FF] == 0;
+    tables_unlock();
+    return empty;
 }
 
 int paging_map_user_in(uint32_t dir_phys, uint32_t vaddr, uint32_t frame)
@@ -246,9 +331,13 @@ uint32_t paging_get_mapping(uint32_t dir_phys, uint32_t vaddr)
 {
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pde = vaddr >> 22;
-    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
+    tables_lock();
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde])) {
+        tables_unlock();
         return 0;
+    }
     uint32_t pte = ((uint32_t *)(dir[pde] & ~0xFFFu))[(vaddr >> 12) & 0x3FF];
+    tables_unlock();
     return pte & PTE_PRESENT ? pte & ~0xFFFu : 0;
 }
 
@@ -381,14 +470,28 @@ int paging_handle_cow(uint32_t vaddr, uint32_t err_code)
     __asm__ volatile("movl %%cr3, %0" : "=r"(dir_phys));
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pde = vaddr >> 22;
-    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
+
+    /* From here to the end of the split, one core at a time. Two of
+       them faulting on the same shared page would otherwise both make
+       a copy, and one of the copies would be written into by nobody -
+       while the frame it replaced would have its owner count dropped
+       twice. */
+    tables_lock();
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde])) {
+        tables_unlock();
         return 0;
+    }
 
     uint32_t *pt = (uint32_t *)(dir[pde] & ~0xFFFu);
     uint32_t idx = (vaddr >> 12) & 0x3FF;
     uint32_t e = pt[idx];
-    if (!(e & PTE_PRESENT) || !(e & PTE_COW))
-        return 0;
+    if (!(e & PTE_PRESENT) || !(e & PTE_COW)) {
+        tables_unlock();
+        /* Somebody split it a moment ago - which is an answer too: the
+           instruction may be repeated and this time it will go
+           through. */
+        return !(e & PTE_COW) && (e & PTE_PRESENT) && (e & PTE_WRITE);
+    }
 
     uint32_t frame = e & ~0xFFFu;
     if (pmm_frame_refs(frame) <= 1) {
@@ -396,12 +499,15 @@ int paging_handle_cow(uint32_t vaddr, uint32_t err_code)
         pt[idx] = (e & ~(uint32_t)PTE_COW) | PTE_WRITE;
     } else {
         uint32_t copy = pmm_alloc_frame();
-        if (!copy)
+        if (!copy) {
+            tables_unlock();
             return 0;                   /* out of memory - the process will die */
+        }
         memcpy((void *)copy, (const void *)frame, 4096);
         pmm_free_frame(frame);          /* one owner fewer */
         pt[idx] = copy | (e & 0xFFFu & ~(uint32_t)PTE_COW) | PTE_WRITE;
     }
+    tables_unlock();
     /* The sharpest case there is: the address stays, the frame under it
        does not. A core holding the old entry would go on writing into
        memory that now belongs to somebody else. */
@@ -501,12 +607,20 @@ int paging_swap_in(uint32_t dir_phys, uint32_t vaddr)
 {
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pde = vaddr >> 22;
-    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde]))
-        return 0;
 
+    /* The entry is read under the lock and written under it, but the
+       disk read in between is NOT: holding it across an I/O would stop
+       every core that faults meanwhile, and for as long as the disk
+       takes. */
+    tables_lock();
+    if (!(dir[pde] & PTE_PRESENT) || kernel_table(dir[pde])) {
+        tables_unlock();
+        return 0;
+    }
     uint32_t *pt = (uint32_t *)(dir[pde] & ~0xFFFu);
     uint32_t idx = (vaddr >> 12) & 0x3FF;
     uint32_t e = pt[idx];
+    tables_unlock();
     if ((e & PTE_PRESENT) || !(e & PTE_SWAPPED))
         return 0;
 
@@ -518,7 +632,17 @@ int paging_swap_in(uint32_t dir_phys, uint32_t vaddr)
         pmm_free_frame(frame);
         return 0;
     }
+
+    tables_lock();
+    if (pt[idx] != e) {
+        /* Somebody dealt with it while we were reading the disk - our
+           frame and our slot are the ones that are now spare */
+        tables_unlock();
+        pmm_free_frame(frame);
+        return 1;
+    }
     pt[idx] = frame | PTE_PRESENT | PTE_WRITE | PTE_USER;
+    tables_unlock();
     swap_free_slot(slot);
     tlb_invalidate(dir_phys, vaddr);
     return 1;

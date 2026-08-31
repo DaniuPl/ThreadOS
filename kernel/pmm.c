@@ -133,9 +133,45 @@ void pmm_set_reclaim(int (*fn)(void))
     reclaim = fn;
 }
 
+/* Where the last search stopped.
+ *
+ * Without it every search starts from frame zero, so handing out N
+ * frames costs N squared - and the lock is held for all of it. It is
+ * not a correctness question but it is not a detail either: a program
+ * touching six thousand pages spent more time walking a bitmap it had
+ * already walked than doing anything else.
+ *
+ * A hint, not a promise: freeing does not move it back, so a search
+ * that finds nothing ahead starts over from the beginning. */
+static uint32_t cursor;
+
 static uint32_t alloc_contiguous_raw(uint32_t n)
 {
     irqflags_t flags = spin_lock_irq(&lock);
+
+    /* One frame is what almost every caller wants, and for one frame a
+       run of consecutive frames is not needed - so start where the
+       last one was found and go round once. */
+    if (n == 1) {
+        for (uint32_t i = 0; i < MAX_FRAMES; i++) {
+            uint32_t f = cursor + i;
+            if (f >= MAX_FRAMES)
+                f -= MAX_FRAMES;
+            if (frame_test(f))
+                continue;
+            frame_set(f);
+            refs[f] = 1;
+            used_frames++;
+            cursor = (f + 1 < MAX_FRAMES) ? f + 1 : 0;
+            spin_unlock_irq(&lock, flags);
+            return f * PAGE_SIZE;
+        }
+        spin_unlock_irq(&lock, flags);
+        return 0;
+    }
+
+    /* A run of several frames in a row - a device buffer, and rare
+       enough that walking the whole map is not worth avoiding */
     uint32_t run = 0;
     for (uint32_t f = 0; f < MAX_FRAMES; f++) {
         if (frame_test(f)) {

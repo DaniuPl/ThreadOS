@@ -1149,11 +1149,16 @@ int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
         if (current->maps[i].end)
             continue;
         current->maps[i].start = start;
-        current->maps[i].end = end;
         current->maps[i].size = size;
         current->maps[i].blocks = blocks;
         current->maps[i].nblocks_of = nblocks_of;
         current->maps[i].write = write;
+        /* 'end' says the entry is in use, so it goes in LAST. The page
+           fault handler reads this table without the big kernel lock,
+           and it is to see either a free entry or a whole one - never
+           a marker over fields that are not written yet. */
+        __asm__ volatile("" ::: "memory");
+        current->maps[i].end = end;
         return 0;
     }
     return -1;

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "paging64.h"
 #include "../kernel/include/tlb.h"
+#include "../kernel/include/spinlock.h"
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/string.h"
@@ -80,6 +81,32 @@ static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
     return table_at(table[idx]);
 }
 
+/* --- The lock on the page tables -------------------------------------
+ *
+ * The same reasoning as in the 32-bit kernel (kernel/paging.c): a page
+ * fault no longer takes the big kernel lock for the causes that only
+ * need a frame and one entry, so the tables need a lock of their own.
+ * One for the whole kernel; the section under it is a walk of four
+ * levels and a single write.
+ *
+ * Waiting under it we keep answering shootdowns - a fault arrives with
+ * interrupts off, and a core that goes deaf while it waits is a core
+ * somebody else waits for forever. */
+static struct spinlock tables = SPINLOCK_FREE;
+
+static void tables_lock(void)
+{
+    while (!spin_trylock(&tables)) {
+        tlb_service();
+        __asm__ volatile("pause" ::: "memory");
+    }
+}
+
+static void tables_unlock(void)
+{
+    spin_unlock(&tables);
+}
+
 /* A changed entry of the CURRENT space.
  *
  * Every caller below works on the space the core is standing in - the
@@ -91,8 +118,14 @@ static void invalidate(uint64_t addr)
     tlb_invalidate((uintptr_t)paging64_current_space(), (uintptr_t)addr);
 }
 
-static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
-                  uint64_t flags)
+/* 'only_absent' = 1 means: map only if there is nothing there yet.
+ *
+ * That is what a page fault needs. Two cores can fault on the SAME page
+ * of one address space at the same moment, both find it missing and
+ * both bring a frame - and the loser has to learn that it lost, or the
+ * winner's page, already written to, is replaced by an empty one. */
+static int map_in_flags(uint64_t *top, uint64_t virt, uint64_t phys,
+                        uint64_t flags, int only_absent)
 {
     if (!top)
         return -1;
@@ -100,23 +133,38 @@ static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
     /* The user bit has to run the whole path - otherwise ring 3 will
        not see the page even though its own entry allows it */
     uint64_t path = flags & PG_USER;
+    int rc = -1;
 
+    tables_lock();
     uint64_t *pdpt = ensure(top, (int)((virt >> 39) & 0x1FF), path);
     if (!pdpt)
-        return -1;
+        goto out;
     uint64_t *pd = ensure(pdpt, (int)((virt >> 30) & 0x1FF), path);
     if (!pd)
-        return -1;
+        goto out;
 
     int i2 = (int)((virt >> 21) & 0x1FF);
     if (pd[i2] & PTE_HUGE)
-        return -1;              /* an area already described by a 2 MiB page */
+        goto out;               /* an area already described by a 2 MiB page */
     uint64_t *pt = ensure(pd, i2, path);
     if (!pt)
-        return -1;
+        goto out;
 
-    pt[(virt >> 12) & 0x1FF] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
-    return 0;
+    int i = (int)((virt >> 12) & 0x1FF);
+    if (only_absent && pt[i] != 0)
+        goto out;               /* somebody was here first */
+
+    pt[i] = (phys & ADDR_MASK) | PTE_PRESENT | flags;
+    rc = 0;
+out:
+    tables_unlock();
+    return rc;
+}
+
+static int map_in(uint64_t *top, uint64_t virt, uint64_t phys,
+                  uint64_t flags)
+{
+    return map_in_flags(top, virt, phys, flags, 0);
 }
 
 int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
@@ -126,6 +174,45 @@ int paging64_map(uint64_t virt, uint64_t phys, uint64_t flags)
         invalidate(virt);               /* only the current space has anything to
                                        invalidate in the translation buffer */
     return rc;
+}
+
+int paging64_map_if_absent(uint64_t virt, uint64_t phys, uint64_t flags)
+{
+    int rc = map_in_flags(root_now(), virt, phys, flags, 1);
+    if (rc == 0)
+        invalidate(virt);
+    return rc == 0;
+}
+
+/* Is there nothing at all at this address?
+ *
+ * Stricter than 'not present': a page evicted to disk is absent too,
+ * and filling it with zeros would lose what is on the disk. */
+int paging64_entry_empty(uint64_t virt)
+{
+    uint64_t *top = root_now();
+    int empty = 0;
+
+    tables_lock();
+    if (top) {
+        uint64_t e = top[(virt >> 39) & 0x1FF];
+        if (!(e & PTE_PRESENT))
+            empty = 1;
+        else {
+            e = table_at(e)[(virt >> 30) & 0x1FF];
+            if (!(e & PTE_PRESENT))
+                empty = 1;
+            else {
+                e = table_at(e)[(virt >> 21) & 0x1FF];
+                if (!(e & PTE_PRESENT))
+                    empty = 1;
+                else if (!(e & PTE_HUGE))
+                    empty = table_at(e)[(virt >> 12) & 0x1FF] == 0;
+            }
+        }
+    }
+    tables_unlock();
+    return empty;
 }
 
 /* One entry per two megabytes - that is how we describe memory and the
@@ -402,40 +489,58 @@ int paging64_handle_cow(uint64_t virt)
     if (!top)
         return 0;
 
+    /* One core at a time from here to the end of the split: two of them
+       faulting on the same shared page would otherwise both make a copy,
+       and the frame they replaced would lose an owner twice. */
+    tables_lock();
     uint64_t e = top[(virt >> 39) & 0x1FF];
     if (!(e & PTE_PRESENT))
-        return 0;
+        goto not_ours;
     e = table_at(e)[(virt >> 30) & 0x1FF];
     if (!(e & PTE_PRESENT))
-        return 0;
+        goto not_ours;
     e = table_at(e)[(virt >> 21) & 0x1FF];
     if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
-        return 0;
+        goto not_ours;
 
     uint64_t *pt = table_at(e);
     int i = (int)((virt >> 12) & 0x1FF);
-    if (!(pt[i] & PTE_PRESENT) || !(pt[i] & PG_COW))
-        return 0;
+    if (!(pt[i] & PTE_PRESENT) || !(pt[i] & PG_COW)) {
+        /* Somebody split it a moment ago - which is an answer too: the
+           instruction may be repeated and will go through */
+        int done = (pt[i] & PTE_PRESENT) && (pt[i] & PG_WRITE) &&
+                   !(pt[i] & PG_COW);
+        tables_unlock();
+        return done;
+    }
 
     uint64_t old = pt[i] & ADDR_MASK;
     uint64_t flags = (pt[i] & (PG_USER | PG_NX)) | PG_WRITE;
 
     if (pmm_frame_refs((uint32_t)old) <= 1) {
         pt[i] = old | PTE_PRESENT | flags;      /* we are alone */
+        tables_unlock();
         invalidate(virt);
         return 1;
     }
     cow_splits++;
 
     uint32_t fresh = pmm_alloc_frame();
-    if (!fresh)
+    if (!fresh) {
+        tables_unlock();
         return 0;
+    }
     memcpy((void *)(uintptr_t)fresh, (const void *)(uintptr_t)old, PAGE_SIZE);
     pmm_free_frame((uint32_t)old);              /* one owner fewer */
 
     pt[i] = (uint64_t)fresh | PTE_PRESENT | flags;
+    tables_unlock();
     invalidate(virt);
     return 1;
+
+not_ours:
+    tables_unlock();
+    return 0;
 }
 
 uint32_t paging64_cow_splits(void)
