@@ -2675,3 +2675,29 @@ sprawdzane przez `make test`.
       linii, cd, potok, przewijanie, wiecej linii po rozciagnieciu
       okna) i 'gterm64' (ta sama sesja przez fork, dup2, exec i pipe w
       trybie dlugim).
+
+- [x] **Alt+Tab** - klawiatura dostaje to, co dotad miala tylko mysz.
+
+      Przy dwunastu oknach jedyna droga do okna byla mysz: klik w okno
+      albo w jego przycisk na pasku. Klawisze do przelaczania byly w
+      sterowniku od dawna - wiedzial, ze Alt jest wcisniety, i wiedzial,
+      co to Tab. Nikt tych dwoch rzeczy nie zlozyl.
+
+      Teraz Alt+Tab oddaje ognisko nastepnemu oknu i wynosi je na
+      wierzch. Kolejnosc jest kolejnoscia slotow, czyli kolejnoscia
+      przyciskow na pasku zadan - wiec dwa nacisniecia zabieraja tam,
+      gdzie patrzenie na pasek mowi, ze zabiora. Okna zwiniete sa
+      pomijane (ognisko, ktorego nie widac, to klawiatura pisaca w
+      nicosc), tak samo dwa okna jadra - nie ma za nimi programu, ktory
+      by klawisz przyjal.
+
+      Kod Alt+Tab powstaje w kbdmap.c, wspolnym dla obu jader, jako
+      KEY_NEXTWIN - kolejny kod sterujacy obok strzalek. Pulpit lapie go
+      przed wszystkim innym; tam, gdzie pulpitu nie ma, nikt go nie
+      czyta i na konsoli tekstowej nic sie nie dzieje.
+
+      Nowa grupa 'alttab'. Dwie asercje sa tu wazniejsze od reszty: ze
+      okno naprawde WYCHODZI NA WIERZCH (caly jego pasek tytulu widac, a
+      nie polowa spod sasiada) i ze KLAWISZE ZA NIM IDA - po Alt+Tab
+      wpisana komenda laduje w terminalu, ktory chwile wczesniej
+      byl pod dwoma innymi oknami.

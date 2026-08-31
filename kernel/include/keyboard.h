@@ -13,6 +13,11 @@
 #define KEY_HOME  0x17
 #define KEY_END   0x18
 
+/* Alt+Tab: not a character either, and not for a program - it says
+   'the next window'. The desktop takes it before anything else does;
+   where there is no desktop, nothing reads it. */
+#define KEY_NEXTWIN 0x19
+
 /* Ctrl+C: not a character but a request to interrupt. The driver turns
    it into a SIGINT for the process holding the console (see keyboard.c). */
 #define KEY_INTR  0x03

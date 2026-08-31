@@ -17,6 +17,7 @@
 #define SC_RSHIFT 0x36
 #define SC_CTRL   0x1D
 #define SC_ALT    0x38
+#define SC_TAB    0x0F
 #define SC_F1     0x3B          /* F1..F12 lie consecutively from 0x3B */
 #define SC_RELEASED 0x80
 #define SC_EXTENDED 0xE0
@@ -84,6 +85,14 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
     if (scancode == (SC_ALT | SC_RELEASED)) {
         alt_pressed = 0;
         return KBD_NOTHING;
+    }
+    /* Alt+Tab. A character it is not, and it never reaches a program:
+       the desktop switches windows on it. Without a desktop nobody
+       reads the code and nothing happens - which is what should happen
+       on a text console. */
+    if (alt_pressed && scancode == SC_TAB) {
+        *out_char = KEY_NEXTWIN;
+        return KBD_CHAR;
     }
     /* Alt plus a function key. What that means is the caller's
        decision - we only report the key number, counted from zero. */

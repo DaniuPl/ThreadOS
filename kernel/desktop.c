@@ -873,8 +873,36 @@ static void reap_windows(void)
    ('run ...') still work. Runs in IRQ1 context. */
 static keyboard_char_handler_t prev_key_handler;
 
+/* Alt+Tab: the next window takes the focus and comes to the top.
+ *
+ * Round the slots in order, from the one that has the focus now. Slot
+ * order rather than the order they were last used: it is the order a
+ * person can see on the taskbar, so pressing it twice takes you where
+ * looking at the bar says it will.
+ *
+ * A minimised window is skipped - it is not on the screen, and a focus
+ * that cannot be seen is a keyboard typing into nowhere. So are the
+ * kernel's own two windows: they have no application behind them to
+ * take a key. */
+static void focus_next(void)
+{
+    int start = focus_idx >= 0 ? focus_idx : MAX_WIN - 1;
+    for (int k = 1; k <= MAX_WIN; k++) {
+        int i = (start + k) % MAX_WIN;
+        if (!wins[i].used || wins[i].minimized || !wins[i].content)
+            continue;
+        focus_idx = i;
+        raise_win(i);
+        return;
+    }
+}
+
 static void desktop_on_key(char c)
 {
+    if (c == KEY_NEXTWIN) {
+        focus_next();
+        return;
+    }
     if (focus_idx >= 0 && focus_idx < MAX_WIN && wins[focus_idx].used &&
         wins[focus_idx].content) {
         win_enqueue(&wins[focus_idx], WEV_KEY, 0, 0, (unsigned char)c);
