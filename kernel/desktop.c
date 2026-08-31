@@ -20,6 +20,7 @@
 #include "include/io.h"
 #include "include/config.h"
 #include "include/rtc.h"
+#include "include/printk.h"
 
 /* Desktop palette indices (set in desktop_thread)
  *
@@ -291,6 +292,10 @@ static int resize_idx = -1;
 static int content_drag = -1;
 static int drag_dx, drag_dy;
 static int prev_pressed;    /* the previous left-button state - to detect a click */
+/* Where the pointer was on the last pass. Drawing needs it for one
+   thing only: the entry the cursor is over is drawn differently, which
+   is what tells a list from a menu. */
+static int mouse_x, mouse_y;
 static int focus_idx = -1;  /* the window with keyboard focus */
 
 /* The taskbar and the launch menu */
@@ -307,8 +312,10 @@ static int focus_idx = -1;  /* the window with keyboard focus */
 #define TB_H 18                       /* the taskbar height */
 #define TB_ICON 12                    /* the picture on a button */
 #define MENU_BW 40                    /* the width of the "Menu" button */
-#define MENU_ROW 12                   /* the height of a menu entry */
-#define MENU_W 80                     /* the width of the opened menu */
+/* An entry is a picture and a name, so it is as tall as the picture
+   with air around it - not as tall as one line of text. */
+#define MENU_ROW 16                   /* the height of a menu entry */
+#define MENU_W 110                    /* the width of the opened menu */
 static int menu_open;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
@@ -643,6 +650,9 @@ static int on_titlebar(const struct window *win, int x, int y)
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
+
+    mouse_x = mx;
+    mouse_y = my;
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
         /* The taskbar / launch menu takes precedence (it is on top) */
@@ -999,6 +1009,77 @@ static void toggle_max(int i)
 }
 
 /* Draws the taskbar at the bottom and (if open) the launch menu */
+/* The wallpaper: a small picture stretched over the screen.
+ *
+ * A screen-sized image is three hundred kilobytes and the kernel's
+ * heap is one megabyte, so the picture kept here is small - 160 by 120
+ * at most - and every one of its pixels covers a block of the screen.
+ * It looks like what it is: a picture, softly. That is the honest
+ * trade at this size of machine, and it is the whole of the format:
+ *
+ *   "PWAL", width and height (two bytes each), then 192 colours of
+ *   three bytes (the palette entries from WALL_COL0 up), then one byte
+ *   per pixel - an index into those colours.
+ *
+ * The desktop's own colours live below WALL_COL0 and are not touched,
+ * so a wallpaper can never repaint a window.
+ */
+#define WALL_MAX_W 160
+#define WALL_MAX_H 120
+#define WALL_COL0  64
+#define WALL_COLS  192
+#define WALL_HDR   (4 + 2 + 2 + WALL_COLS * 3)
+
+static uint8_t *wall;              /* the picture, or NULL */
+static int wall_w, wall_h;
+
+/* Reads the wallpaper named in the settings. Anything wrong with the
+   file - missing, too big, not a picture - leaves the gradient in
+   place: a background is not something to fail on. */
+static void wallpaper_load(void)
+{
+    wall = (uint8_t *)0;
+    wall_w = wall_h = 0;
+
+    const char *name = config_get("tapeta");
+    if (!name || !name[0] || !fs_ready())
+        return;
+
+    uint8_t head[WALL_HDR];
+    int slot = fs_open(FS_ROOT, name, 0);
+    if (slot < 0)
+        return;
+    if (fs_read_at(slot, 0, head, sizeof(head)) != (int)sizeof(head))
+        return;
+    if (head[0] != 'P' || head[1] != 'W' || head[2] != 'A' || head[3] != 'L')
+        return;
+
+    int w = head[4] | (head[5] << 8);
+    int h = head[6] | (head[7] << 8);
+    if (w <= 0 || h <= 0 || w > WALL_MAX_W || h > WALL_MAX_H)
+        return;
+
+    uint8_t *buf = kmalloc((uint32_t)(w * h));
+    if (!buf)
+        return;
+    if (fs_read_at(slot, sizeof(head), buf, (uint32_t)(w * h)) != w * h) {
+        kfree(buf);
+        return;
+    }
+
+    /* The picture's own colours go in above the desktop's, so the two
+       never argue about an index */
+    for (int i = 0; i < WALL_COLS; i++) {
+        const uint8_t *c = head + 8 + i * 3;
+        video_set_palette((uint8_t)(WALL_COL0 + i), c[0] >> 2, c[1] >> 2,
+                          c[2] >> 2);
+    }
+    wall = buf;
+    wall_w = w;
+    wall_h = h;
+    printk("[pulpit] tapeta '%s': %dx%d\n", name, w, h);
+}
+
 /* The background: sixteen bands, darkening towards the floor.
  *
  * A flat colour is what a machine draws when nobody has thought about
@@ -1007,6 +1088,22 @@ static void toggle_max(int i)
 static void draw_background(void)
 {
     int h = taskbar_y();
+
+    /* A picture, if there is one: every pixel of it covers a block of
+       the screen, so this is one multiply per row and one per column
+       rather than a scaling filter nobody would see the benefit of. */
+    if (wall) {
+        int sw = video_w();
+        for (int y = 0; y < h; y++) {
+            int sy = y * wall_h / video_h();
+            const uint8_t *row = wall + sy * wall_w;
+            for (int x = 0; x < sw; x++)
+                video_putpixel(x, y, (uint8_t)(WALL_COL0 +
+                                               row[x * wall_w / sw]));
+        }
+        return;
+    }
+
     for (int i = 0; i < COL_DESK_N; i++) {
         int y0 = i * h / COL_DESK_N;
         int y1 = (i + 1) * h / COL_DESK_N;
@@ -1086,6 +1183,44 @@ static void clock_refresh(void)
     clock_text[8] = 0;
 }
 
+/* The name of the window under the pointer, shown just above the bar.
+ *
+ * Remembered rather than drawn on the spot: it belongs on top of
+ * everything, and the buttons are drawn before the menu that may open
+ * over them. */
+static int hint_x;
+static const char *hint_text;
+
+static void hint_for(int x, const char *text)
+{
+    hint_x = x;
+    hint_text = text;
+}
+
+static void draw_hint(void)
+{
+    if (!hint_text || !hint_text[0])
+        return;
+    int n = 0;
+    while (hint_text[n])
+        n++;
+    int w = n * 8 + 8;
+    int x = hint_x;
+    if (x + w > video_w())
+        x = video_w() - w;
+    if (x < 0)
+        x = 0;
+    int y = taskbar_y() - 15;
+
+    video_fill_rect(x, y, w, 13, COL_WIN);
+    video_fill_rect(x, y, w, 1, COL_LINE);
+    video_fill_rect(x, y + 12, w, 1, COL_LINE);
+    video_fill_rect(x, y, 1, 13, COL_LINE);
+    video_fill_rect(x + w - 1, y, 1, 13, COL_LINE);
+    video_draw_string(x + 4, y + 3, hint_text, COL_BLACK);
+    hint_text = (const char *)0;      /* one frame, one hint */
+}
+
 static void draw_taskbar(void)
 {
     int ty = taskbar_y();
@@ -1121,6 +1256,11 @@ static void draw_taskbar(void)
         draw_icon_art_col(art, bx + (bw - 2 - TB_ICON) / 2,
                           ty + (TB_H - TB_ICON) / 2,
                           i == focus_idx ? COL_WHITE : COL_BLACK);
+        /* A picture says WHICH program; it does not say which of two
+           terminals. The name comes back when the pointer asks for it,
+           which is the one moment it is wanted. */
+        if (in_rect(mouse_x, mouse_y, bx, ty, bw - 2, TB_H))
+            hint_for(bx, wins[i].title);
         j++;
     }
 
@@ -1130,8 +1270,10 @@ static void draw_taskbar(void)
     video_draw_string(clock_x(), ty + (TB_H - 8) / 2, clock_text, COL_BLACK);
 
     if (menu_open) {
-        /* One flat panel with a line round it, and a line between the
-           entries - a menu is a list, and a list needs no relief */
+        /* One flat panel with a line round it. Every entry is the
+           program's own picture and its name - the same picture as on
+           its icon and on its button, because a program that looks
+           like three different things is three things to remember. */
         int top = menu_item_y(0);
         int hgt = MENU_N * MENU_ROW;
         video_fill_rect(bx0 + 2, top, MENU_W, hgt, COL_WIN);
@@ -1141,9 +1283,25 @@ static void draw_taskbar(void)
         video_fill_rect(bx0 + 2 + MENU_W - 1, top, 1, hgt, COL_LINE);
         for (int i = 0; i < MENU_N; i++) {
             int iy = menu_item_y(i);
-            if (i)
+            int art = icon_of_app(menu_items[i]);
+            /* The entry under the pointer wears the accent colour.
+               Without it a menu is a list of words that happens to be
+               clickable; with it, it answers. */
+            int over = in_rect(mouse_x, mouse_y, bx0 + 2, iy, MENU_W,
+                               MENU_ROW);
+            if (over)
+                video_fill_rect(bx0 + 3, iy, MENU_W - 2, MENU_ROW,
+                                COL_TITLE);
+            else if (i)
                 video_fill_rect(bx0 + 3, iy, MENU_W - 2, 1, COL_LINE);
-            video_draw_string(bx0 + 6, iy + 2, menu_items[i], COL_BLACK);
+            draw_icon_art_col(art, bx0 + 6, iy + 2,
+                              over ? COL_WHITE : COL_BLACK);
+            /* The name a person knows it by, which is the one written
+               under its icon - the program's own name is for the
+               shell */
+            const char *label = art >= 0 ? icons[art].label : menu_items[i];
+            video_draw_string(bx0 + 22, iy + 4, label,
+                              over ? COL_WHITE : COL_BLACK);
         }
     }
 }
@@ -1388,6 +1546,7 @@ static void desktop_thread(void *arg)
 
 
     icons_load();              /* restore the remembered icon positions from disk */
+    wallpaper_load();          /* and the wallpaper, if the settings name one */
 
     /* Two kernel windows (no owner, no content buffer) */
     wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
@@ -1422,6 +1581,7 @@ static void desktop_thread(void *arg)
             draw_window(&wins[ord[k]]);
 
         draw_taskbar();
+        draw_hint();               /* above everything, including the menu */
         draw_cursor(mx, my);
 
         video_present();                      /* the finished frame -> the screen */

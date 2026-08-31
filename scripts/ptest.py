@@ -49,7 +49,7 @@ RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
-MENU_ROW = 12
+MENU_ROW = 16
 MENU_TASKBAR_Y = 462   # video_h() - TB_H (kernel/desktop.c)
 
 

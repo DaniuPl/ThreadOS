@@ -36,7 +36,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, font8x8
 
 TB_H = 18
 CLOCK_W = 8 * 8 + 6
@@ -71,6 +71,31 @@ def picture(at, span, ty):
     a, b = span
     return tuple(at(x, ty + 3 + dy)
                  for dy in range(12) for x in range(a, b + 1))
+
+
+def read_line(q, ox, oy, cols):
+    """One line of text off the screen, through the kernel's own
+    font - for reading what a hint says."""
+    w, h, at = q.screen_raw()
+    font = font8x8()
+    counts = {}
+    for y in range(8):
+        for x in range(ox, ox + cols * 8):
+            p = at(x, oy + y)
+            counts[p] = counts.get(p, 0) + 1
+    bg = max(counts, key=counts.get)
+
+    out = ""
+    for c in range(cols):
+        pattern = []
+        for y in range(8):
+            bits = 0
+            for x in range(8):
+                if at(ox + c * 8 + x, oy + y) != bg:
+                    bits |= 1 << x
+            pattern.append(bits)
+        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
+    return out.rstrip()
 
 
 def open_apps(q, icon_ys):
@@ -115,6 +140,52 @@ def main():
             # from an icon: they share the plain window mark
             check("okna jadra maja ten sam, domyslny obrazek",
                   pics[0] == pics[1])
+
+            # --- the launch menu shows the same faces ----------------
+            # A program that looks like three different things - an
+            # icon, a button and a word in a menu - is three things to
+            # remember. It is one picture in all three places.
+            q.mouse_goto(20, ty + 8)
+            q.mouse_click()
+            time.sleep(1)
+            q.mouse_goto(300, 300)          # the pointer off the menu
+            time.sleep(1)
+            w, h, at = q.screen_raw()
+            entry_y = ty - 2 * 16          # the third entry from the top
+            marks = sum(1 for dy in range(12) for dx in range(12)
+                        if at(8 + dx, entry_y + 2 + dy) == (0, 0, 0))
+            check("wpis w menu ma obrazek (%d pikseli)" % marks, marks > 8)
+
+            # The entry under the pointer answers: it wears the accent
+            q.mouse_goto(60, entry_y + 8)
+            time.sleep(1)
+            w, h, at = q.screen_raw()
+            r, g, b = at(100, entry_y + 8)
+            check("wpis pod kursorem jest podswietlony (%d,%d,%d)"
+                  % (r, g, b), b > 120 and r < 90 and g < 90)
+            others = at(100, entry_y - 16 + 8)
+            check("a inne wpisy nie", not (others[2] > 120 and
+                                           others[0] < 90 and others[1] < 90))
+
+            # --- the name comes back when asked for ------------------
+            # A picture says WHICH program; it does not say which of
+            # two terminals. The name appears over the button the
+            # pointer is on, and only then.
+            q.mouse_goto(20, ty + 8)       # close the menu
+            q.mouse_click()
+            time.sleep(1)
+            last = spans[-1]               # the settings window's button
+            q.mouse_goto((last[0] + last[1]) // 2, ty + 8)
+            time.sleep(1.5)
+            said = read_line(q, last[0] + 4, ty - 12, 14)
+            check("nazwa okna pojawia sie nad przyciskiem ('%s')" % said,
+                  "Ustawienia" in said)
+
+            q.mouse_goto(300, 300)         # the pointer off the bar
+            time.sleep(1.5)
+            gone = read_line(q, last[0] + 4, ty - 12, 14)
+            check("i znika, gdy kursor odchodzi ('%s')" % gone,
+                  "Ustawienia" not in gone)
         finally:
             q.close()
     finally:

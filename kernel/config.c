@@ -40,6 +40,8 @@ static struct setting settings[] = {
     { "kolor",  "11",       "kolor zachety shella, 0-15",         0, { 0 } },
     { "tlo",    "0",        "tlo pulpitu: 0 morskie, 1 granat,\n"
                             "2 fiolet, 3 zielen, 4 braz, 5 szarosc", 0, { 0 } },
+    { "tapeta", "",         "plik z tapeta (pusty = gradient);\n"
+                            "robi go program 'mkwall'", 0, { 0 } },
     { "pasek",  "100",      "szerokosc paska zadan: 100, 75 albo 50\n"
                             "procent ekranu", 0, { 0 } },
     { "ikony",  "0",        "ikony na pasku: 0 od lewej, 1 na srodku,\n"

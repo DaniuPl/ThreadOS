@@ -52,7 +52,10 @@ buttons — the desktop remembers which icon started which process, so a
 window wears the face of the program it belongs to. How wide the bar is
 (100, 75 or 50 percent of the screen, centred) and where its buttons
 sit (left, middle, or up against the clock) are settings kept on the
-disk. With
+disk, and so is the wallpaper — a small indexed picture computed by a
+program in ring 3, written to the disk and stretched over the screen
+behind everything else. Hovering a taskbar button names the window;
+the launch menu carries the same pictures as the icons. With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end
 and insists if it will not — twelve of them at once, on a taskbar that

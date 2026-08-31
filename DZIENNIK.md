@@ -3073,3 +3073,45 @@ sprawdzane przez `make test`.
       to, gdzie program pisze "zapisane na dysku", zalezy od liczby
       ustawien i dlugosci opisu jednego z nich - czyli od ukladu, ktory
       jest sprawa programu. Komunikat jest sprawa testu.
+
+- [x] **Menu z obrazkami, nazwa okna pod kursorem, tapeta z pliku.**
+
+      Trzy rzeczy w tym samym duchu: pulpit ma mowic bez czytania, a
+      tam, gdzie czytanie jest potrzebne, ma je podac na zawolanie.
+
+      **Menu ma obrazki.** Te same, co ikony i co przyciski na pasku -
+      program, ktory wyglada na trzy rozne rzeczy, jest trzema rzeczami
+      do zapamietania. Wpisy nosza teraz nazwe spod ikony ("Zegar"), a
+      nie nazwe programu ("gclock"), bo nazwa programu jest dla shella.
+      Wpis pod kursorem dostaje kolor akcentu: bez tego menu jest lista
+      slow, ktora akurat da sie kliknac.
+
+      **Nazwa okna wraca pod kursorem.** Obrazek mowi, KTORY program;
+      nie mowi, ktory z dwoch terminali. Wiec nad przyciskiem, na
+      ktorym stoi kursor, pojawia sie nazwa okna - i tylko wtedy.
+      Rysowana jest na samym koncu klatki, po menu, bo to, co objasnia,
+      musi byc nad tym, co objasnia.
+
+      **Tapeta jest plikiem.** Tlo bylo kolorem, potem szesnastoma
+      pasmami koloru. Obrazkiem byc nie moglo, bo obrazek musi skads
+      pochodzic - a maszyna bez aparatu i bez edytora ma tylko
+      arytmetyke. Wiec obrazek liczy program 'mkwall' w pierscieniu
+      trzecim, zapisuje na dysk, a kompozytor czyta go przy starcie.
+
+      Format to cala mysl: "PWAL", rozmiar, 192 kolory po trzy bajty i
+      jeden bajt na piksel. Maly z rozmyslem - 160 na 120, rozciagane
+      na ekran. Pelnoekranowy obraz to trzysta kilobajtow, a sterta
+      jadra ma megabajt; to, co tu lezy, to jedna pietnasta tego, i
+      kazdy jego piksel przykrywa kawalek ekranu. Wyglada na to, czym
+      jest - na obrazek, miekko. Kolory tapety siedza NAD kolorami
+      pulpitu (indeksy od 64), wiec tapeta nie ma jak przemalowac okna.
+
+      Cztery wzory, bo tyle jest warte jedno popoludnie arytmetyki:
+      zbocze, pierscienie, plecionka i krata - kazdy w szesciu barwach.
+
+      Nowa grupa 'wall'. Najlepsza asercja jest ta, ktora odroznia
+      obrazek od gradientu nie wiedzac, co jest narysowane: gradient ma
+      w poprzek wiersza JEDEN kolor, a obrazek ma ich wiele. Do tego:
+      plik ma rozmiar wynikajacy z formatu, jadro mowi przy starcie, co
+      wczytalo, okno na tapecie ma nadal swoj kolor, a tapeta, ktorej
+      nie ma, nie psuje niczego - wraca gradient.

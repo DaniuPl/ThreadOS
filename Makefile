@@ -43,6 +43,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
              $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
              $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
+             $(BUILD)/user/mkwall.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
@@ -262,6 +263,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    mkmap=$(BUILD)/user/mkmap.elf mmapfile=$(BUILD)/user/mmapfile.elf \
 	    deep=$(BUILD)/user/deep.elf tlbtest=$(BUILD)/user/tlbtest.elf \
 	    faults=$(BUILD)/user/faults.elf \
+	    mkwall=$(BUILD)/user/mkwall.elf \
 	    gsettings=$(BUILD)/user/gsettings.elf gdeaf=$(BUILD)/user/gdeaf.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
