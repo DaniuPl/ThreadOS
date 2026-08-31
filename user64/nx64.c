@@ -1,14 +1,14 @@
-/* nx64 - program, ktory probuje wykonac wlasne dane
+/* nx64 - a program that tries to execute its own data
  *
- * Bit zakazu wykonywania jest ustawiany od dawna, ale samo ustawienie
- * bitu niczego nie dowodzi. Dowodem jest dopiero to, ze procesor
- * naprawde na nim reaguje - a jedyny sposob, zeby to sprawdzic, to
- * sprobowac.
+ * The no-execute bit has been set for a long time, but setting the bit
+ * proves nothing by itself. What proves it is that the processor really
+ * reacts to it - and the only way to check that is to try.
  *
- * Program wpisuje do swojej tablicy jedna instrukcje powrotu i skacze
- * pod jej adres. Tablica lezy w sekcji .bss, ktorej jadro nadalo
- * prawo zapisu i zakaz wykonywania - wiec zapis przechodzi, a skok
- * konczy sie wyjatkiem i smiercia programu.
+ * The program writes a single return instruction into its array and
+ * jumps to its address. The array lies in the .bss section, to which
+ * the kernel gave write permission and no execute permission - so the
+ * write goes through and the jump ends in an exception and the
+ * program's death.
  */
 
 #include "usys64.h"

@@ -1,14 +1,16 @@
-/* gterm64 - terminal w oknie graficznym (ring 3, jadro 64-bitowe)
+/* gterm64 - a terminal in a graphical window (ring 3, the 64-bit
+ * kernel)
  *
- * Przyjmuje klawisze (gdy okno ma fokus) do wiersza polecen. Po
- * Enterze uruchamia program z wyjsciem przekierowanym do pliku,
- * czeka na jego koniec, czyta plik i rysuje wynik w oknie.
+ * It takes keys (when the window has focus) into a command line. On
+ * Enter it runs a program with its output redirected to a file, waits
+ * for it to end, reads the file and draws the result in the window.
  *
- * Nie ma tu ani jednej rzeczy, ktorej jadro nie umialoby wczesniej -
- * jest za to wszystko naraz: klawiatura przez zdarzenia okna, fork
- * i exec, przekierowanie przez dup2, czekanie na dziecko, system
- * plikow i rysowanie. Terminal jest zwyklym programem w pierscieniu 3
- * i nie wie o kompozytorze nic poza czterema wywolaniami okien.
+ * There is not a single thing here the kernel could not do before -
+ * what there is instead is all of it at once: the keyboard through
+ * window events, fork and exec, redirection through dup2, waiting for a
+ * child, the file system and drawing. The terminal is an ordinary
+ * program in ring 3 and knows nothing about the compositor beyond four
+ * window calls.
  */
 
 #include "usys64.h"
@@ -27,7 +29,8 @@ static char row_text[ROWS_MAX];
 static int length;
 static char result[1024];
 
-/* Uruchamia wpisane polecenie z wyjsciem do pliku i wczytuje wynik */
+/* Runs the command that was typed with its output to a file and reads
+   the result */
 static void run(void)
 {
     row_text[length] = '\0';
@@ -35,9 +38,9 @@ static void run(void)
     if (!row_text[0])
         return;
 
-    /* Plik od nowa: inaczej krotszy wynik zostawilby ogon
-       poprzedniego. Kasujemy i zakladamy jeszcze raz - to samo, co
-       zrobilby 'rm' przed przekierowaniem. */
+    /* The file from scratch: otherwise a shorter result would leave a
+       tail of the previous one. We delete it and create it again - the
+       same thing 'rm' would do before a redirection. */
     sys_unlink(FILE_MARK);
     int fd = (int)sys_open(FILE_MARK, 1);
     if (fd < 0)
@@ -45,14 +48,14 @@ static void run(void)
 
     int64_t pid = sys_fork();
     if (pid == 0) {
-        /* Od tej chwili wypisy dziecka ida do pliku, a nie na konsole.
-           Dziecko o tym nie wie i wiedziec nie musi - dla niego to
-           dalej jest deskryptor numer jeden. */
+        /* From this moment the child's prints go to the file, not to the
+           console. The child does not know that and does not have to -
+           for it this is still descriptor number one. */
         sys_dup2(fd, FD_STDOUT);
         sys_close(fd);
         char *argv[2] = {row_text, 0};
         sys_exec(row_text, argv);
-        sys_exit(127);               /* exec wraca tylko przy bledzie */
+        sys_exit(127);               /* exec returns only on an error */
     }
     sys_close(fd);
     if (pid > 0) {
@@ -70,7 +73,7 @@ static void run(void)
     result[n < 0 ? 0 : n] = '\0';
 }
 
-/* Rysuje bufor wyjscia rozbity na wiersze po znaku nowej linii */
+/* Draws the output buffer split into lines on the newline character */
 static void print_result(int w)
 {
     char buf[40];

@@ -1,12 +1,14 @@
-/* ush64 - shell w przestrzeni uzytkownika
+/* ush64 - a shell in user space
  *
- * Zwykly program w ring 3. Nie ma zadnych uprawnien ponad te, ktore ma
- * kazdy inny proces: czyta klawiature wywolaniem systemowym, uruchamia
- * programy przez fork i exec, czeka na nie przez wait. Wszystko, co
- * robi, moglby zrobic dowolny inny program - i to jest sedno.
+ * An ordinary program in ring 3. It has no rights beyond those every
+ * other process has: it reads the keyboard with a system call, starts
+ * programs through fork and exec, waits for them through wait.
+ * Everything it does could be done by any other program - and that is
+ * the point.
  *
- * Shell w jadrze byl potrzebny, zeby w ogole bylo czym sterowac
- * systemem. Ten jest dowodem, ze juz nie musi tam byc.
+ * A shell inside the kernel was needed so that there would be anything
+ * at all to drive the system with. This one is the proof that it no
+ * longer has to be there.
  */
 
 #include "usys64.h"
@@ -18,9 +20,9 @@ static int line_len;
 static char out[128];
 static volatile int interrupted;
 
-/* Shell nie ginie od Ctrl+C - przerywa tylko to, co wpisywal.
-   Bez wlasnej procedury sygnal zabilby go domyslnie, a wtedy kazde
-   przypadkowe Ctrl+C konczyloby sesje. */
+/* The shell does not die of Ctrl+C - it only aborts what was being
+   typed. Without a handler of its own the signal would kill it by
+   default, and then every accidental Ctrl+C would end the session. */
 static void on_signal(int sig)
 {
     (void)sig;
@@ -38,8 +40,9 @@ static int putn(int n, int64_t v)
 {
     char tmp[24];
 
-    /* Kod wyjscia bywa ujemny - program zabity sygnalem oddaje minus
-       jeden. Bez tego wychodzi z tego liczba o dwudziestu cyfrach. */
+    /* An exit code can be negative - a program killed by a signal
+       hands back minus one. Without this that comes out as a
+       twenty-digit number. */
     if (v < 0) {
         out[n++] = '-';
         v = -v;
@@ -74,10 +77,11 @@ static int starts_with(const char *s, const char *p)
     return 1;
 }
 
-/* Uruchomienie programu: fork, exec w dziecku, wait w rodzicu.
-   Dokladnie ten sam schemat, ktorego uzywa kazdy shell.
-   Linie dzielimy na slowa - pierwsze to program, reszta to jego
-   argumenty, i shell nie interesuje sie tym, co z nich wyniknie. */
+/* Starting a program: fork, exec in the child, wait in the parent.
+   Exactly the same scheme every shell uses.
+   We split the line into words - the first is the program, the rest are
+   its arguments, and the shell takes no interest in what comes of
+   them. */
 #define SH_ARGS 8
 
 static char words[SH_ARGS][32];
@@ -104,12 +108,12 @@ static int split(char *text)
     return n;
 }
 
-/* Dwa programy polaczone potokiem.
+/* Two programs joined by a pipe.
  *
- * Shell zaklada potok, rozdaje jego konce dwojce dzieci i - co
- * najwazniejsze - zamyka oba u siebie. Gdyby ich nie zamknal, drugi
- * program czekalby na koniec danych, ktory nigdy by nie nadszedl:
- * jeden piszacy (sam shell) zostalby przy zyciu na zawsze. */
+ * The shell creates the pipe, hands its ends out to two children and -
+ * most importantly - closes both of its own. If it did not close them,
+ * the second program would wait for an end of data that would never
+ * come: one writer (the shell itself) would stay alive forever. */
 static char words2[SH_ARGS][32];
 static char *argv2[SH_ARGS + 1];
 
@@ -121,8 +125,8 @@ static void run_pipe(char *left, char *right)
         return;
     }
 
-    /* Prawa strona najpierw: jej argv trzeba zbudowac, zanim podzial
-       lewej nadpisze wspolne bufory */
+    /* The right side first: its argv has to be built before splitting
+       the left one overwrites the shared buffers */
     int n2 = 0, i = 0;
     while (right[i] && n2 < SH_ARGS) {
         while (right[i] == ' ')
@@ -154,7 +158,7 @@ static void run_pipe(char *left, char *right)
 
     int64_t a = sys_fork();
     if (a == 0) {
-        sys_dup2(fd[1], FD_STDOUT);   /* wyjscie idzie do potoku */
+        sys_dup2(fd[1], FD_STDOUT);   /* the output goes into the pipe */
         sys_close(fd[0]);
         sys_close(fd[1]);
         sys_exec(argv[0], argv);
@@ -163,14 +167,15 @@ static void run_pipe(char *left, char *right)
 
     int64_t b = sys_fork();
     if (b == 0) {
-        sys_dup2(fd[0], FD_STDIN);    /* wejscie bierze sie z potoku */
+        sys_dup2(fd[0], FD_STDIN);    /* the input comes from the pipe */
         sys_close(fd[0]);
         sys_close(fd[1]);
         sys_exec(argv2[0], argv2);
         sys_exit(127);
     }
 
-    /* Bez tego drugi program czekalby na koniec danych bez konca */
+    /* Without this the second program would wait for an end of data
+   forever */
     sys_close(fd[0]);
     sys_close(fd[1]);
 
@@ -190,7 +195,7 @@ static void run(const char *name)
     }
     if (child == 0) {
         sys_exec(name, argv);
-        /* exec wraca tylko wtedy, gdy sie nie udal */
+        /* exec returns only when it failed */
         print("ush64: nie ma takiego programu\n");
         sys_exit(127);
     }
@@ -210,8 +215,8 @@ static void execute(void)
         print("ush64: help, echo <tekst>, pid, exit, "
               "albo nazwa programu z initrd\n");
     } else if (equal(line, "pid")) {
-        /* Numer procesu poznajemy po tym, co fork mowi rodzicowi -
-           tak samo jak kazdy inny program */
+        /* We learn the process number from what fork tells the parent -
+           just like every other program */
         print("ush64: jestem procesem w ring 3\n");
     } else if (equal(line, "exit")) {
         print("ush64: pa!\n");
@@ -220,8 +225,8 @@ static void execute(void)
         print(line + 5);
         print("\n");
     } else {
-        /* Kreska dzieli linie na dwa programy - wszystko przed nia
-           pisze do tego, co czyta wszystko za nia */
+        /* A bar splits the line into two programs - everything before it
+           writes to what reads everything after it */
         int dash = -1;
         for (int i = 0; line[i]; i++)
             if (line[i] == '|') {
@@ -253,9 +258,9 @@ void _start(void)
             char c;
             int64_t n = sys_read(FD_STDIN, &c, 1);
             if (n <= 0) {
-                /* Czekanie przerwal sygnal. Procedura obslugi juz
-                   byla - zostaje porzucic zaczeta linie i zaczac od
-                   nowa, dokladnie jak kazdy shell. */
+                /* A signal interrupted the wait. The handler has already run -
+                   what is left is to abandon the line begun and start
+                   over, exactly like every shell. */
                 if (interrupted) {
                     interrupted = 0;
                     print("^C\n");
@@ -278,7 +283,7 @@ void _start(void)
             }
             if (c >= ' ' && c < 0x7F && line_len < LINE_MAX - 1) {
                 line[line_len++] = c;
-                out[0] = c;          /* echo robi czytajacy */
+                out[0] = c;          /* the echo is done by the reader */
                 out[1] = 0;
                 print(out);
             }

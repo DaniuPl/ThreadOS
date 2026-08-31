@@ -1,15 +1,16 @@
-/* heap64 - sterta od strony programu
+/* heap64 - the heap as seen from a program
  *
- * Do tej pory kazdy bufor musial byc wpisany w program na sztywno.
- * Ten prosi jadro o pamiec w biegu i uzywa jej.
+ * Until now every buffer had to be hard-coded into the program. This
+ * one asks the kernel for memory as it runs and uses it.
  *
- * Najciekawsze jest to, ile ta prosba kosztuje. Program prosi o cwierc
- * megabajta, a potem dotyka tylko czterech stron - i tyle wlasnie
- * powinno ubyc pamieci, bo strony pojawiaja sie dopiero pod palcami.
- * Program sam tego nie widzi; widzi to jadro i mowi po wszystkim.
+ * The most interesting part is what that request costs. The program
+ * asks for a quarter of a megabyte and then touches only four pages -
+ * and exactly that much memory should be gone, because pages appear
+ * only under your fingers. The program does not see that itself; the
+ * kernel does, and says so afterwards.
  *
- * Sprawdza sie sam: gdyby ktorykolwiek bajt wrocil inny, konczy
- * bledem zamiast komunikatu, ktory ktos musi przeczytac.
+ * It checks itself: if any byte came back different, it ends with an
+ * error rather than a message somebody has to read.
  */
 
 #include "usys64.h"
@@ -69,7 +70,7 @@ void _start(void)
     if (!memory)
         fail_with("sbrk odmowil");
 
-    /* Dotykamy tylko kilku stron - reszta ma nie istniec */
+    /* We touch only a few pages - the rest is not to exist */
     for (int i = 0; i < TOUCH; i++)
         for (int j = 0; j < PAGE_MARK; j++)
             memory[i * PAGE_MARK + j] = (char)(i * 31 + j);
@@ -85,14 +86,14 @@ void _start(void)
     out[n] = 0;
     print(out);
 
-    /* Zwezenie oddaje pamiec od razu */
+    /* Shrinking gives the memory back at once */
     if (!sys_sbrk(-REQUEST))
         fail_with("nie moge oddac pamieci");
     if (sys_sbrk(0) != poczatek)
         fail_with("granica nie wrocila tam, gdzie byla");
     print("[heap64] oddalem wszystko, granica wrocila na miejsce\n");
 
-    /* Prosba poza wlasna pamiec musi zostac odrzucona */
+    /* A request beyond our own memory has to be rejected */
     if (sys_sbrk(-4096))
         fail_with("jadro pozwolilo zejsc ponizej sterty");
     print("[heap64] ponizej wlasnej sterty jadro nie puszcza\n");

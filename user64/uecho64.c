@@ -1,9 +1,9 @@
-/* uecho64 - wypisuje swoje argumenty
+/* uecho64 - prints its arguments
  *
- * Najprostszy program, jaki mozna napisac, i zarazem jedyny dowod,
- * ze argumenty naprawde dochodza: nie robi nic poza pokazaniem tego,
- * co dostal. Do tej pory 'echo' musialo byc wbudowane w shell, bo nie
- * bylo jak przekazac programowi ani jednego slowa.
+ * The simplest program one can write, and at the same time the only
+ * proof that arguments really do arrive: it does nothing beyond showing
+ * what it was given. Until now 'echo' had to be built into the shell,
+ * because there was no way of passing a program a single word.
  */
 
 #include "usys64.h"

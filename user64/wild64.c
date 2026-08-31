@@ -1,18 +1,19 @@
-/* wild64 - program, ktory siega po pamiec jadra
+/* wild64 - a program that reaches for kernel memory
  *
- * Dwa razy, bo sa na to dwie drogi. Najpierw prosi jadro, zeby
- * wypisalo mu kawalek pamieci spod adresu obrazu jadra - to jest
- * proba oszukania jadra jego wlasnymi rekami, i jadro musi odmowic,
- * bo sprawdza, czy wskaznik w ogole nalezy do programu.
+ * Twice, because there are two ways to it. First it asks the kernel to
+ * print it a piece of memory from the kernel image's address - that is
+ * an attempt to cheat the kernel with its own hands, and the kernel has
+ * to refuse, because it checks whether a pointer belongs to the program
+ * at all.
  *
- * Potem siega tam sam. Tej proby nie zatrzymuje juz zadne
- * sprawdzenie w kodzie, tylko sam procesor: strona jadra nie ma bitu
- * dostepu dla pierscienia 3.
+ * Then it reaches there itself. That attempt is no longer stopped by
+ * any check in the code, but by the processor itself: a kernel page has
+ * no access bit for ring 3.
  */
 
 #include "usys64.h"
 
-#define KERNEL_ADDR 0x100000ULL          /* obraz jadra pod megabajtem */
+#define KERNEL_ADDR 0x100000ULL          /* the kernel image below a megabyte */
 
 void _start(void)
 {

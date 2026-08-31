@@ -333,8 +333,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/unet64.elf \
                $(BUILD)/user64/guiapp64.elf \
                $(BUILD)/user64/swaptest64.elf \
-               $(BUILD)/user64/shmpisz64.elf \
-               $(BUILD)/user64/shmczytaj64.elf \
+               $(BUILD)/user64/shmwrite64.elf \
+               $(BUILD)/user64/shmread64.elf \
                $(BUILD)/user64/gclock64.elf \
                $(BUILD)/user64/gfiles64.elf \
                $(BUILD)/user64/gmon64.elf \
@@ -423,8 +423,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    unet64=$(BUILD)/user64/unet64.elf \
 	    guiapp=$(BUILD)/user64/guiapp64.elf \
 	    swaptest64=$(BUILD)/user64/swaptest64.elf \
-	    shmpisz64=$(BUILD)/user64/shmpisz64.elf \
-	    shmczytaj64=$(BUILD)/user64/shmczytaj64.elf \
+	    shmwrite64=$(BUILD)/user64/shmwrite64.elf \
+	    shmread64=$(BUILD)/user64/shmread64.elf \
 	    gclock=$(BUILD)/user64/gclock64.elf \
 	    gfiles=$(BUILD)/user64/gfiles64.elf \
 	    gmon=$(BUILD)/user64/gmon64.elf \

@@ -1,14 +1,14 @@
-/* fpu64test - liczby zmiennoprzecinkowe i rejestry SSE
+/* fpu64test - floating-point numbers and the SSE registers
  *
- * Jadro uruchamia dwie kopie naraz, kazda z inna liczba poczatkowa.
- * Obie licza w petli, oddajac po drodze procesor - i gdyby rejestry
- * zmiennoprzecinkowe nie byly zapisywane przy przelaczaniu zadan,
- * kazda dostawalaby wynik drugiej.
+ * The kernel starts two copies at once, each with a different starting
+ * number. Both count in a loop, handing over the processor along the
+ * way - and if the floating-point registers were not saved on a task
+ * switch, each would get the other one's result.
  *
- * Dzialanie dobrane tak, zeby bylo dokladne: v = v * 2 + 1 na
- * liczbach calkowitych mieszczacych sie w podwojnej precyzji nie
- * traci ani jednego bitu, wiec wynik da sie sprawdzic co do jednosci.
- * Po dwudziestu obrotach z 'a' wychodzi (a + 1) * 2^20 - 1.
+ * The operation is chosen so as to be exact: v = v * 2 + 1 on integers
+ * that fit in double precision loses not a single bit, so the result
+ * can be checked down to the unit. After twenty turns, 'a' comes out as
+ * (a + 1) * 2^20 - 1.
  */
 
 #include "usys64.h"
@@ -40,10 +40,10 @@ void _start(int argc, char **argv)
     double v = (double)start;
     for (int i = 0; i < SPINS; i++) {
         v = v * 2.0 + 1.0;
-        sys_sleep(20);               /* tu wchodzi drugi proces */
+        sys_sleep(20);               /* this is where the other process steps in */
     }
 
-    /* To samo na liczbach calkowitych - wynik musi byc identyczny */
+    /* The same on integers - the result has to be identical */
     uint64_t expected = (uint64_t)start;
     for (int i = 0; i < SPINS; i++)
         expected = expected * 2 + 1;

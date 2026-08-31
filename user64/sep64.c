@@ -1,19 +1,19 @@
-/* sep64 - dowod, ze kazdy proces ma wlasna przestrzen adresowa
+/* sep64 - proof that every process has its own address space
  *
- * Jadro uruchamia dwie kopie tego programu naraz. Obie sa tym samym
- * plikiem, zaladowanym pod ten sam adres wirtualny, i obie pisza pod
- * ten sam adres swojej zmiennej. Rozni je jedno: liczba, ktora
- * dostaly od jadra w rejestrze RDI.
+ * The kernel starts two copies of this program at once. Both are the
+ * same file, loaded at the same virtual address, and both write to the
+ * same address of their variable. One thing tells them apart: the
+ * number they were given by the kernel in the RDI register.
  *
- * Gdyby przestrzen byla wspolna, druga kopia nadpisalaby pierwszej
- * jej wartosc - i pierwsza by to zauwazyla. Program wpisuje swoja
- * liczbe, oddaje procesor na chwile drugiemu, a potem sprawdza, czy
- * jego pamiec jest taka, jak ja zostawil.
+ * If the space were shared, the second copy would overwrite the first
+ * one's value - and the first would notice. The program writes its
+ * number, hands the processor over to the other one for a moment, and
+ * then checks whether its memory is as it left it.
  */
 
 #include "usys64.h"
 
-static volatile uint64_t marker;     /* ten sam adres w obu procesach */
+static volatile uint64_t marker;     /* the same address in both processes */
 static char buf[96];
 
 static int put(int n, const char *s)
@@ -39,8 +39,8 @@ static int puth(int n, uint64_t v)
 
 void _start(int argc, char **argv)
 {
-    /* Numer przychodzi jako zwykly argument - tak, jak dostaje go
-       kazdy program uruchomiony z linii polecen */
+    /* The number arrives as an ordinary argument - the way every
+       program started from a command line gets it */
     int64_t id = argc > 1 ? uatoi(argv[1]) : 0;
     uint64_t mine = 1000 + (uint64_t)id;
     marker = mine;
@@ -55,7 +55,7 @@ void _start(int argc, char **argv)
     buf[n] = 0;
     print(buf);
 
-    /* Chwila dla drugiego procesu - niech napisze swoje */
+    /* A moment for the other process - let it write its own */
     sys_sleep(200);
 
     uint64_t now = marker;

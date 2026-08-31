@@ -1,11 +1,12 @@
-/* uls64 - wypisuje zawartosc katalogu roboczego
+/* uls64 - prints the contents of the working directory
  *
- * Jadro ma wbudowane 'fls', bo do niedawna nie bylo inaczej. Ten robi
- * to samo, ale jest zwyklym programem i pyta o wpisy po kolei -
- * jeden na wywolanie, dopoki dostaje odpowiedz.
+ * The kernel has 'fls' built in, because until recently there was no
+ * other way. This one does the same, but is an ordinary program and
+ * asks for the entries in turn - one per call, as long as it keeps
+ * getting an answer.
  *
- * Katalog roboczy jest wlasnoscia zadania, wiec uls64 wypisuje ten,
- * w ktorym stal shell, gdy go uruchamial.
+ * The working directory belongs to the task, so uls64 prints the one
+ * the shell stood in when it started it.
  */
 
 #include "usys64.h"

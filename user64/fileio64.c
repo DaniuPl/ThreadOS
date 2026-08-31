@@ -1,13 +1,14 @@
-/* fileio64 - plik od strony programu
+/* fileio64 - a file as seen from a program
  *
- * Do tej pory do dysku siegalo tylko jadro. Ten program robi to sam:
- * zaklada plik, zapisuje do niego, zamyka, otwiera z powrotem i czyta.
- * Nie ma przy tym zadnych szczegolnych uprawnien - deskryptor jest
- * zwyklym numerem w jego wlasnej tablicy, a i-wezel, na ktory numer
- * wskazuje, zna juz tylko jadro.
+ * Until now only the kernel reached for the disk. This program does it
+ * itself: it creates a file, writes to it, closes it, opens it again
+ * and reads. It has no special rights while doing so - a descriptor is
+ * an ordinary number in its own table, and the inode that number points
+ * at is known only to the kernel.
  *
- * Sprawdza sie sam: gdyby odczyt oddal cokolwiek innego niz zapis,
- * konczy sie bledem, a nie komunikatem, ktory ktos musi przeczytac.
+ * It checks itself: if the read handed back anything other than what
+ * was written, it ends with an error rather than a message somebody has
+ * to read.
  */
 
 #include "usys64.h"
@@ -61,8 +62,9 @@ void _start(void)
         err("write", n);
     sys_close((int)fd);
 
-    /* Drugie otwarcie zaczyna od poczatku pliku - miejsce, w ktorym
-       stal poprzedni deskryptor, znikneło razem z nim */
+    /* The second open starts from the beginning of the file - the
+       position the previous descriptor stood at disappeared along with
+       it */
     print("[fileio64] otwieram go z powrotem i czytam\n");
     fd = sys_open("zring3", 0);
     if (fd < 0)
@@ -83,7 +85,7 @@ void _start(void)
     out[m] = 0;
     print(out);
 
-    /* Plik ma nie istniec dopiero wtedy, gdy go nie ma */
+    /* A file is to be missing only when it is not there */
     if (sys_open("nie-ma-takiego", 0) >= 0)
         err("open wymyslil sobie plik", 0);
     print("[fileio64] nieistniejacego pliku jadro nie otwiera\n");

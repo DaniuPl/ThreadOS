@@ -1,9 +1,10 @@
-/* ucat64 - wypisuje plik podany w argumencie
+/* ucat64 - prints the file given in the argument
  *
- * Shell jadra ma wbudowane 'cat', bo do niedawna nie bylo innego
- * wyjscia. Ten robi to samo, ale jest zwyklym programem: dostaje
- * nazwe pliku jako argument, otwiera go deskryptorem i czyta.
- * Jadro nie wie o nim nic ponad to, ze ma go uruchomic.
+ * The kernel's shell has 'cat' built in, because until recently there
+ * was no other way. This one does the same, but is an ordinary program:
+ * it gets the file name as an argument, opens it with a descriptor and
+ * reads. The kernel knows nothing about it beyond that it is to start
+ * it.
  */
 
 #include "usys64.h"
@@ -25,8 +26,9 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    /* Czytamy porcjami az do konca - deskryptor sam pamieta, gdzie
-       stanal, wiec kolejny odczyt zaczyna tam, gdzie skonczyl poprzedni */
+    /* We read in portions to the end - the descriptor remembers where
+       it stopped by itself, so the next read starts where the previous
+       one finished */
     int64_t n;
     while ((n = sys_read((int)fd, buf, sizeof(buf))) > 0)
         sys_write(FD_STDOUT, buf, (uint64_t)n);

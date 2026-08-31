@@ -1,13 +1,15 @@
-/* guiapp64 - aplikacja graficzna w pierscieniu 3, jadro 64-bitowe
+/* guiapp64 - a graphical application in ring 3, the 64-bit kernel
  *
- * Pulpit dzialal do tej pory sam ze soba: kompozytor byl w jadrze,
- * a ikony wskazywaly programy, ktorych w trybie dlugim nie bylo.
- * Ten program jest po drugiej stronie tej granicy - rysuje przez
- * wywolania systemowe, we wlasnym oknie, i dostaje z powrotem
- * zdarzenia: klikniecia w obszar okna i klawisze, gdy okno ma fokus.
+ * The desktop has so far worked with itself alone: the compositor was
+ * in the kernel, and the icons pointed at programs that did not exist
+ * in long mode. This program is on the other side of that line - it
+ * draws through system calls, in a window of its own, and gets events
+ * back: clicks in the window's area and keys, when the window has
+ * focus.
  *
- * Kolory to indeksy palety pulpitu, nie RGB - jadro trzyma palete,
- * program nie musi o niej nic wiedziec.
+ * The colours are indices into the desktop's palette, not RGB - the
+ * kernel keeps the palette, the program does not have to know anything
+ * about it.
  */
 
 #include "usys64.h"
@@ -16,7 +18,7 @@
 #define C_GREEN 2
 #define C_BLUE  3
 #define C_WHITE 4
-#define C_BG    8    /* szare tlo okna */
+#define C_BG    8    /* the window's grey background */
 
 #define WINDOW_W 120
 #define WINDOW_H 60
@@ -51,8 +53,8 @@ void _start(void)
     }
 
     for (;;) {
-        /* Zdarzenia: klikniecia i klawisze. Kolejka jest krotka,
-           wiec oprozniamy ja do konca przy kazdej klatce. */
+        /* Events: clicks and keys. The queue is short, so we drain it
+           to the end on every frame. */
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLICK && npt < MAXPT) {
@@ -72,7 +74,8 @@ void _start(void)
         }
         written[length] = '\0';
 
-        /* Cala tresc okna od nowa: tlo, paleta, podpisy, licznik */
+        /* The whole window's content from scratch: the background, the
+   palette, the captions, the counter */
         win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
@@ -82,7 +85,7 @@ void _start(void)
         win_text(w, 6, 38, "txt:", C_GREEN);
         win_text(w, 40, 38, written, C_WHITE);
 
-        /* Znaczniki w miejscach klikniec */
+        /* Markers at the places of the clicks */
         for (int i = 0; i < npt; i++)
             win_rect(w, px[i] - 2, py[i] - 2, 5, 5, C_WHITE);
 

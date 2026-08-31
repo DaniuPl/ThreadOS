@@ -1,13 +1,13 @@
-/* fork64 - powielanie procesu widziane od strony programu
+/* fork64 - duplicating a process as seen from a program
  *
- * Program wpisuje liczbe do swojej zmiennej i powiela sie. Od tej
- * chwili sa dwa procesy z ta sama pamiecia - ale KOPIA, nie ta sama.
- * Dziecko wpisuje swoja liczbe, rodzic czeka i sprawdza, czy jego
- * wlasna przetrwala.
+ * The program writes a number into its variable and duplicates itself.
+ * From this moment there are two processes with the same memory - but a
+ * COPY, not the same one. The child writes its own number, the parent
+ * waits and checks whether its own survived.
  *
- * Rodzic i dziecko wracaja z fork() w to samo miejsce, z tym samym
- * stanem procesora - rozni ich jedna wartosc: dziecko dostaje zero,
- * rodzic numer dziecka.
+ * The parent and the child return from fork() to the same place, with
+ * the same processor state - one value tells them apart: the child gets
+ * zero, the parent the child's number.
  */
 
 #include "usys64.h"
@@ -41,8 +41,9 @@ void _start(void)
     }
 
     if (child == 0) {
-        /* Dziecko. Nadpisuje wartosc u siebie - rodzic nie ma prawa
-           tego zobaczyc, bo dostal wlasna kopie strony. */
+        /* The child. It overwrites the value in its own copy - the parent
+           has no way of seeing that, because it got its own copy of the
+           page. */
         value = 200;
         int n = put(0, "[fork64] dziecko: fork dal 0, moja wartosc to ");
         n = putn(n, value);
@@ -52,7 +53,8 @@ void _start(void)
         sys_exit(0);
     }
 
-    /* Rodzic. Daje dziecku czas na zapis i sprawdza swoja pamiec. */
+    /* The parent. It gives the child time to write and checks its own
+   memory. */
     int n = put(0, "[fork64] rodzic: fork dal numer dziecka ");
     n = putn(n, (uint64_t)child);
     buf[n++] = '\n';

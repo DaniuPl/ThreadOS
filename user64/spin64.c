@@ -1,8 +1,8 @@
-/* spin64 - program bez procedury obslugi, w petli bez konca
+/* spin64 - a program with no handler, in an endless loop
  *
- * Nie da sie go zakonczyc od srodka i nie o to chodzi: chodzi o to,
- * ze da sie go zakonczyc od zewnatrz. Bez sygnalow program taki jak
- * ten zabieralby konsole na zawsze.
+ * It cannot be ended from the inside and that is not the point: the
+ * point is that it can be ended from the outside. Without signals a
+ * program like this would take the console away forever.
  */
 
 #include "usys64.h"

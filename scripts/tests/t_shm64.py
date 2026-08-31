@@ -48,13 +48,13 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            out = q.command("run shmpisz64", "koniec, kod wyjscia",
+            out = q.command("run shmwrite64", "koniec, kod wyjscia",
                               timeout=40)
 
             check("pisarz dostal region pamieci wspoldzielonej",
-                  "[shmpisz64] zapisalem 12345" in out)
+                  "[shmwrite64] zapisalem 12345" in out)
             check("czytelnik - osobny proces - widzi te sama wartosc",
-                  "[shmczytaj64] wartosc=12345" in out)
+                  "[shmread64] wartosc=12345" in out)
             check("czytelnik potwierdza, ze to ta sama pamiec",
                   "dwa procesy, jedna pamiec" in out)
             check("odpowiedz czytelnika wraca do pisarza ta sama droga",

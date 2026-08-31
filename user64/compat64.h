@@ -1,17 +1,20 @@
-/* Slownik zgodnosci dla programow 64-bitowych
+/* A compatibility dictionary for 64-bit programs
  *
- * Kryptografia, TLS, HTTP, DNS i parser HTML zyja w naglowkach
- * w user/ i nie wiedza nic o trybie procesora - licza na bajtach.
- * Do jadra mowia jednak kilkoma nazwami: polacz sie, wyslij, odbierz,
- * ktora godzina, ile tyknelo, otworz plik.
+ * The cryptography, TLS, HTTP, DNS and the HTML parser live in the
+ * headers in user/ and know nothing about the processor mode - they
+ * compute on bytes. They do talk to the kernel through a handful of
+ * names, though: connect, send, receive, what time is it, how many
+ * ticks, open a file.
  *
- * Te nazwy sa umowa. Co za nimi stoi, jest sprawa jadra - i ten plik
- * jest cala roznica miedzy jedna strona a druga, dokladnie tak samo,
- * jak kernel64/compat64.c po stronie jadra.
+ * Those names are the contract. What stands behind them is the
+ * kernel's business - and this file is the whole difference between
+ * one side and the other, exactly like kernel64/compat64.c on the
+ * kernel's side.
  *
- * Roznica w ksztalcie wywolan bierze sie stad, ze w trybie dlugim
- * argumenty ida rejestrami, a nie strukturami wskazywanymi przez ECX:
- * rejestrow jest wiecej i wiekszosc opisow zmiescila sie wprost.
+ * The difference in the shape of the calls comes from the fact that in
+ * long mode the arguments travel in registers rather than in structures
+ * pointed to by ECX: there are more registers and most descriptions
+ * fitted in directly.
  */
 
 #ifndef PROTONOS_COMPAT64_H
@@ -19,11 +22,11 @@
 
 #include "usys64.h"
 
-/* --- Pliki --------------------------------------------------------
+/* --- Files --------------------------------------------------------
  *
- * Jadro 64-bitowe nie ma jeszcze flag otwarcia: plik albo istnieje,
- * albo zaklada sie go przy otwarciu. Tlumaczymy wiec flagi na to
- * jedno pytanie, ktore umie zadac. */
+ * The 64-bit kernel has no open flags yet: a file either exists, or is
+ * created when opened. So we translate the flags into that one question
+ * it knows how to ask. */
 #define O_READ   1
 #define O_WRITE  2
 #define O_CREATE 4
@@ -32,16 +35,17 @@
 #define STDIN   FD_STDIN
 #define STDOUT  FD_STDOUT
 
-static inline int32_t uz_open(const char *name, int flags)
+static inline int32_t u_open(const char *name, int flags)
 {
     return (int32_t)sys_open(name, (flags & O_CREATE) ? 1 : 0);
 }
-#define sys_open(name, flags) uz_open((name), (flags))
+#define sys_open(name, flags) u_open((name), (flags))
 
-/* --- Klawisze bez odpowiednika w ASCII -----------------------------
+/* --- Keys with no ASCII equivalent ---------------------------------
  *
- * Musza zgadzac sie z kernel/include/keyboard.h - to jadro wklada te
- * kody do kolejki, a tlumaczy je wspolny kernel/kbdmap.c. */
+ * They have to match kernel/include/keyboard.h - it is the kernel that
+ * puts these codes into the queue, and the shared kernel/kbdmap.c that
+ * translates them. */
 #define KEY_UP    0x11
 #define KEY_DOWN  0x12
 #define KEY_LEFT  0x13
@@ -51,7 +55,7 @@ static inline int32_t uz_open(const char *name, int flags)
 #define KEY_HOME  0x17
 #define KEY_END   0x18
 
-/* --- Czas ---------------------------------------------------------- */
+/* --- Time ---------------------------------------------------------- */
 
 struct utime {
     uint16_t year;
@@ -62,16 +66,15 @@ struct utime {
     uint8_t sec;
 } __attribute__((packed));
 
-/* Ten sam uklad pol, co struct czas64 - inne sa tylko nazwy. Kod
-   wspolny mowi po angielsku, bo mowi tak takze X.509; jadro po
-   polsku, bo tak mowi cala reszta. Bajty sa te same. */
-static inline void uz_time(struct utime *t)
+/* The same field layout as struct time64 - only the names differ. The
+   bytes are the same. */
+static inline void u_time(struct utime *t)
 {
     syscall64(SYS64_TIME, (int64_t)(uintptr_t)t, 0);
 }
-#define sys_time(t) uz_time((struct utime *)(t))
+#define sys_time(t) u_time((struct utime *)(t))
 
-/* Numer wlasnego procesu - do zasiewu generatora liczb losowych */
+/* Our own process number - for seeding the random number generator */
 static inline int32_t sys_getpid(void)
 {
     return (int32_t)syscall64(SYS64_GETPID, 0, 0);
@@ -82,11 +85,11 @@ static inline uint32_t sys_getticks(void)
     return (uint32_t)sys_ticks();
 }
 
-/* --- Wypisywanie liczb ---------------------------------------------- */
+/* --- Printing numbers ----------------------------------------------- */
 
-/* Czekanie na dowolne wlasne dziecko. W jadrze 32-bitowym nazywa sie
-   to sys_waitany, w 64-bitowym sys_wait - kod wspolny mowi jednym
-   slowem, a ten plik tlumaczy je na wlasciwa strone. */
+/* Waiting for any of our own children. In the 32-bit kernel this is
+   called sys_waitany, in the 64-bit one sys_wait - the shared code says
+   it with one word, and this file translates it to the right side. */
 static inline int64_t sys_wait_child(int *code)
 {
     return sys_wait(code);
@@ -99,7 +102,7 @@ static inline void print_dec(uint32_t v)
     print(buf);
 }
 
-/* Adres IP w postaci, ktora czyta czlowiek */
+/* An IP address in the form a human reads */
 static inline void print_ip(uint32_t ip)
 {
     for (int i = 3; i >= 0; i--) {
@@ -120,9 +123,10 @@ static inline int ustreq(const char *a, const char *b)
 
 /* --- UDP ------------------------------------------------------------
  *
- * Ksztalt jest tu inny: w trybie dlugim gniazdo, adres, port i limit
- * czasu jada w jednym opisie, bo tak bylo czytelniej niz upychac je
- * w rejestrach. Program o tym nie musi wiedziec. */
+ * The shape here is different: in long mode the socket, the address,
+ * the port and the timeout travel in one description, because that read
+ * better than packing them into registers. The program does not have to
+ * know about it. */
 
 static inline int32_t udp_open(uint32_t port)
 {
@@ -143,7 +147,8 @@ static inline int32_t udp_recv(int32_t sock, void *buf, uint32_t max,
     struct udp_info o = {(int)sock, 0, 0, 0, timeout_ms};
     int32_t n = (int32_t)sys_udp_recv(&o, buf, max);
     if (n >= 0) {
-        /* Adres nadawcy jadro wpisuje z powrotem w ten sam opis */
+        /* The kernel writes the sender's address back into the same
+   description */
         if (from_ip)
             *from_ip = o.ip;
         if (from_port)
@@ -169,7 +174,7 @@ static inline int32_t tcp_connect(uint32_t ip, uint32_t port,
 static inline int32_t tcp_send(int32_t conn, const void *buf, uint32_t len,
                                uint32_t timeout_ms)
 {
-    (void)timeout_ms;               /* limit ustala jadro */
+    (void)timeout_ms;               /* the limit is set by the kernel */
     return (int32_t)sys_tcp_send((int)conn, buf, len);
 }
 
@@ -185,7 +190,7 @@ static inline void tcp_close(int32_t conn)
     sys_tcp_close((int)conn);
 }
 
-/* --- Adres wlasny --------------------------------------------------- */
+/* --- Our own address ------------------------------------------------ */
 
 struct netinfo {
     uint32_t ip, mask, gw, dns;

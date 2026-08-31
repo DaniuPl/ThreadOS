@@ -1,10 +1,11 @@
-/* mkmap64 - zaklada plik z wzorcem do sprawdzania odwzorowan
+/* mkmap64 - creates a file with a pattern for checking mappings
  *
- * Bajt o numerze i ma wartosc (i * 7 + 13) & 0xFF - ten sam wzorzec,
- * ktorego szuka mmapfile64. Plik jest wiekszy niz jedna strona, wiec
- * jego odczyt przez odwzorowanie musi sie odbyc w kilku ratach.
+ * The byte with number i has the value (i * 7 + 13) & 0xFF - the same
+ * pattern mmapfile64 looks for. The file is larger than a single page,
+ * so reading it through a mapping has to happen in several
+ * instalments.
  *
- * Uzycie: run mkmap64 <plik> [ile KiB] (domyslnie 12)
+ * Usage: run mkmap64 <file> [how many KiB] (12 by default)
  */
 
 #include "usys64.h"

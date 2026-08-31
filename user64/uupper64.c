@@ -1,11 +1,12 @@
-/* uupper64 - przepisuje wejscie na wyjscie wielkimi literami
+/* uupper64 - copies input to output in capital letters
  *
- * Nie zna zadnego pliku ani zadnego innego programu: czyta z numeru
- * zero i pisze na numer jeden. To, ze po drugiej stronie siedzi
- * drugi program, a nie klawiatura i ekran, jest sprawa tego, kto go
- * uruchomil - i program nie ma jak tego zauwazyc.
+ * It knows no file and no other program: it reads from number zero and
+ * writes to number one. That on the other side there sits another
+ * program rather than a keyboard and a screen is the business of
+ * whoever started it - and the program has no way of noticing.
  *
- * Konczy sie, gdy odczyt odda zero, czyli gdy zniknie ostatni piszacy.
+ * It ends when a read returns zero, that is, when the last writer
+ * disappears.
  */
 
 #include "usys64.h"

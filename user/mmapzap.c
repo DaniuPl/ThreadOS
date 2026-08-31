@@ -6,25 +6,25 @@
  * when the process ends). Which pages to flush is known to the
  * processor: dirty is the one somebody really wrote to.
  *
- * Modes (the second argument, 'pisz' by default):
+ * Modes (the second argument, 'write' by default):
  *
- *   pisz   - checks the old pattern, writes a new one into the first
- *            two pages and flushes them explicitly. It is to flush TWO
- *            pages, not all of them: the rest of the file we only read,
- *            and reading does not make anything dirty. The second
- *            sys_msync is to return zero - once flushed, a page stops
- *            being dirty.
- *   spr    - opens the file with an ORDINARY sys_read and checks that
- *            it sees the new pattern there in the first two pages, and
- *            the old one further on.
- *   bez    - writes two bytes and finishes WITHOUT sys_msync. It is the
- *            kernel that is to flush them when the process ends.
- *   spr2   - checks with an ordinary read that those two bytes are
- *            there.
- *   widac  - forks; the child writes through the mapping and the parent
- *            is to see it in its own. A writable mapping is SHARED, not
- *            copied on write - otherwise the child's writes would never
- *            reach the file.
+ *   write   - checks the old pattern, writes a new one into the first
+ *             two pages and flushes them explicitly. It is to flush TWO
+ *             pages, not all of them: the rest of the file we only read,
+ *             and reading does not make anything dirty. The second
+ *             sys_msync is to return zero - once flushed, a page stops
+ *             being dirty.
+ *   check   - opens the file with an ORDINARY sys_read and checks that
+ *             it sees the new pattern there in the first two pages, and
+ *             the old one further on.
+ *   nosync  - writes two bytes and finishes WITHOUT sys_msync. It is the
+ *             kernel that is to flush them when the process ends.
+ *   check2  - checks with an ordinary read that those two bytes are
+ *             there.
+ *   shared  - forks; the child writes through the mapping and the parent
+ *             is to see it in its own. A writable mapping is SHARED, not
+ *             copied on write - otherwise the child's writes would never
+ *             reach the file.
  *
  * Usage: run mmapzap <file> [mode]
  */
@@ -106,9 +106,9 @@ static uint32_t check_by_reading(const char *name)
 void _start(int argc, char **argv)
 {
     const char *name = argc > 1 ? argv[1] : "zapis.txt";
-    const char *mode = argc > 2 ? argv[2] : "pisz";
+    const char *mode = argc > 2 ? argv[2] : "write";
 
-    if (equal(mode, "spr")) {
+    if (equal(mode, "check")) {
         uint32_t bad = check_by_reading(name);
         if (bad) {
             print("[mmapzap] ZLE: zwykly odczyt widzi inne bajty: ");
@@ -120,7 +120,7 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    if (equal(mode, "spr2")) {
+    if (equal(mode, "check2")) {
         int a = read_byte(name, 0);
         int b = read_byte(name, OFF_B);
         if (a != CH_A || b != CH_B) {
@@ -138,14 +138,14 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    if (equal(mode, "bez")) {
+    if (equal(mode, "nosync")) {
         p[0] = CH_A;
         p[OFF_B] = CH_B;
         print("[mmapzap] dwa bajty wpisane, koncze bez msync\n");
         sys_exit(0);
     }
 
-    if (equal(mode, "widac")) {
+    if (equal(mode, "shared")) {
         int32_t pid = sys_fork();
         if (pid == 0) {
             p[OFF_CHILD] = CH_B;
@@ -165,7 +165,7 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    /* Mode 'pisz': we read the whole file but write only over the two
+    /* Mode 'write': we read the whole file but write only over the two
        first pages - and that is what the flushed count is to show */
     if (size <= CHANGED) {
         print("[mmapzap] ZLE: plik za maly na ten test\n");

@@ -1,8 +1,9 @@
-/* gclock64 - zegar w oknie graficznym (ring 3, jadro 64-bitowe)
+/* gclock64 - a clock in a graphical window (ring 3, the 64-bit kernel)
  *
- * Co pol sekundy czyta zegar plyty glownej i rysuje godzine w swoim
- * oknie. Pod spodem uptime - liczony z tyknac timera, wiec widac
- * naraz dwa niezalezne zrodla czasu: sprzet i jadro.
+ * Every half second it reads the motherboard clock and draws the time
+ * in its window. Below it the uptime - counted from timer ticks, so two
+ * independent sources of time can be seen at once: the hardware and the
+ * kernel.
  */
 
 #include "usys64.h"

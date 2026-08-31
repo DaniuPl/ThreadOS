@@ -67,7 +67,7 @@ def main():
                 check("plik z wzorcem zalozony na dysku",
                       "[mkmap64] zapisano 12288 B wzorca" in make_it)
 
-                write_it = q.command("run mmapzap64 zapis.txt pisz",
+                write_it = q.command("run mmapzap64 zapis.txt write",
                                    "kod wyjscia", timeout=90)
                 check("caly plik da sie przeczytac przez odwzorowanie "
                       "do zapisu",
@@ -79,7 +79,7 @@ def main():
                 check("odeslanie na dysk nie rusza tresci w pamieci",
                       "zapis przez pamiec gotowy" in write_it and "ZLE" not in write_it)
 
-                probe = q.command("run mmapzap64 zapis.txt spr",
+                probe = q.command("run mmapzap64 zapis.txt check",
                                   "kod wyjscia", timeout=90)
                 check("zwykly odczyt widzi to, co wpisala pamiec",
                       "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
@@ -87,11 +87,11 @@ def main():
                 # Bez jawnego msync - odsyla jadro na koncu procesu
                 q.command("run mkmap64 bezsync.txt 12", "kod wyjscia",
                             timeout=60)
-                without = q.command("run mmapzap64 bezsync.txt bez",
+                without = q.command("run mmapzap64 bezsync.txt nosync",
                                   "kod wyjscia", timeout=60)
                 check("program moze skonczyc sie bez proszenia o odeslanie",
                       "koncze bez msync" in without)
-                probe2 = q.command("run mmapzap64 bezsync.txt spr2",
+                probe2 = q.command("run mmapzap64 bezsync.txt check2",
                                    "kod wyjscia", timeout=60)
                 check("jadro odsyla brudne strony przy koncu procesu",
                       "doszly na dysk przy koncu procesu" in probe2)
@@ -99,7 +99,7 @@ def main():
                 # Po fork-u odwzorowanie jest wspolne, a nie kopiowane
                 q.command("run mkmap64 wspolny.txt 12", "kod wyjscia",
                             timeout=60)
-                visible = q.command("run mmapzap64 wspolny.txt widac",
+                visible = q.command("run mmapzap64 wspolny.txt shared",
                                     "kod wyjscia", timeout=60)
                 check("rodzic widzi zapis dziecka - odwzorowanie wspolne",
                       "odwzorowanie wspolne" in visible and "ZLE" not in visible)
@@ -129,7 +129,7 @@ def main():
             check("plik z wzorcem zalozony na dysku (32-bit)",
                   "[mkmap] zapisano 12288 B wzorca" in make_it)
 
-            write_it = q3.command("run mmapzap zapis.txt pisz", "zakonczyl sie",
+            write_it = q3.command("run mmapzap zapis.txt write", "zakonczyl sie",
                                 timeout=90)
             check("caly plik da sie przeczytac przez odwzorowanie "
                   "do zapisu (32-bit)",
@@ -141,25 +141,25 @@ def main():
             check("odeslanie na dysk nie rusza tresci w pamieci (32-bit)",
                   "zapis przez pamiec gotowy" in write_it and "ZLE" not in write_it)
 
-            probe = q3.command("run mmapzap zapis.txt spr", "zakonczyl sie",
+            probe = q3.command("run mmapzap zapis.txt check", "zakonczyl sie",
                                timeout=90)
             check("zwykly odczyt widzi to, co wpisala pamiec (32-bit)",
                   "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
 
             q3.command("run mkmap bezsync.txt 12", "zakonczyl sie",
                          timeout=60)
-            without = q3.command("run mmapzap bezsync.txt bez", "zakonczyl sie",
+            without = q3.command("run mmapzap bezsync.txt nosync", "zakonczyl sie",
                                timeout=60)
             check("program moze skonczyc sie bez proszenia o odeslanie "
                   "(32-bit)", "koncze bez msync" in without)
-            probe2 = q3.command("run mmapzap bezsync.txt spr2",
+            probe2 = q3.command("run mmapzap bezsync.txt check2",
                                 "zakonczyl sie", timeout=60)
             check("jadro odsyla brudne strony przy koncu procesu (32-bit)",
                   "doszly na dysk przy koncu procesu" in probe2)
 
             q3.command("run mkmap wspolny.txt 12", "zakonczyl sie",
                          timeout=60)
-            visible = q3.command("run mmapzap wspolny.txt widac",
+            visible = q3.command("run mmapzap wspolny.txt shared",
                                  "zakonczyl sie", timeout=60)
             check("rodzic widzi zapis dziecka - odwzorowanie wspolne "
                   "(32-bit)",
@@ -177,11 +177,11 @@ def main():
                   "+ PFS gotowy" in screen_text and "sformatowany" not in screen_text)
             q4.wait_for("[siec] DHCP", timeout=30)
 
-            po = q4.command("run mmapzap zapis.txt spr", "zakonczyl sie",
+            po = q4.command("run mmapzap zapis.txt check", "zakonczyl sie",
                               timeout=90)
             check("zapisy przez pamiec przetrwaly restart maszyny",
                   "zwykly odczyt widzi to" in po and "ZLE" not in po)
-            po2 = q4.command("run mmapzap bezsync.txt spr2",
+            po2 = q4.command("run mmapzap bezsync.txt check2",
                                "zakonczyl sie", timeout=60)
             check("bajty odeslane przy koncu procesu tez przetrwaly restart",
                   "doszly na dysk przy koncu procesu" in po2)

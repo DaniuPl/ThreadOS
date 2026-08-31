@@ -1,17 +1,17 @@
-/* swaptest64 - wymiana stron na dysk widziana od strony programu
+/* swaptest64 - swapping pages out to disk as seen from a program
  *
- * Bierze wiecej pamieci, niz maszyna ma RAM-u, i zapisuje w niej wzorzec
- * zalezny od numeru strony. Jadro musi po drodze wyrzucic czesc stron
- * na dysk. Potem program czyta wszystko z powrotem: kazda strona, ktora
- * poszla na dysk, wraca przy pierwszym dotknieciu - i musi wrocic
- * z dokladnie ta sama zawartoscia.
+ * It takes more memory than the machine has RAM and writes into it a
+ * pattern that depends on the page number. Along the way the kernel has
+ * to throw some of the pages out to disk. Then the program reads
+ * everything back: every page that went out to disk comes back on the
+ * first touch - and has to come back with exactly the same contents.
  *
- * Program o wymianie nie wie nic i wlasnie o to chodzi: dla niego
- * pamiec jest po prostu pamiecia. Sprawdza sie sam - gdyby wrocil
- * choc jeden inny bajt, konczy bledem zamiast komunikatem, ktory ktos
- * musialby przeczytac.
+ * The program knows nothing about swapping and that is exactly the
+ * point: to it, memory is simply memory. It checks itself - if even one
+ * byte came back different, it ends with an error rather than a message
+ * somebody would have to read.
  *
- * Uzycie: run swaptest64 [MiB] (domyslnie 14).
+ * Usage: run swaptest64 [MiB] (14 by default).
  */
 
 #include "usys64.h"

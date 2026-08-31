@@ -1,9 +1,10 @@
-/* gfiles64 - menedzer plikow w oknie (ring 3, jadro 64-bitowe)
+/* gfiles64 - a file manager in a window (ring 3, the 64-bit kernel)
  *
- * Listuje pliki z dysku w oknie; klikniecie nazwy otwiera plik
- * i pokazuje jego poczatek w panelu podgladu. Spina cztery rzeczy
- * naraz: system plikow, zdarzenia myszy, wywolania okien i wlasna
- * przestrzen adresowa procesu - a wszystko z pierscienia 3.
+ * It lists files from the disk in a window; clicking a name opens the
+ * file and shows its beginning in the preview panel. It ties four
+ * things together at once: the file system, mouse events, the window
+ * calls and the process's own address space - and all of it from
+ * ring 3.
  */
 
 #include "usys64.h"
@@ -43,7 +44,7 @@ static int same(const char *a, const char *b)
     return *a == *b;
 }
 
-/* Otwiera zaznaczony plik i wczytuje jego poczatek do podgladu */
+/* Opens the selected file and reads its beginning into the preview */
 static void load(const char *name)
 {
     copy_out(selected, name, sizeof(selected));
@@ -58,7 +59,7 @@ static void load(const char *name)
     if (n < 0)
         n = 0;
     preview[n] = '\0';
-    /* Podglad rysuje sie w jednej linii - koniec na pierwszym enterze */
+    /* The preview is drawn on one line - it ends at the first newline */
     for (int i = 0; preview[i]; i++)
         if (preview[i] == '\n') {
             preview[i] = '\0';
@@ -90,10 +91,11 @@ void _start(void)
         ile = 0;
         struct dirent64 entry;
         for (int i = 0; i < 32 && ile < MAXP; i++) {
-            /* sys_readdir oddaje ZERO przy trafieniu, a -1 na koncu
-               katalogu - inaczej niz fs_readdir w jadrze, ktore oddaje
-               jedynke. Pomylenie tych dwoch konwencji konczy sie
-               pustym oknem, bo pierwszy wpis wyglada jak koniec. */
+            /* sys_readdir returns ZERO on a hit and -1 at the end of the
+               directory - unlike fs_readdir in the kernel, which
+               returns one. Confusing these two conventions ends in an
+               empty window, because the first entry looks like the
+               end. */
             if (sys_readdir(i, &entry) != 0)
                 break;
             copy_out(names[ile], entry.name, sizeof(names[0]));

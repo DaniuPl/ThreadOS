@@ -1,9 +1,10 @@
-/* gmon64 - wskaznik zasobow w oknie (ring 3, jadro 64-bitowe)
+/* gmon64 - a resource monitor in a window (ring 3, the 64-bit kernel)
  *
- * Co pol sekundy pyta jadro o stan maszyny i rysuje pamiec oraz czas
- * pracy na zywo, z paskiem zajetosci. Nic tu nie jest tajemnica:
- * liczby opisuja maszyne, a nie cudze procesy - dlatego program
- * z pierscienia 3 moze je dostac, nie prosac o zadne uprawnienia.
+ * Every half second it asks the kernel for the machine's state and
+ * draws memory and uptime live, with a usage bar. Nothing here is a
+ * secret: the numbers describe the machine, not somebody else's
+ * processes - which is why a ring 3 program can have them without
+ * asking for any rights.
  */
 
 #include "usys64.h"
@@ -46,7 +47,7 @@ void _start(void)
         win_text(w, 4, 28, "uptime (s):", C_GREEN);
         num(w, 96, 28, si.uptime_s, C_WHITE);
 
-        /* Pasek zajetosci: czerwone tlo, niebieska czesc uzyta */
+        /* The usage bar: a red background, the used part in blue */
         uint32_t ile = si.ram_kib
                            ? si.used_kib * BAR_W / si.ram_kib : 0;
         win_rect(w, 4, 48, BAR_W, 12, C_RED);

@@ -1,16 +1,16 @@
-/* unet64 - siec od strony programu
+/* unet64 - the network as seen from a program
  *
- * Do tej pory z sieci korzystalo tylko jadro: 'ping' i 'ifconfig' to
- * jego wlasne polecenia. Ten program robi to sam, przez wywolania
- * systemowe, i nie ma przy tym zadnych szczegolnych uprawnien.
+ * Until now only the kernel used the network: 'ping' and 'ifconfig' are
+ * its own commands. This program does it itself, through system calls,
+ * and has no special rights while doing so.
  *
- * Sprawdza trzy rzeczy po kolei:
- *   - czy zna swoj adres (ten z DHCP),
- *   - czy datagram wyslany do siebie samego wraca taki sam,
- *   - czy da sie polaczyc z serwerem i dostac od niego odpowiedz.
+ * It checks three things in turn:
+ *   - whether it knows its own address (the one from DHCP),
+ *   - whether a datagram sent to itself comes back the same,
+ *   - whether it can connect to a server and get an answer from it.
  *
- * Adres i port serwera podaje sie w argumentach; bez nich robi tylko
- * dwie pierwsze proby.
+ * The server's address and port are given in the arguments; without
+ * them it only makes the first two attempts.
  */
 
 #include "usys64.h"
@@ -60,7 +60,8 @@ void _start(int argc, char **argv)
 {
     uint32_t addrs[4];
 
-    /* 1. Wlasny adres - ten, ktory przyszedl z sieci przez DHCP */
+    /* 1. Our own address - the one that came from the network through
+   DHCP */
     if (sys_netinfo(addrs) != 1)
         err("system nie ma adresu IP", 0);
 
@@ -72,8 +73,9 @@ void _start(int argc, char **argv)
     out[n] = 0;
     print(out);
 
-    /* 2. Datagram do samego siebie. Petla zwrotna nie wychodzi na
-          kabel, wiec proba nie zalezy od zadnej sieci na zewnatrz. */
+    /* 2. A datagram to ourselves. The loopback does not go out on the
+          wire, so the attempt does not depend on any network
+          outside. */
     int64_t s = sys_udp_open(MY_PORT);
     if (s < 0)
         err("nie moge otworzyc gniazda UDP", s);
@@ -114,8 +116,8 @@ void _start(int argc, char **argv)
         sys_exit(0);
     }
 
-    /* 3. Polaczenie TCP i prosba HTTP - najkrotsza droga do
-          sprawdzenia, czy strumien dziala w obie strony */
+    /* 3. A TCP connection and an HTTP request - the shortest way to
+          check that the stream works in both directions */
     int64_t ip = uparse_ip(argv[1]);
     int64_t port = uatoi(argv[2]);
     if (ip < 0 || port <= 0)
@@ -139,7 +141,7 @@ void _start(int argc, char **argv)
             break;
         total += k;
         if (total > 16)
-            break;                   /* naglowek wystarczy za dowod */
+            break;                   /* the header is proof enough */
     }
     sys_tcp_close((int)c);
 

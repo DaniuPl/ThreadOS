@@ -1,10 +1,10 @@
-/* sigtest64 - program, ktory przechwytuje Ctrl+C
+/* sigtest64 - a program that catches Ctrl+C
  *
- * Ustawia wlasna procedure obslugi i czeka. Po sygnale procedura
- * wypisuje, ze go dostala, i wraca - a program ma dzialac dalej
- * dokladnie tam, gdzie mu przerwano. To drugie jest wazniejsze od
- * pierwszego: procedura obslugi nie konczy programu, tylko wchodzi
- * mu w pol kroku i wychodzi.
+ * It sets a handler of its own and waits. After the signal the handler
+ * prints that it got it and returns - and the program is to keep
+ * running exactly where it was interrupted. The latter matters more
+ * than the former: a handler does not end the program, it steps into it
+ * mid-stride and steps out again.
  */
 
 #include "usys64.h"
@@ -25,8 +25,8 @@ void _start(void)
     sys_signal(SIGINT, on_signal);
     print("[sigtest64] czekam na Ctrl+C\n");
 
-    /* Petla bez konca: gdyby sygnal nie dzialal, program zostalby
-       tu na zawsze. Licznik pokazuje, ze petla naprawde biegla. */
+    /* An endless loop: if the signal did not work, the program would
+       stay here forever. The counter shows that the loop really ran. */
     while (!dostalem) {
         spins++;
         sys_sleep(10);
