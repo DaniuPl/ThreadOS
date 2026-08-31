@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: watki jadra prowadzone przez wszystkie rdzenie.
+"""ProtonOS smoke test: kernel threads run by all the cores.
 
-To jest ta zmiana, na ktora czekaly poprzednie. Rdzen wtorny mial juz
-tablice wyjatkow, wlasny zegar i zamki na wspolnych strukturach - ale
-biezace zadanie bylo wciaz JEDNA zmienna globalna, i dopoki nia bylo,
-wiecej niz jeden rdzen nie mial jak prowadzic zadan. Teraz jest ich
-tyle, ile rdzeni.
+This is the change the earlier ones were waiting for. A secondary core
+already had an exception table, its own clock and locks on the shared
+structures - but the current task was still ONE global variable, and as
+long as it was, more than one core had no way of running tasks. Now
+there are as many of them as there are cores.
 
-Sprawdzamy trzy rzeczy, bo kazda z osobna dalaby sie podrobic:
+We check three things, because each on its own could be faked:
 
-  1. Kazdy rdzen wtorny ma wlasne zadanie bezczynne i prowadzi je -
-     widac to w 'ps'. Bez tego nie byloby dokad odlozyc jego kontekstu.
-  2. Watek sam zapisuje, na ktorym rdzeniu wlasnie liczy. Gdyby jednak
-     scheduler tylko przerzucal go miedzy rdzeniami po kolei, maska
-     wygladalaby tak samo.
-  3. Dlatego mierzymy CZAS. Cztery porcje puszczone rownolegle maja
-     zajac wyraznie mniej niz cztery razy tyle, co jedna. Jednego
-     rdzenia nie da sie o to oszukac: on musi policzyc je po kolei.
+  1. Every secondary core has its own idle task and runs it - that can be
+     seen in 'ps'. Without it there would be nowhere to put its context.
+  2. A thread records for itself which core it is computing on. If the
+     scheduler merely threw it between the cores in turn, though, the
+     mask would look the same.
+  3. So we measure TIME. Four portions started in parallel are to take
+     clearly less than four times as long as one. A single core cannot be
+     cheated about that: it has to compute them one after another.
 
-Wynik kazdej porcji jest ten sam, co porcji policzonej w watku shella -
-co do bitu. Watek, ktory policzyl swoje na innym rdzeniu, ma dac
-dokladnie ta sama liczbe.
+Every portion's result is the same as that of a portion computed in the
+shell's thread - bit for bit. A thread that computed its share on another
+core is to give exactly the same number.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -55,7 +55,7 @@ def check_threads(out, suffix, ncores):
     for m in masks:
         total |= m
     if ncores > 1:
-        # Sedno: watek jadra naprawde biegl poza rdzeniem rozruchowym
+        # The heart of it: a kernel thread really ran off the bootstrap core
         check("watki prowadzil takze rdzen inny niz rozruchowy (maska %x)%s"
               % (total, suffix),
               (total & ~1) != 0 and "Watki poza rdzeniem rozruchowym: tak"
@@ -76,9 +76,10 @@ def check_threads(out, suffix, ncores):
     check("porcja odniesienia trwala dosc dlugo, by cos znaczyc (%d tyknac)%s"
           % (one, suffix), one >= 5)
     if ncores > 1:
-        # Po kolei zajelyby cztery razy tyle. Prog stoi w polowie drogi
-        # miedzy jednym a drugim - nie mierzymy szybkosci maszyny,
-        # tylko to, czy praca w ogole idzie rownolegle.
+        # One after another they would take four times as long. The
+        # threshold stands halfway between one and the other - we are not
+        # measuring the machine's speed, only whether the work goes in
+        # parallel at all.
         check("cztery porcje naraz szybciej niz po kolei (%d wobec ~%d)%s"
               % (four, 4 * one, suffix),
               four < 3 * one)
@@ -89,7 +90,7 @@ def check_threads(out, suffix, ncores):
 
 
 def idle_per_core(ps, ile):
-    """Czy kazdy rdzen wtorny prowadzi swoje zadanie bezczynne."""
+    """Does every secondary core run its own idle task."""
     for i in range(1, ile):
         if not re.search(r"bezczynny%d" % i, ps):
             return False
@@ -122,7 +123,7 @@ def main():
                 out = q.command("smpthreads", "Watki poza", timeout=180)
                 check_threads(out, "", 4)
 
-                # System ma po tym wszystkim dzialac jak dotad
+                # The system is to work as before after all this
                 after_run = q.command("run hello64", "kod wyjscia", timeout=60)
                 check("jadro dziala dalej po probie",
                       "czesc, jestem ELF-em" in after_run)
@@ -156,9 +157,9 @@ def main():
         if os.path.exists(slog32):
             os.unlink(slog32)
 
-    # --- Maszyna jednordzeniowa ---
-    # Ten sam kod, jeden rdzen: watki maja sie policzyc tak samo,
-    # tyle ze po kolei
+    # --- A single-core machine ---
+    # The same code, one core: the threads are to compute the same, only
+    # one after another
     print("--- ta sama proba na jednym rdzeniu ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:

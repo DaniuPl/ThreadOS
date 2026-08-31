@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: zapis przez plik odwzorowany w pamieci.
+"""ProtonOS smoke test: writing through a file mapped into memory.
 
-Odwzorowania byly dotad jednokierunkowe: plik dawalo sie czytac jak
-pamiec, ale nie pisac. Teraz droga prowadzi w obie strony - program
-zmienia bajty pod adresem, a one trafiaja do pliku na dysku.
+Mappings were one-way so far: a file could be read like memory, but not
+written. Now the road goes both ways - the program changes bytes at an
+address and they land in the file on disk.
 
-Sprawdzamy przy tym cztery rzeczy, ktore latwo zrobic zle:
+Along the way we check four things that are easy to get wrong:
 
-  1. Odsylamy TYLKO to, co sie zmienilo. Program czyta caly plik,
-     a pisze po dwoch stronach - i dwie strony maja wrocic na dysk.
-     O tym, ktore, mowi procesor: bit "brudna" ustawia sam przy
-     zapisie. Drugie sys_msync z rzedu ma odeslac zero.
-  2. Zmiany widac ZWYKLYM odczytem, a po restarcie maszyny takze na
-     dysku - nie tylko w pamieci, ktora je trzymala.
-  3. Program nie musi prosic: to, czego nie zdazyl odeslac sam, odsyla
-     jadro przy koncu procesu.
-  4. Zapisywalne odwzorowanie po fork-u jest WSPOLNE, a nie kopiowane
-     przy zapisie. Oba procesy pisza do jednego pliku, wiec prywatna
-     kopia u dziecka znaczylaby, ze jego zapisy nigdy nie wychodza
-     poza jego wlasna pamiec.
+  1. We flush ONLY what changed. The program reads the whole file and
+     writes over two pages - and two pages are to go back to the disk.
+     Which ones is said by the processor: it sets the "dirty" bit itself
+     on a write. A second sys_msync in a row is to flush zero.
+  2. The changes can be seen with an ORDINARY read, and after a machine
+     restart on the disk too - not only in the memory that held them.
+  3. The program does not have to ask: what it did not manage to flush
+     itself is flushed by the kernel when the process ends.
+  4. A writable mapping after a fork is SHARED, not copied on write. Both
+     processes write into one file, so a private copy in the child would
+     mean its writes never go beyond its own memory.
 
-Oba jadra maja to samo, kazde swoim kodem stronicowania - i oba
-sprawdzamy tak samo.
+Both kernels have the same thing, each with its own paging code - and we
+check both the same way.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -84,7 +83,8 @@ def main():
                 check("zwykly odczyt widzi to, co wpisala pamiec",
                       "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
 
-                # Bez jawnego msync - odsyla jadro na koncu procesu
+                # Without an explicit msync - the kernel flushes it at the end of the
+# process
                 q.command("run mkmap64 bezsync.txt 12", "kod wyjscia",
                             timeout=60)
                 without = q.command("run mmapzap64 bezsync.txt nosync",
@@ -96,7 +96,7 @@ def main():
                 check("jadro odsyla brudne strony przy koncu procesu",
                       "doszly na dysk przy koncu procesu" in probe2)
 
-                # Po fork-u odwzorowanie jest wspolne, a nie kopiowane
+                # After a fork the mapping is shared, not copied
                 q.command("run mkmap64 wspolny.txt 12", "kod wyjscia",
                             timeout=60)
                 visible = q.command("run mmapzap64 wspolny.txt shared",
@@ -111,11 +111,11 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    # --- To samo w jadrze 32-bitowym, z restartem na koniec ---
+    # --- The same in the 32-bit kernel, with a restart at the end ---
     print("--- zapis przez odwzorowanie (jadro 32-bitowe) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
-    slog4 = tempfile.mktemp(suffix=".log")   # drugi rozruch pisze na swoj
+    slog4 = tempfile.mktemp(suffix=".log")   # the second boot writes to its own
     with open(disk32, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
@@ -167,9 +167,9 @@ def main():
         finally:
             q3.close()
 
-        # Najmocniejszy dowod: TEN SAM obraz dysku, nowe jadro, nowa
-        # pamiec. Gdyby zmiany siedzialy tylko w stronach procesu,
-        # tutaj nie byloby po nich sladu.
+        # The strongest proof: THE SAME disk image, a new kernel, new
+        # memory. If the changes sat only in the process's pages, there
+        # would be no trace of them here.
         q4 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog4)
         try:
             screen_text = q4.wait_for("ProtonOS shell", timeout=40)

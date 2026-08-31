@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: dysk NVMe (PCI Express).
+"""ProtonOS smoke test: an NVMe disk (PCI Express).
 
-Warstwa blokowa istniala od czasow AHCI: system plikow i wymiana stron
-nie wiedza, ktory kontroler siedzi pod spodem. NVMe jest trzecim
-sterownikiem pod ta sama nazwa i najbardziej niepodobnym do reszty -
-nie ma w nim nic z dziedzictwa ATA. Zamiast rejestrow i ramek FIS sa
-dwie kolejki w pamieci: my wkladamy polecenia, kontroler odklada
-odpowiedzi, a o tym, ze cos wrocilo, mowi bit fazy.
+The block layer has existed since the days of AHCI: the file system and
+page swapping do not know which controller sits underneath. NVMe is the
+third driver under that same name and the least like the rest - there is
+nothing of the ATA heritage in it. Instead of registers and FIS frames
+there are two queues in memory: we put commands in, the controller puts
+answers back, and a phase bit says that something has returned.
 
-Sprawdzamy to tak, jak sprawdza sie dysk: zapisujemy, czytamy, a potem
-uruchamiamy maszyne DRUGI RAZ na tym samym obrazie. Plik, ktory
-przezyl restart, naprawde lezal na talerzu, a nie w pamieci.
+We check that the way a disk is checked: we write, we read, and then
+start the machine a SECOND TIME on the same image. A file that survived
+a restart really did lie on the platter and not in memory.
 """
 
 import os
@@ -26,7 +26,7 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    # --- Jadro 32-bitowe ---
+    # --- The 32-bit kernel ---
     print("--- dysk NVMe (jadro 32-bitowe) ---")
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
@@ -40,13 +40,13 @@ def main():
               "Dysk NVMe (PCIe, kolejki) + PFS gotowy" in start)
         check("system plikow sformatowal pusty dysk NVMe",
               "sformatowany" in start)
-        # Shell rusza dopiero po schedulerze, a klawisze wpisane
-        # wczesniej przepadaja - to nie jest rzecz do zgadywania
+        # The shell starts only after the scheduler, and keys typed
+        # earlier are lost - that is not a thing to guess at
         q.wait_for("ProtonOS shell", timeout=30)
         q.wait_for("[siec] DHCP", timeout=30)
 
-        # Wymiana stron zaklada swoj plik juz po systemie plikow,
-        # wiec pytamy o nia dopiero teraz
+        # Page swapping creates its file only after the file system,
+        # so we ask about it only now
         check("plik wymiany zalozony na dysku NVMe",
               re.search(r"Wymiana stron: \d+ KiB",
                         q.wait_serial("Wymiana stron:", timeout=20))
@@ -58,13 +58,14 @@ def main():
         check("odczyt tego samego pliku oddaje te same bajty",
               "tresc-przez-kolejki" in read_res)
 
-        # Proces w ring 3 przez te sama droge: syscall -> PFS -> NVMe
+        # A ring 3 process by the same path: syscall -> PFS -> NVMe
         ring3 = q.command("run fileio", "[fileio] OK", timeout=40)
         check("proces ring3 pisze i czyta plik przez NVMe",
               "odczytano z dysku: plik zapisany przez proces ring3" in ring3)
 
-        # Duzy plik: kilkanascie partii po jednej stronie kazda -
-        # tu widac, czy petla dzielaca transfer liczy sie poprawnie
+        # A large file: a dozen or so batches of one page each - here
+        # it can be seen whether the loop splitting the transfer counts
+        # correctly
         big = q.command("run memtest", "[memtest]", timeout=60)
         check("system zyje po intensywnym ruchu na dysku",
               "[memtest]" in big)
@@ -73,7 +74,7 @@ def main():
         if os.path.exists(slog):
             os.unlink(slog)
 
-    # --- Drugi rozruch na tym samym obrazie ---
+    # --- A second boot on the same image ---
     print("--- NVMe: drugi rozruch, ten sam obraz ---")
     slog2 = tempfile.mktemp(suffix=".log")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2, nvme=True)
@@ -95,7 +96,7 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    # --- Jadro 64-bitowe ---
+    # --- The 64-bit kernel ---
     print("--- dysk NVMe (jadro 64-bitowe) ---")
     reason = no64()
     if reason:
@@ -116,9 +117,9 @@ def main():
         q64 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, disk=disk64,
                    nvme=True, qemu="qemu-system-x86_64")
         try:
-            # Czekamy na CALY wiersz, a nie na sam skrot "PFS": ten
-            # pojawia sie juz przy formatowaniu dysku, wiec czekanie na
-            # niego bylo wyscigiem z wypisem o sterowniku
+            # We wait for the WHOLE line, not for the "PFS" tag alone:
+            # that appears already when the disk is formatted, so waiting
+            # for it was a race with the driver's message
             start = q64.wait_serial("+ PFS gotowy", timeout=90)
             check("jadro 64-bitowe tez widzi dysk NVMe",
                   "Dysk NVMe (PCIe, kolejki) + PFS gotowy" in start)
@@ -129,7 +130,8 @@ def main():
             check("zapis i odczyt przez NVMe w trybie dlugim",
                   "tresc-z-trybu-dlugiego" in read_res)
 
-            # Program z dysku NVMe: loader ELF czyta go ta sama droga
+            # A program from the NVMe disk: the ELF loader reads it by the
+            # same path
             q64.command("cp hello64 znvme", "cp:")
             run_out = q64.command("run znvme", "[hello64] koncze",
                                   timeout=40)

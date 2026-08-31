@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: procesy pierscienia 3 i ich pamiec.
+"""ProtonOS smoke test: ring 3 processes and their memory.
 
-Program uzytkownika to osobny plik ELF z wlasna przestrzenia adresowa.
-Ta grupa przechodzi po kolei przez wszystko, co taki program dostaje od
-jadra: wywolania systemowe, argumenty, rosnaca sterte, mmap, pamiec
-wspoldzielona, watki i priorytety.
+A user program is a separate ELF file with its own address space. This
+group walks in turn through everything such a program gets from the
+kernel: system calls, arguments, a growing heap, mmap, shared memory,
+threads and priorities.
 
-Po KAZDYM programie pytamy 'mem' o liczbe zajetych ramek i porownujemy
-ja z ta sprzed uruchomienia. Proces, ktory sie skonczyl, ma oddac
-wszystko - to jedyna asercja, ktora wylapuje wyciek pamieci, bo sam
-program niczego o nim nie powie.
+After EVERY program we ask 'mem' for the number of frames taken and
+compare it with the one from before the start. A process that has
+finished is to give everything back - that is the only assertion that
+catches a memory leak, because the program itself will say nothing about
+it.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -41,13 +42,13 @@ def main():
         q.type_line("mem")
         used_before = pmm_used(q.screen())
 
-        # 'run hello': proces ELF z wlasna przestrzenia adresowa
+        # 'run hello': an ELF process with its own address space
         q.type_line("run hello")
         screen = q.wait_for("[hello] czesc, jestem procesem ELF")
         check("proces hello wystartowal z ELF i robi syscall write",
               "[hello] czesc, jestem procesem ELF" in screen)
-        # Przestrzen uzytkownika zaczyna sie od 1 GiB - ponizej jest juz
-        # tylko mapowanie identycznosciowe jadra
+        # User space starts from 1 GiB - below there is only the kernel's
+        # identity mapping
         check("program uzytkownika mieszka powyzej 1 GiB",
               re.search(r"entry 4[0-9a-f]{7}", screen) is not None)
         view = q.wait_for("[hello] licze: 3")
@@ -57,18 +58,18 @@ def main():
         check("hello zakonczyl sie czysto przez sys_exit",
               "proces 'hello' zakonczyl sie (kod 0)" in view)
 
-        time.sleep(0.5)  # czas na sprzatniecie zombie
+        time.sleep(0.5)  # time to clean the zombie up
         q.type_line("mem")
         used_after = pmm_used(q.screen())
         check(f"brak wycieku ramek po procesie ({used_before} -> {used_after})",
               used_before is not None and used_after == used_before)
 
-        # 'run echo ...': argumenty (argc/argv) docieraja do procesu
+        # 'run echo ...': the arguments (argc/argv) reach the process
         q.type_line("run echo proton os dziala")
         check("argumenty argc/argv docieraja do procesu (echo)",
               "proton os dziala" in q.wait_for("proton os dziala"))
 
-        # 'run memtest': sbrk/malloc daje procesowi rosnaca pamiec
+        # 'run memtest': sbrk/malloc gives the process growing memory
         q.type_line("run memtest")
         screen = q.wait_for("[memtest] OK:")
         check("sbrk/malloc dziala (memtest zapisal i zweryfikowal pamiec)",
@@ -84,7 +85,7 @@ def main():
               f" ({used_before} -> {used_after_mt})",
               used_after_mt is not None and used_after_mt == used_before)
 
-        # 'run mmaptest': mmap daje swieza, wyzerowana, zapisywalna pamiec
+        # 'run mmaptest': mmap gives fresh, zeroed, writable memory
         q.type_line("run mmaptest")
         check("mmap dziala (3 strony zmapowane, zerowe i zapisywalne)",
               "zapisane i zweryfikowane" in q.wait_for("[mmaptest] OK:"))
@@ -95,23 +96,23 @@ def main():
               f" ({used_before} -> {used_after_mm})",
               used_after_mm is not None and used_after_mm == used_before)
 
-        # 'run shmtest': pamiec wspoldzielona miedzy procesami. shmtest
-        # zapisuje 12345 i uruchamia shmread (osobny proces), ktory czyta
-        # te sama pamiec - dowodem jest jego linia z odczytana wartoscia.
+        # 'run shmtest': shared memory between processes. shmtest writes
+        # 12345 and starts shmread (a separate process), which reads the
+        # same memory - the proof is its line with the value read.
         q.type_line("run shmtest")
         check("pamiec wspoldzielona: inny proces czyta zapisana wartosc",
               "[shmread] wartosc=12345" in q.wait_for("[shmread] wartosc="))
 
-        # 'run threads': dwa watki w jednym procesie (wspolna pamiec).
-        # Kazdy zapisuje inna zmienna globalna; main sumuje -> 33.
-        # Swieza baza ramek (shmtest zajal trwaly region wspoldzielony).
+        # 'run threads': two threads in one process (shared memory). Each
+        # writes a different global variable; main adds them up -> 33.
+        # A fresh frame baseline (shmtest took a permanent shared region).
         q.type_line("mem")
         used_before_th = pmm_used(q.screen())
         q.type_line("run threads")
         check("watki w procesie dziela pamiec (suma globalnych = 33)",
               "suma=33" in q.wait_for("[threads] watki zapisaly"))
-        # brak wycieku ramek po procesie wielowatkowym (stosy watkow +
-        # przestrzen adresowa zwolnione, gdy konczy sie ostatni watek)
+        # no frame leak after a multi-threaded process (the threads' stacks
+        # + the address space freed when the last thread ends)
         time.sleep(0.5)
         q.type_line("mem")
         used_after_th = pmm_used(q.screen())
@@ -119,8 +120,9 @@ def main():
               f" ({used_before_th} -> {used_after_th})",
               used_after_th is not None and used_after_th == used_before_th)
 
-        # 'run prio': scheduler z priorytetami. Watek normalny wywlaszcza
-        # niski -> przez to samo okno czasu naliczy wielokrotnie wiecej.
+        # 'run prio': the scheduler with priorities. The normal thread
+        # preempts the low one -> over the same time window it will count
+        # many times more.
         q.type_line("run prio")
         screen = q.wait_for("[prio] normalny=", timeout=20)
         m = re.search(r"normalny=(\d+) niski=(\d+)", screen)
@@ -128,7 +130,7 @@ def main():
               + (f" ({m.group(1)} vs {m.group(2)})" if m else ""),
               m is not None and int(m.group(1)) > int(m.group(2)) * 5)
 
-        # Kryptografia pod TLS: wektory z RFC liczone w pierscieniu 3
+        # The cryptography under TLS: the RFC vectors computed in ring 3
         q.type_line("clear")
         q.type_line("run cryptotest")
         crypto = q.wait_for("[crypto] wszystkie", timeout=20)

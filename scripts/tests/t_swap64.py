@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: wymiana stron na dysk w jadrze 64-bitowym.
+"""ProtonOS smoke test: swapping pages out to disk in the 64-bit kernel.
 
-Program bierze wiecej pamieci, niz maszyna ma RAM-u. Jadro musi po
-drodze wyrzucic czesc jego stron na dysk i sciagnac je z powrotem, gdy
-program po nie siegnie - a program nie moze tego zauwazyc inaczej niz
-chwila zwloki: kazdy bajt ma wrocic taki, jaki byl.
+The program takes more memory than the machine has RAM. Along the way
+the kernel has to throw some of its pages out to disk and fetch them
+back when the program reaches for them - and the program must not notice
+it other than as a moment's delay: every byte is to come back as it was.
 
-Sprawdzamy jedno i drugie: program potwierdza, ze wszystkie strony
-wrocily w calosci, a jadro pokazuje w 'mem', ile ich naprawde poszlo
-na dysk. Bez tej drugiej asercji test przeszedlby takze wtedy, gdyby
-pamiec zwyczajnie sie zmiescila i wymiana nie ruszyla ani razu.
+We check both: the program confirms that all the pages came back whole,
+and the kernel shows in 'mem' how many of them really went out to disk.
+Without that second assertion the test would pass even if the memory
+simply fitted and swapping never started once.
 
-Magazyn (kernel/swap.c) jest wspolny z jadrem 32-bitowym. W trybie
-dlugim doszla polityka wyrzucania: obchod czterech poziomow tablic
-stron z bitem 'odwiedzona' i wpis strony na dysku, ktorego procesor
-nie oglada, bo nie ma w nim bitu obecnosci.
+The store (kernel/swap.c) is shared with the 32-bit kernel. In long mode
+an eviction policy was added to it: a walk of four levels of page tables
+with the 'accessed' bit, and an entry for a page on disk which the
+processor never looks at, because it has no present bit in it.
 """
 
 import os
@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
-RAM_MIB = 16          # mniej, niz program zaraz wezmie
+RAM_MIB = 16          # less than the program is about to take
 REQUEST_MIB = 18
 
 
@@ -52,7 +52,7 @@ def main():
         if not os.path.exists(iso):
             return summary()
 
-        # Dysk za kontrolerem AHCI: strony ida na niego przez DMA
+        # A disk behind an AHCI controller: the pages go to it through DMA
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, ram_mib=RAM_MIB, qemu="qemu-system-x86_64")
         try:
@@ -69,8 +69,8 @@ def main():
             check("wszystkie strony wrocily z dysku bez zmian",
                   "stron wrocilo w calosci" in out)
 
-            # Bez tego test przeszedlby takze wtedy, gdyby wymiana
-            # w ogole nie ruszyla
+            # Without this the test would pass even if swapping never
+            # started at all
             q.type_line("mem")
             stan = q.wait_serial("Wymiana:", timeout=20)
             m = re.search(r"Wymiana: \d+/\d+ stron na dysku "
@@ -80,17 +80,17 @@ def main():
             check("i sciagalo je z powrotem",
                   m is not None and int(m.group(2)) > 0)
 
-            # Po koncu programu miejsce w pliku wymiany wraca do puli:
-            # sprzatanie przestrzeni adresowej zwalnia takze strony,
-            # ktore w chwili smierci lezaly na dysku
+            # After the program ends its space in the swap file returns to
+            # the pool: cleaning the address space up frees the pages
+            # that lay on the disk at the moment of death too
             used = re.search(r"Wymiana: (\d+)/", stan)
             check("po koncu programu plik wymiany jest pusty",
                   used is not None and int(used.group(1)) == 0)
 
-            # Drugi przebieg na tej samej maszynie: miejsce odzyskane
-            # naprawde daje sie uzyc jeszcze raz. Na koncu czekamy na
-            # DRUGIE wystapienie napisu, bo pierwsze wisi na porcie od
-            # poprzedniego przebiegu.
+            # A second pass on the same machine: the space reclaimed really
+            # can be used once more. At the end we wait for the SECOND
+            # occurrence of the text, because the first hangs on the port
+            # from the previous pass.
             q.type_line("run swaptest64 %d" % REQUEST_MIB)
             end = time.time() + 240
             second = ""

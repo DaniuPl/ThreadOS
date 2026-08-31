@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: TLS 1.3 i klient HTTP w ring 3 (jadro 64-bitowe).
+"""ProtonOS smoke test: TLS 1.3 and the HTTP client in ring 3 (64-bit
+kernel).
 
-Kryptografia, TLS, HTTP, DNS i parser certyfikatow zyja w naglowkach
-w user/ i nie wiedza nic o trybie procesora - licza na bajtach. Do
-jadra mowia kilkoma nazwami i te nazwy sa cala roznica: przeklada je
-user64/uzgodnosc64.h, dokladnie tak samo, jak compat64.c przeklada
-slownik jadra.
+The cryptography, TLS, HTTP, DNS and the certificate parser live in the
+headers in user/ and know nothing about the processor mode - they
+compute on bytes. They talk to the kernel through a handful of names and
+those names are the whole difference: user64/compat64.h translates them,
+exactly as compat64.c translates the kernel's dictionary.
 
-Po drugiej stronie kabla stoi prawdziwy OpenSSL, a nie nasza wlasna
-petla - wiec to, ze uzgodnienie dochodzi do skutku, znaczy, ze zgadza
-sie kazdy bajt: X25519, ChaCha20-Poly1305, wyprowadzanie kluczy
-i podpis w Finished.
+On the other side of the wire stands a real OpenSSL, not a loop of our
+own - so a handshake reaching completion means every byte matches:
+X25519, ChaCha20-Poly1305, key derivation and the signature in Finished.
 
-Sprawdzamy tez to, co wazniejsze od samego szyfrowania: obcy
-certyfikat ma polaczenie ZERWAC. Szyfrowana rozmowa z kims nieznanym
-nie jest bezpieczna, tylko prywatna.
+We also check what matters more than the encryption itself: a foreign
+certificate is to TEAR the connection DOWN. An encrypted conversation
+with somebody unknown is not secure, only private.
 """
 
 import os
@@ -62,7 +62,7 @@ def main():
             q.wait_serial("proton64>", timeout=90)
             q.wait_serial("DHCP: przyznano", timeout=30)
 
-            # --- Zwykly HTTP: TCP z pierscienia 3 ---
+            # --- Plain HTTP: TCP from ring 3 ---
             out = q.command("run httpget 10.0.2.2 %d /" % http_port,
                               "kod wyjscia", timeout=60)
             check("TCP z ring 3: uzgodnienie i odpowiedz HTTP 200",
@@ -70,20 +70,20 @@ def main():
             check("tresc strony dotarla w calosci",
                   "ProtonOS TCP dziala" in out)
 
-            # --- DNS: nazwa zamiast adresu ---
+            # --- DNS: a name instead of an address ---
             q.command("dns 10.0.2.2", "serwer DNS ustawiony")
             nsl = q.command("run nslookup protonos.test", "kod wyjscia",
                               timeout=40)
             check("DNS z ring 3: nazwa zamieniona na adres",
                   "10.0.2.2" in nsl)
 
-            # --- TLS bez magazynu zaufania: polaczenie ma padac ---
+            # --- TLS with no trust store: the connection is to fail ---
             refusal = q.command("run httpget https://protonos.test %d /"
                               % https_port, "kod wyjscia", timeout=90)
             check("obcy certyfikat zrywa polaczenie",
                   "brak zaufanego wystawcy" in refusal)
 
-            # --- TLS z pominieciem sprawdzania (-k) ---
+            # --- TLS with the check skipped (-k) ---
             sec = q.command("run httpget -k https://protonos.test %d /"
                               % https_port, "kod wyjscia", timeout=90)
             check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
@@ -95,7 +95,7 @@ def main():
             check("-k mowi wprost, ze tozsamosc nie jest sprawdzona",
                   "certyfikat NIESPRAWDZONY" in sec)
 
-            # --- Magazyn zaufania z dysku i pelna weryfikacja ---
+            # --- A trust store from the disk and full verification ---
             q.command("run httpget 10.0.2.2 %d /cert.der roots.der"
                         % http_port, "kod wyjscia", timeout=60)
             listing = q.command("fls", "roots.der")
@@ -109,15 +109,16 @@ def main():
             check("tresc pobrana po zweryfikowanym TLS",
                   "HTTP 200, tresc %d B" % len(PAGE) in ver)
 
-            # --- Kryptografia i X.509 same w sobie ---
+            # --- The cryptography and X.509 in themselves ---
             kr = q.command("run cryptotest", "kod wyjscia", timeout=120)
             check("wektory z RFC: SHA-256, HMAC, HKDF, ChaCha20, X25519",
                   "wszystkie wektory zgadzaja sie" in kr)
             ce = q.command("run certtest", "kod wyjscia", timeout=120)
             check("X.509: RSA, PSS, ECDSA P-256 i P-384, SubjectAltName",
                   "[cert] wszystko sie zgadza" in ce)
-            # Stos programu urosl w trakcie sam z siebie - weryfikacja
-            # podpisu siega glebiej, niz mozna zgadnac z gory
+            # The program's stack grew of its own accord along the way -
+            # verifying a signature reaches deeper than can be guessed up
+            # front
             m = re.search(r"certtest\] koniec, kod wyjscia 0 "
                           r"\(ramek \d+ -> \d+, stron sterty \d+, "
                           r"stosu (\d+)", ce)
@@ -128,10 +129,11 @@ def main():
             if os.path.exists(slog):
                 os.unlink(slog)
 
-        # --- Przegladarka w oknie pulpitu: siec -> TLS -> GUI ---
-        # Ostatnia martwa ikona pulpitu. Spina wszystko naraz:
-        # klawiature i mysz z kompozytora, DNS, TCP, parser HTML
-        # i rysowanie w oknie - a to wszystko z pierscienia 3.
+        # --- The browser in a desktop window: network -> TLS -> GUI ---
+        # The last dead icon on the desktop. It ties everything together
+        # at once: the keyboard and mouse from the compositor, DNS, TCP,
+        # the HTML parser and drawing in a window - and all of it from
+        # ring 3.
         print("--- przegladarka w oknie (gweb) ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
@@ -139,18 +141,19 @@ def main():
         try:
             q2.wait_serial("proton64>", timeout=90)
             q2.wait_serial("DHCP: przyznano", timeout=30)
-            # Serwer nazw trzeba ustawic PRZED pulpitem: potem klawiatura
-            # nalezy juz do kompozytora, a nie do shella jadra
+            # The name server has to be set BEFORE the desktop: afterwards
+            # the keyboard belongs to the compositor, not to the kernel's
+            # shell
             q2.command("dns 10.0.2.2", "serwer DNS ustawiony")
             q2.type_line("pulpit")
             q2.wait_serial("Pulpit startuje", timeout=30)
             check("pulpit wstaje przed przegladarka", q2.wait_desktop(30))
 
             q2.mouse_home()
-            q2.mouse_goto(24, 232)          # ikona 'Web' pod (8,220)
+            q2.mouse_goto(24, 232)          # the 'Web' icon at (8,220)
             q2.mouse_click()
 
-            # Okno przegladarki: slot 2, tresc 320x200 od (95,65)
+            # The browser's window: slot 2, content 320x200 from (95,65)
             def white_text():
                 _, _, a = q2.screen_raw()
                 return sum(1 for y in range(100, 250)
@@ -160,12 +163,13 @@ def main():
             time.sleep(3)
             before = white_text()
 
-            # Klik w okno daje mu fokus klawiatury, potem kursor na bok
+            # A click in the window gives it keyboard focus, then the cursor
+# goes aside
             q2.mouse_goto(150, 120)
             q2.mouse_click()
             q2.mouse_goto(500, 350)
 
-            for _ in range(24):             # skasuj domyslny adres
+            for _ in range(24):             # clear the default address
                 q2.sendkey("backspace")
             for ch in "protonos.test:%d/" % http_port:
                 q2.sendkey(Qemu.KEYNAMES.get(ch, ch))

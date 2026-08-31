@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: menedzer plikow, ikony, monitor, terminal, rozmiar okien.
+"""ProtonOS smoke test: the file manager, icons, the monitor, the
+terminal, window sizes.
 
-Uruchamiany osobno albo przez scripts/run_testy.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -19,7 +20,8 @@ from ptest import check, summary
 
 
 def main():
-    # --- Menedzer plikow GUI: FS -> okno aplikacji (osobny boot z dyskiem) ---
+    # --- The GUI file manager: FS -> an application window (a separate
+# boot with a disk) ---
     print("--- pulpit: menedzer plikow (gfiles) ---")
     gdisk = tempfile.mktemp(suffix=".img")
     with open(gdisk, "wb") as f:
@@ -27,20 +29,21 @@ def main():
     q9 = Qemu(KERNEL, INITRD, gdisk)
     try:
         q9.wait_desktop()
-        q9.type_line("write raport abc")   # plik na dysku (przed pulpitem)
+        q9.type_line("write raport abc")   # a file on the disk (before the desktop)
         time.sleep(0.5)
         time.sleep(1.0)
 
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # Menu -> wpis 'gfiles'
+        # Menu -> the 'gfiles' entry
         q9.mouse_goto(10, 472)
         q9.mouse_click()
         q9.mouse_goto(40, menu_y("gfiles"))
         q9.mouse_click()
-        # gfiles slot2 (94,54), content (95,65); nazwa pliku przy
-        # content(8,16) -> screen(103,81). Tekst (bialy) = pliki z PFS.
+        # gfiles slot2 (94,54), content (95,65); the file name at
+        # content(8,16) -> screen(103,81). The text (white) = files from
+        # PFS.
         def files_row_white():
             _, _, a = q9.screen_raw()
             return sum(1 for x in range(103, 160) for y in range(81, 89)
@@ -54,11 +57,12 @@ def main():
         check("menedzer plikow GUI listuje plik z dysku (FS -> okno)",
               appeared)
 
-        # Klik nazwy pliku -> podglad tresci. Wiersz0 przy content(.,16)
-        # -> ekran y81, kolejne co 10 px. Klikamy WIERSZ 1: wiersz 0 to
-        # 'swap.sys', ktory jadro zaklada przy starcie (i-wezel 0), a nam
-        # chodzi o 'raport'. Po kliknieciu panel 'tresc:' (content y102 ->
-        # ekran y167) pokazuje zawartosc. Kursor odsuwamy przed zrzutem.
+        # A click on the file name -> a preview of the contents. Line 0 at
+        # content(.,16) -> screen y81, the next ones every 10 px. We click
+        # LINE 1: line 0 is 'swap.sys', which the kernel creates at
+        # startup (inode 0), and what we want is 'raport'. After the click
+        # the panel 'tresc:' (content y102 -> screen y167) shows the
+        # contents. We move the cursor away before the screenshot.
         q9.mouse_goto(115, 93)
         q9.mouse_click()
         q9.mouse_goto(60, 300)
@@ -80,7 +84,7 @@ def main():
         if os.path.exists(gdisk):
             os.unlink(gdisk)
 
-    # --- Ikony na pulpicie (osobny boot) ---
+    # --- Icons on the desktop (a separate boot) ---
     print("--- pulpit: ikony ---")
     q10 = Qemu(KERNEL, INITRD)
     try:
@@ -90,19 +94,19 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # ikona 'App' (kafelek 8,20,32x24) pomaranczowa
+        # the 'App' icon (the tile 8,20,32x24) in orange
         check("ikona pulpitu narysowana (pomaranczowy kafelek 20,30)",
               q10.wait_pixel(20, 30, (255, 162, 0)))
-        # klik ikony uruchamia aplikacje (guiapp -> czerwony kwadrat)
+        # a click on the icon starts the application (guiapp -> a red square)
         q10.mouse_goto(24, 32)
         q10.mouse_click()
-        q10.mouse_goto(300, 300)         # odsun kursor
+        q10.mouse_goto(300, 300)         # move the cursor away
         check("klik ikony uruchamia aplikacje (czerwony kwadrat 101,71)",
               q10.wait_pixel(101, 71, (255, 0, 0)))
     finally:
         q10.close()
 
-    # --- Wskaznik zasobow (gmon) na zywo ---
+    # --- The resource monitor (gmon) live ---
     print("--- pulpit: monitor zasobow (gmon) ---")
     q11 = Qemu(KERNEL, INITRD)
     try:
@@ -113,13 +117,13 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # gmon slot2 (94,54), content (95,65). Pasek RAM (content y48)
-        # zawiera niebieski fragment uzycia -> ekran ~ (101,116).
+        # gmon slot2 (94,54), content (95,65). The RAM bar (content y48)
+        # contains a blue usage fragment -> screen ~ (101,116).
         check("monitor zasobow: pasek RAM (niebieski 101,116)",
               q11.wait_pixel(101, 116, (0, 0, 255)))
 
-        # uptime (liczba przy content(96,28) -> ekran (191,93)) rosnie:
-        # komorka tekstu zmienia sie w czasie -> zywy monitor
+        # the uptime (the number at content(96,28) -> screen (191,93)) grows:
+        # the text cell changes over time -> a live monitor
         def up_cell():
             _, _, a = q11.screen_raw()
             return [a(191 + c, 93 + r) for r in range(8) for c in range(24)]
@@ -131,7 +135,7 @@ def main():
     finally:
         q11.close()
 
-    # --- Terminal w oknie GUI (osobny boot z dyskiem) ---
+    # --- A terminal in a GUI window (a separate boot with a disk) ---
     print("--- pulpit: terminal GUI (gterm) ---")
     tdisk = tempfile.mktemp(suffix=".img")
     with open(tdisk, "wb") as f:
@@ -146,16 +150,18 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # klik w okno terminala (slot2, content 95,65) -> fokus klawiatury
+        # a click in the terminal's window (slot2, content 95,65) -> keyboard
+# focus
         q12.mouse_goto(150, 120)
         q12.mouse_click()
         q12.mouse_goto(400, 300)
-        # wpisz 'seq 3' i Enter -> wyjscie (1,2,3) pojawia sie w oknie
+        # type 'seq 3' and Enter -> the output (1,2,3) appears in the window
         for ch in "seq 3":
             q12.sendkey({" ": "spc"}.get(ch, ch))
         q12.sendkey("ret")
 
-        # wyjscie rysowane u gory okna (content y4 -> ekran y69)
+        # the output is drawn at the top of the window (content y4 -> screen
+# y69)
         def out_white():
             _, _, a = q12.screen_raw()
             return sum(1 for x in range(99, 130) for y in range(69, 99)
@@ -173,7 +179,7 @@ def main():
         if os.path.exists(tdisk):
             os.unlink(tdisk)
 
-    # --- Zwijanie i zmiana rozmiaru okien (osobny boot) ---
+    # --- Collapsing and resizing windows (a separate boot) ---
     print("--- pulpit: minimalizacja + zmiana rozmiaru ---")
     q13 = Qemu(KERNEL, INITRD)
     try:
@@ -183,30 +189,32 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # win0 "Terminal" (40,60,120x70): pasek tytulu niebieski na starcie
+        # win0 "Terminal" (40,60,120x70): the title bar blue at the start
         check("okno 0: pasek tytulu niebieski przed zwinieciem (80,64)",
               q13.wait_pixel(80, 64, (0, 0, 255)))
 
-        # Przycisk zwijania [_] win0: min_x = x+w-2*8-2 = 142, y=61 (8x8).
-        # Klik srodka (146,65) zwija okno -> pasek znika, wraca tlo.
+        # win0's collapse button [_]: min_x = x+w-2*8-2 = 142, y=61 (8x8).
+        # A click on the centre (146,65) collapses the window -> the bar
+        # disappears, the background comes back.
         q13.mouse_goto(146, 65)
         q13.mouse_click()
-        q13.mouse_goto(400, 300)              # odsun kursor
+        q13.mouse_goto(400, 300)              # move the cursor away
         check("zwiniete okno znika z pulpitu (pasek 80,64 -> teal)",
               q13.wait_pixel(80, 64, (0, 128, 160)))
 
-        # Okno wciaz na pasku zadan (slot0 'Terminal', x46..96, y468).
-        # Klik przywraca je: pasek tytulu niebieski znow widoczny.
+        # The window is still on the taskbar (slot0 'Terminal', x46..96,
+        # y468). A click restores it: the blue title bar is visible again.
         q13.mouse_goto(60, 473)
         q13.mouse_click()
         q13.mouse_goto(400, 300)
         check("klik na pasku zadan przywraca zwiniete okno (80,64 niebieski)",
               q13.wait_pixel(80, 64, (0, 0, 255)))
 
-        # Zmiana rozmiaru: uchwyt win0 w prawym dolnym rogu
-        # grip_x = x+w-8 = 152, grip_y = y+h-8 = 122. Przed zmiana punkt
-        # (170,140) jest poza oknem (teal). Przeciagamy uchwyt (155,125)
-        # o (+60,+40) -> okno rosnie i pokrywa (170,140).
+        # Resizing: win0's grip in the bottom right corner
+        # grip_x = x+w-8 = 152, grip_y = y+h-8 = 122. Before the change
+        # the point (170,140) is outside the window (teal). We drag the
+        # grip (155,125) by (+60,+40) -> the window grows and covers
+        # (170,140).
         _, _, at = q13.screen_raw()
         check("przed zmiana rozmiaru punkt poza oknem (170,140 teal)",
               near(at(170, 140), (0, 128, 160)))
@@ -220,7 +228,8 @@ def main():
     finally:
         q13.close()
 
-    # --- Zapis pozycji ikon na dysku (dwa boot-y na tym samym dysku) ---
+    # --- Saving the icon positions on the disk (two boots on the same
+# disk) ---
     print("--- pulpit: zapis pozycji ikon na dysku ---")
     idisk = tempfile.mktemp(suffix=".img")
     with open(idisk, "wb") as f:
@@ -233,17 +242,17 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # ikona 'App' domyslnie (8,20,32x24) - kafelek pomaranczowy ~ (20,30)
+        # the 'App' icon by default (8,20,32x24) - an orange tile ~ (20,30)
         check("ikona App w domyslnej pozycji (20,30 pomaranczowy)",
               q14.wait_pixel(20, 30, (255, 162, 0)))
 
-        # Przeciagnij ikone: chwyt srodka (24,32), przesun na (416,312) z
-        # wcisnietym LPM -> ikona laduje w (400,300). Pusc.
+        # Drag the icon: grab the centre (24,32), move it to (416,312) with
+        # the left button held -> the icon lands at (400,300). Release.
         q14.mouse_goto(24, 32)
         q14.mouse_button(True)
         q14.mouse_goto(416, 312)
         q14.mouse_button(False)
-        q14.mouse_goto(100, 250)          # odsun kursor od ikony
+        q14.mouse_goto(100, 250)          # move the cursor away from the icon
         check("ikona przeniesiona na nowa pozycje (410,310 pomaranczowy)",
               q14.wait_pixel(410, 310, (255, 162, 0)))
         check("stara pozycja ikony wyczyszczona (20,30 teal)",
@@ -251,7 +260,7 @@ def main():
     finally:
         q14.close()
 
-    # Reboot na TYM SAMYM dysku: pozycja ikony przetrwala (icons.pos)
+    # A reboot on THE SAME disk: the icon's position survived (icons.pos)
     q15 = Qemu(KERNEL, INITRD, idisk)
     try:
         q15.wait_desktop()

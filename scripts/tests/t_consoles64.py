@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: konsole wirtualne w jadrze 64-bitowym.
+"""ProtonOS smoke test: virtual consoles in the 64-bit kernel.
 
-Sprzet ma jeden ekran, a system trzyma ich cztery. Alt+F1..F4 przelacza
-obraz, ale kazda konsola ma wlasna tresc, wlasny shell i wlasnych
-pisarzy: o tym, na ktorej konsoli pisze program, decyduje ZADANIE,
-a nie to, na co akurat patrzymy. Dlatego program uruchomiony na drugiej
-konsoli pisze na niej dalej, gdy patrzymy na pierwsza - i to jest
-wlasciwa asercja tego testu, mocniejsza niz samo przelaczanie obrazu.
+The hardware has one screen, and the system holds four. Alt+F1..F4
+switches the picture, but every console has its own content, its own
+shell and its own writers: which console a program writes on is decided
+by the TASK, not by what we happen to be looking at. That is why a
+program started on the second console keeps writing on it while we look
+at the first - and that is this test's real assertion, stronger than the
+picture switching itself.
 
-Caly bufor konsol jest w kernel/vga.c, wspolnym z jadrem 32-bitowym.
-W trybie dlugim doszla do tego wlasnosc zadania (task_vc) i osobna
-kolejka klawiszy na kazda konsole.
+The whole console buffer is in kernel/vga.c, shared with the 32-bit
+kernel. In long mode task ownership (task_vc) and a separate key queue
+per console were added to it.
 
-Ekran czytamy z bufora obrazu, a nie z pamieci znakow spod 0xB8000:
-GRUB, widzac w naglowku jadra zadanie trybu obrazu, i tak daje grafike,
-wiec konsola rysuje sie sama czcionka 8x8. Odczyt jest wiec taki, jaki
-ma czlowiek - z tego, co naprawde widac.
+We read the screen from the framebuffer rather than from the character
+memory at 0xB8000: GRUB, seeing a request for a video mode in the
+kernel's header, gives graphics anyway, so the console draws itself in
+an 8x8 font. So the reading is the one a human gets - from what can
+really be seen.
 """
 
 import os
@@ -51,7 +53,7 @@ def main():
         try:
             q.wait_serial("proton64>", timeout=60)
 
-            # Konsola pierwsza: cos, co zostanie na niej na dluzej
+            # The first console: something that will stay on it for a while
             q.type_line("clear")
             q.type_line("uptime")
             time.sleep(1.0)
@@ -59,7 +61,7 @@ def main():
             check("pierwsza konsola dziala jak dotad",
                   "Uptime:" in first_one)
 
-            # Alt+F2: druga konsola ma wlasny shell i jest pusta
+            # Alt+F2: the second console has its own shell and is empty
             q.sendkey("alt-f2")
             time.sleep(0.8)
             second_one = q.screen_fbcon()
@@ -68,14 +70,14 @@ def main():
             check("tresc pierwszej konsoli nie przecieka na druga",
                   "Uptime:" not in second_one)
 
-            # Program uruchomiony na drugiej konsoli pisze na niej
+            # A program started on the second console writes on it
             q.type_line("run spin64")
             view = q.wait_fbcon("[spin64]", timeout=20)
             check("program uruchomiony na drugiej konsoli pisze na niej",
                   "[spin64]" in view)
 
-            # Powrot na pierwsza: jej tresc nietknieta, a program
-            # z drugiej dalej pisze u siebie, nie tutaj
+            # Back to the first: its content untouched, and the program
+            # from the second still writes on its own, not here
             q.sendkey("alt-f1")
             time.sleep(1.5)
             returned = q.screen_fbcon()
@@ -84,8 +86,9 @@ def main():
             check("program z drugiej konsoli nie pisze po pierwszej",
                   "[spin64]" not in returned)
 
-            # Ctrl+C dotyczy konsoli, na ktorej pada: tu nie ma czego
-            # przerywac, a program na drugiej ma dzialac dalej
+            # Ctrl+C concerns the console it falls on: here there is
+            # nothing to interrupt, and the program on the second is to
+            # keep running
             q.sendkey("ctrl-c")
             time.sleep(1.0)
             q.sendkey("alt-f2")
@@ -94,10 +97,10 @@ def main():
             check("program na drugiej konsoli przezyl Ctrl+C na pierwszej",
                   "[spin64]" in again)
 
-            # Ctrl+C na jego wlasnej konsoli program konczy. Dowod
-            # jest podwojny: shell melduje koniec dziecka, a ekran
-            # przestaje sie zmieniac - spin64 pisze co pol sekundy,
-            # wiec zywy zostawilby slad.
+            # Ctrl+C on its own console ends the program. The proof is
+            # double: the shell reports the child's end, and the screen
+            # stops changing - spin64 writes every half second, so alive
+            # it would leave a trace.
             q.sendkey("ctrl-c")
             time.sleep(2.0)
             po = q.screen_fbcon()

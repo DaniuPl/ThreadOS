@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: rozruch jadra 32-bitowego.
+"""ProtonOS smoke test: the 32-bit kernel's boot.
 
-Pierwsza z grup wydzielonych z dawnego zbiorczego 'rdzen'. Pyta o to,
-co dzieje sie ZANIM ktokolwiek cokolwiek wpisze: czy jadro doszlo do
-konca inicjalizacji, czy rozpoznalo sprzet, czy wystartowal timer,
-scheduler i siec.
+The first of the groups split out of the old collective 'rdzen'. It asks
+about what happens BEFORE anybody types anything: did the kernel reach
+the end of initialization, did it recognize the hardware, did the timer,
+the scheduler and the network start.
 
-Kolejnosc komunikatow czytamy z portu szeregowego, a nie z ekranu -
-z ekranu najstarsze wiersze wyjezdzaja, a dowod, ktory znika, gdy
-maszyna zwolni, nie jest zadnym dowodem.
+We read the order of the messages from the serial port rather than from
+the screen - from the screen the oldest lines scroll away, and a proof
+that disappears when the machine slows down is no proof at all.
 
-Uruchamiany osobno albo przez scripts/run_tests.py, ktory puszcza
-wszystkie grupy rownolegle.
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
 """
 
 import os
@@ -49,12 +49,14 @@ def main():
         check("na jednym rdzeniu system mowi to wprost",
               "Procesory: 1" in q.serial())
 
-        # Adres IP przychodzi z serwera DHCP slirpa juz po starcie
-        # shella. Czekamy na komunikat, zanim ekran zacznie sluzyc
-        # testom klawiatury - inaczej wpada w srodek pisanej linii.
+        # The IP address comes from slirp's DHCP server only after the
+        # shell has started. We wait for the message before the screen
+        # starts serving the keyboard tests - otherwise it falls into the
+        # middle of a line being typed.
         q.wait_for("[siec] DHCP", timeout=20)
-        # Komunikat sklada sie z kilku printk-ow, wiec chwila na
-        # dopisanie reszty linii - inaczej test czyta ja w polowie
+        # The message is assembled out of several printk calls, so a
+        # moment for the rest of the line to be added - otherwise the test
+        # reads it half-finished
         time.sleep(0.5)
         lease = q.screen()
         check("DHCP przyznal adres IP", "przyznano 10.0.2.15" in lease)
@@ -76,15 +78,15 @@ def main():
         check("jadro przezylo init pamieci (doszlo do shella)",
               "ProtonOS shell" in screen)
 
-        # Watek C konczy sie po dwoch sekundach. Jego napis w wierszu
-        # zerowym znika przy kazdym przewinieciu ekranu, wiec pytamy
-        # o to port szeregowy: tam nic nie wyjezdza.
+        # Thread C ends after two seconds. Its text in line zero
+        # disappears with every scroll of the screen, so we ask the serial
+        # port about it: nothing scrolls away there.
         end_c = q.wait_serial("Watek demonstracyjny C zakonczyl prace",
                               timeout=30)
         check("watek C zakonczyl prace",
               "Watek demonstracyjny C zakonczyl prace" in end_c)
 
-        # Timer: uptime w rogu ekranu musi urosnac
+        # The timer: the uptime in the screen's corner has to grow
         def uptime(s):
             m = re.search(r"uptime: (\d+)s", s)
             return int(m.group(1)) if m else None
@@ -95,9 +97,9 @@ def main():
         check(f"timer PIT tyka (uptime {t1}s -> {t2}s)",
               t1 is not None and t2 is not None and t2 > t1)
 
-        # Wielozadaniowosc: liczniki watkow A i B musza rosnac
-        # niezaleznie. Bierzemy OSTATNIE wystapienie - po przewinieciu
-        # ekranu wyzej moga wisiec stare, martwe kopie linii.
+        # Multitasking: the counters of threads A and B have to grow
+        # independently. We take the LAST occurrence - after the screen
+        # scrolls, old, dead copies of the line may hang higher up.
         def counters(s):
             a = re.findall(r"watek-A: (\d+)", s)
             b = re.findall(r"watek-B: (\d+)", s)
@@ -111,10 +113,10 @@ def main():
         check(f"watek B liczy ({b1} -> {b2})",
               b1 is not None and b2 is not None and b2 > b1)
 
-        # Klawiatura: wstrzyknij "proton 1" i sprawdz echo
+        # The keyboard: inject "proton 1" and check the echo
         for key in ["p", "r", "o", "t", "o", "n", "spc", "1"]:
             q.sendkey(key)
-        q.sendkey("shift-x")  # test shifta: powinno wyjsc 'X'
+        q.sendkey("shift-x")  # a shift test: 'X' should come out
         screen = q.screen()
         check("echo klawiatury: 'proton 1'", "> proton 1" in screen)
         check("echo klawiatury z shiftem: 'X'", "> proton 1X" in screen)

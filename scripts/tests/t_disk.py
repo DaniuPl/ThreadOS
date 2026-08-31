@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Test dymny ProtonOS: uruchamianie programow z dysku.
+"""ProtonOS smoke test: running programs from the disk.
 
-Loader ELF i system plikow istnialy obok siebie od dawna i nigdy nie
-byly polaczone: 'run' zagladal wylacznie do initrd, czyli do obrazu
-wgrywanego razem z jadrem i tylko do odczytu. Teraz program moze lezec
-na dysku - i nadal daje sie uruchomic.
+The ELF loader and the file system existed side by side for a long time
+and were never joined: 'run' looked only into the initrd, that is, into
+the image uploaded together with the kernel and read-only. Now a program
+can lie on the disk - and can still be run.
 
-Najmocniejszy dowod jest taki sam, jak przy systemie plikow: DRUGI
-ROZRUCH tej samej maszyny z tym samym obrazem dysku. Program, ktory
-uruchamia sie po restarcie, a ktorego nie ma w initrd, moze pochodzic
-juz tylko z talerza.
+The strongest proof is the same as with the file system: a SECOND BOOT of
+the same machine with the same disk image. A program that starts after a
+restart, and that is not in the initrd, can only have come off the
+platter.
 
-Szukanie programu (kernel/prog.c) jest wspolne dla obu jader - o trybie
-procesora nie ma w nim ani slowa - wiec sprawdzamy je po obu stronach.
+Looking for a program (kernel/prog.c) is shared by both kernels - there
+is not a word about the processor mode in it - so we check it on both
+sides.
 """
 
 import os
@@ -26,8 +27,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
-# Nazwa, ktorej w initrd NIE MA - inaczej nie wiadomo, skad program
-# przyszedl
+# A name that is NOT in the initrd - otherwise there is no telling
+# where the program came from
 ON_DISK = "zdysku"
 
 
@@ -49,7 +50,7 @@ def main():
         if not os.path.exists(iso):
             return summary()
 
-        # --- Pierwszy rozruch: program trafia z initrd na dysk ---
+        # --- The first boot: the program goes from the initrd onto the disk ---
         slog = tempfile.mktemp(suffix=".log")
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
@@ -80,7 +81,7 @@ def main():
             if os.path.exists(slog):
                 os.unlink(slog)
 
-        # --- Drugi rozruch z tym samym dyskiem ---
+        # --- A second boot with the same disk ---
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
@@ -91,30 +92,30 @@ def main():
             check("program przetrwal restart i dalej sie uruchamia",
                   "Program '%s' z dysku" % ON_DISK in po)
 
-            # Program z dysku jest zwyklym programem: ma wlasna
-            # przestrzen adresowa i konczy sie wlasnym kodem wyjscia
+            # A program from the disk is an ordinary program: it has its
+            # own address space and ends with its own exit code
             check("program z dysku konczy sie wlasnym kodem wyjscia",
                   "koniec, kod wyjscia 7" in po)
 
-            # ...i drugi raz tez, czyli bufor po nim zostal oddany.
-            # Liczymy tylko to, co przybylo po TYM poleceniu: hello64
-            # startuje takze przy rozruchu, wiec na porcie jest go
-            # wiecej niz raz.
+            # ...and a second time too, that is, the buffer after it was
+            # given back. We count only what arrived after THIS command:
+            # hello64 also starts at boot, so there is more than one of it
+            # on the port.
             two = q2.command("run " + ON_DISK, "[hello64] koncze",
                                timeout=30)
             check("drugie uruchomienie z dysku tez przechodzi",
                   two.count("[hello64] koncze") == 1)
 
-            # Ta sama droga z pierscienia 3: shell uzytkownika robi
-            # fork i exec, a exec szuka programu tak samo jak jadro -
-            # wiec program z dysku uruchamia sie takze stamtad
+            # The same path from ring 3: the user shell does a fork and
+            # an exec, and exec looks for a program just as the kernel
+            # does - so a program from the disk starts from there too
             q2.command("run ush64", "ush64$")
             from_ring3 = q2.command(ON_DISK, "[hello64] koncze", timeout=30)
             check("exec z pierscienia 3 tez znajduje program na dysku",
                   "[hello64] czesc" in from_ring3)
             q2.command("exit", "koniec, kod wyjscia")
 
-            # Nazwa, ktorej nie ma nigdzie, dalej jest bledem
+            # A name that is nowhere is still an error
             bad_one = q2.command("run niczegotakiego", "run: nie ma programu")
             check("nieistniejacy program dalej jest bledem",
                   "run: nie ma programu" in bad_one)
@@ -128,9 +129,9 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    # --- To samo w jadrze 32-bitowym ---
-    # Ten sam plik szukajacy programu, ta sama droga; rozni sie tylko
-    # loader ELF po drugiej stronie
+    # --- The same in the 32-bit kernel ---
+    # The same file looking for the program, the same path; the only
+    # difference is the ELF loader on the other side
     print("--- programy z dysku (jadro 32-bitowe) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
