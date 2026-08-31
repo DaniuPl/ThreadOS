@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Uruchamia grupy testu dymnego ProtonOS - domyslnie rownolegle.
+"""Runs the groups of the ProtonOS smoke test - in parallel by default.
 
-Kazda grupa potrzebuje wlasnej maszyny QEMU, a te i tak wiekszosc czasu
-czekaja: na rozruch, na odpowiedz, na przerysowanie ekranu. Puszczanie
-ich jedna po drugiej zajmowalo kilkanascie minut, z czego procesor byl
-zajety przez ulamek tego czasu.
+Every group needs its own QEMU machine, and those spend most of their
+time waiting anyway: for the boot, for an answer, for the screen to be
+redrawn. Running them one after another took a good ten minutes, of
+which the processor was busy for a fraction.
 
-Wyjscie kazdej grupy trzymamy w calosci i wypisujemy dopiero po jej
-zakonczeniu - inaczej wiersze z kilku maszyn wymieszalyby sie w jedna
-nieczytelna kolumne.
+Every group's output we hold whole and print only once it has finished -
+otherwise lines from several machines would mix into one unreadable
+column.
 
-  make test              wszystkie grupy
-  make test T=k64        tylko jadro 64-bitowe
-  make test J=1          jedna po drugiej (do debugowania)
+  make test              all the groups
+  make test T=k64        the 64-bit kernel only
+  make test J=1          one after another (for debugging)
 """
 
 import os
@@ -22,8 +22,8 @@ import time
 
 DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 
-# Kolejnosc ma znaczenie tylko przy J=1; rownolegle i tak startuja
-# najdluzsze pierwsze, zeby nie zostawaly na koniec same
+# The order matters only with J=1; in parallel the longest ones start
+# first anyway, so that they are not left alone at the end
 GROUPS = [
     "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
     "net32", "http32", "mouse", "ush", "pfs", "k64core", "k64proc",
@@ -56,8 +56,8 @@ def main():
 
     start = time.time()
     waiting = list(selected)
-    running = []          # (nazwa, proces, czas startu)
-    results = []          # (nazwa, kod, sekundy, tekst)
+    running = []          # (name, process, start time)
+    results = []          # (name, code, seconds, text)
 
     while waiting or running:
         while waiting and len(running) < parallel:

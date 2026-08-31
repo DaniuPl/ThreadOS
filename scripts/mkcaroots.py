@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Buduje user/caroots.h - wbudowany magazyn zaufania ProtonOS-a.
+"""Builds user/caroots.h - the ProtonOS built-in trust store.
 
-Bierze wskazane korzenie CA z systemowego zasobu (domyslnie
-/etc/ssl/certs/ca-certificates.crt) i zapisuje je jako sklejone
-certyfikaty DER w naglowku C. Dzieki temu HTTPS dziala od razu, bez
-wgrywania czegokolwiek na dysk systemu.
+It takes the named CA roots from the system's bundle (by default
+/etc/ssl/certs/ca-certificates.crt) and writes them as glued DER
+certificates in a C header. Thanks to that HTTPS works right away,
+without uploading anything to the system's disk.
 
-Uzycie: python3 scripts/mkcaroots.py [zasob.crt] [wyjscie.h]
+Usage: python3 scripts/mkcaroots.py [bundle.crt] [output.h]
 """
 
 import re
 import subprocess
 import sys
 
-# Korzenie pokrywajace wiekszosc publicznych stron. Kazdy z nich musi
-# byc podpisany algorytmem, ktory umiemy sprawdzic (RSA albo ECDSA P-256).
+# Roots covering most public sites. Each of them has to be signed with
+# an algorithm we know how to check (RSA or ECDSA P-256).
 WANTED = [
     "CN = ISRG Root X1",                    # Let's Encrypt (RSA)
-    "CN = ISRG Root X2",                    # Let's Encrypt (EC P-384 - tylko zapas)
+    "CN = ISRG Root X2",                    # Let's Encrypt (EC P-384 - a spare only)
     "CN = DigiCert Global Root CA",
     "CN = DigiCert Global Root G2",
     "CN = DigiCert Global Root G3",
@@ -28,7 +28,7 @@ WANTED = [
     "CN = USERTrust RSA Certification Authority",
     "CN = Go Daddy Root Certificate Authority - G2",
     "CN = Amazon Root CA 1",
-    "CN = Certum Trusted Network CA",       # popularny w Polsce
+    "CN = Certum Trusted Network CA",       # popular in Poland
 ]
 
 BUNDLE = sys.argv[1] if len(sys.argv) > 1 else "/etc/ssl/certs/ca-certificates.crt"
@@ -66,12 +66,12 @@ def main():
 
     blob = b"".join(der for _, _, der in chosen)
 
-    lines = ["/* Wbudowany magazyn zaufania - PLIK GENEROWANY.",
+    lines = ["/* The built-in trust store - A GENERATED FILE.",
              " *",
-             " * Zrodlo: %s" % BUNDLE,
-             " * Odswiezenie: python3 scripts/mkcaroots.py",
+             " * Source: %s" % BUNDLE,
+             " * To refresh: python3 scripts/mkcaroots.py",
              " *",
-             " * Korzenie w srodku:"]
+             " * The roots inside:"]
     for _, subj, der in chosen:
         cn = subj.replace("subject=", "")
         lines.append(" *   - %s (%u B)" % (cn, len(der)))

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Pakuje pliki do initrd ProtonOS (format PIRD).
+"""Packs files into a ProtonOS initrd (the PIRD format).
 
-Format: "PIRD" | u32 liczba | wpisy {name[16], u32 offset, u32 size} | dane
+Format: "PIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data
 
-Użycie: mkinitrd.py wyjscie.img nazwa=plik [nazwa=plik ...]
+Usage: mkinitrd.py output.img name=file [name=file ...]
 """
 
 import struct

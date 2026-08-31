@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Sprawdza parsery ProtonOS-a na uszkodzonych danych.
+"""Checks the ProtonOS parsers against corrupted data.
 
-Dwa fronty: programy w ring 3 (certyfikaty, HTML, HTTP) i sciezka
-pakietow w jadrze (net.c + tcp.c). W jadrze blad nie konczy sie smiercia
-procesu, tylko padnieciem systemu, wiec tym bardziej warto go szukac.
+Two fronts: the ring 3 programs (certificates, HTML, HTTP) and the
+packet path in the kernel (net.c + tcp.c). In the kernel an error does
+not end in the death of a process but in the system going down, so it
+is all the more worth looking for.
 
-Certyfikaty, HTML i odpowiedzi HTTP przychodza prosto z sieci - moze je
-podac ktokolwiek. Ten skrypt kompiluje parsery na hoscie z sanitizerami
-adresow i zachowan nieokreslonych, a potem karmi je tysiacami wejsc
-zrobionych przez psucie poprawnych danych: obcinanie, przestawianie
-bajtow, wpisywanie skrajnych dlugosci, wycinanie fragmentow.
+Certificates, HTML and HTTP responses come straight from the network -
+anybody can supply them. This script compiles the parsers on the host
+with the address and undefined-behaviour sanitizers, and then feeds them
+thousands of inputs made by corrupting valid data: truncating, moving
+bytes around, writing extreme lengths, cutting fragments out.
 
-Kazde wywalenie sie programu (albo zgloszenie sanitizera) to blad do
-naprawienia - zapisujemy wtedy wejscie do pliku, zeby dalo sie je
-powtorzyc.
+Every crash of a program (or a sanitizer report) is a bug to be fixed -
+we then save the input to a file, so that it can be repeated.
 
-Uzycie: python3 scripts/fuzz_parsers.py [liczba_przypadkow]
+Usage: python3 scripts/fuzz_parsers.py [number_of_cases]
 """
 
 import os
@@ -31,15 +31,16 @@ CASES = int(sys.argv[1]) if len(sys.argv) > 1 else 400
 
 
 def build(workdir):
-    """Kompiluje harness. Naglowki userspace wciagaja 'uapi.h', a ta
-    wybiera wejscie do jadra wlasciwe dla trybu procesora - na hoscie
-    zadne z nich nie ma sensu. Podstawiamy wiec zaslepke: katalog
-    z dowiazaniami do prawdziwych naglowkow, a zamiast wejscia do
-    jadra plik z samymi typami i drobiazgami.
+    """Compiles the harness. The userspace headers pull in 'uapi.h', and
+    that one picks the entry into the kernel appropriate for the
+    processor mode - on the host neither of them makes sense. So we
+    substitute a stub: a directory of symlinks to the real headers, and
+    instead of the entry into the kernel a file with types and small
+    details only.
 
-    Zaslepiamy tez 'usys.h' pod jego wlasna nazwa - parsery nie
-    powinny go juz wolac wprost, ale gdyby ktorys wrocil do starego
-    zwyczaju, lepiej zeby trafil w zaslepke niz w syscalle."""
+    We stub 'usys.h' under its own name too - the parsers should no
+    longer call it directly, but if one of them went back to the old
+    habit, better it hit a stub than a syscall."""
     inc = os.path.join(workdir, "include")
     os.makedirs(inc, exist_ok=True)
 
@@ -64,8 +65,9 @@ def build(workdir):
 
 
 def build_kernel(workdir):
-    """Kompiluje net.c i tcp.c z zaslepkami sprzetu - zrodla jadra sa
-    dowiazane w kstub/, obok katalogu z podstawionymi naglowkami."""
+    """Compiles net.c and tcp.c with hardware stubs - the kernel's sources
+    are symlinked in kstub/, next to the directory of substituted
+    headers."""
     kstub = os.path.join(FUZZ, "kstub")
     inc = os.path.join(kstub, "include")
     objs = []
@@ -93,7 +95,7 @@ def build_kernel(workdir):
 
 
 def frames():
-    """Poprawne ramki ethernetowe: ARP, ICMP, UDP i TCP."""
+    """Valid Ethernet frames: ARP, ICMP, UDP and TCP."""
     mac_us = bytes([0x52, 0x54, 0x00, 0x12, 0x34, 0x56])
     mac_them = bytes([0x52, 0x55, 0x0a, 0x00, 0x02, 0x02])
     ip_us = bytes([10, 0, 2, 15])
@@ -132,8 +134,8 @@ def frames():
 
 
 def seeds(workdir):
-    """Poprawne dane wyjsciowe: certyfikaty (RSA i dwie krzywe), podpis,
-    strona HTML i odpowiedz HTTP."""
+    """Valid output data: certificates (RSA and two curves), a signature,
+    an HTML page and an HTTP response."""
     def openssl(*args, **kw):
         subprocess.run(["openssl"] + list(args), check=True,
                        capture_output=True, timeout=120, **kw)
@@ -174,25 +176,26 @@ def seeds(workdir):
 
 
 def mutate(data, rng):
-    """Psucie danych: obciecie, zmiana bajtow, wstawki, skrajne dlugosci."""
+    """Corrupting the data: truncation, byte changes, insertions, extreme
+    lengths."""
     b = bytearray(data)
     how = rng.randrange(6)
 
-    if how == 0 and len(b) > 1:                    # obciecie
+    if how == 0 and len(b) > 1:                    # truncation
         del b[rng.randrange(1, len(b)):]
-    elif how == 1 and b:                           # pojedyncze bajty
+    elif how == 1 and b:                           # single bytes
         for _ in range(rng.randrange(1, 8)):
             b[rng.randrange(len(b))] = rng.randrange(256)
-    elif how == 2 and b:                           # skrajne wartosci
+    elif how == 2 and b:                           # extreme values
         for _ in range(rng.randrange(1, 5)):
             b[rng.randrange(len(b))] = rng.choice([0x00, 0x01, 0x7f, 0x80,
                                                    0xfe, 0xff, 0x30, 0x82])
-    elif how == 3 and len(b) > 4:                  # wyciecie fragmentu
+    elif how == 3 and len(b) > 4:                  # cutting a fragment out
         i = rng.randrange(len(b) - 2)
         del b[i:i + rng.randrange(1, min(64, len(b) - i))]
-    elif how == 4:                                 # doklejka smieci
+    elif how == 4:                                 # rubbish appended
         b += bytes(rng.randrange(256) for _ in range(rng.randrange(1, 64)))
-    else:                                          # powtorzenie fragmentu
+    else:                                          # a fragment repeated
         if len(b) > 8:
             i = rng.randrange(len(b) - 4)
             b[i:i] = b[i:i + rng.randrange(1, 32)]

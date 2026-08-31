@@ -1,11 +1,12 @@
-"""Wspolna czesc testu dymnego ProtonOS.
+"""The shared part of the ProtonOS smoke test.
 
-Wszystko, co potrzebne, zeby uruchomic maszyne i cos na niej sprawdzic:
-klasa Qemu, serwery HTTP i DNS dla testow sieciowych, generowanie
-certyfikatow oraz sama funkcja check.
+Everything needed to start the machine and check something on it: the
+Qemu class, the HTTP and DNS servers for the network tests, certificate
+generation and the check function itself.
 
-Same sprawdzenia leza w scripts/tests/ - kazda grupa w osobnym pliku,
-bo kazda potrzebuje wlasnej maszyny, a te uruchamiaja sie rownolegle.
+The checks themselves live in scripts/tests/ - every group in its own
+file, because every one needs its own machine, and those start in
+parallel.
 """
 
 import http.server
@@ -30,18 +31,20 @@ VGA_BYTES = 80 * 25 * 2
 VIDEO_W = 320
 VIDEO_H = 200
 
-# Geometria menu pulpitu (kernel/desktop.c): wpisy rosna w gore od paska
-# zadan, wiec kazdy nowy program przesuwa poprzednie. Trzymamy to w
-# jednym miejscu, zeby dodanie aplikacji nie psulo testow klikania.
-# System startuje prosto na pulpit; testy konsolowe wymuszaja tryb
-# tekstowy linia polecen jadra.
+# The geometry of the desktop menu (kernel/desktop.c): the entries grow
+# upwards from the taskbar, so every new program shifts the previous
+# ones. We keep it in one place, so that adding an application does not
+# break the click tests.
+# The system starts straight into the desktop; the console tests force
+# text mode with a kernel command line.
 TEXT_MODE = "nodesktop"
 
-# Obraz dysku pod PFS3 (jadro formatuje pusty dysk przy pierwszym starcie)
+# The disk image under PFS3 (the kernel formats an empty disk on the
+# first start)
 DISK_SIZE = 16 * 1024 * 1024
 
-# Zegar guesta: ustalony, ale pozniejszy niz data wystawienia
-# certyfikatow generowanych w trakcie testu
+# The guest's clock: fixed, but later than the issue date of the
+# certificates generated during the test
 RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
@@ -51,23 +54,25 @@ MENU_TASKBAR_Y = 468   # video_h() - TB_H (kernel/desktop.c)
 
 
 def menu_y(name):
-    """Srodek wpisu menu o danej nazwie (wspolrzedne ekranu 640x480)."""
+    """The centre of the menu entry with the given name (screen
+    coordinates 640x480)."""
     idx = MENU_ITEMS.index(name)
     return MENU_TASKBAR_Y - (len(MENU_ITEMS) - idx) * MENU_ROW + MENU_ROW // 2
 
 
 PAGE = b"<html>ProtonOS TCP dziala</html>\n"
-# Strona z odnosnikiem i taka ilescia tekstu, ze trzeba przewijac
+# A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>Strona pierwsza</h1>"
              + b"<p>Wiersz wypelniajacy strone numer jeden.</p>" * 20
              + b'<p>Przejdz do <a href="/druga">drugiej strony</a>.</p>'
              + b"</body></html>\n")
 LINK_PAGE2 = (b"<html><body><h1>Strona druga</h1>"
               b"<p>Odnosnik zadzialal.</p></body></html>\n")
-# Ponad dawny sufit 268 KiB na plik - wchodzi w blok podwojnie posredni
+# Above the old ceiling of 268 KiB per file - it reaches into the
+# doubly indirect block
 HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" * 6500
-# Strona grubo ponad stary limit PFS (16 KiB na plik) - sprawdza
-# przydzial blokow, blok posredni i przepustowosc TCP
+# A page well above the old PFS limit (16 KiB per file) - it checks
+# block allocation, the indirect block and TCP throughput
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
 
 
@@ -75,9 +80,9 @@ _FONT8X8 = None
 
 
 def font8x8():
-    """Czcionka konsoli wczytana wprost z naglowka jadra: wzorzec
-    osmiu bajtow -> znak. Jedno zrodlo prawdy - gdy czcionka sie
-    zmieni, testy czytaja nowa."""
+    """The console font read straight from the kernel's header: a
+    pattern of eight bytes -> a character. A single source of truth -
+    when the font changes, the tests read the new one."""
     global _FONT8X8
     if _FONT8X8 is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -94,9 +99,9 @@ def font8x8():
 
 
 def start_dns_server(answer_ip=(10, 0, 2, 2)):
-    """Prosciutki serwer DNS na hoscie: na kazde pytanie o rekord A
-    odpowiada tym samym adresem. Dzieki temu sciezka 'nazwa -> adres'
-    da sie sprawdzic bez zadnej sieci na zewnatrz."""
+    """A very simple DNS server on the host: to every question about an A
+    record it answers with the same address. Thanks to that the path
+    'name -> address' can be checked with no network outside at all."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", 53))
@@ -113,15 +118,15 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
                 break
             if len(data) < 12:
                 continue
-            # pytanie konczy sie zerowym bajtem nazwy + QTYPE + QCLASS
+            # a question ends with a zero name byte + QTYPE + QCLASS
             i = 12
             while i < len(data) and data[i]:
                 i += data[i] + 1
             qend = i + 5
             header = data[:2] + b"\x81\x80" + data[4:6] + b"\x00\x01" \
                      + b"\x00\x00\x00\x00"
-            answer = (b"\xc0\x0c"            # wskaznik na nazwe z pytania
-                      + b"\x00\x01\x00\x01"  # typ A, klasa IN
+            answer = (b"\xc0\x0c"            # a pointer to the name from the question
+                      + b"\x00\x01\x00\x01"  # type A, class IN
                       + b"\x00\x00\x00\x3c"  # TTL 60 s
                       + b"\x00\x04" + bytes(answer_ip))
             sock.sendto(header + data[12:qend] + answer, addr)
@@ -131,17 +136,17 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
     return stop.set
 
 
-CERT_DER = None          # certyfikat serwera HTTPS (do magazynu zaufania)
-CERT_DER_EC = None       # to samo, ale na krzywej P-256
-CERT_DER_P384 = None     # i na krzywej P-384 (podpis SHA-384)
+CERT_DER = None          # the HTTPS server's certificate (for the trust store)
+CERT_DER_EC = None       # the same, but on the P-256 curve
+CERT_DER_P384 = None     # and on the P-384 curve (a SHA-384 signature)
 
 
 def make_test_cert(dirpath, ec=False, p384=False):
-    """Certyfikat samopodpisany dla protonos.test: SubjectAltName z nazwa
-    i wieloznacznikiem, flaga CA (moze wiec sluzyc tez za korzen
-    zaufania) i dziesiecioletnia waznosc, zeby obejmowala ustalony zegar
-    guesta. Robimy to narzedziem openssl - jest wszedzie tam, gdzie
-    testuje sie TLS."""
+    """A self-signed certificate for protonos.test: a SubjectAltName with
+    the name and a wildcard, the CA flag (so it can serve as a trust
+    root too) and a ten-year validity, so that it covers the guest's
+    fixed clock. We do it with the openssl tool - it is everywhere TLS
+    is tested."""
     import subprocess
 
     tag = "p384" if p384 else ("ec" if ec else "rsa")
@@ -173,9 +178,9 @@ def make_test_cert(dirpath, ec=False, p384=False):
 
 
 def make_chain_certs(dirpath):
-    """Prawdziwy lancuch: korzen -> posrednik -> certyfikat serwera.
-    Zaufanie dajemy tylko korzeniowi, wiec ProtonOS musi przejsc cala
-    droge podpisow, a nie tylko porownac jeden certyfikat."""
+    """A real chain: root -> intermediate -> the server's certificate.
+    We trust only the root, so ProtonOS has to walk the whole path of
+    signatures rather than merely compare one certificate."""
     import subprocess
 
     def run(args, **kw):
@@ -190,13 +195,13 @@ def make_chain_certs(dirpath):
         f.write("basicConstraints=critical,CA:FALSE\n"
                 "subjectAltName=DNS:protonos.test\n")
 
-    # korzen
+    # the root
     run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("root.key"), "-out", j("root.pem"), "-days", "3650",
          "-subj", "/CN=ProtonOS Test Root",
          "-addext", "basicConstraints=critical,CA:TRUE"])
 
-    # posrednik podpisany korzeniem
+    # the intermediate signed by the root
     run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("int.key"), "-out", j("int.csr"),
          "-subj", "/CN=ProtonOS Test Intermediate"])
@@ -204,7 +209,7 @@ def make_chain_certs(dirpath):
          "-CA", j("root.pem"), "-CAkey", j("root.key"), "-CAcreateserial",
          "-out", j("int.pem"), "-days", "3650", "-extfile", j("ca.ext")])
 
-    # certyfikat serwera podpisany posrednikiem
+    # the server's certificate signed by the intermediate
     run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("leaf.key"), "-out", j("leaf.csr"),
          "-subj", "/CN=protonos.test"])
@@ -212,7 +217,7 @@ def make_chain_certs(dirpath):
          "-CA", j("int.pem"), "-CAkey", j("int.key"), "-CAcreateserial",
          "-out", j("leaf.pem"), "-days", "3650", "-extfile", j("leaf.ext")])
 
-    # serwer wysyla certyfikat wraz z posrednikiem
+    # the server sends its certificate together with the intermediate
     with open(j("chain.pem"), "w") as out:
         out.write(open(j("leaf.pem")).read())
         out.write(open(j("int.pem")).read())
@@ -223,11 +228,11 @@ def make_chain_certs(dirpath):
         return j("chain.pem"), j("leaf.key"), f.read()
 
 
-CERT_DER_ROOT = None     # korzen lancucha (do magazynu zaufania)
+CERT_DER_ROOT = None     # the root of the chain (for the trust store)
 
 
 def start_https_chain_server():
-    """Serwer HTTPS przedstawiajacy lancuch dwupoziomowy."""
+    """An HTTPS server presenting a two-level chain."""
     global CERT_DER_ROOT
     import ssl
 
@@ -261,18 +266,18 @@ def start_https_chain_server():
 
 
 def start_https_server(ec=False, p384=False):
-    """Serwer HTTPS (TLS 1.3) na hoscie z certyfikatem generowanym w
-    locie - z kluczem RSA albo na krzywej P-256. Test nie potrzebuje
-    dzieki temu niczego z zewnatrz.
-    Zwraca (port, stop) albo (None, stop), gdy brakuje openssl-a."""
+    """An HTTPS server (TLS 1.3) on the host with a certificate generated
+    on the fly - with an RSA key or on the P-256 curve. Thanks to that
+    the test needs nothing from outside.
+    Returns (port, stop), or (None, stop) when openssl is missing."""
     global CERT_DER, CERT_DER_EC, CERT_DER_P384
     import ssl
 
     tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
     try:
         certfile, keyfile, der = make_test_cert(tmpdir, ec, p384)
-    except BaseException:                # brak openssl-a to nie powod, by
-        return None, lambda: None        # wywrocic caly test
+    except BaseException:                # a missing openssl is no reason to
+        return None, lambda: None        # bring the whole test down
     if p384:
         CERT_DER_P384 = der
     elif ec:
@@ -303,26 +308,26 @@ def start_https_server(ec=False, p384=False):
 
 
 def start_http_server():
-    """Serwer HTTP na hoscie - guest siega do niego przez brame slirpa
-    (10.0.2.2), wiec test TCP nie potrzebuje zadnej sieci na zewnatrz."""
+    """An HTTP server on the host - the guest reaches it through the slirp
+    gateway (10.0.2.2), so the TCP test needs no network outside."""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self):
-            if self.path.startswith("/stara"):      # przekierowanie
+            if self.path.startswith("/stara"):      # a redirect
                 self.send_response(302)
                 self.send_header("Location", "/kawalki")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
 
-            if self.path.startswith("/kawalki"):    # kodowanie chunked
+            if self.path.startswith("/kawalki"):    # chunked encoding
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
-                for i in range(0, len(PAGE), 7):    # celowo male kawalki
+                for i in range(0, len(PAGE), 7):    # deliberately small pieces
                     part = PAGE[i:i + 7]
                     self.wfile.write(b"%x\r\n" % len(part) + part + b"\r\n")
                 self.wfile.write(b"0\r\n\r\n")
@@ -401,58 +406,62 @@ class Qemu:
                  uefi=None, nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
-        # Jadro 64-bitowe potrzebuje procesora z trybem dlugim, a
-        # qemu-system-i386 takiego nie udaje
+        # The 64-bit kernel needs a processor with long mode, and
+        # qemu-system-i386 does not pretend to be one
         cmd = [qemu,
                "-display", "none", "-no-reboot",
-               # Stala data RTC -> deterministyczny test komendy 'date'.
-               # Musi byc pozniejsza niz chwila wystawienia certyfikatow
-               # testowych, inaczej TLS slusznie je odrzuci jako
-               # "jeszcze nie obowiazuje".
+               # A fixed RTC date -> a deterministic test of the 'date' command.
+               # It has to be later than the moment the test certificates
+               # were issued, otherwise TLS will rightly reject them as
+               # "not yet valid".
                "-rtc", "base=" + RTC_BASE,
-               # Karta sieciowa w trybie uzytkownika: brama 10.0.2.2
-               # odpowiada na ARP i ICMP echo, wiec 'ping' da sie
-               # przetestowac bez zadnej sieci na hoscie
+               # The network card in user mode: the gateway 10.0.2.2
+               # answers ARP and ICMP echo, so 'ping' can be tested with
+               # no network on the host at all
                "-netdev",
                "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:{hostfwd_port}"
                                if hostfwd_port else ""),
-               # Karta sieciowa: domyslnie RTL8139, ale system umie tez
-               # e1000 - i to jest jedyna roznica w wywolaniu QEMU,
-               # bo o tym, ktora karta siedzi w gniezdzie, decyduje
-               # warstwa netdev, a nie kod sieciowy
+               # The network card: RTL8139 by default, but the system
+               # knows e1000 too - and that is the only difference in the
+               # QEMU invocation, because which card sits in the socket
+               # is decided by the netdev layer, not by the network code
                "-device", nic + ",netdev=n0",
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
         if cpus:
-            # Wiecej niz jeden rdzen. Firmware wylicza je w tablicy ACPI,
-            # a system budzi sygnalem INIT-SIPI
+            # More than one core. The firmware lists them in an ACPI
+            # table, and the system wakes them with an INIT-SIPI signal
             cmd += ["-smp", str(cpus)]
         if usbkbd == "xhci":
-            # Kontroler xHCI: jedyny, jaki maja nowsze plyty. To ta sama
-            # klawiatura, tylko na innej magistrali - i o tym, ze system
-            # widzi ja tak samo, ma rozstrzygac test, a nie zalozenie
+            # An xHCI controller: the only one newer boards have. It is
+            # the same keyboard, only on a different bus - and whether
+            # the system sees it the same way is for the test to settle,
+            # not for an assumption
             cmd += ["-device", "qemu-xhci,id=xhci",
                     "-device", "usb-kbd,bus=xhci.0"]
         elif usbkbd:
-            # Klawiatura USB zamiast PS/2 - tak wyglada kazda maszyna
-            # nowsza niz mniej wiecej 2010 rok
+            # A USB keyboard instead of PS/2 - that is what every
+            # machine newer than roughly 2010 looks like
             cmd += ["-usb", "-device", "usb-kbd"]
         self.serial_path = serial
         if serial:
-            # Gdy konsola rysuje sie na buforze obrazu, w buforze znakow
-            # VGA nie ma juz nic do czytania - tekst zbieramy z portu
+            # When the console draws on the framebuffer, there is nothing
+            # left to read in the VGA character buffer - we collect the
+            # text from the serial port
             cmd += ["-serial", "file:" + serial]
         if uefi:
-            # Zamiast BIOS-u pamiec flash z firmware UEFI (OVMF): osobno
-            # kod (tylko do odczytu) i osobno zmienne, ktore firmware
-            # zapisuje - stad kopia pliku ze zmiennymi dla kazdego biegu
+            # Instead of a BIOS, flash memory with UEFI firmware (OVMF):
+            # the code separately (read-only) and separately the
+            # variables the firmware writes - hence a copy of the
+            # variables file for every run
             code, nvram = uefi
             cmd += ["-drive", "if=pflash,format=raw,unit=0,readonly=on,"
                               "file=" + code,
                     "-drive", "if=pflash,format=raw,unit=1,file=" + nvram]
         if cdrom:
-            # Rozruch jak z prawdziwej plyty: jadro wgrywa GRUB, a nie QEMU
+            # Booting as from a real board: the kernel is loaded by GRUB, not by
+# QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
         else:
             cmd += ["-kernel", kernel]
@@ -461,12 +470,13 @@ class Qemu:
             if initrd:
                 cmd += ["-initrd", initrd]
         if disk and nvme:
-            # Dysk NVMe: bez kontrolera po drodze - urzadzenie siedzi
-            # wprost na PCI Express
+            # An NVMe disk: with no controller in between - the device
+            # sits straight on PCI Express
             cmd += ["-drive", f"id=nvm0,file={disk},if=none,format=raw",
                     "-device", "nvme,drive=nvm0,serial=protonos"]
         elif disk and sata:
-            # Dysk za kontrolerem AHCI - tak wyglada kazda nowsza plyta
+            # A disk behind an AHCI controller - that is what every newer board
+# looks like
             cmd += ["-device", "ich9-ahci,id=ahci",
                     "-drive", f"id=sata0,file={disk},if=none,format=raw",
                     "-device", "ide-hd,drive=sata0,bus=ahci.0"]
@@ -475,7 +485,7 @@ class Qemu:
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-        # Poczekaj, az QEMU wystawi socket QMP (start bywa wolny)
+        # Wait until QEMU puts up the QMP socket (the start is sometimes slow)
         sock = socket.socket(socket.AF_UNIX)
         deadline = time.time() + 10
         while True:
@@ -489,18 +499,18 @@ class Qemu:
                 if time.time() > deadline:
                     raise
                 time.sleep(0.2)
-        # Limit czasu na odpowiedz. Bez niego odczyt z gniazda czeka
-        # w nieskonczonosc: gdy QEMU zginie albo zawiesi sie w srodku
-        # polecenia, caly test staje na zawsze zamiast zglosic blad -
-        # a nie ma nikogo, kto by go z tego wybudzil.
+        # A time limit on an answer. Without it a read from the socket
+        # waits forever: when QEMU dies or hangs in the middle of a
+        # command, the whole test stops for good instead of reporting an
+        # error - and there is nobody to wake it from that.
         sock.settimeout(self.QMP_TIMEOUT)
         self.sock = sock
         self.f = sock.makefile("rwb")
-        self.f.readline()  # baner QMP
+        self.f.readline()  # the QMP banner
         self.cmd({"execute": "qmp_capabilities"})
 
-    # Najdluzsze polecenie to zrzut ekranu w wysokiej rozdzielczosci -
-    # sekundy wystarcza z ogromnym zapasem
+    # The longest command is a screenshot at high resolution -
+    # seconds are enough with enormous room to spare
     QMP_TIMEOUT = 60
 
     def cmd(self, msg):
@@ -512,7 +522,7 @@ class Qemu:
             except (socket.timeout, TimeoutError):
                 raise RuntimeError(
                     f"QMP nie odpowiedzialo w {self.QMP_TIMEOUT} s na: {msg}")
-            if not raw:                  # gniazdo zamkniete = QEMU zginal
+            if not raw:                  # a closed socket = QEMU died
                 raise RuntimeError(f"QEMU rozlaczyl sie podczas: {msg}")
             resp = json.loads(raw)
             if "return" in resp or "error" in resp:
@@ -534,7 +544,7 @@ class Qemu:
         return "\n".join(lines).rstrip()
 
     def wait_for(self, text, timeout=15):
-        """Czeka, az podany tekst pojawi sie na ekranie VGA."""
+        """Waits until the given text appears on the VGA screen."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             screen = self.screen()
@@ -543,12 +553,13 @@ class Qemu:
             time.sleep(0.3)
         raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na ekranie")
 
-    DESK_BG = (0, 128, 160)          # tlo pulpitu (teal)
+    DESK_BG = (0, 128, 160)          # the desktop's background (teal)
 
     def wait_desktop(self, timeout=25):
-        """Czeka, az kompozytor narysuje pulpit. W trybie graficznym
-        bufor tekstowy VGA (0xB8000) przestaje byc oknem na to, co
-        widac, wiec gotowosci szukamy w pikselach, nie w napisach."""
+        """Waits until the compositor draws the desktop. In graphics mode
+        the VGA text buffer (0xB8000) stops being a window onto what can
+        be seen, so we look for readiness in pixels rather than in
+        text."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -566,9 +577,9 @@ class Qemu:
         time.sleep(0.1)
 
     def mouse_move(self, dx, dy):
-        """Mysz PS/2 przenosi w jednym pakiecie tylko male delty, wiec
-        wieksze skoki dzielimy na kroki - inaczej kursor laduje gdzie
-        indziej, niz chcial test."""
+        """A PS/2 mouse carries only small deltas in one packet, so we
+        split larger jumps into steps - otherwise the cursor lands
+        somewhere other than where the test wanted."""
         while dx or dy:
             sx = max(-100, min(100, dx))
             sy = max(-100, min(100, dy))
@@ -581,9 +592,9 @@ class Qemu:
         time.sleep(0.15)
 
     def mouse_home(self):
-        """Dosuwa kursor do lewego gornego rogu (kompozytor przytrzymuje
-        go w granicach ekranu) i zeruje sledzona pozycje - kalibracja
-        przed klikaniem w konkretne miejsca."""
+        """Pushes the cursor into the top left corner (the compositor holds
+        it within the screen's bounds) and zeroes the tracked position -
+        a calibration before clicking on particular places."""
         self.mouse_move(-800, -600)
         self.mx, self.my = 0, 0
 
@@ -592,7 +603,8 @@ class Qemu:
             {"type": "btn", "data": {"button": "left", "down": down}}]}})
         time.sleep(0.2)
 
-    # Sledzenie pozycji kursora (pulpit startuje na srodku 320x200)
+    # Tracking the cursor's position (the desktop starts in the middle of
+# 320x200)
     mx, my = 160, 100
 
     def mouse_goto(self, tx, ty):
@@ -604,9 +616,9 @@ class Qemu:
         self.mouse_button(False)
 
     def screen_pixels(self):
-        """Zrzut ekranu (QMP screendump) -> (skala_x, skala_y, funkcja
-        pikseli we wspolrzednych framebuffera 320x200). QEMU podwaja
-        tryb 13h przy wyswietlaniu, stad skalowanie."""
+        """A screenshot (QMP screendump) -> (scale_x, scale_y, a pixel
+        function in framebuffer coordinates 320x200). QEMU doubles mode
+        13h when displaying it, hence the scaling."""
         ppm = tempfile.mktemp(suffix=".ppm")
         self.cmd({"execute": "screendump", "arguments": {"filename": ppm}})
         data = open(ppm, "rb").read()
@@ -631,9 +643,9 @@ class Qemu:
         return sx, sy, at
 
     def wait_pixel(self, x, y, want, tol=40, timeout=4):
-        """Czeka, az piksel (x,y) osiagnie kolor 'want' (z tolerancja).
-        Niweluje flakiness: kompozytor hi-res odswieza wolniej niz
-        przychodza zdarzenia. Zwraca True/False."""
+        """Waits until the pixel (x,y) reaches the colour 'want' (with a
+        tolerance). It removes flakiness: the hi-res compositor refreshes
+        more slowly than events arrive. Returns True/False."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             _, _, at = self.screen_raw()
@@ -644,8 +656,8 @@ class Qemu:
         return False
 
     def screen_raw(self):
-        """Zrzut ekranu w natywnych wspolrzednych (bez skalowania) -
-        (szerokosc, wysokosc, funkcja pikseli). Do trybow VESA."""
+        """A screenshot in native coordinates (with no scaling) -
+        (width, height, a pixel function). For the VESA modes."""
         ppm = tempfile.mktemp(suffix=".ppm")
         self.cmd({"execute": "screendump", "arguments": {"filename": ppm}})
         data = open(ppm, "rb").read()
@@ -670,20 +682,23 @@ class Qemu:
 
 
     def screen_fbcon(self):
-        """Tekst konsoli odczytany z BUFORA OBRAZU.
+        """The console text read from the FRAMEBUFFER.
 
-        GRUB, widzac w naglowku jadra zadanie trybu obrazu, zawsze daje
-        grafike - pamiec znakow spod 0xB8000 zostaje wtedy pusta i
-        screen() nic z niej nie wyczyta. Konsola rysuje sie wowczas sama,
-        czcionka 8x8, w bloku 80x25 na srodku ekranu (kernel/fbcon.c).
+        GRUB, seeing a request for a video mode in the kernel's header,
+        always gives graphics - the character memory at 0xB8000 then
+        stays empty and screen() reads nothing out of it. The console
+        draws itself then, in an 8x8 font, in an 80x25 block in the
+        middle of the screen (kernel/fbcon.c).
 
-        Czytamy ja tak, jak czytalby czlowiek: kolor, ktorego na calym
-        bloku jest najwiecej, to tlo, reszta to glify - a wzorzec osmiu
-        bajtow wyszukujemy w tej samej czcionce, ktora rysowalo jadro.
+        We read it the way a human would: the colour most common across
+        the whole block is the background, the rest are glyphs -
+        and we look up the pattern of eight bytes in the same font the
+        kernel drew with.
 
-        Tlo liczymy dla calego bloku, nie dla pojedynczej komorki: sa
-        znaki, w ktorych pikseli glifu jest WIECEJ niz tla ('0', 'N',
-        'B', 'W'), i liczone osobno wychodzilyby na wspak.
+        We compute the background for the whole block, not for a single
+        cell: there are characters in which there are MORE glyph pixels
+        than background ones ('0', 'N', 'B', 'W'), and computed
+        separately they would come out inverted.
         """
         w, h, _ = self.screen_raw()
         px = self._ostatnie_piksele
@@ -722,9 +737,9 @@ class Qemu:
         return "\n".join(rows).rstrip()
 
     def wait_fbcon(self, text, timeout=15):
-        """Czeka, az tekst pojawi sie na konsoli rysowanej w buforze
-        obrazu. Zwraca caly ekran (takze po przekroczeniu czasu -
-        asercja nalezy do wolajacego)."""
+        """Waits until the text appears on the console drawn in the
+        framebuffer. Returns the whole screen (also after the time runs
+        out - the assertion belongs to the caller)."""
         end = time.time() + timeout
         screen_text = ""
         while time.time() < end:
@@ -746,19 +761,19 @@ class Qemu:
         time.sleep(0.3)
 
     def serial(self):
-        """Wszystko, co jadro wypisalo na port szeregowy."""
+        """Everything the kernel wrote to the serial port."""
         if not self.serial_path or not os.path.exists(self.serial_path):
             return ""
         with open(self.serial_path, "rb") as fh:
             return fh.read().decode("latin1")
 
     def command(self, cmd, text=None, timeout=20):
-        """Wpisuje polecenie i oddaje TO, CO PRZYBYLO na porcie po nim.
+        """Types a command and hands back WHAT ARRIVED on the port after it.
 
-        Bez odcinania starszej tresci latwo o falszywy alarm: shell
-        odbija wpisany wiersz, wiec nazwa pliku jest na porcie takze
-        wtedy, gdy polecenie niczego nie znalazlo - a wynik poprzedniego
-        polecenia lezy tam do konca biegu."""
+        Without cutting off the older content a false alarm is easy: the
+        shell echoes the typed line, so the file name is on the port even
+        when the command found nothing - and the previous command's
+        result lies there until the end of the run."""
         start = len(self.serial())
         self.type_line(cmd)
         if text is None:
@@ -782,7 +797,7 @@ class Qemu:
         raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na porcie")
 
     def wait_exit(self, timeout=20):
-        """Czeka, az QEMU sam sie zakonczy (wylaczenie zasilania)."""
+        """Waits until QEMU ends by itself (a power off)."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -797,15 +812,16 @@ class Qemu:
                 os.unlink(p)
 
 
-# --- Zliczanie wynikow ---------------------------------------------
-# Kazda grupa dziala we wlasnym procesie i wypisuje swoje wyniki na
-# wyjscie. Sumuje je runner - dzieki temu grupy nie musza sie o siebie
-# nawzajem troszczyc ani niczego sobie przekazywac.
+# --- Counting the results -------------------------------------------
+# Every group runs in its own process and prints its results to the
+# output. The runner adds them up - thanks to that the groups do not
+# have to care about one another or pass anything between themselves.
 failures = []
 
 
 def pmm_used(screen_text):
-    """Ile ramek zajetych wedlug ostatniej linii PMM na ekranie 'mem'."""
+    """How many frames are taken according to the last PMM line on the
+    'mem' screen."""
     m = re.findall(r"PMM:\s+(\d+)/", screen_text)
     return int(m[-1]) if m else None
 
@@ -817,7 +833,7 @@ def check(name, cond):
 
 
 def summary():
-    """Konczy proces grupy: 0 = wszystko przeszlo."""
+    """Ends the group's process: 0 = everything passed."""
     if failures:
         print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
         return 1
@@ -826,17 +842,18 @@ def summary():
 
 
 def make_iso64(workdir, iso, graphics=False, text=False):
-    """Sklada plyte z jadrem 64-bitowym i jego initrd.
+    """Assembles a disc with the 64-bit kernel and its initrd.
 
-    Jadro 64-bitowe nie da sie uruchomic przez -kernel: QEMU wgrywa tak
-    tylko obrazy Multiboot 1, a to jest Multiboot 2. Kazdy test musi
-    wiec zbudowac plyte GRUB-em, a robil to dotad kazdy na wlasna reke.
-    'grafika' wlacza tryb graficzny od loadera (pulpit i konsola na
-    buforze obrazu). 'tekst' zada trybu tekstowego: GRUB sam z siebie
-    daje bufor obrazu i wtedy konsola rysuje sie w nim zamiast
-    w pamieci znakow VGA, ktorej testy szukaja pod 0xB8000.
+    The 64-bit kernel cannot be started through -kernel: QEMU loads only
+    Multiboot 1 images that way, and this is Multiboot 2. So every test
+    has to build a disc with GRUB, and until now every one did it on its
+    own. 'graphics' turns graphics mode on from the loader (the desktop
+    and the console on the framebuffer). 'text' demands text mode: GRUB
+    gives a framebuffer of its own accord and the console then draws in
+    it instead of in the VGA character memory the tests look for at
+    0xB8000.
 
-    Zwraca True, gdy plyta powstala.
+    Returns True when the disc was created.
     """
     os.makedirs(workdir + "/boot/grub", exist_ok=True)
     shutil.copy(KERNEL64, workdir + "/boot/protonos64.bin")
@@ -856,8 +873,8 @@ def make_iso64(workdir, iso, graphics=False, text=False):
 
 
 def no64():
-    """Powod, dla ktorego testu 64-bitowego nie da sie uruchomic, albo
-    None, gdy da sie. Wszystkie grupy 64-bitowe pytaja o to samo."""
+    """The reason a 64-bit test cannot be run, or None when it can. Every
+    64-bit group asks the same question."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
         return "brak obrazu 64-bitowego (make kernel64)"
     if shutil.which("grub-mkrescue") is None:
