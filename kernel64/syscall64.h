@@ -81,6 +81,13 @@
 #define SYS64_DROP      46   /* back to a plain user; always succeeds */
 #define SYS64_LEVEL     47   /* -> 0 = admin, 1 = a plain user */
 
+/* A wait that does not wait: a1=pid, a2=&code -> 0 (ended, the code is
+   written) or -3 (still running) */
+#define SYS64_TRYWAIT   48
+
+/* Where in the file the next read starts: a1=fd, a2=position */
+#define SYS64_SEEK      49
+
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1

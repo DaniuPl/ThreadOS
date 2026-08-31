@@ -749,6 +749,22 @@ static void handle(struct regs *r)
     case SYS64_LEVEL:
         r->rax = (uint64_t)(int64_t)task64_level();
         return;
+    case SYS64_SEEK:
+        r->rax = (uint64_t)(int64_t)task64_fd_seek((int)a1, (uint32_t)a2);
+        return;
+    case SYS64_TRYWAIT: {
+        int code = 0;
+        int rc = task64_trywait((int)a1, &code);
+        if (rc == 0 && a2) {
+            if (!paging64_user_range(a2, sizeof(int))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            *(int *)(uintptr_t)a2 = code;
+        }
+        r->rax = (uint64_t)(int64_t)rc;
+        return;
+    }
     /* Windows. The owner is the process, not whoever passes a window
        number: the compositor checks it on every draw, so a program will
        not draw anything in somebody else's window. */

@@ -84,6 +84,22 @@ static int  plen;
    is drawn and what is done with it. */
 static int  asking;
 static char pending[LINE_MAX];
+
+/* A program that is running RIGHT NOW.
+ *
+ * It used to be started and waited for, and the window did nothing at
+ * all in the meantime: it could not be moved, could not be closed, and
+ * showed nothing until the program had ended. Which meant that a
+ * program that does not end - and 'spin' is one - took the terminal
+ * with it.
+ *
+ * Now the terminal starts it, keeps drawing, and reads what it has
+ * written so far on every pass. 'shown' is how much of that output has
+ * already been put on the screen, so that reading again brings only
+ * what is new. */
+static int32_t running;
+static int32_t helper;         /* the other half of a pipe, 0 = none */
+static uint32_t shown;
 static int  cw = W0, ch = H0;  /* the content area, as it is now */
 static int  cols = 48, rows = 23;
 
@@ -238,7 +254,11 @@ static int out_file(void)
     return (int)sys_open(OUTFILE, O_CREATE | O_WRITE);
 }
 
-static int32_t run_one(char *cmd)
+/* Starts the program and comes straight back with its pid. Whether
+   there is such a program at all is not known yet: in long mode that
+   answer comes from the child, as the exit code 127 of a failed exec.
+   So it arrives later, where the exit code does. */
+static int32_t start_one(char *cmd)
 {
     int fd = out_file();
     if (fd < 0)
@@ -255,18 +275,13 @@ static int32_t run_one(char *cmd)
     sys_close(fd);
     if (pid < 0)
         return -2;
-
-    int code = 0;
-    sys_wait(&code);
-    /* The child cannot say 'there is no such program' in any other way
-       than by dying, so 127 is the agreement between it and us. */
-    return code == 127 ? -1 : (int32_t)code;
+    return (int32_t)pid;
 }
 
 /* 'a | b': the pipe belongs to the terminal, both its ends are handed
    to the children and BOTH are then closed here - otherwise the second
    program would wait for an end of data that never comes. */
-static int32_t run_pipe(char *left, char *right)
+static int32_t start_pipe(char *left, char *right)
 {
     int fd[2];
     if (sys_pipe(fd) < 0)
@@ -305,15 +320,11 @@ static int32_t run_pipe(char *left, char *right)
     if (a < 0 || b < 0)
         return -2;
 
-    int code = 0, last = 0;
-    sys_wait(&code);
-    last = code;
-    sys_wait(&code);
-    /* Whichever of them ended second, the code that matters is the one
-       from the right-hand side - and both of ours are these two. */
-    if (last == 127 || code == 127)
-        return -1;
-    return (int32_t)code;
+    /* The right-hand side is the one whose output is shown, so it is
+       the one we watch. The left one is collected when it is over -
+       by then it has nothing left to do. */
+    helper = (int32_t)a;
+    return (int32_t)b;
 }
 
 #else
@@ -327,24 +338,39 @@ static void term_cwd(char *buf, int len)
     sys_getcwd(buf);
 }
 
-static int32_t run_one(char *cmd)
+/* The output file, emptied before anything writes into it.
+ *
+ * Whoever reads it while it grows has to be sure that what is in it
+ * came from THIS command: the terminal shows what is past the point it
+ * last read, and a file still holding the last program's output would
+ * be shown as this one's. */
+static void empty_out_file(void)
 {
-    int32_t pid = sys_spawn(cmd, OUTFILE, 0);
-    if (pid < 0)
-        return -1;
-    return sys_wait(pid);
+    int32_t fd = sys_open(OUTFILE, O_WRITE | O_CREATE | O_TRUNC);
+    if (fd >= 0)
+        sys_close((int)fd);
 }
 
-static int32_t run_pipe(char *left, char *right)
+/* Starts the program with its output going to a file and comes back
+   at once: the pid, or -1 when there is no such program (which this
+   kernel knows straight away, because it is the one that looks for
+   it). */
+static int32_t start_one(char *cmd)
+{
+    empty_out_file();
+    int32_t pid = sys_spawn(cmd, OUTFILE, 0);
+    return pid < 0 ? -1 : pid;
+}
+
+static int32_t start_pipe(char *left, char *right)
 {
     /* The kernel takes the pipeline as one line, so we put back the
        '|' we cut it at */
     (void)right;
+    empty_out_file();
     left[t_len(left)] = '|';
     int32_t pid = sys_pipeline(left, OUTFILE);
-    if (pid < 0)
-        return -1;
-    return sys_wait(pid);
+    return pid < 0 ? -1 : pid;
 }
 
 #endif
@@ -373,15 +399,23 @@ static void refresh_prompt(void)
     plen = i;
 }
 
-/* Reads what the command wrote and puts it into the ring - in pieces,
-   because the output may be longer than anything we would want to hold
-   whole. What does not fit in the ring scrolls away, exactly as it
-   would in a terminal. */
-static void show_output(void)
+/* Shows whatever the running program has written since the last look.
+ *
+ * The output goes to a file, so 'what is new' is simply 'what is past
+ * the point we stopped at' - we seek there and read to the end. Called
+ * on every pass of the main loop, so a program that prints as it goes
+ * is seen printing as it goes, rather than all at once when it is
+ * over.
+ *
+ * What does not fit in the ring of lines scrolls away, exactly as it
+ * would in a terminal. */
+static void show_new_output(void)
 {
     int32_t fd = sys_open(OUTFILE, O_READ);
     if (fd < 0)
         return;
+    if (shown)
+        sys_seek((int)fd, shown);
     char buf[256];
     for (;;) {
         int32_t n = sys_read((int)fd, buf, sizeof(buf));
@@ -389,14 +423,11 @@ static void show_output(void)
             break;
         for (int32_t i = 0; i < n; i++)
             put_char(buf[i]);
+        shown += (uint32_t)n;
         if (n < (int32_t)sizeof(buf))
             break;
     }
     sys_close((int)fd);
-    /* A program whose last line has no newline would leave the next
-       prompt stuck to its output */
-    if (count && line_len[at(count - 1)])
-        put_char('\n');
 }
 
 static void remember(const char *cmd)
@@ -412,6 +443,7 @@ static void remember(const char *cmd)
    thing that was asked for and to nothing else. */
 static void run_pending(void);
 static void run_program(char *line);
+static void watch_running(void);
 
 static void run_line(void)
 {
@@ -529,29 +561,73 @@ static void run_program(char *line)
             break;
         }
 
-    int32_t code;
+    int32_t pid;
+    helper = 0;
+    shown = 0;
     if (bar) {
         *bar = 0;
         char *right = bar + 1;
         while (*right == ' ')
             right++;
-        code = run_pipe(line, right);
+        pid = start_pipe(line, right);
     } else {
-        code = run_one(line);
+        pid = start_one(line);
     }
 
-    if (code == -1) {
+    if (pid == -1) {
         put_str("no such program: ");
         put_str(line);
         put_char('\n');
         return;
     }
-    if (code == -2) {
+    if (pid < 0) {
         put_str("could not start it\n");
         return;
     }
 
-    show_output();
+    /* From here the terminal goes back to drawing. The program writes,
+       we read what is new on every pass, and the end of it is noticed
+       in the same place - see watch_running(). */
+    running = pid;
+}
+
+/* Is the program still running, and what has it written? Called on
+   every pass of the main loop, which is what makes the difference
+   between a window that has frozen and a window that is waiting. */
+static void watch_running(void)
+{
+    int code = 0;
+    int32_t rc = sys_trywait(running, &code);
+
+    /* Read AFTER asking whether it has ended: anything written between
+       the two is then still caught by the final read below. */
+    show_new_output();
+    if (rc == -3)
+        return;                    /* still going */
+
+    show_new_output();             /* the last of it */
+    running = 0;
+
+    /* The other half of a pipe has nothing left to do once the right
+       side is over; collecting it keeps the process table clean. */
+    if (helper) {
+        int hc = 0;
+        for (int i = 0; i < 50 && sys_trywait(helper, &hc) == -3; i++)
+            sys_sleep(10);
+        helper = 0;
+    }
+
+    /* A program whose last line has no newline would leave the next
+       prompt stuck to its output */
+    if (count && line_len[at(count - 1)])
+        put_char('\n');
+
+    /* In long mode a failed exec can only come back as the child's
+       exit code, so 'there is no such program' arrives here */
+    if (code == 127) {
+        put_str("no such program\n");
+        return;
+    }
     /* A code other than zero is not an error of ours, but it is
        something the person has to be able to see */
     if (code) {
@@ -636,7 +712,23 @@ static void on_key(char c)
         return;
     }
 
+    /* Ctrl+C. The keyboard driver turns it into 0x03 and the desktop
+       hands it to whoever has the focus, so it arrives here like any
+       other key - and here it means the one thing it means everywhere:
+       stop that. A program with no handler of its own dies on it. */
+    if (c == 0x03) {
+        if (running) {
+            put_str("^C\n");
+            sys_kill((int)running, SIGINT);
+        }
+        return;
+    }
     if (c == '\n' || c == '\r') {
+        /* One at a time: a second command while the first is still
+           running would have nowhere to put its output - both write to
+           the same file. */
+        if (running)
+            return;
         run_line();
         return;
     }
@@ -734,7 +826,15 @@ static void draw(int w)
     /* Scrolled up, the last thing on the screen is not the last thing
        that happened - and that has to be said, or the terminal looks
        stuck */
-    if (view && cols > 24) {
+    /* A program is running: say so, and say how to stop it. Without
+       this the terminal looks the same whether it is waiting for a
+       command or waiting for a program, which are not the same thing
+       to be looking at. */
+    if (running && cols > 24) {
+        int mx = PAD + (cols - 15) * 8;
+        win_rect(w, mx, PAD, 15 * 8, 8, C_BG);
+        win_text(w, mx, PAD, "running... ^C", C_NOTE);
+    } else if (view && cols > 24) {
         /* Cleared first: drawn straight onto the line underneath, the
            two texts would share the same pixels and neither would be
            readable. */
@@ -767,6 +867,9 @@ void _start(void)
                 on_key((char)ev.val);
             }
         }
+
+        if (running)
+            watch_running();
 
         draw(w);
         sys_sleep(50);

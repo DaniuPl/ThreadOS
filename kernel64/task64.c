@@ -851,6 +851,28 @@ int task64_id_current(void)       { return current ? current->id : -1; }
 /* Is the task with this number still alive. A zombie does not count -
    the network code asks this in order to clean up the sockets of the
    dead. */
+/* A wait that does not wait: -3 while the process is still running,
+   0 once it has ended (and then its exit code is taken out of the
+   table, so that nobody reaps it twice), -4 when there is nothing
+   there any more. */
+int task64_trywait(int id, int *code)
+{
+    if (task64_alive(id))
+        return -3;
+    irqflags_t flags = irq_save();
+    for (int i = 0; i < EXIT_SLOTS; i++) {
+        if (finished[i].used && finished[i].id == id) {
+            if (code)
+                *code = finished[i].code;
+            finished[i].used = 0;
+            irq_restore(flags);
+            return 0;
+        }
+    }
+    irq_restore(flags);
+    return -4;
+}
+
 int task64_alive(int id)
 {
     irqflags_t flags = irq_save();
@@ -1217,6 +1239,16 @@ void task64_fd_advance(int fd, uint32_t n)
 {
     if (fd >= 0 && fd < FD_MAX && current->fds[fd].kind == FDK_FILE)
         current->fds[fd].pos += n;
+}
+
+/* Puts the reading point where the program says. Only a file has one -
+   a pipe or the keyboard has nowhere to go back to. */
+int task64_fd_seek(int fd, uint32_t pos)
+{
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_FILE)
+        return -1;
+    current->fds[fd].pos = pos;
+    return 0;
 }
 
 /* Closing a pipe end decreases the owner count - and it is exactly

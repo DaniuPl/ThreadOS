@@ -79,6 +79,20 @@ static inline int32_t sys_level(void)
     return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
 }
 
+/* Where the next read from that file starts */
+static inline int32_t sys_seek(int fd, uint32_t pos)
+{
+    return (int32_t)syscall64(SYS64_SEEK, (int64_t)fd, (int64_t)pos);
+}
+
+/* A wait that does not wait: 0 = ended (and 'code' holds the exit
+   code), -3 = still running. */
+static inline int32_t sys_trywait(int32_t pid, int *code)
+{
+    return (int32_t)syscall64(SYS64_TRYWAIT, (int64_t)pid,
+                              (int64_t)(uintptr_t)code);
+}
+
 /* --- Time ---------------------------------------------------------- */
 
 struct utime {

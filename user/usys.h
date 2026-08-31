@@ -58,6 +58,7 @@
 #define SYS_AUTH       51
 #define SYS_DROP       52
 #define SYS_LEVEL      53
+#define SYS_TRYWAIT    54
 
 #define FS_NAME_MAX  63
 
@@ -646,6 +647,20 @@ static inline int32_t sys_level(void)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(SYS_LEVEL) : "memory");
+    return ret;
+}
+
+/* A wait that does not wait: 0 = it has ended (and 'code' holds its
+   exit code), -3 = still running. For a program that watches another
+   one and has something else to do meanwhile - drawing, for
+   instance. */
+static inline int32_t sys_trywait(int32_t pid, int *code)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_TRYWAIT), "b"(pid), "c"(code)
+                     : "memory");
     return ret;
 }
 

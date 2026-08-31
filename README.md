@@ -51,9 +51,10 @@ shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. Icons, a file
 manager, a web browser and a settings window whose changes survive a
 restart. The terminal in a window is a dark screen with light text and
-a session in it: scrollback, history, a movable cursor, `cd` and pipes
-— one program compiled for both kernels, differing only in how a
-command is started. Alt+Tab moves the focus from the keyboard, the way
+a session in it: scrollback, history, a movable cursor, `cd` and pipes,
+output that appears while the program is still writing it, and Ctrl+C
+to stop it — one program compiled for both kernels, differing only in
+how a command is started. Alt+Tab moves the focus from the keyboard, the way
 it does everywhere else. Two privilege levels: changing the system —
 its settings and the files it keeps them in — needs an admin, and the
 way up is a password, asked for by the shell, by the terminal and by

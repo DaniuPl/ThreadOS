@@ -61,6 +61,11 @@
 #define SYS_AUTH       51 /* ebx=password -> 0 = admin from now on, -2 = no */
 #define SYS_DROP       52 /* back to a plain user; always succeeds */
 #define SYS_LEVEL      53 /* -> 0 = admin, 1 = a plain user */
+/* A wait that does not wait: ebx=pid, ecx=&code.
+   0 = it has ended (the code is written through ecx), -3 = still
+   running. Without it a program watching another one has to choose
+   between blocking and not knowing. */
+#define SYS_TRYWAIT    54
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

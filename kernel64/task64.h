@@ -89,6 +89,9 @@ int task64_vc(void);
 
 /* What the running task may do (USER_ADMIN / USER_PLAIN, see
    kernel/include/user.h). Inherited by every child. */
+/* A wait that does not wait - see task64.c */
+int task64_trywait(int id, int *code);
+
 int task64_level(void);
 void task64_set_level(int level);
 int task64_level_of(int pid);
@@ -168,6 +171,7 @@ void task64_fd_close_all(void);
 int task64_fd_slot(int fd);          /* PFS inode / pipe number */
 uint32_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);
+int task64_fd_seek(int fd, uint32_t pos);
 int task64_fd_close(int fd);
 void task64_inherit_fds(struct task64 *child);
 

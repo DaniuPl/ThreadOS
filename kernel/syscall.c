@@ -496,6 +496,21 @@ void syscall_handler(struct regs *r)
     case SYS_LEVEL:
         r->eax = (uint32_t)task_level();
         break;
+    case SYS_TRYWAIT: {
+        if (task_alive((int)r->ebx)) {
+            r->eax = (uint32_t)-3;         /* still running */
+            break;
+        }
+        int code = task_wait((int)r->ebx);  /* it has ended: does not block */
+        if (r->ecx) {
+            if (user_put(r->ecx, &code, sizeof(code)) < 0) {
+                r->eax = EFAULT;
+                break;
+            }
+        }
+        r->eax = 0;
+        break;
+    }
     case SYS_SHM:
         r->eax = process_shm((int)r->ebx, r->ecx);
         break;

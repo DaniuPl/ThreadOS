@@ -87,6 +87,22 @@ def text(rows):
     return "\n".join(rows)
 
 
+def wait_for_line(q, want, tries=20, **kw):
+    """Waits for a WHOLE line to be exactly that text.
+
+    The command is echoed the moment it is typed and its output arrives
+    afterwards - the program runs while the terminal goes on drawing -
+    so waiting for a substring can catch the echo and read the screen
+    before the output is on it."""
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **kw)
+        if any(r == want for r in seen):
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
 def wait_for_row(q, want, tries=15, **kw):
     """Waits until some row holds the text - the command runs in another
     process, so it is not there the moment Enter is pressed."""
@@ -129,7 +145,7 @@ def main():
 
             # --- a command, its echo and its output --------------------
             q.type_line("seq 3")
-            rows = wait_for_row(q, "/> seq 3", **geom)
+            rows = wait_for_line(q, "3", **geom)
             body = text(rows)
             check("komenda zostala odbita razem z zacheta", "/> seq 3" in body)
             check("a pod nia jest jej wyjscie",
@@ -153,7 +169,9 @@ def main():
                   % last, last.strip().endswith("seq 3"))
 
             q.sendkey("ret")               # and it can be run again
-            rows = wait_for_row(q, "/> seq 3", **geom)
+            rows = wait_for_line(q, "3", **geom)
+            time.sleep(1)
+            rows = read_rows(q, **geom)
             check("przywrocona komenda daje sie uruchomic",
                   text(rows).count("/> seq 3") >= 2)
 
@@ -171,7 +189,7 @@ def main():
             check("kursor cofnal sie, a znak wszedl W SRODEK linii ('%s')"
                   % last.strip(), last.strip().endswith("seq 4"))
             q.sendkey("ret")
-            rows = wait_for_row(q, "/> seq 4", **geom)
+            rows = wait_for_line(q, "4", **geom)
             check("i tak zlozona komenda dziala", "4" in rows)
 
             # --- cd changes the directory and the prompt ---------------
@@ -198,7 +216,7 @@ def main():
 
             # --- scrolling back ------------------------------------------
             q.type_line("seq 40")
-            rows = wait_for_row(q, "40", **geom)
+            rows = wait_for_line(q, "40", **geom)
             check("dlugie wyjscie konczy sie na ostatniej linii",
                   "40" in rows)
             check("a poczatek wyjscia zjechal poza okno", "1" not in rows)

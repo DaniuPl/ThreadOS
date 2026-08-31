@@ -2767,3 +2767,43 @@ sprawdzane przez `make test`.
       otwartym tekstem) i 'usersgui' (terminal i okno ustawien). Grupa
       'k64shell' dostala te same asercje dla trybu dlugiego, bo to ten
       sam user.c po obu stronach.
+
+- [x] **Terminal, ktory nie zamiera** - wyjscie na zywo i Ctrl+C.
+
+      Terminal uruchamial program i CZEKAL: nic nie rysowal, na nic nie
+      odpowiadal i nic nie pokazywal, dopoki program sie nie skonczyl.
+      Przy programie, ktory konczy sie szybko, tego nie bylo widac.
+      Przy takim, ktory sie nie konczy - a 'spin' jest wlasnie taki -
+      zabieral ze soba okno: bez wyjscia, bez sposobu na zamkniecie,
+      bez sposobu na zatrzymanie. To nie jest terminal uruchamiajacy
+      program, to jest terminal, ktory stanal.
+
+      **Wyjscie czytane w miare pisania.** Program pisze do pliku, a
+      terminal na kazdym przebiegu swojej petli czyta to, co jest za
+      punktem, na ktorym skonczyl ostatnio. Wiec linie pojawiaja sie,
+      gdy program jeszcze dziala, i pojawiaja sie dalej.
+
+      **Czekanie, ktore nie czeka.** Do tego potrzebne bylo nowe
+      wywolanie systemowe w obu jadrach: SYS_TRYWAIT - "0, jesli sie
+      skonczyl (i tu jest kod), -3, jesli jeszcze biegnie". Bez niego
+      program pilnujacy innego musi wybrac miedzy blokowaniem a
+      niewiedza. Jadro 64-bitowe dostalo przy okazji seek: bez niego
+      czytanie "tego, co nowe" znaczyloby czytanie calosci za kazdym
+      razem.
+
+      **Ctrl+C znaczy to samo, co wszedzie.** Klawisz przychodzi jako
+      0x03 jak kazdy inny, terminal wysyla SIGINT do programu, ktory
+      uruchomil, a program bez wlasnej procedury na tym ginie. Potem
+      terminal bierze nastepna komende.
+
+      Jeden blad wart zapisania: plik z wyjsciem nie byl czyszczony
+      przed startem, wiec pierwszy odczyt nowej komendy pokazywal
+      resztki poprzedniej. Przy czytaniu dopiero na koncu tego nie bylo
+      widac - stary plik i tak byl juz nadpisany, zanim ktokolwiek do
+      niego zajrzal. Czytanie na biezaco to wywleklo.
+
+      Nowa grupa 'gtermlive': wyjscie widac przed koncem programu, jest
+      go coraz wiecej, okno przyjmuje klawisze przy dzialajacym
+      programie, Ctrl+C pokazuje sie w sesji i konczy program, po nim
+      nic juz nie dopisuje, a nastepna komenda pokazuje swoje wyjscie,
+      nie resztki poprzedniego.
