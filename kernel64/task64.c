@@ -114,10 +114,23 @@ extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
  * which one is mine the processor says itself (the number in its local
  * APIC).
  */
+/* One cache line per core.
+ *
+ * These two pointers are written on every context switch, by the core
+ * they belong to. Four cores' worth of them side by side is four cores
+ * writing into ONE cache line - and then the line spends its time
+ * travelling between them instead of the cores doing work. It cost
+ * about ten times the running time of four kernel threads, and which
+ * way it fell depended on where the line boundary happened to land,
+ * so unrelated code growing elsewhere in the kernel would make the
+ * machine slow or fast. Sixty-four bytes per core is the cheapest
+ * thing this kernel buys. */
+#define CACHELINE 64
 struct core {
     struct task64 *running;
     struct task64 *idle;
-};
+    char pad[CACHELINE - 2 * sizeof(struct task64 *)];
+} __attribute__((aligned(CACHELINE)));
 static struct core cores[SMP_CORES];
 
 #define current   (cores[smp_core()].running)
@@ -127,7 +140,9 @@ static struct core cores[SMP_CORES];
    It is held ACROSS a context switch and released by whoever arrives
    on the other side - only then is the previous task's stack really
    free. */
-static struct spinlock lock = SPINLOCK_FREE;
+/* And the lock on a line of its own, for the same reason. */
+static struct spinlock lock __attribute__((aligned(CACHELINE)))
+    = SPINLOCK_FREE;
 
 static int next_id;
 static int scheduler_up;

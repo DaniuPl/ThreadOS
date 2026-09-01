@@ -1734,11 +1734,16 @@ static void close_window(int i)
     if (w->content && w->owner >= 0) {
         win_enqueue(w, WEV_CLOSE, 0, 0, 0);
         w->closing = CLOSE_FRAMES;
+        /* The focus STAYS while the window does. A program may decline
+           to close - and then Alt+F4 has to reach it a second time,
+           which it cannot do if asking once took the keyboard away
+           from the very window that is being asked. The focus is let
+           go when the window really goes, in reap_windows(). */
     } else {
         w->used = 0;
+        if (focus_idx == i)
+            focus_idx = -1;
     }
-    if (focus_idx == i)
-        focus_idx = -1;
 }
 
 /* Alt and a function key. In text mode these switch consoles; here
@@ -1823,6 +1828,33 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         return i;
     }
     return -1;
+}
+
+/* "I heard, and I am not closing yet."
+ *
+ * Closing is a REQUEST - it always was, and the countdown after it was
+ * there for programs that do not answer. What was missing was the
+ * other answer: a program that HAS heard and has a reason to stay, an
+ * editor with a file that was never saved being the whole of the
+ * point. So it says so, and the countdown stops; what it does with the
+ * moment it bought - a question in its own window, saving the file -
+ * is its own business.
+ *
+ * A program that goes on declining goes on being asked, exactly as
+ * everywhere else: refusing to close is a thing an application may do,
+ * and the way past it is to ask again. Silence is still what gets a
+ * window taken away. */
+int desktop_win_keep(int winid, int owner)
+{
+    if (winid < 0 || winid >= MAX_WIN)
+        return -1;
+    struct window *w = &wins[winid];
+    if (!w->used || !w->content || w->owner != owner)
+        return -1;
+    if (!w->closing)
+        return 0;                  /* nobody was asking */
+    w->closing = 0;
+    return 1;
 }
 
 /* Checks that winid is a window of application owner */

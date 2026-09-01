@@ -407,6 +407,9 @@ void syscall_handler(struct regs *r)
             r->eax = (uint32_t)got;
         break;
     }
+    case SYS_WIN_KEEP:
+        r->eax = (uint32_t)desktop_win_keep((int)r->ebx, task_current_id());
+        break;
     case SYS_MMAP:
         r->eax = process_mmap(r->ebx);
         break;

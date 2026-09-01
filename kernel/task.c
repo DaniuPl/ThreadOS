@@ -118,10 +118,23 @@ extern void context_switch(uint32_t *old_esp_store, uint32_t new_esp);
  * and there is no reason for it to stop. All that changed is what it
  * points at.
  */
+/* One cache line per core.
+ *
+ * These two pointers are written on every context switch, by the core
+ * they belong to. Four cores' worth of them side by side is four cores
+ * writing into ONE cache line - and then the line spends its time
+ * travelling between them instead of the cores doing work. It cost
+ * about ten times the running time of four kernel threads, and which
+ * way it fell depended on where the line boundary happened to land,
+ * so unrelated code growing elsewhere in the kernel would make the
+ * machine slow or fast. Sixty-four bytes per core is the cheapest
+ * thing this kernel buys. */
+#define CACHELINE 64
 struct core {
     struct task *running;
     struct task *idle;      /* the one a core returns to when it has no work */
-};
+    char pad[CACHELINE - 2 * sizeof(struct task *)];
+} __attribute__((aligned(CACHELINE)));
 static struct core cores[SMP_CORES];
 
 #define current (cores[smp_core()].running)
@@ -132,7 +145,11 @@ static struct core cores[SMP_CORES];
  * on the other side. Otherwise there would be a window in which a task
  * is already marked ready while its stack is still in use - and a
  * second core would step onto a stack the first is still walking. */
-static struct spinlock lock = SPINLOCK_FREE;
+/* And the lock on a line of its own, for the same reason: it is taken
+   by every core, and a line it shares with anything else carries that
+   traffic too. */
+static struct spinlock lock __attribute__((aligned(CACHELINE)))
+    = SPINLOCK_FREE;
 
 static int next_id;
 static int scheduler_up;

@@ -14,5 +14,9 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,
                      uint8_t color);
 int desktop_win_poll(int winid, int owner, void *out);
+/* The answer to a close request: "not yet". Returns 1 when there was a
+   request to decline, 0 when there was none, -1 for a window that is
+   not the caller's. */
+int desktop_win_keep(int winid, int owner);
 
 #endif

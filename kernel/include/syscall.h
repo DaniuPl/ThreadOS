@@ -75,6 +75,8 @@
    and ebx=buffer, ecx=size -> how much is there */
 #define SYS_CLIP_SET   56
 #define SYS_CLIP_GET   57
+/* "I heard the close request and I am not closing yet" */
+#define SYS_WIN_KEEP   58
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */
