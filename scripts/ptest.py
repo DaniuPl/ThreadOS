@@ -48,7 +48,7 @@ DISK_SIZE = 16 * 1024 * 1024
 RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
-MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb"]
+MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb", "gedit"]
 MENU_ROW = 16
 MENU_TASKBAR_Y = 462   # video_h() - TB_H (kernel/desktop.c)
 
@@ -777,7 +777,10 @@ class Qemu:
                 "\\": "backslash", "`": "grave_accent",
                 "~": "shift-grave_accent"}
 
-    def type_line(self, text):
+    def type_line(self, text, enter=True):
+        """Types the text, and Enter after it unless told otherwise -
+        an editor is a place where what is typed does not end with
+        pressing Enter."""
         for ch in text:
             if ch.isupper():
                 # QEMU has no key called 'T' - a capital is the shift
@@ -786,7 +789,8 @@ class Qemu:
                 self.sendkey("shift-" + ch.lower())
                 continue
             self.sendkey(self.KEYNAMES.get(ch, ch))
-        self.sendkey("ret")
+        if enter:
+            self.sendkey("ret")
         time.sleep(0.3)
 
     def serial(self):

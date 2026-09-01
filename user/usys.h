@@ -67,6 +67,8 @@
 
 /* Keys with no ASCII equivalent - they have to match
    kernel/include/keyboard.h */
+#define KEY_SAVE  0x05      /* Ctrl+S */
+#define KEY_OPEN  0x06      /* Ctrl+O */
 #define KEY_UP    0x11
 #define KEY_DOWN  0x12
 #define KEY_LEFT  0x13

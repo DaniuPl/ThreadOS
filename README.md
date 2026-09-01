@@ -64,8 +64,10 @@ closed like anywhere else — the compositor asks an application to end
 and insists if it will not — twelve of them at once, on a taskbar that
 shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. Icons, a file
-manager, a web browser and a settings window whose changes survive a
-restart. The terminal in a window is a dark screen with light text and
+manager, a web browser, a text editor — a white page with a caret, a
+status line that is the whole of its interface, Ctrl+S and Ctrl+O, and
+the desktop's own clipboard — and a settings window whose changes
+survive a restart. The terminal in a window is a dark screen with light text and
 a session in it: scrollback, history, a movable cursor, `cd` and pipes,
 output that appears while the program is still writing it, Ctrl+C to
 stop it, and a pipe into what it started — so the ring 3 shell runs

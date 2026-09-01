@@ -91,8 +91,9 @@ static struct icon icons[ICON_MAX] = {
     {8, 180, "Term", "gterm", 4, {{0}}},
     {8, 220, "Web", "gweb", 5, {{0}}},
     {8, 260, "Ustaw", "gsettings", 6, {{0}}},
+    {8, 300, "Edytor", "gedit", 7, {{0}}},
 };
-static int icon_n = 7;         /* how many of them there are */
+static int icon_n = 8;         /* how many of them there are */
 
 /* What each icon has drawn on it: twelve rows of twelve pixels, in the
  * order of the table above.
@@ -134,6 +135,10 @@ static const uint16_t icon_art[][12] = {
     {   /* Ustaw - a cogwheel */
         0x0F0, 0x2F4, 0x7FE, 0xFFF, 0xF0F, 0xE07,
         0xE07, 0xF0F, 0xFFF, 0x7FE, 0x2F4, 0x0F0,
+    },
+    {   /* Edytor - a sheet of paper with writing on it */
+        0xFFC, 0x804, 0x9E4, 0x804, 0x9F4, 0x804,
+        0x9E4, 0x804, 0x9F4, 0x804, 0xFFC, 0x000,
     },
 };
 #define ICON_N icon_n
@@ -430,7 +435,8 @@ static int menu_open;
    pointer is - the same list either way, because a second list would
    be a second thing to learn. */
 static int menu_px, menu_py;
-static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
+static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
+                                  "gedit"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 /* Virtual desktops.

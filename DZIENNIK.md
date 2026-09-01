@@ -3263,3 +3263,42 @@ sprawdzane przez `make test`.
       niewidocznym pulpicie po powrocie pokazuje czas pozniejszy o tyle,
       ile nas nie bylo. Program, na ktorego nikt nie patrzy, dalej
       chodzi.
+
+- [x] **Edytor tekstu w oknie** - bo system, ktory umie zrobic plik, ale
+      nie umie go ZMIENIC, to maszyna do przechowywania tekstu, a nie do
+      pracy.
+
+      Wszystko, co dotad robilo plik - 'write' z shella, 'echo' z '>' -
+      bylo jednym wierszem wpisanym przy zachecie, a wiersz wpisany przy
+      zachecie nie moze wrocic do tego, co mowil chwile temu.
+
+      Wiec: biala kartka, czarny tekst, kursor tam, gdzie kaza strzalki
+      albo mysz, Enter dzielacy wiersz i Backspace laczacy dwa (jedyna
+      droga powrotna po Enterze wcisnietym przez pomylke), Ctrl+S i
+      Ctrl+O. Schowek ten sam, co reszta pulpitu: Ctrl+Insert kopiuje
+      wiersz z kursorem, Shift+Insert wstawia w kursor - wiec tekst
+      chodzi miedzy edytorem a terminalem, choc zaden z nich nie wie o
+      drugim.
+
+      Pasek stanu na dole jest calym interfejsem: nazwa pliku, gwiazdka
+      gdy sie zmienil, wiersz i kolumna, a gdy edytor potrzebuje nazwy -
+      pytanie, zadane w tym samym pasku. Okienko dialogowe byloby drugim
+      oknem do przesuwania, ogniskowania i zamykania, dla jednego
+      wiersza tekstu.
+
+      Dwa nowe kody klawiszy: Ctrl+S i Ctrl+O. Pozostale Ctrl+litera
+      przychodza jako sama litera (tego chce shell), ale program, ktory
+      pisze pliki, musi umiec odroznic "zapisz" od "s". Jadro nie wie nic
+      wiecej niz to, ze klawisze padly - co z nimi zrobic, to sprawa
+      programu.
+
+      Kursor to wlos MIEDZY znakami, nie blok i nie belka w komorce:
+      jedno i drugie zaslania wlasnie to, na co czlowiek patrzy, gdy
+      pisze. Test zlapal to od razu - czytal z ekranu 'Ala ma kota?',
+      bo kursor zjadal kolumne litery.
+
+      Nowa grupa 'gedit' (19 asercji, oba jadra) czyta z ekranu tekst i
+      pasek stanu, a potem wychodzi poza edytor: shell jadra robi 'cat'
+      na zapisanym pliku, a w trybie 64-bitowym - gdzie shella jadra z
+      pulpitu nie da sie pisac - robi to terminal przez 'ucat64'. Jeden
+      program zapisal, drugi przeczytal.

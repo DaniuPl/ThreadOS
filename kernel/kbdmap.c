@@ -153,6 +153,12 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
     if (!c)
         return KBD_NOTHING;
 
+    /* Ctrl+S and Ctrl+O keep their own codes: a program that writes
+       files has to be able to tell "save" from the letter s. */
+    if (ctrl_pressed && c == 's')
+        c = KEY_SAVE;
+    if (ctrl_pressed && c == 'o')
+        c = KEY_OPEN;
     *out_char = c;
     return KBD_CHAR;
 }

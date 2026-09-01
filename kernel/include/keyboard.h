@@ -33,6 +33,13 @@
 #define KEY_DESK_TAKE_NEXT 0x1F
 /* Ctrl+C: not a character but a request to interrupt. The driver turns
    it into a SIGINT for the process holding the console (see keyboard.c). */
+/* Ctrl+S and Ctrl+O. The other Ctrl+letter combinations arrive as the
+   letter itself, which is what a shell wants; these two do not, because
+   a program that writes files has to be able to tell "save" from "s".
+   The kernel knows no more than that the keys were pressed - what to do
+   with them is the program's business. */
+#define KEY_SAVE  0x05
+#define KEY_OPEN  0x06
 #define KEY_INTR  0x03
 
 /* Ctrl+D: the end of what is being typed. Not a character either - it
