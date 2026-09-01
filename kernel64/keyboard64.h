@@ -12,6 +12,11 @@ char keyboard64_getchar(void);
 void keyboard64_set_override(void (*handler)(char c));
 void keyboard64_set_fkey_override(void (*handler)(int fkey));
 
+/* Gives one character to the console being looked at, as if nobody had
+   taken the keyboard over. The desktop hands back this way the keys
+   that no window wanted. */
+void keyboard64_to_console(char c);
+
 /* Whom to send SIGINT to after Ctrl+C (-1 = nobody). It concerns the
    console the calling task types on. */
 void keyboard64_set_intr_target(int id);

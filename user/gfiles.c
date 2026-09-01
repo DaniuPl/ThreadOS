@@ -33,6 +33,24 @@ static int ustrcpy(char *d, const char *s, int max)
     return i;
 }
 
+/* "Edytuj": what a file manager is FOR is getting to a file, and
+   getting to a text file means opening it in the editor. The button
+   sits in the top right corner, where there is room next to the
+   heading; without a file chosen it does nothing, because there is
+   nothing to open. */
+#define EDIT_X 122
+#define EDIT_H 12
+
+static void edit_selected(void)
+{
+    if (!selected[0])
+        return;
+    char cmd[FS_NAME_MAX + 8];
+    int n = ustrcpy(cmd, "gedit ", sizeof(cmd));
+    ustrcpy(cmd + n, selected, (int)sizeof(cmd) - n);
+    sys_spawn(cmd, 0, 0);
+}
+
 /* Opens the selected file and reads its contents into the preview */
 static void load_preview(const char *name)
 {
@@ -63,6 +81,10 @@ void _start(void)
             if (ev.type == WEV_CLOSE)
                 sys_exit(0);
             if (ev.type == WEV_CLICK) {
+                if (ev.y < EDIT_H && ev.x >= EDIT_X) {
+                    edit_selected();
+                    continue;
+                }
                 int row = (ev.y - ROW_Y0) / ROW_H;
                 if (ev.y >= ROW_Y0 && row >= 0 && row < nfiles)
                     load_preview(names[row]);
@@ -72,6 +94,8 @@ void _start(void)
         /* Refresh the file list from the disk */
         win_rect(w, 0, 0, 180, 120, C_BG);
         win_text(w, 4, 2, "Pliki na dysku:", C_GREEN);
+        win_rect(w, EDIT_X, 0, 180 - EDIT_X, EDIT_H, C_BLUE);
+        win_text(w, EDIT_X + 5, 2, "Edytuj", C_WHITE);
         nfiles = 0;
         char name[FS_NAME_MAX + 1];
         for (int i = 0; i < 32 && nfiles < MAXF; i++) {

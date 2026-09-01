@@ -77,15 +77,10 @@ void keyboard64_set_intr_target(int id)
 /* Delivering a finished character. Called from the keyboard interrupt
    and from the USB keyboard thread - the character's path is the same
    in both cases. */
-static void dorecz(char c)
+/* Into the queue of the console being looked at - which is where a
+   key goes when nobody has taken the keyboard over. */
+static void to_console(char c)
 {
-    if (override) {                      /* the desktop takes everything */
-        override(c);
-        return;
-    }
-
-    /* The key goes to the console we are looking at - that is the one
-       under the typist's fingers */
     struct queue *k = console(console_active());
 
     /* Ctrl+C is not a character to be read but a request to interrupt
@@ -100,6 +95,25 @@ static void dorecz(char c)
 
     if (k->head - k->tail < KBD_BUF_SIZE)
         k->buf[k->head++ & (KBD_BUF_SIZE - 1)] = c;
+}
+
+/* The same road, opened to whoever took the keyboard over: the desktop
+   hands back the keys no window wants, so that the kernel's shell can
+   still be typed at from a screen full of windows. In protected mode
+   that is what keyboard_console_handler() gives out; long mode had
+   nothing to give, and the desktop there simply dropped those keys. */
+void keyboard64_to_console(char c)
+{
+    to_console(c);
+}
+
+static void dorecz(char c)
+{
+    if (override) {                      /* the desktop takes everything */
+        override(c);
+        return;
+    }
+    to_console(c);
 }
 
 /* Switching the picture to another console. The desktop holds the

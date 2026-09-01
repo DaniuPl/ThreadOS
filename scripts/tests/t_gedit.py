@@ -81,16 +81,35 @@ def is_bar(px):
     return b > 120 and r < 90 and g < 90
 
 
+def file_row(at, i, cols=12, wx=WX, wy=WY):
+    """One name from the file manager's list: light letters on the
+    window's grey."""
+    font = font8x8()
+    x0, y0 = wx + 1 + 8, wy + 11 + 16 + i * 10
+    out = ""
+    for c in range(cols):
+        pattern = []
+        for y in range(8):
+            bits = 0
+            for x in range(8):
+                p = at(x0 + c * 8 + x, y0 + y)
+                if not all(abs(v - 227) <= 8 for v in p):
+                    bits |= 1 << x
+            pattern.append(bits)
+        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
+    return out.strip()
+
+
 def is_ink(px):
     """Black on the page. The caret is blue and stands between two
     characters, so it is not part of any of them."""
     return all(c < 120 for c in px)
 
 
-def row_text(at, r, cols=48):
+def row_text(at, r, cols=48, wx=WX, wy=WY):
     """One line of the page, read through the kernel's own font."""
     font = font8x8()
-    x0, y0 = CX + PAD, CY + PAD + r * ROW_H
+    x0, y0 = wx + 1 + PAD, wy + 11 + PAD + r * ROW_H
     out = ""
     for c in range(cols):
         pattern = []
@@ -213,6 +232,39 @@ def sixty_four():
             rows = term_rows(at)
             check("(64) inny program czyta z dysku to, co edytor zapisal",
                   any("dwa jadra" in r for r in rows))
+
+            # And the file manager hands a file to the editor here too -
+            # in long mode that is a fork and an exec from a program
+            # drawing in a window, which is its own piece of code
+            fx, fy = 118, 78              # the next slot of the cascade
+            q.mouse_goto(24, 112)         # the "Pliki" icon
+            q.mouse_click()
+            time.sleep(5)
+            q.mouse_goto(600, 430)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
+            row = -1
+            for i, name in enumerate(listed):
+                if name == "long":
+                    row = i
+            check("(64) menedzer plikow widzi plik z edytora (%s)"
+                  % ", ".join(n for n in listed if n), row >= 0)
+            if row >= 0:
+                q.mouse_goto(fx + 1 + 20, fy + 11 + 16 + row * 10 + 4)
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(1.5)
+                q.mouse_goto(fx + 1 + 150, fy + 11 + 6)      # "Edytuj"
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(5)
+                q.mouse_goto(600, 430)
+                time.sleep(1.5)
+                w, h, at = q.screen_raw()
+                check("(64) 'Edytuj' otwiera plik w edytorze ('%s')"
+                      % row_text(at, 0, wx=fx + 12, wy=fy + 12),
+                      row_text(at, 0, wx=fx + 12, wy=fy + 12) == "dwa jadra")
         finally:
             q.close()
     finally:
@@ -341,6 +393,62 @@ def main():
                   "('%s')" % row_text(at, 1),
                   row_text(at, 1) == "i psaAla ma kota" and
                   row_text(at, 2) == "")
+
+            # --- a file named when the editor is started ----------------
+            # 'gedit notatka' opens that file at once. Making a person
+            # type the name again, in the program they have just told
+            # which file they mean, is what makes an editor a chore.
+            q.sendkey("alt-f4")                # away with the first one
+            time.sleep(2.5)
+            q.mouse_goto(600, 430)
+            q.mouse_click()
+            time.sleep(1)
+            q.type_line("run gedit notatka")
+            time.sleep(4)
+            q.mouse_goto(600, 430)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("'gedit notatka' otwiera plik od razu ('%s')"
+                  % row_text(at, 0),
+                  row_text(at, 0) == "Ala ma kota" and
+                  row_text(at, 1) == "i psa")
+
+            # --- and the file manager can hand a file over --------------
+            # What a file manager is FOR is getting to a file; getting
+            # to a text file means opening it in the editor.
+            q.sendkey("alt-f4")
+            time.sleep(2.5)
+            q.mouse_goto(24, 112)              # the "Pliki" icon
+            q.mouse_click()
+            time.sleep(4)
+            q.mouse_goto(600, 430)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+
+            listed = [file_row(at, i) for i in range(6)]
+            row = -1
+            for i, name in enumerate(listed):
+                if name == "notatka":
+                    row = i
+            check("menedzer plikow widzi zapisany plik (%s)"
+                  % ", ".join(n for n in listed if n), row >= 0)
+            if row >= 0:
+                q.mouse_goto(WX + 1 + 20, WY + 11 + 16 + row * 10 + 4)
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(1.5)
+                q.mouse_goto(WX + 1 + 150, WY + 11 + 6)   # "Edytuj"
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(4)
+                q.mouse_goto(600, 430)
+                time.sleep(1.5)
+                w, h, at = q.screen_raw()
+                # The new window is the next slot of the cascade
+                check("przycisk 'Edytuj' otwiera plik w edytorze ('%s')"
+                      % row_text(at, 0, wx=WX + 12, wy=WY + 12),
+                      row_text(at, 0, wx=WX + 12, wy=WY + 12) ==
+                      "Ala ma kota")
         finally:
             q.close()
     finally:

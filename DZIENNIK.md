@@ -3302,3 +3302,31 @@ sprawdzane przez `make test`.
       na zapisanym pliku, a w trybie 64-bitowym - gdzie shella jadra z
       pulpitu nie da sie pisac - robi to terminal przez 'ucat64'. Jeden
       program zapisal, drugi przeczytal.
+
+- [x] **Edytor dostaje plik, a menedzer plikow ma czym go podac** - i
+      dwa jadra znowu robia to samo.
+
+      'gedit notatka' otwiera plik od razu. Kazanie czlowiekowi wpisac
+      nazwe drugi raz, w programie, ktoremu wlasnie powiedzial, o ktory
+      plik chodzi, to jest dokladnie to, od czego edytor robi sie
+      obowiazkiem.
+
+      W menedzerze plikow przybyl przycisk "Edytuj" - bo do czego SLUZY
+      menedzer plikow, jesli nie do dostania sie do pliku, a dostanie
+      sie do pliku tekstowego znaczy otworzenie go w edytorze. W trybie
+      chronionym to jedno wywolanie sys_spawn z gotowa linia polecenia,
+      w long mode fork i exec, bo tam nie ma spawnu - dwa zrodla, bo
+      menedzer plikow ma osobne, ale ten sam przycisk w tym samym rogu.
+
+      Przy okazji dziura, ktora znalazl test edytora: w trybie
+      64-bitowym pulpit nie mial komu oddac klawisza, ktorego nie chcialo
+      zadne okno. keyboard_console_handler() zwracalo NULL, wiec ekran
+      pelen okien byl ekranem, na ktorym nie dalo sie nic wpisac do
+      shella jadra - podczas gdy w trybie chronionym dzialalo to od
+      zawsze. Teraz klawisz idzie do kolejki ogladanej konsoli, czyli
+      tam, skad shell czyta. Grupa 'desktop64' sprawdza to jednym
+      'uptime' wpisanym przy oknach na ekranie.
+
+      Grupa 'gedit' urosla do 24 asercji i konczy sie tym samym po obu
+      stronach: menedzer plikow widzi plik, ktory zapisal edytor, i
+      oddaje go z powrotem edytorowi.

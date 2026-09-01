@@ -446,7 +446,7 @@ static void edit_key(char c)
     }
 }
 
-void _start(void)
+void _start(int argc, char **argv)
 {
     int win = (int)win_create(W0, H0, "Edytor");
     if (win < 0)
@@ -454,6 +454,12 @@ void _start(void)
 
     clear_all();
     ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje", sizeof(note) - 1);
+    /* Started with a name - 'gedit notatka' - it opens that file at
+       once. Making a person type the name a second time, in the
+       program they have just told which file they mean, is the sort of
+       thing that makes an editor a chore. */
+    if (argc > 1 && argv && argv[1] && argv[1][0])
+        load_from(argv[1]);
     draw(win);
 
     for (;;) {

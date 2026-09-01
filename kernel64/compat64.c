@@ -132,7 +132,13 @@ void keyboard_set_override(keyboard_char_handler_t handler)
    through a callback - so there is nothing to hand the desktop for
    safekeeping. When the desktop finishes, the keys return to the queue
    by themselves. */
+/* What the desktop is to do with a key that no window wants. In
+   protected mode this is the handler of the visible console - its
+   shell; here the same thing means putting the character into that
+   console's queue, which is where its shell reads from. Without it a
+   64-bit desktop was a screen one could not type at unless a window
+   was listening. */
 keyboard_char_handler_t keyboard_console_handler(void)
 {
-    return (keyboard_char_handler_t)0;
+    return keyboard64_to_console;
 }

@@ -115,6 +115,22 @@ def main():
             _, _, at3 = q.screen_raw()
             check("klik w pasek tytulu nie wywraca kompozytora",
                   near(at3(w // 2, h // 2), TLO))
+
+            # A key that no window wants goes to the kernel's shell -
+            # the same as in protected mode. Long mode had nowhere to
+            # hand those keys back to, so a desktop full of windows was
+            # a screen nobody could type at.
+            q.mouse_goto(560, 300)
+            q.mouse_button(True)          # the desktop takes the focus
+            time.sleep(0.3)
+            q.mouse_button(False)
+            time.sleep(1)
+            seen = len(q.serial())
+            q.type_line("uptime")
+            time.sleep(2)
+            out = q.serial()[seen:]
+            check("klawisz, ktorego nie chce zadne okno, trafia do "
+                  "shella jadra", "Uptime:" in out)
         finally:
             q.close()
     finally:

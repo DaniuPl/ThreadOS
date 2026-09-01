@@ -88,11 +88,13 @@ def run_case(q, ncores, label):
         # and a machine whose two cores are taken away in the middle of
         # a measurement measures the host, not the kernel. Hence a
         # measurement repeated while it loses, with the best of them
-        # counting - and a margin (0.85) that a genuinely parallel
+        # counting - and a margin (0.9) that a genuinely parallel
         # kernel clears even on a busy host, while a serialised one
-        # (1.0 and up) does not come near it.
+        # (1.0 and up) does not come near it. The margin has stayed
+        # where it was; what grew is the patience, because the suite
+        # now runs heavier neighbours alongside this one.
         limit = 9 * serial_run[1] // 10
-        for _ in range(4):
+        for _ in range(6):
             if parallel_run[1] < limit:
                 break
             again = measure(q, "runw syscalls", " ('runw', powtorka)" + label)

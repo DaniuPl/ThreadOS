@@ -44,6 +44,28 @@ static int same(const char *a, const char *b)
     return *a == *b;
 }
 
+/* "Edytuj": what a file manager is FOR is getting to a file, and
+   getting to a text file means opening it in the editor. In long mode
+   a program is started the way everything else is here - fork and
+   exec - and the child hands the file name straight to the editor. */
+#define EDIT_X 122
+#define EDIT_H 12
+
+static void edit_selected(void)
+{
+    if (!selected[0])
+        return;
+    int64_t pid = sys_fork();
+    if (pid == 0) {
+        char *args[3];
+        args[0] = "gedit";
+        args[1] = selected;
+        args[2] = 0;
+        sys_exec("gedit", args);
+        sys_exit(127);            /* exec comes back only on an error */
+    }
+}
+
 /* Opens the selected file and reads its beginning into the preview */
 static void load(const char *name)
 {
@@ -79,6 +101,10 @@ void _start(void)
         struct win_event ev;
         while (win_poll(w, &ev) == 1) {
             if (ev.type == WEV_CLICK) {
+                if (ev.y < EDIT_H && ev.x >= EDIT_X) {
+                    edit_selected();
+                    continue;
+                }
                 int row_text = (ev.y - ROW_Y0) / ROW_H_PX;
                 if (ev.y >= ROW_Y0 && row_text >= 0 && row_text < ile)
                     load(names[row_text]);
@@ -87,6 +113,8 @@ void _start(void)
 
         win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
         win_text(w, 4, 2, "Pliki na dysku:", C_GREEN);
+        win_rect(w, EDIT_X, 0, WINDOW_W - EDIT_X, EDIT_H, C_BLUE);
+        win_text(w, EDIT_X + 5, 2, "Edytuj", C_WHITE);
 
         ile = 0;
         struct dirent64 entry;
