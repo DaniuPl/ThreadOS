@@ -25,6 +25,12 @@
 #define KEY_COPY  0x1A
 #define KEY_PASTE 0x1B
 
+/* Ctrl+Alt+Left/Right change the desktop; with Shift the window that
+   has the focus comes along. In text mode nothing reads them. */
+#define KEY_DESK_PREV      0x1C
+#define KEY_DESK_NEXT      0x1D
+#define KEY_DESK_TAKE_PREV 0x1E
+#define KEY_DESK_TAKE_NEXT 0x1F
 /* Ctrl+C: not a character but a request to interrupt. The driver turns
    it into a SIGINT for the process holding the console (see keyboard.c). */
 #define KEY_INTR  0x03

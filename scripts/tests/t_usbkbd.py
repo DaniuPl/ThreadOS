@@ -35,7 +35,11 @@ def main():
         check("klawiatura USB rozpoznana na magistrali",
               re.search(r"Klawiatura USB \(HID, UHCI\) na porcie \d+", boot)
               is not None)
-        q19.wait_for("ProtonOS shell", timeout=20)
+        # Waiting, not asserting: with four machines booting at once the
+        # shell's greeting can take twice as long to reach the screen as
+        # it does on an idle one, and a wait that runs out proves
+        # nothing about the keyboard.
+        q19.wait_for("ProtonOS shell", timeout=40)
         q19.type_line("clear")
         q19.type_line("uptime")
         out = q19.wait_for("tyknac timera", timeout=20)

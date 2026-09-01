@@ -46,6 +46,7 @@ static char extended_key(uint8_t scancode);
 
 static int shift_pressed;
 static int ctrl_pressed;
+static int alt_pressed;
 
 static char extended_key(uint8_t scancode)
 {
@@ -55,6 +56,17 @@ static char extended_key(uint8_t scancode)
         if (shift_pressed)
             return KEY_PASTE;
         return 0;                        /* plain Insert: nothing yet */
+    }
+    /* Ctrl+Alt and an arrow changes the desktop - the arrow points
+       where you are going. With Shift the window that has the focus
+       comes along, because a window left behind is a window looked
+       for. */
+    if (scancode == 0x4B || scancode == 0x4D) {
+        if (ctrl_pressed && alt_pressed) {
+            if (scancode == 0x4B)
+                return shift_pressed ? KEY_DESK_TAKE_PREV : KEY_DESK_PREV;
+            return shift_pressed ? KEY_DESK_TAKE_NEXT : KEY_DESK_NEXT;
+        }
     }
     switch (scancode) {
     case 0x48: return KEY_UP;
@@ -69,7 +81,6 @@ static char extended_key(uint8_t scancode)
     }
 }
 
-static int alt_pressed;
 static int extended_next;               /* the previous byte was 0xE0 */
 
 int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)

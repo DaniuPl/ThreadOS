@@ -76,7 +76,10 @@ Alt+F4 closes the window that has it — by asking the application, the
 same way its [x] does — the right mouse button opens the launch menu
 where the pointer is, a window dragged against an edge takes that half
 of the screen (or all of it, at the top), with an outline showing where
-it will land before the button is let go, and Ctrl+Insert /
+it will land before the button is let go, four virtual desktops switch
+with Ctrl+Alt and an arrow — with Shift the focused window comes along,
+and a program on a desktop nobody is looking at goes on running — and
+Ctrl+Insert /
 Shift+Insert move text between windows through a clipboard the kernel
 holds, and dragging the mouse across a terminal's output selects it —
 which copies it, the way it does everywhere else. Two privilege levels: changing the system —

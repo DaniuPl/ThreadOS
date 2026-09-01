@@ -350,6 +350,9 @@ struct window {
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
     int cw, ch;            /* dimensions of the content area */
     int z;                 /* drawing order (higher = on top) */
+    /* Which desktop the window belongs to. A window is only ever on
+       one of them - it is not hidden on the others, it is not THERE. */
+    int desk;
     int minimized;         /* is it minimised (hidden, visible on the bar) */
     /* Maximised: the window fills the desktop down to the taskbar. The
        geometry it came from is kept here, because restoring it has to
@@ -429,6 +432,21 @@ static int menu_open;
 static int menu_px, menu_py;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
+
+/* Virtual desktops.
+ *
+ * Four of them, and a window belongs to exactly one. It is the oldest
+ * answer there is to a screen that has run out of room: instead of a
+ * dozen windows in one heap, four small heaps that are switched
+ * between - and switching costs nothing, because nothing is drawn,
+ * moved or resized. A window on another desktop keeps running and
+ * keeps drawing into its own buffer; it is simply not on the screen.
+ *
+ * Which one is showing is drawn at the right-hand end of the top bar,
+ * because that is where a thing that is always true belongs - a person
+ * has to be able to see WHERE they are without pressing anything. */
+#define DESK_N 4
+static int cur_desk;
 
 static int taskbar_y(void) { return video_h() - TB_H; }
 
@@ -517,11 +535,19 @@ static int tbl_x0(void)
 }
 
 
+/* Is this window on the desktop being shown? Everything that draws a
+   window, counts one or looks for one under the cursor asks here -
+   that one question is the whole of what a virtual desktop is. */
+static int here(int i)
+{
+    return wins[i].used && wins[i].desk == cur_desk;
+}
+
 static int win_count(void)
 {
     int n = 0;
     for (int i = 0; i < MAX_WIN; i++)
-        if (wins[i].used)
+        if (here(i))
             n++;
     return n;
 }
@@ -558,7 +584,7 @@ static int zorder(int *out)
 {
     int n = 0;
     for (int i = 0; i < MAX_WIN; i++)
-        if (wins[i].used)
+        if (here(i))
             out[n++] = i;
     for (int a = 1; a < n; a++) {     /* insertion sort by z */
         int key = out[a], b = a - 1;
@@ -772,6 +798,69 @@ static int on_titlebar(const struct window *win, int x, int y)
            y >= win->y && y < win->y + TITLE_H;
 }
 
+/* Goes to another desktop. Nothing moves and nothing is redrawn by
+   hand: the next frame simply asks here(i) about other windows.
+   Whatever the hand was in the middle of ends - a drag that carried
+   on across a switch would drop a window on a desktop nobody was
+   looking at. */
+static void desk_switch(int d)
+{
+    if (d < 0 || d >= DESK_N || d == cur_desk)
+        return;
+    cur_desk = d;
+    drag_idx = -1;
+    resize_idx = -1;
+    content_drag = -1;
+    icon_drag = -1;
+    menu_open = 0;
+
+    /* The focus goes to the topmost window that is there, so that
+       typing after a switch lands somewhere a person can see. */
+    focus_idx = -1;
+    int ord[MAX_WIN];
+    int n = zorder(ord);
+    for (int k = n - 1; k >= 0; k--)
+        if (!wins[ord[k]].minimized && wins[ord[k]].content) {
+            focus_idx = ord[k];
+            break;
+        }
+}
+
+/* Takes the window that has the focus along. Moving it out of sight
+   and staying behind would be a way of losing a window, so we follow
+   it - which is also what the hand expects, having pushed it. */
+static void desk_take(int d)
+{
+    if (d < 0 || d >= DESK_N || d == cur_desk)
+        return;
+    if (focus_idx >= 0 && wins[focus_idx].used)
+        wins[focus_idx].desk = d;
+    desk_switch(d);
+}
+
+/* The switch drawn at the right-hand end of the top bar: one cell per
+   desktop, the one being shown in the accent colour, and a desktop
+   that holds nothing written in the quiet grey - so that "where am I"
+   and "is there anything over there" are one glance, not two. */
+#define DESK_CELL 12
+static int desk_x0(void) { return video_w() - DESK_N * DESK_CELL - 3; }
+
+/* Which window is under that point, or -1. Asked from the top of the
+   pile down, because that is the one a person sees there. The top bar
+   and the desktop below it are DRAWN under the windows, so what is
+   drawn under them must not take their clicks either. */
+static int window_at(int x, int y)
+{
+    int ord[MAX_WIN];
+    int n = zorder(ord);
+    for (int k = n - 1; k >= 0; k--) {
+        struct window *w = &wins[ord[k]];
+        if (!w->minimized && in_rect(x, y, w->x, w->y, w->w, w->h))
+            return ord[k];
+    }
+    return -1;
+}
+
 /* Snapping a window to an edge of the screen.
  *
  * A window pulled against the left edge takes the left half, against
@@ -847,12 +936,7 @@ static void handle_input(int mx, int my, int buttons)
        pointer is. On a window it does nothing yet - a window's own
        menu is the window's business, and none of them has one. */
     if (right && !prev_right) {
-        int on_window = 0;
-        for (int i = 0; i < MAX_WIN; i++)
-            if (wins[i].used && !wins[i].minimized &&
-                in_rect(mx, my, wins[i].x, wins[i].y, wins[i].w, wins[i].h))
-                on_window = 1;
-        if (!on_window && my < taskbar_y())
+        if (window_at(mx, my) < 0 && my < taskbar_y())
             menu_at(mx, my);
         else
             menu_open = 0;
@@ -860,6 +944,15 @@ static void handle_input(int mx, int my, int buttons)
     prev_right = right;
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
+        /* The desktop switch on the top bar, which is above everything
+           the way the bar itself is */
+        if (my < 10 && mx >= desk_x0() && window_at(mx, my) < 0) {
+            int d = (mx - desk_x0()) / DESK_CELL;
+            if (d >= 0 && d < DESK_N)
+                desk_switch(d);
+            prev_pressed = pressed;
+            return;
+        }
         /* The taskbar / launch menu takes precedence (it is on top) */
         if (in_rect(mx, my, bar_x0() + 2, taskbar_y() + 3, MENU_BW,
                     TB_H - 6)) {
@@ -894,7 +987,7 @@ static void handle_input(int mx, int my, int buttons)
             int x0 = tbl_x0();
             int j = 0;
             for (int i = 0; i < MAX_WIN; i++) {
-                if (!wins[i].used)
+                if (!here(i))
                     continue;
                 if (in_rect(mx, my, x0 + j * bw, taskbar_y(),
                             bw - 2, TB_H)) {
@@ -1488,7 +1581,7 @@ static void draw_taskbar(void)
     int x0 = tbl_x0();
     int j = 0;
     for (int i = 0; i < MAX_WIN; i++) {
-        if (!wins[i].used)
+        if (!here(i))
             continue;
         int bx = x0 + j * bw;
         if (bx + bw - 2 > bx0 + bwid)
@@ -1617,7 +1710,7 @@ static void focus_next(void)
     int start = focus_idx >= 0 ? focus_idx : MAX_WIN - 1;
     for (int k = 1; k <= MAX_WIN; k++) {
         int i = (start + k) % MAX_WIN;
-        if (!wins[i].used || wins[i].minimized || !wins[i].content)
+        if (!here(i) || wins[i].minimized || !wins[i].content)
             continue;
         focus_idx = i;
         raise_win(i);
@@ -1655,6 +1748,16 @@ static void desktop_on_key(char c)
 {
     if (c == KEY_NEXTWIN) {
         focus_next();
+        return;
+    }
+    if (c == KEY_DESK_PREV || c == KEY_DESK_NEXT) {
+        desk_switch((cur_desk + (c == KEY_DESK_NEXT ? 1 : DESK_N - 1))
+                    % DESK_N);
+        return;
+    }
+    if (c == KEY_DESK_TAKE_PREV || c == KEY_DESK_TAKE_NEXT) {
+        desk_take((cur_desk + (c == KEY_DESK_TAKE_NEXT ? 1 : DESK_N - 1))
+                  % DESK_N);
         return;
     }
     if (focus_idx >= 0 && focus_idx < MAX_WIN && wins[focus_idx].used &&
@@ -1708,6 +1811,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->cw = cw;
         w->ch = ch;
         w->used = 1;
+        w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
         focus_idx = i;             /* and with focus */
         return i;
@@ -1847,6 +1951,20 @@ static void desktop_thread(void *arg)
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_fill_rect(0, 9, video_w(), 1, COL_LINE);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
+
+        for (int d = 0; d < DESK_N; d++) {
+            int dx = desk_x0() + d * DESK_CELL;
+            int busy = 0;
+            for (int i = 0; i < MAX_WIN; i++)
+                if (wins[i].used && wins[i].desk == d && wins[i].content)
+                    busy = 1;
+            if (d == cur_desk)
+                video_fill_rect(dx, 1, DESK_CELL - 1, 8, COL_TITLE);
+            char n[2] = {(char)('1' + d), 0};
+            video_draw_string(dx + 2, 1, n,
+                              d == cur_desk ? COL_WHITE
+                                            : busy ? COL_BLACK : COL_DIM);
+        }
 
         draw_icons();                         /* icons on the background (below the windows) */
 

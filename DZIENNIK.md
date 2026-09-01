@@ -3222,3 +3222,44 @@ sprawdzane przez `make test`.
       szerokosc (360, a nie 320 czy 640) i - na koniec - to, po co to
       wszystko: terminal na lewej polowie, ustawienia na prawej, granica
       dokladnie w polowie.
+
+- [x] **Cztery pulpity wirtualne** - najstarsza odpowiedz na ekran,
+      ktoremu skonczylo sie miejsce.
+
+      Zamiast tuzina okien na jednej kupie - cztery male kupki, miedzy
+      ktorymi sie przelacza. Przelaczenie nie kosztuje nic: nic sie nie
+      rysuje, nie przesuwa i nie zmienia rozmiaru. Cala rzecz to jedno
+      pytanie - here(i) - ktore zadaje wszystko, co rysuje okno, liczy
+      okna albo szuka okna pod kursorem. Okno na innym pulpicie nie jest
+      SCHOWANE, tylko go tam nie ma; dziala i rysuje do swojego bufora
+      tak samo jak przedtem.
+
+      Ctrl+Alt i strzalka zmienia pulpit - strzalka pokazuje, dokad sie
+      idzie. Z Shiftem okno z ogniskiem idzie razem, bo okno zostawione
+      za soba to okno szukane. Idziemy za nim, zamiast wypchnac je poza
+      wzrok i zostac.
+
+      Ktory pulpit widac, pisze sie na prawym koncu gornej belki: jedna
+      komorka na pulpit, ta widoczna w kolorze akcentu, pusta - szarym
+      przygaszonym. "Gdzie jestem" i "czy tam cos jest" to jedno
+      spojrzenie, a nie dwa. Komorka jest tez przyciskiem.
+
+      Co sie konczy przy przelaczeniu: ciagniecie okna, ciagniecie ikony,
+      zmiana rozmiaru i otwarte menu. Ciagniecie, ktore przezywa
+      przelaczenie, upuszcza okno na pulpicie, na ktory nikt nie patrzy.
+
+      Przy okazji jedna rzecz, ktora zlapala dopiero pelna suita:
+      komorka na gornej belce lezy dokladnie tam, gdzie ma przyciski
+      okno rozwiniete na caly ekran. Belka jest rysowana POD oknami,
+      wiec i klikniecia musi brac pod nimi - inaczej [] okna
+      zmaksymalizowanego przelaczalo pulpit. Jedno pytanie -
+      window_at(x,y), zadawane od wierzchu stosu w dol - odpowiada teraz
+      i belce, i prawemu przyciskowi myszy.
+
+      Nowa grupa 'desks' (19 asercji) sprawdza komorki na belce, to ze
+      okno znika z ekranu I z paska po przejsciu obok, ze nowe okno
+      otwiera sie tam, gdzie sie patrzy, ze klik w komorke przenosi, ze
+      Shift zabiera okno - i najwazniejsze: ze zegar zostawiony na
+      niewidocznym pulpicie po powrocie pokazuje czas pozniejszy o tyle,
+      ile nas nie bylo. Program, na ktorego nikt nie patrzy, dalej
+      chodzi.
