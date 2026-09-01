@@ -60,8 +60,10 @@ desktop has is a text file on the disk — one line per icon, buildable
 from the machine's own shell — falling back to the built-in seven when
 it says nothing usable. With
 windows that can be moved, resized, maximised to fill the screen and
-closed like anywhere else — the compositor asks an application to end
-and insists if it will not — twelve of them at once, on a taskbar that
+closed like anywhere else — the compositor asks an application to end,
+an application may answer "not yet" and keep its window (the editor
+does, when the file has unsaved changes), and the compositor insists on
+silence alone — twelve of them at once, on a taskbar that
 shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. Icons, a file
 manager, a web browser, a text editor — a white page with a caret, a

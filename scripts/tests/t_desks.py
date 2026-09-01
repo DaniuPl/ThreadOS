@@ -108,6 +108,22 @@ def clock_text(at):
     return out
 
 
+def read_clock(q, tries=8):
+    """The clock's digits, read again if the screen was caught between
+    the clearing of the window and the drawing of the time. The program
+    clears its content and then writes into it, and a screenshot taken
+    between the two shows an empty window - which is a torn frame, not
+    a clock that stopped."""
+    text = ""
+    for _ in range(tries):
+        w, h, at = q.screen_raw()
+        text = clock_text(at)
+        if text.count(":") == 2 and "?" not in text and " " not in text:
+            return text
+        time.sleep(0.6)
+    return text
+
+
 def seconds(text):
     h, m, s = (int(p) for p in text.split(":"))
     return h * 3600 + m * 60 + s
@@ -138,8 +154,8 @@ def main():
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
+            first = read_clock(q)
             w, h, at = q.screen_raw()
-            first = clock_text(at)
             check("zegar chodzi na pierwszym pulpicie ('%s')" % first,
                   first.count(":") == 2 and "?" not in first)
             check("i ma swoj przycisk na pasku",
@@ -181,7 +197,7 @@ def main():
                   not near(at(WX + 100, WY + 60), 0))
 
             # The heart of it: the program was RUNNING all that time
-            second = clock_text(at)
+            second = read_clock(q)
             gap = seconds(second) - seconds(first)
             check("program na niewidocznym pulpicie chodzil dalej "
                   "(%s -> %s, %d s)" % (first, second, gap),
@@ -205,7 +221,7 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            third = clock_text(at)
+            third = read_clock(q)
             check("i po przeprowadzce dalej chodzi (%s -> %s)"
                   % (second, third),
                   third.count(":") == 2 and "?" not in third and

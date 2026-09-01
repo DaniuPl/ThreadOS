@@ -53,6 +53,10 @@ static int  nlines = 1;
 static int  cy, cx;           /* the caret: which line, which column */
 static int  top, hoff;        /* the first line and column shown */
 static int  dirty;            /* changed since the last save */
+/* Whether the person has already been told there is something to
+   lose. Asking twice about the same thing is a program that does not
+   believe the answer. */
+static int  warned;
 
 static char fname[NAME_MAX + 1];
 static char note[48];         /* the last thing that happened */
@@ -105,6 +109,7 @@ static void clear_all(void)
     nlines = 1;
     cy = cx = top = hoff = 0;
     dirty = 0;
+    warned = 0;
 }
 
 static void insert_char(char c)
@@ -200,6 +205,7 @@ static void save_to(const char *name)
     sys_close(fd);
     ecopy(fname, name, NAME_MAX);
     dirty = 0;
+    warned = 0;
     ecopy(note, "zapisano", sizeof(note) - 1);
 }
 
@@ -466,8 +472,22 @@ void _start(int argc, char **argv)
         struct win_event ev;
         int drew = 0;
         while (win_poll(win, &ev) == 1) {
-            if (ev.type == WEV_CLOSE)
+            if (ev.type == WEV_CLOSE) {
+                /* A file with changes in it is not something to lose
+                   because a window was closed. The first request is
+                   declined and turned into a question; the second one
+                   is an answer to that question. */
+                if (dirty && !warned) {
+                    win_keep(win);
+                    warned = 1;
+                    ecopy(note, "Niezapisane zmiany! Ctrl+S zapisze, "
+                                "zamkniecie jeszcze raz - nie",
+                          sizeof(note) - 1);
+                    drew = 1;
+                    continue;
+                }
                 sys_exit(0);
+            }
             if (ev.type == WEV_SIZE) {
                 cw = ev.x;
                 ch = ev.y;

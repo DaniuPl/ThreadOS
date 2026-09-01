@@ -923,6 +923,10 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)jest;
         return;
     }
+    case SYS64_WIN_KEEP:
+        r->rax = (uint64_t)(int64_t)desktop_win_keep((int)a1,
+                                                     task64_current_id());
+        return;
     default:
         printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
         r->rax = (uint64_t)-1;

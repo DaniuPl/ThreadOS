@@ -3330,3 +3330,64 @@ sprawdzane przez `make test`.
       Grupa 'gedit' urosla do 24 asercji i konczy sie tym samym po obu
       stronach: menedzer plikow widzi plik, ktory zapisal edytor, i
       oddaje go z powrotem edytorowi.
+
+- [x] **Program moze odmowic zamkniecia** - bo zamkniecie zawsze bylo
+      PROSBA, tyle ze nie bylo jak odpowiedziec "jeszcze nie".
+
+      Odliczanie po prosbie bylo od poczatku - dla programow, ktore nie
+      odpowiadaja. Brakowalo drugiej odpowiedzi: programu, ktory
+      USLYSZAL i ma powod zostac. Edytor z niezapisanym plikiem jest
+      calym tego przykladem.
+
+      Nowe wywolanie systemowe win_keep(okno): "slyszalem, jeszcze nie
+      zamykam". Pulpit przestaje odliczac, a co program zrobi z
+      wyproszona chwila - zapyta we wlasnym oknie, zapisze plik - to
+      juz jego sprawa. Milczenie dalej kosztuje okno: program, ktory nie
+      odpowiada, po dwoch sekundach je traci.
+
+      Przy okazji ognisko: prosba o zamkniecie zabierala je oknu, ktore
+      wlasnie pytano. Skoro program moze odmowic, drugie Alt+F4 musi
+      miec jak do niego trafic - wiec ognisko zostaje przy oknie tak
+      dlugo, jak okno, a puszcza sie je przy sprzataniu.
+
+      Edytor odmawia raz: pierwsze Alt+F4 zamienia sie w pytanie w pasku
+      stanu, drugie jest na nie odpowiedzia. Zapisanie pliku kasuje i
+      gwiazdke, i pamiec o pytaniu.
+
+      Grupa 'gedit' ma teraz 30 asercji i sprawdza obie strony: ze okno
+      po odmowie stoi jeszcze piec sekund pozniej (odliczanie naprawde
+      stanelo, a nie tylko zwolnilo), ze drugie Alt+F4 zdejmuje przycisk
+      z paska zadan i ze program konczy sie SAM z kodem zero, a nie
+      zostaje zabity. To samo w long mode, gdzie wywolanie ma wlasny
+      numer i wlasna obsluge.
+
+      I jedna nauka o samym tescie: kursor myszy jest bialy jak kartka
+      edytora. Sonda zostawiona pod kursorem mowila "okno dalej jest" o
+      oknie, ktorego juz nie bylo.
+
+- [x] **Kazdy rdzen dostaje wlasna linie cache planisty** - i przy okazji
+      lekcja o tym, czego test naprawde pilnuje.
+
+      Grupa 'kthreads' zaczela padac po dodaniu SZESCIU WIERSZY do
+      kompozytora - kodu, ktory w tym tescie nawet sie nie uruchamia
+      (test chodzi w trybie tekstowym). Cztery watki jadra, ktore
+      wczesniej konczyly w 45 tyknieciach, potrzebowaly 508. Bisekcja po
+      wlasnych zmianach pokazala winowajce, ktory winowajca byc nie mogl
+      - i to bylo wlasnie wskazowka.
+
+      Wskazniki 'running' i 'idle' kazdego rdzenia leza w tablicy
+      cores[]. Osiem bajtow na rdzen, cztery rdzenie - wszystkie w
+      JEDNEJ linii cache. Kazde przelaczenie zadania to zapis do tej
+      linii, wiec przy czterech rdzeniach linia jezdzi miedzy nimi
+      zamiast pracy. Ile to kosztuje, zalezy od tego, gdzie akurat
+      wypadnie granica linii - a to zmienia sie, gdy cokolwiek w jadrze
+      urosnie. Stad test, ktory pada od zmiany w zupelnie innym pliku.
+
+      Szescdziesiat cztery bajty na rdzen to najtansza rzecz, jaka to
+      jadro kupuje. Zamek planisty dostaje wlasna linie z tego samego
+      powodu. Po poprawce: 45 tykniec, niezaleznie od tego, co gdzie
+      indziej urosnie.
+
+      Test nie byl zbyt czuly. Mierzyl dokladnie to, co mial mierzyc -
+      czy praca idzie rownolegle - i powiedzial prawde o maszynie, ktora
+      przestala isc rownolegle. Prog zostal, gdzie byl.

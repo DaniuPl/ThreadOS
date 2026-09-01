@@ -72,6 +72,27 @@ def term_rows(at, rows=20, cols=48):
     return out
 
 
+TB_H = 18
+TBL_X0 = 46
+CLOCK_W = 8 * 8 + 6
+
+
+def buttons(at, w, y):
+    """The window buttons on the taskbar: everything on that row which
+    is not the bar's own grey."""
+    out, start = [], None
+    for x in range(TBL_X0, w - CLOCK_W - 2):
+        on_bar = all(abs(c - 210) <= 6 for c in at(x, y))
+        if not on_bar and start is None:
+            start = x
+        elif on_bar and start is not None:
+            out.append((start, x - 1))
+            start = None
+    if start is not None:
+        out.append((start, w - CLOCK_W - 3))
+    return out
+
+
 def is_page(px):
     return all(c > 235 for c in px)          # the white of the page
 
@@ -199,6 +220,15 @@ def sixty_four():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("(64) edytor pisze na kartce ('%s')" % row_text(at, 0),
+                  row_text(at, 0) == "dwa jadra")
+
+            # The same refusal, through the long-mode syscall of its own
+            q.sendkey("alt-f4")
+            time.sleep(3)
+            w, h, at = q.screen_raw()
+            check("(64) Alt+F4 przy niezapisanym pliku pyta, a nie zamyka "
+                  "('%s')" % status_text(at),
+                  "Niezapisane zmiany" in status_text(at) and
                   row_text(at, 0) == "dwa jadra")
 
             q.sendkey("ctrl-s")
@@ -394,12 +424,55 @@ def main():
                   row_text(at, 1) == "i psaAla ma kota" and
                   row_text(at, 2) == "")
 
+            # --- closing is a request, and it can be declined -----------
+            # A file with changes in it is not something to lose
+            # because a window was closed. The editor answers the first
+            # request with "not yet" - the desktop stops counting down
+            # - and turns it into a question; the second close is the
+            # answer to that question.
+            q.type_line("zmiana", enter=False)
+            # The pointer away from the page: the cursor is drawn white,
+            # and left on the page it is indistinguishable from the page
+            # - a probe would then say "the window is still there" about
+            # a window that had gone.
+            q.mouse_goto(600, 200)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            row = h - TB_H + 2
+            open_before = len(buttons(at, w, row))
+            q.sendkey("alt-f4")
+            time.sleep(3)
+            w, h, at = q.screen_raw()
+            st = status_text(at)
+            check("Alt+F4 przy niezapisanym pliku NIE zamyka, tylko pyta "
+                  "('%s')" % st, "Niezapisane zmiany" in st)
+            check("i okno stoi tam, gdzie stalo",
+                  is_page(at(CX + 200, CY + 100)))
+            # And the desktop did stop counting: two seconds is the
+            # whole of the grace, so a window still here five seconds
+            # later was not merely slow to die
+            time.sleep(5)
+            w, h, at = q.screen_raw()
+            check("pulpit przestal odliczac - po pieciu sekundach okno "
+                  "dalej jest", is_page(at(CX + 200, CY + 100)))
+
+            q.sendkey("alt-f4")
+            left = open_before
+            for _ in range(10):                # waiting, not asserting
+                time.sleep(1)
+                w, h, at = q.screen_raw()
+                left = len(buttons(at, w, row))
+                if left < open_before:
+                    break
+            check("drugie Alt+F4 zamyka (%d -> %d przyciskow na pasku)"
+                  % (open_before, left), left == open_before - 1)
+            check("i program zakonczyl sie sam, a nie zostal zabity",
+                  "proces 'gedit' zakonczyl sie (kod 0)" in q.serial())
+
             # --- a file named when the editor is started ----------------
             # 'gedit notatka' opens that file at once. Making a person
             # type the name again, in the program they have just told
             # which file they mean, is what makes an editor a chore.
-            q.sendkey("alt-f4")                # away with the first one
-            time.sleep(2.5)
             q.mouse_goto(600, 430)
             q.mouse_click()
             time.sleep(1)

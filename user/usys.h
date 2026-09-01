@@ -62,6 +62,7 @@
 #define SYS_SPAWN_TALK 55
 #define SYS_CLIP_SET   56
 #define SYS_CLIP_GET   57
+#define SYS_WIN_KEEP   58
 
 #define FS_NAME_MAX  63
 
@@ -547,6 +548,20 @@ struct win_event {
     int32_t x, y;          /* coordinates relative to the content area */
     int32_t val;           /* a mask of buttons */
 };
+
+/* The answer to WEV_CLOSE: "I heard, and I am not closing yet". The
+   desktop stops counting down, and the program has the time it needs
+   to ask about an unsaved file. A program that says nothing still
+   loses its window - that is what the countdown is for. */
+static inline int32_t win_keep(int winid)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_KEEP), "b"(winid)
+                     : "memory");
+    return ret;
+}
 
 /* Fetches a window event (non-blocking). Returns 1 = there is one,
    0 = none. */

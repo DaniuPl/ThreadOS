@@ -91,6 +91,7 @@
 /* The clipboard: a1=text, a2=length -> taken; a1=buffer, a2=size -> length */
 #define SYS64_CLIP_SET  50
 #define SYS64_CLIP_GET  51
+#define SYS64_WIN_KEEP  52  /* a1=winid -> "not closing yet" */
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
