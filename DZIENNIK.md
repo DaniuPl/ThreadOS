@@ -3391,3 +3391,37 @@ sprawdzane przez `make test`.
       Test nie byl zbyt czuly. Mierzyl dokladnie to, co mial mierzyc -
       czy praca idzie rownolegle - i powiedzial prawde o maszynie, ktora
       przestala isc rownolegle. Prog zostal, gdzie byl.
+
+- [x] **Menedzer zadan w oknie** - bo 'ps' drukuje, a drukowania program
+      nie przeczyta.
+
+      Lista, po ktora trzeba napisac komende, to lista, w ktora nikt nie
+      patrzy. Maszyna z tuzinem okien potrzebuje jednego miejsca, ktore
+      mowi, co dziala - a gdy program przestal odpowiadac, sposobu na
+      zakonczenie go innego niz restart maszyny.
+
+      Nowe wywolanie sys_ps(numer, bufor): jeden wiersz listy zadan na
+      wywolanie, indeks od zera, -1 gdy nic tam nie ma - dokladnie tak,
+      jak czyta sie katalog. Kolejnosc to kolejnosc listy, wiec lista,
+      ktora program pokazuje, jest o jedno odswiezenie z tylu - jak w
+      kazdym menedzerze zadan na swiecie.
+
+      Okno: wiersz na zadanie, odswiezane dwa razy na sekunde, klik
+      wybiera, przycisk konczy. Dwie rzeczy, ktorych nie zrobi: nie
+      zakonczy watku jadra (te dziela pamiec jadra, wiec zabranie
+      jednego zabiera kawalek maszyny) i nie zakonczy SIEBIE - menedzer
+      zadan, ktory znika po kliknieciu, jest zartem, a nie narzedziem.
+      Oba przypadki mowia dlaczego, zamiast nie zrobic nic.
+
+      Co odroznia program od watku jadra: wlasna przestrzen adresowa, a
+      nie sterta. Sterte maja jedne i drugie - pierwsza wersja pokazywala
+      wszystko jako "program" i test to zlapal od razu.
+
+      Nowa grupa 'gtasks' (22 asercje, oba jadra) sprawdza, ze lista
+      ZYJE: program uruchomiony przy otwartym oknie sam sie na niej
+      pojawia, a zakonczony przyciskiem znika i z listy, i z paska
+      zadan. Oraz obie odmowy.
+
+      Test musial przy okazji odsunac okno menedzera z drogi kaskady -
+      bo kazde nowe okno otwiera sie o krok dalej i stanelo nad
+      czytana lista. Czlowiek by je przesunal; test tez.

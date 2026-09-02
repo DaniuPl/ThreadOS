@@ -66,7 +66,9 @@ does, when the file has unsaved changes), and the compositor insists on
 silence alone — twelve of them at once, on a taskbar that
 shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. Icons, a file
-manager, a web browser, a text editor — a white page with a caret, a
+manager, a web browser, a task manager that lists what is
+running and ends a program that has stopped answering (it refuses to
+end a kernel thread, or itself), a text editor — a white page with a caret, a
 status line that is the whole of its interface, Ctrl+S and Ctrl+O, the
 desktop's own clipboard, a file named on the command line opened at
 once, and an "Edytuj" button in the file manager that hands a file to

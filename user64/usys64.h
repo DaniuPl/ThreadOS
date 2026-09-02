@@ -63,6 +63,7 @@
 #define SYS64_CLIP_SET   50
 #define SYS64_CLIP_GET   51
 #define SYS64_WIN_KEEP   52
+#define SYS64_PS         53
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -610,6 +611,23 @@ static inline void win_text(int win, int x, int y, const char *s, int color)
 static inline int64_t win_poll(int win, struct win_event *ev)
 {
     return syscall64(SYS64_WIN_POLL, win, (int64_t)(uintptr_t)ev);
+}
+
+/* The task list, one row per call - the same struct as in protected
+   mode, because one program reads it on both kernels. */
+#define PS_NAME_MAX 16
+struct psinfo {
+    int pid;
+    int parent;
+    int state;
+    int anycore;
+    int ring3;
+    char name[PS_NAME_MAX];
+};
+
+static inline int64_t sys_ps(int index, struct psinfo *out)
+{
+    return syscall64(SYS64_PS, index, (int64_t)(uintptr_t)out);
 }
 
 /* The answer to WEV_CLOSE: "I heard, and I am not closing yet" - the

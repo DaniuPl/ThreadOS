@@ -92,6 +92,7 @@
 #define SYS64_CLIP_SET  50
 #define SYS64_CLIP_GET  51
 #define SYS64_WIN_KEEP  52  /* a1=winid -> "not closing yet" */
+#define SYS64_PS        53  /* a1=index, a2=buffer -> 0 / -1 */
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

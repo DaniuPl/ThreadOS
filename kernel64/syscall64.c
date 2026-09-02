@@ -923,6 +923,17 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)jest;
         return;
     }
+    case SYS64_PS: {
+        struct psinfo64 info;
+        if (!paging64_user_range(a2, sizeof(info)) ||
+            task64_ps((int)a1, &info) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        *(struct psinfo64 *)(uintptr_t)a2 = info;
+        r->rax = 0;
+        return;
+    }
     case SYS64_WIN_KEEP:
         r->rax = (uint64_t)(int64_t)desktop_win_keep((int)a1,
                                                      task64_current_id());

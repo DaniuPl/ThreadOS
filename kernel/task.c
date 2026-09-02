@@ -1343,6 +1343,52 @@ const char *task_current_name(void)
     return current ? current->name : "(brak)";
 }
 
+/* One entry of the task list, as a program in ring 3 sees it.
+ *
+ * The shell has had 'ps' from the beginning, but it prints - and a
+ * program cannot read printing. This hands over the same rows one at a
+ * time, the way the directory is read: index 0, 1, 2 ... until there
+ * is nothing there. The order is the order of the list, which does not
+ * change between two calls unless a task is born or dies - and then
+ * the list a program shows is one refresh behind, which is what every
+ * task manager in the world shows anyway.
+ */
+int task_ps(int index, struct psinfo *out)
+{
+    if (index < 0 || !out)
+        return -1;
+
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    int i = 0;
+    int found = 0;
+    do {
+        if (i == index) {
+            out->pid = t->id;
+            out->parent = t->parent;
+            out->state = (int)t->state;
+            out->anycore = t->anycore;
+            /* A process has an address space of ITS OWN - that is
+               what separates it from a kernel thread, which lives in
+               the kernel's. The heap is not the test: kernel threads
+               have one too. */
+            out->ring3 = t->owns_dir ? 1 : 0;
+            for (int k = 0; k < PS_NAME_MAX - 1; k++) {
+                out->name[k] = t->name[k];
+                if (!t->name[k])
+                    break;
+            }
+            out->name[PS_NAME_MAX - 1] = '\0';
+            found = 1;
+            break;
+        }
+        i++;
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+    return found ? 0 : -1;
+}
+
 void task_dump(void)
 {
     static const char *state_names[] = { "gotowy", "dziala", "spi",

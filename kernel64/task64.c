@@ -1353,6 +1353,43 @@ int task64_count(void)
     return n;
 }
 
+/* One row of the task list for a program in ring 3 - the same thing
+   the shell's 'ps' prints, only readable rather than printed. See
+   task_ps() in the 32-bit kernel: the same rows, the same rule that
+   the list a program shows is one refresh behind. */
+int task64_ps(int index, struct psinfo64 *out)
+{
+    if (index < 0 || !out)
+        return -1;
+
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task64 *t = current;
+    int i = 0, found = 0;
+    do {
+        if (i == index) {
+            out->pid = t->id;
+            out->parent = t->parent;
+            out->state = (int)t->state;
+            out->anycore = t->anycore;
+            /* Its own address space is what makes a process; a
+               kernel thread runs in the kernel's. */
+            out->ring3 = t->space ? 1 : 0;
+            for (int k = 0; k < PS_NAME_MAX64 - 1; k++) {
+                out->name[k] = t->name[k];
+                if (!t->name[k])
+                    break;
+            }
+            out->name[PS_NAME_MAX64 - 1] = '\0';
+            found = 1;
+            break;
+        }
+        i++;
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+    return found ? 0 : -1;
+}
+
 void task64_dump(void)
 {
     static const char *state_names[] = { "gotowy", "dziala", "spi", "zombie" };

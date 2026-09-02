@@ -407,6 +407,20 @@ void syscall_handler(struct regs *r)
             r->eax = (uint32_t)got;
         break;
     }
+    case SYS_PS: {
+        /* The list is read into the kernel first and only then handed
+           over: the copy to ring 3 can touch a page that is not there,
+           and a page fault with the task list locked would be a
+           machine that stops. */
+        struct psinfo info;
+        if (task_ps((int)r->ebx, &info) < 0)
+            r->eax = (uint32_t)-1;
+        else if (user_put(r->ecx, &info, sizeof(info)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = 0;
+        break;
+    }
     case SYS_WIN_KEEP:
         r->eax = (uint32_t)desktop_win_keep((int)r->ebx, task_current_id());
         break;

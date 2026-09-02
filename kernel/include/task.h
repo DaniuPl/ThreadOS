@@ -140,6 +140,20 @@ void schedule(void);
 /* Prints the list of threads (the 'ps' shell command) */
 void task_dump(void);
 
+/* The task list as a program sees it: one row per call, index from
+   zero, -1 when there is nothing there. The layout has to match struct
+   psinfo in user/usys.h - it travels to ring 3 as it stands. */
+#define PS_NAME_MAX 16
+struct psinfo {
+    int pid;
+    int parent;
+    int state;        /* 0 ready, 1 running, 2 sleeping, 3 blocked, 4 zombie */
+    int anycore;      /* may any core run it */
+    int ring3;        /* a process (its own memory), not a kernel thread */
+    char name[PS_NAME_MAX];
+};
+int task_ps(int index, struct psinfo *out);
+
 const char *task_current_name(void);
 
 /* The current task moves to an address space of its own; the page

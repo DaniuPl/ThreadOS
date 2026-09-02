@@ -63,6 +63,7 @@
 #define SYS_CLIP_SET   56
 #define SYS_CLIP_GET   57
 #define SYS_WIN_KEEP   58
+#define SYS_PS         59
 
 #define FS_NAME_MAX  63
 
@@ -548,6 +549,28 @@ struct win_event {
     int32_t x, y;          /* coordinates relative to the content area */
     int32_t val;           /* a mask of buttons */
 };
+
+/* The task list, one row per call, index from zero: 0 = there is one,
+   -1 = that is all. The layout matches struct psinfo in the kernel. */
+#define PS_NAME_MAX 16
+struct psinfo {
+    int32_t pid;
+    int32_t parent;
+    int32_t state;      /* 0 gotowy, 1 dziala, 2 spi, 3 czeka, 4 zombie */
+    int32_t anycore;
+    int32_t ring3;      /* a process of its own, not a kernel thread */
+    char name[PS_NAME_MAX];
+};
+
+static inline int32_t sys_ps(int index, struct psinfo *out)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_PS), "b"(index), "c"(out)
+                     : "memory");
+    return ret;
+}
 
 /* The answer to WEV_CLOSE: "I heard, and I am not closing yet". The
    desktop stops counting down, and the program has the time it needs

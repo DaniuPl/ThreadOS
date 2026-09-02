@@ -92,8 +92,9 @@ static struct icon icons[ICON_MAX] = {
     {8, 220, "Web", "gweb", 5, {{0}}},
     {8, 260, "Ustaw", "gsettings", 6, {{0}}},
     {8, 300, "Edytor", "gedit", 7, {{0}}},
+    {8, 340, "Zadania", "gtasks", 8, {{0}}},
 };
-static int icon_n = 8;         /* how many of them there are */
+static int icon_n = 9;         /* how many of them there are */
 
 /* What each icon has drawn on it: twelve rows of twelve pixels, in the
  * order of the table above.
@@ -139,6 +140,10 @@ static const uint16_t icon_art[][12] = {
     {   /* Edytor - a sheet of paper with writing on it */
         0xFFC, 0x804, 0x9E4, 0x804, 0x9F4, 0x804,
         0x9E4, 0x804, 0x9F4, 0x804, 0xFFC, 0x000,
+    },
+    {   /* Zadania - a list of rows, one of them picked out */
+        0x000, 0xFFF, 0x000, 0xEEE, 0x000, 0xFFF,
+        0x000, 0xEEE, 0x000, 0xFFF, 0x000, 0x000,
     },
 };
 #define ICON_N icon_n
@@ -436,7 +441,7 @@ static int menu_open;
    be a second thing to learn. */
 static int menu_px, menu_py;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
-                                  "gedit"};
+                                  "gedit", "gtasks"};
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 /* Virtual desktops.

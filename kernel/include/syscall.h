@@ -77,6 +77,8 @@
 #define SYS_CLIP_GET   57
 /* "I heard the close request and I am not closing yet" */
 #define SYS_WIN_KEEP   58
+/* One row of the task list: ebx=index, ecx=buffer -> 0 or -1 */
+#define SYS_PS         59
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

@@ -179,4 +179,18 @@ int  task64_id(const struct task64 *t);
 int  task64_count(void);            /* how many tasks are on the list */
 void task64_dump(void);
 
+/* The task list as a program sees it - the layout matches struct
+   psinfo in user/usys.h, because one program reads it on both
+   kernels. */
+#define PS_NAME_MAX64 16
+struct psinfo64 {
+    int pid;
+    int parent;
+    int state;
+    int anycore;
+    int ring3;
+    char name[PS_NAME_MAX64];
+};
+int task64_ps(int index, struct psinfo64 *out);
+
 #endif
