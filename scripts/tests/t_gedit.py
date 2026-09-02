@@ -102,11 +102,19 @@ def is_bar(px):
     return b > 120 and r < 90 and g < 90
 
 
+# The file manager: names at content (6,18), a row every ten pixels,
+# and the two buttons held against the right-hand edge of a 320-wide
+# window ("Otworz" at 212, "Usun" at 272).
+FM_NAME_X = 6
+FM_ROW_Y0 = 18
+FM_OPEN_X = 320 - 48 - 56 - 4
+
+
 def file_row(at, i, cols=12, wx=WX, wy=WY):
     """One name from the file manager's list: light letters on the
     window's grey."""
     font = font8x8()
-    x0, y0 = wx + 1 + 8, wy + 11 + 16 + i * 10
+    x0, y0 = wx + 1 + FM_NAME_X, wy + 11 + FM_ROW_Y0 + i * 10
     out = ""
     for c in range(cols):
         pattern = []
@@ -281,18 +289,18 @@ def sixty_four():
             check("(64) menedzer plikow widzi plik z edytora (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(fx + 1 + 20, fy + 11 + 16 + row * 10 + 4)
+                q.mouse_goto(fx + 1 + 20, fy + 11 + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(fx + 1 + 150, fy + 11 + 6)      # "Edytuj"
+                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + 11 + 5)  # "Otworz"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(5)
                 q.mouse_goto(600, 430)
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
-                check("(64) 'Edytuj' otwiera plik w edytorze ('%s')"
+                check("(64) 'Otworz' otwiera plik w edytorze ('%s')"
                       % row_text(at, 0, wx=fx + 12, wy=fy + 12),
                       row_text(at, 0, wx=fx + 12, wy=fy + 12) == "dwa jadra")
         finally:
@@ -506,11 +514,11 @@ def main():
             check("menedzer plikow widzi zapisany plik (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(WX + 1 + 20, WY + 11 + 16 + row * 10 + 4)
+                q.mouse_goto(WX + 1 + 20, WY + 11 + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(WX + 1 + 150, WY + 11 + 6)   # "Edytuj"
+                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + 11 + 5)  # "Otworz"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(4)
@@ -518,7 +526,7 @@ def main():
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
                 # The new window is the next slot of the cascade
-                check("przycisk 'Edytuj' otwiera plik w edytorze ('%s')"
+                check("przycisk 'Otworz' otwiera plik w edytorze ('%s')"
                       % row_text(at, 0, wx=WX + 12, wy=WY + 12),
                       row_text(at, 0, wx=WX + 12, wy=WY + 12) ==
                       "Ala ma kota")

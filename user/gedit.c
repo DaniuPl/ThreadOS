@@ -525,7 +525,7 @@ void _start(int argc, char **argv)
                     ask_key(c);
                 else
                     edit_key(c);
-            } else if (ev.type == WEV_PRESS || ev.type == WEV_CLICK) {
+            } else if (ev.type == WEV_CLICK) {
                 /* The caret goes where the pointer is - the nearest
                    place there is text, not the empty page past it. */
                 int l = top + (ev.y - PAD) / ROW_H;

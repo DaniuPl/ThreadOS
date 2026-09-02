@@ -3519,3 +3519,19 @@ sprawdzane przez `make test`.
       rozmiar w wyniku, a w long mode wypelnia strukture. Ta jedna
       roznica to teraz dziesiec wierszy pod #ifdef, a reszta - lista,
       klikanie, rysowanie - jest wspolna. user64/gfiles64.c usuniety.
+
+- [x] **Jeden klik, jedno dzialanie** - i przyciski trzymajace krawedz.
+
+      Screeny zlapaly blad, ktorego zaden test nie widzial: klikniecie
+      "Otworz" w menedzerze plikow uruchamialo edytor DWA RAZY. Okno
+      dostaje i WEV_PRESS, i WEV_CLICK - te same palce, dwa zdarzenia -
+      a programy sluchaly obu. Teraz slucha sie klikniecia, a nacisniecie
+      i puszczenie zostaja tam, gdzie sa potrzebne: przy ciagnieciu.
+
+      Drugi screen (okno rozwiniete na caly ekran) pokazal przyciski
+      przybite do liczby: "Zakoncz" stalo w polowie okna szerokiego na
+      caly ekran i wygladalo jak pomylka. Przyciski liczy sie teraz od
+      prawej krawedzi.
+
+      Obie rzeczy widac na obrazku od razu, a w tescie - dopiero gdyby
+      ktos sprawdzil, ile okien sie otworzylo.

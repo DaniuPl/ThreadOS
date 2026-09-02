@@ -34,8 +34,8 @@
 #define ROW_H 10
 #define MAXF 64               /* names kept; the window scrolls through them */
 #define NAME_LEN 32
-#define EDIT_X 200            /* the two buttons, in the top right corner */
-#define DEL_X 264
+#define EDIT_W 56             /* the two buttons, kept at the right edge */
+#define DEL_W 48
 
 struct entry {
     char name[NAME_LEN];
@@ -53,6 +53,12 @@ static char here[64];         /* the directory we are looking at */
 
 static int cw = W0, ch = H0;
 static int winid = -1;
+
+/* The buttons hold the right-hand edge, whatever the window has been
+   pulled to - nailed to a number they end up in the middle of a
+   maximised window. */
+static int del_x(void)  { return cw - DEL_W; }
+static int edit_x(void) { return cw - DEL_W - EDIT_W - 4; }
 
 static int rows_shown(void)
 {
@@ -276,10 +282,10 @@ static void draw(void)
     head[p] = '\0';
     win_text(win, 4, 2, head, C_GREEN);
 
-    win_rect(win, EDIT_X, 0, 56, HEAD_H, C_BLUE);
-    win_text(win, EDIT_X + 4, 2, "Otworz", C_WHITE);
-    win_rect(win, DEL_X, 0, cw - DEL_X, HEAD_H, confirm ? C_RED : C_BLUE);
-    win_text(win, DEL_X + 6, 2, "Usun", C_WHITE);
+    win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
+    win_text(win, edit_x() + 4, 2, "Otworz", C_WHITE);
+    win_rect(win, del_x(), 0, DEL_W, HEAD_H, confirm ? C_RED : C_BLUE);
+    win_text(win, del_x() + 8, 2, "Usun", C_WHITE);
     win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_WHITE);
 
     for (int i = 0; i < shown; i++) {
@@ -369,10 +375,15 @@ void _start(void)
                     if (chosen >= top + shown)
                         top = chosen - shown + 1;
                 }
-            } else if (ev.type == WEV_CLICK || ev.type == WEV_PRESS) {
-                if (ev.y < HEAD_H && ev.x >= DEL_X) {
+            } else if (ev.type == WEV_CLICK) {
+                /* A click, and only a click. The compositor also sends
+                   the press and the release that make one up - acting
+                   on those as well means one click on "Otworz"
+                   starting the editor twice, which is exactly what it
+                   did. */
+                if (ev.y < HEAD_H && ev.x >= del_x()) {
                     delete_chosen();
-                } else if (ev.y < HEAD_H && ev.x >= EDIT_X) {
+                } else if (ev.y < HEAD_H && ev.x >= edit_x()) {
                     open_chosen();
                 } else if (ev.y >= ROW_Y0 - 1) {
                     int r = (ev.y - ROW_Y0 + 1) / ROW_H + top;

@@ -34,7 +34,7 @@
 #define ROW_Y0 26
 #define HEAD_H 12
 #define MAXT 14
-#define KILL_X 236            /* the "Zakoncz" button, top right */
+#define KILL_W 64             /* the "Zakoncz" button, kept at the right */
 
 static struct psinfo list[MAXT];
 static int count;
@@ -42,6 +42,14 @@ static int chosen = -1;       /* the pid picked, not the row: rows move */
 static char note[40];
 
 static int cw = W0, ch = H0;
+
+/* The button holds the right-hand edge, whatever width the window has
+   been pulled to. Nailed to a number, it sat in the middle of a
+   maximised window looking like a mistake. */
+static int kill_x(void)
+{
+    return cw - KILL_W;
+}
 
 static void ecopy(char *d, const char *s, int max)
 {
@@ -134,8 +142,8 @@ static void draw(int win)
 
     /* The button, in the top right corner where there is room next to
        the heading */
-    win_rect(win, KILL_X, 0, cw - KILL_X, HEAD_H, C_BLUE);
-    win_text(win, KILL_X + 4, 2, "Zakoncz", C_WHITE);
+    win_rect(win, kill_x(), 0, KILL_W, HEAD_H, C_BLUE);
+    win_text(win, kill_x() + 4, 2, "Zakoncz", C_WHITE);
 
     win_rect(win, 0, ROW_Y0 - 4, cw, 1, C_WHITE);
 
@@ -184,8 +192,11 @@ void _start(void)
             if (ev.type == WEV_SIZE) {
                 cw = ev.x;
                 ch = ev.y;
-            } else if (ev.type == WEV_CLICK || ev.type == WEV_PRESS) {
-                if (ev.y < HEAD_H && ev.x >= KILL_X) {
+            } else if (ev.type == WEV_CLICK) {
+                /* The press and the release of the same click arrive
+                   too; acting on all three would end the chosen task
+                   three times over. */
+                if (ev.y < HEAD_H && ev.x >= kill_x()) {
                     end_chosen();
                     refresh();
                 } else if (ev.y >= ROW_Y0 - 1) {
