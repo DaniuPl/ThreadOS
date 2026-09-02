@@ -57,28 +57,32 @@ def main():
         check("menedzer plikow GUI listuje plik z dysku (FS -> okno)",
               appeared)
 
-        # A click on the file name -> a preview of the contents. Line 0 at
-        # content(.,16) -> screen y81, the next ones every 10 px. We click
-        # LINE 1: line 0 is 'swap.sys', which the kernel creates at
-        # startup (inode 0), and what we want is 'raport'. After the click
-        # the panel 'tresc:' (content y102 -> screen y167) shows the
-        # contents. We move the cursor away before the screenshot.
+        # A click on a file name chooses it: the row takes the accent
+        # colour, which is how everything on this desktop says "this
+        # one". The contents are no longer shown here - a file manager
+        # hands a file to the program that opens it, and that program
+        # is the editor.
+        #
+        # Row 1 (content y16 + 10 -> screen y91): row 0 is 'swap.sys',
+        # which the kernel makes at startup, and what we want is
+        # 'raport'.
+        def row_blue():
+            _, _, a = q9.screen_raw()
+            return sum(1 for x in range(100, 300) for y in range(91, 99)
+                       if near(a(x, y), (0, 0, 255), 60))
+
+        before_blue = row_blue()
         q9.mouse_goto(115, 93)
         q9.mouse_click()
         q9.mouse_goto(60, 300)
-
-        def preview_white():
-            _, _, a = q9.screen_raw()
-            return sum(1 for x in range(99, 200) for y in range(167, 175)
-                       if near(a(x, y), (255, 255, 255), 10))
-        prev = False
+        picked = False
         for _ in range(15):
-            if preview_white() > 0:
-                prev = True
+            if row_blue() > before_blue + 100:
+                picked = True
                 break
             time.sleep(0.2)
-        check("klik pliku w gfiles pokazuje jego tresc (open+read z ring3)",
-              prev)
+        check("klik pliku w gfiles wybiera go (zdarzenie myszy -> ring 3)",
+              picked)
     finally:
         q9.close()
         if os.path.exists(gdisk):

@@ -68,7 +68,8 @@ shares its width out among their buttons instead of letting them run
 off the edge, with a clock at its right-hand end. A window can be renamed by the program
 that owns it, so the editor's title says which file it holds and the
 terminal's says where it is standing. Icons, a file
-manager, a web browser, a task manager that lists what is
+manager that lists sizes, walks into directories and back out, hands a
+file to the editor and throws one away when asked twice, a web browser, a task manager that lists what is
 running and ends a program that has stopped answering (it refuses to
 end a kernel thread, or itself), a text editor — a white page with a caret, a
 status line that is the whole of its interface, Ctrl+S and Ctrl+O, the

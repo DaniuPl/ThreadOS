@@ -3486,3 +3486,36 @@ sprawdzane przez `make test`.
       cala rzecz: przycisk, ktory tylko chowa, kosztuje uklad okien i
       nikt go nie nacisnie drugi raz. Okno zwiniete recznie zostaje
       zwiniete, bo to byla czyjas decyzja.
+
+- [x] **Menedzer plikow napisany od nowa** - i jedno zrodlo zamiast
+      dwoch.
+
+      To, co bylo, listowalo osiem nazw w oknie wielkosci znaczka
+      pocztowego i pokazywalo pierwsze sto bajtow jednej z nich. To
+      dowodzilo drogi "dysk -> klik -> odczyt -> rysunek"; menedzerem
+      plikow nie bylo. Menedzer plikow to miejsce, do ktorego czlowiek
+      IDZIE po plik: mowi, ile co waży, wchodzi do katalogow i z nich
+      wychodzi, podaje plik programowi, ktory go otwiera, i wyrzuca go,
+      gdy poprosic dwa razy.
+
+      Wiec: lista z rozmiarami, katalogi oznaczone i chodliwe (Enter
+      albo "Otworz" wchodzi, Backspace wychodzi wyzej), nazwa katalogu w
+      tytule okna, PgUp/PgDn przewija, a licznik w rogu mowi, ktory
+      kawalek listy widac - lista, ktora przewija sie bez slowa, wyglada
+      na taka, ktora coz zgubila.
+
+      "Usun" pyta. Menedzer plikow, ktory wyrzuca plik po jednym
+      kliknieciu, to menedzer, ktorego czlowiek sie boi - a drugie
+      klikniecie jest odpowiedzia, nie powtorzeniem. Katalogu nie usuwa
+      wcale.
+
+      Podglad tresci znikl, bo od pokazywania tresci jest edytor, a
+      "Otworz" mu ten plik podaje. Dwie asercje w starych testach
+      mowily o podgladzie - zostaly przepisane na to, co program robi
+      teraz: klik wybiera wiersz, a wybor widac kolorem akcentu.
+
+      I najwazniejsze: JEDNO zrodlo dla obu jader. Osobne byly przez
+      jedna rzecz - czytanie katalogu, ktore w trybie chronionym oddaje
+      rozmiar w wyniku, a w long mode wypelnia strukture. Ta jedna
+      roznica to teraz dziesiec wierszy pod #ifdef, a reszta - lista,
+      klikanie, rysowanie - jest wspolna. user64/gfiles64.c usuniety.

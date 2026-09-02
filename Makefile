@@ -348,7 +348,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/shmwrite64.elf \
                $(BUILD)/user64/shmread64.elf \
                $(BUILD)/user64/gclock64.elf \
-               $(BUILD)/user64/gfiles64.elf \
+               $(BUILD)/user64/gfiles.elf \
                $(BUILD)/user64/gmon64.elf \
                $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/gedit.elf \
@@ -441,7 +441,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    shmwrite64=$(BUILD)/user64/shmwrite64.elf \
 	    shmread64=$(BUILD)/user64/shmread64.elf \
 	    gclock=$(BUILD)/user64/gclock64.elf \
-	    gfiles=$(BUILD)/user64/gfiles64.elf \
+	    gfiles=$(BUILD)/user64/gfiles.elf \
 	    gmon=$(BUILD)/user64/gmon64.elf \
 	    gterm=$(BUILD)/user64/gterm.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \

@@ -212,46 +212,43 @@ def main():
             q.mouse_goto(400, 300)
 
             px2, py2 = body_text(4)
-            # The heading "Pliki na dysku:" drawn in green at (4,2)
+            # The heading - the directory being shown and how many
+            # things are in it - is drawn in green at (4,2)
             greens = 0
             end = time.time() + 20
             while time.time() < end:
                 _, _, ap = q.screen_raw()
                 greens = sum(1 for dy in range(8) for dx in range(120)
                                 if ap(px2 + 4 + dx, py2 + 2 + dy) == GREEN)
-                if greens > 20:
+                if greens > 10:
                     break
                 time.sleep(0.5)
             check("ikona 'Pliki' uruchamia menedzer plikow "
                   "(%d zielonych pikseli naglowka)" % greens,
-                  greens > 20)
+                  greens > 10)
 
-            # On the disk lies a file written before the desktop started -
-            # the manager has to show it, and a click on it has to load
-            # the contents
-            _, _, ap1 = q.screen_raw()
-            def preview_panel(fun):
-                return [fun(px2 + 4 + dx, py2 + 102 + dy)
-                        for dy in range(8) for dx in range(140)]
+            # A click chooses a file: the row takes the accent colour,
+            # which is this desktop's way of saying "this one". That is
+            # the whole path being checked - a mouse event reaching a
+            # ring 3 program and coming back as a drawing.
+            def row_blue(row):
+                _, _, a = q.screen_raw()
+                return sum(1 for dx in range(200) for dy in range(8)
+                           if a(px2 + 4 + dx, py2 + 18 + row * 10 + dy)
+                           == BLUE)
 
-            before = preview_panel(ap1)
-
-            # On the disk there are also kernel files (swap.sys, icons.pos)
-            # which are empty in the preview - so we click successive
-            # rows until content really appears
-            loaded = False
+            picked = False
             for row in range(4):
+                before = row_blue(row)
                 q.mouse_home()
-                q.mouse_goto(px2 + 20, py2 + 16 + row * 10 + 4)
+                q.mouse_goto(px2 + 20, py2 + 18 + row * 10 + 4)
                 q.mouse_click()
                 q.mouse_goto(400, 300)
                 time.sleep(1.5)
-                _, _, ap2 = q.screen_raw()
-                if preview_panel(ap2) != before:
-                    loaded = True
+                if row_blue(row) > before + 100:
+                    picked = True
                     break
-            check("klik w nazwe pliku wczytuje jego tresc z dysku",
-                  loaded)
+            check("klik w nazwe pliku wybiera go w menedzerze", picked)
 
             # The compositor survived all this: the desktop's background is still
 # there.
