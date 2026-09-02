@@ -3576,3 +3576,37 @@ sprawdzane przez `make test`.
       zostaly wypisane raz, jako split_at() i join_at(): uzywaja ich i
       klawisze, i cofanie, tylko w druga strone. Wczesniej ta sama
       robota byla wpisana w Enter i w Backspace osobno.
+
+- [x] **Struktura zadania na wlasnej linii cache - i utajony blad, ktory
+      to odkrylo.**
+
+      Grupa 'kthreads' znowu zaczela padac, tym razem po stronie
+      64-bitowej: cztery watki jadra 320 tykniec zamiast 42. Bisekcja po
+      commitach pokazala winowajce nie do uwierzenia - CZTERY WIERSZE
+      DODANE DO MAPY KLAWIATURY (Ctrl+F i Ctrl+Z). Kod, ktory w tym
+      tescie nawet nie jest wolany.
+
+      Struktury zadan leza na stercie, a sterta wyrownuje do osmiu
+      bajtow. Pierwsze slowa struktury - wskaznik stosu i stan - sa
+      zapisywane przy KAZDYM przelaczeniu zadania, przez ten rdzen,
+      ktory to zadanie prowadzi. Dwie struktury w jednej linii cache to
+      dwa rdzenie piszace do jednej linii, a wtedy linia jezdzi miedzy
+      nimi zamiast pracy. Czy tak wypadnie, zalezy od tego, gdzie
+      poukladaly sie bloki sterty - czyli od rozmiaru kodu, ktory nie ma
+      z tym nic wspolnego.
+
+      Zadanie dostaje teraz linie dla siebie: prosimy o linie wiecej i
+      sami przesuwamy sie do granicy, pamietajac adres do oddania.
+
+      Po drodze pierwsza proba - "kazdy blok sterty na wlasnej linii" -
+      wywrocila sterownik xHCI. I dobrze, bo pokazala blad starszy od
+      wszystkiego: tworzac zadanie zerowano w tablicy mapowan plikow
+      tylko POCZATEK i KONIEC, a nie wskaznik 'blocks'. Zwolnienie
+      mapowania oddawalo wiec sterte wskaznik, ktory byl smieciem z
+      poprzedniego zycia tej pamieci. Czekalo to na sterte, ktora poda
+      blok z odpowiednim smieciem w srodku - i doczekalo sie.
+
+      Sterta ma teraz straznika: wskaznik, przed ktorym nie ma
+      sensownego naglowka, nie jest zwalniany, tylko zglaszany. Awaria
+      byla w kfree, a blad calkiem gdzie indziej - i to jest dokladnie
+      ten rodzaj awarii, o ktorym warto powiedziec glosno.

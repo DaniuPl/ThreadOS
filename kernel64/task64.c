@@ -101,6 +101,7 @@ struct task64 {
     int nolock;
     int idle_for_core;
     char name[NAME_MAX];
+    void *raw;                   /* what kmalloc gave, before aligning */
     struct task64 *next;
 };
 
@@ -114,6 +115,28 @@ extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
  * which one is mine the processor says itself (the number in its local
  * APIC).
  */
+/* A task structure gets a cache line to itself: its first words - the
+   stack pointer and the state - are written on every context switch,
+   by whichever core is running it, and two structures sharing a line
+   means two cores writing into one line. See kernel/task.c for what
+   that cost and why it came and went with unrelated edits. */
+static struct task64 *task_alloc(void)
+{
+    char *raw = kmalloc(sizeof(struct task64) + 64);
+    if (!raw)
+        return (struct task64 *)0;
+    uintptr_t at = ((uintptr_t)raw + 63) & ~(uintptr_t)63;
+    struct task64 *t = (struct task64 *)at;
+    t->raw = raw;
+    return t;
+}
+
+static void task_free(struct task64 *t)
+{
+    if (t)
+        kfree(t->raw);
+}
+
 /* One cache line per core.
  *
  * These two pointers are written on every context switch, by the core
@@ -192,7 +215,7 @@ static void idle_loop(void *arg)
 
 void scheduler64_init(void)
 {
-    struct task64 *main_task = kmalloc(sizeof(*main_task));
+    struct task64 *main_task = task_alloc();
     main_task->stack = NULL;
     main_task->state = TASK_RUNNING;
     main_task->id = next_id++;
@@ -237,12 +260,12 @@ int task_scheduler_ready(void)
 struct task64 *task64_create(const char *name, void (*entry)(void *),
                              void *arg)
 {
-    struct task64 *t = kmalloc(sizeof(*t));
+    struct task64 *t = task_alloc();
     if (!t)
         return NULL;
     t->stack = kmalloc(STACK_SIZE);
     if (!t->stack) {
-        kfree(t);
+        task_free(t);
         return NULL;
     }
     t->entry = entry;
@@ -260,7 +283,18 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
-        t->maps[i].start = t->maps[i].end = 0;
+        /* The whole entry, not only its ends: 'blocks' is a pointer
+           that gets freed when the mapping goes, and a pointer left
+           unset is whatever was in that memory before - a free of
+           something that was never allocated. It waited a long time
+           for a heap that handed out a block with rubbish in it. */
+        {
+            t->maps[i].start = t->maps[i].end = 0;
+            t->maps[i].size = 0;
+            t->maps[i].nblocks_of = 0;
+            t->maps[i].blocks = (void *)0;
+            t->maps[i].write = 0;
+        }
     t->fpu = fpu64_alloc();
     t->cwd = current ? current->cwd : FS_ROOT;
     /* A thread standing in the kernel's own address space is the kernel
@@ -479,7 +513,7 @@ static void reap_zombies(void)
             t->next = z->next;
             fpu64_free(z->fpu);
             kfree(z->stack);
-            kfree(z);
+            task_free(z);
         } else {
             t = t->next;
         }
@@ -696,7 +730,7 @@ void task_core_enter(int nr)
     if (nr <= 0 || nr >= SMP_CORES || !scheduler_up)
         return;
 
-    struct task64 *t = kmalloc(sizeof(*t));
+    struct task64 *t = task_alloc();
     if (!t)
         return;
     t->stack = NULL;             /* its stack comes from the boot trampoline */
@@ -714,7 +748,18 @@ void task_core_enter(int nr)
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
-        t->maps[i].start = t->maps[i].end = 0;
+        /* The whole entry, not only its ends: 'blocks' is a pointer
+           that gets freed when the mapping goes, and a pointer left
+           unset is whatever was in that memory before - a free of
+           something that was never allocated. It waited a long time
+           for a heap that handed out a block with rubbish in it. */
+        {
+            t->maps[i].start = t->maps[i].end = 0;
+            t->maps[i].size = 0;
+            t->maps[i].nblocks_of = 0;
+            t->maps[i].blocks = (void *)0;
+            t->maps[i].write = 0;
+        }
     t->fpu = fpu64_alloc();
     t->cwd = FS_ROOT;
     t->level = USER_ADMIN;       /* a kernel thread is the kernel */

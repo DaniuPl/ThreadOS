@@ -97,6 +97,21 @@ void kfree(void *ptr)
     irqflags_t flags = spin_lock_irq(&lock);
 
     struct block *b = (struct block *)(addr - sizeof(struct block));
+    /* A pointer that is not a block of ours: the header in front of it
+       would have to be a size, a free flag and a link into the heap.
+       Freeing it would put rubbish into the list and the next kfree
+       would walk off into nowhere - which is exactly what happened,
+       and took a while to find, because the crash was in kfree and the
+       fault was somewhere else entirely. Saying so is worth more than
+       carrying on. */
+    if (b->free > 1 || (b->next && ((uint32_t)(uintptr_t)b->next < heap_start ||
+                                    (uint32_t)(uintptr_t)b->next >= heap_end))) {
+        printk("[sterta] zly blok %x (free=%u next=%x), zwolniony z %x\n",
+               (uint32_t)(uintptr_t)b, b->free, (uint32_t)(uintptr_t)b->next,
+               (uint32_t)(uintptr_t)__builtin_return_address(0));
+        spin_unlock_irq(&lock, flags);
+        return;
+    }
     if (!b->free) {
         b->free = 1;
         used_bytes -= b->size;

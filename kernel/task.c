@@ -96,10 +96,43 @@ struct task {
     int exit_code;              /* the code returned by task_exit */
     int killed;                 /* a pending kill */
     char name[NAME_MAX];
+    void *raw;                  /* what kmalloc gave, before aligning */
     void *stack;                /* NULL for the main thread (stack from boot.S) */
     struct file_desc fds[TASK_MAX_FD];
     struct task *next;
 };
+
+/* A task structure gets a cache line to itself.
+ *
+ * The first words of it - the stack pointer and the state - are
+ * written on every context switch, by whichever core is running that
+ * task. Two structures sharing a line means two cores writing into one
+ * line, and then the line spends its time travelling between them: it
+ * cost ten times the running time of four kernel threads. Worse, it
+ * did or did not happen depending on where the heap's blocks fell,
+ * which depends on the size of code that has nothing to do with any of
+ * it - four lines added to the keyboard map were enough to flip it.
+ *
+ * The heap aligns to eight, so we ask for a line more and step forward
+ * to the boundary ourselves, keeping the address to give back. */
+#define CACHELINE 64
+
+static struct task *task_alloc(void)
+{
+    char *raw = kmalloc(sizeof(struct task) + CACHELINE);
+    if (!raw)
+        return (struct task *)0;
+    uintptr_t at = ((uintptr_t)raw + CACHELINE - 1) & ~(uintptr_t)(CACHELINE - 1);
+    struct task *t = (struct task *)at;
+    t->raw = raw;
+    return t;
+}
+
+static void task_free(struct task *t)
+{
+    if (t)
+        kfree(t->raw);
+}
 
 /* The boot stack from boot.S - the main thread carries on using it */
 extern char stack_top[];
@@ -287,7 +320,7 @@ static void task_trampoline(void)
 
 void scheduler_init(void)
 {
-    struct task *main_task = kmalloc(sizeof(*main_task));
+    struct task *main_task = task_alloc();
     main_task->id = next_id++;
     task_set_name(main_task, "main");
     main_task->state = TASK_RUNNING;
@@ -327,7 +360,7 @@ int task_scheduler_ready(void)
 
 struct task *task_create(const char *name, void (*entry)(void *), void *arg)
 {
-    struct task *t = kmalloc(sizeof(*t));
+    struct task *t = task_alloc();
     t->stack = kmalloc(STACK_SIZE);
     t->kstack_top = (uint32_t)t->stack + STACK_SIZE;
     t->cr3 = paging_kernel_cr3();
@@ -336,7 +369,18 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
     t->brk_base = 0;
     t->mmap_next = 0;
     for (int i = 0; i < MMAP_FILES; i++)
-        t->maps[i].start = t->maps[i].end = 0;
+        /* The whole entry, not only its ends: 'blocks' is a pointer
+           that gets freed when the mapping goes, and a pointer left
+           unset is whatever was in that memory before - a free of
+           something that was never allocated. It waited a long time
+           for a heap that handed out a block with rubbish in it. */
+        {
+            t->maps[i].start = t->maps[i].end = 0;
+            t->maps[i].size = 0;
+            t->maps[i].nblocks_of = 0;
+            t->maps[i].blocks = (void *)0;
+            t->maps[i].write = 0;
+        }
     t->cwd = current ? current->cwd : -1;  /* the child inherits cwd */
     /* Started from a shell, a program gets the shell's level; started
        by another program, the level that one had. The kernel shell is
@@ -690,7 +734,7 @@ static void reap_zombies(void)
                 if (z->maps[i].blocks)
                     kfree(z->maps[i].blocks);
             kfree(z->stack);
-            kfree(z);
+            task_free(z);
         } else {
             t = t->next;
         }
@@ -839,7 +883,7 @@ void task_core_enter(int nr)
     if (nr <= 0 || nr >= SMP_CORES || !scheduler_up)
         return;
 
-    struct task *t = kmalloc(sizeof(*t));
+    struct task *t = task_alloc();
     if (!t)
         return;
     t->id = -nr;                 /* a negative number: this is not a process */
@@ -853,7 +897,18 @@ void task_core_enter(int nr)
     t->owns_dir = 0;
     t->brk = t->brk_base = t->mmap_next = 0;
     for (int i = 0; i < MMAP_FILES; i++)
-        t->maps[i].start = t->maps[i].end = 0;
+        /* The whole entry, not only its ends: 'blocks' is a pointer
+           that gets freed when the mapping goes, and a pointer left
+           unset is whatever was in that memory before - a free of
+           something that was never allocated. It waited a long time
+           for a heap that handed out a block with rubbish in it. */
+        {
+            t->maps[i].start = t->maps[i].end = 0;
+            t->maps[i].size = 0;
+            t->maps[i].nblocks_of = 0;
+            t->maps[i].blocks = (void *)0;
+            t->maps[i].write = 0;
+        }
     t->cwd = -1;
     t->level = USER_ADMIN;       /* a kernel thread is the kernel */
     t->parent = -1;
