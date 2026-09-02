@@ -533,6 +533,15 @@ static int clock_x(void)
  * buttons. */
 #define TB_LOAD_BAR 40
 
+/* "Show the desktop": everything out of the way, and then everything
+   back. The second click is the whole of the idea - a button that only
+   hides windows is a button that costs you your work arrangement, and
+   nobody presses it twice. So which windows were hidden BY IT is
+   remembered, and only those come back; a window minimised by hand
+   stays minimised, because that was somebody's decision. */
+#define SHOW_W 12
+static unsigned hidden_by_show;   /* a bit per window slot */
+
 /* The reading itself, refreshed about once a second - memory does not
    change fast enough to be worth a fresh count sixty times a second,
    and every count walks the task list under a lock. */
@@ -894,6 +903,33 @@ static void desk_take(int d)
 #define DESK_CELL 12
 static int desk_x0(void) { return video_w() - DESK_N * DESK_CELL - 3; }
 
+static int show_x(void)
+{
+    return desk_x0() - TB_LOAD_BAR - 8 - 6 - SHOW_W;
+}
+
+static void toggle_show_desktop(void)
+{
+    if (hidden_by_show) {                 /* bring back what it hid */
+        for (int i = 0; i < MAX_WIN; i++)
+            if (hidden_by_show & (1u << i)) {
+                if (wins[i].used)
+                    wins[i].minimized = 0;
+            }
+        hidden_by_show = 0;
+        return;
+    }
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!here(i) || wins[i].minimized)
+            continue;
+        wins[i].minimized = 1;
+        hidden_by_show |= 1u << i;
+        if (focus_idx == i)
+            focus_idx = -1;
+    }
+}
+
+
 /* Which window is under that point, or -1. Asked from the top of the
    pile down, because that is the one a person sees there. The top bar
    and the desktop below it are DRAWN under the windows, so what is
@@ -973,6 +1009,24 @@ static int snap_where(int i, int mx, int my)
    left-button press edge, so that one click = one action. */
 static int prev_right;      /* the previous right-button state */
 
+/* Frames since the desktop started - the compositor's own clock, and
+   the only one it needs: everything here happens in frames. */
+static uint32_t frames;
+
+/* Two clicks on the same title bar, close together in time, are one
+   gesture: fill the screen, or give the window its size back. Every
+   system does this, and a person who has used one tries it here within
+   the first minute.
+ *
+ * "Close together" is twenty frames - about six tenths of a second at
+ * the thirty-three this desktop draws. That is the value every system
+ * settles near: shorter and a hand misses it on a machine that is
+ * busy, longer and two separate clicks (which is how a window is
+ * raised, then raised again) start counting as one gesture. */
+#define DOUBLE_FRAMES 20
+static uint32_t last_title_click;
+static int last_title_win = -1;
+
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
@@ -995,6 +1049,12 @@ static void handle_input(int mx, int my, int buttons)
     if (pressed && !prev_pressed) {     /* a press edge = a click */
         /* The desktop switch on the top bar, which is above everything
            the way the bar itself is */
+        if (my < 10 && mx >= show_x() && mx < show_x() + SHOW_W &&
+            window_at(mx, my) < 0) {
+            toggle_show_desktop();
+            prev_pressed = pressed;
+            return;
+        }
         if (my < 10 && mx >= desk_x0() && window_at(mx, my) < 0) {
             int d = (mx - desk_x0()) / DESK_CELL;
             if (d >= 0 && d < DESK_N)
@@ -1114,6 +1174,15 @@ static void handle_input(int mx, int my, int buttons)
                cursor at the same place along its bar, so it does not
                jump out from under the hand. */
             if (on_titlebar(w, mx, my)) {
+                if (last_title_win == i &&
+                    frames - last_title_click <= DOUBLE_FRAMES) {
+                    last_title_win = -1;      /* one gesture, once */
+                    toggle_max(i);
+                    hit = 1;
+                    break;
+                }
+                last_title_win = i;
+                last_title_click = frames;
                 if (w->maxed) {
                     int along = w->w > 0 ? (mx - w->x) * w->rw / w->w : 0;
                     toggle_max(i);
@@ -2080,6 +2149,21 @@ static void desktop_thread(void *arg)
         video_fill_rect(0, 9, video_w(), 1, COL_LINE);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
 
+        /* Everything out of the way, and everything back: a screen
+           with a window on it, drawn small. */
+        int sx = show_x();
+        video_fill_rect(sx, 1, SHOW_W, 8, hidden_by_show ? COL_TITLE
+                                                         : COL_TBBTN_OFF);
+        video_fill_rect(sx, 1, SHOW_W, 1, COL_LINE);
+        video_fill_rect(sx, 8, SHOW_W, 1, COL_LINE);
+        video_fill_rect(sx, 1, 1, 8, COL_LINE);
+        video_fill_rect(sx + SHOW_W - 1, 1, 1, 8, COL_LINE);
+        video_fill_rect(sx + 3, 3, SHOW_W - 6, 4,
+                        hidden_by_show ? COL_WHITE : COL_LINE);
+        if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, 10))
+            hint_at(sx - 40, 12, hidden_by_show ? "Przywroc okna"
+                                                : "Pokaz pulpit");
+
         /* How much of the machine is in use, next to which desktop
            this is: both are things that are always true. */
         load_refresh();
@@ -2168,6 +2252,7 @@ static void desktop_thread(void *arg)
         draw_cursor(mx, my);
 
         video_present();                      /* the finished frame -> the screen */
+        frames++;
         task_sleep(30);                       /* ~33 frames/s */
     }
 }

@@ -3468,3 +3468,21 @@ sprawdzane przez `make test`.
       jednym 'cd', a zacheta i tytul maja mowic to samo.
 
       Dwa jadra, dwa numery wywolania, jedna funkcja w kompozytorze.
+
+- [x] **Podwojny klik i "pokaz pulpit"** - dwa odruchy, ktore czlowiek
+      sprawdza w pierwszej minucie.
+
+      Dwa klikniecia w ten sam pasek tytulu, blisko siebie w czasie, to
+      jeden gest: na caly ekran albo z powrotem. "Blisko siebie" to
+      dwadziescia klatek, czyli okolo szesc dziesiatych sekundy przy
+      trzydziestu trzech klatkach na sekunde - wartosc, przy ktorej
+      osiada kazdy system. Krocej i reka nie trafia na zajetej maszynie,
+      dluzej i dwa osobne klikniecia (bo tak sie podnosi okno) zaczynaja
+      liczyc sie jako jeden gest. Pierwsza wersja miala dwanascie klatek
+      i nie dalo sie w nia trafic.
+
+      Przycisk "pokaz pulpit" na gornej belce chowa wszystkie okna, a
+      drugim kliknieciem przywraca DOKLADNIE te, ktore schowal. To jest
+      cala rzecz: przycisk, ktory tylko chowa, kosztuje uklad okien i
+      nikt go nie nacisnie drugi raz. Okno zwiniete recznie zostaje
+      zwiniete, bo to byla czyjas decyzja.
