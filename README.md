@@ -72,8 +72,8 @@ manager that lists sizes, walks into directories and back out, hands a
 file to the editor and throws one away when asked twice, a web browser, a task manager that lists what is
 running and ends a program that has stopped answering (it refuses to
 end a kernel thread, or itself), a text editor — a white page with a caret, a
-status line that is the whole of its interface, Ctrl+S, Ctrl+O and Ctrl+F that searches and goes round the end of the
-file, the desktop's own clipboard, a file named on the command line opened at
+status line that is the whole of its interface, Ctrl+S, Ctrl+O, Ctrl+F that searches and goes round the end of the
+file, Ctrl+Z that takes back the last hundred and twenty changes, the desktop's own clipboard, a file named on the command line opened at
 once, and an "Edytuj" button in the file manager that hands a file to
 it — and a settings window whose changes
 survive a restart. The terminal in a window is a dark screen with light text and

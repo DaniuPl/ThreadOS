@@ -107,6 +107,17 @@ static void num(char *d, int v)      /* a small unsigned number */
 
 /* --- the buffer ------------------------------------------------- */
 
+/* How far back one can go; the log itself is described below, where
+   the steps are written. */
+#define UNDO_N 120
+struct step {
+    unsigned char kind;
+    short line, col;
+    char ch;
+};
+static struct step log[UNDO_N];
+static int log_n;
+
 static void clear_all(void)
 {
     for (int i = 0; i < MAXL; i++)
@@ -115,6 +126,82 @@ static void clear_all(void)
     cy = cx = top = hoff = 0;
     dirty = 0;
     warned = 0;
+    log_n = 0;              /* another file, another history */
+}
+
+/* Taking it back.
+ *
+ * An editor without an undo is an editor one types in carefully, and
+ * typing carefully is slower than typing and fixing. What is kept is
+ * not the file but the CHANGES to it: a character put in, a character
+ * taken out, a line split, two lines joined. Each of the four has an
+ * obvious opposite, and doing the opposite in reverse order is the
+ * whole of it - a hundred and twenty steps back cost two kilobytes,
+ * where two hundred copies of the file would cost four megabytes.
+ *
+ * The oldest step is dropped when the log fills. A person who has
+ * typed a hundred and twenty things since the mistake is not looking
+ * for that mistake any more. */
+#define U_INS   1     /* a character was put in at (line,col) */
+#define U_DEL   2     /* a character was taken out of (line,col) */
+#define U_SPLIT 3     /* the line was split at (line,col) */
+#define U_JOIN  4     /* line+1 was joined onto line at col */
+
+static void record(int kind, int line, int col, char ch)
+{
+    if (log_n == UNDO_N) {         /* drop the oldest */
+        for (int i = 1; i < UNDO_N; i++)
+            log[i - 1] = log[i];
+        log_n--;
+    }
+    log[log_n].kind = (unsigned char)kind;
+    log[log_n].line = (short)line;
+    log[log_n].col = (short)col;
+    log[log_n].ch = ch;
+    log_n++;
+}
+
+/* The two operations on lines, written once: the editing keys use
+   them, and so does the undo, in the other direction. */
+static void split_at(int line, int col)
+{
+    if (nlines >= MAXL || line < 0 || line >= nlines)
+        return;
+    for (int i = nlines; i > line + 1; i--) {
+        ecopy(text[i], text[i - 1], MAXC);
+        llen[i] = llen[i - 1];
+    }
+    nlines++;
+    int rest = llen[line] - col;
+    if (rest < 0)
+        rest = 0;
+    for (int i = 0; i < rest; i++)
+        text[line + 1][i] = text[line][col + i];
+    text[line + 1][rest] = '\0';
+    llen[line + 1] = rest;
+    text[line][col] = '\0';
+    llen[line] = col;
+}
+
+/* Joins line+1 onto line; returns where the seam is. */
+static int join_at(int line)
+{
+    if (line < 0 || line + 1 >= nlines)
+        return -1;
+    int at = llen[line];
+    for (int i = 0; i < llen[line + 1] && at + i < MAXC; i++)
+        text[line][at + i] = text[line + 1][i];
+    int total = at + llen[line + 1];
+    llen[line] = total > MAXC ? MAXC : total;
+    text[line][llen[line]] = '\0';
+    for (int i = line + 1; i < nlines - 1; i++) {
+        ecopy(text[i], text[i + 1], MAXC);
+        llen[i] = llen[i + 1];
+    }
+    nlines--;
+    if (nlines < 1)
+        nlines = 1;
+    return at;
 }
 
 static void insert_char(char c)
@@ -126,6 +213,7 @@ static void insert_char(char c)
     text[cy][cx] = c;
     llen[cy]++;
     text[cy][llen[cy]] = '\0';
+    record(U_INS, cy, cx, c);
     cx++;
     dirty = 1;
 }
@@ -135,18 +223,8 @@ static void split_line(void)
 {
     if (nlines >= MAXL)
         return;
-    for (int i = nlines; i > cy + 1; i--) {
-        ecopy(text[i], text[i - 1], MAXC);
-        llen[i] = llen[i - 1];
-    }
-    nlines++;
-    int rest = llen[cy] - cx;
-    for (int i = 0; i < rest; i++)
-        text[cy + 1][i] = text[cy][cx + i];
-    text[cy + 1][rest] = '\0';
-    llen[cy + 1] = rest;
-    text[cy][cx] = '\0';
-    llen[cy] = cx;
+    split_at(cy, cx);
+    record(U_SPLIT, cy, cx, 0);
     cy++;
     cx = 0;
     dirty = 1;
@@ -157,30 +235,72 @@ static void split_line(void)
 static void backspace(void)
 {
     if (cx > 0) {
+        char gone = text[cy][cx - 1];
         for (int i = cx - 1; i < llen[cy]; i++)
             text[cy][i] = text[cy][i + 1];
         llen[cy]--;
         cx--;
+        record(U_DEL, cy, cx, gone);
         dirty = 1;
         return;
     }
     if (cy == 0)
         return;
-    int up = cy - 1, at = llen[up];
-    for (int i = 0; i < llen[cy] && at + i < MAXC; i++)
-        text[up][at + i] = text[cy][i];
-    llen[up] = at + llen[cy] > MAXC ? MAXC : at + llen[cy];
-    text[up][llen[up]] = '\0';
-    for (int i = cy; i < nlines - 1; i++) {
-        ecopy(text[i], text[i + 1], MAXC);
-        llen[i] = llen[i + 1];
-    }
-    nlines--;
-    if (nlines < 1)
-        nlines = 1;
+    int up = cy - 1;
+    int at = join_at(up);
+    if (at < 0)
+        return;
+    record(U_JOIN, up, at, 0);
     cy = up;
     cx = at;
     dirty = 1;
+}
+
+/* One step back: the opposite of the last thing done. */
+static void undo_one(void)
+{
+    if (!log_n) {
+        ecopy(note, "nie ma czego cofnac", sizeof(note) - 1);
+        return;
+    }
+    struct step st = log[--log_n];
+    switch (st.kind) {
+    case U_INS:                     /* it was put in - take it out */
+        cy = st.line;
+        cx = st.col;
+        if (cy < nlines && cx < llen[cy]) {
+            for (int i = cx; i < llen[cy]; i++)
+                text[cy][i] = text[cy][i + 1];
+            llen[cy]--;
+        }
+        break;
+    case U_DEL:                     /* it was taken out - put it back */
+        cy = st.line;
+        cx = st.col;
+        if (cy < nlines && llen[cy] < MAXC) {
+            for (int i = llen[cy]; i > cx; i--)
+                text[cy][i] = text[cy][i - 1];
+            text[cy][cx] = st.ch;
+            llen[cy]++;
+            text[cy][llen[cy]] = '\0';
+            cx++;
+        }
+        break;
+    case U_SPLIT:                   /* it was split - join it back */
+        join_at(st.line);
+        cy = st.line;
+        cx = st.col;
+        break;
+    case U_JOIN:                    /* it was joined - split it back */
+        split_at(st.line, st.col);
+        cy = st.line + 1;
+        cx = 0;
+        break;
+    default:
+        break;
+    }
+    dirty = 1;
+    ecopy(note, "cofniete", sizeof(note) - 1);
 }
 
 static void insert_text(const char *s, int n)
@@ -474,6 +594,9 @@ static void edit_key(char c)
         asking = ASK_FIND;
         alen = 0;
         return;
+    case KEY_UNDO:
+        undo_one();
+        return;
     case KEY_UP:
         if (cy > 0)
             cy--;
@@ -553,8 +676,8 @@ void _start(int argc, char **argv)
     winid = win;
 
     clear_all();
-    ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje, Ctrl+F szuka",
-          sizeof(note) - 1);
+    ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje, Ctrl+F szuka, "
+                "Ctrl+Z cofa", sizeof(note) - 1);
     /* Started with a name - 'gedit notatka' - it opens that file at
        once. Making a person type the name a second time, in the
        program they have just told which file they mean, is the sort of

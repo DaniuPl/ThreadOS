@@ -3557,3 +3557,22 @@ sprawdzane przez `make test`.
 
       Trzeci kod klawisza dla jadra: Ctrl+F. Jadro dalej wie tylko tyle,
       ze klawisze padly.
+
+- [x] **Ctrl+Z w edytorze** - bo edytor bez cofania to edytor, w ktorym
+      pisze sie ostroznie, a ostrozne pisanie jest wolniejsze niz pisanie
+      i poprawianie.
+
+      Pamieta sie nie PLIK, tylko ZMIANY: znak wstawiony, znak usuniety,
+      wiersz rozdzielony, dwa wiersze zlaczone. Kazda z tych czterech ma
+      oczywiste przeciwienstwo, a robienie przeciwienstw w odwrotnej
+      kolejnosci jest calym cofaniem. Sto dwadziescia krokow wstecz
+      kosztuje dwa kilobajty; dwiescie kopii pliku kosztowaloby cztery
+      megabajty.
+
+      Najstarszy krok wypada, gdy log sie zapelni. Kto napisal od tamtej
+      pomylki sto dwadziescia rzeczy, nie szuka juz tamtej pomylki.
+
+      Przy okazji dwie operacje na wierszach - rozdziel i zlacz -
+      zostaly wypisane raz, jako split_at() i join_at(): uzywaja ich i
+      klawisze, i cofanie, tylko w druga strone. Wczesniej ta sama
+      robota byla wpisana w Enter i w Backspace osobno.

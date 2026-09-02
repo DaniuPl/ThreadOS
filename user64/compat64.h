@@ -46,6 +46,7 @@ static inline int32_t u_open(const char *name, int flags)
  * They have to match kernel/include/keyboard.h - it is the kernel that
  * puts these codes into the queue, and the shared kernel/kbdmap.c that
  * translates them. */
+#define KEY_UNDO  0x0E      /* Ctrl+Z */
 #define KEY_FIND  0x07      /* Ctrl+F */
 #define KEY_SAVE  0x05      /* Ctrl+S */
 #define KEY_OPEN  0x06      /* Ctrl+O */
