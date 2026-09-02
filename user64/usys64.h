@@ -64,6 +64,7 @@
 #define SYS64_CLIP_GET   51
 #define SYS64_WIN_KEEP   52
 #define SYS64_PS         53
+#define SYS64_WIN_TITLE  54
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -632,6 +633,12 @@ static inline int64_t sys_ps(int index, struct psinfo *out)
 
 /* The answer to WEV_CLOSE: "I heard, and I am not closing yet" - the
    desktop stops counting down. Silence still costs the window. */
+/* Renames the window - the title bar and the taskbar's hint alike. */
+static inline int64_t win_title(int win, const char *title)
+{
+    return syscall64(SYS64_WIN_TITLE, win, (int64_t)(uintptr_t)title);
+}
+
 static inline int64_t win_keep(int win)
 {
     return syscall64(SYS64_WIN_KEEP, win, 0);

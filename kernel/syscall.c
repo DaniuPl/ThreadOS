@@ -421,6 +421,15 @@ void syscall_handler(struct regs *r)
             r->eax = 0;
         break;
     }
+    case SYS_WIN_TITLE: {
+        char title[64];
+        if (user_str(title, r->ecx, sizeof(title)) < 0)
+            r->eax = EFAULT;
+        else
+            r->eax = (uint32_t)desktop_win_title((int)r->ebx,
+                                                 task_current_id(), title);
+        break;
+    }
     case SYS_WIN_KEEP:
         r->eax = (uint32_t)desktop_win_keep((int)r->ebx, task_current_id());
         break;

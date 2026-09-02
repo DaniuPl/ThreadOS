@@ -3454,3 +3454,17 @@ sprawdzane przez `make test`.
 
       Liczba zadan: task_count() w obu jadrach - 64-bitowe mialo ja od
       dawna, 32-bitowe dostalo teraz.
+
+- [x] **Okno mowi, co ma otwarte** - bo trzy okna nazwane "Edytor" to
+      trzy okna do sprawdzenia po kolei.
+
+      Nowe wywolanie win_title(okno, napis): program zmienia nazwe
+      swojego okna. Pasek tytulu i podpowiedz na pasku zadan czytaja to
+      samo pole, wiec jedno wywolanie zalatwia oba miejsca.
+
+      Edytor mowi teraz "Edytor: notatka" - po wczytaniu i po zapisie,
+      bo dopiero wtedy plik ma nazwe. Terminal mowi "Terminal: /kat",
+      i robi to tam, gdzie i tak buduje zachete: katalog zmienia sie
+      jednym 'cd', a zacheta i tytul maja mowic to samo.
+
+      Dwa jadra, dwa numery wywolania, jedna funkcja w kompozytorze.

@@ -64,6 +64,7 @@
 #define SYS_CLIP_GET   57
 #define SYS_WIN_KEEP   58
 #define SYS_PS         59
+#define SYS_WIN_TITLE  60
 
 #define FS_NAME_MAX  63
 
@@ -576,6 +577,19 @@ static inline int32_t sys_ps(int index, struct psinfo *out)
    desktop stops counting down, and the program has the time it needs
    to ask about an unsaved file. A program that says nothing still
    loses its window - that is what the countdown is for. */
+/* Renames the window - what the title bar says, and what the taskbar
+   says under the pointer. A program with a file open should say which
+   one. */
+static inline int32_t win_title(int winid, const char *title)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_TITLE), "b"(winid), "c"(title)
+                     : "memory");
+    return ret;
+}
+
 static inline int32_t win_keep(int winid)
 {
     int32_t ret;

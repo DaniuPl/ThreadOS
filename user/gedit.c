@@ -190,6 +190,31 @@ static void insert_text(const char *s, int n)
 
 /* --- the file ---------------------------------------------------- */
 
+/* What the window is called: the program, and the file it holds. Three
+   editors open on three files are three windows called "Edytor"
+   otherwise - and the taskbar shows the same name under the pointer,
+   so this is the difference between finding a window and hunting for
+   it. */
+static int winid = -1;
+
+static void retitle(void)
+{
+    char t[NAME_MAX + 12];
+    int p = 0;
+    const char *pre = "Edytor";
+    for (int i = 0; pre[i]; i++)
+        t[p++] = pre[i];
+    if (fname[0]) {
+        t[p++] = ':';
+        t[p++] = ' ';
+        for (int i = 0; fname[i] && p < (int)sizeof(t) - 1; i++)
+            t[p++] = fname[i];
+    }
+    t[p] = '\0';
+    if (winid >= 0)
+        win_title(winid, t);
+}
+
 static void save_to(const char *name)
 {
     int fd = (int)sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
@@ -207,6 +232,7 @@ static void save_to(const char *name)
     dirty = 0;
     warned = 0;
     ecopy(note, "zapisano", sizeof(note) - 1);
+    retitle();
 }
 
 static void load_from(const char *name)
@@ -244,6 +270,7 @@ static void load_from(const char *name)
     dirty = 0;
     ecopy(fname, name, NAME_MAX);
     ecopy(note, "wczytano", sizeof(note) - 1);
+    retitle();
 }
 
 /* --- drawing ------------------------------------------------------ */
@@ -457,6 +484,7 @@ void _start(int argc, char **argv)
     int win = (int)win_create(W0, H0, "Edytor");
     if (win < 0)
         sys_exit(1);
+    winid = win;
 
     clear_all();
     ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje", sizeof(note) - 1);

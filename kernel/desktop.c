@@ -1903,6 +1903,23 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
     return -1;
 }
 
+/* A window's name, changed by the program that owns it.
+ *
+ * A window called "Edytor" says what the program is; a window called
+ * "Edytor: notatka" says which of the three open ones you are looking
+ * for - and that is what a title bar is FOR. The name is also what the
+ * taskbar shows under the pointer, so one call fixes both at once. */
+int desktop_win_title(int winid, int owner, const char *title)
+{
+    if (winid < 0 || winid >= MAX_WIN || !title)
+        return -1;
+    struct window *w = &wins[winid];
+    if (!w->used || !w->content || w->owner != owner)
+        return -1;
+    set_title(w, title);
+    return 0;
+}
+
 /* "I heard, and I am not closing yet."
  *
  * Closing is a REQUEST - it always was, and the countdown after it was

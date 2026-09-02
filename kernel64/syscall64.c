@@ -934,6 +934,16 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_WIN_TITLE: {
+        char title[64];
+        if (text_from_ring3(a2, title, sizeof(title)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_win_title(
+            (int)a1, task64_current_id(), title);
+        return;
+    }
     case SYS64_WIN_KEEP:
         r->rax = (uint64_t)(int64_t)desktop_win_keep((int)a1,
                                                      task64_current_id());

@@ -18,5 +18,7 @@ int desktop_win_poll(int winid, int owner, void *out);
    request to decline, 0 when there was none, -1 for a window that is
    not the caller's. */
 int desktop_win_keep(int winid, int owner);
+/* The window's name, as the program that owns it wants it read. */
+int desktop_win_title(int winid, int owner, const char *title);
 
 #endif

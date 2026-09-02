@@ -65,7 +65,9 @@ an application may answer "not yet" and keep its window (the editor
 does, when the file has unsaved changes), and the compositor insists on
 silence alone — twelve of them at once, on a taskbar that
 shares its width out among their buttons instead of letting them run
-off the edge, with a clock at its right-hand end. Icons, a file
+off the edge, with a clock at its right-hand end. A window can be renamed by the program
+that owns it, so the editor's title says which file it holds and the
+terminal's says where it is standing. Icons, a file
 manager, a web browser, a task manager that lists what is
 running and ends a program that has stopped answering (it refuses to
 end a kernel thread, or itself), a text editor — a white page with a caret, a

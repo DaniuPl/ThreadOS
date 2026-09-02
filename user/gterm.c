@@ -76,6 +76,7 @@ static int  hist_n;            /* how many commands are remembered */
 static int  hist_pos;          /* where we are walking through them */
 
 static char prompt[48];
+static int  term_win = -1;     /* the window, so the prompt can rename it */
 static int  plen;
 
 /* Asking for the password: the next line typed is not a command but a
@@ -438,6 +439,21 @@ static void refresh_prompt(void)
     prompt[i++] = ' ';
     prompt[i] = 0;
     plen = i;
+
+    /* And the window says where it is standing. Two terminals in two
+       directories are two windows called "Terminal" otherwise - and it
+       is the taskbar, which shows this name under the pointer, that
+       has to tell them apart. */
+    char t[48];
+    int n = 0;
+    const char *pre = "Terminal: ";
+    for (int k = 0; pre[k]; k++)
+        t[n++] = pre[k];
+    for (int k = 0; dir[k] && n < (int)sizeof(t) - 1; k++)
+        t[n++] = dir[k];
+    t[n] = 0;
+    if (term_win >= 0)
+        win_title(term_win, t);
 }
 
 /* Shows whatever the running program has written since the last look.
@@ -1038,6 +1054,7 @@ static void draw(int w)
 void _start(void)
 {
     int w = (int)win_create(W0, H0, "Terminal");
+    term_win = w;
     if (w < 0)
         sys_exit(1);
 
