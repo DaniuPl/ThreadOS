@@ -1343,6 +1343,22 @@ const char *task_current_name(void)
     return current ? current->name : "(brak)";
 }
 
+/* How many tasks there are. The desktop asks once a second, for a
+   number on the bar - so it walks the list rather than keeping a
+   counter that every birth and death would have to remember. */
+int task_count(void)
+{
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    int n = 0;
+    do {
+        n++;
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+    return n;
+}
+
 /* One entry of the task list, as a program in ring 3 sees it.
  *
  * The shell has had 'ps' from the beginning, but it prints - and a

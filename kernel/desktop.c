@@ -21,6 +21,7 @@
 #include "include/config.h"
 #include "include/rtc.h"
 #include "include/printk.h"
+#include "include/pmm.h"
 
 /* Desktop palette indices (set in desktop_thread)
  *
@@ -516,6 +517,43 @@ static void menu_at(int x, int y)
 static int clock_x(void)
 {
     return bar_x0() + bar_w() - TB_CLOCK_W + 3;
+}
+
+/* How much of the machine is in use.
+ *
+ * A number would say "4128 KiB", which is a thing to read; a bar
+ * filled to a third is a thing to SEE. The exact figures - how much
+ * memory, of how much, and how many tasks are behind it - are one
+ * hover away, so the strip stays quiet until it is asked.
+ *
+ * It goes on the top bar, next to the desktop switch, because that
+ * strip is where things that are ALWAYS true live: which desktop this
+ * is, and how much of the machine is spoken for. The taskbar below is
+ * for windows, and a meter there would be one more thing squeezing the
+ * buttons. */
+#define TB_LOAD_BAR 40
+
+/* The reading itself, refreshed about once a second - memory does not
+   change fast enough to be worth a fresh count sixty times a second,
+   and every count walks the task list under a lock. */
+static int load_percent;
+static int load_used_mib, load_ram_mib, load_tasks;
+static int load_wait;
+
+static void load_refresh(void)
+{
+    if (--load_wait > 0)
+        return;
+    load_wait = 30;                    /* ~ once a second at 33 fps */
+
+    uint32_t ram_kib = pmm_ram_kib();
+    uint32_t used_kib = pmm_used_frames() * 4;
+    if (used_kib > ram_kib)
+        used_kib = ram_kib;
+    load_percent = ram_kib ? (int)((used_kib * 100) / ram_kib) : 0;
+    load_used_mib = (int)(used_kib / 1024);
+    load_ram_mib = (int)(ram_kib / 1024);
+    load_tasks = task_count();
 }
 
 #define TBL_W_MAX 22                  /* a picture and air on both sides */
@@ -1512,6 +1550,23 @@ static void draw_icons(void)
  * to do thirty times a second for a digit that changes once a second.
  * The reading is kept and refreshed about five times a second, which is
  * often enough that no second is ever skipped on screen. */
+/* A small unsigned number into a buffer; returns how many characters
+   it wrote. The hint on the bar is the only place that needs one. */
+static int put_num(char *d, int v)
+{
+    char tmp[8];
+    int n = 0;
+    if (v < 0)
+        v = 0;
+    do {
+        tmp[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v && n < 7);
+    for (int i = 0; i < n; i++)
+        d[i] = tmp[n - 1 - i];
+    return n;
+}
+
 static char clock_text[TB_CLOCK_CH + 1] = "--:--:--";
 static int clock_wait;
 
@@ -1539,12 +1594,23 @@ static void clock_refresh(void)
  * Remembered rather than drawn on the spot: it belongs on top of
  * everything, and the buttons are drawn before the menu that may open
  * over them. */
-static int hint_x;
+static int hint_x, hint_y;
 static const char *hint_text;
 
 static void hint_for(int x, const char *text)
 {
     hint_x = x;
+    hint_y = taskbar_y() - 15;        /* just above the bar it belongs to */
+    hint_text = text;
+}
+
+/* The same hint, for something that is not on the taskbar: the top
+   strip has its own things to explain, and a hint that appears at the
+   other end of the screen from what it explains is a riddle. */
+static void hint_at(int x, int y, const char *text)
+{
+    hint_x = x;
+    hint_y = y;
     hint_text = text;
 }
 
@@ -1561,7 +1627,9 @@ static void draw_hint(void)
         x = video_w() - w;
     if (x < 0)
         x = 0;
-    int y = taskbar_y() - 15;
+    int y = hint_y;
+    if (y + 13 > taskbar_y())
+        y = taskbar_y() - 15;
 
     video_fill_rect(x, y, w, 13, COL_WIN);
     video_fill_rect(x, y, w, 1, COL_LINE);
@@ -1617,8 +1685,8 @@ static void draw_taskbar(void)
     /* The clock: no field, no frame - just the time, at the end of the
        bar where nothing else is */
     clock_refresh();
+    load_refresh();
     video_draw_string(clock_x(), ty + (TB_H - 8) / 2, clock_text, COL_BLACK);
-
     if (menu_open) {
         /* One flat panel with a line round it. Every entry is the
            program's own picture and its name - the same picture as on
@@ -1994,6 +2062,56 @@ static void desktop_thread(void *arg)
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_fill_rect(0, 9, video_w(), 1, COL_LINE);
         video_draw_string(2, 1, "ProtonOS", COL_BLACK);
+
+        /* How much of the machine is in use, next to which desktop
+           this is: both are things that are always true. */
+        load_refresh();
+        int lx = desk_x0() - TB_LOAD_BAR - 8, ly = 1;
+        video_fill_rect(lx, ly, TB_LOAD_BAR, 8, COL_TBBTN_OFF);
+        video_fill_rect(lx, ly, TB_LOAD_BAR, 1, COL_LINE);
+        video_fill_rect(lx, ly + 7, TB_LOAD_BAR, 1, COL_LINE);
+        video_fill_rect(lx, ly, 1, 8, COL_LINE);
+        video_fill_rect(lx + TB_LOAD_BAR - 1, ly, 1, 8, COL_LINE);
+        /* The filling goes INSIDE the frame - drawn over it, a reading
+           of a few percent is one column wide and the frame covers
+           exactly that column, so the meter would show nothing until
+           the machine was half full. */
+        int inner = TB_LOAD_BAR - 2;
+        int fill = load_percent * inner / 100;
+        if (fill > inner)
+            fill = inner;
+        if (fill < 1 && load_percent > 0)
+            fill = 1;                 /* something in use looks like it */
+        video_fill_rect(lx + 1, ly + 1, fill, 6, COL_TITLE);
+
+        /* Asked about, it says everything: how much of how much, and
+           how many tasks are behind it. */
+        if (in_rect(mouse_x, mouse_y, lx, 0, TB_LOAD_BAR, 10)) {
+            static char text[40];
+            int n = 0;
+            n += put_num(text + n, load_percent);
+            text[n++] = '%';
+            text[n++] = ' ';
+            text[n++] = '(';
+            n += put_num(text + n, load_used_mib);
+            text[n++] = '/';
+            n += put_num(text + n, load_ram_mib);
+            text[n++] = ' ';
+            text[n++] = 'M';
+            text[n++] = 'i';
+            text[n++] = 'B';
+            text[n++] = ')';
+            text[n++] = ',';
+            text[n++] = ' ';
+            n += put_num(text + n, load_tasks);
+            text[n++] = ' ';
+            text[n++] = 'z';
+            text[n++] = 'a';
+            text[n++] = 'd';
+            text[n++] = '.';
+            text[n] = 0;
+            hint_at(lx - 60, 12, text);
+        }
 
         for (int d = 0; d < DESK_N; d++) {
             int dx = desk_x0() + d * DESK_CELL;

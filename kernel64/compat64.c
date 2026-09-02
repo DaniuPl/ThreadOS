@@ -118,6 +118,13 @@ void keyboard_inject_switch(int vc)
     keyboard64_inject_switch(vc);
 }
 
+/* The desktop asks how many tasks are running - it puts the number on
+   the bar. One word, the same question on both sides. */
+int task_count(void)
+{
+    return task64_count();
+}
+
 void keyboard_set_fkey_override(keyboard_fkey_handler_t handler)
 {
     keyboard64_set_fkey_override(handler);

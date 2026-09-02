@@ -84,7 +84,9 @@ Alt+F4 closes the window that has it — by asking the application, the
 same way its [x] does — the right mouse button opens the launch menu
 where the pointer is, a window dragged against an edge takes that half
 of the screen (or all of it, at the top), with an outline showing where
-it will land before the button is let go, four virtual desktops switch
+it will land before the button is let go, the top strip carries what is always true — which of the four
+desktops this is, and a meter of how much of the machine is spoken for,
+with the figures one hover away — four virtual desktops switch
 with Ctrl+Alt and an arrow — with Shift the focused window comes along,
 and a program on a desktop nobody is looking at goes on running — and
 Ctrl+Insert /

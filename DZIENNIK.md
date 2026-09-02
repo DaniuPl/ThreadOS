@@ -3425,3 +3425,32 @@ sprawdzane przez `make test`.
       Test musial przy okazji odsunac okno menedzera z drogi kaskady -
       bo kazde nowe okno otwiera sie o krok dalej i stanelo nad
       czytana lista. Czlowiek by je przesunal; test tez.
+
+- [x] **Miernik obciazenia na gornej belce** - ile maszyny jest zajete,
+      jednym spojrzeniem.
+
+      Liczba mowi "4128 KiB", czyli jest do PRZECZYTANIA. Pasek
+      wypelniony w jednej trzeciej jest do ZOBACZENIA - a dokladne
+      liczby (ile pamieci, z ilu, i ile zadan za tym stoi) sa jedno
+      najechanie kursorem dalej, wiec belka milczy, dopoki sie jej nie
+      spyta.
+
+      Miejsce: gorna belka, obok przelacznika pulpitow. Tam mieszka to,
+      co jest ZAWSZE prawda - ktory pulpit jest widoczny i ile maszyny
+      jest zajete. Pasek zadan na dole jest dla okien; miernik na nim
+      bylby jeszcze jedna rzecza sciskajaca przyciski (i, jak sie
+      okazalo przy pierwszej wersji, jedna rzecza, ktora testy licza
+      jako przycisk).
+
+      Wypelnienie rysuje sie WEWNATRZ ramki. Narysowane po niej, odczyt
+      kilku procent ma jedna kolumne szerokosci - dokladnie te, ktora
+      zakrywa ramka - wiec miernik nie pokazywalby nic, dopoki maszyna
+      nie bylaby w polowie pelna.
+
+      Podpowiedz umie sie teraz pojawic tam, gdzie stoi to, co
+      tlumaczy: dotad zawsze wychodzila nad paskiem zadan, a
+      podpowiedz na drugim koncu ekranu niz rzecz, ktorej dotyczy, jest
+      zagadka.
+
+      Liczba zadan: task_count() w obu jadrach - 64-bitowe mialo ja od
+      dawna, 32-bitowe dostalo teraz.

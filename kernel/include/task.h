@@ -153,6 +153,7 @@ struct psinfo {
     char name[PS_NAME_MAX];
 };
 int task_ps(int index, struct psinfo *out);
+int task_count(void);
 
 const char *task_current_name(void);
 
