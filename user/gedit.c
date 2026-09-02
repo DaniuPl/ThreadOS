@@ -68,9 +68,14 @@ static int  cw = W0, ch = H0; /* the content area, as the desktop says */
 #define ASK_NONE 0
 #define ASK_SAVE 1
 #define ASK_OPEN 2
+#define ASK_FIND 3
 static int  asking;
 static char answer[NAME_MAX + 1];
 static int  alen;
+/* What was looked for last time. Ctrl+F and Enter on an empty line
+   means "the same thing again", which is what a person expects after
+   the first match is not the one they wanted. */
+static char last_find[NAME_MAX + 1];
 
 static int rows(void) { return (ch - PAD * 2 - STATUS_H) / ROW_H; }
 static int cols(void) { return (cw - PAD * 2) / 8; }
@@ -273,6 +278,57 @@ static void load_from(const char *name)
     retitle();
 }
 
+/* Looks for the text from just after the caret, and goes round the end
+   of the file back to where it started: a search that stops at the
+   bottom is a search one has to think about, and thinking about the
+   search is not what the search is for. */
+static int find_from(const char *what, int line, int col)
+{
+    int n = 0;
+    while (what[n])
+        n++;
+    if (!n)
+        return 0;
+
+    for (int step = 0; step <= nlines; step++) {
+        int l = (line + step) % nlines;
+        int start = step ? 0 : col;
+        for (int c = start; c + n <= llen[l]; c++) {
+            int k = 0;
+            while (k < n && text[l][c + k] == what[k])
+                k++;
+            if (k == n) {
+                cy = l;
+                cx = c;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void find_answer(const char *what)
+{
+    if (!what[0]) {
+        ecopy(note, "nie ma czego szukac", sizeof(note) - 1);
+        return;
+    }
+    ecopy(last_find, what, NAME_MAX);
+    if (find_from(what, cy, cx + 1)) {
+        char n[8];
+        num(n, cy + 1);
+        int p = 0;
+        const char *pre = "znaleziono w wierszu ";
+        for (int i = 0; pre[i]; i++)
+            note[p++] = pre[i];
+        for (int i = 0; n[i]; i++)
+            note[p++] = n[i];
+        note[p] = '\0';
+    } else {
+        ecopy(note, "nie znaleziono", sizeof(note) - 1);
+    }
+}
+
 /* --- drawing ------------------------------------------------------ */
 
 static void scroll_to_caret(void)
@@ -331,7 +387,9 @@ static void draw(int win)
     char line[80];
     int p = 0;
     if (asking) {
-        const char *q = asking == ASK_SAVE ? "Zapisz jako: " : "Otworz: ";
+        const char *q = asking == ASK_SAVE ? "Zapisz jako: "
+                      : asking == ASK_OPEN ? "Otworz: "
+                                           : "Szukaj: ";
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen; i++)
@@ -373,8 +431,12 @@ static void ask_key(char c)
     if (c == '\n') {
         int which = asking;
         asking = ASK_NONE;
-        if (alen) {
-            answer[alen] = '\0';
+        answer[alen] = '\0';
+        if (which == ASK_FIND) {
+            /* Nothing typed means "the same as last time" - which is
+               how a search is repeated everywhere else. */
+            find_answer(alen ? answer : last_find);
+        } else if (alen) {
             if (which == ASK_SAVE)
                 save_to(answer);
             else
@@ -406,6 +468,10 @@ static void edit_key(char c)
         return;
     case KEY_OPEN:
         asking = ASK_OPEN;
+        alen = 0;
+        return;
+    case KEY_FIND:
+        asking = ASK_FIND;
         alen = 0;
         return;
     case KEY_UP:
@@ -487,7 +553,8 @@ void _start(int argc, char **argv)
     winid = win;
 
     clear_all();
-    ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje", sizeof(note) - 1);
+    ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje, Ctrl+F szuka",
+          sizeof(note) - 1);
     /* Started with a name - 'gedit notatka' - it opens that file at
        once. Making a person type the name a second time, in the
        program they have just told which file they mean, is the sort of

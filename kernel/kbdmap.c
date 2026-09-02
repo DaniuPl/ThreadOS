@@ -159,6 +159,8 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         c = KEY_SAVE;
     if (ctrl_pressed && c == 'o')
         c = KEY_OPEN;
+    if (ctrl_pressed && c == 'f')
+        c = KEY_FIND;
     *out_char = c;
     return KBD_CHAR;
 }

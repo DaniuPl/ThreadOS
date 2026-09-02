@@ -3535,3 +3535,25 @@ sprawdzane przez `make test`.
 
       Obie rzeczy widac na obrazku od razu, a w tescie - dopiero gdyby
       ktos sprawdzil, ile okien sie otworzylo.
+
+- [x] **Ctrl+F w edytorze i Tab w terminalu** - dwa klawisze, bez ktorych
+      pisze sie wolno.
+
+      Ctrl+F pyta w pasku stanu, szuka od miejsca ZA kursorem i okraza
+      koniec pliku, wracajac tam, skad zaczal - szukanie, ktore staje na
+      dole, trzeba obmyslic, a od myslenia o szukaniu nie jest szukanie.
+      Enter przy pustym pytaniu powtarza ostatnie, bo pierwsze trafienie
+      rzadko jest tym, o ktore chodzilo. Mowi, w ktorym wierszu znalazl,
+      albo ze nie znalazl.
+
+      Tab w terminalu konczy slowo spod kursora tym, co lezy na dysku.
+      Jedno dopasowanie konczy slowo, kilka - popycha je tak daleko, jak
+      sie zgadzaja, i wypisuje kandydatow (dalej byloby zgadywaniem,
+      ktore z nich); zadne nie robi nic, bo to jedyna uczciwa
+      odpowiedz. Nazwy bierze z katalogu roboczego, czyli stamtad, skad
+      bierze je shell - wiec dopelnia sie to, co i tak by sie
+      uruchomilo. Gdy program dziala, wiersz nalezy do niego i tabulator
+      jest tabulatorem.
+
+      Trzeci kod klawisza dla jadra: Ctrl+F. Jadro dalej wie tylko tyle,
+      ze klawisze padly.

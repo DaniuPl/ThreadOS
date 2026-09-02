@@ -38,6 +38,7 @@
    a program that writes files has to be able to tell "save" from "s".
    The kernel knows no more than that the keys were pressed - what to do
    with them is the program's business. */
+#define KEY_FIND  0x07      /* Ctrl+F - "find", the third of them */
 #define KEY_SAVE  0x05
 #define KEY_OPEN  0x06
 #define KEY_INTR  0x03

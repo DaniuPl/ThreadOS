@@ -728,6 +728,141 @@ static void take_history(int which)
     icur = ilen;
 }
 
+/* Tab: finish the word being typed from what is on the disk.
+ *
+ * A terminal where a file name has to be typed out in full, correctly,
+ * every time is a terminal one types slowly at. This looks at the word
+ * under the cursor and asks the directory: one match finishes the word,
+ * several push it as far as they agree and then say what they were, and
+ * none does nothing at all - which is the only honest answer.
+ *
+ * The names come from the working directory, which is where the shell
+ * looks too, so what completes is what would have run. */
+#ifdef __x86_64__
+#define TERM_NAME_MAX NAME_MAX64
+#else
+#define TERM_NAME_MAX FS_NAME_MAX
+#endif
+
+static int word_start(void)
+{
+    int i = icur;
+    while (i > 0 && input[i - 1] != ' ')
+        i--;
+    return i;
+}
+
+static void complete_word(void)
+{
+    int start = word_start();
+    int len = icur - start;
+    if (len < 0)
+        return;
+
+    char best[64];
+    int best_len = 0, found = 0;
+
+    for (int idx = 0;; idx++) {
+        char name[TERM_NAME_MAX + 1];
+#ifdef __x86_64__
+        struct dirent64 e;
+        if (sys_readdir(idx, &e) != 0)
+            break;
+        int n = 0;
+        while (e.name[n] && n < TERM_NAME_MAX) {
+            name[n] = e.name[n];
+            n++;
+        }
+        name[n] = 0;
+#else
+        if (sys_readdir(idx, name) == -1)
+            break;
+#endif
+        int match = 1;
+        for (int i = 0; i < len; i++)
+            if (name[i] != input[start + i]) {
+                match = 0;
+                break;
+            }
+        if (!match)
+            continue;
+
+        found++;
+        if (found == 1) {
+            int n = 0;
+            while (name[n] && n < (int)sizeof(best) - 1) {
+                best[n] = name[n];
+                n++;
+            }
+            best[n] = 0;
+            best_len = n;
+        } else {
+            /* As far as they agree, and no further - anything more
+               would be guessing which one was meant. */
+            int n = 0;
+            while (n < best_len && name[n] && best[n] == name[n])
+                n++;
+            best_len = n;
+            best[n] = 0;
+        }
+    }
+
+    if (!found)
+        return;
+
+    /* Several: say what they were, the way a shell does, and then let
+       the person type one more letter. */
+    if (found > 1) {
+        put_str(prompt);
+        input[ilen] = 0;
+        put_str(input);
+        put_char('\n');
+        for (int idx = 0;; idx++) {
+            char name[TERM_NAME_MAX + 1];
+#ifdef __x86_64__
+            struct dirent64 e;
+            if (sys_readdir(idx, &e) != 0)
+                break;
+            int n = 0;
+            while (e.name[n] && n < TERM_NAME_MAX) {
+                name[n] = e.name[n];
+                n++;
+            }
+            name[n] = 0;
+#else
+            if (sys_readdir(idx, name) == -1)
+                break;
+#endif
+            int match = 1;
+            for (int i = 0; i < len; i++)
+                if (name[i] != input[start + i]) {
+                    match = 0;
+                    break;
+                }
+            if (match) {
+                put_str("  ");
+                put_str(name);
+            }
+        }
+        put_char('\n');
+    }
+
+    if (best_len <= len)
+        return;                      /* nothing to add */
+
+    /* Put the finished word in place of the piece that was typed */
+    int tail = ilen - icur;
+    if (start + best_len + tail >= LINE_MAX - 1)
+        return;
+    for (int i = tail - 1; i >= 0; i--)
+        input[start + best_len + i] = input[icur + i];
+    for (int i = 0; i < best_len; i++)
+        input[start + i] = best[i];
+    ilen = start + best_len + tail;
+    icur = start + best_len;
+    input[ilen] = 0;
+}
+
 static void on_key(char c)
 {
     int text_rows = rows - 1;
@@ -770,6 +905,14 @@ static void on_key(char c)
         view -= text_rows / 2 ? text_rows / 2 : 1;
         if (view < 0)
             view = 0;
+        return;
+    }
+
+    /* Tab finishes what is being typed. While a program runs the line
+       is that program's input, and a tab in it is a tab. */
+    if (c == '\t') {
+        if (!running)
+            complete_word();
         return;
     }
 

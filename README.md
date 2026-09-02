@@ -72,12 +72,14 @@ manager that lists sizes, walks into directories and back out, hands a
 file to the editor and throws one away when asked twice, a web browser, a task manager that lists what is
 running and ends a program that has stopped answering (it refuses to
 end a kernel thread, or itself), a text editor — a white page with a caret, a
-status line that is the whole of its interface, Ctrl+S and Ctrl+O, the
-desktop's own clipboard, a file named on the command line opened at
+status line that is the whole of its interface, Ctrl+S, Ctrl+O and Ctrl+F that searches and goes round the end of the
+file, the desktop's own clipboard, a file named on the command line opened at
 once, and an "Edytuj" button in the file manager that hands a file to
 it — and a settings window whose changes
 survive a restart. The terminal in a window is a dark screen with light text and
-a session in it: scrollback, history, a movable cursor, `cd` and pipes,
+a session in it: scrollback, history, a movable cursor, Tab that
+finishes a file name from the directory (and lists the candidates when
+several fit), `cd` and pipes,
 output that appears while the program is still writing it, Ctrl+C to
 stop it, and a pipe into what it started — so the ring 3 shell runs
 inside the terminal window, its children writing where it writes, and
