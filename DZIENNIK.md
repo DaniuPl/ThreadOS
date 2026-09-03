@@ -3752,3 +3752,40 @@ sprawdzane przez `make test`.
 
       Nastepne w kolejce: PNG (inflate to jakies trzysta wierszy i
       przyda sie jeszcze nie raz), potem JPEG baseline.
+
+- [x] **PNG: inflate wlasnej roboty, chunki i piec filtrow** - drugi z
+      trzech formatow z pytania "a co z JPG, PNG i BMP".
+
+      PNG to trzy rzeczy w jednym plaszczu: chunki, strumien deflate i
+      jeden bajt filtra na wiersz. Chunki sa latwe (dlugosc, nazwa,
+      bajty, suma kontrolna, na ktora nie trzeba patrzec, bo strumien
+      deflate i tak sie nie zlozy, jesli bajty sa zle).
+
+      Deflate wyladowal w osobnym pliku (user/uinflate.h), bo przyda sie
+      jeszcze nie raz: trzy rodzaje blokow (skladowany, ze stalymi
+      drzewami, z drzewami zapisanymi w samym bloku - opisanymi trzecim
+      drzewem), a potem strumien symboli, gdzie symbol ponizej 256 to
+      bajt, 256 konczy blok, a powyzej znaczy "przepisz N bajtow sprzed
+      D" - i to jest cale kompresowanie. Kopiowanie bajt po bajcie jest
+      celowe: kopia moze zachodzic na siebie, bo "trzy bajty sprzed
+      jednego" znaczy ten sam bajt trzy razy.
+
+      Dekodowanie Huffmana zwyklym chodzeniem po bitach, bez tablicy
+      podgladu: trzydziesci wierszy zamiast stu piecdziesieciu, a obraz
+      i tak wczytuje sie chwile. Sprawdzone na hoscie przeciw prawdziwej
+      zlib, na czterech poziomach kompresji - w tym zerowym, ktory daje
+      bloki skladowane.
+
+      Filtry to miejsce, gdzie dekodery zwykle padaja, wiec obraz w
+      tescie ma KAZDY z piatki po kolei (none, sub, up, average, paeth).
+      Obraz z samymi zerowymi filtrami nie mowi nic o pozostalych
+      czterech.
+
+      Przeplatanego PNG (Adam7) nie umiem i mowie to wprost, zamiast
+      rysowac cwierc obrazu: obraz pokazany zle jest gorszy niz obraz
+      niepokazany.
+
+      W 'proccores' wiecej cierpliwosci (cztery odczyty zamiast dwoch,
+      liczy sie najlepszy) przy tym samym progu - suita ma coraz
+      ciezszych sasiadow, a pomiar rownoleglosci na hoscie bez wolnego
+      rdzenia mierzy hosta.

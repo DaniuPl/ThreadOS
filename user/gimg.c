@@ -18,6 +18,7 @@
  */
 
 #include "uapi.h"
+#include "uinflate.h"
 
 #define C_BG    8
 #define C_WHITE 4
@@ -183,6 +184,195 @@ static void draw_status(void)
     win_text(winid, 4, ch - STATUS_H + 1, line, C_WHITE);
 }
 
+/* A PNG.
+ *
+ * Three things in a trench coat: chunks, a deflate stream, and one
+ * filter byte per row. The chunks are easy (a length, a name, the
+ * bytes, a checksum we do not need to look at, because the deflate
+ * stream will not hold together if the bytes are wrong). The deflate
+ * stream is in uinflate.h, written for this and useful again the next
+ * time something is packed. What is left is the filters - five of
+ * them, each saying "this row was written as the difference from
+ * something", and each undone by adding that something back:
+ *
+ *   0 none, 1 the pixel to the left, 2 the pixel above,
+ *   3 the average of those two, 4 Paeth - whichever of left, above and
+ *     above-left is nearest to their sum minus the corner.
+ *
+ * Interlaced pictures are refused rather than half-drawn: Adam7 is
+ * seven passes of this same work in a different order, and a picture
+ * shown wrong is worse than a picture not shown.
+ */
+#define PNG_MAX_PIXELS (1024 * 1024)
+
+static int paeth(int a, int b, int c)
+{
+    int p = a + b - c;
+    int pa = p > a ? p - a : a - p;
+    int pb = p > b ? p - b : b - p;
+    int pc = p > c ? p - c : c - p;
+    if (pa <= pb && pa <= pc)
+        return a;
+    return pb <= pc ? b : c;
+}
+
+static int show_png(int fd, const uint8_t *head, int got)
+{
+    /* The whole file first: the deflate stream is spread across as
+       many IDAT chunks as the writer felt like, and they have to be
+       fed to the decoder as one. There is no call that says how long a
+       file is, so we take a ceiling and read until it ends. */
+#define PNG_MAX_FILE (2 * 1024 * 1024)
+    uint8_t *file = malloc(PNG_MAX_FILE);
+    if (!file) {
+        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        return -1;
+    }
+    for (int i = 0; i < got && i < PNG_MAX_FILE; i++)
+        file[i] = head[i];
+    int have = got;
+    while (have < PNG_MAX_FILE) {
+        int n = (int)sys_read(fd, file + have,
+                              (uint32_t)(PNG_MAX_FILE - have));
+        if (n <= 0)
+            break;
+        have += n;
+    }
+    int size = have;
+
+    int w = 0, h = 0, depth = 0, colour = 0, interlace = 0;
+    uint8_t plte[256 * 3];
+    int plte_n = 0;
+    uint8_t *idat = malloc((uint32_t)size);   /* never larger than the file */
+    if (!idat) {
+        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        return -1;
+    }
+    int idat_n = 0;
+
+    int pos = 8;                              /* past the signature */
+    while (pos + 8 <= have) {
+        uint32_t len = ((uint32_t)file[pos] << 24) |
+                       ((uint32_t)file[pos + 1] << 16) |
+                       ((uint32_t)file[pos + 2] << 8) | file[pos + 3];
+        const uint8_t *name = file + pos + 4;
+        const uint8_t *body = file + pos + 8;
+        if (pos + 8 + (int)len + 4 > have)
+            break;
+
+        if (name[0] == 'I' && name[1] == 'H' && name[2] == 'D' &&
+            name[3] == 'R' && len >= 13) {
+            w = (int)(((uint32_t)body[0] << 24) | ((uint32_t)body[1] << 16) |
+                      ((uint32_t)body[2] << 8) | body[3]);
+            h = (int)(((uint32_t)body[4] << 24) | ((uint32_t)body[5] << 16) |
+                      ((uint32_t)body[6] << 8) | body[7]);
+            depth = body[8];
+            colour = body[9];
+            interlace = body[12];
+        } else if (name[0] == 'P' && name[1] == 'L' && name[2] == 'T' &&
+                   name[3] == 'E') {
+            plte_n = (int)(len / 3);
+            if (plte_n > 256)
+                plte_n = 256;
+            for (int i = 0; i < plte_n * 3; i++)
+                plte[i] = body[i];
+        } else if (name[0] == 'I' && name[1] == 'D' && name[2] == 'A' &&
+                   name[3] == 'T') {
+            for (uint32_t i = 0; i < len; i++)
+                idat[idat_n++] = body[i];
+        } else if (name[0] == 'I' && name[1] == 'E' && name[2] == 'N' &&
+                   name[3] == 'D') {
+            break;
+        }
+        pos += 8 + (int)len + 4;
+    }
+
+    if (w <= 0 || h <= 0 || w > ROW_MAX || (long)w * h > PNG_MAX_PIXELS) {
+        ecopy(note, "dziwne wymiary", sizeof(note));
+        return -1;
+    }
+    if (depth != 8) {
+        ecopy(note, "umiem PNG po 8 bitow na kanal", sizeof(note));
+        return -1;
+    }
+    if (interlace) {
+        ecopy(note, "przeplatanego PNG nie umiem", sizeof(note));
+        return -1;
+    }
+    int chan = colour == 2 ? 3 : colour == 6 ? 4 : colour == 4 ? 2 :
+               colour == 0 ? 1 : colour == 3 ? 1 : 0;
+    if (!chan || (colour == 3 && !plte_n)) {
+        ecopy(note, "nieznany rodzaj PNG", sizeof(note));
+        return -1;
+    }
+
+    uint32_t raw_len = (uint32_t)h * (uint32_t)(1 + w * chan);
+    uint8_t *raw = malloc(raw_len);
+    if (!raw) {
+        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        return -1;
+    }
+    if (inflate_zlib(idat, (unsigned)idat_n, raw, raw_len) < 0) {
+        ecopy(note, "strumien PNG sie nie zgadza", sizeof(note));
+        return -1;
+    }
+
+    img_w = w;
+    img_h = h;
+    int room_w = cw, room_h = ch - STATUS_H - 2;
+    step = 1;
+    while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
+        step++;
+    if (!memo_ready)
+        colours_start();
+    win_rect(winid, 0, 0, cw, ch, C_BG);
+
+    /* Undoing the filters needs the row above, so the rows are walked
+       in order and the previous one kept. */
+    int stride = w * chan;
+    for (int y = 0; y < h; y++) {
+        uint8_t *cur = raw + (uint32_t)y * (uint32_t)(1 + stride);
+        int filter = cur[0];
+        uint8_t *line = cur + 1;
+        uint8_t *prev = y ? raw + (uint32_t)(y - 1) * (uint32_t)(1 + stride)
+                            + 1 : (uint8_t *)0;
+        for (int i = 0; i < stride; i++) {
+            int a = i >= chan ? line[i - chan] : 0;
+            int b = prev ? prev[i] : 0;
+            int c = (prev && i >= chan) ? prev[i - chan] : 0;
+            switch (filter) {
+            case 1: line[i] = (uint8_t)(line[i] + a); break;
+            case 2: line[i] = (uint8_t)(line[i] + b); break;
+            case 3: line[i] = (uint8_t)(line[i] + ((a + b) >> 1)); break;
+            case 4: line[i] = (uint8_t)(line[i] + paeth(a, b, c)); break;
+            default: break;                       /* 0: as it stands */
+            }
+        }
+
+        if (y % step)
+            continue;
+        int dest = y / step;
+        if (dest >= room_h)
+            break;
+        int n = 0;
+        for (int x = 0; x < w && n < ROW_MAX; x += step) {
+            int r, g, b;
+            const uint8_t *px = line + (long)x * chan;
+            if (colour == 2 || colour == 6) {
+                r = px[0]; g = px[1]; b = px[2];
+            } else if (colour == 3) {
+                const uint8_t *c = plte + (px[0] % (plte_n ? plte_n : 1)) * 3;
+                r = c[0]; g = c[1]; b = c[2];
+            } else {
+                r = g = b = px[0];                /* grey, with or without alpha */
+            }
+            out[n++] = nearest(r, g, b);
+        }
+        win_blit(winid, 0, dest, n, 1, out);
+    }
+    return 0;
+}
+
 /* A BMP, as it comes from anywhere else in the world.
  *
  * Only what is worth having: no compression (BI_RGB), twenty-four bits
@@ -304,6 +494,20 @@ static void show(const char *name)
         sys_close(fd);
         ecopy(note, "to nie jest obraz", sizeof(note));
         img_w = 0;
+        return;
+    }
+
+    if (head[0] == 0x89 && head[1] == 'P' && head[2] == 'N' &&
+        head[3] == 'G') {
+        int ok = show_png(fd, head, got);
+        sys_close(fd);
+        if (ok < 0) {
+            img_w = 0;
+            return;
+        }
+        ecopy(fname, name, NAME_MAX_LEN);
+        ecopy(note, "wczytany", sizeof(note));
+        retitle();
         return;
     }
 

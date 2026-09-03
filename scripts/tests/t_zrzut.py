@@ -228,6 +228,43 @@ def main():
                   greens[1] > 200 and greens[0] < 60 and
                   blues[2] > 200 and blues[0] < 60 and
                   all(v > 200 for v in whites))
+
+            # --- and the same picture as a PNG --------------------------
+            # Chunks, a deflate stream and a filter byte per row: three
+            # things that all have to be right, and the four exact
+            # colours say whether they were.
+            q.mouse_goto(600, 430)
+            q.mouse_click()
+            time.sleep(1)
+            seen = len(q.serial())
+            q.type_line("run httpget 10.0.2.2 %d /kwadraty.png obraz.png"
+                        % http_port)
+            time.sleep(6)
+            got = q.serial()[seen:]
+            check("maszyna sciaga PNG z sieci",
+                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+
+            q.type_line("run gimg obraz.png")
+            time.sleep(7)
+            q.mouse_goto(600, 200)
+            time.sleep(2)
+            w, h, at = q.screen_raw()
+            vx, vy = VX + 36, VY + 36
+            said = status(at, vx=vx, vy=vy)
+            check("podglad rozpakowal PNG ('%s')" % said,
+                  "64x48" in said and "wczytany" in said)
+
+            cx, cy = vx + 1, vy + 11
+            reds = at(cx + 16, cy + 12)
+            greens = at(cx + 48, cy + 12)
+            blues = at(cx + 16, cy + 36)
+            whites = at(cx + 48, cy + 36)
+            check("i wyszly z niego te same cztery kolory "
+                  "(%s %s %s %s)" % (reds, greens, blues, whites),
+                  reds[0] > 200 and reds[1] < 60 and
+                  greens[1] > 200 and greens[0] < 60 and
+                  blues[2] > 200 and blues[0] < 60 and
+                  all(v > 200 for v in whites))
         finally:
             q.close()
     finally:

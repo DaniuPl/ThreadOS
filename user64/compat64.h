@@ -84,6 +84,15 @@ static inline int32_t sys_level(void)
     return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
 }
 
+/* The same bump allocator as in protected mode: it only allocates,
+   which is enough for a program that reads a file into memory once. */
+static inline void *malloc(uint32_t size)
+{
+    size = (size + 7) & ~7u;
+    void *p = sys_sbrk((int64_t)size);
+    return p == (void *)-1 ? (void *)0 : p;
+}
+
 /* The clipboard - the same two calls as in protected mode */
 #define CLIP_MAX 512
 

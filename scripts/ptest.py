@@ -18,6 +18,7 @@ import socket
 import socketserver
 import subprocess
 import threading
+import zlib
 import sys
 import tempfile
 import time
@@ -110,6 +111,65 @@ def make_bmp(w=64, h=48):
 
 
 BMP_IMAGE = make_bmp()
+
+
+def make_png(w=64, h=48):
+    """The same four quarters as the BMP, as a PNG: truecolour, eight
+    bits a channel, one filter byte per row and the whole thing in a
+    zlib stream. Written by hand (zlib is in the standard library, an
+    image library is not), so the test brings its own picture."""
+    import struct
+
+    def colour(x, y):
+        top, left = y < h // 2, x < w // 2
+        if top and left:
+            return (255, 0, 0)
+        if top:
+            return (0, 255, 0)
+        if left:
+            return (0, 0, 255)
+        return (255, 255, 255)
+
+    def paeth(a, b, c):
+        p = a + b - c
+        pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+        return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+
+    # A different filter on every row, going round all five. They are
+    # where a decoder usually breaks, and a picture whose rows are all
+    # unfiltered says nothing about the other four.
+    rows = [[v for x in range(w) for v in colour(x, y)] for y in range(h)]
+    raw = bytearray()
+    for y in range(h):
+        f = y % 5
+        raw.append(f)
+        line, above = rows[y], (rows[y - 1] if y else [0] * (w * 3))
+        for i in range(w * 3):
+            a = line[i - 3] if i >= 3 else 0
+            b = above[i]
+            c = above[i - 3] if i >= 3 else 0
+            v = line[i]
+            if f == 1:
+                v -= a
+            elif f == 2:
+                v -= b
+            elif f == 3:
+                v -= (a + b) // 2
+            elif f == 4:
+                v -= paeth(a, b, c)
+            raw.append(v & 0xFF)
+
+    def chunk(tag, body):
+        return (struct.pack(">I", len(body)) + tag + body
+                + struct.pack(">I", zlib.crc32(tag + body) & 0xffffffff))
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+PNG_IMAGE = make_png()
 
 
 _FONT8X8 = None
@@ -385,6 +445,14 @@ def start_http_server():
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if self.path.endswith(".png"):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(PNG_IMAGE)))
+                self.end_headers()
+                self.wfile.write(PNG_IMAGE)
                 return
 
             if self.path.endswith(".bmp"):
