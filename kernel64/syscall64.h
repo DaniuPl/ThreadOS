@@ -93,7 +93,8 @@
 #define SYS64_CLIP_GET  51
 #define SYS64_WIN_KEEP  52  /* a1=winid -> "not closing yet" */
 #define SYS64_WIN_TITLE 54
-#define SYS64_RENAME   55  /* a1/a2 = from, a3/a4 = to */  /* a1=winid, a2=text */
+#define SYS64_RENAME   55
+#define SYS64_WIN_BLIT 56  /* a1=winid, a2=&cmd */  /* a1/a2 = from, a3/a4 = to */  /* a1=winid, a2=text */
 #define SYS64_PS        53  /* a1=index, a2=buffer -> 0 / -1 */
 
 /* Numbers taken since forever: keyboard, console, errors */

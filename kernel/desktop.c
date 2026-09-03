@@ -1665,6 +1665,10 @@ static void clock_refresh(void)
  * over them. */
 static int hint_x, hint_y;
 static const char *hint_text;
+/* What was just saved, and for how many frames to keep saying it: a
+   hint lives one frame, and a message about a file wants a moment. */
+static const char *shot_note;
+static int shot_frames;
 
 static void hint_for(int x, const char *text)
 {
@@ -1897,8 +1901,97 @@ static void desktop_on_fkey(int fkey)
         close_window(focus_idx);
 }
 
+/* A picture of what is on the screen, written to the disk.
+ *
+ * The format is the machine's own: four bytes "PSCR", the width and
+ * the height, the whole palette (two hundred and fifty six colours,
+ * three bytes each, so the file says what its numbers mean), and then
+ * one byte per pixel - the palette index. That is exactly what the
+ * compositor drew, so the viewer has nothing to interpret: it puts the
+ * bytes back into a window and they are the same colours again.
+ *
+ * The rows go out one at a time. A whole screen is three hundred
+ * kilobytes and the kernel heap is one megabyte - a buffer that big
+ * would be most of it, for a picture. */
+#define SHOT_HDR (4 + 2 + 2 + 256 * 3)
+
+static int shot_number;
+
+static void save_screenshot(void)
+{
+    int w = video_w(), h = video_h();
+    uint8_t *row = kmalloc((uint32_t)w);
+    if (!row)
+        return;
+
+    char name[16];
+    int p = 0;
+    const char *pre = "zrzut";
+    for (int i = 0; pre[i]; i++)
+        name[p++] = pre[i];
+    p += put_num(name + p, ++shot_number);
+    name[p++] = '.';
+    name[p++] = 'p';
+    name[p++] = 's';
+    name[p++] = 'c';
+    name[p] = '\0';
+
+    int slot = fs_open(FS_ROOT, name, 1);
+    if (slot < 0) {
+        kfree(row);
+        return;
+    }
+    fs_truncate(slot);
+
+    uint8_t hdr[SHOT_HDR];
+    hdr[0] = 'P'; hdr[1] = 'S'; hdr[2] = 'C'; hdr[3] = 'R';
+    hdr[4] = (uint8_t)(w & 0xFF);
+    hdr[5] = (uint8_t)((w >> 8) & 0xFF);
+    hdr[6] = (uint8_t)(h & 0xFF);
+    hdr[7] = (uint8_t)((h >> 8) & 0xFF);
+    for (int i = 0; i < 256; i++) {
+        uint32_t c = video_palette_rgb((uint8_t)i);
+        hdr[8 + i * 3 + 0] = (uint8_t)((c >> 16) & 0xFF);
+        hdr[8 + i * 3 + 1] = (uint8_t)((c >> 8) & 0xFF);
+        hdr[8 + i * 3 + 2] = (uint8_t)(c & 0xFF);
+    }
+    uint32_t off = 0;
+    if (fs_write_at(slot, off, hdr, SHOT_HDR) != SHOT_HDR) {
+        kfree(row);
+        return;
+    }
+    off += SHOT_HDR;
+
+    for (int y = 0; y < h; y++) {
+        int n = video_read_row(y, row, w);
+        if (n <= 0)
+            break;
+        if (fs_write_at(slot, off, row, (uint32_t)n) != n)
+            break;
+        off += (uint32_t)n;
+    }
+    kfree(row);
+
+    /* Said on the screen, because a picture saved in silence is a
+       picture nobody knows about. */
+    static char note[32];
+    int q = 0;
+    for (int i = 0; name[i]; i++)
+        note[q++] = name[i];
+    const char *tail = " zapisany";
+    for (int i = 0; tail[i]; i++)
+        note[q++] = tail[i];
+    note[q] = '\0';
+    shot_note = note;
+    shot_frames = 60;             /* about two seconds */
+}
+
 static void desktop_on_key(char c)
 {
+    if (c == KEY_SHOT) {
+        save_screenshot();
+        return;
+    }
     if (c == KEY_NEXTWIN) {
         focus_next();
         return;
@@ -2034,6 +2127,35 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
     if (!win)
         return -1;
     buf_rect(win, x, y, w, h, color);
+    return 0;
+}
+
+/* A block of pixels straight into a window's content.
+ *
+ * Everything a program could draw until now was a rectangle of one
+ * colour or a line of text. A picture is neither, and drawing it by
+ * calling for one rectangle per pixel would be three hundred thousand
+ * system calls for one screenshot. This takes a row - or a whole
+ * block - at a time, in the same palette indices the compositor draws
+ * in, so there is nothing to interpret on either side. */
+int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
+                     const uint8_t *pixels)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win || !pixels || w <= 0 || h <= 0)
+        return -1;
+
+    for (int row = 0; row < h; row++) {
+        int dy = y + row;
+        if (dy < 0 || dy >= win->ch)
+            continue;
+        for (int col = 0; col < w; col++) {
+            int dx = x + col;
+            if (dx < 0 || dx >= win->cw)
+                continue;
+            win->content[dy * win->cw + dx] = pixels[row * w + col];
+        }
+    }
     return 0;
 }
 
@@ -2256,6 +2378,14 @@ static void desktop_thread(void *arg)
         }
 
         draw_taskbar();
+        /* What was just saved stays on the screen for a moment - the
+           hint itself lives one frame, so it is asked for again until
+           the moment is up. */
+        if (shot_frames > 0) {
+            shot_frames--;
+            if (shot_note)
+                hint_at(4, 12, shot_note);
+        }
         draw_hint();               /* above everything, including the menu */
         draw_cursor(mx, my);
 

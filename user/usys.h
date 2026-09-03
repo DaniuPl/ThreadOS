@@ -66,11 +66,13 @@
 #define SYS_PS         59
 #define SYS_WIN_TITLE  60
 #define SYS_RENAME     61
+#define SYS_WIN_BLIT   62
 
 #define FS_NAME_MAX  63
 
 /* Keys with no ASCII equivalent - they have to match
    kernel/include/keyboard.h */
+#define KEY_SHOT  0x10      /* Print Screen */
 #define KEY_UNDO  0x0E      /* Ctrl+Z */
 #define KEY_FIND  0x07      /* Ctrl+F */
 #define KEY_SAVE  0x05      /* Ctrl+S */
@@ -583,6 +585,26 @@ static inline int32_t sys_ps(int index, struct psinfo *out)
 /* Renames the window - what the title bar says, and what the taskbar
    says under the pointer. A program with a file open should say which
    one. */
+/* A block of palette indices into the window's content - a picture,
+   in other words. At most 4096 pixels at a time, which is a row of
+   any screen this machine can have. */
+struct win_blit_cmd {
+    int32_t x, y, w, h;
+    const uint8_t *pixels;
+};
+
+static inline int32_t win_blit(int winid, int x, int y, int w, int h,
+                               const uint8_t *pixels)
+{
+    struct win_blit_cmd c = { x, y, w, h, pixels };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_BLIT), "b"(winid), "c"(&c)
+                     : "memory");
+    return ret;
+}
+
 static inline int32_t win_title(int winid, const char *title)
 {
     int32_t ret;

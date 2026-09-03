@@ -46,6 +46,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/mkwall.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
+             $(BUILD)/user/gimg.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
              $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf \
@@ -252,6 +253,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
+	    gimg=$(BUILD)/user/gimg.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
 	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
@@ -353,6 +355,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gtasks.elf \
+               $(BUILD)/user64/gimg.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/nslookup.elf \
@@ -446,6 +449,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    gterm=$(BUILD)/user64/gterm.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
+	    gimg=$(BUILD)/user64/gimg.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \

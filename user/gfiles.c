@@ -192,11 +192,21 @@ static void open_chosen(void)
         reread();
         return;
     }
-    /* A file goes to the editor - which is what a file manager is FOR:
-       getting to a file. */
+    /* A file goes to the program that opens it: a picture to the
+       viewer, everything else to the editor. The name is what tells
+       them apart - looking inside the file to decide would mean
+       reading every file in the directory to draw a list. */
+    const char *nm = items[chosen].name;
+    int ln = 0;
+    while (nm[ln])
+        ln++;
+    int picture = ln > 4 && nm[ln - 4] == '.' && nm[ln - 3] == 'p' &&
+                  nm[ln - 2] == 's' && nm[ln - 1] == 'c';
+    const char *prog = picture ? "gimg" : "gedit";
+
     char cmd[NAME_LEN + 8];
     int n = 0;
-    const char *pre = "gedit ";
+    const char *pre = picture ? "gimg " : "gedit ";
     for (int i = 0; pre[i]; i++)
         cmd[n++] = pre[i];
     ecopy(cmd + n, items[chosen].name, (int)sizeof(cmd) - n);
@@ -204,16 +214,18 @@ static void open_chosen(void)
     int64_t pid = sys_fork();
     if (pid == 0) {
         char *args[3];
-        args[0] = "gedit";
+        args[0] = (char *)prog;
         args[1] = items[chosen].name;
         args[2] = 0;
-        sys_exec("gedit", args);
+        sys_exec(prog, args);
         sys_exit(127);
     }
 #else
+    (void)prog;
     sys_spawn(cmd, 0, 0);
 #endif
-    ecopy(note, "otwarte w edytorze", sizeof(note));
+    ecopy(note, picture ? "otwarte w podgladzie" : "otwarte w edytorze",
+          sizeof(note));
 }
 
 /* Deleting asks first. A file manager that throws a file away on one

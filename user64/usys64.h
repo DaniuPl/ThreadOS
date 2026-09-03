@@ -66,6 +66,7 @@
 #define SYS64_PS         53
 #define SYS64_WIN_TITLE  54
 #define SYS64_RENAME    55
+#define SYS64_WIN_BLIT  56
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -643,6 +644,19 @@ static inline int64_t sys_ps(int index, struct psinfo *out)
 /* The answer to WEV_CLOSE: "I heard, and I am not closing yet" - the
    desktop stops counting down. Silence still costs the window. */
 /* Renames the window - the title bar and the taskbar's hint alike. */
+/* A block of palette indices into the window's content - a picture. */
+struct win_blit_cmd {
+    int32_t x, y, w, h;
+    const uint8_t *pixels;
+};
+
+static inline int64_t win_blit(int win, int x, int y, int w, int h,
+                               const uint8_t *pixels)
+{
+    struct win_blit_cmd c = { x, y, w, h, pixels };
+    return syscall64(SYS64_WIN_BLIT, win, (int64_t)(uintptr_t)&c);
+}
+
 static inline int64_t win_title(int win, const char *title)
 {
     return syscall64(SYS64_WIN_TITLE, win, (int64_t)(uintptr_t)title);

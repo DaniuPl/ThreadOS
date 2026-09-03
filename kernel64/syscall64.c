@@ -952,6 +952,27 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)fs_rename(task64_cwd(), from, to);
         return;
     }
+    case SYS64_WIN_BLIT: {
+        struct win_blit_cmd64 {
+            int32_t x, y, w, h;
+            uint64_t pixels;
+        } c;
+        if (!paging64_user_range(a2, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const struct win_blit_cmd64 *)(uintptr_t)a2;
+        if (c.w <= 0 || c.h <= 0 || c.w > 1024 || c.h > 1024 ||
+            c.w * c.h > 4096 ||
+            !paging64_user_range(c.pixels, (uint64_t)(c.w * c.h))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_win_blit(
+            (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
+            (const uint8_t *)(uintptr_t)c.pixels);
+        return;
+    }
     case SYS64_WIN_TITLE: {
         char title[64];
         if (text_from_ring3(a2, title, sizeof(title)) < 0) {

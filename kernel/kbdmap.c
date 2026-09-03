@@ -68,6 +68,12 @@ static char extended_key(uint8_t scancode)
             return shift_pressed ? KEY_DESK_TAKE_NEXT : KEY_DESK_NEXT;
         }
     }
+    /* Print Screen arrives as two extended pairs (E0 2A E0 37); the
+       0x2A half is the shift the keyboard sends on its own and means
+       nothing here, so the 0x37 is the whole of it. */
+    if (scancode == 0x37)
+        return KEY_SHOT;
+
     switch (scancode) {
     case 0x48: return KEY_UP;
     case 0x50: return KEY_DOWN;

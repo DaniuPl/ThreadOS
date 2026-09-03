@@ -3679,3 +3679,43 @@ sprawdzane przez `make test`.
       zrodla nie ma), 'files' pyta i zmienia, a 'gedit' robi to samo na
       jadrze 64-bitowym, gdzie wywolanie ma wlasny numer i wlasna
       obsluge.
+
+- [x] **Zrzut ekranu i podglad obrazu** - maszyna, ktora umie sie
+      sfotografowac i sama na to zdjecie popatrzec.
+
+      Print Screen zapisuje ekran w wlasnych kategoriach maszyny: cztery
+      bajty "PSCR", szerokosc, wysokosc, cala paleta (256 kolorow po
+      trzy bajty, zeby plik mowil, co znacza jego liczby) i po jednym
+      bajcie na piksel - numer w palecie. To dokladnie to, co narysowal
+      kompozytor, wiec podglad nie ma czego interpretowac: wklada bajty
+      z powrotem do okna i to znowu sa te same kolory.
+
+      Odczyt ekranu wstecz: w trybach osmiobitowych bufor JUZ trzyma
+      numery i to jest kopia; w 24- i 32-bitowych trzyma kolory, a droga
+      powrotna to szukanie w palecie - dokladne, bo wszystko na tym
+      ekranie zostalo z tej palety narysowane. Szukanie byloby 256
+      porownan na piksel, gdyby robic je uczciwie za kazdym razem; ekran
+      sklada sie z ciagow jednego koloru, wiec ostatnia odpowiedz jest
+      pamietana i prawie zawsze jest znowu ta wlasciwa.
+
+      Nowe wywolanie win_blit(): blok pikseli prosto do tresci okna.
+      Wszystko, co program mogl dotad narysowac, to prostokat jednego
+      koloru albo wiersz tekstu - a obraz nie jest ani jednym, ani
+      drugim, i rysowanie go po prostokacie na piksel byloby trzysta
+      tysiecy wywolan systemowych na jeden zrzut.
+
+      Podglad pokazuje co drugi (albo co trzeci) piksel, bo caly ekran
+      nie miesci sie w oknie na tym samym ekranie. Najblizszy sasiad, bo
+      chodzi o to, zeby ZOBACZYC, co bylo na ekranie, a rozmyta polowka
+      ekranu pelnego osmiopikselowych liter pokazalaby mniej, nie
+      wiecej. Nic nie jest trzymane po wczytaniu: tresc okna JEST kopia.
+
+      Menedzer plikow podaje ".psc" podgladowi, a wszystko inne
+      edytorowi - po nazwie, bo zagladanie do srodka znaczyloby czytanie
+      kazdego pliku w katalogu, zeby narysowac liste.
+
+      Nowa grupa 'zrzut' (9 asercji) sprawdza, ze plik ma dokladnie tyle
+      bajtow, ile ma ekran plus paleta, i - co wazniejsze - ze obraz w
+      oknie NAPRAWDE jest ekranem: pomaranczowy ikon znajduje sie w
+      oknie w tym samym miejscu i w ilosci odpowiadajacej pokazywaniu co
+      drugiego piksela. Takiej liczby nie produkuje zaden przypadek.

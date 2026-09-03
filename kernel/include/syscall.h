@@ -83,6 +83,8 @@
 #define SYS_WIN_TITLE  60
 /* A new name for something that exists: ebx=from, ecx=to -> 0 or -1 */
 #define SYS_RENAME     61
+/* A block of pixels into a window: ebx=winid, ecx=&struct win_blit_cmd */
+#define SYS_WIN_BLIT   62
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

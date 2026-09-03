@@ -234,6 +234,69 @@ void video_console_cell(int col, int row, char ch, uint8_t attr)
     fbcon_cell(col, row, ch, attr);
 }
 
+/* Reading the screen back, as palette indices.
+ *
+ * In eight-bit modes the framebuffer already holds indices and this is
+ * a copy. In the twenty-four and thirty-two bit ones it holds colours,
+ * and the way back is a search through the palette for the entry that
+ * was used - which is exact, because everything on this screen was
+ * drawn FROM that palette in the first place.
+ *
+ * The search would be two hundred and fifty six comparisons per pixel
+ * if it were done honestly every time. It is not: a screen is made of
+ * runs of one colour, so the last answer is remembered and almost
+ * always the right one again. */
+int video_read_row(int y, uint8_t *dst, int max)
+{
+    if (!dst || y < 0 || y >= vid_h)
+        return -1;
+    int n = vid_w < max ? vid_w : max;
+
+    if (vid_bpp == 8) {
+        for (int x = 0; x < n; x++)
+            dst[x] = fb[(uint32_t)y * vid_pitch + x];
+        return n;
+    }
+
+    static uint32_t last_rgb;
+    static uint8_t last_idx;
+    for (int x = 0; x < n; x++) {
+        const volatile uint8_t *p = fb + (uint32_t)y * vid_pitch
+                                       + (uint32_t)x * vid_bypp;
+        uint32_t rgb = ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0];
+        if (rgb == last_rgb) {
+            dst[x] = last_idx;
+            continue;
+        }
+        uint8_t best = 0;
+        uint32_t best_d = 0xFFFFFFFFu;
+        for (int i = 0; i < 256; i++) {
+            uint32_t c = palette_rgb[i];
+            int dr = (int)((c >> 16) & 0xFF) - (int)((rgb >> 16) & 0xFF);
+            int dg = (int)((c >> 8) & 0xFF) - (int)((rgb >> 8) & 0xFF);
+            int db = (int)(c & 0xFF) - (int)(rgb & 0xFF);
+            uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+            if (d < best_d) {
+                best_d = d;
+                best = (uint8_t)i;
+                if (!d)
+                    break;
+            }
+        }
+        last_rgb = rgb;
+        last_idx = best;
+        dst[x] = best;
+    }
+    return n;
+}
+
+/* The colour behind an index, so that a picture saved on this machine
+   can carry its palette with it. */
+uint32_t video_palette_rgb(uint8_t idx)
+{
+    return palette_rgb[idx];
+}
+
 void video_present(void)
 {
     if (fb != front)

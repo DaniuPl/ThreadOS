@@ -81,6 +81,10 @@ struct sysinfo_buf {
     uint32_t used_kib;
     uint32_t uptime_s;
 };
+struct win_blit_cmd {
+    int32_t x, y, w, h;
+    uint32_t pixels;            /* pointer to the bytes (uint8_t *) */
+};
 struct win_event_buf {
     int32_t type, x, y, val;
 };
@@ -447,6 +451,29 @@ void syscall_handler(struct regs *r)
         else
             r->eax = (uint32_t)desktop_win_title((int)r->ebx,
                                                  task_current_id(), title);
+        break;
+    }
+    case SYS_WIN_BLIT: {
+        struct win_blit_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        /* One row at a time is what the caller is expected to do, so
+           the kernel's own buffer is one row wide - and a request for
+           more than that is refused rather than quietly cut short. */
+        if (c.w <= 0 || c.h <= 0 || c.w > 1024 || c.h > 1024 ||
+            c.w * c.h > 4096) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        uint8_t px[4096];
+        if (user_get(px, c.pixels, (uint32_t)(c.w * c.h)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)desktop_win_blit((int)r->ebx, task_current_id(),
+                                            c.x, c.y, c.w, c.h, px);
         break;
     }
     case SYS_WIN_KEEP:

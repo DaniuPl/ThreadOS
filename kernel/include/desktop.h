@@ -20,5 +20,9 @@ int desktop_win_poll(int winid, int owner, void *out);
 int desktop_win_keep(int winid, int owner);
 /* The window's name, as the program that owns it wants it read. */
 int desktop_win_title(int winid, int owner, const char *title);
+/* A block of palette indices copied into the window's content - the
+   only way to draw a picture without a syscall per pixel. */
+int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
+                     const uint8_t *pixels);
 
 #endif

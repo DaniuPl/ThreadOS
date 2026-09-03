@@ -37,6 +37,12 @@ int video_h(void);
    (double buffering). Does nothing in a mode without a working buffer. */
 void video_present(void);
 
+/* One row of the screen read back as palette indices (see video.c).
+   Returns how many pixels were written, or -1. */
+int video_read_row(int y, uint8_t *dst, int max);
+/* The colour an index stands for, as 0x00RRGGBB */
+uint32_t video_palette_rgb(uint8_t idx);
+
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b);
 void video_clear(uint8_t color);
 void video_putpixel(int x, int y, uint8_t color);
