@@ -39,6 +39,10 @@ int fs_chdir(int cwd, const char *path, int *newcwd);
 
 /* Removes a file or an empty directory (frees its blocks). 0 or -1. */
 int fs_unlink(int cwd, const char *path);
+/* A new name (and, if the paths differ in their directories, a new
+   parent) for something that already exists. The blocks stay where
+   they are - only the entry that names them changes. */
+int fs_rename(int cwd, const char *from, const char *to);
 
 /* Writes the absolute path of a slot into buf (>= 512 B). */
 void fs_getpath(int slot, char *buf);

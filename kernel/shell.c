@@ -95,6 +95,7 @@ static const struct {
     {"cat F",    "wypisz plik"},
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
+    {"mv A B",   "zmien nazwe pliku na dysku"},
     {"set",      "ustawienia systemu (pamietane na dysku)"},
     {"kim",      "kim jestes: adminem czy uzytkownikiem"},
     {"sudo",     "wykonaj komende jako admin (pyta o haslo)"},
@@ -349,6 +350,33 @@ static void cmd_write(char *args)
  * first, then on the disk. Thanks to that a program shipped with the
  * kernel can be moved onto the disk with one command - and run from
  * there afterwards. */
+/* mv - a new name for something that exists. Two words in, one entry
+   changed on the disk: the file's blocks do not move, which is the
+   whole difference between this and 'cp' followed by 'rm'. */
+static void cmd_mv(char *args)
+{
+    char *dst = args;
+    while (*dst && *dst != ' ')
+        dst++;
+    if (*dst == ' ')
+        *dst++ = '\0';
+    while (*dst == ' ')
+        dst++;
+
+    if (!*args || !*dst) {
+        printk("uzycie: mv <zrodlo> <cel>\n");
+        return;
+    }
+    if (!may_touch(args) || !may_touch(dst))
+        return;
+    /* The kernel's shell stands in the root - it is the ring 3 shell
+       that walks about with a working directory. */
+    if (fs_rename(FS_ROOT, args, dst) == 0)
+        printk("mv: '%s' -> '%s'\n", args, dst);
+    else
+        printk("mv: nie da sie (nie ma zrodla albo nazwa zajeta)\n");
+}
+
 static void cmd_cp(char *args)
 {
     char *dst = args;
@@ -735,6 +763,8 @@ static void run_command(char *cmd)
         cmd_write(arg);
     else if (!strcmp(cmd, "cp"))
         cmd_cp(arg);
+    else if (!strcmp(cmd, "mv"))
+        cmd_mv(arg);
     else if (!strcmp(cmd, "set"))
         cmd_set(arg);
     else if (!strcmp(cmd, "smp"))

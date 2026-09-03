@@ -34,8 +34,9 @@
 #define ROW_H 10
 #define MAXF 64               /* names kept; the window scrolls through them */
 #define NAME_LEN 32
-#define EDIT_W 56             /* the two buttons, kept at the right edge */
+#define EDIT_W 56             /* the three buttons, kept at the right edge */
 #define DEL_W 48
+#define NAME_W 56
 
 struct entry {
     char name[NAME_LEN];
@@ -48,6 +49,12 @@ static int count;
 static int top;               /* the first row shown */
 static int chosen = -1;       /* which row, or -1 */
 static int confirm;           /* a deletion has been asked about once */
+/* Renaming asks for the new name in the status line, the way the
+   editor asks for a file name: a window to move, focus and close, for
+   one word of text, is a window nobody wants. */
+static int asking;
+static char answer[NAME_LEN];
+static int alen;
 static char note[48];
 static char here[64];         /* the directory we are looking at */
 
@@ -59,6 +66,7 @@ static int winid = -1;
    maximised window. */
 static int del_x(void)  { return cw - DEL_W; }
 static int edit_x(void) { return cw - DEL_W - EDIT_W - 4; }
+static int name_x(void) { return cw - DEL_W - EDIT_W - NAME_W - 8; }
 
 static int rows_shown(void)
 {
@@ -245,6 +253,22 @@ static void delete_chosen(void)
     reread();
 }
 
+/* The new name, once it has been typed. The blocks do not move - only
+   the entry that names them - so this is instant whatever the file's
+   size, which is the whole reason the filesystem grew a rename. */
+static void rename_to(const char *what)
+{
+    if (chosen < 0 || chosen >= count || !what[0])
+        return;
+    if (sys_rename(items[chosen].name, what) < 0) {
+        ecopy(note, "nie da sie - nazwa zajeta?", sizeof(note));
+        return;
+    }
+    ecopy(note, "zmieniona nazwa", sizeof(note));
+    chosen = -1;
+    reread();
+}
+
 static void go_up(void)
 {
     if (same(here, "/")) {
@@ -282,6 +306,8 @@ static void draw(void)
     head[p] = '\0';
     win_text(win, 4, 2, head, C_GREEN);
 
+    win_rect(win, name_x(), 0, NAME_W, HEAD_H, asking ? C_GREEN : C_BLUE);
+    win_text(win, name_x() + 4, 2, "Nazwa", C_WHITE);
     win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
     win_text(win, edit_x() + 4, 2, "Otworz", C_WHITE);
     win_rect(win, del_x(), 0, DEL_W, HEAD_H, confirm ? C_RED : C_BLUE);
@@ -315,7 +341,8 @@ static void draw(void)
     }
 
     /* Which part of the list is on the screen - a list that scrolls
-       without saying so is a list that seems to have lost things. */
+       without saying so is a list that seems to have lost things. It
+       goes at the BOTTOM: the top row belongs to the buttons now. */
     if (count > shown) {
         char more[24];
         int n = 0;
@@ -328,14 +355,26 @@ static void draw(void)
         n += num(more + n, (unsigned)count);
         more[n++] = ']';
         more[n] = '\0';
-        win_text(win, cw - 8 * n - 4, 2, more, C_WHITE);
+        win_text(win, cw - 8 * n - 4, ch - 10, more, C_WHITE);
     }
 
-    if (note[0])
+    if (asking) {
+        char line[64];
+        int p = 0;
+        const char *q = "Nowa nazwa: ";
+        for (int i = 0; q[i]; i++)
+            line[p++] = q[i];
+        for (int i = 0; i < alen && p < (int)sizeof(line) - 2; i++)
+            line[p++] = answer[i];
+        line[p++] = '_';
+        line[p] = '\0';
+        win_text(win, 4, ch - 10, line, C_GREEN);
+    } else if (note[0]) {
         win_text(win, 4, ch - 10, note, confirm ? C_RED : C_WHITE);
-    else
+    } else {
         win_text(win, 4, ch - 10,
                  "PgUp/PgDn przewija, '..' wyzej", C_GREEN);
+    }
 }
 
 void _start(void)
@@ -361,6 +400,27 @@ void _start(void)
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 int shown = rows_shown();
+                if (asking) {
+                    if (c == '\n') {
+                        asking = 0;
+                        answer[alen] = '\0';
+                        if (alen)
+                            rename_to(answer);
+                        else
+                            ecopy(note, "nazwa bez zmian", sizeof(note));
+                        alen = 0;
+                    } else if (c == '\b') {
+                        if (alen)
+                            alen--;
+                        else
+                            asking = 0;      /* nothing typed = never mind */
+                    } else if (c >= 0x20 && c < 0x7F &&
+                               alen < NAME_LEN - 1) {
+                        answer[alen++] = c;
+                    }
+                    again = 1;
+                    continue;
+                }
                 if (c == KEY_PGDN && top + shown < count)
                     top += shown;
                 else if (c == KEY_PGUP)
@@ -387,6 +447,15 @@ void _start(void)
                    did. */
                 if (ev.y < HEAD_H && ev.x >= del_x()) {
                     delete_chosen();
+                } else if (ev.y < HEAD_H && ev.x >= name_x() &&
+                           ev.x < edit_x()) {
+                    if (chosen < 0)
+                        ecopy(note, "nie wybrano pliku", sizeof(note));
+                    else {
+                        asking = 1;
+                        alen = 0;
+                        confirm = 0;
+                    }
                 } else if (ev.y < HEAD_H && ev.x >= edit_x()) {
                     open_chosen();
                 } else if (ev.y >= ROW_Y0 - 1) {
@@ -405,7 +474,9 @@ void _start(void)
         /* The disk is not ours alone - a terminal in the next window
            can write a file while this one is open. Twice a second is
            often enough to notice and rare enough to cost nothing. */
-        if (++ticks >= 5) {
+        if (++ticks >= 5 && !asking) {
+            /* While a name is being typed the list stands still: a
+               refresh under a question would rub out the question. */
             ticks = 0;
             int was = count;
             int keep = confirm;

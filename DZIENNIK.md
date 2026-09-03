@@ -3647,3 +3647,35 @@ sprawdzane przez `make test`.
       tlumaczy; a napis "katalog" w menedzerze byl wyrownany inaczej niz
       kolumna rozmiarow - dwie kolumny konczace sie w roznych miejscach
       czytaja sie jak dwie kolumny.
+
+- [x] **Zmiana nazwy w systemie plikow** - bo dotad przeniesienie
+      czterech megabajtow znaczylo przeczytanie i zapisanie czterech
+      megabajtow, zeby zmienic szescdziesiat cztery bajty wpisu w
+      katalogu.
+
+      fs_rename(): bloki pliku nie ruszaja sie z miejsca, zmienia sie
+      tylko wpis, ktory je nazywa - a gdy sciezki wskazuja rozne
+      katalogi, takze rodzic. Reguly ma te, co kazdy system plikow:
+      zrodlo musi istniec, katalog celu musi istniec, nazwa celu musi
+      byc wolna (zmiana nazwy nie jest sposobem na skasowanie czegos
+      przez przypadek), a katalogu nie da sie przeniesc do samego siebie
+      ani pod siebie - to odcielo by kawalek drzewa od korzenia i
+      zostawilo go wskazujacego w kolko.
+
+      Do tego wywolanie systemowe po obu stronach (pliki systemowe
+      chronione z OBU stron: przemianowanie systemowego pliku jest
+      rownie dobre jak jego skasowanie, a przemianowanie czegos NA jego
+      nazwe podklada obcy plik tam, gdzie system szuka swojego),
+      komenda 'mv' w shellu jadra, i program 'mv', ktory probuje teraz
+      najpierw taniej drogi, a kopiowanie zostawia jako druga probe -
+      bo "mv na istniejacy plik" jest rzecza, ktora ludzie robia.
+
+      W menedzerze plikow przybyl przycisk "Nazwa": pyta o nowa nazwe w
+      tym samym pasku, w ktorym mowi wszystko inne. Okienko dialogowe
+      byloby drugim oknem do przesuwania, ogniskowania i zamykania - dla
+      jednego slowa.
+
+      Testy: 'pfs' dostal zmiane nazwy i obie odmowy (nazwa zajeta,
+      zrodla nie ma), 'files' pyta i zmienia, a 'gedit' robi to samo na
+      jadrze 64-bitowym, gdzie wywolanie ma wlasny numer i wlasna
+      obsluge.

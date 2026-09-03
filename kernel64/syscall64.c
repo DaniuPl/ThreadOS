@@ -934,6 +934,24 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_RENAME: {
+        char from[FS_NAME_MAX + 1], to[FS_NAME_MAX + 1];
+        if (name_from_ring3(a1, a2, from) < 0 ||
+            name_from_ring3(a3, a4, to) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        /* The system's own files on both sides: renaming one away is
+           as good as deleting it, and renaming onto its name puts a
+           stranger's file where the system looks for its own. */
+        if ((user_is_system_file(from) || user_is_system_file(to)) &&
+            task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)fs_rename(task64_cwd(), from, to);
+        return;
+    }
     case SYS64_WIN_TITLE: {
         char title[64];
         if (text_from_ring3(a2, title, sizeof(title)) < 0) {

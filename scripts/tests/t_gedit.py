@@ -319,6 +319,38 @@ def sixty_four():
                 check("(64) 'Otworz' otwiera plik w edytorze ('%s')"
                       % row_text(at, 0, wx=fx + 12, wy=fy + 12),
                       row_text(at, 0, wx=fx + 12, wy=fy + 12) == "dwa jadra")
+
+                # And a new name for it - long mode has its own number
+                # for that call and its own handler behind it.
+                # The editor opened over the manager a moment ago, so
+                # the manager has to come back to the top first.
+                q.mouse_goto(fx + 100, fy + 4)
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(1.5)
+                q.mouse_goto(fx + 1 + 20, fy + 11 + FM_ROW_Y0 + row * 10 + 3)
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(1)
+                q.mouse_goto(fx + 1 + 320 - 48 - 56 - 56 - 8 + 20, fy + 11 + 5)
+                time.sleep(0.5)
+                q.mouse_click()
+                time.sleep(1.5)
+                q.mouse_goto(fx + 160, fy + 130)
+                time.sleep(0.5)
+                q.mouse_click()                # the keys into the manager
+                time.sleep(1)
+                q.type_line("dlugi", enter=False)
+                time.sleep(0.5)
+                q.sendkey("ret")
+                time.sleep(2.5)
+                q.mouse_goto(600, 430)
+                time.sleep(1.5)
+                w, h, at = q.screen_raw()
+                listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
+                check("(64) 'Nazwa' zmienia nazwe pliku (%s)"
+                      % ", ".join(n for n in listed if n),
+                      "dlugi" in listed and "long" not in listed)
         finally:
             q.close()
     finally:

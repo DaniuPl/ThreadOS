@@ -65,6 +65,7 @@
 #define SYS64_WIN_KEEP   52
 #define SYS64_PS         53
 #define SYS64_WIN_TITLE  54
+#define SYS64_RENAME    55
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -351,6 +352,14 @@ static inline int64_t sys_getcwd(char *buf, uint64_t len)
 static inline int64_t sys_readdir(int index, struct dirent64 *out)
 {
     return syscall64(SYS64_READDIR, index, (int64_t)(uintptr_t)out);
+}
+
+/* A new name for something that exists - the blocks stay put. */
+static inline int64_t sys_rename(const char *from, const char *to)
+{
+    return syscall64_4(SYS64_RENAME, (int64_t)(uintptr_t)from,
+                       (int64_t)ustrlen(from), (int64_t)(uintptr_t)to,
+                       (int64_t)ustrlen(to));
 }
 
 static inline int64_t sys_unlink(const char *name)

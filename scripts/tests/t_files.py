@@ -42,6 +42,7 @@ ROW_Y0 = 18
 ROW_H = 10
 DEL_X = CW - 48
 EDIT_X = CW - 48 - 56 - 4
+NAME_X = CW - 48 - 56 - 56 - 8
 
 TEXT = "Wyniki pomiarow"          # what the test writes, and its length
 
@@ -218,11 +219,40 @@ def main():
             check("i pliku naprawde nie ma na dysku",
                   TEXT not in after)
 
-            # --- a directory is not deleted -----------------------------
+            # --- a new name, asked for in the same status line ----------
+            # The blocks do not move when a file is renamed, so this is
+            # instant whatever its size - which is what the filesystem
+            # grew a rename for.
             click(q, CX + 160, CY + 120, wait=1)
             w, h, at = q.screen_raw()
             names = [r[0] for r in rows(at)]
             i = names.index("dokumenty")
+            click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
+            click(q, CX + NAME_X + 20, CY + 4, wait=2)
+            q.mouse_goto(500, 380)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("'Nazwa' pyta o nowa nazwe ('%s')"
+                  % read_at(at, 4, CH - 10, 30),
+                  "Nowa nazwa" in read_at(at, 4, CH - 10, 30))
+
+            click(q, CX + 160, CY + 120, wait=1)   # the keys into the window
+            q.type_line("papiery", enter=False)
+            time.sleep(0.5)
+            q.sendkey("ret")
+            time.sleep(2)
+            q.mouse_goto(500, 380)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            names = [r[0] for r in rows(at)]
+            check("i zmienia ja (%s)" % ", ".join(names),
+                  "papiery" in names and "dokumenty" not in names)
+
+            # --- a directory is not deleted -----------------------------
+            click(q, CX + 160, CY + 120, wait=1)
+            w, h, at = q.screen_raw()
+            names = [r[0] for r in rows(at)]
+            i = names.index("papiery")
             click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
             click(q, CX + DEL_X + 16, CY + 4, wait=2)
             q.mouse_goto(500, 380)
@@ -232,7 +262,7 @@ def main():
             check("katalogu nie usuwa, i mowi dlaczego ('%s')" % said,
                   "katalog" in said)
             check("a katalog dalej jest",
-                  "dokumenty" in [r[0] for r in rows(at)])
+                  "papiery" in [r[0] for r in rows(at)])
         finally:
             q.close()
     finally:

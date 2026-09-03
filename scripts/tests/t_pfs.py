@@ -103,6 +103,50 @@ def main():
         q2.type_line("cat ring3.txt")
         check("plik zapisany przez ring3 przetrwal restart",
               "plik zapisany przez proces ring3" in q2.wait_for("ring3"))
+
+        # --- a new name, without moving a single block ------------------
+        # 'mv' used to read the whole file and write it out again; the
+        # blocks of a file do not move when it is renamed, and now
+        # neither does the code pretend they do.
+        q2.type_line("mv greeting powitanie")
+        q2.wait_for("mv:", timeout=20)
+        # The screen keeps what scrolled past, and 'greeting' was
+        # printed on it a moment ago - so it is wiped before the
+        # listing is read, or the old name would be found in the old
+        # output rather than in the directory.
+        q2.type_line("clear")
+        time.sleep(1)
+        q2.type_line("fls")
+        screen = q2.wait_for("Katalog glowny")
+        check("mv daje nowa nazwe, a stara znika",
+              "powitanie" in screen and "greeting" not in screen)
+
+        q2.type_line("cat powitanie")
+        check("i tresc jest ta sama - bloki sie nie ruszyly",
+              "witaj-z-dysku-pfs" in q2.wait_for("witaj-z-dysku-pfs"))
+
+        # The rules a rename has: the name must be free, and the source
+        # must exist. A rename that overwrites is a delete nobody asked
+        # for.
+        q2.type_line("clear")
+        time.sleep(1)
+        q2.type_line("mv powitanie ring3.txt")
+        screen = q2.wait_for("mv:", timeout=20)
+        check("na zajeta nazwe nie pozwala", "nie da sie" in screen)
+
+        q2.type_line("clear")
+        time.sleep(1)
+        q2.type_line("mv nieistniejacy cokolwiek")
+        screen = q2.wait_for("mv:", timeout=20)
+        check("i nie zmienia nazwy czemus, czego nie ma",
+              "nie da sie" in screen)
+
+        q2.type_line("clear")
+        time.sleep(1)
+        q2.type_line("fls")
+        screen = q2.wait_for("Katalog glowny")
+        check("po obu odmowach pliki sa jak byly",
+              "powitanie" in screen and "ring3.txt" in screen)
     finally:
         q2.close()
         if os.path.exists(disk):

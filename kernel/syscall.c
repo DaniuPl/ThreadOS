@@ -308,6 +308,25 @@ void syscall_handler(struct regs *r)
         r->eax = (uint32_t)fs_unlink(task_cwd(), path);
         break;
     }
+    case SYS_RENAME: {
+        char from[PATH_MAX], to[PATH_MAX];
+        if (user_str(from, r->ebx, sizeof(from)) < 0 ||
+            user_str(to, r->ecx, sizeof(to)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        /* The system's own files are the admin's business, on both
+           sides of the rename: renaming a system file away is as good
+           as deleting it, and renaming something ONTO its name would
+           put a stranger's file where the system looks for its own. */
+        if ((user_is_system_file(from) || user_is_system_file(to)) &&
+            task_level() != USER_ADMIN) {
+            r->eax = EPERM;
+            break;
+        }
+        r->eax = (uint32_t)fs_rename(task_cwd(), from, to);
+        break;
+    }
     case SYS_TIME: {
         struct rtc_time t;
         rtc_read(&t);

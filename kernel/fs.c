@@ -552,6 +552,65 @@ int fs_unlink(int cwd, const char *path)
     return 0;
 }
 
+/* Changing a name - and, when the paths point at different
+ * directories, changing a parent.
+ *
+ * Until now 'mv' read the whole file and wrote it out again under the
+ * other name: moving four megabytes meant reading and writing four
+ * megabytes, to change sixty-four bytes of a directory entry. The
+ * blocks do not move when a file is renamed - only the entry that
+ * names them does, which is what this is.
+ *
+ * The rules are the ones every filesystem has: the source must exist,
+ * the target's directory must exist, the target must not already be
+ * there (a rename is not a way to delete something by accident), and a
+ * directory may not be moved into itself or into anything below it -
+ * that would cut a piece of the tree off from the root and leave it
+ * pointing in a circle. */
+int fs_rename(int cwd, const char *from, const char *to)
+{
+    if (!ready || !from || !to)
+        return -1;
+
+    uint32_t flags = irq_save();
+    int slot = resolve(cwd, from);
+    if (slot < 0) {                        /* nothing there, or the root */
+        irq_restore(flags);
+        return -1;
+    }
+
+    char base[FS_NAME_MAX + 1];
+    int dir = resolve_parent(cwd, to, base);
+    if (dir == FS_NOTFOUND) {
+        irq_restore(flags);
+        return -1;
+    }
+    if (dir_find(dir, base, (int)strlen(base)) >= 0) {
+        irq_restore(flags);            /* the name is taken */
+        return -1;
+    }
+
+    /* A directory into itself, or into its own descendant */
+    if (inodes[slot].type == FS_TYPE_DIR) {
+        for (int up = dir; up != FS_ROOT && up >= 0; up = inodes[up].parent)
+            if (up == slot) {
+                irq_restore(flags);
+                return -1;
+            }
+        if (dir == slot) {
+            irq_restore(flags);
+            return -1;
+        }
+    }
+
+    memset(inodes[slot].name, 0, sizeof(inodes[slot].name));
+    memcpy(inodes[slot].name, base, strlen(base));
+    inodes[slot].parent = (int16_t)dir;
+    flush_inodes();
+    irq_restore(flags);
+    return 0;
+}
+
 void fs_getpath(int slot, char *buf)
 {
     if (slot == FS_ROOT || slot < 0) {

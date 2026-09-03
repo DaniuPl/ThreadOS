@@ -65,6 +65,7 @@
 #define SYS_WIN_KEEP   58
 #define SYS_PS         59
 #define SYS_WIN_TITLE  60
+#define SYS_RENAME     61
 
 #define FS_NAME_MAX  63
 
@@ -610,6 +611,19 @@ static inline int32_t win_poll(int winid, struct win_event *ev)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_WIN_POLL), "b"(winid), "c"(ev)
+                     : "memory");
+    return ret;
+}
+
+/* A new name for a file that exists - the blocks do not move, only
+   the entry that names them. Returns 0, or -1 when the source is not
+   there, the name is taken, or the path makes no sense. */
+static inline int32_t sys_rename(const char *from, const char *to)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_RENAME), "b"(from), "c"(to)
                      : "memory");
     return ret;
 }
