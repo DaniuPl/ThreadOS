@@ -224,6 +224,50 @@ def main():
             check("Alt+F4 bez ogniska nie zamyka niczego - okna jadra "
                   "stoja gdzie staly", len(bar_buttons(at, w, row)) == after)
 
+            # --- two clicks on the title bar ----------------------------
+            # Every system does this, and a person who has used one
+            # tries it here in the first minute: the window fills the
+            # screen, and does it again the other way round.
+            q.mouse_goto(24, 272)              # the "Ustaw" icon again
+            q.mouse_click()
+            time.sleep(4)
+            q.mouse_goto(600, 200)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("okno otwarte na swoim miejscu", is_win(at(400, 200)))
+
+            q.mouse_goto(WX + 100, WY + 4)
+            time.sleep(0.4)
+            q.mouse_click()
+            time.sleep(0.15)
+            q.mouse_click()                    # the second one, quickly
+            time.sleep(2.5)
+            q.mouse_goto(320, 300)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("dwa klikniecia w pasek tytulu rozwijaja okno na caly "
+                  "ekran", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
+            check("ale nie na pasek zadan",
+                  is_bar(at(320, h - TB_H + 6)))
+
+            q.mouse_goto(200, 4)
+            time.sleep(0.4)
+            q.mouse_click()
+            time.sleep(0.15)
+            q.mouse_click()
+            time.sleep(2.5)
+            q.mouse_goto(600, 200)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("i drugie dwa klikniecia oddaja mu wlasny rozmiar",
+                  is_win(at(400, 200)) and not is_win(at(20, 300)))
+
+            q.sendkey("alt-f4")                # away with it again
+            time.sleep(3)
+            w, h, at = q.screen_raw()
+            check("po zamknieciu pasek zadan jest jak byl",
+                  len(bar_buttons(at, w, row)) == after)
+
             # --- the menu under the right button ------------------------
             MX, MY = 500, 300
             q.mouse_goto(MX, MY)

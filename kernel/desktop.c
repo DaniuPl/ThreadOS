@@ -2160,9 +2160,14 @@ static void desktop_thread(void *arg)
         video_fill_rect(sx + SHOW_W - 1, 1, 1, 8, COL_LINE);
         video_fill_rect(sx + 3, 3, SHOW_W - 6, 4,
                         hidden_by_show ? COL_WHITE : COL_LINE);
-        if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, 10))
-            hint_at(sx - 40, 12, hidden_by_show ? "Przywroc okna"
-                                                : "Pokaz pulpit");
+        if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, 10)) {
+            const char *what = hidden_by_show ? "Przywroc okna"
+                                              : "Pokaz pulpit";
+            int n = 0;
+            while (what[n])
+                n++;
+            hint_at(sx - (n * 8 + 8) - 4, 12, what);
+        }
 
         /* How much of the machine is in use, next to which desktop
            this is: both are things that are always true. */
@@ -2211,7 +2216,10 @@ static void desktop_thread(void *arg)
             text[n++] = 'd';
             text[n++] = '.';
             text[n] = 0;
-            hint_at(lx - 60, 12, text);
+            /* To the LEFT of the meter, ending where the meter
+               begins: put under the pointer, the box would be read
+               with an arrow drawn across the middle of it. */
+            hint_at(lx - (n * 8 + 8) - 4, 12, text);
         }
 
         for (int d = 0; d < DESK_N; d++) {

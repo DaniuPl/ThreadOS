@@ -3610,3 +3610,40 @@ sprawdzane przez `make test`.
       sensownego naglowka, nie jest zwalniany, tylko zglaszany. Awaria
       byla w kfree, a blad calkiem gdzie indziej - i to jest dokladnie
       ten rodzaj awarii, o ktorym warto powiedziec glosno.
+
+- [x] **Nadrobione testy: osiem funkcji dostaje siatke** - bo to ona
+      zlapala blad sprzed miesiecy w mapowaniach plikow.
+
+      Dwie nowe grupy i trzy rozszerzone:
+
+      'sysbar' (15 asercji) - gorna belka. Miernik pokazuje, ze cos jest
+      zajete i ze nie wszystko; podpowiedz podaje liczby, ktore trzymaja
+      sie kupy (uzyte <= calosc, procent <= 100); a najwazniejsze - te
+      liczby ZYJA: program uruchomiony miedzy dwoma spojrzeniami musi
+      pojawic sie w liczniku zadan. "Pokaz pulpit" chowa okna, nie
+      zamykajac ich (przyciski zostaja na pasku), a drugi klik przywraca
+      dokladnie te, ktore schowal - okno zwiniete recznie zostaje
+      zwiniete.
+
+      'files' (18 asercji) - menedzer plikow. Rozmiar sprawdzany przy
+      pliku, ktorego dlugosc test zna, bo kolumna liczb znikad niczego
+      nie dowodzi. Usuwanie sprawdzone w obu polowach: pierwszy klik
+      tylko pyta (i plik dalej jest), drugi usuwa - co potwierdza shell
+      jadra, nie umiejac juz tego pliku przeczytac. Katalogu nie usuwa
+      wcale. Nazwa okna mowi, w ktorym katalogu stoimy, i zmienia sie
+      przy wejsciu.
+
+      'winkeys' (+4) - podwojne klikniecie w pasek tytulu na caly ekran i
+      z powrotem. 'gedit' (+9) - Ctrl+F znajduje slowo LEZACE WYZEJ niz
+      kursor, czyli naprawde okraza koniec pliku; Enter przy pustym
+      pytaniu powtarza; Ctrl+Z cofa po jednym znaku; okno nosi nazwe
+      pliku. 'gterm' (+4) - Tab konczy nazwe, przy kilku pasujacych
+      wypisuje kandydatow i dopisuje tylko to, co wspolne; okno mowi, w
+      ktorym katalogu stoi.
+
+      Dwie rzeczy poprawione po drodze, obie znalezione przez pisanie
+      testu: podpowiedz miernika chowala sie POD KURSOREM (strzalka jest
+      rysowana na niej), wiec wychodzi teraz w lewo od tego, co
+      tlumaczy; a napis "katalog" w menedzerze byl wyrownany inaczej niz
+      kolumna rozmiarow - dwie kolumny konczace sie w roznych miejscach
+      czytaja sie jak dwie kolumny.

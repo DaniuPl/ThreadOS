@@ -152,6 +152,22 @@ def row_text(at, r, cols=48, wx=WX, wy=WY):
     return out.rstrip()
 
 
+def win_title(at, wx=WX, wy=WY, cols=24):
+    """The window's own name, white on its title bar."""
+    font = font8x8()
+    out = ""
+    for c in range(cols):
+        pattern = []
+        for y in range(8):
+            bits = 0
+            for x in range(8):
+                if all(v > 200 for v in at(wx + 4 + c * 8 + x, wy + 2 + y)):
+                    bits |= 1 << x
+            pattern.append(bits)
+        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
+    return out.strip()
+
+
 def status_text(at, cols=48):
     """The status line: white letters on the accent blue."""
     font = font8x8()
@@ -357,6 +373,70 @@ def main():
                   row_text(at, 1) == "i psa")
             check("a pasek stanu liczy wiersze", "W2 K6" in status_text(at))
 
+            # --- Ctrl+F: finding, and going round the end ---------------
+            q.sendkey("ctrl-f")
+            time.sleep(1)
+            w, h, at = q.screen_raw()
+            check("Ctrl+F pyta, czego szukac ('%s')" % status_text(at),
+                  "Szukaj:" in status_text(at))
+            q.type_line("kota", enter=False)
+            time.sleep(0.5)
+            q.sendkey("ret")
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            st = status_text(at)
+            # The caret was on line two, past the word - so finding it
+            # at all means the search went round the end of the file
+            check("znajduje slowo LEZACE WYZEJ niz kursor, czyli okraza "
+                  "koniec pliku ('%s')" % st,
+                  "znaleziono w wierszu 1" in st and "W1 K8" in st)
+
+            q.sendkey("ctrl-f")
+            time.sleep(0.8)
+            q.sendkey("ret")                   # nothing typed = the same again
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("Enter przy pustym pytaniu powtarza ostatnie szukanie "
+                  "('%s')" % status_text(at),
+                  "znaleziono" in status_text(at))
+
+            q.sendkey("ctrl-f")
+            time.sleep(0.8)
+            q.type_line("czegotuniema", enter=False)
+            time.sleep(0.5)
+            q.sendkey("ret")
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("a czego nie ma, tego nie znajduje ('%s')"
+                  % status_text(at), "nie znaleziono" in status_text(at))
+
+            # --- Ctrl+Z: taking it back ---------------------------------
+            q.sendkey("down")
+            q.sendkey("end")
+            time.sleep(0.5)
+            q.sendkey("ctrl-z")
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("Ctrl+Z cofa ostatni znak ('%s')" % row_text(at, 1),
+                  row_text(at, 1) == "i ps")
+            check("i mowi, ze cofnal", "cofniete" in status_text(at))
+
+            q.sendkey("ctrl-z")
+            q.sendkey("ctrl-z")
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            # Three characters back the line reads "i " - the space is
+            # still there, and the screen shows it as nothing
+            check("i cofa dalej, po jednym ('%s')" % row_text(at, 1),
+                  row_text(at, 1) == "i")
+
+            # Back to what it was - the checks below expect it
+            q.type_line("psa", enter=False)
+            time.sleep(1)
+            w, h, at = q.screen_raw()
+            check("a to, co dopisano po cofnieciu, jest na swoim miejscu",
+                  row_text(at, 1) == "i psa")
+
             # --- saving -------------------------------------------------
             q.sendkey("ctrl-s")
             time.sleep(1)
@@ -371,6 +451,11 @@ def main():
             st = status_text(at)
             check("po zapisie pasek zna nazwe i gwiazdki juz nie ma "
                   "('%s')" % st, "notatka" in st and "notatka*" not in st)
+            # And the window says which file it holds - three editors
+            # open on three files would be three windows called
+            # "Edytor" otherwise
+            check("okno nosi nazwe pliku ('%s')" % win_title(at),
+                  win_title(at) == "Edytor: notatka")
 
             # --- and the file is really on the disk ---------------------
             # Checked by something that is not the program that wrote

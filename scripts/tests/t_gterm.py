@@ -128,6 +128,17 @@ def main():
             check("pulpit wstal", q.wait_desktop(timeout=40))
             q.mouse_home()
 
+            # Three files for the Tab test at the end, made now: the
+            # kernel's shell listens while no window has the focus, and
+            # once the terminal is open and filling the screen there is
+            # no desktop left to click on.
+            q.type_line("write plikjeden tresc")
+            time.sleep(1)
+            q.type_line("write plikdwa tresc")
+            time.sleep(1)
+            q.type_line("write inny tresc")
+            time.sleep(1.5)
+
             q.mouse_goto(24, 192)          # the 'Term' icon at (8,180)
             q.mouse_click()
             time.sleep(3)
@@ -263,6 +274,57 @@ def main():
                   "rozmiaru sa na miejscu", "/> seq 40" in text(rows))
             check("zacheta jest przy dolnej krawedzi wiekszego okna",
                   any(r.startswith("/>") for r in rows[-2:]))
+
+            # --- Tab finishes what is being typed -----------------------
+            # A terminal where a file name has to be typed out in full,
+            # correctly, every time is a terminal one types slowly at.
+            q.type_line("cat inn", enter=False)
+            time.sleep(0.5)
+            q.sendkey("tab")
+            time.sleep(1.5)
+            q.sendkey("ret")
+            rows = wait_for_row(q, "tresc", **big)
+            check("Tab konczy nazwe, gdy pasuje tylko jedna "
+                  "(cat inn -> inny)",
+                  any("cat inny" in r for r in rows))
+
+            # Two names that start alike: as far as they agree, and the
+            # candidates written out - going further would be guessing
+            q.type_line("cat plik", enter=False)
+            time.sleep(0.5)
+            q.sendkey("tab")
+            time.sleep(2)
+            rows = read_rows(q, **big)
+            check("przy kilku pasujacych wypisuje kandydatow (%s)"
+                  % [r for r in rows if "plikjeden" in r][:1],
+                  any("plikjeden" in r and "plikdwa" in r for r in rows))
+
+            # And what it added is the part they agree on: pressing
+            # Enter now runs 'cat plik', which has no such file
+            q.sendkey("ret")
+            time.sleep(2)
+            rows = read_rows(q, **big)
+            check("a dopisal tylko to, co wspolne (nadal 'cat plik')",
+                  any(r.startswith("/> cat plik") and
+                      not r.startswith("/> cat plikj") and
+                      not r.startswith("/> cat plikd") for r in rows))
+
+            # --- and the window says where it stands --------------------
+            w, h, at = q.screen_raw()
+            font = font8x8()
+            titled = ""
+            for c in range(24):
+                pattern = []
+                for y in range(8):
+                    bits = 0
+                    for x in range(8):
+                        if all(v > 200 for v in at(4 + c * 8 + x, 2 + y)):
+                            bits |= 1 << x
+                    pattern.append(bits)
+                titled += font.get(tuple(pattern),
+                                   " " if not any(pattern) else "?")
+            check("okno terminala mowi, w ktorym katalogu stoi ('%s')"
+                  % titled.strip(), titled.strip().startswith("Terminal: /"))
         finally:
             q.close()
     finally:

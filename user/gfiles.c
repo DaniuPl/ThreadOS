@@ -299,7 +299,11 @@ static void draw(void)
         win_text(win, 6, y, items[idx].name,
                  items[idx].is_dir ? C_GREEN : C_WHITE);
         if (items[idx].is_dir) {
-            win_text(win, cw - 60, y, "katalog", picked ? C_WHITE : C_GREEN);
+            /* Right-aligned, like the sizes it stands in place of: two
+               columns that end in different places read as two
+               columns. */
+            win_text(win, cw - 7 * 8 - 6, y, "katalog",
+                     picked ? C_WHITE : C_GREEN);
         } else {
             char sz[16];
             int n = num(sz, items[idx].size);
