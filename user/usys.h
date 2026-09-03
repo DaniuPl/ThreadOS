@@ -67,6 +67,7 @@
 #define SYS_WIN_TITLE  60
 #define SYS_RENAME     61
 #define SYS_WIN_BLIT   62
+#define SYS_PALETTE    63
 
 #define FS_NAME_MAX  63
 
@@ -585,6 +586,22 @@ static inline int32_t sys_ps(int index, struct psinfo *out)
 /* Renames the window - what the title bar says, and what the taskbar
    says under the pointer. A program with a file open should say which
    one. */
+/* The screen's palette: 256 colours as 0x00RRGGBB.
+ *
+ * This screen speaks in numbers, not colours - a window's content is
+ * palette indices. A program showing a picture that came from
+ * somewhere else has RGB in its hands and has to find the nearest
+ * number for each colour, which it cannot do without this. */
+static inline int32_t sys_palette(uint32_t *out256)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_PALETTE), "b"(out256)
+                     : "memory");
+    return ret;
+}
+
 /* A block of palette indices into the window's content - a picture,
    in other words. At most 4096 pixels at a time, which is a row of
    any screen this machine can have. */

@@ -45,8 +45,60 @@ static int asking;
 static char answer[NAME_MAX_LEN + 1];
 static int alen;
 
-static uint8_t row[ROW_MAX];
+static uint8_t row[ROW_MAX * 3];   /* a source row, up to three bytes a pixel */
 static uint8_t out[ROW_MAX];
+
+/* --- colours into numbers -------------------------------------------
+ *
+ * This screen speaks in palette indices; a picture that came from
+ * anywhere else speaks in colours. So each colour has to be traded for
+ * the nearest number the screen has - and "nearest" is honest here,
+ * because the palette holds thirty-six colours of the desktop and
+ * whatever the wallpaper left in the rest. A drawing comes out well; a
+ * photograph comes out as a photograph seen through thirty-six
+ * crayons, which is what an eight-bit screen is.
+ *
+ * Doing the search for every pixel would be two hundred and fifty six
+ * comparisons three hundred thousand times. Instead the answer is
+ * remembered for every colour rounded to five bits a channel: at most
+ * thirty two thousand searches, and a picture rarely uses a tenth of
+ * that. */
+static uint32_t pal[256];
+static uint8_t memo[32768];
+static int memo_ready;
+
+static void colours_start(void)
+{
+    sys_palette(pal);
+    for (int i = 0; i < 32768; i++)
+        memo[i] = 0xFF;
+    memo_ready = 1;
+}
+
+static uint8_t nearest(int r, int g, int b)
+{
+    int key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    if (memo[key] != 0xFF)
+        return memo[key];
+
+    int best = 0;
+    long best_d = 1L << 30;
+    for (int i = 0; i < 256; i++) {
+        int pr = (int)((pal[i] >> 16) & 0xFF);
+        int pg = (int)((pal[i] >> 8) & 0xFF);
+        int pb = (int)(pal[i] & 0xFF);
+        long dr = pr - r, dg = pg - g, db = pb - b;
+        long d = dr * dr + dg * dg + db * db;
+        if (d < best_d) {
+            best_d = d;
+            best = i;
+            if (!d)
+                break;
+        }
+    }
+    memo[key] = (uint8_t)best;
+    return (uint8_t)best;
+}
 
 static void ecopy(char *d, const char *s, int max)
 {
@@ -131,6 +183,106 @@ static void draw_status(void)
     win_text(winid, 4, ch - STATUS_H + 1, line, C_WHITE);
 }
 
+/* A BMP, as it comes from anywhere else in the world.
+ *
+ * Only what is worth having: no compression (BI_RGB), twenty-four bits
+ * a pixel or eight with a palette of its own. Rows are padded to four
+ * bytes and, unless the height is negative, they run from the BOTTOM
+ * up - which is why the destination row is counted from the other end.
+ */
+static int show_bmp(int fd, const uint8_t *head)
+{
+    uint32_t data_at = (uint32_t)head[10] | ((uint32_t)head[11] << 8) |
+                       ((uint32_t)head[12] << 16) | ((uint32_t)head[13] << 24);
+    uint32_t dib = (uint32_t)head[14] | ((uint32_t)head[15] << 8) |
+                   ((uint32_t)head[16] << 16) | ((uint32_t)head[17] << 24);
+    int w = (int)((uint32_t)head[18] | ((uint32_t)head[19] << 8) |
+                  ((uint32_t)head[20] << 16) | ((uint32_t)head[21] << 24));
+    int hh = (int)((uint32_t)head[22] | ((uint32_t)head[23] << 8) |
+                   ((uint32_t)head[24] << 16) | ((uint32_t)head[25] << 24));
+    int bpp = (int)((uint32_t)head[28] | ((uint32_t)head[29] << 8));
+    uint32_t comp = (uint32_t)head[30] | ((uint32_t)head[31] << 8) |
+                    ((uint32_t)head[32] << 16) | ((uint32_t)head[33] << 24);
+
+    int upside = hh > 0;              /* the usual: rows from the bottom */
+    if (hh < 0)
+        hh = -hh;
+    if (w <= 0 || w > ROW_MAX || hh <= 0 || dib < 40) {
+        ecopy(note, "dziwne wymiary", sizeof(note));
+        return -1;
+    }
+    if (comp != 0 || (bpp != 24 && bpp != 8)) {
+        ecopy(note, "umiem tylko BMP 24- i 8-bitowy bez kompresji",
+              sizeof(note));
+        return -1;
+    }
+
+    /* An eight-bit BMP carries its own palette, right after the header */
+    static uint8_t own[256 * 4];
+    uint32_t pos = 14 + dib;
+    if (bpp == 8) {
+        int colours = (int)(data_at - pos) / 4;
+        if (colours > 256)
+            colours = 256;
+        if (colours < 0 || (int)sys_read(fd, own, (uint32_t)(colours * 4))
+                           != colours * 4) {
+            ecopy(note, "nie da sie przeczytac palety obrazu",
+                  sizeof(note));
+            return -1;
+        }
+        pos += (uint32_t)(colours * 4);
+    }
+    /* Skip whatever else sits between here and the pixels */
+    while (pos < data_at) {
+        uint32_t step_n = data_at - pos;
+        if (step_n > sizeof(row))
+            step_n = sizeof(row);
+        if ((uint32_t)sys_read(fd, row, step_n) != step_n)
+            break;
+        pos += step_n;
+    }
+
+    img_w = w;
+    img_h = hh;
+    int room_w = cw, room_h = ch - STATUS_H - 2;
+    step = 1;
+    while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
+        step++;
+
+    if (!memo_ready)
+        colours_start();
+    win_rect(winid, 0, 0, cw, ch, C_BG);
+
+    int stride = bpp == 24 ? (w * 3 + 3) & ~3 : (w + 3) & ~3;
+    for (int y = 0; y < hh; y++) {
+        if ((int)sys_read(fd, row, (uint32_t)stride) != stride)
+            break;
+        int dest = upside ? (hh - 1 - y) : y;
+        if (dest % step)
+            continue;
+        dest /= step;
+        if (dest >= room_h)
+            continue;
+        int n = 0;
+        for (int x = 0; x < w && n < ROW_MAX; x += step) {
+            int r, g, b;
+            if (bpp == 24) {
+                b = row[x * 3 + 0];
+                g = row[x * 3 + 1];
+                r = row[x * 3 + 2];
+            } else {
+                const uint8_t *c = own + row[x] * 4;
+                b = c[0];
+                g = c[1];
+                r = c[2];
+            }
+            out[n++] = nearest(r, g, b);
+        }
+        win_blit(winid, 0, dest, n, 1, out);
+    }
+    return 0;
+}
+
 /* Reads the picture and puts it in the window, row by row. Nothing is
    kept afterwards: the window's content IS the copy, and a second copy
    in this program's memory would be three hundred kilobytes held for
@@ -144,9 +296,40 @@ static void show(const char *name)
         return;
     }
 
+    /* Enough of the front of the file to tell the formats apart and
+       to hold a whole BMP header (fourteen plus forty bytes). */
     uint8_t head[HDR];
-    if ((int)sys_read(fd, head, HDR) != HDR ||
-        head[0] != 'P' || head[1] != 'S' || head[2] != 'C' ||
+    int got = (int)sys_read(fd, head, HDR);
+    if (got < 54) {
+        sys_close(fd);
+        ecopy(note, "to nie jest obraz", sizeof(note));
+        img_w = 0;
+        return;
+    }
+
+    if (head[0] == 'B' && head[1] == 'M') {
+        /* The reading above swallowed more than the BMP header, so we
+           start again from the top and step forward properly. */
+        sys_close(fd);
+        fd = (int)sys_open(name, O_READ);
+        if (fd < 0) {
+            img_w = 0;
+            return;
+        }
+        uint8_t bh[54];
+        if ((int)sys_read(fd, bh, 54) != 54 || show_bmp(fd, bh) < 0) {
+            sys_close(fd);
+            img_w = 0;
+            return;
+        }
+        sys_close(fd);
+        ecopy(fname, name, NAME_MAX_LEN);
+        ecopy(note, "wczytany", sizeof(note));
+        retitle();
+        return;
+    }
+
+    if (got != HDR || head[0] != 'P' || head[1] != 'S' || head[2] != 'C' ||
         head[3] != 'R') {
         sys_close(fd);
         ecopy(note, "to nie jest obraz", sizeof(note));

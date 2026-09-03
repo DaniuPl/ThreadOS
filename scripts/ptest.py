@@ -76,6 +76,42 @@ HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" 
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
 
 
+def make_bmp(w=64, h=48):
+    """A 24-bit BMP with four quarters: red, green, blue and white.
+    Those four are in the screen's palette exactly, so a picture drawn
+    from this file has to come out in exactly those colours - which is
+    what tells a working decoder from a decoder that draws something."""
+    stride = (w * 3 + 3) & ~3
+    pixels = bytearray()
+    for y in range(h):                      # BMP rows run bottom-up
+        row = bytearray()
+        for x in range(w):
+            top = (h - 1 - y) < h // 2
+            left = x < w // 2
+            if top and left:
+                bgr = (0, 0, 255)           # red, as BGR
+            elif top:
+                bgr = (0, 255, 0)           # green
+            elif left:
+                bgr = (255, 0, 0)           # blue
+            else:
+                bgr = (255, 255, 255)       # white
+            row += bytes(bgr)
+        row += b"\0" * (stride - len(row))
+        pixels += row
+
+    dib = bytes([40, 0, 0, 0]) + w.to_bytes(4, "little") \
+        + h.to_bytes(4, "little") + (1).to_bytes(2, "little") \
+        + (24).to_bytes(2, "little") + (0).to_bytes(4, "little") \
+        + len(pixels).to_bytes(4, "little") + b"\0" * 16
+    head = b"BM" + (14 + len(dib) + len(pixels)).to_bytes(4, "little") \
+        + b"\0\0\0\0" + (14 + len(dib)).to_bytes(4, "little")
+    return head + dib + bytes(pixels)
+
+
+BMP_IMAGE = make_bmp()
+
+
 _FONT8X8 = None
 
 
@@ -349,6 +385,14 @@ def start_http_server():
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if self.path.endswith(".bmp"):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/bmp")
+                self.send_header("Content-Length", str(len(BMP_IMAGE)))
+                self.end_headers()
+                self.wfile.write(BMP_IMAGE)
                 return
 
             if self.path.startswith("/rootca") and CERT_DER_ROOT:

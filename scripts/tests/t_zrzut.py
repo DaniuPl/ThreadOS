@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a picture of the screen, taken and shown.
+"""ProtonOS smoke test: pictures - taken, saved, fetched and shown.
 
 The machine could draw a desktop and could read a wallpaper from a
 file. What it could not do was look at itself: there was no way to save
@@ -18,6 +18,14 @@ appearing. The picture has to BE the screen: the orange of the icons
 covers a quarter of the area inside the window that it covers on the
 screen itself, because the picture is shown every second pixel - and
 that is a number no accident produces.
+
+And a picture from OUTSIDE: there is no floppy and no way to hand the
+machine a file, but there is a network - so the test's own HTTP server
+offers a BMP, the machine fetches it with httpget and the viewer draws
+it. The file is four quarters of red, green, blue and white, and those
+four colours are in the screen's palette exactly: a decoder that works
+shows exactly them, and a decoder that draws something shows something
+else.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -76,6 +84,7 @@ def main():
         f.truncate(16 * 1024 * 1024)
     slog = tempfile.mktemp(suffix=".log")
 
+    http_port, stop_http = start_http_server()
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
@@ -133,7 +142,18 @@ def main():
             # The picture IS the screen: the icons' orange inside the
             # window, in the strip where the icons were, and a quarter
             # of what it was (every second pixel in each direction).
-            inside = count_orange(at, CX, CY, CX + 32, CY + (h - 20) // 2)
+            # The viewer draws the picture a row at a time - four
+            # hundred and eighty rows through as many calls - so the
+            # screen is looked at again until it stops filling up.
+            inside = 0
+            for _ in range(10):
+                w, h, at = q.screen_raw()
+                now = count_orange(at, CX, CY, CX + 32, CY + (h - 20) // 2)
+                if now > inside:
+                    inside = now
+                if inside > on_screen // 6:
+                    break
+                time.sleep(1)
             check("obraz w oknie to naprawde ekran - ikony sa na swoim "
                   "miejscu (%d wobec %d na ekranie)" % (inside, on_screen),
                   inside > on_screen // 6)
@@ -165,9 +185,53 @@ def main():
             check("plik, ktory nie jest obrazem, jest odrzucony ze "
                   "slowem wyjasnienia ('%s')" % said,
                   "nie jest obraz" in said)
+
+            # --- a picture from the outside world -----------------------
+            # No floppy, no shared folder - but a network. The machine
+            # fetches the file itself and then shows it.
+            q.mouse_goto(600, 430)
+            q.mouse_click()
+            time.sleep(1)
+            seen = len(q.serial())
+            q.type_line("run httpget 10.0.2.2 %d /kwadraty.bmp obraz.bmp"
+                        % http_port)
+            time.sleep(6)
+            got = q.serial()[seen:]
+            check("maszyna sciaga obraz z sieci na dysk",
+                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+
+            q.type_line("run gimg obraz.bmp")
+            time.sleep(6)
+            q.mouse_goto(600, 200)
+            time.sleep(2)
+            w, h, at = q.screen_raw()
+
+            # The third viewer, the third slot of the cascade
+            vx, vy = VX + 24, VY + 24
+            said = status(at, vx=vx, vy=vy)
+            check("podglad wczytal BMP ('%s')" % said,
+                  "64x48" in said and "wczytany" in said)
+
+            # The four quarters, in the four colours the file has -
+            # each of them exactly in the palette, so 'nearly' is not
+            # good enough here
+            cx, cy = vx + 1, vy + 11
+            def hue(x, y):
+                return at(cx + x, cy + y)
+            reds = hue(16, 12)
+            greens = hue(48, 12)
+            blues = hue(16, 36)
+            whites = hue(48, 36)
+            check("i wyszly z niego cztery cwiartki w czterech kolorach "
+                  "(%s %s %s %s)" % (reds, greens, blues, whites),
+                  reds[0] > 200 and reds[1] < 60 and
+                  greens[1] > 200 and greens[0] < 60 and
+                  blues[2] > 200 and blues[0] < 60 and
+                  all(v > 200 for v in whites))
         finally:
             q.close()
     finally:
+        stop_http()
         for f in (disk, slog):
             if os.path.exists(f):
                 os.unlink(f)

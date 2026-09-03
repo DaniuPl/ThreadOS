@@ -67,6 +67,7 @@
 #define SYS64_WIN_TITLE  54
 #define SYS64_RENAME    55
 #define SYS64_WIN_BLIT  56
+#define SYS64_PALETTE   57
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -644,6 +645,13 @@ static inline int64_t sys_ps(int index, struct psinfo *out)
 /* The answer to WEV_CLOSE: "I heard, and I am not closing yet" - the
    desktop stops counting down. Silence still costs the window. */
 /* Renames the window - the title bar and the taskbar's hint alike. */
+/* The screen's palette: 256 colours as 0x00RRGGBB - what a program
+   needs to turn colours into the numbers this screen speaks. */
+static inline int64_t sys_palette(uint32_t *out256)
+{
+    return syscall64(SYS64_PALETTE, (int64_t)(uintptr_t)out256, 0);
+}
+
 /* A block of palette indices into the window's content - a picture. */
 struct win_blit_cmd {
     int32_t x, y, w, h;

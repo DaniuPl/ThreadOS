@@ -3719,3 +3719,36 @@ sprawdzane przez `make test`.
       oknie NAPRAWDE jest ekranem: pomaranczowy ikon znajduje sie w
       oknie w tym samym miejscu i w ilosci odpowiadajacej pokazywaniu co
       drugiego piksela. Takiej liczby nie produkuje zaden przypadek.
+
+- [x] **Obraz z zewnatrz: BMP i kolory, ktorych ekran nie ma** - bo
+      pytanie "a co z JPG, PNG i BMP" ma trudnosc nie w formatach, tylko
+      w kolorze.
+
+      Ten ekran jest osmiobitowy z paleta: tresc okna to numery, nie
+      kolory. Plik .psc dziala bez wysilku, bo to SA bajty kompozytora.
+      Kazdy obraz z zewnatrz jest RGB i trzeba go skwantyzowac do tego,
+      co maszyna ma: trzydziesci szesc kolorow pulpitu plus sto
+      dziewiecdziesiat dwa miejsca po tapecie. Rysunek wychodzi dobrze,
+      zdjecie wychodzi jak zdjecie ogladane przez trzydziesci szesc
+      kredek - i to wlasnie jest osmiobitowy ekran, a nie usterka.
+
+      Wiec najpierw fundament: sys_palette() oddaje programowi cala
+      palete, bo bez wiedzy, co znacza numery, zaden format nie ma sensu.
+      Szukanie najblizszego koloru bylo by 256 porownan na piksel, wiec
+      odpowiedz jest pamietana dla koloru zaokraglonego do pieciu bitow
+      na kanal: najwyzej trzydziesci dwa tysiace szukan, a obraz rzadko
+      uzywa dziesiatej czesci tego.
+
+      BMP: bez kompresji, 24 bity albo 8 z wlasna paleta, wiersze
+      dopelniane do czterech bajtow i - o ile wysokosc nie jest ujemna -
+      liczone od DOLU.
+
+      Jak taki plik ma tu trafic? Nie ma dyskietki ani wymiany z hostem,
+      ale jest siec: 'httpget' sciaga plik na dysk, a podglad go
+      pokazuje. Tak tez sprawdza to test - serwer harnessu podaje BMP z
+      czterema cwiartkami w czerwieni, zieleni, blekicie i bieli, bo te
+      cztery kolory paleta ma DOKLADNIE: dekoder, ktory dziala, pokazuje
+      dokladnie je, a dekoder, ktory cos rysuje, pokazuje cos innego.
+
+      Nastepne w kolejce: PNG (inflate to jakies trzysta wierszy i
+      przyda sie jeszcze nie raz), potem JPEG baseline.

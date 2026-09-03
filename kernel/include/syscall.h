@@ -85,6 +85,9 @@
 #define SYS_RENAME     61
 /* A block of pixels into a window: ebx=winid, ecx=&struct win_blit_cmd */
 #define SYS_WIN_BLIT   62
+/* The screen's palette, so a program can turn colours into numbers:
+   ebx=buffer for 256 entries of 0x00RRGGBB */
+#define SYS_PALETTE    63
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include "syscall64.h"
+#include "../kernel/include/video.h"
 #include "../kernel/include/smp.h"
 #include "../kernel/include/user.h"
 #include "../kernel/include/clip.h"
@@ -971,6 +972,17 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)desktop_win_blit(
             (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
             (const uint8_t *)(uintptr_t)c.pixels);
+        return;
+    }
+    case SYS64_PALETTE: {
+        if (!paging64_user_range(a1, 256 * sizeof(uint32_t))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint32_t *out = (uint32_t *)(uintptr_t)a1;
+        for (int i = 0; i < 256; i++)
+            out[i] = video_palette_rgb((uint8_t)i);
+        r->rax = 0;
         return;
     }
     case SYS64_WIN_TITLE: {

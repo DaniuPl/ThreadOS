@@ -33,6 +33,7 @@
 #include "include/pmm.h"
 #include "include/rtc.h"
 #include "include/desktop.h"
+#include "include/video.h"
 #include "include/paging.h"
 #include "include/net.h"
 #include "include/tcp.h"
@@ -474,6 +475,17 @@ void syscall_handler(struct regs *r)
         }
         r->eax = (uint32_t)desktop_win_blit((int)r->ebx, task_current_id(),
                                             c.x, c.y, c.w, c.h, px);
+        break;
+    }
+    case SYS_PALETTE: {
+        /* The whole palette in one go. A program that wants to show a
+           picture from the outside world has to turn colours into the
+           numbers this screen speaks, and it cannot do that without
+           knowing what the numbers mean. */
+        uint32_t rgb[256];
+        for (int i = 0; i < 256; i++)
+            rgb[i] = video_palette_rgb((uint8_t)i);
+        r->eax = user_put(r->ebx, rgb, sizeof(rgb)) < 0 ? EFAULT : 0;
         break;
     }
     case SYS_WIN_KEEP:
