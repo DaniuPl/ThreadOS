@@ -590,7 +590,7 @@ def start_http_server():
 class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, nvme=False,
-                 usbkbd=False,
+                 usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
@@ -633,6 +633,20 @@ class Qemu:
             # A USB keyboard instead of PS/2 - that is what every
             # machine newer than roughly 2010 looks like
             cmd += ["-usb", "-device", "usb-kbd"]
+        if usbmouse == "xhci":
+            # A pointer on the same bus. Newer laptops have no PS/2
+            # port at all, and then this is the only pointer there is.
+            if usbkbd != "xhci":
+                cmd += ["-device", "qemu-xhci,id=xhci"]
+            cmd += ["-device", "usb-mouse,bus=xhci.0"]
+        elif usbmouse:
+            cmd += ["-usb", "-device", "usb-mouse"]
+        if no_i8042:
+            # A machine with no 8042 controller: no PS/2 keyboard and
+            # no PS/2 mouse, which is what an ultrabook made in the
+            # last few years actually is. Everything has to arrive over
+            # USB or not at all.
+            cmd += ["-machine", "pc,i8042=off"]
         self.serial_path = serial
         if serial:
             # When the console draws on the framebuffer, there is nothing

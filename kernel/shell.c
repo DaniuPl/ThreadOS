@@ -160,8 +160,8 @@ static void cmd_help(void)
    that matters is how much of it had to cross the bus to the card. */
 static void cmd_ekran(void)
 {
-    printk("tryb:         %dx%d, %s\n", video_w(), video_h(),
-           video_true_colour() ? "kolory" : "paleta 256");
+    printk("tryb:         %dx%d, %s, skala %d\n", video_w(), video_h(),
+           video_true_colour() ? "kolory" : "paleta 256", video_scale());
     printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
            video_present_rows(), video_h());
 }

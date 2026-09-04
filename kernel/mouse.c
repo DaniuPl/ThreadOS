@@ -234,3 +234,29 @@ int mouse_has_wheel(void)
 {
     return wheel;
 }
+
+/* Movement from somewhere other than the PS/2 port.
+ *
+ * A laptop without an 8042 controller - and there are more of those
+ * every year - has no PS/2 anything: its pointer arrives over USB, and
+ * so does the pointer of anyone who plugs a mouse into a dock. There
+ * is still only ONE pointer on the screen, so the second road ends
+ * here rather than in a second position that the compositor would have
+ * to choose between.
+ *
+ * The wheel's sign is the one this file uses everywhere: away from the
+ * person is positive. USB HID counts it the same way, so nothing is
+ * turned round here - unlike the PS/2 packet, which does not. */
+void mouse_inject(int dx, int dy, int buttons, int wheel_notches)
+{
+    mouse_x += dx;
+    mouse_y += dy;             /* HID's Y already grows downwards */
+    int mw = video_w(), mh = video_h();
+    if (mouse_x < 0) mouse_x = 0;
+    if (mouse_x >= mw) mouse_x = mw - 1;
+    if (mouse_y < 0) mouse_y = 0;
+    if (mouse_y >= mh) mouse_y = mh - 1;
+    mouse_buttons = buttons & 0x07;
+    scroll_acc += wheel_notches;
+    draw_status();
+}

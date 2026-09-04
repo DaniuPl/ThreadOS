@@ -1,6 +1,8 @@
 #ifndef PROTONOS_USBHC_H
 #define PROTONOS_USBHC_H
 
+#include <stdint.h>
+
 /* USB host controller - the selection layer
  *
  * Just like blk.c chooses between ATA, AHCI and NVMe, and netdev.c
@@ -45,5 +47,19 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval);
 /* A single look into an interrupt endpoint. Returns the number of
    bytes, 0 when the device has nothing to say, -1 on error. */
 int usbhc_int_in(int dev, int ep, void *data, int len);
+
+/* The two requests every driver above here makes, spelled once.
+ *
+ * A control transfer is eight bytes of setup and then perhaps some
+ * data, and building those eight bytes is the same arithmetic whether
+ * a keyboard or a mouse is asking. It lived in the keyboard driver
+ * while the keyboard was the only device; a second one would have
+ * copied it, and two copies of a wire format is how they drift. */
+int usbhc_descriptor(int dev, uint8_t type, uint8_t index,
+                     void *buf, int len);
+/* A request with no data stage - SET_CONFIGURATION, SET_IDLE,
+   SET_PROTOCOL. */
+int usbhc_request(int dev, uint8_t type, uint8_t req,
+                  uint16_t value, uint16_t index);
 
 #endif

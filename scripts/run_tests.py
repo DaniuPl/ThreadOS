@@ -27,10 +27,10 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 GROUPS = [
     "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
     "net32", "http32", "mouse", "ush", "pfs", "k64core", "k64proc",
-    "k64shell", "k64disk", "acpi", "usbkbd", "ahci", "consoles", "swap",
+    "k64shell", "k64disk", "acpi", "usbkbd", "usbmysz", "ahci", "consoles", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
-    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "zrzut", "kolory", "kolko", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
+    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "zrzut", "kolory", "kolko", "skala", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
     "usbkbd64", "iso", "uefi"
 ]

@@ -32,35 +32,6 @@ static uint8_t report[8] __attribute__((aligned(16)));
 static int dev;                  /* the device handle from the controller layer */
 static int ep_num, ep_maxpacket, ep_interval = 8;
 
-static void setup_packet(uint8_t *p, uint8_t type, uint8_t req,
-                         uint16_t value, uint16_t index, uint16_t len)
-{
-    p[0] = type;
-    p[1] = req;
-    p[2] = (uint8_t)value;
-    p[3] = (uint8_t)(value >> 8);
-    p[4] = (uint8_t)index;
-    p[5] = (uint8_t)(index >> 8);
-    p[6] = (uint8_t)len;
-    p[7] = (uint8_t)(len >> 8);
-}
-
-static int get_descriptor(uint8_t type, uint8_t index, void *buf, int len)
-{
-    uint8_t setup[8];
-    setup_packet(setup, 0x80, 0x06, (uint16_t)(type << 8 | index), 0,
-                 (uint16_t)len);
-    return usbhc_control(dev, setup, buf, len, 1);
-}
-
-static int no_data_request(uint8_t type, uint8_t req,
-                           uint16_t value, uint16_t index)
-{
-    uint8_t setup[8];
-    setup_packet(setup, type, req, value, index, 0);
-    return usbhc_control(dev, setup, (void *)0, 0, 0);
-}
-
 /* Looks in the configuration for a HID interface in its boot version
    and its interrupt endpoint. Returns the interface number or -1. */
 static int find_boot_keyboard(const uint8_t *cfg, int total)
@@ -207,12 +178,12 @@ int usbkbd_init(void)
         if (dev < 0)
             continue;
 
-        if (get_descriptor(0x02, 0, desc_buf, 9) < 9)
+        if (usbhc_descriptor(dev, 0x02, 0, desc_buf, 9) < 9)
             continue;
         int total = desc_buf[2] | (desc_buf[3] << 8);
         if (total > (int)sizeof(desc_buf))
             total = (int)sizeof(desc_buf);
-        if (get_descriptor(0x02, 0, desc_buf, total) < total)
+        if (usbhc_descriptor(dev, 0x02, 0, desc_buf, total) < total)
             continue;
 
         int iface = find_boot_keyboard(desc_buf, total);
@@ -220,13 +191,13 @@ int usbkbd_init(void)
             continue;                    /* something other than a keyboard */
 
         uint8_t cfg_value = desc_buf[5];
-        if (no_data_request(0x00, 0x09, cfg_value, 0) < 0)
+        if (usbhc_request(dev, 0x00, 0x09, cfg_value, 0) < 0)
             continue;                    /* SET_CONFIGURATION */
 
         /* SET_IDLE 0 - report changes only, do not repeat endlessly */
-        no_data_request(0x21, 0x0A, 0, (uint16_t)iface);
+        usbhc_request(dev, 0x21, 0x0A, 0, (uint16_t)iface);
         /* SET_PROTOCOL 0 - the boot protocol, a fixed 8-byte report */
-        no_data_request(0x21, 0x0B, 0, (uint16_t)iface);
+        usbhc_request(dev, 0x21, 0x0B, 0, (uint16_t)iface);
 
         if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)
             continue;

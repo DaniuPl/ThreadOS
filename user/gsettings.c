@@ -40,7 +40,7 @@
 
 #define ROW_Y   22            /* the first row */
 #define ROW_H   14
-#define MAXCFG   8
+#define MAXCFG   12    /* room for the settings there are, and a few more */
 
 static struct cfg_entry cfg[MAXCFG];
 static int ncfg;

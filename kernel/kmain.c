@@ -26,6 +26,7 @@
 #include "include/acpi.h"
 #include "include/mb2.h"
 #include "include/usbkbd.h"
+#include "include/usbmouse.h"
 #include "include/dynlink.h"
 #include "include/biglock.h"
 #include "include/swap.h"
@@ -297,6 +298,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     /* A USB keyboard needs the scheduler too - a thread polls it. On a
        machine without PS/2 it is the only input the system has. */
     usbkbd_init();
+    usbmouse_init();
 
     /* We take the IP address from the network - the DHCP client waits
        for the server's answers, so it has to run in a thread (after

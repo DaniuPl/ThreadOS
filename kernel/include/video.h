@@ -29,9 +29,17 @@ int video_console_enable(void);
 int video_console_active(void);
 void video_console_cell(int col, int row, char ch, uint8_t attr);
 
-/* Dimensions of the current mode */
+/* Dimensions of the current mode, in LOGICAL pixels - which is what
+   everything above this file draws in. On a panel large enough that an
+   eight pixel letter would be a millimetre and a half tall, one
+   logical pixel is put on the screen as a square of four, and these
+   report half of what the panel has. */
 int video_w(void);
 int video_h(void);
+/* How many screen pixels one logical pixel is. Said before the mode is
+   set up: 0 means "decide from the panel". */
+void video_set_scale(int s);
+int video_scale(void);
 
 /* Moves a finished frame from the working buffer onto the screen
    (double buffering). Does nothing in a mode without a working buffer. */

@@ -46,8 +46,31 @@ static volatile uint8_t *front = (uint8_t *)(uintptr_t)0xA0000;
 static volatile uint8_t *shadow;
 static int shadow_valid;
 static uint32_t present_rows;
+/* Two sizes, and the difference between them is the whole of what
+   "scaling the interface" means here.
+ *
+ * Everything above this file - the compositor, every program, the
+ * mouse - draws in LOGICAL pixels and asks video_w()/video_h() how
+ * many there are. The screen has its own, physical, number of them.
+ * When a panel is large enough that an eight pixel letter would be a
+ * millimetre and a half tall, the logical screen is made half the
+ * physical one and every logical pixel is put on the screen as a
+ * square of four.
+ *
+ * It is pixel doubling, and it is worth saying plainly what that costs
+ * and what it does not. It does not sharpen anything: the letters are
+ * the same eight-by-eight letters, drawn twice as large, and a
+ * photograph shown on such a screen has half the detail the panel
+ * could carry. What it buys is that not one line of layout anywhere in
+ * this system had to change - and a machine whose every window, icon
+ * and status line is placed in absolute pixels would otherwise have
+ * had all of them rewritten, and every test with them. */
 static int vid_w = 320, vid_h = 200;
 static int vid_pitch = 320;          /* bytes per row */
+static int phys_w = 320, phys_h = 200;
+static int phys_pitch = 320;
+static int scale = 1;                /* logical pixels per screen pixel */
+static int scale_wish;               /* 0 = decide from the panel */
 static int vid_bpp = 8;
 static int vid_bypp = 1;             /* bytes per pixel: 1, 3 or 4 */
 static uint32_t palette_rgb[256];    /* the software palette (0x00RRGGBB) */
@@ -122,6 +145,8 @@ static void set_default_palette(void)
 void video_init(void)
 {
     vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
+    phys_w = 320; phys_h = 200; phys_pitch = 320;
+    scale = 1;                       /* nothing to scale down from */
     shadow = (uint8_t *)0;
     shadow_valid = 0;
     fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* no double buffering */
@@ -141,6 +166,59 @@ static void dispi(uint16_t idx, uint16_t val)
     outw(VBE_DATA, val);
 }
 
+/* How many screen pixels one logical pixel is drawn as.
+ *
+ * Asked once, when the mode is set up. A wish of zero means "decide
+ * from the panel": a screen nine hundred pixels tall or more is a
+ * laptop's own resolution or better, and there an eight pixel letter
+ * is about a millimetre and a half - readable through a magnifying
+ * glass and not otherwise. Everything below that is left alone,
+ * because doubling a 640x480 screen would leave a desktop 320 pixels
+ * across, which is not a desktop. */
+static void decide_scale(void)
+{
+    scale = scale_wish > 0 ? scale_wish : (phys_h >= 900 ? 2 : 1);
+    if (scale < 1)
+        scale = 1;
+    if (scale > 4)
+        scale = 4;
+}
+
+void video_set_scale(int s)
+{
+    scale_wish = s;
+}
+
+int video_scale(void)
+{
+    return scale;
+}
+
+/* The working buffer, and the copy of the screen next to it, are both
+   the LOGICAL size - that is what makes the scaling cost nothing
+   above this file. Without room for them there is no scaling and no
+   double buffering either, and we draw straight onto the screen. */
+static void take_buffers(void)
+{
+    uint32_t bytes = (uint32_t)vid_h * (uint32_t)vid_pitch;
+    uint32_t pages = (bytes + 4095) / 4096;
+    uint32_t back = pmm_alloc_contiguous(pages);
+    if (!back) {
+        scale = 1;                   /* nothing to scale into */
+        vid_w = phys_w;
+        vid_h = phys_h;
+        vid_pitch = phys_pitch;
+        fb = front;
+        shadow = (uint8_t *)0;
+        shadow_valid = 0;
+        return;
+    }
+    fb = (uint8_t *)(uintptr_t)back;
+    uint32_t sh = pmm_alloc_contiguous(pages);
+    shadow = sh ? (uint8_t *)(uintptr_t)sh : (uint8_t *)0;
+    shadow_valid = 0;
+}
+
 int video_init_vesa(int w, int h)
 {
     /* When the loader has already set a mode, we leave it alone: its
@@ -148,15 +226,18 @@ int video_init_vesa(int w, int h)
        only works on a virtual machine. We merely add a working
        buffer so that the compositor does not flicker. */
     if (video_have_loader_lfb()) {
-        uint32_t bytes = (uint32_t)vid_h * vid_pitch;
-        uint32_t back = pmm_alloc_contiguous((bytes + 4095) / 4096);
-        if (back)
-            fb = (uint8_t *)(uintptr_t)back;
-        if (back) {
-            uint32_t sh = pmm_alloc_contiguous((bytes + 4095) / 4096);
-            shadow = sh ? (uint8_t *)(uintptr_t)sh : (uint8_t *)0;
-        }
-        shadow_valid = 0;
+        decide_scale();
+        vid_w = phys_w / scale;
+        vid_h = phys_h / scale;
+        vid_pitch = vid_w * vid_bypp;
+        take_buffers();
+        /* A screen whose height does not divide by the scale has a
+           strip at the bottom that no logical row covers. It is
+           painted once, here, rather than left showing whatever the
+           card powered up with. */
+        for (int y = 0; y < phys_h; y++)
+            memset((void *)(front + (uint32_t)y * phys_pitch), 0,
+                   (uint32_t)phys_pitch);
         video_clear(0);
         video_present();
         return 0;
@@ -174,19 +255,15 @@ int video_init_vesa(int w, int h)
     dispi(3, 32);            /* BPP */
     dispi(4, 0x41);          /* ENABLED | LFB */
 
-    vid_w = w; vid_h = h; vid_pitch = w * 4; vid_bpp = 32; vid_bypp = 4;
+    phys_w = w; phys_h = h; phys_pitch = w * 4;
+    vid_bpp = 32; vid_bypp = 4;
     front = (uint8_t *)(uintptr_t)lfb;
 
-    /* A working buffer in RAM (double buffering - no flicker) */
-    uint32_t bytes = (uint32_t)w * h * 4;
-    uint32_t pages = (bytes + 4095) / 4096;
-    uint32_t back = pmm_alloc_contiguous(pages);
-    fb = back ? (uint8_t *)(uintptr_t)back : front;  /* without RAM - straight into the LFB */
-    if (back) {
-        uint32_t sh = pmm_alloc_contiguous(pages);
-        shadow = sh ? (uint8_t *)(uintptr_t)sh : (uint8_t *)0;
-    }
-    shadow_valid = 0;
+    decide_scale();
+    vid_w = phys_w / scale;
+    vid_h = phys_h / scale;
+    vid_pitch = vid_w * 4;
+    take_buffers();
 
     set_default_palette();
     video_clear(0);
@@ -213,6 +290,10 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     vid_w = w;
     vid_h = h;
     vid_pitch = (int)pitch;
+    phys_w = w;
+    phys_h = h;
+    phys_pitch = (int)pitch;
+    scale = 1;
     /* The depth the loader really gave. Hardcoding thirty-two bits
        here worked while the buffer came from the BIOS - UEFI firmware
        can report 24, and then a full-word write tramples the
@@ -348,6 +429,36 @@ uint32_t video_present_rows(void)
     return present_rows;
 }
 
+/* One logical row onto the screen, as 'scale' screen rows of 'scale'
+   pixels each. At a scale of one this is the copy it always was. */
+static void put_row(int y, const uint8_t *src)
+{
+    for (int r = 0; r < scale; r++) {
+        int py = y * scale + r;
+        if (py >= phys_h)
+            return;
+        volatile uint8_t *dst = front + (uint32_t)py * phys_pitch;
+        if (scale == 1) {
+            memcpy((void *)dst, src, (uint32_t)vid_pitch);
+            continue;
+        }
+        if (vid_bypp == 4) {
+            const uint32_t *s32 = (const uint32_t *)src;
+            volatile uint32_t *d32 = (volatile uint32_t *)dst;
+            for (int x = 0; x < vid_w; x++) {
+                uint32_t c = s32[x];
+                for (int k = 0; k < scale; k++)
+                    d32[x * scale + k] = c;
+            }
+            continue;
+        }
+        for (int x = 0; x < vid_w; x++)
+            for (int k = 0; k < scale; k++)
+                for (int b = 0; b < vid_bypp; b++)
+                    dst[(x * scale + k) * vid_bypp + b] = src[x * vid_bypp + b];
+    }
+}
+
 void video_present(void)
 {
     if (fb == front)
@@ -355,7 +466,8 @@ void video_present(void)
 
     uint32_t pitch = (uint32_t)vid_pitch;
     if (!shadow || !shadow_valid) {
-        memcpy((void *)front, (const void *)fb, (uint32_t)vid_h * pitch);
+        for (int y = 0; y < vid_h; y++)
+            put_row(y, (const uint8_t *)(fb + (uint32_t)y * pitch));
         if (shadow) {
             memcpy((void *)shadow, (const void *)fb, (uint32_t)vid_h * pitch);
             shadow_valid = 1;
@@ -373,7 +485,7 @@ void video_present(void)
         if (!memcmp((const void *)(shadow + off), src, pitch))
             continue;
         memcpy((void *)(shadow + off), src, pitch);
-        memcpy((void *)(front + off), src, pitch);
+        put_row(y, src);
         rows++;
     }
     present_rows = rows;

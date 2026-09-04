@@ -117,7 +117,35 @@ static int uhci_greet(int port, struct device *u)
     return 0;
 }
 
+/* Which ports already have a device somebody is talking to.
+ *
+ * Two drivers walk these ports - the keyboard's and the mouse's - and
+ * each stops at the first device it recognises, having attached and
+ * looked at every one before it. Attaching means RESETTING the port,
+ * so the second walk would knock over the keyboard the first walk had
+ * just started. So a port is greeted once and its handle kept: the
+ * second asker gets the same device rather than a device that has just
+ * been reset underneath its owner. */
+#define PORTS_MAX 32
+static int port_dev[PORTS_MAX];
+static int port_known[PORTS_MAX];
+
+static int usbhc_greet(int port);
+
 int usbhc_attach(int port)
+{
+    if (port >= 0 && port < PORTS_MAX && port_known[port])
+        return port_dev[port];
+
+    int handle = usbhc_greet(port);
+    if (port >= 0 && port < PORTS_MAX) {
+        port_known[port] = 1;
+        port_dev[port] = handle;
+    }
+    return handle;
+}
+
+static int usbhc_greet(int port)
 {
     if (controller == XHCI) {
         int slot = xhci_attach(port);
@@ -185,4 +213,39 @@ int usbhc_int_in(int dev, int ep, void *data, int len)
     struct device *u = &list[dev - 1];
     return uhci_interrupt_in(u->addr, u->lowspeed, ep, u->ep_maxpacket,
                              data, len, &u->toggle);
+}
+
+/* --- The requests a device driver makes -----------------------------
+ *
+ * Eight bytes of setup, laid out as the specification says, and then
+ * the transfer. Both of these were in the keyboard driver while the
+ * keyboard was the only device on the bus. */
+static void setup_packet(uint8_t *p, uint8_t type, uint8_t req,
+                         uint16_t value, uint16_t index, uint16_t len)
+{
+    p[0] = type;
+    p[1] = req;
+    p[2] = (uint8_t)value;
+    p[3] = (uint8_t)(value >> 8);
+    p[4] = (uint8_t)index;
+    p[5] = (uint8_t)(index >> 8);
+    p[6] = (uint8_t)len;
+    p[7] = (uint8_t)(len >> 8);
+}
+
+int usbhc_descriptor(int dev, uint8_t type, uint8_t index,
+                     void *buf, int len)
+{
+    uint8_t setup[8];
+    setup_packet(setup, 0x80, 0x06, (uint16_t)(type << 8 | index), 0,
+                 (uint16_t)len);
+    return usbhc_control(dev, setup, buf, len, 1);
+}
+
+int usbhc_request(int dev, uint8_t type, uint8_t req,
+                  uint16_t value, uint16_t index)
+{
+    uint8_t setup[8];
+    setup_packet(setup, type, req, value, index, 0);
+    return usbhc_control(dev, setup, (void *)0, 0, 0);
 }

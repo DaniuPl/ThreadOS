@@ -748,8 +748,8 @@ static void execute(const char *line)
     } else if (!strcmp(line, "ekran")) {
         /* What the screen is, and how much of the last frame had to
            cross the bus to the card. */
-        printk("tryb:         %dx%d, %s\n", video_w(), video_h(),
-               video_true_colour() ? "kolory" : "paleta 256");
+        printk("tryb:         %dx%d, %s, skala %d\n", video_w(), video_h(),
+               video_true_colour() ? "kolory" : "paleta 256", video_scale());
         printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
                video_present_rows(), video_h());
     } else if (!strcmp(line, "reboot")) {

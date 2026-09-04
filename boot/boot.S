@@ -63,14 +63,28 @@ mb2_header:
        Under UEFI there is no VGA text mode - the character buffer at
        0xB8000 simply does not exist - so the only way to show anything
        is the framebuffer handed over by the loader. We then draw the
-       characters ourselves. */
+       characters ourselves.
+
+       Zero means "no preference", which is not laziness: a number here
+       WINS over whatever the loader was told to use, so asking for a
+       thousand and twenty four by seven hundred and sixty eight is
+       asking a laptop with a screen twice that size to use a quarter
+       of it. Under UEFI it is worse than that - the choice is whatever
+       the firmware happens to expose through GOP, and a mode outside
+       that list leaves the loader setting up NOTHING, on a machine
+       with no text mode to fall back to.
+
+       So the mode is the loader's to pick, which in practice means
+       gfxpayload, which in practice means the panel's own resolution.
+       The long-mode header has said this for a while; this one had
+       not, and that was the whole of why the desktop came up small. */
     .align 8
     .short 5                         /* tag: video mode */
     .short 0
     .long 20
-    .long 1024                       /* width */
-    .long 768                        /* height */
-    .long 32                         /* bits per pixel */
+    .long 0                          /* width - any */
+    .long 0                          /* height - any */
+    .long 0                          /* depth - any */
 
     .align 8
     .short 0                         /* end tag */

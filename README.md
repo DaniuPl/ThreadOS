@@ -78,7 +78,19 @@ every program here always drew, or asks once to hold colours instead
 and then a photograph is a photograph rather than a photograph seen
 through thirty-six crayons. The compositor writes to the card only the
 rows that actually changed, so an idle desktop redrawn thirty times a
-second sends nothing at all across the bus. A window can be renamed by the program
+second sends nothing at all across the bus. The screen is whatever the
+loader gives — the kernel asks for no particular mode, which on a
+laptop means the panel's own resolution — and when that panel is large
+enough that an eight-pixel letter would be a millimetre and a half
+tall, the compositor draws into a screen half the size and every
+logical pixel reaches the panel as a square of four, so not one line of
+layout had to change. A laptop's touchpad is a mouse with a wheel: the
+fourth byte is asked for the way it has to be asked for, and two
+fingers sliding on the pad scroll the window under the pointer — not
+the one with the keyboard. A pointer that is not on the PS/2 port at
+all works too: a USB mouse in the HID boot protocol, next to the USB
+keyboard that was already there, so a machine with no 8042 controller —
+which is what a laptop made in the last few years is — still has both. A window can be renamed by the program
 that owns it, so the editor's title says which file it holds and the
 terminal's says where it is standing. Icons, a file
 manager that lists sizes, walks into directories and back out, hands a

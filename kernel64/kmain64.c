@@ -36,6 +36,7 @@
 #include "shell64.h"
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/usbkbd.h"
+#include "../kernel/include/usbmouse.h"
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/biglock.h"
 #include "../kernel/include/swap.h"
@@ -588,6 +589,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        address the controller itself understands, and in both modes
        that means an identity mapping. */
     usbkbd_init();          /* it reports in by itself when it finds something */
+    usbmouse_init();
 
     /* The IP address comes from the network, and the DHCP client waits
        for the server's replies - so it has to run in a thread, that is,

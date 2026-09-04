@@ -3971,3 +3971,149 @@ sprawdzane przez `make test`.
       wpuszczony w okno gradient JPEG - 3031, i rosnie w prawo czerwienia
       i w dol zielenia, wiec to nie jest "duzo kolorow" tylko "wlasciwe
       kolory".
+
+- [x] **Laptop: touchpad, kolko i rozdzielczosc wlasna panelu** - bo
+      "najpierw na laptopie bede system testowac".
+
+      **Blad, ktory na laptopie bylby widoczny od pierwszej sekundy.**
+      mouse.c rysowal "M x,y bN" w rogu ekranu przy KAZDYM pakiecie
+      myszy, a pit.c "uptime: Ns" co sekunde. W trybie tekstowym to byla
+      diagnostyka. Pod UEFI trybu tekstowego nie ma - vga_write_at idzie
+      przez fbcon prosto na WIDOCZNY bufor - wiec sterownik myszy malowal
+      po pulpicie, z przerwania, kilkaset razy na sekunde. Widac to bylo
+      na zrzucie jako napisy wiszace nad tapeta bez zadnego okna.
+
+      Naprawa: kompozytor mowi vga_screen_taken(1), gdy bierze ekran, i
+      rog tekstowego ekranu przestaje byc miejscem. Trzy wywolania
+      naraz - mysz, uptime, watki demonstracyjne z kmain.c - i wszystkie
+      i tak pisza do dziennika szeregowego, gdzie diagnostyka nalezy.
+
+      Przy okazji: bez tego kazdy ruch palcem po touchpadzie unieważnial
+      kopie ekranu (bo napis szedl na bufor widoczny), wiec optymalizacja
+      z poprzedniego wpisu przestawala dzialac dokladnie wtedy, gdy jest
+      najbardziej potrzebna.
+
+      **Kolko, czyli dwa palce.** Touchpad na porcie PS/2 to mysz: melduje
+      ruch wzgledny i przyciski dokladnie tak samo, a stukniecie w tafle
+      zamienia na klikniecie jego wlasny firmware. Czego mysz z 1987
+      roku nie miala, a touchpad ma, to kolko - i tak wlasnie zglasza
+      dwa palce sunace po tafli. To jest rozszerzenie IntelliMouse:
+      czwarty bajt, o ktory trzeba poprosic pukaniem, jakiego nikt nie
+      wysle przypadkiem - trzy czestotliwosci probkowania, 200, 100 i
+      80 - po czym urzadzenie mowi, kim jest. Odpowiedz 3 znaczy, ze
+      czwarty bajt jest.
+
+      Znak jest odwrotny, niz sie wydaje: protokol liczy zab KU
+      CZLOWIEKOWI jako dodatni, a cala reszta systemu nazywa dodatnim
+      kierunek OD czlowieka, bo w te strone jedzie dokument. Odwrocenie
+      siedzi w sterowniku, zeby nikt wyzej nie musial o tym pamietac -
+      wyszlo to na tescie, ktory pokazal liste jadaca w zla strone.
+
+      Przy okazji parser pakietow: byl switch z etykieta i skokiem, jest
+      tablica i licznik.
+
+      **WEV_SCROLL idzie do okna POD WSKAZNIKIEM**, nie do tego z fokusem.
+      Tak robi kazdy inny system i to jest wlasciwa strona: patrzy sie na
+      liste i przewija ja, nie robiac jej wpierw oknem od klawiatury.
+      Obsluzyly to gweb, gfiles i gedit.
+
+      W edytorze wyszla rzecz do przemyslenia: draw() wolal
+      scroll_to_caret() co klatke, wiec przewiniecie natychmiast by sie
+      cofalo. Stad follow_caret - kolko puszcza kursor, pierwszy klawisz
+      lapie go z powrotem. Przewijanie dokumentu to patrzenie gdzie
+      indziej, a nie przenoszenie sie tam.
+
+      **Rozdzielczosc: jadro samo sobie ja psulo.** boot/boot.S prosil
+      loader o 1024x768. Prosba w naglowku Multiboot2 WYGRYWA z
+      gfxpayload, wiec panel 1920x1080 dostawal cwiartke siebie. Naglowek
+      64-bitowy mial tam zero ("dowolna") juz od dawna, z komentarzem
+      tlumaczacym dlaczego; 32-bitowy nie mial, i to bylo cale zrodlo
+      malego pulpitu. Zmierzone, nie zgadniete: z prosba - 1024x768, bez
+      prosby - to, co da loader. Tak samo grub.cfg dostal 'insmod
+      all_video' i 'gfxpayload=keep', ktore plyta 64-bitowa miala, a
+      32-bitowa nie.
+
+      **Bufory okien wyszly ze sterty do PMM.** Bufor okna to najwieksza
+      pojedyncza rzecz, jaka ten system alokuje: przy wlasnej
+      rozdzielczosci laptopa zmaksymalizowane okno w kolorach to osiem
+      megabajtow, czyli CALA sterta. Trzymanie najwiekszych i
+      najmniejszych obiektow na jednej liscie pierwszego dopasowania to
+      przepis na fragmentacje. Teraz ida calymi stronami prosto z
+      alokatora ramek, i rozmiar jest kwestia panelu, a nie liczby
+      wpisanej w kod.
+
+      **I rzecz, ktorej nie bylo w planie.** 1920x1080 zadzialalo od
+      razu - i bylo NIECZYTELNE. Cale UI stoi w pikselach bezwzglednych,
+      font ma osiem pikseli, a osiem pikseli na 15-calowym panelu 1080p
+      to poltora milimetra. System poprawny i bezuzyteczny.
+
+      Odpowiedz: kompozytor rysuje we WLASNYM ekranie, logicznym, a na
+      panel idzie ten ekran z kazdym pikselem polozonym jako kwadrat
+      czterech. video_w() i video_h() odpowiadaja w pikselach logicznych
+      - i ani jedna linia rozkladu nigdzie nie musiala sie zmienic.
+      Maszyna, w ktorej kazde okno, ikona i pasek stanu stoja w
+      wspolrzednych bezwzglednych, inaczej wymagalaby przepisania ich
+      wszystkich, a z nimi geometrii w kilkudziesieciu grupach testowych.
+
+      Trzeba powiedziec wprost, co to kosztuje: to jest podwajanie
+      pikseli, nie skalowanie elementow. Litery sa tymi samymi literami
+      8x8, narysowanymi dwa razy wiekszymi - nie ostrzejszymi. Zdjecie
+      na takim ekranie ma polowe szczegolu, ktory panel mogl by uniesc.
+      W zamian: zero zmian wyzej i zero ryzyka.
+
+      Skala jest ustawieniem ('set skala'), a zero znaczy "niech
+      zdecyduje ekran": panel wysoki na 900 pikseli i wiecej dostaje 2,
+      wszystko mniejsze 1 - bo podwojenie 640x480 dalo by pulpit 320
+      pikseli w poprzek, a to nie jest pulpit. Dzieki temu wszystkie
+      dotychczasowe testy zostaja przy skali 1 i nie zmienia sie w nich
+      nic.
+
+      Grupa 'skala' pyta o mechanizm przy skali wymuszonej recznie, i
+      pyta uczciwie: nie tylko czy sasiednie piksele sa rowne w parach
+      (11100 na 11100), ale takze czy ta sama siatka przesunieta o
+      piksel juz sie NIE zgadza (8590 na 11100). Pierwsza liczba bez
+      drugiej nie znaczylaby nic.
+
+- [x] **Mysz USB - i maszyna, ktora nie ma PS/2 w ogole** - druga polowa
+      odpowiedzi na "najpierw na laptopie".
+
+      Wskaznik przychodzil przez kontroler 8042 od pierwszego dnia i na
+      komputerze stacjonarnym dalej tak przychodzi. Laptop z ostatnich
+      lat moze nie miec 8042 wcale: ani klawiatury PS/2, ani touchpada
+      PS/2, bo nie ma tych portow. Jego wskaznik to urzadzenie HID na
+      magistrali USB, i klawiatura tak samo.
+
+      Wiec sterownik myszy obok sterownika klawiatury, ta sama droga -
+      porty, ktore melduje warstwa kontrolera, deskryptor konfiguracji,
+      interfejs klasy HID w wersji rozruchowej - i rozstaja sie na
+      JEDNYM bajcie: protokol interfejsu to 1 dla klawiatury i 2 dla
+      myszy. Raport rozruchowy ma trzy bajty, czasem cztery: przyciski,
+      ruch w X, ruch w Y i - na urzadzeniu z kolkiem - liczba zebow.
+      Bajty ruchu sa ZE ZNAKIEM i trzeba je tak czytac: ruch o minus
+      jeden przychodzi jako 0xFF, a wziety jako 255 rzucilby wskaznik
+      przez caly ekran.
+
+      Wspolne kawalki - budowanie osmiu bajtow zadania i dwa rodzaje
+      transferu sterujacego - wyszly z usbkbd.c do usbhc.c. Siedzialy
+      tam, dopoki klawiatura byla jedynym urzadzeniem; drugie by je
+      skopiowalo, a dwie kopie formatu na drucie to sposob, w jaki
+      formaty sie rozjezdzaja.
+
+      **Pulapka, ktora sam bym zastawil.** Oba sterowniki chodza po tych
+      samych portach i kazdy zatrzymuje sie na pierwszym urzadzeniu,
+      ktore rozpozna - przygladajac sie po drodze wszystkim wczesniejszym.
+      A przygladanie sie znaczy RESET portu. Drugi przebieg wywrocilby
+      klawiature, ktora pierwszy wlasnie uruchomil. Wiec port jest witany
+      raz, a jego uchwyt zapamietany: drugi pytajacy dostaje to samo
+      urzadzenie, a nie urzadzenie wlasnie zresetowane pod wlascicielem.
+
+      Ruch z obu drog konczy sie w mouse_inject(), bo wskaznik na ekranie
+      jest jeden i kompozytor nie ma miedzy czym wybierac. Znak kolka w
+      HID jest juz taki, jakiego uzywa reszta systemu - w odroznieniu od
+      pakietu PS/2, ktory trzeba odwrocic.
+
+      Grupa 'usbmysz' pyta o dwie rzeczy, i druga jest ta, ktora sie
+      liczy: ze maszyna znajduje mysz na kontrolerze xHCI i mowi gdzie,
+      oraz ze przy WYLACZONYM 8042 - maszyna, ktora naprawde nie ma
+      PS/2 - wskaznik dalej sie rusza. Czym innym niz USB ruszyc sie
+      nie moze.

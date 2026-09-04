@@ -375,6 +375,7 @@ struct window {
        0x00RRGGBB. The compositor does not care which: it composes one
        with a row copy and the other a pixel at a time. */
     int truecolour;
+    uint32_t content_bytes;   /* what was taken for it, so it can go back */
     int cw, ch;            /* dimensions of the content area */
     int z;                 /* drawing order (higher = on top) */
     /* Which desktop the window belongs to. A window is only ever on
@@ -753,6 +754,35 @@ static void draw_int(int x, int y, int v, uint8_t col)
         s[j++] = tmp[--n];
     s[j] = '\0';
     video_draw_string(x, y, s, col);
+}
+
+/* --- Where a window's pixels live -----------------------------------
+ *
+ * Not on the kernel's heap. A window's content buffer is the largest
+ * single thing this system allocates: at a laptop's own resolution a
+ * maximised window in colours is eight megabytes, which is the whole
+ * heap - and the heap is a first-fit list shared with every small
+ * allocation the kernel makes. Putting the biggest and the smallest
+ * objects in one list is how a list gets fragmented.
+ *
+ * So these come whole pages at a time, straight from the frame
+ * allocator. That is also what makes the size a question of the panel
+ * rather than of a number written here: a screen twice as large asks
+ * for twice the frames and gets them, or does not and the window keeps
+ * the size it had. */
+static uint8_t *win_buf_alloc(uint32_t bytes)
+{
+    uint32_t addr = pmm_alloc_contiguous((bytes + 4095) / 4096);
+    return addr ? (uint8_t *)(uintptr_t)addr : (uint8_t *)0;
+}
+
+static void win_buf_free(uint8_t *p, uint32_t bytes)
+{
+    if (!p)
+        return;
+    uint32_t addr = (uint32_t)(uintptr_t)p;
+    for (uint32_t n = (bytes + 4095) / 4096; n; n--, addr += 4096)
+        pmm_free_frame(addr);
 }
 
 /* --- Drawing into an application's content buffer -------------------
@@ -1422,15 +1452,16 @@ static int resize_content(struct window *w)
     if (cw == w->cw && ch == w->ch)
         return 0;                      /* the drag changed nothing */
 
-    int bytes = cw * ch * (w->truecolour ? 4 : 1);
-    uint8_t *buf = kmalloc(bytes);
+    uint32_t bytes = (uint32_t)(cw * ch) * (w->truecolour ? 4u : 1u);
+    uint8_t *buf = win_buf_alloc(bytes);
     if (!buf) {
         w->w = w->cw + 2;              /* back to the size that has a buffer */
         w->h = w->ch + TITLE_H + 2;
         return -1;
     }
-    kfree(w->content);
+    win_buf_free(w->content, w->content_bytes);
     w->content = buf;
+    w->content_bytes = bytes;
     w->cw = cw;
     w->ch = ch;
     buf_rect(w, 0, 0, cw, ch, buf_colour(w, COL_WIN));
@@ -1913,8 +1944,9 @@ static void reap_windows(void)
             continue;
 
         if (!task_alive(w->owner)) {
-            kfree(w->content);
+            win_buf_free(w->content, w->content_bytes);
             w->content = (void *)0;
+            w->content_bytes = 0;
             w->used = 0;
             w->closing = 0;
             if (focus_idx == i)
@@ -2113,12 +2145,14 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
     for (int i = 0; i < MAX_WIN; i++) {
         if (wins[i].used)
             continue;
-        uint8_t *buf = kmalloc(cw * ch);
+        uint32_t bytes = (uint32_t)(cw * ch);
+        uint8_t *buf = win_buf_alloc(bytes);
         if (!buf)
             return -1;
-        memset(buf, COL_WIN, cw * ch);     /* a grey background to start with */
+        memset(buf, COL_WIN, bytes);       /* a grey background to start with */
         struct window *w = &wins[i];
         w->truecolour = 0;                 /* indices until asked otherwise */
+        w->content_bytes = bytes;
         w->w = cw + 2;
         w->h = ch + TITLE_H + 2;
         /* New windows go in a cascade, twelve pixels apart. Far enough
@@ -2244,7 +2278,8 @@ int desktop_win_truecolour(int winid, int owner)
     if (win->truecolour)
         return 0;
 
-    uint32_t *buf = kmalloc(win->cw * win->ch * 4);
+    uint32_t bytes = (uint32_t)(win->cw * win->ch) * 4u;
+    uint32_t *buf = (uint32_t *)win_buf_alloc(bytes);
     if (!buf)
         return -1;
     /* What was already drawn stays drawn - a program that asks after
@@ -2253,8 +2288,9 @@ int desktop_win_truecolour(int winid, int owner)
         for (int i = 0; i < win->cw; i++)
             buf[j * win->cw + i] =
                 video_palette_rgb(win->content[j * win->cw + i]);
-    kfree(win->content);
+    win_buf_free(win->content, win->content_bytes);
     win->content = (uint8_t *)buf;
+    win->content_bytes = bytes;
     win->truecolour = 1;
     return 0;
 }
@@ -2345,6 +2381,12 @@ int desktop_win_poll(int winid, int owner, void *out)
 static void desktop_thread(void *arg)
 {
     (void)arg;
+    /* How large a logical pixel is. Zero - the default - means the
+       screen decides: a laptop's own resolution gets two, everything
+       smaller gets one. A person who disagrees says so once and it is
+       remembered, like the background and the wallpaper. */
+    video_set_scale((int)config_get_num("skala", 0));
+
     /* Try the high VESA resolution (640x480x32); when there is no
        framebuffer - fall back to mode 13h (320x200) */
     if (video_init_vesa(640, 480) < 0)
