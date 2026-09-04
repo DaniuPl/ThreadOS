@@ -36,6 +36,10 @@
 #include "include/fs.h"
 #include "include/rtc.h"
 #include "include/mouse.h"
+#include "include/pci.h"
+#include "include/usbhc.h"
+#include "include/usbkbd.h"
+#include "include/usbmouse.h"
 #include "include/video.h"
 #include "include/desktop.h"
 #include "include/io.h"
@@ -82,7 +86,12 @@ static void prompt(void)
 }
 
 /* The command list grows and the screen has 25 rows - hence two
-   columns: the whole listing fits without scrolling. */
+   columns. Two columns of forty commands is twenty rows, which fits
+   only if nothing is above it, so the listing starts by clearing the
+   screen: a reference one has to scroll to read is not a reference,
+   and whatever was above it was the boot log or the last command,
+   neither of which anybody is reading at the moment they ask what the
+   commands are. */
 static const struct {
     const char *name;
     const char *desc;
@@ -95,16 +104,16 @@ static const struct {
     {"cat F",    "wypisz plik"},
     {"write F",  "zapisz tekst do pliku"},
     {"cp A B",   "przepisz plik na dysk"},
-    {"mv A B",   "zmien nazwe pliku na dysku"},
-    {"set",      "ustawienia systemu (pamietane na dysku)"},
-    {"kim",      "kim jestes: adminem czy uzytkownikiem"},
-    {"sudo",     "wykonaj komende jako admin (pyta o haslo)"},
+    {"mv A B",   "zmien nazwe pliku"},
+    {"set",      "ustawienia systemu"},
+    {"kim",      "czy jestes adminem"},
+    {"sudo",     "komenda jako admin"},
     {"wyloguj",  "przestan byc adminem"},
     {"haslo",    "zmien haslo admina"},
-    {"smp",      "policz cos na wszystkich rdzeniach"},
-    {"smpmem",   "proba zamkow: pamiec z wszystkich rdzeni"},
-    {"smpthreads", "watki jadra na wszystkich rdzeniach"},
-    {"runw",     "jak run, ale program moze biec na kazdym rdzeniu"},
+    {"smp",      "licz na kazdym rdzeniu"},
+    {"smpmem",   "proba zamkow na pamieci"},
+    {"smpthreads", "watki jadra na rdzeniach"},
+    {"runw",     "run na dowolnym rdzeniu"},
     {"df",       "zajetosc dysku"},
     {"mem",      "uzycie pamieci"},
     {"uptime",   "czas od startu"},
@@ -117,9 +126,10 @@ static const struct {
     {"netstat",  "polaczenia TCP"},
     {"dhcp",     "adres IP z sieci"},
     {"desktop",  "pulpit graficzny"},
-    {"kill P S", "sygnal do procesu (dom. zabij)"},
+    {"kill P S", "sygnal do procesu"},
     {"clear",    "wyczysc ekran"},
-    {"ekran",    "tryb graficzny i ile wierszy szlo na karte"},
+    {"ekran",    "tryb ekranu, koszt klatki"},
+    {"sprzet",   "co jest w tej maszynie"},
     {"gfx",      "test trybu 13h"},
     {"vesa",     "test trybu VESA"},
     {"crash",    "test page faulta"},
@@ -129,16 +139,26 @@ static const struct {
 
 #define COMMAND_N ((int)(sizeof(commands) / sizeof(commands[0])))
 
+/* A column, and never wider than one.
+ *
+ * This only padded before, which works right up to the first entry
+ * longer than the column - and then that row is wider than the screen,
+ * the terminal wraps it, and the listing that was meant to fit in
+ * twenty rows takes twenty-five and scrolls its own heading away. A
+ * column has a width or it is not a column. */
 static void print_padded(const char *s, int width)
 {
-    printk("%s", s);
-    for (int i = (int)strlen(s); i < width; i++)
+    int i = 0;
+    for (; s[i] && (!width || i < width); i++)
+        printk("%c", s[i]);
+    for (; i < width; i++)
         printk(" ");
 }
 
 static void cmd_help(void)
 {
     int rows = (COMMAND_N + 1) / 2;
+    vga_clear();
     printk("Dostepne komendy:\n");
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < 2; c++) {
@@ -146,8 +166,8 @@ static void cmd_help(void)
             if (i >= COMMAND_N)
                 break;
             printk("  ");
-            print_padded(commands[i].name, 10);
-            print_padded(commands[i].desc, c ? 0 : 25);
+            print_padded(commands[i].name, 11);
+            print_padded(commands[i].desc, c ? 0 : 24);
         }
         printk("\n");
     }
@@ -164,6 +184,83 @@ static void cmd_ekran(void)
            video_true_colour() ? "kolory" : "paleta 256", video_scale());
     printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
            video_present_rows(), video_h());
+}
+
+/* What this machine actually is.
+ *
+ * Written for a first boot on hardware nobody has tried yet. Every
+ * line here answers a question one asks while standing in front of a
+ * laptop that will not do something: what did the loader give us for
+ * a screen, is there anything on the PS/2 ports, did the USB bus have
+ * a keyboard or a pointer on it, and - when the answer to the pointer
+ * is no - what else is in the machine that it might be hiding behind.
+ *
+ * The PCI listing is the last of those. A touchpad that is not on the
+ * PS/2 port is usually on an I2C controller, and an I2C controller is
+ * a device of the serial-bus class sitting in plain sight here. We do
+ * not speak that bus; being able to SAY that is the difference between
+ * a mystery and a known gap. */
+static const char *pci_class_name(uint32_t class)
+{
+    switch (class >> 24) {
+    case 0x01: return "dysk";
+    case 0x02: return "siec";
+    case 0x03: return "grafika";
+    case 0x04: return "dzwiek/wideo";
+    case 0x06: return "mostek";
+    case 0x08: return "kontroler systemowy";
+    case 0x09: return "wejscie (mysz, tablet)";
+    case 0x0C: return ((class >> 16) & 0xFF) == 0x03 ? "USB" : "magistrala szeregowa";
+    case 0x11: return "przetwarzanie sygnalu";
+    default:   return "inne";
+    }
+}
+
+static void cmd_sprzet(void)
+{
+    printk("ekran:    %dx%d, %s, skala %d, bufor %s\n",
+           video_w(), video_h(),
+           video_true_colour() ? "kolory" : "paleta 256", video_scale(),
+           video_have_loader_lfb() ? "od loadera" : "ustawiony przez jadro");
+
+    if (!ps2_controller_present())
+        printk("PS/2:     BRAK kontrolera 8042 - ani klawiatury, ani "
+               "myszy na tych portach\n");
+    else
+        printk("PS/2:     kontroler 8042 jest, mysz %s\n",
+               mouse_present() ? (mouse_has_wheel() ? "tak (z kolkiem)"
+                                                    : "tak (bez kolka)")
+                               : "NIE");
+    printk("USB:      %s, klawiatura %s, mysz %s\n",
+           usbhc_name(), usbkbd_present() ? "tak" : "nie",
+           usbmouse_present() ? "tak" : "nie");
+
+    /* And what else is in here, so that a gap has a name */
+    int serial_bus = 0;
+    printk("PCI:\n");
+    for (int i = 0; ; i++) {
+        struct pci_dev d;
+        uint32_t class;
+        if (!pci_enumerate(i, &d, &class))
+            break;
+        uint8_t base = (uint8_t)(class >> 24);
+        uint8_t sub = (uint8_t)((class >> 16) & 0xFF);
+        if ((base == 0x0C && sub != 0x03) || base == 0x11)
+            serial_bus++;
+        /* printk has no field widths, so the columns are spelled out
+           rather than padded - and a slot number is more readable in
+           decimal here anyway. */
+        printk("  %u.%u  %x:%x  klasa %x.%x  %s\n",
+               (uint32_t)d.slot, (uint32_t)d.func,
+               (uint32_t)d.vendor, (uint32_t)d.device,
+               (uint32_t)base, (uint32_t)sub, pci_class_name(class));
+    }
+
+    if (!mouse_present() && !usbmouse_present() && serial_bus)
+        printk("Wskaznika nie ma na zadnej znanej drodze, a w maszynie\n"
+               "jest %d kontroler(ow) magistrali szeregowej - touchpad\n"
+               "siedzi zapewne na I2C (HID przez I2C), ktorego nie umiemy.\n"
+               "Mysz w gniazdo USB zadziala.\n", serial_bus);
 }
 
 static void cmd_mem(void)
@@ -792,6 +889,8 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "ekran"))
         cmd_ekran();
+    else if (!strcmp(cmd, "sprzet"))
+        cmd_sprzet();
     else if (!strcmp(cmd, "uptime"))
         cmd_uptime();
     else if (!strcmp(cmd, "date"))

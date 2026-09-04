@@ -26,6 +26,12 @@ int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
 int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out);
 
+/* Walks every device on the bus: index 0, 1, 2... until it returns 0.
+   'class_out' takes the raw class register (class, subclass, prog-if
+   and revision), because on unknown hardware the class is the useful
+   half of the answer. */
+int pci_enumerate(int index, struct pci_dev *out, uint32_t *class_out);
+
 /* Enables I/O port access, memory access and bus mastering (DMA) */
 void pci_enable_bus_master(const struct pci_dev *dev);
 

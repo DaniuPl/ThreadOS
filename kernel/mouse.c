@@ -42,20 +42,26 @@ static uint8_t packet[4];
 static int wheel;              /* the device sends a fourth byte */
 static int scroll_acc;         /* notches since somebody last asked */
 
-/* Waits until the controller's input buffer is empty (writing is possible) */
-static void wait_write(void)
+/* Waits until the controller's input buffer is empty (writing is
+   possible). Returns 0 when it never emptied - on a machine with no
+   8042 at all every port read answers 0xFF, and 0xFF has that bit
+   set, so without the answer we would wait the full count for every
+   byte of every command and call it success. */
+static int wait_write(void)
 {
     for (int i = 0; i < 100000; i++)
         if ((inb(0x64) & 0x02) == 0)
-            return;
+            return 1;
+    return 0;
 }
 
-/* Waits until there is data to read */
-static void wait_read(void)
+/* Waits until there is data to read. Returns 0 when none came. */
+static int wait_read(void)
 {
     for (int i = 0; i < 100000; i++)
         if (inb(0x64) & 0x01)
-            return;
+            return 1;
+    return 0;
 }
 
 /* Sends a byte to the mouse itself (the 0xD4 prefix) */
@@ -67,10 +73,18 @@ static void mouse_command(uint8_t cmd)
     outb(0x60, cmd);
 }
 
-static uint8_t mouse_ack(void)
+/* The device answers 0xFA to everything it understood. Reading that
+   answer and throwing it away - which is what this did - means a
+   machine with nothing on the auxiliary port looks exactly like a
+   machine with a mouse on it: every command "works", the interrupt
+   handler goes in, and the pointer never moves with no word said
+   about why. On a laptop whose touchpad is not on this port, that
+   silence is the whole difficulty. */
+static int mouse_ack(void)
 {
-    wait_read();
-    return inb(0x60);          /* the mouse answers 0xFA (ACK) */
+    if (!wait_read())
+        return 0;
+    return inb(0x60) == 0xFA;
 }
 
 /* Draws the mouse position and buttons in the top left corner.
@@ -168,7 +182,27 @@ static void mouse_irq(struct regs *r)
     packet_done();
 }
 
-void mouse_init(void)
+/* Whether the 8042 controller is there at all.
+ *
+ * A machine that has none - and a laptop made in the last few years
+ * may well have none - answers every read of these ports with 0xFF,
+ * because nothing is driving the bus. That is the classic test and it
+ * is the honest one: without it we would go on reporting a PS/2
+ * keyboard on a machine that has no PS/2 anything. */
+int ps2_controller_present(void)
+{
+    return inb(0x64) != 0xFF;
+}
+
+/* Whether there is really a device on the auxiliary port */
+static int present;
+
+int mouse_present(void)
+{
+    return present;
+}
+
+int mouse_init(void)
 {
     wait_write();
     outb(0x64, 0xA8);          /* enable the auxiliary device */
@@ -185,8 +219,12 @@ void mouse_init(void)
     wait_write();
     outb(0x60, cfg);
 
+    /* The first question that has to be answered. A device that does
+       not acknowledge "go back to your defaults" is not a device. */
     mouse_command(0xF6);       /* default settings */
-    mouse_ack();
+    if (!mouse_ack())
+        return 0;
+    present = 1;
 
     /* The knock that asks for a wheel: three sample rates in an order
        no ordinary setup would use. A device that understands it starts
@@ -209,6 +247,7 @@ void mouse_init(void)
 
     irq_install_handler(12, mouse_irq);
     pic_unmask(12);
+    return 1;
 }
 
 void mouse_get(int *x, int *y, int *buttons)

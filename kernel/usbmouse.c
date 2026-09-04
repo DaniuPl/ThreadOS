@@ -33,6 +33,7 @@ static uint8_t desc_buf[256] __attribute__((aligned(16)));
 static uint8_t report[8] __attribute__((aligned(16)));
 
 static int dev;
+static int found;
 static int ep_num, ep_maxpacket, ep_interval = 8;
 
 /* Looks in the configuration for a boot-protocol mouse and its
@@ -131,10 +132,16 @@ int usbmouse_init(void)
             continue;
 
         usbhc_claim(port);
+        found = 1;
         task_create("usbmouse", poll_thread, 0);
         printk("[ OK ] Mysz USB (HID, %s) na porcie %d, "
                "punkt koncowy %d\n", usbhc_name(), port + 1, ep_num);
         return 1;
     }
     return 0;
+}
+
+int usbmouse_present(void)
+{
+    return found;
 }

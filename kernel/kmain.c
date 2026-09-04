@@ -198,8 +198,15 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     keyboard_init();
     ok("Klawiatura PS/2 gotowa");
 
-    mouse_init();
-    ok("Mysz PS/2 gotowa (IRQ12)");
+    /* A laptop whose touchpad is not on this port answers nothing
+       here, and that is worth saying out loud rather than reporting a
+       mouse that is not there. */
+    if (mouse_init())
+        printk("[ OK ] Mysz PS/2 na porcie pomocniczym (IRQ12), kolko: %s\n",
+               mouse_has_wheel() ? "tak" : "nie");
+    else
+        printk("[ -- ] Na porcie pomocniczym PS/2 nie ma myszy "
+               "(touchpad moze byc na USB albo I2C)\n");
 
     __asm__ volatile("sti");
     ok("Przerwania wlaczone (sti)");

@@ -580,8 +580,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Keyboard input ----------------------------------------- */
     keyboard64_init();
-    mouse_init();
-    printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12)\n");
+    if (mouse_init())
+        printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12), kolko: %s\n",
+               mouse_has_wheel() ? "tak" : "nie");
+    else
+        printk("[ OK ] Klawiatura PS/2 (IRQ 1); myszy PS/2 brak\n");
 
     /* Machines newer than roughly 2010 no longer have a PS/2 connector.
        The USB driver and the HID class are again the same files as in

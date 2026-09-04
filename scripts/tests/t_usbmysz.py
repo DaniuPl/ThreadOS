@@ -27,6 +27,7 @@ groups in parallel.
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -44,6 +45,31 @@ def main():
                  if re.search(r"Mysz USB[^\n]*", boot) else "brak"),
               re.search(r"Mysz USB \(HID, [^)]+\) na porcie \d+", boot)
               is not None)
+    finally:
+        q.close()
+
+    # --- the machine says what it found ------------------------------
+    # Written for a first boot on hardware nobody has tried yet: a
+    # laptop whose pointer does not move is either a laptop with
+    # nothing on the PS/2 port or one whose touchpad is on a bus we do
+    # not speak, and only the machine can say which.
+    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
+             usbmouse="xhci")
+    try:
+        q.wait_for("ProtonOS shell", timeout=60)
+        q.type_line("sprzet")
+        time.sleep(3)
+        said = q.screen()
+        check("'sprzet' mowi o kontrolerze 8042 i myszy PS/2 ('%s')"
+              % next((l.strip() for l in said.splitlines()
+                      if l.startswith("PS/2:")), "brak wiersza"),
+              "PS/2:" in said and "kontroler 8042 jest" in said)
+        check("i o tym, co znalazl na USB ('%s')"
+              % next((l.strip() for l in said.splitlines()
+                      if l.startswith("USB:")), "brak wiersza"),
+              "USB:" in said and "mysz tak" in said)
+        check("i wymienia urzadzenia PCI, wiec obca maszyna sie opisze",
+              "klasa" in said and "grafika" in said)
     finally:
         q.close()
 
@@ -71,6 +97,23 @@ def main():
               q.wait_pixel(200, 121, (255, 255, 255)))
         check("a stare miejsce zostalo zamalowane tlem (~50,41)",
               q.wait_pixel(50, 41, (0, 128, 160)))
+    finally:
+        q.close()
+
+    # And such a machine says so rather than claiming a keyboard and a
+    # mouse it does not have. Typed on the USB keyboard, because there
+    # is no other.
+    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
+             usbmouse="xhci", no_i8042=True)
+    try:
+        q.wait_for("ProtonOS shell", timeout=60)
+        q.type_line("sprzet")
+        time.sleep(3)
+        said = q.screen()
+        check("maszyna bez 8042 mowi to wprost, zamiast udawac PS/2 ('%s')"
+              % next((l.strip() for l in said.splitlines()
+                      if l.startswith("PS/2:")), "brak wiersza"),
+              "BRAK kontrolera 8042" in said)
     finally:
         q.close()
 

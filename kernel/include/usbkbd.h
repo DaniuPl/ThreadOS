@@ -13,5 +13,7 @@
 /* Looks for a keyboard on the bus and starts the polling thread.
    1 = found. */
 int usbkbd_init(void);
+/* Whether one was found and is being read */
+int usbkbd_present(void);
 
 #endif

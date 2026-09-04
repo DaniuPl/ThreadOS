@@ -42,8 +42,12 @@ def main():
               "+ PFS gotowy" in screen)
         check("kontroler dysku nazwany przy boocie (tu stary ATA PIO)",
               "Dysk ATA PIO + PFS gotowy" in screen)
-        check("mysz PS/2 wykryta przy boocie",
-              "Mysz PS/2 gotowa" in screen)
+        # The message says what was found rather than that something
+        # was: a machine with nothing on the auxiliary port says so
+        # instead of reporting a mouse it has not got.
+        check("mysz PS/2 wykryta przy boocie i policzone kolko",
+              "Mysz PS/2 na porcie pomocniczym" in screen and
+              "kolko:" in screen)
         check("karta sieciowa RTL8139 wykryta przy boocie",
               "Siec: RTL8139" in screen)
         check("na jednym rdzeniu system mowi to wprost",

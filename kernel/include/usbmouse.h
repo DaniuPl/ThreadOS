@@ -6,5 +6,7 @@
    feeds its movement into the same pointer the PS/2 driver moves.
    Returns 1 when one was found. */
 int usbmouse_init(void);
+/* Whether one was found and is being read */
+int usbmouse_present(void);
 
 #endif

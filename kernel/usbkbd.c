@@ -29,7 +29,8 @@
 static uint8_t desc_buf[256] __attribute__((aligned(16)));
 static uint8_t report[8] __attribute__((aligned(16)));
 
-static int dev;                  /* the device handle from the controller layer */
+static int dev;
+static int found;                  /* the device handle from the controller layer */
 static int ep_num, ep_maxpacket, ep_interval = 8;
 
 /* Looks in the configuration for a HID interface in its boot version
@@ -203,10 +204,16 @@ int usbkbd_init(void)
             continue;
 
         usbhc_claim(port);
+        found = 1;
         task_create("usbkbd", poll_thread, 0);
         printk("[ OK ] Klawiatura USB (HID, %s) na porcie %d, "
                "punkt koncowy %d\n", usbhc_name(), port + 1, ep_num);
         return 1;
     }
     return 0;
+}
+
+int usbkbd_present(void)
+{
+    return found;
 }

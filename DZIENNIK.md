@@ -4137,3 +4137,63 @@ sprawdzane przez `make test`.
       maszyna bez 8042 nie ma tez klawiatury PS/2, wiec nie ma jak
       niczego WPISAC. Co poruszylo tym kursorem, przyszlo przez USB, bo
       innej drogi tam nie ma.
+
+- [x] **Klawiatura milkla, gdy dolaczala mysz - i raport sprzetowy dla
+      pierwszego rozruchu na obcej maszynie.**
+
+      Laptop okazal sie Dellem. Dobra wiadomosc: Dell trzyma wbudowana
+      klawiature na i8042 nawet w nowych modelach. Touchpad to loteria
+      zalezna od rocznika - starsze sa PS/2, nowsze od okolo 2016 siedza
+      na I2C-HID, ktorego nie umiemy. Wiec zamiast zgadywac, ktora to
+      maszyna, trzeba bylo sprawic, zeby SAMA powiedziala.
+
+      **Pierwsze klamstwo do usuniecia.** mouse_init() nigdy nie
+      sprawdzalo, czy cokolwiek jest na porcie pomocniczym: mouse_ack()
+      czytalo bajt i wyrzucalo. Maszyna bez myszy PS/2 wygladala
+      dokladnie jak maszyna z mysza - kazde polecenie "dzialalo",
+      handler przerwania wchodzil, a wskaznik sie nie ruszal i nikt nie
+      mowil dlaczego. Teraz brak potwierdzenia 0xFA konczy sprawe i
+      rozruch mowi to wprost. Tak samo wait_write/wait_read: na maszynie
+      bez 8042 kazdy odczyt portu daje 0xFF, a 0xFF ma ustawiony ten
+      bit - bez sprawdzenia czekalismy pelna liczbe obrotow na kazdy
+      bajt kazdej komendy i nazywali to sukcesem.
+
+      Drugie: raport mowil "klawiatura tak" bez zadnej podstawy. To
+      dokladnie ten sam blad, ktory zarzucilem myszy. Teraz pyta o sam
+      kontroler - maszyna, ktora go nie ma, odpowiada 0xFF na wszystko,
+      i to jest klasyczny i uczciwy test.
+
+      **Komenda 'sprzet'** - napisana pod pierwszy rozruch na sprzecie,
+      ktorego nikt nie probowal. Ekran (skad bufor, jaka skala), porty
+      PS/2, co znalazlo sie na USB, i spis urzadzen PCI. Ten ostatni
+      jest tam po cos: touchpad, ktorego nie ma na PS/2, siedzi zwykle
+      na kontrolerze I2C, a kontroler I2C jest urzadzeniem klasy
+      magistrali szeregowej widocznym w tym spisie. Nie umiemy tej
+      magistrali - ale moc POWIEDZIEC, ze to ona, to roznica miedzy
+      zagadka a znana luka.
+
+      **I blad, ktory ta praca odslonila - w sterowniku xHCI.** Byl
+      napisany dla dokladnie jednego urzadzenia i nikt tego nie
+      zauwazyl, bo do dzis bylo jedno. Jeden bufor na caly kontroler:
+      dwa urzadzenia maja dwa odczyty w locie naraz, wiec raport jednego
+      lada w miejscu, z ktorego drugi wlasnie czyta. I jeden pierscien
+      zdarzen: kto pierwszy zajrzy, widzi CUDZE zakonczenia, a wziecie
+      nie swojego gubi tamten raport na zawsze.
+      Objaw: klawiatura milkla w chwili, gdy do magistrali dolaczala
+      mysz - czyli dokladnie na laptopie z klawiatura i touchpadem po
+      USB.
+
+      Naprawa: bufor na slot, a zdarzenie odkladane pod swoim slotem
+      (numer slotu jest w najstarszym bajcie slowa sterujacego - i tylko
+      dlatego dwa urzadzenia moga w ogole dzielic jeden pierscien).
+
+      Po drodze zepsulem to dwa razy i za kazdym razem powiedzialy o tym
+      testy, nie kompilator. Najpierw sort_events pozeralo zdarzenia
+      ZAKONCZENIA POLECEN, na ktore czekala enumeracja - stad osobna
+      kolejka na to, co nie jest transferem. Potem okazalo sie, ze na
+      slot potrzeba KOLEJKI, a nie jednego miejsca: transfer sterujacy
+      konczy sie dwa razy, raz dla danych i raz dla statusu, a przy
+      jednym miejscu drugie nadpisywalo pierwsze i wywolujacy czekal w
+      nieskonczonosc na cos, co juz mu powiedziano. Za trzecim razem
+      cofnalem sie do stanu z commita, potwierdzilem, ze dziala, i
+      dopiero wtedy zrobilem to raz a porzadnie.

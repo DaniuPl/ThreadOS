@@ -113,6 +113,34 @@ int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
     return 0;
 }
 
+/* Every device on the bus, one call at a time.
+ *
+ * The finders above answer "is there one of these"; this answers "what
+ * is in this machine", which is the question one actually has in front
+ * of unknown hardware. A laptop that will not move its pointer is
+ * either a laptop with nothing on the PS/2 port or a laptop whose
+ * touchpad is on a bus we do not speak - and the difference is visible
+ * here and nowhere else. */
+int pci_enumerate(int index, struct pci_dev *out, uint32_t *class_out)
+{
+    int seen = 0;
+    for (int slot = 0; slot < 32; slot++) {
+        int funcs = multifunction(slot) ? 8 : 1;
+        for (int func = 0; func < funcs; func++) {
+            uint32_t id = pci_config_read(0, slot, func, 0x00);
+            if ((id & 0xFFFF) == 0xFFFF)
+                continue;
+            if (seen++ != index)
+                continue;
+            fill(out, slot, func, id);
+            if (class_out)
+                *class_out = pci_config_read(0, slot, func, 0x08);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void pci_enable_bus_master(const struct pci_dev *dev)
 {
     uint32_t cmd = pci_config_read(dev->bus, dev->slot, dev->func, 0x04);

@@ -145,7 +145,38 @@ static uint32_t evt_index, evt_cycle;
 static int armed[SLOTS];       /* is a read pending on the interrupt endpoint */
 
 /* Buffer for control transfer data: the controller reaches for it itself */
-static uint8_t buf[512] __attribute__((aligned(64)));
+/* One buffer per device, not one for the whole controller.
+ *
+ * While a keyboard was the only thing on this bus, one was enough. Two
+ * devices have two reads in flight at once, and one buffer means each
+ * one's report lands where the other is about to read it - which shows
+ * up as a keyboard that goes silent the moment a mouse is plugged in. */
+static uint8_t buf[SLOTS][512] __attribute__((aligned(64)));
+
+/* Transfers that have finished, waiting for the device they belong to.
+ *
+ * There is ONE event ring for the whole controller, so whoever looks
+ * at it first sees everybody's completions, and taking one that is not
+ * yours loses that device's report for good. So an event is filed
+ * under its slot and waits there.
+ *
+ * A QUEUE per slot rather than one place, because completions do
+ * arrive together: a control transfer finishes twice, once for the
+ * data and once for the status, and with a single place the second
+ * would overwrite the first and the caller would wait forever for a
+ * thing it had already been told. */
+#define COMPS 8
+struct comp { int code, left; };
+static struct {
+    struct comp q[COMPS];
+    int head, tail;
+} done[SLOTS];
+
+/* Non-transfer events - a command finishing, a port changing - kept
+   the same way and for the same reason. */
+#define OTHERS 8
+static struct trb other_q[OTHERS];
+static int other_n;
 
 /* --- register access -------------------------------------------------- */
 
@@ -259,19 +290,70 @@ static int event(struct trb *result)
    and that is how it should be: port change notifications, which
    nobody ordered and nobody asks about, also travel through this
    ring. */
+/* Empties the event ring, filing everything where its owner will find
+   it. A transfer goes under its slot, which is the top byte of the
+   control word - and that byte is the only reason two devices can
+   share one ring at all. */
+static void sort_events(void)
+{
+    struct trb t;
+    while (event(&t)) {
+        if ((int)((t.control >> 10) & 0x3F) != TRB_EV_TRANSFER) {
+            if (other_n < OTHERS)
+                other_q[other_n++] = t;
+            continue;
+        }
+        int s = (int)((t.control >> 24) & 0xFF);
+        if (s < 1 || s > SLOTS)
+            continue;
+        int next = (done[s - 1].head + 1) % COMPS;
+        if (next == done[s - 1].tail)
+            continue;                    /* nobody is collecting - drop it */
+        done[s - 1].q[done[s - 1].head].code = (int)(t.status >> 24);
+        done[s - 1].q[done[s - 1].head].left = (int)(t.status & 0xFFFFFF);
+        done[s - 1].head = next;
+    }
+}
+
+/* Takes one finished transfer of this slot's, if there is one. */
+static int take_comp(int slot, struct comp *out)
+{
+    if (done[slot - 1].tail == done[slot - 1].head)
+        return 0;
+    *out = done[slot - 1].q[done[slot - 1].tail];
+    done[slot - 1].tail = (done[slot - 1].tail + 1) % COMPS;
+    return 1;
+}
+
+/* Waits for one of this slot's transfers, filing everybody else's on
+   the way rather than dropping them. */
+static int wait_slot(int slot, struct comp *out, uint32_t ms)
+{
+    uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
+    while (pit_ticks() < az) {
+        sort_events();
+        if (take_comp(slot, out))
+            return 1;
+        io_wait();
+    }
+    return 0;
+}
+
 static int wait_for(int kind, struct trb *result, uint32_t ms)
 {
     uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
     while (pit_ticks() < az) {
-        struct trb t;
-        if (!event(&t)) {
-            io_wait();
-            continue;
-        }
-        if ((int)((t.control >> 10) & 0x3F) == kind) {
-            *result = t;
+        sort_events();
+        for (int i = 0; i < other_n; i++) {
+            if ((int)((other_q[i].control >> 10) & 0x3F) != kind)
+                continue;
+            *result = other_q[i];
+            for (int j = i + 1; j < other_n; j++)
+                other_q[j - 1] = other_q[j];
+            other_n--;
             return 1;
         }
+        io_wait();
     }
     return 0;
 }
@@ -523,8 +605,9 @@ int xhci_control(int slot, const void *setup, void *data, int len, int in)
 {
     if (!base || slot < 1 || slot > SLOTS)
         return -1;
-    if (len < 0 || len > (int)sizeof(buf))
+    if (len < 0 || len > (int)sizeof(buf[0]))
         return -1;
+    uint8_t *mine = buf[slot - 1];
 
     const uint8_t *s = setup;
     uint64_t query = 0;
@@ -532,7 +615,7 @@ int xhci_control(int slot, const void *setup, void *data, int len, int in)
         query |= (uint64_t)s[i] << (i * 8);
 
     if (len && !in)
-        memcpy(buf, data, (uint32_t)len);
+        memcpy(mine, data, (uint32_t)len);
 
     struct ring *p = &ep_pier[slot - 1][0];
     /* Transfer type: 0 no data, 2 data out, 3 data in */
@@ -540,7 +623,7 @@ int xhci_control(int slot, const void *setup, void *data, int len, int in)
     insert(p, query, 8, ((uint32_t)TRB_SETUP << 10) | TRB_IDT |
                           (kind << 16));
     if (len)
-        insert(p, fiz(buf), (uint32_t)len,
+        insert(p, fiz(mine), (uint32_t)len,
              ((uint32_t)TRB_DATA << 10) | TRB_IOC | TRB_ISP |
              ((uint32_t)(in ? 1 : 0) << 16));
     insert(p, 0, 0, ((uint32_t)TRB_STATUS << 10) | TRB_IOC |
@@ -549,24 +632,22 @@ int xhci_control(int slot, const void *setup, void *data, int len, int in)
     doorbells[slot] = 1;                   /* endpoint zero has number 1 */
 
     int passed = 0;
+    struct comp c;
     if (len) {
-        struct trb t;
-        if (!wait_for(TRB_EV_TRANSFER, &t, 1000))
+        if (!wait_slot(slot, &c, 1000))
             return -1;
-        int code = (int)(t.status >> 24);
-        if (code != CODE_OK && code != CODE_SHORT)
+        if (c.code != CODE_OK && c.code != CODE_SHORT)
             return -1;
         /* The controller reports HOW MUCH IS LEFT, not how much went through */
-        passed = len - (int)(t.status & 0xFFFFFF);
+        passed = len - c.left;
         if (in)
-            memcpy(data, buf, (uint32_t)(passed > 0 ? passed : 0));
+            memcpy(data, mine, (uint32_t)(passed > 0 ? passed : 0));
     }
 
-    struct trb t;
-    if (!wait_for(TRB_EV_TRANSFER, &t, 1000))
+    /* The status stage - this slot's transfer like any other */
+    if (!wait_slot(slot, &c, 1000))
         return -1;
-    int code = (int)(t.status >> 24);
-    if (code != CODE_OK && code != CODE_SHORT)
+    if (c.code != CODE_OK && c.code != CODE_SHORT)
         return -1;
     return passed;
 }
@@ -622,29 +703,27 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
 int xhci_int_in(int slot, int ep, void *data, int len)
 {
     if (!base || slot < 1 || slot > SLOTS || len <= 0 ||
-        len > (int)sizeof(buf))
+        len > (int)sizeof(buf[0]))
         return -1;
 
     if (!armed[slot - 1]) {
-        insert(&ep_pier[slot - 1][1], fiz(buf), (uint32_t)len,
+        insert(&ep_pier[slot - 1][1], fiz(buf[slot - 1]), (uint32_t)len,
              ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
         doorbells[slot] = (uint32_t)dci(ep);
         armed[slot - 1] = 1;
         return 0;                        /* the answer will come in a moment */
     }
 
-    struct trb t;
-    if (!event(&t))
+    sort_events();
+    struct comp c;
+    if (!take_comp(slot, &c))
         return 0;                        /* the device is silent - we keep waiting */
     armed[slot - 1] = 0;
-    if ((int)((t.control >> 10) & 0x3F) != TRB_EV_TRANSFER)
-        return 0;                        /* a port notification, not our data */
 
-    int code = (int)(t.status >> 24);
-    if (code != CODE_OK && code != CODE_SHORT)
+    if (c.code != CODE_OK && c.code != CODE_SHORT)
         return -1;
-    int passed = len - (int)(t.status & 0xFFFFFF);
+    int passed = len - c.left;
     if (passed > 0)
-        memcpy(data, buf, (uint32_t)passed);
+        memcpy(data, buf[slot - 1], (uint32_t)passed);
     return passed;
 }
