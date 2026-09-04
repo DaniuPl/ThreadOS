@@ -200,14 +200,19 @@ static void open_chosen(void)
     int ln = 0;
     while (nm[ln])
         ln++;
-    /* Three endings the viewer knows: the machine's own pictures, and
-       the two formats that come from outside it. */
+    /* The endings the viewer knows: the machine's own pictures, and
+       the formats that come from outside it. */
     int picture = 0;
     if (ln > 4 && nm[ln - 4] == '.') {
         const char *e = nm + ln - 3;
         picture = (e[0] == 'p' && e[1] == 's' && e[2] == 'c') ||
                   (e[0] == 'p' && e[1] == 'n' && e[2] == 'g') ||
-                  (e[0] == 'b' && e[1] == 'm' && e[2] == 'p');
+                  (e[0] == 'b' && e[1] == 'm' && e[2] == 'p') ||
+                  (e[0] == 'j' && e[1] == 'p' && e[2] == 'g');
+    }
+    if (!picture && ln > 5 && nm[ln - 5] == '.') {
+        const char *e = nm + ln - 4;
+        picture = e[0] == 'j' && e[1] == 'p' && e[2] == 'e' && e[3] == 'g';
     }
     const char *prog = picture ? "gimg" : "gedit";
 

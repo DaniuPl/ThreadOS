@@ -19,6 +19,7 @@
 
 #include "uapi.h"
 #include "uinflate.h"
+#include "ujpeg.h"
 
 #define C_BG    8
 #define C_WHITE 4
@@ -373,6 +374,87 @@ static int show_png(int fd, const uint8_t *head, int got)
     return 0;
 }
 
+/* A JPEG, which is what a camera gives you.
+ *
+ * Baseline only, and that is a deliberate line: baseline is what
+ * cameras, scanners and most of the web write. Progressive is the same
+ * picture sent in several passes so that a slow line shows something
+ * early - a decoder for it is a second decoder, and this one says so
+ * plainly rather than showing half a picture.
+ *
+ * The work itself is in ujpeg.h. What is left here is the reading:
+ * a JPEG has no length in its header either, so the file is read to
+ * its end, decoded into planes, and then asked pixel by pixel - the
+ * components have different sizes (the colour ones are usually half),
+ * and asking hides that.
+ */
+#define JPEG_MAX_FILE (1024 * 1024)
+#define JPEG_MAX_MEM  (3 * 1024 * 1024)
+
+static uint8_t *jpeg_file;        /* kept between pictures: malloc never
+                                     gives anything back, so opening a
+                                     second JPEG must not ask again */
+static uint8_t *jpeg_mem;
+
+static int show_jpeg(int fd, const uint8_t *head, int got)
+{
+    if (!jpeg_file) {
+        jpeg_file = malloc(JPEG_MAX_FILE);
+        jpeg_mem = malloc(JPEG_MAX_MEM);
+    }
+    if (!jpeg_file || !jpeg_mem) {
+        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        return -1;
+    }
+
+    for (int i = 0; i < got && i < JPEG_MAX_FILE; i++)
+        jpeg_file[i] = head[i];
+    int have = got;
+    while (have < JPEG_MAX_FILE) {
+        int n = (int)sys_read(fd, jpeg_file + have,
+                              (uint32_t)(JPEG_MAX_FILE - have));
+        if (n <= 0)
+            break;
+        have += n;
+    }
+
+    int w = 0, h = 0;
+    const char *why = "nie wyszlo";
+    if (jpeg_decode(jpeg_file, (unsigned)have, jpeg_mem, JPEG_MAX_MEM,
+                    &w, &h, &why) < 0) {
+        ecopy(note, why, sizeof(note));
+        return -1;
+    }
+    if (w <= 0 || w > ROW_MAX || h <= 0) {
+        ecopy(note, "dziwne wymiary", sizeof(note));
+        return -1;
+    }
+
+    img_w = w;
+    img_h = h;
+    int room_w = cw, room_h = ch - STATUS_H - 2;
+    step = 1;
+    while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
+        step++;
+    if (!memo_ready)
+        colours_start();
+    win_rect(winid, 0, 0, cw, ch, C_BG);
+
+    for (int y = 0; y < h; y += step) {
+        int dest = y / step;
+        if (dest >= room_h)
+            break;
+        int n = 0;
+        for (int x = 0; x < w && n < ROW_MAX; x += step) {
+            int r, g, b;
+            jpeg_pixel(x, y, &r, &g, &b);
+            out[n++] = nearest(r, g, b);
+        }
+        win_blit(winid, 0, dest, n, 1, out);
+    }
+    return 0;
+}
+
 /* A BMP, as it comes from anywhere else in the world.
  *
  * Only what is worth having: no compression (BI_RGB), twenty-four bits
@@ -500,6 +582,19 @@ static void show(const char *name)
     if (head[0] == 0x89 && head[1] == 'P' && head[2] == 'N' &&
         head[3] == 'G') {
         int ok = show_png(fd, head, got);
+        sys_close(fd);
+        if (ok < 0) {
+            img_w = 0;
+            return;
+        }
+        ecopy(fname, name, NAME_MAX_LEN);
+        ecopy(note, "wczytany", sizeof(note));
+        retitle();
+        return;
+    }
+
+    if (head[0] == 0xFF && head[1] == 0xD8) {
+        int ok = show_jpeg(fd, head, got);
         sys_close(fd);
         if (ok < 0) {
             img_w = 0;

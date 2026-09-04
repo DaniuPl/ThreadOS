@@ -3789,3 +3789,68 @@ sprawdzane przez `make test`.
       liczy sie najlepszy) przy tym samym progu - suita ma coraz
       ciezszych sasiadow, a pomiar rownoleglosci na hoscie bez wolnego
       rdzenia mierzy hosta.
+
+- [x] **JPEG baseline: Huffman, kosinus i kolor z polowy rozdzielczosci**
+      - trzeci i ostatni z formatow z pytania "a co z JPG, PNG i BMP".
+
+      BMP to bylo czytanie bajtow, PNG - rozpakowanie strumienia. JPEG
+      jest czyms innym: obrazu w tym pliku NIE MA. Sa wspolczynniki
+      przeksztalcenia kosinusowego, spakowane Huffmanem i podzielone
+      przez tablice kwantyzacji, a obraz trzeba z nich policzyc.
+
+      Kolejno: bity (z odkrecaniem wypelniacza - 0xFF w danych jest
+      zapisane jako 0xFF 0x00, zeby nie udawalo znacznika), Huffman po
+      kanonicznych tablicach z naglowka (mincode/maxcode/valptr, bez
+      drzewa - kody tej samej dlugosci leza obok siebie, wiec wystarczy
+      porownanie), zygzak z powrotem do kwadratu 8x8, mnozenie przez
+      kwantyzacje i odwrotny kosinus.
+
+      Kosinus w stalym przecinku, dwanascie bitow po przecinku, i
+      rozdzielony: osiem kolumn, potem osiem wierszy. Rozdzielenie to
+      jedyny powod, dla ktorego to sie liczy w rozsadnym czasie -
+      wprost byloby 64 mnozenia na piksel zamiast szesnastu.
+
+      A na koncu kolor: JPEG trzyma jasnosc w pelnej rozdzielczosci, a
+      barwe zwykle w polowie w obu osiach, bo oko tego nie widzi. Wiec
+      skladowe leza we wlasnych rozmiarach, a pytanie o piksel przelicza
+      wspolrzedne - i dopiero wtedy YCbCr wraca na RGB.
+
+      Sprawdzone przeciw dekoderowi Go (image/jpeg) na calym jego
+      zestawie testowym: trzynascie plikow baseline - 4:4:4, 4:4:0,
+      4:2:2, 4:2:0, 4:1:1, 4:1:0, ze znacznikami restartu, w skali
+      szarosci, z probkowaniem 2x2 na jedynej skladowej i z barwami
+      zapisanymi wprost jako R, G, B. Najwieksza roznica na kanal: 4
+      poziomy z 256, i to tylko na zaokragleniu kosinusa. To jest ten
+      rodzaj sprawdzenia, ktorego wlasny test nie zastapi - obcy plik
+      od obcego kodera.
+
+      Po drodze trzy prawdziwe bledy, wszystkie znalezione przez
+      psucie pliku losowo (900 uszkodzonych wersji, pod ASan i UBSan):
+      numery tablic z naglowka nie byly sprawdzane (tq=66 siegalo poza
+      tablice kwantyzacji), przesuwanie liczby ujemnej w lewo jest
+      niezdefiniowane, a wspolczynniki z popsutego pliku wychodzily poza
+      zakres na tyle, ze mnozenia w kosinusie przekraczaly int. Stad
+      dwa ograniczniki - na wspolczynnik i na wynik pierwszego przebiegu
+      - dobrane z pomiaru na prawdziwych obrazach (najwiekszy
+      wspolczynnik ~1000, najwiekszy wynik posredni ~4200) i ustawione
+      dziesieciokrotnie wyzej: poprawnego obrazu nie dotykaja, a
+      popsutemu daja bezsensowne piksele zamiast niezdefiniowanego
+      zachowania.
+
+      Przy okazji oba dekodery obrazow - inflate i JPEG - weszly na
+      stale do 'make fuzz', obok certyfikatow, HTML-a i ramek. Obraz
+      przychodzi z sieci dokladnie tak samo jak certyfikat, a w dodatku
+      to wejscie decyduje, ILE sie zapisze; jednorazowe sprawdzenie w
+      trakcie pisania nie pilnuje niczego pozniej.
+
+      Progresywnego JPEG nie umiem i mowie to wprost - to jest drugi
+      dekoder, nie wariant tego samego. Tak samo CMYK i arytmetycznego.
+
+      Test bierze obrazek od obcego kodera (Go, jakosc 90, 4:2:0),
+      wpisany do harnessu jako bajty - bo wlasny koder pisalby pliki
+      pod wlasny dekoder, a to nie jest sprawdzanie. Te same cztery
+      cwiartki co przy BMP i PNG, czytane w srodkach cwiartek, bo
+      format stratny ma prawo rozmazac granice. Sprawdzane na obu
+      jadrach - dekoder jest jednym zrodlem kompilowanym dwa razy, a w
+      trybie dlugim wskaznik ma inny rozmiar i indeksowanie plaszczyzny
+      idzie przez long.

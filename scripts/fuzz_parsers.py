@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FUZZ = os.path.join(ROOT, "tests", "fuzz")
@@ -135,13 +136,14 @@ def frames():
 
 def seeds(workdir):
     """Valid output data: certificates (RSA and two curves), a signature,
-    an HTML page and an HTTP response."""
+    an HTML page, an HTTP response, deflate streams and a JPEG."""
     def openssl(*args, **kw):
         subprocess.run(["openssl"] + list(args), check=True,
                        capture_output=True, timeout=120, **kw)
 
     j = lambda n: os.path.join(workdir, n)
-    out = {"x509": [], "ecdsa": [], "html": [], "http": []}
+    out = {"x509": [], "ecdsa": [], "html": [], "http": [],
+           "inflate": [], "jpeg": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -172,6 +174,21 @@ def seeds(workdir):
     out["http"].append(
         b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
         b"Transfer-Encoding: chunked\r\nLocation: /gdzies\r\n\r\n")
+
+    # The picture decoders. A deflate stream at three levels, because
+    # level zero writes stored blocks and the other two write both
+    # kinds of tree; and the test harness's own JPEG, which came from
+    # an outside encoder.
+    body = b"ProtonOS: obrazek, ktory da sie spakowac. " * 40
+    for level in (0, 6, 9):
+        out["inflate"].append(zlib.compress(body, level))
+    out["inflate"].append(zlib.compress(bytes(range(256)) * 8, 9))
+    raw = zlib.compressobj(9, zlib.DEFLATED, -15)   # no zlib wrapper
+    out["inflate"].append(raw.compress(body) + raw.flush())
+
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    from ptest import JPEG_IMAGE           # noqa: E402 - it lives there
+    out["jpeg"].append(JPEG_IMAGE)
     return out
 
 

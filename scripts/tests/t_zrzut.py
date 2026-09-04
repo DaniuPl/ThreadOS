@@ -21,11 +21,14 @@ that is a number no accident produces.
 
 And a picture from OUTSIDE: there is no floppy and no way to hand the
 machine a file, but there is a network - so the test's own HTTP server
-offers a BMP, the machine fetches it with httpget and the viewer draws
-it. The file is four quarters of red, green, blue and white, and those
-four colours are in the screen's palette exactly: a decoder that works
-shows exactly them, and a decoder that draws something shows something
-else.
+offers the same picture as a BMP, a PNG and a JPEG, the machine fetches
+each with httpget and the viewer draws it. The file is four quarters of
+red, green, blue and white, and those four colours are in the screen's
+palette exactly: a decoder that works shows exactly them, and a decoder
+that draws something shows something else. Three formats, three quite
+different kinds of work - rows padded to four bytes, a deflate stream
+under a filter per row, and Huffman codes over a cosine transform - and
+one question asked of all three.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -33,6 +36,8 @@ groups in parallel.
 
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -265,6 +270,49 @@ def main():
                   greens[1] > 200 and greens[0] < 60 and
                   blues[2] > 200 and blues[0] < 60 and
                   all(v > 200 for v in whites))
+
+            # --- and as a JPEG, which is what a camera writes ------------
+            # A different kind of work again: Huffman codes, a cosine
+            # transform undone in fixed point, and colour stored at half
+            # resolution and put back. The file comes from an outside
+            # encoder, so this is our arithmetic reading somebody
+            # else's picture.
+            q.mouse_goto(600, 430)
+            q.mouse_click()
+            time.sleep(1)
+            seen = len(q.serial())
+            q.type_line("run httpget 10.0.2.2 %d /kwadraty.jpg obraz.jpg"
+                        % http_port)
+            time.sleep(6)
+            got = q.serial()[seen:]
+            check("maszyna sciaga JPEG z sieci",
+                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+
+            q.type_line("run gimg obraz.jpg")
+            time.sleep(7)
+            q.mouse_goto(600, 200)
+            time.sleep(2)
+            w, h, at = q.screen_raw()
+            vx, vy = VX + 48, VY + 48
+            said = status(at, vx=vx, vy=vy)
+            check("podglad rozlozyl JPEG na piksele ('%s')" % said,
+                  "64x48" in said and "wczytany" in said)
+
+            # JPEG is lossy, so the colours are read well inside the
+            # quarters - but they still have to be the right four, and
+            # a decoder that got the transform wrong gives grey mush
+            # rather than four saturated fields.
+            cx, cy = vx + 1, vy + 11
+            reds = at(cx + 16, cy + 12)
+            greens = at(cx + 48, cy + 12)
+            blues = at(cx + 16, cy + 36)
+            whites = at(cx + 48, cy + 36)
+            check("i wyszly z niego te same cztery kolory "
+                  "(%s %s %s %s)" % (reds, greens, blues, whites),
+                  reds[0] > 200 and reds[1] < 60 and
+                  greens[1] > 200 and greens[0] < 60 and
+                  blues[2] > 200 and blues[0] < 60 and
+                  all(v > 200 for v in whites))
         finally:
             q.close()
     finally:
@@ -273,7 +321,121 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
+    sixty_four()
     return summary()
+
+
+def sixty_four():
+    """The picture formats on the 64-bit kernel.
+
+    The decoders are one set of sources compiled twice, so what is
+    asked here is what the compiler could have got wrong on its own:
+    the arithmetic is int and unsigned int, the plane is indexed
+    through a long, and a pointer is twice the size it was. A JPEG is
+    the one that would notice - it has the most of all three - so the
+    long-mode half fetches the same file and looks for the same four
+    colours."""
+    if KERNEL64 is None or not os.path.exists(KERNEL64):
+        print("POMINIETE (64): brak obrazu 64-bitowego (make kernel64)")
+        return
+    if shutil.which("grub-mkrescue") is None or \
+       shutil.which("qemu-system-x86_64") is None:
+        print("POMINIETE (64): brak grub-mkrescue lub qemu-system-x86_64")
+        return
+
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+
+    http_port, stop_http = start_http_server()
+    try:
+        os.makedirs(d + "/boot/grub")
+        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        mod = ""
+        if INITRD64 and os.path.exists(INITRD64):
+            shutil.copy(INITRD64, d + "/boot/initrd64.img")
+            mod = "    module2 /boot/initrd64.img initrd64\n"
+        with open(d + "/boot/grub/grub.cfg", "w") as fh:
+            fh.write("insmod all_video\nset gfxpayload=keep\n"
+                     "set timeout=0\nset default=0\n"
+                     'menuentry "ProtonOS 64" {\n'
+                     "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+        made = subprocess.run(["grub-mkrescue", "-o", iso, d],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+        check("plyta z jadrem 64-bitowym buduje sie", made)
+        if not made:
+            return
+
+        q = Qemu(KERNEL, INITRD, disk=disk, cdrom=iso, serial=slog,
+                 qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("proton64>", timeout=60)
+            q.type_line("pulpit")
+            q.wait_serial("Pulpit startuje", timeout=30)
+            time.sleep(4)
+            q.mouse_home()
+
+            # The same window as on the other kernel, so the viewer
+            # lands in the same slot of the cascade and the reading
+            # grid below is the same one
+            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_click()
+            time.sleep(4)
+            q.mouse_goto(600, 430)             # the keys back to the shell
+            q.mouse_click()
+            time.sleep(1)
+
+            seen = len(q.serial())
+            q.type_line("run httpget 10.0.2.2 %d /kwadraty.jpg obraz.jpg"
+                        % http_port)
+            time.sleep(8)
+            q.type_line("fls")
+            time.sleep(2)
+            got = q.serial()[seen:]
+            # The long-mode shell does not announce a program's exit
+            # code, so the proof that the fetch worked is the file
+            # itself - with the length the server sent.
+            m = re.search(r"obraz\.jpg\s+\((\d+) B\)", got)
+            check("(64) maszyna sciaga JPEG z sieci ('%s')"
+                  % (m.group(0) if m else got[-60:].replace("\n", " ")),
+                  "HTTP 200" in got and m is not None and
+                  int(m.group(1)) == len(JPEG_IMAGE))
+
+            q.type_line("run gimg obraz.jpg")
+            time.sleep(8)
+            q.mouse_goto(600, 200)
+            time.sleep(2)
+            w, h, at = q.screen_raw()
+
+            vx, vy = VX, VY
+            said = status(at, vx=vx, vy=vy)
+            check("(64) podglad rozlozyl JPEG na piksele ('%s')" % said,
+                  "64x48" in said and "wczytany" in said)
+
+            cx, cy = vx + 1, vy + 11
+            reds = at(cx + 16, cy + 12)
+            greens = at(cx + 48, cy + 12)
+            blues = at(cx + 16, cy + 36)
+            whites = at(cx + 48, cy + 36)
+            check("(64) i wyszly z niego cztery kolory, te same co na "
+                  "32 bitach (%s %s %s %s)"
+                  % (reds, greens, blues, whites),
+                  reds[0] > 200 and reds[1] < 60 and
+                  greens[1] > 200 and greens[0] < 60 and
+                  blues[2] > 200 and blues[0] < 60 and
+                  all(v > 200 for v in whites))
+        finally:
+            q.close()
+    finally:
+        stop_http()
+        shutil.rmtree(d, ignore_errors=True)
+        for f in (iso, slog, disk):
+            if os.path.exists(f):
+                os.unlink(f)
 
 
 sys.exit(main())

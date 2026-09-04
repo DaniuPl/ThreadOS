@@ -9,6 +9,7 @@ file, because every one needs its own machine, and those start in
 parallel.
 """
 
+import base64
 import http.server
 import json
 import os
@@ -170,6 +171,36 @@ def make_png(w=64, h=48):
 
 
 PNG_IMAGE = make_png()
+
+
+# The same four quarters again, this time as a baseline JPEG.
+#
+# This one is not written here: a JPEG encoder is a second half of the
+# work the decoder does, and a picture shaped by our own arithmetic
+# would flatter it. These bytes came out of an outside encoder (Go's
+# image/jpeg, quality 90, 4:2:0), so the test asks the decoder to read
+# somebody else's file - which is the only kind that matters.
+#
+# 4:2:0 means the colour is stored at half resolution and put back by
+# the decoder, so the quarters are read well inside their corners,
+# away from the boundaries where a lossy format is allowed to smudge.
+JPEG_IMAGE = base64.b64decode(
+    "/9j/2wCEAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsL"
+    "EBYQERMUFRUVDA8XGBYUGBIUFRQBAwQEBQQFCQUFCRQNCw0UFBQUFBQUFBQUFBQUFBQU"
+    "FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/AABEIADAAQAMBIgACEQED"
+    "EQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAAB"
+    "fQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkq"
+    "NDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SV"
+    "lpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq"
+    "8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUE"
+    "BAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZ"
+    "GiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeI"
+    "iYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl"
+    "5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/APnSiiivww/1TCiiigD7Gooor8SP+Y8K"
+    "KKKAPjmivAqK/wBUP+JZf+px/wCUP/ux/tV/xMN/1Kv/ACt/9yPfaK8Coo/4ll/6nH/l"
+    "D/7sH/Ew3/Uq/wDK3/3I/UOiv0Yor+H/APiGf/UZ/wCU/wD7c/zj/wCIPf8AUf8A+Uv/"
+    "ALofnPRX6MUUf8Qz/wCoz/yn/wDbh/xB7/qP/wDKX/3Q/mkooor/AHDP1cKKKKAP6W6K"
+    "KK/ysPuAooooA//Z")
 
 
 _FONT8X8 = None
@@ -453,6 +484,14 @@ def start_http_server():
                 self.send_header("Content-Length", str(len(PNG_IMAGE)))
                 self.end_headers()
                 self.wfile.write(PNG_IMAGE)
+                return
+
+            if self.path.endswith(".jpg") or self.path.endswith(".jpeg"):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(JPEG_IMAGE)))
+                self.end_headers()
+                self.wfile.write(JPEG_IMAGE)
                 return
 
             if self.path.endswith(".bmp"):

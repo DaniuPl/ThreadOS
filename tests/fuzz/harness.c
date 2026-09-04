@@ -6,7 +6,7 @@
  * pliku albo na stdin. Skrypt scripts/fuzz_parsers.py karmi go tysiacami
  * przypadkow zrobionych przez psucie poprawnych danych.
  *
- * Uzycie: harness <x509|html|http|ecdsa> <plik>
+ * Uzycie: harness <x509|html|http|ecdsa|inflate|jpeg> <plik>
  */
 
 #include <stdio.h>
@@ -16,6 +16,8 @@
 #include "ux509.h"
 #include "uecdsa.h"
 #include "uhtml.h"
+#include "uinflate.h"
+#include "ujpeg.h"
 
 #define MAX_INPUT (1 << 20)
 
@@ -124,10 +126,49 @@ static void run_ecdsa(const unsigned char *data, size_t len)
     ecdsa_verify_der(&ec_p384, pub, 97, hash, 48, data, (uint32_t)len);
 }
 
+/* The picture decoders. A picture arrives from the network exactly as
+   a certificate does, so it gets the same treatment - and it is the
+   one place where the input decides how much is written, which is the
+   kind of arithmetic a corrupted file is best at breaking. */
+static void run_inflate(const unsigned char *data, size_t len)
+{
+    unsigned char *out = malloc(1 << 20);
+    if (!out)
+        return;
+    inflate_zlib(data, (unsigned)len, out, 1 << 20);
+    inflate_raw(data, (unsigned)len, out, 1 << 20);
+    free(out);
+}
+
+static void run_jpeg(const unsigned char *data, size_t len)
+{
+    unsigned char *mem = malloc(4 << 20);
+    if (!mem)
+        return;
+    int w = 0, h = 0;
+    const char *why = "?";
+    if (jpeg_decode(data, (unsigned)len, mem, 4 << 20, &w, &h, &why) == 0) {
+        /* Every pixel, because the planes are read through a
+           calculation that a strange set of sampling factors could
+           push outside them */
+        volatile int sink = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                int r, g, b;
+                jpeg_pixel(x, y, &r, &g, &b);
+                sink += r + g + b;
+            }
+        (void)sink;
+    }
+    free(mem);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 3) {
-        fprintf(stderr, "uzycie: %s <x509|html|http|ecdsa> <plik>\n", argv[0]);
+        fprintf(stderr,
+                "uzycie: %s <x509|html|http|ecdsa|inflate|jpeg> <plik>\n",
+                argv[0]);
         return 2;
     }
 
@@ -153,6 +194,10 @@ int main(int argc, char **argv)
         run_http(input, len);
     else if (!strcmp(argv[1], "ecdsa"))
         run_ecdsa(input, len);
+    else if (!strcmp(argv[1], "inflate"))
+        run_inflate(input, len);
+    else if (!strcmp(argv[1], "jpeg"))
+        run_jpeg(input, len);
     else {
         fprintf(stderr, "nieznany parser: %s\n", argv[1]);
         free(input);
