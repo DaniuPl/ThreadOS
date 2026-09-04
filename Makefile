@@ -128,7 +128,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/fbcon.o
 
 .PHONY: all iso iso64 initrd64 run run-iso run-iso64-uefi test fuzz clean \
-        kernel64
+        kernel64 efi
 
 all: $(KERNEL) $(INITRD)
 
@@ -570,3 +570,24 @@ fuzz:
 
 clean:
 	rm -rf $(BUILD)
+
+# --- Wlasny program rozruchowy UEFI ----------------------------------
+#
+# Aplikacja EFI to plik w formacie PE32+ z konwencją wywolan Microsoftu,
+# czyli dwie rzeczy, ktorych GCC na Linuksie nie robi. Robi je clang z
+# lld-linkiem - i to jedyne, co jest tu cudze: format pliku. Kod jest
+# w calosci nasz, bez gnu-efi i bez EDK2.
+EFI_OUT := $(BUILD)/BOOTX64.EFI
+EFI_CC  := clang -target x86_64-unknown-windows -ffreestanding \
+           -fshort-wchar -mno-red-zone -Wall -Wextra -O2
+
+$(EFI_OUT): boot/efi/efiboot.c boot/efi/efi.h | $(BUILD)
+	@command -v clang >/dev/null && command -v lld-link >/dev/null || { \
+	    echo "BLAD: brak clang albo lld-link (apt install clang lld)"; \
+	    exit 1; }
+	$(EFI_CC) -c boot/efi/efiboot.c -o $(BUILD)/efiboot.o
+	lld-link -subsystem:efi_application -entry:efi_main -nodefaultlib \
+	    -out:$@ $(BUILD)/efiboot.o
+	@echo "Gotowe: $@"
+
+efi: $(EFI_OUT)

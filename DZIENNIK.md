@@ -4271,3 +4271,61 @@ sprawdzane przez `make test`.
       partycji, brakuje jeszcze zapisu do partycji EFI - czyli FAT-u,
       ktorego nie mamy - i programu rozruchowego EFI. To sa nastepne
       kroki, nie ten.
+
+- [x] **protoboot: wlasny program rozruchowy UEFI** - etapy 1-3.
+
+      Do dzis ten system uruchamial GRUB. GRUB jest znakomity i jest
+      CUDZY; wszystko inne tutaj jest napisane od zera, a rzecz, ktora
+      kladzie jadro w pamieci, byla ostatnim kawalkiem, ktory nie byl.
+
+      **Etap 1 zdejmowal najwieksze ryzyko** i tylko o to chodzilo: nie
+      wiedzialem, czy ten toolchain w ogole zbuduje aplikacje EFI.
+      Aplikacja EFI to plik PE32+ z konwencja wywolan Microsoftu, czyli
+      dwie rzeczy, ktorych GCC na Linuksie nie robi. Robi je clang
+      celujacy w x86_64-unknown-windows plus lld-link; 'file' mowi "PE32+
+      executable (EFI application)", firmware to zaladowalo i wykonalo.
+      Dwa kilobajty, bez gnu-efi i bez EDK2. Jedyne, co cudze, to format
+      pliku.
+
+      **Deklaracje UEFI sa nasze** (boot/efi/efi.h) i dwie rzeczy trzeba
+      przy nich zrobic dobrze. KOLEJNOSC skladnikow: firmware podaje
+      tablice wskaznikow do funkcji, a my indeksujemy po pozycji -
+      pominiety wpis przesuwa wszystko po nim i maszyna skacze w zla
+      funkcje. Dlatego kazdy wpis tablicy uslug rozruchowych jest tam, w
+      kolejnosci, nawet te, ktorych nigdy nie wolamy. I KONWENCJA
+      WYWOLAN, ktora zalatwia wybor kompilatora, wiec nie musi jej
+      powtarzac ani jedna linijka.
+
+      **Etapy 2 i 3**: czytanie jadra i initrd, tryb graficzny, ACPI.
+      Wlasnego FAT-u do rozruchu NIE POTRZEBUJEMY - firmware ma juz
+      zamontowana partycje, z ktorej nas uruchomiono, i podaje protokol
+      plikowy. FAT bedzie potrzebny do ZAPISANIA takiej partycji, czyli
+      przy instalacji, a nie tutaj. Rozmiar pliku brany przez pojscie na
+      koniec i zapytanie, gdzie sie jest - co oszczedza EFI_FILE_INFO,
+      GUID-a i bufora, dla odpowiedzi bedacej jedna liczba.
+
+      Tryb graficzny brany taki, jaki firmware juz pokazuje: na laptopie
+      jest to rozdzielczosc wlasna panelu, czyli dokladnie to, czego
+      chcemy, a proszenie o konkretny tryb wlasnie by to wyrzucilo. To
+      ta sama lekcja, co przy naglowku Multiboot2 - prosba o konkret
+      wygrywa i psuje.
+
+      RSDP z tablicy konfiguracyjnej firmware'u, bo na maszynie UEFI nie
+      ma innej drogi: stare szukanie po niskiej pamieci nie znajdzie tam
+      nic.
+
+      Zmierzone pod OVMF: jadro 825028 B, initrd 448132 B - co do bajtu
+      tyle, ile maja pliki - ekran 1280x800, RSDP w wersji 2.0.
+
+      **Czego jeszcze nie ma**: zbudowania tablicy tagow Multiboot 2,
+      wczytania ELF-a, ExitBootServices i skoku. Ten ostatni jest
+      niezrecznosc calego przedsiewziecia: aplikacja UEFI biegnie w
+      trybie dlugim, a jadro Multiboot 2 wchodzi w 32-bitowym trybie
+      chronionym, wiec po pozegnaniu firmware'u trzeba z trybu dlugiego
+      wyjsc samemu - na wlasnych tablicach, z wylaczonym stronicowaniem.
+
+      Ksztalt "powiedzenia jadru" jest juz ustalony i nie jest nasz do
+      zmieniania: jadro to obraz Multiboot 2 i chce magicznej liczby w
+      EAX oraz tablicy tagow w EBX. Wiec loader te tablice ZBUDUJE,
+      dokladnie tak jak robi to GRUB, a jadro sie nie dowie, ze cokolwiek
+      sie zmienilo. Ani jedna jego linijka nie musiala.
