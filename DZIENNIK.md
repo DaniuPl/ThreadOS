@@ -4345,3 +4345,63 @@ sprawdzane przez `make test`.
       EAX oraz tablicy tagow w EBX. Wiec loader te tablice ZBUDUJE,
       dokladnie tak jak robi to GRUB, a jadro sie nie dowie, ze cokolwiek
       sie zmienilo. Ani jedna jego linijka nie musiala.
+
+- [x] **protoboot: etap 4 - jadro startuje z naszego loadera** (grupa
+      testow `protoboot`).
+
+      Etapy 1-3 czytaly pliki i pytaly firmware o ekran. Etap 4 jest
+      tym, po co to wszystko bylo: zbudowac tablice tagow Multiboot 2,
+      wczytac ELF-a, pozegnac firmware i skoczyc. Od chwili, gdy
+      ExitBootServices wroci, nie ma juz nikogo do pomocy - konsola
+      firmware'u nie istnieje, wiec kazdy blad w tej sekwencji to
+      maszyna, ktora gasnie bez slowa.
+
+      **Tablica tagow jest zbudowana pod to, co jadro faktycznie
+      czyta**, a nie pod cala specyfikacje. kernel/mb2.c rozpoznaje
+      siedem typow: koniec, wiersz polecen, modul, mape pamieci, bufor
+      obrazu i dwie postacie RSDP. Loader wystawia dokladnie te.
+      Wystawianie reszty byloby kodem, ktorego nikt nie czyta - a wiec
+      kodem, ktory nikt nie sprawdzi.
+
+      **Mapa pamieci UEFI ma pulapke i jest to najwazniejsza rzecz w
+      tym etapie.** Firmware oddaje mape swoich regionow; przelozenie
+      jej na Multiboot 2 jest zamiana typow. Kuszace jest uznac
+      EfiLoaderCode i EfiLoaderData za wolne - przeciez loader zaraz
+      przestanie istniec. Tyle ze W TEJ WLASNIE PAMIECI lezy initrd,
+      ktory loader wczytal z dysku. Oddane jako wolne, trafilyby do
+      alokatora jadra i zostalyby rozdane pierwszemu, kto poprosi -
+      a initrd zamienilby sie w smieci, zanim ktokolwiek by go otworzyl.
+      Wiec ida do mapy jako ZAJETE. Test pilnuje tego nie przez
+      ogladanie mapy, tylko przez uruchomienie programu z initrd:
+      jesli te strony ktos rozdal, program nie wystartuje.
+
+      **Zejscie z trybu dlugiego.** Aplikacja UEFI biegnie w trybie
+      dlugim, jadro Multiboot 2 wchodzi w 32-bitowym trybie chronionym.
+      Kolejnosc jest przymusowa i nie ma w niej miejsca na wlasne
+      pomysly: wlasna GDT (firmware'owa znika razem z firmware'em),
+      daleki skok do segmentu 32-bitowego, wylaczenie stronicowania w
+      CR0, wyczyszczenie EFER.LME, wylaczenie PAE w CR4 - i dopiero
+      wtedy skok pod punkt wejscia z EAX i EBX ustawionymi tak, jak
+      ustawia je GRUB. Adresy w tej sekwencji sa juz fizyczne, bo
+      UEFI mapuje pamiec tozsamosciowo; gdyby nie mapowalo, tego kroku
+      nie daloby sie zrobic w miejscu.
+
+      **Zadziolalo za pierwszym razem i nie jest to powod do dumy, tylko
+      skutek tego, ze ksztalt byl ustalony wczesniej.** Jadro nie
+      dowiedzialo sie o niczym: ta sama liczba magiczna, ta sama tablica,
+      ten sam modul. Ani jedna linijka jadra nie zmienila sie na potrzeby
+      tego loadera - i to jest miara, czy interfejs byl dobry.
+
+      **Grupa testow `protoboot`** startuje maszyne, na ktorej NIE MA
+      GRUB-a: partycja EFI z trzema plikami i firmware OVMF. Rozmiary
+      jadra i initrd sprawdzane sa co do bajtu wzgledem plikow na dysku
+      (loader ma je przeczytac, a nie powiedziec, ze przeczytal),
+      rozdzielczosc z GOP porownana z ta, ktora zobaczylo jadro, i z ta,
+      ktora ma zrzut ekranu. Sam plik BOOTX64.EFI czytany jest bajtowo:
+      PE32+, maszyna 0x8664, podsystem 10 - bo tylko taki firmware w
+      ogole uruchomi.
+
+      **Czego dalej nie ma**: zapisu do FAT-u i instalatora. Loader umie
+      juz uruchomic system z pendrive'a przygotowanego na hoscie; zeby
+      ProtonOS umial przygotowac go sam - obok Windowsa, na dysku
+      laptopa - musi umiec ZAPISAC partycje EFI. To jest nastepny krok.

@@ -10,7 +10,9 @@ files compiled twice*, and only what genuinely depends on the CPU mode —
 paging, interrupts, context switching — has separate implementations.
 
 Both kernels are Multiboot-compliant, so GRUB or QEMU can load them
-directly.
+directly — and on a UEFI machine the 64-bit kernel is loaded by
+**protoboot**, this project's own EFI boot loader (`boot/efi/`), with no
+GRUB involved at all.
 
 ## What works
 
@@ -140,7 +142,11 @@ memory, files mapped into memory for reading *and writing*, a stack
 that grows on demand, swap to disk, processes that run in ring 3 on
 every core, **threads sharing one address space across cores**, four
 virtual consoles, USB keyboard (xHCI or UHCI), ACPI power-off, and
-BIOS + UEFI boot from a single hybrid disc.
+BIOS + UEFI boot from a single hybrid disc — the latter through our own
+EFI loader, which reads the kernel and the initrd off the EFI system
+partition, sets the graphics mode through GOP, takes the ACPI pointer
+from the firmware, builds the Multiboot 2 tag table itself, leaves long
+mode and jumps.
 
 ## Quick start
 
@@ -148,13 +154,14 @@ BIOS + UEFI boot from a single hybrid disc.
 make run              # 32-bit kernel in QEMU
 make kernel64         # build the long-mode kernel + its initrd
 make run-iso64-uefi   # boot the hybrid disc under UEFI firmware (OVMF)
+make efi              # build protoboot, our own EFI loader (needs clang + lld)
 make test             # full test suite, groups in parallel (~5 min)
 make test T=ush       # one group only
 ```
 
 Requirements: `gcc` with `-m32` (`gcc-multilib`), `make`,
 `qemu-system-x86`. For discs: `grub-pc-bin`, `grub-efi-amd64-bin`,
-`xorriso`, `mtools`, `ovmf`.
+`xorriso`, `mtools`, `ovmf`. For our own EFI loader: `clang`, `lld`.
 
 ## Testing
 
@@ -178,6 +185,7 @@ HTTP, network frames) under ASan/UBSan on the host.
 
 ```
 boot/  boot64/     entry points: Multiboot header, long-mode entry
+boot/efi/          protoboot: our own UEFI boot loader (PE32+)
 kernel/            shared code + 32-bit kernel
 kernel64/          only what depends on the CPU mode being 64-bit
 user/  user64/     ring 3 programs, packed into an initrd

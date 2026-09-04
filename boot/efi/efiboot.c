@@ -227,6 +227,172 @@ static void *find_rsdp(int *is_v2)
     return old;
 }
 
+/* --- the table the kernel is told everything through ------------------
+ *
+ * Multiboot 2: a length, then tags one after another, each padded up to
+ * eight bytes, ending with a tag of type zero. The kernel already knows
+ * how to read this - GRUB was handing it one - so building it is the
+ * whole of "talking to the kernel" and nothing in the kernel changes.
+ */
+#define MB2_MAGIC        0x36d76289u
+#define TAG_END          0
+#define TAG_CMDLINE      1
+#define TAG_BOOTLOADER   2
+#define TAG_MODULE       3
+#define TAG_MMAP         6
+#define TAG_FRAMEBUF     8
+#define TAG_RSDP_OLD     14
+#define TAG_RSDP_NEW     15
+
+static UINT8 *mbi;                 /* the structure being built */
+static UINTN mbi_at;               /* how far into it we are */
+static UINTN mbi_room;
+
+static void *tag_open(UINT32 type, UINTN size)
+{
+    if (mbi_at + size + 8 > mbi_room)
+        fail(L"tablica dla jadra sie nie miesci", 0);
+    UINT8 *p = mbi + mbi_at;
+    *(UINT32 *)p = type;
+    *(UINT32 *)(p + 4) = (UINT32)size;
+    mbi_at += (size + 7) & ~(UINTN)7;   /* tags sit on eight bytes */
+    return p;
+}
+
+static void copy_bytes(void *dst, const void *src, UINTN n)
+{
+    UINT8 *d = dst;
+    const UINT8 *s = src;
+    while (n--)
+        *d++ = *s++;
+}
+
+static void tag_string(UINT32 type, const char *s)
+{
+    UINTN n = 0;
+    while (s[n])
+        n++;
+    UINT8 *p = tag_open(type, 8 + n + 1);
+    copy_bytes(p + 8, s, n + 1);
+}
+
+/* --- the kernel image ------------------------------------------------- */
+
+/* Just enough ELF64 to put the segments where they say they go. The
+   kernel is an ELF the loader has to place itself: the program headers
+   say what to copy, where to, and how much to leave as zeros after it
+   (that is the .bss - space the file does not carry). */
+struct elf64_hdr {
+    UINT8 ident[16];
+    UINT16 type, machine;
+    UINT32 version;
+    UINT64 entry, phoff, shoff;
+    UINT32 flags;
+    UINT16 ehsize, phentsize, phnum, shentsize, shnum, shstrndx;
+};
+
+struct elf64_phdr {
+    UINT32 type, flags;
+    UINT64 offset, vaddr, paddr, filesz, memsz, align;
+};
+
+#define PT_LOAD 1
+
+static UINT64 load_elf(struct blob *img)
+{
+    const UINT8 *base = img->data;
+    const struct elf64_hdr *eh = (const struct elf64_hdr *)base;
+
+    if (eh->ident[0] != 0x7F || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
+        eh->ident[3] != 'F' || eh->ident[4] != 2)
+        fail(L"to nie jest ELF64", 0);
+
+    for (UINT16 i = 0; i < eh->phnum; i++) {
+        const struct elf64_phdr *ph = (const struct elf64_phdr *)
+            (base + eh->phoff + (UINTN)i * eh->phentsize);
+        if (ph->type != PT_LOAD || !ph->memsz)
+            continue;
+
+        /* The place the segment asks for has to be taken from the
+           firmware first, or it may be holding something of its own
+           there and we would be writing over it. */
+        UINT64 start = ph->paddr & ~(UINT64)4095;
+        UINTN pages = (UINTN)((ph->paddr + ph->memsz - start + 4095) / 4096);
+        UINT64 got = start;
+        if (BS->AllocatePages(AllocateAddress, EfiLoaderData_Type, pages,
+                              &got) != EFI_SUCCESS)
+            fail(L"nie moge wziac pamieci pod jadro", ph->paddr);
+
+        copy_bytes((void *)(UINTN)ph->paddr, base + ph->offset,
+                   (UINTN)ph->filesz);
+        UINT8 *tail = (UINT8 *)(UINTN)(ph->paddr + ph->filesz);
+        for (UINT64 n = ph->memsz - ph->filesz; n; n--)
+            *tail++ = 0;
+    }
+    return eh->entry;
+}
+
+/* --- leaving, and the last thing this loader does --------------------- */
+
+/* The jump, written out because C cannot say any of it.
+ *
+ * A UEFI application runs in long mode; a Multiboot 2 kernel is entered
+ * in 32-bit protected mode. Between those two facts sits this routine,
+ * and it has to walk back out of long mode by itself: a table of its
+ * own, a far jump into a 32-bit segment, paging off, the long mode bit
+ * cleared, PAE off. From there it is an ordinary protected mode machine
+ * and the kernel can have it.
+ *
+ * It works because the firmware maps memory one-to-one, so this code's
+ * address does not change when paging goes away underneath it.
+ */
+__asm__(
+".globl enter_kernel\n"
+".align 16\n"
+"enter_kernel:\n"                  /* rcx = entry, rdx = magic, r8 = mbi */
+"    cli\n"
+"    movl %ecx, %edi\n"            /* where we are going */
+"    movl %edx, %esi\n"            /* the magic word */
+"    movl %r8d, %ebp\n"            /* the table */
+"    lgdt gdt32_desc(%rip)\n"
+"    ljmpl *far_ptr(%rip)\n"       /* into a 32-bit code segment */
+".code32\n"
+"prot32:\n"
+"    movl $0x10, %eax\n"
+"    movl %eax, %ds\n"
+"    movl %eax, %es\n"
+"    movl %eax, %fs\n"
+"    movl %eax, %gs\n"
+"    movl %eax, %ss\n"
+"    movl %cr0, %eax\n"            /* paging off - and with it long mode */
+"    andl $0x7FFFFFFF, %eax\n"
+"    movl %eax, %cr0\n"
+"    movl $0xC0000080, %ecx\n"     /* EFER */
+"    rdmsr\n"
+"    andl $0xFFFFFEFF, %eax\n"     /* LME away */
+"    wrmsr\n"
+"    movl %cr4, %eax\n"
+"    andl $0xFFFFFFDF, %eax\n"     /* PAE away */
+"    movl %eax, %cr4\n"
+"    movl %esi, %eax\n"            /* the contract: magic in EAX... */
+"    movl %ebp, %ebx\n"            /* ...and the table in EBX */
+"    jmp *%edi\n"
+".code64\n"
+".align 8\n"
+"gdt32:\n"
+"    .quad 0\n"
+"    .quad 0x00CF9A000000FFFF\n"   /* 32-bit code, whole address space */
+"    .quad 0x00CF92000000FFFF\n"   /* 32-bit data */
+"gdt32_desc:\n"
+"    .word 23\n"
+"    .quad gdt32\n"
+"far_ptr:\n"
+"    .long prot32\n"
+"    .word 8\n"
+);
+
+void enter_kernel(UINT64 entry, UINT64 magic, UINT64 table);
+
 /* --- the way in ------------------------------------------------------ */
 
 EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
@@ -287,7 +453,123 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         put(L"nie ma\r\n");
     }
 
-    put(L"protoboot: na razie tyle - reszta w nastepnym kroku\r\n");
+    /* --- the table the kernel reads ------------------------------- */
+    /* Generously sized and taken now: after the memory map is fetched
+       nothing may allocate, or the key that ExitBootServices checks
+       goes stale. */
+    UINT64 where = 0;
+    UINTN mbi_pages = 32;                 /* 128 KiB - a large memory map */
+    if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type, mbi_pages,
+                          &where) != EFI_SUCCESS)
+        fail(L"brak pamieci na tablice dla jadra", 0);
+    mbi = (UINT8 *)(UINTN)where;
+    mbi_room = mbi_pages * 4096;
+    mbi_at = 8;                           /* total_size and a reserved word */
+
+    tag_string(TAG_BOOTLOADER, "protoboot");
+    tag_string(TAG_CMDLINE, "");
+
+    {
+        UINT8 *p = tag_open(TAG_MODULE, 8 + 4 + 4 + 1);
+        *(UINT32 *)(p + 8) = (UINT32)(UINTN)initrd.data;
+        *(UINT32 *)(p + 12) = (UINT32)((UINTN)initrd.data + initrd.size);
+        p[16] = 0;                        /* the module carries no name */
+    }
+
+    if (sc.have) {
+        UINT8 *p = tag_open(TAG_FRAMEBUF, 8 + 22 + 6);
+        *(UINT64 *)(p + 8) = sc.base;
+        *(UINT32 *)(p + 16) = sc.pitch_pixels * 4;   /* MB2 wants bytes */
+        *(UINT32 *)(p + 20) = sc.width;
+        *(UINT32 *)(p + 24) = sc.height;
+        p[28] = 32;                       /* bits per pixel */
+        p[29] = 1;                        /* direct colours, not text */
+        p[30] = 0;
+        p[31] = 0;
+        p[32] = (UINT8)sc.red_shift;   p[33] = 8;
+        p[34] = (UINT8)sc.green_shift; p[35] = 8;
+        p[36] = (UINT8)sc.blue_shift;  p[37] = 8;
+    }
+
+    if (rsdp) {
+        /* The whole thing is copied in, because after ExitBootServices
+           the firmware's own tables are not promised to stay put. */
+        UINTN n = acpi2 ? 36 : 20;
+        UINT8 *p = tag_open(acpi2 ? TAG_RSDP_NEW : TAG_RSDP_OLD, 8 + n);
+        copy_bytes(p + 8, rsdp, n);
+    }
+
+    UINT64 entry = load_elf(&kernel);
+
+    /* --- the memory map, and then no more firmware ----------------- */
+    UINTN map_size = 0, map_key = 0, desc_size = 0;
+    UINT32 desc_ver = 0;
+    BS->GetMemoryMap(&map_size, 0, &map_key, &desc_size, &desc_ver);
+    map_size += 8 * desc_size;            /* room for what our own call adds */
+
+    UINT64 map_at = 0;
+    if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type,
+                          (map_size + 4095) / 4096, &map_at) != EFI_SUCCESS)
+        fail(L"brak pamieci na mape pamieci", 0);
+    EFI_MEMORY_DESCRIPTOR *map = (EFI_MEMORY_DESCRIPTOR *)(UINTN)map_at;
+
+    EFI_STATUS st2 = BS->GetMemoryMap(&map_size, map, &map_key, &desc_size,
+                                      &desc_ver);
+    if (st2 != EFI_SUCCESS)
+        fail(L"nie dostalem mapy pamieci", st2);
+
+    /* Turning the firmware's map into the kernel's.
+     *
+     * What matters is which regions are FREE, and the answer is not
+     * "everything the firmware is not using": the kernel image, the
+     * initrd and this table are all in memory the firmware calls
+     * loader memory, and reporting that as free would have the kernel
+     * hand out its own initrd as a spare page. So loader memory is
+     * reserved, and only genuinely spare memory - and what the boot
+     * services stop needing the moment we leave - is available. */
+    {
+        UINTN entries = map_size / desc_size;
+        UINT8 *p = tag_open(TAG_MMAP, 8 + 8 + entries * 24);
+        *(UINT32 *)(p + 8) = 24;          /* the size of one entry */
+        *(UINT32 *)(p + 12) = 0;          /* version */
+        UINT8 *e = p + 16;
+        for (UINTN i = 0; i < entries; i++) {
+            EFI_MEMORY_DESCRIPTOR *d =
+                (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
+            UINT32 kind;
+            switch (d->Type) {
+            case EfiConventionalMemory:
+            case EfiBootServicesCode:
+            case EfiBootServicesData:
+                kind = 1;                 /* free */
+                break;
+            case 9:  kind = 3; break;     /* ACPI, reclaimable */
+            case 10: kind = 4; break;     /* ACPI NVS */
+            default: kind = 2; break;     /* taken, ours included */
+            }
+            *(UINT64 *)(e + 0) = d->PhysicalStart;
+            *(UINT64 *)(e + 8) = d->NumberOfPages * 4096;
+            *(UINT32 *)(e + 16) = kind;
+            *(UINT32 *)(e + 20) = 0;
+            e += 24;
+        }
+    }
+
+    tag_open(TAG_END, 8);
+    *(UINT32 *)mbi = (UINT32)mbi_at;
+    *(UINT32 *)(mbi + 4) = 0;
+
+    put(L"protoboot: oddaje maszyne jadru\r\n");
+
+    if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS) {
+        /* The map may have moved under us; take it again and go. */
+        map_size = mbi_pages * 0;
+        BS->GetMemoryMap(&map_size, map, &map_key, &desc_size, &desc_ver);
+        if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS)
+            fail(L"firmware nie chce oddac maszyny", 0);
+    }
+
+    enter_kernel(entry, MB2_MAGIC, (UINT64)(UINTN)mbi);
     for (;;)
         __asm__ volatile("hlt");
 }

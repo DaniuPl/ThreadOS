@@ -697,7 +697,7 @@ class Qemu:
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None, nic="rtl8139", cpus=None):
+                 uefi=None, esp=None, nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The 64-bit kernel needs a processor with long mode, and
@@ -767,11 +767,19 @@ class Qemu:
             cmd += ["-drive", "if=pflash,format=raw,unit=0,readonly=on,"
                               "file=" + code,
                     "-drive", "if=pflash,format=raw,unit=1,file=" + nvram]
+        if esp:
+            # A directory served as a FAT disk: QEMU builds the
+            # filesystem out of it as it goes, and the firmware sees
+            # exactly what it sees on a stick - an EFI system partition
+            # with \\EFI\\BOOT\\BOOTX64.EFI in it. Nothing is loaded from
+            # the command line here: whatever the loader does not find
+            # by itself, the machine will not get.
+            cmd += ["-drive", f"file=fat:rw:{esp},format=raw,media=disk"]
         if cdrom:
             # Booting as from a real board: the kernel is loaded by GRUB, not by
 # QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
-        else:
+        elif not esp:
             cmd += ["-kernel", kernel]
             if append:
                 cmd += ["-append", append]
