@@ -26,6 +26,7 @@
 #include "include/fs.h"
 #include "include/ata.h"
 #include "include/blk.h"
+#include "include/part.h"
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
@@ -75,16 +76,31 @@ static uint8_t block_buf[FS_BLOCK];
 
 /* --- block access ------------------------------------------------------ */
 
+/* Where this filesystem begins on the disk.
+ *
+ * Zero means "the whole disk is ours", which is what every disk this
+ * system had until now and what its own images still look like. A
+ * laptop's disk is not like that: sector zero there belongs to a
+ * partition table, and living on such a machine means living INSIDE a
+ * partition, starting wherever that partition starts.
+ *
+ * The offset lives here, in the two functions that touch the disk, and
+ * nowhere else - so that no code above has to know whether it is on a
+ * whole disk or a slice of one. */
+static uint32_t fs_base;
+
 /* A whole block in one command: with AHCI that is a single DMA
    transfer instead of two separate per-sector requests */
 static int block_read(uint32_t block, void *buf)
 {
-    return blk_read(block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
+    return blk_read(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
+                    buf);
 }
 
 static int block_write(uint32_t block, const void *buf)
 {
-    return blk_write(block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK, buf);
+    return blk_write(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
+                     buf);
 }
 
 static void flush_inodes(void)
@@ -294,6 +310,91 @@ static void format_disk(void)
            total_blocks, FS_BLOCK);
 }
 
+/* Whether the disk has never had anything written to it.
+ *
+ * "Blank" is answered conservatively, because the cost of getting it
+ * wrong one way is a fresh disk the person has to format by hand, and
+ * the other way is somebody's data. A partition table announces itself
+ * with a signature in the last two bytes of sector zero; beyond that,
+ * a disk anyone has ever used has SOMETHING in its first sixty-four
+ * kilobytes - a boot sector, a superblock, a stray header. All zeros
+ * there is what a new disk, and an image made by a test, looks like. */
+static int disk_is_blank(void)
+{
+    static uint8_t probe[512];
+    for (uint32_t lba = 0; lba < 128; lba++) {
+        if (blk_read(lba, 1, probe) < 0)
+            return 0;              /* cannot read it - certainly not ours */
+        if (lba == 0 && probe[510] == 0x55 && probe[511] == 0xAA)
+            return 0;              /* a partition table */
+        for (int i = 0; i < 512; i++)
+            if (probe[i])
+                return 0;
+    }
+    return 1;
+}
+
+/* Fits the filesystem to a stretch of disk: where it starts and how
+   many blocks it gets. Returns 0 when that stretch is too small to
+   hold a filesystem at all. */
+static int fit(uint32_t start, uint32_t sectors)
+{
+    fs_base = start;
+    total_blocks = sectors / SECTORS_PER_BLOCK;
+    if (total_blocks > BITMAP_BITS)
+        total_blocks = BITMAP_BITS;        /* this much the bitmap covers */
+    return total_blocks > DATA_START;
+}
+
+/* Formats because somebody asked in so many words. 'partition' is 0
+   for the whole disk, or a partition number counted from one - and
+   that second case is the one that matters on a machine that belongs
+   to somebody: the table and every other partition are left exactly
+   as they were. Returns 1 when it happened. */
+int fs_format_now(int partition)
+{
+    if (!blk_present())
+        return 0;
+
+    if (partition <= 0) {
+        if (!fit(0, blk_sectors()))
+            return 0;
+    } else {
+        struct partition pt;
+        if (part_scan() < partition || !part_get(partition - 1, &pt))
+            return 0;
+        if (pt.start > 0xFFFFFFFFu || pt.sectors > 0xFFFFFFFFu)
+            return 0;                      /* past what our LBAs reach */
+        if (!fit((uint32_t)pt.start, (uint32_t)pt.sectors))
+            return 0;
+    }
+    format_disk();
+    ready = 1;
+    return 1;
+}
+
+/* Looks for a filesystem of ours inside one of the partitions.
+   Returns the partition number (from one) or 0. */
+static int find_our_partition(void)
+{
+    int n = part_scan();
+    for (int i = 0; i < n; i++) {
+        struct partition pt;
+        if (!part_get(i, &pt))
+            break;
+        if (pt.start > 0xFFFFFFFFu || pt.sectors > 0xFFFFFFFFu)
+            continue;
+        if (!fit((uint32_t)pt.start, (uint32_t)pt.sectors))
+            continue;
+        if (block_read(0, block_buf) < 0)
+            continue;
+        if (memcmp(((struct superblock *)block_buf)->magic, MAGIC, 4) == 0)
+            return i + 1;
+    }
+    fs_base = 0;
+    return 0;
+}
+
 int fs_init(void)
 {
     if (!blk_present()) {
@@ -301,11 +402,7 @@ int fs_init(void)
         return 0;
     }
 
-    uint32_t sectors = blk_sectors();
-    total_blocks = sectors / SECTORS_PER_BLOCK;
-    if (total_blocks > BITMAP_BITS)
-        total_blocks = BITMAP_BITS;        /* this much the bitmap covers */
-    if (total_blocks <= DATA_START) {
+    if (!fit(0, blk_sectors())) {
         printk("[ !! ] FS: dysk za maly (%u blokow)\n", total_blocks);
         return 0;
     }
@@ -317,6 +414,45 @@ int fs_init(void)
 
     struct superblock *sb = (struct superblock *)block_buf;
     if (memcmp(sb->magic, MAGIC, 4) != 0) {
+        /* A disk that is not ours is NOT ours to take.
+         *
+         * This used to format anything whose first block did not say
+         * PFS3 - which was harmless while every disk this system ever
+         * saw was an empty file made by a test, and is a catastrophe
+         * the moment it boots on a real machine: a laptop's disk does
+         * not say PFS3 either, and the first thing the system would do
+         * is throw away its partition table, its Windows and
+         * everything on it, without asking, in the first second of
+         * the first boot.
+         *
+         * So the disk is formatted only when it is genuinely blank.
+         * Anything else is left alone and said out loud, and the
+         * person who really does want this disk says so with the
+         * 'formatuj' command. */
+        /* Not at the front of the disk - but perhaps in a partition,
+           which is where a system living next to somebody else's
+           actually lives. */
+        int p = find_our_partition();
+        if (p) {
+            printk("[ OK ] PFS: w partycji %u (od sektora %u)\n",
+                   (uint32_t)p, fs_base);
+            for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
+                block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
+            uint8_t *dst = (uint8_t *)inodes;
+            for (uint32_t i = 0; i < INODE_BLOCKS; i++)
+                block_read(INODE_START + i, dst + i * FS_BLOCK);
+            ready = 1;
+            return 1;
+        }
+
+        if (!disk_is_blank()) {
+            printk("[ !! ] FS: na dysku cos JEST, a nie jest to PFS - "
+                   "nie ruszam go.\n");
+            printk("       Jesli caly dysk ma byc dla ProtonOS-a, wpisz "
+                   "'formatuj' (skasuje wszystko);\n");
+            printk("       zeby zajac jedna partycje - 'formatuj N'.\n");
+            return 0;
+        }
         format_disk();
     } else {
         for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)

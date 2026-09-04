@@ -22,6 +22,11 @@
    disk. Returns 1 when ready, 0 when there is no disk. */
 int fs_init(void);
 int fs_ready(void);
+/* Formats because somebody asked in so many words: 0 for the whole
+   disk, or a partition number counted from one - and then the table
+   and every other partition are left exactly as they were. Startup
+   never does this to a disk that has anything on it - see fs.c. */
+int fs_format_now(int partition);
 
 /* --- Path operations (relative to the working directory cwd) ---
    cwd is a directory slot or FS_ROOT. A path may be absolute ("/a/b"),

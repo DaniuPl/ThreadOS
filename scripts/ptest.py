@@ -17,6 +17,7 @@ import re
 import shutil
 import socket
 import socketserver
+import struct
 import subprocess
 import threading
 import zlib
@@ -76,6 +77,110 @@ HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" 
 # A page well above the old PFS limit (16 KiB per file) - it checks
 # block allocation, the indirect block and TCP throughput
 BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
+
+
+def make_gpt_disk(path, mib=800):
+    """A disk image with a GPT partition table on it: an EFI system
+    partition, a Windows one and a Linux one.
+
+    This is what a laptop's disk looks like, and the reason the test
+    needs one is not the table itself - it is what must NOT happen to
+    it. A system that formats whatever disk it does not recognise
+    destroys exactly this, and the assertion that it did not is worth
+    nothing without a real table to destroy."""
+    import binascii
+    import uuid
+    sec = 512
+    total = mib * 2048
+
+    def guid(s):
+        return uuid.UUID(s).bytes_le
+
+    parts = [
+        ("C12A7328-F81F-11D2-BA4B-00A0C93EC93B", 2048, 2048 + 204800 - 1,
+         "EFI system partition"),
+        ("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", 2048 + 204800,
+         2048 + 204800 + 409600 - 1, "Windows"),
+        ("0FC63DAF-8483-4772-8E79-3D69D8477DE4", 2048 + 204800 + 409600,
+         total - 34, "linux-root"),
+    ]
+    ent = bytearray(128 * 128)
+    for i, (t, a, b, name) in enumerate(parts):
+        e = bytearray(128)
+        e[0:16] = guid(t)
+        e[16:32] = guid("11111111-2222-3333-4444-%012d" % i)
+        e[32:40] = struct.pack("<Q", a)
+        e[40:48] = struct.pack("<Q", b)
+        nm = name.encode("utf-16-le")[:72]
+        e[56:56 + len(nm)] = nm
+        ent[i * 128:(i + 1) * 128] = e
+
+    hdr = bytearray(92)
+    hdr[0:8] = b"EFI PART"
+    hdr[8:12] = struct.pack("<I", 0x00010000)
+    hdr[12:16] = struct.pack("<I", 92)
+    hdr[24:32] = struct.pack("<Q", 1)
+    hdr[32:40] = struct.pack("<Q", total - 1)
+    hdr[40:48] = struct.pack("<Q", 34)
+    hdr[48:56] = struct.pack("<Q", total - 34)
+    hdr[56:72] = guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    hdr[72:80] = struct.pack("<Q", 2)
+    hdr[80:84] = struct.pack("<I", 128)
+    hdr[84:88] = struct.pack("<I", 128)
+    hdr[88:92] = struct.pack("<I", binascii.crc32(bytes(ent)) & 0xFFFFFFFF)
+    hdr[16:20] = struct.pack("<I", binascii.crc32(bytes(hdr)) & 0xFFFFFFFF)
+
+    # The protective MBR: one entry of type 0xEE covering everything, so
+    # that a program which knows only the old format sees a full disk
+    mbr = bytearray(sec)
+    mbr[446 + 4] = 0xEE
+    mbr[446 + 8:446 + 12] = struct.pack("<I", 1)
+    mbr[446 + 12:446 + 16] = struct.pack("<I", min(total - 1, 0xFFFFFFFF))
+    mbr[510] = 0x55
+    mbr[511] = 0xAA
+
+    head = bytearray(sec * 2048)
+    head[0:sec] = mbr
+    head[sec:sec + 92] = hdr
+    head[2 * sec:2 * sec + len(ent)] = ent
+    with open(path, "wb") as f:
+        f.write(bytes(head))
+        f.truncate(total * sec)
+
+    # Something recognisable inside the first two partitions. A test
+    # that formats the third one and then says "the table survived" has
+    # proved less than it sounds: the table is 34 sectors and the
+    # neighbours are hundreds of megabytes. These say whether the
+    # neighbours survived too.
+    with open(path, "r+b") as f:
+        for i, (_, start, _, _) in enumerate(parts[:2]):
+            f.seek(start * sec)
+            f.write(NEIGHBOUR_MARK % i)
+
+
+NEIGHBOUR_MARK = b"CUDZE-DANE-%d-NIE-RUSZAC" + b"\0" * 8
+
+
+def neighbours_intact(path, mib=800):
+    """Are the first two partitions still carrying what was put in
+    them? Read from the host, not asked of the system."""
+    sec = 512
+    starts = [2048, 2048 + 204800]
+    with open(path, "rb") as f:
+        for i, start in enumerate(starts):
+            f.seek(start * sec)
+            if f.read(len(NEIGHBOUR_MARK % i)) != NEIGHBOUR_MARK % i:
+                return False
+    return True
+
+
+def gpt_intact(path):
+    """Is the table still there? The signature of the protective MBR
+    and the header that follows it."""
+    with open(path, "rb") as f:
+        d = f.read(1024)
+    return (len(d) >= 1024 and d[510] == 0x55 and d[511] == 0xAA and
+            d[512:520] == b"EFI PART")
 
 
 def make_bmp(w=64, h=48):

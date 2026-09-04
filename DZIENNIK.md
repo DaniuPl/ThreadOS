@@ -4197,3 +4197,77 @@ sprawdzane przez `make test`.
       nieskonczonosc na cos, co juz mu powiedziano. Za trzecim razem
       cofnalem sie do stanu z commita, potwierdzilem, ze dziala, i
       dopiero wtedy zrobilem to raz a porzadnie.
+
+- [x] **Dysk, ktory nie jest nasz, nie jest nasz do wziecia** - i to jest
+      wpis, ktory powinien byl powstac dawno temu.
+
+      Pytanie brzmialo "a jakis instalator do tego systemu". Zaczalem od
+      sprawdzenia, czym instalator w ogole moglby tu byc, i po drodze
+      trafilem na to:
+
+          if (memcmp(sb->magic, MAGIC, 4) != 0)
+              format_disk();
+
+      fs_init() przy KAZDYM starcie sprawdzal, czy pierwszy blok mowi
+      PFS3 - a jesli nie, formatowal dysk. Bez pytania, bez spojrzenia,
+      co tam jest.
+
+      Bylo to nieszkodliwe tak dlugo, jak kazdy dysk, jaki ten system
+      widzial, byl pustym plikiem zrobionym przez test. Przestaje byc w
+      chwili, gdy trafia na prawdziwa maszyne: dysk laptopa tez nie mowi
+      PFS3. Uruchomienie tego z pendrive'a na Dellu skasowaloby tablice
+      partycji, Windowsa i wszystko inne w pierwszej sekundzie
+      pierwszego rozruchu.
+
+      Zobaczylem to nie z lektury, tylko dlatego, ze moj obraz testowy z
+      GPT wrocil jako "bez tablicy partycji" - jadro zdazylo go
+      wyczyscic, zanim zdazylem go odczytac.
+
+      Teraz formatowany jest wylacznie dysk NAPRAWDE pusty. "Pusty"
+      odpowiedziane ostroznie, bo koszt pomylki w jedna strone to nowy
+      dysk, ktory czlowiek formatuje recznie, a w druga - czyjes dane:
+      sygnatura tablicy partycji w sektorze zerowym dyskwalifikuje od
+      razu, a poza tym pierwsze szescdziesiat cztery kilobajty musza byc
+      w calosci zerami. Wszystko inne zostaje nietkniete i powiedziane
+      wprost, a kto naprawde chce ten dysk, mowi to komenda 'formatuj'.
+
+      Potwierdzenie jest slowem wpisanym w calosci - TAK, duzymi
+      literami - bo klawisz do wcisniecia to rzecz, ktora czlowiek robi
+      odruchowo, a slowo trzeba postanowic napisac.
+
+      **Czytanie tablicy partycji** (kernel/part.c) powstalo przy tej
+      okazji i jest fundamentem calej reszty: MBR i GPT, przy czym
+      wykrycie jest jednym bajtem - typ 0xEE w sektorze zerowym znaczy
+      "patrz do sektora pierwszego". GPT trzyma tam wpis ochronny
+      obejmujacy caly dysk wlasnie po to, zeby program znajacy tylko
+      stary format zobaczyl dysk pelny zamiast pustego i nie zaproponowal
+      uprzejmie spartycjonowania go. Nic w tym pliku nie pisze.
+
+      Grupa 'dysk' pyta o powsciagliwosc i o to, na czym ona polega:
+      obraz z prawdziwa tablica GPT wchodzi w rozruch i wychodzi z niego
+      z ta sama tablica - odczytana Z POWROTEM PO STRONIE HOSTA, bajt po
+      bajcie, a nie wzieta na slowo systemu. Pusty dysk dalej jest
+      formatowany. Zla odpowiedz na 'formatuj' nie kasuje niczego, a
+      wpisane TAK kasuje - i wtedy tablicy juz nie ma, bo o to sie
+      prosilo.
+
+      **PFS w partycji** - drugi krok, zrobiony od razu, bo bez niego
+      poprzedni jest tylko odmowa. Przesuniecie siedzi w DWOCH
+      funkcjach dotykajacych dysku i nigdzie indziej, wiec zaden kod
+      wyzej nie musi wiedziec, czy stoi na calym dysku, czy na jego
+      kawalku. 'formatuj N' zajmuje jedna partycje - tablica i sasiedzi
+      zostaja tacy, jacy byli - a przy nastepnym rozruchu jadro samo
+      znajduje swoj PFS, szukajac partycji, ktorej pierwszy blok mowi
+      PFS3. Bez rejestru GUID-ow, bez nowych umow: system rozpoznaje
+      sie po tym, co juz zapisuje.
+
+      Test tego sprawdza rzecz, ktora latwo udawac. Nie tylko czy
+      tablica przezyla - to 34 sektory - ale czy SASIEDNIE PARTYCJE
+      dalej maja swoje dane, bo to sa setki megabajtow i to o nie
+      naprawde chodzi. Znacznik wpisany przed, odczytany po, po stronie
+      hosta.
+
+      Czego to NIE jest: instalatora. Zeby maszyna wystartowala z tej
+      partycji, brakuje jeszcze zapisu do partycji EFI - czyli FAT-u,
+      ktorego nie mamy - i programu rozruchowego EFI. To sa nastepne
+      kroki, nie ten.

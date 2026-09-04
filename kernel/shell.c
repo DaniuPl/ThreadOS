@@ -37,6 +37,8 @@
 #include "include/rtc.h"
 #include "include/mouse.h"
 #include "include/pci.h"
+#include "include/part.h"
+#include "include/blk.h"
 #include "include/usbhc.h"
 #include "include/usbkbd.h"
 #include "include/usbmouse.h"
@@ -235,6 +237,31 @@ static void cmd_sprzet(void)
            usbhc_name(), usbkbd_present() ? "tak" : "nie",
            usbmouse_present() ? "tak" : "nie");
 
+    /* The disk, and what is already on it. A machine booted from a
+       stick sees the laptop's own disk here - and before anyone
+       proposes to write to it, it is worth reading what would be
+       written over. */
+    printk("dysk:     %s, %u sektorow po 512 B (%u MiB)\n", blk_name(),
+           blk_sectors(), blk_sectors() / 2048);
+    int np = part_scan();
+    if (np < 0)
+        printk("          brak dysku\n");
+    else if (np == 0)
+        printk("          bez tablicy partycji - caly dysk jest nasz\n");
+    else {
+        printk("          tablica %s, partycji: %u\n",
+               part_is_gpt() ? "GPT" : "MBR", (uint32_t)np);
+        for (int i = 0; i < np; i++) {
+            struct partition pt;
+            if (!part_get(i, &pt))
+                break;
+            printk("          %u: od %u, %u MiB, %s%s%s\n",
+                   (uint32_t)(i + 1), (uint32_t)pt.start,
+                   (uint32_t)(pt.sectors / 2048), pt.kind,
+                   pt.label[0] ? " " : "", pt.label);
+        }
+    }
+
     /* And what else is in here, so that a gap has a name */
     int serial_bus = 0;
     printk("PCI:\n");
@@ -261,6 +288,77 @@ static void cmd_sprzet(void)
                "jest %d kontroler(ow) magistrali szeregowej - touchpad\n"
                "siedzi zapewne na I2C (HID przez I2C), ktorego nie umiemy.\n"
                "Mysz w gniazdo USB zadziala.\n", serial_bus);
+}
+
+/* Reads a line back with what was typed visible - the confirmation
+   below has to be READ by the person typing it. Defined next to
+   read_secret, which is the same loop with stars. */
+static void read_word(char *out, int max);
+
+/* Formatting, and the asking that has to come before it.
+ *
+ * The startup path will not touch a disk that has anything on it, so
+ * this is the only way a disk with a Windows on it becomes a disk with
+ * PFS on it - and it is deliberately a thing one has to mean. The
+ * confirmation is the word, typed out: a key to press is something a
+ * person does by reflex, and a word is something they have to decide
+ * to type. */
+static void cmd_formatuj(char *arg)
+{
+    if (!blk_present()) {
+        printk("formatuj: nie ma dysku\n");
+        return;
+    }
+
+    int which = 0;                 /* 0 = the whole disk */
+    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
+        which = which * 10 + (*p - '0');
+
+    printk("Dysk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
+    int np = part_scan();
+    if (np > 0) {
+        printk("Sa na nim %u partycje(i) - tablica %s:\n", (uint32_t)np,
+               part_is_gpt() ? "GPT" : "MBR");
+        for (int i = 0; i < np; i++) {
+            struct partition pt;
+            if (!part_get(i, &pt))
+                break;
+            printk("  %u: %u MiB, %s %s\n", (uint32_t)(i + 1),
+                   (uint32_t)(pt.sectors / 2048), pt.kind, pt.label);
+        }
+    }
+
+    if (which > 0) {
+        struct partition pt;
+        if (which > np || !part_get(which - 1, &pt)) {
+            printk("formatuj: nie ma partycji %u\n", (uint32_t)which);
+            return;
+        }
+        printk("\nTO SKASUJE PARTYCJE %u (%u MiB, %s %s).\n",
+               (uint32_t)which, (uint32_t)(pt.sectors / 2048), pt.kind,
+               pt.label);
+        printk("Reszta dysku i tablica partycji zostaja nietkniete.\n");
+    } else if (np > 0) {
+        printk("\nTO SKASUJE CALY DYSK - tablice partycji i WSZYSTKIE "
+               "%u partycje(i) powyzej.\n", (uint32_t)np);
+        printk("Zeby zajac tylko jedna, napisz 'formatuj N'.\n");
+    } else {
+        printk("\nTO SKASUJE CALY DYSK, ze wszystkim, co na nim jest.\n");
+    }
+    printk("Wpisz TAK (duzymi literami), zeby to zrobic: ");
+
+    char answer[8];
+    read_word(answer, (int)sizeof(answer));
+
+    if (strcmp(answer, "TAK") != 0) {
+        printk("formatuj: nie skasowano niczego\n");
+        return;
+    }
+    if (fs_format_now(which))
+        printk("formatuj: gotowe - %s jest teraz PFS-em ProtonOS-a\n",
+               which ? "ta partycja" : "caly dysk");
+    else
+        printk("formatuj: nie udalo sie\n");
 }
 
 static void cmd_mem(void)
@@ -709,6 +807,32 @@ static void cmd_ping(const char *arg)
  */
 static char shell_getchar(struct shell *sh);
 
+static void read_word(char *out, int max)
+{
+    struct shell *sh = my_shell();
+    int n = 0;
+    for (;;) {
+        char c = shell_getchar(sh);
+        if (c == '\n')
+            break;
+        if (c == '\b') {
+            if (n) {
+                n--;
+                printk("\b \b");
+            }
+            continue;
+        }
+        if (c < 0x20)
+            continue;
+        if (n < max - 1) {
+            out[n++] = c;
+            printk("%c", c);
+        }
+    }
+    out[n] = 0;
+    printk("\n");
+}
+
 static void read_secret(char *out, int max)
 {
     struct shell *sh = my_shell();
@@ -891,6 +1015,8 @@ static void run_command(char *cmd)
         cmd_ekran();
     else if (!strcmp(cmd, "sprzet"))
         cmd_sprzet();
+    else if (!strcmp(cmd, "formatuj"))
+        cmd_formatuj(arg);
     else if (!strcmp(cmd, "uptime"))
         cmd_uptime();
     else if (!strcmp(cmd, "date"))
