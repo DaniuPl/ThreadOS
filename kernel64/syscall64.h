@@ -97,6 +97,8 @@
 #define SYS64_WIN_BLIT 56
 #define SYS64_PALETTE  57  /* a1 = buffer for 256 colours */  /* a1=winid, a2=&cmd */  /* a1/a2 = from, a3/a4 = to */  /* a1=winid, a2=text */
 #define SYS64_PS        53  /* a1=index, a2=buffer -> 0 / -1 */
+#define SYS64_WIN_TRUECOL 58  /* a1=winid -> 0 / -1 */
+#define SYS64_WIN_BLIT32  59  /* a1=winid, a2=&cmd */
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

@@ -4,25 +4,31 @@
  * one comes from: a machine with no camera and no image editor still
  * has arithmetic, so the pictures here are computed rather than drawn.
  *
- * The file is what kernel/desktop.c reads: "PWAL", the size, 192
- * colours of three bytes, then one byte per pixel - an index into
- * those colours. Small on purpose (160x120): the kernel stretches it
- * over the screen, and a screen-sized image would be a third of the
- * kernel's heap.
+ * The file is what kernel/desktop.c reads: "PWL2", the size, then
+ * three bytes a pixel. Small on purpose (160x120): the kernel
+ * stretches it over the screen, and a screen-sized image would be a
+ * large part of the kernel's heap.
  *
- * Four patterns, because four is what one afternoon of arithmetic is
- * worth: a two-colour slope, rings, a weave and a grid. Any of them
- * can be had in any hue - the hue is what a person actually chooses.
+ * It used to write a palette of 192 colours and one index per pixel,
+ * which was the right shape for a screen that had 256 colours in all.
+ * For four of the five patterns here it made no difference - a slope
+ * down 120 rows is 120 colours whatever you do. For the fifth it makes
+ * all of it: a blend across BOTH axes is one colour per pixel, near
+ * twenty thousand of them, and no palette of 192 holds that.
+ *
+ * Five patterns, then: a slope, rings, a weave, a grid and a blend.
+ * Any of them can be had in any hue - the hue is what a person
+ * actually chooses.
  */
 
 #include "usys.h"
 
 #define W 160
 #define H 120
-#define COLS 192
-#define HDR (4 + 2 + 2 + COLS * 3)
+#define LEVELS 192          /* how many steps the patterns are drawn in */
+#define HDR 8
 
-static unsigned char out[HDR + W * H];
+static unsigned char out[HDR + W * H * 3];
 
 static int text_to_num(const char *s)
 {
@@ -51,66 +57,83 @@ static uint32_t isqrt(uint32_t v)
     return r;
 }
 
+/* A hue at a brightness. Two of them get a second component so that
+   'teal' is teal and not a blue with a name. */
+static void hue_rgb(int hue, int v, int *r, int *g, int *b)
+{
+    *r = *g = *b = 0;
+    switch (hue % 6) {
+    case 0: *g = v * 3 / 4; *b = v; break;        /* teal */
+    case 1: *b = v; break;                        /* blue */
+    case 2: *r = v * 3 / 5; *b = v; break;        /* violet */
+    case 3: *g = v; break;                        /* green */
+    case 4: *r = v; *g = v * 2 / 5; break;        /* amber */
+    default: *r = *g = *b = v; break;             /* grey */
+    }
+}
+
 void _start(int argc, char **argv)
 {
-    /* mkwall <plik> [wzor 0-3] [barwa 0-5] */
+    /* mkwall <plik> [wzor 0-4] [barwa 0-5] */
     if (argc < 2) {
-        print("uzycie: mkwall <plik> [wzor 0-3] [barwa 0-5]\n");
-        print("  wzory: 0 zbocze, 1 pierscienie, 2 plecionka, 3 krata\n");
+        print("uzycie: mkwall <plik> [wzor 0-4] [barwa 0-5]\n");
+        print("  wzory: 0 zbocze, 1 pierscienie, 2 plecionka, 3 krata,\n");
+        print("         4 przenikanie (tysiace kolorow)\n");
         sys_exit(1);
     }
-    int pattern = argc > 2 ? text_to_num(argv[2]) % 4 : 0;
+    int pattern = argc > 2 ? text_to_num(argv[2]) % 5 : 0;
     int hue = argc > 3 ? text_to_num(argv[3]) % 6 : 0;
 
-    out[0] = 'P'; out[1] = 'W'; out[2] = 'A'; out[3] = 'L';
+    out[0] = 'P'; out[1] = 'W'; out[2] = 'L'; out[3] = '2';
     out[4] = W & 0xFF; out[5] = (W >> 8) & 0xFF;
     out[6] = H & 0xFF; out[7] = (H >> 8) & 0xFF;
 
-    /* The palette: 192 steps from dark to light in the chosen hue.
-       Two hues get a second component so that 'teal' is teal and not
-       a blue with a name. */
-    for (int i = 0; i < COLS; i++) {
-        int v = 40 + i * 215 / (COLS - 1);        /* 40..255 */
-        int r = 0, g = 0, b = 0;
-        switch (hue) {
-        case 0: g = v * 3 / 4; b = v; break;      /* teal */
-        case 1: b = v; break;                     /* blue */
-        case 2: r = v * 3 / 5; b = v; break;      /* violet */
-        case 3: g = v; break;                     /* green */
-        case 4: r = v; g = v * 2 / 5; break;      /* amber */
-        default: r = g = b = v; break;            /* grey */
-        }
-        out[8 + i * 3] = (unsigned char)r;
-        out[9 + i * 3] = (unsigned char)g;
-        out[10 + i * 3] = (unsigned char)b;
-    }
-
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
-            int v;
-            switch (pattern) {
-            case 1: {                             /* rings from the middle */
-                int dx = x - W / 2, dy = (y - H / 2) * 4 / 3;
-                uint32_t d = isqrt((uint32_t)(dx * dx + dy * dy));
-                v = (int)((d * 6) % COLS);
-                break;
+            int r, g, b;
+            if (pattern == 4) {
+                /* The blend: brightness down the picture, and across
+                   it a walk from the chosen hue to the one three
+                   places along. Every pixel gets its own colour, which
+                   is the thing a palette could not give. */
+                int v = 40 + (H - 1 - y) * 215 / (H - 1);
+                int mix = x * 255 / (W - 1);
+                int r1, g1, b1, r2, g2, b2;
+                hue_rgb(hue, v, &r1, &g1, &b1);
+                hue_rgb(hue + 3, v, &r2, &g2, &b2);
+                r = (r1 * (255 - mix) + r2 * mix) / 255;
+                g = (g1 * (255 - mix) + g2 * mix) / 255;
+                b = (b1 * (255 - mix) + b2 * mix) / 255;
+            } else {
+                int i;
+                switch (pattern) {
+                case 1: {                         /* rings from the middle */
+                    int dx = x - W / 2, dy = (y - H / 2) * 4 / 3;
+                    uint32_t d = isqrt((uint32_t)(dx * dx + dy * dy));
+                    i = (int)((d * 6) % LEVELS);
+                    break;
+                }
+                case 2:                           /* a weave */
+                    i = ((x * 5 / 4 + y * 3 / 4) % 48) * LEVELS / 48;
+                    break;
+                case 3:                           /* a grid */
+                    i = (x % 20 < 2 || y % 20 < 2) ? LEVELS - 1
+                                                   : (y * LEVELS / H) / 3;
+                    break;
+                default:                          /* a slope */
+                    i = LEVELS - 1 - (y * LEVELS / H);
+                    break;
+                }
+                if (i < 0)
+                    i = 0;
+                if (i >= LEVELS)
+                    i = LEVELS - 1;
+                hue_rgb(hue, 40 + i * 215 / (LEVELS - 1), &r, &g, &b);
             }
-            case 2:                               /* a weave */
-                v = ((x * 5 / 4 + y * 3 / 4) % 48) * COLS / 48;
-                break;
-            case 3:                               /* a grid */
-                v = (x % 20 < 2 || y % 20 < 2) ? COLS - 1
-                                               : (y * COLS / H) / 3;
-                break;
-            default:                              /* a slope */
-                v = COLS - 1 - (y * COLS / H);
-                break;
-            }
-            if (v < 0)
-                v = 0;
-            if (v >= COLS)
-                v = COLS - 1;
-            out[HDR + y * W + x] = (unsigned char)v;
+            unsigned char *p = out + HDR + (y * W + x) * 3;
+            p[0] = (unsigned char)r;
+            p[1] = (unsigned char)g;
+            p[2] = (unsigned char)b;
         }
     }
 

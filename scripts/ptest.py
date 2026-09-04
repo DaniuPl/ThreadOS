@@ -202,6 +202,42 @@ JPEG_IMAGE = base64.b64decode(
     "ALofnPRX6MUUf8Qz/wCoz/yn/wDbh/xB7/qP/wDKX/3Q/mkooor/AHDP1cKKKKAP6W6K"
     "KK/ysPuAooooA//Z")
 
+# A gradient, as a baseline JPEG - the picture that shows what a
+# palette costs.
+#
+# The four quarters above are four flat fields, and a palette of two
+# hundred and fifty six holds those perfectly well; a decoder could
+# lose almost all its colours and still pass. This one has red rising
+# left to right and green top to bottom, so it is three thousand
+# distinct colours in three thousand pixels - and a screen speaking in
+# indices cannot show more than a few dozen of them whatever it does.
+#
+# From the same outside encoder (Go's image/jpeg, quality 95).
+JPEG_GRADIENT = base64.b64decode(
+    "/9j/2wCEAAIBAQEBAQIBAQECAgICAgQDAgICAgUEBAMEBgUGBgYFBgYGBwkIBgcJBwYG"
+    "CAsICQoKCgoKBggLDAsKDAkKCgoBAgICAgICBQMDBQoHBgcKCgoKCgoKCgoKCgoKCgoK"
+    "CgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCv/AABEIADAAQAMBIgACEQED"
+    "EQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAAB"
+    "fQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkq"
+    "NDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SV"
+    "lpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq"
+    "8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUE"
+    "BAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZ"
+    "GiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeI"
+    "iYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl"
+    "5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/APxY0nwMOP3X6V0+k+Beg8r68V3+k+Be"
+    "n7n9K6bSfAo4/cfpX2+M4h31PD4a4q+H3jgNI8DdP3X6V0+k+Bhx+6/Su/0nwKMj9z+l"
+    "dPpPgXp+5/SvlMbxD5n9BcNcU/D7xwGk+Beg8r68V0+keBuBiL9K77SfAo4/cfpXUaT4"
+    "F6fuf0r5PG8Q+Z/QPDXFO3vHn+k+Bhx+6/Sun0nwL0/dfpXf6T4F6fuf0rp9J8C8j9z+"
+    "lfKYziHfU/oLhrir4fePlbSfAo4/c/pXTaT4F6fuP0r0DSfAp4/c/pXTaT4F6fuP0r0M"
+    "bxDvqf8APTw1xS/d944DSPAvT9x+ldPpPgUcfuf0rv8ASPAvI/cfpXT6T4FPH7n9K+Tx"
+    "nEO+p/QPDXFXw+8ef6T4F6fuP0rqNI8CjAxB+ld/pPgXp+4/Sun0nwKeP3P6V8njeId9"
+    "T+guGeKtV7x5/pPgUcfuf0rp9J8C9P3H6V3+k+BTx+5/Sun0nwLyP3H6V8njOIfM/oLh"
+    "ril+77x8raT4F6fuf0rptJ8C9P3P6V6BpPgU8Hyf0rptJ8Cnj9yfyr0MZxDvqf8APTw1"
+    "xT8PvHAaR4Fzj9z+ldPpPgXp+5/Su/0nwIcj9z+ldPpPgU8Hyf0r5TG8Q+Z/QPDXFPw+"
+    "8ef6T4F6fuf0rqNI8C9P3P6V32k+BTx+5P5V1Gk+BSQB5P6V8njeIfM/oHhninb3jz/S"
+    "fAvT9z+ldPpPgXp+5/Su/wBJ8Cng+T+ldPpPgQ8fuf0r5PGcQ76n9BcNcU/D7x//2Q==")
+
 
 _FONT8X8 = None
 
@@ -487,11 +523,13 @@ def start_http_server():
                 return
 
             if self.path.endswith(".jpg") or self.path.endswith(".jpeg"):
+                body = (JPEG_GRADIENT if "gradient" in self.path
+                        else JPEG_IMAGE)
                 self.send_response(200)
                 self.send_header("Content-Type", "image/jpeg")
-                self.send_header("Content-Length", str(len(JPEG_IMAGE)))
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(JPEG_IMAGE)
+                self.wfile.write(body)
                 return
 
             if self.path.endswith(".bmp"):

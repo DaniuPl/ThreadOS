@@ -359,6 +359,14 @@ struct window {
     int counter;           /* the button's click counter */
     int owner;             /* the owning process's pid; -1 = a kernel window */
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
+    /* What one pixel of that buffer means. A window starts holding
+       palette indices, one byte each - which is what every program
+       here drew in while the screen had two hundred and fifty six
+       colours. A program that has better colours to show than that
+       asks for the other kind, and then a pixel is four bytes of
+       0x00RRGGBB. The compositor does not care which: it composes one
+       with a row copy and the other a pixel at a time. */
+    int truecolour;
     int cw, ch;            /* dimensions of the content area */
     int z;                 /* drawing order (higher = on top) */
     /* Which desktop the window belongs to. A window is only ever on
@@ -739,37 +747,53 @@ static void draw_int(int x, int y, int v, uint8_t col)
     video_draw_string(x, y, s, col);
 }
 
-/* --- Drawing into an application's content buffer (palette indices) --- */
+/* --- Drawing into an application's content buffer -------------------
+ *
+ * The colour below is whatever the window's own pixels are: an index
+ * for an ordinary window, 0x00RRGGBB for a true-colour one. Every
+ * caller in this file passes an index, and the two entry points that
+ * applications reach translate one into the other, so the shape of the
+ * drawing code does not change with the format. */
 
-static void buf_rect(struct window *w, int x, int y, int rw, int rh, uint8_t c)
+
+static void buf_px(struct window *w, int x, int y, uint32_t c)
 {
-    for (int j = 0; j < rh; j++) {
-        int py = y + j;
-        if (py < 0 || py >= w->ch)
-            continue;
-        for (int i = 0; i < rw; i++) {
-            int px = x + i;
-            if (px >= 0 && px < w->cw)
-                w->content[py * w->cw + px] = c;
-        }
-    }
+    if (x < 0 || x >= w->cw || y < 0 || y >= w->ch)
+        return;
+    if (w->truecolour)
+        ((uint32_t *)w->content)[y * w->cw + x] = c;
+    else
+        w->content[y * w->cw + x] = (uint8_t)c;
 }
 
-static void buf_char(struct window *w, int x, int y, char ch, uint8_t c)
+/* An index means one thing to an ordinary window and another to a
+   true-colour one, and every caller inside the compositor speaks
+   indices - so this is where the two meet. */
+static uint32_t buf_colour(const struct window *w, uint8_t idx)
+{
+    return w->truecolour ? video_palette_rgb(idx) : idx;
+}
+
+static void buf_rect(struct window *w, int x, int y, int rw, int rh,
+                     uint32_t c)
+{
+    for (int j = 0; j < rh; j++)
+        for (int i = 0; i < rw; i++)
+            buf_px(w, x + i, y + j, c);
+}
+
+static void buf_char(struct window *w, int x, int y, char ch, uint32_t c)
 {
     if (ch < 0x20 || ch > 0x7E)
         return;
     const uint8_t *g = font8x8[ch - 0x20];
     for (int row = 0; row < 8; row++)
         for (int col = 0; col < 8; col++)
-            if (g[row] & (1 << col)) {
-                int px = x + col, py = y + row;
-                if (px >= 0 && px < w->cw && py >= 0 && py < w->ch)
-                    w->content[py * w->cw + px] = c;
-            }
+            if (g[row] & (1 << col))
+                buf_px(w, x + col, y + row, c);
 }
 
-static void buf_text(struct window *w, int x, int y, const char *s, uint8_t c)
+static void buf_text(struct window *w, int x, int y, const char *s, uint32_t c)
 {
     for (int i = 0; s[i]; i++)
         buf_char(w, x + i * 8, y, s[i], c);
@@ -838,14 +862,22 @@ static void draw_window(const struct window *win)
                  COL_WHITE);
     }
 
-    /* An application window: compose its content buffer into the work area */
+    /* An application window: compose its content buffer into the work
+       area. A true-colour window goes a row at a time - its pixels are
+       already what the framebuffer wants - and that is the faster of
+       the two, not the slower. */
     if (win->content) {
         int bx = win->x + 1;
         int by = win->y + TITLE_H + 1;
-        for (int j = 0; j < win->ch; j++)
-            for (int i = 0; i < win->cw; i++)
-                video_putpixel(bx + i, by + j,
-                               win->content[j * win->cw + i]);
+        if (win->truecolour) {
+            video_blit_rgb(bx, by, win->cw, win->ch,
+                           (const uint32_t *)win->content, win->cw);
+        } else {
+            for (int j = 0; j < win->ch; j++)
+                for (int i = 0; i < win->cw; i++)
+                    video_putpixel(bx + i, by + j,
+                                   win->content[j * win->cw + i]);
+        }
     }
 }
 
@@ -1365,17 +1397,18 @@ static int resize_content(struct window *w)
     if (cw == w->cw && ch == w->ch)
         return 0;                      /* the drag changed nothing */
 
-    uint8_t *buf = kmalloc(cw * ch);
+    int bytes = cw * ch * (w->truecolour ? 4 : 1);
+    uint8_t *buf = kmalloc(bytes);
     if (!buf) {
         w->w = w->cw + 2;              /* back to the size that has a buffer */
         w->h = w->ch + TITLE_H + 2;
         return -1;
     }
-    memset(buf, COL_WIN, cw * ch);
     kfree(w->content);
     w->content = buf;
     w->cw = cw;
     w->ch = ch;
+    buf_rect(w, 0, 0, cw, ch, buf_colour(w, COL_WIN));
     win_enqueue(w, WEV_SIZE, cw, ch, 0);
     return 0;
 }
@@ -1480,6 +1513,13 @@ static void snap_window(int i, int where)
  *
  * The desktop's own colours live below WALL_COL0 and are not touched,
  * so a wallpaper can never repaint a window.
+ *
+ * And a second shape of the same file, for a screen that holds
+ * colours: "PWL2", width and height, then three bytes a pixel and no
+ * palette at all. A hundred and ninety two colours is plenty for rings
+ * and a weave, and visibly not plenty for a slope - the bands are
+ * there to be counted. The old shape is still read, because a file
+ * written before this is still a wallpaper.
  */
 #define WALL_MAX_W 160
 #define WALL_MAX_H 120
@@ -1489,6 +1529,7 @@ static void snap_window(int i, int where)
 
 static uint8_t *wall;              /* the picture, or NULL */
 static int wall_w, wall_h;
+static int wall_rgb;               /* three bytes a pixel, no palette */
 
 /* Reads the wallpaper named in the settings. Anything wrong with the
    file - missing, too big, not a picture - leaves the gradient in
@@ -1497,6 +1538,7 @@ static void wallpaper_load(void)
 {
     wall = (uint8_t *)0;
     wall_w = wall_h = 0;
+    wall_rgb = 0;
 
     const char *name = config_get("tapeta");
     if (!name || !name[0] || !fs_ready())
@@ -1508,7 +1550,10 @@ static void wallpaper_load(void)
         return;
     if (fs_read_at(slot, 0, head, sizeof(head)) != (int)sizeof(head))
         return;
-    if (head[0] != 'P' || head[1] != 'W' || head[2] != 'A' || head[3] != 'L')
+    if (head[0] != 'P' || head[1] != 'W')
+        return;
+    int rgb = head[2] == 'L' && head[3] == '2';
+    if (!rgb && (head[2] != 'A' || head[3] != 'L'))
         return;
 
     int w = head[4] | (head[5] << 8);
@@ -1516,11 +1561,23 @@ static void wallpaper_load(void)
     if (w <= 0 || h <= 0 || w > WALL_MAX_W || h > WALL_MAX_H)
         return;
 
-    uint8_t *buf = kmalloc((uint32_t)(w * h));
+    /* The colours-per-pixel file carries no palette, so its pixels
+       begin right after the eight bytes of header. */
+    uint32_t at = rgb ? 8 : WALL_HDR;
+    uint32_t bytes = (uint32_t)(w * h) * (rgb ? 3 : 1);
+    uint8_t *buf = kmalloc(bytes);
     if (!buf)
         return;
-    if (fs_read_at(slot, sizeof(head), buf, (uint32_t)(w * h)) != w * h) {
+    if (fs_read_at(slot, at, buf, bytes) != (int)bytes) {
         kfree(buf);
+        return;
+    }
+    if (rgb) {
+        wall = buf;
+        wall_w = w;
+        wall_h = h;
+        wall_rgb = 1;
+        printk("[pulpit] tapeta '%s': %dx%d w kolorach\n", name, w, h);
         return;
     }
 
@@ -1528,8 +1585,7 @@ static void wallpaper_load(void)
        never argue about an index */
     for (int i = 0; i < WALL_COLS; i++) {
         const uint8_t *c = head + 8 + i * 3;
-        video_set_palette((uint8_t)(WALL_COL0 + i), c[0] >> 2, c[1] >> 2,
-                          c[2] >> 2);
+        video_set_palette((uint8_t)(WALL_COL0 + i), c[0], c[1], c[2]);
     }
     wall = buf;
     wall_w = w;
@@ -1553,6 +1609,15 @@ static void draw_background(void)
         int sw = video_w();
         for (int y = 0; y < h; y++) {
             int sy = y * wall_h / video_h();
+            if (wall_rgb) {
+                const uint8_t *row = wall + (long)sy * wall_w * 3;
+                for (int x = 0; x < sw; x++) {
+                    const uint8_t *p = row + (x * wall_w / sw) * 3;
+                    video_putpixel_rgb(x, y, ((uint32_t)p[0] << 16) |
+                                             ((uint32_t)p[1] << 8) | p[2]);
+                }
+                continue;
+            }
             const uint8_t *row = wall + sy * wall_w;
             for (int x = 0; x < sw; x++)
                 video_putpixel(x, y, (uint8_t)(WALL_COL0 +
@@ -2028,6 +2093,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
             return -1;
         memset(buf, COL_WIN, cw * ch);     /* a grey background to start with */
         struct window *w = &wins[i];
+        w->truecolour = 0;                 /* indices until asked otherwise */
         w->w = cw + 2;
         w->h = ch + TITLE_H + 2;
         /* New windows go in a cascade, twelve pixels apart. Far enough
@@ -2126,7 +2192,45 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
-    buf_rect(win, x, y, w, h, color);
+    buf_rect(win, x, y, w, h, buf_colour(win, color));
+    return 0;
+}
+
+/* "From now on my pixels are colours."
+ *
+ * A window is born holding palette indices, because that is what every
+ * program on this machine drew in and none of them should have to
+ * change. One that has better colours to show - a photograph, a page
+ * whose author picked them - asks for the other kind, once, and from
+ * then on writes 0x00RRGGBB through win_blit32. Its chrome can go on
+ * using the index calls: they translate.
+ *
+ * The request is granted whatever the screen is. On a screen that
+ * cannot show a colour the compositor trades each one for the nearest
+ * index while composing, which is worse than asking the program to do
+ * it - but the program then has one path instead of two, and this
+ * machine's eight-bit mode is a fallback for when there is no
+ * framebuffer at all, not the case to design for. */
+int desktop_win_truecolour(int winid, int owner)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    if (win->truecolour)
+        return 0;
+
+    uint32_t *buf = kmalloc(win->cw * win->ch * 4);
+    if (!buf)
+        return -1;
+    /* What was already drawn stays drawn - a program that asks after
+       painting its chrome does not lose it. */
+    for (int j = 0; j < win->ch; j++)
+        for (int i = 0; i < win->cw; i++)
+            buf[j * win->cw + i] =
+                video_palette_rgb(win->content[j * win->cw + i]);
+    kfree(win->content);
+    win->content = (uint8_t *)buf;
+    win->truecolour = 1;
     return 0;
 }
 
@@ -2145,16 +2249,42 @@ int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
     if (!win || !pixels || w <= 0 || h <= 0)
         return -1;
 
+    for (int row = 0; row < h; row++)
+        for (int col = 0; col < w; col++)
+            buf_px(win, x + col, y + row,
+                   buf_colour(win, pixels[row * w + col]));
+    return 0;
+}
+
+/* The same thing in colours rather than indices.
+ *
+ * This is the call a picture actually wants: sixteen million colours
+ * instead of two hundred and fifty six, and no search for the nearest
+ * of them on the way in. It only means anything to a window that asked
+ * for true colour - one that did not has nowhere to put the other
+ * three bytes, so it is told no rather than shown a quarter of the
+ * picture. */
+int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
+                       const uint32_t *pixels)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win || !pixels || w <= 0 || h <= 0)
+        return -1;
+    if (!win->truecolour)
+        return -1;
+
     for (int row = 0; row < h; row++) {
         int dy = y + row;
         if (dy < 0 || dy >= win->ch)
             continue;
-        for (int col = 0; col < w; col++) {
-            int dx = x + col;
-            if (dx < 0 || dx >= win->cw)
-                continue;
-            win->content[dy * win->cw + dx] = pixels[row * w + col];
-        }
+        /* A row that lands whole inside the window is a copy - which
+           is the whole point of having asked for this format. */
+        const uint32_t *src = pixels + (long)row * w;
+        uint32_t *dst = (uint32_t *)win->content + (long)dy * win->cw;
+        int from = x < 0 ? -x : 0;
+        int to = x + w > win->cw ? win->cw - x : w;
+        for (int col = from; col < to; col++)
+            dst[x + col] = src[col];
     }
     return 0;
 }
@@ -2165,7 +2295,7 @@ int desktop_win_text(int winid, int owner, int x, int y, const char *s,
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
-    buf_text(win, x, y, s, color);
+    buf_text(win, x, y, s, buf_colour(win, color));
     return 0;
 }
 
@@ -2199,31 +2329,31 @@ static void desktop_thread(void *arg)
        number that means one of six things can be checked, and 'a red
        component of 41' cannot. */
     static const struct { uint8_t r, g, b; } backgrounds[] = {
-        {  0, 32, 40 },      /* 0 - teal, as it always was */
-        {  0,  0, 32 },      /* 1 - navy */
-        { 20,  0, 30 },      /* 2 - purple */
-        {  0, 28,  0 },      /* 3 - green */
-        { 40, 20,  0 },      /* 4 - brown */
-        { 12, 12, 12 },      /* 5 - grey */
+        {   0, 130, 162 },   /* 0 - teal, as it always was */
+        {   0,   0, 130 },   /* 1 - navy */
+        {  81,   0, 121 },   /* 2 - purple */
+        {   0, 113,   0 },   /* 3 - green */
+        { 162,  81,   0 },   /* 4 - brown */
+        {  48,  48,  48 },   /* 5 - grey */
     };
     uint32_t bg = config_get_num("tlo", 0);
     if (bg >= sizeof(backgrounds) / sizeof(backgrounds[0]))
         bg = 0;
     video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
                       backgrounds[bg].b);
-    video_set_palette(COL_BAR, 52, 52, 52);   /* the light grey bars */
-    video_set_palette(COL_WIN, 56, 56, 56);   /* the grey window background */
-    video_set_palette(COL_TBBTN, 26, 26, 26); /* the dark grey bar button */
-    video_set_palette(COL_ICON, 63, 40, 0);   /* the orange icon */
+    video_set_palette(COL_BAR, 211, 211, 211);   /* the light grey bars */
+    video_set_palette(COL_WIN, 227, 227, 227);   /* the grey window background */
+    video_set_palette(COL_TBBTN, 105, 105, 105); /* the dark grey bar button */
+    video_set_palette(COL_ICON, 255, 162, 0);   /* the orange icon */
 
     /* Flat tones. One line colour, one lighter surface, one dim text -
        and the accent blue, which is the only thing that shouts. */
-    video_set_palette(COL_LINE, 37, 37, 37);       /* surface boundaries */
-    video_set_palette(COL_WIN_HI, 61, 61, 61);     /* a lighter field */
-    video_set_palette(COL_TITLE_OFF, 44, 44, 44);  /* no focus - plain grey */
-    video_set_palette(COL_TBBTN_OFF, 36, 36, 36);  /* a quiet button */
-    video_set_palette(COL_DIM, 18, 18, 18);        /* text without weight */
-    video_set_palette(COL_ICON_LO, 46, 28, 0);
+    video_set_palette(COL_LINE, 150, 150, 150);       /* surface boundaries */
+    video_set_palette(COL_WIN_HI, 247, 247, 247);     /* a lighter field */
+    video_set_palette(COL_TITLE_OFF, 178, 178, 178);  /* no focus - plain grey */
+    video_set_palette(COL_TBBTN_OFF, 146, 146, 146);  /* a quiet button */
+    video_set_palette(COL_DIM, 73, 73, 73);        /* text without weight */
+    video_set_palette(COL_ICON_LO, 186, 113, 0);
 
     /* The background: from a little brighter at the top to a little
        darker at the floor. A narrow range on purpose - a machine set to
@@ -2236,9 +2366,9 @@ static void desktop_thread(void *arg)
         int g = backgrounds[bg].g * num / 100;
         int b = backgrounds[bg].b * num / 100;
         video_set_palette((uint8_t)(COL_DESK0 + i),
-                          (uint8_t)(r > 63 ? 63 : r),
-                          (uint8_t)(g > 63 ? 63 : g),
-                          (uint8_t)(b > 63 ? 63 : b));
+                          (uint8_t)(r > 255 ? 255 : r),
+                          (uint8_t)(g > 255 ? 255 : g),
+                          (uint8_t)(b > 255 ? 255 : b));
     }
 
 

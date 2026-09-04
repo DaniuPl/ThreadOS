@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-WALL_SIZE = 4 + 2 + 2 + 192 * 3 + 160 * 120
+WALL_SIZE = 4 + 2 + 2 + 160 * 120 * 3      # "PWL2", size, RGB
 
 
 def row_colours(at, y, x_from=200, x_to=600, step=8):
@@ -67,6 +67,15 @@ def main():
                   % (size.group(1) if size else "?"),
                   size is not None and int(size.group(1)) == WALL_SIZE)
 
+            # The blend: the pattern that only exists because the file
+            # holds colours rather than a palette of 192. It is the one
+            # put on the screen below, so the count further down means
+            # something.
+            out = q.command("run mkwall tapeta.img 4 2", "zakonczyl",
+                            timeout=90)
+            check("i drugi wzor - przenikanie - tez sie zrobil",
+                  "gotowa" in out and "(kod 0)" in out)
+
             q.type_line("sudo set tapeta tapeta.img")
             time.sleep(1)
             saved = q.command("proton", "zapisane", timeout=30)
@@ -81,7 +90,8 @@ def main():
 
             log = q.serial()
             check("jadro wczytalo tapete i mowi, jaka",
-                  re.search(r"tapeta 'tapeta\.img': 160x120", log) is not None)
+                  re.search(r"tapeta 'tapeta\.img': 160x120 w kolorach", log)
+                  is not None)
 
             w, h, at = q.screen_raw()
             # A gradient is one colour all the way across a row; a
@@ -93,6 +103,18 @@ def main():
             # pattern of stripes
             check("i inny zestaw kolorow nizej niz wyzej",
                   row_colours(at, 120) != row_colours(at, 380))
+
+            # And the count: a blend across both axes is one colour per
+            # pixel of the file. A wallpaper that carried a palette of
+            # 192 could not put more than that on the screen no matter
+            # what it was drawn from - so a number well above it says
+            # the file really does hold colours.
+            blend = set()
+            for y in range(0, h - 30, 3):
+                for x in range(0, w, 3):
+                    blend.add(at(x, y))
+            check("tapeta ma wiecej kolorow, niz paleta 192 by udzwignela "
+                  "(%d roznych)" % len(blend), len(blend) > 400)
 
             # The wallpaper's colours live above the desktop's, so a
             # window drawn on top of it is still the window's grey

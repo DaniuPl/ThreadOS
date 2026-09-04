@@ -119,6 +119,7 @@ static const struct {
     {"desktop",  "pulpit graficzny"},
     {"kill P S", "sygnal do procesu (dom. zabij)"},
     {"clear",    "wyczysc ekran"},
+    {"ekran",    "tryb graficzny i ile wierszy szlo na karte"},
     {"gfx",      "test trybu 13h"},
     {"vesa",     "test trybu VESA"},
     {"crash",    "test page faulta"},
@@ -152,6 +153,17 @@ static void cmd_help(void)
     }
     printk("Konsole: Alt+F1..F%d (teraz %d)\n",
            CONSOLE_COUNT, task_vc() + 1);
+}
+
+/* What the screen is and how much of it the last frame actually cost.
+   The compositor redraws everything thirty times a second; the number
+   that matters is how much of it had to cross the bus to the card. */
+static void cmd_ekran(void)
+{
+    printk("tryb:         %dx%d, %s\n", video_w(), video_h(),
+           video_true_colour() ? "kolory" : "paleta 256");
+    printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
+           video_present_rows(), video_h());
 }
 
 static void cmd_mem(void)
@@ -775,6 +787,8 @@ static void run_command(char *cmd)
         smpthreads_test();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
+    else if (!strcmp(cmd, "ekran"))
+        cmd_ekran();
     else if (!strcmp(cmd, "uptime"))
         cmd_uptime();
     else if (!strcmp(cmd, "date"))

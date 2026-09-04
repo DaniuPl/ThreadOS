@@ -477,6 +477,34 @@ void syscall_handler(struct regs *r)
                                             c.x, c.y, c.w, c.h, px);
         break;
     }
+    case SYS_WIN_TRUECOL:
+        r->eax = (uint32_t)desktop_win_truecolour((int)r->ebx,
+                                                  task_current_id());
+        break;
+    case SYS_WIN_BLIT32: {
+        struct win_blit_cmd c;
+        if (user_get(&c, r->ecx, sizeof(c)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        /* A colour is four bytes, so this holds a quarter of the
+           pixels the index call does for the same four kilobytes of
+           kernel stack - still a row of any screen this machine can
+           have. */
+        if (c.w <= 0 || c.h <= 0 || c.w > 1024 || c.h > 1024 ||
+            c.w * c.h > 1024) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        uint32_t px32[1024];
+        if (user_get(px32, c.pixels, (uint32_t)(c.w * c.h) * 4) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)desktop_win_blit32((int)r->ebx, task_current_id(),
+                                              c.x, c.y, c.w, c.h, px32);
+        break;
+    }
     case SYS_PALETTE: {
         /* The whole palette in one go. A program that wants to show a
            picture from the outside world has to turn colours into the

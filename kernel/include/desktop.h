@@ -24,5 +24,13 @@ int desktop_win_title(int winid, int owner, const char *title);
    only way to draw a picture without a syscall per pixel. */
 int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
                      const uint8_t *pixels);
+/* Asks for the window's pixels to become colours (0x00RRGGBB) rather
+   than palette indices. Granted whatever the screen can show - on an
+   eight-bit one the compositor trades each colour for the nearest
+   index while composing. */
+int desktop_win_truecolour(int winid, int owner);
+/* A block of colours. Only for a window that asked for them. */
+int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
+                       const uint32_t *pixels);
 
 #endif

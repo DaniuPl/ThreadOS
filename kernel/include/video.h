@@ -36,6 +36,10 @@ int video_h(void);
 /* Moves a finished frame from the working buffer onto the screen
    (double buffering). Does nothing in a mode without a working buffer. */
 void video_present(void);
+/* How many rows the last video_present() actually wrote to the screen.
+   On an idle desktop this is zero: the frame was drawn again and came
+   out identical, so nothing crossed the bus. */
+uint32_t video_present_rows(void);
 
 /* One row of the screen read back as palette indices (see video.c).
    Returns how many pixels were written, or -1. */
@@ -43,7 +47,29 @@ int video_read_row(int y, uint8_t *dst, int max);
 /* The colour an index stands for, as 0x00RRGGBB */
 uint32_t video_palette_rgb(uint8_t idx);
 
+/* Sets what an index stands for. Components are 0..255; the VGA DAC,
+   which takes six bits, is the only place they are narrowed. */
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b);
+
+/* --- Drawing in real colours (0x00RRGGBB) ---------------------------
+ *
+ * The calls above speak palette indices, which is what this machine
+ * drew with while its screen had two hundred and fifty six colours to
+ * give. The framebuffer a loader hands over today holds colours, so
+ * these say one directly - and in the eight-bit fallback they trade it
+ * for the nearest index the palette has, which is all such a screen
+ * can do.
+ *
+ * video_true_colour() is how the compositor knows which of the two is
+ * worth doing: there is no point keeping a window's content in four
+ * bytes a pixel on a screen that cannot show them. */
+int video_true_colour(void);
+uint8_t video_nearest_index(uint32_t rgb);
+void video_putpixel_rgb(int x, int y, uint32_t rgb);
+void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb);
+/* One rectangle of colours, 'stride' pixels to a source row */
+void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
+                    int stride);
 void video_clear(uint8_t color);
 void video_putpixel(int x, int y, uint8_t color);
 void video_fill_rect(int x, int y, int w, int h, uint8_t color);

@@ -10,6 +10,12 @@
  * showing a picture is copying it - through win_blit, which takes a
  * row at a time instead of a system call per pixel.
  *
+ * A picture from anywhere ELSE speaks in colours, so the window asks
+ * to hold colours too (win_truecolour) and the decoders hand them over
+ * whole, through win_blit32. What used to happen here - every colour
+ * traded for the nearest of two hundred and fifty six - does not
+ * happen any more.
+ *
  * The picture is bigger than the window (a screen does not fit inside
  * a window on the same screen), so it is shown every second or third
  * pixel, whichever makes it fit. Nearest neighbour: the point is to
@@ -48,58 +54,26 @@ static char answer[NAME_MAX_LEN + 1];
 static int alen;
 
 static uint8_t row[ROW_MAX * 3];   /* a source row, up to three bytes a pixel */
-static uint8_t out[ROW_MAX];
+static uint8_t out[ROW_MAX];       /* palette indices - for the machine's own files */
+static uint32_t out32[ROW_MAX];    /* colours - for everything from outside */
 
-/* --- colours into numbers -------------------------------------------
+/* --- colours ---------------------------------------------------------
  *
- * This screen speaks in palette indices; a picture that came from
- * anywhere else speaks in colours. So each colour has to be traded for
- * the nearest number the screen has - and "nearest" is honest here,
- * because the palette holds thirty-six colours of the desktop and
- * whatever the wallpaper left in the rest. A drawing comes out well; a
- * photograph comes out as a photograph seen through thirty-six
- * crayons, which is what an eight-bit screen is.
+ * A picture from outside speaks in colours, and so, now, does this
+ * window: it asks the compositor for pixels that ARE colours, and then
+ * a photograph is a photograph rather than a photograph seen through
+ * thirty-six crayons. The trading of each colour for the nearest index
+ * the palette had - a search, and a table of thirty-two thousand
+ * answers to make it bearable - is simply gone.
  *
- * Doing the search for every pixel would be two hundred and fifty six
- * comparisons three hundred thousand times. Instead the answer is
- * remembered for every colour rounded to five bits a channel: at most
- * thirty two thousand searches, and a picture rarely uses a tenth of
- * that. */
-static uint32_t pal[256];
-static uint8_t memo[32768];
-static int memo_ready;
+ * The machine's own screenshots stay as they are: their bytes are
+ * palette indices and the palette is this screen's, so win_blit puts
+ * them back exactly. */
+static int colour_win;             /* did the window agree to hold colours */
 
-static void colours_start(void)
+static uint32_t rgb(int r, int g, int b)
 {
-    sys_palette(pal);
-    for (int i = 0; i < 32768; i++)
-        memo[i] = 0xFF;
-    memo_ready = 1;
-}
-
-static uint8_t nearest(int r, int g, int b)
-{
-    int key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
-    if (memo[key] != 0xFF)
-        return memo[key];
-
-    int best = 0;
-    long best_d = 1L << 30;
-    for (int i = 0; i < 256; i++) {
-        int pr = (int)((pal[i] >> 16) & 0xFF);
-        int pg = (int)((pal[i] >> 8) & 0xFF);
-        int pb = (int)(pal[i] & 0xFF);
-        long dr = pr - r, dg = pg - g, db = pb - b;
-        long d = dr * dr + dg * dg + db * db;
-        if (d < best_d) {
-            best_d = d;
-            best = i;
-            if (!d)
-                break;
-        }
-    }
-    memo[key] = (uint8_t)best;
-    return (uint8_t)best;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
 static void ecopy(char *d, const char *s, int max)
@@ -110,6 +84,17 @@ static void ecopy(char *d, const char *s, int max)
         i++;
     }
     d[i] = '\0';
+}
+
+/* A picture from outside needs the window to hold colours. The only
+   way that is refused is no memory for the buffer, and then saying so
+   beats drawing nothing. */
+static int need_colour(void)
+{
+    if (colour_win)
+        return 1;
+    ecopy(note, "brak pamieci na kolory", sizeof(note));
+    return 0;
 }
 
 static int num(char *d, int v)
@@ -219,6 +204,8 @@ static int paeth(int a, int b, int c)
 
 static int show_png(int fd, const uint8_t *head, int got)
 {
+    if (!need_colour())
+        return -1;
     /* The whole file first: the deflate stream is spread across as
        many IDAT chunks as the writer felt like, and they have to be
        fed to the decoder as one. There is no call that says how long a
@@ -324,8 +311,6 @@ static int show_png(int fd, const uint8_t *head, int got)
     step = 1;
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
-    if (!memo_ready)
-        colours_start();
     win_rect(winid, 0, 0, cw, ch, C_BG);
 
     /* Undoing the filters needs the row above, so the rows are walked
@@ -367,9 +352,9 @@ static int show_png(int fd, const uint8_t *head, int got)
             } else {
                 r = g = b = px[0];                /* grey, with or without alpha */
             }
-            out[n++] = nearest(r, g, b);
+            out32[n++] = rgb(r, g, b);
         }
-        win_blit(winid, 0, dest, n, 1, out);
+        win_blit32(winid, 0, dest, n, 1, out32);
     }
     return 0;
 }
@@ -398,6 +383,8 @@ static uint8_t *jpeg_mem;
 
 static int show_jpeg(int fd, const uint8_t *head, int got)
 {
+    if (!need_colour())
+        return -1;
     if (!jpeg_file) {
         jpeg_file = malloc(JPEG_MAX_FILE);
         jpeg_mem = malloc(JPEG_MAX_MEM);
@@ -436,8 +423,6 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
     step = 1;
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
-    if (!memo_ready)
-        colours_start();
     win_rect(winid, 0, 0, cw, ch, C_BG);
 
     for (int y = 0; y < h; y += step) {
@@ -448,9 +433,9 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
         for (int x = 0; x < w && n < ROW_MAX; x += step) {
             int r, g, b;
             jpeg_pixel(x, y, &r, &g, &b);
-            out[n++] = nearest(r, g, b);
+            out32[n++] = rgb(r, g, b);
         }
-        win_blit(winid, 0, dest, n, 1, out);
+        win_blit32(winid, 0, dest, n, 1, out32);
     }
     return 0;
 }
@@ -464,6 +449,8 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
  */
 static int show_bmp(int fd, const uint8_t *head)
 {
+    if (!need_colour())
+        return -1;
     uint32_t data_at = (uint32_t)head[10] | ((uint32_t)head[11] << 8) |
                        ((uint32_t)head[12] << 16) | ((uint32_t)head[13] << 24);
     uint32_t dib = (uint32_t)head[14] | ((uint32_t)head[15] << 8) |
@@ -521,8 +508,6 @@ static int show_bmp(int fd, const uint8_t *head)
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
 
-    if (!memo_ready)
-        colours_start();
     win_rect(winid, 0, 0, cw, ch, C_BG);
 
     int stride = bpp == 24 ? (w * 3 + 3) & ~3 : (w + 3) & ~3;
@@ -548,9 +533,9 @@ static int show_bmp(int fd, const uint8_t *head)
                 g = c[1];
                 r = c[2];
             }
-            out[n++] = nearest(r, g, b);
+            out32[n++] = rgb(r, g, b);
         }
-        win_blit(winid, 0, dest, n, 1, out);
+        win_blit32(winid, 0, dest, n, 1, out32);
     }
     return 0;
 }
@@ -677,6 +662,12 @@ void _start(int argc, char **argv)
     if (win < 0)
         sys_exit(1);
     winid = win;
+
+    /* Ask for a window whose pixels are colours. Everything the viewer
+       draws for itself - the background, the status line - goes on
+       being said in palette indices, and the compositor translates
+       them; only the picture needs the other sixteen million. */
+    colour_win = win_truecolour(win) == 0;
 
     win_rect(win, 0, 0, cw, ch, C_BG);
     if (argc > 1 && argv && argv[1] && argv[1][0])

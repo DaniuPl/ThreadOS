@@ -745,6 +745,13 @@ static void execute(const char *line)
         cmd_date();
     } else if (!strcmp(line, "clear")) {
         vga_clear();
+    } else if (!strcmp(line, "ekran")) {
+        /* What the screen is, and how much of the last frame had to
+           cross the bus to the card. */
+        printk("tryb:         %dx%d, %s\n", video_w(), video_h(),
+               video_true_colour() ? "kolory" : "paleta 256");
+        printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
+               video_present_rows(), video_h());
     } else if (!strcmp(line, "reboot")) {
         printk("Restart...\n");
         /* When the ACPI tables have no reset register, there is a way

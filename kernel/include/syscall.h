@@ -88,6 +88,10 @@
 /* The screen's palette, so a program can turn colours into numbers:
    ebx=buffer for 256 entries of 0x00RRGGBB */
 #define SYS_PALETTE    63
+/* "My pixels are colours from now on": ebx=winid -> 0 or -1 */
+#define SYS_WIN_TRUECOL 64
+/* A block of colours into a window: ebx=winid, ecx=&struct win_blit_cmd */
+#define SYS_WIN_BLIT32 65
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

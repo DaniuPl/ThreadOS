@@ -35,6 +35,17 @@
    which removes flicker and tearing. */
 static volatile uint8_t *fb = (uint8_t *)(uintptr_t)0xA0000;
 static volatile uint8_t *front = (uint8_t *)(uintptr_t)0xA0000;
+/* A copy in RAM of what was last put on the screen. It is here for one
+   reason: writing to a framebuffer is far slower than writing to
+   memory - it goes across the bus to the card - and the compositor
+   redraws the whole frame thirty times a second whether anything moved
+   or not. Comparing against this says which rows really changed, and
+   an idle desktop then writes nothing at all to the card. The
+   comparison is RAM against RAM; reading the framebuffer back to do it
+   would cost more than the writes it saved. */
+static volatile uint8_t *shadow;
+static int shadow_valid;
+static uint32_t present_rows;
 static int vid_w = 320, vid_h = 200;
 static int vid_pitch = 320;          /* bytes per row */
 static int vid_bpp = 8;
@@ -84,33 +95,35 @@ static void write_regs(uint8_t *r)
     outb(0x3C0, 0x20);
 }
 
+/* Components are 0..255 - what every other piece of the machine
+   means by a colour. The VGA DAC is the odd one out: it takes six
+   bits, so only that path narrows them. */
 void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b)
 {
-    /* 6-bit components (0..63) -> 8-bit in the software palette */
-    palette_rgb[idx] = ((uint32_t)((r << 2) | (r >> 4)) << 16) |
-                       ((uint32_t)((g << 2) | (g >> 4)) << 8) |
-                       (uint32_t)((b << 2) | (b >> 4));
+    palette_rgb[idx] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     if (vid_bpp == 8) {
         outb(0x3C8, idx);
-        outb(0x3C9, r);
-        outb(0x3C9, g);
-        outb(0x3C9, b);
+        outb(0x3C9, (uint8_t)(r >> 2));
+        outb(0x3C9, (uint8_t)(g >> 2));
+        outb(0x3C9, (uint8_t)(b >> 2));
     }
 }
 
 static void set_default_palette(void)
 {
     video_set_palette(0, 0, 0, 0);
-    video_set_palette(1, 63, 0, 0);
-    video_set_palette(2, 0, 63, 0);
-    video_set_palette(3, 0, 0, 63);
-    video_set_palette(4, 63, 63, 63);
-    video_set_palette(5, 63, 63, 0);
+    video_set_palette(1, 255, 0, 0);
+    video_set_palette(2, 0, 255, 0);
+    video_set_palette(3, 0, 0, 255);
+    video_set_palette(4, 255, 255, 255);
+    video_set_palette(5, 255, 255, 0);
 }
 
 void video_init(void)
 {
     vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
+    shadow = (uint8_t *)0;
+    shadow_valid = 0;
     fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* no double buffering */
     vid_bypp = 1;
     write_regs(mode13);
@@ -139,6 +152,11 @@ int video_init_vesa(int w, int h)
         uint32_t back = pmm_alloc_contiguous((bytes + 4095) / 4096);
         if (back)
             fb = (uint8_t *)(uintptr_t)back;
+        if (back) {
+            uint32_t sh = pmm_alloc_contiguous((bytes + 4095) / 4096);
+            shadow = sh ? (uint8_t *)(uintptr_t)sh : (uint8_t *)0;
+        }
+        shadow_valid = 0;
         video_clear(0);
         video_present();
         return 0;
@@ -164,6 +182,11 @@ int video_init_vesa(int w, int h)
     uint32_t pages = (bytes + 4095) / 4096;
     uint32_t back = pmm_alloc_contiguous(pages);
     fb = back ? (uint8_t *)(uintptr_t)back : front;  /* without RAM - straight into the LFB */
+    if (back) {
+        uint32_t sh = pmm_alloc_contiguous(pages);
+        shadow = sh ? (uint8_t *)(uintptr_t)sh : (uint8_t *)0;
+    }
+    shadow_valid = 0;
 
     set_default_palette();
     video_clear(0);
@@ -197,6 +220,8 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     vid_bpp = bpp;
     vid_bypp = bpp / 8;
     fb = front = (uint8_t *)(uintptr_t)addr;
+    shadow = (uint8_t *)0;
+    shadow_valid = 0;
     lfb_addr = addr;
     lfb_bytes = pitch * (uint32_t)h;
     lfb_from_loader = 1;
@@ -238,9 +263,12 @@ void video_console_cell(int col, int row, char ch, uint8_t attr)
  *
  * In eight-bit modes the framebuffer already holds indices and this is
  * a copy. In the twenty-four and thirty-two bit ones it holds colours,
- * and the way back is a search through the palette for the entry that
- * was used - which is exact, because everything on this screen was
- * drawn FROM that palette in the first place.
+ * and the way back is a search through the palette for the nearest
+ * entry. For everything the compositor drew that search is exact - it
+ * drew FROM this palette. For a true-colour window it is not, and
+ * cannot be: a screenshot is a file of indices, so a photograph in it
+ * comes back quantised. That is the format saying what it is, not the
+ * reading being wrong.
  *
  * The search would be two hundred and fifty six comparisons per pixel
  * if it were done honestly every time. It is not: a screen is made of
@@ -297,10 +325,40 @@ uint32_t video_palette_rgb(uint8_t idx)
     return palette_rgb[idx];
 }
 
+uint32_t video_present_rows(void)
+{
+    return present_rows;
+}
+
 void video_present(void)
 {
-    if (fb != front)
-        memcpy((void *)front, (const void *)fb, (uint32_t)vid_h * vid_pitch);
+    if (fb == front)
+        return;                        /* nothing to move: no back buffer */
+
+    uint32_t pitch = (uint32_t)vid_pitch;
+    if (!shadow || !shadow_valid) {
+        memcpy((void *)front, (const void *)fb, (uint32_t)vid_h * pitch);
+        if (shadow) {
+            memcpy((void *)shadow, (const void *)fb, (uint32_t)vid_h * pitch);
+            shadow_valid = 1;
+        }
+        present_rows = (uint32_t)vid_h;
+        return;
+    }
+
+    /* A row is the unit: finer than that and the bookkeeping costs
+       more than the writes it saves. */
+    uint32_t rows = 0;
+    for (int y = 0; y < vid_h; y++) {
+        uint32_t off = (uint32_t)y * pitch;
+        const void *src = (const void *)(fb + off);
+        if (!memcmp((const void *)(shadow + off), src, pitch))
+            continue;
+        memcpy((void *)(shadow + off), src, pitch);
+        memcpy((void *)(front + off), src, pitch);
+        rows++;
+    }
+    present_rows = rows;
 }
 
 /* --- Drawing (independent of the mode) --- */
@@ -349,6 +407,94 @@ void video_fill_rect(int x, int y, int w, int h, uint8_t color)
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
             video_putpixel(x + i, y + j, color);
+}
+
+/* --- Drawing in real colours ----------------------------------------
+ *
+ * Everything above this line says which of two hundred and fifty six
+ * entries it means; below it, a colour is a colour. On a screen that
+ * holds colours the write is direct - the palette is not consulted at
+ * all - and on the eight-bit fallback the colour is traded for the
+ * nearest entry there is.
+ *
+ * That trade is a search through the whole palette, so the last answer
+ * is kept: a picture is made of runs of one colour, and a window's
+ * background is one colour for thousands of pixels in a row. It is a
+ * cache of one, and it is nearly always right - which is the same
+ * trick, and for the same reason, as reading the screen back.
+ */
+int video_true_colour(void)
+{
+    return vid_bpp >= 24;
+}
+
+uint8_t video_nearest_index(uint32_t rgb)
+{
+    static uint32_t last_rgb = 0xFFFFFFFFu;
+    static uint8_t last_idx;
+    if (rgb == last_rgb)
+        return last_idx;
+
+    uint8_t best = 0;
+    uint32_t best_d = 0xFFFFFFFFu;
+    for (int i = 0; i < 256; i++) {
+        uint32_t c = palette_rgb[i];
+        int dr = (int)((c >> 16) & 0xFF) - (int)((rgb >> 16) & 0xFF);
+        int dg = (int)((c >> 8) & 0xFF) - (int)((rgb >> 8) & 0xFF);
+        int db = (int)(c & 0xFF) - (int)(rgb & 0xFF);
+        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+        if (d < best_d) {
+            best_d = d;
+            best = (uint8_t)i;
+            if (!d)
+                break;
+        }
+    }
+    last_rgb = rgb;
+    last_idx = best;
+    return best;
+}
+
+void video_putpixel_rgb(int x, int y, uint32_t rgb)
+{
+    if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
+        return;
+    if (vid_bpp == 8)
+        fb[y * vid_pitch + x] = video_nearest_index(rgb);
+    else
+        put_px(fb + y * vid_pitch + x * vid_bypp, rgb);
+}
+
+void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb)
+{
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++)
+            video_putpixel_rgb(x + i, y + j, rgb);
+}
+
+void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
+                    int stride)
+{
+    if (!src)
+        return;
+    for (int j = 0; j < h; j++) {
+        int dy = y + j;
+        if ((unsigned)dy >= (unsigned)vid_h)
+            continue;
+        const uint32_t *row = src + (long)j * stride;
+        /* The common case - a whole row inside the screen, four bytes a
+           pixel both sides - is a straight copy. It is worth saying so:
+           this runs for every pixel of every window, every frame. */
+        if (vid_bypp == 4 && x >= 0 && x + w <= vid_w) {
+            volatile uint32_t *dst = (volatile uint32_t *)
+                (fb + (uint32_t)dy * vid_pitch) + x;
+            for (int i = 0; i < w; i++)
+                dst[i] = row[i];
+            continue;
+        }
+        for (int i = 0; i < w; i++)
+            video_putpixel_rgb(x + i, dy, row[i]);
+    }
 }
 
 void video_draw_char(int x, int y, char c, uint8_t color)

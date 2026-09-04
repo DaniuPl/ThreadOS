@@ -3854,3 +3854,98 @@ sprawdzane przez `make test`.
       jadrach - dekoder jest jednym zrodlem kompilowanym dwa razy, a w
       trybie dlugim wskaznik ma inny rozmiar i indeksowanie plaszczyzny
       idzie przez long.
+
+- [x] **Kolory: koniec z paleta 256 tam, gdzie ekran ma wiecej** -
+      odpowiedz na pytanie "co zrobic, zeby miec tyle kolorow, co
+      wspolczesne komputery".
+
+      Najpierw to, czego nie trzeba bylo robic: bufor ekranu JUZ byl
+      32-bitowy. video.c od dawna umie 24 i 32 bity na piksel, a
+      video_adopt_lfb bierze bufor od GRUB-a albo od UEFI, wiec na
+      prawdziwym sprzecie to dziala. Sufitem nie byl sprzet, tylko my
+      sami: wszystko powyzej video_putpixel mowilo indeksami palety.
+
+      **Sterta.** Pierwszy prawdziwy blocker nie mial nic wspolnego z
+      kolorem. Bufor okna to jeden bajt na piksel; w kolorach cztery.
+      Okno 420x300 rosnie ze 123 KiB do 492 KiB, a sterta jadra miala
+      MEGABAJT - dwa okna i po stercie. Wiec sterta liczy sie teraz z
+      wykrytej pamieci: szesnasta czesc, miedzy 1 a 8 MiB. Maszyna ze
+      128 MiB dostaje 8 MiB, a te z 16 MiB, na ktorych chodza testy
+      wymiany, dostaja dokladnie ten megabajt, ktory mialy - nie
+      zabieramy im polowy pamieci przy okazji.
+
+      **Paleta 8-bitowa.** video_set_palette brala skladowe 6-bitowe
+      (0..63) - spadek po DAC-u VGA, ktory tyle bierze. Teraz bierze
+      0..255, a zwezenie zostalo tam, gdzie jego miejsce: w jednej
+      linijce piszacej do DAC-u. Stale w desktop.c przeliczone dokladna
+      formula (v<<2)|(v>>4), czyli tak, jak przeliczala je sama paleta
+      - wyglad nie drgnal ani o poziom, co potwierdzily grupy 'look',
+      'wall' i 'icons'. To jest zmiana, ktora zdejmuje sufit i niczego
+      nie rusza.
+
+      **Druga sciezka rysowania.** video_putpixel_rgb, video_fill_rect_rgb
+      i video_blit_rgb biora 0x00RRGGBB. W trybie 8-bitowym (tryb 13h,
+      awaryjny) kolor jest wymieniany na najblizszy indeks - z pamiecia
+      ostatniej odpowiedzi, bo obraz sklada sie z ciagow jednego koloru.
+
+      **Okno z formatem.** Okno rodzi sie z indeksami, bo tak rysowal
+      kazdy program tej maszyny i zaden nie musial sie zmieniac. Program,
+      ktory ma co pokazac, prosi raz (win_truecolour) i od tej pory
+      pisze kolory przez win_blit32. Jego wlasna oprawa - tlo, pasek
+      stanu - dalej idzie przez win_rect i win_text w indeksach, bo te
+      wywolania TLUMACZA indeks na kolor dla takiego okna. Dzieki temu
+      gimg zmienil trzy petle, a nie caly plik.
+
+      Podmiana bufora pod oknem jest bezpieczna nie przez nowy zamek,
+      tylko przez ten, ktory juz jest: syscall bierze duzy zamek jadra,
+      a kompozytor trzyma go przez cale rysowanie. Ta sama zasada od
+      dawna chroni resize_content.
+
+      Ciekawe uboczne: okno w kolorach sklada sie SZYBCIEJ niz w
+      indeksach - jego piksele sa juz tym, czego chce bufor ekranu, wiec
+      idzie wierszami zamiast piksel po pikselu.
+
+      **gimg.** Znikla funkcja nearest() i tablica 32768 zapamietanych
+      odpowiedzi. Zdjecie jest zdjeciem, a nie zdjeciem widzianym przez
+      trzydziesci szesc kredek. Pliki .psc zostaja indeksami - ich bajty
+      SA numerami tej palety, wiec win_blit odklada je dokladnie.
+
+      **Tapeta.** Format dostal drugi ksztalt: "PWL2", rozmiar, trzy
+      bajty na piksel, bez palety. Stary "PWAL" dalej sie czyta. I tu
+      trzeba byc uczciwym: dla czterech z pieciu wzorow mkwalla to nie
+      zmienia NIC - zbocze przez 120 wierszy ma 120 kolorow, cokolwiek
+      by sie robilo. Zmiana zarabia na siebie piatym wzorem:
+      przenikaniem po obu osiach, gdzie kazdy piksel ma swoj kolor -
+      dziewietnascie tysiecy, czego paleta 192 nie udzwignie.
+
+      **gweb nie dostal nic** i mowie to wprost: jego parser HTML w
+      ogole nie czyta kolorow, rysuje szescioma stalymi. Przepisanie
+      tych szesciu stalych na RGB nie zmienilo by ani jednego piksela.
+      Prawdziwe kolory w przegladarce to parser CSS - inna robota, nie
+      ta.
+
+      **Prezentacja tylko tego, co sie zmienilo.** Kompozytor przerysowuje
+      calą klatke trzydziesci razy na sekunde, czy cos sie ruszylo, czy
+      nie, i dotad cala klatka szla na karte - przy 640x480 to 1,2 MB,
+      przy 1024x768 juz 3 MB. Pisanie do bufora karty jest DUZO drozsze
+      niz do pamieci, wiec doszedl trzeci bufor: kopia w RAM tego, co
+      ostatnio poszlo na ekran. Porownanie RAM z RAM-em mowi, ktore
+      wiersze naprawde sie zmienily, i tylko one przechodza przez
+      magistrale. Czytanie bufora karty z powrotem kosztowaloby wiecej
+      niz zapisy, ktore by oszczedzilo - stad kopia, a nie porownanie z
+      ekranem.
+
+      Zmierzone, nie oszacowane: komenda 'ekran' pokazuje ile wierszy
+      poszlo w ostatniej klatce. Bezczynny pulpit: ZERO. Z tykajacym
+      zegarem na pasku: szesc wierszy. Test tego pilnuje.
+
+      Czego to nadal nie daje: to jest bufor ramki bez GPU. Zadnego
+      przyspieszania, tryb ustawia za nas GRUB albo UEFI, jeden monitor.
+      Sterownik karty to projekt wielkosci calego dotychczasowego
+      systemu i nie tam bym szedl.
+
+      Nowa grupa 'kolory' liczy to, czego nie da sie podrobic: pulpit
+      rysowany indeksami ma 29 roznych kolorow na calym ekranie, a
+      wpuszczony w okno gradient JPEG - 3031, i rosnie w prawo czerwienia
+      i w dol zielenia, wiec to nie jest "duzo kolorow" tylko "wlasciwe
+      kolory".

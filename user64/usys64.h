@@ -68,6 +68,8 @@
 #define SYS64_RENAME    55
 #define SYS64_WIN_BLIT  56
 #define SYS64_PALETTE   57
+#define SYS64_WIN_TRUECOL 58
+#define SYS64_WIN_BLIT32  59
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -663,6 +665,25 @@ static inline int64_t win_blit(int win, int x, int y, int w, int h,
 {
     struct win_blit_cmd c = { x, y, w, h, pixels };
     return syscall64(SYS64_WIN_BLIT, win, (int64_t)(uintptr_t)&c);
+}
+
+/* "From now on my pixels are colours."
+ *
+ * Asked once, right after the window is made. What was drawn before
+ * stays drawn; what comes after goes in through win_blit32, in
+ * 0x00RRGGBB. The index calls - win_rect, win_text - go on working and
+ * mean the same colours they always did. */
+static inline int64_t win_truecolour(int win)
+{
+    return syscall64(SYS64_WIN_TRUECOL, win, 0);
+}
+
+/* A block of colours into a window that asked for them. */
+static inline int64_t win_blit32(int win, int x, int y, int w, int h,
+                                 const uint32_t *pixels)
+{
+    struct win_blit_cmd c = { x, y, w, h, (const uint8_t *)pixels };
+    return syscall64(SYS64_WIN_BLIT32, win, (int64_t)(uintptr_t)&c);
 }
 
 static inline int64_t win_title(int win, const char *title)

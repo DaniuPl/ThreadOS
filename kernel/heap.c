@@ -1,8 +1,17 @@
 /* The kernel heap - kmalloc/kfree
  *
- * A simple first-fit allocator over a list of blocks. The heap takes
- * 1 MiB of physically contiguous memory from the PMM (we are in the
+ * A simple first-fit allocator over a list of blocks. The heap takes a
+ * slice of physically contiguous memory from the PMM (we are in the
  * identity mapping, so the physical address == the virtual one).
+ *
+ * How big a slice is decided by how much memory the machine has, not
+ * by a number written here. A window's content buffer comes from this
+ * heap, and a window in true colour costs four times what one in
+ * palette indices did - twelve of them no longer fit under a fixed
+ * megabyte. But a machine with sixteen megabytes of RAM must not lose
+ * half of them to the kernel either, so it is a sixteenth of what was
+ * found, held between one and eight megabytes: the small machines the
+ * swap tests run on keep exactly the megabyte they had.
  *
  * Every block has a header with a size and a "free" flag. On
  * allocation a block is split if the remainder makes sense; on freeing
@@ -16,7 +25,8 @@
 #include "include/io.h"
 #include "include/spinlock.h"
 
-#define HEAP_SIZE (1024u * 1024)
+#define HEAP_MIN  (1024u * 1024)
+#define HEAP_MAX  (8u * 1024 * 1024)
 #define ALIGN_UP(x, a) (((x) + (a) - 1) & ~((a) - 1))
 #define MIN_SPLIT 16u   /* do not create free scraps smaller than this */
 
@@ -28,20 +38,32 @@ struct block {
 
 static struct block *heap_head;
 static uint32_t heap_start, heap_end;
+static uint32_t heap_size;
 static uint32_t used_bytes;
 
 void heap_init(void)
 {
-    heap_start = pmm_alloc_contiguous(HEAP_SIZE / PAGE_SIZE);
+    uint32_t want = (pmm_ram_kib() / 16) * 1024;
+    if (want < HEAP_MIN)
+        want = HEAP_MIN;
+    if (want > HEAP_MAX)
+        want = HEAP_MAX;
+    heap_size = ALIGN_UP(want, PAGE_SIZE);
+
+    /* A machine that cannot give the whole slice in one piece still
+       has to boot, so we ask for less rather than stopping. */
+    while (!(heap_start = pmm_alloc_contiguous(heap_size / PAGE_SIZE)) &&
+           heap_size > HEAP_MIN)
+        heap_size /= 2;
     if (!heap_start) {
-        printk("heap: brak %u KiB ciaglej pamieci!\n", HEAP_SIZE / 1024);
+        printk("heap: brak %u KiB ciaglej pamieci!\n", heap_size / 1024);
         for (;;)
             __asm__ volatile("cli; hlt");
     }
-    heap_end = heap_start + HEAP_SIZE;
+    heap_end = heap_start + heap_size;
 
     heap_head = (struct block *)(uintptr_t)heap_start;
-    heap_head->size = HEAP_SIZE - sizeof(struct block);
+    heap_head->size = heap_size - sizeof(struct block);
     heap_head->free = 1;
     heap_head->next = (void *)0;
 }
@@ -126,5 +148,5 @@ void kfree(void *ptr)
     spin_unlock_irq(&lock, flags);
 }
 
-uint32_t heap_total_bytes(void) { return HEAP_SIZE; }
+uint32_t heap_total_bytes(void) { return heap_size; }
 uint32_t heap_used_bytes(void)  { return used_bytes; }

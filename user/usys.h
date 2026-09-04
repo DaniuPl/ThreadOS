@@ -68,6 +68,8 @@
 #define SYS_RENAME     61
 #define SYS_WIN_BLIT   62
 #define SYS_PALETTE    63
+#define SYS_WIN_TRUECOL 64
+#define SYS_WIN_BLIT32 65
 
 #define FS_NAME_MAX  63
 
@@ -618,6 +620,36 @@ static inline int32_t win_blit(int winid, int x, int y, int w, int h,
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_WIN_BLIT), "b"(winid), "c"(&c)
+                     : "memory");
+    return ret;
+}
+
+/* "From now on my pixels are colours."
+ *
+ * Asked once, right after the window is made. What was drawn before
+ * stays drawn; what comes after goes in through win_blit32, in
+ * 0x00RRGGBB. The index calls - win_rect, win_text - go on working and
+ * mean the same colours they always did. */
+static inline int32_t win_truecolour(int winid)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_TRUECOL), "b"(winid)
+                     : "memory");
+    return ret;
+}
+
+/* A block of colours into a window that asked for them. At most 1024
+   at a time - a row of any screen this machine can have. */
+static inline int32_t win_blit32(int winid, int x, int y, int w, int h,
+                                 const uint32_t *pixels)
+{
+    struct win_blit_cmd c = { x, y, w, h, (const uint8_t *)pixels };
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_WIN_BLIT32), "b"(winid), "c"(&c)
                      : "memory");
     return ret;
 }

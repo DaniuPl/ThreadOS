@@ -974,6 +974,31 @@ static void handle(struct regs *r)
             (const uint8_t *)(uintptr_t)c.pixels);
         return;
     }
+    case SYS64_WIN_TRUECOL:
+        r->rax = (uint64_t)(int64_t)desktop_win_truecolour(
+            (int)a1, task64_current_id());
+        return;
+    case SYS64_WIN_BLIT32: {
+        struct win_blit_cmd64 {
+            int32_t x, y, w, h;
+            uint64_t pixels;
+        } c;
+        if (!paging64_user_range(a2, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const struct win_blit_cmd64 *)(uintptr_t)a2;
+        if (c.w <= 0 || c.h <= 0 || c.w > 1024 || c.h > 1024 ||
+            c.w * c.h > 1024 ||
+            !paging64_user_range(c.pixels, (uint64_t)(c.w * c.h) * 4)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_win_blit32(
+            (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
+            (const uint32_t *)(uintptr_t)c.pixels);
+        return;
+    }
     case SYS64_PALETTE: {
         if (!paging64_user_range(a1, 256 * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;

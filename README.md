@@ -71,10 +71,14 @@ says what its numbers mean — and the picture viewer puts them back into
 a window through a block-of-pixels call — and reads BMP, PNG and
 baseline JPEG files too — the deflate decoder is the machine's own, and
 so are the Huffman codes, the cosine transform undone in fixed point
-and the colour put back from half resolution, and the colours are
-quantised to the nearest the screen has, which is what an eight-bit
-display can honestly do with a photograph — so a machine that takes a
-picture of itself can also look at what a camera wrote. A window can be renamed by the program
+and the colour put back from half resolution — so a machine that takes
+a picture of itself can also look at what a camera wrote, and look at
+it in the colours it was written in: a window holds palette indices, as
+every program here always drew, or asks once to hold colours instead
+and then a photograph is a photograph rather than a photograph seen
+through thirty-six crayons. The compositor writes to the card only the
+rows that actually changed, so an idle desktop redrawn thirty times a
+second sends nothing at all across the bus. A window can be renamed by the program
 that owns it, so the editor's title says which file it holds and the
 terminal's says where it is standing. Icons, a file
 manager that lists sizes, walks into directories and back out, hands a

@@ -220,7 +220,8 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     heap_init();
     if (kmalloc_selftest())
-        ok("Sterta jadra: kmalloc/kfree dzialaja (1 MiB)");
+        printk("[ OK ] Sterta jadra: kmalloc/kfree dzialaja (%u KiB)\n",
+               heap_total_bytes() / 1024);
     else
         printk("[FAIL] kmalloc selftest!\n");
 
