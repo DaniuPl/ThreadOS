@@ -4317,6 +4317,22 @@ sprawdzane przez `make test`.
       Zmierzone pod OVMF: jadro 825028 B, initrd 448132 B - co do bajtu
       tyle, ile maja pliki - ekran 1280x800, RSDP w wersji 2.0.
 
+      **Loader laduje jadro 64-bitowe i tylko je.** Poczatkowo siegal po
+      protonos.bin, co bylo bezmyslne: maszyna z UEFI jest maszyna
+      64-bitowa. Jadro 32-bitowe istnieje w tym projekcie po to, zeby
+      jeden zestaw zrodel byl kompilowany dwa razy i drugie kompilowanie
+      powiedzialo, co ukrylo pierwsze - to jest dobry powod, zeby je
+      trzymac, i nie jest powodem, zeby je uruchamiac na laptopie.
+      Wpuszczanie go tutaj znaczyloby loader ELF32 obok ELF64 dla
+      przypadku, ktorego nikt nie ma; ogolnosc, o ktora nikt nie prosil,
+      to sposob, w jaki loader przestaje byc godny zaufania. GRUB dalej
+      uruchamia tamto jadro komu trzeba.
+
+      Przy okazji dwie rzeczy, ktore to ustalilo: jadro 64-bitowe jest
+      ELF64 (nie ELF32, jak zakladalem, planujac wczytywanie), a modul
+      initrd jadro bierze PO POZYCJI, nie po nazwie - wiec loader ma
+      podac jeden modul i tyle.
+
       **Czego jeszcze nie ma**: zbudowania tablicy tagow Multiboot 2,
       wczytania ELF-a, ExitBootServices i skoku. Ten ostatni jest
       niezrecznosc calego przedsiewziecia: aplikacja UEFI biegnie w

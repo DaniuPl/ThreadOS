@@ -23,6 +23,12 @@
  * firmware has already mounted the partition it loaded us from, and
  * hands out a file protocol. A FAT of our own will be needed for
  * WRITING one, which is the installer's problem, not this one's.
+ *
+ * It loads the 64-bit kernel and nothing else. A machine with UEFI is
+ * a 64-bit machine; the 32-bit kernel exists so that one set of
+ * sources gets compiled twice and the second compilation says what the
+ * first one hid, which is a good reason to keep it and not a reason to
+ * boot it on a laptop.
  */
 
 #include "efi.h"
@@ -232,13 +238,23 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     open_volume(image);
 
+    /* The 64-bit kernel, and only that one.
+     *
+     * This machine is a UEFI machine, which means it is a 64-bit
+     * machine; the 32-bit kernel is a thing this project keeps for its
+     * own reasons - one set of sources compiled twice catches what one
+     * compilation hides - and not a thing to boot on a laptop. Loading
+     * it here would mean an ELF32 loader next to the ELF64 one for a
+     * case nobody has, and generality nobody asked for is how a loader
+     * becomes hard to trust. GRUB still boots it for anyone who wants
+     * that. */
     struct blob kernel, initrd;
-    if (!read_file(L"\\protonos.bin", &kernel) &&
-        !read_file(L"\\EFI\\BOOT\\protonos.bin", &kernel))
-        fail(L"nie znalazlem protonos.bin", 0);
-    if (!read_file(L"\\initrd.img", &initrd) &&
-        !read_file(L"\\EFI\\BOOT\\initrd.img", &initrd))
-        fail(L"nie znalazlem initrd.img", 0);
+    if (!read_file(L"\\protonos64.bin", &kernel) &&
+        !read_file(L"\\EFI\\BOOT\\protonos64.bin", &kernel))
+        fail(L"nie znalazlem protonos64.bin", 0);
+    if (!read_file(L"\\initrd64.img", &initrd) &&
+        !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd))
+        fail(L"nie znalazlem initrd64.img", 0);
 
     put(L"  jadro:  ");
     put_num(kernel.size, 10);
