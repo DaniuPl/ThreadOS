@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "include/fbcon.h"
 #include "include/font8x8.h"
+#include "include/video.h"
 
 #define CON_COLS 80
 #define CON_ROWS 25
@@ -95,6 +96,7 @@ int fbcon_enable(void)
             put_pixel(row + (uint32_t)x * (uint32_t)fb_bypp, 0);
     }
     con_on = 1;
+    video_front_touched();
     return 1;
 }
 
@@ -107,6 +109,10 @@ void fbcon_cell(int col, int row, char ch, uint8_t attr)
 {
     if (!con_on || col < 0 || row < 0 || col >= CON_COLS || row >= CON_ROWS)
         return;
+
+    /* This writes onto the visible buffer directly, so whatever keeps
+       a copy of it has to be told the copy is now stale. */
+    video_front_touched();
 
     uint32_t fgc = console_rgb[attr & 0x0F];
     uint32_t bgc = console_rgb[(attr >> 4) & 0x0F];

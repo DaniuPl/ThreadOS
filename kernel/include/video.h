@@ -36,6 +36,9 @@ int video_h(void);
 /* Moves a finished frame from the working buffer onto the screen
    (double buffering). Does nothing in a mode without a working buffer. */
 void video_present(void);
+/* Said by anything that writes to the visible framebuffer without
+   going through this file - the framebuffer console does. */
+void video_front_touched(void);
 /* How many rows the last video_present() actually wrote to the screen.
    On an idle desktop this is zero: the frame was drawn again and came
    out identical, so nothing crossed the bus. */

@@ -3939,6 +3939,28 @@ sprawdzane przez `make test`.
       poszlo w ostatniej klatce. Bezczynny pulpit: ZERO. Z tykajacym
       zegarem na pasku: szesc wierszy. Test tego pilnuje.
 
+      I blad, ktory ta optymalizacja przyniosla - bo przyniosla.
+      Konsola na buforze obrazu (fbcon) trzyma adres bufora WIDOCZNEGO
+      i pisze prosto na niego, nie wiedzac nic o buforze roboczym
+      kompozytora. Dopoki cala klatka szla na ekran, nie mialo to
+      znaczenia: nastepna klatka i tak zakrywala napis. Z porownaniem
+      wierszy - ma. Kompozytor rysowal wlasciwa rzecz, porownywal ja z
+      kopia, ktora juz sie zgadzala, i nie wysylal nic; napis z jadra
+      zostawal na ekranie na zawsze. Wysypala sie na tym grupa
+      'gterm64', bo jej OCR czytal te resztki jako tresc okna.
+
+      Naprawa jest tam, gdzie problem: kazdy, kto pisze po widocznym
+      buforze za plecami video.c, mowi to przez video_front_touched(),
+      a nastepna klatka idzie caloscia. Pierwsze podejscie wlozylem w
+      video_console_cell() i bylo bezuzyteczne - vga.c wola fbcon_cell
+      bezposrednio, z pominieciem tamtej funkcji. Wiec haczyk siedzi w
+      samym fbcon.c.
+
+      Grupa 'iso' pyta o to wprost: pulpit stoi na buforze od loadera,
+      z shella jadra leci komenda 'mem', i po niej tla ma byc tyle
+      samo, co przed. To jest asercja, ktora bez tego bledu przechodzi,
+      a z nim nie.
+
       Czego to nadal nie daje: to jest bufor ramki bez GPU. Zadnego
       przyspieszania, tryb ustawia za nas GRUB albo UEFI, jeden monitor.
       Sterownik karty to projekt wielkosci calego dotychczasowego

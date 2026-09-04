@@ -117,6 +117,27 @@ def main():
                         check(f"pulpit rysuje sie na buforze od loadera "
                               f"({w}x{h}, {teal}/{total} probek tla)",
                               teal > total * 0.7)
+
+                        # A message printed while the desktop is
+                        # running goes onto the VISIBLE buffer: the
+                        # framebuffer console holds its address of its
+                        # own and knows nothing about the compositor's
+                        # working buffer. The next frame has to cover
+                        # it. It is worth asking, because the
+                        # compositor sends only the rows that changed -
+                        # and rows somebody else wrote behind its back
+                        # look unchanged to it.
+                        q22.type_line("mem")
+                        time.sleep(3)
+                        w, h, at = q22.screen_raw()
+                        after = sum(1 for y in range(0, h, 8)
+                                    for x in range(0, w, 8)
+                                    if all(abs(at(x, y)[i] - (0, 128, 160)[i])
+                                           <= 40 for i in range(3)))
+                        check(f"a napis z jadra nie zostaje na ekranie - "
+                              f"pulpit go zakrywa ({after}/{total} probek "
+                              f"tla, bylo {teal})",
+                              after >= teal - total // 100)
                     finally:
                         q22.close()
                 finally:

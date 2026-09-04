@@ -325,6 +325,24 @@ uint32_t video_palette_rgb(uint8_t idx)
     return palette_rgb[idx];
 }
 
+/* "Somebody else has just drawn on the screen."
+ *
+ * The copy in RAM is only worth anything while it says what is really
+ * on the screen. The framebuffer console does not go through this file
+ * at all - it holds the buffer's address of its own and writes text
+ * straight onto it - so after that the copy is a lie, and a frame
+ * compared against a lie sends the wrong rows. Everything that writes
+ * to the screen behind this file's back says so here, and the next
+ * frame goes across whole.
+ *
+ * Without it a message printed while the desktop is running stays on
+ * the screen for good: the compositor draws the right thing, compares
+ * it against a copy that already matches, and sends nothing. */
+void video_front_touched(void)
+{
+    shadow_valid = 0;
+}
+
 uint32_t video_present_rows(void)
 {
     return present_rows;
