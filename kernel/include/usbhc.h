@@ -35,6 +35,12 @@ int usbhc_ports(void);
    the port or it could not be woken. */
 int usbhc_attach(int port);
 
+/* "This device is mine now." Said by a driver that has configured a
+   device and started talking to it: after that the port answers
+   "nothing here" to every other driver, so nobody reads descriptors
+   down a wire somebody else is already using. */
+void usbhc_claim(int port);
+
 /* A control transfer to a device. 'setup' is the 8-byte request, data
    may go either way (in=1 reads). Returns the number of data bytes
    or -1. */

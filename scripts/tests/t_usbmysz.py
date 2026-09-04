@@ -16,8 +16,9 @@ mouse.
 Two questions, and the second is the one that matters:
 
   the machine finds the mouse on the xHCI controller and says so
-  with the 8042 switched OFF - a machine that genuinely has no PS/2 -
-  the pointer still moves, which it can only do through USB
+  with the 8042 switched OFF - a machine that genuinely has no PS/2,
+  and so no way to TYPE anything either - the pointer on the desktop
+  still follows the mouse, which it can only do through USB
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -26,7 +27,6 @@ groups in parallel.
 import os
 import re
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -48,33 +48,29 @@ def main():
         q.close()
 
     # --- and now a machine that has no PS/2 at all -------------------
-    # Without the 8042 the old driver finds nothing: no port, no
-    # packets, no pointer. Whatever moves the pointer here came over
-    # USB, and there is no other reading of it.
-    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
-             usbmouse="xhci", no_i8042=True)
+    # Without the 8042 there is no PS/2 keyboard either, so nothing can
+    # be TYPED here - the question has to be asked in pixels. The
+    # desktop draws the pointer where the pointer is, so moving the
+    # mouse and looking at the screen says everything: whatever moved
+    # that cursor came over USB, because there is no other road.
+    q = Qemu(KERNEL, INITRD, usbkbd="xhci", usbmouse="xhci",
+             no_i8042=True)
     try:
-        q.wait_for("ProtonOS shell", timeout=60)
+        check("maszyna bez 8042 wstaje i rysuje pulpit",
+              q.wait_desktop(timeout=60))
 
-        q.type_line("mouse")
-        start = q.wait_for("mysz: x=")
-        m = re.search(r"mysz: x=(\d+) y=(\d+)", start)
-        check("maszyna bez 8042 wstaje i ma wskaznik ('%s')"
-              % (m.group(0) if m else start[-40:]), m is not None)
-        if not m:
-            return summary()
-        x0, y0 = int(m.group(1)), int(m.group(2))
+        # The pointer starts in the middle of the mode the compositor
+        # set up; from there it is moved to a place nothing else draws
+        # on, and the white cursor has to be there.
+        q.mouse_move(-110, -60)
+        check("kursor jest tam, gdzie mysz USB go zaprowadzila (~50,41)",
+              q.wait_pixel(50, 41, (255, 255, 255)))
 
-        q.mouse_move(40, 30)
-        time.sleep(1)
-        q.type_line("mouse")
-        after = q.wait_for("mysz: x=")
-        m2 = None
-        for m2 in re.finditer(r"mysz: x=(\d+) y=(\d+)", after):
-            pass
-        x1, y1 = int(m2.group(1)), int(m2.group(2))
-        check("i wskaznik idzie za mysza po USB (%d,%d -> %d,%d)"
-              % (x0, y0, x1, y1), x1 > x0 and y1 > y0)
+        q.mouse_move(150, 80)
+        check("i idzie za nia dalej (~200,121)",
+              q.wait_pixel(200, 121, (255, 255, 255)))
+        check("a stare miejsce zostalo zamalowane tlem (~50,41)",
+              q.wait_pixel(50, 41, (0, 128, 160)))
     finally:
         q.close()
 

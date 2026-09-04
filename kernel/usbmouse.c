@@ -130,6 +130,7 @@ int usbmouse_init(void)
         if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)
             continue;
 
+        usbhc_claim(port);
         task_create("usbmouse", poll_thread, 0);
         printk("[ OK ] Mysz USB (HID, %s) na porcie %d, "
                "punkt koncowy %d\n", usbhc_name(), port + 1, ep_num);

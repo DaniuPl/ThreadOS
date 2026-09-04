@@ -53,6 +53,14 @@ const char *usbhc_name(void)
 
 int usbhc_init(void)
 {
+    /* Once is enough, and twice is worse than useless: starting a
+       controller RESETS it, and the second driver to ask would wipe
+       out the slot and the endpoint the first one is already using -
+       which shows up as a keyboard that is found, announced, and then
+       silent. */
+    if (controller != NONE)
+        return 1;
+
     if (xhci_init()) {
         controller = XHCI;
         return 1;
@@ -117,32 +125,46 @@ static int uhci_greet(int port, struct device *u)
     return 0;
 }
 
-/* Which ports already have a device somebody is talking to.
+/* Who has already got hold of which port.
  *
  * Two drivers walk these ports - the keyboard's and the mouse's - and
- * each stops at the first device it recognises, having attached and
- * looked at every one before it. Attaching means RESETTING the port,
- * so the second walk would knock over the keyboard the first walk had
- * just started. So a port is greeted once and its handle kept: the
- * second asker gets the same device rather than a device that has just
- * been reset underneath its owner. */
+ * each stops at the first device it recognises, having looked at every
+ * one before it. That raises two different problems and they need two
+ * different answers.
+ *
+ * Greeting a port RESETS it, so the second walk must not greet a port
+ * the first one already greeted: hence the handle, kept and handed
+ * back. And a device another driver is already TALKING to must not be
+ * looked at either - reading its descriptors while its own poll thread
+ * is reading its reports is two conversations down one wire, and what
+ * it costs is the keyboard quietly ceasing to deliver keys. So a
+ * driver that takes a device says so, and from then on the port
+ * answers "nothing here" to everybody else. */
 #define PORTS_MAX 32
 static int port_dev[PORTS_MAX];
 static int port_known[PORTS_MAX];
+static int port_taken[PORTS_MAX];
 
 static int usbhc_greet(int port);
 
+void usbhc_claim(int port)
+{
+    if (port >= 0 && port < PORTS_MAX)
+        port_taken[port] = 1;
+}
+
 int usbhc_attach(int port)
 {
-    if (port >= 0 && port < PORTS_MAX && port_known[port])
+    if (port < 0 || port >= PORTS_MAX)
+        return usbhc_greet(port);
+    if (port_taken[port])
+        return -1;                   /* somebody else's device */
+    if (port_known[port])
         return port_dev[port];
 
-    int handle = usbhc_greet(port);
-    if (port >= 0 && port < PORTS_MAX) {
-        port_known[port] = 1;
-        port_dev[port] = handle;
-    }
-    return handle;
+    port_known[port] = 1;
+    port_dev[port] = usbhc_greet(port);
+    return port_dev[port];
 }
 
 static int usbhc_greet(int port)

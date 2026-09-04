@@ -4112,8 +4112,28 @@ sprawdzane przez `make test`.
       HID jest juz taki, jakiego uzywa reszta systemu - w odroznieniu od
       pakietu PS/2, ktory trzeba odwrocic.
 
+      **Dwa bledy po drodze, oba moje, oba zlapane przez testy.**
+
+      Pierwszy: usbhc_init() bezwarunkowo startowal kontroler, a start
+      znaczy RESET. Drugi sterownik, pytajac o kontroler, kasowal slot i
+      punkt koncowy, ktorych pierwszy juz uzywal - i klawiatura USB byla
+      znajdowana, meldowana i cicha. Teraz raz znaleziony kontroler
+      odpowiada od razu.
+
+      Drugi, subtelniejszy: nawet nie resetujac portu, drugi sterownik
+      CZYTAL deskryptory urzadzenia, z ktorym pierwszy juz rozmawial -
+      dwie rozmowy jednym drutem. Stad usbhc_claim(): sterownik, ktory
+      wzial urzadzenie, mowi to, i od tej pory port odpowiada "nic tu
+      nie ma" wszystkim innym.
+
+      Zadnego z nich nie widac w kodzie, ktory sie kompiluje; oba wyszly
+      dopiero z uruchomionej grupy 'usbkbd'. To jest dokladnie ten
+      rodzaj bledu, dla ktorego te testy istnieja.
+
       Grupa 'usbmysz' pyta o dwie rzeczy, i druga jest ta, ktora sie
       liczy: ze maszyna znajduje mysz na kontrolerze xHCI i mowi gdzie,
-      oraz ze przy WYLACZONYM 8042 - maszyna, ktora naprawde nie ma
-      PS/2 - wskaznik dalej sie rusza. Czym innym niz USB ruszyc sie
-      nie moze.
+      oraz ze przy WYLACZONYM 8042 pulpit wstaje, a jego kursor idzie za
+      mysza. Pytanie musi byc zadane w pikselach, nie slowami - bo
+      maszyna bez 8042 nie ma tez klawiatury PS/2, wiec nie ma jak
+      niczego WPISAC. Co poruszylo tym kursorem, przyszlo przez USB, bo
+      innej drogi tam nie ma.
