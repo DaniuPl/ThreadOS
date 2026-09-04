@@ -7,6 +7,11 @@ falls in the middle of 320x200, that is (160,100), and QEMU passes the
 deltas one to one, so every movement can be checked arithmetically
 rather than by eye.
 
+The fourth byte - the wheel, which is how a laptop's touchpad reports
+two fingers - is asked for with a knock of three sample rates, and the
+device answers with who it is. That the asking worked is asked here;
+what the wheel then DOES is the 'kolko' group.
+
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -36,6 +41,15 @@ def main():
               "mysz: x=120 y=80 przyciski=1"
               in q.wait_for("mysz: x=120 y=80 przyciski=1"))
         q.mouse_button(False)
+
+        # The wheel. A laptop's touchpad reports two fingers sliding
+        # through it, and the fourth byte that carries it has to be
+        # asked for - QEMU's mouse sends it only to a guest that did.
+        q.type_line("mouse")
+        said = q.wait_for("kolko=")
+        check("maszyna wynegocjowala czwarty bajt - kolko ('%s')"
+              % said.strip().splitlines()[-1][:50],
+              "kolko=tak" in said)
     finally:
         q.close()
 

@@ -176,8 +176,29 @@ void vga_write(const char *s)
         vga_putchar(*s++);
 }
 
+/* Whether anything is left of the text screen.
+ *
+ * The corner of the text screen was where the boot-time diagnostics
+ * went: the mouse position, the uptime, a demonstration thread saying
+ * hello. Under a framebuffer there is no text screen - the characters
+ * are DRAWN, straight onto the buffer the monitor shows - so once the
+ * compositor owns that buffer those writes are somebody scribbling on
+ * the desktop. From a mouse interrupt, at packet rate.
+ *
+ * So the compositor says it has taken the screen, and the corner
+ * quietly stops being a place. The serial log is untouched: that is
+ * where a diagnostic belongs anyway. */
+static int screen_taken;
+
+void vga_screen_taken(int yes)
+{
+    screen_taken = yes;
+}
+
 void vga_write_at(size_t x, size_t y, const char *s)
 {
+    if (screen_taken)
+        return;
     struct console *con = mine();
     while (*s && x < VGA_WIDTH && y < VGA_HEIGHT) {
         put(con, y * VGA_WIDTH + x, vga_entry(*s, con->color));

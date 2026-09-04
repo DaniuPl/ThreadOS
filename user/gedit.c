@@ -52,6 +52,13 @@ static int  nlines = 1;
 
 static int  cy, cx;           /* the caret: which line, which column */
 static int  top, hoff;        /* the first line and column shown */
+/* Whether the page follows the caret.
+ *
+ * It always did, and for keys that is right: type anywhere in a long
+ * file and the place you are typing has to be on the screen. The wheel
+ * is the other thing - looking somewhere else without going there - so
+ * it lets go, and the next key takes hold again. */
+static int  follow_caret = 1;
 static int  dirty;            /* changed since the last save */
 /* Whether the person has already been told there is something to
    lose. Asking twice about the same thing is a program that does not
@@ -453,6 +460,8 @@ static void find_answer(const char *what)
 
 static void scroll_to_caret(void)
 {
+    if (!follow_caret)
+        return;
     int r = rows(), c = cols();
     if (cy < top)
         top = cy;
@@ -709,13 +718,26 @@ void _start(int argc, char **argv)
             if (ev.type == WEV_SIZE) {
                 cw = ev.x;
                 ch = ev.y;
+            } else if (ev.type == WEV_SCROLL) {
+                /* The page moves and the caret does not: looking
+                   somewhere else in a file is not the same as putting
+                   the caret there, and a person who scrolls and then
+                   types expects to be typing where they were. */
+                follow_caret = 0;
+                top -= ev.val * 3;
+                if (top > nlines - 1)
+                    top = nlines - 1;
+                if (top < 0)
+                    top = 0;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
+                follow_caret = 1;     /* a key means "where I am" again */
                 if (asking)
                     ask_key(c);
                 else
                     edit_key(c);
             } else if (ev.type == WEV_CLICK) {
+                follow_caret = 1;     /* putting the caret somewhere */
                 /* The caret goes where the pointer is - the nearest
                    place there is text, not the empty page past it. */
                 int l = top + (ev.y - PAD) / ROW_H;

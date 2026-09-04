@@ -270,8 +270,11 @@ static void cmd_mouse(void)
 {
     int x, y, b;
     mouse_get(&x, &y, &b);
-    printk("mysz: x=%u y=%u przyciski=%u\n", (uint32_t)x, (uint32_t)y,
-           (uint32_t)b);
+    /* Whether the device agreed to the fourth byte. On a laptop that
+       is the difference between two fingers scrolling and two fingers
+       doing nothing. */
+    printk("mysz: x=%u y=%u przyciski=%u kolko=%s\n", (uint32_t)x,
+           (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "tak" : "nie");
 }
 
 static void cmd_date(void)

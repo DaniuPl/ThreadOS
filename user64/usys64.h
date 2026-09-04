@@ -489,6 +489,13 @@ struct win_text_cmd {
 #define WEV_PRESS   5
 #define WEV_DRAG    6
 #define WEV_RELEASE 7
+/* The wheel turned over the window - two fingers on a touchpad, most
+   of the time. 'val' is how many notches and which way: positive is
+   away from the person, which on a screen means towards the top of
+   the document. x and y say where the pointer was, because a list and
+   the panel beside it are two things to scroll and only the pointer
+   says which one was meant. */
+#define WEV_SCROLL  8
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */

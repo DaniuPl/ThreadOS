@@ -421,6 +421,16 @@ void _start(void)
             if (ev.type == WEV_SIZE) {
                 cw = ev.x;
                 ch = ev.y;
+            } else if (ev.type == WEV_SCROLL) {
+                /* Three rows a notch, and the choice is left where it
+                   was: scrolling a list is looking at it, not moving
+                   through it. */
+                int shown = rows_shown();
+                top -= ev.val * 3;
+                if (top > count - shown)
+                    top = count - shown;
+                if (top < 0)
+                    top = 0;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 int shown = rows_shown();

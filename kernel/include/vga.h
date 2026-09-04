@@ -46,5 +46,8 @@ void vga_write(const char *s);
 /* Writes at a specific place on the screen without moving the cursor
    (e.g. the uptime counter in the corner) */
 void vga_write_at(size_t x, size_t y, const char *s);
+/* Said by the compositor when it takes the screen: after that the
+   text corner is not a place to write diagnostics to. */
+void vga_screen_taken(int yes);
 
 #endif

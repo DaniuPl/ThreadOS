@@ -798,6 +798,20 @@ class Qemu:
             {"type": "btn", "data": {"button": button, "down": down}}]}})
         time.sleep(0.2)
 
+    def mouse_wheel(self, notches=1):
+        """Turns the wheel. Positive is away from the person, which is
+        what two fingers sliding UP a touchpad send. QEMU's PS/2 mouse
+        only sends this once the guest has asked for the IntelliMouse
+        packet, so a test that sees it has proved the asking worked."""
+        button = "wheel-up" if notches > 0 else "wheel-down"
+        for _ in range(abs(notches)):
+            self.cmd({"execute": "input-send-event", "arguments": {"events": [
+                {"type": "btn", "data": {"button": button, "down": True}}]}})
+            self.cmd({"execute": "input-send-event", "arguments": {"events": [
+                {"type": "btn", "data": {"button": button, "down": False}}]}})
+            time.sleep(0.15)
+        time.sleep(0.3)
+
     # Tracking the cursor's position (the desktop starts in the middle of
 # 320x200)
     mx, my = 160, 100

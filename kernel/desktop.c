@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include "include/desktop.h"
 #include "include/video.h"
+#include "include/vga.h"
 #include "include/mouse.h"
 #include "include/task.h"
 #include "include/heap.h"
@@ -349,6 +350,13 @@ struct wevent {
 #define WEV_PRESS   5
 #define WEV_DRAG    6
 #define WEV_RELEASE 7
+/* The wheel turned over the window - two fingers on a touchpad, most
+   of the time. 'val' is how many notches and which way: positive is
+   away from the person, which on a screen means towards the top of
+   the document. x and y say where the pointer was, because a list and
+   the panel beside it are two things to scroll and only the pointer
+   says which one was meant. */
+#define WEV_SCROLL  8
 #define WEV_QLEN  8
 
 struct window {
@@ -1066,6 +1074,23 @@ static void handle_input(int mx, int my, int buttons)
 
     mouse_x = mx;
     mouse_y = my;
+
+    /* The wheel goes to the window under the POINTER, not to the one
+       with the focus. That is how every other machine does it and it
+       is the right way round: a person looking at a list scrolls it by
+       pointing at it, without first making it the window that hears
+       the keyboard. */
+    int notches = mouse_take_scroll();
+    if (notches) {
+        int wi = window_at(mx, my);
+        if (wi >= 0 && wins[wi].content) {
+            struct window *w = &wins[wi];
+            int cx = mx - (w->x + 1);
+            int cy = my - (w->y + TITLE_H + 1);
+            if (cx >= 0 && cy >= 0 && cx < w->cw && cy < w->ch)
+                win_enqueue(w, WEV_SCROLL, cx, cy, notches);
+        }
+    }
 
     /* The right button on the desktop opens the same menu where the
        pointer is. On a window it does nothing yet - a window's own
@@ -2531,6 +2556,11 @@ void desktop_start(void)
     if (running)
         return;
     running = 1;
+
+    /* From here the screen is the compositor's. Whatever used to write
+       into the corner of the text screen - the mouse's position, the
+       uptime - would now be drawing on top of the desktop. */
+    vga_screen_taken(1);
 
     prev_key_handler = keyboard_console_handler();  /* the shell of the visible console */
     keyboard_set_override(desktop_on_key);          /* keys -> the focused window */

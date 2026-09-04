@@ -6,5 +6,9 @@
    ready for graphics mode). The state is read through mouse_get. */
 void mouse_init(void);
 void mouse_get(int *x, int *y, int *buttons);
+/* Wheel notches since the last call, and then zero until it turns
+   again. On a laptop this is two fingers sliding on the touchpad. */
+int mouse_take_scroll(void);
+int mouse_has_wheel(void);
 
 #endif

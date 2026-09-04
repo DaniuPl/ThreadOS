@@ -337,6 +337,14 @@ void _start(void)
                 handle_click(ev.x, ev.y);
                 continue;
             }
+            /* Three rows a notch: the number every other machine uses,
+               and the one that makes a flick of two fingers move a
+               paragraph rather than a line. Away from the person is up
+               the page. */
+            if (ev.type == WEV_SCROLL) {
+                scroll_by(-ev.val * 3);
+                continue;
+            }
             if (ev.type != WEV_KEY)
                 continue;
 
