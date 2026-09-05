@@ -144,11 +144,31 @@ def main():
                   filled and filled[0] == 1 and max(filled) < LOAD_BAR - 1)
 
             # --- and it says what it means when asked -------------------
-            q.mouse_goto(lx + 20, 5)
-            time.sleep(2)
-            w, h, at = q.screen_raw()
-            said = hint_text(at, w, h)
-            m = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad", said)
+            # The count has to SETTLE first. Just after the desktop
+            # starts there are still tasks of its own finishing (the
+            # wallpaper is drawn by a program), and on a machine loaded
+            # with the whole suite that takes a while - a baseline read
+            # too early counts something that is about to disappear, and
+            # then the number after starting a program looks unchanged.
+            def hint_now():
+                q.mouse_goto(lx + 20, 5)
+                time.sleep(2)
+                ww, hh, aat = q.screen_raw()
+                text = hint_text(aat, ww, hh)
+                found = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad",
+                                  text)
+                q.mouse_goto(320, 300)     # away, so the hint disappears
+                return text, found
+
+            said, m = hint_now()
+            previous = None
+            for _ in range(10):
+                if m and previous == int(m.group(4)):
+                    break
+                previous = int(m.group(4)) if m else None
+                time.sleep(2)
+                said, m = hint_now()
+
             check("podpowiedz podaje liczby ('%s')" % said, m is not None)
             if not m:
                 return summary()
@@ -171,16 +191,9 @@ def main():
             said2 = ""
             m2 = None
             for _ in range(12):
-                time.sleep(2)
-                q.mouse_goto(lx + 20, 5)
-                time.sleep(1.5)
-                w, h, at = q.screen_raw()
-                said2 = hint_text(at, w, h)
-                m2 = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad",
-                               said2)
+                said2, m2 = hint_now()
                 if m2 and int(m2.group(4)) > tasks:
                     break
-                q.mouse_goto(320, 300)     # away, so the hint disappears
             check("po uruchomieniu programu podpowiedz mowi co innego "
                   "('%s')" % said2, m2 is not None)
             if m2:
