@@ -877,6 +877,53 @@ def aesref(mode, key, nonce, aad, plain, taglen=16):
     return ct, tag
 
 
+def start_suite_server(suite, dirpath=None):
+    """An HTTPS server that will agree to ONE cipher suite.
+
+    Python's ssl module cannot narrow the TLS 1.3 suites (set_ciphers
+    reaches only the older ones), so this one is OpenSSL's own
+    's_server'. It also says, in its log, what it agreed on - so the
+    test does not have to take the client's word for which suite was
+    used.
+
+    Returns (port, stop, log) - log() gives back everything the server
+    has printed so far. (None, stop, log) when openssl is missing.
+    """
+    tmpdir = dirpath or tempfile.mkdtemp(prefix="protonos-suite-")
+    try:
+        certfile, keyfile, _ = make_test_cert(tmpdir)
+    except BaseException:
+        return None, lambda: None, lambda: ""
+
+    sock = socket.socket()
+    sock.bind(("0.0.0.0", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    out = tempfile.mktemp(suffix="-sserver.log")
+    fh = open(out, "wb")
+    proc = subprocess.Popen(
+        ["openssl", "s_server", "-tls1_3", "-ciphersuites", suite,
+         "-cert", certfile, "-key", keyfile, "-accept", str(port),
+         "-naccept", "8", "-WWW"],
+        stdout=fh, stderr=subprocess.STDOUT, cwd=tmpdir)
+    time.sleep(1.0)
+
+    def log():
+        fh.flush()
+        try:
+            with open(out, "rb") as r:
+                return r.read().decode(errors="replace")
+        except OSError:
+            return ""
+
+    def stop():
+        proc.kill()
+        fh.close()
+
+    return port, stop, log
+
+
 def start_http_server():
     """An HTTP server on the host - the guest reaches it through the slirp
     gateway (10.0.2.2), so the TCP test needs no network outside."""

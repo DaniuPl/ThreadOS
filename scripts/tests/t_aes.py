@@ -126,7 +126,8 @@ def main():
                 cases = [("ecb", "3f", 32, 128), ("ecb", "77", 32, 256),
                          ("ctr", "5a", 40, 128), ("ctr", "b1", 40, 192),
                          ("gcm", "2c", 45, 128), ("gcm", "e9", 45, 256),
-                         ("ccm", "84", 45, 128), ("ccm", "17", 45, 256)]
+                         ("ccm", "84", 45, 128), ("ccm", "17", 45, 256),
+                         ("ccm7", "6d", 45, 128)]
                 for mode, seed, length, bits in cases:
                     out = q.command("run aestest %s %s %d %d"
                                     % (mode, seed, length, bits),
@@ -145,8 +146,10 @@ def main():
                           len(set(got["jawny"])) > 4 and
                           len(got["klucz"]) == bits // 8)
 
+                    # ccm7 is the same mode with a seven-byte nonce -
+                    # OpenSSL takes the length from the nonce itself.
                     taglen = 8 if mode == "ccm" else 16
-                    ref = aesref(mode, got["klucz"],
+                    ref = aesref(mode[:3], got["klucz"],
                                  got.get("nonce", b""), got.get("aad", b""),
                                  got["jawny"], taglen)
                     check("%s-%d: szyfr taki sam jak w OpenSSL"

@@ -198,7 +198,7 @@ $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 # Kopiowanie zrodel do build/ nie jest ozdoba: '#include "utls.h"' szuka
 # najpierw w katalogu pliku, ktory je wciaga. Gdyby libproton.c lezal
 # w user/, znalazlby oryginal zamiast wersji wygenerowanej.
-LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h urand.h ux25519.h \
+LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h uaes.h urand.h ux25519.h \
                ursa.h uecdsa.h ux509.h ucert.h utls.h uhttp.h uhtml.h \
                udns.h caroots.h uproton.h
 LIB_SRC  := $(patsubst %,$(BUILD)/libsrc/%,$(LIB_HEADERS))

@@ -1,9 +1,14 @@
 /* A TLS 1.3 client (RFC 8446) - minimal, but real
  *
- * The set: X25519 for key exchange, TLS_CHACHA20_POLY1305_SHA256 for
- * encryption, SHA-256 in the transcript and the key schedule. That is
- * enough to reach agreement with any modern server - TLS 1.3 threw all
- * the old junk out of the protocol.
+ * The set: X25519 for key exchange, TLS_CHACHA20_POLY1305_SHA256 or
+ * TLS_AES_128_GCM_SHA256 for encryption, SHA-256 in the transcript and
+ * the key schedule. That is enough to reach agreement with any modern
+ * server - TLS 1.3 threw all the old junk out of the protocol.
+ *
+ * Both suites are offered and the server picks; the difference between
+ * them ends at the record - the key schedule, the transcript and the
+ * whole handshake are the same, only the key is sixteen bytes instead
+ * of thirty-two. AES is there because some servers offer nothing else.
  *
  * The course of it: ClientHello with a public key -> ServerHello with
  * its key -> both sides compute the same secret -> the rest of the
@@ -27,6 +32,7 @@
 #include "uapi.h"
 #include "usha256.h"
 #include "uchacha.h"
+#include "uaes.h"
 #include "ux25519.h"
 #include "urand.h"
 #include "ucert.h"
@@ -64,6 +70,8 @@ struct tls_config {
 struct tls_conn {
     int32_t sock;
     int established;
+    uint16_t suite;                      /* which one the server picked */
+    uint32_t keylen;                     /* 32 for ChaCha20, 16 for AES-128 */
     int verified;                        /* 1 = the certificate was verified */
     int verify_err;                      /* CERT_* when it failed */
 
@@ -173,7 +181,11 @@ static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
     tls_put16(out + 3, plen + 16);
 
     tls_nonce(c->iv_c, c->seq_c, nonce);
-    aead_encrypt(c->key_c, nonce, out, 5, plain, out + 5, plen, tag);
+    if (c->suite == TLS_AES_GCM_SHA256)
+        aes_gcm_encrypt(c->key_c, 128, nonce, 12, out, 5, plain, out + 5,
+                        plen, tag, 16);
+    else
+        aead_encrypt(c->key_c, nonce, out, 5, plain, out + 5, plen, tag);
     for (int i = 0; i < 16; i++)
         out[5 + plen + i] = tag[i];
     c->seq_c++;
@@ -205,8 +217,12 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
 
         uint32_t ctlen = len - 16;
         tls_nonce(c->iv_s, c->seq_s, nonce);
-        if (!aead_decrypt(c->key_s, nonce, hdr, 5, buf, out, ctlen,
-                          buf + ctlen)) {
+        int good = c->suite == TLS_AES_GCM_SHA256
+            ? aes_gcm_decrypt(c->key_s, 128, nonce, 12, hdr, 5, buf, out,
+                              ctlen, buf + ctlen, 16)
+            : aead_decrypt(c->key_s, nonce, hdr, 5, buf, out, ctlen,
+                           buf + ctlen);
+        if (!good) {
             c->error = "nie udalo sie odszyfrowac rekordu";
             return -1;
         }
@@ -224,9 +240,9 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
 /* --- the key schedule (RFC 8446 7.1) --- */
 
 static inline void tls_traffic_keys(const uint8_t *secret, uint8_t *key,
-                                    uint8_t *iv)
+                                    uint8_t *iv, uint32_t keylen)
 {
-    hkdf_expand_label(secret, "key", 0, 0, key, 32);
+    hkdf_expand_label(secret, "key", 0, 0, key, keylen);
     hkdf_expand_label(secret, "iv", 0, 0, iv, 12);
 }
 
@@ -372,6 +388,8 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
 
     c->error = 0;
     c->established = 0;
+    c->suite = TLS_CHACHA20_SHA256;
+    c->keylen = 32;
     c->verified = 0;
     c->verify_err = CERT_ERR_PARSE;
     c->applen = c->appoff = 0;
@@ -399,8 +417,12 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     msg[n++] = 32;                       /* legacy_session_id */
     urand_bytes(msg + n, 32);
     n += 32;
-    tls_put16(msg + n, 2); n += 2;       /* a single cipher suite */
+    /* Two cipher suites, in our order of preference - ChaCha20 first,
+       because it needs no substitution tables and so no cache. The
+       server picks; both are accepted below. */
+    tls_put16(msg + n, 4); n += 2;
     tls_put16(msg + n, TLS_CHACHA20_SHA256); n += 2;
+    tls_put16(msg + n, TLS_AES_GCM_SHA256); n += 2;
     msg[n++] = 1; msg[n++] = 0;          /* no compression */
 
     uint32_t ext_len_at = n;
@@ -490,11 +512,13 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     uint32_t suite = tls_get16(msg + p);
     p += 2;
     p += 1;                              /* compression */
-    if (suite != TLS_CHACHA20_SHA256) {
+    if (suite != TLS_CHACHA20_SHA256 && suite != TLS_AES_GCM_SHA256) {
         c->error = "serwer wybral inny zestaw szyfrow";
         tls_abort(c);
         return -1;
     }
+    c->suite = (uint16_t)suite;
+    c->keylen = suite == TLS_AES_GCM_SHA256 ? 16 : 32;
 
     uint32_t exts = tls_get16(msg + p);
     p += 2;
@@ -538,11 +562,11 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     sha256_final(&snap, transcript);
     hkdf_expand_label(hs_secret, "c hs traffic", transcript, 32, c_hs, 32);
     hkdf_expand_label(hs_secret, "s hs traffic", transcript, 32, s_hs, 32);
-    tls_traffic_keys(c_hs, hs_key_c, hs_iv_c);
-    tls_traffic_keys(s_hs, hs_key_s, hs_iv_s);
+    tls_traffic_keys(c_hs, hs_key_c, hs_iv_c, c->keylen);
+    tls_traffic_keys(s_hs, hs_key_s, hs_iv_s, c->keylen);
 
     /* From this moment records are encrypted with the handshake keys */
-    for (int i = 0; i < 32; i++) {
+    for (uint32_t i = 0; i < c->keylen; i++) {
         c->key_s[i] = hs_key_s[i];
         c->key_c[i] = hs_key_c[i];
     }
@@ -678,8 +702,8 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     hkdf_extract(derived, 32, zeros, 32, master);
     hkdf_expand_label(master, "c ap traffic", transcript, 32, c_ap, 32);
     hkdf_expand_label(master, "s ap traffic", transcript, 32, s_ap, 32);
-    tls_traffic_keys(c_ap, c->key_c, c->iv_c);
-    tls_traffic_keys(s_ap, c->key_s, c->iv_s);
+    tls_traffic_keys(c_ap, c->key_c, c->iv_c, c->keylen);
+    tls_traffic_keys(s_ap, c->key_s, c->iv_s, c->keylen);
     c->seq_c = c->seq_s = 0;
 
     c->established = 1;

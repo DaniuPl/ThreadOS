@@ -475,8 +475,12 @@ static inline void ccm_ctr_block(uint8_t ctr[16], const uint8_t *nonce,
     ctr[0] = (uint8_t)(L - 1);
     for (uint32_t i = 0; i < noncelen; i++)
         ctr[1 + i] = nonce[i];
+    /* The counter goes into L bytes, and L reaches eight - so the shift
+       has to be done on sixty-four bits. On thirty-two it would be
+       undefined at the ninth byte, which is the kind of thing that
+       works until somebody uses a short nonce. */
     for (uint32_t i = 0; i < L; i++)
-        ctr[15 - i] = (uint8_t)(counter >> (8 * i));
+        ctr[15 - i] = (uint8_t)((uint64_t)counter >> (8 * i));
 }
 
 /* The MAC over B0, the associated data and the message. Returns the
@@ -496,7 +500,7 @@ static inline void ccm_mac(const struct aes *a, const uint8_t *nonce,
     for (uint32_t i = 0; i < noncelen; i++)
         b[1 + i] = nonce[i];
     for (uint32_t i = 0; i < L; i++)
-        b[15 - i] = (uint8_t)(len >> (8 * i));
+        b[15 - i] = (uint8_t)((uint64_t)len >> (8 * i));
     ccm_mac_block(a, x, b);
 
     if (aadlen) {

@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, make_iso64, no64, start_suite_server
 
 
 def main():
@@ -124,6 +124,34 @@ def main():
                           r"stosu (\d+)", ce)
             check("stos programu urosl na zadanie w trakcie liczenia",
                   m is not None and int(m.group(1)) > 0)
+
+            # --- A server that will agree to ONE suite -----------------
+            # Until now the client offered ChaCha20 alone, so "it
+            # worked" said nothing about AES. These two servers will
+            # agree to one suite each and refuse the handshake
+            # otherwise - so a reply that arrives is proof of which
+            # cipher the record was encrypted with.
+            for suite, label in (
+                    ("TLS_AES_128_GCM_SHA256", "AES-128-GCM"),
+                    ("TLS_CHACHA20_POLY1305_SHA256", "ChaCha20-Poly1305")):
+                sdir = tempfile.mkdtemp()
+                with open(os.path.join(sdir, "index.html"), "wb") as fh:
+                    fh.write(PAGE)
+                sport, sstop, _ = start_suite_server(suite, sdir)
+                if sport is None:
+                    print("POMINIETE: brak openssl s_server")
+                    break
+                try:
+                    got = q.command("run httpget -k https://protonos.test "
+                                    "%d /index.html" % sport,
+                                    "kod wyjscia", timeout=90)
+                    check("serwer wylacznie na %s: uzgodnienie przechodzi"
+                          % label, "[httpget] TLS 1.3" in got)
+                    check("i tresc wraca odszyfrowana (%s)" % label,
+                          "ProtonOS TCP dziala" in got)
+                finally:
+                    sstop()
+                    shutil.rmtree(sdir, ignore_errors=True)
         finally:
             q.close()
             if os.path.exists(slog):

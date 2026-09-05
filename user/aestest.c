@@ -303,7 +303,12 @@ static void derived(const char *mode, uint32_t seed, uint32_t len,
     uint8_t key[32], nonce[13], aad[20];
     uint8_t pt[MAXDATA], ct[MAXDATA], back[MAXDATA], tag[16];
     uint32_t keylen = bits / 8;
-    uint32_t noncelen = same_word(mode, "ccm") ? 13 : 12;
+    /* "ccm" is the shape WPA2 uses: a thirteen-byte nonce and an
+       eight-byte tag. "ccm7" is the other end of the range - a
+       seven-byte nonce, so the length field takes eight bytes, which
+       is where a thirty-two-bit shift would fall over. */
+    uint32_t noncelen = same_word(mode, "ccm") ? 13
+                      : same_word(mode, "ccm7") ? 7 : 12;
     uint32_t taglen = same_word(mode, "ccm") ? 8 : 16;
     struct aes a;
 

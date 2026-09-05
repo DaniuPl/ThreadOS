@@ -162,12 +162,25 @@ def main():
             # count; a number that never moves is a picture of a number.
             q.mouse_goto(24, 192)              # the "Term" icon
             q.mouse_click()
-            time.sleep(4)
-            q.mouse_goto(lx + 20, 5)
-            time.sleep(2.5)
-            w, h, at = q.screen_raw()
-            said2 = hint_text(at, w, h)
-            m2 = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad", said2)
+
+            # How long a program takes to start is not something to
+            # guess: with the whole suite running in parallel four
+            # seconds are sometimes not enough, and a test that fails
+            # because the machine was busy teaches nothing. So we look
+            # again until the count moves, and give up only then.
+            said2 = ""
+            m2 = None
+            for _ in range(12):
+                time.sleep(2)
+                q.mouse_goto(lx + 20, 5)
+                time.sleep(1.5)
+                w, h, at = q.screen_raw()
+                said2 = hint_text(at, w, h)
+                m2 = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad",
+                               said2)
+                if m2 and int(m2.group(4)) > tasks:
+                    break
+                q.mouse_goto(320, 300)     # away, so the hint disappears
             check("po uruchomieniu programu podpowiedz mowi co innego "
                   "('%s')" % said2, m2 is not None)
             if m2:

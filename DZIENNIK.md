@@ -5020,3 +5020,28 @@ sprawdzane przez `make test`.
       urzadzenia, ktore odpowiada - znaczy tyle, co pisac bez zadnego
       testu. To zostaje na sprzet, i wtedy juz tylko sterownik, bo cala
       kryptografia bedzie gotowa i sprawdzona.
+
+- [x] **TLS z AES-128-GCM, nie tylko z ChaCha20** (user/utls.h,
+      rozszerzona grupa `tls64`).
+
+      Pierwszy zysk z AES-a, ktory widac od razu. Do tej pory klient
+      oferowal jeden zestaw szyfrow i tyle - a czesc serwerow, zwlaszcza
+      wbudowanych i sprzetowych, nie oferuje nic poza AES-GCM. Teraz w
+      ClientHello ida dwa zestawy, serwer wybiera, a roznica miedzy nimi
+      konczy sie na rekordzie: rozklad kluczy, transkrypt i cale
+      uzgodnienie sa te same, klucz ma tylko szesnascie bajtow zamiast
+      trzydziestu dwoch.
+
+      ChaCha20 zostaje pierwsza w kolejnosci naszych preferencji, bo nie
+      potrzebuje tablic podstawien, wiec nie ma czym zdradzic klucza
+      przez pamiec podreczna. AES jest po to, zeby bylo z czym rozmawiac
+      tam, gdzie nie ma wyboru.
+
+      **Test, ktory nie pozwala sobie na "chyba dziala".** Do tej pory
+      "polaczylo sie" nie mowilo nic o tym, ktorego szyfru uzyto - bo
+      byl jeden. Teraz stoja dwa serwery, kazdy zgadza sie na DOKLADNIE
+      jeden zestaw (openssl s_server -ciphersuites, bo modul ssl
+      Pythona nie umie zawezic zestawow TLS 1.3) i przy innym zrywa
+      uzgodnienie. Odpowiedz, ktora wraca, jest wiec dowodem, czym
+      rekord byl zaszyfrowany - osobno dla AES-GCM i osobno dla
+      ChaCha20-Poly1305.
