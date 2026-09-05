@@ -65,6 +65,13 @@ def menu_y(name):
 
 
 PAGE = b"<html>ProtonOS TCP dziala</html>\n"
+
+# Files a test wants the guest to be able to download: path -> bytes.
+# Filled in BEFORE start_http_server() is called - the handler reads
+# this dictionary on every request, so a test that has something of its
+# own to hand over (a ciphertext prepared on the host, say) does not
+# have to add a branch to the server.
+SERVED = {}
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>Strona pierwsza</h1>"
              + b"<p>Wiersz wypelniajacy strone numer jeden.</p>" * 20
@@ -838,6 +845,38 @@ def start_https_server(ec=False, p384=False):
     return srv.server_address[1], srv.shutdown
 
 
+_AESREF = None          # the compiled helper, False when it cannot be built
+
+
+def aesref(mode, key, nonce, aad, plain, taglen=16):
+    """What OpenSSL makes of the same input - or None when the helper
+    cannot be built here (no compiler, no libcrypto headers).
+
+    The AES test needs an opinion that shares no line of code with ours;
+    scripts/aesref.c is that opinion, compiled once per run."""
+    global _AESREF
+
+    if _AESREF is None:
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "aesref.c")
+        out = tempfile.mktemp(suffix="-aesref")
+        r = subprocess.run(["cc", "-O2", "-o", out, src, "-lcrypto"],
+                           capture_output=True)
+        _AESREF = out if r.returncode == 0 else False
+
+    if not _AESREF:
+        return None
+
+    r = subprocess.run([_AESREF, mode, key.hex(), nonce.hex(), aad.hex(),
+                        plain.hex(), str(taglen)], capture_output=True)
+    if r.returncode != 0:
+        return None
+    parts = r.stdout.decode().split()
+    ct = bytes.fromhex(parts[0]) if parts and parts[0] else b""
+    tag = bytes.fromhex(parts[1]) if len(parts) > 1 else b""
+    return ct, tag
+
+
 def start_http_server():
     """An HTTP server on the host - the guest reaches it through the slirp
     gateway (10.0.2.2), so the TCP test needs no network outside."""
@@ -846,6 +885,15 @@ def start_http_server():
         protocol_version = "HTTP/1.1"
 
         def do_GET(self):
+            blob = SERVED.get(self.path)
+            if blob is not None:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(blob)))
+                self.end_headers()
+                self.wfile.write(blob)
+                return
+
             if self.path.startswith("/stara"):      # a redirect
                 self.send_response(302)
                 self.send_header("Location", "/kawalki")

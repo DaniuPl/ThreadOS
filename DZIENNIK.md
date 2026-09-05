@@ -4911,3 +4911,63 @@ sprawdzane przez `make test`.
       daje 2353, 5% daje 314, a cisza zero. Osobno to samo klikane w
       oknie - suwak na koniec, przycisk 'Sprawdz', pomiar; suwak na
       jedna piata, znowu pomiar, i musi byc ciszej.
+
+- [x] **AES, GCM i CCM - szyfr, ktorego dotad nie bylo** (user/uaes.h,
+      program user/aestest.c, wzorzec scripts/aesref.c, grupa testow
+      `aes`).
+
+      Cala kryptografia tego systemu stala dotad na ChaCha20 - wybranej
+      dlatego, ze liczy na dodawaniu, obrotach i XOR-ach, wiec da sie ja
+      napisac bez ani jednej tablicy. AES jest wejsciowka do dwoch
+      miejsc, do ktorych ChaCha nie siega: do zestawow szyfrow TLS,
+      ktore czesc serwerow oferuje wylacznie, i do WPA2 - bo ramke
+      bezprzewodowa szyfruje sie AES-CCM i niczym innym.
+
+      Sam szyfr to FIPS-197 przepisane wprost: jedna tablica podstawien
+      (256 bajtow) i jej odwrotnosc, a MixColumns liczone, nie czytane z
+      czterech kilobajtow tablic. Wolniej, ale kazda linia daje sie
+      przeczytac obok specyfikacji. **Nie jest to implementacja odporna
+      na pomiar czasu** - odczyt z tablicy zalezy od danych - i jest to
+      napisane wprost w naglowku, zamiast udawac, ze jest inaczej.
+
+      **Rzecz, ktora najlatwiej zrobic prawie dobrze.** AES z bledem w
+      rozwijaniu klucza szyfruje, odszyfrowuje, zgadza sie sam ze soba
+      idealnie - i nie zgadza sie z nikim na swiecie. Dlatego jedna
+      linia w rozwijaniu klucza (dodatkowe podstawienie co czwarte slowo
+      przy kluczu 256-bitowym) ma nad soba komentarz, ze bez niej
+      powstaje wlasnie taki AES.
+
+      **Licznik GCM to nie jest licznik CTR.** W trybie CTR podnosi sie
+      caly szesnastobajtowy blok, w GCM tylko ostatnie CZTERY bajty -
+      reszta bloku to nonce i ruszyc jej nie wolno. Sa to dwie funkcje,
+      choc wygladaja na jedna.
+
+      **CCM odszyfrowuje, zanim sprawdzi**, bo jego suma liczy tekst
+      JAWNY, a nie szyfrogram (odwrotnie niz GCM). Wiec przy zlym
+      znaczniku w buforze wolajacego lezy juz odszyfrowana tresc - i
+      dlatego jest tam zerowana. Oddanie czegos niesprawdzonego byloby
+      gorsze niz nieoddanie niczego, a test tego pilnuje osobno.
+
+      Sprawdzane z trzech stron, bo zadna z nich osobno nie wystarcza:
+
+        1. wektory oficjalne - FIPS-197 (trzy dlugosci klucza),
+           SP 800-38A dla CTR, przypadek 4 ze specyfikacji GCM i pakiet
+           nr 1 z RFC 3610 (czyli dokladnie ksztalt WPA2: nonce
+           trzynastobajtowy, znacznik osmiobajtowy);
+        2. przeciwko OpenSSL - system szyfruje wlasny material i
+           WYPISUJE wszystko, czego uzyl, a host szyfruje to samo przez
+           libcrypto (scripts/aesref.c, bo `openssl enc` nie umie trybow
+           uwierzytelnionych) i porownuje bajt w bajt;
+        3. w druga strone - to OpenSSL szyfruje, plik wjezdza do systemu
+           po HTTP, a system ma go odszyfrowac i ma ODMOWIC temu samemu
+           plikowi z jednym przestawionym bitem znacznika.
+
+      Trzecia droga jest najwazniejsza: to, ze nasze szyfrowanie zgadza
+      sie z naszym odszyfrowywaniem, nie mowi o zadnym z nich niczego.
+      Test sprawdza tez, ze material nie jest wyrodny - klucz z jednego
+      powtorzonego bajtu zgadza sie ze wszystkim.
+
+      Te same wektory ida osobno przez jadro 32-bitowe. Nie dlatego, ze
+      je rozwijamy, tylko dlatego, ze druga kompilacja tych samych
+      zrodel jest najtansza znana mi metoda na przesuniecie, szerokosc i
+      wskaznik, ktory przypadkiem mial dobry rozmiar.
