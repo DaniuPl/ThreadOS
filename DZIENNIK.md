@@ -4405,3 +4405,67 @@ sprawdzane przez `make test`.
       juz uruchomic system z pendrive'a przygotowanego na hoscie; zeby
       ProtonOS umial przygotowac go sam - obok Windowsa, na dysku
       laptopa - musi umiec ZAPISAC partycje EFI. To jest nastepny krok.
+
+- [x] **FAT12/16/32 - jedyny cudzy system plikow w tym projekcie**
+      (kernel/fat.c, kernel/fatcmd.c, grupa testow `fat`).
+
+      Ten system trzyma swoje pliki w PFS3 i nie ma powodu chciec
+      czegokolwiek innego - poza jednym miejscem. Partycja EFI jest
+      FAT-em z urzedu: firmware kazdej maszyny UEFI umie czytac FAT i
+      nie umie czytac niczego innego, wiec program rozruchowy lezacy
+      gdzie indziej nigdy nie zostanie uruchomiony. Zainstalowanie tego
+      systemu obok innego znaczy wiec ZAPISAC do partycji, ktora juz
+      istnieje, ma juz w sobie czyjs loader i ma dzialac dalej.
+
+      Stad ksztalt sterownika. Czytanie jest kompletne. Zapis robi to,
+      czego potrzebuje instalator - katalog, plik, jego tresc - i nic
+      ponadto: nic tu nie formatuje, nic nie przenosi cudzych plikow,
+      nic nie przepisuje struktury, ktorej nie musialo dotknac. Kazdy
+      zapis idzie do WSZYSTKICH kopii tablicy alokacji, bo system,
+      ktory uruchomi te maszyne jutro, moze czytac dowolna z nich.
+
+      **Ktora to z trzech odmian, nie mowi nic w sektorze rozruchowym.**
+      Mowi to LICZBA KLASTROW, policzona z rozmiarow. To nie jest
+      zlosliwosc specyfikacji, tylko jedyna rzecz, ktora jest o FAT-cie
+      naprawde prawdziwa - a odczytanie nazwy z napisu w sektorze
+      rozruchowym, czyli miejsce, w ktorym mieszka pierwszy blad
+      kazdego, myli sie na woluminach, ktore glosza "FAT16   " i nim
+      nie sa.
+
+      **FAT12 nie jest ciekawostka.** Jego wpis ma dwanascie bitow,
+      wiec co drugi lezy okrakiem na granicy sektora tablicy. Sterownik
+      napisany na cale wpisy lamie sie wlasnie tam. Dlatego caly dostep
+      do tablicy - chodzenie po lancuchu, przydzielanie, zwalnianie -
+      idzie przez POJEDYNCZE BAJTY: bajt nie lezy okrakiem na niczym.
+
+      **Dlugie nazwy sa czytane i zapisywane**, i nie jest to
+      uprzejmosc. Loader szuka pliku 'protonos64.bin', ktore nie miesci
+      sie w osmiu znakach i kropce; nagiecie nazwy do ograniczen
+      systemu plikow byloby pozwoleniem, zeby to system plikow
+      decydowal, jak nazywaja sie pliki tego systemu. Nazwa, ktora
+      MIESCI sie w 8.3, dostaje jeden zwykly wpis - dokladnie taki, jaki
+      zapisalby kazdy inny - z dwoma bitami w bajcie na pozycji
+      dwunastej, ktore pamietaja, ze byla pisana malymi literami.
+
+      **Co jest po drugiej stronie kazdej asercji.** Obrazy FAT w
+      testach robi mtools i to mtools czyta z powrotem wszystko, co
+      system do nich zapisal: katalog, dluga nazwe wraz z jej nazwa
+      krotka (PROTON~1.BIN), tresc plikow, zniknięcie usunietego pliku.
+      Sterownik, ktory zgadza sie tylko sam ze soba, nie udowodnil
+      niczego - a juz najmniej na partycji nalezacej do systemu, ktory
+      uruchamia te maszyne. Osobno sprawdzane jest to, czego robic nie
+      wolno: cudzy bootmgfw.efi na tej samej partycji, tablica GPT i
+      sasiednia partycja Windows sa po wszystkim czytane z hosta i
+      musza byc nietkniete.
+
+      **fatcopy jest instalatorem w miniaturze.** Przepisuje plik z
+      initrd na partycje EFI - a instalowanie tego systemu to dokladnie
+      to: loader, jadro i initrd sa plikami, ktore dzialajacy system juz
+      ma. Komenda powstala przed instalatorem, bo jest ta czescia, ktora
+      da sie sprawdzic osobno, co do bajtu, programem, ktory nie jest
+      nasz. Test przepisuje libproton.so (83 272 B) i porownuje z
+      zawartoscia initrd.
+
+      **Komendy sa w osobnym pliku** (kernel/fatcmd.c), bo obie powloki
+      - 32- i 64-bitowa - maja je mieć, a zadna nie powinna miec
+      wlasnej kopii.

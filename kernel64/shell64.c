@@ -44,6 +44,7 @@
 #include "../kernel/include/smpthreads.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/fatcmd.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
@@ -98,6 +99,8 @@ static void cmd_help(void)
     printk("           reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("           runw <prog> - program na dowolnym rdzeniu\n");
     printk("           kim, sudo <komenda>, wyloguj, haslo\n");
+    printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
+    printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
 }
 
 static void cmd_mem(void)
@@ -681,6 +684,26 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "fat")) {
+        fatcmd_mount("");
+    } else if (starts_with(line, "fat ")) {
+        fatcmd_mount(argument(line, 4));
+    } else if (!strcmp(line, "fatls")) {
+        fatcmd_ls("/");
+    } else if (starts_with(line, "fatls ")) {
+        fatcmd_ls(argument(line, 6));
+    } else if (starts_with(line, "fatcat ")) {
+        fatcmd_cat(argument(line, 7));
+    } else if (starts_with(line, "fatput ")) {
+        fatcmd_put(argument(line, 7));
+    } else if (starts_with(line, "fatmkdir ")) {
+        fatcmd_mkdir(argument(line, 9));
+    } else if (starts_with(line, "fatrm ")) {
+        fatcmd_rm(argument(line, 6));
+    } else if (starts_with(line, "fatsum ")) {
+        fatcmd_sum(argument(line, 7));
+    } else if (starts_with(line, "fatcopy ")) {
+        fatcmd_copy(argument(line, 8));
     } else if (!strcmp(line, "set")) {
         cmd_set("");
     } else if (starts_with(line, "set ")) {

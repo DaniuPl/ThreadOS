@@ -161,13 +161,140 @@ def make_gpt_disk(path, mib=800):
 NEIGHBOUR_MARK = b"CUDZE-DANE-%d-NIE-RUSZAC" + b"\0" * 8
 
 
-def neighbours_intact(path, mib=800):
-    """Are the first two partitions still carrying what was put in
-    them? Read from the host, not asked of the system."""
+# --- FAT, made and read back by somebody else ------------------------
+#
+# The EFI partition is FAT, and FAT is the one filesystem in this
+# project that is not ours. So the images the tests read are made by
+# mtools, and what the system writes into them is read back by mtools
+# too - an independent implementation on the other side of every
+# assertion. A driver that agrees only with itself has proved nothing.
+
+MTOOLS_ENV = dict(os.environ, MTOOLS_SKIP_CHECK="1")
+
+
+def mtools_ok():
+    return shutil.which("mformat") is not None
+
+
+def _mt(args, quiet=True):
+    return subprocess.run(
+        args, env=MTOOLS_ENV,
+        stdout=subprocess.DEVNULL if quiet else subprocess.PIPE,
+        stderr=subprocess.DEVNULL)
+
+
+def _at(path, offset_sectors):
+    return f"{path}@@{offset_sectors * 512}"
+
+
+def fat_format(path, offset_sectors, sectors, fat32=True, label="ESPTEST"):
+    """Puts a FAT filesystem into an image at an offset. Whether it
+    comes out as FAT12, FAT16 or FAT32 follows from the size, which is
+    the only thing that decides it - so the test asks the bytes
+    afterwards rather than assuming."""
+    args = ["mformat", "-i", _at(path, offset_sectors),
+            "-T", str(sectors), "-v", label]
+    if fat32:
+        args.insert(1, "-F")
+    return _mt(args + ["::"]).returncode == 0
+
+
+def fat_mkdirs(path, offset_sectors, dirs):
+    for d in dirs:
+        if _mt(["mmd", "-i", _at(path, offset_sectors), "::" + d]).returncode:
+            return False
+    return True
+
+
+def fat_put(path, offset_sectors, data, dest):
+    """Puts bytes into the image under the given name."""
+    tmp = tempfile.mktemp()
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    try:
+        return _mt(["mcopy", "-i", _at(path, offset_sectors), tmp,
+                    "::" + dest]).returncode == 0
+    finally:
+        os.unlink(tmp)
+
+
+def fat_get(path, offset_sectors, name):
+    """The contents of a file, read out of the image by mtools.
+    None when it is not there."""
+    r = subprocess.run(["mtype", "-i", _at(path, offset_sectors), "::" + name],
+                       env=MTOOLS_ENV, stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    return r.stdout if r.returncode == 0 else None
+
+
+def fat_dir(path, offset_sectors, where="::"):
+    """What mtools sees in the image - the whole tree, long names and
+    all."""
+    r = subprocess.run(["mdir", "-i", _at(path, offset_sectors), "-/", where],
+                       env=MTOOLS_ENV, stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    return r.stdout.decode(errors="replace") if r.returncode == 0 else ""
+
+
+def fat_kind(path, offset_sectors):
+    """Which of the three it is, counted from the boot sector the same
+    way the driver counts it: from the number of clusters, not from the
+    string somebody wrote into the sector."""
+    with open(path, "rb") as fh:
+        fh.seek(offset_sectors * 512)
+        bs = fh.read(512)
+    if len(bs) < 512 or bs[510] != 0x55 or bs[511] != 0xAA:
+        return None
+    spc = bs[13]
+    reserved = struct.unpack_from("<H", bs, 14)[0]
+    nfats = bs[16]
+    root_entries = struct.unpack_from("<H", bs, 17)[0]
+    total = struct.unpack_from("<H", bs, 19)[0] or \
+        struct.unpack_from("<I", bs, 32)[0]
+    fat_secs = struct.unpack_from("<H", bs, 22)[0] or \
+        struct.unpack_from("<I", bs, 36)[0]
+    if not spc or not total or not fat_secs:
+        return None
+    root_secs = (root_entries * 32 + 511) // 512
+    clusters = (total - (reserved + nfats * fat_secs + root_secs)) // spc
+    return "FAT12" if clusters < 4085 else \
+           "FAT16" if clusters < 65525 else "FAT32"
+
+
+def make_mbr_fat_disk(path, mib=64, fat32=False, label="MALYFAT"):
+    """A disk with the old table on it and one FAT partition - the
+    shape of a memory stick, and the second of the two tables the
+    system has to find its way around."""
+    sec = 512
+    total = mib * 2048
+    start = 2048
+    count = total - start
+    mbr = bytearray(sec)
+    mbr[446 + 4] = 0x0C if fat32 else 0x0E     # FAT32 LBA / FAT16 LBA
+    mbr[446 + 8:446 + 12] = struct.pack("<I", start)
+    mbr[446 + 12:446 + 16] = struct.pack("<I", count)
+    mbr[510] = 0x55
+    mbr[511] = 0xAA
+    with open(path, "wb") as fh:
+        fh.write(bytes(mbr))
+        fh.truncate(total * sec)
+    return fat_format(path, start, count, fat32=fat32, label=label), start
+
+
+def neighbours_intact(path, mib=800, which=(0, 1)):
+    """Are the marked partitions still carrying what was put in them?
+    Read from the host, not asked of the system.
+
+    'which' picks the ones to look at: a test that deliberately writes
+    into one of them - putting a FAT filesystem on the EFI partition,
+    say - has to leave that one out, or it will find its own doing and
+    call it damage."""
     sec = 512
     starts = [2048, 2048 + 204800]
     with open(path, "rb") as f:
         for i, start in enumerate(starts):
+            if i not in which:
+                continue
             f.seek(start * sec)
             if f.read(len(NEIGHBOUR_MARK % i)) != NEIGHBOUR_MARK % i:
                 return False

@@ -38,6 +38,7 @@
 #include "include/mouse.h"
 #include "include/pci.h"
 #include "include/part.h"
+#include "include/fatcmd.h"
 #include "include/blk.h"
 #include "include/usbhc.h"
 #include "include/usbkbd.h"
@@ -132,6 +133,10 @@ static const struct {
     {"clear",    "wyczysc ekran"},
     {"ekran",    "tryb ekranu, koszt klatki"},
     {"sprzet",   "co jest w tej maszynie"},
+    {"fat [N]",  "partycja EFI (FAT)"},
+    {"fatls P",  "katalog na FAT"},
+    {"fatcat P", "plik z FAT"},
+    {"fatcopy",  "z initrd na FAT"},
     {"gfx",      "test trybu 13h"},
     {"vesa",     "test trybu VESA"},
     {"crash",    "test page faulta"},
@@ -1017,6 +1022,22 @@ static void run_command(char *cmd)
         cmd_sprzet();
     else if (!strcmp(cmd, "formatuj"))
         cmd_formatuj(arg);
+    else if (!strcmp(cmd, "fat"))
+        fatcmd_mount(arg);
+    else if (!strcmp(cmd, "fatls"))
+        fatcmd_ls(arg);
+    else if (!strcmp(cmd, "fatcat"))
+        fatcmd_cat(arg);
+    else if (!strcmp(cmd, "fatput"))
+        fatcmd_put(arg);
+    else if (!strcmp(cmd, "fatmkdir"))
+        fatcmd_mkdir(arg);
+    else if (!strcmp(cmd, "fatrm"))
+        fatcmd_rm(arg);
+    else if (!strcmp(cmd, "fatsum"))
+        fatcmd_sum(arg);
+    else if (!strcmp(cmd, "fatcopy"))
+        fatcmd_copy(arg);
     else if (!strcmp(cmd, "uptime"))
         cmd_uptime();
     else if (!strcmp(cmd, "date"))
