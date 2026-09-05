@@ -136,9 +136,14 @@ def main():
             check("jadro rozpoznaje znaczniki Multiboot 2 od naszego loadera",
                   "Multiboot OK (Multiboot 2)" in boot)
 
+            # Three modules: the initrd, which the kernel has always
+            # taken by position, and behind it the kernel image and the
+            # loader itself - handed over by name, because a system
+            # that may be asked to install itself has to have the
+            # FILES, and the kernel in memory is loaded segments
             mods = q.wait_serial("Moduly od loadera:", timeout=30)
-            check("initrd dociera do jadra jako modul Multiboot 2",
-                  "Moduly od loadera: 1" in mods)
+            check("initrd, obraz jadra i sam loader docieraja jako moduly",
+                  "Moduly od loadera: 3" in mods)
 
             fb = q.wait_serial("Bufor obrazu:", timeout=30)
             m = re.search(r"Bufor obrazu: (\d+)x(\d+), (\d+) bitow", fb)

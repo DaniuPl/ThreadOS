@@ -45,6 +45,7 @@
 #include "../kernel/include/io.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fatcmd.h"
+#include "../kernel/include/install.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
@@ -101,6 +102,7 @@ static void cmd_help(void)
     printk("           kim, sudo <komenda>, wyloguj, haslo\n");
     printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
+    printk("           instaluj - ProtonOS na dysk tej maszyny\n");
 }
 
 static void cmd_mem(void)
@@ -536,6 +538,55 @@ static void read_secret(char *out, int max)
     printk("\n");
 }
 
+/* The same loop with what was typed left visible. A confirmation has
+   to be READ by the person typing it. */
+static void read_word(char *out, int max)
+{
+    int n = 0;
+    for (;;) {
+        char c = keyboard64_getchar();
+        if (c == '\n')
+            break;
+        if (c == '\b') {
+            if (n) {
+                n--;
+                printk("\b");
+            }
+            continue;
+        }
+        if (c < 0x20)
+            continue;
+        if (n < max - 1) {
+            out[n++] = c;
+            printk("%c", c);
+        }
+    }
+    out[n] = 0;
+    printk("\n");
+}
+
+/* Installing onto the machine's own disk.
+ *
+ * Reading and printing first, then a person saying yes, and only then
+ * writing. The word typed out is deliberate: a key to press is
+ * something one does by reflex, and a word is something one has to
+ * decide to type - and what is on the other side of this is somebody's
+ * laptop. */
+static void cmd_install(void)
+{
+    char answer[8];
+
+    if (!install_plan())
+        return;
+    printk("\nWpisz TAK (duzymi literami), zeby to zapisac: ");
+    read_word(answer, (int)sizeof(answer));
+    if (strcmp(answer, "TAK") != 0) {
+        printk("instaluj: nie zapisano niczego\n");
+        return;
+    }
+    install_do();
+}
+
 static void execute(const char *line);
 
 static void cmd_whoami(void)
@@ -684,6 +735,8 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "instaluj")) {
+        cmd_install();
     } else if (!strcmp(line, "fat")) {
         fatcmd_mount("");
     } else if (starts_with(line, "fat ")) {

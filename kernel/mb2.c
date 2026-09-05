@@ -81,6 +81,32 @@ uint32_t mb2_rsdp(void)
     return rsdp_addr;
 }
 
+/* Modules beyond the initrd: the loader's own name for each is the
+   only thing that identifies it. */
+static uint32_t nmods_kept;
+
+int mb2_module(const char *name, uint32_t *start, uint32_t *size)
+{
+    if (!name)
+        return 0;
+    for (uint32_t i = 0; i < nmods_kept; i++) {
+        const char *s = (const char *)(uintptr_t)mods[i].string;
+        if (!s)
+            continue;
+        int k = 0;
+        while (name[k] && s[k] == name[k])
+            k++;
+        if (name[k] || s[k])
+            continue;
+        if (start)
+            *start = mods[i].start;
+        if (size)
+            *size = mods[i].end - mods[i].start;
+        return 1;
+    }
+    return 0;
+}
+
 const struct mb2_framebuffer *mb2_framebuffer(void)
 {
     return framebuffer.addr ? &framebuffer : (const struct mb2_framebuffer *)0;
@@ -181,6 +207,7 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
         pos += (t->size + 7) & ~7u;      /* tags every eight bytes */
     }
 
+    nmods_kept = nmods;
     if (nmods) {
         info.mods_count = nmods;
         info.mods_addr = (uint32_t)(uintptr_t)mods;

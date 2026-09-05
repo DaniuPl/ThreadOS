@@ -72,6 +72,7 @@ typedef struct {
 #define EfiConventionalMemory  7
 
 #define AllocateAnyPages   0
+#define AllocateMaxAddress 1
 #define AllocateAddress    2
 #define EfiLoaderData_Type 2
 

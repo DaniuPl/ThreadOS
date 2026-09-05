@@ -39,6 +39,7 @@
 #include "include/pci.h"
 #include "include/part.h"
 #include "include/fatcmd.h"
+#include "include/install.h"
 #include "include/blk.h"
 #include "include/usbhc.h"
 #include "include/usbkbd.h"
@@ -133,6 +134,7 @@ static const struct {
     {"clear",    "wyczysc ekran"},
     {"ekran",    "tryb ekranu, koszt klatki"},
     {"sprzet",   "co jest w tej maszynie"},
+    {"instaluj", "ProtonOS na dysk maszyny"},
     {"fat [N]",  "partycja EFI (FAT)"},
     {"fatls P",  "katalog na FAT"},
     {"fatcat P", "plik z FAT"},
@@ -364,6 +366,26 @@ static void cmd_formatuj(char *arg)
                which ? "ta partycja" : "caly dysk");
     else
         printk("formatuj: nie udalo sie\n");
+}
+
+/* Installing onto the machine's own disk.
+ *
+ * Reading and printing first, then a person saying yes, and only then
+ * writing - the same shape as formatting, and for the same reason:
+ * what is on the other side of this is somebody's laptop. */
+static void cmd_install(void)
+{
+    char answer[8];
+
+    if (!install_plan())
+        return;
+    printk("\nWpisz TAK (duzymi literami), zeby to zapisac: ");
+    read_word(answer, (int)sizeof(answer));
+    if (strcmp(answer, "TAK") != 0) {
+        printk("instaluj: nie zapisano niczego\n");
+        return;
+    }
+    install_do();
 }
 
 static void cmd_mem(void)
@@ -1022,6 +1044,8 @@ static void run_command(char *cmd)
         cmd_sprzet();
     else if (!strcmp(cmd, "formatuj"))
         cmd_formatuj(arg);
+    else if (!strcmp(cmd, "instaluj"))
+        cmd_install();
     else if (!strcmp(cmd, "fat"))
         fatcmd_mount(arg);
     else if (!strcmp(cmd, "fatls"))

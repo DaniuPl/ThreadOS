@@ -4469,3 +4469,61 @@ sprawdzane przez `make test`.
       **Komendy sa w osobnym pliku** (kernel/fatcmd.c), bo obie powloki
       - 32- i 64-bitowa - maja je mieć, a zadna nie powinna miec
       wlasnej kopii.
+
+- [x] **Instalator: ProtonOS na dysk maszyny** (kernel/install.c, grupa
+      testow `instaluj`).
+
+      Na maszynie z UEFI instalowanie jest mniejsze, niz slowo
+      sugeruje: trzy pliki zapisane na partycji EFI, ktora juz tam
+      jest. Firmware szuka na niej programu rozruchowego i uruchamia
+      go - to caly mechanizm. Wiec nic tutaj nie tworzy partycji, nic
+      nie rusza tablicy i nic nie usuwa ani nie przenosi zadnego pliku
+      nalezacego do systemu, ktory na tym dysku juz mieszka.
+
+      **Skad biora sie te trzy pliki - to jest sedno.** Jadro dzialajace
+      w tej chwili to zaladowane segmenty, a nie plik, z ktorego
+      przyszlo; a zapisac trzeba plik. Wiec loader podaje wszystkie trzy
+      jako moduly Multiboot 2: initrd tak, jak podawal zawsze, a obraz
+      jadra i SIEBIE SAMEGO - po nazwie. System uruchomiony inaczej
+      (QEMU z -kernel, GRUB z plyty, ktora nie byla o tym robiona) nie
+      ma czego instalowac i mowi to wprost, zamiast zapisac cos
+      przyblizonego.
+
+      Moduly poza initrd bierze sie PO NAZWIE, nie po pozycji.
+      Alternatywa jest umowa loadera z jadrem co do kolejnosci, czyli
+      rodzaj umowy, ktora psuje sie po cichu.
+
+      **Dwie sciezki, i roznica miedzy nimi jest cala etyka tej
+      komendy.** /EFI/ProtonOS jest nasz i zapisujemy go zawsze.
+      /EFI/BOOT/BOOTX64.EFI - nazwa, do ktorej firmware sie cofa, gdy
+      nic innego nie jest ustawione - zapisujemy TYLKO WTEDY, GDY GO
+      TAM NIE MA. Na maszynie, ktora go ma, nalezy on do tego, kto te
+      maszyne dzisiaj uruchamia; zabranie go byloby instalacja NA
+      MIEJSCE kogos, a nie OBOK niego. Wtedy droga wejscia jest wpis w
+      menu firmware'u i powiedzenie tego jest lepsze niz maszyna, ktora
+      po cichu przestaje uruchamiac to, co uruchamiala.
+
+      Potwierdzenie jest slowem wpisanym z klawiatury, tak samo jak przy
+      'formatuj' i z tego samego powodu: klawisz do nacisniecia to
+      odruch, a slowo to decyzja - a po drugiej stronie jest czyjs
+      laptop.
+
+      **Test zamyka petle.** Maszyna wstaje z pendrive'a (partycja EFI
+      podana QEMU jako katalog), dysk 'tej drugiej maszyny' wisi na
+      kontrolerze AHCI - a wiec jest tym, ktory system wybiera - i ma na
+      sobie tablice GPT, FAT-a zrobionego przez mtools i cudzego
+      bootmgfw.efi. Po instalacji kazdy z trzech plikow jest czytany z
+      obrazu przez mtools i porownywany co do bajtu, a cudzy plik,
+      tablica i sasiednia partycja musza byc nietkniete. Potem TEN DYSK
+      JEST URUCHAMIANY SAM, bez pendrive'a - i to jedyny dowod, ze
+      instalacja cokolwiek zainstalowala. Osobno sprawdzane jest, ze bez
+      wpisania TAK nie dzieje sie nic, i osobno drugi dysk - taki, ktory
+      cudzy /EFI/BOOT/BOOTX64.EFI juz ma - gdzie ten plik po wszystkim
+      musi byc bajt w bajt ten sam.
+
+      Przy okazji dwie poprawki w loaderze: pliki wczytuje teraz przez
+      AllocateMaxAddress ponizej czterech gigabajtow (adres modulu
+      Multiboot 2 ma trzydziesci dwa bity i nie ma gdzie zapisac
+      wiekszego - dotad bylo to ciche zalozenie), a szukajac jadra i
+      initrd zaglada takze do \EFI\ProtonOS - czyli tam, gdzie kladzie
+      je instalator.

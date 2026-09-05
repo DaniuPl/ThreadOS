@@ -32,7 +32,7 @@ GROUPS = [
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "zrzut", "kolory", "kolko", "skala", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
-    "usbkbd64", "iso", "uefi", "protoboot", "fat"
+    "usbkbd64", "iso", "uefi", "protoboot", "fat", "instaluj"
 ]
 
 

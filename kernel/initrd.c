@@ -33,6 +33,13 @@ static uint32_t total_size;
 static uint32_t file_count;
 static const struct pird_entry *entries;
 
+const void *initrd_image(uint32_t *size)
+{
+    if (size)
+        *size = total_size;
+    return base;
+}
+
 void initrd_init(const struct multiboot_info *mbi)
 {
     if (!(mbi->flags & MULTIBOOT_FLAG_MODS) || mbi->mods_count == 0) {

@@ -40,4 +40,14 @@ const char *mb2_boot_kind(void);
    Under UEFI there is nowhere to look for it ourselves. */
 uint32_t mb2_rsdp(void);
 
+/* A module the loader handed over, found by the name it gave it.
+ * 1 = there is one.
+ *
+ * The initrd is taken by position and always has been, because it was
+ * the only module there was. Anything beyond it is taken by name: the
+ * alternative is the loader and the kernel agreeing on an order, which
+ * is the sort of agreement that goes wrong without saying so.
+ */
+int mb2_module(const char *name, uint32_t *start, uint32_t *size);
+
 #endif

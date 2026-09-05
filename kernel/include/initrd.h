@@ -12,4 +12,9 @@ uint32_t initrd_file_count(void);
 const void *initrd_find(const char *name, uint32_t *size);
 void initrd_ls(void);   /* the 'ls' shell command */
 
+/* The whole image, as it arrived - not a file inside it. The installer
+   writes this onto the EFI partition byte for byte, because that is
+   what the loader will read there. NULL = there is none. */
+const void *initrd_image(uint32_t *size);
+
 #endif

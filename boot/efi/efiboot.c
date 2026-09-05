@@ -136,11 +136,15 @@ static int read_file(const CHAR16 *name, struct blob *out)
         return 0;
     }
 
-    UINT64 where = 0;
+    /* Below four gigabytes, because a Multiboot 2 module is named by a
+       thirty-two bit address and there is nowhere to put a larger one.
+       AllocateMaxAddress means "at or below this", so the request says
+       what the format can express rather than hoping the firmware
+       happens to allocate low. Loader data, so that the memory map
+       hands it to the kernel as something already spoken for. */
+    UINT64 where = 0xFFFFFFFFull;
     UINTN pages = (UINTN)((size + 4095) / 4096);
-    /* Loader data, so that the memory map hands it to the kernel as
-       something already spoken for rather than free. */
-    if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type, pages,
+    if (BS->AllocatePages(AllocateMaxAddress, EfiLoaderData_Type, pages,
                           &where) != EFI_SUCCESS) {
         f->Close(f);
         return 0;
@@ -257,6 +261,22 @@ static void *tag_open(UINT32 type, UINTN size)
     *(UINT32 *)(p + 4) = (UINT32)size;
     mbi_at += (size + 7) & ~(UINTN)7;   /* tags sit on eight bytes */
     return p;
+}
+
+/* A module: an address, an end and a name. The name is what the kernel
+   tells them apart by - taking them in order would mean the loader and
+   the kernel agreeing on a sequence, which is the kind of agreement
+   that goes wrong quietly. */
+static void tag_module(UINT64 start, UINT64 size, const char *name)
+{
+    UINTN n = 0;
+    while (name[n])
+        n++;
+    UINT8 *p = (UINT8 *)tag_open(TAG_MODULE, 8 + 4 + 4 + n + 1);
+    *(UINT32 *)(p + 8) = (UINT32)start;
+    *(UINT32 *)(p + 12) = (UINT32)(start + size);
+    for (UINTN i = 0; i <= n; i++)
+        p[16 + i] = (UINT8)name[i];
 }
 
 static void copy_bytes(void *dst, const void *src, UINTN n)
@@ -416,17 +436,43 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
      * that. */
     struct blob kernel, initrd;
     if (!read_file(L"\\protonos64.bin", &kernel) &&
-        !read_file(L"\\EFI\\BOOT\\protonos64.bin", &kernel))
+        !read_file(L"\\EFI\\BOOT\\protonos64.bin", &kernel) &&
+        !read_file(L"\\EFI\\ProtonOS\\protonos64.bin", &kernel))
         fail(L"nie znalazlem protonos64.bin", 0);
     if (!read_file(L"\\initrd64.img", &initrd) &&
-        !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd))
+        !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd) &&
+        !read_file(L"\\EFI\\ProtonOS\\initrd64.img", &initrd))
         fail(L"nie znalazlem initrd64.img", 0);
+
+    /* And the loader itself, as a file.
+     *
+     * Not because it is needed to boot - it is already running - but
+     * because the system that is about to start may be asked to
+     * install itself onto another disk, and then these three files are
+     * exactly what has to be written there. A system that boots from a
+     * stick has them within reach and nowhere else to get them from:
+     * the kernel in memory is loaded segments, not the file it came
+     * from. Missing is not fatal; it only means installing is not on
+     * offer this time. */
+    struct blob self;
+    self.data = 0;
+    self.size = 0;
+    if (!read_file(L"\\EFI\\BOOT\\BOOTX64.EFI", &self) &&
+        !read_file(L"\\BOOTX64.EFI", &self) &&
+        !read_file(L"\\EFI\\ProtonOS\\BOOTX64.EFI", &self))
+        self.data = 0;
 
     put(L"  jadro:  ");
     put_num(kernel.size, 10);
     put(L" B\r\n  initrd: ");
     put_num(initrd.size, 10);
-    put(L" B\r\n");
+    put(L" B\r\n  loader: ");
+    if (self.data) {
+        put_num(self.size, 10);
+        put(L" B\r\n");
+    } else {
+        put(L"nie znalazlem siebie - instalacja nie bedzie mozliwa\r\n");
+    }
 
     struct screen sc;
     find_screen(&sc);
@@ -457,9 +503,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     /* Generously sized and taken now: after the memory map is fetched
        nothing may allocate, or the key that ExitBootServices checks
        goes stale. */
-    UINT64 where = 0;
+    UINT64 where = 0xFFFFFFFFull;         /* EBX holds this - so, low */
     UINTN mbi_pages = 32;                 /* 128 KiB - a large memory map */
-    if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type, mbi_pages,
+    if (BS->AllocatePages(AllocateMaxAddress, EfiLoaderData_Type, mbi_pages,
                           &where) != EFI_SUCCESS)
         fail(L"brak pamieci na tablice dla jadra", 0);
     mbi = (UINT8 *)(UINTN)where;
@@ -469,12 +515,14 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     tag_string(TAG_BOOTLOADER, "protoboot");
     tag_string(TAG_CMDLINE, "");
 
-    {
-        UINT8 *p = tag_open(TAG_MODULE, 8 + 4 + 4 + 1);
-        *(UINT32 *)(p + 8) = (UINT32)(UINTN)initrd.data;
-        *(UINT32 *)(p + 12) = (UINT32)((UINTN)initrd.data + initrd.size);
-        p[16] = 0;                        /* the module carries no name */
-    }
+    /* The initrd comes first and is nameless, because that is the
+       module the kernel has always taken by position. The two behind
+       it are named, and nothing that existed before this looks at
+       them. */
+    tag_module((UINTN)initrd.data, initrd.size, "");
+    tag_module((UINTN)kernel.data, kernel.size, "jadro");
+    if (self.data)
+        tag_module((UINTN)self.data, self.size, "loader");
 
     if (sc.have) {
         UINT8 *p = tag_open(TAG_FRAMEBUF, 8 + 22 + 6);
