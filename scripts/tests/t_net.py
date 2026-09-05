@@ -72,9 +72,12 @@ def main():
         time.sleep(1.5)
 
         def page_white():
+            """How much text is on the page. The page is the window's
+            light grey, so the text on it is BLACK - white on that grey
+            was drawn and could not be read."""
             _, _, a = q_web.screen_raw()
             return sum(1 for y in range(100, 250) for x in range(96, 400)
-                       if a(x, y) == (255, 255, 255))
+                       if a(x, y) == (0, 0, 0))
 
         before = page_white()
 
@@ -113,10 +116,12 @@ def main():
         time.sleep(5)
 
         def link_pixels():
-            """Links are drawn in colour 5 from the palette (yellow)."""
+            """Links are drawn in the accent blue - which is what a link
+            has been since there were links, and which is readable on a
+            light page in a way yellow is not."""
             _, _, a = q_web.screen_raw()
             return [(x, y) for y in range(180, 260) for x in range(96, 420)
-                    if a(x, y) == (255, 255, 0)]
+                    if a(x, y) == (0, 0, 255)]
 
         first_view = page_white()
         q_web.sendkey("pgdn")

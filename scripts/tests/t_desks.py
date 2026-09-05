@@ -90,8 +90,10 @@ def buttons(at, w, y):
 
 
 def clock_text(at):
-    """The 'HH:MM:SS' that gclock draws in its own window: green on the
-    window's grey, at (8,6) of a content area starting at (95,65)."""
+    """The 'HH:MM:SS' that gclock draws in its own window: BLACK on the
+    window's light grey, at (8,6) of a content area starting at
+    (95,65). Dark on light is the rule everywhere in this system - the
+    digits used to be green, which was drawn and could not be read."""
     x0, y0 = WX + 1 + 8, WY + 11 + 6
     font = font8x8()
     out = ""
@@ -101,7 +103,7 @@ def clock_text(at):
             bits = 0
             for x in range(8):
                 p = at(x0 + c * 8 + x, y0 + y)
-                if p[1] > 150 and p[0] < 80:        # green = the digits
+                if all(v < 80 for v in p):          # the digits are dark
                     bits |= 1 << x
             pattern.append(bits)
         out += font.get(tuple(pattern), "?")

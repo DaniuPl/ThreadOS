@@ -22,10 +22,16 @@
 
 #include "uapi.h"
 
-#define C_BG    8             /* the window's grey */
-#define C_WHITE 4
+/* Dark text on a light surface, light text on a dark one. The window
+   is the system's light grey, so its text is BLACK; white belongs on
+   the accent blue and nowhere else. */
+#define C_BG    8             /* the window's light grey */
+#define C_TEXT  0             /* black - text on the window */
+#define C_DIM  15             /* dark grey - the same, said quietly */
+#define C_HEAD  3             /* the accent: headings, buttons, the picked row */
+#define C_WHITE 4             /* only ever on something dark */
+#define C_LINE 11             /* a line between one thing and the next */
 #define C_BLUE  3
-#define C_GREEN 2
 #define C_RED   1
 
 #define W0 300
@@ -137,15 +143,15 @@ static void draw(int win)
     char line[64];
     int p = num(line, count);
     ecopy(line + p, " zadan", (int)sizeof(line) - p);
-    win_text(win, 4, 2, "Zadania:", C_GREEN);
-    win_text(win, 80, 2, line, C_WHITE);
+    win_text(win, 4, 2, "Zadania:", C_HEAD);
+    win_text(win, 80, 2, line, C_TEXT);
 
     /* The button, in the top right corner where there is room next to
        the heading */
     win_rect(win, kill_x(), 0, KILL_W, HEAD_H, C_BLUE);
     win_text(win, kill_x() + 4, 2, "Zakoncz", C_WHITE);
 
-    win_rect(win, 0, ROW_Y0 - 4, cw, 1, C_WHITE);
+    win_rect(win, 0, ROW_Y0 - 4, cw, 1, C_LINE);
 
     for (int i = 0; i < count; i++) {
         int y = ROW_Y0 + i * ROW_H;
@@ -160,13 +166,14 @@ static void draw(int win)
         while (n < 4)
             row[n++] = ' ';
         row[n] = '\0';
-        win_text(win, 4, y, row, picked ? C_WHITE : C_GREEN);
-        win_text(win, 44, y, list[i].name, C_WHITE);
-        win_text(win, 160, y, state_name(list[i].state), C_WHITE);
+        win_text(win, 4, y, row, picked ? C_WHITE : C_HEAD);
+        win_text(win, 44, y, list[i].name, picked ? C_WHITE : C_TEXT);
+        win_text(win, 160, y, state_name(list[i].state),
+                 picked ? C_WHITE : C_TEXT);
         /* A process has memory of its own; a kernel thread does not -
            and only the first of the two is something to end */
         win_text(win, 232, y, list[i].ring3 ? "program" : "jadro",
-                 list[i].ring3 ? C_WHITE : C_GREEN);
+                 picked ? C_WHITE : (list[i].ring3 ? C_TEXT : C_DIM));
     }
 
     if (note[0])

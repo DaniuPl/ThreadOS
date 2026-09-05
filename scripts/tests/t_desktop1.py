@@ -164,7 +164,9 @@ def main():
         time.sleep(0.6)
         _, _, at = q6.screen_raw()
         cell_after = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
-        white_after = sum(1 for p in cell_after if near(p, (255, 255, 255), 10))
+        # The counter stands on the window's grey, so it is black -
+        # white on that grey was drawn and could not be read
+        white_after = sum(1 for p in cell_after if near(p, (0, 0, 0), 10))
         check("przycisk akcji reaguje na klik (licznik zmienil cyfre)",
               cell_before != cell_after and white_after > 0)
 
@@ -204,7 +206,7 @@ def main():
               q7.wait_pixel(170, 75, (0, 0, 255)))
 
         # Events: a click in the window's body reaches the application
-        # (win_poll), which draws a white marker at the place of the
+        # (win_poll), which draws a marker in the accent colour at the place of the
         # click. The counter 'klikniec:' at (175,89) grows. We move the
         # cursor away so that it does not cover the marker in the
         # screenshot.
@@ -213,7 +215,7 @@ def main():
         q7.mouse_click()
         q7.mouse_goto(60, 140)            # move the cursor away from the marker
         check("klik dostarczony do aplikacji: znacznik w miejscu (149,109)",
-              q7.wait_pixel(149, 109, (255, 255, 255)))
+              q7.wait_pixel(149, 109, (0, 0, 255)))
         _, _, at = q7.screen_raw()
         cnt_after = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
         check("aplikacja zliczyla klikniecie (licznik zmienil cyfre)",
@@ -225,10 +227,10 @@ def main():
         for k in ("a", "b", "c"):
             q7.sendkey(k)
 
-        def txt_white():
+        def txt_white():          # the typed text - black on the grey
             _, _, a = q7.screen_raw()
             return sum(1 for x in range(135, 159) for y in range(103, 111)
-                       if near(a(x, y), (255, 255, 255), 10))
+                       if near(a(x, y), (0, 0, 0), 10))
 
         appeared = False
         for _ in range(15):          # poll: the text appears after a few frames

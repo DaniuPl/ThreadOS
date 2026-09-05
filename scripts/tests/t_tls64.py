@@ -158,7 +158,7 @@ def main():
                 _, _, a = q2.screen_raw()
                 return sum(1 for y in range(100, 250)
                            for x in range(100, 400)
-                           if a(x, y) == (255, 255, 255))
+                           if a(x, y) == (0, 0, 0))
 
             time.sleep(3)
             before = white_text()

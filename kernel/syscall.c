@@ -19,6 +19,7 @@
 #include "include/syscall.h"
 #include "include/smp.h"
 #include "include/config.h"
+#include "include/install.h"
 #include "include/user.h"
 #include "include/clip.h"
 #include "include/isr.h"
@@ -585,6 +586,30 @@ void syscall_handler(struct regs *r)
         r->eax = (uint32_t)config_set(name, value);
         break;
     }
+    /* --- installing onto this machine's own disk -------------------
+     *
+     * Looking is reading and is allowed to anybody. Writing is not:
+     * every step goes through the same gate as changing a setting,
+     * because what is behind it is the disk of a machine that boots
+     * without us. */
+    case SYS_INSTALL_LOOK: {
+        struct install_info info;
+        int can = install_look((int)r->ebx, &info);
+        if (user_put(r->ecx, &info, sizeof(info)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        r->eax = (uint32_t)can;
+        break;
+    }
+    case SYS_INSTALL_STEP:
+        if (task_level() != USER_ADMIN) {
+            r->eax = EPERM;
+            break;
+        }
+        r->eax = (uint32_t)install_step((int)r->ebx);
+        break;
+
     /* --- who is at the machine ------------------------------------
      *
      * Up by a password, down for nothing. Going down is never a thing

@@ -9,6 +9,11 @@
 #define C_BG    8
 #define C_WHITE 4
 #define C_GREEN 2
+/* Dark text on a light surface, light text on a dark one: the window
+   is the system's light grey, so its text is black. */
+#define C_TEXT  0
+#define C_DIM  15
+#define C_HEAD  3
 
 static void pad2(char *d, int v)
 {
@@ -43,7 +48,7 @@ void _start(void)
         s[8] = '\0';
 
         win_rect(w, 0, 0, 80, 20, C_BG);
-        win_text(w, 8, 6, s, C_GREEN);
+        win_text(w, 8, 6, s, C_TEXT);
 
         sys_sleep(500);
     }

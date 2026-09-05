@@ -57,6 +57,8 @@
 #define SYS_CFG_SET    50
 #define SYS_AUTH       51
 #define SYS_DROP       52
+#define SYS_INSTALL_LOOK 66
+#define SYS_INSTALL_STEP 67
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
@@ -771,6 +773,82 @@ static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
 }
 
 /* Changes a setting and writes them all back to the disk. 0 or -1. */
+
+/* --- Installing onto this machine's own disk -----------------------
+ *
+ * Two calls, and the split between them is the point. Looking reads
+ * the disk and changes nothing, so anybody may do it - a window that
+ * cannot say what it would write is a window nobody should trust.
+ * Every step of the writing needs an admin, because on the other side
+ * of it is the disk of a machine that boots without us.
+ *
+ * The layout must match struct install_info in kernel/include/install.h.
+ */
+#define INST_NAME 24
+
+#define INST_OK        0
+#define INST_NO_DISK   1
+#define INST_NO_FILES  2
+#define INST_NO_TABLE  3
+#define INST_NO_ESP    4
+#define INST_NOT_FAT   5
+#define INST_NO_ROOM   6
+#define INST_TOO_SMALL 7
+
+/* Two ways, and the difference between them is everything: alongside
+   writes three files and touches nothing else; the whole disk makes a
+   new table and everything that was there is gone. */
+#define INST_ALONGSIDE 0
+#define INST_WHOLE     1
+
+#define INST_STEPS       5
+#define INST_STEPS_WHOLE 8
+
+struct install_info {
+    uint32_t ok;
+    uint32_t problem;
+    uint32_t mode;
+    uint32_t steps;
+    uint32_t can_wipe;
+    uint32_t esp_index;
+    uint32_t esp_lba;
+    uint32_t free_kib;
+    uint32_t need_kib;
+    uint32_t loader_size;
+    uint32_t kernel_size;
+    uint32_t initrd_size;
+    uint32_t fallback_free;
+    uint32_t disk_mib;
+    uint32_t parts;
+    char disk[INST_NAME];
+    char kind[8];
+    char label[INST_NAME];
+};
+
+/* Reads and changes nothing. 1 = it can be done, 0 = it cannot (and
+   then info.problem says why). */
+static inline int32_t sys_install_look(int32_t mode, struct install_info *out)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_INSTALL_LOOK), "b"(mode), "c"(out)
+                     : "memory");
+    return ret;
+}
+
+/* One step. 0 = done, 1 = there was nothing to do, -1 = it failed,
+   -2 = not allowed (and then a password is the answer, not a retry). */
+static inline int32_t sys_install_step(int32_t n)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_INSTALL_STEP), "b"(n)
+                     : "memory");
+    return ret;
+}
+
 /* --- who is at the machine -----------------------------------------
  *
  * USER_ADMIN may change the system - the settings the kernel reads at

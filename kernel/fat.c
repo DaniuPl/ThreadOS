@@ -1217,3 +1217,146 @@ int fat_unlink(const char *path)
     fsinfo_unknown();
     return 0;
 }
+
+/* --- Making a filesystem ---------------------------------------------
+ *
+ * Everything above writes into a FAT that somebody else made. This
+ * makes one, and it is here for a single case: a machine on which
+ * ProtonOS is to be the only system needs an EFI partition, and an EFI
+ * partition has to be FAT or the firmware will not read it.
+ *
+ * FAT32, because that is what an EFI partition is everywhere. And
+ * FAT32 is not a flag one sets - it is a count of clusters above
+ * 65524, exactly the rule mounting uses. So the size of a cluster is
+ * chosen to put the count where it belongs, and a partition too small
+ * for that is refused rather than formatted into something else and
+ * called FAT32.
+ */
+
+/* How many sectors one copy of the table needs to describe the
+   clusters that fit once the tables themselves are taken out. Each
+   answer changes the question, so it is asked until it stops
+   changing - three passes, always. */
+static uint32_t fat32_table_size(uint32_t sectors, uint32_t reserved,
+                                 uint32_t nfats, uint32_t spc)
+{
+    uint32_t fatsz = 1;
+    for (int pass = 0; pass < 8; pass++) {
+        uint32_t data = sectors - reserved - nfats * fatsz;
+        uint32_t clusters = data / spc;
+        uint32_t need = ((clusters + 2) * 4 + SECTOR - 1) / SECTOR;
+        if (need <= fatsz)
+            break;
+        fatsz = need;
+    }
+    return fatsz;
+}
+
+int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
+{
+    const uint32_t reserved = 32;          /* what FAT32 uses everywhere */
+    const uint32_t nfats = 2;
+    uint32_t spc = 0, fatsz = 0, clusters = 0;
+
+    fat_umount();
+    if (!blk_present() || !sectors)
+        return -1;
+
+    /* The largest cluster that still leaves more than 65524 of them:
+       fewer, bigger clusters mean a smaller table and less to zero,
+       and the count is what makes this FAT32 at all. */
+    for (uint32_t try = 64; try >= 1; try /= 2) {
+        uint32_t f = fat32_table_size(sectors, reserved, nfats, try);
+        uint32_t c = (sectors - reserved - nfats * f) / try;
+        if (c >= 65525 + 16 && c < 0x0FFFFFF0u) {
+            spc = try;
+            fatsz = f;
+            clusters = c;
+            break;
+        }
+        if (try == 1)
+            break;
+    }
+    if (!spc)
+        return -1;                         /* too small to be a FAT32 */
+
+    uint32_t fat_lba = lba + reserved;
+    uint32_t data_lba = fat_lba + nfats * fatsz;
+
+    /* The boot sector. Every field of it is read by somebody: the
+       firmware, Windows, mtools - so the ones nobody here needs are
+       filled with what everybody expects rather than with zeros. */
+    memset(bsbuf, 0, SECTOR);
+    bsbuf[0] = 0xEB;                       /* a jump, because a boot sector */
+    bsbuf[1] = 0x58;
+    bsbuf[2] = 0x90;
+    memcpy(bsbuf + 3, "PROTONOS", 8);
+    put16(bsbuf + 11, SECTOR);
+    bsbuf[13] = (uint8_t)spc;
+    put16(bsbuf + 14, (uint16_t)reserved);
+    bsbuf[16] = (uint8_t)nfats;
+    put16(bsbuf + 17, 0);                  /* no fixed root - this is FAT32 */
+    put16(bsbuf + 19, 0);
+    bsbuf[21] = 0xF8;                      /* a fixed disk */
+    put16(bsbuf + 22, 0);                  /* likewise: FAT32 says it below */
+    put16(bsbuf + 24, 63);                 /* geometry nobody uses any more */
+    put16(bsbuf + 26, 255);
+    put32(bsbuf + 28, lba);                /* sectors before this partition */
+    put32(bsbuf + 32, sectors);
+    put32(bsbuf + 36, fatsz);
+    put16(bsbuf + 40, 0);                  /* both copies in use, mirrored */
+    put16(bsbuf + 42, 0);                  /* version 0.0 */
+    put32(bsbuf + 44, 2);                  /* the root starts at cluster two */
+    put16(bsbuf + 48, 1);                  /* FSInfo in the sector after this */
+    put16(bsbuf + 50, 6);                  /* and a copy of all this at six */
+    bsbuf[64] = 0x80;
+    bsbuf[66] = 0x29;                      /* what follows is an id and a name */
+    put32(bsbuf + 67, lba ^ sectors ^ 0x50524F54u);
+    memset(bsbuf + 71, ' ', 11);
+    for (int i = 0; label && label[i] && i < 11; i++)
+        bsbuf[71 + i] = (uint8_t)upcase(label[i]);
+    memcpy(bsbuf + 82, "FAT32   ", 8);
+    put16(bsbuf + 510, 0xAA55);
+    if (blk_write(lba, 1, bsbuf) < 0)
+        return -1;
+    if (blk_write(lba + 6, 1, bsbuf) < 0)  /* the copy the format asks for */
+        return -1;
+
+    /* FSInfo. We know exactly how much is free at this moment, so we
+       say it - the point of writing "unknown" elsewhere is that we had
+       not counted, and here we have. */
+    memset(datbuf, 0, SECTOR);
+    put32(datbuf, 0x41615252u);
+    put32(datbuf + 484, 0x61417272u);
+    put32(datbuf + 488, clusters - 1);     /* the root took one */
+    put32(datbuf + 492, 3);                /* look for the next one there */
+    put32(datbuf + 508, 0xAA550000u);
+    if (blk_write(lba + 1, 1, datbuf) < 0)
+        return -1;
+    if (blk_write(lba + 7, 1, datbuf) < 0)
+        return -1;
+
+    /* The tables, zeroed, then their first three entries: the media
+       byte, the end-of-chain mark, and the root directory's single
+       cluster. */
+    memset(datbuf, 0, SECTOR);
+    for (uint32_t i = 0; i < nfats * fatsz; i++)
+        if (blk_write(fat_lba + i, 1, datbuf) < 0)
+            return -1;
+    put32(datbuf, 0x0FFFFFF8u);
+    put32(datbuf + 4, 0x0FFFFFFFu);
+    put32(datbuf + 8, 0x0FFFFFFFu);        /* cluster two: the root, and done */
+    for (uint32_t f = 0; f < nfats; f++)
+        if (blk_write(fat_lba + f * fatsz, 1, datbuf) < 0)
+            return -1;
+
+    /* And the root directory itself, empty. A directory that has never
+       been written is a directory full of whatever was on the disk
+       before, and the first entry of that is read as a file. */
+    memset(datbuf, 0, SECTOR);
+    for (uint32_t i = 0; i < spc; i++)
+        if (blk_write(data_lba + i, 1, datbuf) < 0)
+            return -1;
+
+    return 0;
+}

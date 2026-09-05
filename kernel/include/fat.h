@@ -83,4 +83,21 @@ int fat_write_file(const char *path, const void *data, uint32_t len);
 /* Removes a file (not a directory). 0 or -1. */
 int fat_unlink(const char *path);
 
+/* --- Making one -----------------------------------------------------
+ *
+ * The one place this system creates a FAT rather than writing into
+ * somebody's: a machine on which ProtonOS is to be the only system
+ * needs an EFI partition, and an EFI partition has to be FAT or the
+ * firmware will not read it.
+ *
+ * FAT32 and only FAT32, because that is what an EFI partition is
+ * everywhere, and because the count of clusters decides the format -
+ * so a partition too small to hold 65525 of them cannot be one, and
+ * this says so instead of making something else and calling it FAT32.
+ *
+ * This destroys whatever was in the partition. 0 = done, -1 = it did
+ * not work.
+ */
+int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label);
+
 #endif

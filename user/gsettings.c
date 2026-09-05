@@ -307,7 +307,7 @@ void _start(void)
                is the one that reads. */
             win_text(w, 6, y, cfg[i].name, i == chosen ? C_WHITE : C_BLACK);
             win_text(w, 100, y, i == chosen ? edit : cfg[i].value,
-                     i == chosen ? C_GREEN : C_BLACK);
+                     i == chosen ? C_WHITE : C_BLACK);
         }
 
         /* What the selected setting is for, and how to change it */
@@ -352,7 +352,7 @@ void _start(void)
             win_text(w, 6, y + 26, "zmiana ustawien wymaga admina; "
                                    "Enter zatwierdza", C_BLACK);
         } else if (saved > 0) {
-            win_text(w, 6, y + 15, "zapisane na dysku", C_GREEN);
+            win_text(w, 6, y + 15, "zapisane na dysku", C_BLUE);
         } else if (saved < 0) {
             win_text(w, 6, y + 15, "NIE zapisane (zle haslo albo "
                                    "zla wartosc)", C_RED);

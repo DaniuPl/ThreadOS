@@ -103,6 +103,7 @@ static void cmd_help(void)
     printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("           instaluj - ProtonOS na dysk tej maszyny\n");
+    printk("             (caly ekran; 'instaluj tekstem [caly]' - tutaj)\n");
 }
 
 static void cmd_mem(void)
@@ -572,15 +573,21 @@ static void read_word(char *out, int max)
  * something one does by reflex, and a word is something one has to
  * decide to type - and what is on the other side of this is somebody's
  * laptop. */
-static void cmd_install(void)
+/* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
+   things here, which is what one wants when there is no screen to draw
+   on - or when the answer has to end up in a log. */
+static void cmd_install_text(int mode)
 {
     char answer[8];
 
-    if (!install_plan())
+    if (!install_plan(mode))
         return;
-    printk("\nWpisz TAK (duzymi literami), zeby to zapisac: ");
+    /* A different word for the way that destroys things. TAK is what
+       one says to a question; KASUJ is what one says to this. */
+    const char *word = mode == INST_WHOLE ? "KASUJ" : "TAK";
+    printk("\nWpisz %s (duzymi literami), zeby to zrobic: ", word);
     read_word(answer, (int)sizeof(answer));
-    if (strcmp(answer, "TAK") != 0) {
+    if (strcmp(answer, word) != 0) {
         printk("instaluj: nie zapisano niczego\n");
         return;
     }
@@ -736,7 +743,16 @@ static void execute(const char *line)
         else
             printk("cat: podaj nazwe pliku\n");
     } else if (!strcmp(line, "instaluj")) {
-        cmd_install();
+        if (!install_graphical()) {
+            printk("instaluj: pulpit juz dziala, a instalator potrzebuje "
+                   "calego ekranu.\n");
+            printk("          Zrestartuj maszyne albo napisz "
+                   "'instaluj tekstem'.\n");
+        }
+    } else if (!strcmp(line, "instaluj tekstem")) {
+        cmd_install_text(INST_ALONGSIDE);
+    } else if (!strcmp(line, "instaluj tekstem caly")) {
+        cmd_install_text(INST_WHOLE);
     } else if (!strcmp(line, "fat")) {
         fatcmd_mount("");
     } else if (starts_with(line, "fat ")) {

@@ -47,28 +47,27 @@ NAME_X = CW - 48 - 56 - 56 - 8
 TEXT = "Wyniki pomiarow"          # what the test writes, and its length
 
 
-def is_grey(px):
-    return all(abs(c - 227) <= 8 for c in px)
-
-
-def is_accent(px):
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
-
-
 def read_at(at, x, y, cols):
-    """Text inside the window: anything that is not the window's own
-    grey is ink. A chosen row has the accent colour behind it, so the
-    background is 'grey or accent', not 'light'."""
+    """Text inside the window, read the way a person reads it: whatever
+    colour most of the band is, is the background - the rest is ink.
+
+    Counting the background rather than naming it is what makes one
+    function read both kinds of row. An ordinary row is dark text on
+    the window's grey; the chosen row is white text on the accent - and
+    the accent is also the colour a directory's NAME is written in, so
+    a rule that said 'blue is background' would read those names as
+    empty."""
     font = font8x8()
+    band = [at(CX + x + c * 8 + xx, CY + y + yy)
+            for c in range(cols) for xx in range(8) for yy in range(8)]
+    bg = max(set(band), key=band.count)
     out = ""
     for c in range(cols):
         pattern = []
         for yy in range(8):
             bits = 0
             for xx in range(8):
-                p = at(CX + x + c * 8 + xx, CY + y + yy)
-                if not is_grey(p) and not is_accent(p):
+                if at(CX + x + c * 8 + xx, CY + y + yy) != bg:
                     bits |= 1 << xx
             pattern.append(bits)
         out += font.get(tuple(pattern), " " if not any(pattern) else "?")

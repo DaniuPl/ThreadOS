@@ -27,7 +27,12 @@
 #define C_GREEN  2
 #define C_RED    1
 #define C_TITLE  3
-#define C_LINK   5            /* links - a different colour from the rest of the text */
+/* The page is the window's light grey, so its text is BLACK. A link
+   is blue, which is what a link has been since there were links - and
+   yellow, which this used to be, is unreadable on a light surface. */
+#define C_TEXT   0
+#define C_DIM   15
+#define C_LINK   3
 
 #define ADDR_MAX  80
 #define PAGE_MAX  8192
@@ -282,7 +287,8 @@ static void draw_page(int w)
             buf[run] = '\0';
 
             int col = i - doc.lines[li].start;
-            win_text(w, 4 + col * 8, y, buf, k >= 0 ? C_LINK : C_WHITE);
+            win_text(w, 4 + col * 8, y, buf,
+                     k >= 0 ? C_LINK : C_TEXT);
             i += run;
         }
     }
@@ -376,8 +382,12 @@ void _start(void)
         win_rect(w, 0, 0, W, 14, C_TITLE);
         addr[addr_len] = '\0';
         win_text(w, 4, 3, addr, C_WHITE);
+        /* The status line stands on the grey, so it is dark: the
+           accent when the page came over a connection worth saying
+           something about, plain black otherwise, red when nothing
+           came at all. */
         win_text(w, 4, 17, status,
-                 doc.text_len ? (last_secure || !cur_tls ? C_GREEN : C_WHITE)
+                 doc.text_len ? (last_secure || !cur_tls ? C_LINK : C_TEXT)
                               : C_RED);
         draw_page(w);
 

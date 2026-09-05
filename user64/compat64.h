@@ -84,6 +84,69 @@ static inline int32_t sys_level(void)
     return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
 }
 
+
+/* --- Installing onto this machine's own disk -----------------------
+ *
+ * Two calls, and the split between them is the point. Looking reads
+ * the disk and changes nothing, so anybody may do it - a window that
+ * cannot say what it would write is a window nobody should trust.
+ * Every step of the writing needs an admin, because on the other side
+ * of it is the disk of a machine that boots without us.
+ *
+ * The layout must match struct install_info in kernel/include/install.h.
+ */
+#define INST_NAME 24
+
+#define INST_OK        0
+#define INST_NO_DISK   1
+#define INST_NO_FILES  2
+#define INST_NO_TABLE  3
+#define INST_NO_ESP    4
+#define INST_NOT_FAT   5
+#define INST_NO_ROOM   6
+#define INST_TOO_SMALL 7
+
+/* Two ways, and the difference between them is everything: alongside
+   writes three files and touches nothing else; the whole disk makes a
+   new table and everything that was there is gone. */
+#define INST_ALONGSIDE 0
+#define INST_WHOLE     1
+
+#define INST_STEPS       5
+#define INST_STEPS_WHOLE 8
+
+struct install_info {
+    uint32_t ok;
+    uint32_t problem;
+    uint32_t mode;
+    uint32_t steps;
+    uint32_t can_wipe;
+    uint32_t esp_index;
+    uint32_t esp_lba;
+    uint32_t free_kib;
+    uint32_t need_kib;
+    uint32_t loader_size;
+    uint32_t kernel_size;
+    uint32_t initrd_size;
+    uint32_t fallback_free;
+    uint32_t disk_mib;
+    uint32_t parts;
+    char disk[INST_NAME];
+    char kind[8];
+    char label[INST_NAME];
+};
+
+static inline int32_t sys_install_look(int32_t mode, struct install_info *out)
+{
+    return (int32_t)syscall64(SYS64_INSTALL_LOOK, mode,
+                              (int64_t)(uintptr_t)out);
+}
+
+static inline int32_t sys_install_step(int32_t n)
+{
+    return (int32_t)syscall64(SYS64_INSTALL_STEP, n, 0);
+}
+
 /* The same bump allocator as in protected mode: it only allocates,
    which is enough for a program that reads a file into memory once. */
 static inline void *malloc(uint32_t size)

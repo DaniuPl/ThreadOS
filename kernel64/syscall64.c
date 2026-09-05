@@ -17,6 +17,7 @@
 #include "../kernel/include/video.h"
 #include "../kernel/include/smp.h"
 #include "../kernel/include/user.h"
+#include "../kernel/include/install.h"
 #include "../kernel/include/clip.h"
 #include "../kernel/include/config.h"
 #include "../kernel/include/biglock.h"
@@ -974,6 +975,29 @@ static void handle(struct regs *r)
             (const uint8_t *)(uintptr_t)c.pixels);
         return;
     }
+    /* --- installing onto this machine's own disk -------------------
+     *
+     * Looking is reading and is allowed to anybody. Writing is not:
+     * behind it is the disk of a machine that boots without us. */
+    case SYS64_INSTALL_LOOK: {
+        struct install_info info;
+        if (!paging64_user_range(a2, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int can = install_look((int)a1, &info);
+        *(struct install_info *)(uintptr_t)a2 = info;
+        r->rax = (uint64_t)(int64_t)can;
+        return;
+    }
+    case SYS64_INSTALL_STEP:
+        if (task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)(int64_t)-2;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)install_step((int)a1);
+        return;
+
     case SYS64_WIN_TRUECOL:
         r->rax = (uint64_t)(int64_t)desktop_win_truecolour(
             (int)a1, task64_current_id());

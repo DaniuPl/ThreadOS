@@ -202,15 +202,16 @@ def main():
             q.mouse_goto(560, 420)
             time.sleep(1)
 
-            # 'zapisane na dysku' is drawn in green under the
-            # description. Which row that is depends on how many
+            # 'zapisane na dysku' is drawn in the accent colour under
+            # the description. Which row that is depends on how many
             # settings there are and how long the description of this
             # one is, so we look through the band it can be in rather
             # than computing it here - the layout is the program's
             # business, the message is ours.
             w, h, at = q.screen_raw()
-            green = any(at(CX + 6 + x, CY + y)[1] > 120 and
-                        at(CX + 6 + x, CY + y)[0] < 90
+            green = any(at(CX + 6 + x, CY + y)[2] > 120 and
+                        at(CX + 6 + x, CY + y)[0] < 90 and
+                        at(CX + 6 + x, CY + y)[1] < 90
                         for y in range(130, 190)
                         for x in range(0, 130))
             check("program zameldowal zapis na dysku", green)

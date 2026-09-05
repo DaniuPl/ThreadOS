@@ -11,6 +11,11 @@
 #define C_GREEN 2
 #define C_RED   1
 #define C_BLUE  3
+/* Dark text on a light surface, light text on a dark one: the window
+   is the system's light grey, so its text is black. */
+#define C_TEXT  0
+#define C_DIM  15
+#define C_HEAD  3
 
 /* Draws a decimal number in the window */
 static void draw_num(int w, int x, int y, uint32_t v, int col)
@@ -46,12 +51,12 @@ void _start(void)
         sys_sysinfo(&si);
 
         win_rect(w, 0, 0, 170, 80, C_BG);
-        win_text(w, 4, 4, "RAM uzyte (KiB):", C_GREEN);
-        draw_num(w, 136, 4, si.used_kib, C_WHITE);
-        win_text(w, 4, 16, "RAM razem (KiB):", C_GREEN);
-        draw_num(w, 136, 16, si.ram_kib, C_WHITE);
-        win_text(w, 4, 28, "uptime (s):", C_GREEN);
-        draw_num(w, 96, 28, si.uptime_s, C_WHITE);
+        win_text(w, 4, 4, "RAM uzyte (KiB):", C_HEAD);
+        draw_num(w, 136, 4, si.used_kib, C_TEXT);
+        win_text(w, 4, 16, "RAM razem (KiB):", C_HEAD);
+        draw_num(w, 136, 16, si.ram_kib, C_TEXT);
+        win_text(w, 4, 28, "uptime (s):", C_HEAD);
+        draw_num(w, 96, 28, si.uptime_s, C_TEXT);
 
         /* The RAM usage bar (the percentage from used/total) */
         uint32_t pct = si.ram_kib ? (si.used_kib * 160 / si.ram_kib) : 0;

@@ -42,12 +42,12 @@ def main():
         q9.mouse_goto(40, menu_y("gfiles"))
         q9.mouse_click()
         # gfiles slot2 (94,54), content (95,65); the file name at
-        # content(8,16) -> screen(103,81). The text (white) = files from
-        # PFS.
+        # content(8,16) -> screen(103,81). The text is BLACK - the
+        # window is light grey, and white on it was unreadable.
         def files_row_white():
             _, _, a = q9.screen_raw()
             return sum(1 for x in range(103, 160) for y in range(81, 89)
-                       if near(a(x, y), (255, 255, 255), 10))
+                       if near(a(x, y), (0, 0, 0), 10))
         appeared = False
         for _ in range(15):
             if files_row_white() > 0:

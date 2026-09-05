@@ -139,6 +139,25 @@ def make_gpt_disk(path, mib=800):
     mbr[510] = 0x55
     mbr[511] = 0xAA
 
+    # The copy at the end of the disk, which the format requires and a
+    # real machine's disk has: the entries again, and behind them a
+    # header pointing the other way. A test image without one is not
+    # the shape of the thing being imitated.
+    back = bytearray(92)
+    back[0:8] = b"EFI PART"
+    back[8:12] = struct.pack("<I", 0x00010000)
+    back[12:16] = struct.pack("<I", 92)
+    back[24:32] = struct.pack("<Q", total - 1)
+    back[32:40] = struct.pack("<Q", 1)
+    back[40:48] = struct.pack("<Q", 34)
+    back[48:56] = struct.pack("<Q", total - 34)
+    back[56:72] = guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    back[72:80] = struct.pack("<Q", total - 33)
+    back[80:84] = struct.pack("<I", 128)
+    back[84:88] = struct.pack("<I", 128)
+    back[88:92] = struct.pack("<I", binascii.crc32(bytes(ent)) & 0xFFFFFFFF)
+    back[16:20] = struct.pack("<I", binascii.crc32(bytes(back)) & 0xFFFFFFFF)
+
     head = bytearray(sec * 2048)
     head[0:sec] = mbr
     head[sec:sec + 92] = hdr
@@ -146,6 +165,11 @@ def make_gpt_disk(path, mib=800):
     with open(path, "wb") as f:
         f.write(bytes(head))
         f.truncate(total * sec)
+    with open(path, "r+b") as f:
+        f.seek((total - 33) * sec)
+        f.write(bytes(ent))
+        f.seek((total - 1) * sec)
+        f.write(bytes(back))
 
     # Something recognisable inside the first two partitions. A test
     # that formats the third one and then says "the table survived" has
@@ -259,6 +283,78 @@ def fat_kind(path, offset_sectors):
     clusters = (total - (reserved + nfats * fat_secs + root_secs)) // spc
     return "FAT12" if clusters < 4085 else \
            "FAT16" if clusters < 65525 else "FAT32"
+
+
+def gpt_read(path):
+    """Reads a GPT the way a firmware would, and says whether it holds
+    together: the protective MBR, both headers, both CRCs.
+
+    Written out here rather than asked of the system, because a table
+    the system wrote and the system reads back proves only that it is
+    consistent with itself. A firmware checks the CRCs and quietly
+    decides a table is damaged; a test that does not check them would
+    pass on a disk no machine will boot.
+
+    Returns (ok, [(type_guid_first4, first_lba, last_lba, name), ...],
+    problem) - the list is empty when the table does not hold."""
+    import binascii
+    with open(path, "rb") as fh:
+        data = fh.read(34 * 512)
+        fh.seek(0, 2)
+        total = fh.tell() // 512
+        fh.seek((total - 33) * 512)
+        tail = fh.read(33 * 512)
+
+    if data[510] != 0x55 or data[511] != 0xAA:
+        return False, [], "brak sygnatury MBR"
+    if data[446 + 4] != 0xEE:
+        return False, [], "MBR nie jest ochronny (typ %#x)" % data[446 + 4]
+
+    def header(buf, where):
+        if buf[:8] != b"EFI PART":
+            return None, "brak 'EFI PART' w %s" % where
+        size = struct.unpack_from("<I", buf, 12)[0]
+        if size < 92 or size > 512:
+            return None, "dziwny rozmiar naglowka w %s" % where
+        want = struct.unpack_from("<I", buf, 16)[0]
+        got = binascii.crc32(buf[:16] + b"\0\0\0\0" + buf[20:size]) & 0xFFFFFFFF
+        if want != got:
+            return None, "zla suma naglowka w %s" % where
+        return struct.unpack_from("<QQQQ", buf, 24), None
+
+    prim, why = header(data[512:1024], "naglowku glownym")
+    if prim is None:
+        return False, [], why
+    back, why = header(tail[32 * 512:33 * 512], "kopii na koncu")
+    if back is None:
+        return False, [], why
+    if prim[0] != 1 or prim[1] != total - 1:
+        return False, [], "naglowek glowny wskazuje nie tam"
+    if back[0] != total - 1 or back[1] != 1:
+        return False, [], "kopia na koncu wskazuje nie tam"
+
+    n = struct.unpack_from("<I", data, 512 + 80)[0]
+    size = struct.unpack_from("<I", data, 512 + 84)[0]
+    crc = struct.unpack_from("<I", data, 512 + 88)[0]
+    ents = data[2 * 512:2 * 512 + n * size]
+    if (binascii.crc32(ents) & 0xFFFFFFFF) != crc:
+        return False, [], "zla suma tablicy wpisow"
+    if ents != tail[:n * size]:
+        return False, [], "kopia tablicy na koncu jest inna"
+
+    out = []
+    for i in range(n):
+        e = ents[i * size:(i + 1) * size]
+        if e[:16] == b"\0" * 16:
+            continue
+        first, last = struct.unpack_from("<QQ", e, 32)
+        name = e[56:128].decode("utf-16-le").split("\0")[0]
+        out.append((e[:4], first, last, name))
+    return True, out, ""
+
+
+GUID_ESP4 = bytes([0x28, 0x73, 0x2A, 0xC1])       # C12A7328-...
+GUID_PFS4 = b"PROT"                                # ours, and it says so
 
 
 def make_mbr_fat_disk(path, mib=64, fat32=False, label="MALYFAT"):
@@ -1148,6 +1244,59 @@ class Qemu:
         return w, h, at
 
 
+    def read_text(self, x0, y0, cols, rows, line_h=8):
+        """Text drawn in the 8x8 font ANYWHERE on the screen.
+
+        The console is not the only thing in this system written with
+        that font: every window is. So the reading is the same in both
+        cases and lives in one place - a block of cols x rows
+        characters starting at (x0, y0), with lines every line_h pixels
+        (windows put them further apart than the console does).
+
+        We read it the way a human would: the colour most common across
+        the whole block is the background, the rest are glyphs - and
+        the pattern of eight bytes is looked up in the same font the
+        kernel drew with.
+
+        The background is computed for the WHOLE block, not for a
+        single cell: there are characters with more glyph pixels than
+        background ones ('0', 'N', 'B', 'W'), and computed separately
+        they would come out inverted.
+        """
+        w, h, _ = self.screen_raw()
+        px = self._ostatnie_piksele
+        if x0 < 0 or y0 < 0 or x0 + cols * 8 > w or y0 + rows * line_h > h:
+            return ""
+
+        ile = {}
+        for y in range(rows * line_h):
+            o = ((y0 + y) * w + x0) * 3
+            band = px[o:o + cols * 8 * 3]
+            for i in range(0, len(band), 3):
+                p = band[i:i + 3]
+                ile[p] = ile.get(p, 0) + 1
+        if not ile:
+            return ""
+        tlo = max(ile, key=ile.get)
+
+        font = font8x8()
+        out = []
+        for row in range(rows):
+            chars = []
+            for col in range(cols):
+                pattern = []
+                for y in range(8):
+                    o = ((y0 + row * line_h + y) * w + x0 + col * 8) * 3
+                    band = px[o:o + 24]
+                    b = 0
+                    for x in range(8):
+                        if band[x * 3:x * 3 + 3] != tlo:
+                            b |= 1 << x
+                    pattern.append(b)
+                chars.append(font.get(tuple(pattern), "?"))
+            out.append("".join(chars).rstrip())
+        return "\n".join(out).rstrip()
+
     def screen_fbcon(self):
         """The console text read from the FRAMEBUFFER.
 
@@ -1156,52 +1305,9 @@ class Qemu:
         stays empty and screen() reads nothing out of it. The console
         draws itself then, in an 8x8 font, in an 80x25 block in the
         middle of the screen (kernel/fbcon.c).
-
-        We read it the way a human would: the colour most common across
-        the whole block is the background, the rest are glyphs -
-        and we look up the pattern of eight bytes in the same font the
-        kernel drew with.
-
-        We compute the background for the whole block, not for a single
-        cell: there are characters in which there are MORE glyph pixels
-        than background ones ('0', 'N', 'B', 'W'), and computed
-        separately they would come out inverted.
         """
         w, h, _ = self.screen_raw()
-        px = self._ostatnie_piksele
-        x0 = (w - 80 * 8) // 2
-        y0 = (h - 25 * 8) // 2
-        if x0 < 0 or y0 < 0:
-            return ""
-
-        ile = {}
-        for y in range(25 * 8):
-            o = ((y0 + y) * w + x0) * 3
-            line_text = px[o:o + 80 * 8 * 3]
-            for i in range(0, len(line_text), 3):
-                p = line_text[i:i + 3]
-                ile[p] = ile.get(p, 0) + 1
-        if not ile:
-            return ""
-        tlo = max(ile, key=ile.get)
-
-        font = font8x8()
-        rows = []
-        for row in range(25):
-            chars = []
-            for col in range(80):
-                pattern = []
-                for y in range(8):
-                    o = ((y0 + row * 8 + y) * w + x0 + col * 8) * 3
-                    line_text = px[o:o + 24]
-                    b = 0
-                    for x in range(8):
-                        if line_text[x * 3:x * 3 + 3] != tlo:
-                            b |= 1 << x
-                    pattern.append(b)
-                chars.append(font.get(tuple(pattern), "?"))
-            rows.append("".join(chars).rstrip())
-        return "\n".join(rows).rstrip()
+        return self.read_text((w - 80 * 8) // 2, (h - 25 * 8) // 2, 80, 25)
 
     def wait_fbcon(self, text, timeout=15):
         """Waits until the text appears on the console drawn in the

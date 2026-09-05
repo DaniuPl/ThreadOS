@@ -19,6 +19,11 @@
 #define C_BLUE  3
 #define C_WHITE 4
 #define C_BG    8    /* the window's grey background */
+/* Dark text on a light surface, light text on a dark one: the window
+   is the system's light grey, so its text is black. */
+#define C_TEXT  0
+#define C_DIM  15
+#define C_HEAD  3
 
 #define WINDOW_W 120
 #define WINDOW_H 60
@@ -80,14 +85,14 @@ void _start(void)
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
         win_rect(w, 62, 6, 24, 12, C_BLUE);
-        win_text(w, 6, 24, "klikniec:", C_WHITE);
-        draw_number(w, 80, 24, npt, C_WHITE);
-        win_text(w, 6, 38, "txt:", C_GREEN);
-        win_text(w, 40, 38, written, C_WHITE);
+        win_text(w, 6, 24, "klikniec:", C_TEXT);
+        draw_number(w, 80, 24, npt, C_TEXT);
+        win_text(w, 6, 38, "txt:", C_HEAD);
+        win_text(w, 40, 38, written, C_TEXT);
 
         /* Markers at the places of the clicks */
         for (int i = 0; i < npt; i++)
-            win_rect(w, px[i] - 2, py[i] - 2, 5, 5, C_WHITE);
+            win_rect(w, px[i] - 2, py[i] - 2, 5, 5, C_HEAD);
 
         sys_sleep(80);
     }

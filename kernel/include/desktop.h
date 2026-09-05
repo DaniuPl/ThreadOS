@@ -7,6 +7,17 @@
    The move into graphics mode is one-way. */
 void desktop_start(void);
 
+/* The same compositor with everything else taken away: one program,
+   the whole screen, no bar, no icons, no menu and no other window.
+   This is what installing looks like - while a machine is being
+   written to, a taskbar within reach is not a convenience but a way to
+   click something else by mistake. The only thing the environment
+   itself offers is restarting the machine.
+
+   Has to be called BEFORE the compositor starts; a desktop already on
+   the screen cannot become a kiosk. */
+int desktop_start_kiosk(const char *program);
+
 /* API for ring 3 applications (called from syscalls). owner = process pid. */
 int desktop_win_create(int owner, int cw, int ch, const char *title);
 int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,

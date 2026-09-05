@@ -4527,3 +4527,182 @@ sprawdzane przez `make test`.
       wiekszego - dotad bylo to ciche zalozenie), a szukajac jadra i
       initrd zaglada takze do \EFI\ProtonOS - czyli tam, gdzie kladzie
       je instalator.
+
+- [x] **Instalator ma wlasny ekran, a nie okno na pulpicie**
+      (user/ginstal.c, tryb kiosku w kernel/desktop.c, grupa testow
+      `ginstal`).
+
+      Najpierw powstal jako zwykle okno wsrod innych okien i tak bylo
+      zle. Instalowanie nie jest jednym z zadan: kiedy trwa zapis na
+      czyims dysku, pasek zadan i cudze okna w zasiegu reki nie sa
+      wygoda, tylko sposobem, zeby w polowie zapisu kliknac cos innego.
+      Wiec 'instaluj' bierze CALY ekran.
+
+      **Tryb kiosku** to ten sam kompozytor z odjeta cala reszta: bez
+      gornego paska, bez paska zadan, bez ikon, bez menu, bez pulpitow
+      i bez drugiego okna. Jeden program, na srodku pustego ekranu, i
+      jedyna rzecz, ktora oferuje samo srodowisko - restart maszyny w
+      prawym gornym rogu. Okno nie ma nawet przyciskow zamkniecia,
+      minimalizacji i maksymalizacji: nie ma dokad go zminimalizowac,
+      nie ma w co je powiekszyc i nie ma nic za nim, wiec byly to trzy
+      klamstwa.
+
+      Kiosk uruchamia program ponownie, gdy ten sie skonczy - kiosk z
+      pustym ekranem wyglada na zepsuta maszyne. Ale jesli program
+      pada od razu, po trzech probach kiosk przestaje i pisze o tym;
+      migotanie w nieskonczonosc bylo latwiejsze do napisania i gorsze
+      do ogladania.
+
+      **Instalatora nie ma juz w menu pulpitu** i to jest cala roznica
+      miedzy tym, co bylo, a tym, co jest.
+
+      **Program nie wie nic o instalowaniu.** Pyta jadro, jak wyglada
+      dysk (sys_install_look - czyta i nic nie zmienia, wiec wolno to
+      kazdemu), i prosi jadro o jeden krok naraz (sys_install_step -
+      kazdy krok wymaga admina, bo po drugiej stronie jest dysk maszyny,
+      ktora uruchamia sie bez nas). Decydowanie, co znaczy instalacja,
+      jest w jednym miejscu i nie jest nim okno.
+
+      Krok na obrot petli, a nie pieciu naraz: jadro zapisaloby wszystko
+      w jednym wywolaniu i okno zamarloby na czas zapisu. Tak pasek
+      idzie, a pod nim stoi nazwa pliku, ktory wlasnie leci na dysk - a
+      czlowiek patrzacy, jak zapisuje sie jego dysk, ma prawo widziec,
+      gdzie to jest.
+
+      **Slowo, nie przycisk.** Przycisk to odruch, a odruchami zapisuje
+      sie cudze dyski. Okno pyta o wpisane TAK, tak samo jak wersja
+      konsolowa. Potem jadro odmawia programowi, ktory nie jest adminem,
+      i wtedy - dopiero wtedy - okno pyta o haslo; ten sam ksztalt, co w
+      gsettings, i z tego samego powodu: odmowa to nie to samo co blad.
+
+      **Kazda linia lezy na siatce dwunastu pikseli.** Nie dla porzadku:
+      czcionka ma osiem pikseli wysokosci, a tekst rozstawiony na oko -
+      jedna linia na dwudziestu, druga na piecdziesieciu - to tekst,
+      ktory umie przeczytac tylko czlowiek. Siatka to tekst, ktory umie
+      przeczytac takze program. Kolumna z rozmiarami stoi na x=6+36*8 z
+      tego samego powodu, a nie na 296, bo 296 nie dzieli sie przez
+      osiem.
+
+      Test czyta ekran ta sama czcionka, ktora jadro go narysowalo
+      (nowe `Qemu.read_text` w ptest.py - screen_fbcon jest teraz jego
+      szczegolnym przypadkiem, bo konsola nie jest jedyna rzecza pisana
+      ta czcionka). Sprawdza obie polowy rzeczy: ze na tym ekranie NIE
+      MA paska zadan, gornego paska ani ikon i ze klik w rog, gdzie na
+      pulpicie jest 'Menu', niczego nie otwiera - oraz ze wszystko, co
+      program mowi, da sie z ekranu przeczytac. Na koniec, jak w grupie
+      `instaluj`, pliki sa czytane z obrazu przez mtools co do bajtu, a
+      zainstalowany dysk jest uruchamiany sam.
+
+      Dwie drobne rzeczy, ktore test odslonil: kursor myszy narysowany
+      na literze robi z niej znak, ktorego nie ma w czcionce (test
+      odsuwa wskaznik, tak jak zrobilby czlowiek), a pasek tytulu okna
+      zaczyna sie piksel od ramki - wiec tresc jest pod win->y +
+      TITLE_H + 1, a nie tam, gdzie zgadywalem.
+
+      Wersja konsolowa zostaje jako 'instaluj tekstem'. Nie z
+      sentymentu: kiedy nie ma na czym rysowac, albo kiedy odpowiedz ma
+      trafic do dziennika, jest to jedyna wersja, ktora dziala.
+
+- [x] **Kontrast: ciemny tekst na jasnym, jasny na ciemnym** - w calym
+      GUI, nie tylko w instalatorze.
+
+      Okna tego systemu maja jasnoszare tlo (227,227,227), a wszystkie
+      programy pisaly na nim BIALYM. Wygladalo to jak dzialajacy
+      program - wszystko bylo narysowane - i nie dalo sie tego czytac.
+      To najgorszy rodzaj bledu w interfejsie: nic nie jest zepsute,
+      tylko nikt nic nie widzi.
+
+      Zasada jest jedna i jest calym rozwiazaniem: **na jasnym tle
+      ciemny tekst, na ciemnym jasny**. Wiec czarny na szarym oknie,
+      bialy na akcentowym niebieskim (przyciski, zaznaczony wiersz,
+      pasek tytulu), bialy na czarnych polach do wpisywania, bialy na
+      ciemnym tle pulpitu. Ciemny szary (73,73,73) dla tego, co
+      powiedziane ciszej - rozmiar pliku obok jego nazwy - i niebieski
+      dla naglowkow, bo to ten sam akcent, ktorego uzywa pulpit.
+
+      Zielony (0,255,0) zniknal z jasnych powierzchni, bo na szarym 227
+      jest gorszy niz bialy; tam, gdzie sluzyl do odroznienia (katalog
+      od pliku, watek jadra od programu), zastapil go akcent albo ciemny
+      szary. Zolte odnosniki w gweb sa teraz niebieskie - odnosniki sa
+      niebieskie, odkad istnieja odnosniki, a zolty na jasnym tle to
+      nie jest kolor, to jest brak koloru.
+
+      Poprawione: ginstal, gtasks, gfiles, gweb, guiapp, gclock, gmon,
+      gsettings (dwa miejsca - reszta juz to wiedziala, jest tam nawet
+      komentarz "Black on grey reads; white on grey does not") i
+      licznik przy przycisku 'Klik' w samym kompozytorze. gedit, gterm
+      i gimg byly poprawne od poczatku: gedit ma biala strone i czarny
+      tekst, gterm czarne tlo i bialy, gimg pasek stanu w akcencie.
+
+      Kilka linii, ktore mialy byc kreskami oddzielajacymi, tez bylo
+      bialych na szarym - czyli niewidocznych. Sa teraz w kolorze linii
+      (150,150,150), tym samym, ktorego uzywa kompozytor.
+
+- [x] **Caly dysk: wlasna tablica partycji i wlasny FAT32**
+      (kernel/gpt.c, fat_mkfs w kernel/fat.c, grupa testow `caly`).
+
+      Dotad instalacja znaczyla: trzy pliki na cudzej partycji EFI.
+      Teraz jest druga droga - dysk zrobiony od nowa - i roznica miedzy
+      nimi jest calym sensem tego kroku. Obok: tablica zostaje, cudze
+      partycje zostaja, kazdy plik na partycji EFI zostaje. Caly dysk:
+      nowa tablica, nowa partycja EFI, partycja dla ProtonOS-a - i
+      wszystko, co tam bylo, znika.
+
+      Trzeciej drogi nie ma i nie bedzie takiej, ktora zmniejsza cudza
+      partycje, zeby zrobic miejsce. Przesuwanie danych innego systemu
+      na podstawie domyslu, czym one sa, to nie jest rzecz, ktora sie
+      robi.
+
+      **Tablica GPT jest napisana pod to, co sprawdza firmware, a nie
+      pod to, co wystarczy nam.** Ochronny MBR w sektorze zerowym,
+      naglowek w pierwszym, 128 wpisow za nim - i te same wpisy oraz
+      drugi naglowek na samym koncu dysku, od tylu. Ostatnie 34 sektory
+      dysku GPT to nie jest wolne miejsce, tylko kopia, dzieki ktorej
+      urwany poczatek da sie naprawic. Oba naglowki nosza CRC siebie i
+      CRC calej tablicy wpisow. Pomylka w tych sumach nie objawia sie
+      glosno: firmware po cichu uznaje tablice za uszkodzona i maszyna
+      nie startuje, nie mowiac dlaczego. Dlatego test czyta tablice po
+      swojemu, w Pythonie, tak jak czyta ja firmware - z obiema sumami
+      i porownaniem kopii z oryginalem.
+
+      Wpisy ida na dysk PRZED naglowkami, ktore na nie wskazuja, a
+      ochronny MBR na samym koncu: dopoki go nie ma, sektor zerowy
+      dalej mowi "pusto" kazdemu, kto go czyta. To jest kolejnosc na
+      wypadek, gdyby prad zniknal w polowie.
+
+      **GUID naszej partycji jest nasz.** Bajty ukladaja sie w
+      PROTONOS-PFS3, wiec czlowiek ogladajacy tablice edytorem
+      szesnastkowym widzi, czyja ona jest, a zaden inny system nie
+      wezmie jej za swoja. Pozyczanie GUID-a Linuksa byloby klamstwem,
+      ktore kiedys ktos by odczytal.
+
+      **fat_mkfs robi FAT32, i FAT32 nie jest flaga, ktora sie
+      ustawia.** To jest liczba klastrow powyzej 65524 - dokladnie ta
+      sama regula, ktorej uzywa montowanie. Wiec rozmiar klastra jest
+      dobierany tak, zeby liczba wypadla tam, gdzie trzeba, a partycja
+      za mala na to jest odrzucana, a nie formatowana na cos innego i
+      nazywana FAT32. Partycja EFI ma 128 MiB: znacznie wiecej, niz
+      trzy pliki potrzebuja, i najmniej, przy czym FAT32 jest wygodnie
+      FAT32.
+
+      Przy okazji: **"32" w FAT32 nie ma nic wspolnego z 32-bitowym
+      procesorem.** To szerokosc numeru klastra we wpisie tablicy
+      alokacji - FAT12 ma wpisy dwunastobitowe, FAT16 szesnastobitowe,
+      FAT32 trzydziestodwubitowe (uzywane 28). Decyduje to o tym, jak
+      duzy moze byc wolumin, a nie o tym, na czym sie go czyta.
+      Partycja EFI 64-bitowego laptopa z Windowsem tez jest FAT32;
+      FAT64 nie istnieje.
+
+      **Slowo jest inne.** Przy instalacji obok pyta o TAK. Tutaj o
+      KASUJ - bo TAK mowi sie na pytanie, a na to mowi sie co innego.
+
+      Test sprawdza cala droge: stary dysk z wlasna, poprawna tablica i
+      cudzym bootmgfw.efi; plan, ktory mowi wprost, co zniknie; slowo
+      inne niz TAK; brak zmian, gdy sie go nie wpisze; po wpisaniu -
+      tablica czytana w Pythonie z obiema sumami, dwie partycje o
+      wlasciwych GUID-ach, nazwach i granicach, FAT32 czytany przez
+      mtools, trzy pliki co do bajtu i na koniec URUCHOMIENIE TEGO
+      DYSKU. Osobno to, czego ten tryb NIE robi: nie zeruje dysku
+      bajt po bajcie, bo nie robi tego zaden instalator - znika ksztalt
+      (tablica i systemy plikow), a nie kazdy bajt, i test mowi to
+      wprost zamiast twierdzic cos, co nie byloby prawda.

@@ -293,9 +293,12 @@ def main():
                   not is_win(at(60, 430)))
 
             # --- a click on an entry starts the program -----------------
-            # The second entry is the clock; it draws its digits in
-            # green, so a window that merely appeared and a program
-            # that actually runs are not the same assertion
+            # The second entry is the clock, and what it draws is a
+            # TIME - so a window that merely appeared and a program
+            # that actually runs are not the same assertion. We read
+            # the digits with the font the kernel drew them with;
+            # counting dark pixels would count the kernel's own window
+            # underneath, whose button carries dark text too.
             q.mouse_goto(MX + 60, MY + MENU_ROW + 8)
             time.sleep(0.5)
             q.mouse_click()
@@ -306,11 +309,9 @@ def main():
 
             check("menu zamknelo sie po wyborze",
                   not is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
-            green = sum(1 for yy in range(WY + 12, WY + 32)
-                        for xx in range(WX + 2, WX + 82)
-                        if at(xx, yy)[1] > 150 and at(xx, yy)[0] < 80)
-            check("program z menu naprawde chodzi - zegar rysuje cyfry "
-                  "(%d pikseli)" % green, green > 40)
+            shown = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
+            check("program z menu naprawde chodzi - zegar rysuje "
+                  "godzine ('%s')" % shown, shown.count(":") == 2)
             check("i ma swoj przycisk na pasku",
                   len(bar_buttons(at, w, row)) == after + 1)
 
@@ -352,11 +353,9 @@ def main():
             log = q.serial()
             check("Alt+F4 zamyka takze okno uruchomione z menu",
                   "proces 'gclock' zakonczyl sie (kod 0)" in log)
-            green = sum(1 for yy in range(WY + 12, WY + 32)
-                        for xx in range(WX + 2, WX + 82)
-                        if at(xx, yy)[1] > 150 and at(xx, yy)[0] < 80)
-            check("zegar zniknal z ekranu (%d zielonych pikseli)" % green,
-                  green == 0)
+            gone = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
+            check("zegar zniknal z ekranu ('%s')" % gone,
+                  gone.count(":") != 2)
             check("i z paska zadan", len(bar_buttons(at, w, row)) == after)
         finally:
             q.close()

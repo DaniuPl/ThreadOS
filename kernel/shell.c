@@ -134,7 +134,7 @@ static const struct {
     {"clear",    "wyczysc ekran"},
     {"ekran",    "tryb ekranu, koszt klatki"},
     {"sprzet",   "co jest w tej maszynie"},
-    {"instaluj", "ProtonOS na dysk maszyny"},
+    {"instaluj", "ProtonOS na dysk (ekran)"},
     {"fat [N]",  "partycja EFI (FAT)"},
     {"fatls P",  "katalog na FAT"},
     {"fatcat P", "plik z FAT"},
@@ -373,15 +373,37 @@ static void cmd_formatuj(char *arg)
  * Reading and printing first, then a person saying yes, and only then
  * writing - the same shape as formatting, and for the same reason:
  * what is on the other side of this is somebody's laptop. */
-static void cmd_install(void)
+/* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
+   things here, which is what one wants when there is no screen to draw
+   on - or when the answer has to end up in a log. */
+static void cmd_install(const char *arg)
 {
     char answer[8];
+    int mode = INST_ALONGSIDE;
 
-    if (!install_plan())
+    if (!arg || !arg[0]) {
+        if (install_graphical())
+            return;
+        printk("instaluj: pulpit juz dziala, a instalator potrzebuje "
+               "calego ekranu.\n");
+        printk("          Zrestartuj maszyne albo napisz "
+               "'instaluj tekstem'.\n");
         return;
-    printk("\nWpisz TAK (duzymi literami), zeby to zapisac: ");
+    }
+    if (!strcmp(arg, "tekstem caly"))
+        mode = INST_WHOLE;
+    else if (strcmp(arg, "tekstem") != 0) {
+        printk("uzycie: instaluj [tekstem [caly]]\n");
+        return;
+    }
+    if (!install_plan(mode))
+        return;
+    /* A different word for the way that destroys things. TAK is what
+       one says to a question; KASUJ is what one says to this. */
+    const char *word = mode == INST_WHOLE ? "KASUJ" : "TAK";
+    printk("\nWpisz %s (duzymi literami), zeby to zrobic: ", word);
     read_word(answer, (int)sizeof(answer));
-    if (strcmp(answer, "TAK") != 0) {
+    if (strcmp(answer, word) != 0) {
         printk("instaluj: nie zapisano niczego\n");
         return;
     }
@@ -1045,7 +1067,7 @@ static void run_command(char *cmd)
     else if (!strcmp(cmd, "formatuj"))
         cmd_formatuj(arg);
     else if (!strcmp(cmd, "instaluj"))
-        cmd_install();
+        cmd_install(arg);
     else if (!strcmp(cmd, "fat"))
         fatcmd_mount(arg);
     else if (!strcmp(cmd, "fatls"))

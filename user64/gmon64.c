@@ -14,6 +14,11 @@
 #define C_BLUE  3
 #define C_WHITE 4
 #define C_BG    8
+/* Dark text on a light surface, light text on a dark one: the window
+   is the system's light grey, so its text is black. */
+#define C_TEXT  0
+#define C_DIM  15
+#define C_HEAD  3
 
 #define WINDOW_W 170
 #define WINDOW_H 80
@@ -40,12 +45,12 @@ void _start(void)
             sys_exit(1);
 
         win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
-        win_text(w, 4, 4, "RAM uzyte (KiB):", C_GREEN);
-        num(w, 136, 4, si.used_kib, C_WHITE);
-        win_text(w, 4, 16, "RAM razem (KiB):", C_GREEN);
-        num(w, 136, 16, si.ram_kib, C_WHITE);
-        win_text(w, 4, 28, "uptime (s):", C_GREEN);
-        num(w, 96, 28, si.uptime_s, C_WHITE);
+        win_text(w, 4, 4, "RAM uzyte (KiB):", C_HEAD);
+        num(w, 136, 4, si.used_kib, C_TEXT);
+        win_text(w, 4, 16, "RAM razem (KiB):", C_HEAD);
+        num(w, 136, 16, si.ram_kib, C_TEXT);
+        win_text(w, 4, 28, "uptime (s):", C_HEAD);
+        num(w, 96, 28, si.uptime_s, C_TEXT);
 
         /* The usage bar: a red background, the used part in blue */
         uint32_t ile = si.ram_kib

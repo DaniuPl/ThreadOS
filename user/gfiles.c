@@ -21,8 +21,15 @@
 
 #include "uapi.h"
 
-#define C_BG    8             /* the window's grey */
-#define C_WHITE 4
+/* Dark text on a light surface, light text on a dark one. The window
+   is the system's light grey, so its text is BLACK; white belongs on
+   the accent blue and nowhere else. */
+#define C_BG    8             /* the window's light grey */
+#define C_TEXT  0             /* black - text on the window */
+#define C_DIM  15             /* dark grey - the same, said quietly */
+#define C_HEAD  3             /* the accent: headings, buttons, the picked row */
+#define C_WHITE 4             /* only ever on something dark */
+#define C_LINE 11             /* a line between one thing and the next */
 #define C_BLUE  3
 #define C_GREEN 2
 #define C_RED   1
@@ -328,15 +335,15 @@ static void draw(void)
     p += num(head + p, (unsigned)count);
     head[p++] = ')';
     head[p] = '\0';
-    win_text(win, 4, 2, head, C_GREEN);
+    win_text(win, 4, 2, head, C_HEAD);
 
-    win_rect(win, name_x(), 0, NAME_W, HEAD_H, asking ? C_GREEN : C_BLUE);
+    win_rect(win, name_x(), 0, NAME_W, HEAD_H, asking ? C_RED : C_BLUE);
     win_text(win, name_x() + 4, 2, "Nazwa", C_WHITE);
     win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
     win_text(win, edit_x() + 4, 2, "Otworz", C_WHITE);
     win_rect(win, del_x(), 0, DEL_W, HEAD_H, confirm ? C_RED : C_BLUE);
     win_text(win, del_x() + 8, 2, "Usun", C_WHITE);
-    win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_WHITE);
+    win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_LINE);
 
     for (int i = 0; i < shown; i++) {
         int idx = top + i;
@@ -346,21 +353,25 @@ static void draw(void)
         int picked = idx == chosen;
         if (picked)
             win_rect(win, 0, y - 1, cw, ROW_H, C_BLUE);
+        /* A directory is said by weight, not by colour: black for a
+           file, the accent for something one can go into. On a picked
+           row both are white, because the row itself is the accent. */
         win_text(win, 6, y, items[idx].name,
-                 items[idx].is_dir ? C_GREEN : C_WHITE);
+                 picked ? C_WHITE : (items[idx].is_dir ? C_HEAD : C_TEXT));
         if (items[idx].is_dir) {
             /* Right-aligned, like the sizes it stands in place of: two
                columns that end in different places read as two
                columns. */
             win_text(win, cw - 7 * 8 - 6, y, "katalog",
-                     picked ? C_WHITE : C_GREEN);
+                     picked ? C_WHITE : C_DIM);
         } else {
             char sz[16];
             int n = num(sz, items[idx].size);
             sz[n++] = ' ';
             sz[n++] = 'B';
             sz[n] = '\0';
-            win_text(win, cw - 8 * n - 6, y, sz, C_WHITE);
+            win_text(win, cw - 8 * n - 6, y, sz,
+                     picked ? C_WHITE : C_DIM);
         }
     }
 
@@ -379,7 +390,7 @@ static void draw(void)
         n += num(more + n, (unsigned)count);
         more[n++] = ']';
         more[n] = '\0';
-        win_text(win, cw - 8 * n - 4, ch - 10, more, C_WHITE);
+        win_text(win, cw - 8 * n - 4, ch - 10, more, C_DIM);
     }
 
     if (asking) {
@@ -392,12 +403,12 @@ static void draw(void)
             line[p++] = answer[i];
         line[p++] = '_';
         line[p] = '\0';
-        win_text(win, 4, ch - 10, line, C_GREEN);
+        win_text(win, 4, ch - 10, line, C_HEAD);
     } else if (note[0]) {
-        win_text(win, 4, ch - 10, note, confirm ? C_RED : C_WHITE);
+        win_text(win, 4, ch - 10, note, confirm ? C_RED : C_TEXT);
     } else {
         win_text(win, 4, ch - 10,
-                 "PgUp/PgDn przewija, '..' wyzej", C_GREEN);
+                 "PgUp/PgDn przewija, '..' wyzej", C_DIM);
     }
 }
 

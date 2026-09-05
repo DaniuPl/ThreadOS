@@ -15,6 +15,8 @@
 #include "include/heap.h"
 #include "include/string.h"
 #include "include/font8x8.h"
+#include "include/acpi.h"
+#include "include/io.h"
 #include "include/keyboard.h"
 #include "include/exec.h"
 #include "include/fs.h"
@@ -458,8 +460,39 @@ static int menu_open;
    pointer is - the same list either way, because a second list would
    be a second thing to learn. */
 static int menu_px, menu_py;
+/* The installer is deliberately NOT here. It takes the whole screen
+   and everything else has to be out of reach while it runs, so it is
+   started as a kiosk ('instaluj') and not as one more window among
+   somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
                                   "gedit", "gtasks"};
+
+/* --- The kiosk -----------------------------------------------------
+ *
+ * One program, the whole screen, and no way to anything else. This is
+ * what an installer is: while a machine is being installed onto,
+ * having a taskbar and a menu and somebody's other windows within
+ * reach is not a convenience, it is a way to click something else by
+ * mistake in the middle of writing to a disk.
+ *
+ * So in this mode the compositor draws no bar, no icons, no menu and
+ * no other window, starts exactly one program and puts it in the
+ * middle of an empty screen. The only thing the environment itself
+ * offers is a way out of it: restarting the machine, which is what one
+ * does after installing anyway.
+ */
+static int kiosk;
+static const char *kiosk_app;
+static int kiosk_launches;         /* how many times we have started it */
+static int kiosk_wait;             /* frames before starting it again */
+static int kiosk_gave_up;
+
+#define KIOSK_BTN_W 152
+#define KIOSK_BTN_H 14
+#define KIOSK_TRIES 3
+
+static int kiosk_btn_x(void) { return video_w() - KIOSK_BTN_W - 6; }
+static int kiosk_btn_y(void) { return 6; }
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 /* Virtual desktops.
@@ -871,15 +904,22 @@ static void draw_window(const struct window *win)
        them. What they do is said by the sign; a frame adds nothing but
        ink. The one exception is the close button, which is red,
        because that one had better be unmistakable. */
-    uint8_t sign = focused ? COL_WHITE : COL_DIM;
-    video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O', sign);
-    video_draw_char(min_x(win), close_y(win), '_', sign);
-    video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ, COL_RED);
-    video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
+    /* Not in the kiosk. There is nothing to minimise the window to,
+       nowhere for it to grow into and nothing behind it to close it
+       back to - three buttons that would all be lies. */
+    if (!kiosk) {
+        uint8_t sign = focused ? COL_WHITE : COL_DIM;
+        video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O',
+                        sign);
+        video_draw_char(min_x(win), close_y(win), '_', sign);
+        video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ,
+                        COL_RED);
+        video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
+    }
     /* The grip: three plain lines running the way the corner is
        pulled. One colour, no shading - it is a hint, not a handle to
        be modelled. */
-    if (resizable(win)) {
+    if (!kiosk && resizable(win)) {
         int gx = grip_x(win), gy = grip_y(win);
         for (int d = 2; d < GRIP_SZ; d += 3)
             for (int k = 0; k <= GRIP_SZ - 2 - d; k++)
@@ -896,8 +936,10 @@ static void draw_window(const struct window *win)
         video_fill_rect(btn_x(win) + BTN_W - 1, btn_y(win), 1, BTN_H,
                         COL_LINE);
         video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
+        /* The counter stands on the window's grey, not on the button -
+           so it is dark, like everything else there. */
         draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
-                 COL_WHITE);
+                 COL_BLACK);
     }
 
     /* An application window: compose its content buffer into the work
@@ -1104,6 +1146,38 @@ static void handle_input(int mx, int my, int buttons)
 
     mouse_x = mx;
     mouse_y = my;
+
+    /* In the kiosk there is nothing to click but the one window and
+       the one button the environment itself offers. Everything the
+       taskbar, the menu, the icons and the desktop switch would have
+       done is simply not reachable - which is the whole point of the
+       mode. */
+    if (kiosk) {
+        int notch = mouse_take_scroll();
+        int wi = window_at(mx, my);
+        if (notch && wi >= 0 && wins[wi].content) {
+            struct window *w = &wins[wi];
+            int cx = mx - (w->x + 1), cy = my - (w->y + TITLE_H + 1);
+            if (cx >= 0 && cy >= 0 && cx < w->cw && cy < w->ch)
+                win_enqueue(w, WEV_SCROLL, cx, cy, notch);
+        }
+        if (pressed && !prev_pressed) {
+            if (in_rect(mx, my, kiosk_btn_x(), kiosk_btn_y(),
+                        KIOSK_BTN_W, KIOSK_BTN_H)) {
+                printk("Restart...\n");
+                if (!acpi_reboot())
+                    outb(0x64, 0xFE);
+            } else if (wi >= 0 && wins[wi].content) {
+                struct window *w = &wins[wi];
+                int cx = mx - (w->x + 1), cy = my - (w->y + TITLE_H + 1);
+                if (cx >= 0 && cy >= 0 && cx < w->cw && cy < w->ch)
+                    win_enqueue(w, WEV_CLICK, cx, cy, 1);
+            }
+        }
+        prev_pressed = pressed;
+        prev_right = right;
+        return;
+    }
 
     /* The wheel goes to the window under the POINTER, not to the one
        with the focus. That is how every other machine does it and it
@@ -2378,6 +2452,84 @@ int desktop_win_poll(int winid, int owner, void *out)
     return got;
 }
 
+
+/* --- one frame of the kiosk ----------------------------------------
+ *
+ * Everything the ordinary desktop draws around a window - the bar, the
+ * icons, the menu, the other windows - is missing here, and that is
+ * the whole difference. What is left is a name for the screen, the one
+ * window in the middle of it, and the single thing the environment
+ * itself offers: restarting the machine.
+ */
+static int kiosk_pid = -1;
+static int kiosk_uptime;           /* frames the program has been alive */
+
+static void kiosk_frame(int mx, int my)
+{
+    /* The one program. Not running - never started, or ended - means
+       starting it again: a kiosk with nothing in it is a machine that
+       looks broken. A program that dies at once is a different matter,
+       and after a few tries we stop and say so rather than flicker
+       for ever. */
+    if (kiosk_pid >= 0 && task_alive(kiosk_pid)) {
+        if (++kiosk_uptime > 100)
+            kiosk_launches = 0;    /* it ran; whatever it does now is fine */
+    } else if (!kiosk_gave_up) {
+        kiosk_uptime = 0;
+        if (kiosk_wait > 0) {
+            kiosk_wait--;
+        } else if (kiosk_launches >= KIOSK_TRIES) {
+            kiosk_gave_up = 1;
+        } else {
+            kiosk_launches++;
+            kiosk_pid = exec_spawn(kiosk_app);
+            kiosk_wait = 33;                   /* a second before asking again */
+        }
+    }
+
+    video_draw_string(8, 8, "ProtonOS - instalacja", COL_WHITE);
+
+    int bx = kiosk_btn_x(), by = kiosk_btn_y();
+    int over = in_rect(mouse_x, mouse_y, bx, by, KIOSK_BTN_W, KIOSK_BTN_H);
+    video_fill_rect(bx, by, KIOSK_BTN_W, KIOSK_BTN_H,
+                    over ? COL_TITLE : COL_TBBTN);
+    video_fill_rect(bx, by, KIOSK_BTN_W, 1, COL_LINE);
+    video_fill_rect(bx, by + KIOSK_BTN_H - 1, KIOSK_BTN_W, 1, COL_LINE);
+    video_draw_string(bx + 8, by + 3, "Uruchom ponownie", COL_WHITE);
+
+    /* The window, in the middle. It is put there every frame because
+       in this mode nobody may move it - there is nowhere to move it
+       to. */
+    for (int i = 0; i < MAX_WIN; i++) {
+        struct window *w = &wins[i];
+        if (!w->used || !w->content)
+            continue;
+        w->x = (video_w() - w->w) / 2;
+        w->y = (video_h() - w->h) / 2;
+        if (w->y < 30)
+            w->y = 30;
+        w->has_button = 0;         /* nothing to close it with */
+        w->minimized = 0;
+        w->desk = cur_desk;
+        focus_idx = i;
+        draw_window(w);
+    }
+
+    if (kiosk_gave_up) {
+        int cx = video_w() / 2 - 22 * 8 / 2;
+        video_draw_string(cx, video_h() / 2 - 4,
+                          "Instalator sie nie uruchamia", COL_WHITE);
+        video_draw_string(cx, video_h() / 2 + 10,
+                          "Uruchom maszyne ponownie", COL_WHITE);
+    }
+
+    draw_hint();
+    draw_cursor(mx, my);
+    video_present();
+    frames++;
+    task_sleep(30);
+}
+
 static void desktop_thread(void *arg)
 {
     (void)arg;
@@ -2443,15 +2595,17 @@ static void desktop_thread(void *arg)
     icons_load();              /* restore the remembered icon positions from disk */
     wallpaper_load();          /* and the wallpaper, if the settings name one */
 
-    /* Two kernel windows (no owner, no content buffer) */
-    wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
-                              .used = 1, .has_button = 1, .owner = -1};
-    set_title(&wins[0], "Terminal");
-    raise_win(0);
-    wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
-                              .used = 1, .has_button = 0, .owner = -1};
-    set_title(&wins[1], "Pliki");
-    raise_win(1);
+    if (!kiosk) {
+        /* Two kernel windows (no owner, no content buffer) */
+        wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
+                                  .used = 1, .has_button = 1, .owner = -1};
+        set_title(&wins[0], "Terminal");
+        raise_win(0);
+        wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
+                                  .used = 1, .has_button = 0, .owner = -1};
+        set_title(&wins[1], "Pliki");
+        raise_win(1);
+    }
 
     for (;;) {
         reap_windows();
@@ -2461,6 +2615,11 @@ static void desktop_thread(void *arg)
         handle_input(mx, my, buttons);
 
         draw_background();
+
+        if (kiosk) {
+            kiosk_frame(mx, my);
+            continue;
+        }
 
         /* The top bar with the system title, lit along its top edge and
            shaded along the bottom - the same light as everything else */
@@ -2592,12 +2751,26 @@ static void desktop_thread(void *arg)
     }
 }
 
+static int compositor_running;
+
+int desktop_start_kiosk(const char *program)
+{
+    /* Only before the compositor is up: a desktop already on the
+       screen cannot become a kiosk, because the windows that are
+       already open would have nowhere to go. */
+    if (compositor_running || !program)
+        return 0;
+    kiosk = 1;
+    kiosk_app = program;
+    desktop_start();
+    return 1;
+}
+
 void desktop_start(void)
 {
-    static int running;                          /* one compositor is enough */
-    if (running)
+    if (compositor_running)                      /* one compositor is enough */
         return;
-    running = 1;
+    compositor_running = 1;
 
     /* From here the screen is the compositor's. Whatever used to write
        into the corner of the text screen - the mouse's position, the

@@ -58,6 +58,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/deep.elf $(BUILD)/user/mmapzap.elf \
              $(BUILD)/user/tlbtest.elf $(BUILD)/user/faults.elf \
              $(BUILD)/user/gsettings.elf $(BUILD)/user/gdeaf.elf \
+             $(BUILD)/user/ginstal.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
              $(BUILD)/user/syscalls.elf
 
@@ -116,6 +117,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/usbmouse.o \
         $(BUILD)/part.o \
         $(BUILD)/fat.o \
+        $(BUILD)/gpt.o \
         $(BUILD)/fatcmd.o \
         $(BUILD)/install.o \
         $(BUILD)/dynlink.o \
@@ -274,6 +276,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    faults=$(BUILD)/user/faults.elf \
 	    mkwall=$(BUILD)/user/mkwall.elf \
 	    gsettings=$(BUILD)/user/gsettings.elf gdeaf=$(BUILD)/user/gdeaf.elf \
+	    ginstal=$(BUILD)/user/ginstal.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
@@ -293,7 +296,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci xhci usbhc usbkbd usbmouse part fat fatcmd install swap prog shm rtc \
+            mouse desktop acpi uhci xhci usbhc usbkbd usbmouse part fat gpt fatcmd install swap prog shm rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
@@ -360,6 +363,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gtasks.elf \
+               $(BUILD)/user64/ginstal.elf \
                $(BUILD)/user64/gimg.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
@@ -454,6 +458,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    gterm=$(BUILD)/user64/gterm.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
+	    ginstal=$(BUILD)/user64/ginstal.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \

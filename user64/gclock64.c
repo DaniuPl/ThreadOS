@@ -11,6 +11,11 @@
 #define C_BG    8
 #define C_GREEN 2
 #define C_WHITE 4
+/* Dark text on a light surface, light text on a dark one: the window
+   is the system's light grey, so its text is black. */
+#define C_TEXT  0
+#define C_DIM  15
+#define C_HEAD  3
 
 #define WINDOW_W 100
 #define WINDOW_H 34
@@ -55,8 +60,8 @@ void _start(void)
         up[n] = '\0';
 
         win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
-        win_text(w, 8, 4, s, C_GREEN);
-        win_text(w, 8, 20, up, C_WHITE);
+        win_text(w, 8, 4, s, C_TEXT);
+        win_text(w, 8, 20, up, C_DIM);
 
         sys_sleep(500);
     }

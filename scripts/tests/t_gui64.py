@@ -40,6 +40,7 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 BIALY = (255, 255, 255)
+CZARNY = (0, 0, 0)
 
 
 def scr(cx, cy):
@@ -118,13 +119,15 @@ def main():
             check("program rysuje trzeci kwadrat (niebieski)",
                   q.wait_pixel(cx, cy, BLUE, timeout=5))
 
-            # The caption 'klikniec:' drawn by win_text - white text on a
-            # grey background; we look for white pixels in its band.
+            # The caption 'klikniec:' drawn by win_text - DARK text on
+            # the window's light grey, which is the rule everywhere in
+            # this system; white on that grey was drawn and could not
+            # be read.
             _, _, at = q.screen_raw()
             tx, ty = scr(6, 24)
             whites = sum(1 for dy in range(8) for dx in range(72)
-                          if at(tx + dx, ty + dy) == BIALY)
-            check(f"program pisze tekst w oknie ({whites} bialych pikseli)",
+                          if at(tx + dx, ty + dy) == CZARNY)
+            check(f"program pisze tekst w oknie ({whites} ciemnych pikseli)",
                   whites > 20)
 
             # The click counter before the click - we remember the cell
@@ -138,17 +141,17 @@ def main():
             counter_before = counter_cell(at)
 
             # An event the other way: a click in the content area is to
-            # reach the process, which answers with a white marker at
-            # that place. The tolerance has to be narrow here: the
-            # window's grey background (227,227,227) fits inside the
-            # default one and would pass a test in which nothing
-            # happens.
+            # reach the process, which answers with a marker in the
+            # accent colour at that place. The tolerance has to be
+            # narrow here: the window's grey background (227,227,227)
+            # fits inside the default one and would pass a test in
+            # which nothing happens.
             kx, ky = scr(20, 50)
             q.mouse_goto(kx, ky)
             q.mouse_click()
             q.mouse_goto(400, 300)
             check("klik w okno wraca do programu jako zdarzenie (znacznik)",
-                  q.wait_pixel(kx, ky, BIALY, tol=8, timeout=10))
+                  q.wait_pixel(kx, ky, BLUE, tol=8, timeout=10))
 
             # The click counter stops being zero - the program counted the
             # event rather than merely redrawing the window
@@ -213,18 +216,18 @@ def main():
 
             px2, py2 = body_text(4)
             # The heading - the directory being shown and how many
-            # things are in it - is drawn in green at (4,2)
+            # things are in it - is drawn in the accent colour at (4,2)
             greens = 0
             end = time.time() + 20
             while time.time() < end:
                 _, _, ap = q.screen_raw()
                 greens = sum(1 for dy in range(8) for dx in range(120)
-                                if ap(px2 + 4 + dx, py2 + 2 + dy) == GREEN)
+                                if ap(px2 + 4 + dx, py2 + 2 + dy) == BLUE)
                 if greens > 10:
                     break
                 time.sleep(0.5)
             check("ikona 'Pliki' uruchamia menedzer plikow "
-                  "(%d zielonych pikseli naglowka)" % greens,
+                  "(%d pikseli naglowka w akcencie)" % greens,
                   greens > 10)
 
             # A click chooses a file: the row takes the accent colour,

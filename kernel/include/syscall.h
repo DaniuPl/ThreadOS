@@ -92,6 +92,14 @@
 #define SYS_WIN_TRUECOL 64
 /* A block of colours into a window: ebx=winid, ecx=&struct win_blit_cmd */
 #define SYS_WIN_BLIT32 65
+/* Installing onto this machine's own disk. Looking changes nothing and
+   is allowed to anybody; every step of the writing needs an admin,
+   because what is on the other side of it is somebody's disk.
+   ebx=way (0 = alongside, 1 = the whole disk), ecx=&struct install_info
+   -> 1 = it can be done, 0 = it cannot */
+#define SYS_INSTALL_LOOK 66
+/* ebx=step number -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */
+#define SYS_INSTALL_STEP 67
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

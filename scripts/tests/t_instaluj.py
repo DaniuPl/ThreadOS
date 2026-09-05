@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: installing onto the machine's own disk.
+"""ProtonOS smoke test: installing onto the machine's own disk (in text).
+
+The installer proper takes the whole screen and is checked in t_ginstal;
+this group is the same three files written by the same code, said out
+loud in the console - which is what one wants when there is no screen
+to draw on, or when the answer has to end up in a log.
 
 The shape of this group is the shape of the thing: a machine started
 from a stick, a second disk that belongs to somebody else, and the
@@ -131,7 +136,7 @@ def main():
             q.wait_serial("System 64-bitowy gotowy", timeout=90)
 
             # Somebody who does not type the word gets nothing done
-            out = q.command("instaluj", "Wpisz TAK", timeout=30)
+            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=30)
             check("instalator najpierw mowi, co by zapisal",
                   "/EFI/ProtonOS/protonos64.bin" in out
                   and "Partycja EFI: numer 1" in out)
@@ -141,15 +146,15 @@ def main():
             check("bez slowa TAK nie zapisuje niczego",
                   "nie zapisano niczego" in out)
 
-            out = q.command("instaluj", "Wpisz TAK", timeout=30)
+            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=30)
             out = q.command("TAK", "Gotowe", timeout=90)
             check("po TAK zapisuje wszystkie trzy pliki",
-                  "/EFI/ProtonOS/BOOTX64.EFI zapisany" in out
-                  and "/EFI/ProtonOS/protonos64.bin zapisany" in out
-                  and "/EFI/ProtonOS/initrd64.img zapisany" in out)
+                  "/EFI/ProtonOS/BOOTX64.EFI - gotowe" in out
+                  and "/EFI/ProtonOS/protonos64.bin - gotowe" in out
+                  and "/EFI/ProtonOS/initrd64.img - gotowe" in out)
             check("i - skoro nikogo tam nie bylo - takze /EFI/BOOT/"
                   "BOOTX64.EFI",
-                  "/EFI/BOOT/BOOTX64.EFI zapisany" in out
+                  "/EFI/BOOT/BOOTX64.EFI - gotowe" in out
                   and "uruchomi ProtonOS-a z dysku" in out)
         finally:
             q.close()
@@ -198,16 +203,16 @@ def main():
                   uefi=(OVMF_CODE, nvram))
         try:
             q3.wait_serial("System 64-bitowy gotowy", timeout=120)
-            out = q3.command("instaluj", "Wpisz TAK", timeout=30)
+            out = q3.command("instaluj tekstem", "Wpisz TAK", timeout=30)
             check("instalator widzi, ze /EFI/BOOT/BOOTX64.EFI jest zajety",
                   "JEST JUZ ZAJETY" in out)
             check("i z gory mowi, ze trzeba bedzie wpisu w firmwarze",
                   "menu rozruchowym" in out)
             out = q3.command("TAK", "Gotowe", timeout=90)
             check("zapisuje swoje pliki mimo to",
-                  "/EFI/ProtonOS/protonos64.bin zapisany" in out)
+                  "/EFI/ProtonOS/protonos64.bin - gotowe" in out)
             check("ale nie pisze o zapisaniu cudzego pliku",
-                  "/EFI/BOOT/BOOTX64.EFI zapisany" not in out
+                  "/EFI/BOOT/BOOTX64.EFI - gotowe" not in out
                   and "dodaj w firmwarze wpis" in out)
         finally:
             q3.close()

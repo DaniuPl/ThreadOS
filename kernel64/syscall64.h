@@ -99,6 +99,14 @@
 #define SYS64_PS        53  /* a1=index, a2=buffer -> 0 / -1 */
 #define SYS64_WIN_TRUECOL 58  /* a1=winid -> 0 / -1 */
 #define SYS64_WIN_BLIT32  59  /* a1=winid, a2=&cmd */
+/* Installing onto this machine's own disk. Looking changes nothing and
+   is allowed to anybody; writing needs an admin, because what is on
+   the other side of it is somebody's disk.
+   a1=way (0 = alongside, 1 = the whole disk), a2=&struct install_info
+   -> 1 = it can be done, 0 = it cannot */
+#define SYS64_INSTALL_LOOK 60
+/* a1=step -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */
+#define SYS64_INSTALL_STEP 61
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

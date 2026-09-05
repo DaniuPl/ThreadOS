@@ -23,7 +23,7 @@ Shared by both kernels (same files, compiled twice):
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC, local APIC |
 | USB | xHCI and UHCI behind one host-controller layer; HID boot keyboard |
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
-| Installing | `instaluj` writes the loader, the kernel and the initrd onto the machine's own EFI partition — nothing else on that disk is touched |
+| Installing | `instaluj` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a PFS3 partition) |
 | FAT | FAT12/16/32 on the EFI partition — read fully, written as far as an installer needs, long names both ways |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
