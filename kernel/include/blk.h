@@ -6,21 +6,37 @@
 /* The block device layer
  *
  * The filesystem and the swapper do not need to know whether the disk
- * sits behind an AHCI controller or behind old ATA in PIO mode. The
- * choice is made once, at startup: AHCI has priority (it is faster and
- * it is the only thing visible on newer boards), ATA remains as a
- * fallback.
+ * sits behind an AHCI controller or behind old ATA in PIO mode. What
+ * they do need is that there is ONE disk they are reading and writing
+ * - so this layer keeps a list of the disks the machine has and one of
+ * them in use, and everything above it works on that one.
+ *
+ * The list is in order from newer to older: NVMe, then every AHCI
+ * port with a disk on it, then the two drives of the old ATA bus. The
+ * first one is in use at startup, which makes a machine with one disk
+ * behave exactly as it did when this layer knew of only one.
  */
 
-/* Detects a disk and picks a driver. 1 = there is a disk. */
+#define BLK_MAX 8
+
+/* Finds the disks and takes the first one. 1 = there is at least one. */
 int blk_init(void);
 int blk_present(void);
 
-/* Name of the chosen driver (for the startup message) */
+/* How many there are, which one is in use, and how to change that.
+   Changing it changes what the filesystem, the partition table and
+   FAT are looking at - so whoever changes it has to mean it. */
+int blk_count(void);
+int blk_current(void);
+int blk_use(int i);                  /* 0 = done, -1 = there is no such one */
+
+/* Name of the driver behind the disk in use, and behind any of them */
 const char *blk_name(void);
+const char *blk_name_of(int i);
 
 /* Capacity in 512 B sectors (0 = unknown) */
 uint32_t blk_sectors(void);
+uint32_t blk_sectors_of(int i);
 
 /* Read/write 'count' consecutive sectors. The buffer must lie in
    physically contiguous memory - with AHCI the controller reaches for

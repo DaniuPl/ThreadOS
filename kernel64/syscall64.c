@@ -985,7 +985,7 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        int can = install_look((int)a1, &info);
+        int can = install_look((int)a1, (int)(int64_t)a3, &info);
         *(struct install_info *)(uintptr_t)a2 = info;
         r->rax = (uint64_t)(int64_t)can;
         return;

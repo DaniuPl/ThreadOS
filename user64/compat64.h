@@ -121,6 +121,8 @@ struct install_info {
     uint32_t mode;
     uint32_t steps;
     uint32_t can_wipe;
+    uint32_t disk;
+    uint32_t disks;
     uint32_t esp_index;
     uint32_t esp_lba;
     uint32_t free_kib;
@@ -131,15 +133,16 @@ struct install_info {
     uint32_t fallback_free;
     uint32_t disk_mib;
     uint32_t parts;
-    char disk[INST_NAME];
+    char disk_name[INST_NAME];
     char kind[8];
     char label[INST_NAME];
 };
 
-static inline int32_t sys_install_look(int32_t mode, struct install_info *out)
+static inline int32_t sys_install_look(int32_t mode, int32_t disk,
+                                       struct install_info *out)
 {
-    return (int32_t)syscall64(SYS64_INSTALL_LOOK, mode,
-                              (int64_t)(uintptr_t)out);
+    return (int32_t)syscall64_3(SYS64_INSTALL_LOOK, mode,
+                                (int64_t)(uintptr_t)out, disk);
 }
 
 static inline int32_t sys_install_step(int32_t n)

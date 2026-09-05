@@ -594,7 +594,7 @@ void syscall_handler(struct regs *r)
      * without us. */
     case SYS_INSTALL_LOOK: {
         struct install_info info;
-        int can = install_look((int)r->ebx, &info);
+        int can = install_look((int)r->ebx, (int)r->edx, &info);
         if (user_put(r->ecx, &info, sizeof(info)) < 0) {
             r->eax = EFAULT;
             break;

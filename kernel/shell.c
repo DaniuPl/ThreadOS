@@ -373,13 +373,22 @@ static void cmd_formatuj(char *arg)
  * Reading and printing first, then a person saying yes, and only then
  * writing - the same shape as formatting, and for the same reason:
  * what is on the other side of this is somebody's laptop. */
+/* Does the line start with this word? */
+static int starts(const char *s, const char *word)
+{
+    while (*word)
+        if (*s++ != *word++)
+            return 0;
+    return *s == '\0' || *s == ' ';
+}
+
 /* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
    things here, which is what one wants when there is no screen to draw
    on - or when the answer has to end up in a log. */
 static void cmd_install(const char *arg)
 {
     char answer[8];
-    int mode = INST_ALONGSIDE;
+    int mode = INST_ALONGSIDE, disk = -1;
 
     if (!arg || !arg[0]) {
         if (install_graphical())
@@ -390,13 +399,35 @@ static void cmd_install(const char *arg)
                "'instaluj tekstem'.\n");
         return;
     }
-    if (!strcmp(arg, "tekstem caly"))
-        mode = INST_WHOLE;
-    else if (strcmp(arg, "tekstem") != 0) {
-        printk("uzycie: instaluj [tekstem [caly]]\n");
+    /* "tekstem", then optionally "caly", then optionally a disk
+       number counted from one. A machine with several disks is a
+       machine where saying which one is the whole question. */
+    const char *p = arg;
+    if (!starts(p, "tekstem")) {
+        printk("uzycie: instaluj [tekstem [caly] [numer dysku]]\n");
         return;
     }
-    if (!install_plan(mode))
+    p += 7;
+    while (*p == ' ')
+        p++;
+    if (starts(p, "caly")) {
+        mode = INST_WHOLE;
+        p += 4;
+        while (*p == ' ')
+            p++;
+    }
+    if (*p >= '1' && *p <= '9') {
+        int n = 0;
+        while (*p >= '0' && *p <= '9')
+            n = n * 10 + (*p++ - '0');
+        disk = n - 1;
+    }
+    if (blk_count() > 1)
+        for (int i = 0; i < blk_count(); i++)
+            printk("  dysk %u: %s, %u MiB%s\n", (uint32_t)(i + 1),
+                   blk_name_of(i), blk_sectors_of(i) / 2048,
+                   i == (disk < 0 ? blk_current() : disk) ? "  <-" : "");
+    if (!install_plan(mode, disk))
         return;
     /* A different word for the way that destroys things. TAK is what
        one says to a question; KASUJ is what one says to this. */

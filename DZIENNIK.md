@@ -4706,3 +4706,47 @@ sprawdzane przez `make test`.
       bajt po bajcie, bo nie robi tego zaden instalator - znika ksztalt
       (tablica i systemy plikow), a nie kazdy bajt, i test mowi to
       wprost zamiast twierdzic cos, co nie byloby prawda.
+
+- [x] **Kilka dyskow i wybor miedzy nimi** (kernel/blk.c jako lista,
+      ata.c master i slave, ahci.c wszystkie porty, grupa testow
+      `dyski`).
+
+      Warstwa blokowa znajdowala jeden dysk i to byl dysk. Dla maszyny
+      z jednym jest to sluszne i przestaje byc sluszne w chwili, gdy
+      ktos ma wybrac, na ktory zainstalowac.
+
+      Wiec jest lista. Kolejnosc dalej idzie od nowszego do starszego -
+      NVMe, potem kazdy port AHCI z dyskiem, potem oba napedy starej
+      magistrali ATA - a pierwszy z listy jest tym uzywanym, dzieki
+      czemu maszyna z jednym dyskiem zachowuje sie dokladnie tak, jak
+      zachowywala sie wczesniej. To nie jest ostroznosc na wyrost: pod
+      ta warstwa lezy caly system plikow, wymiana i tablica partycji.
+
+      Ponad warstwa nic sie nie zmienilo: system plikow, part.c i fat.c
+      czytaja i pisza DYSK UZYWANY. Przewlekanie numeru urzadzenia
+      przez kazdego z nich byloby zmiana w kazdym z nich - dla pytania,
+      ktore zadaje sie raz, czlowiekowi, w instalatorze.
+
+      **OGLADANIE NIE MOZE NICZEGO ZMIENIAC** i to jest jedyna
+      subtelna rzecz w tym kroku. Przeczytanie tablicy innego dysku
+      wymaga wskazania go warstwie blokowej, bo part.c czyta dysk
+      uzywany. Ale maszyna zostawiona wskazujaca na dysk, o ktory ktos
+      tylko zapytal, to system plikow czytajacy cudze sektory. Wiec
+      install_look() zapamietuje, co bylo uzywane, i wraca tam przed
+      powrotem - razem z odmontowaniem FAT-u, ktory po drodze
+      podmontowal. Wskazanie wybranego dysku jest rzecza install_step(),
+      czyli chwili, w ktorej naprawde sie pisze.
+
+      **Test znalazl przy okazji prawdziwy blad, i to stary.** Komenda
+      'disk' pisala wzorzec do OSTATNIEGO SEKTORA dysku i czytala go z
+      powrotem - co bylo bezpieczne, dopoki nasze dyski nie mialy na
+      sobie nic. Na dysku z GPT ostatni sektor JEST kopia tablicy
+      partycji. Zapis tam niszczy ja bez slowa: dysk dalej startuje, a
+      pewnego dnia narzedzie naprawcze mowi, ze tablica jest
+      uszkodzona. Teraz dysk z tablica jest tylko czytany, i jest
+      asercja, ktora to trzyma.
+
+      Wersja tekstowa przyjmuje numer dysku ('instaluj tekstem caly 2')
+      i wypisuje liste, gdy dyskow jest wiecej niz jeden. W oknie linia
+      z dyskiem jest klikalna i mowi o tym wprost - wybor, ktorego
+      trzeba sie domyslic, nie jest wyborem.

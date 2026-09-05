@@ -64,6 +64,8 @@ struct install_info {
     uint32_t mode;               /* which of the two was asked about */
     uint32_t steps;              /* how many steps it takes */
     uint32_t can_wipe;           /* 1 = the whole-disk way is possible at all */
+    uint32_t disk;               /* which disk this is about, counted from 0 */
+    uint32_t disks;              /* how many the machine has */
     uint32_t esp_index;          /* the partition, counted from one */
     uint32_t esp_lba;
     uint32_t free_kib;
@@ -74,14 +76,16 @@ struct install_info {
     uint32_t fallback_free;      /* 1 = \EFI\BOOT\BOOTX64.EFI is nobody's */
     uint32_t disk_mib;
     uint32_t parts;              /* how many partitions the disk has */
-    char disk[INST_NAME];        /* the driver behind it */
+    char disk_name[INST_NAME];   /* the driver behind it */
     char kind[8];                /* FAT16 / FAT32 */
     char label[INST_NAME];       /* what the partition calls itself */
 };
 
-/* Reads the disk and fills the shape above for the way of installing
-   being asked about. Changes nothing. 1 = it can be done. */
-int install_look(int mode, struct install_info *out);
+/* Reads a disk and fills the shape above for the way of installing
+   being asked about. 'disk' is one of the machine's disks counted from
+   zero, or -1 for the one the system is using. Changes nothing beyond
+   which disk the block layer is pointed at. 1 = it can be done. */
+int install_look(int mode, int disk, struct install_info *out);
 
 /* How many steps each way takes, and what each of them is called. A
    person watching a bar move wants to know what is moving. */
@@ -96,7 +100,7 @@ int install_step(int n);
 
 /* The two the text version uses: printing what would happen, and doing
    all the steps one after another. */
-int install_plan(int mode);
+int install_plan(int mode, int disk);
 int install_do(void);
 
 /* Installing the way it is meant to be done: the whole screen, one

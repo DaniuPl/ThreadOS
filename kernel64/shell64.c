@@ -32,6 +32,7 @@
 #include "../kernel/include/pit.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/part.h"
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/swap.h"
 #include "../kernel/include/rtc.h"
@@ -127,7 +128,13 @@ static void cmd_mem(void)
 
 /* Writing and reading a sector - the only way to check the disk for
    real rather than merely that the controller introduced itself.
-   The last sector: nothing lies there yet. */
+ *
+ * The last sector, and that used to be safe because our disks had
+ * nothing on them. It is not safe on a disk with a GPT: the last
+ * sector of such a disk IS the copy of the partition table, and a
+ * write there destroys it without a word - the disk still boots, and
+ * one day a repair tool says the table is damaged. So a disk with a
+ * table on it is read and not written, and this says so. */
 static void cmd_disk(void)
 {
     if (!blk_present()) {
@@ -139,6 +146,17 @@ static void cmd_disk(void)
 
     static uint8_t buf[512];
     uint32_t lba = blk_sectors() ? blk_sectors() - 1 : 0;
+
+    if (part_scan() > 0) {
+        if (blk_read(lba, 1, buf) < 0) {
+            printk("disk: odczyt sektora %u nie przeszedl\n", lba);
+            return;
+        }
+        printk("disk: na dysku jest tablica partycji - ostatni sektor to "
+               "jej kopia,\n      wiec tylko go czytam (%u B odczytane)\n",
+               512u);
+        return;
+    }
 
     for (int i = 0; i < 512; i++)
         buf[i] = (uint8_t)(i + 7);
@@ -576,11 +594,28 @@ static void read_word(char *out, int max)
 /* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
    things here, which is what one wants when there is no screen to draw
    on - or when the answer has to end up in a log. */
-static void cmd_install_text(int mode)
+/* A number written out on the line - the disk to install onto,
+   counted from one the way a person counts. */
+static uint32_t text_num(const char *s)
+{
+    uint32_t v = 0;
+    while (*s == ' ')
+        s++;
+    while (*s >= '0' && *s <= '9')
+        v = v * 10 + (uint32_t)(*s++ - '0');
+    return v;
+}
+
+static void cmd_install_text(int mode, int disk)
 {
     char answer[8];
 
-    if (!install_plan(mode))
+    if (blk_count() > 1)
+        for (int i = 0; i < blk_count(); i++)
+            printk("  dysk %u: %s, %u MiB%s\n", (uint32_t)(i + 1),
+                   blk_name_of(i), blk_sectors_of(i) / 2048,
+                   i == (disk < 0 ? blk_current() : disk) ? "  <-" : "");
+    if (!install_plan(mode, disk))
         return;
     /* A different word for the way that destroys things. TAK is what
        one says to a question; KASUJ is what one says to this. */
@@ -750,9 +785,13 @@ static void execute(const char *line)
                    "'instaluj tekstem'.\n");
         }
     } else if (!strcmp(line, "instaluj tekstem")) {
-        cmd_install_text(INST_ALONGSIDE);
+        cmd_install_text(INST_ALONGSIDE, -1);
     } else if (!strcmp(line, "instaluj tekstem caly")) {
-        cmd_install_text(INST_WHOLE);
+        cmd_install_text(INST_WHOLE, -1);
+    } else if (starts_with(line, "instaluj tekstem caly ")) {
+        cmd_install_text(INST_WHOLE, (int)text_num(line + 22) - 1);
+    } else if (starts_with(line, "instaluj tekstem ")) {
+        cmd_install_text(INST_ALONGSIDE, (int)text_num(line + 17) - 1);
     } else if (!strcmp(line, "fat")) {
         fatcmd_mount("");
     } else if (starts_with(line, "fat ")) {

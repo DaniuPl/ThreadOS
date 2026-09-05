@@ -1,7 +1,7 @@
 /* ATA (IDE) disk driver in PIO mode with polling
  *
- * It handles the first bus (ports 0x1F0-0x1F7), the master drive and
- * LBA28 addressing. This is the simplest possible driver: no
+ * It handles the first bus (ports 0x1F0-0x1F7), both drives on it -
+ * the master and the slave - and LBA28 addressing. This is the simplest possible driver: no
  * interrupts, no DMA - we read/write 256 words through the data port,
  * waiting in a loop until the controller reports readiness. For a toy
  * system and QEMU disks that is entirely enough.
@@ -37,6 +37,21 @@ int ata_present(void)
     return inb(ATA_STATUS) != 0xFF;
 }
 
+/* Which of the two drives on the bus the commands are for. One bit in
+   the drive register, and it has to be set before every command - so
+   it is kept here rather than passed through every call. */
+static int unit;
+
+void ata_select(int u)
+{
+    unit = u ? 1 : 0;
+}
+
+int ata_selected(void)
+{
+    return unit;
+}
+
 static int ata_wait_drq(void);
 
 /* Disk capacity: the IDENTIFY DEVICE command returns 256 descriptor
@@ -44,13 +59,13 @@ static int ata_wait_drq(void);
    sectors. */
 uint32_t ata_sectors(void)
 {
-    static uint32_t cached;
-    if (cached)
-        return cached;
+    static uint32_t cached[2];
+    if (cached[unit])
+        return cached[unit];
     if (!ata_present())
         return 0;
 
-    outb(ATA_DRIVE, 0xA0);              /* master, CHS/LBA mode irrelevant */
+    outb(ATA_DRIVE, (uint8_t)(0xA0 | (unit << 4)));  /* the chosen drive */
     outb(ATA_SECCOUNT, 0);
     outb(ATA_LBA_LO, 0);
     outb(ATA_LBA_MID, 0);
@@ -66,8 +81,8 @@ uint32_t ata_sectors(void)
     for (int i = 0; i < 256; i++)
         id[i] = inw(ATA_DATA);
 
-    cached = ((uint32_t)id[61] << 16) | id[60];
-    return cached;
+    cached[unit] = ((uint32_t)id[61] << 16) | id[60];
+    return cached[unit];
 }
 
 /* Reading alt-status 4x gives the required ~400 ns for BSY to settle
@@ -101,12 +116,12 @@ static int ata_wait_not_busy(void)
     return -1;
 }
 
-/* Selecting the master drive plus loading the LBA28 address, sector
-   count = 1. The drive selection MUST precede the command, and one has
-   to wait after it. */
+/* Selecting the drive plus loading the LBA28 address, sector count =
+   1. The drive selection MUST precede the command, and one has to wait
+   after it. */
 static int ata_setup(uint32_t lba)
 {
-    outb(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));  /* master, LBA */
+    outb(ATA_DRIVE, (uint8_t)(0xE0 | (unit << 4) | ((lba >> 24) & 0x0F)));
     ata_delay();
     if (ata_wait_not_busy() < 0)
         return -1;

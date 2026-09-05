@@ -111,10 +111,53 @@ struct fis_h2d {
 #define SIG_SATA       0x00000101u
 
 static struct hba_mem *hba;
+/* A controller can have several ports and a disk on each of them.
+   Each needs its own command list and its own command table, so a
+   disk here is those three things plus how big it is - and the one
+   commands go to is the one chosen. */
+#define AHCI_MAX 4
+
+struct ahci_disk {
+    struct hba_port *port;
+    struct cmd_header *cmd_list;
+    struct cmd_table *cmd_tbl;
+    uint32_t sectors;
+};
+
+static struct ahci_disk disks[AHCI_MAX];
+static int ndisks;
+static int chosen;
+
+/* The three the rest of this file works through. Kept as plain
+   variables rather than reached through disks[chosen] on every line:
+   the command path is long enough without an index in the middle of
+   it. */
 static struct hba_port *port;
 static struct cmd_header *cmd_list;
 static struct cmd_table *cmd_tbl;
 static uint32_t disk_sectors;
+
+static void use(int i)
+{
+    chosen = i;
+    port = disks[i].port;
+    cmd_list = disks[i].cmd_list;
+    cmd_tbl = disks[i].cmd_tbl;
+    disk_sectors = disks[i].sectors;
+}
+
+int ahci_count(void)
+{
+    return ndisks;
+}
+
+int ahci_select(int i)
+{
+    if (i < 0 || i >= ndisks)
+        return -1;
+    use(i);
+    return 0;
+}
 
 /* The controller can take its time; we have no clock finer than 10 ms,
    so we count loop iterations. The values have plenty of margin. */
@@ -227,9 +270,12 @@ int ahci_init(void)
     hba = (struct hba_mem *)(uintptr_t)abar;
     hba->ghc |= (1u << 31);                  /* AHCI mode, not compatibility */
 
-    /* The first port with a SATA disk attached */
+    /* Every port with a SATA disk attached, not just the first one:
+       a machine can have more than one, and which of them a person
+       means is a question only they can answer. */
     uint32_t implemented = hba->pi;
-    for (int i = 0; i < 32; i++) {
+    ndisks = 0;
+    for (int i = 0; i < 32 && ndisks < AHCI_MAX; i++) {
         if (!(implemented & (1u << i)))
             continue;
         struct hba_port *p = &hba->ports[i];
@@ -264,10 +310,18 @@ int ahci_init(void)
         port = p;
         cmd_list = (struct cmd_header *)(uintptr_t)area;
         cmd_tbl = (struct cmd_table *)(uintptr_t)table;
+        disk_sectors = 0;
         read_capacity();
-        return 1;
+
+        disks[ndisks].port = port;
+        disks[ndisks].cmd_list = cmd_list;
+        disks[ndisks].cmd_tbl = cmd_tbl;
+        disks[ndisks].sectors = disk_sectors;
+        ndisks++;
     }
-    return 0;
+    if (ndisks)
+        use(0);
+    return ndisks;
 }
 
 uint32_t ahci_sectors(void)

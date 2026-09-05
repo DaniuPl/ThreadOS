@@ -810,6 +810,8 @@ struct install_info {
     uint32_t mode;
     uint32_t steps;
     uint32_t can_wipe;
+    uint32_t disk;
+    uint32_t disks;
     uint32_t esp_index;
     uint32_t esp_lba;
     uint32_t free_kib;
@@ -820,19 +822,20 @@ struct install_info {
     uint32_t fallback_free;
     uint32_t disk_mib;
     uint32_t parts;
-    char disk[INST_NAME];
+    char disk_name[INST_NAME];
     char kind[8];
     char label[INST_NAME];
 };
 
 /* Reads and changes nothing. 1 = it can be done, 0 = it cannot (and
    then info.problem says why). */
-static inline int32_t sys_install_look(int32_t mode, struct install_info *out)
+static inline int32_t sys_install_look(int32_t mode, int32_t disk,
+                                       struct install_info *out)
 {
     int32_t ret;
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
-                     : "a"(SYS_INSTALL_LOOK), "b"(mode), "c"(out)
+                     : "a"(SYS_INSTALL_LOOK), "b"(mode), "c"(out), "d"(disk)
                      : "memory");
     return ret;
 }

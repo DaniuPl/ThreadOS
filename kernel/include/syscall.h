@@ -95,7 +95,8 @@
 /* Installing onto this machine's own disk. Looking changes nothing and
    is allowed to anybody; every step of the writing needs an admin,
    because what is on the other side of it is somebody's disk.
-   ebx=way (0 = alongside, 1 = the whole disk), ecx=&struct install_info
+   ebx=way (0 = alongside, 1 = the whole disk), ecx=&struct install_info,
+   edx=which disk (from zero; -1 = the one in use)
    -> 1 = it can be done, 0 = it cannot */
 #define SYS_INSTALL_LOOK 66
 /* ebx=step number -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */

@@ -51,7 +51,7 @@ FOREIGN = b"MZ-to-jest-cudzy-bootmgfw-" * 300
 # size means the test is reading somewhere else, and it should say so
 # instead of quietly reading the wallpaper.
 WIN_W = 440
-WIN_H = 218
+WIN_H = 230
 TITLE_H = 10                 # kernel/desktop.c
 TITLE = (0, 0, 255)          # the title bar of the window with focus
 BAR = (211, 211, 211)        # the desktop's bars - which must NOT be here
@@ -197,7 +197,7 @@ def main():
 
             # Everything below is read off the screen, in the font the
             # kernel drew it with - not from the serial port
-            text = q.read_text(cx + 6, cy + 4, 54, 15, line_h=12)
+            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
             check("okno mowi, po co jest",
                   "Instalacja ProtonOS-a na dysk tej maszyny" in text)
             check("i co znalazlo: dysk za kontrolerem AHCI",
@@ -232,7 +232,7 @@ def main():
             q.mouse_goto(right, by)
             q.mouse_click()
             time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 14, line_h=12)
+            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
             check("drugi przycisk pokazuje druga droge: caly dysk",
                   "Caly dysk dla ProtonOS-a" in text)
             check("i mowi wprost, co to znaczy",
@@ -248,7 +248,7 @@ def main():
             q.mouse_goto(left, by)        # "Wroc"
             q.mouse_click()
             time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 14, line_h=12)
+            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
             check("'Wroc' wraca do instalacji obok",
                   "Instalacja ProtonOS-a na dysk tej maszyny" in text)
 

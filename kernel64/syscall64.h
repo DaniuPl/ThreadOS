@@ -102,7 +102,8 @@
 /* Installing onto this machine's own disk. Looking changes nothing and
    is allowed to anybody; writing needs an admin, because what is on
    the other side of it is somebody's disk.
-   a1=way (0 = alongside, 1 = the whole disk), a2=&struct install_info
+   a1=way (0 = alongside, 1 = the whole disk), a2=&struct install_info,
+   a3=which disk (from zero; -1 = the one in use)
    -> 1 = it can be done, 0 = it cannot */
 #define SYS64_INSTALL_LOOK 60
 /* a1=step -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */

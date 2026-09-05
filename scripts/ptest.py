@@ -920,7 +920,8 @@ class Qemu:
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None, esp=None, nic="rtl8139", cpus=None):
+                 uefi=None, esp=None, disk2=None, nic="rtl8139",
+                 cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The 64-bit kernel needs a processor with long mode, and
@@ -1021,6 +1022,14 @@ class Qemu:
                     "-device", "ide-hd,drive=sata0,bus=ahci.0"]
         elif disk:
             cmd += ["-hda", disk]
+        if disk2:
+            # A second disk on the same controller, which has to be
+            # declared by then - hence the position. A machine with
+            # more than one disk is the only place where "which disk"
+            # is a question at all, and a test that never asks it is a
+            # test that never sees the answer.
+            cmd += ["-drive", f"id=sata1,file={disk2},if=none,format=raw",
+                    "-device", "ide-hd,drive=sata1,bus=ahci.1"]
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 

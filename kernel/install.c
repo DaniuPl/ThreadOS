@@ -61,6 +61,7 @@
 
 static struct {
     int ready;
+    int was;                     /* the disk in use before we looked */
     struct install_info info;
     const uint8_t *loader;
     const uint8_t *kernel;
@@ -92,17 +93,29 @@ static void say(char *dst, const char *src, int max)
     dst[i] = '\0';
 }
 
+/* Looking is over: the FAT the looking may have mounted is let go and
+   the machine is pointed back at the disk it was using. Both matter -
+   a mounted volume on a disk nobody is looking at any more is a
+   driver holding a sector cache from somewhere else. */
+static void done_looking(void)
+{
+    fat_umount();
+    if (plan.was >= 0 && blk_current() != plan.was)
+        blk_use(plan.was);
+}
+
 static int no(struct install_info *out, uint32_t why)
 {
     plan.ready = 0;
     plan.info.problem = why;
     plan.info.ok = 0;
+    done_looking();
     if (out)
         *out = plan.info;
     return 0;
 }
 
-int install_look(int mode, struct install_info *out)
+int install_look(int mode, int disk, struct install_info *out)
 {
     struct partition pt;
     struct fat_entry e;
@@ -116,6 +129,21 @@ int install_look(int mode, struct install_info *out)
     if (!blk_present())
         return no(out, INST_NO_DISK);
 
+    /* Which disk this is about. Reading another one's table means
+       pointing the block layer at it, because everything below -
+       part.c, fat.c - reads the disk in use. But LOOKING MUST CHANGE
+       NOTHING, and leaving the machine pointed at a disk somebody
+       merely asked about would leave its filesystem reading a disk it
+       was never mounted from. So the disk in use is put back before
+       this returns, and install_step() points at the chosen one again
+       when the time comes to write. */
+    int was = blk_current();
+    if (disk >= 0 && blk_use(disk) < 0)
+        return no(out, INST_NO_DISK);
+    in->disk = (uint32_t)blk_current();
+    in->disks = (uint32_t)blk_count();
+    plan.was = was;
+
     /* What we would write. If the machine was not started by a loader
        that hands these over, there is nothing to install and no
        reason to look at the disk at all. */
@@ -125,7 +153,7 @@ int install_look(int mode, struct install_info *out)
     if (!plan.loader || !plan.kernel || !plan.initrd || !in->initrd_size)
         return no(out, INST_NO_FILES);
 
-    say(in->disk, blk_name(), INST_NAME);
+    say(in->disk_name, blk_name(), INST_NAME);
     in->disk_mib = blk_sectors() / 2048;
     /* Whether taking the whole disk is even possible is worth saying
        on every screen, including the ones that are about the other
@@ -152,6 +180,7 @@ int install_look(int mode, struct install_info *out)
                         + in->loader_size) / 1024 + 4;
         in->ok = 1;
         plan.ready = 1;
+        done_looking();
         if (out)
             *out = *in;
         return 1;
@@ -185,6 +214,7 @@ int install_look(int mode, struct install_info *out)
 
     in->ok = 1;
     plan.ready = 1;
+    done_looking();
     if (out)
         *out = *in;
     return 1;
@@ -248,10 +278,21 @@ int install_step(int n)
 {
     if (!plan.ready)
         return -1;
+    /* Back onto the disk the plan is about. Looking put the machine
+       back where it was; writing is the moment that is undone. */
+    if (blk_current() != (int)plan.info.disk &&
+        blk_use((int)plan.info.disk) < 0)
+        return -1;
+
     if (plan.info.mode == INST_WHOLE) {
         if (n < 3)
             return step_wipe(n);
         n -= 3;
+    } else if (!fat_mounted() && !fat_mount(plan.info.esp_lba)) {
+        /* The EFI partition, mounted again: looking let it go so that
+           nothing would be left holding a volume on a disk nobody
+           chose. */
+        return -1;
     }
     switch (n) {
     case 0:
@@ -322,16 +363,17 @@ static void complain(uint32_t why, const struct install_info *in)
     }
 }
 
-int install_plan(int mode)
+int install_plan(int mode, int disk)
 {
     struct install_info in;
 
-    if (!install_look(mode, &in)) {
+    if (!install_look(mode, disk, &in)) {
         complain(in.problem, &in);
         return 0;
     }
 
-    printk("Dysk:     %s, %u MiB\n", in.disk, in.disk_mib);
+    printk("Dysk %u z %u: %s, %u MiB\n", in.disk + 1, in.disks,
+           in.disk_name, in.disk_mib);
     if (in.mode == INST_WHOLE) {
         printk("\nCALY TEN DYSK BEDZIE ProtonOS-a. Zniknie z niego "
                "WSZYSTKO:\n");

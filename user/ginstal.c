@@ -50,7 +50,7 @@
 #define C_HEAD  C_BLUE
 
 #define W0 440
-#define H0 218
+#define H0 230
 
 #define BTN_W  168
 #define BTN_H  16
@@ -257,6 +257,32 @@ static int in_button(int x, int y)
     return 0;
 }
 
+/* Which disk this is about, and - when the machine has more than one
+   - that clicking the line changes it. A machine with several disks
+   is a machine where saying which one is the whole question, and a
+   choice that has to be guessed at is not a choice. */
+#define DISK_ROW 2
+
+static void disk_line(int win)
+{
+    char line[80];
+    int at = add(line, 0, "Dysk ");
+
+    at = addnum(line, at, info.disk + 1);
+    at = add(line, at, " z ");
+    at = addnum(line, at, info.disks);
+    at = add(line, at, ": ");
+    at = add(line, at, info.disk_name);
+    at = add(line, at, ", ");
+    at = addnum(line, at, info.disk_mib);
+    at = add(line, at, " MiB, partycji: ");
+    at = addnum(line, at, info.parts);
+    win_text(win, 6, rowy(DISK_ROW), line, C_TEXT);
+    if (info.disks > 1)
+        win_text(win, 6, rowy(DISK_ROW + 1),
+                 "(klik w te linie wybiera nastepny dysk)", C_HEAD);
+}
+
 static void draw_plan(int win)
 {
     char line[80];
@@ -265,13 +291,7 @@ static void draw_plan(int win)
     win_text(win, 6, rowy(0), "Instalacja ProtonOS-a na dysk tej maszyny",
              C_HEAD);
 
-    at = add(line, 0, "Dysk: ");
-    at = add(line, at, info.disk);
-    at = add(line, at, ", ");
-    at = addnum(line, at, info.disk_mib);
-    at = add(line, at, " MiB, partycji: ");
-    at = addnum(line, at, info.parts);
-    win_text(win, 6, rowy(2), line, C_TEXT);
+    disk_line(win);
 
     at = add(line, 0, "Partycja EFI: nr ");
     at = addnum(line, at, info.esp_index);
@@ -284,39 +304,39 @@ static void draw_plan(int win)
     at = add(line, at, ", wolne ");
     at = addnum(line, at, info.free_kib);
     at = add(line, at, " KiB");
-    win_text(win, 6, rowy(3), line, C_TEXT);
+    win_text(win, 6, rowy(4), line, C_TEXT);
 
-    win_text(win, 6, rowy(5), "Zapisze:", C_HEAD);
+    win_text(win, 6, rowy(6), "Zapisze:", C_HEAD);
 
     const uint32_t size3[3] = {info.loader_size, info.kernel_size,
                                info.initrd_size};
     for (int i = 0; i < 3; i++) {
-        win_text(win, 14, rowy(6 + i), STEP_NAME[1 + i], C_TEXT);
+        win_text(win, 14, rowy(7 + i), STEP_NAME[1 + i], C_TEXT);
         int n = num(line, size3[i]);
         add(line, n, " B");
         /* The size is said quietly - the name is what matters. And
            the column sits on the same eight-pixel grid the glyphs do:
            a column at an odd offset can be read by an eye and not by
            a program. */
-        win_text(win, 6 + 36 * 8, rowy(6 + i), line, C_DIM);
+        win_text(win, 6 + 36 * 8, rowy(7 + i), line, C_DIM);
     }
 
     if (info.fallback_free) {
-        win_text(win, 14, rowy(9), STEP_NAME[4], C_TEXT);
-        win_text(win, 14, rowy(10), "wolny - maszyna wystartuje sama",
+        win_text(win, 14, rowy(10), STEP_NAME[4], C_TEXT);
+        win_text(win, 14, rowy(11), "wolny - maszyna wystartuje sama",
                  C_HEAD);
     } else {
-        win_text(win, 14, rowy(9), STEP_NAME[4], C_RED);
-        win_text(win, 14, rowy(10), "zajety przez kogos - nie ruszam go",
+        win_text(win, 14, rowy(10), STEP_NAME[4], C_RED);
+        win_text(win, 14, rowy(11), "zajety przez kogos - nie ruszam go",
                  C_RED);
     }
 
-    win_text(win, 6, rowy(12), "NIE ruszam tablicy partycji, innych "
+    win_text(win, 6, rowy(13), "NIE ruszam tablicy partycji, innych "
              "partycji", C_TEXT);
-    win_text(win, 6, rowy(13), "ani zadnego pliku, ktory juz tam jest.",
+    win_text(win, 6, rowy(14), "ani zadnego pliku, ktory juz tam jest.",
              C_TEXT);
     if (!info.fallback_free)
-        win_text(win, 6, rowy(14),
+        win_text(win, 6, rowy(15),
                  "Potem dodaj wpis w firmwarze - patrz wyzej.", C_TEXT);
 }
 
@@ -330,31 +350,25 @@ static void draw_wipe(int win)
 
     win_text(win, 6, rowy(0), "Caly dysk dla ProtonOS-a", C_RED);
 
-    at = add(line, 0, "Dysk: ");
-    at = add(line, at, info.disk);
-    at = add(line, at, ", ");
-    at = addnum(line, at, info.disk_mib);
-    at = add(line, at, " MiB, partycji: ");
-    at = addnum(line, at, info.parts);
-    win_text(win, 6, rowy(2), line, C_TEXT);
+    disk_line(win);
 
-    win_text(win, 6, rowy(4), "TO SKASUJE WSZYSTKO NA TYM DYSKU:", C_RED);
+    win_text(win, 6, rowy(5), "TO SKASUJE WSZYSTKO NA TYM DYSKU:", C_RED);
     at = add(line, 0, "tablice partycji, wszystkie ");
     at = addnum(line, at, info.parts);
     at = add(line, at, " partycje i to, co na nich jest.");
-    win_text(win, 14, rowy(5), line, C_TEXT);
+    win_text(win, 14, rowy(6), line, C_TEXT);
 
-    win_text(win, 6, rowy(7), "Zrobie:", C_HEAD);
-    win_text(win, 14, rowy(8), STEP_WHOLE[0], C_TEXT);
+    win_text(win, 6, rowy(8), "Zrobie:", C_HEAD);
+    win_text(win, 14, rowy(9), STEP_WHOLE[0], C_TEXT);
     at = add(line, 0, STEP_WHOLE[1]);
     at = add(line, at, ", ");
     at = addnum(line, at, info.free_kib / 1024);
     at = add(line, at, " MiB");
-    win_text(win, 14, rowy(9), line, C_TEXT);
-    win_text(win, 14, rowy(10), STEP_WHOLE[2], C_TEXT);
-    win_text(win, 14, rowy(11), "i zapisze na niej system.", C_TEXT);
+    win_text(win, 14, rowy(10), line, C_TEXT);
+    win_text(win, 14, rowy(11), STEP_WHOLE[2], C_TEXT);
+    win_text(win, 14, rowy(12), "i zapisze na niej system.", C_TEXT);
 
-    win_text(win, 6, rowy(13),
+    win_text(win, 6, rowy(14),
              "Innego dysku to nie dotyczy - tylko tego jednego.", C_TEXT);
 }
 
@@ -513,9 +527,9 @@ static void draw(int win)
 
 /* --- doing it -------------------------------------------------------- */
 
-static void look(int mode)
+static void look(int mode, int disk)
 {
-    sys_install_look(mode, &info);
+    sys_install_look(mode, disk, &info);
     state = S_LOOK;
     step = 0;
     failed_at = -1;
@@ -575,7 +589,7 @@ void _start(void)
     if (win < 0)
         sys_exit(1);
 
-    look(INST_ALONGSIDE);
+    look(INST_ALONGSIDE, -1);
     draw(win);
 
     for (;;) {
@@ -603,6 +617,16 @@ void _start(void)
                 continue;
             }
             if (ev.type == WEV_CLICK) {
+                /* The disk line, when there is more than one disk to
+                   choose between. Before the buttons, because it is
+                   inside the text and a button is not. */
+                if (state == S_LOOK && info.disks > 1 &&
+                    ev.y >= rowy(DISK_ROW) && ev.y < rowy(DISK_ROW) + 8) {
+                    look((int)info.mode,
+                         (int)((info.disk + 1) % info.disks));
+                    again = 1;
+                    continue;
+                }
                 int b = in_button(ev.x, ev.y);
                 if (!b)
                     continue;
@@ -612,28 +636,28 @@ void _start(void)
                        whole disk, and from the whole disk back. */
                     if (info.mode == INST_WHOLE) {
                         if (b == 1)
-                            look(INST_ALONGSIDE);
+                            look(INST_ALONGSIDE, (int)info.disk);
                         else
                             state = S_WORD;
                     } else if (b == 2) {
-                        look(INST_WHOLE);
+                        look(INST_WHOLE, (int)info.disk);
                     } else if (info.ok) {
                         state = S_WORD;
                     } else {
-                        look(INST_ALONGSIDE);
+                        look(INST_ALONGSIDE, -1);
                     }
                     tlen = 0;
                     typed[0] = '\0';
                     note[0] = '\0';
                 } else if (state == S_FAIL) {
-                    look(INST_ALONGSIDE);
+                    look(INST_ALONGSIDE, -1);
                 } else if (state == S_WORD) {
-                    look(info.mode);           /* "Nie instaluj" / "Wroc" */
+                    look((int)info.mode, (int)info.disk);           /* "Nie instaluj" / "Wroc" */
                 } else if (state == S_PASS) {
                     for (int i = 0; i < plen; i++)
                         pass[i] = 0;
                     plen = 0;
-                    look(INST_ALONGSIDE);
+                    look(INST_ALONGSIDE, -1);
                 } else if (state == S_DONE) {
                     /* Only a right we asked for is a right to give
                        back: somebody who was an admin before this
