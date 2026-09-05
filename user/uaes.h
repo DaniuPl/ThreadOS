@@ -630,4 +630,86 @@ static inline int aes_ccm_decrypt(const uint8_t *key, int keybits,
     return 1;
 }
 
+/* --- Key wrap (RFC 3394) ---------------------------------------------
+ *
+ * How one key travels inside another. WPA2 sends the group key this
+ * way in the third message of the handshake, wrapped with the KEK.
+ *
+ * The trick of it is the constant A6A6A6A6A6A6A6A6: unwrapping ends
+ * with a comparison against it, so a wrong key does not yield rubbish
+ * that looks like a key - it yields a refusal. Six passes over the
+ * blocks mix every block into every other one, which is why a single
+ * changed bit anywhere makes the whole thing fail rather than damage
+ * one block.
+ */
+static inline void aes_wrap(const uint8_t *kek, int keybits,
+                            const uint8_t *in, uint32_t blocks, uint8_t *out)
+{
+    struct aes a;
+    uint8_t v[16], av[8];
+
+    aes_key(&a, kek, keybits);
+    for (int i = 0; i < 8; i++)
+        av[i] = 0xA6;
+    for (uint32_t i = 0; i < blocks * 8; i++)
+        out[8 + i] = in[i];
+
+    for (uint32_t j = 0; j < 6; j++) {
+        for (uint32_t i = 1; i <= blocks; i++) {
+            uint64_t t = (uint64_t)blocks * j + i;
+
+            for (int k = 0; k < 8; k++) {
+                v[k] = av[k];
+                v[8 + k] = out[i * 8 + k];
+            }
+            aes_encrypt_block(&a, v, v);
+            for (int k = 0; k < 8; k++) {
+                av[k] = v[k];
+                out[i * 8 + k] = v[8 + k];
+            }
+            for (int k = 0; k < 8; k++)
+                av[7 - k] ^= (uint8_t)(t >> (8 * k));
+        }
+    }
+
+    for (int i = 0; i < 8; i++)
+        out[i] = av[i];
+}
+
+/* 1 = unwrapped and the constant agrees, 0 = the key is wrong or the
+   data are damaged. */
+static inline int aes_unwrap(const uint8_t *kek, int keybits,
+                             const uint8_t *in, uint32_t blocks, uint8_t *out)
+{
+    struct aes a;
+    uint8_t v[16], av[8];
+
+    aes_key(&a, kek, keybits);
+    for (int i = 0; i < 8; i++)
+        av[i] = in[i];
+    for (uint32_t i = 0; i < blocks * 8; i++)
+        out[i] = in[8 + i];
+
+    for (int j = 5; j >= 0; j--) {
+        for (uint32_t i = blocks; i >= 1; i--) {
+            uint64_t t = (uint64_t)blocks * (uint32_t)j + i;
+
+            for (int k = 0; k < 8; k++)
+                v[k] = (uint8_t)(av[k] ^ (uint8_t)(t >> (8 * (7 - k))));
+            for (int k = 0; k < 8; k++)
+                v[8 + k] = out[(i - 1) * 8 + k];
+            aes_decrypt_block(&a, v, v);
+            for (int k = 0; k < 8; k++) {
+                av[k] = v[k];
+                out[(i - 1) * 8 + k] = v[8 + k];
+            }
+        }
+    }
+
+    uint8_t diff = 0;
+    for (int i = 0; i < 8; i++)
+        diff |= (uint8_t)(av[i] ^ 0xA6);
+    return diff == 0;
+}
+
 #endif

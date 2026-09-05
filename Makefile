@@ -54,6 +54,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/cryptotest.elf \
              $(BUILD)/user/certtest.elf \
              $(BUILD)/user/aestest.elf \
+             $(BUILD)/user/wpatest.elf \
              $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
              $(BUILD)/user/mkmap.elf $(BUILD)/user/mmapfile.elf \
              $(BUILD)/user/deep.elf $(BUILD)/user/mmapzap.elf \
@@ -272,6 +273,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    cryptotest=$(BUILD)/user/cryptotest.elf \
 	    certtest=$(BUILD)/user/certtest.elf \
 	    aestest=$(BUILD)/user/aestest.elf \
+	    wpatest=$(BUILD)/user/wpatest.elf \
 	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf \
 	    sigtest=$(BUILD)/user/sigtest.elf \
 	    lazymem=$(BUILD)/user/lazymem.elf \
@@ -375,6 +377,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
+               $(BUILD)/user64/wpatest.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
                $(BUILD)/user64/gweb.elf \
@@ -472,6 +475,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
+	    wpatest=$(BUILD)/user64/wpatest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \
 	    httpget=$(BUILD)/user64/httpget.elf \
 	    gweb=$(BUILD)/user64/gweb.elf \

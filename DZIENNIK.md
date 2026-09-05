@@ -4971,3 +4971,52 @@ sprawdzane przez `make test`.
       je rozwijamy, tylko dlatego, ze druga kompilacja tych samych
       zrodel jest najtansza znana mi metoda na przesuniecie, szerokosc i
       wskaznik, ktory przypadkiem mial dobry rozmiar.
+
+- [x] **WPA2: klucze i szyfrowanie ramki - wszystko poza radiem**
+      (user/usha1.h, user/uwpa.h, AES key wrap w user/uaes.h, program
+      user/wpatest.c, grupa testow `wpa`).
+
+      Tu przebiega uczciwa granica. Radia w tym systemie nie ma i QEMU
+      nie emuluje zadnej karty bezprzewodowej - ale wszystko, co stacja
+      robi z haslem, z uzgodnieniem i z ramka, da sie napisac i
+      sprawdzic juz teraz. Sterownika konkretnego ukladu - nie.
+
+      **SHA-1 jest tu z jednego powodu i tylko z jednego.** Do podpisow
+      nie nadaje sie od lat i przy certyfikatach go nie ma. WPA2 nie
+      daje wyboru: haslo sieci zamienia sie w klucz przez
+      PBKDF2-HMAC-SHA1 z 4096 rundami, a uzgodnienie czterech ramek
+      wyprowadza klucze sesji funkcja zbudowana z HMAC-SHA1. Kolizje,
+      ktore SHA-1 dobily, nie dotykaja zadnego z tych zastosowan.
+
+      Solą PBKDF2 jest NAZWA SIECI - i dlatego dwie sieci o tej samej
+      nazwie i tym samym hasle maja ten sam klucz, a policzyc tego raz
+      dla wszystkich sieci sie nie da. Cztery tysiace rund ma boleć: to
+      jedyne, co stoi miedzy krotkim haslem a slownikiem.
+
+      **Dane dodatkowe CCMP to jest cala rzecz.** Podpis obejmuje
+      naglowek, ale z zamaskowanymi polami, ktore po drodze legalnie
+      sie zmieniaja: retry, oszczedzanie energii, more-data, numer
+      kolejny. Adresy zostaja objete. Dzieki temu wzmacniak moze ramke
+      powtorzyc, a napastnik nie moze jej przekierowac - i test sprawdza
+      wlasnie to: zmiana jednego bitu w adresie A3 ma konczyc sie
+      wyrzuceniem ramki, przy nietknietych danych.
+
+      Sprawdzane wektorami z P802.11i/D7.0 (I.7.4) - prawdziwymi
+      ramkami z naglowkiem, numerem pakietu i podpisem, w tym jedna z
+      QoS i naglowkiem 26-bajtowym. To jest jedyny rodzaj wektora,
+      ktory lapie zle zlozone dane dodatkowe: CCMP z takim bledem zgadza
+      sie sam ze soba i z zadnym punktem dostepowym na swiecie.
+
+      Klucze sprawdza hashlib: system wyprowadza PMK, PTK i podpis
+      wiadomosci EAPOL-Key z nasiona, wypisuje wszystko, czego uzyl, a
+      host liczy to samo wlasnym PBKDF2 i HMAC. Do tego RFC 3394
+      (opakowanie klucza grupowego) z oficjalnym wektorem i z odmowa po
+      zmianie jednego bitu - bo stala A6A6A6A6A6A6A6A6 po to tam jest,
+      zeby zly klucz dawal odmowe, a nie smieci wygladajace jak klucz.
+
+      Czego to NIE zalatwia: sterownika. Karta wymaga wgranego
+      firmware'u i wlasnego protokolu na PCI, rozniacego sie miedzy
+      Intelem, Broadcomem i Realtekiem, a napisac go na slepo - bez
+      urzadzenia, ktore odpowiada - znaczy tyle, co pisac bez zadnego
+      testu. To zostaje na sprzet, i wtedy juz tylko sterownik, bo cala
+      kryptografia bedzie gotowa i sprawdzona.
