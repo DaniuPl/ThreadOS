@@ -285,6 +285,45 @@ def fat_kind(path, offset_sectors):
            "FAT16" if clusters < 65525 else "FAT32"
 
 
+def wav_tone(path, since=0):
+    """What is in the sound QEMU wrote, from byte 'since' on.
+
+    QEMU only fills in the sizes in the header when it closes the file,
+    and a test kills the machine rather than waiting for it - so the
+    header is read for the format and the rest is taken as samples.
+
+    Returns (peak, milliseconds, hertz) of the loud part, or None when
+    there is no sound in it. The frequency is the median distance
+    between upward zero crossings rather than their count over the
+    whole span: one crossing missed at an edge shifts a count, and
+    shifts nothing in a median."""
+    with open(path, "rb") as fh:
+        head = fh.read(44)
+        if len(head) < 44 or head[:4] != b"RIFF":
+            return None
+        fh.seek(44 + since)
+        body = fh.read()
+    rate = struct.unpack_from("<I", head, 24)[0]
+    ch = struct.unpack_from("<H", head, 22)[0]
+    if not rate or not ch or len(body) < 4:
+        return None
+    n = len(body) // 2
+    s = struct.unpack("<%dh" % n, body[:n * 2])
+    left = s[0::ch]
+    peak = max(abs(v) for v in left)
+    if peak < 200:
+        return None
+    loud = [i for i, v in enumerate(left) if abs(v) > peak // 3]
+    a, b = loud[0], loud[-1]
+    seg = left[a:b + 1]
+    cross = [i for i in range(1, len(seg)) if seg[i - 1] <= 0 < seg[i]]
+    ms = (b - a + 1) * 1000.0 / rate
+    if len(cross) < 3:
+        return (peak, ms, 0.0)
+    gaps = sorted(cross[i] - cross[i - 1] for i in range(1, len(cross)))
+    return (peak, ms, rate / float(gaps[len(gaps) // 2]))
+
+
 def gpt_read(path):
     """Reads a GPT the way a firmware would, and says whether it holds
     together: the protective MBR, both headers, both CRCs.
@@ -920,8 +959,8 @@ class Qemu:
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None, esp=None, disk2=None, nic="rtl8139",
-                 cpus=None):
+                 uefi=None, esp=None, disk2=None, audio=None,
+                 nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The 64-bit kernel needs a processor with long mode, and
@@ -970,6 +1009,14 @@ class Qemu:
             cmd += ["-device", "usb-mouse,bus=xhci.0"]
         elif usbmouse:
             cmd += ["-usb", "-device", "usb-mouse"]
+        if audio:
+            # An HD Audio controller with a codec on it, and the sound
+            # written to a file instead of a speaker. That file is the
+            # whole point: what the machine plays can then be read back
+            # here, sample by sample, instead of being taken on trust.
+            cmd += ["-audiodev", "wav,id=snd0,path=" + audio,
+                    "-device", "intel-hda",
+                    "-device", "hda-output,audiodev=snd0"]
         if no_i8042:
             # A machine with no 8042 controller: no PS/2 keyboard and
             # no PS/2 mouse, which is what an ultrabook made in the

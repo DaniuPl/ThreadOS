@@ -4799,3 +4799,68 @@ sprawdzane przez `make test`.
       Test `stick` czyta obraz tak, jak przeczyta go firmware: tablica
       w Pythonie z obiema sumami, FAT przez mtools, trzy pliki co do
       bajtu - a potem go URUCHAMIA i wpisuje obie nowe komendy.
+
+- [x] **Dzwiek: Intel HD Audio** (kernel/hda.c, komenda `beep`, grupa
+      testow `dzwiek`).
+
+      Jedyna klasa urzadzen, ktorej w tym systemie nie bylo. Maszyna ze
+      stosem TCP, TLS 1.3 i przegladarka, ktora nie umie wydac zadnego
+      dzwieku, jest dziwnie niekompletna.
+
+      **HDA nie jest urzadzeniem, do ktorego sie pisze probki**, i to
+      jest cala trudnosc. W maszynie sa DWIE rzeczy. Kontroler siedzi
+      na PCI i sam wyciaga bajty z pamieci - dostaje liste buforow
+      (BDL) i chodzi po niej w kolko; od tej chwili to on czyta, a
+      sterownik ma tylko nadazac z wypelnianiem tej polowy, w ktorej go
+      akurat nie ma. Kodek siedzi za kontrolerem na szeregowym laczu i
+      jest GRAFEM: ponumerowane widzety - przetworniki, gniazda,
+      miksery - po ktorych trzeba CHODZIC, zeby dowiedziec sie, ktory
+      przetwornik dochodzi do ktorego gniazda. Dwie maszyny z tym samym
+      kontrolerem moga miec zupelnie inne grafy.
+
+      **Trzy bledy po drodze, wszystkie takie, ze urzadzenie po prostu
+      milczy.**
+
+      Pierwszy i najdrozszy: **RINTCNT ustawione na jeden**. To licznik
+      odpowiedzi, po ktorym kontroler uznaje, ze nie nadazamy - i
+      PRZESTAJE wykonywac polecenia, dopoki nie skasuje sie flagi,
+      ktora przy tym podniosl. Przy jedynce odpowiedz dostaje dokladnie
+      jedno pytanie, a kazde nastepne czeka na przerwanie, ktorego nie
+      bierzemy. Objaw byl idealnie mylacy: pierwsze pytanie (o
+      producenta kodeka) dawalo prawidlowa odpowiedz, wiec pierscienie
+      "dzialaly", a drugie nie dawalo nic. Widac to bylo dopiero po
+      wypisaniu CORBRP: wskaznik odczytu stal na jedynce, podczas gdy
+      wskaznik zapisu szedl dalej. Licznik jest teraz odsuniety, a
+      status kasowany po kazdej odpowiedzi.
+
+      Drugi: **werby maja dwie dlugosci i dlugosc decyduje o miejscu**.
+      Czterobitowy zostawia szesnascie bitow na argument, dwunastobitowy
+      osiem. Zapisanie krotkiego juz przesunietego - 0x200 zamiast 0x2 -
+      wyglada niewinnie i wysyla polecenie, na ktore kodek nie
+      odpowiada niczym. Sa teraz zapisane jako liczby, ktorymi sa, a
+      klasyfikuje je jeden warunek.
+
+      Trzeci wyszedl dopiero z pliku dzwiekowego: **ton trwal 243 ms
+      zamiast 200**. Kontroler chodzi po buforze w kolko, wiec polowa,
+      ktorej sie nie nadpisze, zostaje zagrana drugi raz. Po skonczeniu
+      sie probek trzeba dalej wypelniac - cisza - przez caly bufor, i
+      dopiero potem zatrzymac strumien. To jest roznica miedzy tonem o
+      zadanej dlugosci a tonem z zajakniem na koncu.
+
+      **Test nie pyta systemu, czy zagral.** Sterownik, ktory ustawi
+      wszystkie rejestry i wyprodukuje cisze, wyglada dokladnie tak samo
+      jak dzialajacy. Wiec QEMU zapisuje swoje wyjscie dzwiekowe do
+      pliku, a plik jest czytany tutaj: szczyt, dlugosc glosnego
+      fragmentu i odleglosc miedzy przejsciami przez zero. 440 Hz przez
+      200 ms musi wyjsc jako 440 Hz przez 200 ms, a 880 przez 100 jako
+      to - jedna liczba bylaby zbiegiem okolicznosci, dwie sa
+      sterownikiem. Wychodzi 441 Hz / 200 ms i 882 Hz / 100 ms.
+      Czestotliwosc liczona jest jako MEDIANA odstepow miedzy
+      przejsciami, a nie ich liczba na calosci: jedno przejscie
+      przeoczone na krawedzi przesuwa liczbe i nie przesuwa mediany.
+
+      Osobno maszyna BEZ karty dzwiekowej - musi powiedziec wprost,
+      czego nie ma, a 'beep' na niej ma odmowic, zamiast udawac. Stad
+      tez sterownik pamieta, GDZIE sie zatrzymal: "nie ma kontrolera
+      HDA na PCI" i "kodek nie ma wyjscia, ktore umiem znalezc" to dwie
+      rozne rzeczy i na prawdziwym sprzecie robi to cala roznice.

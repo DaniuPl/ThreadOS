@@ -23,6 +23,7 @@
 #include "include/initrd.h"
 #include "include/fs.h"
 #include "include/blk.h"
+#include "include/hda.h"
 #include "include/acpi.h"
 #include "include/mb2.h"
 #include "include/usbkbd.h"
@@ -306,6 +307,15 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        machine without PS/2 it is the only input the system has. */
     usbkbd_init();
     usbmouse_init();
+
+    /* Sound. Not needed by anything and that is exactly why it is
+       started here rather than on demand: a machine that cannot make a
+       noise should say so at startup, not the first time somebody
+       asks for one. */
+    if (hda_init())
+        printk("[ OK ] Dzwiek: Intel HDA, %s\n", hda_name());
+    else
+        printk("[ -- ] Dzwiek: %s\n", hda_name());
 
     /* We take the IP address from the network - the DHCP client waits
        for the server's answers, so it has to run in a thread (after

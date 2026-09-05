@@ -41,6 +41,7 @@
 #include "include/fatcmd.h"
 #include "include/install.h"
 #include "include/hwinfo.h"
+#include "include/hda.h"
 #include "include/blk.h"
 #include "include/usbhc.h"
 #include "include/usbkbd.h"
@@ -349,6 +350,41 @@ static void cmd_install(const char *arg)
         return;
     }
     install_do();
+}
+
+/* A tone, and the shortest way to hear whether the sound driver found
+   anything at all. */
+static void cmd_beep(const char *arg)
+{
+    uint32_t hz = 440, ms = 200, v = 0;
+    const char *p = arg;
+
+    if (!hda_present()) {
+        printk("beep: nie ma dzwieku (zobacz 'sprzet')\n");
+        return;
+    }
+    while (*p == ' ')
+        p++;
+    if (*p >= '0' && *p <= '9') {
+        while (*p >= '0' && *p <= '9')
+            v = v * 10 + (uint32_t)(*p++ - '0');
+        hz = v;
+        while (*p == ' ')
+            p++;
+        if (*p >= '0' && *p <= '9') {
+            v = 0;
+            while (*p >= '0' && *p <= '9')
+                v = v * 10 + (uint32_t)(*p++ - '0');
+            ms = v;
+        }
+    }
+    if (hz < 20 || hz > 20000) {
+        printk("beep: %u Hz to nie jest dzwiek, ktory da sie uslyszec\n", hz);
+        return;
+    }
+    printk("beep: %u Hz przez %u ms\n", hz, ms);
+    if (hda_beep(hz, ms) < 0)
+        printk("beep: nie udalo sie zagrac\n");
 }
 
 static void cmd_mem(void)
@@ -1003,6 +1039,8 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "ekran"))
         cmd_ekran();
+    else if (!strcmp(cmd, "beep"))
+        cmd_beep(arg);
     else if (!strcmp(cmd, "sprzet"))
         hwinfo_print();
     else if (!strcmp(cmd, "dyski"))

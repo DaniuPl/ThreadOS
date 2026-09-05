@@ -48,6 +48,7 @@
 #include "../kernel/include/fatcmd.h"
 #include "../kernel/include/install.h"
 #include "../kernel/include/hwinfo.h"
+#include "../kernel/include/hda.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
@@ -105,6 +106,7 @@ static void cmd_help(void)
     printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("           sprzet - co jest w tej maszynie, dyski - dyski\n");
+    printk("           beep [Hz] [ms] - dzwiek\n");
     printk("           instaluj - ProtonOS na dysk tej maszyny\n");
     printk("             (caly ekran; 'instaluj tekstem [caly]' - tutaj)\n");
 }
@@ -608,6 +610,37 @@ static uint32_t text_num(const char *s)
     return v;
 }
 
+/* A tone, and the shortest way to hear whether the sound driver found
+   anything at all. Without arguments: A above middle C for a fifth of
+   a second, because a number one recognises is worth more than a
+   number one has to look up. */
+static void cmd_beep(const char *arg)
+{
+    uint32_t hz = 440, ms = 200;
+    const char *p = arg;
+
+    if (!hda_present()) {
+        printk("beep: nie ma dzwieku (zobacz 'sprzet')\n");
+        return;
+    }
+    if (p && *p) {
+        hz = text_num(p);
+        while (*p == ' ')
+            p++;
+        while (*p >= '0' && *p <= '9')
+            p++;
+        if (*p)
+            ms = text_num(p);
+    }
+    if (hz < 20 || hz > 20000) {
+        printk("beep: %u Hz to nie jest dzwiek, ktory da sie uslyszec\n", hz);
+        return;
+    }
+    printk("beep: %u Hz przez %u ms\n", hz, ms);
+    if (hda_beep(hz, ms) < 0)
+        printk("beep: nie udalo sie zagrac\n");
+}
+
 static void cmd_install_text(int mode, int disk)
 {
     char answer[8];
@@ -779,6 +812,10 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "beep")) {
+        cmd_beep("");
+    } else if (starts_with(line, "beep ")) {
+        cmd_beep(argument(line, 5));
     } else if (!strcmp(line, "sprzet")) {
         hwinfo_print();
     } else if (!strcmp(line, "dyski")) {

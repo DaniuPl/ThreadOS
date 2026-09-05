@@ -23,6 +23,7 @@ Shared by both kernels (same files, compiled twice):
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC, local APIC |
 | USB | xHCI and UHCI behind one host-controller layer; HID boot keyboard |
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
+| Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer (`beep`) |
 | Disks | NVMe, every AHCI port, both ATA drives — a list, with one in use; the installer asks which |
 | Installing | `instaluj` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a PFS3 partition) |
 | FAT | FAT12/16/32 on the EFI partition — read fully, written as far as an installer needs, long names both ways |

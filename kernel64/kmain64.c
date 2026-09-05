@@ -44,6 +44,7 @@
 #include "isr64.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
+#include "../kernel/include/hda.h"
 #include "../kernel/include/fs.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/netdev.h"
@@ -593,6 +594,15 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        that means an identity mapping. */
     usbkbd_init();          /* it reports in by itself when it finds something */
     usbmouse_init();
+
+    /* Sound. Not needed by anything and that is exactly why it is
+       started here rather than on demand: a machine that cannot make a
+       noise should say so at startup, not the first time somebody
+       asks for one. */
+    if (hda_init())
+        printk("[ OK ] Dzwiek: Intel HDA, %s\n", hda_name());
+    else
+        printk("[ -- ] Dzwiek: %s\n", hda_name());
 
     /* The IP address comes from the network, and the DHCP client waits
        for the server's replies - so it has to run in a thread, that is,
