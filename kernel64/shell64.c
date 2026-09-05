@@ -106,7 +106,7 @@ static void cmd_help(void)
     printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("           sprzet - co jest w tej maszynie, dyski - dyski\n");
-    printk("           beep [Hz] [ms] - dzwiek\n");
+    printk("           beep [Hz] [ms] - dzwiek, glosnosc [0-100|cisza]\n");
     printk("           instaluj - ProtonOS na dysk tej maszyny\n");
     printk("             (caly ekran; 'instaluj tekstem [caly]' - tutaj)\n");
 }
@@ -812,6 +812,10 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "glosnosc")) {
+        hwinfo_volume("");
+    } else if (starts_with(line, "glosnosc ")) {
+        hwinfo_volume(argument(line, 9));
     } else if (!strcmp(line, "beep")) {
         cmd_beep("");
     } else if (starts_with(line, "beep ")) {

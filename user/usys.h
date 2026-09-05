@@ -59,6 +59,9 @@
 #define SYS_DROP       52
 #define SYS_INSTALL_LOOK 66
 #define SYS_INSTALL_STEP 67
+#define SYS_SND_GET  68
+#define SYS_SND_SET  69
+#define SYS_SND_BEEP 70
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
@@ -773,6 +776,56 @@ static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
 }
 
 /* Changes a setting and writes them all back to the disk. 0 or -1. */
+
+
+/* --- Sound ------------------------------------------------------------
+ *
+ * Loudness is a knob and not a change to the system, so setting it
+ * asks nobody's permission - it is the one setting a program may
+ * write down. Playing is the kernel's: a program says what it wants
+ * heard, not how.
+ *
+ * The percentage is of what the codec's amplifier actually has, and
+ * its steps are decibels - so thirty per cent is far quieter than a
+ * third. That is how loudness works.
+ */
+struct snd_info {
+    uint32_t present;
+    uint32_t volume;             /* 0..100 */
+    uint32_t muted;
+    uint32_t steps;
+};
+
+static inline int32_t sys_snd_get(struct snd_info *out)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SND_GET), "b"(out)
+                     : "memory");
+    return ret;
+}
+
+/* -1 in either place leaves it as it was */
+static inline int32_t sys_snd_set(int32_t volume, int32_t mute)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SND_SET), "b"(volume), "c"(mute)
+                     : "memory");
+    return ret;
+}
+
+static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SND_BEEP), "b"(hz), "c"(ms)
+                     : "memory");
+    return ret;
+}
 
 /* --- Installing onto this machine's own disk -----------------------
  *

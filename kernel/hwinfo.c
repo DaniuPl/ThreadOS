@@ -22,6 +22,8 @@
 #include "include/blk.h"
 #include "include/part.h"
 #include "include/pci.h"
+#include "include/hda.h"
+#include "include/string.h"
 
 /* What this machine actually is.
  *
@@ -167,4 +169,48 @@ void hwinfo_disks(void)
        left every driver pointed where it found it, and the next thing
        to touch the disk should not have to know that. */
     part_scan();
+}
+
+/* How loud, and it is remembered.
+ *
+ * The percentage is of what the codec's amplifier actually has - its
+ * steps are decibels, so thirty per cent is far quieter than a third.
+ * That is how loudness works and not something to correct: a mixer
+ * that spread the numbers evenly over the amplitude would feel wrong
+ * at both ends of its travel.
+ */
+void hwinfo_volume(const char *arg)
+{
+    uint32_t v = 0;
+
+    if (!hda_present()) {
+        printk("glosnosc: nie ma dzwieku (zobacz 'sprzet')\n");
+        return;
+    }
+    while (arg && *arg == ' ')
+        arg++;
+
+    if (arg && arg[0] == 'c') {                  /* 'cisza' */
+        hda_set_mute(!hda_muted());
+        printk("glosnosc: %s\n", hda_muted() ? "cisza" : "znowu slychac");
+        return;
+    }
+    if (arg && arg[0] >= '0' && arg[0] <= '9') {
+        while (*arg >= '0' && *arg <= '9')
+            v = v * 10 + (uint32_t)(*arg++ - '0');
+        if (v > 100) {
+            printk("glosnosc: 0-100, nie %u\n", v);
+            return;
+        }
+        hda_set_volume((int)v);
+        hda_set_mute(0);
+        if (hda_remember() < 0)
+            printk("glosnosc: %d%% - ale nie zapisane na dysk\n",
+                   hda_volume());
+        else
+            printk("glosnosc: %d%%\n", hda_volume());
+        return;
+    }
+    printk("glosnosc: %d%%%s, %d stopni w kodeku\n", hda_volume(),
+           hda_muted() ? " (cisza)" : "", hda_volume_steps());
 }

@@ -37,6 +37,8 @@
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/pit.h"
+#include "include/config.h"
+#include "include/task.h"
 
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
@@ -140,6 +142,14 @@ static uint32_t bdl_phys;
 static volatile int16_t *buf;         /* the samples the controller reads */
 static uint32_t buf_phys;
 
+/* Loudness. Two widgets can have an amplifier - the converter and the
+   pin - and which of them has a usable range differs between codecs,
+   so both are moved together and the range is whichever has one. */
+static int amp_node[2] = { -1, -1 };
+static int amp_steps[2];
+static int volume = 80;
+static int muted;
+
 /* Two pages of samples: at 48 kHz stereo that is about 43 ms, which is
    short enough to fill without hearing the seam and long enough that
    filling it is not a busy loop. */
@@ -153,8 +163,24 @@ static void wr32(uint32_t off, uint32_t v) { *(volatile uint32_t *)(reg + off) =
 static void wr16(uint32_t off, uint16_t v) { *(volatile uint16_t *)(reg + off) = v; }
 static void wr8(uint32_t off, uint8_t v)   { *(volatile uint8_t *)(reg + off) = v; }
 
+/* Waiting here SLEEPS rather than spins, and that is not a nicety.
+ *
+ * A system call in long mode is entered with interrupts off - the
+ * processor clears the flag on the way in. A driver that then spins
+ * for a fifth of a second leaves the machine deaf for a fifth of a
+ * second: no timer, and a PS/2 mouse that loses the middle of a packet
+ * and never finds the framing again. Sleeping hands the core back to
+ * the scheduler, which is where interrupts come back on.
+ *
+ * Before the scheduler exists there is nothing to sleep on, so the
+ * spin stays as the fallback - and at that point in the boot nothing
+ * else wants the machine anyway. */
 static void wait_ms(uint32_t ms)
 {
+    if (ready) {
+        task_sleep(ms);
+        return;
+    }
     uint32_t until = pit_ticks() + (ms + 9) / 10 + 1;
     while (pit_ticks() < until)
         __asm__ volatile("pause" ::: "memory");
@@ -357,19 +383,28 @@ static void stream_setup(void)
     verb(pin, VERB_SET_POWER, 0);
     verb(pin, VERB_SET_PIN_CTL, 0x40);       /* output enabled */
 
-    /* Unmute and turn up, both sides, the output amp. Asking for more
-       gain than a widget has is answered by ignoring the whole
-       command, so the number comes from the widget itself: the
-       'steps' field of its amplifier capabilities is its loudest. */
+    /* What the amplifiers are, before anything is asked of them.
+       Asking for more gain than a widget has is answered by ignoring
+       the whole command, so the range comes from the widget itself:
+       'numsteps' in its capabilities is its loudest. A widget with no
+       amplifier says zero, and is then left alone. */
     for (int i = 0; i < 2; i++) {
         int node = i ? pin : dac;
         uint32_t cap = param(node, PARAM_AMP_OUT_CAP);
-        uint32_t steps = (cap >> 8) & 0x7F;
-        if (!steps || steps == 0x7F)
-            steps = 0x7F;
-        /* bit 15 output amp, 13 and 12 both channels, bit 7 mute */
-        verb(node, VERB_SET_AMP, 0xB000 | (steps & 0x7F));
+        /* The amplifier's capabilities, and the two fields in them are
+           easy to swap: the NUMBER OF STEPS is at bits 14..8 and the
+           SIZE of a step at 22..16, not the other way round. Reading
+           them the wrong way round does not fail - it gives a mixer
+           with three positions on a codec that has seventy-four, and
+           the only sign of it is that quiet and loud sound the same. */
+        int steps = (int)((cap >> 8) & 0x7F);
+        amp_node[i] = node;
+        amp_steps[i] = (cap == 0xFFFFFFFFu) ? 0 : steps;
     }
+    /* How loud, from the settings - so it survives a restart like the
+       background and the machine's name do. */
+    volume = (int)config_get_num("glosnosc", 80);
+    hda_set_volume(volume);
 }
 
 /* --- coming up --------------------------------------------------------- */
@@ -510,12 +545,15 @@ int hda_play(const int16_t *samples, uint32_t frames)
        for and a tone with a stutter on the end. */
     filling = 0;
     uint32_t guard = 0;
-    while ((done < frames || silent < 2) && guard < 2000000) {
+    while ((done < frames || silent < 2) && guard < 5000) {
         uint32_t pos = rd32(out_base + SD_LPIB);
         int playing = pos >= BUF_BYTES / 2;
         if (playing == filling) {
+            /* Half a buffer is about twenty milliseconds, so a
+               millisecond of sleep is fine grain and lets everything
+               else on the machine keep running while we play. */
             guard++;
-            __asm__ volatile("pause" ::: "memory");
+            task_sleep(1);
             continue;
         }
         guard = 0;
@@ -566,4 +604,86 @@ int hda_beep(uint32_t hz, uint32_t ms)
         tone[i * 2 + 1] = v;
     }
     return hda_play(tone, frames);
+}
+
+/* --- how loud ----------------------------------------------------------
+ *
+ * The percentage is of the widget's own range, because that is the
+ * only range there is. The steps are decibels, so thirty per cent is
+ * far quieter than a third - which is how loudness works and not
+ * something to correct.
+ */
+static void apply_volume(void)
+{
+    for (int i = 0; i < 2; i++) {
+        int gain;
+        if (amp_node[i] < 0 || !amp_steps[i])
+            continue;
+        gain = amp_steps[i] * volume / 100;
+        if (gain > amp_steps[i])
+            gain = amp_steps[i];
+        /* bit 15 the output amp, 13 and 12 both channels, 7 mute */
+        verb(amp_node[i], VERB_SET_AMP,
+             0xB000 | (muted || !volume ? 0x80 : 0) | (uint32_t)(gain & 0x7F));
+    }
+}
+
+void hda_set_volume(int percent)
+{
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    volume = percent;
+    if (ready || amp_node[0] >= 0)
+        apply_volume();
+}
+
+int hda_volume(void)
+{
+    return volume;
+}
+
+void hda_set_mute(int on)
+{
+    muted = on ? 1 : 0;
+    if (ready)
+        apply_volume();
+}
+
+int hda_muted(void)
+{
+    return muted;
+}
+
+int hda_volume_steps(void)
+{
+    int most = 0;
+    for (int i = 0; i < 2; i++)
+        if (amp_steps[i] > most)
+            most = amp_steps[i];
+    return most;
+}
+
+/* Written down the way the background and the machine's name are.
+ * Loudness is a knob and not a change to the system, which is why
+ * nothing here asks who is turning it - and why it is the one setting
+ * a program in ring 3 may write.
+ */
+int hda_remember(void)
+{
+    char text[8];
+    int n = 0, v = volume;
+
+    do {
+        text[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v && n < 4);
+    for (int i = 0; i < n / 2; i++) {
+        char t = text[i];
+        text[i] = text[n - 1 - i];
+        text[n - 1 - i] = t;
+    }
+    text[n] = '\0';
+    return config_set("glosnosc", text);
 }

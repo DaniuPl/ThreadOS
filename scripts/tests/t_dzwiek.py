@@ -39,6 +39,7 @@ def main():
     wav = tempfile.mktemp(suffix=".wav")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
+    slog3 = tempfile.mktemp(suffix=".log")
 
     try:
         check("plyta z jadrem 64-bitowym buduje sie",
@@ -85,8 +86,119 @@ def main():
             out = q.command("beep 3 100", "beep:", timeout=20)
             check("czestotliwosc, ktorej nie da sie uslyszec, jest odrzucona",
                   "nie jest dzwiek" in out)
+
+            # --- and how loud. The codec's amplifier has as many steps
+            # as it has, so the percentage is of that; what a test can
+            # say for certain is that louder is louder, quieter is
+            # quieter and silence is silent.
+            out = q.command("glosnosc", "glosnosc:", timeout=20)
+            check("system mowi, jak glosno jest i z czego to liczy",
+                  "%" in out and "stopni w kodeku" in out)
+
+            def loud_after(command):
+                at = os.path.getsize(wav) - 44
+                q.command(command, "glosnosc:", timeout=20)
+                q.command("beep 440 150", "beep:", timeout=30)
+                time.sleep(2)
+                t = wav_tone(wav, max(at, 0))
+                return t[0] if t else 0
+
+            full = loud_after("glosnosc 100")
+            check("na 100%% cos wychodzi glosno (szczyt %d)" % full,
+                  full > 3000)
+            third = loud_after("glosnosc 30")
+            check("na 30%% ciszej niz na 100%% (%d wobec %d)" % (third, full),
+                  0 < third < full)
+            low = loud_after("glosnosc 5")
+            check("na 5%% jeszcze ciszej (%d)" % low, low < third)
+            quiet = loud_after("glosnosc cisza")
+            check("a po 'cisza' nie wychodzi nic (%d)" % quiet, quiet == 0)
+            out = q.command("glosnosc cisza", "glosnosc:", timeout=20)
+            check("i drugie 'cisza' wlacza z powrotem",
+                  "znowu slychac" in out)
         finally:
             q.close()
+
+        # --- the same knob in a window, which is where a person
+        # actually reaches for it: dragged while listening rather than
+        # typed and heard a second later
+        wav2 = tempfile.mktemp(suffix=".wav")
+        d2 = tempfile.mkdtemp()
+        iso2 = tempfile.mktemp(suffix=".iso")
+        try:
+            make_iso64(d2, iso2, graphics=True)
+            q3 = Qemu(KERNEL, INITRD, cdrom=iso2, serial=slog3, audio=wav2,
+                      qemu="qemu-system-x86_64")
+            try:
+                q3.wait_serial("System 64-bitowy gotowy", timeout=120)
+                q3.type_line("pulpit")
+                q3.wait_serial("Pulpit startuje", timeout=40)
+                time.sleep(4)
+                out = q3.command("run gmikser", "z initrd", timeout=30)
+                check("mikser startuje jako program w pierscieniu 3",
+                      "'gmikser' z initrd" in out)
+                time.sleep(3)
+                q3.mouse_goto(700, 500)
+                time.sleep(0.8)
+
+                # The window: slot two, content a pixel in and a title
+                # bar down (kernel/desktop.c)
+                CX, CY = 95, 65
+                text = q3.read_text(CX + 6, CY + 4, 44, 4, line_h=12)
+                check("okno mowi, jak glosno jest",
+                      "Glosnosc:" in text and "%" in text)
+                check("i z czego liczy procenty",
+                      "stopni" in text and "decybele" in text)
+
+                BAR_X, BAR_Y, BAR_H = 8, 52, 16
+                BTN_X, BTN_Y, BTN_W, BTN_H = 8, 82, 84, 16
+                bar_w = 360 - 2 * BAR_X
+
+                def click(x, y):
+                    q3.mouse_goto(CX + x, CY + y)
+                    q3.mouse_click()
+                    time.sleep(0.8)
+                    q3.mouse_goto(700, 500)
+                    time.sleep(0.5)
+
+                def test_tone():
+                    at = os.path.getsize(wav2) - 44
+                    q3.mouse_goto(CX + BTN_X + BTN_W + 10 + 20, CY + BTN_Y + 8)
+                    q3.mouse_click()
+                    time.sleep(3)
+                    q3.mouse_goto(700, 500)
+                    t = wav_tone(wav2, max(at, 0))
+                    return t[0] if t else 0
+
+                click(BAR_X + bar_w - 1, BAR_Y + BAR_H // 2)
+                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                check("klik na koncu suwaka daje 100%% ('%s')"
+                      % text.strip(), "100%" in text)
+                loud = test_tone()
+                check("i przycisk 'Sprawdz' naprawde gra (szczyt %d)" % loud,
+                      loud > 3000)
+
+                click(BAR_X + bar_w // 5, BAR_Y + BAR_H // 2)
+                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                check("klik w piatej czesci suwaka daje okolo 20%% ('%s')"
+                      % text.strip(),
+                      "19%" in text or "20%" in text or "21%" in text)
+                soft = test_tone()
+                check("i wtedy gra ciszej (%d wobec %d)" % (soft, loud),
+                      0 < soft < loud)
+
+                click(BTN_X + BTN_W // 2, BTN_Y + BTN_H // 2)
+                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                check("przycisk 'Cisza' mowi, ze jest cisza ('%s')"
+                      % text.strip(), "cisza" in text)
+                check("i wtedy nie gra nic", test_tone() == 0)
+            finally:
+                q3.close()
+        finally:
+            shutil.rmtree(d2, ignore_errors=True)
+            for f in (iso2, wav2):
+                if os.path.exists(f):
+                    os.unlink(f)
 
         # --- and a machine with no sound card, which has to say so
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2,
@@ -102,7 +214,7 @@ def main():
             q2.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, wav, slog, slog2):
+        for f in (iso, wav, slog, slog2, slog3):
             if os.path.exists(f):
                 os.unlink(f)
 

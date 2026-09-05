@@ -101,12 +101,19 @@
 #define SYS_INSTALL_LOOK 66
 /* ebx=step number -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */
 #define SYS_INSTALL_STEP 67
+/* Sound: how loud it is, how loud it should be, and a tone.
+   ebx=&struct snd_info | ebx=volume (-1 keeps), ecx=mute (-1 keeps)
+   | ebx=hertz, ecx=milliseconds */
+#define SYS_SND_GET  68
+#define SYS_SND_SET  69
+#define SYS_SND_BEEP 70
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */
 #define CFG_NAME_MAX 32
 #define CFG_VAL_MAX  32
 #define CFG_HELP_MAX 80
+
 
 struct cfg_entry {
     char name[CFG_NAME_MAX];

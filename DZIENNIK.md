@@ -4864,3 +4864,50 @@ sprawdzane przez `make test`.
       tez sterownik pamieta, GDZIE sie zatrzymal: "nie ma kontrolera
       HDA na PCI" i "kodek nie ma wyjscia, ktore umiem znalezc" to dwie
       rozne rzeczy i na prawdziwym sprzecie robi to cala roznice.
+
+- [x] **Mikser: glosnosc, wyciszenie i okno do tego** (hda_set_volume w
+      kernel/hda.c, komenda `glosnosc`, program user/gmikser.c,
+      rozszerzona grupa `dzwiek`).
+
+      **Pole, ktore latwo przeczytac odwrotnie.** Wzmacniacz widzetu
+      opisuje parametr 0x12, a w nim LICZBA STOPNI stoi na bitach 14..8,
+      a WIELKOSC stopnia na 22..16. Przeczytalem je na odwrot i nie
+      objawilo sie to bledem: kodek podal trzy stopnie zamiast
+      siedemdziesieciu czterech, mikser dostal trzy pozycje, a jedynym
+      znakiem bylo to, ze cicho i glosno brzmialo tak samo. Widac to
+      bylo dopiero w pliku dzwiekowym: szczyt 314 przy pelnej
+      glosnosci, podczas gdy wczesniej - z przypadkowo wieksza liczba -
+      wychodzilo 5679.
+
+      Procent jest procentem TEGO, co widzet ma, bo innego zakresu nie
+      ma. Stopnie sa decybelami, wiec trzydziesci procent jest znacznie
+      ciszej niz jedna trzecia - i to nie jest do poprawienia, tylko tak
+      dziala slyszenie. Okno mowi to wprost zamiast udawac skale
+      liniowa.
+
+      **I blad, ktory wyszedl dopiero przez mikser, a jest o calym
+      jadrze.** Po zagraniu tonu z okna mysz przestawala sie ruszac.
+      Powod: w trybie dlugim wywolanie systemowe wchodzi z WYLACZONYMI
+      przerwaniami - procesor kasuje flage przy wejsciu (SFMASK). Wiec
+      sterownik, ktory krecil sie w petli przez dwiesta milisekund,
+      zostawial maszyne gluchna na dwiescie milisekund: bez zegara i z
+      mysza PS/2, ktora gubila srodek pakietu i juz nigdy nie
+      odnajdywala ramkowania. Czekanie w hda.c SPI teraz, zamiast sie
+      krecic - a spanie oddaje rdzen planiscie, czyli tam, gdzie
+      przerwania wracaja. To jest rzecz, ktora dotyczy kazdego dlugiego
+      wywolania systemowego w tym jadrze i ten sterownik byl pierwszym,
+      ktory ja wywolal.
+
+      **Suwak dochodzi do stu procent**, bo dzieli sie przez szerokosc
+      MINUS JEDEN. Suwak, ktorego nie da sie dociagnac do konca, czuje
+      sie zepsuty, a roznica jest jednym znakiem w kodzie.
+
+      Glosnosc jest zapamietywana jak tlo pulpitu i nazwa maszyny - i
+      jest to jedyne ustawienie, ktore program z pierscienia 3 moze
+      zapisac bez pytania o haslo. Powod jest prosty: glosnosc to
+      pokretlo, a nie zmiana systemu.
+
+      Test mierzy to, co wyszlo z karty: 100% daje szczyt 8000, 30%
+      daje 2353, 5% daje 314, a cisza zero. Osobno to samo klikane w
+      oknie - suwak na koniec, przycisk 'Sprawdz', pomiar; suwak na
+      jedna piata, znowu pomiar, i musi byc ciszej.

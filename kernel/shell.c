@@ -1039,6 +1039,8 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "ekran"))
         cmd_ekran();
+    else if (!strcmp(cmd, "glosnosc"))
+        hwinfo_volume(arg);
     else if (!strcmp(cmd, "beep"))
         cmd_beep(arg);
     else if (!strcmp(cmd, "sprzet"))

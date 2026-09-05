@@ -18,6 +18,7 @@
 #include "../kernel/include/smp.h"
 #include "../kernel/include/user.h"
 #include "../kernel/include/install.h"
+#include "../kernel/include/hda.h"
 #include "../kernel/include/clip.h"
 #include "../kernel/include/config.h"
 #include "../kernel/include/biglock.h"
@@ -996,6 +997,36 @@ static void handle(struct regs *r)
             return;
         }
         r->rax = (uint64_t)(int64_t)install_step((int)a1);
+        return;
+
+    /* --- sound ------------------------------------------------------
+     *
+     * Loudness is a knob and not a change to the system, so nothing
+     * here asks who is turning it. */
+    case SYS64_SND_GET: {
+        struct snd_info info;
+        if (!paging64_user_range(a1, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        info.present = (uint32_t)hda_present();
+        info.volume = (uint32_t)hda_volume();
+        info.muted = (uint32_t)hda_muted();
+        info.steps = (uint32_t)hda_volume_steps();
+        *(struct snd_info *)(uintptr_t)a1 = info;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_SND_SET:
+        if ((int64_t)a1 >= 0)
+            hda_set_volume((int)a1);
+        if ((int64_t)a2 >= 0)
+            hda_set_mute((int)a2);
+        hda_remember();
+        r->rax = 0;
+        return;
+    case SYS64_SND_BEEP:
+        r->rax = (uint64_t)(int64_t)hda_beep((uint32_t)a1, (uint32_t)a2);
         return;
 
     case SYS64_WIN_TRUECOL:

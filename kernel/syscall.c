@@ -20,6 +20,7 @@
 #include "include/smp.h"
 #include "include/config.h"
 #include "include/install.h"
+#include "include/hda.h"
 #include "include/user.h"
 #include "include/clip.h"
 #include "include/isr.h"
@@ -608,6 +609,32 @@ void syscall_handler(struct regs *r)
             break;
         }
         r->eax = (uint32_t)install_step((int)r->ebx);
+        break;
+
+    /* --- sound ------------------------------------------------------
+     *
+     * Loudness is a knob and not a change to the system, so nothing
+     * here asks who is turning it. Playing a tone is the kernel's -
+     * a program says what it wants heard, not how. */
+    case SYS_SND_GET: {
+        struct snd_info info;
+        info.present = (uint32_t)hda_present();
+        info.volume = (uint32_t)hda_volume();
+        info.muted = (uint32_t)hda_muted();
+        info.steps = (uint32_t)hda_volume_steps();
+        r->eax = user_put(r->ebx, &info, sizeof(info)) < 0 ? EFAULT : 0;
+        break;
+    }
+    case SYS_SND_SET:
+        if ((int32_t)r->ebx >= 0)
+            hda_set_volume((int)r->ebx);
+        if ((int32_t)r->ecx >= 0)
+            hda_set_mute((int)r->ecx);
+        hda_remember();
+        r->eax = 0;
+        break;
+    case SYS_SND_BEEP:
+        r->eax = (uint32_t)hda_beep(r->ebx, r->ecx);
         break;
 
     /* --- who is at the machine ------------------------------------

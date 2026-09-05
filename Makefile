@@ -59,6 +59,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/tlbtest.elf $(BUILD)/user/faults.elf \
              $(BUILD)/user/gsettings.elf $(BUILD)/user/gdeaf.elf \
              $(BUILD)/user/ginstal.elf \
+             $(BUILD)/user/gmikser.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
              $(BUILD)/user/syscalls.elf
 
@@ -279,6 +280,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    mkwall=$(BUILD)/user/mkwall.elf \
 	    gsettings=$(BUILD)/user/gsettings.elf gdeaf=$(BUILD)/user/gdeaf.elf \
 	    ginstal=$(BUILD)/user/ginstal.elf \
+	    gmikser=$(BUILD)/user/gmikser.elf \
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
@@ -366,6 +368,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/ginstal.elf \
+               $(BUILD)/user64/gmikser.elf \
                $(BUILD)/user64/gimg.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
@@ -461,6 +464,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    ginstal=$(BUILD)/user64/ginstal.elf \
+	    gmikser=$(BUILD)/user64/gmikser.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \

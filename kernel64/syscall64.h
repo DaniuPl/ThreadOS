@@ -108,6 +108,11 @@
 #define SYS64_INSTALL_LOOK 60
 /* a1=step -> 0 done, 1 nothing to do, -1 failed, -2 not allowed */
 #define SYS64_INSTALL_STEP 61
+/* Sound: a1=&struct snd_info | a1=volume (-1 keeps), a2=mute (-1 keeps)
+   | a1=hertz, a2=milliseconds */
+#define SYS64_SND_GET  62
+#define SYS64_SND_SET  63
+#define SYS64_SND_BEEP 64
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

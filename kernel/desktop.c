@@ -465,7 +465,7 @@ static int menu_px, menu_py;
    started as a kiosk ('instaluj') and not as one more window among
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
-                                  "gedit", "gtasks"};
+                                  "gedit", "gtasks", "gmikser"};
 
 /* --- The kiosk -----------------------------------------------------
  *

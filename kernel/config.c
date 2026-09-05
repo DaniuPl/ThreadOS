@@ -46,6 +46,7 @@ static struct setting settings[] = {
                             "procent ekranu", 0, { 0 } },
     { "ikony",  "0",        "ikony na pasku: 0 od lewej, 1 na srodku,\n"
                             "2 od prawej", 0, { 0 } },
+    { "glosnosc", "80",     "glosnosc, 0-100 (0 = cisza)",        0, { 0 } },
     { "skala",  "0",        "ile pikseli ekranu na jeden pulpitu:\n"
                             "0 wybiera ekran (duzy panel dostaje 2)", 0, { 0 } },
     /* Not the password - a number computed from it. The default is the

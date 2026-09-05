@@ -19,4 +19,9 @@ void hwinfo_print(void);
    Reading only - nothing here writes a sector. */
 void hwinfo_disks(void);
 
+/* How loud, said and set. An empty argument only says; a number sets
+   it; the word 'cisza' silences without forgetting the number. Both
+   shells have it, so it lives once. */
+void hwinfo_volume(const char *arg);
+
 #endif

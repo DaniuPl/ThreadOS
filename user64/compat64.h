@@ -85,6 +85,40 @@ static inline int32_t sys_level(void)
 }
 
 
+
+/* --- Sound ------------------------------------------------------------
+ *
+ * Loudness is a knob and not a change to the system, so setting it
+ * asks nobody's permission - it is the one setting a program may
+ * write down. Playing is the kernel's: a program says what it wants
+ * heard, not how.
+ *
+ * The percentage is of what the codec's amplifier actually has, and
+ * its steps are decibels - so thirty per cent is far quieter than a
+ * third. That is how loudness works.
+ */
+struct snd_info {
+    uint32_t present;
+    uint32_t volume;             /* 0..100 */
+    uint32_t muted;
+    uint32_t steps;
+};
+
+static inline int32_t sys_snd_get(struct snd_info *out)
+{
+    return (int32_t)syscall64(SYS64_SND_GET, (int64_t)(uintptr_t)out, 0);
+}
+
+static inline int32_t sys_snd_set(int32_t volume, int32_t mute)
+{
+    return (int32_t)syscall64(SYS64_SND_SET, volume, mute);
+}
+
+static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
+{
+    return (int32_t)syscall64(SYS64_SND_BEEP, (int64_t)hz, (int64_t)ms);
+}
+
 /* --- Installing onto this machine's own disk -----------------------
  *
  * Two calls, and the split between them is the point. Looking reads

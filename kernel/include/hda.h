@@ -41,4 +41,44 @@ int hda_play(const int16_t *samples, uint32_t frames);
    any of the above is true. 0 = played. */
 int hda_beep(uint32_t hz, uint32_t ms);
 
+/* --- how loud ---------------------------------------------------------
+ *
+ * A codec's amplifier is not a number from nothing: every widget says
+ * how many steps it has and how big a step is, and asking for more
+ * than it has is answered by the command being ignored. So loudness
+ * here is a PERCENTAGE of what the widget actually has, and the
+ * translation is the driver's business.
+ *
+ * The steps are decibels, so half the steps is nowhere near half the
+ * amplitude. That is not a fault to correct - it is how loudness
+ * works, and a mixer that pretended otherwise would feel wrong at
+ * both ends.
+ */
+void hda_set_volume(int percent);        /* 0..100 */
+int hda_volume(void);
+void hda_set_mute(int on);
+int hda_muted(void);
+/* How many steps the widget has, for anything that wants to say what
+   the percentage is a percentage of. 0 = the codec has no amplifier
+   we can move. */
+int hda_volume_steps(void);
+
+/* Writes the loudness down, so the next boot is as loud as this one.
+   0 = written, -1 = there was nowhere to write it. */
+int hda_remember(void);
+
+/* --- Sound, as a program in ring 3 sees it ---------------------------
+ *
+ * The shape that goes through a syscall, so it lives with the driver
+ * rather than with either kernel's list of calls. It must match
+ * struct snd_info in user/usys.h and user64/compat64.h.
+ */
+struct snd_info {
+    uint32_t present;
+    uint32_t volume;             /* 0..100 */
+    uint32_t muted;
+    uint32_t steps;              /* how many the codec's amplifier has */
+};
+
+
 #endif
