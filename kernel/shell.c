@@ -40,6 +40,7 @@
 #include "include/part.h"
 #include "include/fatcmd.h"
 #include "include/install.h"
+#include "include/hwinfo.h"
 #include "include/blk.h"
 #include "include/usbhc.h"
 #include "include/usbkbd.h"
@@ -134,11 +135,10 @@ static const struct {
     {"clear",    "wyczysc ekran"},
     {"ekran",    "tryb ekranu, koszt klatki"},
     {"sprzet",   "co jest w tej maszynie"},
+    {"dyski",    "dyski, ktore ma maszyna"},
     {"instaluj", "ProtonOS na dysk (ekran)"},
-    {"fat [N]",  "partycja EFI (FAT)"},
-    {"fatls P",  "katalog na FAT"},
-    {"fatcat P", "plik z FAT"},
-    {"fatcopy",  "z initrd na FAT"},
+    {"fat [N]",  "partycja EFI: fatls,"},
+    {"",         "  fatcat, fatcopy, fatrm"},
     {"gfx",      "test trybu 13h"},
     {"vesa",     "test trybu VESA"},
     {"crash",    "test page faulta"},
@@ -147,6 +147,18 @@ static const struct {
 };
 
 #define COMMAND_N ((int)(sizeof(commands) / sizeof(commands[0])))
+
+/* The screen has twenty-five rows and the listing has to leave room
+   for its own heading, the line about consoles and the prompt
+   underneath. One entry too many and the list scrolls its heading off
+   the top - which looks like nothing at all, because everything is
+   still there, one row higher. So the limit is checked HERE, when the
+   list is edited, rather than found later by somebody wondering where
+   the heading went. */
+#define HELP_ROWS 22
+_Static_assert(COMMAND_N <= 2 * HELP_ROWS,
+               "lista komend nie miesci sie na ekranie - skroc opisy "
+               "albo polacz pozycje");
 
 /* A column, and never wider than one.
  *
@@ -166,7 +178,7 @@ static void print_padded(const char *s, int width)
 
 static void cmd_help(void)
 {
-    int rows = (COMMAND_N + 1) / 2;
+    int rows = (COMMAND_N + 1) / 2;      /* at most HELP_ROWS - see above */
     vga_clear();
     printk("Dostepne komendy:\n");
     for (int r = 0; r < rows; r++) {
@@ -193,108 +205,6 @@ static void cmd_ekran(void)
            video_true_colour() ? "kolory" : "paleta 256", video_scale());
     printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
            video_present_rows(), video_h());
-}
-
-/* What this machine actually is.
- *
- * Written for a first boot on hardware nobody has tried yet. Every
- * line here answers a question one asks while standing in front of a
- * laptop that will not do something: what did the loader give us for
- * a screen, is there anything on the PS/2 ports, did the USB bus have
- * a keyboard or a pointer on it, and - when the answer to the pointer
- * is no - what else is in the machine that it might be hiding behind.
- *
- * The PCI listing is the last of those. A touchpad that is not on the
- * PS/2 port is usually on an I2C controller, and an I2C controller is
- * a device of the serial-bus class sitting in plain sight here. We do
- * not speak that bus; being able to SAY that is the difference between
- * a mystery and a known gap. */
-static const char *pci_class_name(uint32_t class)
-{
-    switch (class >> 24) {
-    case 0x01: return "dysk";
-    case 0x02: return "siec";
-    case 0x03: return "grafika";
-    case 0x04: return "dzwiek/wideo";
-    case 0x06: return "mostek";
-    case 0x08: return "kontroler systemowy";
-    case 0x09: return "wejscie (mysz, tablet)";
-    case 0x0C: return ((class >> 16) & 0xFF) == 0x03 ? "USB" : "magistrala szeregowa";
-    case 0x11: return "przetwarzanie sygnalu";
-    default:   return "inne";
-    }
-}
-
-static void cmd_sprzet(void)
-{
-    printk("ekran:    %dx%d, %s, skala %d, bufor %s\n",
-           video_w(), video_h(),
-           video_true_colour() ? "kolory" : "paleta 256", video_scale(),
-           video_have_loader_lfb() ? "od loadera" : "ustawiony przez jadro");
-
-    if (!ps2_controller_present())
-        printk("PS/2:     BRAK kontrolera 8042 - ani klawiatury, ani "
-               "myszy na tych portach\n");
-    else
-        printk("PS/2:     kontroler 8042 jest, mysz %s\n",
-               mouse_present() ? (mouse_has_wheel() ? "tak (z kolkiem)"
-                                                    : "tak (bez kolka)")
-                               : "NIE");
-    printk("USB:      %s, klawiatura %s, mysz %s\n",
-           usbhc_name(), usbkbd_present() ? "tak" : "nie",
-           usbmouse_present() ? "tak" : "nie");
-
-    /* The disk, and what is already on it. A machine booted from a
-       stick sees the laptop's own disk here - and before anyone
-       proposes to write to it, it is worth reading what would be
-       written over. */
-    printk("dysk:     %s, %u sektorow po 512 B (%u MiB)\n", blk_name(),
-           blk_sectors(), blk_sectors() / 2048);
-    int np = part_scan();
-    if (np < 0)
-        printk("          brak dysku\n");
-    else if (np == 0)
-        printk("          bez tablicy partycji - caly dysk jest nasz\n");
-    else {
-        printk("          tablica %s, partycji: %u\n",
-               part_is_gpt() ? "GPT" : "MBR", (uint32_t)np);
-        for (int i = 0; i < np; i++) {
-            struct partition pt;
-            if (!part_get(i, &pt))
-                break;
-            printk("          %u: od %u, %u MiB, %s%s%s\n",
-                   (uint32_t)(i + 1), (uint32_t)pt.start,
-                   (uint32_t)(pt.sectors / 2048), pt.kind,
-                   pt.label[0] ? " " : "", pt.label);
-        }
-    }
-
-    /* And what else is in here, so that a gap has a name */
-    int serial_bus = 0;
-    printk("PCI:\n");
-    for (int i = 0; ; i++) {
-        struct pci_dev d;
-        uint32_t class;
-        if (!pci_enumerate(i, &d, &class))
-            break;
-        uint8_t base = (uint8_t)(class >> 24);
-        uint8_t sub = (uint8_t)((class >> 16) & 0xFF);
-        if ((base == 0x0C && sub != 0x03) || base == 0x11)
-            serial_bus++;
-        /* printk has no field widths, so the columns are spelled out
-           rather than padded - and a slot number is more readable in
-           decimal here anyway. */
-        printk("  %u.%u  %x:%x  klasa %x.%x  %s\n",
-               (uint32_t)d.slot, (uint32_t)d.func,
-               (uint32_t)d.vendor, (uint32_t)d.device,
-               (uint32_t)base, (uint32_t)sub, pci_class_name(class));
-    }
-
-    if (!mouse_present() && !usbmouse_present() && serial_bus)
-        printk("Wskaznika nie ma na zadnej znanej drodze, a w maszynie\n"
-               "jest %d kontroler(ow) magistrali szeregowej - touchpad\n"
-               "siedzi zapewne na I2C (HID przez I2C), ktorego nie umiemy.\n"
-               "Mysz w gniazdo USB zadziala.\n", serial_bus);
 }
 
 /* Reads a line back with what was typed visible - the confirmation
@@ -1094,7 +1004,9 @@ static void run_command(char *cmd)
     else if (!strcmp(cmd, "ekran"))
         cmd_ekran();
     else if (!strcmp(cmd, "sprzet"))
-        cmd_sprzet();
+        hwinfo_print();
+    else if (!strcmp(cmd, "dyski"))
+        hwinfo_disks();
     else if (!strcmp(cmd, "formatuj"))
         cmd_formatuj(arg);
     else if (!strcmp(cmd, "instaluj"))

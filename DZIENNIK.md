@@ -4750,3 +4750,52 @@ sprawdzane przez `make test`.
       i wypisuje liste, gdy dyskow jest wiecej niz jeden. W oknie linia
       z dyskiem jest klikalna i mowi o tym wprost - wybor, ktorego
       trzeba sie domyslic, nie jest wyborem.
+
+- [x] **Domkniecie drogi do sprzetu: `make stick`, `sprzet` i `dyski`
+      w jadrze 64-bitowym** (scripts/mkstick.py, kernel/hwinfo.c, grupa
+      testow `stick`).
+
+      Caly ten lancuch - loader, FAT, instalator, partycje, wybor dysku
+      - istnieje po to, zeby polozyc ProtonOS-a na prawdziwym laptopie.
+      I ani jeden bajt z tego nie dzialal na prawdziwym sprzecie:
+      wszystko bylo sprawdzane pod QEMU i OVMF. Miedzy "dziala w
+      emulatorze" a "startuje z pendrive'a" brakowalo trzech rzeczy i
+      wszystkie trzy byly banalne, co jest najgorszym rodzajem
+      brakujacych rzeczy.
+
+      **Nie bylo polecenia, ktore robi pendrive'a.** `make iso64` robi
+      plyte z GRUB-em, czyli dokladnie to, czego nasz loader nie
+      uzywa. Zeby przygotowac stick, trzeba bylo recznie zlozyc GPT,
+      sformatowac ESP i skopiowac trzy pliki - czyli powtorzyc z
+      pamieci to, co system umie sam. Teraz `make stick` daje surowy
+      obraz do dd, a `make run-stick` uruchamia go pod OVMF, zanim
+      pojdzie na pendrive.
+
+      Tablica w obrazie jest pisana bajt po bajcie w Pythonie, z tego
+      samego powodu, dla ktorego istnieje kernel/gpt.c: firmware
+      sprawdza sumy i kopie na koncu dysku i po cichu uznaje tablice
+      za uszkodzona. FAT robi mformat - czyli ktos inny. To, ze stick
+      jest robiony przez jedna implementacje, a czytany przez druga,
+      jest warte wiecej niz to, ze obie byly nasze.
+
+      Obraz ma 192 MiB i jedna partycje. Trzy pliki zajmuja poltora
+      megabajta; reszta jest po to, zeby FAT32 byl FAT32 (liczba
+      klastrow) i zeby bylo gdzie cos dopisac.
+
+      **`sprzet` nie istnial w jadrze 64-bitowym.** Napisalem te
+      komende wprost pod pierwszy rozruch na sprzecie - co jest na
+      PS/2, co na USB, co widzi PCI, jaki ekran dal loader - i siedziala
+      w powloce 32-bitowej, czyli w jadrze, ktorego na laptopie nikt nie
+      uruchomi. To jest ta komenda, ktora wpisuje sie jako pierwsza na
+      maszynie, ktorej nikt jeszcze nie probowal, i nie bylo jej tam,
+      gdzie jest potrzebna.
+
+      Wyladowala w kernel/hwinfo.c, wspolnym dla obu powlok, razem z
+      nowa komenda **`dyski`**: co maszyna ma za dyski, ktorego uzywa i
+      co jest na kazdym z nich. Bez wchodzenia w instalator. Ogladanie
+      cudzego dysku wskazuje go warstwie blokowej, wiec i tu jest
+      wskazywany z powrotem - ta sama zasada, co w install_look().
+
+      Test `stick` czyta obraz tak, jak przeczyta go firmware: tablica
+      w Pythonie z obiema sumami, FAT przez mtools, trzy pliki co do
+      bajtu - a potem go URUCHAMIA i wpisuje obie nowe komendy.

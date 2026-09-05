@@ -47,6 +47,7 @@
 #include "../kernel/include/fs.h"
 #include "../kernel/include/fatcmd.h"
 #include "../kernel/include/install.h"
+#include "../kernel/include/hwinfo.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
@@ -103,6 +104,7 @@ static void cmd_help(void)
     printk("           kim, sudo <komenda>, wyloguj, haslo\n");
     printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
+    printk("           sprzet - co jest w tej maszynie, dyski - dyski\n");
     printk("           instaluj - ProtonOS na dysk tej maszyny\n");
     printk("             (caly ekran; 'instaluj tekstem [caly]' - tutaj)\n");
 }
@@ -777,6 +779,10 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: podaj nazwe pliku\n");
+    } else if (!strcmp(line, "sprzet")) {
+        hwinfo_print();
+    } else if (!strcmp(line, "dyski")) {
+        hwinfo_disks();
     } else if (!strcmp(line, "instaluj")) {
         if (!install_graphical()) {
             printk("instaluj: pulpit juz dziala, a instalator potrzebuje "

@@ -158,6 +158,8 @@ make run              # 32-bit kernel in QEMU
 make kernel64         # build the long-mode kernel + its initrd
 make run-iso64-uefi   # boot the hybrid disc under UEFI firmware (OVMF)
 make efi              # build protoboot, our own EFI loader (needs clang + lld)
+make stick            # a bootable USB image: GPT + an EFI partition + the three files
+make run-stick        # boot that image under OVMF, before it goes on a stick
 make test             # full test suite, groups in parallel (~5 min)
 make test T=ush       # one group only
 ```
@@ -228,7 +230,10 @@ ground for both.
   driving pipes and redirections, and a dozen TLS 1.3 handshakes
   against a real OpenSSL) now decide how long a full run takes — about
   90 seconds each, out of some 385 for all 50 groups.
-- Run on real hardware, not only under QEMU and OVMF.
+- Run on real hardware, not only under QEMU and OVMF. Everything is in
+  place for it: `make stick` writes the image, `sprzet` says what the
+  machine is and `dyski` what it has to install onto. What is missing
+  is a machine and somebody standing in front of it.
 
 ## Documentation
 

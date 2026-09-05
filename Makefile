@@ -120,6 +120,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/gpt.o \
         $(BUILD)/fatcmd.o \
         $(BUILD)/install.o \
+        $(BUILD)/hwinfo.o \
         $(BUILD)/dynlink.o \
         $(BUILD)/smpmem.o \
         $(BUILD)/smpthreads.o \
@@ -133,7 +134,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/fbcon.o
 
 .PHONY: all iso iso64 initrd64 run run-iso run-iso64-uefi test fuzz clean \
-        kernel64 efi
+        kernel64 efi stick run-stick
 
 all: $(KERNEL) $(INITRD)
 
@@ -296,7 +297,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci xhci usbhc usbkbd usbmouse part fat gpt fatcmd install swap prog shm rtc \
+            mouse desktop acpi uhci xhci usbhc usbkbd usbmouse part fat gpt fatcmd install hwinfo swap prog shm rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
@@ -599,3 +600,32 @@ $(EFI_OUT): boot/efi/efiboot.c boot/efi/efi.h | $(BUILD)
 	@echo "Gotowe: $@"
 
 efi: $(EFI_OUT)
+
+# Firmware UEFI dla QEMU. Te same pliki, ktorych uzywa run-iso64-uefi.
+OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
+
+# --- Pendrive, z ktorego startuje ta maszyna -------------------------
+#
+# To, z czego startuje maszyna z UEFI, nie jest plyta ani jadrem: to
+# dysk z tablica GPT, partycja EFI w srodku, FAT-em w niej i loaderem
+# pod nazwa, ktora firmware zna. Ten cel robi dokladnie taki obraz -
+# surowy, do wgrania na pendrive przez dd. Bez GRUB-a i bez El Torito.
+STICK := $(BUILD)/protonos-stick.img
+
+$(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py
+	@command -v mformat >/dev/null || { \
+	    echo "BLAD: brak mtools (apt install mtools)"; exit 1; }
+	python3 scripts/mkstick.py $@ $(EFI_OUT) $(KERNEL64) $(INITRD64)
+
+stick: $(STICK)
+
+# Ten sam obraz uruchomiony pod OVMF - zanim pojdzie na pendrive,
+# warto zobaczyc, ze startuje.
+run-stick: $(STICK)
+	@test -f $(OVMF_CODE) || { echo "BLAD: brak OVMF"; exit 1; }
+	cp $(OVMF_VARS) $(BUILD)/ovmf_vars.fd
+	qemu-system-x86_64 -m 512 \
+	    -drive if=pflash,format=raw,unit=0,readonly=on,file=$(OVMF_CODE) \
+	    -drive if=pflash,format=raw,unit=1,file=$(BUILD)/ovmf_vars.fd \
+	    -drive file=$(STICK),format=raw,media=disk
