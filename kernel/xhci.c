@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include "include/xhci.h"
 #include "include/spinlock.h"
+#include "include/task.h"
 #include "include/pci.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -366,11 +367,22 @@ static int take_comp(int slot, struct comp *out)
 static int wait_slot(int slot, struct comp *out, uint32_t ms)
 {
     uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
+    int spins = 0;
+
     while (pit_ticks() < az) {
         sort_events();
         if (take_comp(slot, out))
             return 1;
-        io_wait();
+        /* The first few hundred turns are a busy wait, because most
+           answers come back in microseconds and going to sleep would
+           cost more than the wait itself. After that the machine is
+           let go: a driver that spins for five seconds waiting for a
+           disk - or for a packet that may never come - is a driver
+           that stops the machine while it waits. */
+        if (++spins > 200 && task_scheduler_ready())
+            task_sleep(1);
+        else
+            io_wait();
     }
     return 0;
 }

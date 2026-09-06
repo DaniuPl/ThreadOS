@@ -5274,3 +5274,42 @@ sprawdzane przez `make test`.
       flaga jest zglaszana w kolko i punkt koncowy mowi "cos sie
       zmienilo" na wieki, dwa razy na sekunde, o czyms, co zmienilo sie
       raz.
+
+- [x] **Karta sieciowa na USB (RNDIS)** (kernel/usbnet.c, netdev.c,
+      nowa grupa testow `usbsiec`).
+
+      Druga polowa tego, co siedzi w stacji dokujacej. Rozni sie od
+      dwoch kart, ktore ten system juz zna, glebiej niz rejestrami: nie
+      ma zadnych rejestrow. Wszystko jest rozmowa - "wstan", "jaki masz
+      adres", "przepuszczaj rozgloszenia" - prowadzona przez punkt
+      koncowy zero jako "polecenia opakowane", a kazda ramka dostaje
+      czterdziestoczterobajtowy naglowek przed soba.
+
+      Protokolem jest RNDIS, czyli NDIS - interfejs sterownikow Windows
+      - rozciagniety po drucie. Stad jego wiadomosci pytaja o "OID-y"
+      zamiast o sprzet: OID to numer nazywajacy wlasciwosc, a
+      0x01010101 znaczy akurat "twoj staly adres ethernetowy".
+
+      **Rzecz, ktora kosztowala najwiecej czasu i miesci sie w jednym
+      polu.** Przy pytaniu bez danych PRZESUNIECIE tych danych ma byc
+      zerem, a nie dwudziestka, ktora niesie wiadomosc Z danymi. Karta
+      sprawdza, czy przesuniecie wskazuje do srodka wiadomosci - a
+      pytanie o dwudziestu osmiu bajtach, ktorego dane zaczynaja sie na
+      dwudziestym osmym, jest pytaniem, na ktore odmawia odpowiedzi. Z
+      zewnatrz wyglada to dokladnie jak karta, ktora nie dziala.
+
+      **I rzecz strukturalna: tu nic nie da sie zrobic z przerwania.**
+      Karta PCI zglasza przerwanie i program obslugi czyta pierscien;
+      karte USB trzeba ZAPYTAC, a pytanie to transfer, a transferu nie
+      wolno robic w obsludze przerwania. Wiec ramki zbiera watek, ktory
+      spedza zycie na czekaniu na odczyt bulk - i po to ten watek jest.
+      Przy okazji czekanie w sterowniku xHCI przestalo byc czystym
+      kreceniem sie w kolko: po kilkuset obrotach oddaje maszyne
+      planiscie, bo sterownik krecacy sie pieć sekund w oczekiwaniu na
+      pakiet, ktory moze nigdy nie przyjsc, zatrzymuje cala maszyne.
+
+      Karta USB jest ostatnia na liscie prob w netdev.c: maszyna z
+      wlasna karta zostaje przy niej, a maszyna bez zadnej moze siegnac
+      do sieci przez stacje dokujaca. Test stawia maszyne BEZ karty PCI
+      i sprawdza cala droge w gore: adres z DHCP, odpowiedz na ping i
+      strone pobrana po TCP z serwera na hoscie - z pierscienia 3.

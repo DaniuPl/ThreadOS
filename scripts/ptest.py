@@ -1070,7 +1070,7 @@ class Qemu:
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
-                 usbhub=False, behind_hub=False,
+                 usbhub=False, behind_hub=False, usbnic=False,
                  nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
@@ -1093,7 +1093,7 @@ class Qemu:
                # knows e1000 too - and that is the only difference in the
                # QEMU invocation, because which card sits in the socket
                # is decided by the netdev layer, not by the network code
-               "-device", nic + ",netdev=n0",
+               *(["-device", nic + ",netdev=n0"] if nic else []),
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
@@ -1128,6 +1128,14 @@ class Qemu:
             cmd += ["-device", "usb-mouse,bus=xhci.0"]
         elif usbmouse:
             cmd += ["-usb", "-device", "usb-mouse"]
+        if usbnic:
+            # The Ethernet card in a docking station: the same slirp
+            # network, reached through the USB bus instead of the PCI
+            # one. The card speaks RNDIS, which is what nearly every
+            # USB Ethernet adapter offers.
+            if usbkbd not in ("xhci", "hub") and usbmouse != "xhci":
+                cmd += ["-device", "qemu-xhci,id=xhci"]
+            cmd += ["-device", "usb-net,bus=xhci.0,netdev=n0"]
         if usbhub:
             # A hub in the socket, and the keyboard behind it. This is
             # what a docking station looks like from the machine's
