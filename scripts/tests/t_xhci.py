@@ -30,6 +30,7 @@ groups in parallel.
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -37,6 +38,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
+
+OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
 
 
 def type_text(q, text, delay=0.12):
@@ -118,6 +125,58 @@ def main():
                 os.unlink(iso)
             if os.path.exists(slog):
                 os.unlink(slog)
+
+    # --- And the same machine started through UEFI ------------------
+    #
+    # This is where a real laptop starts, and it turned out to be a
+    # different machine from the one booted off a disc: UEFI firmware
+    # gives the controller a memory window ABOVE 4 GiB, and a driver
+    # that refuses such an address has no USB at all - so no keyboard
+    # and no mouse on a machine that has nothing else. Nothing caught
+    # it, because every USB test until now booted through the old BIOS.
+    reason = no64()
+    if not reason and os.path.exists(OVMF_CODE) and os.path.exists(OVMF_VARS):
+        print("--- klawiatura USB na xHCI, start przez UEFI ---")
+        esp = tempfile.mkdtemp()
+        nvram = tempfile.mktemp(suffix=".fd")
+        slogu = tempfile.mktemp(suffix=".log")
+        try:
+            if not os.path.exists(LOADER):
+                subprocess.run(["make", "efi"], cwd=ROOT,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            if not os.path.exists(LOADER):
+                print("POMINIETE: brak build/BOOTX64.EFI")
+            else:
+                os.makedirs(os.path.join(esp, "EFI", "BOOT"))
+                shutil.copy(LOADER,
+                            os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+                shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+                shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
+                shutil.copy(OVMF_VARS, nvram)
+
+                q4 = Qemu(KERNEL, INITRD, esp=esp, serial=slogu,
+                          usbkbd="xhci", qemu="qemu-system-x86_64",
+                          uefi=(OVMF_CODE, nvram))
+                try:
+                    start = q4.wait_serial("System 64-bitowy gotowy",
+                                           timeout=140)
+                    check("po starcie przez UEFI klawiatura USB tez sie "
+                          "znajduje",
+                          re.search(r"Klawiatura USB \(HID, xHCI\)",
+                                    start) is not None)
+                    said = q4.command("sprzet", "PCI:", timeout=30)
+                    check("i 'sprzet' nie mowi juz 'USB: brak'",
+                          "USB:      xHCI" in said)
+                    check("a gdyby mowil, to z powodem, nie bez",
+                          "USB:      brak" not in said or "(" in said)
+                finally:
+                    q4.close()
+        finally:
+            shutil.rmtree(esp, ignore_errors=True)
+            for f in (nvram, slogu):
+                if os.path.exists(f):
+                    os.unlink(f)
 
     # --- The same in the 32-bit kernel ---
     print("--- klawiatura USB na xHCI (jadro 32-bitowe) ---")
