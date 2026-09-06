@@ -37,6 +37,7 @@
 #include "../kernel/include/acpi.h"
 #include "../kernel/include/usbkbd.h"
 #include "../kernel/include/usbmouse.h"
+#include "../kernel/include/bt.h"
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/biglock.h"
 #include "../kernel/include/swap.h"
@@ -594,6 +595,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        that means an identity mapping. */
     usbkbd_init();          /* it reports in by itself when it finds something */
     usbmouse_init();
+    /* And the adapter on the same bus. It reports in by itself when it
+       finds one; on a machine without Bluetooth this costs one walk
+       across the ports and says nothing. */
+    bt_init();
 
     /* Sound. Not needed by anything and that is exactly why it is
        started here rather than on demand: a machine that cannot make a

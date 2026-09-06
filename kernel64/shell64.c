@@ -49,6 +49,7 @@
 #include "../kernel/include/install.h"
 #include "../kernel/include/hwinfo.h"
 #include "../kernel/include/hda.h"
+#include "../kernel/include/bt.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/video.h"
@@ -106,6 +107,7 @@ static void cmd_help(void)
     printk("           fat [N [dysk]] - partycja FAT: fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("           sprzet - co jest w tej maszynie, dyski - dyski\n");
+    printk("           bt [skan|test] - Bluetooth\n");
     printk("           beep [Hz] [ms] - dzwiek, glosnosc [0-100|cisza]\n");
     printk("           instaluj - ProtonOS na dysk tej maszyny\n");
     printk("             (caly ekran; 'instaluj tekstem [caly]' - tutaj)\n");
@@ -416,6 +418,51 @@ static void cmd_cp(char *rest)
  * whether the pixel at (x, y) ends up at (x, y). A wrongly computed
  * bytes-per-pixel shows up here immediately: the image skews.
  */
+/* 'bt' - what the adapter is, 'bt skan [s]' - who is in range,
+   'bt test' - the packet parser against recorded packets, which is the
+   only part of Bluetooth that can be checked without an adapter. */
+static void cmd_bt(const char *arg)
+{
+    while (*arg == ' ')
+        arg++;
+
+    if (arg[0] == 't') {                 /* test */
+        bt_selftest();
+        return;
+    }
+
+    if (!bt_present()) {
+        printk("bt: nie ma adaptera (%s)\n", bt_why());
+        return;
+    }
+
+    if (arg[0] != 's') {                 /* status */
+        printk("adapter: %s\n", bt_address());
+        printk("nazwa:   %s\n", bt_name());
+        printk("wersja:  %s\n", bt_version());
+        printk("( 'bt skan' - kto jest w zasiegu )\n");
+        return;
+    }
+
+    uint32_t sec = 0;
+    for (const char *p = arg; *p; p++)
+        if (*p >= '0' && *p <= '9')
+            sec = sec * 10 + (uint32_t)(*p - '0');
+    if (!sec || sec > 30)
+        sec = 5;
+
+    printk("bt: nasluchuje przez %u s...\n", sec);
+    int n = bt_scan(sec);
+    if (n < 0) {
+        printk("bt: adapter nie chcial zaczac nasluchu\n");
+        return;
+    }
+    for (int i = 0; i < n; i++)
+        printk("  %s  %s%s%d dBm\n", bt_found_addr(i), bt_found_name(i),
+               bt_found_name(i)[0] ? "  " : "", bt_found_rssi(i));
+    printk("bt: uslyszanych urzadzen: %u\n", (uint32_t)n);
+}
+
 static void cmd_gfx(void)
 {
     if (!video_w()) {
@@ -822,6 +869,10 @@ static void execute(const char *line)
         cmd_beep(argument(line, 5));
     } else if (!strcmp(line, "sprzet")) {
         hwinfo_print();
+    } else if (!strcmp(line, "bt")) {
+        cmd_bt("");
+    } else if (starts_with(line, "bt ")) {
+        cmd_bt(line + 3);
     } else if (!strcmp(line, "dyski")) {
         hwinfo_disks();
     } else if (!strcmp(line, "instaluj")) {

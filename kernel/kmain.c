@@ -28,6 +28,7 @@
 #include "include/mb2.h"
 #include "include/usbkbd.h"
 #include "include/usbmouse.h"
+#include "include/bt.h"
 #include "include/dynlink.h"
 #include "include/biglock.h"
 #include "include/swap.h"
@@ -307,6 +308,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        machine without PS/2 it is the only input the system has. */
     usbkbd_init();
     usbmouse_init();
+    /* And the adapter on the same bus. It reports in by itself when it
+       finds one; on a machine without Bluetooth this costs one walk
+       across the ports and says nothing. */
+    bt_init();
 
     /* Sound. Not needed by anything and that is exactly why it is
        started here rather than on demand: a machine that cannot make a

@@ -5094,3 +5094,47 @@ sprawdzane przez `make test`.
       tekstem caly 3`), sprawdzenie tablicy GPT wlasnym czytnikiem,
       loadera co do bajtu przez mtools - i uruchomienie tego pendrive'a
       pod UEFI, az do powloki.
+
+- [x] **Bluetooth: rozmowa HCI z adapterem** (kernel/bt.c, komendy `bt`,
+      `bt skan`, `bt test`, grupa testow `bt`).
+
+      Kazdy adapter Bluetooth, cokolwiek ma w srodku, mowi tym samym
+      jezykiem: HCI. Polecenia w dol, zdarzenia w gore, a pakiety maja
+      ten sam ksztalt niezaleznie od tego, czy adapter siedzi na USB,
+      na porcie szeregowym czy na SDIO. W laptopie siedzi na USB -
+      wewnetrznie, na tej samej magistrali co kamerka - wiec ten
+      sterownik gada przez warstwe USB, ktora wlasnie powstala przy
+      pendrivie. Polecenia nie ida zadnym punktem koncowym: sa
+      transferem kontrolnym z typem zadania 0x20 i reszta wyzerowana.
+      Tak jest od 2001 roku.
+
+      **I tu przebiega granica, ktora trzeba nazwac.** QEMU nie emuluje
+      zadnego adaptera Bluetooth - caly stos wyrzucono z niego lata
+      temu - i zaden inny hipernadzorca tez go nie ma. Wiec ani jedna
+      linia tej rozmowy nigdy nie dotarla do urzadzenia, ktore
+      odpowiada. Sprawdzone jest to, co jest czystymi bajtami: skladanie
+      polecen i czytanie zdarzen, przeciwko nagranym pakietom o
+      ksztalcie z normy. `bt test` sam to mowi na koncu: "to sprawdza
+      skladanie i czytanie pakietow, nie rozmowe z adapterem".
+
+      Co lapie taki test, mimo wszystko: adres, ktory na drucie idzie
+      od najmlodszego bajtu, a na ekranie od najstarszego - odwrotnie
+      przeczytany jest poprawny i nie do poznania; wytworce, ktora w
+      odpowiedzi na Read Local Version stoi na bajcie osmym, a nie
+      siodmym; nazwe urzadzenia wyciagana z rozglaszania LE, gdzie jest
+      jednym z kawalkow o wlasnej dlugosci i typie. To sa dokladnie te
+      pomylki, ktore inaczej znajduje sie na laptopie, po jednym
+      restarcie na sztuke.
+
+      Druga rzecz, ktorej pilnuje test: **uczciwosc na maszynie bez
+      adaptera**. `bt` ma powiedziec, ze adaptera nie ma i dlaczego, a
+      `bt skan` ma odmowic - a nie pokazac pusta liste urzadzen, jakby
+      sie rozgladal. Pusta lista i brak adaptera to dwie rozne rzeczy i
+      tylko jedna z nich jest prawdziwa.
+
+      Czego tu nie ma: danych. Skanowanie potrzebuje tylko zdarzen,
+      wiec starczy punkt koncowy przerwaniowy; polaczenie z sluchawkami
+      czy myszka potrzebuje dwoch punktow bulk i warstwy L2CAP nad
+      nimi. To pojdzie wtedy, gdy bedzie z czym rozmawiac. Adaptery
+      Intela i Broadcoma chca dodatkowo wgranego firmware'u, zanim
+      zrobia cokolwiek poza podaniem wlasnego adresu.
