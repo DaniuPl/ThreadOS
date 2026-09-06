@@ -5430,3 +5430,11 @@ sprawdzane przez `make test`.
       Przy okazji wyszlo, ze README klamalo w liczbach - "prawie 800
       asercji" i "50 grup" bylo prawda kilkadziesiat commitow temu.
       Teraz asercji jest ponad 1600, a grup 95.
+
+      **Pierwszy przebieg CI zmierzyl to, czego sie balem.** Zestaw
+      kilkunastu grup zajal biegaczowi GitHuba **szesc minut** - dwa
+      rdzenie, bez KVM. Skoro tyle, to lista byla za krotka: doszly
+      grupy, ktore najlatwiej zepsuc niechcacy (pulpit, menedzer
+      plikow, instalator, powloka w ring 3, TLS 1.3, siec, pendrive).
+      Pelny lokalny przebieg po tych zmianach: **1714 asercji, zero
+      niepowodzen, 95 grup, 1229 s**.

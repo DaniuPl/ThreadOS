@@ -69,12 +69,15 @@ jobs:
 
       # A cross-section rather than everything: booting both kernels,
       # ring 3, the filesystem, the disc, the two authenticated ciphers,
-      # WPA2, USB storage and the sound card. Under an hour, and a
-      # failure here means something real is broken.
+      # WPA2, USB storage, the sound card, the desktop and the network.
+      # The first run of this took six minutes on a runner with two
+      # cores and no KVM, which is why the list is this long rather
+      # than half of it - a failure here means something real is
+      # broken, and finding it now is cheaper than finding it at night.
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=boot,shell,process,pfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdysk,usbsiec,dzwiek,xhci,uefi,protoboot
+          make test J=2 T=boot,shell,process,pfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdysk,usbsiec,dzwiek,xhci,uefi,protoboot,ush,tls64,net64,desktop64,files,ginstal,stick
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'
