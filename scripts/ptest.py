@@ -268,10 +268,22 @@ def fat_dir(path, offset_sectors, where="::"):
     return r.stdout.decode(errors="replace") if r.returncode == 0 else ""
 
 
+def fat_minfo(path, offset_sectors):
+    """What mtools says about the volume - somebody else's reading of
+    the same boot sector, used where our own would be no evidence."""
+    r = subprocess.run(["minfo", "-i", _at(path, offset_sectors)],
+                       env=MTOOLS_ENV, stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    return r.stdout.decode(errors="replace") if r.returncode == 0 else ""
+
+
 def fat_kind(path, offset_sectors):
     """Which of the three it is, counted from the boot sector the same
     way the driver counts it: from the number of clusters, not from the
-    string somebody wrote into the sector."""
+    string somebody wrote into the sector - with the one exception the
+    driver also makes, for a volume that was formatted as FAT32 while
+    being too small to need it (its sixteen-bit 'sectors per FAT' is
+    zero, and that leaves no doubt)."""
     with open(path, "rb") as fh:
         fh.seek(offset_sectors * 512)
         bs = fh.read(512)
@@ -289,6 +301,8 @@ def fat_kind(path, offset_sectors):
         return None
     root_secs = (root_entries * 32 + 511) // 512
     clusters = (total - (reserved + nfats * fat_secs + root_secs)) // spc
+    if not struct.unpack_from("<H", bs, 22)[0] and not root_entries:
+        return "FAT32"
     return "FAT12" if clusters < 4085 else \
            "FAT16" if clusters < 65525 else "FAT32"
 

@@ -38,6 +38,13 @@ const char *blk_name_of(int i);
 uint32_t blk_sectors(void);
 uint32_t blk_sectors_of(int i);
 
+/* A disk plugged in while the machine runs, and one pulled out. The
+   numbers on the list never move: a disk that leaves keeps its place
+   and is marked gone, because somebody is reading that list and about
+   to type a number from it. */
+int blk_usb_added(int unit);
+void blk_usb_gone(int unit);
+
 /* Read/write 'count' consecutive sectors. The buffer must lie in
    physically contiguous memory - with AHCI the controller reaches for
    it itself. 0 = OK, -1 = error. */

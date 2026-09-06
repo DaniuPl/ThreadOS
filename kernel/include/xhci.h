@@ -38,6 +38,12 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval);
    has arrived yet, -1 = error. */
 int xhci_int_in(int slot, int ep, void *data, int len);
 
+/* Is anything plugged into this port at this moment? */
+int xhci_port_connected(int port);
+
+/* Hands a slot back to the controller - after the device has gone. */
+int xhci_release(int slot);
+
 /* Declares the pair of bulk endpoints a disk speaks through - both at
    once, because one command replaces the whole description of the
    device. 0 = done. */

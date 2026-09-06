@@ -151,15 +151,16 @@ def main():
             # hundred and eighty rows through as many calls - so the
             # screen is looked at again until it stops filling up.
             #
-            # Twenty-five readings rather than ten, and the threshold
+            # Sixty readings rather than twenty-five, and the threshold
             # untouched. Four hundred and eighty system calls take as
             # long as the machine gives them, and the machine is four
             # QEMUs sharing a host that is also running the rest of the
-            # suite; the group has grown neighbours since this loop was
-            # written. Waiting longer for the same answer is patience,
-            # lowering the answer would be something else.
+            # suite; the group has grown neighbours twice since this
+            # loop was written, and once the whole minute went by with
+            # nothing drawn at all. Waiting longer for the same answer
+            # is patience, lowering the answer would be something else.
             inside = 0
-            for _ in range(25):
+            for _ in range(60):
                 w, h, at = q.screen_raw()
                 now = count_orange(at, CX, CY, CX + 32, CY + (h - 20) // 2)
                 if now > inside:

@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include "include/usbmass.h"
 #include "include/usbhc.h"
+#include "include/blk.h"
 #include "include/printk.h"
 #include "include/string.h"
 
@@ -36,6 +37,8 @@
 
 struct unit {
     int used;
+    int gone;                    /* pulled out of the socket */
+    int port;                    /* which socket it was in */
     int dev;                     /* the handle from the controller layer */
     int ep_in, ep_out;
     uint32_t tag;                /* the number that ties a CSW to its CBW */
@@ -231,55 +234,104 @@ static int read_capacity(struct unit *u)
     return -1;
 }
 
+/* One port, one question: is there a disk in it? Returns 1 when it took
+   the device. The same function does the work at start-up and when
+   somebody pushes a stick in three hours later - a disk plugged in
+   later is not a different kind of disk. */
+static int try_port(int port)
+{
+    int dev = usbhc_attach(port);
+
+    if (dev < 0 || count >= UNITS)
+        return 0;
+
+    if (usbhc_descriptor(dev, 0x02, 0, desc_buf, 9) < 9)
+        return 0;
+    int total = desc_buf[2] | (desc_buf[3] << 8);
+    if (total > (int)sizeof(desc_buf))
+        total = (int)sizeof(desc_buf);
+    if (usbhc_descriptor(dev, 0x02, 0, desc_buf, total) < total)
+        return 0;
+
+    int in_ep = 0, out_ep = 0, maxpacket = 64;
+    int iface = find_disk(desc_buf, total, &in_ep, &out_ep, &maxpacket);
+    if (iface < 0)
+        return 0;                        /* something other than a disk */
+
+    uint8_t cfg_value = desc_buf[5];
+    if (usbhc_request(dev, 0x00, 0x09, cfg_value, 0) < 0)
+        return 0;                        /* SET_CONFIGURATION */
+    if (usbhc_bulk_endpoint(dev, in_ep, out_ep, maxpacket) < 0)
+        return 0;
+
+    struct unit *u = &units[count];
+    u->used = 1;
+    u->gone = 0;
+    u->port = port;
+    u->dev = dev;
+    u->ep_in = in_ep;
+    u->ep_out = out_ep;
+    u->tag = 0;
+    u->sectors = 0;
+
+    read_name(u);
+    if (read_capacity(u) < 0) {
+        u->used = 0;
+        return 0;
+    }
+
+    usbhc_claim(port);
+    printk("[ OK ] Dysk USB: %s, %u sektorow (port %d, %s)\n",
+           u->name, u->sectors, port + 1, usbhc_name());
+    count++;
+    return 1;
+}
+
+/* Pushed in while the machine is running. Everything above this layer
+   learns about it the same way it learns about a disk found at
+   start-up: through the block layer's list. */
+static int on_plug(int port)
+{
+    int before = count;
+
+    if (!try_port(port))
+        return 0;
+    blk_usb_added(before);
+    printk("[ OK ] Dysk USB w gniazdku %d - jest jako dysk %u\n",
+           port + 1, (uint32_t)(blk_count()));
+    return 1;
+}
+
+/* And pulled out. We do not pretend it is still there: the block layer
+   marks it gone, and every read of it fails from now on. A disk that
+   answers from memory after it has left the building is how a
+   filesystem gets written to nothing. */
+static void on_unplug(int port)
+{
+    for (int i = 0; i < count; i++) {
+        if (!units[i].used || units[i].gone || units[i].port != port)
+            continue;
+        units[i].gone = 1;
+        blk_usb_gone(i);
+        printk("[ !! ] Dysk USB wyjety z gniazdka %d\n", port + 1);
+    }
+}
+
 int usbmass_init(void)
 {
     if (!usbhc_init())
         return 0;
 
-    for (int port = 0; port < usbhc_ports() && count < UNITS; port++) {
-        int dev = usbhc_attach(port);
-        if (dev < 0)
-            continue;
+    for (int port = 0; port < usbhc_ports() && count < UNITS; port++)
+        try_port(port);
 
-        if (usbhc_descriptor(dev, 0x02, 0, desc_buf, 9) < 9)
-            continue;
-        int total = desc_buf[2] | (desc_buf[3] << 8);
-        if (total > (int)sizeof(desc_buf))
-            total = (int)sizeof(desc_buf);
-        if (usbhc_descriptor(dev, 0x02, 0, desc_buf, total) < total)
-            continue;
+    /* From now on the sockets are watched. This costs one thread and a
+       read of a register twice a second, and it is the difference
+       between a machine one uses and a machine one reboots. */
+    usbhc_on_plug(on_plug);
+    usbhc_on_unplug(on_unplug);
+    usbhc_watch();
 
-        int in_ep = 0, out_ep = 0, maxpacket = 64;
-        int iface = find_disk(desc_buf, total, &in_ep, &out_ep, &maxpacket);
-        if (iface < 0)
-            continue;                    /* something other than a disk */
-
-        uint8_t cfg_value = desc_buf[5];
-        if (usbhc_request(dev, 0x00, 0x09, cfg_value, 0) < 0)
-            continue;                    /* SET_CONFIGURATION */
-
-        if (usbhc_bulk_endpoint(dev, in_ep, out_ep, maxpacket) < 0)
-            continue;
-
-        struct unit *u = &units[count];
-        u->used = 1;
-        u->dev = dev;
-        u->ep_in = in_ep;
-        u->ep_out = out_ep;
-        u->tag = 0;
-        u->sectors = 0;
-
-        read_name(u);
-        if (read_capacity(u) < 0) {
-            u->used = 0;
-            continue;
-        }
-
-        usbhc_claim(port);
-        printk("[ OK ] Dysk USB: %s, %u sektorow (port %d, %s)\n",
-               u->name, u->sectors, port + 1, usbhc_name());
-        count++;
-    }
     return count > 0;
 }
 
@@ -302,6 +354,11 @@ const char *usbmass_name(int unit)
     return units[unit].name;
 }
 
+int usbmass_present(int unit)
+{
+    return unit >= 0 && unit < count && units[unit].used && !units[unit].gone;
+}
+
 /* Reading and writing.
  *
  * One command per call, however many sectors - a stick moves data far
@@ -311,7 +368,7 @@ const char *usbmass_name(int unit)
  */
 int usbmass_read(int unit, uint32_t lba, uint32_t count_sec, void *buf)
 {
-    if (unit < 0 || unit >= count || !count_sec)
+    if (unit < 0 || unit >= count || !count_sec || units[unit].gone)
         return -1;
     struct unit *u = &units[unit];
     uint8_t read10[10] = { 0x28, 0 };
@@ -325,9 +382,10 @@ int usbmass_read(int unit, uint32_t lba, uint32_t count_sec, void *buf)
     return 0;
 }
 
-int usbmass_write(int unit, uint32_t lba, uint32_t count_sec, const void *buf)
+int usbmass_write(int unit, uint32_t lba, uint32_t count_sec,
+                  const void *buf)
 {
-    if (unit < 0 || unit >= count || !count_sec)
+    if (unit < 0 || unit >= count || !count_sec || units[unit].gone)
         return -1;
     struct unit *u = &units[unit];
     uint8_t write10[10] = { 0x2A, 0 };

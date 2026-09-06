@@ -57,6 +57,27 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval);
    bytes, 0 when the device has nothing to say, -1 on error. */
 int usbhc_int_in(int dev, int ep, void *data, int len);
 
+/* --- devices that come and go ---------------------------------------
+ *
+ * A driver that can take something plugged in later says so with
+ * usbhc_on_plug: its function is called with the port number when
+ * something new appears, and returns 1 when it took it. The other one
+ * is called when a device disappears, so that whoever was using it
+ * stops pretending it is there.
+ *
+ * usbhc_watch starts the thread that watches the ports - once, however
+ * many drivers ask for it.
+ */
+void usbhc_on_plug(int (*fn)(int port));
+void usbhc_on_unplug(void (*fn)(int port));
+void usbhc_watch(void);
+
+/* Is anything in this port right now? -1 = this controller cannot say. */
+int usbhc_connected(int port);
+
+/* Forgets a port, so that the next device in it is greeted afresh. */
+void usbhc_forget(int port);
+
 /* Bulk endpoints - what a disk speaks through. Declared in pairs (in
    and out), because that is how the mass storage class works and
    because one command describes the whole device anyway. Available on

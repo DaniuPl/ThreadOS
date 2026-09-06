@@ -25,6 +25,10 @@ uint32_t usbmass_sectors(int unit);
 /* The name to print: the maker and the model from INQUIRY */
 const char *usbmass_name(int unit);
 
+/* Is it still in the socket? A disk that has been pulled out keeps its
+   number and its name - and answers no to this. */
+int usbmass_present(int unit);
+
 /* Reading and writing whole sectors. 0 = done, -1 = error. */
 int usbmass_read(int unit, uint32_t lba, uint32_t count, void *buf);
 int usbmass_write(int unit, uint32_t lba, uint32_t count, const void *buf);

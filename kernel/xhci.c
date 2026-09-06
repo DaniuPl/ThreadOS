@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include "include/xhci.h"
+#include "include/spinlock.h"
 #include "include/pci.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -93,6 +94,7 @@
 #define TRB_STATUS      4
 #define TRB_LINK        6
 #define TRB_ENABLE_SLOT 9
+#define TRB_DISABLE_SLOT 10
 #define TRB_ADDRESS_DEV 11
 #define TRB_CONFIG_EP   12
 #define TRB_EVAL_CTX    13
@@ -247,10 +249,30 @@ static void ring_setup(struct ring *p, struct trb *trb)
     jump->control = ((uint32_t)TRB_LINK << 10) | TRB_TC;
 }
 
+/* One lock for the rings, and one turn for a whole command.
+ *
+ * There used to be one thread doing all of this: enumeration ran at
+ * start-up and the keyboard's poll thread began afterwards. Now a
+ * thread watches the sockets, so a stick can be greeted while the
+ * keyboard is being read - two threads on one controller.
+ *
+ * The two need different guards. Putting a TRB into a ring and taking
+ * an event off it are short - a spinlock is right, and none of it may
+ * sleep. A whole COMMAND is not short: it waits for its answer, and
+ * two commands in flight at once would find each other's completions,
+ * because a command event says which command ring it came from and not
+ * whose it was. So commands take turns, and the waiting is done by the
+ * same clock the rest of this driver waits on.
+ */
+static struct spinlock ring_lock = SPINLOCK_FREE;
+static volatile uint32_t cmd_turn;
+
 static void insert(struct ring *p, uint64_t param, uint32_t status,
                  uint32_t control)
 {
+    irqflags_t flags = spin_lock_irq(&ring_lock);
     struct trb *t = &p->trb[p->index];
+
     t->p0 = (uint32_t)param;
     t->p1 = (uint32_t)(param >> 32);
     t->status = status;
@@ -265,6 +287,7 @@ static void insert(struct ring *p, uint64_t param, uint32_t status,
         p->index = 0;
         p->cycle ^= 1;
     }
+    spin_unlock_irq(&ring_lock, flags);
 }
 
 /* Takes one event off the event ring. 1 = there was one. */
@@ -301,6 +324,8 @@ static int event(struct trb *result)
 static void sort_events(void)
 {
     struct trb t;
+    irqflags_t flags = spin_lock_irq(&ring_lock);
+
     while (event(&t)) {
         if ((int)((t.control >> 10) & 0x3F) != TRB_EV_TRANSFER) {
             if (other_n < OTHERS)
@@ -317,16 +342,22 @@ static void sort_events(void)
         done[s - 1].q[done[s - 1].head].left = (int)(t.status & 0xFFFFFF);
         done[s - 1].head = next;
     }
+    spin_unlock_irq(&ring_lock, flags);
 }
 
 /* Takes one finished transfer of this slot's, if there is one. */
 static int take_comp(int slot, struct comp *out)
 {
-    if (done[slot - 1].tail == done[slot - 1].head)
-        return 0;
-    *out = done[slot - 1].q[done[slot - 1].tail];
-    done[slot - 1].tail = (done[slot - 1].tail + 1) % COMPS;
-    return 1;
+    irqflags_t flags = spin_lock_irq(&ring_lock);
+    int got = 0;
+
+    if (done[slot - 1].tail != done[slot - 1].head) {
+        *out = done[slot - 1].q[done[slot - 1].tail];
+        done[slot - 1].tail = (done[slot - 1].tail + 1) % COMPS;
+        got = 1;
+    }
+    spin_unlock_irq(&ring_lock, flags);
+    return got;
 }
 
 /* Waits for one of this slot's transfers, filing everybody else's on
@@ -366,15 +397,35 @@ static int wait_for(int kind, struct trb *result, uint32_t ms)
    code (CODE_OK when all is well) or -1 when nothing arrived. */
 static int command(uint64_t param, uint32_t control, struct trb *reply)
 {
+    struct trb t;
+    int code;
+
+    /* Wait for our turn - at most a second, because a command that
+       never finishes must not stop the machine for good. */
+    uint32_t until = pit_ticks() + 100;
+    while (pit_ticks() < until) {
+        irqflags_t flags = spin_lock_irq(&ring_lock);
+        int free_now = !cmd_turn;
+        if (free_now)
+            cmd_turn = 1;
+        spin_unlock_irq(&ring_lock, flags);
+        if (free_now)
+            break;
+        io_wait();
+    }
+
     insert(&cmd_pier, param, 0, control);
     doorbells[0] = 0;                      /* the command ring doorbell */
 
-    struct trb t;
-    if (!wait_for(TRB_EV_COMMAND, &t, 1000))
+    if (!wait_for(TRB_EV_COMMAND, &t, 1000)) {
+        cmd_turn = 0;
         return -1;
+    }
     if (reply)
         *reply = t;
-    return (int)(t.status >> 24);
+    code = (int)(t.status >> 24);
+    cmd_turn = 0;
+    return code;
 }
 
 /* --- device and endpoint contexts ------------------------------------ */
@@ -891,4 +942,36 @@ int xhci_bulk_out(int slot, int ep, const void *data, int len)
 int xhci_bulk_in(int slot, int ep, void *data, int len)
 {
     return bulk_transfer(slot, ep, data, len, 1);
+}
+
+
+/* --- what is in the socket right now ---------------------------------
+ *
+ * Enumeration at start-up answers "what was plugged in when we
+ * booted". A machine somebody uses answers a different question all
+ * day: what is plugged in NOW. Both come from the same bit - the
+ * controller keeps the state of every port in a register - so
+ * noticing a stick being pushed in costs one read, not a mechanism.
+ */
+int xhci_port_connected(int port)
+{
+    if (!base || port < 0 || port >= nports)
+        return 0;
+    return (rd(port_reg(port)) & PORT_CCS) ? 1 : 0;
+}
+
+/* Gives a slot back to the controller. Without this a machine that
+   somebody plugs a stick into four times has no slots left - and the
+   fifth one is simply not seen, which looks like a broken socket. */
+int xhci_release(int slot)
+{
+    if (!base || slot < 1 || slot > SLOTS)
+        return -1;
+
+    command(0, ((uint32_t)TRB_DISABLE_SLOT << 10) | ((uint32_t)slot << 24),
+            (struct trb *)0);
+    dcbaa[slot] = 0;
+    armed[slot - 1] = 0;
+    done[slot - 1].head = done[slot - 1].tail = 0;
+    return 0;
 }

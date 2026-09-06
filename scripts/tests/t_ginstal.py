@@ -92,6 +92,22 @@ def find_window(q, width=WIN_W):
     return None, None
 
 
+
+def wait_text(q, x, y, cols, rows, want, tries=10, line_h=12):
+    """Reads the window until the words appear.
+
+    Clicking a button and reading the screen a second and a half later
+    is fine on an idle machine and a coin toss when the whole suite is
+    running. The window is redrawn when the program gets round to it,
+    so we look again rather than assume."""
+    text = ""
+    for _ in range(tries):
+        text = q.read_text(x, y, cols, rows, line_h=line_h)
+        if want in text:
+            return text
+        time.sleep(1.0)
+    return text
+
 def main():
     print()
     print("--- instalator w oknie (ginstal) ---")
@@ -231,8 +247,8 @@ def main():
 
             q.mouse_goto(right, by)
             q.mouse_click()
-            time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
+            text = wait_text(q, cx + 6, cy + 4, 54, 16,
+                             "Caly dysk dla ProtonOS-a")
             check("drugi przycisk pokazuje druga droge: caly dysk",
                   "Caly dysk dla ProtonOS-a" in text)
             check("i mowi wprost, co to znaczy",
@@ -247,15 +263,14 @@ def main():
 
             q.mouse_goto(left, by)        # "Wroc"
             q.mouse_click()
-            time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
+            text = wait_text(q, cx + 6, cy + 4, 54, 16,
+                             "Instalacja ProtonOS-a na dysk tej maszyny")
             check("'Wroc' wraca do instalacji obok",
                   "Instalacja ProtonOS-a na dysk tej maszyny" in text)
 
             q.mouse_goto(left, by)        # "Zainstaluj obok"
             q.mouse_click()
-            time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
+            text = wait_text(q, cx + 6, cy + 4, 54, 10, "Wpisz TAK")
             check("klik w 'Zainstaluj obok' pyta o slowo, a nie zapisuje",
                   "Wpisz TAK" in text)
 

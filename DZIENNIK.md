@@ -5138,3 +5138,60 @@ sprawdzane przez `make test`.
       nimi. To pojdzie wtedy, gdy bedzie z czym rozmawiac. Adaptery
       Intela i Broadcoma chca dodatkowo wgranego firmware'u, zanim
       zrobia cokolwiek poza podaniem wlasnego adresu.
+
+- [x] **Pendrive wlozony w trakcie pracy - i wyjety** (watek pilnujacy
+      gniazdek w kernel/usbhc.c, dyski dopisywane i wykreslane w
+      kernel/blk.c, rozszerzona grupa `usbdysk`).
+
+      Wyliczenie urzadzen przy starcie odpowiada na pytanie "co bylo
+      wetkniete, kiedy wstawalismy". Maszyna, ktorej ktos uzywa, ma
+      calkiem inne pytanie: co jest wetkniete TERAZ. Odpowiedz siedzi w
+      tym samym bicie - kontroler trzyma stan kazdego gniazdka w
+      rejestrze - wiec zauwazenie pendrive'a kosztuje jeden odczyt, a
+      nie mechanizm.
+
+      Ksztalt jest odwrotny niz przy starcie: tam kazdy sterownik
+      przechodzil po gniazdkach sam, tu jeden watek patrzy na gniazdka,
+      a sterowniki zglaszaja, co potrafia rozpoznac. Musi byc odwrotny,
+      bo teraz to GNIAZDKO sie zmienia, a nie sterownik pyta.
+
+      **Numery dyskow nie moga sie przesuwac.** Ktos patrzy na `dyski`
+      i za chwile wpisze `instaluj tekstem caly 2`. Wiec dysk, ktory
+      znika, zostaje na swoim miejscu z adnotacja "wyjety z gniazdka",
+      a nowy dopisuje sie na koncu. Odczyt z wyjetego konczy sie
+      odmowa, nie smieciami - i to samo dotyczy systemu plikow: FAT
+      podmontowany z wyjetego dysku przestaje byc podmontowany, BEZ
+      zapisywania czegokolwiek, bo nie ma dokad. System plikow, ktory
+      po zniknieciu dysku odpowiada z pamieci, to jest sposob na
+      nadpisanie cudzych danych.
+
+      Slot wraca do kontrolera przy kazdym wyjeciu. Bez tego maszyna, w
+      ktorej ktos cztery razy wlozyl i wyjal pendrive, nie ma juz
+      slotow - a piaty raz po prostu nie jest widziany, co wyglada jak
+      zepsute gniazdko.
+
+      **Dwa watki na jednym kontrolerze - i to wymaga zamka.** Do tej
+      pory wyliczanie konczylo sie, zanim ruszyl watek klawiatury.
+      Teraz pendrive moze byc witany w trakcie czytania klawiatury.
+      Wkladanie TRB do pierscienia i zdejmowanie zdarzenia sa krotkie -
+      od tego jest spinlock. Cale POLECENIE krotkie nie jest: czeka na
+      odpowiedz, a dwa polecenia naraz znalazlyby nawzajem swoje
+      zakonczenia, bo zdarzenie mowi, z ktorego pierscienia przyszlo, a
+      nie czyje bylo. Wiec polecenia ida po kolei.
+
+- [x] **FAT32 na malym wolumenie przestaje udawac FAT16** (kernel/fat.c,
+      nowy przypadek w grupie `fat`).
+
+      Znalezione przez pendrive: 32 MiB sformatowane przez mtools jako
+      FAT32, a system pokazywal pusty katalog na pelnym dysku. Typ FAT-u
+      wynika z liczby klastrow - to jest regula i tej reguly trzymamy
+      sie dalej - ale formater, ktoremu KAZANO zrobic FAT32, robi go
+      takze na wolumenie zbyt malym, zeby go potrzebowal. Taki wolumen
+      mowi to wprost: szesnastobitowe "sektorow na FAT" jest zerem, a
+      trzydziestodwubitowe nie, i nie ma katalogu glownego o stalym
+      rozmiarze. Czytany sama liczba klastrow wyglada jak FAT16 - i
+      wszystko po tym jest smieciem.
+
+      Dowod, ze to naprawde FAT32, przychodzi w tescie od mtools
+      ("sectors per fat: 0"), a nie od nas - bo nasza wlasna regula
+      byla tu wlasnie tym, co bylo do sprawdzenia.

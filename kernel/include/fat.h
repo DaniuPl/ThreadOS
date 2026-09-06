@@ -43,6 +43,9 @@ int fat_mount(uint32_t lba);
    keeps running on the machine's own disk. Every read and write of the
    mounted filesystem points the block layer there and puts it back. */
 int fat_mount_on(int disk, uint32_t lba);
+
+/* The disk went away: drop the volume without writing anything. */
+void fat_forget(int disk);
 void fat_umount(void);
 int fat_mounted(void);
 

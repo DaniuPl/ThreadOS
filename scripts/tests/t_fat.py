@@ -24,7 +24,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_iso64, no64, make_gpt_disk,
                    gpt_intact, neighbours_intact, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_dir, fat_kind,
-                   make_mbr_fat_disk)
+                   fat_minfo, make_mbr_fat_disk)
 
 ESP_START = 2048                     # make_gpt_disk puts the ESP there
 ESP_SECTORS = 204800                 # 100 MiB
@@ -243,6 +243,46 @@ def main():
             check(f"{name}: i tresc zgadza sie z plikiem w initrd",
                   got is not None and len(got) > 4000
                   and got[:4] == b"\x7fELF")
+
+        # --- A small volume that a formatter was TOLD to make FAT32
+        #
+        # The type of a FAT is decided by the number of clusters - that
+        # is the rule, and it is the rule this driver follows. But a
+        # formatter told to make FAT32 makes it even when the volume is
+        # too small to need it, and such sticks and camera cards exist.
+        # Read by cluster count alone, such a volume looks like FAT16
+        # and everything after that is garbage: an empty directory on a
+        # stick full of files, which is exactly how this was found.
+        maly32 = tempfile.mktemp(suffix=".img")
+        ok, start = make_mbr_fat_disk(maly32, 32, fat32=True,
+                                      label="MALYFAT32")
+        # The evidence that it really is FAT32 comes from mtools, not
+        # from us: "sectors per fat: 0" is what a FAT32 boot sector has
+        # instead of a sixteen-bit count, and no FAT16 volume has it.
+        info = fat_minfo(maly32, start)
+        check("obraz 32 MiB sformatowany przez mtools JAKO FAT32 "
+              "(minfo: sectors per fat = 0)",
+              ok and "sectors per fat: 0" in info)
+        fat_put(maly32, start, LONG_TEXT, "/od-mtools.txt")
+
+        q3 = Qemu(KERNEL, INITRD, cdrom=iso, disk=maly32, serial=slog2,
+                  qemu="qemu-system-x86_64")
+        try:
+            q3.wait_serial("proton64>", timeout=90)
+            out = q3.command("fat 1", "klaster", timeout=20)
+            check("maly wolumen nie udaje FAT16 - liczba klastrow nie "
+                  "jest jedynym slowem",
+                  "FAT32" in out and "MALYFAT32" in out)
+            out = q3.command("fatls /", "pozycji", timeout=15)
+            check("i widac na nim plik, a nie pusty katalog",
+                  "od-mtools.txt" in out)
+            out = q3.command("fatcat /od-mtools.txt", "partycji", timeout=15)
+            check("z trescia co do znaku",
+                  LONG_TEXT.decode().strip() in out)
+        finally:
+            q3.close()
+            if os.path.exists(maly32):
+                os.unlink(maly32)
 
         # --- And the thing this driver must never do
         check("na zadnym z obrazow nie zniknal sektor rozruchowy FAT",

@@ -54,6 +54,100 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
 
 
+def hotplug():
+    """A stick pushed in three hours after the machine started.
+
+    This is the half of "a disk in the socket" that has nothing to do
+    with booting, and the one a person actually does: the machine is
+    running, the socket is empty, and then it is not. QEMU can be told
+    to plug a device in while it runs, which is why this can be tested
+    at all rather than only asserted about.
+
+    And the other direction, which matters more: after the stick is
+    pulled out, the system must stop offering it. A disk that answers
+    from memory after it has left the building is how a filesystem gets
+    written to nothing."""
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    stick = tempfile.mktemp(suffix=".usb")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
+
+    made, start = make_mbr_fat_disk(stick, mib=32, fat32=True,
+                                    label="POZNIEJ")
+    fat_put(stick, start, b"wlozony w trakcie pracy\n", "/pozniej.txt")
+
+    try:
+        if not make_iso64(d, iso, text=True):
+            check("plyta dla proby z wkladaniem buduje sie", False)
+            return
+        # An xHCI controller with NOTHING in it - the stick comes later
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, usbkbd="xhci", qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("proton64>", timeout=90)
+            out = q.command("dyski", "sektorow", timeout=20)
+            check("na poczatku pendrive'a nie ma na liscie",
+                  "USB (pamiec masowa)" not in out)
+
+            # Plugged in while the machine runs
+            q.hmp("drive_add 0 if=none,id=pd,format=raw,file=" + stick)
+            q.cmd({"execute": "device_add",
+                   "arguments": {"driver": "usb-storage", "bus": "xhci.0",
+                                 "drive": "pd", "id": "pendrive"}})
+            found = q.wait_serial("Dysk USB", timeout=30)
+            check("system zauwaza pendrive wlozony w trakcie pracy",
+                  "Dysk USB" in found)
+
+            out = q.command("dyski", "sektorow", timeout=20)
+            usbno = usb_disk_number(out)
+            check("i dopisuje go do listy dyskow (dysk %d)" % usbno,
+                  usbno > 0)
+
+            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
+            # A 32 MiB volume that a formatter was told to make FAT32
+            # IS FAT32, however few clusters it has - and reading it by
+            # cluster count alone showed an empty directory on a full
+            # stick.
+            check("da sie go od razu czytac, i to jako FAT32",
+                  "FAT32" in out and "POZNIEJ" in out)
+            out = q.command("fatcat /pozniej.txt", "wlozony", timeout=20)
+            check("razem z plikiem, ktory host na nim zostawil",
+                  "wlozony w trakcie pracy" in out)
+
+            # And pulled out
+            q.cmd({"execute": "device_del",
+                   "arguments": {"id": "pendrive"}})
+            gone = q.wait_serial("wyjety z gniazdka", timeout=30)
+            check("system zauwaza wyjecie pendrive'a",
+                  "wyjety z gniazdka" in gone)
+
+            out = q.command("dyski", "sektorow", timeout=20)
+            check("i mowi o nim, ze go nie ma, zamiast udawac",
+                  "wyjety z gniazdka" in out)
+
+            # The numbers must not move: somebody is reading that list
+            check("numery pozostalych dyskow sie nie przesunely",
+                  "dysk 1: AHCI" in out)
+
+            out = q.command("fatls /", "proton64>", timeout=20)
+            check("po wyjeciu nic nie jest juz podmontowane - zamiast "
+                  "pustego katalogu jest odmowa",
+                  "nic nie jest podmontowane" in out)
+
+            # The machine is still alive afterwards
+            out = q.command("uptime", "Uptime", timeout=20)
+            check("system dziala dalej po wyjeciu dysku", "Uptime" in out)
+        finally:
+            q.close()
+    finally:
+        for path in (iso, slog, disk, stick):
+            if os.path.exists(path):
+                os.unlink(path)
+
+
 def install_to_stick():
     """The point of a stick: making a bootable one from inside a running
     system, and then booting it.
@@ -279,6 +373,10 @@ def main():
         old = fat_get(stick, start, "/od-hosta.txt")
         check("plik hosta przezyl pisanie po tym samym systemie plikow",
               old == FROM_HOST)
+
+        # --- and the half that has nothing to do with booting -----
+        print("--- pendrive wlozony i wyjety przy pracujacym systemie ---")
+        hotplug()
 
         # --- and the thing a stick is for --------------------------
         print("--- instalacja systemu na pendrive ---")

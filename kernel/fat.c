@@ -753,6 +753,23 @@ uint32_t fat_free_kib(void)
     return (uint32_t)((uint64_t)free_clus * v.sec_per_clus / 2);
 }
 
+/* The disk this volume was on has gone. Nothing may be written -
+   there is nowhere to write it to - so the cached table is dropped
+   rather than flushed, and the volume simply stops being mounted. A
+   filesystem that answers from memory after its disk has left the
+   building is how a directory gets written over somebody else's
+   data. */
+void fat_forget(int disk)
+{
+    if (!v.type || (fat_disk >= 0 && fat_disk != disk))
+        return;
+    fat_dirty = 0;
+    memset(&v, 0, sizeof(v));
+    fat_rel = 0xFFFFFFFFu;
+    dirbuf_lba = 0;
+    fat_disk = -1;
+}
+
 void fat_umount(void)
 {
     fat_flush();
@@ -819,11 +836,25 @@ int fat_mount_on(int disk, uint32_t lba)
     v.total_sectors = total;
     v.hint = 2;
 
-    /* The count of clusters, and nothing else, says which of the three
-       this is. The thresholds are the specification's, off-by-one
-       included: they are what every other driver uses, so a volume
-       sitting on the boundary is read the same way by everyone. */
-    if (clusters < 4085)
+    /* The count of clusters says which of the three this is, and the
+       thresholds are the specification's, off-by-one included: they
+       are what every other driver uses, so a volume sitting on the
+       boundary is read the same way by everyone.
+     *
+     * With one exception, and it is not academic: a formatter TOLD to
+     * make FAT32 makes it, even on a volume too small to need it - a
+     * small stick formatted by hand, a card out of a camera. Such a
+     * volume says so in a way that leaves no doubt: the sixteen-bit
+     * "sectors per FAT" is zero, the thirty-two-bit one is not, and
+     * there is no root directory of fixed size. Going by the cluster
+     * count alone reads it as FAT16 and everything after that is
+     * garbage - an empty directory on a stick full of files, which is
+     * exactly how this was found. */
+    int says32 = !le16(bsbuf + 22) && le32(bsbuf + 36) && !root_entries;
+
+    if (says32)
+        v.type = 32;
+    else if (clusters < 4085)
         v.type = 12;
     else if (clusters < 65525)
         v.type = 16;

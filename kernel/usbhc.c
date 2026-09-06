@@ -205,6 +205,115 @@ static int usbhc_greet(int port)
     return -1;
 }
 
+/* --- what is in the socket, and who wants to know --------------------
+ *
+ * Enumeration at start-up is one walk across the ports. A machine
+ * somebody uses needs the other half of it: a stick pushed in three
+ * hours later has to be seen too, and one pulled out has to stop being
+ * listed as though it were still there.
+ *
+ * The shape of it: drivers say what they can recognise, and one thread
+ * watches the ports. That is the other way round from the walk at
+ * start-up, where each driver looked at every port itself - and it has
+ * to be, because now it is the PORT that changes, not the driver that
+ * asks.
+ */
+#define GREETERS 4
+
+static int (*plugged[GREETERS])(int port);
+static void (*unplugged[GREETERS])(int port);
+static int nplug, nunplug;
+static int watching;
+
+void usbhc_on_plug(int (*fn)(int port))
+{
+    if (nplug < GREETERS)
+        plugged[nplug++] = fn;
+}
+
+void usbhc_on_unplug(void (*fn)(int port))
+{
+    if (nunplug < GREETERS)
+        unplugged[nunplug++] = fn;
+}
+
+int usbhc_connected(int port)
+{
+    if (controller == XHCI)
+        return xhci_port_connected(port);
+    /* UHCI keeps the connection bit in its own port register; nobody
+       has asked this of it yet, and pretending otherwise would be
+       worse than saying so. */
+    return -1;
+}
+
+/* Forgets everything about a port, so that whatever is plugged in next
+   is greeted from the beginning. The slot goes back to the controller
+   with it - four sticks in and out would otherwise leave a machine
+   with no slots and a socket that looks broken. */
+void usbhc_forget(int port)
+{
+    if (port < 0 || port >= PORTS_MAX)
+        return;
+    if (controller == XHCI && port_known[port] && port_dev[port] > 0)
+        xhci_release(port_dev[port]);
+    port_known[port] = 0;
+    port_taken[port] = 0;
+    port_dev[port] = -1;
+}
+
+static void watch_thread(void *arg)
+{
+    static int was[PORTS_MAX];
+    (void)arg;
+
+    for (int i = 0; i < usbhc_ports() && i < PORTS_MAX; i++)
+        was[i] = usbhc_connected(i) > 0;
+
+    for (;;) {
+        task_sleep(500);
+        for (int port = 0; port < usbhc_ports() && port < PORTS_MAX;
+             port++) {
+            int now = usbhc_connected(port);
+            if (now < 0)
+                return;                  /* this controller cannot say */
+            if (now == was[port])
+                continue;
+            was[port] = now;
+
+            if (!now) {
+                for (int i = 0; i < nunplug; i++)
+                    unplugged[i](port);
+                usbhc_forget(port);
+                continue;
+            }
+
+            /* Something new. A device needs a moment after being
+               pushed in before it answers anything - the specification
+               allows a hundred milliseconds, and a hub gives it
+               power in the meantime. */
+            task_sleep(300);
+            usbhc_forget(port);          /* whatever was here is gone */
+            for (int i = 0; i < nplug; i++)
+                if (plugged[i](port))
+                    break;
+        }
+    }
+}
+
+/* Starts watching. Called by the drivers that can take something
+   plugged in later; the first call starts the thread and the rest do
+   nothing. */
+void usbhc_watch(void)
+{
+    if (watching || controller == NONE)
+        return;
+    if (usbhc_connected(0) < 0)
+        return;                          /* nothing to watch it with */
+    watching = 1;
+    task_create("usbhc", watch_thread, 0);
+}
+
 int usbhc_control(int dev, const void *setup, void *data, int len, int in)
 {
     if (dev < 1)

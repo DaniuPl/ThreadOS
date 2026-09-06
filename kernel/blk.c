@@ -23,6 +23,7 @@
 #include "include/ahci.h"
 #include "include/ata.h"
 #include "include/usbmass.h"
+#include "include/fat.h"
 
 enum backend { BLK_NONE, BLK_NVME, BLK_AHCI, BLK_ATA, BLK_USB };
 
@@ -30,6 +31,7 @@ struct dev {
     enum backend kind;
     int unit;                    /* which one, within that driver */
     uint32_t sectors;
+    int gone;                    /* pulled out of the socket */
 };
 
 static struct dev devs[BLK_MAX];
@@ -60,7 +62,48 @@ static void add(enum backend kind, int unit, uint32_t sectors)
     devs[ndevs].kind = kind;
     devs[ndevs].unit = unit;
     devs[ndevs].sectors = sectors;
+    devs[ndevs].gone = 0;
     ndevs++;
+}
+
+/* --- disks that arrive and leave while the machine runs -------------
+ *
+ * A stick pushed into a socket is a new disk, and the numbers already
+ * on the list must not move: somebody is looking at 'dyski' and about
+ * to type 'instaluj tekstem caly 2'. So a disk that leaves keeps its
+ * place and its number, and is marked gone; a disk that arrives is
+ * added at the end.
+ */
+int blk_usb_added(int unit)
+{
+    for (int i = 0; i < ndevs; i++) {
+        if (devs[i].kind == BLK_USB && devs[i].unit == unit) {
+            devs[i].gone = 0;             /* the same one came back */
+            devs[i].sectors = usbmass_sectors(unit);
+            return i;
+        }
+    }
+    add(BLK_USB, unit, usbmass_sectors(unit));
+    return ndevs - 1;
+}
+
+void blk_usb_gone(int unit)
+{
+    for (int i = 0; i < ndevs; i++) {
+        if (devs[i].kind != BLK_USB || devs[i].unit != unit)
+            continue;
+        devs[i].gone = 1;
+        /* Anything mounted from it stops being mounted, and nothing is
+           written back: there is nowhere to write it to. */
+        fat_forget(i);
+        /* If the machine was pointed at it, point it back at the first
+           disk - otherwise the next write goes to a socket with
+           nothing in it. */
+        if (cur == i) {
+            cur = 0;
+            point();
+        }
+    }
 }
 
 int blk_init(void)
@@ -134,6 +177,8 @@ const char *blk_name_of(int i)
 {
     if (i < 0 || i >= ndevs)
         return "brak";
+    if (devs[i].gone)
+        return "USB (wyjety z gniazdka)";
     return kind_name(devs[i].kind);
 }
 
@@ -163,7 +208,7 @@ int blk_use(int i)
 
 int blk_read(uint32_t lba, uint32_t count, void *buf)
 {
-    if (cur < 0)
+    if (cur < 0 || devs[cur].gone)
         return -1;
     point();
     if (devs[cur].kind == BLK_NVME)
@@ -181,7 +226,7 @@ int blk_read(uint32_t lba, uint32_t count, void *buf)
 
 int blk_write(uint32_t lba, uint32_t count, const void *buf)
 {
-    if (cur < 0)
+    if (cur < 0 || devs[cur].gone)
         return -1;
     point();
     if (devs[cur].kind == BLK_NVME)
