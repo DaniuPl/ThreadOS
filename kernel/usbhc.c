@@ -71,6 +71,19 @@ struct socket {
 
 static struct socket sock[PORTS_MAX];
 static int nsock;
+
+/* The hubs themselves. A hub has an endpoint whose whole purpose is to
+   say "something changed on port N" - it is how a hub is meant to be
+   watched, instead of asking it about every port twice a second. */
+#define HUBS 4
+struct hubinfo {
+    int dev;                     /* the hub's handle */
+    int ep, maxpacket;           /* its status-change endpoint */
+    int first;                   /* its ports, as sockets, start here */
+    int ports;
+};
+static struct hubinfo hubs[HUBS];
+static int nhubs;
 static int dev_speed[PORTS_MAX];         /* per socket, filled on greeting */
 
 static int usbhc_greet(int port);
@@ -326,6 +339,29 @@ static void hub_expand(int socket_index, int dev)
     if (ports < 1 || ports > 15)
         return;
 
+    /* The endpoint the hub reports changes on. It is the only
+       interrupt endpoint a hub has, and every hub has one. */
+    uint8_t full[64];
+    int ep = 0, ep_packet = 1, ep_interval = 12;
+    int total = cfg[2] | (cfg[3] << 8);
+    if (total > (int)sizeof(full))
+        total = (int)sizeof(full);
+    if (usbhc_descriptor(dev, 0x02, 0, full, total) >= total) {
+        for (int i = 0; i + 1 < total;) {
+            int dlen = full[i];
+            if (dlen < 2)
+                break;
+            if (full[i + 1] == 0x05 && i + 6 < total &&
+                (full[i + 2] & 0x80) && (full[i + 3] & 0x03) == 0x03) {
+                ep = full[i + 2] & 0x0F;
+                ep_packet = full[i + 4] | (full[i + 5] << 8);
+                ep_interval = full[i + 6] ? full[i + 6] : 12;
+                break;
+            }
+            i += dlen;
+        }
+    }
+
     int speed = dev_speed[socket_index];
     int multi_tt = 0;                    /* one translator for the lot */
     int think = (characteristics >> 5) & 3;
@@ -352,7 +388,22 @@ static void hub_expand(int socket_index, int dev)
         n->hub = dev;
         n->hub_port = p;
         n->hub_speed = speed;
+        port_dev[nsock] = -1;
+        port_known[nsock] = 0;
         nsock++;
+    }
+
+    if (ep && nhubs < HUBS) {
+        if (ep_packet > 4)
+            ep_packet = 4;               /* a bitmap of up to 15 ports */
+        if (usbhc_int_endpoint(dev, ep, ep_packet, ep_interval) == 0) {
+            hubs[nhubs].dev = dev;
+            hubs[nhubs].ep = ep;
+            hubs[nhubs].maxpacket = ep_packet;
+            hubs[nhubs].first = nsock - ports;
+            hubs[nhubs].ports = ports;
+            nhubs++;
+        }
     }
 
     printk("[ OK ] Koncentrator USB na gniazdku %d: %d gniazdek wiecej\n",
@@ -451,14 +502,14 @@ int usbhc_connected(int port)
     if (controller == XHCI) {
         if (port < 0 || port >= nsock)
             return 0;
-        /* Only the machine's own sockets are watched. Asking a hub
-           about its ports means a control transfer per port twice a
-           second, and a hub full of nothing would cost more than it is
-           worth; a device plugged into a hub after boot is therefore
-           not noticed yet, and saying so is better than a comment
-           claiming otherwise. */
+        /* A hub's port is not asked about here: the hub says by itself
+           when something changes on it, through the endpoint it has
+           for exactly that, and the watching thread listens to it.
+           Asking each port separately would be a control transfer per
+           port twice a second, for an answer that is almost always
+           "nothing". */
         if (sock[port].hub)
-            return port_known[port] ? 1 : 0;
+            return (port_known[port] && port_dev[port] >= 1) ? 1 : 0;
         return xhci_port_connected(sock[port].root);
     }
     /* UHCI keeps the connection bit in its own port register; nobody
@@ -482,6 +533,55 @@ void usbhc_forget(int port)
     port_dev[port] = -1;
 }
 
+/* One look at what a hub has to say. Its endpoint answers with a
+   bitmap: bit one for port one, and so on. Nothing to say is the
+   normal answer and costs one transfer. */
+static void watch_hub(struct hubinfo *h, int *was)
+{
+    uint8_t bits[4] = { 0, 0, 0, 0 };
+    int n = usbhc_int_in(h->dev, h->ep, bits, h->maxpacket);
+
+    if (n <= 0)
+        return;
+
+    for (int p = 1; p <= h->ports; p++) {
+        if (!(bits[p / 8] & (1u << (p % 8))))
+            continue;
+
+        int index = h->first + p - 1;
+        uint32_t status = 0;
+
+        if (hub_status(h->dev, p, &status) < 0 || index >= PORTS_MAX)
+            continue;
+
+        /* Every change the hub is holding has to be acknowledged, not
+           just the one we came for: an unacknowledged flag is
+           reported again and again, and the endpoint then says
+           "something changed" for ever, twice a second, about
+           something that changed once. */
+        for (int bit = 16; bit <= 20; bit++)
+            if (status & (1u << bit))
+                hub_feature(h->dev, p, bit, 0);
+
+        int now = (status & 0x0001) ? 1 : 0;
+        if (now == was[index])
+            continue;
+        was[index] = now;
+
+        if (!now) {
+            for (int i = 0; i < nunplug; i++)
+                unplugged[i](index);
+            usbhc_forget(index);
+            continue;
+        }
+        task_sleep(300);                 /* let it settle */
+        usbhc_forget(index);
+        for (int i = 0; i < nplug; i++)
+            if (plugged[i](index))
+                break;
+    }
+}
+
 static void watch_thread(void *arg)
 {
     static int was[PORTS_MAX];
@@ -492,8 +592,16 @@ static void watch_thread(void *arg)
 
     for (;;) {
         task_sleep(500);
+
+        /* What the hubs have to say - one transfer each, and silence
+           is the usual answer. */
+        for (int h = 0; h < nhubs; h++)
+            watch_hub(&hubs[h], was);
+
         for (int port = 0; port < usbhc_ports() && port < PORTS_MAX;
              port++) {
+            if (sock[port].hub)
+                continue;                /* a hub's port - watched above */
             int now = usbhc_connected(port);
             if (now < 0)
                 return;                  /* this controller cannot say */

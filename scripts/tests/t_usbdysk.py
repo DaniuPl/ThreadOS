@@ -193,6 +193,40 @@ def hotplug():
             check("system dziala dalej po wyjeciu dysku", "Uptime" in out)
         finally:
             q.close()
+
+        # --- the same, but into a hub -----------------------------
+        #
+        # A stick pushed into a docking station rather than into the
+        # machine. The hub says by itself that something changed on one
+        # of its ports - it has an endpoint for exactly that - and the
+        # difference from the socket in the machine has to end there.
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, usbhub=True, qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("proton64>", timeout=90)
+            check("koncentrator sam, bez niczego w nim",
+                  "Koncentrator USB" in q.serial())
+            out = q.command("dyski", "sektorow", timeout=25)
+            check("i na razie zadnego dysku USB",
+                  "USB (pamiec masowa)" not in out)
+
+            q.hmp("drive_add 0 if=none,id=pd2,format=raw,file=" + stick)
+            q.cmd({"execute": "device_add",
+                   "arguments": {"driver": "usb-storage", "bus": "xhci.0",
+                                 "port": "2.1", "drive": "pd2",
+                                 "id": "wdoku"}})
+            found = q.wait_serial("Dysk USB", timeout=40)
+            check("pendrive wlozony do koncentratora tez zostaje "
+                  "zauwazony", "Dysk USB" in found)
+
+            out = q.command("dyski", "sektorow", timeout=25)
+            usbno = usb_disk_number(out)
+            check("i trafia na liste dyskow (dysk %d)" % usbno, usbno > 0)
+            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
+            check("razem z tym, co na nim jest",
+                  "FAT32" in out and "POZNIEJ" in out)
+        finally:
+            q.close()
     finally:
         for path in (iso, slog, disk, stick):
             if os.path.exists(path):

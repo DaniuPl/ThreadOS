@@ -149,6 +149,7 @@ static struct ring cmd_pier;
 static struct ring ep_pier[SLOTS][RINGS];
 static uint32_t evt_index, evt_cycle;
 static int armed[SLOTS];       /* is a read pending on the interrupt endpoint */
+static int slot_speed[SLOTS];  /* what speed the device answered at */
 
 /* Buffer for control transfer data: the controller reaches for it itself */
 /* One buffer per device, not one for the whole controller.
@@ -695,6 +696,7 @@ int xhci_address(int port, uint32_t route, int speed, int tt_slot,
     memset(dev_ctx[slot - 1], 0, CTX_BYTES);
     ring_setup(&ep_pier[slot - 1][0], ep_trb[slot - 1][0]);
 
+    slot_speed[slot - 1] = speed;
     make_input(slot, port, speed, maxpacket, route, tt_slot, tt_port);
     if (command(fiz(in_ctx[slot - 1]),
                   ((uint32_t)TRB_ADDRESS_DEV << 10) | ((uint32_t)slot << 24),
@@ -799,8 +801,34 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
     device[0] = (src[0] & 0x07FFFFFFu) | ((uint32_t)number << 27);
     device[1] = src[1];
 
+    /* The interval in a descriptor and the interval in an endpoint
+       context are not the same number, and passing one for the other
+       is a bug that hides for years.
+     *
+     * A high-speed descriptor gives an exponent already (frames =
+     * 2^(bInterval-1) microframes); a full- or low-speed one gives
+     * MILLISECONDS, and a hub asks for two hundred and fifty-five of
+     * them. Written into the context unchanged, that is 2^255
+     * microframes - a polling interval longer than the machine's life,
+     * which shows up as an endpoint that never answers. And an
+     * endpoint that never answers is how a hub stops reporting that
+     * somebody plugged something into it. */
+    int period;
+    if (slot_speed[slot - 1] >= 3) {         /* high speed and above */
+        period = interval > 0 ? interval - 1 : 3;
+        if (period < 0)
+            period = 0;
+    } else {                                  /* milliseconds */
+        int ms = interval > 0 ? interval : 8;
+        period = 3;                           /* 2^3 microframes = 1 ms */
+        while ((1 << (period - 3)) < ms && period < 10)
+            period++;
+    }
+    if (period > 15)
+        period = 15;
+
     uint32_t *punkt = info(we, number + 1);
-    punkt[0] = (uint32_t)(interval > 0 ? interval : 8) << 16;
+    punkt[0] = (uint32_t)period << 16;
     punkt[1] = (3u << 1) |               /* three attempts on error */
                (7u << 3) |               /* type: interrupt in */
                ((uint32_t)maxpacket << 16);

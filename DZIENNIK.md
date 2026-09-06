@@ -5237,3 +5237,40 @@ sprawdzane przez `make test`.
       pracy - pytanie koncentratora o kazdy port dwa razy na sekunde
       kosztowaloby wiecej, niz jest warte, i jest to napisane wprost
       zamiast komentarza udajacego co innego.
+
+- [x] **Wkladanie do koncentratora, i przedzial czasu, ktory znaczy co
+      innego niz sie wydaje** (kernel/usbhc.c, kernel/xhci.c,
+      rozszerzona grupa `usbdysk`).
+
+      Pendrive wlozony do stacji dokujacej, a nie do maszyny. Koncentrator
+      ma punkt koncowy, ktorego calym zadaniem jest powiedziec "cos sie
+      zmienilo na porcie N" - i tak sie go pilnuje, zamiast pytac o
+      kazdy port dwa razy na sekunde. Odpowiedz to mapa bitowa: bit
+      pierwszy to port pierwszy.
+
+      **Blad, ktory chowal sie za dzialajaca klawiatura.** Przedzial
+      czasu w deskryptorze i przedzial w kontekscie punktu koncowego to
+      NIE jest ta sama liczba. Deskryptor high-speed podaje wykladnik,
+      a full-speed - milisekundy, i koncentrator prosi o dwiescie
+      piecdziesiat piec. Wpisane bez przeliczenia daje 2^255
+      mikroramek, czyli odpytywanie rzadsze niz zycie maszyny - punkt
+      koncowy, ktory nigdy nie odpowiada. Klawiatura dzialala mimo tego
+      samego bledu, bo prosila o osiem i wyszlo z tego trzydziesci dwie
+      milisekundy zamiast osmiu: dosc, zeby nikt nie zauwazyl.
+      Przeliczenie jest teraz takie, jak w normie, i zalezy od
+      predkosci urzadzenia - wiec kontroler zapamietuje predkosc kazdego
+      slotu.
+
+      **I drugi, o jeden stan za daleko.** Watek pilnujacy gniazdek
+      zapamietuje, co bylo wetkniete, zeby wiedziec, co sie zmienilo.
+      Gniazdko koncentratora, ktore przy starcie zostalo obejrzane i
+      okazalo sie puste, bylo zapamietane jako ZAJETE - bo "obejrzane"
+      myli sie z "cos w nim jest" tylko wtedy, gdy sie te dwie rzeczy
+      pomyli w kodzie. Efekt: pierwsze wlozenie bylo widziane, a nastepne
+      juz nie.
+
+      Kazda zmiana zgloszona przez koncentrator jest teraz kwitowana -
+      wszystkie flagi, nie tylko ta, po ktora sie przyszlo. Niepokwitowana
+      flaga jest zglaszana w kolko i punkt koncowy mowi "cos sie
+      zmienilo" na wieki, dwa razy na sekunde, o czyms, co zmienilo sie
+      raz.
