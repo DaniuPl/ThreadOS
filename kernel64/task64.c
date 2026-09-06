@@ -768,8 +768,13 @@ void task_core_enter(int nr)
     t->nolock = 1;         /* an idle task does not take the lock */
     t->idle_for_core = nr;
     set_name(t, "idle");
-    t->name[9] = (char)('0' + nr);
-    t->name[10] = '\0';
+    /* the core's number goes right after the name, wherever it ends -
+       a fixed index is a trap for whoever renames the task */
+    int len = 0;
+    while (t->name[len])
+        len++;
+    t->name[len] = (char)('0' + nr);
+    t->name[len + 1] = '\0';
 
     irqflags_t flags = spin_lock_irq(&lock);
     t->next = cores[0].running->next;

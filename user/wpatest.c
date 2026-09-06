@@ -301,8 +301,8 @@ static void derived(uint32_t seed)
     wpa_eapol_mic(ptk, frame, 64, mic);   /* the KCK is the first part */
 
     print("[wpa] derived material\n");
-    field("passwd", (const uint8_t *)pass, 12);
-    field("network", (const uint8_t *)ssid, 8);
+    field("password", (const uint8_t *)pass, 12);
+    field("ssid", (const uint8_t *)ssid, 8);
     field("pmk", pmk, 32);
     field("aa", aa, 6);
     field("spa", spa, 6);

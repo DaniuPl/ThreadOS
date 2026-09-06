@@ -100,9 +100,9 @@ def check_shared(q, marker, suffix, lib_base):
           counter2.group(1) == counter.group(1))
 
     # A write into the shared code has to kill whoever tries
-    corrupt = q.command("run dynlib pisz", "Page Fault", timeout=60)
+    corrupt = q.command("run dynlib write", "Page Fault", timeout=60)
     check("writing to the library's code ends with a protection fault" + suffix,
-          "trying to write over the code" in corrupt and "Page Fault" in corrupt and
+          "trying to write over the library's code" in corrupt and "Page Fault" in corrupt and
           "writing to the library's code worked" not in corrupt)
 
     # Sizes: the four heaviest programs together lighter than the library

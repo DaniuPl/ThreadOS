@@ -827,7 +827,7 @@ static void execute(const char *line)
     } else if (!strcmp(line, "pwd")) {
         cmd_pwd();
     } else if (starts_with(line, "cd ")) {
-        const char *kat = argument(line, 3);
+        const char *kat = argument(line, sizeof("cd ") - 1);
         int fresh_one = FS_ROOT;
         if (!kat)
             printk("cd: give a directory\n");
@@ -836,7 +836,7 @@ static void execute(const char *line)
         else
             task64_set_cwd(fresh_one);
     } else if (starts_with(line, "mkdir ")) {
-        const char *kat = argument(line, 6);
+        const char *kat = argument(line, sizeof("mkdir ") - 1);
         if (!kat)
             printk("mkdir: give a name\n");
         else if (fs_mkdir(task64_cwd(), kat) < 0)
@@ -844,7 +844,7 @@ static void execute(const char *line)
         else
             printk("mkdir: '%s' created\n", kat);
     } else if (starts_with(line, "rm ")) {
-        const char *file = argument(line, 3);
+        const char *file = argument(line, sizeof("rm ") - 1);
         if (!file)
             printk("rm: give a name\n");
         else if (!may_touch(file))
@@ -854,7 +854,7 @@ static void execute(const char *line)
         else
             printk("rm: '%s' removed\n", file);
     } else if (starts_with(line, "cat ")) {
-        const char *name = argument(line, 4);
+        const char *name = argument(line, sizeof("cat ") - 1);
         if (name)
             cmd_cat(name);
         else
@@ -862,11 +862,11 @@ static void execute(const char *line)
     } else if (!strcmp(line, "volume")) {
         hwinfo_volume("");
     } else if (starts_with(line, "volume ")) {
-        hwinfo_volume(argument(line, 9));
+        hwinfo_volume(argument(line, sizeof("volume ") - 1));
     } else if (!strcmp(line, "beep")) {
         cmd_beep("");
     } else if (starts_with(line, "beep ")) {
-        cmd_beep(argument(line, 5));
+        cmd_beep(argument(line, sizeof("beep ") - 1));
     } else if (!strcmp(line, "hardware")) {
         hwinfo_print();
     } else if (!strcmp(line, "bt")) {
@@ -887,29 +887,31 @@ static void execute(const char *line)
     } else if (!strcmp(line, "install text whole")) {
         cmd_install_text(INST_WHOLE, -1);
     } else if (starts_with(line, "install text whole ")) {
-        cmd_install_text(INST_WHOLE, (int)text_num(line + 22) - 1);
+        cmd_install_text(INST_WHOLE,
+                         (int)text_num(line + sizeof("install text whole ") - 1) - 1);
     } else if (starts_with(line, "install text ")) {
-        cmd_install_text(INST_ALONGSIDE, (int)text_num(line + 17) - 1);
+        cmd_install_text(INST_ALONGSIDE,
+                         (int)text_num(line + sizeof("install text ") - 1) - 1);
     } else if (!strcmp(line, "fat")) {
         fatcmd_mount("");
     } else if (starts_with(line, "fat ")) {
-        fatcmd_mount(argument(line, 4));
+        fatcmd_mount(argument(line, sizeof("fat ") - 1));
     } else if (!strcmp(line, "fatls")) {
         fatcmd_ls("/");
     } else if (starts_with(line, "fatls ")) {
-        fatcmd_ls(argument(line, 6));
+        fatcmd_ls(argument(line, sizeof("fatls ") - 1));
     } else if (starts_with(line, "fatcat ")) {
-        fatcmd_cat(argument(line, 7));
+        fatcmd_cat(argument(line, sizeof("fatcat ") - 1));
     } else if (starts_with(line, "fatput ")) {
-        fatcmd_put(argument(line, 7));
+        fatcmd_put(argument(line, sizeof("fatput ") - 1));
     } else if (starts_with(line, "fatmkdir ")) {
-        fatcmd_mkdir(argument(line, 9));
+        fatcmd_mkdir(argument(line, sizeof("fatmkdir ") - 1));
     } else if (starts_with(line, "fatrm ")) {
-        fatcmd_rm(argument(line, 6));
+        fatcmd_rm(argument(line, sizeof("fatrm ") - 1));
     } else if (starts_with(line, "fatsum ")) {
-        fatcmd_sum(argument(line, 7));
+        fatcmd_sum(argument(line, sizeof("fatsum ") - 1));
     } else if (starts_with(line, "fatcopy ")) {
-        fatcmd_copy(argument(line, 8));
+        fatcmd_copy(argument(line, sizeof("fatcopy ") - 1));
     } else if (!strcmp(line, "set")) {
         cmd_set("");
     } else if (starts_with(line, "set ")) {
@@ -921,13 +923,13 @@ static void execute(const char *line)
     } else if (!strcmp(line, "smpthreads")) {
         smpthreads_test();
     } else if (starts_with(line, "cp ")) {
-        char *arg = (char *)argument(line, 3);
+        char *arg = (char *)argument(line, sizeof("cp ") - 1);
         if (!arg)
             printk("cp: give a source and a target\n");
         else
             cmd_cp(arg);
     } else if (starts_with(line, "write ")) {
-        char *rest = (char *)argument(line, 6);
+        char *rest = (char *)argument(line, sizeof("write ") - 1);
         if (rest)
             cmd_write(rest);
         else
@@ -958,7 +960,7 @@ static void execute(const char *line)
             printk("\n");
         }
     } else if (starts_with(line, "ping ")) {
-        const char *addr = argument(line, 5);
+        const char *addr = argument(line, sizeof("ping ") - 1);
         uint32_t ip = 0;
         if (!addr)
             printk("ping: give an address\n");
@@ -1017,7 +1019,7 @@ static void execute(const char *line)
         if (proc64_spawn_anycore(progw, 0, 1) < 0)
             printk("runw: could not start '%s'\n", progw);
     } else if (starts_with(line, "run ")) {
-        const char *name = argument(line, 4);
+        const char *name = argument(line, sizeof("run ") - 1);
         if (!name) {
             printk("run: give a program name (see 'ls')\n");
             return;

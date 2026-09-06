@@ -56,7 +56,7 @@ def main():
         try:
             boot = q.wait_for("ProtonOS shell", timeout=40)
             check("the kernel says there is something on the disk and does not touch it",
-                  "I am not touching it" in boot)
+                  "there IS something on the disk" in boot)
             check("and it hints what to do if it is to be ours after all",
                   "format" in boot)
 
@@ -96,7 +96,7 @@ def main():
             boot = q.wait_for("ProtonOS shell", timeout=40)
             check("an empty disk is formatted as it always was",
                   "formatted" in boot)
-            check("and there is no talk of a refusal there", "I am not touching it" not in boot)
+            check("and there is no talk of a refusal there", "there IS something on the disk" not in boot)
         finally:
             q.close()
     finally:
@@ -126,7 +126,7 @@ def main():
             time.sleep(4)
             said = q.screen()
             check("and it creates a PFS on it",
-                  "that partition is a PFS now" in said)
+                  "this partition is a ProtonOS PFS now" in said)
 
             q.type_line("write proof.txt installed-beside-windows")
             time.sleep(2)
@@ -146,7 +146,7 @@ def main():
                   % next((l.strip() for l in boot.splitlines()
                           if "in partition" in l), "no line"),
                   "PFS: in partition 3" in boot)
-            out = q.command("cat dowod.txt", "installed", timeout=20)
+            out = q.command("cat proof.txt", "installed", timeout=20)
             check("and the file written before the restart is there",
                   "installed-beside-windows" in out)
         finally:
@@ -192,7 +192,7 @@ def main():
             time.sleep(4)
             said = q.screen()
             check("and a typed YES formats the disk",
-                  "the whole disk is a PFS now" in said)
+                  "the whole disk is a ProtonOS PFS now" in said)
         finally:
             q.close()
         check("and then the GPT is gone - which is what was asked for",

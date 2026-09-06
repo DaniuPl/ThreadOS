@@ -278,7 +278,7 @@ def main():
             # --- Tab finishes what is being typed -----------------------
             # A terminal where a file name has to be typed out in full,
             # correctly, every time is a terminal one types slowly at.
-            q.type_line("cat inn", enter=False)
+            q.type_line("cat oth", enter=False)
             time.sleep(0.5)
             q.sendkey("tab")
             time.sleep(1.5)
@@ -300,14 +300,14 @@ def main():
                   any("fileone" in r and "filetwo" in r for r in rows))
 
             # And what it added is the part they agree on: pressing
-            # Enter now runs 'cat plik', which has no such file
+            # Enter now runs 'cat file', which has no such file
             q.sendkey("ret")
             time.sleep(2)
             rows = read_rows(q, **big)
             check("and it added only what they share (still 'cat file')",
                   any(r.startswith("/> cat file") and
-                      not r.startswith("/> cat plikj") and
-                      not r.startswith("/> cat plikd") for r in rows))
+                      not r.startswith("/> cat fileone") and
+                      not r.startswith("/> cat filetwo") for r in rows))
 
             # --- and the window says where it stands --------------------
             w, h, at = q.screen_raw()

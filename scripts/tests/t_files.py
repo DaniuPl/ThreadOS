@@ -161,7 +161,7 @@ def main():
                   size.startswith(str(len(TEXT) + 1)))
             check("and a directory has a word instead of a number ('%s')"
                   % dict(listed).get("documents", ""),
-                  dict(listed).get("documents", "") == "directory")
+                  dict(listed).get("documents", "") == "folder")
 
             check("the heading says where we are ('%s')"
                   % read_at(at, 4, 2, 20), read_at(at, 4, 2, 20).startswith("/"))

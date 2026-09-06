@@ -136,7 +136,7 @@ def main():
                 time.sleep(4)
                 out = q3.command("run gmikser", "z initrd", timeout=30)
                 check("the mixer starts as a ring 3 program",
-                      "'gmikser' z initrd" in out)
+                      "'gmikser' from the initrd" in out)
                 time.sleep(3)
                 q3.mouse_goto(700, 500)
                 time.sleep(0.8)
@@ -148,7 +148,7 @@ def main():
                 check("the window says how loud it is",
                       "Volume:" in text and "%" in text)
                 check("and what it computes the percentage from",
-                      "steps" in text and "decibels" in text)
+                      "steps" in text and "decibel" in text)
 
                 BAR_X, BAR_Y, BAR_H = 8, 52, 16
                 BTN_X, BTN_Y, BTN_W, BTN_H = 8, 82, 84, 16

@@ -152,8 +152,8 @@ def main():
                   "/EFI/ProtonOS/BOOTX64.EFI - done" in out
                   and "/EFI/ProtonOS/protonos64.bin - done" in out
                   and "/EFI/ProtonOS/initrd64.img - done" in out)
-            check("and - since nobody was there - /EFI/BOOT/ too"
-                  "BOOTX64.EFI",
+            check("and - since nobody was there - "
+                  "/EFI/BOOT/BOOTX64.EFI too",
                   "/EFI/BOOT/BOOTX64.EFI - done" in out
                   and "will boot ProtonOS off the disk" in out)
         finally:

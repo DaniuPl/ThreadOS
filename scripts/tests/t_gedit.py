@@ -378,7 +378,7 @@ def sixty_four():
                 listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
                 check("(64) 'Rename' changes the file's name (%s)"
                       % ", ".join(n for n in listed if n),
-                      "long" in listed and "long" not in listed)
+                      "long" in listed and "note" not in listed)
         finally:
             q.close()
     finally:
@@ -422,7 +422,7 @@ def main():
             check("the status bar says the file has no name and has changed "
                   "('%s')" % st, "(no name)*" in st)
             check("and where the cursor stands (line 1, column 12)",
-                  "W1 K12" in st)
+                  "L1 C12" in st)
 
             q.sendkey("ret")
             q.type_line("i psa", enter=False)
@@ -431,7 +431,7 @@ def main():
             check("Enter starts a new line",
                   row_text(at, 0) == "The quick brown fox" and
                   row_text(at, 1) == "i psa")
-            check("and the status bar counts the lines", "W2 K6" in status_text(at))
+            check("and the status bar counts the lines", "L2 C6" in status_text(at))
 
             # --- Ctrl+F: finding, and going round the end ---------------
             q.sendkey("ctrl-f")
@@ -449,7 +449,7 @@ def main():
             # at all means the search went round the end of the file
             check("it finds a word ABOVE the cursor, so it wraps around "
                   "the end of the file ('%s')" % st,
-                  "found on line 1" in st and "W1 K8" in st)
+                  "found on line 1" in st and "L1 C8" in st)
 
             q.sendkey("ctrl-f")
             time.sleep(0.8)
@@ -515,7 +515,7 @@ def main():
             # open on three files would be three windows called
             # "Editor" otherwise
             check("the window is named after the file ('%s')" % win_title(at),
-                  win_title(at) == "Editor: a note")
+                  win_title(at) == "Editor: note")
 
             # --- and the file is really on the disk ---------------------
             # Checked by something that is not the program that wrote

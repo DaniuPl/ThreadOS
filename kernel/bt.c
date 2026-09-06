@@ -555,10 +555,10 @@ void bt_selftest(void)
     /* An LE advertising report: one device, a random address, a
        Complete Local Name in the data, and a signal of -59 dBm. */
     static const uint8_t ev_adv[] = {
-        0x3E, 0x17, 0x02, 0x01, 0x00, 0x01,
+        0x3E, 0x18, 0x02, 0x01, 0x00, 0x01,
         0x21, 0x43, 0x65, 0x87, 0xA9, 0xCB,
-        0x0B,                                  /* eleven bytes of data */
-        0x0A, 0x09, 'S', 'l', 'u', 'c', 'h', 'a', 'w', 'k', 'i',
+        0x0C,                                  /* twelve bytes of data */
+        0x0B, 0x09, 'H', 'e', 'a', 'd', 'p', 'h', 'o', 'n', 'e', 's',
         0xC5 };                                /* -59 dBm */
 
     /* An inquiry result: one classic device, no name, no signal */

@@ -577,13 +577,13 @@ static void draw(int win)
         if (dirty)
             line[p++] = '*';
         line[p++] = ' ';
-        line[p++] = 'W';
+        line[p++] = 'L';
         char n[8];
         num(n, cy + 1);
         for (int i = 0; n[i]; i++)
             line[p++] = n[i];
         line[p++] = ' ';
-        line[p++] = 'K';
+        line[p++] = 'C';
         num(n, cx + 1);
         for (int i = 0; n[i]; i++)
             line[p++] = n[i];

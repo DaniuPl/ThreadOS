@@ -104,7 +104,7 @@ static void relabel(void)
 
     at = add(steps_line, 0, "the codec has ");
     at += num(steps_line + at, snd.steps);
-    add(steps_line, at, " steps, and a step is decibels");
+    add(steps_line, at, " steps, each of them a decibel");
 
     ug_set_value(&u, id_bar, snd.muted ? 0 : (int)snd.volume);
     ug_set_text(&u, id_mute, snd.muted ? "Unmute" : "Mute");

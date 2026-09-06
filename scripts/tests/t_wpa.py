@@ -111,7 +111,7 @@ def main():
                     check("seed %s: the system printed the keys" % seed, False)
                     continue
 
-                pmk = hashlib.pbkdf2_hmac("sha1", got["passwd"], got["ssid"],
+                pmk = hashlib.pbkdf2_hmac("sha1", got["password"], got["ssid"],
                                           4096, 32)
                 check("seed %s: the PMK matches PBKDF2 from hashlib" % seed,
                       pmk == got["pmk"])

@@ -377,7 +377,7 @@ static void draw(void)
             /* Right-aligned, like the sizes it stands in place of: two
                columns that end in different places read as two
                columns. */
-            win_text(win, cw - 7 * 8 - 6, y, "directory",
+            win_text(win, cw - 6 * 8 - 6, y, "folder",
                      picked ? C_WHITE : C_DIM);
         } else {
             char sz[16];

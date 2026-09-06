@@ -70,7 +70,7 @@ void _start(int argc, char **argv)
        frames. If they could be written to, one program would swap a
        function out for everybody at once. So it has to be impossible,
        and it has to kill that program. */
-    if (argc > 1 && argv[1][0] == 'p') {
+    if (argc > 1 && argv[1][0] == 'w') {
         print("[dynlib] trying to write over the library's code\n");
         *(volatile uint8_t *)(uintptr_t)code = 0x90;
         print("[dynlib] WRONG: writing to the library's code worked\n");

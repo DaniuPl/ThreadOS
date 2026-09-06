@@ -64,13 +64,13 @@ def main():
             type_shift_a()
             try:
                 saved = q19.wait_for("wrote", timeout=10)
-                if "do 'A'" in saved:
+                if "to 'A'" in saved:
                     break
             except RuntimeError:
                 pass
             q19.type_line("clear")
         check("the Shift modifier from the HID report gives capital letters",
-              "do 'A'" in saved)
+              "to 'A'" in saved)
     finally:
         q19.close()
         if os.path.exists(udisk):

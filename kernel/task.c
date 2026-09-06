@@ -888,8 +888,13 @@ void task_core_enter(int nr)
         return;
     t->id = -nr;                 /* a negative number: this is not a process */
     task_set_name(t, "idle");
-    t->name[9] = (char)('0' + nr);
-    t->name[10] = '\0';
+    /* the core's number goes right after the name, wherever it ends -
+       a fixed index is a trap for whoever renames the task */
+    int len = 0;
+    while (t->name[len])
+        len++;
+    t->name[len] = (char)('0' + nr);
+    t->name[len + 1] = '\0';
     t->state = TASK_RUNNING;
     t->stack = NULL;             /* its stack comes from the boot trampoline */
     t->kstack_top = 0;

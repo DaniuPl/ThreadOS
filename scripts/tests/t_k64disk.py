@@ -257,7 +257,7 @@ def main():
                   re.search(r"write: 'note' written \(\d+ B\)",
                             wr) is not None)
             q23.type_line("fls")
-            fl = q23.wait_serial("Zajetosc:", timeout=25)
+            fl = q23.wait_serial("Used:", timeout=25)
             check("the file shows in the root directory listing",
                   re.search(r"note  \(\d+ B\)", fl) is not None)
             seen = len(q23.serial())
@@ -295,7 +295,7 @@ def main():
                   and "formatted" not in again)
             q2.wait_serial("proton64>", timeout=40)
             q2.type_line("fls")
-            fl2 = q2.wait_serial("Zajetosc:", timeout=25)
+            fl2 = q2.wait_serial("Used:", timeout=25)
             check("the file survived the machine being switched off",
                   re.search(r"note  \(\d+ B\)", fl2) is not None)
             seen = len(q2.serial())

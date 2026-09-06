@@ -62,7 +62,7 @@ def main():
             # with a syscall instruction.
             q23.wait_serial("System calls through the syscall instruction",
                             timeout=20)
-            r3 = q23.wait_serial("Program w ring 3:", timeout=25)
+            r3 = q23.wait_serial("A program in ring 3:", timeout=25)
             m = re.search(r"Program w ring 3: (.+?), cs=(\w+), "
                           r"ring (\d)", r3)
             check("the program entered the kernel with the syscall instruction",

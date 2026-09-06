@@ -146,7 +146,11 @@ static const uint8_t ec_sig[] = {
     0x95,0x68,0xc9,0xd3,0x7e,0x3f,0xaa,0x34,0x3c,0xf7,0xc1,0x11,0x8a,0x29,
 };
 
-static const char pss_msg[] = "ProtonOS test message for a PSS signature";
+/* The message the signatures below were made over. It is DATA, not a
+   sentence anybody reads: pss_sig and ec_sig were computed on these
+   exact bytes, so translating it would break both signatures. It is
+   left as it was written. */
+static const char pss_msg[] = "ProtonOS test wiadomosci do podpisu PSS";
 
 static const uint8_t p384_cert_der[] = {
     0x30,0x82,0x01,0xdc,0x30,0x82,0x01,0x62,0xa0,0x03,0x02,0x01,0x02,0x02,

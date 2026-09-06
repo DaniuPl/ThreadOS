@@ -71,7 +71,7 @@ def main():
             q2.type_line("reboot")
             check("'reboot' resets the machine", q2.wait_exit(timeout=25))
             check("the kernel managed to say it was restarting",
-                  "Restart..." in q2.serial())
+                  "Restarting..." in q2.serial())
         finally:
             q2.close()
             if os.path.exists(slog2):

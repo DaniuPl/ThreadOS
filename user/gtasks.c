@@ -172,7 +172,7 @@ static void draw(int win)
                  picked ? C_WHITE : C_TEXT);
         /* A process has memory of its own; a kernel thread does not -
            and only the first of the two is something to end */
-        win_text(win, 232, y, list[i].ring3 ? "program" : "the kernel",
+        win_text(win, 232, y, list[i].ring3 ? "program" : "kernel",
                  picked ? C_WHITE : (list[i].ring3 ? C_TEXT : C_DIM));
     }
 

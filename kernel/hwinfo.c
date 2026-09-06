@@ -205,7 +205,7 @@ void hwinfo_volume(const char *arg)
     while (arg && *arg == ' ')
         arg++;
 
-    if (arg && arg[0] == 'c') {                  /* 'cisza' */
+    if (arg && arg[0] == 'm') {                  /* 'mute' */
         hda_set_mute(!hda_muted());
         printk("volume: %s\n", hda_muted() ? "silence" : "audible again");
         return;

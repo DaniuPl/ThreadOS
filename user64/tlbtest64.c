@@ -141,7 +141,7 @@ void _start(void)
     put_num(THREADS);
     print(", chunks ");
     put_num(seen);
-    print(" po ");
+    print(" of ");
     put_num(CHUNK);
     print(" pages, core mask ");
     put_num(cores);

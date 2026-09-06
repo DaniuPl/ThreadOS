@@ -318,12 +318,14 @@ static void cmd_install(const char *arg)
         printk("usage: install [text [whole] [disk number]]\n");
         return;
     }
-    p += 7;
+    /* the length comes from the word itself: a number here is a trap
+       for whoever renames the word */
+    p += sizeof("text") - 1;
     while (*p == ' ')
         p++;
     if (starts(p, "whole")) {
         mode = INST_WHOLE;
-        p += 4;
+        p += sizeof("whole") - 1;
         while (*p == ' ')
             p++;
     }

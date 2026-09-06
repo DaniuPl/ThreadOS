@@ -28,7 +28,7 @@ def main():
         q_srv.wait_for("[net] DHCP", timeout=20)
         q_srv.type_line("run tcpserv")
         view = q_srv.wait_for("listening on port 5555", timeout=15)
-        check("ring 3 listening on port TCP",
+        check("ring 3 listens on a TCP port",
               "listening on port 5555" in view)
 
         # The host's real stack connects (through QEMU's hostfwd)
@@ -38,10 +38,10 @@ def main():
         check("the host connected and got a greeting from ProtonOS",
               b"ProtonOS TCP ready" in greeting)
 
-        sock.sendall(b"hello z hosta\n")
+        sock.sendall(b"hello from the host\n")
         echoed = sock.recv(200)
         check("the host's data came back echoed by the ring 3 server",
-              b"hello z hosta" in echoed)
+              b"hello from the host" in echoed)
         sock.close()
 
         seen = q_srv.wait_for("from the client", timeout=15)

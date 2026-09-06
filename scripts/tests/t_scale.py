@@ -68,7 +68,7 @@ def main():
             q.type_line("screen")
             time.sleep(2)
             said = q.serial()[seen:]
-            m = re.search(r"mode:\s+(\d+)x(\d+), \S+, scale (\d+)", said)
+            m = re.search(r"mode:\s+(\d+)x(\d+), [^,]+, scale (\d+)", said)
             check("the machine says what scale it draws at ('%s')"
                   % (m.group(0) if m else said[-60:].replace("\n", " ")),
                   m is not None and m.group(3) == "2")

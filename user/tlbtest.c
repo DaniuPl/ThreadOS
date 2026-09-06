@@ -142,7 +142,7 @@ void _start(void)
     print_dec(THREADS);
     print(", chunks ");
     print_dec(seen);
-    print(" po ");
+    print(" of ");
     print_dec(CHUNK);
     print(" pages, core mask ");
     print_dec(cores);

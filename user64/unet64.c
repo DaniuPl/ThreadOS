@@ -67,7 +67,7 @@ void _start(int argc, char **argv)
 
     int n = put(0, "[unet64] my address ");
     n = put_ip(n, addrs[0]);
-    n = put(n, ", brama ");
+    n = put(n, ", gateway ");
     n = put_ip(n, addrs[2]);
     n = put(n, "\n");
     out[n] = 0;
