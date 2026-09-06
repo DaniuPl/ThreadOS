@@ -102,9 +102,9 @@ static void relabel(void)
         at = add(state_line, at, "  (muted)");
     ug_set_colour(&u, id_state, snd.muted ? UG_RED : UG_BLUE);
 
-    at = add(steps_line, 0, "the codec has ");
+    at = add(steps_line, 0, "codec steps: ");
     at += num(steps_line + at, snd.steps);
-    add(steps_line, at, " steps, each of them a decibel");
+    add(steps_line, at, ", each of them a decibel");
 
     ug_set_value(&u, id_bar, snd.muted ? 0 : (int)snd.volume);
     ug_set_text(&u, id_mute, snd.muted ? "Unmute" : "Mute");

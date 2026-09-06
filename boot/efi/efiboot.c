@@ -481,7 +481,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         put_num(sc.width, 10);
         put(L"x");
         put_num(sc.height, 10);
-        put(L", bufor 0x");
+        put(L", buffer 0x");
         put_num(sc.base, 16);
         put(L"\r\n");
     } else {

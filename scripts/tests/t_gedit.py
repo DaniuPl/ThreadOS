@@ -368,7 +368,7 @@ def sixty_four():
                 time.sleep(0.5)
                 q.mouse_click()                # the keys into the manager
                 time.sleep(1)
-                q.type_line("long", enter=False)
+                q.type_line("longer", enter=False)
                 time.sleep(0.5)
                 q.sendkey("ret")
                 time.sleep(2.5)
@@ -378,7 +378,7 @@ def sixty_four():
                 listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
                 check("(64) 'Rename' changes the file's name (%s)"
                       % ", ".join(n for n in listed if n),
-                      "long" in listed and "note" not in listed)
+                      "longer" in listed and "long" not in listed)
         finally:
             q.close()
     finally:
@@ -526,7 +526,7 @@ def main():
             time.sleep(2)
             log = q.serial()
             check("the file is on the disk and holds what was written",
-                  "The quick brown fox" in log and "i psa" in log)
+                  "The quick brown fox" in log and "jumps over" in log)
 
             # --- reading it back ----------------------------------------
             q.mouse_goto(CX + 200, CY + 100)   # back into the editor
@@ -557,7 +557,7 @@ def main():
             w, h, at = q.screen_raw()
             check("the opened file replaced what was in the window",
                   row_text(at, 0) == "The quick brown fox" and
-                  row_text(at, 1) == "i psa" and
+                  row_text(at, 1) == "jumps over" and
                   row_text(at, 2) == "")
 
             # And the new way: click a name, click "Open"
