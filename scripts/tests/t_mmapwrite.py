@@ -38,11 +38,11 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- zapis przez odwzorowanie (jadro 64-bitowe) ---")
+    print("--- writing through a mapping (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
@@ -51,7 +51,7 @@ def main():
         with open(disk, "wb") as fh:
             fh.truncate(DISK_SIZE)
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
@@ -59,50 +59,50 @@ def main():
                      sata=True, qemu="qemu-system-x86_64")
             try:
                 q.wait_serial("proton64>", timeout=90)
-                q.wait_serial("PFS gotowy", timeout=30)
+                q.wait_serial("PFS ready", timeout=30)
 
-                make_it = q.command("run mkmap64 zapis.txt 12", "kod wyjscia",
+                make_it = q.command("run mkmap64 written.txt 12", "exit code",
                                    timeout=60)
-                check("plik z wzorcem zalozony na dysku",
-                      "[mkmap64] zapisano 12288 B wzorca" in make_it)
+                check("a file with the pattern was created on the disk",
+                      "[mkmap64] wrote 12288 B of the pattern" in make_it)
 
-                write_it = q.command("run mmapzap64 zapis.txt write",
-                                   "kod wyjscia", timeout=90)
-                check("caly plik da sie przeczytac przez odwzorowanie "
-                      "do zapisu",
-                      "stary wzorzec przeczytany, bajtow 12288" in write_it)
-                check("odsylane sa tylko strony, do ktorych pisano",
-                      "odeslanych stron: 2" in write_it)
-                check("odeslana strona przestaje byc brudna",
-                      "drugie msync odeslalo: 0" in write_it)
-                check("odeslanie na dysk nie rusza tresci w pamieci",
-                      "zapis przez pamiec gotowy" in write_it and "ZLE" not in write_it)
+                write_it = q.command("run mmapzap64 written.txt write",
+                                   "exit code", timeout=90)
+                check("the whole file can be read through the mapping "
+                      "for writing",
+                      "the old pattern was read, bytes 12288" in write_it)
+                check("only the pages written to are sent back",
+                      "pages sent back: 2" in write_it)
+                check("a page that was sent back stops being dirty",
+                      "the second msync sent back: 0" in write_it)
+                check("sending it to the disk does not touch the content in memory",
+                      "writing through memory is done" in write_it and "WRONG" not in write_it)
 
-                probe = q.command("run mmapzap64 zapis.txt check",
-                                  "kod wyjscia", timeout=90)
-                check("zwykly odczyt widzi to, co wpisala pamiec",
-                      "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
+                probe = q.command("run mmapzap64 written.txt check",
+                                  "exit code", timeout=90)
+                check("an ordinary read sees what the memory wrote",
+                      "an ordinary read sees what" in probe and "WRONG" not in probe)
 
                 # Without an explicit msync - the kernel flushes it at the end of the
 # process
-                q.command("run mkmap64 bezsync.txt 12", "kod wyjscia",
+                q.command("run mkmap64 nosync.txt 12", "exit code",
                             timeout=60)
-                without = q.command("run mmapzap64 bezsync.txt nosync",
-                                  "kod wyjscia", timeout=60)
-                check("program moze skonczyc sie bez proszenia o odeslanie",
-                      "koncze bez msync" in without)
-                probe2 = q.command("run mmapzap64 bezsync.txt check2",
-                                   "kod wyjscia", timeout=60)
-                check("jadro odsyla brudne strony przy koncu procesu",
-                      "doszly na dysk przy koncu procesu" in probe2)
+                without = q.command("run mmapzap64 nosync.txt nosync",
+                                  "exit code", timeout=60)
+                check("a program may end without asking for a flush",
+                      "ending with no msync" in without)
+                probe2 = q.command("run mmapzap64 nosync.txt check2",
+                                   "exit code", timeout=60)
+                check("the kernel sends dirty pages back as the process ends",
+                      "reached the disk as the process ended" in probe2)
 
                 # After a fork the mapping is shared, not copied
-                q.command("run mkmap64 wspolny.txt 12", "kod wyjscia",
+                q.command("run mkmap64 shared.txt 12", "exit code",
                             timeout=60)
-                visible = q.command("run mmapzap64 wspolny.txt shared",
-                                    "kod wyjscia", timeout=60)
-                check("rodzic widzi zapis dziecka - odwzorowanie wspolne",
-                      "odwzorowanie wspolne" in visible and "ZLE" not in visible)
+                visible = q.command("run mmapzap64 shared.txt shared",
+                                    "exit code", timeout=60)
+                check("the parent sees the child's write - the mapping is shared",
+                      "the mapping is shared" in visible and "WRONG" not in visible)
             finally:
                 q.close()
         finally:
@@ -112,7 +112,7 @@ def main():
                     os.unlink(f)
 
     # --- The same in the 32-bit kernel, with a restart at the end ---
-    print("--- zapis przez odwzorowanie (jadro 32-bitowe) ---")
+    print("--- writing through a mapping (the 32-bit kernel) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
     slog4 = tempfile.mktemp(suffix=".log")   # the second boot writes to its own
@@ -122,48 +122,48 @@ def main():
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
-            q3.wait_for("[siec] DHCP", timeout=30)
+            q3.wait_for("[net] DHCP", timeout=30)
 
-            make_it = q3.command("run mkmap zapis.txt 12", "zakonczyl sie",
+            make_it = q3.command("run mkmap written.txt 12", "has ended",
                                 timeout=60)
-            check("plik z wzorcem zalozony na dysku (32-bit)",
-                  "[mkmap] zapisano 12288 B wzorca" in make_it)
+            check("a file with the pattern was created on the disk (32-bit)",
+                  "[mkmap] wrote 12288 B of the pattern" in make_it)
 
-            write_it = q3.command("run mmapzap zapis.txt write", "zakonczyl sie",
+            write_it = q3.command("run mmapzap written.txt write", "has ended",
                                 timeout=90)
-            check("caly plik da sie przeczytac przez odwzorowanie "
-                  "do zapisu (32-bit)",
-                  "stary wzorzec przeczytany, bajtow 12288" in write_it)
-            check("odsylane sa tylko strony, do ktorych pisano (32-bit)",
-                  "odeslanych stron: 2" in write_it)
-            check("odeslana strona przestaje byc brudna (32-bit)",
-                  "drugie msync odeslalo: 0" in write_it)
-            check("odeslanie na dysk nie rusza tresci w pamieci (32-bit)",
-                  "zapis przez pamiec gotowy" in write_it and "ZLE" not in write_it)
+            check("the whole file can be read through the mapping "
+                  "for writing (32-bit)",
+                  "the old pattern was read, bytes 12288" in write_it)
+            check("only the pages written to are sent back (32-bit)",
+                  "pages sent back: 2" in write_it)
+            check("a page that was sent back stops being dirty (32-bit)",
+                  "the second msync sent back: 0" in write_it)
+            check("sending it to the disk does not touch the content in memory (32-bit)",
+                  "writing through memory is done" in write_it and "WRONG" not in write_it)
 
-            probe = q3.command("run mmapzap zapis.txt check", "zakonczyl sie",
+            probe = q3.command("run mmapzap written.txt check", "has ended",
                                timeout=90)
-            check("zwykly odczyt widzi to, co wpisala pamiec (32-bit)",
-                  "zwykly odczyt widzi to" in probe and "ZLE" not in probe)
+            check("an ordinary read sees what the memory wrote (32-bit)",
+                  "an ordinary read sees what" in probe and "WRONG" not in probe)
 
-            q3.command("run mkmap bezsync.txt 12", "zakonczyl sie",
+            q3.command("run mkmap nosync.txt 12", "has ended",
                          timeout=60)
-            without = q3.command("run mmapzap bezsync.txt nosync", "zakonczyl sie",
+            without = q3.command("run mmapzap nosync.txt nosync", "has ended",
                                timeout=60)
-            check("program moze skonczyc sie bez proszenia o odeslanie "
-                  "(32-bit)", "koncze bez msync" in without)
-            probe2 = q3.command("run mmapzap bezsync.txt check2",
-                                "zakonczyl sie", timeout=60)
-            check("jadro odsyla brudne strony przy koncu procesu (32-bit)",
-                  "doszly na dysk przy koncu procesu" in probe2)
+            check("a program may end without asking for a flush "
+                  "(32-bit)", "ending with no msync" in without)
+            probe2 = q3.command("run mmapzap nosync.txt check2",
+                                "has ended", timeout=60)
+            check("the kernel sends dirty pages back as the process ends (32-bit)",
+                  "reached the disk as the process ended" in probe2)
 
-            q3.command("run mkmap wspolny.txt 12", "zakonczyl sie",
+            q3.command("run mkmap shared.txt 12", "has ended",
                          timeout=60)
-            visible = q3.command("run mmapzap wspolny.txt shared",
-                                 "zakonczyl sie", timeout=60)
-            check("rodzic widzi zapis dziecka - odwzorowanie wspolne "
+            visible = q3.command("run mmapzap shared.txt shared",
+                                 "has ended", timeout=60)
+            check("the parent sees the child's write - the mapping is shared "
                   "(32-bit)",
-                  "odwzorowanie wspolne" in visible and "ZLE" not in visible)
+                  "the mapping is shared" in visible and "WRONG" not in visible)
         finally:
             q3.close()
 
@@ -173,18 +173,18 @@ def main():
         q4 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog4)
         try:
             screen_text = q4.wait_for("ProtonOS shell", timeout=40)
-            check("drugi rozruch na tym samym dysku (bez formatowania)",
-                  "+ PFS gotowy" in screen_text and "sformatowany" not in screen_text)
-            q4.wait_for("[siec] DHCP", timeout=30)
+            check("a second boot on the same disk (with no formatting)",
+                  "+ PFS ready" in screen_text and "formatted" not in screen_text)
+            q4.wait_for("[net] DHCP", timeout=30)
 
-            po = q4.command("run mmapzap zapis.txt check", "zakonczyl sie",
+            po = q4.command("run mmapzap written.txt check", "has ended",
                               timeout=90)
-            check("zapisy przez pamiec przetrwaly restart maszyny",
-                  "zwykly odczyt widzi to" in po and "ZLE" not in po)
-            po2 = q4.command("run mmapzap bezsync.txt check2",
-                               "zakonczyl sie", timeout=60)
-            check("bajty odeslane przy koncu procesu tez przetrwaly restart",
-                  "doszly na dysk przy koncu procesu" in po2)
+            check("the writes through memory survived the machine restarting",
+                  "an ordinary read sees what" in po and "WRONG" not in po)
+            po2 = q4.command("run mmapzap nosync.txt check2",
+                               "has ended", timeout=60)
+            check("the bytes sent back as the process ended survived the restart too",
+                  "reached the disk as the process ended" in po2)
         finally:
             q4.close()
     finally:

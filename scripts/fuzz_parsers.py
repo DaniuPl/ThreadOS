@@ -61,7 +61,7 @@ def build(workdir):
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:4000])
-        raise SystemExit("nie udalo sie zbudowac harnessu")
+        raise SystemExit("the harness could not be built")
     return binary
 
 
@@ -81,7 +81,7 @@ def build_kernel(workdir):
         out = subprocess.run(cmd, capture_output=True, text=True)
         if out.returncode != 0:
             print(out.stderr[:3000])
-            raise SystemExit("nie udalo sie zbudowac %s" % src)
+            raise SystemExit("%s could not be built" % src)
         objs.append(obj)
 
     binary = os.path.join(workdir, "kharness")
@@ -91,7 +91,7 @@ def build_kernel(workdir):
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:3000])
-        raise SystemExit("nie udalo sie zbudowac harnessu jadra")
+        raise SystemExit("the kernel harness could not be built")
     return binary
 
 
@@ -121,7 +121,7 @@ def frames():
     icmp = b"\x08\x00\x00\x00\x12\x34\x00\x01" + b"proton" * 4
     out.append(ip(1, icmp))
 
-    udp_payload = b"zapytanie testowe"
+    udp_payload = b"a test query"
     udp = (b"\x30\x39" + (53).to_bytes(2, "big") +
            (8 + len(udp_payload)).to_bytes(2, "big") + b"\x00\x00" +
            udp_payload)
@@ -166,20 +166,20 @@ def seeds(workdir):
 
     out["html"].append(
         b"<html><head><title>x</title><style>a{}</style></head><body>"
-        b"<h1>Naglowek</h1><p>Tekst z encja &amp; i odnosnikiem "
-        b'<a href="/dalej">tutaj</a>.</p><ul><li>raz</li><li>dwa</li></ul>'
+        b"<h1>A heading</h1><p>Text with the entity &amp; and a link "
+        b'<a href="/onwards">tutaj</a>.</p><ul><li>raz</li><li>dwa</li></ul>'
         b"<script>var x=1;</script></body></html>")
-    out["html"].append(b"<p>" + b"slowo " * 500 + b"</p>")
+    out["html"].append(b"<p>" + b"a word " * 500 + b"</p>")
 
     out["http"].append(
         b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-        b"Transfer-Encoding: chunked\r\nLocation: /gdzies\r\n\r\n")
+        b"Transfer-Encoding: chunked\r\nLocation: /somewhere\r\n\r\n")
 
     # The picture decoders. A deflate stream at three levels, because
     # level zero writes stored blocks and the other two write both
     # kinds of tree; and the test harness's own JPEG, which came from
     # an outside encoder.
-    body = b"ProtonOS: obrazek, ktory da sie spakowac. " * 40
+    body = b"ProtonOS: a picture that can be compressed. " * 40
     for level in (0, 6, 9):
         out["inflate"].append(zlib.compress(body, level))
     out["inflate"].append(zlib.compress(bytes(range(256)) * 8, 9))
@@ -228,8 +228,8 @@ def main():
         binary = build(workdir)
         kbinary = build_kernel(workdir)
         corpus = seeds(workdir)
-        corpus["ramki"] = frames()
-        print("harness zbudowany, przypadkow na parser: %d" % CASES)
+        corpus["frames"] = frames()
+        print("the harness is built, cases per parser: %d" % CASES)
 
         for parser, base in corpus.items():
             crashes = 0
@@ -239,7 +239,7 @@ def main():
                 with open(path, "wb") as f:
                     f.write(data)
 
-                cmd = ([kbinary, path] if parser == "ramki"
+                cmd = ([kbinary, path] if parser == "frames"
                        else [binary, parser, path])
                 run = subprocess.run(cmd, capture_output=True, timeout=30)
                 if run.returncode != 0:
@@ -251,19 +251,19 @@ def main():
                                      run.stderr.decode(errors="replace")))
                     if crashes >= 3:
                         break
-            print("  %-6s %4d przypadkow, bledow: %d" %
+            print("  %-6s %4d cases, errors: %d" %
                   (parser, CASES, crashes))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
     if failures:
-        print("\nZNALEZIONE BLEDY:")
+        print("\nERRORS FOUND:")
         for parser, path, err in failures[:5]:
             print("--- %s (%s) ---" % (parser, path))
             print("\n".join(err.strip().splitlines()[:12]))
         return 1
 
-    print("\nWszystkie parsery przetrwaly uszkodzone dane.")
+    print("\nEvery parser survived the corrupted data.")
     return 0
 
 

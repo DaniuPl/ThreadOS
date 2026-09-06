@@ -206,7 +206,7 @@ int usbkbd_init(void)
         usbhc_claim(port);
         found = 1;
         task_create("usbkbd", poll_thread, 0);
-        printk("[ OK ] Klawiatura USB (HID, %s) na porcie %d, "
+        printk("[ OK ] A USB keyboard (HID, %s) on port %d, "
                "punkt koncowy %d\n", usbhc_name(), port + 1, ep_num);
         return 1;
     }

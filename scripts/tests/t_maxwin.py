@@ -82,10 +82,10 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 272)           # the 'Ustaw' icon
+            q.mouse_goto(24, 272)           # the 'Config' icon
             q.mouse_click()
             time.sleep(3)
             q.mouse_goto(600, 300)
@@ -93,17 +93,17 @@ def main():
 
             w, h, at = q.screen_raw()
             ty = h - 12                     # the top of the taskbar
-            check("okno aplikacji sie otworzylo", grey(at(WX + 200, WY + 120)))
+            check("the application window opened", grey(at(WX + 200, WY + 120)))
             # The blue stripe of the selected row stops inside the small
             # window - so its reaching further later means something
             # The content starts at (x+1, y+TITLE_H+1) and the selected
             # row's stripe is 20 px below that - so y = WY + 31.
-            check("zaznaczony wiersz jest widoczny w oknie",
+            check("the marked row is visible in the window",
                   blue(at(WX + 200, WY + 31)))
-            check("i konczy sie w granicach okna, nie dalej",
+            check("and it ends inside the window, not beyond",
                   not blue(at(WX + WW + 60, WY + 31)))
-            check("poza oknem jest pulpit", not grey(at(600, WY + 120)))
-            check("ikony na pulpicie widac", orange(at(24, 30)))
+            check("outside the window is the desktop", not grey(at(600, WY + 120)))
+            check("the desktop icons show", orange(at(24, 30)))
 
             # --- maximise ---------------------------------------------
             q.mouse_goto(max_button(WX, WW), WY + 5)
@@ -114,23 +114,23 @@ def main():
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("pasek tytulu ciagnie sie przez caly ekran",
+            check("the title bar runs across the whole screen",
                   blue(at(600, 5)) and blue(at(20, 5)))
-            check("okno siega az do paska zadan",
+            check("the window reaches down to the taskbar",
                   grey(at(300, ty - 3)))
             # The bar is how every other window is reached
             # x=520: past the window buttons, before the clock - the
             # bar's own grey, and nothing drawn on top of it
-            check("pasek zadan nadal widac (okno go nie przykrylo)",
+            check("the taskbar still shows (the window did not cover it)",
                   at(520, ty + 6)[0] > 150 and at(520, ty + 6)[1] > 150)
-            check("ikony pulpitu sa zaslonione", not orange(at(24, 30)))
+            check("the desktop icons are covered", not orange(at(24, 30)))
 
             # The ruler: the selected row's stripe now reaches the right
             # side of the screen, which it can only do if the program was
             # told the new width and given a buffer that big
-            check("program dostal nowy rozmiar (pasek wiersza siega "
-                  "prawej krawedzi)", blue(at(600, 36)))
-            check("i nie jest to pasek tytulu tylko wiersz",
+            check("the program got the new size (the row bar reaches "
+                  "the right edge)", blue(at(600, 36)))
+            check("and it is not the title bar but the row",
                   not blue(at(600, 20)))
 
             # --- restore ----------------------------------------------
@@ -142,13 +142,13 @@ def main():
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("okno wrocilo dokladnie tam, gdzie bylo",
+            check("the window came back exactly where it was",
                   grey(at(WX + 200, WY + 120)) and
                   not grey(at(600, WY + 120)))
-            check("ikony pulpitu znowu widac", orange(at(24, 30)))
-            check("program zwezil sie z powrotem (pasek wiersza konczy "
-                  "sie w oknie)", not blue(at(600, 36)))
-            check("a w oknie ten pasek dalej jest", blue(at(WX + 200, WY + 31)))
+            check("the desktop icons show again", orange(at(24, 30)))
+            check("the program narrowed back (the row bar ends "
+                  "inside the window)", not blue(at(600, 36)))
+            check("and that bar is still in the window", blue(at(WX + 200, WY + 31)))
 
             # --- dragging a maximised window puts it back -------------
             q.mouse_goto(max_button(WX, WW), WY + 5)
@@ -156,7 +156,7 @@ def main():
             q.mouse_click()
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("okno znowu na caly ekran", blue(at(600, 5)))
+            check("the window is full screen again", blue(at(600, 5)))
 
             q.mouse_goto(300, 5)            # grab the title bar
             q.mouse_button(True)
@@ -168,11 +168,11 @@ def main():
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("po zlapaniu za pasek okno przestalo byc na caly ekran",
+            check("once grabbed by the bar the window stopped being full screen",
                   not blue(at(600, 5)))
-            check("i poszlo za kursorem (okno jest tam, gdzie je puszczono)",
+            check("and it followed the pointer (the window is where it was dropped)",
                   grey(at(320, 260)))
-            check("a pulpit jest tam, gdzie okna juz nie ma",
+            check("and the desktop is where the window no longer is",
                   not grey(at(600, 100)))
         finally:
             q.close()

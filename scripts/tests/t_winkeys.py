@@ -98,11 +98,11 @@ def sixty_four():
     it separately. The compositor above is the same code, so here we ask
     only the one question that differs - do the keys arrive."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE (64): brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED (64): no 64-bit image (make kernel64)")
         return
     if shutil.which("grub-mkrescue") is None or \
        shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE (64): brak grub-mkrescue lub qemu-system-x86_64")
+        print("SKIPPED (64): no grub-mkrescue or qemu-system-x86_64")
         return
 
     d = tempfile.mkdtemp()
@@ -127,7 +127,7 @@ def sixty_four():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return
 
@@ -135,8 +135,8 @@ def sixty_four():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
             q.mouse_home()
 
@@ -149,7 +149,7 @@ def sixty_four():
             w, h, at = q.screen_raw()
             row = h - TB_H + 2
             opened = len(bar_buttons(at, w, row))
-            check("(64) zegar wstal z ikony (%d przyciskow na pasku)"
+            check("(64) the clock came up from its icon (%d buttons on the bar)"
                   % opened, opened == 3)
 
             # Closing a window is not instant, and how long it takes
@@ -164,15 +164,15 @@ def sixty_four():
                 left = len(bar_buttons(at, w, row))
                 if left == 2:
                     break
-            check("(64) Alt+F4 dochodzi przez sterownik long mode i "
-                  "zamyka okno (%d przyciskow)" % left, left == 2)
+            check("(64) Alt+F4 gets through the long-mode driver and "
+                  "closes the window (%d buttons)" % left, left == 2)
 
             q.mouse_goto(500, 300)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("(64) prawy przycisk otwiera menu pod kursorem",
+            check("(64) the right button opens the menu under the pointer",
                   is_win(at(600, 300 + 2 * MENU_ROW + 8)) and
                   is_accent(at(600, 308)))
         finally:
@@ -193,11 +193,11 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- Alt+F4 -------------------------------------------------
-            q.mouse_goto(24, 272)          # the "Ustaw" icon (gsettings)
+            q.mouse_goto(24, 272)          # the "Config" icon (gsettings)
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 400)
@@ -205,9 +205,9 @@ def main():
 
             w, h, at = q.screen_raw()
             row = h - TB_H + 2
-            check("ustawienia stoja na ekranie", is_win(at(*P_APP)))
+            check("the settings stand on the screen", is_win(at(*P_APP)))
             before = len(bar_buttons(at, w, row))
-            check("i maja swoj przycisk na pasku (%d z oknami jadra)"
+            check("and they have their button on the bar (%d with the kernel's windows)"
                   % before, before == 3)
 
             q.sendkey("alt-f4")
@@ -218,11 +218,11 @@ def main():
             # Not dropped - ASKED. A window pulled out from under a
             # process leaves it running; this one ended itself, which
             # is what its own exit code says.
-            check("Alt+F4 poprosil program, a ten zakonczyl sie sam",
-                  "proces 'gsettings' zakonczyl sie (kod 0)" in log)
-            check("okno zniknelo z ekranu", not is_win(at(*P_APP)))
+            check("Alt+F4 asked the program, and it ended by itself",
+                  "process \'gsettings\' has ended (code 0)" in log)
+            check("the window is gone from the screen", not is_win(at(*P_APP)))
             after = len(bar_buttons(at, w, row))
-            check("i zniknelo z paska zadan (%d -> %d przyciskow)"
+            check("and it went from the taskbar (%d -> %d buttons)"
                   % (before, after), after == before - 1)
 
             # Alt+F4 with nothing focused closes nothing - the kernel's
@@ -230,20 +230,20 @@ def main():
             q.sendkey("alt-f4")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("Alt+F4 bez ogniska nie zamyka niczego - okna jadra "
-                  "stoja gdzie staly", len(bar_buttons(at, w, row)) == after)
+            check("Alt+F4 with no focus closes nothing - the kernel's windows "
+                  "stand where they stood", len(bar_buttons(at, w, row)) == after)
 
             # --- two clicks on the title bar ----------------------------
             # Every system does this, and a person who has used one
             # tries it here in the first minute: the window fills the
             # screen, and does it again the other way round.
-            q.mouse_goto(24, 272)              # the "Ustaw" icon again
+            q.mouse_goto(24, 272)              # the "Config" icon again
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 200)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("okno otwarte na swoim miejscu", is_win(at(400, 200)))
+            check("the window opened in its place", is_win(at(400, 200)))
 
             q.mouse_goto(WX + 100, WY + 4)
             time.sleep(0.4)
@@ -254,9 +254,9 @@ def main():
             q.mouse_goto(320, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("dwa klikniecia w pasek tytulu rozwijaja okno na caly "
-                  "ekran", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
-            check("ale nie na pasek zadan",
+            check("two clicks on the title bar open the window to the whole "
+                  "screen", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
+            check("but not over the taskbar",
                   is_bar(at(320, h - TB_H + 6)))
 
             q.mouse_goto(200, 4)
@@ -268,13 +268,13 @@ def main():
             q.mouse_goto(600, 200)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("i drugie dwa klikniecia oddaja mu wlasny rozmiar",
+            check("and another two clicks give it its own size back",
                   is_win(at(400, 200)) and not is_win(at(20, 300)))
 
             q.sendkey("alt-f4")                # away with it again
             time.sleep(3)
             w, h, at = q.screen_raw()
-            check("po zamknieciu pasek zadan jest jak byl",
+            check("after the close the taskbar is as it was",
                   len(bar_buttons(at, w, row)) == after)
 
             # --- the menu under the right button ------------------------
@@ -285,20 +285,20 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
-            check("prawy przycisk na pulpicie otworzyl menu POD KURSOREM",
+            check("the right button on the desktop opened the menu UNDER THE POINTER",
                   is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
-            check("i ma swoja ramke, a nie samo tlo",
+            check("and it has a frame of its own, not just background",
                   near(at(MX, MY + 2 * MENU_ROW + 8), 150))
             # The pointer sits on the first entry, so that entry wears
             # the accent colour - a menu that does not answer the
             # pointer is a list of words that happens to be clickable
-            check("pozycja pod kursorem jest podswietlona",
+            check("the entry under the pointer is highlighted",
                   is_accent(at(MX + 100, MY + 8)))
-            check("a dalsza juz nie", not is_accent(
+            check("and a further one is not", not is_accent(
                   at(MX + 100, MY + 2 * MENU_ROW + 8)))
             # It came to the hand: nothing opened over the Menu button,
             # where the menu stands when that button is what opened it
-            check("i nic nie wyskoczylo nad przyciskiem Menu",
+            check("and nothing popped up above the Menu button",
                   not is_win(at(60, 430)))
 
             # --- a click on an entry starts the program -----------------
@@ -316,12 +316,12 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
-            check("menu zamknelo sie po wyborze",
+            check("the menu closed after the choice",
                   not is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
             shown = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
-            check("program z menu naprawde chodzi - zegar rysuje "
+            check("the program from the menu really runs - the clock draws "
                   "godzine ('%s')" % shown, shown.count(":") == 2)
-            check("i ma swoj przycisk na pasku",
+            check("and it has its button on the bar",
                   len(bar_buttons(at, w, row)) == after + 1)
 
             # --- the right button over a window ---------------------------
@@ -334,9 +334,9 @@ def main():
             q.mouse_right_click()
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("prawy przycisk na oknie nie otwiera menu",
+            check("the right button on a window does not open the menu",
                   not is_accent(at(WX + 100, WY + 28)))
-            check("i zamyka to, ktore bylo otwarte",
+            check("and it closes the one that was open",
                   not is_win(at(600, 350 + 2 * MENU_ROW + 8)))
 
             # --- the menu never hangs off the screen ----------------------
@@ -348,11 +348,11 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             top = h - TB_H - MENU_N * MENU_ROW
-            check("menu przy krawedzi zjechalo w lewo i w gore",
+            check("the menu at the edge moved left and up",
                   is_win(at(w - 20, top + 2 * MENU_ROW + 8)))
-            check("nie wychodzi poza prawa krawedz",
+            check("it does not go past the right edge",
                   not is_win(at(w - MENU_W - 12, top + 2 * MENU_ROW + 8)))
-            check("i nie zachodzi na pasek zadan",
+            check("and it does not run over the taskbar",
                   is_bar(at(w - 20, h - TB_H + 6)))
 
             # --- and Alt+F4 on a window that came from the menu ----------
@@ -360,12 +360,12 @@ def main():
             time.sleep(3)
             w, h, at = q.screen_raw()
             log = q.serial()
-            check("Alt+F4 zamyka takze okno uruchomione z menu",
-                  "proces 'gclock' zakonczyl sie (kod 0)" in log)
+            check("Alt+F4 closes a window started from the menu too",
+                  "process \'gclock\' has ended (code 0)" in log)
             gone = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
-            check("zegar zniknal z ekranu ('%s')" % gone,
+            check("the clock is gone from the screen ('%s')" % gone,
                   gone.count(":") != 2)
-            check("i z paska zadan", len(bar_buttons(at, w, row)) == after)
+            check("and from the taskbar", len(bar_buttons(at, w, row)) == after)
         finally:
             q.close()
     finally:
@@ -373,7 +373,7 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    print("--- to samo na jadrze 64-bitowym ---")
+    print("--- the same on the 64-bit kernel ---")
     sixty_four()
     return summary()
 

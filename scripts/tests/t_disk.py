@@ -29,15 +29,15 @@ from ptest import check, summary, make_iso64, no64
 
 # A name that is NOT in the initrd - otherwise there is no telling
 # where the program came from
-ON_DISK = "zdysku"
+ON_DISK = "fromdisk"
 
 
 def main():
-    print("--- programy z dysku (jadro 64-bitowe) ---")
+    print("--- programs from the disk (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
@@ -46,7 +46,7 @@ def main():
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -55,27 +55,27 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("PFS gotowy", timeout=90)
+            q.wait_serial("PFS ready", timeout=90)
             q.wait_serial("proton64>", timeout=30)
 
             missing = q.command("run " + ON_DISK, "run:")
-            check("przed skopiowaniem programu na dysku nie ma",
-                  "run: nie ma programu" in missing)
+            check("before the copy the program is not on the disk",
+                  "run: there is no program" in missing)
 
             copied = q.command("cp hello64 " + ON_DISK, "cp:")
-            check("'cp' przepisuje program z initrd na dysk",
+            check("'cp' copies a program from the initrd onto the disk",
                   "cp: 'hello64' -> '%s'" % ON_DISK in copied)
 
             listing = q.command("fls", "  %s  (" % ON_DISK)
-            check("skopiowany program widac w spisie plikow dysku",
+            check("the copied program shows in the disk's file list",
                   "  %s  (" % ON_DISK in listing)
 
-            wyn = q.command("run " + ON_DISK, "[hello64] koncze",
+            wyn = q.command("run " + ON_DISK, "[hello64] ending",
                               timeout=30)
-            check("program z dysku uruchamia sie i dziala",
-                  "[hello64] czesc" in wyn)
-            check("jadro melduje, ze wzielo go z dysku, a nie z initrd",
-                  "Program '%s' z dysku" % ON_DISK in wyn)
+            check("a program from the disk starts and runs",
+                  "[hello64] hello" in wyn)
+            check("the kernel reports it took it off the disk, not out of the initrd",
+                  "Program '%s' from the disk" % ON_DISK in wyn)
         finally:
             q.close()
             if os.path.exists(slog):
@@ -87,38 +87,38 @@ def main():
                   sata=True, qemu="qemu-system-x86_64")
         try:
             q2.wait_serial("proton64>", timeout=90)
-            po = q2.command("run " + ON_DISK, "[hello64] koncze",
+            po = q2.command("run " + ON_DISK, "[hello64] ending",
                               timeout=30)
-            check("program przetrwal restart i dalej sie uruchamia",
-                  "Program '%s' z dysku" % ON_DISK in po)
+            check("the program survived the restart and still starts",
+                  "Program '%s' from the disk" % ON_DISK in po)
 
             # A program from the disk is an ordinary program: it has its
             # own address space and ends with its own exit code
-            check("program z dysku konczy sie wlasnym kodem wyjscia",
-                  "koniec, kod wyjscia 7" in po)
+            check("a program from the disk ends with its own exit code",
+                  "done, exit code 7" in po)
 
             # ...and a second time too, that is, the buffer after it was
             # given back. We count only what arrived after THIS command:
             # hello64 also starts at boot, so there is more than one of it
             # on the port.
-            two = q2.command("run " + ON_DISK, "[hello64] koncze",
+            two = q2.command("run " + ON_DISK, "[hello64] ending",
                                timeout=30)
-            check("drugie uruchomienie z dysku tez przechodzi",
-                  two.count("[hello64] koncze") == 1)
+            check("a second run from the disk passes too",
+                  two.count("[hello64] ending") == 1)
 
             # The same path from ring 3: the user shell does a fork and
             # an exec, and exec looks for a program just as the kernel
             # does - so a program from the disk starts from there too
             q2.command("run ush64", "ush64$")
-            from_ring3 = q2.command(ON_DISK, "[hello64] koncze", timeout=30)
-            check("exec z pierscienia 3 tez znajduje program na dysku",
-                  "[hello64] czesc" in from_ring3)
-            q2.command("exit", "koniec, kod wyjscia")
+            from_ring3 = q2.command(ON_DISK, "[hello64] ending", timeout=30)
+            check("exec from ring 3 finds the program on the disk too",
+                  "[hello64] hello" in from_ring3)
+            q2.command("exit", "done, exit code")
 
             # A name that is nowhere is still an error
-            bad_one = q2.command("run niczegotakiego", "run: nie ma programu")
-            check("nieistniejacy program dalej jest bledem",
-                  "run: nie ma programu" in bad_one)
+            bad_one = q2.command("run nosuchthing", "run: there is no program")
+            check("a program that is not there is still an error",
+                  "run: there is no program" in bad_one)
         finally:
             q2.close()
             if os.path.exists(slog2):
@@ -132,7 +132,7 @@ def main():
     # --- The same in the 32-bit kernel ---
     # The same file looking for the program, the same path; the only
     # difference is the ELF loader on the other side
-    print("--- programy z dysku (jadro 32-bitowe) ---")
+    print("--- programs from the disk (the 32-bit kernel) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
     with open(disk32, "wb") as fh:
@@ -142,14 +142,14 @@ def main():
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
             copied = q3.command("cp hello " + ON_DISK, "cp:")
-            check("'cp' przepisuje program na dysk (32-bit)",
+            check("'cp' copies a program onto the disk (32-bit)",
                   "cp: 'hello' -> '%s'" % ON_DISK in copied)
-            wyn = q3.command("run " + ON_DISK, "[hello] koncze",
+            wyn = q3.command("run " + ON_DISK, "[hello] ending",
                                timeout=30)
-            check("program z dysku uruchamia sie (32-bit)",
-                  "[hello] czesc" in wyn)
-            check("jadro 32-bitowe tez melduje, skad go wzielo",
-                  "exec '%s' z dysku" % ON_DISK in wyn)
+            check("a program from the disk starts (32-bit)",
+                  "[hello] hello" in wyn)
+            check("the 32-bit kernel reports where it took it from too",
+                  "exec '%s' from the disk" % ON_DISK in wyn)
         finally:
             q3.close()
     finally:

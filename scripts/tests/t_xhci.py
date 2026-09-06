@@ -55,29 +55,29 @@ def type_text(q, text, delay=0.12):
 
 
 def main():
-    print("--- klawiatura USB na xHCI (jadro 64-bitowe) ---")
+    print("--- a USB keyboard on xHCI (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, usbkbd="xhci",
                      qemu="qemu-system-x86_64")
             try:
-                start = q.wait_serial("Klawiatura USB", timeout=60)
+                start = q.wait_serial("A USB keyboard", timeout=60)
                 # The selection layer says by itself what it is talking
                 # through - and it is to say xHCI here, because there is
                 # no UHCI on this machine
-                check("klawiatura znaleziona na kontrolerze xHCI",
-                      re.search(r"Klawiatura USB \(HID, xHCI\) na porcie \d+",
+                check("the keyboard was found on the xHCI controller",
+                      re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
                                 start) is not None)
 
                 q.wait_serial("proton64>", timeout=30)
@@ -86,7 +86,7 @@ def main():
                 type_text(q, "uptime")
                 time.sleep(1.5)
                 po = q.serial()[before:]
-                check("polecenie wpisane przez xHCI wykonuje sie",
+                check("a command typed through xHCI runs",
                       "Uptime:" in po)
 
                 # A capital letter comes from a modifier in the HID report -
@@ -107,7 +107,7 @@ def main():
                     if "echo A" in q.serial()[before:]:
                         big_one = True
                         break
-                check("modyfikator Shift z raportu HID daje wielka litere",
+                check("the Shift modifier from the HID report gives a capital letter",
                       big_one)
 
                 # Alt+F2 is a different path inside the kernel than an
@@ -115,8 +115,8 @@ def main():
                 # queue)
                 q.sendkey("alt-f2")
                 time.sleep(1.0)
-                check("Alt+F2 z klawiatury na xHCI przelacza konsole",
-                      "konsola 2" in q.screen_fbcon())
+                check("Alt+F2 from the xHCI keyboard switches consoles",
+                      "console 2" in q.screen_fbcon())
             finally:
                 q.close()
         finally:
@@ -136,26 +136,26 @@ def main():
     # then the controller has to be told the WAY to what was found,
     # four bits per tier of hubs.
     if not no64():
-        print("--- klawiatura za koncentratorem USB ---")
+        print("--- a keyboard behind a USB hub ---")
         dh = tempfile.mkdtemp()
         isoh = tempfile.mktemp(suffix=".iso")
         slogh = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta dla proby z koncentratorem buduje sie",
+            check("the disc for the hub attempt builds",
                   make_iso64(dh, isoh, text=True))
             qh = Qemu(KERNEL, INITRD, cdrom=isoh, serial=slogh,
                       usbkbd="hub", qemu="qemu-system-x86_64")
             try:
                 start = qh.wait_serial("proton64>", timeout=90)
-                check("system znajduje koncentrator i liczy jego gniazdka",
-                      re.search(r"Koncentrator USB na gniazdku \d+: "
-                                r"\d+ gniazdek wiecej", start) is not None)
+                check("the system finds the hub and counts its sockets",
+                      re.search(r"A USB hub in socket \d+: "
+                                r"\d+ sockets more", start) is not None)
 
-                m = re.search(r"Klawiatura USB \(HID, xHCI\) na porcie "
+                m = re.search(r"A USB keyboard \(HID, xHCI\) on port "
                               r"(\d+)", start)
-                check("i klawiature ZA nim - na gniazdku, ktorego "
-                      "kontroler nie ma"
-                      + (" (porcie %s)" % m.group(1) if m else ""),
+                check("and the keyboard BEHIND it - in a socket the "
+                      "there is no controller"
+                      + (" (port %s)" % m.group(1) if m else ""),
                       m is not None and int(m.group(1)) > 4)
 
                 # And it is a keyboard, not a line in a log: what is
@@ -167,7 +167,7 @@ def main():
                 qh.sendkey("ret")
                 time.sleep(2)
                 typed = qh.serial()[before:]
-                check("i to, co na niej wpisane, dochodzi do powloki",
+                check("and what is typed on it reaches the shell",
                       "Uptime:" in typed)
             finally:
                 qh.close()
@@ -187,7 +187,7 @@ def main():
     # it, because every USB test until now booted through the old BIOS.
     reason = no64()
     if not reason and os.path.exists(OVMF_CODE) and os.path.exists(OVMF_VARS):
-        print("--- klawiatura USB na xHCI, start przez UEFI ---")
+        print("--- a USB keyboard on xHCI, booted through UEFI ---")
         esp = tempfile.mkdtemp()
         nvram = tempfile.mktemp(suffix=".fd")
         slogu = tempfile.mktemp(suffix=".log")
@@ -197,7 +197,7 @@ def main():
                                stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL)
             if not os.path.exists(LOADER):
-                print("POMINIETE: brak build/BOOTX64.EFI")
+                print("SKIPPED: no build/BOOTX64.EFI")
             else:
                 os.makedirs(os.path.join(esp, "EFI", "BOOT"))
                 shutil.copy(LOADER,
@@ -210,17 +210,17 @@ def main():
                           usbkbd="xhci", qemu="qemu-system-x86_64",
                           uefi=(OVMF_CODE, nvram))
                 try:
-                    start = q4.wait_serial("System 64-bitowy gotowy",
+                    start = q4.wait_serial("The 64-bit system is ready",
                                            timeout=140)
-                    check("po starcie przez UEFI klawiatura USB tez sie "
-                          "znajduje",
-                          re.search(r"Klawiatura USB \(HID, xHCI\)",
+                    check("after a UEFI boot the USB keyboard is "
+                          "finds",
+                          re.search(r"A USB keyboard \(HID, xHCI\)",
                                     start) is not None)
-                    said = q4.command("sprzet", "PCI:", timeout=30)
-                    check("i 'sprzet' nie mowi juz 'USB: brak'",
+                    said = q4.command("hardware", "PCI:", timeout=30)
+                    check("and 'hardware' no longer says 'USB: none'",
                           "USB:      xHCI" in said)
-                    check("a gdyby mowil, to z powodem, nie bez",
-                          "USB:      brak" not in said or "(" in said)
+                    check("and if it did, it would say why",
+                          "USB:      none" not in said or "(" in said)
                 finally:
                     q4.close()
         finally:
@@ -230,17 +230,17 @@ def main():
                     os.unlink(f)
 
     # --- The same in the 32-bit kernel ---
-    print("--- klawiatura USB na xHCI (jadro 32-bitowe) ---")
+    print("--- a USB keyboard on xHCI (the 32-bit kernel) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32,
                   usbkbd="xhci")
         try:
-            start = q3.wait_serial("Klawiatura USB", timeout=60)
-            check("klawiatura znaleziona na kontrolerze xHCI (32-bit)",
-                  re.search(r"Klawiatura USB \(HID, xHCI\) na porcie \d+",
+            start = q3.wait_serial("A USB keyboard", timeout=60)
+            check("the keyboard was found on the xHCI controller (32-bit)",
+                  re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
                             start) is not None)
-            check("kontroler nie zglosil sie jako UHCI",
+            check("the controller did not report itself as UHCI",
                   "HID, UHCI" not in start)
 
             q3.wait_serial("ProtonOS shell", timeout=40)
@@ -249,8 +249,8 @@ def main():
             type_text(q3, "uptime")
             time.sleep(1.5)
             po = q3.serial()[before:]
-            check("polecenie wpisane przez xHCI wykonuje sie (32-bit)",
-                  "uptime:" in po and "tyknac" in po)
+            check("a command typed through xHCI runs (32-bit)",
+                  "uptime:" in po and "ticks" in po)
 
             # Several keys in a row: the reports have to go one after another
             # through the same transfer ring, not just the first one
@@ -258,8 +258,8 @@ def main():
             type_text(q3, "help")
             time.sleep(1.5)
             help_text = q3.serial()[before:]
-            check("cale slowo dochodzi znak po znaku (32-bit)",
-                  "help" in help_text and "Dostepne komendy" in help_text)
+            check("the whole word arrives character by character (32-bit)",
+                  "help" in help_text and "Available commands" in help_text)
         finally:
             q3.close()
     finally:

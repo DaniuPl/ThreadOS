@@ -155,7 +155,7 @@ void _start(int argc, char **argv)
 
     print("[httpget] HTTP ");
     print_dec((uint32_t)res.status);
-    print(res.chunked ? " (chunked), tresc " : ", tresc ");
+    print(res.chunked ? " (chunked), content " : ", content ");
     print_dec(res.body_len);
     print(" B\n");
     sys_exit(res.status == 200 ? 0 : 1);

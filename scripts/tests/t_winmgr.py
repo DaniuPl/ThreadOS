@@ -68,22 +68,22 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- an application window opens ---------------------------
-            q.mouse_goto(24, 272)          # the 'Ustaw' icon
+            q.mouse_goto(24, 272)          # the 'Config' icon
             q.mouse_click()
             time.sleep(3)
             q.mouse_goto(600, 430)         # the cursor out of the way
             time.sleep(1)
 
             w, h, at = q.screen_raw()
-            check("okno aplikacji sie otworzylo (szare tlo w slocie 2)",
+            check("the application window opened (a grey background in slot 2)",
                   grey(at(*P_APP)))
             # Beyond the window there is desktop - so that growing it is
             # visible as a change and not as something already there
-            check("poza oknem jest pulpit, a nie okno",
+            check("outside the window is the desktop, not a window",
                   not grey(at(WX + WW + 60, WY + 100)))
 
             # --- resizing ----------------------------------------------
@@ -97,12 +97,12 @@ def main():
             time.sleep(1)
 
             w, h, at = q.screen_raw()
-            check("okno uroslo tam, gdzie przedtem byl pulpit",
+            check("the window grew where the desktop used to be",
                   grey(at(WX + WW + 60, WY + 100)))
             # The program redrew itself at the new size: its background
             # reaches the new bottom edge, and a buffer that was not
             # remade would leave rubbish or the desktop there
-            check("program przerysowal sie w nowym rozmiarze",
+            check("the program redrew itself at the new size",
                   grey(at(WX + 40, WY + WH + 30)))
 
 
@@ -115,26 +115,26 @@ def main():
             time.sleep(1)
 
             log = q.serial()
-            check("program zakonczyl sie SAM, z kodem zero",
-                  "proces 'gsettings' zakonczyl sie (kod 0)" in log)
+            check("the program ended BY ITSELF, with code zero",
+                  "process \'gsettings\' has ended (code 0)" in log)
 
             w, h, at = q.screen_raw()
-            check("okno zniknelo z ekranu", not grey(at(*P_APP)))
+            check("the window is gone from the screen", not grey(at(*P_APP)))
             # The taskbar button has to go too - a window that is gone
             # from the screen and left on the bar is half-closed
             bar = q.screen_raw()[2]
-            check("i zniknelo z paska zadan",
+            check("and it went from the taskbar",
                   not any(bar(x, 474)[2] > 150 and bar(x, 474)[0] < 90
                           for x in range(150, 250)))
         finally:
             q.close()
 
         # --- an application that does not listen ----------------------
-        print("--- program, ktory nie slucha ---")
+        print("--- a program that does not listen ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, serial=slog2)
         try:
-            check("pulpit wstal (druga proba)", q2.wait_desktop(timeout=40))
+            check("the desktop came up (a second attempt)", q2.wait_desktop(timeout=40))
             q2.mouse_home()
             # 'gdeaf' has no icon - the kernel shell starts it, which in
             # graphics mode listens as long as no window has focus
@@ -144,7 +144,7 @@ def main():
             time.sleep(1)
 
             w, h, at = q2.screen_raw()
-            check("okno gluchego programu jest na ekranie",
+            check("the deaf program's window is on the screen",
                   grey(at(*P_DEAF)))
 
             q2.mouse_goto(WX + 100 + 2 - 6, WY + 5)   # its [x] (100 wide)
@@ -157,15 +157,15 @@ def main():
             time.sleep(1)
 
             log = q2.serial()
-            check("pulpit przestal prosic i zabil program",
-                  "zabity" in log or "kod -9" in log or
-                  "proces 'gdeaf'" in log)
+            check("the desktop stopped asking and killed the program",
+                  "killed" in log or "code -9" in log or
+                  "the 'gdeaf' process" in log)
             w, h, at = q2.screen_raw()
-            check("okno zniknelo mimo braku odpowiedzi",
+            check("the window is gone even though nothing answered",
                   not grey(at(*P_DEAF)))
 
             # And the desktop is alive after all that
-            check("pulpit dziala dalej",
+            check("the desktop is still running",
                   at(600, 300)[1] > 20 or at(600, 300)[2] > 20)
         finally:
             q2.close()

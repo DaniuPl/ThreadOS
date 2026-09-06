@@ -34,11 +34,11 @@ REQUEST_MIB = 18
 
 
 def main():
-    print("--- wymiana stron na dysk (jadro 64-bitowe) ---")
+    print("--- swapping pages to the disk (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
@@ -48,7 +48,7 @@ def main():
     with open(disk, "wb") as fh:
         fh.truncate(64 * 1024 * 1024)
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -56,35 +56,35 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, ram_mib=RAM_MIB, qemu="qemu-system-x86_64")
         try:
-            start = q.wait_serial("Wymiana stron:", timeout=90)
-            check("plik wymiany zalozony na dysku",
-                  re.search(r"Wymiana stron: \d+ KiB na dysku \(swap\.sys\)",
+            start = q.wait_serial("Page swapping:", timeout=90)
+            check("the swap file was created on the disk",
+                  re.search(r"Page swapping: \d+ KiB on the disk \(swap\.sys\)",
                             start) is not None)
 
             q.wait_serial("proton64>", timeout=30)
             q.type_line("run swaptest64 %d" % REQUEST_MIB)
-            out = q.wait_serial("[swaptest64] wszystkie", timeout=240)
-            check("program dostal wiecej pamieci, niz maszyna ma RAM-u",
-                  "[swaptest64] zapisuje %d MiB" % REQUEST_MIB in out)
-            check("wszystkie strony wrocily z dysku bez zmian",
-                  "stron wrocilo w calosci" in out)
+            out = q.wait_serial("[swaptest64] all", timeout=240)
+            check("the program got more memory than the machine has RAM",
+                  "[swaptest64] writing %d MiB" % REQUEST_MIB in out)
+            check("every page came back off the disk unchanged",
+                  "pages came back whole" in out)
 
             # Without this the test would pass even if swapping never
             # started at all
             q.type_line("mem")
-            stan = q.wait_serial("Wymiana:", timeout=20)
-            m = re.search(r"Wymiana: \d+/\d+ stron na dysku "
-                          r"\(wyrzuconych (\d+), sciagnietych (\d+)\)", stan)
-            check("jadro naprawde wyrzucalo strony na dysk",
+            stan = q.wait_serial("Swap:", timeout=20)
+            m = re.search(r"Swap: \d+/\d+ pages on disk "
+                          r"\(evicted (\d+), fetched (\d+)\)", stan)
+            check("the kernel really did evict pages to the disk",
                   m is not None and int(m.group(1)) > 0)
-            check("i sciagalo je z powrotem",
+            check("and fetched them back",
                   m is not None and int(m.group(2)) > 0)
 
             # After the program ends its space in the swap file returns to
             # the pool: cleaning the address space up frees the pages
             # that lay on the disk at the moment of death too
-            used = re.search(r"Wymiana: (\d+)/", stan)
-            check("po koncu programu plik wymiany jest pusty",
+            used = re.search(r"Swap: (\d+)/", stan)
+            check("once the program ends the swap file is empty",
                   used is not None and int(used.group(1)) == 0)
 
             # A second pass on the same machine: the space reclaimed really
@@ -96,11 +96,11 @@ def main():
             second = ""
             while time.time() < end:
                 second = q.serial()
-                if second.count("stron wrocilo w calosci") >= 2:
+                if second.count("pages came back whole") >= 2:
                     break
                 time.sleep(1.0)
-            check("druga proba na tej samej maszynie tez przechodzi",
-                  second.count("stron wrocilo w calosci") == 2)
+            check("a second attempt on the same machine passes too",
+                  second.count("pages came back whole") == 2)
         finally:
             q.close()
     finally:

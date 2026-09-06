@@ -53,10 +53,10 @@ void _start(void)
         num(w, 96, 28, si.uptime_s, C_TEXT);
 
         /* The usage bar: a red background, the used part in blue */
-        uint32_t ile = si.ram_kib
+        uint32_t count = si.ram_kib
                            ? si.used_kib * BAR_W / si.ram_kib : 0;
         win_rect(w, 4, 48, BAR_W, 12, C_RED);
-        win_rect(w, 4, 48, (int)ile, 12, C_BLUE);
+        win_rect(w, 4, 48, (int)count, 12, C_BLUE);
 
         sys_sleep(500);
     }

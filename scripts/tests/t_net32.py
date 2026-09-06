@@ -38,59 +38,59 @@ def main():
         # The IP address comes from slirp's DHCP server only after the
         # shell has started - without waiting for it every network test
         # would be a race with the lease
-        q.wait_for("[siec] DHCP", timeout=30)
+        q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
         q.type_line("ifconfig")
         ifc = q.wait_for("eth0  RTL8139, MAC")
-        check("ifconfig nazywa karte, ktora odpowiedziala",
+        check("ifconfig names the card that answered",
               "eth0  RTL8139, MAC" in ifc)
-        check("ifconfig pokazuje adres IP", "IP 10.0.2.15" in ifc)
-        check("ifconfig pokazuje brame", "brama 10.0.2.2" in ifc)
-        check("ifconfig pokazuje serwer DNS z DHCP", "DNS 10.0.2.3" in ifc)
+        check("ifconfig shows the IP address", "IP 10.0.2.15" in ifc)
+        check("ifconfig shows the gateway", "gateway 10.0.2.2" in ifc)
+        check("ifconfig shows the DNS server from DHCP", "DNS 10.0.2.3" in ifc)
 
         q.type_line("ping 10.0.2.2")
         q.type_line("dns 10.0.2.3")     # typing ahead during the ping
         pong = q.wait_for("40 B od 10.0.2.2: seq=1", timeout=20)
-        check("ping: odpowiedz ICMP echo od bramy",
+        check("ping: an ICMP echo answer from the gateway",
               "40 B od 10.0.2.2" in pong)
-        stats = q.wait_for("--- statystyki:", timeout=20)
-        check("ping: wszystkie 4 pakiety wrocily",
-              "wyslano 4, odebrano 4" in stats)
-        buffered = q.wait_for("serwer DNS ustawiony na", timeout=20)
-        check("znaki wpisane w trakcie komendy nie gina (bufor klawiatury)",
-              "serwer DNS ustawiony na 10.0.2.3" in buffered)
+        stats = q.wait_for("--- statistics:", timeout=20)
+        check("ping: all 4 packets came back",
+              "sent 4, received 4" in stats)
+        buffered = q.wait_for("DNS server set to", timeout=20)
+        check("characters typed during a command are not lost (the keyboard buffer)",
+              "DNS server set to 10.0.2.3" in buffered)
 
         q.type_line("arp")
-        check("tablica ARP zna MAC bramy",
+        check("the ARP table knows the gateway's MAC",
               "10.0.2.2" in q.wait_for("10.0.2.2  "))
 
         # UDP sockets in ring 3: two processes talk through the loopback,
         # so the test does not depend on any network outside
         q.type_line("run udpecho")
-        view = q.wait_for("nasluchuje na porcie 7777", timeout=10)
-        check("proces ring 3 otworzyl gniazdo UDP",
-              "nasluchuje na porcie 7777" in view)
+        view = q.wait_for("listening on port 7777", timeout=10)
+        check("a ring 3 process opened a UDP socket",
+              "listening on port 7777" in view)
 
         q.type_line("run udptest")
-        echo = q.wait_for("echo wrocilo", timeout=10)
-        check("datagram wrocil do nadawcy przez petle zwrotna",
-              "echo wrocilo: proton-udp" in echo)
-        check("serwer zobaczyl datagram od klienta",
+        echo = q.wait_for("the echo came back", timeout=10)
+        check("the datagram came back to the sender through the loopback",
+              "the echo came back: proton-udp" in echo)
+        check("the server saw the client's datagram",
               "[udpecho] od 10.0.2.15:" in echo)
-        check("klient zakonczyl sie bez bledu",
-              "proces 'udptest' zakonczyl sie (kod 0)" in echo)
+        check("the client ended with no error",
+              "process \'udptest\' has ended (code 0)" in echo)
 
         # A socket has an owner: after the process dies the port has to be
         # freed
         q.type_line("kill udpecho")
         time.sleep(0.5)
-        q.type_line("clear")          # a clear screen: the old "nasluchuje" disappears
+        q.type_line("clear")          # a clear screen: the old "listening" disappears
         q.type_line("run udpecho")
-        again = q.wait_for("porcie 7777", timeout=10)
-        check("port zwolniony po smierci wlasciciela gniazda",
-              "nasluchuje na porcie 7777" in again
-              and "nie udalo sie otworzyc gniazda" not in again)
+        again = q.wait_for("port 7777", timeout=10)
+        check("the port was freed once the socket's owner died",
+              "listening on port 7777" in again
+              and "the socket could not be opened" not in again)
         q.type_line("kill udpecho")
 
         # DNS from ring 3. We ask our own server standing on the host
@@ -98,16 +98,16 @@ def main():
         # the machine's resolver.
         dns_stop, dns_ok = start_dns_server()
         if not dns_ok:
-            print("POMINIETE (DNS): " + DNS_HINT)
+            print("SKIPPED (DNS): " + DNS_HINT)
         else:
             try:
                 q.type_line("clear")
                 q.type_line("dns 10.0.2.2")
-                q.wait_for("serwer DNS ustawiony", timeout=10)
+                q.wait_for("DNS server set", timeout=10)
                 q.type_line("run nslookup protonos.test")
-                dns = q.wait_for("ma adres", timeout=20)
-                check("nslookup rozwiazal nazwe przez wskazany serwer DNS",
-                      "protonos.test ma adres 10.0.2.2" in dns)
+                dns = q.wait_for("has the address", timeout=20)
+                check("nslookup resolved the name through the named DNS server",
+                      "protonos.test has the address 10.0.2.2" in dns)
             finally:
                 dns_stop()
 
@@ -116,9 +116,9 @@ def main():
         # The output of the previous 'ifconfig' (from before the ping)
         # hangs on the screen too - what counts is the last, freshest
         # occurrence
-        rx = re.findall(r"RX (\d+) pakietow, TX (\d+) pakietow", ifc)
-        check(f"licznik pakietow RX/TX rosnie"
-              f" (ostatni: {rx[-1] if rx else None})",
+        rx = re.findall(r"RX (\d+) packets, TX (\d+) packets", ifc)
+        check(f"the RX/TX packet counters grow"
+              f" (the last: {rx[-1] if rx else None})",
               bool(rx) and int(rx[-1][0]) > 0 and int(rx[-1][1]) > 0)
     finally:
         q.close()

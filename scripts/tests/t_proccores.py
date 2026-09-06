@@ -42,8 +42,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
-PATTERN = re.compile(r"\[cores\] (dziecko|rodzic ): rdzenie (\d+), "
-                  r"tyknac (\d+), suma (\d+)")
+PATTERN = re.compile(r"\[cores\] (child|parent ): cores (\d+), "
+                  r"ticks (\d+), sum (\d+)")
 
 
 def parse_lines(out):
@@ -57,12 +57,12 @@ def check_pair(out, label):
     agree on the result. Returns (mask_together, most_ticks,
     checksum)."""
     proc = parse_lines(out)
-    check("oba procesy doszly do konca" + label, len(proc) == 2)
+    check("both processes ran to the end" + label, len(proc) == 2)
     if len(proc) != 2:
         return None
 
     sums = set(p[2] for p in proc)
-    check("oba policzyly dokladnie to samo" + label, len(sums) == 1)
+    check("both counted exactly the same" + label, len(sums) == 1)
 
     mask = proc[0][0] | proc[1][0]
     ticks = max(p[1] for p in proc)
@@ -74,29 +74,29 @@ def run_case(q, ncores, label):
     parallel_run = None
 
     serial_run = check_pair(
-        q.command("run cores", "gotowe", timeout=180), " ('run')" + label)
+        q.command("run cores", "done", timeout=180), " ('run')" + label)
     if serial_run:
         mask, ticks, _ = serial_run
-        check("bez 'runw' oba procesy zostaly na rdzeniu rozruchowym "
-              "(maska %d)%s" % (mask, label), mask == 1)
-        check("porcja odniesienia trwala dosc dlugo, by cos znaczyc "
-              "(%d tyknac)%s" % (ticks, label), ticks >= 20)
+        check("without 'runw' both processes stayed on the boot core "
+              "(mask %d)%s" % (mask, label), mask == 1)
+        check("the reference batch lasted long enough to mean something "
+              "(%d ticks)%s" % (ticks, label), ticks >= 20)
 
     parallel_run = check_pair(
-        q.command("runw cores", "gotowe", timeout=180),
+        q.command("runw cores", "done", timeout=180),
         " ('runw')" + label)
     if not (serial_run and parallel_run):
         return
 
-    check("ta sama suma kontrolna z 'run' i z 'runw'" + label,
+    check("the same checksum from 'run' and from 'runw'" + label,
           serial_run[2] == parallel_run[2])
 
     mask = parallel_run[0]
     if ncores > 1:
-        check("program w pierscieniu 3 biegl takze poza rdzeniem "
-              "rozruchowym (maska %d)%s" % (mask, label),
+        check("a ring 3 program ran off the boot core "
+              "too (mask %d)%s" % (mask, label),
               (mask & ~1) != 0)
-        check("prowadzil go wiecej niz jeden rdzen (%d)%s"
+        check("more than one core ran it (%d)%s"
               % (bin(mask).count("1"), label),
               bin(mask).count("1") >= 2)
         # Two processes on one core compute in turn, on two - at once. The
@@ -113,33 +113,33 @@ def run_case(q, ncores, label):
             if parallel_run[1] < 3 * serial_run[1] // 4:
                 break
             again = check_pair(
-                q.command("runw cores", "gotowe", timeout=180),
-                " ('runw', powtorka)" + label)
+                q.command("runw cores", "done", timeout=180),
+                " ('runw', a repeat)" + label)
             if again and again[1] < parallel_run[1]:
                 parallel_run = again
-        check("dwa procesy naraz szybciej niz po kolei (%d wobec %d "
-              "tykniec)%s" % (parallel_run[1], serial_run[1], label),
+        check("two processes at once are faster than one after another (%d against %d "
+              "ticks)%s" % (parallel_run[1], serial_run[1], label),
               parallel_run[1] < 3 * serial_run[1] // 4)
     else:
-        check("na jednej maszynie jednordzeniowej 'runw' nie zmienia nic "
-              "(maska %d)%s" % (mask, label), mask == 1)
-        check("i trwa tyle samo, co 'run' (%d wobec %d tykniec)%s"
+        check("on a single-core machine 'runw' changes nothing "
+              "(mask %d)%s" % (mask, label), mask == 1)
+        check("and it lasts as long as 'run' (%d against %d ticks)%s"
               % (parallel_run[1], serial_run[1], label),
               parallel_run[1] > serial_run[1] // 2)
 
 
 def main():
-    print("--- procesy na wszystkich rdzeniach (jadro 64-bitowe) ---")
+    print("--- processes on every core (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
@@ -148,9 +148,9 @@ def main():
             try:
                 q.wait_serial("proton64>", timeout=90)
                 run_case(q, 4, "")
-                after_run = q.command("run hello64", "kod wyjscia", timeout=60)
-                check("jadro dziala dalej po probie",
-                      "czesc, jestem ELF-em" in after_run)
+                after_run = q.command("run hello64", "exit code", timeout=60)
+                check("the kernel still runs after the attempt",
+                      "hello, I am a" in after_run)
             finally:
                 q.close()
         finally:
@@ -159,29 +159,29 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    print("--- procesy na wszystkich rdzeniach (jadro 32-bitowe) ---")
+    print("--- processes on every core (the 32-bit kernel) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
             run_case(q3, 4, " (32-bit)")
-            after_run = q3.command("run hello", "zakonczyl sie", timeout=60)
-            check("jadro dziala dalej po probie (32-bit)",
-                  "zakonczyl sie (kod 0)" in after_run)
+            after_run = q3.command("run hello", "has ended", timeout=60)
+            check("the kernel still runs after the attempt (32-bit)",
+                  "has ended (code 0)" in after_run)
         finally:
             q3.close()
     finally:
         if os.path.exists(slog32):
             os.unlink(slog32)
 
-    print("--- ta sama proba na jednym rdzeniu ---")
+    print("--- the same attempt on one core ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
             q1.wait_for("ProtonOS shell", timeout=40)
-            run_case(q1, 1, " (jeden rdzen)")
+            run_case(q1, 1, " (one core)")
         finally:
             q1.close()
     finally:

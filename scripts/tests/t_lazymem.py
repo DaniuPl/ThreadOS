@@ -34,32 +34,32 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
         q.wait_for("ProtonOS shell")
-        q.wait_for("[siec] DHCP", timeout=20)
+        q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
         q.type_line("clear")
         q.type_line("mem")
         used_before_lz = pmm_used(q.screen())
         q.type_line("run lazymem")
-        screen = q.wait_for("[lazymem] dotkniete", timeout=40)
-        m = re.search(r"poproszone 64 MiB, RAM urosl o (\d+) KiB", screen)
-        check("prosba o 64 MiB sterty nie kosztuje ani ramki"
+        screen = q.wait_for("[lazymem] touched", timeout=40)
+        m = re.search(r"asked for 64 MiB, RAM grew by (\d+) KiB", screen)
+        check("asking for 64 MiB of heap costs not one frame"
               + (f" (+{m.group(1)} KiB)" if m else ""),
               m is not None and int(m.group(1)) == 0)
-        m = re.search(r"dotkniete 1 MiB, RAM urosl o (\d+) KiB", screen)
-        check("place sie dokladnie za dotkniete strony"
+        m = re.search(r"touched 1 MiB, RAM grew by (\d+) KiB", screen)
+        check("we pay for exactly the pages we touched"
               + (f" (+{m.group(1)} KiB)" if m else ""),
               m is not None and int(m.group(1)) == 1024)
-        screen = q.wait_for("[lazymem] mmap tez daje strony", timeout=30)
-        check("syscall urzeczywistnia nietknieta strone zamiast zglaszac blad",
-              "syscall urzeczywistnil nietknieta strone" in screen)
-        check("mmap tez przydziela strony dopiero przy dotknieciu",
-              "[lazymem] mmap tez daje strony" in screen)
-        q.wait_for("proces 'lazymem' zakonczyl sie (kod 0)", timeout=20)
+        screen = q.wait_for("[lazymem] mmap too gives pages", timeout=30)
+        check("the syscall makes an untouched page real instead of reporting an error",
+              "the syscall made an untouched heap page real" in screen)
+        check("mmap too hands out pages only when they are touched",
+              "[lazymem] mmap too gives pages" in screen)
+        q.wait_for("process \'lazymem\' has ended (code 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")
         used_after_lz = pmm_used(q.screen())
-        check(f"brak wycieku ramek po stronicowaniu na zadanie"
+        check(f"no frames leaked after demand paging"
               f" ({used_before_lz} -> {used_after_lz})",
               used_after_lz is not None and used_after_lz == used_before_lz)
     finally:

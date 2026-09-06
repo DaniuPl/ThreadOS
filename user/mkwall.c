@@ -74,7 +74,7 @@ static void hue_rgb(int hue, int v, int *r, int *g, int *b)
 
 void _start(int argc, char **argv)
 {
-    /* mkwall <plik> [wzor 0-4] [barwa 0-5] */
+    /* mkwall <file> [pattern 0-4] [hue 0-5] */
     if (argc < 2) {
         print("usage: mkwall <file> [pattern 0-4] [hue 0-5]\n");
         print("  patterns: 0 slope, 1 rings, 2 weave, 3 lattice,\n");

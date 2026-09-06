@@ -30,11 +30,11 @@ from ptest import check, summary, no64, make_iso64, start_http_server
 
 def main():
     print()
-    print("--- karta sieciowa na USB (RNDIS) ---")
+    print("--- the network card na USB (RNDIS) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -45,7 +45,7 @@ def main():
         fh.truncate(DISK_SIZE)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -58,34 +58,34 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             boot = q.wait_serial("proton64>", timeout=90)
-            check("system znajduje karte sieciowa na USB",
-                  "Karta sieciowa USB (RNDIS)" in boot)
-            check("i to ona jest karta tej maszyny",
-                  "Siec: USB (RNDIS)" in boot)
-            check("z adresem sprzetowym, ktory podala sama karta",
+            check("the system finds the network card on USB",
+                  "A USB network card (RNDIS)" in boot)
+            check("and it is this machine's card",
+                  "Network: USB (RNDIS)" in boot)
+            check("with the hardware address the card itself gave",
                   "52:54:0:12:34:56" in boot)
 
-            got = q.wait_serial("DHCP: przyznano", timeout=60)
-            check("DHCP przez USB: adres przyznany",
-                  "przyznano 10.0.2.15" in got)
+            got = q.wait_serial("DHCP: granted", timeout=60)
+            check("DHCP over USB: an address was granted",
+                  "granted 10.0.2.15" in got)
 
             out = q.command("ifconfig", "proton64>", timeout=25)
-            check("ifconfig pokazuje karte USB jako eth0",
+            check("ifconfig shows the USB card as eth0",
                   "USB (RNDIS)" in out and "10.0.2.15" in out)
-            check("i licznik pakietow rusza sie w obie strony",
-                  "RX 0 pakietow" not in out and "TX 0 pakietow" not in out)
+            check("and the packet counters move both ways",
+                  "RX 0 packets" not in out and "TX 0 packets" not in out)
 
             out = q.command("ping 10.0.2.2", "statystyki", timeout=40)
-            check("ping przez karte USB dochodzi i wraca",
-                  "odebrano 3" in out)
+            check("a ping over the USB card gets there and back",
+                  "received 3" in out)
 
             # The whole way up: TCP through a USB cable, from ring 3
             out = q.command("run httpget 10.0.2.2 %d /" % port,
-                            "kod wyjscia", timeout=60)
-            check("HTTP przez karte USB: odpowiedz 200",
+                            "exit code", timeout=60)
+            check("HTTP over the USB card: a 200 answer",
                   "[httpget] HTTP 200" in out)
-            check("i tresc strony w calosci",
-                  "ProtonOS TCP dziala" in out)
+            check("and the page's content whole",
+                  "ProtonOS TCP works" in out)
         finally:
             q.close()
             stop()

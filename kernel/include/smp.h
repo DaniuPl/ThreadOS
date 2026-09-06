@@ -89,7 +89,7 @@ void smp_run_work(int core);
  * may not get an address wrong. It is to compute what it was given,
  * and that is all. */
 void smp_work(void (*fn)(uint32_t number, void *data), void *data,
-               uint32_t ile);
+               uint32_t count);
 
 /* How many units each core computed in the last order (index 0 is the
    boot core) and how many cores took part in it at all */

@@ -25,17 +25,17 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- ACPI: wylaczanie i restart (jadro 64-bitowe) ---")
+    print("--- ACPI: switching off and restarting (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -45,14 +45,14 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             start = q.wait_serial("ACPI:", timeout=60)
-            check("tablice ACPI znalezione przy starcie",
-                  re.search(r"ACPI: tablice od '\S", start) is not None)
+            check("the ACPI tables were found at boot",
+                  re.search(r"ACPI: tables from '\S", start) is not None)
             q.wait_serial("proton64>", timeout=30)
             q.type_line("help")
-            check("'poweroff' jest w spisie polecen",
-                  "poweroff" in q.wait_serial("Polecenia:", timeout=20))
+            check("'poweroff' is in the list of commands",
+                  "poweroff" in q.wait_serial("Commands:", timeout=20))
             q.type_line("poweroff")
-            check("'poweroff' faktycznie gasi maszyne",
+            check("'poweroff' really switches the machine off",
                   q.wait_exit(timeout=25))
         finally:
             q.close()
@@ -69,8 +69,8 @@ def main():
         try:
             q2.wait_serial("proton64>", timeout=60)
             q2.type_line("reboot")
-            check("'reboot' resetuje maszyne", q2.wait_exit(timeout=25))
-            check("jadro zdazylo powiedziec, ze restartuje",
+            check("'reboot' resets the machine", q2.wait_exit(timeout=25))
+            check("the kernel managed to say it was restarting",
                   "Restart..." in q2.serial())
         finally:
             q2.close()

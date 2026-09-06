@@ -34,51 +34,51 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
         q.wait_for("ProtonOS shell")
-        q.wait_for("[siec] DHCP", timeout=20)
+        q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
         q.type_line("clear")
         q.type_line("mem")
         used_before_sg = pmm_used(q.screen())
         q.type_line("run sigtest")
-        screen = q.wait_for("[sigtest] wlasna procedura obslugi", timeout=30)
-        check("wlasna procedura obslugi sygnalu dziala w ring 3 i wraca",
-              "dostala SIGINT i wrocila" in screen)
+        screen = q.wait_for("[sigtest] my own handler", timeout=30)
+        check("a handler of one's own runs in ring 3 and comes back",
+              "got SIGINT and came back" in screen)
         screen = q.wait_for("[sigtest] SIG_IGN", timeout=20)
-        check("SIG_IGN gubi sygnal zamiast go doreczac",
-              "sygnal przepadl" in screen)
-        screen = q.wait_for("[sigtest] rodzic dostal SIGCHLD", timeout=30)
-        check("SIGTERM domyslnie konczy proces (kod -15)",
-              "domyslnie konczy proces (kod -15)" in screen)
-        check("rodzic dostaje SIGCHLD po smierci dziecka",
-              "[sigtest] rodzic dostal SIGCHLD" in screen)
-        screen = q.wait_for("[sigtest] SIGKILL nie do przechwycenia",
+        check("SIG_IGN loses the signal instead of delivering it",
+              "the signal was lost" in screen)
+        screen = q.wait_for("[sigtest] the parent got SIGCHLD", timeout=30)
+        check("SIGTERM ends a process by default (code -15)",
+              "ends a process by default (code -15)" in screen)
+        check("the parent gets SIGCHLD after the child dies",
+              "[sigtest] the parent got SIGCHLD" in screen)
+        screen = q.wait_for("[sigtest] SIGKILL cannot be caught",
                             timeout=30)
-        check("SIGKILL-a nie da sie przechwycic ani zignorowac",
-              "[sigtest] SIGKILL nie do przechwycenia" in screen)
+        check("SIGKILL can be neither caught nor ignored",
+              "[sigtest] SIGKILL cannot be caught" in screen)
 
         # Ctrl+C from a real keyboard -> a SIGINT to the process holding
         # the console; the wait for a key is interrupted halfway
-        q.wait_for("[sigtest] czekam na Ctrl+C", timeout=20)
+        q.wait_for("[sigtest] waiting for Ctrl+C", timeout=20)
         q.sendkey("ctrl-c")
-        screen = q.wait_for("[sigtest] Ctrl+C dotarl", timeout=20)
-        check("Ctrl+C dociera do procesu jako SIGINT i przerywa odczyt",
-              "dotarl jako SIGINT" in screen)
-        q.wait_for("proces 'sigtest' zakonczyl sie (kod 0)", timeout=20)
+        screen = q.wait_for("[sigtest] Ctrl+C arrived", timeout=20)
+        check("Ctrl+C reaches the process as SIGINT and interrupts the read",
+              "arrived as SIGINT" in screen)
+        q.wait_for("process \'sigtest\' has ended (code 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")
         used_after_sg = pmm_used(q.screen())
-        check(f"brak wycieku ramek po sygnalach"
+        check(f"no frames leaked after the signals"
               f" ({used_before_sg} -> {used_after_sg})",
               used_after_sg is not None and used_after_sg == used_before_sg)
 
         # The kernel's shell can send any signal, by a process's name too
         q.type_line("clear")
         q.type_line("run spin")
-        q.wait_for("[spin] tik", timeout=20)
+        q.wait_for("[spin] tick", timeout=20)
         q.type_line("kill spin 15")
-        screen = q.wait_for("zakonczony przez SIGTERM", timeout=20)
-        check("'kill nazwa 15' z shella jadra wysyla SIGTERM",
+        screen = q.wait_for("ended by SIGTERM", timeout=20)
+        check("'kill name 15' from the kernel's shell sends SIGTERM",
               "kill: SIGTERM -> pid" in screen)
     finally:
         q.close()

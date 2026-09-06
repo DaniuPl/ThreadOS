@@ -32,11 +32,11 @@ from ptest import (check, summary, make_iso64, no64,
 
 
 def main():
-    print("--- TLS 1.3 i HTTP z pierscienia 3 (jadro 64-bitowe) ---")
+    print("--- TLS 1.3 and HTTP from ring 3 (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
@@ -46,7 +46,7 @@ def main():
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -54,81 +54,81 @@ def main():
         https_port, https_stop = start_https_server()
         dns_stop, dns_ok = start_dns_server()
         if https_port is None:
-            print("POMINIETE: brak openssl")
+            print("SKIPPED: no openssl")
             return summary()
         if not dns_ok:
             # Everything below reaches the server by NAME, so without our
             # own name server there is nothing here to check.
-            print("POMINIETE: " + DNS_HINT)
+            print("SKIPPED: " + DNS_HINT)
             return summary()
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=90)
-            q.wait_serial("DHCP: przyznano", timeout=30)
+            q.wait_serial("DHCP: granted", timeout=30)
 
             # --- Plain HTTP: TCP from ring 3 ---
             out = q.command("run httpget 10.0.2.2 %d /" % http_port,
-                              "kod wyjscia", timeout=60)
-            check("TCP z ring 3: uzgodnienie i odpowiedz HTTP 200",
+                              "exit code", timeout=60)
+            check("TCP from ring 3: a handshake and an HTTP 200 answer",
                   "[httpget] HTTP 200" in out)
-            check("tresc strony dotarla w calosci",
-                  "ProtonOS TCP dziala" in out)
+            check("the page's content arrived whole",
+                  "ProtonOS TCP works" in out)
 
             # --- DNS: a name instead of an address ---
-            q.command("dns 10.0.2.2", "serwer DNS ustawiony")
-            nsl = q.command("run nslookup protonos.test", "kod wyjscia",
+            q.command("dns 10.0.2.2", "DNS server set")
+            nsl = q.command("run nslookup protonos.test", "exit code",
                               timeout=40)
-            check("DNS z ring 3: nazwa zamieniona na adres",
+            check("DNS from ring 3: a name turned into an address",
                   "10.0.2.2" in nsl)
 
             # --- TLS with no trust store: the connection is to fail ---
             refusal = q.command("run httpget https://protonos.test %d /"
-                              % https_port, "kod wyjscia", timeout=90)
-            check("obcy certyfikat zrywa polaczenie",
-                  "brak zaufanego wystawcy" in refusal)
+                              % https_port, "exit code", timeout=90)
+            check("a foreign certificate tears the connection down",
+                  "no trusted issuer" in refusal)
 
             # --- TLS with the check skipped (-k) ---
             sec = q.command("run httpget -k https://protonos.test %d /"
-                              % https_port, "kod wyjscia", timeout=90)
-            check("TLS 1.3: uzgodnienie z serwerem OpenSSL",
+                              % https_port, "exit code", timeout=90)
+            check("TLS 1.3: a handshake with an OpenSSL server",
                   "[httpget] TLS 1.3" in sec)
-            check("HTTPS: odpowiedz 200 z pelna trescia",
-                  "HTTP 200, tresc %d B" % len(PAGE) in sec)
-            check("HTTPS: tresc odszyfrowana poprawnie",
-                  "ProtonOS TCP dziala" in sec)
-            check("-k mowi wprost, ze tozsamosc nie jest sprawdzona",
-                  "certyfikat NIESPRAWDZONY" in sec)
+            check("HTTPS: a 200 answer with the whole content",
+                  "HTTP 200, content %d B" % len(PAGE) in sec)
+            check("HTTPS: the content was decrypted correctly",
+                  "ProtonOS TCP works" in sec)
+            check("-k says outright that nobody's identity is checked",
+                  "certificate NOT CHECKED" in sec)
 
             # --- A trust store from the disk and full verification ---
             q.command("run httpget 10.0.2.2 %d /cert.der roots.der"
-                        % http_port, "kod wyjscia", timeout=60)
+                        % http_port, "exit code", timeout=60)
             listing = q.command("fls", "roots.der")
-            check("magazyn zaufania zapisany na dysku PFS",
+            check("the trust store was written to the PFS disk",
                   "roots.der" in listing)
 
             ver = q.command("run httpget https://protonos.test %d /"
-                              % https_port, "kod wyjscia", timeout=90)
-            check("certyfikat sprawdzony wzgledem magazynu z dysku",
-                  "certyfikat sprawdzony" in ver)
-            check("tresc pobrana po zweryfikowanym TLS",
-                  "HTTP 200, tresc %d B" % len(PAGE) in ver)
+                              % https_port, "exit code", timeout=90)
+            check("the certificate was checked against the store from the disk",
+                  "certificate checked" in ver)
+            check("the content was fetched over a verified TLS",
+                  "HTTP 200, content %d B" % len(PAGE) in ver)
 
             # --- The cryptography and X.509 in themselves ---
-            kr = q.command("run cryptotest", "kod wyjscia", timeout=120)
-            check("wektory z RFC: SHA-256, HMAC, HKDF, ChaCha20, X25519",
-                  "wszystkie wektory zgadzaja sie" in kr)
-            ce = q.command("run certtest", "kod wyjscia", timeout=120)
+            kr = q.command("run cryptotest", "exit code", timeout=120)
+            check("vectors from the RFCs: SHA-256, HMAC, HKDF, ChaCha20, X25519",
+                  "every vector matches" in kr)
+            ce = q.command("run certtest", "exit code", timeout=120)
             check("X.509: RSA, PSS, ECDSA P-256 i P-384, SubjectAltName",
-                  "[cert] wszystko sie zgadza" in ce)
+                  "[cert] everything matches" in ce)
             # The program's stack grew of its own accord along the way -
             # verifying a signature reaches deeper than can be guessed up
             # front
-            m = re.search(r"certtest\] koniec, kod wyjscia 0 "
-                          r"\(ramek \d+ -> \d+, stron sterty \d+, "
-                          r"stosu (\d+)", ce)
-            check("stos programu urosl na zadanie w trakcie liczenia",
+            m = re.search(r"certtest\] done, exit code 0 "
+                          r"\(frames \d+ -> \d+, heap pages \d+, "
+                          r"stack (\d+)", ce)
+            check("the program's stack grew on demand while it counted",
                   m is not None and int(m.group(1)) > 0)
 
             # --- A server that will agree to ONE suite -----------------
@@ -145,16 +145,16 @@ def main():
                     fh.write(PAGE)
                 sport, sstop, _ = start_suite_server(suite, sdir)
                 if sport is None:
-                    print("POMINIETE: brak openssl s_server")
+                    print("SKIPPED: no openssl s_server")
                     break
                 try:
                     got = q.command("run httpget -k https://protonos.test "
                                     "%d /index.html" % sport,
-                                    "kod wyjscia", timeout=90)
-                    check("serwer wylacznie na %s: uzgodnienie przechodzi"
+                                    "exit code", timeout=90)
+                    check("a server on %s alone: the handshake goes through"
                           % label, "[httpget] TLS 1.3" in got)
-                    check("i tresc wraca odszyfrowana (%s)" % label,
-                          "ProtonOS TCP dziala" in got)
+                    check("and the content comes back decrypted (%s)" % label,
+                          "ProtonOS TCP works" in got)
                 finally:
                     sstop()
                     shutil.rmtree(sdir, ignore_errors=True)
@@ -168,20 +168,20 @@ def main():
         # at once: the keyboard and mouse from the compositor, DNS, TCP,
         # the HTML parser and drawing in a window - and all of it from
         # ring 3.
-        print("--- przegladarka w oknie (gweb) ---")
+        print("--- the browser in a window (gweb) ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
             q2.wait_serial("proton64>", timeout=90)
-            q2.wait_serial("DHCP: przyznano", timeout=30)
+            q2.wait_serial("DHCP: granted", timeout=30)
             # The name server has to be set BEFORE the desktop: afterwards
             # the keyboard belongs to the compositor, not to the kernel's
             # shell
-            q2.command("dns 10.0.2.2", "serwer DNS ustawiony")
-            q2.type_line("pulpit")
-            q2.wait_serial("Pulpit startuje", timeout=30)
-            check("pulpit wstaje przed przegladarka", q2.wait_desktop(30))
+            q2.command("dns 10.0.2.2", "DNS server set")
+            q2.type_line("desktop")
+            q2.wait_serial("The desktop is starting", timeout=30)
+            check("the desktop comes up before the browser", q2.wait_desktop(30))
 
             q2.mouse_home()
             q2.mouse_goto(24, 232)          # the 'Web' icon at (8,220)
@@ -216,8 +216,8 @@ def main():
                     showed = True
                     break
                 time.sleep(0.5)
-            check("przegladarka rozwiazala nazwe, pobrala strone "
-                  "i narysowala tekst", showed)
+            check("the browser resolved the name, fetched the page "
+                  "and it drew the text", showed)
         finally:
             q2.close()
             if os.path.exists(slog2):

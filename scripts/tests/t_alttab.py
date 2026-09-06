@@ -90,7 +90,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # Three applications, in this order: the terminal (slot 2),
@@ -105,10 +105,10 @@ def main():
             w, h, at = q.screen_raw()
             row = h - TB_H + 2
             spans = buttons(at, w, row)
-            check("trzy aplikacje maja swoje przyciski (razem %d z oknami "
-                  "jadra)" % len(spans), len(spans) == 5)
+            check("three applications have their buttons (%d in all with the "
+                  "kernel)" % len(spans), len(spans) == 5)
             start = focused_button(at, row, spans)
-            check("ostatnio otwarte okno ma ognisko (przycisk %d)" % start,
+            check("the window opened last has the focus (button %d)" % start,
                   start == 4)
 
             # --- Alt+Tab ------------------------------------------------
@@ -119,12 +119,12 @@ def main():
             w, h, at = q.screen_raw()
             spans = buttons(at, w, row)
             now = focused_button(at, row, spans)
-            check("Alt+Tab przeniosl ognisko na nastepne okno (%d -> %d)"
+            check("Alt+Tab moved the focus to the next window (%d -> %d)"
                   % (start, now), now == 2)
 
             # It is on top, not merely focused: its title bar is whole
             x2, y2 = slot_xy(2)
-            check("i okno wyszlo na wierzch - caly jego pasek tytulu widac",
+            check("and the window came to the top - its whole title bar is visible",
                   title_whole(at, x2, y2, 402))
 
             # --- the keys follow the focus ------------------------------
@@ -160,7 +160,7 @@ def main():
                                      " " if not any(pattern) else "?")
                 text.append(line.rstrip())
             body = "\n".join(text)
-            check("to, co wpisano po Alt+Tab, trafilo do terminala",
+            check("what was typed after Alt+Tab reached the terminal",
                   "/> date" in body)
             check("i terminal to wykonal", "2030-06-13" in body)
 
@@ -171,7 +171,7 @@ def main():
             time.sleep(1)
             w, h, at = q.screen_raw()
             spans = buttons(at, w, row)
-            check("trzy razy Alt+Tab przy trzech oknach wraca tam, gdzie "
+            check("three Alt+Tabs with three windows come back where "
                   "bylismy", focused_button(at, row, spans) == 2)
 
             # --- a minimised window is skipped --------------------------
@@ -186,10 +186,10 @@ def main():
             w, h, at = q.screen_raw()
             spans = buttons(at, w, row)
             after = focused_button(at, row, spans)
-            check("po zwinieciu okna Alt+Tab je pomija (ognisko na %d)"
+            check("once a window is minimised Alt+Tab skips it (the focus on %d)"
                   % after, after in (3, 4))
 
-            check("pulpit dziala dalej",
+            check("the desktop is still running",
                   at(600, 300)[0] + at(600, 300)[1] + at(600, 300)[2] > 20)
         finally:
             q.close()

@@ -56,14 +56,14 @@ def main():
             q.wait_for("ProtonOS shell", timeout=40)
 
             # --- the picture is made by a program in ring 3 ----------
-            out = q.command("run mkwall tapeta.img 1 2", "zakonczyl",
+            out = q.command("run mkwall wallpaper.img 1 2", "ended",
                             timeout=90)
-            check("program zrobil tapete", "gotowa" in out)
-            check("i skonczyl sie bez bledu", "(kod 0)" in out)
+            check("the program made a wallpaper", "is ready" in out)
+            check("and it ended with no error", "(code 0)" in out)
 
-            fls = q.command("fls", "tapeta.img", timeout=30)
-            size = re.search(r"tapeta\.img\s+\((\d+) B\)", fls)
-            check("plik jest na dysku i ma rozmiar z formatu (%s B)"
+            fls = q.command("fls", "wallpaper.img", timeout=30)
+            size = re.search(r"wallpaper\.img\s+\((\d+) B\)", fls)
+            check("the file is on the disk and has the size the format says (%s B)"
                   % (size.group(1) if size else "?"),
                   size is not None and int(size.group(1)) == WALL_SIZE)
 
@@ -71,15 +71,15 @@ def main():
             # holds colours rather than a palette of 192. It is the one
             # put on the screen below, so the count further down means
             # something.
-            out = q.command("run mkwall tapeta.img 4 2", "zakonczyl",
+            out = q.command("run mkwall wallpaper.img 4 2", "ended",
                             timeout=90)
-            check("i drugi wzor - przenikanie - tez sie zrobil",
-                  "gotowa" in out and "(kod 0)" in out)
+            check("and the second pattern - the blend - came out too",
+                  "is ready" in out and "(code 0)" in out)
 
-            q.type_line("sudo set tapeta tapeta.img")
+            q.type_line("sudo set wallpaper wallpaper.img")
             time.sleep(1)
-            saved = q.command("proton", "zapisane", timeout=30)
-            check("ustawienie zapisane", "tapeta = tapeta.img" in saved)
+            saved = q.command("proton", "saved", timeout=30)
+            check("the setting was saved", "wallpaper = wallpaper.img" in saved)
 
             # --- and the desktop puts it up -------------------------
             q.type_line("desktop")
@@ -89,19 +89,19 @@ def main():
             time.sleep(2)
 
             log = q.serial()
-            check("jadro wczytalo tapete i mowi, jaka",
-                  re.search(r"tapeta 'tapeta\.img': 160x120 w kolorach", log)
+            check("the kernel read the wallpaper and says which",
+                  re.search(r"wallpaper 'wallpaper\.img': 160x120 in colour", log)
                   is not None)
 
             w, h, at = q.screen_raw()
             # A gradient is one colour all the way across a row; a
             # picture is not. That is the difference, whatever is drawn.
             colours = row_colours(at, 300)
-            check("w poprzek ekranu jest wiecej niz jeden kolor (%d)"
+            check("across the screen there is more than one colour (%d)"
                   % len(colours), len(colours) > 3)
             # And it changes down the screen as well - a picture, not a
             # pattern of stripes
-            check("i inny zestaw kolorow nizej niz wyzej",
+            check("and a different set of colours lower down than higher up",
                   row_colours(at, 120) != row_colours(at, 380))
 
             # And the count: a blend across both axes is one colour per
@@ -113,26 +113,26 @@ def main():
             for y in range(0, h - 30, 3):
                 for x in range(0, w, 3):
                     blend.add(at(x, y))
-            check("tapeta ma wiecej kolorow, niz paleta 192 by udzwignela "
-                  "(%d roznych)" % len(blend), len(blend) > 400)
+            check("the wallpaper has more colours than a palette of 192 could carry "
+                  "(%d different)" % len(blend), len(blend) > 400)
 
             # The wallpaper's colours live above the desktop's, so a
             # window drawn on top of it is still the window's grey
-            check("okno na tapecie ma nadal swoj kolor",
+            check("a window on the wallpaper still has its own colour",
                   at(80, 100) == (227, 227, 227))
-            check("a pasek zadan swoj", at(300, h - 6)[0] > 190)
+            check("and the taskbar its own", at(300, h - 6)[0] > 190)
         finally:
             q.close()
 
         # --- a wallpaper that is not there ------------------------------
-        print("--- tapeta, ktorej nie ma ---")
+        print("--- a wallpaper that is not there ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
             q2.wait_for("ProtonOS shell", timeout=40)
-            q2.type_line("sudo set tapeta nieistniejaca.img")
+            q2.type_line("sudo set wallpaper nosuchfile.img")
             time.sleep(1)
-            q2.command("proton", "zapisane", timeout=30)
+            q2.command("proton", "saved", timeout=30)
             q2.type_line("desktop")
             time.sleep(6)
             q2.mouse_home()
@@ -141,9 +141,9 @@ def main():
 
             w, h, at = q2.screen_raw()
             # Back to the gradient: one colour all the way across
-            check("brak pliku nie psuje pulpitu - wraca gradient",
+            check("a missing file does not break the desktop - the gradient is back",
                   len(row_colours(at, 300)) == 1)
-            check("i tlo dalej ciemnieje ku dolowi",
+            check("and the background still darkens downwards",
                   sum(at(600, 40)) > sum(at(600, 400)))
         finally:
             q2.close()

@@ -27,11 +27,11 @@ from ptest import check, summary, no64, make_iso64, wav_tone
 
 def main():
     print()
-    print("--- dzwiek (Intel HDA) ---")
+    print("--- sound (Intel HDA) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -42,7 +42,7 @@ def main():
     slog3 = tempfile.mktemp(suffix=".log")
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -50,72 +50,72 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, audio=wav,
                  qemu="qemu-system-x86_64")
         try:
-            out = q.wait_serial("System 64-bitowy gotowy", timeout=90)
-            check("system znajduje kontroler i kodek",
-                  "Dzwiek: Intel HDA" in out)
-            check("i mowi, ktoredy idzie dzwiek",
-                  "wyjscie" in out and "gniazdo" in out)
+            out = q.wait_serial("The 64-bit system is ready", timeout=90)
+            check("the system finds the controller and the codec",
+                  "Sound: Intel HDA" in out)
+            check("and it says which way the sound goes",
+                  "output" in out and "socket" in out)
 
             # --- the first tone
             before = os.path.getsize(wav) - 44 if os.path.exists(wav) else 0
             out = q.command("beep 440 200", "beep:", timeout=30)
-            check("'beep' nie odmawia", "nie ma dzwieku" not in out)
+            check("'beep' does not refuse", "there is no sound" not in out)
             time.sleep(2)
             tone = wav_tone(wav, max(before, 0))
-            check("cokolwiek wyszlo z karty dzwiekowej",
+            check("something came out of the sound card",
                   tone is not None)
             if tone:
                 peak, ms, hz = tone
-                check("i jest to 440 Hz (%.0f Hz)" % hz, 420 <= hz <= 460)
-                check("przez 200 ms (%.0f ms)" % ms, 150 <= ms <= 260)
-                check("dostatecznie glosno, zeby to byl dzwiek, a nie szum "
-                      "(szczyt %d)" % peak, peak > 1000)
+                check("and it is 440 Hz (%.0f Hz)" % hz, 420 <= hz <= 460)
+                check("for 200 ms (%.0f ms)" % ms, 150 <= ms <= 260)
+                check("loud enough to be a sound and not noise "
+                      "(peak %d)" % peak, peak > 1000)
 
             # --- and a different one, because one number is a coincidence
             before = os.path.getsize(wav) - 44
             q.command("beep 880 100", "beep:", timeout=30)
             time.sleep(2)
             tone = wav_tone(wav, max(before, 0))
-            check("drugi ton tez wychodzi", tone is not None)
+            check("the second tone comes out too", tone is not None)
             if tone:
                 peak, ms, hz = tone
-                check("i jest o oktawe wyzej (%.0f Hz)" % hz,
+                check("and it is an octave higher (%.0f Hz)" % hz,
                       850 <= hz <= 910)
-                check("i krotszy (%.0f ms)" % ms, 60 <= ms <= 160)
+                check("and shorter (%.0f ms)" % ms, 60 <= ms <= 160)
 
             out = q.command("beep 3 100", "beep:", timeout=20)
-            check("czestotliwosc, ktorej nie da sie uslyszec, jest odrzucona",
-                  "nie jest dzwiek" in out)
+            check("a frequency nobody can hear is refused",
+                  "is not a sound" in out)
 
             # --- and how loud. The codec's amplifier has as many steps
             # as it has, so the percentage is of that; what a test can
             # say for certain is that louder is louder, quieter is
             # quieter and silence is silent.
-            out = q.command("glosnosc", "glosnosc:", timeout=20)
-            check("system mowi, jak glosno jest i z czego to liczy",
-                  "%" in out and "stopni w kodeku" in out)
+            out = q.command("volume", "volume:", timeout=20)
+            check("the system says how loud it is and what it computes that from",
+                  "%" in out and "steps in the codec" in out)
 
             def loud_after(command):
                 at = os.path.getsize(wav) - 44
-                q.command(command, "glosnosc:", timeout=20)
+                q.command(command, "volume:", timeout=20)
                 q.command("beep 440 150", "beep:", timeout=30)
                 time.sleep(2)
                 t = wav_tone(wav, max(at, 0))
                 return t[0] if t else 0
 
-            full = loud_after("glosnosc 100")
-            check("na 100%% cos wychodzi glosno (szczyt %d)" % full,
+            full = loud_after("volume 100")
+            check("at 100%% something comes out loud (peak %d)" % full,
                   full > 3000)
-            third = loud_after("glosnosc 30")
-            check("na 30%% ciszej niz na 100%% (%d wobec %d)" % (third, full),
+            third = loud_after("volume 30")
+            check("at 30%% quieter than at 100%% (%d against %d)" % (third, full),
                   0 < third < full)
-            low = loud_after("glosnosc 5")
-            check("na 5%% jeszcze ciszej (%d)" % low, low < third)
-            quiet = loud_after("glosnosc cisza")
-            check("a po 'cisza' nie wychodzi nic (%d)" % quiet, quiet == 0)
-            out = q.command("glosnosc cisza", "glosnosc:", timeout=20)
-            check("i drugie 'cisza' wlacza z powrotem",
-                  "znowu slychac" in out)
+            low = loud_after("volume 5")
+            check("at 5%% quieter still (%d)" % low, low < third)
+            quiet = loud_after("volume mute")
+            check("and after 'mute' nothing comes out (%d)" % quiet, quiet == 0)
+            out = q.command("volume mute", "volume:", timeout=20)
+            check("and a second 'mute' turns it back on",
+                  "audible again" in out)
         finally:
             q.close()
 
@@ -130,12 +130,12 @@ def main():
             q3 = Qemu(KERNEL, INITRD, cdrom=iso2, serial=slog3, audio=wav2,
                       qemu="qemu-system-x86_64")
             try:
-                q3.wait_serial("System 64-bitowy gotowy", timeout=120)
-                q3.type_line("pulpit")
-                q3.wait_serial("Pulpit startuje", timeout=40)
+                q3.wait_serial("The 64-bit system is ready", timeout=120)
+                q3.type_line("desktop")
+                q3.wait_serial("The desktop is starting", timeout=40)
                 time.sleep(4)
                 out = q3.command("run gmikser", "z initrd", timeout=30)
-                check("mikser startuje jako program w pierscieniu 3",
+                check("the mixer starts as a ring 3 program",
                       "'gmikser' z initrd" in out)
                 time.sleep(3)
                 q3.mouse_goto(700, 500)
@@ -145,10 +145,10 @@ def main():
                 # bar down (kernel/desktop.c)
                 CX, CY = 95, 65
                 text = q3.read_text(CX + 6, CY + 4, 44, 4, line_h=12)
-                check("okno mowi, jak glosno jest",
-                      "Glosnosc:" in text and "%" in text)
-                check("i z czego liczy procenty",
-                      "stopni" in text and "decybele" in text)
+                check("the window says how loud it is",
+                      "Volume:" in text and "%" in text)
+                check("and what it computes the percentage from",
+                      "steps" in text and "decibels" in text)
 
                 BAR_X, BAR_Y, BAR_H = 8, 52, 16
                 BTN_X, BTN_Y, BTN_W, BTN_H = 8, 82, 84, 16
@@ -172,26 +172,26 @@ def main():
 
                 click(BAR_X + bar_w - 1, BAR_Y + BAR_H // 2)
                 text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
-                check("klik na koncu suwaka daje 100%% ('%s')"
+                check("a click at the end of the slider gives 100%% ('%s')"
                       % text.strip(), "100%" in text)
                 loud = test_tone()
-                check("i przycisk 'Sprawdz' naprawde gra (szczyt %d)" % loud,
+                check("and the 'Test' button really plays (peak %d)" % loud,
                       loud > 3000)
 
                 click(BAR_X + bar_w // 5, BAR_Y + BAR_H // 2)
                 text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
-                check("klik w piatej czesci suwaka daje okolo 20%% ('%s')"
+                check("a click a fifth of the way along the slider gives about 20%% ('%s')"
                       % text.strip(),
                       "19%" in text or "20%" in text or "21%" in text)
                 soft = test_tone()
-                check("i wtedy gra ciszej (%d wobec %d)" % (soft, loud),
+                check("and then it plays quieter (%d against %d)" % (soft, loud),
                       0 < soft < loud)
 
                 click(BTN_X + BTN_W // 2, BTN_Y + BTN_H // 2)
                 text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
-                check("przycisk 'Cisza' mowi, ze jest cisza ('%s')"
-                      % text.strip(), "cisza" in text)
-                check("i wtedy nie gra nic", test_tone() == 0)
+                check("the 'Mute' button says it is muted ('%s')"
+                      % text.strip(), "muted" in text)
+                check("and then it plays nothing", test_tone() == 0)
             finally:
                 q3.close()
         finally:
@@ -204,12 +204,12 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2,
                   qemu="qemu-system-x86_64")
         try:
-            out = q2.wait_serial("System 64-bitowy gotowy", timeout=90)
-            check("maszyna bez karty mowi to wprost",
-                  "nie ma kontrolera HDA na PCI" in out)
+            out = q2.wait_serial("The 64-bit system is ready", timeout=90)
+            check("a machine with no card says so outright",
+                  "there is no HDA controller on the PCI bus" in out)
             out = q2.command("beep", "beep:", timeout=20)
-            check("a 'beep' na niej odmawia, zamiast udawac",
-                  "nie ma dzwieku" in out)
+            check("and 'beep' on it refuses instead of pretending",
+                  "there is no sound" in out)
         finally:
             q2.close()
     finally:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ProtonOS smoke test: the taskbar - pictures on it, and its shape.
 
-The bar carried names, trimmed to six letters, so 'Ustawienia' read as
-'Ustawi' and two terminals read the same. It carried them because a
+The bar carried names, trimmed to six letters, so 'Settings' read as
+'Configi' and two terminals read the same. It carried them because a
 window knows its title and nothing else - not what was clicked to start
 it.
 
@@ -113,11 +113,11 @@ def main():
         f.truncate(16 * 1024 * 1024)
     slog = tempfile.mktemp(suffix=".log")
 
-    print("--- obrazki na pasku ---")
+    print("--- the pictures on the bar ---")
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             # The clock (icon 1) and the settings (icon 6): two
             # different programs, so two different pictures
@@ -127,18 +127,18 @@ def main():
             ty = h - TB_H
             row = ty + 2
             spans = buttons(at, w, row, 46, w - CLOCK_W - 2)
-            check("cztery okna maja przyciski (dwa jadra i dwie aplikacje)",
+            check("four windows have buttons (two of the kernel's and two applications)",
                   len(spans) == 4)
 
             pics = [picture(at, s, ty) for s in spans]
-            check("przycisk zegara i przycisk ustawien maja ROZNE obrazki",
+            check("the clock button and the settings button have DIFFERENT pictures",
                   pics[2] != pics[3])
-            check("a oba maja na sobie cos narysowanego",
+            check("and both have something drawn on them",
                   any(p != pics[2][0] for p in pics[2]) and
                   any(p != pics[3][0] for p in pics[3]))
             # Two windows of the kernel itself, which nobody launched
             # from an icon: they share the plain window mark
-            check("okna jadra maja ten sam, domyslny obrazek",
+            check("the kernel's windows have the same default picture",
                   pics[0] == pics[1])
 
             # --- the launch menu shows the same faces ----------------
@@ -154,17 +154,17 @@ def main():
             entry_y = ty - 2 * 16          # the third entry from the top
             marks = sum(1 for dy in range(12) for dx in range(12)
                         if at(8 + dx, entry_y + 2 + dy) == (0, 0, 0))
-            check("wpis w menu ma obrazek (%d pikseli)" % marks, marks > 8)
+            check("a menu entry has a picture (%d pixels)" % marks, marks > 8)
 
             # The entry under the pointer answers: it wears the accent
             q.mouse_goto(60, entry_y + 8)
             time.sleep(1)
             w, h, at = q.screen_raw()
             r, g, b = at(100, entry_y + 8)
-            check("wpis pod kursorem jest podswietlony (%d,%d,%d)"
+            check("the entry under the pointer is highlighted (%d,%d,%d)"
                   % (r, g, b), b > 120 and r < 90 and g < 90)
             others = at(100, entry_y - 16 + 8)
-            check("a inne wpisy nie", not (others[2] > 120 and
+            check("and the other entries are not", not (others[2] > 120 and
                                            others[0] < 90 and others[1] < 90))
 
             # --- the name comes back when asked for ------------------
@@ -178,14 +178,14 @@ def main():
             q.mouse_goto((last[0] + last[1]) // 2, ty + 8)
             time.sleep(1.5)
             said = read_line(q, last[0] + 4, ty - 12, 14)
-            check("nazwa okna pojawia sie nad przyciskiem ('%s')" % said,
-                  "Ustawienia" in said)
+            check("the window's name appears above the button ('%s')" % said,
+                  "Settings" in said)
 
             q.mouse_goto(300, 300)         # the pointer off the bar
             time.sleep(1.5)
             gone = read_line(q, last[0] + 4, ty - 12, 14)
-            check("i znika, gdy kursor odchodzi ('%s')" % gone,
-                  "Ustawienia" not in gone)
+            check("and it goes when the pointer leaves ('%s')" % gone,
+                  "Settings" not in gone)
         finally:
             q.close()
     finally:
@@ -194,9 +194,9 @@ def main():
                 os.unlink(f)
 
     # --- the shape of the bar is a setting ---------------------------
-    for width, align, name in ((50, 1, "polowa ekranu, ikony na srodku"),
-                               (75, 2, "trzy czwarte, ikony od prawej")):
-        print("--- pasek: %s ---" % name)
+    for width, align, name in ((50, 1, "half the screen, icons centred"),
+                               (75, 2, "three quarters, icons from the right")):
+        print("--- the bar: %s ---" % name)
         disk2 = tempfile.mktemp(suffix=".img")
         with open(disk2, "wb") as f:
             f.truncate(16 * 1024 * 1024)
@@ -205,10 +205,10 @@ def main():
                       serial=tempfile.mktemp(suffix=".log"))
             try:
                 q2.wait_for("ProtonOS shell", timeout=40)
-                for cmd in ("set pasek %d" % width, "set ikony %d" % align):
+                for cmd in ("set taskbar %d" % width, "set icons %d" % align):
                     q2.type_line("sudo " + cmd)
                     time.sleep(1)
-                    q2.command("proton", "zapisane", timeout=30)
+                    q2.command("proton", "saved", timeout=30)
                 q2.type_line("desktop")
                 time.sleep(5)
                 q2.mouse_home()
@@ -220,22 +220,22 @@ def main():
                 x0, x1 = bar_span(at, w, ty + 1)
                 wide = x1 - x0 + 1
                 want = w * width // 100
-                check("pasek zajmuje %d%% ekranu (%d z %d px)"
+                check("the bar takes %d%% of the screen (%d of %d px)"
                       % (width, wide, w), abs(wide - want) <= 8)
-                check("i jest wysrodkowany (od %d do %d)" % (x0, x1),
+                check("and it is centred (from %d to %d)" % (x0, x1),
                       abs(x0 - (w - want) // 2) <= 6)
 
                 spans = buttons(at, w, row, x0 + 46, x1 - CLOCK_W - 2)
-                check("przyciski sa na pasku (%d)" % len(spans),
+                check("the buttons are on the bar (%d)" % len(spans),
                       len(spans) == 4)
                 if align == 1:
                     middle = (spans[0][0] + spans[-1][1]) // 2
-                    check("ikony stoja na srodku wolnego miejsca "
-                          "(srodek %d, pasek %d..%d)" % (middle, x0, x1),
+                    check("the icons stand in the middle of the free room "
+                          "(the middle %d, the bar %d..%d)" % (middle, x0, x1),
                           abs(middle - (x0 + x1) // 2) <= 24)
                 else:
                     gap = (x1 - CLOCK_W) - spans[-1][1]
-                    check("ikony sa dosuniete do zegara (odstep %d px)"
+                    check("the icons are pushed up against the clock (a gap of %d px)"
                           % gap, gap <= 12)
 
                 # The one that matters: a button clicks where it is
@@ -251,7 +251,7 @@ def main():
                 spans2 = buttons(at, w, row, x0 + 46, x1 - CLOCK_W - 2)
                 a, b = spans2[-1]
                 r, g, bl = at((a + b) // 2, ty + 2)
-                check("i klik trafia w przycisk tam, gdzie go widac",
+                check("and a click hits the button where it is seen",
                       bl > 120 and r < 90 and g < 90)
             finally:
                 q2.close()

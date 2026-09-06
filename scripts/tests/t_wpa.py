@@ -37,8 +37,8 @@ from ptest import check, summary, no64, make_iso64
 
 def fields(out):
     got = {}
-    for name, value in re.findall(r"^\s*(haslo|siec|pmk|aa|spa|anonce|snonce"
-                                  r"|ptk|ramka|mic)=([0-9a-f]+)\s*$",
+    for name, value in re.findall(r"^\s*(password|ssid|pmk|aa|spa|anonce|snonce"
+                                  r"|ptk|frame|mic)=([0-9a-f]+)\s*$",
                                   out, re.M):
         got[name] = bytes.fromhex(value)
     return got
@@ -58,11 +58,11 @@ def host_prf(key, label, data, nbytes):
 
 def main():
     print()
-    print("--- WPA2: klucze i szyfrowanie ramki ---")
+    print("--- WPA2: the keys and encrypting a frame ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -73,7 +73,7 @@ def main():
         fh.truncate(DISK_SIZE)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -83,37 +83,37 @@ def main():
         try:
             q.wait_serial("proton64>", timeout=90)
 
-            out = q.command("run wpatest", "kod wyjscia", timeout=240)
-            check("SHA-1, HMAC-SHA1 i PMK z hasla (802.11i)",
-                  "PMK z hasla (802.11i, 4096 rund): OK" in out)
-            check("AES key wrap z RFC 3394 (tak jedzie klucz grupowy)",
+            out = q.command("run wpatest", "exit code", timeout=240)
+            check("SHA-1, HMAC-SHA1 and the PMK from a passphrase (802.11i)",
+                  "PMK from a passphrase (802.11i, 4096 rounds): OK" in out)
+            check("AES key wrap from RFC 3394 (that is how the group key travels)",
                   "AES key wrap (RFC 3394 4.1): OK" in out and
-                  "jeden zmieniony bit = odmowa odwiniecia: OK" in out)
-            check("CCMP szyfruje trzy ramki z P802.11i tak jak norma",
-                  out.count("CCMP szyfruje jak w P802.11i: OK") == 3)
-            check("i odszyfrowuje je z powrotem",
-                  out.count("i odszyfrowuje z powrotem: OK") == 3)
-            check("zmiana adresu w naglowku konczy sie odrzuceniem ramki",
-                  "zmiana adresu w naglowku = ramka odrzucona: OK" in out)
-            check("zmiana bajtu danych konczy sie odrzuceniem ramki",
-                  "zmiana bajtu danych = ramka odrzucona: OK" in out)
-            check("obcy klucz nie odszyfrowuje niczego",
-                  "obcy klucz nie odszyfrowuje: OK" in out)
-            check("caly zestaw wektorow przechodzi",
-                  "[wpa] wszystko sie zgadza" in out and "BLAD" not in out)
+                  "one changed bit = the unwrap is refused: OK" in out)
+            check("CCMP encrypts three P802.11i frames as the standard says",
+                  out.count("CCMP encrypts as in P802.11i: OK") == 3)
+            check("and it decrypts them back again",
+                  out.count("and decrypts back again: OK") == 3)
+            check("a changed address in the header ends with the frame refused",
+                  "a changed address in the header = the frame is refused: OK" in out)
+            check("a changed data byte ends with the frame refused",
+                  "a changed data byte = the frame is refused: OK" in out)
+            check("a foreign key decrypts nothing",
+                  "a foreign key does not decrypt it: OK" in out)
+            check("the whole set of vectors passes",
+                  "[wpa] everything matches" in out and "FAILED" not in out)
 
             # --- The same keys, computed by Python -------------------
             for seed in ("5a", "c3"):
-                out = q.command("run wpatest pochodne %s" % seed,
-                                "kod wyjscia", timeout=240)
+                out = q.command("run wpatest derived %s" % seed,
+                                "exit code", timeout=240)
                 got = fields(out)
                 if "ptk" not in got:
-                    check("nasiono %s: system wypisal klucze" % seed, False)
+                    check("seed %s: the system printed the keys" % seed, False)
                     continue
 
-                pmk = hashlib.pbkdf2_hmac("sha1", got["haslo"], got["siec"],
+                pmk = hashlib.pbkdf2_hmac("sha1", got["passwd"], got["ssid"],
                                           4096, 32)
-                check("nasiono %s: PMK zgodny z PBKDF2 z hashlib" % seed,
+                check("seed %s: the PMK matches PBKDF2 from hashlib" % seed,
                       pmk == got["pmk"])
 
                 aa, spa = got["aa"], got["spa"]
@@ -121,14 +121,14 @@ def main():
                 data = (min(aa, spa) + max(aa, spa) +
                         min(an, sn) + max(an, sn))
                 ptk = host_prf(pmk, b"Pairwise key expansion", data, 48)
-                check("nasiono %s: PTK z uzgodnienia czterech ramek" % seed,
+                check("seed %s: the PTK from the four-way handshake" % seed,
                       ptk == got["ptk"])
 
-                mic = hmac.new(ptk[:16], got["ramka"],
+                mic = hmac.new(ptk[:16], got["frame"],
                                hashlib.sha1).digest()[:16]
-                check("nasiono %s: podpis wiadomosci EAPOL-Key" % seed,
+                check("seed %s: the EAPOL-Key message signature" % seed,
                       mic == got["mic"])
-                check("nasiono %s: klucze nie sa wyrodne" % seed,
+                check("seed %s: the keys are not degenerate" % seed,
                       len(set(got["ptk"])) > 8 and
                       got["ptk"][:16] != got["ptk"][16:32])
         finally:
@@ -144,9 +144,9 @@ def main():
         try:
             q.wait_for("ProtonOS shell")
             q.type_line("run wpatest")
-            screen = q.wait_for("[wpa] wszystko sie zgadza", timeout=240)
-            check("te same wektory przechodza w trybie 32-bitowym",
-                  "[wpa] wszystko sie zgadza" in screen)
+            screen = q.wait_for("[wpa] everything matches", timeout=240)
+            check("the same vectors pass in 32-bit mode",
+                  "[wpa] everything matches" in screen)
         finally:
             q.close()
             os.unlink(disk32)

@@ -111,31 +111,31 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(600, 300)
             time.sleep(1)
 
             first = read_clock(q)
-            check("na pasku zadan da sie odczytac zegar ('%s')" % first,
+            check("the clock can be read off the taskbar ('%s')" % first,
                   re.match(r"^\d\d:\d\d:\d\d$", first) is not None)
 
             # The machine is started with the clock set to a fixed
             # moment, so the digits have to say THAT moment - a clock
             # showing anything at all would pass a weaker check
             start_hm = RTC_BASE.split("T")[1][:5]
-            check("zegar pokazuje godzine, z ktora wstala maszyna (%s)"
+            check("the clock shows the time the machine booted with (%s)"
                   % start_hm, first.startswith(start_hm[:2]))
-            check("i minute z tej samej godziny",
+            check("and a minute of the same hour",
                   0 <= seconds(first) - seconds(RTC_BASE.split("T")[1]) < 300)
 
             # --- and it runs -------------------------------------------
             time.sleep(4)
             second = read_clock(q)
-            check("po czterech sekundach zegar pokazuje cos innego ('%s')"
+            check("four seconds later the clock shows something else ('%s')"
                   % second, second != first)
             delta = seconds(second) - seconds(first)
-            check("i jest to o kilka sekund pozniej, a nie cokolwiek "
+            check("and it is a few seconds later, not just anything "
                   "(%d s)" % delta, 2 <= delta <= 8)
 
             # --- the buttons stop where the clock begins ---------------
@@ -151,16 +151,16 @@ def main():
             # pixels down, so this row is button and nothing else.
             row = h - TB_H + 2
             got = buttons(at, w, row)
-            check("dziewiec okien ma swoje przyciski na pasku (jest %d)"
+            check("nine windows have their buttons on the bar (there are %d)"
                   % len(got), len(got) >= 9)
-            check("i zaden nie wchodzi pod zegar",
+            check("and none of them runs under the clock",
                   got[-1][1] < clock_x0(w) - 2)
 
             third = read_clock(q)
-            check("zegar dalej da sie odczytac przy dziewieciu oknach "
+            check("the clock can still be read with nine windows open "
                   "('%s')" % third,
                   re.match(r"^\d\d:\d\d:\d\d$", third) is not None)
-            check("i chodzi dalej", seconds(third) > seconds(second))
+            check("and it keeps running", seconds(third) > seconds(second))
         finally:
             q.close()
     finally:

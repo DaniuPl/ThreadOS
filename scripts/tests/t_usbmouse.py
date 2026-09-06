@@ -40,10 +40,10 @@ def main():
              usbmouse="xhci")
     try:
         boot = q.wait_for("ProtonOS shell", timeout=60)
-        check("jadro znalazlo mysz USB i mowi, gdzie ('%s')"
-              % (re.search(r"Mysz USB[^\n]*", boot).group(0)
-                 if re.search(r"Mysz USB[^\n]*", boot) else "brak"),
-              re.search(r"Mysz USB \(HID, [^)]+\) na porcie \d+", boot)
+        check("the kernel found the USB mouse and says where ('%s')"
+              % (re.search(r"A USB mouse[^\n]*", boot).group(0)
+                 if re.search(r"A USB mouse[^\n]*", boot) else "none"),
+              re.search(r"A USB mouse \(HID, [^)]+\) on port \d+", boot)
               is not None)
     finally:
         q.close()
@@ -57,19 +57,19 @@ def main():
              usbmouse="xhci")
     try:
         q.wait_for("ProtonOS shell", timeout=60)
-        q.type_line("sprzet")
+        q.type_line("hardware")
         time.sleep(3)
         said = q.screen()
-        check("'sprzet' mowi o kontrolerze 8042 i myszy PS/2 ('%s')"
+        check("'hardware' talks about the 8042 controller and the PS/2 mouse ('%s')"
               % next((l.strip() for l in said.splitlines()
-                      if l.startswith("PS/2:")), "brak wiersza"),
-              "PS/2:" in said and "kontroler 8042 jest" in said)
-        check("i o tym, co znalazl na USB ('%s')"
+                      if l.startswith("PS/2:")), "no line"),
+              "PS/2:" in said and "the 8042 controller is there" in said)
+        check("and about what it found on USB ('%s')"
               % next((l.strip() for l in said.splitlines()
-                      if l.startswith("USB:")), "brak wiersza"),
-              "USB:" in said and "mysz tak" in said)
-        check("i wymienia urzadzenia PCI, wiec obca maszyna sie opisze",
-              "klasa" in said and "grafika" in said)
+                      if l.startswith("USB:")), "no line"),
+              "USB:" in said and "mouse yes" in said)
+        check("and it lists the PCI devices, so a foreign machine will describe itself",
+              "class" in said and "graphics" in said)
     finally:
         q.close()
 
@@ -82,20 +82,20 @@ def main():
     q = Qemu(KERNEL, INITRD, usbkbd="xhci", usbmouse="xhci",
              no_i8042=True)
     try:
-        check("maszyna bez 8042 wstaje i rysuje pulpit",
+        check("a machine with no 8042 comes up and draws the desktop",
               q.wait_desktop(timeout=60))
 
         # The pointer starts in the middle of the mode the compositor
         # set up; from there it is moved to a place nothing else draws
         # on, and the white cursor has to be there.
         q.mouse_move(-110, -60)
-        check("kursor jest tam, gdzie mysz USB go zaprowadzila (~50,41)",
+        check("the pointer is where the USB mouse took it (~50,41)",
               q.wait_pixel(50, 41, (255, 255, 255)))
 
         q.mouse_move(150, 80)
-        check("i idzie za nia dalej (~200,121)",
+        check("and it keeps following it (~200,121)",
               q.wait_pixel(200, 121, (255, 255, 255)))
-        check("a stare miejsce zostalo zamalowane tlem (~50,41)",
+        check("and the old place was painted over with the background (~50,41)",
               q.wait_pixel(50, 41, (0, 128, 160)))
     finally:
         q.close()
@@ -107,13 +107,13 @@ def main():
              usbmouse="xhci", no_i8042=True)
     try:
         q.wait_for("ProtonOS shell", timeout=60)
-        q.type_line("sprzet")
+        q.type_line("hardware")
         time.sleep(3)
         said = q.screen()
-        check("maszyna bez 8042 mowi to wprost, zamiast udawac PS/2 ('%s')"
+        check("a machine with no 8042 says so outright instead of faking PS/2 ('%s')"
               % next((l.strip() for l in said.splitlines()
-                      if l.startswith("PS/2:")), "brak wiersza"),
-              "BRAK kontrolera 8042" in said)
+                      if l.startswith("PS/2:")), "no line"),
+              "NO 8042 controller" in said)
     finally:
         q.close()
 

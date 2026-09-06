@@ -28,9 +28,9 @@
    the shared library and are to stay there - a program gets a pointer
    to them rather than its own copy of a dozen or so kilobytes of
    certificates. */
-static inline const uint8_t *cert_builtin_roots(uint32_t *ile)
+static inline const uint8_t *cert_builtin_roots(uint32_t *count)
 {
-    *ile = (uint32_t)sizeof(ca_roots_der);
+    *count = (uint32_t)sizeof(ca_roots_der);
     return ca_roots_der;
 }
 

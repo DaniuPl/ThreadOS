@@ -17,5 +17,5 @@ An honest boundary is worth more than a green tick that means nothing.
 
 - [ ] `make test` is green (or: the groups that could fail are named below, with why)
 - [ ] The new feature has its own group in `scripts/tests/`, registered in `scripts/run_tests.py`
-- [ ] Comments and identifiers in English; what the running system says stays Polish
+- [ ] Comments, identifiers and everything the system says are in English
 - [ ] Anything worth remembering went into `DZIENNIK.md`

@@ -432,9 +432,9 @@ void smp_run_work(int core)
 }
 
 void smp_work(void (*fn)(uint32_t number, void *data), void *data,
-               uint32_t ile)
+               uint32_t count)
 {
-    if (!fn || !ile)
+    if (!fn || !count)
         return;
 
     for (int i = 0; i < MAX_CPU; i++)
@@ -444,7 +444,7 @@ void smp_work(void (*fn)(uint32_t number, void *data), void *data,
     work_arg = data;
     work_next = 0;
     work_done = 0;
-    __atomic_store_n(&work_count, ile, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&work_count, count, __ATOMIC_SEQ_CST);
 
     /* The order is already visible - now the ones sleeping through it
        have to be woken. The order is not arbitrary: a wake-up sent
@@ -456,7 +456,7 @@ void smp_work(void (*fn)(uint32_t number, void *data), void *data,
     run_available(0);
 
     /* We wait for those who took a unit just before we did */
-    while (__atomic_load_n(&work_done, __ATOMIC_SEQ_CST) < ile)
+    while (__atomic_load_n(&work_done, __ATOMIC_SEQ_CST) < count)
         __asm__ volatile("pause" ::: "memory");
 
     __atomic_store_n(&work_count, 0, __ATOMIC_SEQ_CST);

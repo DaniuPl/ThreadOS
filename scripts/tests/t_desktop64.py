@@ -31,16 +31,16 @@ def near(a, b, tol=40):
 
 
 def main():
-    print("--- pulpit graficzny (jadro 64-bitowe) ---")
+    print("--- the graphical desktop (the 64-bit kernel) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
         return 0
     if shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue")
+        print("SKIPPED: no grub-mkrescue")
         return 0
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return 0
 
     d = tempfile.mkdtemp()
@@ -61,7 +61,7 @@ def main():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return summary()
 
@@ -69,30 +69,30 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
 
             w, h, at = q.screen_raw()
-            check(f"pulpit wstaje w trybie graficznym ({w}x{h})",
+            check(f"the desktop comes up in graphics mode ({w}x{h})",
                   w >= 640 and h >= 400)
-            check("tlo pulpitu wypelnia ekran",
+            check("the desktop background fills the screen",
                   near(at(w // 2, h // 2), TLO))
-            check("gorny pasek narysowany",
+            check("the top bar is drawn",
                   near(at(w // 2, 4), BAR))
-            check("pasek zadan na dole narysowany",
+            check("the taskbar at the bottom is drawn",
                   near(at(w // 2, h - 8), BAR))
             # The icons stand in a column on the left; that orange
             # patch is the first of them
-            check("ikony na pulpicie",
+            check("the icons on the desktop",
                   near(at(24, 32), IKONA))
 
             # The kernel's windows: two, one on top of the other. The
             # window's grey background at the place the first one stands.
             WINDOW = (235, 235, 235)
-            check("okno 'Terminal' narysowane",
+            check("the 'Terminal' window is drawn",
                   near(at(100, 100), WINDOW, 60))
-            check("okno 'Pliki' narysowane",
+            check("the 'Files' window is drawn",
                   near(at(240, 140), WINDOW, 60))
 
             # The mouse: the cursor is to go where we move it. We check
@@ -102,7 +102,7 @@ def main():
             _, _, at2 = q.screen_raw()
             differ = sum(1 for dy in range(12) for dx in range(12)
                         if at2(400 + dx, 300 + dy) != at(400 + dx, 300 + dy))
-            check(f"kursor idzie za mysza ({differ} pikseli zmienionych)",
+            check(f"the pointer follows the mouse ({differ} pixels changed)",
                   differ > 8)
 
             # A click on the second window's title bar brings it to the
@@ -113,7 +113,7 @@ def main():
             q.mouse_button(False)
             time.sleep(1.5)
             _, _, at3 = q.screen_raw()
-            check("klik w pasek tytulu nie wywraca kompozytora",
+            check("a click on the title bar does not upset the compositor",
                   near(at3(w // 2, h // 2), TLO))
 
             # A key that no window wants goes to the kernel's shell -
@@ -129,8 +129,8 @@ def main():
             q.type_line("uptime")
             time.sleep(2)
             out = q.serial()[seen:]
-            check("klawisz, ktorego nie chce zadne okno, trafia do "
-                  "shella jadra", "Uptime:" in out)
+            check("a key no window wants reaches the "
+                  "kernel's shell", "Uptime:" in out)
         finally:
             q.close()
     finally:

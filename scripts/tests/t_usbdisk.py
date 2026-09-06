@@ -35,7 +35,7 @@ from ptest import (check, summary, no64, make_iso64, make_mbr_fat_disk,
 
 STICK_MIB = 64
 INSTALL_MIB = 400          # room for the EFI partition and ours
-FROM_HOST = b"To pisal mtools na hoscie, nie my.\n"
+FROM_HOST = b"mtools wrote this on the host, not us.\n"
 
 
 def usb_disk_number(listing):
@@ -43,7 +43,7 @@ def usb_disk_number(listing):
     booting through UEFI adds a disk of the firmware's own, so the
     stick moves - and a test that assumed '2' would be testing the
     numbering rather than the disk."""
-    m = re.search(r"dysk (\d+): USB \(pamiec masowa\)", listing)
+    m = re.search(r"disk (\d+): USB \(mass storage\)", listing)
     return int(m.group(1)) if m else 0
 
 
@@ -70,33 +70,33 @@ def behind_hub():
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     made, start = make_mbr_fat_disk(stick, mib=32, fat32=True,
-                                    label="ZAHUBEM")
-    fat_put(stick, start, b"za koncentratorem\n", "/zahubem.txt")
+                                    label="BEHINDHUB")
+    fat_put(stick, start, b"behind the hub\n", "/behindhub.txt")
 
     try:
         if not make_iso64(d, iso, text=True):
-            check("plyta dla proby z koncentratorem buduje sie", False)
+            check("the disc for the hub attempt builds", False)
             return
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbdisk=stick, usbhub=True, behind_hub=True,
                  qemu="qemu-system-x86_64")
         try:
             boot = q.wait_serial("proton64>", timeout=90)
-            check("system znajduje koncentrator",
-                  "Koncentrator USB" in boot)
-            check("i dysk ZA nim", "Dysk USB:" in boot)
+            check("the system finds the hub",
+                  "A USB hub" in boot)
+            check("and the disk BEHIND it", "USB disk:" in boot)
 
-            out = q.command("dyski", "sektorow", timeout=25)
+            out = q.command("disks", "sectors", timeout=25)
             usbno = usb_disk_number(out)
-            check("dysk zza koncentratora jest na liscie jak kazdy inny "
-                  "(dysk %d)" % usbno, usbno > 0)
+            check("the disk behind the hub is on the list like any other "
+                  "(disk %d)" % usbno, usbno > 0)
 
-            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
-            check("i da sie go czytac", "FAT32" in out and "ZAHUBEM" in out)
-            out = q.command("fatcat /zahubem.txt", "koncentratorem",
+            out = q.command("fat 1 %d" % usbno, "cluster", timeout=30)
+            check("and it can be read", "FAT32" in out and "BEHINDHUB" in out)
+            out = q.command("fatcat /behindhub.txt", "the hub",
                             timeout=20)
-            check("razem z plikiem, ktory host na nim zostawil",
-                  "za koncentratorem" in out)
+            check("together with the file the host left on it",
+                  "behind the hub" in out)
         finally:
             q.close()
     finally:
@@ -127,70 +127,70 @@ def hotplug():
         fh.truncate(DISK_SIZE)
 
     made, start = make_mbr_fat_disk(stick, mib=32, fat32=True,
-                                    label="POZNIEJ")
-    fat_put(stick, start, b"wlozony w trakcie pracy\n", "/pozniej.txt")
+                                    label="LATER")
+    fat_put(stick, start, b"plugged in while it runs\n", "/later.txt")
 
     try:
         if not make_iso64(d, iso, text=True):
-            check("plyta dla proby z wkladaniem buduje sie", False)
+            check("the disc for the plugging attempt builds", False)
             return
         # An xHCI controller with NOTHING in it - the stick comes later
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbkbd="xhci", qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=90)
-            out = q.command("dyski", "sektorow", timeout=20)
-            check("na poczatku pendrive'a nie ma na liscie",
-                  "USB (pamiec masowa)" not in out)
+            out = q.command("disks", "sectors", timeout=20)
+            check("at the start the stick is not on the list",
+                  "USB (mass storage)" not in out)
 
             # Plugged in while the machine runs
             q.hmp("drive_add 0 if=none,id=pd,format=raw,file=" + stick)
             q.cmd({"execute": "device_add",
                    "arguments": {"driver": "usb-storage", "bus": "xhci.0",
                                  "drive": "pd", "id": "pendrive"}})
-            found = q.wait_serial("Dysk USB", timeout=30)
-            check("system zauwaza pendrive wlozony w trakcie pracy",
-                  "Dysk USB" in found)
+            found = q.wait_serial("USB disk", timeout=30)
+            check("the system notices a stick plugged in while it runs",
+                  "USB disk" in found)
 
-            out = q.command("dyski", "sektorow", timeout=20)
+            out = q.command("disks", "sectors", timeout=20)
             usbno = usb_disk_number(out)
-            check("i dopisuje go do listy dyskow (dysk %d)" % usbno,
+            check("and adds it to the disk list (disk %d)" % usbno,
                   usbno > 0)
 
-            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
+            out = q.command("fat 1 %d" % usbno, "cluster", timeout=30)
             # A 32 MiB volume that a formatter was told to make FAT32
             # IS FAT32, however few clusters it has - and reading it by
             # cluster count alone showed an empty directory on a full
             # stick.
-            check("da sie go od razu czytac, i to jako FAT32",
-                  "FAT32" in out and "POZNIEJ" in out)
-            out = q.command("fatcat /pozniej.txt", "wlozony", timeout=20)
-            check("razem z plikiem, ktory host na nim zostawil",
-                  "wlozony w trakcie pracy" in out)
+            check("it can be read at once, and as a FAT32",
+                  "FAT32" in out and "LATER" in out)
+            out = q.command("fatcat /later.txt", "plugged in", timeout=20)
+            check("together with the file the host left on it",
+                  "plugged in while it runs" in out)
 
             # And pulled out
             q.cmd({"execute": "device_del",
                    "arguments": {"id": "pendrive"}})
-            gone = q.wait_serial("wyjety z gniazdka", timeout=30)
-            check("system zauwaza wyjecie pendrive'a",
-                  "wyjety z gniazdka" in gone)
+            gone = q.wait_serial("pulled out of the socket", timeout=30)
+            check("the system notices the stick being pulled out",
+                  "pulled out of the socket" in gone)
 
-            out = q.command("dyski", "sektorow", timeout=20)
-            check("i mowi o nim, ze go nie ma, zamiast udawac",
-                  "wyjety z gniazdka" in out)
+            out = q.command("disks", "sectors", timeout=20)
+            check("and it says it is gone instead of pretending",
+                  "pulled out of the socket" in out)
 
             # The numbers must not move: somebody is reading that list
-            check("numery pozostalych dyskow sie nie przesunely",
-                  "dysk 1: AHCI" in out)
+            check("the numbers of the other disks did not shift",
+                  "disk 1: AHCI" in out)
 
             out = q.command("fatls /", "proton64>", timeout=20)
-            check("po wyjeciu nic nie jest juz podmontowane - zamiast "
-                  "pustego katalogu jest odmowa",
-                  "nic nie jest podmontowane" in out)
+            check("after the pull nothing is mounted any more - instead of "
+                  "an empty directory there is a refusal",
+                  "nothing is mounted" in out)
 
             # The machine is still alive afterwards
             out = q.command("uptime", "Uptime", timeout=20)
-            check("system dziala dalej po wyjeciu dysku", "Uptime" in out)
+            check("the system still runs after the disk is pulled out", "Uptime" in out)
         finally:
             q.close()
 
@@ -204,27 +204,27 @@ def hotplug():
                  sata=True, usbhub=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=90)
-            check("koncentrator sam, bez niczego w nim",
-                  "Koncentrator USB" in q.serial())
-            out = q.command("dyski", "sektorow", timeout=25)
-            check("i na razie zadnego dysku USB",
-                  "USB (pamiec masowa)" not in out)
+            check("the hub alone, with nothing in it",
+                  "A USB hub" in q.serial())
+            out = q.command("disks", "sectors", timeout=25)
+            check("and no USB disk for now",
+                  "USB (mass storage)" not in out)
 
             q.hmp("drive_add 0 if=none,id=pd2,format=raw,file=" + stick)
             q.cmd({"execute": "device_add",
                    "arguments": {"driver": "usb-storage", "bus": "xhci.0",
                                  "port": "2.1", "drive": "pd2",
                                  "id": "wdoku"}})
-            found = q.wait_serial("Dysk USB", timeout=40)
-            check("pendrive wlozony do koncentratora tez zostaje "
-                  "zauwazony", "Dysk USB" in found)
+            found = q.wait_serial("USB disk", timeout=40)
+            check("a stick put into the hub is "
+                  "noticed", "USB disk" in found)
 
-            out = q.command("dyski", "sektorow", timeout=25)
+            out = q.command("disks", "sectors", timeout=25)
             usbno = usb_disk_number(out)
-            check("i trafia na liste dyskow (dysk %d)" % usbno, usbno > 0)
-            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
-            check("razem z tym, co na nim jest",
-                  "FAT32" in out and "POZNIEJ" in out)
+            check("and it lands on the disk list (disk %d)" % usbno, usbno > 0)
+            out = q.command("fat 1 %d" % usbno, "cluster", timeout=30)
+            check("together with what is on it",
+                  "FAT32" in out and "LATER" in out)
         finally:
             q.close()
     finally:
@@ -248,7 +248,7 @@ def install_to_stick():
                        stderr=subprocess.DEVNULL)
     for path in (LOADER, OVMF_CODE, OVMF_VARS):
         if not os.path.exists(path):
-            print("POMINIETE: brak %s - bez instalacji na pendrive" % path)
+            print("SKIPPED: no %s - no installing onto a stick" % path)
             return
 
     esp = tempfile.mkdtemp()
@@ -269,50 +269,50 @@ def install_to_stick():
         # A stick with somebody's data on it - it is going away, and the
         # installer has to say so before it does.
         made, start = make_mbr_fat_disk(stick, mib=INSTALL_MIB, fat32=True,
-                                        label="STAREDANE")
-        fat_put(stick, start, b"zdjecia z wakacji" * 100, "/wazne.txt")
+                                        label="OLDDATA")
+        fat_put(stick, start, b"holiday photographs" * 100, "/important.txt")
 
         shutil.copy(OVMF_VARS, nvram)
         q = Qemu(KERNEL, INITRD, esp=esp, disk=own, sata=True,
                  usbdisk=stick, serial=slog, qemu="qemu-system-x86_64",
                  uefi=(OVMF_CODE, nvram))
         try:
-            q.wait_serial("System 64-bitowy gotowy", timeout=140)
-            out = q.command("dyski", "sektorow", timeout=20)
+            q.wait_serial("The 64-bit system is ready", timeout=140)
+            out = q.command("disks", "sectors", timeout=20)
             usbno = usb_disk_number(out)
-            check("instalator ma z czego wybierac: wlasny dysk i pendrive"
-                  " (pendrive to dysk %d)" % usbno, usbno > 0)
+            check("the installer has a choice: its own disk and the stick"
+                  " (the stick is disk %d)" % usbno, usbno > 0)
             if not usbno:
                 return
 
-            out = q.command("instaluj tekstem caly %d" % usbno,
-                            "Wpisz KASUJ", timeout=60)
-            check("plan dotyczy pendrive'a, nie dysku maszyny",
-                  "USB" in out or ("dysk %d" % usbno) in out)
-            out = q.command("KASUJ", "Gotowe", timeout=300)
-            check("instalacja na pendrive dochodzi do konca",
-                  "tablica partycji (GPT) - gotowe" in out
-                  and "partycja EFI (FAT32) - gotowe" in out
-                  and "/EFI/BOOT/BOOTX64.EFI - gotowe" in out)
+            out = q.command("install text whole %d" % usbno,
+                            "Type ERASE", timeout=60)
+            check("the plan is about the stick, not the machine's disk",
+                  "USB" in out or ("disk %d" % usbno) in out)
+            out = q.command("ERASE", "Done", timeout=300)
+            check("installing onto the stick runs to the end",
+                  "partition table (GPT) - done" in out
+                  and "EFI partition (FAT32) - done" in out
+                  and "/EFI/BOOT/BOOTX64.EFI - done" in out)
         finally:
             q.close()
 
         # --- what came out, read by somebody else -------------------
         ok, parts, why = gpt_read(stick)
-        check("pendrive ma teraz nasza tablice GPT%s"
+        check("the stick has our GPT now%s"
               % ("" if ok else ": " + why), ok and len(parts) == 2)
         if len(parts) == 2:
-            check("z partycja EFI i nasza",
+            check("with an EFI partition and ours",
                   parts[0][0] == GUID_ESP4 and parts[1][0] == GUID_PFS4)
-        check("na partycji EFI pendrive'a jest FAT32",
+        check("the stick's EFI partition holds a FAT32",
               fat_kind(stick, 2048) == "FAT32")
         loader = fat_get(stick, 2048, "/EFI/BOOT/BOOTX64.EFI")
         with open(LOADER, "rb") as fh:
             want = fh.read()
-        check("loader zapisany co do bajtu (%d B)"
+        check("the loader was written byte for byte (%d B)"
               % (len(loader) if loader else 0), loader == want)
-        check("stare dane sa nie do odczytania - dysk zostal skasowany",
-              fat_get(stick, 2048, "/wazne.txt") is None)
+        check("the old data cannot be read - the disk was erased",
+              fat_get(stick, 2048, "/important.txt") is None)
 
         # --- and the proof: the firmware boots FROM the stick -------
         shutil.copy(OVMF_VARS, nvram)
@@ -320,10 +320,10 @@ def install_to_stick():
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q2.wait_serial("protoboot: ProtonOS", timeout=90)
-            check("firmware wybiera nasz loader z pendrive'a",
+            check("the firmware picks our loader off the stick",
                   "protoboot" in out)
-            out = q2.wait_serial("System 64-bitowy gotowy", timeout=140)
-            check("i system z pendrive'a dochodzi do powloki",
+            out = q2.wait_serial("The 64-bit system is ready", timeout=140)
+            check("and the system on the stick reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
         finally:
             q2.close()
@@ -336,14 +336,14 @@ def install_to_stick():
 
 def main():
     print()
-    print("--- dysk w gniazdku USB ---")
+    print("--- a disk in a USB socket ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok():
-        print("POMINIETE: brak mtools - nie ma czym sprawdzic pendrive'a")
+        print("SKIPPED: no mtools - nothing to check the stick with")
         return summary()
 
     d = tempfile.mkdtemp()
@@ -355,7 +355,7 @@ def main():
         fh.truncate(DISK_SIZE)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -364,10 +364,10 @@ def main():
         # a FAT32 on it, and one file put there by somebody else's tool.
         made, start = make_mbr_fat_disk(stick, mib=STICK_MIB, fat32=True,
                                         label="PENDRIVE")
-        check("pendrive sformatowany przez mtools (nie przez nas)", made)
+        check("the stick was formatted by mtools (not by us)", made)
         if not made:
             return summary()
-        check("plik od hosta zapisany na pendrive",
+        check("the host's file was written onto the stick",
               fat_put(stick, start, FROM_HOST, "/od-hosta.txt"))
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
@@ -376,79 +376,79 @@ def main():
             boot = q.wait_serial("proton64>", timeout=90)
 
             # --- the device itself -----------------------------------
-            check("system znajduje dysk w gniazdku USB",
-                  "Dysk USB:" in boot)
-            m = re.search(r"Dysk USB: (.*), (\d+) sektorow", boot)
-            check("i podaje jego nazwe oraz pojemnosc"
-                  + (" ('%s', %s sektorow)" % (m.group(1), m.group(2))
+            check("the system finds the disk in the USB socket",
+                  "USB disk:" in boot)
+            m = re.search(r"USB disk: (.*), (\d+) sectors", boot)
+            check("and gives its name and its capacity"
+                  + (" ('%s', %s sectors)" % (m.group(1), m.group(2))
                      if m else ""), m is not None)
             # QEMU's disk is exactly as large as the file we made
-            check("pojemnosc zgadza sie z rozmiarem obrazu (%d sektorow)"
+            check("the capacity matches the image size (%d sectors)"
                   % (STICK_MIB * 2048),
                   m is not None and int(m.group(2)) == STICK_MIB * 2048)
 
             # --- and the block layer sees it as a disk ---------------
-            out = q.command("dyski", "sektorow", timeout=20)
-            check("pendrive jest na liscie dyskow obok wlasnego dysku",
-                  "USB (pamiec masowa)" in out and "AHCI" in out)
+            out = q.command("disks", "sectors", timeout=20)
+            check("the stick is on the disk list beside our own disk",
+                  "USB (mass storage)" in out and "AHCI" in out)
             usbno = usb_disk_number(out)
-            check("ale to NIE on jest uzywany - system zostaje na swoim",
-                  re.search(r"USB \(pamiec masowa\).*<- uzywany", out)
+            check("but it is NOT the one in use - the system stays on its own",
+                  re.search(r"USB \(mass storage\).*<- in use", out)
                   is None)
-            check("system widzi na nim tablice partycji",
-                  "FAT" in out or "partycja" in out.lower())
+            check("the system sees a partition table on it",
+                  "FAT" in out or "partition" in out.lower())
 
             # --- reading: a file written by mtools -------------------
-            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
-            check("FAT na pendrivie podmontowany ze WSKAZANEGO dysku",
-                  "dysk %d, partycja 1" % usbno in out)
-            check("i rozpoznany jako FAT32 z etykieta PENDRIVE",
+            out = q.command("fat 1 %d" % usbno, "cluster", timeout=30)
+            check("the FAT on the stick was mounted from the NAMED disk",
+                  "disk %d, partition 1" % usbno in out)
+            check("and recognised as a FAT32 labelled PENDRIVE",
                   "FAT32" in out and "PENDRIVE" in out)
 
-            out = q.command("fatls /", "pozycji", timeout=20)
-            check("widzimy plik, ktory host tam zapisal",
+            out = q.command("fatls /", "entries", timeout=20)
+            check("we see the file the host wrote there",
                   "od-hosta.txt" in out)
 
             out = q.command("fatcat /od-hosta.txt", "mtools", timeout=20)
-            check("tresc pliku z pendrive'a odczytana co do znaku",
+            check("the content of the file from the stick was read character for character",
                   FROM_HOST.decode().strip() in out)
 
             # --- and PFS on the machine's own disk still works -------
             # The whole point of mounting a FAT "from disk 2": the rest
             # of the system must not have moved.
-            q.command("write proba.txt pendrive-nie-przestawil-dysku",
-                      "zapisano", timeout=20)
-            out = q.command("cat proba.txt", "pendrive", timeout=20)
-            check("PFS na wlasnym dysku dziala dalej, mimo montowania USB",
-                  "pendrive-nie-przestawil-dysku" in out)
+            q.command("write attempt.txt the-stick-did-not-move-the-disk",
+                      "wrote", timeout=20)
+            out = q.command("cat attempt.txt", "pendrive", timeout=20)
+            check("the PFS on our own disk still works, despite the USB mount",
+                  "the-stick-did-not-move-the-disk" in out)
 
             # --- writing: our file, read back by mtools --------------
-            q.command("fatmkdir /ZSYSTEMU", "fatmkdir", timeout=20)
-            q.command("fatput /ZSYSTEMU/witaj.txt czesc-z-protonos",
+            q.command("fatmkdir /FROMSYSTEM", "fatmkdir", timeout=20)
+            q.command("fatput /FROMSYSTEM/hello.txt hello-from-protonos",
                       "fatput", timeout=20)
-            out = q.command("fatcopy hello64 /ZSYSTEMU/hello64.bin",
+            out = q.command("fatcopy hello64 /FROMSYSTEM/hello64.bin",
                             "fatcopy", timeout=60)
-            check("wieksze pisanie po USB dochodzi do konca (program z "
+            check("a bigger write over USB runs to the end (a program from "
                   "initrd)", "skopiowano" in out or "B" in out)
 
             # Everything has to reach the disk before the machine dies
-            q.command("fat 1 %d" % usbno, "klaster", timeout=30)  # flush
+            q.command("fat 1 %d" % usbno, "cluster", timeout=30)  # flush
         finally:
             q.close()
 
         # --- the host looks at what came out ------------------------
-        listing = fat_dir(stick, start, "::/ZSYSTEMU")
-        check("mtools widzi katalog i pliki zapisane przez system",
-              listing is not None and "WITAJ" in (listing or "").upper())
+        listing = fat_dir(stick, start, "::/FROMSYSTEM")
+        check("mtools sees the directory and the files the system wrote",
+              listing is not None and "HELLO" in (listing or "").upper())
 
-        got = fat_get(stick, start, "/ZSYSTEMU/witaj.txt")
-        check("i tresc jest dokladnie ta, ktora system zapisal"
+        got = fat_get(stick, start, "/FROMSYSTEM/hello.txt")
+        check("and the content is exactly what the system wrote"
               + (" ('%s')" % got.decode(errors="replace").strip()
                  if got else ""),
-              got is not None and b"czesc-z-protonos" in got)
+              got is not None and b"hello-from-protonos" in got)
 
-        binary = fat_get(stick, start, "/ZSYSTEMU/hello64.bin")
-        check("skopiowany program ma sensowna dlugosc i naglowek ELF"
+        binary = fat_get(stick, start, "/FROMSYSTEM/hello64.bin")
+        check("the copied program has a sensible length and an ELF header"
               + (" (%d B)" % len(binary) if binary else ""),
               binary is not None and len(binary) > 1024 and
               binary[:4] == b"\x7fELF")
@@ -456,19 +456,19 @@ def main():
         # The file the host put there has to be untouched: writing to a
         # stick must add, not rearrange.
         old = fat_get(stick, start, "/od-hosta.txt")
-        check("plik hosta przezyl pisanie po tym samym systemie plikow",
+        check("the host's file survived our writing on the same filesystem",
               old == FROM_HOST)
 
         # --- and the same disk one tier further away --------------
-        print("--- pendrive za koncentratorem ---")
+        print("--- a stick behind a hub ---")
         behind_hub()
 
         # --- and the half that has nothing to do with booting -----
-        print("--- pendrive wlozony i wyjety przy pracujacym systemie ---")
+        print("--- a stick plugged in and pulled out while the system runs ---")
         hotplug()
 
         # --- and the thing a stick is for --------------------------
-        print("--- instalacja systemu na pendrive ---")
+        print("--- installing the system onto a stick ---")
         install_to_stick()
     finally:
         for path in (iso, slog, disk, stick):

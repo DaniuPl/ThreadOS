@@ -46,26 +46,26 @@ def blob(path):
 
 def main():
     print()
-    print("--- caly dysk dla ProtonOS-a ---")
+    print("--- the whole disk for ProtonOS ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok():
-        print("POMINIETE: brak mtools")
+        print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
         subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
-        print("POMINIETE: brak build/BOOTX64.EFI (apt install clang lld)")
+        print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
     if not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
-        print("POMINIETE: brak firmware OVMF")
+        print("SKIPPED: no OVMF firmware")
         return summary()
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return summary()
 
     esp = tempfile.mkdtemp()
@@ -88,90 +88,90 @@ def main():
         # and data in its partitions. All of it is going away, and the
         # test says so before it happens.
         make_gpt_disk(target)
-        fat_format(target, ESP_START, ESP_SECTORS, fat32=True, label="STARY")
+        fat_format(target, ESP_START, ESP_SECTORS, fat32=True, label="OLD")
         fat_mkdirs(target, ESP_START, ["/EFI", "/EFI/Microsoft"])
-        fat_put(target, ESP_START, b"MZ-cudzy" * 400,
+        fat_put(target, ESP_START, b"MZ-somebody-elses" * 400,
                 "/EFI/Microsoft/bootmgfw.efi")
         ok, before, why = gpt_read(target)
-        check("dysk obcej maszyny ma wlasna, poprawna tablice GPT (%d "
-              "partycji)" % len(before), ok and len(before) == 3)
+        check("the foreign machine's disk has a correct GPT of its own (%d "
+              "partitions)" % len(before), ok and len(before) == 3)
 
         shutil.copy(OVMF_VARS, nvram)
         q = Qemu(KERNEL, INITRD, esp=esp, disk=target, sata=True,
                  serial=slog, qemu="qemu-system-x86_64",
                  uefi=(OVMF_CODE, nvram))
         try:
-            q.wait_serial("System 64-bitowy gotowy", timeout=120)
+            q.wait_serial("The 64-bit system is ready", timeout=120)
 
-            out = q.command("instaluj tekstem caly", "Wpisz KASUJ",
+            out = q.command("install text whole", "Type ERASE",
                             timeout=40)
-            check("plan mowi wprost, ze skasuje caly dysk",
-                  "CALY TEN DYSK BEDZIE ProtonOS-a" in out
-                  and "Zniknie z niego WSZYSTKO" in out)
-            check("i wymienia, co zrobi",
-                  "tablice GPT" in out
-                  and "partycje EFI 128 MiB (FAT32)" in out
+            check("the plan says outright that it will erase the whole disk",
+                  "THIS WHOLE DISK WILL BE ProtonOS" in out
+                  and "It will lose EVERYTHING" in out)
+            check("and it lists what it will do",
+                  "a GPT" in out
+                  and "an EFI partition of 128 MiB (FAT32)" in out
                   and "ProtonOS-a (PFS)" in out)
-            check("slowo jest inne niz przy instalacji obok",
-                  "Wpisz KASUJ" in out and "Wpisz TAK" not in out)
+            check("the word is different from the one for installing beside",
+                  "Type ERASE" in out and "Type YES" not in out)
 
             # A word that is not the word - and the disk still has its
             # old table afterwards
-            out = q.command("nie", "instaluj:", timeout=20)
-            check("bez slowa KASUJ nie dzieje sie nic",
-                  "nie zapisano niczego" in out)
+            out = q.command("no", "install:", timeout=20)
+            check("without the word ERASE nothing happens",
+                  "nothing was written" in out)
             ok, still, _ = gpt_read(target)
-            check("i stara tablica jest nietknieta",
+            check("and the old table is untouched",
                   ok and len(still) == 3 and still[0][3] == before[0][3])
 
-            q.command("instaluj tekstem caly", "Wpisz KASUJ", timeout=40)
-            out = q.command("KASUJ", "Gotowe", timeout=180)
-            check("po KASUJ robi tablice, partycje i system plikow",
-                  "tablica partycji (GPT) - gotowe" in out
-                  and "partycja EFI (FAT32) - gotowe" in out
-                  and "partycja ProtonOS (PFS) - gotowe" in out)
-            check("i zapisuje na nich pliki",
-                  "/EFI/ProtonOS/protonos64.bin - gotowe" in out
-                  and "/EFI/BOOT/BOOTX64.EFI - gotowe" in out)
+            q.command("install text whole", "Type ERASE", timeout=40)
+            out = q.command("ERASE", "Done", timeout=180)
+            check("after ERASE it makes a table, partitions and a filesystem",
+                  "partition table (GPT) - done" in out
+                  and "EFI partition (FAT32) - done" in out
+                  and "ProtonOS partition (PFS) - done" in out)
+            check("and it writes the files onto them",
+                  "/EFI/ProtonOS/protonos64.bin - done" in out
+                  and "/EFI/BOOT/BOOTX64.EFI - done" in out)
         finally:
             q.close()
 
         # --- the table, read the way a firmware reads one
         ok, parts, why = gpt_read(target)
-        check("tablica GPT trzyma sie kupy (MBR ochronny, oba naglowki, "
-              "obie sumy)%s" % ("" if ok else ": " + why), ok)
-        check("sa dokladnie dwie partycje (%d)" % len(parts),
+        check("the GPT holds together (a protective MBR, both headers, "
+              "both checksums)%s" % ("" if ok else ": " + why), ok)
+        check("there are exactly two partitions (%d)" % len(parts),
               len(parts) == 2)
         if len(parts) == 2:
-            check("pierwsza to partycja EFI, i mowi to swoim GUID-em",
+            check("the first is the EFI partition, and it says so with its GUID",
                   parts[0][0] == GUID_ESP4)
-            check("druga jest nasza i tez mowi to swoim GUID-em (%s)"
+            check("the second is ours and says so with its GUID too (%s)"
                   % parts[1][0].decode("latin1"),
                   parts[1][0] == GUID_PFS4)
-            check("nazwy partycji: '%s' i '%s'" % (parts[0][3], parts[1][3]),
+            check("the partition names: '%s' and '%s'" % (parts[0][3], parts[1][3]),
                   parts[0][3] == "EFI" and parts[1][3] == "ProtonOS")
-            check("partycja EFI zaczyna sie na 2048 i ma 128 MiB (%d "
-                  "sektorow)" % (parts[0][2] - parts[0][1] + 1),
+            check("the EFI partition starts at 2048 and is 128 MiB (%d "
+                  "sectors)" % (parts[0][2] - parts[0][1] + 1),
                   parts[0][1] == 2048
                   and parts[0][2] - parts[0][1] + 1 == 128 * 2048)
-            check("nasza partycja zaczyna sie tam, gdzie tamta konczy",
+            check("our partition starts where that one ends",
                   parts[1][1] == parts[0][2] + 1)
             size = os.path.getsize(target) // 512
-            check("i nie wchodzi na kopie tablicy na koncu dysku",
+            check("and it does not run into the table's copy at the end of the disk",
                   parts[1][2] <= size - 34)
 
         # --- the filesystem on it, read by somebody else
-        check("na partycji EFI jest FAT32 (%s)" % fat_kind(target, 2048),
+        check("the EFI partition holds a FAT32 (%s)" % fat_kind(target, 2048),
               fat_kind(target, 2048) == "FAT32")
         listing = fat_dir(target, 2048)
-        check("mtools czyta z niej katalogi, ktore zrobilismy",
+        check("mtools reads the directories we made off it",
               "ProtonOS" in listing and "BOOT" in listing)
         for path, want in (("/EFI/ProtonOS/BOOTX64.EFI", want_loader),
                            ("/EFI/ProtonOS/protonos64.bin", want_kernel),
                            ("/EFI/ProtonOS/initrd64.img", want_initrd),
                            ("/EFI/BOOT/BOOTX64.EFI", want_loader)):
             got = fat_get(target, 2048, path)
-            check("%s co do bajtu (%d B)" % (path, len(want)),
+            check("%s byte for byte (%d B)" % (path, len(want)),
                   got is not None and got == want)
 
         # --- and the thing this mode is FOR: the old disk is gone.
@@ -184,9 +184,9 @@ def main():
         # table described are not described by anything any more.
         old_starts = [e[1] for e in before]
         new_starts = [e[1] for e in parts]
-        check("po zadnej ze starych partycji nie zostal wpis w tablicy",
+        check("not one of the old partitions left an entry in the table",
               not any(x in new_starts for x in old_starts[1:]))
-        check("i cudzego bootmgfw.efi nie da sie juz odczytac",
+        check("and somebody else's bootmgfw.efi can no longer be read",
               fat_get(target, 2048, "/EFI/Microsoft/bootmgfw.efi") is None)
 
         # --- the proof: it boots
@@ -195,17 +195,17 @@ def main():
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("firmware wybiera nasz loader z tablicy, ktora sami "
-                  "zrobilismy", "protoboot" in out)
-            out = q2.wait_serial("System 64-bitowy gotowy", timeout=120)
-            check("i system z tego dysku dochodzi do powloki",
+            check("the firmware picks our loader out of the table we "
+                  "we made", "protoboot" in out)
+            out = q2.wait_serial("The 64-bit system is ready", timeout=120)
+            check("and the system on that disk reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
-            check("a PFS na naszej partycji jest gotowy do uzycia",
-                  "PFS" in out and "NIEDOSTEPNY" not in out.split(
-                      "Ustawienia:")[0].split("Dysk ")[-1])
+            check("and the PFS on our partition is ready to use",
+                  "PFS" in out and "OUT OF REACH" not in out.split(
+                      "Settings:")[0].split("Disk ")[-1])
             out = q2.command("fls", "proton64>", timeout=20)
-            check("i mozna na nim trzymac pliki",
-                  "nie ma" not in out.lower() or "swap" in out.lower())
+            check("and files can be kept on it",
+                  "there is no" not in out.lower() or "swap" in out.lower())
         finally:
             q2.close()
     finally:

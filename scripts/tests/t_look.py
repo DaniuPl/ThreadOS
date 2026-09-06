@@ -58,7 +58,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(300, 400)       # the cursor off the column we read
             time.sleep(1.5)
@@ -69,7 +69,7 @@ def main():
             top = lum(at(600, 20))
             mid = lum(at(600, 230))
             bot = lum(at(600, ty - 6))
-            check("tlo ciemnieje ku dolowi (%d -> %d -> %d)"
+            check("the background darkens downwards (%d -> %d -> %d)"
                   % (top, mid, bot), top > mid > bot)
             # ...and the steps are small: a staircase is what six bands
             # would have looked like
@@ -80,7 +80,7 @@ def main():
                 if abs(now - prev) > biggest:
                     biggest = abs(now - prev)
                 prev = now
-            check("i robi to stopniami, ktorych nie widac (najwiekszy %d)"
+            check("and it does it in steps nobody can see (the biggest %d)"
                   % biggest, biggest <= 24)
 
             # --- a window is a flat surface with a line round it -----
@@ -89,16 +89,16 @@ def main():
             # anything else is a gradient, a bevel or a shadow, and
             # there are none of those any more.
             body = [at(60, 100), at(100, 100), at(60, 120), at(140, 120)]
-            check("wnetrze okna jest jednym kolorem (%s)" % (body[0],),
+            check("the inside of the window is one colour (%s)" % (body[0],),
                   all(p == body[0] for p in body))
             # And what separates it from the desktop is a single line,
             # darker than the surface and lighter than black
             line = at(40, 100)
-            check("a od pulpitu dzieli je jedna linia (%s)" % (line,),
+            check("and one line separates it from the desktop (%s)" % (line,),
                   lum(line) < lum(body[0]) - 100 and lum(line) > 120)
             # Nothing is painted under the window: the desktop right
             # beside it is the same as the desktop further away
-            check("pod oknem nie ma cienia",
+            check("there is no shadow under the window",
                   at(40 + 120 + 2, 60 + 70 + 2) ==
                   at(40 + 120 + 12, 60 + 70 + 2))
 
@@ -107,7 +107,7 @@ def main():
             # Past the name written on the bar (and short of the
             # buttons at its other end), so that what is read is the
             # bar itself and not a letter of it
-            check("na starcie zaden pasek tytulu nie jest niebieski",
+            check("at the start no title bar is blue",
                   not is_blue(at(115, 67)) and not is_blue(at(240, 102)))
 
             q.mouse_goto(80, 64)         # window 0's title bar
@@ -116,9 +116,9 @@ def main():
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("po kliknieciu okno 0 ma niebieski pasek",
+            check("after the click window 0 has a blue bar",
                   is_blue(at(115, 67)))
-            check("a okno 1 dalej nie ma", not is_blue(at(240, 102)))
+            check("and window 1 still has none", not is_blue(at(240, 102)))
 
             q.mouse_goto(220, 99)        # window 1's title bar
             q.mouse_click()
@@ -126,7 +126,7 @@ def main():
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("klik w drugie okno przenosi ten niebieski na nie",
+            check("a click on the second window moves that blue onto it",
                   is_blue(at(240, 102)) and not is_blue(at(115, 67)))
 
             # --- the taskbar says the same thing with colour ---------
@@ -135,13 +135,13 @@ def main():
             # Buttons are a picture wide now, not a name: 22 pixels
             b1x = 46 + 22 + 10
             b0x = 46 + 10
-            check("przycisk okna z ogniskiem ma kolor akcentu",
+            check("the button of the focused window has the accent colour",
                   is_blue(at(b1x, ty + 2)))
-            check("a przycisk bez ogniska jest szary",
+            check("and a button without the focus is grey",
                   not is_blue(at(b0x, ty + 2)))
             # Flat means flat: the button is the same colour at its top
             # and at its bottom, with no edge drawn round it
-            check("i przyciski sa plaskie (bez krawedzi)",
+            check("and the buttons are flat (no edges)",
                   at(b0x, ty + 2) == at(b0x, ty + 15))
 
             # --- an icon has a picture on it -------------------------
@@ -153,12 +153,12 @@ def main():
             app = tile(0, 20)
             clock_icon = tile(1, 60)
             marks = sum(1 for p in app if p == (255, 255, 255))
-            check("ikona ma na sobie rysunek (%d bialych pikseli)"
+            check("the icon has a drawing on it (%d white pixels)"
                   % marks, marks > 12)
-            check("i dwie ikony maja rozne rysunki", app != clock_icon)
+            check("and two icons have different drawings", app != clock_icon)
             # The tile itself is flat: a corner of it, away from the
             # picture, is the same colour as the opposite corner
-            check("kafelek ikony jest plaski",
+            check("the icon's tile is flat",
                   at(10, 22) == at(8 + 30, 20 + 21))
         finally:
             q.close()

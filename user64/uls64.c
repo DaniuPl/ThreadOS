@@ -43,7 +43,7 @@ void _start(void)
     out[n] = 0;
     print(out);
 
-    int ile = 0;
+    int count = 0;
     for (int i = 0; sys_readdir(i, &entry) == 0; i++) {
         n = put(0, "  ");
         n = put(n, entry.name);
@@ -57,11 +57,11 @@ void _start(void)
         n = put(n, "\n");
         out[n] = 0;
         print(out);
-        ile++;
+        count++;
     }
 
     n = put(0, "uls64: entries ");
-    n = putn(n, (uint64_t)ile);
+    n = putn(n, (uint64_t)count);
     n = put(n, "\n");
     out[n] = 0;
     print(out);

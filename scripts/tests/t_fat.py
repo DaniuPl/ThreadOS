@@ -29,7 +29,7 @@ from ptest import (check, summary, make_iso64, no64, make_gpt_disk,
 ESP_START = 2048                     # make_gpt_disk puts the ESP there
 ESP_SECTORS = 204800                 # 100 MiB
 
-LONG_TEXT = b"To jest plik z dluga nazwa na partycji EFI.\n"
+LONG_TEXT = b"This is a file with a long name on the EFI partition.\n"
 BIG = bytes((i * 7 + 3) & 0xFF for i in range(200000))
 
 
@@ -46,14 +46,14 @@ def rot_sum(data):
 
 def main():
     print()
-    print("--- FAT12/16/32: partycja EFI ---")
+    print("--- FAT12/16/32: the EFI partition ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok():
-        print("POMINIETE: brak mtools (obrazow FAT nie ma czym zrobic)")
+        print("SKIPPED: no mtools (nothing to make FAT images with)")
         return summary()
 
     d = tempfile.mkdtemp()
@@ -65,7 +65,7 @@ def main():
     slog2 = tempfile.mktemp(suffix=".log")
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -75,102 +75,102 @@ def main():
         make_gpt_disk(disk)
         made = fat_format(disk, ESP_START, ESP_SECTORS, fat32=True,
                           label="ESPTEST")
-        check("partycja EFI sformatowana przez mtools (nie przez nas)", made)
-        check("i wyszla FAT32 - bo tak wypada z liczby klastrow",
+        check("the EFI partition was formatted by mtools (not by us)", made)
+        check("and it came out a FAT32 - which is what the cluster count says",
               fat_kind(disk, ESP_START) == "FAT32")
         fat_mkdirs(disk, ESP_START, ["/EFI", "/EFI/BOOT", "/EFI/Microsoft"])
-        fat_put(disk, ESP_START, b"\x4d\x5a" + b"cudzy loader" * 100,
+        fat_put(disk, ESP_START, b"\x4d\x5a" + b"somebody elses loader" * 100,
                 "/EFI/Microsoft/bootmgfw.efi")
-        fat_put(disk, ESP_START, LONG_TEXT, "/czytaj-mnie-koniecznie.txt")
-        fat_put(disk, ESP_START, BIG, "/duzy.bin")
+        fat_put(disk, ESP_START, LONG_TEXT, "/read-me-without-fail.txt")
+        fat_put(disk, ESP_START, BIG, "/big.bin")
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, disk=disk, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=90)
 
-            out = q.command("fat", "klaster", timeout=15)
-            check("system sam znajduje partycje EFI w tablicy GPT",
-                  "partycja 1, sektor 2048" in out)
-            check("i rozpoznaje ja jako FAT32 z etykieta ESPTEST",
+            out = q.command("fat", "cluster", timeout=15)
+            check("the system finds the EFI partition in the GPT by itself",
+                  "partition 1, sector 2048" in out)
+            check("and recognises it as a FAT32 labelled ESPTEST",
                   "FAT32" in out and "ESPTEST" in out)
-            m = re.search(r"razem (\d+) KiB, wolnych (\d+) KiB", out)
-            check("rozmiar i wolne miejsce policzone z tablicy"
-                  + (f" ({m.group(1)} KiB, wolne {m.group(2)} KiB)"
+            m = re.search(r"(\d+) KiB in all, (\d+) KiB free", out)
+            check("the size and the free room computed from the table"
+                  + (f" ({m.group(1)} KiB, {m.group(2)} KiB free)"
                      if m else ""),
                   m is not None and 90000 < int(m.group(1)) < 110000
                   and int(m.group(2)) < int(m.group(1))
                   and int(m.group(2)) > int(m.group(1)) - 1000)
 
-            out = q.command("fatls /", "pozycji", timeout=15)
-            check("katalog glowny widziany tak, jak go zapisano",
-                  "EFI" in out and "duzy.bin" in out)
-            check("dluga nazwa odczytana w calosci, nie jako CZYTAJ~1.TXT",
-                  "czytaj-mnie-koniecznie.txt" in out)
-            check("rozmiar pliku z pozycji katalogu",
+            out = q.command("fatls /", "entries", timeout=15)
+            check("the root directory seen as it was written",
+                  "EFI" in out and "big.bin" in out)
+            check("the long name read whole, not as READ-M~1.TXT",
+                  "read-me-without-fail.txt" in out)
+            check("the file size from the directory entry",
                   "200000 B" in out)
 
-            out = q.command("fatls /EFI", "pozycji", timeout=15)
-            check("katalog o dlugiej nazwie ('Microsoft') tez",
+            out = q.command("fatls /EFI", "entries", timeout=15)
+            check("a directory with a long name ('Microsoft') too",
                   "Microsoft" in out and "BOOT" in out)
 
-            out = q.command("fatcat /czytaj-mnie-koniecznie.txt",
-                            "partycji EFI", timeout=15)
-            check("tresc pliku co do znaku",
+            out = q.command("fatcat /read-me-without-fail.txt",
+                            "EFI partition", timeout=15)
+            check("the file's content character for character",
                   LONG_TEXT.decode().strip() in out)
 
             # A file of two hundred kilobytes is four hundred clusters:
             # read by following a chain, and a chain followed wrongly
             # gives back bytes that look perfectly plausible
-            out = q.command("fatsum /duzy.bin", "suma", timeout=30)
-            m = re.search(r"(\d+) B, suma ([0-9a-f]+)", out)
-            check(f"caly plik przez lancuch klastrow "
+            out = q.command("fatsum /big.bin", "sum", timeout=30)
+            m = re.search(r"(\d+) B, sum ([0-9a-f]+)", out)
+            check(f"the whole file through the cluster chain "
                   f"({m.group(1) if m else '?'} B)",
                   m is not None and int(m.group(1)) == len(BIG))
-            check("i bajt w bajt ten sam, ktory zapisal ktos inny",
+            check("and byte for byte the one somebody else wrote",
                   m is not None and int(m.group(2), 16) == rot_sum(BIG))
 
             # --- Writing. Everything below is checked by mtools after
             # the machine is switched off, not by asking the system
             # whether it thinks it succeeded.
             out = q.command("fatmkdir /EFI/ProtonOS", "fatmkdir", timeout=15)
-            check("katalog zalozony", "nie udalo" not in out)
-            out = q.command("fatput /EFI/ProtonOS/witaj.txt czesc-swiecie",
+            check("created", "could not" not in out)
+            out = q.command("fatput /EFI/ProtonOS/hello.txt hello-world",
                             "fatput", timeout=15)
-            check("plik zapisany", "nie udalo" not in out)
+            check("written", "could not" not in out)
             out = q.command("fatput /protonos64-testowy.bin ABCDEFGH",
                             "fatput", timeout=15)
-            check("plik o dlugiej nazwie zapisany", "nie udalo" not in out)
+            check("a file with a long name was written", "could not" not in out)
             out = q.command("fatcopy libproton.so /EFI/ProtonOS/libproton.so",
                             "fatcopy", timeout=40)
-            check("plik z initrd przepisany na partycje EFI",
-                  "nie udalo" not in out and "-> /EFI/ProtonOS" in out)
-            out = q.command("fatrm /duzy.bin", "fatrm", timeout=20)
-            check("plik usuniety", "nie udalo" not in out)
+            check("a file from the initrd copied onto the EFI partition",
+                  "could not" not in out and "-> /EFI/ProtonOS" in out)
+            out = q.command("fatrm /big.bin", "fatrm", timeout=20)
+            check("removed", "could not" not in out)
 
-            out = q.command("fatls /", "pozycji", timeout=15)
-            check("po usunieciu nie ma go w katalogu",
-                  "duzy.bin" not in out
+            out = q.command("fatls /", "entries", timeout=15)
+            check("after the removal it is not in the directory",
+                  "big.bin" not in out
                   and "protonos64-testowy.bin" in out)
-            q.command("fat", "klaster", timeout=15)
+            q.command("fat", "cluster", timeout=15)
         finally:
             q.close()
 
         # --- What is really on the disk, according to somebody else
         listing = fat_dir(disk, ESP_START)
-        check("mtools czyta katalog zalozony przez nas",
+        check("mtools reads a directory we created",
               "ProtonOS" in listing)
-        check("mtools czyta dluga nazwe zapisana przez nas",
+        check("mtools reads a long name we wrote",
               "protonos64-testowy.bin" in listing)
-        check("dluga nazwa ma tez poprawna nazwe krotka (~1)",
+        check("the long name has a correct short name too (~1)",
               re.search(r"PROTON~\d\s+BIN", listing) is not None)
-        check("plik, ktory usunelismy, zniknal tez dla mtools",
-              "duzy" not in listing)
-        got = fat_get(disk, ESP_START, "/EFI/ProtonOS/witaj.txt")
-        check("tresc zapisanego pliku, odczytana przez mtools",
-              got is not None and got.strip() == b"czesc-swiecie")
+        check("the file we removed is gone for mtools too",
+              "big" not in listing)
+        got = fat_get(disk, ESP_START, "/EFI/ProtonOS/hello.txt")
+        check("the content of the written file, read back by mtools",
+              got is not None and got.strip() == b"hello-world")
         got = fat_get(disk, ESP_START, "/protonos64-testowy.bin")
-        check("i pliku o dlugiej nazwie",
+        check("and the file with the long name",
               got is not None and got.strip() == b"ABCDEFGH")
 
         # The copy from the initrd, byte for byte against the file the
@@ -187,18 +187,18 @@ def main():
             if name == "libproton.so":
                 want = blob[o:o + sz]
         got = fat_get(disk, ESP_START, "/EFI/ProtonOS/libproton.so")
-        check(f"plik z initrd przepisany co do bajtu "
+        check(f"the file from the initrd copied byte for byte "
               f"({len(want) if want else 0} B)",
               want is not None and got == want)
 
-        check("cudzy loader na partycji EFI nietkniety",
+        check("somebody elses loader on the EFI partition is untouched",
               (fat_get(disk, ESP_START, "/EFI/Microsoft/bootmgfw.efi") or b"")
               .startswith(b"\x4d\x5a"))
-        check("tablica GPT nietknieta", gpt_intact(disk))
+        check("the GPT is untouched", gpt_intact(disk))
         # The EFI partition is the one the test itself put a filesystem
         # into, so the neighbour that still has to be untouched is the
         # Windows one behind it
-        check("sasiednia partycja Windows nietknieta",
+        check("the neighbouring Windows partition is untouched",
               neighbours_intact(disk, which=(1,)))
 
         # --- The old table and the two smaller formats. FAT12 is not a
@@ -209,7 +209,7 @@ def main():
                                            ("FAT12", tiny, 2, "FAT12")):
             ok, start = make_mbr_fat_disk(path, mib, fat32=False,
                                           label="MALYFAT")
-            check(f"obraz {name} w tablicy MBR gotowy",
+            check(f"the {name} image in an MBR table is ready",
                   ok and fat_kind(path, start) == want_kind)
             fat_put(path, start, LONG_TEXT, "/od-mtools.txt")
 
@@ -217,30 +217,30 @@ def main():
                       qemu="qemu-system-x86_64")
             try:
                 q2.wait_serial("proton64>", timeout=90)
-                out = q2.command("fat 1", "klaster", timeout=20)
-                check(f"{name} rozpoznany przez liczbe klastrow, "
-                      f"nie przez napis w sektorze rozruchowym",
+                out = q2.command("fat 1", "cluster", timeout=20)
+                check(f"{name} recognised by the cluster count, "
+                      f"not by the string in the boot sector",
                       want_kind in out)
-                out = q2.command("fatcat /od-mtools.txt", "partycji",
+                out = q2.command("fatcat /od-mtools.txt", "partitions",
                                  timeout=15)
-                check(f"{name}: plik od mtools odczytany",
+                check(f"{name}: mtools' file was read",
                       LONG_TEXT.decode().strip() in out)
                 out = q2.command("fatcopy hello64 /hello64-z-initrd.bin",
                                  "fatcopy", timeout=40)
-                check(f"{name}: zapis pliku przez lancuch klastrow",
-                      "nie udalo" not in out)
-                out = q2.command("fatls /", "pozycji", timeout=15)
-                check(f"{name}: oba pliki w katalogu glownym",
+                check(f"{name}: writing a file through the cluster chain",
+                      "could not" not in out)
+                out = q2.command("fatls /", "entries", timeout=15)
+                check(f"{name}: both files in the root directory",
                       "od-mtools.txt" in out
                       and "hello64-z-initrd.bin" in out)
             finally:
                 q2.close()
 
             listing = fat_dir(path, start)
-            check(f"{name}: mtools widzi to, co zapisalismy",
+            check(f"{name}: mtools sees what we wrote",
                   "hello64-z-initrd.bin" in listing)
             got = fat_get(path, start, "/hello64-z-initrd.bin")
-            check(f"{name}: i tresc zgadza sie z plikiem w initrd",
+            check(f"{name}: and the content matches the file in the initrd",
                   got is not None and len(got) > 4000
                   and got[:4] == b"\x7fELF")
 
@@ -260,7 +260,7 @@ def main():
         # from us: "sectors per fat: 0" is what a FAT32 boot sector has
         # instead of a sixteen-bit count, and no FAT16 volume has it.
         info = fat_minfo(maly32, start)
-        check("obraz 32 MiB sformatowany przez mtools JAKO FAT32 "
+        check("a 32 MiB image formatted by mtools AS A FAT32 "
               "(minfo: sectors per fat = 0)",
               ok and "sectors per fat: 0" in info)
         fat_put(maly32, start, LONG_TEXT, "/od-mtools.txt")
@@ -269,15 +269,15 @@ def main():
                   qemu="qemu-system-x86_64")
         try:
             q3.wait_serial("proton64>", timeout=90)
-            out = q3.command("fat 1", "klaster", timeout=20)
-            check("maly wolumen nie udaje FAT16 - liczba klastrow nie "
-                  "jest jedynym slowem",
+            out = q3.command("fat 1", "cluster", timeout=20)
+            check("a small volume does not pretend to be FAT16 - the cluster count is not "
+                  "the only word",
                   "FAT32" in out and "MALYFAT32" in out)
-            out = q3.command("fatls /", "pozycji", timeout=15)
-            check("i widac na nim plik, a nie pusty katalog",
+            out = q3.command("fatls /", "entries", timeout=15)
+            check("and a file shows on it, not an empty directory",
                   "od-mtools.txt" in out)
-            out = q3.command("fatcat /od-mtools.txt", "partycji", timeout=15)
-            check("z trescia co do znaku",
+            out = q3.command("fatcat /od-mtools.txt", "partitions", timeout=15)
+            check("with the content character for character",
                   LONG_TEXT.decode().strip() in out)
         finally:
             q3.close()
@@ -285,7 +285,7 @@ def main():
                 os.unlink(maly32)
 
         # --- And the thing this driver must never do
-        check("na zadnym z obrazow nie zniknal sektor rozruchowy FAT",
+        check("the FAT boot sector vanished from none of the images",
               fat_kind(disk, ESP_START) == "FAT32"
               and fat_kind(small, 2048) == "FAT16"
               and fat_kind(tiny, 2048) == "FAT12")

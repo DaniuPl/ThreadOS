@@ -50,13 +50,13 @@ def pe_says(path):
 
 def main():
     print()
-    print("--- wlasny program rozruchowy UEFI (protoboot) ---")
+    print("--- our own UEFI boot loader (protoboot) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
         return summary()
     if INITRD64 is None or not os.path.exists(INITRD64):
-        print("POMINIETE: brak initrd 64-bitowego")
+        print("SKIPPED: no 64-bit initrd")
         return summary()
     if not os.path.exists(LOADER):
         # Nobody has built it yet - so we build it, and if there is
@@ -64,19 +64,19 @@ def main():
         subprocess.run(["make", "efi"], cwd=ROOT,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
-        print("POMINIETE: brak build/BOOTX64.EFI (apt install clang lld)")
+        print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
     if not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
-        print("POMINIETE: brak firmware OVMF (apt install ovmf)")
+        print("SKIPPED: no OVMF firmware (apt install ovmf)")
         return summary()
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return summary()
 
     said = pe_says(LOADER)
-    check("program rozruchowy jest plikiem PE32+ dla x86-64",
+    check("the boot loader is a PE32+ file for x86-64",
           said is not None and said[0] == 0x8664 and said[1] == 0x20b)
-    check("i ma podsystem aplikacji EFI (10)",
+    check("and it has the EFI application subsystem (10)",
           said is not None and said[2] == 10)
 
     esp = tempfile.mkdtemp()
@@ -95,45 +95,45 @@ def main():
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("firmware uruchamia nasz program rozruchowy",
+            check("the firmware starts our boot loader",
                   "protoboot: ProtonOS" in out)
             # No GRUB was put on this disk, so anything that starts had
             # better be ours
-            check("na tej plycie nie ma zadnego cudzego loadera",
+            check("there is no other loader on this disc",
                   "GRUB" not in out and "grub" not in out)
 
             head = q.wait_serial("ACPI:", timeout=30)
-            m = re.search(r"jadro:\s+(\d+) B", head)
-            check(f"loader odczytuje jadro z partycji EFI "
-                  f"({m.group(1) if m else '?'} B, plik ma {kbytes} B)",
+            m = re.search(r"kernel:\s+(\d+) B", head)
+            check(f"the loader reads the kernel off the EFI partition "
+                  f"({m.group(1) if m else '?'} B, the file is {kbytes} B)",
                   m is not None and int(m.group(1)) == kbytes)
             m = re.search(r"initrd:\s+(\d+) B", head)
-            check(f"loader odczytuje initrd "
-                  f"({m.group(1) if m else '?'} B, plik ma {ibytes} B)",
+            check(f"the loader reads the initrd "
+                  f"({m.group(1) if m else '?'} B, the file is {ibytes} B)",
                   m is not None and int(m.group(1)) == ibytes)
-            m = re.search(r"ekran:\s+(\d+)x(\d+), bufor 0x([0-9a-f]+)", head)
-            check("loader sam ustawia tryb graficzny przez GOP"
+            m = re.search(r"screen:\s+(\d+)x(\d+), buffer 0x([0-9a-f]+)", head)
+            check("the loader sets a graphics mode itself through GOP"
                   + (f" ({m.group(1)}x{m.group(2)})" if m else ""),
                   m is not None and int(m.group(1)) >= 640
                   and int(m.group(2)) >= 400 and int(m.group(3), 16) != 0)
             loader_w = int(m.group(1)) if m else 0
             loader_h = int(m.group(2)) if m else 0
             m = re.search(r"ACPI:\s+0x([0-9a-f]+) \((1\.0|2\.0)\)", head)
-            check("loader wyjmuje wskaznik ACPI z tablicy konfiguracyjnej"
+            check("the loader takes the ACPI pointer out of the configuration table"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and int(m.group(1), 16) != 0)
 
             # ExitBootServices and the way down from long mode: after
             # this line there is no firmware left to complain, so the
             # next word can only come from the kernel
-            gone = q.wait_serial("oddaje maszyne jadru", timeout=30)
-            check("loader zegna sie z firmware (ExitBootServices)",
-                  "protoboot: oddaje maszyne jadru" in gone)
+            gone = q.wait_serial("handing the machine to the kernel", timeout=30)
+            check("the loader says goodbye to the firmware (ExitBootServices)",
+                  "protoboot: handing the machine to the kernel" in gone)
 
             boot = q.wait_serial("Multiboot OK", timeout=60)
-            check("jadro rusza po zejsciu z trybu dlugiego i powrocie do niego",
-                  "Jadro uruchomione w trybie dlugim" in boot)
-            check("jadro rozpoznaje znaczniki Multiboot 2 od naszego loadera",
+            check("the kernel starts after leaving long mode and coming back to it",
+                  "The kernel is running in long mode" in boot)
+            check("the kernel recognises the Multiboot 2 tags from our loader",
                   "Multiboot OK (Multiboot 2)" in boot)
 
             # Three modules: the initrd, which the kernel has always
@@ -141,25 +141,25 @@ def main():
             # loader itself - handed over by name, because a system
             # that may be asked to install itself has to have the
             # FILES, and the kernel in memory is loaded segments
-            mods = q.wait_serial("Moduly od loadera:", timeout=30)
-            check("initrd, obraz jadra i sam loader docieraja jako moduly",
-                  "Moduly od loadera: 3" in mods)
+            mods = q.wait_serial("Modules from the loader:", timeout=30)
+            check("the initrd, the kernel image and the loader itself arrive as modules",
+                  "Modules from the loader: 3" in mods)
 
-            fb = q.wait_serial("Bufor obrazu:", timeout=30)
-            m = re.search(r"Bufor obrazu: (\d+)x(\d+), (\d+) bitow", fb)
-            check(f"jadro dostaje ten sam bufor obrazu, ktory loader ustawil "
+            fb = q.wait_serial("Framebuffer:", timeout=30)
+            m = re.search(r"Framebuffer: (\d+)x(\d+), (\d+) bits", fb)
+            check(f"the kernel gets the same framebuffer the loader set "
                   f"({loader_w}x{loader_h})",
                   m is not None and int(m.group(1)) == loader_w
                   and int(m.group(2)) == loader_h)
 
-            acpi = q.wait_serial("Wskaznik ACPI", timeout=30)
-            check("wskaznik ACPI przechodzi przez znacznik do jadra",
-                  re.search(r"Wskaznik ACPI od loadera: [0-9a-f]+",
+            acpi = q.wait_serial("ACPI pointer", timeout=30)
+            check("the ACPI pointer passes through a tag to the kernel",
+                  re.search(r"ACPI pointer from the loader: [0-9a-f]+",
                             acpi) is not None)
 
-            mem = q.wait_serial("Pamiec fizyczna:", timeout=30)
-            m = re.search(r"Pamiec fizyczna: (\d+) KiB RAM", mem)
-            check(f"mapa pamieci UEFI przelozona na Multiboot 2 ma sens"
+            mem = q.wait_serial("Physical memory:", timeout=30)
+            m = re.search(r"Physical memory: (\d+) KiB RAM", mem)
+            check(f"the UEFI memory map turned into Multiboot 2 makes sense"
                   + (f" ({m.group(1)} KiB)" if m else ""),
                   m is not None and int(m.group(1)) > 64 * 1024)
 
@@ -169,19 +169,19 @@ def main():
             # them out and the program from the initrd would be rubbish
             # by the time anyone ran it.
             elf = q.wait_serial("ELF64 z initrd:", timeout=60)
-            check("program z initrd dziala - loader nie oddal wlasnej pamieci",
-                  "pierscien 3" in elf and "kod wyjscia 7" in elf)
+            check("a program from the initrd runs - the loader did not give away its own memory",
+                  "ring 3" in elf and "exit code 7" in elf)
 
-            q.wait_serial("System 64-bitowy gotowy", timeout=60)
+            q.wait_serial("The 64-bit system is ready", timeout=60)
             w, h, at = q.screen_raw()
-            check(f"rozdzielczosc ekranu zgadza sie z ta od loadera ({w}x{h})",
+            check(f"the screen resolution matches the loader's ({w}x{h})",
                   w == loader_w and h == loader_h)
             x0, y0 = (w - 640) // 2, (h - 200) // 2
             lit = sum(1 for y in range(y0, y0 + 200)
                       for x in range(x0, x0 + 640)
                       if at(x, y) != (0, 0, 0))
-            check(f"konsola rysuje sie na ekranie od naszego loadera "
-                  f"({lit} pikseli)", lit > 2000)
+            check(f"the console draws on the screen from our loader "
+                  f"({lit} pixels)", lit > 2000)
         finally:
             q.close()
     finally:

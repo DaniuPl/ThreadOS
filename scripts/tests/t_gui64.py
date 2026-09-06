@@ -50,19 +50,19 @@ def scr(cx, cy):
 
 
 def main():
-    print("--- aplikacja graficzna w ring 3 (jadro 64-bitowe) ---")
+    print("--- a graphical application in ring 3 (the 64-bit kernel) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
         return 0
     if INITRD64 is None or not os.path.exists(INITRD64):
-        print("POMINIETE: brak initrd 64-bitowego")
+        print("SKIPPED: no 64-bit initrd")
         return 0
     if shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue")
+        print("SKIPPED: no grub-mkrescue")
         return 0
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return 0
 
     d = tempfile.mkdtemp()
@@ -84,7 +84,7 @@ def main():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return summary()
 
@@ -94,10 +94,10 @@ def main():
             q.wait_serial("proton64>", timeout=60)
             # A file on the disk for the file manager - once the desktop
             # starts the keyboard belongs to it, so it is now or never
-            q.command("write notatka czesc-z-dysku", "write:")
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
-            check("pulpit wstaje w trybie graficznym", q.wait_desktop(30))
+            q.command("write note hello-from-the-disk", "write:")
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
+            check("the desktop comes up in graphics mode", q.wait_desktop(30))
 
             # The mouse is relative: first push the cursor into the
             # corner, so as to know where it is at all.
@@ -110,13 +110,13 @@ def main():
             # of the window. Each from a different system call, so each
             # separately.
             cx, cy = scr(10, 10)
-            check("klik ikony uruchamia program z initrd (czerwony kwadrat)",
+            check("a click on an icon starts a program from the initrd (a red square)",
                   q.wait_pixel(cx, cy, RED, timeout=20))
             cx, cy = scr(38, 10)
-            check("program rysuje drugi kwadrat (zielony)",
+            check("the program draws a second square (green)",
                   q.wait_pixel(cx, cy, GREEN, timeout=5))
             cx, cy = scr(66, 10)
-            check("program rysuje trzeci kwadrat (niebieski)",
+            check("the program draws a third square (blue)",
                   q.wait_pixel(cx, cy, BLUE, timeout=5))
 
             # The caption 'klikniec:' drawn by win_text - DARK text on
@@ -127,7 +127,7 @@ def main():
             tx, ty = scr(6, 24)
             whites = sum(1 for dy in range(8) for dx in range(72)
                           if at(tx + dx, ty + dy) == CZARNY)
-            check(f"program pisze tekst w oknie ({whites} ciemnych pikseli)",
+            check(f"the program writes text in its window ({whites} dark pixels)",
                   whites > 20)
 
             # The click counter before the click - we remember the cell
@@ -150,13 +150,13 @@ def main():
             q.mouse_goto(kx, ky)
             q.mouse_click()
             q.mouse_goto(400, 300)
-            check("klik w okno wraca do programu jako zdarzenie (znacznik)",
+            check("a click on the window comes back to the program as an event (a mark)",
                   q.wait_pixel(kx, ky, BLUE, tol=8, timeout=10))
 
             # The click counter stops being zero - the program counted the
             # event rather than merely redrawing the window
             _, _, at2 = q.screen_raw()
-            check("licznik klikniec w oknie rosnie",
+            check("the click counter in the window grows",
                   counter_cell(at2) != counter_before)
 
             # The keyboard: the window has focus after the click, so the
@@ -173,7 +173,7 @@ def main():
             time.sleep(1.5)
             _, _, at3 = q.screen_raw()
             po = pole_txt(at3)
-            check("klawisze trafiaja do okna z fokusem", before != po)
+            check("the keys reach the window with the focus", before != po)
 
             # --- The clock: a second application, its own window ---
             # The 'Zegar' icon stands at (8,60), a 32x24 tile
@@ -196,7 +196,7 @@ def main():
                     clock_present = True
                     break
                 time.sleep(0.5)
-            check("ikona 'Zegar' uruchamia druga aplikacje we wlasnym oknie",
+            check("the 'Clock' icon starts a second application in a window of its own",
                   clock_present)
 
             # The clock is to run: the time changes in the window of its own
@@ -205,7 +205,7 @@ def main():
             first = clock_window(az1)
             time.sleep(2.5)
             _, _, az2 = q.screen_raw()
-            check("zegar w oknie idzie (tresc zmienia sie sama)",
+            check("the clock in the window runs (its content changes by itself)",
                   clock_window(az2) != first)
 
             # --- Files: a third application, it reads the disk ---
@@ -226,8 +226,8 @@ def main():
                 if greens > 10:
                     break
                 time.sleep(0.5)
-            check("ikona 'Pliki' uruchamia menedzer plikow "
-                  "(%d pikseli naglowka w akcencie)" % greens,
+            check("the 'Files' icon starts the file manager "
+                  "(%d title-bar pixels in the accent colour)" % greens,
                   greens > 10)
 
             # A click chooses a file: the row takes the accent colour,
@@ -251,13 +251,13 @@ def main():
                 if row_blue(row) > before + 100:
                     picked = True
                     break
-            check("klik w nazwe pliku wybiera go w menedzerze", picked)
+            check("a click on a file name picks it in the manager", picked)
 
             # The compositor survived all this: the desktop's background is still
 # there.
             w, h, at4 = q.screen_raw()
             tlo = at4(w - 20, h // 2)
-            check("kompozytor dalej rysuje pulpit",
+            check("the compositor still draws the desktop",
                   all(abs(tlo[i] - (0, 130, 162)[i]) <= 40 for i in range(3)))
         finally:
             q.close()
@@ -265,15 +265,15 @@ def main():
         # The compositor holds at most six windows, and two are taken by
         # the kernel - five applications at once will not fit, so these
         # two get a machine of their own
-        print("--- monitor zasobow i terminal w oknie ---")
+        print("--- the resource monitor and the terminal in a window ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
             q2.wait_serial("proton64>", timeout=60)
-            q2.type_line("pulpit")
-            q2.wait_serial("Pulpit startuje", timeout=30)
-            check("pulpit wstaje po raz drugi", q2.wait_desktop(30))
+            q2.type_line("desktop")
+            q2.wait_serial("The desktop is starting", timeout=30)
+            check("the desktop comes up a second time", q2.wait_desktop(30))
 
             # The 'Monitor' icon at (8,140)
             q2.mouse_home()
@@ -287,8 +287,8 @@ def main():
             # that they are neither zero nor everything.
             red = q2.wait_pixel(mx + 150, my + 52, RED, timeout=20)
             blue = q2.wait_pixel(mx + 6, my + 52, BLUE, timeout=5)
-            check("ikona 'Monitor' uruchamia wskaznik zasobow "
-                  "(pasek pamieci)", red and blue)
+            check("the 'Monitor' icon starts the resource gauge "
+                  "(the memory bar)", red and blue)
 
             # The uptime grows: the window is alive rather than showing one
 # photograph
@@ -300,7 +300,7 @@ def main():
             u1 = pole_uptime(am1)
             time.sleep(2.5)
             _, _, am2 = q2.screen_raw()
-            check("monitor jest zywy (uptime w oknie rosnie)",
+            check("the monitor is alive (uptime in the window grows)",
                   pole_uptime(am2) != u1)
 
             # --- The terminal: keyboard, fork, exec, dup2, a file ---
@@ -325,8 +325,8 @@ def main():
                 if prompts > 3:
                     break
                 time.sleep(0.5)
-            check("ikona 'Term' uruchamia terminal w oknie "
-                  "(znak zachety: %d pikseli)" % prompts, prompts > 3)
+            check("the 'Term' icon starts the terminal in a window "
+                  "(the prompt character: %d pixels)" % prompts, prompts > 3)
 
             # The terminal's window has focus right after it appears - we
             # type a command and watch whether its output appears in the
@@ -350,8 +350,8 @@ def main():
                 if printed > empty + 100:
                     break
                 time.sleep(0.5)
-            check("polecenie wpisane w terminalu wypisuje wynik w oknie "
-                  "(%d bialych pikseli)" % printed, printed > empty + 100)
+            check("a command typed in the terminal prints its result in the window "
+                  "(%d white pixels)" % printed, printed > empty + 100)
         finally:
             q2.close()
             if os.path.exists(slog2):

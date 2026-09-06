@@ -41,16 +41,16 @@ from ptest import check, summary, make_iso64, no64
 def pages_from_files(text):
     """How many pages the kernel read from mapped files - the shell gives
     that in the summary after every program."""
-    m = re.search(r"z plikow (\d+)\)", text)
+    m = re.search(r"from files (\d+)\)", text)
     return int(m.group(1)) if m else None
 
 
 def main():
-    print("--- pliki odwzorowane w pamieci (jadro 64-bitowe) ---")
+    print("--- files mapped into memory (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
@@ -60,7 +60,7 @@ def main():
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -68,62 +68,62 @@ def main():
                  sata=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=90)
-            q.wait_serial("PFS gotowy", timeout=30)
+            q.wait_serial("PFS ready", timeout=30)
 
             # --- A small file: read whole through a mapping ---
-            make_it = q.command("run mkmap64 mapa.txt 12", "kod wyjscia",
+            make_it = q.command("run mkmap64 map.txt 12", "exit code",
                                timeout=60)
-            check("plik z wzorcem zalozony na dysku",
-                  "[mkmap64] zapisano 12288 B wzorca" in make_it)
+            check("a file with the pattern was created on the disk",
+                  "[mkmap64] wrote 12288 B of the pattern" in make_it)
 
-            read_out = q.command("run mmapfile64 mapa.txt", "kod wyjscia",
+            read_out = q.command("run mmapfile64 map.txt", "exit code",
                                timeout=90)
-            addr = re.search(r"plik pod adresem (\d+)", read_out)
-            check("plik dostal adres w obszarze mapowan",
+            addr = re.search(r"the file at address (\d+)", read_out)
+            check("the file got an address in the mapping area",
                   addr is not None and
                   0x50000000 <= int(addr.group(1)) < 0x60000000)
-            check("wszystkie bajty pliku zgadzaja sie z wzorcem",
-                  "sprawdzone bajty zgadzaja sie, bylo ich 12288" in read_out)
-            check("proba zapisu do odwzorowania zabija proces",
-                  "zapis do odwzorowania odrzucony" in read_out and
-                  "zabite: Page Fault" in read_out)
-            check("tresc pliku po odrzuconym zapisie nietknieta",
-                  "ZLE" not in read_out)
-            check("plik przeczytany bez ani jednego wywolania read",
-                  "bez ani jednego read" in read_out)
-            check("dwanascie kilobajtow to dokladnie trzy strony z dysku",
+            check("every byte of the file matches the pattern",
+                  "the checked bytes match, and there were 12288" in read_out)
+            check("trying to write to the mapping kills the process",
+                  "writing to the mapping was refused" in read_out and
+                  "killed: Page Fault" in read_out)
+            check("the file's content after the refused write is untouched",
+                  "WRONG" not in read_out)
+            check("the file was read without a single read call",
+                  "without a single read" in read_out)
+            check("twelve kilobytes are exactly three pages off the disk",
                   pages_from_files(read_out) == 3)
 
             # --- A large file, one byte touched ---
             # This is the real proof of paging on demand: a mapping
             # costs as much as was taken from it
-            q.command("run mkmap64 duza.txt 400", "kod wyjscia",
+            q.command("run mkmap64 big.txt 400", "exit code",
                         timeout=120)
-            malo = q.command("run mmapfile64 duza.txt 1", "kod wyjscia",
+            malo = q.command("run mmapfile64 big.txt 1", "exit code",
                                timeout=90)
-            check("odwzorowanie duzego pliku sie udaje",
-                  "reszty pliku nie tknalem" in malo)
-            check("dotkniecie jednego bajtu kosztuje jedna strone, "
-                  "a nie caly plik", pages_from_files(malo) == 1)
+            check("mapping a big file works",
+                  "I never touched the rest of the file" in malo)
+            check("touching one byte costs one page, "
+                  "and not the whole file", pages_from_files(malo) == 1)
 
             # ...and reading the whole of it costs as much as it has pages
-            many = q.command("run mmapfile64 duza.txt", "kod wyjscia",
+            many = q.command("run mmapfile64 big.txt", "exit code",
                                timeout=120)
-            check("przeczytanie calego pliku wciaga wszystkie jego strony",
+            check("reading the whole file pulls in every one of its pages",
                   pages_from_files(many) == 400 * 1024 // 4096)
 
             # A mapping does not outlive the process: the memory returns to the
 # pool
-            m = re.search(r"mmapfile64\] koniec, kod wyjscia 0 "
-                          r"\(ramek (\d+) -> (\d+)", many)
-            check("po koncu programu ramki wrocily do puli",
+            m = re.search(r"mmapfile64\] done, exit code 0 "
+                          r"\(frames (\d+) -> (\d+)", many)
+            check("once the program ended the frames came back to the pool",
                   m is not None and m.group(1) == m.group(2))
 
             # A file that does not exist is an error, not an empty address
-            missing = q.command("run mmapfile64 niczegotakiego",
-                               "kod wyjscia", timeout=60)
-            check("nieistniejacy plik zglaszany jako blad",
-                  "nie da sie odwzorowac pliku" in missing)
+            missing = q.command("run mmapfile64 nosuchthing",
+                               "exit code", timeout=60)
+            check("a file that is not there is reported as an error",
+                  "the file cannot be mapped" in missing)
         finally:
             q.close()
     finally:
@@ -133,7 +133,7 @@ def main():
                 os.unlink(f)
 
     # --- The same in the 32-bit kernel ---
-    print("--- pliki odwzorowane w pamieci (jadro 32-bitowe) ---")
+    print("--- files mapped into memory (the 32-bit kernel) ---")
     disk32 = tempfile.mktemp(suffix=".img")
     slog32 = tempfile.mktemp(suffix=".log")
     with open(disk32, "wb") as fh:
@@ -142,39 +142,39 @@ def main():
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
-            q3.wait_for("[siec] DHCP", timeout=30)
+            q3.wait_for("[net] DHCP", timeout=30)
 
-            make_it = q3.command("run mkmap mapa.txt 12", "zakonczyl sie",
+            make_it = q3.command("run mkmap map.txt 12", "has ended",
                                 timeout=60)
-            check("plik z wzorcem zalozony na dysku (32-bit)",
-                  "[mkmap] zapisano 12288 B wzorca" in make_it)
+            check("a file with the pattern was created on the disk (32-bit)",
+                  "[mkmap] wrote 12288 B of the pattern" in make_it)
 
-            read_out = q3.command("run mmapfile mapa.txt", "zakonczyl sie",
+            read_out = q3.command("run mmapfile map.txt", "has ended",
                                 timeout=90)
-            addr = re.search(r"plik pod adresem (\d+)", read_out)
-            check("plik dostal adres w obszarze mmap (32-bit)",
+            addr = re.search(r"the file at address (\d+)", read_out)
+            check("the file got an address in the mmap area (32-bit)",
                   addr is not None and
                   0xB0000000 <= int(addr.group(1)) < 0xBF000000)
-            check("wszystkie bajty pliku zgadzaja sie z wzorcem (32-bit)",
-                  "sprawdzone bajty zgadzaja sie, bylo ich 12288" in read_out)
-            check("proba zapisu do odwzorowania zabija proces (32-bit)",
-                  "zapis do odwzorowania odrzucony" in read_out and
-                  re.search(r"ubity na rdzeniu \d+: Page Fault", read_out) is not None)
-            check("tresc pliku po odrzuconym zapisie nietknieta (32-bit)",
-                  "ZLE" not in read_out)
+            check("every byte of the file matches the pattern (32-bit)",
+                  "the checked bytes match, and there were 12288" in read_out)
+            check("trying to write to the mapping kills the process (32-bit)",
+                  "writing to the mapping was refused" in read_out and
+                  re.search(r"killed on core \d+: Page Fault", read_out) is not None)
+            check("the file's content after the refused write is untouched (32-bit)",
+                  "WRONG" not in read_out)
 
             # Paging on demand: a large file, one byte touched
-            before = q3.command("mem", "z plikow:")
-            m1 = re.search(r"z plikow:\s+(\d+)", before)
-            q3.command("run mkmap duza.txt 400", "zakonczyl sie",
+            before = q3.command("mem", "from files:")
+            m1 = re.search(r"from files:\s+(\d+)", before)
+            q3.command("run mkmap big.txt 400", "has ended",
                          timeout=120)
-            malo = q3.command("run mmapfile duza.txt 1", "zakonczyl sie",
+            malo = q3.command("run mmapfile big.txt 1", "has ended",
                                 timeout=90)
-            check("odwzorowanie duzego pliku sie udaje (32-bit)",
-                  "reszty pliku nie tknalem" in malo)
-            po = q3.command("mem", "z plikow:")
-            m2 = re.search(r"z plikow:\s+(\d+)", po)
-            check("dotkniecie jednego bajtu kosztuje jedna strone (32-bit)",
+            check("mapping a big file works (32-bit)",
+                  "I never touched the rest of the file" in malo)
+            po = q3.command("mem", "from files:")
+            m2 = re.search(r"from files:\s+(\d+)", po)
+            check("touching one byte costs one page (32-bit)",
                   m1 is not None and m2 is not None and
                   int(m2.group(1)) - int(m1.group(1)) == 1)
 
@@ -183,11 +183,11 @@ def main():
             # back it checks whether every frame is still its own.
             # Adding pages on top of overwriting somebody else's frames
             # would look the same halfway.
-            stack = q3.command("run deep", "zakonczyl sie", timeout=60)
-            check("stos rosnie na zadanie: rekurencja siega poza osiem "
-                  "stron", "[deep] zeszlem na poziom 40" in stack)
-            check("i kazda ramka przetrwala nietknieta",
-                  "wszystkie ramki caly" in stack and "ZLE" not in stack)
+            stack = q3.command("run deep", "has ended", timeout=60)
+            check("the stack grows on demand: the recursion goes past eight "
+                  "pages", "[deep] I went down to level 40" in stack)
+            check("and every frame survived untouched",
+                  "every frame whole" in stack and "WRONG" not in stack)
         finally:
             q3.close()
     finally:

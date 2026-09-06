@@ -73,16 +73,16 @@ static void unit(uint32_t number, void *data)
         }
 
         /* --- a heap block --- */
-        uint32_t ile = 32 + (number * 7 + i * 13) % 192;
-        uint8_t *b = kmalloc(ile);
+        uint32_t count = 32 + (number * 7 + i * 13) % 192;
+        uint8_t *b = kmalloc(count);
         if (!b) {
             __atomic_add_fetch(&p->failed, 1, __ATOMIC_RELAXED);
             continue;
         }
         uint8_t ch = (uint8_t)(number * 31 + i);
-        for (uint32_t k = 0; k < ile; k++)
+        for (uint32_t k = 0; k < count; k++)
             b[k] = (uint8_t)(ch + k);
-        for (uint32_t k = 0; k < ile; k++)
+        for (uint32_t k = 0; k < count; k++)
             if (b[k] != (uint8_t)(ch + k)) {
                 __atomic_add_fetch(&p->nerrors, 1, __ATOMIC_RELAXED);
                 break;

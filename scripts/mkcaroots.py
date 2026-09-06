@@ -61,7 +61,7 @@ def main():
                 break
 
     if not chosen:
-        print("nie znalazlem zadnego korzenia w", BUNDLE)
+        print("I found no root in", BUNDLE)
         return 1
 
     blob = b"".join(der for _, _, der in chosen)
@@ -91,7 +91,7 @@ def main():
     lines += ["};", "", "#endif", ""]
 
     open(OUT, "w").write("\n".join(lines))
-    print("zapisano %s: %u korzeni, %u B" % (OUT, len(chosen), len(blob)))
+    print("wrote %s: %u roots, %u B" % (OUT, len(chosen), len(blob)))
     return 0
 
 

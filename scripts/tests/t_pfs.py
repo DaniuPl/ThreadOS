@@ -38,71 +38,71 @@ def main():
         # A ring 3 process writes and reads a file with syscalls
         q.type_line("run fileio")
         screen = q.wait_for("[fileio] OK")
-        check("proces ring3 zapisal i odczytal plik z dysku",
-              "odczytano z dysku: plik zapisany przez proces ring3" in screen)
+        check("a ring 3 process wrote and read a file off the disk",
+              "read off the disk: a file written by a ring 3 process" in screen)
 
         # The kernel's shell: write -> cat (a write and a read within one boot)
-        q.type_line("write greeting witaj-z-dysku-pfs")
-        check("zapis pliku z shella jadra",
-              "zapisano" in q.wait_for("zapisano"))
+        q.type_line("write greeting hello-from-the-pfs-disk")
+        check("writing a file from the kernel's shell",
+              "wrote" in q.wait_for("wrote"))
         q.type_line("cat greeting")
-        check("odczyt zapisanego pliku (cat)",
-              "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs"))
+        check("reading the written file back (cat)",
+              "hello-from-the-pfs-disk" in q.wait_for("hello-from-the-pfs-disk"))
 
         # fls shows both files
         q.type_line("fls")
-        screen = q.wait_for("Katalog glowny")
-        check("fls listuje pliki na dysku",
+        screen = q.wait_for("Root directory")
+        check("fls lists the files on the disk",
               "greeting" in screen and "ring3.txt" in screen)
 
         # cat of a file that does not exist
-        q.type_line("cat niema")
-        check("cat zglasza brak pliku",
-              "brak pliku 'niema'" in q.wait_for("brak pliku"))
+        q.type_line("cat nofile")
+        check("cat reports that the file is missing",
+              "there is no file 'nofile'" in q.wait_for("there is no file"))
 
         # The 'cat' program in ring 3: it reads a file through an fd and
         # writes to fd 1 (a unified I/O model: read the file -> write to
         # the console). We clear the screen so as not to catch the old
-        # echo of 'witaj-z-dysku-pfs'.
+        # echo of 'hello-from-the-pfs-disk'.
         q.type_line("clear")
         time.sleep(0.3)
         q.type_line("run cat greeting")
-        check("program ring3 'cat' czyta plik przez fd i pisze na fd 1",
-              "witaj-z-dysku-pfs" in q.wait_for("witaj-z-dysku-pfs",
+        check("the ring 3 'cat' reads a file through an fd and writes to fd 1",
+              "hello-from-the-pfs-disk" in q.wait_for("hello-from-the-pfs-disk",
                                                 timeout=20))
 
         # At the end: crash should cause a page fault with a diagnostic
         q.type_line("crash")
         screen = q.screen()
-        check("page fault obsluzony (wyjatek 14)",
-              "WYJATEK CPU 14: Page Fault" in screen)
-        check("CR2 wskazuje felerny adres",
+        check("the page fault was served (exception 14)",
+              "CPU EXCEPTION 14: Page Fault" in screen)
+        check("CR2 points at the faulty address",
               "(CR2): e0000000" in screen)
-        check("system zatrzymany po wyjatku", "System zatrzymany" in screen)
+        check("the system stopped after the exception", "The system has stopped" in screen)
     finally:
         q.close()
 
     # --- Persistence: a second boot on THE SAME disk ---
-    print("--- drugi boot (ten sam dysk) ---")
+    print("--- a second boot (the same disk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         screen = q2.wait_for("ProtonOS shell")
-        check("drugi boot: dysk wykryty"
-              " (juz sformatowany, bez ponownego format)",
-              "+ PFS gotowy" in screen and "sformatowany" not in screen)
+        check("the second boot: the disk was found"
+              " (already formatted, no second format)",
+              "+ PFS ready" in screen and "formatted" not in screen)
 
         q2.type_line("fls")
-        screen = q2.wait_for("Katalog glowny")
-        check("pliki przetrwaly restart (fls)",
+        screen = q2.wait_for("Root directory")
+        check("the files survived the restart (fls)",
               "greeting" in screen and "ring3.txt" in screen)
 
         q2.type_line("cat greeting")
-        check("zawartosc pliku przetrwala restart (cat)",
-              "witaj-z-dysku-pfs" in q2.wait_for("witaj-z-dysku-pfs"))
+        check("the file's content survived the restart (cat)",
+              "hello-from-the-pfs-disk" in q2.wait_for("hello-from-the-pfs-disk"))
 
         q2.type_line("cat ring3.txt")
-        check("plik zapisany przez ring3 przetrwal restart",
-              "plik zapisany przez proces ring3" in q2.wait_for("ring3"))
+        check("the file written by ring 3 survived the restart",
+              "a file written by a ring 3 process" in q2.wait_for("ring3"))
 
         # --- a new name, without moving a single block ------------------
         # 'mv' used to read the whole file and write it out again; the
@@ -117,13 +117,13 @@ def main():
         q2.type_line("clear")
         time.sleep(1)
         q2.type_line("fls")
-        screen = q2.wait_for("Katalog glowny")
-        check("mv daje nowa nazwe, a stara znika",
+        screen = q2.wait_for("Root directory")
+        check("mv gives a new name, and the old one goes",
               "powitanie" in screen and "greeting" not in screen)
 
         q2.type_line("cat powitanie")
-        check("i tresc jest ta sama - bloki sie nie ruszyly",
-              "witaj-z-dysku-pfs" in q2.wait_for("witaj-z-dysku-pfs"))
+        check("and the content is the same - the blocks did not move",
+              "hello-from-the-pfs-disk" in q2.wait_for("hello-from-the-pfs-disk"))
 
         # The rules a rename has: the name must be free, and the source
         # must exist. A rename that overwrites is a delete nobody asked
@@ -132,20 +132,20 @@ def main():
         time.sleep(1)
         q2.type_line("mv powitanie ring3.txt")
         screen = q2.wait_for("mv:", timeout=20)
-        check("na zajeta nazwe nie pozwala", "nie da sie" in screen)
+        check("it does not allow a name that is taken", "cannot" in screen)
 
         q2.type_line("clear")
         time.sleep(1)
-        q2.type_line("mv nieistniejacy cokolwiek")
+        q2.type_line("mv nosuchfile whatever")
         screen = q2.wait_for("mv:", timeout=20)
-        check("i nie zmienia nazwy czemus, czego nie ma",
-              "nie da sie" in screen)
+        check("and it does not rename something that is not there",
+              "cannot" in screen)
 
         q2.type_line("clear")
         time.sleep(1)
         q2.type_line("fls")
-        screen = q2.wait_for("Katalog glowny")
-        check("po obu odmowach pliki sa jak byly",
+        screen = q2.wait_for("Root directory")
+        check("after both refusals the files are as they were",
               "powitanie" in screen and "ring3.txt" in screen)
     finally:
         q2.close()

@@ -20,18 +20,18 @@ from ptest import check, summary
 
 
 def main():
-    print("--- ACPI (wylaczanie zasilania) ---")
+    print("--- ACPI (switching the power off) ---")
     q20 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
         boot = q20.wait_for("ACPI:", timeout=30)
-        check("tablice ACPI znalezione przy starcie",
-              re.search(r"ACPI: tablice od '\S+", boot) is not None)
+        check("the ACPI tables were found at boot",
+              re.search(r"ACPI: tables from '\S+", boot) is not None)
         q20.wait_for("ProtonOS shell", timeout=20)
         q20.type_line("help")
-        check("'poweroff' jest w spisie komend",
-              "poweroff" in q20.wait_for("Dostepne komendy", timeout=20))
+        check("'poweroff' is in the list of commands",
+              "poweroff" in q20.wait_for("Available commands", timeout=20))
         q20.type_line("poweroff")
-        check("'poweroff' faktycznie gasi maszyne", q20.wait_exit(timeout=20))
+        check("'poweroff' really switches the machine off", q20.wait_exit(timeout=20))
     finally:
         q20.close()
 

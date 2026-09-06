@@ -48,11 +48,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
-HEAD = re.compile(r"\[tlbtest(?:64)?\] watkow (\d+), kawalkow (\d+) po (\d+) "
-                  r"stron, maska rdzeni (\d+)")
-BAD = re.compile(r"\[tlbtest(?:64)?\] bledow przy pisaniu (\d+), "
-                 r"po wszystkim (\d+)")
-COUNTERS = re.compile(r"TLB: lokalnie (\d+), zdalnie (\d+), odpowiedzi (\d+)")
+HEAD = re.compile(r"\[tlbtest(?:64)?\] threads (\d+), chunks (\d+) of (\d+) "
+                  r"pages, core mask (\d+)")
+BAD = re.compile(r"\[tlbtest(?:64)?\] errors while writing (\d+), "
+                 r"afterwards (\d+)")
+COUNTERS = re.compile(r"TLB: local (\d+), remote (\d+), replies (\d+)")
 
 
 def counters(q, wait, timeout=60):
@@ -88,26 +88,26 @@ def run_case(q, out, label):
         bits = list(BAD.finditer(log))
         h = hits[-1] if hits else None
         b = bits[-1] if bits else None
-    check("tlbtest zdal raport%s" % label, bool(h) and bool(b))
+    check("tlbtest reported back%s" % label, bool(h) and bool(b))
     if not h or not b:
         return None
     threads, chunks, pages, mask = (int(x) for x in h.groups())
     early, late = (int(x) for x in b.groups())
 
     # A run that mapped nothing would pass every other check here
-    check("kazdy watek dostal swoje kawalki (%d z %d)%s"
+    check("every thread got its chunks (%d of %d)%s"
           % (chunks, threads * 10, label), chunks == threads * 10)
-    check("pamiec zgodna przy pisaniu (%d bledow)%s" % (early, label),
+    check("the memory agrees while writing (%d errors)%s" % (early, label),
           early == 0)
     # The one that matters: read after every thread has finished, so
     # after the neighbours had time to be given somebody else's frames
-    check("pamiec zgodna po wszystkich watkach (%d bledow)%s"
+    check("the memory agrees after every thread (%d errors)%s"
           % (late, label), late == 0)
     return mask, chunks, early, late
 
 
 def main():
-    print("--- zmiana mapowania a inne rdzenie (jadro 32-bitowe) ---")
+    print("--- changing a mapping and the other cores (the 32-bit kernel) ---")
     slog = tempfile.mktemp(suffix=".log")
     try:
         q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, cpus=4)
@@ -115,72 +115,72 @@ def main():
             q.wait_for("ProtonOS shell", timeout=40)
 
             before = counters(q, "TLB:")
-            check("jadro liczy zmiany mapowan", before is not None)
+            check("the kernel counts mapping changes", before is not None)
 
             # --- On the boot core: nobody else holds the space -------
-            out = q.command("run tlbtest", "zakonczyl sie", timeout=180)
+            out = q.command("run tlbtest", "has ended", timeout=180)
             res = run_case(q, out, " ('run')")
             mid = counters(q, "TLB:")
             if res:
-                check("bez 'runw' proces zostaje na rdzeniu rozruchowym "
-                      "(maska %d)" % res[0], res[0] == 1)
+                check("without 'runw' the process stays on the boot core "
+                      "(mask %d)" % res[0], res[0] == 1)
             if before is None or mid is None:
-                check("liczniki TLB daly sie odczytac po probie", False)
+                check("the TLB counters could be read after the attempt", False)
                 return summary()
-            check("i nie kosztuje ani jednego przerwania (%d -> %d)"
+            check("and it costs not one interrupt (%d -> %d)"
                   % (before[1], mid[1]), mid[1] == before[1])
             # ...though mappings did change - they were simply nobody
             # else's business
-            check("choc zmian mapowan bylo duzo (%d -> %d lokalnych)"
+            check("even though there were many mapping changes (%d -> %d local)"
                   % (before[0], mid[0]), mid[0] > before[0])
 
             # --- Allowed anywhere: threads of one process spread -----
-            out = q.command("runw tlbtest", "zakonczyl sie", timeout=180)
+            out = q.command("runw tlbtest", "has ended", timeout=180)
             res = run_case(q, out, " ('runw')")
             after = counters(q, "TLB:")
             if after is None:
-                check("liczniki TLB daly sie odczytac po drugiej probie",
+                check("the TLB counters could be read after the second attempt",
                       False)
                 return summary()
             if res:
                 mask = res[0]
-                check("watki jednego procesu bieglyby poza rdzeniem "
-                      "rozruchowym (maska %d)" % mask, (mask & ~1) != 0)
-                check("i niosl je wiecej niz jeden rdzen (%d)"
+                check("threads of one process would run off the "
+                      "boot core (mask %d)" % mask, (mask & ~1) != 0)
+                check("and more than one core carried them (%d)"
                       % bin(mask).count("1"), bin(mask).count("1") >= 2)
-            check("zmiany mapowan musialy dojsc do innych rdzeni "
+            check("the mapping changes had to reach the other cores "
                   "(%d -> %d)" % (mid[1], after[1]), after[1] > mid[1])
-            check("i kazda z nich doczekala sie odpowiedzi (%d -> %d)"
+            check("and every one of them was answered (%d -> %d)"
                   % (mid[2], after[2]), after[2] - mid[2] >= after[1] - mid[1])
 
-            check("system dziala dalej po probie",
-                  "zakonczyl sie (kod 0)" in
-                  q.command("run hello", "zakonczyl sie", timeout=60))
+            check("the system still runs after the attempt",
+                  "has ended (code 0)" in
+                  q.command("run hello", "has ended", timeout=60))
         finally:
             q.close()
     finally:
         if os.path.exists(slog):
             os.unlink(slog)
 
-    print("--- ta sama proba na jednym rdzeniu ---")
+    print("--- the same attempt on one core ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
             q1.wait_for("ProtonOS shell", timeout=40)
             before = counters(q1, "TLB:")
-            out = q1.command("runw tlbtest", "zakonczyl sie", timeout=180)
-            res = run_case(q1, out, " (jeden rdzen)")
+            out = q1.command("runw tlbtest", "has ended", timeout=180)
+            res = run_case(q1, out, " (one core)")
             after = counters(q1, "TLB:")
             if before is None or after is None:
-                check("liczniki TLB daly sie odczytac (jeden rdzen)", False)
+                check("the TLB counters could be read (one core)", False)
                 return summary()
             if res:
-                check("na jednym rdzeniu 'runw' nie zmienia nic (maska %d)"
+                check("on one core 'runw' changes nothing (mask %d)"
                       % res[0], res[0] == 1)
-            check("i nie ma komu wysylac przerwan (%d -> %d)"
+            check("and there is nobody to send interrupts to (%d -> %d)"
                   % (before[1], after[1]), after[1] == before[1] == 0)
-            check("a zmiany mapowan i tak byly (%d -> %d lokalnych)"
+            check("and the mapping changes happened anyway (%d -> %d local)"
                   % (before[0], after[0]), after[0] > before[0])
         finally:
             q1.close()
@@ -191,17 +191,17 @@ def main():
     # The same thing in long mode. Until now there were no threads
     # there at all, so two cores could not be put into one address
     # space and the mechanism could be built in but not shown working.
-    print("--- to samo w jadrze 64-bitowym ---")
+    print("--- the same in the 64-bit kernel ---")
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog64 = tempfile.mktemp(suffix=".log")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
@@ -209,45 +209,45 @@ def main():
         try:
             q.wait_serial("proton64>", timeout=90)
             before = counters(q, "TLB:")
-            check("jadro 64-bitowe tez liczy zmiany mapowan",
+            check("the 64-bit kernel counts mapping changes too",
                   before is not None and before[0] > 0)
 
-            out = q.command("run tlbtest64", "kod wyjscia", timeout=180)
+            out = q.command("run tlbtest64", "exit code", timeout=180)
             res = run_case(q, out, " (64-bit, 'run')")
             mid = counters(q, "TLB:")
             if res:
-                check("bez 'runw' proces zostaje na rdzeniu rozruchowym "
-                      "(64-bit, maska %d)" % res[0], res[0] == 1)
+                check("without 'runw' the process stays on the boot core "
+                      "(64-bit, mask %d)" % res[0], res[0] == 1)
             if before is None or mid is None:
-                check("liczniki TLB daly sie odczytac (64-bit)", False)
+                check("the TLB counters could be read (64-bit)", False)
                 return summary()
-            check("i nie kosztuje ani jednego przerwania (64-bit, %d -> %d)"
+            check("and it costs not one interrupt (64-bit, %d -> %d)"
                   % (before[1], mid[1]), mid[1] == before[1] == 0)
 
-            out = q.command("runw tlbtest64", "kod wyjscia", timeout=180)
+            out = q.command("runw tlbtest64", "exit code", timeout=180)
             res = run_case(q, out, " (64-bit, 'runw')")
             after = counters(q, "TLB:")
             if after is None:
-                check("liczniki TLB daly sie odczytac po drugiej probie "
+                check("the TLB counters could be read after the second attempt "
                       "(64-bit)", False)
                 return summary()
             if res:
                 mask = res[0]
-                check("watki jednego procesu bieglyby poza rdzeniem "
-                      "rozruchowym (64-bit, maska %d)" % mask,
+                check("threads of one process would run off the "
+                      "boot core (64-bit, mask %d)" % mask,
                       (mask & ~1) != 0)
-                check("i niosl je wiecej niz jeden rdzen (64-bit, %d)"
+                check("and more than one core carried them (64-bit, %d)"
                       % bin(mask).count("1"), bin(mask).count("1") >= 2)
-            check("zmiany mapowan musialy dojsc do innych rdzeni "
+            check("the mapping changes had to reach the other cores "
                   "(64-bit, %d -> %d)" % (mid[1], after[1]),
                   after[1] > mid[1])
-            check("i kazda z nich doczekala sie odpowiedzi (64-bit, %d -> %d)"
+            check("and every one of them was answered (64-bit, %d -> %d)"
                   % (mid[2], after[2]),
                   after[2] - mid[2] >= after[1] - mid[1])
 
-            check("jadro dziala dalej po probie (64-bit)",
-                  "czesc, jestem ELF-em" in
-                  q.command("run hello64", "kod wyjscia", timeout=60))
+            check("the kernel still runs after the attempt (64-bit)",
+                  "hello, I am a" in
+                  q.command("run hello64", "exit code", timeout=60))
         finally:
             q.close()
     finally:

@@ -30,34 +30,34 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- klawiatura USB (HID) w jadrze 64-bitowym ---")
+    print("--- a USB keyboard (HID) in the 64-bit kernel ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, usbkbd=True,
                  qemu="qemu-system-x86_64")
         try:
-            start = q.wait_serial("Klawiatura USB", timeout=60)
-            check("klawiatura USB rozpoznana na magistrali",
-                  re.search(r"Klawiatura USB \(HID, UHCI\) na porcie \d+",
+            start = q.wait_serial("A USB keyboard", timeout=60)
+            check("the USB keyboard was recognised on the bus",
+                  re.search(r"A USB keyboard \(HID, UHCI\) on port \d+",
                             start) is not None)
 
             q.wait_serial("proton64>", timeout=30)
             q.type_line("uptime")
             out_text = q.wait_serial("Uptime:", timeout=20)
-            check("polecenie wpisane z klawiatury USB wykonuje sie",
-                  "tyknac po" in out_text)
+            check("a command typed on the USB keyboard runs",
+                  "ticks of" in out_text)
 
             # A capital letter comes from a modifier in the HID report. We
             # poll the keyboard fifty times a second, and QEMU holds a key
@@ -80,7 +80,7 @@ def main():
                 if "echo A" in q.serial()[before:]:
                     big_one = True
                     break
-            check("modyfikator Shift z raportu HID daje wielka litere", big_one)
+            check("the Shift modifier from the HID report gives a capital letter", big_one)
 
             # Alt+F2 from a USB keyboard switches the console - that is a
             # different path inside the kernel than an ordinary character
@@ -88,8 +88,8 @@ def main():
             q.sendkey("alt-f2")
             time.sleep(1.0)
             second_one = q.screen_fbcon()
-            check("Alt+F2 z klawiatury USB przelacza konsole",
-                  "konsola 2" in second_one)
+            check("Alt+F2 from the USB keyboard switches consoles",
+                  "console 2" in second_one)
         finally:
             q.close()
     finally:

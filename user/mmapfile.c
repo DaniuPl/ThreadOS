@@ -33,17 +33,17 @@ void _start(int argc, char **argv)
     print_dec(size);
     print(" B\n");
 
-    uint32_t ile = size;
+    uint32_t count = size;
     if (argc > 2) {
         uint32_t v = 0;
         for (const char *q = argv[2]; *q >= '0' && *q <= '9'; q++)
             v = v * 10 + (uint32_t)(*q - '0');
         if (v && v < size)
-            ile = v;
+            count = v;
     }
 
     uint32_t bad = 0;
-    for (uint32_t i = 0; i < ile; i++)
+    for (uint32_t i = 0; i < count; i++)
         if (p[i] != (unsigned char)(i * 7 + 13))
             bad++;
     if (bad) {
@@ -54,9 +54,9 @@ void _start(int argc, char **argv)
     }
 
     print("[mmapfile] the checked bytes match, and there were ");
-    print_dec(ile);
+    print_dec(count);
     print("\n");
-    if (ile != size) {
+    if (count != size) {
         print("[mmapfile] I never touched the rest of the file\n");
         sys_exit(0);
     }

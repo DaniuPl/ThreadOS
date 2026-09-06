@@ -140,7 +140,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- the terminal ------------------------------------------
@@ -155,28 +155,28 @@ def main():
 
             q.type_line("whoami")
             rows = wait_row(q, "plain user", geom)
-            check("terminal wstaje jako zwykly uzytkownik",
+            check("the terminal comes up as an ordinary user",
                   "plain user" in "\n".join(rows))
 
             # A program in ring 3 asking to delete a system file is
             # refused by the KERNEL - and rm says which refusal it was
             q.type_line("rm swap.sys")
-            rows = wait_row(q, "uprawnien", geom)
-            check("program dostaje odmowe, a nie 'nie ma pliku'",
-                  "brak uprawnien" in "\n".join(rows))
+            rows = wait_row(q, "permission", geom)
+            check("the program is refused, not told 'there is no file'",
+                  "no permission" in "\n".join(rows))
 
             # --- sudo in the window ------------------------------------
             q.type_line("sudo cp termout system.cfg")
             time.sleep(1.5)
             rows = read_rows(q, **geom)
-            check("terminal pyta o haslo",
+            check("the terminal asks for a password",
                   any(r.startswith("password:") for r in rows))
 
             # A wrong one changes nothing and says so
-            typed(q, "zlehaslo")
+            typed(q, "wrongpassword")
             q.sendkey("ret")
             rows = wait_row(q, "wrong password", geom)
-            check("zle haslo odrzucone", "wrong password" in "\n".join(rows))
+            check("a wrong password is refused", "wrong password" in "\n".join(rows))
 
             q.type_line("sudo cp termout system.cfg")
             time.sleep(1.5)
@@ -186,26 +186,26 @@ def main():
             time.sleep(0.5)
             rows = read_rows(q, **geom)
             last = [r for r in rows if r][-1]
-            check("wpisywane haslo widac jako gwiazdki ('%s')" % last,
+            check("the password being typed shows as stars ('%s')" % last,
                   "******" in last and "proton" not in last)
 
             q.sendkey("ret")
             time.sleep(3)
             rows = wait_row(q, "sudo cp", geom)
             body = "\n".join(rows)
-            check("komenda wykonala sie z prawami admina",
-                  "brak uprawnien" not in body.split("sudo cp")[-1])
+            check("the command ran with admin rights",
+                  "no permission" not in body.split("sudo cp")[-1])
 
             q.type_line("whoami")
             time.sleep(2)
             rows = read_rows(q, **geom)
             # Twice: once at the start of the session and once now,
             # after the one command that was run as an admin
-            check("a po niej terminal znowu jest zwyklym uzytkownikiem",
+            check("and after it the terminal is an ordinary user again",
                   "\n".join(rows).count("plain user") >= 2)
 
             # --- the settings window ------------------------------------
-            q.mouse_goto(24, 272)          # the 'Ustaw' icon
+            q.mouse_goto(24, 272)          # the 'Config' icon
             q.mouse_click()
             time.sleep(3)
             q.mouse_goto(600, 380)
@@ -227,16 +227,16 @@ def main():
             # The status line sits under the description of the
             # setting, so its exact row depends on how long that is -
             # we look through the band it can be in.
-            check("okno ustawien mowi, ze potrzeba admina",
-                  window_says(q, SX + 6, SY + 100, SY + 200, "haslo admina"))
+            check("the settings window says admin is needed",
+                  window_says(q, SX + 6, SY + 100, SY + 200, "the admin password"))
 
-            typed(q, "zlehaslo")
+            typed(q, "wrongpassword")
             q.sendkey("ret")
             time.sleep(2)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
-            check("zle haslo w oknie tez niczego nie zapisuje",
-                  window_says(q, SX + 6, SY + 100, SY + 200, "NIE zapisane"))
+            check("a wrong password in the window writes nothing either",
+                  window_says(q, SX + 6, SY + 100, SY + 200, "NOT saved"))
 
             q.sendkey("ret")               # ask again
             time.sleep(1.5)
@@ -245,9 +245,9 @@ def main():
             time.sleep(2.5)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
-            check("dobre haslo zapisuje ustawienie",
+            check("the right password saves the setting",
                   window_says(q, SX + 6, SY + 100, SY + 200,
-                              "zapisane na dysku"))
+                              "saved to the disk"))
         finally:
             q.close()
     finally:

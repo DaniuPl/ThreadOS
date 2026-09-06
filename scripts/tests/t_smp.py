@@ -50,12 +50,12 @@ def values(text, label):
     'rdzenN=' across the whole text would glue one to the other."""
     for w in text.replace("\r", "").split("\n"):
         if w.startswith(label):
-            return [int(x) for x in re.findall(r"rdzen\d+=(\d+)", w)]
+            return [int(x) for x in re.findall(r"core\d+=(\d+)", w)]
     return []
 
 
 def main():
-    print("--- pozostale procesory (INIT-SIPI) ---")
+    print("--- the other processors (INIT-SIPI) ---")
 
     # --- Four cores ---
     slog = tempfile.mktemp(suffix=".log")
@@ -64,38 +64,38 @@ def main():
         f.write(b"\0" * DISK_SIZE)
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog, cpus=4)
     try:
-        start = q.wait_for("Procesory:", timeout=60)
-        m = re.search(r"Procesory: (\d+) \(obudzonych (\d+)", start)
-        check("system wylicza wszystkie procesory z tablicy ACPI",
+        start = q.wait_for("Processors:", timeout=60)
+        m = re.search(r"Processors: (\d+) \(woken (\d+)", start)
+        check("the system lists every processor from the ACPI table",
               m is not None and int(m.group(1)) == 4)
-        check("trzy pozostale rdzenie zglosily sie po INIT-SIPI",
+        check("the other three cores answered after INIT-SIPI",
               m is not None and int(m.group(2)) == 3)
 
         q.wait_for("ProtonOS shell", timeout=30)
-        q.wait_for("[siec] DHCP", timeout=30)
+        q.wait_for("[net] DHCP", timeout=30)
 
         # After waking the cores the system is to work as it did before
-        up1 = q.command("uptime", "tyknac timera")
-        check("timer tyka po obudzeniu pozostalych rdzeni",
-              "tyknac timera" in up1)
+        up1 = q.command("uptime", "timer ticks")
+        check("the timer ticks once the other cores are woken",
+              "timer ticks" in up1)
 
-        proc = q.command("run hello", "zakonczyl sie", timeout=40)
-        check("proces w ring 3 dziala jak dotad",
-              "[hello] czesc, jestem procesem ELF" in proc)
+        proc = q.command("run hello", "has ended", timeout=40)
+        check("a ring 3 process runs as before",
+              "[hello] hello, I am an ELF process" in proc)
 
-        files = q.command("write smptest wielordzeniowo", "zapisano")
-        check("dysk dziala jak dotad", "zapisano" in files)
-        read_res = q.command("cat smptest", "wielordzeniowo")
-        check("i oddaje to, co zapisano", "wielordzeniowo" in read_res)
+        files = q.command("write smptest multicore", "wrote")
+        check("the disk works as before", "wrote" in files)
+        read_res = q.command("cat smptest", "multicore")
+        check("and gives back what was written", "multicore" in read_res)
 
         # The work distributed across the cores: the result is to match bit
         # for bit the one computed on a single core
-        work = q.command("smp", "Liczylo rdzeni", timeout=90)
-        check("wynik pracy rozdzielonej zgadza sie z jednordzeniowym",
-              "zgadza sie" in work and "NIE ZGADZA SIE" not in work)
+        work = q.command("smp", "Cores that counted", timeout=90)
+        check("the result of the divided work matches the single-core one",
+              "matches" in work and "DOES NOT MATCH" not in work)
 
-        m = re.search(r"Liczylo rdzeni: (\d+)", work)
-        check("prace liczylo kilka rdzeni naraz",
+        m = re.search(r"Cores that counted: (\d+)", work)
+        check("several cores counted the work at once",
               m is not None and int(m.group(1)) >= 2)
 
         # How many cores really took work. We do not demand that EVERY
@@ -103,10 +103,10 @@ def main():
         # woken only by an interrupt, and how quickly that arrives
         # depends on the virtual machine underneath. That is a race, and
         # races are not assertions.
-        shares = values(work, "Udzial:")
-        check("prace wzielo wiecej niz jeden rdzen (%s)" % shares,
+        shares = values(work, "Share:")
+        check("more than one core took the work (%s)" % shares,
               len(shares) == 4 and sum(1 for u in shares if u) >= 2)
-        check("razem policzono dokladnie tyle jednostek, ile zlecono",
+        check("in all exactly as many units were counted as were asked for",
               sum(shares) == 64)
 
         # --- Every core's own clock -------------------------------
@@ -114,31 +114,31 @@ def main():
         # through the PIC to ONE processor. What it does have is its own
         # clock in the local APIC - and only that gives it the
         # interrupts without which it could never be preempted.
-        clocks = values(work, "Zegary rdzeni:")
-        check("kazdy rdzen wtorny ma wlasny zegar, ktory tyka (%s)"
+        clocks = values(work, "Core clocks:")
+        check("every secondary core has a clock of its own that ticks (%s)"
               % clocks,
               len(clocks) == 4 and all(z > 0 for z in clocks[1:]))
-        check("rdzen rozruchowy chodzi z PIT, nie z APIC",
+        check("the boot core runs off the PIT, not the APIC",
               len(clocks) == 4 and clocks[0] == 0)
 
         # A single reading proves nothing - the counters are to GROW
         time.sleep(1.5)
-        again = values(q.command("smp", "Zegary rdzeni", timeout=90),
-                         "Zegary rdzeni:")
-        check("zegary rdzeni wtornych ida dalej (%s -> %s)"
+        again = values(q.command("smp", "Core clocks", timeout=90),
+                         "Core clocks:")
+        check("the secondary cores' clocks keep running (%s -> %s)"
               % (clocks, again),
               len(again) == 4 and
               all(again[i] > clocks[i] for i in range(1, 4)))
 
         # The threads' counters keep growing - the scheduler did not stop
         def counter():
-            m = re.findall(r"watek-A: (\d+)", q.screen())
+            m = re.findall(r"thread-A: (\d+)", q.screen())
             return int(m[-1]) if m else None
 
         a1 = counter()
         time.sleep(1.5)
         a2 = counter()
-        check("scheduler dziala dalej (%s -> %s)" % (a1, a2),
+        check("the scheduler is still running (%s -> %s)" % (a1, a2),
               a1 is not None and a2 is not None and a2 > a1)
     finally:
         q.close()
@@ -151,40 +151,40 @@ def main():
     # system has long been running in 64 bits: it has to walk the whole
     # road itself, sixteen bits -> thirty-two -> sixty-four. It takes the
     # page tables ready-made, the same ones the kernel uses.
-    print("--- pozostale procesory w trybie dlugim ---")
+    print("--- the other processors in long mode ---")
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog64 = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if os.path.exists(iso):
                 q64 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
                            qemu="qemu-system-x86_64")
                 try:
-                    st = q64.wait_serial("Procesory:", timeout=90)
-                    m = re.search(r"Procesory: (\d+) \(obudzonych (\d+)", st)
-                    check("jadro 64-bitowe wylicza wszystkie procesory",
+                    st = q64.wait_serial("Processors:", timeout=90)
+                    m = re.search(r"Processors: (\d+) \(woken (\d+)", st)
+                    check("the 64-bit kernel lists every processor",
                           m is not None and int(m.group(1)) == 4)
-                    check("rdzenie wtorne same dochodza do trybu dlugiego",
+                    check("the secondary cores reach long mode by themselves",
                           m is not None and int(m.group(2)) == 3)
 
                     q64.wait_serial("proton64>", timeout=40)
-                    prog = q64.command("run hello64", "kod wyjscia",
+                    prog = q64.command("run hello64", "exit code",
                                          timeout=40)
-                    check("program w ring 3 dziala jak dotad",
-                          "[hello64] koncze sie grzecznie" in prog)
+                    check("a ring 3 program runs as before",
+                          "[hello64] ending politely" in prog)
 
-                    work = q64.command("smp", "Liczylo rdzeni",
+                    work = q64.command("smp", "Cores that counted",
                                           timeout=90)
-                    check("praca rozdzielona na rdzenie takze w trybie "
-                          "dlugim", "zgadza sie" in work and
-                          "NIE ZGADZA SIE" not in work)
-                    m2 = re.search(r"Liczylo rdzeni: (\d+)", work)
-                    check("prace liczylo kilka rdzeni naraz (tryb dlugi)",
+                    check("the work is divided between the cores in long "
+                          "mode too", "matches" in work and
+                          "DOES NOT MATCH" not in work)
+                    m2 = re.search(r"Cores that counted: (\d+)", work)
+                    check("several cores counted the work at once (long mode)",
                           m2 is not None and int(m2.group(1)) >= 2)
 
                     # The core's own clock in long mode.
@@ -196,15 +196,15 @@ def main():
                     # bit 63 of a page table entry is RESERVED - so the
                     # first reach for the local APIC ended in a page
                     # fault and the quiet death of the whole machine.
-                    clock = values(work, "Zegary rdzeni:")
-                    check("kazdy rdzen wtorny ma wlasny zegar takze "
-                          "w trybie dlugim (%s)" % clock,
+                    clock = values(work, "Core clocks:")
+                    check("every secondary core has a clock of its own "
+                          "in long mode (%s)" % clock,
                           len(clock) == 4 and all(z > 0 for z in clock[1:]))
                     time.sleep(1.5)
-                    clock2 = values(q64.command("smp", "Zegary rdzeni",
+                    clock2 = values(q64.command("smp", "Core clocks",
                                                   timeout=90),
-                                    "Zegary rdzeni:")
-                    check("i tykaja dalej (%s -> %s)" % (clock, clock2),
+                                    "Core clocks:")
+                    check("and they keep ticking (%s -> %s)" % (clock, clock2),
                           len(clock2) == 4 and
                           all(clock2[i] > clock[i] for i in range(1, 4)))
                 finally:
@@ -216,16 +216,16 @@ def main():
                     os.unlink(f)
 
     # --- One core: nothing changes ---
-    print("--- maszyna jednordzeniowa ---")
+    print("--- a single-core machine ---")
     slog1 = tempfile.mktemp(suffix=".log")
     q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
     try:
-        start = q1.wait_for("Procesory:", timeout=60)
-        check("na jednym rdzeniu system mowi to wprost i nikogo nie budzi",
-              "Procesory: 1" in start)
+        start = q1.wait_for("Processors:", timeout=60)
+        check("on one core the system says so outright and wakes nobody",
+              "Processors: 1" in start)
         q1.wait_for("ProtonOS shell", timeout=30)
-        up = q1.command("uptime", "tyknac timera")
-        check("i dziala tak samo", "tyknac timera" in up)
+        up = q1.command("uptime", "timer ticks")
+        check("and it works just the same", "timer ticks" in up)
     finally:
         q1.close()
         if os.path.exists(slog1):

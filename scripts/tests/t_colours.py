@@ -74,7 +74,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- the machine says what kind of screen it has ------------
@@ -82,12 +82,12 @@ def main():
             q.mouse_click()
             time.sleep(1)
             seen = len(q.serial())
-            q.type_line("ekran")
+            q.type_line("screen")
             time.sleep(2)
             said = q.serial()[seen:]
-            check("ekran mowi, ze tryb jest kolorowy ('%s')"
+            check("the screen says the mode is in colour ('%s')"
                   % said.replace("\n", " ")[:70],
-                  "kolory" in said and "640x480" in said)
+                  "true colour" in said and "640x480" in said)
 
             # --- nothing moves, nothing goes to the card ----------------
             # The compositor redraws the whole frame thirty times a
@@ -95,16 +95,16 @@ def main():
             # thirty times a second is a megabyte crossing the bus.
             time.sleep(3)
             seen = len(q.serial())
-            q.type_line("ekran")
+            q.type_line("screen")
             time.sleep(2)
             said = q.serial()[seen:]
-            m = re.search(r"ostatnia klatka: (\d+) wierszy", said)
-            check("kompozytor pisze na karte tylko to, co sie zmienilo "
+            m = re.search(r"last frame:      (\d+) rows", said)
+            check("the compositor writes to the card only what changed "
                   "('%s')" % (m.group(0) if m else said[-60:]),
                   m is not None and int(m.group(1)) < 40)
 
             # --- a picture in real colours ------------------------------
-            q.mouse_goto(24, 72)               # the "Zegar" icon, for the slot
+            q.mouse_goto(24, 72)               # the "Clock" icon, for the slot
             q.mouse_click()
             time.sleep(4)
 
@@ -119,8 +119,8 @@ def main():
             for y in range(0, h, 4):
                 for x in range(0, w, 4):
                     own.add(at(x, y))
-            check("pulpit rysowany indeksami ma ich garstke (%d roznych "
-                  "na calym ekranie)" % len(own), 1 < len(own) < 100)
+            check("a desktop drawn in indices has a handful of them (%d different "
+                  "on the whole screen)" % len(own), 1 < len(own) < 100)
 
             q.mouse_goto(600, 430)             # the keys back to the shell
             q.mouse_click()
@@ -130,8 +130,8 @@ def main():
                         % http_port)
             time.sleep(6)
             got = q.serial()[seen:]
-            check("maszyna sciaga obraz z sieci",
-                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+            check("the machine fetches a picture off the network",
+                  "HTTP 200" in got and "has ended (code 0)" in got)
 
             q.type_line("run gimg foto.jpg")
             time.sleep(7)
@@ -139,8 +139,8 @@ def main():
             time.sleep(2)
             w, h, at = q.screen_raw()
             said = status(at)
-            check("podglad wczytal obraz ('%s')" % said,
-                  "64x48" in said and "wczytany" in said)
+            check("the viewer loaded the picture ('%s')" % said,
+                  "64x48" in said and "loaded" in said)
 
             # How many DIFFERENT colours the picture put on the screen.
             # The whole point of the number: three thousand pixels of
@@ -154,8 +154,8 @@ def main():
             for y in range(0, 48):
                 for x in range(0, 64):
                     seen_cols.add(at(cx + x, cy + y))
-            check("obraz ma wiecej odcieni, niz paleta w ogole miala "
-                  "(%d roznych)" % len(seen_cols), len(seen_cols) > 500)
+            check("the picture has more shades than the palette ever had "
+                  "(%d different)" % len(seen_cols), len(seen_cols) > 500)
 
             # More colours is worth nothing if they are the wrong ones.
             # The picture rises in red from left to right and in green
@@ -163,11 +163,11 @@ def main():
             # read at eight points, each higher than the last.
             reds = [at(cx + x, cy + 24)[0] for x in range(4, 64, 8)]
             greens = [at(cx + 32, cy + y)[1] for y in range(3, 48, 6)]
-            check("i rosna tam, gdzie maja rosnac - czerwien w prawo %s"
+            check("and they rise where they should - red to the right %s"
                   % reds,
                   all(reds[i] < reds[i + 1] for i in range(len(reds) - 1)) and
                   reds[0] < 40 and reds[-1] > 200)
-            check("a zielen w dol %s" % greens,
+            check("and green downwards %s" % greens,
                   all(greens[i] < greens[i + 1]
                       for i in range(len(greens) - 1)) and
                   greens[0] < 40 and greens[-1] > 200)

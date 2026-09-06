@@ -25,15 +25,15 @@ def main():
     # The USB controller, device enumeration, the HID boot protocol.
     # QEMU directs keys to the USB device, so the mere fact that a
     # command runs at all is proof that they went that way.
-    print("--- klawiatura USB (HID) ---")
+    print("--- a USB keyboard (HID) ---")
     udisk = tempfile.mktemp(suffix=".img")
     with open(udisk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     q19 = Qemu(KERNEL, INITRD, udisk, append=TEXT_MODE, usbkbd=True)
     try:
-        boot = q19.wait_for("Klawiatura USB", timeout=30)
-        check("klawiatura USB rozpoznana na magistrali",
-              re.search(r"Klawiatura USB \(HID, UHCI\) na porcie \d+", boot)
+        boot = q19.wait_for("A USB keyboard", timeout=30)
+        check("the USB keyboard was recognised on the bus",
+              re.search(r"A USB keyboard \(HID, UHCI\) on port \d+", boot)
               is not None)
         # Waiting, not asserting: with four machines booting at once the
         # shell's greeting can take twice as long to reach the screen as
@@ -42,8 +42,8 @@ def main():
         q19.wait_for("ProtonOS shell", timeout=40)
         q19.type_line("clear")
         q19.type_line("uptime")
-        out = q19.wait_for("tyknac timera", timeout=20)
-        check("komenda wpisana z klawiatury USB wykonuje sie",
+        out = q19.wait_for("timer ticks", timeout=20)
+        check("a command typed on the USB keyboard runs",
               "uptime:" in out)
         # A capital letter comes from a modifier in the HID report -
         # 'type_line' knows only lower case, so we assemble the keys by
@@ -63,13 +63,13 @@ def main():
         for attempt in range(3):
             type_shift_a()
             try:
-                saved = q19.wait_for("zapisano", timeout=10)
+                saved = q19.wait_for("wrote", timeout=10)
                 if "do 'A'" in saved:
                     break
             except RuntimeError:
                 pass
             q19.type_line("clear")
-        check("modyfikator Shift z raportu HID daje wielkie litery",
+        check("the Shift modifier from the HID report gives capital letters",
               "do 'A'" in saved)
     finally:
         q19.close()

@@ -339,9 +339,9 @@ int dyn_init(void)
         const struct shdr *sh = section(image, i);
         if (sh->sh_type != SHT_REL_OURS || !sh->sh_entsize)
             continue;
-        uint32_t ile = (uint32_t)(sh->sh_size / sh->sh_entsize);
+        uint32_t count = (uint32_t)(sh->sh_size / sh->sh_entsize);
         const struct rel *r = (const struct rel *)(image + sh->sh_offset);
-        for (uint32_t k = 0; k < ile; k++) {
+        for (uint32_t k = 0; k < count; k++) {
             uint32_t typ = REL_TYPE(r[k].r_info);
             if (typ == R_JUMP || typ == R_DATA) {
                 printk("[kernel] %s has unresolved references of its own - "
@@ -411,9 +411,9 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
         const struct shdr *st = section(image, (int)ss->sh_link);
         const char *texts = (const char *)(image + st->sh_offset);
 
-        uint32_t ile = (uint32_t)(sh->sh_size / sh->sh_entsize);
+        uint32_t count = (uint32_t)(sh->sh_size / sh->sh_entsize);
         const struct rel *r = (const struct rel *)(image + sh->sh_offset);
-        for (uint32_t k = 0; k < ile; k++) {
+        for (uint32_t k = 0; k < count; k++) {
             uint32_t typ = REL_TYPE(r[k].r_info);
             uint32_t nr = REL_SYM(r[k].r_info);
             if (typ != R_JUMP && typ != R_DATA) {

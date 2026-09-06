@@ -22,14 +22,14 @@ from ptest import check, summary
 def main():
     # --- The GUI file manager: FS -> an application window (a separate
 # boot with a disk) ---
-    print("--- pulpit: menedzer plikow (gfiles) ---")
+    print("--- the desktop: the file manager (gfiles) ---")
     gdisk = tempfile.mktemp(suffix=".img")
     with open(gdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
     q9 = Qemu(KERNEL, INITRD, gdisk)
     try:
         q9.wait_desktop()
-        q9.type_line("write raport abc")   # a file on the disk (before the desktop)
+        q9.type_line("write report abc")   # a file on the disk (before the desktop)
         time.sleep(0.5)
         time.sleep(1.0)
 
@@ -54,7 +54,7 @@ def main():
                 appeared = True
                 break
             time.sleep(0.2)
-        check("menedzer plikow GUI listuje plik z dysku (FS -> okno)",
+        check("the GUI file manager lists a file from the disk (FS -> a window)",
               appeared)
 
         # A click on a file name chooses it: the row takes the accent
@@ -81,7 +81,7 @@ def main():
                 picked = True
                 break
             time.sleep(0.2)
-        check("klik pliku w gfiles wybiera go (zdarzenie myszy -> ring 3)",
+        check("a click on a file in gfiles picks it (a mouse event -> ring 3)",
               picked)
     finally:
         q9.close()
@@ -89,7 +89,7 @@ def main():
             os.unlink(gdisk)
 
     # --- Icons on the desktop (a separate boot) ---
-    print("--- pulpit: ikony ---")
+    print("--- the desktop: the icons ---")
     q10 = Qemu(KERNEL, INITRD)
     try:
         q10.wait_desktop()
@@ -99,19 +99,19 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # the 'App' icon (the tile 8,20,32x24) in orange
-        check("ikona pulpitu narysowana (pomaranczowy kafelek 20,30)",
+        check("a desktop icon is drawn (an orange tile 20,30)",
               q10.wait_pixel(20, 30, (255, 162, 0)))
         # a click on the icon starts the application (guiapp -> a red square)
         q10.mouse_goto(24, 32)
         q10.mouse_click()
         q10.mouse_goto(300, 300)         # move the cursor away
-        check("klik ikony uruchamia aplikacje (czerwony kwadrat 101,71)",
+        check("a click on an icon starts the application (a red square 101,71)",
               q10.wait_pixel(101, 71, (255, 0, 0)))
     finally:
         q10.close()
 
     # --- The resource monitor (gmon) live ---
-    print("--- pulpit: monitor zasobow (gmon) ---")
+    print("--- the desktop: the resource monitor (gmon) ---")
     q11 = Qemu(KERNEL, INITRD)
     try:
         q11.wait_desktop()
@@ -123,7 +123,7 @@ def main():
 
         # gmon slot2 (94,54), content (95,65). The RAM bar (content y48)
         # contains a blue usage fragment -> screen ~ (101,116).
-        check("monitor zasobow: pasek RAM (niebieski 101,116)",
+        check("the resource monitor: the RAM bar (blue 101,116)",
               q11.wait_pixel(101, 116, (0, 0, 255)))
 
         # the uptime (the number at content(96,28) -> screen (191,93)) grows:
@@ -134,7 +134,7 @@ def main():
         c1 = up_cell()
         time.sleep(1.6)
         c2 = up_cell()
-        check("monitor zasobow zywy: uptime aktualizuje sie w oknie",
+        check("the resource monitor is alive: uptime updates in its window",
               c1 != c2)
     finally:
         q11.close()
@@ -176,7 +176,7 @@ def main():
                 shown = True
                 break
             time.sleep(0.2)
-        check("terminal GUI uruchamia komende i pokazuje wyjscie w oknie",
+        check("the GUI terminal runs a command and shows the output in its window",
               shown)
     finally:
         q12.close()
@@ -184,7 +184,7 @@ def main():
             os.unlink(tdisk)
 
     # --- Collapsing and resizing windows (a separate boot) ---
-    print("--- pulpit: minimalizacja + zmiana rozmiaru ---")
+    print("--- the desktop: minimising + resizing ---")
     q13 = Qemu(KERNEL, INITRD)
     try:
         q13.wait_desktop()
@@ -196,7 +196,7 @@ def main():
         # win0 "Terminal" (40,60,120x70). A title bar is the accent
         # blue for the window with the focus and plain grey for the
         # rest; at boot nothing has the focus. Read past the name.
-        check("okno 0: pasek tytulu narysowany przed zwinieciem (115,64)",
+        check("window 0: the title bar is drawn before the minimise (115,64)",
               q13.wait_pixel(115, 64, (178, 178, 178), 25))
 
         # win0's collapse button [_]: min_x = x+w-2*8-2 = 142, y=61 (8x8).
@@ -205,7 +205,7 @@ def main():
         q13.mouse_goto(146, 65)
         q13.mouse_click()
         q13.mouse_goto(400, 300)              # move the cursor away
-        check("zwiniete okno znika z pulpitu (pasek 80,64 -> teal)",
+        check("a minimised window goes from the desktop (the bar 80,64 -> teal)",
               q13.wait_pixel(80, 64, (0, 128, 160)))
 
         # The window is still on the taskbar (slot0 'Terminal', x46..96,
@@ -215,7 +215,7 @@ def main():
         q13.mouse_goto(400, 300)
         # Restoring it from the bar also gives it the focus, so the bar
         # comes back BLUE
-        check("klik na pasku zadan przywraca zwiniete okno (115,68)",
+        check("a click on the taskbar brings a minimised window back (115,68)",
               q13.wait_pixel(115, 68, (0, 0, 255), 30))
 
         # Resizing: win0's grip in the bottom right corner
@@ -224,21 +224,21 @@ def main():
         # grip (155,125) by (+60,+40) -> the window grows and covers
         # (170,140).
         _, _, at = q13.screen_raw()
-        check("przed zmiana rozmiaru punkt poza oknem (170,140 teal)",
+        check("before the resize the point is outside the window (170,140 teal)",
               near(at(170, 140), (0, 128, 160)))
         q13.mouse_goto(155, 125)
         q13.mouse_button(True)
         q13.mouse_move(60, 40)
         q13.mouse_button(False)
         q13.mouse_goto(400, 300)
-        check("po zmianie rozmiaru okno powiekszone (170,140 szare tlo okna)",
+        check("after the resize the window is bigger (170,140 the window's grey background)",
               q13.wait_pixel(170, 140, (224, 224, 224)))
     finally:
         q13.close()
 
     # --- Saving the icon positions on the disk (two boots on the same
 # disk) ---
-    print("--- pulpit: zapis pozycji ikon na dysku ---")
+    print("--- the desktop: saving the icon places to the disk ---")
     idisk = tempfile.mktemp(suffix=".img")
     with open(idisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
@@ -251,7 +251,7 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # the 'App' icon by default (8,20,32x24) - an orange tile ~ (20,30)
-        check("ikona App w domyslnej pozycji (20,30 pomaranczowy)",
+        check("the App icon in its default place (20,30 orange)",
               q14.wait_pixel(20, 30, (255, 162, 0)))
 
         # Drag the icon: grab the centre (24,32), move it to (416,312) with
@@ -263,9 +263,9 @@ def main():
         q14.mouse_goto(100, 250)          # move the cursor away from the icon
         # The tile, off its picture: the icon now has one drawn in the
         # middle of it, and that is not orange
-        check("ikona przeniesiona na nowa pozycje (404,304 pomaranczowy)",
+        check("the icon was moved to a new place (404,304 orange)",
               q14.wait_pixel(404, 304, (255, 162, 0)))
-        check("stara pozycja ikony wyczyszczona (20,30 teal)",
+        check("the icon's old place was cleaned up (20,30 teal)",
               q14.wait_pixel(20, 30, (0, 128, 160)))
     finally:
         q14.close()
@@ -279,9 +279,9 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        check("pozycja ikony przetrwala restart (404,304 pomaranczowy)",
+        check("the icon's place survived the restart (404,304 orange)",
               q15.wait_pixel(404, 304, (255, 162, 0)))
-        check("domyslna pozycja ikony pusta po restarcie (20,30 teal)",
+        check("the icon's default place is empty after the restart (20,30 teal)",
               q15.wait_pixel(20, 30, (0, 128, 160)))
     finally:
         q15.close()

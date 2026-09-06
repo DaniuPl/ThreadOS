@@ -20,38 +20,38 @@ from ptest import check, summary, DNS_HINT
 
 def main():
     # --- ProtonOS as a TCP server (a passive open, a separate boot) ---
-    print("--- siec: serwer TCP w ring 3 ---")
+    print("--- the network: a TCP server in ring 3 ---")
     srv_port = 5555
     q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port, append=TEXT_MODE)
     try:
         q_srv.wait_for("ProtonOS shell")
-        q_srv.wait_for("[siec] DHCP", timeout=20)
+        q_srv.wait_for("[net] DHCP", timeout=20)
         q_srv.type_line("run tcpserv")
-        view = q_srv.wait_for("nasluchuje na porcie 5555", timeout=15)
-        check("ring 3 nasluchuje na porcie TCP",
-              "nasluchuje na porcie 5555" in view)
+        view = q_srv.wait_for("listening on port 5555", timeout=15)
+        check("ring 3 listening on port TCP",
+              "listening on port 5555" in view)
 
         # The host's real stack connects (through QEMU's hostfwd)
         sock = socket.create_connection(("127.0.0.1", srv_port), timeout=15)
         sock.settimeout(15)
         greeting = sock.recv(200)
-        check("host polaczyl sie i dostal powitanie od ProtonOS-a",
-              b"ProtonOS TCP gotowy" in greeting)
+        check("the host connected and got a greeting from ProtonOS",
+              b"ProtonOS TCP ready" in greeting)
 
-        sock.sendall(b"czesc z hosta\n")
+        sock.sendall(b"hello z hosta\n")
         echoed = sock.recv(200)
-        check("dane z hosta wrocily odbite przez serwer w ring 3",
-              b"czesc z hosta" in echoed)
+        check("the host's data came back echoed by the ring 3 server",
+              b"hello z hosta" in echoed)
         sock.close()
 
-        seen = q_srv.wait_for("od klienta", timeout=15)
-        check("serwer zobaczyl dane klienta",
-              "od klienta: czesc z hosta" in seen)
+        seen = q_srv.wait_for("from the client", timeout=15)
+        check("the server saw the client's data",
+              "from the client: hello from the host" in seen)
     finally:
         q_srv.close()
 
     # --- The browser in a desktop window (network -> GUI -> disk) ---
-    print("--- pulpit: przegladarka (gweb) ---")
+    print("--- the desktop: the browser (gweb) ---")
     wdisk = tempfile.mktemp(suffix=".img")
     with open(wdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
@@ -61,7 +61,7 @@ def main():
         # The browser looks the page up by NAME, and what comes after it
         # reads back what the browser saved - so with no name server of
         # ours there is nothing here left to check.
-        print("POMINIETE (przegladarka): " + DNS_HINT)
+        print("SKIPPED (the browser): " + DNS_HINT)
         http_stop()
         os.unlink(wdisk)
         return summary()
@@ -112,13 +112,13 @@ def main():
                 shown = True
                 break
             time.sleep(0.4)
-        check("przegladarka rozwiazala nazwe, pobrala strone i "
-              "narysowala tekst", shown)
+        check("the browser resolved the name, fetched the page and "
+              "drew the text", shown)
 
         # --- scrolling and links ---
         for _ in range(40):              # a new address: a page with a link
             q_web.sendkey("backspace")
-        for ch in "protonos.test:%d/linki" % http_port:
+        for ch in "protonos.test:%d/links" % http_port:
             q_web.sendkey(Qemu.KEYNAMES.get(ch, ch))
         q_web.sendkey("ret")
         time.sleep(5)
@@ -134,7 +134,7 @@ def main():
         first_view = page_white()
         q_web.sendkey("pgdn")
         time.sleep(1.0)
-        check("PgDn przewija tresc w oknie", page_white() != first_view)
+        check("PgDn scrolls the content in the window", page_white() != first_view)
 
         found = []
         for _ in range(8):               # scroll to the end, where the link is
@@ -143,7 +143,7 @@ def main():
                 break
             q_web.sendkey("pgdn")
             time.sleep(0.8)
-        check("odnosnik wyrozniony kolorem w tekscie", bool(found))
+        check("the link stands out in colour in the text", bool(found))
 
         if found:
             # A link can occupy two lines - the centre of gravity of all the
@@ -169,12 +169,12 @@ def main():
     q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE)
     try:
         q_web2.wait_for("ProtonOS shell")
-        q_web2.type_line("cat strona.htm")
-        saved = q_web2.wait_for("Strona druga", timeout=10)
-        check("klikniety odnosnik pobral druga strone (widac ja na dysku)",
-              "Odnosnik zadzialal" in saved)
-        check("strona zapisana przez przegladarke przezyla restart",
-              "<html><body><h1>Strona druga</h1>" in saved)
+        q_web2.type_line("cat page.htm")
+        saved = q_web2.wait_for("The second page", timeout=10)
+        check("the clicked link fetched the second page (it shows on the disk)",
+              "The link worked" in saved)
+        check("the page the browser saved survived the restart",
+              "<html><body><h1>The second page</h1>" in saved)
     finally:
         q_web2.close()
         if os.path.exists(wdisk):

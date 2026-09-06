@@ -26,13 +26,13 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 # first anyway, so that they are not left alone at the end
 GROUPS = [
     "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
-    "net32", "http32", "mouse", "ush", "pfs", "dysk", "k64core", "k64proc",
-    "k64shell", "k64disk", "acpi", "usbkbd", "usbmysz", "ahci", "consoles", "swap",
+    "net32", "http32", "mouse", "ush", "pfs", "foreigndisk", "k64core", "k64proc",
+    "k64shell", "k64disk", "acpi", "usbkbd", "usbmouse", "ahci", "consoles", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
-    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "zrzut", "kolory", "kolko", "skala", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
+    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "screenshot", "colours", "wheel", "scale", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
-    "usbkbd64", "iso", "uefi", "protoboot", "fat", "instaluj", "ginstal", "caly", "dyski", "stick", "dzwiek", "aes", "wpa", "usbdysk", "bt", "usbsiec"
+    "usbkbd64", "iso", "uefi", "protoboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet"
 ]
 
 
@@ -50,8 +50,8 @@ def main():
 
     unknown = [g for g in selected if g not in GROUPS]
     if unknown:
-        print(f"Nieznane grupy: {', '.join(unknown)}")
-        print(f"Dostepne: {', '.join(GROUPS)}")
+        print(f"Unknown groups: {', '.join(unknown)}")
+        print(f"Available: {', '.join(GROUPS)}")
         return 2
 
     start = time.time()
@@ -77,26 +77,26 @@ def main():
             text = p.stdout.read().decode(errors="replace")
             results.append((g, p.returncode, time.time() - t0, text))
             print(f"\n=== {g} ({time.time() - t0:.0f} s) "
-                  f"{'OK' if p.returncode == 0 else 'BLEDY'} ===")
+                  f"{'OK' if p.returncode == 0 else 'ERRORS'} ===")
             print(text.rstrip(), flush=True)
         if running:
             time.sleep(0.5)
 
     ok = sum(t.count("\nOK:   ") + t.startswith("OK:   ")
              for _, _, _, t in results)
-    bad = sum(t.count("\nBLAD: ") + t.startswith("BLAD: ")
+    bad = sum(t.count("\nFAIL: ") + t.startswith("FAIL: ")
               for _, _, _, t in results)
 
     print("\n" + "=" * 60)
     for g, code, sec, _ in sorted(results, key=lambda w: -w[2]):
-        print(f"  {g:12} {sec:5.0f} s   {'OK' if code == 0 else 'BLEDY'}")
-    print(f"\nAsercji: {ok} przeszlo, {bad} nie przeszlo "
-          f"(lacznie {time.time() - start:.0f} s)")
+        print(f"  {g:12} {sec:5.0f} s   {'OK' if code == 0 else 'ERRORS'}")
+    print(f"\nAssertions: {ok} passed, {bad} failed "
+          f"({time.time() - start:.0f} s in all)")
 
     if bad or any(code for _, code, _, _ in results):
-        print("NIEPOWODZENIE")
+        print("FAILED")
         return 1
-    print("WSZYSTKIE TESTY PRZESZLY")
+    print("ALL TESTS PASSED")
     return 0
 
 

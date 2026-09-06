@@ -31,7 +31,7 @@ from ptest import check, summary, make_iso64, no64
 def main():
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -45,7 +45,7 @@ def main():
         fh.write(b"\0" * DISK_SIZE)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -60,91 +60,91 @@ def main():
             # and its two lowest bits say which ring the program
             # REALLY ran in. To say that, it had to enter the kernel
             # with a syscall instruction.
-            q23.wait_serial("Wywolania systemowe przez instrukcje",
+            q23.wait_serial("System calls through the syscall instruction",
                             timeout=20)
             r3 = q23.wait_serial("Program w ring 3:", timeout=25)
             m = re.search(r"Program w ring 3: (.+?), cs=(\w+), "
-                          r"pierscien (\d)", r3)
-            check("program wszedl do jadra instrukcja syscall",
-                  m is not None and m.group(1) == "odezwal sie")
-            check("procesor potwierdza pierscien 3"
+                          r"ring (\d)", r3)
+            check("the program entered the kernel with the syscall instruction",
+                  m is not None and m.group(1) == "answered")
+            check("the processor confirms ring 3"
                   + (f" (cs={m.group(2)})" if m else ""),
                   m is not None and m.group(3) == "3")
 
             # A program from a FILE: the kernel did not see it at
             # build time - it learns everything from the ELF header
             ini = q23.wait_serial("initrd:", timeout=25)
-            check("jadro 64-bitowe czyta initrd od loadera",
-                  re.search(r"initrd: \d+ plik", ini) is not None)
+            check("the 64-bit kernel reads the initrd from the loader",
+                  re.search(r"initrd: \d+ file", ini) is not None)
             ld = q23.wait_serial("z initrd:", timeout=25)
             m = re.search(r"Program 'hello64' z initrd: (\d+) B, "
-                          r"wejscie ([0-9a-f]+)", ld)
-            check("ELF64 z initrd zaladowany"
-                  + (f" ({m.group(1)} B, wejscie {m.group(2)})"
+                          r"entry ([0-9a-f]+)", ld)
+            check("the ELF64 from the initrd was loaded"
+                  + (f" ({m.group(1)} B, entry {m.group(2)})"
                      if m else ""),
                   m is not None and int(m.group(1)) > 0
                   # the entry point has to lie in user space, that
                   # is, from 1 GiB upwards
                   and int(m.group(2), 16) >= 0x40000000)
-            out64 = q23.wait_serial("[hello64] koncze", timeout=30)
-            check("program z pliku pisze przez wywolanie systemowe",
-                  "[hello64] czesc, jestem ELF-em 64-bitowym"
+            out64 = q23.wait_serial("[hello64] ending", timeout=30)
+            check("a program from a file writes through a system call",
+                  "[hello64] hello, I am a 64-bit ELF"
                   in out64)
-            check("program liczy i usypia sam siebie",
-                  "[hello64] licze: 1" in out64
-                  and "[hello64] licze: 3" in out64)
-            m = re.search(r"uplynelo tyknac: (\d+)", out64)
-            check("sen programu trwa tyle, ile ma"
-                  + (f" ({m.group(1)} tyknac)" if m else ""),
+            check("the program counts and puts itself to sleep",
+                  "[hello64] counting: 1" in out64
+                  and "[hello64] counting: 3" in out64)
+            m = re.search(r"ticks gone by: (\d+)", out64)
+            check("the program's sleep lasts as long as it should"
+                  + (f" ({m.group(1)} ticks)" if m else ""),
                   m is not None and 13 <= int(m.group(1)) <= 25)
             fin = q23.wait_serial("ELF64 z initrd:", timeout=25)
-            m = re.search(r"pierscien (\d), kod wyjscia (\d+)", fin)
-            check("program z pliku dzialal w ring 3",
+            m = re.search(r"ring (\d), exit code (\d+)", fin)
+            check("the program from the file ran in ring 3",
                   m is not None and m.group(1) == "3")
-            check("kod wyjscia programu dotarl do jadra"
+            check("the program's exit code reached the kernel"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and m.group(2) == "7")
 
             # Memory protection as seen from the program. The NX
             # bit had only been set so far - here a program really
             # tries to execute its data and dies.
-            nx = q23.wait_serial("Zakaz wykonywania:", timeout=30)
-            check("program probuje wykonac wlasne dane",
-                  "[nx64] i probuje ja wykonac" in nx)
-            check("procesor odmawia wykonania danych (bit NX)",
-                  "procesor odmowil wykonania danych" in nx)
+            nx = q23.wait_serial("Execute-disable:", timeout=30)
+            check("the program tries to execute its own data",
+                  "[nx64] and trying to execute it" in nx)
+            check("the processor refuses to execute data (the NX bit)",
+                  "the processor refused to execute data" in nx)
             # 0x15 = page present, access from ring 3, an
             # instruction fetch. The present bit alone would rule out
             # an ordinary missing mapping - this really was NX.
-            m = re.search(r"Zakaz wykonywania: .*err=([0-9a-f]+)", nx)
-            check("blad strony mowi: pobranie instrukcji z ring 3"
+            m = re.search(r"Execute-disable: .*err=([0-9a-f]+)", nx)
+            check("the page fault says: an instruction fetch from ring 3"
                   + (f" (err={m.group(1)})" if m else ""),
                   m is not None and int(m.group(1), 16) & 0x15 == 0x15)
-            check("winny program zostaje zabity, nie caly system",
-                  "zabite: Page Fault" in nx)
+            check("the guilty program is killed, not the whole system",
+                  "killed: Page Fault" in nx)
 
             # The other road to kernel memory: ask the kernel
             # itself for it. It has to refuse, because it checks the
             # pointer.
-            wild = q23.wait_serial("Pamiec jadra:", timeout=30)
-            check("jadro odrzuca wskaznik spoza programu",
-                  "nie nalezy do programu" in wild
-                  and "[wild64] jadro odmowilo" in wild)
-            check("pamiec jadra niedostepna z ring 3",
-                  "niedostepna dla pierscienia 3" in wild)
-            m = re.search(r"Pamiec jadra: .*err=([0-9a-f]+), "
-                          r"adres=([0-9a-f]+)", wild)
-            check("blad strony mowi: odczyt z ring 3 strony jadra"
-                  + (f" (err={m.group(1)}, adres={m.group(2)})"
+            wild = q23.wait_serial("Kernel memory:", timeout=30)
+            check("the kernel refuses a pointer from outside the program",
+                  "does not belong to the program" in wild
+                  and "[wild64] the kernel refused" in wild)
+            check("kernel memory is out of reach from ring 3",
+                  "out of reach of ring 3" in wild)
+            m = re.search(r"Kernel memory: .*err=([0-9a-f]+), "
+                          r"address=([0-9a-f]+)", wild)
+            check("the page fault says: a read from ring 3 of a kernel page"
+                  + (f" (err={m.group(1)}, address={m.group(2)})"
                      if m else ""),
                   m is not None and int(m.group(1), 16) == 0x05
                   and int(m.group(2), 16) == 0x100000)
 
             # And what this whole handling exists for
-            surv = q23.wait_serial("System przezyl", timeout=30)
-            m = re.search(r"licznik (\d+) -> (\d+)", surv)
-            check("system pracuje po smierci obu programow"
-                  + (f" (licznik {m.group(1)} -> {m.group(2)})"
+            surv = q23.wait_serial("The system survived", timeout=30)
+            m = re.search(r"counter (\d+) -> (\d+)", surv)
+            check("the system runs on after both programs die"
+                  + (f" (counter {m.group(1)} -> {m.group(2)})"
                      if m else ""),
                   m is not None
                   and int(m.group(2)) > int(m.group(1)))
@@ -152,30 +152,30 @@ def main():
             # Two processes at once, each in its own space. The
             # same file, the same virtual address, separate memory -
             # and that is exactly what has to be visible.
-            sep = q23.wait_serial("Pamiec po procesach", timeout=40)
-            addrs = re.findall(r"proces (\d): adres ([0-9a-f]+), "
-                               r"wpisalem (\d+)", sep)
-            check(f"dwa procesy ruszyly naraz ({len(addrs)})",
+            sep = q23.wait_serial("The processes' memory", timeout=40)
+            addrs = re.findall(r"process (\d): address ([0-9a-f]+), "
+                               r"I wrote (\d+)", sep)
+            check(f"two processes started at once ({len(addrs)})",
                   len(addrs) == 2)
-            check("oba pisza pod TEN SAM adres wirtualny"
+            check("both write to THE SAME virtual address"
                   + (f" ({addrs[0][1]})" if addrs else ""),
                   len(addrs) == 2 and addrs[0][1] == addrs[1][1])
-            check("kazdy wpisal co innego"
+            check("each wrote something different"
                   + (f" ({addrs[0][2]} i {addrs[1][2]})"
                      if len(addrs) == 2 else ""),
                   len(addrs) == 2 and addrs[0][2] != addrs[1][2])
-            kept = re.findall(r"proces \d: nadal (\d+) - moja "
-                              r"pamiec nietknieta", sep)
-            check(f"zaden nie zobaczyl pamieci drugiego "
+            kept = re.findall(r"process \d: still (\d+) - my "
+                              r"memory is untouched", sep)
+            check(f"neither saw the other's memory "
                   f"({len(kept)}/2)", len(kept) == 2)
-            check("obie kopie skonczyly sie bez bledu",
-                  "Dwa procesy naraz: 2 zakonczonych, 0 bledow"
+            check("both copies finished with no error",
+                  "Two processes at once: 2 finished, 0 errors"
                   in sep)
             # The space has to disappear along with the process,
             # otherwise every program that ran takes memory forever
-            m = re.search(r"Pamiec po procesach oddana "
-                          r"\((\d+) -> (\d+) ramek\)", sep)
-            check("pamiec po procesach wrocila do puli"
+            m = re.search(r"The processes' memory came back "
+                          r"\((\d+) -> (\d+) frames\)", sep)
+            check("the processes' memory came back to the pool"
                   + (f" ({m.group(1)} -> {m.group(2)})"
                      if m else ""),
                   m is not None
@@ -183,25 +183,25 @@ def main():
 
             # fork: the second process comes no longer from the
             # kernel's decision but from the program's own
-            fk = q23.wait_serial("Pamiec po fork-u", timeout=45)
-            m = re.search(r"rodzic: fork dal numer dziecka (\d+)", fk)
-            check("rodzic dostaje z fork-a numer dziecka"
+            fk = q23.wait_serial("The fork's memory", timeout=45)
+            m = re.search(r"parent: the fork gave the child number (\d+)", fk)
+            check("the parent gets the child's number out of the fork"
                   + (f" ({m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) > 0)
-            check("dziecko dostaje z fork-a zero",
-                  "dziecko: fork dal 0" in fk)
+            check("the child gets zero out of the fork",
+                  "child: the fork gave 0" in fk)
             # Both return to the same place with the same state,
             # but their memory is already separate
-            check("dziecko pisze po swojej kopii (200)",
-                  "moja wartosc to 200" in fk)
-            check("zapis dziecka nie dosiega rodzica (nadal 100)",
-                  "rodzic: nadal 100 - dziecko dostalo kopie" in fk)
-            check("obie galezie skonczyly sie bez bledu",
-                  "Proces powielil sie sam: 2 zakonczonych, "
-                  "0 bledow" in fk)
-            m = re.search(r"Pamiec po fork-u oddana "
-                          r"\((\d+) -> (\d+) ramek\)", fk)
-            check("kopia pamieci wrocila do puli"
+            check("the child writes over its own copy (200)",
+                  "my value is 200" in fk)
+            check("the child's write does not reach the parent (still 100)",
+                  "parent: still 100 - the child got a copy" in fk)
+            check("both branches finished with no error",
+                  "A process copied itself: 2 finished, "
+                  "0 errors" in fk)
+            m = re.search(r"The fork's memory came back "
+                          r"\((\d+) -> (\d+) frames\)", fk)
+            check("the copied memory came back to the pool"
                   + (f" ({m.group(1)} -> {m.group(2)})"
                      if m else ""),
                   m is not None
@@ -210,25 +210,25 @@ def main():
             # fork + exec + wait: the classic three that are
             # enough for every shell in the world
             sp = q23.wait_serial("fork + exec + wait:", timeout=60)
-            check("proces uruchamia INNY program przez exec",
-                  "powielam sie i uruchamiam w dziecku 'hello64'"
+            check("a process starts ANOTHER program through exec",
+                  "copying myself and running 'hello64' in the child"
                   in sp
-                  and "[hello64] czesc, jestem ELF-em" in sp)
-            m = re.search(r"doczekalem dziecka (\d+), "
-                          r"kod wyjscia (\d+)", sp)
-            check("rodzic doczekal wlasnego dziecka"
+                  and "[hello64] hello, I am a" in sp)
+            m = re.search(r"I waited out the child (\d+), "
+                          r"exit code (\d+)", sp)
+            check("the parent waited out its own child"
                   + (f" (nr {m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) > 0)
             # hello64 ends with a seven - that seven is the proof
             # that it waited for THAT child, not for any finished task
-            check("kod wyjscia doszedl do rodzica przez wait"
+            check("the exit code reached the parent through wait"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and m.group(2) == "7")
-            check("wait bez dzieci mowi, ze nie ma na co czekac",
-                  "BLAD: wait wymyslil sobie dziecko" not in sp)
-            check("program sam potwierdza cala trojke",
-                  "[spawn64] fork + exec + wait dzialaja" in sp)
-            check("jadro potwierdza werdykt programu",
+            check("wait with no children says there is nothing to wait for",
+                  "ERROR: wait invented a child" not in sp)
+            check("the program confirms all three itself",
+                  "[spawn64] fork + exec + wait work" in sp)
+            check("the kernel confirms the program's verdict",
                   "fork + exec + wait: 2 zakonczonych, werdykt 0"
                   in sp)
 
@@ -238,15 +238,15 @@ def main():
             # them plus the tables. With shared pages only the tables
             # are left, and only what somebody really wrote gets
             # copied.
-            cow = q23.wait_serial("Kopiowanie przy zapisie",
+            cow = q23.wait_serial("Copy on write",
                                   timeout=30)
-            m = re.search(r"fork wzial (\d+) ramek, "
-                          r"rozdzielono (\d+) stron", cow)
-            check("fork nie kopiuje pamieci programu"
-                  + (f" ({m.group(1)} ramek - same tablice)"
+            m = re.search(r"the fork took (\d+) frames, "
+                          r"(\d+) pages were split", cow)
+            check("the fork does not copy the program's memory"
+                  + (f" ({m.group(1)} frames - the tables alone)"
                      if m else ""),
                   m is not None and int(m.group(1)) <= 6)
-            check("rozdzielone tylko strony naprawde zapisane"
+            check("only the pages really written were split"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and 1 <= int(m.group(2)) <= 6)
         finally:

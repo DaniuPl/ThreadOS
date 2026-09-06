@@ -38,7 +38,7 @@ WX, WY = 94, 54
 CX, CY = WX + 1, WY + 11
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
-WORD = "przeniesione"
+WORD = "moved"
 
 
 def read_rows(q, ox, oy, cols, rows, pitch=ROW_H, per_row=False):
@@ -93,11 +93,11 @@ def main():
     slog = tempfile.mktemp(suffix=".log")
     geom = dict(ox=CX + PAD, oy=CY + PAD, cols=COLS, rows=ROWS)
 
-    print("--- schowek miedzy oknami ---")
+    print("--- the clipboard between windows ---")
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- copy: in the terminal ---------------------------------
@@ -113,7 +113,7 @@ def main():
             typed(q, WORD)
             time.sleep(0.5)
             rows = read_rows(q, **geom)
-            check("tekst jest w linii terminala",
+            check("the text is on the terminal's line",
                   any(WORD in r for r in rows))
             q.sendkey("ctrl-insert")       # copy
             time.sleep(0.5)
@@ -125,11 +125,11 @@ def main():
                 time.sleep(0.08)
             time.sleep(0.5)
             rows = read_rows(q, **geom)
-            check("linia terminala jest znowu pusta",
+            check("the terminal's line is empty again",
                   not any(WORD in r for r in rows))
 
             # --- paste: in another window ------------------------------
-            q.mouse_goto(24, 272)          # the 'Ustaw' icon
+            q.mouse_goto(24, 272)          # the 'Config' icon
             q.mouse_click()
             time.sleep(3)
             q.mouse_goto(600, 380)
@@ -151,7 +151,7 @@ def main():
             # THERE, not from the left edge of the window
             vals = read_rows(q, ox=SX + 100, oy=SY + 22, cols=30, rows=4,
                              pitch=14, per_row=True)
-            check("tekst z terminala pojawil sie w innym oknie ('%s')"
+            check("the text from the terminal appeared in another window ('%s')"
                   % vals[0], WORD in vals[0])
 
             # --- and the kernel keeps it -------------------------------
@@ -172,7 +172,7 @@ def main():
             time.sleep(1.5)
             vals = read_rows(q, ox=SX + 100, oy=SY + 22, cols=30, rows=4,
                              pitch=14, per_row=True)
-            check("schowek przezyl zamkniecie okna, z ktorego pochodzil "
+            check("the clipboard survived the closing of the window it came from "
                   "('%s')" % vals[1], WORD in vals[1])
         finally:
             q.close()
@@ -182,7 +182,7 @@ def main():
                 os.unlink(f)
 
     # --- and the same clipboard on the text console -------------------
-    print("--- ten sam schowek na konsoli ---")
+    print("--- the same clipboard on the console ---")
     slog2 = tempfile.mktemp(suffix=".log")
     try:
         q2 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog2)
@@ -203,11 +203,11 @@ def main():
             q2.sendkey("shift-insert")
             time.sleep(1)
             screen = q2.screen()
-            check("wklejona linia pojawila sie na DRUGIEJ konsoli",
+            check("the pasted line appeared on the SECOND console",
                   "echo " + WORD in screen)
             q2.sendkey("ret")
             out = q2.wait_for(WORD, timeout=20)
-            check("i wykonala sie jak wpisana z klawiatury",
+            check("and it ran as if it had been typed",
                   WORD in out)
         finally:
             q2.close()

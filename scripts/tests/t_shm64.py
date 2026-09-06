@@ -28,18 +28,18 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- pamiec wspoldzielona (jadro 64-bitowe) ---")
+    print("--- shared memory (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -47,31 +47,31 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            out = q.command("run shmwrite64", "koniec, kod wyjscia",
+            out = q.command("run shmwrite64", "done, exit code",
                               timeout=40)
 
-            check("pisarz dostal region pamieci wspoldzielonej",
-                  "[shmwrite64] zapisalem 12345" in out)
-            check("czytelnik - osobny proces - widzi te sama wartosc",
-                  "[shmread64] wartosc=12345" in out)
-            check("czytelnik potwierdza, ze to ta sama pamiec",
-                  "dwa procesy, jedna pamiec" in out)
-            check("odpowiedz czytelnika wraca do pisarza ta sama droga",
-                  "czytelnik odpisal przez te sama pamiec" in out)
-            check("oba procesy skonczyly sie bez bledu",
-                  "koniec, kod wyjscia 0" in out and "ZLE" not in out)
+            check("the writer got a region of shared memory",
+                  "[shmwrite64] I wrote 12345" in out)
+            check("the reader - a separate process - sees the same value",
+                  "[shmread64] value=12345" in out)
+            check("the reader confirms it is the same memory",
+                  "two processes, one memory" in out)
+            check("the reader's answer comes back to the writer the same way",
+                  "the reader answered through the same memory" in out)
+            check("both processes finished with no error",
+                  "done, exit code 0" in out and "WRONG" not in out)
 
             # The region lies in the mapping area (from 0x50000000
             # upwards), not in the heap or on the stack - and that can be
             # seen from the address
-            adresy = re.findall(r"region pod adresem (\d+)", out)
-            check("oba procesy dostaly adres z obszaru mapowan",
+            adresy = re.findall(r"the region at address (\d+)", out)
+            check("both processes got an address from the mapping area",
                   len(adresy) == 2 and
                   all(0x50000000 <= int(a) < 0x60000000 for a in adresy))
             # The writer mapped a region on the side earlier, so it sees
             # the shared one higher up than the reader does. The same
             # bytes at two different addresses - that is the point.
-            check("kazdy widzi te sama pamiec pod SWOIM adresem",
+            check("each sees the same memory at ITS OWN address",
                   len(adresy) == 2 and adresy[0] != adresy[1])
         finally:
             q.close()

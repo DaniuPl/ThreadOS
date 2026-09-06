@@ -35,109 +35,109 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         q.wait_for("ProtonOS shell", timeout=40)
-        q.wait_for("[siec] DHCP", timeout=30)
+        q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
         http_port, http_stop = start_http_server()
         try:
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /" % http_port)
-            page = q.wait_for("tresc ", timeout=30)
-            check("TCP: handshake i odpowiedz HTTP 200",
+            page = q.wait_for("content ", timeout=30)
+            check("TCP: a handshake and an HTTP 200 answer",
                   "[httpget] HTTP 200" in page)
-            check("TCP: tresc strony dotarla w calosci",
-                  "ProtonOS TCP dziala" in page)
-            check("httpget zakonczyl sie bez bledu",
-                  "proces 'httpget' zakonczyl sie (kod 0)" in page)
+            check("TCP: the page's content arrived whole",
+                  "ProtonOS TCP works" in page)
+            check("httpget ended without an error",
+                  "process \'httpget\' has ended (code 0)" in page)
 
             # Network -> disk: an HTTP body written to PFS and read back from it
             q.type_line("clear")
-            q.type_line("run httpget 10.0.2.2 %d / strona.htm" % http_port)
-            q.wait_for("tresc ", timeout=30)
-            q.type_line("cat strona.htm")
-            saved = q.wait_for("ProtonOS TCP dziala", timeout=10)
-            check("tresc z sieci zapisana na PFS i odczytana z dysku",
-                  "<html>ProtonOS TCP dziala</html>" in saved)
-            check("do pliku poszla sama tresc, bez naglowkow HTTP",
+            q.type_line("run httpget 10.0.2.2 %d / page.htm" % http_port)
+            q.wait_for("content ", timeout=30)
+            q.type_line("cat page.htm")
+            saved = q.wait_for("ProtonOS TCP works", timeout=10)
+            check("content from the network written to the PFS and read off the disk",
+                  "<html>ProtonOS TCP works</html>" in saved)
+            check("only the content went into the file, without the HTTP headers",
                   "Content-Length" not in saved)
 
             # PFS3: a file well above the old limit of 16 KiB per file
             q.type_line("clear")
-            q.type_line("run httpget 10.0.2.2 %d /duza duza.htm" % http_port)
-            big = q.wait_for("tresc ", timeout=90)
+            q.type_line("run httpget 10.0.2.2 %d /big big.htm" % http_port)
+            big = q.wait_for("content ", timeout=90)
             # httpget gives the length of the body alone (without the headers)
-            got = re.search(r"tresc (\d+) B", big)
-            check("duza strona pobrana w calosci (%d B tresci)"
+            got = re.search(r"content (\d+) B", big)
+            check("a big page fetched whole (%d B of content)"
                   % len(BIG_PAGE),
                   got is not None and int(got.group(1)) == len(BIG_PAGE))
             q.type_line("fls")
-            listing = q.wait_for("duza.htm", timeout=10)
-            check("plik ponad stary limit 16 KiB zapisany na PFS",
-                  "duza.htm  (%d B)" % len(BIG_PAGE) in listing)
+            listing = q.wait_for("big.htm", timeout=10)
+            check("a file past the old 16 KiB limit written to the PFS",
+                  "big.htm  (%d B)" % len(BIG_PAGE) in listing)
             q.type_line("df")
-            usage = q.wait_for("dysk: ", timeout=10)
-            check("df pokazuje zajetosc dysku w blokach",
-                  "bloki po 1024 B" in usage and "zajete" in usage)
+            usage = q.wait_for("disk: ", timeout=10)
+            check("df shows the disk usage in blocks",
+                  "blocks of 1024 B" in usage and "used" in usage)
 
             # A file above the old ceiling of 268 KiB: the data reach the
             # doubly indirect block, and then we read them back
             q.type_line("clear")
-            q.type_line("run httpget 10.0.2.2 %d /ogromna ogromna.htm"
+            q.type_line("run httpget 10.0.2.2 %d /huge huge.htm"
                         % http_port)
-            huge = q.wait_for("tresc ", timeout=180)
-            check("plik ponad 268 KiB pobrany w calosci (%d B)"
+            huge = q.wait_for("content ", timeout=180)
+            check("a file past 268 KiB fetched whole (%d B)"
                   % len(HUGE_PAGE),
-                  "tresc %d B" % len(HUGE_PAGE) in huge)
+                  "content %d B" % len(HUGE_PAGE) in huge)
 
             q.type_line("fls")
-            listing = q.wait_for("ogromna.htm", timeout=15)
-            check("zapisany na PFS z pelnym rozmiarem",
-                  "ogromna.htm  (%d B)" % len(HUGE_PAGE) in listing)
+            listing = q.wait_for("huge.htm", timeout=15)
+            check("written to the PFS at its full size",
+                  "huge.htm  (%d B)" % len(HUGE_PAGE) in listing)
 
             q.type_line("run sh")
             q.wait_for("ush:/", timeout=20)
-            q.type_line("cat ogromna.htm | wc")
-            back = q.wait_for("bajtow=", timeout=180)
-            check("odczyt przez blok podwojnie posredni oddaje te same dane",
-                  "wierszy=6500 bajtow=%d" % len(HUGE_PAGE) in back)
+            q.type_line("cat huge.htm | wc")
+            back = q.wait_for("bytes=", timeout=180)
+            check("reading through a doubly indirect block gives the same data back",
+                  "lines=6500 bytes=%d" % len(HUGE_PAGE) in back)
             q.type_line("exit")
             q.wait_for("ush: pa!", timeout=20)
 
             # HTTP/1.1: a 302 redirect and a body in pieces (chunked) - that
             # is how most real servers answer
             q.type_line("clear")
-            q.type_line("run httpget 10.0.2.2 %d /stara" % http_port)
-            hop = q.wait_for("tresc ", timeout=30)
-            check("klient idzie za przekierowaniem 302",
-                  "przekierowanie -> /kawalki" in hop)
-            check("tresc w kawalkach (chunked) zlozona poprawnie",
-                  "HTTP 200 (chunked), tresc %d B" % len(PAGE) in hop)
-            check("tresc po zlozeniu jest cala",
-                  "ProtonOS TCP dziala" in hop)
+            q.type_line("run httpget 10.0.2.2 %d /old" % http_port)
+            hop = q.wait_for("content ", timeout=30)
+            check("the client follows a 302 redirect",
+                  "redirect -> /chunks" in hop)
+            check("content in chunks was put together correctly",
+                  "HTTP 200 (chunked), content %d B" % len(PAGE) in hop)
+            check("the content is whole once put together",
+                  "ProtonOS TCP works" in hop)
         finally:
             http_stop()
 
         q.type_line("netstat")
-        check("netstat: po zamknieciu nie ma wiszacych polaczen",
-              "brak polaczen TCP" in q.wait_for("polacze", timeout=10))
+        check("netstat: after the close no connections hang about",
+              "no TCP connections" in q.wait_for("connections", timeout=10))
     finally:
         q.close()
 
     # The large file is to survive a restart with its full size: its inode
     # reaches into an indirect block, and the allocation bitmap comes back
     # from the disk
-    print("--- drugi boot (ten sam dysk) ---")
+    print("--- a second boot (the same disk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
         q2.wait_for("ProtonOS shell", timeout=40)
         q2.type_line("fls")
-        listing = q2.wait_for("duza.htm", timeout=10)
-        check("duzy plik (>100 KiB) przetrwal restart z pelnym rozmiarem",
-              "duza.htm  (%d B)" % len(BIG_PAGE) in listing)
+        listing = q2.wait_for("big.htm", timeout=10)
+        check("a big file (>100 KiB) survived the restart at its full size",
+              "big.htm  (%d B)" % len(BIG_PAGE) in listing)
         q2.type_line("df")
-        usage = q2.wait_for("dysk: ", timeout=10)
-        check("zajetosc dysku odtworzona z bitmapy po restarcie",
-              "zajete" in usage and "zajete 0 KiB" not in usage)
+        usage = q2.wait_for("disk: ", timeout=10)
+        check("the disk usage was rebuilt from the bitmap after the restart",
+              "used" in usage and "used 0 KiB" not in usage)
     finally:
         q2.close()
         if os.path.exists(disk):

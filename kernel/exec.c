@@ -578,10 +578,10 @@ int process_demand_page(uint32_t addr)
         memset(dst, 0, PAGE_SIZE);
         for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
                              remaining > b * FS_BLOCK; b++) {
-            uint32_t blok = task_mmap_block(addr, first + b);
-            if (!blok)
+            uint32_t block = task_mmap_block(addr, first + b);
+            if (!block)
                 break;
-            blk_read(fs_block_lba(blok), FS_BLOCK / 512, dst + b * FS_BLOCK);
+            blk_read(fs_block_lba(block), FS_BLOCK / 512, dst + b * FS_BLOCK);
         }
         mmap_pages++;
         return 1;
@@ -848,10 +848,10 @@ uint32_t process_msync(void)
                    somebody else */
                 if (offset + b * FS_BLOCK >= size)
                     break;
-                uint32_t blok = task_mmap_block(va, offset / FS_BLOCK + b);
-                if (!blok)
+                uint32_t block = task_mmap_block(va, offset / FS_BLOCK + b);
+                if (!block)
                     break;
-                blk_write(fs_block_lba(blok), FS_BLOCK / 512,
+                blk_write(fs_block_lba(block), FS_BLOCK / 512,
                           src + b * FS_BLOCK);
             }
             paging_file_clean(dir, va);

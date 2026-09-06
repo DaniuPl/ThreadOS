@@ -37,29 +37,29 @@ from ptest import check, summary, make_iso64, no64
 
 
 def verify(out, suffix, ncores):
-    check("proba doszla do konca" + suffix, "Liczylo rdzeni:" in out)
-    if "Liczylo rdzeni:" not in out:
+    check("the attempt ran to the end" + suffix, "Cores that counted:" in out)
+    if "Cores that counted:" not in out:
         return
 
-    m = re.search(r"Przydzialow: (\d+), nieudanych: (\d+)", out)
-    check("wszystkie przydzialy sie udaly" + suffix,
+    m = re.search(r"Allocations: (\d+), failed: (\d+)", out)
+    check("every allocation worked" + suffix,
           m is not None and int(m.group(1)) == 64 * 48 and
           int(m.group(2)) == 0)
 
     # The heart of it: a frame handed out twice has two writers
-    check("kazdy przydzial trafil do jednego rdzenia" + suffix,
-          "Wzorzec: zgadza sie (bledow 0)" in out)
+    check("every allocation went to exactly one core" + suffix,
+          "Pattern: matches (errors 0)" in out)
 
-    ram = re.search(r"Ramki: (\d+) -> (\d+), sterta: (\d+) -> (\d+) B", out)
-    check("mapa ramek i sterta wrocily do stanu sprzed proby" + suffix,
+    ram = re.search(r"Frames: (\d+) -> (\d+), heap: (\d+) -> (\d+) B", out)
+    check("the frame map and the heap came back to what they were before" + suffix,
           ram is not None and ram.group(1) == ram.group(2) and
           ram.group(3) == ram.group(4))
-    check("jadro samo mowi, ze nic nie wycieklo" + suffix,
-          "Nic nie wycieklo: tak" in out)
+    check("the kernel says itself that nothing leaked" + suffix,
+          "Nothing leaked: yes" in out)
 
-    check("maszyna widzi %d %s%s"
-          % (ncores, "rdzen" if ncores == 1 else "rdzenie", suffix),
-          re.search(r"Rdzeni: %d \(obudzonych %d\)" % (ncores, ncores - 1),
+    check("the machine sees %d %s%s"
+          % (ncores, "core" if ncores == 1 else "cores", suffix),
+          re.search(r"Cores: %d \(woken %d\)" % (ncores, ncores - 1),
                     out) is not None)
 
     # How many cores really took work. We do not demand that EVERY one
@@ -67,31 +67,31 @@ def verify(out, suffix, ncores):
     # time and is sometimes preempted by the timer, while the secondary
     # ones spin in a tight loop and take the job apart before it can
     # reach for it. That is a race, and races are not assertions.
-    share = [int(v) for v in re.findall(r"rdzen\d+=(\d+)", out)]
-    check(("caly zestaw policzyl jedyny rdzen (%s)%s" if ncores == 1
-           else "prace wzielo wiecej niz jeden rdzen (%s)%s")
+    share = [int(v) for v in re.findall(r"core\d+=(\d+)", out)]
+    check(("the only core counted the whole set (%s)%s" if ncores == 1
+           else "more than one core took the work (%s)%s")
           % (share, suffix),
           len(share) == ncores and
           (ncores == 1 or sum(1 for v in share if v) >= 2))
 
     # This is the right question to ask about concurrency: not "did
     # anything get computed", but was EVERY ITEM computed EXACTLY ONCE
-    check("wszystkie 64 jednostki policzone dokladnie raz" + suffix,
+    check("all 64 units were counted exactly once" + suffix,
           sum(share) == 64)
 
 
 def main():
-    print("--- zamki w jadrze 64-bitowym (cztery rdzenie) ---")
+    print("--- the locks in the 64-bit kernel (four cores) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
@@ -99,15 +99,15 @@ def main():
                      qemu="qemu-system-x86_64")
             try:
                 q.wait_serial("proton64>", timeout=90)
-                out = q.command("smpmem", "Liczylo rdzeni", timeout=120)
+                out = q.command("smpmem", "Cores that counted", timeout=120)
                 verify(out, "", 4)
 
                 # The system is to live on after all this: if the locks
                 # left a broken heap behind them, the next program would
                 # have nothing to come into being from
-                after_run = q.command("run hello64", "kod wyjscia", timeout=60)
-                check("jadro dziala dalej po probie",
-                      "czesc, jestem ELF-em" in after_run)
+                after_run = q.command("run hello64", "exit code", timeout=60)
+                check("the kernel still runs after the attempt",
+                      "hello, I am a" in after_run)
             finally:
                 q.close()
         finally:
@@ -116,17 +116,17 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    print("--- zamki w jadrze 32-bitowym (cztery rdzenie) ---")
+    print("--- the locks in the 32-bit kernel (four cores) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
-            out = q3.command("smpmem", "Liczylo rdzeni", timeout=120)
+            out = q3.command("smpmem", "Cores that counted", timeout=120)
             verify(out, " (32-bit)", 4)
-            after_run = q3.command("run hello", "zakonczyl sie", timeout=60)
-            check("jadro dziala dalej po probie (32-bit)",
-                  "zakonczyl sie (kod 0)" in after_run)
+            after_run = q3.command("run hello", "has ended", timeout=60)
+            check("the kernel still runs after the attempt (32-bit)",
+                  "has ended (code 0)" in after_run)
         finally:
             q3.close()
     finally:
@@ -136,14 +136,14 @@ def main():
     # --- A single-core machine ---
     # The same code, one core: the lock is to be harmless where there is
     # nobody to compete with
-    print("--- ta sama proba na jednym rdzeniu ---")
+    print("--- the same attempt on one core ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
             q1.wait_for("ProtonOS shell", timeout=40)
-            out = q1.command("smpmem", "Liczylo rdzeni", timeout=120)
-            verify(out, " (jeden rdzen)", 1)
+            out = q1.command("smpmem", "Cores that counted", timeout=120)
+            verify(out, " (one core)", 1)
         finally:
             q1.close()
     finally:

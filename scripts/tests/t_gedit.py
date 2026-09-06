@@ -114,7 +114,7 @@ def is_bar(px):
 
 # The file manager: names at content (6,18), a row every ten pixels,
 # and the two buttons held against the right-hand edge of a 320-wide
-# window ("Otworz" at 212, "Usun" at 272).
+# window ("Open" at 212, "Remove" at 272).
 FM_NAME_X = 6
 FM_ROW_Y0 = 18
 FM_OPEN_X = 320 - 48 - 56 - 4
@@ -218,11 +218,11 @@ def sixty_four():
     calls it makes - a window, keys, and a file written to the disk -
     are all there in long mode too."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE (64): brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED (64): no 64-bit image (make kernel64)")
         return
     if shutil.which("grub-mkrescue") is None or \
        shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE (64): brak grub-mkrescue lub qemu-system-x86_64")
+        print("SKIPPED (64): no grub-mkrescue or qemu-system-x86_64")
         return
 
     d = tempfile.mkdtemp()
@@ -247,7 +247,7 @@ def sixty_four():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return
 
@@ -255,32 +255,32 @@ def sixty_four():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
             q.mouse_home()
 
-            q.mouse_goto(24, 312)              # the "Edytor" icon
+            q.mouse_goto(24, 312)              # the "Editor" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(CX + 200, CY + 100)
             q.mouse_click()                    # the focus, into the page
             time.sleep(1)
 
-            q.type_line("dwa jadra", enter=False)
+            q.type_line("two kernels", enter=False)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("(64) edytor pisze na kartce ('%s')" % row_text(at, 0),
-                  row_text(at, 0) == "dwa jadra")
+            check("(64) the editor writes on the page ('%s')" % row_text(at, 0),
+                  row_text(at, 0) == "two kernels")
 
             # The same refusal, through the long-mode syscall of its own
             q.sendkey("alt-f4")
             time.sleep(3)
             w, h, at = q.screen_raw()
-            check("(64) Alt+F4 przy niezapisanym pliku pyta, a nie zamyka "
+            check("(64) Alt+F4 on an unsaved file asks instead of closing "
                   "('%s')" % status_text(at),
-                  "Niezapisane zmiany" in status_text(at) and
-                  row_text(at, 0) == "dwa jadra")
+                  "Unsaved changes" in status_text(at) and
+                  row_text(at, 0) == "two kernels")
 
             q.sendkey("ctrl-s")
             time.sleep(1)
@@ -289,7 +289,7 @@ def sixty_four():
             q.sendkey("ret")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("(64) i zapisuje pod nazwa ('%s')" % status_text(at),
+            check("(64) and it saves under a name ('%s')" % status_text(at),
                   "long" in status_text(at) and "long*" not in status_text(at))
 
             # Checked by a program that is not the one that wrote the
@@ -311,14 +311,14 @@ def sixty_four():
             time.sleep(1)
             w, h, at = q.screen_raw()
             rows = term_rows(at)
-            check("(64) inny program czyta z dysku to, co edytor zapisal",
-                  any("dwa jadra" in r for r in rows))
+            check("(64) another program reads off the disk what the editor wrote",
+                  any("two kernels" in r for r in rows))
 
             # And the file manager hands a file to the editor here too -
             # in long mode that is a fork and an exec from a program
             # drawing in a window, which is its own piece of code
             fx, fy = 118, 78              # the next slot of the cascade
-            q.mouse_goto(24, 112)         # the "Pliki" icon
+            q.mouse_goto(24, 112)         # the "Files" icon
             time.sleep(0.6)               # the pointer first, the button after
             q.mouse_click()
             time.sleep(5)
@@ -330,23 +330,23 @@ def sixty_four():
             for i, name in enumerate(listed):
                 if name == "long":
                     row = i
-            check("(64) menedzer plikow widzi plik z edytora (%s)"
+            check("(64) the file manager sees the editor's file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
                 q.mouse_goto(fx + 1 + 20, fy + 11 + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + 11 + 5)  # "Otworz"
+                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + 11 + 5)  # "Open"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(5)
                 q.mouse_goto(600, 430)
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
-                check("(64) 'Otworz' otwiera plik w edytorze ('%s')"
+                check("(64) 'Open' opens the file in the editor ('%s')"
                       % row_text(at, 0, wx=fx + 12, wy=fy + 12),
-                      row_text(at, 0, wx=fx + 12, wy=fy + 12) == "dwa jadra")
+                      row_text(at, 0, wx=fx + 12, wy=fy + 12) == "two kernels")
 
                 # And a new name for it - long mode has its own number
                 # for that call and its own handler behind it.
@@ -368,7 +368,7 @@ def sixty_four():
                 time.sleep(0.5)
                 q.mouse_click()                # the keys into the manager
                 time.sleep(1)
-                q.type_line("dlugi", enter=False)
+                q.type_line("long", enter=False)
                 time.sleep(0.5)
                 q.sendkey("ret")
                 time.sleep(2.5)
@@ -376,9 +376,9 @@ def sixty_four():
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
                 listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
-                check("(64) 'Nazwa' zmienia nazwe pliku (%s)"
+                check("(64) 'Rename' changes the file's name (%s)"
                       % ", ".join(n for n in listed if n),
-                      "dlugi" in listed and "long" not in listed)
+                      "long" in listed and "long" not in listed)
         finally:
             q.close()
     finally:
@@ -397,49 +397,49 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 312)              # the "Edytor" icon
+            q.mouse_goto(24, 312)              # the "Editor" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("edytor otworzyl sie i jest bialy jak kartka",
+            check("the editor opened and is as white as a page",
                   is_page(at(CX + 200, CY + 100)))
-            check("a na dole ma pasek stanu",
+            check("and it has a status bar at the bottom",
                   is_bar(at(CX + 200, CY + CH - 5)))
 
             # --- typing -------------------------------------------------
-            q.type_line("Ala ma kota", enter=False)
+            q.type_line("The quick brown fox", enter=False)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("to, co wpisano, jest na kartce ('%s')" % row_text(at, 0),
-                  row_text(at, 0) == "Ala ma kota")
+            check("what was typed is on the page ('%s')" % row_text(at, 0),
+                  row_text(at, 0) == "The quick brown fox")
             st = status_text(at)
-            check("pasek stanu mowi, ze plik nie ma nazwy i sie zmienil "
-                  "('%s')" % st, "(bez nazwy)*" in st)
-            check("i gdzie stoi kursor (wiersz 1, kolumna 12)",
+            check("the status bar says the file has no name and has changed "
+                  "('%s')" % st, "(no name)*" in st)
+            check("and where the cursor stands (line 1, column 12)",
                   "W1 K12" in st)
 
             q.sendkey("ret")
             q.type_line("i psa", enter=False)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Enter zaczyna nowy wiersz",
-                  row_text(at, 0) == "Ala ma kota" and
+            check("Enter starts a new line",
+                  row_text(at, 0) == "The quick brown fox" and
                   row_text(at, 1) == "i psa")
-            check("a pasek stanu liczy wiersze", "W2 K6" in status_text(at))
+            check("and the status bar counts the lines", "W2 K6" in status_text(at))
 
             # --- Ctrl+F: finding, and going round the end ---------------
             q.sendkey("ctrl-f")
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("Ctrl+F pyta, czego szukac ('%s')" % status_text(at),
-                  "Szukaj:" in status_text(at))
-            q.type_line("kota", enter=False)
+            check("Ctrl+F asks what to look for ('%s')" % status_text(at),
+                  "Find:" in status_text(at))
+            q.type_line("fox", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
             time.sleep(1.5)
@@ -447,28 +447,28 @@ def main():
             st = status_text(at)
             # The caret was on line two, past the word - so finding it
             # at all means the search went round the end of the file
-            check("znajduje slowo LEZACE WYZEJ niz kursor, czyli okraza "
-                  "koniec pliku ('%s')" % st,
-                  "znaleziono w wierszu 1" in st and "W1 K8" in st)
+            check("it finds a word ABOVE the cursor, so it wraps around "
+                  "the end of the file ('%s')" % st,
+                  "found on line 1" in st and "W1 K8" in st)
 
             q.sendkey("ctrl-f")
             time.sleep(0.8)
             q.sendkey("ret")                   # nothing typed = the same again
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Enter przy pustym pytaniu powtarza ostatnie szukanie "
+            check("Enter on an empty question repeats the last search "
                   "('%s')" % status_text(at),
-                  "znaleziono" in status_text(at))
+                  "found" in status_text(at))
 
             q.sendkey("ctrl-f")
             time.sleep(0.8)
-            q.type_line("czegotuniema", enter=False)
+            q.type_line("nosuchthing", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("a czego nie ma, tego nie znajduje ('%s')"
-                  % status_text(at), "nie znaleziono" in status_text(at))
+            check("and what is not there it does not find ('%s')"
+                  % status_text(at), "not found" in status_text(at))
 
             # --- Ctrl+Z: taking it back ---------------------------------
             q.sendkey("down")
@@ -477,9 +477,9 @@ def main():
             q.sendkey("ctrl-z")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Ctrl+Z cofa ostatni znak ('%s')" % row_text(at, 1),
+            check("Ctrl+Z undoes the last character ('%s')" % row_text(at, 1),
                   row_text(at, 1) == "i ps")
-            check("i mowi, ze cofnal", "cofniete" in status_text(at))
+            check("and it says it undid something", "undone" in status_text(at))
 
             q.sendkey("ctrl-z")
             q.sendkey("ctrl-z")
@@ -487,35 +487,35 @@ def main():
             w, h, at = q.screen_raw()
             # Three characters back the line reads "i " - the space is
             # still there, and the screen shows it as nothing
-            check("i cofa dalej, po jednym ('%s')" % row_text(at, 1),
+            check("and it keeps undoing, one at a time ('%s')" % row_text(at, 1),
                   row_text(at, 1) == "i")
 
             # Back to what it was - the checks below expect it
             q.type_line("psa", enter=False)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("a to, co dopisano po cofnieciu, jest na swoim miejscu",
+            check("and what was typed after the undo is in its place",
                   row_text(at, 1) == "i psa")
 
             # --- saving -------------------------------------------------
             q.sendkey("ctrl-s")
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("Ctrl+S pyta o nazwe w pasku stanu",
-                  "Zapisz jako:" in status_text(at))
-            q.type_line("notatka", enter=False)
+            check("Ctrl+S asks for a name in the status bar",
+                  "Save as:" in status_text(at))
+            q.type_line("note", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
             time.sleep(2)
             w, h, at = q.screen_raw()
             st = status_text(at)
-            check("po zapisie pasek zna nazwe i gwiazdki juz nie ma "
-                  "('%s')" % st, "notatka" in st and "notatka*" not in st)
+            check("after the save the bar knows the name and the star is gone "
+                  "('%s')" % st, "note" in st and "note*" not in st)
             # And the window says which file it holds - three editors
             # open on three files would be three windows called
-            # "Edytor" otherwise
-            check("okno nosi nazwe pliku ('%s')" % win_title(at),
-                  win_title(at) == "Edytor: notatka")
+            # "Editor" otherwise
+            check("the window is named after the file ('%s')" % win_title(at),
+                  win_title(at) == "Editor: a note")
 
             # --- and the file is really on the disk ---------------------
             # Checked by something that is not the program that wrote
@@ -524,17 +524,17 @@ def main():
             q.mouse_goto(600, 430)
             q.mouse_click()                    # the desktop takes the focus
             time.sleep(1)
-            q.type_line("cat notatka")
+            q.type_line("cat note")
             time.sleep(2)
             log = q.serial()
-            check("plik jest na dysku i ma to, co napisano",
-                  "Ala ma kota" in log and "i psa" in log)
+            check("the file is on the disk and holds what was written",
+                  "The quick brown fox" in log and "i psa" in log)
 
             # --- reading it back ----------------------------------------
             q.mouse_goto(CX + 200, CY + 100)   # back into the editor
             q.mouse_click()
             time.sleep(1)
-            q.type_line("smieci", enter=False)
+            q.type_line("rubbish", enter=False)
             time.sleep(1)
             q.sendkey("ctrl-o")
             time.sleep(1.5)
@@ -545,35 +545,35 @@ def main():
             listed = [read_text_at(at, CX + 16,
                                    CY + PICK_LIST_Y + i * 12 + 2, 24).strip()
                       for i in range(4)]
-            check("Ctrl+O pokazuje, co jest na dysku ('%s': %s)"
+            check("Ctrl+O shows what is on the disk ('%s': %s)"
                   % (title.strip(), ", ".join(x for x in listed if x)),
-                  "Otworz plik" in title and
-                  any("notatka" in x for x in listed))
+                  "Open a file" in title and
+                  any("note" in x for x in listed))
 
             # Typing still works, and is still the way to name a file
             # that is not on the list
-            q.type_line("notatka", enter=False)
+            q.type_line("note", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("otwarty plik zastapil to, co bylo w oknie",
-                  row_text(at, 0) == "Ala ma kota" and
+            check("the opened file replaced what was in the window",
+                  row_text(at, 0) == "The quick brown fox" and
                   row_text(at, 1) == "i psa" and
                   row_text(at, 2) == "")
 
-            # And the new way: click a name, click "Otworz"
+            # And the new way: click a name, click "Open"
             q.sendkey("ctrl-o")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             which = -1
             for i in range(6):
-                if "notatka" in read_text_at(at, CX + 16,
+                if "note" in read_text_at(at, CX + 16,
                                              CY + PICK_LIST_Y + i * 12 + 2,
                                              24):
                     which = i
                     break
-            check("nazwa z dysku jest na liscie do klikniecia", which >= 0)
+            check("a name from the disk is on the list to be clicked", which >= 0)
             if which >= 0:
                 q.mouse_goto(CX + 60, CY + PICK_LIST_Y + which * 12 + 5)
                 q.mouse_click()
@@ -589,8 +589,8 @@ def main():
                 q.mouse_goto(600, 430)
                 time.sleep(1)
                 w, h, at = q.screen_raw()
-                check("klik w nazwe i w 'Otworz' otwiera ten sam plik",
-                      row_text(at, 0) == "Ala ma kota")
+                check("a click on the name and on 'Open' opens the same file",
+                      row_text(at, 0) == "The quick brown fox")
 
             # --- the clipboard, shared with the rest of the desktop -----
             q.sendkey("ctrl-insert")           # copies the caret's line
@@ -603,9 +603,9 @@ def main():
             q.sendkey("shift-insert")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Ctrl+Insert i Shift+Insert przenosza wiersz "
+            check("Ctrl+Insert and Shift+Insert move a line "
                   "('%s')" % row_text(at, 2),
-                  row_text(at, 2) == "Ala ma kota")
+                  row_text(at, 2) == "The quick brown fox")
 
             # --- backspace joins two lines ------------------------------
             q.sendkey("home")
@@ -613,9 +613,9 @@ def main():
             q.sendkey("backspace")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Backspace na poczatku wiersza laczy go z poprzednim "
+            check("Backspace at the start of a line joins it to the one before "
                   "('%s')" % row_text(at, 1),
-                  row_text(at, 1) == "i psaAla ma kota" and
+                  row_text(at, 1) == "i psaThe quick brown fox" and
                   row_text(at, 2) == "")
 
             # --- closing is a request, and it can be declined -----------
@@ -624,7 +624,7 @@ def main():
             # request with "not yet" - the desktop stops counting down
             # - and turns it into a question; the second close is the
             # answer to that question.
-            q.type_line("zmiana", enter=False)
+            q.type_line("change", enter=False)
             # The pointer away from the page: the cursor is drawn white,
             # and left on the page it is indistinguishable from the page
             # - a probe would then say "the window is still there" about
@@ -638,17 +638,17 @@ def main():
             time.sleep(3)
             w, h, at = q.screen_raw()
             st = status_text(at)
-            check("Alt+F4 przy niezapisanym pliku NIE zamyka, tylko pyta "
-                  "('%s')" % st, "Niezapisane zmiany" in st)
-            check("i okno stoi tam, gdzie stalo",
+            check("Alt+F4 on an unsaved file does NOT close, it asks "
+                  "('%s')" % st, "Unsaved changes" in st)
+            check("and the window stands where it stood",
                   is_page(at(CX + 200, CY + 100)))
             # And the desktop did stop counting: two seconds is the
             # whole of the grace, so a window still here five seconds
             # later was not merely slow to die
             time.sleep(5)
             w, h, at = q.screen_raw()
-            check("pulpit przestal odliczac - po pieciu sekundach okno "
-                  "dalej jest", is_page(at(CX + 200, CY + 100)))
+            check("the desktop stopped counting - after five seconds the window "
+                  "is still there", is_page(at(CX + 200, CY + 100)))
 
             q.sendkey("alt-f4")
             left = open_before
@@ -658,10 +658,10 @@ def main():
                 left = len(buttons(at, w, row))
                 if left < open_before:
                     break
-            check("drugie Alt+F4 zamyka (%d -> %d przyciskow na pasku)"
+            check("a second Alt+F4 closes it (%d -> %d buttons on the bar)"
                   % (open_before, left), left == open_before - 1)
-            check("i program zakonczyl sie sam, a nie zostal zabity",
-                  "proces 'gedit' zakonczyl sie (kod 0)" in q.serial())
+            check("and the program ended by itself, it was not killed",
+                  "process \'gedit\' has ended (code 0)" in q.serial())
 
             # --- a file named when the editor is started ----------------
             # 'gedit notatka' opens that file at once. Making a person
@@ -670,14 +670,14 @@ def main():
             q.mouse_goto(600, 430)
             q.mouse_click()
             time.sleep(1)
-            q.type_line("run gedit notatka")
+            q.type_line("run gedit note")
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'gedit notatka' otwiera plik od razu ('%s')"
+            check("'gedit note' opens the file at once ('%s')"
                   % row_text(at, 0),
-                  row_text(at, 0) == "Ala ma kota" and
+                  row_text(at, 0) == "The quick brown fox" and
                   row_text(at, 1) == "i psa")
 
             # --- and the file manager can hand a file over --------------
@@ -692,7 +692,7 @@ def main():
             # it seeing a press at the old place, on no icon at all -
             # and then nothing starts, which is a long thing to look at
             # before one sees it.
-            q.mouse_goto(24, 112)              # the "Pliki" icon
+            q.mouse_goto(24, 112)              # the "Files" icon
             time.sleep(0.6)
             q.mouse_click()
             time.sleep(4)
@@ -703,16 +703,16 @@ def main():
             listed = [file_row(at, i) for i in range(6)]
             row = -1
             for i, name in enumerate(listed):
-                if name == "notatka":
+                if name == "note":
                     row = i
-            check("menedzer plikow widzi zapisany plik (%s)"
+            check("the file manager sees the saved file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
                 q.mouse_goto(WX + 1 + 20, WY + 11 + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + 11 + 5)  # "Otworz"
+                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + 11 + 5)  # "Open"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(4)
@@ -720,10 +720,10 @@ def main():
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
                 # The new window is the next slot of the cascade
-                check("przycisk 'Otworz' otwiera plik w edytorze ('%s')"
+                check("the 'Open' button opens the file in the editor ('%s')"
                       % row_text(at, 0, wx=WX + 12, wy=WY + 12),
                       row_text(at, 0, wx=WX + 12, wy=WY + 12) ==
-                      "Ala ma kota")
+                      "The quick brown fox")
         finally:
             q.close()
     finally:
@@ -731,7 +731,7 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    print("--- ten sam edytor na jadrze 64-bitowym ---")
+    print("--- the same editor on the 64-bit kernel ---")
     sixty_four()
     return summary()
 

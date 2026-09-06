@@ -53,10 +53,10 @@ def main():
             # The scale is a setting, so it is set before the compositor
             # starts - the mode is set up once and does not change under
             # a running desktop.
-            q.type_line("sudo set skala 2")
+            q.type_line("sudo set scale 2")
             time.sleep(1)
-            saved = q.command("proton", "zapisane", timeout=30)
-            check("ustawienie skali zapisane", "skala = 2" in saved)
+            saved = q.command("proton", "saved", timeout=30)
+            check("the scale setting was saved", "scale = 2" in saved)
 
             q.type_line("desktop")
             time.sleep(7)
@@ -65,11 +65,11 @@ def main():
             time.sleep(2)
 
             seen = len(q.serial())
-            q.type_line("ekran")
+            q.type_line("screen")
             time.sleep(2)
             said = q.serial()[seen:]
-            m = re.search(r"tryb:\s+(\d+)x(\d+), \S+, skala (\d+)", said)
-            check("maszyna mowi, w jakiej skali rysuje ('%s')"
+            m = re.search(r"mode:\s+(\d+)x(\d+), \S+, scale (\d+)", said)
+            check("the machine says what scale it draws at ('%s')"
                   % (m.group(0) if m else said[-60:].replace("\n", " ")),
                   m is not None and m.group(3) == "2")
             if not m:
@@ -77,7 +77,7 @@ def main():
 
             lw, lh = int(m.group(1)), int(m.group(2))
             w, h, at = q.screen_raw()
-            check("pulpit ma polowe ekranu w kazda strone (%dx%d z %dx%d)"
+            check("the desktop is half the screen each way (%dx%d of %dx%d)"
                   % (lw, lh, w, h), lw == w // 2 and lh == h // 2)
 
             # It is drawn, not blank: the background covers the screen
@@ -86,10 +86,10 @@ def main():
                      for x in range(200, w - 100, 8)
                      if at(x, y)[1] > 40 and at(x, y)[2] > 60)
             total = len(range(40, h - 60, 8)) * len(range(200, w - 100, 8))
-            check("tlo pulpitu wypelnia ekran (%d/%d probek)" % (bg, total),
+            check("the desktop background fills the screen (%d/%d samples)" % (bg, total),
                   bg > total * 0.7)
             bar = at(w // 2, h - 6)
-            check("pasek zadan na dole (%s)" % (bar,),
+            check("the taskbar at the bottom (%s)" % (bar,),
                   all(abs(c - 211) <= 30 for c in bar))
 
             # --- and now the thing itself ------------------------------
@@ -104,7 +104,7 @@ def main():
                     if at(x, y) == at(x + 1, y) and at(x, y) == at(x, y + 1) \
                        and at(x, y) == at(x + 1, y + 1):
                         same += 1
-            check("kazdy piksel pulpitu to kwadrat czterech (%d/%d probek)"
+            check("every desktop pixel is a square of four (%d/%d samples)"
                   % (same, pairs), pairs > 100 and same == pairs)
 
             # And the counter-check: without doubling, a column of icons
@@ -118,8 +118,8 @@ def main():
                     if at(x, y) == at(x + 1, y) and at(x, y) == at(x, y + 1) \
                        and at(x, y) == at(x + 1, y + 1):
                         off_same += 1
-            check("a siatka przesunieta o piksel juz sie nie zgadza "
-                  "(%d/%d probek rowna)" % (off_same, off_pairs),
+            check("and a grid moved by one pixel no longer matches "
+                  "(%d/%d samples equal)" % (off_same, off_pairs),
                   off_same < off_pairs)
         finally:
             q.close()

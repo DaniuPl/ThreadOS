@@ -41,8 +41,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
 LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
 
-FOREIGN_BOOTMGR = b"MZ-to-jest-cudzy-bootmgfw-" * 300
-FOREIGN_FALLBACK = b"MZ-cudzy-loader-w-EFI-BOOT-" * 200
+FOREIGN_BOOTMGR = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
+FOREIGN_FALLBACK = b"MZ-somebody-elses-loader-in-EFI-BOOT-" * 200
 
 
 def blob(path):
@@ -79,26 +79,26 @@ def boot_stick(where):
 
 def main():
     print()
-    print("--- instalacja na dysk maszyny ---")
+    print("--- installing onto the machine's disk ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok():
-        print("POMINIETE: brak mtools")
+        print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
         subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
-        print("POMINIETE: brak build/BOOTX64.EFI (apt install clang lld)")
+        print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
     if not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
-        print("POMINIETE: brak firmware OVMF")
+        print("SKIPPED: no OVMF firmware")
         return summary()
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return summary()
 
     esp = tempfile.mkdtemp()
@@ -115,7 +115,7 @@ def main():
 
     try:
         boot_stick(esp)
-        check("dysk obcej maszyny gotowy (GPT + FAT32 od mtools)",
+        check("the foreign machine's disk is ready (GPT + FAT32 from mtools)",
               make_target(target, with_fallback=False))
 
         # --- A machine started from the stick, with the other one's
@@ -127,35 +127,35 @@ def main():
                  uefi=(OVMF_CODE, nvram))
         try:
             out = q.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("maszyna wstaje z pendrive'a przez nasz loader",
+            check("the machine boots off the stick through our loader",
                   "protoboot" in out)
             head = q.wait_serial("loader:", timeout=30)
-            check("loader podaje jadro i SIEBIE jako moduly - bez tego "
-                  "nie ma z czego instalowac",
+            check("the loader hands over the kernel and ITSELF as modules - without that "
+                  "there is nothing to install from",
                   f"loader: {len(want_loader)} B" in head)
-            q.wait_serial("System 64-bitowy gotowy", timeout=90)
+            q.wait_serial("The 64-bit system is ready", timeout=90)
 
             # Somebody who does not type the word gets nothing done
-            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=30)
-            check("instalator najpierw mowi, co by zapisal",
+            out = q.command("install text", "Type YES", timeout=30)
+            check("the installer first says what it would write",
                   "/EFI/ProtonOS/protonos64.bin" in out
-                  and "Partycja EFI: numer 1" in out)
-            check("i obiecuje, czego nie ruszy",
-                  "NIE ruszam: tablicy partycji" in out)
-            out = q.command("nie", "instaluj:", timeout=20)
-            check("bez slowa TAK nie zapisuje niczego",
-                  "nie zapisano niczego" in out)
+                  and "EFI partition: number 1" in out)
+            check("and it promises what it will not touch",
+                  "I do NOT touch: the partition table" in out)
+            out = q.command("no", "install:", timeout=20)
+            check("without the word YES it writes nothing",
+                  "nothing was written" in out)
 
-            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=30)
-            out = q.command("TAK", "Gotowe", timeout=90)
-            check("po TAK zapisuje wszystkie trzy pliki",
-                  "/EFI/ProtonOS/BOOTX64.EFI - gotowe" in out
-                  and "/EFI/ProtonOS/protonos64.bin - gotowe" in out
-                  and "/EFI/ProtonOS/initrd64.img - gotowe" in out)
-            check("i - skoro nikogo tam nie bylo - takze /EFI/BOOT/"
+            out = q.command("install text", "Type YES", timeout=30)
+            out = q.command("YES", "Done", timeout=90)
+            check("after YES it writes all three files",
+                  "/EFI/ProtonOS/BOOTX64.EFI - done" in out
+                  and "/EFI/ProtonOS/protonos64.bin - done" in out
+                  and "/EFI/ProtonOS/initrd64.img - done" in out)
+            check("and - since nobody was there - /EFI/BOOT/ too"
                   "BOOTX64.EFI",
-                  "/EFI/BOOT/BOOTX64.EFI - gotowe" in out
-                  and "uruchomi ProtonOS-a z dysku" in out)
+                  "/EFI/BOOT/BOOTX64.EFI - done" in out
+                  and "will boot ProtonOS off the disk" in out)
         finally:
             q.close()
 
@@ -165,14 +165,14 @@ def main():
                            ("/EFI/ProtonOS/initrd64.img", want_initrd),
                            ("/EFI/BOOT/BOOTX64.EFI", want_loader)):
             got = fat_get(target, ESP_START, path)
-            check(f"{path} co do bajtu ({len(want)} B)",
+            check(f"{path} byte for byte ({len(want)} B)",
                   got is not None and got == want)
 
         got = fat_get(target, ESP_START, "/EFI/Microsoft/Boot/bootmgfw.efi")
-        check("cudzy bootmgfw.efi nietkniety",
+        check("somebody elses bootmgfw.efi is untouched",
               got == FOREIGN_BOOTMGR)
-        check("tablica GPT nietknieta", gpt_intact(target))
-        check("sasiednia partycja Windows nietknieta",
+        check("the GPT is untouched", gpt_intact(target))
+        check("the neighbouring Windows partition is untouched",
               neighbours_intact(target, which=(1,)))
 
         # --- The proof: the disk boots on its own, with no stick
@@ -181,50 +181,50 @@ def main():
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("zainstalowany dysk startuje sam, bez pendrive'a",
+            check("the installed disk boots on its own, with no stick",
                   "protoboot" in out)
-            out = q2.wait_serial("oddaje maszyne", timeout=30)
-            check(f"loader znajduje jadro tam, gdzie je polozyl instalator "
+            out = q2.wait_serial("handing the machine", timeout=30)
+            check(f"the loader finds the kernel where the installer put it "
                   f"({len(want_kernel)} B)",
-                  f"jadro:  {len(want_kernel)} B" in out)
-            out = q2.wait_serial("System 64-bitowy gotowy", timeout=90)
-            check("i system z tego dysku dochodzi do powloki",
+                  f"kernel: {len(want_kernel)} B" in out)
+            out = q2.wait_serial("The 64-bit system is ready", timeout=90)
+            check("and the system on that disk reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
         finally:
             q2.close()
 
         # --- And the other case: a machine that already has a loader
         # under the name the firmware falls back to
-        check("drugi dysk - z cudzym /EFI/BOOT/BOOTX64.EFI - gotowy",
+        check("a second disk - with somebody elses /EFI/BOOT/BOOTX64.EFI - is ready",
               make_target(taken, with_fallback=True))
         shutil.copy(OVMF_VARS, nvram)
         q3 = Qemu(KERNEL, INITRD, esp=esp, disk=taken, sata=True,
                   serial=slog3, qemu="qemu-system-x86_64",
                   uefi=(OVMF_CODE, nvram))
         try:
-            q3.wait_serial("System 64-bitowy gotowy", timeout=120)
-            out = q3.command("instaluj tekstem", "Wpisz TAK", timeout=30)
-            check("instalator widzi, ze /EFI/BOOT/BOOTX64.EFI jest zajety",
-                  "JEST JUZ ZAJETY" in out)
-            check("i z gory mowi, ze trzeba bedzie wpisu w firmwarze",
-                  "menu rozruchowym" in out)
-            out = q3.command("TAK", "Gotowe", timeout=90)
-            check("zapisuje swoje pliki mimo to",
-                  "/EFI/ProtonOS/protonos64.bin - gotowe" in out)
-            check("ale nie pisze o zapisaniu cudzego pliku",
-                  "/EFI/BOOT/BOOTX64.EFI - gotowe" not in out
-                  and "dodaj w firmwarze wpis" in out)
+            q3.wait_serial("The 64-bit system is ready", timeout=120)
+            out = q3.command("install text", "Type YES", timeout=30)
+            check("the installer sees that /EFI/BOOT/BOOTX64.EFI is taken",
+                  "IS TAKEN ALREADY" in out)
+            check("and it says up front that a firmware entry will be needed",
+                  "boot menu" in out)
+            out = q3.command("YES", "Done", timeout=90)
+            check("it writes its files all the same",
+                  "/EFI/ProtonOS/protonos64.bin - done" in out)
+            check("but it does not talk about writing over somebody else's file",
+                  "/EFI/BOOT/BOOTX64.EFI - done" not in out
+                  and "add an entry in the firmware" in out)
         finally:
             q3.close()
 
         got = fat_get(taken, ESP_START, "/EFI/BOOT/BOOTX64.EFI")
-        check("cudzy loader pod /EFI/BOOT zostal, co do bajtu",
+        check("the foreign loader under /EFI/BOOT stayed, byte for byte",
               got == FOREIGN_FALLBACK)
         got = fat_get(taken, ESP_START, "/EFI/ProtonOS/protonos64.bin")
-        check("a nasze jadro i tak jest na miejscu",
+        check("and our kernel is in place anyway",
               got is not None and got == want_kernel)
         listing = fat_dir(taken, ESP_START)
-        check("mtools widzi oba katalogi obok siebie",
+        check("mtools sees both directories side by side",
               "ProtonOS" in listing and "Microsoft" in listing)
     finally:
         shutil.rmtree(esp, ignore_errors=True)

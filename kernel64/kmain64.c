@@ -223,7 +223,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        themselves are read later: they lie high up and first have to be
        added to the mapping, and there is no paging here yet. */
     if (mb2_rsdp()) {
-        printk("[ OK ] Wskaznik ACPI od loadera: %x\n", mb2_rsdp());
+        printk("[ OK ] ACPI pointer from the loader: %x\n", mb2_rsdp());
         acpi_set_rsdp(mb2_rsdp());
     }
 

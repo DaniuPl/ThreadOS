@@ -82,16 +82,16 @@ def wait_for(q, want, geom, tries=15):
 
 
 def main():
-    print("--- terminal w oknie (jadro 64-bitowe) ---")
+    print("--- the terminal in a window (the 64-bit kernel) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
         return 0
     if shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue")
+        print("SKIPPED: no grub-mkrescue")
         return 0
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return 0
 
     d = tempfile.mkdtemp()
@@ -117,7 +117,7 @@ def main():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return summary()
 
@@ -125,8 +125,8 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
             q.mouse_home()
 
@@ -140,31 +140,31 @@ def main():
             time.sleep(1)
 
             rows = read_rows(q, **geom)
-            check("terminal sie otworzyl i ma zachete",
+            check("the terminal opened and has a prompt",
                   any(r.startswith("/>") for r in rows))
 
             # --- fork + exec + a redirect built by hand ---------------
             q.type_line("uls64")
-            rows = wait_for(q, "wpisow", geom)
+            rows = wait_for(q, "entries", geom)
             body = "\n".join(rows)
-            check("komenda odbita razem z zacheta", "/> uls64" in body)
-            check("i widac jej wyjscie - a wiec przekierowanie zrobione "
-                  "z fork, dup2 i exec zadzialalo", "wpisow" in body)
+            check("the command was echoed together with the prompt", "/> uls64" in body)
+            check("and its output shows - so the redirect was done "
+                  "with fork, dup2 and exec worked", "entries" in body)
 
             # --- a pipe, both ends closed by the parent ---------------
             q.type_line("uecho64 hej | uupper64")
             rows = wait_for(q, "HEJ", geom)
             body = "\n".join(rows)
-            check("potok przepuscil tekst przez druga strone (HEJ)",
+            check("the pipe passed the text through the other side (HEJ)",
                   "HEJ" in body)
-            check("a poprzednia komenda wciaz jest nad nim - to sesja",
+            check("and the previous command is still above it - a session",
                   "/> uls64" in body)
 
             # --- a program that is not there --------------------------
-            q.type_line("nieistniejacy")
+            q.type_line("nosuchprogram")
             rows = wait_for(q, "no such program", geom)
-            check("nieznany program konczy sie komunikatem "
-                  "(kod 127 od dziecka po nieudanym exec)",
+            check("an unknown program ends with a message "
+                  "(code 127 from the child after a failed exec)",
                   "no such program" in "\n".join(rows))
 
             # --- talking to a program: the shell inside the terminal ---
@@ -173,30 +173,30 @@ def main():
             # children write where the shell writes, at the end of it.
             q.type_line("ush64")
             rows = wait_for(q, "ush64$", geom)
-            check("shell uzytkownika wstal w oknie terminala",
+            check("the user's shell came up in the terminal window",
                   "ush64$" in "\n".join(rows))
 
-            q.type_line("uecho64 czesc")
-            rows = wait_for(q, "czesc", geom)
+            q.type_line("uecho64 hello")
+            rows = wait_for(q, "hello", geom)
             body = "\n".join(rows)
-            check("to, co wpisano, doszlo do shella i wykonalo sie",
-                  "ush64$ uecho64 czesc" in body)
+            check("what was typed reached the shell and ran",
+                  "ush64$ uecho64 hello" in body)
             cmd_at = next((i for i, r in enumerate(rows)
-                           if "ush64$ uecho64 czesc" in r), -1)
+                           if "ush64$ uecho64 hello" in r), -1)
             out_at = next((i for i in range(cmd_at + 1, len(rows))
-                           if rows[i] == "czesc"), -1)
-            check("a jego wyjscie jest POD komenda, nie nadpisane zacheta",
+                           if rows[i] == "hello"), -1)
+            check("and its output is UNDER the command, not overwritten by the prompt",
                   cmd_at >= 0 and out_at > cmd_at)
 
             q.sendkey("ctrl-d")
             time.sleep(3)
             rows = read_rows(q, **geom)
-            check("Ctrl+D konczy shella takze w trybie dlugim",
+            check("Ctrl+D ends the shell in long mode too",
                   "^D" in "\n".join(rows))
 
             # --- and the desktop is alive after all that --------------
             w, h, at = q.screen_raw()
-            check("pulpit dziala dalej",
+            check("the desktop is still running",
                   at(600, 500)[1] > 20 or at(600, 500)[2] > 20)
         finally:
             q.close()

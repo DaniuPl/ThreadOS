@@ -5470,3 +5470,69 @@ sprawdzane przez `make test`.
       **559 asercji zamiast 539** - te dwadziescia to wlasnie `tls64`,
       ktory wczesniej wywalal sie po sekundzie. Dziewiec minut na
       biegaczu z dwoma rdzeniami.
+
+---
+
+*Od tego miejsca dziennik jest po angielsku - razem z systemem. Wpisy
+powyzej zostaja takie, jakie byly pisane: przetlumaczony dziennik
+przestalby byc dziennikiem.*
+
+*From here on this journal is in English, together with the system. The
+entries above stay as they were written: a journal translated after the
+fact stops being a journal.*
+
+---
+
+- [x] **The whole system speaks English now** (both kernels, every ring 3
+      program, protoboot, the command names, the settings, the tests and
+      the harness).
+
+      The repository went open two commits ago, and a system that says
+      `instaluj: nie ma dysku` is a wall for everyone who does not read
+      Polish. Not only the messages: the commands themselves were
+      Polish, and a person who cannot guess that `dyski` lists the disks
+      cannot use the machine at all.
+
+      What changed, in order:
+
+      **The system.** Every `printk`, every window label, every icon,
+      the installer's screen and protoboot's four lines. About nine
+      hundred strings.
+
+      **The vocabulary.** `kim -> whoami`, `wyloguj -> logout`,
+      `haslo -> passwd`, `ekran -> screen`, `glosnosc -> volume`,
+      `sprzet -> hardware`, `dyski -> disks`, `formatuj -> format`,
+      `instaluj -> install`, `pulpit -> desktop`; the settings keys
+      `nazwa/kolor/tlo/tapeta/pasek/ikony/skala/glosnosc/haslo` became
+      `name/color/background/wallpaper/taskbar/icons/scale/volume/password`.
+      The words a person types before a disk is erased changed too:
+      `TAK -> YES`, `KASUJ -> ERASE`.
+
+      **The tests.** Every assertion description, and - the part that
+      actually matters - every string the tests EXPECT to see. Those are
+      the same sentences the kernel prints, so the two had to move
+      together or nothing would pass. Twelve test groups had Polish
+      names as well (`dysk`, `zrzut`, `kolko`, `instaluj`, `caly`,
+      `dyski`, `dzwiek`, `usbdysk`, `usbsiec`, `kolory`, `skala`,
+      `usbmysz`); they are now `foreigndisk`, `screenshot`, `wheel`,
+      `install`, `wholedisk`, `disks`, `sound`, `usbdisk`, `usbnet`,
+      `colours`, `scale`, `usbmouse`, and `scripts/run_tests.py`, the CI
+      workflow and the documentation know the new names.
+
+      **Two bugs the translation itself made**, both worth writing down:
+
+      `hello` printed a counter by patching a digit into a fixed string
+      at index 15 - which was the digit's place in `[hello] licze: 0`
+      and lands in the middle of a word in `[hello] counting: 0`. The
+      fix is not a new number but `sizeof(counter_msg) - 3`: the digit
+      is the last character before the newline, whatever the sentence
+      says. A constant that depends on the length of a message is a trap
+      set for the next person who edits the message.
+
+      And a whole test run was wasted because I edited `ptest.py` while
+      the suite was running. That is the second time; the rule stands
+      and is in CONTRIBUTING: nothing gets rebuilt or edited while a run
+      is in flight.
+
+      The journal stays Polish, and this entry says why on its own line
+      above.

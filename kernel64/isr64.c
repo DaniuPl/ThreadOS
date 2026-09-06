@@ -218,10 +218,10 @@ static void isr64_dispatch(struct regs *r)
                     memset(dst, 0, PAGE_SIZE);
                     for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
                                          remaining > b * FS_BLOCK; b++) {
-                        uint32_t blok = task64_mmap_block(addr, first + b);
-                        if (!blok)
+                        uint32_t block = task64_mmap_block(addr, first + b);
+                        if (!block)
                             break;
-                        blk_read(fs_block_lba(blok), FS_BLOCK / 512,
+                        blk_read(fs_block_lba(block), FS_BLOCK / 512,
                                  dst + b * FS_BLOCK);
                     }
                     uint64_t right = PG_USER | PG_NX;

@@ -36,44 +36,51 @@ def main():
         q.wait_for("ProtonOS shell")
         # The DHCP message falls into the middle of a line being typed, so
         # we wait for it before we start typing
-        q.wait_for("[siec] DHCP", timeout=20)
+        q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
         q.type_line("help")
         screen = q.screen()
-        check("komenda 'help' wypisuje liste komend",
-              "Dostepne komendy" in screen and "reboot" in screen)
+        check("the 'help' command prints the list of commands",
+              "Available commands" in screen and "reboot" in screen)
 
         q.type_line("mem")
         screen = q.screen()
-        check("komenda 'mem' pokazuje RAM i ramki",
-              "RAM wykryty" in screen and "ramek 4 KiB" in screen)
-        check("komenda 'mem' pokazuje sterte", "sterta jadra" in screen)
+        check("the 'mem' command shows the RAM and the frames",
+              "RAM detected" in screen and "4 KiB frames" in screen)
+        check("the 'mem' command shows the heap", "kernel heap" in screen)
         # All the detected memory is under management, not only the first
         # 64 MiB: the identity mapping stretches all the way to the top of
         # the RAM.
-        mm = re.search(r"zarzadzane (\d+) MiB", screen)
-        ram = re.search(r"RAM wykryty:\s+(\d+) KiB", screen)
-        check("zarzadzana pamiec siega szczytu wykrytego RAM-u"
-              + (f" ({mm.group(1)} MiB z {int(ram.group(1)) // 1024} MiB)"
+        mm = re.search(r"managing (\d+) MiB", screen)
+        ram = re.search(r"RAM detected: \s*(\d+) KiB", screen)
+        check("the managed memory reaches the top of the RAM found"
+              + (f" ({mm.group(1)} MiB of {int(ram.group(1)) // 1024} MiB)"
                  if mm and ram else ""),
               mm is not None and ram is not None
               and int(mm.group(1)) >= int(ram.group(1)) // 1024 - 2)
 
         q.type_line("uptime")
-        check("komenda 'uptime' dziala", "tyknac timera" in q.screen())
+        check("the 'uptime' command works", "timer ticks" in q.screen())
 
-        q.type_line("ps")
-        screen = q.screen()
-        check("komenda 'ps' pokazuje watki",
+        # Thread C ends on its own and is then reaped. How soon that
+        # happens depends on how loaded the host is, so we look again
+        # rather than assume it has already happened.
+        for _ in range(20):
+            q.type_line("ps")
+            screen = q.screen()
+            if "demo-C" not in screen:
+                break
+            time.sleep(1.0)
+        check("the 'ps' command shows the threads",
               "main" in screen and "demo-A" in screen
               and "demo-B" in screen)
-        check("shell jest wlasnym watkiem (nie kontekst przerwania)",
-              "shell (biezacy)" in screen)
-        check("zombie po watku C zostal sprzatniety",
+        check("the shell is a thread of its own (not an interrupt context)",
+              "shell (current)" in screen)
+        check("the zombie left by thread C was cleaned up",
               "demo-C" not in screen)
-        check("ps pokazuje rodzica kazdego watku",
-              "RODZIC" in screen
+        check("ps shows every thread's parent",
+              "PARENT" in screen
               and re.search(r"\n  0   -", screen) is not None)
 
         # initrd: 'ls' shows the packed programs. There are more files than
@@ -87,15 +94,15 @@ def main():
         entries = re.findall(r"(\w+)\s+\((\d+) B\)", screen)
         known = {"forktest", "ptree", "sigtest", "lazymem", "swaptest",
                  "mkmap", "mmapfile", "deep", "mmapzap", "dynlib"}
-        check("komenda 'ls' pokazuje pliki initrd (%d wpisow, %d znanych)"
+        check("the 'ls' command shows the initrd files (%d entries, %d known)"
               % (len(entries), len({n for n, _ in entries} & known)),
               len(entries) >= 15
               and all(int(size) > 0 for _, size in entries)
               and len({n for n, _ in entries} & known) >= 3)
 
-        q.type_line("run brak")
-        check("run zglasza brak pliku - i szuka go w obu miejscach",
-              "nie ma 'brak' ani w initrd, ani na dysku" in q.screen())
+        q.type_line("run nothing")
+        check("run reports the file is missing - and looks for it in both places",
+              "there is no 'nothing' in the initrd or on the disk" in q.screen())
     finally:
         q.close()
         for f in (disk, slog):

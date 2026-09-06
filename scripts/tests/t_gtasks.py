@@ -117,11 +117,11 @@ def sixty_four():
     call that hands over one row of the task list, which long mode
     answers with its own code."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE (64): brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED (64): no 64-bit image (make kernel64)")
         return
     if shutil.which("grub-mkrescue") is None or \
        shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE (64): brak grub-mkrescue lub qemu-system-x86_64")
+        print("SKIPPED (64): no grub-mkrescue or qemu-system-x86_64")
         return
 
     global CX, CY
@@ -147,7 +147,7 @@ def sixty_four():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return
 
@@ -155,12 +155,12 @@ def sixty_four():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
             q.mouse_home()
 
-            q.mouse_goto(24, 352)              # the "Zadania" icon
+            q.mouse_goto(24, 352)              # the "Tasks" icon
             q.mouse_click()
             time.sleep(5)
             q.mouse_goto(WX + 100, WY + 4)     # out of the cascade
@@ -181,14 +181,14 @@ def sixty_four():
             row = h - TB_H + 2
             listed = rows(at)
             names = [r[1] for r in listed]
-            check("(64) lista zadan jest (%d wierszy: %s)"
+            check("(64) the task list is there (%d rows: %s)"
                   % (len(listed), ", ".join(names)), len(listed) >= 3)
-            check("(64) widzi sam siebie", any("gtasks" in n for n in names))
-            check("(64) i odroznia program od watku jadra",
+            check("(64) it sees itself", any("gtasks" in n for n in names))
+            check("(64) and it tells a program from a kernel thread",
                   any(r[3] == "program" for r in listed) and
-                  any(r[3] == "jadro" for r in listed))
+                  any(r[3] == "kernel" for r in listed))
 
-            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_goto(24, 72)               # the "Clock" icon
             q.mouse_click()
             time.sleep(5)
             q.mouse_goto(600, 430)
@@ -196,7 +196,7 @@ def sixty_four():
             w, h, at = q.screen_raw()
             listed = rows(at)
             clock_row = [i for i, r in enumerate(listed) if "gclock" in r[1]]
-            check("(64) nowy program sam sie pojawia na liscie (%s)"
+            check("(64) a new program appears on the list by itself (%s)"
                   % ", ".join(r[1] for r in listed), len(clock_row) == 1)
             if not clock_row:
                 return
@@ -207,7 +207,7 @@ def sixty_four():
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
-            q.mouse_goto(CX + 260, CY + 4)     # "Zakoncz"
+            q.mouse_goto(CX + 260, CY + 4)     # "End"
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -215,7 +215,7 @@ def sixty_four():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             names = [r[1] for r in rows(at)]
-            check("(64) 'Zakoncz' konczy wybrany program (%s)"
+            check("(64) 'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names) and
                   len(buttons(at, w, row)) == before - 1)
@@ -237,10 +237,10 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 352)              # the "Zadania" icon
+            q.mouse_goto(24, 352)              # the "Tasks" icon
             q.mouse_click()
             time.sleep(4)
 
@@ -267,21 +267,21 @@ def main():
             row = h - TB_H + 2
             listed = rows(at)
             names = [r[1] for r in listed]
-            check("menedzer zadan pokazuje liste (%d wierszy: %s)"
+            check("the task manager shows the list (%d rows: %s)"
                   % (len(listed), ", ".join(names)), len(listed) >= 3)
-            check("widzi sam siebie", any("gtasks" in n for n in names))
-            check("i watek pulpitu, ktory to wszystko rysuje",
-                  any("pulpit" in n or "desktop" in n for n in names))
+            check("it sees itself", any("gtasks" in n for n in names))
+            check("and the desktop thread that draws it all",
+                  any("desktop" in n or "desktop" in n for n in names))
             # A process has memory of its own; a kernel thread has not -
             # and the list says which is which
             kinds = {r[1]: r[3] for r in listed}
-            check("odroznia program od watku jadra (%s)"
+            check("it tells a program from a kernel thread (%s)"
                   % ", ".join("%s=%s" % (k, v) for k, v in kinds.items()),
                   any(v == "program" for v in kinds.values()) and
-                  any(v == "jadro" for v in kinds.values()))
+                  any(v == "kernel" for v in kinds.values()))
 
             # --- the list is live ---------------------------------------
-            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_goto(24, 72)               # the "Clock" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 430)
@@ -289,12 +289,12 @@ def main():
             w, h, at = q.screen_raw()
             listed = rows(at)
             names = [r[1] for r in listed]
-            check("program uruchomiony po otwarciu okna sam sie pojawia "
+            check("a program started after the window opened appears by itself "
                   "(%s)" % ", ".join(names),
                   any("gclock" in n for n in names))
 
             clock_row = [i for i, r in enumerate(listed) if "gclock" in r[1]]
-            check("i jest opisany jako program", clock_row and
+            check("and it is described as a program", clock_row and
                   listed[clock_row[0]][3] == "program")
 
             # --- choosing and ending ------------------------------------
@@ -314,12 +314,12 @@ def main():
             # what was chosen is a task, not a place on the screen.
             got = picked_row(at)
             listed = rows(at)
-            check("klik w wiersz wybiera to zadanie (wiersz %d: %s)"
+            check("a click on a row picks that task (row %d: %s)"
                   % (got, listed[got][1] if 0 <= got < len(listed) else "-"),
                   0 <= got < len(listed) and "gclock" in listed[got][1])
 
             before = len(buttons(at, w, row))
-            q.mouse_goto(CX + 260, CY + 4)     # the "Zakoncz" button
+            q.mouse_goto(CX + 260, CY + 4)     # the "End" button
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -327,18 +327,18 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             names = [r[1] for r in rows(at)]
-            check("'Zakoncz' konczy wybrany program (%s)"
+            check("'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names))
             after = len(buttons(at, w, row))
-            check("i jego okno znika z paska zadan (%d -> %d)"
+            check("and its window goes from the taskbar (%d -> %d)"
                   % (before, after), after == before - 1)
 
             # --- what it will not do ------------------------------------
             listed = rows(at)
             kernel_rows = [i for i, r in enumerate(listed)
-                           if r[3] == "jadro"]
-            check("na liscie sa watki jadra", len(kernel_rows) > 0)
+                           if r[3] == "kernel"]
+            check("there are kernel threads on the list", len(kernel_rows) > 0)
             i = kernel_rows[0]
             q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
             time.sleep(0.5)
@@ -352,17 +352,17 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             note = field(at, 4, 190 - 10, 34)
-            check("watku jadra nie konczy, i mowi dlaczego ('%s')" % note,
-                  "watek jadra" in note)
+            check("it does not end a kernel thread, and says why ('%s')" % note,
+                  "a kernel thread" in note)
             after_kernel = [r[1] for r in rows(at)]
-            check("a watek dalej jest na liscie",
+            check("and the thread is still on the list",
                   listed[i][1] in after_kernel)
 
             # And it will not end itself - a task manager that vanishes
             # when clicked is a joke rather than a tool
             listed = rows(at)
             mine = [i for i, r in enumerate(listed) if "gtasks" in r[1]]
-            check("menedzer widzi wlasny wiersz", len(mine) == 1)
+            check("the manager sees its own row", len(mine) == 1)
             i = mine[0]
             q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
             time.sleep(0.5)
@@ -376,8 +376,8 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             note = field(at, 4, 190 - 10, 34)
-            check("siebie nie konczy ('%s')" % note, "siebie" in note)
-            check("i dalej dziala - lista jest na ekranie",
+            check("it does not end itself ('%s')" % note, "myself" in note)
+            check("and it still runs - the list is on the screen",
                   any("gtasks" in n for n in [r[1] for r in rows(at)]))
         finally:
             q.close()
@@ -386,7 +386,7 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    print("--- ten sam menedzer na jadrze 64-bitowym ---")
+    print("--- the same manager on the 64-bit kernel ---")
     sixty_four()
     return summary()
 

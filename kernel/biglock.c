@@ -71,18 +71,18 @@ int biglock_release_all(void)
 {
     if (owner != smp_core())
         return 0;
-    int ile = depth;
+    int count = depth;
     depth = 0;
     owner = -1;
     spin_unlock(&lock);
-    return ile;
+    return count;
 }
 
-void biglock_restore(int ile)
+void biglock_restore(int count)
 {
-    if (ile <= 0)
+    if (count <= 0)
         return;
     wait_for_lock();
     owner = smp_core();
-    depth = ile;
+    depth = count;
 }

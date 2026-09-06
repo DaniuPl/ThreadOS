@@ -577,7 +577,7 @@ struct win_event {
 struct psinfo {
     int32_t pid;
     int32_t parent;
-    int32_t state;      /* 0 gotowy, 1 dziala, 2 spi, 3 czeka, 4 zombie */
+    int32_t state;      /* 0 ready, 1 running, 2 sleeping, 3 waiting, 4 zombie */
     int32_t anycore;
     int32_t ring3;      /* a process of its own, not a kernel thread */
     char name[PS_NAME_MAX];

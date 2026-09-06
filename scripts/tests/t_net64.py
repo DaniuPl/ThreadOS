@@ -22,16 +22,16 @@ from ptest import check, summary
 
 
 def main():
-    print("--- siec od strony programu (tryb dlugi) ---")
+    print("--- the network from a program's side (long mode) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
         return 0
     if shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue")
+        print("SKIPPED: no grub-mkrescue")
         return 0
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return 0
 
     d = tempfile.mkdtemp()
@@ -52,7 +52,7 @@ def main():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return summary()
 
@@ -63,37 +63,37 @@ def main():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.wait_serial("[siec] DHCP", timeout=40)
+            q.wait_serial("[net] DHCP", timeout=40)
 
             seen = len(q.serial())
             q.type_line(f"run unet64 10.0.2.2 {http_port}")
-            out = q.wait_serial("[unet64] koniec, kod wyjscia",
+            out = q.wait_serial("[unet64] done, exit code",
                                 timeout=60)[seen:]
 
-            m = re.search(r"moj adres (\d+\.\d+\.\d+\.\d+), "
-                          r"brama (\d+\.\d+\.\d+\.\d+)", out)
-            check("program pyta jadro o swoj adres z DHCP"
+            m = re.search(r"my address (\d+\.\d+\.\d+\.\d+), "
+                          r"gateway (\d+\.\d+\.\d+\.\d+)", out)
+            check("the program asks the kernel for its DHCP address"
                   + (f" ({m.group(1)})" if m else ""),
                   m is not None)
 
             # The loopback does not go out on the wire, so this attempt
             # checks the stack itself, not the network around it
-            m = re.search(r"datagram wrocil do mnie \((\d+) B\) "
+            m = re.search(r"the datagram came back to me \((\d+) B\) "
                           r"od (\d+\.\d+\.\d+\.\d+)", out)
-            check("datagram wyslany do siebie wraca taki sam"
+            check("a datagram sent to itself comes back the same"
                   + (f" ({m.group(1)} B)" if m else ""),
                   m is not None and int(m.group(1)) > 0)
 
-            m = re.search(r"serwer odpowiedzial \((\d+) B\): (HTTP/1\.\d)",
+            m = re.search(r"the server answered \((\d+) B\): (HTTP/1\.\d)",
                           out)
-            check("polaczenie TCP z ring 3 dostaje odpowiedz serwera"
+            check("a TCP connection from ring 3 gets the server's answer"
                   + (f" ({m.group(2)}, {m.group(1)} B)" if m else ""),
                   m is not None)
 
-            check("program konczy sie bez bledu",
-                  "[unet64] koniec, kod wyjscia 0" in out)
-            check("zadna proba nie zglosila bledu",
-                  "[unet64] BLAD" not in out)
+            check("the program ends with no error",
+                  "[unet64] done, exit code 0" in out)
+            check("no attempt reported an error",
+                  "[unet64] FAILED" not in out)
         finally:
             q.close()
     finally:

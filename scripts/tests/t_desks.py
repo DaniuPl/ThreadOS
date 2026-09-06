@@ -140,38 +140,38 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(600, 430)
             time.sleep(1)
 
             w, h, at = q.screen_raw()
             row = h - TB_H + 2
-            check("na gornej belce widac cztery pulpity, swieci pierwszy",
+            check("the top bar shows four desktops, the first one lit",
                   pager(at, w) == [True, False, False, False])
 
             # --- the clock, on the first desktop ------------------------
-            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_goto(24, 72)               # the "Clock" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             first = read_clock(q)
             w, h, at = q.screen_raw()
-            check("zegar chodzi na pierwszym pulpicie ('%s')" % first,
+            check("the clock runs on the first desktop ('%s')" % first,
                   first.count(":") == 2 and "?" not in first)
-            check("i ma swoj przycisk na pasku",
+            check("and it has its button on the bar",
                   len(buttons(at, w, row)) == 3)
 
             # --- away, to the second ------------------------------------
             q.sendkey("ctrl-alt-right")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("Ctrl+Alt+strzalka przenosi na drugi pulpit",
+            check("Ctrl+Alt+arrow moves to the second desktop",
                   pager(at, w) == [False, True, False, False])
-            check("zegara tu nie ma - ani na ekranie",
+            check("the clock is not here - not on the screen",
                   not is_win(at(WX + 40, WY + 20)))
-            check("ani na pasku zadan (okna jadra tez zostaly)",
+            check("nor on the taskbar (the kernel's windows stayed too)",
                   len(buttons(at, w, row)) == 0)
 
             # A window of its own over here, and it is the only one
@@ -181,9 +181,9 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("nowe okno otwiera sie tam, gdzie sie patrzy",
+            check("a new window opens where you are looking",
                   len(buttons(at, w, row)) == 1)
-            check("i jest to terminal (czarny ekran)",
+            check("and it is a terminal (a black screen)",
                   near(at(WX + 100, WY + 60), 0))
 
             # --- back to the first --------------------------------------
@@ -191,17 +191,17 @@ def main():
             q.sendkey("ctrl-alt-left")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("i z powrotem na pierwszy",
+            check("and back to the first",
                   pager(at, w) == [True, False, False, False])
-            check("zegar czekal tam, gdzie go zostawiono",
+            check("the clock waited where it was left",
                   len(buttons(at, w, row)) == 3)
-            check("a terminal zostal na drugim",
+            check("and the terminal stayed on the second",
                   not near(at(WX + 100, WY + 60), 0))
 
             # The heart of it: the program was RUNNING all that time
             second = read_clock(q)
             gap = seconds(second) - seconds(first)
-            check("program na niewidocznym pulpicie chodzil dalej "
+            check("a program on a desktop nobody is looking at kept running "
                   "(%s -> %s, %d s)" % (first, second, gap),
                   6 <= gap <= 20)
 
@@ -209,10 +209,10 @@ def main():
             q.sendkey("ctrl-alt-shift-right")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("Ctrl+Alt+Shift+strzalka zabiera okno ze soba",
+            check("Ctrl+Alt+Shift+arrow takes the window along",
                   pager(at, w) == [False, True, False, False])
             spans = buttons(at, w, row)
-            check("zegar jest tam, gdzie my - razem z terminalem",
+            check("the clock is where we are - together with the terminal",
                   len(spans) == 2)
             # The terminal opened here first, so it lies over the clock;
             # its button on the bar brings the clock back to the top
@@ -224,7 +224,7 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             third = read_clock(q)
-            check("i po przeprowadzce dalej chodzi (%s -> %s)"
+            check("and after the move it still runs (%s -> %s)"
                   % (second, third),
                   third.count(":") == 2 and "?" not in third and
                   seconds(third) > seconds(second))
@@ -237,9 +237,9 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("klik w komorke na belce przenosi na czwarty pulpit",
+            check("a click on a cell in the bar moves to the fourth desktop",
                   pager(at, w) == [False, False, False, True])
-            check("a tam nie ma nic - pusty pulpit",
+            check("and there is nothing there - an empty desktop",
                   len(buttons(at, w, row)) == 0 and
                   not is_win(at(WX + 40, WY + 20)))
 
@@ -250,7 +250,7 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("a pierwszy pulpit ma z powrotem swoje okna jadra",
+            check("and the first desktop has its kernel windows back",
                   pager(at, w) == [True, False, False, False] and
                   len(buttons(at, w, row)) == 2)
         finally:

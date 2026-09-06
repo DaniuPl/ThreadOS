@@ -118,7 +118,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(320, 300)
             time.sleep(1.5)
@@ -136,11 +136,11 @@ def main():
                       if is_accent(at(lx + dx, 4))]
             empty = [dx for dx in range(1, LOAD_BAR - 1)
                      if is_ground(at(lx + dx, 4))]
-            check("miernik pokazuje, ze cos jest zajete (%d kolumn)"
+            check("the gauge shows something is used (%d columns)"
                   % len(filled), len(filled) >= 1)
-            check("i ze nie wszystko (%d kolumn wolnych)" % len(empty),
+            check("and that not everything is (%d columns free)" % len(empty),
                   len(empty) >= 10)
-            check("wypelnienie jest od lewej, w ramce",
+            check("the fill starts from the left, inside the frame",
                   filled and filled[0] == 1 and max(filled) < LOAD_BAR - 1)
 
             # --- and it says what it means when asked -------------------
@@ -169,11 +169,11 @@ def main():
                 time.sleep(2)
                 said, m = hint_now()
 
-            check("podpowiedz podaje liczby ('%s')" % said, m is not None)
+            check("the hint gives the numbers ('%s')" % said, m is not None)
             if not m:
                 return summary()
             pct, used, total, tasks = (int(x) for x in m.groups())
-            check("i sa to liczby, ktore trzymaja sie kupy "
+            check("and they are numbers that hold together "
                   "(%d%% z %d/%d MiB)" % (pct, used, total),
                   0 < total <= 512 and used <= total and pct <= 100)
 
@@ -194,22 +194,22 @@ def main():
                 said2, m2 = hint_now()
                 if m2 and int(m2.group(4)) > tasks:
                     break
-            check("po uruchomieniu programu podpowiedz mowi co innego "
+            check("once a program starts the hint says something else "
                   "('%s')" % said2, m2 is not None)
             if m2:
-                check("i zadan jest wiecej (%d -> %d)"
+                check("and there are more tasks (%d -> %d)"
                       % (tasks, int(m2.group(4))), int(m2.group(4)) > tasks)
 
             # --- show the desktop ---------------------------------------
-            q.mouse_goto(24, 272)              # the "Ustaw" icon as well
+            q.mouse_goto(24, 272)              # the "Config" icon as well
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(320, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             before = len(buttons(at, w, row))
-            check("dwa okna stoja na ekranie (%d przyciskow z oknami "
-                  "jadra)" % before, before == 4)
+            check("two windows stand on the screen (%d buttons with the "
+                  "kernel's)" % before, before == 4)
 
             # The settings window is at slot 3 (106,66); minimise it by
             # hand - its [_] is at x+w-2*8-2. It has to STAY minimised
@@ -221,7 +221,7 @@ def main():
             q.mouse_goto(320, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("okno zwiniete recznie znika z ekranu",
+            check("a window minimised by hand goes from the screen",
                   not is_win(at(300, 200)))
 
             q.mouse_goto(sx + 6, 5)
@@ -231,12 +231,12 @@ def main():
             q.mouse_goto(320, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'pokaz pulpit' chowa reszte okien",
+            check("'show desktop' hides the other windows",
                   not any(all(c < 60 for c in at(x, 200))
                           for x in range(100, 400, 8)))
-            check("ale nie zamyka ich - przyciski na pasku zostaja",
+            check("but it does not close them - the buttons stay on the bar",
                   len(buttons(at, w, row)) == before)
-            check("i sam przycisk swieci",
+            check("and the button itself is lit",
                   is_accent(at(sx + 6, 4)) or is_accent(at(sx + 1, 4)))
 
             q.mouse_goto(sx + 6, 5)
@@ -249,9 +249,9 @@ def main():
             # The terminal is black, so its return is easy to see
             back = any(all(c < 60 for c in at(x, 200))
                        for x in range(100, 400, 8))
-            check("drugi klik przywraca to, co schowal", back)
-            check("a okno zwiniete recznie zostaje zwiniete - "
-                  "przycisk nie odwraca cudzych decyzji",
+            check("a second click brings back what it hid", back)
+            check("and a window minimised by hand stays minimised - "
+                  "the button does not undo anybody else's decisions",
                   not is_win(at(300, 120)))
         finally:
             q.close()

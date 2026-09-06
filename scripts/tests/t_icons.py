@@ -13,8 +13,8 @@ and nothing else. Plain text like everything else the system keeps: it
 can be read with 'cat' and BUILT ON THE MACHINE ITSELF, with the shell
 in the terminal and the redirections it already had -
 
-    echo gterm Terminal 4 > pulpit.ikony
-    echo gweb Internet 5 >> pulpit.ikony
+    echo gterm Terminal 4 > desktop.icons
+    echo gweb Internet 5 >> desktop.icons
 
 which is what this test does, because a format nobody on the machine
 can produce is a format for somebody else's machine.
@@ -88,7 +88,7 @@ def write_list(q, lines):
     time.sleep(2)
     for i, line in enumerate(lines):
         q.type_line("echo %s %s %d" % (line[0], line[1], line[2]) +
-                    (" > " if i == 0 else " >> ") + "pulpit.ikony")
+                    (" > " if i == 0 else " >> ") + "desktop.icons")
         time.sleep(1.5)
     q.type_line("exit")
     time.sleep(1.5)
@@ -101,7 +101,7 @@ def main():
     slog = tempfile.mktemp(suffix=".log")
     wanted = [("gterm", "Terminal", 4),
               ("gweb", "Internet", 5),
-              ("gsettings", "Ustawienia", 6)]
+              ("gsettings", "Settings", 6)]
 
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
@@ -112,9 +112,9 @@ def main():
             # column, and the icon captions run under them - so they go
             # out of the way before anything is read off the screen
 
-            shown = q.command("cat pulpit.ikony", "gsettings", timeout=30)
+            shown = q.command("cat desktop.icons", "gsettings", timeout=30)
             for app, label, art in wanted:
-                check("plik ma wiersz dla '%s'" % app,
+                check("the file has a line for '%s'" % app,
                       "%s %s %d" % (app, label, art) in shown)
 
             q.type_line("desktop")
@@ -128,21 +128,21 @@ def main():
             time.sleep(2)
 
             log = q.serial()
-            check("jadro wczytalo liste ikon i mowi, ile",
-                  "ikony z pliku 'pulpit.ikony': 3" in log)
+            check("the kernel read the icon list and says how many",
+                  "icons from the file 'desktop.icons': 3" in log)
 
             w, h, at = q.screen_raw()
-            check("na pulpicie sa trzy kafelki",
+            check("there are three tiles on the desktop",
                   is_tile(at, 0) and is_tile(at, 1) and is_tile(at, 2))
-            check("i ani jednego wiecej", not is_tile(at, 3))
+            check("and not one more", not is_tile(at, 3))
 
             for k, (app, label, art) in enumerate(wanted):
                 got = label_of(q, k)
-                check("kafelek %d nosi napis z pliku ('%s')" % (k, got),
+                check("tile %d carries the label from the file ('%s')" % (k, got),
                       got == label)
 
             pics = [picture_of(at, k) for k in range(3)]
-            check("i kazdy ma inny obrazek",
+            check("and each has a different picture",
                   pics[0] != pics[1] and pics[1] != pics[2] and
                   pics[0] != pics[2])
 
@@ -151,20 +151,20 @@ def main():
             q.mouse_click()
             time.sleep(4)
             log = q.serial()
-            check("klik w ikone z pliku uruchamia jej program",
+            check("a click on an icon from the file starts its program",
                   "exec 'gterm'" in log)
         finally:
             q.close()
 
         # --- a list that says nothing usable ---------------------------
-        print("--- plik bez sensownych wierszy ---")
+        print("--- a file with no sensible lines ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
             q2.wait_for("ProtonOS shell", timeout=40)
             # A file with nothing in it but a comment: the lines that
             # do not parse are passed over, and what is left is nothing
-            q2.command("write pulpit.ikony #tylko-komentarz", "zapisano",
+            q2.command("write desktop.icons #only-a-comment", "wrote",
                        timeout=30)
             q2.type_line("desktop")
             time.sleep(6)
@@ -173,9 +173,9 @@ def main():
             time.sleep(2)
 
             w, h, at = q2.screen_raw()
-            check("pulpit wraca do swoich siedmiu ikon",
+            check("the desktop comes back to its seven icons",
                   is_tile(at, 0) and is_tile(at, 6))
-            check("i pierwsza z nich jest ta, co zawsze ('App')",
+            check("and the first of them is the usual one ('App')",
                   label_of(q2, 0) == "App")
         finally:
             q2.close()

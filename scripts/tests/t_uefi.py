@@ -22,22 +22,22 @@ def main():
     # things: that the kernel came up at all and that it drew something on
 # the screen.
     print()
-    print("--- rozruch przez UEFI (OVMF) ---")
+    print("--- booting through UEFI (OVMF) ---")
     OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
     OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE: brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED: no 64-bit image (make kernel64)")
     elif shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue")
+        print("SKIPPED: no grub-mkrescue")
     elif not os.path.isdir("/usr/lib/grub/x86_64-efi"):
-        print("POMINIETE: brak GRUB-a dla EFI "
+        print("SKIPPED: no GRUB for EFI "
               "(apt install grub-efi-amd64-bin)")
     elif shutil.which("mformat") is None:
-        print("POMINIETE: brak mtools (partycji EFI nie ma z czego zlozyc)")
+        print("SKIPPED: no mtools (nothing to build an EFI partition out of)")
     elif not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
-        print("POMINIETE: brak firmware OVMF (apt install ovmf)")
+        print("SKIPPED: no OVMF firmware (apt install ovmf)")
     elif shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
     else:
         due = tempfile.mkdtemp()
         isoue = tempfile.mktemp(suffix=".iso")
@@ -62,14 +62,14 @@ def main():
             made = subprocess.run(["grub-mkrescue", "-o", isoue, due],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
-            check("plyta hybrydowa (BIOS + UEFI) buduje sie", made)
+            check("the hybrid disc (BIOS + UEFI) builds", made)
             # The EFI partition really has to be inside, otherwise the
             # firmware has nothing to start - we look for its signature in
             # the image
             if made:
                 with open(isoue, "rb") as fh:
                     head = fh.read(4 * 1024 * 1024)
-                check("obraz zawiera partycje EFI z programem rozruchowym",
+                check("the image holds an EFI partition with a boot loader",
                       b"EFI PART" in head or b"BOOTX64" in head.upper())
             if made:
                 # The firmware writes variables, so it works on a copy
@@ -79,40 +79,40 @@ def main():
                            uefi=(OVMF_CODE, nvram))
                 try:
                     out = q24.wait_serial("Multiboot OK", timeout=60)
-                    check("firmware UEFI uruchamia GRUB-a, a GRUB jadro",
-                          "Jadro uruchomione w trybie dlugim" in out)
-                    check("jadro widzi znaczniki Multiboot 2 od GRUB-a EFI",
+                    check("the UEFI firmware starts GRUB, and GRUB the kernel",
+                          "The kernel is running in long mode" in out)
+                    check("the kernel sees the Multiboot 2 tags from EFI GRUB",
                           "Multiboot OK (Multiboot 2)" in out)
                     # Under UEFI the ACPI tables are the only way to learn
                     # anything about the board
-                    acpi = q24.wait_serial("Wskaznik ACPI", timeout=20)
-                    check("loader podaje wskaznik ACPI",
-                          re.search(r"Wskaznik ACPI od loadera: [0-9a-f]+",
+                    acpi = q24.wait_serial("ACPI pointer", timeout=20)
+                    check("the loader hands over an ACPI pointer",
+                          re.search(r"ACPI pointer from the loader: [0-9a-f]+",
                                     acpi) is not None)
-                    fbl = q24.wait_serial("Bufor obrazu", timeout=20)
-                    m = re.search(r"Bufor obrazu: (\d+)x(\d+), (\d+) "
-                                  r"bitow na piksel", fbl)
-                    check("bufor obrazu od firmware przyjety"
+                    fbl = q24.wait_serial("Framebuffer", timeout=20)
+                    m = re.search(r"Framebuffer: (\d+)x(\d+), (\d+) "
+                                  r"bits per pixel", fbl)
+                    check("the firmware's framebuffer was accepted"
                           + (f" ({m.group(1)}x{m.group(2)}, {m.group(3)} b/px)"
                              if m else ""),
                           m is not None)
-                    check("format piksela inny niz 32-bitowy tez dziala",
+                    check("a pixel format other than 32-bit works too",
                           m is not None and m.group(3) in ("24", "32"))
-                    mem = q24.wait_serial("Pamiec fizyczna", timeout=20)
-                    check("mapa pamieci od GRUB-a EFI ma sens",
-                          re.search(r"Pamiec fizyczna: \d{5,} KiB RAM",
+                    mem = q24.wait_serial("Physical memory", timeout=20)
+                    check("the memory map from EFI GRUB makes sense",
+                          re.search(r"Physical memory: \d{5,} KiB RAM",
                                     mem) is not None)
                     r3 = q24.wait_serial("Program w ring 3:", timeout=40)
-                    check("program w ring 3 rusza tak samo jak pod BIOS-em",
-                          "pierscien 3" in r3)
+                    check("a ring 3 program starts just as it does under BIOS",
+                          "ring 3" in r3)
                     if INITRD64 and os.path.exists(INITRD64):
                         # The module from GRUB EFI arrives by the same path
                         # as under BIOS - through a Multiboot 2 tag
                         elf = q24.wait_serial("ELF64 z initrd:", timeout=40)
-                        check("program z initrd dziala takze pod UEFI",
-                              "pierscien 3" in elf
-                              and "kod wyjscia 7" in elf)
-                    q24.wait_serial("System 64-bitowy gotowy", timeout=30)
+                        check("a program from the initrd runs under UEFI too",
+                              "ring 3" in elf
+                              and "exit code 7" in elf)
+                    q24.wait_serial("The 64-bit system is ready", timeout=30)
                     # And the same on the screen - drawn by our code,
                     # pixel by pixel, with no help from the firmware
                     w, h, at = q24.screen_raw()
@@ -120,8 +120,8 @@ def main():
                     lit = sum(1 for y in range(y0, y0 + 200)
                               for x in range(x0, x0 + 640)
                               if at(x, y) != (0, 0, 0))
-                    check(f"konsola rysuje sie na ekranie UEFI "
-                          f"({lit} pikseli)", lit > 2000)
+                    check(f"the console draws on the UEFI screen "
+                          f"({lit} pixels)", lit > 2000)
                 finally:
                     q24.close()
         finally:

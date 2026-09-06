@@ -54,11 +54,11 @@ def size(listing, name):
 def adresy(text):
     """The three addresses dynlib prints."""
     def one_core(co):
-        m = re.search(r"kod programu pod (\d+)" if co == "prog" else
-                      (r"kod biblioteki pod (\d+)" if co == "kod" else
-                       r"dane biblioteki pod (\d+)"), text)
+        m = re.search(r"the program's code at (\d+)" if co == "prog" else
+                      (r"the library's code at (\d+)" if co == "code" else
+                       r"the library's data at (\d+)"), text)
         return int(m.group(1)) if m else None
-    return one_core("prog"), one_core("kod"), one_core("dane")
+    return one_core("prog"), one_core("code"), one_core("data")
 
 
 def check_shared(q, marker, suffix, lib_base):
@@ -66,7 +66,7 @@ def check_shared(q, marker, suffix, lib_base):
     listing."""
     first = q.command("run dynlib", marker, timeout=60)
     prog, code, dane = adresy(first)
-    check("program podaje wszystkie trzy adresy" + suffix,
+    check("the program gives all three addresses" + suffix,
           prog is not None and code is not None and dane is not None)
     if code is None:
         return
@@ -74,64 +74,64 @@ def check_shared(q, marker, suffix, lib_base):
     # The library's code lies in ITS area, not in the program's image.
     # That is the whole point: the program does not have that code inside
     # itself.
-    check("kod biblioteki lezy poza obrazem programu" + suffix,
+    check("the library's code lies outside the program image" + suffix,
           code >= lib_base and code < lib_base + 16 * 1024 * 1024)
-    check("kod programu lezy tam, gdzie zawsze" + suffix,
+    check("the program's code lies where it always does" + suffix,
           prog is not None and 0x40000000 <= prog < 0x41000000)
-    check("dane biblioteki sa w osobnym, wyzszym segmencie" + suffix,
+    check("the library's data is in a separate, higher segment" + suffix,
           dane is not None and dane > code)
-    check("kryptografia z biblioteki liczy poprawnie" + suffix,
-          "zgadza sie z FIPS 180-4" in first and "ZLE" not in first)
+    check("the cryptography from the library computes correctly" + suffix,
+          "matches FIPS 180-4" in first and "WRONG" not in first)
 
-    counter = re.search(r"licznik po pobraniu bajtow: (\d+)", first)
-    check("program doszedl do konca" + suffix,
-          "[dynlib] gotowe" in first and counter is not None)
+    counter = re.search(r"the counter after taking bytes: (\d+)", first)
+    check("the program reached the end" + suffix,
+          "[dynlib] done" in first and counter is not None)
 
     # The second run: the same code at the same address (shared frames),
     # but the counter from zero again (private data). If the data were
     # shared, it would find the previous process's state.
     second = q.command("run dynlib", marker, timeout=60)
     prog2, code2, dane2 = adresy(second)
-    counter2 = re.search(r"licznik po pobraniu bajtow: (\d+)", second)
-    check("drugi proces widzi kod pod tym samym adresem" + suffix,
+    counter2 = re.search(r"the counter after taking bytes: (\d+)", second)
+    check("the second process sees the code at the same address" + suffix,
           code2 == code and dane2 == dane)
-    check("ale dane biblioteki dostaje wlasne, od zera" + suffix,
+    check("but it gets the library's data of its own, from zero" + suffix,
           counter is not None and counter2 is not None and
           counter2.group(1) == counter.group(1))
 
     # A write into the shared code has to kill whoever tries
     corrupt = q.command("run dynlib pisz", "Page Fault", timeout=60)
-    check("zapis do kodu biblioteki konczy sie bledem ochrony" + suffix,
-          "probuje pisac po kodzie" in corrupt and "Page Fault" in corrupt and
-          "zapis do kodu biblioteki sie udal" not in corrupt)
+    check("writing to the library's code ends with a protection fault" + suffix,
+          "trying to write over the code" in corrupt and "Page Fault" in corrupt and
+          "writing to the library's code worked" not in corrupt)
 
     # Sizes: the four heaviest programs together lighter than the library
     listing = q.command("ls", "dynlib", timeout=20)
     lib = size(listing, "libproton.so")
-    check("biblioteka jest w initrd i wazy swoje" + suffix,
+    check("the library is in the initrd and weighs what it weighs" + suffix,
           lib is not None and lib > 60000)
     heavy = [size(listing, n)
                for n in ("cryptotest", "certtest", "httpget", "gweb")]
-    check("wszystkie cztery programy sa w wypisie" + suffix,
+    check("all four programs are in the listing" + suffix,
           all(v is not None for v in heavy))
     if lib and all(v is not None for v in heavy):
-        check("cztery najciezsze programy razem lzejsze niz biblioteka"
+        check("the four heaviest programs together weigh less than the library"
               " (%d B < %d B)%s" % (sum(heavy), lib, suffix),
               sum(heavy) < lib)
 
 
 def main():
-    print("--- biblioteka wspoldzielona (jadro 64-bitowe) ---")
+    print("--- the shared library (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
@@ -139,10 +139,10 @@ def main():
                      qemu="qemu-system-x86_64")
             try:
                 start = q.wait_serial("proton64>", timeout=90)
-                m = re.search(r"Biblioteka libproton\.so: (\d+) stron", start)
-                check("jadro wczytalo biblioteke przy rozruchu",
+                m = re.search(r"Library libproton\.so: (\d+) pages", start)
+                check("the kernel read the library at boot",
                       m is not None and int(m.group(1)) >= 8)
-                check_shared(q, "kod wyjscia", "", 0x4F000000)
+                check_shared(q, "exit code", "", 0x4F000000)
             finally:
                 q.close()
         finally:
@@ -152,7 +152,7 @@ def main():
                     os.unlink(f)
 
     # --- The same in the 32-bit kernel ---
-    print("--- biblioteka wspoldzielona (jadro 32-bitowe) ---")
+    print("--- the shared library (the 32-bit kernel) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     disk32 = tempfile.mktemp(suffix=".img")
     with open(disk32, "wb") as fh:
@@ -161,11 +161,11 @@ def main():
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
             start = q3.wait_for("ProtonOS shell", timeout=40)
-            m = re.search(r"Biblioteka libproton\.so: (\d+) stron", start)
-            check("jadro wczytalo biblioteke przy rozruchu (32-bit)",
+            m = re.search(r"Library libproton\.so: (\d+) pages", start)
+            check("the kernel read the library at boot (32-bit)",
                   m is not None and int(m.group(1)) >= 8)
-            q3.wait_for("[siec] DHCP", timeout=30)
-            check_shared(q3, "zakonczyl sie", " (32-bit)", 0xAF000000)
+            q3.wait_for("[net] DHCP", timeout=30)
+            check_shared(q3, "has ended", " (32-bit)", 0xAF000000)
         finally:
             q3.close()
     finally:

@@ -37,7 +37,7 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
         q.wait_for("ProtonOS shell")
-        q.wait_for("[siec] DHCP", timeout=20)
+        q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
         # 'run forktest': fork() with copy on write. The program takes
@@ -47,38 +47,38 @@ def main():
         q.type_line("mem")
         used_before_fk = pmm_used(q.screen())
         q.type_line("run forktest")
-        screen = q.wait_for("[forktest] dziecko: wzorzec odziedziczony",
+        screen = q.wait_for("[forktest] child: the pattern was inherited",
                             timeout=30)
-        check("fork: dziecko wraca z syscalla z pamiecia rodzica",
-              "[forktest] dziecko: wzorzec odziedziczony" in screen)
-        m = re.search(r"przyrost RAM po fork: (\d+) KiB", screen)
-        check("fork nie kopiuje pamieci procesu"
-              + (f" (256 KiB bufora, przyrost {m.group(1)} KiB)" if m else ""),
+        check("fork: the child comes back from a syscall with the parent's memory",
+              "[forktest] child: the pattern was inherited" in screen)
+        m = re.search(r"RAM growth after the fork: (\d+) KiB", screen)
+        check("fork does not copy the process's memory"
+              + (f" (256 KiB of buffer, growth {m.group(1)} KiB)" if m else ""),
               m is not None and int(m.group(1)) < 64)
-        screen = q.wait_for("[forktest] rodzic: wzorzec nietkniety",
+        screen = q.wait_for("[forktest] parent: the pattern is untouched",
                             timeout=30)
-        check("zapisy dziecka nie widac u rodzica (prywatne kopie stron)",
-              "[forktest] rodzic: wzorzec nietkniety" in screen)
-        check("zapis jadra w dziecku tez trafil w prywatna kopie strony",
-              "rodzic: wzorzec nietkniety" in screen)
-        check("rodzic odbiera kod wyjscia dziecka przez wait",
-              "kod dziecka=7" in screen)
+        check("the child's writes are not seen by the parent (private copies of pages)",
+              "[forktest] parent: the pattern is untouched" in screen)
+        check("a kernel write in the child hit a private copy of the page too",
+              "parent: the pattern is untouched" in screen)
+        check("the parent takes the child's exit code through wait",
+              "child code=7" in screen)
 
         # The other half of the Unix pair: the child turns itself into
         # another program through exec, and the parent waits for the same
         # pid.
-        screen = q.wait_for("[forktest] rodzic doczekal sie pidu", timeout=30)
-        check("exec podmienia obraz procesu w miejscu",
-              "[forktest] po exec: inny program, ten sam pid" in screen)
-        check("po exec proces nazywa sie jak nowy program",
-              "proces 'echo' zakonczyl sie (kod 0)" in screen)
-        check("wait rodzica trafia w ten sam pid po exec",
-              "doczekal sie pidu" in screen)
-        q.wait_for("proces 'forktest' zakonczyl sie (kod 0)", timeout=20)
+        screen = q.wait_for("[forktest] the parent waited out pid", timeout=30)
+        check("exec swaps the process image in place",
+              "[forktest] after exec: another program, the same pid" in screen)
+        check("after the exec the process is named after the new program",
+              "process \'echo\' has ended (code 0)" in screen)
+        check("the parent's wait hits the same pid after the exec",
+              "waited out pid" in screen)
+        q.wait_for("process \'forktest\' has ended (code 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")
         used_after_fk = pmm_used(q.screen())
-        check(f"brak wycieku ramek po fork"
+        check(f"no frames leaked after the fork"
               f" ({used_before_fk} -> {used_after_fk})",
               used_after_fk is not None and used_after_fk == used_before_fk)
 
@@ -89,22 +89,22 @@ def main():
         q.type_line("mem")
         used_before_pt = pmm_used(q.screen())
         q.type_line("run ptree")
-        screen = q.wait_for("[ptree] zebrane wszystkie dzieci", timeout=30)
-        m = re.findall(r"skonczylo dziecko (\d+) z kodem (\d+)", screen)
-        check("wait na dowolne dziecko oddaje je w kolejnosci konczenia"
+        screen = q.wait_for("[ptree] every child collected", timeout=30)
+        m = re.findall(r"a child finished: (\d+) with code (\d+)", screen)
+        check("wait for any child gives them back in the order they finish"
               + (f" (pidy {[p for p, _ in m]})" if m else ""),
               len(m) == 3 and [int(p) for p, _ in m] == sorted(
                   (int(p) for p, _ in m), reverse=True))
-        check("kod wyjscia pasuje do dziecka, ktore go zwrocilo",
+        check("the exit code matches the child that returned it",
               [c for _, c in m] == ["22", "21", "20"])
-        screen = q.wait_for("[ptree] sierota przygarnieta", timeout=30)
-        check("sierota trafia pod opieke dziadka (kod 99 dociera do niego)",
-              "z kodem 99" in screen)
-        q.wait_for("proces 'ptree' zakonczyl sie (kod 0)", timeout=20)
+        screen = q.wait_for("[ptree] the orphan was taken in", timeout=30)
+        check("the orphan ends up in the grandparent's care (code 99 reaches it)",
+              "with code 99" in screen)
+        q.wait_for("process \'ptree\' has ended (code 0)", timeout=20)
         time.sleep(0.6)
         q.type_line("mem")
         used_after_pt = pmm_used(q.screen())
-        check(f"brak wycieku ramek po drzewie procesow"
+        check(f"no frames leaked after the process tree"
               f" ({used_before_pt} -> {used_after_pt})",
               used_after_pt is not None and used_after_pt == used_before_pt)
     finally:

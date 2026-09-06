@@ -1,4 +1,4 @@
-/* hello - grzeczny program uzytkownika: syscalle i czyste wyjscie */
+/* hello - a polite user program: syscalls and a clean exit */
 
 #include "usys.h"
 
@@ -9,7 +9,8 @@ void _start(void)
     print("[hello] hello, I am an ELF process from the initrd!\n");
 
     for (int i = 1; i <= 3; i++) {
-        counter_msg[15] = (char)('0' + i);
+        /* the digit is the last character before the newline */
+        counter_msg[sizeof(counter_msg) - 3] = (char)('0' + i);
         print(counter_msg);
         sys_sleep(250);
     }

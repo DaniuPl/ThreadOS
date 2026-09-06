@@ -35,30 +35,30 @@ def main():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
         q.wait_for("ProtonOS shell")
-        q.wait_for("[siec] DHCP", timeout=20)
+        q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
         # 'run evil': an attempt to read kernel memory directly
         q.type_line("clear")
         q.type_line("run evil")
-        screen = q.wait_for("proces 'evil' ubity")
-        check("evil czytal pamiec jadra i zostal ubity",
-              "proces 'evil' ubity" in screen)
-        check("CR2 pokazuje atakowany adres",
-              "siegnal po adres 100000" in screen)
-        check("kod po ataku nie wykonal sie",
-              "TEGO NIE POWINNO BYC WIDAC" not in screen)
+        screen = q.wait_for("process 'evil' killed")
+        check("evil read kernel memory and was killed",
+              "process 'evil' killed" in screen)
+        check("CR2 shows the attacked address",
+              "reached for the address 100000" in screen)
+        check("the code after the attack never ran",
+              "THIS SHOULD NOT BE VISIBLE" not in screen)
 
         # 'run evil2': the same addresses, but passed to the kernel in
         # syscalls
         q.type_line("run evil2")
-        ev2 = q.wait_for("granica trzyma", timeout=20)
-        check("syscalle odrzucaja wskazniki na pamiec jadra",
-              "jadro odrzucilo wszystkie proby" in ev2)
-        check("evil2 nie wypisal pamieci jadra na konsole",
-              "PRZESZLO" not in ev2 and "DZIURA" not in ev2)
-        check("proces przezyl odrzucone syscalle (kod 0)",
-              "kod 0" in ev2)
+        ev2 = q.wait_for("the boundary holds", timeout=20)
+        check("the syscalls refuse pointers into kernel memory",
+              "the kernel refused every attempt" in ev2)
+        check("evil2 did not print kernel memory on the console",
+              "IT PASSED" not in ev2 and "A HOLE" not in ev2)
+        check("the process survived the refused syscalls (code 0)",
+              "code 0" in ev2)
     finally:
         q.close()
         for f in (disk, slog):

@@ -20,9 +20,9 @@ from ptest import check, summary
 
 def main():
     # ACPI arrives as Multiboot 2 tags.
-    print("--- rozruch z ISO (Multiboot 2) ---")
+    print("--- booting off an ISO (Multiboot 2) ---")
     if shutil.which("grub-mkrescue") is None:
-        print("POMINIETE: brak grub-mkrescue "
+        print("SKIPPED: no grub-mkrescue "
               "(apt install grub-pc-bin grub-common xorriso)")
     else:
         isodir = tempfile.mkdtemp()
@@ -41,52 +41,52 @@ def main():
             made = subprocess.run(["grub-mkrescue", "-o", iso, isodir],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
-            check("obraz ISO buduje sie", made)
+            check("the ISO image builds", made)
             if made:
                 slog = tempfile.mktemp(suffix=".log")
                 q21 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog)
                 try:
                     boot = q21.wait_serial("Multiboot OK", timeout=40)
-                    check("jadro wgrane przez GRUB-a mowi Multiboot 2",
+                    check("the kernel loaded by GRUB speaks Multiboot 2",
                           "Multiboot OK (Multiboot 2)" in boot)
-                    check("mapa pamieci ze znacznika Multiboot 2",
-                          re.search(r"Pamiec fizyczna: \d+ KiB RAM",
-                                    q21.wait_serial("Pamiec fizyczna",
+                    check("the memory map from the Multiboot 2 tag",
+                          re.search(r"Physical memory: \d+ KiB RAM",
+                                    q21.wait_serial("Physical memory",
                                                     timeout=20)) is not None)
-                    check("initrd dotarl jako modul Multiboot 2",
-                          re.search(r"initrd: \d+ plikow",
+                    check("the initrd arrived as a Multiboot 2 module",
+                          re.search(r"initrd: \d+ files",
                                     q21.wait_serial("initrd:", timeout=20))
                           is not None)
-                    check("wskaznik na tablice ACPI podany przez GRUB-a",
-                          "ACPI: tablice od" in q21.wait_serial("ACPI:",
+                    check("the pointer to the ACPI tables handed over by GRUB",
+                          "ACPI: tables from" in q21.wait_serial("ACPI:",
                                                                 timeout=20))
                     q21.wait_serial("ProtonOS shell", timeout=30)
                     q21.type_line("uptime")
-                    check("system z plyty odpowiada na komendy",
-                          "uptime:" in q21.wait_serial("tyknac timera",
+                    check("the system from the disc answers commands",
+                          "uptime:" in q21.wait_serial("timer ticks",
                                                        timeout=20))
 
                     # The console drawn on the framebuffer from GRUB: VGA
                     # text mode does not work here at all, so every lit
                     # pixel is a character drawn by us
                     w, h, at = q21.screen_raw()
-                    check(f"loader ustawil tryb graficzny ({w}x{h})",
+                    check(f"the loader set a graphics mode ({w}x{h})",
                           w >= 640 and h >= 400)
                     x0, y0 = (w - 640) // 2, (h - 200) // 2
                     lit = sum(1 for y in range(y0, y0 + 200)
                               for x in range(x0, x0 + 640)
                               if at(x, y) != (0, 0, 0))
-                    check(f"konsola narysowana na buforze obrazu "
-                          f"({lit} pikseli)", lit > 3000)
+                    check(f"the console is drawn on the framebuffer "
+                          f"({lit} pixels)", lit > 3000)
                     green = sum(1 for y in range(y0, y0 + 200)
                                 for x in range(x0, x0 + 640)
                                 if at(x, y) == (85, 255, 85))
-                    check("kolory trybu tekstowego oddane w RGB "
-                          f"(jasnozielone [ OK ]: {green})", green > 100)
+                    check("the text mode colours given back in RGB "
+                          f"(a light green [ OK ]: {green})", green > 100)
                     outside = sum(1 for y in range(0, min(40, y0))
                                   for x in range(0, w, 4)
                                   if at(x, y) != (0, 0, 0))
-                    check("poza blokiem tekstu ekran czysty", outside == 0)
+                    check("outside the block of text the screen is clean", outside == 0)
                 finally:
                     q21.close()
                     if os.path.exists(slog):
@@ -114,8 +114,8 @@ def main():
                                    if all(abs(at(x, y)[i] - (0, 128, 160)[i])
                                           <= 40 for i in range(3)))
                         total = (h // 8) * (w // 8)
-                        check(f"pulpit rysuje sie na buforze od loadera "
-                              f"({w}x{h}, {teal}/{total} probek tla)",
+                        check(f"the desktop draws on the loader's buffer "
+                              f"({w}x{h}, {teal}/{total} background samples)",
                               teal > total * 0.7)
 
                         # A message printed while the desktop is
@@ -144,9 +144,9 @@ def main():
                                        <= 40 for i in range(3)))
                             if after >= want:
                                 break
-                        check(f"a napis z jadra nie zostaje na ekranie - "
-                              f"pulpit go zakrywa ({after}/{total} probek "
-                              f"tla, bylo {teal})",
+                        check(f"and the kernel's text does not stay on the screen - "
+                              f"the desktop covers it ({after}/{total} background "
+                              f"samples, it was {teal})",
                               after >= want)
                     finally:
                         q22.close()

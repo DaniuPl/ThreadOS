@@ -40,11 +40,11 @@ from ptest import check, summary, no64, make_iso64, aesref, start_http_server
 
 
 def fields(out):
-    """The hex lines the program printed: klucz=..., szyfr=... ."""
+    """The hex lines the program printed: key=..., ciphertext=... ."""
     got = {}
     # The console ends its lines with \n\r, so the next line begins with
     # the carriage return - hence the \s* in front of the name.
-    for name, value in re.findall(r"^\s*(klucz|nonce|aad|jawny|szyfr|tag)="
+    for name, value in re.findall(r"^\s*(key|nonce|aad|plaintext|ciphertext|tag)="
                                   r"([0-9a-f]+)\s*$", out, re.M):
         got[name] = bytes.fromhex(value)
     return got
@@ -67,7 +67,7 @@ def main():
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -82,7 +82,7 @@ def main():
     key = bytes(range(0x40, 0x50))
     nonce12 = bytes(range(0x10, 0x1C))
     nonce13 = bytes(range(0x20, 0x2D))
-    aad = b"ProtonOS, naglowek ramki"
+    aad = b"ProtonOS, a frame header"
     plain = bytes((i * 7 + 3) & 0xFF for i in range(48))
 
     good_gcm = vector_file("gcm", key, nonce12, aad, plain, 16)
@@ -94,10 +94,10 @@ def main():
         bad_gcm[-1] ^= 0x01          # one bit of the tag
         ptest.SERVED["/gcm.bin"] = good_gcm
         ptest.SERVED["/ccm.bin"] = good_ccm
-        ptest.SERVED["/zly.bin"] = bytes(bad_gcm)
+        ptest.SERVED["/bad.bin"] = bytes(bad_gcm)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -109,18 +109,18 @@ def main():
             q.wait_serial("proton64>", timeout=90)
 
             # --- 1. The published vectors ------------------------------
-            out = q.command("run aestest", "kod wyjscia", timeout=120)
-            check("wektory z FIPS-197, SP 800-38A, GCM i RFC 3610",
-                  "[aes] wszystko sie zgadza" in out and "BLAD" not in out)
-            check("CCM odrzuca podmieniony znacznik i nie oddaje tresci",
-                  "CCM wykrycie podmiany znacznika: OK" in out and
-                  "CCM po odrzuceniu nie zostawia tresci: OK" in out)
-            check("GCM wykrywa zmiane w danych dodatkowych",
-                  "GCM wykrycie zmiany w naglowku: OK" in out)
+            out = q.command("run aestest", "exit code", timeout=120)
+            check("vectors from FIPS-197, SP 800-38A, GCM and RFC 3610",
+                  "[aes] everything matches" in out and "FAILED" not in out)
+            check("CCM refuses a changed tag and gives back no plaintext",
+                  "CCM notices a changed tag: OK" in out and
+                  "CCM leaves no plaintext after a refusal: OK" in out)
+            check("GCM notices a change in the additional data",
+                  "GCM notices a change in the header: OK" in out)
 
             # --- 2. The same material through OpenSSL ------------------
             if not have_ref:
-                print("POMINIETE: brak cc/libcrypto - bez porownania "
+                print("SKIPPED: no cc/libcrypto - without a comparison "
                       "z OpenSSL")
             else:
                 cases = [("ecb", "3f", 32, 128), ("ecb", "77", 32, 256),
@@ -131,57 +131,57 @@ def main():
                 for mode, seed, length, bits in cases:
                     out = q.command("run aestest %s %s %d %d"
                                     % (mode, seed, length, bits),
-                                    "kod wyjscia", timeout=120)
+                                    "exit code", timeout=120)
                     got = fields(out)
-                    if "szyfr" not in got or "klucz" not in got:
-                        check("%s-%d: program wypisal material" % (mode, bits),
+                    if "ciphertext" not in got or "key" not in got:
+                        check("%s-%d: the program printed the material" % (mode, bits),
                               False)
                         continue
 
                     # A degenerate input would make the comparison
                     # meaningless - a key of one repeated byte agrees
                     # with everything.
-                    check("%s-%d: material nie jest wyrodny" % (mode, bits),
-                          len(set(got["klucz"])) > 4 and
-                          len(set(got["jawny"])) > 4 and
-                          len(got["klucz"]) == bits // 8)
+                    check("%s-%d: the material is not degenerate" % (mode, bits),
+                          len(set(got["key"])) > 4 and
+                          len(set(got["plaintext"])) > 4 and
+                          len(got["key"]) == bits // 8)
 
                     # ccm7 is the same mode with a seven-byte nonce -
                     # OpenSSL takes the length from the nonce itself.
                     taglen = 8 if mode == "ccm" else 16
-                    ref = aesref(mode[:3], got["klucz"],
+                    ref = aesref(mode[:3], got["key"],
                                  got.get("nonce", b""), got.get("aad", b""),
-                                 got["jawny"], taglen)
-                    check("%s-%d: szyfr taki sam jak w OpenSSL"
+                                 got["plaintext"], taglen)
+                    check("%s-%d: the ciphertext is the same as OpenSSL's"
                           % (mode, bits),
-                          ref is not None and ref[0] == got["szyfr"])
+                          ref is not None and ref[0] == got["ciphertext"])
                     if mode in ("gcm", "ccm"):
-                        check("%s-%d: znacznik taki sam jak w OpenSSL"
+                        check("%s-%d: the tag is the same as OpenSSL's"
                               % (mode, bits),
                               ref is not None and ref[1] == got.get("tag"))
-                    check("%s-%d: odszyfrowanie wraca do jawnego"
-                          % (mode, bits), "powrot: OK" in out)
+                    check("%s-%d: decryption comes back to the plaintext"
+                          % (mode, bits), "back again: OK" in out)
 
                 # --- 3. A ciphertext made outside the system -----------
-                q.wait_serial("DHCP: przyznano", timeout=60)
+                q.wait_serial("DHCP: granted", timeout=60)
                 for name, label in (("gcm", "GCM"), ("ccm", "CCM")):
                     q.command("run httpget 10.0.2.2 %d /%s.bin %s.bin"
-                              % (port, name, name), "kod wyjscia",
+                              % (port, name, name), "exit code",
                               timeout=60)
-                    out = q.command("run aestest plik %s.bin" % name,
-                                    "kod wyjscia", timeout=60)
-                    check("%s: szyfr z OpenSSL odszyfrowany w systemie"
+                    out = q.command("run aestest file %s.bin" % name,
+                                    "exit code", timeout=60)
+                    check("%s: OpenSSL's ciphertext decrypted inside the system"
                           % label,
-                          "[aes] tag zgadza sie" in out and
-                          fields(out).get("jawny") == plain)
+                          "[aes] the tag matches" in out and
+                          fields(out).get("plaintext") == plain)
 
-                q.command("run httpget 10.0.2.2 %d /zly.bin zly.bin" % port,
-                          "kod wyjscia", timeout=60)
-                out = q.command("run aestest plik zly.bin", "kod wyjscia",
+                q.command("run httpget 10.0.2.2 %d /bad.bin bad.bin" % port,
+                          "exit code", timeout=60)
+                out = q.command("run aestest file bad.bin", "exit code",
                                 timeout=60)
-                check("jeden zmieniony bit znacznika = odmowa",
-                      "[aes] tag NIE zgadza sie" in out and
-                      "jawny=" not in out)
+                check("one changed bit of the tag = a refusal",
+                      "[aes] the tag does NOT match" in out and
+                      "plaintext=" not in out)
         finally:
             q.close()
             stop()
@@ -198,9 +198,9 @@ def main():
         try:
             q.wait_for("ProtonOS shell")
             q.type_line("run aestest")
-            screen = q.wait_for("[aes] wszystko sie zgadza", timeout=120)
-            check("te same wektory przechodza w trybie 32-bitowym",
-                  "[aes] wszystko sie zgadza" in screen)
+            screen = q.wait_for("[aes] everything matches", timeout=120)
+            check("the same vectors pass in 32-bit mode",
+                  "[aes] everything matches" in screen)
         finally:
             q.close()
             os.unlink(disk32)

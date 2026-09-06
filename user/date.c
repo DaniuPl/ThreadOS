@@ -1,4 +1,4 @@
-/* date - wypisuje date i godzine z RTC w formacie YYYY-MM-DD HH:MM:SS */
+/* date - prints the date and time from the RTC as YYYY-MM-DD HH:MM:SS */
 
 #include "usys.h"
 

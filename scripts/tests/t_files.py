@@ -18,7 +18,7 @@ by failing to read the file. A directory is not deleted at all.
 
 The window's name is checked too: it says which directory it is
 showing, and changes when we walk into one. Two file managers open on
-two directories would be two windows called "Pliki" otherwise.
+two directories would be two windows called "Files" otherwise.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -49,10 +49,10 @@ NAME_X = CW - 48 - 56 - 56 - 8
 MODAL_H = 96
 MODAL_Y = (CH - MODAL_H) // 2
 MODAL_BY = MODAL_Y + MODAL_H - 26
-YES_X = 8 + 8 + 42            # the middle of "Usun"
-NO_X = 8 + 8 + 84 + 10 + 42   # the middle of "Zostaw"
+YES_X = 8 + 8 + 42            # the middle of "Remove"
+NO_X = 8 + 8 + 84 + 10 + 42   # the middle of "Keep"
 
-TEXT = "Wyniki pomiarow"          # what the test writes, and its length
+TEXT = "Measurement results"          # what the test writes, and its length
 
 
 def read_at(at, x, y, cols):
@@ -130,57 +130,57 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # Something to look at: a file whose length we know, and a
             # directory to walk into
-            q.type_line("write raport.txt " + TEXT)
+            q.type_line("write report.txt " + TEXT)
             time.sleep(1)
-            q.type_line("run mkdir dokumenty")
+            q.type_line("run mkdir documents")
             time.sleep(2)
 
-            click(q, 24, 112, wait=4)          # the "Pliki" icon
+            click(q, 24, 112, wait=4)          # the "Files" icon
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
             listed = rows(at)
             names = [r[0] for r in listed]
-            check("menedzer listuje zawartosc dysku (%s)"
-                  % ", ".join(names), "raport.txt" in names)
-            check("i katalog tez (%s)" % ", ".join(names),
-                  "dokumenty" in names)
+            check("the manager lists what is on the disk (%s)"
+                  % ", ".join(names), "report.txt" in names)
+            check("and the directory too (%s)" % ", ".join(names),
+                  "documents" in names)
 
             # The size column against a file whose length we know: the
             # shell writes the text and a newline
-            size = dict(listed).get("raport.txt", "")
-            check("przy pliku stoi jego rozmiar ('%s' przy %d znakach "
-                  "tekstu)" % (size, len(TEXT)),
+            size = dict(listed).get("report.txt", "")
+            check("a file has its size beside it ('%s' next to %d characters "
+                  "of text)" % (size, len(TEXT)),
                   size.startswith(str(len(TEXT))) or
                   size.startswith(str(len(TEXT) + 1)))
-            check("a przy katalogu slowo zamiast liczby ('%s')"
-                  % dict(listed).get("dokumenty", ""),
-                  dict(listed).get("dokumenty", "") == "katalog")
+            check("and a directory has a word instead of a number ('%s')"
+                  % dict(listed).get("documents", ""),
+                  dict(listed).get("documents", "") == "directory")
 
-            check("naglowek mowi, gdzie jestesmy ('%s')"
+            check("the heading says where we are ('%s')"
                   % read_at(at, 4, 2, 20), read_at(at, 4, 2, 20).startswith("/"))
-            check("i okno nosi nazwe katalogu ('%s')" % title(at),
-                  title(at) == "Pliki: /")
+            check("and the window is named after the directory ('%s')" % title(at),
+                  title(at) == "Files: /")
 
             # --- walking into a directory -------------------------------
-            i = names.index("dokumenty")
+            i = names.index("documents")
             click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
             click(q, CX + EDIT_X + 20, CY + 4, wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'Otworz' na katalogu wchodzi do niego ('%s')"
+            check("'Open' on a directory goes into it ('%s')"
                   % read_at(at, 4, 2, 20),
-                  read_at(at, 4, 2, 20).startswith("/dokumenty"))
-            check("i okno mowi to samo ('%s')" % title(at),
-                  title(at) == "Pliki: /dokumenty")
-            check("a w srodku pusto", rows(at) == [])
+                  read_at(at, 4, 2, 20).startswith("/documents"))
+            check("and the window says the same ('%s')" % title(at),
+                  title(at) == "Files: /documents")
+            check("and it is empty inside", rows(at) == [])
 
             # --- and back out -------------------------------------------
             click(q, CX + 160, CY + 120, wait=1)   # the focus into the window
@@ -189,51 +189,51 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Backspace wraca wyzej ('%s')" % title(at),
-                  title(at) == "Pliki: /")
+            check("Backspace goes back up ('%s')" % title(at),
+                  title(at) == "Files: /")
             listed = rows(at)
             names = [r[0] for r in listed]
-            check("i widac znowu to, co bylo", "raport.txt" in names)
+            check("and what was there shows again", "report.txt" in names)
 
             # --- deleting asks first ------------------------------------
-            i = names.index("raport.txt")
+            i = names.index("report.txt")
             click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
             click(q, CX + DEL_X + 16, CY + 4, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             asked = read_at(at, 8 + 8, MODAL_Y + 10, 36)
-            check("klik w 'Usun' stawia pytanie, a nie kasuje ('%s')"
-                  % asked, "Usunac" in asked and "raport.txt" in asked)
-            check("i plik dalej jest",
-                  "raport.txt" in [r[0] for r in rows(at)])
+            check("a click on 'Remove' asks a question instead of deleting ('%s')"
+                  % asked, "Remove" in asked and "report.txt" in asked)
+            check("and the file is still there",
+                  "report.txt" in [r[0] for r in rows(at)])
 
-            # "Zostaw" has to leave it alone - a question whose answers
+            # "Keep" has to leave it alone - a question whose answers
             # both mean yes is not a question.
             click(q, CX + NO_X, CY + MODAL_BY + 8, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'Zostaw' zostawia plik",
-                  "raport.txt" in [r[0] for r in rows(at)])
+            check("'Keep' keeps the file",
+                  "report.txt" in [r[0] for r in rows(at)])
 
             click(q, CX + DEL_X + 16, CY + 4, wait=2)
             click(q, CX + YES_X, CY + MODAL_BY + 8, wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("dopiero 'Usun' w pytaniu usuwa",
-                  "raport.txt" not in [r[0] for r in rows(at)])
+            check("only 'Remove' in the question removes it",
+                  "report.txt" not in [r[0] for r in rows(at)])
 
             # Confirmed by something that is not this program
             q.mouse_goto(500, 380)
             q.mouse_click()                    # the desktop takes the keys
             time.sleep(1)
             seen = len(q.serial())
-            q.type_line("cat raport.txt")
+            q.type_line("cat report.txt")
             time.sleep(2)
             after = q.serial()[seen:]
-            check("i pliku naprawde nie ma na dysku",
+            check("and the file really is gone from the disk",
                   TEXT not in after)
 
             # --- a new name, asked for in the same status line ----------
@@ -243,18 +243,18 @@ def main():
             click(q, CX + 160, CY + 120, wait=1)
             w, h, at = q.screen_raw()
             names = [r[0] for r in rows(at)]
-            i = names.index("dokumenty")
+            i = names.index("documents")
             click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
             click(q, CX + NAME_X + 20, CY + 4, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'Nazwa' pyta o nowa nazwe ('%s')"
+            check("'Rename' asks for a new name ('%s')"
                   % read_at(at, 4, CH - 10, 30),
-                  "Nowa nazwa" in read_at(at, 4, CH - 10, 30))
+                  "New name" in read_at(at, 4, CH - 10, 30))
 
             click(q, CX + 160, CY + 120, wait=1)   # the keys into the window
-            q.type_line("papiery", enter=False)
+            q.type_line("papers", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
             time.sleep(2)
@@ -262,24 +262,24 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             names = [r[0] for r in rows(at)]
-            check("i zmienia ja (%s)" % ", ".join(names),
-                  "papiery" in names and "dokumenty" not in names)
+            check("and it changes it (%s)" % ", ".join(names),
+                  "papers" in names and "documents" not in names)
 
             # --- a directory is not deleted -----------------------------
             click(q, CX + 160, CY + 120, wait=1)
             w, h, at = q.screen_raw()
             names = [r[0] for r in rows(at)]
-            i = names.index("papiery")
+            i = names.index("papers")
             click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
             click(q, CX + DEL_X + 16, CY + 4, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             said = read_at(at, 4, CH - 10, 36)
-            check("katalogu nie usuwa, i mowi dlaczego ('%s')" % said,
-                  "katalog" in said)
-            check("a katalog dalej jest",
-                  "papiery" in [r[0] for r in rows(at)])
+            check("it does not remove a directory, and says why ('%s')" % said,
+                  "directory" in said)
+            check("and the directory is still there",
+                  "papers" in [r[0] for r in rows(at)])
         finally:
             q.close()
     finally:

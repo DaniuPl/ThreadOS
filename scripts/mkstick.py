@@ -128,14 +128,14 @@ def main():
 
     for f in (args.loader, args.kernel, args.initrd):
         if not os.path.exists(f):
-            sys.stderr.write("mkstick: nie ma %s\n" % f)
+            sys.stderr.write("mkstick: there is no %s\n" % f)
             return 1
 
     total = args.mib * 2048
     first = 2048
     last = total - 34                       # the copy at the end is not ours
     if last - first < 64 * 2048:
-        sys.stderr.write("mkstick: %d MiB to za malo\n" % args.mib)
+        sys.stderr.write("mkstick: %d MiB is too little\n" % args.mib)
         return 1
 
     write_gpt(args.out, total, first, last)
@@ -158,13 +158,13 @@ def main():
     ]
     for step in steps:
         if not mtool(step, env):
-            sys.stderr.write("mkstick: nie udalo sie: %s\n" % " ".join(step))
+            sys.stderr.write("mkstick: it did not work: %s\n" % " ".join(step))
             return 1
 
-    print("Gotowe: %s (%d MiB)" % (args.out, args.mib))
+    print("Done: %s (%d MiB)" % (args.out, args.mib))
     print("Na pendrive:  dd if=%s of=/dev/sdX bs=4M conv=fsync" % args.out)
-    print("UWAGA: /dev/sdX to CALY pendrive, nie partycja - i wszystko,")
-    print("       co na nim jest, zniknie.")
+    print("WARNING: /dev/sdX is the WHOLE stick, not a partition - and everything")
+    print("         on it will be gone.")
     return 0
 
 

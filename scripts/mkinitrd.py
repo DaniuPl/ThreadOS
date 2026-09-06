@@ -20,10 +20,10 @@ def main():
     for spec in sys.argv[2:]:
         name, _, path = spec.partition("=")
         if not path:
-            print(f"blad: '{spec}' nie jest w formie nazwa=plik")
+            print(f"error: '{spec}' is not in the form name=file")
             return 1
         if len(name.encode()) > 15:
-            print(f"blad: nazwa '{name}' za dluga (max 15 znakow)")
+            print(f"error: the name '{name}' is too long (max 15 characters)")
             return 1
         files.append((name, open(path, "rb").read()))
 
@@ -40,7 +40,7 @@ def main():
 
     with open(out_path, "wb") as f:
         f.write(out)
-    print(f"initrd: {len(files)} plikow, {len(out)} B -> {out_path}")
+    print(f"initrd: {len(files)} files, {len(out)} B -> {out_path}")
     return 0
 
 

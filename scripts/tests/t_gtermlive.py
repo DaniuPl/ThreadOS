@@ -83,7 +83,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             q.mouse_goto(24, 192)          # the 'Term' icon
@@ -100,9 +100,9 @@ def main():
             time.sleep(2.5)
             rows = read_rows(q, **geom)
             first = spins(rows)
-            check("wyjscie widac, ZANIM program sie skonczyl (%d linii)"
+            check("the output shows BEFORE the program finished (%d lines)"
                   % first, first > 0)
-            check("terminal mowi, ze cos chodzi, i jak to zatrzymac",
+            check("the terminal says something is running and how to stop it",
                   "running" in "\n".join(rows))
 
             # It goes on arriving - one flush at the start would pass
@@ -110,7 +110,7 @@ def main():
             time.sleep(3)
             rows = read_rows(q, **geom)
             second = spins(rows)
-            check("i przybywa go dalej (%d -> %d linii)" % (first, second),
+            check("and more of it keeps coming (%d -> %d lines)" % (first, second),
                   second > first)
 
             # The window still takes keys while the program runs: what
@@ -121,7 +121,7 @@ def main():
             time.sleep(0.8)
             rows = read_rows(q, **geom)
             last = [r for r in rows if r][-1]
-            check("okno przyjmuje klawisze przy dzialajacym programie "
+            check("the window takes keys while a program runs "
                   "('%s')" % last, last.endswith("abc"))
             for _ in range(3):
                 q.sendkey("backspace")
@@ -132,25 +132,25 @@ def main():
             time.sleep(3)
             rows = read_rows(q, **geom)
             body = "\n".join(rows)
-            check("Ctrl+C zostal pokazany w sesji", "^C" in body)
-            check("program przestal chodzic (znika napis o dzialaniu)",
+            check("Ctrl+C was shown in the session", "^C" in body)
+            check("the program stopped running (the running notice goes)",
                   "running" not in body)
-            check("i terminal podal jego kod", "[code" in body)
+            check("and the terminal gave its code", "[code" in body)
 
             after_kill = spins(read_rows(q, **geom))
             time.sleep(2.5)
-            check("nic juz nie dopisuje sie do sesji",
+            check("nothing is added to the session any more",
                   spins(read_rows(q, **geom)) == after_kill)
 
             # --- and the terminal takes the next command ---------------
             q.type_line("seq 3")
             time.sleep(3)
             rows = read_rows(q, **geom)
-            check("po zabiciu programu terminal bierze nastepna komende",
+            check("after the program is killed the terminal takes the next command",
                   "/> seq 3" in "\n".join(rows))
-            check("i pokazuje JEJ wyjscie, a nie resztek poprzedniego",
+            check("and shows ITS output, not the leftovers of the last one",
                   "1" in rows and "2" in rows and "3" in rows)
-            check("po starym programie nie zostalo nic w oknie",
+            check("nothing of the old program is left in the window",
                   spins(rows) == 0 or "/> seq 3" in "\n".join(rows[-8:]))
         finally:
             q.close()

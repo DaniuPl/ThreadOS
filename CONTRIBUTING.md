@@ -66,19 +66,23 @@ Tests run four machines at once on a loaded host. **Never write
 thing you are waiting for has happened, and give up only then. Half the
 flaky failures this project ever had were exactly that.
 
-## Language: English in the code, Polish on the screen
+## Language: English everywhere the code can be read
 
 This is deliberate, and it is not negotiable in a patch:
 
-- **identifiers, file names, commit messages and code comments: English.**
-  The code is read by people who do not speak Polish;
-- **what the running system says: Polish.** `printk`, shell messages,
-  window labels, the installer. The exception is the terminal
-  emulator's own messages, which are English because that is what a
-  terminal looks like everywhere;
-- **test assertion descriptions: Polish**, because they are read next to
-  the system's own output;
-- `DZIENNIK.md` - the development journal - is Polish.
+- **identifiers, file names, code comments and commit messages:
+  English** - the code is read by people who do not speak Polish;
+- **what the running system says: English too.** `printk`, shell
+  messages, window labels, the installer, the names of the commands
+  themselves. The system was Polish until it went out into the open,
+  and then a system nobody outside can read stopped being worth the
+  saving;
+- **test assertion descriptions: English**, because they are read next
+  to the system's own output;
+- `DZIENNIK.md` - the development journal - **stays Polish**. It is a
+  record written day by day from the first commit, and translating it
+  after the fact would turn a diary into a report. New entries are
+  written in English.
 
 ## Comments explain WHY
 

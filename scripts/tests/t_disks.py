@@ -44,26 +44,26 @@ def blob(path):
 
 def main():
     print()
-    print("--- kilka dyskow i wybor miedzy nimi ---")
+    print("--- several disks and choosing between them ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok():
-        print("POMINIETE: brak mtools")
+        print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
         subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
-        print("POMINIETE: brak build/BOOTX64.EFI (apt install clang lld)")
+        print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
     if not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
-        print("POMINIETE: brak firmware OVMF")
+        print("SKIPPED: no OVMF firmware")
         return summary()
     if shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE: brak qemu-system-x86_64")
+        print("SKIPPED: no qemu-system-x86_64")
         return summary()
 
     esp = tempfile.mkdtemp()
@@ -86,7 +86,7 @@ def main():
         make_gpt_disk(first)
         fat_format(first, 2048, 204800, fat32=True, label="LAPTOPESP")
         fat_mkdirs(first, 2048, ["/EFI", "/EFI/Microsoft"])
-        fat_put(first, 2048, b"MZ-cudzy" * 400,
+        fat_put(first, 2048, b"MZ-somebody-elses" * 400,
                 "/EFI/Microsoft/bootmgfw.efi")
         with open(second, "wb") as fh:
             fh.truncate(400 * 1024 * 1024)
@@ -96,24 +96,24 @@ def main():
                  sata=True, serial=slog, qemu="qemu-system-x86_64",
                  uefi=(OVMF_CODE, nvram))
         try:
-            q.wait_serial("System 64-bitowy gotowy", timeout=120)
+            q.wait_serial("The 64-bit system is ready", timeout=120)
 
-            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=40)
-            check("system wymienia dyski, ktore ma",
-                  "dysk 1: AHCI" in out and "dysk 2: AHCI" in out)
-            check("i pokazuje, na ktory patrzy", "800 MiB  <-" in out)
-            check("pierwszy jest tym, ktorego uzywa - jak dotad",
-                  "Dysk 1 z" in out and "LAPTOPESP" in out)
-            q.command("nie", "instaluj:", timeout=20)
+            out = q.command("install text", "Type YES", timeout=40)
+            check("the system lists the disks it has",
+                  "disk 1: AHCI" in out and "disk 2: AHCI" in out)
+            check("and shows which one it is looking at", "800 MiB  <-" in out)
+            check("the first is the one it uses - as before",
+                  "Disk 1 of" in out and "LAPTOPESP" in out)
+            q.command("no", "install:", timeout=20)
 
             # The second disk: no table, so there is nothing to install
             # beside - and the system says which disk it is talking
             # about rather than which disk it happens to be using
-            out = q.command("instaluj tekstem 2", "instaluj:", timeout=40)
-            check("mozna zapytac o drugi dysk",
+            out = q.command("install text 2", "install:", timeout=40)
+            check("the second disk can be asked about",
                   "400 MiB  <-" in out)
-            check("i o drugim mowi prawde: nie ma na nim tablicy",
-                  "nie ma tablicy partycji" in out)
+            check("and it tells the truth about the second: it has no table",
+                  "no partition table" in out)
 
             # And nothing moved: asked again without a number, the
             # system talks about the disk it is USING, which is still
@@ -121,11 +121,11 @@ def main():
             # the machine at it, and a machine left pointed somewhere
             # it was never mounted from is a filesystem reading a
             # stranger's sectors.
-            out = q.command("instaluj tekstem", "Wpisz TAK", timeout=40)
-            check("po ogladaniu drugiego dysku system dalej uzywa "
-                  "pierwszego",
-                  "Dysk 1 z" in out and "800 MiB  <-" in out)
-            q.command("nie", "instaluj:", timeout=20)
+            out = q.command("install text", "Type YES", timeout=40)
+            check("after looking at the second disk the system still uses "
+                  "the first",
+                  "Disk 1 of" in out and "800 MiB  <-" in out)
+            q.command("no", "install:", timeout=20)
 
             # The 'disk' command writes a pattern into a sector and
             # reads it back, and the sector it used was the last one -
@@ -136,43 +136,43 @@ def main():
             # damaged. This test found that; the assertion is what
             # keeps it found.
             out = q.command("disk", "proton64>", timeout=20)
-            check("'disk' na dysku z tablica tylko ja czyta",
-                  "tylko go czytam" in out)
+            check("'disk' on a disk with a table only reads it",
+                  "I only read it" in out)
             ok, after, why2 = gpt_read(first)
-            check("i kopia tablicy na koncu dysku zyje%s"
+            check("and the table's copy at the end of the disk is alive%s"
                   % ("" if ok else ": " + why2), ok and len(after) == 3)
 
             # Now install onto the second, wiping it - and the first
             # one must come out of it untouched
-            q.command("instaluj tekstem caly 2", "Wpisz KASUJ", timeout=40)
-            out = q.command("KASUJ", "Gotowe", timeout=240)
-            check("instalacja na wskazany dysk dochodzi do konca",
-                  "tablica partycji (GPT) - gotowe" in out
-                  and "/EFI/BOOT/BOOTX64.EFI - gotowe" in out)
+            q.command("install text whole 2", "Type ERASE", timeout=40)
+            out = q.command("ERASE", "Done", timeout=240)
+            check("installing onto the named disk runs to the end",
+                  "partition table (GPT) - done" in out
+                  and "/EFI/BOOT/BOOTX64.EFI - done" in out)
         finally:
             q.close()
 
         # --- what is on each of them, read here
         ok, parts, why = gpt_read(second)
-        check("drugi dysk ma teraz nasza tablice%s"
+        check("the second disk has our table now%s"
               % ("" if ok else ": " + why), ok and len(parts) == 2)
         if len(parts) == 2:
-            check("z partycja EFI i nasza", parts[0][0] == GUID_ESP4
+            check("with an EFI partition and ours", parts[0][0] == GUID_ESP4
                   and parts[1][0] == GUID_PFS4)
-        check("na jego partycji EFI jest FAT32",
+        check("its EFI partition holds a FAT32",
               fat_kind(second, 2048) == "FAT32")
         got = fat_get(second, 2048, "/EFI/ProtonOS/protonos64.bin")
-        check("i jadro co do bajtu (%d B)" % len(want_kernel),
+        check("and the kernel byte for byte (%d B)" % len(want_kernel),
               got is not None and got == want_kernel)
 
         ok, still, why2 = gpt_read(first)
-        check("PIERWSZY dysk jest nietkniety - ta sama tablica (%s)"
+        check("the FIRST disk is untouched - the same table (%s)"
               % (why2 or ", ".join(e[3] for e in still)),
               ok and len(still) == 3 and still[1][3] == "Windows")
-        check("i cudzy loader dalej na nim jest",
+        check("and somebody else's loader is still on it",
               (fat_get(first, 2048, "/EFI/Microsoft/bootmgfw.efi") or b"")
-              .startswith(b"MZ-cudzy"))
-        check("a nasze pliki NIE trafily na niego",
+              .startswith(b"MZ-somebody-elses"))
+        check("and our files did NOT land on it",
               fat_get(first, 2048, "/EFI/ProtonOS/protonos64.bin") is None)
 
         # --- and it boots, from the disk that was chosen
@@ -181,9 +181,9 @@ def main():
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("wskazany dysk startuje sam", "protoboot" in out)
-            out = q2.wait_serial("System 64-bitowy gotowy", timeout=120)
-            check("i system z niego dochodzi do powloki",
+            check("the named disk boots on its own", "protoboot" in out)
+            out = q2.wait_serial("The 64-bit system is ready", timeout=120)
+            check("and the system on it reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
         finally:
             q2.close()

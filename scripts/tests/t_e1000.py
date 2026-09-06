@@ -33,25 +33,25 @@ from ptest import check, summary, make_iso64, no64
 
 def main():
     # --- The 32-bit kernel ---
-    print("--- karta e1000 (jadro 32-bitowe) ---")
+    print("--- the e1000 card (the 32-bit kernel) ---")
     slog = tempfile.mktemp(suffix=".log")
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, nic="e1000")
     try:
-        start = q.wait_for("Siec:", timeout=40)
-        check("jadro znajduje karte e1000 i mowi, ktora to",
-              re.search(r"Siec: e1000 ([0-9a-f]+:){5}", start) is not None)
+        start = q.wait_for("Network:", timeout=40)
+        check("the kernel finds the e1000 card and says which it is",
+              re.search(r"Network: e1000 ([0-9a-f]+:){5}", start) is not None)
 
         # DHCP is a full round trip: a question by broadcast, the
         # server's answer, accepting the lease
-        lease = q.wait_for("[siec] DHCP", timeout=30)
+        lease = q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
         lease = q.screen()
-        check("DHCP przez e1000 przyznal adres",
-              "przyznano 10.0.2.15" in lease)
+        check("DHCP over the e1000 granted an address",
+              "granted 10.0.2.15" in lease)
 
         q.type_line("ifconfig")
         ifc = q.wait_for("eth0  e1000", timeout=20)
-        check("ifconfig nazywa karte po imieniu",
+        check("ifconfig names the card",
               "eth0  e1000, MAC" in ifc)
 
         # ICMP: slirp's gateway answers, so the frame really went out
@@ -59,15 +59,15 @@ def main():
         q.type_line("clear")
         q.type_line("ping 10.0.2.2")
         pong = q.wait_for("40 B od 10.0.2.2", timeout=30)
-        check("ping przez e1000: odpowiedz ICMP echo od bramy",
+        check("ping over the e1000: an ICMP echo answer from the gateway",
               "40 B od 10.0.2.2" in pong)
-        stats = q.wait_for("--- statystyki:", timeout=30)
-        check("ping przez e1000: wszystkie pakiety wrocily",
-              "wyslano 4, odebrano 4" in stats)
+        stats = q.wait_for("--- statistics:", timeout=30)
+        check("ping over the e1000: every packet came back",
+              "sent 4, received 4" in stats)
 
         q.type_line("arp")
         arp = q.wait_for("10.0.2.2", timeout=20)
-        check("tablica ARP zna adres sprzetowy bramy",
+        check("the ARP table knows the gateway's hardware address",
               re.search(r"10\.0\.2\.2\s+([0-9a-f]+:){5}", arp) is not None)
 
         # TCP to the host: the longest path this card has to travel
@@ -75,17 +75,17 @@ def main():
         try:
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /" % http_port)
-            page = q.wait_for("tresc ", timeout=40)
-            check("TCP przez e1000: odpowiedz HTTP 200 z pelna trescia",
+            page = q.wait_for("content ", timeout=40)
+            check("TCP over the e1000: an HTTP 200 answer with the whole content",
                   "[httpget] HTTP 200" in page and
-                  "ProtonOS TCP dziala" in page)
+                  "ProtonOS TCP works" in page)
         finally:
             http_stop()
 
         q.type_line("ifconfig")
         count = q.wait_for("RX ", timeout=20)
-        m = re.search(r"RX (\d+) pakietow, TX (\d+) pakietow", count)
-        check("licznikami widac ruch w obie strony",
+        m = re.search(r"RX (\d+) packets, TX (\d+) packets", count)
+        check("the counters show traffic both ways",
               m is not None and int(m.group(1)) > 10 and int(m.group(2)) > 10)
     finally:
         q.close()
@@ -97,17 +97,17 @@ def main():
     # mapping, and the page tables are built by different code in each
     # kernel - that is the only thing in this driver that depends on the
     # processor mode
-    print("--- karta e1000 (jadro 64-bitowe) ---")
+    print("--- the e1000 card (the 64-bit kernel) ---")
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog64 = tempfile.mktemp(suffix=".log")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -115,26 +115,26 @@ def main():
         q64 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, nic="e1000",
                    qemu="qemu-system-x86_64")
         try:
-            start = q64.wait_serial("Siec:", timeout=90)
-            check("jadro 64-bitowe tez znajduje e1000",
-                  re.search(r"Siec: e1000 ([0-9a-f]+:){5}", start) is not None)
+            start = q64.wait_serial("Network:", timeout=90)
+            check("the 64-bit kernel finds the e1000 too",
+                  re.search(r"Network: e1000 ([0-9a-f]+:){5}", start) is not None)
 
-            lease = q64.wait_serial("DHCP: przyznano", timeout=40)
-            check("DHCP przez e1000 w trybie dlugim",
-                  "przyznano 10.0.2.15" in lease)
+            lease = q64.wait_serial("DHCP: granted", timeout=40)
+            check("DHCP over the e1000 in long mode",
+                  "granted 10.0.2.15" in lease)
 
             q64.wait_serial("proton64>", timeout=30)
-            pong = q64.command("ping 10.0.2.2", "--- statystyki:",
+            pong = q64.command("ping 10.0.2.2", "--- statistics:",
                                  timeout=40)
-            check("ping z jadra 64-bitowego przez e1000",
-                  "wyslano 3, odebrano 3" in pong or
-                  "wyslano 4, odebrano 4" in pong)
+            check("ping from the 64-bit kernel over the e1000",
+                  "sent 3, received 3" in pong or
+                  "sent 4, received 4" in pong)
 
             page = q64.command("run httpget 10.0.2.2 %d /" % http_port,
-                                 "kod wyjscia", timeout=60)
-            check("TCP z pierscienia 3 przez e1000 w trybie dlugim",
+                                 "exit code", timeout=60)
+            check("TCP from ring 3 over the e1000 in long mode",
                   "[httpget] HTTP 200" in page and
-                  "ProtonOS TCP dziala" in page)
+                  "ProtonOS TCP works" in page)
         finally:
             q64.close()
             http_stop()

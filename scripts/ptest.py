@@ -64,7 +64,7 @@ def menu_y(name):
     return MENU_TASKBAR_Y - (len(MENU_ITEMS) - idx) * MENU_ROW + MENU_ROW // 2
 
 
-PAGE = b"<html>ProtonOS TCP dziala</html>\n"
+PAGE = b"<html>ProtonOS TCP works</html>\n"
 
 # Files a test wants the guest to be able to download: path -> bytes.
 # Filled in BEFORE start_http_server() is called - the handler reads
@@ -73,18 +73,18 @@ PAGE = b"<html>ProtonOS TCP dziala</html>\n"
 # have to add a branch to the server.
 SERVED = {}
 # A page with a link and enough text that it has to be scrolled
-LINK_PAGE = (b"<html><body><h1>Strona pierwsza</h1>"
-             + b"<p>Wiersz wypelniajacy strone numer jeden.</p>" * 20
-             + b'<p>Przejdz do <a href="/druga">drugiej strony</a>.</p>'
+LINK_PAGE = (b"<html><body><h1>The first page</h1>"
+             + b"<p>A line filling page number one.</p>" * 20
+             + b'<p>Przejdz do <a href="/second">drugiej strony</a>.</p>'
              + b"</body></html>\n")
-LINK_PAGE2 = (b"<html><body><h1>Strona druga</h1>"
-              b"<p>Odnosnik zadzialal.</p></body></html>\n")
+LINK_PAGE2 = (b"<html><body><h1>The second page</h1>"
+              b"<p>The link worked.</p></body></html>\n")
 # Above the old ceiling of 268 KiB per file - it reaches into the
 # doubly indirect block
-HUGE_PAGE = b"<p>ProtonOS PFS3: blok posredni, potem podwojnie posredni.</p>\n" * 6500
+HUGE_PAGE = b"<p>ProtonOS PFS3: an indirect block, then a doubly indirect one.</p>\n" * 6500
 # A page well above the old PFS limit (16 KiB per file) - it checks
 # block allocation, the indirect block and TCP throughput
-BIG_PAGE = b"<p>ProtonOS PFS3: blok po bloku.</p>\n" * 3000
+BIG_PAGE = b"<p>ProtonOS PFS3: block after block.</p>\n" * 3000
 
 
 def make_gpt_disk(path, mib=800):
@@ -190,7 +190,7 @@ def make_gpt_disk(path, mib=800):
             f.write(NEIGHBOUR_MARK % i)
 
 
-NEIGHBOUR_MARK = b"CUDZE-DANE-%d-NIE-RUSZAC" + b"\0" * 8
+NEIGHBOUR_MARK = b"SOMEBODY-ELSES-DATA-%d-DO-NOT-TOUCH" + b"\0" * 8
 
 
 # --- FAT, made and read back by somebody else ------------------------
@@ -367,41 +367,41 @@ def gpt_read(path):
         tail = fh.read(33 * 512)
 
     if data[510] != 0x55 or data[511] != 0xAA:
-        return False, [], "brak sygnatury MBR"
+        return False, [], "no MBR signature"
     if data[446 + 4] != 0xEE:
-        return False, [], "MBR nie jest ochronny (typ %#x)" % data[446 + 4]
+        return False, [], "the MBR is not protective (type %#x)" % data[446 + 4]
 
     def header(buf, where):
         if buf[:8] != b"EFI PART":
-            return None, "brak 'EFI PART' w %s" % where
+            return None, "no 'EFI PART' in %s" % where
         size = struct.unpack_from("<I", buf, 12)[0]
         if size < 92 or size > 512:
-            return None, "dziwny rozmiar naglowka w %s" % where
+            return None, "an odd header size in %s" % where
         want = struct.unpack_from("<I", buf, 16)[0]
         got = binascii.crc32(buf[:16] + b"\0\0\0\0" + buf[20:size]) & 0xFFFFFFFF
         if want != got:
-            return None, "zla suma naglowka w %s" % where
+            return None, "a bad header checksum in %s" % where
         return struct.unpack_from("<QQQQ", buf, 24), None
 
-    prim, why = header(data[512:1024], "naglowku glownym")
+    prim, why = header(data[512:1024], "the main header")
     if prim is None:
         return False, [], why
-    back, why = header(tail[32 * 512:33 * 512], "kopii na koncu")
+    back, why = header(tail[32 * 512:33 * 512], "the copy at the end")
     if back is None:
         return False, [], why
     if prim[0] != 1 or prim[1] != total - 1:
-        return False, [], "naglowek glowny wskazuje nie tam"
+        return False, [], "the main header points somewhere else"
     if back[0] != total - 1 or back[1] != 1:
-        return False, [], "kopia na koncu wskazuje nie tam"
+        return False, [], "the copy at the end points somewhere else"
 
     n = struct.unpack_from("<I", data, 512 + 80)[0]
     size = struct.unpack_from("<I", data, 512 + 84)[0]
     crc = struct.unpack_from("<I", data, 512 + 88)[0]
     ents = data[2 * 512:2 * 512 + n * size]
     if (binascii.crc32(ents) & 0xFFFFFFFF) != crc:
-        return False, [], "zla suma tablicy wpisow"
+        return False, [], "a bad checksum of the entry table"
     if ents != tail[:n * size]:
-        return False, [], "kopia tablicy na koncu jest inna"
+        return False, [], "the copy of the table at the end is different"
 
     out = []
     for i in range(n):
@@ -650,8 +650,8 @@ def font8x8():
     return _FONT8X8
 
 
-DNS_HINT = ("port 53 jest zajety albo bez uprawnien - uruchom jako root "
-            "albo raz: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
+DNS_HINT = ("port 53 is taken, or out of reach - run as root, or "
+            "once: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
 
 
 def start_dns_server(answer_ip=(10, 0, 2, 2)):
@@ -972,14 +972,14 @@ def start_http_server():
                 self.wfile.write(blob)
                 return
 
-            if self.path.startswith("/stara"):      # a redirect
+            if self.path.startswith("/old"):      # a redirect
                 self.send_response(302)
-                self.send_header("Location", "/kawalki")
+                self.send_header("Location", "/chunks")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
 
-            if self.path.startswith("/kawalki"):    # chunked encoding
+            if self.path.startswith("/chunks"):    # chunked encoding
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Transfer-Encoding", "chunked")
@@ -990,7 +990,7 @@ def start_http_server():
                 self.wfile.write(b"0\r\n\r\n")
                 return
 
-            if self.path.startswith("/ogromna"):
+            if self.path.startswith("/huge"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(HUGE_PAGE)))
@@ -998,8 +998,8 @@ def start_http_server():
                 self.wfile.write(HUGE_PAGE)
                 return
 
-            if self.path.startswith("/linki") or self.path.startswith("/druga"):
-                body = (LINK_PAGE2 if self.path.startswith("/druga")
+            if self.path.startswith("/links") or self.path.startswith("/second"):
+                body = (LINK_PAGE2 if self.path.startswith("/second")
                         else LINK_PAGE)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -1066,7 +1066,7 @@ def start_http_server():
                 self.wfile.write(CERT_DER)
                 return
 
-            body = BIG_PAGE if self.path.startswith("/duza") else PAGE
+            body = BIG_PAGE if self.path.startswith("/big") else PAGE
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
@@ -1249,7 +1249,7 @@ class Qemu:
         deadline = time.time() + 10
         while True:
             if self.proc.poll() is not None:
-                raise RuntimeError("QEMU zakonczyl sie przedwczesnie:\n"
+                raise RuntimeError("QEMU ended too early:\n"
                                    + self.proc.stderr.read().decode())
             try:
                 sock.connect(self.qmp_path)
@@ -1280,13 +1280,13 @@ class Qemu:
                 raw = self.f.readline()
             except (socket.timeout, TimeoutError):
                 raise RuntimeError(
-                    f"QMP nie odpowiedzialo w {self.QMP_TIMEOUT} s na: {msg}")
+                    f"QMP did not answer in {self.QMP_TIMEOUT} s to: {msg}")
             if not raw:                  # a closed socket = QEMU died
-                raise RuntimeError(f"QEMU rozlaczyl sie podczas: {msg}")
+                raise RuntimeError(f"QEMU disconnected during: {msg}")
             resp = json.loads(raw)
             if "return" in resp or "error" in resp:
                 if "error" in resp:
-                    raise RuntimeError(f"Blad QMP: {resp}")
+                    raise RuntimeError(f"QMP error: {resp}")
                 return resp
 
     def hmp(self, command):
@@ -1316,7 +1316,7 @@ class Qemu:
             if text in screen:
                 return screen
             time.sleep(0.3)
-        raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na ekranie")
+        raise RuntimeError(f"timeout: '{text}' never appeared on the screen")
 
     DESK_BG = (0, 128, 160)          # the desktop's background (teal)
 
@@ -1335,7 +1335,7 @@ class Qemu:
             except Exception:
                 pass
             time.sleep(0.3)
-        raise RuntimeError("timeout: pulpit sie nie pojawil")
+        raise RuntimeError("timeout: the desktop never appeared")
 
     def sendkey(self, key):
         self.hmp(f"sendkey {key}")
@@ -1456,7 +1456,7 @@ class Qemu:
         idx += 1
         w, h, _ = fields
         px = data[idx:]
-        self._ostatnie_piksele = px
+        self._last_pixels = px
 
         def at(x, y):
             o = (y * w + x) * 3
@@ -1484,7 +1484,7 @@ class Qemu:
         they would come out inverted.
         """
         w, h, _ = self.screen_raw()
-        px = self._ostatnie_piksele
+        px = self._last_pixels
         if x0 < 0 or y0 < 0 or x0 + cols * 8 > w or y0 + rows * line_h > h:
             return ""
 
@@ -1643,7 +1643,7 @@ def pmm_used(screen_text):
 
 
 def check(name, cond):
-    print(("OK:   " if cond else "BLAD: ") + name)
+    print(("OK:   " if cond else "FAIL: ") + name)
     if not cond:
         failures.append(name)
 
@@ -1651,7 +1651,7 @@ def check(name, cond):
 def summary():
     """Ends the group's process: 0 = everything passed."""
     if failures:
-        print(f"NIEPOWODZENIE: {len(failures)} test(y) nie przeszly")
+        print(f"FAILED: {len(failures)} assertion(s) did not pass")
         return 1
     return 0
 

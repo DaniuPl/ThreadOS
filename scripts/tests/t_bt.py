@@ -37,11 +37,11 @@ from ptest import check, summary, no64, make_iso64
 
 def main():
     print()
-    print("--- Bluetooth (pakiety, bo adaptera nie ma czym udawac) ---")
+    print("--- Bluetooth (packets, because there is nothing to fake an adapter with) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return summary()
 
     d = tempfile.mkdtemp()
@@ -52,7 +52,7 @@ def main():
         fh.truncate(DISK_SIZE)
 
     try:
-        check("plyta z jadrem 64-bitowym buduje sie",
+        check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
             return summary()
@@ -64,39 +64,39 @@ def main():
 
             # --- the machine has no adapter, and has to say so --------
             out = q.command("bt", "bt:", timeout=20)
-            check("system nie udaje, ze ma Bluetooth",
-                  "nie ma adaptera" in out)
-            check("i mowi, dlaczego go nie ma",
-                  "adaptera Bluetooth na magistrali USB" in out
-                  or "nie ma kontrolera USB" in out)
+            check("the system does not pretend to have Bluetooth",
+                  "there is no adapter" in out)
+            check("and says why there is none",
+                  "Bluetooth adapter on the USB bus" in out
+                  or "there is no USB controller" in out)
 
-            said = q.command("sprzet", "PCI:", timeout=30)
-            check("'sprzet' tez wymienia Bluetooth wsrod tego, czego brak",
-                  "Bluetooth: brak" in said)
+            said = q.command("hardware", "PCI:", timeout=30)
+            check("'hardware' lists Bluetooth too among what is missing",
+                  "Bluetooth: none" in said)
 
             # --- the packets ------------------------------------------
-            out = q.command("bt test", "uslyszane", timeout=30)
-            check("adres adaptera odczytany z pakietu we wlasciwa strone",
-                  "adres adaptera: 00:1a:7d:da:71:13" in out)
-            check("nazwa adaptera wyciagnieta z odpowiedzi",
-                  "nazwa adaptera: Proton" in out)
-            check("wersja i wytworca z Read Local Version",
-                  "wersja: Bluetooth 5.0" in out and "000f" in out)
-            check("dwa urzadzenia z dwoch roznych rodzajow zdarzen",
-                  "uslyszane urzadzenia: 2" in out)
-            check("urzadzenie LE z nazwa z rozglaszania i sila sygnalu",
-                  "cb:a9:87:65:43:21" in out and "Sluchawki" in out
+            out = q.command("bt test", "heard", timeout=30)
+            check("the adapter address read out of the packet the right way round",
+                  "adapter address: 00:1a:7d:da:71:13" in out)
+            check("the adapter name pulled out of the answer",
+                  "adapter name: Proton" in out)
+            check("the version and the maker from Read Local Version",
+                  "version: Bluetooth 5.0" in out and "000f" in out)
+            check("two devices out of two different kinds of event",
+                  "devices heard: 2" in out)
+            check("an LE device with a name from its advertising and a signal strength",
+                  "cb:a9:87:65:43:21" in out and "Headphones" in out
                   and "-59 dBm" in out)
-            check("urzadzenie klasyczne z wyniku inquiry",
+            check("a classic device from an inquiry result",
                   "66:55:44:33:22:11" in out)
-            check("i test mowi wprost, czego NIE sprawdza",
-                  "nie rozmowe z adapterem" in out)
+            check("and the test says outright what it does NOT check",
+                  "not a conversation with an adapter" in out)
 
             # A scan with no adapter must refuse, not pretend
-            out = q.command("bt skan 1", "bt:", timeout=30)
-            check("skan bez adaptera odmawia zamiast pokazywac pusta liste",
-                  "nie ma adaptera" in out
-                  and "uslyszanych urzadzen" not in out)
+            out = q.command("bt scan 1", "bt:", timeout=30)
+            check("a scan with no adapter refuses instead of showing an empty list",
+                  "there is no adapter" in out
+                  and "devices heard" not in out)
         finally:
             q.close()
 
@@ -109,10 +109,10 @@ def main():
                  serial=tempfile.mktemp(suffix=".log"))
         try:
             q.wait_for("ProtonOS shell")
-            q.type_line("sprzet")
+            q.type_line("hardware")
             screen = q.wait_for("Bluetooth:", timeout=30)
-            check("w trybie 32-bitowym ten sam wiersz o Bluetooth",
-                  "Bluetooth: brak" in screen)
+            check("in 32-bit mode the same line about Bluetooth",
+                  "Bluetooth: none" in screen)
         finally:
             q.close()
             os.unlink(disk32)

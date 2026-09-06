@@ -38,42 +38,42 @@ from ptest import check, summary, make_iso64, no64
 
 
 def check_threads(out, suffix, ncores, again=None):
-    check("proba doszla do konca" + suffix, "Watki poza" in out)
-    if "Watki poza" not in out:
+    check("the attempt ran to the end" + suffix, "Threads off" in out)
+    if "Threads off" not in out:
         return
 
-    masks = [int(x, 16) for x in re.findall(r"watek\d: rdzenie ([0-9a-f]+)",
+    masks = [int(x, 16) for x in re.findall(r"thread\d: cores ([0-9a-f]+)",
                                             out)]
-    results = re.findall(r"watek\d: rdzenie [0-9a-f]+, wynik (\d+)", out)
-    check("policzyly sie wszystkie cztery watki" + suffix,
+    results = re.findall(r"thread\d: cores [0-9a-f]+, result (\d+)", out)
+    check("all four threads counted" + suffix,
           len(masks) == 4 and len(results) == 4)
-    check("kazdy dal ten sam wynik, co porcja policzona w shellu"
+    check("each gave the same result as the batch counted in the shell"
           + suffix,
-          "Wynik: zgadza sie" in out and len(set(results)) == 1)
+          "Result: matches" in out and len(set(results)) == 1)
 
     total = 0
     for m in masks:
         total |= m
     if ncores > 1:
         # The heart of it: a kernel thread really ran off the bootstrap core
-        check("watki prowadzil takze rdzen inny niz rozruchowy (maska %x)%s"
+        check("a core other than the boot one ran threads too (mask %x)%s"
               % (total, suffix),
-              (total & ~1) != 0 and "Watki poza rdzeniem rozruchowym: tak"
+              (total & ~1) != 0 and "Threads off the boot core: yes"
               in out)
         core_count = bin(total).count("1")
-        check("prowadzil je wiecej niz jeden rdzen (%d)%s"
+        check("more than one core ran them (%d)%s"
               % (core_count, suffix), core_count >= 2)
     else:
-        check("na jednym rdzeniu system mowi to wprost" + suffix,
+        check("on one core the system says so outright" + suffix,
               total == 1 and
-              "Watki poza rdzeniem rozruchowym: NIE" in out)
+              "Threads off the boot core: NO" in out)
 
-    times = re.search(r"Jedna porcja: (\d+) tyknac, cztery naraz: (\d+)", out)
-    check("czasy zmierzone" + suffix, times is not None)
+    times = re.search(r"One batch: (\d+) ticks, four at once: (\d+)", out)
+    check("the times were measured" + suffix, times is not None)
     if not times:
         return
     one, four = int(times.group(1)), int(times.group(2))
-    check("porcja odniesienia trwala dosc dlugo, by cos znaczyc (%d tyknac)%s"
+    check("the reference batch lasted long enough to mean something (%d ticks)%s"
           % (one, suffix), one >= 5)
     if ncores > 1:
         # One after another they would take four times as long. The
@@ -87,17 +87,17 @@ def check_threads(out, suffix, ncores, again=None):
         # that loses is taken again, and the better of the two counts.
         # The threshold does not move.
         if four >= 3 * one and again:
-            retry = re.search(r"Jedna porcja: (\d+) tyknac, cztery naraz: "
+            retry = re.search(r"One batch: (\d+) ticks, four at once: "
                               r"(\d+)", again())
             if retry:
                 one2, four2 = int(retry.group(1)), int(retry.group(2))
                 if four2 * one < four * one2:      # a better ratio
                     one, four = one2, four2
-        check("cztery porcje naraz szybciej niz po kolei (%d wobec ~%d)%s"
+        check("four batches at once are faster than one after another (%d against ~%d)%s"
               % (four, 4 * one, suffix),
               four < 3 * one)
     else:
-        check("na jednym rdzeniu cztery porcje trwaja jak cztery (%d wobec"
+        check("on one core four batches last like four (%d against"
               " ~%d)%s" % (four, 4 * one, suffix),
               four >= 2 * one)
 
@@ -105,23 +105,23 @@ def check_threads(out, suffix, ncores, again=None):
 def idle_per_core(ps, ile):
     """Does every secondary core run its own idle task."""
     for i in range(1, ile):
-        if not re.search(r"bezczynny%d" % i, ps):
+        if not re.search(r"idle%d" % i, ps):
             return False
     return True
 
 
 def main():
-    print("--- watki jadra na wszystkich rdzeniach (jadro 64-bitowe) ---")
+    print("--- kernel threads on every core (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
     else:
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
         try:
-            check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
             if not os.path.exists(iso):
                 return summary()
 
@@ -129,19 +129,19 @@ def main():
                      qemu="qemu-system-x86_64")
             try:
                 q.wait_serial("proton64>", timeout=90)
-                ps = q.command("ps", "NAZWA", timeout=30)
-                check("kazdy rdzen wtorny ma wlasne zadanie bezczynne",
+                ps = q.command("ps", "NAME", timeout=30)
+                check("every secondary core has an idle task of its own",
                       idle_per_core(ps, 4))
 
-                out = q.command("smpthreads", "Watki poza", timeout=180)
+                out = q.command("smpthreads", "Threads off", timeout=180)
                 check_threads(out, "", 4,
-                              lambda: q.command("smpthreads", "Watki poza",
+                              lambda: q.command("smpthreads", "Threads off",
                                                 timeout=180))
 
                 # The system is to work as before after all this
-                after_run = q.command("run hello64", "kod wyjscia", timeout=60)
-                check("jadro dziala dalej po probie",
-                      "czesc, jestem ELF-em" in after_run)
+                after_run = q.command("run hello64", "exit code", timeout=60)
+                check("the kernel still runs after the attempt",
+                      "hello, I am a" in after_run)
             finally:
                 q.close()
         finally:
@@ -150,24 +150,24 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
-    print("--- watki jadra na wszystkich rdzeniach (jadro 32-bitowe) ---")
+    print("--- kernel threads on every core (the 32-bit kernel) ---")
     slog32 = tempfile.mktemp(suffix=".log")
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
             q3.wait_for("ProtonOS shell", timeout=40)
-            ps = q3.command("ps", "NAZWA", timeout=30)
-            check("kazdy rdzen wtorny ma wlasne zadanie bezczynne (32-bit)",
+            ps = q3.command("ps", "NAME", timeout=30)
+            check("every secondary core has an idle task of its own (32-bit)",
                   idle_per_core(ps, 4))
 
-            out = q3.command("smpthreads", "Watki poza", timeout=180)
+            out = q3.command("smpthreads", "Threads off", timeout=180)
             check_threads(out, " (32-bit)", 4,
-                          lambda: q3.command("smpthreads", "Watki poza",
+                          lambda: q3.command("smpthreads", "Threads off",
                                              timeout=180))
 
-            after_run = q3.command("run hello", "zakonczyl sie", timeout=60)
-            check("jadro dziala dalej po probie (32-bit)",
-                  "zakonczyl sie (kod 0)" in after_run)
+            after_run = q3.command("run hello", "has ended", timeout=60)
+            check("the kernel still runs after the attempt (32-bit)",
+                  "has ended (code 0)" in after_run)
         finally:
             q3.close()
     finally:
@@ -177,14 +177,14 @@ def main():
     # --- A single-core machine ---
     # The same code, one core: the threads are to compute the same, only
     # one after another
-    print("--- ta sama proba na jednym rdzeniu ---")
+    print("--- the same attempt on one core ---")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
             q1.wait_for("ProtonOS shell", timeout=40)
-            out = q1.command("smpthreads", "Watki poza", timeout=180)
-            check_threads(out, " (jeden rdzen)", 1)
+            out = q1.command("smpthreads", "Threads off", timeout=180)
+            check_threads(out, " (one core)", 1)
         finally:
             q1.close()
     finally:

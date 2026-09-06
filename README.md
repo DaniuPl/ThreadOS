@@ -24,23 +24,24 @@ QEMU, clicks its way through the system and dumps the framebuffer -
 the same machinery the test suite uses, so what is below is what the
 kernel actually drew.
 
-![The desktop: a file manager, a clock and a memory monitor](docs/pulpit.png)
+![The desktop: a file manager, a clock and a memory monitor](docs/desktop.png)
 
 The desktop, running on the loader's framebuffer: icons down the left,
 a taskbar at the bottom, windows that can be dragged, resized, tiled
 and closed. Every window is a ring 3 program talking to the
 compositor; the fonts are the kernel's own.
 
-![The installer, alone on the screen](docs/instalator.png)
+![The installer, alone on the screen](docs/installer.png)
 
-`instaluj` on a UEFI machine, having found the disk, read its GPT and
+`install` on a UEFI machine, having found the disk, read its GPT and
 its EFI partition, and listing the three files it is about to write -
 before writing anything. It gets the whole screen, with no taskbar and
 no other window to click by mistake.
 
-The system speaks Polish, the source speaks English; see
-[CONTRIBUTING.md](CONTRIBUTING.md#language-english-in-the-code-polish-on-the-screen)
-for why.
+The system and its source are both in English; the development
+journal is the one thing that stayed Polish, and
+[CONTRIBUTING.md](CONTRIBUTING.md#language-english-everywhere-the-code-can-be-read)
+says why.
 
 ## What works
 
@@ -51,9 +52,9 @@ Shared by both kernels (same files, compiled twice):
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC, local APIC |
 | USB | xHCI and UHCI behind one host-controller layer; HID boot keyboard |
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
-| Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer; volume and mute as a percentage of what the codec's amplifier really has (`beep`, `glosnosc`, and a mixer window) |
+| Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer; volume and mute as a percentage of what the codec's amplifier really has (`beep`, `volume`, and a mixer window) |
 | Disks | NVMe, every AHCI port, both ATA drives — a list, with one in use; the installer asks which |
-| Installing | `instaluj` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a PFS3 partition) |
+| Installing | `install` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a PFS3 partition) |
 | FAT | FAT12/16/32 on the EFI partition — read fully, written as far as an installer needs, long names both ways |
 | Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
@@ -266,15 +267,17 @@ ground for both.
   90 seconds each, out of some twenty minutes for all 95 groups on
   four cores.
 - Run on real hardware, not only under QEMU and OVMF. Everything is in
-  place for it: `make stick` writes the image, `sprzet` says what the
-  machine is and `dyski` what it has to install onto. What is missing
+  place for it: `make stick` writes the image, `hardware` says what the
+  machine is and `disks` what it has to install onto. What is missing
   is a machine and somebody standing in front of it.
 
 ## Documentation
 
-The detailed development journal — in Polish, with the reasoning behind
-each decision and the bugs that shaped it — is in
-[DZIENNIK.md](DZIENNIK.md).
+The detailed development journal — with the reasoning behind each
+decision and the bugs that shaped it — is in [DZIENNIK.md](DZIENNIK.md).
+It is written in Polish: it is a diary kept from the first commit, and
+a diary translated after the fact is no longer a diary. Entries from
+the day the system started speaking English are in English.
 
 ## Contributing
 

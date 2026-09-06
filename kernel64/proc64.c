@@ -591,11 +591,11 @@ uint64_t proc64_msync(void)
                    else */
                 if (offset + b * FS_BLOCK >= size)
                     break;
-                uint32_t blok = task64_mmap_block(va,
+                uint32_t block = task64_mmap_block(va,
                                     (uint32_t)(offset / FS_BLOCK) + b);
-                if (!blok)
+                if (!block)
                     break;
-                blk_write(fs_block_lba(blok), FS_BLOCK / 512,
+                blk_write(fs_block_lba(block), FS_BLOCK / 512,
                           src + b * FS_BLOCK);
             }
             paging64_file_clean(va);

@@ -105,10 +105,10 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 272)              # the "Ustaw" icon
+            q.mouse_goto(24, 272)              # the "Config" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 400)
@@ -117,7 +117,7 @@ def main():
             w, h, at = q.screen_raw()
             half = w // 2
             deck = h - TB_H                    # the room a window may have
-            check("ustawienia stoja tam, gdzie zawsze",
+            check("the settings stand where they always do",
                   is_win(at(WX + 300, WY + 150)))
 
             # --- a drag that is NOT at an edge shows nothing ------------
@@ -125,7 +125,7 @@ def main():
             drag(q, WX + 100, WY + 4, 300, 200,
                  hold=lambda: seen.append(q.screen_raw()))
             _, _, mid = seen[0]
-            check("w srodku ekranu nie ma zadnego obrysu",
+            check("there is no outline in the middle of the screen",
                   not is_accent(mid(half - 2, deck - 40)) and
                   not is_accent(mid(4, deck - 40)))
 
@@ -139,39 +139,39 @@ def main():
             # The outline stands where the window would: down the middle
             # of the screen and along its bottom, over the window that is
             # being dragged (it is drawn last, so it is seen)
-            check("przy lewej krawedzi widac obrys lewej polowy",
+            check("at the left edge the outline of the left half shows",
                   is_accent(at2(half - 2, 300)) and
                   is_accent(at2(1, 300)))
-            check("i obrys konczy sie nad paskiem zadan",
+            check("and the outline ends above the taskbar",
                   is_accent(at2(200, deck - 1)) and
                   not is_accent(at2(200, deck + 6)))
 
             w, h, at = q.screen_raw()
-            check("po puszczeniu okno zajmuje lewa polowe",
+            check("once dropped the window takes the left half",
                   is_win(at(half - 10, 300)) and not is_win(at(half + 10, 300)))
-            check("od gory do paska zadan",
+            check("from the top to the taskbar",
                   is_accent(at(half - 40, 5)) and is_win(at(100, deck - 4)))
             # The program was told its new size and drew itself in it;
             # a buffer that was not remade would leave the old picture
             # or rubbish down there
-            check("program przerysowal sie w polowie ekranu",
+            check("the program redrew itself in half the screen",
                   is_win(at(20, deck - 20)))
 
             # --- the right edge -----------------------------------------
             drag(q, 150, 4, w - 5, 200)
             w, h, at = q.screen_raw()
-            check("okno pociagniete w prawo zajmuje prawa polowe",
+            check("a window dragged right takes the right half",
                   is_win(at(half + 10, 300)) and
                   not is_win(at(half - 10, 300)))
-            check("i siega prawej krawedzi",
+            check("and it reaches the right edge",
                   is_win(at(w - 3, 300)))
 
             # --- the top: the whole screen ------------------------------
             drag(q, half + 150, 4, 320, 20)
             w, h, at = q.screen_raw()
-            check("okno pociagniete do gory zajmuje caly ekran",
+            check("a window dragged to the top takes the whole screen",
                   is_win(at(20, 300)) and is_win(at(w - 3, 300)))
-            check("ale nie wchodzi na pasek zadan",
+            check("but it does not run over the taskbar",
                   not is_win(at(320, h - 4)))
 
             # --- and [] gives it its own size back ----------------------
@@ -182,17 +182,17 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("przycisk [] przywraca oknu jego wlasny rozmiar",
+            check("the [] button gives the window its own size back",
                   not is_win(at(w - 3, 300)) and not is_win(at(20, 30)))
             # Its own size is 362 wide - the size it asked for. Half
             # the screen is 320 and the whole of it 640, so this one
             # number tells the three apart.
             wide, x0, ty = title_run(at, w)
-            check("i jest to jego wlasna szerokosc (%d px, nie polowa "
-                  "ani caly ekran)" % wide, abs(wide - (WW - 2)) <= 4)
+            check("and it is its own width (%d px, not half "
+                  "nor the whole screen)" % wide, abs(wide - (WW - 2)) <= 4)
             # After four drags, three snaps and a restore it is still a
             # window: a lit title bar with its own body under it
-            check("okno przezylo cztery przeciagniecia i dalej ma ognisko",
+            check("the window survived four drags and still has the focus",
                   is_win(at(x0 + 20, ty + TITLE_H + 40)))
 
             # --- what all of it is for: two windows side by side --------
@@ -210,10 +210,10 @@ def main():
             w, h, at = q.screen_raw()
 
             dark = near(at(150, deck - 30), 0)
-            check("terminal zajmuje lewa polowe (czarny ekran)", dark)
-            check("a ustawienia prawa (szare tlo)",
+            check("the terminal takes the left half (a black screen)", dark)
+            check("and the settings the right (a grey background)",
                   is_win(at(half + 100, 300)))
-            check("i nie zachodza na siebie - granica jest w polowie",
+            check("and they do not overlap - the border is in the middle",
                   near(at(half - 10, deck - 30), 0) and
                   is_win(at(half + 10, 300)))
         finally:

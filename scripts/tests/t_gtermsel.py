@@ -97,7 +97,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             q.mouse_goto(24, 192)          # the 'Term' icon
@@ -115,7 +115,7 @@ def main():
             rows = read_rows(q, **geom)
             line_no = next((i for i, r in enumerate(rows)
                             if r.startswith("2030-")), -1)
-            check("wyjscie programu jest w oknie", line_no >= 0)
+            check("the program's output is in the window", line_no >= 0)
             if line_no < 0:
                 return summary()
             wanted = rows[line_no][:10]     # '2030-06-13'
@@ -134,9 +134,9 @@ def main():
             field = sum(1 for dx in range(0, 10 * 8)
                         for dy in (0, 2)
                         if blue_at(at, CX + PAD + dx, y + dy))
-            check("zaznaczony kawalek ma pod soba pole (%d pikseli)" % field,
+            check("the selected piece has a field under it (%d pixels)" % field,
                   field > 20)
-            check("a to, czego nie zaznaczono, pola nie ma",
+            check("and what was not selected has no field",
                   not any(blue_at(at, CX + PAD + 12 * 8 + dx, y + dy)
                           for dx in range(0, 8) for dy in (0, 2)))
 
@@ -145,7 +145,7 @@ def main():
             time.sleep(1.5)
             rows = read_rows(q, **geom)
             typed_line = [r for r in rows if r][-1]
-            check("wklejone jest dokladnie to, co bylo pod mysza "
+            check("what is pasted is exactly what was under the mouse "
                   "('%s' w '%s')" % (wanted, typed_line),
                   wanted in typed_line)
 
@@ -166,7 +166,7 @@ def main():
             time.sleep(1.5)
             rows = read_rows(q, **geom)
             typed_line = [r for r in rows if r][-1]
-            check("zaznaczenie przez dwie linie bierze obie ('%s')"
+            check("a selection across two lines takes both ('%s')"
                   % typed_line,
                   "date" in typed_line and "2030-" in typed_line)
 
@@ -181,7 +181,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("samo klikniecie zaznaczenie kasuje",
+            check("a click on its own clears the selection",
                   not any(blue_at(at, CX + PAD + dx, y + dy)
                           for dx in range(0, 10 * 8) for dy in (0, 2)))
         finally:

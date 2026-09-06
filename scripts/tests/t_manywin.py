@@ -115,7 +115,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             w, h, at = q.screen_raw()
@@ -125,7 +125,7 @@ def main():
             before = buttons(at, w, row)
             # The kernel's own two windows are there from the start - so
             # anything we count later is on top of something real
-            check("na starcie pasek zadan ma dwa przyciski (okna jadra)",
+            check("at the start the taskbar has two buttons (the kernel's windows)",
                   len(before) == 2)
 
             # --- every icon opens a window ----------------------------
@@ -141,22 +141,22 @@ def main():
             # Seven applications plus the two kernel windows. The old
             # compositor held six windows in total, so this number is
             # itself the thing that could not happen before.
-            check("dziewiec okien naraz ma swoje przyciski na pasku "
-                  "(jest %d)" % len(got), len(got) >= 9)
+            check("nine windows at once have their buttons on the bar "
+                  "(there are %d)" % len(got), len(got) >= 9)
 
             # A button that starts past the right edge is drawn nowhere
             # and clickable nowhere
-            check("wszystkie przyciski mieszcza sie na pasku i nie "
-                  "wchodza pod zegar",
+            check("every button fits on the bar and does not "
+                  "run under the clock",
                   all(a >= TBL_X0 and b < w - CLOCK_W for a, b in got))
-            check("przyciski nie nachodza na siebie",
+            check("the buttons do not overlap",
                   all(got[i][1] < got[i + 1][0] for i in range(len(got) - 1)))
             # Narrower, but still wide enough to hold a letter or two
             # Every button is the same size, because what is on it is a
             # picture and a picture has one size. Nine of them fit with
             # room to spare where nine names never would have.
             widths = [b - a + 1 for a, b in got]
-            check("kazdy przycisk ma te sama szerokosc (%d px)"
+            check("every button has the same width (%d px)"
                   % widths[0],
                   min(widths) == max(widths) and widths[0] >= 14)
 
@@ -176,11 +176,11 @@ def main():
 
             w, h, at = q.screen_raw()
             now = buttons(at, w, row)
-            check("po kliknieciu pasek ma tyle samo przyciskow",
+            check("after the click the bar has as many buttons",
                   len(now) == len(got))
-            check("klikniety przycisk (ostatni) dostal ognisko",
+            check("the clicked button (the last) got the focus",
                   focused(at, row, now[-1]))
-            check("i tylko on - sasiad nie",
+            check("and only it - not its neighbour",
                   not focused(at, row, now[-2]))
 
             # The window that button belongs to came to the top, so its
@@ -188,12 +188,12 @@ def main():
             # taskbar. A window the cascade had pushed off the edge
             # would have no such strip to find.
             bar = title_bar(at, w, ty)
-            check("okno wywolane z paska ma pasek tytulu na ekranie",
+            check("a window called up from the bar has its title bar on the screen",
                   bar is not None)
             if bar:
                 by, bx0, bx1 = bar
-                check("pasek tytulu miesci sie w ekranie i nad paskiem "
-                      "zadan (y=%d, x=%d..%d)" % (by, bx0, bx1),
+                check("the title bar fits on the screen and above the "
+                      "taskbar (y=%d, x=%d..%d)" % (by, bx0, bx1),
                       bx0 >= 0 and bx1 < w and by < ty - TB_H)
 
             # --- twelve, which is where the buttons must give way -----
@@ -214,20 +214,20 @@ def main():
 
             w, h, at = q.screen_raw()
             full = buttons(at, w, row)
-            check("dwanascie okien naraz ma przyciski na pasku (jest %d)"
+            check("twelve windows at once have buttons on the bar (there are %d)"
                   % len(full), len(full) == 12)
-            check("i ani jednego wiecej, bo tyle jest slotow",
+            check("and not one more, because that is how many slots there are",
                   len(full) <= 12)
             # Twelve fit WITHOUT being squeezed: pictures take a third
             # of what trimmed names took, so the bar does not have to
             # give anything up
             fw = [b - a + 1 for a, b in full]
-            check("dwanascie miesci sie bez zwezania (%d px, tyle co przy "
+            check("twelve fit without narrowing (%d px, the same as with "
                   "dziewieciu)" % fw[0],
                   min(fw) == max(fw) == widths[0])
-            check("caly pasek nadal miesci sie obok zegara",
+            check("the whole bar still fits beside the clock",
                   full[-1][1] < w - CLOCK_W and full[0][0] >= TBL_X0)
-            check("i nadal sie nie nachodza",
+            check("and they still do not overlap",
                   all(full[i][1] < full[i + 1][0]
                       for i in range(len(full) - 1)))
 
@@ -242,9 +242,9 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             narrow = buttons(at, w, row)
-            check("ostatni przycisk trafia we wlasne okno",
+            check("the last button hits its own window",
                   len(narrow) == 12 and focused(at, row, narrow[-1]))
-            check("i nie w sasiada", not focused(at, row, narrow[-2]))
+            check("and not its neighbour", not focused(at, row, narrow[-2]))
 
             # --- and one in the middle, to prove it was not luck ------
             mid_i = len(narrow) // 2
@@ -258,13 +258,13 @@ def main():
 
             w, h, at = q.screen_raw()
             now2 = buttons(at, w, row)
-            check("przycisk ze srodka paska tez trafia we wlasne okno",
+            check("a button from the middle of the bar hits its own window too",
                   len(now2) == 12 and focused(at, row, now2[mid_i]))
-            check("a ostatni ognisko stracil",
+            check("and the last one lost the focus",
                   not focused(at, row, now2[-1]))
 
             # The desktop survived nine windows and all that clicking
-            check("pulpit dziala dalej",
+            check("the desktop is still running",
                   at(600, 300)[0] + at(600, 300)[1] + at(600, 300)[2] > 20)
         finally:
             q.close()

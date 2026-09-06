@@ -1,7 +1,8 @@
-/* gclock - zegar w oknie graficznym (ring 3)
+/* gclock - a clock in a graphical window (ring 3)
  *
- * Co sekunde czyta RTC (sys_time) i rysuje godzine HH:MM:SS w swoim
- * oknie. Druga aplikacja GUI uruchamiana z menu pulpitu.
+ * Every second it reads the RTC (sys_time) and draws the time HH:MM:SS
+ * in its own window. The second GUI application started from the
+ * desktop's menu.
  */
 
 #include "usys.h"

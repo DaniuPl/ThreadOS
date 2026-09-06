@@ -93,11 +93,11 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # Something on the screen worth photographing
-            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_goto(24, 72)               # the "Clock" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(420, 300)
@@ -107,7 +107,7 @@ def main():
             # How much orange the icons put on the screen - the number
             # the picture will have to repeat, a quarter of it
             on_screen = count_orange(at, 0, 0, 64, h - 20)
-            check("ikony sa na ekranie (%d pomaranczowych probek)"
+            check("the icons are on the screen (%d orange samples)"
                   % on_screen, on_screen > 50)
 
             # --- Print Screen -------------------------------------------
@@ -120,29 +120,29 @@ def main():
             q.type_line("fls")
             time.sleep(2)
             listing = q.serial()[seen:]
-            m = re.search(r"zrzut1\.psc\s+\((\d+) B\)", listing)
-            check("Print Screen zapisal plik na dysku ('%s')"
+            m = re.search(r"shot1\.psc\s+\((\d+) B\)", listing)
+            check("Print Screen wrote a file to the disk ('%s')"
                   % (m.group(0) if m else listing[-60:].replace("\n", " ")),
                   m is not None)
             if not m:
                 return summary()
             # 640*480 pixels + "PSCR" + two sizes + 256 colours
-            check("i ma dokladnie tyle bajtow, ile ma ekran plus paleta "
+            check("and it has exactly as many bytes as the screen plus the palette "
                   "(%s)" % m.group(1),
                   int(m.group(1)) == 640 * 480 + 4 + 2 + 2 + 256 * 3)
 
             # --- and the viewer puts it back on the screen --------------
-            q.type_line("run gimg zrzut1.psc")
+            q.type_line("run gimg shot1.psc")
             time.sleep(6)
             q.mouse_goto(560, 430)
             time.sleep(2)
             w, h, at = q.screen_raw()
 
             said = status(at)
-            check("podglad mowi, co wczytal ('%s')" % said,
-                  "640x480" in said and "wczytany" in said)
-            check("i ze pokazuje co drugi pixel, bo caly ekran nie "
-                  "zmiesci sie w oknie na tym ekranie", "co 2" in said)
+            check("the viewer says what it loaded ('%s')" % said,
+                  "640x480" in said and "loaded" in said)
+            check("and that it shows every other pixel, because the whole screen "
+                  "does not fit in a window on this screen", "co 2" in said)
 
             # The picture IS the screen: the icons' orange inside the
             # window, in the strip where the icons were, and a quarter
@@ -168,8 +168,8 @@ def main():
                 if inside > on_screen // 6:
                     break
                 time.sleep(1)
-            check("obraz w oknie to naprawde ekran - ikony sa na swoim "
-                  "miejscu (%d wobec %d na ekranie)" % (inside, on_screen),
+            check("the picture in the window really is the screen - the icons are in their "
+                  "place (%d against %d on the screen)" % (inside, on_screen),
                   inside > on_screen // 6)
 
             # --- the counter, and what is not a picture -----------------
@@ -182,8 +182,8 @@ def main():
             q.type_line("fls")
             time.sleep(2)
             listing = q.serial()[seen:]
-            check("drugi zrzut dostaje kolejny numer",
-                  "zrzut2.psc" in listing and "zrzut1.psc" in listing)
+            check("the second shot gets the next number",
+                  "shot2.psc" in listing and "shot1.psc" in listing)
 
             q.type_line("run gimg swap.sys")
             time.sleep(5)
@@ -196,9 +196,9 @@ def main():
             # The second viewer opens in the next slot of the cascade -
             # the first one is still standing where it was
             said = status(at, vx=VX + 12, vy=VY + 12)
-            check("plik, ktory nie jest obrazem, jest odrzucony ze "
-                  "slowem wyjasnienia ('%s')" % said,
-                  "nie jest obraz" in said)
+            check("a file that is not a picture is refused with "
+                  "a word of explanation ('%s')" % said,
+                  "is not a picture" in said)
 
             # --- a picture from the outside world -----------------------
             # No floppy, no shared folder - but a network. The machine
@@ -207,14 +207,14 @@ def main():
             q.mouse_click()
             time.sleep(1)
             seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /kwadraty.bmp obraz.bmp"
+            q.type_line("run httpget 10.0.2.2 %d /squares.bmp picture.bmp"
                         % http_port)
             time.sleep(6)
             got = q.serial()[seen:]
-            check("maszyna sciaga obraz z sieci na dysk",
-                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+            check("the machine fetches a picture off the network onto the disk",
+                  "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg obraz.bmp")
+            q.type_line("run gimg picture.bmp")
             time.sleep(6)
             q.mouse_goto(600, 200)
             time.sleep(2)
@@ -223,8 +223,8 @@ def main():
             # The third viewer, the third slot of the cascade
             vx, vy = VX + 24, VY + 24
             said = status(at, vx=vx, vy=vy)
-            check("podglad wczytal BMP ('%s')" % said,
-                  "64x48" in said and "wczytany" in said)
+            check("the viewer loaded the BMP ('%s')" % said,
+                  "64x48" in said and "loaded" in said)
 
             # The four quarters, in the four colours the file has -
             # each of them exactly in the palette, so 'nearly' is not
@@ -236,7 +236,7 @@ def main():
             greens = hue(48, 12)
             blues = hue(16, 36)
             whites = hue(48, 36)
-            check("i wyszly z niego cztery cwiartki w czterech kolorach "
+            check("and four quarters in four colours came out of it "
                   "(%s %s %s %s)" % (reds, greens, blues, whites),
                   reds[0] > 200 and reds[1] < 60 and
                   greens[1] > 200 and greens[0] < 60 and
@@ -251,29 +251,29 @@ def main():
             q.mouse_click()
             time.sleep(1)
             seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /kwadraty.png obraz.png"
+            q.type_line("run httpget 10.0.2.2 %d /squares.png picture.png"
                         % http_port)
             time.sleep(6)
             got = q.serial()[seen:]
-            check("maszyna sciaga PNG z sieci",
-                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+            check("the machine fetches a PNG off the network",
+                  "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg obraz.png")
+            q.type_line("run gimg picture.png")
             time.sleep(7)
             q.mouse_goto(600, 200)
             time.sleep(2)
             w, h, at = q.screen_raw()
             vx, vy = VX + 36, VY + 36
             said = status(at, vx=vx, vy=vy)
-            check("podglad rozpakowal PNG ('%s')" % said,
-                  "64x48" in said and "wczytany" in said)
+            check("the viewer unpacked the PNG ('%s')" % said,
+                  "64x48" in said and "loaded" in said)
 
             cx, cy = vx + 1, vy + 11
             reds = at(cx + 16, cy + 12)
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
             whites = at(cx + 48, cy + 36)
-            check("i wyszly z niego te same cztery kolory "
+            check("and the same four colours came out of it "
                   "(%s %s %s %s)" % (reds, greens, blues, whites),
                   reds[0] > 200 and reds[1] < 60 and
                   greens[1] > 200 and greens[0] < 60 and
@@ -290,22 +290,22 @@ def main():
             q.mouse_click()
             time.sleep(1)
             seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /kwadraty.jpg obraz.jpg"
+            q.type_line("run httpget 10.0.2.2 %d /squares.jpg picture.jpg"
                         % http_port)
             time.sleep(6)
             got = q.serial()[seen:]
-            check("maszyna sciaga JPEG z sieci",
-                  "HTTP 200" in got and "zakonczyl sie (kod 0)" in got)
+            check("the machine fetches a JPEG off the network",
+                  "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg obraz.jpg")
+            q.type_line("run gimg picture.jpg")
             time.sleep(7)
             q.mouse_goto(600, 200)
             time.sleep(2)
             w, h, at = q.screen_raw()
             vx, vy = VX + 48, VY + 48
             said = status(at, vx=vx, vy=vy)
-            check("podglad rozlozyl JPEG na piksele ('%s')" % said,
-                  "64x48" in said and "wczytany" in said)
+            check("the viewer took the JPEG apart into pixels ('%s')" % said,
+                  "64x48" in said and "loaded" in said)
 
             # JPEG is lossy, so the colours are read well inside the
             # quarters - but they still have to be the right four, and
@@ -316,7 +316,7 @@ def main():
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
             whites = at(cx + 48, cy + 36)
-            check("i wyszly z niego te same cztery kolory "
+            check("and the same four colours came out of it "
                   "(%s %s %s %s)" % (reds, greens, blues, whites),
                   reds[0] > 200 and reds[1] < 60 and
                   greens[1] > 200 and greens[0] < 60 and
@@ -345,11 +345,11 @@ def sixty_four():
     long-mode half fetches the same file and looks for the same four
     colours."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("POMINIETE (64): brak obrazu 64-bitowego (make kernel64)")
+        print("SKIPPED (64): no 64-bit image (make kernel64)")
         return
     if shutil.which("grub-mkrescue") is None or \
        shutil.which("qemu-system-x86_64") is None:
-        print("POMINIETE (64): brak grub-mkrescue lub qemu-system-x86_64")
+        print("SKIPPED (64): no grub-mkrescue or qemu-system-x86_64")
         return
 
     d = tempfile.mkdtemp()
@@ -375,7 +375,7 @@ def sixty_four():
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
-        check("plyta z jadrem 64-bitowym buduje sie", made)
+        check("the disc with the 64-bit kernel builds", made)
         if not made:
             return
 
@@ -383,15 +383,15 @@ def sixty_four():
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("proton64>", timeout=60)
-            q.type_line("pulpit")
-            q.wait_serial("Pulpit startuje", timeout=30)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)
             q.mouse_home()
 
             # The same window as on the other kernel, so the viewer
             # lands in the same slot of the cascade and the reading
             # grid below is the same one
-            q.mouse_goto(24, 72)               # the "Zegar" icon
+            q.mouse_goto(24, 72)               # the "Clock" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 430)             # the keys back to the shell
@@ -399,7 +399,7 @@ def sixty_four():
             time.sleep(1)
 
             seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /kwadraty.jpg obraz.jpg"
+            q.type_line("run httpget 10.0.2.2 %d /squares.jpg picture.jpg"
                         % http_port)
             time.sleep(8)
             q.type_line("fls")
@@ -408,13 +408,13 @@ def sixty_four():
             # The long-mode shell does not announce a program's exit
             # code, so the proof that the fetch worked is the file
             # itself - with the length the server sent.
-            m = re.search(r"obraz\.jpg\s+\((\d+) B\)", got)
-            check("(64) maszyna sciaga JPEG z sieci ('%s')"
+            m = re.search(r"picture\.jpg\s+\((\d+) B\)", got)
+            check("(64) the machine fetches a JPEG off the network ('%s')"
                   % (m.group(0) if m else got[-60:].replace("\n", " ")),
                   "HTTP 200" in got and m is not None and
                   int(m.group(1)) == len(JPEG_IMAGE))
 
-            q.type_line("run gimg obraz.jpg")
+            q.type_line("run gimg picture.jpg")
             time.sleep(8)
             q.mouse_goto(600, 200)
             time.sleep(2)
@@ -422,15 +422,15 @@ def sixty_four():
 
             vx, vy = VX, VY
             said = status(at, vx=vx, vy=vy)
-            check("(64) podglad rozlozyl JPEG na piksele ('%s')" % said,
-                  "64x48" in said and "wczytany" in said)
+            check("(64) the viewer took the JPEG apart into pixels ('%s')" % said,
+                  "64x48" in said and "loaded" in said)
 
             cx, cy = vx + 1, vy + 11
             reds = at(cx + 16, cy + 12)
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
             whites = at(cx + 48, cy + 36)
-            check("(64) i wyszly z niego cztery kolory, te same co na "
+            check("(64) and four colours came out of it, the same as on "
                   "32 bitach (%s %s %s %s)"
                   % (reds, greens, blues, whites),
                   reds[0] > 200 and reds[1] < 60 and

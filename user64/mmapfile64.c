@@ -56,18 +56,18 @@ void _start(int argc, char **argv)
     /* How many bytes to check. The whole file by default - but with an
        explicitly given number we touch only that many, and then it can
        be seen how many pages the kernel really read. */
-    uint64_t ile = size;
+    uint64_t count = size;
     if (argc > 2) {
         int64_t v = uatoi(argv[2]);
         if (v > 0 && (uint64_t)v < size)
-            ile = (uint64_t)v;
+            count = (uint64_t)v;
     }
 
     /* The file's pattern: the byte with number i has the value
        (i * 7 + 13) & 0xFF. mkmap64 wrote it, before the file reached the
        disk. */
     uint64_t bad = 0;
-    for (uint64_t i = 0; i < ile; i++)
+    for (uint64_t i = 0; i < count; i++)
         if (p[i] != (unsigned char)(i * 7 + 13))
             bad++;
 
@@ -76,8 +76,8 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
     report("[mmapfile64] the checked bytes match, and there were ",
-            ile, "");
-    if (ile != size) {
+            count, "");
+    if (count != size) {
         print("[mmapfile64] I never touched the rest of the file\n");
         sys_exit(0);
     }

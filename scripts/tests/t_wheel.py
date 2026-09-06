@@ -84,7 +84,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             # --- the machine asked for the fourth byte ------------------
@@ -95,20 +95,20 @@ def main():
             q.type_line("mouse")
             time.sleep(2)
             said = q.serial()[seen:]
-            check("maszyna wynegocjowala kolko ('%s')"
+            check("the machine negotiated a wheel ('%s')"
                   % said.replace("\n", " ")[:60],
-                  "kolko=tak" in said)
+                  "wheel=yes" in said)
 
             # --- a list longer than the window -------------------------
             # Named so that the order is the order they were made in,
             # and so that a name read from the screen says which one it
             # is without counting.
             for i in range(FILES):
-                q.type_line("write plik%02d.txt x" % i)
+                q.type_line("write file%02d.txt x" % i)
                 time.sleep(0.35)
             time.sleep(1)
 
-            q.mouse_goto(24, 112)              # the "Pliki" icon
+            q.mouse_goto(24, 112)              # the "Files" icon
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(500, 380)             # the pointer off the window
@@ -119,7 +119,7 @@ def main():
             # test does not care which name it is, only that it is one
             # and that it moves.
             top_before = first_row(q)
-            check("menedzer plikow pokazuje liste ('%s')" % top_before,
+            check("the file manager shows the list ('%s')" % top_before,
                   len(top_before) > 2)
 
             # --- the wheel over the list -------------------------------
@@ -128,14 +128,14 @@ def main():
             q.mouse_wheel(-2)                  # towards the person: down
             time.sleep(1)
             top_down = first_row(q)
-            check("kolko w dol przewinelo liste ('%s' -> '%s')"
+            check("the wheel down scrolled the list ('%s' -> '%s')"
                   % (top_before, top_down),
-                  top_down != top_before and top_down.startswith("plik"))
+                  top_down != top_before and top_down.startswith("file"))
 
             q.mouse_wheel(2)                   # and back up
             time.sleep(1)
             top_back = first_row(q)
-            check("kolko w gore wrocilo tam, gdzie bylo ('%s')" % top_back,
+            check("the wheel up came back where it was ('%s')" % top_back,
                   top_back == top_before)
 
             # --- and over nothing it does nothing ----------------------
@@ -147,7 +147,7 @@ def main():
             q.mouse_wheel(-3)
             time.sleep(1)
             top_off = first_row(q)
-            check("kolko poza oknem go nie przewija ('%s')" % top_off,
+            check("the wheel outside the window does not scroll it ('%s')" % top_off,
                   top_off == top_before)
         finally:
             q.close()

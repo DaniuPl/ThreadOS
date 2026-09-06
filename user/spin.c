@@ -8,7 +8,7 @@
 void _start(void)
 {
     for (;;) {
-        print("[spin] tik\n");
+        print("[spin] tick\n");
         sys_sleep(300);
     }
 }

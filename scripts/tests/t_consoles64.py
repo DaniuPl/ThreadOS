@@ -33,18 +33,18 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- konsole wirtualne Alt+F1..F4 (jadro 64-bitowe) ---")
+    print("--- virtual consoles Alt+F1..F4 (the 64-bit kernel) ---")
 
     reason = no64()
     if reason:
-        print("POMINIETE: " + reason)
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     try:
-        check("plyta z jadrem 64-bitowym buduje sie", make_iso64(d, iso))
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
         if not os.path.exists(iso):
             return summary()
 
@@ -58,22 +58,22 @@ def main():
             q.type_line("uptime")
             time.sleep(1.0)
             first_one = q.wait_fbcon("Uptime:", timeout=10)
-            check("pierwsza konsola dziala jak dotad",
+            check("the first console works as before",
                   "Uptime:" in first_one)
 
             # Alt+F2: the second console has its own shell and is empty
             q.sendkey("alt-f2")
             time.sleep(0.8)
             second_one = q.screen_fbcon()
-            check("Alt+F2 pokazuje druga konsole z wlasnym promptem",
-                  "konsola 2" in second_one)
-            check("tresc pierwszej konsoli nie przecieka na druga",
+            check("Alt+F2 shows the second console with a prompt of its own",
+                  "console 2" in second_one)
+            check("what is on the first console does not leak onto the second",
                   "Uptime:" not in second_one)
 
             # A program started on the second console writes on it
             q.type_line("run spin64")
             view = q.wait_fbcon("[spin64]", timeout=20)
-            check("program uruchomiony na drugiej konsoli pisze na niej",
+            check("a program started on the second console writes to it",
                   "[spin64]" in view)
 
             # Back to the first: its content untouched, and the program
@@ -81,9 +81,9 @@ def main():
             q.sendkey("alt-f1")
             time.sleep(1.5)
             returned = q.screen_fbcon()
-            check("pierwsza konsola nietknieta po powrocie",
+            check("the first console is untouched when we come back",
                   "Uptime:" in returned)
-            check("program z drugiej konsoli nie pisze po pierwszej",
+            check("a program on the second console does not write over the first",
                   "[spin64]" not in returned)
 
             # Ctrl+C concerns the console it falls on: here there is
@@ -94,7 +94,7 @@ def main():
             q.sendkey("alt-f2")
             time.sleep(1.0)
             again = q.screen_fbcon()
-            check("program na drugiej konsoli przezyl Ctrl+C na pierwszej",
+            check("a program on the second console survived Ctrl+C on the first",
                   "[spin64]" in again)
 
             # Ctrl+C on its own console ends the program. The proof is
@@ -104,10 +104,10 @@ def main():
             q.sendkey("ctrl-c")
             time.sleep(2.0)
             po = q.screen_fbcon()
-            check("Ctrl+C na wlasnej konsoli przerywa program",
-                  "koniec, kod wyjscia" in po)
+            check("Ctrl+C on its own console interrupts the program",
+                  "done, exit code" in po)
             time.sleep(2.0)
-            check("przerwany program przestal pisac",
+            check("the interrupted program stopped writing",
                   q.screen_fbcon() == po)
         finally:
             q.close()

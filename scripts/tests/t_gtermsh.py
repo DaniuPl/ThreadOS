@@ -99,7 +99,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("pulpit wstal", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
             q.mouse_goto(24, 192)          # the 'Term' icon
@@ -115,34 +115,34 @@ def main():
             q.type_line("sh")
             rows = wait_line(q, "ush:", geom)
             body = "\n".join(rows)
-            check("shell uzytkownika wstal w oknie terminala",
-                  "shell uzytkownika" in body)
-            check("i pokazal wlasna zachete", "ush:/>" in body)
-            check("terminal wie, ze cos w nim chodzi", "running" in body)
+            check("the user's shell came up in the terminal window",
+                  "the user's shell" in body)
+            check("and it showed a prompt of its own", "ush:/>" in body)
+            check("the terminal knows something is running in it", "running" in body)
 
             # --- what is typed reaches it -----------------------------
-            q.type_line("echo czesc")
-            rows = wait_line(q, "czesc", geom)
-            check("to, co wpisano, doszlo do shella (odbil komende)",
-                  index_of(rows, "ush:/> echo czesc") >= 0)
+            q.type_line("echo hello")
+            rows = wait_line(q, "hello", geom)
+            check("what was typed reached the shell (it echoed the command)",
+                  index_of(rows, "ush:/> echo hello") >= 0)
 
             # The order is the point: the command, then its output, then
             # the next prompt. Getting this wrong means the child's
             # output was written over by the shell.
-            cmd_at = index_of(rows, "ush:/> echo czesc")
+            cmd_at = index_of(rows, "ush:/> echo hello")
             out_at = -1
             for i in range(cmd_at + 1, len(rows)):
-                if rows[i] == "czesc":
+                if rows[i] == "hello":
                     out_at = i
                     break
-            check("wyjscie programu jest POD komenda, ktora go wywolala",
+            check("the program's output is UNDER the command that called it",
                   out_at > cmd_at)
             nxt = -1
             for i in range(out_at + 1, len(rows)):
                 if rows[i].startswith("ush:/>"):
                     nxt = i
                     break
-            check("a nastepna zacheta pod wyjsciem, nie na nim",
+            check("and the next prompt is under the output, not on it",
                   nxt > out_at)
 
             # --- and a real command with more output ------------------
@@ -150,28 +150,28 @@ def main():
             rows = wait_line(q, "seq 3", geom)
             time.sleep(1.5)
             rows = read_rows(q, **geom)
-            check("liczby z 'seq 3' widac w kolejnosci",
+            check("the numbers from 'seq 3' show in order",
                   "1" in rows and "2" in rows and "3" in rows)
 
             # A pipeline INSIDE the shell inside the terminal
             q.type_line("seq 9 | wc")
-            rows = wait_line(q, "wierszy=9", geom)
-            check("potok wewnatrz shella tez pisze do okna",
-                  "wierszy=9" in "\n".join(rows))
+            rows = wait_line(q, "lines=9", geom)
+            check("a pipe inside the shell writes to the window too",
+                  "lines=9" in "\n".join(rows))
 
             # --- Ctrl+D ends it ---------------------------------------
             q.sendkey("ctrl-d")
             time.sleep(3)
             rows = read_rows(q, **geom)
             body = "\n".join(rows)
-            check("Ctrl+D widac w sesji", "^D" in body)
-            check("shell skonczyl sie i terminal przestal go pilnowac",
+            check("Ctrl+D shows in the session", "^D" in body)
+            check("the shell finished and the terminal stopped watching it",
                   "running" not in body)
 
             # --- the terminal is its own again ------------------------
             q.type_line("date")
             rows = wait_line(q, "2030-", geom)
-            check("po zakonczonym shellu terminal bierze wlasne komendy",
+            check("after the shell ends the terminal takes commands of its own",
                   "2030-06-13" in "\n".join(rows))
         finally:
             q.close()

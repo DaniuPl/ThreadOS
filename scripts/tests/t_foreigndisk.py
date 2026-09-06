@@ -22,7 +22,7 @@ one is being restrained from:
   sizes and the names they carry
   a genuinely blank disk is still formatted, because that is a disk
   nobody loses anything by
-  and 'formatuj' does it on purpose - but only for somebody who types
+  and 'format' does it on purpose - but only for somebody who types
   the whole word
   'formatuj N' takes ONE partition: the table and the neighbours come
   out of it untouched, and after a restart the system finds its
@@ -50,35 +50,35 @@ def main():
     make_gpt_disk(disk, 800)
 
     try:
-        check("obraz testowy naprawde ma tablice GPT", gpt_intact(disk))
+        check("the test image really has a GPT", gpt_intact(disk))
 
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
             boot = q.wait_for("ProtonOS shell", timeout=40)
-            check("jadro mowi, ze na dysku cos jest i tego nie rusza",
-                  "nie ruszam go" in boot)
-            check("i podpowiada, co zrobic, gdyby jednak mial byc nasz",
-                  "formatuj" in boot)
+            check("the kernel says there is something on the disk and does not touch it",
+                  "I am not touching it" in boot)
+            check("and it hints what to do if it is to be ours after all",
+                  "format" in boot)
 
             # What it can read. Not the point of the group, but the
             # thing that makes the restraint useful rather than blind.
-            q.type_line("sprzet")
+            q.type_line("hardware")
             time.sleep(3)
             said = q.screen()
-            check("czyta tablice GPT i liczbe partycji ('%s')"
+            check("it reads the GPT and the number of partitions ('%s')"
                   % next((l.strip() for l in said.splitlines()
-                          if "tablica" in l), "brak wiersza"),
-                  "tablica GPT" in said and "partycji: 3" in said)
-            check("nazywa partycje EFI i widzi jej etykiete",
+                          if "table," in l), "no line"),
+                  "GPT table" in said and "partitions: 3" in said)
+            check("it names the EFI partition and sees its label",
                   "EFI (ESP)" in said and "EFI system partition" in said)
-            check("i rozpoznaje partycje danych oraz Linuksa",
+            check("and it recognises the data and the Linux partitions",
                   "Windows" in said and "linux-root" in said)
         finally:
             q.close()
 
         # The assertion the whole group exists for: read the image back
         # from the host, and the table has to still be in it.
-        check("po calym rozruchu tablica partycji jest NIETKNIETA",
+        check("after the whole boot the partition table is UNTOUCHED",
               gpt_intact(disk))
     finally:
         for f in (disk, slog):
@@ -94,9 +94,9 @@ def main():
         q = Qemu(KERNEL, INITRD, blank, append=TEXT_MODE, serial=slog2)
         try:
             boot = q.wait_for("ProtonOS shell", timeout=40)
-            check("pusty dysk jest formatowany tak, jak byl dotad",
-                  "sformatowany" in boot)
-            check("i nie ma tam mowy o odmowie", "nie ruszam go" not in boot)
+            check("an empty disk is formatted as it always was",
+                  "formatted" in boot)
+            check("and there is no talk of a refusal there", "I am not touching it" not in boot)
         finally:
             q.close()
     finally:
@@ -116,39 +116,39 @@ def main():
         q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
         try:
             q.wait_for("ProtonOS shell", timeout=40)
-            q.type_line("formatuj 3")
+            q.type_line("format 3")
             time.sleep(2)
             said = q.screen()
-            check("'formatuj 3' mowi, ze skasuje TE partycje, nie dysk",
-                  "SKASUJE PARTYCJE 3" in said and
-                  "tablica partycji zostaja nietkniete" in said)
-            q.type_line("TAK")
+            check("'format 3' says it will erase THAT partition, not the disk",
+                  "ERASE PARTITION 3" in said and
+                  "partition table stay untouched" in said)
+            q.type_line("YES")
             time.sleep(4)
             said = q.screen()
-            check("i zaklada na niej PFS",
-                  "ta partycja jest teraz PFS-em" in said)
+            check("and it creates a PFS on it",
+                  "that partition is a PFS now" in said)
 
-            q.type_line("write dowod.txt zainstalowany-obok-windowsa")
+            q.type_line("write proof.txt installed-beside-windows")
             time.sleep(2)
         finally:
             q.close()
 
-        check("tablica partycji przezyla formatowanie partycji",
+        check("the partition table survived formatting a partition",
               gpt_intact(disk3))
-        check("i sasiednie partycje tez - dalej maja swoje dane",
+        check("and the neighbouring partitions too - they still hold their data",
               neighbours_intact(disk3))
 
         # And the system finds it again on the next boot
         q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
         try:
             boot = q.wait_for("ProtonOS shell", timeout=40)
-            check("po restarcie jadro znajduje PFS w partycji ('%s')"
+            check("after the restart the kernel finds the PFS in the partition ('%s')"
                   % next((l.strip() for l in boot.splitlines()
-                          if "w partycji" in l), "brak wiersza"),
-                  "PFS: w partycji 3" in boot)
-            out = q.command("cat dowod.txt", "zainstalowany", timeout=20)
-            check("a plik zapisany przed restartem tam jest",
-                  "zainstalowany-obok-windowsa" in out)
+                          if "in partition" in l), "no line"),
+                  "PFS: in partition 3" in boot)
+            out = q.command("cat dowod.txt", "installed", timeout=20)
+            check("and the file written before the restart is there",
+                  "installed-beside-windows" in out)
         finally:
             q.close()
     finally:
@@ -167,35 +167,35 @@ def main():
         try:
             q.wait_for("ProtonOS shell", timeout=40)
 
-            q.type_line("formatuj")
+            q.type_line("format")
             time.sleep(2)
-            q.type_line("tak")            # not the word that is asked for
+            q.type_line("yes")            # not the word that is asked for
             time.sleep(3)
             said = q.screen()
-            check("'formatuj' ostrzega, co skasuje ('%s')"
+            check("'format' warns what it will erase ('%s')"
                   % next((l.strip() for l in said.splitlines()
-                          if "SKASUJE" in l), "brak wiersza"),
-                  "SKASUJE CALY DYSK" in said)
-            check("zla odpowiedz niczego nie kasuje",
-                  "nie skasowano niczego" in said)
+                          if "ERASE" in l), "no line"),
+                  "ERASE THE WHOLE DISK" in said)
+            check("a wrong answer erases nothing",
+                  "nothing was erased" in said)
         finally:
             q.close()
-        check("i tablica dalej jest na miejscu", gpt_intact(disk2))
+        check("and the table is still in place", gpt_intact(disk2))
 
         # And now the word itself
         q = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE, serial=slog3)
         try:
             q.wait_for("ProtonOS shell", timeout=40)
-            q.type_line("formatuj")
+            q.type_line("format")
             time.sleep(2)
-            q.type_line("TAK")
+            q.type_line("YES")
             time.sleep(4)
             said = q.screen()
-            check("a wpisane TAK formatuje dysk",
-                  "caly dysk jest teraz PFS-em" in said)
+            check("and a typed YES formats the disk",
+                  "the whole disk is a PFS now" in said)
         finally:
             q.close()
-        check("i wtedy tablicy GPT juz nie ma - o to sie prosilo",
+        check("and then the GPT is gone - which is what was asked for",
               not gpt_intact(disk2))
     finally:
         for f in (disk2, slog3):
