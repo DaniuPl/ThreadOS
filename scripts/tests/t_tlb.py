@@ -42,6 +42,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -55,9 +56,19 @@ COUNTERS = re.compile(r"TLB: lokalnie (\d+), zdalnie (\d+), odpowiedzi (\d+)")
 
 
 def counters(q, wait, timeout=60):
-    """(local only, sent to other cores, answers collected)."""
-    m = COUNTERS.search(q.command("smp", wait, timeout=timeout))
-    return tuple(int(x) for x in m.groups()) if m else None
+    """(local only, sent to other cores, answers collected).
+
+    Asked more than once on purpose: the counters are read with an
+    ordinary shell command, and on a host running the whole suite at
+    once the answer sometimes does not arrive inside the first
+    timeout. A test that then dies of a missing value teaches nothing
+    about the kernel."""
+    for _ in range(3):
+        m = COUNTERS.search(q.command("smp", wait, timeout=timeout))
+        if m:
+            return tuple(int(x) for x in m.groups())
+        time.sleep(1.0)
+    return None
 
 
 def run_case(q, out, label):
@@ -113,6 +124,9 @@ def main():
             if res:
                 check("bez 'runw' proces zostaje na rdzeniu rozruchowym "
                       "(maska %d)" % res[0], res[0] == 1)
+            if before is None or mid is None:
+                check("liczniki TLB daly sie odczytac po probie", False)
+                return summary()
             check("i nie kosztuje ani jednego przerwania (%d -> %d)"
                   % (before[1], mid[1]), mid[1] == before[1])
             # ...though mappings did change - they were simply nobody
@@ -124,6 +138,10 @@ def main():
             out = q.command("runw tlbtest", "zakonczyl sie", timeout=180)
             res = run_case(q, out, " ('runw')")
             after = counters(q, "TLB:")
+            if after is None:
+                check("liczniki TLB daly sie odczytac po drugiej probie",
+                      False)
+                return summary()
             if res:
                 mask = res[0]
                 check("watki jednego procesu bieglyby poza rdzeniem "
@@ -154,6 +172,9 @@ def main():
             out = q1.command("runw tlbtest", "zakonczyl sie", timeout=180)
             res = run_case(q1, out, " (jeden rdzen)")
             after = counters(q1, "TLB:")
+            if before is None or after is None:
+                check("liczniki TLB daly sie odczytac (jeden rdzen)", False)
+                return summary()
             if res:
                 check("na jednym rdzeniu 'runw' nie zmienia nic (maska %d)"
                       % res[0], res[0] == 1)
@@ -197,12 +218,19 @@ def main():
             if res:
                 check("bez 'runw' proces zostaje na rdzeniu rozruchowym "
                       "(64-bit, maska %d)" % res[0], res[0] == 1)
+            if before is None or mid is None:
+                check("liczniki TLB daly sie odczytac (64-bit)", False)
+                return summary()
             check("i nie kosztuje ani jednego przerwania (64-bit, %d -> %d)"
                   % (before[1], mid[1]), mid[1] == before[1] == 0)
 
             out = q.command("runw tlbtest64", "kod wyjscia", timeout=180)
             res = run_case(q, out, " (64-bit, 'runw')")
             after = counters(q, "TLB:")
+            if after is None:
+                check("liczniki TLB daly sie odczytac po drugiej probie "
+                      "(64-bit)", False)
+                return summary()
             if res:
                 mask = res[0]
                 check("watki jednego procesu bieglyby poza rdzeniem "

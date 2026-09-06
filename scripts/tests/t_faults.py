@@ -37,6 +37,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -74,6 +75,25 @@ def run_case(q, cmd, label, timeout=240):
     return mask, ticks, pages, sums[0]
 
 
+def settled(q, read):
+    """The counter after it has stopped moving.
+
+    A process that has reported its result is not necessarily finished:
+    the last threads are still ending, and their faults are still being
+    counted. Reading the counter one moment too early makes the
+    difference look smaller than it was - which on a loaded host is a
+    failure that says nothing about the kernel. So we look until two
+    readings agree."""
+    previous = None
+    for _ in range(12):
+        now = read(q)
+        if now is not None and now == previous:
+            return now
+        previous = now
+        time.sleep(1.0)
+    return previous
+
+
 def main():
     print("--- bledy stron bez wielkiego zamka (jadro 32-bitowe) ---")
     slog = tempfile.mktemp(suffix=".log")
@@ -87,7 +107,7 @@ def main():
 
             # --- Both processes held on the boot core -----------------
             res = run_case(q, "run faults", " ('run')")
-            mid = faults(q)
+            mid = settled(q, faults)
             if res:
                 mask, ticks, pages, _ = res
                 check("bez 'runw' oba zostaja na rdzeniu rozruchowym "
@@ -107,7 +127,7 @@ def main():
 
             # --- Allowed anywhere -------------------------------------
             res = run_case(q, "runw faults", " ('runw')")
-            after = faults(q)
+            after = settled(q, faults)
             if res:
                 mask, ticks, pages, _ = res
                 check("z 'runw' bieglyby takze poza rdzeniem rozruchowym "
