@@ -292,7 +292,7 @@ int ahci_init(void)
         uint32_t area = pmm_alloc_frame();
         uint32_t table = pmm_alloc_frame();
         if (!area || !table) {
-            printk("[ !! ] AHCI: brak pamieci na struktury sterownika\n");
+            printk("[ !! ] AHCI: no memory for the driver's structures\n");
             return 0;
         }
         memset((void *)(uintptr_t)area, 0, PAGE_SIZE);

@@ -94,20 +94,20 @@ static int bar_w(void)
    change. The layer holds the pointers; the text is ours. */
 static void relabel(void)
 {
-    int at = add(state_line, 0, "Glosnosc: ");
+    int at = add(state_line, 0, "Volume: ");
 
     at += num(state_line + at, snd.volume);
     at = add(state_line, at, "%");
     if (snd.muted)
-        at = add(state_line, at, "  (cisza)");
+        at = add(state_line, at, "  (muted)");
     ug_set_colour(&u, id_state, snd.muted ? UG_RED : UG_BLUE);
 
-    at = add(steps_line, 0, "kodek ma ");
+    at = add(steps_line, 0, "the codec has ");
     at += num(steps_line + at, snd.steps);
-    add(steps_line, at, " stopni, a stopien to decybele");
+    add(steps_line, at, " steps, and a step is decibels");
 
     ug_set_value(&u, id_bar, snd.muted ? 0 : (int)snd.volume);
-    ug_set_text(&u, id_mute, snd.muted ? "Wlacz" : "Cisza");
+    ug_set_text(&u, id_mute, snd.muted ? "Unmute" : "Mute");
     ug_set_colour(&u, id_mute, snd.muted ? UG_RED : UG_BLUE);
     ug_set_text(&u, id_note, note);
 }
@@ -123,25 +123,25 @@ static void build(int win)
     ug_start(&u, win, W0, H0);
 
     if (!snd.present) {
-        ug_label(&u, 6, rowy(0), "Dzwiek");
+        ug_label(&u, 6, rowy(0), "Sound");
         ug_set_colour(&u, 0, UG_BLUE);
-        ug_label(&u, 6, rowy(2), "Ta maszyna nie ma karty dzwiekowej,");
-        ug_label(&u, 6, rowy(3), "ktora umiem obsluzyc.");
-        ug_note(&u, 6, rowy(5), "Wiecej powie 'sprzet'.");
+        ug_label(&u, 6, rowy(2), "This machine has no sound card");
+        ug_label(&u, 6, rowy(3), "that I know how to drive.");
+        ug_note(&u, 6, rowy(5), "'hardware' says more.");
         id_state = id_steps = id_bar = id_mute = id_test = id_note = -1;
         return;
     }
 
     id_state = ug_label(&u, 6, rowy(0), state_line);
     id_steps = ug_note(&u, 6, rowy(1), steps_line);
-    ug_note(&u, 6, rowy(2), "- wiec polowa suwaka to nie polowa");
-    ug_note(&u, 6, rowy(3), "glosnosci. Kolko myszy tez dziala.");
+    ug_note(&u, 6, rowy(2), "- so half the slider is not half the");
+    ug_note(&u, 6, rowy(3), "loudness. The mouse wheel works too.");
 
     id_bar = ug_slider(&u, BAR_X, BAR_Y, bar_w(), BAR_H,
                        (int)snd.volume, 100);
-    id_mute = ug_button(&u, BAR_X, BTN_Y, BTN_W, BTN_H, "Cisza");
+    id_mute = ug_button(&u, BAR_X, BTN_Y, BTN_W, BTN_H, "Mute");
     id_test = ug_button(&u, BAR_X + BTN_W + 10, BTN_Y, BTN_W, BTN_H,
-                        "Sprawdz");
+                        "Test");
     id_note = ug_label(&u, BAR_X + 2 * BTN_W + 26, BTN_Y + 4, note);
 
     relabel();
@@ -149,7 +149,7 @@ static void build(int win)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Glosnosc");
+    int win = (int)win_create(W0, H0, "Volume");
     if (win < 0)
         sys_exit(1);
 
@@ -196,7 +196,7 @@ void _start(void)
                    call plays and returns, so the window is still while
                    it sounds; that is honest, because the machine
                    really is busy playing. */
-                ecopy(note, "gra...", sizeof(note));
+                ecopy(note, "playing...", sizeof(note));
                 relabel();
                 ug_draw(&u);
                 sys_snd_beep(440, 200);

@@ -30,18 +30,18 @@ void _start(void)
 {
     volatile uint32_t *p = sys_shm(KEY, 4096);
     if (!p) {
-        print("[shmread64] brak pamieci wspoldzielonej\n");
+        print("[shmread64] there is no shared memory\n");
         sys_exit(1);
     }
 
-    report("[shmread64] region pod adresem ", (uint64_t)(uintptr_t)p);
-    report("[shmread64] wartosc=", p[0]);
+    report("[shmread64] the region at address ", (uint64_t)(uintptr_t)p);
+    report("[shmread64] value=", p[0]);
 
     if (p[0] != PATTERN) {
-        print("[shmread64] ZLE: to nie ta wartosc\n");
+        print("[shmread64] WRONG: that is not the value\n");
         sys_exit(1);
     }
     p[2] = PATTERN + 1;              /* the answer by the same road */
-    print("[shmread64] zgadza sie - dwa procesy, jedna pamiec\n");
+    print("[shmread64] it matches - two processes, one memory\n");
     sys_exit(0);
 }

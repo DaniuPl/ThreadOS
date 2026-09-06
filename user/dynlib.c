@@ -44,12 +44,12 @@ void _start(int argc, char **argv)
     uint32_t data = (uint32_t)proton_data_addr();
     uint32_t mine = (uint32_t)(uintptr_t)our_fn;
 
-    report("[dynlib] kod programu pod ", mine);
-    report("[dynlib] kod biblioteki pod ", code);
-    report("[dynlib] dane biblioteki pod ", data);
+    report("[dynlib] the program's code at ", mine);
+    report("[dynlib] the library's code at ", code);
+    report("[dynlib] the library's data at ", data);
 
     if (code <= mine) {
-        print("[dynlib] ZLE: kod biblioteki lezy w obrazie programu\n");
+        print("[dynlib] WRONG: the library's code lies inside the program image\n");
         sys_exit(1);
     }
 
@@ -60,20 +60,20 @@ void _start(int argc, char **argv)
     sha256("abc", 3, digest);
     for (int i = 0; i < 8; i++) {
         if (digest[i] != want[i]) {
-            print("[dynlib] ZLE: SHA-256 z biblioteki daje nie to, co trzeba\n");
+            print("[dynlib] WRONG: SHA-256 from the library gives the wrong answer\n");
             sys_exit(1);
         }
     }
-    print("[dynlib] SHA-256('abc') z biblioteki zgadza sie z FIPS 180-4\n");
+    print("[dynlib] SHA-256('abc') from the library matches FIPS 180-4\n");
 
     /* The library's code is SHARED - every process sees the same
        frames. If they could be written to, one program would swap a
        function out for everybody at once. So it has to be impossible,
        and it has to kill that program. */
     if (argc > 1 && argv[1][0] == 'p') {
-        print("[dynlib] probuje pisac po kodzie biblioteki\n");
+        print("[dynlib] trying to write over the library's code\n");
         *(volatile uint8_t *)(uintptr_t)code = 0x90;
-        print("[dynlib] ZLE: zapis do kodu biblioteki sie udal\n");
+        print("[dynlib] WRONG: writing to the library's code worked\n");
         sys_exit(1);
     }
 
@@ -81,15 +81,15 @@ void _start(int argc, char **argv)
        process it is to be zero - without that there would be no telling
        whether the data are private. */
     if (proton_random_counter() != 0) {
-        print("[dynlib] ZLE: licznik biblioteki nie zaczyna od zera\n");
+        print("[dynlib] WRONG: the library's counter does not start at zero\n");
         sys_exit(1);
     }
     uint8_t random[64];
     urand_init();
     urand_bytes(random, sizeof(random));
-    report("[dynlib] licznik po pobraniu bajtow: ",
+    report("[dynlib] the counter after taking bytes: ",
             proton_random_counter());
 
-    print("[dynlib] gotowe\n");
+    print("[dynlib] done\n");
     sys_exit(0);
 }

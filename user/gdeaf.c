@@ -17,14 +17,14 @@
 
 void _start(void)
 {
-    int w = win_create(100, 40, "Gluchy");
+    int w = win_create(100, 40, "Deaf");
     if (w < 0)
         sys_exit(1);
 
     for (;;) {
         win_rect(w, 0, 0, 100, 40, C_BG);
-        win_text(w, 4, 4, "nie slucham", C_RED);
-        win_text(w, 4, 18, "zamknij mnie", C_RED);
+        win_text(w, 4, 4, "not listening", C_RED);
+        win_text(w, 4, 18, "close me", C_RED);
         sys_sleep(200);
     }
 }

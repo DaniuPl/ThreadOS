@@ -17,14 +17,14 @@ static volatile unsigned char data[16];
 
 void _start(void)
 {
-    print("[nx64] wpisuje instrukcje do wlasnych danych\n");
+    print("[nx64] writing an instruction into my own data\n");
     data[0] = 0xC3;                  /* ret */
 
-    print("[nx64] i probuje ja wykonac - to powinno mnie zabic\n");
+    print("[nx64] and trying to execute it - this should kill me\n");
     void (*fn)(void);
     *(void **)&fn = (void *)(unsigned char *)data;
     fn();
 
-    print("[nx64] BLAD: procesor wykonal dane!\n");
+    print("[nx64] ERROR: the processor executed data!\n");
     sys_exit(1);
 }

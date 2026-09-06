@@ -121,7 +121,7 @@ static void run_pipe(char *left, char *right)
 {
     int fd[2];
     if (sys_pipe(fd) < 0) {
-        print("ush64: nie mam z czego zrobic potoku\n");
+        print("ush64: I have nothing to make a pipe out of\n");
         return;
     }
 
@@ -142,7 +142,7 @@ static void run_pipe(char *left, char *right)
     }
     argv2[n2] = 0;
     if (!n2) {
-        print("ush64: po kresce nic nie ma\n");
+        print("ush64: there is nothing after the bar\n");
         sys_close(fd[0]);
         sys_close(fd[1]);
         return;
@@ -150,7 +150,7 @@ static void run_pipe(char *left, char *right)
 
     int n1 = split(left);
     if (!n1) {
-        print("ush64: przed kreska nic nie ma\n");
+        print("ush64: there is nothing before the bar\n");
         sys_close(fd[0]);
         sys_close(fd[1]);
         return;
@@ -190,20 +190,20 @@ static void run(const char *name)
 {
     int64_t child = sys_fork();
     if (child < 0) {
-        print("ush64: nie mam z czego zrobic procesu\n");
+        print("ush64: I have nothing to make a process out of\n");
         return;
     }
     if (child == 0) {
         sys_exec(name, argv);
         /* exec returns only when it failed */
-        print("ush64: nie ma takiego programu\n");
+        print("ush64: there is no such program\n");
         sys_exit(127);
     }
 
     int code = 0;
     int64_t who = sys_wait(&code);
     if (who >= 0)
-        say("ush64: koniec, kod ", code, "\n");
+        say("ush64: done, code ", code, "\n");
 }
 
 static void execute(void)
@@ -212,12 +212,12 @@ static void execute(void)
         return;
 
     if (equal(line, "help")) {
-        print("ush64: help, echo <tekst>, pid, exit, "
-              "albo nazwa programu z initrd\n");
+        print("ush64: help, echo <text>, pid, exit, "
+              "or the name of a program from the initrd\n");
     } else if (equal(line, "pid")) {
         /* We learn the process number from what fork tells the parent -
            just like every other program */
-        print("ush64: jestem procesem w ring 3\n");
+        print("ush64: I am a process in ring 3\n");
     } else if (equal(line, "exit")) {
         print("ush64: pa!\n");
         sys_exit(0);
@@ -248,7 +248,7 @@ void _start(void)
 {
 
     sys_signal(SIGINT, on_signal);
-    print("ush64 - shell uzytkownika. Wpisz 'help'.\n");
+    print("ush64 - the user's shell. Type 'help'.\n");
 
     for (;;) {
         print("ush64$ ");

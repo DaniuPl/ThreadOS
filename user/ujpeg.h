@@ -345,7 +345,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
     }
 
     if (len < 4 || data[0] != 0xFF || data[1] != 0xD8) {
-        *why = "to nie jest JPEG";
+        *why = "this is not a JPEG";
         return -1;
     }
     j.pos = 2;
@@ -366,7 +366,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
         int seg = jpg_u16(&j);
         unsigned int end = j.pos + (unsigned int)seg - 2;
         if (end > j.len) {
-            *why = "plik urwany";
+            *why = "the file is cut short";
             return -1;
         }
 
@@ -379,7 +379,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
             j.ncomp = j.in[j.pos++];
             if (j.ncomp > JPG_MAX_COMP || j.width <= 0 ||
                 j.width > JPG_MAX_W || j.height <= 0) {
-                *why = "dziwne wymiary albo za duzo skladowych";
+                *why = "odd dimensions, or too many components";
                 return -1;
             }
             for (int i = 0; i < j.ncomp; i++) {
@@ -389,12 +389,12 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
                 j.comp[i].tq = j.in[j.pos + 2];
                 j.pos += 3;
                 if (j.comp[i].tq > 3) {
-                    *why = "zla tablica kwantyzacji";
+                    *why = "a bad quantisation table";
                     return -1;
                 }
                 if (j.comp[i].hs < 1 || j.comp[i].hs > 4 ||
                     j.comp[i].vs < 1 || j.comp[i].vs > 4) {
-                    *why = "nietypowe probkowanie";
+                    *why = "unusual sampling";
                     return -1;
                 }
             }
@@ -413,14 +413,14 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
             break;
         }
         case 0xC2:
-            *why = "JPEG progresywny - nie umiem";
+            *why = "a progressive JPEG - I cannot read it";
             return -1;
         case 0xC4:                          /* Huffman tables */
             while (j.pos < end) {
                 int tc = j.in[j.pos] >> 4, th = j.in[j.pos] & 15;
                 j.pos++;
                 if (th > 3) {
-                    *why = "zla tablica Huffmana";
+                    *why = "a bad Huffman table";
                     return -1;
                 }
                 struct jpg_huff *h = tc ? &j.hac[th] : &j.hdc[th];
@@ -431,7 +431,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
                     total += h->bits[i];
                 }
                 if (total > 256 || j.pos + (unsigned)total > j.len) {
-                    *why = "zla tablica Huffmana";
+                    *why = "a bad Huffman table";
                     return -1;
                 }
                 for (int i = 0; i < total; i++)
@@ -445,7 +445,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
                 int pq = j.in[j.pos] >> 4, tq = j.in[j.pos] & 15;
                 j.pos++;
                 if (tq > 3) {
-                    *why = "zla tablica kwantyzacji";
+                    *why = "a bad quantisation table";
                     return -1;
                 }
                 for (int i = 0; i < 64; i++) {
@@ -466,14 +466,14 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
         case 0xDA: {                        /* the scan itself */
             int ns = j.in[j.pos++];
             if (ns < 1 || ns != j.ncomp) {
-                *why = "skan nie obejmuje calego obrazu";
+                *why = "the scan does not cover the whole picture";
                 return -1;
             }
             for (int i = 0; i < ns; i++) {
                 int id = j.in[j.pos], tt = j.in[j.pos + 1];
                 j.pos += 2;
                 if ((tt >> 4) > 3 || (tt & 15) > 3) {
-                    *why = "zla tablica Huffmana";
+                    *why = "a bad Huffman table";
                     return -1;
                 }
                 for (int k = 0; k < j.ncomp; k++)
@@ -485,7 +485,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
             for (int i = 0; i < j.ncomp; i++)
                 if (!j.hdc[j.comp[i].td].present ||
                     !j.hac[j.comp[i].ta].present) {
-                    *why = "brak tablicy Huffmana dla skladowej";
+                    *why = "no Huffman table for a component";
                     return -1;
                 }
             j.pos += 3;                     /* spectral selection, baseline */
@@ -507,7 +507,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
                 need += (unsigned int)j.comp[i].pw * j.comp[i].ph;
             }
             if (need > mem_len) {
-                *why = "obraz za duzy na pamiec";
+                *why = "the picture is too big for memory";
                 return -1;
             }
             unsigned int at = 0;
@@ -549,7 +549,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
             *out_w = j.width;
             *out_h = j.height;
             if (j.error) {
-                *why = "strumien JPEG sie nie zgadza";
+                *why = "the JPEG stream does not add up";
                 return -1;
             }
             return 0;
@@ -561,7 +561,7 @@ static int jpeg_decode(const unsigned char *data, unsigned int len,
         if (j.pos < end)
             j.pos = end;
     }
-    *why = "nie znalazlem obrazu w pliku";
+    *why = "I found no picture in the file";
     return -1;
 #undef j
 }

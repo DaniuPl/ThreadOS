@@ -43,14 +43,14 @@ void _start(void)
 
     volatile uint32_t *p = sys_shm(KEY, 4096);
     if (!p) {
-        print("[shmwrite64] brak pamieci wspoldzielonej\n");
+        print("[shmwrite64] there is no shared memory\n");
         sys_exit(1);
     }
 
     p[0] = PATTERN;
     p[2] = 0;                        /* room for the reader's answer */
-    report("[shmwrite64] region pod adresem ", (uint64_t)(uintptr_t)p);
-    report("[shmwrite64] zapisalem ", PATTERN);
+    report("[shmwrite64] the region at address ", (uint64_t)(uintptr_t)p);
+    report("[shmwrite64] I wrote ", PATTERN);
 
     /* A child with its own address space - fork and exec, the way a
        shell does it */
@@ -58,7 +58,7 @@ void _start(void)
     if (pid == 0) {
         char *argv[2] = {"shmread64", 0};
         sys_exec("shmread64", argv);
-        print("[shmwrite64] nie ma 'shmread64'\n");
+        print("[shmwrite64] there is no 'shmread64'\n");
         sys_exit(1);
     }
     if (pid > 0) {
@@ -69,9 +69,9 @@ void _start(void)
     /* The reader bounced the value back through the same place - if it
        arrived, it can be seen here now */
     if (p[2] != PATTERN + 1) {
-        report("[shmwrite64] ZLE: czytelnik nie odpisal, jest ", p[2]);
+        report("[shmwrite64] WRONG: the reader did not answer, it is ", p[2]);
         sys_exit(1);
     }
-    print("[shmwrite64] czytelnik odpisal przez te sama pamiec\n");
+    print("[shmwrite64] the reader answered through the same memory\n");
     sys_exit(0);
 }

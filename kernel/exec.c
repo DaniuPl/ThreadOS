@@ -154,7 +154,7 @@ static int load_segment(uint32_t dir, const uint8_t *file,
 {
     if (ph->p_vaddr < PAGING_USER_BASE ||
         ph->p_vaddr + ph->p_memsz > USER_STACK_BASE) {
-        printk("exec: segment poza dozwolonym zakresem (%x)\n", ph->p_vaddr);
+        printk("exec: a segment outside the allowed range (%x)\n", ph->p_vaddr);
         return 0;
     }
 
@@ -322,21 +322,21 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     void *loaded = (void *)0;
     const uint8_t *file = prog_image(tok[0], &size, &loaded);
     if (!file) {
-        printk("exec: nie ma '%s' ani w initrd, ani na dysku "
-               "(sprawdz 'ls' i 'fls')\n", tok[0]);
+        printk("exec: there is no '%s' in the initrd or on the disk "
+               "(look at 'ls' and 'fls')\n", tok[0]);
         return 0;
     }
 
     const struct elf_ehdr *eh = (const struct elf_ehdr *)file;
     if (!elf_valid(eh, size)) {
-        printk("exec: '%s' nie jest programem ELF32 i386\n", tok[0]);
+        printk("exec: '%s' is not an ELF32 i386 program\n", tok[0]);
         prog_release(loaded);
         return 0;
     }
 
     uint32_t dir = paging_new_address_space();
     if (!dir) {
-        printk("exec: brak pamieci na katalog stron\n");
+        printk("exec: no memory for the page directory\n");
         prog_release(loaded);
         return 0;
     }
@@ -364,7 +364,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
        jump through an unfilled entry has nowhere to lead. */
     if (dyn_is_dynamic(file, size)) {
         if (!dyn_present()) {
-            printk("exec: '%s' potrzebuje biblioteki %s, ktorej nie ma\n",
+            printk("exec: '%s' needs the library %s, which is not there\n",
                    tok[0], dyn_name());
             paging_destroy_address_space(dir);
             prog_release(loaded);
@@ -372,7 +372,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         }
         if (!map_library(dir) ||
             dyn_relocate(file, size, &dir, write_addr) < 0) {
-            printk("exec: '%s' - nie da sie zwiazac z %s\n",
+            printk("exec: '%s' - cannot be bound to %s\n",
                    tok[0], dyn_name());
             paging_destroy_address_space(dir);
             prog_release(loaded);
@@ -386,7 +386,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
         uint32_t va = USER_STACK_TOP - (uint32_t)(i + 1) * PAGE_SIZE;
         uint32_t frame = page_frame_for(dir, va);
         if (!frame) {
-            printk("exec: brak pamieci na stos\n");
+            printk("exec: no memory for the stack\n");
             paging_destroy_address_space(dir);
             prog_release(loaded);
             return 0;
@@ -398,7 +398,7 @@ static uint32_t build_image(char **tok, int argc, uint32_t *entry_out,
     *esp_out = build_argv_stack(sframe, tok, argc);
     *entry_out = eh->e_entry;
     *brk_out = brk;
-    printk("[jadro] exec '%s' z %s: ELF %u B, entry %x, argc=%d\n",
+    printk("[kernel] exec '%s' from %s: ELF %u B, entry %x, argc=%d\n",
            tok[0], prog_source(), size, eh->e_entry, argc);
     /* The segments are already in the process's pages - the copy in
        kernel memory is of no further use */
@@ -439,7 +439,7 @@ static void exec_task(void *arg)
         file_set_pipe(1, a->out_pipe, 1);   /* stdout -> the write end */
     else if (a->out_file[0]) {
         if (file_redirect_stdout(a->out_file, a->out_append) < 0)
-            printk("exec: nie moge przekierowac stdout do '%s'\n",
+            printk("exec: I cannot redirect stdout to '%s'\n",
                    a->out_file);
     } else if (a->out_inode >= 0) {
         /* Nobody said where to write, but whoever started us writes to
@@ -950,8 +950,8 @@ static struct exec_args *make_args(const char *cmdline, char *prog)
     if (!prog[0])
         return (void *)0;
     if (!prog_exists(prog)) {
-        printk("run: nie ma '%s' ani w initrd, ani na dysku "
-               "(sprawdz 'ls' i 'fls')\n", prog);
+        printk("run: there is no '%s' in the initrd or on the disk "
+               "(look at 'ls' and 'fls')\n", prog);
         return (void *)0;
     }
 
@@ -1119,7 +1119,7 @@ int exec_spawn_pipeline(const char *pipeline, const char *outfile)
     for (int i = 0; i + 1 < nseg; i++) {
         int pidx = pipe_alloc();
         if (pidx < 0) {
-            printk("run: brak wolnego potoku\n");
+            printk("run: no free pipe\n");
             for (int j = 0; j < nseg; j++)
                 kfree(args[j]);
             /* release the pipes already allocated by closing both ends */

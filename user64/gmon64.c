@@ -35,7 +35,7 @@ void _start(void)
 {
     int w = (int)win_create(WINDOW_W, WINDOW_H, "Monitor");
     if (w < 0) {
-        print("gmon64: pulpit nie dal okna\n");
+        print("gmon64: the desktop gave no window\n");
         sys_exit(1);
     }
 
@@ -45,9 +45,9 @@ void _start(void)
             sys_exit(1);
 
         win_rect(w, 0, 0, WINDOW_W, WINDOW_H, C_BG);
-        win_text(w, 4, 4, "RAM uzyte (KiB):", C_HEAD);
+        win_text(w, 4, 4, "RAM used (KiB):", C_HEAD);
         num(w, 136, 4, si.used_kib, C_TEXT);
-        win_text(w, 4, 16, "RAM razem (KiB):", C_HEAD);
+        win_text(w, 4, 16, "RAM total (KiB):", C_HEAD);
         num(w, 136, 16, si.ram_kib, C_TEXT);
         win_text(w, 4, 28, "uptime (s):", C_HEAD);
         num(w, 96, 28, si.uptime_s, C_TEXT);

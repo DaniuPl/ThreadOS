@@ -76,9 +76,9 @@ void _start(int argc, char **argv)
 {
     /* mkwall <plik> [wzor 0-4] [barwa 0-5] */
     if (argc < 2) {
-        print("uzycie: mkwall <plik> [wzor 0-4] [barwa 0-5]\n");
-        print("  wzory: 0 zbocze, 1 pierscienie, 2 plecionka, 3 krata,\n");
-        print("         4 przenikanie (tysiace kolorow)\n");
+        print("usage: mkwall <file> [pattern 0-4] [hue 0-5]\n");
+        print("  patterns: 0 slope, 1 rings, 2 weave, 3 lattice,\n");
+        print("            4 blend (thousands of colours)\n");
         sys_exit(1);
     }
     int pattern = argc > 2 ? text_to_num(argv[2]) % 5 : 0;
@@ -139,13 +139,13 @@ void _start(int argc, char **argv)
 
     int fd = sys_open(argv[1], O_WRITE | O_CREATE | O_TRUNC);
     if (fd == -2) {
-        print("mkwall: brak uprawnien do '");
+        print("mkwall: no permission for '");
         print(argv[1]);
         print("'\n");
         sys_exit(2);
     }
     if (fd < 0) {
-        print("mkwall: nie moge utworzyc '");
+        print("mkwall: I cannot create '");
         print(argv[1]);
         print("'\n");
         sys_exit(1);
@@ -166,7 +166,7 @@ void _start(int argc, char **argv)
 
     print("mkwall: ");
     print(argv[1]);
-    print(" gotowa (ustaw 'set tapeta ");
+    print(" is ready (set it with 'set wallpaper ");
     print(argv[1]);
     print("')\n");
     sys_exit(at == sizeof(out) ? 0 : 1);

@@ -52,12 +52,12 @@ void _start(int argc, char **argv)
 
     int n = put(0, "[fpu64] start ");
     n = putn(n, (uint64_t)start);
-    n = put(n, ": wyszlo ");
+    n = put(n, ": came out ");
     n = putn(n, result);
-    n = put(n, ", mialo ");
+    n = put(n, ", wanted ");
     n = putn(n, expected);
-    n = put(n, result == expected ? " - zgadza sie\n"
-                                   : " - NIE ZGADZA SIE\n");
+    n = put(n, result == expected ? " - it matches\n"
+                                   : " - IT DOES NOT MATCH\n");
     out[n] = 0;
     print(out);
 

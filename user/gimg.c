@@ -93,7 +93,7 @@ static int need_colour(void)
 {
     if (colour_win)
         return 1;
-    ecopy(note, "brak pamieci na kolory", sizeof(note));
+    ecopy(note, "no memory for the colours", sizeof(note));
     return 0;
 }
 
@@ -117,7 +117,7 @@ static void retitle(void)
 {
     char t[NAME_MAX_LEN + 10];
     int p = 0;
-    const char *pre = "Obraz";
+    const char *pre = "Picture";
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     if (fname[0]) {
@@ -136,7 +136,7 @@ static void draw_status(void)
     char line[80];
     int p = 0;
     if (asking) {
-        const char *q = "Otworz: ";
+        const char *q = "Open: ";
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen; i++)
@@ -154,7 +154,7 @@ static void draw_status(void)
         for (int i = 0; px[i]; i++)
             line[p++] = px[i];
     } else {
-        const char *hint = "Ctrl+O otwiera obraz";
+        const char *hint = "Ctrl+O opens a picture";
         for (int i = 0; hint[i]; i++)
             line[p++] = hint[i];
     }
@@ -213,7 +213,7 @@ static int show_png(int fd, const uint8_t *head, int got)
 #define PNG_MAX_FILE (2 * 1024 * 1024)
     uint8_t *file = malloc(PNG_MAX_FILE);
     if (!file) {
-        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        ecopy(note, "no memory for the picture", sizeof(note));
         return -1;
     }
     for (int i = 0; i < got && i < PNG_MAX_FILE; i++)
@@ -233,7 +233,7 @@ static int show_png(int fd, const uint8_t *head, int got)
     int plte_n = 0;
     uint8_t *idat = malloc((uint32_t)size);   /* never larger than the file */
     if (!idat) {
-        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        ecopy(note, "no memory for the picture", sizeof(note));
         return -1;
     }
     int idat_n = 0;
@@ -276,32 +276,32 @@ static int show_png(int fd, const uint8_t *head, int got)
     }
 
     if (w <= 0 || h <= 0 || w > ROW_MAX || (long)w * h > PNG_MAX_PIXELS) {
-        ecopy(note, "dziwne wymiary", sizeof(note));
+        ecopy(note, "odd dimensions", sizeof(note));
         return -1;
     }
     if (depth != 8) {
-        ecopy(note, "umiem PNG po 8 bitow na kanal", sizeof(note));
+        ecopy(note, "I read PNG with 8 bits per channel", sizeof(note));
         return -1;
     }
     if (interlace) {
-        ecopy(note, "przeplatanego PNG nie umiem", sizeof(note));
+        ecopy(note, "I cannot read an interlaced PNG", sizeof(note));
         return -1;
     }
     int chan = colour == 2 ? 3 : colour == 6 ? 4 : colour == 4 ? 2 :
                colour == 0 ? 1 : colour == 3 ? 1 : 0;
     if (!chan || (colour == 3 && !plte_n)) {
-        ecopy(note, "nieznany rodzaj PNG", sizeof(note));
+        ecopy(note, "an unknown kind of PNG", sizeof(note));
         return -1;
     }
 
     uint32_t raw_len = (uint32_t)h * (uint32_t)(1 + w * chan);
     uint8_t *raw = malloc(raw_len);
     if (!raw) {
-        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        ecopy(note, "no memory for the picture", sizeof(note));
         return -1;
     }
     if (inflate_zlib(idat, (unsigned)idat_n, raw, raw_len) < 0) {
-        ecopy(note, "strumien PNG sie nie zgadza", sizeof(note));
+        ecopy(note, "the PNG stream does not add up", sizeof(note));
         return -1;
     }
 
@@ -390,7 +390,7 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
         jpeg_mem = malloc(JPEG_MAX_MEM);
     }
     if (!jpeg_file || !jpeg_mem) {
-        ecopy(note, "brak pamieci na obraz", sizeof(note));
+        ecopy(note, "no memory for the picture", sizeof(note));
         return -1;
     }
 
@@ -406,14 +406,14 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
     }
 
     int w = 0, h = 0;
-    const char *why = "nie wyszlo";
+    const char *why = "it did not work";
     if (jpeg_decode(jpeg_file, (unsigned)have, jpeg_mem, JPEG_MAX_MEM,
                     &w, &h, &why) < 0) {
         ecopy(note, why, sizeof(note));
         return -1;
     }
     if (w <= 0 || w > ROW_MAX || h <= 0) {
-        ecopy(note, "dziwne wymiary", sizeof(note));
+        ecopy(note, "odd dimensions", sizeof(note));
         return -1;
     }
 
@@ -467,11 +467,11 @@ static int show_bmp(int fd, const uint8_t *head)
     if (hh < 0)
         hh = -hh;
     if (w <= 0 || w > ROW_MAX || hh <= 0 || dib < 40) {
-        ecopy(note, "dziwne wymiary", sizeof(note));
+        ecopy(note, "odd dimensions", sizeof(note));
         return -1;
     }
     if (comp != 0 || (bpp != 24 && bpp != 8)) {
-        ecopy(note, "umiem tylko BMP 24- i 8-bitowy bez kompresji",
+        ecopy(note, "I only read 24- and 8-bit BMP with no compression",
               sizeof(note));
         return -1;
     }
@@ -485,7 +485,7 @@ static int show_bmp(int fd, const uint8_t *head)
             colours = 256;
         if (colours < 0 || (int)sys_read(fd, own, (uint32_t)(colours * 4))
                            != colours * 4) {
-            ecopy(note, "nie da sie przeczytac palety obrazu",
+            ecopy(note, "the picture's palette cannot be read",
                   sizeof(note));
             return -1;
         }
@@ -548,7 +548,7 @@ static void show(const char *name)
 {
     int fd = (int)sys_open(name, O_READ);
     if (fd < 0) {
-        ecopy(note, "nie ma takiego pliku", sizeof(note));
+        ecopy(note, "there is no such file", sizeof(note));
         img_w = 0;
         return;
     }
@@ -559,7 +559,7 @@ static void show(const char *name)
     int got = (int)sys_read(fd, head, HDR);
     if (got < 54) {
         sys_close(fd);
-        ecopy(note, "to nie jest obraz", sizeof(note));
+        ecopy(note, "this is not a picture", sizeof(note));
         img_w = 0;
         return;
     }
@@ -573,7 +573,7 @@ static void show(const char *name)
             return;
         }
         ecopy(fname, name, NAME_MAX_LEN);
-        ecopy(note, "wczytany", sizeof(note));
+        ecopy(note, "loaded", sizeof(note));
         retitle();
         return;
     }
@@ -586,7 +586,7 @@ static void show(const char *name)
             return;
         }
         ecopy(fname, name, NAME_MAX_LEN);
-        ecopy(note, "wczytany", sizeof(note));
+        ecopy(note, "loaded", sizeof(note));
         retitle();
         return;
     }
@@ -608,7 +608,7 @@ static void show(const char *name)
         }
         sys_close(fd);
         ecopy(fname, name, NAME_MAX_LEN);
-        ecopy(note, "wczytany", sizeof(note));
+        ecopy(note, "loaded", sizeof(note));
         retitle();
         return;
     }
@@ -616,7 +616,7 @@ static void show(const char *name)
     if (got != HDR || head[0] != 'P' || head[1] != 'S' || head[2] != 'C' ||
         head[3] != 'R') {
         sys_close(fd);
-        ecopy(note, "to nie jest obraz", sizeof(note));
+        ecopy(note, "this is not a picture", sizeof(note));
         img_w = 0;
         return;
     }
@@ -624,7 +624,7 @@ static void show(const char *name)
     img_h = head[6] | (head[7] << 8);
     if (img_w <= 0 || img_w > ROW_MAX || img_h <= 0) {
         sys_close(fd);
-        ecopy(note, "dziwne wymiary", sizeof(note));
+        ecopy(note, "odd dimensions", sizeof(note));
         img_w = 0;
         return;
     }
@@ -652,13 +652,13 @@ static void show(const char *name)
     }
     sys_close(fd);
     ecopy(fname, name, NAME_MAX_LEN);
-    ecopy(note, "wczytany", sizeof(note));
+    ecopy(note, "loaded", sizeof(note));
     retitle();
 }
 
 void _start(int argc, char **argv)
 {
-    int win = (int)win_create(W0, H0, "Obraz");
+    int win = (int)win_create(W0, H0, "Picture");
     if (win < 0)
         sys_exit(1);
     winid = win;

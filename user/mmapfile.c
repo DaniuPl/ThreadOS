@@ -19,17 +19,17 @@
 
 void _start(int argc, char **argv)
 {
-    const char *name = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "map.txt";
 
     uint32_t size = 0;
     const unsigned char *p = sys_mmap_file(name, &size);
     if (!p || !size) {
-        print("[mmapfile] nie da sie odwzorowac pliku\n");
+        print("[mmapfile] the file cannot be mapped\n");
         sys_exit(1);
     }
-    print("[mmapfile] plik pod adresem ");
+    print("[mmapfile] the file at address ");
     print_dec((uint32_t)p);
-    print("\n[mmapfile] rozmiar ");
+    print("\n[mmapfile] size ");
     print_dec(size);
     print(" B\n");
 
@@ -47,17 +47,17 @@ void _start(int argc, char **argv)
         if (p[i] != (unsigned char)(i * 7 + 13))
             bad++;
     if (bad) {
-        print("[mmapfile] ZLE: bajtow nie tak, jak trzeba: ");
+        print("[mmapfile] WRONG: the bytes are not as they should be: ");
         print_dec(bad);
         print("\n");
         sys_exit(1);
     }
 
-    print("[mmapfile] sprawdzone bajty zgadzaja sie, bylo ich ");
+    print("[mmapfile] the checked bytes match, and there were ");
     print_dec(ile);
     print("\n");
     if (ile != size) {
-        print("[mmapfile] reszty pliku nie tknalem\n");
+        print("[mmapfile] I never touched the rest of the file\n");
         sys_exit(0);
     }
 
@@ -67,19 +67,19 @@ void _start(int argc, char **argv)
     if (pid == 0) {
         unsigned char *corrupt = (unsigned char *)p;
         corrupt[0] = 0xFF;                  /* the process is to die here */
-        print("[mmapfile] ZLE: zapis do odwzorowania sie udal\n");
+        print("[mmapfile] WRONG: writing to the mapping worked\n");
         sys_exit(1);
     }
     if (pid > 0) {
         int code = 0;
         sys_waitany(&code);
         if (p[0] != (unsigned char)13) {
-            print("[mmapfile] ZLE: tresc pliku zostala zmieniona\n");
+            print("[mmapfile] WRONG: the file's content was changed\n");
             sys_exit(1);
         }
-        print("[mmapfile] zapis do odwzorowania odrzucony\n");
+        print("[mmapfile] writing to the mapping was refused\n");
     }
 
-    print("[mmapfile] plik czytany jak pamiec, bez ani jednego read\n");
+    print("[mmapfile] the file read like memory, without a single read\n");
     sys_exit(0);
 }

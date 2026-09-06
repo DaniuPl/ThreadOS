@@ -53,25 +53,25 @@ void _start(int argc, char **argv)
 
     unsigned char *p = sys_sbrk((int64_t)nbytes);
     if (!p) {
-        print("[swaptest64] sbrk odmowil\n");
+        print("[swaptest64] sbrk refused\n");
         sys_exit(1);
     }
     p = (unsigned char *)(((uintptr_t)p + PAGE_MARK - 1) & ~(uintptr_t)(PAGE_MARK - 1));
 
-    report("[swaptest64] zapisuje ", mib, " MiB\n");
+    report("[swaptest64] writing ", mib, " MiB\n");
     for (uint64_t i = 0; i < pages; i++)
         p[i * PAGE_MARK] = tag(i);
 
-    print("[swaptest64] czytam z powrotem\n");
+    print("[swaptest64] reading it back\n");
     uint64_t bad = 0;
     for (uint64_t i = 0; i < pages; i++)
         if (p[i * PAGE_MARK] != tag(i))
             bad++;
 
     if (bad) {
-        report("[swaptest64] ZLE: stron z bledna zawartoscia ", bad, "\n");
+        report("[swaptest64] WRONG: pages with the wrong content ", bad, "\n");
         sys_exit(1);
     }
-    report("[swaptest64] wszystkie ", pages, " stron wrocilo w calosci\n");
+    report("[swaptest64] all ", pages, " pages came back whole\n");
     sys_exit(0);
 }

@@ -266,7 +266,7 @@ void net_arp_dump(void)
         shown++;
     }
     if (!shown)
-        printk("tablica ARP pusta (sprobuj 'ping <ip>')\n");
+        printk("the ARP table is empty (try 'ping <ip>')\n");
 }
 
 /* --- sending ------------------------------------------------------------ */
@@ -760,17 +760,17 @@ static const uint8_t *arp_resolve(uint32_t ip)
 void net_ping(uint32_t ip, int count)
 {
     if (!netdev_present()) {
-        printk("ping: brak karty sieciowej\n");
+        printk("ping: there is no network card\n");
         return;
     }
     if (!my_ip) {
-        printk("ping: brak adresu IP (sprobuj 'dhcp')\n");
+        printk("ping: there is no IP address (try 'dhcp')\n");
         return;
     }
 
     const uint8_t *mac = arp_resolve(ip);
     if (!mac) {
-        printk("ping: brak odpowiedzi ARP dla ");
+        printk("ping: no ARP answer for ");
         net_print_ip(ip);
         printk("\n");
         return;
@@ -778,7 +778,7 @@ void net_ping(uint32_t ip, int count)
 
     printk("PING ");
     net_print_ip(ip);
-    printk(" (%u B danych)\n", 32);
+    printk(" (%u B of data)\n", 32);
 
     int received = 0;
     for (int seq = 1; seq <= count; seq++) {
@@ -798,7 +798,7 @@ void net_ping(uint32_t ip, int count)
 
         uint32_t sent_tick = pit_ticks();
         if (ip_send(ip, mac, IP_PROTO_ICMP, icmp, 40) < 0) {
-            printk("ping: nie udalo sie wyslac pakietu\n");
+            printk("ping: could not send the packet\n");
             ping_waiting = 0;
             return;
         }
@@ -807,7 +807,7 @@ void net_ping(uint32_t ip, int count)
             task_sleep(10);
             if (task_killed()) {      /* 'kill ping' is to work at once */
                 ping_waiting = 0;
-                printk("ping: przerwane\n");
+                printk("ping: interrupted\n");
                 return;
             }
         }
@@ -818,17 +818,17 @@ void net_ping(uint32_t ip, int count)
             received++;
             printk("40 B od ");
             net_print_ip(ip);
-            printk(": seq=%u ttl=%u czas=%ums\n", (uint32_t)seq,
+            printk(": seq=%u ttl=%u time=%ums\n", (uint32_t)seq,
                    (uint32_t)ping_ttl, ms);
         } else {
-            printk("brak odpowiedzi: seq=%u (timeout 1 s)\n", (uint32_t)seq);
+            printk("no answer: seq=%u (1 s timeout)\n", (uint32_t)seq);
         }
 
         if (seq < count)
             task_sleep(500);
     }
 
-    printk("--- statystyki: wyslano %u, odebrano %u ---\n",
+    printk("--- statistics: sent %u, received %u ---\n",
            (uint32_t)count, (uint32_t)received);
 }
 
@@ -837,25 +837,25 @@ void net_ping(uint32_t ip, int count)
 void net_ifconfig(void)
 {
     if (!netdev_present()) {
-        printk("brak karty sieciowej (QEMU: -device e1000 albo rtl8139)\n");
+        printk("there is no network card (QEMU: -device e1000 or rtl8139)\n");
         return;
     }
     const uint8_t *m = netdev_mac();
     printk("eth0  %s, MAC %x:%x:%x:%x:%x:%x\n", netdev_name(),
            m[0], m[1], m[2], m[3], m[4], m[5]);
     if (!my_ip) {
-        printk("      brak adresu IP - konfiguracja przez DHCP w toku\n");
+        printk("      no IP address - DHCP is still configuring\n");
         return;
     }
     printk("      IP ");
     net_print_ip(my_ip);
-    printk("  maska ");
+    printk("  netmask ");
     net_print_ip(my_mask);
-    printk("  brama ");
+    printk("  gateway ");
     net_print_ip(my_gw);
     printk("  DNS ");
     net_print_ip(my_dns);
-    printk("\n      RX %u pakietow, TX %u pakietow, odrzucone %u+%u\n",
+    printk("\n      RX %u packets, TX %u packets, dropped %u+%u\n",
            netdev_rx_packets(), netdev_tx_packets(), rx_dropped,
            udp_dropped);
 }

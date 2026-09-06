@@ -243,7 +243,7 @@ void scheduler64_init(void)
     main_task->next = main_task;
     cores[0].running = main_task;
 
-    cores[0].idle = task64_create("bezczynny", idle_loop, 0);
+    cores[0].idle = task64_create("idle", idle_loop, 0);
     cores[0].idle->idle_for_core = 0;
     scheduler_up = 1;
 
@@ -767,7 +767,7 @@ void task_core_enter(int nr)
     t->anycore = 0;
     t->nolock = 1;         /* an idle task does not take the lock */
     t->idle_for_core = nr;
-    set_name(t, "bezczynny");
+    set_name(t, "idle");
     t->name[9] = (char)('0' + nr);
     t->name[10] = '\0';
 
@@ -842,7 +842,7 @@ void task64_exit(void)
 void task64_kill_current(const char *why)
 {
     irq_save();
-    printk("[jadro] zadanie %d (%s) zabite: %s\n",
+    printk("[kernel] task %d (%s) killed: %s\n",
            current->id, current->name, why);
     task64_fd_close_all();
     drop_space(current);
@@ -1437,13 +1437,13 @@ int task64_ps(int index, struct psinfo64 *out)
 
 void task64_dump(void)
 {
-    static const char *state_names[] = { "gotowy", "dziala", "spi", "zombie" };
+    static const char *state_names[] = { "ready", "running", "spi", "zombie" };
     irqflags_t flags = irq_save();
-    printk("  ID  STAN    NAZWA\n");
+    printk("  ID  STATE   NAME\n");
     struct task64 *t = current;
     do {
         printk("  %d   %s  %s%s\n", t->id, state_names[t->state], t->name,
-               t == current ? " (biezacy)" : "");
+               t == current ? " (current)" : "");
         t = t->next;
     } while (t != current);
     irq_restore(flags);

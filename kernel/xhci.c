@@ -496,28 +496,28 @@ int xhci_init(void)
     /* Class 0x0C (serial bus), subclass 0x03 (USB),
        programming interface 0x30 (xHCI) */
     if (!pci_find_class(0x0C, 0x03, 0x30, &dev))
-        return give_up("nie ma kontrolera xHCI na PCI");
+        return give_up("there is no xHCI controller on the PCI bus");
 
     /* xHCI sits in memory - BAR0, possibly 64-bit (bits 2:1 equal to 2
        mean the upper half of the address is in BAR1) */
     uint64_t addr = dev.bar[0] & ~0xFULL;
     if (dev.bar[0] & 0x01)
-        return give_up("BAR0 kontrolera nie jest oknem w pamieci");
+        return give_up("the controller's BAR0 is not a memory window");
     if (((dev.bar[0] >> 1) & 0x3) == 0x2)
         addr |= (uint64_t)dev.bar[1] << 32;
     if (!addr)
-        return give_up("firmware nie przydzielil kontrolerowi adresu");
+        return give_up("the firmware gave the controller no address");
 #ifndef __x86_64__
     /* In 32-bit mode there is nowhere to map it to: the whole address
        space ends where this address begins. UEFI firmware likes to put
        64-bit windows up there, and that is why the same machine has
        USB under the old BIOS and none under UEFI - in this kernel. */
     if (addr > 0xFFFFFFFFull)
-        return give_up("kontroler siedzi powyzej 4 GiB (tryb 32-bitowy)");
+        return give_up("the controller sits above 4 GiB (32-bit mode)");
 #endif
 
     if (MAP_PHYS((uintptr_t)addr, 0x10000) < 0)
-        return give_up("nie udalo sie zmapowac okna kontrolera");
+        return give_up("could not map the controller's window");
     pci_enable_bus_master(&dev);
 
     base = (uintptr_t)addr;
@@ -542,7 +542,7 @@ int xhci_init(void)
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_CNR); i++)
         wait_ms(1);
     if (rd(op + OP_USBCMD) & CMD_HCRST)
-        return give_up("kontroler nie chce sie zresetowac");
+        return give_up("the controller will not reset");
 
     memset(dcbaa, 0, sizeof(dcbaa));
     memset(dev_ctx, 0, sizeof(dev_ctx));
@@ -575,7 +575,7 @@ int xhci_init(void)
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_HCH); i++)
         wait_ms(1);
     if (rd(op + OP_USBSTS) & STS_HCH)
-        return give_up("kontroler nie chce ruszyc po resecie");
+        return give_up("the controller will not start after the reset");
 
     /* Port power: without it nothing on a port will ever report in */
     for (int i = 0; i < nports; i++) {

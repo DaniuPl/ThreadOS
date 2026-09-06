@@ -57,7 +57,7 @@ static char text[PAGE_MAX];   /* the body once stripped of tags */
 static struct html_doc doc;   /* the text, the links and the split into lines */
 static int scroll;
 
-static char status[64] = "Wpisz adres i nacisnij Enter";
+static char status[64] = "Type an address and press Enter";
 static int last_secure;
 
 static void set_status(const char *s)
@@ -133,20 +133,20 @@ static void fetch(void)
     res.verify_err = 0;
 
     for (int hop = 0; hop < 3; hop++) {
-        set_status("Szukam adresu...");
+        set_status("Looking the address up...");
         uint32_t ip = http_resolve(cur_host);
         if (!ip) {
-            set_status("Nie znam takiej nazwy");
+            set_status("I do not know that name");
             return;
         }
 
-        set_status("Lacze...");
+        set_status("Connecting...");
         if (http_get(ip, cur_port, cur_host, cur_path, cur_tls, page_sink, 0,
                      &res) < 0) {
             if (cur_tls && res.verify_err) {
                 char msg[64];
                 int k = 0;
-                const char *pre = "Certyfikat odrzucony: ";
+                const char *pre = "Certificate refused: ";
                 while (*pre && k < (int)sizeof(msg) - 1)
                     msg[k++] = *pre++;
                 const char *why = cert_error_text(res.verify_err);
@@ -155,7 +155,7 @@ static void fetch(void)
                 msg[k] = '\0';
                 set_status(msg);
             } else {
-                set_status("Nie udalo sie polaczyc");
+                set_status("Could not connect");
             }
             return;
         }
@@ -171,18 +171,18 @@ static void fetch(void)
                                  &cur_tls))
             break;
         rebuild_addr();
-        set_status("Przekierowanie...");
+        set_status("Redirecting...");
     }
 
     last_secure = cur_tls && res.verified;
     page[page_len] = '\0';
 
     if (!page_len) {
-        set_status("Pusta odpowiedz");
+        set_status("An empty answer");
         return;
     }
 
-    int fd = sys_open("strona.htm", O_CREATE | O_WRITE);
+    int fd = sys_open("page.htm", O_CREATE | O_WRITE);
     if (fd >= 0) {
         sys_write(fd, page, (uint32_t)page_len);
         sys_close(fd);
@@ -219,7 +219,7 @@ static void fetch(void)
     } while (v);
     while (d)
         st[i++] = digits[--d];
-    const char *tail = " B, odnosnikow ";
+    const char *tail = " B, links ";
     while (*tail)
         st[i++] = *tail++;
     v = (uint32_t)doc.link_count;
@@ -241,7 +241,7 @@ static void navigate_from_addr(void)
     cur_tls = 0;
     if (!http_parse_url(addr, cur_host, sizeof(cur_host), &cur_port,
                         cur_path, sizeof(cur_path), &cur_tls)) {
-        set_status("Zly adres");
+        set_status("A bad address");
         return;
     }
     fetch();
@@ -253,7 +253,7 @@ static void follow_link(int k)
     if (!http_apply_location(doc.links[k].href, cur_host, sizeof(cur_host),
                              &cur_port, cur_path, sizeof(cur_path),
                              &cur_tls)) {
-        set_status("Zly odnosnik");
+        set_status("A bad link");
         return;
     }
     rebuild_addr();
@@ -329,7 +329,7 @@ static void scroll_by(int delta)
 
 void _start(void)
 {
-    int w = win_create(W, H, "Przegladarka");
+    int w = win_create(W, H, "Browser");
     if (w < 0)
         sys_exit(1);
 

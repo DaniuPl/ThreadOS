@@ -41,7 +41,7 @@ const char *signal_name(int sig)
     case SIGKILL: return "SIGKILL";
     case SIGTERM: return "SIGTERM";
     case SIGCHLD: return "SIGCHLD";
-    default:      return "sygnal";
+    default:      return "a signal";
     }
 }
 
@@ -62,7 +62,7 @@ static void default_action(int sig)
 {
     if (sig == SIGCHLD)
         return;                     /* by default nobody cares */
-    printk("[jadro] proces '%s' (pid %d) zakonczony przez %s\n",
+    printk("[kernel] process '%s' (pid %d) ended by %s\n",
            task_current_name(), task_current_id(), signal_name(sig));
     task_exit(-sig);
 }
@@ -90,7 +90,7 @@ void signal_deliver(struct regs *r)
     uint32_t frame = (r->useresp - sizeof(struct regs)) & ~3u;
     uint32_t sp = frame - 8;
     if (!user_range_ok(sp, sizeof(struct regs) + 8)) {
-        printk("[jadro] proces '%s': brak miejsca na stosie na %s\n",
+        printk("[kernel] process '%s': no room on the stack for %s\n",
                task_current_name(), signal_name(sig));
         task_exit(-sig);
         return;
@@ -110,7 +110,7 @@ void signal_return(struct regs *r)
 {
     uint32_t frame = task_signal_leave();
     if (!frame || !user_range_ok(frame, sizeof(struct regs))) {
-        printk("[jadro] proces '%s': sigreturn bez wlasnej ramki\n",
+        printk("[kernel] process '%s': sigreturn with no frame of its own\n",
                task_current_name());
         task_exit(-1);
         return;

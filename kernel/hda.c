@@ -124,7 +124,7 @@ static char name[48];
 /* Where it stopped, when it stopped. A driver for a device that is
    there but silent is worth nothing without this: "no sound" can mean
    six different things and each has a different answer. */
-static const char *why = "nie szukano";
+static const char *why = "never looked for";
 
 static int give_up(const char *reason)
 {
@@ -403,7 +403,7 @@ static void stream_setup(void)
     }
     /* How loud, from the settings - so it survives a restart like the
        background and the machine's name do. */
-    volume = (int)config_get_num("glosnosc", 80);
+    volume = (int)config_get_num("volume", 80);
     hda_set_volume(volume);
 }
 
@@ -418,14 +418,14 @@ int hda_init(void)
     /* Class 0x04 (multimedia), subclass 0x03 (HD Audio). The
        programming interface is zero on every one of them. */
     if (!pci_find_class(0x04, 0x03, 0x00, &dev))
-        return give_up("nie ma kontrolera HDA na PCI");
+        return give_up("there is no HDA controller on the PCI bus");
 
     uint32_t bar = dev.bar[0] & 0xFFFFFFF0u;
     if (!bar || (dev.bar[0] & 0x01))
-        return give_up("kontroler bez rejestrow w pamieci");
+        return give_up("a controller with no registers in memory");
     pci_enable_bus_master(&dev);
     if (MAP_PHYS(bar, 0x4000) < 0)
-        return give_up("nie moge odwzorowac rejestrow");
+        return give_up("I cannot map the registers");
     reg = (volatile uint8_t *)(uintptr_t)bar;
 
     /* Out of reset. The controller says when it is ready by reading
@@ -436,12 +436,12 @@ int hda_init(void)
     for (int i = 0; i < 100 && !(rd32(REG_GCTL) & 1); i++)
         wait_ms(1);
     if (!(rd32(REG_GCTL) & 1))
-        return give_up("kontroler nie wychodzi z resetu");
+        return give_up("the controller will not come out of reset");
     wait_ms(10);                       /* the codecs need a moment to answer */
 
     uint16_t states = rd16(REG_STATESTS);
     if (!states)
-        return give_up("zaden kodek sie nie odezwal");
+        return give_up("no codec answered");
     codec = 0;
     while (codec < 15 && !(states & (1u << codec)))
         codec++;
@@ -453,14 +453,14 @@ int hda_init(void)
     out_base = 0x80 + (uint32_t)in_streams * 0x20;
 
     if (!rings_setup())
-        return give_up("brak pamieci na pierscienie i bufor");
+        return give_up("no memory for the rings and the buffer");
 
     uint32_t vendor = param(0, PARAM_VENDOR);
     if (vendor == 0xFFFFFFFFu)
-        return give_up("kodek nie odpowiada na pytania");
+        return give_up("the codec does not answer questions");
 
     if (!find_output())
-        return give_up("kodek nie ma wyjscia, ktore umiem znalezc");
+        return give_up("the codec has no output I know how to find");
 
     bdl_setup();
     stream_setup();
@@ -470,17 +470,17 @@ int hda_init(void)
        where it does not work. */
     int n = 0;
     const char *hex = "0123456789abcdef";
-    const char *p = "kodek ";
+    const char *p = "codec ";
     while (*p)
         name[n++] = *p++;
     for (int s = 28; s >= 0; s -= 4)
         name[n++] = hex[(vendor >> s) & 0xF];
-    p = ", wyjscie ";
+    p = ", output ";
     while (*p)
         name[n++] = *p++;
     name[n++] = (char)('0' + (dac / 10) % 10);
     name[n++] = (char)('0' + dac % 10);
-    p = " -> gniazdo ";
+    p = " -> socket ";
     while (*p)
         name[n++] = *p++;
     name[n++] = (char)('0' + (pin / 10) % 10);
@@ -685,5 +685,5 @@ int hda_remember(void)
         text[n - 1 - i] = t;
     }
     text[n] = '\0';
-    return config_set("glosnosc", text);
+    return config_set("volume", text);
 }

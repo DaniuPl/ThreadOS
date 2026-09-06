@@ -57,7 +57,7 @@ void pmm_init(const struct multiboot_info *mbi)
     memset(bitmap, 0xFF, sizeof(bitmap));
 
     if (!(mbi->flags & MULTIBOOT_FLAG_MMAP)) {
-        printk("PMM: brak mapy pamieci od bootloadera!\n");
+        printk("PMM: no memory map from the boot loader!\n");
         for (;;)
             __asm__ volatile("cli; hlt");
     }
@@ -224,7 +224,7 @@ void pmm_free_frame(uint32_t addr)
     if (addr >= (uint32_t)(uintptr_t)_kernel_start &&
         addr < (uint32_t)(uintptr_t)_kernel_end) {
         spin_unlock_irq(&lock, flags);
-        printk("[PMM] proba zwolnienia ramki obrazu jadra (%x) - odmawiam\n",
+        printk("[PMM] an attempt to free a frame of the kernel image (%x) - refused\n",
                addr);
         return;
     }

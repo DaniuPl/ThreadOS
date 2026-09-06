@@ -56,7 +56,7 @@ void heap_init(void)
            heap_size > HEAP_MIN)
         heap_size /= 2;
     if (!heap_start) {
-        printk("heap: brak %u KiB ciaglej pamieci!\n", heap_size / 1024);
+        printk("heap: no %u KiB of contiguous memory!\n", heap_size / 1024);
         for (;;)
             __asm__ volatile("cli; hlt");
     }
@@ -128,7 +128,7 @@ void kfree(void *ptr)
        carrying on. */
     if (b->free > 1 || (b->next && ((uint32_t)(uintptr_t)b->next < heap_start ||
                                     (uint32_t)(uintptr_t)b->next >= heap_end))) {
-        printk("[sterta] zly blok %x (free=%u next=%x), zwolniony z %x\n",
+        printk("[heap] a bad block %x (free=%u next=%x), freed from %x\n",
                (uint32_t)(uintptr_t)b, b->free, (uint32_t)(uintptr_t)b->next,
                (uint32_t)(uintptr_t)__builtin_return_address(0));
         spin_unlock_irq(&lock, flags);

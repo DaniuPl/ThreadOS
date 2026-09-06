@@ -166,7 +166,7 @@ int64_t proc64_fork(struct regs *r)
     uint64_t space = paging64_clone_space(paging64_current_space());
     last_cost = pmm_used_frames() - before;
     if (!space) {
-        printk("[jadro] fork: brak pamieci na kopie przestrzeni\n");
+        printk("[kernel] fork: no memory to copy the address space\n");
         return -1;
     }
 
@@ -178,7 +178,7 @@ int64_t proc64_fork(struct regs *r)
     fa->frame = *r;
     fa->space = space;
 
-    struct task64 *child = task64_create("dziecko", child_start, fa);
+    struct task64 *child = task64_create("child", child_start, fa);
     if (child) {
         task64_inherit_fds(child);   /* open files go with the memory */
         task64_inherit_brk(child);
@@ -234,7 +234,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     void *loaded = (void *)0;
     const void *image = prog_image(kname, &size, &loaded);
     if (!image) {
-        printk("[jadro] exec: nie ma programu '%s'\n", kname);
+        printk("[kernel] exec: there is no program '%s'\n", kname);
         return -1;
     }
 
@@ -256,7 +256,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         !(rsp = elf64_make_stack())) {
         /* The old image no longer exists and the new one did not load -
            the process has nothing to return to */
-        printk("[jadro] exec: '%s' nie da sie zaladowac\n", kname);
+        printk("[kernel] exec: '%s' cannot be loaded\n", kname);
         paging64_free_space(old);
         prog_release(loaded);
         task64_exit_code(-1);
@@ -320,7 +320,7 @@ static void spawn_thread(void *arg)
     void *loaded = (void *)0;
     const void *image = prog_image(name, &size, &loaded);
     if (!image) {
-        printk("[ !! ] nie ma programu '%s' ani w initrd, ani na dysku\n",
+        printk("[ !! ] there is no program '%s' in the initrd or on the disk\n",
                name);
         task64_exit();
     }
@@ -331,7 +331,7 @@ static void spawn_thread(void *arg)
        it is the same in every space. */
     uint64_t space = paging64_new_space();
     if (!space) {
-        printk("[ !! ] brak pamieci na przestrzen adresowa\n");
+        printk("[ !! ] no memory for an address space\n");
         task64_exit();
     }
 
@@ -348,12 +348,12 @@ static void spawn_thread(void *arg)
 
     uint64_t rsp = elf64_make_stack();
     if (!rsp) {
-        printk("[ !! ] elf64: brak pamieci na stos programu\n");
+        printk("[ !! ] elf64: no memory for the program's stack\n");
         task64_exit();
     }
 
     if (!quiet)
-        printk("[ OK ] Program '%s' z %s: %u B, wejscie %x\n",
+        printk("[ OK ] Program '%s' from %s: %u B, entry %x\n",
                name, from_where, size, (uint32_t)entry);
 
     uint64_t argv_va = 0;

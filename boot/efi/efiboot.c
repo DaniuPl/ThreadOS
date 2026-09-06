@@ -106,16 +106,16 @@ static void open_volume(EFI_HANDLE image)
     EFI_STATUS st = BS->HandleProtocol(image, &GUID_LOADED_IMAGE,
                                        (void **)&li);
     if (st != EFI_SUCCESS)
-        fail(L"nie wiem, skad mnie uruchomiono", st);
+        fail(L"I do not know where I was started from", st);
 
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
     st = BS->HandleProtocol(li->DeviceHandle, &GUID_SIMPLE_FS, (void **)&fs);
     if (st != EFI_SUCCESS)
-        fail(L"na tym nosniku nie ma systemu plikow", st);
+        fail(L"this medium has no filesystem", st);
 
     st = fs->OpenVolume(fs, &root);
     if (st != EFI_SUCCESS)
-        fail(L"nie moge otworzyc woluminu", st);
+        fail(L"I cannot open the volume", st);
 }
 
 /* The size is asked for by going to the end and asking where that is -
@@ -255,7 +255,7 @@ static UINTN mbi_room;
 static void *tag_open(UINT32 type, UINTN size)
 {
     if (mbi_at + size + 8 > mbi_room)
-        fail(L"tablica dla jadra sie nie miesci", 0);
+        fail(L"the table for the kernel does not fit", 0);
     UINT8 *p = mbi + mbi_at;
     *(UINT32 *)p = type;
     *(UINT32 *)(p + 4) = (UINT32)size;
@@ -325,7 +325,7 @@ static UINT64 load_elf(struct blob *img)
 
     if (eh->ident[0] != 0x7F || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
         eh->ident[3] != 'F' || eh->ident[4] != 2)
-        fail(L"to nie jest ELF64", 0);
+        fail(L"this is not an ELF64", 0);
 
     for (UINT16 i = 0; i < eh->phnum; i++) {
         const struct elf64_phdr *ph = (const struct elf64_phdr *)
@@ -341,7 +341,7 @@ static UINT64 load_elf(struct blob *img)
         UINT64 got = start;
         if (BS->AllocatePages(AllocateAddress, EfiLoaderData_Type, pages,
                               &got) != EFI_SUCCESS)
-            fail(L"nie moge wziac pamieci pod jadro", ph->paddr);
+            fail(L"I cannot take memory for the kernel", ph->paddr);
 
         copy_bytes((void *)(UINTN)ph->paddr, base + ph->offset,
                    (UINTN)ph->filesz);
@@ -438,11 +438,11 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if (!read_file(L"\\protonos64.bin", &kernel) &&
         !read_file(L"\\EFI\\BOOT\\protonos64.bin", &kernel) &&
         !read_file(L"\\EFI\\ProtonOS\\protonos64.bin", &kernel))
-        fail(L"nie znalazlem protonos64.bin", 0);
+        fail(L"I found no protonos64.bin", 0);
     if (!read_file(L"\\initrd64.img", &initrd) &&
         !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd) &&
         !read_file(L"\\EFI\\ProtonOS\\initrd64.img", &initrd))
-        fail(L"nie znalazlem initrd64.img", 0);
+        fail(L"I found no initrd64.img", 0);
 
     /* And the loader itself, as a file.
      *
@@ -462,7 +462,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         !read_file(L"\\EFI\\ProtonOS\\BOOTX64.EFI", &self))
         self.data = 0;
 
-    put(L"  jadro:  ");
+    put(L"  kernel: ");
     put_num(kernel.size, 10);
     put(L" B\r\n  initrd: ");
     put_num(initrd.size, 10);
@@ -471,13 +471,13 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         put_num(self.size, 10);
         put(L" B\r\n");
     } else {
-        put(L"nie znalazlem siebie - instalacja nie bedzie mozliwa\r\n");
+        put(L"I did not find myself - installing will not be possible\r\n");
     }
 
     struct screen sc;
     find_screen(&sc);
     if (sc.have) {
-        put(L"  ekran:  ");
+        put(L"  screen: ");
         put_num(sc.width, 10);
         put(L"x");
         put_num(sc.height, 10);
@@ -485,7 +485,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         put_num(sc.base, 16);
         put(L"\r\n");
     } else {
-        put(L"  ekran:  brak bufora obrazu\r\n");
+        put(L"  screen: no framebuffer\r\n");
     }
 
     int acpi2 = 0;
@@ -496,7 +496,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         put_num((UINT64)(UINTN)rsdp, 16);
         put(acpi2 ? L" (2.0)\r\n" : L" (1.0)\r\n");
     } else {
-        put(L"nie ma\r\n");
+        put(L"none\r\n");
     }
 
     /* --- the table the kernel reads ------------------------------- */
@@ -507,7 +507,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     UINTN mbi_pages = 32;                 /* 128 KiB - a large memory map */
     if (BS->AllocatePages(AllocateMaxAddress, EfiLoaderData_Type, mbi_pages,
                           &where) != EFI_SUCCESS)
-        fail(L"brak pamieci na tablice dla jadra", 0);
+        fail(L"no memory for the kernel's table", 0);
     mbi = (UINT8 *)(UINTN)where;
     mbi_room = mbi_pages * 4096;
     mbi_at = 8;                           /* total_size and a reserved word */
@@ -520,7 +520,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
        it are named, and nothing that existed before this looks at
        them. */
     tag_module((UINTN)initrd.data, initrd.size, "");
-    tag_module((UINTN)kernel.data, kernel.size, "jadro");
+    tag_module((UINTN)kernel.data, kernel.size, "the kernel");
     if (self.data)
         tag_module((UINTN)self.data, self.size, "loader");
 
@@ -558,13 +558,13 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     UINT64 map_at = 0;
     if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type,
                           (map_size + 4095) / 4096, &map_at) != EFI_SUCCESS)
-        fail(L"brak pamieci na mape pamieci", 0);
+        fail(L"no memory for the memory map", 0);
     EFI_MEMORY_DESCRIPTOR *map = (EFI_MEMORY_DESCRIPTOR *)(UINTN)map_at;
 
     EFI_STATUS st2 = BS->GetMemoryMap(&map_size, map, &map_key, &desc_size,
                                       &desc_ver);
     if (st2 != EFI_SUCCESS)
-        fail(L"nie dostalem mapy pamieci", st2);
+        fail(L"I did not get a memory map", st2);
 
     /* Turning the firmware's map into the kernel's.
      *
@@ -607,14 +607,14 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     *(UINT32 *)mbi = (UINT32)mbi_at;
     *(UINT32 *)(mbi + 4) = 0;
 
-    put(L"protoboot: oddaje maszyne jadru\r\n");
+    put(L"protoboot: handing the machine to the kernel\r\n");
 
     if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS) {
         /* The map may have moved under us; take it again and go. */
         map_size = mbi_pages * 0;
         BS->GetMemoryMap(&map_size, map, &map_key, &desc_size, &desc_ver);
         if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS)
-            fail(L"firmware nie chce oddac maszyny", 0);
+            fail(L"the firmware will not hand the machine over", 0);
     }
 
     enter_kernel(entry, MB2_MAGIC, (UINT64)(UINTN)mbi);

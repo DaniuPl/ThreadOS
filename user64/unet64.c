@@ -46,7 +46,7 @@ static int put_ip(int n, uint32_t ip)
 
 static void err(const char *co, int64_t v)
 {
-    int n = put(0, "[unet64] BLAD: ");
+    int n = put(0, "[unet64] ERROR: ");
     n = put(n, co);
     n = put(n, " -> ");
     n = putn(n, (uint64_t)v);
@@ -63,9 +63,9 @@ void _start(int argc, char **argv)
     /* 1. Our own address - the one that came from the network through
    DHCP */
     if (sys_netinfo(addrs) != 1)
-        err("system nie ma adresu IP", 0);
+        err("the system has no IP address", 0);
 
-    int n = put(0, "[unet64] moj adres ");
+    int n = put(0, "[unet64] my address ");
     n = put_ip(n, addrs[0]);
     n = put(n, ", brama ");
     n = put_ip(n, addrs[2]);
@@ -78,7 +78,7 @@ void _start(int argc, char **argv)
           outside. */
     int64_t s = sys_udp_open(MY_PORT);
     if (s < 0)
-        err("nie moge otworzyc gniazda UDP", s);
+        err("I cannot open a UDP socket", s);
 
     static const char body[] = "datagram z ring 3";
     struct udp_info o;
@@ -88,21 +88,21 @@ void _start(int argc, char **argv)
     o.timeout = 3000;
 
     if (sys_udp_send(&o, body, ustrlen(body)) < 0)
-        err("wysylka datagramu nie przeszla", -1);
+        err("sending the datagram did not work", -1);
 
     o.sock = (int)s;
     o.timeout = 3000;
     int64_t got = sys_udp_recv(&o, buf, sizeof(buf));
     if (got <= 0)
-        err("datagram nie wrocil", got);
+        err("the datagram did not come back", got);
 
     if ((uint64_t)got != ustrlen(body))
-        err("wrocil datagram innej dlugosci", got);
+        err("a datagram of another length came back", got);
     for (int64_t i = 0; i < got; i++)
         if (buf[i] != body[i])
-            err("tresc datagramu sie nie zgadza", i);
+            err("the datagram's content does not match", i);
 
-    n = put(0, "[unet64] datagram wrocil do mnie (");
+    n = put(0, "[unet64] the datagram came back to me (");
     n = putn(n, (uint64_t)got);
     n = put(n, " B) od ");
     n = put_ip(n, o.ip);
@@ -112,7 +112,7 @@ void _start(int argc, char **argv)
     sys_udp_close((int)s);
 
     if (argc < 3) {
-        print("[unet64] bez adresu serwera koncze na UDP\n");
+        print("[unet64] with no server address I stop at UDP\n");
         sys_exit(0);
     }
 
@@ -121,18 +121,18 @@ void _start(int argc, char **argv)
     int64_t ip = uparse_ip(argv[1]);
     int64_t port = uatoi(argv[2]);
     if (ip < 0 || port <= 0)
-        err("zly adres albo port serwera", 0);
+        err("a bad server address or port", 0);
 
     o.ip = (uint32_t)ip;
     o.port = (uint16_t)port;
     o.timeout = 5000;
     int64_t c = sys_tcp_connect(&o);
     if (c < 0)
-        err("nie moge sie polaczyc", c);
+        err("I cannot connect", c);
 
     static const char task[] = "GET / HTTP/1.0\r\n\r\n";
     if (sys_tcp_send((int)c, task, ustrlen(task)) < 0)
-        err("wysylka zadania nie przeszla", -1);
+        err("sending the request did not work", -1);
 
     int64_t total = 0;
     for (;;) {
@@ -146,10 +146,10 @@ void _start(int argc, char **argv)
     sys_tcp_close((int)c);
 
     if (total <= 0)
-        err("serwer nic nie odpowiedzial", total);
+        err("the server answered nothing", total);
 
     buf[16] = 0;
-    n = put(0, "[unet64] serwer odpowiedzial (");
+    n = put(0, "[unet64] the server answered (");
     n = putn(n, (uint64_t)total);
     n = put(n, " B): ");
     n = put(n, buf);

@@ -273,7 +273,7 @@ static int identify_disk(void)
     uint32_t size = bits < 32 ? (1u << bits) : 0;
 
     if (size != SECTOR) {
-        printk("[ !! ] NVMe: blok %u B, a system pracuje na %u B\n",
+        printk("[ !! ] NVMe: a %u B block, and the system works on %u B\n",
                size, (uint32_t)SECTOR);
         return 0;
     }

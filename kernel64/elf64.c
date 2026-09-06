@@ -18,7 +18,7 @@
    boundary - and that boundary is at the same time the split of the
    second-level tables. The two numbers have to agree. */
 _Static_assert((USER64_BASE >> 30) == PAGING64_USER_PDPT,
-               "USER64_BASE musi lezec w gigabajcie PAGING64_USER_PDPT");
+               "USER64_BASE has to lie in the PAGING64_USER_PDPT gigabyte");
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/printk.h"
@@ -158,7 +158,7 @@ static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
     if (ph->p_vaddr < USER64_BASE ||
         ph->p_vaddr + ph->p_memsz < ph->p_vaddr ||     /* overflow */
         ph->p_vaddr + ph->p_memsz > USER64_TOP) {
-        printk("[jadro] elf64: segment poza zakresem uzytkownika (%x)\n",
+        printk("[kernel] elf64: a segment outside the user range (%x)\n",
                (uint32_t)ph->p_vaddr);
         return -1;
     }
@@ -198,7 +198,7 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)image;
 
     if (!elf_valid(eh, size)) {
-        printk("[jadro] elf64: to nie jest program ELF64 x86-64\n");
+        printk("[kernel] elf64: this is not an ELF64 x86-64 program\n");
         return -1;
     }
 
@@ -210,7 +210,7 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
         if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
             continue;
         if (ph[i].p_offset + ph[i].p_filesz > size) {
-            printk("[jadro] elf64: segment wystaje poza plik\n");
+            printk("[kernel] elf64: a segment sticks out past the file\n");
             return -1;
         }
         if (load_segment(file, &ph[i]) < 0)
@@ -220,11 +220,11 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
         loaded++;
     }
     if (!loaded) {
-        printk("[jadro] elf64: brak segmentow do zaladowania\n");
+        printk("[kernel] elf64: no segments to load\n");
         return -1;
     }
     if (eh->e_entry < USER64_BASE || eh->e_entry >= USER64_TOP) {
-        printk("[jadro] elf64: punkt wejscia poza programem (%x)\n",
+        printk("[kernel] elf64: the entry point is outside the program (%x)\n",
                (uint32_t)eh->e_entry);
         return -1;
     }
@@ -235,13 +235,13 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
        unfilled slot has nowhere to lead. */
     if (dyn_is_dynamic(file, size)) {
         if (!dyn_present()) {
-            printk("[jadro] elf64: program potrzebuje biblioteki %s, "
-                   "ktorej nie ma\n", dyn_name());
+            printk("[kernel] elf64: the program needs the library %s, "
+                   "which is not there\n", dyn_name());
             return -1;
         }
         if (map_library() < 0 ||
             dyn_relocate(file, size, (void *)0, write_addr) < 0) {
-            printk("[jadro] elf64: nie da sie zwiazac z %s\n", dyn_name());
+            printk("[kernel] elf64: it cannot be bound to %s\n", dyn_name());
             return -1;
         }
     }

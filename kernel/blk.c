@@ -165,20 +165,20 @@ int blk_current(void)
 static const char *kind_name(enum backend k)
 {
     switch (k) {
-    case BLK_NVME: return "NVMe (PCIe, kolejki)";
+    case BLK_NVME: return "NVMe (PCIe, queues)";
     case BLK_AHCI: return "AHCI (SATA, DMA)";
     case BLK_ATA:  return "ATA PIO";
-    case BLK_USB:  return "USB (pamiec masowa)";
-    default:       return "brak";
+    case BLK_USB:  return "USB (mass storage)";
+    default:       return "none";
     }
 }
 
 const char *blk_name_of(int i)
 {
     if (i < 0 || i >= ndevs)
-        return "brak";
+        return "none";
     if (devs[i].gone)
-        return "USB (wyjety z gniazdka)";
+        return "USB (pulled out of the socket)";
     return kind_name(devs[i].kind);
 }
 

@@ -13,11 +13,11 @@ void _start(void)
 {
     int32_t sock = udp_open(PORT);
     if (sock < 0) {
-        print("[udpecho] nie udalo sie otworzyc gniazda\n");
+        print("[udpecho] the socket could not be opened\n");
         sys_exit(1);
     }
 
-    print("[udpecho] nasluchuje na porcie 7777\n");
+    print("[udpecho] listening on port 7777\n");
 
     char buf[256];
     uint32_t from_ip, from_port;
@@ -44,7 +44,7 @@ void _start(void)
     }
 
     udp_close(sock);
-    print("[udpecho] koniec, obsluzonych datagramow: ");
+    print("[udpecho] done, datagrams served: ");
     print_dec((uint32_t)served);
     print("\n");
     sys_exit(0);

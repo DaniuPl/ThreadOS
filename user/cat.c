@@ -7,13 +7,13 @@
 void _start(int argc, char **argv)
 {
     if (argc < 2) {
-        print("uzycie: cat <plik>\n");
+        print("usage: cat <file>\n");
         sys_exit(1);
     }
 
     int fd = sys_open(argv[1], O_READ);
     if (fd < 0) {
-        print("cat: nie moge otworzyc '");
+        print("cat: I cannot open '");
         print(argv[1]);
         print("'\n");
         sys_exit(1);

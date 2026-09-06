@@ -148,7 +148,7 @@ int install_look(int mode, int disk, struct install_info *out)
        that hands these over, there is nothing to install and no
        reason to look at the disk at all. */
     plan.loader = module_at("loader", &in->loader_size);
-    plan.kernel = module_at("jadro", &in->kernel_size);
+    plan.kernel = module_at("the kernel", &in->kernel_size);
     plan.initrd = initrd_image(&in->initrd_size);
     if (!plan.loader || !plan.kernel || !plan.initrd || !in->initrd_size)
         return no(out, INST_NO_FILES);
@@ -228,9 +228,9 @@ const char *install_step_name(int n)
 {
     if (plan.info.mode == INST_WHOLE) {
         switch (n) {
-        case 0: return "tablica partycji (GPT)";
-        case 1: return "partycja EFI (FAT32)";
-        case 2: return "partycja ProtonOS (PFS)";
+        case 0: return "partition table (GPT)";
+        case 1: return "EFI partition (FAT32)";
+        case 2: return "ProtonOS partition (PFS)";
         default: n -= 3; break;
         }
     }
@@ -328,37 +328,37 @@ static void complain(uint32_t why, const struct install_info *in)
 {
     switch (why) {
     case INST_NO_DISK:
-        printk("instaluj: nie ma dysku\n");
+        printk("install: there is no disk\n");
         break;
     case INST_NO_FILES:
-        printk("instaluj: ten system nie ma z czego sie zainstalowac.\n");
-        printk("          Program rozruchowy musi podac obraz jadra i "
-               "siebie samego\n");
-        printk("          jako moduly - robi to protoboot (rozruch przez "
-               "UEFI z pendrive'a).\n");
+        printk("install: this system has nothing to install itself from.\n");
+        printk("         The boot loader has to hand over the kernel image and "
+               "itself\n");
+        printk("         as modules - protoboot does that (booting through "
+               "UEFI off a stick).\n");
         break;
     case INST_NO_TABLE:
-        printk("instaluj: na dysku nie ma tablicy partycji, wiec nie ma "
-               "tez partycji EFI.\n");
+        printk("install: the disk has no partition table, so it has no "
+               "EFI partition either.\n");
         break;
     case INST_NO_ESP:
-        printk("instaluj: nie znalazlem partycji EFI (%u partycji na "
-               "dysku).\n", in->parts);
+        printk("install: I found no EFI partition (%u partitions on the "
+               "disk).\n", in->parts);
         break;
     case INST_NOT_FAT:
-        printk("instaluj: partycja %u nie jest FAT-em - a partycja EFI "
-               "musi nim byc.\n", in->esp_index);
+        printk("install: partition %u is not a FAT - and an EFI partition "
+               "has to be one.\n", in->esp_index);
         break;
     case INST_NO_ROOM:
-        printk("instaluj: na partycji EFI jest %u KiB wolnego, a trzeba "
-               "okolo %u KiB.\n", in->free_kib, in->need_kib);
+        printk("install: the EFI partition has %u KiB free, and it needs "
+               "about %u KiB.\n", in->free_kib, in->need_kib);
         break;
     case INST_TOO_SMALL:
-        printk("instaluj: ten dysk ma %u MiB - za malo na wlasna tablice "
-               "partycji.\n", in->disk_mib);
+        printk("install: this disk has %u MiB - too little for a partition "
+               "table of our own.\n", in->disk_mib);
         break;
     default:
-        printk("instaluj: nie wiem, co jest nie tak\n");
+        printk("install: I do not know what is wrong\n");
         break;
     }
 }
@@ -372,37 +372,37 @@ int install_plan(int mode, int disk)
         return 0;
     }
 
-    printk("Dysk %u z %u: %s, %u MiB\n", in.disk + 1, in.disks,
+    printk("Disk %u of %u: %s, %u MiB\n", in.disk + 1, in.disks,
            in.disk_name, in.disk_mib);
     if (in.mode == INST_WHOLE) {
-        printk("\nCALY TEN DYSK BEDZIE ProtonOS-a. Zniknie z niego "
-               "WSZYSTKO:\n");
-        printk("  tablica partycji, %u partycji i wszystko, co na nich "
-               "jest.\n", in.parts);
-        printk("Zrobie: tablice GPT, partycje EFI %u MiB (FAT32) i "
-               "partycje\n        ProtonOS-a (PFS) na reszcie dysku.\n",
+        printk("\nTHIS WHOLE DISK WILL BE ProtonOS. It will lose its "
+               "EVERYTHING:\n");
+        printk("  partition table, %u partitions and everything that is on "
+               "them.\n", in.parts);
+        printk("I will make: a GPT, an EFI partition of %u MiB (FAT32) and "
+               "a ProtonOS\n        partition (PFS) on the rest of the disk.\n",
                (uint32_t)ESP_MIB);
     }
     else
-        printk("Partycja EFI: numer %u, sektor %u, %s%s%s, wolne %u KiB\n",
+        printk("EFI partition: number %u, sector %u, %s%s%s, free %u KiB\n",
                in.esp_index, in.esp_lba, in.kind, in.label[0] ? ", " : "",
                in.label, in.free_kib);
-    printk("\nZapisze:\n");
+    printk("\nI will write:\n");
     printk("  %s  %u B\n", PATH_LOADER, in.loader_size);
     printk("  %s  %u B\n", PATH_KERNEL, in.kernel_size);
     printk("  %s  %u B\n", PATH_INITRD, in.initrd_size);
     if (in.fallback_free)
-        printk("  %s  %u B  (nie ma go tam - maszyna wystartuje sama)\n",
+        printk("  %s  %u B  (not there - the machine will boot on its own)\n",
                PATH_FALLBACK, in.loader_size);
     else
-        printk("  %s JEST JUZ ZAJETY - nie ruszam go.\n", PATH_FALLBACK);
+        printk("  %s IS TAKEN ALREADY - I am not touching it.\n", PATH_FALLBACK);
 
     if (in.mode != INST_WHOLE)
-        printk("\nNIE ruszam: tablicy partycji, innych partycji ani "
-               "zadnego pliku,\nktory juz jest na partycji EFI.\n");
+        printk("\nI do NOT touch: the partition table, other partitions or "
+               "any file\nthat is on the EFI partition already.\n");
     if (!in.fallback_free)
-        printk("Zeby uruchomic ProtonOS-a, trzeba bedzie dodac wpis w "
-               "menu rozruchowym\nfirmware'u i wskazac %s.\n", PATH_LOADER);
+        printk("To start ProtonOS you will have to add an entry to the "
+               "firmware's boot menu\nand point it at %s.\n", PATH_LOADER);
     return 1;
 }
 
@@ -411,17 +411,17 @@ int install_do(void)
     for (int n = 0; n < (int)plan.info.steps; n++) {
         int rc = install_step(n);
         if (rc < 0) {
-            printk("instaluj: nie moge zapisac %s\n", install_step_name(n));
+            printk("install: I cannot write %s\n", install_step_name(n));
             return -1;
         }
         if (rc == 0)
-            printk("  %s - gotowe\n", install_step_name(n));
+            printk("  %s - done\n", install_step_name(n));
     }
     if (plan.info.fallback_free)
-        printk("\nGotowe. Ta maszyna uruchomi ProtonOS-a z dysku.\n");
+        printk("\nDone. This machine will boot ProtonOS from the disk.\n");
     else
-        printk("\nGotowe. Pliki sa na partycji EFI; %s zostal cudzy,\n"
-               "wiec dodaj w firmwarze wpis wskazujacy %s.\n",
+        printk("\nDone. The files are on the EFI partition; %s stayed somebody else's,\n"
+               "so add an entry in the firmware pointing at %s.\n",
                PATH_FALLBACK, PATH_LOADER);
     return 0;
 }

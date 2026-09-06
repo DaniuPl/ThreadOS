@@ -52,13 +52,13 @@ static void report(const char *who, uint32_t mask, uint32_t ticks,
 {
     print("[syscalls] ");
     print(who);
-    print(": rdzenie ");
+    print(": cores ");
     print_dec(mask);
-    print(", tyknac ");
+    print(", ticks ");
     print_dec(ticks);
-    print(", wywolan ");
+    print(", calls ");
     print_dec(CALLS);
-    print(", zgodnych ");
+    print(", matching ");
     print_dec(matching);
     print("\n");
 }
@@ -67,7 +67,7 @@ void _start(void)
 {
     int32_t pid = sys_fork();
     if (pid < 0) {
-        print("[syscalls] ZLE: fork sie nie udal\n");
+        print("[syscalls] WRONG: the fork did not work\n");
         sys_exit(1);
     }
 
@@ -77,13 +77,13 @@ void _start(void)
     uint32_t ticks = sys_getticks() - start;
 
     if (pid == 0) {
-        report("dziecko", mask, ticks, matching);
+        report("child", mask, ticks, matching);
         sys_exit(0);
     }
 
     int code = 0;
     sys_wait_child(&code);
-    report("rodzic ", mask, ticks, matching);
-    print("[syscalls] gotowe\n");
+    report("parent ", mask, ticks, matching);
+    print("[syscalls] done\n");
     sys_exit(0);
 }

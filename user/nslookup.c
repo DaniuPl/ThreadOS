@@ -13,21 +13,21 @@
 void _start(int argc, char **argv)
 {
     if (argc < 2) {
-        print("uzycie: nslookup <nazwa>\n");
+        print("usage: nslookup <name>\n");
         sys_exit(1);
     }
 
     struct netinfo ni;
     if (netinfo(&ni) < 0) {
-        print("[nslookup] system nie ma jeszcze adresu IP\n");
+        print("[nslookup] the system has no IP address yet\n");
         sys_exit(1);
     }
     if (!ni.dns) {
-        print("[nslookup] DHCP nie podal serwera DNS\n");
+        print("[nslookup] DHCP gave no DNS server\n");
         sys_exit(1);
     }
 
-    print("[nslookup] pytam ");
+    print("[nslookup] asking ");
     print_ip(ni.dns);
     print(" o ");
     print(argv[1]);
@@ -38,21 +38,21 @@ void _start(int argc, char **argv)
 
     if (ip) {
         print(argv[1]);
-        print(" ma adres ");
+        print(" has the address ");
         print_ip(ip);
         print("\n");
         sys_exit(0);
     }
     if (rcode == 3) {
-        print("[nslookup] nazwa nie istnieje\n");
+        print("[nslookup] there is no such name\n");
         sys_exit(2);
     }
     if (rcode) {
-        print("[nslookup] serwer zwrocil blad ");
+        print("[nslookup] the server answered with an error ");
         print_dec((uint32_t)rcode);
         print("\n");
         sys_exit(2);
     }
-    print("[nslookup] brak odpowiedzi (timeout 5 s)\n");
+    print("[nslookup] no answer (5 s timeout)\n");
     sys_exit(1);
 }

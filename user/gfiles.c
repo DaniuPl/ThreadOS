@@ -9,8 +9,8 @@
  * throws one away when asked twice.
  *
  * So: a list with sizes, directories marked and walkable, the name of
- * the directory in the window's own title, "Edytuj" that starts the
- * editor on the chosen file, and "Usun" that asks first - the second
+ * the directory in the window's own title, "Edit" that starts the
+ * editor on the chosen file, and "Remove" that asks first - the second
  * click is the answer, the same way the editor's second Alt+F4 is.
  *
  * The one thing that depends on the processor mode is reading a
@@ -160,11 +160,11 @@ static void where_am_i(void)
         ecopy(here, "/", sizeof(here));
 
     /* The window says which directory it is showing - two file
-       managers open on two directories are two windows called "Pliki"
+       managers open on two directories are two windows called "Files"
        otherwise. */
     char t[80];
     int p = 0;
-    const char *pre = "Pliki: ";
+    const char *pre = "Files: ";
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     for (int i = 0; here[i] && p < (int)sizeof(t) - 1; i++)
@@ -197,7 +197,7 @@ static void open_chosen(void)
         return;
     if (items[chosen].is_dir) {
         if (sys_chdir(items[chosen].name) < 0) {
-            ecopy(note, "nie da sie tam wejsc", sizeof(note));
+            ecopy(note, "cannot go in there", sizeof(note));
             return;
         }
         chosen = -1;
@@ -250,7 +250,7 @@ static void open_chosen(void)
     (void)prog;
     sys_spawn(cmd, 0, 0);
 #endif
-    ecopy(note, picture ? "otwarte w podgladzie" : "otwarte w edytorze",
+    ecopy(note, picture ? "opened in the viewer" : "opened in the editor",
           sizeof(note));
 }
 
@@ -260,16 +260,16 @@ static void open_chosen(void)
 static void delete_chosen(void)
 {
     if (chosen < 0 || chosen >= count) {
-        ecopy(note, "nie wybrano pliku", sizeof(note));
+        ecopy(note, "no file picked", sizeof(note));
         return;
     }
     if (items[chosen].is_dir) {
-        ecopy(note, "to katalog - nie usuwam", sizeof(note));
+        ecopy(note, "a directory - not removing it", sizeof(note));
         return;
     }
 
     int p = 0;
-    const char *q = "Usunac '";
+    const char *q = "Remove '";
     for (int i = 0; q[i]; i++)
         ask_line[p++] = q[i];
     for (int i = 0; items[chosen].name[i] && p < 40; i++)
@@ -278,23 +278,23 @@ static void delete_chosen(void)
     ask_line[p++] = '?';
     ask_line[p] = '\0';
 
-    ug_ask(&ask, ask_line, "Tego sie nie cofnie.", "Usun", "Zostaw");
+    ug_ask(&ask, ask_line, "This cannot be undone.", "Remove", "Keep");
 }
 
-/* The answer. Only "Usun" removes anything - and that is the whole
+/* The answer. Only "Remove" removes anything - and that is the whole
    point of asking. */
 static void delete_answered(void)
 {
     if (!ask.answer) {
-        ecopy(note, "zostawione", sizeof(note));
+        ecopy(note, "kept", sizeof(note));
         return;
     }
     if (chosen < 0 || chosen >= count)
         return;
     if (sys_unlink(items[chosen].name) < 0)
-        ecopy(note, "nie da sie usunac", sizeof(note));
+        ecopy(note, "it cannot be removed", sizeof(note));
     else
-        ecopy(note, "usuniete", sizeof(note));
+        ecopy(note, "removed", sizeof(note));
     chosen = -1;
     reread();
 }
@@ -307,10 +307,10 @@ static void rename_to(const char *what)
     if (chosen < 0 || chosen >= count || !what[0])
         return;
     if (sys_rename(items[chosen].name, what) < 0) {
-        ecopy(note, "nie da sie - nazwa zajeta?", sizeof(note));
+        ecopy(note, "cannot - is the name taken?", sizeof(note));
         return;
     }
-    ecopy(note, "zmieniona nazwa", sizeof(note));
+    ecopy(note, "renamed", sizeof(note));
     chosen = -1;
     reread();
 }
@@ -318,11 +318,11 @@ static void rename_to(const char *what)
 static void go_up(void)
 {
     if (same(here, "/")) {
-        ecopy(note, "to juz korzen", sizeof(note));
+        ecopy(note, "this is the root already", sizeof(note));
         return;
     }
     if (sys_chdir("..") < 0) {
-        ecopy(note, "nie da sie wyjsc wyzej", sizeof(note));
+        ecopy(note, "cannot go higher", sizeof(note));
         return;
     }
     chosen = -1;
@@ -353,11 +353,11 @@ static void draw(void)
     win_text(win, 4, 2, head, C_HEAD);
 
     win_rect(win, name_x(), 0, NAME_W, HEAD_H, asking ? C_RED : C_BLUE);
-    win_text(win, name_x() + 4, 2, "Nazwa", C_WHITE);
+    win_text(win, name_x() + 4, 2, "Rename", C_WHITE);
     win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
-    win_text(win, edit_x() + 4, 2, "Otworz", C_WHITE);
+    win_text(win, edit_x() + 4, 2, "Open", C_WHITE);
     win_rect(win, del_x(), 0, DEL_W, HEAD_H, ask.on ? C_RED : C_BLUE);
-    win_text(win, del_x() + 8, 2, "Usun", C_WHITE);
+    win_text(win, del_x() + 8, 2, "Remove", C_WHITE);
     win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_LINE);
 
     for (int i = 0; i < shown; i++) {
@@ -377,7 +377,7 @@ static void draw(void)
             /* Right-aligned, like the sizes it stands in place of: two
                columns that end in different places read as two
                columns. */
-            win_text(win, cw - 7 * 8 - 6, y, "katalog",
+            win_text(win, cw - 7 * 8 - 6, y, "directory",
                      picked ? C_WHITE : C_DIM);
         } else {
             char sz[16];
@@ -411,7 +411,7 @@ static void draw(void)
     if (asking) {
         char line[64];
         int p = 0;
-        const char *q = "Nowa nazwa: ";
+        const char *q = "New name: ";
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen && p < (int)sizeof(line) - 2; i++)
@@ -423,7 +423,7 @@ static void draw(void)
         win_text(win, 4, ch - 10, note, C_TEXT);
     } else {
         win_text(win, 4, ch - 10,
-                 "PgUp/PgDn przewija, '..' wyzej", C_DIM);
+                 "PgUp/PgDn scrolls, '..' goes up", C_DIM);
     }
 
     /* Last, and therefore over everything: a question one can scroll
@@ -436,7 +436,7 @@ static void draw(void)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Pliki");
+    int win = (int)win_create(W0, H0, "Files");
     if (win < 0)
         sys_exit(1);
     winid = win;
@@ -488,7 +488,7 @@ void _start(void)
                         if (alen)
                             rename_to(answer);
                         else
-                            ecopy(note, "nazwa bez zmian", sizeof(note));
+                            ecopy(note, "the name is unchanged", sizeof(note));
                         alen = 0;
                     } else if (c == '\b') {
                         if (alen)
@@ -523,7 +523,7 @@ void _start(void)
             } else if (ev.type == WEV_CLICK) {
                 /* A click, and only a click. The compositor also sends
                    the press and the release that make one up - acting
-                   on those as well means one click on "Otworz"
+                   on those as well means one click on "Open"
                    starting the editor twice, which is exactly what it
                    did. */
                 if (ev.y < HEAD_H && ev.x >= del_x()) {
@@ -531,7 +531,7 @@ void _start(void)
                 } else if (ev.y < HEAD_H && ev.x >= name_x() &&
                            ev.x < edit_x()) {
                     if (chosen < 0)
-                        ecopy(note, "nie wybrano pliku", sizeof(note));
+                        ecopy(note, "no file picked", sizeof(note));
                     else {
                         asking = 1;
                         alen = 0;

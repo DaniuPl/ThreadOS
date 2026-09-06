@@ -4,7 +4,7 @@
 
 void _start(void)
 {
-    print("[evil] czesc, zaraz przeczytam pamiec jadra pod 0x100000...\n");
+    print("[evil] hello, I am about to read kernel memory at 0x100000...\n");
     sys_sleep(100);
 
     volatile uint32_t probe = *(volatile uint32_t *)0x100000;
@@ -12,6 +12,6 @@ void _start(void)
 
     /* We do not get here - the kernel kills the process with a page
    fault */
-    print("[evil] TEGO NIE POWINNO BYC WIDAC\n");
+    print("[evil] THIS SHOULD NOT BE VISIBLE\n");
     sys_exit(1);
 }

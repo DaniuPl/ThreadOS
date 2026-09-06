@@ -66,25 +66,25 @@ const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
 
     int len = fs_size(f);
     if (len <= 0 || len > PROG_MAX) {
-        printk("[jadro] '%s' na dysku ma %d B - to nie jest program\n",
+        printk("[kernel] '%s' on the disk is %d B - that is not a program\n",
                name, len);
         return (const void *)0;
     }
 
     void *buf = kmalloc((uint32_t)len);
     if (!buf) {
-        printk("[jadro] brak pamieci na wczytanie '%s' (%d B)\n", name, len);
+        printk("[kernel] no memory to read '%s' (%d B)\n", name, len);
         return (const void *)0;
     }
     /* fs_read_at returns the NUMBER of bytes read - an image shorter
        than the file is not the same program */
     if (fs_read_at(f, 0, buf, (uint32_t)len) != len) {
         kfree(buf);
-        printk("[jadro] '%s' nie da sie odczytac z dysku\n", name);
+        printk("[kernel] '%s' cannot be read off the disk\n", name);
         return (const void *)0;
     }
 
-    from_where = "dysku";
+    from_where = "the disk";
     *buf_out = buf;
     *size_out = (uint32_t)len;
     return buf;

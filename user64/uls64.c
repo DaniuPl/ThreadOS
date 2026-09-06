@@ -33,7 +33,7 @@ void _start(void)
     struct dirent64 entry;
 
     if (sys_getcwd(path, sizeof(path)) < 0) {
-        print("uls64: nie wiem, gdzie stoje\n");
+        print("uls64: I do not know where I am\n");
         sys_exit(1);
     }
 
@@ -48,7 +48,7 @@ void _start(void)
         n = put(0, "  ");
         n = put(n, entry.name);
         if (entry.is_dir) {
-            n = put(n, "/  (katalog)");
+            n = put(n, "/  (directory)");
         } else {
             n = put(n, "  (");
             n = putn(n, entry.size);
@@ -60,7 +60,7 @@ void _start(void)
         ile++;
     }
 
-    n = put(0, "uls64: wpisow ");
+    n = put(0, "uls64: entries ");
     n = putn(n, (uint64_t)ile);
     n = put(n, "\n");
     out[n] = 0;

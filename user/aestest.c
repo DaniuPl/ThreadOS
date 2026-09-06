@@ -59,9 +59,9 @@ static void check(const char *what, const uint8_t *got, const uint8_t *want,
         print(": OK\n");
         return;
     }
-    print(": BLAD\n  wyszlo:   ");
+    print(": FAILED\n  came out: ");
     print_hex(got, n);
-    print("\n  a mialo:  ");
+    print("\n  wanted:   ");
     print_hex(want, n);
     print("\n");
     failures++;
@@ -70,7 +70,7 @@ static void check(const char *what, const uint8_t *got, const uint8_t *want,
 static void check_flag(const char *what, int ok)
 {
     print(what);
-    print(ok ? ": OK\n" : ": BLAD\n");
+    print(ok ? ": OK\n" : ": FAILED\n");
     if (!ok)
         failures++;
 }
@@ -117,7 +117,7 @@ static void vectors(void)
     struct aes a;
     uint8_t out[64], back[16];
 
-    print("[aes] wektory: FIPS-197, SP 800-38A, GCM, RFC 3610\n");
+    print("[aes] vectors: FIPS-197, SP 800-38A, GCM, RFC 3610\n");
 
     /* FIPS-197 C.1, C.2, C.3: one block, three key lengths. The key is
        00 01 .. and the input 00 11 22 .. - the same in all three. */
@@ -140,21 +140,21 @@ static void vectors(void)
 
     aes_key(&a, key256, 128);
     aes_encrypt_block(&a, plain, out);
-    check("AES-128 blok (FIPS-197 C.1)", out, c128, 16);
+    check("AES-128 block (FIPS-197 C.1)", out, c128, 16);
     aes_decrypt_block(&a, out, back);
-    check("AES-128 odwrotnie", back, plain, 16);
+    check("AES-128 the other way", back, plain, 16);
 
     aes_key(&a, key256, 192);
     aes_encrypt_block(&a, plain, out);
-    check("AES-192 blok (FIPS-197 C.2)", out, c192, 16);
+    check("AES-192 block (FIPS-197 C.2)", out, c192, 16);
     aes_decrypt_block(&a, out, back);
-    check("AES-192 odwrotnie", back, plain, 16);
+    check("AES-192 the other way", back, plain, 16);
 
     aes_key(&a, key256, 256);
     aes_encrypt_block(&a, plain, out);
-    check("AES-256 blok (FIPS-197 C.3)", out, c256, 16);
+    check("AES-256 block (FIPS-197 C.3)", out, c256, 16);
     aes_decrypt_block(&a, out, back);
-    check("AES-256 odwrotnie", back, plain, 16);
+    check("AES-256 the other way", back, plain, 16);
 
     /* SP 800-38A F.5.1: CTR-AES128. Four blocks - long enough for the
        counter to have to be counted up correctly. */
@@ -215,9 +215,9 @@ static void vectors(void)
     uint8_t buf[64], tag[16], plainback[64];
 
     aes_gcm_encrypt(gkey, 128, giv, 12, gaad, 20, gpt, buf, 60, tag, 16);
-    check("GCM-AES128 szyfr (przypadek 4)", buf, gct, 60);
-    check("GCM-AES128 znacznik", tag, gtag, 16);
-    check_flag("GCM odszyfrowanie",
+    check("GCM-AES128 ciphertext (case 4)", buf, gct, 60);
+    check("GCM-AES128 tag", tag, gtag, 16);
+    check_flag("GCM decryption",
                aes_gcm_decrypt(gkey, 128, giv, 12, gaad, 20, gct, plainback,
                                60, gtag, 16) &&
                equal(plainback, gpt, 60));
@@ -228,7 +228,7 @@ static void vectors(void)
     for (int i = 0; i < 20; i++)
         badaad[i] = gaad[i];
     badaad[19] ^= 1;
-    check_flag("GCM wykrycie zmiany w naglowku",
+    check_flag("GCM notices a change in the header",
                !aes_gcm_decrypt(gkey, 128, giv, 12, badaad, 20, gct,
                                 plainback, 60, gtag, 16));
 
@@ -250,12 +250,12 @@ static void vectors(void)
     static const uint8_t ctag[8] = {
         0x17,0xe8,0xd1,0x2c,0xfd,0xf9,0x26,0xe0 };
 
-    check_flag("CCM parametry przyjete",
+    check_flag("CCM parameters accepted",
                aes_ccm_encrypt(ckey, 128, cnonce, 13, caad, 8, cpt, buf, 23,
                                tag, 8));
-    check("CCM-AES128 szyfr (RFC 3610 nr 1)", buf, cct, 23);
-    check("CCM-AES128 znacznik", tag, ctag, 8);
-    check_flag("CCM odszyfrowanie",
+    check("CCM-AES128 ciphertext (RFC 3610 no 1)", buf, cct, 23);
+    check("CCM-AES128 tag", tag, ctag, 8);
+    check_flag("CCM decryption",
                aes_ccm_decrypt(ckey, 128, cnonce, 13, caad, 8, cct, plainback,
                                23, ctag, 8) &&
                equal(plainback, cpt, 23));
@@ -264,7 +264,7 @@ static void vectors(void)
     for (int i = 0; i < 8; i++)
         badtag[i] = ctag[i];
     badtag[0] ^= 0x80;
-    check_flag("CCM wykrycie podmiany znacznika",
+    check_flag("CCM notices a changed tag",
                !aes_ccm_decrypt(ckey, 128, cnonce, 13, caad, 8, cct,
                                 plainback, 23, badtag, 8));
 
@@ -274,11 +274,11 @@ static void vectors(void)
     for (int i = 0; i < 23; i++)
         if (plainback[i])
             leak = 1;
-    check_flag("CCM po odrzuceniu nie zostawia tresci", !leak);
+    check_flag("CCM leaves no plaintext after a refusal", !leak);
 
     /* CCM refuses parameters it cannot express: a nonce longer than
        thirteen bytes leaves no room for the length field. */
-    check_flag("CCM odrzuca zly nonce",
+    check_flag("CCM refuses a bad nonce",
                !aes_ccm_encrypt(ckey, 128, cnonce, 14, caad, 8, cpt, buf, 23,
                                 tag, 8));
 }
@@ -327,8 +327,8 @@ static void derived(const char *mode, uint32_t seed, uint32_t len,
     print(" bitow, ");
     print_dec(len);
     print(" B\n");
-    field("klucz", key, keylen);
-    field("jawny", pt, len);
+    field("key", key, keylen);
+    field("plaintext", pt, len);
 
     if (same_word(mode, "ecb")) {
         for (uint32_t off = 0; off + 16 <= len; off += 16) {
@@ -337,26 +337,26 @@ static void derived(const char *mode, uint32_t seed, uint32_t len,
             aes_decrypt_block(&a, ct + off, back + off);
         }
         len -= len % 16;
-        field("szyfr", ct, len);
-        check_flag("powrot", equal(back, pt, len));
+        field("ciphertext", ct, len);
+        check_flag("back again", equal(back, pt, len));
     } else if (same_word(mode, "ctr")) {
         uint8_t ctr[16];
         derive(ctr, 16, seed, 0x22);
         field("nonce", ctr, 16);
         aes_key(&a, key, (int)bits);
         aes_ctr(&a, ctr, pt, ct, len);
-        field("szyfr", ct, len);
+        field("ciphertext", ct, len);
         derive(ctr, 16, seed, 0x22);
         aes_ctr(&a, ctr, ct, back, len);
-        check_flag("powrot", equal(back, pt, len));
+        check_flag("back again", equal(back, pt, len));
     } else if (same_word(mode, "gcm")) {
         field("nonce", nonce, noncelen);
         field("aad", aad, 20);
         aes_gcm_encrypt(key, (int)bits, nonce, noncelen, aad, 20,
                         pt, ct, len, tag, taglen);
-        field("szyfr", ct, len);
+        field("ciphertext", ct, len);
         field("tag", tag, taglen);
-        check_flag("powrot",
+        check_flag("back again",
                    aes_gcm_decrypt(key, (int)bits, nonce, noncelen, aad, 20,
                                    ct, back, len, tag, taglen) &&
                    equal(back, pt, len));
@@ -365,13 +365,13 @@ static void derived(const char *mode, uint32_t seed, uint32_t len,
         field("aad", aad, 20);
         if (!aes_ccm_encrypt(key, (int)bits, nonce, noncelen, aad, 20,
                              pt, ct, len, tag, taglen)) {
-            print("[aes] CCM odmowil\n");
+            print("[aes] CCM refused it\n");
             failures++;
             return;
         }
-        field("szyfr", ct, len);
+        field("ciphertext", ct, len);
         field("tag", tag, taglen);
-        check_flag("powrot",
+        check_flag("back again",
                    aes_ccm_decrypt(key, (int)bits, nonce, noncelen, aad, 20,
                                    ct, back, len, tag, taglen) &&
                    equal(back, pt, len));
@@ -394,7 +394,7 @@ static void from_file(const char *name)
     int n = 0, got;
 
     if (fd < 0) {
-        print("[aes] nie moge otworzyc '");
+        print("[aes] I cannot open '");
         print(name);
         print("'\n");
         sys_exit(1);
@@ -405,7 +405,7 @@ static void from_file(const char *name)
 
     if (n < HDR || buf[0] != 'A' || buf[1] != 'E' || buf[2] != 'S' ||
         buf[3] != 'V') {
-        print("[aes] to nie jest plik z wektorem\n");
+        print("[aes] this is not a vector file\n");
         sys_exit(1);
     }
 
@@ -420,11 +420,11 @@ static void from_file(const char *name)
 
     if (ctlen > MAXDATA ||
         HDR + keylen + noncelen + aadlen + ctlen + taglen > (uint32_t)n) {
-        print("[aes] plik urwany\n");
+        print("[aes] the file is cut short\n");
         sys_exit(1);
     }
 
-    print("[aes] plik: ");
+    print("[aes] file: ");
     print(mode == 1 ? "gcm" : "ccm");
     print(", ");
     print_dec(ctlen);
@@ -437,16 +437,16 @@ static void from_file(const char *name)
                           ct, pt, ctlen, tag, taglen);
 
     if (!ok) {
-        print("[aes] tag NIE zgadza sie\n");
+        print("[aes] the tag does NOT match\n");
         sys_exit(0);
     }
-    print("[aes] tag zgadza sie\n");
-    field("jawny", pt, ctlen);
+    print("[aes] the tag matches\n");
+    field("plaintext", pt, ctlen);
 }
 
 void _start(int argc, char **argv)
 {
-    if (argc >= 3 && same_word(argv[1], "plik")) {
+    if (argc >= 3 && same_word(argv[1], "file")) {
         from_file(argv[2]);
         sys_exit(0);
     }
@@ -462,11 +462,11 @@ void _start(int argc, char **argv)
     }
 
     if (failures) {
-        print("[aes] BLEDOW: ");
+        print("[aes] FAILURES: ");
         print_dec((uint32_t)failures);
         print("\n");
         sys_exit(1);
     }
-    print("[aes] wszystko sie zgadza\n");
+    print("[aes] everything matches\n");
     sys_exit(0);
 }

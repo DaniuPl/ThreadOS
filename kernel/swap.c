@@ -46,13 +46,13 @@ void swap_init(void)
     if (slots > SLOTS_MAX)
         slots = SLOTS_MAX;
     if (!slots) {
-        printk("[ !! ] Wymiana: za malo miejsca na dysku\n");
+        printk("[ !! ] Swap: too little room on the disk\n");
         return;
     }
 
     int f = fs_open(FS_ROOT, "swap.sys", 1);
     if (f < 0) {
-        printk("[ !! ] Wymiana: nie moge zalozyc pliku wymiany\n");
+        printk("[ !! ] Swap: I cannot create the swap file\n");
         return;
     }
     fs_truncate(f);
@@ -69,7 +69,7 @@ void swap_init(void)
     }
 ready:
     if (!slots) {
-        printk("[ !! ] Wymiana: nie udalo sie przydzielic blokow\n");
+        printk("[ !! ] Swap: could not allocate the blocks\n");
         return;
     }
     /* Set the file size so that 'fls' and 'df' show the space as taken */
@@ -78,7 +78,7 @@ ready:
     slot_count = slots;
 
     pmm_set_reclaim(task_reclaim_page);
-    printk("[ OK ] Wymiana stron: %u KiB na dysku (swap.sys)\n",
+    printk("[ OK ] Page swapping: %u KiB on the disk (swap.sys)\n",
            slots * PAGE_SIZE / 1024);
 }
 

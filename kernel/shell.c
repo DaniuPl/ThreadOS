@@ -82,11 +82,11 @@ static struct shell *my_shell(void)
    given - both come from the settings, so both survive a restart */
 static void prompt(void)
 {
-    vga_set_color((enum vga_color)(config_get_num("kolor", VGA_LIGHT_CYAN) & 15),
+    vga_set_color((enum vga_color)(config_get_num("color", VGA_LIGHT_CYAN) & 15),
                   VGA_BLACK);
     /* '#' for an admin, '>' for everybody else - the oldest way of
        saying it, and the one that is seen without being read. */
-    printk("%s%c ", config_get("nazwa"),
+    printk("%s%c ", config_get("name"),
            user_shell_level() == USER_ADMIN ? '#' : '>');
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
 }
@@ -102,49 +102,49 @@ static const struct {
     const char *name;
     const char *desc;
 } commands[] = {
-    {"help",     "ta pomoc"},
-    {"ps",       "watki jadra"},
-    {"ls",       "pliki w initrd"},
-    {"run X",    "uruchom program X"},
-    {"fls",      "pliki na dysku"},
-    {"cat F",    "wypisz plik"},
-    {"write F",  "zapisz tekst do pliku"},
-    {"cp A B",   "przepisz plik na dysk"},
-    {"mv A B",   "zmien nazwe pliku"},
-    {"set",      "ustawienia systemu"},
-    {"kim",      "czy jestes adminem"},
-    {"sudo",     "komenda jako admin"},
-    {"wyloguj",  "przestan byc adminem"},
-    {"haslo",    "zmien haslo admina"},
-    {"smp",      "licz na kazdym rdzeniu"},
-    {"smpmem",   "proba zamkow na pamieci"},
-    {"smpthreads", "watki jadra na rdzeniach"},
-    {"runw",     "run na dowolnym rdzeniu"},
-    {"df",       "zajetosc dysku"},
-    {"mem",      "uzycie pamieci"},
-    {"uptime",   "czas od startu"},
-    {"date",     "data i godzina (RTC)"},
-    {"mouse",    "pozycja myszy"},
-    {"ifconfig", "karta sieciowa"},
-    {"arp",      "tablica ARP"},
-    {"ping IP",  "4 pakiety ICMP"},
-    {"dns IP",   "ustaw serwer DNS"},
-    {"netstat",  "polaczenia TCP"},
-    {"dhcp",     "adres IP z sieci"},
-    {"desktop",  "pulpit graficzny"},
-    {"kill P S", "sygnal do procesu"},
-    {"clear",    "wyczysc ekran"},
-    {"ekran",    "tryb ekranu, koszt klatki"},
-    {"sprzet",   "co jest w tej maszynie"},
-    {"dyski",    "dyski, ktore ma maszyna"},
-    {"instaluj", "ProtonOS na dysk (ekran)"},
-    {"fat [N]",  "partycja EFI: fatls,"},
+    {"help",     "this help"},
+    {"ps",       "kernel threads"},
+    {"ls",       "files in the initrd"},
+    {"run X",    "run program X"},
+    {"fls",      "files on the disk"},
+    {"cat F",    "print a file"},
+    {"write F",  "write text to a file"},
+    {"cp A B",   "copy a file to disk"},
+    {"mv A B",   "rename a file"},
+    {"set",      "system settings"},
+    {"whoami",      "are you admin"},
+    {"sudo",     "a command as admin"},
+    {"logout",  "stop being admin"},
+    {"passwd",    "change the password"},
+    {"smp",      "count on every core"},
+    {"smpmem",   "memory lock test"},
+    {"smpthreads", "kernel threads on cores"},
+    {"runw",     "run on any core"},
+    {"df",       "disk usage"},
+    {"mem",      "memory usage"},
+    {"uptime",   "time since boot"},
+    {"date",     "date and time (RTC)"},
+    {"mouse",    "mouse position"},
+    {"ifconfig", "the network card"},
+    {"arp",      "the ARP table"},
+    {"ping IP",  "4 ICMP packets"},
+    {"dns IP",   "set the DNS server"},
+    {"netstat",  "TCP connections"},
+    {"dhcp",     "IP address over DHCP"},
+    {"desktop",  "the graphical desktop"},
+    {"kill P S", "signal to a process"},
+    {"clear",    "clear the screen"},
+    {"screen",    "video mode, frame cost"},
+    {"hardware",   "what is in this machine"},
+    {"disks",    "the machine's disks"},
+    {"install", "ProtonOS onto a disk"},
+    {"fat [N]",  "EFI partition: fatls,"},
     {"",         "  fatcat, fatcopy, fatrm"},
-    {"gfx",      "test trybu 13h"},
-    {"vesa",     "test trybu VESA"},
-    {"crash",    "test page faulta"},
-    {"reboot",   "restart komputera"},
-    {"poweroff", "wylacz komputer"},
+    {"gfx",      "mode 13h test"},
+    {"vesa",     "VESA mode test"},
+    {"crash",    "page fault test"},
+    {"reboot",   "restart the machine"},
+    {"poweroff", "power the machine off"},
 };
 
 #define COMMAND_N ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -158,8 +158,8 @@ static const struct {
    the heading went. */
 #define HELP_ROWS 22
 _Static_assert(COMMAND_N <= 2 * HELP_ROWS,
-               "lista komend nie miesci sie na ekranie - skroc opisy "
-               "albo polacz pozycje");
+               "the command list does not fit on the screen - shorten "
+               "the descriptions or join entries");
 
 /* A column, and never wider than one.
  *
@@ -181,7 +181,7 @@ static void cmd_help(void)
 {
     int rows = (COMMAND_N + 1) / 2;      /* at most HELP_ROWS - see above */
     vga_clear();
-    printk("Dostepne komendy:\n");
+    printk("Available commands:\n");
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < 2; c++) {
             int i = r + c * rows;
@@ -193,7 +193,7 @@ static void cmd_help(void)
         }
         printk("\n");
     }
-    printk("Konsole: Alt+F1..F%d (teraz %d)\n",
+    printk("Consoles: Alt+F1..F%d (now %d)\n",
            CONSOLE_COUNT, task_vc() + 1);
 }
 
@@ -202,9 +202,9 @@ static void cmd_help(void)
    that matters is how much of it had to cross the bus to the card. */
 static void cmd_ekran(void)
 {
-    printk("tryb:         %dx%d, %s, skala %d\n", video_w(), video_h(),
-           video_true_colour() ? "kolory" : "paleta 256", video_scale());
-    printk("ostatnia klatka: %u wierszy na karte (z %d)\n",
+    printk("mode:            %dx%d, %s, scale %d\n", video_w(), video_h(),
+           video_true_colour() ? "true colour" : "256-colour palette", video_scale());
+    printk("last frame:      %u rows to the card (of %d)\n",
            video_present_rows(), video_h());
 }
 
@@ -224,7 +224,7 @@ static void read_word(char *out, int max);
 static void cmd_formatuj(char *arg)
 {
     if (!blk_present()) {
-        printk("formatuj: nie ma dysku\n");
+        printk("format: there is no disk\n");
         return;
     }
 
@@ -232,10 +232,10 @@ static void cmd_formatuj(char *arg)
     for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
         which = which * 10 + (*p - '0');
 
-    printk("Dysk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
+    printk("Disk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
     int np = part_scan();
     if (np > 0) {
-        printk("Sa na nim %u partycje(i) - tablica %s:\n", (uint32_t)np,
+        printk("It has %u partition(s) - a %s table:\n", (uint32_t)np,
                part_is_gpt() ? "GPT" : "MBR");
         for (int i = 0; i < np; i++) {
             struct partition pt;
@@ -249,34 +249,34 @@ static void cmd_formatuj(char *arg)
     if (which > 0) {
         struct partition pt;
         if (which > np || !part_get(which - 1, &pt)) {
-            printk("formatuj: nie ma partycji %u\n", (uint32_t)which);
+            printk("format: there is no partition %u\n", (uint32_t)which);
             return;
         }
-        printk("\nTO SKASUJE PARTYCJE %u (%u MiB, %s %s).\n",
+        printk("\nTHIS WILL ERASE PARTITION %u (%u MiB, %s %s).\n",
                (uint32_t)which, (uint32_t)(pt.sectors / 2048), pt.kind,
                pt.label);
-        printk("Reszta dysku i tablica partycji zostaja nietkniete.\n");
+        printk("The rest of the disk and the partition table stay untouched.\n");
     } else if (np > 0) {
-        printk("\nTO SKASUJE CALY DYSK - tablice partycji i WSZYSTKIE "
-               "%u partycje(i) powyzej.\n", (uint32_t)np);
-        printk("Zeby zajac tylko jedna, napisz 'formatuj N'.\n");
+        printk("\nTHIS WILL ERASE THE WHOLE DISK - the partition table "
+               "and ALL %u partition(s) above.\n", (uint32_t)np);
+        printk("To take just one, type 'format N'.\n");
     } else {
-        printk("\nTO SKASUJE CALY DYSK, ze wszystkim, co na nim jest.\n");
+        printk("\nTHIS WILL ERASE THE WHOLE DISK, with everything on it.\n");
     }
-    printk("Wpisz TAK (duzymi literami), zeby to zrobic: ");
+    printk("Type YES (in capitals) to do it: ");
 
     char answer[8];
     read_word(answer, (int)sizeof(answer));
 
-    if (strcmp(answer, "TAK") != 0) {
-        printk("formatuj: nie skasowano niczego\n");
+    if (strcmp(answer, "YES") != 0) {
+        printk("format: nothing was erased\n");
         return;
     }
     if (fs_format_now(which))
-        printk("formatuj: gotowe - %s jest teraz PFS-em ProtonOS-a\n",
-               which ? "ta partycja" : "caly dysk");
+        printk("format: done - %s is a ProtonOS PFS now\n",
+               which ? "this partition" : "the whole disk");
     else
-        printk("formatuj: nie udalo sie\n");
+        printk("format: it did not work\n");
 }
 
 /* Installing onto the machine's own disk.
@@ -304,24 +304,24 @@ static void cmd_install(const char *arg)
     if (!arg || !arg[0]) {
         if (install_graphical())
             return;
-        printk("instaluj: pulpit juz dziala, a instalator potrzebuje "
-               "calego ekranu.\n");
-        printk("          Zrestartuj maszyne albo napisz "
-               "'instaluj tekstem'.\n");
+        printk("install: the desktop is running, and the installer needs "
+               "the whole screen.\n");
+        printk("         Restart the machine, or type "
+               "'install text'.\n");
         return;
     }
-    /* "tekstem", then optionally "caly", then optionally a disk
+    /* "text", then optionally "whole", then optionally a disk
        number counted from one. A machine with several disks is a
        machine where saying which one is the whole question. */
     const char *p = arg;
-    if (!starts(p, "tekstem")) {
-        printk("uzycie: instaluj [tekstem [caly] [numer dysku]]\n");
+    if (!starts(p, "text")) {
+        printk("usage: install [text [whole] [disk number]]\n");
         return;
     }
     p += 7;
     while (*p == ' ')
         p++;
-    if (starts(p, "caly")) {
+    if (starts(p, "whole")) {
         mode = INST_WHOLE;
         p += 4;
         while (*p == ' ')
@@ -335,18 +335,18 @@ static void cmd_install(const char *arg)
     }
     if (blk_count() > 1)
         for (int i = 0; i < blk_count(); i++)
-            printk("  dysk %u: %s, %u MiB%s\n", (uint32_t)(i + 1),
+            printk("  disk %u: %s, %u MiB%s\n", (uint32_t)(i + 1),
                    blk_name_of(i), blk_sectors_of(i) / 2048,
                    i == (disk < 0 ? blk_current() : disk) ? "  <-" : "");
     if (!install_plan(mode, disk))
         return;
-    /* A different word for the way that destroys things. TAK is what
-       one says to a question; KASUJ is what one says to this. */
-    const char *word = mode == INST_WHOLE ? "KASUJ" : "TAK";
-    printk("\nWpisz %s (duzymi literami), zeby to zrobic: ", word);
+    /* A different word for the way that destroys things. YES is what
+       one says to a question; ERASE is what one says to this. */
+    const char *word = mode == INST_WHOLE ? "ERASE" : "YES";
+    printk("\nType %s (in capitals) to do it: ", word);
     read_word(answer, (int)sizeof(answer));
     if (strcmp(answer, word) != 0) {
-        printk("instaluj: nie zapisano niczego\n");
+        printk("install: nothing was written\n");
         return;
     }
     install_do();
@@ -360,7 +360,7 @@ static void cmd_beep(const char *arg)
     const char *p = arg;
 
     if (!hda_present()) {
-        printk("beep: nie ma dzwieku (zobacz 'sprzet')\n");
+        printk("beep: there is no sound (see 'hardware')\n");
         return;
     }
     while (*p == ' ')
@@ -379,39 +379,39 @@ static void cmd_beep(const char *arg)
         }
     }
     if (hz < 20 || hz > 20000) {
-        printk("beep: %u Hz to nie jest dzwiek, ktory da sie uslyszec\n", hz);
+        printk("beep: %u Hz is not a sound anybody can hear\n", hz);
         return;
     }
-    printk("beep: %u Hz przez %u ms\n", hz, ms);
+    printk("beep: %u Hz for %u ms\n", hz, ms);
     if (hda_beep(hz, ms) < 0)
-        printk("beep: nie udalo sie zagrac\n");
+        printk("beep: could not play it\n");
 }
 
 static void cmd_mem(void)
 {
-    printk("RAM wykryty:  %u KiB\n", pmm_ram_kib());
-    printk("PMM:          %u/%u ramek 4 KiB zajetych (zarzadzane %u MiB)\n",
+    printk("RAM detected: %u KiB\n", pmm_ram_kib());
+    printk("PMM:          %u/%u 4 KiB frames used (managing %u MiB)\n",
            pmm_used_frames(), pmm_total_frames(),
            pmm_managed_top() / (1024 * 1024));
-    printk("sterta jadra: %u/%u B zajetych\n",
+    printk("kernel heap:  %u/%u B used\n",
            heap_used_bytes(), heap_total_bytes());
 
-    printk("z plikow:     %u stron wczytanych z odwzorowan\n",
+    printk("from files:   %u pages read through mappings\n",
            process_mmap_pages());
 
     uint32_t sused, stotal, sout, sin;
     swap_stats(&sused, &stotal, &sout, &sin);
     if (stotal)
-        printk("wymiana:      %u/%u stron na dysku (wyrzuconych %u, "
-               "sciagnietych %u)\n", sused, stotal, sout, sin);
+        printk("swap:         %u/%u pages on disk (evicted %u, "
+               "fetched %u)\n", sused, stotal, sout, sin);
     else
-        printk("wymiana:      brak pliku wymiany\n");
+        printk("swap:         no swap file\n");
 }
 
 static void cmd_kill(char *arg)
 {
     if (!*arg) {
-        printk("uzycie: kill <pid|nazwa> [sygnal], np. kill 7 15\n");
+        printk("usage: kill <pid|name> [signal], e.g. kill 7 15\n");
         return;
     }
 
@@ -428,7 +428,7 @@ static void cmd_kill(char *arg)
         for (const char *p = sp; *p >= '0' && *p <= '9'; p++)
             sig = sig * 10 + (*p - '0');
         if (sig <= 0 || sig >= NSIG) {
-            printk("kill: nieznany sygnal '%s'\n", sp);
+            printk("kill: unknown signal '%s'\n", sp);
             return;
         }
     }
@@ -440,10 +440,10 @@ static void cmd_kill(char *arg)
     if (*arg < '0' || *arg > '9') {
         pid = task_find_name(arg);
         if (pid < 0) {
-            printk("kill: nie ma procesu '%s'\n", arg);
+            printk("kill: there is no process '%s'\n", arg);
             return;
         }
-        printk("kill: proces '%s' ma pid %d\n", arg, pid);
+        printk("kill: process '%s' has pid %d\n", arg, pid);
     } else {
         pid = 0;
         for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
@@ -451,7 +451,7 @@ static void cmd_kill(char *arg)
     }
 
     if (task_signal_send(pid, sig) < 0)
-        printk("kill: nie ma procesu o pid %d\n", pid);
+        printk("kill: there is no process with pid %d\n", pid);
     else if (sig != SIGKILL)
         printk("kill: %s -> pid %d\n", signal_name(sig), pid);
 }
@@ -459,7 +459,7 @@ static void cmd_kill(char *arg)
 static void cmd_uptime(void)
 {
     uint32_t s = pit_ticks() / 100;
-    printk("uptime: %u s (%u tyknac timera po 10 ms)\n", s, pit_ticks());
+    printk("uptime: %u s (%u timer ticks of 10 ms)\n", s, pit_ticks());
 }
 
 static void cmd_gfx(void)
@@ -477,7 +477,7 @@ static void cmd_vesa(void)
 {
     /* VESA mode 640x480x32 plus a test pattern (one-way). */
     if (video_init_vesa(640, 480) < 0) {
-        printk("vesa: brak framebuffera (PCI)\n");
+        printk("vesa: no framebuffer (PCI)\n");
         return;
     }
     video_clear(3);                        /* blue background */
@@ -494,8 +494,8 @@ static void cmd_mouse(void)
     /* Whether the device agreed to the fourth byte. On a laptop that
        is the difference between two fingers scrolling and two fingers
        doing nothing. */
-    printk("mysz: x=%u y=%u przyciski=%u kolko=%s\n", (uint32_t)x,
-           (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "tak" : "nie");
+    printk("mouse: x=%u y=%u buttons=%u wheel=%s\n", (uint32_t)x,
+           (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "yes" : "no");
 }
 
 static void cmd_date(void)
@@ -514,7 +514,7 @@ static void cmd_cat(const char *name)
        instead of holding the whole file in a kernel buffer */
     int slot = fs_open(FS_ROOT, name, 0);
     if (slot < 0) {
-        printk("cat: brak pliku '%s' (lista: 'fls')\n", name);
+        printk("cat: there is no file '%s' (list: 'fls')\n", name);
         return;
     }
 
@@ -539,11 +539,11 @@ static void cmd_df(void)
     uint32_t used, total;
     fs_usage(&used, &total);
     if (!total) {
-        printk("df: brak dysku\n");
+        printk("df: there is no disk\n");
         return;
     }
     uint32_t kib = FS_BLOCK / 1024;
-    printk("dysk: %u KiB, zajete %u KiB, wolne %u KiB (bloki po %u B)\n",
+    printk("disk: %u KiB, used %u KiB, free %u KiB (blocks of %u B)\n",
            total * kib, used * kib, (total - used) * kib, FS_BLOCK);
 }
 
@@ -555,7 +555,7 @@ static int may_touch(const char *name)
 {
     if (!user_is_system_file(name) || user_shell_level() == USER_ADMIN)
         return 1;
-    printk("brak uprawnien do '%s' - sprobuj przez sudo\n", name);
+    printk("no permission for '%s' - try it through sudo\n", name);
     return 0;
 }
 
@@ -569,15 +569,15 @@ static void cmd_write(char *args)
         *text++ = '\0';
 
     if (!*args || !*text) {
-        printk("uzycie: write <plik> <tekst>\n");
+        printk("usage: write <file> <text>\n");
         return;
     }
     if (!may_touch(args))
         return;
     if (fs_write(args, text, strlen(text)) < 0)
-        printk("write: blad zapisu '%s'\n", args);
+        printk("write: could not write '%s'\n", args);
     else
-        printk("zapisano %u B do '%s'\n", (uint32_t)strlen(text), args);
+        printk("wrote %u B to '%s'\n", (uint32_t)strlen(text), args);
 }
 
 /* cp <source> <destination> - copying a file onto the disk
@@ -600,7 +600,7 @@ static void cmd_mv(char *args)
         dst++;
 
     if (!*args || !*dst) {
-        printk("uzycie: mv <zrodlo> <cel>\n");
+        printk("usage: mv <source> <target>\n");
         return;
     }
     if (!may_touch(args) || !may_touch(dst))
@@ -610,7 +610,7 @@ static void cmd_mv(char *args)
     if (fs_rename(FS_ROOT, args, dst) == 0)
         printk("mv: '%s' -> '%s'\n", args, dst);
     else
-        printk("mv: nie da sie (nie ma zrodla albo nazwa zajeta)\n");
+        printk("mv: cannot (no source, or the name is taken)\n");
 }
 
 static void cmd_cp(char *args)
@@ -624,7 +624,7 @@ static void cmd_cp(char *args)
         dst++;
 
     if (!*args || !*dst) {
-        printk("uzycie: cp <zrodlo> <cel>\n");
+        printk("usage: cp <source> <target>\n");
         return;
     }
 
@@ -635,7 +635,7 @@ static void cmd_cp(char *args)
     void *loaded = (void *)0;
     const void *image = prog_image(args, &size, &loaded);
     if (!image) {
-        printk("cp: nie ma '%s'\n", args);
+        printk("cp: there is no '%s'\n", args);
         return;
     }
     int ok = fs_write(dst, image, size) == 0;
@@ -644,7 +644,7 @@ static void cmd_cp(char *args)
     if (ok)
         printk("cp: '%s' -> '%s' (%u B)\n", args, dst, size);
     else
-        printk("cp: nie udalo sie zapisac '%s'\n", dst);
+        printk("cp: could not write '%s'\n", dst);
 }
 
 /* smp - spreading computation across all cores
@@ -698,40 +698,40 @@ static void cmd_smp(void)
     for (uint32_t i = 0; i < SMP_UNITS; i++)
         total += smp_results[i];
 
-    printk("Rdzeni: %d (obudzonych %d), jednostek %u\n",
+    printk("Cores: %d (woken %d), units %u\n",
            smp_cpus(), smp_started(), (uint32_t)SMP_UNITS);
-    printk("Udzial:");
+    printk("Share:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_share(i));
+        printk(" core%d=%u", i, smp_share(i));
     printk("\n");
-    printk("Wynik: %u, wzorzec: %u - %s\n", total, pattern,
-           total == pattern ? "zgadza sie" : "NIE ZGADZA SIE");
-    printk("Liczylo rdzeni: %d\n", smp_workers());
+    printk("Result: %u, expected: %u - %s\n", total, pattern,
+           total == pattern ? "matches" : "DOES NOT MATCH");
+    printk("Cores that counted: %d\n", smp_workers());
 
     /* Every core's own timer. The boot core runs on the PIT and has
        zero here - secondary ones count their ticks in the local APIC,
        and that is the only proof that they get interrupts at all. */
-    printk("Zegary rdzeni:");
+    printk("Core clocks:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_ticks(i));
+        printk(" core%d=%u", i, smp_ticks(i));
     printk("\n");
 
     /* What the changed mappings cost. 'lokalnie' are the ones nobody
        else was holding - no interrupt, no waiting; 'zdalnie' are the
        ones that had to reach another core, and 'odpowiedzi' is how many
        cores answered. */
-    printk("TLB: lokalnie %u, zdalnie %u, odpowiedzi %u\n",
+    printk("TLB: local %u, remote %u, replies %u\n",
            tlb_local_only(), tlb_shootdowns(), tlb_remote_acks());
     /* The commonest way into the kernel there is. 'bez zamka' are the
        faults served before the big kernel lock was taken at all. */
-    printk("Bledy stron: bez zamka %u, z zamkiem %u\n",
+    printk("Page faults: without the lock %u, with it %u\n",
            isr_faults_nolock(), isr_faults_locked());
 }
 
 static void cmd_dhcp(void)
 {
     if (!dhcp_configure())
-        printk("dhcp: brak odpowiedzi serwera\n");
+        printk("dhcp: no answer from the server\n");
 }
 
 /* set - what the machine remembers about itself
@@ -742,11 +742,11 @@ static void cmd_dhcp(void)
 static void cmd_set(const char *arg)
 {
     if (!*arg) {
-        printk("Ustawienia (plik %s):\n", CONFIG_FILE);
+        printk("Settings (file %s):\n", CONFIG_FILE);
         for (int i = 0; i < config_count(); i++)
             printk("  %s = %s   (%s)\n", config_name(i), config_value(i),
                    config_help(i));
-        printk("uzycie: set <nazwa> <wartosc>\n");
+        printk("usage: set <name> <value>\n");
         return;
     }
 
@@ -765,26 +765,26 @@ static void cmd_set(const char *arg)
         if (v)
             printk("%s = %s\n", name, v);
         else
-            printk("set: nie ma ustawienia '%s'\n", name);
+            printk("set: there is no setting '%s'\n", name);
         return;
     }
 
     if (user_shell_level() != USER_ADMIN) {
-        printk("set: zmiana ustawien wymaga admina - 'sudo set %s ...'\n",
+        printk("set: changing settings needs admin - 'sudo set %s ...'\n",
                name);
         return;
     }
     if (config_is_hidden(name)) {
-        printk("set: '%s' nie zmienia sie tak - zobacz komende 'haslo'\n",
+        printk("set: '%s' does not change this way - see the 'passwd' command\n",
                name);
         return;
     }
     if (config_set(name, arg + i) < 0) {
-        printk("set: nie udalo sie zapisac '%s' (zla nazwa, za dluga "
-               "wartosc albo brak dysku)\n", name);
+        printk("set: could not write '%s' (bad name, too long a "
+               "value, or no disk)\n", name);
         return;
     }
-    printk("%s = %s (zapisane)\n", name, config_get(name));
+    printk("%s = %s (saved)\n", name, config_get(name));
 
     /* Some settings are read the moment they are needed and some were
        handed to a subsystem once, at boot - those have to be handed
@@ -800,11 +800,11 @@ static void cmd_dns(const char *arg)
 {
     uint32_t ip;
     if (!net_parse_ip(arg, &ip)) {
-        printk("uzycie: dns <adres ip serwera>\n");
+        printk("usage: dns <server ip address>\n");
         return;
     }
     net_set_dns(ip);
-    printk("serwer DNS ustawiony na ");
+    printk("DNS server set to ");
     net_print_ip(ip);
     printk("\n");
 }
@@ -818,7 +818,7 @@ static void cmd_ping(const char *arg)
 {
     uint32_t ip;
     if (!net_parse_ip(arg, &ip)) {
-        printk("uzycie: ping <adres ip>, np. ping 10.0.2.2\n");
+        printk("usage: ping <ip address>, e.g. ping 10.0.2.2\n");
         return;
     }
     net_ping(ip, 4);
@@ -890,8 +890,8 @@ static void run_command(char *cmd);
 static void cmd_whoami(void)
 {
     printk("%s\n", user_shell_level() == USER_ADMIN
-                        ? "admin (mozesz zmieniac system)"
-                        : "uzytkownik (zmiana systemu przez 'sudo')");
+                        ? "admin (you can change the system)"
+                        : "user (change the system through 'sudo')");
 }
 
 /* sudo <komenda> - one command as an admin, and back down at once.
@@ -902,21 +902,21 @@ static void cmd_sudo(char *arg)
         if (*arg)
             run_command(arg);
         else
-            printk("juz jestes adminem\n");
+            printk("you are admin already\n");
         return;
     }
 
     char pass[CONFIG_VAL_MAX];
-    printk("haslo: ");
+    printk("password: ");
     read_secret(pass, sizeof(pass));
     if (!user_password_ok(pass)) {
-        printk("sudo: zle haslo\n");
+        printk("sudo: wrong password\n");
         return;
     }
 
     user_shell_set(USER_ADMIN);
     if (!*arg) {
-        printk("jestes adminem; 'wyloguj' konczy\n");
+        printk("you are admin; 'logout' ends it\n");
         return;
     }
     run_command(arg);
@@ -926,11 +926,11 @@ static void cmd_sudo(char *arg)
 static void cmd_logout(void)
 {
     if (user_shell_level() != USER_ADMIN) {
-        printk("nie jestes adminem\n");
+        printk("you are not admin\n");
         return;
     }
     user_shell_set(USER_PLAIN);
-    printk("znowu zwykly uzytkownik\n");
+    printk("an ordinary user again\n");
 }
 
 /* Changing the password: the old one first, unless the person asking
@@ -940,30 +940,30 @@ static void cmd_password(void)
     char pass[CONFIG_VAL_MAX], again[CONFIG_VAL_MAX];
 
     if (user_shell_level() != USER_ADMIN) {
-        printk("stare haslo: ");
+        printk("old password: ");
         read_secret(pass, sizeof(pass));
         if (!user_password_ok(pass)) {
-            printk("haslo: zle haslo\n");
+            printk("passwd: wrong password\n");
             return;
         }
     }
-    printk("nowe haslo: ");
+    printk("new password: ");
     read_secret(pass, sizeof(pass));
     if (!pass[0]) {
-        printk("haslo: puste haslo to brak hasla - nie zmieniam\n");
+        printk("passwd: an empty password is no password - not changing it\n");
         return;
     }
-    printk("powtorz: ");
+    printk("again: ");
     read_secret(again, sizeof(again));
     if (strcmp(pass, again)) {
-        printk("haslo: te dwa nie sa takie same - nie zmieniam\n");
+        printk("passwd: those two are not the same - not changing it\n");
         return;
     }
     if (user_set_password(pass) < 0) {
-        printk("haslo: nie udalo sie zapisac (brak dysku?)\n");
+        printk("passwd: could not save it (no disk?)\n");
         return;
     }
-    printk("haslo zmienione\n");
+    printk("password changed\n");
 }
 
 static void run_command(char *cmd)
@@ -983,13 +983,13 @@ static void run_command(char *cmd)
 
     if (!strcmp(cmd, "help"))
         cmd_help();
-    else if (!strcmp(cmd, "kim"))
+    else if (!strcmp(cmd, "whoami"))
         cmd_whoami();
     else if (!strcmp(cmd, "sudo"))
         cmd_sudo(arg);
-    else if (!strcmp(cmd, "wyloguj"))
+    else if (!strcmp(cmd, "logout"))
         cmd_logout();
-    else if (!strcmp(cmd, "haslo"))
+    else if (!strcmp(cmd, "passwd"))
         cmd_password();
     else if (!strcmp(cmd, "ps"))
         task_dump();
@@ -999,7 +999,7 @@ static void run_command(char *cmd)
         if (*arg)
             exec_spawn(arg);
         else
-            printk("uzycie: run <plik> (lista: 'ls')\n");
+            printk("usage: run <file> (list: 'ls')\n");
     }
     /* The same, but the program may run on any core. Its kernel side
        runs under the big lock anyway - what goes in parallel is the
@@ -1008,8 +1008,8 @@ static void run_command(char *cmd)
         if (*arg)
             exec_spawn_anycore(arg);
         else
-            printk("uzycie: runw <plik> (jak 'run', ale na kazdym "
-                   "rdzeniu)\n");
+            printk("usage: runw <file> (like 'run', but on every "
+                   "core)\n");
     }
     else if (!strcmp(cmd, "fls"))
         fs_list();
@@ -1017,7 +1017,7 @@ static void run_command(char *cmd)
         if (*arg)
             cmd_cat(arg);
         else
-            printk("uzycie: cat <plik>\n");
+            printk("usage: cat <file>\n");
     }
     else if (!strcmp(cmd, "df"))
         cmd_df();
@@ -1037,19 +1037,19 @@ static void run_command(char *cmd)
         smpthreads_test();
     else if (!strcmp(cmd, "mem"))
         cmd_mem();
-    else if (!strcmp(cmd, "ekran"))
+    else if (!strcmp(cmd, "screen"))
         cmd_ekran();
-    else if (!strcmp(cmd, "glosnosc"))
+    else if (!strcmp(cmd, "volume"))
         hwinfo_volume(arg);
     else if (!strcmp(cmd, "beep"))
         cmd_beep(arg);
-    else if (!strcmp(cmd, "sprzet"))
+    else if (!strcmp(cmd, "hardware"))
         hwinfo_print();
-    else if (!strcmp(cmd, "dyski"))
+    else if (!strcmp(cmd, "disks"))
         hwinfo_disks();
-    else if (!strcmp(cmd, "formatuj"))
+    else if (!strcmp(cmd, "format"))
         cmd_formatuj(arg);
-    else if (!strcmp(cmd, "instaluj"))
+    else if (!strcmp(cmd, "install"))
         cmd_install(arg);
     else if (!strcmp(cmd, "fat"))
         fatcmd_mount(arg);
@@ -1098,17 +1098,17 @@ static void run_command(char *cmd)
     else if (!strcmp(cmd, "crash"))
         *(volatile uint32_t *)0xE0000000 = 1;  /* outside the mapping -> #PF */
     else if (!strcmp(cmd, "reboot")) {
-        printk("Restart...\n");
+        printk("Restarting...\n");
         if (!acpi_reboot())
             outb(0x64, 0xFE);  /* fallback: a pulse through the keyboard controller */
     }
     else if (!strcmp(cmd, "poweroff")) {
-        printk("Wylaczanie zasilania...\n");
+        printk("Powering off...\n");
         acpi_poweroff();
-        printk("poweroff: nie udalo sie - mozna wylaczyc zasilanie recznie\n");
+        printk("poweroff: it did not work - the power can be cut by hand\n");
     }
     else
-        printk("nieznana komenda: '%s' (wpisz 'help')\n", cmd);
+        printk("unknown command: '%s' (type 'help')\n", cmd);
 }
 
 static void shell_handle_char(struct shell *sh, char c)
@@ -1203,7 +1203,7 @@ static void shell_thread(void *arg)
        the startup messages and the prompt settle in a predictable
        order. The others greet themselves. */
     if (vc) {
-        printk("ProtonOS - konsola %d. Alt+F1..F4 przelacza.\n", vc + 1);
+        printk("ProtonOS - console %d. Alt+F1..F4 switches.\n", vc + 1);
         prompt();
     }
 
@@ -1216,7 +1216,7 @@ void shell_init(void)
     for (int vc = 0; vc < CONSOLE_COUNT; vc++)
         keyboard_set_handler(vc, shell_on_char);
 
-    printk("\nProtonOS shell - wpisz 'help', by zobaczyc komendy.\n");
+    printk("\nProtonOS shell - type 'help' to see the commands.\n");
     prompt();
 
     for (int vc = 0; vc < CONSOLE_COUNT; vc++)

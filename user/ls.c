@@ -25,6 +25,6 @@ void _start(void)
         found++;
     }
     if (!found)
-        print("(pusto)\n");
+        print("(empty)\n");
     sys_exit(0);
 }

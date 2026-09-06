@@ -148,7 +148,7 @@ int dhcp_configure(void)
 
     int sock = net_udp_open(DHCP_CLIENT_PORT, -1);
     if (sock < 0) {
-        printk("[siec] DHCP: brak wolnego gniazda\n");
+        printk("[net] DHCP: no free socket\n");
         return 0;
     }
 
@@ -222,9 +222,9 @@ int dhcp_configure(void)
         net_udp_close(sock, -1);
         net_set_config(ip, mask, gw, dns);
 
-        printk("[siec] DHCP: przyznano ");
+        printk("[net] DHCP: granted ");
         net_print_ip(ip);
-        printk(", brama ");
+        printk(", gateway ");
         net_print_ip(gw);
         printk(", DNS ");
         net_print_ip(dns);
@@ -241,7 +241,7 @@ static void dhcp_thread(void *arg)
     (void)arg;
     if (!dhcp_configure()) {
         net_use_fallback();
-        printk("[siec] DHCP: brak odpowiedzi, uzywam adresu awaryjnego ");
+        printk("[net] DHCP: no answer, using the fallback address ");
         net_print_ip(net_ip());
         printk("\n");
     }

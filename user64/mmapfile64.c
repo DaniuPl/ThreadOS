@@ -42,16 +42,16 @@ static void report(const char *a, uint64_t v, const char *b)
 
 void _start(int argc, char **argv)
 {
-    const char *name = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "map.txt";
 
     uint64_t size = 0;
     const unsigned char *p = sys_mmap_file(name, &size);
     if (!p) {
-        print("[mmapfile64] nie da sie odwzorowac pliku\n");
+        print("[mmapfile64] the file cannot be mapped\n");
         sys_exit(1);
     }
-    report("[mmapfile64] plik pod adresem ", (uint64_t)(uintptr_t)p, "");
-    report("[mmapfile64] rozmiar ", size, " B");
+    report("[mmapfile64] the file at address ", (uint64_t)(uintptr_t)p, "");
+    report("[mmapfile64] size ", size, " B");
 
     /* How many bytes to check. The whole file by default - but with an
        explicitly given number we touch only that many, and then it can
@@ -72,13 +72,13 @@ void _start(int argc, char **argv)
             bad++;
 
     if (bad) {
-        report("[mmapfile64] ZLE: bajtow nie tak, jak trzeba: ", bad, "");
+        report("[mmapfile64] WRONG: the bytes are not as they should be: ", bad, "");
         sys_exit(1);
     }
-    report("[mmapfile64] sprawdzone bajty zgadzaja sie, bylo ich ",
+    report("[mmapfile64] the checked bytes match, and there were ",
             ile, "");
     if (ile != size) {
-        print("[mmapfile64] reszty pliku nie tknalem\n");
+        print("[mmapfile64] I never touched the rest of the file\n");
         sys_exit(0);
     }
 
@@ -88,19 +88,19 @@ void _start(int argc, char **argv)
     if (pid == 0) {
         unsigned char *corrupt = (unsigned char *)p;
         corrupt[0] = 0xFF;                  /* the process is to die here */
-        print("[mmapfile64] ZLE: zapis do odwzorowania sie udal\n");
+        print("[mmapfile64] WRONG: writing to the mapping worked\n");
         sys_exit(1);
     }
     if (pid > 0) {
         int code = 0;
         sys_wait(&code);
         if (p[0] != (unsigned char)13) {
-            print("[mmapfile64] ZLE: tresc pliku zostala zmieniona\n");
+            print("[mmapfile64] WRONG: the file's content was changed\n");
             sys_exit(1);
         }
-        print("[mmapfile64] zapis do odwzorowania odrzucony\n");
+        print("[mmapfile64] writing to the mapping was refused\n");
     }
 
-    print("[mmapfile64] plik czytany jak pamiec, bez ani jednego read\n");
+    print("[mmapfile64] the file read like memory, without a single read\n");
     sys_exit(0);
 }

@@ -887,7 +887,7 @@ void task_core_enter(int nr)
     if (!t)
         return;
     t->id = -nr;                 /* a negative number: this is not a process */
-    task_set_name(t, "bezczynny");
+    task_set_name(t, "idle");
     t->name[9] = (char)('0' + nr);
     t->name[10] = '\0';
     t->state = TASK_RUNNING;
@@ -1178,7 +1178,7 @@ int task_find_name(const char *name)
 void task_kill_pending(void)
 {
     if (current->killed) {
-        printk("[jadro] proces '%s' (pid %d) zabity (kod -9)\n",
+        printk("[kernel] process '%s' (pid %d) killed (code -9)\n",
                current->name, current->id);
         task_exit(-9);
     }
@@ -1395,7 +1395,7 @@ void task_set_priority(int prio)
 
 const char *task_current_name(void)
 {
-    return current ? current->name : "(brak)";
+    return current ? current->name : "(none)";
 }
 
 /* How many tasks there are. The desktop asks once a second, for a
@@ -1462,11 +1462,11 @@ int task_ps(int index, struct psinfo *out)
 
 void task_dump(void)
 {
-    static const char *state_names[] = { "gotowy", "dziala", "spi",
-                                         "czeka", "zombie" };
+    static const char *state_names[] = { "ready", "running", "spi",
+                                         "waiting", "zombie" };
 
     irqflags_t flags = spin_lock_irq(&lock);
-    printk("  ID  RODZIC  STAN    NAZWA\n");
+    printk("  ID  PARENT  STATE   NAME\n");
     struct task *t = current;
     do {
         printk("  %d   ", t->id);
@@ -1479,7 +1479,7 @@ void task_dump(void)
             printk(" ");
         /* An asterisk: a task that any core may run */
         printk("%s%s%s\n", t->name, t->anycore ? " *" : "",
-               t == current ? " (biezacy)" : "");
+               t == current ? " (current)" : "");
         t = t->next;
     } while (t != current);
     spin_unlock_irq(&lock, flags);

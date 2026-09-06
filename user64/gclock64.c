@@ -28,9 +28,9 @@ static void two_digits(char *d, int v)
 
 void _start(void)
 {
-    int w = (int)win_create(WINDOW_W, WINDOW_H, "Zegar");
+    int w = (int)win_create(WINDOW_W, WINDOW_H, "Clock");
     if (w < 0) {
-        print("gclock64: pulpit nie dal okna\n");
+        print("gclock64: the desktop gave no window\n");
         sys_exit(1);
     }
 

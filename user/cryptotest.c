@@ -41,9 +41,9 @@ static void check(const char *what, const uint8_t *got, const uint8_t *want,
         print(": OK\n");
         return;
     }
-    print(": BLAD\n  wyszlo:   ");
+    print(": FAILED\n  came out: ");
     print_hex(got, n);
-    print("\n  a mialo:  ");
+    print("\n  wanted:   ");
     print_hex(want, n);
     print("\n");
     failures++;
@@ -53,7 +53,7 @@ void _start(void)
 {
     uint8_t out[64];
 
-    print("[crypto] wektory testowe SHA-256 / HMAC / HKDF\n");
+    print("[crypto] test vectors: SHA-256 / HMAC / HKDF\n");
 
     /* SHA-256("abc") - FIPS 180-4 */
     static const uint8_t abc[] = {
@@ -77,7 +77,7 @@ void _start(void)
         0x60,0x39,0xa3,0x3c,0xe4,0x59,0x64,0xff,0x21,0x67,0xf6,0xec,0xed,0xd4,
         0x19,0xdb,0x06,0xc1 };
     sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56, out);
-    check("SHA-256 (dwa bloki)", out, twoblk, 32);
+    check("SHA-256 (two blocks)", out, twoblk, 32);
 
     /* HMAC-SHA256, case 1 from RFC 4231 */
     uint8_t key[20];
@@ -179,22 +179,22 @@ void _start(void)
     static uint8_t act[114], apt[114];
     uint8_t atag[16];
     aead_encrypt(akey, anonce, aad, 12, (const uint8_t *)plain, act, 114, atag);
-    check("AEAD ChaCha20-Poly1305: znacznik", atag, want_atag, 16);
+    check("AEAD ChaCha20-Poly1305: tag", atag, want_atag, 16);
 
     int ok = aead_decrypt(akey, anonce, aad, 12, act, apt, 114, atag);
     if (!ok || !equal(apt, (const uint8_t *)plain, 114)) {
-        print("AEAD odszyfrowanie: BLAD\n");
+        print("AEAD decryption: FAILED\n");
         failures++;
     } else {
-        print("AEAD odszyfrowanie: OK\n");
+        print("AEAD decryption: OK\n");
     }
 
     atag[0] ^= 1;                        /* a swapped tag has to fall apart */
     if (aead_decrypt(akey, anonce, aad, 12, act, apt, 114, atag)) {
-        print("AEAD wykrycie podmiany: BLAD (przeszlo mimo zmiany)\n");
+        print("AEAD noticing a change: FAILED (it passed after a change)\n");
         failures++;
     } else {
-        print("AEAD wykrycie podmiany: OK\n");
+        print("AEAD noticing a change: OK\n");
     }
 
     /* --- X25519 (RFC 7748 5.2) --- */
@@ -224,23 +224,23 @@ void _start(void)
     x25519_base(pub_b, priv_b);
     x25519(sh_a, priv_a, pub_b);
     x25519(sh_b, priv_b, pub_a);
-    check("X25519: obie strony licza ten sam sekret", sh_a, sh_b, 32);
+    check("X25519: both sides compute the same secret", sh_a, sh_b, 32);
 
     /* What one scalar multiplication costs - a TLS handshake needs two
        (the public key and the shared secret) */
     uint32_t t0 = sys_getticks();
     x25519_base(pub_a, priv_a);
     uint32_t t1 = sys_getticks();
-    print("X25519: jedno mnozenie skalarne ~");
+    print("X25519: one scalar multiplication ~");
     print_dec((t1 - t0) * 10);
     print(" ms\n");
 
     if (failures) {
-        print("[crypto] BLEDOW: ");
+        print("[crypto] FAILURES: ");
         print_dec((uint32_t)failures);
         print("\n");
         sys_exit(1);
     }
-    print("[crypto] wszystkie wektory zgadzaja sie\n");
+    print("[crypto] every vector matches\n");
     sys_exit(0);
 }

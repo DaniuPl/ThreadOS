@@ -29,13 +29,13 @@ void _start(void)
     int32_t t1 = sys_thread(worker_a, 0);
     int32_t t2 = sys_thread(worker_b, 0);
     if (t1 < 0 || t2 < 0) {
-        print("[threads] blad tworzenia watkow\n");
+        print("[threads] the threads could not be created\n");
         sys_exit(1);
     }
     sys_wait(t1);
     sys_wait(t2);
 
-    print("[threads] watki zapisaly, suma=");
+    print("[threads] the threads wrote, sum=");
     print_dec((uint32_t)(va + vb));   /* 33 = both threads saw the same memory */
     print("\n");
     sys_exit(0);

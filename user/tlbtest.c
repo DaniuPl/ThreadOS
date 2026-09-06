@@ -102,7 +102,7 @@ void _start(void)
     for (uint32_t i = 0; i < THREADS; i++) {
         tid[i] = sys_thread(worker, (void *)(uintptr_t)i);
         if (tid[i] < 0) {
-            print("[tlbtest] nie udalo sie utworzyc watku\n");
+            print("[tlbtest] the thread could not be created\n");
             sys_exit(1);
         }
     }
@@ -138,24 +138,24 @@ void _start(void)
             seen++;
         }
 
-    print("[tlbtest] watkow ");
+    print("[tlbtest] threads ");
     print_dec(THREADS);
-    print(", kawalkow ");
+    print(", chunks ");
     print_dec(seen);
     print(" po ");
     print_dec(CHUNK);
-    print(" stron, maska rdzeni ");
+    print(" pages, core mask ");
     print_dec(cores);
-    print("\n[tlbtest] bledow przy pisaniu ");
+    print("\n[tlbtest] errors while writing ");
     print_dec(bad);
-    print(", po wszystkim ");
+    print(", afterwards ");
     print_dec(late);
     print("\n");
 
     if (bad || late || seen != THREADS * ROUNDS) {
-        print("[tlbtest] ZLE: pamiec sie nie zgadza\n");
+        print("[tlbtest] WRONG: the memory does not match\n");
         sys_exit(2);
     }
-    print("[tlbtest] pamiec zgodna na wszystkich rdzeniach\n");
+    print("[tlbtest] the memory agrees on every core\n");
     sys_exit(0);
 }

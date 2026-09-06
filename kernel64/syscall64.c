@@ -61,7 +61,7 @@ struct core_syscall {
 };
 extern struct core_syscall syscall64_bloki[];
 _Static_assert(sizeof(struct core_syscall) == 16,
-               "stub liczy po szesnascie bajtow na rdzen");
+               "the stub counts sixteen bytes per core");
 
 static int user_ran;
 static uint32_t user_cs;
@@ -298,7 +298,7 @@ static void handle(struct regs *r)
                                         of billions of pages would tie
                                         the kernel up for good */
         if (!paging64_user_range(a2, a3)) {
-            printk("[jadro] write: wskaznik %x nie nalezy do programu\n",
+            printk("[kernel] write: the pointer %x does not belong to the program\n",
                    (uint32_t)a2);
             r->rax = (uint64_t)-1;
             return;
@@ -390,7 +390,7 @@ static void handle(struct regs *r)
         if (a3 > 4096)
             a3 = 4096;
         if (!paging64_user_range(a2, a3)) {
-            printk("[jadro] read: wskaznik %x nie nalezy do programu\n",
+            printk("[kernel] read: the pointer %x does not belong to the program\n",
                    (uint32_t)a2);
             r->rax = (uint64_t)-1;
             return;
@@ -727,8 +727,8 @@ static void handle(struct regs *r)
         return;
     case SYS64_SIGRETURN:
         if (signal64_return(r) < 0) {
-            printk("[jadro] sigreturn: ramka poza pamiecia programu\n");
-            task64_kill_current("zepsuty sigreturn");
+            printk("[kernel] sigreturn: the frame is outside the program's memory\n");
+            task64_kill_current("a broken sigreturn");
         }
         return;                      /* the frame already describes the interrupted spot */
     case SYS64_KILL:
@@ -1080,7 +1080,7 @@ static void handle(struct regs *r)
                                                      task64_current_id());
         return;
     default:
-        printk("[jadro] nieznane wywolanie systemowe %u\n", (uint32_t)nr);
+        printk("[kernel] unknown system call %u\n", (uint32_t)nr);
         r->rax = (uint64_t)-1;
         return;
     }

@@ -16,7 +16,7 @@
 void _start(int argc, char **argv)
 {
     if (argc < 3) {
-        print("uzycie: mv <zrodlo> <cel>\n");
+        print("usage: mv <source> <target>\n");
         sys_exit(1);
     }
 
@@ -26,14 +26,14 @@ void _start(int argc, char **argv)
 
     int src = sys_open(argv[1], O_READ);
     if (src < 0) {
-        print("mv: nie ma pliku '");
+        print("mv: there is no file '");
         print(argv[1]);
         print("'\n");
         sys_exit(1);
     }
     int dst = sys_open(argv[2], O_WRITE | O_CREATE | O_TRUNC);
     if (dst < 0) {
-        print("mv: nie moge utworzyc '");
+        print("mv: I cannot create '");
         print(argv[2]);
         print("'\n");
         sys_exit(1);

@@ -123,17 +123,17 @@ static uint64_t check_by_reading(const char *name)
 
 void _start(int argc, char **argv)
 {
-    const char *name = argc > 1 ? argv[1] : "zapis.txt";
+    const char *name = argc > 1 ? argv[1] : "written.txt";
     const char *mode = argc > 2 ? argv[2] : "write";
 
     if (equal(mode, "check")) {
         uint64_t bad = check_by_reading(name);
         if (bad) {
-            report("[mmapzap64] ZLE: zwykly odczyt widzi inne bajty: ",
+            report("[mmapzap64] WRONG: an ordinary read sees other bytes: ",
                     bad, "");
             sys_exit(1);
         }
-        print("[mmapzap64] zwykly odczyt widzi to, co wpisala pamiec\n");
+        print("[mmapzap64] an ordinary read sees what the memory wrote\n");
         sys_exit(0);
     }
 
@@ -141,25 +141,25 @@ void _start(int argc, char **argv)
         int a = read_byte(name, 0);
         int b = read_byte(name, OFF_B);
         if (a != CH_A || b != CH_B) {
-            print("[mmapzap64] ZLE: bajty bez msync nie doszly na dysk\n");
+            print("[mmapzap64] WRONG: bytes without msync never reached the disk\n");
             sys_exit(1);
         }
-        print("[mmapzap64] bajty bez msync doszly na dysk"
-              " przy koncu procesu\n");
+        print("[mmapzap64] bytes without msync reached the disk"
+              " as the process ended\n");
         sys_exit(0);
     }
 
     uint64_t size = 0;
     unsigned char *p = sys_mmap_file_w(name, &size);
     if (!p || !size) {
-        print("[mmapzap64] nie da sie odwzorowac pliku do zapisu\n");
+        print("[mmapzap64] the file cannot be mapped for writing\n");
         sys_exit(1);
     }
 
     if (equal(mode, "nosync")) {
         p[0] = CH_A;
         p[OFF_B] = CH_B;
-        print("[mmapzap64] dwa bajty wpisane, koncze bez msync\n");
+        print("[mmapzap64] two bytes written, ending with no msync\n");
         sys_exit(0);
     }
 
@@ -170,24 +170,24 @@ void _start(int argc, char **argv)
             sys_exit(0);
         }
         if (pid < 0) {
-            print("[mmapzap64] ZLE: fork sie nie udal\n");
+            print("[mmapzap64] WRONG: the fork did not work\n");
             sys_exit(1);
         }
         int code = 0;
         sys_wait(&code);
         if (p[OFF_CHILD] != CH_B) {
-            print("[mmapzap64] ZLE: rodzic nie widzi zapisu dziecka\n");
+            print("[mmapzap64] WRONG: the parent does not see the child's write\n");
             sys_exit(1);
         }
-        print("[mmapzap64] rodzic widzi zapis dziecka"
-              " - odwzorowanie wspolne\n");
+        print("[mmapzap64] the parent sees the child's write"
+              " - the mapping is shared\n");
         sys_exit(0);
     }
 
     /* Mode 'write': we read the whole file but write only over the two
        first pages - and that is what the flushed count is to show */
     if (size <= CHANGED) {
-        print("[mmapzap64] ZLE: plik za maly na ten test\n");
+        print("[mmapzap64] WRONG: the file is too small for this test\n");
         sys_exit(1);
     }
     uint64_t bad = 0;
@@ -195,26 +195,26 @@ void _start(int argc, char **argv)
         if (p[i] != old(i))
             bad++;
     if (bad) {
-        report("[mmapzap64] ZLE: stary wzorzec sie nie zgadza: ", bad, "");
+        report("[mmapzap64] WRONG: the old pattern does not match: ", bad, "");
         sys_exit(1);
     }
-    report("[mmapzap64] stary wzorzec przeczytany, bajtow ", size, "");
+    report("[mmapzap64] the old pattern was read, bytes ", size, "");
 
     for (uint64_t i = 0; i < CHANGED; i++)
         p[i] = fresh_one(i);
 
     int64_t sent_back = sys_msync();
-    report("[mmapzap64] odeslanych stron: ", (uint64_t)sent_back, "");
+    report("[mmapzap64] pages sent back: ", (uint64_t)sent_back, "");
 
     int64_t drugie = sys_msync();
-    report("[mmapzap64] drugie msync odeslalo: ", (uint64_t)drugie, "");
+    report("[mmapzap64] the second msync sent back: ", (uint64_t)drugie, "");
 
     /* Memory is still to show what we wrote - flushing to disk does not
        touch anything in it */
     if (p[0] != fresh_one(0) || p[CHANGED - 1] != fresh_one(CHANGED - 1)) {
-        print("[mmapzap64] ZLE: pamiec zgubila zapisane bajty\n");
+        print("[mmapzap64] WRONG: the memory lost the written bytes\n");
         sys_exit(1);
     }
-    print("[mmapzap64] zapis przez pamiec gotowy\n");
+    print("[mmapzap64] writing through memory is done\n");
     sys_exit(0);
 }

@@ -23,7 +23,7 @@ static void pad2(char *d, int v)
 
 void _start(void)
 {
-    int w = win_create(80, 20, "Zegar");
+    int w = win_create(80, 20, "Clock");
     if (w < 0)
         sys_exit(1);
 

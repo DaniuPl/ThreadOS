@@ -10,10 +10,10 @@ void _start(void)
 {
     volatile uint32_t *p = (volatile uint32_t *)sys_shm(42, 4096);
     if (!p) {
-        print("[shmread] brak pamieci wspoldzielonej\n");
+        print("[shmread] there is no shared memory\n");
         sys_exit(1);
     }
-    print("[shmread] wartosc=");
+    print("[shmread] value=");
     print_dec(p[0]);
     print("\n");
     sys_exit(0);

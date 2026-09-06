@@ -107,7 +107,7 @@ static void ring3_thread(void *arg)
     uint32_t code = pmm_alloc_frame();
     uint32_t stack = pmm_alloc_frame();
     if (!code || !stack) {
-        printk("[ !! ] Ring 3: brak pamieci\n");
+        printk("[ !! ] Ring 3: no memory\n");
         task64_exit();
     }
 
@@ -118,7 +118,7 @@ static void ring3_thread(void *arg)
        ring 3 sees both, but neither is written and executed at once */
     if (paging64_map(USER_CODE_VA, code, PG_USER) < 0 ||
         paging64_map(USER_STACK_VA, stack, PG_USER | PG_WRITE | PG_NX) < 0) {
-        printk("[ !! ] Ring 3: nie da sie zmapowac programu\n");
+        printk("[ !! ] Ring 3: the program cannot be mapped\n");
         task64_exit();
     }
 
@@ -189,11 +189,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     printk("ProtonOS 64\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    printk("Jadro uruchomione w trybie dlugim (x86-64).\n\n");
+    printk("The kernel is running in long mode (x86-64).\n\n");
 
     if (!mbi) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        printk("BLAD: nieznany magic od bootloadera (%x)!\n", magic);
+        printk("ERROR: unknown magic from the boot loader (%x)!\n", magic);
         for (;;)
             __asm__ volatile("cli; hlt");
     }
@@ -202,21 +202,21 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     vga_set_color(VGA_LIGHT_GREEN, VGA_BLACK);
     printk("[ OK ] ");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    printk("Tryb dlugi: LMA=%u, wskaznik ma %u bajtow\n",
+    printk("Long mode: LMA=%u, a pointer is %u bytes\n",
            (uint32_t)long_mode_active(), (uint32_t)sizeof(void *));
 
     if (mbi->flags & MULTIBOOT_FLAG_MODS)
-        printk("[ OK ] Moduly od loadera: %u\n", mbi->mods_count);
+        printk("[ OK ] Modules from the loader: %u\n", mbi->mods_count);
 
     if (fbcon_have())
-        printk("[ OK ] Bufor obrazu: %ux%u, %u bitow na piksel\n",
+        printk("[ OK ] Framebuffer: %ux%u, %u bits per pixel\n",
                (uint32_t)fbcon_width(), (uint32_t)fbcon_height(),
                (uint32_t)fbcon_bpp());
     else if (lfb)
-        printk("[ !! ] Bufor obrazu %ux%u ma %u bitow na piksel - "
-               "umiemy 24 i 32\n", lfb->width, lfb->height, lfb->bpp);
+        printk("[ !! ] The %ux%u framebuffer has %u bits per pixel - "
+               "we can read 24 and 32\n", lfb->width, lfb->height, lfb->bpp);
     else
-        printk("[ !! ] Loader nie dal bufora obrazu - tylko port szeregowy\n");
+        printk("[ !! ] The loader gave no framebuffer - the serial port only\n");
 
     /* Under UEFI there is no BIOS memory to search - the pointer to the
        ACPI tables is then supplied by the loader alone. The tables
@@ -229,7 +229,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Memory ------------------------------------------------- */
     pmm_init(mbi);
-    printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
+    printk("[ OK ] Physical memory: %u KiB RAM, %u free 4 KiB frames\n",
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     /* The framebuffer lies high up, outside the memory described at
@@ -240,17 +240,17 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     if (paging64_init() < 0) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        printk("BLAD: nie udalo sie zbudowac tablic stron\n");
+        printk("ERROR: the page tables could not be built\n");
         for (;;)
             __asm__ volatile("cli; hlt");
     }
     /* From now on every change of a mapping can be told to the other
        cores - and to do that they have to know what each is running */
     tlb_switch(paging64_kernel_space());
-    printk("[ OK ] Stronicowanie czteropoziomowe: %u MiB, zakaz "
-           "wykonywania %s\n",
+    printk("[ OK ] Four-level paging: %u MiB, execute-disable "
+           "%s\n",
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
-           paging64_nx_enabled() ? "wlaczony" : "wylaczony");
+           paging64_nx_enabled() ? "on" : "off");
 
     /* Fine-grained mapping: a frame placed high up, far beyond the area
        described one to one. Writing and reading through that address
@@ -261,11 +261,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         volatile uint64_t *p = (volatile uint64_t *)(uintptr_t)high;
         *p = 0x0123456789ABCDEFULL;
         uint64_t phys = paging64_lookup(high);
-        printk("[ OK ] Mapowanie 4 KiB pod 8 GiB: odczyt %x%x, "
-               "adres fizyczny %x\n",
+        printk("[ OK ] A 4 KiB mapping at 8 GiB: read %x%x, "
+               "physical address %x\n",
                (uint32_t)(*p >> 32), (uint32_t)*p, (uint32_t)phys);
     } else {
-        printk("[ !! ] Mapowanie 4 KiB nie powiodlo sie\n");
+        printk("[ !! ] The 4 KiB mapping did not work\n");
     }
 
     heap_init();
@@ -285,22 +285,22 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     uint32_t used = heap_used_bytes();
     kfree(a);
     kfree(b);
-    printk("[ OK ] Sterta jadra: %s (szczyt %u B, po zwolnieniu %u B)\n",
-           heap_ok ? "kmalloc/kfree dzialaja" : "BLAD", used,
+    printk("[ OK ] Kernel heap: %s (peak %u B, after freeing %u B)\n",
+           heap_ok ? "kmalloc/kfree work" : "ERROR", used,
            heap_used_bytes());
 
     /* --- Interrupts --------------------------------------------- */
     idt64_init();
-    printk("[ OK ] IDT zaladowana (wyjatki 0-31, IRQ 32-47)\n");
+    printk("[ OK ] IDT loaded (exceptions 0-31, IRQ 32-47)\n");
 
     pic_init();
-    printk("[ OK ] PIC przemapowany (IRQ -> wektory 32-47)\n");
+    printk("[ OK ] PIC remapped (IRQ -> vectors 32-47)\n");
 
     pit_init(100);
     printk("[ OK ] Timer PIT: 100 Hz\n");
 
     __asm__ volatile("sti");
-    printk("[ OK ] Przerwania wlaczone (sti)\n");
+    printk("[ OK ] Interrupts enabled (sti)\n");
 
     /* A trap exception: it exercises the whole path - stub, tables,
        register frame and the return through iretq - without stopping
@@ -313,36 +313,36 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     uint32_t start = pit_ticks();
     for (int i = 0; i < 200; i++)
         __asm__ volatile("hlt");
-    printk("[ OK ] Timer tyka: %u -> %u tyknac\n", start, pit_ticks());
+    printk("[ OK ] The timer ticks: %u -> %u ticks\n", start, pit_ticks());
 
     /* --- Threads ------------------------------------------------ */
     /* SSE has to be enabled BEFORE the scheduler: the first task gets
        room for the register state right away, and its pattern comes
        from a freshly initialized unit */
     if (fpu64_init())
-        printk("[ OK ] Jednostka zmiennoprzecinkowa i SSE wlaczone\n");
+        printk("[ OK ] The floating point unit and SSE are on\n");
 
     scheduler64_init();
-    task64_create("licz-A", count_a, 0);
-    task64_create("licz-B", count_b, 0);
-    task64_create("krotki", mortal, 0);
-    printk("[ OK ] Scheduler: %d zadania na liscie\n", task64_count());
+    task64_create("count-A", count_a, 0);
+    task64_create("count-B", count_b, 0);
+    task64_create("short", mortal, 0);
+    printk("[ OK ] Scheduler: %d tasks on the list\n", task64_count());
 
     /* The main thread goes to sleep; the processor has to move on to the
        others meanwhile. If context switching were broken, the counters
        would stay at zero or the system would hang. */
     task64_sleep(600);
-    printk("[ OK ] Watki licza rownolegle: A=%u, B=%u\n",
+    printk("[ OK ] Threads counting side by side: A=%u, B=%u\n",
            counter_a, counter_b);
-    printk("[ OK ] Watek konczacy sie: %s, zadan na liscie: %d\n",
-           mortal_done ? "zrobil swoje" : "nie zdazyl", task64_count());
+    printk("[ OK ] A thread that ends: %s, tasks on the list: %d\n",
+           mortal_done ? "did its work" : "did not make it", task64_count());
 
     /* --- Ring 3 -------------------------------------------------- */
     gdt64_init();
-    printk("[ OK ] GDT z segmentami ring 3 i zadaniem TSS\n");
+    printk("[ OK ] A GDT with ring 3 segments and a TSS\n");
 
     syscall64_init();
-    printk("[ OK ] Wywolania systemowe przez instrukcje syscall\n");
+    printk("[ OK ] System calls through the syscall instruction\n");
 
     task64_create("ring3", ring3_thread, 0);
     task64_sleep(200);
@@ -350,21 +350,21 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     /* Only the processor knows the code selector - the two lowest bits
        say which ring the program really ran in */
     uint32_t cs = syscall64_user_cs();
-    printk("[ OK ] Program w ring 3: %s, cs=%x, pierscien %u\n",
-           syscall64_user_ran() ? "odezwal sie" : "MILCZY", cs, cs & 3);
+    printk("[ OK ] A program in ring 3: %s, cs=%x, ring %u\n",
+           syscall64_user_ran() ? "answered" : "SILENT", cs, cs & 3);
 
     /* --- Programs from the initrd ------------------------------- */
     initrd_init(mbi);
     if (!initrd_file_count())
-        printk("[ !! ] initrd: brak programow - nie ma czego uruchomic\n");
+        printk("[ !! ] initrd: no programs - there is nothing to run\n");
     else
-        printk("[ OK ] initrd: %u plik(ow) od loadera\n",
+        printk("[ OK ] initrd: %u file(s) from the loader\n",
                initrd_file_count());
 
     /* The shared library has to be ready before the first program
        starts - its frames are common to all processes */
     if (dyn_init())
-        printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
+        printk("[ OK ] Library %s: %u pages shared between processes\n",
                dyn_name(), dyn_pages());
 
     if (initrd_file_count()) {
@@ -373,7 +373,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        the kernel image */
     if (run_program("hello64")) {
         cs = syscall64_user_cs();
-        printk("[ OK ] ELF64 z initrd: pierscien %u, kod wyjscia %u\n",
+        printk("[ OK ] ELF64 from the initrd: ring %u, exit code %u\n",
                cs & 3, (uint32_t)syscall64_user_status());
     }
 
@@ -383,24 +383,24 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        guilty one instead of stopping the system - so this can be
        checked and survived. */
     if (run_program("nx64"))
-        printk("[ %s ] Zakaz wykonywania: %s (err=%x, adres=%x)\n",
+        printk("[ %s ] Execute-disable: %s (err=%x, address=%x)\n",
                isr64_user_fault() ? "OK" : "!!",
-               isr64_user_fault() ? "procesor odmowil wykonania danych"
-                                  : "PROGRAM WYKONAL SWOJE DANE",
+               isr64_user_fault() ? "the processor refused to execute data"
+                                  : "THE PROGRAM EXECUTED ITS OWN DATA",
                isr64_user_fault_err(), (uint32_t)isr64_user_fault_addr());
 
     if (run_program("wild64"))
-        printk("[ %s ] Pamiec jadra: %s (err=%x, adres=%x)\n",
+        printk("[ %s ] Kernel memory: %s (err=%x, address=%x)\n",
                isr64_user_fault() ? "OK" : "!!",
-               isr64_user_fault() ? "niedostepna dla pierscienia 3"
-                                  : "PROGRAM JA PRZECZYTAL",
+               isr64_user_fault() ? "out of reach of ring 3"
+                                  : "THE PROGRAM READ IT",
                isr64_user_fault_err(), (uint32_t)isr64_user_fault_addr());
 
     /* The most important proof: after those two deaths the system keeps
        running */
     uint32_t a_before = counter_a;
     task64_sleep(200);
-    printk("[ %s ] System przezyl smierc programow (licznik %u -> %u)\n",
+    printk("[ %s ] The system survived the programs dying (counter %u -> %u)\n",
            counter_a > a_before ? "OK" : "!!", a_before, counter_a);
 
     /* --- Two processes at once, each in its own space ------------ */
@@ -424,14 +424,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     int exits = syscall64_user_exits();
     int fails = syscall64_user_failures();
-    printk("[ %s ] Dwa procesy naraz: %u zakonczonych, %u bledow\n",
+    printk("[ %s ] Two processes at once: %u finished, %u errors\n",
            (exits == 2 && fails == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)fails);
 
     /* The spaces have to disappear along with the processes - otherwise
        every program that ran would take memory away forever */
     uint32_t frames_after = pmm_used_frames();
-    printk("[ %s ] Pamiec po procesach oddana (%u -> %u ramek)\n",
+    printk("[ %s ] The processes' memory came back (%u -> %u frames)\n",
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
 
@@ -449,11 +449,11 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     exits = syscall64_user_exits();
     fails = syscall64_user_failures();
-    printk("[ %s ] Proces powielil sie sam: %u zakonczonych, %u bledow\n",
+    printk("[ %s ] A process copied itself: %u finished, %u errors\n",
            (exits == 2 && fails == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)fails);
     frames_after = pmm_used_frames();
-    printk("[ %s ] Pamiec po fork-u oddana (%u -> %u ramek)\n",
+    printk("[ %s ] The fork's memory came back (%u -> %u frames)\n",
            frames_after <= frames_before ? "OK" : "!!",
            frames_before, frames_after);
 
@@ -473,7 +473,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        itself - its exit code is the last one. */
     exits = syscall64_user_exits();
     int verdict = syscall64_user_status();
-    printk("[ %s ] fork + exec + wait: %u zakonczonych, werdykt %u\n",
+    printk("[ %s ] fork + exec + wait: %u finished, verdict %u\n",
            (exits == 2 && verdict == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)verdict);
 
@@ -492,8 +492,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     exits = syscall64_user_exits();
     fails = syscall64_user_failures();
-    printk("[ %s ] Stan SSE przetrwal przelaczanie: %u policzylo, "
-           "%u pomylek\n",
+    printk("[ %s ] The SSE state survived switching: %u counted, "
+           "%u mistakes\n",
            (exits == 2 && fails == 0) ? "OK" : "!!",
            (uint32_t)exits, (uint32_t)fails);
 
@@ -501,8 +501,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        those pages somebody actually wrote to */
     uint32_t splits = paging64_cow_splits();
     uint32_t cost = proc64_last_fork_cost();
-    printk("[ %s ] Kopiowanie przy zapisie: fork wzial %u ramek, "
-           "rozdzielono %u stron\n",
+    printk("[ %s ] Copy on write: the fork took %u frames, "
+           "%u pages were split\n",
            (splits > 0 && splits < 16 && cost < 8) ? "OK" : "!!",
            cost, splits);
     }
@@ -516,10 +516,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        thing that does is adding tables to the mapping, and that is all
        this file shows about the mode. */
     if (acpi_init())
-        printk("[ OK ] ACPI: tablice od '%s' (polecenia 'poweroff', "
+        printk("[ OK ] ACPI: tables from '%s' (the 'poweroff', "
                "'reboot')\n", acpi_oem());
     else
-        printk("[ !! ] ACPI: brak tablic - komputera nie wylaczymy\n");
+        printk("[ !! ] ACPI: no tables - we cannot switch the machine off\n");
 
     /* --- Disk --------------------------------------------------- */
     /* PCI, ATA, AHCI and the block layer are the same files as in the
@@ -532,14 +532,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            seen through the block layer looks the same regardless of the
            processor mode. */
         int fs = fs_init();
-        printk("[ OK ] Dysk %s + PFS %s (%u sektorow)\n",
-               blk_name(), fs ? "gotowy" : "NIEDOSTEPNY", blk_sectors());
+        printk("[ OK ] Disk %s + PFS %s (%u sectors)\n",
+               blk_name(), fs ? "ready" : "OUT OF REACH", blk_sectors());
 
         /* What the machine remembers about itself. Right after the file
            system, because that is where it is written. */
         config_load();
-        printk("[ OK ] Ustawienia: %s (%d pozycji, komenda 'set')\n",
-               config_get("nazwa"), config_count());
+        printk("[ OK ] Settings: %s (%d entries, the 'set' command)\n",
+               config_get("name"), config_count());
         /* Page swapping: the space is reserved through the file system, but
            the pages themselves travel there straight through the block
            layer. It has to come after fs_init, because without a file
@@ -547,7 +547,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         if (fs)
             swap_init();
     } else {
-        printk("[ !! ] Dysk: zaden kontroler nie odpowiedzial\n");
+        printk("[ !! ] Disk: no controller answered\n");
     }
 
     /* --- Network ------------------------------------------------ */
@@ -559,10 +559,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     int net = net_init();
     if (net) {
         const uint8_t *m = netdev_mac();
-        printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x\n", netdev_name(),
+        printk("[ OK ] Network: %s %x:%x:%x:%x:%x:%x\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
     } else {
-        printk("[ !! ] Siec: nie znalazlem karty sieciowej\n");
+        printk("[ !! ] Network: I found no network card\n");
     }
 
     /* --- The remaining processors ------------------------------- */
@@ -575,18 +575,18 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        of those yet. */
     int ncores = smp_init();
     if (ncores > 1)
-        printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
+        printk("[ OK ] Processors: %d (woken %d, waiting for work)\n",
                ncores, smp_started());
     else
-        printk("[ OK ] Procesory: 1\n");
+        printk("[ OK ] Processors: 1\n");
 
     /* --- Keyboard input ----------------------------------------- */
     keyboard64_init();
     if (mouse_init())
-        printk("[ OK ] Klawiatura PS/2 (IRQ 1) i mysz (IRQ 12), kolko: %s\n",
-               mouse_has_wheel() ? "tak" : "nie");
+        printk("[ OK ] PS/2 keyboard (IRQ 1) and mouse (IRQ 12), wheel: %s\n",
+               mouse_has_wheel() ? "yes" : "no");
     else
-        printk("[ OK ] Klawiatura PS/2 (IRQ 1); myszy PS/2 brak\n");
+        printk("[ OK ] PS/2 keyboard (IRQ 1); no PS/2 mouse\n");
 
     /* Machines newer than roughly 2010 no longer have a PS/2 connector.
        The USB driver and the HID class are again the same files as in
@@ -605,9 +605,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        noise should say so at startup, not the first time somebody
        asks for one. */
     if (hda_init())
-        printk("[ OK ] Dzwiek: Intel HDA, %s\n", hda_name());
+        printk("[ OK ] Sound: Intel HDA, %s\n", hda_name());
     else
-        printk("[ -- ] Dzwiek: %s\n", hda_name());
+        printk("[ -- ] Sound: %s\n", hda_name());
 
     /* The IP address comes from the network, and the DHCP client waits
        for the server's replies - so it has to run in a thread, that is,
@@ -617,7 +617,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         tcp_init();
     }
 
-    printk("\nSystem 64-bitowy gotowy - wpisz 'help'.\n");
+    printk("\nThe 64-bit system is ready - type 'help'.\n");
     shell64_start();
 
     /* From this moment on the main thread becomes the idle thread - the

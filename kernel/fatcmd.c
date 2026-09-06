@@ -29,12 +29,12 @@ static int pick(const char *arg, uint32_t *lba)
 
     int np = part_scan();
     if (np <= 0) {
-        printk("fat: na dysku nie ma tablicy partycji\n");
+        printk("fat: the disk has no partition table\n");
         return -1;
     }
     if (which > 0) {
         if (!part_get(which - 1, &pt)) {
-            printk("fat: nie ma partycji %u\n", (uint32_t)which);
+            printk("fat: there is no partition %u\n", (uint32_t)which);
             return -1;
         }
         *lba = (uint32_t)pt.start;
@@ -48,7 +48,7 @@ static int pick(const char *arg, uint32_t *lba)
             return i + 1;
         }
     }
-    printk("fat: nie znalazlem partycji EFI - podaj numer, np. 'fat 1'\n");
+    printk("fat: I found no EFI partition - give a number, e.g. 'fat 1'\n");
     return -1;
 }
 
@@ -56,11 +56,11 @@ static int need(void)
 {
     if (fat_mounted())
         return 1;
-    printk("nic nie jest podmontowane - najpierw 'fat'\n");
+    printk("nothing is mounted - 'fat' first\n");
     return 0;
 }
 
-/* "fat <partycja> [dysk]" - and the second number is what makes a
+/* "fat <partition> [disk]" - and the second number is what makes a
    stick usable: the partition table and the filesystem are read from
    THAT disk, while everything else in the system goes on using the one
    it was using. Without it, looking at a pendrive would mean pointing
@@ -85,8 +85,8 @@ void fatcmd_mount(const char *arg)
                 n = n * 10 + (*p++ - '0');
             disk = n - 1;
             if (disk < 0 || disk >= blk_count()) {
-                printk("fat: nie ma dysku %u ('dyski' pokazuje, ile ich "
-                       "jest)\n", (uint32_t)n);
+                printk("fat: there is no disk %u ('disks' shows how many "
+                       "there are)\n", (uint32_t)n);
                 return;
             }
             /* The table has to be read from the disk being asked about */
@@ -100,14 +100,14 @@ void fatcmd_mount(const char *arg)
     if (which < 0)
         return;
     if (!fat_mount_on(disk >= 0 ? disk : was, lba)) {
-        printk("fat: partycja %u (sektor %u) to nie jest FAT\n",
+        printk("fat: partition %u (sector %u) is not a FAT\n",
                (uint32_t)which, lba);
         return;
     }
-    printk("dysk %u, partycja %u, sektor %u: %s%s%s\n",
+    printk("disk %u, partition %u, sector %u: %s%s%s\n",
            (uint32_t)((disk >= 0 ? disk : was) + 1), (uint32_t)which, lba,
-           fat_kind(), fat_label()[0] ? ", etykieta " : "", fat_label());
-    printk("klaster %u B, razem %u KiB, wolnych %u KiB\n",
+           fat_kind(), fat_label()[0] ? ", label " : "", fat_label());
+    printk("cluster %u B, %u KiB in all, %u KiB free\n",
            fat_cluster_bytes(), fat_total_kib(), fat_free_kib());
 }
 
@@ -122,17 +122,17 @@ void fatcmd_ls(const char *path)
     if (!path || !path[0])
         path = "/";
     if (!fat_dir(path, &dir)) {
-        printk("fatls: %s - nie ma takiego katalogu\n", path);
+        printk("fatls: %s - there is no such directory\n", path);
         return;
     }
     for (int i = 0; fat_readdir(dir, i, &e); i++) {
         if (e.is_dir)
-            printk("  <kat>  %s\n", e.name);
+            printk("  <dir>  %s\n", e.name);
         else
             printk("  %u B  %s\n", e.size, e.name);
         n++;
     }
-    printk("%s: %u pozycji\n", path, (uint32_t)n);
+    printk("%s: %u entries\n", path, (uint32_t)n);
 }
 
 void fatcmd_cat(const char *path)
@@ -141,12 +141,12 @@ void fatcmd_cat(const char *path)
     if (!need())
         return;
     if (!path || !path[0]) {
-        printk("uzycie: fatcat <sciezka>\n");
+        printk("usage: fatcat <path>\n");
         return;
     }
     int n = fat_read(path, 0, buf, sizeof(buf) - 1);
     if (n < 0) {
-        printk("fatcat: %s - nie ma takiego pliku\n", path);
+        printk("fatcat: %s - there is no such file\n", path);
         return;
     }
     buf[n] = '\0';
@@ -167,7 +167,7 @@ void fatcmd_put(const char *arg)
     while (arg[n] && arg[n] != ' ' && n < (int)sizeof(path) - 1)
         n++;
     if (!arg[n]) {
-        printk("uzycie: fatput <sciezka> <tresc>\n");
+        printk("usage: fatput <path> <text>\n");
         return;
     }
     memcpy(path, arg, (size_t)n);
@@ -178,7 +178,7 @@ void fatcmd_put(const char *arg)
     while (text[len])
         len++;
     if (fat_write_file(path, text, len) < 0)
-        printk("fatput: nie udalo sie zapisac %s\n", path);
+        printk("fatput: could not write %s\n", path);
     else
         printk("fatput: %s, %u B\n", path, len);
 }
@@ -188,11 +188,11 @@ void fatcmd_mkdir(const char *path)
     if (!need())
         return;
     if (!path || !path[0]) {
-        printk("uzycie: fatmkdir <sciezka>\n");
+        printk("usage: fatmkdir <path>\n");
         return;
     }
     if (fat_mkdir(path) < 0)
-        printk("fatmkdir: nie udalo sie zrobic %s\n", path);
+        printk("fatmkdir: could not make %s\n", path);
     else
         printk("fatmkdir: %s\n", path);
 }
@@ -202,11 +202,11 @@ void fatcmd_rm(const char *path)
     if (!need())
         return;
     if (!path || !path[0]) {
-        printk("uzycie: fatrm <sciezka>\n");
+        printk("usage: fatrm <path>\n");
         return;
     }
     if (fat_unlink(path) < 0)
-        printk("fatrm: nie udalo sie usunac %s\n", path);
+        printk("fatrm: could not remove %s\n", path);
     else
         printk("fatrm: %s\n", path);
 }
@@ -227,13 +227,13 @@ void fatcmd_sum(const char *path)
     if (!need())
         return;
     if (!path || !path[0]) {
-        printk("uzycie: fatsum <sciezka>\n");
+        printk("usage: fatsum <path>\n");
         return;
     }
     for (;;) {
         int n = fat_read(path, off, buf, sizeof(buf));
         if (n < 0) {
-            printk("fatsum: %s - nie ma takiego pliku\n", path);
+            printk("fatsum: %s - there is no such file\n", path);
             return;
         }
         if (!n)
@@ -243,7 +243,7 @@ void fatcmd_sum(const char *path)
         total += (uint32_t)n;
         off += (uint32_t)n;
     }
-    printk("fatsum: %s, %u B, suma %x\n", path, total, sum);
+    printk("fatsum: %s, %u B, sum %x\n", path, total, sum);
 }
 
 /* A file out of the initrd onto the FAT partition.
@@ -266,7 +266,7 @@ void fatcmd_copy(const char *arg)
     while (arg[n] && arg[n] != ' ' && n < (int)sizeof(from) - 1)
         n++;
     if (!arg[n]) {
-        printk("uzycie: fatcopy <nazwa w initrd> <sciezka na FAT>\n");
+        printk("usage: fatcopy <name in the initrd> <path on the FAT>\n");
         return;
     }
     memcpy(from, arg, (size_t)n);
@@ -276,18 +276,18 @@ void fatcmd_copy(const char *arg)
     while (*to == ' ')
         to++;
     if (!*to) {
-        printk("uzycie: fatcopy <nazwa w initrd> <sciezka na FAT>\n");
+        printk("usage: fatcopy <name in the initrd> <path on the FAT>\n");
         return;
     }
 
     uint32_t size = 0;
     const void *data = initrd_find(from, &size);
     if (!data) {
-        printk("fatcopy: w initrd nie ma '%s'\n", from);
+        printk("fatcopy: the initrd has no '%s'\n", from);
         return;
     }
     if (fat_write_file(to, data, size) < 0)
-        printk("fatcopy: nie udalo sie zapisac %s\n", to);
+        printk("fatcopy: could not write %s\n", to);
     else
         printk("fatcopy: %s -> %s, %u B\n", from, to, size);
 }

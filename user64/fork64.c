@@ -36,7 +36,7 @@ void _start(void)
 
     int64_t child = sys_fork();
     if (child < 0) {
-        print("[fork64] BLAD: fork sie nie udal\n");
+        print("[fork64] ERROR: the fork did not work\n");
         sys_exit(1);
     }
 
@@ -45,7 +45,7 @@ void _start(void)
            has no way of seeing that, because it got its own copy of the
            page. */
         value = 200;
-        int n = put(0, "[fork64] dziecko: fork dal 0, moja wartosc to ");
+        int n = put(0, "[fork64] child: the fork gave 0, my value is ");
         n = putn(n, value);
         buf[n++] = '\n';
         buf[n] = 0;
@@ -55,7 +55,7 @@ void _start(void)
 
     /* The parent. It gives the child time to write and checks its own
    memory. */
-    int n = put(0, "[fork64] rodzic: fork dal numer dziecka ");
+    int n = put(0, "[fork64] parent: the fork gave the child number ");
     n = putn(n, (uint64_t)child);
     buf[n++] = '\n';
     buf[n] = 0;
@@ -63,11 +63,11 @@ void _start(void)
 
     sys_sleep(300);
 
-    n = put(0, value == 100 ? "[fork64] rodzic: nadal "
-                              : "[fork64] rodzic: BLAD, teraz ");
+    n = put(0, value == 100 ? "[fork64] parent: still "
+                              : "[fork64] parent: ERROR, now ");
     n = putn(n, value);
-    n = put(n, value == 100 ? " - dziecko dostalo kopie\n"
-                              : " - dziecko pisze po mojej pamieci\n");
+    n = put(n, value == 100 ? " - the child got a copy\n"
+                              : " - the child is writing over my memory\n");
     buf[n] = 0;
     print(buf);
 

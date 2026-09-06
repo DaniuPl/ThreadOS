@@ -33,31 +33,31 @@ void _start(int argc, char **argv)
 
     unsigned char *p = sys_sbrk((int32_t)bytes);
     if (p == (void *)-1) {
-        print("[swaptest] sbrk odmowil\n");
+        print("[swaptest] sbrk refused\n");
         sys_exit(1);
     }
     p = (unsigned char *)(((uint32_t)p + PAGE - 1) & ~(uint32_t)(PAGE - 1));
 
-    print("[swaptest] zapisuje ");
+    print("[swaptest] writing ");
     print_dec(mib);
     print(" MiB\n");
     for (uint32_t i = 0; i < pages; i++)
         p[i * PAGE] = stamp(i);
 
-    print("[swaptest] czytam z powrotem\n");
+    print("[swaptest] reading it back\n");
     uint32_t bad = 0;
     for (uint32_t i = 0; i < pages; i++)
         if (p[i * PAGE] != stamp(i))
             bad++;
 
     if (bad) {
-        print("[swaptest] ZLE: stron z bledna zawartoscia ");
+        print("[swaptest] WRONG: pages with the wrong content ");
         print_dec(bad);
         print("\n");
         sys_exit(1);
     }
-    print("[swaptest] wszystkie ");
+    print("[swaptest] all ");
     print_dec(pages);
-    print(" stron wrocilo w calosci\n");
+    print(" pages came back whole\n");
     sys_exit(0);
 }

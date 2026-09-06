@@ -14,13 +14,13 @@ static char buf[256];
 void _start(int argc, char **argv)
 {
     if (argc < 2) {
-        print("ucat64: podaj nazwe pliku\n");
+        print("ucat64: give a file name\n");
         sys_exit(1);
     }
 
     int64_t fd = sys_open(argv[1], 0);
     if (fd < 0) {
-        print("ucat64: nie moge otworzyc '");
+        print("ucat64: I cannot open '");
         print(argv[1]);
         print("'\n");
         sys_exit(1);

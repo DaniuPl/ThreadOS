@@ -103,20 +103,20 @@ void smpmem_test(void)
     uint32_t frames_after = pmm_used_frames();
     uint32_t heap_after = heap_used_bytes();
 
-    printk("Rdzeni: %d (obudzonych %d), jednostek %u po %u przydzialow\n",
+    printk("Cores: %d (woken %d), units %u of %u allocations\n",
            smp_cpus(), smp_started(), (uint32_t)UNITS,
            (uint32_t)RETRIES);
-    printk("Udzial:");
+    printk("Share:");
     for (int i = 0; i < smp_cpus(); i++)
-        printk(" rdzen%d=%u", i, smp_share(i));
+        printk(" core%d=%u", i, smp_share(i));
     printk("\n");
-    printk("Przydzialow: %u, nieudanych: %u\n", p.allocs, p.failed);
-    printk("Wzorzec: %s (bledow %u)\n",
-           p.nerrors ? "NIE ZGADZA SIE" : "zgadza sie", p.nerrors);
-    printk("Ramki: %u -> %u, sterta: %u -> %u B\n",
+    printk("Allocations: %u, failed: %u\n", p.allocs, p.failed);
+    printk("Pattern: %s (errors %u)\n",
+           p.nerrors ? "DOES NOT MATCH" : "matches", p.nerrors);
+    printk("Frames: %u -> %u, heap: %u -> %u B\n",
            frames_at_start, frames_after, heap_before, heap_after);
-    printk("Nic nie wycieklo: %s\n",
+    printk("Nothing leaked: %s\n",
            (frames_at_start == frames_after && heap_before == heap_after)
-               ? "tak" : "NIE");
-    printk("Liczylo rdzeni: %d\n", smp_workers());
+               ? "yes" : "NO");
+    printk("Cores that counted: %d\n", smp_workers());
 }

@@ -14,14 +14,14 @@ static char line[LINE_MAX];
 
 static void print_help(void)
 {
-    print("ush: wpisz nazwe programu z initrd (np. hello), albo:\n"
-          "  help        - ta pomoc\n"
-          "  pid         - pokaz pid shella\n"
-          "  cd [kat]    - zmien katalog (bez arg = /)\n"
-          "  pwd         - pokaz katalog roboczy\n"
-          "  cmd > plik  - przekieruj wyjscie do pliku (>> dopisuje)\n"
-          "  cmd1 | cmd2 - polacz programy potokiem\n"
-          "  exit        - wyjdz do shella jadra\n");
+    print("ush: type the name of a program from the initrd (e.g. hello), or:\n"
+          "  help        - this help\n"
+          "  pid         - print the shell's pid\n"
+          "  cd [dir]    - change directory (no argument = /)\n"
+          "  pwd         - print the working directory\n"
+          "  cmd > file  - redirect the output to a file (>> appends)\n"
+          "  cmd1 | cmd2 - join two programs with a pipe\n"
+          "  exit        - leave for the kernel's shell\n");
 }
 
 static void print_pid(void)
@@ -33,7 +33,7 @@ static void print_pid(void)
         buf[n++] = (char)('0' + pid % 10);
         pid /= 10;
     } while (pid);
-    print("ush: moj pid to ");
+    print("ush: my pid is ");
     while (n)
         sys_write(STDOUT, &buf[--n], 1);
     print("\n");
@@ -44,7 +44,7 @@ static void report_code(int32_t code)
 {
     if (code == 0)
         return;
-    print("ush: [kod ");
+    print("ush: [code ");
     if (code < 0) {
         print("-");
         code = -code;
@@ -91,7 +91,7 @@ static uint32_t read_line(void)
 
 void _start(void)
 {
-    print("\nush - shell uzytkownika (ring 3). Wpisz 'help'.\n");
+    print("\nush - the user's shell (ring 3). Type 'help'.\n");
 
     for (;;) {
         char cwd[128];
@@ -128,7 +128,7 @@ void _start(void)
                 arg++;
             const char *target = *arg ? arg : "/";
             if (sys_chdir(target) < 0) {
-                print("ush: nie ma katalogu '");
+                print("ush: there is no directory '");
                 print(target);
                 print("'\n");
             }
@@ -141,9 +141,9 @@ void _start(void)
             while (*a == ' ')
                 a++;
             if (!*a) {
-                print("uzycie: kill <pid>\n");
+                print("usage: kill <pid>\n");
             } else if (sys_kill(uatoi(a), SIGKILL) < 0) {
-                print("ush: nie ma procesu o pid ");
+                print("ush: there is no process with pid ");
                 print(a);
                 print("\n");
             }
@@ -194,7 +194,7 @@ void _start(void)
                 }
             int32_t pid = sys_pipeline(line, outfile);
             if (pid < 0)
-                print("ush: nie moge uruchomic potoku\n");
+                print("ush: I cannot start the pipe\n");
             else
                 report_code(sys_wait(pid));
             goto next;
@@ -226,19 +226,19 @@ void _start(void)
 
         int32_t pid = sys_spawn(line, outfile, append);
         if (pid < 0) {
-            print("ush: nie znam '");
+            print("ush: I do not know '");
             print(line);
             print("'\n");
             continue;
         }
         if (bg) {                  /* in the background: we do not wait, we show the pid */
-            print("ush: w tle, pid=");
+            print("ush: in the background, pid=");
             print_dec((uint32_t)pid);
             print("\n");
         } else {
             report_code(sys_wait(pid));
             if (outfile) {
-                print("ush: wyjscie zapisane do '");
+                print("ush: the output was written to '");
                 print(outfile);
                 print("'\n");
             }

@@ -313,7 +313,7 @@ static void backspace(void)
 static void undo_one(void)
 {
     if (!log_n) {
-        ecopy(note, "nie ma czego cofnac", sizeof(note) - 1);
+        ecopy(note, "there is nothing to undo", sizeof(note) - 1);
         return;
     }
     struct step st = log[--log_n];
@@ -353,7 +353,7 @@ static void undo_one(void)
         break;
     }
     dirty = 1;
-    ecopy(note, "cofniete", sizeof(note) - 1);
+    ecopy(note, "undone", sizeof(note) - 1);
 }
 
 static void insert_text(const char *s, int n)
@@ -369,7 +369,7 @@ static void insert_text(const char *s, int n)
 /* --- the file ---------------------------------------------------- */
 
 /* What the window is called: the program, and the file it holds. Three
-   editors open on three files are three windows called "Edytor"
+   editors open on three files are three windows called "Editor"
    otherwise - and the taskbar shows the same name under the pointer,
    so this is the difference between finding a window and hunting for
    it. */
@@ -379,7 +379,7 @@ static void retitle(void)
 {
     char t[NAME_MAX + 12];
     int p = 0;
-    const char *pre = "Edytor";
+    const char *pre = "Editor";
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     if (fname[0]) {
@@ -397,7 +397,7 @@ static void save_to(const char *name)
 {
     int fd = (int)sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        ecopy(note, "nie da sie zapisac", sizeof(note) - 1);
+        ecopy(note, "it cannot be written", sizeof(note) - 1);
         return;
     }
     for (int i = 0; i < nlines; i++) {
@@ -409,7 +409,7 @@ static void save_to(const char *name)
     ecopy(fname, name, NAME_MAX);
     dirty = 0;
     warned = 0;
-    ecopy(note, "zapisano", sizeof(note) - 1);
+    ecopy(note, "saved", sizeof(note) - 1);
     retitle();
 }
 
@@ -417,7 +417,7 @@ static void load_from(const char *name)
 {
     int fd = (int)sys_open(name, O_READ);
     if (fd < 0) {
-        ecopy(note, "nie ma takiego pliku", sizeof(note) - 1);
+        ecopy(note, "there is no such file", sizeof(note) - 1);
         return;
     }
     clear_all();
@@ -447,7 +447,7 @@ static void load_from(const char *name)
     cy = cx = top = hoff = 0;
     dirty = 0;
     ecopy(fname, name, NAME_MAX);
-    ecopy(note, "wczytano", sizeof(note) - 1);
+    ecopy(note, "loaded", sizeof(note) - 1);
     retitle();
 }
 
@@ -483,7 +483,7 @@ static int find_from(const char *what, int line, int col)
 static void find_answer(const char *what)
 {
     if (!what[0]) {
-        ecopy(note, "nie ma czego szukac", sizeof(note) - 1);
+        ecopy(note, "there is nothing to look for", sizeof(note) - 1);
         return;
     }
     ecopy(last_find, what, NAME_MAX);
@@ -491,14 +491,14 @@ static void find_answer(const char *what)
         char n[8];
         num(n, cy + 1);
         int p = 0;
-        const char *pre = "znaleziono w wierszu ";
+        const char *pre = "found on line ";
         for (int i = 0; pre[i]; i++)
             note[p++] = pre[i];
         for (int i = 0; n[i]; i++)
             note[p++] = n[i];
         note[p] = '\0';
     } else {
-        ecopy(note, "nie znaleziono", sizeof(note) - 1);
+        ecopy(note, "not found", sizeof(note) - 1);
     }
 }
 
@@ -562,16 +562,16 @@ static void draw(int win)
     char line[80];
     int p = 0;
     if (asking) {
-        const char *q = asking == ASK_SAVE ? "Zapisz jako: "
-                      : asking == ASK_OPEN ? "Otworz: "
-                                           : "Szukaj: ";
+        const char *q = asking == ASK_SAVE ? "Save as: "
+                      : asking == ASK_OPEN ? "Open: "
+                                           : "Find: ";
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen; i++)
             line[p++] = answer[i];
         line[p++] = '_';
     } else {
-        const char *nm = fname[0] ? fname : "(bez nazwy)";
+        const char *nm = fname[0] ? fname : "(no name)";
         for (int i = 0; nm[i] && p < 40; i++)
             line[p++] = nm[i];
         if (dirty)
@@ -653,7 +653,7 @@ static void edit_key(char c)
            memory. Typing still works - the line under the list is the
            same line the question used to be. */
         reread_files();
-        ug_pick_open(&picker, "Otworz plik:", file_row, (void *)0, nfiles,
+        ug_pick_open(&picker, "Open a file:", file_row, (void *)0, nfiles,
                      picked, (int)sizeof(picked));
         return;
     case KEY_FIND:
@@ -711,7 +711,7 @@ static void edit_key(char c)
         return;
     case 0x1A: {                  /* Ctrl+Insert - the line the caret is on */
         sys_clip_set(text[cy], (uint32_t)llen[cy]);
-        ecopy(note, "skopiowano wiersz", sizeof(note) - 1);
+        ecopy(note, "the line was copied", sizeof(note) - 1);
         return;
     }
     case 0x1B: {                  /* Shift+Insert */
@@ -736,14 +736,14 @@ static void edit_key(char c)
 
 void _start(int argc, char **argv)
 {
-    int win = (int)win_create(W0, H0, "Edytor");
+    int win = (int)win_create(W0, H0, "Editor");
     if (win < 0)
         sys_exit(1);
     winid = win;
 
     clear_all();
-    ecopy(note, "Ctrl+O otwiera, Ctrl+S zapisuje, Ctrl+F szuka, "
-                "Ctrl+Z cofa", sizeof(note) - 1);
+    ecopy(note, "Ctrl+O opens, Ctrl+S saves, Ctrl+F finds, "
+                "Ctrl+Z undoes", sizeof(note) - 1);
     /* Started with a name - 'gedit notatka' - it opens that file at
        once. Making a person type the name a second time, in the
        program they have just told which file they mean, is the sort of
@@ -777,8 +777,8 @@ void _start(int argc, char **argv)
                 if (dirty && !warned) {
                     win_keep(win);
                     warned = 1;
-                    ecopy(note, "Niezapisane zmiany! Ctrl+S zapisze, "
-                                "zamkniecie jeszcze raz - nie",
+                    ecopy(note, "Unsaved changes! Ctrl+S will save, "
+                                "closing again will not",
                           sizeof(note) - 1);
                     drew = 1;
                     continue;

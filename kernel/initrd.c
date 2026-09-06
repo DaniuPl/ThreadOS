@@ -43,7 +43,7 @@ const void *initrd_image(uint32_t *size)
 void initrd_init(const struct multiboot_info *mbi)
 {
     if (!(mbi->flags & MULTIBOOT_FLAG_MODS) || mbi->mods_count == 0) {
-        printk("[ !! ] initrd: bootloader nie przekazal modulu\n");
+        printk("[ !! ] initrd: the boot loader handed over no module\n");
         return;
     }
 
@@ -51,14 +51,14 @@ void initrd_init(const struct multiboot_info *mbi)
         (const struct multiboot_mod *)(uintptr_t)mbi->mods_addr;
 
     if (mod->end > IDENTITY_TOP()) {
-        printk("[ !! ] initrd: modul poza zarzadzana pamiecia (%x)\n",
+        printk("[ !! ] initrd: the module is outside managed memory (%x)\n",
                mod->start);
         return;
     }
 
     const uint8_t *p = (const uint8_t *)(uintptr_t)mod->start;
     if (p[0] != 'P' || p[1] != 'I' || p[2] != 'R' || p[3] != 'D') {
-        printk("[ !! ] initrd: zly magic modulu\n");
+        printk("[ !! ] initrd: the module's magic is wrong\n");
         return;
     }
 
@@ -88,7 +88,7 @@ const void *initrd_find(const char *name, uint32_t *size)
 void initrd_ls(void)
 {
     if (!file_count) {
-        printk("initrd: brak plikow\n");
+        printk("initrd: no files\n");
         return;
     }
     printk("initrd (%u B):\n", total_size);

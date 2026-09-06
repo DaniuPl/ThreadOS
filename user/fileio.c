@@ -9,14 +9,14 @@
 
 #include "usys.h"
 
-static char content[] = "plik zapisany przez proces ring3\n";
+static char content[] = "a file written by a ring 3 process\n";
 
 void _start(void)
 {
-    print("[fileio] otwieram 'ring3.txt' do zapisu...\n");
+    print("[fileio] opening 'ring3.txt' for writing...\n");
     int fd = sys_open("ring3.txt", O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        print("[fileio] blad open do zapisu (brak dysku?)\n");
+        print("[fileio] open for writing failed (no disk?)\n");
         sys_exit(1);
     }
     sys_write(fd, content, ustrlen(content));
@@ -24,19 +24,19 @@ void _start(void)
 
     fd = sys_open("ring3.txt", O_READ);
     if (fd < 0) {
-        print("[fileio] blad open do odczytu\n");
+        print("[fileio] open for reading failed\n");
         sys_exit(1);
     }
     char buf[128];
     int n = sys_read(fd, buf, sizeof(buf) - 1);
     sys_close(fd);
     if (n < 0) {
-        print("[fileio] blad read\n");
+        print("[fileio] read failed\n");
         sys_exit(1);
     }
     buf[n] = '\0';
 
-    print("[fileio] odczytano z dysku: ");
+    print("[fileio] read off the disk: ");
     print(buf);
     print("[fileio] OK\n");
     sys_exit(0);

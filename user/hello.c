@@ -2,11 +2,11 @@
 
 #include "usys.h"
 
-static char counter_msg[] = "[hello] licze: 0\n";
+static char counter_msg[] = "[hello] counting: 0\n";
 
 void _start(void)
 {
-    print("[hello] czesc, jestem procesem ELF z initrd!\n");
+    print("[hello] hello, I am an ELF process from the initrd!\n");
 
     for (int i = 1; i <= 3; i++) {
         counter_msg[15] = (char)('0' + i);
@@ -14,6 +14,6 @@ void _start(void)
         sys_sleep(250);
     }
 
-    print("[hello] koncze sie grzecznie\n");
+    print("[hello] ending politely\n");
     sys_exit(0);
 }

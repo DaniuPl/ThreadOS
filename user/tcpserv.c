@@ -9,16 +9,16 @@
 #include "usys.h"
 
 #define PORT 5555
-#define GREETING "ProtonOS TCP gotowy\n"
+#define GREETING "ProtonOS TCP ready\n"
 
 void _start(void)
 {
     int32_t lis = tcp_listen(PORT);
     if (lis < 0) {
-        print("[tcpserv] nie moge nasluchiwac na porcie 5555\n");
+        print("[tcpserv] I cannot listen on port 5555\n");
         sys_exit(1);
     }
-    print("[tcpserv] nasluchuje na porcie 5555\n");
+    print("[tcpserv] listening on port 5555\n");
 
     int served = 0;
     while (served < 3) {
@@ -26,14 +26,14 @@ void _start(void)
         if (conn < 0)
             break;                       /* nobody came - we finish */
 
-        print("[tcpserv] polaczenie przyjete\n");
+        print("[tcpserv] a connection was accepted\n");
         tcp_send(conn, GREETING, sizeof(GREETING) - 1, 5000);
 
         char buf[256];
         int32_t n = tcp_recv(conn, buf, sizeof(buf) - 1, 5000);
         if (n > 0) {
             buf[n] = '\0';
-            print("[tcpserv] od klienta: ");
+            print("[tcpserv] from the client: ");
             print(buf);
             if (buf[n - 1] != '\n')
                 print("\n");
@@ -45,7 +45,7 @@ void _start(void)
     }
 
     tcp_close(lis);
-    print("[tcpserv] koniec, obsluzonych polaczen: ");
+    print("[tcpserv] done, connections served: ");
     print_dec((uint32_t)served);
     print("\n");
     sys_exit(0);

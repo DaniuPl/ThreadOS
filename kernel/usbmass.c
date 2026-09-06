@@ -186,7 +186,7 @@ static void read_name(struct unit *u)
 
     memset(u->name, 0, sizeof(u->name));
     if (command(u, inquiry, 6, small, 36, 1) < 0) {
-        memcpy(u->name, "dysk USB", 9);
+        memcpy(u->name, "USB disk", 9);
         return;
     }
     /* Bytes 8..15 are the maker, 16..31 the model - padded with
@@ -204,7 +204,7 @@ static void read_name(struct unit *u)
         k--;
     u->name[k] = 0;
     if (!k)
-        memcpy(u->name, "dysk USB", 9);
+        memcpy(u->name, "USB disk", 9);
 }
 
 /* READ CAPACITY (10): the last sector's number and how large a sector
@@ -220,7 +220,7 @@ static int read_capacity(struct unit *u)
             uint32_t size = get32be(small + 4);
 
             if (size != SECTOR) {
-                printk("[usb] dysk ma sektory po %u B - nie obsluguje\n",
+                printk("[usb] the disk has %u B sectors - not supported\n",
                        size);
                 return -1;
             }
@@ -281,7 +281,7 @@ static int try_port(int port)
     }
 
     usbhc_claim(port);
-    printk("[ OK ] Dysk USB: %s, %u sektorow (port %d, %s)\n",
+    printk("[ OK ] USB disk: %s, %u sectors (port %d, %s)\n",
            u->name, u->sectors, port + 1, usbhc_name());
     count++;
     return 1;
@@ -297,7 +297,7 @@ static int on_plug(int port)
     if (!try_port(port))
         return 0;
     blk_usb_added(before);
-    printk("[ OK ] Dysk USB w gniazdku %d - jest jako dysk %u\n",
+    printk("[ OK ] A USB disk in socket %d - it is disk %u\n",
            port + 1, (uint32_t)(blk_count()));
     return 1;
 }
@@ -313,7 +313,7 @@ static void on_unplug(int port)
             continue;
         units[i].gone = 1;
         blk_usb_gone(i);
-        printk("[ !! ] Dysk USB wyjety z gniazdka %d\n", port + 1);
+        printk("[ !! ] The USB disk was pulled out of socket %d\n", port + 1);
     }
 }
 
@@ -350,7 +350,7 @@ uint32_t usbmass_sectors(int unit)
 const char *usbmass_name(int unit)
 {
     if (unit < 0 || unit >= count)
-        return "brak";
+        return "none";
     return units[unit].name;
 }
 

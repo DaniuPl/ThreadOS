@@ -209,7 +209,7 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
         if (type == REC_CCS)
             continue;                    /* compatibility with old hardware */
         if (type == REC_ALERT && len >= 2) {
-            c->error = "serwer zerwal polaczenie (alert)";
+            c->error = "the server tore the connection down (alert)";
             return -1;
         }
         if (len < 17 || len - 16 > max)
@@ -223,7 +223,7 @@ static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
             : aead_decrypt(c->key_s, nonce, hdr, 5, buf, out, ctlen,
                            buf + ctlen);
         if (!good) {
-            c->error = "nie udalo sie odszyfrowac rekordu";
+            c->error = "the record could not be decrypted";
             return -1;
         }
         c->seq_s++;
@@ -397,7 +397,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
 
     c->sock = tcp_connect(ip, port, 8000);
     if (c->sock < 0) {
-        c->error = "nie udalo sie polaczyc";
+        c->error = "could not connect";
         return -1;
     }
 
@@ -483,7 +483,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     rec[0] = REC_HANDSHAKE; rec[1] = 0x03; rec[2] = 0x01;
     tls_put16(rec + 3, n);
     if (tls_write_all(c, rec, 5) < 0 || tls_write_all(c, msg, n) < 0) {
-        c->error = "nie udalo sie wyslac ClientHello";
+        c->error = "the ClientHello could not be sent";
         tls_abort(c);
         return -1;
     }
@@ -494,7 +494,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     uint32_t len;
     if (tls_read_record(c, &type, hdr, msg, &len) < 0 ||
         type != REC_HANDSHAKE || len < 4 || msg[0] != HS_SERVER_HELLO) {
-        c->error = "brak ServerHello";
+        c->error = "no ServerHello";
         tls_abort(c);
         return -1;
     }
@@ -504,7 +504,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     p += 2;                              /* legacy_version */
     p += 32;                             /* random */
     if (p >= len) {
-        c->error = "uszkodzony ServerHello";
+        c->error = "a damaged ServerHello";
         tls_abort(c);
         return -1;
     }
@@ -513,7 +513,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     p += 2;
     p += 1;                              /* compression */
     if (suite != TLS_CHACHA20_SHA256 && suite != TLS_AES_GCM_SHA256) {
-        c->error = "serwer wybral inny zestaw szyfrow";
+        c->error = "the server picked another cipher suite";
         tls_abort(c);
         return -1;
     }
@@ -541,7 +541,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         p = edata + elen;
     }
     if (!have_key) {
-        c->error = "ServerHello bez klucza x25519";
+        c->error = "a ServerHello with no x25519 key";
         tls_abort(c);
         return -1;
     }
@@ -591,7 +591,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         int got = tls_recv_encrypted(c, &inner, msg, TLS_HS_MAX);
         if (got < 0) {
             if (!c->error)
-                c->error = "przerwane uzgodnienie";
+                c->error = "the handshake was broken off";
             tls_abort(c);
             tls_abort(c);
         return -1;
@@ -639,7 +639,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                     if (expect[i] != hs[off + 4 + i])
                         bad = 1;
                 if (bad) {
-                    c->error = "Finished serwera sie nie zgadza";
+                    c->error = "the server's Finished does not match";
                     tls_abort(c);
                     tls_abort(c);
             tls_abort(c);
@@ -692,7 +692,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     for (int i = 0; i < 32; i++)
         fin[4 + i] = verify[i];
     if (tls_send_encrypted(c, REC_HANDSHAKE, fin, 36) < 0) {
-        c->error = "nie udalo sie wyslac Finished";
+        c->error = "Finished could not be sent";
         tls_abort(c);
         return -1;
     }

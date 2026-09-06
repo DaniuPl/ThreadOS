@@ -53,7 +53,7 @@ void _start(void)
 {
     int w = (int)win_create(WINDOW_W, WINDOW_H, "App64");
     if (w < 0) {
-        print("guiapp64: pulpit nie dal okna\n");
+        print("guiapp64: the desktop gave no window\n");
         sys_exit(1);
     }
 
@@ -85,7 +85,7 @@ void _start(void)
         win_rect(w, 6, 6, 24, 12, C_RED);
         win_rect(w, 34, 6, 24, 12, C_GREEN);
         win_rect(w, 62, 6, 24, 12, C_BLUE);
-        win_text(w, 6, 24, "klikniec:", C_TEXT);
+        win_text(w, 6, 24, "clicks:", C_TEXT);
         draw_number(w, 80, 24, npt, C_TEXT);
         win_text(w, 6, 38, "txt:", C_HEAD);
         win_text(w, 40, 38, written, C_TEXT);

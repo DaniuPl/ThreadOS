@@ -71,11 +71,11 @@ static int same(const char *a, const char *b)
 
 static int cycle_limit(const char *name)
 {
-    if (same(name, "tlo"))
+    if (same(name, "background"))
         return 6;                     /* tlo: six backgrounds */
-    if (same(name, "kolor"))
+    if (same(name, "color"))
         return 16;                    /* kolor: sixteen text colours */
-    if (same(name, "ikony"))
+    if (same(name, "icons"))
         return 3;                     /* od lewej, na srodku, od prawej */
     return 0;                         /* everything else is typed */
 }
@@ -85,7 +85,7 @@ static int cycle_limit(const char *name)
 static const char *bar_widths[] = { "100", "75", "50" };
 #define BAR_W_N 3
 
-static int is_bar_width(const char *name) { return same(name, "pasek"); }
+static int is_bar_width(const char *name) { return same(name, "taskbar"); }
 
 static void num_to_text(uint32_t v, char *out)
 {
@@ -186,7 +186,7 @@ static void try_password(void)
 
 void _start(void)
 {
-    int w = win_create(W0, H0, "Ustawienia");
+    int w = win_create(W0, H0, "Settings");
     if (w < 0)
         sys_exit(1);
 
@@ -294,7 +294,7 @@ void _start(void)
 
         /* --- drawing --- */
         win_rect(w, 0, 0, cw, ch, C_BG);
-        win_text(w, 6, 6, "Ustawienia systemu:", C_BLUE);
+        win_text(w, 6, 6, "System settings:", C_BLUE);
 
         for (int i = 0; i < ncfg; i++) {
             int y = ROW_Y + i * ROW_H;
@@ -333,8 +333,8 @@ void _start(void)
             win_text(w, 6, y + 3,
                      (cycle_limit(cfg[chosen].name) ||
                       is_bar_width(cfg[chosen].name))
-                         ? "klik w wiersz zmienia, Enter zapisuje"
-                         : "pisz na klawiaturze, Enter zapisuje",
+                         ? "a click on a line changes it, Enter saves"
+                         : "type on the keyboard, Enter saves",
                      C_BLUE);
             y += 3;
         }
@@ -347,15 +347,15 @@ void _start(void)
             for (; i < plen && i < (int)sizeof(stars) - 1; i++)
                 stars[i] = '*';
             stars[i] = 0;
-            win_text(w, 6, y + 15, "haslo admina:", C_BLUE);
+            win_text(w, 6, y + 15, "the admin password:", C_BLUE);
             win_text(w, 6 + 14 * 8, y + 15, stars, C_BLACK);
-            win_text(w, 6, y + 26, "zmiana ustawien wymaga admina; "
-                                   "Enter zatwierdza", C_BLACK);
+            win_text(w, 6, y + 26, "changing settings needs admin; "
+                                   "Enter confirms", C_BLACK);
         } else if (saved > 0) {
-            win_text(w, 6, y + 15, "zapisane na dysku", C_BLUE);
+            win_text(w, 6, y + 15, "saved to the disk", C_BLUE);
         } else if (saved < 0) {
-            win_text(w, 6, y + 15, "NIE zapisane (zle haslo albo "
-                                   "zla wartosc)", C_RED);
+            win_text(w, 6, y + 15, "NOT saved (wrong password or "
+                                   "a bad value)", C_RED);
         }
 
         sys_sleep(80);

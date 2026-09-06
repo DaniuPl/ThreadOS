@@ -10,7 +10,7 @@
 void _start(void)
 {
 
-    print("[spin64] krece sie bez konca - zatrzymaj mnie Ctrl+C\n");
+    print("[spin64] spinning with no end - stop me with Ctrl+C\n");
     for (;;)
         sys_sleep(50);
 }

@@ -15,7 +15,7 @@ static volatile uint64_t spins;
 static void on_signal(int sig)
 {
     (void)sig;
-    print("[sigtest64] procedura obslugi: dostalem sygnal\n");
+    print("[sigtest64] the handler: I got a signal\n");
     dostalem = 1;
 }
 
@@ -23,7 +23,7 @@ void _start(void)
 {
 
     sys_signal(SIGINT, on_signal);
-    print("[sigtest64] czekam na Ctrl+C\n");
+    print("[sigtest64] waiting for Ctrl+C\n");
 
     /* An endless loop: if the signal did not work, the program would
        stay here forever. The counter shows that the loop really ran. */
@@ -32,6 +32,6 @@ void _start(void)
         sys_sleep(10);
     }
 
-    print("[sigtest64] wrocilem do przerwanego miejsca i koncze\n");
+    print("[sigtest64] I came back where I was interrupted and I am done\n");
     sys_exit(0);
 }

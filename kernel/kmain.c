@@ -114,7 +114,7 @@ static void demo_counter(void *arg)
     uint32_t n = 0;
     for (;;) {
         draw_labeled_counter(slot ? 33 : 18,
-                             slot ? "watek-B: " : "watek-A: ", n++);
+                             slot ? "thread-B: " : "thread-A: ", n++);
         task_sleep(slot ? 330 : 200);
     }
 }
@@ -122,14 +122,14 @@ static void demo_counter(void *arg)
 static void demo_mortal(void *arg)
 {
     (void)arg;
-    vga_write_at(48, 0, "watek-C: czesc!     ");
+    vga_write_at(48, 0, "thread-C: hello!    ");
     task_sleep(2000);
     /* We keep redrawing the text for a while. Row 0 disappears on every
        scroll of the screen, and startup messages keep coming for a good
        second after the thread finishes its work - otherwise the proof
        that it ran at all would scroll away with them. */
     for (int i = 0; i < 12; i++) {
-        vga_write_at(48, 0, "watek-C: zakonczony ");
+        vga_write_at(48, 0, "thread-C: finished  ");
         task_sleep(500);
     }
 
@@ -143,7 +143,7 @@ static void demo_mortal(void *arg)
        would land in the middle of a line somebody is typing. The
        serial port is the log, the screen is the work in progress; the
        two are not always the same. */
-    serial_write("[ OK ] Watek demonstracyjny C zakonczyl prace\n");
+    serial_write("[ OK ] The demonstration thread C has finished\n");
 }
 
 static void ok(const char *what)
@@ -175,49 +175,49 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     printk("ProtonOS\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-    printk("Jadro uruchomione w trybie chronionym 32-bit.\n\n");
+    printk("The kernel is running in 32-bit protected mode.\n\n");
 
     if (!mbi) {
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        printk("BLAD: nieznany magic od bootloadera (%x)!\n", magic);
+        printk("ERROR: unknown magic from the boot loader (%x)!\n", magic);
         for (;;)
             __asm__ volatile("cli; hlt");
     }
     printk("[ OK ] Multiboot OK (%s)\n", mb2_boot_kind());
 
     gdt_init();
-    ok("GDT zaladowana (plaski model pamieci, segmenty ring 0/3)");
+    ok("GDT loaded (flat memory model, ring 0/3 segments)");
 
     idt_init();
-    ok("IDT zaladowana (wyjatki 0-31, IRQ 32-47)");
+    ok("IDT loaded (exceptions 0-31, IRQ 32-47)");
 
     pic_init();
-    ok("PIC przemapowany (IRQ -> wektory 32-47)");
+    ok("PIC remapped (IRQ -> vectors 32-47)");
 
     pit_init(100);
     ok("Timer PIT: 100 Hz");
 
     keyboard_init();
-    ok("Klawiatura PS/2 gotowa");
+    ok("The PS/2 keyboard is ready");
 
     /* A laptop whose touchpad is not on this port answers nothing
        here, and that is worth saying out loud rather than reporting a
        mouse that is not there. */
     if (mouse_init())
-        printk("[ OK ] Mysz PS/2 na porcie pomocniczym (IRQ12), kolko: %s\n",
-               mouse_has_wheel() ? "tak" : "nie");
+        printk("[ OK ] PS/2 mouse on the auxiliary port (IRQ12), wheel: %s\n",
+               mouse_has_wheel() ? "yes" : "no");
     else
-        printk("[ -- ] Na porcie pomocniczym PS/2 nie ma myszy "
-               "(touchpad moze byc na USB albo I2C)\n");
+        printk("[ -- ] No mouse on the auxiliary PS/2 port "
+               "(the touchpad may be on USB or I2C)\n");
 
     __asm__ volatile("sti");
-    ok("Przerwania wlaczone (sti)");
+    ok("Interrupts enabled (sti)");
 
     /* An IDT test: int3 should print a message and come back */
     __asm__ volatile("int $3");
 
     pmm_init(mbi);
-    printk("[ OK ] Pamiec fizyczna: %u KiB RAM, %u wolnych ramek 4 KiB\n",
+    printk("[ OK ] Physical memory: %u KiB RAM, %u free 4 KiB frames\n",
            pmm_ram_kib(), pmm_total_frames() - pmm_used_frames());
 
     paging_init();
@@ -225,25 +225,25 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        cores - and to do that they have to know what each is running */
     tlb_switch(paging_kernel_cr3());
     video_map_lfb();          /* before we write anything on the screen */
-    printk("[ OK ] Stronicowanie wlaczone (identycznosciowe %u MiB)\n",
+    printk("[ OK ] Paging enabled (identity-mapped %u MiB)\n",
            paging_identity_limit() / (1024 * 1024));
 
     heap_init();
     if (kmalloc_selftest())
-        printk("[ OK ] Sterta jadra: kmalloc/kfree dzialaja (%u KiB)\n",
+        printk("[ OK ] Kernel heap: kmalloc/kfree work (%u KiB)\n",
                heap_total_bytes() / 1024);
     else
         printk("[FAIL] kmalloc selftest!\n");
 
     initrd_init(mbi);
     if (initrd_file_count())
-        printk("[ OK ] initrd: %u plikow (komendy 'ls' i 'run')\n",
+        printk("[ OK ] initrd: %u files (the 'ls' and 'run' commands)\n",
                initrd_file_count());
 
     /* The shared library has to be ready before the first program
        starts - its frames are shared by all processes */
     if (dyn_init())
-        printk("[ OK ] Biblioteka %s: %u stron wspolnych dla procesow\n",
+        printk("[ OK ] Library %s: %u pages shared between processes\n",
                dyn_name(), dyn_pages());
 
     /* Under UEFI there is no BIOS memory to search - the pointer to
@@ -251,22 +251,22 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (mb2_rsdp())
         acpi_set_rsdp(mb2_rsdp());
     if (acpi_init())
-        printk("[ OK ] ACPI: tablice od '%s' (komendy 'poweroff', 'reboot')\n",
+        printk("[ OK ] ACPI: tables from '%s' (the 'poweroff', 'reboot' commands)\n",
                acpi_oem());
     else
-        printk("[ !! ] ACPI: brak tablic - komputera nie wylaczymy\n");
+        printk("[ !! ] ACPI: no tables - we cannot switch the machine off\n");
 
     blk_init();
     if (fs_init())
-        printk("[ OK ] Dysk %s + PFS gotowy (komendy 'fls', 'cat', 'write')\n",
+        printk("[ OK ] Disk %s + PFS ready (the 'fls', 'cat', 'write' commands)\n",
                blk_name());
 
     /* What the machine remembers about itself. Right after the file
        system, because that is where it is written - and before the
        network, because one of the settings is for the network. */
     config_load();
-    printk("[ OK ] Ustawienia: %s (%d pozycji, komenda 'set')\n",
-           config_get("nazwa"), config_count());
+    printk("[ OK ] Settings: %s (%d entries, the 'set' command)\n",
+           config_get("name"), config_count());
 
     int has_net = net_init();
     if (has_net) {
@@ -277,8 +277,8 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         if (dns)
             net_set_dns(dns);
         const uint8_t *m = netdev_mac();
-        printk("[ OK ] Siec: %s %x:%x:%x:%x:%x:%x "
-               "(komendy 'ifconfig', 'ping', 'dhcp')\n", netdev_name(),
+        printk("[ OK ] Network: %s %x:%x:%x:%x:%x:%x "
+               "(the 'ifconfig', 'ping', 'dhcp' commands)\n", netdev_name(),
                m[0], m[1], m[2], m[3], m[4], m[5]);
     }
 
@@ -289,16 +289,16 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        written for a single core. */
     int ncores = smp_init();
     if (ncores > 1)
-        printk("[ OK ] Procesory: %d (obudzonych %d, czekaja na prace)\n",
+        printk("[ OK ] Processors: %d (woken %d, waiting for work)\n",
                ncores, smp_started());
     else
-        printk("[ OK ] Procesory: 1\n");
+        printk("[ OK ] Processors: 1\n");
 
     scheduler_init();
     task_create("demo-A", demo_counter, (void *)0);
     task_create("demo-B", demo_counter, (void *)1);
     task_create("demo-C", demo_mortal, (void *)0);
-    ok("Scheduler: watki jadra, wywlaszczanie co 10 ms");
+    ok("Scheduler: kernel threads, preemption every 10 ms");
 
     /* Swapping only here: memory reclaim walks the task list, so the
        scheduler has to exist already */
@@ -318,9 +318,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        noise should say so at startup, not the first time somebody
        asks for one. */
     if (hda_init())
-        printk("[ OK ] Dzwiek: Intel HDA, %s\n", hda_name());
+        printk("[ OK ] Sound: Intel HDA, %s\n", hda_name());
     else
-        printk("[ -- ] Dzwiek: %s\n", hda_name());
+        printk("[ -- ] Sound: %s\n", hda_name());
 
     /* We take the IP address from the network - the DHCP client waits
        for the server's answers, so it has to run in a thread (after
@@ -337,9 +337,9 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        the prompt. */
     int text_mode = cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text");
     if (text_mode)
-        printk("Tryb tekstowy (linia polecen jadra) - pulpit: 'desktop'\n");
+        printk("Text mode (the kernel's command line) - desktop: 'desktop'\n");
     else
-        printk("Start pulpitu graficznego (wylaczysz opcja 'nodesktop')\n");
+        printk("Starting the graphical desktop ('nodesktop' switches it off)\n");
 
     shell_init();
 

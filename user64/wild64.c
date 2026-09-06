@@ -17,18 +17,18 @@
 
 void _start(void)
 {
-    print("[wild64] prosze jadro o wypisanie jego wlasnej pamieci\n");
+    print("[wild64] asking the kernel to print its own memory\n");
     int64_t ret = syscall64(SYS64_WRITE, (int64_t)KERNEL_ADDR, 16);
     if (ret < 0)
-        print("[wild64] jadro odmowilo - dobrze\n");
+        print("[wild64] the kernel refused - good\n");
     else
-        print("[wild64] BLAD: jadro wypisalo swoja pamiec!\n");
+        print("[wild64] ERROR: the kernel printed its memory!\n");
 
-    print("[wild64] to siegne tam sam - to powinno mnie zabic\n");
+    print("[wild64] then I will reach in myself - this should kill me\n");
     volatile unsigned char *p = (volatile unsigned char *)(uintptr_t)KERNEL_ADDR;
     unsigned char v = *p;
     (void)v;
 
-    print("[wild64] BLAD: przeczytalem pamiec jadra!\n");
+    print("[wild64] ERROR: I read the kernel's memory!\n");
     sys_exit(1);
 }

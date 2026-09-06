@@ -33,28 +33,28 @@ void _start(int argc, char **argv)
 {
     struct netinfo ni;
     if (netinfo(&ni) < 0) {
-        print("[udptest] system nie ma jeszcze adresu IP\n");
+        print("[udptest] the system has no IP address yet\n");
         sys_exit(1);
     }
 
     uint32_t target = argc > 1 ? parse_ip(argv[1]) : ni.ip;
     if (!target) {
-        print("[udptest] zly adres\n");
+        print("[udptest] a bad address\n");
         sys_exit(1);
     }
 
     int32_t sock = udp_open(0);         /* an ephemeral port */
     if (sock < 0) {
-        print("[udptest] brak wolnego gniazda\n");
+        print("[udptest] no free socket\n");
         sys_exit(1);
     }
 
-    print("[udptest] wysylam '" MSG "' do ");
+    print("[udptest] sending '" MSG "' do ");
     print_ip(target);
     print(":7777\n");
 
     if (udp_send(sock, target, PORT, MSG, sizeof(MSG) - 1) < 0) {
-        print("[udptest] wyslanie nie powiodlo sie\n");
+        print("[udptest] sending did not work\n");
         udp_close(sock);
         sys_exit(1);
     }
@@ -65,12 +65,12 @@ void _start(int argc, char **argv)
     udp_close(sock);
 
     if (n < 0) {
-        print("[udptest] brak odpowiedzi (timeout 3 s)\n");
+        print("[udptest] no answer (3 s timeout)\n");
         sys_exit(1);
     }
     buf[n] = '\0';
 
-    print("[udptest] echo wrocilo: ");
+    print("[udptest] the echo came back: ");
     print(buf);
     print(" (od ");
     print_ip(from_ip);

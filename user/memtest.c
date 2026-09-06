@@ -12,7 +12,7 @@
 
 void _start(void)
 {
-    print("[memtest] start sterty: ");
+    print("[memtest] heap start: ");
     print_dec((uint32_t)sys_sbrk(0));
     print("\n");
 
@@ -21,14 +21,14 @@ void _start(void)
     for (int b = 0; b < BLOCKS; b++) {
         blk[b] = (unsigned char *)malloc(BLOCK_LEN);
         if (!blk[b]) {
-            print("[memtest] malloc zwrocil NULL - blad!\n");
+            print("[memtest] malloc returned NULL - an error!\n");
             sys_exit(1);
         }
         for (int i = 0; i < BLOCK_LEN; i++)
             blk[b][i] = (unsigned char)(b * 31 + i);
     }
 
-    print("[memtest] koniec sterty:  ");
+    print("[memtest] end of the heap: ");
     print_dec((uint32_t)sys_sbrk(0));
     print("\n");
 
@@ -36,14 +36,14 @@ void _start(void)
     for (int b = 0; b < BLOCKS; b++)
         for (int i = 0; i < BLOCK_LEN; i++)
             if (blk[b][i] != (unsigned char)(b * 31 + i)) {
-                print("[memtest] BLAD: uszkodzony bajt!\n");
+                print("[memtest] ERROR: a damaged byte!\n");
                 sys_exit(1);
             }
 
     print("[memtest] OK: ");
     print_dec(BLOCKS);
-    print(" blokow po ");
+    print(" blocks of ");
     print_dec(BLOCK_LEN);
-    print(" B zapisanych i zweryfikowanych\n");
+    print(" B written and verified\n");
     sys_exit(0);
 }

@@ -11,14 +11,14 @@ void _start(void)
 {
     unsigned char *p = (unsigned char *)sys_mmap(LEN);
     if (!p) {
-        print("[mmaptest] mmap zwrocil NULL - blad!\n");
+        print("[mmaptest] mmap returned NULL - an error!\n");
         sys_exit(1);
     }
 
     /* fresh memory is to be zeroed */
     for (int i = 0; i < LEN; i++)
         if (p[i] != 0) {
-            print("[mmaptest] pamiec nie jest wyzerowana!\n");
+            print("[mmaptest] the memory is not zeroed!\n");
             sys_exit(1);
         }
 
@@ -26,10 +26,10 @@ void _start(void)
         p[i] = (unsigned char)(i * 7 + 1);
     for (int i = 0; i < LEN; i++)
         if (p[i] != (unsigned char)(i * 7 + 1)) {
-            print("[mmaptest] BLAD: uszkodzony bajt!\n");
+            print("[mmaptest] ERROR: a damaged byte!\n");
             sys_exit(1);
         }
 
-    print("[mmaptest] OK: 3 strony przez mmap zapisane i zweryfikowane\n");
+    print("[mmaptest] OK: 3 pages through mmap written and verified\n");
     sys_exit(0);
 }

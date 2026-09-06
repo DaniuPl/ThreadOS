@@ -305,7 +305,7 @@ static int try_port(int port)
     usbhc_claim(port);
     present = 1;
     task_create("usbnet", rx_thread, 0);
-    printk("[ OK ] Karta sieciowa USB (RNDIS): "
+    printk("[ OK ] A USB network card (RNDIS): "
            "%x:%x:%x:%x:%x:%x\n",
            (uint32_t)mac[0], (uint32_t)mac[1], (uint32_t)mac[2],
            (uint32_t)mac[3], (uint32_t)mac[4], (uint32_t)mac[5]);

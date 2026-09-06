@@ -18,13 +18,13 @@ static const char *exception_names[32] = {
     "Overflow", "BOUND Range Exceeded", "Invalid Opcode",
     "Device Not Available", "Double Fault", "Coprocessor Segment Overrun",
     "Invalid TSS", "Segment Not Present", "Stack-Segment Fault",
-    "General Protection Fault", "Page Fault", "(zarezerwowany)",
+    "General Protection Fault", "Page Fault", "(reserved)",
     "x87 FPU Error", "Alignment Check", "Machine Check",
     "SIMD FP Exception", "Virtualization Exception", "Control Protection",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)",
 };
 
 static irq_handler_t irq_handlers[16];
@@ -138,32 +138,32 @@ static void isr_dispatch(struct regs *r)
 
         /* A breakpoint (int3) is a trap exception: report it and carry on */
         if (r->int_no == 3) {
-            printk("[INT3] breakpoint pod eip=%x\n", r->eip);
+            printk("[INT3] a breakpoint at eip=%x\n", r->eip);
             return;
         }
 
         /* An exception in ring 3: only the user process dies, not the system */
         if ((r->cs & 3) == 3) {
-            printk("\n[jadro] proces '%s' ubity na rdzeniu %d: "
+            printk("\n[kernel] process '%s' killed on core %d: "
                    "%s (err=%x, eip=%x)\n",
                    task_current_name(), smp_core(),
                    exception_names[r->int_no], r->err_code, r->eip);
             if (r->int_no == 14) {
                 uint32_t cr2;
                 __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
-                printk("[jadro] proces siegnal po adres %x\n", cr2);
+                printk("[kernel] the process reached for the address %x\n", cr2);
             }
             task_exit(-1);          /* killed by a CPU exception */
         }
 
-        printk("\n!!! WYJATEK CPU %u: %s (err=%x) pod eip=%x\n",
+        printk("\n!!! CPU EXCEPTION %u: %s (err=%x) at eip=%x\n",
                r->int_no, exception_names[r->int_no], r->err_code, r->eip);
         if (r->int_no == 14) {
             uint32_t cr2;
             __asm__ volatile("movl %%cr2, %0" : "=r"(cr2));
-            printk("Page fault pod adresem (CR2): %x\n", cr2);
+            printk("Page fault at the address (CR2): %x\n", cr2);
         }
-        printk("System zatrzymany.\n");
+        printk("The system has stopped.\n");
         for (;;)
             __asm__ volatile("cli; hlt");
     }

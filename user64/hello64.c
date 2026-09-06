@@ -28,18 +28,18 @@ static void say(const char *prefix, uint64_t value)
 
 void _start(void)
 {
-    print("[hello64] czesc, jestem ELF-em 64-bitowym z initrd\n");
+    print("[hello64] hello, I am a 64-bit ELF from the initrd\n");
 
     /* Proof that a file read from the initrd really runs in ring 3 */
     sys_report_ring();
 
     uint64_t start = sys_ticks();
     for (int i = 1; i <= 3; i++) {
-        say("[hello64] licze: ", (uint64_t)i);
+        say("[hello64] counting: ", (uint64_t)i);
         sys_sleep(50);
     }
-    say("[hello64] uplynelo tyknac: ", sys_ticks() - start);
+    say("[hello64] ticks gone by: ", sys_ticks() - start);
 
-    print("[hello64] koncze sie grzecznie\n");
+    print("[hello64] ending politely\n");
     sys_exit(7);
 }

@@ -44,7 +44,7 @@ static int puth(int n, uint64_t v)
 
 static void fail_with(const char *co)
 {
-    print("[heap64] BLAD: ");
+    print("[heap64] ERROR: ");
     print(co);
     print("\n");
     sys_exit(1);
@@ -54,21 +54,21 @@ void _start(void)
 {
     void *poczatek = sys_sbrk(0);
     if (!poczatek)
-        fail_with("nie mam sterty");
+        fail_with("I have no heap");
 
-    int n = put(0, "[heap64] sterta zaczyna sie pod ");
+    int n = put(0, "[heap64] the heap starts at ");
     n = puth(n, (uint64_t)(uintptr_t)poczatek);
-    n = put(n, ", prosze o ");
+    n = put(n, ", asking for ");
     n = putn(n, REQUEST / 1024);
     n = put(n, " KiB (");
     n = putn(n, REQUEST / PAGE_MARK);
-    n = put(n, " stron)\n");
+    n = put(n, " pages)\n");
     out[n] = 0;
     print(out);
 
     char *memory = (char *)sys_sbrk(REQUEST);
     if (!memory)
-        fail_with("sbrk odmowil");
+        fail_with("sbrk refused");
 
     /* We touch only a few pages - the rest is not to exist */
     for (int i = 0; i < TOUCH; i++)
@@ -78,25 +78,25 @@ void _start(void)
     for (int i = 0; i < TOUCH; i++)
         for (int j = 0; j < PAGE_MARK; j++)
             if (memory[i * PAGE_MARK + j] != (char)(i * 31 + j))
-                fail_with("pamiec oddala co innego, niz wpisano");
+                fail_with("the memory gives back something other than what was written");
 
-    n = put(0, "[heap64] dotknalem ");
+    n = put(0, "[heap64] I touched ");
     n = putn(n, TOUCH);
-    n = put(n, " z nich i wszystkie oddaly to, co wpisalem\n");
+    n = put(n, " of them, and every one gave back what I wrote\n");
     out[n] = 0;
     print(out);
 
     /* Shrinking gives the memory back at once */
     if (!sys_sbrk(-REQUEST))
-        fail_with("nie moge oddac pamieci");
+        fail_with("I cannot give the memory back");
     if (sys_sbrk(0) != poczatek)
-        fail_with("granica nie wrocila tam, gdzie byla");
-    print("[heap64] oddalem wszystko, granica wrocila na miejsce\n");
+        fail_with("the break did not come back where it was");
+    print("[heap64] I gave it all back, and the break came home\n");
 
     /* A request beyond our own memory has to be rejected */
     if (sys_sbrk(-4096))
-        fail_with("jadro pozwolilo zejsc ponizej sterty");
-    print("[heap64] ponizej wlasnej sterty jadro nie puszcza\n");
+        fail_with("the kernel let me go below the heap");
+    print("[heap64] below its own heap the kernel does not let go\n");
 
     sys_exit(0);
 }

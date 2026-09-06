@@ -66,7 +66,7 @@ struct superblock {
 
 /* The on-disk layout depends on the inode size - let the compiler watch it */
 _Static_assert(sizeof(struct inode) == INODE_SIZE,
-               "i-wezel musi miec dokladnie INODE_SIZE bajtow");
+               "an inode has to be exactly INODE_SIZE bytes");
 
 static int ready;
 static struct inode inodes[FS_MAX_FILES];
@@ -306,7 +306,7 @@ static void format_disk(void)
 
     memset(inodes, 0, sizeof(inodes));
     flush_inodes();
-    printk("[ OK ] PFS: pusty dysk sformatowany (%u blokow po %u B)\n",
+    printk("[ OK ] PFS: an empty disk formatted (%u blocks of %u B)\n",
            total_blocks, FS_BLOCK);
 }
 
@@ -398,17 +398,17 @@ static int find_our_partition(void)
 int fs_init(void)
 {
     if (!blk_present()) {
-        printk("[ !! ] FS: brak dysku\n");
+        printk("[ !! ] FS: there is no disk\n");
         return 0;
     }
 
     if (!fit(0, blk_sectors())) {
-        printk("[ !! ] FS: dysk za maly (%u blokow)\n", total_blocks);
+        printk("[ !! ] FS: the disk is too small (%u blocks)\n", total_blocks);
         return 0;
     }
 
     if (block_read(0, block_buf) < 0) {
-        printk("[ !! ] FS: blad odczytu superbloku\n");
+        printk("[ !! ] FS: could not read the superblock\n");
         return 0;
     }
 
@@ -434,7 +434,7 @@ int fs_init(void)
            actually lives. */
         int p = find_our_partition();
         if (p) {
-            printk("[ OK ] PFS: w partycji %u (od sektora %u)\n",
+            printk("[ OK ] PFS: in partition %u (from sector %u)\n",
                    (uint32_t)p, fs_base);
             for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
                 block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
@@ -446,11 +446,11 @@ int fs_init(void)
         }
 
         if (!disk_is_blank()) {
-            printk("[ !! ] FS: na dysku cos JEST, a nie jest to PFS - "
-                   "nie ruszam go.\n");
-            printk("       Jesli caly dysk ma byc dla ProtonOS-a, wpisz "
-                   "'formatuj' (skasuje wszystko);\n");
-            printk("       zeby zajac jedna partycje - 'formatuj N'.\n");
+            printk("[ !! ] FS: there IS something on the disk, and it is not a PFS - "
+                   "I am not touching it.\n");
+            printk("       If the whole disk is to be ProtonOS', type "
+                   "'format' (it erases everything);\n");
+            printk("       to take one partition - 'format N'.\n");
             return 0;
         }
         format_disk();
@@ -958,14 +958,14 @@ int fs_read(const char *name, void *buf, uint32_t max)
 void fs_list(void)
 {
     if (!ready) {
-        printk("FS: brak dysku\n");
+        printk("FS: there is no disk\n");
         return;
     }
     char name[FS_NAME_MAX + 1];
     uint32_t size;
     int is_d;
     int n = 0;
-    printk("Katalog glowny:\n");
+    printk("Root directory:\n");
     for (int i = 0; fs_readdir(FS_ROOT, i, name, &size, &is_d); i++) {
         if (is_d)
             printk("  %s/\n", name);
@@ -974,5 +974,5 @@ void fs_list(void)
         n++;
     }
     if (!n)
-        printk("  (pusty)\n");
+        printk("  (empty)\n");
 }

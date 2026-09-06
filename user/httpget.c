@@ -43,7 +43,7 @@ void _start(int argc, char **argv)
     }
 
     if (argc < 2) {
-        print("uzycie: httpget [-k] <host|ip> [port] [sciezka] [plik]\n");
+        print("usage: httpget [-k] <host|ip> [port] [path] [file]\n");
         sys_exit(1);
     }
 
@@ -57,7 +57,7 @@ void _start(int argc, char **argv)
     int use_tls = 0;
     if (!http_parse_url(argv[1], host, sizeof(host), &parsed_port,
                         path, sizeof(path), &use_tls)) {
-        print("[httpget] zly adres\n");
+        print("[httpget] a bad address\n");
         sys_exit(1);
     }
     if (port)
@@ -78,7 +78,7 @@ void _start(int argc, char **argv)
     if (outfile) {
         st.fd = sys_open(outfile, O_CREATE | O_WRITE);
         if (st.fd < 0) {
-            print("[httpget] nie moge otworzyc pliku ");
+            print("[httpget] I cannot open the file ");
             print(outfile);
             print("\n");
             sys_exit(1);
@@ -91,14 +91,14 @@ void _start(int argc, char **argv)
         uint32_t roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
         http_set_roots(roots, roots_len, !insecure);
         if (insecure)
-            print("[httpget] UWAGA: -k, certyfikat nie bedzie sprawdzany\n");
+            print("[httpget] WARNING: -k, the certificate will not be checked\n");
     }
 
     struct http_result res;
     for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
         uint32_t ip = http_resolve(host);
         if (!ip) {
-            print("[httpget] nie znam adresu ");
+            print("[httpget] I do not know the address of ");
             print(host);
             print("\n");
             if (st.fd >= 0)
@@ -118,7 +118,7 @@ void _start(int argc, char **argv)
 
         if (http_get(ip, parsed_port, host, path, use_tls, body_sink, &st,
                      &res) < 0) {
-            print("[httpget] nie udalo sie polaczyc");
+            print("[httpget] could not connect");
             if (use_tls && res.verify_err) {
                 print(": ");
                 print(cert_error_text(res.verify_err));
@@ -134,7 +134,7 @@ void _start(int argc, char **argv)
         if (!redirect || !res.location[0])
             break;
 
-        print("[httpget] przekierowanie -> ");
+        print("[httpget] redirect -> ");
         print(res.location);
         print("\n");
         if (!http_apply_location(res.location, host, sizeof(host),
@@ -147,10 +147,10 @@ void _start(int argc, char **argv)
         sys_close(st.fd);
 
     if (use_tls) {
-        print(res.verified ? "[httpget] certyfikat sprawdzony (wystawca, "
-                             "nazwa, daty)\n"
-                           : "[httpget] certyfikat NIESPRAWDZONY - kanal "
-                             "szyfrowany, ale bez potwierdzenia tozsamosci\n");
+        print(res.verified ? "[httpget] certificate checked (issuer, "
+                             "name, dates)\n"
+                           : "[httpget] certificate NOT CHECKED - the channel is "
+                             "encrypted, but nobody's identity is confirmed\n");
     }
 
     print("[httpget] HTTP ");

@@ -24,7 +24,7 @@ static int failures;
 static void result(const char *what, int ok)
 {
     print(what);
-    print(ok ? ": OK\n" : ": BLAD\n");
+    print(ok ? ": OK\n" : ": FAILED\n");
     if (!ok)
         failures++;
 }
@@ -41,30 +41,30 @@ void _start(void)
     struct x509_cert cert;
     uint8_t hash[32];
 
-    print("[cert] parser X.509 i podpisy RSA\n");
+    print("[cert] the X.509 parser and RSA signatures\n");
 
-    result("rozbior certyfikatu DER",
+    result("taking a DER certificate apart",
            x509_parse(&cert, cert_der, sizeof(cert_der)) == 0);
     if (failures)
         sys_exit(1);
 
-    print("      wazny od ");
+    print("      valid from ");
     print(cert.not_before);
     print(" do ");
     print(cert.not_after);
     print("\n");
 
-    result("klucz publiczny RSA znaleziony",
+    result("the RSA public key was found",
            cert.key_type == X509_KEY_RSA && cert.mod_len == 256);
-    result("wykladnik publiczny to 65537", cert.exp == 65537);
-    result("algorytm podpisu: RSA + SHA-256",
+    result("the public exponent is 65537", cert.exp == 65537);
+    result("signature algorithm: RSA + SHA-256",
            cert.sig_alg == X509_ALG_RSA_SHA256);
-    result("dlugosc podpisu zgadza sie z kluczem",
+    result("the signature length matches the key",
            cert.sig_len == cert.mod_len);
 
     /* The signature covers the tbsCertificate bytes */
     sha256(cert.tbs, cert.tbs_len, hash);
-    result("podpis wlasny certyfikatu (PKCS#1 v1.5)",
+    result("the certificate's own signature (PKCS#1 v1.5)",
            rsa_verify_pkcs1_sha256(cert.mod, cert.mod_len, cert.exp,
                                    cert.sig, cert.sig_len, hash));
 
@@ -78,11 +78,11 @@ void _start(void)
     struct x509_cert bad;
     if (x509_parse(&bad, tampered, sizeof(cert_der)) == 0) {
         sha256(bad.tbs, bad.tbs_len, hash);
-        result("podmieniona tresc odrzucona",
+        result("changed content refused",
                !rsa_verify_pkcs1_sha256(bad.mod, bad.mod_len, bad.exp,
                                         bad.sig, bad.sig_len, hash));
     } else {
-        result("podmieniona tresc odrzucona (juz na parserze)", 1);
+        result("changed content refused (in the parser already)", 1);
     }
 
     /* A PSS signature - that is what TLS 1.3 requires in
@@ -91,53 +91,53 @@ void _start(void)
     while (pss_msg[msglen])
         msglen++;
     sha256(pss_msg, msglen, hash);
-    result("podpis w schemacie PSS",
+    result("a signature in the PSS scheme",
            rsa_verify_pss_sha256(cert.mod, cert.mod_len, cert.exp,
                                  pss_sig, sizeof(pss_sig), hash, 2048));
 
     hash[0] ^= 0x01;
-    result("PSS: zly skrot odrzucony",
+    result("PSS: a wrong digest refused",
            !rsa_verify_pss_sha256(cert.mod, cert.mod_len, cert.exp,
                                   pss_sig, sizeof(pss_sig), hash, 2048));
 
     /* A host name match from SubjectAltName, or the lack of one */
     if (cert.san) {
-        result("SubjectAltName: pasuje 'protonos.test'",
+        result("SubjectAltName: 'protonos.test' matches",
                x509_matches_host(&cert, "protonos.test"));
-        result("SubjectAltName: obca nazwa odrzucona",
-               !x509_matches_host(&cert, "zly.przyklad"));
+        result("SubjectAltName: a foreign name refused",
+               !x509_matches_host(&cert, "wrong.example"));
     } else {
-        print_str("      ", "certyfikat bez SubjectAltName (stary styl)");
+        print_str("      ", "a certificate with no SubjectAltName (the old style)");
     }
 
     /* --- a certificate on the P-256 curve --- */
     struct x509_cert ec;
-    result("rozbior certyfikatu ECDSA",
+    result("taking an ECDSA certificate apart",
            x509_parse(&ec, ec_cert_der, sizeof(ec_cert_der)) == 0);
-    result("klucz na krzywej P-256 rozpoznany",
+    result("a key on the P-256 curve recognised",
            ec.key_type == X509_KEY_EC && ec.ec_bits == 256 &&
            ec.ec_point_len == 65);
-    result("algorytm podpisu: ECDSA + SHA-256",
+    result("signature algorithm: ECDSA + SHA-256",
            ec.sig_alg == X509_ALG_ECDSA_SHA256);
 
     uint32_t t0, t1;
     t0 = sys_getticks();
     sha256(ec.tbs, ec.tbs_len, hash);
-    result("podpis wlasny certyfikatu (ECDSA P-256)",
+    result("the certificate's own signature (ECDSA P-256)",
            ecdsa_verify_der(ec_curve_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec.sig, ec.sig_len));
     t1 = sys_getticks();
-    print("      sprawdzenie podpisu ECDSA zajelo ~");
+    print("      checking the ECDSA signature took ~");
     print_dec((t1 - t0) * 10);
     print(" ms\n");
 
     hash[0] ^= 0x01;
-    result("ECDSA: zly skrot odrzucony",
+    result("ECDSA: a wrong digest refused",
            !ecdsa_verify_der(ec_curve_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                              ec.sig, ec.sig_len));
 
     sha256(pss_msg, msglen, hash);
-    result("podpis ECDSA wiadomosci (osobny wektor)",
+    result("an ECDSA signature of a message (a separate vector)",
            ecdsa_verify_der(ec_curve_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec_sig, sizeof(ec_sig)));
 
@@ -145,26 +145,26 @@ void _start(void)
     struct x509_cert ec384;
     uint8_t hash384[48];
 
-    result("rozbior certyfikatu P-384",
+    result("taking a P-384 certificate apart",
            x509_parse(&ec384, p384_cert_der, sizeof(p384_cert_der)) == 0);
-    result("klucz na krzywej P-384 rozpoznany",
+    result("a key on the P-384 curve recognised",
            ec384.key_type == X509_KEY_EC && ec384.ec_bits == 384 &&
            ec384.ec_point_len == 97);
-    result("algorytm podpisu: ECDSA + SHA-384",
+    result("signature algorithm: ECDSA + SHA-384",
            ec384.sig_alg == X509_ALG_ECDSA_SHA384);
 
     t0 = sys_getticks();
     sha384(ec384.tbs, ec384.tbs_len, hash384);
-    result("podpis wlasny certyfikatu (ECDSA P-384)",
+    result("the certificate's own signature (ECDSA P-384)",
            ecdsa_verify_der(ec_curve_p384(), ec384.ec_point, ec384.ec_point_len,
                             hash384, 48, ec384.sig, ec384.sig_len));
     t1 = sys_getticks();
-    print("      sprawdzenie podpisu P-384 zajelo ~");
+    print("      checking the P-384 signature took ~");
     print_dec((t1 - t0) * 10);
     print(" ms\n");
 
     hash384[0] ^= 0x01;
-    result("P-384: zly skrot odrzucony",
+    result("P-384: a wrong digest refused",
            !ecdsa_verify_der(ec_curve_p384(), ec384.ec_point, ec384.ec_point_len,
                              hash384, 48, ec384.sig, ec384.sig_len));
 
@@ -179,7 +179,7 @@ void _start(void)
     for (int i = 0; i < 48; i++)
         if (hash384[i] != want384[i])
             same = 0;
-    result("SHA-384('abc') zgadza sie z FIPS 180-4", same);
+    result("SHA-384('abc') matches FIPS 180-4", same);
 
     /* --- the built-in trust store --- */
     int roots_ok = 0, roots_bad = 0;
@@ -210,18 +210,18 @@ void _start(void)
         p += rlen;
         left -= rlen;
     }
-    print("      wbudowanych korzeni CA: ");
+    print("      built-in CA roots: ");
     print_dec((uint32_t)roots_ok);
     print("\n");
-    result("wszystkie wbudowane korzenie daja sie rozczytac",
+    result("every built-in root can be read",
            roots_bad == 0 && roots_ok == CA_ROOTS_COUNT);
 
     if (failures) {
-        print("[cert] BLEDOW: ");
+        print("[cert] FAILURES: ");
         print_dec((uint32_t)failures);
         print("\n");
         sys_exit(1);
     }
-    print("[cert] wszystko sie zgadza\n");
+    print("[cert] everything matches\n");
     sys_exit(0);
 }

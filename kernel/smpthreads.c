@@ -74,7 +74,7 @@ void smpthreads_test(void)
     /* --- four portions at once, each in its own thread --- */
     start = pit_ticks();
     for (uint32_t i = 0; i < THREADS; i++)
-        task_create_anycore("liczy", thread, (void *)(uintptr_t)i);
+        task_create_anycore("counting", thread, (void *)(uintptr_t)i);
     while (__atomic_load_n(&finished, __ATOMIC_SEQ_CST) < THREADS)
         task_sleep(10);
     uint32_t time_four = pit_ticks() - start;
@@ -88,15 +88,15 @@ void smpthreads_test(void)
            which core computed it */
         if (result[i] != pattern)
             matches = 0;
-        printk("  watek%d: rdzenie %x, wynik %u\n", i, mask[i], result[i]);
+        printk("  thread%d: cores %x, result %u\n", i, mask[i], result[i]);
     }
 
-    printk("Watkow: %u po %u krokow, rdzeni w maszynie: %d\n",
+    printk("Threads: %u of %u steps, cores in the machine: %d\n",
            (uint32_t)THREADS, STEPS, smp_cpus());
-    printk("Rdzenie, ktore je prowadzily: %x\n", all_cores);
-    printk("Wynik: %s\n", matches ? "zgadza sie" : "NIE ZGADZA SIE");
-    printk("Jedna porcja: %u tyknac, cztery naraz: %u tyknac\n",
+    printk("The cores that ran them: %x\n", all_cores);
+    printk("Result: %s\n", matches ? "matches" : "DOES NOT MATCH");
+    printk("One batch: %u ticks, four at once: %u ticks\n",
            time_one, time_four);
-    printk("Watki poza rdzeniem rozruchowym: %s\n",
-           (all_cores & ~1u) ? "tak" : "NIE");
+    printk("Threads off the boot core: %s\n",
+           (all_cores & ~1u) ? "yes" : "NO");
 }

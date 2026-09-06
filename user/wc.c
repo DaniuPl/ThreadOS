@@ -20,9 +20,9 @@ void _start(void)
         }
     }
 
-    print("wc: wierszy=");
+    print("wc: lines=");
     print_dec(lines);
-    print(" bajtow=");
+    print(" bytes=");
     print_dec(bytes);
     print("\n");
     sys_exit(0);

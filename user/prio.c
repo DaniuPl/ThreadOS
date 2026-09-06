@@ -34,7 +34,7 @@ void _start(void)
     int n = sys_thread(worker_normal, 0);
     int l = sys_thread(worker_low, 0);
     if (n < 0 || l < 0) {
-        print("[prio] blad tworzenia watkow\n");
+        print("[prio] the threads could not be created\n");
         sys_exit(1);
     }
 
@@ -43,9 +43,9 @@ void _start(void)
     sys_wait(n);
     sys_wait(l);
 
-    print("[prio] normalny=");
+    print("[prio] normal=");
     print_dec((uint32_t)cnt_normal);
-    print(" niski=");
+    print(" low=");
     print_dec((uint32_t)cnt_low);
     print("\n");
     sys_exit(0);

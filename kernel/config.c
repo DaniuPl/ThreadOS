@@ -35,26 +35,26 @@ struct setting {
 /* Every one of these is read somewhere. In order: the shell prompt,
    the network, the console and the desktop. */
 static struct setting settings[] = {
-    { "nazwa",  "proton",   "nazwa maszyny - widac ja w zachecie", 0, { 0 } },
-    { "dns",    "0.0.0.0",  "serwer nazw; 0.0.0.0 = ten z DHCP",  0, { 0 } },
-    { "kolor",  "11",       "kolor zachety shella, 0-15",         0, { 0 } },
-    { "tlo",    "0",        "tlo pulpitu: 0 morskie, 1 granat,\n"
-                            "2 fiolet, 3 zielen, 4 braz, 5 szarosc", 0, { 0 } },
-    { "tapeta", "",         "plik z tapeta (pusty = gradient);\n"
-                            "robi go program 'mkwall'", 0, { 0 } },
-    { "pasek",  "100",      "szerokosc paska zadan: 100, 75 albo 50\n"
-                            "procent ekranu", 0, { 0 } },
-    { "ikony",  "0",        "ikony na pasku: 0 od lewej, 1 na srodku,\n"
-                            "2 od prawej", 0, { 0 } },
-    { "glosnosc", "80",     "glosnosc, 0-100 (0 = cisza)",        0, { 0 } },
-    { "skala",  "0",        "ile pikseli ekranu na jeden pulpitu:\n"
-                            "0 wybiera ekran (duzy panel dostaje 2)", 0, { 0 } },
+    { "name",  "proton",   "the machine's name - it shows in the prompt", 0, { 0 } },
+    { "dns",    "0.0.0.0",  "name server; 0.0.0.0 = the one from DHCP",  0, { 0 } },
+    { "color",  "11",       "the shell prompt's colour, 0-15",         0, { 0 } },
+    { "background",    "0",        "desktop background: 0 sea, 1 navy,\n"
+                            "2 violet, 3 green, 4 brown, 5 grey", 0, { 0 } },
+    { "wallpaper", "",         "the wallpaper file (empty = a gradient);\n"
+                            "the 'mkwall' program makes one", 0, { 0 } },
+    { "taskbar",  "100",      "the taskbar's width: 100, 75 or 50\n"
+                            "percent of the screen", 0, { 0 } },
+    { "icons",  "0",        "icons on the bar: 0 from the left, 1 centred,\n"
+                            "2 from the right", 0, { 0 } },
+    { "volume", "80",     "volume, 0-100 (0 = silence)",        0, { 0 } },
+    { "scale",  "0",        "screen pixels per desktop pixel:\n"
+                            "0 lets the screen decide (a big panel gets 2)", 0, { 0 } },
     /* Not the password - a number computed from it. The default is the
        number for 'proton', so a machine on which nobody ever set one
        still has a password. Hidden, because a number nobody can type
        back is not a setting: it is changed by the 'haslo' command. */
-    { "haslo",  "12265581074349227503",
-                            "haslo admina (liczba policzona z hasla)",
+    { "password",  "12265581074349227503",
+                            "the admin password (a number computed from it)",
                             1, { 0 } },
 };
 

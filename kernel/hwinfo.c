@@ -44,70 +44,70 @@
 static const char *pci_class_name(uint32_t class)
 {
     switch (class >> 24) {
-    case 0x01: return "dysk";
-    case 0x02: return "siec";
-    case 0x03: return "grafika";
-    case 0x04: return "dzwiek/wideo";
-    case 0x06: return "mostek";
-    case 0x08: return "kontroler systemowy";
-    case 0x09: return "wejscie (mysz, tablet)";
-    case 0x0C: return ((class >> 16) & 0xFF) == 0x03 ? "USB" : "magistrala szeregowa";
-    case 0x11: return "przetwarzanie sygnalu";
-    default:   return "inne";
+    case 0x01: return "disk";
+    case 0x02: return "network";
+    case 0x03: return "graphics";
+    case 0x04: return "sound/video";
+    case 0x06: return "bridge";
+    case 0x08: return "system controller";
+    case 0x09: return "input (mouse, tablet)";
+    case 0x0C: return ((class >> 16) & 0xFF) == 0x03 ? "USB" : "serial bus";
+    case 0x11: return "signal processing";
+    default:   return "other";
     }
 }
 
 void hwinfo_print(void)
 {
-    printk("ekran:    %dx%d, %s, skala %d, bufor %s\n",
+    printk("screen:   %dx%d, %s, scale %d, buffer %s\n",
            video_w(), video_h(),
-           video_true_colour() ? "kolory" : "paleta 256", video_scale(),
-           video_have_loader_lfb() ? "od loadera" : "ustawiony przez jadro");
+           video_true_colour() ? "true colour" : "256-colour palette", video_scale(),
+           video_have_loader_lfb() ? "from the loader" : "set by the kernel");
 
     if (!ps2_controller_present())
-        printk("PS/2:     BRAK kontrolera 8042 - ani klawiatury, ani "
-               "myszy na tych portach\n");
+        printk("PS/2:     NO 8042 controller - neither a keyboard nor a "
+               "mouse on these ports\n");
     else
-        printk("PS/2:     kontroler 8042 jest, mysz %s\n",
-               mouse_present() ? (mouse_has_wheel() ? "tak (z kolkiem)"
-                                                    : "tak (bez kolka)")
-                               : "NIE");
-    printk("USB:      %s, klawiatura %s, mysz %s\n",
-           usbhc_name(), usbkbd_present() ? "tak" : "nie",
-           usbmouse_present() ? "tak" : "nie");
+        printk("PS/2:     the 8042 controller is there, mouse %s\n",
+               mouse_present() ? (mouse_has_wheel() ? "yes (with a wheel)"
+                                                    : "yes (no wheel)")
+                               : "NO");
+    printk("USB:      %s, keyboard %s, mouse %s\n",
+           usbhc_name(), usbkbd_present() ? "yes" : "no",
+           usbmouse_present() ? "yes" : "no");
     /* And when there is none, WHY - because "no USB" is not something
        anybody can act on, while "the controller sits above 4 GiB" is. */
     if (usbhc_why())
         printk("          (%s)\n", usbhc_why());
     for (int i = 0; i < usbmass_count(); i++)
-        printk("          dysk USB: %s, %u sektorow po 512 B (%u MiB)\n",
+        printk("          USB disk: %s, %u sectors of 512 B (%u MiB)\n",
                usbmass_name(i), usbmass_sectors(i),
                usbmass_sectors(i) / 2048);
     if (bt_present())
         printk("Bluetooth: %s, %s, %s\n", bt_address(), bt_name(),
                bt_version());
     else
-        printk("Bluetooth: brak (%s)\n", bt_why());
+        printk("Bluetooth: none (%s)\n", bt_why());
 
     /* The disk, and what is already on it. A machine booted from a
        stick sees the laptop's own disk here - and before anyone
        proposes to write to it, it is worth reading what would be
        written over. */
-    printk("dysk:     %s, %u sektorow po 512 B (%u MiB)\n", blk_name(),
+    printk("disk:     %s, %u sectors of 512 B (%u MiB)\n", blk_name(),
            blk_sectors(), blk_sectors() / 2048);
     int np = part_scan();
     if (np < 0)
-        printk("          brak dysku\n");
+        printk("          no disk\n");
     else if (np == 0)
-        printk("          bez tablicy partycji - caly dysk jest nasz\n");
+        printk("          no partition table - the whole disk is ours\n");
     else {
-        printk("          tablica %s, partycji: %u\n",
+        printk("          %s table, partitions: %u\n",
                part_is_gpt() ? "GPT" : "MBR", (uint32_t)np);
         for (int i = 0; i < np; i++) {
             struct partition pt;
             if (!part_get(i, &pt))
                 break;
-            printk("          %u: od %u, %u MiB, %s%s%s\n",
+            printk("          %u: from %u, %u MiB, %s%s%s\n",
                    (uint32_t)(i + 1), (uint32_t)pt.start,
                    (uint32_t)(pt.sectors / 2048), pt.kind,
                    pt.label[0] ? " " : "", pt.label);
@@ -129,17 +129,17 @@ void hwinfo_print(void)
         /* printk has no field widths, so the columns are spelled out
            rather than padded - and a slot number is more readable in
            decimal here anyway. */
-        printk("  %u.%u  %x:%x  klasa %x.%x  %s\n",
+        printk("  %u.%u  %x:%x  class %x.%x  %s\n",
                (uint32_t)d.slot, (uint32_t)d.func,
                (uint32_t)d.vendor, (uint32_t)d.device,
                (uint32_t)base, (uint32_t)sub, pci_class_name(class));
     }
 
     if (!mouse_present() && !usbmouse_present() && serial_bus)
-        printk("Wskaznika nie ma na zadnej znanej drodze, a w maszynie\n"
-               "jest %d kontroler(ow) magistrali szeregowej - touchpad\n"
-               "siedzi zapewne na I2C (HID przez I2C), ktorego nie umiemy.\n"
-               "Mysz w gniazdo USB zadziala.\n", serial_bus);
+        printk("The pointer is on no road we know, and this machine has\n"
+               "%d serial bus controller(s) - the touchpad is probably\n"
+               "on I2C (HID over I2C), which we cannot speak.\n"
+               "A mouse in a USB socket will work.\n", serial_bus);
 }
 
 /* The disks the machine has, all of them, and which one everything
@@ -152,14 +152,14 @@ void hwinfo_disks(void)
     int n = blk_count();
 
     if (!n) {
-        printk("Nie ma zadnego dysku.\n");
+        printk("There is no disk at all.\n");
         return;
     }
     for (int i = 0; i < n; i++) {
-        printk("dysk %u: %s, %u sektorow po 512 B (%u MiB)%s\n",
+        printk("disk %u: %s, %u sectors of 512 B (%u MiB)%s\n",
                (uint32_t)(i + 1), blk_name_of(i), blk_sectors_of(i),
                blk_sectors_of(i) / 2048,
-               i == blk_current() ? "  <- uzywany" : "");
+               i == blk_current() ? "  <- in use" : "");
         /* What is on it. Reading another disk's table means pointing
            the machine at it, so it is pointed back straight after -
            looking must not move what the filesystem is reading. */
@@ -168,12 +168,12 @@ void hwinfo_disks(void)
             continue;
         int np = part_scan();
         if (np == 0)
-            printk("         bez tablicy partycji\n");
+            printk("         no partition table\n");
         for (int k = 0; k < np; k++) {
             struct partition pt;
             if (!part_get(k, &pt))
                 break;
-            printk("         %u: od %u, %u MiB, %s%s%s\n",
+            printk("         %u: from %u, %u MiB, %s%s%s\n",
                    (uint32_t)(k + 1), (uint32_t)pt.start,
                    (uint32_t)(pt.sectors / 2048), pt.kind,
                    pt.label[0] ? " " : "", pt.label);
@@ -199,7 +199,7 @@ void hwinfo_volume(const char *arg)
     uint32_t v = 0;
 
     if (!hda_present()) {
-        printk("glosnosc: nie ma dzwieku (zobacz 'sprzet')\n");
+        printk("volume: there is no sound (see 'hardware')\n");
         return;
     }
     while (arg && *arg == ' ')
@@ -207,25 +207,25 @@ void hwinfo_volume(const char *arg)
 
     if (arg && arg[0] == 'c') {                  /* 'cisza' */
         hda_set_mute(!hda_muted());
-        printk("glosnosc: %s\n", hda_muted() ? "cisza" : "znowu slychac");
+        printk("volume: %s\n", hda_muted() ? "silence" : "audible again");
         return;
     }
     if (arg && arg[0] >= '0' && arg[0] <= '9') {
         while (*arg >= '0' && *arg <= '9')
             v = v * 10 + (uint32_t)(*arg++ - '0');
         if (v > 100) {
-            printk("glosnosc: 0-100, nie %u\n", v);
+            printk("volume: 0-100, not %u\n", v);
             return;
         }
         hda_set_volume((int)v);
         hda_set_mute(0);
         if (hda_remember() < 0)
-            printk("glosnosc: %d%% - ale nie zapisane na dysk\n",
+            printk("volume: %d%% - but not saved to disk\n",
                    hda_volume());
         else
-            printk("glosnosc: %d%%\n", hda_volume());
+            printk("volume: %d%%\n", hda_volume());
         return;
     }
-    printk("glosnosc: %d%%%s, %d stopni w kodeku\n", hda_volume(),
-           hda_muted() ? " (cisza)" : "", hda_volume_steps());
+    printk("volume: %d%%%s, %d steps in the codec\n", hda_volume(),
+           hda_muted() ? " (muted)" : "", hda_volume_steps());
 }

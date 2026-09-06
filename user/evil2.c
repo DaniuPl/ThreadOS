@@ -33,9 +33,9 @@ static void expect_refused(const char *what, int32_t ret)
     print("[evil2] ");
     print(what);
     if (ret == -1) {
-        print(": odrzucone (-1) OK\n");
+        print(": refused (-1) OK\n");
     } else {
-        print(": PRZESZLO! zwrocono ");
+        print(": IT PASSED! it returned ");
         print_dec((uint32_t)ret);
         print("\n");
         failures++;
@@ -44,14 +44,14 @@ static void expect_refused(const char *what, int32_t ret)
 
 void _start(void)
 {
-    print("[evil2] probuje oszukac jadro wskaznikami na jego wlasna pamiec\n");
+    print("[evil2] trying to trick the kernel with pointers into its own memory\n");
 
     /* Printing kernel memory to the console by somebody else's hands */
-    expect_refused("write(1, jadro, 32)",
+    expect_refused("write(1, kernel, 32)",
                    raw(SYS_WRITE, 1, KERNEL_ADDR, 32));
 
     /* Overwriting kernel memory with the date from the RTC */
-    expect_refused("time(-> jadro)", raw(SYS_TIME, KERNEL_ADDR, 0, 0));
+    expect_refused("time(-> kernel)", raw(SYS_TIME, KERNEL_ADDR, 0, 0));
 
     /* Overwriting the VGA buffer with memory statistics */
     expect_refused("sysinfo(-> VGA)", raw(SYS_SYSINFO, VGA_ADDR, 0, 0));
@@ -60,23 +60,23 @@ void _start(void)
     expect_refused("getcwd(NULL)", raw(SYS_GETCWD, 0, 0, 0));
 
     /* A file path pointing into kernel memory */
-    expect_refused("open(jadro)", raw(SYS_OPEN, KERNEL_ADDR, 0, 0));
+    expect_refused("open(kernel)", raw(SYS_OPEN, KERNEL_ADDR, 0, 0));
 
     /* A thread entry point inside kernel code */
-    expect_refused("thread(-> jadro)", raw(SYS_THREAD, KERNEL_ADDR, 0, 0));
+    expect_refused("thread(-> kernel)", raw(SYS_THREAD, KERNEL_ADDR, 0, 0));
 
     /* A positive control: an ordinary, honest pointer is to keep
    working */
     struct utime t;
     if (raw(SYS_TIME, (uint32_t)&t, 0, 0) != 0) {
-        print("[evil2] BLAD: uczciwy wskaznik tez zostal odrzucony!\n");
+        print("[evil2] ERROR: an honest pointer was refused too!\n");
         failures++;
     }
 
     if (failures) {
-        print("[evil2] DZIURA: jadro dalo sie oszukac\n");
+        print("[evil2] A HOLE: the kernel was tricked\n");
         sys_exit(1);
     }
-    print("[evil2] jadro odrzucilo wszystkie proby - granica trzyma\n");
+    print("[evil2] the kernel refused every attempt - the boundary holds\n");
     sys_exit(0);
 }

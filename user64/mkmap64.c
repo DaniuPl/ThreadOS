@@ -17,7 +17,7 @@ static char out[96];
 
 void _start(int argc, char **argv)
 {
-    const char *name = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "map.txt";
     uint64_t kib = 12;
     if (argc > 2) {
         int64_t v = uatoi(argv[2]);
@@ -28,7 +28,7 @@ void _start(int argc, char **argv)
 
     int fd = (int)sys_open(name, 1);
     if (fd < 0) {
-        print("[mkmap64] nie da sie zalozyc pliku\n");
+        print("[mkmap64] the file cannot be created\n");
         sys_exit(1);
     }
 
@@ -36,21 +36,21 @@ void _start(int argc, char **argv)
         for (uint64_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
         if (sys_write(fd, buf, CHUNK) != CHUNK) {
-            print("[mkmap64] zapis sie nie udal\n");
+            print("[mkmap64] the write did not work\n");
             sys_exit(1);
         }
     }
     sys_close(fd);
 
     int n = 0;
-    const char *a = "[mkmap64] zapisano ";
+    const char *a = "[mkmap64] wrote ";
     while (*a)
         out[n++] = *a++;
     char tmp[24];
     utoa(nbytes, tmp);
     for (int i = 0; tmp[i]; i++)
         out[n++] = tmp[i];
-    const char *b = " B wzorca\n";
+    const char *b = " B of the pattern\n";
     while (*b)
         out[n++] = *b++;
     out[n] = '\0';

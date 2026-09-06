@@ -25,7 +25,7 @@ void _start(void)
     for (int i = 0; i < KIDS; i++) {
         int32_t p = sys_fork();
         if (p < 0) {
-            print("[ptree] fork sie nie udal\n");
+            print("[ptree] the fork did not work\n");
             sys_exit(1);
         }
         if (p == 0) {
@@ -36,9 +36,9 @@ void _start(void)
         pid[i] = p;
     }
 
-    print("[ptree] rodzic ma pid ");
+    print("[ptree] the parent has pid ");
     print_dec((uint32_t)sys_getpid());
-    print(", dzieci: ");
+    print(", children: ");
     for (int i = 0; i < KIDS; i++) {
         print_dec((uint32_t)pid[i]);
         print(i == KIDS - 1 ? "\n" : " ");
@@ -59,28 +59,28 @@ void _start(void)
         if (idx < 0 || code != 20 + idx)
             wrong++;
 
-        print("[ptree] skonczylo dziecko ");
+        print("[ptree] a child finished: ");
         print_dec((uint32_t)who);
-        print(" z kodem ");
+        print(" with code ");
         print_dec((uint32_t)code);
         print("\n");
         got++;
     }
 
     if (got != KIDS || wrong) {
-        print("[ptree] zle: zebranych dzieci ");
+        print("[ptree] wrong: children collected ");
         print_dec((uint32_t)got);
-        print(", niezgodnych kodow ");
+        print(", mismatched codes ");
         print_dec((uint32_t)wrong);
         print("\n");
         sys_exit(1);
     }
-    print("[ptree] zebrane wszystkie dzieci, waitany zglosil koniec\n");
+    print("[ptree] every child collected, wait reported the end\n");
 
     /* An orphan: the child makes a grandchild and dies at once */
     int32_t mid = sys_fork();
     if (mid < 0) {
-        print("[ptree] fork sieroty sie nie udal\n");
+        print("[ptree] the orphan's fork did not work\n");
         sys_exit(1);
     }
     if (mid == 0) {
@@ -89,9 +89,9 @@ void _start(void)
             sys_sleep(500);         /* it will outlive its own parent */
             sys_exit(99);
         }
-        print("[ptree] dziecko robi wnuka ");
+        print("[ptree] the child makes a grandchild ");
         print_dec((uint32_t)grand);
-        print(" i konczy sie\n");
+        print(" and ends\n");
         sys_exit(30);
     }
 
@@ -105,16 +105,16 @@ void _start(void)
             seen_child = 1;
         else if (code == 99)
             seen_orphan = 1;         /* the grandchild was adopted by the grandparent */
-        print("[ptree] odebrane od ");
+        print("[ptree] collected from ");
         print_dec((uint32_t)who);
-        print(" z kodem ");
+        print(" with code ");
         print_dec((uint32_t)code);
         print("\n");
     }
     if (!seen_child || !seen_orphan) {
-        print("[ptree] zle: sierota nie trafila pod opieke dziadka\n");
+        print("[ptree] wrong: the orphan did not end up in the grandparent's care\n");
         sys_exit(1);
     }
-    print("[ptree] sierota przygarnieta przez dziadka\n");
+    print("[ptree] the orphan was taken in by the grandparent\n");
     sys_exit(0);
 }

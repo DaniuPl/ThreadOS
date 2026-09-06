@@ -40,7 +40,7 @@
 #define ROW_Y0 26
 #define HEAD_H 12
 #define MAXT 14
-#define KILL_W 64             /* the "Zakoncz" button, kept at the right */
+#define KILL_W 64             /* the "End" button, kept at the right */
 
 static struct psinfo list[MAXT];
 static int count;
@@ -89,10 +89,10 @@ static int num(char *d, int v)
 static const char *state_name(int st)
 {
     switch (st) {
-    case 0:  return "gotowy";
-    case 1:  return "dziala";
+    case 0:  return "ready";
+    case 1:  return "running";
     case 2:  return "spi";
-    case 3:  return "czeka";
+    case 3:  return "waiting";
     default: return "zombie";
     }
 }
@@ -113,26 +113,26 @@ static void refresh(void)
 static void end_chosen(void)
 {
     if (chosen < 0) {
-        ecopy(note, "nie wybrano zadania", sizeof(note));
+        ecopy(note, "no task picked", sizeof(note));
         return;
     }
     if (chosen == (int)sys_getpid()) {
-        ecopy(note, "siebie nie koncze", sizeof(note));
+        ecopy(note, "I do not end myself", sizeof(note));
         return;
     }
     for (int i = 0; i < count; i++) {
         if (list[i].pid != chosen)
             continue;
         if (!list[i].ring3) {
-            ecopy(note, "to watek jadra, nie program", sizeof(note));
+            ecopy(note, "a kernel thread, not a program", sizeof(note));
             return;
         }
         sys_kill(chosen, SIGKILL);
-        ecopy(note, "zakonczone", sizeof(note));
+        ecopy(note, "ended", sizeof(note));
         chosen = -1;
         return;
     }
-    ecopy(note, "tego zadania juz nie ma", sizeof(note));
+    ecopy(note, "that task is gone already", sizeof(note));
     chosen = -1;
 }
 
@@ -142,14 +142,14 @@ static void draw(int win)
 
     char line[64];
     int p = num(line, count);
-    ecopy(line + p, " zadan", (int)sizeof(line) - p);
-    win_text(win, 4, 2, "Zadania:", C_HEAD);
+    ecopy(line + p, " tasks", (int)sizeof(line) - p);
+    win_text(win, 4, 2, "Tasks:", C_HEAD);
     win_text(win, 80, 2, line, C_TEXT);
 
     /* The button, in the top right corner where there is room next to
        the heading */
     win_rect(win, kill_x(), 0, KILL_W, HEAD_H, C_BLUE);
-    win_text(win, kill_x() + 4, 2, "Zakoncz", C_WHITE);
+    win_text(win, kill_x() + 4, 2, "End", C_WHITE);
 
     win_rect(win, 0, ROW_Y0 - 4, cw, 1, C_LINE);
 
@@ -172,7 +172,7 @@ static void draw(int win)
                  picked ? C_WHITE : C_TEXT);
         /* A process has memory of its own; a kernel thread does not -
            and only the first of the two is something to end */
-        win_text(win, 232, y, list[i].ring3 ? "program" : "jadro",
+        win_text(win, 232, y, list[i].ring3 ? "program" : "the kernel",
                  picked ? C_WHITE : (list[i].ring3 ? C_TEXT : C_DIM));
     }
 
@@ -182,7 +182,7 @@ static void draw(int win)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Zadania");
+    int win = (int)win_create(W0, H0, "Tasks");
     if (win < 0)
         sys_exit(1);
 

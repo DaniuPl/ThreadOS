@@ -391,7 +391,7 @@ int bt_init(void)
     if (present)
         return 1;
     if (!usbhc_init())
-        return give_up("nie ma kontrolera USB");
+        return give_up("there is no USB controller");
 
     for (int port = 0; port < usbhc_ports(); port++) {
         int d = usbhc_attach(port);
@@ -423,7 +423,7 @@ int bt_init(void)
            talked to is in a state we know nothing about. */
         if (!command(OP_RESET, (const uint8_t *)0, 0, 2000)) {
             dev = -1;
-            return give_up("adapter nie odpowiedzial na HCI Reset");
+            return give_up("the adapter did not answer HCI Reset");
         }
 
         static const uint8_t all_events[8] = {
@@ -435,12 +435,12 @@ int bt_init(void)
 
         present = 1;
         printk("[ OK ] Bluetooth: %s%s%s (port %d, %s)\n",
-               have_addr ? bt_address() : "adapter bez adresu",
+               have_addr ? bt_address() : "an adapter with no address",
                have_name && local_name[0] ? ", " : "",
                have_name ? local_name : "", port + 1, usbhc_name());
         return 1;
     }
-    return give_up("nie ma adaptera Bluetooth na magistrali USB");
+    return give_up("there is no Bluetooth adapter on the USB bus");
 }
 
 int bt_present(void)
@@ -451,25 +451,25 @@ int bt_present(void)
 const char *bt_why(void)
 {
     return present ? (const char *)0
-                   : (gave_up ? gave_up : "Bluetooth nie byl szukany");
+                   : (gave_up ? gave_up : "Bluetooth was never looked for");
 }
 
 const char *bt_address(void)
 {
     if (!have_addr)
-        return "brak";
+        return "none";
     addr_text(local_addr, addr_str);
     return addr_str;
 }
 
 const char *bt_name(void)
 {
-    return have_name && local_name[0] ? local_name : "bez nazwy";
+    return have_name && local_name[0] ? local_name : "no name";
 }
 
 const char *bt_version(void)
 {
-    return have_version ? version : "nieznana";
+    return have_version ? version : "unknown";
 }
 
 int bt_scan(uint32_t seconds)
@@ -509,7 +509,7 @@ int bt_found(void)
 const char *bt_found_addr(int i)
 {
     if (i < 0 || i >= nseen)
-        return "brak";
+        return "none";
     addr_text(seen[i].addr, found_str);
     return found_str;
 }
@@ -576,20 +576,20 @@ void bt_selftest(void)
     bt_event(ev_adv, (int)sizeof(ev_adv));
     bt_event(ev_inq, (int)sizeof(ev_inq));
 
-    printk("bt: sprawdzam czytanie pakietow (bez adaptera - "
-           "QEMU nie ma zadnego)\n");
-    printk("  adres adaptera: %s\n", bt_address());
-    printk("  nazwa adaptera: %s\n", bt_name());
-    printk("  wersja: %s\n", bt_version());
-    printk("  uslyszane urzadzenia: %u\n", (uint32_t)nseen);
+    printk("bt: checking how packets are read (with no adapter - "
+           "QEMU has none)\n");
+    printk("  adapter address: %s\n", bt_address());
+    printk("  adapter name: %s\n", bt_name());
+    printk("  version: %s\n", bt_version());
+    printk("  devices heard: %u\n", (uint32_t)nseen);
     for (int i = 0; i < nseen; i++)
         printk("    %s  %s%s%d dBm\n", bt_found_addr(i), bt_found_name(i),
                bt_found_name(i)[0] ? "  " : "", bt_found_rssi(i));
 
     /* And what it does NOT prove, said out loud rather than left to be
        assumed from a row of green ticks. */
-    printk("bt: to sprawdza skladanie i czytanie pakietow, nie rozmowe "
-           "z adapterem\n");
+    printk("bt: this checks how packets are built and read, not a conversation "
+           "with an adapter\n");
 
     have_addr = have_name = have_version = 0;
     nseen = 0;

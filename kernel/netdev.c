@@ -48,7 +48,7 @@ const char *netdev_name(void)
     case NIC_E1000:   return "e1000";
     case NIC_RTL8139: return "RTL8139";
     case NIC_USB:     return "USB (RNDIS)";
-    default:            return "brak";
+    default:            return "none";
     }
 }
 

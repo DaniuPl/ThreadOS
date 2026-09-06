@@ -49,14 +49,14 @@ static inline const uint8_t *cert_builtin_roots(uint32_t *ile)
 static inline const char *cert_error_text(int err)
 {
     switch (err) {
-    case CERT_OK:            return "w porzadku";
-    case CERT_ERR_NAME:      return "certyfikat nie obejmuje tej nazwy";
-    case CERT_ERR_EXPIRED:   return "certyfikat wygasl";
-    case CERT_ERR_NOT_YET:   return "certyfikat jeszcze nie obowiazuje";
-    case CERT_ERR_UNTRUSTED: return "brak zaufanego wystawcy";
-    case CERT_ERR_SIGNATURE: return "podpis sie nie zgadza";
-    case CERT_ERR_ALG:       return "nieobslugiwany algorytm podpisu";
-    default:                 return "certyfikat nie do rozczytania";
+    case CERT_OK:            return "in order";
+    case CERT_ERR_NAME:      return "the certificate does not cover this name";
+    case CERT_ERR_EXPIRED:   return "the certificate has expired";
+    case CERT_ERR_NOT_YET:   return "the certificate is not valid yet";
+    case CERT_ERR_UNTRUSTED: return "no trusted issuer";
+    case CERT_ERR_SIGNATURE: return "the signature does not match";
+    case CERT_ERR_ALG:       return "an unsupported signature algorithm";
+    default:                 return "the certificate cannot be read";
     }
 }
 

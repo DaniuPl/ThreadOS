@@ -11,11 +11,11 @@ void _start(void)
 {
     volatile uint32_t *p = (volatile uint32_t *)sys_shm(42, 4096);
     if (!p) {
-        print("[shmtest] brak pamieci wspoldzielonej\n");
+        print("[shmtest] there is no shared memory\n");
         sys_exit(1);
     }
     p[0] = 12345;
-    print("[shmtest] zapisano 12345 do shm, uruchamiam shmread\n");
+    print("[shmtest] wrote 12345 into the shm, starting shmread\n");
 
     int32_t pid = sys_spawn("shmread", 0, 0);
     if (pid >= 0)

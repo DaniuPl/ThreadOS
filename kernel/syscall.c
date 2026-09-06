@@ -203,7 +203,7 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_EXIT:
-        printk("[jadro] proces '%s' zakonczyl sie (kod %d)\n",
+        printk("[kernel] process '%s' has ended (code %d)\n",
                task_current_name(), (int)r->ebx);
         task_exit((int)r->ebx);
         break;
@@ -882,7 +882,7 @@ void syscall_handler(struct regs *r)
         r->eax = (uint32_t)process_fork(r);
         break;
     default:
-        printk("[jadro] nieznany syscall %u od '%s'\n",
+        printk("[kernel] unknown syscall %u from '%s'\n",
                r->eax, task_current_name());
         r->eax = (uint32_t)-1;
     }

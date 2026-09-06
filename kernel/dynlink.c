@@ -276,7 +276,7 @@ int dyn_init(void)
 
     const uint8_t *image = file;
     if (!elf_sane(image, size, ET_DYN)) {
-        printk("[jadro] %s nie jest biblioteka wspoldzielona\n", LIB_FILE);
+        printk("[kernel] %s is not a shared library\n", LIB_FILE);
         return 0;
     }
 
@@ -289,8 +289,8 @@ int dyn_init(void)
            somewhere else, its own references would point into thin
            air - better to say so now */
         if (ph[i].p_vaddr < LIB_BASE) {
-            printk("[jadro] %s ma segment pod %x - poza obszarem "
-                   "biblioteki\n", LIB_FILE, (uint32_t)ph[i].p_vaddr);
+            printk("[kernel] %s has a segment at %x - outside the area "
+                   "the library\n", LIB_FILE, (uint32_t)ph[i].p_vaddr);
             return 0;
         }
         segmenty[nsegments].vaddr = (dyn_addr)ph[i].p_vaddr;
@@ -318,7 +318,7 @@ int dyn_init(void)
         break;
     }
     if (!lib_sym || !lib_str) {
-        printk("[jadro] %s nie ma tablicy symboli dynamicznych\n", LIB_FILE);
+        printk("[kernel] %s has no dynamic symbol table\n", LIB_FILE);
         return 0;
     }
 
@@ -344,8 +344,8 @@ int dyn_init(void)
         for (uint32_t k = 0; k < ile; k++) {
             uint32_t typ = REL_TYPE(r[k].r_info);
             if (typ == R_JUMP || typ == R_DATA) {
-                printk("[jadro] %s ma nierozwiazane wlasne odwolania - "
-                       "brakuje -Bsymbolic przy konsolidacji\n", LIB_FILE);
+                printk("[kernel] %s has unresolved references of its own - "
+                       "-Bsymbolic is missing at link time\n", LIB_FILE);
                 nsegments = 0;
                 return 0;
             }
@@ -355,7 +355,7 @@ int dyn_init(void)
     lib_image = image;
     lib_size = size;
     if (setup_frames() < 0) {
-        printk("[jadro] brak pamieci na biblioteke %s\n", LIB_FILE);
+        printk("[kernel] no memory for the library %s\n", LIB_FILE);
         nsegments = 0;
         return 0;
     }
@@ -422,8 +422,8 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
                        The library deliberately exports no variables -
                        if one ended up there, every process would have
                        a copy of its own and nobody would know. */
-                    printk("[jadro] relokacja kopiujaca dane '%s' - "
-                           "biblioteka ma wystawiac tylko funkcje\n",
+                    printk("[kernel] a copy relocation for the data '%s' - "
+                           "a library is to expose functions only\n",
                            texts + syms_tab[nr].st_name);
                     return -1;
                 }
@@ -435,7 +435,7 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
             const char *name = texts + syms_tab[nr].st_name;
             dyn_addr dst = find(name);
             if (!dst) {
-                printk("[jadro] brak symbolu '%s' w %s\n", name, LIB_FILE);
+                printk("[kernel] no symbol '%s' in %s\n", name, LIB_FILE);
                 return -1;
             }
             if (store(ctx, (dyn_addr)r[k].r_offset, dst) < 0)

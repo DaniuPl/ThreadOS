@@ -56,8 +56,8 @@ enum tcp_state {
 };
 
 static const char *state_name[] = {
-    "ZAMKNIETE", "NASLUCH", "SYN-WYSLANY", "SYN-ODEBRANY",
-    "NAWIAZANE", "FIN-WAIT", "CLOSE-WAIT", "LAST-ACK",
+    "CLOSED", "LISTEN", "SYN-SENT", "SYN-RECEIVED",
+    "ESTABLISHED", "FIN-WAIT", "CLOSE-WAIT", "LAST-ACK",
 };
 
 struct tcp_conn {
@@ -700,11 +700,11 @@ void tcp_dump(void)
         if (c->state != TCP_LISTEN) {
             printk("  <-> ");
             net_print_ip(c->remote_ip);
-            printk(":%u  odebrane %u B", c->remote_port, (uint32_t)c->rx_len);
+            printk(":%u  received %u B", c->remote_port, (uint32_t)c->rx_len);
         }
         printk("\n");
         shown++;
     }
     if (!shown)
-        printk("brak polaczen TCP\n");
+        printk("no TCP connections\n");
 }

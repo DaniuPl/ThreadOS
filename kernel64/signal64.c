@@ -41,9 +41,9 @@ void signal64_deliver(struct regs *r)
     /* Without a handler of its own the default reaction is left. SIGKILL
        has no other by design - which is why it cannot be caught. */
     if (!handler || sig == SIGKILL) {
-        printk("[jadro] zadanie %d dostalo sygnal %d\n",
+        printk("[kernel] task %d got signal %d\n",
                task64_current_id(), sig);
-        task64_kill_current("sygnal");     /* does not return */
+        task64_kill_current("a signal");     /* does not return */
     }
 
     /* Room for the frame and the return address on the program's stack.
@@ -54,8 +54,8 @@ void signal64_deliver(struct regs *r)
     uint64_t sp = frame - 8;
 
     if (!paging64_user_range(sp, sizeof(struct regs) + 8)) {
-        printk("[jadro] sygnal %d: brak miejsca na stosie programu\n", sig);
-        task64_kill_current("brak stosu na sygnal");
+        printk("[kernel] signal %d: no room on the program's stack\n", sig);
+        task64_kill_current("no stack for the signal");
     }
 
     memcpy((void *)(uintptr_t)frame, r, sizeof(*r));

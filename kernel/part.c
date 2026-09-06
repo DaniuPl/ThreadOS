@@ -54,15 +54,15 @@ static void say(char *dst, const char *s)
 static const char *mbr_kind(uint8_t t)
 {
     switch (t) {
-    case 0x00: return "puste";
+    case 0x00: return "empty";
     case 0x07: return "NTFS/exFAT";
     case 0x0B: case 0x0C: return "FAT32";
     case 0x0E: return "FAT16";
-    case 0x82: return "wymiana Linuksa";
+    case 0x82: return "Linux swap";
     case 0x83: return "Linux";
-    case 0xEE: return "ochronne GPT";
+    case 0xEE: return "GPT protective";
     case 0xEF: return "EFI (ESP)";
-    default:   return "nieznane";
+    default:   return "unknown";
     }
 }
 
@@ -75,12 +75,12 @@ static const char *gpt_kind(const uint8_t *guid)
     uint32_t first = le32(guid);
     switch (first) {
     case 0xC12A7328: return "EFI (ESP)";
-    case 0xEBD0A0A2: return "dane (NTFS/FAT)";
+    case 0xEBD0A0A2: return "data (NTFS/FAT)";
     case 0x0FC63DAF: return "Linux";
-    case 0x0657FD6D: return "wymiana Linuksa";
-    case 0xE3C9E316: return "zapas Microsoftu";
-    case 0xDE94BBA4: return "odzyskiwanie Windows";
-    default:         return "nieznane";
+    case 0x0657FD6D: return "Linux swap";
+    case 0xE3C9E316: return "Microsoft reserved";
+    case 0xDE94BBA4: return "Windows recovery";
+    default:         return "unknown";
     }
 }
 

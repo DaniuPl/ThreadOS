@@ -45,11 +45,11 @@ void _start(int argc, char **argv)
     uint64_t mine = 1000 + (uint64_t)id;
     marker = mine;
 
-    int n = put(0, "[sep64] proces ");
+    int n = put(0, "[sep64] process ");
     n = putn(n, (uint64_t)id);
-    n = put(n, ": adres ");
+    n = put(n, ": address ");
     n = puth(n, (uint64_t)(uintptr_t)&marker);
-    n = put(n, ", wpisalem ");
+    n = put(n, ", I wrote ");
     n = putn(n, mine);
     buf[n++] = '\n';
     buf[n] = 0;
@@ -59,12 +59,12 @@ void _start(int argc, char **argv)
     sys_sleep(200);
 
     uint64_t now = marker;
-    n = put(0, "[sep64] proces ");
+    n = put(0, "[sep64] process ");
     n = putn(n, (uint64_t)id);
-    n = put(n, now == mine ? ": nadal " : ": BLAD, teraz ");
+    n = put(n, now == mine ? ": still " : ": ERROR, now ");
     n = putn(n, now);
-    n = put(n, now == mine ? " - moja pamiec nietknieta\n"
-                           : " - ktos mi ja nadpisal\n");
+    n = put(n, now == mine ? " - my memory is untouched\n"
+                           : " - somebody overwrote it\n");
     buf[n] = 0;
     print(buf);
 

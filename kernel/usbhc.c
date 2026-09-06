@@ -105,7 +105,7 @@ const char *usbhc_name(void)
         return "xHCI";
     if (controller == UHCI)
         return "UHCI";
-    return "brak";
+    return "none";
 }
 
 int usbhc_init(void)
@@ -406,7 +406,7 @@ static void hub_expand(int socket_index, int dev)
         }
     }
 
-    printk("[ OK ] Koncentrator USB na gniazdku %d: %d gniazdek wiecej\n",
+    printk("[ OK ] A USB hub in socket %d: %d sockets more\n",
            socket_index + 1, ports);
 }
 

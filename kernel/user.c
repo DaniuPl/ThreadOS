@@ -78,7 +78,7 @@ int user_password_ok(const char *password)
     if (locked_until && now < locked_until)
         return 0;
 
-    const char *stored = config_get("haslo");
+    const char *stored = config_get("password");
     if (!stored || !*stored)
         return 0;
 
@@ -99,7 +99,7 @@ int user_set_password(const char *password)
 {
     char text[24];
     to_text(hash(password), text);
-    return config_set("haslo", text);
+    return config_set("password", text);
 }
 
 static int shell_level = USER_PLAIN;

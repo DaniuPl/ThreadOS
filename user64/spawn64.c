@@ -31,11 +31,11 @@ static int putn(int n, int64_t v)
 void _start(void)
 {
 
-    print("[spawn64] powielam sie i uruchamiam w dziecku 'hello64'\n");
+    print("[spawn64] copying myself and running 'hello64' in the child\n");
 
     int64_t child = sys_fork();
     if (child < 0) {
-        print("[spawn64] BLAD: fork sie nie udal\n");
+        print("[spawn64] ERROR: the fork did not work\n");
         sys_exit(1);
     }
 
@@ -44,16 +44,16 @@ void _start(void)
            completely different program is running. If exec returns, that
            means it failed. */
         sys_exec("hello64", 0);
-        print("[spawn64] BLAD: exec wrocil\n");
+        print("[spawn64] ERROR: the exec came back\n");
         sys_exit(1);
     }
 
     int code = -1;
     int64_t who = sys_wait(&code);
 
-    int n = put(0, "[spawn64] doczekalem dziecka ");
+    int n = put(0, "[spawn64] I waited out the child ");
     n = putn(n, who);
-    n = put(n, ", kod wyjscia ");
+    n = put(n, ", exit code ");
     n = putn(n, code);
     buf[n++] = '\n';
     buf[n] = 0;
@@ -62,13 +62,13 @@ void _start(void)
     /* hello64 ends with a seven - if we see that, it went the whole
        way: fork, exec, wait */
     int ok = (who == child && code == 7);
-    print(ok ? "[spawn64] fork + exec + wait dzialaja\n"
-             : "[spawn64] BLAD: nie ten numer albo nie ten kod\n");
+    print(ok ? "[spawn64] fork + exec + wait work\n"
+             : "[spawn64] ERROR: the wrong number or the wrong code\n");
 
     /* There is nothing left to wait for - the second wait has to say so */
     int64_t none = sys_wait(0);
     if (none != -1) {
-        print("[spawn64] BLAD: wait wymyslil sobie dziecko\n");
+        print("[spawn64] ERROR: wait invented a child\n");
         ok = 0;
     }
 

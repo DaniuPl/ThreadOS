@@ -30,13 +30,13 @@ static const char *exception_names[32] = {
     "Overflow", "BOUND Range Exceeded", "Invalid Opcode",
     "Device Not Available", "Double Fault", "Coprocessor Segment Overrun",
     "Invalid TSS", "Segment Not Present", "Stack-Segment Fault",
-    "General Protection Fault", "Page Fault", "(zarezerwowany)",
+    "General Protection Fault", "Page Fault", "(reserved)",
     "x87 FPU Error", "Alignment Check", "Machine Check",
     "SIMD FP Exception", "Virtualization Exception", "Control Protection",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)", "(zarezerwowany)", "(zarezerwowany)",
-    "(zarezerwowany)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)", "(reserved)", "(reserved)",
+    "(reserved)",
 };
 
 static irq_handler_t irq_handlers[16];
@@ -170,7 +170,7 @@ static void isr64_dispatch(struct regs *r)
     if (r->int_no < 32) {
         /* A breakpoint is a trap exception: report it and carry on */
         if (r->int_no == 3) {
-            printk("[INT3] breakpoint pod rip=%x\n", (uint32_t)r->rip);
+            printk("[INT3] a breakpoint at rip=%x\n", (uint32_t)r->rip);
             return;
         }
 
@@ -330,8 +330,8 @@ static void isr64_dispatch(struct regs *r)
             user_fault_addr = r->int_no == 14 ? read_cr2() : r->rip;
 
             vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-            printk("[jadro] wyjatek %u (%s) w programie: err=%x, "
-                   "rip=%x, adres=%x\n",
+            printk("[kernel] exception %u (%s) in a program: err=%x, "
+                   "rip=%x, address=%x\n",
                    (uint32_t)r->int_no, exception_names[r->int_no],
                    (uint32_t)r->err_code, (uint32_t)r->rip,
                    (uint32_t)user_fault_addr);
@@ -340,7 +340,7 @@ static void isr64_dispatch(struct regs *r)
         }
 
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
-        printk("\n!!! WYJATEK CPU %u: %s (err=%x)\n",
+        printk("\n!!! CPU EXCEPTION %u: %s (err=%x)\n",
                (uint32_t)r->int_no, exception_names[r->int_no],
                (uint32_t)r->err_code);
         printk("rip=%x:%x rsp=%x:%x\n",
@@ -348,10 +348,10 @@ static void isr64_dispatch(struct regs *r)
                (uint32_t)(r->rsp >> 32), (uint32_t)r->rsp);
         if (r->int_no == 14) {
             uint64_t cr2 = read_cr2();
-            printk("Page fault pod adresem (CR2): %x:%x\n",
+            printk("Page fault at the address (CR2): %x:%x\n",
                    (uint32_t)(cr2 >> 32), (uint32_t)cr2);
         }
-        printk("System zatrzymany.\n");
+        printk("The system has stopped.\n");
         for (;;)
             __asm__ volatile("cli; hlt");
     }

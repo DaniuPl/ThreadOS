@@ -647,7 +647,7 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
 
 /* --- choosing a file, instead of typing its name blind ---------------
  *
- * The editor asked "Otworz:" and waited for a name. That works if one
+ * The editor asked "Open:" and waited for a name. That works if one
  * remembers what is on the disk, and is otherwise a guessing game -
  * the one part of a graphical system where a person is worse off than
  * in a shell, because a shell at least completes names.
@@ -688,8 +688,8 @@ static inline void ug_pick_open(struct ug_pick *p, const char *title,
     p->top = 0;
     p->buf = buf;
     p->buflen = buflen;
-    p->yes = "Otworz";
-    p->no = "Anuluj";
+    p->yes = "Open";
+    p->no = "Cancel";
     p->answer = -1;
     if (buf && buflen > 0)
         buf[0] = '\0';

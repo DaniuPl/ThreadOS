@@ -5,26 +5,26 @@
 void _start(int argc, char **argv)
 {
     if (argc < 3) {
-        print("uzycie: cp <zrodlo> <cel>\n");
+        print("usage: cp <source> <target>\n");
         sys_exit(1);
     }
 
     int src = sys_open(argv[1], O_READ);
     if (src < 0) {
-        print("cp: nie moge otworzyc '");
+        print("cp: I cannot open '");
         print(argv[1]);
         print("'\n");
         sys_exit(1);
     }
     int dst = sys_open(argv[2], O_WRITE | O_CREATE | O_TRUNC);
     if (dst == -2) {
-        print("cp: brak uprawnien do '");
+        print("cp: no permission for '");
         print(argv[2]);
-        print("' (sprobuj przez sudo)\n");
+        print("' (try it through sudo)\n");
         sys_exit(2);
     }
     if (dst < 0) {
-        print("cp: nie moge utworzyc '");
+        print("cp: I cannot create '");
         print(argv[2]);
         print("'\n");
         sys_exit(1);

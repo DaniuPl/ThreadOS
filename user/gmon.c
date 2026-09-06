@@ -51,9 +51,9 @@ void _start(void)
         sys_sysinfo(&si);
 
         win_rect(w, 0, 0, 170, 80, C_BG);
-        win_text(w, 4, 4, "RAM uzyte (KiB):", C_HEAD);
+        win_text(w, 4, 4, "RAM used (KiB):", C_HEAD);
         draw_num(w, 136, 4, si.used_kib, C_TEXT);
-        win_text(w, 4, 16, "RAM razem (KiB):", C_HEAD);
+        win_text(w, 4, 16, "RAM total (KiB):", C_HEAD);
         draw_num(w, 136, 16, si.ram_kib, C_TEXT);
         win_text(w, 4, 28, "uptime (s):", C_HEAD);
         draw_num(w, 96, 28, si.uptime_s, C_TEXT);

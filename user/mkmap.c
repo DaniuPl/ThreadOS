@@ -15,7 +15,7 @@ static unsigned char buf[CHUNK];
 
 void _start(int argc, char **argv)
 {
-    const char *name = argc > 1 ? argv[1] : "mapa.txt";
+    const char *name = argc > 1 ? argv[1] : "map.txt";
     uint32_t kib = 12;
     if (argc > 2) {
         kib = 0;
@@ -28,7 +28,7 @@ void _start(int argc, char **argv)
 
     int32_t fd = sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        print("[mkmap] nie da sie zalozyc pliku\n");
+        print("[mkmap] the file cannot be created\n");
         sys_exit(1);
     }
 
@@ -36,14 +36,14 @@ void _start(int argc, char **argv)
         for (uint32_t i = 0; i < CHUNK; i++)
             buf[i] = (unsigned char)((off + i) * 7 + 13);
         if (sys_write(fd, buf, CHUNK) != (int32_t)CHUNK) {
-            print("[mkmap] zapis sie nie udal\n");
+            print("[mkmap] the write did not work\n");
             sys_exit(1);
         }
     }
     sys_close(fd);
 
-    print("[mkmap] zapisano ");
+    print("[mkmap] wrote ");
     print_dec(nbytes);
-    print(" B wzorca\n");
+    print(" B of the pattern\n");
     sys_exit(0);
 }

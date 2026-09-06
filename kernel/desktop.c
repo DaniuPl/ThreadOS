@@ -89,14 +89,14 @@ struct icon {
 };
 static struct icon icons[ICON_MAX] = {
     {8, 20, "App", "guiapp", 0, {{0}}},
-    {8, 60, "Zegar", "gclock", 1, {{0}}},
-    {8, 100, "Pliki", "gfiles", 2, {{0}}},
+    {8, 60, "Clock", "gclock", 1, {{0}}},
+    {8, 100, "Files", "gfiles", 2, {{0}}},
     {8, 140, "Monitor", "gmon", 3, {{0}}},
     {8, 180, "Term", "gterm", 4, {{0}}},
     {8, 220, "Web", "gweb", 5, {{0}}},
-    {8, 260, "Ustaw", "gsettings", 6, {{0}}},
-    {8, 300, "Edytor", "gedit", 7, {{0}}},
-    {8, 340, "Zadania", "gtasks", 8, {{0}}},
+    {8, 260, "Config", "gsettings", 6, {{0}}},
+    {8, 300, "Editor", "gedit", 7, {{0}}},
+    {8, 340, "Tasks", "gtasks", 8, {{0}}},
 };
 static int icon_n = 9;         /* how many of them there are */
 
@@ -217,7 +217,7 @@ static int icon_press_x, icon_press_y;   /* the press position (click vs drag) *
  * it can be read with 'cat' and built with 'echo ... >> pulpit.ikony'
  * from the shell in the terminal.
  */
-#define ICON_LIST_FILE "pulpit.ikony"
+#define ICON_LIST_FILE "desktop.icons"
 #define ICON_LIST_MAX 512
 
 static int icons_read_list(void)
@@ -289,7 +289,7 @@ static int icons_read_list(void)
     if (!count)
         return 0;                      /* nothing usable - keep the seven */
     icon_n = count;
-    printk("[pulpit] ikony z pliku '%s': %d\n", ICON_LIST_FILE, count);
+    printk("[desktop] icons from the file '%s': %d\n", ICON_LIST_FILE, count);
     return 1;
 }
 
@@ -517,7 +517,7 @@ static int taskbar_y(void) { return video_h() - TB_H; }
    cannot be understood is not a reason to draw nothing. */
 static int bar_w(void)
 {
-    uint32_t p = config_get_num("pasek", 100);
+    uint32_t p = config_get_num("taskbar", 100);
     if (p != 75 && p != 50)
         p = 100;
     int w = (int)((uint32_t)video_w() * p / 100);
@@ -629,7 +629,7 @@ static int tbl_x0(void)
     int left = bar_x0() + 2 + MENU_BW + 4;
     int right = bar_x0() + bar_w() - TB_CLOCK_W - 2;
     int strip = win_count() * tbl_width();
-    uint32_t how = config_get_num("ikony", 0);
+    uint32_t how = config_get_num("icons", 0);
 
     if (how == 1) {                   /* centred between menu and clock */
         int x = left + (right - left - strip) / 2;
@@ -935,7 +935,7 @@ static void draw_window(const struct window *win)
         video_fill_rect(btn_x(win), btn_y(win), 1, BTN_H, COL_LINE);
         video_fill_rect(btn_x(win) + BTN_W - 1, btn_y(win), 1, BTN_H,
                         COL_LINE);
-        video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Klik", COL_BLACK);
+        video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Click", COL_BLACK);
         /* The counter stands on the window's grey, not on the button -
            so it is dark, like everything else there. */
         draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
@@ -1164,7 +1164,7 @@ static void handle_input(int mx, int my, int buttons)
         if (pressed && !prev_pressed) {
             if (in_rect(mx, my, kiosk_btn_x(), kiosk_btn_y(),
                         KIOSK_BTN_W, KIOSK_BTN_H)) {
-                printk("Restart...\n");
+                printk("Restarting...\n");
                 if (!acpi_reboot())
                     outb(0x64, 0xFE);
             } else if (wi >= 0 && wins[wi].content) {
@@ -1670,7 +1670,7 @@ static void wallpaper_load(void)
     wall_w = wall_h = 0;
     wall_rgb = 0;
 
-    const char *name = config_get("tapeta");
+    const char *name = config_get("wallpaper");
     if (!name || !name[0] || !fs_ready())
         return;
 
@@ -1707,7 +1707,7 @@ static void wallpaper_load(void)
         wall_w = w;
         wall_h = h;
         wall_rgb = 1;
-        printk("[pulpit] tapeta '%s': %dx%d w kolorach\n", name, w, h);
+        printk("[desktop] wallpaper '%s': %dx%d in colour\n", name, w, h);
         return;
     }
 
@@ -1720,7 +1720,7 @@ static void wallpaper_load(void)
     wall = buf;
     wall_w = w;
     wall_h = h;
-    printk("[pulpit] tapeta '%s': %dx%d\n", name, w, h);
+    printk("[desktop] wallpaper '%s': %dx%d\n", name, w, h);
 }
 
 /* The background: sixteen bands, darkening towards the floor.
@@ -2122,7 +2122,7 @@ static void save_screenshot(void)
 
     char name[16];
     int p = 0;
-    const char *pre = "zrzut";
+    const char *pre = "shot";
     for (int i = 0; pre[i]; i++)
         name[p++] = pre[i];
     p += put_num(name + p, ++shot_number);
@@ -2174,7 +2174,7 @@ static void save_screenshot(void)
     int q = 0;
     for (int i = 0; name[i]; i++)
         note[q++] = name[i];
-    const char *tail = " zapisany";
+    const char *tail = " saved";
     for (int i = 0; tail[i]; i++)
         note[q++] = tail[i];
     note[q] = '\0';
@@ -2266,8 +2266,8 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
 
 /* A window's name, changed by the program that owns it.
  *
- * A window called "Edytor" says what the program is; a window called
- * "Edytor: notatka" says which of the three open ones you are looking
+ * A window called "Editor" says what the program is; a window called
+ * "Editor: a note" says which of the three open ones you are looking
  * for - and that is what a title bar is FOR. The name is also what the
  * taskbar shows under the pointer, so one call fixes both at once. */
 int desktop_win_title(int winid, int owner, const char *title)
@@ -2487,7 +2487,7 @@ static void kiosk_frame(int mx, int my)
         }
     }
 
-    video_draw_string(8, 8, "ProtonOS - instalacja", COL_WHITE);
+    video_draw_string(8, 8, "ProtonOS - installation", COL_WHITE);
 
     int bx = kiosk_btn_x(), by = kiosk_btn_y();
     int over = in_rect(mouse_x, mouse_y, bx, by, KIOSK_BTN_W, KIOSK_BTN_H);
@@ -2495,7 +2495,7 @@ static void kiosk_frame(int mx, int my)
                     over ? COL_TITLE : COL_TBBTN);
     video_fill_rect(bx, by, KIOSK_BTN_W, 1, COL_LINE);
     video_fill_rect(bx, by + KIOSK_BTN_H - 1, KIOSK_BTN_W, 1, COL_LINE);
-    video_draw_string(bx + 8, by + 3, "Uruchom ponownie", COL_WHITE);
+    video_draw_string(bx + 8, by + 3, "Restart", COL_WHITE);
 
     /* The window, in the middle. It is put there every frame because
        in this mode nobody may move it - there is nowhere to move it
@@ -2518,9 +2518,9 @@ static void kiosk_frame(int mx, int my)
     if (kiosk_gave_up) {
         int cx = video_w() / 2 - 22 * 8 / 2;
         video_draw_string(cx, video_h() / 2 - 4,
-                          "Instalator sie nie uruchamia", COL_WHITE);
+                          "The installer will not start", COL_WHITE);
         video_draw_string(cx, video_h() / 2 + 10,
-                          "Uruchom maszyne ponownie", COL_WHITE);
+                          "Restart the machine", COL_WHITE);
     }
 
     draw_hint();
@@ -2537,7 +2537,7 @@ static void desktop_thread(void *arg)
        screen decides: a laptop's own resolution gets two, everything
        smaller gets one. A person who disagrees says so once and it is
        remembered, like the background and the wallpaper. */
-    video_set_scale((int)config_get_num("skala", 0));
+    video_set_scale((int)config_get_num("scale", 0));
 
     /* Try the high VESA resolution (640x480x32); when there is no
        framebuffer - fall back to mode 13h (320x200) */
@@ -2555,7 +2555,7 @@ static void desktop_thread(void *arg)
         { 162,  81,   0 },   /* 4 - brown */
         {  48,  48,  48 },   /* 5 - grey */
     };
-    uint32_t bg = config_get_num("tlo", 0);
+    uint32_t bg = config_get_num("background", 0);
     if (bg >= sizeof(backgrounds) / sizeof(backgrounds[0]))
         bg = 0;
     video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
@@ -2603,7 +2603,7 @@ static void desktop_thread(void *arg)
         raise_win(0);
         wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
                                   .used = 1, .has_button = 0, .owner = -1};
-        set_title(&wins[1], "Pliki");
+        set_title(&wins[1], "Files");
         raise_win(1);
     }
 
@@ -2639,8 +2639,8 @@ static void desktop_thread(void *arg)
         video_fill_rect(sx + 3, 3, SHOW_W - 6, 4,
                         hidden_by_show ? COL_WHITE : COL_LINE);
         if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, 10)) {
-            const char *what = hidden_by_show ? "Przywroc okna"
-                                              : "Pokaz pulpit";
+            const char *what = hidden_by_show ? "Restore windows"
+                                              : "Show desktop";
             int n = 0;
             while (what[n])
                 n++;

@@ -25,7 +25,7 @@ static void flush_line(const char *pattern)
 void _start(int argc, char **argv)
 {
     if (argc < 2) {
-        print("uzycie: grep <wzorzec>\n");
+        print("usage: grep <pattern>\n");
         sys_exit(1);
     }
 

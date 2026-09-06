@@ -33,7 +33,7 @@ static void on_chld(int32_t sig)
 
 static void fail(const char *msg)
 {
-    print("[sigtest] ZLE: ");
+    print("[sigtest] WRONG: ");
     print(msg);
     print("\n");
     sys_exit(1);
@@ -43,21 +43,21 @@ void _start(void)
 {
     /* 1. A handler of one's own and a return to the same place */
     if (sys_signal(SIGINT, on_signal) < 0)
-        fail("nie da sie ustawic procedury obslugi");
+        fail("the handler cannot be set");
     int32_t rc = sys_kill(sys_getpid(), SIGINT);
     if (rc != 0)
-        fail("przerwany syscall nie oddal swojego wyniku");
+        fail("an interrupted syscall did not give its result back");
     if (hits != 1 || last_sig != SIGINT)
-        fail("procedura obslugi nie dostala SIGINT");
-    print("[sigtest] wlasna procedura obslugi dostala SIGINT i wrocila\n");
+        fail("the handler never got SIGINT");
+    print("[sigtest] my own handler got SIGINT and came back\n");
 
     /* 2. Ignoring */
     sys_signal(SIGINT, (sighandler_t)SIG_IGN);
     sys_kill(sys_getpid(), SIGINT);
     sys_sleep(50);
     if (hits != 1)
-        fail("zignorowany sygnal jednak wszedl w procedure obslugi");
-    print("[sigtest] SIG_IGN: sygnal przepadl, tak jak mial\n");
+        fail("an ignored signal entered the handler anyway");
+    print("[sigtest] SIG_IGN: the signal was lost, as it should be\n");
 
     /* 3. The default reaction: the child dies of SIGTERM */
     sys_signal(SIGCHLD, on_chld);
@@ -71,11 +71,11 @@ void _start(void)
     sys_kill(kid, SIGTERM);
     int32_t code = 0;
     if (sys_waitany(&code) != kid || code != -SIGTERM)
-        fail("SIGTERM nie zakonczyl dziecka domyslna reakcja");
-    print("[sigtest] SIGTERM domyslnie konczy proces (kod -15)\n");
+        fail("SIGTERM did not end the child by default");
+    print("[sigtest] SIGTERM ends a process by default (code -15)\n");
     if (chld < 1)
-        fail("rodzic nie dostal SIGCHLD po smierci dziecka");
-    print("[sigtest] rodzic dostal SIGCHLD\n");
+        fail("the parent never got SIGCHLD after the child died");
+    print("[sigtest] the parent got SIGCHLD\n");
 
     /* 4. SIGKILL cannot be caught */
     int32_t tough = sys_fork();
@@ -87,22 +87,22 @@ void _start(void)
     sys_sleep(200);
     sys_kill(tough, SIGKILL);
     if (sys_waitany(&code) != tough || code != -9)
-        fail("SIGKILL dal sie przechwycic albo nie zabil");
-    print("[sigtest] SIGKILL nie do przechwycenia (kod -9)\n");
+        fail("SIGKILL could be caught, or did not kill");
+    print("[sigtest] SIGKILL cannot be caught (code -9)\n");
 
     /* 5. Ctrl+C from the keyboard: the driver turns it into a SIGINT
        for the process holding the console, and it interrupts the wait
        for a key */
     hits = 0;
     sys_signal(SIGINT, on_signal);
-    print("[sigtest] czekam na Ctrl+C\n");
+    print("[sigtest] waiting for Ctrl+C\n");
     char c;
     while (hits == 0) {
         if (sys_read(STDIN, &c, 1) < 0)
             continue;                /* a read interrupted by a signal */
     }
     if (last_sig != SIGINT)
-        fail("Ctrl+C przyszedl jako cos innego niz SIGINT");
-    print("[sigtest] Ctrl+C dotarl jako SIGINT\n");
+        fail("Ctrl+C arrived as something other than SIGINT");
+    print("[sigtest] Ctrl+C arrived as SIGINT\n");
     sys_exit(0);
 }
