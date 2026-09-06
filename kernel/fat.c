@@ -74,6 +74,46 @@ static uint32_t fat_rel = 0xFFFFFFFFu;   /* which sector of the table is held */
 static uint32_t dirbuf_lba;              /* 0 = nothing valid in dirbuf */
 static int fat_dirty;
 
+/* Which disk this filesystem lies on.
+ *
+ * A FAT does not have to be on the disk the rest of the system is
+ * using: the usual case for it is a stick in the socket while PFS runs
+ * on the machine's own disk. So every read and write of this
+ * filesystem goes through the two functions below, which point the
+ * block layer at the right disk and put it back where it was -
+ * looking at a stick must not move what the filesystem is reading.
+ *
+ * -1 means "whatever is in use", which is what every caller wanted
+ * while there was only ever one disk in play.
+ */
+static int fat_disk = -1;
+
+static int fat_bread(uint32_t lba, uint32_t n, void *buf)
+{
+    int was = blk_current();
+    int r;
+
+    if (fat_disk >= 0 && fat_disk != was && blk_use(fat_disk) < 0)
+        return -1;
+    r = blk_read(lba, n, buf);
+    if (fat_disk >= 0 && fat_disk != was)
+        blk_use(was);
+    return r;
+}
+
+static int fat_bwrite(uint32_t lba, uint32_t n, const void *buf)
+{
+    int was = blk_current();
+    int r;
+
+    if (fat_disk >= 0 && fat_disk != was && blk_use(fat_disk) < 0)
+        return -1;
+    r = blk_write(lba, n, buf);
+    if (fat_disk >= 0 && fat_disk != was)
+        blk_use(was);
+    return r;
+}
+
 static uint16_t le16(const uint8_t *p)
 {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
@@ -133,7 +173,7 @@ static int fat_flush(void)
     if (!fat_dirty || fat_rel == 0xFFFFFFFFu)
         return 0;
     for (uint32_t i = 0; i < v.nfats; i++)
-        if (blk_write(v.fat_start + i * v.fat_sectors + fat_rel, 1, fatbuf) < 0)
+        if (fat_bwrite(v.fat_start + i * v.fat_sectors + fat_rel, 1, fatbuf) < 0)
             return -1;
     fat_dirty = 0;
     return 0;
@@ -147,7 +187,7 @@ static int fat_load(uint32_t rel)
         return -1;
     if (rel >= v.fat_sectors)
         return -1;
-    if (blk_read(v.fat_start + rel, 1, fatbuf) < 0)
+    if (fat_bread(v.fat_start + rel, 1, fatbuf) < 0)
         return -1;
     fat_rel = rel;
     return 0;
@@ -256,7 +296,7 @@ static int dir_load(uint32_t lba)
 {
     if (lba && lba == dirbuf_lba)
         return 0;
-    if (blk_read(lba, 1, dirbuf) < 0) {
+    if (fat_bread(lba, 1, dirbuf) < 0) {
         dirbuf_lba = 0;
         return -1;
     }
@@ -266,7 +306,7 @@ static int dir_load(uint32_t lba)
 
 static int dir_store(uint32_t lba)
 {
-    if (blk_write(lba, 1, dirbuf) < 0) {
+    if (fat_bwrite(lba, 1, dirbuf) < 0) {
         dirbuf_lba = 0;
         return -1;
     }
@@ -284,13 +324,13 @@ static void fsinfo_unknown(void)
 {
     if (v.type != 32 || !v.fsinfo)
         return;
-    if (blk_read(v.fsinfo, 1, datbuf) < 0)
+    if (fat_bread(v.fsinfo, 1, datbuf) < 0)
         return;
     if (le32(datbuf) != 0x41615252u || le32(datbuf + 484) != 0x61417272u)
         return;
     put32(datbuf + 488, 0xFFFFFFFFu);      /* free clusters: unknown */
     put32(datbuf + 492, 0xFFFFFFFFu);      /* where to look next: unknown */
-    blk_write(v.fsinfo, 1, datbuf);
+    fat_bwrite(v.fsinfo, 1, datbuf);
 }
 
 static uint32_t alloc_cluster(void)
@@ -316,7 +356,7 @@ static int zero_cluster(uint32_t clus)
 {
     memset(datbuf, 0, SECTOR);
     for (uint32_t s = 0; s < v.sec_per_clus; s++)
-        if (blk_write(clus_lba(clus) + s, 1, datbuf) < 0)
+        if (fat_bwrite(clus_lba(clus) + s, 1, datbuf) < 0)
             return -1;
     if (dirbuf_lba >= clus_lba(clus) &&
         dirbuf_lba < clus_lba(clus) + v.sec_per_clus)
@@ -655,7 +695,7 @@ int fat_read(const char *path, uint32_t off, void *buf, uint32_t len)
             break;
         uint32_t sec = inside / SECTOR;
         while (sec < v.sec_per_clus && got < len) {
-            if (blk_read(clus_lba(clus) + sec, 1, datbuf) < 0)
+            if (fat_bread(clus_lba(clus) + sec, 1, datbuf) < 0)
                 return -1;
             uint32_t from = inside % SECTOR;
             uint32_t take = SECTOR - from;
@@ -716,16 +756,18 @@ uint32_t fat_free_kib(void)
 void fat_umount(void)
 {
     fat_flush();
+    fat_disk = -1;
     memset(&v, 0, sizeof(v));
     fat_rel = 0xFFFFFFFFu;
     dirbuf_lba = 0;
     fat_dirty = 0;
 }
 
-int fat_mount(uint32_t lba)
+int fat_mount_on(int disk, uint32_t lba)
 {
     fat_umount();
-    if (!blk_present() || blk_read(lba, 1, bsbuf) < 0)
+    fat_disk = disk;
+    if (!blk_present() || fat_bread(lba, 1, bsbuf) < 0)
         return 0;
 
     /* Four things have to be true before any of the numbers are worth
@@ -1161,7 +1203,7 @@ int fat_write_file(const char *path, const void *data, uint32_t len)
                 take = SECTOR;
             memset(datbuf, 0, SECTOR);
             memcpy(datbuf, src + done, take);
-            if (blk_write(clus_lba(c) + s, 1, datbuf) < 0)
+            if (fat_bwrite(clus_lba(c) + s, 1, datbuf) < 0)
                 return -1;
             done += take;
         }
@@ -1317,9 +1359,9 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
         bsbuf[71 + i] = (uint8_t)upcase(label[i]);
     memcpy(bsbuf + 82, "FAT32   ", 8);
     put16(bsbuf + 510, 0xAA55);
-    if (blk_write(lba, 1, bsbuf) < 0)
+    if (fat_bwrite(lba, 1, bsbuf) < 0)
         return -1;
-    if (blk_write(lba + 6, 1, bsbuf) < 0)  /* the copy the format asks for */
+    if (fat_bwrite(lba + 6, 1, bsbuf) < 0)  /* the copy the format asks for */
         return -1;
 
     /* FSInfo. We know exactly how much is free at this moment, so we
@@ -1331,9 +1373,9 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
     put32(datbuf + 488, clusters - 1);     /* the root took one */
     put32(datbuf + 492, 3);                /* look for the next one there */
     put32(datbuf + 508, 0xAA550000u);
-    if (blk_write(lba + 1, 1, datbuf) < 0)
+    if (fat_bwrite(lba + 1, 1, datbuf) < 0)
         return -1;
-    if (blk_write(lba + 7, 1, datbuf) < 0)
+    if (fat_bwrite(lba + 7, 1, datbuf) < 0)
         return -1;
 
     /* The tables, zeroed, then their first three entries: the media
@@ -1341,13 +1383,13 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
        cluster. */
     memset(datbuf, 0, SECTOR);
     for (uint32_t i = 0; i < nfats * fatsz; i++)
-        if (blk_write(fat_lba + i, 1, datbuf) < 0)
+        if (fat_bwrite(fat_lba + i, 1, datbuf) < 0)
             return -1;
     put32(datbuf, 0x0FFFFFF8u);
     put32(datbuf + 4, 0x0FFFFFFFu);
     put32(datbuf + 8, 0x0FFFFFFFu);        /* cluster two: the root, and done */
     for (uint32_t f = 0; f < nfats; f++)
-        if (blk_write(fat_lba + f * fatsz, 1, datbuf) < 0)
+        if (fat_bwrite(fat_lba + f * fatsz, 1, datbuf) < 0)
             return -1;
 
     /* And the root directory itself, empty. A directory that has never
@@ -1355,8 +1397,15 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
        before, and the first entry of that is read as a file. */
     memset(datbuf, 0, SECTOR);
     for (uint32_t i = 0; i < spc; i++)
-        if (blk_write(data_lba + i, 1, datbuf) < 0)
+        if (fat_bwrite(data_lba + i, 1, datbuf) < 0)
             return -1;
 
     return 0;
+}
+
+/* The old spelling: mount from the disk in use. Everything that knew of
+   one disk keeps working, and nothing had to learn a new word. */
+int fat_mount(uint32_t lba)
+{
+    return fat_mount_on(blk_current(), lba);
 }

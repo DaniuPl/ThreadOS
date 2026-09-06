@@ -136,11 +136,15 @@ static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(64)));
 static uint32_t erst[4] __attribute__((aligned(64)));
 static uint8_t dev_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
 static uint8_t in_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
-/* Transfer rings: [0] endpoint zero, [1] the interrupt one */
-static struct trb ep_trb[SLOTS][2][TRB_CHAIN] __attribute__((aligned(64)));
+/* Transfer rings: [0] endpoint zero, [1] the interrupt one, [2] bulk
+   in, [3] bulk out. A ring per endpoint, because that is what the
+   controller expects: it keeps its own read position in each of them
+   and a shared ring would make two endpoints trip over each other. */
+#define RINGS 4
+static struct trb ep_trb[SLOTS][RINGS][TRB_CHAIN] __attribute__((aligned(64)));
 
 static struct ring cmd_pier;
-static struct ring ep_pier[SLOTS][2];
+static struct ring ep_pier[SLOTS][RINGS];
 static uint32_t evt_index, evt_cycle;
 static int armed[SLOTS];       /* is a read pending on the interrupt endpoint */
 
@@ -382,10 +386,18 @@ static uint32_t *info(uint8_t *set, int i)
     return (uint32_t *)(set + (uintptr_t)i * (uintptr_t)ctx_size);
 }
 
-/* An endpoint's number in a context: zero has 1, further IN ones have 2n+1 */
+/* An endpoint's number in a context: zero has 1, further IN ones have
+   2n+1 and OUT ones 2n. The direction is part of the number, because
+   in USB an "endpoint 2" going in and an "endpoint 2" going out are
+   two different endpoints that merely share a digit. */
 static int dci(int ep)
 {
     return ep ? ep * 2 + 1 : 1;
+}
+
+static int dci_dir(int ep, int in)
+{
+    return ep ? ep * 2 + (in ? 1 : 0) : 1;
 }
 
 /* --- bringing it up --------------------------------------------------- */
@@ -395,26 +407,53 @@ int xhci_ports(void)
     return nports;
 }
 
+/* Where the start-up stopped, if it did.
+ *
+ * "No USB" is not an answer anybody can act on. A controller that is
+ * on the bus but did not start is a different fault from one that is
+ * not there at all - and on a real machine that difference is the
+ * whole diagnosis, so it is written down and printed by 'sprzet'. */
+static const char *gave_up;
+
+static int give_up(const char *why)
+{
+    gave_up = why;
+    return 0;
+}
+
+const char *xhci_why(void)
+{
+    return gave_up;
+}
+
 int xhci_init(void)
 {
     struct pci_dev dev;
     /* Class 0x0C (serial bus), subclass 0x03 (USB),
        programming interface 0x30 (xHCI) */
     if (!pci_find_class(0x0C, 0x03, 0x30, &dev))
-        return 0;
+        return give_up("nie ma kontrolera xHCI na PCI");
 
     /* xHCI sits in memory - BAR0, possibly 64-bit (bits 2:1 equal to 2
        mean the upper half of the address is in BAR1) */
     uint64_t addr = dev.bar[0] & ~0xFULL;
     if (dev.bar[0] & 0x01)
-        return 0;                        /* this is not a memory window */
+        return give_up("BAR0 kontrolera nie jest oknem w pamieci");
     if (((dev.bar[0] >> 1) & 0x3) == 0x2)
         addr |= (uint64_t)dev.bar[1] << 32;
-    if (!addr || addr > 0xFFFFFFFFull)
-        return 0;                        /* we would not reach higher anyway */
+    if (!addr)
+        return give_up("firmware nie przydzielil kontrolerowi adresu");
+#ifndef __x86_64__
+    /* In 32-bit mode there is nowhere to map it to: the whole address
+       space ends where this address begins. UEFI firmware likes to put
+       64-bit windows up there, and that is why the same machine has
+       USB under the old BIOS and none under UEFI - in this kernel. */
+    if (addr > 0xFFFFFFFFull)
+        return give_up("kontroler siedzi powyzej 4 GiB (tryb 32-bitowy)");
+#endif
 
-    if (MAP_PHYS((uint32_t)addr, 0x10000) < 0)
-        return 0;
+    if (MAP_PHYS((uintptr_t)addr, 0x10000) < 0)
+        return give_up("nie udalo sie zmapowac okna kontrolera");
     pci_enable_bus_master(&dev);
 
     base = (uintptr_t)addr;
@@ -439,7 +478,7 @@ int xhci_init(void)
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_CNR); i++)
         wait_ms(1);
     if (rd(op + OP_USBCMD) & CMD_HCRST)
-        return 0;
+        return give_up("kontroler nie chce sie zresetowac");
 
     memset(dcbaa, 0, sizeof(dcbaa));
     memset(dev_ctx, 0, sizeof(dev_ctx));
@@ -472,7 +511,7 @@ int xhci_init(void)
     for (int i = 0; i < 200 && (rd(op + OP_USBSTS) & STS_HCH); i++)
         wait_ms(1);
     if (rd(op + OP_USBSTS) & STS_HCH)
-        return 0;
+        return give_up("kontroler nie chce ruszyc po resecie");
 
     /* Port power: without it nothing on a port will ever report in */
     for (int i = 0; i < nports; i++) {
@@ -726,4 +765,130 @@ int xhci_int_in(int slot, int ep, void *data, int len)
     if (passed > 0)
         memcpy(data, buf[slot - 1], (uint32_t)passed);
     return passed;
+}
+
+/* --- bulk endpoints ----------------------------------------------------
+ *
+ * What a disk needs, and what a keyboard did not. The difference from
+ * an interrupt endpoint is smaller than it looks: the same rings, the
+ * same events, another number in the type field. Two differences do
+ * matter.
+ *
+ * The first: a bulk transfer goes BOTH ways, so a device has two
+ * endpoints and each of them needs a ring of its own. They are set up
+ * with one command, because every Configure Endpoint command replaces
+ * the whole description of the device - sending two commands in a row
+ * would leave the second one having forgotten the first.
+ *
+ * The second: we wait for the answer here instead of returning "not
+ * yet". A keyboard is asked whether it has anything to say; a disk is
+ * told to read a sector, and there is nothing sensible to do until it
+ * has.
+ */
+int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket)
+{
+    if (!base || slot < 1 || slot > SLOTS || in_ep < 1 || out_ep < 1)
+        return -1;
+
+    int in_dci = dci_dir(in_ep, 1);
+    int out_dci = dci_dir(out_ep, 0);
+    if (in_dci > 31 || out_dci > 31)
+        return -1;
+
+    ring_setup(&ep_pier[slot - 1][2], ep_trb[slot - 1][2]);
+    ring_setup(&ep_pier[slot - 1][3], ep_trb[slot - 1][3]);
+
+    uint8_t *we = in_ctx[slot - 1];
+    memset(we, 0, CTX_BYTES);
+    uint32_t *control = info(we, 0);
+    control[1] = 0x1u | (1u << in_dci) | (1u << out_dci);
+
+    /* The device context says how many endpoints the controller is to
+       keep room for - and that is the HIGHEST number in use, not how
+       many there are. */
+    int top = in_dci > out_dci ? in_dci : out_dci;
+    uint32_t *src = info(dev_ctx[slot - 1], 0);
+    uint32_t *device = info(we, 1);
+    device[0] = (src[0] & 0x07FFFFFFu) | ((uint32_t)top << 27);
+    device[1] = src[1];
+
+    static const int kinds[2] = { 6, 2 };      /* bulk in, bulk out */
+    int dcis[2] = { in_dci, out_dci };
+    for (int i = 0; i < 2; i++) {
+        uint32_t *punkt = info(we, dcis[i] + 1);
+        punkt[0] = 0;                          /* bulk has no interval */
+        punkt[1] = (3u << 1) |                 /* three attempts on error */
+                   ((uint32_t)kinds[i] << 3) |
+                   ((uint32_t)maxpacket << 16);
+        uint64_t p = fiz(ep_trb[slot - 1][i == 0 ? 2 : 3]) | 1;
+        punkt[2] = (uint32_t)p;
+        punkt[3] = (uint32_t)(p >> 32);
+        punkt[4] = (uint32_t)maxpacket;
+    }
+
+    if (command(fiz(we),
+                ((uint32_t)TRB_CONFIG_EP << 10) | ((uint32_t)slot << 24),
+                (struct trb *)0) != CODE_OK)
+        return -1;
+    return 0;
+}
+
+/* One transfer, in pieces the controller will accept.
+ *
+ * A single TRB may not describe a buffer that crosses a 64 KiB
+ * boundary - not because of the bus but because of how the controller
+ * counts. Nothing here asks for more than four kilobytes at a time,
+ * but "nothing here does" is exactly the kind of assumption that
+ * breaks a year later, so the split is done properly.
+ */
+static int bulk_transfer(int slot, int ep, void *data, int len, int in)
+{
+    if (!base || slot < 1 || slot > SLOTS || len < 0)
+        return -1;
+
+    struct ring *p = &ep_pier[slot - 1][in ? 2 : 3];
+    uint8_t *q = data;
+    int left = len;
+    int total = 0;
+
+    while (left > 0) {
+        uint64_t phys = fiz(q);
+        uint32_t room = 0x10000u - (uint32_t)(phys & 0xFFFFu);
+        uint32_t n = (uint32_t)left;
+        struct comp c;
+
+        if (n > room)
+            n = room;
+
+        insert(p, phys, n, ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+        doorbells[slot] = (uint32_t)dci_dir(ep, in);
+
+        if (!wait_slot(slot, &c, 5000))
+            return -1;
+        if (c.code != CODE_OK && c.code != CODE_SHORT)
+            return -1;
+
+        int passed = (int)n - c.left;
+        if (passed < 0)
+            passed = 0;
+        total += passed;
+        /* A packet shorter than asked for ends the transfer - that is
+           how a device says "that is all I had". */
+        if (passed < (int)n)
+            break;
+
+        q += n;
+        left -= (int)n;
+    }
+    return total;
+}
+
+int xhci_bulk_out(int slot, int ep, const void *data, int len)
+{
+    return bulk_transfer(slot, ep, (void *)(uintptr_t)data, len, 0);
+}
+
+int xhci_bulk_in(int slot, int ep, void *data, int len)
+{
+    return bulk_transfer(slot, ep, data, len, 1);
 }

@@ -17,6 +17,7 @@
 #include "include/mouse.h"
 #include "include/keyboard.h"
 #include "include/usbhc.h"
+#include "include/usbmass.h"
 #include "include/usbkbd.h"
 #include "include/usbmouse.h"
 #include "include/blk.h"
@@ -73,6 +74,14 @@ void hwinfo_print(void)
     printk("USB:      %s, klawiatura %s, mysz %s\n",
            usbhc_name(), usbkbd_present() ? "tak" : "nie",
            usbmouse_present() ? "tak" : "nie");
+    /* And when there is none, WHY - because "no USB" is not something
+       anybody can act on, while "the controller sits above 4 GiB" is. */
+    if (usbhc_why())
+        printk("          (%s)\n", usbhc_why());
+    for (int i = 0; i < usbmass_count(); i++)
+        printk("          dysk USB: %s, %u sektorow po 512 B (%u MiB)\n",
+               usbmass_name(i), usbmass_sectors(i),
+               usbmass_sectors(i) / 2048);
 
     /* The disk, and what is already on it. A machine booted from a
        stick sees the laptop's own disk here - and before anyone

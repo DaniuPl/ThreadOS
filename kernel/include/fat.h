@@ -38,6 +38,11 @@ struct fat_entry {
    1 = mounted, 0 = there is no FAT there (and then nothing is
    touched). */
 int fat_mount(uint32_t lba);
+
+/* The same, but from a chosen disk - a stick can be read while PFS
+   keeps running on the machine's own disk. Every read and write of the
+   mounted filesystem points the block layer there and puts it back. */
+int fat_mount_on(int disk, uint32_t lba);
 void fat_umount(void);
 int fat_mounted(void);
 

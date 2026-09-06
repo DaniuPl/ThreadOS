@@ -103,7 +103,7 @@ static void cmd_help(void)
     printk("           reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("           runw <prog> - program na dowolnym rdzeniu\n");
     printk("           kim, sudo <komenda>, wyloguj, haslo\n");
-    printk("           fat [N] - partycja EFI (FAT): fatls, fatcat,\n");
+    printk("           fat [N [dysk]] - partycja FAT: fatls, fatcat,\n");
     printk("             fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("           sprzet - co jest w tej maszynie, dyski - dyski\n");
     printk("           beep [Hz] [ms] - dzwiek, glosnosc [0-100|cisza]\n");

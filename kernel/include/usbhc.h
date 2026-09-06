@@ -27,6 +27,9 @@ int usbhc_init(void);
 /* Name of the controller found - to be printed at startup */
 const char *usbhc_name(void);
 
+/* When there is no controller: why. NULL when there is one. */
+const char *usbhc_why(void);
+
 /* How many ports the controller has */
 int usbhc_ports(void);
 
@@ -53,6 +56,17 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval);
 /* A single look into an interrupt endpoint. Returns the number of
    bytes, 0 when the device has nothing to say, -1 on error. */
 int usbhc_int_in(int dev, int ep, void *data, int len);
+
+/* Bulk endpoints - what a disk speaks through. Declared in pairs (in
+   and out), because that is how the mass storage class works and
+   because one command describes the whole device anyway. Available on
+   xHCI; UHCI answers -1. */
+int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket);
+
+/* Bulk transfers. They wait for the answer. The number of bytes moved,
+   or -1. */
+int usbhc_bulk_out(int dev, int ep, const void *data, int len);
+int usbhc_bulk_in(int dev, int ep, void *data, int len);
 
 /* The two requests every driver above here makes, spelled once.
  *

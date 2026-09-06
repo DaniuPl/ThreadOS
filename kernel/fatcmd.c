@@ -60,18 +60,52 @@ static int need(void)
     return 0;
 }
 
+/* "fat <partycja> [dysk]" - and the second number is what makes a
+   stick usable: the partition table and the filesystem are read from
+   THAT disk, while everything else in the system goes on using the one
+   it was using. Without it, looking at a pendrive would mean pointing
+   the whole machine at it. */
 void fatcmd_mount(const char *arg)
 {
     uint32_t lba = 0;
+    int disk = -1;
+    int was = blk_current();
+
+    if (arg) {
+        const char *p = arg;
+        while (*p == ' ')
+            p++;
+        while (*p >= '0' && *p <= '9')
+            p++;
+        while (*p == ' ')
+            p++;
+        if (*p >= '0' && *p <= '9') {
+            int n = 0;
+            while (*p >= '0' && *p <= '9')
+                n = n * 10 + (*p++ - '0');
+            disk = n - 1;
+            if (disk < 0 || disk >= blk_count()) {
+                printk("fat: nie ma dysku %u ('dyski' pokazuje, ile ich "
+                       "jest)\n", (uint32_t)n);
+                return;
+            }
+            /* The table has to be read from the disk being asked about */
+            blk_use(disk);
+        }
+    }
+
     int which = pick(arg ? arg : "", &lba);
+    if (disk >= 0)
+        blk_use(was);
     if (which < 0)
         return;
-    if (!fat_mount(lba)) {
+    if (!fat_mount_on(disk >= 0 ? disk : was, lba)) {
         printk("fat: partycja %u (sektor %u) to nie jest FAT\n",
                (uint32_t)which, lba);
         return;
     }
-    printk("partycja %u, sektor %u: %s%s%s\n", (uint32_t)which, lba,
+    printk("dysk %u, partycja %u, sektor %u: %s%s%s\n",
+           (uint32_t)((disk >= 0 ? disk : was) + 1), (uint32_t)which, lba,
            fat_kind(), fat_label()[0] ? ", etykieta " : "", fat_label());
     printk("klaster %u B, razem %u KiB, wolnych %u KiB\n",
            fat_cluster_bytes(), fat_total_kib(), fat_free_kib());

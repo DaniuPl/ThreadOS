@@ -22,8 +22,9 @@
 #include "include/nvme.h"
 #include "include/ahci.h"
 #include "include/ata.h"
+#include "include/usbmass.h"
 
-enum backend { BLK_NONE, BLK_NVME, BLK_AHCI, BLK_ATA };
+enum backend { BLK_NONE, BLK_NVME, BLK_AHCI, BLK_ATA, BLK_USB };
 
 struct dev {
     enum backend kind;
@@ -47,6 +48,9 @@ static void point(void)
         ahci_select(devs[cur].unit);
     else if (devs[cur].kind == BLK_ATA)
         ata_select(devs[cur].unit);
+    /* USB disks need no pointing: the unit number travels with every
+       command, because the device is addressed by its slot on the bus
+       rather than by a register somebody set earlier. */
 }
 
 static void add(enum backend kind, int unit, uint32_t sectors)
@@ -85,6 +89,14 @@ int blk_init(void)
         ata_select(0);
     }
 
+    /* And the disk somebody plugged in. Last on the list on purpose:
+       a machine that has a disk of its own is to keep booting from it,
+       whatever is in the socket. */
+    if (usbmass_init()) {
+        for (int i = 0; i < usbmass_count(); i++)
+            add(BLK_USB, i, usbmass_sectors(i));
+    }
+
     if (ndevs) {
         cur = 0;
         point();
@@ -113,6 +125,7 @@ static const char *kind_name(enum backend k)
     case BLK_NVME: return "NVMe (PCIe, kolejki)";
     case BLK_AHCI: return "AHCI (SATA, DMA)";
     case BLK_ATA:  return "ATA PIO";
+    case BLK_USB:  return "USB (pamiec masowa)";
     default:       return "brak";
     }
 }
@@ -157,6 +170,8 @@ int blk_read(uint32_t lba, uint32_t count, void *buf)
         return nvme_read(lba, count, buf);
     if (devs[cur].kind == BLK_AHCI)
         return ahci_read(lba, count, buf);
+    if (devs[cur].kind == BLK_USB)
+        return usbmass_read(devs[cur].unit, lba, count, buf);
     uint8_t *p = buf;
     for (uint32_t i = 0; i < count; i++)
         if (ata_read_sector(lba + i, p + i * ATA_SECTOR_SIZE) < 0)
@@ -173,6 +188,8 @@ int blk_write(uint32_t lba, uint32_t count, const void *buf)
         return nvme_write(lba, count, buf);
     if (devs[cur].kind == BLK_AHCI)
         return ahci_write(lba, count, buf);
+    if (devs[cur].kind == BLK_USB)
+        return usbmass_write(devs[cur].unit, lba, count, buf);
     const uint8_t *p = buf;
     for (uint32_t i = 0; i < count; i++)
         if (ata_write_sector(lba + i, p + i * ATA_SECTOR_SIZE) < 0)

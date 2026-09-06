@@ -42,6 +42,17 @@ struct device {
 
 static struct device list[DEVICES];
 
+/* Why there is no controller. The question is asked by 'sprzet', and
+   the answer matters most on a real machine: "no xHCI on the PCI bus"
+   and "the controller is there but did not start" call for different
+   things to be done. */
+const char *usbhc_why(void)
+{
+    if (controller != NONE)
+        return (const char *)0;
+    return xhci_why();
+}
+
 const char *usbhc_name(void)
 {
     if (controller == XHCI)
@@ -235,6 +246,35 @@ int usbhc_int_in(int dev, int ep, void *data, int len)
     struct device *u = &list[dev - 1];
     return uhci_interrupt_in(u->addr, u->lowspeed, ep, u->ep_maxpacket,
                              data, len, &u->toggle);
+}
+
+/* Bulk endpoints - a disk, not a keyboard.
+ *
+ * Only xHCI for now, and that is said out loud rather than hidden:
+ * UHCI would need its own queue for bulk and a data toggle kept per
+ * endpoint, and the machines that still have UHCI alone are the ones
+ * that boot from something else anyway. A driver above gets -1 and
+ * knows there is no disk to be had here.
+ */
+int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket)
+{
+    if (dev < 1 || controller != XHCI)
+        return -1;
+    return xhci_bulk_endpoint(dev, in_ep, out_ep, maxpacket);
+}
+
+int usbhc_bulk_out(int dev, int ep, const void *data, int len)
+{
+    if (dev < 1 || controller != XHCI)
+        return -1;
+    return xhci_bulk_out(dev, ep, data, len);
+}
+
+int usbhc_bulk_in(int dev, int ep, void *data, int len)
+{
+    if (dev < 1 || controller != XHCI)
+        return -1;
+    return xhci_bulk_in(dev, ep, data, len);
 }
 
 /* --- The requests a device driver makes -----------------------------

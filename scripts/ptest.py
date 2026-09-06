@@ -1055,7 +1055,7 @@ class Qemu:
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
-                 uefi=None, esp=None, disk2=None, audio=None,
+                 uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
@@ -1105,6 +1105,15 @@ class Qemu:
             cmd += ["-device", "usb-mouse,bus=xhci.0"]
         elif usbmouse:
             cmd += ["-usb", "-device", "usb-mouse"]
+        if usbdisk:
+            # A stick in the socket: a file on the host, a disk on the
+            # bus. Whatever the system writes to it lands in that file,
+            # which is how the test reads the result with somebody
+            # else's tools.
+            if usbkbd != "xhci" and usbmouse != "xhci":
+                cmd += ["-device", "qemu-xhci,id=xhci"]
+            cmd += ["-drive", "if=none,id=pendrive,format=raw,file=" + usbdisk,
+                    "-device", "usb-storage,bus=xhci.0,drive=pendrive"]
         if audio:
             # An HD Audio controller with a codec on it, and the sound
             # written to a file instead of a speaker. That file is the

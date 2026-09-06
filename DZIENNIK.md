@@ -5045,3 +5045,52 @@ sprawdzane przez `make test`.
       uzgodnienie. Odpowiedz, ktora wraca, jest wiec dowodem, czym
       rekord byl zaszyfrowany - osobno dla AES-GCM i osobno dla
       ChaCha20-Poly1305.
+
+- [x] **Dysk w gniazdku USB: pendrive jak kazdy inny dysk**
+      (transfery bulk w kernel/xhci.c, sterownik kernel/usbmass.c,
+      FAT z wybranego dysku, nowa grupa testow `usbdysk`).
+
+      Magistrala USB nosila dotad klawiature i mysz - urzadzenia, ktore
+      na pytanie odpowiadaja kilkoma bajtami. Dysk to drugi rodzaj
+      ruchu: punkty koncowe bulk, dane w obie strony i polecenie SCSI
+      w kazdym transferze. Klasa nazywa sie Bulk-Only Transport i mowi
+      nia kazdy pendrive z ostatnich dwudziestu lat: trzydziesci jeden
+      bajtow polecenia (CBW), dane, trzynascie bajtow werdyktu (CSW).
+
+      **Blad, ktory znalazl sie sam i byl powazniejszy niz cala reszta.**
+      Test uruchomil te sama maszyne przez UEFI - i USB znikneło.
+      Zupelnie: "USB: brak", mimo ze kontroler byl na PCI. Powod:
+      firmware UEFI przydziela kontrolerowi okno pamieci POWYZEJ 4 GiB,
+      a sterownik odmawial takiego adresu jednym warunkiem napisanym
+      wtedy, gdy jadro bylo tylko 32-bitowe. W trybie dlugim nie ma
+      powodu odmawiac - i teraz nie odmawia, a w trybie 32-bitowym
+      mowi wprost, dlaczego nie moze. **Na laptopie, ktory startuje
+      przez UEFI, oznaczalo to brak klawiatury i myszy USB** - czyli
+      wszystkiego, co ma nowy laptop. Zaden test tego nie lapal, bo
+      testy USB startowaly z plyty przez BIOS.
+
+      Stad tez druga zmiana: kontroler, ktory sie nie podnosi, ZAPISUJE,
+      gdzie stanal ("nie ma kontrolera xHCI na PCI", "kontroler siedzi
+      powyzej 4 GiB", "nie chce sie zresetowac"), a `sprzet` to
+      pokazuje. "USB: brak" nie jest odpowiedzia, z ktora ktokolwiek
+      moze cokolwiek zrobic.
+
+      **FAT z WSKAZANEGO dysku.** Pendrive jest do ogladania, a nie do
+      przestawiania na niego calej maszyny - wiec `fat 1 3` montuje
+      partycje z dysku trzeciego, a PFS dalej pracuje na swoim. Kazdy
+      odczyt i zapis tego systemu plikow przestawia warstwe blokowa na
+      wlasciwy dysk i odklada ja z powrotem, dokladnie tak jak przy
+      ogladaniu cudzych dyskow w `dyski`.
+
+      Sterownik dopisuje sie do blk.c jako zwykly dysk - ale na koncu
+      listy: maszyna, ktora ma wlasny dysk, ma z niego startowac,
+      cokolwiek tkwi w gniazdku.
+
+      Sprawdzane tak, ze wynik czyta ktos inny: mtools zapisuje plik na
+      obrazie pendrive'a i system musi go przeczytac, a potem system
+      pisze swoje i mtools musi to znalezc - razem z tym, ze plik hosta
+      przezyl. Na koniec to, po co pendrive w ogole jest: **instalacja
+      systemu na pendrive z poziomu dzialajacego systemu** (`instaluj
+      tekstem caly 3`), sprawdzenie tablicy GPT wlasnym czytnikiem,
+      loadera co do bajtu przez mtools - i uruchomienie tego pendrive'a
+      pod UEFI, az do powloki.
