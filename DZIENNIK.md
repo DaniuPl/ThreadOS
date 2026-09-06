@@ -5465,3 +5465,8 @@ sprawdzane przez `make test`.
       Obie drogi sprawdzone lokalnie: normalna (jako root, cztery grupy
       sieciowe przechodza) i odmowa (port 53 zajety przez inny proces -
       grupa wypisuje POMINIETE i konczy sie zielono).
+
+      Potwierdzenie z zewnatrz: przebieg CI po tej zmianie jest zielony,
+      **559 asercji zamiast 539** - te dwadziescia to wlasnie `tls64`,
+      ktory wczesniej wywalal sie po sekundzie. Dziewiec minut na
+      biegaczu z dwoma rdzeniami.
