@@ -19,6 +19,7 @@
 #include "include/uhci.h"
 #include "include/xhci.h"
 #include "include/task.h"
+#include "include/printk.h"
 
 enum { NONE, XHCI, UHCI };
 
@@ -41,6 +42,38 @@ struct device {
 };
 
 static struct device list[DEVICES];
+
+#define PORTS_MAX 32
+static int port_dev[PORTS_MAX];
+static int port_known[PORTS_MAX];
+static int port_taken[PORTS_MAX];
+
+/* A socket is not the same thing as a port on the controller.
+ *
+ * The machine has as many sockets as the controller has ports - until
+ * somebody plugs a hub into one of them, and then it has more. So the
+ * list of sockets grows: the first entries are the controller's own
+ * ports, and every hub found adds its ports to the end. A driver
+ * walking "the ports" therefore reaches devices behind hubs without
+ * knowing that hubs exist, which is the whole point.
+ *
+ * The route string is how the controller is told the way to a device:
+ * four bits per tier of hubs. It is built here, one nibble per tier,
+ * because here is where the tree is known. */
+struct socket {
+    int root;                    /* the controller's port it hangs off */
+    uint32_t route;              /* 0 = the root port itself */
+    int tier;                    /* 0 = root, 1 = behind one hub, ... */
+    int hub;                     /* handle of the hub above, 0 = none */
+    int hub_port;                /* which of its ports, counted from 1 */
+    int hub_speed;               /* the hub's own speed (xHCI numbering) */
+};
+
+static struct socket sock[PORTS_MAX];
+static int nsock;
+static int dev_speed[PORTS_MAX];         /* per socket, filled on greeting */
+
+static int usbhc_greet(int port);
 
 /* Why there is no controller. The question is asked by 'sprzet', and
    the answer matters most on a real machine: "no xHCI on the PCI bus"
@@ -74,6 +107,20 @@ int usbhc_init(void)
 
     if (xhci_init()) {
         controller = XHCI;
+        /* One socket per port of the controller, to begin with. Hubs
+           add theirs as they are found. */
+        nsock = xhci_ports();
+        if (nsock > PORTS_MAX)
+            nsock = PORTS_MAX;
+        for (int i = 0; i < nsock; i++) {
+            sock[i].root = i;
+            sock[i].route = 0;
+            sock[i].tier = 0;
+            sock[i].hub = 0;
+            sock[i].hub_port = 0;
+            sock[i].hub_speed = 0;
+            port_dev[i] = -1;
+        }
         return 1;
     }
     if (uhci_init()) {
@@ -84,10 +131,13 @@ int usbhc_init(void)
     return 0;
 }
 
+/* How many sockets there are to look into: the controller's ports, and
+   whatever hubs have added since. The number grows while enumeration
+   runs, which is exactly what a loop over ports wants. */
 int usbhc_ports(void)
 {
     if (controller == XHCI)
-        return xhci_ports();
+        return nsock;
     if (controller == UHCI)
         return uhci_ports();
     return 0;
@@ -151,12 +201,7 @@ static int uhci_greet(int port, struct device *u)
  * it costs is the keyboard quietly ceasing to deliver keys. So a
  * driver that takes a device says so, and from then on the port
  * answers "nothing here" to everybody else. */
-#define PORTS_MAX 32
-static int port_dev[PORTS_MAX];
-static int port_known[PORTS_MAX];
-static int port_taken[PORTS_MAX];
 
-static int usbhc_greet(int port);
 
 void usbhc_claim(int port)
 {
@@ -178,12 +223,176 @@ int usbhc_attach(int port)
     return port_dev[port];
 }
 
+/* --- hubs -----------------------------------------------------------
+ *
+ * A hub is a device like any other until it has been addressed, and
+ * something else afterwards: it has ports of its own, and each of them
+ * has to be given power and then reset by ASKING THE HUB, with
+ * ordinary control transfers. The controller knows nothing about any
+ * of it - it only has to be told, at the end, how to reach what was
+ * found.
+ */
+#define HUB_CLASS        0x09
+#define REQ_GET_STATUS   0x00
+#define REQ_CLEAR_FEATURE 0x01
+#define REQ_SET_FEATURE  0x03
+#define FEAT_PORT_RESET  4
+#define FEAT_PORT_POWER  8
+#define FEAT_C_RESET     20              /* clear the "reset finished" flag */
+
+static int hub_status(int dev, int port, uint32_t *status)
+{
+    uint8_t setup[8];
+    uint8_t answer[4];
+
+    query(setup, 0xA3, REQ_GET_STATUS, 0, (uint16_t)port, 4);
+    if (usbhc_control(dev, setup, answer, 4, 1) < 4)
+        return -1;
+    *status = (uint32_t)answer[0] | ((uint32_t)answer[1] << 8) |
+              ((uint32_t)answer[2] << 16) | ((uint32_t)answer[3] << 24);
+    return 0;
+}
+
+/* A request to the hub about one of its ports. Setting a feature turns
+   something on (power, reset); clearing one acknowledges something
+   that has happened (the reset is over). */
+static int hub_feature(int dev, int port, int feature, int set)
+{
+    uint8_t setup[8];
+
+    query(setup, 0x23, set ? REQ_SET_FEATURE : REQ_CLEAR_FEATURE,
+          (uint16_t)feature, (uint16_t)port, 0);
+    return usbhc_control(dev, setup, (void *)0, 0, 0);
+}
+
+/* Wakes one port of a hub and says what came up on it: 0 = nothing
+   there, otherwise the speed in the controller's numbering. */
+static int hub_wake_port(int dev, int port)
+{
+    uint32_t status = 0;
+
+    if (hub_status(dev, port, &status) < 0)
+        return 0;
+    if (!(status & 0x0001))              /* nothing connected */
+        return 0;
+
+    hub_feature(dev, port, FEAT_PORT_RESET, 1);
+    for (int i = 0; i < 50; i++) {
+        task_sleep(20);
+        if (hub_status(dev, port, &status) < 0)
+            return 0;
+        if (status & 0x0002)             /* enabled = the reset is over */
+            break;
+    }
+    if (!(status & 0x0002))
+        return 0;
+    hub_feature(dev, port, FEAT_C_RESET, 0);   /* acknowledge it */
+
+    /* The two speed bits of the hub's port status. Low speed is bit 9,
+       high speed bit 10, and neither set means full speed - which is
+       the one everything used to be. */
+    if (status & 0x0200)
+        return 2;                        /* low */
+    if (status & 0x0400)
+        return 3;                        /* high */
+    return 1;                            /* full */
+}
+
+/* A device that turned out to be a hub: its ports are added to the
+   list of sockets, so that whoever walks the list finds what is on
+   them. */
+static void hub_expand(int socket_index, int dev)
+{
+    uint8_t setup[8];
+    uint8_t desc[16];
+    uint8_t cfg[9];
+
+    /* The configuration has to be chosen before the hub will answer
+       anything about its ports. */
+    if (usbhc_descriptor(dev, 0x02, 0, cfg, 9) < 9)
+        return;
+    if (usbhc_request(dev, 0x00, 0x09, cfg[5], 0) < 0)
+        return;
+
+    /* The hub descriptor is class-specific: type 0x29, and it is the
+       only place the number of ports is written down. */
+    query(setup, 0xA0, 0x06, 0x2900, 0, 8);
+    if (usbhc_control(dev, setup, desc, 8, 1) < 8)
+        return;
+
+    int ports = desc[2];
+    int characteristics = desc[3] | (desc[4] << 8);
+    int power_ms = desc[5] * 2;
+    if (ports < 1 || ports > 15)
+        return;
+
+    int speed = dev_speed[socket_index];
+    int multi_tt = 0;                    /* one translator for the lot */
+    int think = (characteristics >> 5) & 3;
+
+    if (controller == XHCI)
+        xhci_mark_hub(dev, ports, multi_tt, think);
+
+    /* Power first, and then wait as long as the hub asked to be waited
+       for - a port that has not finished powering up answers "nothing
+       here" and the device behind it is simply never found. */
+    for (int p = 1; p <= ports; p++)
+        hub_feature(dev, p, FEAT_PORT_POWER, 1);
+    task_sleep(power_ms > 20 ? (uint32_t)power_ms : 20);
+
+    for (int p = 1; p <= ports && nsock < PORTS_MAX; p++) {
+        struct socket *n = &sock[nsock];
+        n->root = sock[socket_index].root;
+        n->tier = sock[socket_index].tier + 1;
+        /* Four bits per tier, the first tier lowest. Beyond five tiers
+           the string runs out - and so does the specification, which
+           allows exactly five. */
+        n->route = sock[socket_index].route |
+                   ((uint32_t)p << (4 * (n->tier - 1)));
+        n->hub = dev;
+        n->hub_port = p;
+        n->hub_speed = speed;
+        nsock++;
+    }
+
+    printk("[ OK ] Koncentrator USB na gniazdku %d: %d gniazdek wiecej\n",
+           socket_index + 1, ports);
+}
+
 static int usbhc_greet(int port)
 {
     if (controller == XHCI) {
-        int slot = xhci_attach(port);
-        if (slot < 0)
-            return -1;
+        struct socket *sk = &sock[port];
+        int slot;
+
+        if (!sk->hub) {
+            slot = xhci_attach(sk->root);
+            if (slot < 0)
+                return -1;
+            dev_speed[port] = xhci_speed(sk->root);
+        } else {
+            int speed = hub_wake_port(sk->hub, sk->hub_port);
+            if (!speed)
+                return -1;               /* nothing in that socket */
+            /* A device slower than the hub above it is reached through
+               that hub's translator - but only when the hub is a
+               high-speed one. Below that there is nothing to
+               translate. */
+            int tt_slot = (sk->hub_speed == 3 && speed != 3) ? sk->hub : 0;
+            slot = xhci_address(sk->root, sk->route, speed, tt_slot,
+                                sk->hub_port);
+            if (slot < 0)
+                return -1;
+            dev_speed[port] = speed;
+        }
+
+        /* Is it a hub? Then the machine has more sockets than it had a
+           moment ago. */
+        uint8_t desc[18];
+        if (usbhc_descriptor(slot, 0x01, 0, desc, 18) >= 18 &&
+            desc[4] == HUB_CLASS)
+            hub_expand(port, slot);
+
         /* The handle is the slot number; so that it does not get
            confused with UHCI handles, we store it the same way - each
            backend reads its own */
@@ -239,8 +448,19 @@ void usbhc_on_unplug(void (*fn)(int port))
 
 int usbhc_connected(int port)
 {
-    if (controller == XHCI)
-        return xhci_port_connected(port);
+    if (controller == XHCI) {
+        if (port < 0 || port >= nsock)
+            return 0;
+        /* Only the machine's own sockets are watched. Asking a hub
+           about its ports means a control transfer per port twice a
+           second, and a hub full of nothing would cost more than it is
+           worth; a device plugged into a hub after boot is therefore
+           not noticed yet, and saying so is better than a comment
+           claiming otherwise. */
+        if (sock[port].hub)
+            return port_known[port] ? 1 : 0;
+        return xhci_port_connected(sock[port].root);
+    }
     /* UHCI keeps the connection bit in its own port register; nobody
        has asked this of it yet, and pretending otherwise would be
        worse than saying so. */

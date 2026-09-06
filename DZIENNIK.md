@@ -5195,3 +5195,45 @@ sprawdzane przez `make test`.
       Dowod, ze to naprawde FAT32, przychodzi w tescie od mtools
       ("sectors per fat: 0"), a nie od nas - bo nasza wlasna regula
       byla tu wlasnie tym, co bylo do sprawdzenia.
+
+- [x] **Koncentratory USB: to, co jest w stacji dokujacej** (route string
+      w kernel/xhci.c, gniazdka rosnace w kernel/usbhc.c, rozszerzone
+      grupy `xhci` i `usbdysk`).
+
+      Urzadzenie za koncentratorem nie jest na ZADNYM porcie kontrolera
+      - wiec przejscie po portach kontrolera nie znajduje go w ogole.
+      Tak wlasnie wygladala z tej strony stacja dokujaca: pusto.
+
+      Gniazdko przestalo wiec znaczyc to samo, co port kontrolera.
+      Lista gniazdek zaczyna sie od portow kontrolera i ROSNIE: kazdy
+      znaleziony koncentrator dokleja swoje na koniec. Sterownik
+      chodzacy "po portach" siega przez to za koncentratory, nic o nich
+      nie wiedzac - i o to chodzi.
+
+      Sam koncentrator obsluguje sie zwyklymi transferami kontrolnymi:
+      zapytaj o deskryptor klasy (typ 0x29 - jedyne miejsce, gdzie
+      stoi liczba portow), daj kazdemu portowi zasilanie, odczekaj
+      tyle, ile koncentrator sobie zazyczyl (port, ktory jeszcze sie
+      nie zasilil, odpowiada "nic tu nie ma" i urzadzenie za nim nigdy
+      nie zostaje znalezione), potem reset portu i odczyt jego stanu -
+      w ktorym siedza takze dwa bity predkosci.
+
+      **Kontrolerowi trzeba potem powiedziec DROGE.** Route string:
+      cztery bity na kazde pietro koncentratorow, pierwsze pietro na
+      najnizszych. Do tego dwa pola, ktore latwo przeoczyc: urzadzenie
+      wolniejsze niz koncentrator nad nim jedzie przez jego translator
+      transakcji, wiec kontroler musi wiedziec, KTORY koncentrator i
+      ktory jego port za to odpowiada. Bez tego urzadzenie dostaje
+      adres i milczy - a to jest rzecz, na ktora patrzy sie dlugo, nim
+      sie ja zobaczy. I sam koncentrator musi byc oznaczony jako
+      koncentrator w swoim kontekscie, bo inaczej kontroler uwaza, ze
+      nie ma zadnych portow, a polecenie o drodze przez niego dotyczy
+      trasy, ktora dla niego nie istnieje.
+
+      Sprawdzane dwoma urzadzeniami za koncentratorem: klawiatura (i to,
+      co na niej wpisane, ma dojsc do powloki) oraz pendrive (ma byc na
+      liscie dyskow jak kazdy inny i dac sie czytac). Czego jeszcze nie
+      ma: zauwazania urzadzen wkladanych do koncentratora w trakcie
+      pracy - pytanie koncentratora o kazdy port dwa razy na sekunde
+      kosztowaloby wiecej, niz jest warte, i jest to napisane wprost
+      zamiast komentarza udajacego co innego.

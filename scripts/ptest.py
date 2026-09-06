@@ -1070,6 +1070,7 @@ class Qemu:
                  usbkbd=False, usbmouse=False, no_i8042=False,
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
+                 usbhub=False, behind_hub=False,
                  nic="rtl8139", cpus=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
@@ -1100,7 +1101,15 @@ class Qemu:
             # More than one core. The firmware lists them in an ACPI
             # table, and the system wakes them with an INIT-SIPI signal
             cmd += ["-smp", str(cpus)]
-        if usbkbd == "xhci":
+        if usbkbd == "hub":
+            # The keyboard NOT in the machine's socket but behind a hub
+            # plugged into it - a docking station, seen from the
+            # machine's side. Everything behind a hub was invisible
+            # until the hubs themselves were understood.
+            cmd += ["-device", "qemu-xhci,id=xhci",
+                    "-device", "usb-hub,id=hub,bus=xhci.0,port=2",
+                    "-device", "usb-kbd,bus=xhci.0,port=2.1"]
+        elif usbkbd == "xhci":
             # An xHCI controller: the only one newer boards have. It is
             # the same keyboard, only on a different bus - and whether
             # the system sees it the same way is for the test to settle,
@@ -1119,15 +1128,26 @@ class Qemu:
             cmd += ["-device", "usb-mouse,bus=xhci.0"]
         elif usbmouse:
             cmd += ["-usb", "-device", "usb-mouse"]
+        if usbhub:
+            # A hub in the socket, and the keyboard behind it. This is
+            # what a docking station looks like from the machine's
+            # side, and until hubs were understood everything behind
+            # one was simply invisible.
+            if usbkbd not in ("xhci", "hub") and usbmouse != "xhci":
+                cmd += ["-device", "qemu-xhci,id=xhci"]
+            if usbkbd != "hub":
+                cmd += ["-device", "usb-hub,id=hub,bus=xhci.0,port=2"]
         if usbdisk:
             # A stick in the socket: a file on the host, a disk on the
             # bus. Whatever the system writes to it lands in that file,
             # which is how the test reads the result with somebody
             # else's tools.
-            if usbkbd != "xhci" and usbmouse != "xhci":
+            if (usbkbd not in ("xhci", "hub") and usbmouse != "xhci"
+                    and not usbhub):
                 cmd += ["-device", "qemu-xhci,id=xhci"]
+            place = ",bus=xhci.0" + (",port=2.1" if behind_hub else "")
             cmd += ["-drive", "if=none,id=pendrive,format=raw,file=" + usbdisk,
-                    "-device", "usb-storage,bus=xhci.0,drive=pendrive"]
+                    "-device", "usb-storage,drive=pendrive" + place]
         if audio:
             # An HD Audio controller with a codec on it, and the sound
             # written to a file instead of a speaker. That file is the

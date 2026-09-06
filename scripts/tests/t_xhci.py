@@ -126,6 +126,57 @@ def main():
             if os.path.exists(slog):
                 os.unlink(slog)
 
+    # --- A hub between the machine and the keyboard -----------------
+    #
+    # What a docking station looks like from the machine's side, and a
+    # thing that was simply invisible until hubs were understood: a
+    # device behind a hub is not on any port of the controller, so
+    # walking the controller's ports finds nothing. The hub's own ports
+    # have to be asked about, given power and reset one by one - and
+    # then the controller has to be told the WAY to what was found,
+    # four bits per tier of hubs.
+    if not no64():
+        print("--- klawiatura za koncentratorem USB ---")
+        dh = tempfile.mkdtemp()
+        isoh = tempfile.mktemp(suffix=".iso")
+        slogh = tempfile.mktemp(suffix=".log")
+        try:
+            check("plyta dla proby z koncentratorem buduje sie",
+                  make_iso64(dh, isoh, text=True))
+            qh = Qemu(KERNEL, INITRD, cdrom=isoh, serial=slogh,
+                      usbkbd="hub", qemu="qemu-system-x86_64")
+            try:
+                start = qh.wait_serial("proton64>", timeout=90)
+                check("system znajduje koncentrator i liczy jego gniazdka",
+                      re.search(r"Koncentrator USB na gniazdku \d+: "
+                                r"\d+ gniazdek wiecej", start) is not None)
+
+                m = re.search(r"Klawiatura USB \(HID, xHCI\) na porcie "
+                              r"(\d+)", start)
+                check("i klawiature ZA nim - na gniazdku, ktorego "
+                      "kontroler nie ma"
+                      + (" (porcie %s)" % m.group(1) if m else ""),
+                      m is not None and int(m.group(1)) > 4)
+
+                # And it is a keyboard, not a line in a log: what is
+                # typed on it has to reach the shell.
+                before = len(qh.serial())
+                for ch in "uptime":
+                    qh.sendkey(ch)
+                    time.sleep(0.12)
+                qh.sendkey("ret")
+                time.sleep(2)
+                typed = qh.serial()[before:]
+                check("i to, co na niej wpisane, dochodzi do powloki",
+                      "Uptime:" in typed)
+            finally:
+                qh.close()
+        finally:
+            shutil.rmtree(dh, ignore_errors=True)
+            for f in (isoh, slogh):
+                if os.path.exists(f):
+                    os.unlink(f)
+
     # --- And the same machine started through UEFI ------------------
     #
     # This is where a real laptop starts, and it turned out to be a

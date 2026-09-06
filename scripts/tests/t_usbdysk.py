@@ -54,6 +54,57 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
 
 
+def behind_hub():
+    """The same stick, but in a hub plugged into the machine.
+
+    A disk behind a hub is on no port of the controller at all, so
+    walking the controller's ports finds nothing - which is what a
+    docking station looked like to this system until the hubs
+    themselves were understood. Everything above the bus has to see no
+    difference: the same list of disks, the same FAT, the same file."""
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    stick = tempfile.mktemp(suffix=".usb")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
+    made, start = make_mbr_fat_disk(stick, mib=32, fat32=True,
+                                    label="ZAHUBEM")
+    fat_put(stick, start, b"za koncentratorem\n", "/zahubem.txt")
+
+    try:
+        if not make_iso64(d, iso, text=True):
+            check("plyta dla proby z koncentratorem buduje sie", False)
+            return
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, usbdisk=stick, usbhub=True, behind_hub=True,
+                 qemu="qemu-system-x86_64")
+        try:
+            boot = q.wait_serial("proton64>", timeout=90)
+            check("system znajduje koncentrator",
+                  "Koncentrator USB" in boot)
+            check("i dysk ZA nim", "Dysk USB:" in boot)
+
+            out = q.command("dyski", "sektorow", timeout=25)
+            usbno = usb_disk_number(out)
+            check("dysk zza koncentratora jest na liscie jak kazdy inny "
+                  "(dysk %d)" % usbno, usbno > 0)
+
+            out = q.command("fat 1 %d" % usbno, "klaster", timeout=30)
+            check("i da sie go czytac", "FAT32" in out and "ZAHUBEM" in out)
+            out = q.command("fatcat /zahubem.txt", "koncentratorem",
+                            timeout=20)
+            check("razem z plikiem, ktory host na nim zostawil",
+                  "za koncentratorem" in out)
+        finally:
+            q.close()
+    finally:
+        for path in (iso, slog, disk, stick):
+            if os.path.exists(path):
+                os.unlink(path)
+
+
 def hotplug():
     """A stick pushed in three hours after the machine started.
 
@@ -373,6 +424,10 @@ def main():
         old = fat_get(stick, start, "/od-hosta.txt")
         check("plik hosta przezyl pisanie po tym samym systemie plikow",
               old == FROM_HOST)
+
+        # --- and the same disk one tier further away --------------
+        print("--- pendrive za koncentratorem ---")
+        behind_hub()
 
         # --- and the half that has nothing to do with booting -----
         print("--- pendrive wlozony i wyjety przy pracujacym systemie ---")

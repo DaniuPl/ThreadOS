@@ -618,7 +618,23 @@ static int port_reset(int port)
 
 /* Assembles the input set for a command: what we are adding, the
    device context and the endpoint zero context. */
-static void make_input(int slot, int port, int speed, int maxpacket)
+/* The description of a device for the controller.
+ *
+ * Two of these fields are the whole difference between a device in a
+ * socket on the machine and one in a socket on a hub plugged into it.
+ *
+ * The ROUTE STRING says how to get there: four bits per tier of hubs,
+ * the first tier in the lowest four. Zero means "straight on the root
+ * port", which is what everything was until hubs.
+ *
+ * The TT fields say who answers for it when it is slower than the hub
+ * it hangs off: a full-speed keyboard behind a high-speed hub is
+ * reached through that hub's transaction translator, and the
+ * controller has to be told which hub and which of its ports. Get
+ * this wrong and the device is addressed and then silent, which is a
+ * hard thing to look at and see. */
+static void make_input(int slot, int port, int speed, int maxpacket,
+                       uint32_t route, int tt_slot, int tt_port)
 {
     uint8_t *we = in_ctx[slot - 1];
     memset(we, 0, CTX_BYTES);
@@ -627,8 +643,11 @@ static void make_input(int slot, int port, int speed, int maxpacket)
     control[1] = 0x3;                 /* we add the device context and endpoint 0 */
 
     uint32_t *device = info(we, 1);
-    device[0] = ((uint32_t)speed << 20) | (1u << 27);  /* one endpoint */
+    device[0] = (route & 0xFFFFFu) |
+                ((uint32_t)speed << 20) | (1u << 27);  /* one endpoint */
     device[1] = (uint32_t)(port + 1) << 16;
+    if (tt_slot > 0)
+        device[2] = (uint32_t)tt_slot | ((uint32_t)tt_port << 8);
 
     uint32_t *punkt0 = info(we, 2);
     punkt0[1] = (3u << 1) |              /* three attempts on error */
@@ -640,11 +659,27 @@ static void make_input(int slot, int port, int speed, int maxpacket)
     punkt0[4] = 8;                       /* the average TRB length */
 }
 
+/* A device on a root port: the controller resets the port itself and
+   the route string is empty. */
 int xhci_attach(int port)
 {
     if (!base || port < 0 || port >= nports)
         return -1;
     if (!port_reset(port))
+        return -1;
+
+    int speed = (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
+    return xhci_address(port, 0, speed, 0, 0);
+}
+
+/* A device anywhere: on a root port (route 0) or behind hubs. The port
+   has already been reset by whoever owns it - the controller for a
+   root port, the hub above for anything else - and the speed is what
+   that reset reported. */
+int xhci_address(int port, uint32_t route, int speed, int tt_slot,
+                 int tt_port)
+{
+    if (!base || port < 0 || port >= nports)
         return -1;
 
     struct trb reply;
@@ -654,14 +689,13 @@ int xhci_attach(int port)
     if (slot < 1 || slot > SLOTS)
         return -1;
 
-    int speed = (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
     int maxpacket = packet_for_speed(speed);
 
     dcbaa[slot] = fiz(dev_ctx[slot - 1]);
     memset(dev_ctx[slot - 1], 0, CTX_BYTES);
     ring_setup(&ep_pier[slot - 1][0], ep_trb[slot - 1][0]);
 
-    make_input(slot, port, speed, maxpacket);
+    make_input(slot, port, speed, maxpacket, route, tt_slot, tt_port);
     if (command(fiz(in_ctx[slot - 1]),
                   ((uint32_t)TRB_ADDRESS_DEV << 10) | ((uint32_t)slot << 24),
                   (struct trb *)0) != CODE_OK)
@@ -974,4 +1008,50 @@ int xhci_release(int slot)
     armed[slot - 1] = 0;
     done[slot - 1].head = done[slot - 1].tail = 0;
     return 0;
+}
+
+
+/* "This device is a hub."
+ *
+ * The controller has to be told, and not for tidiness: a slot context
+ * without the hub bit describes something with no ports, and a
+ * command to address a device BEHIND it is then a command about a
+ * route that, as far as the controller is concerned, does not exist.
+ * The number of ports goes in with it, and for a high-speed hub the
+ * think time of its transaction translator - which is how long it
+ * needs between the parts of a split transaction.
+ */
+int xhci_mark_hub(int slot, int ports, int multi_tt, int think_time)
+{
+    if (!base || slot < 1 || slot > SLOTS || ports < 1)
+        return -1;
+
+    uint8_t *we = in_ctx[slot - 1];
+    memset(we, 0, CTX_BYTES);
+
+    uint32_t *control = info(we, 0);
+    control[1] = 0x1;                    /* the device context alone */
+
+    /* Everything the controller already knows about this device stays;
+       we only add what it did not know. */
+    uint32_t *src = info(dev_ctx[slot - 1], 0);
+    uint32_t *device = info(we, 1);
+    device[0] = src[0] | (1u << 26) | (multi_tt ? (1u << 25) : 0);
+    device[1] = (src[1] & 0x00FFFFFFu) | ((uint32_t)ports << 24);
+    device[2] = (src[2] & ~0x00030000u) |
+                (((uint32_t)think_time & 3) << 16);
+
+    return command(fiz(we),
+                   ((uint32_t)TRB_CONFIG_EP << 10) | ((uint32_t)slot << 24),
+                   (struct trb *)0) == CODE_OK ? 0 : -1;
+}
+
+
+/* The speed the controller reports for a root port, in its own
+   numbering: 1 full, 2 low, 3 high, 4 super. */
+int xhci_speed(int port)
+{
+    if (!base || port < 0 || port >= nports)
+        return 0;
+    return (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
 }

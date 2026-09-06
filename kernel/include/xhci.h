@@ -28,6 +28,21 @@ const char *xhci_why(void);
    number (1..MAX) or -1. */
 int xhci_attach(int port);
 
+/* The same, for a device that is NOT on a root port: behind hubs. The
+   port has already been reset by the hub above, so this only gives the
+   device a slot and an address - but it has to be told the way there.
+
+   'route' is the route string: four bits per tier of hubs, the first
+   tier lowest. 'port' is still the ROOT port the whole tree hangs off.
+   'tt_slot' and 'tt_port' name the high-speed hub answering for a
+   slower device below it (0 when there is none). */
+int xhci_address(int port, uint32_t route, int speed, int tt_slot,
+                 int tt_port);
+
+/* Tells the controller that a device is a hub, and how many ports it
+   has - without this it will not address anything behind it. */
+int xhci_mark_hub(int slot, int ports, int multi_tt, int think_time);
+
 /* A control transfer through a slot's endpoint zero */
 int xhci_control(int slot, const void *setup, void *data, int len, int in);
 
@@ -37,6 +52,10 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval);
 /* Looks into an interrupt endpoint. >0 = that many bytes, 0 = nothing
    has arrived yet, -1 = error. */
 int xhci_int_in(int slot, int ep, void *data, int len);
+
+/* What speed the controller sees on a root port (its own numbering:
+   1 full, 2 low, 3 high, 4 super). */
+int xhci_speed(int port);
 
 /* Is anything plugged into this port at this moment? */
 int xhci_port_connected(int port);
