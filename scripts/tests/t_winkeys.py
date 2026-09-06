@@ -152,11 +152,20 @@ def sixty_four():
             check("(64) zegar wstal z ikony (%d przyciskow na pasku)"
                   % opened, opened == 3)
 
+            # Closing a window is not instant, and how long it takes
+            # is not ours to guess: with the whole suite running the
+            # same three seconds are sometimes not enough. So we look
+            # until the button is gone, and only then give up.
             q.sendkey("alt-f4")
-            time.sleep(3)
-            w, h, at = q.screen_raw()
+            left = 3
+            for _ in range(10):
+                time.sleep(1.5)
+                w, h, at = q.screen_raw()
+                left = len(bar_buttons(at, w, row))
+                if left == 2:
+                    break
             check("(64) Alt+F4 dochodzi przez sterownik long mode i "
-                  "zamyka okno", len(bar_buttons(at, w, row)) == 2)
+                  "zamyka okno (%d przyciskow)" % left, left == 2)
 
             q.mouse_goto(500, 300)
             time.sleep(0.5)

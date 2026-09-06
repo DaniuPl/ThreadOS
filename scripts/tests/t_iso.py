@@ -127,17 +127,27 @@ def main():
                         # compositor sends only the rows that changed -
                         # and rows somebody else wrote behind its back
                         # look unchanged to it.
+                        # How soon the next frame comes is the
+                        # compositor's business, and on a loaded host it
+                        # is later than here. We look until the text is
+                        # covered, rather than assuming three seconds.
                         q22.type_line("mem")
-                        time.sleep(3)
-                        w, h, at = q22.screen_raw()
-                        after = sum(1 for y in range(0, h, 8)
-                                    for x in range(0, w, 8)
-                                    if all(abs(at(x, y)[i] - (0, 128, 160)[i])
-                                           <= 40 for i in range(3)))
+                        after = 0
+                        want = teal - total // 100
+                        for _ in range(10):
+                            time.sleep(1.5)
+                            w, h, at = q22.screen_raw()
+                            after = sum(
+                                1 for y in range(0, h, 8)
+                                for x in range(0, w, 8)
+                                if all(abs(at(x, y)[i] - (0, 128, 160)[i])
+                                       <= 40 for i in range(3)))
+                            if after >= want:
+                                break
                         check(f"a napis z jadra nie zostaje na ekranie - "
                               f"pulpit go zakrywa ({after}/{total} probek "
                               f"tla, bylo {teal})",
-                              after >= teal - total // 100)
+                              after >= want)
                     finally:
                         q22.close()
                 finally:
