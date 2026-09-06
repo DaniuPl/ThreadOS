@@ -5385,3 +5385,48 @@ sprawdzane przez `make test`.
       Nacisniecie na ikone nie bylo wiec nacisnieciem na ikone i nic
       sie nie uruchamialo. Widac to bylo dopiero po dolozeniu do jadra
       wypisywania, ktora ikona zostala puszczona.
+
+- [x] **System przygotowany do wypuszczenia na GitHubie jako open source**
+      (LICENSE, CONTRIBUTING.md, .github/, zrzuty w docs/, README).
+
+      Kod lezal na GitHubie, ale nie byl otwarty w zadnym uzytecznym
+      sensie: bez licencji nikt nie ma prawa go uzyc (brak licencji to
+      nie "rob co chcesz", tylko "wszystkie prawa zastrzezone"), bez
+      opisu zasad kazda przyslana zmiana byla loteria, a bez CI
+      pierwsza taka zmiana byla sprawdzana dopiero na moim komputerze.
+
+      **Licencja MIT** - najkrotsza z tych, ktore pozwalaja wszystko i
+      niczego nie wymagaja poza zachowaniem nazwiska.
+
+      **CONTRIBUTING.md** spisuje jedyna regule, ktora naprawde rzadzi
+      tym repozytorium: **kazda funkcja przynosi test, ktory bez niej
+      by nie przeszedl**, i test ma sprawdzac system z zewnatrz - przez
+      ekran, port szeregowy, mtools czytajace nasz FAT, OpenSSL
+      liczacy nasze szyfry, firmware, ktory z dysku wstaje albo nie.
+      Jest tam tez to, co ktos z zewnatrz musialby zgadywac: dlaczego
+      kod jest po angielsku, a system mowi po polsku; dlaczego jadra sa
+      dwa z jednych zrodel; i zeby nigdy nie pisac `time.sleep(3)` i
+      czytac ekranu raz - polowa migajacych testow, jakie ten projekt
+      mial, byla dokladnie tym.
+
+      **CI w GitHub Actions** jest podzielone: kazdy push buduje oba
+      jadra, protoboot, plyte i obraz pendrive'a, a potem uruchamia
+      kilkanascie grup, ktore dotykaja najwiecej systemu (start obu
+      jader, ring 3, PFS, FAT, AES, WPA, USB, dzwiek, UEFI). Caly
+      zestaw - dziewiecdziesiat piec grup i okolo stu maszyn
+      wirtualnych - chodzi raz na dobe, bo biegacz GitHuba ma dwa
+      rdzenie i nie ma KVM, wiec pelny przebieg trwalby dluzej, niz
+      ktokolwiek chce czekac przy pull requescie. Przy niepowodzeniu
+      wrzuca logi szeregowe jako artefakt, bo bez nich zdalna porazka
+      jest tylko czerwonym krzyzykiem.
+
+      **Zrzuty ekranu** robi skrypt, ktory startuje jadro 64-bitowe w
+      QEMU, klika po systemie i zrzuca framebufor - ta sama maszyneria,
+      co testy, wiec na obrazku jest to, co jadro naprawde narysowalo,
+      a nie makieta. Dwa: pulpit z menedzerem plikow, zegarem i
+      monitorem pamieci, oraz instalator na calym ekranie, w chwili gdy
+      wypisal juz, co zapisze, a jeszcze nie zapisal niczego.
+
+      Przy okazji wyszlo, ze README klamalo w liczbach - "prawie 800
+      asercji" i "50 grup" bylo prawda kilkadziesiat commitow temu.
+      Teraz asercji jest ponad 1600, a grup 95.

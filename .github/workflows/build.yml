@@ -1,0 +1,89 @@
+# Building both kernels and running the tests that matter most.
+#
+# The full suite starts about a hundred virtual machines and takes some
+# twenty minutes on a machine with four cores; a GitHub runner has two
+# and no KVM, so it takes longer than anybody wants to wait on a pull
+# request. Hence the split: every push builds everything and runs a
+# curated set of groups, and the whole suite runs once a night.
+name: build and test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 2 * * *"          # nightly, in UTC
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the build needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib \
+            grub-pc-bin grub-efi-amd64-bin xorriso mtools \
+            clang lld python3
+
+      - name: The 32-bit kernel and its initrd
+        run: make -j$(nproc)
+
+      - name: The long-mode kernel and its initrd
+        run: make -j$(nproc) kernel64
+
+      - name: protoboot - our own EFI loader
+        run: make efi
+
+      - name: The hybrid disc (BIOS + UEFI)
+        run: make iso64
+
+      - name: A bootable USB image
+        run: make stick
+
+      - name: What came out
+        run: ls -la build/*.bin build/*.img build/*.iso build/BOOTX64.EFI
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the tests need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib \
+            qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
+            ovmf clang lld python3 openssl libssl-dev
+
+      - name: Build everything the tests boot
+        run: |
+          make -j$(nproc)
+          make -j$(nproc) kernel64
+          make efi
+
+      # A cross-section rather than everything: booting both kernels,
+      # ring 3, the filesystem, the disc, the two authenticated ciphers,
+      # WPA2, USB storage and the sound card. Under an hour, and a
+      # failure here means something real is broken.
+      - name: The groups that cover the most ground
+        if: github.event_name != 'schedule'
+        run: |
+          make test J=2 T=boot,shell,process,pfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdysk,usbsiec,dzwiek,xhci,uefi,protoboot
+
+      - name: Everything, once a night
+        if: github.event_name == 'schedule'
+        run: make test J=2
+
+      - name: The serial logs, when something went wrong
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: /tmp/*.log
+          if-no-files-found: ignore

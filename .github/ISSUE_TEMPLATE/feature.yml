@@ -1,0 +1,27 @@
+name: Idea
+description: Something the system should be able to do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What it should do
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why - what becomes possible that is not possible now
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof
+    attributes:
+      label: How it could be proved to work
+      description: |
+        Everything in this system is checked against something that is not
+        our own code - mtools reads what our FAT wrote, OpenSSL checks our
+        ciphers, the sound is measured out of a WAV file. If you can see
+        such a check for this idea, say so; if there is none, say that too.

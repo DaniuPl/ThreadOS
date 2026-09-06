@@ -1,5 +1,8 @@
 # ProtonOS
 
+[![build and test](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml/badge.svg)](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A hobby operating system for PC, written from scratch in C and assembly.
 
 There are **two kernels and one set of sources**. One runs in 32-bit
@@ -13,6 +16,31 @@ Both kernels are Multiboot-compliant, so GRUB or QEMU can load them
 directly — and on a UEFI machine the 64-bit kernel is loaded by
 **protoboot**, this project's own EFI boot loader (`boot/efi/`), with no
 GRUB involved at all.
+
+## Screenshots
+
+Both pictures are taken by a script that boots the 64-bit kernel in
+QEMU, clicks its way through the system and dumps the framebuffer -
+the same machinery the test suite uses, so what is below is what the
+kernel actually drew.
+
+![The desktop: a file manager, a clock and a memory monitor](docs/pulpit.png)
+
+The desktop, running on the loader's framebuffer: icons down the left,
+a taskbar at the bottom, windows that can be dragged, resized, tiled
+and closed. Every window is a ring 3 program talking to the
+compositor; the fonts are the kernel's own.
+
+![The installer, alone on the screen](docs/instalator.png)
+
+`instaluj` on a UEFI machine, having found the disk, read its GPT and
+its EFI partition, and listing the three files it is about to write -
+before writing anything. It gets the whole screen, with no taskbar and
+no other window to click by mistake.
+
+The system speaks Polish, the source speaks English; see
+[CONTRIBUTING.md](CONTRIBUTING.md#language-english-in-the-code-polish-on-the-screen)
+for why.
 
 ## What works
 
@@ -171,7 +199,7 @@ Requirements: `gcc` with `-m32` (`gcc-multilib`), `make`,
 
 ## Testing
 
-Nearly 800 assertions run real kernels in QEMU and check the result
+More than 1600 assertions run real kernels in QEMU and check the result
 through QMP: screen contents, pixel colours, serial output, injected
 keystrokes. Nothing is mocked — a failing assertion means the system
 misbehaved, not that a stub drifted.
@@ -230,7 +258,8 @@ ground for both.
 - Keep an eye on the longest group. `ush` and `tls32` (a ring 3 shell
   driving pipes and redirections, and a dozen TLS 1.3 handshakes
   against a real OpenSSL) now decide how long a full run takes — about
-  90 seconds each, out of some 385 for all 50 groups.
+  90 seconds each, out of some twenty minutes for all 95 groups on
+  four cores.
 - Run on real hardware, not only under QEMU and OVMF. Everything is in
   place for it: `make stick` writes the image, `sprzet` says what the
   machine is and `dyski` what it has to install onto. What is missing
@@ -241,3 +270,18 @@ ground for both.
 The detailed development journal — in Polish, with the reasoning behind
 each decision and the bugs that shaped it — is in
 [DZIENNIK.md](DZIENNIK.md).
+
+## Contributing
+
+Patches, bug reports and questions are welcome. There is one rule that
+is not negotiable: **every feature brings a test that would fail
+without it**, and the test must check the system from the outside -
+the screen, the serial port, a disk image read back by `mtools`,
+firmware that boots it or does not. [CONTRIBUTING.md](CONTRIBUTING.md)
+explains what that means in practice, how to add a test group, and the
+conventions the code follows.
+
+## License
+
+MIT - see [LICENSE](LICENSE). Do what you like with it; if it breaks
+your machine, you get to keep both halves.
