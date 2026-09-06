@@ -20,6 +20,7 @@
  */
 
 #include "uapi.h"
+#include "ugui.h"
 
 /* Dark text on a light surface, light text on a dark one. The window
    is the system's light grey, so its text is BLACK; white belongs on
@@ -55,7 +56,14 @@ static struct entry items[MAXF];
 static int count;
 static int top;               /* the first row shown */
 static int chosen = -1;       /* which row, or -1 */
-static int confirm;           /* a deletion has been asked about once */
+/* The question before a deletion. It used to be asked by making the
+   second click on the same button mean something different from the
+   first - which works, and which nobody can guess. Now it is a panel
+   over the window with two buttons on it, and the words on them say
+   what each does. */
+static struct ug ui;
+static struct ug_modal ask;
+static char ask_line[64];
 /* Renaming asks for the new name in the status line, the way the
    editor asks for a file name: a window to move, focus and close, for
    one word of text, is a window nobody wants. */
@@ -178,7 +186,6 @@ static void reread(void)
         top = 0;
     if (chosen >= count)
         chosen = -1;
-    confirm = 0;
     where_am_i();
 }
 
@@ -258,28 +265,36 @@ static void delete_chosen(void)
     }
     if (items[chosen].is_dir) {
         ecopy(note, "to katalog - nie usuwam", sizeof(note));
-        confirm = 0;
         return;
     }
-    if (!confirm) {
-        confirm = 1;
-        int p = 0;
-        const char *q = "Usunac '";
-        for (int i = 0; q[i]; i++)
-            note[p++] = q[i];
-        for (int i = 0; items[chosen].name[i] && p < 30; i++)
-            note[p++] = items[chosen].name[i];
-        const char *r = "'? Kliknij jeszcze raz";
-        for (int i = 0; r[i] && p < (int)sizeof(note) - 1; i++)
-            note[p++] = r[i];
-        note[p] = '\0';
+
+    int p = 0;
+    const char *q = "Usunac '";
+    for (int i = 0; q[i]; i++)
+        ask_line[p++] = q[i];
+    for (int i = 0; items[chosen].name[i] && p < 40; i++)
+        ask_line[p++] = items[chosen].name[i];
+    ask_line[p++] = '\'';
+    ask_line[p++] = '?';
+    ask_line[p] = '\0';
+
+    ug_ask(&ask, ask_line, "Tego sie nie cofnie.", "Usun", "Zostaw");
+}
+
+/* The answer. Only "Usun" removes anything - and that is the whole
+   point of asking. */
+static void delete_answered(void)
+{
+    if (!ask.answer) {
+        ecopy(note, "zostawione", sizeof(note));
         return;
     }
+    if (chosen < 0 || chosen >= count)
+        return;
     if (sys_unlink(items[chosen].name) < 0)
         ecopy(note, "nie da sie usunac", sizeof(note));
     else
         ecopy(note, "usuniete", sizeof(note));
-    confirm = 0;
     chosen = -1;
     reread();
 }
@@ -341,7 +356,7 @@ static void draw(void)
     win_text(win, name_x() + 4, 2, "Nazwa", C_WHITE);
     win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
     win_text(win, edit_x() + 4, 2, "Otworz", C_WHITE);
-    win_rect(win, del_x(), 0, DEL_W, HEAD_H, confirm ? C_RED : C_BLUE);
+    win_rect(win, del_x(), 0, DEL_W, HEAD_H, ask.on ? C_RED : C_BLUE);
     win_text(win, del_x() + 8, 2, "Usun", C_WHITE);
     win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_LINE);
 
@@ -405,11 +420,18 @@ static void draw(void)
         line[p] = '\0';
         win_text(win, 4, ch - 10, line, C_HEAD);
     } else if (note[0]) {
-        win_text(win, 4, ch - 10, note, confirm ? C_RED : C_TEXT);
+        win_text(win, 4, ch - 10, note, C_TEXT);
     } else {
         win_text(win, 4, ch - 10,
                  "PgUp/PgDn przewija, '..' wyzej", C_DIM);
     }
+
+    /* Last, and therefore over everything: a question one can scroll
+       away from is not a question. */
+    ui.win = win;
+    ui.w = cw;
+    ui.h = ch;
+    ug_modal_draw(&ui, &ask);
 }
 
 void _start(void)
@@ -427,6 +449,20 @@ void _start(void)
         struct win_event ev;
         int again = 0;
         while (win_poll(win, &ev) == 1) {
+            if (ask.on) {
+                /* While the question is up it takes everything: that is
+                   what makes it a question rather than a suggestion. */
+                ui.win = win;
+                ui.w = cw;
+                ui.h = ch;
+                int what = ug_modal_event(&ui, &ask, &ev);
+                if (what == UG_CLOSED)
+                    sys_exit(0);
+                if (what == UG_PRESSED)
+                    delete_answered();
+                again = 1;
+                continue;
+            }
             if (ev.type == WEV_CLOSE)
                 sys_exit(0);
             if (ev.type == WEV_SIZE) {
@@ -499,15 +535,12 @@ void _start(void)
                     else {
                         asking = 1;
                         alen = 0;
-                        confirm = 0;
                     }
                 } else if (ev.y < HEAD_H && ev.x >= edit_x()) {
                     open_chosen();
                 } else if (ev.y >= ROW_Y0 - 1) {
                     int r = (ev.y - ROW_Y0 + 1) / ROW_H + top;
                     if (r >= 0 && r < count) {
-                        if (r != chosen)
-                            confirm = 0;    /* another file, another question */
                         chosen = r;
                         note[0] = '\0';
                     }
@@ -524,11 +557,9 @@ void _start(void)
                refresh under a question would rub out the question. */
             ticks = 0;
             int was = count;
-            int keep = confirm;
             char kept[48];
             ecopy(kept, note, sizeof(kept));
             reread();
-            confirm = keep;
             ecopy(note, kept, sizeof(note));
             if (was != count)
                 again = 1;

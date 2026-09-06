@@ -5341,3 +5341,23 @@ sprawdzane przez `make test`.
       jedna piata - 1506, cisza - zero. Ten sam test przechodzi na
       przepisanym oknie, z tymi samymi liczbami. Framework, ktory sie
       kompiluje, i framework, ktory dziala, rozniaca sie wlasnie tym.
+
+- [x] **Pytanie w oknie zamiast "kliknij jeszcze raz"** (ug_modal w
+      user/ugui.h, menedzer plikow pyta przed skasowaniem).
+
+      "Na pewno?" jest tym, czego potrzebuje kazdy program z
+      niszczacym przyciskiem, a do tej pory kazdy wymyslal to sobie
+      sam: gfiles pytal tak, ze DRUGIE klikniecie w ten sam przycisk
+      znaczylo co innego niz pierwsze. To dziala i nikt tego nie
+      zgadnie.
+
+      Panel jest rysowany W OKNIE, a nie jako drugie okno. Program,
+      ktorego pytanie ma wlasne okno, musi trzymac oba przy zyciu,
+      przesuwac je razem i odpowiadac za oba, gdy pulpit prosi o
+      zamkniecie; panel nad trescia ma to wszystko za darmo i dodatkowo
+      nie da sie go zgubic za czyms innym. Dopoki jest, bierze kazde
+      zdarzenie - i to jest roznica miedzy pytaniem a sugestia.
+
+      Test dostal przy okazji asercje, ktorej wczesniej nie bylo i
+      ktorej nie dalo sie napisac: **"Zostaw" ma zostawic plik**.
+      Pytanie, ktorego obie odpowiedzi znacza tak, nie jest pytaniem.

@@ -491,4 +491,158 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
     return what;
 }
 
+/* --- a question that has to be answered before anything else --------
+ *
+ * "Are you sure?" is the one thing every program with a destructive
+ * button needs, and until now each of them invented its own: gfiles
+ * asked by making the second click mean something different from the
+ * first, which works and is impossible to guess.
+ *
+ * It is drawn INSIDE the window rather than as a second one. A program
+ * whose question has its own window has to keep both alive, move them
+ * together and answer for both when the desktop asks it to close; a
+ * panel over the content is all of that for free, and it also cannot
+ * be lost behind anything.
+ */
+struct ug_modal {
+    int on;                      /* is it up */
+    const char *title;
+    const char *note;            /* a second line, or "" */
+    char *buf;                   /* something to type, or NULL */
+    int buflen;
+    const char *yes, *no;
+    int answer;                  /* 1 = yes, 0 = no, -1 = still asking */
+    int list;                    /* a list widget to show inside, or -1 */
+};
+
+#define UG_MODAL_H 96
+
+static inline void ug_ask(struct ug_modal *m, const char *title,
+                          const char *note, const char *yes, const char *no)
+{
+    m->on = 1;
+    m->title = title;
+    m->note = note ? note : "";
+    m->buf = (char *)0;
+    m->buflen = 0;
+    m->yes = yes;
+    m->no = no;
+    m->answer = -1;
+    m->list = -1;
+}
+
+static inline void ug_ask_text(struct ug_modal *m, const char *title,
+                               char *buf, int buflen, const char *yes,
+                               const char *no)
+{
+    ug_ask(m, title, "", yes, no);
+    m->buf = buf;
+    m->buflen = buflen;
+}
+
+/* Where the panel sits: a band across the middle of the window. */
+static inline int ug_modal_y(struct ug *u)
+{
+    int y = (u->h - UG_MODAL_H) / 2;
+    return y < 0 ? 0 : y;
+}
+
+static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
+{
+    if (!m->on)
+        return;
+
+    int x = 8, w = u->w - 16;
+    int y = ug_modal_y(u);
+    int by = y + UG_MODAL_H - 26;
+    int bw = 84;
+
+    win_rect(u->win, x, y, w, UG_MODAL_H, UG_WHITE);
+    win_rect(u->win, x, y, w, 2, UG_BLUE);
+    win_rect(u->win, x, y + UG_MODAL_H - 2, w, 2, UG_BLUE);
+    win_text(u->win, x + 8, y + 10, m->title, UG_BLACK);
+    if (m->note[0])
+        win_text(u->win, x + 8, y + 10 + UG_ROW, m->note, UG_DIM);
+
+    if (m->buf) {
+        win_rect(u->win, x + 8, y + 40, w - 16, UG_ROW + 4, UG_BG);
+        win_text(u->win, x + 11, y + 43, m->buf, UG_BLACK);
+        int at = x + 11 + ug_len(m->buf) * 8;
+        if (at < x + w - 10)
+            win_rect(u->win, at, y + 42, 1, UG_ROW, UG_BLACK);
+    }
+
+    win_rect(u->win, x + 8, by, bw, 16, UG_BLUE);
+    win_text(u->win, x + 8 + 8, by + 4, m->yes, UG_WHITE);
+    win_rect(u->win, x + 8 + bw + 10, by, bw, 16, UG_DIM);
+    win_text(u->win, x + 8 + bw + 18, by + 4, m->no, UG_WHITE);
+}
+
+/* The panel takes every event while it is up: that is what makes it a
+   question rather than a suggestion. Returns UG_PRESSED when it has
+   been answered (m->answer says how), UG_TYPED while typing. */
+static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
+                                 const struct win_event *ev)
+{
+    int x = 8, w = u->w - 16;
+    int y = ug_modal_y(u);
+    int by = y + UG_MODAL_H - 26;
+    int bw = 84;
+
+    if (!m->on)
+        return UG_NOTHING;
+
+    if (ev->type == WEV_CLOSE) {
+        m->on = 0;
+        m->answer = 0;
+        return UG_CLOSED;
+    }
+    if (ev->type == WEV_CLICK) {
+        if (ev->y >= by && ev->y < by + 16) {
+            if (ev->x >= x + 8 && ev->x < x + 8 + bw) {
+                m->on = 0;
+                m->answer = 1;
+                return UG_PRESSED;
+            }
+            if (ev->x >= x + 8 + bw + 10 && ev->x < x + 8 + 2 * bw + 10) {
+                m->on = 0;
+                m->answer = 0;
+                return UG_PRESSED;
+            }
+        }
+        (void)w;
+        return UG_NOTHING;
+    }
+    if (ev->type == WEV_KEY) {
+        char c = (char)ev->val;
+
+        if (c == 27) {                    /* Escape says no */
+            m->on = 0;
+            m->answer = 0;
+            return UG_PRESSED;
+        }
+        if (c == '\n' || c == '\r') {
+            m->on = 0;
+            m->answer = 1;
+            return UG_PRESSED;
+        }
+        if (!m->buf)
+            return UG_NOTHING;
+
+        int len = ug_len(m->buf);
+        if (c == '\b') {
+            if (len > 0)
+                m->buf[len - 1] = '\0';
+            return UG_TYPED;
+        }
+        if (c >= 0x20 && c < 0x7F && len < m->buflen - 1) {
+            m->buf[len] = c;
+            m->buf[len + 1] = '\0';
+            return UG_TYPED;
+        }
+        return UG_NOTHING;
+    }
+    return UG_NOTHING;
+}
+
 #endif

@@ -44,6 +44,14 @@ DEL_X = CW - 48
 EDIT_X = CW - 48 - 56 - 4
 NAME_X = CW - 48 - 56 - 56 - 8
 
+# The question panel (user/ugui.h): a band across the middle of the
+# window, with the two answers at its bottom edge.
+MODAL_H = 96
+MODAL_Y = (CH - MODAL_H) // 2
+MODAL_BY = MODAL_Y + MODAL_H - 26
+YES_X = 8 + 8 + 42            # the middle of "Usun"
+NO_X = 8 + 8 + 84 + 10 + 42   # the middle of "Zostaw"
+
 TEXT = "Wyniki pomiarow"          # what the test writes, and its length
 
 
@@ -194,17 +202,27 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            asked = read_at(at, 4, CH - 10, 36)
-            check("pierwszy klik w 'Usun' tylko pyta ('%s')" % asked,
-                  "Usunac" in asked and "raport.txt" in asked)
+            asked = read_at(at, 8 + 8, MODAL_Y + 10, 36)
+            check("klik w 'Usun' stawia pytanie, a nie kasuje ('%s')"
+                  % asked, "Usunac" in asked and "raport.txt" in asked)
             check("i plik dalej jest",
                   "raport.txt" in [r[0] for r in rows(at)])
 
-            click(q, CX + DEL_X + 16, CY + 4, wait=2.5)
+            # "Zostaw" has to leave it alone - a question whose answers
+            # both mean yes is not a question.
+            click(q, CX + NO_X, CY + MODAL_BY + 8, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("drugi klik usuwa",
+            check("'Zostaw' zostawia plik",
+                  "raport.txt" in [r[0] for r in rows(at)])
+
+            click(q, CX + DEL_X + 16, CY + 4, wait=2)
+            click(q, CX + YES_X, CY + MODAL_BY + 8, wait=2.5)
+            q.mouse_goto(500, 380)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("dopiero 'Usun' w pytaniu usuwa",
                   "raport.txt" not in [r[0] for r in rows(at)])
 
             # Confirmed by something that is not this program
