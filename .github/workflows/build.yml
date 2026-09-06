@@ -67,6 +67,14 @@ jobs:
           make -j$(nproc) kernel64
           make efi
 
+      # The network groups stand a DNS server of their own on the
+      # host's port 53, because that is where QEMU's user network sends
+      # the guest's questions and there is no way to remap it. A runner
+      # is not root, so it needs this one line - without it those groups
+      # say why they are giving up, and the coverage is simply lost.
+      - name: Let an unprivileged process bind port 53
+        run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
+
       # A cross-section rather than everything: booting both kernels,
       # ring 3, the filesystem, the disc, the two authenticated ciphers,
       # WPA2, USB storage, the sound card, the desktop and the network.

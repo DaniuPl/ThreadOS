@@ -24,7 +24,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, start_dns_server
+from ptest import check, summary, start_dns_server, DNS_HINT
 
 
 def main():
@@ -96,17 +96,20 @@ def main():
         # DNS from ring 3. We ask our own server standing on the host
         # (10.0.2.2), so the test depends neither on the internet nor on
         # the machine's resolver.
-        dns_stop = start_dns_server()
-        try:
-            q.type_line("clear")
-            q.type_line("dns 10.0.2.2")
-            q.wait_for("serwer DNS ustawiony", timeout=10)
-            q.type_line("run nslookup protonos.test")
-            dns = q.wait_for("ma adres", timeout=20)
-            check("nslookup rozwiazal nazwe przez wskazany serwer DNS",
-                  "protonos.test ma adres 10.0.2.2" in dns)
-        finally:
-            dns_stop()
+        dns_stop, dns_ok = start_dns_server()
+        if not dns_ok:
+            print("POMINIETE (DNS): " + DNS_HINT)
+        else:
+            try:
+                q.type_line("clear")
+                q.type_line("dns 10.0.2.2")
+                q.wait_for("serwer DNS ustawiony", timeout=10)
+                q.type_line("run nslookup protonos.test")
+                dns = q.wait_for("ma adres", timeout=20)
+                check("nslookup rozwiazal nazwe przez wskazany serwer DNS",
+                      "protonos.test ma adres 10.0.2.2" in dns)
+            finally:
+                dns_stop()
 
         q.type_line("ifconfig")
         ifc = q.wait_for("RX ")

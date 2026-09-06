@@ -27,7 +27,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, start_suite_server
+from ptest import (check, summary, make_iso64, no64,
+                   start_suite_server, DNS_HINT)
 
 
 def main():
@@ -51,9 +52,14 @@ def main():
 
         http_port, http_stop = start_http_server()
         https_port, https_stop = start_https_server()
-        dns_stop = start_dns_server()
+        dns_stop, dns_ok = start_dns_server()
         if https_port is None:
             print("POMINIETE: brak openssl")
+            return summary()
+        if not dns_ok:
+            # Everything below reaches the server by NAME, so without our
+            # own name server there is nothing here to check.
+            print("POMINIETE: " + DNS_HINT)
             return summary()
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,

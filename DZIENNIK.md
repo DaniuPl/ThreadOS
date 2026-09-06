@@ -5438,3 +5438,30 @@ sprawdzane przez `make test`.
       plikow, instalator, powloka w ring 3, TLS 1.3, siec, pendrive).
       Pelny lokalny przebieg po tych zmianach: **1714 asercji, zero
       niepowodzen, 95 grup, 1229 s**.
+
+- [x] **Pierwsza porazka CI byla porazka srodowiska, nie systemu**
+      (port 53 w scripts/ptest.py).
+
+      Poszerzony zestaw grup wywalil sie na `tls64` po sekundzie, z
+      `PermissionError` przy `bind(("0.0.0.0", 53))`. Grupy sieciowe
+      stawiaja **wlasny serwer DNS na porcie 53 hosta**, bo tam wlasnie
+      siec uzytkownika QEMU wysyla pytania goscia (10.0.2.2:53) i nie
+      da sie tego przemapowac - `guestfwd` obsluguje TCP, nie UDP. U
+      mnie testy chodza jako root, wiec tego nie bylo widac; biegacz
+      GitHuba rootem nie jest.
+
+      Dwie rzeczy naraz. Po pierwsze, `start_dns_server` zwraca teraz
+      `(stop, ok)` zamiast wybuchac: grupa, ktora bez nazw nie ma czego
+      sprawdzac, mowi **co odpuszcza i dlaczego**, z gotowa recepta
+      (`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53`).
+      Slad stosu wygladal jak blad systemu, a byl brakiem uprawnien -
+      to jest dokladnie ta roznica, ktora test ma pokazywac.
+
+      Po drugie, CI dostalo te jedna linie sysctl przed testami, bo
+      **odpuszczenie asercji to strata pokrycia**, a nie rozwiazanie.
+      Zielone CI, ktore po cichu nie sprawdza TLS-a, byloby gorsze niz
+      czerwone.
+
+      Obie drogi sprawdzone lokalnie: normalna (jako root, cztery grupy
+      sieciowe przechodza) i odmowa (port 53 zajety przez inny proces -
+      grupa wypisuje POMINIETE i konczy sie zielono).

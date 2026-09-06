@@ -48,6 +48,19 @@ that means nothing.
 3. run `make test T=<name>` until it passes, then `make test` to be
    sure the group plays well with the others running in parallel.
 
+The network groups (`net`, `net32`, `tls32`, `tls64`) stand a DNS
+server of their own on **port 53** of the host: that is where QEMU's
+user network sends the guest's questions, and there is no way to remap
+it. Binding it needs root - so either run the suite as root, or once:
+
+```sh
+sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
+```
+
+Without it those groups say what they are giving up and why, rather
+than failing; the assertions are simply not run, which is worth knowing
+before concluding that everything is fine.
+
 Tests run four machines at once on a loaded host. **Never write
 `time.sleep(3)` and then read the screen once** - look again until the
 thing you are waiting for has happened, and give up only then. Half the

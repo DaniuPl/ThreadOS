@@ -204,6 +204,11 @@ through QMP: screen contents, pixel colours, serial output, injected
 keystrokes. Nothing is mocked — a failing assertion means the system
 misbehaved, not that a stub drifted.
 
+The network groups need port 53 on the host (QEMU's user network sends
+the guest's DNS questions there, and it cannot be remapped): run the
+suite as root, or `sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53`
+once. Without it they say so and skip, rather than failing.
+
 The checks are split into groups under `scripts/tests/`, one file per
 feature, running in parallel because each needs its own virtual machine
 and those spend most of their time waiting. One file per feature costs

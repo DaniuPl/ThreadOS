@@ -650,13 +650,30 @@ def font8x8():
     return _FONT8X8
 
 
+DNS_HINT = ("port 53 jest zajety albo bez uprawnien - uruchom jako root "
+            "albo raz: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
+
+
 def start_dns_server(answer_ip=(10, 0, 2, 2)):
     """A very simple DNS server on the host: to every question about an A
     record it answers with the same address. Thanks to that the path
-    'name -> address' can be checked with no network outside at all."""
+    'name -> address' can be checked with no network outside at all.
+
+    It has to be port 53 and no other: the guest asks 10.0.2.2:53 and
+    QEMU's user network sends that at the host's port 53, with no way to
+    remap it. Binding a port below 1024 needs root, which a CI runner
+    has not got - so a refusal comes back as (stop, False) and the group
+    says why it is giving up, instead of a traceback that looks like a
+    bug in the system.
+
+    Returns (stop, ok)."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", 53))
+    try:
+        sock.bind(("0.0.0.0", 53))
+    except OSError:
+        sock.close()
+        return (lambda: None), False
     stop = threading.Event()
 
     def serve():
@@ -685,7 +702,7 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
         sock.close()
 
     threading.Thread(target=serve, daemon=True).start()
-    return stop.set
+    return stop.set, True
 
 
 CERT_DER = None          # the HTTPS server's certificate (for the trust store)

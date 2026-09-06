@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, DNS_HINT
 
 
 def main():
@@ -54,7 +54,14 @@ def main():
             if https_port is None:
                 print("INFO: brak openssl - pomijam testy TLS")
             else:
-                dns_stop = start_dns_server()
+                dns_stop, dns_ok = start_dns_server()
+                if not dns_ok:
+                    # Everything below reaches the server by NAME, so
+                    # with no name server of ours there is nothing here
+                    # left to check.
+                    print("POMINIETE (TLS): " + DNS_HINT)
+                    https_stop()
+                    return summary()
                 try:
                     q.type_line("dns 10.0.2.2")
                     q.wait_for("serwer DNS ustawiony", timeout=10)

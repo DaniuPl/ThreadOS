@@ -15,7 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, DNS_HINT
 
 
 def main():
@@ -56,7 +56,15 @@ def main():
     with open(wdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
     http_port, http_stop = start_http_server()
-    dns_stop = start_dns_server()
+    dns_stop, dns_ok = start_dns_server()
+    if not dns_ok:
+        # The browser looks the page up by NAME, and what comes after it
+        # reads back what the browser saved - so with no name server of
+        # ours there is nothing here left to check.
+        print("POMINIETE (przegladarka): " + DNS_HINT)
+        http_stop()
+        os.unlink(wdisk)
+        return summary()
     q_web = Qemu(KERNEL, INITRD, wdisk)
     try:
         q_web.wait_desktop()
