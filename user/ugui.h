@@ -645,4 +645,214 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
     return UG_NOTHING;
 }
 
+/* --- choosing a file, instead of typing its name blind ---------------
+ *
+ * The editor asked "Otworz:" and waited for a name. That works if one
+ * remembers what is on the disk, and is otherwise a guessing game -
+ * the one part of a graphical system where a person is worse off than
+ * in a shell, because a shell at least completes names.
+ *
+ * So: a list of what is there, a line to type in for the name that is
+ * not there yet, and two buttons. Clicking a row fills the line, so
+ * whichever way one arrives at a name, the same line is opened - and
+ * typing goes on working exactly as it did, which is why the old way
+ * of using it still works.
+ */
+#define UG_PICK_H   150
+#define UG_PICK_ROWS 7
+
+struct ug_pick {
+    int on;
+    const char *title;
+    const char *(*row)(void *ctx, int i);
+    void *ctx;
+    int rows;                    /* how many there are */
+    int chosen;                  /* which one, -1 = none */
+    int top;                     /* the first one shown */
+    char *buf;                   /* the name, typed or clicked */
+    int buflen;
+    const char *yes, *no;
+    int answer;                  /* 1 = open it, 0 = never mind, -1 = asking */
+};
+
+static inline void ug_pick_open(struct ug_pick *p, const char *title,
+                                const char *(*row)(void *ctx, int i),
+                                void *ctx, int rows, char *buf, int buflen)
+{
+    p->on = 1;
+    p->title = title;
+    p->row = row;
+    p->ctx = ctx;
+    p->rows = rows;
+    p->chosen = -1;
+    p->top = 0;
+    p->buf = buf;
+    p->buflen = buflen;
+    p->yes = "Otworz";
+    p->no = "Anuluj";
+    p->answer = -1;
+    if (buf && buflen > 0)
+        buf[0] = '\0';
+}
+
+static inline int ug_pick_y(struct ug *u)
+{
+    int y = (u->h - UG_PICK_H) / 2;
+    return y < 2 ? 2 : y;
+}
+
+static inline void ug_pick_draw(struct ug *u, struct ug_pick *p)
+{
+    if (!p->on)
+        return;
+
+    int x = 8, w = u->w - 16;
+    int y = ug_pick_y(u);
+    int listy = y + 24;
+    int fieldy = listy + UG_PICK_ROWS * UG_ROW + 6;
+    int by = y + UG_PICK_H - 24;
+    int bw = 84;
+
+    win_rect(u->win, x, y, w, UG_PICK_H, UG_WHITE);
+    win_rect(u->win, x, y, w, 2, UG_BLUE);
+    win_rect(u->win, x, y + UG_PICK_H - 2, w, 2, UG_BLUE);
+    win_text(u->win, x + 8, y + 8, p->title, UG_BLACK);
+
+    for (int r = 0; r < UG_PICK_ROWS && p->top + r < p->rows; r++) {
+        int index = p->top + r;
+        const char *s = p->row ? p->row(p->ctx, index) : "";
+        int ry = listy + r * UG_ROW;
+
+        if (index == p->chosen) {
+            win_rect(u->win, x + 4, ry, w - 8, UG_ROW, UG_BLUE);
+            win_text(u->win, x + 8, ry + 2, s, UG_WHITE);
+        } else {
+            win_text(u->win, x + 8, ry + 2, s, UG_BLACK);
+        }
+    }
+
+    if (p->buf) {
+        win_rect(u->win, x + 8, fieldy, w - 16, UG_ROW + 4, UG_BG);
+        win_text(u->win, x + 11, fieldy + 3, p->buf, UG_BLACK);
+        int at = x + 11 + ug_len(p->buf) * 8;
+        if (at < x + w - 10)
+            win_rect(u->win, at, fieldy + 2, 1, UG_ROW, UG_BLACK);
+    }
+
+    win_rect(u->win, x + 8, by, bw, 16, UG_BLUE);
+    win_text(u->win, x + 16, by + 4, p->yes, UG_WHITE);
+    win_rect(u->win, x + 8 + bw + 10, by, bw, 16, UG_DIM);
+    win_text(u->win, x + 8 + bw + 18, by + 4, p->no, UG_WHITE);
+}
+
+static inline void ug_pick_take(struct ug_pick *p, int index)
+{
+    const char *s;
+    int i = 0;
+
+    if (index < 0 || index >= p->rows || !p->buf)
+        return;
+    p->chosen = index;
+    s = p->row ? p->row(p->ctx, index) : "";
+    while (s[i] && i < p->buflen - 1) {
+        p->buf[i] = s[i];
+        i++;
+    }
+    p->buf[i] = '\0';
+}
+
+static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
+                                const struct win_event *ev)
+{
+    int x = 8, w = u->w - 16;
+    int y = ug_pick_y(u);
+    int listy = y + 24;
+    int by = y + UG_PICK_H - 24;
+    int bw = 84;
+
+    if (!p->on)
+        return UG_NOTHING;
+
+    if (ev->type == WEV_CLOSE) {
+        p->on = 0;
+        p->answer = 0;
+        return UG_CLOSED;
+    }
+    if (ev->type == WEV_SCROLL) {
+        p->top -= ev->val;
+        if (p->top > p->rows - UG_PICK_ROWS)
+            p->top = p->rows - UG_PICK_ROWS;
+        if (p->top < 0)
+            p->top = 0;
+        return UG_CHANGED;
+    }
+    if (ev->type == WEV_CLICK) {
+        if (ev->y >= by && ev->y < by + 16) {
+            if (ev->x >= x + 8 && ev->x < x + 8 + bw) {
+                p->on = 0;
+                p->answer = 1;
+                return UG_PRESSED;
+            }
+            if (ev->x >= x + 8 + bw + 10 && ev->x < x + 8 + 2 * bw + 10) {
+                p->on = 0;
+                p->answer = 0;
+                return UG_PRESSED;
+            }
+            return UG_NOTHING;
+        }
+        if (ev->y >= listy && ev->y < listy + UG_PICK_ROWS * UG_ROW &&
+            ev->x >= x && ev->x < x + w) {
+            ug_pick_take(p, p->top + (ev->y - listy) / UG_ROW);
+            return UG_CHANGED;
+        }
+        return UG_NOTHING;
+    }
+    if (ev->type == WEV_KEY) {
+        char c = (char)ev->val;
+
+        if (c == 27) {
+            p->on = 0;
+            p->answer = 0;
+            return UG_PRESSED;
+        }
+        if (c == '\n' || c == '\r') {
+            p->on = 0;
+            p->answer = 1;
+            return UG_PRESSED;
+        }
+        if (c == KEY_DOWN) {
+            ug_pick_take(p, p->chosen + 1 < p->rows ? p->chosen + 1 : 0);
+            if (p->chosen >= p->top + UG_PICK_ROWS)
+                p->top = p->chosen - UG_PICK_ROWS + 1;
+            if (p->chosen < p->top)
+                p->top = p->chosen;
+            return UG_CHANGED;
+        }
+        if (c == KEY_UP) {
+            ug_pick_take(p, p->chosen > 0 ? p->chosen - 1 : 0);
+            if (p->chosen < p->top)
+                p->top = p->chosen;
+            return UG_CHANGED;
+        }
+        if (!p->buf)
+            return UG_NOTHING;
+
+        int len = ug_len(p->buf);
+        if (c == '\b') {
+            if (len > 0)
+                p->buf[len - 1] = '\0';
+            p->chosen = -1;
+            return UG_TYPED;
+        }
+        if (c >= 0x20 && c < 0x7F && len < p->buflen - 1) {
+            p->buf[len] = c;
+            p->buf[len + 1] = '\0';
+            p->chosen = -1;
+            return UG_TYPED;
+        }
+        return UG_NOTHING;
+    }
+    return UG_NOTHING;
+}
+
 #endif

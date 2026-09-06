@@ -47,6 +47,16 @@ ROW_H = 10
 STATUS_H = 10
 CW, CH = 420, 260
 
+# The panel that opens a file (user/ugui.h): a band across the middle
+# of the window, a list of names in it, a line to type in and two
+# buttons at the bottom edge.
+PICK_H = 150
+PICK_Y = (CH - PICK_H) // 2
+PICK_LIST_Y = PICK_Y + 24
+PICK_BY = PICK_Y + PICK_H - 24
+PICK_YES_X = 8 + 8 + 42
+PICK_NO_X = 8 + 8 + 84 + 10 + 42
+
 # The terminal opens in the next slot of the cascade, behind the editor
 TWX, TWY = 106, 66
 
@@ -139,6 +149,23 @@ def row_text(at, r, cols=48, wx=WX, wy=WY):
     """One line of the page, read through the kernel's own font."""
     font = font8x8()
     x0, y0 = wx + 1 + PAD, wy + 11 + PAD + r * ROW_H
+    out = ""
+    for c in range(cols):
+        pattern = []
+        for y in range(8):
+            bits = 0
+            for x in range(8):
+                if is_ink(at(x0 + c * 8 + x, y0 + y)):
+                    bits |= 1 << x
+            pattern.append(bits)
+        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
+    return out.rstrip()
+
+
+def read_text_at(at, x0, y0, cols):
+    """Dark letters on the white of a panel - the same reading as a
+    line of the page, at coordinates given by the caller."""
+    font = font8x8()
     out = ""
     for c in range(cols):
         pattern = []
@@ -292,6 +319,7 @@ def sixty_four():
             # drawing in a window, which is its own piece of code
             fx, fy = 118, 78              # the next slot of the cascade
             q.mouse_goto(24, 112)         # the "Pliki" icon
+            time.sleep(0.6)               # the pointer first, the button after
             q.mouse_click()
             time.sleep(5)
             q.mouse_goto(600, 430)
@@ -509,10 +537,21 @@ def main():
             q.type_line("smieci", enter=False)
             time.sleep(1)
             q.sendkey("ctrl-o")
-            time.sleep(1)
+            time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Ctrl+O pyta, co otworzyc",
-                  "Otworz:" in status_text(at))
+            # The panel shows what is on the disk: a name no longer has
+            # to be remembered to be opened.
+            title = read_text_at(at, CX + 16, CY + PICK_Y + 8, 24)
+            listed = [read_text_at(at, CX + 16,
+                                   CY + PICK_LIST_Y + i * 12 + 2, 24).strip()
+                      for i in range(4)]
+            check("Ctrl+O pokazuje, co jest na dysku ('%s': %s)"
+                  % (title.strip(), ", ".join(x for x in listed if x)),
+                  "Otworz plik" in title and
+                  any("notatka" in x for x in listed))
+
+            # Typing still works, and is still the way to name a file
+            # that is not on the list
             q.type_line("notatka", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
@@ -522,6 +561,36 @@ def main():
                   row_text(at, 0) == "Ala ma kota" and
                   row_text(at, 1) == "i psa" and
                   row_text(at, 2) == "")
+
+            # And the new way: click a name, click "Otworz"
+            q.sendkey("ctrl-o")
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            which = -1
+            for i in range(6):
+                if "notatka" in read_text_at(at, CX + 16,
+                                             CY + PICK_LIST_Y + i * 12 + 2,
+                                             24):
+                    which = i
+                    break
+            check("nazwa z dysku jest na liscie do klikniecia", which >= 0)
+            if which >= 0:
+                q.mouse_goto(CX + 60, CY + PICK_LIST_Y + which * 12 + 5)
+                q.mouse_click()
+                time.sleep(1)
+                q.mouse_goto(CX + PICK_YES_X, CY + PICK_BY + 8)
+                q.mouse_click()
+                time.sleep(2)
+                # 600x430 and not further: this screen is 640x480, and
+                # a pointer moved past its edge is clamped by the
+                # driver while the test goes on thinking it is where it
+                # asked for - after which every click lands somewhere
+                # else. (That cost an afternoon.)
+                q.mouse_goto(600, 430)
+                time.sleep(1)
+                w, h, at = q.screen_raw()
+                check("klik w nazwe i w 'Otworz' otwiera ten sam plik",
+                      row_text(at, 0) == "Ala ma kota")
 
             # --- the clipboard, shared with the rest of the desktop -----
             q.sendkey("ctrl-insert")           # copies the caret's line
@@ -616,7 +685,15 @@ def main():
             # to a text file means opening it in the editor.
             q.sendkey("alt-f4")
             time.sleep(2.5)
+            # The pointer first, and only then the button: the desktop
+            # decides whether a press on an icon was a click or the
+            # start of a drag by where the pointer was when the button
+            # went DOWN. Moving and pressing in the same breath leaves
+            # it seeing a press at the old place, on no icon at all -
+            # and then nothing starts, which is a long thing to look at
+            # before one sees it.
             q.mouse_goto(24, 112)              # the "Pliki" icon
+            time.sleep(0.6)
             q.mouse_click()
             time.sleep(4)
             q.mouse_goto(600, 430)

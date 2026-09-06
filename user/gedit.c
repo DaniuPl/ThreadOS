@@ -26,6 +26,7 @@
  */
 
 #include "uapi.h"
+#include "ugui.h"
 
 #define C_BLACK 0
 #define C_BLUE  3
@@ -85,7 +86,6 @@ static int  alen;
 static char last_find[NAME_MAX + 1];
 
 static int rows(void) { return (ch - PAD * 2 - STATUS_H) / ROW_H; }
-static int cols(void) { return (cw - PAD * 2) / 8; }
 
 static void ecopy(char *d, const char *s, int max)
 {
@@ -96,6 +96,52 @@ static void ecopy(char *d, const char *s, int max)
     }
     d[i] = '\0';
 }
+
+/* --- what is on the disk, for the panel that opens a file -----------
+ *
+ * Reading a directory is the one thing that looks different in the two
+ * kernels: in long mode the answer is a structure, in the older one a
+ * name and a length in the return value. Everything above it - the
+ * list, the panel, the opening - is the same code.
+ */
+#define FILES_MAX 64
+static char names[FILES_MAX][NAME_MAX + 1];
+static int nfiles;
+static struct ug editor_ui;
+static struct ug_pick picker;
+static char picked[NAME_MAX + 1];
+
+static const char *file_row(void *ctx, int i)
+{
+    (void)ctx;
+    return (i >= 0 && i < nfiles) ? names[i] : "";
+}
+
+static void reread_files(void)
+{
+    nfiles = 0;
+    for (int i = 0; i < 128 && nfiles < FILES_MAX; i++) {
+#ifdef __x86_64__
+        struct dirent64 e;
+        if (sys_readdir(i, &e) != 0)
+            break;
+        if (e.is_dir)
+            continue;
+        ecopy(names[nfiles], e.name, NAME_MAX);
+#else
+        char name[FS_NAME_MAX + 1];
+        int32_t r = sys_readdir(i, name);
+        if (r == -1)
+            break;
+        if (r == -2)
+            continue;                    /* a directory, not a file */
+        ecopy(names[nfiles], name, NAME_MAX);
+#endif
+        nfiles++;
+    }
+}
+static int cols(void) { return (cw - PAD * 2) / 8; }
+
 
 static void num(char *d, int v)      /* a small unsigned number */
 {
@@ -551,6 +597,13 @@ static void draw(int win)
     }
     line[p] = '\0';
     win_text(win, PAD, ch - STATUS_H + 1, line, C_WHITE);
+
+    /* Last, over everything: the panel that opens a file. A list one
+       can scroll the text under is not a question. */
+    editor_ui.win = win;
+    editor_ui.w = cw;
+    editor_ui.h = ch;
+    ug_pick_draw(&editor_ui, &picker);
 }
 
 /* --- keys --------------------------------------------------------- */
@@ -596,8 +649,12 @@ static void edit_key(char c)
         }
         return;
     case KEY_OPEN:
-        asking = ASK_OPEN;
-        alen = 0;
+        /* A list of what is there, instead of a name typed from
+           memory. Typing still works - the line under the list is the
+           same line the question used to be. */
+        reread_files();
+        ug_pick_open(&picker, "Otworz plik:", file_row, (void *)0, nfiles,
+                     picked, (int)sizeof(picked));
         return;
     case KEY_FIND:
         asking = ASK_FIND;
@@ -699,6 +756,19 @@ void _start(int argc, char **argv)
         struct win_event ev;
         int drew = 0;
         while (win_poll(win, &ev) == 1) {
+            if (picker.on) {
+                editor_ui.win = win;
+                editor_ui.w = cw;
+                editor_ui.h = ch;
+                int what = ug_pick_event(&editor_ui, &picker, &ev);
+                if (what == UG_CLOSED)
+                    sys_exit(0);
+                if (what == UG_PRESSED && picker.answer && picked[0])
+                    load_from(picked);
+                drew = 0;
+                draw(win);
+                continue;
+            }
             if (ev.type == WEV_CLOSE) {
                 /* A file with changes in it is not something to lose
                    because a window was closed. The first request is

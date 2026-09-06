@@ -5361,3 +5361,27 @@ sprawdzane przez `make test`.
       Test dostal przy okazji asercje, ktorej wczesniej nie bylo i
       ktorej nie dalo sie napisac: **"Zostaw" ma zostawic plik**.
       Pytanie, ktorego obie odpowiedzi znacza tak, nie jest pytaniem.
+
+- [x] **Wybor pliku z listy zamiast wpisywania nazwy w ciemno**
+      (ug_pick w user/ugui.h, Ctrl+O w edytorze).
+
+      Edytor pytal "Otworz:" i czekal na nazwe. To dziala, jesli sie
+      pamieta, co jest na dysku, a poza tym jest zgadywanka - jedyne
+      miejsce w systemie graficznym, gdzie czlowiek byl w gorszej
+      sytuacji niz w powloce, bo powloka przynajmniej dopowiada nazwy.
+
+      Teraz jest lista tego, co jest, linia do wpisania nazwy, ktorej
+      jeszcze nie ma, i dwa przyciski. Klikniecie wiersza wpisuje nazwe
+      do linii, wiec ktorakolwiek droga sie do niej dojdzie, otwierana
+      jest ta sama linia - i dlatego stary sposob uzywania (wpisac i
+      Enter) dziala dalej, co test sprawdza osobno od nowego.
+
+      **Popoludnie kosztowal blad, ktory nie byl w systemie.** Test
+      przestal znajdowac menedzer plikow, a przyczyna byla w jednej
+      linii, ktora dopisalem do testu: odsuniecie wskaznika na (700,
+      420) na ekranie 640x480. Sterownik myszy przycina wskaznik do
+      krawedzi, a test dalej liczy, ze jest tam, gdzie prosil - i od
+      tego miejsca kazdy klik ladowal szescdziesiat pikseli obok.
+      Nacisniecie na ikone nie bylo wiec nacisnieciem na ikone i nic
+      sie nie uruchamialo. Widac to bylo dopiero po dolozeniu do jadra
+      wypisywania, ktora ikona zostala puszczona.
