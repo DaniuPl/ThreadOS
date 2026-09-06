@@ -168,7 +168,7 @@ def main():
             # pages went into the map as free, the allocator would hand
             # them out and the program from the initrd would be rubbish
             # by the time anyone ran it.
-            elf = q.wait_serial("ELF64 z initrd:", timeout=60)
+            elf = q.wait_serial("ELF64 from the initrd:", timeout=60)
             check("a program from the initrd runs - the loader did not give away its own memory",
                   "ring 3" in elf and "exit code 7" in elf)
 

@@ -214,7 +214,7 @@ def main():
             check("program dziedziczy directory roboczy po shellu",
                   "uls64: /project" in ul)
             check("and it sees only its own entries in there",
-                  "plan  (18 B)" in ul and "uls64: entries 1" in ul)
+                  "plan  (17 B)" in ul and "uls64: entries 1" in ul)
 
             seen = len(q23.serial())
             q23.type_line("cd ..")
@@ -309,7 +309,7 @@ def main():
             # path through the kernel
             seen = len(q2.serial())
             q2.type_line("cat zring3")
-            ct3 = q2.wait_serial("written z ring 3",
+            ct3 = q2.wait_serial("written from ring 3",
                                    timeout=25)[seen:]
             check("a file written by a program survived the restart too",
                   "ProtonOS 64: a file written from ring 3" in ct3)

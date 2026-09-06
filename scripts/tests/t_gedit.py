@@ -421,17 +421,17 @@ def main():
             st = status_text(at)
             check("the status bar says the file has no name and has changed "
                   "('%s')" % st, "(no name)*" in st)
-            check("and where the cursor stands (line 1, column 12)",
-                  "L1 C12" in st)
+            check("and where the cursor stands (line 1, column 20)",
+                  "L1 C20" in st)
 
             q.sendkey("ret")
-            q.type_line("i psa", enter=False)
+            q.type_line("jumps over", enter=False)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("Enter starts a new line",
                   row_text(at, 0) == "The quick brown fox" and
-                  row_text(at, 1) == "i psa")
-            check("and the status bar counts the lines", "L2 C6" in status_text(at))
+                  row_text(at, 1) == "jumps over")
+            check("and the status bar counts the lines", "L2 C11" in status_text(at))
 
             # --- Ctrl+F: finding, and going round the end ---------------
             q.sendkey("ctrl-f")
@@ -449,7 +449,7 @@ def main():
             # at all means the search went round the end of the file
             check("it finds a word ABOVE the cursor, so it wraps around "
                   "the end of the file ('%s')" % st,
-                  "found on line 1" in st and "L1 C8" in st)
+                  "found on line 1" in st and "L1 C17" in st)
 
             q.sendkey("ctrl-f")
             time.sleep(0.8)
@@ -478,24 +478,22 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("Ctrl+Z undoes the last character ('%s')" % row_text(at, 1),
-                  row_text(at, 1) == "i ps")
+                  row_text(at, 1) == "jumps ove")
             check("and it says it undid something", "undone" in status_text(at))
 
             q.sendkey("ctrl-z")
             q.sendkey("ctrl-z")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            # Three characters back the line reads "i " - the space is
-            # still there, and the screen shows it as nothing
             check("and it keeps undoing, one at a time ('%s')" % row_text(at, 1),
-                  row_text(at, 1) == "i")
+                  row_text(at, 1) == "jumps o")
 
             # Back to what it was - the checks below expect it
-            q.type_line("psa", enter=False)
+            q.type_line("ver", enter=False)
             time.sleep(1)
             w, h, at = q.screen_raw()
             check("and what was typed after the undo is in its place",
-                  row_text(at, 1) == "i psa")
+                  row_text(at, 1) == "jumps over")
 
             # --- saving -------------------------------------------------
             q.sendkey("ctrl-s")
@@ -615,7 +613,7 @@ def main():
             w, h, at = q.screen_raw()
             check("Backspace at the start of a line joins it to the one before "
                   "('%s')" % row_text(at, 1),
-                  row_text(at, 1) == "i psaThe quick brown fox" and
+                  row_text(at, 1) == "jumps overThe quick brown fox" and
                   row_text(at, 2) == "")
 
             # --- closing is a request, and it can be declined -----------
@@ -678,7 +676,7 @@ def main():
             check("'gedit note' opens the file at once ('%s')"
                   % row_text(at, 0),
                   row_text(at, 0) == "The quick brown fox" and
-                  row_text(at, 1) == "i psa")
+                  row_text(at, 1) == "jumps over")
 
             # --- and the file manager can hand a file over --------------
             # What a file manager is FOR is getting to a file; getting

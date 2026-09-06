@@ -59,7 +59,7 @@ struct core_syscall {
     uint64_t kernel_rsp;     /* offset 0 */
     uint64_t scratch;        /* offset 8 */
 };
-extern struct core_syscall syscall64_bloki[];
+extern struct core_syscall syscall64_blocks[];
 _Static_assert(sizeof(struct core_syscall) == 16,
                "the stub counts sixteen bytes per core");
 
@@ -92,7 +92,7 @@ void syscall64_init(void)
     /* Pointer to this core's block. The entry stub reaches for it
        through swapgs - the only way with no free register. */
     wrmsr(MSR_KERNEL_GS,
-          (uint64_t)(uintptr_t)&syscall64_bloki[smp_core()]);
+          (uint64_t)(uintptr_t)&syscall64_blocks[smp_core()]);
 
     /* Bits 47-32: the kernel code selector on entry.
        Bits 63-48: the base from which sysret builds the program's
@@ -106,7 +106,7 @@ void syscall64_init(void)
 
 void syscall64_set_kernel_stack(uint64_t rsp)
 {
-    syscall64_bloki[smp_core()].kernel_rsp = rsp;
+    syscall64_blocks[smp_core()].kernel_rsp = rsp;
     gdt64_set_kernel_stack(rsp);   /* the same for interrupts from ring 3 */
 }
 

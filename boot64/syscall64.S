@@ -166,8 +166,8 @@ enter_ring3_64:
    the program's stack (offset 8). The layout must match struct
    core_syscall in kernel64/syscall64.c - a _Static_assert there
    watches over it. */
-.global syscall64_bloki
-syscall64_bloki:
+.global syscall64_blocks
+syscall64_blocks:
     .fill 8 * 16, 1, 0
 
 /* Code meant to run in ring 3.

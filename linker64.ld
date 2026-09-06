@@ -1,7 +1,7 @@
-/* Skrypt konsolidatora jadra 64-bitowego. Uklad taki sam jak
-   w 32-bitowym: obraz pod 1 MiB, naglowek Multiboot 2 na poczatku.
-   GRUB wgrywa obraz ELF64 i zostawia nas w trybie chronionym - w tryb
-   dlugi wchodzimy sami (boot64/boot64.S). */
+/* The linker script for the 64-bit kernel. The same layout as the
+   32-bit one: the image at 1 MiB, the Multiboot 2 header at the start.
+   GRUB loads the ELF64 image and leaves us in protected mode - long
+   mode we enter ourselves (boot64/boot64.S). */
 
 ENTRY(_start)
 

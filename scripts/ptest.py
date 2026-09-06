@@ -1488,16 +1488,16 @@ class Qemu:
         if x0 < 0 or y0 < 0 or x0 + cols * 8 > w or y0 + rows * line_h > h:
             return ""
 
-        ile = {}
+        counts = {}
         for y in range(rows * line_h):
             o = ((y0 + y) * w + x0) * 3
             band = px[o:o + cols * 8 * 3]
             for i in range(0, len(band), 3):
                 p = band[i:i + 3]
-                ile[p] = ile.get(p, 0) + 1
-        if not ile:
+                counts[p] = counts.get(p, 0) + 1
+        if not counts:
             return ""
-        tlo = max(ile, key=ile.get)
+        background = max(counts, key=counts.get)
 
         font = font8x8()
         out = []
@@ -1510,7 +1510,7 @@ class Qemu:
                     band = px[o:o + 24]
                     b = 0
                     for x in range(8):
-                        if band[x * 3:x * 3 + 3] != tlo:
+                        if band[x * 3:x * 3 + 3] != background:
                             b |= 1 << x
                     pattern.append(b)
                 chars.append(font.get(tuple(pattern), "?"))

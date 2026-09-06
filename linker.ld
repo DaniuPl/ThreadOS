@@ -1,4 +1,4 @@
-/* Skrypt linkera ProtonOS - jądro ładowane pod 1 MiB (konwencja Multiboot) */
+/* The ProtonOS linker script - the kernel loads at 1 MiB (the Multiboot convention) */
 
 ENTRY(_start)
 
@@ -8,9 +8,9 @@ SECTIONS
 
     _kernel_start = .;
 
-    /* Nagłówek Multiboot musi być w pierwszych 8 KiB pliku - dlatego
-       ma własną sekcję na samym początku obrazu */
-    /* Naglowek Multiboot 2 wymaga wyrownania do 8 bajtow */
+    /* The Multiboot header has to be in the first 8 KiB of the file -
+       hence a section of its own at the very start of the image */
+    /* A Multiboot 2 header has to be aligned to 8 bytes */
     .multiboot : ALIGN(8)
     {
         KEEP(*(.multiboot))

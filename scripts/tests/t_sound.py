@@ -134,9 +134,9 @@ def main():
                 q3.type_line("desktop")
                 q3.wait_serial("The desktop is starting", timeout=40)
                 time.sleep(4)
-                out = q3.command("run gmikser", "z initrd", timeout=30)
+                out = q3.command("run gmikser", "from initrd", timeout=30)
                 check("the mixer starts as a ring 3 program",
-                      "'gmikser' from the initrd" in out)
+                      "'gmikser' from initrd" in out)
                 time.sleep(3)
                 q3.mouse_goto(700, 500)
                 time.sleep(0.8)

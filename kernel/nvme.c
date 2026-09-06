@@ -218,13 +218,13 @@ int nvme_read(uint32_t lba, uint32_t count, void *buf)
     uint8_t *dst = buf;
 
     while (count) {
-        uint32_t count = count > BUF_SECTORS ? BUF_SECTORS : count;
-        if (batch(lba, count, 0) < 0)
+        uint32_t chunk = count > BUF_SECTORS ? BUF_SECTORS : count;
+        if (batch(lba, chunk, 0) < 0)
             return -1;
-        memcpy(dst, dma_buf, count * SECTOR);
-        dst += count * SECTOR;
-        lba += count;
-        count -= count;
+        memcpy(dst, dma_buf, chunk * SECTOR);
+        dst += chunk * SECTOR;
+        lba += chunk;
+        count -= chunk;
     }
     return 0;
 }
@@ -236,13 +236,13 @@ int nvme_write(uint32_t lba, uint32_t count, const void *buf)
     const uint8_t *src = buf;
 
     while (count) {
-        uint32_t count = count > BUF_SECTORS ? BUF_SECTORS : count;
-        memcpy(dma_buf, src, count * SECTOR);
-        if (batch(lba, count, 1) < 0)
+        uint32_t chunk = count > BUF_SECTORS ? BUF_SECTORS : count;
+        memcpy(dma_buf, src, chunk * SECTOR);
+        if (batch(lba, chunk, 1) < 0)
             return -1;
-        src += count * SECTOR;
-        lba += count;
-        count -= count;
+        src += chunk * SECTOR;
+        lba += chunk;
+        count -= chunk;
     }
     return 0;
 }

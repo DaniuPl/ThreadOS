@@ -1,22 +1,27 @@
-# ProtonOS - budowanie jądra
+# ProtonOS - building the kernel
 #
-# Cele:
-#   make        - buduje protonos.bin (jądro Multiboot)
-#   make iso    - buduje bootowalne ISO (wymaga grub-mkrescue + xorriso)
-#   make run    - uruchamia jądro w QEMU (wymaga qemu-system-i386)
-#   make fuzz   - sprawdza parsery na uszkodzonych danych (sanitizery)
-#   make clean  - usuwa pliki wynikowe
+# Targets:
+#   make        - builds protonos.bin (the Multiboot kernel)
+#   make iso    - builds a bootable ISO (needs grub-mkrescue + xorriso)
+#   make run    - starts the kernel in QEMU (needs qemu-system-i386)
+#   make fuzz   - feeds the parsers corrupted data (under sanitizers)
+#   make clean  - removes what was built
 
 CC      := gcc
 AS      := gcc
 LD      := gcc
 
+# -Wshadow earns its place: renaming a variable to 'count' inside a
+# function whose parameter is already 'count' compiled silently and
+# broke the NVMe driver.
 CFLAGS  := -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
-           -Wall -Wextra -O2 -g
+           -Wall -Wextra -Wshadow -O2 -g
 ASFLAGS := -m32
-# Uwaga: docelowo warto linkować z -lgcc (wymaga gcc-multilib z 32-bit libgcc),
-# np. gdy pojawi się 64-bitowe dzielenie. Na razie jądro się bez niej obywa.
-# --no-warn-rwx-segments: sekcja .user swiadomie laczy kod i dane (RWX)
+# One day it will be worth linking with -lgcc (which needs gcc-multilib
+# with a 32-bit libgcc), for instance when 64-bit division turns up. So
+# far the kernel does without it.
+# --no-warn-rwx-segments: the .user section deliberately holds code and
+# data together (RWX)
 LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
            -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
@@ -26,7 +31,7 @@ ISO     := $(BUILD)/protonos.iso
 INITRD  := $(BUILD)/initrd.img
 DISK    := $(BUILD)/disk.img
 
-# Programy uzytkownika (ELF-y ladowane z initrd)
+# The user programs (ELF files loaded out of the initrd)
 USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
                -Wl,--build-id=none -Wl,--no-warn-rwx-segments
@@ -151,8 +156,9 @@ $(BUILD):
 $(BUILD)/boot.o: boot/boot.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
-# Trampolina rdzeni wtornych idzie przez gcc, a nie przez as: sa w niej
-# makra preprocesora liczace adresy w miejscu docelowym
+# The secondary cores' trampoline goes through gcc rather than as: it
+# has preprocessor macros in it that compute addresses at the place it
+# is copied to
 $(BUILD)/ap.o: boot/ap.S | $(BUILD)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
@@ -162,9 +168,9 @@ $(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
 $(BUILD)/switch.o: kernel/switch.S | $(BUILD)
 	$(AS) $(ASFLAGS) -c $< -o $@
 
-# Zaleznosc od naglowkow jest tu wypisana wprost: bez niej zmiana
-# w kernel/include/ nie przebudowywala nic, a make konczyl sie zielono,
-# choc obiekty pamietaly stary prototyp.
+# The dependency on the headers is spelled out here: without it a
+# change in kernel/include/ rebuilt nothing and make ended green, while
+# the objects still remembered the old prototype.
 KERNEL_HEADERS := $(wildcard kernel/include/*.h)
 
 $(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)
@@ -173,34 +179,37 @@ $(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)
 $(KERNEL): $(OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 	@grub-file --is-x86-multiboot $@ 2>/dev/null \
-	    && echo "OK: $@ jest poprawnym obrazem Multiboot" \
-	    || echo "INFO: grub-file niedostepny - pomijam weryfikacje Multiboot"
+	    && echo "OK: $@ is a valid Multiboot image" \
+	    || echo "INFO: no grub-file - skipping the Multiboot check"
 
 $(BUILD)/user: | $(BUILD)
 	mkdir -p $(BUILD)/user
 
-# Naglowki userspace sa wciagane przez wiele programow (biblioteczka
-# syscalli, siec, kryptografia), wiec zmiana ktoregokolwiek ma
-# przebudowac wszystko - stad wildcard zamiast recznej listy.
+# The userspace headers are pulled in by many programs (the syscall
+# library, the network, the cryptography), so a change to any of them
+# has to rebuild everything - hence a wildcard instead of a hand-kept
+# list.
 USER_HEADERS := $(wildcard user/*.h)
 
 $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
-# --- Biblioteka wspoldzielona ----------------------------------------
+# --- The shared library ----------------------------------------------
 #
-# Kryptografia, TLS, HTTP i DNS zyja w naglowkach user/*.h jako funkcje
-# 'static inline'. Kazdy program niosl je dotad w sobie - httpget i gweb
-# to po osiemdziesiat kilobajtow tego samego kodu.
+# The cryptography, TLS, HTTP and DNS live in the user/*.h headers as
+# 'static inline' functions. Every program used to carry them inside
+# itself - httpget and gweb are eighty kilobytes each of the same code.
 #
-# Zrodlo zostaje jedno. scripts/split_headers.py robi z kazdego naglowka dwie
-# wersje: dla biblioteki (te same funkcje, ale widoczne z zewnatrz) i dla
-# programu (same zapowiedzi, bez cial). Zadna z nich nie jest pisana
-# recznie, wiec nie ma jak sie rozjechac ze zrodlem.
+# There is still one source. scripts/split_headers.py makes two
+# versions of every header: one for the library (the same functions,
+# but visible from outside) and one for a program (declarations only,
+# no bodies). Neither is written by hand, so neither can drift from the
+# source.
 #
-# Kopiowanie zrodel do build/ nie jest ozdoba: '#include "utls.h"' szuka
-# najpierw w katalogu pliku, ktory je wciaga. Gdyby libproton.c lezal
-# w user/, znalazlby oryginal zamiast wersji wygenerowanej.
+# Copying the sources into build/ is not decoration: '#include
+# "utls.h"' looks first in the directory of the file that includes it.
+# If libproton.c lived in user/, it would find the original instead of
+# the generated version.
 LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h uaes.h urand.h ux25519.h \
                ursa.h uecdsa.h ux509.h ucert.h utls.h uhttp.h uhtml.h \
                udns.h caroots.h uproton.h
@@ -220,9 +229,9 @@ $(BUILD)/decl/%.h: user/%.h scripts/split_headers.py | $(BUILD)/decl
 $(BUILD)/libsrc/libproton.c: user/libproton.c | $(BUILD)/libsrc
 	cp $< $@
 
-# -Bsymbolic: wywolania wewnatrz biblioteki wiaza sie od razu, przy
-# konsolidacji. Bez tego szlyby przez jej wlasna tablice skokow, a te
-# wypelnia sie dopiero przy ladowaniu - czym u nas nie ma komu sie zajac.
+# -Bsymbolic: calls inside the library are bound at link time. Without
+# it they would go through its own jump table, and that is filled in at
+# load time - which here there is nobody to do.
 $(LIBPROTON): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user/libproton.ld \
               $(USER_HEADERS) Makefile
 	$(CC) -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC -O2 \
@@ -234,13 +243,14 @@ $(LIBPROTON): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user/libproton.ld \
 $(BUILD)/dyn/%.c: user/%.c | $(BUILD)/dyn
 	cp $< $@
 
-# Programy, ktore biora kryptografie z biblioteki zamiast niesc ja same
+# The programs that take the cryptography from the library instead of
+# carrying it themselves
 USER_DYN_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                    -fno-pic -no-pie -nostdlib -O2 -Wall -Wextra \
                    -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-# Regula wzorcowa ograniczona do tych pieciu nazw: reszta programow
-# buduje sie jak dotad, ze wszystkim w srodku
+# A pattern rule limited to those five names: the rest of the programs
+# build as they always did, with everything inside
 USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
 USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
 
@@ -293,15 +303,15 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 	    cores=$(BUILD)/user/cores.elf \
 	    syscalls=$(BUILD)/user/syscalls.elf
 
-# --- Jadro 64-bitowe (tryb dlugi) ------------------------------------
+# --- The 64-bit kernel (long mode) -----------------------------------
 #
-# Drugi obraz, budowany z tych samych zrodel: rozne sa tylko wejscie
-# (boot64/boot64.S wchodzi w tryb dlugi) i szkielet kmain64. Reszta to
-# te same pliki kompilowane po raz drugi - roznice miedzy trybami
-# zamykaja sie w naglowku io.h i w kilku rzutowaniach.
+# A second image built from the same sources: only the entry point
+# (boot64/boot64.S enters long mode) and the kmain64 skeleton differ.
+# The rest is the same files compiled a second time - what separates
+# the two modes fits in the io.h header and a handful of casts.
 KERNEL64 := $(BUILD)/protonos64.bin
 CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
-            -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -O2 -g
+            -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
@@ -341,16 +351,16 @@ $(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64
 $(BUILD)/64/syscall64_stub.o: boot64/syscall64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
-# Programy uzytkownika trybu dlugiego. Buduja sie tak samo jak
-# 32-bitowe, tylko innym linkerem i z wlasna biblioteczka syscalli -
-# w trybie dlugim do jadra wchodzi sie instrukcja syscall, nie
-# bramka przerwania.
+# The long-mode user programs. They build just like the 32-bit ones,
+# only with a different linker script and their own syscall library -
+# in long mode the kernel is entered with the syscall instruction, not
+# through an interrupt gate.
 INITRD64 := $(BUILD)/initrd64.img
-# Programy uzytkownika buduja sie z SSE - na x86-64 jest ono czescia
-# konwencji wywolan, a jadro potrafi juz zapisac i odtworzyc stan tych
-# rejestrow przy przelaczaniu zadan. Samo jadro zostaje bez SSE:
-# w obsludze przerwania nie ma czego liczyc, a kazda taka instrukcja
-# wymagalaby zapisania stanu przerwanego programu.
+# The user programs are built with SSE - on x86-64 it is part of the
+# calling convention, and the kernel can already save and restore those
+# registers when it switches tasks. The kernel itself stays without
+# SSE: there is nothing to compute in an interrupt handler, and every
+# such instruction would mean saving the interrupted program's state.
 USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
                  -fno-pic -no-pie -static -nostdlib -mno-red-zone \
                  -O2 -Wall -Wextra \
@@ -395,27 +405,29 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
 
-# Makefile jest tu zaleznoscia nie bez powodu: zmiana flag kompilacji
-# musi przebudowac programy, a bez tego wpisu make uznaje, ze skoro
-# zrodla sie nie zmienily, to nie ma nic do roboty.
+# The Makefile is a dependency here for a reason: a change to the
+# compilation flags has to rebuild the programs, and without this entry
+# make decides that since the sources did not change there is nothing
+# to do.
 $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
-# Programy wspolne dla obu jader: kryptografia, TLS, HTTP i DNS zyja
-# w user/ i nie wiedza nic o trybie procesora. Do jadra mowia przez
-# user/uapi.h, ktore wybiera wlasciwa strone - stad ta druga regula,
-# budujaca te same zrodla drugi raz, tyle ze na 64 bity.
+# The programs shared by both kernels: the cryptography, TLS, HTTP and
+# DNS live in user/ and know nothing about the processor mode. They
+# speak to the kernel through user/uapi.h, which picks the right side -
+# hence this second rule, building the same sources again, this time
+# for 64 bits.
 $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
                        user64/compat64.h user64/user64.ld $(USER_HEADERS) \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
-# --- Biblioteka wspoldzielona w trybie dlugim -------------------------
+# --- The shared library in long mode ---------------------------------
 #
-# Ten sam zabieg, co w jadrze 32-bitowym i z tych samych naglowkow -
-# rozny jest tylko adres, pod ktorym biblioteka lezy, i szerokosc
-# rejestrow. Zrodla nikt drugi raz nie pisze.
+# The same trick as in the 32-bit kernel and out of the same headers -
+# only the address the library sits at and the width of the registers
+# differ. Nobody writes the source a second time.
 LIBPROTON64 := $(BUILD)/libproton64.so
 LIB_DECL64  := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 
@@ -489,7 +501,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
 	    dynlib=$(BUILD)/user64/dynlib.elf \
 	    cores=$(BUILD)/user64/cores.elf \
 	    syscalls=$(BUILD)/user64/syscalls.elf
-	@echo "Gotowe: $@ ($$(stat -c%s $@) B)"
+	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)
 
@@ -505,18 +517,18 @@ $(KERNEL64): $(OBJS64) linker64.ld
 	$(CC) $(LDFLAGS64) $(OBJS64) -o $@
 
 kernel64: $(KERNEL64) $(INITRD64)
-	@echo "Gotowe: $(KERNEL64) (tryb dlugi, ladowany przez GRUB-a)"
+	@echo "Done: $(KERNEL64) (long mode, loaded by GRUB)"
 
-# Obraz ISO z jadrem 64-bitowym, startujacy i pod starym BIOS-em,
-# i pod UEFI. Ta sama plyta obsluguje obie drogi: grub-mkrescue wklada
-# do niej dwa zestawy plikow GRUB-a i partycje EFI, a firmware wybiera
-# ten, ktory rozumie. To wlasnie brakowalo do rozruchu na nowszym
-# sprzecie - stary obraz umial tylko droge BIOS-owa.
+# An ISO with the 64-bit kernel that boots under an old BIOS and under
+# UEFI alike. One disc serves both roads: grub-mkrescue puts two sets
+# of GRUB files and an EFI partition on it, and the firmware picks the
+# one it understands. That is what was missing for booting on newer
+# hardware - the old image knew only the BIOS road.
 ISO64 := $(BUILD)/protonos64.iso
 
 $(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg
 	@command -v grub-mkrescue >/dev/null || { \
-	    echo "BLAD: brak grub-mkrescue."; \
+	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
 grub-common xorriso mtools"; \
 	    exit 1; }
@@ -525,29 +537,30 @@ grub-common xorriso mtools"; \
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	grub-mkrescue -o $@ $(BUILD)/isodir64
-	@echo "Gotowe: $@ (BIOS + UEFI)"
+	@echo "Done: $@ (BIOS + UEFI)"
 
 iso64: $(ISO64)
 
-# Rozruch przez UEFI wymaga firmware - OVMF udaje je w QEMU tak samo,
-# jak robi to prawdziwa plyta glowna
+# Booting through UEFI needs firmware - OVMF plays that part in QEMU
+# just as a real motherboard does
 run-iso64-uefi: $(ISO64)
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd $(BUILD)/ovmf_vars.fd
 	qemu-system-x86_64 -cdrom $(ISO64) -boot d \
 	    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 	    -drive if=pflash,format=raw,unit=1,file=$(BUILD)/ovmf_vars.fd
 
-# Pusty obraz dysku 16 MiB pod system plikow PFS (jadro go sformatuje).
-# PFS3 przydziela bloki z bitmapy, wiec miejsce idzie tam, gdzie trzeba.
+# An empty 16 MiB disk image for the PFS filesystem (the kernel will
+# format it). PFS3 hands out blocks from a bitmap, so the room goes
+# where it is needed.
 $(DISK): | $(BUILD)
 	dd if=/dev/zero of=$@ bs=1M count=16 status=none
 
-# Obraz ISO do wypalenia albo uruchomienia z 'qemu -cdrom'. GRUB wgrywa
-# jadro przez Multiboot i podaje mu initrd jako modul; menu pozwala wybrac
-# pulpit albo konsole tekstowa (grub.cfg).
+# An ISO to burn or to start with 'qemu -cdrom'. GRUB loads the kernel
+# through Multiboot and hands it the initrd as a module; the menu lets
+# you pick the desktop or the text console (grub.cfg).
 iso: $(KERNEL) $(INITRD) grub.cfg
 	@command -v grub-mkrescue >/dev/null || { \
-	    echo "BLAD: brak grub-mkrescue."; \
+	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-common xorriso"; \
 	    echo "  Fedora:        dnf install grub2-tools xorriso"; \
 	    exit 1; }
@@ -556,90 +569,95 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
 	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
-	@echo "Gotowe: $(ISO) - 'make run-iso' albo wypal na pendrive"
+	@echo "Done: $(ISO) - 'make run-iso', or write it to a stick"
 
-# QEMU potrafi załadować jądro Multiboot bezpośrednio - bez ISO i GRUB-a.
-# Dysk (-hda) trafia na pierwsza magistrale ATA jako master.
-# Siec: karta RTL8139 w trybie uzytkownika QEMU (adres z DHCP: 10.0.2.15,
-# brama 10.0.2.2). hostfwd wystawia serwer TCP z ProtonOS-a na hosta:
-# po 'run tcpserv' mozna z terminala zrobic 'nc localhost 5555'.
+# QEMU can load a Multiboot kernel directly - with no ISO and no GRUB.
+# The disk (-hda) lands on the first ATA bus as the master.
+# Network: an RTL8139 card in QEMU's user mode (the address comes from
+# DHCP: 10.0.2.15, gateway 10.0.2.2). hostfwd puts the TCP server from
+# ProtonOS in front of the host: after 'run tcpserv' one can type 'nc
+# localhost 5555' in a terminal.
 NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
            -device rtl8139,netdev=n0
 
 run: $(KERNEL) $(INITRD) $(DISK)
 	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
 
-# Uruchomienie z ISO tak, jak na prawdziwej maszynie: dysk (PFS + plik
-# wymiany) i karta sieciowa, bo bez nich polowa systemu nie ma co robic.
+# Starting off the ISO the way a real machine would: a disk (PFS + the
+# swap file) and a network card, because without them half the system
+# has nothing to do.
 run-iso: iso $(DISK)
 	qemu-system-i386 -cdrom $(ISO) -boot d -hda $(DISK) $(NETOPTS)
 
-# Automatyczny test: boot w QEMU bez okna + weryfikacja ekranu VGA.
-# Test sam tworzy swiezy obraz dysku i sprawdza persystencje miedzy boot-ami.
-# Grupy testu chodza rownolegle, bo kazda ma wlasna maszyne QEMU
-# i wiekszosc czasu i tak czeka: na rozruch, na odpowiedz, na
-# przerysowanie ekranu.
+# The automatic test: a boot in QEMU with no window, and the VGA screen
+# read back. The test makes a fresh disk image itself and checks that
+# what was written survives between boots. The groups run in parallel,
+# because each has a QEMU machine of its own and spends most of its
+# time waiting anyway: for the boot, for an answer, for the screen to
+# be redrawn.
 #
-#   make test            wszystkie grupy
-#   make test T=k64      tylko jadro 64-bitowe (albo k64,uefi)
-#   make test J=1        jedna po drugiej, do debugowania
+#   make test            every group
+#   make test T=k64      the 64-bit kernel only (or k64,uefi)
+#   make test J=1        one after another, for debugging
 test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
 	python3 -u scripts/run_tests.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
 	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
 
-# Parsery dostaja dane prosto z sieci - ten cel przepuszcza je przez
-# sanitizery na hoscie, karmiac uszkodzonymi wejsciami (certyfikaty,
-# HTML, HTTP oraz ramki trafiajace do net.c i tcp.c w jadrze).
+# The parsers get their data straight off the network - this target
+# runs them under sanitizers on the host, feeding them corrupted input
+# (certificates, HTML, HTTP and the frames that reach net.c and tcp.c
+# in the kernel).
 fuzz:
 	python3 scripts/fuzz_parsers.py 500
 
 clean:
 	rm -rf $(BUILD)
 
-# --- Wlasny program rozruchowy UEFI ----------------------------------
+# --- Our own UEFI boot loader ----------------------------------------
 #
-# Aplikacja EFI to plik w formacie PE32+ z konwencją wywolan Microsoftu,
-# czyli dwie rzeczy, ktorych GCC na Linuksie nie robi. Robi je clang z
-# lld-linkiem - i to jedyne, co jest tu cudze: format pliku. Kod jest
-# w calosci nasz, bez gnu-efi i bez EDK2.
+# An EFI application is a PE32+ file with Microsoft's calling
+# convention - two things GCC on Linux does not do. clang with lld-link
+# does them, and that is the only borrowed thing here: the file format.
+# The code is all ours, with no gnu-efi and no EDK2.
 EFI_OUT := $(BUILD)/BOOTX64.EFI
 EFI_CC  := clang -target x86_64-unknown-windows -ffreestanding \
            -fshort-wchar -mno-red-zone -Wall -Wextra -O2
 
 $(EFI_OUT): boot/efi/efiboot.c boot/efi/efi.h | $(BUILD)
 	@command -v clang >/dev/null && command -v lld-link >/dev/null || { \
-	    echo "BLAD: brak clang albo lld-link (apt install clang lld)"; \
+	    echo "ERROR: no clang or no lld-link (apt install clang lld)"; \
 	    exit 1; }
 	$(EFI_CC) -c boot/efi/efiboot.c -o $(BUILD)/efiboot.o
 	lld-link -subsystem:efi_application -entry:efi_main -nodefaultlib \
 	    -out:$@ $(BUILD)/efiboot.o
-	@echo "Gotowe: $@"
+	@echo "Done: $@"
 
 efi: $(EFI_OUT)
 
-# Firmware UEFI dla QEMU. Te same pliki, ktorych uzywa run-iso64-uefi.
+# UEFI firmware for QEMU. The same files run-iso64-uefi uses.
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
 
-# --- Pendrive, z ktorego startuje ta maszyna -------------------------
+# --- A stick this machine boots from ---------------------------------
 #
-# To, z czego startuje maszyna z UEFI, nie jest plyta ani jadrem: to
-# dysk z tablica GPT, partycja EFI w srodku, FAT-em w niej i loaderem
-# pod nazwa, ktora firmware zna. Ten cel robi dokladnie taki obraz -
-# surowy, do wgrania na pendrive przez dd. Bez GRUB-a i bez El Torito.
+# What a UEFI machine boots from is neither a disc nor a kernel: it is
+# a disk with a GPT, an EFI partition inside it, a FAT in that and a
+# loader under a name the firmware knows. This target makes exactly
+# that image - raw, to be written to a stick with dd. No GRUB and no El
+# Torito.
 STICK := $(BUILD)/protonos-stick.img
 
 $(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py
 	@command -v mformat >/dev/null || { \
-	    echo "BLAD: brak mtools (apt install mtools)"; exit 1; }
+	    echo "ERROR: no mtools (apt install mtools)"; exit 1; }
 	python3 scripts/mkstick.py $@ $(EFI_OUT) $(KERNEL64) $(INITRD64)
 
 stick: $(STICK)
 
-# Ten sam obraz uruchomiony pod OVMF - zanim pojdzie na pendrive,
-# warto zobaczyc, ze startuje.
+# The same image started under OVMF - before it goes onto a stick, it
+# is worth seeing it boot.
 run-stick: $(STICK)
-	@test -f $(OVMF_CODE) || { echo "BLAD: brak OVMF"; exit 1; }
+	@test -f $(OVMF_CODE) || { echo "ERROR: no OVMF"; exit 1; }
 	cp $(OVMF_VARS) $(BUILD)/ovmf_vars.fd
 	qemu-system-x86_64 -m 512 \
 	    -drive if=pflash,format=raw,unit=0,readonly=on,file=$(OVMF_CODE) \

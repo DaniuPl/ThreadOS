@@ -2725,12 +2725,12 @@ static void desktop_thread(void *arg)
            in the accent colour: the same colour that everywhere else
            means "this is the one". */
         if (snap_hint != SNAP_NONE) {
-            int sx, sy, sw2, sh2;
-            snap_geom(snap_hint, &sx, &sy, &sw2, &sh2);
-            video_fill_rect(sx, sy, sw2, 2, COL_TITLE);
-            video_fill_rect(sx, sy + sh2 - 2, sw2, 2, COL_TITLE);
-            video_fill_rect(sx, sy, 2, sh2, COL_TITLE);
-            video_fill_rect(sx + sw2 - 2, sy, 2, sh2, COL_TITLE);
+            int hx, hy, hw, hh;
+            snap_geom(snap_hint, &hx, &hy, &hw, &hh);
+            video_fill_rect(hx, hy, hw, 2, COL_TITLE);
+            video_fill_rect(hx, hy + hh - 2, hw, 2, COL_TITLE);
+            video_fill_rect(hx, hy, 2, hh, COL_TITLE);
+            video_fill_rect(hx + hw - 2, hy, 2, hh, COL_TITLE);
         }
 
         draw_taskbar();

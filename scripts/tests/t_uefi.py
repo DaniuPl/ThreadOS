@@ -102,13 +102,13 @@ def main():
                     check("the memory map from EFI GRUB makes sense",
                           re.search(r"Physical memory: \d{5,} KiB RAM",
                                     mem) is not None)
-                    r3 = q24.wait_serial("Program w ring 3:", timeout=40)
+                    r3 = q24.wait_serial("A program in ring 3:", timeout=40)
                     check("a ring 3 program starts just as it does under BIOS",
                           "ring 3" in r3)
                     if INITRD64 and os.path.exists(INITRD64):
                         # The module from GRUB EFI arrives by the same path
                         # as under BIOS - through a Multiboot 2 tag
-                        elf = q24.wait_serial("ELF64 z initrd:", timeout=40)
+                        elf = q24.wait_serial("ELF64 from the initrd:", timeout=40)
                         check("a program from the initrd runs under UEFI too",
                               "ring 3" in elf
                               and "exit code 7" in elf)

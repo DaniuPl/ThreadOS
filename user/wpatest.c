@@ -12,7 +12,7 @@
  * in the world, and only a vector with a header in it catches that.
  *
  *   wpatest             - the vectors
- *   wpatest pochodne <s> - keys derived from a seed, printed, so that
+ *   wpatest derived <s> - keys derived from a seed, printed, so that
  *                          the host can compute the same with its own
  *                          hashlib and compare
  */
@@ -315,7 +315,7 @@ static void derived(uint32_t seed)
 
 void _start(int argc, char **argv)
 {
-    if (argc >= 3 && argv[1][0] == 'p' && argv[1][1] == 'o')
+    if (argc >= 3 && argv[1][0] == 'd' && argv[1][1] == 'e')
         derived(from_hex(argv[2]));
     else
         vectors();

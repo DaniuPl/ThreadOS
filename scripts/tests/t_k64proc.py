@@ -63,7 +63,7 @@ def main():
             q23.wait_serial("System calls through the syscall instruction",
                             timeout=20)
             r3 = q23.wait_serial("A program in ring 3:", timeout=25)
-            m = re.search(r"Program w ring 3: (.+?), cs=(\w+), "
+            m = re.search(r"A program in ring 3: (.+?), cs=(\w+), "
                           r"ring (\d)", r3)
             check("the program entered the kernel with the syscall instruction",
                   m is not None and m.group(1) == "answered")
@@ -76,8 +76,8 @@ def main():
             ini = q23.wait_serial("initrd:", timeout=25)
             check("the 64-bit kernel reads the initrd from the loader",
                   re.search(r"initrd: \d+ file", ini) is not None)
-            ld = q23.wait_serial("z initrd:", timeout=25)
-            m = re.search(r"Program 'hello64' z initrd: (\d+) B, "
+            ld = q23.wait_serial("from initrd:", timeout=25)
+            m = re.search(r"Program 'hello64' from initrd: (\d+) B, "
                           r"entry ([0-9a-f]+)", ld)
             check("the ELF64 from the initrd was loaded"
                   + (f" ({m.group(1)} B, entry {m.group(2)})"
@@ -97,7 +97,7 @@ def main():
             check("the program's sleep lasts as long as it should"
                   + (f" ({m.group(1)} ticks)" if m else ""),
                   m is not None and 13 <= int(m.group(1)) <= 25)
-            fin = q23.wait_serial("ELF64 z initrd:", timeout=25)
+            fin = q23.wait_serial("ELF64 from the initrd:", timeout=25)
             m = re.search(r"ring (\d), exit code (\d+)", fin)
             check("the program from the file ran in ring 3",
                   m is not None and m.group(1) == "3")
@@ -229,7 +229,7 @@ def main():
             check("the program confirms all three itself",
                   "[spawn64] fork + exec + wait work" in sp)
             check("the kernel confirms the program's verdict",
-                  "fork + exec + wait: 2 zakonczonych, werdykt 0"
+                  "fork + exec + wait: 2 finished, verdict 0"
                   in sp)
 
             # And now the bill: fork does NOT copy memory. The
