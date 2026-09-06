@@ -5313,3 +5313,31 @@ sprawdzane przez `make test`.
       do sieci przez stacje dokujaca. Test stawia maszyne BEZ karty PCI
       i sprawdza cala droge w gore: adres z DHCP, odpowiedz na ping i
       strone pobrana po TCP z serwera na hoscie - z pierscienia 3.
+
+- [x] **Kontrolki: to, co kazdy program pisal od nowa** (user/ugui.h,
+      mikser przepisany na tej warstwie).
+
+      W kazdym programie graficznym tego systemu bylo to samo:
+      prostokat narysowany tam, gdzie ma byc przycisk, napis na nim, a
+      potem w petli zdarzen arytmetyka - czy klik jest w tych
+      wspolrzednych, czy to pierwszy przycisk czy drugi, ktory wiersz
+      listy to (y - 20) / 12. Szesc programow, szesc kopii tej samej
+      arytmetyki i szesc miejsc, w ktorych przycisk moze wyladowac o
+      piksel od tego, gdzie klik jest oczekiwany.
+
+      Wiec okno staje sie LISTA RZECZY zamiast ciagiem wywolan
+      rysujacych. Program mowi, co ma - etykieta tu, przycisk tam,
+      suwak od zera do stu - a warstwa rysuje, decyduje, w co trafil
+      klik, prowadzi ognisko klawiatury i zglasza "wcisnieto trzeci".
+
+      Czym to swiadomie NIE jest: nie przejmuje petli, nie trzyma
+      danych programu i niczego samo nie rozklada. Pozycje podaje
+      program, w pikselach, bo tak juz robi kazde okno tutaj, a silnik
+      ukladu bylby drugim frameworkiem na pierwszym.
+
+      **Dowod, ze przepisanie nic nie zmienilo, jest z zewnatrz.** Test
+      miksera klika w suwak i w przyciski, a potem MIERZY, co wyszlo z
+      karty dzwiekowej do pliku WAV: sto procent daje szczyt 8000,
+      jedna piata - 1506, cisza - zero. Ten sam test przechodzi na
+      przepisanym oknie, z tymi samymi liczbami. Framework, ktory sie
+      kompiluje, i framework, ktory dziala, rozniaca sie wlasnie tym.
