@@ -7,7 +7,7 @@ what was on the screen, and nothing that would show such a file if
 there were one.
 
 Print Screen now writes the screen to the disk in the machine's own
-terms - four bytes "PSCR", the size, the whole palette (so the file
+terms - four bytes "TSCR", the size, the whole palette (so the file
 says what its numbers mean) and then one byte per pixel, the palette
 index. That is exactly what the compositor drew, so the viewer has
 nothing to interpret: it puts the bytes back into a window through
@@ -126,7 +126,7 @@ def main():
                   m is not None)
             if not m:
                 return summary()
-            # 640*480 pixels + "PSCR" + two sizes + 256 colours
+            # 640*480 pixels + "TSCR" + two sizes + 256 colours
             check("and it has exactly as many bytes as the screen plus the palette "
                   "(%s)" % m.group(1),
                   int(m.group(1)) == 640 * 480 + 4 + 2 + 2 + 256 * 3)
@@ -430,8 +430,8 @@ def sixty_four():
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
             whites = at(cx + 48, cy + 36)
-            check("(64) and four colours came out of it, the same as on "
-                  "32 bitach (%s %s %s %s)"
+            check("(64) and four colours came out of it, the same as in "
+                  "32-bit mode (%s %s %s %s)"
                   % (reds, greens, blues, whites),
                   reds[0] > 200 and reds[1] < 60 and
                   greens[1] > 200 and greens[0] < 60 and

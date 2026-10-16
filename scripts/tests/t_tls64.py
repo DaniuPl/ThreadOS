@@ -120,7 +120,7 @@ def main():
             check("vectors from the RFCs: SHA-256, HMAC, HKDF, ChaCha20, X25519",
                   "every vector matches" in kr)
             ce = q.command("run certtest", "exit code", timeout=120)
-            check("X.509: RSA, PSS, ECDSA P-256 i P-384, SubjectAltName",
+            check("X.509: RSA, PSS, ECDSA P-256 and P-384, SubjectAltName",
                   "[cert] everything matches" in ce)
             # The program's stack grew of its own accord along the way -
             # verifying a signature reaches deeper than can be guessed up

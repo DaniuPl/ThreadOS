@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include "multiboot.h"
 
-/* An initrd in the PIRD format (scripts/mkinitrd.py):
-   "PIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data */
+/* An initrd in the TIRD format (scripts/mkinitrd.py):
+   "TIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data */
 
 void initrd_init(const struct multiboot_info *mbi);
 uint32_t initrd_file_count(void);

@@ -1,7 +1,7 @@
 /* The initrd - an image of user programs loaded by the bootloader
  *
  * QEMU (-initrd) and GRUB (module) pass the file as a Multiboot
- * module. The PIRD format is deliberately trivial: a header, a file
+ * module. The TIRD format is deliberately trivial: a header, a file
  * listing, the data. The PMM reserves the module's frames, so nobody
  * overwrites it for us.
  */
@@ -57,7 +57,7 @@ void initrd_init(const struct multiboot_info *mbi)
     }
 
     const uint8_t *p = (const uint8_t *)(uintptr_t)mod->start;
-    if (p[0] != 'P' || p[1] != 'I' || p[2] != 'R' || p[3] != 'D') {
+    if (p[0] != 'T' || p[1] != 'I' || p[2] != 'R' || p[3] != 'D') {
         printk("[ !! ] initrd: the module's magic is wrong\n");
         return;
     }

@@ -545,7 +545,7 @@ void bt_selftest(void)
        the end of its two hundred and forty-eight bytes. */
     static const uint8_t ev_name[] = {
         0x0E, 0x0B, 0x01, 0x14, 0x0C, 0x00,
-        'P', 'r', 'o', 't', 'o', 'n', 0x00 };
+        'T', 'h', 'r', 'e', 'a', 'd', 0x00 };
 
     /* Read Local Version: HCI 5.0 (version 9), maker 0x000F */
     static const uint8_t ev_ver[] = {

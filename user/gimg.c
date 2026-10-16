@@ -38,7 +38,7 @@
 #define NAME_MAX_LEN 31
 #define ROW_MAX 1024
 
-/* "PSCR", width, height, 256 colours of three bytes, then the pixels */
+/* "TSCR", width, height, 256 colours of three bytes, then the pixels */
 #define HDR (4 + 2 + 2 + 256 * 3)
 
 static char fname[NAME_MAX_LEN + 1];
@@ -146,13 +146,13 @@ static void draw_status(void)
         p += num(line + p, img_w);
         line[p++] = 'x';
         p += num(line + p, img_h);
-        const char *sc = ", co ";
+        /* How many pixels are skipped between the ones drawn. Said as
+           a step rather than an ordinal, because "every 1st / 2nd /
+           3rd" would need the suffix worked out from the number. */
+        const char *sc = ", step ";
         for (int i = 0; sc[i]; i++)
             line[p++] = sc[i];
         p += num(line + p, step);
-        const char *px = ". pixel";
-        for (int i = 0; px[i]; i++)
-            line[p++] = px[i];
     } else {
         const char *hint = "Ctrl+O opens a picture";
         for (int i = 0; hint[i]; i++)
@@ -613,7 +613,7 @@ static void show(const char *name)
         return;
     }
 
-    if (got != HDR || head[0] != 'P' || head[1] != 'S' || head[2] != 'C' ||
+    if (got != HDR || head[0] != 'T' || head[1] != 'S' || head[2] != 'C' ||
         head[3] != 'R') {
         sys_close(fd);
         ecopy(note, "this is not a picture", sizeof(note));

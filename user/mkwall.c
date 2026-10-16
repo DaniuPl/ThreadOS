@@ -4,7 +4,7 @@
  * one comes from: a machine with no camera and no image editor still
  * has arithmetic, so the pictures here are computed rather than drawn.
  *
- * The file is what kernel/desktop.c reads: "PWL2", the size, then
+ * The file is what kernel/desktop.c reads: "TWL2", the size, then
  * three bytes a pixel. Small on purpose (160x120): the kernel
  * stretches it over the screen, and a screen-sized image would be a
  * large part of the kernel's heap.
@@ -84,7 +84,7 @@ void _start(int argc, char **argv)
     int pattern = argc > 2 ? text_to_num(argv[2]) % 5 : 0;
     int hue = argc > 3 ? text_to_num(argv[3]) % 6 : 0;
 
-    out[0] = 'P'; out[1] = 'W'; out[2] = 'L'; out[3] = '2';
+    out[0] = 'T'; out[1] = 'W'; out[2] = 'L'; out[3] = '2';
     out[4] = W & 0xFF; out[5] = (W >> 8) & 0xFF;
     out[6] = H & 0xFF; out[7] = (H >> 8) & 0xFF;
 

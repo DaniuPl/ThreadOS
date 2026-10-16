@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Packs files into a ThreadOS initrd (the PIRD format).
+"""Packs files into a ThreadOS initrd (the TIRD format).
 
-Format: "PIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data
+Format: "TIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data
 
 Usage: mkinitrd.py output.img name=file [name=file ...]
 """
@@ -28,7 +28,7 @@ def main():
         files.append((name, open(path, "rb").read()))
 
     header_size = 8 + 24 * len(files)
-    out = bytearray(b"PIRD")
+    out = bytearray(b"TIRD")
     out += struct.pack("<I", len(files))
 
     offset = header_size

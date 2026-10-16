@@ -7,7 +7,7 @@
  * would not stop somebody who took the disk away and set about the
  * number with a dictionary - and nothing here pretends otherwise.
  *
- * What it does buy is the thing the machine needs: 'set nazwa X' and
+ * What it does buy is the thing the machine needs: 'set name X' and
  * writing to the system's own files ask who is doing it, and the
  * answer has to be earned once rather than assumed forever.
  */

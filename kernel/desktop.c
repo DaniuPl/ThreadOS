@@ -1645,7 +1645,7 @@ static void snap_window(int i, int where)
  * so a wallpaper can never repaint a window.
  *
  * And a second shape of the same file, for a screen that holds
- * colours: "PWL2", width and height, then three bytes a pixel and no
+ * colours: "TWL2", width and height, then three bytes a pixel and no
  * palette at all. A hundred and ninety two colours is plenty for rings
  * and a weave, and visibly not plenty for a slope - the bands are
  * there to be counted. The old shape is still read, because a file
@@ -1680,7 +1680,7 @@ static void wallpaper_load(void)
         return;
     if (fs_read_at(slot, 0, head, sizeof(head)) != (int)sizeof(head))
         return;
-    if (head[0] != 'P' || head[1] != 'W')
+    if (head[0] != 'T' || head[1] != 'W')
         return;
     int rgb = head[2] == 'L' && head[3] == '2';
     if (!rgb && (head[2] != 'A' || head[3] != 'L'))
@@ -2099,7 +2099,7 @@ static void desktop_on_fkey(int fkey)
 
 /* A picture of what is on the screen, written to the disk.
  *
- * The format is the machine's own: four bytes "PSCR", the width and
+ * The format is the machine's own: four bytes "TSCR", the width and
  * the height, the whole palette (two hundred and fifty six colours,
  * three bytes each, so the file says what its numbers mean), and then
  * one byte per pixel - the palette index. That is exactly what the
@@ -2140,7 +2140,7 @@ static void save_screenshot(void)
     fs_truncate(slot);
 
     uint8_t hdr[SHOT_HDR];
-    hdr[0] = 'P'; hdr[1] = 'S'; hdr[2] = 'C'; hdr[3] = 'R';
+    hdr[0] = 'T'; hdr[1] = 'S'; hdr[2] = 'C'; hdr[3] = 'R';
     hdr[4] = (uint8_t)(w & 0xFF);
     hdr[5] = (uint8_t)((w >> 8) & 0xFF);
     hdr[6] = (uint8_t)(h & 0xFF);

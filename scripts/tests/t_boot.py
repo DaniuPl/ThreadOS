@@ -117,18 +117,21 @@ def main():
         check(f"thread B counts ({b1} -> {b2})",
               b1 is not None and b2 is not None and b2 > b1)
 
-        # The keyboard: inject "thread 1" and check the echo
-        for key in ["p", "r", "o", "t", "o", "n", "spc", "1"]:
-            q.sendkey(key)
+        # The keyboard: inject a word and check the echo. The keys come
+        # from the string itself - a hand-written list of letters is a
+        # trap for whoever renames the word.
+        typed = "thread 1"
+        for ch in typed:
+            q.sendkey("spc" if ch == " " else ch)
         q.sendkey("shift-x")  # a shift test: 'X' should come out
         screen = q.screen()
-        check("the keyboard echo: 'thread 1'", "> thread 1" in screen)
-        check("the keyboard echo with shift: 'X'", "> thread 1X" in screen)
+        check(f"the keyboard echo: '{typed}'", "> " + typed in screen)
+        check("the keyboard echo with shift: 'X'", "> " + typed + "X" in screen)
 
         q.sendkey("ret")
         time.sleep(0.3)
         check("an unknown command is reported",
-              "unknown command: 'thread'" in q.screen())
+              "unknown command: '%s'" % typed.split()[0] in q.screen())
     finally:
         q.close()
         for f in (disk, slog):

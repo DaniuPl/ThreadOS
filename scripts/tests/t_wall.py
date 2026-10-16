@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-WALL_SIZE = 4 + 2 + 2 + 160 * 120 * 3      # "PWL2", size, RGB
+WALL_SIZE = 4 + 2 + 2 + 160 * 120 * 3      # "TWL2", size, RGB
 
 
 def row_colours(at, y, x_from=200, x_to=600, step=8):
