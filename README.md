@@ -62,6 +62,7 @@ Shared by both kernels (same files, compiled twice):
 | Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
 | Linking | `libthread.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
+| Fonts | TrueType read and drawn in the kernel, anti-aliased, in integer arithmetic only — glyphs, advances and boxes identical to FreeType's (hinting off), coverage within a few 1/255ths; DejaVu Sans and Sans Mono, Latin-1 and Latin Extended-A |
 | Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background |
 
 Programs that use crypto link against a real shared object: the kernel
@@ -264,7 +265,7 @@ ground for both.
 - Keep an eye on the longest group. `ush` and `tls32` (a ring 3 shell
   driving pipes and redirections, and a dozen TLS 1.3 handshakes
   against a real OpenSSL) now decide how long a full run takes — about
-  90 seconds each, out of some twenty minutes for all 96 groups on
+  90 seconds each, out of some twenty minutes for all 97 groups on
   four cores.
 - Run on real hardware, not only under QEMU and OVMF. Everything is in
   place for it: `make stick` writes the image, `hardware` says what the
@@ -293,3 +294,8 @@ conventions the code follows.
 
 MIT - see [LICENSE](LICENSE). Do what you like with it; if it breaks
 your machine, you get to keep both halves.
+
+The exception is `fonts/`: subsets of the DejaVu fonts, under the
+Bitstream Vera licence that came with them - see
+[fonts/LICENSE-DejaVu.txt](fonts/LICENSE-DejaVu.txt). It is just as free
+to use and pass on; it asks that the notice travel with the fonts.

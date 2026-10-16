@@ -12,6 +12,7 @@
  * difference between a shell and a script printed out at startup.
  */
 
+#include "../kernel/include/fonts.h"
 #include <stdint.h>
 #include "shell64.h"
 #include "keyboard64.h"
@@ -106,7 +107,7 @@ static void cmd_help(void)
     printk("          whoami, sudo <command>, logout, passwd\n");
     printk("          fat [N [disk]] - the FAT partition: fatls, fatcat,\n");
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
-    printk("          hardware - what is in this machine, disks\n");
+    printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          install - ThreadOS onto this machine's disk\n");
@@ -873,6 +874,10 @@ static void execute(const char *line)
         cmd_bt("");
     } else if (starts_with(line, "bt ")) {
         cmd_bt(line + 3);
+    } else if (!strcmp(line, "font")) {
+        fonts_command("");
+    } else if (starts_with(line, "font ")) {
+        fonts_command(line + sizeof("font ") - 1);
     } else if (!strcmp(line, "disks")) {
         hwinfo_disks();
     } else if (starts_with(line, "disks read")) {

@@ -5605,3 +5605,39 @@ fact stops being a journal.*
 
       t_ehci: 36 assertions. The fourteen groups the change touches,
       rerun: 303 passed, 0 failed.
+
+- [x] **TrueType, drawn in the kernel**
+
+      kernel/ttf.c reads TrueType fonts and draws their glyphs with
+      anti-aliasing, and fonts/ carries two of them: DejaVu Sans and
+      DejaVu Sans Mono, cut down by scripts/mkfonts.py to Latin-1,
+      Latin Extended-A (the Polish letters among them) and a handful
+      of dashes and quotes - 30 and 25 KB, with the hinting programs
+      dropped because nothing here runs them.
+
+      The outline is read as FreeType reads it and scaled with
+      FreeType's own rounding, point by point, component offsets
+      scaled separately; arcs are cut into lines exactly as FreeType's
+      rasteriser cuts them; and coverage is the exact area under the
+      outline, accumulated per row in the manner of font-rs. All in
+      integers: the 64-bit kernel has no SSE and the 32-bit one no
+      libgcc, so the few 64-bit divisions go through a long division of
+      their own.
+
+      The point of doing it FreeType's way is that FreeType can then be
+      the judge. 'font sheet' prints glyphs as hex, and t_ttf draws the
+      same glyphs from the same file with FreeType (hinting off): 328
+      characters at 12 and 16 px, the mono font at 13, a hard selection
+      at 48 and 100. Glyph numbers against fontTools' cmap, advances to
+      1/64 px, bitmap boxes - all equal. Coverage: worst 2/255, mean
+      under a tenth. Both kernels give identical numbers, which also
+      says the two ways of dividing agree.
+
+      And the parser went into make fuzz: 500 damaged fonts, every
+      glyph of each drawn at two sizes under the address and
+      undefined-behaviour sanitizers, nothing found.
+
+      Not done yet, on purpose: the desktop still draws with the 8x8
+      bitmap. That is the next step - window titles, menus and the
+      taskbar first, together with teaching the tests' screen reader
+      the new letters.

@@ -1,5 +1,6 @@
 /* ThreadOS - the kernel's main entry point in C */
 
+#include "include/fonts.h"
 #include <stdint.h>
 #include "include/vga.h"
 #include "include/video.h"
@@ -237,6 +238,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[FAIL] kmalloc selftest!\n");
 
     initrd_init(mbi);
+    fonts_init();
     if (initrd_file_count())
         printk("[ OK ] initrd: %u files (the 'ls' and 'run' commands)\n",
                initrd_file_count());

@@ -9,6 +9,7 @@
  * without blocking the timer or the rest of the system.
  */
 
+#include "include/fonts.h"
 #include <stdint.h>
 #include "include/shell.h"
 #include "include/keyboard.h"
@@ -137,6 +138,7 @@ static const struct {
     {"screen",    "video mode, frame cost"},
     {"hardware",   "what is in this machine"},
     {"disks",    "the machine's disks"},
+    {"font",     "the fonts, glyphs drawn"},
     {"install", "ThreadOS onto a disk"},
     {"fat [N]",  "EFI partition: fatls,"},
     {"",         "  fatcat, fatcopy, fatrm"},
@@ -1047,6 +1049,8 @@ static void run_command(char *cmd)
         cmd_beep(arg);
     else if (!strcmp(cmd, "hardware"))
         hwinfo_print();
+    else if (!strcmp(cmd, "font"))
+        fonts_command(arg);
     else if (!strcmp(cmd, "disks")) {
         if (starts(arg, "read"))
             hwinfo_disk_read(arg + sizeof("read") - 1);

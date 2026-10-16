@@ -11,6 +11,7 @@
  * between the modes fit inside the io.h header and a few casts.
  */
 
+#include "../kernel/include/fonts.h"
 #include <stdint.h>
 #include "../kernel/include/mb2.h"
 #include "../kernel/include/fbcon.h"
@@ -355,6 +356,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Programs from the initrd ------------------------------- */
     initrd_init(mbi);
+    fonts_init();
     if (!initrd_file_count())
         printk("[ !! ] initrd: no programs - there is nothing to run\n");
     else

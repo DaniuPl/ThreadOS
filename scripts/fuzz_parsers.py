@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Checks the ThreadOS parsers against corrupted data.
 
-Two fronts: the ring 3 programs (certificates, HTML, HTTP) and the
-packet path in the kernel (net.c + tcp.c). In the kernel an error does
+Three fronts: the ring 3 programs (certificates, HTML, HTTP), the
+packet path in the kernel (net.c + tcp.c), and the kernel's TrueType
+reader (ttf.c), because a font is a file and files come from anywhere. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -93,6 +94,32 @@ def build_kernel(workdir):
         print(out.stderr[:3000])
         raise SystemExit("the kernel harness could not be built")
     return binary
+
+
+def build_ttf(workdir):
+    """The kernel's ttf.c, linked in kstub/ like net.c, with the same
+    substituted headers."""
+    kstub = os.path.join(FUZZ, "kstub")
+    inc = os.path.join(kstub, "include")
+    binary = os.path.join(workdir, "tharness")
+    cmd = ["gcc", "-I", inc, "-fsanitize=address,undefined",
+           "-fno-omit-frame-pointer", "-g", "-O1", "-Wall",
+           "-o", binary, os.path.join(FUZZ, "ttf_harness.c"),
+           os.path.join(kstub, "ttf.c")]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode != 0:
+        print(out.stderr[:3000])
+        raise SystemExit("the TrueType harness could not be built")
+    return binary
+
+
+def fonts():
+    """The two fonts the system carries - as valid a start as any."""
+    out = []
+    for name in ("sans.ttf", "mono.ttf"):
+        with open(os.path.join(ROOT, "fonts", name), "rb") as f:
+            out.append(f.read())
+    return out
 
 
 def frames():
@@ -227,8 +254,10 @@ def main():
     try:
         binary = build(workdir)
         kbinary = build_kernel(workdir)
+        tbinary = build_ttf(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
+        corpus["ttf"] = fonts()
         print("the harness is built, cases per parser: %d" % CASES)
 
         for parser, base in corpus.items():
@@ -239,8 +268,12 @@ def main():
                 with open(path, "wb") as f:
                     f.write(data)
 
-                cmd = ([kbinary, path] if parser == "frames"
-                       else [binary, parser, path])
+                if parser == "frames":
+                    cmd = [kbinary, path]
+                elif parser == "ttf":
+                    cmd = [tbinary, path]
+                else:
+                    cmd = [binary, parser, path]
                 run = subprocess.run(cmd, capture_output=True, timeout=30)
                 if run.returncode != 0:
                     crashes += 1
