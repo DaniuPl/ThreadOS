@@ -293,7 +293,7 @@ static void draw_plan(int win)
 
     disk_line(win);
 
-    at = add(line, 0, "EFI partition: no ");
+    at = add(line, 0, "EFI partition: #");
     at = addnum(line, at, info.esp_index);
     at = add(line, at, ", ");
     at = add(line, at, info.kind);

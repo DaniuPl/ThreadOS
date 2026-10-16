@@ -51,6 +51,6 @@ body:
       label: The serial log
       description: |
         QEMU: add `-serial file:log.txt`. On real hardware, a photograph of
-        the screen will do. `sprzet` and `dyski` typed into the system are
+        the screen will do. `hardware` and `disks` typed into the system are
         worth attaching too.
       render: text

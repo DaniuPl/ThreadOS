@@ -1,4 +1,4 @@
-/* mkdir - tworzy katalog (sys_mkdir). */
+/* mkdir - makes a directory (sys_mkdir). */
 
 #include "usys.h"
 

@@ -140,7 +140,7 @@ def main():
         q11.close()
 
     # --- A terminal in a GUI window (a separate boot with a disk) ---
-    print("--- pulpit: terminal GUI (gterm) ---")
+    print("--- the desktop: a terminal in a window (gterm) ---")
     tdisk = tempfile.mktemp(suffix=".img")
     with open(tdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)

@@ -219,7 +219,7 @@ def main():
             check("and what it found: a disk behind an AHCI controller",
                   "AHCI" in text and "partitions: 3" in text)
             check("and the EFI partition with its label",
-                  "FAT32 LAPTOPESP" in text and "nr 1" in text)
+                  "FAT32 LAPTOPESP" in text and "#1" in text)
             check("it lists all three files it will write",
                   "/EFI/ProtonOS/BOOTX64.EFI" in text
                   and "/EFI/ProtonOS/protonos64.bin" in text
@@ -321,8 +321,8 @@ def main():
             menu = sum(1 for x in range(4, 120) for y in range(h - 130, h - 20)
                        if all(abs(at(x, y)[i] - WINDOW[i]) <= 20
                               for i in range(3)))
-            check(f"a click in the corner where the desktop has 'Menu' does "
-                  f"opens ({menu} menu pixels)", menu == 0)
+            check(f"a click in the corner where the desktop has 'Menu' "
+                  f"opens nothing ({menu} menu pixels)", menu == 0)
         finally:
             q.close()
 

@@ -1,4 +1,5 @@
-/* Zaslepki dostepu do sprzetu - do testow parserow jadra na hoscie */
+/* Stubs for reaching the hardware - for testing the kernel's parsers
+   on the host */
 #ifndef STUB_IO_H
 #define STUB_IO_H
 #include <stdint.h>

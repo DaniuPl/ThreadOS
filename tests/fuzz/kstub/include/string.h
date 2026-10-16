@@ -1,6 +1,6 @@
-/* Zaslepka string.h jadra: te same funkcje, ale bierzemy je z libc
-   hosta (deklaracje zamiast wciagania systemowego naglowka, zeby nie
-   walczyc z kolejnoscia szukania plikow) */
+/* A stub for the kernel's string.h: the same functions, but taken from
+   the host's libc (declarations rather than pulling in the system
+   header, so as not to fight the order files are looked for in) */
 #ifndef STUB_STRING_H
 #define STUB_STRING_H
 

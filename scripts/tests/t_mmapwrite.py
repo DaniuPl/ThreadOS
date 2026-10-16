@@ -177,10 +177,10 @@ def main():
                   "+ PFS ready" in screen_text and "formatted" not in screen_text)
             q4.wait_for("[net] DHCP", timeout=30)
 
-            po = q4.command("run mmapzap written.txt check", "has ended",
+            after = q4.command("run mmapzap written.txt check", "has ended",
                               timeout=90)
             check("the writes through memory survived the machine restarting",
-                  "an ordinary read sees what" in po and "WRONG" not in po)
+                  "an ordinary read sees what" in after and "WRONG" not in after)
             po2 = q4.command("run mmapzap nosync.txt check2",
                                "has ended", timeout=60)
             check("the bytes sent back as the process ended survived the restart too",

@@ -1,11 +1,11 @@
 #ifndef STUB_NETDEV_H
 #define STUB_NETDEV_H
 #include <stdint.h>
-/* Karta udaje, ze dziala: pakiety wychodzace znikaja w prozni.
-   Parsery sprawdzamy na tym, co przychodzi, wiec druga strona kabla
-   nie jest tu do niczego potrzebna. */
+/* The card pretends to work: outgoing packets vanish into thin air.
+   We check the parsers on what comes IN, so the other end of the cable
+   is of no use here at all. */
 static inline int netdev_present(void) { return 1; }
-static inline const char *netdev_name(void) { return "zaslepka"; }
+static inline const char *netdev_name(void) { return "stub"; }
 static inline const uint8_t *netdev_mac(void)
 {
     static const uint8_t mac[6] = {0x52,0x54,0x00,0x12,0x34,0x56};

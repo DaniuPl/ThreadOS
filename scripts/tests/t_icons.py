@@ -7,7 +7,7 @@ saying that a person cannot add one.
 
 The list is now a file on the disk, one line per icon:
 
-    program  napis  numer-obrazka
+    program  caption  numer-obrazka
 
 and nothing else. Plain text like everything else the system keeps: it
 can be read with 'cat' and BUILT ON THE MACHINE ITSELF, with the shell

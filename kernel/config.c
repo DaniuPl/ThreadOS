@@ -52,7 +52,7 @@ static struct setting settings[] = {
     /* Not the password - a number computed from it. The default is the
        number for 'proton', so a machine on which nobody ever set one
        still has a password. Hidden, because a number nobody can type
-       back is not a setting: it is changed by the 'haslo' command. */
+       back is not a setting: it is changed by the 'passwd' command. */
     { "password",  "12265581074349227503",
                             "the admin password (a number computed from it)",
                             1, { 0 } },

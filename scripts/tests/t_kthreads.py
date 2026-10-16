@@ -102,9 +102,9 @@ def check_threads(out, suffix, ncores, again=None):
               four >= 2 * one)
 
 
-def idle_per_core(ps, ile):
+def idle_per_core(ps, count):
     """Does every secondary core run its own idle task."""
-    for i in range(1, ile):
+    for i in range(1, count):
         if not re.search(r"idle%d" % i, ps):
             return False
     return True

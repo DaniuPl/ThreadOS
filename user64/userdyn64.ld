@@ -1,15 +1,16 @@
-/* Programy ProtonOS 64 korzystajace z biblioteki wspoldzielonej
+/* ProtonOS 64 programs that use the shared library
  *
- * Ten sam adres poczatkowy, co user64/user64.ld, i to samo wyrownanie
- * sekcji do stron - jadro nadaje prawa na podstawie tego, co mowi ELF,
- * a najmniejsza jednostka praw jest strona.
+ * The same starting address as user64/user64.ld, and the same page
+ * alignment of the sections - the kernel grants rights from what the
+ * ELF says, and the smallest unit of rights is a page.
  *
- * Roznica jest w tym, co jeszcze trzeba w programie umiescic. Program
- * dynamiczny nie niesie kodu biblioteki; niesie tablice skokow (.plt),
- * tablice adresow (.got.plt) i opis tego, co ma tam trafic. Tablica
- * skokow to KOD, wiec lezy przy .text; tablica adresow to DANE
- * zapisywalne, wiec lezy przy .data - inaczej albo procesor odmowilby
- * skoku, albo dalby sie w niej zapisac czemus wykonywalnemu.
+ * The difference is in what else has to go into the program. A dynamic
+ * program does not carry the library's code; it carries the jump table
+ * (.plt), the address table (.got.plt) and the description of what goes
+ * there. The jump table is CODE, so it lies next to .text; the address
+ * table is writable DATA, so it lies next to .data - otherwise either
+ * the processor would refuse the jump, or it would let something
+ * executable be written into.
  */
 
 ENTRY(_start)

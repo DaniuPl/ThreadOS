@@ -9,7 +9,7 @@ that, and this group checks the image the way the firmware will read it
 mtools, the three files byte for byte - and then boots it.
 
 And the two commands one types first on a machine nobody has tried
-before: 'sprzet', which says what is in it, and 'dyski', which says
+before: 'hardware', which says what is in it, and 'disks', which says
 what it has to install onto. Both were missing from the 64-bit shell
 until now, which is the kernel that will run on that machine.
 
@@ -129,9 +129,9 @@ def main():
             check("'hardware' is in the 64-bit kernel - that is the one that will go there",
                   "Unknown command" not in out)
             check("and it says what screen the loader gave",
-                  "screen:" in out and "od loadera" in out)
+                  "screen:" in out and "from the loader" in out)
             check("what is on the PS/2 ports", "PS/2:" in out)
-            check("co na USB", "USB:" in out)
+            check("what is on the USB ports", "USB:" in out)
             check("and what it sees on the PCI bus",
                   "PCI:" in out and "class" in out)
 

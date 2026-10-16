@@ -85,9 +85,9 @@ def main():
                 before = len(q.serial())
                 type_text(q, "uptime")
                 time.sleep(1.5)
-                po = q.serial()[before:]
+                after = q.serial()[before:]
                 check("a command typed through xHCI runs",
-                      "Uptime:" in po)
+                      "Uptime:" in after)
 
                 # A capital letter comes from a modifier in the HID report -
                 # that is a different path through a report than an
@@ -248,9 +248,9 @@ def main():
             before = len(q3.serial())
             type_text(q3, "uptime")
             time.sleep(1.5)
-            po = q3.serial()[before:]
+            after = q3.serial()[before:]
             check("a command typed through xHCI runs (32-bit)",
-                  "uptime:" in po and "ticks" in po)
+                  "uptime:" in after and "ticks" in after)
 
             # Several keys in a row: the reports have to go one after another
             # through the same transfer ring, not just the first one

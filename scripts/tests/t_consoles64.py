@@ -103,12 +103,12 @@ def main():
             # it would leave a trace.
             q.sendkey("ctrl-c")
             time.sleep(2.0)
-            po = q.screen_fbcon()
+            after = q.screen_fbcon()
             check("Ctrl+C on its own console interrupts the program",
-                  "done, exit code" in po)
+                  "done, exit code" in after)
             time.sleep(2.0)
             check("the interrupted program stopped writing",
-                  q.screen_fbcon() == po)
+                  q.screen_fbcon() == after)
         finally:
             q.close()
     finally:

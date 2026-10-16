@@ -915,15 +915,15 @@ static void handle(struct regs *r)
     }
     case SYS64_WIN_POLL: {
         struct win_event64 ev;
-        int jest = desktop_win_poll((int)a1, task64_current_id(), &ev);
-        if (jest == 1) {
+        int got = desktop_win_poll((int)a1, task64_current_id(), &ev);
+        if (got == 1) {
             if (!paging64_user_range(a2, sizeof(ev))) {
                 r->rax = (uint64_t)-1;
                 return;
             }
             *(struct win_event64 *)(uintptr_t)a2 = ev;
         }
-        r->rax = (uint64_t)(int64_t)jest;
+        r->rax = (uint64_t)(int64_t)got;
         return;
     }
     case SYS64_PS: {

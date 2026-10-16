@@ -428,7 +428,7 @@ int fs_init(void)
          * So the disk is formatted only when it is genuinely blank.
          * Anything else is left alone and said out loud, and the
          * person who really does want this disk says so with the
-         * 'formatuj' command. */
+         * 'format' command. */
         /* Not at the front of the disk - but perhaps in a partition,
            which is where a system living next to somebody else's
            actually lives. */

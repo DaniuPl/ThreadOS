@@ -1,12 +1,13 @@
-/* Sprawdzanie parserow ProtonOS-a na uszkodzonych danych
+/* Putting ProtonOS's parsers through damaged data
  *
- * Parsery certyfikatow i HTML dostaja dane prosto z sieci, wiec musza
- * znosic dowolne smieci. Ten program uruchamia je na hoscie - z
- * sanitizerami adresow i zachowan nieokreslonych - na wejsciu podanym z
- * pliku albo na stdin. Skrypt scripts/fuzz_parsers.py karmi go tysiacami
- * przypadkow zrobionych przez psucie poprawnych danych.
+ * The certificate and HTML parsers get their data straight off the
+ * network, so they have to stand any rubbish at all. This program runs
+ * them on the host - with the address and undefined-behaviour
+ * sanitizers - on input given in a file or on stdin. The script
+ * scripts/fuzz_parsers.py feeds it thousands of cases made by damaging
+ * data that was correct.
  *
- * Uzycie: harness <x509|html|http|ecdsa|inflate|jpeg> <plik>
+ * Usage: harness <x509|html|http|ecdsa|inflate|jpeg> <file>
  */
 
 #include <stdio.h>
@@ -21,13 +22,13 @@
 
 #define MAX_INPUT (1 << 20)
 
-/* Wejscie ladujemy do bufora dokladnie tej dlugosci, co dane. Gdyby
-   siedzialo w wielkiej tablicy statycznej, odczyt kilka bajtow za
-   koncem danych miescilby sie w niej i sanitizer nic by nie zauwazyl -
-   a to wlasnie takie bledy chcemy tu lapac. */
+/* The input goes into a buffer of exactly the length of the data. If
+   it sat in a big static array, a read a few bytes past the end of the
+   data would fit inside it and the sanitizer would notice nothing - and
+   those are exactly the bugs we are here to catch. */
 static unsigned char scratch[MAX_INPUT];
 
-/* --- HTTP: wydzielone z uhttp.h, zeby nie ciagnac tu calego TLS --- */
+/* --- HTTP: taken out of uhttp.h, so as not to pull all of TLS in --- */
 
 static int http_line_scan(const char *hdr, int hlen)
 {
@@ -54,7 +55,7 @@ static void run_x509(const unsigned char *data, size_t len)
     if (x509_parse(&c, data, (uint32_t)len) < 0)
         return;
 
-    /* Dotknij wszystkich pol, ktore czyta reszta systemu */
+    /* Touch every field the rest of the system reads */
     volatile int sink = c.sig_alg + c.key_type + c.is_ca + c.ec_bits;
     (void)sink;
     x509_matches_host(&c, "protonos.test");
@@ -73,7 +74,7 @@ static void run_html(const unsigned char *data, size_t len)
 {
     struct html_doc d;
     int cap = (int)(len < MAX_INPUT / 2 ? len + 2 : MAX_INPUT);
-    char *outbuf = malloc(cap);     /* tez co do bajtu, nie z zapasem */
+    char *outbuf = malloc(cap);     /* to the byte as well, with nothing spare */
 
     memset(&d, 0, sizeof(d));
     d.src = (const char *)data;
@@ -113,7 +114,8 @@ static void run_http(const unsigned char *data, size_t len)
 
 static void run_ecdsa(const unsigned char *data, size_t len)
 {
-    /* Klucz publiczny i skrot biore stale - psuty jest sam podpis */
+    /* The public key and the hash are fixed - it is the signature itself
+       that gets damaged */
     static uint8_t pub[97];
     static uint8_t hash[48];
     for (int i = 0; i < 97; i++)
@@ -167,7 +169,7 @@ int main(int argc, char **argv)
 {
     if (argc < 3) {
         fprintf(stderr,
-                "uzycie: %s <x509|html|http|ecdsa|inflate|jpeg> <plik>\n",
+                "usage: %s <x509|html|http|ecdsa|inflate|jpeg> <file>\n",
                 argv[0]);
         return 2;
     }

@@ -100,7 +100,7 @@ def main():
         finally:
             q.close()
 
-        # The same code compiled for the other mode - 'sprzet' says the
+        # The same code compiled for the other mode - 'hardware' says the
         # same thing there, because it is the same file.
         disk32 = tempfile.mktemp(suffix=".img")
         with open(disk32, "wb") as fh:

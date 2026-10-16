@@ -69,8 +69,8 @@ static void add(enum backend kind, int unit, uint32_t sectors)
 /* --- disks that arrive and leave while the machine runs -------------
  *
  * A stick pushed into a socket is a new disk, and the numbers already
- * on the list must not move: somebody is looking at 'dyski' and about
- * to type 'instaluj tekstem caly 2'. So a disk that leaves keeps its
+ * on the list must not move: somebody is looking at 'disks' and about
+ * to type 'install text whole 2'. So a disk that leaves keeps its
  * place and its number, and is marked gone; a disk that arrives is
  * added at the end.
  */

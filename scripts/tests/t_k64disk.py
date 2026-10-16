@@ -211,7 +211,7 @@ def main():
             seen = len(q23.serial())
             q23.type_line("run uls64")
             ul = q23.wait_serial("uls64: entries", timeout=40)[seen:]
-            check("program dziedziczy directory roboczy po shellu",
+            check("a program inherits the working directory from the shell",
                   "uls64: /project" in ul)
             check("and it sees only its own entries in there",
                   "plan  (17 B)" in ul and "uls64: entries 1" in ul)

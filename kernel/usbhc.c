@@ -88,7 +88,7 @@ static int dev_speed[PORTS_MAX];         /* per socket, filled on greeting */
 
 static int usbhc_greet(int port);
 
-/* Why there is no controller. The question is asked by 'sprzet', and
+/* Why there is no controller. The question is asked by 'hardware', and
    the answer matters most on a real machine: "no xHCI on the PCI bus"
    and "the controller is there but did not start" call for different
    things to be done. */

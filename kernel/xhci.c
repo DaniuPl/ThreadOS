@@ -476,7 +476,7 @@ int xhci_ports(void)
  * "No USB" is not an answer anybody can act on. A controller that is
  * on the bus but did not start is a different fault from one that is
  * not there at all - and on a real machine that difference is the
- * whole diagnosis, so it is written down and printed by 'sprzet'. */
+ * whole diagnosis, so it is written down and printed by 'hardware'. */
 static const char *gave_up;
 
 static int give_up(const char *why)

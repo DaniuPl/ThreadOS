@@ -111,7 +111,7 @@ def main():
             check("and it lists what it will do",
                   "a GPT" in out
                   and "an EFI partition of 128 MiB (FAT32)" in out
-                  and "ProtonOS-a (PFS)" in out)
+                  and "partition (PFS)" in out)
             check("the word is different from the one for installing beside",
                   "Type ERASE" in out and "Type YES" not in out)
 
@@ -196,7 +196,7 @@ def main():
         try:
             out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
             check("the firmware picks our loader out of the table we "
-                  "we made", "protoboot" in out)
+                  "made ourselves", "protoboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
             check("and the system on that disk reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)

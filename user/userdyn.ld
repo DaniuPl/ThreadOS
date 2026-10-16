@@ -1,10 +1,10 @@
-/* Programy uzytkownika ProtonOS korzystajace z biblioteki wspoldzielonej
+/* ProtonOS user programs that use the shared library
  *
- * Ten sam adres poczatkowy, co user/user.ld - roznica jest w tym, co
- * jeszcze trzeba w programie umiescic. Program dynamiczny nie niesie
- * kodu biblioteki; niesie tablice skokow (.plt) i tablice adresow
- * (.got.plt), ktore jadro wypelnia przy ladowaniu, oraz opis tego, co
- * ma tam trafic (.dynsym, .dynstr, .rel.plt).
+ * The same starting address as user/user.ld - the difference is in what
+ * else has to go into the program. A dynamic program does not carry the
+ * library's code; it carries the jump table (.plt) and the address
+ * table (.got.plt), which the kernel fills in at load time, plus the
+ * description of what goes there (.dynsym, .dynstr, .rel.plt).
  */
 
 ENTRY(_start)

@@ -51,7 +51,7 @@ def size(listing, name):
     return int(m.group(1)) if m else None
 
 
-def adresy(text):
+def addresses(text):
     """The three addresses dynlib prints."""
     def one_core(co):
         m = re.search(r"the program's code at (\d+)" if co == "prog" else
@@ -65,9 +65,9 @@ def check_shared(q, marker, suffix, lib_base):
     """The part common to both kernels: the dynlib program and the initrd
     listing."""
     first = q.command("run dynlib", marker, timeout=60)
-    prog, code, dane = adresy(first)
+    prog, code, data = addresses(first)
     check("the program gives all three addresses" + suffix,
-          prog is not None and code is not None and dane is not None)
+          prog is not None and code is not None and data is not None)
     if code is None:
         return
 
@@ -79,7 +79,7 @@ def check_shared(q, marker, suffix, lib_base):
     check("the program's code lies where it always does" + suffix,
           prog is not None and 0x40000000 <= prog < 0x41000000)
     check("the library's data is in a separate, higher segment" + suffix,
-          dane is not None and dane > code)
+          data is not None and data > code)
     check("the cryptography from the library computes correctly" + suffix,
           "matches FIPS 180-4" in first and "WRONG" not in first)
 
@@ -91,10 +91,10 @@ def check_shared(q, marker, suffix, lib_base):
     # but the counter from zero again (private data). If the data were
     # shared, it would find the previous process's state.
     second = q.command("run dynlib", marker, timeout=60)
-    prog2, code2, dane2 = adresy(second)
+    prog2, code2, data2 = addresses(second)
     counter2 = re.search(r"the counter after taking bytes: (\d+)", second)
     check("the second process sees the code at the same address" + suffix,
-          code2 == code and dane2 == dane)
+          code2 == code and data2 == data)
     check("but it gets the library's data of its own, from zero" + suffix,
           counter is not None and counter2 is not None and
           counter2.group(1) == counter.group(1))

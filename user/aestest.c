@@ -11,7 +11,7 @@
  *                        PRINTS everything it used, so that the test on
  *                        the host can encrypt the same with OpenSSL and
  *                        compare byte for byte;
- *   plik <name>        - it reads a ciphertext prepared OUTSIDE the
+ *   file <name>        - it reads a ciphertext prepared OUTSIDE the
  *                        system and decrypts it. That is the direction
  *                        the vectors cannot check: our own encryption
  *                        agreeing with our own decryption proves

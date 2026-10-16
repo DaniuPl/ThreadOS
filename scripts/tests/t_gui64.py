@@ -163,17 +163,17 @@ def main():
             # typed characters are to appear in the 'txt:' field.
             px, py = scr(40, 38)
 
-            def pole_txt(fun):
+            def field_text(fun):
                 return [fun(px + dx, py + dy)
                         for dy in range(8) for dx in range(40)]
 
-            before = pole_txt(at2)
+            before = field_text(at2)
             q.sendkey("o")
             q.sendkey("k")
             time.sleep(1.5)
             _, _, at3 = q.screen_raw()
-            po = pole_txt(at3)
-            check("the keys reach the window with the focus", before != po)
+            after = field_text(at3)
+            check("the keys reach the window with the focus", before != after)
 
             # --- The clock: a second application, its own window ---
             # The 'Zegar' icon stands at (8,60), a 32x24 tile

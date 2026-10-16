@@ -41,7 +41,7 @@ int main(int argc, char **argv)
     int aead;
 
     if (argc < 7) {
-        fprintf(stderr, "uzycie: aesref gcm|ccm|ctr|ecb key nonce aad "
+        fprintf(stderr, "usage: aesref gcm|ccm|ctr|ecb key nonce aad "
                         "plain taglen\n");
         return 2;
     }

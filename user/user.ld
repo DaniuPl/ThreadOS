@@ -1,8 +1,8 @@
-/* Programy uzytkownika ProtonOS
+/* ProtonOS user programs
  *
- * Przestrzen uzytkownika zaczyna sie od 1 GiB: ponizej jadro trzyma
- * mapowanie identycznosciowe calej pamieci fizycznej (PAGING_USER_BASE
- * w kernel/include/paging.h - obie liczby musza sie zgadzac). */
+ * User space starts at 1 GiB: below that the kernel keeps an identity
+ * mapping of the whole of physical memory (PAGING_USER_BASE in
+ * kernel/include/paging.h - the two numbers have to agree). */
 
 ENTRY(_start)
 

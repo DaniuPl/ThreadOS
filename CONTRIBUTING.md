@@ -132,6 +132,6 @@ worth remembering.
 
 Please say which kernel (32- or 64-bit), how it was started (the QEMU
 command line or the real machine), and attach the serial log - the
-system writes almost everything worth knowing there. `sprzet` and
-`dyski` from inside the system are worth more than a description of the
+system writes almost everything worth knowing there. `hardware` and
+`disks` from inside the system are worth more than a description of the
 symptom.

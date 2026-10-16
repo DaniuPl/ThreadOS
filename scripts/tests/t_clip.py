@@ -135,7 +135,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3: content at (107,77); the 'nazwa' row is the first,
+            # Slot 3: content at (107,77); the 'name' row is the first,
             # at ROW_Y=22, and its value is drawn at x=100
             SX, SY = 107, 77
             q.mouse_goto(SX + 40, SY + 22)

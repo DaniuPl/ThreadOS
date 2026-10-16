@@ -129,13 +129,13 @@ static int map_library(void)
             uint64_t frame = page_frame_for(va, flags);
             if (!frame)
                 return -1;
-            uint64_t od = va > vaddr ? va : vaddr;
+            uint64_t from = va > vaddr ? va : vaddr;
             uint64_t file_to = vaddr + filesz;
-            if (od < file_to) {
-                uint64_t do_ = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
-                                                       : file_to;
-                memcpy((void *)(uintptr_t)(frame + (od - va)),
-                       data + (od - vaddr), (uint32_t)(do_ - od));
+            if (from < file_to) {
+                uint64_t upto = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
+                                                        : file_to;
+                memcpy((void *)(uintptr_t)(frame + (from - va)),
+                       data + (from - vaddr), (uint32_t)(upto - from));
             }
         }
     }

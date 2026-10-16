@@ -642,7 +642,7 @@ static void read_word(char *out, int max)
  * something one does by reflex, and a word is something one has to
  * decide to type - and what is on the other side of this is somebody's
  * laptop. */
-/* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
+/* 'install' takes the whole screen; 'install text' says the same
    things here, which is what one wants when there is no screen to draw
    on - or when the answer has to end up in a log. */
 /* A number written out on the line - the disk to install onto,

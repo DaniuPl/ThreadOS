@@ -293,7 +293,7 @@ static int starts(const char *s, const char *word)
     return *s == '\0' || *s == ' ';
 }
 
-/* 'instaluj' takes the whole screen; 'instaluj tekstem' says the same
+/* 'install' takes the whole screen; 'install text' says the same
    things here, which is what one wants when there is no screen to draw
    on - or when the answer has to end up in a log. */
 static void cmd_install(const char *arg)
@@ -897,7 +897,7 @@ static void cmd_whoami(void)
 }
 
 /* sudo <komenda> - one command as an admin, and back down at once.
-   sudo alone - an admin until 'wyloguj'. */
+   sudo alone - an admin until 'logout'. */
 static void cmd_sudo(char *arg)
 {
     if (user_shell_level() == USER_ADMIN) {

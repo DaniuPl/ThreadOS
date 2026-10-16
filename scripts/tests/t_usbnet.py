@@ -30,7 +30,7 @@ from ptest import check, summary, no64, make_iso64, start_http_server
 
 def main():
     print()
-    print("--- the network card na USB (RNDIS) ---")
+    print("--- the network card on USB (RNDIS) ---")
 
     reason = no64()
     if reason:

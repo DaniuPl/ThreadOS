@@ -72,11 +72,11 @@ static int same(const char *a, const char *b)
 static int cycle_limit(const char *name)
 {
     if (same(name, "background"))
-        return 6;                     /* tlo: six backgrounds */
+        return 6;                     /* six backgrounds */
     if (same(name, "color"))
-        return 16;                    /* kolor: sixteen text colours */
+        return 16;                    /* sixteen text colours */
     if (same(name, "icons"))
-        return 3;                     /* od lewej, na srodku, od prawej */
+        return 3;                     /* left, centre, right */
     return 0;                         /* everything else is typed */
 }
 

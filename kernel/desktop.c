@@ -117,11 +117,11 @@ static const uint16_t icon_art[][12] = {
         0xFFF, 0x801, 0xFFF, 0x801, 0x801, 0x801,
         0x801, 0x801, 0x801, 0x801, 0x801, 0xFFF,
     },
-    {   /* Zegar - a clock face with hands */
+    {   /* Clock - a clock face with hands */
         0x1F8, 0x30C, 0x606, 0xC23, 0xC23, 0xC23,
         0xC3B, 0xC03, 0x606, 0x30C, 0x1F8, 0x000,
     },
-    {   /* Pliki - a folder */
+    {   /* Files - a folder */
         0x000, 0xF00, 0xFFE, 0x802, 0x802, 0x802,
         0x802, 0x802, 0x802, 0x802, 0xFFE, 0x000,
     },
@@ -214,7 +214,7 @@ static int icon_press_x, icon_press_y;   /* the press position (click vs drag) *
  * a broken line should be able to do.
  *
  * It is plain text on purpose, like everything else the system keeps:
- * it can be read with 'cat' and built with 'echo ... >> pulpit.ikony'
+ * it can be read with 'cat' and built with 'echo ... >> desktop.icons'
  * from the shell in the terminal.
  */
 #define ICON_LIST_FILE "desktop.icons"
@@ -462,7 +462,7 @@ static int menu_open;
 static int menu_px, menu_py;
 /* The installer is deliberately NOT here. It takes the whole screen
    and everything else has to be out of reach while it runs, so it is
-   started as a kiosk ('instaluj') and not as one more window among
+   started as a kiosk ('install') and not as one more window among
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
                                   "gedit", "gtasks", "gmikser"};

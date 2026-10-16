@@ -39,7 +39,7 @@ FROM_HOST = b"mtools wrote this on the host, not us.\n"
 
 
 def usb_disk_number(listing):
-    """Which number the pendrive got in 'dyski'. It is not a constant:
+    """Which number the pendrive got in 'disks'. It is not a constant:
     booting through UEFI adds a disk of the firmware's own, so the
     stick moves - and a test that assumed '2' would be testing the
     numbering rather than the disk."""

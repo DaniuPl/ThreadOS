@@ -172,8 +172,8 @@ def main():
                                 timeout=90)
             check("mapping a big file works (32-bit)",
                   "I never touched the rest of the file" in malo)
-            po = q3.command("mem", "from files:")
-            m2 = re.search(r"from files:\s+(\d+)", po)
+            after = q3.command("mem", "from files:")
+            m2 = re.search(r"from files:\s+(\d+)", after)
             check("touching one byte costs one page (32-bit)",
                   m1 is not None and m2 is not None and
                   int(m2.group(1)) - int(m1.group(1)) == 1)

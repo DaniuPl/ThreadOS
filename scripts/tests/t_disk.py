@@ -87,15 +87,15 @@ def main():
                   sata=True, qemu="qemu-system-x86_64")
         try:
             q2.wait_serial("proton64>", timeout=90)
-            po = q2.command("run " + ON_DISK, "[hello64] ending",
+            after = q2.command("run " + ON_DISK, "[hello64] ending",
                               timeout=30)
             check("the program survived the restart and still starts",
-                  "Program '%s' from the disk" % ON_DISK in po)
+                  "Program '%s' from the disk" % ON_DISK in after)
 
             # A program from the disk is an ordinary program: it has its
             # own address space and ends with its own exit code
             check("a program from the disk ends with its own exit code",
-                  "done, exit code 7" in po)
+                  "done, exit code 7" in after)
 
             # ...and a second time too, that is, the buffer after it was
             # given back. We count only what arrived after THIS command:

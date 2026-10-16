@@ -375,7 +375,7 @@ int install_plan(int mode, int disk)
     printk("Disk %u of %u: %s, %u MiB\n", in.disk + 1, in.disks,
            in.disk_name, in.disk_mib);
     if (in.mode == INST_WHOLE) {
-        printk("\nTHIS WHOLE DISK WILL BE ProtonOS. It will lose its "
+        printk("\nTHIS WHOLE DISK WILL BE ProtonOS. It will lose "
                "EVERYTHING:\n");
         printk("  partition table, %u partitions and everything that is on "
                "them.\n", in.parts);
@@ -418,7 +418,7 @@ int install_do(void)
             printk("  %s - done\n", install_step_name(n));
     }
     if (plan.info.fallback_free)
-        printk("\nDone. This machine will boot ProtonOS from the disk.\n");
+        printk("\nDone. This machine will boot ProtonOS off the disk.\n");
     else
         printk("\nDone. The files are on the EFI partition; %s stayed somebody else's,\n"
                "so add an entry in the firmware pointing at %s.\n",

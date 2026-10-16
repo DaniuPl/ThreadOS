@@ -64,15 +64,15 @@ def main():
             # The region lies in the mapping area (from 0x50000000
             # upwards), not in the heap or on the stack - and that can be
             # seen from the address
-            adresy = re.findall(r"the region at address (\d+)", out)
+            addresses = re.findall(r"the region at address (\d+)", out)
             check("both processes got an address from the mapping area",
-                  len(adresy) == 2 and
-                  all(0x50000000 <= int(a) < 0x60000000 for a in adresy))
+                  len(addresses) == 2 and
+                  all(0x50000000 <= int(a) < 0x60000000 for a in addresses))
             # The writer mapped a region on the side earlier, so it sees
             # the shared one higher up than the reader does. The same
             # bytes at two different addresses - that is the point.
             check("each sees the same memory at ITS OWN address",
-                  len(adresy) == 2 and adresy[0] != adresy[1])
+                  len(addresses) == 2 and addresses[0] != addresses[1])
         finally:
             q.close()
     finally:

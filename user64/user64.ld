@@ -1,13 +1,13 @@
-/* Programy uzytkownika ProtonOS 64
+/* ProtonOS 64 user programs
  *
- * Ten sam adres, co w jadrze 32-bitowym (1 GiB), i z tego samego
- * powodu: nizej lezy mapowanie identycznosciowe pamieci fizycznej.
- * USER64_BASE w kernel64/elf64.h musi sie z tym zgadzac.
+ * The same address as in the 32-bit kernel (1 GiB), and for the same
+ * reason: below it lies the identity mapping of physical memory.
+ * USER64_BASE in kernel64/elf64.h has to agree with this.
  *
- * Sekcje sa wyrownane do stron, bo jadro nadaje prawa dostepu na
- * podstawie tego, co mowi ELF, a najmniejsza jednostka praw jest
- * strona. Kod ma wiec wlasne strony (do odczytu i wykonania), a dane
- * wlasne (do zapisu, ale z zakazem wykonywania).
+ * The sections are page-aligned, because the kernel grants access
+ * rights from what the ELF says and the smallest unit of rights is a
+ * page. So the code gets pages of its own (to read and to execute) and
+ * the data gets its own (to write, with execution forbidden).
  */
 
 ENTRY(_start)

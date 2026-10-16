@@ -330,12 +330,12 @@ static int take_unit(uint32_t *number)
 {
     uint32_t flags = irq_save();
     spin_lock(&lock);
-    int jest = work_next < work_count;
-    if (jest)
+    int have = work_next < work_count;
+    if (have)
         *number = work_next++;
     spin_unlock(&lock);
     irq_restore(flags);
-    return jest;
+    return have;
 }
 
 /* The work loop - the same for the boot core and for the secondary ones */

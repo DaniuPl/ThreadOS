@@ -1610,7 +1610,7 @@ class Qemu:
             if text in out:
                 return out
             time.sleep(0.3)
-        raise RuntimeError(f"timeout: '{text}' nie pojawilo sie na porcie")
+        raise RuntimeError(f"timeout: '{text}' did not appear on the serial port")
 
     def wait_exit(self, timeout=20):
         """Waits until QEMU ends by itself (a power off)."""

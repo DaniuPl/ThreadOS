@@ -218,13 +218,13 @@ static int map_library(uint32_t dir)
             uint32_t frame = page_frame_for(dir, va);
             if (!frame)
                 return 0;
-            uint32_t od = va > vaddr ? va : vaddr;
+            uint32_t from = va > vaddr ? va : vaddr;
             uint32_t file_to = vaddr + filesz;
-            if (od < file_to) {
-                uint32_t do_ = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
-                                                       : file_to;
-                memcpy((void *)(frame + (od - va)), data + (od - vaddr),
-                       do_ - od);
+            if (from < file_to) {
+                uint32_t upto = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
+                                                        : file_to;
+                memcpy((void *)(frame + (from - va)), data + (from - vaddr),
+                       upto - from);
             }
         }
     }

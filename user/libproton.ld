@@ -1,17 +1,18 @@
-/* Biblioteka wspoldzielona ProtonOS
+/* The ProtonOS shared library
  *
- * Konsolidowana pod STALYM adresem - tym samym, ktory jadro daje jej
- * w kazdym procesie (USER_LIB_BASE w kernel/include/exec.h). Dzieki
- * temu adresy w jej tablicy symboli sa juz ostateczne i ani ona sama,
- * ani jadro nie maja nic do przeliczania przy ladowaniu.
+ * Linked at a FIXED address - the same one the kernel gives it in every
+ * process (USER_LIB_BASE in kernel/include/exec.h). That way the addresses in its symbol
+ * table are already final, and neither the library nor the kernel has
+ * anything to recompute at load time.
  *
- * Dane pisemne dostaja wlasne strony, bo tylko one nie moga byc
- * wspolne: biblioteka trzyma w nich swoj stan (ziarno generatora,
- * ustawienia TLS), a stan jednego procesu nie ma prawa byc widoczny
- * w drugim. Kod i stale sa wspolne - i to jest cala oszczednosc.
+ * The writable data gets pages of its own, because it is the only part
+ * that cannot be shared: the library keeps its state in there (the
+ * generator's seed, the TLS settings), and one process's state has no
+ * business being visible in another. The code and the constants are
+ * shared - and that is the whole of the saving.
  */
 
-ENTRY(_nie_startuje)
+ENTRY(_does_not_start)
 
 SECTIONS
 {
@@ -26,11 +27,11 @@ SECTIONS
     .rel.dyn  : { *(.rel.*) }
     .rela.dyn : { *(.rela.*) }
 
-    /* Od tego miejsca zaczyna sie to, co da sie zapisac - i wlasnie
-       dlatego jest tu granica strony. Segment powyzej jest wspolny dla
-       wszystkich procesow, wiec nie moze zawierac ani jednego bajtu,
-       ktory ktos moglby zmienic; .dynamic i tablice adresow sa
-       zapisywalne, wiec siedza ponizej. */
+    /* From here on comes everything that can be written to - and
+       that is exactly why the page boundary is here. The segment above
+       is shared by every process, so it must not hold a single byte
+       anybody could change; .dynamic and the address tables are
+       writable, so they sit below. */
     . = ALIGN(4096);
     .dynamic : { *(.dynamic) }
     .data   : { *(.data*) *(.got) *(.got.plt) }
