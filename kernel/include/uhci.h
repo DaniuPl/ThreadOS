@@ -24,6 +24,7 @@ int uhci_init(void);
 int uhci_ports(void);
 int uhci_port_reset(int port);          /* 1 = the device is ready to talk */
 int uhci_port_lowspeed(int port);
+int uhci_port_connected(int port);     /* 1 = something is plugged in */
 
 /* A control transfer. 'setup' is the 8-byte request, data may go
    either way (in=1 reads). Returns the number of data bytes or -1. */

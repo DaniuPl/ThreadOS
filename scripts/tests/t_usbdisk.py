@@ -368,7 +368,7 @@ def main():
         if not made:
             return summary()
         check("the host's file was written onto the stick",
-              fat_put(stick, start, FROM_HOST, "/od-hosta.txt"))
+              fat_put(stick, start, FROM_HOST, "/fromhost.txt"))
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbdisk=stick, qemu="qemu-system-x86_64")
@@ -407,9 +407,9 @@ def main():
 
             out = q.command("fatls /", "entries", timeout=20)
             check("we see the file the host wrote there",
-                  "od-hosta.txt" in out)
+                  "fromhost.txt" in out)
 
-            out = q.command("fatcat /od-hosta.txt", "mtools", timeout=20)
+            out = q.command("fatcat /fromhost.txt", "mtools", timeout=20)
             check("the content of the file from the stick was read character for character",
                   FROM_HOST.decode().strip() in out)
 
@@ -427,9 +427,15 @@ def main():
             q.command("fatput /FROMSYSTEM/hello.txt hello-from-threados",
                       "fatput", timeout=20)
             out = q.command("fatcopy hello64 /FROMSYSTEM/hello64.bin",
-                            "fatcopy", timeout=60)
+                            "hello64.bin, ", timeout=60)
+            # The line the command prints when it has finished, size and
+            # all - "B" somewhere in the output, which is what this used
+            # to look for, is there whether the copy worked or not
+            m = re.search(r"fatcopy: hello64 -> /FROMSYSTEM/hello64\.bin, "
+                          r"(\d+) B", out)
             check("a bigger write over USB runs to the end (a program from "
-                  "initrd)", "skopiowano" in out or "B" in out)
+                  "initrd)" + (", %s B" % m.group(1) if m else ""),
+                  m is not None and int(m.group(1)) > 1024)
 
             # Everything has to reach the disk before the machine dies
             q.command("fat 1 %d" % usbno, "cluster", timeout=30)  # flush
@@ -455,7 +461,7 @@ def main():
 
         # The file the host put there has to be untouched: writing to a
         # stick must add, not rearrange.
-        old = fat_get(stick, start, "/od-hosta.txt")
+        old = fat_get(stick, start, "/fromhost.txt")
         check("the host's file survived our writing on the same filesystem",
               old == FROM_HOST)
 

@@ -31,4 +31,7 @@ int gpt_make(uint32_t esp_mib);
    has to hold a FAT32, and FAT32 has a floor of its own. */
 #define GPT_MIN_MIB 256
 
+/* CRC-32 (IEEE), the same as zlib.crc32 */
+uint32_t crc32(const void *data, uint32_t len);
+
 #endif

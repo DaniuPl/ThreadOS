@@ -8,7 +8,7 @@
  * Just like blk.c chooses between ATA, AHCI and NVMe, and netdev.c
  * between RTL8139 and e1000: nobody above cares which controller sits
  * in the slot. We try xHCI first (newer boards have nothing else any
- * more), then UHCI.
+ * more), then EHCI with its companion, then UHCI.
  *
  * The border runs where the DIFFERENCE ends. Resetting a port, giving
  * a device an address and finding the endpoint zero packet size look
@@ -26,6 +26,10 @@ int usbhc_init(void);
 
 /* Name of the controller found - to be printed at startup */
 const char *usbhc_name(void);
+
+/* The controller one socket belongs to. The same as usbhc_name() except
+   on an EHCI machine, where the slow devices are on the companion. */
+const char *usbhc_port_hc(int port);
 
 /* When there is no controller: why. NULL when there is one. */
 const char *usbhc_why(void);

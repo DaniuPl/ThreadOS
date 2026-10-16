@@ -142,7 +142,7 @@ def main():
             check("the viewer says what it loaded ('%s')" % said,
                   "640x480" in said and "loaded" in said)
             check("and that it shows every other pixel, because the whole screen "
-                  "does not fit in a window on this screen", "co 2" in said)
+                  "does not fit in a window on this screen", "step 2" in said)
 
             # The picture IS the screen: the icons' orange inside the
             # window, in the strip where the icons were, and a quarter

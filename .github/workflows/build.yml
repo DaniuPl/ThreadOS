@@ -85,7 +85,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=boot,shell,process,tfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
+          make test J=2 T=boot,shell,process,tfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

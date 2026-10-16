@@ -50,7 +50,7 @@ Shared by both kernels (same files, compiled twice):
 | | |
 |---|---|
 | Hardware | PIC, PIT, PS/2 keyboard, serial port, PCI, RTC, local APIC |
-| USB | xHCI and UHCI behind one host-controller layer; HID boot keyboard |
+| USB | xHCI, EHCI (with its UHCI companion) and UHCI behind one host-controller layer; HID boot keyboard |
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
 | Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer; volume and mute as a percentage of what the codec's amplifier really has (`beep`, `volume`, and a mixer window) |
 | Disks | NVMe, every AHCI port, both ATA drives — a list, with one in use; the installer asks which |
@@ -74,7 +74,7 @@ share.
 
 **32-bit kernel** — ring 3 processes with `fork`/`exec`, copy-on-write,
 swap to disk, signals, pipes, four virtual consoles, USB keyboard
-(xHCI or UHCI), ACPI, files mapped into memory for reading *and
+(xHCI, EHCI or UHCI), ACPI, files mapped into memory for reading *and
 writing*, a stack that grows on demand, processes **and the threads of
 one process** running in ring 3 on every core — a changed mapping is
 sent to the other cores and awaited before the frame is reused — TLS
@@ -174,7 +174,7 @@ a graphical desktop whose six applications all run in ring 3, shared
 memory, files mapped into memory for reading *and writing*, a stack
 that grows on demand, swap to disk, processes that run in ring 3 on
 every core, **threads sharing one address space across cores**, four
-virtual consoles, USB keyboard (xHCI or UHCI), ACPI power-off, and
+virtual consoles, USB keyboard (xHCI, EHCI or UHCI), ACPI power-off, and
 BIOS + UEFI boot from a single hybrid disc — the latter through our own
 EFI loader, which reads the kernel and the initrd off the EFI system
 partition, sets the graphics mode through GOP, takes the ACPI pointer
@@ -264,7 +264,7 @@ ground for both.
 - Keep an eye on the longest group. `ush` and `tls32` (a ring 3 shell
   driving pipes and redirections, and a dozen TLS 1.3 handshakes
   against a real OpenSSL) now decide how long a full run takes — about
-  90 seconds each, out of some twenty minutes for all 95 groups on
+  90 seconds each, out of some twenty minutes for all 96 groups on
   four cores.
 - Run on real hardware, not only under QEMU and OVMF. Everything is in
   place for it: `make stick` writes the image, `hardware` says what the

@@ -221,7 +221,7 @@ static void read_word(char *out, int max);
  * confirmation is the word, typed out: a key to press is something a
  * person does by reflex, and a word is something they have to decide
  * to type. */
-static void cmd_formatuj(char *arg)
+static void cmd_format(char *arg)
 {
     if (!blk_present()) {
         printk("format: there is no disk\n");
@@ -1047,10 +1047,14 @@ static void run_command(char *cmd)
         cmd_beep(arg);
     else if (!strcmp(cmd, "hardware"))
         hwinfo_print();
-    else if (!strcmp(cmd, "disks"))
-        hwinfo_disks();
+    else if (!strcmp(cmd, "disks")) {
+        if (starts(arg, "read"))
+            hwinfo_disk_read(arg + sizeof("read") - 1);
+        else
+            hwinfo_disks();
+    }
     else if (!strcmp(cmd, "format"))
-        cmd_formatuj(arg);
+        cmd_format(arg);
     else if (!strcmp(cmd, "install"))
         cmd_install(arg);
     else if (!strcmp(cmd, "fat"))

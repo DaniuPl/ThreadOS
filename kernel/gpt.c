@@ -49,7 +49,10 @@ static void crc_init(void)
     crc_ready = 1;
 }
 
-static uint32_t crc32(const void *data, uint32_t len)
+/* The ordinary IEEE CRC-32 - the one GPT asks for, and the one zlib
+   computes, which is why a test on the host can check a number this
+   kernel printed. */
+uint32_t crc32(const void *data, uint32_t len)
 {
     const uint8_t *p = (const uint8_t *)data;
     uint32_t c = 0xFFFFFFFFu;

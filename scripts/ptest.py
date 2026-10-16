@@ -418,7 +418,7 @@ GUID_ESP4 = bytes([0x28, 0x73, 0x2A, 0xC1])       # C12A7328-...
 GUID_TFS4 = b"THRE"                                # ours, and it says so
 
 
-def make_mbr_fat_disk(path, mib=64, fat32=False, label="MALYFAT"):
+def make_mbr_fat_disk(path, mib=64, fat32=False, label="SMALLFAT"):
     """A disk with the old table on it and one FAT partition - the
     shape of a memory stick, and the second of the two tables the
     system has to find its way around."""
@@ -1088,7 +1088,7 @@ class Qemu:
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  usbhub=False, behind_hub=False, usbnic=False,
-                 nic="rtl8139", cpus=None):
+                 nic="rtl8139", cpus=None, devices=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The 64-bit kernel needs a processor with long mode, and
@@ -1233,6 +1233,13 @@ class Qemu:
                     "-device", "ide-hd,drive=sata0,bus=ahci.0"]
         elif disk:
             cmd += ["-hda", disk]
+        if devices:
+            # Anything else, word for word. A machine that exists to
+            # test one controller says exactly which controller and
+            # what hangs off which of its ports; a keyword for every
+            # such layout would be a second, worse copy of QEMU's own
+            # syntax.
+            cmd += list(devices)
         if disk2:
             # A second disk on the same controller, which has to be
             # declared by then - hence the position. A machine with

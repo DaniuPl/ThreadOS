@@ -101,6 +101,16 @@ int uhci_ports(void)
     return nports;
 }
 
+/* Is anything in the port. The connect bit says so directly; it is
+   the question the socket-watching thread asks twice a second, and on
+   an EHCI machine this controller is where the keyboard ends up. */
+int uhci_port_connected(int port)
+{
+    if (!base || port < 0 || port >= nports)
+        return 0;
+    return (rd16(REG_PORTSC1 + port * 2) & PORT_CONNECT) ? 1 : 0;
+}
+
 int uhci_port_lowspeed(int port)
 {
     return (rd16(REG_PORTSC1 + port * 2) & PORT_LOWSPEED) ? 1 : 0;

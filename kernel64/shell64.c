@@ -875,6 +875,8 @@ static void execute(const char *line)
         cmd_bt(line + 3);
     } else if (!strcmp(line, "disks")) {
         hwinfo_disks();
+    } else if (starts_with(line, "disks read")) {
+        hwinfo_disk_read(line + sizeof("disks read") - 1);
     } else if (!strcmp(line, "install")) {
         if (!install_graphical()) {
             printk("install: the desktop is running, and the installer needs "

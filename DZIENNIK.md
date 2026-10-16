@@ -5536,3 +5536,72 @@ fact stops being a journal.*
 
       The journal stays Polish, and this entry says why on its own line
       above.
+
+
+- [x] **ProtonOS is ThreadOS**
+
+      The system is called ThreadOS now, down to the magic on the disk.
+      The loader is threadboot, the shared library libthread.so, the
+      filesystem TFS with "TFS3" in its superblock, and the type GUID of
+      our partition spells THREADOS-TFS3 in plain bytes. Our own file
+      magics followed: TIRD (initrd), TSCR (screenshot), TWL2
+      (wallpaper).
+
+      That is a break on purpose: a disk formatted under the old name is
+      not ours any more, and the system leaves it alone - which is what
+      the foreigndisk group exists to guarantee. The machine's name and
+      default password were the word 'proton' and are 'thread'; the
+      password is FNV-1a over the system's name as a salt and the word,
+      so the stored number was recomputed - after reproducing the old
+      number with the same arithmetic first, to know the new one is
+      right and not merely different.
+
+      Almost every name kept its length (ProtonOS/ThreadOS, PFS/TFS,
+      libproton/libthread), so no column or index moved. What broke was
+      eight assertions, every one a place where the name was data rather
+      than text: keys injected letter by letter in t_boot, a recorded
+      Bluetooth reply with the adapter name spelled out byte by byte,
+      and user/certdata.h, where the rename edited the message under the
+      PSS and ECDSA signatures. That fixture had no generator;
+      scripts/mkcertdata.py makes it now.
+
+- [x] **EHCI, and the companion beside it**
+
+      Between UHCI and xHCI there are ten years of machines with EHCI,
+      and on those the system saw a keyboard at best and never a stick.
+      kernel/ehci.c fills that gap.
+
+      EHCI speaks only to high-speed devices. A USB 1.1 keyboard is
+      handed, port by port, to a companion UHCI controller on the same
+      sockets - so in EHCI mode usbhc.c runs two controllers at once:
+      EHCI's ports first, the companion's after them, and every device
+      remembers which one carries it. One shared queue head for control
+      and bulk, rewritten only with the asynchronous schedule stopped
+      (changing a queue head the controller may have cached is the one
+      thing the specification forbids); toggles kept by the caller and
+      written into each descriptor; interrupt endpoints with queue heads
+      of their own in the periodic schedule, re-armed the moment a
+      report is collected so the device is asked every millisecond
+      between the caller's rounds. Hubs on EHCI are refused out loud: a
+      slow device behind one needs split transactions, and QEMU has no
+      high-speed hub to test them with.
+
+      Nothing in the system reads more than a kilobyte at a time, so the
+      path for a large transfer would never have run. 'disks read N LBA
+      COUNT' reads up to 128 KiB in one command and prints a CRC-32; the
+      test computes the same CRC with zlib over the image file. 128 KiB
+      is a chain of eight descriptors, and a 33-sector read is two with
+      the second one short - both match.
+
+      Two bugs that were not EHCI's, found on the way. The 32-bit kernel
+      never noticed a stick plugged in while it ran: the disk driver
+      asks for the socket-watching thread while the disks are being
+      found, which in that kernel is before the scheduler exists, so the
+      thread was created into nothing. It had only ever been tested on
+      the 64-bit kernel, where the order is the other way round. And
+      t_usbdisk checked a copy with `"skopiowano" in out or "B" in out`
+      - a Polish word no longer printed, or a capital B that is there
+      whether the copy worked or not.
+
+      t_ehci: 36 assertions. The fourteen groups the change touches,
+      rerun: 303 passed, 0 failed.

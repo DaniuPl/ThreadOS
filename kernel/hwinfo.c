@@ -26,6 +26,8 @@
 #include "include/pci.h"
 #include "include/hda.h"
 #include "include/string.h"
+#include "include/gpt.h"
+#include "include/pit.h"
 
 /* What this machine actually is.
  *
@@ -184,6 +186,73 @@ void hwinfo_disks(void)
        left every driver pointed where it found it, and the next thing
        to touch the disk should not have to know that. */
     part_scan();
+}
+
+/* 'disks read N LBA COUNT': COUNT sectors from disk N in ONE command,
+ * and a CRC-32 of what came back.
+ *
+ * Nothing else in the system asks a disk for more than a kilobyte at a
+ * time - FAT goes sector by sector, TFS block by block - and so a
+ * driver's path for a large transfer would otherwise never run at all.
+ * EHCI, for one, has to split anything over sixteen kilobytes into a
+ * chain of descriptors and carry the data toggle across them. A test
+ * reads the same sectors out of the image file on the host, computes
+ * the same CRC with zlib, and the two numbers have to agree.
+ */
+#define READ_MAX 256                     /* 128 KiB */
+static uint8_t read_buf[READ_MAX * 512] __attribute__((aligned(4096)));
+
+static uint32_t number(const char **p)
+{
+    uint32_t v = 0;
+    while (**p == ' ')
+        (*p)++;
+    while (**p >= '0' && **p <= '9')
+        v = v * 10 + (uint32_t)(*(*p)++ - '0');
+    return v;
+}
+
+void hwinfo_disk_read(const char *arg)
+{
+    const char *p = arg ? arg : "";
+    uint32_t disk = number(&p), lba = number(&p), count = number(&p);
+
+    if (!disk || disk > (uint32_t)blk_count() || !count ||
+        count > READ_MAX) {
+        printk("usage: disks read <disk> <first sector> <count, up to %u>\n",
+               (uint32_t)READ_MAX);
+        return;
+    }
+    if (lba + count > blk_sectors_of((int)disk - 1)) {
+        printk("disks read: disk %u has only %u sectors\n", disk,
+               blk_sectors_of((int)disk - 1));
+        return;
+    }
+
+    int was = blk_current();
+    if (blk_use((int)disk - 1) < 0) {
+        printk("disks read: disk %u cannot be used\n", disk);
+        return;
+    }
+    uint32_t t0 = pit_ticks();
+    int r = blk_read(lba, count, read_buf);
+    uint32_t t1 = pit_ticks();
+    blk_use(was);
+
+    if (r < 0) {
+        printk("disks read: disk %u did not answer\n", disk);
+        return;
+    }
+    /* Eight hex digits, always - printk has no field widths, and a CRC
+       with its leading zeros dropped is a number a test would have to
+       guess the padding of */
+    uint32_t c = crc32(read_buf, count * 512);
+    char hex[9];
+    for (int i = 0; i < 8; i++)
+        hex[i] = "0123456789abcdef"[(c >> (28 - 4 * i)) & 0xF];
+    hex[8] = '\0';
+    printk("disks read: %u sectors from %u in one command, crc32 %s, "
+           "%u ms\n", count, lba, hex, (t1 - t0) * 10);
 }
 
 /* How loud, and it is remembered.

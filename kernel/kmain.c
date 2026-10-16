@@ -27,6 +27,7 @@
 #include "include/acpi.h"
 #include "include/mb2.h"
 #include "include/usbkbd.h"
+#include "include/usbhc.h"
 #include "include/usbmouse.h"
 #include "include/bt.h"
 #include "include/dynlink.h"
@@ -308,6 +309,11 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        machine without PS/2 it is the only input the system has. */
     usbkbd_init();
     usbmouse_init();
+    /* The sockets themselves, watched for a stick pushed in later. The
+       disk driver asked for this already, while the disks were being
+       found - but that was before there was a scheduler, and a thread
+       needs one. */
+    usbhc_watch();
     /* And the adapter on the same bus. It reports in by itself when it
        finds one; on a machine without Bluetooth this costs one walk
        across the ports and says nothing. */

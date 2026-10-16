@@ -1,8 +1,15 @@
 /* Choosing a USB host controller
  *
  * Just as blk.c chooses between ATA, AHCI and NVMe: we try xHCI first,
- * because newer boards have nothing else, and then UHCI. Nobody above
- * cares which of them answered.
+ * because newer boards have nothing else, then EHCI, then UHCI. Nobody
+ * above cares which of them answered.
+ *
+ * EHCI is the odd one, because it is never alone. It speaks only to
+ * high-speed devices, and hands everything slower - keyboards, mice -
+ * to a companion controller on the same sockets. So in EHCI mode this
+ * file runs two controllers at once: the sockets are EHCI's ports and
+ * then the companion's, and every device remembers which of the two it
+ * is reached through.
  *
  * This file is also where the GREETING conversation with a device
  * lives - that is, the one part of device recognition that looks
@@ -17,28 +24,34 @@
 #include <stdint.h>
 #include "include/usbhc.h"
 #include "include/uhci.h"
+#include "include/ehci.h"
 #include "include/xhci.h"
 #include "include/task.h"
 #include "include/printk.h"
 
-enum { NONE, XHCI, UHCI };
+enum { NONE, XHCI, EHCI, UHCI };
 
 static int controller;
+static int companion;                /* EHCI mode: a UHCI beside it */
 
-/* Devices on the UHCI side have to be described by hand: the
-   controller remembers nothing about them. With xHCI all that
+/* Devices on the UHCI and EHCI side have to be described by hand: the
+   controllers remember nothing about them. With xHCI all that
    knowledge sits inside the controller and a slot number is enough for
    us. */
-#define DEVICES 4
+#define DEVICES 8
 
 struct device {
     int used;
+    int hc;                          /* EHCI or UHCI - who carries it */
     int addr;
     int lowspeed;
     int maxpacket;
     int ep;
     int ep_maxpacket;
     int toggle;
+    int int_pipe;                    /* EHCI: the interrupt queue head */
+    int bulk_mps;                    /* EHCI: bulk endpoints */
+    int toggle_in, toggle_out;
 };
 
 static struct device list[DEVICES];
@@ -61,6 +74,7 @@ static int port_taken[PORTS_MAX];
  * four bits per tier of hubs. It is built here, one nibble per tier,
  * because here is where the tree is known. */
 struct socket {
+    int hc;                      /* EHCI mode: whose port it is */
     int root;                    /* the controller's port it hangs off */
     uint32_t route;              /* 0 = the root port itself */
     int tier;                    /* 0 = root, 1 = behind one hub, ... */
@@ -103,9 +117,20 @@ const char *usbhc_name(void)
 {
     if (controller == XHCI)
         return "xHCI";
+    if (controller == EHCI)
+        return companion ? "EHCI + UHCI" : "EHCI";
     if (controller == UHCI)
         return "UHCI";
     return "none";
+}
+
+/* Which controller a socket belongs to - on an EHCI machine the answer
+   differs from socket to socket, and the device messages say which. */
+const char *usbhc_port_hc(int port)
+{
+    if (controller == EHCI && port >= 0 && port < nsock)
+        return sock[port].hc == UHCI ? "UHCI" : "EHCI";
+    return usbhc_name();
 }
 
 int usbhc_init(void)
@@ -136,6 +161,30 @@ int usbhc_init(void)
         }
         return 1;
     }
+    if (ehci_init()) {
+        controller = EHCI;
+        /* EHCI's own ports first, then the companion's. The companion
+           has to be started AFTER EHCI: until EHCI takes the ports,
+           every device sits on the companion, and starting it first
+           would greet devices that are about to be taken away. */
+        nsock = 0;
+        for (int i = 0; i < ehci_ports() && nsock < PORTS_MAX; i++) {
+            sock[nsock].hc = EHCI;
+            sock[nsock].root = i;
+            port_dev[nsock] = -1;
+            nsock++;
+        }
+        if (uhci_init()) {
+            companion = 1;
+            for (int i = 0; i < uhci_ports() && nsock < PORTS_MAX; i++) {
+                sock[nsock].hc = UHCI;
+                sock[nsock].root = i;
+                port_dev[nsock] = -1;
+                nsock++;
+            }
+        }
+        return 1;
+    }
     if (uhci_init()) {
         controller = UHCI;
         return 1;
@@ -149,7 +198,7 @@ int usbhc_init(void)
    runs, which is exactly what a loop over ports wants. */
 int usbhc_ports(void)
 {
-    if (controller == XHCI)
+    if (controller == XHCI || controller == EHCI)
         return nsock;
     if (controller == UHCI)
         return uhci_ports();
@@ -176,10 +225,12 @@ static void query(uint8_t *p, uint8_t typ, uint8_t req,
    must not inherit its address. */
 static int uhci_greet(int port, struct device *u)
 {
-    if (!uhci_port_reset(port))
+    int root = controller == EHCI ? sock[port].root : port;
+
+    if (!uhci_port_reset(root))
         return -1;
 
-    u->lowspeed = uhci_port_lowspeed(port);
+    u->lowspeed = uhci_port_lowspeed(root);
     u->maxpacket = 8;
 
     uint8_t setup[8];
@@ -193,6 +244,41 @@ static int uhci_greet(int port, struct device *u)
     int addr = port + 1;
     query(setup, 0x00, 0x05, (uint16_t)addr, 0, 0);
     if (uhci_control(0, u->lowspeed, u->maxpacket, setup, (void *)0, 0, 0) < 0)
+        return -1;
+    u->addr = addr;
+    task_sleep(20);
+    return 0;
+}
+
+/* Greeting a device on EHCI. The same conversation as on UHCI - the
+   driver invents the address and assigns it with an ordinary request -
+   only always at high speed, because anything slower has already been
+   handed to the companion by the port reset. */
+static int ehci_greet(int port, struct device *u)
+{
+    int speed = ehci_port_reset(sock[port].root);
+    if (speed == 0)
+        return -1;
+    if (speed < 0) {
+        printk("[ OK ] USB socket %d: a slower device - handed to the "
+               "companion controller\n", port + 1);
+        /* The companion sees it a moment later, as a new connection */
+        task_sleep(100);
+        return -1;
+    }
+
+    uint8_t setup[8];
+    uint8_t info[8];
+    u->maxpacket = 64;                   /* what high speed always allows */
+    query(setup, 0x80, 0x06, 0x0100, 0, 8);
+    if (ehci_control(0, u->maxpacket, setup, info, 8, 1) < 8)
+        return -1;
+    if (info[7])
+        u->maxpacket = info[7];
+
+    int addr = port + 1;
+    query(setup, 0x00, 0x05, (uint16_t)addr, 0, 0);
+    if (ehci_control(0, u->maxpacket, setup, (void *)0, 0, 0) < 0)
         return -1;
     u->addr = addr;
     task_sleep(20);
@@ -449,17 +535,42 @@ static int usbhc_greet(int port)
            backend reads its own */
         return slot;
     }
-    if (controller != UHCI)
+    if (controller != UHCI && controller != EHCI)
         return -1;
 
     for (int i = 0; i < DEVICES; i++) {
         if (list[i].used)
             continue;
-        struct device u = { 0, 0, 0, 8, 0, 8, 0 };
-        if (uhci_greet(port, &u) < 0)
-            return -1;
+        struct device u = { 0 };
+        u.maxpacket = 8;
+        u.ep_maxpacket = 8;
+        u.int_pipe = -1;
+        if (controller == EHCI && sock[port].hc == EHCI) {
+            u.hc = EHCI;
+            if (ehci_greet(port, &u) < 0)
+                return -1;
+        } else {
+            u.hc = UHCI;
+            if (uhci_greet(port, &u) < 0)
+                return -1;
+        }
         u.used = 1;
         list[i] = u;
+
+        /* A hub on EHCI is refused, and said so. A high-speed hub is
+           easy; what hangs behind it mostly is not - a keyboard behind
+           it has to be reached with split transactions through the
+           hub's translator, and none of that is written. Refusing is
+           better than a hub that half works. */
+        uint8_t desc[18];
+        if (u.hc == EHCI &&
+            usbhc_descriptor(i + 1, 0x01, 0, desc, 18) >= 18 &&
+            desc[4] == HUB_CLASS) {
+            printk("[ !! ] USB socket %d: a hub on EHCI - not supported "
+                   "yet (split transactions)\n", port + 1);
+            list[i].used = 0;
+            return -1;
+        }
         return i + 1;
     }
     return -1;
@@ -512,6 +623,12 @@ int usbhc_connected(int port)
             return (port_known[port] && port_dev[port] >= 1) ? 1 : 0;
         return xhci_port_connected(sock[port].root);
     }
+    if (controller == EHCI) {
+        if (port < 0 || port >= nsock)
+            return 0;
+        return sock[port].hc == EHCI ? ehci_port_connected(sock[port].root)
+                                     : uhci_port_connected(sock[port].root);
+    }
     /* UHCI keeps the connection bit in its own port register; nobody
        has asked this of it yet, and pretending otherwise would be
        worse than saying so. */
@@ -528,6 +645,15 @@ void usbhc_forget(int port)
         return;
     if (controller == XHCI && port_known[port] && port_dev[port] > 0)
         xhci_release(port_dev[port]);
+    /* On the other two the device's entry is ours to give back - and on
+       EHCI so is its place in the periodic schedule */
+    if (controller != XHCI && port_known[port] && port_dev[port] > 0 &&
+        port_dev[port] <= DEVICES) {
+        struct device *u = &list[port_dev[port] - 1];
+        if (u->hc == EHCI && u->int_pipe >= 0)
+            ehci_int_release(u->int_pipe);
+        u->used = 0;
+    }
     port_known[port] = 0;
     port_taken[port] = 0;
     port_dev[port] = -1;
@@ -636,6 +762,14 @@ void usbhc_watch(void)
 {
     if (watching || controller == NONE)
         return;
+    /* A thread cannot be started before there is a scheduler to run
+       it, and the 32-bit kernel looks for its disks first - so the
+       watch asked for by the disk driver used to be created into the
+       void, and a stick pushed in later was never seen on that kernel.
+       Asked too early, this does nothing; kmain asks again once
+       threads exist. */
+    if (!task_scheduler_ready())
+        return;
     if (usbhc_connected(0) < 0)
         return;                          /* nothing to watch it with */
     watching = 1;
@@ -648,9 +782,11 @@ int usbhc_control(int dev, const void *setup, void *data, int len, int in)
         return -1;
     if (controller == XHCI)
         return xhci_control(dev, setup, data, len, in);
-    if (controller != UHCI || dev > DEVICES)
+    if (controller == NONE || dev > DEVICES)
         return -1;
     struct device *u = &list[dev - 1];
+    if (u->hc == EHCI)
+        return ehci_control(u->addr, u->maxpacket, setup, data, len, in);
     return uhci_control(u->addr, u->lowspeed, u->maxpacket, setup, data,
                         len, in);
 }
@@ -661,11 +797,17 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval)
         return -1;
     if (controller == XHCI)
         return xhci_int_endpoint(dev, ep, maxpacket, interval);
-    if (controller != UHCI || dev > DEVICES)
+    if (controller == NONE || dev > DEVICES)
         return -1;
+    struct device *u = &list[dev - 1];
+    if (u->hc == EHCI) {
+        /* A queue head of its own in the periodic schedule */
+        u->ep = ep;
+        u->int_pipe = ehci_int_endpoint(u->addr, ep, maxpacket);
+        return u->int_pipe >= 0 ? 0 : -1;
+    }
     /* UHCI has nothing to set up: an endpoint is described to it with
        every transfer separately */
-    struct device *u = &list[dev - 1];
     u->ep = ep;
     u->ep_maxpacket = maxpacket;
     u->toggle = 0;
@@ -678,40 +820,73 @@ int usbhc_int_in(int dev, int ep, void *data, int len)
         return -1;
     if (controller == XHCI)
         return xhci_int_in(dev, ep, data, len);
-    if (controller != UHCI || dev > DEVICES)
+    if (controller == NONE || dev > DEVICES)
         return -1;
     struct device *u = &list[dev - 1];
+    if (u->hc == EHCI)
+        return ehci_int_in(u->int_pipe, data, len);
     return uhci_interrupt_in(u->addr, u->lowspeed, ep, u->ep_maxpacket,
                              data, len, &u->toggle);
 }
 
 /* Bulk endpoints - a disk, not a keyboard.
  *
- * Only xHCI for now, and that is said out loud rather than hidden:
- * UHCI would need its own queue for bulk and a data toggle kept per
- * endpoint, and the machines that still have UHCI alone are the ones
- * that boot from something else anyway. A driver above gets -1 and
- * knows there is no disk to be had here.
+ * xHCI and EHCI. Not UHCI, and that is said out loud rather than
+ * hidden: UHCI would need its own queue for bulk, and a stick on an
+ * EHCI machine never reaches the companion anyway - it is high speed.
+ * A driver above gets -1 and knows there is no disk to be had here.
  */
+static struct device *bulk_device(int dev)
+{
+    if (dev < 1 || dev > DEVICES || controller != EHCI)
+        return (struct device *)0;
+    struct device *u = &list[dev - 1];
+    return (u->used && u->hc == EHCI) ? u : (struct device *)0;
+}
+
 int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket)
 {
-    if (dev < 1 || controller != XHCI)
+    if (dev < 1)
         return -1;
-    return xhci_bulk_endpoint(dev, in_ep, out_ep, maxpacket);
+    if (controller == XHCI)
+        return xhci_bulk_endpoint(dev, in_ep, out_ep, maxpacket);
+    struct device *u = bulk_device(dev);
+    if (!u)
+        return -1;
+    /* EHCI keeps nothing per endpoint: the packet size and the two
+       toggles are all it needs, and they live here */
+    (void)in_ep;
+    (void)out_ep;
+    u->bulk_mps = maxpacket;
+    u->toggle_in = 0;
+    u->toggle_out = 0;
+    return 0;
 }
 
 int usbhc_bulk_out(int dev, int ep, const void *data, int len)
 {
-    if (dev < 1 || controller != XHCI)
+    if (dev < 1)
         return -1;
-    return xhci_bulk_out(dev, ep, data, len);
+    if (controller == XHCI)
+        return xhci_bulk_out(dev, ep, data, len);
+    struct device *u = bulk_device(dev);
+    if (!u)
+        return -1;
+    return ehci_bulk(u->addr, ep, u->bulk_mps, (void *)data, len, 0,
+                     &u->toggle_out);
 }
 
 int usbhc_bulk_in(int dev, int ep, void *data, int len)
 {
-    if (dev < 1 || controller != XHCI)
+    if (dev < 1)
         return -1;
-    return xhci_bulk_in(dev, ep, data, len);
+    if (controller == XHCI)
+        return xhci_bulk_in(dev, ep, data, len);
+    struct device *u = bulk_device(dev);
+    if (!u)
+        return -1;
+    return ehci_bulk(u->addr, ep, u->bulk_mps, data, len, 1,
+                     &u->toggle_in);
 }
 
 /* --- The requests a device driver makes -----------------------------

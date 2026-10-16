@@ -135,7 +135,7 @@ int usbmouse_init(void)
         found = 1;
         task_create("usbmouse", poll_thread, 0);
         printk("[ OK ] A USB mouse (HID, %s) on port %d, "
-               "endpoint %d\n", usbhc_name(), port + 1, ep_num);
+               "endpoint %d\n", usbhc_port_hc(port), port + 1, ep_num);
         return 1;
     }
     return 0;

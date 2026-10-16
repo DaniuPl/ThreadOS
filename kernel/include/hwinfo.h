@@ -18,6 +18,8 @@ void hwinfo_print(void);
 /* The disks the machine has, and which of them the system is using.
    Reading only - nothing here writes a sector. */
 void hwinfo_disks(void);
+/* 'disks read N LBA COUNT' - one large read, and its CRC-32 */
+void hwinfo_disk_read(const char *arg);
 
 /* How loud, said and set. An empty argument only says; a number sets
    it; the word 'cisza' silences without forgetting the number. Both

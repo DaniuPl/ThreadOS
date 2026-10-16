@@ -208,7 +208,7 @@ def main():
         for name, path, mib, want_kind in (("FAT16", small, 64, "FAT16"),
                                            ("FAT12", tiny, 2, "FAT12")):
             ok, start = make_mbr_fat_disk(path, mib, fat32=False,
-                                          label="MALYFAT")
+                                          label="SMALLFAT")
             check(f"the {name} image in an MBR table is ready",
                   ok and fat_kind(path, start) == want_kind)
             fat_put(path, start, LONG_TEXT, "/od-mtools.txt")
@@ -255,7 +255,7 @@ def main():
         # stick full of files, which is exactly how this was found.
         maly32 = tempfile.mktemp(suffix=".img")
         ok, start = make_mbr_fat_disk(maly32, 32, fat32=True,
-                                      label="MALYFAT32")
+                                      label="SMALLFAT32")
         # The evidence that it really is FAT32 comes from mtools, not
         # from us: "sectors per fat: 0" is what a FAT32 boot sector has
         # instead of a sixteen-bit count, and no FAT16 volume has it.
@@ -272,7 +272,7 @@ def main():
             out = q3.command("fat 1", "cluster", timeout=20)
             check("a small volume does not pretend to be FAT16 - the cluster count is not "
                   "the only word",
-                  "FAT32" in out and "MALYFAT32" in out)
+                  "FAT32" in out and "SMALLFAT32" in out)
             out = q3.command("fatls /", "entries", timeout=15)
             check("and a file shows on it, not an empty directory",
                   "od-mtools.txt" in out)
