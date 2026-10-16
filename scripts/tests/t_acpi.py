@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: ACPI - powering off.
+"""ThreadOS smoke test: ACPI - powering off.
 
 The most honest proof one can have: the machine is simply to disappear.
 The emulator ends, rather than pretending something happened.
@@ -26,7 +26,7 @@ def main():
         boot = q20.wait_for("ACPI:", timeout=30)
         check("the ACPI tables were found at boot",
               re.search(r"ACPI: tables from '\S+", boot) is not None)
-        q20.wait_for("ProtonOS shell", timeout=20)
+        q20.wait_for("ThreadOS shell", timeout=20)
         q20.type_line("help")
         check("'poweroff' is in the list of commands",
               "poweroff" in q20.wait_for("Available commands", timeout=20))

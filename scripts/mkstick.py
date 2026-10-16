@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Makes a bootable ProtonOS stick image.
+"""Makes a bootable ThreadOS stick image.
 
 What a UEFI machine boots from is not a disc and not a kernel: it is a
 disk with a GPT on it, an EFI system partition inside, a FAT
 filesystem inside that, and a loader at a name the firmware knows. So
 that is what this writes - a raw image to put on a stick with
 
-    dd if=build/protonos-stick.img of=/dev/sdX bs=4M conv=fsync
+    dd if=build/threados-stick.img of=/dev/sdX bs=4M conv=fsync
 
 and nothing else. No GRUB, no El Torito, no hybrid anything: the three
-files ProtonOS starts from, on a partition the firmware will look in.
+files ThreadOS starts from, on a partition the firmware will look in.
 
 The table is written here, byte by byte, for the same reason the
 kernel's own writer exists: a firmware checks the CRCs and the copy at
@@ -144,7 +144,7 @@ def main():
     at = "%s@@%d" % (args.out, first * SECTOR)
     steps = [
         ["mformat", "-i", at, "-F", "-T", str(last - first + 1),
-         "-v", "PROTONOS", "::"],
+         "-v", "THREADOS", "::"],
         ["mmd", "-i", at, "::/EFI"],
         ["mmd", "-i", at, "::/EFI/BOOT"],
         # The name the firmware falls back to when nothing else is
@@ -153,7 +153,7 @@ def main():
         ["mcopy", "-i", at, args.loader, "::/EFI/BOOT/BOOTX64.EFI"],
         # And what the loader itself goes looking for, in the first
         # place it looks
-        ["mcopy", "-i", at, args.kernel, "::/protonos64.bin"],
+        ["mcopy", "-i", at, args.kernel, "::/threados64.bin"],
         ["mcopy", "-i", at, args.initrd, "::/initrd64.img"],
     ]
     for step in steps:

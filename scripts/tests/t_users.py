@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: who is at the machine, and what that lets them do.
+"""ThreadOS smoke test: who is at the machine, and what that lets them do.
 
 Everything that ran could do everything. A program in ring 3 could
 overwrite the file the system reads its settings from at boot, delete
@@ -66,7 +66,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             out = q.command("whoami", "user", timeout=30)
             check("the machine comes up as an ordinary user",
@@ -79,7 +79,7 @@ def main():
             # than no refusal at all
             listing = q.command("set", "usage:", timeout=30)
             check("and the setting REALLY did not change",
-                  re.search(r"name = proton\b", listing) is not None)
+                  re.search(r"name = thread\b", listing) is not None)
 
             # The console must not be the way round the rule the rest of
             # the machine keeps
@@ -105,9 +105,9 @@ def main():
             check("a wrong password opens nothing", "wrong password" in bad)
             listing = q.command("set", "usage:", timeout=30)
             check("and after a wrong password the setting is still the old one",
-                  re.search(r"name = proton\b", listing) is not None)
+                  re.search(r"name = thread\b", listing) is not None)
 
-            out = sudo(q, "set name machine", "proton", "saved")
+            out = sudo(q, "set name machine", "thread", "saved")
             check("the right password runs the command as admin",
                   "name = machine (saved)" in out)
 
@@ -119,7 +119,7 @@ def main():
             # --- an admin session, and the way out of it -------------
             q.type_line("sudo")
             time.sleep(1)
-            out = q.command("proton", "admin", timeout=30)
+            out = q.command("thread", "admin", timeout=30)
             check("'sudo' with no command gives an admin session",
                   "you are admin" in out)
             out = q.command("whoami", "admin", timeout=30)
@@ -142,18 +142,18 @@ def main():
                 q.command("wrongpassword", "sudo:", timeout=30)
             q.type_line("sudo set color 9")
             time.sleep(0.8)
-            out = q.command("proton", "sudo:", timeout=30)
+            out = q.command("thread", "sudo:", timeout=30)
             check("after three wrong attempts even the right password does not work",
                   "wrong password" in out)
             time.sleep(7)               # the lock is about five seconds
-            out = sudo(q, "set color 9", "proton", "saved", timeout=40)
+            out = sudo(q, "set color 9", "thread", "saved", timeout=40)
             check("after a moment the right password works again",
                   "color = 9 (saved)" in out)
 
             # --- changing the password -------------------------------
             q.type_line("sudo passwd")
             time.sleep(1)
-            q.type_line("proton")       # for sudo itself
+            q.type_line("thread")       # for sudo itself
             time.sleep(1)
             q.type_line("newpassword")    # the new one
             time.sleep(0.8)
@@ -173,10 +173,10 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ProtonOS shell", timeout=40)
+            q2.wait_for("ThreadOS shell", timeout=40)
             q2.type_line("sudo set color 12")
             time.sleep(1)
-            out = q2.command("proton", "sudo:", timeout=30)
+            out = q2.command("thread", "sudo:", timeout=30)
             check("the old password no longer works after the restart",
                   "wrong password" in out)
             time.sleep(1)

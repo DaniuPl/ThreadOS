@@ -6,8 +6,8 @@
  * for tables. TLS 1.3 servers accept it universally.
  */
 
-#ifndef PROTONOS_UCHACHA_H
-#define PROTONOS_UCHACHA_H
+#ifndef THREADOS_UCHACHA_H
+#define THREADOS_UCHACHA_H
 
 #include "uapi.h"
 

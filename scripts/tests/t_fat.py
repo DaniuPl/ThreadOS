@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: FAT12/16/32 - the filesystem of the EFI partition.
+"""ThreadOS smoke test: FAT12/16/32 - the filesystem of the EFI partition.
 
 The one filesystem here that is not ours, and the reason it exists at
 all is that firmware reads FAT and reads nothing else. So every image
@@ -87,7 +87,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, disk=disk, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
 
             out = q.command("fat", "cluster", timeout=15)
             check("the system finds the EFI partition in the GPT by itself",
@@ -133,25 +133,25 @@ def main():
             # --- Writing. Everything below is checked by mtools after
             # the machine is switched off, not by asking the system
             # whether it thinks it succeeded.
-            out = q.command("fatmkdir /EFI/ProtonOS", "fatmkdir", timeout=15)
+            out = q.command("fatmkdir /EFI/ThreadOS", "fatmkdir", timeout=15)
             check("created", "could not" not in out)
-            out = q.command("fatput /EFI/ProtonOS/hello.txt hello-world",
+            out = q.command("fatput /EFI/ThreadOS/hello.txt hello-world",
                             "fatput", timeout=15)
             check("written", "could not" not in out)
-            out = q.command("fatput /protonos64-testowy.bin ABCDEFGH",
+            out = q.command("fatput /threados64-testowy.bin ABCDEFGH",
                             "fatput", timeout=15)
             check("a file with a long name was written", "could not" not in out)
-            out = q.command("fatcopy libproton.so /EFI/ProtonOS/libproton.so",
+            out = q.command("fatcopy libthread.so /EFI/ThreadOS/libthread.so",
                             "fatcopy", timeout=40)
             check("a file from the initrd copied onto the EFI partition",
-                  "could not" not in out and "-> /EFI/ProtonOS" in out)
+                  "could not" not in out and "-> /EFI/ThreadOS" in out)
             out = q.command("fatrm /big.bin", "fatrm", timeout=20)
             check("removed", "could not" not in out)
 
             out = q.command("fatls /", "entries", timeout=15)
             check("after the removal it is not in the directory",
                   "big.bin" not in out
-                  and "protonos64-testowy.bin" in out)
+                  and "threados64-testowy.bin" in out)
             q.command("fat", "cluster", timeout=15)
         finally:
             q.close()
@@ -159,17 +159,17 @@ def main():
         # --- What is really on the disk, according to somebody else
         listing = fat_dir(disk, ESP_START)
         check("mtools reads a directory we created",
-              "ProtonOS" in listing)
+              "ThreadOS" in listing)
         check("mtools reads a long name we wrote",
-              "protonos64-testowy.bin" in listing)
+              "threados64-testowy.bin" in listing)
         check("the long name has a correct short name too (~1)",
-              re.search(r"PROTON~\d\s+BIN", listing) is not None)
+              re.search(r"THREAD~\d\s+BIN", listing) is not None)
         check("the file we removed is gone for mtools too",
               "big" not in listing)
-        got = fat_get(disk, ESP_START, "/EFI/ProtonOS/hello.txt")
+        got = fat_get(disk, ESP_START, "/EFI/ThreadOS/hello.txt")
         check("the content of the written file, read back by mtools",
               got is not None and got.strip() == b"hello-world")
-        got = fat_get(disk, ESP_START, "/protonos64-testowy.bin")
+        got = fat_get(disk, ESP_START, "/threados64-testowy.bin")
         check("and the file with the long name",
               got is not None and got.strip() == b"ABCDEFGH")
 
@@ -184,9 +184,9 @@ def main():
             off = 8 + i * 24
             name = blob[off:off + 16].split(b"\0")[0].decode()
             o, sz = _s.unpack_from("<II", blob, off + 16)
-            if name == "libproton.so":
+            if name == "libthread.so":
                 want = blob[o:o + sz]
-        got = fat_get(disk, ESP_START, "/EFI/ProtonOS/libproton.so")
+        got = fat_get(disk, ESP_START, "/EFI/ThreadOS/libthread.so")
         check(f"the file from the initrd copied byte for byte "
               f"({len(want) if want else 0} B)",
               want is not None and got == want)
@@ -216,7 +216,7 @@ def main():
             q2 = Qemu(KERNEL, INITRD, cdrom=iso, disk=path, serial=slog2,
                       qemu="qemu-system-x86_64")
             try:
-                q2.wait_serial("proton64>", timeout=90)
+                q2.wait_serial("thread64>", timeout=90)
                 out = q2.command("fat 1", "cluster", timeout=20)
                 check(f"{name} recognised by the cluster count, "
                       f"not by the string in the boot sector",
@@ -268,7 +268,7 @@ def main():
         q3 = Qemu(KERNEL, INITRD, cdrom=iso, disk=maly32, serial=slog2,
                   qemu="qemu-system-x86_64")
         try:
-            q3.wait_serial("proton64>", timeout=90)
+            q3.wait_serial("thread64>", timeout=90)
             out = q3.command("fat 1", "cluster", timeout=20)
             check("a small volume does not pretend to be FAT16 - the cluster count is not "
                   "the only word",

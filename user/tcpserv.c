@@ -1,7 +1,7 @@
 /* tcpserv - a TCP server in ring 3 (port 5555)
  *
  * It greets a client, echoes back what it received and ends the
- * connection. Proof that ProtonOS handles a passive open too: a SYN
+ * connection. Proof that ThreadOS handles a passive open too: a SYN
  * from a foreign host, SYN|ACK, a queue of established connections and
  * a stream in both directions.
  */
@@ -9,7 +9,7 @@
 #include "usys.h"
 
 #define PORT 5555
-#define GREETING "ProtonOS TCP ready\n"
+#define GREETING "ThreadOS TCP ready\n"
 
 void _start(void)
 {

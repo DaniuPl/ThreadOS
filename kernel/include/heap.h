@@ -1,5 +1,5 @@
-#ifndef PROTONOS_HEAP_H
-#define PROTONOS_HEAP_H
+#ifndef THREADOS_HEAP_H
+#define THREADOS_HEAP_H
 
 #include <stdint.h>
 #include <stddef.h>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the wheel - two fingers on a laptop's touchpad.
+"""ThreadOS smoke test: the wheel - two fingers on a laptop's touchpad.
 
 A touchpad on the PS/2 port is a mouse: it reports relative movement
 and buttons exactly as one does, and its firmware turns a tap into a

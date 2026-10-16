@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: signals.
+"""ThreadOS smoke test: signals.
 
 There is one sharpest point here: the return from a handler. The signal
 arrives exactly at the moment the kernel has already put down the result
@@ -33,7 +33,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the cursor, windows, controls, a ring 3
+"""ThreadOS smoke test: the cursor, windows, controls, a ring 3
 application, the taskbar.
 
 Run on its own or through scripts/run_tests.py, which starts all the
@@ -24,7 +24,7 @@ def main():
     print("--- graphics mode (screendump) ---")
     q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q3.wait_for("ProtonOS shell")
+        q3.wait_for("ThreadOS shell")
         q3.type_line("gfx")
         time.sleep(1.0)
         sx, sy, at = q3.screen_pixels()
@@ -74,7 +74,7 @@ def main():
         check("the pointer's old place was cleaned up (teal ~50,41)",
               q4.wait_pixel(50, 41, (0, 128, 160)))
 
-        # Text (an 8x8 font): the title bar with the caption "ProtonOS".
+        # Text (an 8x8 font): the title bar with the caption "ThreadOS".
         # The bar is light grey; the glyph black -> a letter's cell has
         # both black and grey pixels (that is, it is a shape, not a solid
         # rectangle).

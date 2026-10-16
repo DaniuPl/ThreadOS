@@ -1,12 +1,12 @@
-#ifndef PROTONOS_FAT_H
-#define PROTONOS_FAT_H
+#ifndef THREADOS_FAT_H
+#define THREADOS_FAT_H
 
 #include <stdint.h>
 
 /* FAT12/16/32 - somebody else's filesystem, and the only one that
  * matters here.
  *
- * ProtonOS keeps its own files in PFS3 and has no reason to want
+ * ThreadOS keeps its own files in TFS3 and has no reason to want
  * anything else - except for one place. The EFI system partition is
  * FAT by decree: the firmware of every UEFI machine knows how to read
  * FAT and knows how to read nothing else, so a boot loader that is not
@@ -20,7 +20,7 @@
  * going to write into belongs to a machine that boots without us.
  *
  * Long names are read and written. They are not a nicety here: the
- * loader looks for 'protonos64.bin', which does not fit into eight
+ * loader looks for 'threados64.bin', which does not fit into eight
  * characters and a dot, and bending the name to the filesystem would
  * be letting the filesystem decide what the system's files are called.
  */
@@ -39,7 +39,7 @@ struct fat_entry {
    touched). */
 int fat_mount(uint32_t lba);
 
-/* The same, but from a chosen disk - a stick can be read while PFS
+/* The same, but from a chosen disk - a stick can be read while TFS
    keeps running on the machine's own disk. Every read and write of the
    mounted filesystem points the block layer there and puts it back. */
 int fat_mount_on(int disk, uint32_t lba);
@@ -94,7 +94,7 @@ int fat_unlink(const char *path);
 /* --- Making one -----------------------------------------------------
  *
  * The one place this system creates a FAT rather than writing into
- * somebody's: a machine on which ProtonOS is to be the only system
+ * somebody's: a machine on which ThreadOS is to be the only system
  * needs an EFI partition, and an EFI partition has to be FAT or the
  * firmware will not read it.
  *

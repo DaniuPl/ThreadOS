@@ -1,5 +1,5 @@
-#ifndef PROTONOS_HWINFO_H
-#define PROTONOS_HWINFO_H
+#ifndef THREADOS_HWINFO_H
+#define THREADOS_HWINFO_H
 
 /* What this machine actually is
  *

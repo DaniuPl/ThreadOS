@@ -3,7 +3,7 @@
  * It joins four worlds under one read/write interface:
  *   fd 0       - the keyboard (a blocking read)
  *   fd 1, 2    - the console (VGA plus the serial port)
- *   fd >= 3    - files on the PFS disk (each with its own offset)
+ *   fd >= 3    - files on the TFS disk (each with its own offset)
  *   any fd     - an end of an inter-process pipe (FD_PIPE)
  *
  * Thanks to that a program writes the same way to the screen

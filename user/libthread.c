@@ -1,4 +1,4 @@
-/* libproton - the ProtonOS shared library
+/* libthread - the ThreadOS shared library
  *
  * There is not a single line of code of its own here, and that is how
  * it should be. All the material lies where it has always lain - in
@@ -35,4 +35,4 @@
 #include "uhttp.h"
 #include "uhtml.h"
 #include "udns.h"
-#include "uproton.h"
+#include "uthread.h"

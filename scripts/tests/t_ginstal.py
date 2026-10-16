@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the installer on a screen of its own (ginstal).
+"""ThreadOS smoke test: the installer on a screen of its own (ginstal).
 
 Installing is not one task among others. While a disk is being written
 to, a taskbar and somebody's other windows within reach are not a
@@ -145,7 +145,7 @@ def main():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
 
         make_gpt_disk(target)
@@ -196,7 +196,7 @@ def main():
             # --- and what IS: the screen says what it is doing, and
             # offers exactly one way out of itself
             head = q.read_text(8, 8, 24, 1)
-            check("the screen says what it is", "ProtonOS - installation" in head)
+            check("the screen says what it is", "ThreadOS - installation" in head)
             # the button sits six pixels off the right edge (kernel/desktop.c)
             btn = q.read_text(w - 152 - 6 + 8, 9, 17, 1)
             check("and it offers the only way out: restarting the machine",
@@ -215,15 +215,15 @@ def main():
             # kernel drew it with - not from the serial port
             text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
             check("the window says what it is for",
-                  "Installing ProtonOS onto this machine's disk" in text)
+                  "Installing ThreadOS onto this machine's disk" in text)
             check("and what it found: a disk behind an AHCI controller",
                   "AHCI" in text and "partitions: 3" in text)
             check("and the EFI partition with its label",
                   "FAT32 LAPTOPESP" in text and "#1" in text)
             check("it lists all three files it will write",
-                  "/EFI/ProtonOS/BOOTX64.EFI" in text
-                  and "/EFI/ProtonOS/protonos64.bin" in text
-                  and "/EFI/ProtonOS/initrd64.img" in text)
+                  "/EFI/ThreadOS/BOOTX64.EFI" in text
+                  and "/EFI/ThreadOS/threados64.bin" in text
+                  and "/EFI/ThreadOS/initrd64.img" in text)
             check("the kernel size on the screen matches the file",
                   str(len(want_kernel)) in text)
             check("it says /EFI/BOOT/BOOTX64.EFI is free",
@@ -234,7 +234,7 @@ def main():
             # Nothing has been written yet - the window has only read
             check("until somebody clicks, nothing on the disk has changed",
                   fat_get(target, ESP_START,
-                          "/EFI/ProtonOS/protonos64.bin") is None)
+                          "/EFI/ThreadOS/threados64.bin") is None)
 
             # Two buttons at the bottom, because there are two ways of
             # installing and a way that is reached by first refusing
@@ -248,25 +248,25 @@ def main():
             q.mouse_goto(right, by)
             q.mouse_click()
             text = wait_text(q, cx + 6, cy + 4, 54, 16,
-                             "The whole disk for ProtonOS")
+                             "The whole disk for ThreadOS")
             check("the second button shows the other way: the whole disk",
-                  "The whole disk for ProtonOS" in text)
+                  "The whole disk for ThreadOS" in text)
             check("and it says outright what that means",
                   "THIS WILL ERASE EVERYTHING ON THIS DISK" in text)
             check("listing what it will do instead",
                   "partition table (GPT)" in text
                   and "EFI partition (FAT32)" in text
-                  and "ProtonOS partition (PFS)" in text)
+                  and "ThreadOS partition (TFS)" in text)
             check("and still nothing on the disk has changed",
                   fat_get(target, ESP_START,
-                          "/EFI/ProtonOS/protonos64.bin") is None)
+                          "/EFI/ThreadOS/threados64.bin") is None)
 
             q.mouse_goto(left, by)        # "Back"
             q.mouse_click()
             text = wait_text(q, cx + 6, cy + 4, 54, 16,
-                             "Installing ProtonOS onto this machine's disk")
+                             "Installing ThreadOS onto this machine's disk")
             check("'Back' goes back to installing beside",
-                  "Installing ProtonOS onto this machine's disk" in text)
+                  "Installing ThreadOS onto this machine's disk" in text)
 
             q.mouse_goto(left, by)        # "Install beside"
             q.mouse_click()
@@ -282,7 +282,7 @@ def main():
                   "that is not the word YES" in text)
             check("and still nothing has been written",
                   fat_get(target, ESP_START,
-                          "/EFI/ProtonOS/protonos64.bin") is None)
+                          "/EFI/ThreadOS/threados64.bin") is None)
 
             # The word, and then the kernel says no: writing needs an
             # admin, and the answer to that is a password
@@ -297,7 +297,7 @@ def main():
             text = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
             check("a wrong password opens nothing", "wrong password" in text)
 
-            q.type_line("proton")
+            q.type_line("thread")
             deadline = time.time() + 60
             done = ""
             while time.time() < deadline:
@@ -308,7 +308,7 @@ def main():
             check("with the right password the installation runs to the end",
                   "Done" in done)
             check("and it says what follows from that",
-                  "will boot ProtonOS off the disk" in done
+                  "will boot ThreadOS off the disk" in done
                   and "Nothing of anybody else's was touched" in done)
 
             # A click where the desktop's menu button would be does
@@ -327,9 +327,9 @@ def main():
             q.close()
 
         # --- What is really on that disk, according to somebody else
-        for path, want in (("/EFI/ProtonOS/BOOTX64.EFI", want_loader),
-                           ("/EFI/ProtonOS/protonos64.bin", want_kernel),
-                           ("/EFI/ProtonOS/initrd64.img", want_initrd),
+        for path, want in (("/EFI/ThreadOS/BOOTX64.EFI", want_loader),
+                           ("/EFI/ThreadOS/threados64.bin", want_kernel),
+                           ("/EFI/ThreadOS/initrd64.img", want_initrd),
                            ("/EFI/BOOT/BOOTX64.EFI", want_loader)):
             got = fat_get(target, ESP_START, path)
             check(f"{path} byte for byte ({len(want)} B)",
@@ -346,8 +346,8 @@ def main():
         q2 = Qemu(KERNEL, INITRD, disk=target, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("a disk installed from the window boots on its own", "protoboot" in out)
+            out = q2.wait_serial("threadboot: ThreadOS", timeout=60)
+            check("a disk installed from the window boots on its own", "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
             check("and the system on it reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)

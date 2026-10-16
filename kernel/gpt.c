@@ -1,7 +1,7 @@
 /* Writing a GPT
  *
  * part.c reads tables and writes nothing on purpose. This writes one,
- * and it exists for a single case: a machine on which ProtonOS is to
+ * and it exists for a single case: a machine on which ThreadOS is to
  * be the only system needs a table, and nobody else is going to make
  * it one.
  *
@@ -89,12 +89,12 @@ static const uint8_t GUID_ESP[16] = {
     0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B
 };
 
-/* Ours. Not borrowed from anybody: the bytes spell PROTONOS-PFS3, so
+/* Ours. Not borrowed from anybody: the bytes spell THREADOS-TFS3, so
    a person looking at a table with a hex editor can tell whose it is,
    and no other system will mistake it for one of its own. */
-static const uint8_t GUID_PFS[16] = {
-    'P', 'R', 'O', 'T', 'O', 'N', 'O', 'S',
-    '-', 'P', 'F', 'S', '3', 0, 0, 1
+static const uint8_t GUID_TFS[16] = {
+    'T', 'H', 'R', 'E', 'A', 'D', 'O', 'S',
+    '-', 'T', 'F', 'S', '3', 0, 0, 1
 };
 
 /* Disk and partition identities. A GUID is supposed to be unique and
@@ -179,11 +179,11 @@ int gpt_make(uint32_t esp_mib)
     put_name(e + 56, "EFI");
 
     e = table + ENT_SIZE;
-    memcpy(e, GUID_PFS, 16);
+    memcpy(e, GUID_TFS, 16);
     make_uuid(e + 16, total, 2);
     put64(e + 32, sys_start);
     put64(e + 40, last_usable);
-    put_name(e + 56, "ProtonOS");
+    put_name(e + 56, "ThreadOS");
 
     uint32_t table_crc = crc32(table, sizeof(table));
 

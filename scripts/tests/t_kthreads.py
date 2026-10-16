@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: kernel threads run by all the cores.
+"""ThreadOS smoke test: kernel threads run by all the cores.
 
 This is the change the earlier ones were waiting for. A secondary core
 already had an exception table, its own clock and locks on the shared
@@ -128,7 +128,7 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
                      qemu="qemu-system-x86_64")
             try:
-                q.wait_serial("proton64>", timeout=90)
+                q.wait_serial("thread64>", timeout=90)
                 ps = q.command("ps", "NAME", timeout=30)
                 check("every secondary core has an idle task of its own",
                       idle_per_core(ps, 4))
@@ -155,7 +155,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             ps = q3.command("ps", "NAME", timeout=30)
             check("every secondary core has an idle task of its own (32-bit)",
                   idle_per_core(ps, 4))
@@ -182,7 +182,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             out = q1.command("smpthreads", "Threads off", timeout=180)
             check_threads(out, " (one core)", 1)
         finally:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: locks on the kernel's shared structures.
+"""ThreadOS smoke test: locks on the kernel's shared structures.
 
 The secondary cores could so far only compute on what they were given -
 all the state shared between them was one number and one lock. For them
@@ -98,7 +98,7 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
                      qemu="qemu-system-x86_64")
             try:
-                q.wait_serial("proton64>", timeout=90)
+                q.wait_serial("thread64>", timeout=90)
                 out = q.command("smpmem", "Cores that counted", timeout=120)
                 verify(out, "", 4)
 
@@ -121,7 +121,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             out = q3.command("smpmem", "Cores that counted", timeout=120)
             verify(out, " (32-bit)", 4)
             after_run = q3.command("run hello", "has ended", timeout=60)
@@ -141,7 +141,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             out = q1.command("smpmem", "Cores that counted", timeout=120)
             verify(out, " (one core)", 1)
         finally:

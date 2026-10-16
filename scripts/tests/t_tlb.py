@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: telling the other cores that a mapping changed.
+"""ThreadOS smoke test: telling the other cores that a mapping changed.
 
 A page table is memory and memory is shared. A translation worked out
 FROM that table is not: every core keeps its own, in a cache no
@@ -112,7 +112,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, cpus=4)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             before = counters(q, "TLB:")
             check("the kernel counts mapping changes", before is not None)
@@ -167,7 +167,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             before = counters(q1, "TLB:")
             out = q1.command("runw tlbtest", "has ended", timeout=180)
             res = run_case(q1, out, " (one core)")
@@ -207,7 +207,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
             before = counters(q, "TLB:")
             check("the 64-bit kernel counts mapping changes too",
                   before is not None and before[0] > 0)

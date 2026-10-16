@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ELF64_H
-#define PROTONOS_ELF64_H
+#ifndef THREADOS_ELF64_H
+#define THREADOS_ELF64_H
 
 #include <stdint.h>
 
@@ -53,7 +53,7 @@
 /* The shared library lies just below the mapping area, at a fixed
    address - the same in every process, because only then can its code
    really be a single copy. The heap and the program's segments end at
-   its threshold; user64/libproton64.ld has to agree with this. */
+   its threshold; user64/libthread64.ld has to agree with this. */
 #define USER64_LIB_BASE    0x000000004F000000ULL
 #define USER64_TOP         USER64_LIB_BASE
 

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PCI_H
-#define PROTONOS_PCI_H
+#ifndef THREADOS_PCI_H
+#define THREADOS_PCI_H
 
 #include <stdint.h>
 

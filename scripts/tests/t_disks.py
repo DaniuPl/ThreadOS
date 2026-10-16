@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: several disks, and choosing between them.
+"""ThreadOS smoke test: several disks, and choosing between them.
 
 The block layer used to find one disk and that was the disk. It is a
 list now, and the reason is the installer: on a machine with more than
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_kind, gpt_read,
-                   GUID_ESP4, GUID_PFS4)
+                   GUID_ESP4, GUID_TFS4)
 
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
@@ -78,7 +78,7 @@ def main():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
 
         # The first disk belongs to somebody: a table, an EFI partition,
@@ -135,7 +135,7 @@ def main():
             # still boots, and one day a repair tool says the table is
             # damaged. This test found that; the assertion is what
             # keeps it found.
-            out = q.command("disk", "proton64>", timeout=20)
+            out = q.command("disk", "thread64>", timeout=20)
             check("'disk' on a disk with a table only reads it",
                   "I only read it" in out)
             ok, after, why2 = gpt_read(first)
@@ -158,10 +158,10 @@ def main():
               % ("" if ok else ": " + why), ok and len(parts) == 2)
         if len(parts) == 2:
             check("with an EFI partition and ours", parts[0][0] == GUID_ESP4
-                  and parts[1][0] == GUID_PFS4)
+                  and parts[1][0] == GUID_TFS4)
         check("its EFI partition holds a FAT32",
               fat_kind(second, 2048) == "FAT32")
-        got = fat_get(second, 2048, "/EFI/ProtonOS/protonos64.bin")
+        got = fat_get(second, 2048, "/EFI/ThreadOS/threados64.bin")
         check("and the kernel byte for byte (%d B)" % len(want_kernel),
               got is not None and got == want_kernel)
 
@@ -173,15 +173,15 @@ def main():
               (fat_get(first, 2048, "/EFI/Microsoft/bootmgfw.efi") or b"")
               .startswith(b"MZ-somebody-elses"))
         check("and our files did NOT land on it",
-              fat_get(first, 2048, "/EFI/ProtonOS/protonos64.bin") is None)
+              fat_get(first, 2048, "/EFI/ThreadOS/threados64.bin") is None)
 
         # --- and it boots, from the disk that was chosen
         shutil.copy(OVMF_VARS, nvram)
         q2 = Qemu(KERNEL, INITRD, disk=second, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("the named disk boots on its own", "protoboot" in out)
+            out = q2.wait_serial("threadboot: ThreadOS", timeout=60)
+            check("the named disk boots on its own", "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
             check("and the system on it reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ISR64_H
-#define PROTONOS_ISR64_H
+#ifndef THREADOS_ISR64_H
+#define THREADOS_ISR64_H
 
 #include <stdint.h>
 

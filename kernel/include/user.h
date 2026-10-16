@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USER_H
-#define PROTONOS_USER_H
+#ifndef THREADOS_USER_H
+#define THREADOS_USER_H
 
 #include <stdint.h>
 

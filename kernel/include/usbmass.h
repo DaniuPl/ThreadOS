@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USBMASS_H
-#define PROTONOS_USBMASS_H
+#ifndef THREADOS_USBMASS_H
+#define THREADOS_USBMASS_H
 
 #include <stdint.h>
 

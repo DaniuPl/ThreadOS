@@ -1,5 +1,5 @@
-#ifndef PROTONOS_HDA_H
-#define PROTONOS_HDA_H
+#ifndef THREADOS_HDA_H
+#define THREADOS_HDA_H
 
 #include <stdint.h>
 

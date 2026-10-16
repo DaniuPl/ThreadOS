@@ -1,5 +1,5 @@
-#ifndef PROTONOS_GDT_H
-#define PROTONOS_GDT_H
+#ifndef THREADOS_GDT_H
+#define THREADOS_GDT_H
 
 #include <stdint.h>
 

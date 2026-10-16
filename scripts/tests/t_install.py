@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: installing onto the machine's own disk (in text).
+"""ThreadOS smoke test: installing onto the machine's own disk (in text).
 
 The installer proper takes the whole screen and is checked in t_ginstal;
 this group is the same three files written by the same code, said out
@@ -73,7 +73,7 @@ def boot_stick(where):
     files it reads."""
     os.makedirs(os.path.join(where, "EFI", "BOOT"), exist_ok=True)
     shutil.copy(LOADER, os.path.join(where, "EFI", "BOOT", "BOOTX64.EFI"))
-    shutil.copy(KERNEL64, os.path.join(where, "protonos64.bin"))
+    shutil.copy(KERNEL64, os.path.join(where, "threados64.bin"))
     shutil.copy(INITRD64, os.path.join(where, "initrd64.img"))
 
 
@@ -126,9 +126,9 @@ def main():
                  serial=slog, qemu="qemu-system-x86_64",
                  uefi=(OVMF_CODE, nvram))
         try:
-            out = q.wait_serial("protoboot: ProtonOS", timeout=60)
+            out = q.wait_serial("threadboot: ThreadOS", timeout=60)
             check("the machine boots off the stick through our loader",
-                  "protoboot" in out)
+                  "threadboot" in out)
             head = q.wait_serial("loader:", timeout=30)
             check("the loader hands over the kernel and ITSELF as modules - without that "
                   "there is nothing to install from",
@@ -138,7 +138,7 @@ def main():
             # Somebody who does not type the word gets nothing done
             out = q.command("install text", "Type YES", timeout=30)
             check("the installer first says what it would write",
-                  "/EFI/ProtonOS/protonos64.bin" in out
+                  "/EFI/ThreadOS/threados64.bin" in out
                   and "EFI partition: number 1" in out)
             check("and it promises what it will not touch",
                   "I do NOT touch: the partition table" in out)
@@ -149,20 +149,20 @@ def main():
             out = q.command("install text", "Type YES", timeout=30)
             out = q.command("YES", "Done", timeout=90)
             check("after YES it writes all three files",
-                  "/EFI/ProtonOS/BOOTX64.EFI - done" in out
-                  and "/EFI/ProtonOS/protonos64.bin - done" in out
-                  and "/EFI/ProtonOS/initrd64.img - done" in out)
+                  "/EFI/ThreadOS/BOOTX64.EFI - done" in out
+                  and "/EFI/ThreadOS/threados64.bin - done" in out
+                  and "/EFI/ThreadOS/initrd64.img - done" in out)
             check("and - since nobody was there - "
                   "/EFI/BOOT/BOOTX64.EFI too",
                   "/EFI/BOOT/BOOTX64.EFI - done" in out
-                  and "will boot ProtonOS off the disk" in out)
+                  and "will boot ThreadOS off the disk" in out)
         finally:
             q.close()
 
         # --- What is really on that disk, according to somebody else
-        for path, want in (("/EFI/ProtonOS/BOOTX64.EFI", want_loader),
-                           ("/EFI/ProtonOS/protonos64.bin", want_kernel),
-                           ("/EFI/ProtonOS/initrd64.img", want_initrd),
+        for path, want in (("/EFI/ThreadOS/BOOTX64.EFI", want_loader),
+                           ("/EFI/ThreadOS/threados64.bin", want_kernel),
+                           ("/EFI/ThreadOS/initrd64.img", want_initrd),
                            ("/EFI/BOOT/BOOTX64.EFI", want_loader)):
             got = fat_get(target, ESP_START, path)
             check(f"{path} byte for byte ({len(want)} B)",
@@ -180,9 +180,9 @@ def main():
         q2 = Qemu(KERNEL, INITRD, disk=target, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
+            out = q2.wait_serial("threadboot: ThreadOS", timeout=60)
             check("the installed disk boots on its own, with no stick",
-                  "protoboot" in out)
+                  "threadboot" in out)
             out = q2.wait_serial("handing the machine", timeout=30)
             check(f"the loader finds the kernel where the installer put it "
                   f"({len(want_kernel)} B)",
@@ -210,7 +210,7 @@ def main():
                   "boot menu" in out)
             out = q3.command("YES", "Done", timeout=90)
             check("it writes its files all the same",
-                  "/EFI/ProtonOS/protonos64.bin - done" in out)
+                  "/EFI/ThreadOS/threados64.bin - done" in out)
             check("but it does not talk about writing over somebody else's file",
                   "/EFI/BOOT/BOOTX64.EFI - done" not in out
                   and "add an entry in the firmware" in out)
@@ -220,12 +220,12 @@ def main():
         got = fat_get(taken, ESP_START, "/EFI/BOOT/BOOTX64.EFI")
         check("the foreign loader under /EFI/BOOT stayed, byte for byte",
               got == FOREIGN_FALLBACK)
-        got = fat_get(taken, ESP_START, "/EFI/ProtonOS/protonos64.bin")
+        got = fat_get(taken, ESP_START, "/EFI/ThreadOS/threados64.bin")
         check("and our kernel is in place anyway",
               got is not None and got == want_kernel)
         listing = fat_dir(taken, ESP_START)
         check("mtools sees both directories side by side",
-              "ProtonOS" in listing and "Microsoft" in listing)
+              "ThreadOS" in listing and "Microsoft" in listing)
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (target, taken, slog, slog2, slog3, nvram):

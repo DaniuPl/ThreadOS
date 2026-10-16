@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SMPTHREADS_H
-#define PROTONOS_SMPTHREADS_H
+#ifndef THREADOS_SMPTHREADS_H
+#define THREADOS_SMPTHREADS_H
 
 /* Kernel threads on all cores
  *

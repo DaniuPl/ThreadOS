@@ -1,5 +1,5 @@
-#ifndef PROTONOS_INITRD_H
-#define PROTONOS_INITRD_H
+#ifndef THREADOS_INITRD_H
+#define THREADOS_INITRD_H
 
 #include <stdint.h>
 #include "multiboot.h"

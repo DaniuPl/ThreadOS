@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the scale - one desktop pixel, four screen ones.
+"""ThreadOS smoke test: the scale - one desktop pixel, four screen ones.
 
 Every window, icon and status line in this system is placed in absolute
 pixels, and the font is eight of them tall. That was right while a
@@ -48,14 +48,14 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             # The scale is a setting, so it is set before the compositor
             # starts - the mode is set up once and does not change under
             # a running desktop.
             q.type_line("sudo set scale 2")
             time.sleep(1)
-            saved = q.command("proton", "saved", timeout=30)
+            saved = q.command("thread", "saved", timeout=30)
             check("the scale setting was saved", "scale = 2" in saved)
 
             q.type_line("desktop")

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PAGING64_H
-#define PROTONOS_PAGING64_H
+#ifndef THREADOS_PAGING64_H
+#define THREADOS_PAGING64_H
 
 #include <stdint.h>
 

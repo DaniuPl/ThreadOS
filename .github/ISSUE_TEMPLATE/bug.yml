@@ -34,7 +34,7 @@ body:
     attributes:
       label: How it was started
       description: The QEMU command line, or the machine and how it boots (BIOS or UEFI).
-      placeholder: qemu-system-x86_64 -cdrom build/protonos64.iso ...
+      placeholder: qemu-system-x86_64 -cdrom build/threados64.iso ...
     validations:
       required: true
 

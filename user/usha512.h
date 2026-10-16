@@ -9,8 +9,8 @@
  * the roots of successive primes - generated, not copied out by hand.
  */
 
-#ifndef PROTONOS_USHA512_H
-#define PROTONOS_USHA512_H
+#ifndef THREADOS_USHA512_H
+#define THREADOS_USHA512_H
 
 #include "uapi.h"
 

@@ -36,7 +36,7 @@
 #define LIB_BASE   USER_LIB_BASE
 #endif
 
-#define LIB_FILE   "libproton.so"
+#define LIB_FILE   "libthread.so"
 
 /* --- ELF headers ------------------------------------------------------ */
 

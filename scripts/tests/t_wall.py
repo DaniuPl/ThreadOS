@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a wallpaper behind the desktop.
+"""ThreadOS smoke test: a wallpaper behind the desktop.
 
 The background was a colour, and then sixteen bands of a colour. It
 could not be a picture, because a picture has to come from somewhere -
@@ -53,7 +53,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             # --- the picture is made by a program in ring 3 ----------
             out = q.command("run mkwall wallpaper.img 1 2", "ended",
@@ -78,7 +78,7 @@ def main():
 
             q.type_line("sudo set wallpaper wallpaper.img")
             time.sleep(1)
-            saved = q.command("proton", "saved", timeout=30)
+            saved = q.command("thread", "saved", timeout=30)
             check("the setting was saved", "wallpaper = wallpaper.img" in saved)
 
             # --- and the desktop puts it up -------------------------
@@ -129,10 +129,10 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ProtonOS shell", timeout=40)
+            q2.wait_for("ThreadOS shell", timeout=40)
             q2.type_line("sudo set wallpaper nosuchfile.img")
             time.sleep(1)
-            q2.command("proton", "saved", timeout=30)
+            q2.command("thread", "saved", timeout=30)
             q2.type_line("desktop")
             time.sleep(6)
             q2.mouse_home()

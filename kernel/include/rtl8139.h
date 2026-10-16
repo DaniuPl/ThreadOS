@@ -1,5 +1,5 @@
-#ifndef PROTONOS_RTL8139_H
-#define PROTONOS_RTL8139_H
+#ifndef THREADOS_RTL8139_H
+#define THREADOS_RTL8139_H
 
 #include <stdint.h>
 

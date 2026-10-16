@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: swapping pages out to disk.
+"""ThreadOS smoke test: swapping pages out to disk.
 
 A machine with 16 MiB of RAM and a program that takes 18 MiB: without
 swapping it has no right to succeed. The pattern depends on the page
@@ -35,7 +35,7 @@ def main():
         boot = q16.wait_for("Page swapping:", timeout=30)
         check("the swap file is created at boot",
               re.search(r"Page swapping: \d+ KiB on the disk", boot) is not None)
-        q16.wait_for("ProtonOS shell", timeout=20)
+        q16.wait_for("ThreadOS shell", timeout=20)
         q16.type_line("clear")
         q16.type_line("run swaptest 18")
         out = q16.wait_for("[swaptest] all", timeout=120)

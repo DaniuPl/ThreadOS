@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USBHC_H
-#define PROTONOS_USBHC_H
+#ifndef THREADOS_USBHC_H
+#define THREADOS_USBHC_H
 
 #include <stdint.h>
 

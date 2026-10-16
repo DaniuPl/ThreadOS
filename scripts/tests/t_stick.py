@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the stick a machine actually boots from.
+"""ThreadOS smoke test: the stick a machine actually boots from.
 
 What a UEFI machine starts from is not a disc and not a kernel: a disk
 with a GPT, an EFI system partition in it, a FAT filesystem in that and
@@ -103,7 +103,7 @@ def main():
         check("mtools sees in it the directory the firmware looks in",
               "BOOT" in listing)
         for path, want in (("/EFI/BOOT/BOOTX64.EFI", want_loader),
-                           ("/protonos64.bin", want_kernel),
+                           ("/threados64.bin", want_kernel),
                            ("/initrd64.img", want_initrd)):
             got = fat_get(img, 2048, path)
             check("%s byte for byte (%d B)" % (path, len(want)),
@@ -114,8 +114,8 @@ def main():
         q = Qemu(KERNEL, INITRD, disk=img, serial=slog,
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q.wait_serial("protoboot: ProtonOS", timeout=60)
-            check("the firmware finds our loader on it", "protoboot" in out)
+            out = q.wait_serial("threadboot: ThreadOS", timeout=60)
+            check("the firmware finds our loader on it", "threadboot" in out)
             out = q.wait_serial("handing the machine", timeout=30)
             check("the loader finds the kernel where we put it "
                   "(%d B)" % len(want_kernel),

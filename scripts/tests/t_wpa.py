@@ -1,4 +1,4 @@
-"""ProtonOS smoke test: the cryptography of WPA2 (IEEE 802.11i).
+"""ThreadOS smoke test: the cryptography of WPA2 (IEEE 802.11i).
 
 There is no radio in this system, and QEMU has no wireless card to
 emulate - so this is where the honest line runs: everything a station
@@ -81,7 +81,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
 
             out = q.command("run wpatest", "exit code", timeout=240)
             check("SHA-1, HMAC-SHA1 and the PMK from a passphrase (802.11i)",
@@ -142,7 +142,7 @@ def main():
         q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
                  serial=tempfile.mktemp(suffix=".log"))
         try:
-            q.wait_for("ProtonOS shell")
+            q.wait_for("ThreadOS shell")
             q.type_line("run wpatest")
             screen = q.wait_for("[wpa] everything matches", timeout=240)
             check("the same vectors pass in 32-bit mode",

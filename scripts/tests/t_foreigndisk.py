@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a disk that is not ours is not ours to take.
+"""ThreadOS smoke test: a disk that is not ours is not ours to take.
 
 Until this group existed, fs_init() did something that was harmless for
 as long as every disk this system ever saw was an empty file made by a
 test, and catastrophic the first time it met a real one: if the first
-block did not say PFS3, it FORMATTED the disk. No question, no look at
+block did not say TFS3, it FORMATTED the disk. No question, no look at
 what was there.
 
-A laptop's disk does not say PFS3 either. Booting this system from a
+A laptop's disk does not say TFS3 either. Booting this system from a
 stick would have thrown away the partition table, the Windows and
 everything else, in the first second, without asking.
 
@@ -54,7 +54,7 @@ def main():
 
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            boot = q.wait_for("ProtonOS shell", timeout=40)
+            boot = q.wait_for("ThreadOS shell", timeout=40)
             check("the kernel says there is something on the disk and does not touch it",
                   "there IS something on the disk" in boot)
             check("and it hints what to do if it is to be ours after all",
@@ -93,7 +93,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, blank, append=TEXT_MODE, serial=slog2)
         try:
-            boot = q.wait_for("ProtonOS shell", timeout=40)
+            boot = q.wait_for("ThreadOS shell", timeout=40)
             check("an empty disk is formatted as it always was",
                   "formatted" in boot)
             check("and there is no talk of a refusal there", "there IS something on the disk" not in boot)
@@ -115,7 +115,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
             q.type_line("format 3")
             time.sleep(2)
             said = q.screen()
@@ -125,8 +125,8 @@ def main():
             q.type_line("YES")
             time.sleep(4)
             said = q.screen()
-            check("and it creates a PFS on it",
-                  "this partition is a ProtonOS PFS now" in said)
+            check("and it creates a TFS on it",
+                  "this partition is a ThreadOS TFS now" in said)
 
             q.type_line("write proof.txt installed-beside-windows")
             time.sleep(2)
@@ -141,11 +141,11 @@ def main():
         # And the system finds it again on the next boot
         q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
         try:
-            boot = q.wait_for("ProtonOS shell", timeout=40)
-            check("after the restart the kernel finds the PFS in the partition ('%s')"
+            boot = q.wait_for("ThreadOS shell", timeout=40)
+            check("after the restart the kernel finds the TFS in the partition ('%s')"
                   % next((l.strip() for l in boot.splitlines()
                           if "in partition" in l), "no line"),
-                  "PFS: in partition 3" in boot)
+                  "TFS: in partition 3" in boot)
             out = q.command("cat proof.txt", "installed", timeout=20)
             check("and the file written before the restart is there",
                   "installed-beside-windows" in out)
@@ -165,7 +165,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE, serial=slog3)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             q.type_line("format")
             time.sleep(2)
@@ -185,14 +185,14 @@ def main():
         # And now the word itself
         q = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE, serial=slog3)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
             q.type_line("format")
             time.sleep(2)
             q.type_line("YES")
             time.sleep(4)
             said = q.screen()
             check("and a typed YES formats the disk",
-                  "the whole disk is a ProtonOS PFS now" in said)
+                  "the whole disk is a ThreadOS TFS now" in said)
         finally:
             q.close()
         check("and then the GPT is gone - which is what was asked for",

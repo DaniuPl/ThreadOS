@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: system settings.
+"""ThreadOS smoke test: system settings.
 
 Everything the system knew about itself was written into it at build
 time. A name server could be changed with a command, and the change
@@ -79,7 +79,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             out = q.command("set", "usage:", timeout=30)
             # A listing that shows nothing would pass every other check
@@ -90,8 +90,8 @@ def main():
             # The default is what the system had before there were any
             # settings at all - so nothing changed for a machine that
             # never sets one
-            check("the machine's default name is 'proton'",
-                  re.search(r"name = proton\b", out) is not None)
+            check("the machine's default name is 'thread'",
+                  re.search(r"name = thread\b", out) is not None)
 
             # Changing a setting is changing the system, so it goes
             # through 'sudo' - the password is asked for on the next
@@ -99,7 +99,7 @@ def main():
             def set_as_admin(command, wait="saved"):
                 q.type_line("sudo " + command)
                 time.sleep(1)
-                return q.command("proton", wait, timeout=30)
+                return q.command("thread", wait, timeout=30)
 
             changed = set_as_admin("set name machine")
             check("the name change was accepted", "name = machine (saved)"
@@ -130,7 +130,7 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ProtonOS shell", timeout=40)
+            q2.wait_for("ThreadOS shell", timeout=40)
             boot = q2.serial()
             # The kernel says at boot what it read - and it says the new
             # name, so the file was read before anything used it
@@ -194,7 +194,7 @@ def main():
             # The kernel refuses a plain user, so the window asks for
             # the admin's password - see t_users_gui.py for that on its
             # own; here it is simply the way to the disk
-            for ch in "proton":
+            for ch in "thread":
                 q.sendkey(ch)
                 time.sleep(0.15)
             q.sendkey("ret")

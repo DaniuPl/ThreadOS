@@ -1,5 +1,5 @@
-#ifndef PROTONOS_MOUSE_H
-#define PROTONOS_MOUSE_H
+#ifndef THREADOS_MOUSE_H
+#define THREADOS_MOUSE_H
 
 /* PS/2 mouse driver (IRQ12). The position is accumulated from relative
    movements and clamped to the screen range (320x200 by default -

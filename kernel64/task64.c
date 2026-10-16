@@ -49,7 +49,7 @@
    there. */
 struct fd_entry {
     int kind;
-    int slot;                    /* a PFS inode or a pipe number */
+    int slot;                    /* a TFS inode or a pipe number */
     uint32_t pos;                /* where this particular reader stands */
 };
 
@@ -78,7 +78,7 @@ struct task64 {
         uint64_t start, end;  /* the address range (0 = a free entry) */
         uint32_t size;        /* how many bytes the file itself has */
         uint32_t nblocks_of;
-        uint32_t *blocks;         /* the PFS block numbers, in order */
+        uint32_t *blocks;         /* the TFS block numbers, in order */
         uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
     int cwd;                     /* the working directory (an inode, FS_ROOT = /) */
@@ -1112,7 +1112,7 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
     return 0;
 }
 
-/* The PFS block number at a given index of the mapping covering an address */
+/* The TFS block number at a given index of the mapping covering an address */
 uint32_t task64_mmap_block(uint64_t addr, uint32_t index)
 {
     uint64_t page = addr & ~0xFFFULL;

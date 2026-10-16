@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds user/caroots.h - the ProtonOS built-in trust store.
+"""Builds user/caroots.h - the ThreadOS built-in trust store.
 
 It takes the named CA roots from the system's bundle (by default
 /etc/ssl/certs/ca-certificates.crt) and writes them as glued DER
@@ -75,8 +75,8 @@ def main():
     for _, subj, der in chosen:
         cn = subj.replace("subject=", "")
         lines.append(" *   - %s (%u B)" % (cn, len(der)))
-    lines += [" */", "", "#ifndef PROTONOS_CAROOTS_H",
-              "#define PROTONOS_CAROOTS_H", "", '#include "usys.h"', "",
+    lines += [" */", "", "#ifndef THREADOS_CAROOTS_H",
+              "#define THREADOS_CAROOTS_H", "", '#include "usys.h"', "",
               "#define CA_ROOTS_COUNT %u" % len(chosen), "",
               "static const uint8_t ca_roots_der[] = {"]
 

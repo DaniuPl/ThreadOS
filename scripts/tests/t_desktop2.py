@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the file manager, icons, the monitor, the
+"""ThreadOS smoke test: the file manager, icons, the monitor, the
 terminal, window sizes.
 
 Run on its own or through scripts/run_tests.py, which starts all the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: maximising a window.
+"""ThreadOS smoke test: maximising a window.
 
 A window could be moved, resized by its corner, minimised to the bar
 and closed. What it could not be is made to fill the screen - the one

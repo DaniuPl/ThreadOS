@@ -1,4 +1,4 @@
-/* ProtonOS - the kernel's main entry point in C */
+/* ThreadOS - the kernel's main entry point in C */
 
 #include <stdint.h>
 #include "include/vga.h"
@@ -173,7 +173,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     serial_init();
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    printk("ProtonOS\n");
+    printk("ThreadOS\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     printk("The kernel is running in 32-bit protected mode.\n\n");
 
@@ -258,7 +258,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     blk_init();
     if (fs_init())
-        printk("[ OK ] Disk %s + PFS ready (the 'fls', 'cat', 'write' commands)\n",
+        printk("[ OK ] Disk %s + TFS ready (the 'fls', 'cat', 'write' commands)\n",
                blk_name());
 
     /* What the machine remembers about itself. Right after the file

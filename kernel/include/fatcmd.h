@@ -1,5 +1,5 @@
-#ifndef PROTONOS_FATCMD_H
-#define PROTONOS_FATCMD_H
+#ifndef THREADOS_FATCMD_H
+#define THREADOS_FATCMD_H
 
 /* The commands that look into a FAT partition.
  *

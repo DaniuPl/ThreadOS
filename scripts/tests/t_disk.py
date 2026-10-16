@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: running programs from the disk.
+"""ThreadOS smoke test: running programs from the disk.
 
 The ELF loader and the file system existed side by side for a long time
 and were never joined: 'run' looked only into the initrd, that is, into
@@ -55,8 +55,8 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("PFS ready", timeout=90)
-            q.wait_serial("proton64>", timeout=30)
+            q.wait_serial("TFS ready", timeout=90)
+            q.wait_serial("thread64>", timeout=30)
 
             missing = q.command("run " + ON_DISK, "run:")
             check("before the copy the program is not on the disk",
@@ -86,7 +86,7 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
-            q2.wait_serial("proton64>", timeout=90)
+            q2.wait_serial("thread64>", timeout=90)
             after = q2.command("run " + ON_DISK, "[hello64] ending",
                               timeout=30)
             check("the program survived the restart and still starts",
@@ -140,7 +140,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             copied = q3.command("cp hello " + ON_DISK, "cp:")
             check("'cp' copies a program onto the disk (32-bit)",
                   "cp: 'hello' -> '%s'" % ON_DISK in copied)

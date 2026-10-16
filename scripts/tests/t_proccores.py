@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: user programs on all the cores.
+"""ThreadOS smoke test: user programs on all the cores.
 
 Kernel threads ran on all the cores earlier already. A program in ring 3
 is another matter, though: it needs its own task state segment on every
@@ -146,7 +146,7 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
                      qemu="qemu-system-x86_64")
             try:
-                q.wait_serial("proton64>", timeout=90)
+                q.wait_serial("thread64>", timeout=90)
                 run_case(q, 4, "")
                 after_run = q.command("run hello64", "exit code", timeout=60)
                 check("the kernel still runs after the attempt",
@@ -164,7 +164,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             run_case(q3, 4, " (32-bit)")
             after_run = q3.command("run hello", "has ended", timeout=60)
             check("the kernel still runs after the attempt (32-bit)",
@@ -180,7 +180,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             run_case(q1, 1, " (one core)")
         finally:
             q1.close()

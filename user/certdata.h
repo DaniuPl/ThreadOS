@@ -1,8 +1,8 @@
 /* Test data for certificate checking - generated with openssl.
  *
  * cert_der: a self-signed certificate (RSA-2048,
- *   sha256WithRSAEncryption) with a SubjectAltName on protonos.test and
- *   *.protonos.test. Since its own key signed it, the signature can be
+ *   sha256WithRSAEncryption) with a SubjectAltName on threados.test and
+ *   *.threados.test. Since its own key signed it, the signature can be
  *   checked without any trust store - and the whole DER parser along
  *   the way.
  * pss_sig: a signature over the same message in the PSS scheme (which
@@ -15,8 +15,8 @@
  *   how ISRG Root X2, among others, is issued.
  */
 
-#ifndef PROTONOS_CERTDATA_H
-#define PROTONOS_CERTDATA_H
+#ifndef THREADOS_CERTDATA_H
+#define THREADOS_CERTDATA_H
 
 #include "uapi.h"
 
@@ -150,7 +150,7 @@ static const uint8_t ec_sig[] = {
    sentence anybody reads: pss_sig and ec_sig were computed on these
    exact bytes, so translating it would break both signatures. It is
    left as it was written. */
-static const char pss_msg[] = "ProtonOS test wiadomosci do podpisu PSS";
+static const char pss_msg[] = "ThreadOS test wiadomosci do podpisu PSS";
 
 static const uint8_t p384_cert_der[] = {
     0x30,0x82,0x01,0xdc,0x30,0x82,0x01,0x62,0xa0,0x03,0x02,0x01,0x02,0x02,

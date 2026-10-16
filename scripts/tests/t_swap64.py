@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: swapping pages out to disk in the 64-bit kernel.
+"""ThreadOS smoke test: swapping pages out to disk in the 64-bit kernel.
 
 The program takes more memory than the machine has RAM. Along the way
 the kernel has to throw some of its pages out to disk and fetch them
@@ -61,7 +61,7 @@ def main():
                   re.search(r"Page swapping: \d+ KiB on the disk \(swap\.sys\)",
                             start) is not None)
 
-            q.wait_serial("proton64>", timeout=30)
+            q.wait_serial("thread64>", timeout=30)
             q.type_line("run swaptest64 %d" % REQUEST_MIB)
             out = q.wait_serial("[swaptest64] all", timeout=240)
             check("the program got more memory than the machine has RAM",

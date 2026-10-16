@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a USB keyboard on an xHCI controller.
+"""ThreadOS smoke test: a USB keyboard on an xHCI controller.
 
 xHCI is the third and last USB controller - the only one newer boards
 have. It differs from UHCI not in details but in the division of labour:
@@ -80,7 +80,7 @@ def main():
                       re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
                                 start) is not None)
 
-                q.wait_serial("proton64>", timeout=30)
+                q.wait_serial("thread64>", timeout=30)
                 time.sleep(0.5)
                 before = len(q.serial())
                 type_text(q, "uptime")
@@ -146,7 +146,7 @@ def main():
             qh = Qemu(KERNEL, INITRD, cdrom=isoh, serial=slogh,
                       usbkbd="hub", qemu="qemu-system-x86_64")
             try:
-                start = qh.wait_serial("proton64>", timeout=90)
+                start = qh.wait_serial("thread64>", timeout=90)
                 check("the system finds the hub and counts its sockets",
                       re.search(r"A USB hub in socket \d+: "
                                 r"\d+ sockets more", start) is not None)
@@ -202,7 +202,7 @@ def main():
                 os.makedirs(os.path.join(esp, "EFI", "BOOT"))
                 shutil.copy(LOADER,
                             os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-                shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+                shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
                 shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
                 shutil.copy(OVMF_VARS, nvram)
 
@@ -243,7 +243,7 @@ def main():
             check("the controller did not report itself as UHCI",
                   "HID, UHCI" not in start)
 
-            q3.wait_serial("ProtonOS shell", timeout=40)
+            q3.wait_serial("ThreadOS shell", timeout=40)
             time.sleep(1.0)
             before = len(q3.serial())
             type_text(q3, "uptime")

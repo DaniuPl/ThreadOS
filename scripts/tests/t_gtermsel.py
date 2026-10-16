@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: selecting text with the mouse.
+"""ThreadOS smoke test: selecting text with the mouse.
 
 The clipboard could take the line being TYPED. What it could not take
 was anything a program had written - which is most of what is in a

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SWAP_H
-#define PROTONOS_SWAP_H
+#ifndef THREADOS_SWAP_H
+#define THREADOS_SWAP_H
 
 #include <stdint.h>
 
@@ -8,8 +8,8 @@
  * A store for pages evicted from memory. We reserve the space through
  * the filesystem (a file 'swap.sys') so that 'df' and 'fls' tell the
  * truth and so that nobody writes over it - but the pages themselves
- * travel back and forth directly through ATA, bypassing the PFS code.
- * PFS has one shared block buffer, and swapping can start in the
+ * travel back and forth directly through ATA, bypassing the TFS code.
+ * TFS has one shared block buffer, and swapping can start in the
  * middle of any file operation; getting in its way there would end in
  * a broken disk.
  */

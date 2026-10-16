@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SIGNAL64_H
-#define PROTONOS_SIGNAL64_H
+#ifndef THREADOS_SIGNAL64_H
+#define THREADOS_SIGNAL64_H
 
 #include <stdint.h>
 

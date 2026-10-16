@@ -22,7 +22,7 @@
    point, makes the number in the file useless anywhere else. */
 static uint64_t hash(const char *password)
 {
-    static const char salt[] = "ProtonOS:";
+    static const char salt[] = "ThreadOS:";
     uint64_t h = 0xcbf29ce484222325ULL;
     for (const char *p = salt; *p; p++) {
         h ^= (uint64_t)(uint8_t)*p;

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_DYNLINK_H
-#define PROTONOS_DYNLINK_H
+#ifndef THREADOS_DYNLINK_H
+#define THREADOS_DYNLINK_H
 
 #include <stdint.h>
 

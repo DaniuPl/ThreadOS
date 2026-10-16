@@ -1,11 +1,11 @@
-#ifndef PROTONOS_EXEC_H
-#define PROTONOS_EXEC_H
+#ifndef THREADOS_EXEC_H
+#define THREADOS_EXEC_H
 
 #include <stdint.h>
 
 /* Where the shared library sits in a process's address space.
    Below the mapping area (0xB0000000) and above the heap, which ends
-   at its doorstep. Must agree with user/libproton.ld. */
+   at its doorstep. Must agree with user/libthread.ld. */
 #define USER_LIB_BASE  0xAF000000u
 
 /* Runs an ELF program from the initrd as a user process (ring 3, its

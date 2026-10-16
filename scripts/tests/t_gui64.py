@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: graphical applications in ring 3 (64-bit kernel).
+"""ThreadOS smoke test: graphical applications in ring 3 (64-bit kernel).
 
 The desktop has so far worked with itself alone - the compositor sat in
 the kernel, and the icons pointed at programs that did not exist in long
@@ -73,13 +73,13 @@ def main():
         fh.truncate(DISK_SIZE)
     try:
         os.makedirs(d + "/boot/grub")
-        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(KERNEL64, d + "/boot/threados64.bin")
         shutil.copy(INITRD64, d + "/boot/initrd64.img")
         with open(d + "/boot/grub/grub.cfg", "w") as fh:
             fh.write("insmod all_video\nset gfxpayload=keep\n"
                      "set timeout=0\nset default=0\n"
-                     'menuentry "ProtonOS 64" {\n'
-                     "    multiboot2 /boot/protonos64.bin\n"
+                     'menuentry "ThreadOS 64" {\n'
+                     "    multiboot2 /boot/threados64.bin\n"
                      "    module2 /boot/initrd64.img initrd64\n}\n")
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
@@ -91,7 +91,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
             # A file on the disk for the file manager - once the desktop
             # starts the keyboard belongs to it, so it is now or never
             q.command("write note hello-from-the-disk", "write:")
@@ -270,7 +270,7 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
-            q2.wait_serial("proton64>", timeout=60)
+            q2.wait_serial("thread64>", timeout=60)
             q2.type_line("desktop")
             q2.wait_serial("The desktop is starting", timeout=30)
             check("the desktop comes up a second time", q2.wait_desktop(30))

@@ -26,8 +26,8 @@
  * certificate revocation and name constraint checking.
  */
 
-#ifndef PROTONOS_UTLS_H
-#define PROTONOS_UTLS_H
+#ifndef THREADOS_UTLS_H
+#define THREADOS_UTLS_H
 
 #include "uapi.h"
 #include "usha256.h"

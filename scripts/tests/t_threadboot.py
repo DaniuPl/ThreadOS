@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: our own UEFI boot loader (protoboot).
+"""ThreadOS smoke test: our own UEFI boot loader (threadboot).
 
 The system is started here by nothing borrowed. On the disk there is an
 EFI system partition with three files - our loader, the kernel and the
@@ -50,7 +50,7 @@ def pe_says(path):
 
 def main():
     print()
-    print("--- our own UEFI boot loader (protoboot) ---")
+    print("--- our own UEFI boot loader (threadboot) ---")
 
     if KERNEL64 is None or not os.path.exists(KERNEL64):
         print("SKIPPED: no 64-bit image (make kernel64)")
@@ -85,7 +85,7 @@ def main():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
         kbytes = os.path.getsize(KERNEL64)
         ibytes = os.path.getsize(INITRD64)
@@ -94,9 +94,9 @@ def main():
         q = Qemu(KERNEL, INITRD, esp=esp, serial=slog,
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q.wait_serial("protoboot: ProtonOS", timeout=60)
+            out = q.wait_serial("threadboot: ThreadOS", timeout=60)
             check("the firmware starts our boot loader",
-                  "protoboot: ProtonOS" in out)
+                  "threadboot: ThreadOS" in out)
             # No GRUB was put on this disk, so anything that starts had
             # better be ours
             check("there is no other loader on this disc",
@@ -128,7 +128,7 @@ def main():
             # next word can only come from the kernel
             gone = q.wait_serial("handing the machine to the kernel", timeout=30)
             check("the loader says goodbye to the firmware (ExitBootServices)",
-                  "protoboot: handing the machine to the kernel" in gone)
+                  "threadboot: handing the machine to the kernel" in gone)
 
             boot = q.wait_serial("Multiboot OK", timeout=60)
             check("the kernel starts after leaving long mode and coming back to it",

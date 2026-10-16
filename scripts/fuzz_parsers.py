@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the ProtonOS parsers against corrupted data.
+"""Checks the ThreadOS parsers against corrupted data.
 
 Two fronts: the ring 3 programs (certificates, HTML, HTTP) and the
 packet path in the kernel (net.c + tcp.c). In the kernel an error does
@@ -118,7 +118,7 @@ def frames():
            b"\x00" * 6 + ip_us)
     out.append(eth(b"\x08\x06", arp))
 
-    icmp = b"\x08\x00\x00\x00\x12\x34\x00\x01" + b"proton" * 4
+    icmp = b"\x08\x00\x00\x00\x12\x34\x00\x01" + b"thread" * 4
     out.append(ip(1, icmp))
 
     udp_payload = b"a test query"
@@ -152,14 +152,14 @@ def seeds(workdir):
                                    "ec_paramgen_curve:secp384r1", "-sha384"])]:
         openssl("req", "-x509", *keyargs, "-nodes", "-keyout", j(tag + ".key"),
                 "-out", j(tag + ".pem"), "-days", "3650",
-                "-subj", "/CN=protonos.test",
-                "-addext", "subjectAltName=DNS:protonos.test,DNS:*.test")
+                "-subj", "/CN=threados.test",
+                "-addext", "subjectAltName=DNS:threados.test,DNS:*.test")
         openssl("x509", "-in", j(tag + ".pem"), "-outform", "DER",
                 "-out", j(tag + ".der"))
         out["x509"].append(open(j(tag + ".der"), "rb").read())
 
     with open(j("msg"), "wb") as f:
-        f.write(b"ProtonOS")
+        f.write(b"ThreadOS")
     openssl("dgst", "-sha256", "-sign", j("p256.key"), "-out", j("p256.sig"),
             j("msg"))
     out["ecdsa"].append(open(j("p256.sig"), "rb").read())
@@ -179,7 +179,7 @@ def seeds(workdir):
     # level zero writes stored blocks and the other two write both
     # kinds of tree; and the test harness's own JPEG, which came from
     # an outside encoder.
-    body = b"ProtonOS: a picture that can be compressed. " * 40
+    body = b"ThreadOS: a picture that can be compressed. " * 40
     for level in (0, 6, 9):
         out["inflate"].append(zlib.compress(body, level))
     out["inflate"].append(zlib.compress(bytes(range(256)) * 8, 9))
@@ -221,7 +221,7 @@ def mutate(data, rng):
 
 def main():
     rng = random.Random(20260826)
-    workdir = tempfile.mkdtemp(prefix="protonos-fuzz-")
+    workdir = tempfile.mkdtemp(prefix="threados-fuzz-")
     failures = []
 
     try:

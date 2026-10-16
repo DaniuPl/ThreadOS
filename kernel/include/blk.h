@@ -1,5 +1,5 @@
-#ifndef PROTONOS_BLK_H
-#define PROTONOS_BLK_H
+#ifndef THREADOS_BLK_H
+#define THREADOS_BLK_H
 
 #include <stdint.h>
 

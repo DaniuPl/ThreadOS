@@ -1,5 +1,5 @@
-#ifndef PROTONOS_KEYBOARD64_H
-#define PROTONOS_KEYBOARD64_H
+#ifndef THREADOS_KEYBOARD64_H
+#define THREADOS_KEYBOARD64_H
 
 /* Installs the IRQ1 handler and unmasks the keyboard interrupt */
 void keyboard64_init(void);

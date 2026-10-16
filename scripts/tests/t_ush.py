@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: ush - the user shell in ring 3.
+"""ThreadOS smoke test: ush - the user shell in ring 3.
 
 The kernel's shell is a convenience; ush is a proof. An ordinary process
 takes the console over through sys_read, starts other programs through
@@ -40,7 +40,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
         q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
@@ -76,11 +76,11 @@ def main():
         check("the redirected output landed in the file (cat redir.txt)",
               "redirect-ok" in q.wait_for("redirect-ok"))
 
-        # A pipe: 'echo proton-pipe | wc' - two processes in parallel, echo
+        # A pipe: 'echo thread-pipe | wc' - two processes in parallel, echo
         # writes into the pipe, wc reads to EOF and counts
-        # ('proton-pipe\n' = 11 characters + a newline = 12 bytes,
+        # ('thread-pipe\n' = 11 characters + a newline = 12 bytes,
         # 1 line)
-        q.type_line("echo proton-pipe | wc")
+        q.type_line("echo thread-pipe | wc")
         screen = q.wait_for("wc: lines=")
         check("the pipe joins two processes (echo | wc): the count is right",
               "wc: lines=1 bytes=12" in screen)

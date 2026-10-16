@@ -77,7 +77,7 @@ static int fat_dirty;
 /* Which disk this filesystem lies on.
  *
  * A FAT does not have to be on the disk the rest of the system is
- * using: the usual case for it is a stick in the socket while PFS runs
+ * using: the usual case for it is a stick in the socket while TFS runs
  * on the machine's own disk. So every read and write of this
  * filesystem goes through the two functions below, which point the
  * block layer at the right disk and put it back where it was -
@@ -1295,7 +1295,7 @@ int fat_unlink(const char *path)
  *
  * Everything above writes into a FAT that somebody else made. This
  * makes one, and it is here for a single case: a machine on which
- * ProtonOS is to be the only system needs an EFI partition, and an EFI
+ * ThreadOS is to be the only system needs an EFI partition, and an EFI
  * partition has to be FAT or the firmware will not read it.
  *
  * FAT32, because that is what an EFI partition is everywhere. And
@@ -1363,7 +1363,7 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
     bsbuf[0] = 0xEB;                       /* a jump, because a boot sector */
     bsbuf[1] = 0x58;
     bsbuf[2] = 0x90;
-    memcpy(bsbuf + 3, "PROTONOS", 8);
+    memcpy(bsbuf + 3, "THREADOS", 8);
     put16(bsbuf + 11, SECTOR);
     bsbuf[13] = (uint8_t)spc;
     put16(bsbuf + 14, (uint16_t)reserved);

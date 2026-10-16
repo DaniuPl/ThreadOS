@@ -5,8 +5,8 @@
  * dependencies - ring 3 programs have no libc.
  */
 
-#ifndef PROTONOS_USHA256_H
-#define PROTONOS_USHA256_H
+#ifndef THREADOS_USHA256_H
+#define THREADOS_USHA256_H
 
 #include "uapi.h"
 

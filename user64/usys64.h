@@ -1,4 +1,4 @@
-/* The ProtonOS 64 program library - calls through the syscall
+/* The ThreadOS 64 program library - calls through the syscall
  * instruction
  *
  * In long mode the kernel is no longer entered through an interrupt
@@ -13,8 +13,8 @@
  * of the contract and this list rests on it.
  */
 
-#ifndef PROTONOS_USYS64_H
-#define PROTONOS_USYS64_H
+#ifndef THREADOS_USYS64_H
+#define THREADOS_USYS64_H
 
 #include <stdint.h>
 
@@ -426,11 +426,11 @@ static inline int64_t sys_read(int fd, void *buf, uint64_t len)
  * of this label under the handler as the return address - so an
  * ordinary ret lands here, and from here one call goes back into the
  * kernel for the frame. */
-__asm__(".globl protonos_sigreturn\n"
-        "protonos_sigreturn:\n"
+__asm__(".globl threados_sigreturn\n"
+        "threados_sigreturn:\n"
         "    movq $10, %rax\n"          /* SYS64_SIGRETURN */
         "    syscall\n");
-extern void protonos_sigreturn(void);
+extern void threados_sigreturn(void);
 
 /* Sets the signal handler (0 = kill the program, which is the
    default). The return address is supplied by the library, because the
@@ -438,7 +438,7 @@ extern void protonos_sigreturn(void);
 static inline void sys_signal(int sig, void (*handler)(int))
 {
     syscall64_3(SYS64_SIGNAL, sig, (int64_t)(uintptr_t)handler,
-                (int64_t)(uintptr_t)protonos_sigreturn);
+                (int64_t)(uintptr_t)threados_sigreturn);
 }
 
 static inline int64_t sys_kill(int64_t id, int sig)

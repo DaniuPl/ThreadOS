@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the terminal while a program is running.
+"""ThreadOS smoke test: the terminal while a program is running.
 
 The terminal used to start a program and WAIT for it: it drew nothing,
 answered nothing and showed nothing until the program had ended. A

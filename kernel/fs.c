@@ -1,4 +1,4 @@
-/* PFS3 - the ProtonOS File System with block allocation
+/* TFS3 - the ThreadOS File System with block allocation
  *
  * The previous version gave every file a fixed area of 32 sectors: no
  * fragmentation, but a hard ceiling of 16 KiB and 16 files. Since the
@@ -6,7 +6,7 @@
  * so blocks are allocated from a bitmap and an inode holds their list.
  *
  * Disk layout (block = 1 KiB = 2 sectors):
- *   block 0        - the superblock (magic "PFS3")
+ *   block 0        - the superblock (magic "TFS3")
  *   blocks 1..4    - the block bitmap (4 KiB = 32768 bits)
  *   blocks 5..12   - the inode table (64 x 128 B)
  *   blocks 13..    - data
@@ -31,7 +31,7 @@
 #include "include/printk.h"
 #include "include/io.h"
 
-#define MAGIC          "PFS3"
+#define MAGIC          "TFS3"
 #define SECTORS_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)
 
 #define BITMAP_START   1
@@ -306,7 +306,7 @@ static void format_disk(void)
 
     memset(inodes, 0, sizeof(inodes));
     flush_inodes();
-    printk("[ OK ] PFS: an empty disk formatted (%u blocks of %u B)\n",
+    printk("[ OK ] TFS: an empty disk formatted (%u blocks of %u B)\n",
            total_blocks, FS_BLOCK);
 }
 
@@ -417,10 +417,10 @@ int fs_init(void)
         /* A disk that is not ours is NOT ours to take.
          *
          * This used to format anything whose first block did not say
-         * PFS3 - which was harmless while every disk this system ever
+         * TFS3 - which was harmless while every disk this system ever
          * saw was an empty file made by a test, and is a catastrophe
          * the moment it boots on a real machine: a laptop's disk does
-         * not say PFS3 either, and the first thing the system would do
+         * not say TFS3 either, and the first thing the system would do
          * is throw away its partition table, its Windows and
          * everything on it, without asking, in the first second of
          * the first boot.
@@ -434,7 +434,7 @@ int fs_init(void)
            actually lives. */
         int p = find_our_partition();
         if (p) {
-            printk("[ OK ] PFS: in partition %u (from sector %u)\n",
+            printk("[ OK ] TFS: in partition %u (from sector %u)\n",
                    (uint32_t)p, fs_base);
             for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
                 block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
@@ -446,9 +446,9 @@ int fs_init(void)
         }
 
         if (!disk_is_blank()) {
-            printk("[ !! ] FS: there IS something on the disk, and it is not a PFS - "
+            printk("[ !! ] FS: there IS something on the disk, and it is not a TFS - "
                    "I am not touching it.\n");
-            printk("       If the whole disk is to be ProtonOS', type "
+            printk("       If the whole disk is to be ThreadOS', type "
                    "'format' (it erases everything);\n");
             printk("       to take one partition - 'format N'.\n");
             return 0;
@@ -808,7 +808,7 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
    0 = error.
    Swapping uses this: it reserves space through the filesystem (so
    'df' and 'fls' tell the truth) and then writes over it directly
-   through ATA - without stepping into the PFS code, which has one
+   through ATA - without stepping into the TFS code, which has one
    shared block buffer. */
 uint32_t fs_file_block(int slot, uint32_t index, int alloc)
 {
@@ -820,7 +820,7 @@ uint32_t fs_file_block(int slot, uint32_t index, int alloc)
     return blk;
 }
 
-/* The first ATA sector of a given PFS block */
+/* The first ATA sector of a given TFS block */
 uint32_t fs_block_lba(uint32_t block)
 {
     return block * SECTORS_PER_BLOCK;

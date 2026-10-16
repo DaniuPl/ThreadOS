@@ -1,4 +1,4 @@
-# Contributing to ProtonOS
+# Contributing to ThreadOS
 
 Thank you for looking. This file is short on ceremony and long on the
 two or three rules that actually shape this codebase, because those are

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: virtual consoles in the 64-bit kernel.
+"""ThreadOS smoke test: virtual consoles in the 64-bit kernel.
 
 The hardware has one screen, and the system holds four. Alt+F1..F4
 switches the picture, but every console has its own content, its own
@@ -51,7 +51,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
 
             # The first console: something that will stay on it for a while
             q.type_line("clear")

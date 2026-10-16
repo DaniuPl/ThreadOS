@@ -1,5 +1,5 @@
-#ifndef PROTONOS_DHCP_H
-#define PROTONOS_DHCP_H
+#ifndef THREADOS_DHCP_H
+#define THREADOS_DHCP_H
 
 /* DHCP client: DISCOVER -> OFFER -> REQUEST -> ACK.
    Runs in a thread of its own, because it waits for server replies. */

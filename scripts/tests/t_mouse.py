@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the PS/2 mouse.
+"""ThreadOS smoke test: the PS/2 mouse.
 
 A mouse gives relative deltas rather than a position - it is the kernel
 that has to add them up and clamp them to the screen's size. The start
@@ -27,7 +27,7 @@ from ptest import check, summary
 def main():
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
 
         q.mouse_move(40, 30)
         q.type_line("mouse")

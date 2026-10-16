@@ -1,4 +1,4 @@
-/* ProtonOS user programs that use the shared library
+/* ThreadOS user programs that use the shared library
  *
  * The same starting address as user/user.ld - the difference is in what
  * else has to go into the program. A dynamic program does not carry the

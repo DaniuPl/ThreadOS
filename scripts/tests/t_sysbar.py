@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the system strip along the top of the screen.
+"""ThreadOS smoke test: the system strip along the top of the screen.
 
 The taskbar at the bottom is for windows. The strip at the top is for
 what is ALWAYS true: which of the four desktops is showing, how much of

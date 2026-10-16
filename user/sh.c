@@ -1,4 +1,4 @@
-/* ush - the ProtonOS user shell, running in ring 3
+/* ush - the ThreadOS user shell, running in ring 3
  *
  * It reads the keyboard with the read syscall (taking the console over
  * from the kernel's shell), starts programs from the initrd through

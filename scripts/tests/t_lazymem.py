@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: paging on demand.
+"""ThreadOS smoke test: paging on demand.
 
 The heap and the mmap area are PROMISED to a process, not given: asking
 for 64 MiB is not to cost a single frame. Payment is only for the pages
@@ -33,7 +33,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 

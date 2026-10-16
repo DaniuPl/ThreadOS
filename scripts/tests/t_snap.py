@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: snapping a window to an edge of the screen.
+"""ThreadOS smoke test: snapping a window to an edge of the screen.
 
 Two windows side by side used to mean two drags and two pulls of a
 corner, done by eye, and the eye is not good at halves. Now a window

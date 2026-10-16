@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Splits a header into declarations and bodies - for the shared library.
 
-In ProtonOS the cryptography, TLS, HTTP and DNS live in headers, as
+In ThreadOS the cryptography, TLS, HTTP and DNS live in headers, as
 'static inline' functions. That was fine as long as every program
 carried them inside itself: a single source of truth, no intermediate
 files, no dependencies in the Makefile.

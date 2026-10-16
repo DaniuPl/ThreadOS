@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: Bluetooth - what can be checked without one.
+"""ThreadOS smoke test: Bluetooth - what can be checked without one.
 
 This group is different from every other one in this project, and it
 says so in its own output.
@@ -60,7 +60,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbkbd="xhci", qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
 
             # --- the machine has no adapter, and has to say so --------
             out = q.command("bt", "bt:", timeout=20)
@@ -79,7 +79,7 @@ def main():
             check("the adapter address read out of the packet the right way round",
                   "adapter address: 00:1a:7d:da:71:13" in out)
             check("the adapter name pulled out of the answer",
-                  "adapter name: Proton" in out)
+                  "adapter name: Thread" in out)
             check("the version and the maker from Read Local Version",
                   "version: Bluetooth 5.0" in out and "000f" in out)
             check("two devices out of two different kinds of event",
@@ -108,7 +108,7 @@ def main():
         q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
                  serial=tempfile.mktemp(suffix=".log"))
         try:
-            q.wait_for("ProtonOS shell")
+            q.wait_for("ThreadOS shell")
             q.type_line("hardware")
             screen = q.wait_for("Bluetooth:", timeout=30)
             check("in 32-bit mode the same line about Bluetooth",

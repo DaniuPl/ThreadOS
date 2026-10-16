@@ -42,10 +42,10 @@
 #define PAGE_Y    30          /* the first line of content in the window */
 /* --- state --- */
 
-static char addr[ADDR_MAX] = "protonos.test/";
+static char addr[ADDR_MAX] = "threados.test/";
 static int addr_len = 14;
 
-static char cur_host[64] = "protonos.test";
+static char cur_host[64] = "threados.test";
 static uint32_t cur_port = 80;
 static char cur_path[96] = "/";
 static int cur_tls;

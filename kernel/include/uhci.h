@@ -1,5 +1,5 @@
-#ifndef PROTONOS_UHCI_H
-#define PROTONOS_UHCI_H
+#ifndef THREADOS_UHCI_H
+#define THREADOS_UHCI_H
 
 #include <stdint.h>
 

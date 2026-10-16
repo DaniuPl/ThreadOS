@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: booting through UEFI (OVMF).
+"""ThreadOS smoke test: booting through UEFI (OVMF).
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -45,7 +45,7 @@ def main():
         nvram = tempfile.mktemp(suffix=".fd")
         try:
             os.makedirs(due + "/boot/grub")
-            shutil.copy(KERNEL64, due + "/boot/protonos64.bin")
+            shutil.copy(KERNEL64, due + "/boot/threados64.bin")
             mod = ""
             if INITRD64 and os.path.exists(INITRD64):
                 shutil.copy(INITRD64, due + "/boot/initrd64.img")
@@ -56,8 +56,8 @@ def main():
             with open(due + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("insmod all_video\nset gfxpayload=keep\n"
                          "set timeout=0\nset default=0\n"
-                         'menuentry "ProtonOS 64" {\n'
-                         "    multiboot2 /boot/protonos64.bin\n"
+                         'menuentry "ThreadOS 64" {\n'
+                         "    multiboot2 /boot/threados64.bin\n"
                          + mod + "}\n")
             made = subprocess.run(["grub-mkrescue", "-o", isoue, due],
                                   stdout=subprocess.DEVNULL,

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SMPMEM_H
-#define PROTONOS_SMPMEM_H
+#ifndef THREADOS_SMPMEM_H
+#define THREADOS_SMPMEM_H
 
 /* A trial of the locks: shared kernel structures under fire from every core
  *

@@ -4,8 +4,8 @@
  * is assembled and a response taken apart.
  */
 
-#ifndef PROTONOS_UDNS_H
-#define PROTONOS_UDNS_H
+#ifndef THREADOS_UDNS_H
+#define THREADOS_UDNS_H
 
 #include "uapi.h"
 

@@ -1,4 +1,4 @@
-"""The shared part of the ProtonOS smoke test.
+"""The shared part of the ThreadOS smoke test.
 
 Everything needed to start the machine and check something on it: the
 Qemu class, the HTTP and DNS servers for the network tests, certificate
@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 
-KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/protonos.bin"
+KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/threados.bin"
 INITRD = sys.argv[2] if len(sys.argv) > 2 else None
 KERNEL64 = sys.argv[3] if len(sys.argv) > 3 else None
 INITRD64 = sys.argv[4] if len(sys.argv) > 4 else None
@@ -42,7 +42,7 @@ VIDEO_H = 200
 # text mode with a kernel command line.
 TEXT_MODE = "nodesktop"
 
-# The disk image under PFS3 (the kernel formats an empty disk on the
+# The disk image under TFS3 (the kernel formats an empty disk on the
 # first start)
 DISK_SIZE = 16 * 1024 * 1024
 
@@ -64,7 +64,7 @@ def menu_y(name):
     return MENU_TASKBAR_Y - (len(MENU_ITEMS) - idx) * MENU_ROW + MENU_ROW // 2
 
 
-PAGE = b"<html>ProtonOS TCP works</html>\n"
+PAGE = b"<html>ThreadOS TCP works</html>\n"
 
 # Files a test wants the guest to be able to download: path -> bytes.
 # Filled in BEFORE start_http_server() is called - the handler reads
@@ -81,10 +81,10 @@ LINK_PAGE2 = (b"<html><body><h1>The second page</h1>"
               b"<p>The link worked.</p></body></html>\n")
 # Above the old ceiling of 268 KiB per file - it reaches into the
 # doubly indirect block
-HUGE_PAGE = b"<p>ProtonOS PFS3: an indirect block, then a doubly indirect one.</p>\n" * 6500
-# A page well above the old PFS limit (16 KiB per file) - it checks
+HUGE_PAGE = b"<p>ThreadOS TFS3: an indirect block, then a doubly indirect one.</p>\n" * 6500
+# A page well above the old TFS limit (16 KiB per file) - it checks
 # block allocation, the indirect block and TCP throughput
-BIG_PAGE = b"<p>ProtonOS PFS3: block after block.</p>\n" * 3000
+BIG_PAGE = b"<p>ThreadOS TFS3: block after block.</p>\n" * 3000
 
 
 def make_gpt_disk(path, mib=800):
@@ -415,7 +415,7 @@ def gpt_read(path):
 
 
 GUID_ESP4 = bytes([0x28, 0x73, 0x2A, 0xC1])       # C12A7328-...
-GUID_PFS4 = b"PROT"                                # ours, and it says so
+GUID_TFS4 = b"THRE"                                # ours, and it says so
 
 
 def make_mbr_fat_disk(path, mib=64, fat32=False, label="MALYFAT"):
@@ -711,7 +711,7 @@ CERT_DER_P384 = None     # and on the P-384 curve (a SHA-384 signature)
 
 
 def make_test_cert(dirpath, ec=False, p384=False):
-    """A self-signed certificate for protonos.test: a SubjectAltName with
+    """A self-signed certificate for threados.test: a SubjectAltName with
     the name and a wildcard, the CA flag (so it can serve as a trust
     root too) and a ten-year validity, so that it covers the guest's
     fixed clock. We do it with the openssl tool - it is everywhere TLS
@@ -735,8 +735,8 @@ def make_test_cert(dirpath, ec=False, p384=False):
     subprocess.run(
         ["openssl", "req", "-x509"] + keyargs + ["-keyout", keyfile,
          "-out", certfile, "-days", "3650", "-nodes",
-         "-subj", "/CN=protonos.test",
-         "-addext", "subjectAltName=DNS:protonos.test,DNS:*.protonos.test"],
+         "-subj", "/CN=threados.test",
+         "-addext", "subjectAltName=DNS:threados.test,DNS:*.threados.test"],
         check=True, capture_output=True, timeout=120)
     subprocess.run(
         ["openssl", "x509", "-in", certfile, "-outform", "DER", "-out", derfile],
@@ -748,7 +748,7 @@ def make_test_cert(dirpath, ec=False, p384=False):
 
 def make_chain_certs(dirpath):
     """A real chain: root -> intermediate -> the server's certificate.
-    We trust only the root, so ProtonOS has to walk the whole path of
+    We trust only the root, so ThreadOS has to walk the whole path of
     signatures rather than merely compare one certificate."""
     import subprocess
 
@@ -762,18 +762,18 @@ def make_chain_certs(dirpath):
                 "keyUsage=critical,keyCertSign,cRLSign\n")
     with open(j("leaf.ext"), "w") as f:
         f.write("basicConstraints=critical,CA:FALSE\n"
-                "subjectAltName=DNS:protonos.test\n")
+                "subjectAltName=DNS:threados.test\n")
 
     # the root
     run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("root.key"), "-out", j("root.pem"), "-days", "3650",
-         "-subj", "/CN=ProtonOS Test Root",
+         "-subj", "/CN=ThreadOS Test Root",
          "-addext", "basicConstraints=critical,CA:TRUE"])
 
     # the intermediate signed by the root
     run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("int.key"), "-out", j("int.csr"),
-         "-subj", "/CN=ProtonOS Test Intermediate"])
+         "-subj", "/CN=ThreadOS Test Intermediate"])
     run(["openssl", "x509", "-req", "-in", j("int.csr"),
          "-CA", j("root.pem"), "-CAkey", j("root.key"), "-CAcreateserial",
          "-out", j("int.pem"), "-days", "3650", "-extfile", j("ca.ext")])
@@ -781,7 +781,7 @@ def make_chain_certs(dirpath):
     # the server's certificate signed by the intermediate
     run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
          "-keyout", j("leaf.key"), "-out", j("leaf.csr"),
-         "-subj", "/CN=protonos.test"])
+         "-subj", "/CN=threados.test"])
     run(["openssl", "x509", "-req", "-in", j("leaf.csr"),
          "-CA", j("int.pem"), "-CAkey", j("int.key"), "-CAcreateserial",
          "-out", j("leaf.pem"), "-days", "3650", "-extfile", j("leaf.ext")])
@@ -805,7 +805,7 @@ def start_https_chain_server():
     global CERT_DER_ROOT
     import ssl
 
-    tmpdir = tempfile.mkdtemp(prefix="protonos-chain-")
+    tmpdir = tempfile.mkdtemp(prefix="threados-chain-")
     try:
         chainfile, keyfile, root_der = make_chain_certs(tmpdir)
     except BaseException:
@@ -842,7 +842,7 @@ def start_https_server(ec=False, p384=False):
     global CERT_DER, CERT_DER_EC, CERT_DER_P384
     import ssl
 
-    tmpdir = tempfile.mkdtemp(prefix="protonos-tls-")
+    tmpdir = tempfile.mkdtemp(prefix="threados-tls-")
     try:
         certfile, keyfile, der = make_test_cert(tmpdir, ec, p384)
     except BaseException:                # a missing openssl is no reason to
@@ -920,7 +920,7 @@ def start_suite_server(suite, dirpath=None):
     Returns (port, stop, log) - log() gives back everything the server
     has printed so far. (None, stop, log) when openssl is missing.
     """
-    tmpdir = dirpath or tempfile.mkdtemp(prefix="protonos-suite-")
+    tmpdir = dirpath or tempfile.mkdtemp(prefix="threados-suite-")
     try:
         certfile, keyfile, _ = make_test_cert(tmpdir)
     except BaseException:
@@ -1224,7 +1224,7 @@ class Qemu:
             # An NVMe disk: with no controller in between - the device
             # sits straight on PCI Express
             cmd += ["-drive", f"id=nvm0,file={disk},if=none,format=raw",
-                    "-device", "nvme,drive=nvm0,serial=protonos"]
+                    "-device", "nvme,drive=nvm0,serial=threados"]
         elif disk and sata:
             # A disk behind an AHCI controller - that is what every newer board
 # looks like
@@ -1672,7 +1672,7 @@ def make_iso64(workdir, iso, graphics=False, text=False):
     Returns True when the disc was created.
     """
     os.makedirs(workdir + "/boot/grub", exist_ok=True)
-    shutil.copy(KERNEL64, workdir + "/boot/protonos64.bin")
+    shutil.copy(KERNEL64, workdir + "/boot/threados64.bin")
     mod = ""
     if INITRD64 and os.path.exists(INITRD64):
         shutil.copy(INITRD64, workdir + "/boot/initrd64.img")
@@ -1681,8 +1681,8 @@ def make_iso64(workdir, iso, graphics=False, text=False):
                 else "set gfxpayload=text\n" if text else "")
     with open(workdir + "/boot/grub/grub.cfg", "w") as fh:
         fh.write(header + "set timeout=0\nset default=0\n"
-                 'menuentry "ProtonOS 64" {\n'
-                 "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+                 'menuentry "ThreadOS 64" {\n'
+                 "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
     return subprocess.run(["grub-mkrescue", "-o", iso, workdir],
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL).returncode == 0

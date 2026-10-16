@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: writing through a file mapped into memory.
+"""ThreadOS smoke test: writing through a file mapped into memory.
 
 Mappings were one-way so far: a file could be read like memory, but not
 written. Now the road goes both ways - the program changes bytes at an
@@ -58,8 +58,8 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                      sata=True, qemu="qemu-system-x86_64")
             try:
-                q.wait_serial("proton64>", timeout=90)
-                q.wait_serial("PFS ready", timeout=30)
+                q.wait_serial("thread64>", timeout=90)
+                q.wait_serial("TFS ready", timeout=30)
 
                 make_it = q.command("run mkmap64 written.txt 12", "exit code",
                                    timeout=60)
@@ -121,7 +121,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             q3.wait_for("[net] DHCP", timeout=30)
 
             make_it = q3.command("run mkmap written.txt 12", "has ended",
@@ -172,9 +172,9 @@ def main():
         # would be no trace of them here.
         q4 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog4)
         try:
-            screen_text = q4.wait_for("ProtonOS shell", timeout=40)
+            screen_text = q4.wait_for("ThreadOS shell", timeout=40)
             check("a second boot on the same disk (with no formatting)",
-                  "+ PFS ready" in screen_text and "formatted" not in screen_text)
+                  "+ TFS ready" in screen_text and "formatted" not in screen_text)
             q4.wait_for("[net] DHCP", timeout=30)
 
             after = q4.command("run mmapzap written.txt check", "has ended",

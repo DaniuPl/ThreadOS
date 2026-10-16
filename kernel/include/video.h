@@ -1,5 +1,5 @@
-#ifndef PROTONOS_VIDEO_H
-#define PROTONOS_VIDEO_H
+#ifndef THREADOS_VIDEO_H
+#define THREADOS_VIDEO_H
 
 #include <stdint.h>
 

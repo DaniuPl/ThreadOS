@@ -1203,7 +1203,7 @@ void _start(void)
 
     measure();
     refresh_prompt();
-    put_str("ProtonOS terminal - type 'help' to see what it can do.\n");
+    put_str("ThreadOS terminal - type 'help' to see what it can do.\n");
 
     for (;;) {
         struct win_event ev;

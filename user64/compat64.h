@@ -17,8 +17,8 @@
  * fitted in directly.
  */
 
-#ifndef PROTONOS_COMPAT64_H
-#define PROTONOS_COMPAT64_H
+#ifndef THREADOS_COMPAT64_H
+#define THREADOS_COMPAT64_H
 
 #include "usys64.h"
 

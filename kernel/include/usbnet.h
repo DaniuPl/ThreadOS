@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USBNET_H
-#define PROTONOS_USBNET_H
+#ifndef THREADOS_USBNET_H
+#define THREADOS_USBNET_H
 
 #include <stdint.h>
 

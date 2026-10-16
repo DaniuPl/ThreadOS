@@ -1,4 +1,4 @@
-/* ProtonOS - kernel entry point (Multiboot 1)
+/* ThreadOS - kernel entry point (Multiboot 1)
  *
  * GRUB loads the kernel and jumps to _start in 32-bit protected mode.
  * Here we set up a stack and call kmain() written in C.

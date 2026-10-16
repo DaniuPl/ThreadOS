@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a disk in the USB socket (pendrive).
+"""ThreadOS smoke test: a disk in the USB socket (pendrive).
 
 The bus so far carried a keyboard and a mouse - devices that say a few
 bytes when asked. A disk is the other kind of traffic: bulk endpoints,
@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, no64, make_iso64, make_mbr_fat_disk,
                    mtools_ok, fat_put, fat_get, fat_dir, fat_kind, gpt_read,
-                   GUID_ESP4, GUID_PFS4)
+                   GUID_ESP4, GUID_TFS4)
 
 STICK_MIB = 64
 INSTALL_MIB = 400          # room for the EFI partition and ours
@@ -81,7 +81,7 @@ def behind_hub():
                  sata=True, usbdisk=stick, usbhub=True, behind_hub=True,
                  qemu="qemu-system-x86_64")
         try:
-            boot = q.wait_serial("proton64>", timeout=90)
+            boot = q.wait_serial("thread64>", timeout=90)
             check("the system finds the hub",
                   "A USB hub" in boot)
             check("and the disk BEHIND it", "USB disk:" in boot)
@@ -138,7 +138,7 @@ def hotplug():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbkbd="xhci", qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
             out = q.command("disks", "sectors", timeout=20)
             check("at the start the stick is not on the list",
                   "USB (mass storage)" not in out)
@@ -171,9 +171,9 @@ def hotplug():
             # And pulled out
             q.cmd({"execute": "device_del",
                    "arguments": {"id": "pendrive"}})
-            gone = q.wait_serial("pulled out of the socket", timeout=30)
+            gone = q.wait_serial("pulled out of socket", timeout=30)
             check("the system notices the stick being pulled out",
-                  "pulled out of the socket" in gone)
+                  "pulled out of socket" in gone)
 
             out = q.command("disks", "sectors", timeout=20)
             check("and it says it is gone instead of pretending",
@@ -183,7 +183,7 @@ def hotplug():
             check("the numbers of the other disks did not shift",
                   "disk 1: AHCI" in out)
 
-            out = q.command("fatls /", "proton64>", timeout=20)
+            out = q.command("fatls /", "thread64>", timeout=20)
             check("after the pull nothing is mounted any more - instead of "
                   "an empty directory there is a refusal",
                   "nothing is mounted" in out)
@@ -203,7 +203,7 @@ def hotplug():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbhub=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
             check("the hub alone, with nothing in it",
                   "A USB hub" in q.serial())
             out = q.command("disks", "sectors", timeout=25)
@@ -261,7 +261,7 @@ def install_to_stick():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
 
         with open(own, "wb") as fh:
@@ -303,7 +303,7 @@ def install_to_stick():
               % ("" if ok else ": " + why), ok and len(parts) == 2)
         if len(parts) == 2:
             check("with an EFI partition and ours",
-                  parts[0][0] == GUID_ESP4 and parts[1][0] == GUID_PFS4)
+                  parts[0][0] == GUID_ESP4 and parts[1][0] == GUID_TFS4)
         check("the stick's EFI partition holds a FAT32",
               fat_kind(stick, 2048) == "FAT32")
         loader = fat_get(stick, 2048, "/EFI/BOOT/BOOTX64.EFI")
@@ -319,9 +319,9 @@ def install_to_stick():
         q2 = Qemu(KERNEL, INITRD, disk=stick, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q2.wait_serial("protoboot: ProtonOS", timeout=90)
+            out = q2.wait_serial("threadboot: ThreadOS", timeout=90)
             check("the firmware picks our loader off the stick",
-                  "protoboot" in out)
+                  "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=140)
             check("and the system on the stick reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
@@ -349,7 +349,7 @@ def main():
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
-    disk = tempfile.mktemp(suffix=".img")      # the machine's own disk (PFS)
+    disk = tempfile.mktemp(suffix=".img")      # the machine's own disk (TFS)
     stick = tempfile.mktemp(suffix=".usb")
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
@@ -373,7 +373,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, usbdisk=stick, qemu="qemu-system-x86_64")
         try:
-            boot = q.wait_serial("proton64>", timeout=90)
+            boot = q.wait_serial("thread64>", timeout=90)
 
             # --- the device itself -----------------------------------
             check("the system finds the disk in the USB socket",
@@ -413,18 +413,18 @@ def main():
             check("the content of the file from the stick was read character for character",
                   FROM_HOST.decode().strip() in out)
 
-            # --- and PFS on the machine's own disk still works -------
+            # --- and TFS on the machine's own disk still works -------
             # The whole point of mounting a FAT "from disk 2": the rest
             # of the system must not have moved.
             q.command("write attempt.txt the-stick-did-not-move-the-disk",
                       "wrote", timeout=20)
             out = q.command("cat attempt.txt", "pendrive", timeout=20)
-            check("the PFS on our own disk still works, despite the USB mount",
+            check("the TFS on our own disk still works, despite the USB mount",
                   "the-stick-did-not-move-the-disk" in out)
 
             # --- writing: our file, read back by mtools --------------
             q.command("fatmkdir /FROMSYSTEM", "fatmkdir", timeout=20)
-            q.command("fatput /FROMSYSTEM/hello.txt hello-from-protonos",
+            q.command("fatput /FROMSYSTEM/hello.txt hello-from-threados",
                       "fatput", timeout=20)
             out = q.command("fatcopy hello64 /FROMSYSTEM/hello64.bin",
                             "fatcopy", timeout=60)
@@ -445,7 +445,7 @@ def main():
         check("and the content is exactly what the system wrote"
               + (" ('%s')" % got.decode(errors="replace").strip()
                  if got else ""),
-              got is not None and b"hello-from-protonos" in got)
+              got is not None and b"hello-from-threados" in got)
 
         binary = fat_get(stick, start, "/FROMSYSTEM/hello64.bin")
         check("the copied program has a sensible length and an ELF header"

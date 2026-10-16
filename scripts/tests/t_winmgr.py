@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: closing and resizing application windows.
+"""ThreadOS smoke test: closing and resizing application windows.
 
 A window that opens and cannot be closed is not a window, and until now
 that is what an application had: the compositor's [x] dropped the

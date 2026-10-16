@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SPINLOCK_H
-#define PROTONOS_SPINLOCK_H
+#ifndef THREADOS_SPINLOCK_H
+#define THREADOS_SPINLOCK_H
 
 #include <stdint.h>
 #include "io.h"

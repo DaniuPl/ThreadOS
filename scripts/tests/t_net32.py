@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the network in the 32-bit kernel (ARP, ICMP,
+"""ThreadOS smoke test: the network in the 32-bit kernel (ARP, ICMP,
 UDP, DNS).
 
 Everything here talks to slirp's gateway (10.0.2.2) or to a server the
@@ -34,7 +34,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
         # The IP address comes from slirp's DHCP server only after the
         # shell has started - without waiting for it every network test
         # would be a race with the lease
@@ -75,7 +75,7 @@ def main():
         q.type_line("run udptest")
         echo = q.wait_for("the echo came back", timeout=10)
         check("the datagram came back to the sender through the loopback",
-              "the echo came back: proton-udp" in echo)
+              "the echo came back: thread-udp" in echo)
         check("the server saw the client's datagram",
               "[udpecho] od 10.0.2.15:" in echo)
         check("the client ended with no error",
@@ -104,10 +104,10 @@ def main():
                 q.type_line("clear")
                 q.type_line("dns 10.0.2.2")
                 q.wait_for("DNS server set", timeout=10)
-                q.type_line("run nslookup protonos.test")
+                q.type_line("run nslookup threados.test")
                 dns = q.wait_for("has the address", timeout=20)
                 check("nslookup resolved the name through the named DNS server",
-                      "protonos.test has the address 10.0.2.2" in dns)
+                      "threados.test has the address 10.0.2.2" in dns)
             finally:
                 dns_stop()
 

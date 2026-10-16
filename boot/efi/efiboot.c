@@ -1,4 +1,4 @@
-/* protoboot - the ProtonOS loader for UEFI machines
+/* threadboot - the ThreadOS loader for UEFI machines
  *
  * Until now this system was started by GRUB. GRUB is excellent and it
  * is somebody else's; everything else here is written from nothing, and
@@ -82,7 +82,7 @@ static void put_num(UINT64 v, int base)
 
 static void fail(const CHAR16 *what, EFI_STATUS st)
 {
-    put(L"protoboot: ");
+    put(L"threadboot: ");
     put(what);
     put(L" (status 0x");
     put_num(st, 16);
@@ -420,7 +420,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     ST = st;
     BS = st->BootServices;
 
-    put(L"protoboot: ProtonOS\r\n");
+    put(L"threadboot: ThreadOS\r\n");
 
     open_volume(image);
 
@@ -435,13 +435,13 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
      * becomes hard to trust. GRUB still boots it for anyone who wants
      * that. */
     struct blob kernel, initrd;
-    if (!read_file(L"\\protonos64.bin", &kernel) &&
-        !read_file(L"\\EFI\\BOOT\\protonos64.bin", &kernel) &&
-        !read_file(L"\\EFI\\ProtonOS\\protonos64.bin", &kernel))
-        fail(L"I found no protonos64.bin", 0);
+    if (!read_file(L"\\threados64.bin", &kernel) &&
+        !read_file(L"\\EFI\\BOOT\\threados64.bin", &kernel) &&
+        !read_file(L"\\EFI\\ThreadOS\\threados64.bin", &kernel))
+        fail(L"I found no threados64.bin", 0);
     if (!read_file(L"\\initrd64.img", &initrd) &&
         !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd) &&
-        !read_file(L"\\EFI\\ProtonOS\\initrd64.img", &initrd))
+        !read_file(L"\\EFI\\ThreadOS\\initrd64.img", &initrd))
         fail(L"I found no initrd64.img", 0);
 
     /* And the loader itself, as a file.
@@ -459,7 +459,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     self.size = 0;
     if (!read_file(L"\\EFI\\BOOT\\BOOTX64.EFI", &self) &&
         !read_file(L"\\BOOTX64.EFI", &self) &&
-        !read_file(L"\\EFI\\ProtonOS\\BOOTX64.EFI", &self))
+        !read_file(L"\\EFI\\ThreadOS\\BOOTX64.EFI", &self))
         self.data = 0;
 
     put(L"  kernel: ");
@@ -512,7 +512,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     mbi_room = mbi_pages * 4096;
     mbi_at = 8;                           /* total_size and a reserved word */
 
-    tag_string(TAG_BOOTLOADER, "protoboot");
+    tag_string(TAG_BOOTLOADER, "threadboot");
     tag_string(TAG_CMDLINE, "");
 
     /* The initrd comes first and is nameless, because that is the
@@ -607,7 +607,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     *(UINT32 *)mbi = (UINT32)mbi_at;
     *(UINT32 *)(mbi + 4) = 0;
 
-    put(L"protoboot: handing the machine to the kernel\r\n");
+    put(L"threadboot: handing the machine to the kernel\r\n");
 
     if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS) {
         /* The map may have moved under us; take it again and go. */

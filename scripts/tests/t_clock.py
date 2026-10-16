@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the clock on the taskbar.
+"""ThreadOS smoke test: the clock on the taskbar.
 
 The machine had a clock - 'date' printed it and a program could ask for
 it through a syscall. What it did not have was a clock a person can see

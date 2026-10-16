@@ -109,7 +109,7 @@ static void cmd_help(void)
     printk("          hardware - what is in this machine, disks\n");
     printk("          bt [scan|test] - Bluetooth\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
-    printk("          install - ProtonOS onto this machine's disk\n");
+    printk("          install - ThreadOS onto this machine's disk\n");
     printk("            (the whole screen; 'install text [whole]' - here)\n");
 }
 
@@ -493,7 +493,7 @@ static void cmd_gfx(void)
         video_putpixel(0, y, 4);
         video_putpixel(w - 1, y, 4);
     }
-    video_draw_string(w / 2 - 112, h / 2, "ProtonOS 64 - graphics mode", 4);
+    video_draw_string(w / 2 - 112, h / 2, "ThreadOS 64 - graphics mode", 4);
     video_present();
 }
 
@@ -1106,7 +1106,7 @@ static void shell_thread(void *arg)
         printk("\n");
         cmd_help();
     } else {
-        printk("ProtonOS 64 - console %d. Alt+F1..F4 switches.\n", vc + 1);
+        printk("ThreadOS 64 - console %d. Alt+F1..F4 switches.\n", vc + 1);
     }
     prompt();
 

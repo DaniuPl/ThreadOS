@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: graphics mode in the 64-bit kernel.
+"""ThreadOS smoke test: graphics mode in the 64-bit kernel.
 
 The check drawing is simple on purpose: four rectangles in the corners,
 a frame and a caption in our own font. Every error in computing a
@@ -49,7 +49,7 @@ def inspect(iso, via_uefi):
     q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, uefi=uefi,
              qemu="qemu-system-x86_64")
     try:
-        q.wait_serial("proton64>", timeout=60)
+        q.wait_serial("thread64>", timeout=60)
         q.type_line("gfx")
         out = q.wait_serial("gfx: drawing", timeout=30)
         m = re.search(r"gfx: drawing (\d+)x(\d+), (\d+) bits", out)
@@ -107,7 +107,7 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     try:
         os.makedirs(d + "/boot/grub")
-        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(KERNEL64, d + "/boot/threados64.bin")
         mod = ""
         if INITRD64 and os.path.exists(INITRD64):
             shutil.copy(INITRD64, d + "/boot/initrd64.img")
@@ -115,8 +115,8 @@ def main():
         with open(d + "/boot/grub/grub.cfg", "w") as fh:
             fh.write("insmod all_video\nset gfxpayload=keep\n"
                      "set timeout=0\nset default=0\n"
-                     'menuentry "ProtonOS 64" {\n'
-                     "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+                     'menuentry "ThreadOS 64" {\n'
+                     "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0

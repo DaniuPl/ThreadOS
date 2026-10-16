@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PMM_H
-#define PROTONOS_PMM_H
+#ifndef THREADOS_PMM_H
+#define THREADOS_PMM_H
 
 #include <stdint.h>
 #include "multiboot.h"

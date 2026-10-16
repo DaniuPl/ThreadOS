@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the text editor in a window.
+"""ThreadOS smoke test: the text editor in a window.
 
 The system could make files - 'write' at the prompt, 'echo' with a
 '>' - but it could not CHANGE one. Everything that made a file was one
@@ -234,7 +234,7 @@ def sixty_four():
 
     try:
         os.makedirs(d + "/boot/grub")
-        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(KERNEL64, d + "/boot/threados64.bin")
         mod = ""
         if INITRD64 and os.path.exists(INITRD64):
             shutil.copy(INITRD64, d + "/boot/initrd64.img")
@@ -242,8 +242,8 @@ def sixty_four():
         with open(d + "/boot/grub/grub.cfg", "w") as fh:
             fh.write("insmod all_video\nset gfxpayload=keep\n"
                      "set timeout=0\nset default=0\n"
-                     'menuentry "ProtonOS 64" {\n'
-                     "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+                     'menuentry "ThreadOS 64" {\n'
+                     "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
@@ -254,7 +254,7 @@ def sixty_four():
         q = Qemu(KERNEL, INITRD, disk=disk, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)

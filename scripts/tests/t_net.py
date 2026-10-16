@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a TCP server in ring 3 and the graphical browser.
+"""ThreadOS smoke test: a TCP server in ring 3 and the graphical browser.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -19,12 +19,12 @@ from ptest import check, summary, DNS_HINT
 
 
 def main():
-    # --- ProtonOS as a TCP server (a passive open, a separate boot) ---
+    # --- ThreadOS as a TCP server (a passive open, a separate boot) ---
     print("--- the network: a TCP server in ring 3 ---")
     srv_port = 5555
     q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port, append=TEXT_MODE)
     try:
-        q_srv.wait_for("ProtonOS shell")
+        q_srv.wait_for("ThreadOS shell")
         q_srv.wait_for("[net] DHCP", timeout=20)
         q_srv.type_line("run tcpserv")
         view = q_srv.wait_for("listening on port 5555", timeout=15)
@@ -35,8 +35,8 @@ def main():
         sock = socket.create_connection(("127.0.0.1", srv_port), timeout=15)
         sock.settimeout(15)
         greeting = sock.recv(200)
-        check("the host connected and got a greeting from ProtonOS",
-              b"ProtonOS TCP ready" in greeting)
+        check("the host connected and got a greeting from ThreadOS",
+              b"ThreadOS TCP ready" in greeting)
 
         sock.sendall(b"hello from the host\n")
         echoed = sock.recv(200)
@@ -102,7 +102,7 @@ def main():
 
         for _ in range(20):              # clear the default address
             q_web.sendkey("backspace")
-        for ch in "protonos.test:%d/" % http_port:   # an address by name
+        for ch in "threados.test:%d/" % http_port:   # an address by name
             q_web.sendkey(Qemu.KEYNAMES.get(ch, ch))
         q_web.sendkey("ret")
 
@@ -118,7 +118,7 @@ def main():
         # --- scrolling and links ---
         for _ in range(40):              # a new address: a page with a link
             q_web.sendkey("backspace")
-        for ch in "protonos.test:%d/links" % http_port:
+        for ch in "threados.test:%d/links" % http_port:
             q_web.sendkey(Qemu.KEYNAMES.get(ch, ch))
         q_web.sendkey("ret")
         time.sleep(5)
@@ -168,7 +168,7 @@ def main():
 # restart
     q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE)
     try:
-        q_web2.wait_for("ProtonOS shell")
+        q_web2.wait_for("ThreadOS shell")
         q_web2.type_line("cat page.htm")
         saved = q_web2.wait_for("The second page", timeout=10)
         check("the clicked link fetched the second page (it shows on the disk)",

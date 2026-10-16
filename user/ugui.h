@@ -25,8 +25,8 @@
  * a light surface, light text on a dark one.
  */
 
-#ifndef PROTONOS_UGUI_H
-#define PROTONOS_UGUI_H
+#ifndef THREADOS_UGUI_H
+#define THREADOS_UGUI_H
 
 #include "uapi.h"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: shared memory in the 64-bit kernel.
+"""ThreadOS smoke test: shared memory in the 64-bit kernel.
 
 Until now every process saw only its own memory and that was intended -
 that is the point of separate address spaces. Shared memory is an
@@ -46,7 +46,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
             out = q.command("run shmwrite64", "done, exit code",
                               timeout=40)
 

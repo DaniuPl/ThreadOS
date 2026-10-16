@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the network as seen from a program in long mode.
+"""ThreadOS smoke test: the network as seen from a program in long mode.
 
 Until now only the kernel used the network - 'ping' and 'ifconfig' are
 its own commands. Here we check the path through system calls: a program
@@ -40,15 +40,15 @@ def main():
     http_port, http_stop = start_http_server()
     try:
         os.makedirs(d + "/boot/grub")
-        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(KERNEL64, d + "/boot/threados64.bin")
         mod = ""
         if INITRD64 and os.path.exists(INITRD64):
             shutil.copy(INITRD64, d + "/boot/initrd64.img")
             mod = "    module2 /boot/initrd64.img initrd64\n"
         with open(d + "/boot/grub/grub.cfg", "w") as fh:
             fh.write("set timeout=0\nset default=0\n"
-                     'menuentry "ProtonOS 64" {\n'
-                     "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+                     'menuentry "ThreadOS 64" {\n'
+                     "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
@@ -62,7 +62,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
             q.wait_serial("[net] DHCP", timeout=40)
 
             seen = len(q.serial())

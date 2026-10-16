@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: Alt+Tab.
+"""ThreadOS smoke test: Alt+Tab.
 
 With twelve windows to hand, the only way to reach one of them was the
 mouse: a click on the window, or on its button on the taskbar. Every

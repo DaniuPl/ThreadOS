@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the taskbar - pictures on it, and its shape.
+"""ThreadOS smoke test: the taskbar - pictures on it, and its shape.
 
 The bar carried names, trimmed to six letters, so 'Settings' read as
 'Configi' and two terminals read the same. It carried them because a
@@ -204,11 +204,11 @@ def main():
             q2 = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE,
                       serial=tempfile.mktemp(suffix=".log"))
             try:
-                q2.wait_for("ProtonOS shell", timeout=40)
+                q2.wait_for("ThreadOS shell", timeout=40)
                 for cmd in ("set taskbar %d" % width, "set icons %d" % align):
                     q2.type_line("sudo " + cmd)
                     time.sleep(1)
-                    q2.command("proton", "saved", timeout=30)
+                    q2.command("thread", "saved", timeout=30)
                 q2.type_line("desktop")
                 time.sleep(5)
                 q2.mouse_home()

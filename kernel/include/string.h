@@ -1,5 +1,5 @@
-#ifndef PROTONOS_STRING_H
-#define PROTONOS_STRING_H
+#ifndef THREADOS_STRING_H
+#define THREADOS_STRING_H
 
 #include <stddef.h>
 

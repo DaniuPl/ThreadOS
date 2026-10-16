@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a USB keyboard in the 64-bit kernel.
+"""ThreadOS smoke test: a USB keyboard in the 64-bit kernel.
 
 A machine newer than roughly 2010 no longer has a PS/2 connector. This
 group looks after the older bus - UHCI. The newer one, xHCI, has its own
@@ -53,7 +53,7 @@ def main():
                   re.search(r"A USB keyboard \(HID, UHCI\) on port \d+",
                             start) is not None)
 
-            q.wait_serial("proton64>", timeout=30)
+            q.wait_serial("thread64>", timeout=30)
             q.type_line("uptime")
             out_text = q.wait_serial("Uptime:", timeout=20)
             check("a command typed on the USB keyboard runs",

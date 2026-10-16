@@ -1,5 +1,5 @@
-#ifndef PROTONOS_IDT64_H
-#define PROTONOS_IDT64_H
+#ifndef THREADOS_IDT64_H
+#define THREADOS_IDT64_H
 
 /* Loads the long mode interrupt table (exceptions 0-31, IRQ 32-47) */
 void idt64_init(void);

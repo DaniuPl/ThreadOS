@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ATA_H
-#define PROTONOS_ATA_H
+#ifndef THREADOS_ATA_H
+#define THREADOS_ATA_H
 
 #include <stdint.h>
 

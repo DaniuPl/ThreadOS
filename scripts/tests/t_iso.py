@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: booting from a disc (Multiboot 2).
+"""ThreadOS smoke test: booting from a disc (Multiboot 2).
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -29,14 +29,14 @@ def main():
         iso = tempfile.mktemp(suffix=".iso")
         try:
             os.makedirs(isodir + "/boot/grub")
-            shutil.copy(KERNEL, isodir + "/boot/protonos.bin")
+            shutil.copy(KERNEL, isodir + "/boot/threados.bin")
             shutil.copy(INITRD, isodir + "/boot/initrd.img")
             # A menu of our own: with no countdown and straight into text
             # mode, so that the screen can be read
             with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("set timeout=0\nset default=0\n"
-                         'menuentry "ProtonOS" {\n'
-                         "    multiboot2 /boot/protonos.bin nodesktop\n"
+                         'menuentry "ThreadOS" {\n'
+                         "    multiboot2 /boot/threados.bin nodesktop\n"
                          "    module2 /boot/initrd.img\n}\n")
             made = subprocess.run(["grub-mkrescue", "-o", iso, isodir],
                                   stdout=subprocess.DEVNULL,
@@ -60,7 +60,7 @@ def main():
                     check("the pointer to the ACPI tables handed over by GRUB",
                           "ACPI: tables from" in q21.wait_serial("ACPI:",
                                                                 timeout=20))
-                    q21.wait_serial("ProtonOS shell", timeout=30)
+                    q21.wait_serial("ThreadOS shell", timeout=30)
                     q21.type_line("uptime")
                     check("the system from the disc answers commands",
                           "uptime:" in q21.wait_serial("timer ticks",
@@ -97,8 +97,8 @@ def main():
                 # the mode
                 with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                     fh.write("set timeout=0\nset default=0\n"
-                             'menuentry "ProtonOS" {\n'
-                             "    multiboot2 /boot/protonos.bin\n"
+                             'menuentry "ThreadOS" {\n'
+                             "    multiboot2 /boot/threados.bin\n"
                              "    module2 /boot/initrd.img\n}\n")
                 iso2 = tempfile.mktemp(suffix=".iso")
                 try:

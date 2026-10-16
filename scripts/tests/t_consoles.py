@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: virtual consoles (Alt+F1..F4).
+"""ThreadOS smoke test: virtual consoles (Alt+F1..F4).
 
 Alt+F1..F4 switches the screen, but every console has its own content,
 its own shell and its own "own" writers: a program started on the second
@@ -28,7 +28,7 @@ def main():
     print("--- virtual consoles (Alt+F1..F4) ---")
     q17 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q17.wait_for("ProtonOS shell", timeout=30)
+        q17.wait_for("ThreadOS shell", timeout=30)
         q17.type_line("clear")
         q17.type_line("uptime")
         first = q17.wait_for("timer ticks", timeout=20)

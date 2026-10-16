@@ -1,4 +1,4 @@
-/* ProtonOS 64 - entering long mode
+/* ThreadOS 64 - entering long mode
  *
  * GRUB leaves us in 32-bit protected mode, because that is what
  * Multiboot 2 prescribes. Getting into long mode takes several steps

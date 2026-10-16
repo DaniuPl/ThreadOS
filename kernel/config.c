@@ -35,7 +35,7 @@ struct setting {
 /* Every one of these is read somewhere. In order: the shell prompt,
    the network, the console and the desktop. */
 static struct setting settings[] = {
-    { "name",  "proton",   "the machine's name - it shows in the prompt", 0, { 0 } },
+    { "name",  "thread",   "the machine's name - it shows in the prompt", 0, { 0 } },
     { "dns",    "0.0.0.0",  "name server; 0.0.0.0 = the one from DHCP",  0, { 0 } },
     { "color",  "11",       "the shell prompt's colour, 0-15",         0, { 0 } },
     { "background",    "0",        "desktop background: 0 sea, 1 navy,\n"
@@ -50,10 +50,10 @@ static struct setting settings[] = {
     { "scale",  "0",        "screen pixels per desktop pixel:\n"
                             "0 lets the screen decide (a big panel gets 2)", 0, { 0 } },
     /* Not the password - a number computed from it. The default is the
-       number for 'proton', so a machine on which nobody ever set one
+       number for 'thread', so a machine on which nobody ever set one
        still has a password. Hidden, because a number nobody can type
        back is not a setting: it is changed by the 'passwd' command. */
-    { "password",  "12265581074349227503",
+    { "password",  "14605732860167589771",
                             "the admin password (a number computed from it)",
                             1, { 0 } },
 };

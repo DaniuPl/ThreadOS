@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the terminal in a window, 64-bit kernel.
+"""ThreadOS smoke test: the terminal in a window, 64-bit kernel.
 
 The terminal is one program compiled twice - the ring of lines, the
 editing, the history and the drawing are the same code on both sides.
@@ -104,7 +104,7 @@ def main():
 
     try:
         os.makedirs(d + "/boot/grub")
-        shutil.copy(KERNEL64, d + "/boot/protonos64.bin")
+        shutil.copy(KERNEL64, d + "/boot/threados64.bin")
         mod = ""
         if INITRD64 and os.path.exists(INITRD64):
             shutil.copy(INITRD64, d + "/boot/initrd64.img")
@@ -112,8 +112,8 @@ def main():
         with open(d + "/boot/grub/grub.cfg", "w") as fh:
             fh.write("insmod all_video\nset gfxpayload=keep\n"
                      "set timeout=0\nset default=0\n"
-                     'menuentry "ProtonOS 64" {\n'
-                     "    multiboot2 /boot/protonos64.bin\n" + mod + "}\n")
+                     'menuentry "ThreadOS 64" {\n'
+                     "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
         made = subprocess.run(["grub-mkrescue", "-o", iso, d],
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL).returncode == 0
@@ -124,7 +124,7 @@ def main():
         q = Qemu(KERNEL, INITRD, disk=disk, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=60)
+            q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
             time.sleep(4)

@@ -1,7 +1,7 @@
 /* A source of randomness for ring 3 programs
  *
  * TLS needs unpredictable bytes (the private key, the random part of
- * ClientHello). ProtonOS has no hardware generator, so we mix whatever
+ * ClientHello). ThreadOS has no hardware generator, so we mix whatever
  * we have at hand: the real-time clock, the timer tick counter, the
  * process's pid and addresses from the stack. Successive bytes come out
  * of SHA-256 of a counter and a seed.
@@ -11,8 +11,8 @@
  * but not for protecting anything valuable.
  */
 
-#ifndef PROTONOS_URAND_H
-#define PROTONOS_URAND_H
+#ifndef THREADOS_URAND_H
+#define THREADOS_URAND_H
 
 #include "uapi.h"
 #include "usha256.h"

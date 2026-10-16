@@ -13,8 +13,8 @@
  * into lines of a given width, on word boundaries.
  */
 
-#ifndef PROTONOS_UHTML_H
-#define PROTONOS_UHTML_H
+#ifndef THREADOS_UHTML_H
+#define THREADOS_UHTML_H
 
 #include "uapi.h"
 

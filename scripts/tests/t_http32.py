@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: TCP and HTTP in the 32-bit kernel.
+"""ThreadOS smoke test: TCP and HTTP in the 32-bit kernel.
 
 On the other side stands a real stack - an HTTP server in Python on the
 host - and not a loopback of our own. So the client has to reach
@@ -7,7 +7,7 @@ agreement with something we did not write: negotiate a connection, read
 the response, follow a 302 redirect and assemble a body sent in pieces.
 
 The second thing this is about is the path network -> disk. The files
-fetched land on PFS, and their sizes are chosen so as to go through all
+fetched land on TFS, and their sizes are chosen so as to go through all
 three levels of an inode's addressing: direct, indirect and doubly
 indirect. At the end the machine comes up a second time on the same
 disk - the largest file is to have its full size after the restart.
@@ -34,7 +34,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
         q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
@@ -46,22 +46,22 @@ def main():
             check("TCP: a handshake and an HTTP 200 answer",
                   "[httpget] HTTP 200" in page)
             check("TCP: the page's content arrived whole",
-                  "ProtonOS TCP works" in page)
+                  "ThreadOS TCP works" in page)
             check("httpget ended without an error",
                   "process \'httpget\' has ended (code 0)" in page)
 
-            # Network -> disk: an HTTP body written to PFS and read back from it
+            # Network -> disk: an HTTP body written to TFS and read back from it
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d / page.htm" % http_port)
             q.wait_for("content ", timeout=30)
             q.type_line("cat page.htm")
-            saved = q.wait_for("ProtonOS TCP works", timeout=10)
-            check("content from the network written to the PFS and read off the disk",
-                  "<html>ProtonOS TCP works</html>" in saved)
+            saved = q.wait_for("ThreadOS TCP works", timeout=10)
+            check("content from the network written to the TFS and read off the disk",
+                  "<html>ThreadOS TCP works</html>" in saved)
             check("only the content went into the file, without the HTTP headers",
                   "Content-Length" not in saved)
 
-            # PFS3: a file well above the old limit of 16 KiB per file
+            # TFS3: a file well above the old limit of 16 KiB per file
             q.type_line("clear")
             q.type_line("run httpget 10.0.2.2 %d /big big.htm" % http_port)
             big = q.wait_for("content ", timeout=90)
@@ -72,7 +72,7 @@ def main():
                   got is not None and int(got.group(1)) == len(BIG_PAGE))
             q.type_line("fls")
             listing = q.wait_for("big.htm", timeout=10)
-            check("a file past the old 16 KiB limit written to the PFS",
+            check("a file past the old 16 KiB limit written to the TFS",
                   "big.htm  (%d B)" % len(BIG_PAGE) in listing)
             q.type_line("df")
             usage = q.wait_for("disk: ", timeout=10)
@@ -91,7 +91,7 @@ def main():
 
             q.type_line("fls")
             listing = q.wait_for("huge.htm", timeout=15)
-            check("written to the PFS at its full size",
+            check("written to the TFS at its full size",
                   "huge.htm  (%d B)" % len(HUGE_PAGE) in listing)
 
             q.type_line("run sh")
@@ -113,7 +113,7 @@ def main():
             check("content in chunks was put together correctly",
                   "HTTP 200 (chunked), content %d B" % len(PAGE) in hop)
             check("the content is whole once put together",
-                  "ProtonOS TCP works" in hop)
+                  "ThreadOS TCP works" in hop)
         finally:
             http_stop()
 
@@ -129,7 +129,7 @@ def main():
     print("--- a second boot (the same disk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q2.wait_for("ProtonOS shell", timeout=40)
+        q2.wait_for("ThreadOS shell", timeout=40)
         q2.type_line("fls")
         listing = q2.wait_for("big.htm", timeout=10)
         check("a big file (>100 KiB) survived the restart at its full size",

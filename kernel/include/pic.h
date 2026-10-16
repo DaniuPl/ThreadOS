@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PIC_H
-#define PROTONOS_PIC_H
+#ifndef THREADOS_PIC_H
+#define THREADOS_PIC_H
 
 #include <stdint.h>
 

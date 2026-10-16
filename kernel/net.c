@@ -1,4 +1,4 @@
-/* The ProtonOS network stack: Ethernet + ARP + IPv4 + ICMP + UDP + TCP
+/* The ThreadOS network stack: Ethernet + ARP + IPv4 + ICMP + UDP + TCP
  *
  * Minimal but real: the system answers ARP queries and pings from
  * outside on its own, and the 'ping' command resolves a MAC address
@@ -665,7 +665,7 @@ static void handle_icmp(uint32_t src_ip, const uint8_t *src_mac, uint8_t ttl,
         return;
 
     if (icmp[0] == ICMP_ECHO_REQUEST) {
-        /* Somebody is pinging ProtonOS - we bounce the packet back as an echo reply */
+        /* Somebody is pinging ThreadOS - we bounce the packet back as an echo reply */
         uint8_t reply[64];
         uint16_t n = len > sizeof(reply) ? (uint16_t)sizeof(reply) : len;
         memcpy(reply, icmp, n);

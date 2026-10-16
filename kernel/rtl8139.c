@@ -2,7 +2,7 @@
  *
  * The card is "old school": it is configured through I/O ports (BAR0),
  * while packets travel by DMA to buffers in kernel memory. Because
- * ProtonOS has an identity mapping, a buffer's virtual address is also
+ * ThreadOS has an identity mapping, a buffer's virtual address is also
  * the physical address we hand to the card.
  *
  * Reception: one contiguous ring buffer (8 KiB + 16 B + 1500 B - that

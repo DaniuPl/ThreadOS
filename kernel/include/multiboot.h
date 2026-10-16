@@ -1,5 +1,5 @@
-#ifndef PROTONOS_MULTIBOOT_H
-#define PROTONOS_MULTIBOOT_H
+#ifndef THREADOS_MULTIBOOT_H
+#define THREADOS_MULTIBOOT_H
 
 #include <stdint.h>
 

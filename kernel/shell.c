@@ -137,7 +137,7 @@ static const struct {
     {"screen",    "video mode, frame cost"},
     {"hardware",   "what is in this machine"},
     {"disks",    "the machine's disks"},
-    {"install", "ProtonOS onto a disk"},
+    {"install", "ThreadOS onto a disk"},
     {"fat [N]",  "EFI partition: fatls,"},
     {"",         "  fatcat, fatcopy, fatrm"},
     {"gfx",      "mode 13h test"},
@@ -217,7 +217,7 @@ static void read_word(char *out, int max);
  *
  * The startup path will not touch a disk that has anything on it, so
  * this is the only way a disk with a Windows on it becomes a disk with
- * PFS on it - and it is deliberately a thing one has to mean. The
+ * TFS on it - and it is deliberately a thing one has to mean. The
  * confirmation is the word, typed out: a key to press is something a
  * person does by reflex, and a word is something they have to decide
  * to type. */
@@ -273,7 +273,7 @@ static void cmd_formatuj(char *arg)
         return;
     }
     if (fs_format_now(which))
-        printk("format: done - %s is a ProtonOS PFS now\n",
+        printk("format: done - %s is a ThreadOS TFS now\n",
                which ? "this partition" : "the whole disk");
     else
         printk("format: it did not work\n");
@@ -485,7 +485,7 @@ static void cmd_vesa(void)
     video_clear(3);                        /* blue background */
     video_fill_rect(200, 150, 240, 180, 1); /* red in the middle */
     video_fill_rect(20, 20, 60, 60, 2);    /* green in a corner */
-    video_draw_string(210, 235, "ProtonOS VESA 640x480", 4);
+    video_draw_string(210, 235, "ThreadOS VESA 640x480", 4);
     video_present();
 }
 
@@ -1205,7 +1205,7 @@ static void shell_thread(void *arg)
        the startup messages and the prompt settle in a predictable
        order. The others greet themselves. */
     if (vc) {
-        printk("ProtonOS - console %d. Alt+F1..F4 switches.\n", vc + 1);
+        printk("ThreadOS - console %d. Alt+F1..F4 switches.\n", vc + 1);
         prompt();
     }
 
@@ -1218,7 +1218,7 @@ void shell_init(void)
     for (int vc = 0; vc < CONSOLE_COUNT; vc++)
         keyboard_set_handler(vc, shell_on_char);
 
-    printk("\nProtonOS shell - type 'help' to see the commands.\n");
+    printk("\nThreadOS shell - type 'help' to see the commands.\n");
     prompt();
 
     for (int vc = 0; vc < CONSOLE_COUNT; vc++)

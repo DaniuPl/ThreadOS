@@ -1,5 +1,5 @@
-#ifndef PROTONOS_FPU64_H
-#define PROTONOS_FPU64_H
+#ifndef THREADOS_FPU64_H
+#define THREADOS_FPU64_H
 
 #include <stdint.h>
 

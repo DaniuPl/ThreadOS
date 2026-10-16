@@ -1,9 +1,9 @@
-#ifndef PROTONOS_INSTALL_H
-#define PROTONOS_INSTALL_H
+#ifndef THREADOS_INSTALL_H
+#define THREADOS_INSTALL_H
 
 #include <stdint.h>
 
-/* Installing ProtonOS onto the machine's own disk
+/* Installing ThreadOS onto the machine's own disk
  *
  * What installing amounts to on a UEFI machine is smaller than the
  * word suggests: three files - the loader, the kernel and the initrd -
@@ -49,7 +49,7 @@
  * partitions stay, every file that was on that EFI partition stays.
  *
  * WHOLE makes the disk ours: a new partition table, a new EFI
- * partition, a partition for ProtonOS - and everything that was on
+ * partition, a partition for ThreadOS - and everything that was on
  * that disk is gone. There is no third mode, and there is no mode
  * that resizes somebody's partition to make room; moving another
  * system's data is not a thing to do on the strength of a guess about

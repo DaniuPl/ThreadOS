@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the kernel shell's commands.
+"""ThreadOS smoke test: the kernel shell's commands.
 
 The kernel's shell is the only way into the system until ush starts in
 ring 3 - and the first thing to stop working when something breaks
@@ -33,7 +33,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         # The DHCP message falls into the middle of a line being typed, so
         # we wait for it before we start typing
         q.wait_for("[net] DHCP", timeout=20)

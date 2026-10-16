@@ -10,8 +10,8 @@
  * 2048 bits = 64 limbs; with room to spare for 4096-bit keys.
  */
 
-#ifndef PROTONOS_UBIGNUM_H
-#define PROTONOS_UBIGNUM_H
+#ifndef THREADOS_UBIGNUM_H
+#define THREADOS_UBIGNUM_H
 
 #include "uapi.h"
 

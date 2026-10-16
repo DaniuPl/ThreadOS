@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PIT_H
-#define PROTONOS_PIT_H
+#ifndef THREADOS_PIT_H
+#define THREADOS_PIT_H
 
 #include <stdint.h>
 

@@ -20,7 +20,7 @@
 #include "uapi.h"
 #include "usha256.h"
 #include "urand.h"
-#include "uproton.h"
+#include "uthread.h"
 
 static void report(const char *co, uint32_t v)
 {
@@ -40,8 +40,8 @@ void _start(int argc, char **argv)
 {
     our_fn();
 
-    uint32_t code = (uint32_t)proton_code_addr();
-    uint32_t data = (uint32_t)proton_data_addr();
+    uint32_t code = (uint32_t)thread_code_addr();
+    uint32_t data = (uint32_t)thread_data_addr();
     uint32_t mine = (uint32_t)(uintptr_t)our_fn;
 
     report("[dynlib] the program's code at ", mine);
@@ -80,7 +80,7 @@ void _start(int argc, char **argv)
     /* The generator's counter is the library's state. In a fresh
        process it is to be zero - without that there would be no telling
        whether the data are private. */
-    if (proton_random_counter() != 0) {
+    if (thread_random_counter() != 0) {
         print("[dynlib] WRONG: the library's counter does not start at zero\n");
         sys_exit(1);
     }
@@ -88,7 +88,7 @@ void _start(int argc, char **argv)
     urand_init();
     urand_bytes(random, sizeof(random));
     report("[dynlib] the counter after taking bytes: ",
-            proton_random_counter());
+            thread_random_counter());
 
     print("[dynlib] done\n");
     sys_exit(0);

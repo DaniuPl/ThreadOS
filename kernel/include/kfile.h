@@ -1,5 +1,5 @@
-#ifndef PROTONOS_KFILE_H
-#define PROTONOS_KFILE_H
+#ifndef THREADOS_KFILE_H
+#define THREADOS_KFILE_H
 
 #include <stdint.h>
 
@@ -10,7 +10,7 @@
 #define O_TRUNC  8
 
 /* The process file descriptor layer. fd 0/1/2 = keyboard/console,
-   higher fds refer to PFS files. They operate on the fd table of the
+   higher fds refer to TFS files. They operate on the fd table of the
    current task. */
 /* A free descriptor number, taken but not yet given a meaning - the
    caller puts something behind it at once (see kfile.c) */

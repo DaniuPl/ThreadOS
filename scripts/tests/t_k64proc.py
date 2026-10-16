@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: processes in ring 3 (64-bit kernel).
+"""ThreadOS smoke test: processes in ring 3 (64-bit kernel).
 
 Only the processor knows the code selector, and its two lowest bits say
 which ring the program REALLY ran in - and to say that, it had to enter
@@ -54,7 +54,7 @@ def main():
         try:
             # The kernel reaches the shell by itself; everything this
             # group checks happens only afterwards
-            q23.wait_serial("proton64>", timeout=90)
+            q23.wait_serial("thread64>", timeout=90)
 
             # Ring 3: only the processor knows the code selector,
             # and its two lowest bits say which ring the program

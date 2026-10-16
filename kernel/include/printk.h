@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PRINTK_H
-#define PROTONOS_PRINTK_H
+#ifndef THREADOS_PRINTK_H
+#define THREADOS_PRINTK_H
 
 /* Formatted kernel printing - to the VGA screen and the serial port.
    Supports: %s %c %d %u %x %p %% */

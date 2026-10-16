@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: fork, exec and the process tree.
+"""ThreadOS smoke test: fork, exec and the process tree.
 
 The Unix fork/exec pair is the heaviest part of process management,
 because it touches everything at once: the address space, copy on write,
@@ -36,7 +36,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 

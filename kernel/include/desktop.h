@@ -1,5 +1,5 @@
-#ifndef PROTONOS_DESKTOP_H
-#define PROTONOS_DESKTOP_H
+#ifndef THREADOS_DESKTOP_H
+#define THREADOS_DESKTOP_H
 
 #include <stdint.h>
 

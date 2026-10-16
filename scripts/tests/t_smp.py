@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: detecting and waking the remaining processors.
+"""ThreadOS smoke test: detecting and waking the remaining processors.
 
 After power on one core works - the one the firmware chose as the
 bootstrap. The rest stand and wait for a signal, and that is the
@@ -71,7 +71,7 @@ def main():
         check("the other three cores answered after INIT-SIPI",
               m is not None and int(m.group(2)) == 3)
 
-        q.wait_for("ProtonOS shell", timeout=30)
+        q.wait_for("ThreadOS shell", timeout=30)
         q.wait_for("[net] DHCP", timeout=30)
 
         # After waking the cores the system is to work as it did before
@@ -172,7 +172,7 @@ def main():
                     check("the secondary cores reach long mode by themselves",
                           m is not None and int(m.group(2)) == 3)
 
-                    q64.wait_serial("proton64>", timeout=40)
+                    q64.wait_serial("thread64>", timeout=40)
                     prog = q64.command("run hello64", "exit code",
                                          timeout=40)
                     check("a ring 3 program runs as before",
@@ -223,7 +223,7 @@ def main():
         start = q1.wait_for("Processors:", timeout=60)
         check("on one core the system says so outright and wakes nobody",
               "Processors: 1" in start)
-        q1.wait_for("ProtonOS shell", timeout=30)
+        q1.wait_for("ThreadOS shell", timeout=30)
         up = q1.command("uptime", "timer ticks")
         check("and it works just the same", "timer ticks" in up)
     finally:

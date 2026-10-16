@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: virtual desktops.
+"""ThreadOS smoke test: virtual desktops.
 
 Four desktops, and a window belongs to exactly one of them. It is the
 oldest answer there is to a screen that has run out of room: instead

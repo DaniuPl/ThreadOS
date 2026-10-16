@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: many windows open at once.
+"""ThreadOS smoke test: many windows open at once.
 
 The compositor used to hold six windows, two of which are its own. Four
 applications, and the fifth failed - with no message, no error and

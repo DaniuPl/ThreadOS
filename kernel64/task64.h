@@ -1,5 +1,5 @@
-#ifndef PROTONOS_TASK64_H
-#define PROTONOS_TASK64_H
+#ifndef THREADOS_TASK64_H
+#define THREADOS_TASK64_H
 
 #include <stdint.h>
 
@@ -119,8 +119,8 @@ void task64_inherit_brk(struct task64 *child);
  * content from disk instead of zeros.
  *
  * We work the block numbers out once, when the mapping is set up, and
- * from then on read them through the block layer, bypassing the PFS
- * code. The reason is the same as with page swapping: PFS has one
+ * from then on read them through the block layer, bypassing the TFS
+ * code. The reason is the same as with page swapping: TFS has one
  * shared buffer for a block, and a page fault can land in the middle
  * of any file operation.
  *
@@ -134,7 +134,7 @@ int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
                       uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
 
 /* Does the address belong to one of the mappings. If so, it writes out
-   the PFS block number, how many bytes of the file are left from that
+   the TFS block number, how many bytes of the file are left from that
    point and whether the mapping is writable. */
 int task64_mmap_find(uint64_t addr, uint32_t *first_block,
                        uint32_t *nbytes, uint32_t *write);
@@ -144,7 +144,7 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
 int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
                      uint32_t *size, uint32_t *write);
 
-/* The PFS block number at the given index in the mapping covering an
+/* The TFS block number at the given index in the mapping covering an
    address */
 uint32_t task64_mmap_block(uint64_t addr, uint32_t index);
 
@@ -168,7 +168,7 @@ int task64_fd_pipe(int idx, int reader_task);
 int task64_fd_kind(int fd);
 int task64_fd_dup2(int old, int fresh_one);
 void task64_fd_close_all(void);
-int task64_fd_slot(int fd);          /* PFS inode / pipe number */
+int task64_fd_slot(int fd);          /* TFS inode / pipe number */
 uint32_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);
 int task64_fd_seek(int fd, uint32_t pos);

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USBKBD_H
-#define PROTONOS_USBKBD_H
+#ifndef THREADOS_USBKBD_H
+#define THREADOS_USBKBD_H
 
 /* USB keyboard (HID class, boot protocol)
  *

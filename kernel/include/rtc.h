@@ -1,5 +1,5 @@
-#ifndef PROTONOS_RTC_H
-#define PROTONOS_RTC_H
+#ifndef THREADOS_RTC_H
+#define THREADOS_RTC_H
 
 #include <stdint.h>
 

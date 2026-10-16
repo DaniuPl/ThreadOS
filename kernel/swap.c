@@ -8,9 +8,9 @@
  * We do it this way because swapping starts at the worst moments -
  * when a frame ran out, and therefore potentially in the middle of a
  * page fault handler that itself landed in the middle of a file
- * operation. PFS has one shared block buffer; getting in its way there
+ * operation. TFS has one shared block buffer; getting in its way there
  * would leave blocks on disk with a mixture of two writes. Reserving
- * space through PFS therefore happens once, at leisure, and after that
+ * space through TFS therefore happens once, at leisure, and after that
  * it is only raw sectors.
  */
 
@@ -23,7 +23,7 @@
 #include "include/task.h"
 #include "include/printk.h"
 
-#define SLOT_BLOCKS   (PAGE_SIZE / FS_BLOCK)          /* 4 PFS blocks per page */
+#define SLOT_BLOCKS   (PAGE_SIZE / FS_BLOCK)          /* 4 TFS blocks per page */
 #define SECT_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)   /* 2 sectors per block */
 #define SLOTS_MAX     4096                            /* ceiling: 16 MiB */
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the icons on the desktop come from a file.
+"""ThreadOS smoke test: the icons on the desktop come from a file.
 
 Seven programs, decided when the kernel was built. Adding one meant
 editing kernel/desktop.c and building a kernel - which is the same as
@@ -106,7 +106,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
             write_list(q, wanted)
             # The kernel's own two windows sit over the left-hand
             # column, and the icon captions run under them - so they go
@@ -161,7 +161,7 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ProtonOS shell", timeout=40)
+            q2.wait_for("ThreadOS shell", timeout=40)
             # A file with nothing in it but a comment: the lines that
             # do not parse are passed over, and what is left is nothing
             q2.command("write desktop.icons #only-a-comment", "wrote",

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_XHCI_H
-#define PROTONOS_XHCI_H
+#ifndef THREADOS_XHCI_H
+#define THREADOS_XHCI_H
 
 /* USB host controller (xHCI) - the transport layer
  *

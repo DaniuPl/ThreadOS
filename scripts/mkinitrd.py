@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Packs files into a ProtonOS initrd (the PIRD format).
+"""Packs files into a ThreadOS initrd (the PIRD format).
 
 Format: "PIRD" | u32 count | entries {name[16], u32 offset, u32 size} | data
 

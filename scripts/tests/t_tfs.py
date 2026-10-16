@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the PFS file system on the disk.
+"""ThreadOS smoke test: the TFS file system on the disk.
 
 A file written by a ring 3 process and a file written from the kernel's
 shell are to be the same file seen by both - and both are to survive a
@@ -32,9 +32,9 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
 
-        # --- The file system on the disk (PFS) ---
+        # --- The file system on the disk (TFS) ---
         # A ring 3 process writes and reads a file with syscalls
         q.type_line("run fileio")
         screen = q.wait_for("[fileio] OK")
@@ -42,12 +42,12 @@ def main():
               "read off the disk: a file written by a ring 3 process" in screen)
 
         # The kernel's shell: write -> cat (a write and a read within one boot)
-        q.type_line("write greeting hello-from-the-pfs-disk")
+        q.type_line("write greeting hello-from-the-tfs-disk")
         check("writing a file from the kernel's shell",
               "wrote" in q.wait_for("wrote"))
         q.type_line("cat greeting")
         check("reading the written file back (cat)",
-              "hello-from-the-pfs-disk" in q.wait_for("hello-from-the-pfs-disk"))
+              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk"))
 
         # fls shows both files
         q.type_line("fls")
@@ -63,12 +63,12 @@ def main():
         # The 'cat' program in ring 3: it reads a file through an fd and
         # writes to fd 1 (a unified I/O model: read the file -> write to
         # the console). We clear the screen so as not to catch the old
-        # echo of 'hello-from-the-pfs-disk'.
+        # echo of 'hello-from-the-tfs-disk'.
         q.type_line("clear")
         time.sleep(0.3)
         q.type_line("run cat greeting")
         check("the ring 3 'cat' reads a file through an fd and writes to fd 1",
-              "hello-from-the-pfs-disk" in q.wait_for("hello-from-the-pfs-disk",
+              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk",
                                                 timeout=20))
 
         # At the end: crash should cause a page fault with a diagnostic
@@ -86,10 +86,10 @@ def main():
     print("--- a second boot (the same disk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        screen = q2.wait_for("ProtonOS shell")
+        screen = q2.wait_for("ThreadOS shell")
         check("the second boot: the disk was found"
               " (already formatted, no second format)",
-              "+ PFS ready" in screen and "formatted" not in screen)
+              "+ TFS ready" in screen and "formatted" not in screen)
 
         q2.type_line("fls")
         screen = q2.wait_for("Root directory")
@@ -98,7 +98,7 @@ def main():
 
         q2.type_line("cat greeting")
         check("the file's content survived the restart (cat)",
-              "hello-from-the-pfs-disk" in q2.wait_for("hello-from-the-pfs-disk"))
+              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
 
         q2.type_line("cat ring3.txt")
         check("the file written by ring 3 survived the restart",
@@ -123,7 +123,7 @@ def main():
 
         q2.type_line("cat powitanie")
         check("and the content is the same - the blocks did not move",
-              "hello-from-the-pfs-disk" in q2.wait_for("hello-from-the-pfs-disk"))
+              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
 
         # The rules a rename has: the name must be free, and the source
         # must exist. A rename that overwrites is a delete nobody asked

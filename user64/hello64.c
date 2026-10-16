@@ -1,4 +1,4 @@
-/* hello64 - the first real ProtonOS program in long mode
+/* hello64 - the first real ThreadOS program in long mode
  *
  * Built separately, put into the initrd, read by the kernel only after
  * startup. The kernel knows nothing about it beyond what it reads from

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_NVME_H
-#define PROTONOS_NVME_H
+#ifndef THREADOS_NVME_H
+#define THREADOS_NVME_H
 
 #include <stdint.h>
 

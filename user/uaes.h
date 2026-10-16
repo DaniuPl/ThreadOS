@@ -1,6 +1,6 @@
 /* AES with the two modes that seal a packet: GCM and CCM
  *
- * Until now the whole of ProtonOS' cryptography stood on ChaCha20 -
+ * Until now the whole of ThreadOS' cryptography stood on ChaCha20 -
  * chosen because it computes on additions, rotations and XORs alone.
  * AES is needed for what ChaCha cannot reach:
  *
@@ -21,8 +21,8 @@
  * first version.
  */
 
-#ifndef PROTONOS_UAES_H
-#define PROTONOS_UAES_H
+#ifndef THREADOS_UAES_H
+#define THREADOS_UAES_H
 
 #include "uapi.h"
 

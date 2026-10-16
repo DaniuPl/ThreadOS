@@ -1,5 +1,5 @@
-#ifndef PROTONOS_GPT_H
-#define PROTONOS_GPT_H
+#ifndef THREADOS_GPT_H
+#define THREADOS_GPT_H
 
 #include <stdint.h>
 
@@ -8,7 +8,7 @@
  * kernel/part.c reads tables and deliberately writes nothing: knowing
  * what is on a disk is one thing and changing it is another. This is
  * the other thing, and it exists for exactly one reason - a machine on
- * which ProtonOS is to be the only system has to have a table made for
+ * which ThreadOS is to be the only system has to have a table made for
  * it, and nobody else is going to make one.
  *
  * What is written is a GPT, because that is what a UEFI machine boots
@@ -23,7 +23,7 @@
  */
 
 /* Makes a fresh table: an EFI partition of 'esp_mib' megabytes and
-   one partition for ProtonOS taking the rest. 0 = done, -1 = it did
+   one partition for ThreadOS taking the rest. 0 = done, -1 = it did
    not work (no disk, or the disk is too small). */
 int gpt_make(uint32_t esp_mib);
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: taking the whole disk.
+"""ThreadOS smoke test: taking the whole disk.
 
 The other way of installing. Not three files into somebody's EFI
 partition, but a disk made ours from nothing: a new partition table, a
-new EFI partition with a FAT32 on it, a partition for ProtonOS - and
+new EFI partition with a FAT32 on it, a partition for ThreadOS - and
 everything that was on that disk gone.
 
 So this group is mostly about what a table has to be for a firmware to
@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_dir, fat_kind, gpt_read,
-                   GUID_ESP4, GUID_PFS4)
+                   GUID_ESP4, GUID_TFS4)
 
 ESP_START = 2048
 ESP_SECTORS = 204800
@@ -46,7 +46,7 @@ def blob(path):
 
 def main():
     print()
-    print("--- the whole disk for ProtonOS ---")
+    print("--- the whole disk for ThreadOS ---")
 
     reason = no64()
     if reason:
@@ -81,7 +81,7 @@ def main():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "protonos64.bin"))
+        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
 
         # A disk that belongs to somebody else, with a table of its own
@@ -106,12 +106,12 @@ def main():
             out = q.command("install text whole", "Type ERASE",
                             timeout=40)
             check("the plan says outright that it will erase the whole disk",
-                  "THIS WHOLE DISK WILL BE ProtonOS" in out
+                  "THIS WHOLE DISK WILL BE ThreadOS" in out
                   and "It will lose EVERYTHING" in out)
             check("and it lists what it will do",
                   "a GPT" in out
                   and "an EFI partition of 128 MiB (FAT32)" in out
-                  and "partition (PFS)" in out)
+                  and "partition (TFS)" in out)
             check("the word is different from the one for installing beside",
                   "Type ERASE" in out and "Type YES" not in out)
 
@@ -129,9 +129,9 @@ def main():
             check("after ERASE it makes a table, partitions and a filesystem",
                   "partition table (GPT) - done" in out
                   and "EFI partition (FAT32) - done" in out
-                  and "ProtonOS partition (PFS) - done" in out)
+                  and "ThreadOS partition (TFS) - done" in out)
             check("and it writes the files onto them",
-                  "/EFI/ProtonOS/protonos64.bin - done" in out
+                  "/EFI/ThreadOS/threados64.bin - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
         finally:
             q.close()
@@ -147,9 +147,9 @@ def main():
                   parts[0][0] == GUID_ESP4)
             check("the second is ours and says so with its GUID too (%s)"
                   % parts[1][0].decode("latin1"),
-                  parts[1][0] == GUID_PFS4)
+                  parts[1][0] == GUID_TFS4)
             check("the partition names: '%s' and '%s'" % (parts[0][3], parts[1][3]),
-                  parts[0][3] == "EFI" and parts[1][3] == "ProtonOS")
+                  parts[0][3] == "EFI" and parts[1][3] == "ThreadOS")
             check("the EFI partition starts at 2048 and is 128 MiB (%d "
                   "sectors)" % (parts[0][2] - parts[0][1] + 1),
                   parts[0][1] == 2048
@@ -165,10 +165,10 @@ def main():
               fat_kind(target, 2048) == "FAT32")
         listing = fat_dir(target, 2048)
         check("mtools reads the directories we made off it",
-              "ProtonOS" in listing and "BOOT" in listing)
-        for path, want in (("/EFI/ProtonOS/BOOTX64.EFI", want_loader),
-                           ("/EFI/ProtonOS/protonos64.bin", want_kernel),
-                           ("/EFI/ProtonOS/initrd64.img", want_initrd),
+              "ThreadOS" in listing and "BOOT" in listing)
+        for path, want in (("/EFI/ThreadOS/BOOTX64.EFI", want_loader),
+                           ("/EFI/ThreadOS/threados64.bin", want_kernel),
+                           ("/EFI/ThreadOS/initrd64.img", want_initrd),
                            ("/EFI/BOOT/BOOTX64.EFI", want_loader)):
             got = fat_get(target, 2048, path)
             check("%s byte for byte (%d B)" % (path, len(want)),
@@ -194,16 +194,16 @@ def main():
         q2 = Qemu(KERNEL, INITRD, disk=target, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
-            out = q2.wait_serial("protoboot: ProtonOS", timeout=60)
+            out = q2.wait_serial("threadboot: ThreadOS", timeout=60)
             check("the firmware picks our loader out of the table we "
-                  "made ourselves", "protoboot" in out)
+                  "made ourselves", "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
             check("and the system on that disk reaches the shell",
                   "Multiboot OK (Multiboot 2)" in out)
-            check("and the PFS on our partition is ready to use",
-                  "PFS" in out and "OUT OF REACH" not in out.split(
+            check("and the TFS on our partition is ready to use",
+                  "TFS" in out and "OUT OF REACH" not in out.split(
                       "Settings:")[0].split("Disk ")[-1])
-            out = q2.command("fls", "proton64>", timeout=20)
+            out = q2.command("fls", "thread64>", timeout=20)
             check("and files can be kept on it",
                   "there is no" not in out.lower() or "swap" in out.lower())
         finally:

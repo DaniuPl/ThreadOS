@@ -10,8 +10,8 @@
  * processor with no coprocessor is the simplest way.
  */
 
-#ifndef PROTONOS_UX25519_H
-#define PROTONOS_UX25519_H
+#ifndef THREADOS_UX25519_H
+#define THREADOS_UX25519_H
 
 #include "uapi.h"
 

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SHM_H
-#define PROTONOS_SHM_H
+#ifndef THREADOS_SHM_H
+#define THREADOS_SHM_H
 
 #include <stdint.h>
 

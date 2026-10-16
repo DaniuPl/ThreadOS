@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: ACPI in the 64-bit kernel.
+"""ThreadOS smoke test: ACPI in the 64-bit kernel.
 
 Powering off is the one thing that cannot be checked with text on the
 screen: either the machine goes dark or it does not. QEMU then ends by
@@ -47,7 +47,7 @@ def main():
             start = q.wait_serial("ACPI:", timeout=60)
             check("the ACPI tables were found at boot",
                   re.search(r"ACPI: tables from '\S", start) is not None)
-            q.wait_serial("proton64>", timeout=30)
+            q.wait_serial("thread64>", timeout=30)
             q.type_line("help")
             check("'poweroff' is in the list of commands",
                   "poweroff" in q.wait_serial("Commands:", timeout=20))
@@ -67,7 +67,7 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2,
                   qemu="qemu-system-x86_64")
         try:
-            q2.wait_serial("proton64>", timeout=60)
+            q2.wait_serial("thread64>", timeout=60)
             q2.type_line("reboot")
             check("'reboot' resets the machine", q2.wait_exit(timeout=25))
             check("the kernel managed to say it was restarting",

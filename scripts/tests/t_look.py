@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: how the desktop looks.
+"""ThreadOS smoke test: how the desktop looks.
 
 Everything on the screen was drawn with one call: fill this rectangle
 with that colour. It worked, and it looked like it - a flat background,

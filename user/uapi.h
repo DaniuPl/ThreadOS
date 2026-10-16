@@ -8,8 +8,8 @@
  * about it.
  */
 
-#ifndef PROTONOS_UAPI_H
-#define PROTONOS_UAPI_H
+#ifndef THREADOS_UAPI_H
+#define THREADOS_UAPI_H
 
 #ifdef __x86_64__
 #include "../user64/usys64.h"

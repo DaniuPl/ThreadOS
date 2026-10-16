@@ -1,4 +1,4 @@
-/* Installing ProtonOS onto the machine's own disk
+/* Installing ThreadOS onto the machine's own disk
  *
  * On a UEFI machine installing is smaller than the word suggests:
  * three files written onto the EFI partition that is already there.
@@ -16,7 +16,7 @@
  * that was not made for this - has nothing to install and says so
  * rather than writing something approximate.
  *
- * Two paths are written. \EFI\ProtonOS is ours and is always written.
+ * Two paths are written. \EFI\ThreadOS is ours and is always written.
  * \EFI\BOOT\BOOTX64.EFI - the name firmware falls back to when nothing
  * else is arranged - is written ONLY IF IT IS NOT THERE. On a machine
  * that has one, it belongs to whoever boots that machine today, and
@@ -45,10 +45,10 @@
 #define IDENTITY_TOP() paging_identity_limit()
 #endif
 
-#define DIR_OURS     "/EFI/ProtonOS"
-#define PATH_LOADER  "/EFI/ProtonOS/BOOTX64.EFI"
-#define PATH_KERNEL  "/EFI/ProtonOS/protonos64.bin"
-#define PATH_INITRD  "/EFI/ProtonOS/initrd64.img"
+#define DIR_OURS     "/EFI/ThreadOS"
+#define PATH_LOADER  "/EFI/ThreadOS/BOOTX64.EFI"
+#define PATH_KERNEL  "/EFI/ThreadOS/threados64.bin"
+#define PATH_INITRD  "/EFI/ThreadOS/initrd64.img"
 #define DIR_FALLBACK "/EFI/BOOT"
 #define PATH_FALLBACK "/EFI/BOOT/BOOTX64.EFI"
 
@@ -230,7 +230,7 @@ const char *install_step_name(int n)
         switch (n) {
         case 0: return "partition table (GPT)";
         case 1: return "EFI partition (FAT32)";
-        case 2: return "ProtonOS partition (PFS)";
+        case 2: return "ThreadOS partition (TFS)";
         default: n -= 3; break;
         }
     }
@@ -334,7 +334,7 @@ static void complain(uint32_t why, const struct install_info *in)
         printk("install: this system has nothing to install itself from.\n");
         printk("         The boot loader has to hand over the kernel image and "
                "itself\n");
-        printk("         as modules - protoboot does that (booting through "
+        printk("         as modules - threadboot does that (booting through "
                "UEFI off a stick).\n");
         break;
     case INST_NO_TABLE:
@@ -375,12 +375,12 @@ int install_plan(int mode, int disk)
     printk("Disk %u of %u: %s, %u MiB\n", in.disk + 1, in.disks,
            in.disk_name, in.disk_mib);
     if (in.mode == INST_WHOLE) {
-        printk("\nTHIS WHOLE DISK WILL BE ProtonOS. It will lose "
+        printk("\nTHIS WHOLE DISK WILL BE ThreadOS. It will lose "
                "EVERYTHING:\n");
         printk("  partition table, %u partitions and everything that is on "
                "them.\n", in.parts);
         printk("I will make: a GPT, an EFI partition of %u MiB (FAT32) and "
-               "a ProtonOS\n        partition (PFS) on the rest of the disk.\n",
+               "a ThreadOS\n        partition (TFS) on the rest of the disk.\n",
                (uint32_t)ESP_MIB);
     }
     else
@@ -401,7 +401,7 @@ int install_plan(int mode, int disk)
         printk("\nI do NOT touch: the partition table, other partitions or "
                "any file\nthat is on the EFI partition already.\n");
     if (!in.fallback_free)
-        printk("To start ProtonOS you will have to add an entry to the "
+        printk("To start ThreadOS you will have to add an entry to the "
                "firmware's boot menu\nand point it at %s.\n", PATH_LOADER);
     return 1;
 }
@@ -418,7 +418,7 @@ int install_do(void)
             printk("  %s - done\n", install_step_name(n));
     }
     if (plan.info.fallback_free)
-        printk("\nDone. This machine will boot ProtonOS off the disk.\n");
+        printk("\nDone. This machine will boot ThreadOS off the disk.\n");
     else
         printk("\nDone. The files are on the EFI partition; %s stayed somebody else's,\n"
                "so add an entry in the firmware pointing at %s.\n",

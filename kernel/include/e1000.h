@@ -1,5 +1,5 @@
-#ifndef PROTONOS_E1000_H
-#define PROTONOS_E1000_H
+#ifndef THREADOS_E1000_H
+#define THREADOS_E1000_H
 
 #include <stdint.h>
 

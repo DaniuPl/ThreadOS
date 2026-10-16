@@ -1,4 +1,4 @@
-/* ProtonOS 64 user programs
+/* ThreadOS 64 user programs
  *
  * The same address as in the 32-bit kernel (1 GiB), and for the same
  * reason: below it lies the identity mapping of physical memory.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the line between the kernel and a program.
+"""ThreadOS smoke test: the line between the kernel and a program.
 
 A program in ring 3 will not reach for kernel memory itself - paging
 sees to that. It can, however, do it by somebody else's hands: pass a
@@ -34,7 +34,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 

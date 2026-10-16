@@ -1,5 +1,5 @@
-#ifndef PROTONOS_TASK_H
-#define PROTONOS_TASK_H
+#ifndef THREADOS_TASK_H
+#define THREADOS_TASK_H
 
 #include <stdint.h>
 #include "signal.h"
@@ -12,14 +12,14 @@ struct task;
 
 enum fd_kind {
     FD_CONSOLE,           /* keyboard (read) / screen (write) */
-    FD_FILE,              /* file on the PFS disk */
+    FD_FILE,              /* file on the TFS disk */
     FD_PIPE,              /* end of an inter-process pipe */
 };
 
 struct file_desc {
     int used;
     enum fd_kind kind;
-    int inode;            /* FD_FILE: PFS inode index */
+    int inode;            /* FD_FILE: TFS inode index */
     uint32_t off;         /* FD_FILE: current offset */
     int pipe;             /* FD_PIPE: pipe index */
     /* FD_FILE: every write goes to the END of the file, whatever the
@@ -64,7 +64,7 @@ void task_rename(const char *name);
 /* Is this address space still used by some other thread? */
 int task_cr3_shared(uint32_t cr3);
 
-/* Working directory of the current task (PFS slot, -1 = root) */
+/* Working directory of the current task (TFS slot, -1 = root) */
 /* --- Memory-mapped files --------------------------------------------
  *
  * A file seen as memory: the program gets an address and the pages

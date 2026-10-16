@@ -1,4 +1,4 @@
-/* ginstal - installing ProtonOS onto this machine's disk, in a window
+/* ginstal - installing ThreadOS onto this machine's disk, in a window
  *
  * Installing on a UEFI machine is three files written onto the EFI
  * partition that is already there, and that is a thing better SEEN
@@ -71,10 +71,10 @@ static int rowy(int r) { return ROW_Y0 + r * ROW_H; }
    told what will be written should see the same names move past while
    it is. */
 static const char *STEP_NAME[INST_STEPS] = {
-    "/EFI/ProtonOS",
-    "/EFI/ProtonOS/BOOTX64.EFI",
-    "/EFI/ProtonOS/protonos64.bin",
-    "/EFI/ProtonOS/initrd64.img",
+    "/EFI/ThreadOS",
+    "/EFI/ThreadOS/BOOTX64.EFI",
+    "/EFI/ThreadOS/threados64.bin",
+    "/EFI/ThreadOS/initrd64.img",
     "/EFI/BOOT/BOOTX64.EFI"
 };
 
@@ -83,11 +83,11 @@ static const char *STEP_NAME[INST_STEPS] = {
 static const char *STEP_WHOLE[INST_STEPS_WHOLE] = {
     "partition table (GPT)",
     "EFI partition (FAT32)",
-    "ProtonOS partition (PFS)",
-    "/EFI/ProtonOS",
-    "/EFI/ProtonOS/BOOTX64.EFI",
-    "/EFI/ProtonOS/protonos64.bin",
-    "/EFI/ProtonOS/initrd64.img",
+    "ThreadOS partition (TFS)",
+    "/EFI/ThreadOS",
+    "/EFI/ThreadOS/BOOTX64.EFI",
+    "/EFI/ThreadOS/threados64.bin",
+    "/EFI/ThreadOS/initrd64.img",
     "/EFI/BOOT/BOOTX64.EFI"
 };
 
@@ -181,7 +181,7 @@ static const char *problem_hint(uint32_t why)
 {
     switch (why) {
     case INST_NO_FILES:
-        return "Boot the machine off a stick through protoboot (UEFI).";
+        return "Boot the machine off a stick through threadboot (UEFI).";
     case INST_NO_TABLE:
         return "This is not the disk a UEFI machine boots from.";
     case INST_NO_ESP:
@@ -288,7 +288,7 @@ static void draw_plan(int win)
     char line[80];
     int at;
 
-    win_text(win, 6, rowy(0), "Installing ProtonOS onto this machine's disk",
+    win_text(win, 6, rowy(0), "Installing ThreadOS onto this machine's disk",
              C_HEAD);
 
     disk_line(win);
@@ -348,7 +348,7 @@ static void draw_wipe(int win)
     char line[80];
     int at;
 
-    win_text(win, 6, rowy(0), "The whole disk for ProtonOS", C_RED);
+    win_text(win, 6, rowy(0), "The whole disk for ThreadOS", C_RED);
 
     disk_line(win);
 
@@ -391,7 +391,7 @@ static void draw(int win)
     win_rect(win, 0, 0, cw, ch, C_BG);
 
     if (state == S_LOOK && !info.ok) {
-        win_text(win, 6, rowy(0), "Installing ProtonOS", C_HEAD);
+        win_text(win, 6, rowy(0), "Installing ThreadOS", C_HEAD);
         win_text(win, 6, rowy(2), problem_line(info.problem), C_RED);
         win_text(win, 6, rowy(3), problem_hint(info.problem), C_TEXT);
         if (info.problem == INST_NO_ROOM) {
@@ -497,7 +497,7 @@ static void draw(int win)
         win_text(win, 6, rowy(0), "Done", C_HEAD);
         if (info.fallback_free) {
             win_text(win, 6, rowy(2),
-                     "This machine will boot ProtonOS off the disk.", C_TEXT);
+                     "This machine will boot ThreadOS off the disk.", C_TEXT);
             win_text(win, 6, rowy(3),
                      "You can pull the stick out and restart.", C_TEXT);
         } else {

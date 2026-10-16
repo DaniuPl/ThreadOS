@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the terminal in a window.
+"""ThreadOS smoke test: the terminal in a window.
 
 What was there before ran one command and drew what it printed. Every
 command wiped out the one before it, the window was 240x150 whatever

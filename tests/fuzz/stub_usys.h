@@ -2,8 +2,8 @@
    the host. The parsers do not call the kernel; they need only the
    types and a couple of odds and ends. */
 
-#ifndef PROTONOS_STUB_USYS_H
-#define PROTONOS_STUB_USYS_H
+#ifndef THREADOS_STUB_USYS_H
+#define THREADOS_STUB_USYS_H
 
 #include <stdint.h>
 #include <stdio.h>

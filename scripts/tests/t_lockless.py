@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: system calls without the big kernel lock.
+"""ThreadOS smoke test: system calls without the big kernel lock.
 
 The previous step let user programs onto all the cores, but every entry
 into the kernel took one lock for the whole kernel. So the counting in
@@ -129,7 +129,7 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
                      qemu="qemu-system-x86_64")
             try:
-                q.wait_serial("proton64>", timeout=90)
+                q.wait_serial("thread64>", timeout=90)
                 run_case(q, 4, "")
                 after_run = q.command("run hello64", "exit code", timeout=60)
                 check("the kernel still runs after the attempt",
@@ -147,7 +147,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             run_case(q3, 4, " (32-bit)")
             after_run = q3.command("run hello", "has ended", timeout=60)
             check("the kernel still runs after the attempt (32-bit)",
@@ -163,7 +163,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             run_case(q1, 1, " (one core)")
         finally:
             q1.close()

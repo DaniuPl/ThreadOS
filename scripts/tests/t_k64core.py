@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the long mode boot (64-bit kernel).
+"""ThreadOS smoke test: the long mode boot (64-bit kernel).
 
 The first step of every 64-bit kernel: the processor is to confirm by
 itself that it is in long mode (LMA=1), the page tables are to be built

@@ -4,7 +4,7 @@
  *   DISCOVER (broadcast) -> OFFER -> REQUEST -> ACK
  * From the answer we take the address (yiaddr) and the options: the
  * netmask (1), the gateway (3) and the DNS server (6). Without this
- * ProtonOS would only work in QEMU's user network, where the addresses
+ * ThreadOS would only work in QEMU's user network, where the addresses
  * are known up front.
  *
  * DHCP runs over UDP (68 -> 67), so it uses the stack's ordinary

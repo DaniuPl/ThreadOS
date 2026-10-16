@@ -48,7 +48,7 @@
    process - only thanks to that can its code really be one. The place
    is just below the mapping area, and the heap ends at its doorstep;
    USER_LIB_BASE in kernel/include/exec.h and the address in the linker
-   script user/libproton.ld must agree. */
+   script user/libthread.ld must agree. */
 #define USER_BRK_MAX   USER_LIB_BASE /* ceiling of the process heap (sbrk) */
 #define MMAP_BASE      0xB0000000u   /* the mmap area (above the library) */
 #define MMAP_MAX       0xBF000000u   /* mmap ceiling (below the space for the stack) */
@@ -65,7 +65,7 @@ struct exec_args {
     int in_pipe;                  /* stdin from a pipe (idx) or -1 */
     int out_pipe;                 /* stdout to a pipe (idx) or -1 */
     char out_file[FS_NAME_MAX + 1]; /* stdout to a file ("" = none) */
-    /* stdout inherited from whoever started us: the PFS inode of the
+    /* stdout inherited from whoever started us: the TFS inode of the
        file the parent writes to, or -1. A program started by a
        redirected program writes where its parent writes - which is
        what makes a shell inside a terminal show anything at all. */

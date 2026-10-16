@@ -1,9 +1,9 @@
-#ifndef PROTONOS_FS_H
-#define PROTONOS_FS_H
+#ifndef THREADOS_FS_H
+#define THREADOS_FS_H
 
 #include <stdint.h>
 
-/* PFS3: 1 KiB blocks allocated from a bitmap, 64 inodes, longer names.
+/* TFS3: 1 KiB blocks allocated from a bitmap, 64 inodes, longer names.
    A file has 12 direct blocks, an indirect block (256 pointers) and a
    doubly indirect block (256 x 256) - that is up to 64 MiB, more than
    fits on a typical disk image. */
@@ -18,7 +18,7 @@
 
 #define FS_ROOT (-1)              /* the root directory (a virtual inode) */
 
-/* Detects the disk and reads the PFS filesystem; formats an empty
+/* Detects the disk and reads the TFS filesystem; formats an empty
    disk. Returns 1 when ready, 0 when there is no disk. */
 int fs_init(void);
 int fs_ready(void);

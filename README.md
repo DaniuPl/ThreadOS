@@ -1,4 +1,4 @@
-# ProtonOS
+# ThreadOS
 
 [![build and test](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml/badge.svg)](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -14,7 +14,7 @@ paging, interrupts, context switching — has separate implementations.
 
 Both kernels are Multiboot-compliant, so GRUB or QEMU can load them
 directly — and on a UEFI machine the 64-bit kernel is loaded by
-**protoboot**, this project's own EFI boot loader (`boot/efi/`), with no
+**threadboot**, this project's own EFI boot loader (`boot/efi/`), with no
 GRUB involved at all.
 
 ## Screenshots
@@ -54,18 +54,18 @@ Shared by both kernels (same files, compiled twice):
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
 | Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer; volume and mute as a percentage of what the codec's amplifier really has (`beep`, `volume`, and a mixer window) |
 | Disks | NVMe, every AHCI port, both ATA drives — a list, with one in use; the installer asks which |
-| Installing | `install` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a PFS3 partition) |
+| Installing | `install` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a TFS3 partition) |
 | FAT | FAT12/16/32 on the EFI partition — read fully, written as far as an installer needs, long names both ways |
-| Filesystem | PFS3 — block bitmap, inodes, directories, files up to 64 MiB |
+| Filesystem | TFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
 | Network | RTL8139 and e1000 behind one netdev layer; ARP, ICMP, UDP, DHCP, TCP, DNS |
 | Ring 3 | The same programs built twice: crypto, TLS 1.3, HTTP, HTML, GUI apps |
-| Linking | `libproton.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
+| Linking | `libthread.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 | Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background |
 
 Programs that use crypto link against a real shared object: the kernel
-loads `libproton.so` once at a fixed address, maps its code and
+loads `libthread.so` once at a fixed address, maps its code and
 constants into every process as the *same physical frames*, gives each
 process a private copy of its writable data, and fills in the jump
 tables from the ELF relocations before the first instruction runs. The
@@ -187,7 +187,7 @@ mode and jumps.
 make run              # 32-bit kernel in QEMU
 make kernel64         # build the long-mode kernel + its initrd
 make run-iso64-uefi   # boot the hybrid disc under UEFI firmware (OVMF)
-make efi              # build protoboot, our own EFI loader (needs clang + lld)
+make efi              # build threadboot, our own EFI loader (needs clang + lld)
 make stick            # a bootable USB image: GPT + an EFI partition + the three files
 make run-stick        # boot that image under OVMF, before it goes on a stick
 make test             # full test suite, groups in parallel (~5 min)
@@ -225,7 +225,7 @@ HTTP, network frames) under ASan/UBSan on the host.
 
 ```
 boot/  boot64/     entry points: Multiboot header, long-mode entry
-boot/efi/          protoboot: our own UEFI boot loader (PE32+)
+boot/efi/          threadboot: our own UEFI boot loader (PE32+)
 kernel/            shared code + 32-bit kernel
 kernel64/          only what depends on the CPU mode being 64-bit
 user/  user64/     ring 3 programs, packed into an initrd

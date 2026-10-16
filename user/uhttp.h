@@ -15,8 +15,8 @@
  * holding the whole page in memory.
  */
 
-#ifndef PROTONOS_UHTTP_H
-#define PROTONOS_UHTTP_H
+#ifndef THREADOS_UHTTP_H
+#define THREADOS_UHTTP_H
 
 #include "uapi.h"
 #include "udns.h"
@@ -230,7 +230,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
         req[r++] = *mid++;
     for (int i = 0; host[i] && r < (int)sizeof(req) - 64; i++)
         req[r++] = host[i];
-    const char *end = "\r\nUser-Agent: ProtonOS\r\nAccept: text/html\r\n"
+    const char *end = "\r\nUser-Agent: ThreadOS\r\nAccept: text/html\r\n"
                       "Connection: close\r\n\r\n";
     while (*end)
         req[r++] = *end++;

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SERIAL_H
-#define PROTONOS_SERIAL_H
+#ifndef THREADOS_SERIAL_H
+#define THREADOS_SERIAL_H
 
 void serial_init(void);
 void serial_putchar(char c);

@@ -23,8 +23,8 @@
  * ready when there is something to send.
  */
 
-#ifndef PROTONOS_UWPA_H
-#define PROTONOS_UWPA_H
+#ifndef THREADOS_UWPA_H
+#define THREADOS_UWPA_H
 
 #include "uapi.h"
 #include "uaes.h"

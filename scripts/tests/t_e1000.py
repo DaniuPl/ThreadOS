@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the e1000 network card (Intel 82540EM).
+"""ThreadOS smoke test: the e1000 network card (Intel 82540EM).
 
 Until now the system had one card and that could be seen in every line
 that needed a MAC address. Now above the drivers stands the netdev layer
@@ -78,7 +78,7 @@ def main():
             page = q.wait_for("content ", timeout=40)
             check("TCP over the e1000: an HTTP 200 answer with the whole content",
                   "[httpget] HTTP 200" in page and
-                  "ProtonOS TCP works" in page)
+                  "ThreadOS TCP works" in page)
         finally:
             http_stop()
 
@@ -123,7 +123,7 @@ def main():
             check("DHCP over the e1000 in long mode",
                   "granted 10.0.2.15" in lease)
 
-            q64.wait_serial("proton64>", timeout=30)
+            q64.wait_serial("thread64>", timeout=30)
             pong = q64.command("ping 10.0.2.2", "--- statistics:",
                                  timeout=40)
             check("ping from the 64-bit kernel over the e1000",
@@ -134,7 +134,7 @@ def main():
                                  "exit code", timeout=60)
             check("TCP from ring 3 over the e1000 in long mode",
                   "[httpget] HTTP 200" in page and
-                  "ProtonOS TCP works" in page)
+                  "ThreadOS TCP works" in page)
         finally:
             q64.close()
             http_stop()

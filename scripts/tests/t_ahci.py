@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a disk behind an AHCI controller (SATA).
+"""ThreadOS smoke test: a disk behind an AHCI controller (SATA).
 
 The same file system and the same page swapping, only the data are
 carried by the controller through DMA instead of by the processor word
@@ -31,23 +31,23 @@ def main():
         fh.truncate(64 * 1024 * 1024)
     q18 = Qemu(KERNEL, INITRD, sdisk, append=TEXT_MODE, ram_mib=16, sata=True)
     try:
-        boot = q18.wait_for("+ PFS ready", timeout=30)
+        boot = q18.wait_for("+ TFS ready", timeout=30)
         check("the AHCI controller was found over PCI and picked instead of ATA",
-              "Disk AHCI (SATA, DMA) + PFS ready" in boot)
-        check("PFS formatted the disk through AHCI",
+              "Disk AHCI (SATA, DMA) + TFS ready" in boot)
+        check("TFS formatted the disk through AHCI",
               "formatted" in boot)
         check("the swap file was created on the SATA disk",
               re.search(r"Page swapping: \d+ KiB",
                         q18.wait_for("Page swapping:", timeout=20)) is not None)
 
-        q18.wait_for("ProtonOS shell", timeout=20)
+        q18.wait_for("ThreadOS shell", timeout=20)
         q18.type_line("clear")
-        q18.type_line("write ahci proton through dma")
+        q18.type_line("write ahci thread through dma")
         q18.wait_for("wrote", timeout=20)
         q18.type_line("cat ahci")
-        back = q18.wait_for("proton through dma", timeout=20)
+        back = q18.wait_for("thread through dma", timeout=20)
         check("writing and reading a file through DMA give back the same data",
-              "proton through dma" in back)
+              "thread through dma" in back)
 
         # Page swapping through AHCI: the same 18 MiB on a machine with 16 MiB
         q18.type_line("clear")

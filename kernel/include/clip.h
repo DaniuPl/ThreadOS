@@ -1,5 +1,5 @@
-#ifndef PROTONOS_CLIP_H
-#define PROTONOS_CLIP_H
+#ifndef THREADOS_CLIP_H
+#define THREADOS_CLIP_H
 
 #include <stdint.h>
 

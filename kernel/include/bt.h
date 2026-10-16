@@ -1,5 +1,5 @@
-#ifndef PROTONOS_BT_H
-#define PROTONOS_BT_H
+#ifndef THREADOS_BT_H
+#define THREADOS_BT_H
 
 #include <stdint.h>
 

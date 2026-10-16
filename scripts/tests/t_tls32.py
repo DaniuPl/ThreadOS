@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: TLS 1.3 in ring 3 (32-bit kernel).
+"""ThreadOS smoke test: TLS 1.3 in ring 3 (32-bit kernel).
 
 Split out of the 'rdzen2' group, because TLS handshakes are the most
 expensive thing in the whole set: each of them computes X25519 and
@@ -32,7 +32,7 @@ from ptest import check, summary, DNS_HINT
 
 def main():
     # The disk is needed here for the trust store: we fetch the issuer's
-    # certificate over HTTP and write it to PFS, and only then check the
+    # certificate over HTTP and write it to TFS, and only then check the
     # server's identity with it
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
@@ -40,7 +40,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ProtonOS shell", timeout=40)
+        q.wait_for("ThreadOS shell", timeout=40)
         q.wait_for("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
@@ -70,7 +70,7 @@ def main():
                     #    built-in public CA roots: the connection is to be
                     #    torn down
                     q.type_line("clear")
-                    q.type_line("run httpget https://protonos.test %d /"
+                    q.type_line("run httpget https://threados.test %d /"
                                 % https_port)
                     reg = q.wait_for("could not connect", timeout=60)
                     check("a foreign certificate refused by the built-in "
@@ -79,7 +79,7 @@ def main():
 
                     # ... unless we deliberately skip the check (-k)
                     q.type_line("clear")
-                    q.type_line("run httpget -k https://protonos.test %d /"
+                    q.type_line("run httpget -k https://threados.test %d /"
                                 % https_port)
                     sec = q.wait_for("content ", timeout=60)
                     check("TLS 1.3: a handshake with an OpenSSL server",
@@ -87,7 +87,7 @@ def main():
                     check("HTTPS: a 200 answer with the whole content",
                           "HTTP 200, content %d B" % len(PAGE) in sec)
                     check("HTTPS: the content was decrypted correctly",
-                          "ProtonOS TCP works" in sec)
+                          "ThreadOS TCP works" in sec)
                     check("-k says outright that nobody's identity is checked",
                           "certificate NOT CHECKED" in sec)
 
@@ -103,7 +103,7 @@ def main():
                     # 3. With the store: full verification of the chain, the
                     #    dates and the name
                     q.type_line("clear")
-                    q.type_line("run httpget https://protonos.test %d /"
+                    q.type_line("run httpget https://threados.test %d /"
                                 % https_port)
                     ver = q.wait_for("content ", timeout=60)
                     if "certificate checked" not in ver:
@@ -126,7 +126,7 @@ def main():
                                         "roots.der" % http_port)
                             q.wait_for("content ", timeout=30)
                             q.type_line("clear")
-                            q.type_line("run httpget https://protonos.test %d /"
+                            q.type_line("run httpget https://threados.test %d /"
                                         % ec_port)
                             ecres = q.wait_for("content ", timeout=90)
                             check("a certificate on the P-256 curve checked "
@@ -154,7 +154,7 @@ def main():
                                         "/p384cert.der roots.der" % http_port)
                             q.wait_for("content ", timeout=30)
                             q.type_line("clear")
-                            q.type_line("run httpget https://protonos.test %d /"
+                            q.type_line("run httpget https://threados.test %d /"
                                         % p384_port)
                             p3 = q.wait_for("content ", timeout=120)
                             check("a certificate on the P-384 curve checked "
@@ -173,7 +173,7 @@ def main():
                                         "roots.der" % http_port)
                             q.wait_for("content ", timeout=30)
                             q.type_line("clear")
-                            q.type_line("run httpget https://protonos.test %d /"
+                            q.type_line("run httpget https://threados.test %d /"
                                         % ch_port)
                             chres = q.wait_for("content ", timeout=90)
                             check("a chain through an intermediate closed up to "

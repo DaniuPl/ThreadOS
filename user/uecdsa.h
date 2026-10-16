@@ -16,8 +16,8 @@
  * resistant to timing measurement - and it is not.
  */
 
-#ifndef PROTONOS_UECDSA_H
-#define PROTONOS_UECDSA_H
+#ifndef THREADOS_UECDSA_H
+#define THREADOS_UECDSA_H
 
 #include "uapi.h"
 #include "ubignum.h"

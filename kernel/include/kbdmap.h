@@ -1,5 +1,5 @@
-#ifndef PROTONOS_KBDMAP_H
-#define PROTONOS_KBDMAP_H
+#ifndef THREADOS_KBDMAP_H
+#define THREADOS_KBDMAP_H
 
 #include <stdint.h>
 #include "keyboard.h"

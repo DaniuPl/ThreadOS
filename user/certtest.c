@@ -102,8 +102,8 @@ void _start(void)
 
     /* A host name match from SubjectAltName, or the lack of one */
     if (cert.san) {
-        result("SubjectAltName: 'protonos.test' matches",
-               x509_matches_host(&cert, "protonos.test"));
+        result("SubjectAltName: 'threados.test' matches",
+               x509_matches_host(&cert, "threados.test"));
         result("SubjectAltName: a foreign name refused",
                !x509_matches_host(&cert, "wrong.example"));
     } else {

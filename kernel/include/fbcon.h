@@ -1,5 +1,5 @@
-#ifndef PROTONOS_FBCON_H
-#define PROTONOS_FBCON_H
+#ifndef THREADOS_FBCON_H
+#define THREADOS_FBCON_H
 
 #include <stdint.h>
 

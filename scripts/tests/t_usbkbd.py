@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a USB keyboard (HID).
+"""ThreadOS smoke test: a USB keyboard (HID).
 
 The USB controller, device enumeration and the HID boot protocol. QEMU
 directs keys to the USB device, so the mere fact that a command runs at
@@ -39,7 +39,7 @@ def main():
         # shell's greeting can take twice as long to reach the screen as
         # it does on an idle one, and a wait that runs out proves
         # nothing about the keyboard.
-        q19.wait_for("ProtonOS shell", timeout=40)
+        q19.wait_for("ThreadOS shell", timeout=40)
         q19.type_line("clear")
         q19.type_line("uptime")
         out = q19.wait_for("timer ticks", timeout=20)

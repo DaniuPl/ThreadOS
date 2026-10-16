@@ -11,8 +11,8 @@
  * buffer.
  */
 
-#ifndef PROTONOS_UX509_H
-#define PROTONOS_UX509_H
+#ifndef THREADOS_UX509_H
+#define THREADOS_UX509_H
 
 #include "uapi.h"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: AES, and the two modes that seal a packet.
+"""ThreadOS smoke test: AES, and the two modes that seal a packet.
 
 Until now the whole cryptography of the system stood on ChaCha20.
 AES is the entry ticket to two places ChaCha cannot reach: the TLS
@@ -82,7 +82,7 @@ def main():
     key = bytes(range(0x40, 0x50))
     nonce12 = bytes(range(0x10, 0x1C))
     nonce13 = bytes(range(0x20, 0x2D))
-    aad = b"ProtonOS, a frame header"
+    aad = b"ThreadOS, a frame header"
     plain = bytes((i * 7 + 3) & 0xFF for i in range(48))
 
     good_gcm = vector_file("gcm", key, nonce12, aad, plain, 16)
@@ -106,7 +106,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  disk=disk, sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
 
             # --- 1. The published vectors ------------------------------
             out = q.command("run aestest", "exit code", timeout=120)
@@ -196,7 +196,7 @@ def main():
         q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
                  serial=tempfile.mktemp(suffix=".log"))
         try:
-            q.wait_for("ProtonOS shell")
+            q.wait_for("ThreadOS shell")
             q.type_line("run aestest")
             screen = q.wait_for("[aes] everything matches", timeout=120)
             check("the same vectors pass in 32-bit mode",

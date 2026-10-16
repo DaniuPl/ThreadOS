@@ -20,8 +20,8 @@
  *   - C = US, ST = New Jersey, L = Jersey City, O = The USERTRUST Network, CN = USERTrust RSA Certification Authority (1506 B)
  */
 
-#ifndef PROTONOS_CAROOTS_H
-#define PROTONOS_CAROOTS_H
+#ifndef THREADOS_CAROOTS_H
+#define THREADOS_CAROOTS_H
 
 #include "uapi.h"
 

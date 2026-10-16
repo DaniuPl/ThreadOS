@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a network card on USB (RNDIS).
+"""ThreadOS smoke test: a network card on USB (RNDIS).
 
 The other half of what sits in a docking station. It differs from the
 two cards this system already knows in a way that goes deeper than
@@ -57,7 +57,7 @@ def main():
                  sata=True, nic=None, usbnic=True,
                  qemu="qemu-system-x86_64")
         try:
-            boot = q.wait_serial("proton64>", timeout=90)
+            boot = q.wait_serial("thread64>", timeout=90)
             check("the system finds the network card on USB",
                   "A USB network card (RNDIS)" in boot)
             check("and it is this machine's card",
@@ -69,7 +69,7 @@ def main():
             check("DHCP over USB: an address was granted",
                   "granted 10.0.2.15" in got)
 
-            out = q.command("ifconfig", "proton64>", timeout=25)
+            out = q.command("ifconfig", "thread64>", timeout=25)
             check("ifconfig shows the USB card as eth0",
                   "USB (RNDIS)" in out and "10.0.2.15" in out)
             check("and the packet counters move both ways",
@@ -85,7 +85,7 @@ def main():
             check("HTTP over the USB card: a 200 answer",
                   "[httpget] HTTP 200" in out)
             check("and the page's content whole",
-                  "ProtonOS TCP works" in out)
+                  "ThreadOS TCP works" in out)
         finally:
             q.close()
             stop()

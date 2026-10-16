@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the file manager.
+"""ThreadOS smoke test: the file manager.
 
 What it replaced listed eight names in a window the size of a postage
 stamp and showed the first hundred bytes of one of them. That proved

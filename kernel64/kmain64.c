@@ -1,4 +1,4 @@
-/* ProtonOS 64 - the first step of the port to long mode
+/* ThreadOS 64 - the first step of the port to long mode
  *
  * By this point the processor has come all the way through
  * boot64/boot64.S: long mode is on, it has its own descriptor table
@@ -187,7 +187,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     serial_init();
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
-    printk("ProtonOS 64\n");
+    printk("ThreadOS 64\n");
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     printk("The kernel is running in long mode (x86-64).\n\n");
 
@@ -532,7 +532,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            seen through the block layer looks the same regardless of the
            processor mode. */
         int fs = fs_init();
-        printk("[ OK ] Disk %s + PFS %s (%u sectors)\n",
+        printk("[ OK ] Disk %s + TFS %s (%u sectors)\n",
                blk_name(), fs ? "ready" : "OUT OF REACH", blk_sectors());
 
         /* What the machine remembers about itself. Right after the file

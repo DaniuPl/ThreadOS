@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the shell, signals and SSE (64-bit kernel).
+"""ThreadOS smoke test: the shell, signals and SSE (64-bit kernel).
 
 A system one can talk to rather than merely watch replay a script: a
 program started FROM THE KEYBOARD, a signal stopping an endless loop
@@ -53,11 +53,11 @@ def main():
         try:
             # The kernel reaches the shell by itself; everything this
             # group checks happens only afterwards
-            q23.wait_serial("proton64>", timeout=90)
+            q23.wait_serial("thread64>", timeout=90)
 
             # The keyboard and the shell: a system one can talk
             # to rather than merely watch replay a script
-            ready = q23.wait_serial("proton64>", timeout=40)
+            ready = q23.wait_serial("thread64>", timeout=40)
             check("the 64-bit kernel starts the shell",
                   "PS/2 keyboard (IRQ 1)" in ready
                   and "The 64-bit system is ready" in ready)
@@ -101,7 +101,7 @@ def main():
                   "needs admin" in no)
             q23.type_line("sudo set color 13")
             q23.wait_serial("password:", timeout=20)
-            q23.type_line("proton")
+            q23.type_line("thread")
             yes = q23.wait_serial("saved", timeout=30)
             check("once the password is given the setting is saved",
                   "color = 13 (saved)" in yes)
@@ -191,11 +191,11 @@ def main():
             # is on the other side is the business of whoever started
             # it.
             seen = len(q23.serial())
-            q23.type_line("uecho64 proton through a pipe | uupper64")
-            pp = q23.wait_serial("PROTON THROUGH A PIPE",
+            q23.type_line("uecho64 thread through a pipe | uupper64")
+            pp = q23.wait_serial("THREAD THROUGH A PIPE",
                                  timeout=40)[seen:]
             check("one program's output goes into another's input",
-                  "PROTON THROUGH A PIPE" in pp)
+                  "THREAD THROUGH A PIPE" in pp)
 
             # The second program has to see the END of the data -
             # and that happens only when the shell closes both ends of

@@ -9,7 +9,7 @@
 #include "usys.h"
 
 #define PORT 7777
-#define MSG  "proton-udp"
+#define MSG  "thread-udp"
 
 /* A simple IPv4 address parser (with no range validation - this is a
    demo) */

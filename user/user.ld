@@ -1,4 +1,4 @@
-/* ProtonOS user programs
+/* ThreadOS user programs
  *
  * User space starts at 1 GiB: below that the kernel keeps an identity
  * mapping of the whole of physical memory (PAGING_USER_BASE in

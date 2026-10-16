@@ -1,5 +1,5 @@
-#ifndef PROTONOS_CONFIG_H
-#define PROTONOS_CONFIG_H
+#ifndef THREADOS_CONFIG_H
+#define THREADOS_CONFIG_H
 
 #include <stdint.h>
 

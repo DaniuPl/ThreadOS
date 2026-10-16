@@ -1,7 +1,7 @@
-# ProtonOS - building the kernel
+# ThreadOS - building the kernel
 #
 # Targets:
-#   make        - builds protonos.bin (the Multiboot kernel)
+#   make        - builds threados.bin (the Multiboot kernel)
 #   make iso    - builds a bootable ISO (needs grub-mkrescue + xorriso)
 #   make run    - starts the kernel in QEMU (needs qemu-system-i386)
 #   make fuzz   - feeds the parsers corrupted data (under sanitizers)
@@ -26,8 +26,8 @@ LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
            -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 BUILD   := build
-KERNEL  := $(BUILD)/protonos.bin
-ISO     := $(BUILD)/protonos.iso
+KERNEL  := $(BUILD)/threados.bin
+ISO     := $(BUILD)/threados.iso
 INITRD  := $(BUILD)/initrd.img
 DISK    := $(BUILD)/disk.img
 
@@ -208,14 +208,14 @@ $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 #
 # Copying the sources into build/ is not decoration: '#include
 # "utls.h"' looks first in the directory of the file that includes it.
-# If libproton.c lived in user/, it would find the original instead of
+# If libthread.c lived in user/, it would find the original instead of
 # the generated version.
 LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h uaes.h urand.h ux25519.h \
                ursa.h uecdsa.h ux509.h ucert.h utls.h uhttp.h uhtml.h \
-               udns.h caroots.h uproton.h
+               udns.h caroots.h uthread.h
 LIB_SRC  := $(patsubst %,$(BUILD)/libsrc/%,$(LIB_HEADERS))
 LIB_DECL := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
-LIBPROTON := $(BUILD)/libproton.so
+LIBTHREAD := $(BUILD)/libthread.so
 
 $(BUILD)/libsrc $(BUILD)/decl $(BUILD)/dyn:
 	mkdir -p $@
@@ -226,19 +226,19 @@ $(BUILD)/libsrc/%.h: user/%.h scripts/split_headers.py | $(BUILD)/libsrc
 $(BUILD)/decl/%.h: user/%.h scripts/split_headers.py | $(BUILD)/decl
 	python3 scripts/split_headers.py --decl $< > $@
 
-$(BUILD)/libsrc/libproton.c: user/libproton.c | $(BUILD)/libsrc
+$(BUILD)/libsrc/libthread.c: user/libthread.c | $(BUILD)/libsrc
 	cp $< $@
 
 # -Bsymbolic: calls inside the library are bound at link time. Without
 # it they would go through its own jump table, and that is filled in at
 # load time - which here there is nobody to do.
-$(LIBPROTON): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user/libproton.ld \
+$(LIBTHREAD): $(BUILD)/libsrc/libthread.c $(LIB_SRC) user/libthread.ld \
               $(USER_HEADERS) Makefile
 	$(CC) -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC -O2 \
-	    -Wall -Wextra -I$(BUILD)/libsrc -Iuser -c $< -o $(BUILD)/libproton.o
+	    -Wall -Wextra -I$(BUILD)/libsrc -Iuser -c $< -o $(BUILD)/libthread.o
 	$(CC) -m32 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
-	    -Wl,-soname,libproton.so -Wl,--no-warn-rwx-segments \
-	    -T user/libproton.ld -o $@ $(BUILD)/libproton.o
+	    -Wl,-soname,libthread.so -Wl,--no-warn-rwx-segments \
+	    -T user/libthread.ld -o $@ $(BUILD)/libthread.o
 
 $(BUILD)/dyn/%.c: user/%.c | $(BUILD)/dyn
 	cp $< $@
@@ -255,13 +255,13 @@ USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
 USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
 
 $(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL) \
-                     $(LIBPROTON) user/userdyn.ld Makefile | $(BUILD)/user
+                     $(LIBTHREAD) user/userdyn.ld Makefile | $(BUILD)/user
 	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/decl -Iuser -T user/userdyn.ld \
-	    $< $(LIBPROTON) -o $@
+	    $< $(LIBTHREAD) -o $@
 
-$(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
+$(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
-	    libproton.so=$(LIBPROTON) \
+	    libthread.so=$(LIBTHREAD) \
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    evil2=$(BUILD)/user/evil2.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
@@ -309,7 +309,7 @@ $(INITRD): $(USER_ELFS) $(LIBPROTON) scripts/mkinitrd.py
 # (boot64/boot64.S enters long mode) and the kmain64 skeleton differ.
 # The rest is the same files compiled a second time - what separates
 # the two modes fits in the io.h header and a handful of casts.
-KERNEL64 := $(BUILD)/protonos64.bin
+KERNEL64 := $(BUILD)/threados64.bin
 CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
             -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
@@ -428,18 +428,18 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
 # The same trick as in the 32-bit kernel and out of the same headers -
 # only the address the library sits at and the width of the registers
 # differ. Nobody writes the source a second time.
-LIBPROTON64 := $(BUILD)/libproton64.so
+LIBTHREAD64 := $(BUILD)/libthread64.so
 LIB_DECL64  := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 
-$(LIBPROTON64): $(BUILD)/libsrc/libproton.c $(LIB_SRC) user64/libproton64.ld \
+$(LIBTHREAD64): $(BUILD)/libsrc/libthread.c $(LIB_SRC) user64/libthread64.ld \
                 $(USER_HEADERS) Makefile
 	$(CC) -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC \
 	    -mno-red-zone -O2 -Wall -Wextra -I$(BUILD)/libsrc -Iuser \
-	    -c $< -o $(BUILD)/libproton64.o
+	    -c $< -o $(BUILD)/libthread64.o
 	$(CC) -m64 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
-	    -Wl,-soname,libproton.so -Wl,--no-warn-rwx-segments \
+	    -Wl,-soname,libthread.so -Wl,--no-warn-rwx-segments \
 	    -Wl,-z,max-page-size=0x1000 \
-	    -T user64/libproton64.ld -o $@ $(BUILD)/libproton64.o
+	    -T user64/libthread64.ld -o $@ $(BUILD)/libthread64.o
 
 USER64_DYN_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
                      -fno-pic -no-pie -nostdlib -mno-red-zone \
@@ -449,14 +449,14 @@ USER64_DYN_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
 USER64_DYN_ELFS := $(patsubst %,$(BUILD)/user64/%.elf,$(USER_DYN))
 
 $(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL64) \
-                     $(LIBPROTON64) user64/userdyn64.ld Makefile \
+                     $(LIBTHREAD64) user64/userdyn64.ld Makefile \
                      | $(BUILD)/user64
 	$(CC) $(USER64_DYN_CFLAGS) -I$(BUILD)/decl -Iuser \
-	    -T user64/userdyn64.ld $< $(LIBPROTON64) -o $@
+	    -T user64/userdyn64.ld $< $(LIBTHREAD64) -o $@
 
-$(INITRD64): $(USER64_ELFS) $(LIBPROTON64) scripts/mkinitrd.py
+$(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py
 	python3 scripts/mkinitrd.py $@ \
-	    libproton.so=$(LIBPROTON64) \
+	    libthread.so=$(LIBTHREAD64) \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \
@@ -524,7 +524,7 @@ kernel64: $(KERNEL64) $(INITRD64)
 # of GRUB files and an EFI partition on it, and the firmware picks the
 # one it understands. That is what was missing for booting on newer
 # hardware - the old image knew only the BIOS road.
-ISO64 := $(BUILD)/protonos64.iso
+ISO64 := $(BUILD)/threados64.iso
 
 $(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg
 	@command -v grub-mkrescue >/dev/null || { \
@@ -533,7 +533,7 @@ $(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg
 grub-common xorriso mtools"; \
 	    exit 1; }
 	mkdir -p $(BUILD)/isodir64/boot/grub
-	cp $(KERNEL64) $(BUILD)/isodir64/boot/protonos64.bin
+	cp $(KERNEL64) $(BUILD)/isodir64/boot/threados64.bin
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	grub-mkrescue -o $@ $(BUILD)/isodir64
@@ -549,8 +549,8 @@ run-iso64-uefi: $(ISO64)
 	    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 	    -drive if=pflash,format=raw,unit=1,file=$(BUILD)/ovmf_vars.fd
 
-# An empty 16 MiB disk image for the PFS filesystem (the kernel will
-# format it). PFS3 hands out blocks from a bitmap, so the room goes
+# An empty 16 MiB disk image for the TFS filesystem (the kernel will
+# format it). TFS3 hands out blocks from a bitmap, so the room goes
 # where it is needed.
 $(DISK): | $(BUILD)
 	dd if=/dev/zero of=$@ bs=1M count=16 status=none
@@ -565,7 +565,7 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 	    echo "  Fedora:        dnf install grub2-tools xorriso"; \
 	    exit 1; }
 	mkdir -p $(BUILD)/isodir/boot/grub
-	cp $(KERNEL) $(BUILD)/isodir/boot/protonos.bin
+	cp $(KERNEL) $(BUILD)/isodir/boot/threados.bin
 	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
 	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
@@ -575,7 +575,7 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 # The disk (-hda) lands on the first ATA bus as the master.
 # Network: an RTL8139 card in QEMU's user mode (the address comes from
 # DHCP: 10.0.2.15, gateway 10.0.2.2). hostfwd puts the TCP server from
-# ProtonOS in front of the host: after 'run tcpserv' one can type 'nc
+# ThreadOS in front of the host: after 'run tcpserv' one can type 'nc
 # localhost 5555' in a terminal.
 NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
            -device rtl8139,netdev=n0
@@ -583,7 +583,7 @@ NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
 run: $(KERNEL) $(INITRD) $(DISK)
 	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
 
-# Starting off the ISO the way a real machine would: a disk (PFS + the
+# Starting off the ISO the way a real machine would: a disk (TFS + the
 # swap file) and a network card, because without them half the system
 # has nothing to do.
 run-iso: iso $(DISK)
@@ -645,7 +645,7 @@ OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
 # loader under a name the firmware knows. This target makes exactly
 # that image - raw, to be written to a stick with dd. No GRUB and no El
 # Torito.
-STICK := $(BUILD)/protonos-stick.img
+STICK := $(BUILD)/threados-stick.img
 
 $(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py
 	@command -v mformat >/dev/null || { \

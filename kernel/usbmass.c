@@ -17,7 +17,7 @@
  *
  * The second: the sector size is not always 512. Card readers and some
  * external drives report 2048 or 4096. Everything above this layer -
- * PFS, FAT, the partition table - counts in 512-byte sectors, so a
+ * TFS, FAT, the partition table - counts in 512-byte sectors, so a
  * disk with larger ones would have to be translated, and translating a
  * write means reading the block first. We do not do that: such a disk
  * is listed with a capacity of zero, that is, not listed at all, and

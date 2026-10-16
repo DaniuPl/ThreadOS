@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the 32-bit kernel's boot.
+"""ThreadOS smoke test: the 32-bit kernel's boot.
 
 The first of the groups split out of the old collective 'rdzen'. It asks
 about what happens BEFORE anybody types anything: did the kernel reach
@@ -33,15 +33,15 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        screen = q.wait_for("ProtonOS shell")
+        screen = q.wait_for("ThreadOS shell")
         print("=== The VGA screen after boot ===")
         print(screen)
         print("===========================")
 
-        check("the disk + PFS were found and formatted",
-              "+ PFS ready" in screen)
+        check("the disk + TFS were found and formatted",
+              "+ TFS ready" in screen)
         check("the disk controller is named at boot (here the old ATA PIO)",
-              "Disk ATA PIO + PFS ready" in screen)
+              "Disk ATA PIO + TFS ready" in screen)
         # The message says what was found rather than that something
         # was: a machine with nothing on the auxiliary port says so
         # instead of reporting a mouse it has not got.
@@ -80,7 +80,7 @@ def main():
             check(f"the message '{expected}'", expected in screen)
 
         check("the kernel survived memory init (it reached the shell)",
-              "ProtonOS shell" in screen)
+              "ThreadOS shell" in screen)
 
         # Thread C ends after two seconds. Its text in line zero
         # disappears with every scroll of the screen, so we ask the serial
@@ -117,18 +117,18 @@ def main():
         check(f"thread B counts ({b1} -> {b2})",
               b1 is not None and b2 is not None and b2 > b1)
 
-        # The keyboard: inject "proton 1" and check the echo
+        # The keyboard: inject "thread 1" and check the echo
         for key in ["p", "r", "o", "t", "o", "n", "spc", "1"]:
             q.sendkey(key)
         q.sendkey("shift-x")  # a shift test: 'X' should come out
         screen = q.screen()
-        check("the keyboard echo: 'proton 1'", "> proton 1" in screen)
-        check("the keyboard echo with shift: 'X'", "> proton 1X" in screen)
+        check("the keyboard echo: 'thread 1'", "> thread 1" in screen)
+        check("the keyboard echo with shift: 'X'", "> thread 1X" in screen)
 
         q.sendkey("ret")
         time.sleep(0.3)
         check("an unknown command is reported",
-              "unknown command: 'proton'" in q.screen())
+              "unknown command: 'thread'" in q.screen())
     finally:
         q.close()
         for f in (disk, slog):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: files mapped into memory.
+"""ThreadOS smoke test: files mapped into memory.
 
 The ELF loader and the file system we joined earlier - a program can lie
 on the disk. This is the other half of the same thought: a file can be
@@ -15,8 +15,8 @@ We check three things, each a different way:
      process rather than quietly vanish.
 
 The kernel works the block numbers out once, when the mapping is set up,
-and reads them afterwards through the block layer, bypassing the PFS
-code - for the same reason as with page swapping: PFS has one shared
+and reads them afterwards through the block layer, bypassing the TFS
+code - for the same reason as with page swapping: TFS has one shared
 buffer for a block, and a page fault can land in the middle of any file
 operation.
 
@@ -67,8 +67,8 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
-            q.wait_serial("PFS ready", timeout=30)
+            q.wait_serial("thread64>", timeout=90)
+            q.wait_serial("TFS ready", timeout=30)
 
             # --- A small file: read whole through a mapping ---
             make_it = q.command("run mkmap64 map.txt 12", "exit code",
@@ -141,7 +141,7 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
-            q3.wait_for("ProtonOS shell", timeout=40)
+            q3.wait_for("ThreadOS shell", timeout=40)
             q3.wait_for("[net] DHCP", timeout=30)
 
             make_it = q3.command("run mkmap map.txt 12", "has ended",

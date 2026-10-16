@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USERMODE_H
-#define PROTONOS_USERMODE_H
+#ifndef THREADOS_USERMODE_H
+#define THREADOS_USERMODE_H
 
 #include <stdint.h>
 

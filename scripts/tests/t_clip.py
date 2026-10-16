@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the clipboard.
+"""ThreadOS smoke test: the clipboard.
 
 Copying and pasting is the plainest thing two programs do together, and
 the one thing they cannot do by themselves: neither may touch the
@@ -187,7 +187,7 @@ def main():
     try:
         q2 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ProtonOS shell", timeout=40)
+            q2.wait_for("ThreadOS shell", timeout=40)
             typed(q2, "echo " + WORD)
             q2.sendkey("ctrl-insert")      # copy the whole line
             time.sleep(0.5)

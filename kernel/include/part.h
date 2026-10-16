@@ -1,12 +1,12 @@
-#ifndef PROTONOS_PART_H
-#define PROTONOS_PART_H
+#ifndef THREADOS_PART_H
+#define THREADOS_PART_H
 
 #include <stdint.h>
 
 /* The partition table of the disk we booted next to.
  *
  * Until now this system owned whatever disk it found, from sector zero
- * up: PFS3's superblock IS sector zero. That is the right shape for a
+ * up: TFS3's superblock IS sector zero. That is the right shape for a
  * machine whose whole disk is ours and the wrong one for a laptop,
  * where sector zero belongs to a partition table and the rest belongs
  * to somebody's Windows.

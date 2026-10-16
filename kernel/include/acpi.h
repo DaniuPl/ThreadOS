@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ACPI_H
-#define PROTONOS_ACPI_H
+#ifndef THREADOS_ACPI_H
+#define THREADOS_ACPI_H
 
 #include <stdint.h>
 

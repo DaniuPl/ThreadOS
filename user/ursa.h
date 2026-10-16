@@ -7,8 +7,8 @@
  * hence both paths.
  */
 
-#ifndef PROTONOS_URSA_H
-#define PROTONOS_URSA_H
+#ifndef THREADOS_URSA_H
+#define THREADOS_URSA_H
 
 #include "uapi.h"
 #include "usha256.h"

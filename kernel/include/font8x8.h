@@ -1,5 +1,5 @@
-#ifndef PROTONOS_FONT8X8_H
-#define PROTONOS_FONT8X8_H
+#ifndef THREADOS_FONT8X8_H
+#define THREADOS_FONT8X8_H
 
 #include <stdint.h>
 

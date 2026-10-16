@@ -1,4 +1,4 @@
-/* The ProtonOS graphical desktop - a simple compositor
+/* The ThreadOS graphical desktop - a simple compositor
  *
  * It runs as a kernel thread: in a loop it redraws the whole frame
  * into the framebuffer (background -> cursor) and gives up the CPU for
@@ -2487,7 +2487,7 @@ static void kiosk_frame(int mx, int my)
         }
     }
 
-    video_draw_string(8, 8, "ProtonOS - installation", COL_WHITE);
+    video_draw_string(8, 8, "ThreadOS - installation", COL_WHITE);
 
     int bx = kiosk_btn_x(), by = kiosk_btn_y();
     int over = in_rect(mouse_x, mouse_y, bx, by, KIOSK_BTN_W, KIOSK_BTN_H);
@@ -2625,7 +2625,7 @@ static void desktop_thread(void *arg)
            shaded along the bottom - the same light as everything else */
         video_fill_rect(0, 0, video_w(), 10, COL_BAR);
         video_fill_rect(0, 9, video_w(), 1, COL_LINE);
-        video_draw_string(2, 1, "ProtonOS", COL_BLACK);
+        video_draw_string(2, 1, "ThreadOS", COL_BLACK);
 
         /* Everything out of the way, and everything back: a screen
            with a window on it, drawn small. */

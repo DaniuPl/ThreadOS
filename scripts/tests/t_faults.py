@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: page faults without the big kernel lock.
+"""ThreadOS smoke test: page faults without the big kernel lock.
 
 A page fault is the commonest way into the kernel there is. Every
 program that touches memory goes through it thousands of times, and
@@ -100,7 +100,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, cpus=4)
         try:
-            q.wait_for("ProtonOS shell", timeout=40)
+            q.wait_for("ThreadOS shell", timeout=40)
 
             before = faults(q)
             check("the kernel counts page faults", before is not None)
@@ -152,7 +152,7 @@ def main():
     try:
         q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
         try:
-            q1.wait_for("ProtonOS shell", timeout=40)
+            q1.wait_for("ThreadOS shell", timeout=40)
             before = faults(q1)
             res = run_case(q1, "runw faults", " (one core)")
             after = faults(q1)
@@ -187,7 +187,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
                  qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
             before = faults(q)
             check("the 64-bit kernel counts page faults too", before is not None)
             out = q.command("runw tlbtest64", "exit code", timeout=180)

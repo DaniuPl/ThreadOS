@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: a USB mouse, and a machine with no PS/2 at all.
+"""ThreadOS smoke test: a USB mouse, and a machine with no PS/2 at all.
 
 The pointer arrived through the 8042 controller from the first day, and
 on a desktop machine it still does. A laptop made in the last few years
@@ -39,7 +39,7 @@ def main():
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
              usbmouse="xhci")
     try:
-        boot = q.wait_for("ProtonOS shell", timeout=60)
+        boot = q.wait_for("ThreadOS shell", timeout=60)
         check("the kernel found the USB mouse and says where ('%s')"
               % (re.search(r"A USB mouse[^\n]*", boot).group(0)
                  if re.search(r"A USB mouse[^\n]*", boot) else "none"),
@@ -56,7 +56,7 @@ def main():
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
              usbmouse="xhci")
     try:
-        q.wait_for("ProtonOS shell", timeout=60)
+        q.wait_for("ThreadOS shell", timeout=60)
         q.type_line("hardware")
         time.sleep(3)
         said = q.screen()
@@ -106,7 +106,7 @@ def main():
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
              usbmouse="xhci", no_i8042=True)
     try:
-        q.wait_for("ProtonOS shell", timeout=60)
+        q.wait_for("ThreadOS shell", timeout=60)
         q.type_line("hardware")
         time.sleep(3)
         said = q.screen()

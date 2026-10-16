@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: colours - as many as the screen really has.
+"""ThreadOS smoke test: colours - as many as the screen really has.
 
 This machine drew in palette indices from its first pixel. That made
 sense while the screen WAS a palette - mode 13h, two hundred and fifty

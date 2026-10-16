@@ -1,4 +1,4 @@
-/* ProtonOS 64 programs that use the shared library
+/* ThreadOS 64 programs that use the shared library
  *
  * The same starting address as user64/user64.ld, and the same page
  * alignment of the sections - the kernel grants rights from what the

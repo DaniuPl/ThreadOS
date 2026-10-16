@@ -1,5 +1,5 @@
-#ifndef PROTONOS_PROC64_H
-#define PROTONOS_PROC64_H
+#ifndef THREADOS_PROC64_H
+#define THREADOS_PROC64_H
 
 #include <stdint.h>
 

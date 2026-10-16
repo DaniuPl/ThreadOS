@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: TLS 1.3 and the HTTP client in ring 3 (64-bit
+"""ThreadOS smoke test: TLS 1.3 and the HTTP client in ring 3 (64-bit
 kernel).
 
 The cryptography, TLS, HTTP, DNS and the certificate parser live in the
@@ -65,7 +65,7 @@ def main():
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
                  sata=True, qemu="qemu-system-x86_64")
         try:
-            q.wait_serial("proton64>", timeout=90)
+            q.wait_serial("thread64>", timeout=90)
             q.wait_serial("DHCP: granted", timeout=30)
 
             # --- Plain HTTP: TCP from ring 3 ---
@@ -74,30 +74,30 @@ def main():
             check("TCP from ring 3: a handshake and an HTTP 200 answer",
                   "[httpget] HTTP 200" in out)
             check("the page's content arrived whole",
-                  "ProtonOS TCP works" in out)
+                  "ThreadOS TCP works" in out)
 
             # --- DNS: a name instead of an address ---
             q.command("dns 10.0.2.2", "DNS server set")
-            nsl = q.command("run nslookup protonos.test", "exit code",
+            nsl = q.command("run nslookup threados.test", "exit code",
                               timeout=40)
             check("DNS from ring 3: a name turned into an address",
                   "10.0.2.2" in nsl)
 
             # --- TLS with no trust store: the connection is to fail ---
-            refusal = q.command("run httpget https://protonos.test %d /"
+            refusal = q.command("run httpget https://threados.test %d /"
                               % https_port, "exit code", timeout=90)
             check("a foreign certificate tears the connection down",
                   "no trusted issuer" in refusal)
 
             # --- TLS with the check skipped (-k) ---
-            sec = q.command("run httpget -k https://protonos.test %d /"
+            sec = q.command("run httpget -k https://threados.test %d /"
                               % https_port, "exit code", timeout=90)
             check("TLS 1.3: a handshake with an OpenSSL server",
                   "[httpget] TLS 1.3" in sec)
             check("HTTPS: a 200 answer with the whole content",
                   "HTTP 200, content %d B" % len(PAGE) in sec)
             check("HTTPS: the content was decrypted correctly",
-                  "ProtonOS TCP works" in sec)
+                  "ThreadOS TCP works" in sec)
             check("-k says outright that nobody's identity is checked",
                   "certificate NOT CHECKED" in sec)
 
@@ -105,10 +105,10 @@ def main():
             q.command("run httpget 10.0.2.2 %d /cert.der roots.der"
                         % http_port, "exit code", timeout=60)
             listing = q.command("fls", "roots.der")
-            check("the trust store was written to the PFS disk",
+            check("the trust store was written to the TFS disk",
                   "roots.der" in listing)
 
-            ver = q.command("run httpget https://protonos.test %d /"
+            ver = q.command("run httpget https://threados.test %d /"
                               % https_port, "exit code", timeout=90)
             check("the certificate was checked against the store from the disk",
                   "certificate checked" in ver)
@@ -148,13 +148,13 @@ def main():
                     print("SKIPPED: no openssl s_server")
                     break
                 try:
-                    got = q.command("run httpget -k https://protonos.test "
+                    got = q.command("run httpget -k https://threados.test "
                                     "%d /index.html" % sport,
                                     "exit code", timeout=90)
                     check("a server on %s alone: the handshake goes through"
                           % label, "[httpget] TLS 1.3" in got)
                     check("and the content comes back decrypted (%s)" % label,
-                          "ProtonOS TCP works" in got)
+                          "ThreadOS TCP works" in got)
                 finally:
                     sstop()
                     shutil.rmtree(sdir, ignore_errors=True)
@@ -173,7 +173,7 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
-            q2.wait_serial("proton64>", timeout=90)
+            q2.wait_serial("thread64>", timeout=90)
             q2.wait_serial("DHCP: granted", timeout=30)
             # The name server has to be set BEFORE the desktop: afterwards
             # the keyboard belongs to the compositor, not to the kernel's
@@ -205,7 +205,7 @@ def main():
 
             for _ in range(24):             # clear the default address
                 q2.sendkey("backspace")
-            for ch in "protonos.test:%d/" % http_port:
+            for ch in "threados.test:%d/" % http_port:
                 q2.sendkey(Qemu.KEYNAMES.get(ch, ch))
             q2.sendkey("ret")
 

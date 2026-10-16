@@ -20,8 +20,8 @@
  * then it is the compiler's default and nothing here has to say it.
  */
 
-#ifndef PROTONOS_EFI_H
-#define PROTONOS_EFI_H
+#ifndef THREADOS_EFI_H
+#define THREADOS_EFI_H
 
 typedef unsigned char      UINT8;
 typedef unsigned short     UINT16;

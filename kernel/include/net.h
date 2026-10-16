@@ -1,5 +1,5 @@
-#ifndef PROTONOS_NET_H
-#define PROTONOS_NET_H
+#ifndef THREADOS_NET_H
+#define THREADOS_NET_H
 
 #include <stdint.h>
 

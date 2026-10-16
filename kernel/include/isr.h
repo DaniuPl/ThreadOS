@@ -1,5 +1,5 @@
-#ifndef PROTONOS_ISR_H
-#define PROTONOS_ISR_H
+#ifndef THREADOS_ISR_H
+#define THREADOS_ISR_H
 
 #include <stdint.h>
 

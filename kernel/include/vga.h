@@ -1,5 +1,5 @@
-#ifndef PROTONOS_VGA_H
-#define PROTONOS_VGA_H
+#ifndef THREADOS_VGA_H
+#define THREADOS_VGA_H
 
 #include <stdint.h>
 #include <stddef.h>

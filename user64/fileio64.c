@@ -13,7 +13,7 @@
 
 #include "usys64.h"
 
-static const char BODY[] = "ProtonOS 64: a file written from ring 3\n";
+static const char BODY[] = "ThreadOS 64: a file written from ring 3\n";
 static char buf[128];
 static char out[160];
 

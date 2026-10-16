@@ -14,8 +14,8 @@
  * than as a fingerprint of a document somebody signs.
  */
 
-#ifndef PROTONOS_USHA1_H
-#define PROTONOS_USHA1_H
+#ifndef THREADOS_USHA1_H
+#define THREADOS_USHA1_H
 
 #include "uapi.h"
 

@@ -1,4 +1,4 @@
-/* The ProtonOS linker script - the kernel loads at 1 MiB (the Multiboot convention) */
+/* The ThreadOS linker script - the kernel loads at 1 MiB (the Multiboot convention) */
 
 ENTRY(_start)
 

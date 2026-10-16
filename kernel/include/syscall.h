@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SYSCALL_H
-#define PROTONOS_SYSCALL_H
+#ifndef THREADOS_SYSCALL_H
+#define THREADOS_SYSCALL_H
 
 /* Syscall numbers (in eax for int 0x80; arguments: ebx, ecx, edx;
    the result comes back in eax) */

@@ -8,8 +8,8 @@
  * library itself.
  */
 
-#ifndef PROTONOS_UPROTON_H
-#define PROTONOS_UPROTON_H
+#ifndef THREADOS_UTHREAD_H
+#define THREADOS_UTHREAD_H
 
 #include "uapi.h"
 #include "usha256.h"
@@ -17,7 +17,7 @@
 
 /* The address of the library's code - the same in every process,
    because these are the same physical frames */
-static inline uintptr_t proton_code_addr(void)
+static inline uintptr_t thread_code_addr(void)
 {
     return (uintptr_t)sha256;
 }
@@ -25,7 +25,7 @@ static inline uintptr_t proton_code_addr(void)
 /* The address of the library's data. The virtual address is the same
    everywhere too, but the frames under it are not - every process has
    its own. */
-static inline uintptr_t proton_data_addr(void)
+static inline uintptr_t thread_data_addr(void)
 {
     return (uintptr_t)urand_seed;
 }
@@ -33,7 +33,7 @@ static inline uintptr_t proton_data_addr(void)
 /* The random generator's counter. It grows with every fetch of bytes,
    so it shows how much this process took from the library - and it is a
    good probe for whether the data really are private. */
-static inline uint32_t proton_random_counter(void)
+static inline uint32_t thread_random_counter(void)
 {
     return urand_counter;
 }

@@ -1,5 +1,5 @@
-#ifndef PROTONOS_TCP_H
-#define PROTONOS_TCP_H
+#ifndef THREADOS_TCP_H
+#define THREADOS_TCP_H
 
 #include <stdint.h>
 

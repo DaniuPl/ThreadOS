@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: ring 3 processes and their memory.
+"""ThreadOS smoke test: ring 3 processes and their memory.
 
 A user program is a separate ELF file with its own address space. This
 group walks in turn through everything such a program gets from the
@@ -35,7 +35,7 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ProtonOS shell")
+        q.wait_for("ThreadOS shell")
         q.wait_for("[net] DHCP", timeout=20)
         time.sleep(0.5)
 
@@ -65,9 +65,9 @@ def main():
               used_before is not None and used_after == used_before)
 
         # 'run echo ...': the arguments (argc/argv) reach the process
-        q.type_line("run echo proton os works")
+        q.type_line("run echo thread os works")
         check("the argc/argv arguments reach the process (echo)",
-              "proton os works" in q.wait_for("proton os works"))
+              "thread os works" in q.wait_for("thread os works"))
 
         # 'run memtest': sbrk/malloc gives the process growing memory
         q.type_line("run memtest")

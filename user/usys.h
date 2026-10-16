@@ -1,7 +1,7 @@
-/* The ProtonOS user program library - int 0x80 syscalls */
+/* The ThreadOS user program library - int 0x80 syscalls */
 
-#ifndef PROTONOS_USYS_H
-#define PROTONOS_USYS_H
+#ifndef THREADOS_USYS_H
+#define THREADOS_USYS_H
 
 #include <stdint.h>
 

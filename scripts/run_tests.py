@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs the groups of the ProtonOS smoke test - in parallel by default.
+"""Runs the groups of the ThreadOS smoke test - in parallel by default.
 
 Every group needs its own QEMU machine, and those spend most of their
 time waiting anyway: for the boot, for an answer, for the screen to be
@@ -26,13 +26,13 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 # first anyway, so that they are not left alone at the end
 GROUPS = [
     "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
-    "net32", "http32", "mouse", "ush", "pfs", "foreigndisk", "k64core", "k64proc",
+    "net32", "http32", "mouse", "ush", "tfs", "foreigndisk", "k64core", "k64proc",
     "k64shell", "k64disk", "acpi", "usbkbd", "usbmouse", "ahci", "consoles", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "screenshot", "colours", "wheel", "scale", "look", "bar", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
-    "usbkbd64", "iso", "uefi", "protoboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet"
+    "usbkbd64", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet"
 ]
 
 

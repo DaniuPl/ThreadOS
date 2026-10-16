@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the disk, the file system and the network
+"""ThreadOS smoke test: the disk, the file system and the network
 (64-bit kernel).
 
 The same drivers as in the 32-bit kernel, compiled a second time. The
@@ -53,7 +53,7 @@ def main():
         try:
             # The kernel reaches the shell by itself; everything this
             # group checks happens only afterwards
-            q23.wait_serial("proton64>", timeout=90)
+            q23.wait_serial("thread64>", timeout=90)
 
             # The disk: the same drivers as in the 32-bit kernel,
             # compiled a second time. The controller's registers lie
@@ -63,14 +63,14 @@ def main():
             # One line speaks about both layers: what the driver
             # found and whether the file system stood on it
             dsk = q23.wait_serial("] Disk ", timeout=30)
-            m = re.search(r"\] Disk (.+?) \+ PFS (\w+) "
+            m = re.search(r"\] Disk (.+?) \+ TFS (\w+) "
                           r"\((\d+) sectors\)", dsk)
             check("the 64-bit kernel finds the disk through PCI and AHCI"
                   + (f" ({m.group(1)}, {m.group(3)} sectors)"
                      if m else ""),
                   m is not None and "AHCI" in m.group(1)
                   and int(m.group(3)) > 0)
-            check("the PFS comes up on the disk seen through AHCI",
+            check("the TFS comes up on the disk seen through AHCI",
                   m is not None and m.group(2) == "ready")
 
             q23.type_line("disk")
@@ -289,11 +289,11 @@ def main():
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
         try:
-            again = q2.wait_serial("+ PFS", timeout=60)
+            again = q2.wait_serial("+ TFS", timeout=60)
             check("a second boot finds the filesystem ready",
-                  "+ PFS ready" in again
+                  "+ TFS ready" in again
                   and "formatted" not in again)
-            q2.wait_serial("proton64>", timeout=40)
+            q2.wait_serial("thread64>", timeout=40)
             q2.type_line("fls")
             fl2 = q2.wait_serial("Used:", timeout=25)
             check("the file survived the machine being switched off",
@@ -312,7 +312,7 @@ def main():
             ct3 = q2.wait_serial("written from ring 3",
                                    timeout=25)[seen:]
             check("a file written by a program survived the restart too",
-                  "ProtonOS 64: a file written from ring 3" in ct3)
+                  "ThreadOS 64: a file written from ring 3" in ct3)
         finally:
             q2.close()
     finally:

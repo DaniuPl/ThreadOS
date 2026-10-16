@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: asking for the password in the graphical part.
+"""ThreadOS smoke test: asking for the password in the graphical part.
 
 The kernel refuses a plain user who tries to change the system. On a
 console that is the end of the story - the person types 'sudo' and the
@@ -182,12 +182,12 @@ def main():
             time.sleep(1.5)
             # What is typed shows as stars: the line has as many of them
             # as there were keys, and none of the letters
-            typed(q, "proton")
+            typed(q, "thread")
             time.sleep(0.5)
             rows = read_rows(q, **geom)
             last = [r for r in rows if r][-1]
             check("the password being typed shows as stars ('%s')" % last,
-                  "******" in last and "proton" not in last)
+                  "******" in last and "thread" not in last)
 
             q.sendkey("ret")
             time.sleep(3)
@@ -240,7 +240,7 @@ def main():
 
             q.sendkey("ret")               # ask again
             time.sleep(1.5)
-            typed(q, "proton")
+            typed(q, "thread")
             q.sendkey("ret")
             time.sleep(2.5)
             q.mouse_goto(600, 380)

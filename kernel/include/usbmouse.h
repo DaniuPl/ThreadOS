@@ -1,5 +1,5 @@
-#ifndef PROTONOS_USBMOUSE_H
-#define PROTONOS_USBMOUSE_H
+#ifndef THREADOS_USBMOUSE_H
+#define THREADOS_USBMOUSE_H
 
 /* A USB mouse in the HID boot protocol. Looks for one on the ports the
    controller layer reports and, having found it, starts a thread that

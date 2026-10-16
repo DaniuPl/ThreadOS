@@ -49,8 +49,8 @@ struct task {
     uint32_t mmap_next;         /* next free mmap address (0 = kernel thread) */
     /* Memory-mapped files. Block numbers are fixed once, when the
        mapping is created, and read afterwards through the block layer,
-       bypassing the PFS code - for the same reason as with swapping:
-       PFS has one shared block buffer, and a page fault can land in
+       bypassing the TFS code - for the same reason as with swapping:
+       TFS has one shared block buffer, and a page fault can land in
        the middle of any file operation. */
     struct file_map {
         uint32_t start, end;  /* address range (0 = free entry) */
@@ -59,7 +59,7 @@ struct task {
         uint32_t *blocks;
         uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
-    int cwd;                     /* working directory (PFS slot, -1 = root) */
+    int cwd;                     /* working directory (TFS slot, -1 = root) */
     /* What this task is allowed to do: USER_ADMIN or USER_PLAIN. A
        child gets what its parent had - the level travels with the
        process, not with the program. */

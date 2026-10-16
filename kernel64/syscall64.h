@@ -1,5 +1,5 @@
-#ifndef PROTONOS_SYSCALL64_H
-#define PROTONOS_SYSCALL64_H
+#ifndef THREADOS_SYSCALL64_H
+#define THREADOS_SYSCALL64_H
 
 #include <stdint.h>
 

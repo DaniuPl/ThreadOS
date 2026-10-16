@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: sound (Intel HD Audio).
+"""ThreadOS smoke test: sound (Intel HD Audio).
 
 The controller every machine made after about 2005 has. What makes it
 worth a test group of its own is that "it played" is not something a

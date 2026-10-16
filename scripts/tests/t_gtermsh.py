@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: talking to a program from the terminal window.
+"""ThreadOS smoke test: talking to a program from the terminal window.
 
 The terminal could start a program and show what it printed. What it
 could not do is say anything back to it - the program's input came from

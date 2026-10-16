@@ -12,8 +12,8 @@
  * one's own certificates on a local network.
  */
 
-#ifndef PROTONOS_UCERT_H
-#define PROTONOS_UCERT_H
+#ifndef THREADOS_UCERT_H
+#define THREADOS_UCERT_H
 
 #include "uapi.h"
 #include "usha256.h"

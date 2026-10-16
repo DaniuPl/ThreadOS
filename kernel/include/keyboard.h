@@ -1,5 +1,5 @@
-#ifndef PROTONOS_KEYBOARD_H
-#define PROTONOS_KEYBOARD_H
+#ifndef THREADOS_KEYBOARD_H
+#define THREADOS_KEYBOARD_H
 
 /* Keys with no ASCII equivalent (arrows, PgUp/PgDn, Home/End) are
    delivered as control codes - programs recognise them by value and

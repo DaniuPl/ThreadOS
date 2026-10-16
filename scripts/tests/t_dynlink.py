@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ProtonOS smoke test: the shared library and symbol binding.
+"""ThreadOS smoke test: the shared library and symbol binding.
 
 Until now every program carried inside itself everything it used. The
 cryptography and TLS meant dozens of kilobytes of the same code in each
@@ -107,7 +107,7 @@ def check_shared(q, marker, suffix, lib_base):
 
     # Sizes: the four heaviest programs together lighter than the library
     listing = q.command("ls", "dynlib", timeout=20)
-    lib = size(listing, "libproton.so")
+    lib = size(listing, "libthread.so")
     check("the library is in the initrd and weighs what it weighs" + suffix,
           lib is not None and lib > 60000)
     heavy = [size(listing, n)
@@ -138,8 +138,8 @@ def main():
             q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                      qemu="qemu-system-x86_64")
             try:
-                start = q.wait_serial("proton64>", timeout=90)
-                m = re.search(r"Library libproton\.so: (\d+) pages", start)
+                start = q.wait_serial("thread64>", timeout=90)
+                m = re.search(r"Library libthread\.so: (\d+) pages", start)
                 check("the kernel read the library at boot",
                       m is not None and int(m.group(1)) >= 8)
                 check_shared(q, "exit code", "", 0x4F000000)
@@ -160,8 +160,8 @@ def main():
     try:
         q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
         try:
-            start = q3.wait_for("ProtonOS shell", timeout=40)
-            m = re.search(r"Library libproton\.so: (\d+) pages", start)
+            start = q3.wait_for("ThreadOS shell", timeout=40)
+            m = re.search(r"Library libthread\.so: (\d+) pages", start)
             check("the kernel read the library at boot (32-bit)",
                   m is not None and int(m.group(1)) >= 8)
             q3.wait_for("[net] DHCP", timeout=30)

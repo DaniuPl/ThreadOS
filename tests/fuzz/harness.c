@@ -1,4 +1,4 @@
-/* Putting ProtonOS's parsers through damaged data
+/* Putting ThreadOS's parsers through damaged data
  *
  * The certificate and HTML parsers get their data straight off the
  * network, so they have to stand any rubbish at all. This program runs
@@ -58,7 +58,7 @@ static void run_x509(const unsigned char *data, size_t len)
     /* Touch every field the rest of the system reads */
     volatile int sink = c.sig_alg + c.key_type + c.is_ca + c.ec_bits;
     (void)sink;
-    x509_matches_host(&c, "protonos.test");
+    x509_matches_host(&c, "threados.test");
     x509_matches_host(&c, "*.example.com");
     if (c.tbs && c.tbs_len)
         (void)c.tbs[c.tbs_len - 1];

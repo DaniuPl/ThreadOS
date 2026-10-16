@@ -1,5 +1,5 @@
-#ifndef PROTONOS_BIGLOCK_H
-#define PROTONOS_BIGLOCK_H
+#ifndef THREADOS_BIGLOCK_H
+#define THREADOS_BIGLOCK_H
 
 /* The big kernel lock
  *
