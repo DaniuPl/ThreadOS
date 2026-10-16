@@ -1,18 +1,15 @@
 # Building both kernels and running the tests that matter most.
 #
-# The full suite starts about a hundred virtual machines and takes some
-# twenty minutes on a machine with four cores; a GitHub runner has two
-# and no KVM, so it takes longer than anybody wants to wait on a pull
-# request. Hence the split: every push builds everything and runs a
-# curated set of groups, and the whole suite runs once a night.
+# By hand only. The project is built and tested locally, in QEMU - the
+# full suite is a hundred virtual machines, twenty minutes on four cores
+# with KVM and a great deal longer on a runner with two and none, and
+# it is run before every push anyway. This stays for whoever wants a
+# second opinion from a clean machine: Actions -> build and test ->
+# Run workflow. Without the 'schedule' event the "everything" step
+# below never fires; the curated list runs instead.
 name: build and test
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-  schedule:
-    - cron: "17 2 * * *"          # nightly, in UTC
   workflow_dispatch:
 
 jobs:

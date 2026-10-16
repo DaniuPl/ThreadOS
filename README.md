@@ -1,6 +1,5 @@
 # ThreadOS
 
-[![build and test](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml/badge.svg)](https://github.com/DaniuPl/ProtonOS/actions/workflows/build.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A hobby operating system for PC, written from scratch in C and assembly.
