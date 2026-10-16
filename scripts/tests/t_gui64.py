@@ -31,7 +31,7 @@ from ptest import check, summary
 # (10 px) lower. The first two slots are taken by the kernel's windows,
 # so the applications start from the third.
 def body_text(slot):
-    return 70 + 12 * slot + 1, 30 + 12 * slot + 11
+    return 70 + 12 * slot + 1, 30 + 12 * slot + CONTENT_DY
 
 
 BODY_X, BODY_Y = body_text(2)  # the top left corner of the first application's content

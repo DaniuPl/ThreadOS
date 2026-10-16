@@ -94,7 +94,7 @@ def clock_text(at):
     window's light grey, at (8,6) of a content area starting at
     (95,65). Dark on light is the rule everywhere in this system - the
     digits used to be green, which was drawn and could not be read."""
-    x0, y0 = WX + 1 + 8, WY + 11 + 6
+    x0, y0 = WX + 1 + 8, WY + CONTENT_DY + 6
     font = font8x8()
     out = ""
     for c in range(8):

@@ -16,6 +16,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
+
+# These positions were measured when the title bar was ten pixels tall;
+# what lies under a window's bar has moved down by the difference
+DOWN = TITLE_H - 10
 from ptest import check, summary
 
 
@@ -46,7 +50,7 @@ def main():
         # window is light grey, and white on it was unreadable.
         def files_row_white():
             _, _, a = q9.screen_raw()
-            return sum(1 for x in range(103, 160) for y in range(81, 89)
+            return sum(1 for x in range(103, 160) for y in range(81 + DOWN, 89 + DOWN)
                        if near(a(x, y), (0, 0, 0), 10))
         appeared = False
         for _ in range(15):
@@ -68,11 +72,11 @@ def main():
         # 'raport'.
         def row_blue():
             _, _, a = q9.screen_raw()
-            return sum(1 for x in range(100, 300) for y in range(91, 99)
+            return sum(1 for x in range(100, 300) for y in range(91 + DOWN, 99 + DOWN)
                        if near(a(x, y), (0, 0, 255), 60))
 
         before_blue = row_blue()
-        q9.mouse_goto(115, 93)
+        q9.mouse_goto(115, 93 + DOWN)
         q9.mouse_click()
         q9.mouse_goto(60, 300)
         picked = False
@@ -106,7 +110,7 @@ def main():
         q10.mouse_click()
         q10.mouse_goto(300, 300)         # move the cursor away
         check("a click on an icon starts the application (a red square 101,71)",
-              q10.wait_pixel(101, 71, (255, 0, 0)))
+              q10.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
     finally:
         q10.close()
 
@@ -124,13 +128,13 @@ def main():
         # gmon slot2 (94,54), content (95,65). The RAM bar (content y48)
         # contains a blue usage fragment -> screen ~ (101,116).
         check("the resource monitor: the RAM bar (blue 101,116)",
-              q11.wait_pixel(101, 116, (0, 0, 255)))
+              q11.wait_pixel(101, 116 + DOWN, (0, 0, 255)))
 
         # the uptime (the number at content(96,28) -> screen (191,93)) grows:
         # the text cell changes over time -> a live monitor
         def up_cell():
             _, _, a = q11.screen_raw()
-            return [a(191 + c, 93 + r) for r in range(8) for c in range(24)]
+            return [a(191 + c, 93 + DOWN + r) for r in range(8) for c in range(24)]
         c1 = up_cell()
         time.sleep(1.6)
         c2 = up_cell()
@@ -168,7 +172,7 @@ def main():
 # y69)
         def out_white():
             _, _, a = q12.screen_raw()
-            return sum(1 for x in range(99, 130) for y in range(69, 99)
+            return sum(1 for x in range(99, 130) for y in range(69 + DOWN, 99 + DOWN)
                        if near(a(x, y), (255, 255, 255), 10))
         shown = False
         for _ in range(20):
@@ -226,7 +230,7 @@ def main():
         _, _, at = q13.screen_raw()
         check("before the resize the point is outside the window (170,140 teal)",
               near(at(170, 140), (0, 128, 160)))
-        q13.mouse_goto(155, 125)
+        q13.mouse_goto(155, 125)          # a kernel window: its height is fixed, so the grip did not move
         q13.mouse_button(True)
         q13.mouse_move(60, 40)
         q13.mouse_button(False)

@@ -318,7 +318,7 @@ def main():
 
             check("the menu closed after the choice",
                   not is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
-            shown = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
+            shown = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
             check("the program from the menu really runs - the clock draws "
                   "godzine ('%s')" % shown, shown.count(":") == 2)
             check("and it has its button on the bar",
@@ -362,7 +362,7 @@ def main():
             log = q.serial()
             check("Alt+F4 closes a window started from the menu too",
                   "process \'gclock\' has ended (code 0)" in log)
-            gone = q.read_text(WX + 1 + 8, WY + 11 + 6, 8, 1)
+            gone = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
             check("the clock is gone from the screen ('%s')" % gone,
                   gone.count(":") != 2)
             check("and from the taskbar", len(bar_buttons(at, w, row)) == after)

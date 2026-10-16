@@ -43,14 +43,15 @@ from ptest import check, summary
 # The application window is slot 2: the compositor cascades them at
 # (70+12i, 30+12i), so (94,54). gsettings asks for 330x160 content.
 WX, WY = 94, 54
-WW, WH = 362, 222
+# The frame: the content, a line either side, and the title bar
+WW, WH = 362, 210 + TITLE_H + 2
 
 # Where to look, and why there. The kernel's own windows sit at
 # (40,60) 120x70 and (180,95) 120x70, so a probe has to fall inside the
 # application's window and outside both of those - otherwise it reads
 # somebody else's grey and says nothing.
 P_APP = (400, 200)          # inside gsettings, past both kernel windows
-P_DEAF = (170, 70)          # inside gdeaf, in the gap between them
+P_DEAF = (170, 59 + CONTENT_DY)   # inside gdeaf, in the gap between them
 
 
 def grey(px):
@@ -107,7 +108,7 @@ def main():
 
 
             # --- closing: the program is asked and ends itself ---------
-            q.mouse_goto(WX + WW + 90 - 6, WY + 5)      # the new [x]
+            q.mouse_goto(WX + WW + 90 - 6, WY + 1 + TITLE_H // 2)      # the new [x]
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -147,7 +148,7 @@ def main():
             check("the deaf program's window is on the screen",
                   grey(at(*P_DEAF)))
 
-            q2.mouse_goto(WX + 100 + 2 - 6, WY + 5)   # its [x] (100 wide)
+            q2.mouse_goto(WX + 100 + 2 - 6, WY + 1 + TITLE_H // 2)   # its [x] (100 wide)
             time.sleep(0.5)
             q2.mouse_click()
             # It will not answer, so the desktop has to stop asking. The

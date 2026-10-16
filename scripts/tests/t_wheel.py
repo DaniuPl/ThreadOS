@@ -37,7 +37,7 @@ from ptest import check, summary, font8x8
 # The file manager: slot 2 of the cascade, content a pixel right and a
 # title bar down; gfiles asks for 320x220.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 CW = 320
 ROW_Y0 = 18
 ROW_H = 10

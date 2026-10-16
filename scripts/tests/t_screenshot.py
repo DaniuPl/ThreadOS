@@ -49,7 +49,7 @@ from ptest import check, summary, font8x8
 # The viewer opens in the next free slot of the cascade; with the clock
 # already open it is slot 3, at (106,66), and asks for 420x300.
 VX, VY = 106, 66
-CX, CY = VX + 1, VY + 11
+CX, CY = VX + 1, VY + CONTENT_DY
 VW, VH = 420, 300
 STATUS_H = 10
 
@@ -63,7 +63,7 @@ def is_orange(px):
 def status(at, cols=48, vx=VX, vy=VY):
     """The viewer's status line: white on the accent blue."""
     font = font8x8()
-    x0, y0 = vx + 1 + 4, vy + 11 + VH - STATUS_H + 1
+    x0, y0 = vx + 1 + 4, vy + CONTENT_DY + VH - STATUS_H + 1
     out = ""
     for c in range(cols):
         pattern = []
@@ -229,7 +229,7 @@ def main():
             # The four quarters, in the four colours the file has -
             # each of them exactly in the palette, so 'nearly' is not
             # good enough here
-            cx, cy = vx + 1, vy + 11
+            cx, cy = vx + 1, vy + CONTENT_DY
             def hue(x, y):
                 return at(cx + x, cy + y)
             reds = hue(16, 12)
@@ -268,7 +268,7 @@ def main():
             check("the viewer unpacked the PNG ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
-            cx, cy = vx + 1, vy + 11
+            cx, cy = vx + 1, vy + CONTENT_DY
             reds = at(cx + 16, cy + 12)
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
@@ -311,7 +311,7 @@ def main():
             # quarters - but they still have to be the right four, and
             # a decoder that got the transform wrong gives grey mush
             # rather than four saturated fields.
-            cx, cy = vx + 1, vy + 11
+            cx, cy = vx + 1, vy + CONTENT_DY
             reds = at(cx + 16, cy + 12)
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)
@@ -425,7 +425,7 @@ def sixty_four():
             check("(64) the viewer took the JPEG apart into pixels ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
-            cx, cy = vx + 1, vy + 11
+            cx, cy = vx + 1, vy + CONTENT_DY
             reds = at(cx + 16, cy + 12)
             greens = at(cx + 48, cy + 12)
             blues = at(cx + 16, cy + 36)

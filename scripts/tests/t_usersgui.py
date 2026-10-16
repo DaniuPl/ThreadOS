@@ -38,7 +38,7 @@ from ptest import check, summary, font8x8
 # The terminal opens in slot 2: content at (95,65), padded by 4, rows
 # 10 apart, 400x240 of content.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
 

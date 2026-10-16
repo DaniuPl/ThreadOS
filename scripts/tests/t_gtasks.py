@@ -40,7 +40,7 @@ CLOCK_W = 8 * 8 + 6
 # The window: slot 2 of the cascade, its content a pixel right and a
 # title bar down. gtasks asks for 300x190.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 ROW_Y0 = 26
 ROW_H = 10
 
@@ -173,7 +173,7 @@ def sixty_four():
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 236 + 11
+            CX, CY = 300 + 1, 236 + CONTENT_DY
             q.mouse_goto(600, 430)
             time.sleep(1.5)
 
@@ -259,7 +259,7 @@ def main():
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 236 + 11
+            CX, CY = 300 + 1, 236 + CONTENT_DY
             q.mouse_goto(600, 430)
             time.sleep(1.5)
 

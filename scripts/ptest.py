@@ -650,6 +650,85 @@ def font8x8():
     return _FONT8X8
 
 
+def _kernel_define(path, name):
+    """A #define straight out of a kernel source file - so a number the
+    desktop is built with and the number a test computes positions with
+    cannot drift apart."""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        path)
+    with open(full) as fh:
+        m = re.search(r"#define\s+%s\s+(\d+)" % name, fh.read())
+    return int(m.group(1))
+
+
+# The title bar's height and the size of the desktop's lettering
+TITLE_H = _kernel_define("kernel/desktop.c", "TITLE_H")
+UI_PX = _kernel_define("kernel/include/uitext.h", "UI_PX")
+# Where a window's content starts below its top edge: the frame line
+# and the title bar
+CONTENT_DY = 1 + TITLE_H
+
+
+def ui_baseline_in(top, height):
+    """The baseline the kernel gives text centred in a band - the same
+    arithmetic as ui_baseline_in() in kernel/uitext.c."""
+    cap = (UI_PX * 73 + 50) // 100
+    return top + (height + cap) // 2
+
+
+class UiFont:
+    """The desktop's TrueType lettering, as FreeType draws it.
+
+    The kernel's glyphs equal FreeType's to within 2/255 of coverage
+    (scripts/tests/t_ttf.py holds it to that), so FreeType's glyphs are
+    what the screen reader matches the screen against. Placed exactly as
+    the kernel places them: the pen moves in 1/64 px by the font's
+    advances, and each glyph goes to the pen's nearest whole pixel."""
+
+    _shared = None
+    CHARSET = ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+               "0123456789 .,:;-_()[]/*!?'\"+=<>@#%&")
+
+    def __init__(self, px=None):
+        import freetype
+        self.px = px or UI_PX
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "fonts", "sans.ttf")
+        self.face = freetype.Face(path)
+        self.face.set_pixel_sizes(0, self.px)
+        self.ascent = (self.face.size.ascender + 63) >> 6
+        self.descent = (-self.face.size.descender + 63) >> 6
+        self.cache = {}
+
+    @classmethod
+    def shared(cls):
+        if cls._shared is None:
+            cls._shared = UiFont()
+        return cls._shared
+
+    def glyph(self, ch):
+        g = self.cache.get(ch)
+        if g is None:
+            import freetype
+            self.face.load_char(ch, freetype.FT_LOAD_RENDER |
+                                freetype.FT_LOAD_NO_HINTING)
+            gl = self.face.glyph
+            b = gl.bitmap
+            a = bytes(v for r in range(b.rows)
+                      for v in b.buffer[r * b.pitch:r * b.pitch + b.width])
+            g = (gl.advance.x, gl.bitmap_left, gl.bitmap_top, b.width,
+                 b.rows, a)
+            self.cache[ch] = g
+        return g
+
+
+def ui_mix(text, under, a):
+    """The kernel's mixing of a glyph's coverage with what is under it
+    (kernel/uitext.c), channel by channel."""
+    return tuple((t * a + u * (255 - a) + 127) // 255
+                 for t, u in zip(text, under))
+
+
 DNS_HINT = ("port 53 is taken, or out of reach - run as root, or "
             "once: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
 
@@ -1470,6 +1549,121 @@ class Qemu:
             return (px[o], px[o + 1], px[o + 2])
         return w, h, at
 
+
+    def read_ui(self, x, baseline, width=320, charset=None):
+        """Text the desktop drew in its TrueType lettering, starting at
+        pen position x on the given baseline - what the kernel's
+        ui_text() would have been called with.
+
+        Read one glyph at a time, the way the kernel drew it: at the pen,
+        every character is tried - its FreeType glyph mixed with the
+        background exactly as the kernel mixes - and the one that best
+        explains the pixels between this pen position and the next is
+        taken; then the pen moves on by that character's advance. What
+        has been read so far is painted into the expectation, so a glyph
+        that leans into its neighbour does not count against it. The
+        text ends where nothing but background follows.
+
+        The background is the commonest colour in the band and the text
+        colour the one furthest from it - a fully covered pixel is
+        exactly the text colour, so the extreme is the right one."""
+        font = UiFont.shared()
+        w, h, at = self.screen_raw()
+        top, bot = baseline - font.ascent, baseline + font.descent
+        x1 = min(w, x + width)
+        if x < 0 or top < 0 or bot > h or x1 <= x:
+            return ""
+        # The colours come from the beginning of the band only: text
+        # starts at the pen, while what stands further right - the
+        # buttons of a title bar, a red close among them - is not text
+        # and must not be taken for its colour
+        counts = {}
+        for yy in range(top, bot):
+            for xx in range(x, min(x1, x + 120)):
+                p = at(xx, yy)
+                counts[p] = counts.get(p, 0) + 1
+        bg = max(counts, key=counts.get)
+        far = [(sum(abs(a - b) for a, b in zip(p, bg)), p)
+               for p, c in counts.items() if c >= 2]
+        if not far or max(far)[0] < 60:
+            return ""                       # nothing but background
+        fg = max(far)[1]
+
+        # The band once, as rows of tuples: everything below reads it
+        # thousands of times
+        # A few pixels to the left as well: a glyph may start before
+        # the pen (DejaVu's 'T' does, by a pixel)
+        bx = max(0, x - 4)
+        band = [[at(xx, yy) for xx in range(bx, x1)] for yy in range(top, bot)]
+        painted = [[bg] * (x1 - bx) for _ in range(bot - top)]
+        chars = charset or UiFont.CHARSET
+        pen = x << 6
+        out = []
+        blanks = 0
+        while True:
+            gx = (pen + 32) >> 6
+            if gx >= x1:
+                break
+            best = None
+            for ch in chars:
+                adv, left, gtop, gw, gh, a = font.glyph(ch)
+                nx = (pen + adv + 32) >> 6
+                x_lo = min(gx, gx + left)
+                x_hi = max(nx, gx + left + gw)
+                if x_hi > x1 or x_hi <= x_lo or x_lo < bx:
+                    continue
+                err = 0
+                gy0 = baseline - gtop - top      # the glyph's first row, in the band
+                for r in range(bot - top):
+                    prow, brow = painted[r], band[r]
+                    gr = r - gy0
+                    inside = 0 <= gr < gh
+                    for xx in range(x_lo, x_hi):
+                        exp = prow[xx - bx]
+                        if inside:
+                            k = xx - gx - left
+                            if 0 <= k < gw:
+                                v = a[gr * gw + k]
+                                if v:
+                                    exp = ui_mix(fg, exp, v)
+                        got = brow[xx - bx]
+                        err += (abs(exp[0] - got[0]) + abs(exp[1] - got[1])
+                                + abs(exp[2] - got[2]))
+                        if best is not None and err > best[0] * (x_hi - x_lo) * (bot - top):
+                            break
+                    if best is not None and err > best[0] * (x_hi - x_lo) * (bot - top):
+                        break
+                score = err / ((x_hi - x_lo) * (bot - top))
+                if best is None or score < best[0]:
+                    best = (score, ch, adv, left, gtop, gw, gh, a)
+            if best is None or best[0] > 12:
+                break
+            score, ch, adv, left, gtop, gw, gh, a = best
+            if ch == " ":
+                blanks += 1
+                if blanks > 2:
+                    break
+            else:
+                blanks = 0
+            gy0 = baseline - gtop - top
+            for r in range(gh):
+                for k in range(gw):
+                    v = a[r * gw + k]
+                    rr, cc = gy0 + r, gx + left + k - bx
+                    if v and 0 <= rr < bot - top and 0 <= cc < x1 - bx:
+                        painted[rr][cc] = ui_mix(fg, painted[rr][cc], v)
+            out.append(ch)
+            pen += adv
+        return "".join(out).rstrip()
+
+    def window_title(self, wx, wy, ww=None):
+        """A window's name as its title bar shows it: kernel/desktop.c
+        draws it with ui_text() five pixels in from the window's edge,
+        centred in the bar. The width stops short of the three buttons
+        when the window's width is known."""
+        width = (ww - 5 - 40) if ww else 240
+        return self.read_ui(wx + 5, ui_baseline_in(wy + 1, TITLE_H),
+                            width=width)
 
     def read_text(self, x0, y0, cols, rows, line_h=8):
         """Text drawn in the 8x8 font ANYWHERE on the screen.

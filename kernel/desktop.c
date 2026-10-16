@@ -15,6 +15,7 @@
 #include "include/heap.h"
 #include "include/string.h"
 #include "include/font8x8.h"
+#include "include/uitext.h"
 #include "include/acpi.h"
 #include "include/io.h"
 #include "include/keyboard.h"
@@ -65,7 +66,13 @@
 #define COL_DESK0    20
 #define COL_DESK_N   16
 
-#define TITLE_H 10
+/* The title bar's height. Sixteen pixels, because the title is drawn in
+   the TrueType sans at UI_PX (11) and that needs room for what hangs
+   below the line - a 'g' or a 'y' cut off at the bottom of the bar
+   would be the first thing anyone saw. It was ten while the title was
+   8x8 bitmap letters. scripts/ptest.py reads this number from here, so
+   the tests move with it. */
+#define TITLE_H 16
 
 /* Desktop icons: clicking one launches an application */
 #define ICON_W 32
@@ -733,7 +740,7 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 }
 
 static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
-static int close_y(const struct window *w) { return w->y + 2; }
+static int close_y(const struct window *w) { return w->y + 1 + (TITLE_H - CLOSE_SZ) / 2; }
 static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
 static int max_x(const struct window *w)   { return w->x + w->w - 3 * CLOSE_SZ - 3; }
 static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
@@ -894,8 +901,8 @@ static void draw_window(const struct window *win)
                     focused ? COL_TITLE : COL_TITLE_OFF);
     video_fill_rect(win->x + 1, win->y + 1 + TITLE_H, win->w - 2, 1,
                     COL_LINE);
-    video_draw_string(win->x + 4, win->y + 2, win->title,
-                      focused ? COL_WHITE : COL_DIM);
+    ui_text(win->x + 5, ui_baseline_in(win->y + 1, TITLE_H), win->title,
+            focused ? COL_WHITE : COL_DIM);
     /* The maximise button, and the minimise one next to the close.
        'O' means it will fill the screen, 'o' that it will go back to
        the size it had - the same button, and which of the two it is

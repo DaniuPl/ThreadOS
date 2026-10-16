@@ -41,7 +41,7 @@ from ptest import check, summary, font8x8
 # 30+12i) - and asks for 400x240 of content, so the content starts at
 # (95,65). The terminal pads by 4 and puts its rows 10 apart.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
 
@@ -256,7 +256,7 @@ def main():
             # The [O] button maximises; the terminal asks the window for
             # its size, so it must show more lines than before
             before = len([r for r in read_rows(q, **geom) if r])
-            q.mouse_goto(WX + 402 - 3 * BTN - 3 + BTN // 2, WY + 5)
+            q.mouse_goto(WX + 402 - 3 * BTN - 3 + BTN // 2, WY + 1 + TITLE_H // 2)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -264,8 +264,9 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            big = dict(ox=1 + PAD, oy=11 + PAD,
-                       cols=(w - 2 - 8) // 8, rows=(h - 12 - 12 - 8) // ROW_H)
+            big = dict(ox=1 + PAD, oy=CONTENT_DY + PAD,
+                       cols=(w - 2 - 8) // 8,
+                       rows=(h - 12 - (TITLE_H + 2) - 8) // ROW_H)
             rows = read_rows(q, **big)
             after = len([r for r in rows if r])
             check("once the window is stretched MORE session lines show "
@@ -310,21 +311,10 @@ def main():
                       not r.startswith("/> cat filetwo") for r in rows))
 
             # --- and the window says where it stands --------------------
-            w, h, at = q.screen_raw()
-            font = font8x8()
-            titled = ""
-            for c in range(24):
-                pattern = []
-                for y in range(8):
-                    bits = 0
-                    for x in range(8):
-                        if all(v > 200 for v in at(4 + c * 8 + x, 2 + y)):
-                            bits |= 1 << x
-                    pattern.append(bits)
-                titled += font.get(tuple(pattern),
-                                   " " if not any(pattern) else "?")
+            # The window is maximised by now, its corner at (0, 0)
+            titled = q.window_title(0, 0)
             check("the terminal window says which directory it stands in ('%s')"
-                  % titled.strip(), titled.strip().startswith("Terminal: /"))
+                  % titled, titled.startswith("Terminal: /"))
         finally:
             q.close()
     finally:

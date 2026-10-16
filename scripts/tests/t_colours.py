@@ -49,7 +49,7 @@ STATUS_H = 10
 def status(at, cols=48, vx=VX, vy=VY):
     """The viewer's status line: white on the accent blue."""
     font = font8x8()
-    x0, y0 = vx + 1 + 4, vy + 11 + VH - STATUS_H + 1
+    x0, y0 = vx + 1 + 4, vy + CONTENT_DY + VH - STATUS_H + 1
     out = ""
     for c in range(cols):
         pattern = []
@@ -149,7 +149,7 @@ def main():
             # has - which is two hundred and fifty six, most of them
             # already spent on the desktop. Anything above five hundred
             # is a thing the old path could not do at all.
-            cx, cy = VX + 1, VY + 11
+            cx, cy = VX + 1, VY + CONTENT_DY
             seen_cols = set()
             for y in range(0, 48):
                 for x in range(0, 64):

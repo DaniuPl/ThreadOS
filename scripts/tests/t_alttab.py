@@ -135,9 +135,9 @@ def main():
             w, h, at = q.screen_raw()
 
             font = font8x8()
-            # Read the terminal's lines: content at (x+1, y+11), padded
+            # Read the terminal's lines: content at (x+1, y+CONTENT_DY), padded
             # by 4, rows 10 apart
-            ox, oy = x2 + 1 + 4, y2 + 11 + 4
+            ox, oy = x2 + 1 + 4, y2 + CONTENT_DY + 4
             counts = {}
             for r in range(23):
                 for yy in range(8):
@@ -162,7 +162,7 @@ def main():
             body = "\n".join(text)
             check("what was typed after Alt+Tab reached the terminal",
                   "/> date" in body)
-            check("i terminal to wykonal", "2030-06-13" in body)
+            check("and the terminal ran it", "2030-06-13" in body)
 
             # --- round the wheel ----------------------------------------
             for _ in range(3):

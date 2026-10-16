@@ -77,6 +77,7 @@ void video_set_palette(uint8_t idx, uint8_t r, uint8_t g, uint8_t b);
 int video_true_colour(void);
 uint8_t video_nearest_index(uint32_t rgb);
 void video_putpixel_rgb(int x, int y, uint32_t rgb);
+uint32_t video_getpixel_rgb(int x, int y);
 void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb);
 /* One rectangle of colours, 'stride' pixels to a source row */
 void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,

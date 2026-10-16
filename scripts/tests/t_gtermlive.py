@@ -37,7 +37,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
 

@@ -16,6 +16,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
+
+# These positions were measured when the title bar was ten pixels tall.
+# Everything under a window's bar has moved down by the difference, and
+# what is centred in the bar by half of it - said once here, so that the
+# next change of the bar moves the positions with it.
+DOWN = TITLE_H - 10
+MID = (TITLE_H - 10) // 2
 from ptest import check, summary
 
 
@@ -151,19 +158,19 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # win0 (40,60,120x70): the [x] button in red in the bar's right corner
-        check("the close button [x] (red, ~153,63)",
-              q6.wait_pixel(153, 63, (255, 0, 0)))
+        check("the close button [x] (red, ~153,%d)" % (63 + MID),
+              q6.wait_pixel(153, 63 + MID, (255, 0, 0)))
         _, _, at = q6.screen_raw()
 
         # The counter next to the 'Klik' button (the cell ~94,80). We click
 # 3 times.
-        cell_before = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
-        q6.mouse_goto(68, 84)            # the centre of the 'Klik' button
+        cell_before = [at(94 + c, 80 + DOWN + r) for r in range(8) for c in range(8)]
+        q6.mouse_goto(68, 84 + DOWN)            # the centre of the 'Klik' button
         for _ in range(3):
             q6.mouse_click()
         time.sleep(0.6)
         _, _, at = q6.screen_raw()
-        cell_after = [at(94 + c, 80 + r) for r in range(8) for c in range(8)]
+        cell_after = [at(94 + c, 80 + DOWN + r) for r in range(8) for c in range(8)]
         # The counter stands on the window's grey, so it is black -
         # white on that grey was drawn and could not be read
         white_after = sum(1 for p in cell_after if near(p, (0, 0, 0), 10))
@@ -171,10 +178,10 @@ def main():
               cell_before != cell_after and white_after > 0)
 
         # Closing a window: a click on window 1's [x] (the close box ~293,99)
-        q6.mouse_goto(293, 99)
+        q6.mouse_goto(293, 99 + MID)
         q6.mouse_click()
         check("a click on [x] closes the window (win1's bar goes, the background is back)",
-              q6.wait_pixel(220, 99, (0, 128, 160)))
+              q6.wait_pixel(220, 99 + MID, (0, 128, 160)))
         _, _, at = q6.screen_raw()
         # window 0 is still there (the click did not touch other windows)
         # Clicking its button gave window 0 the focus, so its bar is
@@ -201,23 +208,23 @@ def main():
         # (94,54), the content area from (95,65). The RGB squares are
         # drawn through syscalls.
         check("the ring 3 application drew a red square (101,71)",
-              q7.wait_pixel(101, 71, (255, 0, 0)))
+              q7.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
         check("the ring 3 application drew a blue square (170,75)",
-              q7.wait_pixel(170, 75, (0, 0, 255)))
+              q7.wait_pixel(170, 75 + DOWN, (0, 0, 255)))
 
         # Events: a click in the window's body reaches the application
         # (win_poll), which draws a marker in the accent colour at the place of the
         # click. The counter 'klikniec:' at (175,89) grows. We move the
         # cursor away so that it does not cover the marker in the
         # screenshot.
-        cnt_before = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
-        q7.mouse_goto(150, 110)
+        cnt_before = [at(175 + c, 89 + DOWN + r) for r in range(8) for c in range(8)]
+        q7.mouse_goto(150, 110 + DOWN)
         q7.mouse_click()
         q7.mouse_goto(60, 140)            # move the cursor away from the marker
         check("the click reached the application: its mark is in place (149,109)",
-              q7.wait_pixel(149, 109, (0, 0, 255)))
+              q7.wait_pixel(149, 109 + DOWN, (0, 0, 255)))
         _, _, at = q7.screen_raw()
-        cnt_after = [at(175 + c, 89 + r) for r in range(8) for c in range(8)]
+        cnt_after = [at(175 + c, 89 + DOWN + r) for r in range(8) for c in range(8)]
         check("the application counted the click (the counter changed a digit)",
               cnt_before != cnt_after)
 
@@ -229,7 +236,7 @@ def main():
 
         def txt_white():          # the typed text - black on the grey
             _, _, a = q7.screen_raw()
-            return sum(1 for x in range(135, 159) for y in range(103, 111)
+            return sum(1 for x in range(135, 159) for y in range(103 + DOWN, 111 + DOWN)
                        if near(a(x, y), (0, 0, 0), 10))
 
         appeared = False
@@ -253,7 +260,7 @@ def main():
         # earlier
         q7.type_line("kill guiapp")
         check("once the application is killed its window is cleaned up (170,75 teal)",
-              q7.wait_pixel(170, 75, (0, 128, 160)))
+              q7.wait_pixel(170, 75 + DOWN, (0, 128, 160)))
     finally:
         q7.close()
 
@@ -277,7 +284,7 @@ def main():
         # before the application starts, slot 2 is empty (the kernel window's
         # background)
         check("before the launch there is no application window (101,71 is not red)",
-              not near(at(101, 71), (255, 0, 0)))
+              not near(at(101, 71 + DOWN), (255, 0, 0)))
 
         # The menu entries are computed from MENU_ITEMS (see menu_y)
         q8.mouse_goto(10, 472)
@@ -289,7 +296,7 @@ def main():
         q8.mouse_goto(40, menu_y("guiapp"))
         q8.mouse_click()
         check("a choice from the menu starts the application (a red square 101,71)",
-              q8.wait_pixel(101, 71, (255, 0, 0)))
+              q8.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
         _, _, at = q8.screen_raw()
         check("the menu closes after a choice (the entry goes)",
               not near(at(70, menu_y("guiapp")), (224, 224, 224)))
@@ -301,10 +308,10 @@ def main():
         # kernel's window.
         q8.mouse_goto(60, 473)
         q8.mouse_click()
-        # Two pixels lower than the red was read: the raised window's
-        # title bar ends with a line, and the line is where y=71 falls
+        # Two pixels into the raised window's content (its corner is at
+        # y=60): just under its bar, where guiapp's red square stood
         check("a click on the bar button brings the window to the top (the red one is covered)",
-              q8.wait_pixel(101, 73, (224, 224, 224), 15))
+              q8.wait_pixel(101, 60 + CONTENT_DY + 2, (224, 224, 224), 15))
         # The focused window's button wears the accent colour. Its top
         # row carries nothing: the picture on it starts three pixels
         # down. The bar is eighteen tall now, so it begins at 462.

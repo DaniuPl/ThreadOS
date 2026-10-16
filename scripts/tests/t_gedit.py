@@ -41,7 +41,7 @@ from ptest import check, summary, font8x8
 # The window: slot 2 of the cascade, content a pixel right and a title
 # bar down. The editor asks for 420x260 and pads its page by four.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 PAD = 4
 ROW_H = 10
 STATUS_H = 10
@@ -64,7 +64,7 @@ TWX, TWY = 106, 66
 def term_rows(at, rows=20, cols=48):
     """The terminal's window: light letters on its black screen."""
     font = font8x8()
-    ox, oy = TWX + 1 + 4, TWY + 11 + 4
+    ox, oy = TWX + 1 + 4, TWY + CONTENT_DY + 4
     out = []
     for r in range(rows):
         line = ""
@@ -124,7 +124,7 @@ def file_row(at, i, cols=12, wx=WX, wy=WY):
     """One name from the file manager's list: light letters on the
     window's grey."""
     font = font8x8()
-    x0, y0 = wx + 1 + FM_NAME_X, wy + 11 + FM_ROW_Y0 + i * 10
+    x0, y0 = wx + 1 + FM_NAME_X, wy + CONTENT_DY + FM_ROW_Y0 + i * 10
     out = ""
     for c in range(cols):
         pattern = []
@@ -148,7 +148,7 @@ def is_ink(px):
 def row_text(at, r, cols=48, wx=WX, wy=WY):
     """One line of the page, read through the kernel's own font."""
     font = font8x8()
-    x0, y0 = wx + 1 + PAD, wy + 11 + PAD + r * ROW_H
+    x0, y0 = wx + 1 + PAD, wy + CONTENT_DY + PAD + r * ROW_H
     out = ""
     for c in range(cols):
         pattern = []
@@ -179,20 +179,9 @@ def read_text_at(at, x0, y0, cols):
     return out.rstrip()
 
 
-def win_title(at, wx=WX, wy=WY, cols=24):
-    """The window's own name, white on its title bar."""
-    font = font8x8()
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if all(v > 200 for v in at(wx + 4 + c * 8 + x, wy + 2 + y)):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def win_title(q, wx=WX, wy=WY):
+    """The window's own name, as its title bar shows it."""
+    return q.window_title(wx, wy)
 
 
 def status_text(at, cols=48):
@@ -333,11 +322,11 @@ def sixty_four():
             check("(64) the file manager sees the editor's file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(fx + 1 + 20, fy + 11 + FM_ROW_Y0 + row * 10 + 3)
+                q.mouse_goto(fx + 1 + 20, fy + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + 11 + 5)  # "Open"
+                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + CONTENT_DY + 5)  # "Open"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(5)
@@ -356,11 +345,11 @@ def sixty_four():
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(fx + 1 + 20, fy + 11 + FM_ROW_Y0 + row * 10 + 3)
+                q.mouse_goto(fx + 1 + 20, fy + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1)
-                q.mouse_goto(fx + 1 + 320 - 48 - 56 - 56 - 8 + 20, fy + 11 + 5)
+                q.mouse_goto(fx + 1 + 320 - 48 - 56 - 56 - 8 + 20, fy + CONTENT_DY + 5)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
@@ -512,8 +501,8 @@ def main():
             # And the window says which file it holds - three editors
             # open on three files would be three windows called
             # "Editor" otherwise
-            check("the window is named after the file ('%s')" % win_title(at),
-                  win_title(at) == "Editor: note")
+            check("the window is named after the file ('%s')" % win_title(q),
+                  win_title(q) == "Editor: note")
 
             # --- and the file is really on the disk ---------------------
             # Checked by something that is not the program that wrote
@@ -706,11 +695,11 @@ def main():
             check("the file manager sees the saved file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(WX + 1 + 20, WY + 11 + FM_ROW_Y0 + row * 10 + 3)
+                q.mouse_goto(WX + 1 + 20, WY + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(1.5)
-                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + 11 + 5)  # "Open"
+                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + CONTENT_DY + 5)  # "Open"
                 time.sleep(0.5)
                 q.mouse_click()
                 time.sleep(4)

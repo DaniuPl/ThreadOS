@@ -585,6 +585,19 @@ uint8_t video_nearest_index(uint32_t rgb)
     return best;
 }
 
+/* What is at a pixel now, as RGB - for drawing that is mixed with what
+   it lands on (anti-aliased text). Read from the drawing buffer, which
+   in a double-buffered mode is ordinary memory. */
+uint32_t video_getpixel_rgb(int x, int y)
+{
+    if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
+        return 0;
+    volatile uint8_t *p = fb + y * vid_pitch + x * vid_bypp;
+    if (vid_bpp == 8)
+        return palette_rgb[*p];
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
+}
+
 void video_putpixel_rgb(int x, int y, uint32_t rgb)
 {
     if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)

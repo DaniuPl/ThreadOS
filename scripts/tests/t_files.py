@@ -36,7 +36,7 @@ from ptest import check, summary, font8x8
 # The window: slot 2 of the cascade, content a pixel right and a title
 # bar down; gfiles asks for 320x220.
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 CW, CH = 320, 220
 ROW_Y0 = 18
 ROW_H = 10
@@ -82,21 +82,9 @@ def read_at(at, x, y, cols):
     return out.strip()
 
 
-def title(at, cols=24):
-    """The window's own name, white on the title bar."""
-    font = font8x8()
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for yy in range(8):
-            bits = 0
-            for xx in range(8):
-                p = at(WX + 4 + c * 8 + xx, WY + 2 + yy)
-                if all(v > 200 for v in p):
-                    bits |= 1 << xx
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def title(q):
+    """The window's own name, as its title bar shows it."""
+    return q.window_title(WX, WY)
 
 
 def rows(at, n=8):
@@ -165,8 +153,8 @@ def main():
 
             check("the heading says where we are ('%s')"
                   % read_at(at, 4, 2, 20), read_at(at, 4, 2, 20).startswith("/"))
-            check("and the window is named after the directory ('%s')" % title(at),
-                  title(at) == "Files: /")
+            check("and the window is named after the directory ('%s')" % title(q),
+                  title(q) == "Files: /")
 
             # --- walking into a directory -------------------------------
             i = names.index("documents")
@@ -178,8 +166,8 @@ def main():
             check("'Open' on a directory goes into it ('%s')"
                   % read_at(at, 4, 2, 20),
                   read_at(at, 4, 2, 20).startswith("/documents"))
-            check("and the window says the same ('%s')" % title(at),
-                  title(at) == "Files: /documents")
+            check("and the window says the same ('%s')" % title(q),
+                  title(q) == "Files: /documents")
             check("and it is empty inside", rows(at) == [])
 
             # --- and back out -------------------------------------------
@@ -189,8 +177,8 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Backspace goes back up ('%s')" % title(at),
-                  title(at) == "Files: /")
+            check("Backspace goes back up ('%s')" % title(q),
+                  title(q) == "Files: /")
             listed = rows(at)
             names = [r[0] for r in listed]
             check("and what was there shows again", "report.txt" in names)

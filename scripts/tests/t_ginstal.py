@@ -52,7 +52,6 @@ FOREIGN = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 # instead of quietly reading the wallpaper.
 WIN_W = 440
 WIN_H = 230
-TITLE_H = 10                 # kernel/desktop.c
 TITLE = (0, 0, 255)          # the title bar of the window with focus
 BAR = (211, 211, 211)        # the desktop's bars - which must NOT be here
 ICON = (255, 162, 0)         # the desktop's icons - likewise

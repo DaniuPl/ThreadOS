@@ -174,14 +174,15 @@ def main():
             q.mouse_goto(560, 420)      # the cursor away from the window
             time.sleep(1)
 
-            # The window is slot 2: (94,54), content from (95,65). The
-            # heading is drawn in blue at (6,6) of the content area.
+            # The window is slot 2: its corner at (94,54), the content
+            # one frame line in and under the title bar. The heading is
+            # drawn in blue at (6,6) of the content area.
+            CX, CY = 94 + 1, 54 + CONTENT_DY
             w, h, at = q.screen_raw()
-            head = any(at(95 + x, 65 + 8)[2] > 120 and at(95 + x, 65 + 8)[0] < 90
+            head = any(at(CX + x, CY + 8)[2] > 120 and at(CX + x, CY + 8)[0] < 90
                        for x in range(6, 150))
             check("the settings window opened (a blue title bar)", head)
 
-            CX, CY = 95, 65
             # the 'background' row is the fourth: ROW_Y=22 + 3*14 = 64
             q.mouse_goto(CX + 40, CY + 64)
             q.mouse_click()             # select the row

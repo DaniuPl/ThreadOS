@@ -38,7 +38,6 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 TB_H = 18
-TITLE_H = 10
 CLOSE_SZ = 8
 
 # The cascade: slot 2 is the first application window, at (94,54);

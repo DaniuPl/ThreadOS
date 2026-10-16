@@ -35,7 +35,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
 WX, WY = 94, 54
-CX, CY = WX + 1, WY + 11
+CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
 WORD = "moved"
@@ -135,9 +135,10 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3: content at (107,77); the 'name' row is the first,
-            # at ROW_Y=22, and its value is drawn at x=100
-            SX, SY = 107, 77
+            # Slot 3: the corner at (70+36, 30+36), the content a frame
+            # line in and under the title bar; the 'name' row is the
+            # first, at ROW_Y=22, and its value is drawn at x=100
+            SX, SY = 106 + 1, 66 + CONTENT_DY
             q.mouse_goto(SX + 40, SY + 22)
             q.mouse_click()                # select the row
             time.sleep(1)
@@ -157,7 +158,7 @@ def main():
             # --- and the kernel keeps it -------------------------------
             # Close the window it came from: the text was never that
             # window's, so closing it changes nothing
-            q.mouse_goto(WX + 402 - 6, WY + 5)     # the terminal's [x]
+            q.mouse_goto(WX + 402 - 6, WY + 1 + TITLE_H // 2)     # the terminal's [x]
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
