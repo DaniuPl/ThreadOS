@@ -73,6 +73,12 @@ def parse_sheet(text):
         w, h = int(m.group(7)), int(m.group(8))
         rows = []
         for _ in range(h):
+            # A line the kernel printed in the middle of the sheet - the
+            # network saying it got an address, say - is not a row of
+            # the glyph; the serial port is shared
+            while i < len(lines) and w and not re.fullmatch(r"[0-9a-f]+",
+                                                            lines[i]):
+                i += 1
             row = lines[i] if i < len(lines) else ""
             i += 1
             try:

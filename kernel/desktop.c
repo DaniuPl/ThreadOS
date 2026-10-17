@@ -2602,6 +2602,7 @@ static void desktop_on_fkey(int fkey)
 #define SHOT_HDR (4 + 2 + 2 + 256 * 3)
 
 static int shot_number;
+static volatile int shot_wanted;       /* Print Screen was pressed */
 
 static void save_screenshot(void)
 {
@@ -2705,7 +2706,11 @@ static void save_screenshot(void)
 static void desktop_on_key(char c)
 {
     if (c == KEY_SHOT) {
-        save_screenshot();
+        /* Not here: this is the keyboard's interrupt, and the frame on
+           the screen may be half drawn at this moment - the glass of
+           the dock and none of its tiles. The desktop's own thread
+           takes the picture, between one finished frame and the next. */
+        shot_wanted = 1;
         return;
     }
     if (c == KEY_NEXTWIN) {
@@ -3151,6 +3156,10 @@ static void desktop_thread(void *arg)
         draw_cursor(mx, my);
 
         video_present();                      /* the finished frame -> the screen */
+        if (shot_wanted) {                    /* a whole frame, nothing half drawn */
+            shot_wanted = 0;
+            save_screenshot();
+        }
         frames++;
         task_sleep(30);                       /* ~33 frames/s */
     }

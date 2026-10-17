@@ -84,16 +84,18 @@ def desktop():
             q.click(*light_xy(180, 95, 0))
             time.sleep(0.5)
             q.n_win = 0
-            # The file manager, the monitor and the clock - placed
+            # The file manager, the monitor and the clock - placed. The
+            # kernel's windows are gone, so they open in the first slots
+            # of the cascade: (70,30), (82,42), (94,54)
             q.launch_dock(2)
             time.sleep(4)
-            drag(q, 94 + 200, 54 + 4, 60 + 200, 56 + 4)
+            drag(q, 70 + 100, 30 + 4, 40 + 100, 50 + 4)
             q.launch_dock(3)
             time.sleep(4)
-            drag(q, 106 + 120, 66 + 4, w - 230 + 120, 70 + 4)
+            drag(q, 82 + 120, 42 + 4, w - 300 + 120, 60 + 4)
             q.launch_dock(1)
             time.sleep(4)
-            drag(q, 118 + 60, 78 + 4, w - 150 + 60, 196 + 4)
+            drag(q, 94 + 70, 54 + 4, w - 200 + 70, 210 + 4)
             # The pointer resting on a tile, so its name shows
             q.mouse_goto(*dock_tile(2, n_w=3, w=w, h=h))
             time.sleep(2)
