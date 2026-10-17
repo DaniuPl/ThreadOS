@@ -289,7 +289,7 @@ static void disk_line(int win)
     int at = add(line, 0, "Disk ");
 
     at = addnum(line, at, info.disk + 1);
-    at = add(line, at, " z ");
+    at = add(line, at, " of ");
     at = addnum(line, at, info.disks);
     at = add(line, at, ": ");
     at = add(line, at, info.disk_name);
@@ -504,7 +504,7 @@ static void draw(int win)
     if (state == S_WORK) {
         int at = add(line, 0, "step ");
         at = addnum(line, at, (uint32_t)step + 1);
-        at = add(line, at, " z ");
+        at = add(line, at, " of ");
         at = addnum(line, at, info.steps);
         say(win, PAD, rowy(0), "Writing...", C_HEAD);
         say(win, PAD, rowy(2), line, C_TEXT);
