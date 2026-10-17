@@ -111,7 +111,10 @@ void fbcon_cell(int col, int row, char ch, uint8_t attr)
         return;
 
     /* This writes onto the visible buffer directly, so whatever keeps
-       a copy of it has to be told the copy is now stale. */
+       a copy of it has to be told the copy is now stale - and told
+       again once the glyph is there: the compositor may be sending a
+       frame on another core in between, and the copy it makes then is
+       of a screen without the glyph. */
     video_front_touched();
 
     uint32_t fgc = console_rgb[attr & 0x0F];
@@ -129,4 +132,5 @@ void fbcon_cell(int col, int row, char ch, uint8_t attr)
             put_pixel(dst + (uint32_t)x * (uint32_t)fb_bypp,
                       (bits & (1 << x)) ? fgc : bgc);
     }
+    video_front_touched();
 }

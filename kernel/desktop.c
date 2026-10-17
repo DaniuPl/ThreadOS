@@ -37,6 +37,7 @@
 #include "include/rtc.h"
 #include "include/printk.h"
 #include "include/pmm.h"
+#include "include/pit.h"
 
 /* Palette indices.
  *
@@ -359,15 +360,26 @@ struct window {
        stop asking - an application that does not answer must not hold
        the screen forever. */
     int closing;
+    /* A window on its way: opening, going down into the dock or coming
+       back out of it (ANIM_*), since frame 'anim_at'. What it means for
+       the window happens at once - a minimised window is minimised the
+       moment the light is clicked; the animation is only what the eye
+       is shown of it. */
+    int anim;
+    uint32_t anim_at;
     struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
 
-/* How long an application has to end after being asked. The desktop
-   redraws about twenty times a second, so this is roughly two seconds -
+/* How many frames the desktop draws in a second (see "The beat"):
+   everything below that is counted in frames is a time, and is written
+   as one */
+#define FRAME_HZ 50
+
+/* How long an application has to end after being asked: two seconds -
    long enough for a program that is doing something else, short enough
    that a hung one does not hold the screen. */
-#define CLOSE_FRAMES 40
+#define CLOSE_FRAMES (2 * FRAME_HZ)
 
 /* How many windows the compositor holds at once.
  *
@@ -384,6 +396,10 @@ static int resize_content(struct window *w);
 static void toggle_max(int i);
 static void close_window(int i);
 static void snap_window(int i, int where);
+
+/* Frames since the desktop started - the compositor's own clock, and
+   the only one it needs: everything here happens in frames. */
+static uint32_t frames;
 
 static int drag_idx = -1;
 static int resize_idx = -1;
@@ -624,7 +640,7 @@ static void load_refresh(void)
 {
     if (--load_wait > 0)
         return;
-    load_wait = 30;                    /* ~ once a second at 33 fps */
+    load_wait = FRAME_HZ;              /* once a second */
 
     uint32_t ram_kib = pmm_ram_kib();
     uint32_t used_kib = pmm_used_frames() * 4;
@@ -1149,19 +1165,12 @@ static void draw_int(int x, int baseline, int v, uint32_t rgb)
     ui_font_text(UI_SANS, UI_PX, x, baseline, s, rgb);
 }
 
-static void draw_window(const struct window *win)
+/* Everything a window is but its shadow and its round corners, at
+   win->x, win->y. 'off' says it goes into a picture of its own rather
+   than onto the screen - the content then goes through gfx too. */
+static void draw_body(const struct window *win, int focused, int off)
 {
-    if (win->minimized)            /* minimised - visible only in the dock */
-        return;
-
     int x = win->x, y = win->y, w = win->w, h = win->h;
-    int focused = focus_idx >= 0 && win == &wins[focus_idx];
-
-    /* The shadow first, under everything: deeper under the window that
-       is listening, which is how the eye finds it without reading */
-    gfx_shadow(x, y, w, h, WIN_R, SHADOW_S,
-               focused ? L.shadow_a : L.shadow_a * 3 / 5, SHADOW_DY);
-    gfx_round_save(x, y, w, h, WIN_R, corner_keep);
 
     /* The title bar and the body. The bar is a shade apart from the
        body when the window has the focus and almost the body's own
@@ -1220,7 +1229,14 @@ static void draw_window(const struct window *win)
     if (win->content) {
         int bx = x + 1;
         int by = y + TITLE_H + 1;
-        if (win->truecolour) {
+        if (off) {
+            const uint32_t *rgb = (const uint32_t *)win->content;
+            for (int j = 0; j < win->ch; j++)
+                for (int i = 0; i < win->cw; i++)
+                    gfx_put(bx + i, by + j, win->truecolour
+                            ? rgb[j * win->cw + i]
+                            : video_palette_rgb(win->content[j * win->cw + i]));
+        } else if (win->truecolour) {
             video_blit_rgb(bx, by, win->cw, win->ch,
                            (const uint32_t *)win->content, win->cw);
         } else {
@@ -1230,6 +1246,170 @@ static void draw_window(const struct window *win)
                                    win->content[j * win->cw + i]);
         }
     }
+}
+
+/* --- Windows on their way ---------------------------------------------------
+ *
+ * A window that appears out of nowhere, or vanishes into the dock
+ * without a trace, makes the eye search for where it went. So for a
+ * few frames it is shown on its way: opening, it grows the last tenth
+ * of its size as it comes up out of nothing; minimised, it shrinks into
+ * its tile in the dock and fades; brought back, it comes out of the
+ * tile the same way.
+ *
+ * The window is drawn once into a picture of its own and the picture
+ * drawn at the size of the moment - which costs a window's worth of
+ * memory, so a window too large for the picture just appears, as all
+ * of them used to.
+ */
+#define ANIM_NONE    0
+#define ANIM_OPEN    1
+#define ANIM_MIN     2
+#define ANIM_RESTORE 3
+#define ANIM_FRAMES  10             /* a fifth of a second at 50 frames */
+#define ANIM_PX      (640 * 480)    /* the largest window that is animated */
+
+static uint32_t *anim_px;
+static int anim_tried;
+
+/* How long a way takes: the 'motion' setting - 0 is none at all (for
+   whoever would rather the screen stayed still), 1 the usual, and more
+   is that many times slower, slow enough to watch every frame */
+static uint32_t anim_frames = ANIM_FRAMES;
+
+static void anim_start(int i, int kind)
+{
+    if (kiosk)                     /* one window, which goes nowhere */
+        return;
+    uint32_t m = config_get_num("motion", 1);
+    if (m == 0)
+        return;
+    anim_frames = ANIM_FRAMES * (m > 10 ? 10 : m);
+    wins[i].anim = kind;
+    wins[i].anim_at = frames;
+}
+
+/* How far along, 0..256 - easing out: quick at first, settling at the
+   end, the way a thing that is thrown and caught moves */
+static int anim_progress(const struct window *win)
+{
+    uint32_t age = frames - win->anim_at;
+    if (age >= anim_frames)
+        return 256;
+    int u = 256 - (int)(age * 256 / anim_frames);
+    return 256 - u * u / 256 * u / 256;
+}
+
+static int lerp(int a, int b, int p)
+{
+    return a + (b - a) * p / 256;
+}
+
+/* Where the window's tile in the dock is: (x, y) and its side. 0 when
+   the window has none - it is on another desktop. */
+static int win_tile(const struct window *win, int *x, int *y, int *t)
+{
+    struct dock d;
+    dock_geom(&d);
+    int j = 0;
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!here(i))
+            continue;
+        if (&wins[i] == win) {
+            *x = dock_tile_x(&d, d.n_l + j);
+            *y = d.ty;
+            *t = d.tile;
+            return 1;
+        }
+        j++;
+    }
+    return 0;
+}
+
+/* Draws the window as it is on its way; 0 when it cannot be (and then
+   it is drawn, or not, as if it were not moving) */
+static int draw_animated(const struct window *win, int focused)
+{
+    if (!anim_px && !anim_tried) {
+        anim_tried = 1;
+        uint32_t a = pmm_alloc_contiguous((ANIM_PX * 4 + 4095) / 4096);
+        anim_px = (uint32_t *)(uintptr_t)a;
+    }
+    if (!anim_px || win->w * win->h > ANIM_PX)
+        return 0;
+
+    int p = anim_progress(win);
+    int x = win->x, y = win->y, w = win->w, h = win->h;
+    /* from (x0, y0, w0, h0, a0) to (x1, ...) */
+    int x0 = x, y0 = y, w0 = w, h0 = h, a0 = 255;
+    int x1 = x, y1 = y, w1 = w, h1 = h, a1 = 255;
+    int tx, ty, t;
+    if (win->anim == ANIM_OPEN) {
+        w0 = w * 9 / 10;
+        h0 = h * 9 / 10;
+        x0 = x + (w - w0) / 2;
+        y0 = y + (h - h0) / 2;
+        a0 = 0;
+    } else if (win_tile(win, &tx, &ty, &t)) {
+        /* the tile keeps the window's proportions, its middle on the
+           tile's middle */
+        int sw = w > h ? t : t * w / h, sh = w > h ? t * h / w : t;
+        int sx = tx + (t - sw) / 2, sy = ty + (t - sh) / 2;
+        if (win->anim == ANIM_MIN) {
+            x1 = sx; y1 = sy; w1 = sw; h1 = sh; a1 = 0;
+        } else {
+            x0 = sx; y0 = sy; w0 = sw; h0 = sh; a0 = 0;
+        }
+    } else {
+        return 0;
+    }
+    int cx = lerp(x0, x1, p), cy = lerp(y0, y1, p);
+    int cw = lerp(w0, w1, p), ch = lerp(h0, h1, p), a = lerp(a0, a1, p);
+    if (cw < 2 || ch < 2 || a <= 0)
+        return 1;
+
+    /* The window at its own size, into the picture */
+    struct window at0 = *win;
+    at0.x = 0;
+    at0.y = 0;
+    struct gfx_surface s = { anim_px, w, h, w };
+    gfx_target(&s);
+    draw_body(&at0, focused, 1);
+    gfx_target((const struct gfx_surface *)0);
+
+    int r = WIN_R * cw / w;
+    gfx_shadow(cx, cy, cw, ch, r, SHADOW_S,
+               (focused ? L.shadow_a : L.shadow_a * 3 / 5) * a / 255,
+               SHADOW_DY);
+    gfx_blit_scaled(cx, cy, cw, ch, r, anim_px, w, h, w, a);
+    return 1;
+}
+
+/* The windows whose way is over stop being on it */
+static void anim_settle(void)
+{
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].anim && frames - wins[i].anim_at >= anim_frames)
+            wins[i].anim = ANIM_NONE;
+}
+
+static void draw_window(const struct window *win)
+{
+    int focused = focus_idx >= 0 && win == &wins[focus_idx];
+    if (win->anim && draw_animated(win, focused))
+        return;
+    if (win->minimized)            /* minimised - visible only in the dock */
+        return;
+
+    int x = win->x, y = win->y, w = win->w, h = win->h;
+
+    /* The shadow first, under everything: deeper under the window that
+       is listening, which is how the eye finds it without reading */
+    gfx_shadow(x, y, w, h, WIN_R, SHADOW_S,
+               focused ? L.shadow_a : L.shadow_a * 3 / 5, SHADOW_DY);
+    gfx_round_save(x, y, w, h, WIN_R, corner_keep);
+
+    draw_body(win, focused, 0);
 
     /* Round corners - the content's too - and one soft line round the
        whole, which is what says where a light window ends on a light
@@ -1290,8 +1470,10 @@ static void toggle_show_desktop(void)
     if (hidden_by_show) {                 /* bring back what it hid */
         for (int i = 0; i < MAX_WIN; i++)
             if (hidden_by_show & (1u << i)) {
-                if (wins[i].used)
+                if (wins[i].used) {
                     wins[i].minimized = 0;
+                    anim_start(i, ANIM_RESTORE);
+                }
             }
         hidden_by_show = 0;
         return;
@@ -1300,6 +1482,7 @@ static void toggle_show_desktop(void)
         if (!here(i) || wins[i].minimized)
             continue;
         wins[i].minimized = 1;
+        anim_start(i, ANIM_MIN);
         hidden_by_show |= 1u << i;
         if (focus_idx == i)
             focus_idx = -1;
@@ -1386,21 +1569,19 @@ static int snap_where(int i, int mx, int my)
    left-button press edge, so that one click = one action. */
 static int prev_right;      /* the previous right-button state */
 
-/* Frames since the desktop started - the compositor's own clock, and
-   the only one it needs: everything here happens in frames. */
-static uint32_t frames;
 
 /* Two clicks on the same title bar, close together in time, are one
    gesture: fill the screen, or give the window its size back. Every
    system does this, and a person who has used one tries it here within
    the first minute.
  *
- * "Close together" is twenty frames - about six tenths of a second at
- * the thirty-three this desktop draws. That is the value every system
- * settles near: shorter and a hand misses it on a machine that is
- * busy, longer and two separate clicks (which is how a window is
- * raised, then raised again) start counting as one gesture. */
-#define DOUBLE_FRAMES 20
+ * "Close together" is six tenths of a second - by the clock, not in
+ * frames, since a busy machine draws fewer of them and the hand is no
+ * slower for it. That is the value every system settles near: shorter
+ * and a hand misses it on a machine that is busy, longer and two
+ * separate clicks (which is how a window is raised, then raised again)
+ * start counting as one gesture. */
+#define DOUBLE_TICKS 60
 static uint32_t last_title_click;
 static int last_title_win = -1;
 
@@ -1535,7 +1716,9 @@ static void handle_input(int mx, int my, int buttons)
                     continue;
                 if (j++ != tile - 100)
                     continue;
-                wins[i].minimized = 0;   /* restore it if minimised */
+                if (wins[i].minimized)   /* restore it if minimised */
+                    anim_start(i, ANIM_RESTORE);
+                wins[i].minimized = 0;
                 focus_idx = i;
                 raise_win(i);
                 break;
@@ -1575,6 +1758,7 @@ static void handle_input(int mx, int my, int buttons)
             }
             if (!kiosk && on_light(w, 1, mx, my)) {
                 w->minimized = 1;
+                anim_start(i, ANIM_MIN);
                 if (focus_idx == i)
                     focus_idx = -1;
                 hit = 1;
@@ -1617,14 +1801,14 @@ static void handle_input(int mx, int my, int buttons)
                jump out from under the hand. */
             if (on_titlebar(w, mx, my)) {
                 if (last_title_win == i &&
-                    frames - last_title_click <= DOUBLE_FRAMES) {
+                    pit_ticks() - last_title_click <= DOUBLE_TICKS) {
                     last_title_win = -1;      /* one gesture, once */
                     toggle_max(i);
                     hit = 1;
                     break;
                 }
                 last_title_win = i;
-                last_title_click = frames;
+                last_title_click = pit_ticks();
                 unmax_pending = w->maxed;
                 unmax_mx = mx;
                 unmax_my = my;
@@ -2099,7 +2283,7 @@ static void look_refresh(int force)
 {
     if (!force && --look_wait > 0)
         return;
-    look_wait = 30;
+    look_wait = FRAME_HZ;
 
     const char *t = config_get("theme");
     int dark = !(t && !strcmp(t, "light"));
@@ -2418,20 +2602,75 @@ static void draw_bar(void)
 /* --- The dock ------------------------------------------------------------- */
 
 
-static void draw_dock(void)
-{
-    struct dock d;
-    dock_geom(&d);
+/* The dock does not change from one frame to the next unless
+ * something it shows does - and its glass, blurred out of whatever is
+ * behind it, is the most expensive thing on the screen. So the frame
+ * it was last drawn in is kept, together with two fingerprints: of
+ * everything it shows (its size, the theme, which programs run, which
+ * windows there are and which one listens) and of the pixels it was
+ * drawn over. While both stay the same, the kept picture is put back
+ * instead of drawing it again. A tile hopping is a dock that changes
+ * every frame, and is just drawn.
+ */
+#define DOCK_KEEP_M 16                 /* the shadow's reach round the glass */
 
-    gfx_shadow(d.x, d.y, d.w, d.h, DOCK_R, 12, theme_dark ? 120 : 70, 3);
-    gfx_frost(d.x, d.y, d.w, d.h, DOCK_R, 8, L.dock_tint, L.dock_a);
-    gfx_rring16(d.x * 16, d.y * 16, d.w * 16, d.h * 16, DOCK_R * 16, 16,
+static uint32_t *dock_keep;
+static int dock_keep_tried, dock_kept;
+static int dk_x, dk_y, dk_w, dk_h;
+static uint32_t dk_state, dk_under;
+
+static uint32_t fp_mix(uint32_t h, uint32_t v)
+{
+    return (h ^ v) * 16777619u;
+}
+
+static uint32_t dock_state_fp(const struct dock *d)
+{
+    uint32_t h = 2166136261u;
+    h = fp_mix(h, (uint32_t)d->x);
+    h = fp_mix(h, (uint32_t)d->y);
+    h = fp_mix(h, (uint32_t)d->w);
+    h = fp_mix(h, (uint32_t)d->tile);
+    h = fp_mix(h, (uint32_t)d->n_l);
+    h = fp_mix(h, (uint32_t)d->n_w);
+    h = fp_mix(h, (uint32_t)theme_dark);
+    h = fp_mix(h, L.dock_tint);
+    h = fp_mix(h, (uint32_t)focus_idx);
+    for (int k = 0; k < d->n_l; k++)
+        h = fp_mix(h, (uint32_t)launcher_running(k));
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!here(i))
+            continue;
+        h = fp_mix(h, (uint32_t)i);
+        h = fp_mix(h, (uint32_t)(uintptr_t)launch_art_of(&wins[i]));
+        h = fp_mix(h, (uint32_t)wins[i].minimized);
+        h = fp_mix(h, (uint32_t)(uint8_t)wins[i].title[0]);
+    }
+    return h;
+}
+
+static uint32_t dock_under_fp(int x, int y, int w, int h)
+{
+    uint32_t f = 2166136261u;
+    for (int j = 0; j < h; j++) {
+        const uint32_t *row = video_row32(y + j);
+        for (int i = 0; i < w; i++)
+            f = fp_mix(f, row[x + i]);
+    }
+    return f;
+}
+
+static void draw_dock_glass(const struct dock *d)
+{
+    gfx_shadow(d->x, d->y, d->w, d->h, DOCK_R, 12, theme_dark ? 120 : 70, 3);
+    gfx_frost(d->x, d->y, d->w, d->h, DOCK_R, 8, L.dock_tint, L.dock_a);
+    gfx_rring16(d->x * 16, d->y * 16, d->w * 16, d->h * 16, DOCK_R * 16, 16,
                 L.dock_line, L.dock_line_a);
 
-    int t = d.tile;
+    int t = d->tile;
     /* the programs */
-    for (int k = 0; k < d.n_l; k++) {
-        int tx = dock_tile_x(&d, k), ty = d.ty;
+    for (int k = 0; k < d->n_l; k++) {
+        int tx = dock_tile_x(d, k), ty = d->ty;
         if (hop_set[k]) {
             uint32_t age = frames - hop_at[k];
             if (age < HOP_FRAMES) {
@@ -2443,16 +2682,13 @@ static void draw_dock(void)
         }
         draw_tile(icons[k].art, tx, ty, t, icons[k].label[0], 255);
         if (launcher_running(k))
-            gfx_disc16(tx * 16 + t * 8, (d.ty + t + 1) * 16 + DOCK_DOT * 8,
+            gfx_disc16(tx * 16 + t * 8, (d->ty + t + 1) * 16 + DOCK_DOT * 8,
                        DOCK_DOT * 8, L.dot, 230);
-        if (in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
-                    t + DOCK_GAP, d.h))
-            hint_above(tx + t / 2, d.y - 6, icons[k].label);
     }
     /* the line between the programs and the windows */
-    if (d.n_l && d.n_w) {
-        int lx = dock_tile_x(&d, d.n_l) - (DOCK_SEP + 1) / 2;
-        gfx_fill(lx, d.y + 8, 1, d.h - 16, L.bar_text, 70);
+    if (d->n_l && d->n_w) {
+        int lx = dock_tile_x(d, d->n_l) - (DOCK_SEP + 1) / 2;
+        gfx_fill(lx, d->y + 8, 1, d->h - 16, L.bar_text, 70);
     }
     /* the windows: their program's picture; a minimised one faded, the
        one that is listening with its dot in the accent colour */
@@ -2460,17 +2696,87 @@ static void draw_dock(void)
     for (int i = 0; i < MAX_WIN; i++) {
         if (!here(i))
             continue;
-        int tx = dock_tile_x(&d, d.n_l + j);
+        int tx = dock_tile_x(d, d->n_l + j);
         int from = launch_icon_of(&wins[i]);
-        draw_tile(launch_art_of(&wins[i]), tx, d.ty, t,
+        draw_tile(launch_art_of(&wins[i]), tx, d->ty, t,
                   from >= 0 ? icons[from].label[0] : wins[i].title[0],
                   wins[i].minimized ? 110 : 255);
-        gfx_disc16(tx * 16 + t * 8, (d.ty + t + 1) * 16 + DOCK_DOT * 8,
+        gfx_disc16(tx * 16 + t * 8, (d->ty + t + 1) * 16 + DOCK_DOT * 8,
                    DOCK_DOT * 8, i == focus_idx ? L.accent : L.dot, 230);
-        if (in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
-                    t + DOCK_GAP, d.h))
-            hint_above(tx + t / 2, d.y - 6, wins[i].title);
         j++;
+    }
+}
+
+static void draw_dock(void)
+{
+    struct dock d;
+    dock_geom(&d);
+
+    /* What is kept: the glass and the reach of its shadow */
+    int x = d.x - DOCK_KEEP_M, y = d.y - DOCK_KEEP_M;
+    int w = d.w + 2 * DOCK_KEEP_M, h = d.h + 2 * DOCK_KEEP_M;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > video_w()) w = video_w() - x;
+    if (y + h > video_h()) h = video_h() - y;
+    int hopping = 0;
+    for (int k = 0; k < d.n_l; k++)
+        if (hop_set[k])
+            hopping = 1;
+    int keep = !hopping && video_row32(0) && w > 0 && h > 0;
+    if (keep && !dock_keep && !dock_keep_tried) {
+        dock_keep_tried = 1;
+        uint32_t px = (uint32_t)video_w() * (DOCK_TILE_L + 2 * DOCK_PAD +
+                                             2 * DOCK_KEEP_M);
+        dock_keep = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
+            (px * 4 + 4095) / 4096);
+    }
+    keep = keep && dock_keep && w * h <= video_w() * (DOCK_TILE_L +
+                                    2 * DOCK_PAD + 2 * DOCK_KEEP_M);
+
+    uint32_t state = 0, under = 0;
+    if (keep) {
+        state = dock_state_fp(&d);
+        under = dock_under_fp(x, y, w, h);
+    }
+    if (keep && dock_kept && x == dk_x && y == dk_y && w == dk_w &&
+        h == dk_h && state == dk_state && under == dk_under) {
+        video_blit_rgb(x, y, w, h, dock_keep, w);
+    } else {
+        draw_dock_glass(&d);
+        dock_kept = 0;
+        if (keep) {
+            for (int j = 0; j < h; j++)
+                memcpy(dock_keep + j * w, video_row32(y + j) + x,
+                       (uint32_t)w * 4);
+            dk_x = x;
+            dk_y = y;
+            dk_w = w;
+            dk_h = h;
+            dk_state = state;
+            dk_under = under;
+            dock_kept = 1;
+        }
+    }
+
+    /* The name of the tile under the pointer, over it */
+    int t = d.tile;
+    for (int k = 0; k < d.n_l + d.n_w; k++) {
+        int tx = dock_tile_x(&d, k);
+        if (!in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
+                     t + DOCK_GAP, d.h))
+            continue;
+        if (k < d.n_l) {
+            hint_above(tx + t / 2, d.y - 6, icons[k].label);
+        } else {
+            int j = 0;
+            for (int i = 0; i < MAX_WIN; i++) {
+                if (!here(i))
+                    continue;
+                if (j++ == k - d.n_l)
+                    hint_above(tx + t / 2, d.y - 6, wins[i].title);
+            }
+        }
     }
 }
 
@@ -2724,7 +3030,7 @@ static void save_screenshot(void)
         note[q++] = tail[i];
     note[q] = '\0';
     shot_note = note;
-    shot_frames = 60;             /* about two seconds */
+    shot_frames = 2 * FRAME_HZ;   /* two seconds */
 }
 
 static void desktop_on_key(char c)
@@ -2809,6 +3115,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
         focus_idx = i;             /* and with focus */
+        anim_start(i, ANIM_OPEN);
         return i;
     }
     return -1;
@@ -3151,6 +3458,52 @@ static void kiosk_frame(int mx, int my)
     task_sleep(30);
 }
 
+/* --- The beat --------------------------------------------------------------
+ *
+ * Fifty frames a second, kept by the clock. Sleeping a fixed time after
+ * every frame made the beat as slow as the drawing plus the sleep, and
+ * as uneven as the drawing: a heavy frame pushed every frame after it.
+ * Now each frame has its moment, two ticks after the one before, and
+ * sleeps only what is left of it; one that ran past its moment does
+ * not try to catch up - it gives the others one tick and the beat
+ * starts again from there.
+ *
+ * What it costs is counted over each second: how many frames, and how
+ * much of the second went on drawing them ('screen' says both).
+ */
+#define FRAME_TICKS (100 / FRAME_HZ)   /* 20 ms at 100 ticks a second */
+
+static uint32_t frame_due;
+static uint32_t stat_from, stat_frames, stat_busy;
+static int fps_last = -1, busy_last;
+
+static void frame_done(uint32_t began)
+{
+    uint32_t now = pit_ticks();
+    stat_frames++;
+    stat_busy += now - began;
+    if (now - stat_from >= 100) {
+        fps_last = (int)(stat_frames * 100 / (now - stat_from));
+        busy_last = (int)(stat_busy * 100 / (now - stat_from));
+        stat_from = now;
+        stat_frames = 0;
+        stat_busy = 0;
+    }
+    frame_due += FRAME_TICKS;
+    if ((int32_t)(frame_due - now) <= 0)
+        frame_due = now + 1;
+    task_sleep((frame_due - now) * 10);
+}
+
+int desktop_frame_stats(int *fps, int *busy)
+{
+    if (fps_last < 0)
+        return 0;
+    *fps = fps_last;
+    *busy = busy_last;
+    return 1;
+}
+
 static void desktop_thread(void *arg)
 {
     (void)arg;
@@ -3196,8 +3549,10 @@ static void desktop_thread(void *arg)
     }
 
     for (;;) {
+        uint32_t began = pit_ticks();
         reap_windows();
         look_refresh(0);
+        anim_settle();
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
@@ -3245,12 +3600,13 @@ static void desktop_thread(void *arg)
         draw_cursor(mx, my);
 
         video_present();                      /* the finished frame -> the screen */
+
         if (shot_wanted) {                    /* a whole frame, nothing half drawn */
             shot_wanted = 0;
             save_screenshot();
         }
         frames++;
-        task_sleep(30);                       /* ~33 frames/s */
+        frame_done(began);
     }
 }
 

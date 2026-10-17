@@ -48,6 +48,8 @@ static struct setting settings[] = {
     { "volume", "80",     "volume, 0-100 (0 = silence)",        0, { 0 } },
     { "scale",  "0",        "screen pixels per desktop pixel:\n"
                             "0 lets the screen decide (a big panel gets 2)", 0, { 0 } },
+    { "motion", "1",        "windows opening and minimising: 0 still,\n"
+                            "1 quick, 2-10 that many times slower", 0, { 0 } },
     /* Not the password - a number computed from it. The default is the
        number for 'thread', so a machine on which nobody ever set one
        still has a password. Hidden, because a number nobody can type

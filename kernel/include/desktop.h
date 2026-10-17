@@ -84,4 +84,8 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
                           row, accent, text on accent, danger, good */
 void desktop_ui_look(uint32_t *out);
 
+/* The compositor's last second: frames drawn, and the share of the
+   second spent drawing them (percent). 0 while it is not running. */
+int desktop_frame_stats(int *fps, int *busy);
+
 #endif

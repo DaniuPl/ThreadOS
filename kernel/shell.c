@@ -209,6 +209,10 @@ static void cmd_ekran(void)
            video_true_colour() ? "true colour" : "256-colour palette", video_scale());
     printk("last frame:      %u rows to the card (of %d)\n",
            video_present_rows(), video_h());
+    int fps, busy;
+    if (desktop_frame_stats(&fps, &busy))
+        printk("frames:          %d a second, %d%% of it drawing\n", fps,
+               busy);
 }
 
 /* Reads a line back with what was typed visible - the confirmation

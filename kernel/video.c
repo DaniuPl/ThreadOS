@@ -44,7 +44,7 @@ static volatile uint8_t *front = (uint8_t *)(uintptr_t)0xA0000;
    comparison is RAM against RAM; reading the framebuffer back to do it
    would cost more than the writes it saved. */
 static volatile uint8_t *shadow;
-static int shadow_valid;
+static volatile int shadow_valid;
 static uint32_t present_rows;
 /* Two sizes, and the difference between them is the whole of what
    "scaling the interface" means here.
@@ -466,12 +466,15 @@ void video_present(void)
 
     uint32_t pitch = (uint32_t)vid_pitch;
     if (!shadow || !shadow_valid) {
+        /* Valid from BEFORE the copy: somebody writing to the screen
+           behind our back while it is being made says so again, and
+           the next frame is sent whole once more */
+        if (shadow)
+            shadow_valid = 1;
         for (int y = 0; y < vid_h; y++)
             put_row(y, (const uint8_t *)(fb + (uint32_t)y * pitch));
-        if (shadow) {
+        if (shadow)
             memcpy((void *)shadow, (const void *)fb, (uint32_t)vid_h * pitch);
-            shadow_valid = 1;
-        }
         present_rows = (uint32_t)vid_h;
         return;
     }

@@ -652,6 +652,38 @@ void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h, i
     }
 }
 
+/* A picture drawn at another size: every pixel of the w x h box takes
+   the source pixel its middle falls on (nearest, which is what a
+   picture on its way somewhere for a few frames needs - not a filter),
+   inside corners of radius r, 'a' of it let through */
+void gfx_blit_scaled_s(const struct gfx_surface *t, int x, int y, int w,
+                       int h, int r, const uint32_t *src, int sw, int sh,
+                       int stride, int a)
+{
+    if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0 || a <= 0)
+        return;
+    if (r > w / 2)
+        r = w / 2;
+    if (r > h / 2)
+        r = h / 2;
+    for (int j = 0; j < h; j++) {
+        int yy = y + j;
+        if (yy < 0 || yy >= th(t))
+            continue;
+        const uint32_t *row = src + (long)((2 * j + 1) * sh / (2 * h)) * stride;
+        int edge_row = j < r || j >= h - r;
+        for (int i = 0; i < w; i++) {
+            int cv = 255;
+            if (edge_row && (i < r || i >= w - r))
+                cv = gfx_cov_rrect16(x + i, yy, x * 16, y * 16, w * 16,
+                                     h * 16, r * 16);
+            if (cv)
+                gfx_blend_s(t, x + i, yy, row[(2 * i + 1) * sw / (2 * w)],
+                            cv * a / 255);
+        }
+    }
+}
+
 
 /* --- the same, onto the compositor's current target ----------------------- */
 
@@ -750,6 +782,12 @@ void gfx_blit_round(int x, int y, int w, int h, int r, const uint32_t *src,
                     int stride, int a)
 {
     gfx_blit_round_s(cur(), x, y, w, h, r, src, stride, a);
+}
+
+void gfx_blit_scaled(int x, int y, int w, int h, int r, const uint32_t *src,
+                     int sw, int sh, int stride, int a)
+{
+    gfx_blit_scaled_s(cur(), x, y, w, h, r, src, sw, sh, stride, a);
 }
 
 /* --- the 'shape' command ---------------------------------------------------------

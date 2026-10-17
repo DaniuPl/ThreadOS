@@ -81,6 +81,13 @@ void gfx_frost(int x, int y, int w, int h, int r, int blur, uint32_t tint,
 /* A picture with round corners: what lies outside them is left alone */
 void gfx_blit_round(int x, int y, int w, int h, int r, const uint32_t *src,
                     int stride, int a);
+/* The same at another size: w x h on the screen from sw x sh of
+   source, the nearest source pixel for each */
+void gfx_blit_scaled(int x, int y, int w, int h, int r, const uint32_t *src,
+                     int sw, int sh, int stride, int a);
+void gfx_blit_scaled_s(const struct gfx_surface *t, int x, int y, int w,
+                       int h, int r, const uint32_t *src, int sw, int sh,
+                       int stride, int a);
 
 /* Rounding something already drawn. save() keeps what is in the four
    corners before it is drawn; apply() puts back, in each corner, as
