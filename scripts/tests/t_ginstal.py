@@ -51,8 +51,14 @@ FOREIGN = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 # size means the test is reading somewhere else, and it should say so
 # instead of quietly reading the wallpaper.
 WIN_W = 440
-WIN_H = 230
-WINDOW = (227, 227, 227)     # a window's grey
+WIN_H = 310
+WINDOW = theme("dark")["win_bg"]
+# The text sits on a grid of rows (user/ginstal.c): ROW_H apart from
+# ROW_Y0 down, starting PAD from the left
+ROW_H, ROW_Y0, PAD = 16, 10, 14
+BTN_W, BTN_H, BTN_GAP = 168, 26, 10
+# The colours text is in: plain, quiet, a warning
+INKS = [theme("dark")[k] for k in ("app_text", "app_dim", "app_danger")]
 
 
 def blob(path):
@@ -73,14 +79,23 @@ def find_window(q, width=WIN_W, height=WIN_H):
     row = y + CONTENT_DY + height // 2
 
     def grey(px):
-        return all(abs(px[i] - WINDOW[i]) <= 6 for i in range(3))
+        return near(px, WINDOW, 3)
     if grey(at(x + 1, row)) and grey(at(x + width, row)) and \
        not grey(at(x - 1, row)) and not grey(at(x + width + 2, row)):
         return x, y
     return None, None
 
 
-def wait_text(q, x, y, cols, rows, want, tries=10, line_h=12):
+def read_rows(q, cx, cy, rows=16):
+    """The window's text, a line per row of its grid, read in the
+    lettering the program wrote it in"""
+    return q.read_ui_lines(cx + PAD - 4, cx + WIN_W - 4,
+                           [cy + ui_font_baseline_in(UD_PX, ROW_Y0 + r * ROW_H,
+                                                     ROW_H)
+                            for r in range(rows)], px=UD_PX, colours=INKS)
+
+
+def wait_text(q, cx, cy, want, tries=10, rows=16):
     """Reads the window until the words appear.
 
     Clicking a button and reading the screen a second and a half later
@@ -89,7 +104,7 @@ def wait_text(q, x, y, cols, rows, want, tries=10, line_h=12):
     so we look again rather than assume."""
     text = ""
     for _ in range(tries):
-        text = q.read_text(x, y, cols, rows, line_h=line_h)
+        text = read_rows(q, cx, cy, rows)
         if want in text:
             return text
         time.sleep(1.0)
@@ -203,7 +218,7 @@ def main():
 
             # Everything below is read off the screen, in the font the
             # kernel drew it with - not from the serial port
-            text = q.read_text(cx + 6, cy + 4, 54, 16, line_h=12)
+            text = read_rows(q, cx, cy)
             check("the window says what it is for",
                   "Installing ThreadOS onto this machine's disk" in text)
             check("and what it found: a disk behind an AHCI controller",
@@ -230,15 +245,13 @@ def main():
             # installing and a way that is reached by first refusing
             # the other one is a way nobody finds. The left one
             # installs beside; the right one takes the whole disk.
-            BTN_W, GAP = 168, 10
-            by = cy + WIN_H - 16 - 6 + 8
-            left = cx + (WIN_W - (2 * BTN_W + GAP)) // 2 + BTN_W // 2
-            right = left + BTN_W + GAP
+            by = cy + WIN_H - BTN_H - 12 + BTN_H // 2
+            left = cx + (WIN_W - (2 * BTN_W + BTN_GAP)) // 2 + BTN_W // 2
+            right = left + BTN_W + BTN_GAP
 
             q.mouse_goto(right, by)
             q.mouse_click()
-            text = wait_text(q, cx + 6, cy + 4, 54, 16,
-                             "The whole disk for ThreadOS")
+            text = wait_text(q, cx, cy, "The whole disk for ThreadOS")
             check("the second button shows the other way: the whole disk",
                   "The whole disk for ThreadOS" in text)
             check("and it says outright what that means",
@@ -253,21 +266,20 @@ def main():
 
             q.mouse_goto(left, by)        # "Back"
             q.mouse_click()
-            text = wait_text(q, cx + 6, cy + 4, 54, 16,
-                             "Installing ThreadOS onto this machine's disk")
+            text = wait_text(q, cx, cy, "Installing ThreadOS onto this machine's disk")
             check("'Back' goes back to installing beside",
                   "Installing ThreadOS onto this machine's disk" in text)
 
             q.mouse_goto(left, by)        # "Install beside"
             q.mouse_click()
-            text = wait_text(q, cx + 6, cy + 4, 54, 10, "Type YES")
+            text = wait_text(q, cx, cy, "Type YES")
             check("a click on 'Install beside' asks for a word instead of writing",
                   "Type YES" in text)
 
             # A word that is not the word
             q.type_line("NO")
             time.sleep(1.2)
-            text = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
+            text = read_rows(q, cx, cy, 10)
             check("another word does not start the writing",
                   "that is not the word YES" in text)
             check("and still nothing has been written",
@@ -278,20 +290,20 @@ def main():
             # admin, and the answer to that is a password
             q.type_line("YES")
             time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
+            text = read_rows(q, cx, cy, 10)
             check("after YES the kernel refuses a program that is not admin",
                   "You have to be admin" in text)
 
             q.type_line("wrongpassword")
             time.sleep(1.5)
-            text = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
+            text = read_rows(q, cx, cy, 10)
             check("a wrong password opens nothing", "wrong password" in text)
 
             q.type_line("thread")
             deadline = time.time() + 60
             done = ""
             while time.time() < deadline:
-                done = q.read_text(cx + 6, cy + 4, 54, 10, line_h=12)
+                done = read_rows(q, cx, cy, 10)
                 if "Done" in done or "It did not work" in done:
                     break
                 time.sleep(0.5)

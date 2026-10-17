@@ -36,9 +36,8 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
-
-SUB = 16                      # samples per pixel, each way
-
+from ptest import in_rrect, in_line, shape_area as area
+from ptest import check_area as compare
 
 def parse(text, pw, ph, channels):
     rows = []
@@ -52,57 +51,6 @@ def parse(text, pw, ph, channels):
                 rows.append([(b[i], b[i + 1], b[i + 2])
                              for i in range(0, len(b), 3)])
     return rows[-ph:] if len(rows) >= ph else None
-
-
-def in_rrect(x, y, rx, ry, rw, rh, r):
-    r = min(r, rw / 2, rh / 2)
-    cx, cy = rx + rw / 2, ry + rh / 2
-    qx = abs(x - cx) - (rw / 2 - r)
-    qy = abs(y - cy) - (rh / 2 - r)
-    if qx <= 0 or qy <= 0:
-        return qx <= r and qy <= r
-    return qx * qx + qy * qy <= r * r
-
-
-def in_line(x, y, x0, y0, x1, y1, t):
-    dx, dy = x1 - x0, y1 - y0
-    l2 = dx * dx + dy * dy
-    u = 0 if l2 == 0 else max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / l2))
-    px, py = x0 + u * dx, y0 + u * dy
-    return (x - px) ** 2 + (y - py) ** 2 <= (t / 2) ** 2
-
-
-def area(inside, pw, ph):
-    out = []
-    for py in range(ph):
-        row = []
-        for px in range(pw):
-            n = 0
-            for j in range(SUB):
-                y = py + (j + 0.5) / SUB
-                for i in range(SUB):
-                    if inside(px + (i + 0.5) / SUB, y):
-                        n += 1
-            row.append(n * 255 // (SUB * SUB))
-        out.append(row)
-    return out
-
-
-def compare(label, ours, ref, max_diff=20, mean_diff=1.0):
-    if ours is None:
-        check("%s: the system printed the shape" % label, False)
-        return
-    worst, total, n = 0, 0, 0
-    for ro, rr in zip(ours, ref):
-        for a, b in zip(ro, rr):
-            d = abs(a - b)
-            worst = max(worst, d)
-            total += d
-            n += 1
-    lit = sum(1 for r in ours for v in r if v)
-    check("%s: within %d of the exact area - worst %d, mean %.2f over %d "
-          "pixels (%d lit)" % (label, max_diff, worst, total / n, n, lit),
-          lit > 0 and worst <= max_diff and total / n <= mean_diff)
 
 
 # --- the blur, from its definition --------------------------------------

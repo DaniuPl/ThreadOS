@@ -30,41 +30,65 @@
  * kernels.
  */
 
-#include "uapi.h"
+#include "udraw.h"
 
-/* Colours, and the one rule they follow: dark text on a light
- * surface, light text on a dark one. The window's background is the
- * system's light grey, so its text is BLACK - white on that grey was
- * the first thing that went wrong here, and it went wrong invisibly:
- * everything was drawn, nothing was readable. The two fields the
- * person types into are the other way round, because they are black.
- */
-#define C_BLACK 0
-#define C_RED   1     /* red - a warning, on the light surface */
-#define C_BLUE  3     /* the system's accent */
-#define C_WHITE 4     /* only ever on something dark */
-#define C_BG    8     /* the window's light grey */
-#define C_DIM   15    /* dark grey - said quietly, still readable */
-
-#define C_TEXT  C_BLACK
-#define C_HEAD  C_BLUE
+/* What a piece of text is: its colour comes from the theme, asked for
+   every time the window is drawn, so a switch of the theme is followed
+   at once. A heading is bold; a warning is the theme's red. */
+#define C_TEXT  0
+#define C_RED   1     /* a warning */
+#define C_HEAD  3     /* a heading, in bold */
+#define C_DIM   15    /* said quietly, still readable */
+#define C_BLUE  C_HEAD
 
 #define W0 440
-#define H0 230
+#define H0 310
+
+#define PAD    14     /* text starts here */
+#define IND    26     /* a list under a heading, here */
+#define COL_SIZE 300  /* a size, in a column of its own */
 
 #define BTN_W  168
-#define BTN_H  16
+#define BTN_H  26
 
-/* Every line of text sits on the same twelve-pixel grid, from the top
-   of the content down. Not for tidiness: the font is eight pixels
-   high, and text laid out by eye - one line at twenty, the next at
-   fifty - is text that only a person can read. A grid is text a
-   program can read too, and a test that reads the window the way a
-   person does is worth more than one that asks the program whether it
-   thinks it drew something. */
-#define ROW_H  12
-#define ROW_Y0 4
+/* Every line of text sits on the same sixteen-pixel grid, from the top
+   of the content down. Not for tidiness: text laid out by eye - one
+   line at twenty, the next at fifty - is text that only a person can
+   read. A grid is text a program can read too, and a test that reads
+   the window the way a person does is worth more than one that asks
+   the program whether it thinks it drew something. */
+#define ROW_H  16
+#define ROW_Y0 10
 static int rowy(int r) { return ROW_Y0 + r * ROW_H; }
+
+static struct ud_look L;
+
+static uint32_t rgb_of(int c)
+{
+    switch (c) {
+    case C_RED:  return L.danger;
+    case C_HEAD: return L.accent;
+    case C_DIM:  return L.dim;
+    default:     return L.text;
+    }
+}
+
+/* A line of text in the row whose top is y */
+static void say(int win, int x, int y, const char *s, int c)
+{
+    ud_text(win, x, ud_baseline(y, ROW_H, UD_PX), s, c == C_HEAD ? L.text
+            : rgb_of(c), c == C_HEAD ? UD_BOLD : UD_SANS, UD_PX);
+}
+
+/* A field to type into, over the row whose top is y */
+static void field(int win, int x, int y, int w, const char *s)
+{
+    ud_round(win, x, y - 3, w, ROW_H + 6, 6, L.field);
+    ud_ring(win, x, y - 3, w, ROW_H + 6, 6, L.accent);
+    int end = ud_text(win, x + 8, ud_baseline(y, ROW_H, UD_PX), s, L.text,
+                      UD_SANS, UD_PX);
+    ud_fill(win, end + 1, y + 1, 1, ROW_H - 2, L.text);     /* the caret */
+}
 
 /* The same five steps the kernel takes, in the same order. The paths
    are shown on the screen above the button anyway - a person who is
@@ -203,7 +227,7 @@ static const char *problem_hint(uint32_t why)
    the other one is a way nobody finds. */
 #define BTN_GAP 10
 
-static int btn_y(void) { return ch - BTN_H - 6; }
+static int btn_y(void) { return ch - BTN_H - 12; }
 
 static int btn_x(int which, int of)
 {
@@ -219,14 +243,10 @@ static void one_button(int win, int which, int of, const char *label,
                        int colour)
 {
     int x = btn_x(which, of);
-    int n = 0;
-    while (label[n])
-        n++;
-    win_rect(win, x, btn_y(), BTN_W, BTN_H, colour);
-    /* The button is a dark accent, so its label is the light one -
-       the same rule the other way round. Centred by counting
-       characters: the font is eight pixels wide and always has been. */
-    win_text(win, x + (BTN_W - n * 8) / 2, btn_y() + 4, label, C_WHITE);
+    ud_round(win, x, btn_y(), BTN_W, BTN_H, 7,
+             colour == C_RED ? L.danger : L.accent);
+    ud_text_mid(win, x, btn_y(), BTN_W, BTN_H, label, L.on_accent, UD_BOLD,
+                UD_PX);
 }
 
 static void button(int win, const char *label, int colour)
@@ -277,9 +297,9 @@ static void disk_line(int win)
     at = addnum(line, at, info.disk_mib);
     at = add(line, at, " MiB, partitions: ");
     at = addnum(line, at, info.parts);
-    win_text(win, 6, rowy(DISK_ROW), line, C_TEXT);
+    say(win, PAD, rowy(DISK_ROW), line, C_TEXT);
     if (info.disks > 1)
-        win_text(win, 6, rowy(DISK_ROW + 1),
+        say(win, PAD, rowy(DISK_ROW + 1),
                  "(a click on this line picks the next disk)", C_HEAD);
 }
 
@@ -288,7 +308,7 @@ static void draw_plan(int win)
     char line[80];
     int at;
 
-    win_text(win, 6, rowy(0), "Installing ThreadOS onto this machine's disk",
+    say(win, PAD, rowy(0), "Installing ThreadOS onto this machine's disk",
              C_HEAD);
 
     disk_line(win);
@@ -304,39 +324,39 @@ static void draw_plan(int win)
     at = add(line, at, ", free ");
     at = addnum(line, at, info.free_kib);
     at = add(line, at, " KiB");
-    win_text(win, 6, rowy(4), line, C_TEXT);
+    say(win, PAD, rowy(4), line, C_TEXT);
 
-    win_text(win, 6, rowy(6), "Will write:", C_HEAD);
+    say(win, PAD, rowy(6), "Will write:", C_HEAD);
 
     const uint32_t size3[3] = {info.loader_size, info.kernel_size,
                                info.initrd_size};
     for (int i = 0; i < 3; i++) {
-        win_text(win, 14, rowy(7 + i), STEP_NAME[1 + i], C_TEXT);
+        say(win, IND, rowy(7 + i), STEP_NAME[1 + i], C_TEXT);
         int n = num(line, size3[i]);
         add(line, n, " B");
         /* The size is said quietly - the name is what matters. And
            the column sits on the same eight-pixel grid the glyphs do:
            a column at an odd offset can be read by an eye and not by
            a program. */
-        win_text(win, 6 + 36 * 8, rowy(7 + i), line, C_DIM);
+        say(win, COL_SIZE, rowy(7 + i), line, C_DIM);
     }
 
     if (info.fallback_free) {
-        win_text(win, 14, rowy(10), STEP_NAME[4], C_TEXT);
-        win_text(win, 14, rowy(11), "free - the machine will boot on its own",
+        say(win, IND, rowy(10), STEP_NAME[4], C_TEXT);
+        say(win, IND, rowy(11), "free - the machine will boot on its own",
                  C_HEAD);
     } else {
-        win_text(win, 14, rowy(10), STEP_NAME[4], C_RED);
-        win_text(win, 14, rowy(11), "somebody else's - not touching it",
+        say(win, IND, rowy(10), STEP_NAME[4], C_RED);
+        say(win, IND, rowy(11), "somebody else's - not touching it",
                  C_RED);
     }
 
-    win_text(win, 6, rowy(13), "I do NOT touch the partition table, other "
+    say(win, PAD, rowy(13), "I do NOT touch the partition table, other "
              "partitions", C_TEXT);
-    win_text(win, 6, rowy(14), "or any file that is there already.",
+    say(win, PAD, rowy(14), "or any file that is there already.",
              C_TEXT);
     if (!info.fallback_free)
-        win_text(win, 6, rowy(15),
+        say(win, PAD, rowy(15),
                  "Then add an entry in the firmware - see above.", C_TEXT);
 }
 
@@ -348,39 +368,41 @@ static void draw_wipe(int win)
     char line[80];
     int at;
 
-    win_text(win, 6, rowy(0), "The whole disk for ThreadOS", C_RED);
+    say(win, PAD, rowy(0), "The whole disk for ThreadOS", C_RED);
 
     disk_line(win);
 
-    win_text(win, 6, rowy(5), "THIS WILL ERASE EVERYTHING ON THIS DISK:", C_RED);
+    say(win, PAD, rowy(5), "THIS WILL ERASE EVERYTHING ON THIS DISK:", C_RED);
     at = add(line, 0, "the partition table, all ");
     at = addnum(line, at, info.parts);
     at = add(line, at, " partitions and what is on them.");
-    win_text(win, 14, rowy(6), line, C_TEXT);
+    say(win, IND, rowy(6), line, C_TEXT);
 
-    win_text(win, 6, rowy(8), "I will make:", C_HEAD);
-    win_text(win, 14, rowy(9), STEP_WHOLE[0], C_TEXT);
+    say(win, PAD, rowy(8), "I will make:", C_HEAD);
+    say(win, IND, rowy(9), STEP_WHOLE[0], C_TEXT);
     at = add(line, 0, STEP_WHOLE[1]);
     at = add(line, at, ", ");
     at = addnum(line, at, info.free_kib / 1024);
     at = add(line, at, " MiB");
-    win_text(win, 14, rowy(10), line, C_TEXT);
-    win_text(win, 14, rowy(11), STEP_WHOLE[2], C_TEXT);
-    win_text(win, 14, rowy(12), "and write the system onto it.", C_TEXT);
+    say(win, IND, rowy(10), line, C_TEXT);
+    say(win, IND, rowy(11), STEP_WHOLE[2], C_TEXT);
+    say(win, IND, rowy(12), "and write the system onto it.", C_TEXT);
 
-    win_text(win, 6, rowy(14),
+    say(win, PAD, rowy(14),
              "No other disk is touched - only this one.", C_TEXT);
 }
 
 static void draw_bar(int win, int done, int total)
 {
-    int x = 20, y = ch - BTN_H - 28, w = cw - 40, h = 14;
-    win_rect(win, x, y, w, h, C_BLACK);
+    int x = PAD, y = ch - BTN_H - 34, w = cw - 2 * PAD, h = 10;
+    ud_round(win, x, y, w, h, h / 2, L.row);
     if (total > 0 && done > 0) {
         int fill = w * done / total;
         if (fill > w)
             fill = w;
-        win_rect(win, x, y, fill, h, C_HEAD);
+        if (fill < h)
+            fill = h;
+        ud_round(win, x, y, fill, h, h / 2, L.accent);
     }
 }
 
@@ -388,29 +410,30 @@ static void draw(int win)
 {
     char line[80];
 
-    win_rect(win, 0, 0, cw, ch, C_BG);
+    ud_look(&L);
+    ud_fill(win, 0, 0, cw, ch, L.bg);
 
     if (state == S_LOOK && !info.ok) {
-        win_text(win, 6, rowy(0), "Installing ThreadOS", C_HEAD);
-        win_text(win, 6, rowy(2), problem_line(info.problem), C_RED);
-        win_text(win, 6, rowy(3), problem_hint(info.problem), C_TEXT);
+        say(win, PAD, rowy(0), "Installing ThreadOS", C_HEAD);
+        say(win, PAD, rowy(2), problem_line(info.problem), C_RED);
+        say(win, PAD, rowy(3), problem_hint(info.problem), C_TEXT);
         if (info.problem == INST_NO_ROOM) {
             int at = add(line, 0, "free ");
             at = addnum(line, at, info.free_kib);
             at = add(line, at, " KiB, needs ");
             at = addnum(line, at, info.need_kib);
             at = add(line, at, " KiB");
-            win_text(win, 6, rowy(5), line, C_TEXT);
+            say(win, PAD, rowy(5), line, C_TEXT);
         }
         /* There may be no way to install BESIDE a system and still a
            way to install instead of one. Offering it here is the
            difference between a machine that cannot be installed on
            and one that can, if somebody means it. */
         if (info.can_wipe && info.mode != INST_WHOLE) {
-            win_text(win, 6, rowy(7),
+            say(win, PAD, rowy(7),
                      "The whole disk can be taken instead - that erases",
                      C_TEXT);
-            win_text(win, 6, rowy(8), "everything on it.", C_TEXT);
+            say(win, PAD, rowy(8), "everything on it.", C_TEXT);
             buttons(win, "Look again", C_BLUE,
                     "Whole disk", C_RED);
         } else {
@@ -436,28 +459,27 @@ static void draw(int win)
 
     if (state == S_WORD) {
         int wipe = info.mode == INST_WHOLE;
-        win_text(win, 6, rowy(0), "Are you sure?", wipe ? C_RED : C_HEAD);
+        say(win, PAD, rowy(0), "Are you sure?", wipe ? C_RED : C_HEAD);
         if (wipe) {
-            win_text(win, 6, rowy(2),
+            say(win, PAD, rowy(2),
                      "I am about to erase this WHOLE disk and remake it.",
                      C_TEXT);
-            win_text(win, 6, rowy(3),
+            say(win, PAD, rowy(3),
                      "This cannot be undone.", C_RED);
-            win_text(win, 6, rowy(5),
+            say(win, PAD, rowy(5),
                      "Type ERASE (in capitals) and press Enter:",
                      C_TEXT);
         } else {
-        win_text(win, 6, rowy(2),
+        say(win, PAD, rowy(2),
                  "I am about to write files onto this machine's EFI partition.", C_TEXT);
-        win_text(win, 6, rowy(3),
+        say(win, PAD, rowy(3),
                  "Nothing else on the disk changes.", C_TEXT);
-        win_text(win, 6, rowy(5),
+        say(win, PAD, rowy(5),
                  "Type YES (in capitals) and press Enter:", C_TEXT);
         }
-        win_rect(win, 6, rowy(7) - 3, 120, 14, C_BLACK);
-        win_text(win, 10, rowy(7), typed, C_WHITE);   /* a black field */
+        field(win, PAD, rowy(7), 140, typed);
         if (note[0])
-            win_text(win, 6, rowy(9), note, C_RED);
+            say(win, PAD, rowy(9), note, C_RED);
         button(win, "Do not install", C_BLUE);
         return;
     }
@@ -465,17 +487,16 @@ static void draw(int win)
     if (state == S_PASS) {
         char stars[24];
         int n = plen < 20 ? plen : 20;
-        win_text(win, 6, rowy(0), "You have to be admin", C_HEAD);
-        win_text(win, 6, rowy(2),
+        say(win, PAD, rowy(0), "You have to be admin", C_HEAD);
+        say(win, PAD, rowy(2),
                  "The kernel refused the write. Give the admin password", C_TEXT);
-        win_text(win, 6, rowy(3), "and press Enter:", C_TEXT);
-        win_rect(win, 6, rowy(5) - 3, 160, 14, C_BLACK);
+        say(win, PAD, rowy(3), "and press Enter:", C_TEXT);
         for (int i = 0; i < n; i++)
             stars[i] = '*';
         stars[n] = '\0';
-        win_text(win, 10, rowy(5), stars, C_WHITE);   /* a black field */
+        field(win, PAD, rowy(5), 180, stars);
         if (note[0])
-            win_text(win, 6, rowy(7), note, C_RED);
+            say(win, PAD, rowy(7), note, C_RED);
         button(win, "Give up", C_BLUE);
         return;
     }
@@ -485,28 +506,28 @@ static void draw(int win)
         at = addnum(line, at, (uint32_t)step + 1);
         at = add(line, at, " z ");
         at = addnum(line, at, info.steps);
-        win_text(win, 6, rowy(0), "Writing...", C_HEAD);
-        win_text(win, 6, rowy(2), line, C_TEXT);
-        win_text(win, 6, rowy(3), step_name(step), C_TEXT);
-        win_text(win, 6, rowy(5), "Do not switch the machine off.", C_RED);
+        say(win, PAD, rowy(0), "Writing...", C_HEAD);
+        say(win, PAD, rowy(2), line, C_TEXT);
+        say(win, PAD, rowy(3), step_name(step), C_TEXT);
+        say(win, PAD, rowy(5), "Do not switch the machine off.", C_RED);
         draw_bar(win, step, (int)info.steps);
         return;
     }
 
     if (state == S_DONE) {
-        win_text(win, 6, rowy(0), "Done", C_HEAD);
+        say(win, PAD, rowy(0), "Done", C_HEAD);
         if (info.fallback_free) {
-            win_text(win, 6, rowy(2),
+            say(win, PAD, rowy(2),
                      "This machine will boot ThreadOS off the disk.", C_TEXT);
-            win_text(win, 6, rowy(3),
+            say(win, PAD, rowy(3),
                      "You can pull the stick out and restart.", C_TEXT);
         } else {
-            win_text(win, 6, rowy(2), "The files are on the EFI partition.", C_TEXT);
-            win_text(win, 6, rowy(3),
+            say(win, PAD, rowy(2), "The files are on the EFI partition.", C_TEXT);
+            say(win, PAD, rowy(3),
                      "Add an entry in the firmware pointing at:", C_TEXT);
-            win_text(win, 6, rowy(4), STEP_NAME[1], C_HEAD);
+            say(win, PAD, rowy(4), STEP_NAME[1], C_HEAD);
         }
-        win_text(win, 6, rowy(6), "Nothing of anybody else's was touched.",
+        say(win, PAD, rowy(6), "Nothing of anybody else's was touched.",
                  C_TEXT);
         draw_bar(win, (int)info.steps, (int)info.steps);
         button(win, "Close", C_BLUE);
@@ -514,12 +535,12 @@ static void draw(int win)
     }
 
     /* S_FAIL */
-    win_text(win, 6, rowy(0), "It did not work", C_RED);
-    win_text(win, 6, rowy(2), "I stopped at:", C_TEXT);
-    win_text(win, 6, rowy(3), step_name(failed_at), C_TEXT);
-    win_text(win, 6, rowy(5), "Nothing beyond what is above was",
+    say(win, PAD, rowy(0), "It did not work", C_RED);
+    say(win, PAD, rowy(2), "I stopped at:", C_TEXT);
+    say(win, PAD, rowy(3), step_name(failed_at), C_TEXT);
+    say(win, PAD, rowy(5), "Nothing beyond what is above was",
              C_TEXT);
-    win_text(win, 6, rowy(6),
+    say(win, PAD, rowy(6),
              "written - and nothing of anybody else's was touched.", C_TEXT);
     draw_bar(win, failed_at, (int)info.steps);
     button(win, "Look again", C_BLUE);

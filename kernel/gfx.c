@@ -46,18 +46,27 @@ void gfx_target(const struct gfx_surface *s)
     }
 }
 
-static int tw(void) { return to_screen ? video_w() : tgt.w; }
-static int th(void) { return to_screen ? video_h() : tgt.h; }
+/* What the compositor draws on unless told otherwise; everything below
+   takes its target as a parameter ('t', NULL = the screen), so that a
+   program drawing into its window through a system call - on another
+   core, or in the middle of a frame - never touches anybody else's. */
+static const struct gfx_surface *cur(void)
+{
+    return to_screen ? (const struct gfx_surface *)0 : &tgt;
+}
+
+static int tw(const struct gfx_surface *t) { return t ? t->w : video_w(); }
+static int th(const struct gfx_surface *t) { return t ? t->h : video_h(); }
 
 /* The row as words, or NULL when the pixels have to go one at a time
    through video.c (a screen that is not four bytes a pixel) */
-static uint32_t *row_of(int y)
+static uint32_t *row_of(const struct gfx_surface *t, int y)
 {
-    if (to_screen)
+    if (!t)
         return video_row32(y);
-    if ((unsigned)y >= (unsigned)tgt.h)
+    if ((unsigned)y >= (unsigned)t->h)
         return (uint32_t *)0;
-    return tgt.px + (long)y * tgt.stride;
+    return t->px + (long)y * t->stride;
 }
 
 /* Division by 255 without dividing: exact for everything up to 65534,
@@ -81,33 +90,33 @@ uint32_t gfx_mix(uint32_t over, uint32_t under, int a)
     return out;
 }
 
-uint32_t gfx_get(int x, int y)
+uint32_t gfx_get_s(const struct gfx_surface *t, int x, int y)
 {
-    if ((unsigned)x >= (unsigned)tw() || (unsigned)y >= (unsigned)th())
+    if ((unsigned)x >= (unsigned)tw(t) || (unsigned)y >= (unsigned)th(t))
         return 0;
-    uint32_t *row = row_of(y);
+    uint32_t *row = row_of(t, y);
     if (row)
         return row[x] & 0xFFFFFF;
     return video_getpixel_rgb(x, y);
 }
 
-void gfx_put(int x, int y, uint32_t c)
+void gfx_put_s(const struct gfx_surface *t, int x, int y, uint32_t c)
 {
-    if ((unsigned)x >= (unsigned)tw() || (unsigned)y >= (unsigned)th())
+    if ((unsigned)x >= (unsigned)tw(t) || (unsigned)y >= (unsigned)th(t))
         return;
-    uint32_t *row = row_of(y);
+    uint32_t *row = row_of(t, y);
     if (row)
         row[x] = c & 0xFFFFFF;
     else
         video_putpixel_rgb(x, y, c);
 }
 
-void gfx_blend(int x, int y, uint32_t c, int a)
+void gfx_blend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
 {
-    if (a <= 0 || (unsigned)x >= (unsigned)tw() ||
-        (unsigned)y >= (unsigned)th())
+    if (a <= 0 || (unsigned)x >= (unsigned)tw(t) ||
+        (unsigned)y >= (unsigned)th(t))
         return;
-    uint32_t *row = row_of(y);
+    uint32_t *row = row_of(t, y);
     if (row) {
         row[x] = a >= 255 ? (c & 0xFFFFFF) : gfx_mix(c, row[x], a);
         return;
@@ -116,18 +125,18 @@ void gfx_blend(int x, int y, uint32_t c, int a)
 }
 
 /* One run of a row, clipped once */
-static void span(int x0, int x1, int y, uint32_t c, int a)
+static void span_s(const struct gfx_surface *t, int x0, int x1, int y, uint32_t c, int a)
 {
-    if ((unsigned)y >= (unsigned)th() || a <= 0)
+    if ((unsigned)y >= (unsigned)th(t) || a <= 0)
         return;
     if (x0 < 0)
         x0 = 0;
-    if (x1 > tw())
-        x1 = tw();
-    uint32_t *row = row_of(y);
+    if (x1 > tw(t))
+        x1 = tw(t);
+    uint32_t *row = row_of(t, y);
     if (!row) {
         for (int x = x0; x < x1; x++)
-            gfx_blend(x, y, c, a);
+            gfx_blend_s(t, x, y, c, a);
         return;
     }
     if (a >= 255) {
@@ -149,10 +158,10 @@ static void span(int x0, int x1, int y, uint32_t c, int a)
     }
 }
 
-void gfx_fill(int x, int y, int w, int h, uint32_t c, int a)
+void gfx_fill_s(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t c, int a)
 {
     for (int j = 0; j < h; j++)
-        span(x, x + w, y + j, c, a);
+        span_s(t, x, x + w, y + j, c, a);
 }
 
 static uint32_t lerp_rgb(uint32_t p, uint32_t q, int num, int den)
@@ -167,11 +176,11 @@ static uint32_t lerp_rgb(uint32_t p, uint32_t q, int num, int den)
     return out;
 }
 
-void gfx_fill_grad(int x, int y, int w, int h, uint32_t top,
+void gfx_fill_grad_s(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t top,
                    uint32_t bottom, int a)
 {
     for (int j = 0; j < h; j++)
-        span(x, x + w, y + j, lerp_rgb(top, bottom, j, h - 1), a);
+        span_s(t, x, x + w, y + j, lerp_rgb(top, bottom, j, h - 1), a);
 }
 
 /* --- how much of a pixel a shape covers ----------------------------------- */
@@ -294,15 +303,15 @@ static void bounds16(int x, int y, int w, int h, int *px0, int *py0,
    both ends only until the coverage is whole; what lies between is one
    run of the colour. The shape is convex and symmetric, so if the
    middle of a row is not covered, nothing in it is. */
-static void rrect_rows(int x, int y, int w, int h, int r, uint32_t top,
+static void rrect_rows_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t top,
                        uint32_t bottom, int a)
 {
     int px0, py0, px1, py1;
     bounds16(x, y, w, h, &px0, &py0, &px1, &py1);
     if (py0 < 0)
         py0 = 0;
-    if (py1 > th())
-        py1 = th();
+    if (py1 > th(t))
+        py1 = th(t);
     int mid = (px0 + px1 - 1) / 2;
     int rows = py1 - py0;
     for (int py = py0; py < py1; py++) {
@@ -315,46 +324,46 @@ static void rrect_rows(int x, int y, int w, int h, int r, uint32_t top,
             int cv = gfx_cov_rrect16(l, py, x, y, w, h, r);
             if (cv >= 255)
                 break;
-            gfx_blend(l, py, c, cv * a / 255);
+            gfx_blend_s(t, l, py, c, cv * a / 255);
         }
         for (; rr >= l; rr--) {
             int cv = gfx_cov_rrect16(rr, py, x, y, w, h, r);
             if (cv >= 255)
                 break;
-            gfx_blend(rr, py, c, cv * a / 255);
+            gfx_blend_s(t, rr, py, c, cv * a / 255);
         }
         if (l <= rr)
-            span(l, rr + 1, py, c, a);
+            span_s(t, l, rr + 1, py, c, a);
     }
 }
 
-void gfx_rrect16(int x, int y, int w, int h, int r, uint32_t c, int a)
+void gfx_rrect16_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
 {
-    rrect_rows(x, y, w, h, r, c, c, a);
+    rrect_rows_s(t, x, y, w, h, r, c, c, a);
 }
 
-void gfx_rrect(int x, int y, int w, int h, int r, uint32_t c, int a)
+void gfx_rrect_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
 {
-    rrect_rows(x * 16, y * 16, w * 16, h * 16, r * 16, c, c, a);
+    rrect_rows_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, c, c, a);
 }
 
-void gfx_rrect_grad(int x, int y, int w, int h, int r, uint32_t top,
+void gfx_rrect_grad_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t top,
                     uint32_t bottom, int a)
 {
-    rrect_rows(x * 16, y * 16, w * 16, h * 16, r * 16, top, bottom, a);
+    rrect_rows_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, top, bottom, a);
 }
 
-void gfx_rring16(int x, int y, int w, int h, int r, int t, uint32_t c,
+void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int thick, uint32_t c,
                  int a)
 {
     int px0, py0, px1, py1;
     bounds16(x, y, w, h, &px0, &py0, &px1, &py1);
-    int ir = r - t > 0 ? r - t : 0;
-    int ix = x + t, iy = y + t, iw = w - 2 * t, ih = h - 2 * t;
+    int ir = r - thick > 0 ? r - thick : 0;
+    int ix = x + thick, iy = y + thick, iw = w - 2 * thick, ih = h - 2 * thick;
     if (py0 < 0)
         py0 = 0;
-    if (py1 > th())
-        py1 = th();
+    if (py1 > th(t))
+        py1 = th(t);
     for (int py = py0; py < py1; py++) {
         /* From each end until the pixel is wholly inside the hole:
            from there to the middle there is no edge to draw */
@@ -364,7 +373,7 @@ void gfx_rring16(int x, int y, int w, int h, int r, int t, uint32_t c,
                         ? gfx_cov_rrect16(l, py, ix, iy, iw, ih, ir) : 0;
             int cv = gfx_cov_rrect16(l, py, x, y, w, h, r) - inner;
             if (cv > 0)
-                gfx_blend(l, py, c, cv * a / 255);
+                gfx_blend_s(t, l, py, c, cv * a / 255);
             if (inner >= 255)
                 break;
         }
@@ -373,24 +382,24 @@ void gfx_rring16(int x, int y, int w, int h, int r, int t, uint32_t c,
                         ? gfx_cov_rrect16(rr, py, ix, iy, iw, ih, ir) : 0;
             int cv = gfx_cov_rrect16(rr, py, x, y, w, h, r) - inner;
             if (cv > 0)
-                gfx_blend(rr, py, c, cv * a / 255);
+                gfx_blend_s(t, rr, py, c, cv * a / 255);
             if (inner >= 255)
                 break;
         }
     }
 }
 
-void gfx_disc16(int cx, int cy, int rad, uint32_t c, int a)
+void gfx_disc16_s(const struct gfx_surface *t, int cx, int cy, int rad, uint32_t c, int a)
 {
-    rrect_rows(cx - rad, cy - rad, 2 * rad, 2 * rad, rad, c, c, a);
+    rrect_rows_s(t, cx - rad, cy - rad, 2 * rad, 2 * rad, rad, c, c, a);
 }
 
-void gfx_circle16(int cx, int cy, int rad, int t, uint32_t c, int a)
+void gfx_circle16_s(const struct gfx_surface *t, int cx, int cy, int rad, int thick, uint32_t c, int a)
 {
-    gfx_rring16(cx - rad, cy - rad, 2 * rad, 2 * rad, rad, t, c, a);
+    gfx_rring16_s(t, cx - rad, cy - rad, 2 * rad, 2 * rad, rad, thick, c, a);
 }
 
-void gfx_line16(int x0, int y0, int x1, int y1, int thick, uint32_t c,
+void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1, int thick, uint32_t c,
                 int a)
 {
     int m = thick / 2 + 16;
@@ -402,13 +411,13 @@ void gfx_line16(int x0, int y0, int x1, int y1, int thick, uint32_t c,
         for (int px = px0; px < px1; px++) {
             int cv = gfx_cov_line16(px, py, x0, y0, x1, y1, thick);
             if (cv)
-                gfx_blend(px, py, c, cv * a / 255);
+                gfx_blend_s(t, px, py, c, cv * a / 255);
         }
 }
 
 /* --- shadows ------------------------------------------------------------------ */
 
-void gfx_shadow(int x, int y, int w, int h, int r, int s, int a, int dy)
+void gfx_shadow_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int s, int a, int dy)
 {
     if (s <= 0 || a <= 0 || w <= 0 || h <= 0)
         return;
@@ -433,8 +442,8 @@ void gfx_shadow(int x, int y, int w, int h, int r, int s, int a, int dy)
     int y0 = sy - s, y1 = sy + h + s;
     if (y0 < 0)
         y0 = 0;
-    if (y1 > th())
-        y1 = th();
+    if (y1 > th(t))
+        y1 = th(t);
     for (int py = y0; py < y1; py++) {
         int qy = iabs(2 * py + 1 - cy2) - (h - 2 * r);
         int in_rows = py >= y && py < y + h;
@@ -458,7 +467,7 @@ void gfx_shadow(int x, int y, int w, int h, int r, int s, int a, int dy)
                 d = 0;
             if (d >= s2)
                 continue;
-            gfx_blend(px, py, 0x000000, fall[d]);
+            gfx_blend_s(t, px, py, 0x000000, fall[d]);
         }
     }
 }
@@ -543,7 +552,7 @@ static void box_cols(const uint32_t *in, uint32_t *out, int w, int ih,
     }
 }
 
-int gfx_blur(int x, int y, int w, int h, int radius)
+int gfx_blur_s(const struct gfx_surface *t, int x, int y, int w, int h, int radius)
 {
     if (w <= 0 || h <= 0 || radius <= 0)
         return 0;
@@ -555,14 +564,14 @@ int gfx_blur(int x, int y, int w, int h, int radius)
     /* What is read beyond the screen is the nearest pixel on it: an
        edge of glass against the edge of the screen should not go dark
        because there is nothing out there. */
-    int sw = tw(), sh = th();
+    int sw = tw(t), sh = th(t);
     for (int j = 0; j < h1; j++) {
         int sy = y - e + j;
         sy = sy < 0 ? 0 : sy >= sh ? sh - 1 : sy;
         for (int i = 0; i < w1; i++) {
             int sx = x - e + i;
             sx = sx < 0 ? 0 : sx >= sw ? sw - 1 : sx;
-            blur_a[(long)j * w1 + i] = gfx_get(sx, sy);
+            blur_a[(long)j * w1 + i] = gfx_get_s(t, sx, sy);
         }
     }
     int w2 = w1 - 2 * radius, h2 = h1 - 2 * radius;
@@ -572,7 +581,7 @@ int gfx_blur(int x, int y, int w, int h, int radius)
     box_cols(blur_b, blur_a, w, h2, radius);        /* w  x h  */
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
-            gfx_put(x + i, y + j, blur_a[(long)j * w + i]);
+            gfx_put_s(t, x + i, y + j, blur_a[(long)j * w + i]);
     return 0;
 }
 
@@ -585,18 +594,18 @@ static void corner_xy(int k, int x, int y, int w, int h, int r, int *cx,
     *cy = (k & 2) ? y + h - r : y;
 }
 
-void gfx_round_save(int x, int y, int w, int h, int r, uint32_t *keep)
+void gfx_round_save_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t *keep)
 {
     for (int k = 0; k < 4; k++) {
         int cx, cy;
         corner_xy(k, x, y, w, h, r, &cx, &cy);
         for (int j = 0; j < r; j++)
             for (int i = 0; i < r; i++)
-                *keep++ = gfx_get(cx + i, cy + j);
+                *keep++ = gfx_get_s(t, cx + i, cy + j);
     }
 }
 
-void gfx_round_apply(int x, int y, int w, int h, int r,
+void gfx_round_apply_s(const struct gfx_surface *t, int x, int y, int w, int h, int r,
                      const uint32_t *keep)
 {
     for (int k = 0; k < 4; k++) {
@@ -607,26 +616,26 @@ void gfx_round_apply(int x, int y, int w, int h, int r,
                 int cv = gfx_cov_rrect16(cx + i, cy + j, x * 16, y * 16,
                                          w * 16, h * 16, r * 16);
                 if (cv < 255)
-                    gfx_put(cx + i, cy + j,
-                            gfx_mix(gfx_get(cx + i, cy + j), *keep, cv));
+                    gfx_put_s(t, cx + i, cy + j,
+                            gfx_mix(gfx_get_s(t, cx + i, cy + j), *keep, cv));
             }
     }
 }
 
-void gfx_frost(int x, int y, int w, int h, int r, int blur, uint32_t tint,
+void gfx_frost_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int blur, uint32_t tint,
                int a)
 {
     static uint32_t keep[4 * 32 * 32];
     if (r > 32)
         r = 32;
-    gfx_round_save(x, y, w, h, r, keep);
+    gfx_round_save_s(t, x, y, w, h, r, keep);
     if (blur > 0)
-        gfx_blur(x, y, w, h, blur);
-    gfx_fill(x, y, w, h, tint, a);
-    gfx_round_apply(x, y, w, h, r, keep);
+        gfx_blur_s(t, x, y, w, h, blur);
+    gfx_fill_s(t, x, y, w, h, tint, a);
+    gfx_round_apply_s(t, x, y, w, h, r, keep);
 }
 
-void gfx_blit_round(int x, int y, int w, int h, int r, const uint32_t *src,
+void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, const uint32_t *src,
                     int stride, int a)
 {
     for (int j = 0; j < h; j++) {
@@ -637,10 +646,110 @@ void gfx_blit_round(int x, int y, int w, int h, int r, const uint32_t *src,
                 cv = gfx_cov_rrect16(x + i, y + j, x * 16, y * 16, w * 16,
                                      h * 16, r * 16);
             if (cv)
-                gfx_blend(x + i, y + j, src[(long)j * stride + i],
+                gfx_blend_s(t, x + i, y + j, src[(long)j * stride + i],
                           cv * a / 255);
         }
     }
+}
+
+
+/* --- the same, onto the compositor's current target ----------------------- */
+
+uint32_t gfx_get(int x, int y)
+{
+    return gfx_get_s(cur(), x, y);
+}
+
+void gfx_put(int x, int y, uint32_t c)
+{
+    gfx_put_s(cur(), x, y, c);
+}
+
+void gfx_blend(int x, int y, uint32_t c, int a)
+{
+    gfx_blend_s(cur(), x, y, c, a);
+}
+
+void gfx_fill(int x, int y, int w, int h, uint32_t c, int a)
+{
+    gfx_fill_s(cur(), x, y, w, h, c, a);
+}
+
+void gfx_fill_grad(int x, int y, int w, int h, uint32_t top,
+                   uint32_t bottom, int a)
+{
+    gfx_fill_grad_s(cur(), x, y, w, h, top, bottom, a);
+}
+
+void gfx_rrect16(int x, int y, int w, int h, int r, uint32_t c, int a)
+{
+    gfx_rrect16_s(cur(), x, y, w, h, r, c, a);
+}
+
+void gfx_rrect(int x, int y, int w, int h, int r, uint32_t c, int a)
+{
+    gfx_rrect_s(cur(), x, y, w, h, r, c, a);
+}
+
+void gfx_rrect_grad(int x, int y, int w, int h, int r, uint32_t top,
+                    uint32_t bottom, int a)
+{
+    gfx_rrect_grad_s(cur(), x, y, w, h, r, top, bottom, a);
+}
+
+void gfx_rring16(int x, int y, int w, int h, int r, int thick, uint32_t c,
+                 int a)
+{
+    gfx_rring16_s(cur(), x, y, w, h, r, thick, c, a);
+}
+
+void gfx_disc16(int cx, int cy, int rad, uint32_t c, int a)
+{
+    gfx_disc16_s(cur(), cx, cy, rad, c, a);
+}
+
+void gfx_circle16(int cx, int cy, int rad, int thick, uint32_t c, int a)
+{
+    gfx_circle16_s(cur(), cx, cy, rad, thick, c, a);
+}
+
+void gfx_line16(int x0, int y0, int x1, int y1, int thick, uint32_t c,
+                int a)
+{
+    gfx_line16_s(cur(), x0, y0, x1, y1, thick, c, a);
+}
+
+void gfx_shadow(int x, int y, int w, int h, int r, int s, int a, int dy)
+{
+    gfx_shadow_s(cur(), x, y, w, h, r, s, a, dy);
+}
+
+int gfx_blur(int x, int y, int w, int h, int radius)
+{
+    return gfx_blur_s(cur(), x, y, w, h, radius);
+}
+
+void gfx_round_save(int x, int y, int w, int h, int r, uint32_t *keep)
+{
+    gfx_round_save_s(cur(), x, y, w, h, r, keep);
+}
+
+void gfx_round_apply(int x, int y, int w, int h, int r,
+                     const uint32_t *keep)
+{
+    gfx_round_apply_s(cur(), x, y, w, h, r, keep);
+}
+
+void gfx_frost(int x, int y, int w, int h, int r, int blur, uint32_t tint,
+               int a)
+{
+    gfx_frost_s(cur(), x, y, w, h, r, blur, tint, a);
+}
+
+void gfx_blit_round(int x, int y, int w, int h, int r, const uint32_t *src,
+                    int stride, int a)
+{
+    gfx_blit_round_s(cur(), x, y, w, h, r, src, stride, a);
 }
 
 /* --- the 'shape' command ---------------------------------------------------------
@@ -724,7 +833,7 @@ void gfx_command(const char *arg)
         return;
     }
     struct gfx_surface s = { sheet, pw, ph, pw };
-    gfx_target(&s);
+    const struct gfx_surface *t = &s;
     if (shape == 4) {
         /* A pattern with edges in it and no symmetry, so that a blur
            going the wrong way, or a pixel off, shows */
@@ -734,8 +843,7 @@ void gfx_command(const char *arg)
                     ((uint32_t)((i * 37 + j * 11) & 0xFF) << 16) |
                     ((uint32_t)(((i / 4 + j / 3) & 1) ? 230 : 20) << 8) |
                     (uint32_t)((i * j * 7) & 0xFF);
-        int rc = gfx_blur(2, 2, pw - 4, ph - 4, v[0]);
-        gfx_target((const struct gfx_surface *)0);
+        int rc = gfx_blur_s(t, 2, 2, pw - 4, ph - 4, v[0]);
         print_sheet(pw, ph, 3);
         printk("shape: blur %s\n", rc ? "too large" : "drawn");
         return;
@@ -743,12 +851,11 @@ void gfx_command(const char *arg)
     for (int i = 0; i < pw * ph; i++)
         sheet[i] = 0;
     if (shape == 1)
-        gfx_rrect16(v[0], v[1], v[2], v[3], v[4], 0xFFFFFF, 255);
+        gfx_rrect16_s(t, v[0], v[1], v[2], v[3], v[4], 0xFFFFFF, 255);
     else if (shape == 2)
-        gfx_rring16(v[0], v[1], v[2], v[3], v[4], v[5], 0xFFFFFF, 255);
+        gfx_rring16_s(t, v[0], v[1], v[2], v[3], v[4], v[5], 0xFFFFFF, 255);
     else
-        gfx_line16(v[0], v[1], v[2], v[3], v[4], 0xFFFFFF, 255);
-    gfx_target((const struct gfx_surface *)0);
+        gfx_line16_s(t, v[0], v[1], v[2], v[3], v[4], 0xFFFFFF, 255);
     print_sheet(pw, ph, 1);
     printk("shape: %dx%d drawn\n", pw, ph);
 }

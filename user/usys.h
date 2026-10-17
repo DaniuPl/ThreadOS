@@ -65,6 +65,8 @@
 #define SYS_SEM_GET  71
 #define SYS_SEM_WAIT 72
 #define SYS_SEM_POST 73
+#define SYS_WIN_DRAW 74
+#define SYS_UI_LOOK  75
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
@@ -847,6 +849,31 @@ static inline int32_t sys_sem_post(int id)
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret)
                      : "a"(SYS_SEM_POST), "b"(id) : "memory");
+    return ret;
+}
+
+/* Shapes and TrueType text in a window, and the theme's colours - see
+   udraw.h, which is what programs use */
+struct win_draw_cmd {
+    int32_t op, x, y, w, h, r;
+    uint32_t rgb, rgb2;
+    int32_t a, font, px;
+    const char *s;
+};
+
+static inline int32_t sys_win_draw(int winid, const struct win_draw_cmd *c)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_WIN_DRAW), "b"(winid), "c"(c) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_ui_look(uint32_t *out)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_UI_LOOK), "b"(out) : "memory");
     return ret;
 }
 

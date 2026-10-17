@@ -21,25 +21,30 @@
  * every window here already knows and because a layout engine would
  * be a second framework on top of the first.
  *
- * The colours follow the rule the whole system follows: dark text on
- * a light surface, light text on a dark one.
+ * It draws the way the desktop draws (udraw.h): TrueType, round
+ * corners, the theme's colours - asked for every time it draws, so a
+ * window follows a switch between dark and light as the desktop does.
+ * A program that says a thing's colour says it by name: UG_BLUE is the
+ * accent, UG_RED is "careful" - whatever those are in the theme.
  */
 
 #ifndef THREADOS_UGUI_H
 #define THREADOS_UGUI_H
 
-#include "uapi.h"
+#include "udraw.h"
 
-/* The palette, by the names the programs already use */
+/* Colours by the names the programs already use - meanings rather than
+   colours: the theme says what they look like */
 #define UG_BLACK 0
-#define UG_RED   1
-#define UG_BLUE  3
+#define UG_RED   1               /* danger */
+#define UG_BLUE  3               /* the accent */
 #define UG_WHITE 4
 #define UG_BG    8
 #define UG_DIM   15
 
 #define UG_MAX   24              /* things in one window */
-#define UG_ROW   12              /* one row of text */
+#define UG_ROW   18              /* one row of text */
+#define UG_R     6               /* the corners of a button, a field */
 
 /* What a thing is */
 #define UG_LABEL  0
@@ -77,6 +82,7 @@ struct ug_item {
 struct ug {
     int win;
     int w, h;
+    struct ud_look look;         /* the theme's colours, as of the last draw */
     struct ug_item it[UG_MAX];
     int n;
     int focus;                   /* which thing has the keyboard, -1 = none */
@@ -234,85 +240,125 @@ static inline int ug_len(const char *s)
     return n;
 }
 
+/* A colour by its meaning */
+static inline uint32_t ug_rgb(const struct ud_look *l, int colour)
+{
+    switch (colour) {
+    case UG_RED:   return l->danger;
+    case UG_BLUE:  return l->accent;
+    case UG_DIM:   return l->dim;
+    case UG_WHITE: return l->on_accent;
+    case UG_BG:    return l->bg;
+    default:       return l->text;
+    }
+}
+
+/* Text placed in a row, as the desktop places it */
+static inline int ug_say(int win, int x, int y, int h, const char *s,
+                         uint32_t rgb, int font)
+{
+    return ud_text(win, x, ud_baseline(y, h, UD_PX), s, rgb, font, UD_PX);
+}
+
+/* A field to type in: a white (or dark) surface, a line round it in
+   the accent when it has the keys, and where the next letter goes */
+static inline void ug_draw_field(int win, const struct ud_look *l, int x,
+                                 int y, int w, int h, const char *text,
+                                 int focused)
+{
+    ud_round(win, x, y, w, h, UG_R, l->field);
+    ud_ring(win, x, y, w, h, UG_R, focused ? l->accent : l->line);
+    int end = ug_say(win, x + 6, y, h, text ? text : "", l->text, UD_SANS);
+    if (focused && end < x + w - 4)
+        ud_fill(win, end + 1, y + 4, 1, h - 8, l->text);
+}
+
+/* A button: a rounded surface with its word in the middle */
+static inline void ug_draw_button(int win, const struct ud_look *l, int x,
+                                  int y, int w, int h, const char *text,
+                                  uint32_t face, uint32_t ink)
+{
+    (void)l;
+    ud_round(win, x, y, w, h, UG_R, face);
+    ud_text_mid(win, x, y, w, h, text, ink, UD_SANS, UD_PX);
+}
+
 static inline void ug_draw_one(struct ug *u, int i)
 {
     struct ug_item *t = &u->it[i];
+    const struct ud_look *l = &u->look;
     int win = u->win;
 
     switch (t->kind) {
     case UG_LABEL:
-        win_text(win, t->x, t->y, t->text,
-                 t->dim ? UG_DIM : (t->colour ? t->colour : UG_BLACK));
+        ug_say(win, t->x, t->y, t->h, t->text,
+               t->dim ? l->dim : (t->colour ? ug_rgb(l, t->colour) : l->text),
+               t->colour == UG_BLUE ? UD_BOLD : UD_SANS);
         break;
 
     case UG_LINE:
-        win_rect(win, t->x, t->y, t->w, 1, UG_DIM);
+        ud_fill(win, t->x, t->y, t->w, 1, l->line);
         break;
 
-    case UG_BUTTON: {
-        int face = t->colour ? t->colour : UG_BLUE;
-        /* A button is a dark surface, so its caption is light - the
-           other way round is the one thing this system does not do. */
-        win_rect(win, t->x, t->y, t->w, t->h, t->enabled ? face : UG_DIM);
-        int len = ug_len(t->text) * 8;
-        int at = t->x + (t->w - len) / 2;
-        if (at < t->x + 2)
-            at = t->x + 2;
-        win_text(win, at, t->y + (t->h - 8) / 2, t->text, UG_WHITE);
+    case UG_BUTTON:
+        if (t->enabled)
+            ug_draw_button(win, l, t->x, t->y, t->w, t->h, t->text,
+                           t->colour ? ug_rgb(l, t->colour) : l->accent,
+                           l->on_accent);
+        else
+            ug_draw_button(win, l, t->x, t->y, t->w, t->h, t->text, l->row,
+                           l->dim);
         break;
-    }
 
     case UG_SLIDER: {
-        int fill = t->max > 0 ? t->value * t->w / t->max : 0;
-        win_rect(win, t->x, t->y, t->w, t->h, UG_BLACK);
+        /* A thin track, filled as far as the value, and a knob there */
+        int fill = t->max > 0 ? t->value * (t->w - t->h) / t->max : 0;
+        int ty = t->y + t->h / 2 - 3;
+        uint32_t c = t->colour ? ug_rgb(l, t->colour) : l->accent;
+        ud_round(win, t->x, ty, t->w, 6, 3, l->row);
         if (fill > 0)
-            win_rect(win, t->x, t->y, fill, t->h,
-                     t->colour ? t->colour : UG_BLUE);
-        /* A line where the filling ends, so that the edge can be seen
-           even when the slider is at either end of its travel. */
-        if (fill > 0 && fill < t->w)
-            win_rect(win, t->x + fill - 1, t->y, 1, t->h, UG_WHITE);
+            ud_round(win, t->x, ty, fill + t->h / 2, 6, 3, c);
+        ud_disc(win, t->x + fill, t->y, t->h, l->dark ? 0xEDEDF0 : 0xFFFFFF);
+        ud_op(win, UD_OP_RING, t->x + fill, t->y, t->h, t->h, t->h / 2,
+              l->line, 0, 0, 0, (const char *)0);
         break;
     }
 
     case UG_CHECK: {
-        win_rect(win, t->x, t->y, 10, 10, UG_BLACK);
-        if (t->value)
-            win_rect(win, t->x + 2, t->y + 2, 6, 6,
-                     t->colour ? t->colour : UG_BLUE);
-        win_text(win, t->x + 16, t->y + 1, t->text, UG_BLACK);
+        int b = 14, by = t->y + (t->h - b) / 2;
+        if (t->value) {
+            ud_round(win, t->x, by, b, b, 4,
+                     t->colour ? ug_rgb(l, t->colour) : l->accent);
+            ud_line(win, t->x + 3, by + 7, t->x + 6, by + 10, 28,
+                    l->on_accent);
+            ud_line(win, t->x + 6, by + 10, t->x + 11, by + 4, 28,
+                    l->on_accent);
+        } else {
+            ud_round(win, t->x, by, b, b, 4, l->field);
+            ud_ring(win, t->x, by, b, b, 4, l->line);
+        }
+        ug_say(win, t->x + b + 8, t->y, t->h, t->text, l->text, UD_SANS);
         break;
     }
 
-    case UG_FIELD: {
-        int focused = (u->focus == i);
-        win_rect(win, t->x, t->y, t->w, t->h, UG_WHITE);
-        win_rect(win, t->x, t->y, t->w, 1, focused ? UG_BLUE : UG_DIM);
-        win_rect(win, t->x, t->y + t->h - 1, t->w, 1,
-                 focused ? UG_BLUE : UG_DIM);
-        if (t->buf)
-            win_text(win, t->x + 3, t->y + 3, t->buf, UG_BLACK);
-        if (focused && t->buf) {
-            int at = t->x + 3 + ug_len(t->buf) * 8;
-            if (at < t->x + t->w - 2)
-                win_rect(win, at, t->y + 2, 1, t->h - 4, UG_BLACK);
-        }
+    case UG_FIELD:
+        ug_draw_field(win, l, t->x, t->y, t->w, t->h, t->buf, u->focus == i);
         break;
-    }
 
     case UG_LIST: {
         int rows = t->h / UG_ROW;
-        win_rect(win, t->x, t->y, t->w, t->h, UG_WHITE);
+        ud_round(win, t->x, t->y, t->w, t->h, UG_R, l->field);
         for (int r = 0; r < rows && u->top + r < t->max; r++) {
             int index = u->top + r;
             const char *s = t->row ? t->row(t->ctx, index) : "";
             int y = t->y + r * UG_ROW;
 
             if (index == t->value) {
-                win_rect(win, t->x, y, t->w, UG_ROW, UG_BLUE);
-                win_text(win, t->x + 3, y + 2, s, UG_WHITE);
+                ud_round(win, t->x + 3, y + 1, t->w - 6, UG_ROW - 2, 5,
+                         l->accent);
+                ug_say(win, t->x + 9, y, UG_ROW, s, l->on_accent, UD_SANS);
             } else {
-                win_text(win, t->x + 3, y + 2, s, UG_BLACK);
+                ug_say(win, t->x + 9, y, UG_ROW, s, l->text, UD_SANS);
             }
         }
         break;
@@ -325,7 +371,8 @@ static inline void ug_draw_one(struct ug *u, int i)
 
 static inline void ug_draw(struct ug *u)
 {
-    win_rect(u->win, 0, 0, u->w, u->h, UG_BG);
+    ud_look(&u->look);
+    ud_fill(u->win, 0, 0, u->w, u->h, u->look.bg);
     for (int i = 0; i < u->n; i++)
         ug_draw_one(u, i);
 }
@@ -338,12 +385,12 @@ static inline int ug_hit(struct ug *u, int x, int y)
        takes the click. */
     for (int i = u->n - 1; i >= 0; i--) {
         struct ug_item *t = &u->it[i];
-        int w = t->w ? t->w : ug_len(t->text) * 8;
+        int w = t->w ? t->w : ud_width(t->text, UD_SANS, UD_PX);
 
         if (t->kind == UG_LABEL || t->kind == UG_LINE)
             continue;
         if (t->kind == UG_CHECK)
-            w = 16 + ug_len(t->text) * 8;
+            w = 22 + ud_width(t->text, UD_SANS, UD_PX);
         if (!t->enabled)
             continue;
         if (x >= t->x && x < t->x + w && y >= t->y && y < t->y + t->h)
@@ -391,8 +438,9 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             /* Divided by one less than the width, so that the last
                pixel of the groove really is the maximum: a slider one
                cannot drag to the end feels broken. */
-            int v = t->w > 1
-                    ? (ev->x - t->x) * t->max / (t->w - 1) : 0;
+            int span = t->w - t->h;
+            int v = span > 0
+                    ? (ev->x - t->x - t->h / 2) * t->max / span : 0;
             if (v < 0)
                 v = 0;
             if (v > t->max)
@@ -515,7 +563,9 @@ struct ug_modal {
     int list;                    /* a list widget to show inside, or -1 */
 };
 
-#define UG_MODAL_H 96
+#define UG_MODAL_H 116
+#define UG_BTN_W   96            /* a dialogue's two buttons */
+#define UG_BTN_H   24
 
 static inline void ug_ask(struct ug_modal *m, const char *title,
                           const char *note, const char *yes, const char *no)
@@ -547,35 +597,49 @@ static inline int ug_modal_y(struct ug *u)
     return y < 0 ? 0 : y;
 }
 
+/* The two answers at the bottom edge of a panel: their left edges and
+   their top - one place, for the drawing and the clicking alike */
+static inline int ug_yes_x(void) { return 10 + 12; }
+static inline int ug_no_x(void)  { return 10 + 12 + UG_BTN_W + 10; }
+
+/* A panel over the window: what is behind it dimmed, so that it is the
+   one thing to answer */
+static inline void ug_panel(struct ug *u, int y, int h)
+{
+    int x = 10, w = u->w - 20;
+    ud_look(&u->look);
+    ud_fill_a(u->win, 0, 0, u->w, u->h, 0x000000, u->look.dark ? 110 : 70);
+    ud_round(u->win, x, y, w, h, 10, u->look.field);
+    ud_ring(u->win, x, y, w, h, 10, u->look.line);
+}
+
+static inline void ug_answers(struct ug *u, int by, const char *yes,
+                              const char *no)
+{
+    const struct ud_look *l = &u->look;
+    ug_draw_button(u->win, l, ug_yes_x(), by, UG_BTN_W, UG_BTN_H, yes,
+                   l->accent, l->on_accent);
+    ug_draw_button(u->win, l, ug_no_x(), by, UG_BTN_W, UG_BTN_H, no, l->row,
+                   l->text);
+}
+
 static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
 {
     if (!m->on)
         return;
 
-    int x = 8, w = u->w - 16;
+    int x = 10, w = u->w - 20;
     int y = ug_modal_y(u);
-    int by = y + UG_MODAL_H - 26;
-    int bw = 84;
+    int by = y + UG_MODAL_H - UG_BTN_H - 12;
 
-    win_rect(u->win, x, y, w, UG_MODAL_H, UG_WHITE);
-    win_rect(u->win, x, y, w, 2, UG_BLUE);
-    win_rect(u->win, x, y + UG_MODAL_H - 2, w, 2, UG_BLUE);
-    win_text(u->win, x + 8, y + 10, m->title, UG_BLACK);
+    ug_panel(u, y, UG_MODAL_H);
+    const struct ud_look *l = &u->look;
+    ud_text(u->win, x + 12, y + 22, m->title, l->text, UD_BOLD, UD_PX);
     if (m->note[0])
-        win_text(u->win, x + 8, y + 10 + UG_ROW, m->note, UG_DIM);
-
-    if (m->buf) {
-        win_rect(u->win, x + 8, y + 40, w - 16, UG_ROW + 4, UG_BG);
-        win_text(u->win, x + 11, y + 43, m->buf, UG_BLACK);
-        int at = x + 11 + ug_len(m->buf) * 8;
-        if (at < x + w - 10)
-            win_rect(u->win, at, y + 42, 1, UG_ROW, UG_BLACK);
-    }
-
-    win_rect(u->win, x + 8, by, bw, 16, UG_BLUE);
-    win_text(u->win, x + 8 + 8, by + 4, m->yes, UG_WHITE);
-    win_rect(u->win, x + 8 + bw + 10, by, bw, 16, UG_DIM);
-    win_text(u->win, x + 8 + bw + 18, by + 4, m->no, UG_WHITE);
+        ud_text(u->win, x + 12, y + 40, m->note, l->dim, UD_SANS, UD_PX);
+    if (m->buf)
+        ug_draw_field(u->win, l, x + 12, y + 46, w - 24, 22, m->buf, 1);
+    ug_answers(u, by, m->yes, m->no);
 }
 
 /* The panel takes every event while it is up: that is what makes it a
@@ -584,10 +648,8 @@ static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
 static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
                                  const struct win_event *ev)
 {
-    int x = 8, w = u->w - 16;
     int y = ug_modal_y(u);
-    int by = y + UG_MODAL_H - 26;
-    int bw = 84;
+    int by = y + UG_MODAL_H - UG_BTN_H - 12;
 
     if (!m->on)
         return UG_NOTHING;
@@ -598,19 +660,18 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
         return UG_CLOSED;
     }
     if (ev->type == WEV_CLICK) {
-        if (ev->y >= by && ev->y < by + 16) {
-            if (ev->x >= x + 8 && ev->x < x + 8 + bw) {
+        if (ev->y >= by && ev->y < by + UG_BTN_H) {
+            if (ev->x >= ug_yes_x() && ev->x < ug_yes_x() + UG_BTN_W) {
                 m->on = 0;
                 m->answer = 1;
                 return UG_PRESSED;
             }
-            if (ev->x >= x + 8 + bw + 10 && ev->x < x + 8 + 2 * bw + 10) {
+            if (ev->x >= ug_no_x() && ev->x < ug_no_x() + UG_BTN_W) {
                 m->on = 0;
                 m->answer = 0;
                 return UG_PRESSED;
             }
         }
-        (void)w;
         return UG_NOTHING;
     }
     if (ev->type == WEV_KEY) {
@@ -658,8 +719,8 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
  * typing goes on working exactly as it did, which is why the old way
  * of using it still works.
  */
-#define UG_PICK_H   150
 #define UG_PICK_ROWS 7
+#define UG_PICK_H   (30 + UG_PICK_ROWS * UG_ROW + 8 + 22 + 10 + UG_BTN_H + 12)
 
 struct ug_pick {
     int on;
@@ -701,22 +762,27 @@ static inline int ug_pick_y(struct ug *u)
     return y < 2 ? 2 : y;
 }
 
+/* The list's top, and the line under it */
+static inline int ug_pick_list_y(struct ug *u) { return ug_pick_y(u) + 30; }
+static inline int ug_pick_field_y(struct ug *u)
+{
+    return ug_pick_list_y(u) + UG_PICK_ROWS * UG_ROW + 8;
+}
+
 static inline void ug_pick_draw(struct ug *u, struct ug_pick *p)
 {
     if (!p->on)
         return;
 
-    int x = 8, w = u->w - 16;
+    int x = 10, w = u->w - 20;
     int y = ug_pick_y(u);
-    int listy = y + 24;
-    int fieldy = listy + UG_PICK_ROWS * UG_ROW + 6;
-    int by = y + UG_PICK_H - 24;
-    int bw = 84;
+    int listy = ug_pick_list_y(u);
+    int by = y + UG_PICK_H - UG_BTN_H - 12;
 
-    win_rect(u->win, x, y, w, UG_PICK_H, UG_WHITE);
-    win_rect(u->win, x, y, w, 2, UG_BLUE);
-    win_rect(u->win, x, y + UG_PICK_H - 2, w, 2, UG_BLUE);
-    win_text(u->win, x + 8, y + 8, p->title, UG_BLACK);
+    ug_panel(u, y, UG_PICK_H);
+    const struct ud_look *l = &u->look;
+    ud_text(u->win, x + 12, y + 20, p->title, l->text, UD_BOLD, UD_PX);
+    ud_round(u->win, x + 8, listy, w - 16, UG_PICK_ROWS * UG_ROW, UG_R, l->bg);
 
     for (int r = 0; r < UG_PICK_ROWS && p->top + r < p->rows; r++) {
         int index = p->top + r;
@@ -724,25 +790,17 @@ static inline void ug_pick_draw(struct ug *u, struct ug_pick *p)
         int ry = listy + r * UG_ROW;
 
         if (index == p->chosen) {
-            win_rect(u->win, x + 4, ry, w - 8, UG_ROW, UG_BLUE);
-            win_text(u->win, x + 8, ry + 2, s, UG_WHITE);
+            ud_round(u->win, x + 10, ry + 1, w - 20, UG_ROW - 2, 5, l->accent);
+            ug_say(u->win, x + 16, ry, UG_ROW, s, l->on_accent, UD_SANS);
         } else {
-            win_text(u->win, x + 8, ry + 2, s, UG_BLACK);
+            ug_say(u->win, x + 16, ry, UG_ROW, s, l->text, UD_SANS);
         }
     }
 
-    if (p->buf) {
-        win_rect(u->win, x + 8, fieldy, w - 16, UG_ROW + 4, UG_BG);
-        win_text(u->win, x + 11, fieldy + 3, p->buf, UG_BLACK);
-        int at = x + 11 + ug_len(p->buf) * 8;
-        if (at < x + w - 10)
-            win_rect(u->win, at, fieldy + 2, 1, UG_ROW, UG_BLACK);
-    }
-
-    win_rect(u->win, x + 8, by, bw, 16, UG_BLUE);
-    win_text(u->win, x + 16, by + 4, p->yes, UG_WHITE);
-    win_rect(u->win, x + 8 + bw + 10, by, bw, 16, UG_DIM);
-    win_text(u->win, x + 8 + bw + 18, by + 4, p->no, UG_WHITE);
+    if (p->buf)
+        ug_draw_field(u->win, l, x + 8, ug_pick_field_y(u), w - 16, 22,
+                      p->buf, 1);
+    ug_answers(u, by, p->yes, p->no);
 }
 
 static inline void ug_pick_take(struct ug_pick *p, int index)
@@ -764,11 +822,10 @@ static inline void ug_pick_take(struct ug_pick *p, int index)
 static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
                                 const struct win_event *ev)
 {
-    int x = 8, w = u->w - 16;
+    int x = 10, w = u->w - 20;
     int y = ug_pick_y(u);
-    int listy = y + 24;
-    int by = y + UG_PICK_H - 24;
-    int bw = 84;
+    int listy = ug_pick_list_y(u);
+    int by = y + UG_PICK_H - UG_BTN_H - 12;
 
     if (!p->on)
         return UG_NOTHING;
@@ -787,13 +844,13 @@ static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
         return UG_CHANGED;
     }
     if (ev->type == WEV_CLICK) {
-        if (ev->y >= by && ev->y < by + 16) {
-            if (ev->x >= x + 8 && ev->x < x + 8 + bw) {
+        if (ev->y >= by && ev->y < by + UG_BTN_H) {
+            if (ev->x >= ug_yes_x() && ev->x < ug_yes_x() + UG_BTN_W) {
                 p->on = 0;
                 p->answer = 1;
                 return UG_PRESSED;
             }
-            if (ev->x >= x + 8 + bw + 10 && ev->x < x + 8 + 2 * bw + 10) {
+            if (ev->x >= ug_no_x() && ev->x < ug_no_x() + UG_BTN_W) {
                 p->on = 0;
                 p->answer = 0;
                 return UG_PRESSED;

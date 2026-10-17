@@ -41,23 +41,31 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The application window is slot 2: the compositor cascades them at
-# (70+12i, 30+12i), so (94,54). gsettings asks for 330x160 content.
+# (70+12i, 30+12i), so (94,54). gsettings asks for GSET_W x GSET_H of content.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
-WW, WH = 362, 210 + TITLE_H + 2
+WW, WH = GSET_W + 2, GSET_H + TITLE_H + 2
 
 # Where to look, and why there. The kernel's own windows sit at
 # (40,60) 120x70 and (180,95) 120x70, so a probe has to fall inside the
 # application's window and outside both of those - otherwise it reads
 # somebody else's grey and says nothing.
-P_APP = (400, 200)          # inside gsettings, past both kernel windows
+# Inside gsettings, past both kernel windows - and right of its rows,
+# which stop six pixels short of its edge: its own background
+P_APP = (WX + 1 + GSET_W - 3, 200)
 P_DEAF = (170, 59 + CONTENT_DY)   # inside gdeaf, in the gap between them
 
 
 def grey(px):
-    """Is this the grey of a window's background (56,56,56 -> ~227)?"""
+    """Is this the grey of an old-style window's background (gdeaf
+    draws in the palette: 56,56,56 -> ~227)?"""
     r, g, b = px
     return r > 200 and g > 200 and b > 200 and abs(r - g) < 12
+
+
+def app_bg(px):
+    """The background a program drawing in the theme's colours has"""
+    return near(px, theme("dark")["win_bg"], 3)
 
 
 def main():
@@ -80,11 +88,11 @@ def main():
 
             w, h, at = q.screen_raw()
             check("the application window opened (a grey background in slot 2)",
-                  grey(at(*P_APP)))
+                  app_bg(at(*P_APP)))
             # Beyond the window there is desktop - so that growing it is
             # visible as a change and not as something already there
             check("outside the window is the desktop, not a window",
-                  not grey(at(WX + WW + 60, WY + 100)))
+                  not app_bg(at(WX + WW + 60, WY + 100)))
 
             # --- resizing ----------------------------------------------
             q.mouse_goto(WX + WW - 4, WY + WH - 4)     # the grip
@@ -98,12 +106,12 @@ def main():
 
             w, h, at = q.screen_raw()
             check("the window grew where the desktop used to be",
-                  grey(at(WX + WW + 60, WY + 100)))
+                  app_bg(at(WX + WW + 60, WY + 100)))
             # The program redrew itself at the new size: its background
             # reaches the new bottom edge, and a buffer that was not
             # remade would leave rubbish or the desktop there
             check("the program redrew itself at the new size",
-                  grey(at(WX + 40, WY + WH + 30)))
+                  app_bg(at(WX + WW + 60, WY + WH + 30)))
 
 
             # --- closing: the program is asked and ends itself ---------
@@ -119,7 +127,7 @@ def main():
                   "process \'gsettings\' has ended (code 0)" in log)
 
             w, h, at = q.screen_raw()
-            check("the window is gone from the screen", not grey(at(*P_APP)))
+            check("the window is gone from the screen", not app_bg(at(*P_APP)))
             # The tile in the dock has to go too - a window that is gone
             # from the screen and left in the dock is half-closed
             check("and it went from the dock", q.dock_windows() == 2)

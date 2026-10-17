@@ -22,29 +22,19 @@
 #include "uapi.h"
 #include "ugui.h"
 
-/* Dark text on a light surface, light text on a dark one. The window
-   is the system's light grey, so its text is BLACK; white belongs on
-   the accent blue and nowhere else. */
-#define C_BG    8             /* the window's light grey */
-#define C_TEXT  0             /* black - text on the window */
-#define C_DIM  15             /* dark grey - the same, said quietly */
-#define C_HEAD  3             /* the accent: headings, buttons, the picked row */
-#define C_WHITE 4             /* only ever on something dark */
-#define C_LINE 11             /* a line between one thing and the next */
-#define C_BLUE  3
-#define C_GREEN 2
-#define C_RED   1
-
-#define W0 320
-#define H0 220
-#define HEAD_H 12
-#define ROW_Y0 18
-#define ROW_H 10
+#define W0 380
+#define H0 270
+#define HEAD_H 32             /* the heading and the three buttons */
+#define BTN_H 22
+#define ROW_Y0 38             /* the first row: under the heading, and a gap */
+#define NAME_X 36             /* a name, right of its picture */
+#define ROW_H 20
+#define FOOT_H 24             /* the status line along the bottom */
 #define MAXF 64               /* names kept; the window scrolls through them */
 #define NAME_LEN 32
 #define EDIT_W 56             /* the three buttons, kept at the right edge */
-#define DEL_W 48
-#define NAME_W 56
+#define DEL_W 70
+#define NAME_W 70
 
 struct entry {
     char name[NAME_LEN];
@@ -79,13 +69,13 @@ static int winid = -1;
 /* The buttons hold the right-hand edge, whatever the window has been
    pulled to - nailed to a number they end up in the middle of a
    maximised window. */
-static int del_x(void)  { return cw - DEL_W; }
-static int edit_x(void) { return cw - DEL_W - EDIT_W - 4; }
-static int name_x(void) { return cw - DEL_W - EDIT_W - NAME_W - 8; }
+static int del_x(void)  { return cw - 10 - DEL_W; }
+static int edit_x(void) { return del_x() - 6 - EDIT_W; }
+static int name_x(void) { return edit_x() - 6 - NAME_W; }
 
 static int rows_shown(void)
 {
-    int n = (ch - ROW_Y0 - 12) / ROW_H;
+    int n = (ch - ROW_Y0 - FOOT_H - 2) / ROW_H;
     return n < 1 ? 1 : n;
 }
 
@@ -333,12 +323,28 @@ static void go_up(void)
 
 /* --- drawing ------------------------------------------------------- */
 
+/* What a row is, drawn small at its left: a folder, or a sheet */
+static void draw_kind(int win, const struct ud_look *l, int x, int y,
+                      int is_dir, int picked)
+{
+    if (is_dir) {
+        uint32_t c = picked ? l->on_accent : 0x5AB4F5;
+        ud_round(win, x, y + 4, 7, 4, 2, c);
+        ud_round(win, x, y + 6, 16, 11, 3, c);
+    } else {
+        ud_round(win, x + 2, y + 3, 12, 14, 2, picked ? l->on_accent : l->field);
+        ud_ring(win, x + 2, y + 3, 12, 14, 2, picked ? l->on_accent : l->dim);
+    }
+}
+
 static void draw(void)
 {
     int win = winid;
     int shown = rows_shown();
+    struct ud_look l;
+    ud_look(&l);
 
-    win_rect(win, 0, 0, cw, ch, C_BG);
+    ud_fill(win, 0, 0, cw, ch, l.bg);
 
     /* The heading says where we are and how much is here */
     char head[80];
@@ -350,15 +356,16 @@ static void draw(void)
     p += num(head + p, (unsigned)count);
     head[p++] = ')';
     head[p] = '\0';
-    win_text(win, 4, 2, head, C_HEAD);
+    ud_text(win, 12, ud_baseline(0, HEAD_H, 13), head, l.text, UD_BOLD, 13);
 
-    win_rect(win, name_x(), 0, NAME_W, HEAD_H, asking ? C_RED : C_BLUE);
-    win_text(win, name_x() + 4, 2, "Rename", C_WHITE);
-    win_rect(win, edit_x(), 0, EDIT_W, HEAD_H, C_BLUE);
-    win_text(win, edit_x() + 4, 2, "Open", C_WHITE);
-    win_rect(win, del_x(), 0, DEL_W, HEAD_H, ask.on ? C_RED : C_BLUE);
-    win_text(win, del_x() + 8, 2, "Remove", C_WHITE);
-    win_rect(win, 0, ROW_Y0 - 3, cw, 1, C_LINE);
+    int by = (HEAD_H - BTN_H) / 2;
+    ug_draw_button(win, &l, name_x(), by, NAME_W, BTN_H, "Rename",
+                   asking ? l.danger : l.row, asking ? l.on_accent : l.text);
+    ug_draw_button(win, &l, edit_x(), by, EDIT_W, BTN_H, "Open", l.accent,
+                   l.on_accent);
+    ug_draw_button(win, &l, del_x(), by, DEL_W, BTN_H, "Remove",
+                   ask.on ? l.danger : l.row, ask.on ? l.on_accent : l.danger);
+    ud_fill(win, 0, HEAD_H, cw, 1, l.line);
 
     for (int i = 0; i < shown; i++) {
         int idx = top + i;
@@ -367,63 +374,66 @@ static void draw(void)
         int y = ROW_Y0 + i * ROW_H;
         int picked = idx == chosen;
         if (picked)
-            win_rect(win, 0, y - 1, cw, ROW_H, C_BLUE);
-        /* A directory is said by weight, not by colour: black for a
-           file, the accent for something one can go into. On a picked
-           row both are white, because the row itself is the accent. */
-        win_text(win, 6, y, items[idx].name,
-                 picked ? C_WHITE : (items[idx].is_dir ? C_HEAD : C_TEXT));
+            ud_round(win, 6, y, cw - 12, ROW_H, 6, l.accent);
+        uint32_t ink = picked ? l.on_accent : l.text;
+        uint32_t quiet = picked ? l.on_accent : l.dim;
+        int base = ud_baseline(y, ROW_H, UD_PX);
+        draw_kind(win, &l, 12, y, items[idx].is_dir, picked);
+        ud_text(win, NAME_X, base, items[idx].name, ink,
+                items[idx].is_dir ? UD_BOLD : UD_SANS, UD_PX);
+        /* Right-aligned, like the sizes it stands in place of: two
+           columns that end in different places read as two columns. */
         if (items[idx].is_dir) {
-            /* Right-aligned, like the sizes it stands in place of: two
-               columns that end in different places read as two
-               columns. */
-            win_text(win, cw - 6 * 8 - 6, y, "folder",
-                     picked ? C_WHITE : C_DIM);
+            ud_text_right(win, cw - 14, base, "folder", quiet, UD_SANS, UD_PX);
         } else {
             char sz[16];
             int n = num(sz, items[idx].size);
             sz[n++] = ' ';
             sz[n++] = 'B';
             sz[n] = '\0';
-            win_text(win, cw - 8 * n - 6, y, sz,
-                     picked ? C_WHITE : C_DIM);
+            ud_text_right(win, cw - 14, base, sz, quiet, UD_SANS, UD_PX);
         }
     }
 
+    /* The status line along the bottom */
+    int fy = ch - FOOT_H;
+    ud_fill(win, 0, fy, cw, 1, l.line);
+    int fb = ud_baseline(fy, FOOT_H, 11);
+
     /* Which part of the list is on the screen - a list that scrolls
-       without saying so is a list that seems to have lost things. It
-       goes at the BOTTOM: the top row belongs to the buttons now. */
+       without saying so is a list that seems to have lost things. */
     if (count > shown) {
         char more[24];
         int n = 0;
-        more[n++] = '[';
         n += num(more + n, (unsigned)(top + 1));
         more[n++] = '-';
         n += num(more + n, (unsigned)(top + shown > count ? count
                                                           : top + shown));
-        more[n++] = '/';
+        more[n++] = ' ';
+        more[n++] = 'o';
+        more[n++] = 'f';
+        more[n++] = ' ';
         n += num(more + n, (unsigned)count);
-        more[n++] = ']';
         more[n] = '\0';
-        win_text(win, cw - 8 * n - 4, ch - 10, more, C_DIM);
+        ud_text_right(win, cw - 12, fb, more, l.dim, UD_SANS, 11);
     }
 
     if (asking) {
         char line[64];
-        int p = 0;
+        int p2 = 0;
         const char *q = "New name: ";
         for (int i = 0; q[i]; i++)
-            line[p++] = q[i];
-        for (int i = 0; i < alen && p < (int)sizeof(line) - 2; i++)
-            line[p++] = answer[i];
-        line[p++] = '_';
-        line[p] = '\0';
-        win_text(win, 4, ch - 10, line, C_HEAD);
+            line[p2++] = q[i];
+        for (int i = 0; i < alen && p2 < (int)sizeof(line) - 2; i++)
+            line[p2++] = answer[i];
+        line[p2++] = '_';
+        line[p2] = '\0';
+        ud_text(win, 12, fb, line, l.accent, UD_BOLD, 11);
     } else if (note[0]) {
-        win_text(win, 4, ch - 10, note, C_TEXT);
+        ud_text(win, 12, fb, note, l.text, UD_SANS, 11);
     } else {
-        win_text(win, 4, ch - 10,
-                 "PgUp/PgDn scrolls, '..' goes up", C_DIM);
+        ud_text(win, 12, fb, "PgUp/PgDn scrolls, '..' goes up", l.dim,
+                UD_SANS, 11);
     }
 
     /* Last, and therefore over everything: a question one can scroll
@@ -538,8 +548,8 @@ void _start(void)
                     }
                 } else if (ev.y < HEAD_H && ev.x >= edit_x()) {
                     open_chosen();
-                } else if (ev.y >= ROW_Y0 - 1) {
-                    int r = (ev.y - ROW_Y0 + 1) / ROW_H + top;
+                } else if (ev.y >= ROW_Y0) {
+                    int r = (ev.y - ROW_Y0) / ROW_H + top;
                     if (r >= 0 && r < count) {
                         chosen = r;
                         note[0] = '\0';

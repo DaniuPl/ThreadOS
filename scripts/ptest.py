@@ -690,6 +690,115 @@ globals().update({k: v for k, v in LOOK.items() if not k.startswith("_")})
 
 # The size of the desktop's lettering
 UI_PX = _kernel_define("kernel/include/uitext.h", "UI_PX")
+# ... and of the programs', which draw through user/udraw.h
+UD_PX = _kernel_define("user/udraw.h", "UD_PX")
+
+# The settings window (user/gsettings.c): its size, its rows, where a
+# setting's value starts, and the line at its bottom that says what
+# became of a change
+GSET_W = _kernel_define("user/gsettings.c", "W0")
+GSET_H = _kernel_define("user/gsettings.c", "H0")
+GSET_ROW_Y = _kernel_define("user/gsettings.c", "ROW_Y")
+GSET_ROW_H = _kernel_define("user/gsettings.c", "ROW_H")
+GSET_VAL_X = _kernel_define("user/gsettings.c", "VAL_X")
+GSET_NOTE_DY = _kernel_define("user/gsettings.c", "NOTE_DY")
+
+
+# The clock (user/gclock.c): its size and the time on it
+GCLOCK_W = _kernel_define("user/gclock.c", "W")
+GCLOCK_H = _kernel_define("user/gclock.c", "H")
+GCLOCK_PX = _kernel_define("user/gclock.c", "TIME_PX")
+GCLOCK_TIME_Y = _kernel_define("user/gclock.c", "TIME_Y")
+GCLOCK_TIME_H = _kernel_define("user/gclock.c", "TIME_H")
+
+
+# The file manager (user/gfiles.c): its size, its rows and the status
+# line along its bottom
+GFILES_W = _kernel_define("user/gfiles.c", "W0")
+GFILES_H = _kernel_define("user/gfiles.c", "H0")
+GFILES_HEAD_H = _kernel_define("user/gfiles.c", "HEAD_H")
+GFILES_ROW_Y0 = _kernel_define("user/gfiles.c", "ROW_Y0")
+GFILES_ROW_H = _kernel_define("user/gfiles.c", "ROW_H")
+GFILES_FOOT_H = _kernel_define("user/gfiles.c", "FOOT_H")
+GFILES_NAME_X = _kernel_define("user/gfiles.c", "NAME_X")
+
+
+# The kit's question panel (user/ugui.h): a band across the middle of
+# a window, a bold question at its top and two answers at its bottom
+UG_MODAL_H = _kernel_define("user/ugui.h", "UG_MODAL_H")
+UG_BTN_W = _kernel_define("user/ugui.h", "UG_BTN_W")
+UG_BTN_H = _kernel_define("user/ugui.h", "UG_BTN_H")
+
+
+def ug_modal(ch):
+    """Where the question panel of a window ch tall is, in its content:
+    its top 'y', the baseline of its question, and the middles of its
+    two answers"""
+    y = max((ch - UG_MODAL_H) // 2, 0)
+    by = y + UG_MODAL_H - UG_BTN_H - 12
+    yes_x = 10 + 12
+    no_x = yes_x + UG_BTN_W + 10
+    return {"y": y, "title": y + 22,
+            "yes": (yes_x + UG_BTN_W // 2, by + UG_BTN_H // 2),
+            "no": (no_x + UG_BTN_W // 2, by + UG_BTN_H // 2)}
+
+
+# ... and its picker: a title, a list of names, a line to type in and
+# the two answers
+UG_ROW = _kernel_define("user/ugui.h", "UG_ROW")
+UG_PICK_ROWS = _kernel_define("user/ugui.h", "UG_PICK_ROWS")
+UG_PICK_H = 30 + UG_PICK_ROWS * UG_ROW + 8 + 22 + 10 + UG_BTN_H + 12
+
+
+def ug_pick(ch):
+    """Where the picker of a window ch tall is, in its content: the
+    baseline of its title, the top of its list, the middle of its row
+    r (row_y(r)) and the middles of its two answers"""
+    y = max((ch - UG_PICK_H) // 2, 2)
+    list_y = y + 30
+    by = y + UG_PICK_H - UG_BTN_H - 12
+    yes_x = 10 + 12
+    no_x = yes_x + UG_BTN_W + 10
+    return {"y": y, "title": y + 20, "list_y": list_y,
+            "row_y": lambda r: list_y + r * UG_ROW + UG_ROW // 2,
+            "yes": (yes_x + UG_BTN_W // 2, by + UG_BTN_H // 2),
+            "no": (no_x + UG_BTN_W // 2, by + UG_BTN_H // 2)}
+
+
+# The file manager's three buttons, held against the right edge of its
+# heading: Remove, then Open, then Rename
+GFILES_DEL_W = _kernel_define("user/gfiles.c", "DEL_W")
+GFILES_EDIT_W = _kernel_define("user/gfiles.c", "EDIT_W")
+GFILES_RENAME_W = _kernel_define("user/gfiles.c", "NAME_W")
+
+
+def gfiles_button(which, cw=None):
+    """The middle of the file manager's button 'remove', 'open' or
+    'rename', in its content"""
+    cw = cw or GFILES_W
+    del_x = cw - 10 - GFILES_DEL_W
+    edit_x = del_x - 6 - GFILES_EDIT_W
+    name_x = edit_x - 6 - GFILES_RENAME_W
+    x = {"remove": del_x + GFILES_DEL_W // 2,
+         "open": edit_x + GFILES_EDIT_W // 2,
+         "rename": name_x + GFILES_RENAME_W // 2}[which]
+    return x, GFILES_HEAD_H // 2
+
+
+# The picture viewer (user/gimg.c): its status line along the bottom
+GIMG_STATUS_H = _kernel_define("user/gimg.c", "STATUS_H")
+GIMG_STATUS_PX = _kernel_define("user/gimg.c", "STATUS_PX")
+
+
+def gfiles_row_y(r):
+    """The middle of the file manager's row r (counted from the top of
+    what is shown), in its content"""
+    return GFILES_ROW_Y0 + r * GFILES_ROW_H + GFILES_ROW_H // 2
+
+
+def gset_row_y(r):
+    """The middle of the settings window's row r, in its content"""
+    return GSET_ROW_Y + r * GSET_ROW_H + GSET_ROW_H // 2
 # Where a window's content starts below its top edge: the frame line
 # and the title bar
 CONTENT_DY = 1 + TITLE_H
@@ -1001,6 +1110,91 @@ class UiFont:
                  b.rows, a)
             self.cache[ch] = g
         return g
+
+
+# --- shapes, by their true areas ------------------------------------------
+
+SHAPE_SUB = 16                  # samples per pixel, each way
+
+
+def in_rrect(x, y, rx, ry, rw, rh, r):
+    """Whether (x, y) is inside a rectangle with corners of radius r"""
+    r = min(r, rw / 2, rh / 2)
+    cx, cy = rx + rw / 2, ry + rh / 2
+    qx = abs(x - cx) - (rw / 2 - r)
+    qy = abs(y - cy) - (rh / 2 - r)
+    if qx <= 0 or qy <= 0:
+        return qx <= r and qy <= r
+    return qx * qx + qy * qy <= r * r
+
+
+def in_line(x, y, x0, y0, x1, y1, t):
+    """Whether (x, y) is inside a line t thick with round ends"""
+    dx, dy = x1 - x0, y1 - y0
+    l2 = dx * dx + dy * dy
+    u = 0 if l2 == 0 else max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / l2))
+    px, py = x0 + u * dx, y0 + u * dy
+    return (x - px) ** 2 + (y - py) ** 2 <= (t / 2) ** 2
+
+
+def shape_area(inside, pw, ph):
+    """How much of every pixel of a pw x ph picture the shape covers,
+    out of 255: each pixel cut into SHAPE_SUB x SHAPE_SUB pieces and
+    the ones whose middles are 'inside' counted"""
+    out = []
+    for py in range(ph):
+        row = []
+        for px in range(pw):
+            n = 0
+            for j in range(SHAPE_SUB):
+                y = py + (j + 0.5) / SHAPE_SUB
+                for i in range(SHAPE_SUB):
+                    if inside(px + (i + 0.5) / SHAPE_SUB, y):
+                        n += 1
+            row.append(n * 255 // (SHAPE_SUB * SHAPE_SUB))
+        out.append(row)
+    return out
+
+
+
+def check_area(label, ours, ref, max_diff=20, mean_diff=1.0):
+    """Holds a drawn shape (rows of 0..255) up against its true area:
+    every pixel within max_diff, and on average within mean_diff"""
+    if ours is None:
+        check("%s: the system printed the shape" % label, False)
+        return
+    worst, total, n = 0, 0, 0
+    for ro, rr in zip(ours, ref):
+        for a, b in zip(ro, rr):
+            d = abs(a - b)
+            worst = max(worst, d)
+            total += d
+            n += 1
+    lit = sum(1 for r in ours for v in r if v)
+    check("%s: within %d of the exact area - worst %d, mean %.2f over %d "
+          "pixels (%d lit)" % (label, max_diff, worst, total / n, n, lit),
+          lit > 0 and worst <= max_diff and total / n <= mean_diff)
+
+
+def ui_text_colour(bg, inkiest, colours):
+    """Which of 'colours' text is in, when no pixel of it is wholly
+    covered - red on a dark surface may never reach its own red. Every
+    pixel of the text lies on the way from the background to the text's
+    colour, the inkiest one furthest along it: the colour whose way
+    passes closest to that pixel is the one."""
+    best, best_err = None, None
+    for c in colours:
+        d = [c[i] - bg[i] for i in range(3)]
+        n = sum(v * v for v in d)
+        if not n:
+            continue
+        t = sum((inkiest[i] - bg[i]) * d[i] for i in range(3)) / n
+        if t < 0.5 or t > 1.02:
+            continue
+        err = sum(abs(bg[i] + t * d[i] - inkiest[i]) for i in range(3))
+        if best_err is None or err < best_err:
+            best, best_err = c, err
+    return best if best_err is not None and best_err < 12 else None
 
 
 def ui_mix(text, under, a):
@@ -1988,7 +2182,7 @@ class Qemu:
 
 
     def read_ui(self, x, baseline, width=320, charset=None, px=None,
-                face="sans", under=None, fg=None):
+                face="sans", under=None, fg=None, screen=None, colours=None):
         """Text the desktop drew in its TrueType lettering, starting at
         pen position x on the given baseline - what the kernel's
         ui_text() would have been called with.
@@ -2012,9 +2206,12 @@ class Qemu:
         is not one colour, and text on it is mixed with what is really
         there. 'fg' is the text's colour when it is known - a short
         text, a single '3', may not have two pixels wholly covered to
-        learn it from."""
+        learn it from. 'screen' is a (w, h, at) already taken, for
+        reading many things off one picture. 'colours', when fg is not
+        known, are the colours the text may be in: the one the inkiest
+        pixel lies on the way to is taken."""
         font = UiFont.shared(px, face)
-        w, h, at = self.screen_raw()
+        w, h, at = screen or self.screen_raw()
         top, bot = baseline - font.ascent, baseline + font.descent
         x1 = min(w, x + width)
         if x < 0 or top < 0 or bot > h or x1 <= x:
@@ -2033,6 +2230,8 @@ class Qemu:
                for p, c in counts.items() if c >= 2]
         if not far or max(far)[0] < 60:
             return ""                       # nothing but background
+        if not fg and colours:
+            fg = ui_text_colour(bg, max(far)[1], colours)
         fg = fg or max(far)[1]
 
         # The band once, as rows of tuples: everything below reads it
@@ -2107,14 +2306,14 @@ class Qemu:
         return "".join(out).rstrip()
 
     def find_ui(self, x0, x1, baseline, charset=None, px=None, face="sans",
-                under=None, fg=None):
+                under=None, fg=None, screen=None, colours=None):
         """Text whose start is not known - a title centred in its bar,
         the clock set against the end of the bar: the first column
         between x0 and x1 where anything stands out from the background
         is where the ink begins, and the pen is a pixel or two either
         side of it. Each of those is read and the longest reading wins."""
         font = UiFont.shared(px, face)
-        w, h, at = self.screen_raw()
+        w, h, at = screen = screen or self.screen_raw()
         top, bot = baseline - font.ascent, baseline + font.descent
         x1 = min(x1, w)
         if top < 0 or bot > h or x1 <= x0:
@@ -2137,10 +2336,185 @@ class Qemu:
         for pen in range(start - 2, start + 2):
             got = self.read_ui(pen, baseline, width=x1 - pen,
                                charset=charset, px=px, face=face,
-                               under=under, fg=fg)
+                               under=under, fg=fg, screen=screen,
+                               colours=colours)
             if len(got) > len(best):
                 best = got
         return best
+
+    def gset_row(self, cx, cy, r, chosen=False, dark=True, screen=None):
+        """(name, value) on row r of the settings window whose content
+        starts at (cx, cy). The chosen row wears the accent with its
+        text on it; the others are text and a quieter value."""
+        t = theme("dark" if dark else "light")
+        scr = screen or self.screen_raw()
+        base = cy + ui_font_baseline_in(UD_PX, GSET_ROW_Y + r * GSET_ROW_H,
+                                        GSET_ROW_H)
+        name = self.read_ui(cx + 14, base, GSET_VAL_X - 18, px=UD_PX,
+                            fg=t["accent_text" if chosen else "app_text"],
+                            screen=scr)
+        value = self.read_ui(cx + GSET_VAL_X, base, GSET_W - GSET_VAL_X - 10,
+                             px=UD_PX,
+                             fg=t["accent_text" if chosen else "app_dim"],
+                             screen=scr)
+        return name, value
+
+    def gclock_time(self, cx, cy, dark=True, screen=None):
+        """The 'HH:MM:SS' on the clock whose content starts at (cx, cy):
+        bold, centred in its band"""
+        t = theme("dark" if dark else "light")
+        base = cy + ui_font_baseline_in(GCLOCK_PX, GCLOCK_TIME_Y,
+                                        GCLOCK_TIME_H)
+        return self.find_ui(cx, cx + GCLOCK_W, base, charset="0123456789:",
+                            px=GCLOCK_PX, face="bold", fg=t["app_text"],
+                            screen=screen)
+
+    def gfiles_rows(self, cx, cy, cw=None, ch=None, dark=True, screen=None):
+        """The file manager's list as it stands: (name, size, picked) per
+        row. A folder's name is bold, a file's plain, and its size - or
+        the word 'folder' - is set against the right edge; the picked
+        row wears the accent with its text on it."""
+        t = theme("dark" if dark else "light")
+        w, h, at = scr = screen or self.screen_raw()
+        cw, ch = cw or GFILES_W, ch or GFILES_H
+        out = []
+        r = 0
+        while GFILES_ROW_Y0 + (r + 1) * GFILES_ROW_H <= ch - GFILES_FOOT_H:
+            y = GFILES_ROW_Y0 + r * GFILES_ROW_H
+            picked = near(at(cx + 8, cy + gfiles_row_y(r)), t["accent"], 6)
+            base = cy + ui_font_baseline_in(UD_PX, y, GFILES_ROW_H)
+            ink = t["accent_text" if picked else "app_text"]
+            name = ""
+            for face in ("sans", "bold"):
+                got = self.read_ui(cx + GFILES_NAME_X, base, 200, px=UD_PX,
+                                   face=face, fg=ink, screen=scr)
+                if len(got) > len(name):
+                    name = got
+            if not name:
+                break
+            size = self.find_ui(cx + cw - 110, cx + cw - 6, base, px=UD_PX,
+                                fg=t["accent_text" if picked else "app_dim"],
+                                screen=scr)
+            out.append((name, size, picked))
+            r += 1
+        return out
+
+    def gfiles_heading(self, cx, cy, dark=True):
+        """Where the file manager is: the bold heading at its top left"""
+        t = theme("dark" if dark else "light")
+        return self.read_ui(cx + 12, cy + ui_font_baseline_in(
+            13, 0, GFILES_HEAD_H), 150, px=13, face="bold", fg=t["app_text"])
+
+    def ug_pick_read(self, cx, cy, ch, dark=True):
+        """The picker of a program built on the kit: (its title, the
+        names on its list)"""
+        t = theme("dark" if dark else "light")
+        p = ug_pick(ch)
+        w, h, at = scr = self.screen_raw()
+        title = self.read_ui(cx + 22, cy + p["title"], 300, px=UD_PX,
+                             face="bold", fg=t["app_text"], screen=scr)
+        names = []
+        for r in range(UG_PICK_ROWS):
+            chosen = near(at(cx + 24, cy + p["row_y"](r)), t["accent"], 6)
+            base = cy + ui_font_baseline_in(UD_PX, p["list_y"] + r * UG_ROW,
+                                            UG_ROW)
+            names.append(self.read_ui(
+                cx + 26, base, 300, px=UD_PX, screen=scr,
+                fg=t["accent_text" if chosen else "app_text"]))
+        return title, names
+
+    def ug_question(self, cx, cy, ch, dark=True):
+        """The question a program built on the kit is asking - the bold
+        line at the top of its panel"""
+        t = theme("dark" if dark else "light")
+        return self.read_ui(cx + 22, cy + ug_modal(ch)["title"], 300,
+                            px=UD_PX, face="bold", fg=t["app_text"])
+
+    def gfiles_status(self, cx, cy, ch=None, dark=True):
+        """The status line along the bottom of the file manager"""
+        t = theme("dark" if dark else "light")
+        base = cy + ui_font_baseline_in(11, (ch or GFILES_H) - GFILES_FOOT_H,
+                                        GFILES_FOOT_H)
+        return self.read_ui_lines(cx + 8, cx + GFILES_W - 4, [base], px=11,
+                                  colours=[t["app_text"], t["app_dim"],
+                                           t["accent"]])
+
+    def gimg_status(self, cx, cy, cw, ch, dark=True):
+        """What the picture viewer's status line says"""
+        t = theme("dark" if dark else "light")
+        base = cy + ui_font_baseline_in(GIMG_STATUS_PX, ch - GIMG_STATUS_H,
+                                        GIMG_STATUS_H)
+        return self.read_ui(cx + 8, base, cw - 12, px=GIMG_STATUS_PX,
+                            fg=t["app_text"])
+
+    def gset_note(self, cx, cy, ch=None, dark=True):
+        """The line at the bottom of the settings window: whether the
+        last change was saved (bold, good or bad news), or - while the
+        password is asked for - what it is asked for (small and quiet)"""
+        t = theme("dark" if dark else "light")
+        base = cy + (ch or GSET_H) - GSET_NOTE_DY
+        scr = self.screen_raw()
+        news = self.read_ui(cx + 12, base, GSET_W - 24, px=UD_PX, face="bold",
+                            colours=[t["app_good"], t["app_danger"]],
+                            screen=scr)
+        quiet = self.read_ui(cx + 12, base, GSET_W - 24, px=11,
+                             fg=t["app_dim"], screen=scr)
+        return news if len(news) >= len(quiet) else quiet
+
+    def read_ui_lines(self, x0, x1, baselines, px=None,
+                      faces=("sans", "bold"), screen=None, gap=14,
+                      colours=None):
+        """A page of TrueType text - what a program wrote into its
+        window through user/udraw.h - one line per baseline, the lines
+        joined with newlines.
+
+        A line is not one piece of text: a name and a size in a column
+        further right, a label and its value. So each line is cut where
+        the ink stops for 'gap' pixels or more, every piece is read on
+        its own - from where its ink starts, and in its own colour,
+        since a line may be text with a quieter number after it - and
+        the pieces are joined with a space. A piece is tried in each of
+        'faces' - a heading is bold - and the longest reading wins."""
+        w, h, at = screen = screen or self.screen_raw()
+        font = UiFont.shared(px, faces[0])
+        x1 = min(x1, w)
+        lines = []
+        for base in baselines:
+            top, bot = base - font.ascent, base + font.descent
+            if top < 0 or bot > h:
+                lines.append("")
+                continue
+            counts = {}
+            for yy in range(top, bot):
+                for xx in range(x0, x1):
+                    p = at(xx, yy)
+                    counts[p] = counts.get(p, 0) + 1
+            bg = max(counts, key=counts.get)
+            ink = [any(sum(abs(a - b) for a, b in zip(at(xx, yy), bg)) > 40
+                       for yy in range(top, bot)) for xx in range(x0, x1)]
+            pieces, start, last = [], None, None
+            for i, on in enumerate(ink):
+                if on:
+                    if start is None:
+                        start = i
+                    elif i - last > gap:
+                        pieces.append((start, last))
+                        start = i
+                    last = i
+            if start is not None:
+                pieces.append((start, last))
+            words = []
+            for a, b in pieces:
+                got = ""
+                for f in faces:
+                    one = self.find_ui(x0 + a, x0 + b + 8, base, px=px,
+                                       face=f, screen=screen, colours=colours)
+                    if len(one) > len(got):
+                        got = one
+                if got:
+                    words.append(got)
+            lines.append(" ".join(words))
+        return "\n".join(lines)
 
     def window_title(self, wx, wy, ww=None):
         """A window's name as its title bar shows it: kernel/desktop.c

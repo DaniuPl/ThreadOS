@@ -140,6 +140,22 @@
 #define DARK_ACCENT        0x0A84FF
 #define DARK_ACCENT_TEXT   0xFFFFFF
 
+/* --- the programs' own colours ----------------------------------------------
+ * What a program draws its window in (desktop_ui_look): its background
+ * is the window's body (..._WIN_BG); these are the rest. */
+#define LIGHT_APP_FIELD    0xFFFFFF   /* a field, a list - a surface to fill */
+#define LIGHT_APP_TEXT     0x1D1D1F
+#define LIGHT_APP_DIM      0x6E6E76
+#define LIGHT_APP_ROW      0xE6E6EC   /* a row under the pointer, a stripe */
+#define LIGHT_APP_DANGER   0xFF3B30
+#define LIGHT_APP_GOOD     0x28A745
+#define DARK_APP_FIELD     0x1C1C20
+#define DARK_APP_TEXT      0xEDEDF0
+#define DARK_APP_DIM       0x9A9AA2
+#define DARK_APP_ROW       0x34343B
+#define DARK_APP_DANGER    0xFF453A
+#define DARK_APP_GOOD      0x30D158
+
 /* The colours of one theme, as the compositor uses them */
 struct look {
     uint32_t bar_tint;  int bar_a;

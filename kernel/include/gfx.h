@@ -90,6 +90,29 @@ void gfx_round_save(int x, int y, int w, int h, int r, uint32_t *keep);
 void gfx_round_apply(int x, int y, int w, int h, int r,
                      const uint32_t *keep);
 
+/* The same calls with the target said each time ('t', NULL = the
+   screen) rather than taken from gfx_target(). What a program draws in
+   its own window goes through these: it may be doing it on another
+   core, or in the middle of the compositor's frame, and must not move
+   the compositor's target from under it. */
+uint32_t gfx_get_s(const struct gfx_surface *t, int x, int y);
+void gfx_put_s(const struct gfx_surface *t, int x, int y, uint32_t c);
+void gfx_blend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a);
+void gfx_fill_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                uint32_t c, int a);
+void gfx_fill_grad_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                     uint32_t top, uint32_t bottom, int a);
+void gfx_rrect16_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                   int r, uint32_t c, int a);
+void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                   int r, int thick, uint32_t c, int a);
+void gfx_rrect_grad_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                      int r, uint32_t top, uint32_t bottom, int a);
+void gfx_disc16_s(const struct gfx_surface *t, int cx, int cy, int rad,
+                  uint32_t c, int a);
+void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
+                  int thick, uint32_t c, int a);
+
 /* The 'shape' shell command: shapes printed as numbers, for the test */
 void gfx_command(const char *arg);
 

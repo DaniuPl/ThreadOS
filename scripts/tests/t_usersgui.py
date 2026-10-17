@@ -80,47 +80,17 @@ def wait_row(q, want, geom, tries=15):
     return seen
 
 
-def read_band(q, ox, oy, cols):
-    """One line of text off the screen, eight pixels tall.
-
-    The settings window puts its rows fourteen pixels apart and its
-    notes eleven, so there is no single grid to read it by - but every
-    line is still eight pixels of the same font, and one line is all
-    these assertions need."""
-    w, h, at = q.screen_raw()
-    font = font8x8()
-    counts = {}
-    for y in range(8):
-        for x in range(ox, ox + cols * 8):
-            p = at(x, oy + y)
-            counts[p] = counts.get(p, 0) + 1
-    bg = max(counts, key=counts.get)
-
-    line = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if at(ox + c * 8 + x, oy + y) != bg:
-                    bits |= 1 << x
-            pattern.append(bits)
-        line += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return line.rstrip()
-
-
-def window_says(q, ox, y_from, y_to, want, tries=8):
-    """Is that text anywhere in the band of lines? The status line of
-    the settings window moves with the length of the description above
-    it, so we look through the few rows it can be on."""
+def window_says(q, cx, cy, want, tries=8):
+    """Does the line at the bottom of the settings window say that? It
+    is redrawn when the program gets round to it, so we look again
+    rather than assume."""
+    said = ""
     for _ in range(tries):
-        # Every row, not every third: a glyph read two pixels off its
-        # own line decodes into nothing at all, so there is no such
-        # thing as being nearly on it.
-        for oy in range(y_from, y_to):
-            if want in read_band(q, ox, oy, 20):
-                return True
+        said = q.gset_note(cx, cy)
+        if want in said:
+            return True
         time.sleep(0.6)
+    print("      (the window says '%s')" % said)
     return False
 
 
@@ -209,10 +179,10 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3: (106,66), content from (107,77). The 'tlo' row is
-            # the fourth: ROW_Y=22 + 3*14 = 64
+            # Slot 3: (106,66), content from (107,77). The background
+            # is the fourth row.
             SX, SY = 106 + 1, 66 + CONTENT_DY
-            q.mouse_goto(SX + 40, SY + 64)
+            q.mouse_goto(SX + 40, SY + gset_row_y(3))
             q.mouse_click()
             time.sleep(1)
             q.mouse_click()                # cycle the value
@@ -222,11 +192,9 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # The status line sits under the description of the
-            # setting, so its exact row depends on how long that is -
-            # we look through the band it can be in.
+            # What became of it is said on the line at the bottom
             check("the settings window says admin is needed",
-                  window_says(q, SX + 6, SY + 100, SY + 200, "the admin password"))
+                  window_says(q, SX, SY, "needs admin"))
 
             typed(q, "wrongpassword")
             q.sendkey("ret")
@@ -234,7 +202,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
             check("a wrong password in the window writes nothing either",
-                  window_says(q, SX + 6, SY + 100, SY + 200, "NOT saved"))
+                  window_says(q, SX, SY, "NOT saved"))
 
             q.sendkey("ret")               # ask again
             time.sleep(1.5)
@@ -244,8 +212,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
             check("the right password saves the setting",
-                  window_says(q, SX + 6, SY + 100, SY + 200,
-                              "saved to the disk"))
+                  window_says(q, SX, SY, "Saved to the disk"))
         finally:
             q.close()
     finally:

@@ -218,21 +218,29 @@ int ui_text_width(const char *s)
 
 /* --- drawing ------------------------------------------------------------- */
 
-int ui_font_text(int font, int px, int x, int baseline, const char *s,
-                 uint32_t rgb)
+/* 'cur' says the compositor's current target (gfx_target()), and then
+   't' is not looked at; otherwise the text goes onto 't' */
+static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
+                     int x, int baseline, const char *s, uint32_t rgb)
 {
     const struct ttf_font *f = font_of(font);
     if (!f) {
         int n = 0;
         while (s[n])
             n++;
-        video_draw_string(x, baseline - 8, s, video_nearest_index(rgb));
+        if (cur)
+            video_draw_string(x, baseline - 8, s, video_nearest_index(rgb));
         return x + 8 * n;
     }
 
     int32_t pen = (int32_t)x << 6;
 
-    spin_lock(&lock);
+    /* With interrupts off, and not only for the lock's sake: the desktop
+       thread draws text with them on, and a timer landing on it while it
+       held this lock would wait for the big lock - which a program on
+       the other core may hold, drawing text into its window, spinning
+       right here for the lock the interrupted thread cannot let go of */
+    irqflags_t fl = spin_lock_irq(&lock);
     while (*s) {
         uint32_t c = next_char(&s);
         const struct cached *g = glyph_of(f, font, px, ttf_glyph(f, c));
@@ -246,13 +254,30 @@ int ui_font_text(int font, int px, int x, int baseline, const char *s,
         for (int r = 0; r < g->h; r++)
             for (int k = 0; k < g->w; k++) {
                 uint8_t v = a[r * g->w + k];
-                if (v)
+                if (!v)
+                    continue;
+                if (cur)
                     gfx_blend(gx + k, gy + r, rgb, v);
+                else
+                    gfx_blend_s(t, gx + k, gy + r, rgb, v);
             }
         pen += g->advance;
     }
-    spin_unlock(&lock);
+    spin_unlock_irq(&lock, fl);
     return (pen + 63) >> 6;
+}
+
+int ui_font_text(int font, int px, int x, int baseline, const char *s,
+                 uint32_t rgb)
+{
+    return draw_text(1, (const struct gfx_surface *)0, font, px, x, baseline,
+                     s, rgb);
+}
+
+int ui_font_text_s(const struct gfx_surface *t, int font, int px, int x,
+                   int baseline, const char *s, uint32_t rgb)
+{
+    return draw_text(0, t, font, px, x, baseline, s, rgb);
 }
 
 int ui_text(int x, int baseline, const char *s, uint8_t colour)

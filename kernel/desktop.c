@@ -393,6 +393,14 @@ static int resize_idx = -1;
    told where the pointer goes. */
 static int content_drag = -1;
 static int drag_dx, drag_dy;
+/* A press on a maximised window's bar: it becomes a drag - and the
+   window its own size again - only once the pointer really moves.
+   Undone on the press itself, the second click of a double click
+   found the window already somewhere else, under the pointer, instead
+   of putting it back where it was. 1 = waiting to see; the press was
+   at (unmax_mx, unmax_my). */
+static int unmax_pending;
+static int unmax_mx, unmax_my;
 static int prev_pressed;    /* the previous left-button state - to detect a click */
 /* Where the pointer was on the last pass. Drawing needs it for one
    thing only: the entry the cursor is over is drawn differently, which
@@ -1617,18 +1625,9 @@ static void handle_input(int mx, int my, int buttons)
                 }
                 last_title_win = i;
                 last_title_click = frames;
-                if (w->maxed) {
-                    int along = w->w > 0 ? (mx - w->x) * w->rw / w->w : 0;
-                    toggle_max(i);
-                    w->x = mx - along;
-                    w->y = my - 3;
-                    if (w->x < 0)
-                        w->x = 0;
-                    if (w->x + w->w > video_w())
-                        w->x = video_w() - w->w;
-                    if (w->y < 0)
-                        w->y = 0;
-                }
+                unmax_pending = w->maxed;
+                unmax_mx = mx;
+                unmax_my = my;
                 drag_idx = i;
                 drag_dx = mx - w->x;
                 drag_dy = my - w->y;
@@ -1668,6 +1667,7 @@ static void handle_input(int mx, int my, int buttons)
             snap_window(drag_idx, snap_hint);
         snap_hint = SNAP_NONE;
         drag_idx = -1;
+        unmax_pending = 0;
         /* The end of a drag inside a window: the application is told
            where the pointer was let go, and that is the whole of what
            the compositor has to say about it. */
@@ -1712,7 +1712,31 @@ static void handle_input(int mx, int my, int buttons)
         }
     }
 
-    if (pressed && drag_idx >= 0) {     /* in progress: the window follows the cursor */
+    /* The pointer moved with the button down on a maximised window's
+       bar: now it is a drag. The window takes its own size back, under
+       the pointer at the same place along its bar, so it does not jump
+       out from under the hand. */
+    if (pressed && drag_idx >= 0 && unmax_pending) {
+        int dx = mx - unmax_mx, dy = my - unmax_my;
+        if (dx * dx + dy * dy >= 16) {
+            struct window *w = &wins[drag_idx];
+            int along = w->w > 0 ? (unmax_mx - w->x) * w->rw / w->w : 0;
+            unmax_pending = 0;
+            toggle_max(drag_idx);
+            w->x = mx - along;
+            w->y = my - 3;
+            if (w->x < 0)
+                w->x = 0;
+            if (w->x + w->w > video_w())
+                w->x = video_w() - w->w;
+            if (w->y < BAR_H)
+                w->y = BAR_H;
+            drag_dx = mx - w->x;
+            drag_dy = my - w->y;
+        }
+    }
+
+    if (pressed && drag_idx >= 0 && !unmax_pending) {  /* in progress: the window follows the cursor */
         int nx = mx - drag_dx;
         int ny = my - drag_dy;
         if (nx < 0) nx = 0;
@@ -2948,6 +2972,71 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
             dst[x + col] = src[col];
     }
     return 0;
+}
+
+int desktop_win_draw(int winid, int owner, const struct win_draw *d,
+                     const char *s)
+{
+    int px = d->px > 0 && d->px <= 64 ? d->px : UI_PX;
+    int font = d->font == UI_BOLD || d->font == UI_MONO ? d->font : UI_SANS;
+    if (d->op == WD_MEASURE)
+        return s ? ui_font_width(font, px, s) : 0;
+
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    if (!win->truecolour && desktop_win_truecolour(winid, owner) < 0)
+        return -1;
+    /* The window's own pixels, said explicitly: the compositor may be
+       in the middle of a frame on another core, drawing somewhere else */
+    struct gfx_surface t = { (uint32_t *)win->content, win->cw, win->ch,
+                             win->cw };
+    int a = d->a < 0 ? 0 : d->a > 255 ? 255 : d->a;
+    int r = d->r < 0 ? 0 : d->r;
+    switch (d->op) {
+    case WD_FILL:
+        gfx_fill_s(&t, d->x, d->y, d->w, d->h, d->rgb, a);
+        return 0;
+    case WD_RRECT:
+        gfx_rrect16_s(&t, d->x * 16, d->y * 16, d->w * 16, d->h * 16, r * 16,
+                      d->rgb, a);
+        return 0;
+    case WD_RING:
+        gfx_rring16_s(&t, d->x * 16, d->y * 16, d->w * 16, d->h * 16, r * 16,
+                      16, d->rgb, a);
+        return 0;
+    case WD_GRAD:
+        gfx_rrect_grad_s(&t, d->x, d->y, d->w, d->h, r, d->rgb, d->rgb2, a);
+        return 0;
+    case WD_DISC:
+        gfx_disc16_s(&t, d->x * 16 + d->w * 8, d->y * 16 + d->w * 8,
+                     d->w * 8, d->rgb, a);
+        return 0;
+    case WD_LINE:
+        gfx_line16_s(&t, d->x * 16 + 8, d->y * 16 + 8, d->w * 16 + 8,
+                     d->h * 16 + 8, r ? r : 16, d->rgb, a);
+        return 0;
+    case WD_TEXT:
+        return s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x;
+    default:
+        return -1;
+    }
+}
+
+void desktop_ui_look(uint32_t *out)
+{
+    int k = 0;
+    out[k++] = (uint32_t)theme_dark;
+    out[k++] = L.win_bg;
+    out[k++] = theme_dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
+    out[k++] = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    out[k++] = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    out[k++] = L.win_line;
+    out[k++] = theme_dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+    out[k++] = L.accent;
+    out[k++] = L.accent_text;
+    out[k++] = theme_dark ? DARK_APP_DANGER : LIGHT_APP_DANGER;
+    out[k++] = theme_dark ? DARK_APP_GOOD : LIGHT_APP_GOOD;
 }
 
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,

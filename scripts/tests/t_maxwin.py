@@ -42,14 +42,18 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The window opens in slot 2: the compositor cascades at (70+12i, 30+12i)
-# and gsettings asks for 360x210 of content.
+# and gsettings asks for GSET_W x GSET_H of content.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
-WW, WH = 362, 210 + TITLE_H + 2
+WW, WH = GSET_W + 2, GSET_H + TITLE_H + 2
 # Zoomed, the window is the room between the bar and the dock
 ZY = BAR_H
-# The selected row's stripe, a little way down the content
-ROW = CONTENT_DY + 24
+# The selected row's stripe, the first under the heading (user/gsettings.c)
+ROW = CONTENT_DY + gset_row_y(0)
+# A column of the window's own background: right of the rows, which
+# stop six pixels short of the edge
+BG_X = WX + 1 + GSET_W - 3
+DARK = theme("dark")
 
 
 def title(px):
@@ -58,15 +62,13 @@ def title(px):
 
 
 def blue(px):
-    """The blue of a title bar or of a selected row."""
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
+    """The accent of a selected row."""
+    return near(px, DARK["accent"], 6)
 
 
 def grey(px):
-    """The grey of a window's background."""
-    r, g, b = px
-    return r > 200 and g > 200 and b > 200 and abs(r - g) < 12
+    """A window's background."""
+    return near(px, DARK["win_bg"], 3)
 
 
 def dock_shows(at):
@@ -92,11 +94,11 @@ def main():
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("the application window opened", grey(at(WX + 200, WY + 120)))
+            check("the application window opened", grey(at(BG_X, WY + 120)))
             # The blue stripe of the selected row stops inside the small
             # window - so its reaching further later means something
             check("the marked row is visible in the window",
-                  blue(at(WX + 200, WY + ROW)))
+                  blue(at(WX + 1 + 350, WY + ROW)))
             check("and it ends inside the window, not beyond",
                   not blue(at(WX + WW + 60, WY + ROW)))
             check("outside the window is the desktop", not grey(at(600, WY + 120)))
@@ -135,12 +137,12 @@ def main():
 
             w, h, at = q.screen_raw()
             check("the window came back exactly where it was",
-                  grey(at(WX + 200, WY + 120)) and
+                  grey(at(BG_X, WY + 120)) and
                   not grey(at(600, WY + 120)))
             check("the program narrowed back (the row bar ends "
                   "inside the window)", not blue(at(600, WY + ROW)))
             check("and that bar is still in the window",
-                  blue(at(WX + 200, WY + ROW)))
+                  blue(at(WX + 1 + 350, WY + ROW)))
 
             # --- dragging a zoomed window puts it back ----------------
             q.click(*light_xy(WX, WY, 2))
@@ -162,8 +164,10 @@ def main():
             w, h, at = q.screen_raw()
             check("once grabbed by the bar the window stopped being full screen",
                   not title(at(600, ZY + 4)))
-            check("and it followed the pointer (the window is where it was dropped)",
-                  grey(at(320, 260)))
+            # (as far down as the screen lets a window that tall go)
+            ty = min(200 - 3, h - WH)
+            check("and it followed the pointer (its title bar is where it "
+                  "was dropped)", title(at(320, ty + 4)))
             check("and the desktop is where the window no longer is",
                   not grey(at(600, 100)))
         finally:

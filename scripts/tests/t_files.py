@@ -31,55 +31,25 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The window: slot 2 of the cascade, content a pixel right and a title
-# bar down; gfiles asks for 320x220.
+# bar down; gfiles asks for GFILES_W x GFILES_H (user/gfiles.c).
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-CW, CH = 320, 220
-ROW_Y0 = 18
-ROW_H = 10
-DEL_X = CW - 48
-EDIT_X = CW - 48 - 56 - 4
-NAME_X = CW - 48 - 56 - 56 - 8
+CW, CH = GFILES_W, GFILES_H
+# Its three buttons, kept at the right edge of the heading
+BTN_Y = GFILES_HEAD_H // 2
+DEL_W, EDIT_W, NAME_W = 70, 56, 70
+DEL_X = CW - 10 - DEL_W
+EDIT_X = DEL_X - 6 - EDIT_W
+NAME_X = EDIT_X - 6 - NAME_W
 
 # The question panel (user/ugui.h): a band across the middle of the
-# window, with the two answers at its bottom edge.
-MODAL_H = 96
-MODAL_Y = (CH - MODAL_H) // 2
-MODAL_BY = MODAL_Y + MODAL_H - 26
-YES_X = 8 + 8 + 42            # the middle of "Remove"
-NO_X = 8 + 8 + 84 + 10 + 42   # the middle of "Keep"
+# window, with the two answers at its bottom edge
+MODAL = ug_modal(CH)
 
 TEXT = "Measurement results"          # what the test writes, and its length
-
-
-def read_at(at, x, y, cols):
-    """Text inside the window, read the way a person reads it: whatever
-    colour most of the band is, is the background - the rest is ink.
-
-    Counting the background rather than naming it is what makes one
-    function read both kinds of row. An ordinary row is dark text on
-    the window's grey; the chosen row is white text on the accent - and
-    the accent is also the colour a directory's NAME is written in, so
-    a rule that said 'blue is background' would read those names as
-    empty."""
-    font = font8x8()
-    band = [at(CX + x + c * 8 + xx, CY + y + yy)
-            for c in range(cols) for xx in range(8) for yy in range(8)]
-    bg = max(set(band), key=band.count)
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for yy in range(8):
-            bits = 0
-            for xx in range(8):
-                if at(CX + x + c * 8 + xx, CY + y + yy) != bg:
-                    bits |= 1 << xx
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
 
 
 def title(q):
@@ -87,19 +57,17 @@ def title(q):
     return q.window_title(WX, WY)
 
 
-def rows(at, n=8):
-    out = []
-    for i in range(n):
-        name = read_at(at, 6, ROW_Y0 + i * ROW_H, 14)
-        if not name:
-            break
-        # The size is drawn right-aligned, its left edge depending on
-        # how many digits it has - so the grid is anchored to the RIGHT
-        # edge, which does not move: the last glyph ends six pixels
-        # short of the window's edge.
-        out.append((name, read_at(at, CW - 6 - 12 * 8,
-                                  ROW_Y0 + i * ROW_H, 12)))
-    return out
+def rows(q):
+    """(name, size) per row - read in the lettering the program writes in"""
+    return [(n, sz) for n, sz, _ in q.gfiles_rows(CX, CY)]
+
+
+def row_y(names, name):
+    return CY + gfiles_row_y(names.index(name))
+
+
+def status(q):
+    return q.gfiles_status(CX, CY)
 
 
 def click(q, x, y, wait=1.5):
@@ -134,7 +102,7 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
-            listed = rows(at)
+            listed = rows(q)
             names = [r[0] for r in listed]
             check("the manager lists what is on the disk (%s)"
                   % ", ".join(names), "report.txt" in names)
@@ -152,24 +120,26 @@ def main():
                   % dict(listed).get("documents", ""),
                   dict(listed).get("documents", "") == "folder")
 
-            check("the heading says where we are ('%s')"
-                  % read_at(at, 4, 2, 20), read_at(at, 4, 2, 20).startswith("/"))
+            head = q.gfiles_heading(CX, CY)
+            check("the heading says where we are ('%s')" % head,
+                  head.startswith("/"))
             check("and the window is named after the directory ('%s')" % title(q),
                   title(q) == "Files: /")
 
             # --- walking into a directory -------------------------------
-            i = names.index("documents")
-            click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
-            click(q, CX + EDIT_X + 20, CY + 4, wait=2.5)
+            click(q, CX + 60, row_y(names, "documents"))
+            click(q, CX + EDIT_X + EDIT_W // 2, CY + BTN_Y, wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'Open' on a directory goes into it ('%s')"
-                  % read_at(at, 4, 2, 20),
-                  read_at(at, 4, 2, 20).startswith("/documents"))
+            head = q.gfiles_heading(CX, CY)
+            check("'Open' on a directory goes into it ('%s')" % head,
+                  head.startswith("/documents"))
             check("and the window says the same ('%s')" % title(q),
                   title(q) == "Files: /documents")
-            check("and it is empty inside", rows(at) == [])
+            inside = [n for n, _ in rows(q)]
+            check("and it is empty inside but for the way back up (%s)"
+                  % ", ".join(inside), inside in ([], [".."]))
 
             # --- and back out -------------------------------------------
             click(q, CX + 160, CY + 120, wait=1)   # the focus into the window
@@ -180,39 +150,37 @@ def main():
             w, h, at = q.screen_raw()
             check("Backspace goes back up ('%s')" % title(q),
                   title(q) == "Files: /")
-            listed = rows(at)
+            listed = rows(q)
             names = [r[0] for r in listed]
             check("and what was there shows again", "report.txt" in names)
 
             # --- deleting asks first ------------------------------------
-            i = names.index("report.txt")
-            click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
-            click(q, CX + DEL_X + 16, CY + 4, wait=2)
+            click(q, CX + 60, row_y(names, "report.txt"))
+            click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            asked = read_at(at, 8 + 8, MODAL_Y + 10, 36)
+            asked = q.ug_question(CX, CY, CH)
             check("a click on 'Remove' asks a question instead of deleting ('%s')"
                   % asked, "Remove" in asked and "report.txt" in asked)
-            check("and the file is still there",
-                  "report.txt" in [r[0] for r in rows(at)])
 
-            # "Keep" has to leave it alone - a question whose answers
-            # both mean yes is not a question.
-            click(q, CX + NO_X, CY + MODAL_BY + 8, wait=2)
+            # The question removed nothing, and "Keep" has to leave it
+            # alone - a question whose answers both mean yes is not a
+            # question. (While it is up, the list behind it is dimmed.)
+            click(q, CX + MODAL["no"][0], CY + MODAL["no"][1], wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("'Keep' keeps the file",
-                  "report.txt" in [r[0] for r in rows(at)])
+                  "report.txt" in [r[0] for r in rows(q)])
 
-            click(q, CX + DEL_X + 16, CY + 4, wait=2)
-            click(q, CX + YES_X, CY + MODAL_BY + 8, wait=2.5)
+            click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
+            click(q, CX + MODAL["yes"][0], CY + MODAL["yes"][1], wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("only 'Remove' in the question removes it",
-                  "report.txt" not in [r[0] for r in rows(at)])
+                  "report.txt" not in [r[0] for r in rows(q)])
 
             # Confirmed by something that is not this program
             q.mouse_goto(500, 380)
@@ -230,17 +198,15 @@ def main():
             # instant whatever its size - which is what the filesystem
             # grew a rename for.
             click(q, CX + 160, CY + 120, wait=1)
-            w, h, at = q.screen_raw()
-            names = [r[0] for r in rows(at)]
-            i = names.index("documents")
-            click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
-            click(q, CX + NAME_X + 20, CY + 4, wait=2)
+            names = [r[0] for r in rows(q)]
+            click(q, CX + 60, row_y(names, "documents"))
+            click(q, CX + NAME_X + NAME_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("'Rename' asks for a new name ('%s')"
-                  % read_at(at, 4, CH - 10, 30),
-                  "New name" in read_at(at, 4, CH - 10, 30))
+            said = status(q)
+            check("'Rename' asks for a new name ('%s')" % said,
+                  "New name" in said)
 
             click(q, CX + 160, CY + 120, wait=1)   # the keys into the window
             q.type_line("papers", enter=False)
@@ -250,25 +216,23 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            names = [r[0] for r in rows(at)]
+            names = [r[0] for r in rows(q)]
             check("and it changes it (%s)" % ", ".join(names),
                   "papers" in names and "documents" not in names)
 
             # --- a directory is not deleted -----------------------------
             click(q, CX + 160, CY + 120, wait=1)
-            w, h, at = q.screen_raw()
-            names = [r[0] for r in rows(at)]
-            i = names.index("papers")
-            click(q, CX + 60, CY + ROW_Y0 + i * ROW_H + 3)
-            click(q, CX + DEL_X + 16, CY + 4, wait=2)
+            names = [r[0] for r in rows(q)]
+            click(q, CX + 60, row_y(names, "papers"))
+            click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            said = read_at(at, 4, CH - 10, 36)
+            said = status(q)
             check("it does not remove a directory, and says why ('%s')" % said,
                   "directory" in said)
             check("and the directory is still there",
-                  "papers" in [r[0] for r in rows(at)])
+                  "papers" in [r[0] for r in rows(q)])
         finally:
             q.close()
     finally:

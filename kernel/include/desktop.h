@@ -44,4 +44,44 @@ int desktop_win_truecolour(int winid, int owner);
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
                        const uint32_t *pixels);
 
+/* Drawing as the desktop itself draws: soft-edged shapes and TrueType
+ * text, in colours. Positions in whole pixels of the window's content;
+ * 'a' is how much of the colour goes on (255 = all of it). A window
+ * that still holds palette indices is made a colour window first.
+ *
+ *   WD_FILL    a rectangle
+ *   WD_RRECT   a rectangle with corners of radius r
+ *   WD_RING    only its edge, a pixel thick
+ *   WD_GRAD    a rounded rectangle sloping from rgb (top) to rgb2
+ *   WD_DISC    a circle in the square x, y, w
+ *   WD_LINE    from (x, y) to (w, h), r sixteenths of a pixel thick
+ *   WD_TEXT    text with its baseline at y, in a face (UI_SANS, UI_BOLD,
+ *              UI_MONO) and a size in pixels; returns where the pen ended
+ *   WD_MEASURE how wide that text would be - no window needed
+ */
+#define WD_FILL    1
+#define WD_RRECT   2
+#define WD_RING    3
+#define WD_GRAD    4
+#define WD_DISC    5
+#define WD_LINE    6
+#define WD_TEXT    7
+#define WD_MEASURE 8
+
+struct win_draw {
+    int op;
+    int x, y, w, h, r;
+    uint32_t rgb, rgb2;
+    int a;
+    int font, px;
+};
+int desktop_win_draw(int winid, int owner, const struct win_draw *d,
+                     const char *s);
+
+/* The colours a program draws its window in, so that it follows the
+   theme as the desktop does - eleven words, in this order: */
+#define UI_LOOK_N 11   /* dark?, background, field, text, dim text, line,
+                          row, accent, text on accent, danger, good */
+void desktop_ui_look(uint32_t *out);
+
 #endif

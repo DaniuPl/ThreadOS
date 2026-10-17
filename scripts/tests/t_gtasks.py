@@ -31,62 +31,73 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The window: slot 2 of the cascade, its content a pixel right and a
-# title bar down. gtasks asks for 300x190.
+# title bar down. gtasks asks for 340x298 (user/gtasks.c).
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-ROW_Y0 = 26
-ROW_H = 10
+CW, CH = 340, 298
+ROW_Y0 = 54
+ROW_H = 16
+COL_PID, COL_NAME, COL_STATE, COL_KIND = 12, 52, 176, 256
+KILL_W, KILL_Y, KILL_H = 84, 7, 22
+FOOT_H = 20
+DARK = theme("dark")
 
 
-def is_grey(px):
-    return all(abs(c - 227) <= 8 for c in px)
+def end_xy():
+    """The middle of the "End task" button, at the window's top right"""
+    return CX + CW - 12 - KILL_W // 2, CY + KILL_Y + KILL_H // 2
 
 
-def field(at, x, y, cols):
-    """A piece of text in the window: anything that is not the window's
-    own grey is ink. The chosen row has a blue background, so what is
-    read is 'not the background', not 'dark'."""
-    font = font8x8()
-    x0, y0 = CX + x, CY + y
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for yy in range(8):
-            bits = 0
-            for xx in range(8):
-                p = at(x0 + c * 8 + xx, y0 + yy)
-                if not is_grey(p) and not (p[2] > 120 and p[0] < 90
-                                           and p[1] < 90):
-                    bits |= 1 << xx
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def row_xy(i):
+    return CX + 130, CY + ROW_Y0 + i * ROW_H + ROW_H // 2
 
 
-def rows(at, n=12):
-    """The list as it stands: (pid, name, state, kind) per row."""
+def rows(q, scr=None):
+    """The list as it stands: (pid, name, state, kind) per row - read
+    off one picture of the screen, in the lettering the program wrote
+    it in. The colours are the theme's: a short word like 'idle' may
+    not have one pixel wholly covered to learn its colour from."""
+    scr = scr or q.screen_raw()
+    w, h, at = scr
     out = []
-    for i in range(n):
+    for i in range(14):
         y = ROW_Y0 + i * ROW_H
-        name = field(at, 44, y, 12)
+        if y + ROW_H > CH - FOOT_H:
+            break
+        base = CY + ui_font_baseline_in(UD_PX, y, ROW_H)
+        picked = near(at(*row_xy(i)), DARK["accent"], 6)
+        ink = DARK["accent_text"] if picked else DARK["app_text"]
+        quiet = DARK["accent_text"] if picked else DARK["app_dim"]
+
+        def field(col, width, fg):
+            return q.read_ui(CX + col, base, width, px=UD_PX, fg=fg,
+                             screen=scr)
+        name = field(COL_NAME, COL_STATE - COL_NAME - 4, ink)
         if not name:
             break
-        out.append((field(at, 4, y, 4), name, field(at, 160, y, 7),
-                    field(at, 232, y, 8)))
+        kind = field(COL_KIND, CW - COL_KIND - 4, ink)
+        if kind != "program":
+            kind = field(COL_KIND, CW - COL_KIND - 4, quiet)
+        out.append((field(COL_PID, COL_NAME - COL_PID - 4, quiet), name,
+                    field(COL_STATE, COL_KIND - COL_STATE - 4, ink), kind))
     return out
 
 
-def picked_row(at, n=12):
+def picked_row(q):
     """Which row wears the accent colour - the one that was chosen."""
-    for i in range(n):
-        y = CY + ROW_Y0 + i * ROW_H
-        p = at(CX + 130, y + 3)
-        if p[2] > 120 and p[0] < 90 and p[1] < 90:
+    w, h, at = q.screen_raw()
+    for i in range(14):
+        if near(at(*row_xy(i)), DARK["accent"], 6):
             return i
     return -1
+
+
+def note(q):
+    return q.read_ui(CX + 12, CY + ui_font_baseline_in(11, CH - FOOT_H, FOOT_H),
+                     CW - 24, px=11, fg=DARK["app_danger"])
 
 
 def sixty_four():
@@ -144,18 +155,18 @@ def sixty_four():
             time.sleep(0.4)
             q.mouse_button(True)
             time.sleep(0.4)
-            q.mouse_goto(400, 200)
+            q.mouse_goto(360, 60)
             time.sleep(0.5)
-            q.mouse_goto(400, 200)
+            q.mouse_goto(360, 60)
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 196 + CONTENT_DY
-            q.mouse_goto(600, 430)
+            CX, CY = 260 + 1, 56 + CONTENT_DY
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            listed = rows(at)
+            listed = rows(q)
             names = [r[1] for r in listed]
             check("(64) the task list is there (%d rows: %s)"
                   % (len(listed), ", ".join(names)), len(listed) >= 3)
@@ -166,10 +177,10 @@ def sixty_four():
 
             q.launch_dock(1)                # the "Clock" tile
             time.sleep(5)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(2)
             w, h, at = q.screen_raw()
-            listed = rows(at)
+            listed = rows(q)
             clock_row = [i for i, r in enumerate(listed) if "gclock" in r[1]]
             check("(64) a new program appears on the list by itself (%s)"
                   % ", ".join(r[1] for r in listed), len(clock_row) == 1)
@@ -178,18 +189,18 @@ def sixty_four():
 
             before = q.dock_windows()
             i = clock_row[0]
-            q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
+            q.mouse_goto(*row_xy(i))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
-            q.mouse_goto(CX + 260, CY + 4)     # "End"
+            q.mouse_goto(*end_xy())
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            names = [r[1] for r in rows(at)]
+            names = [r[1] for r in rows(q)]
             check("(64) 'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names) and
@@ -227,18 +238,18 @@ def main():
             time.sleep(0.4)
             q.mouse_button(True)
             time.sleep(0.4)
-            q.mouse_goto(400, 200)
+            q.mouse_goto(360, 60)
             time.sleep(0.5)
-            q.mouse_goto(400, 200)
+            q.mouse_goto(360, 60)
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 196 + CONTENT_DY
-            q.mouse_goto(600, 430)
+            CX, CY = 260 + 1, 56 + CONTENT_DY
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            listed = rows(at)
+            listed = rows(q)
             names = [r[1] for r in listed]
             check("the task manager shows the list (%d rows: %s)"
                   % (len(listed), ", ".join(names)), len(listed) >= 3)
@@ -256,10 +267,10 @@ def main():
             # --- the list is live ---------------------------------------
             q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(2)
             w, h, at = q.screen_raw()
-            listed = rows(at)
+            listed = rows(q)
             names = [r[1] for r in listed]
             check("a program started after the window opened appears by itself "
                   "(%s)" % ", ".join(names),
@@ -271,7 +282,7 @@ def main():
 
             # --- choosing and ending ------------------------------------
             i = clock_row[0]
-            q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
+            q.mouse_goto(*row_xy(i))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
@@ -284,21 +295,21 @@ def main():
             # By NAME, not by number: the list is read again twice a
             # second and a row can move when a task is born or dies -
             # what was chosen is a task, not a place on the screen.
-            got = picked_row(at)
-            listed = rows(at)
+            got = picked_row(q)
+            listed = rows(q)
             check("a click on a row picks that task (row %d: %s)"
                   % (got, listed[got][1] if 0 <= got < len(listed) else "-"),
                   0 <= got < len(listed) and "gclock" in listed[got][1])
 
             before = q.dock_windows()
-            q.mouse_goto(CX + 260, CY + 4)     # the "End" button
+            q.mouse_goto(*end_xy())
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            names = [r[1] for r in rows(at)]
+            names = [r[1] for r in rows(q)]
             check("'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names))
@@ -307,50 +318,50 @@ def main():
                   % (before, after), after == before - 1)
 
             # --- what it will not do ------------------------------------
-            listed = rows(at)
+            listed = rows(q)
             kernel_rows = [i for i, r in enumerate(listed)
                            if r[3] == "kernel"]
             check("there are kernel threads on the list", len(kernel_rows) > 0)
             i = kernel_rows[0]
-            q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
+            q.mouse_goto(*row_xy(i))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1)
-            q.mouse_goto(CX + 260, CY + 4)
+            q.mouse_goto(*end_xy())
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            note = field(at, 4, 190 - 10, 34)
-            check("it does not end a kernel thread, and says why ('%s')" % note,
-                  "a kernel thread" in note)
-            after_kernel = [r[1] for r in rows(at)]
+            said = note(q)
+            check("it does not end a kernel thread, and says why ('%s')"
+                  % said, "a kernel thread" in said)
+            after_kernel = [r[1] for r in rows(q)]
             check("and the thread is still on the list",
                   listed[i][1] in after_kernel)
 
             # And it will not end itself - a task manager that vanishes
             # when clicked is a joke rather than a tool
-            listed = rows(at)
+            listed = rows(q)
             mine = [i for i, r in enumerate(listed) if "gtasks" in r[1]]
             check("the manager sees its own row", len(mine) == 1)
             i = mine[0]
-            q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
+            q.mouse_goto(*row_xy(i))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1)
-            q.mouse_goto(CX + 260, CY + 4)
+            q.mouse_goto(*end_xy())
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)
-            q.mouse_goto(600, 430)
+            q.mouse_goto(625, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            note = field(at, 4, 190 - 10, 34)
-            check("it does not end itself ('%s')" % note, "myself" in note)
+            said = note(q)
+            check("it does not end itself ('%s')" % said, "myself" in said)
             check("and it still runs - the list is on the screen",
-                  any("gtasks" in n for n in [r[1] for r in rows(at)]))
+                  any("gtasks" in n for n in [r[1] for r in rows(q)]))
         finally:
             q.close()
     finally:

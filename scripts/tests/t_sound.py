@@ -144,14 +144,26 @@ def main():
                 # The window: slot two, content a pixel in and a title
                 # bar down (kernel/desktop.c)
                 CX, CY = 95, 54 + CONTENT_DY
-                text = q3.read_text(CX + 6, CY + 4, 44, 4, line_h=12)
+                dark = theme("dark")
+                inks = [dark[k] for k in ("app_text", "app_dim", "accent",
+                                          "app_danger")]
+
+                def lines(n):
+                    """The window's first n rows of text (user/gmikser.c:
+                    UG_ROW apart from six pixels down), in the lettering
+                    the program writes in"""
+                    return q3.read_ui_lines(
+                        CX + 2, CX + 356,
+                        [CY + ui_font_baseline_in(UD_PX, 6 + r * UG_ROW, UG_ROW)
+                         for r in range(n)], px=UD_PX, colours=inks)
+                text = lines(4)
                 check("the window says how loud it is",
                       "Volume:" in text and "%" in text)
                 check("and what it computes the percentage from",
                       "steps" in text and "decibel" in text)
 
-                BAR_X, BAR_Y, BAR_H = 8, 52, 16
-                BTN_X, BTN_Y, BTN_W, BTN_H = 8, 82, 84, 16
+                BAR_X, BAR_Y, BAR_H = 12, 86, 18
+                BTN_X, BTN_Y, BTN_W, BTN_H = 12, 116, 96, 24
                 bar_w = 360 - 2 * BAR_X
 
                 def click(x, y):
@@ -163,7 +175,8 @@ def main():
 
                 def test_tone():
                     at = os.path.getsize(wav2) - 44
-                    q3.mouse_goto(CX + BTN_X + BTN_W + 10 + 20, CY + BTN_Y + 8)
+                    q3.mouse_goto(CX + BTN_X + BTN_W + 10 + BTN_W // 2,
+                                  CY + BTN_Y + BTN_H // 2)
                     q3.mouse_click()
                     time.sleep(3)
                     q3.mouse_goto(700, 500)
@@ -171,15 +184,19 @@ def main():
                     return t[0] if t else 0
 
                 click(BAR_X + bar_w - 1, BAR_Y + BAR_H // 2)
-                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                text = lines(1)
                 check("a click at the end of the slider gives 100%% ('%s')"
                       % text.strip(), "100%" in text)
                 loud = test_tone()
                 check("and the 'Test' button really plays (peak %d)" % loud,
                       loud > 3000)
 
-                click(BAR_X + bar_w // 5, BAR_Y + BAR_H // 2)
-                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                # The knob is BAR_H across and its middle stands on the
+                # value, so the values run from half a knob in at one end
+                # to half a knob in at the other (user/ugui.h)
+                click(BAR_X + BAR_H // 2 + (bar_w - BAR_H) // 5,
+                      BAR_Y + BAR_H // 2)
+                text = lines(1)
                 check("a click a fifth of the way along the slider gives about 20%% ('%s')"
                       % text.strip(),
                       "19%" in text or "20%" in text or "21%" in text)
@@ -188,7 +205,7 @@ def main():
                       0 < soft < loud)
 
                 click(BTN_X + BTN_W // 2, BTN_Y + BTN_H // 2)
-                text = q3.read_text(CX + 6, CY + 4, 44, 1, line_h=12)
+                text = lines(1)
                 check("the 'Mute' button says it is muted ('%s')"
                       % text.strip(), "muted" in text)
                 check("and then it plays nothing", test_tone() == 0)

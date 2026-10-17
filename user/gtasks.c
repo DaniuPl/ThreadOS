@@ -20,32 +20,33 @@
  * two calls - one row of the list, and a signal to a pid.
  */
 
-#include "uapi.h"
+#include "udraw.h"
 
-/* Dark text on a light surface, light text on a dark one. The window
-   is the system's light grey, so its text is BLACK; white belongs on
-   the accent blue and nowhere else. */
-#define C_BG    8             /* the window's light grey */
-#define C_TEXT  0             /* black - text on the window */
-#define C_DIM  15             /* dark grey - the same, said quietly */
-#define C_HEAD  3             /* the accent: headings, buttons, the picked row */
-#define C_WHITE 4             /* only ever on something dark */
-#define C_LINE 11             /* a line between one thing and the next */
-#define C_BLUE  3
-#define C_RED   1
-
-#define W0 300
-#define H0 190
-#define ROW_H 10
-#define ROW_Y0 26
-#define HEAD_H 12
+#define W0 340
+#define H0 298
+#define PAD 12
+#define HEAD_H 34             /* the heading and the button */
+#define COLS_Y 36             /* the names of the columns */
+#define COLS_H 16
+#define ROW_Y0 54             /* the first task */
+#define ROW_H 16
+#define FOOT_H 20             /* a line for what was said */
 #define MAXT 14
-#define KILL_W 64             /* the "End" button, kept at the right */
+#define KILL_W 84             /* "End task", kept at the right */
+#define KILL_Y 7
+#define KILL_H 22
+
+/* Where each column starts */
+#define COL_PID   PAD
+#define COL_NAME  52
+#define COL_STATE 176
+#define COL_KIND  256
 
 static struct psinfo list[MAXT];
 static int count;
 static int chosen = -1;       /* the pid picked, not the row: rows move */
 static char note[40];
+static int note_ok;           /* what was said is good news */
 
 static int cw = W0, ch = H0;
 
@@ -54,7 +55,7 @@ static int cw = W0, ch = H0;
    maximised window looking like a mistake. */
 static int kill_x(void)
 {
-    return cw - KILL_W;
+    return cw - PAD - KILL_W;
 }
 
 static void ecopy(char *d, const char *s, int max)
@@ -112,6 +113,7 @@ static void refresh(void)
    it would take a piece of the machine with it. */
 static void end_chosen(void)
 {
+    note_ok = 0;
     if (chosen < 0) {
         ecopy(note, "no task picked", sizeof(note));
         return;
@@ -129,6 +131,7 @@ static void end_chosen(void)
         }
         sys_kill(chosen, SIGKILL);
         ecopy(note, "ended", sizeof(note));
+        note_ok = 1;
         chosen = -1;
         return;
     }
@@ -138,46 +141,62 @@ static void end_chosen(void)
 
 static void draw(int win)
 {
-    win_rect(win, 0, 0, cw, ch, C_BG);
+    struct ud_look l;
+    ud_look(&l);
+    ud_fill(win, 0, 0, cw, ch, l.bg);
 
-    char line[64];
+    char line[32];
     int p = num(line, count);
     ecopy(line + p, " tasks", (int)sizeof(line) - p);
-    win_text(win, 4, 2, "Tasks:", C_HEAD);
-    win_text(win, 80, 2, line, C_TEXT);
+    int end = ud_text(win, PAD, ud_baseline(0, HEAD_H, 14), "Tasks", l.text,
+                      UD_BOLD, 14);
+    ud_text(win, end + 8, ud_baseline(0, HEAD_H, 14), line, l.dim, UD_SANS,
+            11);
 
     /* The button, in the top right corner where there is room next to
-       the heading */
-    win_rect(win, kill_x(), 0, KILL_W, HEAD_H, C_BLUE);
-    win_text(win, kill_x() + 4, 2, "End", C_WHITE);
+       the heading - quiet until there is something to end */
+    int ready = chosen >= 0;
+    ud_round(win, kill_x(), KILL_Y, KILL_W, KILL_H, 6,
+             ready ? l.danger : l.row);
+    ud_text_mid(win, kill_x(), KILL_Y, KILL_W, KILL_H, "End task",
+                ready ? l.on_accent : l.dim, UD_BOLD, UD_PX);
 
-    win_rect(win, 0, ROW_Y0 - 4, cw, 1, C_LINE);
+    static const char *const head[4] = { "PID", "Name", "State", "Kind" };
+    static const int col[4] = { COL_PID, COL_NAME, COL_STATE, COL_KIND };
+    for (int k = 0; k < 4; k++)
+        ud_text(win, col[k], ud_baseline(COLS_Y, COLS_H, 11), head[k], l.dim,
+                UD_SANS, 11);
+    ud_fill(win, PAD, ROW_Y0 - 2, cw - 2 * PAD, 1, l.line);
 
     for (int i = 0; i < count; i++) {
         int y = ROW_Y0 + i * ROW_H;
-        if (y + ROW_H > ch - 12)
+        if (y + ROW_H > ch - FOOT_H)
             break;
         int picked = list[i].pid == chosen;
         if (picked)
-            win_rect(win, 0, y - 1, cw, ROW_H, C_BLUE);
+            ud_round(win, PAD / 2, y, cw - PAD, ROW_H, 6, l.accent);
+        else if (i & 1)
+            ud_round(win, PAD / 2, y, cw - PAD, ROW_H, 6, l.row);
 
-        char row[64];
-        int n = num(row, list[i].pid);
-        while (n < 4)
-            row[n++] = ' ';
-        row[n] = '\0';
-        win_text(win, 4, y, row, picked ? C_WHITE : C_HEAD);
-        win_text(win, 44, y, list[i].name, picked ? C_WHITE : C_TEXT);
-        win_text(win, 160, y, state_name(list[i].state),
-                 picked ? C_WHITE : C_TEXT);
+        uint32_t ink = picked ? l.on_accent : l.text;
+        uint32_t quiet = picked ? l.on_accent : l.dim;
+        int base = ud_baseline(y, ROW_H, UD_PX);
+        char pid[8];
+        num(pid, list[i].pid);
+        ud_text(win, COL_PID, base, pid, quiet, UD_SANS, UD_PX);
+        ud_text(win, COL_NAME, base, list[i].name, ink,
+                UD_SANS, UD_PX);
+        ud_text(win, COL_STATE, base, state_name(list[i].state), ink, UD_SANS,
+                UD_PX);
         /* A process has memory of its own; a kernel thread does not -
            and only the first of the two is something to end */
-        win_text(win, 232, y, list[i].ring3 ? "program" : "kernel",
-                 picked ? C_WHITE : (list[i].ring3 ? C_TEXT : C_DIM));
+        ud_text(win, COL_KIND, base, list[i].ring3 ? "program" : "kernel",
+                list[i].ring3 ? ink : quiet, UD_SANS, UD_PX);
     }
 
     if (note[0])
-        win_text(win, 4, ch - 10, note, C_RED);
+        ud_text(win, PAD, ud_baseline(ch - FOOT_H, FOOT_H, 11), note,
+                note_ok ? l.good : l.danger, UD_SANS, 11);
 }
 
 void _start(void)
@@ -203,11 +222,12 @@ void _start(void)
                 /* The press and the release of the same click arrive
                    too; acting on all three would end the chosen task
                    three times over. */
-                if (ev.y < HEAD_H && ev.x >= kill_x()) {
+                if (ev.y >= KILL_Y && ev.y < KILL_Y + KILL_H &&
+                    ev.x >= kill_x() && ev.x < kill_x() + KILL_W) {
                     end_chosen();
                     refresh();
-                } else if (ev.y >= ROW_Y0 - 1) {
-                    int row = (ev.y - ROW_Y0 + 1) / ROW_H;
+                } else if (ev.y >= ROW_Y0) {
+                    int row = (ev.y - ROW_Y0) / ROW_H;
                     if (row >= 0 && row < count) {
                         chosen = list[row].pid;
                         note[0] = '\0';

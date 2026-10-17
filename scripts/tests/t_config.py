@@ -172,16 +172,18 @@ def main():
             time.sleep(1)
 
             # The window is slot 2: its corner at (94,54), the content
-            # one frame line in and under the title bar. The heading is
-            # drawn in blue at (6,6) of the content area.
+            # one frame line in and under the title bar. Its first row,
+            # chosen when it opens, is the machine's name.
             CX, CY = 94 + 1, 54 + CONTENT_DY
-            w, h, at = q.screen_raw()
-            head = any(at(CX + x, CY + 8)[2] > 120 and at(CX + x, CY + 8)[0] < 90
-                       for x in range(6, 150))
-            check("the settings window opened (a blue title bar)", head)
+            name = q.gset_row(CX, CY, 0, chosen=True)[0]
+            check("the settings window opened (its first row: '%s')" % name,
+                  name == "name")
 
-            # the 'background' row is the fourth: ROW_Y=22 + 3*14 = 64
-            q.mouse_goto(CX + 40, CY + 64)
+            # the 'background' row is the fourth
+            bg = q.gset_row(CX, CY, 3)[0]
+            check("the fourth row is the background ('%s')" % bg,
+                  bg == "background")
+            q.mouse_goto(CX + 40, CY + gset_row_y(3))
             q.mouse_click()             # select the row
             time.sleep(1)
             for _ in range(3):          # cycle 0 -> 3 (green)
@@ -200,19 +202,11 @@ def main():
             q.mouse_goto(560, 420)
             time.sleep(1)
 
-            # 'saved to the disk' is drawn in the accent colour under
-            # the description. Which row that is depends on how many
-            # settings there are and how long the description of this
-            # one is, so we look through the band it can be in rather
-            # than computing it here - the layout is the program's
-            # business, the message is ours.
-            w, h, at = q.screen_raw()
-            green = any(at(CX + 6 + x, CY + y)[2] > 120 and
-                        at(CX + 6 + x, CY + y)[0] < 90 and
-                        at(CX + 6 + x, CY + y)[1] < 90
-                        for y in range(130, 190)
-                        for x in range(0, 130))
-            check("the program reported the write to the disk", green)
+            # 'Saved to the disk' is said on the line at the bottom of
+            # the window
+            said = q.gset_note(CX, CY)
+            check("the program reported the write to the disk ('%s')" % said,
+                  said == "Saved to the disk")
         finally:
             q.close()
 

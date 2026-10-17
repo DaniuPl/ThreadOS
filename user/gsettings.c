@@ -21,14 +21,7 @@
  * the line that appears here but the next boot.
  */
 
-#include "usys.h"
-
-#define C_BG     8    /* the window's grey background */
-#define C_RED    1
-#define C_GREEN  2
-#define C_BLUE   3
-#define C_WHITE  4
-#define C_BLACK  0
+#include "udraw.h"
 
 /* The size the window is created with. From then on it is whatever the
    person pulled it to, and the desktop says so with WEV_SIZE. */
@@ -36,10 +29,13 @@
    them and the line that says what happened - and room for one more
    setting before this has to be thought about again. */
 #define W0  360
-#define H0  210
+#define H0  310
 
-#define ROW_Y   22            /* the first row */
-#define ROW_H   14
+#define ROW_Y   30            /* the first row */
+#define ROW_H   18
+#define VAL_X   124           /* where a setting's value starts */
+#define NOTE_DY 12            /* the last line's baseline, from the bottom */
+#define PASS_DY 54            /* the password's field, from the bottom */
 #define MAXCFG   12    /* room for the settings there are, and a few more */
 
 static struct cfg_entry cfg[MAXCFG];
@@ -186,7 +182,7 @@ static void try_password(void)
 
 void _start(void)
 {
-    int w = win_create(W0, H0, "Settings");
+    int w = (int)win_create(W0, H0, "Settings");
     if (w < 0)
         sys_exit(1);
 
@@ -292,29 +288,41 @@ void _start(void)
         }
         edit[elen] = 0;
 
-        /* --- drawing --- */
-        win_rect(w, 0, 0, cw, ch, C_BG);
-        win_text(w, 6, 6, "System settings:", C_BLUE);
+        /* --- drawing ---
+         *
+         * In the desktop's own colours, asked for every time: a switch
+         * of the theme is followed on the next redraw. */
+        struct ud_look l;
+        ud_look(&l);
+        ud_fill(w, 0, 0, cw, ch, l.bg);
+        ud_text(w, 12, ud_baseline(6, 20, 14), "System settings", l.text,
+                UD_BOLD, 14);
 
         for (int i = 0; i < ncfg; i++) {
             int y = ROW_Y + i * ROW_H;
+            int base = ud_baseline(y, ROW_H, UD_PX);
             /* The selected row is marked, so that clicking and typing
-               have a visible target */
+               have a visible target - the accent, with its text on it */
             if (i == chosen)
-                win_rect(w, 2, y - 2, cw - 4, ROW_H - 1, C_BLUE);
-            /* Black on grey reads; white on grey does not. The
-               selected row has a blue field under it, so there white
-               is the one that reads. */
-            win_text(w, 6, y, cfg[i].name, i == chosen ? C_WHITE : C_BLACK);
-            win_text(w, 100, y, i == chosen ? edit : cfg[i].value,
-                     i == chosen ? C_WHITE : C_BLACK);
+                ud_round(w, 6, y, cw - 12, ROW_H, 5, l.accent);
+            else if (i & 1)
+                ud_round(w, 6, y, cw - 12, ROW_H, 5, l.row);
+            uint32_t ink = i == chosen ? l.on_accent : l.text;
+            ud_text(w, 14, base, cfg[i].name, ink, UD_SANS, UD_PX);
+            int end = ud_text(w, VAL_X, base, i == chosen ? edit : cfg[i].value,
+                              i == chosen ? l.on_accent : l.dim, UD_SANS,
+                              UD_PX);
+            /* Where the next typed character goes */
+            if (i == chosen && !asking)
+                ud_fill(w, end + 1, y + 3, 1, ROW_H - 6, l.on_accent);
         }
 
         /* What the selected setting is for, and how to change it */
-        int y = ROW_Y + ncfg * ROW_H + 6;
+        int y = ROW_Y + ncfg * ROW_H + 8;
+        ud_fill(w, 12, y - 4, cw - 24, 1, l.line);
         if (chosen >= 0 && chosen < ncfg) {
-            /* The description may be two lines - win_text draws one, so
-               we cut it at the newline ourselves */
+            /* The description may be two lines - a line is drawn at a
+               time, so we cut it at the newline ourselves */
             char line[CFG_HELP_MAX];
             const char *h = cfg[chosen].help;
             while (*h) {
@@ -324,38 +332,42 @@ void _start(void)
                 for (int k = 0; k < n; k++)
                     line[k] = h[k];
                 line[n] = 0;
-                win_text(w, 6, y, line, C_BLACK);
-                y += 11;
+                ud_text(w, 12, y + 11, line, l.dim, UD_SANS, 11);
+                y += 14;
                 h += n;
                 if (*h == '\n')
                     h++;
             }
-            win_text(w, 6, y + 3,
-                     (cycle_limit(cfg[chosen].name) ||
-                      is_theme(cfg[chosen].name))
-                         ? "a click on a line changes it, Enter saves"
-                         : "type on the keyboard, Enter saves",
-                     C_BLUE);
-            y += 3;
+            ud_text(w, 12, y + 13,
+                    (cycle_limit(cfg[chosen].name) ||
+                     is_theme(cfg[chosen].name))
+                        ? "A click on the line changes it, Enter saves"
+                        : "Type on the keyboard, Enter saves",
+                    l.accent, UD_SANS, 11);
         }
 
+        /* The bottom of the window: the password when it is asked for,
+           otherwise what became of the last change - always in the
+           same place, so it is not looked for */
         if (asking) {
-            /* Stars, not what was typed: the person needs to see that
+            /* Dots, not what was typed: the person needs to see that
                the keys are arriving, and nothing more than that */
-            char stars[CFG_VAL_MAX];
-            int i = 0;
-            for (; i < plen && i < (int)sizeof(stars) - 1; i++)
-                stars[i] = '*';
-            stars[i] = 0;
-            win_text(w, 6, y + 15, "the admin password:", C_BLUE);
-            win_text(w, 6 + 14 * 8, y + 15, stars, C_BLACK);
-            win_text(w, 6, y + 26, "changing settings needs admin; "
-                                   "Enter confirms", C_BLACK);
+            int bx = 12, by = ch - PASS_DY, bw = cw - 24;
+            ud_round(w, bx, by, bw, 22, 6, l.field);
+            ud_ring(w, bx, by, bw, 22, 6, l.accent);
+            int x = ud_text(w, bx + 8, ud_baseline(by, 22, UD_PX),
+                            "Admin password:", l.dim, UD_SANS, UD_PX) + 8;
+            for (int i = 0; i < plen && x < bx + bw - 10; i++, x += 9)
+                ud_disc(w, x, by + 8, 6, l.text);
+            ud_text(w, 12, ch - NOTE_DY, "Changing settings needs admin; "
+                    "Enter confirms", l.dim, UD_SANS, 11);
         } else if (saved > 0) {
-            win_text(w, 6, y + 15, "saved to the disk", C_BLUE);
+            ud_text(w, 12, ch - NOTE_DY, "Saved to the disk", l.good, UD_BOLD,
+                    UD_PX);
         } else if (saved < 0) {
-            win_text(w, 6, y + 15, "NOT saved (wrong password or "
-                                   "a bad value)", C_RED);
+            ud_text(w, 12, ch - NOTE_DY,
+                    "NOT saved (wrong password or a bad value)", l.danger,
+                    UD_BOLD, UD_PX);
         }
 
         sys_sleep(80);

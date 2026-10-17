@@ -42,46 +42,36 @@ def main():
 
         # Menu -> the 'gfiles' entry
         q9.launch_menu("gfiles")
-        # gfiles slot2 (94,54), content (95,65); the file name at
-        # content(8,16) -> screen(103,81). The text is BLACK - the
-        # window is light grey, and white on it was unreadable.
-        def files_row_white():
-            _, _, a = q9.screen_raw()
-            return sum(1 for x in range(103, 160) for y in range(81 + DOWN, 89 + DOWN)
-                       if near(a(x, y), (0, 0, 0), 10))
-        appeared = False
+        # gfiles in slot 2 (94,54), its content a frame line in and
+        # under the title bar; its list read in the lettering it is
+        # written in
+        cx, cy = 94 + 1, 54 + CONTENT_DY
+        names = []
         for _ in range(15):
-            if files_row_white() > 0:
-                appeared = True
+            names = [r[0] for r in q9.gfiles_rows(cx, cy)]
+            if "report" in names:
                 break
-            time.sleep(0.2)
-        check("the GUI file manager lists a file from the disk (FS -> a window)",
-              appeared)
+            time.sleep(0.4)
+        check("the GUI file manager lists a file from the disk (FS -> a window)"
+              " (%s)" % ", ".join(names), "report" in names)
 
         # A click on a file name chooses it: the row takes the accent
         # colour, which is how everything on this desktop says "this
         # one". The contents are no longer shown here - a file manager
         # hands a file to the program that opens it, and that program
         # is the editor.
-        #
-        # Row 1 (content y16 + 10 -> screen y91): row 0 is 'swap.sys',
-        # which the kernel makes at startup, and what we want is
-        # 'raport'.
-        def row_blue():
-            _, _, a = q9.screen_raw()
-            return sum(1 for x in range(100, 300) for y in range(91 + DOWN, 99 + DOWN)
-                       if near(a(x, y), (0, 0, 255), 60))
-
-        before_blue = row_blue()
-        q9.mouse_goto(115, 93 + DOWN)
-        q9.mouse_click()
-        q9.mouse_goto(60, 300)
         picked = False
-        for _ in range(15):
-            if row_blue() > before_blue + 100:
-                picked = True
-                break
-            time.sleep(0.2)
+        if "report" in names:
+            r = names.index("report")
+            q9.mouse_goto(cx + 60, cy + gfiles_row_y(r))
+            q9.mouse_click()
+            q9.mouse_goto(60, 300)
+            for _ in range(15):
+                rows = q9.gfiles_rows(cx, cy)
+                if any(r[0] == "report" and r[2] for r in rows):
+                    picked = True
+                    break
+                time.sleep(0.4)
         check("a click on a file in gfiles picks it (a mouse event -> ring 3)",
               picked)
     finally:
@@ -127,21 +117,29 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # gmon slot2 (94,54), content (95,65). The RAM bar (content y48)
-        # contains a blue usage fragment -> screen ~ (101,116).
-        check("the resource monitor: the RAM bar (blue 101,116)",
-              q11.wait_pixel(101, 116 + DOWN, (0, 0, 255)))
+        # gmon in slot 2 (94,54). The memory capsule (user/gmon.c: 8
+        # tall at content y30, from x12) is filled in the accent as far
+        # as the memory is used
+        cx, cy = 94 + 1, 54 + CONTENT_DY
+        check("the resource monitor: the memory capsule, filled in the "
+              "accent", q11.wait_pixel(cx + 14, cy + 34,
+                                       theme("dark")["accent"], tol=8,
+                                       timeout=8))
 
-        # the uptime (the number at content(96,28) -> screen (191,93)) grows:
-        # the text cell changes over time -> a live monitor
-        def up_cell():
-            _, _, a = q11.screen_raw()
-            return [a(191 + c, 93 + DOWN + r) for r in range(8) for c in range(24)]
-        c1 = up_cell()
-        time.sleep(1.6)
-        c2 = up_cell()
-        check("the resource monitor is alive: uptime updates in its window",
-              c1 != c2)
+        # How long the machine has been up - the last of its rows,
+        # its number set against the right edge - grows: a live monitor
+        def uptime():
+            base = cy + ui_font_baseline_in(UD_PX, 80, 18)
+            got = q11.find_ui(cx + 100, cx + 220, base, px=UD_PX,
+                              fg=theme("dark")["app_text"])
+            digits = got.replace(" s", "").replace(" ", "")
+            return int(digits) if digits.isdigit() else None
+        u1 = uptime()
+        time.sleep(2.5)
+        u2 = uptime()
+        check("the resource monitor is alive: uptime updates in its window "
+              "(%s s -> %s s)" % (u1, u2),
+              u1 is not None and u2 is not None and u2 > u1)
     finally:
         q11.close()
 

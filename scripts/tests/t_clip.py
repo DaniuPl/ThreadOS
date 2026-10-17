@@ -135,9 +135,9 @@ def main():
 
             # Slot 3: the corner at (70+36, 30+36), the content a frame
             # line in and under the title bar; the 'name' row is the
-            # first, at ROW_Y=22, and its value is drawn at x=100
+            # first (user/gsettings.c)
             SX, SY = 106 + 1, 66 + CONTENT_DY
-            q.mouse_goto(SX + 40, SY + 22)
+            q.mouse_goto(SX + 40, SY + gset_row_y(0))
             q.mouse_click()                # select the row
             time.sleep(1)
             q.sendkey("shift-insert")      # paste
@@ -145,13 +145,11 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # The value of a setting is drawn at x=100 of the content,
-            # so it has a grid of its own - eight pixels wide from
-            # THERE, not from the left edge of the window
-            vals = read_rows(q, ox=SX + 100, oy=SY + 22, cols=30, rows=4,
-                             pitch=14, per_row=True)
+            # Read in the lettering the settings write in: the row is
+            # the chosen one, its value on the accent
+            val = q.gset_row(SX, SY, 0, chosen=True)[1]
             check("the text from the terminal appeared in another window ('%s')"
-                  % vals[0], WORD in vals[0])
+                  % val, WORD in val)
 
             # --- and the kernel keeps it -------------------------------
             # Close the window it came from: the text was never that
@@ -162,17 +160,16 @@ def main():
             time.sleep(3)
 
             # Paste again, into the settings window's next row
-            q.mouse_goto(SX + 40, SY + 22 + 14)
+            q.mouse_goto(SX + 40, SY + gset_row_y(1))
             q.mouse_click()
             time.sleep(1)
             q.sendkey("shift-insert")
             time.sleep(1.5)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
-            vals = read_rows(q, ox=SX + 100, oy=SY + 22, cols=30, rows=4,
-                             pitch=14, per_row=True)
+            val = q.gset_row(SX, SY, 1, chosen=True)[1]
             check("the clipboard survived the closing of the window it came from "
-                  "('%s')" % vals[1], WORD in vals[1])
+                  "('%s')" % val, WORD in val)
         finally:
             q.close()
     finally:

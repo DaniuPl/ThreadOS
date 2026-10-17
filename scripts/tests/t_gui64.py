@@ -179,31 +179,26 @@ def main():
             q.launch_dock(1)                # the "Clock" tile
             q.mouse_goto(400, 300)
 
+            # The clock writes the time in the lettering of the system,
+            # and the time is read back the same way
             zx, zy = body_text(3)
-            def clock_window(fun):
-                return [fun(zx + 8 + dx, zy + 4 + dy)
-                        for dy in range(8) for dx in range(64)]
-
-            clock_present = False
+            first = ""
             end = time.time() + 20
             while time.time() < end:
-                _, _, az = q.screen_raw()
-                if any(p != BIALY and p != (227, 227, 227)
-                       for p in clock_window(az)):
-                    clock_present = True
+                first = q.gclock_time(zx, zy)
+                if len(first) == 8 and first.count(":") == 2:
                     break
                 time.sleep(0.5)
-            check("the 'Clock' tile starts a second application in a window of its own",
-                  clock_present)
+            check("the 'Clock' tile starts a second application in a window "
+                  "of its own ('%s')" % first, first.count(":") == 2)
 
             # The clock is to run: the time changes in the window of its own
-# accord
-            _, _, az1 = q.screen_raw()
-            first = clock_window(az1)
+            # accord
             time.sleep(2.5)
-            _, _, az2 = q.screen_raw()
-            check("the clock in the window runs (its content changes by itself)",
-                  clock_window(az2) != first)
+            second = q.gclock_time(zx, zy)
+            check("the clock in the window runs ('%s' -> '%s')"
+                  % (first, second),
+                  second.count(":") == 2 and second != first)
 
             # --- Files: a third application, it reads the disk ---
             q.mouse_home()
@@ -211,43 +206,36 @@ def main():
             q.mouse_goto(400, 300)
 
             px2, py2 = body_text(4)
-            # The heading - the directory being shown and how many
-            # things are in it - is drawn in the accent colour at (4,2)
-            greens = 0
+            # The heading says which directory is shown
+            head = ""
             end = time.time() + 20
             while time.time() < end:
-                _, _, ap = q.screen_raw()
-                greens = sum(1 for dy in range(8) for dx in range(120)
-                                if ap(px2 + 4 + dx, py2 + 2 + dy) == BLUE)
-                if greens > 10:
+                head = q.gfiles_heading(px2, py2)
+                if head.startswith("/"):
                     break
                 time.sleep(0.5)
-            check("the 'Files' tile starts the file manager "
-                  "(%d title-bar pixels in the accent colour)" % greens,
-                  greens > 10)
+            check("the 'Files' tile starts the file manager (its heading: "
+                  "'%s')" % head, head.startswith("/"))
 
             # A click chooses a file: the row takes the accent colour,
             # which is this desktop's way of saying "this one". That is
             # the whole path being checked - a mouse event reaching a
             # ring 3 program and coming back as a drawing.
-            def row_blue(row):
-                _, _, a = q.screen_raw()
-                return sum(1 for dx in range(200) for dy in range(8)
-                           if a(px2 + 4 + dx, py2 + 18 + row * 10 + dy)
-                           == BLUE)
-
+            rows = q.gfiles_rows(px2, py2)
             picked = False
-            for row in range(4):
-                before = row_blue(row)
+            if rows:
                 q.mouse_home()
-                q.mouse_goto(px2 + 20, py2 + 18 + row * 10 + 4)
+                q.mouse_goto(px2 + 60, py2 + gfiles_row_y(0))
                 q.mouse_click()
                 q.mouse_goto(400, 300)
-                time.sleep(1.5)
-                if row_blue(row) > before + 100:
-                    picked = True
-                    break
-            check("a click on a file name picks it in the manager", picked)
+                for _ in range(10):
+                    time.sleep(0.5)
+                    rows = q.gfiles_rows(px2, py2)
+                    if rows and rows[0][2]:
+                        picked = True
+                        break
+            check("a click on a file name picks it in the manager (%s)"
+                  % ", ".join(r[0] for r in rows), picked)
 
             # The compositor survived all this: the desktop's background is still
 # there.
@@ -275,26 +263,31 @@ def main():
             q2.mouse_goto(400, 300)
 
             mx, my = body_text(2)
-            # The memory usage bar: a red background, the used part in
-            # blue. Both colours at once mean the numbers arrived and
-            # that they are neither zero nor everything.
-            red = q2.wait_pixel(mx + 150, my + 52, RED, timeout=20)
-            blue = q2.wait_pixel(mx + 6, my + 52, BLUE, timeout=5)
+            # The memory capsule (user/gmon.c: 8 tall at content y30,
+            # from x12): its track, and as far along as is used, the
+            # accent. Both at once mean the numbers arrived and that
+            # they are neither zero nor everything.
+            dark = theme("dark")
+            used = q2.wait_pixel(mx + 14, my + 34, dark["accent"], tol=8,
+                                 timeout=20)
+            free = q2.wait_pixel(mx + 220 - 16, my + 34, dark["app_row"],
+                                 tol=8, timeout=5)
             check("the 'Monitor' tile starts the resource gauge "
-                  "(the memory bar)", red and blue)
+                  "(the memory capsule)", used and free)
 
             # The uptime grows: the window is alive rather than showing one
-# photograph
-            def pole_uptime(fun):
-                return [fun(mx + 96 + dx, my + 28 + dy)
-                        for dy in range(8) for dx in range(40)]
-
-            _, _, am1 = q2.screen_raw()
-            u1 = pole_uptime(am1)
+            # photograph
+            def uptime():
+                base = my + ui_font_baseline_in(UD_PX, 80, 18)
+                got = q2.find_ui(mx + 100, mx + 220, base, px=UD_PX,
+                                 fg=dark["app_text"])
+                digits = got.replace(" s", "").replace(" ", "")
+                return int(digits) if digits.isdigit() else None
+            u1 = uptime()
             time.sleep(2.5)
-            _, _, am2 = q2.screen_raw()
-            check("the monitor is alive (uptime in the window grows)",
-                  pole_uptime(am2) != u1)
+            u2 = uptime()
+            check("the monitor is alive (uptime in the window grows: %s -> %s)"
+                  % (u1, u2), u1 is not None and u2 is not None and u2 > u1)
 
             # --- The terminal: keyboard, fork, exec, dup2, a file ---
             q2.mouse_home()

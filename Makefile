@@ -56,6 +56,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/mkwall.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
+             $(BUILD)/user/udtest.elf \
              $(BUILD)/user/gimg.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
@@ -292,6 +293,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
+	    udtest=$(BUILD)/user/udtest.elf \
 	    gimg=$(BUILD)/user/gimg.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
@@ -393,12 +395,13 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/swaptest64.elf \
                $(BUILD)/user64/shmwrite64.elf \
                $(BUILD)/user64/shmread64.elf \
-               $(BUILD)/user64/gclock64.elf \
+               $(BUILD)/user64/gclock.elf \
                $(BUILD)/user64/gfiles.elf \
-               $(BUILD)/user64/gmon64.elf \
+               $(BUILD)/user64/gmon.elf \
                $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gtasks.elf \
+               $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/ginstal.elf \
                $(BUILD)/user64/gmikser.elf \
                $(BUILD)/user64/gimg.elf \
@@ -496,12 +499,13 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    swaptest64=$(BUILD)/user64/swaptest64.elf \
 	    shmwrite64=$(BUILD)/user64/shmwrite64.elf \
 	    shmread64=$(BUILD)/user64/shmread64.elf \
-	    gclock=$(BUILD)/user64/gclock64.elf \
+	    gclock=$(BUILD)/user64/gclock.elf \
 	    gfiles=$(BUILD)/user64/gfiles.elf \
-	    gmon=$(BUILD)/user64/gmon64.elf \
+	    gmon=$(BUILD)/user64/gmon.elf \
 	    gterm=$(BUILD)/user64/gterm.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
+	    udtest=$(BUILD)/user64/udtest.elf \
 	    ginstal=$(BUILD)/user64/ginstal.elf \
 	    gmikser=$(BUILD)/user64/gmikser.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \

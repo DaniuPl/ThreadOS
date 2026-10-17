@@ -32,7 +32,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 from ptest import near as ptest_near
 
 # The cascade: the first application window is slot 2, at (94,54)
@@ -61,27 +61,6 @@ def clock_here(at):
     return at(WX + 40, WY + 4) != aurora_px(WX + 40, WY + 4)
 
 
-def clock_text(at):
-    """The 'HH:MM:SS' that gclock draws in its own window: BLACK on the
-    window's light grey, at (8,6) of a content area starting at
-    (95,65). Dark on light is the rule everywhere in this system - the
-    digits used to be green, which was drawn and could not be read."""
-    x0, y0 = WX + 1 + 8, WY + CONTENT_DY + 6
-    font = font8x8()
-    out = ""
-    for c in range(8):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                p = at(x0 + c * 8 + x, y0 + y)
-                if all(v < 80 for v in p):          # the digits are dark
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), "?")
-    return out
-
-
 def read_clock(q, tries=8):
     """The clock's digits, read again if the screen was caught between
     the clearing of the window and the drawing of the time. The program
@@ -90,9 +69,8 @@ def read_clock(q, tries=8):
     a clock that stopped."""
     text = ""
     for _ in range(tries):
-        w, h, at = q.screen_raw()
-        text = clock_text(at)
-        if text.count(":") == 2 and "?" not in text and " " not in text:
+        text = q.gclock_time(WX + 1, WY + CONTENT_DY)
+        if len(text) == 8 and text.count(":") == 2:
             return text
         time.sleep(0.6)
     return text

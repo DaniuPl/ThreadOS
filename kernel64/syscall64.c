@@ -1041,6 +1041,38 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)sem_post((int)a1);
         return;
 
+    case SYS64_WIN_DRAW: {
+        struct win_draw_cmd64 {
+            int32_t op, x, y, w, h, r;
+            uint32_t rgb, rgb2;
+            int32_t a, font, px;
+            uint64_t s;
+        } c;
+        char s[256];
+        if (!paging64_user_range(a2, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const struct win_draw_cmd64 *)(uintptr_t)a2;
+        if (c.s && text_from_ring3(c.s, s, sizeof(s)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        struct win_draw d = { c.op, c.x, c.y, c.w, c.h, c.r, c.rgb, c.rgb2,
+                              c.a, c.font, c.px };
+        r->rax = (uint64_t)(int64_t)desktop_win_draw(
+            (int)a1, task64_current_id(), &d, c.s ? s : (const char *)0);
+        return;
+    }
+    case SYS64_UI_LOOK: {
+        if (!paging64_user_range(a1, UI_LOOK_N * sizeof(uint32_t))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        desktop_ui_look((uint32_t *)(uintptr_t)a1);
+        r->rax = 0;
+        return;
+    }
     case SYS64_WIN_TRUECOL:
         r->rax = (uint64_t)(int64_t)desktop_win_truecolour(
             (int)a1, task64_current_id());

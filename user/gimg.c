@@ -23,18 +23,14 @@
  * screen full of eight-pixel letters would show less, not more.
  */
 
-#include "uapi.h"
+#include "udraw.h"
 #include "uinflate.h"
 #include "ujpeg.h"
 
-#define C_BG    8
-#define C_WHITE 4
-#define C_GREEN 2
-#define C_BLUE  3
-
 #define W0 420
 #define H0 300
-#define STATUS_H 10
+#define STATUS_H 22           /* the status line along the bottom */
+#define STATUS_PX 11
 #define NAME_MAX_LEN 31
 #define ROW_MAX 1024
 
@@ -166,8 +162,20 @@ static void draw_status(void)
             line[p++] = note[i];
     }
     line[p] = '\0';
-    win_rect(winid, 0, ch - STATUS_H, cw, STATUS_H, C_BLUE);
-    win_text(winid, 4, ch - STATUS_H + 1, line, C_WHITE);
+    struct ud_look l;
+    ud_look(&l);
+    ud_fill(winid, 0, ch - STATUS_H, cw, STATUS_H, l.row);
+    ud_fill(winid, 0, ch - STATUS_H, cw, 1, l.line);
+    ud_text(winid, 8, ud_baseline(ch - STATUS_H, STATUS_H, STATUS_PX), line,
+            l.text, UD_SANS, STATUS_PX);
+}
+
+/* The window's own background, in the theme's colour */
+static void clear(int winid)
+{
+    struct ud_look l;
+    ud_look(&l);
+    ud_fill(winid, 0, 0, cw, ch, l.bg);
 }
 
 /* A PNG.
@@ -311,7 +319,7 @@ static int show_png(int fd, const uint8_t *head, int got)
     step = 1;
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
-    win_rect(winid, 0, 0, cw, ch, C_BG);
+    clear(winid);
 
     /* Undoing the filters needs the row above, so the rows are walked
        in order and the previous one kept. */
@@ -423,7 +431,7 @@ static int show_jpeg(int fd, const uint8_t *head, int got)
     step = 1;
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
-    win_rect(winid, 0, 0, cw, ch, C_BG);
+    clear(winid);
 
     for (int y = 0; y < h; y += step) {
         int dest = y / step;
@@ -508,7 +516,7 @@ static int show_bmp(int fd, const uint8_t *head)
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
 
-    win_rect(winid, 0, 0, cw, ch, C_BG);
+    clear(winid);
 
     int stride = bpp == 24 ? (w * 3 + 3) & ~3 : (w + 3) & ~3;
     for (int y = 0; y < hh; y++) {
@@ -567,7 +575,7 @@ static int show_tsc2(const char *name)
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
 
-    win_rect(winid, 0, 0, cw, ch, C_BG);
+    clear(winid);
     int drawn = 0;
     for (int y = 0; y < img_h; y++) {
         if ((int)sys_read(fd, row, (uint32_t)img_w * 3) != img_w * 3)
@@ -694,7 +702,7 @@ static void show(const char *name)
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
 
-    win_rect(winid, 0, 0, cw, ch, C_BG);
+    clear(winid);
     int drawn = 0;
     for (int y = 0; y < img_h; y++) {
         if ((int)sys_read(fd, row, (uint32_t)img_w) != img_w)
@@ -728,7 +736,7 @@ void _start(int argc, char **argv)
        them; only the picture needs the other sixteen million. */
     colour_win = win_truecolour(win) == 0;
 
-    win_rect(win, 0, 0, cw, ch, C_BG);
+    clear(win);
     if (argc > 1 && argv && argv[1] && argv[1][0])
         show(argv[1]);
     draw_status();

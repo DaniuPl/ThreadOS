@@ -1,20 +1,25 @@
-/* gclock - a clock in a graphical window (ring 3)
+/* gclock - a clock in a window of its own (ring 3)
  *
- * Every second it reads the RTC (sys_time) and draws the time HH:MM:SS
- * in its own window. The second GUI application started from the
- * desktop's menu.
+ * The time in large figures and the date under it, drawn the way the
+ * desktop draws - TrueType, in the theme's colours - so that it sits
+ * next to the bar's own clock as one family rather than as a visitor
+ * from a machine of eight-by-eight letters.
+ *
+ * It reads the clock twice a second: often enough that no second is
+ * skipped, and it asks the desktop for the theme's colours every time,
+ * so it follows a switch between dark and light as soon as the desktop
+ * does. One program for both kernels: the system calls it makes have
+ * the same names on either side (uapi.h).
  */
 
-#include "usys.h"
+#include "udraw.h"
 
-#define C_BG    8
-#define C_WHITE 4
-#define C_GREEN 2
-/* Dark text on a light surface, light text on a dark one: the window
-   is the system's light grey, so its text is black. */
-#define C_TEXT  0
-#define C_DIM  15
-#define C_HEAD  3
+#define W 132                 /* the content */
+#define H 52
+#define TIME_PX 20
+#define DATE_PX 11
+#define TIME_Y 6              /* the band the time is centred in */
+#define TIME_H 24
 
 static void pad2(char *d, int v)
 {
@@ -22,16 +27,41 @@ static void pad2(char *d, int v)
     d[1] = (char)('0' + v % 10);
 }
 
+/* The day of the week, 0 = Sunday (Sakamoto's method) */
+static int weekday(int y, int m, int d)
+{
+    static const int t[12] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (m < 3)
+        y -= 1;
+    return (y + y / 4 - y / 100 + y / 400 + t[(m - 1) % 12] + d) % 7;
+}
+
+static int put(char *d, const char *s)
+{
+    int n = 0;
+    while (s[n]) {
+        d[n] = s[n];
+        n++;
+    }
+    return n;
+}
+
 void _start(void)
 {
-    int w = win_create(80, 20, "Clock");
+    static const char *days[7] = { "Sunday", "Monday", "Tuesday",
+                                   "Wednesday", "Thursday", "Friday",
+                                   "Saturday" };
+    static const char *months[12] = { "January", "February", "March",
+                                      "April", "May", "June", "July",
+                                      "August", "September", "October",
+                                      "November", "December" };
+    int w = (int)win_create(W, H, "Clock");
     if (w < 0)
         sys_exit(1);
 
     for (;;) {
         /* The desktop may ask us to end - a window with a close button
-           that does nothing is a window that lies. Nothing else comes
-           this way, so one look per frame is enough. */
+           that does nothing is a window that lies. */
         struct win_event ev;
         while (win_poll(w, &ev) == 1)
             if (ev.type == WEV_CLOSE)
@@ -39,6 +69,8 @@ void _start(void)
 
         struct utime t;
         sys_time(&t);
+        struct ud_look look;
+        ud_look(&look);
 
         char s[9];
         pad2(s, t.hour);
@@ -48,8 +80,23 @@ void _start(void)
         pad2(s + 6, t.sec);
         s[8] = '\0';
 
-        win_rect(w, 0, 0, 80, 20, C_BG);
-        win_text(w, 8, 6, s, C_TEXT);
+        char date[40];
+        int n = 0;
+        if (t.month >= 1 && t.month <= 12 && t.day >= 1 && t.day <= 31) {
+            n += put(date + n, days[weekday(t.year, t.month, t.day)]);
+            date[n++] = ',';
+            date[n++] = ' ';
+            if (t.day >= 10)
+                date[n++] = (char)('0' + t.day / 10);
+            date[n++] = (char)('0' + t.day % 10);
+            date[n++] = ' ';
+            n += put(date + n, months[t.month - 1]);
+        }
+        date[n] = '\0';
+
+        ud_fill(w, 0, 0, W, H, look.bg);
+        ud_text_mid(w, 0, TIME_Y, W, TIME_H, s, look.text, UD_BOLD, TIME_PX);
+        ud_text_mid(w, 0, 32, W, 14, date, look.dim, UD_SANS, DATE_PX);
 
         sys_sleep(500);
     }

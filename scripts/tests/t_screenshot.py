@@ -45,31 +45,17 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The viewer opens in the next free slot of the cascade; with the clock
 # already open it is slot 3, at (106,66), and asks for 420x300.
 VX, VY = 106, 66
 CX, CY = VX + 1, VY + CONTENT_DY
 VW, VH = 420, 300
-STATUS_H = 10
 
-def status(at, cols=48, vx=VX, vy=VY):
-    """The viewer's status line: white on the accent blue."""
-    font = font8x8()
-    x0, y0 = vx + 1 + 4, vy + CONTENT_DY + VH - STATUS_H + 1
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                p = at(x0 + c * 8 + x, y0 + y)
-                if all(v > 200 for v in p):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def status(q, vx=VX, vy=VY):
+    """The viewer's status line, read in the lettering it is written in"""
+    return q.gimg_status(vx + 1, vy + CONTENT_DY, VW, VH)
 
 
 def main():
@@ -129,7 +115,7 @@ def main():
             time.sleep(2)
             w, h, at = q.screen_raw()
 
-            said = status(at)
+            said = status(q)
             check("the viewer says what it loaded ('%s')" % said,
                   "640x480" in said and "loaded" in said)
             check("and that it shows every other pixel, because the whole screen "
@@ -183,7 +169,7 @@ def main():
             # The second viewer opens in the next slot of the cascade -
             # the first one is still standing where it was
             sx4, sy4 = cascade(4, VW + 2, VH + TITLE_H + 2)
-            said = status(at, vx=sx4, vy=sy4)
+            said = status(q, vx=sx4, vy=sy4)
             check("a file that is not a picture is refused with "
                   "a word of explanation ('%s')" % said,
                   "is not a picture" in said)
@@ -209,7 +195,7 @@ def main():
 
             # The third viewer, the third slot of the cascade
             vx, vy = cascade(5, VW + 2, VH + TITLE_H + 2)
-            said = status(at, vx=vx, vy=vy)
+            said = status(q, vx=vx, vy=vy)
             check("the viewer loaded the BMP ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
@@ -252,7 +238,7 @@ def main():
             # (the sixth slot would run under the dock, so the cascade walks
             # back up - kernel/desktop.c)
             vx, vy = cascade(6, VW + 2, VH + TITLE_H + 2)
-            said = status(at, vx=vx, vy=vy)
+            said = status(q, vx=vx, vy=vy)
             check("the viewer unpacked the PNG ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
@@ -290,7 +276,7 @@ def main():
             time.sleep(2)
             w, h, at = q.screen_raw()
             vx, vy = cascade(7, VW + 2, VH + TITLE_H + 2)
-            said = status(at, vx=vx, vy=vy)
+            said = status(q, vx=vx, vy=vy)
             check("the viewer took the JPEG apart into pixels ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
@@ -406,7 +392,7 @@ def sixty_four():
             w, h, at = q.screen_raw()
 
             vx, vy = VX, VY
-            said = status(at, vx=vx, vy=vy)
+            said = status(q, vx=vx, vy=vy)
             check("(64) the viewer took the JPEG apart into pixels ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 

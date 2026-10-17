@@ -32,47 +32,21 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The file manager: slot 2 of the cascade, content a pixel right and a
-# title bar down; gfiles asks for 320x220.
+# title bar down (user/gfiles.c).
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-CW = 320
-ROW_Y0 = 18
-ROW_H = 10
 
 FILES = 24                      # more than the window shows
 
 
-def is_grey(px):
-    return all(abs(c - 227) <= 8 for c in px)
-
-
-def is_accent(px):
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
-
-
-def read_at(at, x, y, cols):
-    font = font8x8()
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for yy in range(8):
-            bits = 0
-            for xx in range(8):
-                p = at(CX + x + c * 8 + xx, CY + y + yy)
-                if not is_grey(p) and not is_accent(p):
-                    bits |= 1 << xx
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
-
-
 def first_row(q):
-    _, _, at = q.screen_raw()
-    return read_at(at, 6, ROW_Y0, 14)
+    """The name at the top of the list, read in the lettering the file
+    manager writes it in"""
+    rows = q.gfiles_rows(CX, CY)
+    return rows[0][0] if rows else ""
 
 
 def main():

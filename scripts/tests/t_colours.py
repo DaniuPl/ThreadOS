@@ -38,31 +38,17 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
-# The viewer opens in the next free slot of the cascade; with the clock
-# already open it is slot 3, at (106,66), and asks for 420x300.
+# The viewer opens in the next free slot of the cascade; with the
+# terminal already open it is slot 3, at (106,66), and asks for 420x300.
 VX, VY = 106, 66
 VW, VH = 420, 300
-STATUS_H = 10
 
 
-def status(at, cols=48, vx=VX, vy=VY):
-    """The viewer's status line: white on the accent blue."""
-    font = font8x8()
-    x0, y0 = vx + 1 + 4, vy + CONTENT_DY + VH - STATUS_H + 1
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                p = at(x0 + c * 8 + x, y0 + y)
-                if all(v > 200 for v in p):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def status(q, vx=VX, vy=VY):
+    """The viewer's status line, read in the lettering it is written in"""
+    return q.gimg_status(vx + 1, vy + CONTENT_DY, VW, VH)
 
 
 def main():
@@ -104,15 +90,15 @@ def main():
                   m is not None and int(m.group(1)) < 40)
 
             # --- a picture in real colours ------------------------------
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(4)
 
             # The desktop itself is drawn in real colours now - the
             # aurora, the glass, the shadows: thousands of shades over
             # the screen. A window that never asked for anything else
-            # still lives in the palette: the clock's content (slot 2,
-            # 80x20) is a handful of colours, because that program did
-            # not have to change.
+            # still lives in the palette: the terminal's content (slot
+            # 2) is a handful of colours, because that program did not
+            # have to change.
             w, h, at = q.screen_raw()
             own = set()
             for y in range(0, h, 4):
@@ -126,7 +112,7 @@ def main():
             inside = set(at(cx0 + x, cy0 + y) for y in range(20)
                          for x in range(8, 72))
             check("and a window drawn in indices has a handful of them (%d "
-                  "in the clock's)" % len(inside), 1 < len(inside) < 12)
+                  "in the terminal's)" % len(inside), 1 < len(inside) < 12)
 
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)
@@ -143,7 +129,7 @@ def main():
             q.mouse_goto(600, 200)
             time.sleep(2)
             w, h, at = q.screen_raw()
-            said = status(at)
+            said = status(q)
             check("the viewer loaded the picture ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 

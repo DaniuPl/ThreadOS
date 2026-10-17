@@ -130,6 +130,24 @@ static inline int32_t sys_sem_post(int id)
     return (int32_t)syscall64(SYS64_SEM_POST, id, 0);
 }
 
+/* Shapes and TrueType text in a window, and the theme's colours */
+struct win_draw_cmd {
+    int32_t op, x, y, w, h, r;
+    uint32_t rgb, rgb2;
+    int32_t a, font, px;
+    const char *s;
+};
+
+static inline int32_t sys_win_draw(int winid, const struct win_draw_cmd *c)
+{
+    return (int32_t)syscall64(SYS64_WIN_DRAW, winid, (int64_t)(uintptr_t)c);
+}
+
+static inline int32_t sys_ui_look(uint32_t *out)
+{
+    return (int32_t)syscall64(SYS64_UI_LOOK, (int64_t)(uintptr_t)out, 0);
+}
+
 static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
 {
     return (int32_t)syscall64(SYS64_SND_BEEP, (int64_t)hz, (int64_t)ms);

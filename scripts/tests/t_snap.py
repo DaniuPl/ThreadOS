@@ -40,8 +40,8 @@ from ptest import near as ptest_near
 
 
 # The cascade: slot 2 is the first application window, at (94,54);
-# gsettings asks for a 360x210 content buffer.
-WX, WY, WW, WH = 94, 54, 362, 222
+# gsettings asks for a GSET_W x GSET_H content buffer.
+WX, WY, WW, WH = 94, 54, GSET_W + 2, GSET_H + 12
 
 
 def near(px, v):
@@ -49,7 +49,9 @@ def near(px, v):
 
 
 def is_win(px):
-    return near(px, 227)            # COL_WIN, a window's background
+    """A window's background, in the theme's colour - the settings
+    draw in it"""
+    return ptest_near(px, theme("dark")["win_bg"], 3)
 
 
 def is_accent(px):
@@ -122,11 +124,11 @@ def main():
             half = w // 2
             deck = work_bottom()               # the room a window may have
             check("the settings stand where they always do",
-                  is_win(at(WX + 300, WY + 150)))
+                  is_win(at(WX + 1 + GSET_W - 3, WY + 150)))
 
             # --- a drag that is NOT at an edge shows nothing ------------
             seen = []
-            drag(q, WX + 100, WY + 4, 300, 200,
+            drag(q, WX + 100, WY + 4, 300, 100,
                  hold=lambda: seen.append(q.screen_raw()))
             _, _, mid = seen[0]
             check("there is no outline in the middle of the screen",
@@ -134,10 +136,10 @@ def main():
                   not is_accent(mid(5, deck - 40)))
 
             # --- the left edge ------------------------------------------
-            # The window is now at (200,196) - the drag above moved it
-            # by (106,4), and that is where its title bar is
+            # The window is now at (200,96) - the drag above moved it
+            # by (106,42), and that is where its title bar is
             seen = []
-            drag(q, 306, 200, 4, 200,
+            drag(q, 306, 100, 4, 200,
                  hold=lambda: seen.append(q.screen_raw()))
             _, _, at2 = seen[0]
             # The outline stands where the window would, a little inside
@@ -200,12 +202,12 @@ def main():
             # After four drags, three snaps and a restore it is still a
             # window: a lit title bar with its own body under it
             check("the window survived four drags and still has the focus",
-                  is_win(at(x0 + 20, ty + TITLE_H + 40)))
+                  is_win(at(x0 + 20, ty + TITLE_H + GSET_H - 30)))
 
             # --- what all of it is for: two windows side by side --------
             # The settings to the right, the terminal to the left. The
             # terminal's screen is BLACK and a window's background is
-            # grey, so one look tells which half holds which - and that
+            # not, so one look tells which half holds which - and that
             # they do not overlap.
             drag(q, x0 + 60, ty + 4, w - 5, 200)
             q.launch_dock(4)                # the "Term" tile
@@ -217,7 +219,7 @@ def main():
 
             dark = near(at(150, deck - 30), 0)
             check("the terminal takes the left half (a black screen)", dark)
-            check("and the settings the right (a grey background)",
+            check("and the settings the right (a window's background)",
                   is_win(at(half + 100, 300)))
             # (a little further right than left: the terminal has the
             # focus, and its shadow falls on the settings beside it)

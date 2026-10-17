@@ -93,8 +93,11 @@ def main():
             # The window that tile belongs to came to the top, so its
             # title bar is on the screen with its lights on. A window
             # the cascade had pushed off the edge would have none.
+            # (the settings, the last one opened: slot 8 of the cascade,
+            # or as far back up it as a window that tall needs to fit)
+            sx, sy = cascade(8, GSET_W + 2, GSET_H + TITLE_H + 2)
             check("a window called up from the dock has its title bar on "
-                  "the screen, with the focus", q.has_focus(166, 126))
+                  "the screen, with the focus", q.has_focus(sx, sy))
 
             # --- twelve, which is all the slots there are ---------------
             # The launch menu opens three more (a second copy of an

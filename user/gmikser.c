@@ -32,18 +32,18 @@
 #include "ugui.h"
 
 #define W0 360
-#define H0 128
+#define H0 152
 
-#define ROW_Y0 4
+#define ROW_Y0 6
 static int rowy(int r) { return ROW_Y0 + r * UG_ROW; }
 
-#define BAR_X  8
-#define BAR_Y  52
-#define BAR_H  16
+#define BAR_X  12
+#define BAR_Y  86
+#define BAR_H  18
 
-#define BTN_W  84
-#define BTN_H  16
-#define BTN_Y  82
+#define BTN_W  96
+#define BTN_H  24
+#define BTN_Y  116
 
 static struct snd_info snd;
 static struct ug u;
@@ -142,7 +142,7 @@ static void build(int win)
     id_mute = ug_button(&u, BAR_X, BTN_Y, BTN_W, BTN_H, "Mute");
     id_test = ug_button(&u, BAR_X + BTN_W + 10, BTN_Y, BTN_W, BTN_H,
                         "Test");
-    id_note = ug_label(&u, BAR_X + 2 * BTN_W + 26, BTN_Y + 4, note);
+    id_note = ug_label(&u, BAR_X + 2 * BTN_W + 26, BTN_Y + (BTN_H - UG_ROW) / 2, note);
 
     relabel();
 }

@@ -117,6 +117,11 @@
 #define SYS64_SEM_GET  65   /* rdi=key, rsi=initial count -> id or -1 */
 #define SYS64_SEM_WAIT 66   /* rdi=id -> 0, or -1 (a bad id, a signal) */
 #define SYS64_SEM_POST 67   /* rdi=id -> 0 or -1 */
+/* Shapes and TrueType text in a window (kernel/include/desktop.h):
+   a1=winid, a2=&cmd */
+#define SYS64_WIN_DRAW 68
+/* The theme's colours for a program's window: a1=buffer of 11 words */
+#define SYS64_UI_LOOK  69
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

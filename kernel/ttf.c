@@ -779,16 +779,16 @@ int ttf_render(const struct ttf_font *f, int glyph, int px,
     if (px < 1 || px > 255)
         return -1;
 
-    spin_lock(&lock);
+    irqflags_t fl = spin_lock_irq(&lock);
     ol.n = ol.nc = 0;
     out->w = out->h = out->left = out->top = 0;
     out->alpha = buf;
     if (load_glyph(f, glyph, scale_for(f, px), &ol, 0) < 0) {
-        spin_unlock(&lock);
+        spin_unlock_irq(&lock, fl);
         return -1;
     }
     if (!ol.n) {
-        spin_unlock(&lock);
+        spin_unlock_irq(&lock, fl);
         return 0;                        /* nothing to draw */
     }
 
@@ -807,11 +807,11 @@ int ttf_render(const struct ttf_font *f, int glyph, int px,
     y1 = (y1 + 63) & ~63;
     int w = (x1 - x0) >> 6, h = (y1 - y0) >> 6;
     if (w <= 0 || h <= 0) {
-        spin_unlock(&lock);
+        spin_unlock_irq(&lock, fl);
         return 0;
     }
     if (w > MAXW || h > MAXH || (uint32_t)(w * h) > cap) {
-        spin_unlock(&lock);
+        spin_unlock_irq(&lock, fl);
         return -1;
     }
 
@@ -822,7 +822,7 @@ int ttf_render(const struct ttf_font *f, int glyph, int px,
     for (int c = 0; c < ol.nc; c++) {
         int e = ol.end[c];
         if (e >= ol.n || e < s) {
-            spin_unlock(&lock);
+            spin_unlock_irq(&lock, fl);
             return -1;
         }
         if (e > s)
@@ -847,6 +847,6 @@ int ttf_render(const struct ttf_font *f, int glyph, int px,
     out->h = h;
     out->left = x0 >> 6;
     out->top = y1 >> 6;
-    spin_unlock(&lock);
+    spin_unlock_irq(&lock, fl);
     return 0;
 }

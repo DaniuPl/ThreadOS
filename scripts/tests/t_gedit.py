@@ -50,12 +50,7 @@ CW, CH = 420, 260
 # The panel that opens a file (user/ugui.h): a band across the middle
 # of the window, a list of names in it, a line to type in and two
 # buttons at the bottom edge.
-PICK_H = 150
-PICK_Y = (CH - PICK_H) // 2
-PICK_LIST_Y = PICK_Y + 24
-PICK_BY = PICK_Y + PICK_H - 24
-PICK_YES_X = 8 + 8 + 42
-PICK_NO_X = 8 + 8 + 84 + 10 + 42
+PICK = ug_pick(CH)
 
 # The terminal opens in the next slot of the cascade, behind the editor
 TWX, TWY = 106, 66
@@ -92,30 +87,17 @@ def is_bar(px):
 
 
 # The file manager: names at content (6,18), a row every ten pixels,
-# and the two buttons held against the right-hand edge of a 320-wide
-# window ("Open" at 212, "Remove" at 272).
-FM_NAME_X = 6
-FM_ROW_Y0 = 18
-FM_OPEN_X = 320 - 48 - 56 - 4
+def files_listed(q, wx=WX, wy=WY):
+    """The names on the file manager's list, in the lettering it writes
+    them in"""
+    return [r[0] for r in q.gfiles_rows(wx + 1, wy + CONTENT_DY)]
 
 
-def file_row(at, i, cols=12, wx=WX, wy=WY):
-    """One name from the file manager's list: light letters on the
-    window's grey."""
-    font = font8x8()
-    x0, y0 = wx + 1 + FM_NAME_X, wy + CONTENT_DY + FM_ROW_Y0 + i * 10
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                p = at(x0 + c * 8 + x, y0 + y)
-                if not all(abs(v - 227) <= 8 for v in p):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
+def files_click(q, wx, wy, x, y):
+    """A click at (x, y) of the file manager's content"""
+    q.mouse_goto(wx + 1 + x, wy + CONTENT_DY + y)
+    time.sleep(0.5)
+    q.mouse_click()
 
 
 def is_ink(px):
@@ -289,21 +271,14 @@ def sixty_four():
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
-            row = -1
-            for i, name in enumerate(listed):
-                if name == "long":
-                    row = i
+            listed = files_listed(q, fx, fy)
+            row = listed.index("long") if "long" in listed else -1
             check("(64) the file manager sees the editor's file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(fx + 1 + 20, fy + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, fx, fy, 60, gfiles_row_y(row))
                 time.sleep(1.5)
-                q.mouse_goto(fx + 1 + FM_OPEN_X + 20, fy + CONTENT_DY + 5)  # "Open"
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, fx, fy, *gfiles_button("open"))
                 time.sleep(5)
                 q.mouse_goto(600, 430)
                 time.sleep(1.5)
@@ -325,13 +300,9 @@ def sixty_four():
                 q.mouse_click()
                 q.mouse_goto(600, 430)
                 q.wait_focus(fx, fy, timeout=10)
-                q.mouse_goto(fx + 1 + 20, fy + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, fx, fy, 60, gfiles_row_y(row))
                 time.sleep(1)
-                q.mouse_goto(fx + 1 + 320 - 48 - 56 - 56 - 8 + 20, fy + CONTENT_DY + 5)
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, fx, fy, *gfiles_button("rename"))
                 time.sleep(1.5)
                 q.mouse_goto(fx + 160, fy + 130)
                 time.sleep(0.5)
@@ -344,7 +315,7 @@ def sixty_four():
                 q.mouse_goto(600, 430)
                 time.sleep(1.5)
                 w, h, at = q.screen_raw()
-                listed = [file_row(at, i, wx=fx, wy=fy) for i in range(6)]
+                listed = files_listed(q, fx, fy)
                 check("(64) 'Rename' changes the file's name (%s)"
                       % ", ".join(n for n in listed if n),
                       "longer" in listed and "long" not in listed)
@@ -506,10 +477,7 @@ def main():
             w, h, at = q.screen_raw()
             # The panel shows what is on the disk: a name no longer has
             # to be remembered to be opened.
-            title = read_text_at(at, CX + 16, CY + PICK_Y + 8, 24)
-            listed = [read_text_at(at, CX + 16,
-                                   CY + PICK_LIST_Y + i * 12 + 2, 24).strip()
-                      for i in range(4)]
+            title, listed = q.ug_pick_read(CX, CY, CH)
             check("Ctrl+O shows what is on the disk ('%s': %s)"
                   % (title.strip(), ", ".join(x for x in listed if x)),
                   "Open a file" in title and
@@ -531,19 +499,14 @@ def main():
             q.sendkey("ctrl-o")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            which = -1
-            for i in range(6):
-                if "note" in read_text_at(at, CX + 16,
-                                             CY + PICK_LIST_Y + i * 12 + 2,
-                                             24):
-                    which = i
-                    break
+            listed = q.ug_pick_read(CX, CY, CH)[1]
+            which = listed.index("note") if "note" in listed else -1
             check("a name from the disk is on the list to be clicked", which >= 0)
             if which >= 0:
-                q.mouse_goto(CX + 60, CY + PICK_LIST_Y + which * 12 + 5)
+                q.mouse_goto(CX + 60, CY + PICK["row_y"](which))
                 q.mouse_click()
                 time.sleep(1)
-                q.mouse_goto(CX + PICK_YES_X, CY + PICK_BY + 8)
+                q.mouse_goto(CX + PICK["yes"][0], CY + PICK["yes"][1])
                 q.mouse_click()
                 time.sleep(2)
                 # 600x430 and not further: this screen is 640x480, and
@@ -654,21 +617,14 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
-            listed = [file_row(at, i) for i in range(6)]
-            row = -1
-            for i, name in enumerate(listed):
-                if name == "note":
-                    row = i
+            listed = files_listed(q)
+            row = listed.index("note") if "note" in listed else -1
             check("the file manager sees the saved file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                q.mouse_goto(WX + 1 + 20, WY + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, WX, WY, 60, gfiles_row_y(row))
                 time.sleep(1.5)
-                q.mouse_goto(WX + 1 + FM_OPEN_X + 20, WY + CONTENT_DY + 5)  # "Open"
-                time.sleep(0.5)
-                q.mouse_click()
+                files_click(q, WX, WY, *gfiles_button("open"))
                 time.sleep(4)
                 q.mouse_goto(600, 430)
                 time.sleep(1.5)

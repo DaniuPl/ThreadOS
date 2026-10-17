@@ -76,6 +76,12 @@ int syscall_lockless(uint32_t nr)
 struct win_rect_cmd {
     int32_t x, y, w, h, color;
 };
+struct win_draw_cmd {
+    int32_t op, x, y, w, h, r;
+    uint32_t rgb, rgb2;
+    int32_t a, font, px;
+    uint32_t s;                       /* the text, or 0 */
+};
 struct win_text_cmd {
     int32_t x, y, color;
     uint32_t s;                 /* pointer to a string (char *) */
@@ -423,6 +429,26 @@ void syscall_handler(struct regs *r)
         }
         r->eax = (uint32_t)desktop_win_text((int)r->ebx, task_current_id(),
                                             c.x, c.y, s, (uint8_t)c.color);
+        break;
+    }
+    case SYS_WIN_DRAW: {
+        struct win_draw_cmd c;
+        char s[256];
+        if (user_get(&c, r->ecx, sizeof(c)) < 0 ||
+            (c.s && user_str(s, c.s, sizeof(s)) < 0)) {
+            r->eax = EFAULT;
+            break;
+        }
+        struct win_draw d = { c.op, c.x, c.y, c.w, c.h, c.r, c.rgb, c.rgb2,
+                              c.a, c.font, c.px };
+        r->eax = (uint32_t)desktop_win_draw((int)r->ebx, task_current_id(),
+                                            &d, c.s ? s : (const char *)0);
+        break;
+    }
+    case SYS_UI_LOOK: {
+        uint32_t look[UI_LOOK_N];
+        desktop_ui_look(look);
+        r->eax = user_put(r->ebx, look, sizeof(look)) < 0 ? EFAULT : 0;
         break;
     }
     case SYS_WIN_POLL: {

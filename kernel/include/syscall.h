@@ -111,6 +111,11 @@
 #define SYS_SEM_GET  71  /* ebx=key, ecx=initial count -> id or -1 */
 #define SYS_SEM_WAIT 72  /* ebx=id -> 0, or -1 (a bad id, being killed) */
 #define SYS_SEM_POST 73  /* ebx=id -> 0 or -1 */
+/* Drawing as the desktop draws - shapes and TrueType text (see
+   desktop.h, struct win_draw): ebx=winid, ecx=&cmd */
+#define SYS_WIN_DRAW 74
+/* The theme's colours for a program's window: ebx=buffer of 11 words */
+#define SYS_UI_LOOK  75
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

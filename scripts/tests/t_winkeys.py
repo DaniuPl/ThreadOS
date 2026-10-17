@@ -45,8 +45,9 @@ from ptest import near as ptest_near
 # at slot 2 because the kernel's own two windows hold 0 and 1.
 WX, WY = 94, 54
 
-# gsettings asks for a 360x210 content buffer
-P_APP = (400, 200)          # inside it, past both kernel windows
+# Inside the settings, past both kernel windows - and right of their
+# rows, which stop six pixels short of the edge: their background
+P_APP = (WX + 1 + GSET_W - 3, 200)
 
 
 def near(px, v):
@@ -54,7 +55,9 @@ def near(px, v):
 
 
 def is_win(px):
-    return near(px, 227)    # COL_WIN, an application window's background
+    """A window's background in the theme's colour, as the settings
+    draw it"""
+    return ptest_near(px, theme("dark")["win_bg"], 3)
 
 
 def is_accent(px):
@@ -224,7 +227,7 @@ def main():
             q.mouse_goto(600, 200)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("the window opened in its place", is_win(at(400, 200)))
+            check("the window opened in its place", is_win(at(*P_APP)))
 
             q.mouse_goto(WX + 100, WY + 4)
             time.sleep(0.4)
@@ -250,7 +253,7 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("and another two clicks give it its own size back",
-                  is_win(at(400, 200)) and not is_win(at(20, 300)))
+                  is_win(at(*P_APP)) and not is_win(at(20, 300)))
 
             q.sendkey("alt-f4")                # away with it again
             time.sleep(3)
@@ -303,7 +306,7 @@ def main():
 
             check("the menu closed after the choice",
                   menu_entry(q, MX, MY, 0) == "")
-            shown = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
+            shown = q.gclock_time(WX + 1, WY + CONTENT_DY)
             check("the program from the menu really runs - the clock draws "
                   "godzine ('%s')" % shown, shown.count(":") == 2)
             check("and it has its tile in the dock",
@@ -352,7 +355,7 @@ def main():
             log = q.serial()
             check("Alt+F4 closes a window started from the menu too",
                   "process \'gclock\' has ended (code 0)" in log)
-            gone = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
+            gone = q.gclock_time(WX + 1, WY + CONTENT_DY)
             check("the clock is gone from the screen ('%s')" % gone,
                   gone.count(":") != 2)
             check("and from the dock", q.dock_windows() == after)
