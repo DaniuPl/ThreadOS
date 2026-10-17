@@ -315,11 +315,16 @@ def sixty_four():
                 # And a new name for it - long mode has its own number
                 # for that call and its own handler behind it.
                 # The editor opened over the manager a moment ago, so
-                # the manager has to come back to the top first.
+                # the manager has to come back to the top first - once
+                # the editor really is there (it has the focus), or it
+                # could open over the manager after the manager was
+                # raised, and every click after that would land on it
+                q.wait_focus(fx + 12, fy + 12, timeout=15)
                 q.mouse_goto(fx + 100, fy + 4)
                 time.sleep(0.5)
                 q.mouse_click()
-                time.sleep(1.5)
+                q.mouse_goto(600, 430)
+                q.wait_focus(fx, fy, timeout=10)
                 q.mouse_goto(fx + 1 + 20, fy + CONTENT_DY + FM_ROW_Y0 + row * 10 + 3)
                 time.sleep(0.5)
                 q.mouse_click()

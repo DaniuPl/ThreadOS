@@ -42,6 +42,23 @@ def main():
               in q.wait_for("mouse: x=120 y=80 buttons=1"))
         q.mouse_button(False)
 
+        # A click quicker than anybody looks: down and up before the
+        # next question. The press is kept until it has been seen
+        # once - so the first look says the button went down, and the
+        # second that it is up. (The desktop looks once a frame; a
+        # tap shorter than a frame used to go missing.)
+        q.mouse_move(10, 10)
+        q.mouse_button(True)
+        q.mouse_button(False)
+        q.type_line("mouse")
+        check("a click between two looks is still seen once (130,90 b1)",
+              "mouse: x=130 y=90 buttons=1"
+              in q.wait_for("mouse: x=130 y=90 buttons=1"))
+        q.type_line("mouse")
+        check("and only once - the next look sees the button up",
+              "mouse: x=130 y=90 buttons=0"
+              in q.wait_for("mouse: x=130 y=90 buttons=0"))
+
         # The wheel. A laptop's touchpad reports two fingers sliding
         # through it, and the fourth byte that carries it has to be
         # asked for - QEMU's mouse sends it only to a guest that did.

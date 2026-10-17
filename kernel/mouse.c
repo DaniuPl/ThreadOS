@@ -36,6 +36,13 @@
 static int mouse_x = SCREEN_W / 2;
 static int mouse_y = SCREEN_H / 2;
 static int mouse_buttons;
+/* Buttons that went down since mouse_get() was last asked. A click is
+   a press and a release, and the desktop looks at the buttons once a
+   frame: a click quicker than a frame - a light tap on a touchpad, or
+   any click while a heavy frame is being drawn - would otherwise go
+   down and come up between two looks, and never have happened. So a
+   press is kept until it has been seen once. */
+static int pressed_since;
 
 static int cycle;
 static uint8_t packet[4];
@@ -140,6 +147,7 @@ static void packet_done(void)
     if (mouse_x >= mw) mouse_x = mw - 1;
     if (mouse_y < 0) mouse_y = 0;
     if (mouse_y >= mh) mouse_y = mh - 1;
+    pressed_since |= (packet[0] & 0x07) & ~mouse_buttons;
     mouse_buttons = packet[0] & 0x07;
 
     /* The wheel: four bits of signed movement in the low half of the
@@ -254,7 +262,12 @@ void mouse_get(int *x, int *y, int *buttons)
 {
     if (x) *x = mouse_x;
     if (y) *y = mouse_y;
-    if (buttons) *buttons = mouse_buttons;
+    if (buttons) {
+        uint32_t flags = irq_save();
+        *buttons = mouse_buttons | pressed_since;
+        pressed_since = 0;
+        irq_restore(flags);
+    }
 }
 
 /* How far the wheel has turned since this was last asked, and then
@@ -295,6 +308,7 @@ void mouse_inject(int dx, int dy, int buttons, int wheel_notches)
     if (mouse_x >= mw) mouse_x = mw - 1;
     if (mouse_y < 0) mouse_y = 0;
     if (mouse_y >= mh) mouse_y = mh - 1;
+    pressed_since |= (buttons & 0x07) & ~mouse_buttons;
     mouse_buttons = buttons & 0x07;
     scroll_acc += wheel_notches;
     draw_status();

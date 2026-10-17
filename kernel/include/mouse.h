@@ -13,6 +13,9 @@ int mouse_present(void);
 /* Whether the 8042 controller answers at all. When it does not, there
    is no PS/2 keyboard either - whatever is typing came over USB. */
 int ps2_controller_present(void);
+/* Where the pointer is, and which buttons are down - counting as down,
+   once, a button that went down and came up again since the last
+   call, so that a click quicker than the caller's look is not lost. */
 void mouse_get(int *x, int *y, int *buttons);
 /* Wheel notches since the last call, and then zero until it turns
    again. On a laptop this is two fingers sliding on the touchpad. */

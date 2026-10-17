@@ -1800,7 +1800,12 @@ class Qemu:
     # --- the desktop, the way a person uses it -----------------------
 
     def click(self, x, y):
+        """The pointer first, and the button only once it is there: the
+        desktop decides what a press is by where the pointer is on the
+        frame the button goes down, and a move and a press sent in one
+        breath can land in one frame with the press first."""
         self.mouse_goto(x, y)
+        time.sleep(0.4)
         self.mouse_click()
 
     def click_desktop(self):
