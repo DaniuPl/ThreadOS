@@ -57,6 +57,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
              $(BUILD)/user/udtest.elf $(BUILD)/user/gappear.elf \
+             $(BUILD)/user/gcalc.elf $(BUILD)/user/gcal.elf \
+             $(BUILD)/user/gpaint.elf \
              $(BUILD)/user/gimg.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
@@ -294,6 +296,8 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
 	    udtest=$(BUILD)/user/udtest.elf gappear=$(BUILD)/user/gappear.elf \
+	    gcalc=$(BUILD)/user/gcalc.elf gcal=$(BUILD)/user/gcal.elf \
+	    gpaint=$(BUILD)/user/gpaint.elf \
 	    gimg=$(BUILD)/user/gimg.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
@@ -402,6 +406,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
+               $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
+               $(BUILD)/user64/gpaint.elf \
                $(BUILD)/user64/ginstal.elf \
                $(BUILD)/user64/gmikser.elf \
                $(BUILD)/user64/gimg.elf \
@@ -506,6 +512,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
+	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
+	    gpaint=$(BUILD)/user64/gpaint.elf \
 	    ginstal=$(BUILD)/user64/ginstal.elf \
 	    gmikser=$(BUILD)/user64/gmikser.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \

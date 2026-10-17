@@ -107,8 +107,8 @@ static int icon_n = 9;         /* how many of them there are */
 /* How many pictures there are (see draw_art): one per program that
    comes with the system, and a last one - a letter - for anything
    else. */
-#define ART_N      12
-#define ART_LETTER 11
+#define ART_N      15
+#define ART_LETTER 14
 
 /* The programs that come with the system, by the name they run under:
    the picture each wears and what a person calls it - for a program
@@ -118,7 +118,8 @@ static const struct { const char *app, *label; } known_apps[] = {
     { "gmon", "Monitor" }, { "gterm", "Term" }, { "gweb", "Web" },
     { "gsettings", "Settings" }, { "gedit", "Editor" },
     { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
-    { "gappear", "Appearance" },
+    { "gappear", "Appearance" }, { "gcalc", "Calculator" },
+    { "gcal", "Calendar" }, { "gpaint", "Paint" },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -369,6 +370,11 @@ struct window {
        is shown of it. */
     int anim;
     uint32_t anim_at;
+    /* The picture of the program the window belongs to, worked out from
+       the program's name when the window was made - for a window whose
+       program was not started from the dock or the menu, which would
+       otherwise wear a letter. -1 = none known. */
+    int art;
     struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
@@ -439,7 +445,8 @@ static int menu_px, menu_py;
    started as a kiosk ('install') and not as one more window among
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
-                                  "gedit", "gtasks", "gmikser", "gappear"};
+                                  "gedit", "gtasks", "gmikser", "gappear",
+                                  "gcalc", "gcal", "gpaint"};
 
 /* --- The kiosk -----------------------------------------------------
  *
@@ -685,7 +692,19 @@ static int launch_art_of(const struct window *w)
     if (w->owner < 0)
         return 0;
     int art = art_of_pid(w->owner);
-    return art >= 0 ? art : ART_LETTER;
+    if (art >= 0)
+        return art;
+    return w->art >= 0 ? w->art : ART_LETTER;
+}
+
+/* The picture of the program running as 'pid', by its name */
+static int art_of_running(int pid)
+{
+    char name[24];
+    if (!task_name_of(pid, name, sizeof(name)))
+        return -1;
+    int k = art_of_app(name);
+    return k == ART_LETTER ? -1 : k;
 }
 
 /* Is anything started from this tile still running - on any desktop?
@@ -931,6 +950,9 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0xFF6B8A, 0xFF2D55 },   /* Tasks */
         { 0xDA8FFF, 0x8944E0 },   /* Mixer */
         { 0xFFB340, 0xFF375F },   /* Appearance */
+        { 0x636366, 0x2C2C2E },   /* Calculator */
+        { 0xFFFFFF, 0xE5E5EA },   /* Calendar */
+        { 0x5AC8FA, 0x34C759 },   /* Paint */
         { 0x8E8E93, 0x48484A },   /* anything else: a letter */
     };
     if (art < 0 || art >= ART_N)
@@ -1020,6 +1042,29 @@ static void draw_art(int art, int x, int y, int s, char letter)
         gfx_disc16(PX(160), PY(160), D(96), 0xFFFFFF, 255);
         gfx_disc16(PX(205), PY(125), D(76), 0xFF6A50, 255);
         gfx_circle16(PX(160), PY(160), D(96), D(14), 0xFFFFFF, 255);
+        break;
+    case 11:                                      /* keys */
+        for (int k = 0; k < 9; k++) {
+            int cx = 100 + 60 * (k % 3), cy = 100 + 60 * (k / 3);
+            gfx_disc16(PX(cx), PY(cy), D(22),
+                       k % 3 == 2 ? 0xFF9F0A : 0xFFFFFF, 255);
+        }
+        break;
+    case 12: {                                    /* a page of the month */
+        gfx_rrect16(PX(0), PY(0), D(320), D(90), D(60), 0xFF3B30, 255);
+        gfx_fill(x, y + s * 45 / 320, s, s * 45 / 320, 0xFF3B30, 255);
+        char t[3] = { '1', '7', 0 };
+        int px = s * 8 / 20;
+        int tw = ui_font_width(UI_BOLD, px, t);
+        ui_font_text(UI_BOLD, px, x + (s - tw) / 2,
+                     y + s * 245 / 320, t, 0x1C1C1E);
+        break;
+    }
+    case 13:                                      /* blots of paint */
+        gfx_disc16(PX(110), PY(120), D(46), 0xFF3B30, 255);
+        gfx_disc16(PX(205), PY(110), D(40), 0xFFCC00, 255);
+        gfx_disc16(PX(150), PY(205), D(44), 0x0A84FF, 255);
+        gfx_line16(PX(220), PY(250), PX(260), PY(180), D(18), 0xFFFFFF, 255);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
@@ -3594,6 +3639,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
         focus_idx = i;             /* and with focus */
+        w->art = art_of_running(owner);
         anim_start(i, ANIM_OPEN);
         return i;
     }

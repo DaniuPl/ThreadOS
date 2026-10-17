@@ -149,3 +149,20 @@ keyboard_char_handler_t keyboard_console_handler(void)
 {
     return keyboard64_to_console;
 }
+
+/* task_name_of() for the shared desktop: the same rows task64_ps hands
+   a program */
+int task_name_of(int pid, char *out, int max)
+{
+    struct psinfo64 ps;
+    for (int i = 0; task64_ps(i, &ps) == 0; i++) {
+        if (ps.pid != pid)
+            continue;
+        int k = 0;
+        for (; ps.name[k] && k < max - 1; k++)
+            out[k] = ps.name[k];
+        out[k] = '\0';
+        return 1;
+    }
+    return 0;
+}

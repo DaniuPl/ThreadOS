@@ -1489,3 +1489,18 @@ void task_dump(void)
     } while (t != current);
     spin_unlock_irq(&lock, flags);
 }
+
+int task_name_of(int pid, char *out, int max)
+{
+    struct psinfo ps;
+    for (int i = 0; task_ps(i, &ps) == 0; i++) {
+        if (ps.pid != pid)
+            continue;
+        int k = 0;
+        for (; ps.name[k] && k < max - 1; k++)
+            out[k] = ps.name[k];
+        out[k] = '\0';
+        return 1;
+    }
+    return 0;
+}

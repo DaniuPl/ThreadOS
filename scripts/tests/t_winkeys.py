@@ -155,11 +155,11 @@ def sixty_four():
             check("(64) Alt+F4 gets through the long-mode driver and "
                   "closes the window (%d windows)" % left, left == 2)
 
-            q.mouse_goto(500, 300)
+            q.mouse_goto(500, 200)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            got = menu_entry(q, 500, 300, 1)
+            got = menu_entry(q, 500, 200, 1)
             check("(64) the right button opens the menu under the pointer "
                   "('%s')" % got, got == "Clock")
         finally:
@@ -262,7 +262,8 @@ def main():
                   q.dock_windows() == after)
 
             # --- the menu under the right button ------------------------
-            MX, MY = 300, 150
+            # (high enough for the whole menu to hang below the pointer)
+            MX, MY = 300, 100
             q.mouse_goto(MX, MY)
             time.sleep(0.5)
             q.mouse_right_click()

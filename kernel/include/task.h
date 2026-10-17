@@ -153,6 +153,9 @@ struct psinfo {
     char name[PS_NAME_MAX];
 };
 int task_ps(int index, struct psinfo *out);
+/* The name a process runs under, into out (max bytes): 1, or 0 when
+   there is no such process */
+int task_name_of(int pid, char *out, int max);
 int task_count(void);
 
 const char *task_current_name(void);

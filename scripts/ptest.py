@@ -2353,7 +2353,10 @@ class Qemu:
         if start is None:
             return ""
         best = ""
-        for pen in range(start - 2, start + 2):
+        # A glyph may begin well right of its pen - a '1' in large type
+        # by a sixth of the size - so the pen is looked for further left
+        reach = 2 + font.px // 6
+        for pen in range(start - reach, start + 2):
             got = self.read_ui(pen, baseline, width=x1 - pen,
                                charset=charset, px=px, face=face,
                                under=under, fg=fg, screen=screen,
