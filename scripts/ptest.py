@@ -82,8 +82,8 @@ PAGE = b"<html>ThreadOS TCP works</html>\n"
 SERVED = {}
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>The first page</h1>"
-             + b"<p>A line filling page number one.</p>" * 20
-             + b'<p>Przejdz do <a href="/second">drugiej strony</a>.</p>'
+             + b"<p>A line filling page number one.</p>" * 40
+             + b'<p>Go on to <a href="/second">the second page</a>.</p>'
              + b"</body></html>\n")
 LINK_PAGE2 = (b"<html><body><h1>The second page</h1>"
               b"<p>The link worked.</p></body></html>\n")
@@ -802,6 +802,18 @@ def gfiles_row_y(r):
     """The middle of the file manager's row r (counted from the top of
     what is shown), in its content"""
     return GFILES_ROW_Y0 + r * GFILES_ROW_H + GFILES_ROW_H // 2
+
+
+# The terminal (user/gterm.c): its size, and the grid its letters sit on
+TERM_W = _kernel_define("user/gterm.c", "W0")
+TERM_H = _kernel_define("user/gterm.c", "H0")
+TERM_PAD = _kernel_define("user/gterm.c", "PAD")
+TERM_ROW_H = _kernel_define("user/gterm.c", "ROW_H")
+TERM_CELL = _kernel_define("user/gterm.c", "CELL")
+TERM_PX = _kernel_define("user/gterm.c", "TERM_PX")
+TERM_BASE = _kernel_define("user/gterm.c", "TERM_BASE")
+TERM_COLS = (TERM_W - 2 * TERM_PAD) // TERM_CELL
+TERM_ROWS = (TERM_H - 2 * TERM_PAD) // TERM_ROW_H
 
 
 def gset_row_y(r):
@@ -2468,6 +2480,85 @@ class Qemu:
         quiet = self.read_ui(cx + 12, base, GSET_W - 24, px=11,
                              fg=t["app_dim"], screen=scr)
         return news if len(news) >= len(quiet) else quiet
+
+    def term_rows(self, cx, cy, cols=TERM_COLS, rows=TERM_ROWS,
+                  screen=None):
+        """The terminal whose content starts at (cx, cy), a line per row"""
+        return self.read_cells(cx + TERM_PAD, cy + TERM_PAD, cols, rows,
+                               cell=TERM_CELL, row_h=TERM_ROW_H,
+                               base=TERM_BASE, px=TERM_PX, face="mono",
+                               screen=screen)
+
+    _cell_masks = {}
+
+    def read_cells(self, ox, oy, cols, rows, cell=8, row_h=16, base=12,
+                   px=12, face="mono", screen=None):
+        """Text on a grid of cells - a terminal's, drawn with ud_cells():
+        every character's pen at the left edge of its cell, the baseline
+        'base' below the top of its row. One line per row, trailing
+        blanks dropped.
+
+        Each cell is read on its own, so text in any colour on any
+        ground - a selection's accent, the prompt's green - reads the
+        same: the ground is the cell's commonest colour, the ink its
+        inkiest pixel, and how far every pixel is from one towards the
+        other is held up against each character's FreeType coverage,
+        placed where the kernel places it. The two bottom rows of a
+        cell are left out, and its last column: that is where a cursor
+        is drawn - under a letter, or between two - where no letter
+        reaches."""
+        w, h, at = screen or self.screen_raw()
+        key = (cell, row_h, base, px, face)
+        if key not in Qemu._cell_masks:
+            font = UiFont.shared(px, face)
+            masks = {}
+            for code in range(33, 127):
+                ch = chr(code)
+                adv, left, top, gw, gh, a = font.glyph(ch)
+                m = [0] * ((cell - 1) * (row_h - 2))
+                for r in range(gh):
+                    yy = base - top + r
+                    if not 0 <= yy < row_h - 2:
+                        continue
+                    for k in range(gw):
+                        xx = left + k
+                        if 0 <= xx < cell - 1:
+                            m[yy * (cell - 1) + xx] = a[r * gw + k]
+                masks[ch] = m
+            Qemu._cell_masks[key] = masks
+        masks = Qemu._cell_masks[key]
+        out = []
+        for r in range(rows):
+            line = ""
+            for c in range(cols):
+                x0, y0 = ox + c * cell, oy + r * row_h
+                if x0 + cell > w or y0 + row_h > h:
+                    line += " "
+                    continue
+                p = [at(x0 + i, y0 + j) for j in range(row_h - 2)
+                     for i in range(cell - 1)]
+                counts = {}
+                for v in p:
+                    counts[v] = counts.get(v, 0) + 1
+                bg = max(counts, key=counts.get)
+                far = max(p, key=lambda v: sum(abs(a - b)
+                                               for a, b in zip(v, bg)))
+                d = [far[i] - bg[i] for i in range(3)]
+                n2 = sum(v * v for v in d)
+                if sum(abs(v) for v in d) < 60 or not n2:
+                    line += " "
+                    continue
+                cov = [max(0, min(255, 255 * sum((v[i] - bg[i]) * d[i]
+                                                  for i in range(3)) // n2))
+                       for v in p]
+                best, best_err = "?", None
+                for ch, m in masks.items():
+                    err = sum(abs(a - b) for a, b in zip(cov, m))
+                    if best_err is None or err < best_err:
+                        best, best_err = ch, err
+                line += best
+            out.append(line.rstrip())
+        return out
 
     def read_ui_lines(self, x0, x1, baselines, px=None,
                       faces=("sans", "bold"), screen=None, gap=14,

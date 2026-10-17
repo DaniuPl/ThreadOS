@@ -33,7 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The cascade: slot i sits at (70+12i, 30+12i). Slots 0 and 1 are the
 # kernel's own windows, so applications start at slot 2.
@@ -109,31 +109,8 @@ def main():
             time.sleep(3)
             w, h, at = q.screen_raw()
 
-            font = font8x8()
-            # Read the terminal's lines: content at (x+1, y+CONTENT_DY), padded
-            # by 4, rows 10 apart
-            ox, oy = x2 + 1 + 4, y2 + CONTENT_DY + 4
-            counts = {}
-            for r in range(23):
-                for yy in range(8):
-                    for xx in range(ox, ox + 48 * 8, 2):
-                        p = at(xx, oy + r * 10 + yy)
-                        counts[p] = counts.get(p, 0) + 1
-            bg = max(counts, key=counts.get)
-            text = []
-            for r in range(23):
-                line = ""
-                for c in range(48):
-                    pattern = []
-                    for yy in range(8):
-                        bits = 0
-                        for xx in range(8):
-                            if at(ox + c * 8 + xx, oy + r * 10 + yy) != bg:
-                                bits |= 1 << xx
-                        pattern.append(bits)
-                    line += font.get(tuple(pattern),
-                                     " " if not any(pattern) else "?")
-                text.append(line.rstrip())
+            # The terminal's lines, read in the lettering they are drawn in
+            text = q.term_rows(x2 + 1, y2 + CONTENT_DY, screen=(w, h, at))
             body = "\n".join(text)
             check("what was typed after Alt+Tab reached the terminal",
                   "/> date" in body)

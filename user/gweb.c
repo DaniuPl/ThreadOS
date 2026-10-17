@@ -15,31 +15,31 @@
  * processes.
  */
 
-#include "uapi.h"
+#include "udraw.h"
 #include "uhttp.h"
 #include "ucert.h"
 #include "uhtml.h"
 
-#define W 320
-#define H 200
-#define C_BG     8
-#define C_WHITE  4
-#define C_GREEN  2
-#define C_RED    1
-#define C_TITLE  3
-/* The page is the window's light grey, so its text is BLACK. A link
-   is blue, which is what a link has been since there were links - and
-   yellow, which this used to be, is unreadable on a light surface. */
-#define C_TEXT   0
-#define C_DIM   15
-#define C_LINK   3
+/* Drawn the way the desktop draws, in its theme: a toolbar with the
+   address in a field of its own and a lock when the page came over
+   TLS, a line saying what happened, and the page - in DejaVu Sans Mono
+   on a grid of cells, because the page is laid out in columns
+   (uhtml.h), with links in the accent and underlined, which is what a
+   link has looked like since there were links. */
+#define W 440
+#define H 320
+#define BAR_H2    40          /* the toolbar */
+#define CELL      8
+#define PAGE_PX   12
+#define PAGE_BASE 12          /* a line's baseline, from its top */
 
 #define ADDR_MAX  80
 #define PAGE_MAX  8192
-#define COLS      38          /* characters per line with an 8x8 font */
+#define COLS      53          /* characters on a line */
 #define ROWS      15
-#define ROW_H     10
-#define PAGE_Y    30          /* the first line of content in the window */
+#define ROW_H     17
+#define PAGE_X    8
+#define PAGE_Y    (BAR_H2 + 22)   /* the first line of the page */
 /* --- state --- */
 
 static char addr[ADDR_MAX] = "threados.test/";
@@ -262,7 +262,7 @@ static void follow_link(int k)
 
 /* --- drawing --- */
 
-static void draw_page(int w)
+static void draw_page(int w, const struct ud_look *l)
 {
     char buf[COLS + 1];
 
@@ -287,11 +287,21 @@ static void draw_page(int w)
             buf[run] = '\0';
 
             int col = i - doc.lines[li].start;
-            win_text(w, 4 + col * 8, y, buf,
-                     k >= 0 ? C_LINK : C_TEXT);
+            int x = PAGE_X + col * CELL;
+            ud_cells(w, x, y + PAGE_BASE, CELL, buf,
+                     k >= 0 ? l->accent : l->text, UD_MONO, PAGE_PX);
+            if (k >= 0)
+                ud_fill(w, x, y + PAGE_BASE + 2, run * CELL, 1, l->accent);
             i += run;
         }
     }
+}
+
+/* A small lock: a body and a shackle */
+static void lock(int w, int x, int y, uint32_t rgb)
+{
+    ud_round(w, x, y + 6, 10, 8, 2, rgb);
+    ud_ring(w, x + 2, y, 6, 10, 3, rgb);
 }
 
 /* A click in the content: we convert it to a character index and look
@@ -301,7 +311,7 @@ static void handle_click(int x, int y)
     if (y < PAGE_Y)
         return;
     int row = (y - PAGE_Y) / ROW_H;
-    int col = (x - 4) / 8;
+    int col = (x - PAGE_X) / CELL;
     int li = scroll + row;
     if (li < 0 || li >= doc.line_count || col < 0 ||
         col >= doc.lines[li].len)
@@ -378,18 +388,30 @@ void _start(void)
             addr[addr_len] = '\0';
         }
 
-        win_rect(w, 0, 0, W, H, C_BG);
-        win_rect(w, 0, 0, W, 14, C_TITLE);
+        struct ud_look l;
+        ud_look(&l);
+        ud_fill(w, 0, 0, W, H, l.field);
+
+        /* The toolbar: the address in its field, with what kind of
+           connection it is at its left */
+        ud_fill(w, 0, 0, W, BAR_H2, l.bg);
+        ud_fill(w, 0, BAR_H2 - 1, W, 1, l.line);
+        ud_round(w, 10, 8, W - 20, 24, 12, l.field);
+        ud_ring(w, 10, 8, W - 20, 24, 12, l.line);
+        if (cur_tls)
+            lock(w, 22, 13, last_secure ? l.good : l.danger);
+        else
+            ud_text(w, 20, ud_baseline(8, 24, 10), "http", l.dim, UD_SANS,
+                    10);
         addr[addr_len] = '\0';
-        win_text(w, 4, 3, addr, C_WHITE);
-        /* The status line stands on the grey, so it is dark: the
-           accent when the page came over a connection worth saying
-           something about, plain black otherwise, red when nothing
-           came at all. */
-        win_text(w, 4, 17, status,
-                 doc.text_len ? (last_secure || !cur_tls ? C_LINK : C_TEXT)
-                              : C_RED);
-        draw_page(w);
+        int end = ud_text(w, 50, ud_baseline(8, 24, UD_PX), addr, l.text,
+                          UD_SANS, UD_PX);
+        ud_fill(w, end + 1, 13, 1, 14, l.accent);
+        /* What happened: quiet when all is well, in the theme's red
+           when nothing came at all */
+        ud_text(w, PAGE_X, ud_baseline(BAR_H2, 22, 11), status,
+                doc.text_len ? l.dim : l.danger, UD_SANS, 11);
+        draw_page(w, &l);
 
         sys_sleep(60);
     }

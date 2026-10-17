@@ -28,23 +28,24 @@
 #include "uapi.h"
 #include "ugui.h"
 
-#define C_BLACK 0
-#define C_BLUE  3
-#define C_WHITE 4
+/* Drawn the way the desktop draws, in its theme: the page is the
+   theme's field, the text DejaVu Sans Mono on a grid of cells (ud_cells)
+   - an editor's columns have to stay columns - with the line numbers in
+   a margin of their own, and the status line along the bottom. */
+#define CELL     8            /* a column */
+#define TEXT_PX  12
+#define TEXT_BASE 12          /* the baseline, from a row's top */
+#define GUTTER   34           /* the line numbers' margin */
 
-#define C_PAGE  C_WHITE       /* the page */
-#define C_TEXT  C_BLACK       /* what is written on it */
-#define C_BAR   C_BLUE        /* the status line */
-#define C_CARET C_BLUE
-
-#define W0 420                /* the size the window opens with */
-#define H0 260
+#define W0 440                /* the size the window opens with */
+#define H0 320
 
 #define MAXL 200              /* lines a file may have */
 #define MAXC 96               /* and characters in a line */
-#define ROW_H 10
+#define ROW_H 16
 #define PAD 4
-#define STATUS_H 10
+#define TEXT_X 40             /* a line's first column: the margin and a gap */
+#define STATUS_H 24
 #define NAME_MAX 31
 
 static char text[MAXL][MAXC + 1];
@@ -140,7 +141,7 @@ static void reread_files(void)
         nfiles++;
     }
 }
-static int cols(void) { return (cw - PAD * 2) / 8; }
+static int cols(void) { return (cw - TEXT_X - PAD) / CELL; }
 
 
 static void num(char *d, int v)      /* a small unsigned number */
@@ -528,13 +529,24 @@ static void draw(int win)
     int r = rows(), c = cols();
     scroll_to_caret();
 
-    win_rect(win, 0, 0, cw, ch, C_PAGE);
+    struct ud_look lk;
+    ud_look(&lk);
+    ud_fill(win, 0, 0, cw, ch, lk.field);
+    ud_fill(win, 0, 0, GUTTER, ch - STATUS_H, lk.bg);
+    ud_fill(win, GUTTER, 0, 1, ch - STATUS_H, lk.line);
 
     char shown[MAXC + 1];
     for (int i = 0; i < r; i++) {
         int l = top + i;
         if (l >= nlines)
             break;
+        int y = PAD + i * ROW_H;
+        /* The line's number, set against the margin's edge - the one
+           the caret is on in the text's own colour, the rest quieter */
+        char no[8];
+        num(no, l + 1);
+        ud_text_right(win, GUTTER - 6, y + TEXT_BASE, no,
+                      l == cy ? lk.text : lk.dim, UD_SANS, 11);
         int n = llen[l] - hoff;
         if (n < 0)
             n = 0;
@@ -544,21 +556,22 @@ static void draw(int win)
             shown[k] = text[l][hoff + k];
         shown[n] = '\0';
         if (n)
-            win_text(win, PAD, PAD + i * ROW_H, shown, C_TEXT);
+            ud_cells(win, TEXT_X, y + TEXT_BASE, CELL, shown, lk.text,
+                     UD_MONO, TEXT_PX);
     }
 
     /* The caret: a hair BETWEEN two characters, where the next one
        will go. A block would cover the letter it stands on, and a bar
        inside the cell would eat its first column - both of them hide
        the very thing a person is looking at while they type. */
-    int caret_x = PAD + (cx - hoff) * 8 - 1;
-    if (caret_x < 0)
-        caret_x = 0;
-    win_rect(win, caret_x, PAD + (cy - top) * ROW_H, 1, 8, C_CARET);
+    int caret_x = TEXT_X + (cx - hoff) * CELL - 1;
+    ud_fill(win, caret_x, PAD + (cy - top) * ROW_H + 1, 1, ROW_H - 3,
+            lk.accent);
 
     /* The status line: what the file is, whether it has been changed,
        where the caret is - or the question, when one is being asked. */
-    win_rect(win, 0, ch - STATUS_H, cw, STATUS_H, C_BAR);
+    ud_fill(win, 0, ch - STATUS_H, cw, STATUS_H, lk.row);
+    ud_fill(win, 0, ch - STATUS_H, cw, 1, lk.line);
     char line[80];
     int p = 0;
     if (asking) {
@@ -596,7 +609,8 @@ static void draw(int win)
         }
     }
     line[p] = '\0';
-    win_text(win, PAD, ch - STATUS_H + 1, line, C_WHITE);
+    ud_text(win, 10, ud_baseline(ch - STATUS_H, STATUS_H, 11), line,
+            asking ? lk.accent : lk.text, asking ? UD_BOLD : UD_SANS, 11);
 
     /* Last, over everything: the panel that opens a file. A list one
        can scroll the text under is not a question. */
@@ -816,7 +830,7 @@ void _start(int argc, char **argv)
                 if (l > nlines - 1)
                     l = nlines - 1;
                 cy = l;
-                int col = hoff + (ev.x - PAD) / 8;
+                int col = hoff + (ev.x - TEXT_X + CELL / 2) / CELL;
                 if (col < 0)
                     col = 0;
                 if (col > llen[cy])

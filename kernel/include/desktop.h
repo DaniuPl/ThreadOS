@@ -58,6 +58,9 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
  *   WD_TEXT    text with its baseline at y, in a face (UI_SANS, UI_BOLD,
  *              UI_MONO) and a size in pixels; returns where the pen ended
  *   WD_MEASURE how wide that text would be - no window needed
+ *   WD_CELLS   text on a grid: every character's pen at x + i*w, the
+ *              baseline at y - a terminal's columns, which no font's
+ *              own advances keep
  */
 #define WD_FILL    1
 #define WD_RRECT   2
@@ -67,6 +70,7 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
 #define WD_LINE    6
 #define WD_TEXT    7
 #define WD_MEASURE 8
+#define WD_CELLS   9
 
 struct win_draw {
     int op;

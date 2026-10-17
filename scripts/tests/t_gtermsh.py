@@ -37,39 +37,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-PAD, ROW_H = 4, 10
-COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
+PAD, ROW_H = TERM_PAD, TERM_ROW_H
+COLS, ROWS = TERM_COLS, TERM_ROWS
 
 
 def read_rows(q, ox, oy, cols, rows):
-    w, h, at = q.screen_raw()
-    font = font8x8()
-    counts = {}
-    for r in range(rows):
-        for y in range(8):
-            for x in range(ox, ox + cols * 8, 2):
-                p = at(x, oy + r * ROW_H + y)
-                counts[p] = counts.get(p, 0) + 1
-    bg = max(counts, key=counts.get)
-
-    out = []
-    for r in range(rows):
-        line = ""
-        for c in range(cols):
-            pattern = []
-            for y in range(8):
-                bits = 0
-                for x in range(8):
-                    if at(ox + c * 8 + x, oy + r * ROW_H + y) != bg:
-                        bits |= 1 << x
-                pattern.append(bits)
-            line += font.get(tuple(pattern), " " if not any(pattern) else "?")
-        out.append(line.rstrip())
-    return out
+    """The terminal's text, read off the screen in the lettering it is
+    drawn in: a grid of cells, each read on its own (ptest.read_cells)"""
+    return q.read_cells(ox, oy, cols, rows, cell=TERM_CELL, row_h=ROW_H,
+                        base=TERM_BASE, px=TERM_PX)
 
 
 def wait_line(q, want, geom, tries=20):

@@ -3804,6 +3804,16 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
         return 0;
     case WD_TEXT:
         return s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x;
+    case WD_CELLS: {
+        int i = 0;
+        for (; s && s[i]; i++) {
+            if (s[i] == ' ')
+                continue;
+            char one[2] = { s[i], 0 };
+            ui_font_text_s(&t, font, px, d->x + i * d->w, d->y, one, d->rgb);
+        }
+        return d->x + i * d->w;
+    }
     default:
         return -1;
     }

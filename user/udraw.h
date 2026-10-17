@@ -38,6 +38,7 @@
 #define UD_OP_LINE    6
 #define UD_OP_TEXT    7
 #define UD_OP_MEASURE 8
+#define UD_OP_CELLS   9
 
 /* The theme's colours, as the desktop hands them out (in this order) */
 struct ud_look {
@@ -124,6 +125,14 @@ static inline int ud_text(int win, int x, int y, const char *s, uint32_t rgb,
                           int font, int px)
 {
     return ud_op(win, UD_OP_TEXT, x, y, 0, 0, 0, rgb, 0, font, px, s);
+}
+
+/* Text on a grid of cells 'cell' wide - a terminal's columns: each
+   character starts at x + i * cell, whatever the font's own advance */
+static inline int ud_cells(int win, int x, int y, int cell, const char *s,
+                           uint32_t rgb, int font, int px)
+{
+    return ud_op(win, UD_OP_CELLS, x, y, cell, 0, 0, rgb, 0, font, px, s);
 }
 
 static inline int ud_width(const char *s, int font, int px)

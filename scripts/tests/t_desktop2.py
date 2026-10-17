@@ -168,18 +168,15 @@ def main():
             q12.sendkey({" ": "spc"}.get(ch, ch))
         q12.sendkey("ret")
 
-        # the output is drawn at the top of the window (content y4 -> screen
-# y69)
-        def out_white():
-            _, _, a = q12.screen_raw()
-            return sum(1 for x in range(99, 130) for y in range(69 + DOWN, 99 + DOWN)
-                       if near(a(x, y), (255, 255, 255), 10))
+        # the output is drawn under the command, read in the terminal's
+        # own lettering
         shown = False
         for _ in range(20):
-            if out_white() > 0:
+            rows = q12.term_rows(95, 54 + CONTENT_DY)
+            if "1" in rows and "2" in rows and "3" in rows:
                 shown = True
                 break
-            time.sleep(0.2)
+            time.sleep(0.3)
         check("the GUI terminal runs a command and shows the output in its window",
               shown)
     finally:

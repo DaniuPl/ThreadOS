@@ -206,7 +206,7 @@ def main():
 
             # --- what all of it is for: two windows side by side --------
             # The settings to the right, the terminal to the left. The
-            # terminal's screen is BLACK and a window's background is
+            # terminal's ground is the theme's field, a window's background is
             # not, so one look tells which half holds which - and that
             # they do not overlap.
             drag(q, x0 + 60, ty + 4, w - 5, 200)
@@ -217,14 +217,16 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
 
-            dark = near(at(150, deck - 30), 0)
-            check("the terminal takes the left half (a black screen)", dark)
+            dark = ptest_near(at(150, deck - 30), theme("dark")["app_field"], 3)
+            check("the terminal takes the left half (its own dark ground)",
+                  dark)
             check("and the settings the right (a window's background)",
                   is_win(at(half + 100, 300)))
             # (a little further right than left: the terminal has the
             # focus, and its shadow falls on the settings beside it)
             check("and they do not overlap - the border is in the middle",
-                  near(at(half - 10, deck - 30), 0) and
+                  ptest_near(at(half - 10, deck - 30),
+                             theme("dark")["app_field"], 3) and
                   is_win(at(half + 20, 300)))
         finally:
             q.close()

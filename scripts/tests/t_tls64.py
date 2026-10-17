@@ -189,9 +189,9 @@ def main():
             # The browser's window: slot 2, content 320x200 from (95,65)
             def white_text():
                 _, _, a = q2.screen_raw()
-                return sum(1 for y in range(100, 250)
-                           for x in range(100, 400)
-                           if a(x, y) == (0, 0, 0))
+                return sum(1 for y in range(140, 390)
+                           for x in range(100, 520)
+                           if near(a(x, y), theme("dark")["app_text"], 40))
 
             time.sleep(3)
             before = white_text()

@@ -36,16 +36,24 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
+from ptest import _kernel_define as ptest_define
 
 # The window: slot 2 of the cascade, content a pixel right and a title
-# bar down. The editor asks for 420x260 and pads its page by four.
+# bar down. Its size and the grid its letters sit on are the editor's
+# own (user/gedit.c).
+def _ed(name):
+    return ptest_define("user/gedit.c", name)
+
+
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-PAD = 4
-ROW_H = 10
-STATUS_H = 10
-CW, CH = 420, 260
+CW, CH = _ed("W0"), _ed("H0")
+ED_PAD, ED_ROW_H, ED_STATUS_H = _ed("PAD"), _ed("ROW_H"), _ed("STATUS_H")
+ED_CELL, ED_PX, ED_BASE = _ed("CELL"), _ed("TEXT_PX"), _ed("TEXT_BASE")
+ED_TEXT_X = _ed("TEXT_X")
+PAD, ROW_H, STATUS_H = ED_PAD, ED_ROW_H, ED_STATUS_H
+DARK = theme("dark")
 
 # The panel that opens a file (user/ugui.h): a band across the middle
 # of the window, a list of names in it, a line to type in and two
@@ -56,34 +64,19 @@ PICK = ug_pick(CH)
 TWX, TWY = 106, 66
 
 
-def term_rows(at, rows=20, cols=48):
-    """The terminal's window: light letters on its black screen."""
-    font = font8x8()
-    ox, oy = TWX + 1 + 4, TWY + CONTENT_DY + 4
-    out = []
-    for r in range(rows):
-        line = ""
-        for c in range(cols):
-            pattern = []
-            for y in range(8):
-                bits = 0
-                for x in range(8):
-                    p = at(ox + c * 8 + x, oy + r * 10 + y)
-                    if p[0] > 120 or p[1] > 120 or p[2] > 120:
-                        bits |= 1 << x
-                pattern.append(bits)
-            line += font.get(tuple(pattern), " " if not any(pattern) else "?")
-        out.append(line.rstrip())
-    return out
+def term_rows(q, rows=TERM_ROWS, cols=TERM_COLS):
+    """The terminal's window, read in the lettering it is drawn in"""
+    return q.term_rows(TWX + 1, TWY + CONTENT_DY, cols, rows)
 
 
 def is_page(px):
-    return all(c > 235 for c in px)          # the white of the page
+    """The page: the theme's field"""
+    return near(px, DARK["app_field"], 3)
 
 
 def is_bar(px):
-    r, g, b = px                             # the blue of the status line
-    return b > 120 and r < 90 and g < 90
+    """The status line along the bottom"""
+    return near(px, DARK["app_row"], 3)
 
 
 # The file manager: names at content (6,18), a row every ten pixels,
@@ -100,44 +93,13 @@ def files_click(q, wx, wy, x, y):
     q.mouse_click()
 
 
-def is_ink(px):
-    """Black on the page. The caret is blue and stands between two
-    characters, so it is not part of any of them."""
-    return all(c < 120 for c in px)
-
-
 def row_text(at, r, cols=48, wx=WX, wy=WY):
-    """One line of the page, read through the kernel's own font."""
-    font = font8x8()
-    x0, y0 = wx + 1 + PAD, wy + CONTENT_DY + PAD + r * ROW_H
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if is_ink(at(x0 + c * 8 + x, y0 + y)):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.rstrip()
-
-
-def read_text_at(at, x0, y0, cols):
-    """Dark letters on the white of a panel - the same reading as a
-    line of the page, at coordinates given by the caller."""
-    font = font8x8()
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if is_ink(at(x0 + c * 8 + x, y0 + y)):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.rstrip()
+    """One line of the page, read in the lettering it is drawn in: a grid
+    of cells right of the line numbers (ptest.read_cells)"""
+    return Qemu.read_cells(None, wx + 1 + ED_TEXT_X,
+                           wy + CONTENT_DY + ED_PAD + r * ED_ROW_H, cols, 1,
+                           cell=ED_CELL, row_h=ED_ROW_H, base=ED_BASE,
+                           px=ED_PX, screen=(10000, 10000, at))[0]
 
 
 def win_title(q, wx=WX, wy=WY):
@@ -146,20 +108,15 @@ def win_title(q, wx=WX, wy=WY):
 
 
 def status_text(at, cols=48):
-    """The status line: white letters on the accent blue."""
-    font = font8x8()
-    x0, y0 = CX + PAD, CY + CH - STATUS_H + 1
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if not is_bar(at(x0 + c * 8 + x, y0 + y)):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.rstrip()
+    """The status line along the bottom of the window"""
+    base = CY + ui_font_baseline_in(11, CH - ED_STATUS_H, ED_STATUS_H)
+    best = ""
+    for face, fg in (("sans", DARK["app_text"]), ("bold", DARK["accent"])):
+        got = Qemu.read_ui(None, CX + 10, base, CW - 20, px=11, face=face,
+                           fg=fg, screen=(10000, 10000, at))
+        if len(got) > len(best):
+            best = got
+    return best
 
 
 def sixty_four():
@@ -258,7 +215,7 @@ def sixty_four():
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            rows = term_rows(at)
+            rows = term_rows(q)
             check("(64) another program reads off the disk what the editor wrote",
                   any("two kernels" in r for r in rows))
 

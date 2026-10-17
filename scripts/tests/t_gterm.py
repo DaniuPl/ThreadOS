@@ -35,51 +35,23 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 # The window opens in slot 2 - the compositor cascades at (70+12i,
 # 30+12i) - and asks for 400x240 of content, so the content starts at
 # (95,65). The terminal pads by 4 and puts its rows 10 apart.
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-PAD, ROW_H = 4, 10
-COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
+PAD, ROW_H = TERM_PAD, TERM_ROW_H
+COLS, ROWS = TERM_COLS, TERM_ROWS
 
 
 
 def read_rows(q, ox, oy, cols, rows):
-    """The terminal's text, read off the screen.
-
-    Every cell is eight by eight pixels; the pattern of eight bytes is
-    looked up in the very font the kernel drew it with. The background
-    is the commonest colour of the whole block, because in a character
-    like '0' there are more glyph pixels than background ones."""
-    w, h, at = q.screen_raw()
-    font = font8x8()
-
-    counts = {}
-    for r in range(rows):
-        for y in range(8):
-            yy = oy + r * ROW_H + y
-            for x in range(ox, ox + cols * 8, 2):
-                p = at(x, yy)
-                counts[p] = counts.get(p, 0) + 1
-    bg = max(counts, key=counts.get)
-
-    out = []
-    for r in range(rows):
-        line = ""
-        for c in range(cols):
-            pattern = []
-            for y in range(8):
-                bits = 0
-                for x in range(8):
-                    if at(ox + c * 8 + x, oy + r * ROW_H + y) != bg:
-                        bits |= 1 << x
-                pattern.append(bits)
-            line += font.get(tuple(pattern), " " if not any(pattern) else "?")
-        out.append(line.rstrip())
-    return out
+    """The terminal's text, read off the screen in the lettering it is
+    drawn in: a grid of cells, each read on its own (ptest.read_cells)"""
+    return q.read_cells(ox, oy, cols, rows, cell=TERM_CELL, row_h=ROW_H,
+                        base=TERM_BASE, px=TERM_PX)
 
 
 def text(rows):
@@ -231,18 +203,22 @@ def main():
             check("and the start of the output scrolled out of the window", "1" not in rows)
 
             # One PgUp is half a screen, so it takes a few to get back
-            # past forty lines of output to the command that made them
-            for _ in range(4):
+            # past forty lines of output to the command that made them -
+            # how many depends on how tall the window is
+            pressed = 0
+            for _ in range(10):
                 q.sendkey("pgup")
-                time.sleep(0.3)
-            time.sleep(1)
-            rows = read_rows(q, **geom)
+                pressed += 1
+                time.sleep(0.6)
+                rows = read_rows(q, **geom)
+                if "/> seq 3" in text(rows):
+                    break
             check("PgUp goes back to what scrolled away - as far as the first "
                   "the session's commands", "/> seq 3" in text(rows))
             check("and the terminal says we are not looking at the end",
                   "scrolled back" in text(rows))
 
-            for _ in range(6):             # and back down to the end
+            for _ in range(pressed + 2):   # and back down to the end
                 q.sendkey("pgdn")
                 time.sleep(0.3)
             time.sleep(1)

@@ -32,52 +32,20 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
-PAD, ROW_H = 4, 10
-COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
+PAD, ROW_H = TERM_PAD, TERM_ROW_H
+COLS, ROWS = TERM_COLS, TERM_ROWS
 WORD = "moved"
 
 
-def read_rows(q, ox, oy, cols, rows, pitch=ROW_H, per_row=False):
-    """The text of a window, read through the kernel's own font.
-
-    'per_row' computes the background line by line instead of once for
-    the block: the settings window paints the SELECTED row a different
-    colour, and a row read against somebody else's background comes out
-    as nothing but question marks."""
-    w, h, at = q.screen_raw()
-    font = font8x8()
-
-    def background(rows_range):
-        counts = {}
-        for r in rows_range:
-            for y in range(8):
-                for x in range(ox, ox + cols * 8, 2):
-                    p = at(x, oy + r * pitch + y)
-                    counts[p] = counts.get(p, 0) + 1
-        return max(counts, key=counts.get)
-
-    bg = None if per_row else background(range(rows))
-
-    out = []
-    for r in range(rows):
-        if per_row:
-            bg = background([r])
-        line = ""
-        for c in range(cols):
-            pattern = []
-            for y in range(8):
-                bits = 0
-                for x in range(8):
-                    if at(ox + c * 8 + x, oy + r * pitch + y) != bg:
-                        bits |= 1 << x
-                pattern.append(bits)
-            line += font.get(tuple(pattern), " " if not any(pattern) else "?")
-        out.append(line.rstrip())
-    return out
+def read_rows(q, ox, oy, cols, rows, per_row=False):
+    """The terminal's text, read off the screen in the lettering it is
+    drawn in: a grid of cells, each read on its own (ptest.read_cells)"""
+    return q.read_cells(ox, oy, cols, rows, cell=TERM_CELL, row_h=ROW_H,
+                        base=TERM_BASE, px=TERM_PX)
 
 
 def typed(q, text):

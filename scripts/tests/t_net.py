@@ -79,13 +79,14 @@ def main():
         q_web.type_line("run gweb")
         time.sleep(1.5)
 
+        ink = theme("dark")["app_text"]
+
         def page_white():
-            """How much text is on the page. The page is the window's
-            light grey, so the text on it is BLACK - white on that grey
-            was drawn and could not be read."""
+            """How much text is on the page - under the toolbar and the
+            status line: pixels in the theme's text colour, or nearly"""
             _, _, a = q_web.screen_raw()
-            return sum(1 for y in range(100, 250) for x in range(96, 400)
-                       if a(x, y) == (0, 0, 0))
+            return sum(1 for y in range(140, 390) for x in range(96, 520)
+                       if near(a(x, y), ink, 40))
 
         before = page_white()
 
@@ -123,13 +124,14 @@ def main():
         q_web.sendkey("ret")
         time.sleep(5)
 
+        link_ink = theme("dark")["accent"]
+
         def link_pixels():
-            """Links are drawn in the accent blue - which is what a link
-            has been since there were links, and which is readable on a
-            light page in a way yellow is not."""
+            """Links are drawn in the accent - which is what a link has
+            been since there were links - and underlined"""
             _, _, a = q_web.screen_raw()
-            return [(x, y) for y in range(180, 260) for x in range(96, 420)
-                    if a(x, y) == (0, 0, 255)]
+            return [(x, y) for y in range(140, 390) for x in range(96, 520)
+                    if near(a(x, y), link_ink, 20)]
 
         first_view = page_white()
         q_web.sendkey("pgdn")

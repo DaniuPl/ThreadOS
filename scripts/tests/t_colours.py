@@ -41,7 +41,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The viewer opens in the next free slot of the cascade; with the
-# terminal already open it is slot 3, at (106,66), and asks for 420x300.
+# App already open it is slot 3, at (106,66), and asks for 420x300.
 VX, VY = 106, 66
 VW, VH = 420, 300
 
@@ -90,15 +90,15 @@ def main():
                   m is not None and int(m.group(1)) < 40)
 
             # --- a picture in real colours ------------------------------
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock(0)                # the "App" tile
             time.sleep(4)
 
             # The desktop itself is drawn in real colours now - the
             # aurora, the glass, the shadows: thousands of shades over
             # the screen. A window that never asked for anything else
-            # still lives in the palette: the terminal's content (slot
-            # 2) is a handful of colours, because that program did not
-            # have to change.
+            # still lives in the palette: the App's content (slot 2) is
+            # a handful of colours - it is the program kept the way all
+            # of them were, to show that the old way still works.
             w, h, at = q.screen_raw()
             own = set()
             for y in range(0, h, 4):
@@ -112,7 +112,7 @@ def main():
             inside = set(at(cx0 + x, cy0 + y) for y in range(20)
                          for x in range(8, 72))
             check("and a window drawn in indices has a handful of them (%d "
-                  "in the terminal's)" % len(inside), 1 < len(inside) < 12)
+                  "in the App's)" % len(inside), 1 < len(inside) < 12)
 
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)

@@ -29,34 +29,28 @@
  * one piece of code compiled twice.
  */
 
-#include "uapi.h"
+#include "udraw.h"
 
-/* A dark terminal, the way a terminal looks: the background is the
-   palette's black and the text is light. The desktop's own windows are
-   grey, so the terminal stands out as what it is - a screen inside a
-   window, not a form. */
-#define C_BLACK  0
-#define C_RED    1
-#define C_GREEN  2
-#define C_BLUE   3
-#define C_WHITE  4
-#define C_YELLOW 5
-#define C_BG     C_BLACK      /* the terminal's own background */
-#define C_TEXT   C_WHITE
-#define C_PROMPT C_GREEN
-#define C_NOTE   C_YELLOW
+/* Drawn the way the desktop draws, in its theme: the terminal's ground
+   is the theme's field - the surface things are typed into - its text
+   DejaVu Sans Mono, the prompt in the theme's green. The letters sit
+   on a grid of cells (ud_cells): a terminal's columns are a promise
+   the font's own advances do not keep. */
+#define CELL     8            /* a column */
+#define TERM_PX  12           /* the letters' size */
+#define TERM_BASE 12          /* the baseline, from a row's top */
 
 /* The size the window opens with. From then on it is whatever the
    person pulled it to, and the desktop says so with WEV_SIZE. */
 #define W0 400
-#define H0 240
+#define H0 320
 
 #define COLS_MAX 96           /* the widest line we keep */
 #define ROWS_MAX 48
 #define SCROLL   140          /* how many lines back you can look */
 #define LINE_MAX 120
 #define HIST_N   12
-#define ROW_H    10
+#define ROW_H    16
 #define PAD      4
 #define OUTFILE  "termout"
 
@@ -1032,7 +1026,7 @@ static void where(int x, int y, int *line, int *col)
         r = 0;
     if (r > text_rows - 1)
         r = text_rows - 1;
-    int c = (x - PAD + 4) / 8;          /* rounded to the nearest gap */
+    int c = (x - PAD + CELL / 2) / CELL;   /* rounded to the nearest gap */
     if (c < 0)
         c = 0;
     if (c > cols)
@@ -1092,7 +1086,7 @@ static void sel_copy(void)
 
 static void measure(void)
 {
-    cols = (cw - 2 * PAD) / 8;
+    cols = (cw - 2 * PAD) / CELL;
     if (cols < 8)
         cols = 8;
     if (cols > COLS_MAX)
@@ -1108,8 +1102,10 @@ static void draw(int w)
 {
     char buf[COLS_MAX + 1];
     int text_rows = rows - 1;
+    struct ud_look l;
+    ud_look(&l);
 
-    win_rect(w, 0, 0, cw, ch, C_BG);
+    ud_fill(w, 0, 0, cw, ch, l.field);
 
     int last = count - view;
     if (last < 0)
@@ -1125,8 +1121,7 @@ static void draw(int w)
     int y = PAD;
     for (int i = from; i < last; i++) {
         /* What is selected gets a field behind it, drawn before the
-           text - win_text puts down the glyph's own pixels and nothing
-           else, so the field shows through around them. */
+           text, which is drawn over it */
         if (sel_on && i >= la && i <= lb) {
             int len = line_len[at(i)];
             int f = (i == la) ? ca : 0;
@@ -1134,11 +1129,11 @@ static void draw(int w)
             if (f > len) f = len;
             if (t > len) t = len;
             if (t > f)
-                win_rect(w, PAD + f * 8, y - 1, (t - f) * 8, ROW_H - 1,
-                         C_BLUE);
+                ud_round(w, PAD + f * CELL, y, (t - f) * CELL, ROW_H, 3,
+                         l.accent);
         }
         t_copy(buf, lines[at(i)], cols + 1);
-        win_text(w, PAD, y, buf, C_TEXT);
+        ud_cells(w, PAD, y + TERM_BASE, CELL, buf, l.text, UD_MONO, TERM_PX);
         y += ROW_H;
     }
 
@@ -1150,7 +1145,7 @@ static void draw(int w)
        which directory it happens in. */
     const char *lead = asking ? "password: " : prompt;
     int leadn = asking ? 10 : plen;
-    win_text(w, PAD, iy, lead, C_PROMPT);
+    ud_cells(w, PAD, iy + TERM_BASE, CELL, lead, l.good, UD_MONO, TERM_PX);
 
     /* A line longer than the window slides under the cursor, so the
        cursor is always somewhere a person can see it */
@@ -1165,13 +1160,15 @@ static void draw(int w)
     if (asking)
         for (int i = 0; buf[i]; i++)
             buf[i] = '*';
-    win_text(w, PAD + leadn * 8, iy, buf, C_TEXT);
+    ud_cells(w, PAD + leadn * CELL, iy + TERM_BASE, CELL, buf, l.text,
+             UD_MONO, TERM_PX);
 
-    /* The cursor: a line under the character it stands on. It does not
-       blink - a blinking cursor is a nicety, and one that is on half
-       the time is one that can be photographed absent. */
-    win_rect(w, PAD + (leadn + icur - off) * 8, iy + ROW_H - 2, 8, 2,
-             C_PROMPT);
+    /* The cursor: a line under the character it stands on, below where
+       any letter reaches. It does not blink - a blinking cursor is a
+       nicety, and one that is on half the time is one that can be
+       photographed absent. */
+    ud_fill(w, PAD + (leadn + icur - off) * CELL, iy + ROW_H - 2, CELL, 2,
+            l.accent);
 
     /* Scrolled up, the last thing on the screen is not the last thing
        that happened - and that has to be said, or the terminal looks
@@ -1180,17 +1177,19 @@ static void draw(int w)
        this the terminal looks the same whether it is waiting for a
        command or waiting for a program, which are not the same thing
        to be looking at. */
-    if (running && cols > 24) {
-        int mx = PAD + (cols - 15) * 8;
-        win_rect(w, mx, PAD, 15 * 8, 8, C_BG);
-        win_text(w, mx, PAD, "running... ^C", C_NOTE);
-    } else if (view && cols > 24) {
-        /* Cleared first: drawn straight onto the line underneath, the
-           two texts would share the same pixels and neither would be
-           readable. */
-        int mx = PAD + (cols - 15) * 8;      /* "^ scrolled back" */
-        win_rect(w, mx, PAD, 15 * 8, 8, C_BG);
-        win_text(w, mx, PAD, "^ scrolled back", C_NOTE);
+    const char *say = running ? "running... ^C" : view ? "^ scrolled back"
+                                                       : (const char *)0;
+    if (say && cols > 24) {
+        /* On a field of its own, on the grid like the rest: drawn
+           straight onto the line underneath, the two texts would share
+           the same pixels */
+        int n = 0;
+        while (say[n])
+            n++;
+        int mx = PAD + (cols - n) * CELL;
+        ud_round(w, mx - 4, PAD, n * CELL + 8, ROW_H, 5, l.row);
+        ud_cells(w, mx, PAD + TERM_BASE, CELL, say, l.accent, UD_MONO,
+                 TERM_PX);
     }
 }
 
