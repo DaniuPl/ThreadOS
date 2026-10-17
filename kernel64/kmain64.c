@@ -54,6 +54,7 @@
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
+#include "../kernel/include/desktop.h"
 
 /* Demonstration threads: two counting forever and one that ends by
    itself - so that a zombie can be seen disappearing from the list. */
@@ -166,6 +167,27 @@ static int long_mode_active(void)
     __asm__ volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(0xC0000080));
     (void)high;
     return (low & (1u << 10)) != 0;
+}
+
+/* Is this word on the boot command line? GRUB passes the line with the
+   kernel's entry in grub.cfg; whole words only, so 'desktop' does not
+   match 'nodesktop'. */
+static int boot_word(const struct multiboot_info *mbi, const char *word)
+{
+    if (!mbi || !(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)
+        return 0;
+    const char *cmd = (const char *)(uintptr_t)mbi->cmdline;
+    size_t n = strlen(word);
+    for (int i = 0; cmd[i]; i++) {
+        if (i && cmd[i - 1] != ' ')
+            continue;
+        size_t k = 0;
+        while (k < n && cmd[i + k] == word[k])
+            k++;
+        if (k == n && (cmd[i + k] == '\0' || cmd[i + k] == ' '))
+            return 1;
+    }
+    return 0;
 }
 
 void kmain64(uint32_t magic, uint32_t info_addr)
@@ -621,6 +643,15 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     printk("\nThe 64-bit system is ready - type 'help'.\n");
     shell64_start();
+
+    /* 'desktop' on the boot line: straight to the desktop, the way a
+       machine is used rather than the way it is tested. Without it the
+       system stays at the shell, where every test expects to find it;
+       'desktop' typed there does the same thing later. */
+    if (boot_word(mbi, "desktop")) {
+        printk("The desktop is starting - the console goes away\n");
+        desktop_start();
+    }
 
     /* From this moment on the main thread becomes the idle thread - the
        work is taken over by the shell, which waits for keys. Such a

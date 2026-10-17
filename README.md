@@ -184,7 +184,10 @@ mode and jumps.
 ## Quick start
 
 ```sh
-make run              # 32-bit kernel in QEMU
+make run              # the 64-bit system in QEMU, straight to the desktop
+make run KVM=1        # the same, with hardware virtualisation (needs /dev/kvm)
+make run AUDIO=pa     # the same, with sound (pa, pipewire or alsa)
+make run32            # the 32-bit kernel in QEMU
 make kernel64         # build the long-mode kernel + its initrd
 make run-iso64-uefi   # boot the hybrid disc under UEFI firmware (OVMF)
 make efi              # build threadboot, our own EFI loader (needs clang + lld)

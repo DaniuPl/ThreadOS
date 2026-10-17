@@ -3,7 +3,9 @@
 # Targets:
 #   make        - builds threados.bin (the Multiboot kernel)
 #   make iso    - builds a bootable ISO (needs grub-mkrescue + xorriso)
-#   make run    - starts the kernel in QEMU (needs qemu-system-i386)
+#   make run    - the 64-bit system in QEMU, from its disc, to the desktop
+#                 (needs qemu-system-x86_64, grub-mkrescue, xorriso)
+#   make run32  - the 32-bit kernel in QEMU (needs qemu-system-i386)
 #   make fuzz   - feeds the parsers corrupted data (under sanitizers)
 #   make clean  - removes what was built
 
@@ -152,7 +154,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
 
-.PHONY: all iso iso64 initrd64 run run-iso run-iso64-uefi test fuzz clean \
+.PHONY: all iso iso64 initrd64 run run32 run-iso run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick
 
 all: $(KERNEL) $(INITRD)
@@ -589,7 +591,39 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
            -device rtl8139,netdev=n0
 
-run: $(KERNEL) $(INITRD) $(DISK)
+# 'make run' is the 64-bit system - the one everything new goes into -
+# started off the disc the way a real machine starts it: GRUB, the
+# desktop straight away (the first menu entry; the second stays at the
+# shell). The machine has what the system has drivers for: a SATA disk
+# behind AHCI, an e1000 network card, HD Audio and two cores. The disk
+# image is the system's own and survives between runs.
+#
+#   make run              the 64-bit system
+#   make run AUDIO=pa     with sound (pa, pipewire, alsa - whatever the
+#                         host has; 'none' by default, because a machine
+#                         without a sound server would refuse to start)
+#   make run KVM=1        with hardware virtualisation, if /dev/kvm is
+#                         there - it starts in a second instead of ten
+#   make run QEMU_EXTRA="..."  anything else QEMU should be told
+#   make run32            the 32-bit kernel, loaded by QEMU directly
+AUDIO ?= none
+DISK64 := $(BUILD)/disk64.img
+QEMU64_ACCEL := $(if $(KVM),-enable-kvm -cpu host,)
+
+$(DISK64): | $(BUILD)
+	dd if=/dev/zero of=$@ bs=1M count=64 status=none
+
+run: $(ISO64) $(DISK64)
+	qemu-system-x86_64 -m 512 -smp 2 $(QEMU64_ACCEL) \
+	    -cdrom $(ISO64) -boot d \
+	    -device ich9-ahci,id=ahci \
+	    -drive id=d0,file=$(DISK64),if=none,format=raw \
+	    -device ide-hd,drive=d0,bus=ahci.0 \
+	    -netdev user,id=n0,hostfwd=tcp::5555-:5555 -device e1000,netdev=n0 \
+	    -audiodev $(AUDIO),id=snd0 -device intel-hda \
+	    -device hda-output,audiodev=snd0 $(QEMU_EXTRA)
+
+run32: $(KERNEL) $(INITRD) $(DISK)
 	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
 
 # Starting off the ISO the way a real machine would: a disk (TFS + the
