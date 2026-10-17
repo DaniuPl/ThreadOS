@@ -120,8 +120,13 @@
 /* Shapes and TrueType text in a window (kernel/include/desktop.h):
    a1=winid, a2=&cmd */
 #define SYS64_WIN_DRAW 68
-/* The theme's colours for a program's window: a1=buffer of 11 words */
+/* The theme's colours for a program's window: a1=buffer of 11 words,
+   a2=which theme (0 the one in use, 1 dark, 2 light) */
 #define SYS64_UI_LOOK  69
+/* A card at the top right of the screen: a1=title, a2=text */
+#define SYS64_NOTIFY   70
+/* A background as a small picture: a1=&cmd {bg, dark, w, h, out} */
+#define SYS64_BG_PREVIEW 71
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

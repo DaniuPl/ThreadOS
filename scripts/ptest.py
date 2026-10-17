@@ -51,8 +51,16 @@ DISK_SIZE = 16 * 1024 * 1024
 RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
-MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb", "gedit", "gtasks",
-              "gmikser"]
+def _menu_items():
+    """The launch menu's entries, straight out of kernel/desktop.c"""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "kernel", "desktop.c")
+    with open(full) as fh:
+        m = re.search(r"menu_items\[\] = \{([^}]*)\}", fh.read())
+    return re.findall(r'"([^"]+)"', m.group(1))
+
+
+MENU_ITEMS = _menu_items()
 MENU_X0 = 6                 # the menu opened from the bar hangs here
 
 

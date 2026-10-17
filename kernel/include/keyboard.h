@@ -39,6 +39,7 @@
    The kernel knows no more than that the keys were pressed - what to do
    with them is the program's business. */
 #define KEY_SHOT  0x10      /* Print Screen - save what is on the screen */
+#define KEY_SEARCH 0x01     /* Ctrl+Space - the desktop's search */
 #define KEY_UNDO  0x0E      /* Ctrl+Z - take that back */
 #define KEY_FIND  0x07      /* Ctrl+F - "find", the third of them */
 #define KEY_SAVE  0x05

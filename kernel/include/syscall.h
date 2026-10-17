@@ -114,8 +114,13 @@
 /* Drawing as the desktop draws - shapes and TrueType text (see
    desktop.h, struct win_draw): ebx=winid, ecx=&cmd */
 #define SYS_WIN_DRAW 74
-/* The theme's colours for a program's window: ebx=buffer of 11 words */
+/* The theme's colours for a program's window: ebx=buffer of 11 words,
+   ecx=which theme (0 the one in use, 1 dark, 2 light) */
 #define SYS_UI_LOOK  75
+/* A card at the top right of the screen: ebx=title, ecx=text */
+#define SYS_NOTIFY   76
+/* A background as a small picture: ebx=&struct bg_preview_cmd */
+#define SYS_BG_PREVIEW 77
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

@@ -122,10 +122,16 @@ def main():
             # the window's light grey, which is the rule everywhere in
             # this system; white on that grey was drawn and could not
             # be read.
-            _, _, at = q.screen_raw()
+            # (looked at until it is there: a window grows into place
+            # as it opens, and on a busy host that takes longer)
             tx, ty = scr(6, 24)
-            whites = sum(1 for dy in range(8) for dx in range(72)
-                          if at(tx + dx, ty + dy) == CZARNY)
+            for _ in range(10):
+                _, _, at = q.screen_raw()
+                whites = sum(1 for dy in range(8) for dx in range(72)
+                             if at(tx + dx, ty + dy) == CZARNY)
+                if whites > 20:
+                    break
+                time.sleep(0.5)
             check(f"the program writes text in its window ({whites} dark pixels)",
                   whites > 20)
 

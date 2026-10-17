@@ -143,9 +143,33 @@ static inline int32_t sys_win_draw(int winid, const struct win_draw_cmd *c)
     return (int32_t)syscall64(SYS64_WIN_DRAW, winid, (int64_t)(uintptr_t)c);
 }
 
+static inline int32_t sys_ui_look_of(int which, uint32_t *out)
+{
+    return (int32_t)syscall64(SYS64_UI_LOOK, (int64_t)(uintptr_t)out,
+                              which);
+}
+
 static inline int32_t sys_ui_look(uint32_t *out)
 {
-    return (int32_t)syscall64(SYS64_UI_LOOK, (int64_t)(uintptr_t)out, 0);
+    return sys_ui_look_of(0, out);
+}
+
+static inline int32_t sys_notify(const char *title, const char *text)
+{
+    return (int32_t)syscall64(SYS64_NOTIFY, (int64_t)(uintptr_t)title,
+                              (int64_t)(uintptr_t)text);
+}
+
+struct bg_preview_cmd {
+    int32_t bg, dark, w, h;
+    uint32_t *out;
+};
+
+static inline int32_t sys_bg_preview(int bg, int dark, int w, int h,
+                                     uint32_t *out)
+{
+    struct bg_preview_cmd c = { bg, dark, w, h, out };
+    return (int32_t)syscall64(SYS64_BG_PREVIEW, (int64_t)(uintptr_t)&c, 0);
 }
 
 static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)

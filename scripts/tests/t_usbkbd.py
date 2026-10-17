@@ -71,10 +71,43 @@ def main():
             q19.type_line("clear")
         check("the Shift modifier from the HID report gives capital letters",
               "to 'A'" in saved)
+
     finally:
         q19.close()
         if os.path.exists(udisk):
             os.unlink(udisk)
+
+    # --- Fast typing, behind xHCI ---------------------------------------
+    # A read on an xHCI (or EHCI) endpoint is two calls: one hands the
+    # controller a read to wait in, the next takes what came back. The
+    # driver took one report a round, so a read was out only every
+    # other round - and two reports to a key (pressed, let go). Typed
+    # faster than that, keys queued in the keyboard until it threw them
+    # away. Eighty a second, each held ten milliseconds: every letter has
+    # to arrive, in order - the shell says back what it was given, as a
+    # command it does not know.
+    print("--- fast typing on a keyboard behind xHCI ---")
+    q20 = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci")
+    try:
+        q20.wait_for("A USB keyboard", timeout=40)
+        q20.wait_for("ThreadOS shell", timeout=40)
+        q20.type_line("clear")
+        q20.sendkey("ret")
+        time.sleep(1)
+        word = "thequickbrownfoxjumps"
+        for ch in word:
+            q20.hmp("sendkey %s 10" % ch)
+            time.sleep(0.012)
+        time.sleep(1)
+        q20.sendkey("ret")
+        time.sleep(1)
+        said = [ln.strip() for ln in q20.screen().split("\n")
+                if "unknown command" in ln]
+        check("eighty keys a second all arrive, in order (%s)"
+              % (said[-1] if said else "-"),
+              bool(said) and "'%s'" % word in said[-1])
+    finally:
+        q20.close()
 
     return summary()
 

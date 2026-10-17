@@ -1032,6 +1032,8 @@ static void execute(const char *line)
         }
         if (proc64_spawn_anycore(progw, 0, 1) < 0)
             printk("runw: could not start '%s'\n", progw);
+    } else if (starts_with(line, "notify ")) {
+        desktop_notify("Shell", argument(line, sizeof("notify ") - 1));
     } else if (starts_with(line, "run ")) {
         const char *name = argument(line, sizeof("run ") - 1);
         if (!name) {

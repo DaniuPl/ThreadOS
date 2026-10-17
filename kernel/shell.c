@@ -137,14 +137,14 @@ static const struct {
     {"kill P S", "signal to a process"},
     {"clear",    "clear the screen"},
     {"screen",    "video mode, frame cost"},
+    {"notify T", "a card on the desktop"},
     {"hardware",   "what is in this machine"},
     {"disks",    "the machine's disks"},
     {"font",     "the fonts, glyphs drawn"},
     {"install", "ThreadOS onto a disk"},
     {"fat [N]",  "EFI partition: fatls,"},
     {"",         "  fatcat, fatcopy, fatrm"},
-    {"gfx",      "mode 13h test"},
-    {"vesa",     "VESA mode test"},
+    {"gfx, vesa", "the two video mode tests"},
     {"crash",    "page fault test"},
     {"reboot",   "restart the machine"},
     {"poweroff", "power the machine off"},
@@ -1048,6 +1048,12 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "screen"))
         cmd_ekran();
+    else if (!strcmp(cmd, "notify")) {
+        if (*arg)
+            desktop_notify("Shell", arg);
+        else
+            printk("notify <text>\n");
+    }
     else if (!strcmp(cmd, "volume"))
         hwinfo_volume(arg);
     else if (!strcmp(cmd, "beep"))

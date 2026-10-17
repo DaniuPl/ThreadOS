@@ -56,7 +56,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/mkwall.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
-             $(BUILD)/user/udtest.elf \
+             $(BUILD)/user/udtest.elf $(BUILD)/user/gappear.elf \
              $(BUILD)/user/gimg.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
@@ -293,7 +293,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
-	    udtest=$(BUILD)/user/udtest.elf \
+	    udtest=$(BUILD)/user/udtest.elf gappear=$(BUILD)/user/gappear.elf \
 	    gimg=$(BUILD)/user/gimg.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \

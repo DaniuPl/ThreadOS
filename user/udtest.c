@@ -11,7 +11,8 @@
  *
  * It asks for the colours again twice a second and says them once more
  * when they change, which is how a switch of the theme is seen to reach
- * a program. One source for both kernels (uapi.h).
+ * a program. And it puts a card on the desktop (sys_notify), which
+ * scripts/tests/t_notify.py reads. One source for both kernels (uapi.h).
  */
 
 #include "udraw.h"
@@ -105,6 +106,9 @@ void _start(void)
     struct ud_look was;
     ud_look(&was);
     say_look(&was);
+
+    /* And a card on the desktop, from ring 3 */
+    sys_notify("udtest", "drawn and measured");
 
     for (;;) {
         struct win_event ev;

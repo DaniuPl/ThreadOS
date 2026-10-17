@@ -1069,8 +1069,35 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        desktop_ui_look((uint32_t *)(uintptr_t)a1);
+        desktop_ui_look((int)a2, (uint32_t *)(uintptr_t)a1);
         r->rax = 0;
+        return;
+    }
+    case SYS64_NOTIFY: {
+        char title[40], body[80];
+        if (text_from_ring3(a1, title, sizeof(title)) < 0 ||
+            text_from_ring3(a2, body, sizeof(body)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        desktop_notify(title, body);
+        r->rax = 0;
+        return;
+    }
+    case SYS64_BG_PREVIEW: {
+        struct { int32_t bg, dark, w, h; uint64_t out; } c;
+        if (!paging64_user_range(a1, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        c = *(const __typeof__(c) *)(uintptr_t)a1;
+        if (c.w <= 0 || c.h <= 0 || c.w * c.h > BG_PREVIEW_MAX ||
+            !paging64_user_range(c.out, (uint64_t)(c.w * c.h) * 4)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)desktop_bg_preview(
+            c.bg, c.dark, c.w, c.h, (uint32_t *)(uintptr_t)c.out);
         return;
     }
     case SYS64_WIN_TRUECOL:

@@ -340,7 +340,7 @@ def main():
                   "(%s at %d,%d)" % (got, mx, my), got == ("App", "Mixer"))
             check("it does not go past the right edge, nor over the dock",
                   mx + MENU_W <= SCREEN_W and
-                  my + 2 * MENU_PAD + 7 * MENU_ROW <= work_bottom())
+                  my + 2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW <= work_bottom())
             q.mouse_goto(600, 140)
             q.mouse_click()                    # away with it
             time.sleep(1)

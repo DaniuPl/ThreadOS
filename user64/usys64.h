@@ -80,6 +80,8 @@
 #define SYS64_SEM_POST 67
 #define SYS64_WIN_DRAW 68
 #define SYS64_UI_LOOK  69
+#define SYS64_NOTIFY   70
+#define SYS64_BG_PREVIEW 71
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40

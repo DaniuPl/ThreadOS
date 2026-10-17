@@ -84,6 +84,31 @@
 #define MENU_ICON    18
 #define MENU_Y       (BAR_H + 4)  /* opened from the bar, it hangs here */
 
+/* --- notifications: cards at the top right, newest on top ------------- */
+#define NOTE_W       280
+#define NOTE_H       56
+#define NOTE_R       12
+#define NOTE_GAP     8
+#define NOTE_TOP     (BAR_H + 10)
+#define NOTE_RIGHT   10
+#define NOTE_ICON    28
+#define NOTE_TEXT_X  52      /* the text, from the card's left edge */
+#define NOTE_TITLE_Y 23      /* the title's baseline, from its top */
+#define NOTE_BODY_Y  41      /* the line under it */
+#define NOTE_PX      12
+#define NOTE_SHOWN   4       /* at most this many at once */
+
+/* --- the search: a field and what matches, under the bar ----------------- */
+#define SEARCH_W       460
+#define SEARCH_Y       (BAR_H + 60)
+#define SEARCH_FIELD_H 44
+#define SEARCH_PX      17
+#define SEARCH_ROW     30
+#define SEARCH_ROWS    8
+#define SEARCH_R       14
+#define SEARCH_TEXT_X  44    /* the typing, from the panel's left edge */
+#define SEARCH_ICON    20
+
 /* --- the hint ----------------------------------------------------------- */
 #define HINT_H       20
 #define HINT_R       6

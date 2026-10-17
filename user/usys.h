@@ -67,6 +67,8 @@
 #define SYS_SEM_POST 73
 #define SYS_WIN_DRAW 74
 #define SYS_UI_LOOK  75
+#define SYS_NOTIFY   76
+#define SYS_BG_PREVIEW 77
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
@@ -869,11 +871,43 @@ static inline int32_t sys_win_draw(int winid, const struct win_draw_cmd *c)
     return ret;
 }
 
-static inline int32_t sys_ui_look(uint32_t *out)
+/* which: 0 the theme in use, 1 the dark one, 2 the light one */
+static inline int32_t sys_ui_look_of(int which, uint32_t *out)
 {
     int32_t ret;
     __asm__ volatile("int $0x80" : "=a"(ret)
-                     : "a"(SYS_UI_LOOK), "b"(out) : "memory");
+                     : "a"(SYS_UI_LOOK), "b"(out), "c"(which) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_ui_look(uint32_t *out)
+{
+    return sys_ui_look_of(0, out);
+}
+
+/* A card at the top right of the screen, for a few seconds */
+static inline int32_t sys_notify(const char *title, const char *text)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_NOTIFY), "b"(title), "c"(text) : "memory");
+    return ret;
+}
+
+/* Background number 'bg' (as the 'background' setting counts them) as
+   a w x h picture, in the dark theme or the light one */
+struct bg_preview_cmd {
+    int32_t bg, dark, w, h;
+    uint32_t *out;
+};
+
+static inline int32_t sys_bg_preview(int bg, int dark, int w, int h,
+                                     uint32_t *out)
+{
+    struct bg_preview_cmd c = { bg, dark, w, h, out };
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_BG_PREVIEW), "b"(&c) : "memory");
     return ret;
 }
 

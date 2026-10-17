@@ -117,8 +117,23 @@ static void handle_key(uint8_t usage, uint8_t mods)
                           : special_key(usage);
     if (!c)
         return;
+    /* The same Ctrl+letter keys the PS/2 path knows (kernel/kbdmap.c):
+       a program cannot tell which keyboard was pressed, and should not
+       have to */
     if (ctrl && c == 'c')
         c = KEY_INTR;
+    else if (ctrl && c == 'd')
+        c = KEY_EOF;
+    else if (ctrl && c == 's')
+        c = KEY_SAVE;
+    else if (ctrl && c == 'o')
+        c = KEY_OPEN;
+    else if (ctrl && c == 'f')
+        c = KEY_FIND;
+    else if (ctrl && c == 'z')
+        c = KEY_UNDO;
+    else if (ctrl && c == ' ')
+        c = KEY_SEARCH;
     keyboard_inject(c);
 }
 
@@ -149,19 +164,20 @@ static void poll_thread(void *arg)
     (void)arg;
 
     for (;;) {
-        /* The keyboard queues reports and hands over one per request.
-           One request per round would lose keys during fast typing -
-           and when the queue overflows the device simply throws away
-           what we failed to collect. So we only pause once there is
-           really nothing left to take. */
-        /* One report per round. More is not needed: a read descriptor
-           waits in the controller's queue at all times, so reports
-           queue up in the device rather than being lost. Fifty rounds
-           a second collect them faster than anyone can type. */
+        /* A call either hands the controller a read to wait in, or takes
+           what that read brought - never both. Taking one report a round
+           meant a read was out only every other round: a report every
+           forty milliseconds, two to a key (pressed, let go) - a dozen
+           keys a second, and a fast typist's next ones queued in the
+           keyboard until it threw them away. So a report taken is
+           followed at once by the next read, and the thread sleeps only
+           while one is out with nothing come back yet. */
         int n = usbhc_int_in(dev, ep_num, report, ep_maxpacket);
-        if (n >= 8)
+        if (n >= 8) {
             handle_report();
-        task_sleep(20);
+            continue;
+        }
+        task_sleep(10);
     }
 }
 

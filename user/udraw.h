@@ -56,6 +56,15 @@ static inline void ud_look(struct ud_look *l)
     sys_ui_look((uint32_t *)l);
 }
 
+/* The colours of a theme that may not be the one in use - to show it
+   before it is chosen: UD_DARK or UD_LIGHT */
+#define UD_DARK  1
+#define UD_LIGHT 2
+static inline void ud_look_of(int which, struct ud_look *l)
+{
+    sys_ui_look_of(which, (uint32_t *)l);
+}
+
 static inline int ud_op(int win, int op, int x, int y, int w, int h, int r,
                         uint32_t rgb, uint32_t rgb2, int font, int px,
                         const char *s)

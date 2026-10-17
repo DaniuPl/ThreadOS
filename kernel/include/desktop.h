@@ -82,10 +82,22 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
    theme as the desktop does - eleven words, in this order: */
 #define UI_LOOK_N 11   /* dark?, background, field, text, dim text, line,
                           row, accent, text on accent, danger, good */
-void desktop_ui_look(uint32_t *out);
+/* which: 0 the theme in use, 1 the dark one, 2 the light one */
+void desktop_ui_look(int which, uint32_t *out);
+
+/* A background as a w x h picture of 0x00RRGGBB, for a program to show
+   before it is chosen: 'bg' as the 'background' setting counts them,
+   in the dark theme or the light one. 0, or -1 for no such
+   background. At most BG_PREVIEW_MAX pixels. */
+#define BG_PREVIEW_MAX (200 * 150)
+int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out);
 
 /* The compositor's last second: frames drawn, and the share of the
    second spent drawing them (percent). 0 while it is not running. */
 int desktop_frame_stats(int *fps, int *busy);
+
+/* A card at the top right of the screen for a few seconds: something
+   worth a glance that nobody asked for. Callable from anywhere. */
+void desktop_notify(const char *title, const char *body);
 
 #endif

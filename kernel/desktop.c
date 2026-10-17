@@ -38,6 +38,7 @@
 #include "include/printk.h"
 #include "include/pmm.h"
 #include "include/pit.h"
+#include "include/spinlock.h"
 
 /* Palette indices.
  *
@@ -106,8 +107,8 @@ static int icon_n = 9;         /* how many of them there are */
 /* How many pictures there are (see draw_art): one per program that
    comes with the system, and a last one - a letter - for anything
    else. */
-#define ART_N      11
-#define ART_LETTER 10
+#define ART_N      12
+#define ART_LETTER 11
 
 /* The programs that come with the system, by the name they run under:
    the picture each wears and what a person calls it - for a program
@@ -117,6 +118,7 @@ static const struct { const char *app, *label; } known_apps[] = {
     { "gmon", "Monitor" }, { "gterm", "Term" }, { "gweb", "Web" },
     { "gsettings", "Settings" }, { "gedit", "Editor" },
     { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
+    { "gappear", "Appearance" },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -437,7 +439,7 @@ static int menu_px, menu_py;
    started as a kiosk ('install') and not as one more window among
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
-                                  "gedit", "gtasks", "gmikser"};
+                                  "gedit", "gtasks", "gmikser", "gappear"};
 
 /* --- The kiosk -----------------------------------------------------
  *
@@ -928,6 +930,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0xFFD60A, 0xFF9F0A },   /* Editor */
         { 0xFF6B8A, 0xFF2D55 },   /* Tasks */
         { 0xDA8FFF, 0x8944E0 },   /* Mixer */
+        { 0xFFB340, 0xFF375F },   /* Appearance */
         { 0x8E8E93, 0x48484A },   /* anything else: a letter */
     };
     if (art < 0 || art >= ART_N)
@@ -1012,6 +1015,11 @@ static void draw_art(int art, int x, int y, int s, char letter)
                        D(12), 0xFFFFFF, 140);
             gfx_disc16(PX(100 + 60 * k), PY(knob[k]), D(24), 0xFFFFFF, 255);
         }
+        break;
+    case 10:                                      /* day and night */
+        gfx_disc16(PX(160), PY(160), D(96), 0xFFFFFF, 255);
+        gfx_disc16(PX(205), PY(125), D(76), 0xFF6A50, 255);
+        gfx_circle16(PX(160), PY(160), D(96), D(14), 0xFFFFFF, 255);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
@@ -1585,6 +1593,14 @@ static int prev_right;      /* the previous right-button state */
 static uint32_t last_title_click;
 static int last_title_win = -1;
 
+/* The search and the notifications (below): what the input asks of them */
+static volatile int search_open;
+static void search_click(int mx, int my);
+static void search_close(void);
+static int search_key(char c);
+static int note_at(int x, int y);
+static void note_drop(int i);
+
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
@@ -1653,6 +1669,19 @@ static void handle_input(int mx, int my, int buttons)
             menu_open = 0;
     }
     prev_right = right;
+
+    /* The search and the notifications are above everything else, and
+       take a click before anything under them can */
+    if (pressed && !prev_pressed && search_open) {
+        search_click(mx, my);
+        prev_pressed = pressed;
+        return;
+    }
+    if (pressed && !prev_pressed && note_at(mx, my) >= 0) {
+        note_drop(note_at(mx, my));
+        prev_pressed = pressed;
+        return;
+    }
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
         /* The menu bar is above everything, the way it is drawn. Its
@@ -2238,6 +2267,8 @@ static void desk_palette(int bg)
     }
 }
 
+static void paint_colour(uint32_t *buf, int w, int h, int bg);
+
 static void paint_background(uint32_t *buf, int w, int h, int bg)
 {
     if (wall) {
@@ -2263,7 +2294,23 @@ static void paint_background(uint32_t *buf, int w, int h, int bg)
         aurora_draw(buf, w, h, w, theme_dark);
         return;
     }
-    /* A colour: smooth, from 115% at the top to 75% at the floor */
+    paint_colour(buf, w, h, bg);
+}
+
+int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out)
+{
+    if (bg < 0 || bg >= BG_N || w <= 0 || h <= 0 || w * h > BG_PREVIEW_MAX)
+        return -1;
+    if (bg == 0)
+        aurora_draw(out, w, h, w, dark);
+    else
+        paint_colour(out, w, h, bg);
+    return 0;
+}
+
+/* A colour: smooth, from 115% at the top to 75% at the floor */
+static void paint_colour(uint32_t *buf, int w, int h, int bg)
+{
     for (int y = 0; y < h; y++) {
         int num = 115 - y * (115 - 75) / (h > 1 ? h - 1 : 1);
         int r = backgrounds[bg].r * num / 100;
@@ -2780,6 +2827,425 @@ static void draw_dock(void)
     }
 }
 
+/* --- Notifications ----------------------------------------------------------
+ *
+ * Something happened that is worth a glance, and nobody asked: a picture
+ * was saved, a program has news. A card slides in at the top right,
+ * stays five seconds and goes; a click sends it away sooner. At most
+ * four are shown, the newest on top - a fifth pushes the oldest out.
+ *
+ * desktop_notify() is called from anywhere - a system call on another
+ * core, the keyboard's interrupt - so the cards are handed over under a
+ * lock and the desktop thread alone draws them.
+ */
+#define NOTE_LIFE  (5 * FRAME_HZ)
+#define NOTE_SLIDE 8                     /* frames to come in */
+#define NOTE_FADE  12                    /* frames to go */
+
+struct note {
+    char title[40];
+    char body[80];
+    uint32_t born;                       /* the frame it came in on */
+};
+static struct note notes[NOTE_SHOWN];    /* [0] is the newest */
+static int note_n;
+static struct spinlock note_lock = SPINLOCK_FREE;
+
+static void copy_cut(char *d, const char *s, int cap)
+{
+    int i = 0;
+    for (; s && s[i] && i < cap - 1; i++)
+        d[i] = s[i];
+    d[i] = '\0';
+}
+
+void desktop_notify(const char *title, const char *body)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    if (note_n < NOTE_SHOWN)
+        note_n++;
+    for (int i = note_n - 1; i > 0; i--)
+        notes[i] = notes[i - 1];
+    copy_cut(notes[0].title, title, sizeof(notes[0].title));
+    copy_cut(notes[0].body, body, sizeof(notes[0].body));
+    notes[0].born = frames;
+    spin_unlock_irq(&note_lock, fl);
+}
+
+static void note_drop(int i)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    if (i >= 0 && i < note_n) {
+        for (int k = i; k < note_n - 1; k++)
+            notes[k] = notes[k + 1];
+        note_n--;
+    }
+    spin_unlock_irq(&note_lock, fl);
+}
+
+static int note_x(void) { return video_w() - NOTE_RIGHT - NOTE_W; }
+static int note_y(int i) { return NOTE_TOP + i * (NOTE_H + NOTE_GAP); }
+
+/* Which card is under the point, or -1 */
+static int note_at(int x, int y)
+{
+    for (int i = 0; i < note_n; i++)
+        if (in_rect(x, y, note_x(), note_y(i), NOTE_W, NOTE_H))
+            return i;
+    return -1;
+}
+
+static void draw_notes(void)
+{
+    /* The old ones go first: a card past its time is not drawn */
+    for (int i = note_n - 1; i >= 0; i--)
+        if (frames - notes[i].born >= NOTE_LIFE)
+            note_drop(i);
+
+    uint32_t m = config_get_num("motion", 1);
+    for (int i = 0; i < note_n; i++) {
+        struct note n = notes[i];
+        uint32_t age = frames - n.born;
+        int x = note_x(), y = note_y(i), a = 255;
+        if (m && age < NOTE_SLIDE) {     /* in from the right, slowing */
+            int u = (int)(NOTE_SLIDE - age);
+            x += (NOTE_W + NOTE_RIGHT) * u * u / (NOTE_SLIDE * NOTE_SLIDE);
+        }
+        if (m && age + NOTE_FADE > NOTE_LIFE)
+            a = 255 * (int)(NOTE_LIFE - age) / NOTE_FADE;
+        gfx_shadow(x, y, NOTE_W, NOTE_H, NOTE_R, 14,
+                   (theme_dark ? 150 : 90) * a / 255, 4);
+        gfx_frost(x, y, NOTE_W, NOTE_H, NOTE_R, 10, L.menu_bg,
+                  L.menu_a * a / 255);
+        gfx_rring16(x * 16, y * 16, NOTE_W * 16, NOTE_H * 16, NOTE_R * 16,
+                    16, L.win_line, 200 * a / 255);
+        if (a < 160)
+            continue;                    /* going: the glass alone */
+        int iy = y + (NOTE_H - NOTE_ICON) / 2;
+        gfx_rrect(x + 12, iy, NOTE_ICON, NOTE_ICON, 7, L.accent, 255);
+        char first[2] = { n.title[0] ? n.title[0] : '!', 0 };
+        int fw = ui_font_width(UI_BOLD, 15, first);
+        ui_font_text(UI_BOLD, 15, x + 12 + (NOTE_ICON - fw) / 2,
+                     ui_font_baseline_in(15, iy, NOTE_ICON), first,
+                     L.accent_text);
+        char cut[sizeof(n.body) + 4];
+        int room = NOTE_W - NOTE_TEXT_X - 12;
+        ui_font_text(UI_BOLD, NOTE_PX, x + NOTE_TEXT_X, y + NOTE_TITLE_Y,
+                     fit_text(n.title, UI_BOLD, NOTE_PX, room, cut,
+                              sizeof(cut)), L.menu_text);
+        ui_font_text(UI_SANS, NOTE_PX, x + NOTE_TEXT_X, y + NOTE_BODY_Y,
+                     fit_text(n.body, UI_SANS, NOTE_PX, room, cut,
+                              sizeof(cut)), L.menu_text);
+    }
+}
+
+/* --- The search -------------------------------------------------------------
+ *
+ * Ctrl+Space, and a field under the bar: what is typed is looked for
+ * among the programs, the open windows, the settings and the files at
+ * the top of the disk, and whatever matches is listed under it - the
+ * names that begin with it first. The arrows pick, Enter takes: a
+ * program starts, a window comes up (out of the dock, if it was
+ * minimised), a setting opens the settings, a file opens in the
+ * program for it. Esc, a click outside or Ctrl+Space again closes it.
+ *
+ * The keys arrive in the keyboard's interrupt; what they do to the
+ * screen - and starting programs above all - is done by the desktop's
+ * own thread, which looks at what was asked once per frame.
+ */
+#define FIND_APP     0
+#define FIND_WINDOW  1
+#define FIND_SETTING 2
+#define FIND_FILE    3
+#define FIND_MAX     SEARCH_ROWS
+
+struct found {
+    int kind;
+    int index;                       /* the program, the window */
+    int art;
+    char name[32];
+};
+
+static char search_q[32];
+static volatile int search_len;
+static volatile int search_pick;
+static volatile int search_take;     /* Enter: the desktop thread acts */
+static volatile uint32_t search_gen; /* bumped by every key that changes q */
+static uint32_t found_gen = (uint32_t)-1;
+static struct found found[FIND_MAX];
+static int found_n;
+
+static char lower(char c)
+{
+    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
+/* 2 = the name begins with q, 1 = it has it inside, 0 = no */
+static int match(const char *name, const char *q, int qn)
+{
+    if (!qn)
+        return 0;
+    for (int at = 0; name[at]; at++) {
+        int k = 0;
+        while (k < qn && name[at + k] && lower(name[at + k]) == lower(q[k]))
+            k++;
+        if (k == qn)
+            return at == 0 ? 2 : 1;
+    }
+    return 0;
+}
+
+static void found_add(int kind, int index, int art, const char *name,
+                      int score, int *scores)
+{
+    /* Kept in order: better first, and of two as good the one found
+       first - a program before a window before a setting before a file */
+    int at = found_n;
+    while (at > 0 && scores[at - 1] < score)
+        at--;
+    if (at >= FIND_MAX)
+        return;
+    int last = found_n < FIND_MAX ? found_n : FIND_MAX - 1;
+    for (int i = last; i > at; i--) {
+        found[i] = found[i - 1];
+        scores[i] = scores[i - 1];
+    }
+    found[at].kind = kind;
+    found[at].index = index;
+    found[at].art = art;
+    copy_cut(found[at].name, name, sizeof(found[at].name));
+    scores[at] = score;
+    if (found_n < FIND_MAX)
+        found_n++;
+}
+
+static void search_refresh(void)
+{
+    if (found_gen == search_gen)
+        return;
+    found_gen = search_gen;
+    found_n = 0;
+    int scores[FIND_MAX];
+    char q[sizeof(search_q)];
+    int qn = search_len;
+    for (int i = 0; i < qn; i++)
+        q[i] = search_q[i];
+
+    for (int k = 0; k < KNOWN_N; k++) {
+        int s = match(known_apps[k].label, q, qn);
+        int s2 = match(known_apps[k].app, q, qn);
+        if (s2 > s)
+            s = s2;
+        if (s)
+            found_add(FIND_APP, k, k, known_apps[k].label, s, scores);
+    }
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!wins[i].used || wins[i].desk != cur_desk)
+            continue;
+        int s = match(wins[i].title, q, qn);
+        if (s)
+            found_add(FIND_WINDOW, i, launch_art_of(&wins[i]), wins[i].title,
+                      s, scores);
+    }
+    for (int i = 0; i < config_count(); i++) {
+        const char *n = config_name(i);
+        if (!n || config_is_hidden(n))
+            continue;
+        int s = match(n, q, qn);
+        if (s)
+            found_add(FIND_SETTING, i, art_of_app("gsettings"), n, s, scores);
+    }
+    char name[64];
+    uint32_t size;
+    int dir;
+    for (int i = 0; i < 64 && fs_readdir(FS_ROOT, i, name, &size, &dir); i++) {
+        if (dir)
+            continue;
+        int s = match(name, q, qn);
+        if (s)
+            found_add(FIND_FILE, i, art_of_app("gedit"), name, s, scores);
+    }
+    if (search_pick >= found_n)
+        search_pick = found_n ? found_n - 1 : 0;
+}
+
+static void search_close(void)
+{
+    search_open = 0;
+    search_len = 0;
+    search_q[0] = '\0';
+    search_pick = 0;
+    search_take = 0;
+    search_gen++;
+}
+
+/* A key, while the search is open; 1 when it was taken */
+static int search_key(char c)
+{
+    if (!search_open)
+        return 0;
+    if (c == 27) {
+        search_close();
+    } else if (c == '\n' || c == '\r') {
+        search_take = 1;
+    } else if (c == KEY_DOWN) {
+        if (search_pick < found_n - 1)
+            search_pick++;
+    } else if (c == KEY_UP) {
+        if (search_pick > 0)
+            search_pick--;
+    } else if (c == '\b') {
+        if (search_len > 0) {
+            search_q[--search_len] = '\0';
+            search_pick = 0;
+            search_gen++;
+        }
+    } else if (c >= 0x20 && c < 0x7F &&
+               search_len < (int)sizeof(search_q) - 1) {
+        search_q[search_len++] = c;
+        search_q[search_len] = '\0';
+        search_pick = 0;
+        search_gen++;
+    }
+    return 1;
+}
+
+static int ends_with(const char *s, const char *tail)
+{
+    int n = (int)strlen(s), t = (int)strlen(tail);
+    return n >= t && !strcmp(s + n - t, tail);
+}
+
+/* What a result does when it is taken */
+static void search_go(int i)
+{
+    if (i < 0 || i >= found_n)
+        return;
+    struct found f = found[i];
+    search_close();
+    if (f.kind == FIND_APP) {
+        int k = icon_of_app(known_apps[f.index].app);
+        remember_launch(exec_spawn(known_apps[f.index].app), k, f.art);
+        if (k >= 0) {
+            hop_at[k] = frames;
+            hop_set[k] = 1;
+        }
+    } else if (f.kind == FIND_WINDOW) {
+        if (wins[f.index].used) {
+            if (wins[f.index].minimized)
+                anim_start(f.index, ANIM_RESTORE);
+            wins[f.index].minimized = 0;
+            focus_idx = f.index;
+            raise_win(f.index);
+        }
+    } else if (f.kind == FIND_SETTING) {
+        remember_launch(exec_spawn("gsettings"), icon_of_app("gsettings"),
+                        f.art);
+    } else {
+        /* A picture to the viewer, anything else to the editor */
+        const char *with = ends_with(f.name, ".png") ||
+                           ends_with(f.name, ".jpg") ||
+                           ends_with(f.name, ".tsc") ? "gimg " : "gedit ";
+        char cmd[96];
+        int n = 0;
+        for (int k = 0; with[k]; k++)
+            cmd[n++] = with[k];
+        for (int k = 0; f.name[k] && n < (int)sizeof(cmd) - 1; k++)
+            cmd[n++] = f.name[k];
+        cmd[n] = '\0';
+        int art = art_of_app(with[1] == 'i' ? "gimg" : "gedit");
+        remember_launch(exec_spawn(cmd), -1, art);
+    }
+}
+
+static int search_x(void) { return (video_w() - SEARCH_W) / 2; }
+
+static int search_h(void)
+{
+    return SEARCH_FIELD_H + (found_n ? 8 + found_n * SEARCH_ROW + 8 : 0);
+}
+
+static int search_row_y(int i)
+{
+    return SEARCH_Y + SEARCH_FIELD_H + 8 + i * SEARCH_ROW;
+}
+
+/* A click while the search is open: on a result it takes it, anywhere
+   else it closes the search */
+static void search_click(int mx, int my)
+{
+    for (int i = 0; i < found_n; i++)
+        if (in_rect(mx, my, search_x(), search_row_y(i), SEARCH_W,
+                    SEARCH_ROW)) {
+            search_go(i);
+            return;
+        }
+    if (!in_rect(mx, my, search_x(), SEARCH_Y, SEARCH_W, search_h()))
+        search_close();
+}
+
+static void draw_search(void)
+{
+    if (!search_open)
+        return;
+    search_refresh();
+    if (search_take) {
+        search_take = 0;
+        if (found_n) {
+            search_go(search_pick);
+            return;
+        }
+    }
+    int x = search_x(), y = SEARCH_Y, h = search_h();
+    gfx_shadow(x, y, SEARCH_W, h, SEARCH_R, 20, theme_dark ? 170 : 100, 6);
+    gfx_frost(x, y, SEARCH_W, h, SEARCH_R, 12, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, SEARCH_W * 16, h * 16, SEARCH_R * 16, 16,
+                L.win_line, 200);
+
+    /* The field: a surface of its own on the glass, nearly even - what
+       is typed is read against it, and a glass that shows the
+       background through makes a restless ground for letters */
+    gfx_rrect(x + 6, y + 6, SEARCH_W - 12, SEARCH_FIELD_H - 12, SEARCH_R - 4,
+              L.menu_bg, 215);
+    /* The magnifying glass, and what was typed (or what the field is) */
+    int gy = y + SEARCH_FIELD_H / 2;
+    gfx_circle16((x + 22) * 16, (gy - 2) * 16, 7 * 16, 30, L.menu_text, 220);
+    gfx_line16((x + 27) * 16, (gy + 3) * 16, (x + 32) * 16, (gy + 8) * 16,
+               36, L.menu_text, 220);
+    int base = ui_font_baseline_in(SEARCH_PX, y, SEARCH_FIELD_H);
+    if (search_len) {
+        int end = ui_font_text(UI_SANS, SEARCH_PX, x + SEARCH_TEXT_X, base,
+                               search_q, L.menu_text);
+        gfx_fill(end + 1, y + 12, 2, SEARCH_FIELD_H - 24, L.accent, 255);
+    } else {
+        ui_font_text(UI_SANS, SEARCH_PX, x + SEARCH_TEXT_X, base,
+                     "Search", L.title_dim);
+        gfx_fill(x + SEARCH_TEXT_X, y + 12, 2, SEARCH_FIELD_H - 24,
+                 L.accent, 255);
+    }
+    if (!found_n)
+        return;
+    gfx_fill(x + 12, y + SEARCH_FIELD_H, SEARCH_W - 24, 1, L.win_line, 160);
+
+    static const char *const kinds[] = { "Program", "Window", "Setting",
+                                         "File" };
+    for (int i = 0; i < found_n; i++) {
+        int ry = search_row_y(i);
+        int on = i == search_pick;
+        if (on)
+            gfx_rrect(x + 8, ry, SEARCH_W - 16, SEARCH_ROW, 8, L.accent, 255);
+        draw_tile(found[i].art, x + 16, ry + (SEARCH_ROW - SEARCH_ICON) / 2,
+                  SEARCH_ICON, found[i].name[0], 255);
+        int rb = ui_font_baseline_in(MENU_PX, ry, SEARCH_ROW);
+        ui_font_text(UI_SANS, MENU_PX, x + 16 + SEARCH_ICON + 12, rb,
+                     found[i].name, on ? L.accent_text : L.menu_text);
+        const char *k = kinds[found[i].kind];
+        int kw = ui_font_width(UI_SANS, UI_PX, k);
+        ui_font_text(UI_SANS, UI_PX, x + SEARCH_W - 18 - kw, rb, k,
+                     on ? L.accent_text : L.title_dim);
+    }
+}
+
 /* --- The launch menu ------------------------------------------------------ */
 
 static void draw_menu(void)
@@ -3031,10 +3497,23 @@ static void save_screenshot(void)
     note[q] = '\0';
     shot_note = note;
     shot_frames = 2 * FRAME_HZ;   /* two seconds */
+    desktop_notify("Screenshot", note);
 }
 
 static void desktop_on_key(char c)
 {
+    if (c == KEY_SEARCH) {
+        if (search_open)
+            search_close();
+        else {
+            search_close();
+            search_open = 1;
+            menu_open = 0;
+        }
+        return;
+    }
+    if (search_key(c))
+        return;
     if (c == KEY_SHOT) {
         /* Not here: this is the keyboard's interrupt, and the frame on
            the screen may be half drawn at this moment - the glass of
@@ -3330,20 +3809,23 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     }
 }
 
-void desktop_ui_look(uint32_t *out)
+void desktop_ui_look(int which, uint32_t *out)
 {
+    const struct look *lk = which == 1 ? &look_dark : which == 2 ? &look_light
+                                                                 : &L;
+    int dark = which == 1 ? 1 : which == 2 ? 0 : theme_dark;
     int k = 0;
-    out[k++] = (uint32_t)theme_dark;
-    out[k++] = L.win_bg;
-    out[k++] = theme_dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
-    out[k++] = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
-    out[k++] = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
-    out[k++] = L.win_line;
-    out[k++] = theme_dark ? DARK_APP_ROW : LIGHT_APP_ROW;
-    out[k++] = L.accent;
-    out[k++] = L.accent_text;
-    out[k++] = theme_dark ? DARK_APP_DANGER : LIGHT_APP_DANGER;
-    out[k++] = theme_dark ? DARK_APP_GOOD : LIGHT_APP_GOOD;
+    out[k++] = (uint32_t)dark;
+    out[k++] = lk->win_bg;
+    out[k++] = dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
+    out[k++] = dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    out[k++] = dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    out[k++] = lk->win_line;
+    out[k++] = dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+    out[k++] = lk->accent;
+    out[k++] = lk->accent_text;
+    out[k++] = dark ? DARK_APP_DANGER : LIGHT_APP_DANGER;
+    out[k++] = dark ? DARK_APP_GOOD : LIGHT_APP_GOOD;
 }
 
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,
@@ -3588,6 +4070,8 @@ static void desktop_thread(void *arg)
         draw_bar();
         draw_dock();
         draw_menu();
+        draw_notes();
+        draw_search();
         /* What was just saved stays on the screen for a moment - the
            hint itself lives one frame, so it is asked for again until
            the moment is up. */

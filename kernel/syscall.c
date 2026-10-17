@@ -36,6 +36,7 @@
 #include "include/pmm.h"
 #include "include/rtc.h"
 #include "include/desktop.h"
+#include "include/heap.h"
 #include "include/video.h"
 #include "include/paging.h"
 #include "include/net.h"
@@ -447,8 +448,38 @@ void syscall_handler(struct regs *r)
     }
     case SYS_UI_LOOK: {
         uint32_t look[UI_LOOK_N];
-        desktop_ui_look(look);
+        desktop_ui_look((int)r->ecx, look);
         r->eax = user_put(r->ebx, look, sizeof(look)) < 0 ? EFAULT : 0;
+        break;
+    }
+    case SYS_NOTIFY: {
+        char title[40], body[80];
+        if (user_str(title, r->ebx, sizeof(title)) < 0 ||
+            user_str(body, r->ecx, sizeof(body)) < 0) {
+            r->eax = EFAULT;
+            break;
+        }
+        desktop_notify(title, body);
+        r->eax = 0;
+        break;
+    }
+    case SYS_BG_PREVIEW: {
+        struct { int32_t bg, dark, w, h; uint32_t out; } c;
+        if (user_get(&c, r->ebx, sizeof(c)) < 0 || c.w <= 0 || c.h <= 0 ||
+            c.w * c.h > BG_PREVIEW_MAX) {
+            r->eax = EFAULT;
+            break;
+        }
+        uint32_t *px = kmalloc((uint32_t)(c.w * c.h) * 4);
+        if (!px) {
+            r->eax = (uint32_t)-1;
+            break;
+        }
+        int rc = desktop_bg_preview(c.bg, c.dark, c.w, c.h, px);
+        if (rc == 0 && user_put(c.out, px, (uint32_t)(c.w * c.h) * 4) < 0)
+            rc = EFAULT;
+        kfree(px);
+        r->eax = (uint32_t)rc;
         break;
     }
     case SYS_WIN_POLL: {

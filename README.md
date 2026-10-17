@@ -63,7 +63,7 @@ Shared by both kernels (same files, compiled twice):
 | Linking | `libthread.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 | Fonts | TrueType read and drawn in the kernel, anti-aliased, in integer arithmetic only — glyphs, advances and boxes identical to FreeType's (hinting off), coverage within a few 1/255ths; DejaVu Sans and Sans Mono, Latin-1 and Latin Extended-A |
-| Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background, light or dark theme, dock size |
+| Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background, light or dark theme, dock size, how windows move |
 
 Programs that use crypto link against a real shared object: the kernel
 loads `libthread.so` once at a fixed address, maps its code and
@@ -100,7 +100,19 @@ else. The launch menu hangs from the mark at the left end of the bar
 and carries the same pictures as the dock. Which programs the dock
 holds is a text file on the disk — one line each, buildable from the
 machine's own shell — falling back to the built-in nine when it says
-nothing usable. With
+nothing usable. The programs draw the way the desktop draws — two system
+calls hand them the same soft-edged shapes and TrueType lettering, and
+the theme's colours, which they follow the moment the theme changes —
+so the settings, the file manager, the task manager, the clock, the
+monitor, the mixer and the installer look like the desktop they stand
+on. Ctrl+Space opens a search under the bar that finds programs, open
+windows, settings and files as they are typed; notifications slide in
+at the top right — from the shell, from any program, from the desktop
+itself when it saves a picture of the screen; and "Appearance" shows
+the two themes and the seven backgrounds as pictures of themselves,
+drawn by the kernel, to be chosen by looking at them. Windows grow out
+of nothing as they open and shrink into their tile when minimised, at a
+pace the 'motion' setting chooses (or not at all). With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end,
 an application may answer "not yet" and keep its window (the editor
@@ -119,8 +131,10 @@ it in the colours it was written in: a window holds palette indices, as
 every program here always drew, or asks once to hold colours instead
 and then a photograph is a photograph rather than a photograph seen
 through thirty-six crayons. The compositor writes to the card only the
-rows that actually changed, so an idle desktop redrawn thirty times a
-second sends nothing at all across the bus. The screen is whatever the
+rows that actually changed, so an idle desktop redrawn fifty times a
+second sends nothing at all across the bus — and spends a few per cent
+of each second drawing, the dock's glass kept between frames while
+nothing it shows or stands on changes. The screen is whatever the
 loader gives — the kernel asks for no particular mode, which on a
 laptop means the panel's own resolution — and when that panel is large
 enough that an eight-pixel letter would be a millimetre and a half
