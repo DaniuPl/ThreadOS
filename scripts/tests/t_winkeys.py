@@ -269,9 +269,10 @@ def main():
             time.sleep(1)
             w, h, at = q.screen_raw()
 
-            got = menu_entry(q, MX, MY, 0), menu_entry(q, MX, MY, 2)
+            # (the first entry is lit under the pointer - read the next two)
+            got = menu_entry(q, MX, MY, 1), menu_entry(q, MX, MY, 2)
             check("the right button on the desktop opened the menu UNDER THE "
-                  "POINTER (%s)" % (got,), got == ("App", "Files"))
+                  "POINTER (%s)" % (got,), got == ("Clock", "Files"))
             # The pointer sits on the first entry, so that entry wears
             # the accent colour - a menu that does not answer the
             # pointer is a list of words that happens to be clickable
