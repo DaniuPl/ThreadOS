@@ -107,6 +107,10 @@
 #define SYS_SND_GET  68
 #define SYS_SND_SET  69
 #define SYS_SND_BEEP 70
+/* Counting semaphores, shared by key (kernel/sem.c) */
+#define SYS_SEM_GET  71  /* ebx=key, ecx=initial count -> id or -1 */
+#define SYS_SEM_WAIT 72  /* ebx=id -> 0, or -1 (a bad id, being killed) */
+#define SYS_SEM_POST 73  /* ebx=id -> 0 or -1 */
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

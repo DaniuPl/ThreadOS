@@ -113,6 +113,10 @@
 #define SYS64_SND_GET  62
 #define SYS64_SND_SET  63
 #define SYS64_SND_BEEP 64
+/* Counting semaphores, shared by key (kernel/sem.c) */
+#define SYS64_SEM_GET  65   /* rdi=key, rsi=initial count -> id or -1 */
+#define SYS64_SEM_WAIT 66   /* rdi=id -> 0, or -1 (a bad id, a signal) */
+#define SYS64_SEM_POST 67   /* rdi=id -> 0 or -1 */
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

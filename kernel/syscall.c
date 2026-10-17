@@ -15,6 +15,7 @@
  * inside the kernel or a quiet theft of memory.
  */
 
+#include "include/sem.h"
 #include <stdint.h>
 #include "include/syscall.h"
 #include "include/smp.h"
@@ -635,6 +636,17 @@ void syscall_handler(struct regs *r)
         break;
     case SYS_SND_BEEP:
         r->eax = (uint32_t)hda_beep(r->ebx, r->ecx);
+        break;
+
+    /* --- semaphores: waiting for one another ----------------------- */
+    case SYS_SEM_GET:
+        r->eax = (uint32_t)sem_get((int)r->ebx, (int)r->ecx);
+        break;
+    case SYS_SEM_WAIT:
+        r->eax = (uint32_t)sem_wait((int)r->ebx);
+        break;
+    case SYS_SEM_POST:
+        r->eax = (uint32_t)sem_post((int)r->ebx);
         break;
 
     /* --- who is at the machine ------------------------------------

@@ -114,6 +114,22 @@ static inline int32_t sys_snd_set(int32_t volume, int32_t mute)
     return (int32_t)syscall64(SYS64_SND_SET, volume, mute);
 }
 
+/* Semaphores: the same three calls, the same meaning */
+static inline int32_t sys_sem_get(int key, int initial)
+{
+    return (int32_t)syscall64(SYS64_SEM_GET, key, initial);
+}
+
+static inline int32_t sys_sem_wait(int id)
+{
+    return (int32_t)syscall64(SYS64_SEM_WAIT, id, 0);
+}
+
+static inline int32_t sys_sem_post(int id)
+{
+    return (int32_t)syscall64(SYS64_SEM_POST, id, 0);
+}
+
 static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
 {
     return (int32_t)syscall64(SYS64_SND_BEEP, (int64_t)hz, (int64_t)ms);

@@ -12,6 +12,7 @@
  *              gate.
  */
 
+#include "../kernel/include/sem.h"
 #include <stdint.h>
 #include "syscall64.h"
 #include "../kernel/include/video.h"
@@ -1027,6 +1028,17 @@ static void handle(struct regs *r)
         return;
     case SYS64_SND_BEEP:
         r->rax = (uint64_t)(int64_t)hda_beep((uint32_t)a1, (uint32_t)a2);
+        return;
+
+    /* --- semaphores: waiting for one another ----------------------- */
+    case SYS64_SEM_GET:
+        r->rax = (uint64_t)(int64_t)sem_get((int)a1, (int)a2);
+        return;
+    case SYS64_SEM_WAIT:
+        r->rax = (uint64_t)(int64_t)sem_wait((int)a1);
+        return;
+    case SYS64_SEM_POST:
+        r->rax = (uint64_t)(int64_t)sem_post((int)a1);
         return;
 
     case SYS64_WIN_TRUECOL:

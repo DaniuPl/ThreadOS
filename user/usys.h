@@ -62,6 +62,9 @@
 #define SYS_SND_GET  68
 #define SYS_SND_SET  69
 #define SYS_SND_BEEP 70
+#define SYS_SEM_GET  71
+#define SYS_SEM_WAIT 72
+#define SYS_SEM_POST 73
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55
@@ -814,6 +817,36 @@ static inline int32_t sys_snd_set(int32_t volume, int32_t mute)
                      : "=a"(ret)
                      : "a"(SYS_SND_SET), "b"(volume), "c"(mute)
                      : "memory");
+    return ret;
+}
+
+/* --- Semaphores, shared by key -------------------------------------
+ *
+ * The same key is the same semaphore for every thread and every
+ * process that asks for it. sem_get makes it with 'initial' tokens the
+ * first time; sem_wait takes one, waiting while there is none; sem_post
+ * gives one back and wakes the longest waiter. */
+static inline int32_t sys_sem_get(int key, int initial)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_SEM_GET), "b"(key), "c"(initial) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_sem_wait(int id)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_SEM_WAIT), "b"(id) : "memory");
+    return ret;
+}
+
+static inline int32_t sys_sem_post(int id)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_SEM_POST), "b"(id) : "memory");
     return ret;
 }
 

@@ -73,6 +73,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/ginstal.elf \
              $(BUILD)/user/gmikser.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
+             $(BUILD)/user/mutex.elf $(BUILD)/user/prodcons.elf \
              $(BUILD)/user/syscalls.elf
 
 OBJS := $(BUILD)/boot.o \
@@ -104,6 +105,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/fs.o \
         $(BUILD)/kfile.o \
         $(BUILD)/pipe.o \
+        $(BUILD)/sem.o \
         $(BUILD)/rtc.o \
         $(BUILD)/mouse.o \
         $(BUILD)/video.o \
@@ -311,6 +313,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    mmapzap=$(BUILD)/user/mmapzap.elf \
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
+	    mutex=$(BUILD)/user/mutex.elf prodcons=$(BUILD)/user/prodcons.elf \
 	    syscalls=$(BUILD)/user/syscalls.elf
 
 # --- The 64-bit kernel (long mode) -----------------------------------
@@ -327,7 +330,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm rtc \
+            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
@@ -410,6 +413,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/mmapzap64.elf \
                $(BUILD)/user64/dynlib.elf \
                $(BUILD)/user64/cores.elf \
+               $(BUILD)/user64/mutex.elf \
+               $(BUILD)/user64/prodcons.elf \
                $(BUILD)/user64/syscalls.elf
 
 $(BUILD)/user64:
@@ -511,6 +516,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \
 	    cores=$(BUILD)/user64/cores.elf \
+	    mutex=$(BUILD)/user64/mutex.elf prodcons=$(BUILD)/user64/prodcons.elf \
 	    syscalls=$(BUILD)/user64/syscalls.elf
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 

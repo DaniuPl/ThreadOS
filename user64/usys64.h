@@ -75,6 +75,9 @@
 #define SYS64_SND_GET  62
 #define SYS64_SND_SET  63
 #define SYS64_SND_BEEP 64
+#define SYS64_SEM_GET  65
+#define SYS64_SEM_WAIT 66
+#define SYS64_SEM_POST 67
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
