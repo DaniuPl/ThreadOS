@@ -12,9 +12,8 @@ same.
 Ctrl+Alt with an arrow changes desktop (the arrow points where you are
 going), and with Shift the window that has the focus comes along - a
 window left behind is a window looked for. Which desktop is showing is
-written at the right-hand end of the top bar, one cell per desktop:
-the one being shown in the accent colour, an empty one in the quiet
-grey, so "where am I" and "is there anything over there" are one
+written on the right of the menu bar, one cell per desktop: the one
+being shown in the accent colour, an empty one dimmed, so "where am I" and "is there anything over there" are one
 glance rather than two.
 
 The assertions are about all of it, and the one that matters most is
@@ -34,15 +33,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
+from ptest import near as ptest_near
 
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-DESK_N = 4
-DESK_CELL = 12
-
-# The cascade: the first application window is slot 2, at (94,54), and
-# its content starts a pixel right and a title bar (10 px) down.
+# The cascade: the first application window is slot 2, at (94,54)
 WX, WY = 94, 54
 
 
@@ -50,43 +43,22 @@ def near(px, v):
     return all(abs(c - v) <= 6 for c in px)
 
 
-def is_win(px):
-    return near(px, 227)
-
-
-def is_bar(px):
-    return near(px, 210)
-
-
-def is_accent(px):
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
-
-
 def pager(at, w):
-    """Which of the four cells on the top bar is lit. The leftmost
-    column of a cell is the one the digit never reaches, so that is
-    where the colour is read."""
-    x0 = w - DESK_N * DESK_CELL - 3
-    return [is_accent(at(x0 + d * DESK_CELL, 5)) for d in range(DESK_N)]
+    """Which of the four cells on the bar is lit - the accent pill, read
+    left of where the digit is written"""
+    acc = theme("dark")["accent"]
+    return [ptest_near(at(bar_desk_x(d) + 3, BAR_MID), acc, 10)
+            for d in range(4)]
 
 
 def pager_x(w, d):
-    return w - DESK_N * DESK_CELL - 3 + d * DESK_CELL + 5
+    return bar_desk_x(d) + DESK_CELL // 2
 
 
-def buttons(at, w, y):
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        on_bar = is_bar(at(x, y))
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
+def clock_here(at):
+    """Is the clock's window on the screen? Where its title bar would be
+    is the bare aurora when it is not."""
+    return at(WX + 40, WY + 4) != aurora_px(WX + 40, WY + 4)
 
 
 def clock_text(at):
@@ -146,13 +118,11 @@ def main():
             time.sleep(1)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
             check("the top bar shows four desktops, the first one lit",
                   pager(at, w) == [True, False, False, False])
 
             # --- the clock, on the first desktop ------------------------
-            q.mouse_goto(24, 72)               # the "Clock" icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -160,8 +130,8 @@ def main():
             w, h, at = q.screen_raw()
             check("the clock runs on the first desktop ('%s')" % first,
                   first.count(":") == 2 and "?" not in first)
-            check("and it has its button on the bar",
-                  len(buttons(at, w, row)) == 3)
+            check("and it has its tile in the dock",
+                  q.dock_windows() == 3)
 
             # --- away, to the second ------------------------------------
             q.sendkey("ctrl-alt-right")
@@ -170,19 +140,18 @@ def main():
             check("Ctrl+Alt+arrow moves to the second desktop",
                   pager(at, w) == [False, True, False, False])
             check("the clock is not here - not on the screen",
-                  not is_win(at(WX + 40, WY + 20)))
-            check("nor on the taskbar (the kernel's windows stayed too)",
-                  len(buttons(at, w, row)) == 0)
+                  not clock_here(at))
+            check("nor in the dock (the kernel's windows stayed too)",
+                  q.dock_windows() == 0)
 
             # A window of its own over here, and it is the only one
-            q.mouse_goto(24, 192)              # the "Term" icon
-            q.mouse_click()
+            q.launch_dock(4, n_w=0)         # the "Term" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("a new window opens where you are looking",
-                  len(buttons(at, w, row)) == 1)
+                  q.dock_windows() == 1)
             check("and it is a terminal (a black screen)",
                   near(at(WX + 100, WY + 60), 0))
 
@@ -194,7 +163,7 @@ def main():
             check("and back to the first",
                   pager(at, w) == [True, False, False, False])
             check("the clock waited where it was left",
-                  len(buttons(at, w, row)) == 3)
+                  q.dock_windows() == 3 and clock_here(at))
             check("and the terminal stayed on the second",
                   not near(at(WX + 100, WY + 60), 0))
 
@@ -211,12 +180,11 @@ def main():
             w, h, at = q.screen_raw()
             check("Ctrl+Alt+Shift+arrow takes the window along",
                   pager(at, w) == [False, True, False, False])
-            spans = buttons(at, w, row)
             check("the clock is where we are - together with the terminal",
-                  len(spans) == 2)
+                  q.dock_windows() == 2)
             # The terminal opened here first, so it lies over the clock;
-            # its button on the bar brings the clock back to the top
-            q.mouse_goto((spans[0][0] + spans[0][1]) // 2, row + 4)
+            # its tile in the dock brings the clock back to the top
+            q.mouse_goto(*dock_window(0, 2))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)
@@ -230,7 +198,7 @@ def main():
                   seconds(third) > seconds(second))
 
             # --- and the switch is clickable ----------------------------
-            q.mouse_goto(pager_x(w, 3), 5)
+            q.mouse_goto(pager_x(w, 3), BAR_MID)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
@@ -240,10 +208,9 @@ def main():
             check("a click on a cell in the bar moves to the fourth desktop",
                   pager(at, w) == [False, False, False, True])
             check("and there is nothing there - an empty desktop",
-                  len(buttons(at, w, row)) == 0 and
-                  not is_win(at(WX + 40, WY + 20)))
+                  q.dock_windows() == 0 and not clock_here(at))
 
-            q.mouse_goto(pager_x(w, 0), 5)
+            q.mouse_goto(pager_x(w, 0), BAR_MID)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
@@ -252,7 +219,7 @@ def main():
             w, h, at = q.screen_raw()
             check("and the first desktop has its kernel windows back",
                   pager(at, w) == [True, False, False, False] and
-                  len(buttons(at, w, row)) == 2)
+                  q.dock_windows() == 2)
         finally:
             q.close()
     finally:

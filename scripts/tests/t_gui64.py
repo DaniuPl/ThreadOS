@@ -102,15 +102,14 @@ def main():
             # The mouse is relative: first push the cursor into the
             # corner, so as to know where it is at all.
             q.mouse_home()
-            q.mouse_goto(24, 32)          # the 'App' icon (the tile 8,20,32x24)
-            q.mouse_click()
+            q.launch_dock(0)                # the "App" tile
             q.mouse_goto(400, 300)        # move the cursor away from the window
 
             # The application draws a palette of three squares at the top
             # of the window. Each from a different system call, so each
             # separately.
             cx, cy = scr(10, 10)
-            check("a click on an icon starts a program from the initrd (a red square)",
+            check("a click on a tile starts a program from the initrd (a red square)",
                   q.wait_pixel(cx, cy, RED, timeout=20))
             cx, cy = scr(38, 10)
             check("the program draws a second square (green)",
@@ -176,10 +175,8 @@ def main():
             check("the keys reach the window with the focus", before != after)
 
             # --- The clock: a second application, its own window ---
-            # The 'Zegar' icon stands at (8,60), a 32x24 tile
             q.mouse_home()
-            q.mouse_goto(24, 72)
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             q.mouse_goto(400, 300)
 
             zx, zy = body_text(3)
@@ -196,7 +193,7 @@ def main():
                     clock_present = True
                     break
                 time.sleep(0.5)
-            check("the 'Clock' icon starts a second application in a window of its own",
+            check("the 'Clock' tile starts a second application in a window of its own",
                   clock_present)
 
             # The clock is to run: the time changes in the window of its own
@@ -210,8 +207,7 @@ def main():
 
             # --- Files: a third application, it reads the disk ---
             q.mouse_home()
-            q.mouse_goto(24, 112)
-            q.mouse_click()
+            q.launch_dock(2)                # the "Files" tile
             q.mouse_goto(400, 300)
 
             px2, py2 = body_text(4)
@@ -226,7 +222,7 @@ def main():
                 if greens > 10:
                     break
                 time.sleep(0.5)
-            check("the 'Files' icon starts the file manager "
+            check("the 'Files' tile starts the file manager "
                   "(%d title-bar pixels in the accent colour)" % greens,
                   greens > 10)
 
@@ -256,9 +252,8 @@ def main():
             # The compositor survived all this: the desktop's background is still
 # there.
             w, h, at4 = q.screen_raw()
-            tlo = at4(w - 20, h // 2)
             check("the compositor still draws the desktop",
-                  all(abs(tlo[i] - (0, 130, 162)[i]) <= 40 for i in range(3)))
+                  at4(w - 20, h // 2) == aurora_px(w - 20, h // 2, w, h))
         finally:
             q.close()
         # --- A second boot: the monitor and the terminal ---
@@ -275,10 +270,8 @@ def main():
             q2.wait_serial("The desktop is starting", timeout=30)
             check("the desktop comes up a second time", q2.wait_desktop(30))
 
-            # The 'Monitor' icon at (8,140)
             q2.mouse_home()
-            q2.mouse_goto(24, 152)
-            q2.mouse_click()
+            q2.launch_dock(3)                # the "Monitor" tile
             q2.mouse_goto(400, 300)
 
             mx, my = body_text(2)
@@ -287,7 +280,7 @@ def main():
             # that they are neither zero nor everything.
             red = q2.wait_pixel(mx + 150, my + 52, RED, timeout=20)
             blue = q2.wait_pixel(mx + 6, my + 52, BLUE, timeout=5)
-            check("the 'Monitor' icon starts the resource gauge "
+            check("the 'Monitor' tile starts the resource gauge "
                   "(the memory bar)", red and blue)
 
             # The uptime grows: the window is alive rather than showing one
@@ -305,8 +298,7 @@ def main():
 
             # --- The terminal: keyboard, fork, exec, dup2, a file ---
             q2.mouse_home()
-            q2.mouse_goto(24, 192)          # the 'Term' icon at (8,180)
-            q2.mouse_click()
+            q2.launch_dock(4)                # the "Term" tile
             q2.mouse_goto(400, 300)
 
             tx, ty = body_text(3)
@@ -325,7 +317,7 @@ def main():
                 if prompts > 3:
                     break
                 time.sleep(0.5)
-            check("the 'Term' icon starts the terminal in a window "
+            check("the 'Term' tile starts the terminal in a window "
                   "(the prompt character: %d pixels)" % prompts, prompts > 3)
 
             # The terminal's window has focus right after it appears - we

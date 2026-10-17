@@ -16,7 +16,7 @@ vanishes when clicked is a joke rather than a tool).
 The assertions are about all of that, and the one that matters most is
 that the list is LIVE: a program started while the window is open
 appears in it by itself, and one ended through the button leaves both
-the list and the taskbar.
+the list and the dock.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -33,20 +33,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-
 # The window: slot 2 of the cascade, its content a pixel right and a
 # title bar down. gtasks asks for 300x190.
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
 ROW_Y0 = 26
 ROW_H = 10
-
-
-def is_bar(px):
-    return all(abs(c - 210) <= 6 for c in px)
 
 
 def is_grey(px):
@@ -95,20 +87,6 @@ def picked_row(at, n=12):
         if p[2] > 120 and p[0] < 90 and p[1] < 90:
             return i
     return -1
-
-
-def buttons(at, w, y):
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        on_bar = is_bar(at(x, y))
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
 
 
 def sixty_four():
@@ -160,25 +138,23 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.mouse_goto(24, 352)              # the "Tasks" icon
-            q.mouse_click()
+            q.launch_dock(8)                # the "Tasks" tile
             time.sleep(5)
             q.mouse_goto(WX + 100, WY + 4)     # out of the cascade
             time.sleep(0.4)
             q.mouse_button(True)
             time.sleep(0.4)
-            q.mouse_goto(400, 240)
+            q.mouse_goto(400, 200)
             time.sleep(0.5)
-            q.mouse_goto(400, 240)
+            q.mouse_goto(400, 200)
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 236 + CONTENT_DY
+            CX, CY = 300 + 1, 196 + CONTENT_DY
             q.mouse_goto(600, 430)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
             listed = rows(at)
             names = [r[1] for r in listed]
             check("(64) the task list is there (%d rows: %s)"
@@ -188,8 +164,7 @@ def sixty_four():
                   any(r[3] == "program" for r in listed) and
                   any(r[3] == "kernel" for r in listed))
 
-            q.mouse_goto(24, 72)               # the "Clock" icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(5)
             q.mouse_goto(600, 430)
             time.sleep(2)
@@ -201,7 +176,7 @@ def sixty_four():
             if not clock_row:
                 return
 
-            before = len(buttons(at, w, row))
+            before = q.dock_windows()
             i = clock_row[0]
             q.mouse_goto(CX + 130, CY + ROW_Y0 + i * ROW_H + 3)
             time.sleep(0.5)
@@ -218,7 +193,7 @@ def sixty_four():
             check("(64) 'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names) and
-                  len(buttons(at, w, row)) == before - 1)
+                  q.dock_windows() == before - 1)
         finally:
             q.close()
     finally:
@@ -240,8 +215,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 352)              # the "Tasks" icon
-            q.mouse_click()
+            q.launch_dock(8)                # the "Tasks" tile
             time.sleep(4)
 
             # Out of the way of the cascade: every window opens at the
@@ -253,18 +227,17 @@ def main():
             time.sleep(0.4)
             q.mouse_button(True)
             time.sleep(0.4)
-            q.mouse_goto(400, 240)
+            q.mouse_goto(400, 200)
             time.sleep(0.5)
-            q.mouse_goto(400, 240)
+            q.mouse_goto(400, 200)
             time.sleep(0.5)
             q.mouse_button(False)
             time.sleep(1.5)
-            CX, CY = 300 + 1, 236 + CONTENT_DY
+            CX, CY = 300 + 1, 196 + CONTENT_DY
             q.mouse_goto(600, 430)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
             listed = rows(at)
             names = [r[1] for r in listed]
             check("the task manager shows the list (%d rows: %s)"
@@ -281,8 +254,7 @@ def main():
                   any(v == "kernel" for v in kinds.values()))
 
             # --- the list is live ---------------------------------------
-            q.mouse_goto(24, 72)               # the "Clock" icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(2)
@@ -318,7 +290,7 @@ def main():
                   % (got, listed[got][1] if 0 <= got < len(listed) else "-"),
                   0 <= got < len(listed) and "gclock" in listed[got][1])
 
-            before = len(buttons(at, w, row))
+            before = q.dock_windows()
             q.mouse_goto(CX + 260, CY + 4)     # the "End" button
             time.sleep(0.5)
             q.mouse_click()
@@ -330,8 +302,8 @@ def main():
             check("'End' ends the picked program (%s)"
                   % ", ".join(names),
                   not any("gclock" in n for n in names))
-            after = len(buttons(at, w, row))
-            check("and its window goes from the taskbar (%d -> %d)"
+            after = q.dock_windows()
+            check("and its window goes from the dock (%d -> %d)"
                   % (before, after), after == before - 1)
 
             # --- what it will not do ------------------------------------

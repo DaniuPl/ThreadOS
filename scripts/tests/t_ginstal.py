@@ -2,10 +2,10 @@
 """ThreadOS smoke test: the installer on a screen of its own (ginstal).
 
 Installing is not one task among others. While a disk is being written
-to, a taskbar and somebody's other windows within reach are not a
+to, a dock and somebody's other windows within reach are not a
 convenience - they are a way to click something else by mistake. So
 'install' takes the WHOLE screen: the compositor runs with no bar, no
-icons, no menu and no other window, the installer is the only program
+dock, no menu and no other window, the installer is the only program
 on it, and the only thing the environment itself offers is restarting
 the machine.
 
@@ -52,9 +52,6 @@ FOREIGN = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 # instead of quietly reading the wallpaper.
 WIN_W = 440
 WIN_H = 230
-TITLE = (0, 0, 255)          # the title bar of the window with focus
-BAR = (211, 211, 211)        # the desktop's bars - which must NOT be here
-ICON = (255, 162, 0)         # the desktop's icons - likewise
 WINDOW = (227, 227, 227)     # a window's grey
 
 
@@ -63,33 +60,24 @@ def blob(path):
         return fh.read()
 
 
-def find_window(q, width=WIN_W):
-    """Where the window is, found on the screen rather than assumed.
+def find_window(q, width=WIN_W, height=WIN_H):
+    """Where the window is: the middle of the screen, where the kiosk
+    puts it (kernel/desktop.c) - and that is checked rather than
+    assumed: its content is grey from its first column to its last and
+    not one column further either way, which is also how we know it is
+    exactly as wide as the program asked for. Returns the window's
+    corner, or (None, None)."""
+    w, h, at = q.screen_raw()
+    ww, wh = width + 2, height + TITLE_H + 2
+    x, y = (w - ww) // 2, max((h - wh) // 2, 30)
+    row = y + CONTENT_DY + height // 2
 
-    Its title bar is a solid band of one colour as wide as the window.
-    We look for that run - and the fact that it is exactly as wide as
-    the program asked for is itself worth knowing."""
-    w, h, _ = q.screen_raw()
-    px = q._last_pixels
-
-    def at(x, y):
-        o = (y * w + x) * 3
-        return (px[o], px[o + 1], px[o + 2])
-
-    for y in range(20, h - 40):
-        x = 0
-        while x < w:
-            if all(abs(at(x, y)[i] - TITLE[i]) <= 60 for i in range(3)):
-                start = x
-                while x < w and all(abs(at(x, y)[i] - TITLE[i]) <= 60
-                                    for i in range(3)):
-                    x += 1
-                if x - start >= width - 4 and x - start <= width + 4:
-                    return start, y
-            else:
-                x += 1
+    def grey(px):
+        return all(abs(px[i] - WINDOW[i]) <= 6 for i in range(3))
+    if grey(at(x + 1, row)) and grey(at(x + width, row)) and \
+       not grey(at(x - 1, row)) and not grey(at(x + width + 2, row)):
+        return x, y
     return None, None
-
 
 
 def wait_text(q, x, y, cols, rows, want, tries=10, line_h=12):
@@ -174,41 +162,44 @@ def main():
             q.mouse_goto(900, 600)
             time.sleep(0.8)
 
-            # --- what is NOT on this screen. The taskbar, the icons and
-            # the menu button are the desktop, and the whole point of
-            # this mode is that none of them is within reach.
+            # --- what is NOT on this screen. The menu bar and the dock
+            # are the desktop, and the whole point of this mode is that
+            # neither of them is within reach: along the top and the
+            # bottom there is nothing but the aurora.
             w, h, at = q.screen_raw()
-            bar = sum(1 for x in range(0, w, 8)
-                      if all(abs(at(x, h - 6)[i] - BAR[i]) <= 25
-                             for i in range(3)))
-            check(f"there is no taskbar at the bottom ({bar} samples in the "
-                  f"of the bar)", bar < 4)
+            bottom = sum(1 for x in range(0, w, 8)
+                         if at(x, h - 20) == aurora_px(x, h - 20, w, h))
+            check(f"there is no dock at the bottom ({bottom} of {w // 8} "
+                  f"samples are the bare aurora)", bottom == w // 8)
             top = sum(1 for x in range(0, w, 8)
-                      if all(abs(at(x, 3)[i] - BAR[i]) <= 25
-                             for i in range(3)))
-            check(f"nor the system's top bar ({top} samples)", top < 4)
-            icon = sum(1 for x in range(10, 40) for y in range(20, 380)
-                       if all(abs(at(x, y)[i] - ICON[i]) <= 30
-                              for i in range(3)))
-            check(f"nor the desktop icons ({icon} icon pixels)", icon == 0)
+                      if at(x, 3) == aurora_px(x, 3, w, h))
+            check(f"nor the menu bar ({top} of {w // 8} samples)",
+                  top == w // 8)
 
             # --- and what IS: the screen says what it is doing, and
             # offers exactly one way out of itself
-            head = q.read_text(8, 8, 24, 1)
-            check("the screen says what it is", "ThreadOS - installation" in head)
-            # the button sits six pixels off the right edge (kernel/desktop.c)
-            btn = q.read_text(w - 152 - 6 + 8, 9, 17, 1)
-            check("and it offers the only way out: restarting the machine",
-                  "Restart" in btn)
+            head = q.read_ui(14, ui_font_baseline_in(BAR_PX + 2, 8, 20),
+                             width=260, px=BAR_PX + 2, face="bold",
+                             fg=(255, 255, 255),
+                             under=lambda x, y: aurora_px(x, y, w, h))
+            check("the screen says what it is ('%s')" % head,
+                  "ThreadOS - installation" in head)
+            # the button sits eight pixels off the right edge
+            # (kernel/desktop.c), 152 wide
+            bx = w - 152 - 8
+            btn = q.find_ui(bx + 12, bx + 140, ui_baseline_in(8, 20),
+                            fg=(255, 255, 255),
+                            under=frost_ref(bx, 8, 152, 20, 6, 0xFFFFFF, 50,
+                                            w, h))
+            check("and it offers the only way out: restarting the machine "
+                  "('%s')" % btn, "Restart" in btn)
 
             wx, wy = find_window(q)
-            check(f"the installer's window is as wide as it asked for "
-                  f"({WIN_W} px)", wx is not None)
+            check(f"the installer's window is in the middle, as wide as it "
+                  f"asked for ({WIN_W} px)", wx is not None)
             if wx is None:
                 return summary()
-            # The title bar is drawn one pixel inside the frame, and
-            # the content one pixel under it (kernel/desktop.c)
-            cx, cy = wx, wy + TITLE_H
+            cx, cy = wx + 1, wy + CONTENT_DY
 
             # Everything below is read off the screen, in the font the
             # kernel drew it with - not from the serial port

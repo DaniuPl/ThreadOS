@@ -13,7 +13,7 @@ not:
   its window pulled out from under it.
 
   THE RIGHT BUTTON on empty desktop opens the launch menu where the
-  pointer is. It is the same list as the Menu button's, because a
+  pointer is. It is the same list as the mark on the bar opens, because a
   second list would be a second thing to learn - only it comes to the
   hand instead of the hand going to the corner. On a window the right
   button opens nothing (a window's own menu is the window's business)
@@ -21,9 +21,9 @@ not:
 
 The assertions are about what a person would notice: the program
 started from the menu really runs (it draws), the menu stands at the
-pointer and not over the Menu button, it never hangs off the screen or
-over the taskbar, Alt+F4 ends the program with its own exit code, and
-the window goes from the screen AND from the taskbar.
+pointer and not under the mark on the bar, it never hangs off the screen or
+over the dock, Alt+F4 ends the program with its own exit code, and
+the window goes from the screen AND from the dock.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -39,13 +39,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
-
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-MENU_ROW = 16
-MENU_W = 110
-MENU_N = 4
+from ptest import near as ptest_near
 
 # The cascade: slot i sits at (70+12i, 30+12i), and applications start
 # at slot 2 because the kernel's own two windows hold 0 and 1.
@@ -56,39 +50,34 @@ P_APP = (400, 200)          # inside it, past both kernel windows
 
 
 def near(px, v):
-    """A grey of exactly this shade? The six-bit palette entries land
-    a shade apart from each other on the screen (56 -> 227, 52 -> 210),
-    so 'grey' alone would not tell a window from the taskbar."""
     return all(abs(c - v) <= 6 for c in px)
 
 
 def is_win(px):
-    return near(px, 227)    # COL_WIN, the window / menu background
-
-
-def is_bar(px):
-    return near(px, 210)    # COL_BAR, the taskbar
+    return near(px, 227)    # COL_WIN, an application window's background
 
 
 def is_accent(px):
-    r, g, b = px            # COL_TITLE, the blue of "this one is listening"
-    return b > 120 and r < 90 and g < 90
+    return ptest_near(px, theme("dark")["accent"], 12)
 
 
-def bar_buttons(at, w, y):
-    """The spans of the taskbar buttons: everything on the bar row that
-    is not the bar's own grey."""
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        on_bar = is_bar(at(x, y))
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
+def menu_entry(q, mx, my, i):
+    """The name on the i-th entry of a menu whose corner is (mx, my) -
+    '' where there is no such menu"""
+    top = my + MENU_PAD + i * MENU_ROW
+    return q.read_ui(mx + 10 + MENU_ICON + 10,
+                     ui_font_baseline_in(MENU_PX, top, MENU_ROW),
+                     width=110, px=MENU_PX,
+                     fg=theme("dark")["menu_text"])
+
+
+def menu_place(mx, my):
+    """Where the menu opened at the pointer really stands: never past
+    the right edge, never over the dock (menu_at())"""
+    hgt = 2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW
+    x = min(mx, SCREEN_W - MENU_W)
+    y = min(my, work_bottom() - hgt)
+    return max(x, 0), max(y, BAR_H)
 
 
 def sixty_four():
@@ -140,16 +129,13 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.mouse_goto(24, 72)           # the 'Zegar' icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
 
-            w, h, at = q.screen_raw()
-            row = h - TB_H + 2
-            opened = len(bar_buttons(at, w, row))
-            check("(64) the clock came up from its icon (%d buttons on the bar)"
+            opened = q.dock_windows()
+            check("(64) the clock came up from its tile (%d windows in the dock)"
                   % opened, opened == 3)
 
             # Closing a window is not instant, and how long it takes
@@ -160,21 +146,19 @@ def sixty_four():
             left = 3
             for _ in range(10):
                 time.sleep(1.5)
-                w, h, at = q.screen_raw()
-                left = len(bar_buttons(at, w, row))
+                left = q.dock_windows()
                 if left == 2:
                     break
             check("(64) Alt+F4 gets through the long-mode driver and "
-                  "closes the window (%d buttons)" % left, left == 2)
+                  "closes the window (%d windows)" % left, left == 2)
 
             q.mouse_goto(500, 300)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            check("(64) the right button opens the menu under the pointer",
-                  is_win(at(600, 300 + 2 * MENU_ROW + 8)) and
-                  is_accent(at(600, 308)))
+            got = menu_entry(q, 500, 300, 1)
+            check("(64) the right button opens the menu under the pointer "
+                  "('%s')" % got, got == "Clock")
         finally:
             q.close()
     finally:
@@ -197,18 +181,16 @@ def main():
             q.mouse_home()
 
             # --- Alt+F4 -------------------------------------------------
-            q.mouse_goto(24, 272)          # the "Config" icon (gsettings)
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
             check("the settings stand on the screen", is_win(at(*P_APP)))
-            before = len(bar_buttons(at, w, row))
-            check("and they have their button on the bar (%d with the kernel's windows)"
-                  % before, before == 3)
+            before = q.dock_windows()
+            check("and they have their tile in the dock (%d with the kernel's "
+                  "windows)" % before, before == 3)
 
             q.sendkey("alt-f4")
             time.sleep(3)
@@ -221,8 +203,8 @@ def main():
             check("Alt+F4 asked the program, and it ended by itself",
                   "process \'gsettings\' has ended (code 0)" in log)
             check("the window is gone from the screen", not is_win(at(*P_APP)))
-            after = len(bar_buttons(at, w, row))
-            check("and it went from the taskbar (%d -> %d buttons)"
+            after = q.dock_windows()
+            check("and it went from the dock (%d -> %d windows)"
                   % (before, after), after == before - 1)
 
             # Alt+F4 with nothing focused closes nothing - the kernel's
@@ -231,14 +213,13 @@ def main():
             time.sleep(2)
             w, h, at = q.screen_raw()
             check("Alt+F4 with no focus closes nothing - the kernel's windows "
-                  "stand where they stood", len(bar_buttons(at, w, row)) == after)
+                  "stand where they stood", q.dock_windows() == after)
 
             # --- two clicks on the title bar ----------------------------
             # Every system does this, and a person who has used one
             # tries it here in the first minute: the window fills the
             # screen, and does it again the other way round.
-            q.mouse_goto(24, 272)              # the "Config" icon again
-            q.mouse_click()
+            q.launch_dock(6, n_w=2)         # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 200)
             time.sleep(1.5)
@@ -256,10 +237,10 @@ def main():
             w, h, at = q.screen_raw()
             check("two clicks on the title bar open the window to the whole "
                   "screen", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
-            check("but not over the taskbar",
-                  is_bar(at(320, h - TB_H + 6)))
+            check("but not over the dock",
+                  min(at(*dock_tile(0, n_w=3))) > 200)
 
-            q.mouse_goto(200, 4)
+            q.mouse_goto(200, BAR_H + 4)
             time.sleep(0.4)
             q.mouse_click()
             time.sleep(0.15)
@@ -274,32 +255,35 @@ def main():
             q.sendkey("alt-f4")                # away with it again
             time.sleep(3)
             w, h, at = q.screen_raw()
-            check("after the close the taskbar is as it was",
-                  len(bar_buttons(at, w, row)) == after)
+            check("after the close the dock is as it was",
+                  q.dock_windows() == after)
 
             # --- the menu under the right button ------------------------
-            MX, MY = 500, 300
+            MX, MY = 300, 150
             q.mouse_goto(MX, MY)
             time.sleep(0.5)
             q.mouse_right_click()
-            time.sleep(1.5)
+            time.sleep(1)
+            # onto the first entry
+            q.mouse_goto(MX + 60, MY + MENU_PAD + MENU_ROW // 2)
+            time.sleep(1)
             w, h, at = q.screen_raw()
 
-            check("the right button on the desktop opened the menu UNDER THE POINTER",
-                  is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
-            check("and it has a frame of its own, not just background",
-                  near(at(MX, MY + 2 * MENU_ROW + 8), 150))
+            got = menu_entry(q, MX, MY, 0), menu_entry(q, MX, MY, 2)
+            check("the right button on the desktop opened the menu UNDER THE "
+                  "POINTER (%s)" % (got,), got == ("App", "Files"))
             # The pointer sits on the first entry, so that entry wears
             # the accent colour - a menu that does not answer the
             # pointer is a list of words that happens to be clickable
+            e0 = MY + MENU_PAD + MENU_ROW // 2
             check("the entry under the pointer is highlighted",
-                  is_accent(at(MX + 100, MY + 8)))
-            check("and a further one is not", not is_accent(
-                  at(MX + 100, MY + 2 * MENU_ROW + 8)))
-            # It came to the hand: nothing opened over the Menu button,
-            # where the menu stands when that button is what opened it
-            check("and nothing popped up above the Menu button",
-                  not is_win(at(60, 430)))
+                  is_accent(at(MX + MENU_W - 16, e0)))
+            check("and a further one is not",
+                  not is_accent(at(MX + MENU_W - 16, e0 + 2 * MENU_ROW)))
+            # It came to the hand: nothing opened under the mark on the
+            # bar, where the menu stands when the mark is what opened it
+            check("and nothing hangs from the mark on the bar",
+                  menu_entry(q, MENU_X0, MENU_Y, 0) == "")
 
             # --- a click on an entry starts the program -----------------
             # The second entry is the clock, and what it draws is a
@@ -308,7 +292,7 @@ def main():
             # the digits with the font the kernel drew them with;
             # counting dark pixels would count the kernel's own window
             # underneath, whose button carries dark text too.
-            q.mouse_goto(MX + 60, MY + MENU_ROW + 8)
+            q.mouse_goto(MX + 60, MY + MENU_PAD + MENU_ROW + MENU_ROW // 2)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(4)
@@ -317,12 +301,12 @@ def main():
             w, h, at = q.screen_raw()
 
             check("the menu closed after the choice",
-                  not is_win(at(MX + 100, MY + 2 * MENU_ROW + 8)))
+                  menu_entry(q, MX, MY, 0) == "")
             shown = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
             check("the program from the menu really runs - the clock draws "
                   "godzine ('%s')" % shown, shown.count(":") == 2)
-            check("and it has its button on the bar",
-                  len(bar_buttons(at, w, row)) == after + 1)
+            check("and it has its tile in the dock",
+                  q.dock_windows() == after + 1)
 
             # --- the right button over a window ---------------------------
             q.mouse_goto(500, 350)
@@ -335,25 +319,30 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("the right button on a window does not open the menu",
-                  not is_accent(at(WX + 100, WY + 28)))
+                  menu_entry(q, *menu_place(WX + 40, WY + 20), 0) == "")
             check("and it closes the one that was open",
-                  not is_win(at(600, 350 + 2 * MENU_ROW + 8)))
+                  menu_entry(q, *menu_place(500, 350), 0) == "")
 
             # --- the menu never hangs off the screen ----------------------
             # Clicked in the corner it slides back: to the left of the
-            # right-hand edge, and above the taskbar
-            q.mouse_goto(620, 450)
+            # right-hand edge, and up off the dock
+            q.mouse_goto(620, 400)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            top = h - TB_H - MENU_N * MENU_ROW
-            check("the menu at the edge moved left and up",
-                  is_win(at(w - 20, top + 2 * MENU_ROW + 8)))
-            check("it does not go past the right edge",
-                  not is_win(at(w - MENU_W - 12, top + 2 * MENU_ROW + 8)))
-            check("and it does not run over the taskbar",
-                  is_bar(at(w - 20, h - TB_H + 6)))
+            mx, my = menu_place(620, 400)
+            got = menu_entry(q, mx, my, 0), menu_entry(q, mx, my, 6)
+            check("the menu at the edge moved left and up, and is whole there "
+                  "(%s at %d,%d)" % (got, mx, my), got == ("App", "Mixer"))
+            check("it does not go past the right edge, nor over the dock",
+                  mx + MENU_W <= SCREEN_W and
+                  my + 2 * MENU_PAD + 7 * MENU_ROW <= work_bottom())
+            q.mouse_goto(600, 140)
+            q.mouse_click()                    # away with it
+            time.sleep(1)
+            q.mouse_goto(WX + 72, WY + 4)      # past its lights
+            q.mouse_click()                    # the clock has the focus
+            time.sleep(1)
 
             # --- and Alt+F4 on a window that came from the menu ----------
             q.sendkey("alt-f4")
@@ -365,7 +354,7 @@ def main():
             gone = q.read_text(WX + 1 + 8, WY + CONTENT_DY + 6, 8, 1)
             check("the clock is gone from the screen ('%s')" % gone,
                   gone.count(":") != 2)
-            check("and from the taskbar", len(bar_buttons(at, w, row)) == after)
+            check("and from the dock", q.dock_windows() == after)
         finally:
             q.close()
     finally:

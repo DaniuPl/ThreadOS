@@ -53,17 +53,15 @@ def new_disk():
     return path
 
 
-def taskbar_ready(q, timeout=40):
+def dock_ready(q, timeout=40):
     """Waits for the desktop WITHOUT looking at the background colour -
-    the background is the very thing these tests change. The taskbar is
-    light grey whatever the background is."""
+    the background is the very thing these tests change. The dock's
+    first tile has its white window on it whatever the background is."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             w, _, at = q.screen_raw()
-            # Not at x=600: the clock is drawn there. x=520 is bar
-            # between the window buttons and the clock.
-            if w >= 640 and at(520, 474)[0] > 150:
+            if w >= 640 and min(at(*dock_tile(0))) > 200:
                 return True
         except Exception:
             pass
@@ -167,9 +165,8 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            # The 'Config' icon is the seventh, at (8,260), a 32x24 tile
-            q.mouse_goto(24, 272)
-            q.mouse_click()
+            # The settings are the seventh program in the dock
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(560, 420)      # the cursor away from the window
             time.sleep(1)
@@ -222,13 +219,13 @@ def main():
         print("--- the desktop after a restart on the same disk ---")
         q2 = Qemu(KERNEL, INITRD, disk2, serial=tempfile.mktemp(suffix=".log"))
         try:
-            check("the desktop came up after the restart", taskbar_ready(q2, timeout=40))
+            check("the desktop came up after the restart", dock_ready(q2, timeout=40))
             time.sleep(2)
             w, h, at = q2.screen_raw()
             r, g, b = at(600, 300)
-            # Green (0,28,0 in the palette -> about 0,113,0 in pixels),
-            # and definitely not the teal it started as
-            check("the desktop background is green, not sea (%d,%d,%d)"
+            # Green (0,113,0 a little darker towards the floor), and
+            # definitely not the aurora it started as
+            check("the desktop background is green, not the aurora (%d,%d,%d)"
                   % (r, g, b), g > 60 and r < 60 and b < 60)
         finally:
             q2.close()

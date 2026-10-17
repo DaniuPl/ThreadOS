@@ -109,11 +109,7 @@ def main():
                     try:
                         time.sleep(22)
                         w, h, at = q22.screen_raw()
-                        teal = sum(1 for y in range(0, h, 8)
-                                   for x in range(0, w, 8)
-                                   if all(abs(at(x, y)[i] - (0, 128, 160)[i])
-                                          <= 40 for i in range(3)))
-                        total = (h // 8) * (w // 8)
+                        teal, total = aurora_samples(at, w, h)
                         check(f"the desktop draws on the loader's buffer "
                               f"({w}x{h}, {teal}/{total} background samples)",
                               teal > total * 0.7)
@@ -137,11 +133,7 @@ def main():
                         for _ in range(10):
                             time.sleep(1.5)
                             w, h, at = q22.screen_raw()
-                            after = sum(
-                                1 for y in range(0, h, 8)
-                                for x in range(0, w, 8)
-                                if all(abs(at(x, y)[i] - (0, 128, 160)[i])
-                                       <= 40 for i in range(3)))
+                            after, _ = aurora_samples(at, w, h)
                             if after >= want:
                                 break
                         check(f"and the kernel's text does not stay on the screen - "

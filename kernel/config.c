@@ -38,14 +38,13 @@ static struct setting settings[] = {
     { "name",  "thread",   "the machine's name - it shows in the prompt", 0, { 0 } },
     { "dns",    "0.0.0.0",  "name server; 0.0.0.0 = the one from DHCP",  0, { 0 } },
     { "color",  "11",       "the shell prompt's colour, 0-15",         0, { 0 } },
-    { "background",    "0",        "desktop background: 0 sea, 1 navy,\n"
-                            "2 violet, 3 green, 4 brown, 5 grey", 0, { 0 } },
-    { "wallpaper", "",         "the wallpaper file (empty = a gradient);\n"
+    { "background",    "0",        "desktop background: 0 aurora, 1 navy,\n"
+                            "2 violet, 3 green, 4 brown, 5 grey, 6 sea", 0, { 0 } },
+    { "wallpaper", "",         "the wallpaper file (empty = the background);\n"
                             "the 'mkwall' program makes one", 0, { 0 } },
-    { "taskbar",  "100",      "the taskbar's width: 100, 75 or 50\n"
-                            "percent of the screen", 0, { 0 } },
-    { "icons",  "0",        "icons on the bar: 0 from the left, 1 centred,\n"
-                            "2 from the right", 0, { 0 } },
+    { "theme",  "dark",     "the desktop's colours: dark or light", 0, { 0 } },
+    { "dock",   "1",        "the size of the dock: 0 small, 1 medium,\n"
+                            "2 large", 0, { 0 } },
     { "volume", "80",     "volume, 0-100 (0 = silence)",        0, { 0 } },
     { "scale",  "0",        "screen pixels per desktop pixel:\n"
                             "0 lets the screen decide (a big panel gets 2)", 0, { 0 } },

@@ -184,8 +184,7 @@ def main():
             check("the desktop comes up before the browser", q2.wait_desktop(30))
 
             q2.mouse_home()
-            q2.mouse_goto(24, 232)          # the 'Web' icon at (8,220)
-            q2.mouse_click()
+            q2.launch_dock(5)                # the "Web" tile
 
             # The browser's window: slot 2, content 320x200 from (95,65)
             def white_text():

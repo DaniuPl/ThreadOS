@@ -13,6 +13,7 @@
  */
 
 #include "../kernel/include/fonts.h"
+#include "../kernel/include/gfx.h"
 #include <stdint.h>
 #include "shell64.h"
 #include "keyboard64.h"
@@ -878,6 +879,8 @@ static void execute(const char *line)
         fonts_command("");
     } else if (starts_with(line, "font ")) {
         fonts_command(line + sizeof("font ") - 1);
+    } else if (starts_with(line, "shape ")) {
+        gfx_command(line + sizeof("shape ") - 1);
     } else if (!strcmp(line, "disks")) {
         hwinfo_disks();
     } else if (starts_with(line, "disks read")) {

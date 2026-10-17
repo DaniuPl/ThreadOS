@@ -72,20 +72,20 @@ static int same(const char *a, const char *b)
 static int cycle_limit(const char *name)
 {
     if (same(name, "background"))
-        return 6;                     /* six backgrounds */
+        return 7;                     /* the aurora and six colours */
     if (same(name, "color"))
         return 16;                    /* sixteen text colours */
-    if (same(name, "icons"))
-        return 3;                     /* left, centre, right */
+    if (same(name, "dock"))
+        return 3;                     /* small, medium, large */
     return 0;                         /* everything else is typed */
 }
 
-/* The width of the taskbar is not a run of numbers but three of them,
-   so clicking its row steps between those three rather than counting */
-static const char *bar_widths[] = { "100", "75", "50" };
-#define BAR_W_N 3
+/* The theme is not a number but one of two words, so clicking its row
+   steps between those two rather than counting */
+static const char *themes[] = { "dark", "light" };
+#define THEME_N 2
 
-static int is_bar_width(const char *name) { return same(name, "taskbar"); }
+static int is_theme(const char *name) { return same(name, "theme"); }
 
 static void num_to_text(uint32_t v, char *out)
 {
@@ -202,12 +202,12 @@ void _start(void)
                     if (row == chosen) {
                         /* A second click on the same row: for a setting
                            picked from a list, that is the way to pick */
-                        if (is_bar_width(cfg[row].name)) {
+                        if (is_theme(cfg[row].name)) {
                             int k = 0;
-                            for (int i = 0; i < BAR_W_N; i++)
-                                if (same(edit, bar_widths[i]))
+                            for (int i = 0; i < THEME_N; i++)
+                                if (same(edit, themes[i]))
                                     k = i;
-                            const char *next = bar_widths[(k + 1) % BAR_W_N];
+                            const char *next = themes[(k + 1) % THEME_N];
                             elen = 0;
                             while (next[elen]) {
                                 edit[elen] = next[elen];
@@ -332,7 +332,7 @@ void _start(void)
             }
             win_text(w, 6, y + 3,
                      (cycle_limit(cfg[chosen].name) ||
-                      is_bar_width(cfg[chosen].name))
+                      is_theme(cfg[chosen].name))
                          ? "a click on a line changes it, Enter saves"
                          : "type on the keyboard, Enter saves",
                      C_BLUE);

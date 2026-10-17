@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the file manager, icons, the monitor, the
+"""ThreadOS smoke test: the file manager, the dock, the monitor, the
 terminal, window sizes.
 
 Run on its own or through scripts/run_tests.py, which starts all the
@@ -41,10 +41,7 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         # Menu -> the 'gfiles' entry
-        q9.mouse_goto(10, 472)
-        q9.mouse_click()
-        q9.mouse_goto(40, menu_y("gfiles"))
-        q9.mouse_click()
+        q9.launch_menu("gfiles")
         # gfiles slot2 (94,54), content (95,65); the file name at
         # content(8,16) -> screen(103,81). The text is BLACK - the
         # window is light grey, and white on it was unreadable.
@@ -92,24 +89,29 @@ def main():
         if os.path.exists(gdisk):
             os.unlink(gdisk)
 
-    # --- Icons on the desktop (a separate boot) ---
-    print("--- the desktop: the icons ---")
+    # --- The dock (a separate boot) ---
+    print("--- the desktop: the dock ---")
     q10 = Qemu(KERNEL, INITRD)
     try:
         q10.wait_desktop()
         time.sleep(1.0)
-
-        def near(px, want, tol=45):
-            return all(abs(px[i] - want[i]) <= tol for i in range(3))
-
-        # the 'App' icon (the tile 8,20,32x24) in orange
-        check("a desktop icon is drawn (an orange tile 20,30)",
-              q10.wait_pixel(20, 30, (255, 162, 0)))
-        # a click on the icon starts the application (guiapp -> a red square)
-        q10.mouse_goto(24, 32)
-        q10.mouse_click()
+        # The first program's tile: a picture on a tile of its own - a
+        # blue slope with a white window on it. Its top edge is the
+        # slope's light end, its middle the white of the window.
+        tx, ty = dock_geom()["tiles"][0]
+        t = dock_geom()["tile"]
+        _, _, at = q10.screen_raw()
+        top, mid = at(tx + 3, ty + 3), at(tx + t // 2, ty + t // 2 + 3)
+        check("the App tile is drawn in the dock (%s at its top, %s in its "
+              "middle)" % (top, mid),
+              top[2] > 200 and top[0] < 160 and min(mid) > 200)
+        # ... and its corners are round: the corner pixel is the glass
+        check("the tile's corners are round (%s at the very corner)"
+              % (at(tx, ty),), not near(at(tx, ty), top, 40))
+        # a click on the tile starts the application (guiapp -> a red square)
+        q10.launch_dock(0)
         q10.mouse_goto(300, 300)         # move the cursor away
-        check("a click on an icon starts the application (a red square 101,71)",
+        check("a click on a tile starts the application (a red square 101,71)",
               q10.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
     finally:
         q10.close()
@@ -197,100 +199,42 @@ def main():
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
-        # win0 "Terminal" (40,60,120x70). A title bar is the accent
-        # blue for the window with the focus and plain grey for the
-        # rest; at boot nothing has the focus. Read past the name.
-        check("window 0: the title bar is drawn before the minimise (115,64)",
-              q13.wait_pixel(115, 64, (178, 178, 178), 25))
-
-        # win0's collapse button [_]: min_x = x+w-2*8-2 = 142, y=61 (8x8).
-        # A click on the centre (146,65) collapses the window -> the bar
-        # disappears, the background comes back.
-        q13.mouse_goto(146, 65)
-        q13.mouse_click()
-        q13.mouse_goto(400, 300)              # move the cursor away
-        check("a minimised window goes from the desktop (the bar 80,64 -> teal)",
-              q13.wait_pixel(80, 64, (0, 128, 160)))
-
-        # The window is still on the taskbar (slot0 'Terminal', x46..96,
-        # y468). A click restores it: the blue title bar is visible again.
-        q13.mouse_goto(60, 473)
-        q13.mouse_click()
-        q13.mouse_goto(400, 300)
-        # Restoring it from the bar also gives it the focus, so the bar
-        # comes back BLUE
-        check("a click on the taskbar brings a minimised window back (115,68)",
-              q13.wait_pixel(115, 68, (0, 0, 255), 30))
-
-        # Resizing: win0's grip in the bottom right corner
-        # grip_x = x+w-8 = 152, grip_y = y+h-8 = 122. Before the change
-        # the point (170,140) is outside the window (teal). We drag the
-        # grip (155,125) by (+60,+40) -> the window grows and covers
-        # (170,140).
+        dark = theme("dark")
+        # win0 "Terminal" (40,60,120x70)
         _, _, at = q13.screen_raw()
-        check("before the resize the point is outside the window (170,140 teal)",
-              near(at(170, 140), (0, 128, 160)))
-        q13.mouse_goto(155, 125)          # a kernel window: its height is fixed, so the grip did not move
+        check("window 0: the title bar is drawn before the minimise (150,63)",
+              near(at(150, 63), dark["title_off"], 3))
+
+        # win0's yellow light minimises it: the window goes, the aurora
+        # comes back
+        q13.click(*light_xy(40, 60, 1))
+        q13.mouse_goto(400, 300)              # move the cursor away
+        check("a minimised window goes from the desktop (the aurora at 80,64)",
+              q13.wait_background(80, 64, tol=0))
+
+        # The window is still in the dock (the first window's tile). A
+        # click brings it back, with the focus.
+        q13.click(*dock_window(0, 2))
+        q13.mouse_goto(400, 300)
+        check("a click on its tile in the dock brings a minimised window back",
+              q13.wait_focus(40, 60))
+
+        # Resizing: win0's grip in the bottom right corner (the last ten
+        # pixels each way). Before, (170,140) is outside the window - its
+        # shadow at most. We drag the grip (155,125) by (+60,+40) -> the
+        # window grows and covers (170,140).
+        _, _, at = q13.screen_raw()
+        check("before the resize the point is outside the window (170,140)",
+              not near(at(170, 140), dark["win_bg"], 4))
+        q13.mouse_goto(155, 125)
         q13.mouse_button(True)
         q13.mouse_move(60, 40)
         q13.mouse_button(False)
         q13.mouse_goto(400, 300)
-        check("after the resize the window is bigger (170,140 the window's grey background)",
-              q13.wait_pixel(170, 140, (224, 224, 224)))
+        check("after the resize the window is bigger (170,140 the window's body)",
+              q13.wait_pixel(170, 140, dark["win_bg"], 3))
     finally:
         q13.close()
-
-    # --- Saving the icon positions on the disk (two boots on the same
-# disk) ---
-    print("--- the desktop: saving the icon places to the disk ---")
-    idisk = tempfile.mktemp(suffix=".img")
-    with open(idisk, "wb") as f:
-        f.write(b"\0" * DISK_SIZE)
-    q14 = Qemu(KERNEL, INITRD, idisk)
-    try:
-        q14.wait_desktop()
-        time.sleep(1.0)
-
-        def near(px, want, tol=45):
-            return all(abs(px[i] - want[i]) <= tol for i in range(3))
-
-        # the 'App' icon by default (8,20,32x24) - an orange tile ~ (20,30)
-        check("the App icon in its default place (20,30 orange)",
-              q14.wait_pixel(20, 30, (255, 162, 0)))
-
-        # Drag the icon: grab the centre (24,32), move it to (416,312) with
-        # the left button held -> the icon lands at (400,300). Release.
-        q14.mouse_goto(24, 32)
-        q14.mouse_button(True)
-        q14.mouse_goto(416, 312)
-        q14.mouse_button(False)
-        q14.mouse_goto(100, 250)          # move the cursor away from the icon
-        # The tile, off its picture: the icon now has one drawn in the
-        # middle of it, and that is not orange
-        check("the icon was moved to a new place (404,304 orange)",
-              q14.wait_pixel(404, 304, (255, 162, 0)))
-        check("the icon's old place was cleaned up (20,30 teal)",
-              q14.wait_pixel(20, 30, (0, 128, 160)))
-    finally:
-        q14.close()
-
-    # A reboot on THE SAME disk: the icon's position survived (icons.pos)
-    q15 = Qemu(KERNEL, INITRD, idisk)
-    try:
-        q15.wait_desktop()
-        time.sleep(1.0)
-
-        def near(px, want, tol=45):
-            return all(abs(px[i] - want[i]) <= tol for i in range(3))
-
-        check("the icon's place survived the restart (404,304 orange)",
-              q15.wait_pixel(404, 304, (255, 162, 0)))
-        check("the icon's default place is empty after the restart (20,30 teal)",
-              q15.wait_pixel(20, 30, (0, 128, 160)))
-    finally:
-        q15.close()
-        if os.path.exists(idisk):
-            os.unlink(idisk)
 
     return summary()
 

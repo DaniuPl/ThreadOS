@@ -1,7 +1,8 @@
 /* The fonts in the initrd, and the 'font' command
  *
- * Two files, cut out of DejaVu by scripts/mkfonts.py: sans.ttf for the
- * desktop and mono.ttf for anything that wants columns. They are read
+ * Three files, cut out of DejaVu by scripts/mkfonts.py: sans.ttf for
+ * the desktop, bold.ttf for what on it has to stand out, and mono.ttf
+ * for anything that wants columns. They are read
  * where they lie in the initrd - kernel/ttf.c copies nothing.
  *
  * 'font' on its own says what was found. 'font sheet NAME PX FIRST
@@ -16,9 +17,10 @@
 #include "include/initrd.h"
 #include "include/printk.h"
 
-static struct ttf_font sans, mono;
-static int have_sans, have_mono;
-static const char *why_sans = "not looked for", *why_mono = "not looked for";
+static struct ttf_font sans, bold, mono;
+static int have_sans, have_bold, have_mono;
+static const char *why_sans = "not looked for", *why_bold = "not looked for",
+                  *why_mono = "not looked for";
 
 static int open_one(struct ttf_font *f, const char *name, const char **why)
 {
@@ -34,12 +36,18 @@ static int open_one(struct ttf_font *f, const char *name, const char **why)
 void fonts_init(void)
 {
     have_sans = open_one(&sans, "sans.ttf", &why_sans);
+    have_bold = open_one(&bold, "bold.ttf", &why_bold);
     have_mono = open_one(&mono, "mono.ttf", &why_mono);
 }
 
 const struct ttf_font *font_sans(void)
 {
     return have_sans ? &sans : (const struct ttf_font *)0;
+}
+
+const struct ttf_font *font_bold(void)
+{
+    return have_bold ? &bold : (const struct ttf_font *)0;
 }
 
 const struct ttf_font *font_mono(void)
@@ -141,6 +149,7 @@ void fonts_command(const char *arg)
 
     if (!*p) {
         describe("sans.ttf", &sans, have_sans, why_sans);
+        describe("bold.ttf", &bold, have_bold, why_bold);
         describe("mono.ttf", &mono, have_mono, why_mono);
         return;
     }
@@ -148,15 +157,17 @@ void fonts_command(const char *arg)
         const struct ttf_font *f = (const struct ttf_font *)0;
         if (take(&p, "sans"))
             f = font_sans();
+        else if (take(&p, "bold"))
+            f = font_bold();
         else if (take(&p, "mono"))
             f = font_mono();
         uint32_t px = number(&p), first = number(&p), last = number(&p);
         if (!f || px < 1 || px > 255 || last < first) {
-            printk("usage: font sheet sans|mono <px> <first> <last>\n");
+            printk("usage: font sheet sans|bold|mono <px> <first> <last>\n");
             return;
         }
         sheet(f, (int)px, first, last);
         return;
     }
-    printk("usage: font  |  font sheet sans|mono <px> <first> <last>\n");
+    printk("usage: font  |  font sheet sans|bold|mono <px> <first> <last>\n");
 }

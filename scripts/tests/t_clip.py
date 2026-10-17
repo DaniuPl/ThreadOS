@@ -101,8 +101,7 @@ def main():
             q.mouse_home()
 
             # --- copy: in the terminal ---------------------------------
-            q.mouse_goto(24, 192)          # the 'Term' icon
-            q.mouse_click()
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
             q.mouse_click()
@@ -129,8 +128,7 @@ def main():
                   not any(WORD in r for r in rows))
 
             # --- paste: in another window ------------------------------
-            q.mouse_goto(24, 272)          # the 'Config' icon
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
@@ -158,7 +156,7 @@ def main():
             # --- and the kernel keeps it -------------------------------
             # Close the window it came from: the text was never that
             # window's, so closing it changes nothing
-            q.mouse_goto(WX + 402 - 6, WY + 1 + TITLE_H // 2)     # the terminal's [x]
+            q.mouse_goto(*light_xy(WX, WY, 0))   # the terminal's red light
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)

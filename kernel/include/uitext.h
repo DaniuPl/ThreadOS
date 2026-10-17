@@ -14,6 +14,11 @@
 
 #define UI_PX 11                 /* the size of the desktop's text */
 
+/* The three faces there are */
+#define UI_SANS 0
+#define UI_BOLD 1
+#define UI_MONO 2
+
 /* How far above and below the baseline the text reaches, whole pixels */
 int ui_ascent(void);
 int ui_descent(void);
@@ -29,5 +34,12 @@ int ui_text(int x, int baseline, const char *s, uint8_t colour);
 /* The baseline that centres capital letters in a band of the screen -
    which is how a title or a button label sits in its bar */
 int ui_baseline_in(int top, int height);
+
+/* The same in any face and size, in a colour of 0x00RRGGBB, and onto
+   whatever kernel/gfx.c is drawing on - the screen or a picture */
+int ui_font_text(int font, int px, int x, int baseline, const char *s,
+                 uint32_t rgb);
+int ui_font_width(int font, int px, const char *s);
+int ui_font_baseline_in(int px, int top, int height);
 
 #endif

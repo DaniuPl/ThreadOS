@@ -144,8 +144,7 @@ def main():
             q.mouse_home()
 
             # --- the terminal ------------------------------------------
-            q.mouse_goto(24, 192)          # the 'Term' icon
-            q.mouse_click()
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
             q.mouse_click()
@@ -205,15 +204,14 @@ def main():
                   "\n".join(rows).count("plain user") >= 2)
 
             # --- the settings window ------------------------------------
-            q.mouse_goto(24, 272)          # the 'Config' icon
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
             # Slot 3: (106,66), content from (107,77). The 'tlo' row is
             # the fourth: ROW_Y=22 + 3*14 = 64
-            SX, SY = 107, 77
+            SX, SY = 106 + 1, 66 + CONTENT_DY
             q.mouse_goto(SX + 40, SY + 64)
             q.mouse_click()
             time.sleep(1)

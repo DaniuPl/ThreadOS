@@ -20,8 +20,9 @@ What is asserted here is the difference, in pixels on the screen:
   ever have given it - the number is counted, not eyeballed
   and it rises where it should rise, so "more colours" did not come at
   the price of the right ones
-  everything the machine draws for itself is still a few dozen colours,
-  because none of those programs had to change
+  the desktop's own drawing - the aurora, glass and shadows - uses the
+  colours too, while a program that draws in indices still shows a
+  handful, because none of those programs had to change
   the compositor writes to the card only what changed: an idle desktop
   is redrawn thirty times a second and sends nothing at all
 
@@ -78,8 +79,7 @@ def main():
             q.mouse_home()
 
             # --- the machine says what kind of screen it has ------------
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("screen")
@@ -104,26 +104,31 @@ def main():
                   m is not None and int(m.group(1)) < 40)
 
             # --- a picture in real colours ------------------------------
-            q.mouse_goto(24, 72)               # the "Clock" icon, for the slot
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
 
-            # Everything this machine draws for ITSELF - the background,
-            # the bars, the icons, a window that never asked for
-            # anything else - still lives in the palette. Counted over
-            # the whole screen, before any picture is on it, so there is
-            # no geometry to get wrong: a few dozen colours, not
-            # thousands.
+            # The desktop itself is drawn in real colours now - the
+            # aurora, the glass, the shadows: thousands of shades over
+            # the screen. A window that never asked for anything else
+            # still lives in the palette: the clock's content (slot 2,
+            # 80x20) is a handful of colours, because that program did
+            # not have to change.
             w, h, at = q.screen_raw()
             own = set()
             for y in range(0, h, 4):
                 for x in range(0, w, 4):
                     own.add(at(x, y))
-            check("a desktop drawn in indices has a handful of them (%d different "
-                  "on the whole screen)" % len(own), 1 < len(own) < 100)
+            check("the desktop is drawn in real colours (%d different on "
+                  "the whole screen)" % len(own), len(own) > 2000)
+            cx0, cy0 = 94 + 1, 54 + CONTENT_DY
+            # (away from its bottom corners, which are rounded over
+            # whatever lies under them)
+            inside = set(at(cx0 + x, cy0 + y) for y in range(20)
+                         for x in range(8, 72))
+            check("and a window drawn in indices has a handful of them (%d "
+                  "in the clock's)" % len(inside), 1 < len(inside) < 12)
 
-            q.mouse_goto(600, 430)             # the keys back to the shell
-            q.mouse_click()
+            q.click_desktop()             # the keys back to the shell
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("run httpget 10.0.2.2 %d /gradient.jpg foto.jpg"

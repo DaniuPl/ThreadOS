@@ -45,7 +45,6 @@ CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = 4, 10
 COLS, ROWS = (400 - 8) // 8, (240 - 8) // 10
 
-BTN = 8                       # the title bar's [O] [_] [x] are 8x8
 
 
 def read_rows(q, ox, oy, cols, rows):
@@ -139,8 +138,7 @@ def main():
             q.type_line("write other content")
             time.sleep(1.5)
 
-            q.mouse_goto(24, 192)          # the 'Term' icon at (8,180)
-            q.mouse_click()
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
             q.mouse_click()                # focus, so keys go here
@@ -253,10 +251,10 @@ def main():
                   "40" in rows and "scrolled back" not in text(rows))
 
             # --- the window's size decides how much is visible ---------
-            # The [O] button maximises; the terminal asks the window for
+            # The green light zooms; the terminal asks the window for
             # its size, so it must show more lines than before
             before = len([r for r in read_rows(q, **geom) if r])
-            q.mouse_goto(WX + 402 - 3 * BTN - 3 + BTN // 2, WY + 1 + TITLE_H // 2)
+            q.mouse_goto(*light_xy(WX, WY, 2))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -264,15 +262,21 @@ def main():
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            big = dict(ox=1 + PAD, oy=CONTENT_DY + PAD,
+            # Zoomed, the window is the room between the bar and the dock
+            zh = work_bottom() - BAR_H
+            big = dict(ox=1 + PAD, oy=BAR_H + CONTENT_DY + PAD,
                        cols=(w - 2 - 8) // 8,
-                       rows=(h - 12 - (TITLE_H + 2) - 8) // ROW_H)
+                       rows=(zh - (TITLE_H + 2) - 8) // ROW_H)
             rows = read_rows(q, **big)
             after = len([r for r in rows if r])
             check("once the window is stretched MORE session lines show "
                   "(%d against %d)" % (after, before), after > before)
-            check("and it is still the same session - the commands from before "
-                  "the resize are in place", "/> seq 40" in text(rows))
+            # (36 rows between the bar and the dock: the bottom of what
+            # 'seq 40' printed, and the prompt after it)
+            check("and it is still the same session - what was printed before "
+                  "the resize is in place (%s)" % [r for r in rows if r][-6:],
+                  any(r.split()[:1] == ["40"] for r in rows)
+                  and any(r.split()[:1] == ["30"] for r in rows))
             check("the prompt is at the bottom edge of the bigger window",
                   any(r.startswith("/>") for r in rows[-2:]))
 
@@ -311,8 +315,8 @@ def main():
                       not r.startswith("/> cat filetwo") for r in rows))
 
             # --- and the window says where it stands --------------------
-            # The window is maximised by now, its corner at (0, 0)
-            titled = q.window_title(0, 0)
+            # The window is zoomed by now, its corner under the bar
+            titled = q.window_title(0, BAR_H, SCREEN_W)
             check("the terminal window says which directory it stands in ('%s')"
                   % titled, titled.startswith("Terminal: /"))
         finally:

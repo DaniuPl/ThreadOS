@@ -30,7 +30,7 @@ LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
 BUILD   := build
 # The fonts in both initrds - cut out of DejaVu by scripts/mkfonts.py and
 # committed, so building needs neither fonttools nor the DejaVu package
-FONTS   := fonts/sans.ttf fonts/mono.ttf
+FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 KERNEL  := $(BUILD)/threados.bin
 ISO     := $(BUILD)/threados.iso
 INITRD  := $(BUILD)/initrd.img
@@ -130,6 +130,8 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/ttf.o \
         $(BUILD)/fonts.o \
         $(BUILD)/uitext.o \
+        $(BUILD)/gfx.o \
+        $(BUILD)/aurora.o \
         $(BUILD)/xhci.o \
         $(BUILD)/usbhc.o \
         $(BUILD)/usbkbd.o \
@@ -273,7 +275,7 @@ $(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL) \
 $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD) \
-	    sans.ttf=fonts/sans.ttf mono.ttf=fonts/mono.ttf \
+	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
 	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
 	    evil2=$(BUILD)/user/evil2.elf \
 	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
@@ -330,7 +332,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
+            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 netdev smp
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
@@ -472,7 +474,7 @@ $(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL64) \
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
-	    sans.ttf=fonts/sans.ttf mono.ttf=fonts/mono.ttf \
+	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \

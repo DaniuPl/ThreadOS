@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the system strip along the top of the screen.
+"""ThreadOS smoke test: the right-hand end of the menu bar.
 
-The taskbar at the bottom is for windows. The strip at the top is for
-what is ALWAYS true: which of the four desktops is showing, how much of
+The dock at the bottom is for programs and windows. The menu bar at the
+top is for what is ALWAYS true: which of the four desktops is showing, how much of
 the machine is spoken for, and a button that puts every window out of
 the way.
 
-The meter is a bar because a bar is a thing to SEE - "4128 KiB" is a
+The meter is a capsule because a capsule filled to a third is a thing to SEE - "4128 KiB" is a
 thing to read. The figures behind it (how much of how much, and how
 many tasks) are one hover away, so the strip stays quiet until it is
 asked; this test asks, and then checks the answer against something
@@ -32,81 +32,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
-
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-DESK_N = 4
-DESK_CELL = 12
-LOAD_BAR = 40
-SHOW_W = 12
-
-
-def desk_x0(w):
-    return w - DESK_N * DESK_CELL - 3
-
-
-def load_x(w):
-    return desk_x0(w) - LOAD_BAR - 8
-
-
-def show_x(w):
-    return load_x(w) - 6 - SHOW_W
-
+from ptest import near as ptest_near
 
 def is_accent(px):
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
-
-
-def is_ground(px):                 # COL_TBBTN_OFF, the meter's empty part
-    return all(abs(c - 146) <= 8 for c in px)
+    return ptest_near(px, theme("dark")["accent"], 12)
 
 
 def is_win(px):
     return all(abs(c - 227) <= 8 for c in px)
-
-
-def is_bar(px):
-    return all(abs(c - 210) <= 6 for c in px)
-
-
-def hint_text(at, w, h):
-    """The box that appears under the strip when the pointer rests on
-    something there: found by its own grey, read by the kernel's font."""
-    row = [x for x in range(w) if is_win(at(x, 14))]
-    if not row:
-        return ""
-    # row[0] is the first pixel of the FILL; the box's own border is
-    # the column before it, and the text starts four pixels past the
-    # border. One pixel out and every letter is unreadable.
-    x0, x1 = row[0] - 1, row[-1] + 1
-    font = font8x8()
-    out = ""
-    for c in range((x1 - x0 - 8) // 8):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if not is_win(at(x0 + 4 + c * 8 + x, 15 + y)):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.strip()
-
-
-def buttons(at, w, y):
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        on_bar = is_bar(at(x, y))
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
 
 
 def main():
@@ -124,24 +57,23 @@ def main():
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
-            lx, sx = load_x(w), show_x(w)
+            lx, sx = bar_load_x(w), bar_show_x(w)
 
             # --- the meter ----------------------------------------------
             # Something is in use, and not everything: the filled part
             # starts at the left and the ground is still there further
             # along. A meter that reads zero on a running machine, or
             # full on an idle one, is a meter nobody would trust.
-            filled = [dx for dx in range(1, LOAD_BAR - 1)
-                      if is_accent(at(lx + dx, 4))]
-            empty = [dx for dx in range(1, LOAD_BAR - 1)
-                     if is_ground(at(lx + dx, 4))]
+            filled = [dx for dx in range(LOAD_W) if is_accent(at(lx + dx, BAR_MID))]
+            empty = [dx for dx in range(LOAD_W)
+                     if not is_accent(at(lx + dx, BAR_MID))]
             check("the gauge shows something is used (%d columns)"
                   % len(filled), len(filled) >= 1)
             check("and that not everything is (%d columns free)" % len(empty),
                   len(empty) >= 10)
-            check("the fill starts from the left, inside the frame",
-                  filled and filled[0] == 1 and max(filled) < LOAD_BAR - 1)
+            check("the fill starts from the left, and is one piece",
+                  filled and filled[0] <= 2 and
+                  filled == list(range(filled[0], filled[-1] + 1)))
 
             # --- and it says what it means when asked -------------------
             # The count has to SETTLE first. Just after the desktop
@@ -151,11 +83,10 @@ def main():
             # too early counts something that is about to disappear, and
             # then the number after starting a program looks unchanged.
             def hint_now():
-                q.mouse_goto(lx + 20, 5)
+                q.mouse_goto(lx + 20, BAR_MID)
                 time.sleep(2)
-                ww, hh, aat = q.screen_raw()
-                text = hint_text(aat, ww, hh)
-                found = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) zad",
+                text = q.read_hint(BAR_H + 4)
+                found = re.search(r"(\d+)% \((\d+)/(\d+) MiB\), (\d+) tasks",
                                   text)
                 q.mouse_goto(320, 300)     # away, so the hint disappears
                 return text, found
@@ -180,8 +111,7 @@ def main():
             # --- the figures are live -----------------------------------
             # A program started between two looks has to appear in the
             # count; a number that never moves is a picture of a number.
-            q.mouse_goto(24, 192)              # the "Term" icon
-            q.mouse_click()
+            q.launch_dock(4)                # the "Term" tile
 
             # How long a program takes to start is not something to
             # guess: with the whole suite running in parallel four
@@ -201,20 +131,18 @@ def main():
                       % (tasks, int(m2.group(4))), int(m2.group(4)) > tasks)
 
             # --- show the desktop ---------------------------------------
-            q.mouse_goto(24, 272)              # the "Config" icon as well
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(320, 300)
             time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            before = len(buttons(at, w, row))
-            check("two windows stand on the screen (%d buttons with the "
+            before = q.dock_windows()
+            check("two windows stand on the screen (%d in the dock with the "
                   "kernel's)" % before, before == 4)
 
             # The settings window is at slot 3 (106,66); minimise it by
-            # hand - its [_] is at x+w-2*8-2. It has to STAY minimised
-            # through what follows.
-            q.mouse_goto(106 + 362 - 2 * 8 - 2 + 4, 66 + 5)
+            # hand - its yellow light. It has to STAY minimised through
+            # what follows.
+            q.mouse_goto(*light_xy(106, 66, 1))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(1.5)
@@ -224,7 +152,7 @@ def main():
             check("a window minimised by hand goes from the screen",
                   not is_win(at(300, 200)))
 
-            q.mouse_goto(sx + 6, 5)
+            q.mouse_goto(sx + SHOW_W // 2, BAR_MID)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)
@@ -234,12 +162,12 @@ def main():
             check("'show desktop' hides the other windows",
                   not any(all(c < 60 for c in at(x, 200))
                           for x in range(100, 400, 8)))
-            check("but it does not close them - the buttons stay on the bar",
-                  len(buttons(at, w, row)) == before)
+            check("but it does not close them - their tiles stay in the dock",
+                  q.dock_windows() == before)
             check("and the button itself is lit",
-                  is_accent(at(sx + 6, 4)) or is_accent(at(sx + 1, 4)))
+                  is_accent(at(sx + 3, BAR_MID)))
 
-            q.mouse_goto(sx + 6, 5)
+            q.mouse_goto(sx + SHOW_W // 2, BAR_MID)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)

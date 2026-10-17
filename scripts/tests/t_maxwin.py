@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: maximising a window.
+"""ThreadOS smoke test: zooming a window - its green light.
 
-A window could be moved, resized by its corner, minimised to the bar
+A window could be moved, resized by its corner, minimised to the dock
 and closed. What it could not be is made to fill the screen - the one
 thing a person does with a window they are actually working in.
 
 Maximising is not the same as pulling the corner as far as it goes, and
 the difference is the part worth testing:
 
-  It goes down to the taskbar and no further. The bar is how every other
-  window is reached, so a window drawn over it would be a window there
-  is no way out of.
+  It fills the room between the menu bar and the dock and no more. They
+  are how everything else is reached, so a window drawn over them would
+  be a window there is no way out of.
 
-  It REMEMBERS. The same button puts the window back exactly where it
+  It REMEMBERS. The same light puts the window back exactly where it
   was - not somewhere reasonable, exactly there.
 
   The application is told. A window is a buffer as well as a rectangle,
@@ -39,28 +39,22 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 
-# The middle of a title bar (where its buttons are), a row of the bar
-# above any lettering, and how far the content has moved down since the
-# bar was ten pixels tall
-BAR_MID = 1 + TITLE_H // 2
-BAR_TOP = 2
-DOWN = TITLE_H - 10
 from ptest import check, summary
 
 # The window opens in slot 2: the compositor cascades at (70+12i, 30+12i)
-# and gsettings asks for 330x160 of content, so the frame is 332x172.
+# and gsettings asks for 360x210 of content.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
 WW, WH = 362, 210 + TITLE_H + 2
+# Zoomed, the window is the room between the bar and the dock
+ZY = BAR_H
+# The selected row's stripe, a little way down the content
+ROW = CONTENT_DY + 24
 
-# The bar buttons are 8x8 in the right-hand corner of the title bar:
-# [O] maximise, [_] minimise, [x] close.
-BTN = 8
 
-
-def max_button(x, w):
-    """The middle of the [O] button of a window at x, w wide."""
-    return x + w - 3 * BTN - 3 + BTN // 2
+def title(px):
+    """The title bar of the window that has the focus"""
+    return near(px, theme("dark")["title_bg"], 4)
 
 
 def blue(px):
@@ -75,10 +69,9 @@ def grey(px):
     return r > 200 and g > 200 and b > 200 and abs(r - g) < 12
 
 
-def orange(px):
-    """A desktop icon."""
-    r, g, b = px
-    return r > 200 and 120 < g < 200 and b < 70
+def dock_shows(at):
+    """The dock's first tile, with its white window in the middle"""
+    return min(at(*dock_tile(0, n_w=3))) > 200
 
 
 def main():
@@ -93,58 +86,49 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 272)           # the 'Config' icon
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 300)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            ty = h - 12                     # the top of the taskbar
             check("the application window opened", grey(at(WX + 200, WY + 120)))
             # The blue stripe of the selected row stops inside the small
             # window - so its reaching further later means something
-            # The content starts at (x+1, y+CONTENT_DY) and the selected
-            # row's stripe is 20 px below that.
             check("the marked row is visible in the window",
-                  blue(at(WX + 200, WY + CONTENT_DY + 20)))
+                  blue(at(WX + 200, WY + ROW)))
             check("and it ends inside the window, not beyond",
-                  not blue(at(WX + WW + 60, WY + CONTENT_DY + 20)))
+                  not blue(at(WX + WW + 60, WY + ROW)))
             check("outside the window is the desktop", not grey(at(600, WY + 120)))
-            check("the desktop icons show", orange(at(24, 30)))
+            check("the dock shows", dock_shows(at))
 
-            # --- maximise ---------------------------------------------
-            q.mouse_goto(max_button(WX, WW), WY + BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            # --- zoom ---------------------------------------------------
+            q.click(*light_xy(WX, WY, 2))
             time.sleep(2.5)
-            q.mouse_goto(600, ty - 30)
+            q.mouse_goto(600, work_bottom() - 30)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("the title bar runs across the whole screen",
-                  blue(at(600, BAR_TOP)) and blue(at(20, BAR_TOP)))
-            check("the window reaches down to the taskbar",
-                  grey(at(300, ty - 3)))
-            # The bar is how every other window is reached
-            # x=520: past the window buttons, before the clock - the
-            # bar's own grey, and nothing drawn on top of it
-            check("the taskbar still shows (the window did not cover it)",
-                  at(520, ty + 6)[0] > 150 and at(520, ty + 6)[1] > 150)
-            check("the desktop icons are covered", not orange(at(24, 30)))
+            check("the title bar runs across the whole screen, under the "
+                  "menu bar", title(at(600, ZY + 4)) and title(at(30, ZY + 4)))
+            check("the window reaches down to the dock",
+                  grey(at(300, work_bottom() - 3)))
+            # The dock is how every other window is reached
+            check("the dock still shows (the window did not cover it)",
+                  dock_shows(at))
+            check("and so does the menu bar",
+                  near(at(300, 12), bar_glass()[12][300], 1))
 
             # The ruler: the selected row's stripe now reaches the right
             # side of the screen, which it can only do if the program was
             # told the new width and given a buffer that big
             check("the program got the new size (the row bar reaches "
-                  "the right edge)", blue(at(600, 36 + DOWN)))
-            check("and it is not the title bar but the row",
-                  not blue(at(600, 20 + DOWN)))
+                  "the right edge)", blue(at(600, ZY + ROW)))
+            check("and it is the row, not anything else",
+                  not blue(at(600, ZY + CONTENT_DY + 4)))
 
             # --- restore ----------------------------------------------
-            q.mouse_goto(max_button(0, w), BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            q.click(*light_xy(0, ZY, 2))
             time.sleep(2.5)
             q.mouse_goto(600, 300)
             time.sleep(1.5)
@@ -153,20 +137,20 @@ def main():
             check("the window came back exactly where it was",
                   grey(at(WX + 200, WY + 120)) and
                   not grey(at(600, WY + 120)))
-            check("the desktop icons show again", orange(at(24, 30)))
             check("the program narrowed back (the row bar ends "
-                  "inside the window)", not blue(at(600, 36 + DOWN)))
-            check("and that bar is still in the window", blue(at(WX + 200, WY + CONTENT_DY + 20)))
+                  "inside the window)", not blue(at(600, WY + ROW)))
+            check("and that bar is still in the window",
+                  blue(at(WX + 200, WY + ROW)))
 
-            # --- dragging a maximised window puts it back -------------
-            q.mouse_goto(max_button(WX, WW), WY + BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            # --- dragging a zoomed window puts it back ----------------
+            q.click(*light_xy(WX, WY, 2))
             time.sleep(2)
+            q.mouse_goto(600, 300)
+            time.sleep(1)
             w, h, at = q.screen_raw()
-            check("the window is full screen again", blue(at(600, BAR_TOP)))
+            check("the window is full screen again", title(at(600, ZY + 4)))
 
-            q.mouse_goto(300, 5)            # grab the title bar
+            q.mouse_goto(300, ZY + 5)       # grab the title bar
             q.mouse_button(True)
             q.mouse_goto(320, 200)          # and pull it down
             time.sleep(0.5)
@@ -177,7 +161,7 @@ def main():
 
             w, h, at = q.screen_raw()
             check("once grabbed by the bar the window stopped being full screen",
-                  not blue(at(600, BAR_TOP)))
+                  not title(at(600, ZY + 4)))
             check("and it followed the pointer (the window is where it was dropped)",
                   grey(at(320, 260)))
             check("and the desktop is where the window no longer is",

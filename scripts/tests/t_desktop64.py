@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """ThreadOS smoke test: the graphical desktop in the 64-bit kernel.
 
-The compositor, the windows and the taskbar are the same desktop.c as in
+The compositor, the windows and the dock are the same desktop.c as in
 the 32-bit kernel - it came across without a single change. The whole
 difference sits in the compatibility dictionary: the desktop starts
 applications by name and takes the keyboard over, and both of those have
 a different name in this kernel.
 
-We check what can be seen: the background, the bars, the windows, their
-order after a click and that the cursor moves with the mouse.
+We check what can be seen: the background, the bar, the dock, the
+windows, the focus after a click and that the cursor moves with the
+mouse.
 """
 
 import os
@@ -20,14 +21,6 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
-
-TLO = (0, 130, 162)          # the desktop's blue
-BAR = (195, 195, 195)      # the light grey bar
-IKONA = (255, 162, 0)        # the orange icon
-
-
-def near(a, b, tol=40):
-    return all(abs(a[i] - b[i]) <= tol for i in range(3))
 
 
 def main():
@@ -76,24 +69,23 @@ def main():
             w, h, at = q.screen_raw()
             check(f"the desktop comes up in graphics mode ({w}x{h})",
                   w >= 640 and h >= 400)
-            check("the desktop background fills the screen",
-                  near(at(w // 2, h // 2), TLO))
-            check("the top bar is drawn",
-                  near(at(w // 2, 4), BAR))
-            check("the taskbar at the bottom is drawn",
-                  near(at(w // 2, h - 8), BAR))
-            # The icons stand in a column on the left; that orange
-            # patch is the first of them
-            check("the icons on the desktop",
-                  near(at(24, 32), IKONA))
+            mid = (w // 2, h // 2)
+            check("the aurora fills the screen (%s at the middle, %s expected)"
+                  % (at(*mid), aurora_px(*mid, w=w, h=h)),
+                  at(*mid) == aurora_px(*mid, w=w, h=h))
+            check("the menu bar is drawn - the aurora through glass",
+                  near(at(w // 2, 4), bar_glass(True, w, h)[4][w // 2], 1))
+            tile = dock_tile(0, w=w, h=h)
+            check("the dock is drawn: the first program's tile (%s)"
+                  % (at(*tile),), min(at(*tile)) > 200)
 
-            # The kernel's windows: two, one on top of the other. The
-            # window's grey background at the place the first one stands.
-            WINDOW = (235, 235, 235)
+            # The kernel's windows: two, one on top of the other - their
+            # bodies where each stands
+            body = theme("dark")["win_bg"]
             check("the 'Terminal' window is drawn",
-                  near(at(100, 100), WINDOW, 60))
+                  near(at(130, 120), body, 3))
             check("the 'Files' window is drawn",
-                  near(at(240, 140), WINDOW, 60))
+                  near(at(240, 140), body, 3))
 
             # The mouse: the cursor is to go where we move it. We check
             # that through a change of pixels at the destination.
@@ -113,8 +105,10 @@ def main():
             q.mouse_button(False)
             time.sleep(1.5)
             _, _, at3 = q.screen_raw()
-            check("a click on the title bar does not upset the compositor",
-                  near(at3(w // 2, h // 2), TLO))
+            check("a click on the title bar gives that window the focus",
+                  q.has_focus(180, 95))
+            check("and does not upset the compositor",
+                  at3(*mid) == aurora_px(*mid, w=w, h=h))
 
             # A key that no window wants goes to the kernel's shell -
             # the same as in protected mode. Long mode had nowhere to

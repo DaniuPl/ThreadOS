@@ -36,9 +36,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
+from ptest import near as ptest_near
 
-TB_H = 18
-CLOSE_SZ = 8
 
 # The cascade: slot 2 is the first application window, at (94,54);
 # gsettings asks for a 360x210 content buffer.
@@ -54,24 +53,31 @@ def is_win(px):
 
 
 def is_accent(px):
-    r, g, b = px                    # COL_TITLE, the accent blue
-    return b > 120 and r < 90 and g < 90
+    """The outline of where a window would go: the accent, nearly
+    opaque"""
+    return ptest_near(px, theme("dark")["accent"], 45)
 
 
-def title_run(at, w, top=60):
-    """The widest run of the accent colour in the top strip of the
-    screen: the title bar of the window that has the focus. Its width
-    is the window's width, which is the thing a snap changes."""
+def is_title(px):
+    return ptest_near(px, theme("dark")["title_bg"], 3)
+
+
+def title_run(at, w, top=300):
+    """The widest run of the focused title bar's colour, read two rows
+    into the bars - above the lights and the lettering: the title bar
+    of the window that has the focus. Its width is the window's width,
+    less what its round corners take, which is the thing a snap
+    changes. Returns (width, its left end, the bar's top row)."""
     best = (0, 0, 0)
-    for y in range(0, top):
+    for y in range(BAR_H, top):
         x = 0
         while x < w:
-            if is_accent(at(x, y)):
+            if is_title(at(x, y)):
                 s = x
-                while x < w and is_accent(at(x, y)):
+                while x < w and is_title(at(x, y)):
                     x += 1
                 if x - s > best[0]:
-                    best = (x - s, s, y)
+                    best = (x - s, s, y - 2)
             else:
                 x += 1
     return best
@@ -107,15 +113,14 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 272)              # the "Config" icon
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
             half = w // 2
-            deck = h - TB_H                    # the room a window may have
+            deck = work_bottom()               # the room a window may have
             check("the settings stand where they always do",
                   is_win(at(WX + 300, WY + 150)))
 
@@ -125,8 +130,8 @@ def main():
                  hold=lambda: seen.append(q.screen_raw()))
             _, _, mid = seen[0]
             check("there is no outline in the middle of the screen",
-                  not is_accent(mid(half - 2, deck - 40)) and
-                  not is_accent(mid(4, deck - 40)))
+                  not is_accent(mid(half - 5, deck - 40)) and
+                  not is_accent(mid(5, deck - 40)))
 
             # --- the left edge ------------------------------------------
             # The window is now at (200,196) - the drag above moved it
@@ -135,21 +140,23 @@ def main():
             drag(q, 306, 200, 4, 200,
                  hold=lambda: seen.append(q.screen_raw()))
             _, _, at2 = seen[0]
-            # The outline stands where the window would: down the middle
-            # of the screen and along its bottom, over the window that is
-            # being dragged (it is drawn last, so it is seen)
+            # The outline stands where the window would, a little inside
+            # it: down the middle of the screen and along its bottom,
+            # over the window that is being dragged (it is drawn last,
+            # so it is seen)
             check("at the left edge the outline of the left half shows",
-                  is_accent(at2(half - 2, 300)) and
-                  is_accent(at2(1, 300)))
-            check("and the outline ends above the taskbar",
-                  is_accent(at2(200, deck - 1)) and
+                  is_accent(at2(half - 5, 300)) and
+                  is_accent(at2(5, 300)))
+            check("and the outline ends above the dock",
+                  is_accent(at2(200, deck - 5)) and
                   not is_accent(at2(200, deck + 6)))
 
             w, h, at = q.screen_raw()
             check("once dropped the window takes the left half",
                   is_win(at(half - 10, 300)) and not is_win(at(half + 10, 300)))
-            check("from the top to the taskbar",
-                  is_accent(at(half - 40, 5)) and is_win(at(100, deck - 4)))
+            check("from under the bar down to the dock",
+                  is_title(at(half - 40, BAR_H + 3)) and
+                  is_win(at(100, deck - 4)))
             # The program was told its new size and drew itself in it;
             # a buffer that was not remade would leave the old picture
             # or rubbish down there
@@ -157,7 +164,7 @@ def main():
                   is_win(at(20, deck - 20)))
 
             # --- the right edge -----------------------------------------
-            drag(q, 150, 4, w - 5, 200)
+            drag(q, 150, BAR_H + 4, w - 5, 200)
             w, h, at = q.screen_raw()
             check("a window dragged right takes the right half",
                   is_win(at(half + 10, 300)) and
@@ -166,29 +173,30 @@ def main():
                   is_win(at(w - 3, 300)))
 
             # --- the top: the whole screen ------------------------------
-            drag(q, half + 150, 4, 320, 20)
+            drag(q, half + 150, BAR_H + 4, 320, 20)
             w, h, at = q.screen_raw()
             check("a window dragged to the top takes the whole screen",
                   is_win(at(20, 300)) and is_win(at(w - 3, 300)))
-            check("but it does not run over the taskbar",
+            check("but it does not run over the dock",
                   not is_win(at(320, h - 4)))
 
-            # --- and [] gives it its own size back ----------------------
-            q.mouse_goto(w - 3 * CLOSE_SZ - 3 + 4, 6)
+            # --- and the green light gives it its own size back ---------
+            q.mouse_goto(*light_xy(0, BAR_H, 2))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(2)
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("the [] button gives the window its own size back",
-                  not is_win(at(w - 3, 300)) and not is_win(at(20, 30)))
+            check("the green light gives the window its own size back",
+                  not is_win(at(w - 3, 300)) and not is_win(at(20, 40)))
             # Its own size is 362 wide - the size it asked for. Half
             # the screen is 320 and the whole of it 640, so this one
-            # number tells the three apart.
+            # number tells the three apart. (Two rows down, the round
+            # corners take a few pixels at either end.)
             wide, x0, ty = title_run(at, w)
             check("and it is its own width (%d px, not half "
-                  "nor the whole screen)" % wide, abs(wide - (WW - 2)) <= 4)
+                  "nor the whole screen)" % wide, abs(wide - (WW - 4)) <= 6)
             # After four drags, three snaps and a restore it is still a
             # window: a lit title bar with its own body under it
             check("the window survived four drags and still has the focus",
@@ -199,9 +207,8 @@ def main():
             # terminal's screen is BLACK and a window's background is
             # grey, so one look tells which half holds which - and that
             # they do not overlap.
-            drag(q, x0 + 40, ty + 4, w - 5, 200)
-            q.mouse_goto(24, 192)              # the "Term" icon
-            q.mouse_click()
+            drag(q, x0 + 60, ty + 4, w - 5, 200)
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(4)
             drag(q, 206, 70, 4, 200)
             q.mouse_goto(320, 440)
@@ -212,9 +219,11 @@ def main():
             check("the terminal takes the left half (a black screen)", dark)
             check("and the settings the right (a grey background)",
                   is_win(at(half + 100, 300)))
+            # (a little further right than left: the terminal has the
+            # focus, and its shadow falls on the settings beside it)
             check("and they do not overlap - the border is in the middle",
                   near(at(half - 10, deck - 30), 0) and
-                  is_win(at(half + 10, 300)))
+                  is_win(at(half + 20, 300)))
         finally:
             q.close()
     finally:

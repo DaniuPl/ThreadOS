@@ -82,27 +82,6 @@ def term_rows(at, rows=20, cols=48):
     return out
 
 
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-
-
-def buttons(at, w, y):
-    """The window buttons on the taskbar: everything on that row which
-    is not the bar's own grey."""
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        on_bar = all(abs(c - 210) <= 6 for c in at(x, y))
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
-
-
 def is_page(px):
     return all(c > 235 for c in px)          # the white of the page
 
@@ -249,8 +228,7 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.mouse_goto(24, 312)              # the "Editor" icon
-            q.mouse_click()
+            q.launch_dock(7)                # the "Editor" tile
             time.sleep(4)
             q.mouse_goto(CX + 200, CY + 100)
             q.mouse_click()                    # the focus, into the page
@@ -288,8 +266,7 @@ def sixty_four():
             # goes through the terminal window, which is a fuller
             # answer anyway: one application wrote the file and
             # another read it.
-            q.mouse_goto(24, 192)              # the "Term" icon
-            q.mouse_click()
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(5)
             q.mouse_goto(TWX + 200, TWY + 100)
             q.mouse_click()
@@ -307,9 +284,7 @@ def sixty_four():
             # in long mode that is a fork and an exec from a program
             # drawing in a window, which is its own piece of code
             fx, fy = 118, 78              # the next slot of the cascade
-            q.mouse_goto(24, 112)         # the "Files" icon
-            time.sleep(0.6)               # the pointer first, the button after
-            q.mouse_click()
+            q.launch_dock(2)              # the "Files" tile
             time.sleep(5)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -389,8 +364,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.mouse_goto(24, 312)              # the "Editor" icon
-            q.mouse_click()
+            q.launch_dock(7)                # the "Editor" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -508,8 +482,7 @@ def main():
             # Checked by something that is not the program that wrote
             # it: the kernel's shell, which listens when no window has
             # the focus.
-            q.mouse_goto(600, 430)
-            q.mouse_click()                    # the desktop takes the focus
+            q.click_desktop()
             time.sleep(1)
             q.type_line("cat note")
             time.sleep(2)
@@ -618,9 +591,7 @@ def main():
             # a window that had gone.
             q.mouse_goto(600, 200)
             time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            row = h - TB_H + 2
-            open_before = len(buttons(at, w, row))
+            open_before = q.dock_windows()
             q.sendkey("alt-f4")
             time.sleep(3)
             w, h, at = q.screen_raw()
@@ -641,11 +612,10 @@ def main():
             left = open_before
             for _ in range(10):                # waiting, not asserting
                 time.sleep(1)
-                w, h, at = q.screen_raw()
-                left = len(buttons(at, w, row))
+                left = q.dock_windows()
                 if left < open_before:
                     break
-            check("a second Alt+F4 closes it (%d -> %d buttons on the bar)"
+            check("a second Alt+F4 closes it (%d -> %d windows in the dock)"
                   % (open_before, left), left == open_before - 1)
             check("and the program ended by itself, it was not killed",
                   "process \'gedit\' has ended (code 0)" in q.serial())
@@ -654,8 +624,7 @@ def main():
             # 'gedit notatka' opens that file at once. Making a person
             # type the name again, in the program they have just told
             # which file they mean, is what makes an editor a chore.
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             q.type_line("run gedit note")
             time.sleep(4)
@@ -672,16 +641,9 @@ def main():
             # to a text file means opening it in the editor.
             q.sendkey("alt-f4")
             time.sleep(2.5)
-            # The pointer first, and only then the button: the desktop
-            # decides whether a press on an icon was a click or the
-            # start of a drag by where the pointer was when the button
-            # went DOWN. Moving and pressing in the same breath leaves
-            # it seeing a press at the old place, on no icon at all -
-            # and then nothing starts, which is a long thing to look at
-            # before one sees it.
-            q.mouse_goto(24, 112)              # the "Files" icon
-            time.sleep(0.6)
-            q.mouse_click()
+            # The editor is closed again: the kernel's two windows are
+            # all the dock holds
+            q.launch_dock(2, n_w=2)            # the "Files" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)

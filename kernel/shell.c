@@ -10,6 +10,7 @@
  */
 
 #include "include/fonts.h"
+#include "include/gfx.h"
 #include <stdint.h>
 #include "include/shell.h"
 #include "include/keyboard.h"
@@ -1051,6 +1052,8 @@ static void run_command(char *cmd)
         hwinfo_print();
     else if (!strcmp(cmd, "font"))
         fonts_command(arg);
+    else if (!strcmp(cmd, "shape"))
+        gfx_command(arg);
     else if (!strcmp(cmd, "disks")) {
         if (starts(arg, "read"))
             hwinfo_disk_read(arg + sizeof("read") - 1);

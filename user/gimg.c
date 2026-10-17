@@ -544,6 +544,48 @@ static int show_bmp(int fd, const uint8_t *head)
    kept afterwards: the window's content IS the copy, and a second copy
    in this program's memory would be three hundred kilobytes held for
    no reason. */
+static int show_tsc2(const char *name)
+{
+    int fd = (int)sys_open(name, O_READ);
+    uint8_t h8[8];
+    if (fd < 0 || (int)sys_read(fd, h8, 8) != 8) {
+        if (fd >= 0)
+            sys_close(fd);
+        ecopy(note, "this is not a picture", sizeof(note));
+        return -1;
+    }
+    img_w = h8[4] | (h8[5] << 8);
+    img_h = h8[6] | (h8[7] << 8);
+    if (img_w <= 0 || img_w > ROW_MAX || img_h <= 0 || !colour_win) {
+        sys_close(fd);
+        ecopy(note, colour_win ? "odd dimensions" : "no colours here",
+              sizeof(note));
+        return -1;
+    }
+    int room_w = cw, room_h = ch - STATUS_H - 2;
+    step = 1;
+    while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
+        step++;
+
+    win_rect(winid, 0, 0, cw, ch, C_BG);
+    int drawn = 0;
+    for (int y = 0; y < img_h; y++) {
+        if ((int)sys_read(fd, row, (uint32_t)img_w * 3) != img_w * 3)
+            break;
+        if (y % step)
+            continue;
+        int n = 0;
+        for (int x = 0; x < img_w && n < ROW_MAX; x += step)
+            out32[n++] = rgb(row[x * 3], row[x * 3 + 1], row[x * 3 + 2]);
+        win_blit32(winid, 0, drawn, n, 1, out32);
+        drawn++;
+        if (drawn >= room_h)
+            break;
+    }
+    sys_close(fd);
+    return 0;
+}
+
 static void show(const char *name)
 {
     int fd = (int)sys_open(name, O_READ);
@@ -607,6 +649,23 @@ static void show(const char *name)
             return;
         }
         sys_close(fd);
+        ecopy(fname, name, NAME_MAX_LEN);
+        ecopy(note, "loaded", sizeof(note));
+        retitle();
+        return;
+    }
+
+    /* The machine's own screenshot of a screen of real colours: "TSC2",
+       the size, three bytes a pixel. Read from the top again, because
+       the header is eight bytes and what was read above is more. */
+    if (head[0] == 'T' && head[1] == 'S' && head[2] == 'C' &&
+        head[3] == '2') {
+        sys_close(fd);
+        int ok = show_tsc2(name);
+        if (ok < 0) {
+            img_w = 0;
+            return;
+        }
         ecopy(fname, name, NAME_MAX_LEN);
         ecopy(note, "loaded", sizeof(note));
         retitle();

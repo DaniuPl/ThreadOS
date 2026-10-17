@@ -534,6 +534,10 @@ void video_clear(uint8_t color)
 
 void video_fill_rect(int x, int y, int w, int h, uint8_t color)
 {
+    if (vid_bypp == 4) {
+        video_fill_rect_rgb(x, y, w, h, palette_rgb[color]);
+        return;
+    }
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
             video_putpixel(x + i, y + j, color);
@@ -608,8 +612,32 @@ void video_putpixel_rgb(int x, int y, uint32_t rgb)
         put_px(fb + y * vid_pitch + x * vid_bypp, rgb);
 }
 
+/* The drawing buffer's row as words, for code that works on many
+   pixels at once (kernel/gfx.c). NULL unless the screen is four bytes a
+   pixel - every other format goes through the pixel calls. */
+uint32_t *video_row32(int y)
+{
+    if (vid_bypp != 4 || (unsigned)y >= (unsigned)vid_h)
+        return (uint32_t *)0;
+    return (uint32_t *)(uintptr_t)(fb + (uint32_t)y * vid_pitch);
+}
+
 void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb)
 {
+    /* Clipped once, then whole rows of words: the compositor fills
+       most of the screen with this every frame. */
+    if (vid_bypp == 4) {
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > vid_w) w = vid_w - x;
+        if (y + h > vid_h) h = vid_h - y;
+        for (int j = 0; j < h; j++) {
+            uint32_t *row = video_row32(y + j) + x;
+            for (int i = 0; i < w; i++)
+                row[i] = rgb;
+        }
+        return;
+    }
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
             video_putpixel_rgb(x + i, y + j, rgb);

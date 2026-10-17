@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the taskbar - pictures on it, and its shape.
+"""ThreadOS smoke test: the dock - its pictures, its tiles, its size.
 
-The bar carried names, trimmed to six letters, so 'Settings' read as
-'Configi' and two terminals read the same. It carried them because a
-window knows its title and nothing else - not what was clicked to start
-it.
+The dock is a row of tiles at the bottom of the screen: first the
+programs it starts, then one tile for every window on this desktop. A
+window wears the picture of the program it was started from - the
+desktop remembers, when it launches something, which tile it came
+from, because a window knows its process and nothing else.
 
-Now the desktop remembers: when it launches something from an icon it
-notes which icon it was, and the window that process opens a moment
-later wears the same picture. Nothing else can join the two - the
-compositor sees a pid, and the icons are the only place where a program
-has a face.
+What is asserted is what a person would check, and it is checked from
+the pixels:
 
-And the bar itself became a matter of taste rather than of fate. Two
-settings, kept on the disk like the rest:
+  that a window's tile is the same picture as its program's tile -
+  pixel for pixel, which is only true if both are where the layout
+  says they are and drawn from the same picture; that two different
+  programs have different pictures; that the kernel's own two windows
+  share the plain window
 
-  'pasek'  - 100, 75 or 50 percent of the screen. Narrower than the
-             screen it is centred, which is what makes it a dock.
-  'ikony'  - 0 from the left, 1 in the middle, 2 up against the clock.
+  that a program that is running has a dot under its tile and one that
+  is not has none
 
-What is asserted here is what a person would check: that the bar really
-is that wide, that the pictures really move, that two windows of
-DIFFERENT programs get different pictures - and, the one that matters
-most, that a button is still clickable exactly where it is drawn, in
-every one of those arrangements.
+  that the launch menu shows the same faces, and answers the pointer
+
+  that a tile's name comes up over it when the pointer is there - and
+  goes when it leaves
+
+  and that the dock's size is a setting ('dock' 0, 1, 2) - the tiles
+  really are that large, and a tile still clicks exactly where it is
+  drawn
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -36,73 +39,32 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, font8x8
+from ptest import check, summary
 
-TB_H = 18
-CLOCK_W = 8 * 8 + 6
-
-
-def bar_span(at, w, y):
-    """Where the bar begins and ends: it is a light strip, and beside
-    it (when it is narrower than the screen) there is desktop."""
-    xs = [x for x in range(w)
-          if at(x, y)[0] > 160 and at(x, y)[1] > 160 and at(x, y)[2] > 160]
-    return (min(xs), max(xs)) if xs else (-1, -1)
+CLOCK, SETTINGS = 1, 6       # their places among the programs
 
 
-def buttons(at, w, y, x_from, x_to):
-    out, start = [], None
-    for x in range(x_from, x_to):
-        r, g, b = at(x, y)
-        on_bar = r > 160 and g > 160 and b > 160
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, x_to - 1))
-    return out
+def tile_px(at, g, k, inset=3):
+    """The inside of the k-th tile - its corners left out, they are
+    blended with what is behind"""
+    tx, ty = g["tiles"][k]
+    t = g["tile"]
+    return tuple(at(tx + i, ty + j) for j in range(inset, t - inset)
+                 for i in range(inset, t - inset))
 
 
-def picture(at, span, ty):
-    """The pixels of the picture on a button, as a tuple - so that two
-    buttons can be compared without knowing what is drawn on them."""
-    a, b = span
-    return tuple(at(x, ty + 3 + dy)
-                 for dy in range(12) for x in range(a, b + 1))
+def dot_at(at, g, k):
+    tx, ty = g["tiles"][k]
+    return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
 
-def read_line(q, ox, oy, cols):
-    """One line of text off the screen, through the kernel's own
-    font - for reading what a hint says."""
-    w, h, at = q.screen_raw()
-    font = font8x8()
-    counts = {}
-    for y in range(8):
-        for x in range(ox, ox + cols * 8):
-            p = at(x, oy + y)
-            counts[p] = counts.get(p, 0) + 1
-    bg = max(counts, key=counts.get)
-
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if at(ox + c * 8 + x, oy + y) != bg:
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.rstrip()
-
-
-def open_apps(q, icon_ys):
-    for iy in icon_ys:
-        q.mouse_goto(24, iy)
-        q.mouse_click()
-        time.sleep(2.5)
+def open_two(q, want=None):
+    """The clock and the settings, from the dock. Each new window adds a
+    tile, and the dock - as wide as what is in it - moves."""
+    q.launch_dock(CLOCK, n_w=2, want=want)
+    time.sleep(2.5)
+    q.launch_dock(SETTINGS, n_w=3, want=want)
+    time.sleep(2.5)
     q.mouse_goto(600, 300)
     time.sleep(1.5)
 
@@ -113,79 +75,70 @@ def main():
         f.truncate(16 * 1024 * 1024)
     slog = tempfile.mktemp(suffix=".log")
 
-    print("--- the pictures on the bar ---")
+    print("--- the pictures in the dock ---")
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            # The clock (icon 1) and the settings (icon 6): two
-            # different programs, so two different pictures
-            open_apps(q, [72, 272])
+            open_two(q)
 
+            g = dock_geom(n_w=4)
             w, h, at = q.screen_raw()
-            ty = h - TB_H
-            row = ty + 2
-            spans = buttons(at, w, row, 46, w - CLOCK_W - 2)
-            check("four windows have buttons (two of the kernel's and two applications)",
-                  len(spans) == 4)
+            win = [tile_px(at, g, DOCK_N + j) for j in range(4)]
+            check("the clock's window wears the clock's picture - pixel for "
+                  "pixel the same as its tile", win[2] == tile_px(at, g, CLOCK))
+            check("the settings' window wears the settings' picture",
+                  win[3] == tile_px(at, g, SETTINGS))
+            check("and the two pictures are different", win[2] != win[3])
+            check("the kernel's two windows share the plain window, the "
+                  "picture of the first program",
+                  win[0] == win[1] == tile_px(at, g, 0))
 
-            pics = [picture(at, s, ty) for s in spans]
-            check("the clock button and the settings button have DIFFERENT pictures",
-                  pics[2] != pics[3])
-            check("and both have something drawn on them",
-                  any(p != pics[2][0] for p in pics[2]) and
-                  any(p != pics[3][0] for p in pics[3]))
-            # Two windows of the kernel itself, which nobody launched
-            # from an icon: they share the plain window mark
-            check("the kernel's windows have the same default picture",
-                  pics[0] == pics[1])
+            dark = theme("dark")
+            running = [k for k in range(DOCK_N)
+                       if near(dot_at(at, g, k), dark["dot"], 60)]
+            check("the programs that run have a dot under them, the others "
+                  "none (dots under %s)" % running, running == [CLOCK, SETTINGS])
 
             # --- the launch menu shows the same faces ----------------
-            # A program that looks like three different things - an
-            # icon, a button and a word in a menu - is three things to
-            # remember. It is one picture in all three places.
-            q.mouse_goto(20, ty + 8)
-            q.mouse_click()
-            time.sleep(1)
+            # A program that looks like two different things - a tile
+            # and a word in a menu - is two things to remember.
+            q.open_menu()
             q.mouse_goto(300, 300)          # the pointer off the menu
             time.sleep(1)
             w, h, at = q.screen_raw()
-            entry_y = ty - 2 * 16          # the third entry from the top
-            marks = sum(1 for dy in range(12) for dx in range(12)
-                        if at(8 + dx, entry_y + 2 + dy) == (0, 0, 0))
-            check("a menu entry has a picture (%d pixels)" % marks, marks > 8)
+            top = menu_y("gclock") - MENU_ROW // 2
+            ix, iy = MENU_X0 + 10, top + (MENU_ROW - MENU_ICON) // 2
+            face = sum(1 for dy in range(MENU_ICON) for dx in range(MENU_ICON)
+                       if min(at(ix + dx, iy + dy)) > 220)
+            check("the clock's entry has the clock's face on it (%d white "
+                  "pixels)" % face, face > 40)
 
             # The entry under the pointer answers: it wears the accent
-            q.mouse_goto(60, entry_y + 8)
+            q.mouse_goto(MENU_X0 + 60, menu_y("gclock"))
             time.sleep(1)
             w, h, at = q.screen_raw()
-            r, g, b = at(100, entry_y + 8)
-            check("the entry under the pointer is highlighted (%d,%d,%d)"
-                  % (r, g, b), b > 120 and r < 90 and g < 90)
-            others = at(100, entry_y - 16 + 8)
-            check("and the other entries are not", not (others[2] > 120 and
-                                           others[0] < 90 and others[1] < 90))
+            right = MENU_X0 + MENU_W - 16
+            check("the entry under the pointer is highlighted %s"
+                  % (at(right, menu_y("gclock")),),
+                  near(at(right, menu_y("gclock")), dark["accent"], 6))
+            check("and the other entries are not",
+                  not near(at(right, menu_y("gfiles")), dark["accent"], 60))
+            q.open_menu()                   # closes it
 
-            # --- the name comes back when asked for ------------------
-            # A picture says WHICH program; it does not say which of
-            # two terminals. The name appears over the button the
-            # pointer is on, and only then.
-            q.mouse_goto(20, ty + 8)       # close the menu
-            q.mouse_click()
-            time.sleep(1)
-            last = spans[-1]               # the settings window's button
-            q.mouse_goto((last[0] + last[1]) // 2, ty + 8)
+            # --- the name comes up when asked for ------------------------
+            # A picture says WHICH program; it does not say which of two
+            # terminals. The name comes up over the tile the pointer is
+            # on, and only then.
+            said = q.dock_hint(DOCK_N + 3, n_w=4)
+            check("the window's name comes up over its tile ('%s')" % said,
+                  said == "Settings")
+            q.mouse_goto(300, 300)          # the pointer off the dock
             time.sleep(1.5)
-            said = read_line(q, last[0] + 4, ty - 12, 14)
-            check("the window's name appears above the button ('%s')" % said,
-                  "Settings" in said)
-
-            q.mouse_goto(300, 300)         # the pointer off the bar
-            time.sleep(1.5)
-            gone = read_line(q, last[0] + 4, ty - 12, 14)
+            gone = q.read_hint(g["y"] - 6 - HINT_H)
             check("and it goes when the pointer leaves ('%s')" % gone,
-                  "Settings" not in gone)
+                  gone == "")
         finally:
             q.close()
     finally:
@@ -193,10 +146,10 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
-    # --- the shape of the bar is a setting ---------------------------
-    for width, align, name in ((50, 1, "half the screen, icons centred"),
-                               (75, 2, "three quarters, icons from the right")):
-        print("--- the bar: %s ---" % name)
+    # --- the size of the dock is a setting ---------------------------
+    for size, want, name in ((0, DOCK_TILE_S, "small"),
+                             (2, DOCK_TILE_L, "large")):
+        print("--- the dock: %s ---" % name)
         disk2 = tempfile.mktemp(suffix=".img")
         with open(disk2, "wb") as f:
             f.truncate(16 * 1024 * 1024)
@@ -205,54 +158,41 @@ def main():
                       serial=tempfile.mktemp(suffix=".log"))
             try:
                 q2.wait_for("ThreadOS shell", timeout=40)
-                for cmd in ("set taskbar %d" % width, "set icons %d" % align):
-                    q2.type_line("sudo " + cmd)
-                    time.sleep(1)
-                    q2.command("thread", "saved", timeout=30)
+                q2.type_line("sudo set dock %d" % size)
+                time.sleep(1)
+                q2.command("thread", "saved", timeout=30)
                 q2.type_line("desktop")
                 time.sleep(5)
                 q2.mouse_home()
-                open_apps(q2, [72, 272])
+                open_two(q2, want=want)
 
+                g = dock_geom(n_w=4, want=want)
                 w, h, at = q2.screen_raw()
-                ty = h - TB_H
-                row = ty + 2
-                x0, x1 = bar_span(at, w, ty + 1)
-                wide = x1 - x0 + 1
-                want = w * width // 100
-                check("the bar takes %d%% of the screen (%d of %d px)"
-                      % (width, wide, w), abs(wide - want) <= 8)
-                check("and it is centred (from %d to %d)" % (x0, x1),
-                      abs(x0 - (w - want) // 2) <= 6)
+                tx, ty = g["tiles"][0]
+                t = g["tile"]
+                # Asked for 'want'; a dock that would not fit the screen
+                # at that size makes its tiles a little smaller
+                check("the tiles are the size asked for, or as near as "
+                      "fits (%d of %d)" % (t, want), want - 3 <= t <= want)
+                # The first program's picture is a blue slope with a
+                # white window on it: blue from one edge of the tile to
+                # the other, and not one pixel further
+                edge = [at(tx + 1, ty + t // 2)[2], at(tx + t - 2, ty + t // 2)[2]]
+                out = [at(tx - 2, ty + t // 2)[2], at(tx + t + 1, ty + t // 2)[2]]
+                check("the first program's picture fills its tile exactly "
+                      "(blue %s at its edges, %s just outside)" % (edge, out),
+                      min(edge) > 240 and max(out) < 230 and
+                      min(at(tx + t // 2, ty + t // 2 + 2)) > 200)
+                check("a window's tile is still its program's picture",
+                      tile_px(at, g, DOCK_N + 3) == tile_px(at, g, SETTINGS))
 
-                spans = buttons(at, w, row, x0 + 46, x1 - CLOCK_W - 2)
-                check("the buttons are on the bar (%d)" % len(spans),
-                      len(spans) == 4)
-                if align == 1:
-                    middle = (spans[0][0] + spans[-1][1]) // 2
-                    check("the icons stand in the middle of the free room "
-                          "(the middle %d, the bar %d..%d)" % (middle, x0, x1),
-                          abs(middle - (x0 + x1) // 2) <= 24)
-                else:
-                    gap = (x1 - CLOCK_W) - spans[-1][1]
-                    check("the icons are pushed up against the clock (a gap of %d px)"
-                          % gap, gap <= 12)
-
-                # The one that matters: a button clicks where it is
-                # drawn, whatever the settings did to the bar
-                last = spans[-1]
-                q2.mouse_goto((last[0] + last[1]) // 2, ty + 8)
-                time.sleep(0.5)
-                q2.mouse_click()
-                time.sleep(1.5)
+                # The one that matters: a tile clicks where it is drawn,
+                # whatever size the setting made it. The Terminal goes
+                # behind the settings, then its tile brings it back.
+                q2.click(*dock_window(0, 4, want=want))
                 q2.mouse_goto(600, 300)
-                time.sleep(1.5)
-                w, h, at = q2.screen_raw()
-                spans2 = buttons(at, w, row, x0 + 46, x1 - CLOCK_W - 2)
-                a, b = spans2[-1]
-                r, g, bl = at((a + b) // 2, ty + 2)
-                check("and a click hits the button where it is seen",
-                      bl > 120 and r < 90 and g < 90)
+                check("and a click on a window's tile, where it is seen, "
+                      "gives that window the focus", q2.wait_focus(40, 60))
             finally:
                 q2.close()
         finally:

@@ -116,11 +116,11 @@ def main():
             check("the wallpaper has more colours than a palette of 192 could carry "
                   "(%d different)" % len(blend), len(blend) > 400)
 
-            # The wallpaper's colours live above the desktop's, so a
-            # window drawn on top of it is still the window's grey
+            # A window drawn on top of the picture is still the window,
+            # and the dock is still the dock
             check("a window on the wallpaper still has its own colour",
-                  at(80, 100) == (227, 227, 227))
-            check("and the taskbar its own", at(300, h - 6)[0] > 190)
+                  near(at(130, 120), theme("dark")["win_bg"], 3))
+            check("and the dock its own", min(at(*dock_tile(0))) > 200)
         finally:
             q.close()
 
@@ -140,11 +140,10 @@ def main():
             time.sleep(2)
 
             w, h, at = q2.screen_raw()
-            # Back to the gradient: one colour all the way across
-            check("a missing file does not break the desktop - the gradient is back",
-                  len(row_colours(at, 300)) == 1)
-            check("and the background still darkens downwards",
-                  sum(at(600, 40)) > sum(at(600, 400)))
+            # Back to the aurora, to the last bit
+            spots = [(600, 300), (400, 200), (500, 380)]
+            check("a missing file does not break the desktop - the aurora is "
+                  "back", all(at(x, y) == aurora_px(x, y) for x, y in spots))
         finally:
             q2.close()
             if os.path.exists(slog2):

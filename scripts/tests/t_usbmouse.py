@@ -96,7 +96,7 @@ def main():
         check("and it keeps following it (~200,121)",
               q.wait_pixel(200, 121, (255, 255, 255)))
         check("and the old place was painted over with the background (~50,41)",
-              q.wait_pixel(50, 41, (0, 128, 160)))
+              q.wait_background(50, 41, tol=0))
     finally:
         q.close()
 

@@ -143,7 +143,7 @@ def main():
 
                 # The window: slot two, content a pixel in and a title
                 # bar down (kernel/desktop.c)
-                CX, CY = 95, 65
+                CX, CY = 95, 54 + CONTENT_DY
                 text = q3.read_text(CX + 6, CY + 4, 44, 4, line_h=12)
                 check("the window says how loud it is",
                       "Volume:" in text and "%" in text)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the icons on the desktop come from a file.
+"""ThreadOS smoke test: the programs in the dock come from a file.
 
-Seven programs, decided when the kernel was built. Adding one meant
+Nine programs, decided when the kernel was built. Adding one meant
 editing kernel/desktop.c and building a kernel - which is the same as
 saying that a person cannot add one.
 
@@ -20,10 +20,10 @@ which is what this test does, because a format nobody on the machine
 can produce is a format for somebody else's machine.
 
 What is checked: the file is really read (the kernel says so and the
-desktop has as many icons as the file has lines, with the names and
-pictures the file gave them), the icons still WORK (clicking one starts
+dock has as many programs as the file has lines, with the names and
+pictures the file gave them), the tiles still WORK (clicking one starts
 its program), and a machine whose file says nothing usable keeps the
-seven it was born with - a desktop with no icons is a machine with
+nine it was born with - a dock with nothing in it is a machine with
 nothing to click, and no broken line should be able to do that.
 
 Run on its own or through scripts/run_tests.py, which starts all the
@@ -39,46 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
-ICON_W, ICON_H = 32, 24
-ORANGE = (255, 162, 0)
-
-
-def icon_y(k):
-    return 20 + k * 40
-
-
-def is_tile(at, k):
-    """Is there an orange tile at that place? Read at its corner, away
-    from the picture in the middle."""
-    return at(12, icon_y(k) + 4) == ORANGE
-
-
-def label_of(q, k, cols=12):
-    """The name under a tile, read through the kernel's own font. Only
-    the white pixels count: the caption is drawn twice, once in black
-    one pixel down, so that it reads on any wallpaper - and the shadow
-    would make nonsense of a glyph looked up whole."""
-    w, h, at = q.screen_raw()
-    font = font8x8()
-    y0 = icon_y(k) + ICON_H + 2
-    out = ""
-    for c in range(cols):
-        pattern = []
-        for y in range(8):
-            bits = 0
-            for x in range(8):
-                if at(8 + c * 8 + x, y0 + y) == (255, 255, 255):
-                    bits |= 1 << x
-            pattern.append(bits)
-        out += font.get(tuple(pattern), " " if not any(pattern) else "?")
-    return out.rstrip()
-
-
-def picture_of(at, k):
-    x0 = 8 + (ICON_W - 12) // 2
-    y0 = icon_y(k) + (ICON_H - 12) // 2
-    return tuple(at(x0 + dx, y0 + dy) == (255, 255, 255)
-                 for dy in range(12) for dx in range(12))
+def picture_of(at, g, k):
+    """The inside of the k-th tile in the dock"""
+    tx, ty = g["tiles"][k]
+    t = g["tile"]
+    return tuple(at(tx + i, ty + j) for j in range(3, t - 3)
+                 for i in range(3, t - 3))
 
 
 def write_list(q, lines):
@@ -108,9 +74,6 @@ def main():
         try:
             q.wait_for("ThreadOS shell", timeout=40)
             write_list(q, wanted)
-            # The kernel's own two windows sit over the left-hand
-            # column, and the icon captions run under them - so they go
-            # out of the way before anything is read off the screen
 
             shown = q.command("cat desktop.icons", "gsettings", timeout=30)
             for app, label, art in wanted:
@@ -120,10 +83,6 @@ def main():
             q.type_line("desktop")
             time.sleep(6)
             q.mouse_home()
-            for bx, by in ((146, 66), (286, 101)):    # the two [_] buttons
-                q.mouse_goto(bx, by)
-                q.mouse_click()
-                time.sleep(1)
             q.mouse_goto(560, 300)
             time.sleep(2)
 
@@ -131,27 +90,33 @@ def main():
             check("the kernel read the icon list and says how many",
                   "icons from the file 'desktop.icons': 3" in log)
 
-            w, h, at = q.screen_raw()
-            check("there are three tiles on the desktop",
-                  is_tile(at, 0) and is_tile(at, 1) and is_tile(at, 2))
-            check("and not one more", not is_tile(at, 3))
+            # Three programs and the kernel's two windows: the dock is
+            # laid out for exactly that - a dot under each window's
+            # tile where three programs put it, and not where four or
+            # nine would have
+            check("there are three programs in the dock, and not one more",
+                  q.dock_windows(n_l=3) == 2 and q.dock_windows(n_l=4) != 2
+                  and q.dock_windows() != 2)
 
             for k, (app, label, art) in enumerate(wanted):
-                got = label_of(q, k)
-                check("tile %d carries the label from the file ('%s')" % (k, got),
-                      got == label)
+                got = q.dock_hint(k, n_l=3)
+                check("tile %d carries the name from the file ('%s')"
+                      % (k, got), got == label)
+            q.mouse_goto(560, 300)
+            time.sleep(1.5)
 
-            pics = [picture_of(at, k) for k in range(3)]
+            g = dock_geom(n_l=3)
+            w, h, at = q.screen_raw()
+            pics = [picture_of(at, g, k) for k in range(3)]
             check("and each has a different picture",
                   pics[0] != pics[1] and pics[1] != pics[2] and
                   pics[0] != pics[2])
 
-            # The icons still do what icons do
-            q.mouse_goto(24, icon_y(0) + 12)
-            q.mouse_click()
+            # The tiles still do what they are for
+            q.click(*dock_tile(0, n_l=3))
             time.sleep(4)
             log = q.serial()
-            check("a click on an icon from the file starts its program",
+            check("a click on a tile from the file starts its program",
                   "exec 'gterm'" in log)
         finally:
             q.close()
@@ -172,11 +137,11 @@ def main():
             q2.mouse_goto(560, 300)
             time.sleep(2)
 
-            w, h, at = q2.screen_raw()
-            check("the desktop comes back to its seven icons",
-                  is_tile(at, 0) and is_tile(at, 6))
-            check("and the first of them is the usual one ('App')",
-                  label_of(q2, 0) == "App")
+            check("the dock comes back to its nine programs",
+                  q2.dock_windows() == 2)
+            first = q2.dock_hint(0)
+            check("and the first of them is the usual one ('%s')" % first,
+                  first == "App")
         finally:
             q2.close()
             if os.path.exists(slog2):

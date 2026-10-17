@@ -2,15 +2,15 @@
 """ThreadOS smoke test: Alt+Tab.
 
 With twelve windows to hand, the only way to reach one of them was the
-mouse: a click on the window, or on its button on the taskbar. Every
+mouse: a click on the window, or on its tile in the dock. Every
 system a person has used switches windows from the keyboard, and the
 keys for it were already there - the driver knew Alt was held down and
 it knew Tab. Nothing put the two together.
 
 Now Alt+Tab hands the focus to the next window and brings it to the
 top. The order is the order of the slots, which is the order of the
-buttons on the taskbar - so pressing it twice takes you where looking
-at the bar says it will. Minimised windows are skipped, because a focus
+windows' tiles in the dock - so pressing it twice takes you where
+looking at the dock says it will. Minimised windows are skipped, because a focus
 you cannot see is a keyboard typing into nowhere, and so are the
 kernel's own windows, which have no application behind them to take a
 key.
@@ -35,50 +35,31 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 
-TB_H = 18
-TBL_X0 = 46
-CLOCK_W = 8 * 8 + 6
-
 # The cascade: slot i sits at (70+12i, 30+12i). Slots 0 and 1 are the
 # kernel's own windows, so applications start at slot 2.
 def slot_xy(i):
     return 70 + 12 * i, 30 + 12 * i
 
 
-def buttons(at, w, y):
-    out, start = [], None
-    for x in range(TBL_X0, w - CLOCK_W - 2):
-        r, g, b = at(x, y)
-        on_bar = r > 160 and g > 160 and b > 160
-        if not on_bar and start is None:
-            start = x
-        elif on_bar and start is not None:
-            out.append((start, x - 1))
-            start = None
-    if start is not None:
-        out.append((start, w - CLOCK_W - 3))
-    return out
-
-
-def focused_button(at, y, spans):
-    """Which of the taskbar buttons is the blue (focused) one."""
-    for i, (a, b) in enumerate(spans):
-        r, g, bl = at((a + b) // 2, y)
-        if bl > 120 and r < 90 and g < 90:
-            return i
+def focused_tile(at, n_w):
+    """Which window's tile in the dock has the accent dot under it - the
+    window with the focus. -1 when none has."""
+    g = dock_geom(n_w=n_w)
+    acc = theme("dark")["accent"]
+    for j in range(n_w):
+        tx, ty = g["tiles"][DOCK_N + j]
+        if near(at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2),
+                acc, 50):
+            return j
     return -1
 
 
 def title_whole(at, x, y, w):
     """Is that window's title bar visible along its whole width? A
     window under another one has its bar cut off where the other covers
-    it.
-
-    We look between the title text (which is white, drawn at the left
-    end) and the three buttons (at the right), so that what is measured
-    is the bar itself and not what is written on it."""
-    return all(at(x + dx, y + 5)[2] > 120 and at(x + dx, y + 5)[0] < 90
-               for dx in range(100, w - 40, 8))
+    it. Read along the bar's top, above what is written on it."""
+    bg = theme("dark")["title_bg"]
+    return all(near(at(x + dx, y + 4), bg, 4) for dx in range(70, w - 16, 8))
 
 
 def main():
@@ -95,21 +76,16 @@ def main():
 
             # Three applications, in this order: the terminal (slot 2),
             # the clock (slot 3), the settings (slot 4)
-            for iy in (192, 72, 272):
-                q.mouse_goto(24, iy)
-                q.mouse_click()
+            for n, k in enumerate((4, 1, 6)):
+                q.launch_dock(k, n_w=2 + n)
                 time.sleep(3)
             q.mouse_goto(600, 400)
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            row = h - TB_H + 2
-            spans = buttons(at, w, row)
-            check("three applications have their buttons (%d in all with the "
-                  "kernel)" % len(spans), len(spans) == 5)
-            start = focused_button(at, row, spans)
-            check("the window opened last has the focus (button %d)" % start,
-                  start == 4)
+            start = focused_tile(at, 5)
+            check("the window opened last has the focus (its tile in the "
+                  "dock, %d, has the accent dot)" % start, start == 4)
 
             # --- Alt+Tab ------------------------------------------------
             # Slot order wraps: from slot 4 the next application is the
@@ -117,8 +93,7 @@ def main():
             q.sendkey("alt-tab")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            spans = buttons(at, w, row)
-            now = focused_button(at, row, spans)
+            now = focused_tile(at, 5)
             check("Alt+Tab moved the focus to the next window (%d -> %d)"
                   % (start, now), now == 2)
 
@@ -170,22 +145,21 @@ def main():
                 time.sleep(1)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            spans = buttons(at, w, row)
-            check("three Alt+Tabs with three windows come back where "
-                  "bylismy", focused_button(at, row, spans) == 2)
+            check("three Alt+Tabs with three windows come back where they "
+                  "started", focused_tile(at, 5) == 2)
 
             # --- a minimised window is skipped --------------------------
-            # Slot 2's [_] is at x+w-2*8-2; minimising it must take it
-            # out of the ring, not leave a focus nobody can see
-            q.mouse_goto(x2 + 402 - 2 * 8 - 2 + 4, y2 + 5)
+            # Slot 2's yellow light minimises it; that must take it out
+            # of the ring, not leave a focus nobody can see
+            q.mouse_goto(*light_xy(x2, y2, 1))
             time.sleep(0.5)
             q.mouse_click()
+            q.mouse_goto(600, 400)
             time.sleep(1.5)
             q.sendkey("alt-tab")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            spans = buttons(at, w, row)
-            after = focused_button(at, row, spans)
+            after = focused_tile(at, 5)
             check("once a window is minimised Alt+Tab skips it (the focus on %d)"
                   % after, after in (3, 4))
 

@@ -18,24 +18,25 @@ GRUB involved at all.
 
 ## Screenshots
 
-Both pictures are taken by a script that boots the 64-bit kernel in
-QEMU, clicks its way through the system and dumps the framebuffer -
+Both pictures are taken by `scripts/screenshots.py`, which boots the
+64-bit kernel in QEMU, clicks its way through the system and dumps the framebuffer -
 the same machinery the test suite uses, so what is below is what the
 kernel actually drew.
 
 ![The desktop: a file manager, a clock and a memory monitor](docs/desktop.png)
 
-The desktop, running on the loader's framebuffer: icons down the left,
-a taskbar at the bottom, windows that can be dragged, resized, tiled
-and closed. Every window is a ring 3 program talking to the
-compositor; the fonts are the kernel's own.
+The desktop, running on the loader's framebuffer: a menu bar of glass
+along the top, a dock at the bottom, windows with round corners and
+soft shadows that can be dragged, resized, tiled and closed. Every
+window is a ring 3 program talking to the compositor; the fonts are the
+kernel's own.
 
 ![The installer, alone on the screen](docs/installer.png)
 
 `install` on a UEFI machine, having found the disk, read its GPT and
 its EFI partition, and listing the three files it is about to write -
-before writing anything. It gets the whole screen, with no taskbar and
-no other window to click by mistake.
+before writing anything. It gets the whole screen, with no dock and no
+other window to click by mistake.
 
 The system and its source are both in English; the development
 journal is the one thing that stayed Polish, and
@@ -53,7 +54,7 @@ Shared by both kernels (same files, compiled twice):
 | Storage | ATA PIO, AHCI (SATA, DMA) and NVMe behind one block layer |
 | Sound | Intel HD Audio — the controller reset, the codec's widget graph walked, a stream fed from a ring buffer; volume and mute as a percentage of what the codec's amplifier really has (`beep`, `volume`, and a mixer window) |
 | Disks | NVMe, every AHCI port, both ATA drives — a list, with one in use; the installer asks which |
-| Installing | `install` takes the whole screen — no taskbar, no icons, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a TFS3 partition) |
+| Installing | `install` takes the whole screen — no bar, no dock, no other window. Two ways: beside another system (three files onto the EFI partition that is already there, nothing else touched) or the whole disk (a GPT of our own, a fresh FAT32 EFI partition and a TFS3 partition) |
 | FAT | FAT12/16/32 on the EFI partition — read fully, written as far as an installer needs, long names both ways |
 | Filesystem | TFS3 — block bitmap, inodes, directories, files up to 64 MiB |
 | Programs | ELF from the initrd **or** from disk (`cp`, then `run`) |
@@ -62,7 +63,7 @@ Shared by both kernels (same files, compiled twice):
 | Linking | `libthread.so` — crypto, TLS, HTTP and DNS in one shared object, bound at load time |
 | Display | VGA mode 13h and the loader's framebuffer (24/32 bpp) |
 | Fonts | TrueType read and drawn in the kernel, anti-aliased, in integer arithmetic only — glyphs, advances and boxes identical to FreeType's (hinting off), coverage within a few 1/255ths; DejaVu Sans and Sans Mono, Latin-1 and Latin Extended-A |
-| Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background |
+| Settings | `system.cfg` on the disk — machine name, name server, prompt colour, desktop background, light or dark theme, dock size |
 
 Programs that use crypto link against a real shared object: the kernel
 loads `libthread.so` once at a fixed address, maps its code and
@@ -78,32 +79,38 @@ swap to disk, signals, pipes, four virtual consoles, USB keyboard
 writing*, a stack that grows on demand, processes **and the threads of
 one process** running in ring 3 on every core — a changed mapping is
 sent to the other cores and awaited before the frame is reused — TLS
-1.3 with certificate verification, and a graphical desktop drawn flat — one colour to a surface, one line
-between two of them, no shadows, a background that darkens towards the
-floor, and a single accent colour saying the one thing worth saying:
-which window is listening, on its title bar and on its taskbar button
-alike. Icons carry pictures rather than labels, and so do the taskbar's
-buttons — the desktop remembers which icon started which process, so a
-window wears the face of the program it belongs to. How wide the bar is
-(100, 75 or 50 percent of the screen, centred) and where its buttons
-sit (left, middle, or up against the clock) are settings kept on the
-disk, and so is the wallpaper — a small indexed picture computed by a
-program in ring 3, written to the disk and stretched over the screen
-behind everything else. Hovering a taskbar button names the window;
-the launch menu carries the same pictures as the icons. Which icons the
-desktop has is a text file on the disk — one line per icon, buildable
-from the machine's own shell — falling back to the built-in seven when
-it says nothing usable. With
+1.3 with certificate verification, and a graphical desktop of light and
+glass — an aurora of soft colour behind everything, a menu bar the
+background shows through blurred, windows with round corners standing
+on soft shadows, their close, minimise and zoom buttons as three
+coloured lights, and a dock of tiles that starts programs and holds the
+open windows. All of it is drawn with anti-aliased edges by the
+kernel's own small graphics library (rounded rectangles, circles, lines,
+shadows and a two-pass blur, each held to the exact area of the shape
+by a test), in two themes — dark and light, a setting the desktop
+follows while it runs. Which window is listening shows in its lights,
+its title bar and the dot under its tile in the dock. The tiles carry
+pictures drawn from shapes rather than labels — the desktop remembers
+which tile started which process, so a window wears the face of the
+program it belongs to — and pointing at one names it. How large the
+dock is is a setting kept on the disk, and so is the wallpaper, if the
+aurora will not do — a small picture computed by a program in ring 3,
+written to the disk and stretched over the screen behind everything
+else. The launch menu hangs from the mark at the left end of the bar
+and carries the same pictures as the dock. Which programs the dock
+holds is a text file on the disk — one line each, buildable from the
+machine's own shell — falling back to the built-in nine when it says
+nothing usable. With
 windows that can be moved, resized, maximised to fill the screen and
 closed like anywhere else — the compositor asks an application to end,
 an application may answer "not yet" and keep its window (the editor
 does, when the file has unsaved changes), and the compositor insists on
-silence alone — twelve of them at once, on a taskbar that
-shares its width out among their buttons instead of letting them run
-off the edge, with a clock at its right-hand end. Print Screen saves what is on the screen to a file of palette indices —
-the compositor's own bytes, with the palette in the header so the file
-says what its numbers mean — and the picture viewer puts them back into
-a window through a block-of-pixels call — and reads BMP, PNG and
+silence alone — twelve of them at once, in a dock that makes its tiles
+smaller rather than letting them run off the edge, with the date and a
+clock at the right-hand end of the bar. Print Screen saves what is on
+the screen to a file in the colours the compositor drew — glass and
+shadows included — and the picture viewer puts them back into a window
+through a block-of-pixels call — and reads BMP, PNG and
 baseline JPEG files too — the deflate decoder is the machine's own, and
 so are the Huffman codes, the cosine transform undone in fixed point
 and the colour put back from half resolution — so a machine that takes
@@ -127,7 +134,7 @@ all works too: a USB mouse in the HID boot protocol, next to the USB
 keyboard that was already there, so a machine with no 8042 controller —
 which is what a laptop made in the last few years is — still has both. A window can be renamed by the program
 that owns it, so the editor's title says which file it holds and the
-terminal's says where it is standing. Icons, a file
+terminal's says where it is standing. A file
 manager that lists sizes, walks into directories and back out, hands a
 file to the editor, renames one where it stands and throws one away
 when asked twice, a web browser, a task manager that lists what is
@@ -151,7 +158,7 @@ same way its [x] does — the right mouse button opens the launch menu
 where the pointer is, a window dragged against an edge takes that half
 of the screen (or all of it, at the top), with an outline showing where
 it will land before the button is let go, a double click on a title bar fills the screen and
-gives the size back, the top strip carries what is always true — which of the four
+gives the size back, the menu bar carries what is always true — which of the four
 desktops this is, and a meter of how much of the machine is spoken for,
 with the figures one hover away, and a button that puts every window
 out of the way and then brings back exactly those it hid — four virtual desktops switch

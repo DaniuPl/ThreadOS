@@ -1,9 +1,17 @@
 /* The ThreadOS graphical desktop - a simple compositor
  *
  * It runs as a kernel thread: in a loop it redraws the whole frame
- * into the framebuffer (background -> cursor) and gives up the CPU for
- * ~30 ms. At 320x200 a full redraw is 64 KB - cheap enough that we do
- * not bother saving the background under the cursor.
+ * into the drawing buffer (background -> bar -> windows -> dock ->
+ * cursor), hands it to the screen and gives up the CPU for ~30 ms.
+ * Only the rows that changed cross over to the screen (see video.c),
+ * so a frame that is drawn again identically costs the bus nothing.
+ *
+ * What it looks like is in kernel/include/look.h: a menu bar of glass
+ * along the top, windows with round corners on soft shadows and their
+ * three buttons as coloured lights, and a dock at the bottom that
+ * starts programs and holds the open windows. The soft edges are
+ * kernel/gfx.c's, the letters kernel/uitext.c's, and the background,
+ * unless a picture is chosen, kernel/aurora.c's.
  */
 
 #include <stdint.h>
@@ -16,6 +24,9 @@
 #include "include/string.h"
 #include "include/font8x8.h"
 #include "include/uitext.h"
+#include "include/gfx.h"
+#include "include/look.h"
+#include "include/aurora.h"
 #include "include/acpi.h"
 #include "include/io.h"
 #include "include/keyboard.h"
@@ -27,136 +38,101 @@
 #include "include/printk.h"
 #include "include/pmm.h"
 
-/* Desktop palette indices (set in desktop_thread)
+/* Palette indices.
  *
- * The screen is eight bits per pixel with a palette of our own, so a
- * shade costs an index and nothing else. That is what the depth here
- * is made of: an edge lit from the top left and shaded at the bottom
- * right, a title bar that is not one flat colour, a background that
- * darkens towards the floor. Every one of them is a rectangle in a
- * slightly different entry of the same table.
+ * The desktop itself now draws in real colours. The palette is still
+ * set, for two reasons: every program draws its window in palette
+ * indices, and those indices have meant these colours since the first
+ * window was opened - and on a screen of two hundred and fifty six
+ * colours, which this machine falls back to when there is no
+ * framebuffer, the palette is all there is.
  */
 #define COL_BLACK  0
-#define COL_TITLE  3      /* the window title bar (blue) */
+#define COL_TITLE  3      /* the accent (blue) */
 #define COL_WHITE  4
-#define COL_DESK   6      /* the desktop background (the middle shade) */
-#define COL_BAR    7      /* the top bar (light grey) */
+#define COL_DESK   6      /* the desktop background */
+#define COL_BAR    7      /* light grey */
 #define COL_WIN    8      /* the window background (grey) */
-#define COL_TBBTN  9      /* a window button on the taskbar (dark grey) */
-#define COL_ICON   10     /* a desktop icon (orange) */
-
-/* --- the few tones a flat surface needs -----------------------------
- *
- * No lit and shaded edges, no shadows, no gradient on a button: a
- * surface is one colour, and what separates two surfaces is a single
- * line a shade darker. What is left to say with colour is then the
- * only thing worth saying with it - which window is listening.
- */
+#define COL_TBBTN  9      /* dark grey */
+#define COL_ICON   10     /* orange */
 #define COL_LINE     11   /* the line between one surface and the next */
-#define COL_WIN_HI   12   /* a lighter surface: fields, the menu */
-#define COL_TITLE_OFF 13  /* the title bar of a window without focus */
-#define COL_TBBTN_OFF 14  /* a taskbar button that is not the focused one */
-#define COL_DIM      15   /* text on a surface that is not the accent */
-#define COL_ICON_LO  16   /* the icon tile, a shade down */
+#define COL_WIN_HI   12   /* a lighter surface */
+#define COL_TITLE_OFF 13  /* a window without focus, in 256 colours */
+#define COL_TBBTN_OFF 14  /* a quiet grey */
+#define COL_DIM      15   /* text without weight */
+#define COL_ICON_LO  16
 
-/* The background is a gradient: sixteen bands, sixteen entries,
-   darkening towards the floor. Sixteen rather than six because six can
-   be counted with the eye - the steps have to be small enough that
-   what is seen is a slope and not a staircase. */
+/* The background in 256 colours: sixteen bands darkening towards the
+   floor, sixteen entries. On a screen of real colours the slope is
+   smooth and these are not used. */
 #define COL_DESK0    20
 #define COL_DESK_N   16
 
-/* The title bar's height. Sixteen pixels, because the title is drawn in
-   the TrueType sans at UI_PX (11) and that needs room for what hangs
-   below the line - a 'g' or a 'y' cut off at the bottom of the bar
-   would be the first thing anyone saw. It was ten while the title was
-   8x8 bitmap letters. scripts/ptest.py reads this number from here, so
-   the tests move with it. */
-#define TITLE_H 16
+/* The colours in use: one of the two sets in look.h */
+static const struct look look_dark = LOOK_OF(DARK);
+static const struct look look_light = LOOK_OF(LIGHT);
+static struct look L = LOOK_OF(DARK);
 
-/* Desktop icons: clicking one launches an application */
-#define ICON_W 32
-#define ICON_H 24
-/* An icon: where it sits, what it says, what it starts, and which of
-   the pictures below it wears.
+/* The programs the dock starts: what each is called, what it runs and
+ * which of the pictures below it wears.
  *
- * The list of them used to be this array and nothing else - seven
- * programs decided when the kernel was built. It is now a file on the
- * disk (see icons_read_list), and this array is what a machine
- * without that file gets. */
+ * The list of them used to be this array and nothing else - programs
+ * decided when the kernel was built. It is now a file on the disk (see
+ * icons_read_list), and this array is what a machine without that
+ * file gets. */
 #define ICON_MAX 12
 struct icon {
-    int x, y;
     const char *label;
     const char *app;
-    int art;                   /* which picture, -1 = by position */
+    int art;                   /* which picture */
     char store[2][24];         /* room for a label and a name read from
                                   the disk - the built-in ones point at
                                   their own literals */
 };
 static struct icon icons[ICON_MAX] = {
-    {8, 20, "App", "guiapp", 0, {{0}}},
-    {8, 60, "Clock", "gclock", 1, {{0}}},
-    {8, 100, "Files", "gfiles", 2, {{0}}},
-    {8, 140, "Monitor", "gmon", 3, {{0}}},
-    {8, 180, "Term", "gterm", 4, {{0}}},
-    {8, 220, "Web", "gweb", 5, {{0}}},
-    {8, 260, "Config", "gsettings", 6, {{0}}},
-    {8, 300, "Editor", "gedit", 7, {{0}}},
-    {8, 340, "Tasks", "gtasks", 8, {{0}}},
+    {"App", "guiapp", 0, {{0}}},
+    {"Clock", "gclock", 1, {{0}}},
+    {"Files", "gfiles", 2, {{0}}},
+    {"Monitor", "gmon", 3, {{0}}},
+    {"Term", "gterm", 4, {{0}}},
+    {"Web", "gweb", 5, {{0}}},
+    {"Settings", "gsettings", 6, {{0}}},
+    {"Editor", "gedit", 7, {{0}}},
+    {"Tasks", "gtasks", 8, {{0}}},
 };
 static int icon_n = 9;         /* how many of them there are */
 
-/* What each icon has drawn on it: twelve rows of twelve pixels, in the
- * order of the table above.
- *
- * A coloured rectangle with a word under it is a label, not an icon -
- * it says nothing until it is read. A picture is recognised before it
- * is read, which is the whole reason icons exist. Twelve by twelve is
- * not much room, so each of these is one idea and no detail: a window,
- * a clock face, a folder, bars of a chart, a prompt, a globe, a
- * cogwheel.
- *
- * The bits are read from the top: 0x800 is the leftmost pixel.
- */
-static const uint16_t icon_art[][12] = {
-    {   /* App - a little window */
-        0xFFF, 0x801, 0xFFF, 0x801, 0x801, 0x801,
-        0x801, 0x801, 0x801, 0x801, 0x801, 0xFFF,
-    },
-    {   /* Clock - a clock face with hands */
-        0x1F8, 0x30C, 0x606, 0xC23, 0xC23, 0xC23,
-        0xC3B, 0xC03, 0x606, 0x30C, 0x1F8, 0x000,
-    },
-    {   /* Files - a folder */
-        0x000, 0xF00, 0xFFE, 0x802, 0x802, 0x802,
-        0x802, 0x802, 0x802, 0x802, 0xFFE, 0x000,
-    },
-    {   /* Monitor - bars of a chart */
-        0x000, 0x030, 0x030, 0x0F0, 0x0F0, 0x3F0,
-        0x3FC, 0xFFC, 0xFFC, 0xFFF, 0xFFF, 0x000,
-    },
-    {   /* Term - a prompt and a place to type */
-        0x000, 0xC00, 0x600, 0x300, 0x180, 0x0C0,
-        0x180, 0x300, 0x600, 0xC00, 0x000, 0x0FC,
-    },
-    {   /* Web - a globe with meridians */
-        0x1F8, 0x3FC, 0x6DE, 0xCDB, 0xCDB, 0xFFF,
-        0xCDB, 0xCDB, 0x6DE, 0x3FC, 0x1F8, 0x000,
-    },
-    {   /* Ustaw - a cogwheel */
-        0x0F0, 0x2F4, 0x7FE, 0xFFF, 0xF0F, 0xE07,
-        0xE07, 0xF0F, 0xFFF, 0x7FE, 0x2F4, 0x0F0,
-    },
-    {   /* Edytor - a sheet of paper with writing on it */
-        0xFFC, 0x804, 0x9E4, 0x804, 0x9F4, 0x804,
-        0x9E4, 0x804, 0x9F4, 0x804, 0xFFC, 0x000,
-    },
-    {   /* Zadania - a list of rows, one of them picked out */
-        0x000, 0xFFF, 0x000, 0xEEE, 0x000, 0xFFF,
-        0x000, 0xEEE, 0x000, 0xFFF, 0x000, 0x000,
-    },
+/* How many pictures there are (see draw_art): one per program that
+   comes with the system, and a last one - a letter - for anything
+   else. */
+#define ART_N      11
+#define ART_LETTER 10
+
+/* The programs that come with the system, by the name they run under:
+   the picture each wears and what a person calls it - for a program
+   that is not in the dock, say one started from the menu */
+static const struct { const char *app, *label; } known_apps[] = {
+    { "guiapp", "App" }, { "gclock", "Clock" }, { "gfiles", "Files" },
+    { "gmon", "Monitor" }, { "gterm", "Term" }, { "gweb", "Web" },
+    { "gsettings", "Settings" }, { "gedit", "Editor" },
+    { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
 };
+#define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
+
+static int art_of_app(const char *app)
+{
+    for (int k = 0; k < KNOWN_N; k++)
+        if (!strcmp(app, known_apps[k].app))
+            return k;
+    return ART_LETTER;
+}
+
+static const char *label_of_app(const char *app)
+{
+    int k = art_of_app(app);
+    return k < KNOWN_N ? known_apps[k].label : app;
+}
+
 #define ICON_N icon_n
 
 static int icon_of_app(const char *app)
@@ -173,32 +149,39 @@ static int icon_of_app(const char *app)
     return -1;
 }
 
-/* The disk file with the remembered icon positions (x,y pairs in order) */
-#define ICON_POS_FILE "icons.pos"
-
 /* Which picture belongs to which running program.
  *
  * A window knows the process that owns it and nothing else - not what
  * was clicked to start it. So the desktop remembers, when it launches
  * something, which icon it came from; the window created a moment
  * later by that process takes the same picture. Nothing else can
- * connect the two: the compositor sees a pid, and the icons are the
+ * connect the two: the compositor sees a pid, and the dock's tiles are the
  * only place where a program has a face.
  */
 #define LAUNCH_MAX 16
-static struct { int pid; int icon; } launched[LAUNCH_MAX];
+static struct { int pid; int icon; int art; } launched[LAUNCH_MAX];
 static int launch_next;
 
-static void remember_launch(int pid, int icon)
+/* 'icon' is the dock's tile it came from, or -1 when it came from the
+   menu; 'art' is the picture either way */
+static void remember_launch(int pid, int icon, int art)
 {
-    if (pid < 0 || icon < 0)
+    if (pid < 0)
         return;
     launched[launch_next].pid = pid;
     launched[launch_next].icon = icon;
+    launched[launch_next].art = art;
     launch_next = (launch_next + 1) % LAUNCH_MAX;
 }
 
-/* The icon a program was started from, or -1 */
+/* When each program was last started from the dock: its tile hops
+   for a moment, which is how a click that takes a second to show a
+   window is seen to have been heard */
+#define HOP_FRAMES 16
+static uint32_t hop_at[ICON_MAX];
+static int hop_set[ICON_MAX];
+
+/* The tile a program was started from, or -1 */
 static int icon_of_pid(int pid)
 {
     for (int i = 0; i < LAUNCH_MAX; i++)
@@ -207,16 +190,21 @@ static int icon_of_pid(int pid)
     return -1;
 }
 
-static int icon_drag = -1;      /* the icon being dragged (-1 = none) */
-static int icon_dx, icon_dy;    /* the grab: the cursor's offset within the icon */
-static int icon_press_x, icon_press_y;   /* the press position (click vs drag) */
+/* The picture a program was started with, or -1 */
+static int art_of_pid(int pid)
+{
+    for (int i = 0; i < LAUNCH_MAX; i++)
+        if (launched[i].pid == pid)
+            return launched[i].art;
+    return -1;
+}
 
-/* The file that says which icons there are: one line per icon,
+/* The file that says which programs the dock starts: one line each,
  *
- *     program  napis  numer-obrazka
+ *     program  label  picture-number
  *
  * and nothing else. Lines that do not parse are passed over, an empty
- * or missing file leaves the built-in seven - a desktop with no icons
+ * or missing file leaves the built-in nine - a dock with nothing in it
  * would be a machine with nothing to click, and that is not something
  * a broken line should be able to do.
  *
@@ -272,8 +260,8 @@ static int icons_read_list(void)
         int art = 0;
         for (const char *p = word[2]; *p >= '0' && *p <= '9'; p++)
             art = art * 10 + (*p - '0');
-        if (art >= (int)(sizeof(icon_art) / sizeof(icon_art[0])))
-            art = 0;
+        if (art >= ART_N)
+            art = ART_LETTER;
 
         struct icon *ic = &icons[count];
         int j = 0;
@@ -288,45 +276,14 @@ static int icons_read_list(void)
         ic->label = ic->store[0];
         ic->app = ic->store[1];
         ic->art = art;
-        ic->x = 8;
-        ic->y = 20 + count * 40;
         count++;
     }
 
     if (!count)
-        return 0;                      /* nothing usable - keep the seven */
+        return 0;                      /* nothing usable - keep the nine */
     icon_n = count;
     printk("[desktop] icons from the file '%s': %d\n", ICON_LIST_FILE, count);
     return 1;
-}
-
-/* Reads the icon positions from disk (if the file exists and its size
-   matches the number of icons there are) */
-static void icons_load(void)
-{
-    if (!fs_ready())
-        return;
-    int32_t buf[ICON_MAX * 2];
-    int want = ICON_N * 2 * (int)sizeof(int32_t);
-    if (fs_read(ICON_POS_FILE, buf, (uint32_t)want) < want)
-        return;
-    for (int k = 0; k < ICON_N; k++) {
-        icons[k].x = buf[k * 2];
-        icons[k].y = buf[k * 2 + 1];
-    }
-}
-
-/* Writes the current icon positions to disk */
-static void icons_save(void)
-{
-    if (!fs_ready())
-        return;
-    int32_t buf[ICON_MAX * 2];
-    for (int k = 0; k < ICON_N; k++) {
-        buf[k * 2] = icons[k].x;
-        buf[k * 2 + 1] = icons[k].y;
-    }
-    fs_write(ICON_POS_FILE, buf, (uint32_t)(ICON_N * 2 * sizeof(int32_t)));
 }
 
 #define COL_RED    1      /* the close button */
@@ -391,7 +348,7 @@ struct window {
        one of them - it is not hidden on the others, it is not THERE. */
     int desk;
     int minimized;         /* is it minimised (hidden, visible on the bar) */
-    /* Maximised: the window fills the desktop down to the taskbar. The
+    /* Maximised: the window fills the room between the bar and the dock. The
        geometry it came from is kept here, because restoring it has to
        put the window back exactly where it was - not somewhere
        reasonable. */
@@ -443,29 +400,13 @@ static int prev_pressed;    /* the previous left-button state - to detect a clic
 static int mouse_x, mouse_y;
 static int focus_idx = -1;  /* the window with keyboard focus */
 
-/* The taskbar and the launch menu */
-/* The taskbar.
+/* The launch menu.
  *
- * Eighteen pixels rather than twelve, because what is on it now is
- * pictures and not words: a twelve-pixel picture needs room around it,
- * and a bar the height of one line of text was only ever the height of
- * the text on it.
- *
- * How WIDE it is, and where the buttons sit on it, are settings - see
- * bar_x0() below. A bar that fills the screen is what a system has when
- * nobody has thought about it; half a screen, centred, is a dock. */
-#define TB_H 18                       /* the taskbar height */
-#define TB_ICON 12                    /* the picture on a button */
-#define MENU_BW 40                    /* the width of the "Menu" button */
-/* An entry is a picture and a name, so it is as tall as the picture
-   with air around it - not as tall as one line of text. */
-#define MENU_ROW 16                   /* the height of a menu entry */
-#define MENU_W 110                    /* the width of the opened menu */
+ * Opened from the mark at the left end of the bar it hangs under it;
+ * opened with the right button on the desktop it stands where the
+ * pointer is - the same list either way, because a second list would
+ * be a second thing to learn. */
 static int menu_open;
-/* Where the menu hangs. Opened from the Menu button it stands over it;
-   opened with the right button on the desktop it stands where the
-   pointer is - the same list either way, because a second list would
-   be a second thing to learn. */
 static int menu_px, menu_py;
 /* The installer is deliberately NOT here. It takes the whole screen
    and everything else has to be out of reach while it runs, so it is
@@ -478,11 +419,11 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
  *
  * One program, the whole screen, and no way to anything else. This is
  * what an installer is: while a machine is being installed onto,
- * having a taskbar and a menu and somebody's other windows within
- * reach is not a convenience, it is a way to click something else by
+ * having a dock and a menu and somebody's other windows within reach
+ * is not a convenience, it is a way to click something else by
  * mistake in the middle of writing to a disk.
  *
- * So in this mode the compositor draws no bar, no icons, no menu and
+ * So in this mode the compositor draws no bar, no dock, no menu and
  * no other window, starts exactly one program and puts it in the
  * middle of an empty screen. The only thing the environment itself
  * offers is a way out of it: restarting the machine, which is what one
@@ -495,11 +436,11 @@ static int kiosk_wait;             /* frames before starting it again */
 static int kiosk_gave_up;
 
 #define KIOSK_BTN_W 152
-#define KIOSK_BTN_H 14
+#define KIOSK_BTN_H 20
 #define KIOSK_TRIES 3
 
-static int kiosk_btn_x(void) { return video_w() - KIOSK_BTN_W - 6; }
-static int kiosk_btn_y(void) { return 6; }
+static int kiosk_btn_x(void) { return video_w() - KIOSK_BTN_W - 8; }
+static int kiosk_btn_y(void) { return 8; }
 #define MENU_N ((int)(sizeof(menu_items) / sizeof(menu_items[0])))
 
 /* Virtual desktops.
@@ -511,84 +452,150 @@ static int kiosk_btn_y(void) { return 6; }
  * moved or resized. A window on another desktop keeps running and
  * keeps drawing into its own buffer; it is simply not on the screen.
  *
- * Which one is showing is drawn at the right-hand end of the top bar,
- * because that is where a thing that is always true belongs - a person
- * has to be able to see WHERE they are without pressing anything. */
+ * Which one is showing is drawn on the right of the menu bar, because
+ * that is where a thing that is always true belongs - a person has to
+ * be able to see WHERE they are without pressing anything. */
 #define DESK_N 4
 static int cur_desk;
 
-static int taskbar_y(void) { return video_h() - TB_H; }
-
-/* How wide the bar is, from the settings: 100, 75 or 50 percent of the
-   screen. Anything else is read as the whole width - a setting that
-   cannot be understood is not a reason to draw nothing. */
-static int bar_w(void)
+/* --- the right-hand end of the bar ------------------------------------
+ *
+ * From the right: the clock, the four desktops, how much of the memory
+ * is in use, and "show the desktop". Each has a fixed place - the
+ * clock a fixed width - so nothing on the bar moves because a digit
+ * changed. */
+static int clock_x(void) { return video_w() - BAR_RIGHT - BAR_CLOCK_W; }
+static int desk_x0(void) { return clock_x() - BAR_ITEM_GAP - DESK_N * DESK_CELL; }
+static int load_x(void)  { return desk_x0() - BAR_ITEM_GAP - LOAD_W; }
+static int show_x(void)  { return load_x() - BAR_ITEM_GAP - SHOW_W; }
+/* The mark and the name at the left end: what opens the menu */
+static int logo_w(void)
 {
-    uint32_t p = config_get_num("taskbar", 100);
-    if (p != 75 && p != 50)
-        p = 100;
-    int w = (int)((uint32_t)video_w() * p / 100);
-    return w < 160 ? 160 : w;
+    return BAR_NAME_X + ui_font_width(UI_BOLD, BAR_PX, "ThreadOS") + 6;
 }
 
-/* Where it starts. A bar narrower than the screen is centred on it:
-   that is what makes it a dock rather than a bar with a gap. */
-static int bar_x0(void)
+/* --- the dock -------------------------------------------------------------
+ *
+ * One row of tiles on glass, in the middle of the bottom edge: first
+ * the programs it starts, then - after a thin line - one tile for each
+ * window on this desktop. It is exactly as wide as what is in it, and
+ * when that would be wider than the screen the tiles get smaller
+ * rather than the dock running off the edge, where they would be drawn
+ * nowhere and clickable nowhere.
+ *
+ * Everything that draws the dock or looks for a tile under the pointer
+ * asks dock_geom(), so a tile is clickable exactly where it is drawn.
+ */
+struct dock {
+    int x, y, w, h;       /* the glass */
+    int tile;             /* the side of one tile */
+    int ty;               /* where the tiles' top edge is */
+    int n_l, n_w;         /* programs, windows */
+};
+
+static int win_count(void);
+
+/* The size the setting asks for */
+static int dock_want(void)
 {
-    return (video_w() - bar_w()) / 2;
+    uint32_t s = config_get_num("dock", 1);
+    return s == 0 ? DOCK_TILE_S : s == 2 ? DOCK_TILE_L : DOCK_TILE_M;
 }
+
+static void dock_geom(struct dock *d)
+{
+    int want = dock_want();
+    d->n_l = icon_n;
+    d->n_w = win_count();
+    int n = d->n_l + d->n_w;
+    int fixed = 2 * DOCK_PAD + (n > 0 ? (n - 1) * DOCK_GAP : 0) +
+                (d->n_l && d->n_w ? DOCK_SEP - DOCK_GAP : 0);
+    int room = video_w() - 2 * DOCK_MARGIN;
+    int t = want;
+    if (n && fixed + n * t > room)
+        t = (room - fixed) / n;
+    if (t < DOCK_TILE_MIN)
+        t = DOCK_TILE_MIN;
+    d->tile = t;
+    d->w = fixed + n * t;
+    d->h = want + 2 * DOCK_PAD;
+    d->x = (video_w() - d->w) / 2;
+    d->y = video_h() - DOCK_BOTTOM - d->h;
+    d->ty = d->y + DOCK_PAD + (want - t) / 2;
+}
+
+/* The left edge of the k-th tile, counting the programs first */
+static int dock_tile_x(const struct dock *d, int k)
+{
+    int x = d->x + DOCK_PAD + k * (d->tile + DOCK_GAP);
+    if (d->n_l && k >= d->n_l)
+        x += DOCK_SEP - DOCK_GAP;
+    return x;
+}
+
+/* Which tile is under the point: 0.. for the programs, 100.. for the
+   windows (counted among those on this desktop), -1 for none. A tile
+   takes clicks over the dock's whole height and half the gap on either
+   side - a tile that has to be hit to the pixel is a tile that gets
+   missed. */
+static int dock_hit(int mx, int my)
+{
+    struct dock d;
+    dock_geom(&d);
+    if (my < d.y || my >= d.y + d.h)
+        return -1;
+    for (int k = 0; k < d.n_l + d.n_w; k++) {
+        int tx = dock_tile_x(&d, k);
+        if (mx >= tx - DOCK_GAP / 2 && mx < tx + d.tile + DOCK_GAP / 2)
+            return k < d.n_l ? k : 100 + (k - d.n_l);
+    }
+    return -1;
+}
+
+/* Where windows may be put: under the bar, above the dock. A
+   maximised window fills exactly this, and so do the halves a window
+   snaps to - the bar and the dock are how a person reaches everything
+   else, so a window that covered them would be one there was no way
+   out of. */
+static int work_top(void) { return BAR_H; }
+static int work_bottom(void)
+{
+    struct dock d;
+    dock_geom(&d);
+    return d.y - DOCK_BOTTOM;
+}
+
+static int menu_h(void) { return 2 * MENU_PAD + MENU_N * MENU_ROW; }
 
 static int menu_item_y(int i)
 {
-    return menu_py + i * MENU_ROW;
+    return menu_py + MENU_PAD + i * MENU_ROW;
 }
 
 /* Puts the menu somewhere it fits: never off the right-hand edge,
-   never over the taskbar. */
+   never over the dock. */
 static void menu_at(int x, int y)
 {
-    int hgt = MENU_N * MENU_ROW;
+    int hgt = menu_h();
     if (x + MENU_W > video_w())
         x = video_w() - MENU_W;
     if (x < 0)
         x = 0;
-    if (y + hgt > taskbar_y())
-        y = taskbar_y() - hgt;
-    if (y < 0)
-        y = 0;
+    if (y + hgt > work_bottom())
+        y = work_bottom() - hgt;
+    if (y < BAR_H)
+        y = BAR_H;
     menu_px = x;
     menu_py = y;
     menu_open = 1;
 }
 
-/* The list of window buttons on the taskbar (after the Menu button).
-   The buttons share out what is left of the bar, so a twelfth window
-   makes them narrower instead of putting them past the right edge -
-   where they would be drawn nowhere and clickable nowhere. */
-/* The clock at the right-hand end of the bar: "12:34:56", eight
-   characters of an 8-pixel font plus a little air on each side. It is
-   taken out of what the window buttons have to share, because a clock
-   drawn over a button would be a clock that hides one. */
-#define TB_CLOCK_CH 8
-#define TB_CLOCK_W (TB_CLOCK_CH * 8 + 6)
-static int clock_x(void)
-{
-    return bar_x0() + bar_w() - TB_CLOCK_W + 3;
-}
-
 /* How much of the machine is in use.
  *
- * A number would say "4128 KiB", which is a thing to read; a bar
+ * A number would say "4128 KiB", which is a thing to read; a capsule
  * filled to a third is a thing to SEE. The exact figures - how much
  * memory, of how much, and how many tasks are behind it - are one
- * hover away, so the strip stays quiet until it is asked.
- *
- * It goes on the top bar, next to the desktop switch, because that
- * strip is where things that are ALWAYS true live: which desktop this
- * is, and how much of the machine is spoken for. The taskbar below is
- * for windows, and a meter there would be one more thing squeezing the
- * buttons. */
-#define TB_LOAD_BAR 40
+ * hover away, so the bar stays quiet until it is asked. */
 
 /* "Show the desktop": everything out of the way, and then everything
    back. The second click is the whole of the idea - a button that only
@@ -596,7 +603,6 @@ static int clock_x(void)
    nobody presses it twice. So which windows were hidden BY IT is
    remembered, and only those come back; a window minimised by hand
    stays minimised, because that was somebody's decision. */
-#define SHOW_W 12
 static unsigned hidden_by_show;   /* a bit per window slot */
 
 /* The reading itself, refreshed about once a second - memory does not
@@ -622,34 +628,6 @@ static void load_refresh(void)
     load_tasks = task_count();
 }
 
-#define TBL_W_MAX 22                  /* a picture and air on both sides */
-#define TBL_W_MIN 14                  /* narrower than this loses the picture */
-
-/* Where the first window button goes: after the Menu button, or
-   wherever the setting says. 0 = from the left, 1 = in the middle of
-   what is left, 2 = up against the clock. */
-static int win_count(void);
-static int tbl_width(void);
-
-static int tbl_x0(void)
-{
-    int left = bar_x0() + 2 + MENU_BW + 4;
-    int right = bar_x0() + bar_w() - TB_CLOCK_W - 2;
-    int strip = win_count() * tbl_width();
-    uint32_t how = config_get_num("icons", 0);
-
-    if (how == 1) {                   /* centred between menu and clock */
-        int x = left + (right - left - strip) / 2;
-        return x < left ? left : x;
-    }
-    if (how == 2) {                   /* pushed up against the clock */
-        int x = right - strip;
-        return x < left ? left : x;
-    }
-    return left;                      /* from the left, as it always was */
-}
-
-
 /* Is this window on the desktop being shown? Everything that draws a
    window, counts one or looks for one under the cursor asks here -
    that one question is the whole of what a virtual desktop is. */
@@ -667,23 +645,32 @@ static int win_count(void)
     return n;
 }
 
-/* The width of one button, the gap between them included. Everything
-   that draws a button or looks for one under the cursor asks here, so
-   a button is clickable exactly where it is drawn. */
-static int tbl_width(void)
+/* The dock's tile a window's program was started from, or -1 */
+static int launch_icon_of(const struct window *w)
 {
-    int n = win_count();
-    if (n < 1)
-        n = 1;
-    int space = bar_w() - (2 + MENU_BW + 4) - 2 - TB_CLOCK_W;
-    int w = space / n;
-    if (w > TBL_W_MAX)
-        w = TBL_W_MAX;
-    if (w < TBL_W_MIN)
-        w = TBL_W_MIN;
-    return w;
+    return w->owner >= 0 ? icon_of_pid(w->owner) : -1;
 }
 
+/* The picture a window wears in the dock: its program's, the plain
+   window for the kernel's own, and a letter for anything started some
+   other way - from a shell, say */
+static int launch_art_of(const struct window *w)
+{
+    if (w->owner < 0)
+        return 0;
+    int art = art_of_pid(w->owner);
+    return art >= 0 ? art : ART_LETTER;
+}
+
+/* Is anything started from this tile still running - on any desktop?
+   That is what the dot under it says. */
+static int launcher_running(int k)
+{
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used && launch_icon_of(&wins[i]) == k)
+            return 1;
+    return 0;
+}
 
 static int z_top;           /* the highest Z order handed out */
 
@@ -727,10 +714,9 @@ static void win_enqueue(struct window *w, int type, int x, int y, int val)
     irq_restore(flags);
 }
 
-#define CLOSE_SZ 8          /* the bar buttons [_] [x] */
-#define GRIP_SZ  8          /* the resize grip (bottom right corner) */
-#define BTN_W 40
-#define BTN_H 12
+#define GRIP_SZ  10         /* the resize grip (bottom right corner) */
+#define BTN_W 44
+#define BTN_H 18
 #define WIN_MIN_W 60
 #define WIN_MIN_H 40
 
@@ -739,19 +725,32 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
     return x >= rx && x < rx + rw && y >= ry && y < ry + rh;
 }
 
-static int close_x(const struct window *w) { return w->x + w->w - CLOSE_SZ - 1; }
-static int close_y(const struct window *w) { return w->y + 1 + (TITLE_H - CLOSE_SZ) / 2; }
-static int min_x(const struct window *w)   { return w->x + w->w - 2 * CLOSE_SZ - 2; }
-static int max_x(const struct window *w)   { return w->x + w->w - 3 * CLOSE_SZ - 3; }
+/* The three lights on the left of the title bar: close, minimise,
+   zoom - in that order, as everywhere they are lights. k = 0, 1, 2. */
+static int light_x(const struct window *w, int k)
+{
+    return w->x + LIGHT_X + k * LIGHT_STEP;
+}
+static int light_y(const struct window *w)
+{
+    return w->y + (TITLE_H - LIGHT_D) / 2 + 1;
+}
+/* Is the point on light k? The square around it is a little larger
+   than the light: eleven pixels is a small thing to aim at. */
+static int on_light(const struct window *w, int k, int x, int y)
+{
+    int pad = (LIGHT_HIT - LIGHT_D) / 2;
+    return in_rect(x, y, light_x(w, k) - pad, light_y(w) - pad,
+                   LIGHT_HIT, LIGHT_HIT);
+}
 static int grip_x(const struct window *w)  { return w->x + w->w - GRIP_SZ; }
 static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
 /* Every window may be resized. An application window costs more than a
    kernel one - its content buffer has to be made anew - so that is done
    once, when the drag ends, and not on every frame of it. */
 static int resizable(const struct window *w) { (void)w; return 1; }
-static int btn_x(const struct window *w)   { return w->x + 8; }
-static int btn_y(const struct window *w)    { return w->y + TITLE_H + 8; }
-
+static int btn_x(const struct window *w)   { return w->x + 10; }
+static int btn_y(const struct window *w)    { return w->y + TITLE_H + 12; }
 /* An 8x12 cursor arrow: set bits = cursor pixels.
    The highest bit (0x80) is the leftmost column. */
 static const uint8_t cursor_bmp[12] = {
@@ -777,23 +776,6 @@ static void draw_cursor(int mx, int my)
         for (int col = 0; col < 8; col++)
             if (cursor_bmp[row] & (0x80 >> col))
                 video_putpixel(mx + col, my + row, COL_WHITE);
-}
-
-/* Draws a decimal number as text */
-static void draw_int(int x, int y, int v, uint8_t col)
-{
-    char tmp[12];
-    int n = 0;
-    do {
-        tmp[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    char s[12];
-    int j = 0;
-    while (n)
-        s[j++] = tmp[--n];
-    s[j] = '\0';
-    video_draw_string(x, y, s, col);
 }
 
 /* --- Where a window's pixels live -----------------------------------
@@ -877,76 +859,350 @@ static void buf_text(struct window *w, int x, int y, const char *s, uint32_t c)
         buf_char(w, x + i * 8, y, s[i], c);
 }
 
+/* --- The pictures ----------------------------------------------------------
+ *
+ * A word under a coloured square is a label, not an icon - it says
+ * nothing until it is read. A picture is recognised before it is read,
+ * which is the whole reason icons exist. Each of these is one idea on
+ * a tile of its own colour: a window, a clock face, a folder, bars of
+ * a chart, a prompt, a globe, a cogwheel, a page, a list, sliders.
+ *
+ * They are drawn from shapes rather than kept as pixels, so they come
+ * out sharp at any size - the dock's, which is a setting, and the
+ * menu's. Positions are given on a grid of 320 across the tile (tenths
+ * of a thirty-second of it), which is what D() turns into the
+ * sixteenths of a pixel kernel/gfx.c draws in.
+ *
+ * A drawn picture is kept (see art_get), because the shapes in one cost
+ * a few thousand pixels of arithmetic and the dock is drawn thirty
+ * times a second.
+ */
+
+/* The twelve hours and the eight points of the compass, as
+   thousandths: x = sin, y = -cos, counted clockwise from the top */
+static const int16_t sin12[12] = { 0, 500, 866, 1000, 866, 500,
+                                   0, -500, -866, -1000, -866, -500 };
+static const int16_t cos12[12] = { 1000, 866, 500, 0, -500, -866,
+                                   -1000, -866, -500, 0, 500, 866 };
+static const int16_t sin8[8] = { 0, 707, 1000, 707, 0, -707, -1000, -707 };
+static const int16_t cos8[8] = { 1000, 707, 0, -707, -1000, -707, 0, 707 };
+
+static void draw_art(int art, int x, int y, int s, char letter)
+{
+    int X = x * 16, Y = y * 16;
+#define D(v) ((v) * s / 20)
+#define PX(v) (X + D(v))
+#define PY(v) (Y + D(v))
+    static const uint32_t grad[ART_N][2] = {
+        { 0x64D2FF, 0x0A84FF },   /* App */
+        { 0x48484A, 0x1C1C1E },   /* Clock */
+        { 0x8FD8FF, 0x2F8EF0 },   /* Files */
+        { 0x3A3A3C, 0x111113 },   /* Monitor */
+        { 0x3A3A3C, 0x141416 },   /* Term */
+        { 0x64D2FF, 0x0A6CFF },   /* Web */
+        { 0xAEAEB2, 0x636366 },   /* Settings */
+        { 0xFFD60A, 0xFF9F0A },   /* Editor */
+        { 0xFF6B8A, 0xFF2D55 },   /* Tasks */
+        { 0xDA8FFF, 0x8944E0 },   /* Mixer */
+        { 0x8E8E93, 0x48484A },   /* anything else: a letter */
+    };
+    if (art < 0 || art >= ART_N)
+        art = ART_LETTER;
+    gfx_fill_grad(x, y, s, s, grad[art][0], grad[art][1], 255);
+    /* a little light along the top edge, as on glass */
+    gfx_fill(x, y, s, 1, 0xFFFFFF, 60);
+
+    switch (art) {
+    case 0:                                       /* a window */
+        gfx_rrect16(PX(70), PY(85), D(180), D(150), D(25), 0xFFFFFF, 245);
+        gfx_line16(PX(78), PY(128), PX(242), PY(128), D(8), 0xBCD3EE, 255);
+        gfx_disc16(PX(97), PY(106), D(11), 0xFF5F57, 255);
+        gfx_disc16(PX(126), PY(106), D(11), 0xFEBC2E, 255);
+        gfx_disc16(PX(155), PY(106), D(11), 0x28C840, 255);
+        break;
+    case 1:                                       /* a clock face at ten past ten */
+        gfx_disc16(PX(160), PY(160), D(118), 0xFFFFFF, 255);
+        for (int k = 0; k < 12; k++)
+            gfx_disc16(PX(160) + D(96 * sin12[k] / 1000),
+                       PY(160) - D(96 * cos12[k] / 1000), D(7),
+                       0x8E8E93, 255);
+        gfx_line16(PX(160), PY(160), PX(117), PY(135), D(18), 0x1C1C1E, 255);
+        gfx_line16(PX(160), PY(160), PX(225), PY(122), D(13), 0x1C1C1E, 255);
+        gfx_line16(PX(160), PY(160), PX(160), PY(245), D(6), 0xFF3B30, 255);
+        gfx_disc16(PX(160), PY(160), D(10), 0xFF3B30, 255);
+        break;
+    case 2:                                       /* a folder */
+        gfx_rrect16(PX(55), PY(80), D(95), D(50), D(15), 0xCDE9FF, 255);
+        gfx_rrect16(PX(55), PY(95), D(210), D(150), D(20), 0xCDE9FF, 255);
+        gfx_rrect16(PX(55), PY(122), D(210), D(123), D(20), 0xFFFFFF, 255);
+        break;
+    case 3:                                       /* bars of a chart */
+        for (int k = 0; k < 4; k++) {
+            static const int hgt[4] = { 80, 140, 100, 170 };
+            gfx_rrect16(PX(70 + 45 * k), PY(245 - hgt[k]), D(34), D(hgt[k]),
+                        D(8), 0x30D158, 255);
+        }
+        break;
+    case 4:                                       /* a prompt */
+        gfx_line16(PX(88), PY(108), PX(136), PY(150), D(22), 0xFFFFFF, 255);
+        gfx_line16(PX(136), PY(150), PX(88), PY(192), D(22), 0xFFFFFF, 255);
+        gfx_line16(PX(152), PY(200), PX(228), PY(200), D(22), 0x30D158, 255);
+        break;
+    case 5:                                       /* a globe */
+        gfx_circle16(PX(160), PY(160), D(105), D(15), 0xFFFFFF, 255);
+        gfx_rring16(PX(115), PY(55), D(90), D(210), D(45), D(15),
+                    0xFFFFFF, 255);
+        gfx_line16(PX(58), PY(160), PX(262), PY(160), D(14), 0xFFFFFF, 255);
+        gfx_line16(PX(76), PY(106), PX(244), PY(106), D(12), 0xFFFFFF, 220);
+        gfx_line16(PX(76), PY(214), PX(244), PY(214), D(12), 0xFFFFFF, 220);
+        break;
+    case 6:                                       /* a cogwheel */
+        for (int k = 0; k < 8; k++)
+            gfx_line16(PX(160) + D(62 * sin8[k] / 1000),
+                       PY(160) - D(62 * cos8[k] / 1000),
+                       PX(160) + D(98 * sin8[k] / 1000),
+                       PY(160) - D(98 * cos8[k] / 1000), D(42),
+                       0xEDEDF0, 255);
+        gfx_disc16(PX(160), PY(160), D(80), 0xEDEDF0, 255);
+        gfx_disc16(PX(160), PY(160), D(32), 0x8A8A90, 255);
+        break;
+    case 7:                                       /* a page with writing */
+        gfx_rrect16(PX(85), PY(55), D(150), D(210), D(18), 0xFFFFFF, 255);
+        for (int k = 0; k < 4; k++)
+            gfx_line16(PX(112), PY(105 + 35 * k),
+                       PX(k == 3 ? 170 : 208), PY(105 + 35 * k), D(12),
+                       0xC7C7CC, 255);
+        break;
+    case 8:                                       /* a list, one row done */
+        for (int k = 0; k < 3; k++) {
+            gfx_circle16(PX(95), PY(100 + 60 * k), D(22), D(14), 0xFFFFFF, 255);
+            gfx_line16(PX(140), PY(100 + 60 * k), PX(240), PY(100 + 60 * k),
+                       D(16), 0xFFFFFF, 255);
+        }
+        gfx_disc16(PX(95), PY(100), D(11), 0xFFFFFF, 255);
+        break;
+    case 9:                                       /* sliders */
+        for (int k = 0; k < 3; k++) {
+            static const int knob[3] = { 185, 110, 205 };
+            gfx_line16(PX(100 + 60 * k), PY(70), PX(100 + 60 * k), PY(250),
+                       D(12), 0xFFFFFF, 140);
+            gfx_disc16(PX(100 + 60 * k), PY(knob[k]), D(24), 0xFFFFFF, 255);
+        }
+        break;
+    default: {                                    /* the first letter */
+        char t[2] = { letter, 0 };
+        int px = s * 11 / 20;
+        int tw = ui_font_width(UI_BOLD, px, t);
+        ui_font_text(UI_BOLD, px, x + (s - tw) / 2,
+                     ui_font_baseline_in(px, y, s), t, 0xFFFFFF);
+        break;
+    }
+    }
+#undef D
+#undef PX
+#undef PY
+}
+
+/* The pictures drawn so far, at the sizes they were asked for. The
+   room for them comes from the frame allocator the first time; when it
+   is full, everything is forgotten and drawn again - simpler than
+   choosing what to throw away, and with a dozen programs at two sizes
+   it does not happen. */
+#define ART_CACHE 32
+#define ART_POOL_PAGES 64
+static struct { int art, s; char letter; uint32_t *px; } art_cache[ART_CACHE];
+static int art_cached;
+static uint32_t *art_pool;
+static uint32_t art_pool_used;           /* in pixels */
+
+static const uint32_t *art_get(int art, int s, char letter)
+{
+    if (art != ART_LETTER)
+        letter = 0;
+    for (int i = 0; i < art_cached; i++)
+        if (art_cache[i].art == art && art_cache[i].s == s &&
+            art_cache[i].letter == letter)
+            return art_cache[i].px;
+    if (!art_pool) {
+        uint32_t a = pmm_alloc_contiguous(ART_POOL_PAGES);
+        if (!a)
+            return (const uint32_t *)0;
+        art_pool = (uint32_t *)(uintptr_t)a;
+    }
+    uint32_t need = (uint32_t)(s * s);
+    if (art_cached == ART_CACHE ||
+        art_pool_used + need > ART_POOL_PAGES * 1024u) {
+        art_cached = 0;
+        art_pool_used = 0;
+        if (need > ART_POOL_PAGES * 1024u)
+            return (const uint32_t *)0;
+    }
+    uint32_t *px = art_pool + art_pool_used;
+    struct gfx_surface surf = { px, s, s, s };
+    gfx_target(&surf);
+    draw_art(art, 0, 0, s, letter);
+    gfx_target((const struct gfx_surface *)0);
+    art_cache[art_cached].art = art;
+    art_cache[art_cached].s = s;
+    art_cache[art_cached].letter = letter;
+    art_cache[art_cached].px = px;
+    art_cached++;
+    art_pool_used += need;
+    return px;
+}
+
+/* A tile: the picture with round corners, the way the dock and the
+   menu show it. 'a' below 255 is a tile that is there and not there -
+   a window that is minimised. */
+static void draw_tile(int art, int x, int y, int s, char letter, int a)
+{
+    const uint32_t *px = art_get(art, s, letter);
+    int r = s * 9 / 40;
+    if (px) {
+        gfx_blit_round(x, y, s, s, r, px, s, a);
+    } else {                      /* no room to keep it: draw it here */
+        gfx_rrect(x, y, s, s, r, 0x8E8E93, a);
+    }
+}
+
+
+/* A text cut to a width, with an ellipsis where it was cut */
+static const char *fit_text(const char *s, int font, int px, int maxw,
+                            char *out, int cap)
+{
+    if (ui_font_width(font, px, s) <= maxw)
+        return s;
+    int n = 0;
+    while (s[n] && n < cap - 4)
+        n++;
+    while (n > 0) {
+        /* back to the start of a character, never into the middle */
+        n--;
+        while (n > 0 && ((uint8_t)s[n] & 0xC0) == 0x80)
+            n--;
+        memcpy(out, s, (uint32_t)n);
+        out[n] = (char)0xE2;
+        out[n + 1] = (char)0x80;
+        out[n + 2] = (char)0xA6;
+        out[n + 3] = 0;
+        if (ui_font_width(font, px, out) <= maxw)
+            return out;
+    }
+    return "";
+}
+/* What was under a window's four corners before it was drawn - so the
+   corners can be made round after its content is in (see
+   gfx_round_save) */
+static uint32_t corner_keep[4 * WIN_R * WIN_R];
+
+static void draw_lights(const struct window *win, int focused)
+{
+    static const uint32_t on[3] = { LIGHT_CLOSE, LIGHT_MIN, LIGHT_ZOOM };
+    int ly = light_y(win);
+    /* The signs on them only while the pointer is over them: three
+       coloured dots are calm, three dots with symbols are a toolbar */
+    int near = in_rect(mouse_x, mouse_y, light_x(win, 0) - 3, ly - 3,
+                       2 * LIGHT_STEP + LIGHT_D + 6, LIGHT_D + 6);
+    for (int k = 0; k < 3; k++) {
+        int cx = light_x(win, k) * 16 + LIGHT_D * 8;
+        int cy = ly * 16 + LIGHT_D * 8;
+        gfx_disc16(cx, cy, LIGHT_D * 8, focused || near ? on[k] : L.light_off,
+                   255);
+        gfx_circle16(cx, cy, LIGHT_D * 8, 12, 0x000000, 40);
+        if (!near)
+            continue;
+        int d = LIGHT_D * 4 - 10;                 /* the sign's half size */
+        if (k == 0) {
+            gfx_line16(cx - d, cy - d, cx + d, cy + d, 22, 0x4D0000, 210);
+            gfx_line16(cx - d, cy + d, cx + d, cy - d, 22, 0x4D0000, 210);
+        } else if (k == 1) {
+            gfx_line16(cx - d - 4, cy, cx + d + 4, cy, 22, 0x5A3A00, 210);
+        } else {
+            gfx_line16(cx - d - 4, cy, cx + d + 4, cy, 22, 0x003A00, 210);
+            gfx_line16(cx, cy - d - 4, cx, cy + d + 4, 22, 0x003A00, 210);
+        }
+    }
+}
+
+/* Draws a decimal number as text */
+static void draw_int(int x, int baseline, int v, uint32_t rgb)
+{
+    char tmp[12];
+    int n = 0;
+    do {
+        tmp[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    char s[12];
+    int j = 0;
+    while (n)
+        s[j++] = tmp[--n];
+    s[j] = '\0';
+    ui_font_text(UI_SANS, UI_PX, x, baseline, s, rgb);
+}
+
 static void draw_window(const struct window *win)
 {
-    if (win->minimized)            /* minimised - visible only on the bar */
+    if (win->minimized)            /* minimised - visible only in the dock */
         return;
 
-    /* A flat surface with one line around it. No shadow underneath and
-       no lit edge: what tells a window from the desktop is that it is
-       a different colour, and one line is enough to say where it
-       ends. */
-    video_fill_rect(win->x, win->y, win->w, win->h, COL_WIN);
-    video_fill_rect(win->x, win->y, win->w, 1, COL_LINE);
-    video_fill_rect(win->x, win->y + win->h - 1, win->w, 1, COL_LINE);
-    video_fill_rect(win->x, win->y, 1, win->h, COL_LINE);
-    video_fill_rect(win->x + win->w - 1, win->y, 1, win->h, COL_LINE);
-
-    /* The title bar: the accent colour when the window is listening,
-       plain grey when it is not. One flat colour either way - the
-       difference is the whole message, so nothing else should be
-       competing with it. */
+    int x = win->x, y = win->y, w = win->w, h = win->h;
     int focused = focus_idx >= 0 && win == &wins[focus_idx];
-    video_fill_rect(win->x + 1, win->y + 1, win->w - 2, TITLE_H,
-                    focused ? COL_TITLE : COL_TITLE_OFF);
-    video_fill_rect(win->x + 1, win->y + 1 + TITLE_H, win->w - 2, 1,
-                    COL_LINE);
-    ui_text(win->x + 5, ui_baseline_in(win->y + 1, TITLE_H), win->title,
-            focused ? COL_WHITE : COL_DIM);
-    /* The maximise button, and the minimise one next to the close.
-       'O' means it will fill the screen, 'o' that it will go back to
-       the size it had - the same button, and which of the two it is
-       has to be visible without clicking it. */
-    /* The buttons are the glyphs themselves - no boxes drawn round
-       them. What they do is said by the sign; a frame adds nothing but
-       ink. The one exception is the close button, which is red,
-       because that one had better be unmistakable. */
+
+    /* The shadow first, under everything: deeper under the window that
+       is listening, which is how the eye finds it without reading */
+    gfx_shadow(x, y, w, h, WIN_R, SHADOW_S,
+               focused ? L.shadow_a : L.shadow_a * 3 / 5, SHADOW_DY);
+    gfx_round_save(x, y, w, h, WIN_R, corner_keep);
+
+    /* The title bar and the body. The bar is a shade apart from the
+       body when the window has the focus and almost the body's own
+       colour when it has not - with the lights, that is the whole of
+       how focus is shown. */
+    gfx_fill(x, y, w, TITLE_H + 1, focused ? L.title_bg : L.title_off, 255);
+    gfx_fill(x, y + TITLE_H, w, 1, L.win_line, 150);
+    gfx_fill(x, y + TITLE_H + 1, w, h - TITLE_H - 1, L.win_bg, 255);
+
+    /* The title in the middle of the bar, in bold - and kept clear of
+       the lights, so a long one is cut short rather than run under
+       them */
+    int left = kiosk ? x + 8 : light_x(win, 2) + LIGHT_D + 8;
+    int room = x + w - 8 - left;
+    char cut[sizeof(win->title) + 4];
+    const char *t = fit_text(win->title, UI_BOLD, TITLE_PX,
+                             room > 0 ? room : 0, cut, sizeof(cut));
+    int tw = ui_font_width(UI_BOLD, TITLE_PX, t);
+    int tx = x + (w - tw) / 2;
+    if (tx < left)
+        tx = left;
+    ui_font_text(UI_BOLD, TITLE_PX, tx,
+                 ui_font_baseline_in(TITLE_PX, y, TITLE_H), t,
+                 focused ? L.title_text : L.title_dim);
+
     /* Not in the kiosk. There is nothing to minimise the window to,
        nowhere for it to grow into and nothing behind it to close it
        back to - three buttons that would all be lies. */
-    if (!kiosk) {
-        uint8_t sign = focused ? COL_WHITE : COL_DIM;
-        video_draw_char(max_x(win), close_y(win), win->maxed ? 'o' : 'O',
-                        sign);
-        video_draw_char(min_x(win), close_y(win), '_', sign);
-        video_fill_rect(close_x(win), close_y(win), CLOSE_SZ, CLOSE_SZ,
-                        COL_RED);
-        video_draw_char(close_x(win), close_y(win), 'x', COL_WHITE);
-    }
-    /* The grip: three plain lines running the way the corner is
-       pulled. One colour, no shading - it is a hint, not a handle to
-       be modelled. */
+    if (!kiosk)
+        draw_lights(win, focused);
+
+    /* The grip: two short strokes the way the corner is pulled. A hint,
+       not a handle to be modelled - and an application's content covers
+       it, as it always did. */
     if (!kiosk && resizable(win)) {
-        int gx = grip_x(win), gy = grip_y(win);
-        for (int d = 2; d < GRIP_SZ; d += 3)
-            for (int k = 0; k <= GRIP_SZ - 2 - d; k++)
-                video_putpixel(gx + d + k, gy + GRIP_SZ - 2 - k, COL_LINE);
+        int gx = (x + w - 3) * 16, gy = (y + h - 3) * 16;
+        for (int d = 3; d <= 7; d += 4)
+            gfx_line16(gx, gy - d * 16, gx - d * 16, gy, 14, L.win_line, 255);
     }
 
     /* An optional action button plus a click counter */
     if (win->has_button) {
-        video_fill_rect(btn_x(win), btn_y(win), BTN_W, BTN_H, COL_WIN_HI);
-        video_fill_rect(btn_x(win), btn_y(win), BTN_W, 1, COL_LINE);
-        video_fill_rect(btn_x(win), btn_y(win) + BTN_H - 1, BTN_W, 1,
-                        COL_LINE);
-        video_fill_rect(btn_x(win), btn_y(win), 1, BTN_H, COL_LINE);
-        video_fill_rect(btn_x(win) + BTN_W - 1, btn_y(win), 1, BTN_H,
-                        COL_LINE);
-        video_draw_string(btn_x(win) + 4, btn_y(win) + 2, "Click", COL_BLACK);
-        /* The counter stands on the window's grey, not on the button -
-           so it is dark, like everything else there. */
-        draw_int(btn_x(win) + BTN_W + 6, btn_y(win) + 2, win->counter,
-                 COL_BLACK);
+        int bx = btn_x(win), by = btn_y(win);
+        gfx_rrect(bx, by, BTN_W, BTN_H, 6, L.accent, 255);
+        int lw = ui_font_width(UI_SANS, UI_PX, "Click");
+        ui_font_text(UI_SANS, UI_PX, bx + (BTN_W - lw) / 2,
+                     ui_baseline_in(by, BTN_H), "Click", L.accent_text);
+        draw_int(bx + BTN_W + 8, ui_baseline_in(by, BTN_H), win->counter,
+                 L.title_text);
     }
 
     /* An application window: compose its content buffer into the work
@@ -954,8 +1210,8 @@ static void draw_window(const struct window *win)
        already what the framebuffer wants - and that is the faster of
        the two, not the slower. */
     if (win->content) {
-        int bx = win->x + 1;
-        int by = win->y + TITLE_H + 1;
+        int bx = x + 1;
+        int by = y + TITLE_H + 1;
         if (win->truecolour) {
             video_blit_rgb(bx, by, win->cw, win->ch,
                            (const uint32_t *)win->content, win->cw);
@@ -966,6 +1222,13 @@ static void draw_window(const struct window *win)
                                    win->content[j * win->cw + i]);
         }
     }
+
+    /* Round corners - the content's too - and one soft line round the
+       whole, which is what says where a light window ends on a light
+       background */
+    gfx_round_apply(x, y, w, h, WIN_R, corner_keep);
+    gfx_rring16(x * 16, y * 16, w * 16, h * 16, WIN_R * 16, 16, L.win_line,
+                focused ? 220 : 170);
 }
 
 /* Is the point on a window's title bar (the drag handle) */
@@ -988,7 +1251,6 @@ static void desk_switch(int d)
     drag_idx = -1;
     resize_idx = -1;
     content_drag = -1;
-    icon_drag = -1;
     menu_open = 0;
 
     /* The focus goes to the topmost window that is there, so that
@@ -1013,18 +1275,6 @@ static void desk_take(int d)
     if (focus_idx >= 0 && wins[focus_idx].used)
         wins[focus_idx].desk = d;
     desk_switch(d);
-}
-
-/* The switch drawn at the right-hand end of the top bar: one cell per
-   desktop, the one being shown in the accent colour, and a desktop
-   that holds nothing written in the quiet grey - so that "where am I"
-   and "is there anything over there" are one glance, not two. */
-#define DESK_CELL 12
-static int desk_x0(void) { return video_w() - DESK_N * DESK_CELL - 3; }
-
-static int show_x(void)
-{
-    return desk_x0() - TB_LOAD_BAR - 8 - 6 - SHOW_W;
 }
 
 static void toggle_show_desktop(void)
@@ -1090,14 +1340,14 @@ static int window_at(int x, int y)
 #define SNAP_EDGE  8              /* how near the edge counts as at it */
 static int snap_hint;             /* where the dragged window would land */
 
-/* What the window would become. The halves stop at the taskbar, like
-   a maximised window does - the bar is not somewhere a window may go. */
+/* What the window would become. The halves fill the space between the
+   bar and the dock, as a maximised window does. */
 static void snap_geom(int where, int *x, int *y, int *w, int *h)
 {
     *x = 0;
-    *y = 0;
+    *y = work_top();
     *w = video_w();
-    *h = taskbar_y();
+    *h = work_bottom() - work_top();
     if (where == SNAP_LEFT)
         *w = video_w() / 2;
     else if (where == SNAP_RIGHT) {
@@ -1118,7 +1368,7 @@ static int snap_where(int i, int mx, int my)
     /* The top comes last, so that a corner gives a half - two windows
        side by side is what somebody dragging into a corner wants, and
        the whole screen is one button away anyway. */
-    if (my < sh / 4 && win->y <= TITLE_H + SNAP_EDGE)
+    if (my < sh / 4 && win->y <= BAR_H + SNAP_EDGE)
         return SNAP_FULL;
     return SNAP_NONE;
 }
@@ -1156,7 +1406,7 @@ static void handle_input(int mx, int my, int buttons)
 
     /* In the kiosk there is nothing to click but the one window and
        the one button the environment itself offers. Everything the
-       taskbar, the menu, the icons and the desktop switch would have
+       dock, the menu, the bar and the desktop switch would have
        done is simply not reachable - which is the whole point of the
        mode. */
     if (kiosk) {
@@ -1207,7 +1457,8 @@ static void handle_input(int mx, int my, int buttons)
        pointer is. On a window it does nothing yet - a window's own
        menu is the window's business, and none of them has one. */
     if (right && !prev_right) {
-        if (window_at(mx, my) < 0 && my < taskbar_y())
+        if (window_at(mx, my) < 0 && my >= BAR_H && my < work_bottom() &&
+            dock_hit(mx, my) < 0)
             menu_at(mx, my);
         else
             menu_open = 0;
@@ -1215,29 +1466,24 @@ static void handle_input(int mx, int my, int buttons)
     prev_right = right;
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
-        /* The desktop switch on the top bar, which is above everything
-           the way the bar itself is */
-        if (my < 10 && mx >= show_x() && mx < show_x() + SHOW_W &&
-            window_at(mx, my) < 0) {
-            toggle_show_desktop();
-            prev_pressed = pressed;
-            return;
-        }
-        if (my < 10 && mx >= desk_x0() && window_at(mx, my) < 0) {
-            int d = (mx - desk_x0()) / DESK_CELL;
-            if (d >= 0 && d < DESK_N)
-                desk_switch(d);
-            prev_pressed = pressed;
-            return;
-        }
-        /* The taskbar / launch menu takes precedence (it is on top) */
-        if (in_rect(mx, my, bar_x0() + 2, taskbar_y() + 3, MENU_BW,
-                    TB_H - 6)) {
-            if (menu_open)
+        /* The menu bar is above everything, the way it is drawn. Its
+           left end opens the menu; on the right are the desktop switch,
+           and "show the desktop". */
+        if (my < BAR_H) {
+            if (mx < logo_w()) {
+                if (menu_open && menu_py == MENU_Y)
+                    menu_open = 0;
+                else
+                    menu_at(6, MENU_Y);
+            } else if (in_rect(mx, my, show_x(), 0, SHOW_W, BAR_H)) {
                 menu_open = 0;
-            else
-                menu_at(bar_x0() + 2,
-                        taskbar_y() - MENU_N * MENU_ROW);
+                toggle_show_desktop();
+            } else if (mx >= desk_x0() && mx < desk_x0() + DESK_N * DESK_CELL) {
+                menu_open = 0;
+                desk_switch((mx - desk_x0()) / DESK_CELL);
+            } else {
+                menu_open = 0;
+            }
             prev_pressed = pressed;
             return;
         }
@@ -1247,34 +1493,54 @@ static void handle_input(int mx, int my, int buttons)
                             MENU_ROW)) {
                     /* Started from the menu, which names programs -
                        so its face is looked up by name */
-                    remember_launch(exec_spawn(menu_items[i]),
-                                    icon_of_app(menu_items[i]));
+                    int from = icon_of_app(menu_items[i]);
+                    remember_launch(exec_spawn(menu_items[i]), from,
+                                    from >= 0 ? icons[from].art
+                                              : art_of_app(menu_items[i]));
                     menu_open = 0;
                     prev_pressed = pressed;
                     return;
                 }
             }
             menu_open = 0;                /* a click outside the menu - close it */
+            if (in_rect(mx, my, menu_px, menu_py, MENU_W, menu_h())) {
+                prev_pressed = pressed;   /* on its edge: nothing else */
+                return;
+            }
         }
-        /* Window buttons on the taskbar: focus plus bring to top. The
-           same two functions the drawing asks, so a button is clickable
-           exactly where it is - wherever the settings have put it. */
-        if (my >= taskbar_y()) {
-            int bw = tbl_width();
-            int x0 = tbl_x0();
+        /* The dock, which is above the windows: a program's tile starts
+           it, a window's tile brings that window up - from minimised,
+           if it was - and gives it the keyboard. The same function the
+           drawing asks, so a tile is clickable exactly where it is. */
+        int tile = dock_hit(mx, my);
+        if (tile >= 0 && tile < 100) {
+            remember_launch(exec_spawn(icons[tile].app), tile, icons[tile].art);
+            hop_at[tile] = frames;
+            hop_set[tile] = 1;
+            prev_pressed = pressed;
+            return;
+        }
+        if (tile >= 100) {
             int j = 0;
             for (int i = 0; i < MAX_WIN; i++) {
                 if (!here(i))
                     continue;
-                if (in_rect(mx, my, x0 + j * bw, taskbar_y(),
-                            bw - 2, TB_H)) {
-                    wins[i].minimized = 0;   /* restore it if minimised */
-                    focus_idx = i;
-                    raise_win(i);
-                    prev_pressed = pressed;
-                    return;
-                }
-                j++;
+                if (j++ != tile - 100)
+                    continue;
+                wins[i].minimized = 0;   /* restore it if minimised */
+                focus_idx = i;
+                raise_win(i);
+                break;
+            }
+            prev_pressed = pressed;
+            return;
+        }
+        {
+            struct dock d;
+            dock_geom(&d);
+            if (in_rect(mx, my, d.x, d.y, d.w, d.h)) {
+                prev_pressed = pressed;   /* the glass between tiles */
+                return;
             }
         }
 
@@ -1286,30 +1552,30 @@ static void handle_input(int mx, int my, int buttons)
             struct window *w = &wins[i];
             if (w->minimized)               /* minimised - out of reach */
                 continue;
-            /* the close button [x]
+            /* The lights - close, minimise, zoom. Not in the kiosk,
+               where they are not drawn.
              *
-             * A kernel window owns nothing, so it simply goes. An
-             * application window belongs to a running process: dropping
-             * it from under that process would leave it drawing into a
-             * window that no longer exists. So we ASK - and only insist
-             * when the asking goes unanswered. */
-            if (in_rect(mx, my, close_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
+             * Closing: a kernel window owns nothing, so it simply goes.
+             * An application window belongs to a running process:
+             * dropping it from under that process would leave it
+             * drawing into a window that no longer exists. So we ASK -
+             * and only insist when the asking goes unanswered. */
+            if (!kiosk && on_light(w, 0, mx, my)) {
                 close_window(i);
                 hit = 1;
                 break;
             }
-            /* the maximise button [O] - and the same button puts it
-               back, so one click undoes the other */
-            if (in_rect(mx, my, max_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
-                toggle_max(i);
-                hit = 1;
-                break;
-            }
-            /* the minimise button [_] */
-            if (in_rect(mx, my, min_x(w), close_y(w), CLOSE_SZ, CLOSE_SZ)) {
+            if (!kiosk && on_light(w, 1, mx, my)) {
                 w->minimized = 1;
                 if (focus_idx == i)
                     focus_idx = -1;
+                hit = 1;
+                break;
+            }
+            /* zoom - and the same light puts it back, so one click
+               undoes the other */
+            if (!kiosk && on_light(w, 2, mx, my)) {
+                toggle_max(i);
                 hit = 1;
                 break;
             }
@@ -1390,20 +1656,8 @@ static void handle_input(int mx, int my, int buttons)
                 break;            /* swallow it - do not fall through to lower ones */
             }
         }
-        if (!hit) {
-            /* A click on the desktop background: grabbing an icon (launch or
-               move is decided on release), otherwise a loss of focus */
-            focus_idx = -1;
-            for (int k = 0; k < ICON_N; k++)
-                if (in_rect(mx, my, icons[k].x, icons[k].y, ICON_W, ICON_H)) {
-                    icon_drag = k;
-                    icon_dx = mx - icons[k].x;
-                    icon_dy = my - icons[k].y;
-                    icon_press_x = mx;
-                    icon_press_y = my;
-                    break;
-                }
-        }
+        if (!hit)
+            focus_idx = -1;            /* a click on the desktop: nobody listens */
     }
 
     if (!pressed) {
@@ -1438,16 +1692,6 @@ static void handle_input(int mx, int my, int buttons)
             resize_content(&wins[resize_idx]);
             resize_idx = -1;
         }
-        if (icon_drag >= 0) {       /* releasing an icon: a click or a move? */
-            int ddx = mx - icon_press_x, ddy = my - icon_press_y;
-            if (ddx * ddx + ddy * ddy < 9)
-                /* barely moved -> a click, and the window it opens
-                   will wear the picture from this very tile */
-                remember_launch(exec_spawn(icons[icon_drag].app), icon_drag);
-            else
-                icons_save();                       /* moved -> save the layout */
-            icon_drag = -1;
-        }
     }
 
     /* Dragging inside a window: the pointer's place, once per frame.
@@ -1468,22 +1712,11 @@ static void handle_input(int mx, int my, int buttons)
         }
     }
 
-    if (pressed && icon_drag >= 0) {    /* the icon follows the cursor */
-        int nx = mx - icon_dx;
-        int ny = my - icon_dy;
-        if (nx < 0) nx = 0;
-        if (ny < 10) ny = 10;                       /* below the top bar */
-        if (nx > video_w() - ICON_W) nx = video_w() - ICON_W;
-        if (ny > video_h() - TB_H - ICON_H) ny = video_h() - TB_H - ICON_H;
-        icons[icon_drag].x = nx;
-        icons[icon_drag].y = ny;
-    }
-
     if (pressed && drag_idx >= 0) {     /* in progress: the window follows the cursor */
         int nx = mx - drag_dx;
         int ny = my - drag_dy;
         if (nx < 0) nx = 0;
-        if (ny < TITLE_H) ny = TITLE_H;
+        if (ny < BAR_H) ny = BAR_H;            /* never over the bar */
         if (nx > video_w() - wins[drag_idx].w) nx = video_w() - wins[drag_idx].w;
         if (ny > video_h() - wins[drag_idx].h) ny = video_h() - wins[drag_idx].h;
         wins[drag_idx].x = nx;
@@ -1552,10 +1785,10 @@ static int resize_content(struct window *w)
 
 /* Maximises the window, or puts it back where it came from.
  *
- * Maximised means: from the top left corner of the screen down to the
- * taskbar - not over it. The bar is how a person reaches every other
- * window, so a window that covered it would be a window there was no
- * way out of.
+ * Maximised means: the whole width of the screen, from under the menu
+ * bar down to the dock - over neither. They are how a person reaches
+ * everything else, so a window that covered them would be a window
+ * there was no way out of.
  *
  * An application's window is a buffer as well as a rectangle, so the
  * buffer has to grow too and the application has to be told. If there
@@ -1569,9 +1802,9 @@ static void toggle_max(int i)
     if (!w->maxed) {
         int ox = w->x, oy = w->y, ow = w->w, oh = w->h;
         w->x = 0;
-        w->y = 0;
+        w->y = work_top();
         w->w = video_w();
-        w->h = taskbar_y();
+        w->h = work_bottom() - work_top();
         if (resize_content(w) < 0) {   /* no memory for that buffer */
             w->x = ox;
             w->y = oy;
@@ -1635,7 +1868,6 @@ static void snap_window(int i, int where)
     raise_win(i);
 }
 
-/* Draws the taskbar at the bottom and (if open) the launch menu */
 /* The wallpaper: a small picture stretched over the screen.
  *
  * A screen-sized image is three hundred kilobytes and the kernel's
@@ -1730,99 +1962,189 @@ static void wallpaper_load(void)
     printk("[desktop] wallpaper '%s': %dx%d\n", name, w, h);
 }
 
-/* The background: sixteen bands, darkening towards the floor.
+/* --- The background ---------------------------------------------------------
  *
- * A flat colour is what a machine draws when nobody has thought about
- * it. Sixteen rectangles cost sixteen palette entries and one loop,
- * and the screen stops looking like a fill. */
+ * Drawn once into a buffer the size of the screen and copied from there
+ * every frame: the aurora is a few million operations, a wallpaper
+ * stretched over the screen a multiply per pixel, and neither changes
+ * from one frame to the next. With it, a second buffer: the strip of
+ * the background under the menu bar, already blurred and tinted - the
+ * bar's glass. Nothing but the background is ever under the bar
+ * (windows stay below it), so the glass is drawn once too.
+ *
+ * Both are drawn again when what they show changes - the theme, the
+ * background or the wallpaper in the settings - which is checked about
+ * once a second. */
+static uint32_t *bg_buf, *bar_buf;
+static uint32_t bg_pages, bar_pages;
+static int bg_key = -1;            /* what they were drawn for */
+static int theme_dark = 1;
+static int look_wait;
+
+/* The six flat choices, from a little brighter at the top to a little
+   darker at the floor - 0 is the aurora */
+static const struct { uint8_t r, g, b; } backgrounds[] = {
+    {  11,  16,  48 },   /* 0 - the aurora (this is its 256-colour stand-in) */
+    {   0,   0, 130 },   /* 1 - navy */
+    {  81,   0, 121 },   /* 2 - violet */
+    {   0, 113,   0 },   /* 3 - green */
+    { 162,  81,   0 },   /* 4 - brown */
+    {  48,  48,  48 },   /* 5 - grey */
+    {   0, 130, 162 },   /* 6 - sea */
+};
+#define BG_N ((int)(sizeof(backgrounds) / sizeof(backgrounds[0])))
+
+static int background_choice(void)
+{
+    uint32_t bg = config_get_num("background", 0);
+    return bg < (uint32_t)BG_N ? (int)bg : 0;
+}
+
+static uint32_t *take_pages(uint32_t bytes, uint32_t *have)
+{
+    uint32_t pages = (bytes + 4095) / 4096;
+    if (*have >= pages)
+        return (uint32_t *)0;          /* the old one will do */
+    uint32_t a = pmm_alloc_contiguous(pages);
+    if (!a)
+        return (uint32_t *)0;
+    *have = pages;
+    return (uint32_t *)(uintptr_t)a;
+}
+
+/* The 256-colour palette for the background bands */
+static void desk_palette(int bg)
+{
+    video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
+                      backgrounds[bg].b);
+    for (int i = 0; i < COL_DESK_N; i++) {
+        /* 115% at the top, 75% at the bottom, in even steps */
+        int num = 115 - i * (115 - 75) / (COL_DESK_N - 1);
+        int r = backgrounds[bg].r * num / 100;
+        int g = backgrounds[bg].g * num / 100;
+        int b = backgrounds[bg].b * num / 100;
+        video_set_palette((uint8_t)(COL_DESK0 + i),
+                          (uint8_t)(r > 255 ? 255 : r),
+                          (uint8_t)(g > 255 ? 255 : g),
+                          (uint8_t)(b > 255 ? 255 : b));
+    }
+}
+
+static void paint_background(uint32_t *buf, int w, int h, int bg)
+{
+    if (wall) {
+        /* A picture: every pixel of it covers a block of the screen */
+        for (int y = 0; y < h; y++) {
+            int sy = y * wall_h / h;
+            for (int x = 0; x < w; x++) {
+                int sx = x * wall_w / w;
+                uint32_t c;
+                if (wall_rgb) {
+                    const uint8_t *p = wall + ((long)sy * wall_w + sx) * 3;
+                    c = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
+                } else {
+                    c = video_palette_rgb((uint8_t)(WALL_COL0 +
+                                                    wall[sy * wall_w + sx]));
+                }
+                buf[(long)y * w + x] = c;
+            }
+        }
+        return;
+    }
+    if (bg == 0) {
+        aurora_draw(buf, w, h, w, theme_dark);
+        return;
+    }
+    /* A colour: smooth, from 115% at the top to 75% at the floor */
+    for (int y = 0; y < h; y++) {
+        int num = 115 - y * (115 - 75) / (h > 1 ? h - 1 : 1);
+        int r = backgrounds[bg].r * num / 100;
+        int g = backgrounds[bg].g * num / 100;
+        int b = backgrounds[bg].b * num / 100;
+        uint32_t c = ((uint32_t)(r > 255 ? 255 : r) << 16) |
+                     ((uint32_t)(g > 255 ? 255 : g) << 8) |
+                     (uint32_t)(b > 255 ? 255 : b);
+        for (int x = 0; x < w; x++)
+            buf[(long)y * w + x] = c;
+    }
+}
+
+/* Reads the theme and the background from the settings and, when they
+   changed, draws what depends on them again */
+static void look_refresh(int force)
+{
+    if (!force && --look_wait > 0)
+        return;
+    look_wait = 30;
+
+    const char *t = config_get("theme");
+    int dark = !(t && !strcmp(t, "light"));
+    int bg = background_choice();
+    int key = (dark << 8) | bg;
+    if (!force && key == bg_key)
+        return;
+    bg_key = key;
+    theme_dark = dark;
+    L = dark ? look_dark : look_light;
+    desk_palette(bg);
+
+    if (!video_true_colour())
+        return;                        /* bands of the palette will do */
+    int w = video_w(), h = video_h();
+    uint32_t *nb = take_pages((uint32_t)(w * h) * 4, &bg_pages);
+    if (nb)
+        bg_buf = nb;
+    if (!bg_buf)
+        return;
+    paint_background(bg_buf, w, h, bg);
+
+    /* The bar's glass: the strip under it, with what lies below it for
+       the blur to read, blurred and tinted */
+    int strip = BAR_H + 4 * BAR_BLUR;
+    if (strip > h)
+        strip = h;
+    uint32_t *nbar = take_pages((uint32_t)(w * strip) * 4, &bar_pages);
+    if (nbar)
+        bar_buf = nbar;
+    if (!bar_buf)
+        return;
+    memcpy(bar_buf, bg_buf, (uint32_t)(w * strip) * 4);
+    struct gfx_surface s = { bar_buf, w, strip, w };
+    gfx_target(&s);
+    gfx_blur(0, 0, w, BAR_H, BAR_BLUR);
+    gfx_fill(0, 0, w, BAR_H, L.bar_tint, L.bar_a);
+    gfx_target((const struct gfx_surface *)0);
+}
+
 static void draw_background(void)
 {
-    int h = taskbar_y();
-
-    /* A picture, if there is one: every pixel of it covers a block of
-       the screen, so this is one multiply per row and one per column
-       rather than a scaling filter nobody would see the benefit of. */
-    if (wall) {
+    if (bg_buf) {
+        video_blit_rgb(0, 0, video_w(), video_h(), bg_buf, video_w());
+        return;
+    }
+    /* Without a buffer: sixteen bands of the palette, or the picture
+       stretched pixel by pixel */
+    int h = video_h();
+    if (wall && !wall_rgb) {
         int sw = video_w();
         for (int y = 0; y < h; y++) {
-            int sy = y * wall_h / video_h();
-            if (wall_rgb) {
-                const uint8_t *row = wall + (long)sy * wall_w * 3;
-                for (int x = 0; x < sw; x++) {
-                    const uint8_t *p = row + (x * wall_w / sw) * 3;
-                    video_putpixel_rgb(x, y, ((uint32_t)p[0] << 16) |
-                                             ((uint32_t)p[1] << 8) | p[2]);
-                }
-                continue;
-            }
-            const uint8_t *row = wall + sy * wall_w;
+            const uint8_t *row = wall + (y * wall_h / h) * wall_w;
             for (int x = 0; x < sw; x++)
                 video_putpixel(x, y, (uint8_t)(WALL_COL0 +
                                                row[x * wall_w / sw]));
         }
         return;
     }
-
     for (int i = 0; i < COL_DESK_N; i++) {
         int y0 = i * h / COL_DESK_N;
         int y1 = (i + 1) * h / COL_DESK_N;
         video_fill_rect(0, y0, video_w(), y1 - y0,
                         (uint8_t)(COL_DESK0 + i));
     }
-    /* Under the bar there is nothing to see, but the bar is drawn last
-       and this keeps the frame whole if it is ever moved */
-    video_fill_rect(0, h, video_w(), video_h() - h,
-                    (uint8_t)(COL_DESK0 + COL_DESK_N - 1));
 }
 
-/* Draws the icons on the desktop background (a tile plus a caption) */
-/* One icon's picture, in whatever colour the place it is drawn in
-   calls for - white on a tile, white or black on a bar button */
-static void draw_icon_art_col(int k, int x, int y, uint8_t col)
-{
-    if (k < 0 || k >= (int)(sizeof(icon_art) / sizeof(icon_art[0])))
-        return;
-    for (int row = 0; row < 12; row++)
-        for (int c = 0; c < 12; c++)
-            if (icon_art[k][row] & (0x800 >> c))
-                video_putpixel(x + c, y + row, col);
-}
-
-/* One icon's picture, drawn where the tile is */
-static void draw_icon_art(int k, int x, int y)
-{
-    /* White on the tile's colour: one flat mark, nothing behind it and
-       nothing under it */
-    draw_icon_art_col(k, x, y, COL_WHITE);
-}
-
-static void draw_icons(void)
-{
-    for (int k = 0; k < ICON_N; k++) {
-        const struct icon *ic = &icons[k];
-        /* The tile: one flat colour with the picture on it. No
-           shadow, no edge - a shape in the accent colour is already
-           different enough from a desktop to be a thing. */
-        video_fill_rect(ic->x, ic->y, ICON_W, ICON_H, COL_ICON);
-        draw_icon_art(ic->art, ic->x + (ICON_W - 12) / 2,
-                      ic->y + (ICON_H - 12) / 2);
-        /* The caption gets a shadow of its own: white on a light
-           background is not text, it is a rumour */
-        video_draw_string(ic->x + 1, ic->y + ICON_H + 3, ic->label,
-                          COL_BLACK);
-        video_draw_string(ic->x, ic->y + ICON_H + 2, ic->label, COL_WHITE);
-    }
-}
-
-/* The time on the bar.
- *
- * Reading the CMOS clock means waiting out an update in progress and
- * then reading it twice until two reads agree, so it is not something
- * to do thirty times a second for a digit that changes once a second.
- * The reading is kept and refreshed about five times a second, which is
- * often enough that no second is ever skipped on screen. */
 /* A small unsigned number into a buffer; returns how many characters
-   it wrote. The hint on the bar is the only place that needs one. */
+   it wrote. */
 static int put_num(char *d, int v)
 {
     char tmp[8];
@@ -1838,8 +2160,24 @@ static int put_num(char *d, int v)
     return n;
 }
 
-static char clock_text[TB_CLOCK_CH + 1] = "--:--:--";
+/* The date and the time on the bar: "Sat 13 Jun 12:34:56".
+ *
+ * Reading the CMOS clock means waiting out an update in progress and
+ * then reading it twice until two reads agree, so it is not something
+ * to do thirty times a second for a digit that changes once a second.
+ * The reading is kept and refreshed about five times a second, which is
+ * often enough that no second is ever skipped on screen. */
+static char clock_text[24] = "--:--:--";
 static int clock_wait;
+
+/* The day of the week, 0 = Sunday (Sakamoto's method) */
+static int weekday(int y, int m, int d)
+{
+    static const int t[12] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (m < 3)
+        y -= 1;
+    return (y + y / 4 - y / 100 + y / 400 + t[(m - 1) % 12] + d) % 7;
+}
 
 static void clock_refresh(void)
 {
@@ -1847,157 +2185,302 @@ static void clock_refresh(void)
         return;
     clock_wait = 6;
 
+    static const char *days[7] = { "Sun", "Mon", "Tue", "Wed", "Thu",
+                                   "Fri", "Sat" };
+    static const char *months[12] = { "Jan", "Feb", "Mar", "Apr", "May",
+                                      "Jun", "Jul", "Aug", "Sep", "Oct",
+                                      "Nov", "Dec" };
     struct rtc_time t;
     rtc_read(&t);
-    clock_text[0] = (char)('0' + (t.hour / 10) % 10);
-    clock_text[1] = (char)('0' + t.hour % 10);
-    clock_text[2] = ':';
-    clock_text[3] = (char)('0' + (t.min / 10) % 10);
-    clock_text[4] = (char)('0' + t.min % 10);
-    clock_text[5] = ':';
-    clock_text[6] = (char)('0' + (t.sec / 10) % 10);
-    clock_text[7] = (char)('0' + t.sec % 10);
-    clock_text[8] = 0;
+    int n = 0;
+    if (t.month >= 1 && t.month <= 12 && t.day >= 1 && t.day <= 31) {
+        const char *dn = days[weekday(t.year, t.month, t.day)];
+        for (int i = 0; i < 3; i++)
+            clock_text[n++] = dn[i];
+        clock_text[n++] = ' ';
+        n += put_num(clock_text + n, t.day);
+        clock_text[n++] = ' ';
+        for (int i = 0; i < 3; i++)
+            clock_text[n++] = months[t.month - 1][i];
+        clock_text[n++] = ' ';
+    }
+    clock_text[n++] = (char)('0' + (t.hour / 10) % 10);
+    clock_text[n++] = (char)('0' + t.hour % 10);
+    clock_text[n++] = ':';
+    clock_text[n++] = (char)('0' + (t.min / 10) % 10);
+    clock_text[n++] = (char)('0' + t.min % 10);
+    clock_text[n++] = ':';
+    clock_text[n++] = (char)('0' + (t.sec / 10) % 10);
+    clock_text[n++] = (char)('0' + t.sec % 10);
+    clock_text[n] = 0;
 }
 
-/* The name of the window under the pointer, shown just above the bar.
+/* --- The hint ------------------------------------------------------------
  *
- * Remembered rather than drawn on the spot: it belongs on top of
- * everything, and the buttons are drawn before the menu that may open
- * over them. */
-static int hint_x, hint_y;
+ * A name in a small rounded box: what a tile in the dock is, what a
+ * button on the bar does. Remembered rather than drawn on the spot - it
+ * belongs on top of everything, the menu included - and it lives one
+ * frame, so it is asked for again for as long as the pointer stays.
+ *
+ * Given as the point it belongs to and which side of it to go: above
+ * a tile in the dock, below a button on the bar. */
+static int hint_x, hint_y, hint_centred;
 static const char *hint_text;
 /* What was just saved, and for how many frames to keep saying it: a
    hint lives one frame, and a message about a file wants a moment. */
 static const char *shot_note;
 static int shot_frames;
 
-static void hint_for(int x, const char *text)
+static int hint_w(const char *text)
 {
-    hint_x = x;
-    hint_y = taskbar_y() - 15;        /* just above the bar it belongs to */
-    hint_text = text;
+    return ui_text_width(text) + 16;
 }
 
-/* The same hint, for something that is not on the taskbar: the top
-   strip has its own things to explain, and a hint that appears at the
-   other end of the screen from what it explains is a riddle. */
+/* Over something, centred on x, its bottom edge at y */
+static void hint_above(int x, int y, const char *text)
+{
+    hint_x = x - hint_w(text) / 2;
+    hint_y = y - HINT_H;
+    hint_text = text;
+    hint_centred = 1;
+}
+
+/* At a place: its top left corner */
 static void hint_at(int x, int y, const char *text)
 {
     hint_x = x;
     hint_y = y;
     hint_text = text;
+    hint_centred = 0;
 }
 
 static void draw_hint(void)
 {
     if (!hint_text || !hint_text[0])
         return;
-    int n = 0;
-    while (hint_text[n])
-        n++;
-    int w = n * 8 + 8;
-    int x = hint_x;
-    if (x + w > video_w())
-        x = video_w() - w;
-    if (x < 0)
-        x = 0;
-    int y = hint_y;
-    if (y + 13 > taskbar_y())
-        y = taskbar_y() - 15;
-
-    video_fill_rect(x, y, w, 13, COL_WIN);
-    video_fill_rect(x, y, w, 1, COL_LINE);
-    video_fill_rect(x, y + 12, w, 1, COL_LINE);
-    video_fill_rect(x, y, 1, 13, COL_LINE);
-    video_fill_rect(x + w - 1, y, 1, 13, COL_LINE);
-    video_draw_string(x + 4, y + 3, hint_text, COL_BLACK);
+    int w = hint_w(hint_text);
+    int x = hint_x, y = hint_y;
+    if (x + w > video_w() - 4)
+        x = video_w() - 4 - w;
+    if (x < 4)
+        x = 4;
+    gfx_shadow(x, y, w, HINT_H, HINT_R, 6, 70, 2);
+    gfx_rrect(x, y, w, HINT_H, HINT_R, L.hint_bg, 240);
+    gfx_rring16(x * 16, y * 16, w * 16, HINT_H * 16, HINT_R * 16, 16,
+                L.win_line, 160);
+    ui_font_text(UI_SANS, UI_PX, x + 8, ui_baseline_in(y, HINT_H), hint_text,
+                 L.hint_text);
     hint_text = (const char *)0;      /* one frame, one hint */
 }
 
-static void draw_taskbar(void)
-{
-    int ty = taskbar_y();
-    int bx0 = bar_x0(), bwid = bar_w();
-    video_fill_rect(bx0, ty, bwid, TB_H, COL_BAR);
-    video_fill_rect(bx0, ty, bwid, 1, COL_LINE);   /* where the bar starts */
-    /* The Menu button: the accent colour, flat */
-    video_fill_rect(bx0 + 2, ty + 3, MENU_BW, TB_H - 6, COL_TITLE);
-    video_draw_string(bx0 + 6, ty + 5, "Menu", COL_WHITE);
+/* --- The menu bar ----------------------------------------------------------- */
 
-    /* The open windows - one button each, carrying the picture of the
-       program the window belongs to.
-     *
-     * A name trimmed to six letters says 'Ustawi'; a picture says what
-     * it is at a glance and takes a third of the room. Which is what a
-     * taskbar is for - to be read without being studied. */
-    int bw = tbl_width();
-    int x0 = tbl_x0();
+/* The mark: a ring with a thread through it */
+static void draw_logo(int x, int y, uint32_t c)
+{
+    int r = BAR_LOGO_D * 8;
+    int cx = x * 16 + r, cy = y * 16 + r;
+    gfx_circle16(cx, cy, r, 26, c, 255);
+    gfx_disc16(cx, cy, 34, c, 255);
+    gfx_line16(cx - r + 10, cy + r - 10, cx + r - 10, cy - r + 10, 18, c, 200);
+}
+
+static void draw_bar(void)
+{
+    int w = video_w();
+    if (bar_buf)
+        video_blit_rgb(0, 0, w, BAR_H, bar_buf, w);
+    else
+        gfx_fill(0, 0, w, BAR_H, L.bar_tint, 255);
+    gfx_fill(0, BAR_H - 1, w, 1, 0x000000, theme_dark ? 90 : 40);
+
+    int base = ui_font_baseline_in(BAR_PX, 0, BAR_H);
+
+    /* The left end: the mark and the name, which open the menu - lit
+       while it is open, like a button held down */
+    if (menu_open && menu_py == MENU_Y)
+        gfx_rrect(4, 3, logo_w() - 4, BAR_H - 6, 6, L.bar_text, 40);
+    draw_logo(BAR_LOGO_X, (BAR_H - BAR_LOGO_D) / 2, L.bar_text);
+    int x = ui_font_text(UI_BOLD, BAR_PX, BAR_NAME_X, base, "ThreadOS",
+                         L.bar_text);
+    /* ... and after them the name of the window that is listening:
+       what the keyboard will reach */
+    if (focus_idx >= 0 && wins[focus_idx].used && here(focus_idx)) {
+        char cut[sizeof(wins[0].title) + 4];
+        int room = show_x() - BAR_ITEM_GAP - (x + BAR_APP_GAP);
+        ui_font_text(UI_SANS, BAR_PX, x + BAR_APP_GAP, base,
+                     fit_text(wins[focus_idx].title, UI_SANS, BAR_PX,
+                              room > 0 ? room : 0, cut, sizeof(cut)),
+                     L.bar_text);
+    }
+
+    /* "Show the desktop": a window drawn small - filled while the
+       windows are away, an outline while they are here */
+    int sx = show_x(), sy = (BAR_H - 12) / 2;
+    if (hidden_by_show)
+        gfx_rrect(sx, sy, SHOW_W, 12, 3, L.accent, 255);
+    gfx_rring16(sx * 16, sy * 16, SHOW_W * 16, 12 * 16, 3 * 16, 20,
+                hidden_by_show ? L.accent_text : L.bar_text, 230);
+    gfx_fill(sx + 3, sy + 3, SHOW_W - 6, 2,
+             hidden_by_show ? L.accent_text : L.bar_text, 200);
+    if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, BAR_H)) {
+        const char *what = hidden_by_show ? "Restore windows"
+                                          : "Show desktop";
+        hint_at(sx - hint_w(what) / 2 + SHOW_W / 2, BAR_H + 4, what);
+    }
+
+    /* How much of the machine is in use: a capsule, filled */
+    load_refresh();
+    int lx = load_x(), ly = (BAR_H - LOAD_H) / 2;
+    gfx_rrect(lx, ly, LOAD_W, LOAD_H, LOAD_H / 2, L.bar_text, 60);
+    int fill = load_percent * LOAD_W / 100;
+    if (fill > LOAD_W)
+        fill = LOAD_W;
+    if (fill < LOAD_H && load_percent > 0)
+        fill = LOAD_H;                /* something in use looks like it */
+    if (fill > 0)
+        gfx_rrect(lx, ly, fill, LOAD_H, LOAD_H / 2, L.accent, 255);
+    /* Asked about, it says everything: how much of how much, and how
+       many tasks are behind it. */
+    if (in_rect(mouse_x, mouse_y, lx, 0, LOAD_W, BAR_H)) {
+        static char text[48];
+        int n = 0;
+        n += put_num(text + n, load_percent);
+        const char *a = "% (";
+        while (*a)
+            text[n++] = *a++;
+        n += put_num(text + n, load_used_mib);
+        text[n++] = '/';
+        n += put_num(text + n, load_ram_mib);
+        a = " MiB), ";
+        while (*a)
+            text[n++] = *a++;
+        n += put_num(text + n, load_tasks);
+        a = " tasks";
+        while (*a)
+            text[n++] = *a++;
+        text[n] = 0;
+        hint_at(lx + LOAD_W - hint_w(text), BAR_H + 4, text);
+    }
+
+    /* The four desktops: the one being shown filled with the accent, a
+       desktop that holds windows written in the bar's text colour, an
+       empty one dimmed - "where am I" and "is there anything over
+       there" in one glance */
+    int dy = (BAR_H - DESK_CELL_H) / 2;
+    for (int d = 0; d < DESK_N; d++) {
+        int dx = desk_x0() + d * DESK_CELL;
+        int busy = 0;
+        for (int i = 0; i < MAX_WIN; i++)
+            if (wins[i].used && wins[i].desk == d && wins[i].content)
+                busy = 1;
+        if (d == cur_desk)
+            gfx_rrect(dx + 1, dy, DESK_CELL - 2, DESK_CELL_H, 4, L.accent, 255);
+        char n[2] = {(char)('1' + d), 0};
+        int nw = ui_font_width(UI_BOLD, UI_PX, n);
+        ui_font_text(UI_BOLD, UI_PX, dx + (DESK_CELL - nw) / 2,
+                     ui_baseline_in(dy, DESK_CELL_H), n,
+                     d == cur_desk ? L.accent_text
+                                   : busy ? L.bar_text : L.bar_dim);
+    }
+
+    /* The clock: at the right-hand end, set against it */
+    clock_refresh();
+    int cw = ui_font_width(UI_SANS, BAR_PX, clock_text);
+    ui_font_text(UI_SANS, BAR_PX, w - BAR_RIGHT - cw, base, clock_text,
+                 L.bar_text);
+}
+
+/* --- The dock ------------------------------------------------------------- */
+
+
+static void draw_dock(void)
+{
+    struct dock d;
+    dock_geom(&d);
+
+    gfx_shadow(d.x, d.y, d.w, d.h, DOCK_R, 12, theme_dark ? 120 : 70, 3);
+    gfx_frost(d.x, d.y, d.w, d.h, DOCK_R, 8, L.dock_tint, L.dock_a);
+    gfx_rring16(d.x * 16, d.y * 16, d.w * 16, d.h * 16, DOCK_R * 16, 16,
+                L.dock_line, L.dock_line_a);
+
+    int t = d.tile;
+    /* the programs */
+    for (int k = 0; k < d.n_l; k++) {
+        int tx = dock_tile_x(&d, k), ty = d.ty;
+        if (hop_set[k]) {
+            uint32_t age = frames - hop_at[k];
+            if (age < HOP_FRAMES) {
+                int up = (int)(age < HOP_FRAMES / 2 ? age : HOP_FRAMES - age);
+                ty -= up;
+            } else {
+                hop_set[k] = 0;
+            }
+        }
+        draw_tile(icons[k].art, tx, ty, t, icons[k].label[0], 255);
+        if (launcher_running(k))
+            gfx_disc16(tx * 16 + t * 8, (d.ty + t + 1) * 16 + DOCK_DOT * 8,
+                       DOCK_DOT * 8, L.dot, 230);
+        if (in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
+                    t + DOCK_GAP, d.h))
+            hint_above(tx + t / 2, d.y - 6, icons[k].label);
+    }
+    /* the line between the programs and the windows */
+    if (d.n_l && d.n_w) {
+        int lx = dock_tile_x(&d, d.n_l) - (DOCK_SEP + 1) / 2;
+        gfx_fill(lx, d.y + 8, 1, d.h - 16, L.bar_text, 70);
+    }
+    /* the windows: their program's picture; a minimised one faded, the
+       one that is listening with its dot in the accent colour */
     int j = 0;
     for (int i = 0; i < MAX_WIN; i++) {
         if (!here(i))
             continue;
-        int bx = x0 + j * bw;
-        if (bx + bw - 2 > bx0 + bwid)
-            break;                    /* the bar has run out - draw no further */
-        video_fill_rect(bx, ty + 2, bw - 2, TB_H - 4,
-                        i == focus_idx ? COL_TITLE : COL_TBBTN_OFF);
-        /* The window's own picture, or - for the kernel's own windows
-           and anything started from a shell - the plain window mark */
-        int from = wins[i].owner >= 0 ? icon_of_pid(wins[i].owner) : -1;
-        int art = from >= 0 ? icons[from].art : 0;
-        draw_icon_art_col(art, bx + (bw - 2 - TB_ICON) / 2,
-                          ty + (TB_H - TB_ICON) / 2,
-                          i == focus_idx ? COL_WHITE : COL_BLACK);
-        /* A picture says WHICH program; it does not say which of two
-           terminals. The name comes back when the pointer asks for it,
-           which is the one moment it is wanted. */
-        if (in_rect(mouse_x, mouse_y, bx, ty, bw - 2, TB_H))
-            hint_for(bx, wins[i].title);
+        int tx = dock_tile_x(&d, d.n_l + j);
+        int from = launch_icon_of(&wins[i]);
+        draw_tile(launch_art_of(&wins[i]), tx, d.ty, t,
+                  from >= 0 ? icons[from].label[0] : wins[i].title[0],
+                  wins[i].minimized ? 110 : 255);
+        gfx_disc16(tx * 16 + t * 8, (d.ty + t + 1) * 16 + DOCK_DOT * 8,
+                   DOCK_DOT * 8, i == focus_idx ? L.accent : L.dot, 230);
+        if (in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
+                    t + DOCK_GAP, d.h))
+            hint_above(tx + t / 2, d.y - 6, wins[i].title);
         j++;
     }
+}
 
-    /* The clock: no field, no frame - just the time, at the end of the
-       bar where nothing else is */
-    clock_refresh();
-    load_refresh();
-    video_draw_string(clock_x(), ty + (TB_H - 8) / 2, clock_text, COL_BLACK);
-    if (menu_open) {
-        /* One flat panel with a line round it. Every entry is the
-           program's own picture and its name - the same picture as on
-           its icon and on its button, because a program that looks
-           like three different things is three things to remember. */
-        int top = menu_item_y(0);
-        int hgt = MENU_N * MENU_ROW;
-        int mx0 = menu_px;
-        video_fill_rect(mx0, top, MENU_W, hgt, COL_WIN);
-        video_fill_rect(mx0, top, MENU_W, 1, COL_LINE);
-        video_fill_rect(mx0, top + hgt - 1, MENU_W, 1, COL_LINE);
-        video_fill_rect(mx0, top, 1, hgt, COL_LINE);
-        video_fill_rect(mx0 + MENU_W - 1, top, 1, hgt, COL_LINE);
-        for (int i = 0; i < MENU_N; i++) {
-            int iy = menu_item_y(i);
-            int from = icon_of_app(menu_items[i]);
-            int art = from >= 0 ? icons[from].art : 0;
-            /* The entry under the pointer wears the accent colour.
-               Without it a menu is a list of words that happens to be
-               clickable; with it, it answers. */
-            int over = in_rect(mouse_x, mouse_y, mx0, iy, MENU_W, MENU_ROW);
-            if (over)
-                video_fill_rect(mx0 + 1, iy, MENU_W - 2, MENU_ROW,
-                                COL_TITLE);
-            else if (i)
-                video_fill_rect(mx0 + 1, iy, MENU_W - 2, 1, COL_LINE);
-            draw_icon_art_col(art, mx0 + 4, iy + 2,
-                              over ? COL_WHITE : COL_BLACK);
-            /* The name a person knows it by, which is the one written
-               under its icon - the program's own name is for the
-               shell */
-            const char *label = from >= 0 ? icons[from].label
-                                          : menu_items[i];
-            video_draw_string(mx0 + 20, iy + 4, label,
-                              over ? COL_WHITE : COL_BLACK);
-        }
+/* --- The launch menu ------------------------------------------------------ */
+
+static void draw_menu(void)
+{
+    if (!menu_open)
+        return;
+    int x = menu_px, y = menu_py, h = menu_h();
+    gfx_shadow(x, y, MENU_W, h, MENU_R, 14, theme_dark ? 150 : 90, 4);
+    gfx_frost(x, y, MENU_W, h, MENU_R, 10, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, MENU_W * 16, h * 16, MENU_R * 16, 16,
+                L.win_line, 200);
+    for (int i = 0; i < MENU_N; i++) {
+        int iy = menu_item_y(i);
+        int from = icon_of_app(menu_items[i]);
+        int art = from >= 0 ? icons[from].art : art_of_app(menu_items[i]);
+        /* The name a person knows it by, which is the one the dock
+           shows - the program's own name is for the shell */
+        const char *label = from >= 0 ? icons[from].label
+                                      : label_of_app(menu_items[i]);
+        /* The entry under the pointer wears the accent colour. Without
+           it a menu is a list of words that happens to be clickable;
+           with it, it answers. */
+        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, MENU_ROW);
+        if (over)
+            gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6, L.accent,
+                      255);
+        draw_tile(art, x + 10, iy + (MENU_ROW - MENU_ICON) / 2, MENU_ICON,
+                  label[0], 255);
+        ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
+                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW), label,
+                     over ? L.accent_text : L.menu_text);
     }
 }
 
@@ -2053,8 +2536,8 @@ static keyboard_char_handler_t prev_key_handler;
  *
  * Round the slots in order, from the one that has the focus now. Slot
  * order rather than the order they were last used: it is the order a
- * person can see on the taskbar, so pressing it twice takes you where
- * looking at the bar says it will.
+ * person can see in the dock, so pressing it twice takes you where
+ * looking at the dock says it will.
  *
  * A minimised window is skipped - it is not on the screen, and a focus
  * that cannot be seen is a keyboard typing into nowhere. So are the
@@ -2073,7 +2556,7 @@ static void focus_next(void)
     }
 }
 
-/* Asks the window to close, exactly as its [x] does: an application
+/* Asks the window to close, exactly as its red light does: an application
    is told and given time to end; a kernel window simply goes. */
 static void close_window(int i)
 {
@@ -2146,32 +2629,62 @@ static void save_screenshot(void)
     }
     fs_truncate(slot);
 
-    uint8_t hdr[SHOT_HDR];
-    hdr[0] = 'T'; hdr[1] = 'S'; hdr[2] = 'C'; hdr[3] = 'R';
-    hdr[4] = (uint8_t)(w & 0xFF);
-    hdr[5] = (uint8_t)((w >> 8) & 0xFF);
-    hdr[6] = (uint8_t)(h & 0xFF);
-    hdr[7] = (uint8_t)((h >> 8) & 0xFF);
-    for (int i = 0; i < 256; i++) {
-        uint32_t c = video_palette_rgb((uint8_t)i);
-        hdr[8 + i * 3 + 0] = (uint8_t)((c >> 16) & 0xFF);
-        hdr[8 + i * 3 + 1] = (uint8_t)((c >> 8) & 0xFF);
-        hdr[8 + i * 3 + 2] = (uint8_t)(c & 0xFF);
-    }
-    uint32_t off = 0;
-    if (fs_write_at(slot, off, hdr, SHOT_HDR) != SHOT_HDR) {
-        kfree(row);
-        return;
-    }
-    off += SHOT_HDR;
+    /* A screen of real colours is saved in real colours - "TSC2", the
+       size, then three bytes a pixel. Trading the glass and the shadows
+       for the nearest of 256 palette entries would save a picture of
+       some other desktop. */
+    if (video_true_colour()) {
+        uint8_t hdr2[8] = { 'T', 'S', 'C', '2', (uint8_t)(w & 0xFF),
+                            (uint8_t)((w >> 8) & 0xFF), (uint8_t)(h & 0xFF),
+                            (uint8_t)((h >> 8) & 0xFF) };
+        uint8_t *rgb = kmalloc((uint32_t)w * 3);
+        if (!rgb || fs_write_at(slot, 0, hdr2, 8) != 8) {
+            if (rgb)
+                kfree(rgb);
+            kfree(row);
+            return;
+        }
+        uint32_t off = 8;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                uint32_t c = video_getpixel_rgb(x, y);
+                rgb[x * 3] = (uint8_t)(c >> 16);
+                rgb[x * 3 + 1] = (uint8_t)(c >> 8);
+                rgb[x * 3 + 2] = (uint8_t)c;
+            }
+            if (fs_write_at(slot, off, rgb, (uint32_t)w * 3) != w * 3)
+                break;
+            off += (uint32_t)w * 3;
+        }
+        kfree(rgb);
+    } else {
+        uint8_t hdr[SHOT_HDR];
+        hdr[0] = 'T'; hdr[1] = 'S'; hdr[2] = 'C'; hdr[3] = 'R';
+        hdr[4] = (uint8_t)(w & 0xFF);
+        hdr[5] = (uint8_t)((w >> 8) & 0xFF);
+        hdr[6] = (uint8_t)(h & 0xFF);
+        hdr[7] = (uint8_t)((h >> 8) & 0xFF);
+        for (int i = 0; i < 256; i++) {
+            uint32_t c = video_palette_rgb((uint8_t)i);
+            hdr[8 + i * 3 + 0] = (uint8_t)((c >> 16) & 0xFF);
+            hdr[8 + i * 3 + 1] = (uint8_t)((c >> 8) & 0xFF);
+            hdr[8 + i * 3 + 2] = (uint8_t)(c & 0xFF);
+        }
+        uint32_t off = 0;
+        if (fs_write_at(slot, off, hdr, SHOT_HDR) != SHOT_HDR) {
+            kfree(row);
+            return;
+        }
+        off += SHOT_HDR;
 
-    for (int y = 0; y < h; y++) {
-        int n = video_read_row(y, row, w);
-        if (n <= 0)
-            break;
-        if (fs_write_at(slot, off, row, (uint32_t)n) != n)
-            break;
-        off += (uint32_t)n;
+        for (int y = 0; y < h; y++) {
+            int n = video_read_row(y, row, w);
+            if (n <= 0)
+                break;
+            if (fs_write_at(slot, off, row, (uint32_t)n) != n)
+                break;
+            off += (uint32_t)n;
+        }
     }
     kfree(row);
 
@@ -2243,7 +2756,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
            apart: two clamped to the same corner would look like one. */
         int k = i;
         while (k > 0 && (70 + k * 12 + w->w > video_w() ||
-                         30 + k * 12 + w->h > taskbar_y()))
+                         30 + k * 12 + w->h > work_bottom()))
             k -= 3;
         if (k < 0)
             k = 0;
@@ -2253,8 +2766,9 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
            that is left is to push it against the edge */
         if (w->x + w->w > video_w())
             w->x = video_w() > w->w ? video_w() - w->w : 0;
-        if (w->y + w->h > taskbar_y())
-            w->y = taskbar_y() > w->h ? taskbar_y() - w->h : 0;
+        if (w->y + w->h > work_bottom())
+            w->y = work_bottom() - w->h > work_top() ? work_bottom() - w->h
+                                                     : work_top();
         set_title(w, title);
         w->has_button = 0;
         w->counter = 0;
@@ -2276,7 +2790,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
  * A window called "Editor" says what the program is; a window called
  * "Editor: a note" says which of the three open ones you are looking
  * for - and that is what a title bar is FOR. The name is also what the
- * taskbar shows under the pointer, so one call fixes both at once. */
+ * dock shows over its tile, so one call fixes both at once. */
 int desktop_win_title(int winid, int owner, const char *title)
 {
     if (winid < 0 || winid >= MAX_WIN || !title)
@@ -2494,15 +3008,19 @@ static void kiosk_frame(int mx, int my)
         }
     }
 
-    video_draw_string(8, 8, "ThreadOS - installation", COL_WHITE);
+    ui_font_text(UI_BOLD, BAR_PX + 2, 14,
+                 ui_font_baseline_in(BAR_PX + 2, kiosk_btn_y(), KIOSK_BTN_H),
+                 "ThreadOS - installation", 0xFFFFFF);
 
     int bx = kiosk_btn_x(), by = kiosk_btn_y();
     int over = in_rect(mouse_x, mouse_y, bx, by, KIOSK_BTN_W, KIOSK_BTN_H);
-    video_fill_rect(bx, by, KIOSK_BTN_W, KIOSK_BTN_H,
-                    over ? COL_TITLE : COL_TBBTN);
-    video_fill_rect(bx, by, KIOSK_BTN_W, 1, COL_LINE);
-    video_fill_rect(bx, by + KIOSK_BTN_H - 1, KIOSK_BTN_W, 1, COL_LINE);
-    video_draw_string(bx + 8, by + 3, "Restart", COL_WHITE);
+    gfx_frost(bx, by, KIOSK_BTN_W, KIOSK_BTN_H, KIOSK_BTN_H / 2, 6,
+              over ? L.accent : 0xFFFFFF, over ? 230 : 50);
+    gfx_rring16(bx * 16, by * 16, KIOSK_BTN_W * 16, KIOSK_BTN_H * 16,
+                KIOSK_BTN_H * 8, 16, 0xFFFFFF, 110);
+    int rw = ui_font_width(UI_SANS, UI_PX, "Restart");
+    ui_font_text(UI_SANS, UI_PX, bx + (KIOSK_BTN_W - rw) / 2,
+                 ui_baseline_in(by, KIOSK_BTN_H), "Restart", 0xFFFFFF);
 
     /* The window, in the middle. It is put there every frame because
        in this mode nobody may move it - there is nowhere to move it
@@ -2523,11 +3041,13 @@ static void kiosk_frame(int mx, int my)
     }
 
     if (kiosk_gave_up) {
-        int cx = video_w() / 2 - 22 * 8 / 2;
-        video_draw_string(cx, video_h() / 2 - 4,
-                          "The installer will not start", COL_WHITE);
-        video_draw_string(cx, video_h() / 2 + 10,
-                          "Restart the machine", COL_WHITE);
+        const char *a = "The installer will not start";
+        const char *b = "Restart the machine";
+        int cx = video_w() / 2, cy = video_h() / 2;
+        ui_font_text(UI_BOLD, TITLE_PX, cx - ui_font_width(UI_BOLD, TITLE_PX, a) / 2,
+                     cy, a, 0xFFFFFF);
+        ui_font_text(UI_SANS, UI_PX, cx - ui_text_width(b) / 2, cy + 18, b,
+                     0xFFFFFF);
     }
 
     draw_hint();
@@ -2550,57 +3070,24 @@ static void desktop_thread(void *arg)
        framebuffer - fall back to mode 13h (320x200) */
     if (video_init_vesa(640, 480) < 0)
         video_init();
-    /* The desktop's background comes from the settings, so it survives
-       a restart. A small set of choices rather than a free colour: a
-       number that means one of six things can be checked, and 'a red
-       component of 41' cannot. */
-    static const struct { uint8_t r, g, b; } backgrounds[] = {
-        {   0, 130, 162 },   /* 0 - teal, as it always was */
-        {   0,   0, 130 },   /* 1 - navy */
-        {  81,   0, 121 },   /* 2 - purple */
-        {   0, 113,   0 },   /* 3 - green */
-        { 162,  81,   0 },   /* 4 - brown */
-        {  48,  48,  48 },   /* 5 - grey */
-    };
-    uint32_t bg = config_get_num("background", 0);
-    if (bg >= sizeof(backgrounds) / sizeof(backgrounds[0]))
-        bg = 0;
-    video_set_palette(COL_DESK, backgrounds[bg].r, backgrounds[bg].g,
-                      backgrounds[bg].b);
-    video_set_palette(COL_BAR, 211, 211, 211);   /* the light grey bars */
-    video_set_palette(COL_WIN, 227, 227, 227);   /* the grey window background */
-    video_set_palette(COL_TBBTN, 105, 105, 105); /* the dark grey bar button */
-    video_set_palette(COL_ICON, 255, 162, 0);   /* the orange icon */
 
-    /* Flat tones. One line colour, one lighter surface, one dim text -
-       and the accent blue, which is the only thing that shouts. */
-    video_set_palette(COL_LINE, 150, 150, 150);       /* surface boundaries */
-    video_set_palette(COL_WIN_HI, 247, 247, 247);     /* a lighter field */
-    video_set_palette(COL_TITLE_OFF, 178, 178, 178);  /* no focus - plain grey */
-    video_set_palette(COL_TBBTN_OFF, 146, 146, 146);  /* a quiet button */
-    video_set_palette(COL_DIM, 73, 73, 73);        /* text without weight */
+    /* The palette, for the programs' windows and for a screen of 256
+       colours. What each entry means has not changed since the first
+       window was drawn - programs count on it. */
+    video_set_palette(COL_BAR, 211, 211, 211);   /* light grey */
+    video_set_palette(COL_WIN, 227, 227, 227);   /* the grey window background */
+    video_set_palette(COL_TBBTN, 105, 105, 105); /* dark grey */
+    video_set_palette(COL_ICON, 255, 162, 0);    /* orange */
+    video_set_palette(COL_LINE, 150, 150, 150);
+    video_set_palette(COL_WIN_HI, 247, 247, 247);
+    video_set_palette(COL_TITLE_OFF, 178, 178, 178);
+    video_set_palette(COL_TBBTN_OFF, 146, 146, 146);
+    video_set_palette(COL_DIM, 73, 73, 73);
     video_set_palette(COL_ICON_LO, 186, 113, 0);
 
-    /* The background: from a little brighter at the top to a little
-       darker at the floor. A narrow range on purpose - a machine set to
-       teal still has to look teal from anywhere on the screen, not just
-       in the middle. */
-    for (int i = 0; i < COL_DESK_N; i++) {
-        /* 115% at the top, 75% at the bottom, in even steps */
-        int num = 115 - i * (115 - 75) / (COL_DESK_N - 1);
-        int r = backgrounds[bg].r * num / 100;
-        int g = backgrounds[bg].g * num / 100;
-        int b = backgrounds[bg].b * num / 100;
-        video_set_palette((uint8_t)(COL_DESK0 + i),
-                          (uint8_t)(r > 255 ? 255 : r),
-                          (uint8_t)(g > 255 ? 255 : g),
-                          (uint8_t)(b > 255 ? 255 : b));
-    }
-
-
-    icons_read_list();         /* which icons there are, if the disk says */
-    icons_load();              /* restore the remembered icon positions from disk */
+    icons_read_list();         /* which programs the dock holds, if the disk says */
     wallpaper_load();          /* and the wallpaper, if the settings name one */
+    look_refresh(1);           /* the theme, and the background drawn once */
 
     if (!kiosk) {
         /* Two kernel windows (no owner, no content buffer) */
@@ -2616,6 +3103,7 @@ static void desktop_thread(void *arg)
 
     for (;;) {
         reap_windows();
+        look_refresh(0);
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
@@ -2628,126 +3116,36 @@ static void desktop_thread(void *arg)
             continue;
         }
 
-        /* The top bar with the system title, lit along its top edge and
-           shaded along the bottom - the same light as everything else */
-        video_fill_rect(0, 0, video_w(), 10, COL_BAR);
-        video_fill_rect(0, 9, video_w(), 1, COL_LINE);
-        video_draw_string(2, 1, "ThreadOS", COL_BLACK);
-
-        /* Everything out of the way, and everything back: a screen
-           with a window on it, drawn small. */
-        int sx = show_x();
-        video_fill_rect(sx, 1, SHOW_W, 8, hidden_by_show ? COL_TITLE
-                                                         : COL_TBBTN_OFF);
-        video_fill_rect(sx, 1, SHOW_W, 1, COL_LINE);
-        video_fill_rect(sx, 8, SHOW_W, 1, COL_LINE);
-        video_fill_rect(sx, 1, 1, 8, COL_LINE);
-        video_fill_rect(sx + SHOW_W - 1, 1, 1, 8, COL_LINE);
-        video_fill_rect(sx + 3, 3, SHOW_W - 6, 4,
-                        hidden_by_show ? COL_WHITE : COL_LINE);
-        if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, 10)) {
-            const char *what = hidden_by_show ? "Restore windows"
-                                              : "Show desktop";
-            int n = 0;
-            while (what[n])
-                n++;
-            hint_at(sx - (n * 8 + 8) - 4, 12, what);
-        }
-
-        /* How much of the machine is in use, next to which desktop
-           this is: both are things that are always true. */
-        load_refresh();
-        int lx = desk_x0() - TB_LOAD_BAR - 8, ly = 1;
-        video_fill_rect(lx, ly, TB_LOAD_BAR, 8, COL_TBBTN_OFF);
-        video_fill_rect(lx, ly, TB_LOAD_BAR, 1, COL_LINE);
-        video_fill_rect(lx, ly + 7, TB_LOAD_BAR, 1, COL_LINE);
-        video_fill_rect(lx, ly, 1, 8, COL_LINE);
-        video_fill_rect(lx + TB_LOAD_BAR - 1, ly, 1, 8, COL_LINE);
-        /* The filling goes INSIDE the frame - drawn over it, a reading
-           of a few percent is one column wide and the frame covers
-           exactly that column, so the meter would show nothing until
-           the machine was half full. */
-        int inner = TB_LOAD_BAR - 2;
-        int fill = load_percent * inner / 100;
-        if (fill > inner)
-            fill = inner;
-        if (fill < 1 && load_percent > 0)
-            fill = 1;                 /* something in use looks like it */
-        video_fill_rect(lx + 1, ly + 1, fill, 6, COL_TITLE);
-
-        /* Asked about, it says everything: how much of how much, and
-           how many tasks are behind it. */
-        if (in_rect(mouse_x, mouse_y, lx, 0, TB_LOAD_BAR, 10)) {
-            static char text[40];
-            int n = 0;
-            n += put_num(text + n, load_percent);
-            text[n++] = '%';
-            text[n++] = ' ';
-            text[n++] = '(';
-            n += put_num(text + n, load_used_mib);
-            text[n++] = '/';
-            n += put_num(text + n, load_ram_mib);
-            text[n++] = ' ';
-            text[n++] = 'M';
-            text[n++] = 'i';
-            text[n++] = 'B';
-            text[n++] = ')';
-            text[n++] = ',';
-            text[n++] = ' ';
-            n += put_num(text + n, load_tasks);
-            text[n++] = ' ';
-            text[n++] = 'z';
-            text[n++] = 'a';
-            text[n++] = 'd';
-            text[n++] = '.';
-            text[n] = 0;
-            /* To the LEFT of the meter, ending where the meter
-               begins: put under the pointer, the box would be read
-               with an arrow drawn across the middle of it. */
-            hint_at(lx - (n * 8 + 8) - 4, 12, text);
-        }
-
-        for (int d = 0; d < DESK_N; d++) {
-            int dx = desk_x0() + d * DESK_CELL;
-            int busy = 0;
-            for (int i = 0; i < MAX_WIN; i++)
-                if (wins[i].used && wins[i].desk == d && wins[i].content)
-                    busy = 1;
-            if (d == cur_desk)
-                video_fill_rect(dx, 1, DESK_CELL - 1, 8, COL_TITLE);
-            char n[2] = {(char)('1' + d), 0};
-            video_draw_string(dx + 2, 1, n,
-                              d == cur_desk ? COL_WHITE
-                                            : busy ? COL_BLACK : COL_DIM);
-        }
-
-        draw_icons();                         /* icons on the background (below the windows) */
-
         int ord[MAX_WIN];
         int n = zorder(ord);
         for (int k = 0; k < n; k++)      /* from the bottom up (Z order) */
             draw_window(&wins[ord[k]]);
 
-        /* The place a dragged window would take, drawn as an outline
-           in the accent colour: the same colour that everywhere else
-           means "this is the one". */
+        /* The place a dragged window would take: a pane of the accent
+           colour, faint, with its edge drawn - the question, before
+           letting go answers it */
         if (snap_hint != SNAP_NONE) {
             int hx, hy, hw, hh;
             snap_geom(snap_hint, &hx, &hy, &hw, &hh);
-            video_fill_rect(hx, hy, hw, 2, COL_TITLE);
-            video_fill_rect(hx, hy + hh - 2, hw, 2, COL_TITLE);
-            video_fill_rect(hx, hy, 2, hh, COL_TITLE);
-            video_fill_rect(hx + hw - 2, hy, 2, hh, COL_TITLE);
+            hx += 4;
+            hy += 4;
+            hw -= 8;
+            hh -= 8;
+            gfx_rrect(hx, hy, hw, hh, WIN_R, L.accent, 60);
+            gfx_rring16(hx * 16, hy * 16, hw * 16, hh * 16, WIN_R * 16, 32,
+                        L.accent, 220);
         }
 
-        draw_taskbar();
+        draw_bar();
+        draw_dock();
+        draw_menu();
         /* What was just saved stays on the screen for a moment - the
            hint itself lives one frame, so it is asked for again until
            the moment is up. */
         if (shot_frames > 0) {
             shot_frames--;
             if (shot_note)
-                hint_at(4, 12, shot_note);
+                hint_at(8, BAR_H + 4, shot_note);
         }
         draw_hint();               /* above everything, including the menu */
         draw_cursor(mx, my);

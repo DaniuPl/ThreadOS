@@ -53,15 +53,15 @@ RTC_DATE = "2030-06-13"
 
 MENU_ITEMS = ["guiapp", "gclock", "gfiles", "gweb", "gedit", "gtasks",
               "gmikser"]
-MENU_ROW = 16
-MENU_TASKBAR_Y = 462   # video_h() - TB_H (kernel/desktop.c)
+MENU_X0 = 6                 # the menu opened from the bar hangs here
 
 
-def menu_y(name):
-    """The centre of the menu entry with the given name (screen
-    coordinates 640x480)."""
+def menu_y(name, top=None):
+    """The middle of the menu entry with the given name, in the menu
+    opened from the mark on the bar - or one standing at 'top'."""
     idx = MENU_ITEMS.index(name)
-    return MENU_TASKBAR_Y - (len(MENU_ITEMS) - idx) * MENU_ROW + MENU_ROW // 2
+    t = MENU_Y if top is None else top
+    return t + MENU_PAD + idx * MENU_ROW + MENU_ROW // 2
 
 
 PAGE = b"<html>ThreadOS TCP works</html>\n"
@@ -661,19 +661,299 @@ def _kernel_define(path, name):
     return int(m.group(1))
 
 
-# The title bar's height and the size of the desktop's lettering
-TITLE_H = _kernel_define("kernel/desktop.c", "TITLE_H")
+def _look():
+    """Every number in kernel/include/look.h - the desktop's sizes and
+    both themes' colours - plus the aurora's clouds, read straight from
+    the file the kernel is built with."""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "kernel", "include", "look.h")
+    with open(full) as fh:
+        src = fh.read()
+    vals = {}
+    for m in re.finditer(r"^#define\s+(\w+)\s+([^\\\n]+)$", src, re.M):
+        expr = m.group(2).split("/*")[0].strip()
+        try:
+            vals[m.group(1)] = int(eval(expr, {}, dict(vals)))
+        except Exception:
+            pass
+    for theme in ("DARK", "LIGHT"):
+        m = re.search(r"#define AURORA_%s_CLOUDS((?:[^\n]*\\\n)*[^\n]*)"
+                      % theme, src)
+        vals["AURORA_%s_CLOUDS" % theme] = [
+            tuple(int(v, 0) for v in c.split(","))
+            for c in re.findall(r"\{([^}]*)\}", m.group(1))]
+    return vals
+
+
+LOOK = _look()
+globals().update({k: v for k, v in LOOK.items() if not k.startswith("_")})
+
+# The size of the desktop's lettering
 UI_PX = _kernel_define("kernel/include/uitext.h", "UI_PX")
 # Where a window's content starts below its top edge: the frame line
 # and the title bar
 CONTENT_DY = 1 + TITLE_H
 
 
-def ui_baseline_in(top, height):
-    """The baseline the kernel gives text centred in a band - the same
-    arithmetic as ui_baseline_in() in kernel/uitext.c."""
-    cap = (UI_PX * 73 + 50) // 100
+def rgb(v):
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+
+
+def theme(name="dark"):
+    """One theme's colours from look.h, by their lower-case names:
+    theme("light")["title_bg"] is LIGHT_TITLE_BG as (r, g, b); the
+    alphas (..._a) stay numbers."""
+    pre = name.upper() + "_"
+    out = {}
+    for k, v in LOOK.items():
+        if k.startswith(pre) and not k.startswith("AURORA"):
+            key = k[len(pre):].lower()
+            out[key] = v if key.endswith("_a") else rgb(v)
+    return out
+
+
+def _tdiv(a, b):
+    """C's division: towards zero"""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b >= 0) else -q
+
+
+def aurora_px(x, y, w=640, h=480, dark=True):
+    """One pixel of the aurora, by the arithmetic kernel/aurora.c spells
+    out - whole numbers, in the same order, so the very same value."""
+    t = "DARK" if dark else "LIGHT"
+    top, bottom = LOOK["AURORA_%s_TOP" % t], LOOK["AURORA_%s_BOTTOM" % t]
+    p = []
+    for ch in range(3):
+        a = (top >> (16 - 8 * ch)) & 0xFF
+        b = (bottom >> (16 - 8 * ch)) & 0xFF
+        p.append(a + _tdiv((b - a) * y, h - 1) if h > 1 else a)
+    X, Y = 2 * x + 1, 2 * y + 1
+    for cx, cy, r, colour, strength in LOOK["AURORA_%s_CLOUDS" % t]:
+        cx2, cy2 = 2 * (cx * w // 1000), 2 * (cy * h // 1000)
+        rr = (2 * (r * w // 1000)) ** 2
+        d2 = (X - cx2) ** 2 + (Y - cy2) ** 2
+        if d2 >= rr:
+            continue
+        tt = (rr - d2) * 256 // rr
+        a = (((tt * tt) >> 8) * strength) >> 8
+        for ch in range(3):
+            col = (colour >> (16 - 8 * ch)) & 0xFF
+            p[ch] = (p[ch] * (256 - a) + col * a) >> 8
+    return tuple(p)
+
+
+def near(px, want, tol=40):
+    return all(abs(px[i] - want[i]) <= tol for i in range(3))
+
+
+def _box(vals, r):
+    """One pass of kernel/gfx.c's box: len(vals) - 2r averages, each the
+    sum times 65536/n rounded, plus a half, over 65536"""
+    n = 2 * r + 1
+    inv = (65536 + n // 2) // n
+    out, s = [], sum(vals[:n])
+    for i in range(len(vals) - 2 * r):
+        out.append((s * inv + 32768) >> 16)
+        if i + n < len(vals):
+            s += vals[i + n] - vals[i]
+    return out
+
+
+def gfx_blur_ref(img, x, y, w, h, r):
+    """gfx_blur() on a picture held as rows of (r, g, b): two passes of
+    the box each way over the rectangle, reading what lies around it
+    (the nearest pixel past the picture's edge), writing only inside.
+    Returns a new picture."""
+    ph, pw = len(img), len(img[0])
+    e = 2 * r
+    out = [list(row) for row in img]
+    chans = []
+    for ch in range(3):
+        ext = []
+        for j in range(h + 2 * e):
+            sy = min(max(y - e + j, 0), ph - 1)
+            ext.append([img[sy][min(max(x - e + i, 0), pw - 1)][ch]
+                        for i in range(w + 2 * e)])
+        a = [_box(row, r) for row in ext]
+        a = list(zip(*[_box(list(c), r) for c in zip(*a)]))
+        a = [_box(list(row), r) for row in a]
+        a = list(zip(*[_box(list(c), r) for c in zip(*a)]))
+        chans.append(a)
+    for j in range(h):
+        for i in range(w):
+            out[y + j][x + i] = (chans[0][j][i], chans[1][j][i], chans[2][j][i])
+    return out
+
+
+def gfx_mix(over, under, a):
+    """kernel/gfx.c's mix, channel by channel"""
+    return tuple((o * a + u * (255 - a) + 127) // 255
+                 for o, u in zip(over, under))
+
+
+def frost_ref(x, y, w, h, blur, tint, a, sw, sh, dark=True):
+    """gfx_frost() over the bare aurora, as a function of (x, y): what
+    lies under text written on glass that is not the bar's - the
+    kiosk's button, say. Exact away from the round corners."""
+    e = 2 * blur
+    px0, py0 = max(x - e, 0), max(y - e, 0)
+    px1, py1 = min(x + w + e, sw), min(y + h + e, sh)
+    img = [[aurora_px(xx, yy, sw, sh, dark) for xx in range(px0, px1)]
+           for yy in range(py0, py1)]
+    img = gfx_blur_ref(img, x - px0, y - py0, w, h, blur)
+    tint = rgb(tint) if isinstance(tint, int) else tint
+
+    def under(xx, yy):
+        return gfx_mix(tint, img[yy - py0][xx - px0], a)
+    return under
+
+
+_BAR_GLASS = {}
+
+
+def bar_glass(dark=True, w=SCREEN_W if "SCREEN_W" in globals() else 640,
+              h=480):
+    """The menu bar's glass as kernel/desktop.c draws it once: the strip
+    of the aurora under it, blurred, then the theme's tint laid over -
+    as rows of (r, g, b), BAR_H of them. Exact, so a pixel of the bar
+    that nothing is drawn on can be held to it."""
+    key = (dark, w, h)
+    if key not in _BAR_GLASS:
+        strip = min(BAR_H + 4 * BAR_BLUR, h)
+        img = [[aurora_px(x, y, w, h, dark) for x in range(w)]
+               for y in range(strip)]
+        img = gfx_blur_ref(img, 0, 0, w, BAR_H, BAR_BLUR)
+        t = theme("dark" if dark else "light")
+        _BAR_GLASS[key] = [[gfx_mix(t["bar_tint"], img[y][x], t["bar_a"])
+                            for x in range(w)] for y in range(BAR_H)]
+    return _BAR_GLASS[key]
+
+
+def aurora_samples(at, w, h, scale=1, step=8, tol=8, dark=True):
+    """How many of the points on a grid 'step' apart show the bare aurora
+    - out of how many. A screen of w x h physical pixels, each logical
+    pixel 'scale' of them across."""
+    lw, lh = w // scale, h // scale
+    hit = total = 0
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            total += 1
+            if near(at(x, y), aurora_px(x // scale, y // scale, lw, lh, dark),
+                    tol):
+                hit += 1
+    return hit, total
+
+
+def on_bar(x, y):
+    """What lies under the menu bar's text: its glass (dark theme)"""
+    return bar_glass()[y][x]
+
+
+def ui_font_baseline_in(px, top, height):
+    """The baseline the kernel gives text of size px centred in a band -
+    the same arithmetic as ui_font_baseline_in() in kernel/uitext.c."""
+    cap = (px * 73 + 50) // 100
     return top + (height + cap) // 2
+
+
+def ui_baseline_in(top, height):
+    return ui_font_baseline_in(UI_PX, top, height)
+
+
+# --- where things are on a 640 x 480 desktop (kernel/desktop.c) ---------
+
+SCREEN_W, SCREEN_H = 640, 480
+MAX_DOCK_WINDOWS = 12           # MAX_WIN in kernel/desktop.c
+DOCK_N = 9                      # the programs in a dock nobody configured
+
+
+def dock_geom(n_l=DOCK_N, n_w=2, want=None, w=SCREEN_W, h=SCREEN_H):
+    """The dock as dock_geom() lays it out: its glass, its tile size and
+    where every tile is - programs first, then the windows on this
+    desktop. 'tiles' holds each tile's (x, y) top left corner."""
+    want = want or DOCK_TILE_M
+    n = n_l + n_w
+    fixed = (2 * DOCK_PAD + (n - 1) * DOCK_GAP if n else 2 * DOCK_PAD) + \
+        (DOCK_SEP - DOCK_GAP if n_l and n_w else 0)
+    room = w - 2 * DOCK_MARGIN
+    t = want
+    if n and fixed + n * t > room:
+        t = (room - fixed) // n
+    t = max(t, DOCK_TILE_MIN)
+    dw, dh = fixed + n * t, want + 2 * DOCK_PAD
+    x, y = (w - dw) // 2, h - DOCK_BOTTOM - dh
+    ty = y + DOCK_PAD + (want - t) // 2
+    tiles = []
+    for k in range(n):
+        tx = x + DOCK_PAD + k * (t + DOCK_GAP)
+        if n_l and k >= n_l:
+            tx += DOCK_SEP - DOCK_GAP
+        tiles.append((tx, ty))
+    return dict(x=x, y=y, w=dw, h=dh, tile=t, ty=ty, tiles=tiles,
+                n_l=n_l, n_w=n_w)
+
+
+def dock_tile(k, n_l=DOCK_N, n_w=2, **kw):
+    """The middle of the k-th tile - the place to click"""
+    g = dock_geom(n_l, n_w, **kw)
+    tx, ty = g["tiles"][k]
+    return tx + g["tile"] // 2, ty + g["tile"] // 2
+
+
+def dock_window(j, n_w, n_l=DOCK_N, **kw):
+    """The middle of the tile of the j-th window on this desktop"""
+    return dock_tile(n_l + j, n_l, n_w, **kw)
+
+
+def work_bottom(want=None, h=SCREEN_H):
+    """Where windows end: above the dock (work_bottom())"""
+    return dock_geom(want=want, h=h)["y"] - DOCK_BOTTOM
+
+
+def cascade(slot, ww, wh, w=SCREEN_W, h=SCREEN_H):
+    """Where a new window of ww x wh (its frame) opens, the way
+    desktop_win_create() places it: a step of twelve down and right per
+    slot, and three steps back up for as long as it would not fit
+    between the bar and the dock"""
+    k = slot
+    while k > 0 and (70 + k * 12 + ww > w or
+                     30 + k * 12 + wh > work_bottom(h=h)):
+        k -= 3
+    k = max(k, 0)
+    return 70 + k * 12, 30 + k * 12
+
+
+def bar_clock_x(w=SCREEN_W):
+    return w - BAR_RIGHT - BAR_CLOCK_W
+
+
+def bar_desk_x(d=0, w=SCREEN_W):
+    """The left edge of desktop d's cell on the bar"""
+    return bar_clock_x(w) - BAR_ITEM_GAP - 4 * DESK_CELL + d * DESK_CELL
+
+
+def bar_load_x(w=SCREEN_W):
+    return bar_desk_x(0, w) - BAR_ITEM_GAP - LOAD_W
+
+
+def bar_show_x(w=SCREEN_W):
+    return bar_load_x(w) - BAR_ITEM_GAP - SHOW_W
+
+
+BAR_MID = BAR_H // 2
+# The mark at the left end of the bar, which opens the menu
+LOGO_XY = (BAR_LOGO_X + BAR_LOGO_D // 2, BAR_MID)
+
+
+def light_xy(wx, wy, k):
+    """The middle of a window's light: 0 close, 1 minimise, 2 zoom"""
+    return (wx + LIGHT_X + k * LIGHT_STEP + LIGHT_D // 2,
+            wy + (TITLE_H - LIGHT_D) // 2 + 1 + LIGHT_D // 2)
+
+
+def title_baseline(wy):
+    return ui_font_baseline_in(TITLE_PX, wy, TITLE_H)
 
 
 class UiFont:
@@ -685,15 +965,15 @@ class UiFont:
     the kernel places them: the pen moves in 1/64 px by the font's
     advances, and each glyph goes to the pen's nearest whole pixel."""
 
-    _shared = None
+    _shared = {}
     CHARSET = ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
                "0123456789 .,:;-_()[]/*!?'\"+=<>@#%&")
 
-    def __init__(self, px=None):
+    def __init__(self, px=None, face="sans"):
         import freetype
         self.px = px or UI_PX
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "..", "fonts", "sans.ttf")
+                            "..", "fonts", face + ".ttf")
         self.face = freetype.Face(path)
         self.face.set_pixel_sizes(0, self.px)
         self.ascent = (self.face.size.ascender + 63) >> 6
@@ -701,10 +981,11 @@ class UiFont:
         self.cache = {}
 
     @classmethod
-    def shared(cls):
-        if cls._shared is None:
-            cls._shared = UiFont()
-        return cls._shared
+    def shared(cls, px=None, face="sans"):
+        key = (px or UI_PX, face)
+        if key not in cls._shared:
+            cls._shared[key] = UiFont(px, face)
+        return cls._shared[key]
 
     def glyph(self, ch):
         g = self.cache.get(ch)
@@ -1353,6 +1634,7 @@ class Qemu:
         self.f = sock.makefile("rwb")
         self.f.readline()  # the QMP banner
         self.cmd({"execute": "qmp_capabilities"})
+        _LIVE.append(self)
 
     # The longest command is a screenshot at high resolution -
     # seconds are enough with enormous room to spare
@@ -1404,7 +1686,9 @@ class Qemu:
             time.sleep(0.3)
         raise RuntimeError(f"timeout: '{text}' never appeared on the screen")
 
-    DESK_BG = (0, 128, 160)          # the desktop's background (teal)
+    # The desktop's background where the tests look for it: the aurora
+    # of the dark theme, which is what a machine nobody configured has
+    DESK_BG = aurora_px(600, 300)
 
     def wait_desktop(self, timeout=25):
         """Waits until the compositor draws the desktop. In graphics mode
@@ -1414,9 +1698,11 @@ class Qemu:
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                w, _, at = self.screen_raw()
-                if w >= 640 and all(abs(at(600, 300)[i] - self.DESK_BG[i]) <= 40
+                w, h, at = self.screen_raw()
+                want = aurora_px(600, 300, w, h) if w >= 640 else self.DESK_BG
+                if w >= 640 and all(abs(at(600, 300)[i] - want[i]) <= 40
                                     for i in range(3)):
+                    self._size = (w, h)
                     return True
             except Exception:
                 pass
@@ -1511,6 +1797,152 @@ class Qemu:
             return (px[o], px[o + 1], px[o + 2])
         return sx, sy, at
 
+    # --- the desktop, the way a person uses it -----------------------
+
+    def click(self, x, y):
+        self.mouse_goto(x, y)
+        self.mouse_click()
+
+    def click_desktop(self):
+        """A click on the bare desktop, where no window and no tile ever
+        stands in these tests: nobody has the focus then, and the keys
+        go to the kernel's shell"""
+        self.click(self.size()[0] - 8, 34)
+        time.sleep(0.3)
+
+    def open_menu(self):
+        """A click on the mark at the left end of the bar"""
+        self.click(*LOGO_XY)
+        time.sleep(0.6)
+
+    # The size of the screen the desktop draws on: 640x480 under the
+    # 32-bit kernel, what the loader set (800x600 in QEMU) under the
+    # 64-bit one. Measured the first time something is placed by it.
+    _size = None
+
+    def size(self):
+        if not self._size:
+            w, h, _ = self.screen_raw()
+            if w >= 640:
+                self._size = (w, h)
+        return self._size or (SCREEN_W, SCREEN_H)
+
+    def _wh(self, kw):
+        w, h = self.size()
+        kw.setdefault("w", w)
+        kw.setdefault("h", h)
+        return kw
+
+    # How many windows the dock holds: the kernel's two, and one more
+    # for every program started through launch_dock()/launch_menu(). A
+    # test that opens or closes windows some other way says so here.
+    n_win = 2
+
+    def launch_menu(self, name):
+        """Starts a program from the menu, by the name it runs under"""
+        self.open_menu()
+        self.click(MENU_X0 + 60, menu_y(name))
+        self.n_win += 1
+
+    def launch_dock(self, k, n_w=None, **kw):
+        """Starts the k-th program in the dock. Where its tile is depends
+        on how many windows the dock holds as well (n_w, by default what
+        this object has counted) - the dock is as wide as what is in it."""
+        self.click(*dock_tile(k, n_w=self.n_win if n_w is None else n_w,
+                              **self._wh(kw)))
+        self.n_win += 1
+
+    def dock_windows(self, want=None, n_l=DOCK_N):
+        """How many window tiles the dock holds, read off the screen:
+        every window's tile has a dot under it, and the dock is as wide
+        as what is in it - so for the right count, and only for it,
+        there is a dot under every place the layout gives a window."""
+        _, _, at = self.screen_raw()
+        t = theme("dark")
+        for n in range(MAX_DOCK_WINDOWS, 0, -1):
+            g = dock_geom(n_l=n_l, n_w=n, want=want, **self._wh({}))
+            ok = True
+            for j in range(n):
+                tx, ty = g["tiles"][n_l + j]
+                p = at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
+                if not (near(p, t["dot"], 60) or near(p, t["accent"], 60)):
+                    ok = False
+                    break
+            if ok:
+                return n
+        return 0
+
+    def dock_focus(self, n_w, n_l=DOCK_N, want=None):
+        """Which window's tile has the accent dot under it - the window
+        with the focus, counted among the windows on this desktop; -1
+        when none has"""
+        _, _, at = self.screen_raw()
+        g = dock_geom(n_l=n_l, n_w=n_w, want=want, **self._wh({}))
+        acc = theme("dark")["accent"]
+        for j in range(n_w):
+            tx, ty = g["tiles"][n_l + j]
+            if near(at(tx + g["tile"] // 2,
+                       ty + g["tile"] + 1 + DOCK_DOT // 2), acc, 50):
+                return j
+        return -1
+
+    def read_hint(self, top):
+        """The hint whose box has its top edge at 'top': the box is found
+        by its colour - the longest run of it across the screen - and
+        the text read from where the desktop puts it, eight pixels into
+        the box"""
+        w, _, at = self.screen_raw()
+        t = theme("dark")
+        y = top + 3                       # above the letters
+        best, run = (0, 0), 0
+        for x in range(w + 1):
+            if x < w and near(at(x, y), t["hint_bg"], 12):
+                run += 1
+                if run > best[0]:
+                    best = (run, x - run + 1)
+            else:
+                run = 0
+        if best[0] < 20:
+            return ""
+        x0 = best[1] - 1                  # the box's edge, under its line
+        return self.read_ui(x0 + 8, ui_baseline_in(top, HINT_H),
+                            width=best[0], fg=t["hint_text"])
+
+    def dock_hint(self, k, n_l=DOCK_N, n_w=2, want=None):
+        """Points at the k-th tile and reads the name that comes up over
+        it"""
+        g = dock_geom(n_l=n_l, n_w=n_w, want=want, **self._wh({}))
+        tx, ty = g["tiles"][k]
+        cx = tx + g["tile"] // 2
+        self.mouse_goto(cx, ty + 5)
+        time.sleep(1.5)
+        return self.read_hint(g["y"] - 6 - HINT_H)
+
+    def is_background(self, x, y, tol=6, dark=True):
+        """Is (x, y) the bare aurora - no window, no shadow over it?"""
+        w, h, at = self.screen_raw()
+        return near(at(x, y), aurora_px(x, y, w, h, dark=dark), tol)
+
+    def wait_background(self, x, y, tol=6, timeout=4, dark=True):
+        w, h = self.size()
+        return self.wait_pixel(x, y, aurora_px(x, y, w, h, dark=dark), tol,
+                               timeout)
+
+    def has_focus(self, wx, wy):
+        """Does the window at (wx, wy) have the focus? Its close light is
+        red then, and grey when it has not - so the pointer must not be
+        over the lights when this is asked."""
+        _, _, at = self.screen_raw()
+        return near(at(*light_xy(wx, wy, 0)), rgb(LIGHT_CLOSE), 30)
+
+    def wait_focus(self, wx, wy, want=True, timeout=4):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.has_focus(wx, wy) == want:
+                return True
+            time.sleep(0.2)
+        return False
+
     def wait_pixel(self, x, y, want, tol=40, timeout=4):
         """Waits until the pixel (x,y) reaches the colour 'want' (with a
         tolerance). It removes flakiness: the hi-res compositor refreshes
@@ -1550,7 +1982,8 @@ class Qemu:
         return w, h, at
 
 
-    def read_ui(self, x, baseline, width=320, charset=None):
+    def read_ui(self, x, baseline, width=320, charset=None, px=None,
+                face="sans", under=None, fg=None):
         """Text the desktop drew in its TrueType lettering, starting at
         pen position x on the given baseline - what the kernel's
         ui_text() would have been called with.
@@ -1566,8 +1999,16 @@ class Qemu:
 
         The background is the commonest colour in the band and the text
         colour the one furthest from it - a fully covered pixel is
-        exactly the text colour, so the extreme is the right one."""
-        font = UiFont.shared()
+        exactly the text colour, so the extreme is the right one.
+
+        'px' and 'face' say which lettering: the bar, the titles and the
+        menu are a size up from the rest, and titles are bold. 'under',
+        when given, says what lies under the text pixel by pixel - glass
+        is not one colour, and text on it is mixed with what is really
+        there. 'fg' is the text's colour when it is known - a short
+        text, a single '3', may not have two pixels wholly covered to
+        learn it from."""
+        font = UiFont.shared(px, face)
         w, h, at = self.screen_raw()
         top, bot = baseline - font.ascent, baseline + font.descent
         x1 = min(w, x + width)
@@ -1587,7 +2028,7 @@ class Qemu:
                for p, c in counts.items() if c >= 2]
         if not far or max(far)[0] < 60:
             return ""                       # nothing but background
-        fg = max(far)[1]
+        fg = fg or max(far)[1]
 
         # The band once, as rows of tuples: everything below reads it
         # thousands of times
@@ -1595,7 +2036,11 @@ class Qemu:
         # the pen (DejaVu's 'T' does, by a pixel)
         bx = max(0, x - 4)
         band = [[at(xx, yy) for xx in range(bx, x1)] for yy in range(top, bot)]
-        painted = [[bg] * (x1 - bx) for _ in range(bot - top)]
+        if under:
+            painted = [[under(xx, yy) for xx in range(bx, x1)]
+                       for yy in range(top, bot)]
+        else:
+            painted = [[bg] * (x1 - bx) for _ in range(bot - top)]
         chars = charset or UiFont.CHARSET
         pen = x << 6
         out = []
@@ -1656,14 +2101,51 @@ class Qemu:
             pen += adv
         return "".join(out).rstrip()
 
+    def find_ui(self, x0, x1, baseline, charset=None, px=None, face="sans",
+                under=None, fg=None):
+        """Text whose start is not known - a title centred in its bar,
+        the clock set against the end of the bar: the first column
+        between x0 and x1 where anything stands out from the background
+        is where the ink begins, and the pen is a pixel or two either
+        side of it. Each of those is read and the longest reading wins."""
+        font = UiFont.shared(px, face)
+        w, h, at = self.screen_raw()
+        top, bot = baseline - font.ascent, baseline + font.descent
+        x1 = min(x1, w)
+        if top < 0 or bot > h or x1 <= x0:
+            return ""
+        counts = {}
+        for yy in range(top, bot):
+            for xx in range(x0, x1):
+                p = at(xx, yy)
+                counts[p] = counts.get(p, 0) + 1
+        bg = max(counts, key=counts.get)
+        start = None
+        for xx in range(x0, x1):
+            if any(sum(abs(a - b) for a, b in zip(at(xx, yy), bg)) > 90
+                   for yy in range(top, bot)):
+                start = xx
+                break
+        if start is None:
+            return ""
+        best = ""
+        for pen in range(start - 2, start + 2):
+            got = self.read_ui(pen, baseline, width=x1 - pen,
+                               charset=charset, px=px, face=face,
+                               under=under, fg=fg)
+            if len(got) > len(best):
+                best = got
+        return best
+
     def window_title(self, wx, wy, ww=None):
         """A window's name as its title bar shows it: kernel/desktop.c
-        draws it with ui_text() five pixels in from the window's edge,
-        centred in the bar. The width stops short of the three buttons
-        when the window's width is known."""
-        width = (ww - 5 - 40) if ww else 240
-        return self.read_ui(wx + 5, ui_baseline_in(wy + 1, TITLE_H),
-                            width=width)
+        draws it in bold, centred in the bar and clear of the three
+        lights. Without the window's width it is read to a fixed
+        distance."""
+        x0 = wx + LIGHT_X + 2 * LIGHT_STEP + LIGHT_D + 6
+        x1 = wx + ww - 4 if ww else x0 + 300
+        return self.find_ui(x0, x1, title_baseline(wy), px=TITLE_PX,
+                            face="bold")
 
     def read_text(self, x0, y0, cols, rows, line_h=8):
         """Text drawn in the 8x8 font ANYWHERE on the screen.
@@ -1823,6 +2305,8 @@ class Qemu:
         return False
 
     def close(self):
+        if self in _LIVE:
+            _LIVE.remove(self)
         self.proc.kill()
         for p in (self.qmp_path, self.dump_path):
             if os.path.exists(p):
@@ -1843,10 +2327,28 @@ def pmm_used(screen_text):
     return int(m[-1]) if m else None
 
 
+# The machines running now - so that a failed check can show what was
+# on their screens. Set PTEST_SHOTS to a directory and every FAIL leaves
+# a picture there: a failure in a test that reads pixels is otherwise a
+# sentence about a screen nobody saw.
+_LIVE = []
+
+
 def check(name, cond):
     print(("OK:   " if cond else "FAIL: ") + name)
     if not cond:
         failures.append(name)
+        where = os.environ.get("PTEST_SHOTS")
+        for i, q in enumerate(_LIVE if where else []):
+            try:
+                path = os.path.join(where, "%s-%d-%d.ppm" % (
+                    os.path.basename(sys.argv[0]).replace(".py", ""),
+                    len(failures), i))
+                q.cmd({"execute": "screendump",
+                       "arguments": {"filename": path}})
+                print("      the screen: " + path)
+            except Exception:
+                pass
 
 
 def summary():

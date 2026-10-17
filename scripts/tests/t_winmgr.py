@@ -23,7 +23,7 @@ Both now work the way they do in a system somebody uses:
   not on every frame of the pull.
 
 The assertions are about what can be seen and what the kernel says: the
-window disappears from the screen AND from the taskbar, the process
+window disappears from the screen AND from the dock, the process
 ends with code 0 when it was asked and with a kill when it was not, and
 the memory comes back.
 
@@ -73,8 +73,7 @@ def main():
             q.mouse_home()
 
             # --- an application window opens ---------------------------
-            q.mouse_goto(24, 272)          # the 'Config' icon
-            q.mouse_click()
+            q.launch_dock(6)                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 430)         # the cursor out of the way
             time.sleep(1)
@@ -108,7 +107,7 @@ def main():
 
 
             # --- closing: the program is asked and ends itself ---------
-            q.mouse_goto(WX + WW + 90 - 6, WY + 1 + TITLE_H // 2)      # the new [x]
+            q.mouse_goto(*light_xy(WX, WY, 0))     # its red light
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(3)
@@ -121,12 +120,9 @@ def main():
 
             w, h, at = q.screen_raw()
             check("the window is gone from the screen", not grey(at(*P_APP)))
-            # The taskbar button has to go too - a window that is gone
-            # from the screen and left on the bar is half-closed
-            bar = q.screen_raw()[2]
-            check("and it went from the taskbar",
-                  not any(bar(x, 474)[2] > 150 and bar(x, 474)[0] < 90
-                          for x in range(150, 250)))
+            # The tile in the dock has to go too - a window that is gone
+            # from the screen and left in the dock is half-closed
+            check("and it went from the dock", q.dock_windows() == 2)
         finally:
             q.close()
 
@@ -137,7 +133,7 @@ def main():
         try:
             check("the desktop came up (a second attempt)", q2.wait_desktop(timeout=40))
             q2.mouse_home()
-            # 'gdeaf' has no icon - the kernel shell starts it, which in
+            # 'gdeaf' is not in the dock - the kernel shell starts it, which in
             # graphics mode listens as long as no window has focus
             q2.type_line("run gdeaf")
             time.sleep(4)
@@ -148,7 +144,7 @@ def main():
             check("the deaf program's window is on the screen",
                   grey(at(*P_DEAF)))
 
-            q2.mouse_goto(WX + 100 + 2 - 6, WY + 1 + TITLE_H // 2)   # its [x] (100 wide)
+            q2.mouse_goto(*light_xy(WX, WY, 0))   # its red light
             time.sleep(0.5)
             q2.mouse_click()
             # It will not answer, so the desktop has to stop asking. The

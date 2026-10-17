@@ -18,7 +18,7 @@ answer is one:
 
   the machine says which scale it is using, and the desktop's size is
   the screen's divided by it
-  the desktop is really drawn - the background fills it, the taskbar is
+  the desktop is really drawn - the background fills it, the dock is
   at the bottom - so scaling did not simply blank the screen
   and every pixel really is a square: pairs of neighbouring screen
   pixels are equal, across and down, which is a thing that cannot be
@@ -80,26 +80,30 @@ def main():
             check("the desktop is half the screen each way (%dx%d of %dx%d)"
                   % (lw, lh, w, h), lw == w // 2 and lh == h // 2)
 
-            # It is drawn, not blank: the background covers the screen
-            # and the taskbar sits on the bottom of it.
-            bg = sum(1 for y in range(40, h - 60, 8)
-                     for x in range(200, w - 100, 8)
-                     if at(x, y)[1] > 40 and at(x, y)[2] > 60)
-            total = len(range(40, h - 60, 8)) * len(range(200, w - 100, 8))
-            check("the desktop background fills the screen (%d/%d samples)" % (bg, total),
-                  bg > total * 0.7)
-            bar = at(w // 2, h - 6)
-            check("the taskbar at the bottom (%s)" % (bar,),
-                  all(abs(c - 211) <= 30 for c in bar))
+            # It is drawn, not blank: the aurora - drawn for the logical
+            # screen and doubled - covers it, and the dock sits on the
+            # bottom of it
+            # Read where nothing stands: down the right-hand side, past
+            # the windows and their shadows, between the bar and the dock
+            spots = [(x, y) for x in range(2 * 300, w, 6)
+                     for y in range(2 * 30, 2 * 80, 6)]
+            bg = sum(1 for x, y in spots
+                     if at(x, y) == aurora_px(x // 2, y // 2, lw, lh))
+            check("the aurora fills the screen, doubled (%d/%d samples)"
+                  % (bg, len(spots)), bg == len(spots))
+            tx, ty = dock_tile(0, w=lw, h=lh)
+            tile = at(2 * tx, 2 * ty)
+            check("the dock at the bottom (%s in the first tile's middle)"
+                  % (tile,), min(tile) > 200)
 
             # --- and now the thing itself ------------------------------
             # A logical pixel is a square of four, so the screen has to
             # be equal in pairs - both across and down. Sampled where
-            # there IS something to see: the icon column, which is
-            # orange tiles and white letters on a coloured ground.
+            # there IS something to see: the first kernel window, with
+            # its lights, its title and its button, and the bar's name.
             pairs = same = 0
-            for y in range(30, 400, 2):
-                for x in range(0, 120, 2):
+            for y in list(range(0, 48, 2)) + list(range(100, 300, 2)):
+                for x in range(60, 340, 2):
                     pairs += 1
                     if at(x, y) == at(x + 1, y) and at(x, y) == at(x, y + 1) \
                        and at(x, y) == at(x + 1, y + 1):
@@ -107,13 +111,13 @@ def main():
             check("every desktop pixel is a square of four (%d/%d samples)"
                   % (same, pairs), pairs > 100 and same == pairs)
 
-            # And the counter-check: without doubling, a column of icons
-            # with eight-pixel letters is NOT equal in pairs. Read the
-            # same window one pixel off the grid - there the squares
+            # And the counter-check: without doubling, a window with
+            # letters and round lights is NOT equal in pairs. Read the
+            # same places one pixel off the grid - there the squares
             # straddle each other and the equality has to break.
             off_pairs = off_same = 0
-            for y in range(31, 401, 2):
-                for x in range(1, 121, 2):
+            for y in list(range(1, 47, 2)) + list(range(101, 301, 2)):
+                for x in range(61, 341, 2):
                     off_pairs += 1
                     if at(x, y) == at(x + 1, y) and at(x, y) == at(x, y + 1) \
                        and at(x, y) == at(x + 1, y + 1):

@@ -79,6 +79,9 @@ uint8_t video_nearest_index(uint32_t rgb);
 void video_putpixel_rgb(int x, int y, uint32_t rgb);
 uint32_t video_getpixel_rgb(int x, int y);
 void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb);
+/* One row of the drawing buffer as 0x00RRGGBB words, or NULL when the
+   screen is not four bytes a pixel */
+uint32_t *video_row32(int y);
 /* One rectangle of colours, 'stride' pixels to a source row */
 void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
                     int stride);

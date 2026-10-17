@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 """ThreadOS smoke test: how the desktop looks.
 
-Everything on the screen was drawn with one call: fill this rectangle
-with that colour. It worked, and it looked like it - a flat background,
-flat windows with a black outline, tiles with a word under them. There
-was nothing to tell you which window was listening, nothing to say a
-window was ABOVE the desktop rather than in it, and nothing on an icon
-but its label.
+The desktop was flat: a surface was one colour, two surfaces were told
+apart by a single line, and the accent blue shouted which window was
+listening. It worked, and it looked like a machine from a long time
+ago.
 
-What replaced it is flat and says things with colour rather than with
-relief: a surface is one colour, what separates two surfaces is a
-single line, and the only thing that shouts is the accent - which is
-reserved for the one thing worth shouting about, namely which window is
-listening.
+What replaced it is light and glass. The background is an aurora -
+soft clouds of colour over a slope. Along the top runs a menu bar the
+background shows through, blurred; windows have round corners and
+stand on soft shadows, with their three buttons as coloured lights; at
+the bottom a dock holds the programs and the open windows. And all of
+it comes in two themes, dark and light, picked by a setting - which
+the desktop follows while it runs.
 
 Appearance is not a thing to assert as 'nice', so this group asserts
 the STRUCTURE of it, which is what the eye actually reads:
 
-  the background is a slope, not a fill, and not a staircase either -
-  it is darker at the floor, in steps small enough not to be counted
-  a window is one flat colour with one line round it, and there is
-  nothing painted underneath it
-  which window has the focus can be SEEN: its title bar and its button
-  on the taskbar carry the accent colour and nobody else's does, and
-  clicking another window moves both
-  an icon is a flat tile with a picture on it, and two icons have
-  different pictures
+  the background is not a fill: hundreds of colours down one column,
+  and no step between two neighbouring rows big enough to be seen
+  a window's body is one colour, its corners are round, and it stands
+  on a shadow - darker right under it than a little further away
+  which window has the focus can be SEEN: its lights are coloured, its
+  title bar a shade apart and its dot in the dock the accent - nobody
+  else's - and clicking another window moves all three
+  a tile in the dock is a picture with round corners, and two tiles
+  have different pictures
+  the theme is a setting, and switching it repaints the bar, the
+  windows and the background without a restart
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -40,126 +42,112 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-TB_H = 18
-BLUE = (0, 0, 255)
-
 
 def lum(px):
     return px[0] + px[1] + px[2]
 
 
-def is_blue(px):
-    r, g, b = px
-    return b > 120 and r < 90 and g < 90
+def dot_of(at, j, n_w=2):
+    g = dock_geom(n_w=n_w)
+    tx, ty = g["tiles"][DOCK_N + j]
+    return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
 
 def main():
     slog = tempfile.mktemp(suffix=".log")
+    dark, light = theme("dark"), theme("light")
     try:
         q = Qemu(KERNEL, INITRD, serial=slog)
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            q.mouse_goto(300, 400)       # the cursor off the column we read
+            q.mouse_goto(300, 400)       # the cursor off what we read
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            ty = h - TB_H
 
-            # --- the background is a slope ---------------------------
-            top = lum(at(600, 20))
-            mid = lum(at(600, 230))
-            bot = lum(at(600, ty - 6))
-            check("the background darkens downwards (%d -> %d -> %d)"
-                  % (top, mid, bot), top > mid > bot)
-            # ...and the steps are small: a staircase is what six bands
-            # would have looked like
-            biggest = 0
-            prev = lum(at(600, 12))
-            for y in range(12, ty - 4, 4):
-                now = lum(at(600, y))
-                if abs(now - prev) > biggest:
-                    biggest = abs(now - prev)
-                prev = now
-            check("and it does it in steps nobody can see (the biggest %d)"
-                  % biggest, biggest <= 24)
+            # --- the background is an aurora ---------------------------
+            col = [at(600, y) for y in range(BAR_H, 420)]
+            check("the background is not a fill: %d different colours down "
+                  "one column" % len(set(col)), len(set(col)) > 100)
+            step = max(max(abs(a[i] - b[i]) for i in range(3))
+                       for a, b in zip(col, col[1:]))
+            check("and nothing in it is a step (the biggest from one row to "
+                  "the next: %d)" % step, step <= 4)
 
-            # --- a window is a flat surface with a line round it -----
-            # win0 is at (40,60) 120x70. Its body is one colour: read
-            # in four places, it has to be the same in all of them -
-            # anything else is a gradient, a bevel or a shadow, and
-            # there are none of those any more.
-            body = [at(60, 100), at(100, 100), at(60, 120), at(140, 120)]
+            # --- a window: one body, round corners, a shadow -----------
+            # win0 is at (40,60) 120x70
+            body = [at(110, 120), at(140, 120), at(60, 118), at(150, 90)]
             check("the inside of the window is one colour (%s)" % (body[0],),
                   all(p == body[0] for p in body))
-            # And what separates it from the desktop is a single line,
-            # darker than the surface and lighter than black
-            line = at(40, 100)
-            check("and one line separates it from the desktop (%s)" % (line,),
-                  lum(line) < lum(body[0]) - 100 and lum(line) > 120)
-            # Nothing is painted under the window: the desktop right
-            # beside it is the same as the desktop further away
-            check("there is no shadow under the window",
-                  at(40 + 120 + 2, 60 + 70 + 2) ==
-                  at(40 + 120 + 12, 60 + 70 + 2))
+            check("its corners are round: the very corner is not the window",
+                  at(40, 129) != body[0] and at(159, 129) != body[0] and
+                  at(44, 125) == body[0])
+            near_, far_ = at(100, 60 + 70 + 2), at(100, 60 + 70 + 20)
+            check("and it stands on a shadow (%s right under it, %s further "
+                  "down)" % (near_, far_),
+                  lum(near_) < lum(aurora_px(100, 132)) - 20 and
+                  far_ == aurora_px(100, 60 + 70 + 20))
 
-            # --- which window is listening can be seen ---------------
-            # Nothing has the focus at boot, so no title bar is blue
-            # Past the name written on the bar (and short of the
-            # buttons at its other end), so that what is read is the
-            # bar itself and not a letter of it
-            check("at the start no title bar is blue",
-                  not is_blue(at(115, 67)) and not is_blue(at(240, 102)))
+            # --- which window is listening can be seen -----------------
+            check("at the start no window has the focus: grey lights",
+                  not q.has_focus(40, 60) and not q.has_focus(180, 95))
 
-            q.mouse_goto(80, 64)         # window 0's title bar
-            q.mouse_click()
-            time.sleep(1)
+            q.click(140, 66)             # window 0's title bar
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("after the click window 0 has a blue bar",
-                  is_blue(at(115, 67)))
-            check("and window 1 still has none", not is_blue(at(240, 102)))
+            check("after the click window 0's lights are on",
+                  q.has_focus(40, 60))
+            check("and its title bar is a shade apart",
+                  near(at(150, 63), dark["title_bg"], 3) and
+                  near(at(290, 98), dark["title_off"], 3))
+            check("and window 1's are not", not q.has_focus(180, 95))
 
-            q.mouse_goto(220, 99)        # window 1's title bar
-            q.mouse_click()
-            time.sleep(1)
+            q.click(280, 99)             # window 1's title bar
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("a click on the second window moves that blue onto it",
-                  is_blue(at(240, 102)) and not is_blue(at(115, 67)))
+            check("a click on the second window moves the focus onto it",
+                  q.has_focus(180, 95) and not q.has_focus(40, 60))
+            # --- the dock says the same thing --------------------------
+            check("its dot in the dock is the accent (%s)" % (dot_of(at, 1),),
+                  near(dot_of(at, 1), dark["accent"], 50))
+            check("and the other window's is not (%s)" % (dot_of(at, 0),),
+                  near(dot_of(at, 0), dark["dot"], 50))
 
-            # --- the taskbar says the same thing with colour ---------
-            # Window 1 has the focus, so its button (the second one)
-            # wears the accent and the first one does not
-            # Buttons are a picture wide now, not a name: 22 pixels
-            b1x = 46 + 22 + 10
-            b0x = 46 + 10
-            check("the button of the focused window has the accent colour",
-                  is_blue(at(b1x, ty + 2)))
-            check("and a button without the focus is grey",
-                  not is_blue(at(b0x, ty + 2)))
-            # Flat means flat: the button is the same colour at its top
-            # and at its bottom, with no edge drawn round it
-            check("and the buttons are flat (no edges)",
-                  at(b0x, ty + 2) == at(b0x, ty + 15))
+            # --- a tile in the dock has a picture on it ----------------
+            g = dock_geom()
 
-            # --- an icon has a picture on it -------------------------
-            # The tile is orange; the picture in the middle of it is not
-            def tile(k, y0):
-                return [at(8 + 10 + c, y0 + 6 + r)
-                        for r in range(12) for c in range(12)]
+            def tile(k):
+                tx, ty = g["tiles"][k]
+                return [at(tx + i, ty + j) for j in range(3, g["tile"] - 3)
+                        for i in range(3, g["tile"] - 3)]
+            app, clock = tile(0), tile(1)
+            marks = sum(1 for p in app if min(p) > 230)
+            check("a tile has a drawing on it (%d white pixels)" % marks,
+                  marks > 40)
+            check("and two tiles have different drawings", app != clock)
+            tx, ty = g["tiles"][0]
+            check("a tile's corners are round", at(tx, ty) != at(tx + 4, ty + 4))
 
-            app = tile(0, 20)
-            clock_icon = tile(1, 60)
-            marks = sum(1 for p in app if p == (255, 255, 255))
-            check("the icon has a drawing on it (%d white pixels)"
-                  % marks, marks > 12)
-            check("and two icons have different drawings", app != clock_icon)
-            # The tile itself is flat: a corner of it, away from the
-            # picture, is the same colour as the opposite corner
-            check("the icon's tile is flat",
-                  at(10, 22) == at(8 + 30, 20 + 21))
+            # --- the theme is a setting, and it is followed live --------
+            bar_before = at(300, 12)
+            q.type_line("sudo set theme light")
+            time.sleep(1)
+            q.type_line("thread")
+            time.sleep(3)
+            q.mouse_goto(600, 300)
+            time.sleep(1)
+            w, h, at = q.screen_raw()
+            check("the light theme repaints the bar - the light glass, worked "
+                  "out from the light aurora (%s, was %s)"
+                  % (at(300, 12), bar_before),
+                  near(at(300, 12), bar_glass(False)[12][300], 1))
+            check("and the background", at(550, 250) ==
+                  aurora_px(550, 250, dark=False))
+            check("and the windows (%s)" % (at(150, 63),),
+                  near(at(150, 63), light["title_off"], 3) and
+                  near(at(290, 98), light["title_bg"], 3))
         finally:
             q.close()
     finally:

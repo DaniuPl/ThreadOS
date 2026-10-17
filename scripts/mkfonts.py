@@ -7,6 +7,10 @@ needs fonttools (pip install fonttools). The results are committed to
 fonts/, so building the system does not need this script or fonttools -
 only changing which characters the system knows does.
 
+Three of them: the sans for the desktop's text, its bold for titles
+and names that have to stand out, and the monospaced one for anything
+that wants columns.
+
 What is kept, and why:
 
   the characters: ASCII, Latin-1 and Latin Extended-A (which is where
@@ -47,6 +51,7 @@ CHARS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
           0x20AC])
 
 FONTS = [("DejaVuSans.ttf", "sans.ttf", "DejaVu Sans ThreadOS"),
+         ("DejaVuSans-Bold.ttf", "bold.ttf", "DejaVu Sans Bold ThreadOS"),
          ("DejaVuSansMono.ttf", "mono.ttf", "DejaVu Sans Mono ThreadOS")]
 
 

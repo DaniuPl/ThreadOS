@@ -7,17 +7,18 @@ what was on the screen, and nothing that would show such a file if
 there were one.
 
 Print Screen now writes the screen to the disk in the machine's own
-terms - four bytes "TSCR", the size, the whole palette (so the file
-says what its numbers mean) and then one byte per pixel, the palette
-index. That is exactly what the compositor drew, so the viewer has
-nothing to interpret: it puts the bytes back into a window through
-win_blit, a row at a time, and they are the same colours again.
+terms - four bytes "TSC2", the size, and then three bytes a pixel: the
+colours the compositor drew, the glass and the shadows included. The
+viewer has nothing to interpret: it puts the colours back into a window
+of its own, a row at a time, and they are the same colours again. (On a
+screen of 256 colours the file is "TSCR", a palette and an index a
+pixel, as it always was.)
 
 The assertions are about the loop being real, not about a file
-appearing. The picture has to BE the screen: the orange of the icons
-covers a quarter of the area inside the window that it covers on the
-screen itself, because the picture is shown every second pixel - and
-that is a number no accident produces.
+appearing. The picture has to BE the screen: the dock, photographed and
+shown again at every second pixel, comes back in the window with the
+very same colours, pixel for pixel - and that is a thing no accident
+produces.
 
 And a picture from OUTSIDE: there is no floppy and no way to hand the
 machine a file, but there is a network - so the test's own HTTP server
@@ -53,13 +54,6 @@ CX, CY = VX + 1, VY + CONTENT_DY
 VW, VH = 420, 300
 STATUS_H = 10
 
-ORANGE = (255, 162, 0)          # COL_ICON - the icon tiles
-
-
-def is_orange(px):
-    return all(abs(px[i] - ORANGE[i]) <= 30 for i in range(3))
-
-
 def status(at, cols=48, vx=VX, vy=VY):
     """The viewer's status line: white on the accent blue."""
     font = font8x8()
@@ -78,11 +72,6 @@ def status(at, cols=48, vx=VX, vy=VY):
     return out.strip()
 
 
-def count_orange(at, x0, y0, x1, y1):
-    return sum(1 for y in range(y0, y1, 2) for x in range(x0, x1, 2)
-               if is_orange(at(x, y)))
-
-
 def main():
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
@@ -97,24 +86,26 @@ def main():
             q.mouse_home()
 
             # Something on the screen worth photographing
-            q.mouse_goto(24, 72)               # the "Clock" icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(420, 300)
             time.sleep(1.5)
 
+            # What the picture will have to repeat: the dock, which does
+            # not change while nothing is clicked - unlike the clocks
             w, h, at = q.screen_raw()
-            # How much orange the icons put on the screen - the number
-            # the picture will have to repeat, a quarter of it
-            on_screen = count_orange(at, 0, 0, 64, h - 20)
-            check("the icons are on the screen (%d orange samples)"
-                  % on_screen, on_screen > 50)
+            g = dock_geom(n_w=3)
+            spots = [(x, y) for y in range(g["y"] + 2, g["y"] + g["h"] - 2, 4)
+                     for x in range(g["x"] + 2, g["x"] + g["w"] - 2, 6)]
+            spots = [(x - x % 2, y - y % 2) for x, y in spots]
+            before = {p: at(*p) for p in spots}
+            check("the dock is on the screen (%d places in it remembered)"
+                  % len(spots), len(set(before.values())) > 50)
 
             # --- Print Screen -------------------------------------------
             q.sendkey("print")
             time.sleep(4)
-            q.mouse_goto(600, 430)
-            q.mouse_click()                    # the keys back to the shell
+            q.click_desktop()
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("fls")
@@ -126,10 +117,10 @@ def main():
                   m is not None)
             if not m:
                 return summary()
-            # 640*480 pixels + "TSCR" + two sizes + 256 colours
-            check("and it has exactly as many bytes as the screen plus the palette "
+            # 640*480 pixels of three bytes + "TSC2" + two sizes
+            check("and it has exactly as many bytes as the screen in colours "
                   "(%s)" % m.group(1),
-                  int(m.group(1)) == 640 * 480 + 4 + 2 + 2 + 256 * 3)
+                  int(m.group(1)) == 640 * 480 * 3 + 4 + 2 + 2)
 
             # --- and the viewer puts it back on the screen --------------
             q.type_line("run gimg shot1.psc")
@@ -144,37 +135,33 @@ def main():
             check("and that it shows every other pixel, because the whole screen "
                   "does not fit in a window on this screen", "step 2" in said)
 
-            # The picture IS the screen: the icons' orange inside the
-            # window, in the strip where the icons were, and a quarter
-            # of what it was (every second pixel in each direction).
-            # The viewer draws the picture a row at a time - four
-            # hundred and eighty rows through as many calls - so the
-            # screen is looked at again until it stops filling up.
+            # The picture IS the screen: the dock, inside the window, at
+            # half the size (every second pixel each way) and in exactly
+            # the colours it had. The viewer draws the picture a row at
+            # a time - four hundred and eighty rows through as many
+            # calls - so the screen is looked at again until it stops
+            # filling up.
             #
-            # Sixty readings rather than twenty-five, and the threshold
-            # untouched. Four hundred and eighty system calls take as
-            # long as the machine gives them, and the machine is four
-            # QEMUs sharing a host that is also running the rest of the
-            # suite; the group has grown neighbours twice since this
-            # loop was written, and once the whole minute went by with
-            # nothing drawn at all. Waiting longer for the same answer
-            # is patience, lowering the answer would be something else.
-            inside = 0
+            # Sixty readings rather than twenty-five. Four hundred and
+            # eighty system calls take as long as the machine gives
+            # them, and the machine is four QEMUs sharing a host that is
+            # also running the rest of the suite. Waiting longer for the
+            # same answer is patience, lowering the answer would be
+            # something else.
+            same = 0
             for _ in range(60):
                 w, h, at = q.screen_raw()
-                now = count_orange(at, CX, CY, CX + 32, CY + (h - 20) // 2)
-                if now > inside:
-                    inside = now
-                if inside > on_screen // 6:
+                same = sum(1 for (x, y), c in before.items()
+                           if at(CX + x // 2, CY + y // 2) == c)
+                if same == len(before):
                     break
                 time.sleep(1)
-            check("the picture in the window really is the screen - the icons are in their "
-                  "place (%d against %d on the screen)" % (inside, on_screen),
-                  inside > on_screen // 6)
+            check("the picture in the window really is the screen - the dock "
+                  "is there, every remembered pixel in its colour (%d of %d)"
+                  % (same, len(before)), same == len(before))
 
             # --- the counter, and what is not a picture -----------------
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             q.sendkey("print")
             time.sleep(4)
@@ -195,7 +182,8 @@ def main():
             # one is still there
             # The second viewer opens in the next slot of the cascade -
             # the first one is still standing where it was
-            said = status(at, vx=VX + 12, vy=VY + 12)
+            sx4, sy4 = cascade(4, VW + 2, VH + TITLE_H + 2)
+            said = status(at, vx=sx4, vy=sy4)
             check("a file that is not a picture is refused with "
                   "a word of explanation ('%s')" % said,
                   "is not a picture" in said)
@@ -203,8 +191,7 @@ def main():
             # --- a picture from the outside world -----------------------
             # No floppy, no shared folder - but a network. The machine
             # fetches the file itself and then shows it.
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("run httpget 10.0.2.2 %d /squares.bmp picture.bmp"
@@ -221,7 +208,7 @@ def main():
             w, h, at = q.screen_raw()
 
             # The third viewer, the third slot of the cascade
-            vx, vy = VX + 24, VY + 24
+            vx, vy = cascade(5, VW + 2, VH + TITLE_H + 2)
             said = status(at, vx=vx, vy=vy)
             check("the viewer loaded the BMP ('%s')" % said,
                   "64x48" in said and "loaded" in said)
@@ -247,8 +234,7 @@ def main():
             # Chunks, a deflate stream and a filter byte per row: three
             # things that all have to be right, and the four exact
             # colours say whether they were.
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("run httpget 10.0.2.2 %d /squares.png picture.png"
@@ -263,7 +249,9 @@ def main():
             q.mouse_goto(600, 200)
             time.sleep(2)
             w, h, at = q.screen_raw()
-            vx, vy = VX + 36, VY + 36
+            # (the sixth slot would run under the dock, so the cascade walks
+            # back up - kernel/desktop.c)
+            vx, vy = cascade(6, VW + 2, VH + TITLE_H + 2)
             said = status(at, vx=vx, vy=vy)
             check("the viewer unpacked the PNG ('%s')" % said,
                   "64x48" in said and "loaded" in said)
@@ -286,8 +274,7 @@ def main():
             # resolution and put back. The file comes from an outside
             # encoder, so this is our arithmetic reading somebody
             # else's picture.
-            q.mouse_goto(600, 430)
-            q.mouse_click()
+            q.click_desktop()
             time.sleep(1)
             seen = len(q.serial())
             q.type_line("run httpget 10.0.2.2 %d /squares.jpg picture.jpg"
@@ -302,7 +289,7 @@ def main():
             q.mouse_goto(600, 200)
             time.sleep(2)
             w, h, at = q.screen_raw()
-            vx, vy = VX + 48, VY + 48
+            vx, vy = cascade(7, VW + 2, VH + TITLE_H + 2)
             said = status(at, vx=vx, vy=vy)
             check("the viewer took the JPEG apart into pixels ('%s')" % said,
                   "64x48" in said and "loaded" in said)
@@ -391,11 +378,9 @@ def sixty_four():
             # The same window as on the other kernel, so the viewer
             # lands in the same slot of the cascade and the reading
             # grid below is the same one
-            q.mouse_goto(24, 72)               # the "Clock" icon
-            q.mouse_click()
+            q.launch_dock(1)                # the "Clock" tile
             time.sleep(4)
-            q.mouse_goto(600, 430)             # the keys back to the shell
-            q.mouse_click()
+            q.click_desktop()             # the keys back to the shell
             time.sleep(1)
 
             seen = len(q.serial())

@@ -128,7 +128,8 @@ def main():
             q.type_line("run mkdir documents")
             time.sleep(2)
 
-            click(q, 24, 112, wait=4)          # the "Files" icon
+            q.launch_dock(2)                   # the "Files" tile
+            time.sleep(4)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
