@@ -171,7 +171,7 @@ static int long_mode_active(void)
 }
 
 /* Is this word on the boot command line? GRUB passes the line with the
-   kernel's entry in grub.cfg; whole words only, so 'desktop' does not
+   kernel's entry in boot/grub64.cfg; whole words only, so 'desktop' does not
    match 'nodesktop'. */
 static int boot_word(const struct multiboot_info *mbi, const char *word)
 {

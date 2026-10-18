@@ -6050,3 +6050,26 @@ fact stops being a journal.*
       downloads a long file and then a short one under the same name and
       finds only the short one. t_files, t_wheel, t_desktop2, t_gedit
       and t_gui64 follow the list to where it now starts.
+
+- [x] **Tidying up before the repository goes public**
+
+      A new README: shorter, in sections someone arriving from outside
+      reads in order - what ThreadOS is, how to try it on a PC (Rufus in
+      DD mode, Secure Boot off, the installer adds the boot entry), how
+      to update, what works, how to build and test, where things are, and
+      what comes next. The old one had grown one paragraph per feature
+      until the 32-bit kernel's was a page long, and it still spoke of
+      an "Edytuj" button and of six applications.
+
+      The top of the tree holds only what a visitor looks for first: the
+      GRUB menus moved to boot/ (grub.cfg, grub64.cfg), each kernel's
+      linker script next to its code (kernel/linker.ld,
+      kernel64/linker64.ld), and this journal to docs/. The C++
+      groundwork for litehtml (apps/browser/layouttest.cpp, libc/cxx/)
+      left the tree: nothing built it, and it named a test that does not
+      exist. It is in the history (4a591f0) for when the browser engine
+      comes back. The last Polish in code and messages went too
+      (BIALY/CZARNY in two tests, the reasons ptest gives for skipping,
+      a message of the fuzz harness), and the fuzz stubs learned the
+      kernel's irqflags_t and spin_lock_irq, which the TrueType harness
+      had needed since the font code took a lock.

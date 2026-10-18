@@ -3,8 +3,9 @@
 #ifndef STUB_IO_H
 #define STUB_IO_H
 #include <stdint.h>
-static inline uint32_t irq_save(void) { return 0; }
-static inline void irq_restore(uint32_t f) { (void)f; }
+typedef unsigned long irqflags_t;
+static inline irqflags_t irq_save(void) { return 0; }
+static inline void irq_restore(irqflags_t f) { (void)f; }
 static inline void outb(uint16_t p, uint8_t v) { (void)p; (void)v; }
 static inline uint8_t inb(uint16_t p) { (void)p; return 0; }
 static inline void outw(uint16_t p, uint16_t v) { (void)p; (void)v; }

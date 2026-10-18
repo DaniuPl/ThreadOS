@@ -11,7 +11,7 @@ threadboot as modules, by the names threadboot itself gives them.
 
 Checked from outside, on the disc 'make iso64' really builds:
 
-  its GRUB menu is the one in grub64.cfg, and threadboot is on it byte
+  its GRUB menu is the one in boot/grub64.cfg, and threadboot is on it byte
   for byte
 
   started under UEFI firmware (OVMF), with somebody else's disk behind
@@ -135,8 +135,8 @@ def main():
     try:
         # --- The disc itself
         cfg = iso_file(ISO, "/boot/grub/grub.cfg", os.path.join(work, "g.cfg"))
-        check("the disc's GRUB menu is grub64.cfg",
-              cfg is not None and cfg == blob(os.path.join(ROOT, "grub64.cfg")))
+        check("the disc's GRUB menu is boot/grub64.cfg",
+              cfg is not None and cfg == blob(os.path.join(ROOT, "boot", "grub64.cfg")))
         entries = re.findall(r'menuentry "([^"]+)" \{(.*?)\}',
                              (cfg or b"").decode(), re.S)
         systems = [(n, b) for n, b in entries if "multiboot2" in b]

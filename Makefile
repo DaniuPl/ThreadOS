@@ -24,7 +24,7 @@ ASFLAGS := -m32
 # far the kernel does without it.
 # --no-warn-rwx-segments: the .user section deliberately holds code and
 # data together (RWX)
-LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T linker.ld \
+LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T kernel/linker.ld \
            -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 BUILD   := build
@@ -192,7 +192,7 @@ KERNEL_HEADERS := $(wildcard kernel/include/*.h)
 $(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL): $(OBJS) linker.ld
+$(KERNEL): $(OBJS) kernel/linker.ld
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 	@grub-file --is-x86-multiboot $@ 2>/dev/null \
 	    && echo "OK: $@ is a valid Multiboot image" \
@@ -333,7 +333,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 KERNEL64 := $(BUILD)/threados64.bin
 CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
             -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
-LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T linker64.ld \
+LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
@@ -660,7 +660,7 @@ $(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) | $(BUILD)/6
 $(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
-$(KERNEL64): $(OBJS64) linker64.ld
+$(KERNEL64): $(OBJS64) kernel64/linker64.ld
 	$(CC) $(LDFLAGS64) $(OBJS64) -o $@
 
 kernel64: $(KERNEL64) $(INITRD64)
@@ -675,10 +675,10 @@ ISO64 := $(BUILD)/threados64.iso
 
 # The disc carries threadboot too (when clang can build it): not to
 # boot from - GRUB does that - but for the installer to write onto a
-# disk, which then boots without GRUB (see grub64.cfg)
+# disk, which then boots without GRUB (see boot/grub64.cfg)
 ISO64_LOADER := $(if $(shell command -v clang 2>/dev/null),$(BUILD)/BOOTX64.EFI)
 
-$(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg $(ISO64_LOADER)
+$(ISO64): $(KERNEL64) $(INITRD64) boot/grub64.cfg $(ISO64_LOADER)
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -687,7 +687,7 @@ grub-common xorriso mtools"; \
 	mkdir -p $(BUILD)/isodir64/boot/grub
 	cp $(KERNEL64) $(BUILD)/isodir64/boot/threados64.bin
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
-	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
+	cp boot/grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	$(if $(ISO64_LOADER),cp $(ISO64_LOADER) $(BUILD)/isodir64/boot/threadboot.efi)
 	grub-mkrescue -o $@ $(BUILD)/isodir64
 	@echo "Done: $@ (BIOS + UEFI)"
@@ -710,8 +710,8 @@ $(DISK): | $(BUILD)
 
 # An ISO to burn or to start with 'qemu -cdrom'. GRUB loads the kernel
 # through Multiboot and hands it the initrd as a module; the menu lets
-# you pick the desktop or the text console (grub.cfg).
-iso: $(KERNEL) $(INITRD) grub.cfg
+# you pick the desktop or the text console (boot/grub.cfg).
+iso: $(KERNEL) $(INITRD) boot/grub.cfg
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-common xorriso"; \
@@ -720,7 +720,7 @@ iso: $(KERNEL) $(INITRD) grub.cfg
 	mkdir -p $(BUILD)/isodir/boot/grub
 	cp $(KERNEL) $(BUILD)/isodir/boot/threados.bin
 	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
-	cp grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
+	cp boot/grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
 	grub-mkrescue -o $(ISO) $(BUILD)/isodir
 	@echo "Done: $(ISO) - 'make run-iso', or write it to a stick"
 

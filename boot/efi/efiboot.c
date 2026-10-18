@@ -607,7 +607,7 @@ static enter_fn move_trampoline(void)
  * there, and something the kernel, which leaves them behind, could
  * only do by calling into the firmware from its own page tables. GRUB
  * starts it from the disc ("chainloader /boot/threadboot.efi register",
- * grub64.cfg); any loader passing the word "register" does.
+ * boot/grub64.cfg); any loader passing the word "register" does.
  *
  * What it adds goes at the END of BootOrder: the machine keeps booting
  * what it booted before, and ThreadOS is one choice in its boot menu.

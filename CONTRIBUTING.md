@@ -12,7 +12,7 @@ review will say so.
 
 A test here is not a unit test with mocks. It **starts a real kernel in
 QEMU** and looks at what happened: the screen through QMP screenshots
-(read back through the kernel's own 8x8 font), the serial port,
+(its text read back glyph by glyph, in the lettering the system draws in), the serial port,
 injected keystrokes and mouse clicks, the bytes on a disk image.
 Nothing is stubbed, so a failing assertion means the system
 misbehaved - not that a stub drifted from the thing it stood for.
@@ -79,7 +79,7 @@ This is deliberate, and it is not negotiable in a patch:
   saving;
 - **test assertion descriptions: English**, because they are read next
   to the system's own output;
-- `DZIENNIK.md` - the development journal - **stays Polish**. It is a
+- `docs/DZIENNIK.md` - the development journal - **stays Polish**. It is a
   record written day by day from the first commit, and translating it
   after the fact would turn a diary into a report. New entries are
   written in English.
@@ -125,7 +125,7 @@ usually a test that assumes how long something takes.
 
 One line saying what changed, then a paragraph or two saying **why** -
 and, when something went wrong on the way, what it was. The journal
-(`DZIENNIK.md`) gets the longer version of that story for anything
+(`docs/DZIENNIK.md`) gets the longer version of that story for anything
 worth remembering.
 
 ## Reporting a bug

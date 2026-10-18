@@ -3014,9 +3014,9 @@ def no64():
     """The reason a 64-bit test cannot be run, or None when it can. Every
     64-bit group asks the same question."""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        return "brak obrazu 64-bitowego (make kernel64)"
+        return "no 64-bit image (make kernel64)"
     if shutil.which("grub-mkrescue") is None:
-        return "brak grub-mkrescue"
+        return "no grub-mkrescue"
     if shutil.which("qemu-system-x86_64") is None:
-        return "brak qemu-system-x86_64"
+        return "no qemu-system-x86_64"
     return None

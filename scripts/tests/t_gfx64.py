@@ -28,7 +28,7 @@ OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
-BIALY = (255, 255, 255)
+WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
 
 
@@ -71,7 +71,7 @@ def inspect(iso, via_uefi):
         check(f"{label}: the bottom left corner is yellow",
               near(at(w // 8, h - h // 8), YELLOW))
         check(f"{label}: the bottom right corner is white",
-              near(at(w - w // 8, h - h // 8), BIALY))
+              near(at(w - w // 8, h - h // 8), WHITE))
         check(f"{label}: the background between the corners is blue",
               near(at(w // 2, h // 8), BLUE))
 
@@ -80,7 +80,7 @@ def inspect(iso, via_uefi):
         # there.
         pas = sum(1 for y in range(h // 2, h // 2 + 8)
                   for x in range(w // 2 - 120, w // 2 + 120)
-                  if near(at(x, y), BIALY))
+                  if near(at(x, y), WHITE))
         check(f"{label}: text drawn in our own font "
               f"({pas} pixels)", 100 < pas < 1500)
     finally:

@@ -21,7 +21,7 @@
 #define MANAGED_LIMIT PAGING_MANAGED_MAX
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
 
-/* Symbols from linker.ld marking out the kernel image in memory */
+/* Symbols from kernel/linker.ld marking out the kernel image in memory */
 extern char _kernel_start[], _kernel_end[];
 
 static uint32_t bitmap[MAX_FRAMES / 32];

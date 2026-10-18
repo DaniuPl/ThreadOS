@@ -88,7 +88,7 @@ static void run_html(const unsigned char *data, size_t len)
     for (int i = 0; i < d.line_count; i++) {
         struct html_line *l = &d.lines[i];
         if (l->start < 0 || l->len < 0 || l->start + l->len > d.text_len) {
-            fprintf(stderr, "wiersz poza tekstem: %d+%d > %d\n",
+            fprintf(stderr, "a line outside the text: %d+%d > %d\n",
                     l->start, l->len, d.text_len);
             abort();
         }

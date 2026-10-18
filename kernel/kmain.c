@@ -45,7 +45,7 @@
 
 /* Does the kernel command line contain a given word?
    QEMU passes it with the -append option, GRUB with an entry in
-   grub.cfg. */
+   boot/grub.cfg. */
 static int cmdline_has(const struct multiboot_info *mbi, const char *word)
 {
     if (!(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)

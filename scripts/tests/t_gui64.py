@@ -39,8 +39,8 @@ BODY_X, BODY_Y = body_text(2)  # the top left corner of the first application's 
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
-BIALY = (255, 255, 255)
-CZARNY = (0, 0, 0)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
 
 def scr(cx, cy):
@@ -128,7 +128,7 @@ def main():
             for _ in range(10):
                 _, _, at = q.screen_raw()
                 whites = sum(1 for dy in range(8) for dx in range(72)
-                             if at(tx + dx, ty + dy) == CZARNY)
+                             if at(tx + dx, ty + dy) == BLACK)
                 if whites > 20:
                     break
                 time.sleep(0.5)
