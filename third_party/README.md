@@ -9,6 +9,7 @@ as code of our own around it (`apps/js`).
 |-----------|----------------------------------------|------------|---------|------|
 | `musl/`   | musl, a C library                      | 1.2.5      | MIT (`COPYRIGHT`) | https://musl.libc.org/ |
 | `quickjs/`| QuickJS, a JavaScript engine (core)    | 2026-06-04 | MIT (`LICENSE`)   | https://bellard.org/quickjs/ |
+| `litehtml/` | litehtml, an HTML/CSS layout engine, with gumbo (an HTML5 parser) inside | git 8848b99 (2026-10-12); gumbo 0.14.1 | BSD-3-Clause (`LICENSE`); gumbo Apache-2.0 (`src/gumbo/LICENSE`) | https://github.com/litehtml/litehtml |
 
 Trimmed, not modified:
 
@@ -20,3 +21,10 @@ Trimmed, not modified:
   `qjs`/`qjsc` programs, `quickjs-libc` (its host for POSIX systems -
   ThreadOS has its own in `apps/js`), the Intl and Temporal extensions,
   or the tests.
+- **litehtml**: `src/`, `include/` and the licences. Not the sample
+  containers (cairo, Windows, Haiku), the support code, the build files
+  or the documentation; and from gumbo only its sources (not the
+  `.gperf` and `tag.in` they were generated from). Two files are built
+  from a patched copy, `apps/browser/patches/`, which says what each
+  change is and why - the directory here stays exactly upstream's.
+

@@ -17,6 +17,7 @@
 # by hand; the release workflow uses its run number).
 
 CC      := gcc
+CXX     := g++
 AS      := gcc
 LD      := gcc
 
@@ -168,7 +169,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
 
-.PHONY: all iso iso64 initrd64 libc64 run run32 run-iso run-iso64-uefi test fuzz clean \
+.PHONY: all iso iso64 initrd64 libc64 browser run run32 run-iso run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick
 
 all: $(KERNEL) $(INITRD)
@@ -586,6 +587,104 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/update.elf
 
+# --- C++, and litehtml ------------------------------------------------
+#
+# C++ programs use the host compiler's own libstdc++: its headers in
+# front of musl's (they #include_next the C ones), and its static
+# library for the few pieces that are not templates - the red-black
+# tree behind std::map, the list node, RTTI for dynamic_cast. They are
+# built without exceptions; libc/cxx/cxxrt.cpp is the runtime's last
+# pieces (operator new, std::string, the __throw_* family ending the
+# program) and libc/cxx/compat.h the glibc names the headers expect.
+CXX64_INCS := $(shell echo | $(CXX) -xc++ -E -v - 2>&1 | sed -n 's/^ \(.*c++.*\)$$/-isystem \1/p')
+LIBSTDCXX  := $(shell $(CXX) -print-file-name=libstdc++.a)
+CXX64_FLAGS := -m64 -std=gnu++17 -O2 -mno-red-zone -fno-stack-protector \
+               -fno-pic -fno-asynchronous-unwind-tables -fno-exceptions \
+               -fno-threadsafe-statics -nostdinc -nostdinc++ $(CXX64_INCS) \
+               -isystem $(MUSL_ROOT)/include \
+               -isystem $(shell $(CC) -print-file-name=include) \
+               -include libc/cxx/compat.h
+
+$(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
+                         | $(BUILD)/libc64
+	$(CXX) $(CXX64_FLAGS) -Wall -c $< -o $@
+
+# litehtml (third_party/litehtml, upstream unchanged) lays out HTML and
+# CSS; gumbo, inside it, parses the HTML. Two of its files are built
+# from a patched copy - apps/browser/patches says what and why.
+LH_DIR     := third_party/litehtml
+LH_PATCHED := encodings url
+LH_SRC     := $(filter-out $(LH_PATCHED),$(basename $(notdir $(wildcard $(LH_DIR)/src/*.cpp))))
+GUMBO_SRC  := $(basename $(notdir $(wildcard $(LH_DIR)/src/gumbo/src/*.c)))
+LH_OBJS    := $(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_SRC) $(LH_PATCHED)) \
+              $(patsubst %,$(BUILD)/litehtml/gumbo-%.o,$(GUMBO_SRC))
+LH_HDRS    := $(wildcard $(LH_DIR)/include/*.h $(LH_DIR)/include/litehtml/*.h \
+                         $(LH_DIR)/src/*.h)
+LH_INC     := -I$(LH_DIR)/include -I$(LH_DIR)/include/litehtml \
+              -I$(LH_DIR)/src -I$(LH_DIR)/src/gumbo/src
+
+$(BUILD)/litehtml:
+	mkdir -p $(BUILD)/litehtml
+
+$(BUILD)/litehtml/%.cpp: $(LH_DIR)/src/%.cpp apps/browser/patches/%.patch \
+                         | $(BUILD)/litehtml
+	patch -s -o $@ $< apps/browser/patches/$*.patch
+
+# (static patterns: a plain pattern rule would lose to the one below,
+# whose source exists without being made, and build the unpatched file)
+$(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_PATCHED)): \
+$(BUILD)/litehtml/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) $(LIBC64) \
+                          | $(BUILD)/litehtml
+	$(CXX) $(CXX64_FLAGS) -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) $(LIBC64) \
+                          | $(BUILD)/litehtml
+	$(CXX) $(CXX64_FLAGS) -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(LIBC64) \
+                             | $(BUILD)/litehtml
+	$(CC) $(LIBC64_CFLAGS) -w -c $< -o $@
+
+# The C++ link: musl's start files, the program, libstdc++ for what
+# the headers do not carry, and the C library after it
+CXX64_LINK = $(call LIBC64_LINK,$(1) $(BUILD)/libc64/cxxrt.o $(LIBSTDCXX))
+
+# layouttest lays pages out with a font of known sizes and prints every
+# box; scripts/tests/t_browser.py holds what it prints on ThreadOS
+# against the same program built for this machine. It is not in the
+# initrd - the test fetches it onto the disk, where a program can be
+# run from too, which keeps the initrd (and the memory every boot
+# spends on it) the size it was.
+$(BUILD)/user64/layouttest.elf: apps/browser/layouttest.cpp $(LH_OBJS) \
+                                $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
+                                | $(BUILD)/user64
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -c $< -o $(BUILD)/litehtml/layouttest.o
+	$(call CXX64_LINK,$(BUILD)/litehtml/layouttest.o $(LH_OBJS)) -s -o $@
+
+# ... and the same source and library built for this machine
+LH_HOST_OBJS := $(patsubst $(BUILD)/litehtml/%.o,$(BUILD)/litehtml/host/%.o,$(LH_OBJS))
+
+$(BUILD)/litehtml/host:
+	mkdir -p $(BUILD)/litehtml/host
+
+$(patsubst %,$(BUILD)/litehtml/host/lh-%.o,$(LH_PATCHED)): \
+$(BUILD)/litehtml/host/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) \
+                               | $(BUILD)/litehtml/host
+	$(CXX) -std=gnu++17 -O2 -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/host/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) \
+                               | $(BUILD)/litehtml/host
+	$(CXX) -std=gnu++17 -O2 -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/host/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c \
+                                  | $(BUILD)/litehtml/host
+	$(CC) -O2 -w -c $< -o $@
+
+$(BUILD)/litehtml/host/layouttest: apps/browser/layouttest.cpp $(LH_HOST_OBJS)
+	$(CXX) -std=gnu++17 -O2 -Wall $(LH_INC) $< $(LH_HOST_OBJS) -o $@
+
+browser: $(BUILD)/user64/layouttest.elf $(BUILD)/litehtml/host/layouttest
+
 # The system's version: a number, the release it is (the release
 # workflow sets VERSION to its run number; a build by hand is 0, older
 # than any release). It travels in the initrd as the file 'version',
@@ -793,7 +892,7 @@ run-iso: iso $(DISK)
 #   make test J=1        one after another, for debugging
 # The disc too, where GRUB can make it: t_isoinstall installs from the
 # one 'make iso64' builds, not from a copy of its own
-test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64) \
+test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64) browser \
       $(if $(shell command -v grub-mkrescue 2>/dev/null),$(ISO64))
 	python3 -u scripts/run_tests.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
 	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)

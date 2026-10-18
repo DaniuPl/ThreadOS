@@ -62,6 +62,10 @@ that use them link against `libthread.so`, which the kernel maps into
 every process once. On the 64-bit side, programs can also be built
 against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
 (QuickJS) is built this way.
+C++ programs use the host compiler's libstdc++ on top of musl, without
+exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
+an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as
+it does on Linux.
 
 **Graphics.** The compositor (`kernel/desktop.c`) runs in the kernel. It
 draws with `kernel/gfx.c` (anti-aliased shapes, shadows, blur) and
@@ -127,6 +131,7 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 | `make iso` | `build/threados.iso` (32-bit) |
 | `make stick` | `build/threados-stick.img` |
 | `make libc64` | musl for ThreadOS (built automatically when needed) |
+| `make browser` | litehtml and its layout test, for ThreadOS and for the host |
 | `make clean` | removes `build/` |
 
 Variables:
@@ -210,7 +215,8 @@ user/            ring 3 programs and the header-only libraries (crypto, TLS, HTT
 user64/          64-bit-only programs, the 64-bit syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests
 apps/js/         the QuickJS host (`js`)
-third_party/     unmodified upstream code: musl 1.2.5, QuickJS
+apps/browser/    the litehtml browser: its test, and the patches to litehtml
+third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml
 fonts/           DejaVu subsets used by the kernel and programs
 scripts/         build helpers, release signing, test runner and tests
 tests/fuzz/      host-side fuzzing harnesses
@@ -283,7 +289,8 @@ These files are committed. Regenerate them only when their inputs change:
 `third_party/` holds upstream releases, trimmed but not modified. See
 `third_party/README.md` for versions and what was left out. To update
 one, replace its directory. ThreadOS-specific changes to musl live in
-`libc/overlay/`. QuickJS is wrapped by `apps/js/`. After an update, run
+`libc/overlay/`, changes to litehtml as patches in `apps/browser/patches/`.
+QuickJS is wrapped by `apps/js/`. After an update, run
 `make test T=libc`.
 
 ## Features

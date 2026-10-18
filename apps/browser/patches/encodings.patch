@@ -1,0 +1,84 @@
+litehtml without C++ exceptions: ThreadOS builds C++ with -fno-exceptions
+(libc/cxx/cxxrt.cpp says why), and this file is the one place litehtml
+throws - to abandon the encoding prescan of a page early. The throw
+becomes a longjmp back to prescan_for_encoding; what it skips are the
+destructors of a few short strings, i.e. memory, not correctness.
+
+--- a/src/encodings.cpp
++++ b/src/encodings.cpp
+@@ -1,3 +1,4 @@
++#include <csetjmp>
+ #include "html.h"
+ #include "os_types.h"
+ #include "utf8_strings.h"
+@@ -7879,20 +7880,18 @@
+         return index >= 1024;
+     }
+ 
+-    struct abort_prescan_exception : public std::exception
+-    {
+-        const char* what() const noexcept override
+-        {
+-            return "abort prescan";
+-        }
+-    };
++    // ThreadOS: no C++ exceptions here (the C++ runtime is built without
++    // them), so abandoning the prescan is a longjmp back to
++    // prescan_for_encoding. What it skips is the destructors of a few
++    // short strings - memory, not correctness.
++    static jmp_buf abort_prescan;
+ 
+     void increment(int& index, const std::string& str)
+     {
+         index++;
+         if(index >= static_cast<int>(str.size()) || end_condition(index))
+         {
+-            throw abort_prescan_exception(); // abort prescan
++            longjmp(abort_prescan, 1); // abort prescan
+         }
+     }
+ 
+@@ -8028,7 +8027,7 @@
+             index = static_cast<int>(str.find("-->", index));
+             if(index == -1 || end_condition(index))
+             {
+-                throw abort_prescan_exception(); // abort prescan
++                longjmp(abort_prescan, 1); // abort prescan
+             }
+             index += 2; // not 3 because it will be incremented one more time in step 5 (next_byte)
+         } else if(match_i(str, index, "<meta") && (is_whitespace(str[index + 5]) || str[index + 5] == '/'))
+@@ -8123,7 +8122,7 @@
+             index = static_cast<int>(str.find_first_of(" \t\r\n\f>", index));
+             if(index == -1 || end_condition(index))
+             {
+-                throw abort_prescan_exception(); // abort prescan
++                longjmp(abort_prescan, 1); // abort prescan
+             }
+ 
+             // 2.
+@@ -8137,7 +8136,7 @@
+             index = static_cast<int>(str.find('>', index));
+             if(index == -1 || end_condition(index))
+             {
+-                throw abort_prescan_exception(); // abort prescan
++                longjmp(abort_prescan, 1); // abort prescan
+             }
+         }
+ 
+@@ -8246,14 +8245,11 @@
+     // https://html.spec.whatwg.org/multipage/parsing.html#prescan-a-byte-stream-to-determine-its-encoding
+     encoding prescan_for_encoding(const std::string& str)
+     {
+-        try
+-        {
+-            return prescan_a_byte_stream_to_determine_its_encoding(str);
+-        }
+-        catch(abort_prescan_exception&)
++        if(setjmp(abort_prescan))
+         {
+             return get_xml_encoding(str);
+         }
++        return prescan_a_byte_stream_to_determine_its_encoding(str);
+     }
+ 
+     // https://html.spec.whatwg.org/multipage/parsing.html#encoding-sniffing-algorithm

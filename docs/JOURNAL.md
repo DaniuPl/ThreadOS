@@ -5494,3 +5494,50 @@ works and is checked by `make test`.
       short one; the entries themselves were translated as written,
       including the names things had at the time.
 
+
+- [x] **C++ on ThreadOS, and litehtml laying out pages exactly as on
+      Linux** (libc/cxx, third_party/litehtml, apps/browser, the `browser`
+      test group).
+
+      The browser so far turns HTML into lines of text (user/uhtml.h).
+      A real one needs a layout engine: CSS, floats, tables, flexbox. The
+      smallest serious one is litehtml - and it is C++, the first C++ this
+      system has run.
+
+      C++ here is the host compiler's own libstdc++ on top of musl: its
+      headers in front of musl's, and its static library for the few
+      things that are not templates. Programs are built without
+      exceptions. The hard part was the link, and it was one file: the
+      library's ready-made std::string (string-inst.o) was compiled with
+      exceptions, so its members catch and rethrow, and pulling it in
+      pulled the whole exception runtime and an unwinder that is not
+      there. libc/cxx/cxxrt.cpp now instantiates std::string itself, in a
+      file built without exceptions, and supplies the whole operator new
+      and delete family (the library's nothrow ones had the same
+      problem). What is left from the library is RTTI, the red-black tree
+      and the list node - none of them throws.
+
+      litehtml is in third_party/ exactly as upstream has it (commit
+      8848b99), with gumbo, its HTML5 parser, inside. Two of its files
+      need a change for this runtime - one throw used to abandon the
+      encoding prescan, which becomes a longjmp, and two functions that
+      use string streams, which become plain string operations - and
+      those changes live as patches in apps/browser/patches, applied to a
+      copy at build time, each with its reason at the top.
+
+      The check is a comparison. apps/browser/layouttest.cpp lays out four
+      pages (blocks with collapsing margins, floats, lists and a table,
+      flexbox with selectors and relative positioning) with a font whose
+      widths are known exactly, and prints every box and every word. The
+      same source and library are built for this machine too; the
+      ThreadOS build is fetched onto the ThreadOS disk over HTTP and run
+      from there, and all 220 lines have to agree. They did the first
+      time - strings, maps, shared pointers, virtual calls, dynamic_cast
+      and floating point all behaving the same on musl as on glibc.
+
+      The test program is not in the initrd: a megabyte and a half of it
+      would be memory every boot spends, and the swap test already showed
+      how close that budget is. A program on the disk is a program too.
+
+      Next: a document_container that draws into a window with the
+      system's own fonts, and the browser on top of it.

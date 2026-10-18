@@ -70,7 +70,7 @@ real. Use a separate `BUILD=` directory for experiments.
    `make kernel64`). Run the tests for both.
 6. **No new dependencies.** The kernel and programs are freestanding (no
    libc, except programs built against `libc/` musl). Third-party code goes
-   into `third_party/` unmodified. Changes go into `libc/overlay/` or into
+   into `third_party/` unmodified. Changes go into `libc/overlay/`, `apps/browser/patches/` or into
    our own wrapper code.
 7. **Never commit secrets.** The update signing key belongs only in the
    repository secret `THREADOS_UPDATE_KEY`. Tests generate keys of their

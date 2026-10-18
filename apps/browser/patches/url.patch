@@ -1,0 +1,84 @@
+litehtml without iostreams: the URL is put together and percent-encoded
+by plain string operations instead of std::stringstream, which would
+bring the whole of the C++ stream library (and its locales) into every
+program for two functions.
+
+--- a/src/url.cpp
++++ b/src/url.cpp
+@@ -29,11 +29,9 @@
+ 
+ #include "url.h"
+ 
+-#include <sstream>
+ #include <algorithm>
+ #include "codepoint.h"
+ #include "url_path.h"
+-#include <iomanip>
+ 
+ namespace litehtml
+ {
+@@ -110,48 +108,52 @@
+         query_(query),
+         fragment_(fragment)
+     {
+-        std::stringstream tss;
++        // ThreadOS: plain concatenation - no iostreams in this C++ runtime
++        std::string tss;
+ 
+         if(!scheme_.empty())
+         {
+-            tss << scheme_ << ":";
++            tss += scheme_ + ":";
+         }
+         if(!authority_.empty())
+         {
+-            tss << "//" << authority_;
++            tss += "//" + authority_;
+         }
+         if(!path_.empty())
+         {
+-            tss << path_;
++            tss += path_;
+         }
+         if(!query_.empty())
+         {
+-            tss << "?" << query_;
++            tss += "?" + query_;
+         }
+         if(!fragment_.empty())
+         {
+-            tss << "#" << fragment_;
++            tss += "#" + fragment_;
+         }
+-        str_ = tss.str();
++        str_ = tss;
+     }
+ 
+     std::string url::encode(const std::string& str)
+     {
+-        std::ostringstream encoded;
+-        encoded << std::hex << std::uppercase;
++        // ThreadOS: by hand - no iostreams in this C++ runtime
++        static const char hex[] = "0123456789ABCDEF";
++        std::string encoded;
+ 
+         for(unsigned char c : str)
+         {
+             if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+             {
+-                encoded << c;
++                encoded += static_cast<char>(c);
+             } else
+             {
+-                encoded << '%' << std::setw(2) << static_cast<int>(c);
++                encoded += '%';
++                encoded += hex[c >> 4];
++                encoded += hex[c & 15];
+             }
+         }
+ 
+-        return encoded.str();
++        return encoded;
+     }
+ 
+     std::string url::decode(const std::string& str)
