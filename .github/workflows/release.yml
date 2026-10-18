@@ -1,0 +1,73 @@
+# A ThreadOS release after every push to main - what 'update' installs.
+#
+# The version is this workflow's run number: it only grows, and a build
+# by hand is version 0, older than every release. The release carries
+# the three files an installed system is made of, update.txt saying
+# what they are and signing all of it (scripts/mkupdate.py), and the
+# disc and the stick image for a new machine.
+#
+# The signature is made with the private key in the repository secret
+# THREADOS_UPDATE_KEY (a P-256 key in PEM - Settings -> Secrets and
+# variables -> Actions). Its public half is built into user/update.c,
+# and a system takes nothing that key did not sign. Without the secret
+# this workflow stops before publishing anything.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the build needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
+            clang lld python3 openssl xz-utils
+
+      - name: Build version ${{ github.run_number }}
+        run: |
+          make -j$(nproc) VERSION=${{ github.run_number }} \
+            build/threados64.bin build/initrd64.img efi
+          make VERSION=${{ github.run_number }} iso64 stick
+          xz -T0 -9 -k build/threados-stick.img
+
+      - name: Sign
+        env:
+          KEY: ${{ secrets.THREADOS_UPDATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::the THREADOS_UPDATE_KEY secret is not set - nothing is published"
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
+          python3 scripts/mkupdate.py build/update.txt ${{ github.run_number }} \
+            "$RUNNER_TEMP/key.pem" \
+            build/threados64.bin build/initrd64.img build/BOOTX64.EFI
+          rm -f "$RUNNER_TEMP/key.pem"
+          cat build/update.txt
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" \
+            --title "ThreadOS ${{ github.run_number }}" \
+            --notes "Built from ${{ github.sha }}. An installed system takes it with 'sudo run update'; a new machine starts from threados64.iso." \
+            --latest \
+            build/update.txt build/threados64.bin build/initrd64.img \
+            build/BOOTX64.EFI build/threados64.iso build/threados-stick.img.xz

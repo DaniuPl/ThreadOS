@@ -22,7 +22,7 @@
 #include "udns.h"
 #include "utls.h"
 
-#define HTTP_HDR_MAX  2048
+#define HTTP_HDR_MAX  8192      /* GitHub's redirects alone carry kilobytes */
 #define HTTP_CHUNK    1024
 
 /* One place the bytes travel through - plain TCP or TLS */
@@ -73,7 +73,8 @@ struct http_result {
     int chunked;                 /* was the body in chunks */
     int verified;                /* https: did the certificate hold up */
     int verify_err;              /* https: the reason, when it did not */
-    char location[192];          /* the Location header (a redirect) */
+    char location[2048];         /* the Location header (a redirect) - a
+                                    signed download link runs to ~1 KiB */
 };
 
 /* Called for successive pieces of the body */
@@ -192,7 +193,7 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                            const char *path, int use_tls, http_sink sink,
                            void *arg, struct http_result *res)
 {
-    static char req[512];
+    static char req[2560];
     static char buf[HTTP_CHUNK];
     static char hdr[HTTP_HDR_MAX];
     static struct http_transport tp;

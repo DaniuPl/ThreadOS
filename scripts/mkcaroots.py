@@ -26,6 +26,9 @@ WANTED = [
     "OU = GlobalSign Root CA - R3",
     "OU = GlobalSign Root CA - R6",
     "CN = USERTrust RSA Certification Authority",
+    "CN = USERTrust ECC Certification Authority",  # github.com (Sectigo ECC)
+    "CN = Sectigo Public Server Authentication Root E46",
+    "CN = Sectigo Public Server Authentication Root R46",
     "CN = Go Daddy Root Certificate Authority - G2",
     "CN = Amazon Root CA 1",
     "CN = Certum Trusted Network CA",       # popular in Poland
@@ -76,7 +79,7 @@ def main():
         cn = subj.replace("subject=", "")
         lines.append(" *   - %s (%u B)" % (cn, len(der)))
     lines += [" */", "", "#ifndef THREADOS_CAROOTS_H",
-              "#define THREADOS_CAROOTS_H", "", '#include "usys.h"', "",
+              "#define THREADOS_CAROOTS_H", "", '#include "uapi.h"', "",
               "#define CA_ROOTS_COUNT %u" % len(chosen), "",
               "static const uint8_t ca_roots_der[] = {"]
 

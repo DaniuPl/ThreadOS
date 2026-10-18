@@ -576,9 +576,21 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 	    -c $< -o $(BUILD)/libc64/js.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/js.o $(QJS_OBJS)) -o $@
 
-USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf
+USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
+               $(BUILD)/user64/update.elf
 
-$(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
+# The system's version: a number, the release it is (the release
+# workflow sets VERSION to its run number; a build by hand is 0, older
+# than any release). It travels in the initrd as the file 'version',
+# where the update program and the About card read it. The file is
+# rewritten only when the number changes, so that make rebuilds the
+# initrd for a new number and not otherwise.
+VERSION ?= 0
+VERSION_FILE := $(BUILD)/version.txt
+$(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_FILE); })
+
+$(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
+             $(VERSION_FILE)
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
@@ -633,7 +645,9 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    mutex=$(BUILD)/user64/mutex.elf prodcons=$(BUILD)/user64/prodcons.elf \
 	    syscalls=$(BUILD)/user64/syscalls.elf \
 	    libctest=$(BUILD)/user64/libctest.elf \
-	    js=$(BUILD)/user64/js.elf
+	    js=$(BUILD)/user64/js.elf \
+	    update=$(BUILD)/user64/update.elf \
+	    version=$(VERSION_FILE)
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

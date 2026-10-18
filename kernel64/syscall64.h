@@ -141,6 +141,13 @@
 #define SYS64_FDINFO   74
 /* a1 = the new FS base (must be a program address) -> 0 / -1 */
 #define SYS64_SET_FS   75
+/* A file of the initrd, read: a1/a2 = name, a3 = buffer, a4 = its size
+   -> how many bytes (the file may be longer), -1 = no such file */
+#define SYS64_INITRD_READ 76
+/* An update's file written over the installed one (admin only): a1 =
+   0 kernel / 1 initrd / 2 loader, a2 = data, a3 = length -> 0, -1
+   write failed, -2 not allowed, -3 nothing installed here */
+#define SYS64_UPDATE_WRITE 77
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

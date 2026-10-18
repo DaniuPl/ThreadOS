@@ -98,6 +98,11 @@ const char *install_step_name(int n);
    belongs to somebody), -1 = it did not work. */
 int install_step(int n);
 
+/* Writes a new kernel (0), initrd (1) or loader (2) over the installed
+   one on this disk's EFI partition - the last step of an update. 0 =
+   done, -1 = writing failed, -3 = nothing installed here to update. */
+int install_update_file(int which, const void *data, uint32_t len);
+
 /* The two the text version uses: printing what would happen, and doing
    all the steps one after another. */
 int install_plan(int mode, int disk);

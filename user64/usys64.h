@@ -86,6 +86,8 @@
 #define SYS64_CFG_SET  73
 #define SYS64_FDINFO   74
 #define SYS64_SET_FS   75
+#define SYS64_INITRD_READ 76
+#define SYS64_UPDATE_WRITE 77
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40

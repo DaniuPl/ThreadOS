@@ -525,6 +525,45 @@ int install_do(void)
     return 0;
 }
 
+/* --- Updating an installed system ------------------------------------
+ *
+ * A new kernel, initrd or loader, already downloaded and checked by
+ * the 'update' program (user/update.c - the signature is its business,
+ * and the kernel only lets an admin call this), written over the
+ * installed ones on the EFI partition of the disk the system runs
+ * from. The loader reads them from there at the next start; nothing
+ * else changes. When \EFI\BOOT\BOOTX64.EFI is ours too (a disk
+ * ThreadOS has to itself), it gets the new loader as well.
+ *
+ * Returns 0, -1 when writing failed, -3 when this disk holds no
+ * installed ThreadOS (a system started from a stick has nothing here
+ * to update). */
+int install_update_file(int which, const void *data, uint32_t len)
+{
+    static const char *paths[3] = { PATH_KERNEL, PATH_INITRD, PATH_LOADER };
+    struct partition pt;
+    struct fat_entry e;
+    int np, i;
+
+    if (which < 0 || which > 2 || !data || !len)
+        return -1;
+    np = part_scan();
+    for (i = 0; i < np; i++)
+        if (part_get(i, &pt) && !strcmp(pt.kind, "EFI (ESP)"))
+            break;
+    if (np <= 0 || i == np)
+        return -3;
+    if (!fat_mount((uint32_t)pt.start))  /* this one, whatever was mounted */
+        return -3;
+    if (!fat_stat(PATH_KERNEL, &e))
+        return -3;                       /* an EFI partition, but not ours */
+    if (fat_write_file(paths[which], data, len) < 0)
+        return -1;
+    if (which == 2 && fat_stat(PATH_FALLBACK, &e) && fallback_is_ours(e.size))
+        fat_write_file(PATH_FALLBACK, data, len);
+    return 0;
+}
+
 /* --- and the way it is meant to be done ------------------------------
  *
  * A window, on a screen with nothing else on it. Installing is not one

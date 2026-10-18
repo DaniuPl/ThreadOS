@@ -5975,3 +5975,41 @@ fact stops being a journal.*
       t_isoinstall installs beside "Windows" from the disc and reads the
       entry back with OVMF's own shell before booting it; t_wholedisk
       wants it first, and boots on the firmware that now lists it.
+
+- [x] **Updates: a newer ThreadOS from the internet, signed**
+
+      A machine with ThreadOS installed should not need a new stick for
+      every new build. 'update' (user/update.c) fetches a release: three
+      files - kernel, initrd, loader - and update.txt saying which
+      version they are, how long each is and its SHA-256, with an ECDSA
+      P-256 signature over all of that on the last line. The public key
+      is built into the program; update.key on the disk (a system file
+      now - only an admin writes it) can name another. A file changed on
+      the way or on the server does not match its hash, and update.txt
+      cannot be changed without the key; HTTPS is the channel's privacy,
+      not its trust. 'update check' only reports.
+
+      The kernel's part is small: SYS64_UPDATE_WRITE writes a file over
+      the installed one on the EFI partition of the disk the system runs
+      from (admin only; the fallback loader too when it is ours), and
+      SYS64_INITRD_READ lets a program read a file of the initrd - the
+      version, which the build puts there as the file 'version'
+      (VERSION=..., 0 for a build by hand).
+
+      Releases are made by .github/workflows/release.yml after every push
+      to main: the run number is the version, scripts/mkupdate.py writes
+      and signs update.txt with the key from a repository secret, and the
+      release carries the disc and the stick image too. Getting there
+      from ThreadOS meant room for GitHub's redirects - a signed download
+      link is a kilobyte; uhttp's Location, request and header buffers
+      grew - and the roots GitHub's chains end in (USERTrust ECC, Sectigo
+      E46 and R46) in the built-in trust store.
+
+      t_update installs ThreadOS onto a whole disk, starts from it, and
+      against a server on the host signed with the test's own key: the
+      built-in key refuses that release, update.key makes it check out,
+      'check' changes nothing, without sudo nothing is written, with
+      sudo all three files land on the disk byte for byte, the restarted
+      system is version 7 and up to date, and a release signed by another
+      key or with an initrd that does not match its hash is refused,
+      leaving the disk as it was.

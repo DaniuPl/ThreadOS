@@ -343,6 +343,24 @@ static inline int64_t sys_wait_child(int *code)
     return sys_wait(code);
 }
 
+/* A file of the initrd, read into 'buf': how many bytes, -1 = none */
+static inline int64_t sys_initrd_read(const char *name, void *buf,
+                                      uint64_t max)
+{
+    return syscall64_4(SYS64_INITRD_READ, (int64_t)(uintptr_t)name,
+                       (int64_t)ustrlen(name), (int64_t)(uintptr_t)buf,
+                       (int64_t)max);
+}
+
+/* A new kernel (0), initrd (1) or loader (2) written over the installed
+   one: 0, -1 failed, -2 not an admin, -3 nothing installed here */
+static inline int64_t sys_update_write(int which, const void *data,
+                                       uint64_t len)
+{
+    return syscall64_3(SYS64_UPDATE_WRITE, which,
+                       (int64_t)(uintptr_t)data, (int64_t)len);
+}
+
 static inline void print_dec(uint32_t v)
 {
     char buf[24];

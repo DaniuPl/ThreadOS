@@ -58,7 +58,8 @@ static uint64_t from_text(const char *s)
 
 int user_is_system_file(const char *name)
 {
-    static const char *files[] = { "system.cfg", "swap.sys", "icons.pos" };
+    static const char *files[] = { "system.cfg", "swap.sys", "icons.pos",
+                                   "update.key" };   /* who signs updates */
     for (int i = 0; i < (int)(sizeof(files) / sizeof(files[0])); i++)
         if (!strcmp(name, files[i]))
             return 1;

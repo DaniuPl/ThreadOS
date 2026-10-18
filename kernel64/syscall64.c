@@ -12,6 +12,7 @@
  *              gate.
  */
 
+#include "../kernel/include/initrd.h"
 #include "../kernel/include/sem.h"
 #include <stdint.h>
 #include "syscall64.h"
@@ -1130,6 +1131,38 @@ static void handle(struct regs *r)
         }
         *(__typeof__(info) *)(uintptr_t)a2 = info;
         r->rax = 0;
+        return;
+    }
+    case SYS64_INITRD_READ: {
+        char name[FS_NAME_MAX + 1];
+        uint32_t size = 0;
+        if (name_from_ring3(a1, a2, name) < 0 ||
+            (a4 && !paging64_user_range(a3, a4))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        const void *f = initrd_find(name, &size);
+        if (!f) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint64_t n = size < a4 ? size : a4;
+        memcpy((void *)(uintptr_t)a3, f, n);
+        r->rax = n;
+        return;
+    }
+    case SYS64_UPDATE_WRITE: {
+        /* Replacing the system is the most an admin can do */
+        if (task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
+        if (!a3 || a3 > 64 * 1024 * 1024 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)install_update_file((int)a1,
+                     (const void *)(uintptr_t)a2, (uint32_t)a3);
         return;
     }
     case SYS64_SET_FS:
