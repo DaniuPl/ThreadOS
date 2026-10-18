@@ -629,6 +629,26 @@ static int session_item_y(int i)
     return menu_item_y(MENU_N) + MENU_SEP + i * SESS_ROW;
 }
 
+/* --- The right button on a dock tile -----------------------------------
+ *
+ * What a tile does on a click is one thing - start the program, bring
+ * the window up. What else can be done with it is said by a small menu
+ * over the tile: a window's tile can show it, put it away into the dock
+ * or close it; a program's tile can start another one. */
+static int tmenu = -1;                 /* the tile (as dock_hit()), or -1 */
+static const char *const tmenu_win[] = { "Show", "Minimise", "Close" };
+static const char *const tmenu_app[] = { "Open" };
+
+static int tmenu_n(int t) { return t >= 100 ? 3 : 1; }
+static const char *tmenu_item(int t, int i)
+{
+    return t >= 100 ? tmenu_win[i] : tmenu_app[i];
+}
+static int tmenu_h(int t) { return 2 * MENU_PAD + tmenu_n(t) * MENU_ROW; }
+static int tmenu_x(int t);
+static int tmenu_y(int t);
+static void tile_action(int t, int i);
+
 /* Puts the menu somewhere it fits: never off the right-hand edge,
    never over the dock. */
 static void menu_at(int x, int y)
@@ -1935,11 +1955,14 @@ static void handle_input(int mx, int my, int buttons)
        pointer is. On a window it does nothing yet - a window's own
        menu is the window's business, and none of them has one. */
     if (right && !prev_right) {
+        tmenu = -1;
         if (window_at(mx, my) < 0 && my >= BAR_H && my < work_bottom() &&
-            dock_hit(mx, my) < 0)
+            dock_hit(mx, my) < 0) {
             menu_at(mx, my);
-        else
+        } else {
             menu_open = 0;
+            tmenu = dock_hit(mx, my);
+        }
     }
     prev_right = right;
 
@@ -1954,6 +1977,18 @@ static void handle_input(int mx, int my, int buttons)
         note_drop(note_at(mx, my));
         prev_pressed = pressed;
         return;
+    }
+
+    if (pressed && !prev_pressed && tmenu >= 0) {
+        int t = tmenu;
+        tmenu = -1;                    /* any click closes it */
+        if (in_rect(mx, my, tmenu_x(t), tmenu_y(t), TMENU_W, tmenu_h(t))) {
+            int i = (my - tmenu_y(t) - MENU_PAD) / MENU_ROW;
+            if (my >= tmenu_y(t) + MENU_PAD && i < tmenu_n(t))
+                tile_action(t, i);
+            prev_pressed = pressed;    /* on it: nothing else */
+            return;
+        }
     }
 
     if (pressed && !prev_pressed) {     /* a press edge = a click */
@@ -3050,6 +3085,95 @@ static void draw_dock_glass(const struct dock *d)
     }
 }
 
+/* The window behind the j-th window tile, or -1 */
+static int win_of_tile(int t)
+{
+    int j = 0;
+    for (int i = 0; i < MAX_WIN; i++) {
+        if (!here(i))
+            continue;
+        if (j++ == t - 100)
+            return i;
+    }
+    return -1;
+}
+
+/* Over its tile, centred on it, never off the screen */
+static int tmenu_x(int t)
+{
+    struct dock d;
+    dock_geom(&d);
+    int k = t >= 100 ? d.n_l + t - 100 : t;
+    int x = dock_tile_x(&d, k) + d.tile / 2 - TMENU_W / 2;
+    if (x + TMENU_W > video_w())
+        x = video_w() - TMENU_W;
+    return x < 0 ? 0 : x;
+}
+
+static int tmenu_y(int t)
+{
+    struct dock d;
+    dock_geom(&d);
+    return d.y - TMENU_GAP - tmenu_h(t);
+}
+
+static void tile_action(int t, int i)
+{
+    if (t < 100) {                       /* Open: one more of the program */
+        if (t < 0 || t >= ICON_MAX)
+            return;
+        remember_launch(exec_spawn(icons[t].app), t, icons[t].art);
+        hop_at[t] = frames;
+        hop_set[t] = 1;
+        return;
+    }
+    int w = win_of_tile(t);
+    if (w < 0)
+        return;
+    if (i == 0) {                        /* Show */
+        if (wins[w].minimized)
+            anim_start(w, ANIM_RESTORE);
+        wins[w].minimized = 0;
+        focus_idx = w;
+        raise_win(w);
+    } else if (i == 1) {                 /* Minimise */
+        if (!wins[w].minimized) {
+            wins[w].minimized = 1;
+            anim_start(w, ANIM_MIN);
+            if (focus_idx == w)
+                focus_idx = -1;
+        }
+    } else {                             /* Close: asked, as the red light asks */
+        close_window(w);
+    }
+}
+
+static void draw_tmenu(void)
+{
+    if (tmenu < 0)
+        return;
+    int t = tmenu;
+    if (t >= 100 && win_of_tile(t) < 0) {
+        tmenu = -1;                      /* the window went in the meantime */
+        return;
+    }
+    int x = tmenu_x(t), y = tmenu_y(t), h = tmenu_h(t);
+    gfx_shadow(x, y, TMENU_W, h, MENU_R, 14, theme_dark ? 150 : 90, 4);
+    gfx_frost(x, y, TMENU_W, h, MENU_R, 10, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, TMENU_W * 16, h * 16, MENU_R * 16, 16,
+                L.win_line, 200);
+    for (int i = 0; i < tmenu_n(t); i++) {
+        int iy = y + MENU_PAD + i * MENU_ROW;
+        int over = in_rect(mouse_x, mouse_y, x, iy, TMENU_W, MENU_ROW);
+        if (over)
+            gfx_rrect(x + 5, iy + 1, TMENU_W - 10, MENU_ROW - 2, 6, L.accent,
+                      255);
+        ui_font_text(UI_SANS, MENU_PX, x + 14,
+                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                     tmenu_item(t, i), over ? L.accent_text : L.menu_text);
+    }
+}
+
 static void draw_dock(void)
 {
     struct dock d;
@@ -3927,6 +4051,7 @@ int desktop_lock(void)
     lock_wrong = 0;
     lock_out = 0;
     ask = -1;
+    tmenu = -1;
     search_close();
     menu_open = 0;
     locked = 1;
@@ -4833,6 +4958,7 @@ static void fit_rect(int *x, int *y, int *w, int *h)
 static void relayout(void)
 {
     menu_open = 0;
+    tmenu = -1;
     search_close();
     snap_hint = SNAP_NONE;
     drag_idx = resize_idx = content_drag = -1;
@@ -4987,6 +5113,7 @@ static void desktop_thread(void *arg)
 
         draw_bar();
         draw_dock();
+        draw_tmenu();
         draw_menu();
         draw_notes();
         draw_search();

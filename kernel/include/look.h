@@ -84,6 +84,8 @@
 #define MENU_ICON    18
 #define MENU_Y       (BAR_H + 4)  /* opened from the bar, it hangs here */
 #define MENU_SEP     7       /* the line between the programs and the system */
+#define TMENU_W      132     /* the right button's menu on a dock tile */
+#define TMENU_GAP    8       /* between it and the dock */
 #define SESS_ROW     22      /* an entry below it, a little lower */
 
 /* --- the question before logging out, restarting, shutting down ------- */

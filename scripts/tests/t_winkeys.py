@@ -74,6 +74,41 @@ def menu_entry(q, mx, my, i):
                      fg=theme("dark")["menu_text"])
 
 
+def tile_menu_at(k, n_w, count):
+    """The corner of the menu the right button opens over dock tile k"""
+    g = dock_geom(n_w=n_w)
+    tx, _ = dock_tile(k, n_w=n_w)
+    x = min(max(tx - TMENU_W // 2, 0), SCREEN_W - TMENU_W)
+    return x, g["y"] - TMENU_GAP - (2 * MENU_PAD + count * MENU_ROW)
+
+
+def tile_menu(q, k, n_w, count):
+    """Opens it and reads its entries - each with the pointer on it, so
+    that it stands on the accent and not on glass"""
+    q.mouse_goto(*dock_tile(k, n_w=n_w))
+    time.sleep(0.4)
+    q.mouse_right_click()
+    time.sleep(0.8)
+    x, y = tile_menu_at(k, n_w, count)
+    got = []
+    for i in range(count):
+        iy = y + MENU_PAD + i * MENU_ROW
+        q.mouse_goto(x + TMENU_W - 10, iy + MENU_ROW // 2)
+        time.sleep(0.5)
+        got.append(q.read_ui(x + 14, ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                             width=TMENU_W - 30, px=MENU_PX,
+                             fg=theme("dark")["accent_text"]))
+    return got
+
+
+def tile_pick(q, k, n_w, count, i):
+    x, y = tile_menu_at(k, n_w, count)
+    q.click(x + TMENU_W - 10, y + MENU_PAD + i * MENU_ROW + MENU_ROW // 2)
+    time.sleep(1.5)
+    q.mouse_goto(600, 400)
+    time.sleep(1)
+
+
 def menu_height():
     """The programs, the line, and the system's entries below it"""
     return (2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
@@ -366,6 +401,43 @@ def main():
             check("the clock is gone from the screen ('%s')" % gone,
                   gone.count(":") != 2)
             check("and from the dock", q.dock_windows() == after)
+
+            # --- the right button on a dock tile --------------------------
+            q.click_desktop()
+            q.type_line("run gclock")
+            time.sleep(4)
+            q.mouse_goto(600, 400)
+            time.sleep(1)
+            n = q.dock_windows()
+            win_tile = DOCK_N + n - 1            # the clock's: the last one
+            check("a clock again, in the dock (%d windows)" % n,
+                  n == after + 1)
+            items = tile_menu(q, win_tile, n, 3)
+            check("the right button on a window's tile: what can be done "
+                  "with it (%s)" % (items,),
+                  items == ["Show", "Minimise", "Close"])
+            tile_pick(q, win_tile, n, 3, 1)
+            check("Minimise puts it away - off the screen, still in the dock",
+                  q.gclock_time(WX + 1, WY + CONTENT_DY).count(":") != 2
+                  and q.dock_windows() == n)
+            tile_menu(q, win_tile, n, 3)
+            tile_pick(q, win_tile, n, 3, 0)
+            shown = q.gclock_time(WX + 1, WY + CONTENT_DY)
+            check("Show brings it back ('%s')" % shown, shown.count(":") == 2)
+            tile_menu(q, win_tile, n, 3)
+            tile_pick(q, win_tile, n, 3, 2)
+            time.sleep(2)
+            check("Close closes it (%d windows in the dock)" % q.dock_windows(),
+                  q.dock_windows() == n - 1)
+            # A program's tile: one thing to do with it
+            items = tile_menu(q, 1, n - 1, 1)
+            check("and on a program's tile ('%s')" % (items,), items == ["Open"])
+            tile_pick(q, 1, n - 1, 1, 0)
+            time.sleep(3)
+            q.mouse_goto(600, 400)
+            time.sleep(1)
+            check("Open starts it (%d windows)" % q.dock_windows(),
+                  q.dock_windows() == n)
         finally:
             q.close()
     finally:
