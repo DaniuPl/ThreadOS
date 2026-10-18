@@ -5891,3 +5891,20 @@ fact stops being a journal.*
       ('bcfg boot dump'), sets BootNext to it the way a laptop's F12 menu
       does, and boots the disk with no disc in a machine laid out
       differently.
+
+- [x] **The screen's memory is write-combining**
+
+      On the IdeaPad the desktop animated in jerks. The firmware's MTRRs
+      mark the framebuffer uncached, so every store of a frame went to
+      the graphics card on its own - a 1366x768 frame is four megabytes
+      of them. Under QEMU the "card" is RAM and nothing showed.
+
+      paging64_pat_init() rewrites entry 1 of the page attribute table
+      (PWT alone, write-through by default and used by nothing here) to
+      write-combining, on the first core and on every secondary one,
+      since each has its own PAT MSR; the framebuffer is mapped with PWT.
+      A PAT entry of WC beats an MTRR of UC, so the processor now
+      gathers stores into whole lines. The boot line says which it got.
+
+      t_wc reads QEMU's own page tables ('info tlb'): the framebuffer's
+      pages carry PWT and not PCD, and nothing else carries PWT.

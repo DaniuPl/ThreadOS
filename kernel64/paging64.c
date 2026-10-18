@@ -28,6 +28,7 @@
 #define PTE_PRESENT 0x001
 #define PTE_WRITE   0x002
 #define PTE_HUGE    0x080
+#define PTE_PWT     0x008  /* with PCD and PAT: which PAT entry */
 #define PTE_ACCESSED 0x020  /* set by the processor when a page is used */
 #define PTE_DIRTY    0x040  /* set by the processor on a write to a page */
 #define ADDR_MASK   0x000FFFFFFFFFF000ULL
@@ -753,6 +754,66 @@ int paging64_swap_in(uint64_t space, uint64_t virt)
  *
  * Writing yes, executing no: there is no code in a device's
  * registers. */
+/* --- The screen's memory: write-combining ----------------------------
+ *
+ * A framebuffer is memory on the graphics card, and the firmware's
+ * MTRRs mark it uncached: every store is a bus transaction of its own.
+ * Under QEMU that costs nothing - the "card" is RAM - and on a real
+ * laptop a frame of 1366x768 took tens of milliseconds, which is a
+ * desktop that animates in jerks. Write-combining lets the processor
+ * gather stores into whole lines and send those; it is what every
+ * system maps a framebuffer as.
+ *
+ * The page attribute table (the PAT MSR) says what each combination
+ * of a page entry's PWT, PCD and PAT bits means. Entry 1 - PWT alone -
+ * is write-through by default, and nothing in this kernel asks for it;
+ * it becomes write-combining. A PAT entry of WC beats an MTRR of UC.
+ * Every core has its own copy of the MSR and all of them have to say
+ * the same, so the secondary cores do this too (kernel/smp.c). */
+#define MSR_PAT 0x277
+#define PAT_WC_AT_1 0x0007040600070106ULL  /* WB WC UC- UC WB WT UC- UC */
+
+static int pat_wc;
+
+void paging64_pat_init(void)
+{
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+    if (!(d & (1u << 16)))
+        return;                      /* no PAT: the screen stays uncached */
+    /* The caches must not hold lines under an old meaning */
+    __asm__ volatile("wbinvd" ::: "memory");
+    __asm__ volatile("wrmsr" : : "c"(MSR_PAT), "a"((uint32_t)PAT_WC_AT_1),
+                     "d"((uint32_t)(PAT_WC_AT_1 >> 32)));
+    __asm__ volatile("wbinvd" ::: "memory");
+    uint64_t cr3;
+    __asm__ volatile("movq %%cr3, %0; movq %0, %%cr3" : "=r"(cr3) :: "memory");
+    pat_wc = 1;
+}
+
+int paging64_fb_wc(void)
+{
+    return pat_wc;
+}
+
+/* The same as below, for a framebuffer: write-combining where the
+   processor has a PAT */
+int paging64_map_phys_wc(uint64_t phys, uint64_t len)
+{
+    uint64_t start = phys & ~0xFFFULL;
+    uint64_t end = (phys + len + PAGE_SIZE - 1) & ~0xFFFULL;
+
+    for (uint64_t a = start; a < end; a += PAGE_SIZE) {
+        if (paging64_lookup(a) == a)
+            continue;
+        if (paging64_map(a, a, PG_WRITE | PG_NX |
+                               (pat_wc ? PTE_PWT : 0)) < 0)
+            return -1;
+        tlb_flush_kernel((uintptr_t)a);
+    }
+    return 0;
+}
+
 int paging64_map_phys(uint64_t phys, uint64_t len)
 {
     uint64_t start = phys & ~0xFFFULL;
@@ -788,6 +849,7 @@ int paging64_init(void)
     low |= (1u << 11);                       /* NXE */
     __asm__ volatile("wrmsr" : : "a"(low), "d"(high), "c"(0xC0000080));
     nx_on = 1;
+    paging64_pat_init();
 
     uint32_t root = pmm_alloc_frame();
     if (!root)
@@ -812,13 +874,14 @@ int paging64_init(void)
         return -1;
 
     /* The framebuffer lies high, outside memory - and it certainly has
-       no code in it to execute */
+       no code in it to execute. Write-combining, see above. */
     if (fbcon_have()) {
         uint64_t fb = fbcon_addr();
         uint64_t end = fb + fbcon_bytes();
         for (uint64_t a = fb & ~(uint64_t)(HUGE_SIZE - 1); a < end;
              a += HUGE_SIZE)
-            if (map_huge(a, a, PTE_WRITE | PG_NX) < 0)
+            if (map_huge(a, a, PTE_WRITE | PG_NX |
+                               (pat_wc ? PTE_PWT : 0)) < 0)
                 return -1;
     }
 

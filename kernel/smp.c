@@ -58,6 +58,7 @@
 #define SYSCALL_ENTRY() syscall64_init()
 #include "../kernel64/fpu64.h"
 #define ENABLE_SSE()  fpu64_enable_core()
+#define SET_PAT()     paging64_pat_init()   /* the same PAT on every core */
 #else
 #include "include/paging.h"
 #define MAP_PHYS(a, n)   paging_map_phys((a), (n))
@@ -71,6 +72,7 @@
 #define TSS_SEL_STEP     8
 #define SYSCALL_ENTRY() do { } while (0)   /* i386 enters through the int 0x80 gate */
 #define ENABLE_SSE()  do { } while (0)     /* i386 programs do not need XMM */
+#define SET_PAT()     do { } while (0)     /* i386 maps the screen uncached */
 #endif
 
 #define AP_BASE       0x8000        /* where we copy the trampoline to */
@@ -375,6 +377,10 @@ void smp_ap_main(uint32_t number)
        and the processor's cannot drift apart - the cost is one flush of
        a cache that holds nothing yet. */
     tlb_switch(tlb_current_space());
+    /* What a page entry's caching bits mean is the core's own MSR, and
+       it has to mean on this core what it means on the first one - the
+       screen is mapped write-combining there (kernel64/paging64.c) */
+    SET_PAT();
     /* The entry registers for the syscall instruction belong to the
        core - one that does not set them will not accept a call at all */
     SYSCALL_ENTRY();

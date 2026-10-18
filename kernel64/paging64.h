@@ -109,5 +109,10 @@ uint64_t paging64_identity_top(void);
 
 /* Is no-execute enabled (the NXE bit in EFER) */
 int paging64_nx_enabled(void);
+/* The page attribute table with entry 1 as write-combining (done on
+   every core); whether the processor had one; a framebuffer mapped so */
+void paging64_pat_init(void);
+int paging64_fb_wc(void);
+int paging64_map_phys_wc(uint64_t phys, uint64_t len);
 
 #endif

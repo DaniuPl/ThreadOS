@@ -274,9 +274,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        cores - and to do that they have to know what each is running */
     tlb_switch(paging64_kernel_space());
     printk("[ OK ] Four-level paging: %u MiB, execute-disable "
-           "%s\n",
+           "%s, screen memory %s\n",
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
-           paging64_nx_enabled() ? "on" : "off");
+           paging64_nx_enabled() ? "on" : "off",
+           paging64_fb_wc() ? "write-combining" : "uncached");
 
     /* Fine-grained mapping: a frame placed high up, far beyond the area
        described one to one. Writing and reading through that address

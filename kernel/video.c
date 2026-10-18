@@ -21,9 +21,11 @@
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n) paging64_map_phys((a), (n))
+#define MAP_FB(a, n)   paging64_map_phys_wc((a), (n))   /* write-combining */
 #else
 #include "include/paging.h"
 #define MAP_PHYS(a, n) paging_map_phys((a), (n))
+#define MAP_FB(a, n)   paging_map_phys((a), (n))
 #endif
 #include "include/pmm.h"
 #include "include/string.h"
@@ -396,7 +398,7 @@ static int dispi_mode(uint32_t lfb, int w, int h)
         w = w * 7 / 8;
     }
     w &= ~7;
-    if (MAP_PHYS(lfb, (uint32_t)w * h * 4) < 0)
+    if (MAP_FB(lfb, (uint32_t)w * h * 4) < 0)
         return -1;
 
     dispi(4, 0x00);          /* disable before changing the mode */
@@ -499,7 +501,7 @@ int video_map_lfb(void)
 {
     if (!lfb_from_loader)
         return 0;
-    return MAP_PHYS(lfb_addr, lfb_bytes);
+    return MAP_FB(lfb_addr, lfb_bytes);
 }
 
 int video_have_loader_lfb(void)
