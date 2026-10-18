@@ -58,9 +58,11 @@ real. Use a separate `BUILD=` directory for experiments.
 2. **Never weaken, skip or delete a test to get green.** If a test fails,
    find out why. Do not wait a fixed time and read the screen once. Poll
    until the expected thing appears, with a timeout.
-3. **English everywhere:** identifiers, comments, commit messages, and
-   everything the system prints or shows. The only exceptions are the Polish
-   keyboard layout and its test.
+3. **English everywhere:** identifiers, comments, commit messages,
+   documentation, and everything the system prints or shows. The only
+   non-English text is test data for non-ASCII input: the Polish keyboard
+   layout (`kernel/kbdmap.c`) and the UTF-8 strings the tests type or
+   compare (`t_polish`, `t_libc`, `scripts/tests/js/`).
 4. **Comments explain *why*,** not what. Match the comment density and the
    tone of the surrounding code.
 5. **Shared code must build and pass on both kernels.** When you change

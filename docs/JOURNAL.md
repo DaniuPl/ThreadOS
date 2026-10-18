@@ -1,5499 +1,4893 @@
-# ThreadOS - dziennik rozwoju
-
-Szczegółowy opis projektu po polsku: struktura, sposób budowania
-i chronologiczna lista tego, co powstawało - **wraz z powodami**.
-Prawie każda pozycja tłumaczy, dlaczego coś wygląda tak, a nie inaczej,
-i jakie błędy po drodze wyszły; to one tłumaczą kształt kodu lepiej niż
-sam kod.
-
-Krótki opis po angielsku jest w [README.md](README.md).
-
-Do jesieni 2026 projekt nazywał się ProtonOS - tak też nazywa się go w
-starszych wpisach dziennika, które zostają w swoim brzmieniu.
-
-## Struktura projektu
-
-```
-ThreadOS/
-├── boot/
-│   └── boot.S          # nagłówek Multiboot, ustawienie stosu, skok do kmain()
-├── kernel/
-│   ├── kmain.c         # główny punkt wejścia jądra w C
-│   ├── gdt.c           # własna GDT (płaski model, segmenty ring 0 i ring 3)
-│   ├── idt.c           # IDT - 256 bramek przerwań
-│   ├── isr.S           # stuby przerwań w asemblerze (wyjątki + IRQ)
-│   ├── isr.c           # wspólny handler: wyjątki CPU i dispatch IRQ
-│   ├── pic.c           # remapowanie PIC 8259, maskowanie, EOI
-│   ├── pit.c           # timer PIT (100 Hz), licznik uptime
-│   ├── keyboard.c      # klawiatura PS/2 - scancode -> ASCII, strzałki/PgUp
-│   ├── task.c          # wątki jądra + scheduler (round-robin, wywłaszczanie)
-│   ├── switch.S        # przełączanie kontekstu (rejestry callee-saved + ESP)
-│   ├── syscall.c       # syscalle int 0x80 (m.in. gniazda UDP) + walidacja
-│   │                   #   wskaźników z ring 3
-│   │                   #   (user_ok/user_str: zły adres = -1, nie page fault)
-│   ├── usermode.c      # wejście w ring 3 przez iret
-│   ├── exec.c          # loader ELF32: przestrzeń adresowa, segmenty, argv, sbrk
-│   ├── initrd.c        # initrd (moduł Multiboot, format PIRD)
-│   ├── ata.c           # sterownik dysku ATA/IDE (PIO, LBA28, IDENTIFY)
-│   ├── fs.c            # PFS3 - bloki 1 KiB z bitmapy, i-węzły (do 64 MiB)
-│   ├── kfile.c         # deskryptory plików: konsola/pliki/potoki (open/read/write/seek)
-│   ├── pipe.c          # potoki międzyprocesowe (bufor kołowy, blokowanie)
-│   ├── rtc.c           # zegar czasu rzeczywistego (CMOS, BCD/binarny)
-│   ├── mouse.c         # mysz PS/2 (IRQ12, pakiety 3-bajtowe, pozycja)
-│   ├── video.c         # tryb graficzny: VGA 13h (8bpp) i VESA liniowy (32bpp),
-│   │                   #   podwójne buforowanie, tekst 8x8
-│   ├── pci.c           # dostęp do PCI (znalezienie framebuffera karty)
-│   ├── shm.c           # pamięć współdzielona między procesami (po kluczu)
-│   ├── rtl8139.c       # sterownik karty sieciowej Realtek RTL8139 (DMA)
-│   ├── net.c           # stos sieciowy: Ethernet + ARP + IPv4 + ICMP + UDP
-│   ├── dhcp.c          # klient DHCP (DISCOVER/OFFER/REQUEST/ACK)
-│   ├── tcp.c           # TCP: klient i serwer, ACK-i, retransmisje, FIN
-│   ├── signal.c        # sygnały: doręczanie, ramka na stosie, sigreturn
-│   ├── desktop.c       # kompozytor: okna (drag, resize, [_]/[x]), ikony, kursor
-│   ├── shell.c         # shell: help, ps, mem, ls, run, fls, cat, date,
-│   │                   #   ifconfig, arp, ping...
-│   ├── pmm.c           # alokator ramek fizycznych (bitmapa, mapa Multiboot)
-│   ├── paging.c        # stronicowanie - identycznościowe całe RAM, COW
-│   ├── swap.c          # wymiana stron na dysk (plik swap.sys)
-│   ├── ahci.c          # kontroler SATA (AHCI): polecenia przez DMA
-│   ├── blk.c           # warstwa blokowa: AHCI albo zapasowo ATA PIO
-│   ├── fbcon.c         # konsola tekstowa rysowana na buforze obrazu
-│   ├── mb2.c           # Multiboot 2: znaczniki od GRUB-a
-│   ├── acpi.c          # tablice ACPI: wyłączanie i restart komputera
-│   ├── dynlink.c       # biblioteka współdzielona: symbole i relokacje
-│   ├── smpmem.c        # próba zamków: pamięć jądra ze wszystkich rdzeni
-│   ├── smpthreads.c    # próba schedulera: wątki jądra na wszystkich rdzeniach
-│   ├── biglock.c       # wielki zamek jądra (zagnieżdżalny, jeden na system)
-│   ├── usbhc.c         # wybór kontrolera USB (xHCI albo UHCI) + powitanie
-│   ├── uhci.c          # kontroler USB 1.1: przesyłki sterujące i przerwaniowe
-│   ├── xhci.c          # kontroler USB 3: pierścienie poleceń, zdarzeń, przesyłek
-│   ├── usbkbd.c        # klawiatura USB (HID, protokół rozruchowy)
-│   ├── heap.c          # sterta jądra: kmalloc/kfree (first-fit + scalanie)
-│   ├── serial.c        # COM1 - logi widoczne w QEMU przez -serial stdio
-│   ├── printk.c        # formatowane wypisywanie (%s %c %d %u %x %p)
-│   ├── vga.c           # 4 konsole wirtualne (VGA albo bufor obrazu)
-│   ├── string.c        # memset/memcpy/strlen (brak libc w jądrze)
-│   └── include/        # nagłówki jądra
-├── user/               # programy użytkownika (osobne ELF-y!)
-│   ├── usys.h          # biblioteczka syscalli (int 0x80)
-│   ├── hello.c         # grzeczny proces: liczy i wychodzi przez sys_exit
-│   ├── evil.c          # niegrzeczny: czyta pamięć jądra i ginie
-│   ├── evil2.c         # podaje jądru wskaźniki na jego pamięć - dostaje -1
-│   ├── sh.c            # ush - shell użytkownika (spawn/wait, > oraz |)
-│   ├── echo.c          # wypisuje swoje argumenty (argc/argv)
-│   ├── memtest.c       # alokuje pamięć przez sbrk/malloc i ją weryfikuje
-│   ├── fileio.c        # zapis i odczyt pliku przez deskryptory (open/read/write)
-│   ├── cat.c           # wypisuje plik na konsolę (read pliku -> write na fd 1)
-│   ├── wc.c            # liczy bajty/wiersze ze stdin (konsument potoku)
-│   ├── seq.c           # wypisuje 1..N (producent potoku)
-│   ├── grep.c          # przepuszcza wiersze zawierające wzorzec
-│   ├── head.c          # przepuszcza pierwsze N wierszy
-│   ├── ls.c            # listuje pliki na dysku (sys_readdir)
-│   ├── rm.c            # usuwa plik (sys_unlink)
-│   ├── date.c          # data i godzina z RTC (sys_time)
-│   ├── cp.c            # kopiuje plik (read src -> write dst)
-│   ├── mv.c            # przenosi plik (kopia + unlink źródła)
-│   ├── mkdir.c         # tworzy katalog (sys_mkdir)
-│   ├── spin.c          # długo żyjący proces do demonstracji kill
-│   ├── cores.c         # rozwidla się i mówi, które rdzenie go prowadziły
-│   ├── syscalls.c      # mierzy same wejścia do jądra (milion sys_getpid)
-│   ├── guiapp.c        # interaktywna aplikacja ring 3 (okno + klik/klawisz)
-│   ├── gclock.c        # zegar w oknie graficznym (RTC, uruchamiany z menu)
-│   ├── gfiles.c        # menedżer plików GUI - lista + klik->podgląd treści
-│   ├── gmon.c          # monitor zasobów (RAM/uptime na żywo, sys_sysinfo)
-│   ├── shmtest.c/shmread.c # demo pamięci współdzielonej
-│   ├── udpecho.c       # serwer UDP w ring 3 (odsyła, co dostał)
-│   ├── udptest.c       # klient UDP - datagram do udpecho i z powrotem
-│   ├── udns.h          # klient DNS dla programów (wspólny dla nslookup/gweb)
-│   ├── uhttp.h         # klient HTTP/1.1: chunked, przekierowania, URL-e
-│   ├── uhtml.h         # HTML -> tekst: znaczniki, encje, odnośniki, wiersze
-│   ├── usha256.h       # SHA-256, HMAC, HKDF (fundament pod TLS 1.3)
-│   ├── uchacha.h       # ChaCha20, Poly1305, AEAD (RFC 8439)
-│   ├── ux25519.h       # X25519 - wymiana kluczy na Curve25519
-│   ├── urand.h         # źródło losowości (RTC + timer + SHA-256)
-│   ├── utls.h          # klient TLS 1.3: handshake, klucze, rekordy
-│   ├── ubignum.h       # wielkie liczby (Montgomery) pod RSA
-│   ├── ursa.h          # podpisy RSA: PKCS#1 v1.5 i PSS
-│   ├── ux509.h         # parser certyfikatów X.509 (DER)
-│   ├── uecdsa.h        # ECDSA na krzywych P-256 i P-384 (weryfikacja)
-│   ├── usha512.h       # SHA-512 i SHA-384 (podpisy na P-384)
-│   ├── caroots.h       # wbudowane korzenie CA (generowane skryptem)
-│   ├── ucert.h         # weryfikacja łańcucha, dat i nazwy hosta
-│   ├── nslookup.c      # klient DNS (zapytanie A przez UDP z ring 3)
-│   ├── httpget.c       # klient HTTP/HTTPS (na konsolę albo do pliku)
-│   ├── tcpserv.c       # serwer TCP w ring 3 (nasłuch na porcie 5555)
-│   ├── gweb.c          # przeglądarka w oknie: adres -> TCP -> tekst + PFS
-│   ├── cryptotest.c    # wektory testowe kryptografii z RFC
-│   ├── certtest.c      # test parsera X.509 i podpisów RSA
-│   ├── threads.c       # wątki w procesie (wspólna przestrzeń adresowa)
-│   ├── prio.c          # demo schedulera z priorytetami
-│   ├── forktest.c      # fork() i kopiowanie przy zapisie
-│   ├── ptree.c         # drzewo procesów: waitany i sieroty
-│   ├── sigtest.c       # sygnały: handler, SIG_IGN, Ctrl+C
-│   ├── gterm.c         # terminal w oknie GUI (komenda -> plik -> okno)
-│   ├── mmaptest.c      # test syscalla mmap (świeża pamięć procesu)
-│   └── user.ld         # programy linkowane pod 0x08048000
-├── tests/
-│   └── fuzz/           # sprawdzanie parserów na uszkodzonych danych
-│       ├── harness.c   # parsery ring 3 (X.509, HTML, HTTP, podpisy)
-│       ├── kernel_harness.c  # ścieżka pakietów: net.c + tcp.c
-│       └── kstub/      # zaślepki sprzętu i schedulera dla kodu jądra
-├── scripts/
-│   ├── mkinitrd.py     # pakuje ELF-y do obrazu initrd (format PIRD)
-│   ├── mkcaroots.py    # buduje wbudowany magazyn zaufania (caroots.h)
-│   ├── fuzz_parsers.py # psuje dane i karmi nimi parsery (make fuzz)
-│   ├── ptest.py        # wspólna część testu: klasa Qemu, serwery, check
-│   ├── run_tests.py    # uruchamia grupy testu równolegle (make test)
-│   └── testy/          # grupy: rdzeń, k64, gfx64, sieć, pulpit, ISO…
-├── boot64/             # wejście w tryb długi, stuby przerwań, syscall
-├── kernel64/           # jądro trybu długiego (x86-64) - tylko to,
-│   │                   # co naprawdę zależy od trybu procesora
-│   ├── kmain64.c       # kolejność startu i sprawdziany podsystemów
-│   ├── paging64.c      # cztery poziomy tablic, NX, przestrzenie procesów
-│   ├── task64.c        # zadania, sygnały, deskryptory, katalog roboczy
-│   ├── proc64.c        # fork, exec, uruchamianie programów z initrd
-│   ├── elf64.c         # ładowanie ELF64 z prawami wprost z segmentów
-│   ├── signal64.c      # dostarczanie sygnału przez podmianę ramki
-│   ├── pipe64.c        # potoki: pierścień plus liczniki właścicieli
-│   ├── fpu64.c         # SSE i stan jednostki zmiennoprzecinkowej
-│   ├── syscall64.c     # wszystkie wywołania systemowe
-│   ├── idt64.c         # bramki 16-bajtowe, IST
-│   ├── gdt64.c         # segmenty w kolejności wymaganej przez sysret
-│   ├── keyboard64.c    # IRQ 1 i kolejka znaków
-│   ├── shell64.c       # shell jako wątek jądra
-│   ├── isr64.c         # wyjątki: NX, brak strony, śmierć programu
-│   └── compat64.c      # słownik zadań dla kodu wspólnego (net, tcp)
-├── user64/             # programy trybu długiego (ELF64 w initrd64)
-│   ├── usys64.h        # syscalle przez instrukcję syscall
-│   ├── hello64.c       # pierwszy program 64-bitowy ładowany z pliku
-│   ├── nx64.c          # próbuje wykonać własne dane - ginie na NX
-│   ├── wild64.c        # sięga po pamięć jądra - ginie na braku USER
-│   ├── sep64.c         # dwie kopie naraz, ten sam adres, osobna pamięć
-│   ├── fork64.c        # proces powiela sam siebie i sprawdza kopię
-│   ├── spawn64.c       # fork + exec + wait - tak działa każdy shell
-│   ├── sigtest64.c     # przechwytuje Ctrl+C i wraca w przerwane miejsce
-│   ├── spin64.c        # pętla bez końca - do zatrzymania z zewnątrz
-│   ├── ush64.c         # shell w ring 3: read + fork + exec + wait
-│   ├── fileio64.c      # plik od strony programu: open, write, read
-│   ├── uecho64.c       # wypisuje swoje argumenty
-│   ├── ucat64.c        # 'cat' jako zwykły program, nie wbudowany
-│   ├── heap64.c        # sterta: prosi o 4 MiB, dotyka 4 stron
-│   ├── fpu64test.c     # liczby zmiennoprzecinkowe w dwóch procesach
-│   ├── uls64.c         # 'ls' jako program: pyta o wpisy po kolei
-│   ├── uupper64.c      # filtr: czyta wejście, pisze wielkimi literami
-│   └── unet64.c        # sieć z ring 3: DHCP, UDP i TCP przez syscalle
-│   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
-├── libc/               # musl jako biblioteka C programów 64-bitowych
-│   ├── overlay/        # pliki musla podmienione na wersje ThreadOS
-│   │   └── src/threados/syscall.c  # wywołania Linuksa -> wywołania ThreadOS
-│   ├── libc64.ld       # skrypt linkera programów z libc (init_array itd.)
-│   └── tests/libctest.c  # przenośne C: wynik porównywany z glibc
-├── apps/js/            # js: konsola i uruchamianie skryptów JavaScript
-│   ├── js.c            # host QuickJS: pliki, zegar, pętla zdarzeń
-│   └── prelude.js      # console.log w formacie Node.js, timery
-├── third_party/        # cudzy kod bez zmian (licencje w środku)
-│   ├── musl/           # musl 1.2.5 (MIT)
-│   └── quickjs/        # QuickJS 2026-06-04, sam rdzeń (MIT)
-├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
-├── linker64.ld         # to samo dla jądra w trybie długim
-├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO (BIOS)
-├── grub64.cfg          # konfiguracja dla płyty 64-bitowej (BIOS + UEFI)
-└── Makefile
-```
-
-## Wymagania
-
-- `gcc` z obsługą `-m32` (na Ubuntu/Debianie: `sudo apt install gcc-multilib`)
-- `make`
-- do uruchomienia: `qemu-system-i386` (pakiet `qemu-system-x86`)
-- do zbudowania ISO: `grub-mkrescue` + `xorriso` (pakiety `grub-pc-bin`, `xorriso`)
-- do płyty i rozruchu przez UEFI: `grub-efi-amd64-bin`, `mtools`, `ovmf`
-  oraz `qemu-system-x86_64`
-
-## Budowanie i uruchamianie
-
-```sh
-make          # buduje build/threados.bin
-make run      # uruchamia jądro w QEMU (najprostsza droga)
-make test     # automatyczny test e2e w QEMU (grupy równolegle)
-make test T=k64      # jedna grupa - szybka pętla przy pracy (~80 s)
-make test J=1        # grupy jedna po drugiej, do debugowania
-make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
-make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
-make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
-make kernel64 # buduje build/threados64.bin + initrd64 (tryb długi)
-make iso64    # płyta hybrydowa z jądrem 64-bitowym (BIOS + UEFI)
-make run-iso64-uefi  # uruchamia tę płytę pod firmware UEFI (OVMF)
-make clean
-```
-
-Po uruchomieniu jądro wypisuje status inicjalizacji każdego podsystemu,
-w prawym górnym rogu tyka licznik uptime, a wszystko co wpiszesz na
-klawiaturze jest echo'wane na ekran. Logi jądra idą równolegle na port
-szeregowy (`make run` + opcja `-serial stdio` w QEMU pokaże je w terminalu).
-
-Testy uruchamiają część instancji z `-append nodesktop` (sprawdzają
-konsolę), a część bez niej - żeby przejść ścieżkę, którą widzi użytkownik.
-
-### Jądro 64-bitowe
-
-```sh
-make kernel64        # build/threados64.bin + initrd64.img
-make run-iso64-uefi  # płyta hybrydowa pod firmware UEFI (OVMF)
-make test T=k64      # sprawdzenia tego jądra (~80 s)
-```
-
-Po starcie wita shell `thread64>`. Polecenia: `help`, `ps`, `mem`,
-`uptime`, `clear`, `ls` (initrd), `fls`, `pwd`, `cd`, `mkdir`, `cat`,
-`write`, `rm`, `disk`, `gfx`, `ifconfig`, `arp`, `ping` oraz
-`run <program> [argumenty]`.
-
-W initrd leżą programy: `hello64`, `ush64` (shell w ring 3 - `fork`,
-`exec`, `wait`, potoki przez `|`), `uecho64`, `ucat64`, `uls64`,
-`uupper64`, `unet64`, `heap64`, `fileio64`, `fpu64test`, `sep64`,
-`fork64`, `spawn64` oraz trzy, które **mają zginąć**: `nx64` próbuje
-wykonać własne dane, `wild64` sięga po pamięć jądra, a `spin64` kręci
-się bez końca, dopóki nie dostanie Ctrl+C.
-
-### Jądro 32-bitowe
-
-Wszystko poniżej opisuje jądro 32-bitowe - ono ma pulpit graficzny,
-TLS, przeglądarkę i wymianę stron na dysk.
-
-`make test` uruchamia jądro w QEMU bez okna i przez QMP sprawdza
-zawartość ekranu, tykanie timera oraz echo klawiatury (wstrzykuje
-klawisze poleceniem `sendkey`) - można rozwijać system bez wpatrywania
-się w okno. Ponad czterysta sprawdzeń podzielonych jest na **grupy
-chodzące równolegle**, bo każda potrzebuje własnej maszyny, a te
-większość czasu i tak czekają: na rozruch, na odpowiedź, na
-przerysowanie ekranu. Grupy leżą w `scripts/tests/`, jedna na plik,
-a `T=` wybiera pojedynczą - przy pracy nad jednym podsystemem to
-różnica między osiemdziesięcioma sekundami a pięcioma minutami.
-
-Kilka grup uruchamia QEMU **dwukrotnie na tym samym obrazie dysku**,
-więc weryfikują też, że pliki zapisane na PFS przeżywają restart - i to
-jest jedyny rozstrzygający dowód, że leżą na dysku, a nie w pamięci.
-
-`make run` podpina też kartę sieciową RTL8139 w trybie użytkownika QEMU
-(`-netdev user`). Adres IP nie jest wpisany na sztywno - zaraz po starcie
-klient **DHCP** prosi o niego sieć i ustawia maskę, bramę oraz serwer DNS
-(w QEMU wychodzi 10.0.2.15/24, brama 10.0.2.2, DNS 10.0.2.3). Gdy w sieci
-nie ma serwera DHCP, system po kilku próbach bierze adres awaryjny.
-Komendy: `ifconfig`, `arp`, `ping 10.0.2.2`, `dhcp` (ponowna konfiguracja).
-ProtonOS odpowiada również na cudze zapytania ARP i na pingi do siebie.
-
-Programy w ring 3 mają własne gniazda UDP: `run udpecho` nasłuchuje na
-porcie 7777, `run udptest` wysyła do niego datagram (domyślnie przez pętlę
-zwrotną, więc działa i bez sieci), a `run nslookup example.com` pyta
-o adres serwer DNS przyznany przez DHCP.
-
-Adresy można podawać po nazwie - `nslookup`, `httpget` i przeglądarka
-pytają serwer DNS przyznany przez DHCP (albo wskazany ręcznie: `dns 1.1.1.1`).
-Klient HTTP mówi po HTTP/1.1: składa treść dzieloną na kawałki
-(`Transfer-Encoding: chunked`) i idzie za przekierowaniami 301/302/307/308,
-także względnymi. Adresy `https://` idą przez **TLS 1.3** (X25519 +
-ChaCha20-Poly1305) - działa to zarówno w `httpget`, jak i w przeglądarce.
-Certyfikat serwera jest **weryfikowany** (podpisy RSA - PKCS#1 v1.5 i PSS -
-oraz ECDSA na krzywych P-256 i P-384), gdy na dysku leży magazyn zaufania `roots.der` (sklejone certyfikaty w DER): sprawdzany jest podpis
-z `CertificateVerify`, łańcuch podpisów do zaufanego wystawcy, daty
-ważności i nazwa hosta. Bez tego pliku połączenie jest tylko szyfrowane -
-i program mówi to wprost, a przeglądarka pokazuje `TLS?` zamiast `TLS+`.
-
-TCP działa w obie strony. Jako klient: `run httpget 10.0.2.2 8000 /`
-pobiera stronę i wypisuje ją na konsolę, a `run httpget 10.0.2.2 8000 /
-strona.htm` zapisuje samą treść na dysk (PFS). Jako serwer: `run tcpserv`
-nasłuchuje na porcie 5555, który `make run` wystawia na hosta - można się
-połączyć zwykłym `nc localhost 5555`. Stan połączeń pokazuje `netstat`.
-
-Na pulpicie jest też **przeglądarka** (`gweb`, ikona `Web` albo wpis w menu):
-wpisujesz adres w postaci `host[:port][/ścieżka]` (albo `https://...`),
-a program rozwiązuje nazwę, pobiera stronę, obdziera ją ze znaczników HTML,
-rysuje tekst w oknie i zapisuje treść na dysk jako `strona.htm`. Stronę
-przewija się strzałkami i PgUp/PgDn (Home wraca na górę), a **odnośniki są
-klikalne** - wyróżnione kolorem, klik idzie za adresem z `<a href>`.
-
-`make run` dołącza obraz dysku `build/disk.img` (16 MiB, jako `-hda`); jądro
-rozpoznaje jego pojemność przez ATA IDENTIFY i formatuje pusty dysk przy
-pierwszym starcie. Pliki zostają na nim między uruchomieniami, a `df`
-pokazuje zajętość. PFS3 przydziela bloki po 1 KiB z bitmapy: 64 i-węzły,
-nazwy do 63 znaków i do **64 MiB na plik** (12 bloków bezpośrednich, blok
-pośredni i blok podwójnie pośredni) - czyli tyle, ile zmieści się na
-obrazie dysku.
-
-## Jak to działa
-
-**Jądro 32-bitowe.** GRUB albo QEMU znajduje w pierwszych 8 KiB obrazu
-nagłówek Multiboot (`boot/boot.S`), ładuje jądro pod adres 1 MiB
-i skacze do `_start` już w trybie chronionym. Stamtąd `kmain()` stawia
-po kolei GDT, IDT, PIC i PIT, buduje mapę pamięci fizycznej ze
-znacznika od loadera, włącza stronicowanie, a na końcu uruchamia
-scheduler i shell.
-
-**Jądro 64-bitowe.** Multiboot 2 zostawia procesor w trybie chronionym,
-więc przejście w tryb długi trzeba wykonać samemu i w ściśle określonej
-kolejności (`boot64/boot64.S`): najpierw tablice stron, bo stronicowanie
-jest w trybie długim **obowiązkowe**, potem PAE, potem bit LME w EFER,
-potem samo stronicowanie - i dopiero skok daleki do segmentu z bitem L
-przełącza procesor naprawdę. Że się udało, mówi sam procesor: bit LMA
-w EFER ustawia on, nie my.
-
-**Rozruch przez UEFI.** `make iso64` składa płytę **hybrydową**:
-z jednej strony sektor rozruchowy dla BIOS-u, z drugiej partycja FAT
-z programem `BOOTX64.EFI`. Ta sama płyta wstaje więc i na starej, i na
-nowej maszynie. Pod UEFI nie ma pamięci znaków spod `0xB8000` - jedyne,
-co dostajemy od firmware, to bufor obrazu, więc znaki rysuje sobie
-`fbcon.c` własną czcionką, piksel po pikselu.
-
-**Programy.** Leżą w initrd jako ELF-y i jądro nie wie o nich nic ponad
-to, co przeczyta z nagłówka: gdzie zacząć, co załadować i z jakimi
-prawami. Prawa biorą się wprost z segmentów, więc kod jest tylko do
-odczytu, a dane i stos dostają zakaz wykonywania - i pilnuje tego
-procesor, nie jądro.
-
-## Dziennik rozwoju
-
-Lista jest chronologiczna i opisuje **dlaczego** coś wygląda tak, a nie
-inaczej - łącznie z błędami, które po drodze wyszły, bo one tłumaczą
-kształt kodu lepiej niż sam kod. Wszystko poniżej działa i jest
-sprawdzane przez `make test`.
-
-
-- [x] GDT (Global Descriptor Table) - własne deskryptory segmentów
-- [x] IDT + obsługa wyjątków CPU
-- [x] PIC (remapowanie) i przerwania sprzętowe (IRQ)
-- [x] Sterownik klawiatury (PS/2)
-- [x] Timer (PIT) i licznik czasu
-- [x] Port szeregowy (COM1) + printk
-- [x] Odczyt mapy pamięci z Multiboot
-- [x] Zarządzanie pamięcią fizyczną (alokator ramek - bitmapa)
-- [x] Stronicowanie (identycznościowe 64 MiB; page fault z diagnostyką CR2)
-- [x] Alokator pamięci jądra (kmalloc/kfree)
-- [x] Prosty shell w jądrze (help, ps, mem, uptime, clear, crash, reboot)
-- [x] Wątki jądra + scheduler (round-robin, wywłaszczanie z timera,
-      sleep/yield/exit, sprzątanie zombie)
-- [x] Tryb użytkownika (ring 3): TSS, syscalle int 0x80, ochrona pamięci
-      (proces sięgający po pamięć jądra ginie, system żyje dalej)
-- [x] Osobne przestrzenie adresowe (katalog stron per proces, CR3 w
-      schedulerze, pełne sprzątanie ramek po zakończeniu procesu)
-- [x] Ładowanie programów ELF z initrd (`ls`, `run hello`, `run evil`)
-- [x] Syscalle read (klawiatura, blokujące), spawn, wait, getpid
-- [x] Shell jako program użytkownika (`run sh` - ring 3, przejmuje
-      konsolę, uruchamia programy przez spawn+wait, `exit` wraca do jądra)
-- [x] Argumenty programów (argc/argv) - `run echo proton os dziala`
-- [x] Syscall sbrk + malloc w userspace (dynamiczna pamięć) - `run memtest`
-- [x] Sterownik dysku ATA (PIO) + system plików PFS - pliki przeżywają restart
-- [x] Deskryptory plików w stylu Uniksa: open/close/read/write/seek,
-      fd 0/1/2 = klawiatura/konsola, wyższe fd = pliki (jeden `write` na
-      wszystko); program `cat` w ring 3
-- [x] Przekierowanie wyjścia w shellu (`echo tekst > plik`) - jądro
-      podmienia stdout procesu na uchwyt pliku przed wejściem w ring 3
-- [x] Potoki międzyprocesowe (`echo cos | wc`) - dwa procesy równolegle,
-      bufor w jądrze, konsument blokuje się na pustym potoku i dostaje
-      EOF, gdy producent się kończy
-- [x] Narzędzia uniksowe komponujące się przez potoki: `seq`, `grep`,
-      `head`, `wc`, `cat` (np. `seq 9 | grep 7 > plik`)
-- [x] Wielostopniowe potoki (`seq 20 | grep 1 | wc`, do 5 etapów)
-- [x] Zarządzanie plikami z ring 3: `ls` (sys_readdir), `rm` (sys_unlink)
-- [x] Status wyjścia procesu zwracany przez `wait` (kod widoczny w `ush`;
-      `grep` zwraca 1 bez dopasowań, proces ubity wyjątkiem → -1)
-- [x] Zegar czasu rzeczywistego (RTC/CMOS) + program `date`
-- [x] Dopisywanie `>>` oraz programy `cp` i `mv`
-- [x] Katalogi w PFS: ścieżki (absolutne/względne, `.`/`..`), katalog
-      roboczy per proces (dziedziczony), `mkdir`/`cd`/`pwd`/`ls`
-- [x] Procesy w tle (`cmd &`) i `kill <pid>` (dostarczane przy powrocie
-      do ring 3 - z syscalla albo przerwania timera)
-- [x] Sterownik myszy PS/2 (IRQ12) - pozycja i przyciski (komenda `mouse`)
-- [x] Tryb graficzny VGA 13h (320x200x256): piksele, prostokąty, paleta
-      (komenda `gfx`, testowany przez QMP screendump)
-- [x] Kursor myszy na pulpicie graficznym (kompozytor jako wątek jądra)
-- [x] Renderowanie tekstu czcionką bitmapową 8x8
-- [x] Okna z paskami tytułu, przeciąganie myszą (kompozytor) - `desktop`
-- [x] Klikalne kontrolki: przycisk zamknięcia [x], przycisk akcji z licznikiem
-- [x] Aplikacje graficzne w ring 3: proces tworzy własne okno i rysuje
-      przez syscalle (`win_create`/`win_rect`/`win_text`); kompozytor składa
-      jego bufor i sprząta okno po śmierci procesu (`run guiapp`)
-- [x] Dostarczanie zdarzeń do aplikacji: kliknięcie w okno trafia do
-      procesu przez kolejkę zdarzeń (`win_poll`), aplikacja reaguje
-- [x] Zdarzenia klawiatury do okna z fokusem (klik fokusuje; klik w
-      pulpit zdejmuje fokus i klawisze wracają do shella jądra)
-- [x] Pasek zadań z przyciskiem `Menu` i menu uruchamiania aplikacji
-      (klik uruchamia program przez exec_spawn) - `guiapp`, `gclock`
-- [x] Lista otwartych okien na pasku zadań: podświetlenie okna z fokusem,
-      klik wynosi okno na wierzch (porządek Z niezależny od slotu)
-- [x] Wyższa rozdzielczość VESA (640x480x32 przez DISPI + PCI), pulpit
-      z podwójnym buforowaniem (bez migotania); fallback do 320x200
-- [x] Syscall `mmap` - anonimowa pamięć procesu (świeża, zerowana),
-      zwalniana z przestrzenią adresową; `run mmaptest`
-- [x] Menedżer plików GUI (`gfiles`) - lista plików z PFS + kliknięcie
-      nazwy otwiera plik i pokazuje treść (FS -> klik -> read -> okno)
-- [x] Pamięć współdzielona między procesami (`sys_shm` po kluczu) -
-      dwa procesy widzą tę samą pamięć (`shmtest` + `shmread`)
-- [x] Ikony na pulpicie - klikalne kafelki uruchamiające aplikacje
-- [x] Wskaźnik zasobów (`gmon`) - RAM/uptime na żywo + pasek użycia
-      pamięci (syscall `sys_sysinfo`)
-- [x] Wątki w procesie (`sys_thread`) - wiele zadań współdzieli przestrzeń
-      adresową; przestrzeń zwalniana po ostatnim wątku (`run threads`)
-- [x] Scheduler z priorytetami (`sys_setprio`): wyższy wywłaszcza niższy,
-      równe round-robin (`run prio`)
-- [x] Terminal w oknie GUI (`gterm`) - wpisz komendę, jej wyjście
-      pojawia się w oknie (klawiatura -> spawn z przekierowaniem -> odczyt)
-- [x] Zmiana rozmiaru / minimalizacja okien: przycisk `[_]` zwija okno
-      (zostaje na pasku zadań - klik przywraca), uchwyt w prawym dolnym
-      rogu okien jądra zmienia rozmiar przeciąganiem
-- [x] Zapis pozycji ikon na dysku: ikony pulpitu można przeciągać myszą,
-      a ich rozmieszczenie zapisuje się do pliku PFS (`icons.pos`) i wraca
-      po restarcie (kompozytor czyta je przy starcie)
-- [x] Karta sieciowa RTL8139 (PCI + DMA: pierścień RX, 4 deskryptory TX,
-      przerwanie karty) i stos sieciowy: Ethernet, ARP z tablicą adresów,
-      IPv4 z sumą kontrolną, ICMP - `ifconfig`, `arp`, `ping 10.0.2.2`
-      (system odpowiada też na cudze ARP i pingi do siebie)
-- [x] Walidacja wskaźników z ring 3: każdy adres podany w syscallu musi
-      leżeć w przestrzeni użytkownika i być zamapowany w katalogu stron
-      procesu (`user_ok`/`user_str`), łańcuchy i struktury kopiowane do
-      buforów jądra; zły wskaźnik to błąd -1, a nie zapis w pamięci jądra
-      cudzymi rękami (`run evil2`)
-- [x] UDP: gniazda w jądrze (porty, kolejki datagramów, suma kontrolna
-      z pseudonagłówkiem) i klient DHCP - adres IP, maska, brama i serwer
-      DNS przychodzą z sieci zamiast być wpisane na sztywno (`dhcp`);
-      `kill` przyjmuje też nazwę procesu, a prompt shella odrysowuje się
-      po asynchronicznych komunikatach jądra
-- [x] Gniazda UDP w ring 3 (`udp_open`/`udp_send`/`udp_recv`/`udp_close`,
-      `netinfo`): gniazdo należy do procesu i zwalnia się po jego śmierci,
-      dane idą przez sprawdzone wskaźniki, a pętla zwrotna pozwala dwóm
-      procesom gadać po UDP bez sieci (`udpecho` + `udptest`); klient DNS
-      w userspace (`nslookup example.com`) i przerywanie oczekiwania
-      w jądrze przez `kill`
-- [x] TCP: aktywne i pasywne otwarcie (klient i serwer), numery
-      sekwencyjne z potwierdzeniami, retransmisje z wątku `tcpd`,
-      zamknięcie przez FIN, RST na segment do zamkniętego portu;
-      syscalle `tcp_connect`/`listen`/`accept`/`send`/`recv`/`close`,
-      klient HTTP (`httpget` - treść ze świata ląduje na PFS) i serwer
-      w ring 3 (`tcpserv`), podgląd przez `netstat`
-- [x] Przeglądarka w oknie pulpitu (`gweb`): pasek adresu z klawiatury,
-      pobranie strony po TCP, wycięcie znaczników HTML, tekst zawijany
-      w oknie i zapis treści na PFS - sieć, GUI, klawiatura i dysk
-      w jednej aplikacji ring 3
-- [x] Start prosto na pulpit graficzny; linia poleceń jądra (Multiboot
-      `-append`) z opcją `nodesktop` zostawia konsolę tekstową
-- [x] PFS3: przydział bloków z bitmapy zamiast stałych obszarów - 64
-      i-węzły, nazwy do 63 znaków, pliki do 268 KiB (bloki bezpośrednie
-      + pośredni), zwalnianie bloków przy `rm`/truncate, `df` i rozmiar
-      dysku z ATA IDENTIFY; zapis metadanych ograniczony do zmienionego
-      bloku i-węzłów i bitmapy
-- [x] TCP: aktualizacja okna po odczycie z gniazda - odbiór dużych
-      odpowiedzi nie czeka już na probnik nadawcy (100 KiB w kilka sekund)
-- [x] Nazwy zamiast adresów: wspólny klient DNS (`udns.h`) w `nslookup`
-      i przeglądarce, ręczne wskazanie serwera komendą `dns`
-- [x] Klient HTTP/1.1 (`uhttp.h`): kodowanie `chunked` sklejane przez
-      granice pakietów, przekierowania (bezwzględne i względne), rozbiór
-      `http://host[:port]/ścieżka`; w przeglądarce encje HTML (`&amp;`)
-      i bajty UTF-8 zamieniane na czytelne znaki
-- [x] Kryptografia pod TLS: SHA-256, HMAC-SHA256, HKDF (w tym
-      `HKDF-Expand-Label` z RFC 8446), ChaCha20, Poly1305 i AEAD
-      ChaCha20-Poly1305, X25519 - wszystko w userspace i sprawdzane
-      wektorami z FIPS 180-4, RFC 4231, RFC 5869, RFC 8439 i RFC 7748
-      (`run cryptotest`; jedno mnożenie skalarne X25519 ~20 ms)
-- [x] `printk` niepodzielny: komunikat z wątku nie wchodzi już w środek
-      linii wypisywanej przez inny wątek albo obsługę przerwania
-- [x] Klient **TLS 1.3** (RFC 8446) w ring 3: ClientHello z SNI i
-      `key_share`, wspólny sekret X25519, harmonogram kluczy na HKDF,
-      zaszyfrowana reszta uzgodnień, sprawdzenie `Finished` serwera,
-      własne `Finished`, osobne klucze aplikacyjne i warstwa rekordów
-      z ChaCha20-Poly1305. `httpget https://...` i przeglądarka pobierają
-      strony po HTTPS; uzgodnienie z OpenSSL-em trwa ~90 ms
-      (certyfikat jeszcze niesprawdzany - to następny krok)
-- [x] Źródło losowości dla programów (`urand.h`): RTC, licznik timera,
-      pid i adresy ze stosu zmieszane przez SHA-256
-- [x] Weryfikacja certyfikatów: wielkie liczby w postaci Montgomery'ego,
-      podpisy RSA (PKCS#1 v1.5 i PSS), parser X.509/DER, sprawdzanie
-      łańcucha do zaufanego wystawcy, dat ważności i nazwy hosta
-      (SubjectAltName z wieloznacznikiem); magazyn zaufania czytany
-      z pliku `roots.der` na PFS (`run certtest`)
-- [x] Stos procesu urósł z 4 KiB do 32 KiB - RSA na 2048 bitach
-      potrzebuje kilku kilobajtów na same liczby robocze
-- [x] ECDSA na krzywej NIST P-256: arytmetyka punktów w postaci Jacobiego
-      na tych samych wielkich liczbach co RSA, weryfikacja podpisów
-      w certyfikatach i w `CertificateVerify` (~80 ms na podpis) -
-      serwery z kluczem EC przestały być poza zasięgiem
-- [x] Wbudowany magazyn zaufania: 14 korzeni publicznych CA w obrazie
-      systemu (skrypt `mkcaroots.py` odświeża je z zasobu hosta), do tego
-      własne korzenie z pliku `roots.der`; weryfikacja jest domyślnie
-      wymagana dla `https://` (`httpget -k` ją pomija)
-- [x] Klawisze rozszerzone (strzałki, PgUp/PgDn, Home/End) w sterowniku
-      klawiatury - dostarczane programom jako własne kody sterujące
-- [x] Przeglądarka: przewijanie strony, odnośniki `<a href>` wyróżnione
-      kolorem i klikalne (adresy względne i bezwzględne), rozdzielanie
-      tekstu na granicy znaczników blokowych, pasek adresu odświeżany
-      po przejściu za odnośnikiem
-- [x] PFS3: blok podwójnie pośredni - sufit rozmiaru pliku rośnie
-      z 268 KiB do 64 MiB (test pobiera z sieci 400 KB prosto na dysk
-      i czyta je z powrotem przez potok)
-- [x] ECDSA na krzywej P-384 i skrót SHA-384/SHA-512: arytmetyka krzywych
-      sparametryzowana (jeden komplet wzorów dla P-256 i P-384), stałe
-      krzywych i tablice SHA-512 generowane, a nie przepisywane ręcznie;
-      `CertificateVerify` przyjmuje `ecdsa_secp384r1_sha384`
-- [x] Odporność parserów: `uhtml.h` (HTML -> tekst) wydzielony z
-      przeglądarki i obwarowany granicami, a `make fuzz` przepuszcza
-      przez sanitizery uszkodzone certyfikaty, HTML, odpowiedzi HTTP,
-      podpisy DER i **ramki sieciowe trafiające do jądra** (net.c i tcp.c
-      kompilowane na hoście z zaślepkami sprzętu)
-- [x] Shell jądra jako zwykły wątek: przerwanie klawiatury tylko wrzuca
-      znak do bufora kołowego i budzi wątek, więc komenda może spać,
-      czekać na sieć albo czytać dysk, a znaki wpisane w tym czasie nie
-      giną (`ping` i `dhcp` nie potrzebują już wątków-obejść)
-- [x] `fork()` z kopiowaniem przy zapisie: dziecko wraca z syscalla tam,
-      gdzie rodzic, i widzi jego pamięć, ale nic nie jest kopiowane -
-      obie przestrzenie dostają te same ramki bez prawa zapisu, ramka
-      liczy właścicieli, a prywatna kopia strony powstaje dopiero przy
-      pierwszym zapisie. Bit WP w CR0 obejmuje tym również zapisy jądra
-      (syscall wypełniający bufor procesu), dziecko dziedziczy
-      deskryptory i końce potoków (`run forktest`: 256 KiB bufora,
-      przyrost RAM po `fork` - 12 KiB)
-- [x] `exec()` w miejscu (odpowiednik `execv`): proces podmienia własny
-      program, zachowując pid, deskryptory i katalog roboczy - razem
-      z `fork()` daje to klasyczną parę uniksową (rozwidl się, w dziecku
-      wskocz w nowy program), a `ps` pokazuje już nową nazwę
-- [x] Drzewo procesów: każde zadanie zna swojego rodzica (`ps` pokazuje
-      kolumnę RODZIC), `waitany` czeka na **dowolne** własne dziecko
-      i oddaje je w kolejności kończenia (pid + kod wyjścia), a osierocone
-      procesy trafiają pod opiekę dziadka - ich kod wyjścia nie przepada
-      razem z rodzicem (`run ptree`)
-- [x] Sygnały: `signal()` z własną procedurą obsługi w ring 3, `SIG_IGN`
-      i reakcje domyślne, `kill(pid, sygnal)`, `SIGCHLD` do rodzica po
-      śmierci dziecka, nieprzechwytywalny `SIGKILL`. Jądro doręcza sygnał
-      przy powrocie do ring 3: odkłada ramkę przerwanego stanu na stos
-      procesu i skacze w handler, a trampolina z `usys.h` prosi przez
-      `sigreturn` o odtworzenie tego stanu - z ramki wracają tylko
-      rejestry ogólne, `eip`, `esp` i flagi arytmetyczne, nigdy selektory
-      ani IOPL. **Ctrl+C** z klawiatury idzie jako `SIGINT` do procesu
-      trzymającego konsolę i przerywa jego oczekiwanie na klawisz;
-      `kill P S` w shellu jądra wysyła dowolny sygnał, także pod nazwę
-      procesu (`run sigtest`)
-- [x] Cała wykryta pamięć pod zarządem: mapowanie identycznościowe nie
-      kończy się już na 64 MiB, tylko sięga szczytu RAM-u (do 512 MiB).
-      Pierwsze 64 MiB opisują tablice statyczne - jądro musi widzieć
-      pamięć, zanim poprosi PMM o pierwszą ramkę - a dalsze tablice
-      biorą się już z PMM, więc granicę wyznacza ilość RAM-u, a nie
-      rozmiar tablicy w `.bss`. Przestrzeń użytkownika przeprowadziła
-      się z `0x08048000` pod **1 GiB**, żeby zejść mapowaniu z drogi:
-      jeden proces potrafi teraz zająć 80 MiB, czyli więcej, niż cały
-      system widział wcześniej
-- [x] Stronicowanie na żądanie: `sbrk` i `mmap` nie przydzielają już ani
-      jednej ramki - obszar jest procesowi obiecany, a strony powstają
-      dopiero przy pierwszym dotknięciu (prośba o 64 MiB kosztuje 0 KiB,
-      zapis 1 MiB kosztuje dokładnie 1024 KiB). Walidacja wskaźników
-      w syscallach umie taką stronę urzeczywistnić, więc świeżo
-      przydzielony, nietknięty bufor nie wygląda z jądra jak zły
-      wskaźnik (`run lazymem`)
-- [x] Naprawiony stary błąd rozpoznawania tablic jądra: były rozpoznawane
-      po **pełnej wartości** wpisu w katalogu stron, a procesor sam
-      ustawia w nim bit „odwiedzony" - ta sama tablica miała więc po
-      chwili różne wartości w różnych katalogach i sprzątanie procesu
-      potrafiło zwolnić tablicę **jądra**, oddając kawałek własnego
-      obrazu jądra do puli wolnych ramek. Teraz rozstrzyga bit USER,
-      którego tablice jądra nie mają; w PMM stoi dodatkowo bezpiecznik
-      odmawiający zwolnienia ramki z obrazu jądra
-- [x] Wymiana stron na dysk: gdy zabraknie ramek, jądro wyrzuca na dysk
-      strony leżące odłogiem (algorytm drugiej szansy - bit „odwiedzona"
-      ustawiany przez procesor) i sprowadza je z powrotem przy pierwszym
-      dotknięciu. Miejsce rezerwuje przez system plików (`swap.sys`,
-      widoczny w `fls` i `df`), ale same strony wędrują tam wprost przez
-      ATA, z pominięciem kodu PFS - wymiana potrafi ruszyć w środku
-      operacji na plikach, a PFS ma jeden wspólny bufor na blok. Wpis
-      wyrzuconej strony trzyma numer miejsca w górnych bitach, `mem`
-      pokazuje bilans, a `run swaptest 18` mieści 18 MiB na maszynie
-      z 16 MiB RAM-u
-- [x] Konsole wirtualne (Alt+F1..F4): każda ma własny ekran 80x25, własny
-      shell, własny bufor klawiszy i własnego właściciela klawiatury.
-      To, na którą konsolę idzie wypis, wynika z **zadania**, które pisze
-      (jak uniksowy terminal kontrolujący) - program uruchomiony na
-      drugiej konsoli pisze na niej dalej, kiedy patrzymy na pierwszą,
-      a `Ctrl+C` trafia w proces trzymający tę konsolę, którą widać
-- [x] Sterownik **AHCI (SATA)** i warstwa urządzenia blokowego: kontroler
-      znajdowany po klasie PCI (0x01/0x06/0x01), polecenia składane
-      w pamięci (lista poleceń, tablica polecenia z ramką FIS i PRDT),
-      dane przenoszone przez **DMA** zamiast przepisywania słowo po
-      słowie. System plików i wymiana stron nie wiedzą już, jaki dysk
-      mają pod spodem - wybór zapada raz przy starcie, ATA PIO zostaje
-      drogą zapasową. To warunek zobaczenia dysku na nowszej płycie,
-      która nie ma trybu zgodności; przy okazji ta sama wymiana 18 MiB
-      na maszynie z 16 MiB RAM-u trwa 4,3 s zamiast 8,3 s
-- [x] **Klawiatura USB** (HID, protokół rozruchowy) na kontrolerze UHCI:
-      rozpoznanie urządzenia na magistrali (reset portu, deskryptory,
-      nadanie adresu, odszukanie interfejsu klasy HID i jego punktu
-      końcowego), przełączenie w protokół rozruchowy i tłumaczenie
-      ośmiobajtowych raportów na klawisze - z modyfikatorami, strzałkami,
-      Ctrl+C i Alt+F1..F4. Dla reszty systemu nie ma różnicy, która
-      klawiatura jest podpięta: znaki idą tą samą drogą co z PS/2.
-      Sprawdzone też przy **wyłączonej obsłudze PS/2** - system dawał się
-      wtedy obsługiwać wyłącznie przez USB
-- [x] Skanowanie PCI obejmuje wszystkie funkcje urządzenia, nie tylko
-      zerową - kontrolery wbudowane w mostek siedzą na funkcji 2 albo 3
-      i przeglądanie samych zerowych nie znajdowało ich nigdy
-- [x] **ACPI**: wyłączanie i restart komputera. Wskaźnik RSDP znajdowany
-      w pamięci poniżej megabajta, przez niego spis tablic (RSDT), a w nim
-      tablica zasilania (FADT). Sama wartość, którą trzeba wpisać, żeby
-      komputer zgasł, siedzi jeszcze głębiej - w bajtkodzie AML (DSDT),
-      pod nazwą `_S5_`; pełnego interpretera nie ma, ten jeden obiekt
-      czytamy wprost. Komendy `poweroff` i `reboot` (restart przez
-      rejestr resetu ACPI, a gdy firmware go nie podaje - impulsem przez
-      kontroler klawiatury). Tablice leżą zwykle poza pamięcią zarządzaną
-      przez jądro, więc każda jest doklejana do mapowania
-      identycznościowego przed odczytem
-- [x] **Multiboot 2**: obraz jądra nosi teraz oba nagłówki naraz. QEMU
-      z opcją `-kernel` rozumie tylko starszy, GRUB woli nowszy - loader
-      wybiera ten, który zna, i mówi w `magic`, którego użył. Informacje
-      z nowszej postaci (linia poleceń, moduły, mapa pamięci) są
-      przepisywane do tej samej struktury, której reszta jądra używa od
-      początku, więc ani PMM, ani initrd nie widzą różnicy. Nowość, która
-      naprawdę coś zmienia: **wskaźnik na tablice ACPI podaje loader** -
-      pod UEFI nie ma pamięci BIOS-u, w której dałoby się go poszukać
-      samemu. To pierwszy krok w stronę rozruchu przez UEFI
-- [x] **Konsola na buforze obrazu**: nagłówek Multiboot 2 prosi loader
-      o tryb graficzny, a jądro rysuje w nim znaki samo - tą samą
-      czcionką 8x8, co reszta grafiki, w kolorach trybu tekstowego
-      przeliczonych na RGB. Bufor znaków pod `0xB8000` przestaje być
-      potrzebny, a to warunek działania pod UEFI, gdzie trybu tekstowego
-      VGA nie ma w ogóle. Cztery konsole wirtualne działają bez zmian -
-      różni się tylko to, dokąd trafia gotowa komórka. Pulpit korzysta
-      z tego samego bufora: `video_init_vesa` sięga po interfejs
-      Bochs/QEMU, który istnieje wyłącznie na maszynie wirtualnej, więc
-      gdy tryb ustawił loader, zostajemy przy nim (i dostajemy 1024x768
-      zamiast 640x480)
-- [x] **Pierwszy krok na x86-64**: drugi obraz jądra (`make kernel64`)
-      wchodzi w tryb długi. GRUB zostawia nas w trybie chronionym 32-bit,
-      więc `boot64/boot64.S` sam układa tablice stron (pierwsze 4 GiB
-      stronami po 2 MiB - nie dla pamięci, tylko dlatego, że wysoko leżą
-      rejestry urządzeń i bufor obrazu), włącza PAE, ustawia bit LME
-      w EFER, włącza stronicowanie i skacze daleko do segmentu z bitem L.
-      Procesor sam potwierdza wynik: bit LMA w EFER ustawia on, nie my.
-      Najważniejsze jest to, czego w tym obrazie **nie ma** - żadnej
-      kopii kodu: wypisywanie, konsola na buforze obrazu, znaczniki
-      Multiboota 2 i obsługa łańcuchów to te same pliki kompilowane
-      drugi raz, a cała różnica między trybami zamyka się w `io.h`
-      i w kilku rzutowaniach przez `uintptr_t`
-- [x] Przerwania i wyjątki w trybie długim: własna tablica IDT (wpis ma
-      teraz 16 bajtów, bo adres procedury jest 64-bitowy i nie mieści
-      się w jednym kawałku), stuby odkładające szesnaście rejestrów
-      ręcznie - `pushal` w trybie długim już nie istnieje - i powrót
-      przez `iretq`. `struct regs` ma od teraz wersję zależną od trybu,
-      dzięki czemu sterowniki PIC i PIT kompilują się w obu jądrach bez
-      jednej zmiany. Dowód: pułapka `int3` wraca, nie zatrzymując
-      systemu, a timer tyka sam z siebie (1 -> 201 tyknięć)
-- [x] Naprawiony błąd w sterowniku USB: deskryptor odczytu był przy
-      braku danych **porzucany**, a kontroler potrafił dokończyć
-      przesyłkę już po tej decyzji - raport wpadał do bufora, którego
-      nikt nie czytał, a urządzenie przestawiało przełącznik danych
-      i przestawał się on zgadzać z naszym już na zawsze. Objawiało się
-      to tak, jak takie błędy zwykle: działało, działało, po czym
-      klawiatura milkła. Teraz deskryptor jest uzbrojony bez przerwy,
-      a kontroler ponawia go sam co ramkę
-- [x] Pamięć w trybie długim: PMM i sterta jądra przeniosły się **bez
-      jednej zmiany logiki** (bitmapa ramek nie zależy od trybu -
-      wystarczyło kilka rzutowań przez `uintptr_t`), a stronicowanie
-      napisane od nowa: cztery poziomy zamiast dwóch, wpisy 64-bitowe,
-      tablice budowane z ramek od PMM zamiast leżeć na sztywno
-      w obrazie jądra. Doszedł bit, którego 32-bitowe stronicowanie nie
-      miało - **zakaz wykonywania**: bufor obrazu i pamięć danych są
-      oznaczone tak, że procesor odmówi wykonania czegokolwiek, co w nich
-      leży. Sprawdzian: strona 4 KiB wstawiona **osiem gigabajtów** ponad
-      obszar opisany identycznościowo, zapisana i odczytana przez pełną
-      czterostopniową ścieżkę
-- [x] Wątki jądra w trybie długim: przełączanie kontekstu zapisuje sześć
-      rejestrów zamiast czterech i po osiem bajtów każdy, reszta stanu
-      wątku zostaje na jego własnym stosie - tak samo jak w jądrze
-      32-bitowym. Doszedł osobny **wątek bezczynności**: dzięki niemu
-      przypadek „nikt nie jest gotowy" po prostu nie występuje,
-      a scheduler nie musi czekać na przerwanie w środku własnego
-      wywołania (co przy wywołaniu z obsługi timera zagnieżdżałoby się
-      bez końca). Sprawdzian jest arytmetyczny: przez 600 ms wątek
-      śpiący po 20 ms budzi się dokładnie 30 razy, a ten po 50 ms - 12
-- [x] **Ring 3 i instrukcja `syscall`** w trybie długim - port jądra
-      domyka się. GDT z segmentami użytkownika (ich kolejność nie jest
-      dowolna: `sysret` składa selektory z jednej wartości w rejestrze
-      STAR, więc dane muszą leżeć **przed** kodem) i zadanie TSS, które
-      w trybie długim ma już tylko jedno zadanie - powiedzieć, na który
-      stos przejść przy przerwaniu z ring 3. Wejście do jądra nie idzie
-      przez bramkę przerwania, tylko przez `syscall`: procesor bierze
-      adres z rejestru modelu, a adres powrotu zostawia w RCX. Cena jest
-      taka, że `syscall` **nie przełącza stosu** - własny trzeba podać
-      z góry, i to dwa razy, bo przerwanie bierze go skądinąd (z TSS)
-      niż wywołanie systemowe. Dowód: program mówi jądru swój selektor
-      kodu, którego zna tylko procesor - `cs=23`, pierścień 3
-- [x] **Rozruch przez UEFI** - jądro 64-bitowe startuje na maszynie bez
-      BIOS-u. `make iso64` składa płytę **hybrydową**: z jednej strony
-      sektor rozruchowy dla BIOS-u, z drugiej partycja FAT z programem
-      `BOOTX64.EFI`, którego szuka firmware. Ta sama płyta wstaje więc
-      i na starej, i na nowej maszynie. Dwie rzeczy trzeba było przy tym
-      poprawić. Po pierwsze GRUB pod UEFI nie ustawia sam trybu
-      graficznego i kończy się błędem „no suitable video mode found",
-      dopóki nie każe mu się wczytać sterowników obrazu (`insmod
-      all_video`) i zostawić tryb ustawiony przez firmware
-      (`set gfxpayload=keep`) - a znacznik Multiboota 2 musi prosić
-      o rozdzielczość „dowolną" (0x0x0), bo firmware i tak da to, co ma.
-      Po drugie okazało się, że OVMF podaje bufor obrazu **24-bitowy**,
-      a konsola umiała rysować tylko po 32 bity na piksel i po cichu
-      odmawiała. Różnica jest drobna, ale zasadnicza: przy 24 bitach
-      piksel nie ma bajtu dopełnienia, więc zapis całym słowem zadeptuje
-      sąsiada - trzeba pisać trzema bajtami. Teraz `fbcon` obsługuje oba
-      formaty i pod UEFI widać na ekranie dokładnie ten sam log, co pod
-      BIOS-em, narysowany naszą czcionką piksel po pikselu, bez
-      pomocy firmware i bez pamięci znaków spod 0xB8000, której tam
-      w ogóle nie ma
-- [x] **Programy z pliku w trybie długim**: jądro 64-bitowe uruchamia
-      ELF-y wczytane z initrd, a nie własny kawałek siebie. Do tej pory
-      w ring 3 działało kilkanaście bajtów wpisanych na stałe w sekcję
-      `.rodata` jądra - dowód, że przejście do pierścienia 3 działa,
-      ale niczego więcej. Teraz `kernel64/elf64.c` czyta nagłówek ELF64
-      i wszystkiego dowiaduje się z pliku: gdzie zacząć, co załadować
-      i **z jakimi prawami**. Prawa biorą się wprost z segmentów, więc
-      kod programu jest tylko do odczytu, a jego dane i stos dostają
-      zakaz wykonywania - pilnuje tego procesor, nie jądro. Doszła
-      biblioteczka `user64/usys64.h`: wejście do jądra idzie instrukcją
-      `syscall` (numer w RAX, argumenty w RDI/RSI, wynik w RAX,
-      a RCX i R11 giną, bo procesor zostawia w nich adres powrotu
-      i flagi). Wskaźnikowi z ring 3 jądro nie wierzy na słowo -
-      `paging64_user_range` sprawdza bit USER na **wszystkich czterech**
-      poziomach tablic, dokładnie tak, jak liczy dostęp procesor;
-      inaczej wystarczyłoby podać adres pamięci jądra, żeby kazać mu ją
-      sobie wypisać. Program `hello64` pisze, liczy, usypia się, pyta
-      o licznik tyknięć i kończy z kodem 7 - i to wszystko przechodzi
-      tak samo pod BIOS-em, jak i pod UEFI
-- [x] **Ochrona pamięci, która naprawdę broni** - i przeżywa własny
-      dowód. Wyjątek przychodzący z pierścienia 3 nie zatrzymuje już
-      systemu: jądro wypisuje, co się stało, zabija winne zadanie
-      i pracuje dalej. O tym, skąd przyszedł wyjątek, mówią dwa
-      najniższe bity selektora kodu w ramce przerwania - odkłada je tam
-      procesor, więc program nie ma jak skłamać. Handler z takiego
-      wyjątku nie wraca: `schedule()` przełącza się na inny wątek,
-      a ramka przerwania ginie razem ze stosem martwego zadania.
-      Dopiero to pozwoliło **sprawdzić** ochronę zamiast wierzyć jej na
-      słowo. `nx64` wpisuje instrukcję do swojej tablicy w `.bss`
-      i skacze pod jej adres - zapis przechodzi, skok kończy się błędem
-      strony `err=0x15` (strona obecna, dostęp z ring 3, pobranie
-      instrukcji), czyli zadziałał bit NX, a nie zwykły brak mapowania.
-      `wild64` sięga po pamięć jądra dwiema drogami: najpierw prosi
-      o nią samo jądro (`paging64_user_range` odmawia), potem sięga
-      sam - `err=0x05`, odczyt strony bez bitu USER. Po obu zgonach
-      wątki jądra liczą dalej, i to jest ta asercja, o którą naprawdę
-      chodzi
-- [x] Naprawiony błąd w umowie o wywołaniach systemowych: jądro
-      niszczyło RDX, RSI, RDI i R8-R10, bo tak wolno funkcji C - ale
-      program o tym nie wiedział. Kompilator trzymał sobie stałą w RDX
-      przez całe wywołanie i użył jej potem jako numeru następnego,
-      trafiając na śmieć po jądrze (objawiło się jako „nieznane
-      wywołanie systemowe 1016"). Teraz stub odkłada te rejestry
-      u siebie: poza RAX z wynikiem oraz RCX i R11, które zabiera sam
-      procesor, wszystko wraca nietknięte. Taniej raz odłożyć sześć
-      rejestrów niż w każdym programie pamiętać o sześciu pułapkach
-- [x] **Osobne przestrzenie adresowe procesów** w trybie długim - dwa
-      programy mogą wreszcie działać naraz, każdy z własną pamięcią pod
-      tym samym adresem. Podział wyszedł sam z rozkładu adresów:
-      najwyższy poziom tablic dzieli przestrzeń na kawałki po 512 GiB,
-      drugi - po gigabajcie, a cała pamięć fizyczna, jądro i bufor
-      obrazu mieszczą się w innych gigabajtach niż ten, w którym leżą
-      programy. Proces dostaje więc własną tablicę drugiego poziomu
-      z wyczyszczonym jednym wpisem, a **reszta zostaje wspólna** - te
-      same ramki, co u jądra. Mapowanie dołożone przez jądro po starcie
-      widać natychmiast we wszystkich przestrzeniach naraz, a przy
-      przełączaniu zadań CR3 przeładowuje się tylko wtedy, gdy naprawdę
-      się zmienia (każde przeładowanie wyrzuca cały bufor tłumaczeń
-      adresów). Zadanie nosi teraz też swój stos jądra - `syscall`
-      i przerwanie z ring 3 biorą go z dwóch różnych miejsc, więc oba
-      trzeba ustawić przy każdym przełączeniu. Umierające zadanie
-      najpierw schodzi na przestrzeń jądra, a dopiero potem oddaje
-      swoją - trudno zwalniać tablice, na których się właśnie stoi.
-      Dowód: `sep64` uruchomiony w dwóch kopiach naraz pisze pod ten
-      sam adres `40002060`, każda swoją liczbę, i po oddaniu procesora
-      drugiej kopii **obie znajdują swoją nietkniętą**; po ich śmierci
-      licznik zajętych ramek wraca dokładnie tam, gdzie był
-- [x] Przy okazji: `iretq` do ring 3 zeruje wszystkie rejestry poza
-      tymi, które program ma dostać. Jądro zostawiało w nich adresy
-      własnych struktur, a pierścień 3 nie ma powodu ich nawet znać.
-      Program dostaje w RDI jedną liczbę od jądra - to cały „argv" na
-      dzisiaj, ale wystarcza, żeby dwie kopie tego samego pliku
-      wiedziały, która jest którą
-- [x] **`fork()` w trybie długim** - drugi proces bierze się już nie
-      z decyzji jądra, tylko z decyzji samego programu. Żeby to było
-      możliwe, stub wywołań systemowych odkłada teraz **dokładnie taką
-      ramkę, jaką odkłada przerwanie**: instrukcja `syscall` sama nie
-      odkłada niczego (adres powrotu zostawia w RCX, flagi w R11), więc
-      te pięć słów dopisujemy ręcznie. Kosztuje to kilkanaście
-      instrukcji i powrót przez `iretq` zamiast `sysretq`, a daje jedną
-      rzecz: jądro widzi wywołanie systemowe i przerwanie tak samo.
-      `fork` sprowadza się wtedy do skopiowania ramki i kazania nowemu
-      zadaniu wrócić nią do ring 3 - z zerem w RAX. Żadne rejestry nie
-      są odtwarzane „ręcznie": robi to ta sama ścieżka, którą wraca
-      każde inne wywołanie. Pamięć na razie kopiujemy wprost, strona po
-      stronie (kopiowanie przy zapisie przyjdzie po tym, jak samo
-      powielanie zacznie działać). Dowód: `fork64` wpisuje 100, powiela
-      się, dziecko wpisuje 200 - i rodzic po przebudzeniu **nadal ma
-      swoje 100**
-- [x] Naprawiony błąd, który czekał na drugi proces: stos programu był
-      zapamiętywany w jednej globalnej komórce na czas **całego**
-      wywołania systemowego. Wystarczyło, żeby wywołanie uśpiło
-      zadanie, a drugi proces wszedł w tym czasie do jądra - i pierwszy
-      wracał do ring 3 na cudzy stos. Nie wybuchło wcześniej tylko
-      dlatego, że oba procesy miały stos pod tym samym adresem
-      wirtualnym, więc podmieniona wartość była przypadkiem ta sama.
-      Teraz wartość ląduje na stosie jądra tego konkretnego zadania
-      i nikt inny jej nie widzi
-- [x] **Kopiowanie przy zapisie** w trybie długim - `fork` przestał
-      kopiować pamięć. Rodzic i dziecko dostają te same ramki, a strona,
-      która była zapisywalna, traci u **obu** prawo zapisu i dostaje
-      znacznik w bicie 9 (procesor zostawia go do dyspozycji systemu).
-      Przy pierwszej próbie zapisu procesor zgłasza błąd strony, a jądro
-      dopiero wtedy robi kopię - i to tylko tej jednej strony. Strony
-      tylko do odczytu (kod, dane stałe) nie potrzebują nawet tego:
-      skoro nikt ich nie zmieni, zostają wspólne na zawsze, a o tym,
-      kiedy wrócą do puli, decyduje licznik właścicieli w PMM. Doszedł
-      bit ochrony zapisu w CR0 (WP): bez niego jądro może pisać po
-      stronach oznaczonych jako tylko do odczytu, więc strona
-      współdzielona zostałaby po cichu nadpisana zamiast rozdzielona.
-      Rachunek z prawdziwego biegu: `fork64` ma siedem stron (kod, dane
-      stałe, dane, cztery strony stosu), więc kopiowanie wprost
-      kosztowałoby siedem ramek plus tablice - **z dzieleniem stron fork
-      bierze pięć ramek, wszystkie na tablice, a rozdzielają się dwie
-      strony**: ta, którą dziecko zapisało, i jedna strona stosu.
-      Semantyka nie zmieniła się o włos: rodzic po przebudzeniu nadal
-      ma swoje 100
-- [x] **`exec` i `wait`** - model procesów się domyka. Program potrafi
-      uruchomić **inny** program i doczekać jego końca, czyli dokładnie
-      to, co robi każdy shell na świecie. `exec` nie potrzebował żadnej
-      osobnej ścieżki powrotu: jesteśmy w obsłudze wywołania
-      systemowego, a ta wraca do ring 3 przez ramkę, którą dostała -
-      wystarczy ją **przepisać** (nowy adres startu, nowy stos,
-      wyzerowane rejestry) i pozwolić wrócić. Program po drugiej
-      stronie nie ma jak zauważyć, że wrócił gdzie indziej, niż wołał.
-      Kolejność jest tu jedyna możliwa: nazwę trzeba przepisać do jądra,
-      **zanim** zniknie pamięć, w której leży, a starą przestrzeń
-      zwolnić dopiero wtedy, gdy procesor z niej zejdzie. `wait`
-      opiera się na śladzie po zakończonym zadaniu: samo zadanie znika
-      z listy przy najbliższym przełączeniu, ale rodzic wcale nie musi
-      zdążyć zapytać, zanim dziecko się skończy - zostaje więc po nim
-      jeden wpis do odebrania. Gdy dzieci nie ma wcale, `wait` mówi to
-      wprost, zamiast czekać w nieskończoność. Dowód: `spawn64` powiela
-      się, dziecko podmienia swój obraz na `hello64`, a rodzic odbiera
-      jego **siódemkę** - i to ta siódemka jest dowodem, że doczekał się
-      tego dziecka, a nie dowolnego zakończonego zadania
-- [x] **Klawiatura i shell w trybie długim** - z systemem da się wreszcie
-      rozmawiać, zamiast oglądać scenariusz wpisany w `kmain64`.
-      Tłumaczenie scancode'ów wyprowadziłem ze sterownika do
-      `kernel/kbdmap.c`: to jedyna jego część, która nie zależy od
-      niczego - ani od konsol wirtualnych, ani od zadań, ani od trybu
-      procesora - więc ten sam automat obsługuje klawiaturę w obu
-      jądrach, a decyzja, **dokąd** trafi gotowy znak, zostaje po
-      stronie sterownika. Stan musi w nim siedzieć, bo jedno wciśnięcie
-      klawisza rozkłada się na kilka bajtów: prefiks `0xE0`, osobne kody
-      wciśnięcia i puszczenia modyfikatorów. `kernel64/shell64.c` to
-      zwykły wątek jądra z pętlą - poleceń ma tyle, ile jądro naprawdę
-      umie: `help`, `ps`, `mem`, `ls`, `uptime`, `clear` i `run
-      <program>`. `run` **czeka** na swoje dziecko przez `task64_wait`
-      i podaje jego kod wyjścia, dokładnie tak, jak zrobiłby to program
-      przez wywołanie systemowe - przez ten czas shell nie odpowiada
-      i tak ma być. Przy okazji uruchamianie programów przeniosło się
-      z `kmain64` do `proc64_spawn`, gdzie jego miejsce: jądro przy
-      starcie i shell na żądanie idą teraz dokładnie tą samą drogą
-- [x] **Sygnały i Ctrl+C** w trybie długim - program w pętli bez końca
-      przestał być nie do zatrzymania. Sygnał nie jest wiadomością do
-      przeczytania, tylko przerwaniem toku programu, i jądro nie może go
-      dostarczyć w chwili wysłania: adresat jest wtedy gdzie indziej -
-      może spać, może siedzieć w środku wywołania systemowego. Czeka
-      więc przy zadaniu do **najbliższego powrotu do pierścienia 3**,
-      bo tylko wtedy ramka opisuje program, a nie jądro. Sprawdzamy to
-      w dwóch miejscach: przy powrocie z wywołania systemowego i przy
-      powrocie z przerwania - to drugie działa nawet wtedy, gdy program
-      o nic jądra nie prosi. Samo dostarczenie to znowu operacja na
-      ramce: odłożyć ją na stosie programu, przestawić na procedurę
-      obsługi i wsunąć pod nią adres powrotu. Adres musi przyjść **od
-      programu**, bo jedyne strony wykonywalne, jakie proces ma, to jego
-      własny kod - stos jest nieskutecznie wykonywalny z założenia (NX).
-      Ramka wraca ze stosu użytkownika, więc program mógłby ją podmienić:
-      rejestry i adres powrotu są jego sprawą, ale segmenty i flagi nie,
-      bo tędy wchodzi się w jądro. Dowód: `spin64` bez własnej procedury
-      ginie od Ctrl+C i shell odzyskuje konsolę, a `sigtest64` sygnał
-      **przechwytuje** - jego procedura wypisuje się i wraca, a program
-      kończy się dalej normalnie, kodem zero
-- [x] **Wejście dla programów i shell w przestrzeni użytkownika**.
-      `read` blokuje do pierwszego znaku, a potem oddaje wszystko, co
-      zdążyło się uzbierać - tak jak każde sensowne wejście: czeka się
-      na cokolwiek, a nie na pełny bufor. Sygnał przerywa to czekanie
-      i wraca błędem, bo inaczej Ctrl+C nie miałby jak dosięgnąć
-      programu, który właśnie czeka na klawisz - a to jest dokładnie
-      ten program, któremu Ctrl+C jest najczęściej potrzebny.
-      `user64/ush64.c` jest zwykłym programem w ring 3: nie ma żadnych
-      uprawnień ponad te, które ma każdy inny proces - klawiaturę czyta
-      wywołaniem systemowym, programy uruchamia przez `fork` i `exec`,
-      czeka na nie przez `wait`. Wszystko, co robi, mógłby zrobić
-      dowolny inny program, i to jest sedno: shell w jądrze był
-      potrzebny, żeby w ogóle było czym sterować systemem, a ten jest
-      dowodem, że **już nie musi tam być**. Nieudany `exec` kończy tylko
-      dziecko (kod 127), rodzic żyje dalej - jak wszędzie
-- [x] Naprawiony **zawis znaleziony przez użytkownika**: `run ush64`,
-      w nim `spin64`, Ctrl+C - i nic. Program kręcił się dalej, konsola
-      nie wracała. Dwie przyczyny, obie po mojej stronie. Po pierwsze
-      sygnał wysłany do zadania czekającego w `task64_wait` **nigdy nie
-      był dostarczany**: sygnał dostarcza się wyłącznie przy powrocie
-      do pierścienia 3, a ta pętla nigdy tam nie wraca, więc czekał na
-      dostarczenie tak długo, jak długo trwało czekanie - a gdy dziecko
-      nie kończy się samo, znaczy to: na zawsze. `read` sprawdzał
-      oczekujący sygnał i wracał błędem, `wait` nie. Po drugie Ctrl+C
-      trafiał w shella, a nie w program: cel przerwania wskazywał na
-      `ush64`, czyli na tego, kto **czeka**, więc nawet działający
-      sygnał zabiłby shella i zostawił program przy życiu. Doszło
-      `task64_foreground` - schodzi w dół łańcucha dzieci do tego, co na
-      końcu faktycznie działa. Zejście jest skończone samo z siebie
-      (dziecko dostaje numer większy od rodzica), ale ogranicznik
-      głębokości i tak jest: pętla szukająca końca pętli to ostatnie
-      miejsce, w którym chce się polegać na rozumowaniu. `ush64` ma też
-      od teraz własną procedurę na SIGINT, więc przypadkowe Ctrl+C
-      przerywa wpisywaną linię zamiast kończyć sesję - tak jak każdy
-      shell. Wcześniejszy audyt pętli **przeoczył to miejsce**: sprawdziłem
-      w `task64_wait` drogi wpisu o zakończeniu dziecka, a nie ścieżkę
-      sygnału, i właśnie ona była dziurą
-- [x] **Dysk w trybie długim**: PCI, ATA PIO, AHCI i warstwa blokowa to
-      te same pliki, co w jądrze 32-bitowym, skompilowane drugi raz.
-      Sterowniki nie wiedzą nic o trybie procesora - gadają z urządzeniem
-      przez porty i pamięć, a jedno i drugie wygląda tak samo po obu
-      stronach. `pci.c`, `ata.c` i `blk.c` przeszły **bez jednej zmiany**;
-      `ahci.c` potrzebował rzutowań przez `uintptr_t` (adresy DMA zostają
-      32-bitowe, bo ramki i tak leżą poniżej 512 MiB) i jednego warunku
-      na tryb: rejestry kontrolera leżą wysoko, poza obszarem opisanym
-      przy starcie, więc trzeba je dokleić do mapowania - bez tego
-      pierwszy odczyt z BAR-a kończy się błędem strony. Doszło
-      `paging64_map_phys`: mapuje zakres fizyczny z prawem zapisu
-      i zakazem wykonywania, bo w rejestrach urządzenia nie ma kodu.
-      Sprawdzone obie drogi - `disk` zapisuje ostatni sektor, czyta go
-      z powrotem i liczy różnice: zero, tak samo przez ATA PIO, jak
-      i przez AHCI z DMA
-- [x] **System plików w trybie długim** - i pierwszy moment, w którym
-      cokolwiek w tym jądrze przeżywa wyłączenie maszyny. `fs.c`
-      przeszedł **bez zmiany ani jednego znaku**: dysk widziany przez
-      warstwę blokową wygląda tak samo niezależnie od trybu procesora,
-      a PFS nie dotyka ani stronicowania, ani zadań. Shell dostał `fls`,
-      `cat <plik>` i `write <plik> <treść>` - trzy polecenia wystarczą,
-      żeby sprawdzić, czy plik naprawdę leży na dysku, a nie tylko
-      w pamięci: zapisać, wypisać, zobaczyć na liście. Czwarty dowód
-      przychodzi sam, przy ponownym uruchomieniu, i to on jest jedyny
-      rozstrzygający - test uruchamia maszynę **drugi raz na tym samym
-      dysku** i sprawdza, że plik tam jest i ma tę samą treść, a system
-      plików nie został sformatowany od nowa
-- [x] **Deskryptory plików dla programów** - do dysku sięga już nie
-      tylko jądro. `open`, `close`, `read` i `write` działają w ring 3,
-      a deskryptor jest zwykłym numerem w **tablicy należącej do
-      zadania**: numer jednego procesu nie znaczy nic w drugim, i to
-      jest cała różnica między nim a i-węzłem, który jest wspólny dla
-      całego systemu. Każdy deskryptor niesie własne miejsce w pliku,
-      bo dwa procesy mogą czytać ten sam plik w innym tempie. Trzy
-      pierwsze numery są zajęte od zawsze i nie odnoszą się do żadnego
-      pliku: zero to klawiatura, jeden to konsola. Dzięki temu
-      wypisanie na ekran jest **zwykłym zapisem do deskryptora numer
-      jeden**, dokładnie takim samym jak zapis do pliku - `read`
-      i `write` przyjmują więc deskryptor jako pierwszy argument, tak
-      jak wszędzie. Dziecko `fork`a dziedziczy otwarte pliki razem
-      z miejscem, w którym stoją - tak samo, jak dziedziczy pamięć.
-      `fileio64` sprawdza się sam: zakłada plik, pisze, zamyka, otwiera
-      z powrotem, czyta i porównuje bajt po bajcie - gdyby cokolwiek
-      się nie zgadzało, kończy się błędem, a nie komunikatem, który ktoś
-      musi przeczytać. Plik napisany przez program przeżywa restart tak
-      samo, jak napisany przez jądro: droga przez deskryptor kończy się
-      na tym samym dysku
-- [x] **Argumenty programów (`argv`)** - narzędzia przestały musieć
-      siedzieć w shellu. Do tej pory `echo` i `cat` były wbudowane, bo
-      nie było jak przekazać programowi ani jednego słowa. Układ na
-      stosie jest ten sam, co wszędzie: najpierw same napisy, nad nimi
-      tablica wskaźników zakończona zerem, a program dostaje
-      w rejestrach ich liczbę i adres tablicy - nic w tym magicznego,
-      to zwykła pamięć programu, którą akurat jądro wypełniło przed
-      jego pierwszą instrukcją. Argumenty kopiujemy do jądra **zanim**
-      zniknie pamięć, w której leżą - tak samo jak nazwę programu, i to
-      jest ta sama pułapka, co przy `exec`. Napisy przepisujemy stroną
-      po stronie, bo napis może kończyć się tuż przed granicą tego, co
-      program ma zmapowane. Limity są skromne i celowo: to ma być
-      `argv`, a nie kanał do przesyłania danych. `uecho64` wypisuje, co
-      dostał, a `ucat64` bierze nazwę pliku z argumentu, otwiera go
-      deskryptorem i czyta - jedno i drugie działa tak samo z shella
-      jądra, jak i z shella użytkownika. `sep64` też przestał dostawać
-      swój numer wpisany do rejestru: przychodzi jako `argv[1]`, czyli
-      tak, jak dostaje go każdy program
-- [x] **Sterta programów (`sbrk`) z pamięcią na żądanie** - do tej pory
-      każdy bufor musiał być wpisany w program na sztywno. Jądro nie
-      przydziela tu ani jednej strony: przesuwa tylko granicę
-      i zapamiętuje, dokąd program o nią poprosił, a strony powstają
-      dopiero przy pierwszym dotknięciu, w obsłudze błędu strony -
-      zapisywalne i z zakazem wykonywania, bo w danych programu nie ma
-      kodu. Różnica jest większa, niż wygląda: **`heap64` prosi
-      o 4 MiB, czyli 1024 strony, a system przydziela mu cztery** -
-      dokładnie te, które program dotknął. Zwężenie oddaje strony od
-      razu, inaczej pamięć wracałaby do puli dopiero razem z całym
-      procesem. Prośba poniżej własnej sterty albo w stos jest
-      odrzucana
-- [x] Po drodze wyszła różnica x86-64, która nie mogła wyjść wcześniej:
-      **SSE2 jest tam bazowe**, więc GCC wektoryzuje pętle bez pytania -
-      pierwsza pętla przepisująca 4 KiB dostała `movdqa ... %xmm9`
-      i skończyła się wyjątkiem „nieprawidłowa instrukcja", bo jądro
-      nie ustawiło jeszcze `CR4.OSFXSR`. Na razie programy budują się
-      z `-mno-sse`, tak jak jądro; docelowo trzeba włączyć SSE i zacząć
-      zapisywać stan FPU przy przełączaniu zadań. Przy okazji wyszła
-      druga rzecz: reguła budowania programów nie zależała od
-      `Makefile`, więc zmiana flag kompilacji **nic nie przebudowywała**
-      - dokładnie ta sama pułapka, co kiedyś z nagłówkami jądra
-- [x] **SSE i stan jednostki zmiennoprzecinkowej** - programy budują się
-      znowu normalnie, bez `-mno-sse`. Na x86-64 SSE nie jest dodatkiem,
-      tylko częścią konwencji wywołań: kompilator używa go bez pytania,
-      bo każdy procesor w tym trybie go ma. Procesor jednak startuje
-      z wyłączoną obsługą i każda taka instrukcja kończy się wyjątkiem,
-      dopóki system nie powie wprost, że umie te rejestry obsłużyć -
-      a „umie" znaczy tu jedno: **potrafi je zapisać i odtworzyć przy
-      przełączaniu zadań**. Rejestry XMM są takim samym stanem zadania,
-      jak RAX czy RSP, z tą różnicą, że jest ich dużo i procesor
-      zapisuje je jedną instrukcją do obszaru 512 bajtów. Wyrównanie do
-      szesnastu bajtów nie jest tu grzecznością: `fxsave` i `fxrstor`
-      po prostu odmawiają pracy na źle wyrównanym adresie. Samo jądro
-      zostaje bez SSE - w obsłudze przerwania nie ma czego liczyć,
-      a każda taka instrukcja wymagałaby zapisania stanu przerwanego
-      programu. Dowód: dwie kopie `fpu64test` liczą równocześnie, każda
-      z inną liczbą początkową, oddając po drodze procesor - i **każda
-      dostaje swój wynik**, a nie wynik sąsiada. Działanie dobrane tak,
-      by było dokładne co do jednostki (`v = v*2 + 1` na liczbach
-      całkowitych mieszczących się w podwójnej precyzji), więc test nie
-      musi niczego przybliżać
-- [x] **Katalogi i ścieżki** w trybie długim - system plików przestał
-      być płaski. `mkdir`, `cd`, `pwd`, `rm` i `readdir` działają
-      z ring 3, a **katalog roboczy jest własnością zadania**, tak samo
-      jak deskryptory: dwa procesy mogą stać w innych miejscach drzewa
-      i żadne z nich nie przeszkadza drugiemu. Dziecko zaczyna tam,
-      gdzie stał rodzic - więc `uls64` uruchomiony z shella wypisuje
-      ten katalog, w którym shell akurat stał. `open` też patrzy na
-      katalog roboczy, a nie zawsze na główny. Po drodze błąd wart
-      zapamiętania: `fs_readdir` oddaje **1 przy trafieniu i 0 na
-      końcu** katalogu, a nie ujemną wartość - sprawdzanie „mniej niż
-      zero" zamieniało koniec katalogu w sukces i wypisywanie kręciło
-      się bez końca na starej zawartości bufora. Popełniłem to samo
-      w dwóch miejscach naraz, bo założyłem konwencję zamiast ją
-      przeczytać
-- [x] **Potoki** - programy dają się łączyć w łańcuchy. Potok nie jest
-      plikiem i nie ma nic wspólnego z dyskiem: to pierścień w pamięci
-      jądra plus **dwa liczniki właścicieli**, i to one są w nim
-      ważniejsze od samego bufora, bo mówią, kiedy skończyć. Gdy zniknie
-      ostatni piszący, czytający dostaje koniec danych zamiast czekać
-      w nieskończoność. Doszedł `dup2` - to tędy przekierowuje się
-      wejście i wyjście - a o tym, dokąd idzie zapis, decyduje od teraz
-      **rodzaj deskryptora, a nie jego numer**: jedynka bez
-      przekierowania to konsola, ale po `dup2` może być końcem potoku
-      i program tego nie widzi. `uupper64` czyta z numeru zero i pisze
-      na numer jeden; to, że po drugiej stronie siedzi drugi program,
-      a nie klawiatura i ekran, jest sprawą tego, kto go uruchomił.
-      Najłatwiej tu o zawieszenie i dlatego dwie rzeczy są zrobione
-      wprost: shell zamyka **oba** końce potoku u siebie zaraz po
-      rozdaniu ich dzieciom (inaczej jeden piszący - on sam - zostałby
-      przy życiu na zawsze i czytający nigdy nie zobaczyłby końca),
-      a czekanie w `pipe64_read`/`pipe64_write` sprawdza oczekujący
-      sygnał, bo w pętli wewnątrz jądra nikt go za nie nie dostarczy.
-      Zadanie zamyka też wszystkie swoje deskryptory, gdy się kończy
-- [x] **Sieć w trybie długim**: karta RTL8139, warstwa IP, DHCP i TCP -
-      znowu te same pliki, co w jądrze 32-bitowym. **Trzy z czterech
-      przeszły bez jednej zmiany**; sterownik karty potrzebował tylko
-      jawnego rzutowania adresów, bo karta adresuje pamięć 32 bitami,
-      a wskaźnik ma tu osiem bajtów (bufory leżą w obrazie jądra, tuż
-      nad megabajtem, więc adres mieści się z zapasem - ale rzutowanie
-      musi być widoczne). Nie kompilowały się natomiast z innego
-      powodu: kod sieciowy mówi do jądra kilkoma funkcjami - uśpij
-      mnie, czy mam zginąć, czy tamto zadanie jeszcze żyje, zrób nowy
-      wątek - a scheduler nazywa się tu inaczej. Zamiast rozsypywać po
-      nich warunki na tryb, doszedł `kernel64/compat64.c`: **te nazwy
-      są umową, a co za nimi stoi, jest sprawą jądra**. Ten jeden plik
-      jest całą różnicą. Dowód z prawdziwego biegu: DHCP przyznaje
-      adres, `ifconfig` pokazuje maskę, bramę i DNS, `ping` na bramę
-      wraca 3/3, a tablica ARP zna jej adres sprzętowy - czyli ramki
-      naprawdę wychodzą i wracają
-- [x] **Sieć od strony programu** - z sieci korzystało dotąd tylko
-      jądro, bo `ping` i `ifconfig` to jego własne polecenia. Teraz
-      program w ring 3 pyta o swój adres, otwiera gniazdo UDP, wysyła
-      datagram i łączy się po TCP - bez żadnych szczególnych uprawnień.
-      Gniazdo należy do zadania, które je otworzyło: jądro trzyma jego
-      numer i sprząta po jego śmierci, więc program nie sięgnie po cudze
-      gniazdo, podając jego numer. Przy okazji lekcja o ABI: pierwsza
-      wersja upychała numer gniazda i limit czasu w jednym rejestrze,
-      bo trzy rejestry na argumenty to za mało na gniazdo, adres, port,
-      długość i limit naraz. Czytało się to fatalnie i psuło przy
-      pierwszej zmianie - teraz wszystko poza samymi danymi idzie
-      w jednym opisie przekazywanym wskaźnikiem, a jądro wpisuje w ten
-      sam opis adres nadawcy przy odbiorze. `unet64` sprawdza trzy
-      rzeczy po kolei i sam wystawia sobie ocenę: adres z DHCP,
-      datagram wysłany **do samego siebie** (pętla zwrotna nie wychodzi
-      na kabel, więc próba dotyczy stosu, a nie sieci dookoła) oraz
-      połączenie TCP z serwerem HTTP stojącym na hoście - w sieci
-      użytkownika QEMU brama `10.0.2.2` **jest** hostem, więc żadne
-      przekierowanie portów nie jest do tego potrzebne
-- [x] **Tryb graficzny w jądrze 64-bitowym** - `video.c` przeszedł jak
-      reszta, ale wyszła przy tym rzecz, która w jądrze 32-bitowym nie
-      mogła wyjść: przyjmując bufor od loadera wpisywał sobie **na
-      sztywno 32 bity na piksel**. Działało to, dopóki bufor przychodził
-      z BIOS-u; firmware UEFI potrafi podać 24, a wtedy zapis całym
-      słowem zadeptuje sąsiedni piksel. Teraz głębia jest taka, jaką
-      loader naprawdę dał - dokładnie ta sama poprawka, co wcześniej
-      w konsoli. Shell dostał `gfx`: cztery prostokąty w rogach, ramka
-      i napis własną czcionką. Rysunek jest prosty celowo, bo każdy błąd
-      w liczeniu adresu piksela widać na nim od razu - zły bajt na
-      piksel rozjeżdża obraz w skos, a zamienione kanały widać po
-      kolorach. Test sprawdza go pod BIOS-em **i** pod UEFI, bo to
-      firmware decyduje, ile bitów ma piksel. Po drodze własna pomyłka
-      warta zapamiętania: pierwszy wzorzec użył numerów kolorów trybu
-      **tekstowego**, a paleta `video.c` ma zdefiniowane własne indeksy
-      0-5 - kod rysował dobrze, to wzorzec był w złych kolorach
-- [x] **Pulpit graficzny w jądrze 64-bitowym** - i to jest ta pozycja,
-      przy której najbardziej opłacił się cały sposób prowadzenia tego
-      portu. `desktop.c` (736 wierszy: kompozytor, okna, paski tytułu,
-      ikony, pasek zadań, menu, przeciąganie) i `mouse.c` przeszły
-      **bez jednej zmiany**. Cała różnica zamknęła się w trzech
-      funkcjach dopisanych do słownika zgodności: `exec_spawn` po
-      nazwie, przejęcie klawiatury przez pulpit i oddanie jej z
-      powrotem. Reszta - zadania, sen, system plików do zapisu pozycji
-      ikon - była już na miejscu z portu sieci. Bałem się tego kroku
-      i okazał się najtańszy z dotychczasowych: nie dlatego, że pulpit
-      jest prosty, tylko dlatego, że nie zależy od trybu procesora
-      w niczym poza nazwami, którymi woła jądro. Czego jeszcze nie ma:
-      aplikacji graficznych w ring 3 - ikony `App`, `Zegar`, `Pliki`
-      wołają programy, których w 64-bitowym initrd nie ma, więc klik
-      w nie nic nie robi. To wymaga wywołań systemowych okien i pamięci
-      współdzielonej, czyli osobnego kroku
-- [x] **Aplikacje graficzne w ring 3 (jądro 64-bitowe)** - ikony
-      pulpitu przestały być martwe. Cztery wywołania systemowe
-      (`win_create`, `win_rect`, `win_text`, `win_poll`) i program
-      `guiapp64` w initrd: rysuje we własnym oknie, dostaje z powrotem
-      kliknięcia i klawisze, liczy je i odpowiada rysunkiem. Kompozytor
-      nie dostał ani jednej nowej linii - `desktop_win_*` istniało od
-      czasów 32-bitowych, tu doszła tylko droga do niego z pierścienia 3.
-      Programu nie trzeba było nawet nazywać inaczej: `mkinitrd` wpisuje
-      go do obrazu pod nazwą `guiapp`, tą samą, którą woła wspólna
-      tablica ikon. Ochrona jest tam, gdzie była: właścicielem okna jest
-      proces, a nie ten, kto poda numer, więc podanie cudzego numeru nic
-      nie daje; napisy i polecenia rysowania jądro przepisuje do siebie,
-      bajt po bajcie sprawdzając, czy program ma prawo tam sięgać -
-      napisu nie da się sprawdzić hurtem, bo może kończyć się na
-      ostatnim bajcie mapowania.
-
-      I przy tym wyszedł błąd, który spał w jądrze od pierwszego
-      programu: pierwszy `movaps` w `guiapp64` kończył się wyjątkiem
-      ochrony ogólnej. Nie w SSE rzecz - stan rejestrów SSE jądro
-      zapisuje od dawna - tylko w **wyrównaniu stosu**. `_start` jest
-      napisany w C, a kompilator traktuje go jak każdą inną funkcję:
-      zakłada stos taki, jaki zastaje się po instrukcji `call`, czyli
-      z adresem powrotu na wierzchu. Jądro dawało wierzchołek wyrównany
-      do szesnastu bajtów, czyli o osiem za dużo, i każde szesnastobajtowe
-      zapisanie rejestru SSE trafiało w adres niewyrównany. Dotychczasowe
-      programy przeżyły tylko dlatego, że kompilator nie miał w nich
-      czego wektoryzować. Ciekawe, że doręczenie sygnału liczyło stos
-      **poprawnie** od początku - tam komentarz wprost mówi "tak, jak
-      zastaje każda funkcja wołana instrukcją call" - a start procesu
-      nie. Jedna linia w `build_args`, ta sama zasada w obu miejscach
-- [x] **ACPI, konsole wirtualne, klawiatura USB i wymiana stron
-      w jądrze 64-bitowym** - cztery rzeczy, które 32-bitowe jądro
-      miało od dawna, przeszły jedna po drugiej. Trzy z nich prawie za
-      darmo, czwarta pokazała błąd, którego 32-bitowa wersja nie mogła
-      pokazać.
-
-      **ACPI** to `kernel/acpi.c` bez zmian w logice: droga do
-      wyłączenia zasilania - RSDP, spis tablic, FADT, obiekt `_S5_`
-      w bajtkodzie AML - nie zależy od trybu procesora. Zależy od niego
-      tylko doklejanie tablic do mapowania, więc plik dostał ten sam
-      wzorzec makr, co `initrd.c` i `video.c`, plus jawne rzutowania
-      adresów na wskaźniki. `poweroff` gasi maszynę, `reboot` ją
-      resetuje - i tego drugiego nie da się sprawdzić inaczej niż tym,
-      że QEMU (z `-no-reboot`) po prostu znika.
-
-      **Konsole wirtualne** siedziały już w `kernel/vga.c`, wspólnym od
-      początku - jądro 64-bitowe po prostu miało tylko jedną, bo
-      `task_vc()` zwracało zero na sztywno. Doszła więc własność
-      zadania (konsola dziedziczy się po rodzicu, tak samo jak katalog
-      roboczy), osobna kolejka klawiszy na każdą konsolę i Alt+F1..F4
-      w obsłudze przerwania. Shell przy okazji przestał trzymać wiersz
-      polecenia w zmiennej globalnej: cztery shelle to cztery wątki,
-      a wiersz jest własnością wątku i leży na jego stosie.
-
-      **Klawiatura USB** wymagała w `uhci.c` tego samego, co wcześniej
-      karta sieciowa: kontroler adresuje pamięć 32 bitami, wskaźnik ma
-      tu osiem bajtów, więc każdy adres struktury idzie do niego przez
-      jawne rzutowanie. `usbkbd.c` przeszedł bez zmian.
-
-      **Wymiana stron** to jedyna pozycja z prawdziwą nową robotą po
-      stronie trybu długiego. Magazyn (`kernel/swap.c`) jest wspólny,
-      ale polityka wyrzucania musiała powstać od nowa: obchód czterech
-      poziomów tablic zamiast dwóch, algorytm drugiej szansy na bicie
-      "odwiedzona" i wpis strony leżącej na dysku - bez bitu obecności,
-      więc procesor go nie ogląda, a numer miejsca siedzi w górnych
-      bitach.
-
-      I tu wyszedł błąd wart zapamiętania. Pierwsza wersja wpisu na
-      dysk niosła sam numer miejsca, a przy powrocie strona dostawała
-      prawa "zapisywalna, bez wykonywania" - bo takie ma większość
-      stron. Program padał zaraz po starcie z wyjątkiem 14 o kodzie
-      `0x15`. Przeczytałem to najpierw jako **piętnaście dziesiętnie**
-      i szukałem naruszenia bitu zarezerwowanego, którego tam nie było;
-      szesnastkowo to jest obecna strona, dostęp z pierścienia 3 i
-      **pobranie instrukcji**. Wyrzucona została strona *kodu*, a
-      wróciła z zakazem wykonywania. Prawa dostępu jadą więc teraz na
-      dysk razem ze stroną - i to jest właściwa zasada, nie łatka:
-      strona kodu jest tylko do odczytu i wykonywalna, strona danych
-      dokładnie odwrotnie, a jądro nie ma prawa zgadywać, która jest
-      która, skoro samo je wcześniej rozdało.
-
-      Przy okazji przestrzeń programu urosła z ośmiu megabajtów do pół
-      gigabajta - wymiana ma sens dopiero wtedy, gdy program może
-      poprosić o więcej pamięci, niż maszyna ma RAM-u. Test bierze 18
-      MiB na maszynie z 16 MiB i sprawdza dwie rzeczy: że każda strona
-      wróciła z dysku bez zmiany choć jednego bajtu, i że wymiana
-      **naprawdę ruszyła** - bo bez tej drugiej asercji przeszedłby
-      także test, w którym wszystko zmieściło się w pamięci.
-
-      Testów przybyło pięć osobnych grup: `gui64`, `acpi64`,
-      `konsole64`, `usbkbd64`, `swap64`. Wszystkie 64-bitowe czytają
-      teraz ekran tak, jak widzi go człowiek: GRUB, widząc w nagłówku
-      jądra żądanie trybu obrazu, zawsze daje grafikę, więc pamięć
-      znaków spod `0xB8000` jest pusta, a konsola rysuje się sama
-      czcionką 8x8. Test rozpoznaje te glify tą samą tablicą, z której
-      korzysta jądro - jedno źródło prawdy, i odczyt z tego, co
-      naprawdę widać.
-- [x] **Programy z dysku, nie tylko z initrd** - loader ELF i system
-      plików leżały obok siebie od dawna i nigdy nie były połączone:
-      `run` zaglądał wyłącznie do initrd, czyli do obrazu wgrywanego
-      razem z jądrem i tylko do odczytu. Teraz program może leżeć na
-      dysku - `cp hello64 cokolwiek`, a potem `run cokolwiek`.
-
-      Całe połączenie to jeden plik, `kernel/prog.c`, i nie ma w nim
-      ani słowa o trybie procesora: decyduje tylko, skąd wziąć bajty,
-      a co z nimi zrobić, wie już loader. Dlatego używają go **oba
-      jądra** - w 64-bitowym przez słownik zgodności (`task_cwd`),
-      w 32-bitowym wprost. Kolejność jest ustalona: najpierw initrd,
-      potem dysk. Initrd jest zawsze i zawsze działa, więc zepsuty
-      plik na dysku nie ma jak przykryć programu wgranego razem
-      z jądrem - a to znaczy, że nie ma jak odebrać systemu.
-
-      Program szuka się w katalogu roboczym **zadania**, tak samo jak
-      przy `cat` czy `ls`: katalog jest własnością procesu, więc `run`
-      znaczy to samo, co znaczyłby po `cd`.
-
-      I znowu ta sama pomyłka, co przy `fs_readdir` - a przecież już
-      raz ją tu opisałem. `fs_write_at` zwraca **liczbę zapisanych
-      bajtów**, nie zero, a ja sprawdzałem `== 0`; `fs_read_at` tak
-      samo. Pierwsze `cp` "nie udało się" mimo poprawnego zapisu.
-      Wniosek na przyszłość jest chyba tylko jeden: konwencji zwrotu
-      nie wolno zgadywać z podobieństwa do sąsiedniej funkcji - trzeba
-      ją przeczytać. Teraz jeden warunek sprawdza, że zapisało się
-      **tyle, ile miało**, bo plik ucięty w połowie to nie jest ten
-      sam program.
-
-      Test bierze najmocniejszy dowód, jaki tu jest: drugi rozruch tej
-      samej maszyny z tym samym obrazem dysku. Program, który po
-      restarcie dalej się uruchamia, a którego nie ma w initrd, może
-      pochodzić już tylko z talerza. Sprawdzamy też drogę z pierścienia
-      3 - `ush64` robi `fork` i `exec`, a `exec` szuka programu tak
-      samo jak jądro.
-
-      Przy okazji dorobiłem testom `q.polecenie(...)`: wpisuje
-      polecenie i oddaje **tylko to, co przybyło po nim**. Bez tego
-      łatwo o fałszywy alarm w drugą stronę - shell odbija wpisany
-      wiersz, więc nazwa pliku jest na porcie także wtedy, gdy
-      polecenie niczego nie znalazło, a wynik poprzedniego leży tam do
-      końca biegu. Trzy asercje w tym teście przechodziły z tego
-      powodu, zanim funkcja w ogóle zaczęła działać.
-- [x] **Pamięć współdzielona i dwie kolejne aplikacje graficzne
-      (jądro 64-bitowe)** - `kernel/shm.c` przeszedł bez zmian
-      w logice, bo region to po prostu ciągły blok ramek z PMM.
-      Nowa jest droga do niego z pierścienia 3: między stertą a stosem
-      wydzielony został obszar mapowań (od 0x50000000 w górę), a sterta
-      kończy się u jego progu - jedno nie ma jak wejść w drugie.
-      Wymiana stron pomija ramki współdzielone, tak jak w jądrze
-      32-bitowym: z nimi trzeba by liczyć właścicieli także na dysku.
-
-      Test pokazuje to, o co w tym naprawdę chodzi, a nie tylko to, że
-      bajty się zgadzają: pisarz mapuje najpierw region na boku,
-      o innym kluczu, więc **wspólny widzi pod innym adresem niż
-      czytelnik**. Te same bajty pod dwoma różnymi adresami - bo
-      o tym, gdzie coś widać, decyduje przestrzeń adresowa, a nie
-      pamięć. Bez tego test przeszedłby także przy przypadkowej
-      zgodności układu.
-
-      Przy okazji doszedł zegar CMOS (`rtc.c`, czyste porty I/O -
-      przeszedł jak stał), polecenie `date` i wywołanie `SYS64_TIME`.
-
-      Dwie nowe aplikacje w oknach: `gclock64` (godzina ze sprzętu
-      i uptime z tyknięć jądra - dwa niezależne źródła czasu obok
-      siebie) i `gfiles64` (lista plików z dysku, kliknięcie nazwy
-      wczytuje jej treść). Ikony `Zegar` i `Pliki` przestały więc być
-      martwe; zostały trzy: Monitor, Term i Web.
-
-      I znowu ta sama pomyłka, co przy `fs_write_at` i przy
-      `fs_readdir` - **trzeci raz w tym projekcie**. `sys_readdir`
-      w bibliotece programów oddaje ZERO przy trafieniu i -1 na końcu
-      katalogu, a `fs_readdir` w jądrze odwrotnie: jedynkę przy
-      trafieniu. Napisałem `!= 1`, więc pierwszy wpis wyglądał jak
-      koniec katalogu i okno pokazywało "(pusto)". Sąsiedztwo nazw nie
-      jest żadną wskazówką co do konwencji zwrotu; trzeba ją
-      przeczytać, za każdym razem.
-- [x] **Monitor zasobów i terminal w oknie (jądro 64-bitowe)** - piąta
-      i szósta aplikacja graficzna, a przy okazji wywołanie
-      `SYS64_SYSINFO`: ile pamięci jest, ile zajęte, jak długo maszyna
-      działa. Nic z tego nie jest tajemnicą - liczby opisują maszynę,
-      a nie cudze procesy - więc program z pierścienia 3 dostaje je bez
-      żadnych uprawnień.
-
-      `gterm64` jest tu najciekawszy, bo nie ma w nim ani jednej rzeczy,
-      której jądro nie umiałoby wcześniej, a jest wszystko naraz:
-      klawiatura przez zdarzenia okna, `fork`, `exec`, przekierowanie
-      wyjścia przez `dup2` do pliku, czekanie na dziecko, odczyt pliku
-      i rysowanie. Terminal jest zwykłym programem i o kompozytorze nie
-      wie nic poza czterema wywołaniami okien - a jednak z tych
-      klocków wychodzi powłoka w okienku.
-
-      Kompozytor trzyma najwyżej sześć okien, a dwa zajmuje jądro, więc
-      pięć aplikacji naraz się nie mieści - test dostał drugi rozruch
-      i to jest właściwa odpowiedź, nie podnoszenie limitu.
-
-      Została jedna martwa ikona: Web. Do niej trzeba najpierw TLS
-      i klienta HTTP w pierścieniu 3.
-- [x] **TLS 1.3, HTTP i przeglądarka w pierścieniu 3 (jądro
-      64-bitowe)** - i tym samym koniec doganiania: wszystko, co robi
-      jądro 32-bitowe, robi teraz także to w trybie długim.
-
-      Najciekawsze jest to, ile kodu trzeba było napisać: **jeden plik
-      nagłówkowy**. Kryptografia, TLS, HTTP, DNS, X.509 i parser HTML -
-      pięć tysięcy wierszy w `user/*.h` - liczą na bajtach i o trybie
-      procesora nie wiedzą nic. Do jądra mówią kilkoma nazwami: połącz
-      się, wyślij, odbierz, która godzina, otwórz plik. Te nazwy są
-      umową; `user64/compat64.h` przekłada je na wywołania trybu
-      długiego, a `user/uapi.h` wybiera stronę. Dokładnie ten sam
-      wzorzec, co `kernel64/compat64.c` po stronie jądra - i drugi raz
-      okazał się tańszy, niż się bałem.
-
-      Zmiany w samym wspólnym kodzie: jedna. Adres na stosie brany do
-      zasiewu generatora szedł przez `(uint32_t)` z wskaźnika - w trybie
-      długim to obcięcie połowy adresu, więc teraz przez `uintptr_t`.
-      Nic więcej.
-
-      Wyszedł za to prawdziwy błąd. `certtest` padał w połowie -
-      wyjątek strony tuż pod szczytem stosu. Program dostawał cztery
-      strony (16 KiB), a weryfikacja podpisu na liczbach
-      dwutysiącbitowych sięga głębiej - i sięga tym głębiej, że
-      wskaźniki mają tu osiem bajtów, więc każda ramka z tablicą
-      wskaźników jest dwa razy większa. Można było podnieść stałą.
-      **Zamiast tego stos rośnie teraz na żądanie**, dokładnie tak jak
-      sterta: program dostaje cztery strony na start, reszta dochodzi
-      pod palcami, a granica (ćwierć megabajta) jest po to, żeby dziki
-      wskaźnik nie zamienił się po cichu w zmapowaną stronę - pod nią
-      błąd strony pozostaje błędem. Zgadywanie z góry, ile stosu
-      potrzeba, zawsze kończy się albo marnowaniem pamięci, albo
-      wyjątkiem w środku głębokiego wywołania.
-
-      Test rozmawia z prawdziwym OpenSSL-em, a nie z własną pętlą, więc
-      dojście uzgodnienia do skutku znaczy, że zgadza się każdy bajt:
-      X25519, ChaCha20-Poly1305, wyprowadzanie kluczy i podpis
-      w Finished. Sprawdzamy też rzecz ważniejszą od samego
-      szyfrowania: obcy certyfikat ma połączenie **zerwać**, bo
-      szyfrowana rozmowa z kimś nieznanym nie jest bezpieczna, tylko
-      prywatna.
-
-      Ostatnia martwa ikona pulpitu ożyła: `gweb` rozwiązuje nazwę
-      przez DNS, pobiera stronę, obdziera ją ze znaczników i rysuje
-      w oknie - a to jeden program spinający naraz kompozytor,
-      klawiaturę, mysz, DNS, TCP, TLS, system plików i własną
-      przestrzeń adresową.
-- [x] **Podział grupy `rdzen` na trzy** - nie dla porządku, tylko dla
-      czasu: jedna grupa robiła 174 asercje na jednej maszynie i sama
-      decydowała, ile trwa cały bieg, bo wszystkie pozostałe kończyły
-      się dużo wcześniej. Teraz są trzy - rozruch i procesy (`rdzen`),
-      sieć z systemem plików (`rdzen2`) i samo TLS (`tls32`) - a że
-      liczą się równolegle, cały zestaw schodzi w 259 s zamiast 310 s.
-      Asercji tyle samo, 518.
-
-      Podział wyciągnął przy okazji flakę, która czekała tam od dawna.
-      Wątek demonstracyjny C kończy się po dwóch sekundach i przez
-      kilka następnych odrysowuje napis w zerowym wierszu ekranu -
-      i tylko tam był dowód, że się wykonał. Wiersz zerowy znika przy
-      każdym przewinięciu, więc na obciążonej maszynie dowód wyjeżdżał
-      razem z komunikatami startowymi, zanim test zdążył spojrzeć.
-      Przesunięcie sprawdzenia wcześniej nie wystarczyło: pod pełnym
-      obciążeniem samo dojście do promptu trwa dłużej niż całe okno
-      widoczności.
-
-      Wątek pisze więc teraz jedną linię **wprost na port szeregowy** -
-      nie przez `printk`, bo kończy się już po starcie shella i wypis
-      na konsoli wpadałby w środek wiersza, który ktoś akurat pisze
-      (test klawiatury złapał to od razu). Port szeregowy jest
-      dziennikiem, ekran bieżącą pracą; to nie zawsze jest to samo,
-      i dobrze, że akurat ta różnica musiała się tu ujawnić.
-- [x] **Pliki odwzorowane w pamięci (jądro 64-bitowe)** - druga połowa
-      tej samej myśli, co uruchamianie programów z dysku: skoro plik
-      może być programem, może też być **pamięcią**. Program dostaje
-      adres i czyta zawartość jak zwykłą tablicę, bez ani jednego
-      wywołania `read`.
-
-      Najciekawszy jest koszt. Odwzorowanie nie tworzy ani jednej
-      strony: jądro zapamiętuje tylko numery bloków, a bajty
-      przychodzą z dysku pod palcami. Dotknięcie jednego bajtu
-      czterystukilobajtowego pliku kosztuje **jedną stronę**, nie sto -
-      i to jest asercja, którą test sprawdza wprost, bo shell podaje po
-      każdym programie, ile stron wczytano z odwzorowań.
-
-      Numery bloków ustalamy raz, przy zakładaniu odwzorowania, i potem
-      czytamy je warstwą blokową z pominięciem kodu PFS. Powód jest ten
-      sam, co przy wymianie stron i wtedy też był zapisany: PFS ma
-      jeden wspólny bufor na blok, a błąd strony potrafi trafić
-      w środek dowolnej operacji na plikach. Raz opisana zasada
-      oszczędziła tu całą klasę pytań.
-
-      Odwzorowanie jest tylko do odczytu i to jest decyzja, nie
-      niedoróbka: zapis wymagałby odsyłania stron z powrotem na dysk
-      i rozstrzygania, kiedy. Dopóki tego nie ma, lepiej niech próba
-      zapisu kończy się błędem ochrony, niż cicho przepada. Test
-      sprawdza to dzieckiem: dziecko próbuje zapisać i ginie, a rodzic
-      przeżywa i melduje, że treść pliku jest nietknięta.
-- [x] **Karta e1000 i warstwa `netdev`** - dyski miały warstwę blokową
-      od dawna: ATA i AHCI stoją pod jedną nazwą, a który kontroler
-      odpowiedział, jest sprawą rozruchu. Sieć takiej warstwy nie
-      miała i było to widać w każdej linii, która potrzebowała adresu
-      MAC - `rtl8139_mac()` wprost w kodzie IP i DHCP. Teraz jest
-      `netdev.c`, dokładnie z tego samego pomysłu.
-
-      Intel 82540EM jest zbudowany zupełnie inaczej niż RTL8139
-      i dlatego był dobrym sprawdzianem dla tej warstwy. Rejestry ma
-      w pamięci, nie w portach I/O - trzeba je najpierw dokleić do
-      mapowania, bo leżą wysoko. Ruch chodzi przez dwa **pierścienie
-      deskryptorów**, po jednym na kierunek, zamiast jednego pierścienia
-      bajtów: deskryptor mówi, gdzie leży bufor i co się z nim stało,
-      a kto go ma na własność, wynika ze wskaźników głowy i ogona.
-      Wygodniejsze od RTL8139 o tyle, że pakiety nie sklejają się ze
-      sobą i nie trzeba przepisywać końca bufora na początek.
-
-      Dla ARP-a, IP, DHCP i TCP nie zmieniło się nic - i to jest
-      właściwa treść tego kroku. Test uruchamia ten sam zestaw
-      sprawdzeń z `-device e1000` na obu jądrach: dzierżawa DHCP,
-      ping do bramy, tablica ARP, HTTP z pierścienia 3. Ta sama droga
-      pakietu, inna karta pod spodem.
-
-      Odbiór idzie w drugą stronę niż reszta: sterownik sam woła
-      `net_rx`, gdy ramka przyjdzie, i warstwa `netdev` w tym nie
-      pośredniczy - byłoby to przekładanie wskaźnika bez powodu.
-- [x] **Dysk NVMe** - trzeci sterownik pod tą samą warstwą blokową
-      i najbardziej niepodobny do dwóch poprzednich: nie ma w nim nic
-      z dziedzictwa ATA. Żadnego "wybierz dysk", żadnych ramek FIS.
-      Są dwie **kolejki w pamięci** - my wkładamy polecenia po 64 bajty
-      do kolejki zgłoszeń, kontroler odkłada odpowiedzi po 16 do
-      kolejki ukończeń - i dwa dzwonki (rejestry doorbell), którymi
-      mówi się drugiej stronie, dokąd się doszło.
-
-      Najładniejszy drobiazg całego standardu to **bit fazy**:
-      kontroler odwraca go przy każdym okrążeniu kolejki, więc żeby
-      wiedzieć, czy odpowiedź jest nowa, nie trzeba niczego zerować
-      ani liczyć. Wystarczy porównać jeden bit z tym, którego się
-      spodziewamy.
-
-      Kolejek jest u nas dwie pary: administracyjna, która powstaje
-      sama przy starcie kontrolera, i jedna do danych, zamawiana
-      poleceniem na tej pierwszej. Bufor jest jeden, wyrównany do
-      strony - wskaźnik PRP opisuje stronę, a nie dowolny kawałek
-      pamięci, więc przepisanie przez własną, wyrównaną stronę jest
-      tańsze niż tłumaczenie każdego cudzego bufora na listę stron.
-
-      Test wpadł przy okazji w pułapkę, która nie ma nic wspólnego
-      z NVMe: pisał polecenia zaraz po komunikacie o gotowym systemie
-      plików, a shell rusza dopiero po schedulerze - pierwsze znaki
-      przepadały i z `write nvmetest tresc-przez-kolejki` do jądra
-      docierało `przez-kolejki`. Klawiatura działa od przerwania,
-      ale czytać z niej ma kto dopiero od wątku.
-- [x] **Pozostałe procesory: wykrycie i wybudzenie (oba jądra)** -
-      pierwszy krok w stronę SMP, i celowo tylko pierwszy.
-
-      Po włączeniu zasilania pracuje jeden rdzeń - ten, który firmware
-      wybrał na rozruchowy. Reszta stoi i czeka, i to jest decyzja
-      sprzętu: procesor obudzony sygnałem SIPI zaczyna w trybie
-      rzeczywistym, szesnastobitowo, pod adresem `(wektor << 12)` -
-      dokładnie tak, jak zaczynał pecet czterdzieści lat temu. Ile ich
-      jest, mówi tablica MADT w ACPI; budzi się je parą sygnałów przez
-      lokalny APIC.
-
-      Najciekawsze jest to, ile drogi taki rdzeń musi przejść **sam**.
-      W jądrze 32-bitowym: tryb rzeczywisty, własna tablica
-      deskryptorów, tryb chroniony. W 64-bitowym cała droga od nowa -
-      szesnaście bitów, trzydzieści dwa, sześćdziesiąt cztery, z PAE
-      i EFER po drodze. Tablic stron nie buduje: bierze gotowe, te
-      same, po których chodzi jądro, a ich adres dostaje w polu, które
-      procesor rozruchowy wypełnia przed wysłaniem sygnału.
-
-      Trampolina jest linkowana z jądrem, ale wykonuje się pod
-      `0x8000`, więc każdy adres w niej liczy się jako baza plus
-      odległość od początku bloku. Adresy trafiają najpierw do
-      rejestru, a dopiero potem w użycie - asembler ma wtedy jedno
-      oczywiste znaczenie do wyboru zamiast dwóch.
-
-      I na tym ten krok się kończy: obudzony rdzeń zgłasza się
-      w liczniku i staje. Dawanie mu pracy wymaga schedulera per rdzeń
-      i zamków w każdej strukturze jądra - a te pisane były dla jednego
-      rdzenia i cicho na to liczą. Lepiej, żeby procesor stał, niż żeby
-      psuł listę zadań. Dlatego test sprawdza dwie rzeczy naraz: że
-      rdzenie się zgłaszają **oraz** że system po ich obudzeniu działa
-      dokładnie tak samo - samo "widzę cztery procesory" nie byłoby nic
-      warte, gdyby przy okazji coś pękało.
-- [x] **Naprawa `make fuzz`** - i lekcja o tym, po co w ogóle jest
-      osobne polecenie, którego nie uruchamia `make test`.
-
-      Fuzzing parserów buduje je **na hoście**, pod ASan i UBSan,
-      podstawiając zaślepkę zamiast wejścia do jądra. Port TLS-a do
-      trybu długiego zmienił to wejście: nagłówki wciągają teraz
-      `uapi.h`, a nie `usys.h`, więc zaślepka podstawiała się pod
-      nazwę, której nikt już nie woła - i harness przestał się
-      budować. Warstwa `netdev` dołożyła drugie takie miejsce po
-      stronie jądra.
-
-      Obie rzeczy przeszły niezauważone przez pełny bieg testów, bo
-      `make fuzz` nie jest jego częścią - i słusznie nie jest, bo trwa
-      swoje i sprawdza co innego. Ale to znaczy, że trzeba go
-      uruchamiać osobno po każdej zmianie w tym, jak kod wspólny
-      rozmawia z jądrem. Zapisuję to tutaj właśnie dlatego, że łatwo
-      o tym zapomnieć: pięćset przypadków na parser, zero błędów -
-      ale tylko wtedy, gdy ktoś je puści.
-- [x] **Rdzenie wtórne dostają pracę** - i pierwszy zamek w tym
-      systemie.
-
-      Wyłączenie przerwań wystarczało, dopóki rdzeń był jeden: nikt
-      inny nie mógł wejść w środek operacji. Teraz może - i to
-      naprawdę **jednocześnie**, a nie tylko pozornie. Stąd
-      `spinlock.h`: instrukcja `xchg` jest niepodzielna z definicji
-      i przy okazji stanowi barierę dla porządku zapisów, więc nie
-      trzeba tu żadnych dodatkowych ogrodzeń - to, co rdzeń zapisał
-      przed zwolnieniem zamka, drugi zobaczy po jego wzięciu.
-
-      Rdzenie wtórne nie prowadzą własnych zadań i długo jeszcze nie
-      będą: scheduler, lista procesów i większość jądra pisane były dla
-      jednego rdzenia. Dostają za to pracę **policzalną**: wspólną
-      kolejkę jednostek, z której każdy bierze kolejny numer pod
-      zamkiem i liczy go u siebie. Cały stan dzielony między rdzeniami
-      to jedna liczba i jeden zamek - i właśnie dlatego da się o nim
-      myśleć.
-
-      Rdzeń rozruchowy liczy razem z pozostałymi; bez tego na maszynie
-      jednordzeniowej nie policzyłby nikt. Przerwania gasną na czas
-      trzymania zamka także na nim: gdyby timer wywłaszczył wątek
-      trzymający zamek, każdy inny chętny czekałby do jego następnej
-      kolejki.
-
-      Polecenie `smp` rozdziela 64 jednostki i porównuje wynik
-      z policzonym na jednym rdzeniu. To jest właściwe pytanie
-      o współbieżność - nie "czy coś się policzyło", tylko "czy
-      policzyło się **dokładnie raz każde**". Cztery rdzenie, po
-      szesnaście jednostek, suma co do bitu ta sama.
-
-      Błąd po drodze wart zapamiętania: pierwsza wersja trampoliny
-      wołała funkcję jądra skokiem względnym. Przesunięcie policzone
-      przy linkowaniu opisuje odległość od miejsca, w którym kod
-      **leży w obrazie jądra** - a wykonuje się pod `0x8000`. Skok
-      trafiał więc w próżnię i maszyna resetowała się w ciszy, bo rdzeń
-      wtórny nie ma jeszcze tablicy wyjątków. Adres idzie teraz przez
-      rejestr, tak jak w wersji 64-bitowej, gdzie od początku musiał -
-      bo tam skok względny sięga najwyżej dwóch gigabajtów.
-- [x] **Stos rosnący na żądanie i pliki odwzorowane w pamięci - także
-      w jądrze 32-bitowym** - wyrównanie asymetrii, którą sam
-      wprowadziłem, robiąc obie te rzeczy najpierw w trybie długim.
-      Ten projekt stoi na tym, że oba jądra to te same pliki
-      kompilowane dwa razy; różnice, których nie wymusza tryb
-      procesora, są w nim po prostu długiem.
-
-      Stos: osiem stron na start, reszta dochodzi pod palcami, granica
-      ćwierć megabajta. Test schodzi rekurencją na czterdziesty poziom
-      po cztery kilobajty ramki i **po powrocie** sprawdza, czy każda
-      ramka jest wciąż jego - bo dokładanie stron pod nadpisywanie
-      cudzych ramek wyglądałoby w połowie tak samo.
-
-      Odwzorowanie plików wyciągnęło przy okazji prawdziwy błąd, i to
-      w kodzie starszym niż cała ta zmiana. `fork` oznaczał **każdą**
-      stronę procesu jako kopiowaną przy zapisie - także taką, która
-      celowo nie miała prawa zapisu. Dziecko pisało więc do
-      odwzorowanego pliku i zapis się *udawał*: obsługa kopiowania
-      przy zapisie robiła mu prywatną, zapisywalną kopię. Strona bez
-      prawa zapisu zostaje teraz taka, jaka jest - i to jest cała jej
-      własność, więc oznaczanie jej do kopiowania przy zapisie było
-      sprzeczne samo w sobie.
-
-      Doszła też para `paging_map_user_in` / `paging_map_user_ro_in`
-      nad wspólnym trzonem: to samo mapowanie, jeden bit różnicy,
-      wybierany przez wołającego.
-- [x] **Zapis przez plik odwzorowany w pamięci** - droga w drugą
-      stronę, w obu jądrach naraz.
-
-      Dotąd odwzorowanie było jednokierunkowe: plik dawało się czytać
-      jak pamięć, ale próba zapisu kończyła się błędem ochrony. Było
-      to uczciwe (lepszy błąd niż cicho zgubiona zmiana), ale połowiczne.
-      Teraz `sys_mmap_file_w` daje stronom prawo zapisu, a treść wraca
-      do pliku.
-
-      Najważniejsze pytanie brzmi **kiedy**. Odsyłanie po każdym bajcie
-      zabiłoby cały sens odwzorowania - wtedy taniej byłoby wołać
-      `write`. Decyduje więc program, przez `sys_msync`, a jądro
-      dokłada jedno miejsce, o którym program nie musi pamiętać:
-      koniec procesu. Odesłanie musi się zdarzyć **tam**, w `task_exit`
-      i w `exec`, dopóki przestrzeń adresowa procesu jeszcze żyje -
-      sprzątacz zombie ogląda te strony już z cudzego CR3, a `exec`
-      za chwilę tej przestrzeni nie ma.
-
-      Które strony odesłać, wie procesor. Bit "brudna" ustawia sam przy
-      każdym zapisie, więc nie trzeba niczego liczyć ani zgadywać: test
-      czyta cały dwunastokilobajtowy plik, pisze po dwóch pierwszych
-      stronach, i `sys_msync` odsyła **dwie**. Drugie z rzędu odsyła
-      zero, bo bit gaśnie razem z odesłaniem. To jest asercja, która
-      naprawdę coś rozstrzyga - "odesłało się cokolwiek" przeszłoby
-      równie dobrze przy przepisywaniu całego pliku za każdym razem.
-
-      Doszedł trzeci bit programowy we wpisie strony - `PTE_PLIK`
-      (`PG_PLIK` w trybie długim), ostatni wolny. Znaczy dwie rzeczy
-      naraz, obie negatywne:
-
-      - `fork` ma taką stronę **współdzielić**, a nie oznaczać do
-        kopiowania przy zapisie. Oba procesy piszą do jednego pliku,
-        więc prywatna kopia u dziecka znaczyłaby, że jego zapisy nigdy
-        nie wychodzą poza jego własną pamięć. Test rozwidla się i każe
-        pisać dziecku, a sprawdza u rodzica.
-      - wymiana stron ma ją omijać. Miejscem takiej strony na dysku
-        jest sam odwzorowany plik, a nie plik wymiany; wyrzucenie jej
-        do `swap.sys` zgubiłoby i związek z plikiem, i informację
-        o tym, że jest brudna.
-
-      Do jądra 64-bitowego trzeba było przy okazji dołożyć **czwarty
-      argument wywołania systemowego**. Dotąd wystarczały trzy; teraz
-      jedzie w R10, tak jak w Linuksie i z tego samego powodu - RCX
-      zabiera sama instrukcja `syscall` na adres powrotu.
-
-      Wyszedł też błąd starszy niż ta zmiana: `exec` w jądrze
-      32-bitowym zerował licznik wolnych adresów mapowań, ale zostawiał
-      **opisy** odwzorowań starego obrazu. Ich zakresy leżą dokładnie
-      tam, gdzie nowy obraz zaczyna zakładać własne, więc błąd strony
-      w nowej stercie trafiał na opis pliku, którego ten proces już nie
-      otwierał. `task_mmap_zwolnij` istniało od początku i nie było
-      wołane z żadnego miejsca - wersja 64-bitowa wołała swoje.
-- [x] **xHCI - trzeci kontroler USB** i warstwa, ktora go zaslania.
-
-      UHCI wystarczał do tej pory tylko dlatego, że QEMU go udaje.
-      Maszyna nowsza niż mniej więcej 2010 rok nie ma już ani PS/2,
-      ani UHCI - jest tylko xHCI. Bez niego "działa na prawdziwym
-      sprzęcie" zostałoby na zawsze pustym punktem listy.
-
-      Różnica między tymi kontrolerami nie leży w szczegółach, tylko
-      w **podziale pracy**. W UHCI to sterownik układał deskryptory
-      przesyłek w liście ramek, którą kontroler przemiatał co
-      milisekundę, i sam wymyślał urządzeniom adresy. W xHCI rozmawia
-      się poleceniami wkładanymi do pierścienia, odpowiedzi przychodzą
-      drugim pierścieniem - zdarzeń - a adresy nadaje kontroler.
-
-      Pierścień to najładniejsza rzecz w tym sterowniku. Jest tablicą
-      TRB, której ostatni element jest skokiem na początek, a o tym,
-      które wpisy należą już do kontrolera, rozstrzyga jeden bit -
-      bit cyklu. Skok ma znacznik, który przy każdym obrocie przewraca
-      znaczenie tego bitu na przeciwne. Dzięki temu pierścienia nigdy
-      nie trzeba czyścić ani liczyć, ile w nim czego zostało: ten sam
-      bit raz znaczy "moje", raz "twoje".
-
-      Dokładanie sterownika ODSŁONIŁO granicę, której wcześniej nie
-      było widać. `usbkbd.c` wołał `uhci_*` wprost, ale nie dlatego,
-      że rozpoznawanie klawiatury ma cokolwiek wspólnego z kontrolerem
-      - po prostu kontroler był jeden. Nowy `usbhc.c` stawia tę
-      granicę tam, gdzie kończy się różnica: reset portu, nadanie
-      adresu i ustalenie rozmiaru pakietu punktu zerowego wyglądają
-      w obu kontrolerach zupełnie inaczej, więc siedzą pod jednym
-      słowem `podlacz`. Wyżej zostaje już tylko rozmowa z urządzeniem,
-      ta sama niezależnie od magistrali - i dlatego cały kod HID,
-      tablice kodów i wątek odpytujący nie zmieniły się ani o linijkę.
-      To ten sam wzorzec, co `blk.c` i `netdev.c`, i po raz trzeci
-      okazuje się, że da się go postawić dopiero wtedy, gdy naprawdę
-      są dwie rzeczy do schowania.
-
-      Przy zapisie do PORTSC trzeba uważać na coś, czego w UHCI nie
-      było: część bitów **kasuje się zapisem jedynki**, a bit
-      włączenia portu zapisem jedynki się port WYŁĄCZA. Zwykłe
-      odczytaj-zmień-zapisz wyłączyłoby więc port przy okazji
-      ustawienia czegokolwiek innego. Stąd `portsc_bezpiecznie`.
-
-      Test jest podwójny z rozmysłem. Sprawdza, że klawiatura na xHCI
-      w ogóle mówi - ale przede wszystkim, że mówi **tak samo**: ta
-      sama grupa sprawdzeń co przy UHCI, ten sam znak, ten sam Shift,
-      ten sam Alt+F2. Osobne grupy `usbkbd64` i `xhci` pilnują dwóch
-      magistral i jednego wniosku: wyżej nie widać, która jest pod
-      spodem.
-- [x] **Biblioteka współdzielona i wiązanie symboli przy ładowaniu** -
-      koniec z kopią kryptografii w każdym programie.
-
-      `httpget` ważył 82 kilobajty, `gweb` 89, `certtest` 51. Prawie
-      wszystko w nich to była ta sama kryptografia i ten sam TLS,
-      wkompilowane po raz kolejny - raz w initrd i raz w pamięci,
-      osobno dla każdego procesu. Teraz te trzy plus `cryptotest` ważą
-      razem mniej niż jedna biblioteka, którą dzielą.
-
-      **Skąd wzięło się źródło biblioteki.** Kryptografia żyje
-      w ProtonOS w nagłówkach, jako `static inline`. To była dobra
-      decyzja i nie chciałem jej cofać: jedno źródło prawdy, zero
-      plików pośrednich. Biblioteka potrzebuje jednak dwóch różnych
-      spojrzeń na ten sam plik - z ciałami (żeby je skompilować
-      i dało się je w niej odnaleźć po nazwie) i bez ciał (żeby
-      program zawierał wywołania, a nie kopie). Rozbicie czternastu
-      nagłówków na pary .c/.h ręcznie znaczyłoby cztery tysiące linii
-      przepisanych i dwa miejsca, które od tej pory mogą się
-      rozjechać. Robi to więc `scripts/rozdziel.py` przy każdym
-      budowaniu: dopasowuje klamry, omijając te w napisach
-      i komentarzach, i wypluwa obie wersje. Źródło zostaje jedno
-      i nietknięte.
-
-      **Dlaczego biblioteka ma stały adres.** Konsolidujemy ją pod
-      adresem, pod którym jądro ją potem kładzie w każdym procesie.
-      Dzięki temu adresy w jej tablicy symboli są już ostateczne -
-      ani ona, ani jądro nie mają przy ładowaniu nic do przeliczania.
-      Ceny są dwie i obie akceptowalne: biblioteka może być tylko
-      jedna i zawsze widać ją pod tym samym adresem. Prawdziwy system
-      tak nie robi, bo chce ich wiele i chce losować adresy - ale
-      prawdziwy system ma na to konsolidator w przestrzeni użytkownika,
-      a u nas rolę `ld.so` pełni kilkadziesiąt linii w jądrze.
-
-      **Co dokładnie robi jądro.** Czyta z biblioteki tablicę symboli
-      dynamicznych (nazwa funkcji -> adres), a z programu listę
-      relokacji (adres pustego miejsca w jego tablicy skoków -> nazwa
-      funkcji). Złożenie jednego z drugim to całe wiązanie. Wiążemy
-      wszystko od razu, przy starcie: leniwe wiązanie wymagałoby, żeby
-      kawałek konsolidatora siedział w przestrzeni procesu i był wołany
-      z zaślepki PLT - cały osobny mechanizm po to, żeby oszczędzić
-      mikrosekundy przy starcie.
-
-      **Podział na wspólne i prywatne.** Segment bez prawa zapisu (kod
-      i stałe) dostaje RAMKI WSPÓLNE - te same fizyczne strony widzi
-      każdy proces, i to jest cała oszczędność. Segment z danymi musi
-      być prywatny, bo biblioteka trzyma w nim swój stan: ziarno
-      generatora losowego, ustawienia TLS. Stan jednego procesu nie ma
-      prawa być widoczny w drugim. Ogon zer (`.bss`) powstaje przy tym
-      pod palcami, tak samo jak sterta - program biorący z biblioteki
-      sam skrót SHA-256 nie ma powodu płacić za bufory TLS-a.
-
-      **Dwie rzeczy, które trzeba było wyjąć z nagłówków.** Krzywe
-      eliptyczne i wbudowany magazyn zaufania były w nich zmiennymi.
-      Program, który sięgnąłby po nie po nazwie, dostałby własną kopię
-      (relokacja kopiująca) - i od tej chwili biblioteka liczyłaby na
-      jednym egzemplarzu, a program patrzył na drugi. Teraz wystawiamy
-      je funkcjami, a jądro odmawia załadowania programu, w którym
-      taka relokacja by się pojawiła. Lepiej głośno przy starcie niż
-      cicho w połowie uzgodnienia TLS.
-
-      **Pułapka, którą widać tylko w liczbach.** Pierwsza wersja
-      raportowała "0 stron wspólnych" i nikomu by to nie przeszkadzało,
-      bo wszystko działało. Konsolidator wrzucił `.dynamic` do tego
-      samego segmentu co kod, a `.dynamic` jest zapisywalne - więc cały
-      segment stał się zapisywalny i jądro słusznie dawało każdemu
-      procesowi własną kopię. Współdzielenia nie było ani przez chwilę.
-      Stąd wyrównanie do granicy strony w skrypcie konsolidatora
-      i stąd ta liczba w komunikacie rozruchowym: bez niej ta pomyłka
-      nie miała jak wyjść na jaw.
-
-      **Druga pułapka, i ta wyszła dopiero na teście.** Dane biblioteki
-      dostawały początkowo strony pod palcami - ogon zer (`.bss`)
-      powstawał dopiero przy pierwszym dotknięciu, jak sterta. TLS
-      w jądrze 32-bitowym działał, w 64-bitowym nie. Powód: sprawdzanie
-      wskaźników z ring 3 wygląda w obu jądrach inaczej. Jądro
-      32-bitowe URZECZYWISTNIA stronę, o którą pyta program;
-      64-bitowe tylko sprawdza, czy jest, i odmawia, gdy jej nie ma.
-      Bufor, do którego pisze wyłącznie jądro - jak ten na odebrane
-      bajty TCP - nie zostaje więc dotknięty przez nikogo i syscall go
-      odrzuca. Cały segment danych jest teraz zakładany od razu;
-      trzydzieści kilka ramek na proces to cena za jeden mechanizm
-      mniej i za to, że oba jądra robią to samo.
-
-      Test nie pyta "czy działa", tylko o rzeczy, których nie da się
-      sfałszować. Adres wykonywanego kodu leży POZA obrazem programu -
-      i podać go musi sama biblioteka, bo program nieprzemieszczalny,
-      który bierze adres jej funkcji, dostaje adres własnej zaślepki
-      skoku. Drugi proces widzi ten sam adres kodu (ramki wspólne), ale
-      licznik generatora znów od zera (dane prywatne). Zapis do kodu
-      biblioteki kończy się błędem ochrony - inaczej jeden program
-      podmieniłby funkcję wszystkim naraz.
-- [x] **Zamki na wspólnych strukturach jądra** - pierwszy krok, bez
-      którego prawdziwego SMP nie da się zacząć.
-
-      Rdzenie wtórne umiały dotąd tylko liczyć na tym, co dostały. Cały
-      dzielony między nimi stan to była jedna liczba i jeden zamek -
-      i właśnie dlatego dało się o nim myśleć. Żeby kiedykolwiek mogły
-      prowadzić zadania, muszą najpierw umieć bezpiecznie **wołać
-      jądro**; a jądro musi to wytrzymać.
-
-      Wygaszenie przerwań, które wystarczało od początku, chroni przed
-      czymś innym niż zamek i warto to nazwać wprost. Zamek chroni
-      przed INNYM RDZENIEM, który naprawdę biegnie jednocześnie.
-      Wygaszenie przerwań chroni przed SAMYM SOBĄ: timer wchodzący
-      w środek sekcji czekałby na zamek trzymany przez kod, który
-      właśnie przerwał - i to na tym samym rdzeniu, jedynym, który
-      mógłby go zwolnić. Stąd `spin_lock_irq` robiące obie rzeczy
-      w jednej kolejności: przerwania gasną PRZED wzięciem zamka
-      i wracają PO zwolnieniu.
-
-      Zamki dostały trzy struktury, po które sięga wszystko inne: mapa
-      ramek fizycznych, sterta jądra i konsola. Każda z nich jest jedna
-      dla całej maszyny, więc i zamek jest jeden.
-
-      **Próba, która naprawdę coś rozstrzyga.** Komenda `smpmem` każe
-      każdemu rdzeniowi przydzielać ramki i bloki sterty trzy tysiące
-      razy naraz. Nie pytamy jednak, czy się nie wysypało - na to
-      odpowiedź bywa przypadkowa. Każdy przydział dostaje wzorzec
-      zależny od numeru jednostki i zaraz potem jest czytany: ramka
-      wydana dwóm rdzeniom naraz ma dwóch piszących i wzorzec się nie
-      zgadza. Na koniec liczymy ramki i bajty sterty - tyle samo przed
-      co po.
-
-      Sprawdziłem, czy ta próba w ogóle może paść, wyjmując zamki
-      z powrotem. Bez zamka w mapie ramek: sześćdziesiąt jeden
-      niezgodności wzorca i pięćdziesiąt osiem ramek, które nie
-      wróciły. Bez zamka na stercie: jądro ginie na błędzie strony pod
-      adresem `aaa9a8ab`, bo lista wolnych bloków przestaje trzymać się
-      kupy w połowie dzielenia bloku. To jest jedyny sposób, żeby
-      wiedzieć, że test czegokolwiek pilnuje.
-
-      **Czego rdzeniowi wtórnemu nadal nie wolno.** Nie ma on tablicy
-      wyjątków ani przerwań, więc wolno mu wołać tylko to, co nie śpi
-      i nie czeka na sprzęt. Przydział pamięci - tak. Dysk, sieć,
-      cokolwiek, co mogłoby sięgnąć po wymianę stron - nie. Granica
-      jest dziś taka, a nie inna, i przesunie ją dopiero scheduler na
-      rdzeń.
-
-      **Asercja, która była wyścigiem.** Pierwsza wersja testu żądała,
-      by KAŻDY rdzeń wziął część pracy. Przeszła, ale na jądrze
-      64-bitowym udział wyszedł `[1, 20, 21, 22]`: rdzeń rozruchowy
-      prowadzi w tym czasie wątek shella i bywa wywłaszczony przez
-      timer, podczas gdy wtórne kręcą się w ciasnej pętli i rozbierają
-      zlecenie, zanim zdąży sięgnąć. Asercja mówi teraz to, co jest
-      prawdą niezależnie od tego, kto wygra wyścig: pracę wzięło więcej
-      niż jeden rdzeń, a wszystkie jednostki policzyły się **dokładnie
-      raz**.
-- [x] **Rdzeń wtórny dostaje tablicę wyjątków i własny zegar** - drugi
-      krok w stronę prawdziwego SMP.
-
-      Obudzony rdzeń był dotąd w dziwnym położeniu: wykonywał kod
-      jądra, ale nie miał ani tablicy segmentów jądra (siedział na
-      tymczasowej z trampoliny), ani żadnej tablicy wyjątków. Każdy
-      jego błąd kończył się potrójnym błędem i **cichym resetem całej
-      maszyny** - bez jednego słowa na ekranie. Obie tablice są jedne
-      dla całego systemu i po zbudowaniu nikt ich nie zmienia, więc
-      wystarczyło je wskazać. Segmentu stanu zadania (TSS) rdzeń wtórny
-      NIE ładuje: `ltr` oznacza deskryptor jako zajęty, więc tej samej
-      tablicy nie da się załadować dwa razy - a i tak nie ma po co,
-      skoro programy ring 3 chodzą na razie tylko na rdzeniu
-      rozruchowym.
-
-      **Własny zegar.** Przerwanie z PIT idzie przez kontroler PIC do
-      JEDNEGO procesora - rdzeń wtórny nie zobaczyłby go nigdy, a bez
-      przerwań nie da się go kiedykolwiek wywłaszczyć. Każdy procesor
-      ma za to własny zegar w lokalnym APIC. Jego częstotliwości nie da
-      się odczytać, więc trzeba ją zmierzyć: rdzeń rozruchowy puszcza
-      licznik APIC i patrzy, ile zdąży odliczyć przez znaną liczbę
-      tyknięć PIT. Mierzy tylko on, bo tylko on ma czym.
-
-      **Błąd, który kosztował najwięcej czasu i był tego wart.**
-      W trybie długim rdzeń wtórny umierał przy pierwszym sięgnięciu po
-      lokalny APIC - cicho, razem z całą maszyną. Powód: trampolina
-      ustawiała w rejestrze EFER bit zgody na tryb długi, ale nie bit
-      NXE. A jądro mapuje bitem zakazu wykonywania wszystko, co nie ma
-      być kodem - w tym rejestry sprzętu doklejone do mapowania
-      identycznościowego. Bez NXE bit 63 wpisu tablicy stron nie znaczy
-      "zakaz wykonywania", tylko jest **zarezerwowany**: każdy dostęp
-      przez taki wpis to błąd strony. Ten sam adres, te same tablice,
-      ten sam CR3 - a jeden procesor czyta, drugi ginie. Różnicę robił
-      jeden bit w rejestrze, którego nikt nie kopiował.
-
-      Znalezienie tego wymagało zejścia do najprostszego możliwego
-      wypisu: jednego bajtu prosto na port szeregowy, bez zamków, bez
-      funkcji, bez niczego, co samo może paść. Litera po literze widać
-      było, dokąd rdzeń dochodzi.
-
-      **Bezczynny rdzeń ma stać, a nie kręcić się w kółko.** Do tej
-      pory rdzeń bez pracy wirował na `pause`. Na maszynie wirtualnej
-      kosztuje to dokładnie tyle, co praca: trzy rdzenie kręcące się bez
-      celu zabierały rdzeniowi rozruchowemu trzy czwarte maszyny, przez
-      co zwykły zapis na dysk trwał cztery razy dłużej. **Rozruch do
-      shella na czterech rdzeniach: 22 sekundy z okładem przed zmianą,
-      6,5 sekundy po.** Teraz rdzeń staje na `hlt`, a budzi go
-      przerwanie międzyrdzeniowe wysłane w chwili złożenia pracy -
-      najprostsze przerwanie, jakie można komuś posłać, bo cała jego
-      treść to fakt, że przyszło.
-
-      Kolejność ma znaczenie i jest w kodzie napisana wprost: pobudka
-      idzie PO zapisaniu zlecenia. Wysłana przed zastałaby jeszcze
-      pustą kolejkę.
-
-      **I znów wyścig w asercji.** Odkąd rdzenie śpią, podział pracy
-      zależy od tego, jak szybko dojdzie do nich pobudka - a to jest
-      sprawa emulatora, nie jądra. Asercja "każdy rdzeń wziął część"
-      przestała więc cokolwiek znaczyć i mówi teraz to, co jest prawdą
-      niezależnie od wyścigu: pracę wzięło więcej niż jeden rdzeń,
-      a wszystkie jednostki policzyły się dokładnie raz. Tego pilnuje
-      porównanie z wynikiem jednordzeniowym, co do bitu.
-- [x] **Wątki jądra na wszystkich rdzeniach** - to, na co czekały trzy
-      poprzednie kroki.
-
-      Rdzeń wtórny miał już tablicę wyjątków, własny zegar i zamki na
-      wspólnych strukturach. Brakowało jednej rzeczy, i to najbardziej
-      niepozornej: **bieżące zadanie było pojedynczą zmienną globalną**.
-      Dopóki nią było, więcej niż jeden rdzeń nie miał dokąd zapisać
-      tego, co właśnie prowadzi. Teraz jest ich tyle, ile rdzeni, a
-      który jest mój, mówi sam procesor - numer w jego lokalnym APIC.
-
-      Słowo `current` zostało, bo całe jądro mówi tym słowem i nie ma
-      powodu, żeby przestało. Zmieniło się tylko to, na co pokazuje:
-      z jednej zmiennej na pole bloku rdzenia. Sto trzydzieści dziewięć
-      miejsc w każdym z dwóch jąder nie musiało o tym wiedzieć.
-
-      **Zamek trzymany przez przełączenie.** To jest ta część, której
-      nie da się zrobić po połowie. Lista zadań jest jedna, więc chroni
-      ją jeden zamek - ale nie wystarczy wziąć go na czas wyboru
-      następnego zadania i zaraz oddać. Zostawałoby okno, w którym
-      poprzednie zadanie jest już oznaczone jako gotowe, a jego stos
-      wciąż używany: drugi rdzeń wskoczyłby na stos, po którym pierwszy
-      jeszcze chodzi. Zamek trzymamy więc **przez** przełączenie
-      kontekstu, a zwalnia go ten, kto po drugiej stronie przyjdzie.
-      Nowe zadanie nie wraca z przełączenia jak wszystkie inne, więc
-      zwalnia zamek samo, w swojej trampolinie. Zadanie, które się
-      kończy, nie wraca nigdy - i nie musi: zrobi to za nie jego
-      następca.
-
-      Z tego samego powodu stan bieżącego zadania zmienia się teraz
-      **pod zamkiem**, razem z wyborem następnego (`switch_to(stan)`).
-      Ustawiony wcześniej dawałby okno, w którym zadanie jest oznaczone
-      jako śpiące, a jego stos wciąż zajęty - i drugi rdzeń mógłby je
-      w tym czasie obudzić.
-
-      **Czego rdzeniowi wtórnemu nadal nie wolno, i dlaczego to jest
-      decyzja, a nie niedoróbka.** Zwykłe zadanie zostaje na rdzeniu
-      rozruchowym. Rdzeń wtórny bierze tylko to, co ktoś jawnie na to
-      pozwolił przez `task_create_anycore` - bo reszta jądra sięga po
-      sterowniki, system plików i wymianę stron, a te pisane były dla
-      jednego rdzenia i cicho na to liczą. Segment stanu zadania jest
-      jeden i należy do rdzenia rozruchowego, więc ring 3 też zostaje
-      u niego. Wołający, który prosi o zadanie „wszędzie", bierze na
-      siebie, że jego wątek dotyka tylko tego, co zniesie dwa rdzenie
-      naraz.
-
-      Każdy rdzeń dostaje własne zadanie bezczynne - inaczej nie byłoby
-      dokąd odłożyć jego kontekstu. Stoi ono na stosie, który rdzeń
-      dostał przy obudzeniu, i nikt inny nie ma prawa go prowadzić.
-      Widać je w `ps` pod ujemnym numerem: to nie są procesy.
-
-      **Dowód jest trzyczęściowy, bo każda część z osobna dałaby się
-      podrobić.** Wątek sam zapisuje, na którym rdzeniu właśnie liczy -
-      ale gdyby scheduler tylko przerzucał go między rdzeniami po
-      kolei, maska wyglądałaby tak samo. Wynik każdej porcji jest co do
-      bitu ten sam, co porcji policzonej w wątku shella - ale to
-      dowodzi tylko poprawności. Rozstrzyga dopiero **czas**: cztery
-      porcje puszczone równolegle mają zająć wyraźnie mniej niż cztery
-      razy tyle, co jedna.
-
-      Liczby są ładniejsze, niż się spodziewałem. W trybie długim jedna
-      porcja to 64 tyknięcia, a cztery naraz - **61**. Cztery razy
-      więcej pracy w tym samym czasie. Ta sama próba na jednym rdzeniu:
-      28 tyknięć jedna, 185 cztery. To jest ta różnica, o którą chodzi,
-      i widać ją w teście wprost.
-- [x] **Ring 3 na wszystkich rdzeniach** - programy użytkownika
-      przestały być własnością rdzenia rozruchowego.
-
-      Trzeba było na to czterech rzeczy. Pierwsza: **segment stanu
-      zadania na każdy rdzeń**. Procesor czyta z niego stos jądra przy
-      wejściu z pierścienia 3, a każdy rdzeń wchodzi tam z innego
-      zadania i na inny stos - jeden wspólny segment znaczyłby, że dwa
-      rdzenie wchodzą do jądra na ten sam stos. Deskryptorów też musi
-      być tyle, ile rdzeni: instrukcja `ltr` oznacza deskryptor jako
-      **zajęty**, więc drugi rdzeń ładujący ten sam selektor dostałby
-      wyjątek ochrony.
-
-      Druga: **własne wejście w `syscall`**. W trybie długim rejestry
-      wejścia (`IA32_LSTAR`, `IA32_STAR`) są własnością rdzenia i ten,
-      który ich nie ustawi, nie przyjmie wywołania systemowego wcale.
-      Sam stos jądra bierze się przez `swapgs` i `IA32_KERNEL_GS_BASE`,
-      czyli jedyny mechanizm, jaki procesor daje na "to jest mój
-      rdzeń": tablica bloków po 16 bajtów, po jednym na rdzeń.
-
-      Trzecia: **wielki zamek jądra**. Reszta jądra - sterowniki,
-      system plików, wymiana stron - pisana była dla jednego rdzenia
-      i cicho na to liczy. Zamek jest zagnieżdżalny, bo musi: przerwanie
-      trafia w środek wywołania systemowego, a rdzeń, który już go
-      trzyma, nie może na siebie czekać. Bierze go każde wejście z
-      pierścienia 3 i oddaje każde wyjście, a `switch_to` oddaje go **na
-      czas przełączenia** - inaczej zadanie usypiające w środku
-      syscalla zamykałoby jądro dla wszystkich aż do swojego
-      przebudzenia. Głębokość leży na stosie tego zadania, więc każde
-      odzyskuje dokładnie swoją.
-
-      Czwarta okazała się prawdziwa i kosztowała dzień. **Rdzeń wtórny
-      w trybie chronionym nie miał włączonego stronicowania.**
-      Trampolina rozruchowa przechodziła w tryb chroniony i na tym
-      kończyła; nikt nigdy nie ustawił mu CR3 ani bitu PG. Dla kodu
-      jądra wychodziło to na jedno, bo dolna pamięć jest odwzorowana
-      jeden do jednego - i dlatego wątki jądra na rdzeniach wtórnych
-      działały bez zarzutu przez cały poprzedni krok. Ale adres programu
-      użytkownika (0x40000000 w górę) bez tablic stron nie znaczy nic:
-      rdzeń czytał stamtąd to, co leży pod tym adresem **fizycznie**,
-      czyli zera.
-
-      Objaw był myląco odległy od przyczyny. Proces ginął pod losowym,
-      dzikim adresem, za każdym razem innym - bo `iret` wchodził w
-      pierścień 3 na poprawnym adresie, a procesor wykonywał tam zera
-      i skakał, gdzie popadnie. Wielki zamek wyglądał na winnego, więc
-      go wyłączyłem - i nic to nie dało, co było pierwszą dobrą
-      wiadomością. Rozstrzygnął dopiero zrzut, w którym te same dane
-      czytane na dwa sposoby dały dwie różne odpowiedzi: przez adres
-      wirtualny **zero**, a przez tę samą ramkę odczytaną wprost -
-      poprawny kod. Katalog stron się zgadzał, wpis się zgadzał, CR3 się
-      zgadzało, `invlpg` i przeładowanie CR3 nic nie zmieniały. Została
-      jedna możliwość: tłumaczenie adresów w ogóle nie działa. Naprawa
-      to sześć instrukcji w trampolinie i jedno pole na CR3 - dokładnie
-      to samo, co rdzeń 64-bitowy dostał od początku, bo bez
-      stronicowania tryb długi po prostu nie rusza.
-
-      **Wątek a proces to teraz dwie różne zgody.** Zadanie jądra
-      utworzone przez `task_create_anycore` jest *samodzielne*: nie
-      bierze wielkiego zamka, bo ten, kto o nie poprosił, wziął na
-      siebie, że jego wątek dotyka wyłącznie rzeczy znoszących dwa
-      rdzenie naraz. Gdyby brało, cztery wątki liczące równolegle
-      liczyłyby się po kolei - a po to ich nie ma. Proces uruchomiony
-      przez `runw` ma odwrotnie: jego strona jądrowa chodzi pod zamkiem,
-      równolegle idzie samo liczenie w pierścieniu 3, a tam program i
-      tak spędza większość czasu.
-
-      **Dowód znów jest porównaniem, nie pomiarem.** `run cores` i
-      `runw cores` w tej samej maszynie: ten sam program, ta sama suma
-      kontrolna co do bitu, ta sama liczba kroków. Różni je tylko to,
-      ilu rdzeniom wolno go prowadzić. W trybie długim 86 tyknięć wobec
-      **33** i maska wszystkich czterech rdzeni; w trybie chronionym 42
-      wobec **26**. Na maszynie jednordzeniowej `runw` nie zmienia nic
-      i tego też pilnuje asercja - obietnica "wolno wszędzie" nie jest
-      obietnicą "musi gdzie indziej".
-- [x] **Wywołania systemowe bez wielkiego zamka** - pierwszy kęs z tego,
-      co poprzedni krok postawił na drodze.
-
-      Zacząć trzeba było od przyznania się do błędu. Sprzątając kod
-      diagnostyczny po poprzednim kroku cofnąłem `kernel/isr.c` do
-      wersji z repozytorium - razem z opakowaniem, które brało wielki
-      zamek przy wejściu z pierścienia 3. Jądro 32-bitowe wjechało więc
-      do repozytorium z ring 3 na wszystkich rdzeniach i **bez żadnego
-      zamka**, mimo że opis mówił co innego. Wszystkie testy przeszły,
-      bo nic w nich nie naciskało na to miejsce dostatecznie mocno -
-      i to jest właśnie ten rodzaj zieleni, który nic nie znaczy.
-      Zamek wrócił na miejsce w tym kroku.
-
-      **Najpierw pomiar, który pokazał coś zupełnie innego.** Program
-      `syscalls` wola jądro milion razy i nic poza tym nie robi. Pod
-      wielkim zamkiem dwa procesy na czterech rdzeniach kończyły w 1080
-      tyknięciach, a te same dwa na jednym rdzeniu w 594. Cztery
-      rdzenie były więc **dwa razy wolniejsze** niż jeden. Ale gdy
-      zdjąłem zamek z tego wywołania, poprawa wyszła znikoma - czyli
-      zamek nie był tu wcale największym kosztem.
-
-      Był nim `smp_core()`. Całe jądro mówi słowem `current`, a to
-      słowo znaczy "zadanie TEGO rdzenia" - więc każde jego użycie
-      pytało procesor o numer rdzenia, a pytanie szło **odczytem
-      z lokalnego APIC**. To rejestr sprzętowy poza pamięcią podręczną:
-      setki cykli na realnej maszynie, a pod emulatorem jeszcze więcej,
-      bo dostęp do sprzętu bierze jego własny zamek. Jądro płaciło to
-      po kilka razy na każde wywołanie systemowe.
-
-      Numer był jednak przez cały czas pod ręką i za darmo. Każdy rdzeń
-      ma **własny segment stanu zadania** - dostał go w poprzednim
-      kroku - a jego selektor siedzi w rejestrze zadania procesora.
-      Instrukcja `str` czyta go bez ani jednego dostępu do pamięci.
-      Zanim rdzeń załaduje swój segment, `str` daje zero, i to jest
-      poprawna odpowiedź, bo do tej chwili biegnie tylko rdzeń
-      rozruchowy. Sam rozruch segmentów pyta dalej APIC - inaczej
-      byłoby to pytanie o numer po to, żeby go dopiero ustawić.
-
-      Efekt: milion wywołań na jednym rdzeniu z 594 tyknięć do 286
-      w trybie chronionym i z 288 do 159 w trybie długim. Dwa razy
-      taniej, w każdym wywołaniu systemowym i w każdym przerwaniu.
-
-      **Dopiero potem zamek.** Lista wywołań, które nie potrzebują
-      wielkiego zamka, jest krótka i jawna: numer procesu, licznik
-      zegara, numer rdzenia, uśpienie. Każde z nich dotyka wyłącznie
-      stanu wołającego zadania albo rzeczy, które mają własne zamki.
-      Domyślna odpowiedź brzmi "z zamkiem" i tak ma zostać - dopisanie
-      się do tej listy jest obietnicą, że wywołanie przeczytało się do
-      końca, razem z tym, co woła dalej.
-
-      Doręczenie zabicia i sygnału zostaje pod zamkiem, bo jedno kończy
-      proces, a drugie przestawia mu stos - ale zamek bierzemy dopiero
-      wtedy, gdy naprawdę jest co doręczyć. Bez tego ta ścieżka nie
-      różniłaby się od zwykłej niczym poza nazwą.
-
-      **Liczby.** Milion wywołań w każdym z dwóch procesów: w trybie
-      chronionym 287 tyknięć po kolei wobec **192** naraz, w trybie
-      długim 147 wobec **62**. Przed całą zmianą było w tym miejscu
-      wolniej na czterech rdzeniach niż na jednym.
-
-      Test pilnuje jednak nie tylko czasu. Każde z miliona wywołań ma
-      zwrócić numer TEGO procesu - a to jest dokładnie ta pomyłka,
-      którą zamek do tej pory zasłaniał: dwa rdzenie, które mylą się co
-      do tego, które zadanie prowadzą. Dwa miliony zgodnych odpowiedzi
-      znaczą więcej niż każdy pomiar czasu.
-- [x] **Nazwy po angielsku, testy rozdzielone** - zmiana konwencji, nie
-      zachowania.
-
-      Identyfikatory, nazwy plikow i nazwy programow sa teraz po
-      angielsku; po polsku zostaje to, co system mowi do czlowieka:
-      komunikaty jadra, opisy asercji w testach i ten dziennik. Kod
-      pisze sie po angielsku, bo tak sie go czyta.
-
-      Zamiane zrobilem narzedziem swiadomym skladni - dla C wlasnym
-      skanerem pomijajacym napisy i komentarze, dla Pythona
-      tokenizerem z biblioteki standardowej. Wynik porownalem
-      maszynowo z czysta zamiana nazw na wersji z repozytorium: rozne
-      mialy byc tylko te pliki, ktore poprawialem recznie, i tylko one
-      byly.
-
-      Recznych poprawek bylo cztery i wszystkie z jednego powodu: nowa
-      nazwa zderzala sie z istniejaca. Jedna z nich zmieniala
-      ZNACZENIE kodu i nie zglosil jej ani kompilator, ani zaden test.
-      W sterowniku NVMe bufor DMA z zakresu pliku dostawal nazwe `buf`,
-      ktora nosi juz parametr `nvme_write` - i przeslanialby go tak, ze
-      zapis szedlby do bufora wolajacego zamiast do DMA. Napisalem
-      wiec osobne narzedzie, ktore szuka NOWYCH przeslonien w calym
-      drzewie: poza jednym miejscem w ush64 zaden plik zadnego nie
-      zyskal.
-
-      Po stronie Pythona byla jeszcze jedna pulapka. Tokenizer oddaje
-      caly f-napis jako jeden znacznik, wiec nazwy w klamrach zostaly
-      nietkniete i `run_tests.py` wywrocil sie na `sek`. Drugie
-      przejscie podmienia je osobno, tylko w nawiasach klamrowych.
-
-      **Testy rozdzielone na pliki po jednej rzeczy.** Trzy grupy byly
-      workami: `rdzen` (174 asercje), `rdzen2` i `k64` (795 wierszy).
-      Kazda z nich robila wszystko na jednej maszynie, wiec awaria
-      wskazywala grupe pokrywajaca trzecia systemu, a nie zepsuta
-      rzecz. Zostaly z nich osobne grupy: rozruch, shell, procesy,
-      fork, pamiec na zadanie, sygnaly, ochrona, siec, HTTP, mysz,
-      ush, system plikow - i po stronie 64-bitowej rdzen trybu
-      dlugiego, procesy, shell i dysk. Sterowniki tez sie rozeszly na
-      ACPI, klawiature USB, AHCI, konsole i wymiane stron.
-
-      Cena jest uczciwa i widac ja w liczbach: grup jest 49 zamiast 32,
-      a caly bieg trwa 361 zamiast 326 sekund, bo kazda grupa musi
-      wystartowac wlasna maszyne. Za to najdluzsza grupa skrocila sie
-      ze 174 do 87 sekund, a nieprzechodzaca asercja mowi teraz, co
-      sie zepsulo.
-- [x] **Komentarze po angielsku** - domkniecie poprzedniego kroku.
-
-      Nazwy przeszly na angielski wczesniej, komentarze zostaly po
-      polsku i przez chwile plik wygladal tak, jakby pisaly go dwie
-      osoby. Teraz po polsku jest tylko to, co system mowi do
-      czlowieka: komunikaty jadra, opisy asercji w testach i ten
-      dziennik.
-
-      Przeszlo przez to wszystko - kernel64/, user/, user64/, oba
-      pliki .S w kernel/, ktore umknely poprzedniemu przejsciu, oraz
-      komentarze i docstringi w scripts/. Robilem to narzedziem, ktore
-      wycina z pliku same komentarze i wkleja z powrotem tlumaczenia
-      pod tymi samymi numerami: dla C wlasnym skanerem, dla Pythona
-      tokenizerem z biblioteki standardowej. Raz pomylilem numeracje o
-      jeden i nadpisalem naglowek sekcji w t_e1000.py cudzym tekstem -
-      widac to bylo od razu, bo w pliku zostal jeden komentarz po
-      polsku, ktorego juz nie mialo byc.
-
-      Przy okazji wyszly nazwy, ktore poprzedni pass ominal, bo nie
-      byly identyfikatorami w kodzie, tylko nazwami plikow i
-      programow: mkmapa, gleboko, shmpisz64, shmczytaj64. Do tego
-      argumenty trybow mmapzap (pisz/spr/bez/spr2/widac) i garstka
-      identyfikatorow z polskim rdzeniem, ktora przeszla przez sito:
-      db_krok, FDK_WOLNY, gotowa, uzyte, uzyty, wszystkie, uz_open,
-      uz_time.
-
-      Automatyczna zamiana nazw ma swoja cene i tu tez ja zaplacilem:
-      zamiana 'bez' na 'nosync' weszla w polskie napisy runtime i
-      zrobila z "bajty bez msync" - "bajty nosync msync". Wylapalem to
-      przegladajac diff, nie test. Tego rodzaju szkody zaden test nie
-      zlapie, bo tekst komunikatu nie jest niczyja asercja.
-
-      768 asercji, 49 grup, bez zmian w zachowaniu.
-
-- [x] **Zmiana mapowania dochodzi do pozostalych rdzeni (TLB shootdown)**
-      - i watki moga wreszcie wyjsc poza rdzen rozruchowy.
-
-      Tablica stron jest pamiecia, a pamiec jest wspolna. Tlumaczenie
-      WYLICZONE z tej tablicy juz nie: kazdy rdzen trzyma swoje, w
-      podrecznej pamieci, do ktorej jadro nie ma zadnej instrukcji.
-      Zmiana wpisu zmienia wiec to, co mowia tablice, i nic w tym, w
-      co wierzy sasiad - a sasiad pisze dalej do ramki, ktora jadro
-      zdazylo juz zwolnic albo oddac komus innemu.
-
-      Dopoki proces bieglo na jednym rdzeniu, nikt na tym nie cierpial.
-      I wlasnie dlatego watki byly trzymane na rdzeniu rozruchowym:
-      dziela przestrzen adresowa, wiec to one wchodza w to pierwsze.
-
-      Jedyna droga do cudzej pamieci podrecznej to zapytac jej
-      wlasciciela - wyslac przerwanie i POCZEKAC na odpowiedz. To
-      czekanie jest cala rzecza. Prosba wyslana i nieodczekana nie mowi
-      nic o tym, kiedy zostanie spelniona, a "kiedy" jest dokladnie
-      tym, co wolajacy musi wiedziec: za chwile zwalnia ramke.
-
-      Placi za to tylko ten, kto jest winien. Kazdy rdzen oglasza, w
-      ktorej przestrzeni stoi, wiec zmiana w przestrzeni, ktorej nikt
-      inny nie trzyma, nie wysyla zadnego przerwania - czyli kazdy
-      proces jednowatkowy, czyli prawie wszystkie.
-
-      **Maska nie moze byc zla, i to jest cale rozumowanie.** Pytamy
-      tylko te rdzenie, ktore mowia, ze stoja w danej przestrzeni, a
-      rdzen moze zmienic zdanie w trakcie pytania. Oba kierunki sa
-      bezpieczne z tego samego powodu: rdzen, ktory z przestrzeni
-      WYSZEDL po policzeniu, uniewaznia adres w przestrzeni, ktorej juz
-      nie prowadzi - jedno zmarnowane chybienie, a samo przejscie i tak
-      wyrzucilo mu cala pamiec podreczna. Rdzen, ktory WSZEDL po
-      policzeniu, musial zaladowac CR3, a to wyrzuca wszystko - nie ma
-      jak wejsc, trzymajac cos starszego niz chwila wejscia.
-
-      **Zakleszczenie, ktore to zatrzymalo.** Pierwsze uruchomienie
-      zawieszalo maszyne. Rdzen czekajacy na wielki zamek jadra robi to
-      z wylaczonymi przerwaniami - wchodzi bramka przerwania - wiec nie
-      slyszy nic. Bylo to nieszkodliwe, dopoki jedyne, na co mozna bylo
-      czekac, to sam zamek: trzymajacy dziala i predzej czy pozniej
-      puszcza. Przestalo byc w chwili, gdy trzymajacy zaczal czekac na
-      NAS. Petla czekania na zamek odpowiada teraz w trakcie: jedna
-      proba, odpowiedz, kolejna proba.
-
-      **Drugi blad, znaleziony przy okazji i starszy od calej zmiany.**
-      Program testowy pokazal 7296 niezgodnosci pamieci - i nie mialy
-      one nic wspolnego z TLB. Granica sterty i nastepny wolny adres
-      mmap opisuja PRZESTRZEN adresowa, a watki dziela jedna; trzymane
-      per zadanie byly kopiowane przy tworzeniu watku i przesuwane
-      osobno, wiec dwa watki proszace o pamiec w tej samej chwili
-      dostawaly TEN SAM adres, kazdy przekonany, ze jest pierwszy. Blad
-      byl bledem od dnia, w ktorym pojawily sie watki - tylko trudno
-      bylo go trafic, dopoki proces stal na jednym rdzeniu.
-
-      **Liczby.** Grupa 'tlb' i program 'tlbtest': cztery watki jednego
-      procesu, w kazdej rundzie swieza pamiec, czyli swieze zmiany
-      mapowan w przestrzeni, w ktorej stoja trzy inne rdzenie.
-
-      | proba | maska rdzeni | zdalnie | odpowiedzi | bledy pamieci |
+# ThreadOS - development journal
+
+A chronological record of what was built, and above all **why**. Nearly
+every entry explains why something looks the way it does and which bugs
+turned up on the way. Those explain the shape of the code better than
+the code itself.
+
+How to build, run, test and maintain the system is in
+[README.md](../README.md). This file is the history behind it.
+
+Until autumn 2026 the project was called ProtonOS, and older entries
+use that name. They also mention earlier names of things that have
+since been renamed: the filesystem was PFS3 before it became TFS3, the
+initrd format was PIRD before TIRD, and some programs and messages had
+Polish names before the system switched to English. Entries describe
+the system as it was on the day they were written.
+
+The journal was kept in Polish until the system switched to English, and
+those early entries were translated later.
+
+## How it works
+
+**The 32-bit kernel.** GRUB or QEMU finds the Multiboot header in the
+first 8 KiB of the image (`boot/boot.S`), loads the kernel at 1 MiB and
+jumps to `_start` already in protected mode. From there `kmain()` sets
+up the GDT, IDT, PIC and PIT in turn, builds the physical memory map from
+the loader's tag, turns on paging, and finally starts the scheduler and
+the shell.
+
+**The 64-bit kernel.** Multiboot 2 leaves the processor in protected
+mode, so the switch to long mode has to be done by hand and in a strict
+order (`boot64/boot64.S`). The page tables come first, because paging
+is **mandatory** in long mode. Then PAE, then the LME bit in EFER, then
+paging itself. Only the far jump to a segment with the L bit really
+switches the processor. The processor itself reports whether it worked:
+the LMA bit in EFER is set by the CPU, not by us.
+
+**Booting through UEFI.** `make iso64` assembles a **hybrid** disc. It
+has a boot sector for BIOS and a FAT partition with `BOOTX64.EFI`, so the
+same disc starts on old and new machines alike. Under UEFI there is no
+text memory at `0xB8000`. All the firmware gives us is a framebuffer, so
+`fbcon.c` draws the characters itself, pixel by pixel, in its own font.
+Later the project got its own UEFI loader, threadboot, which needs no
+GRUB at all.
+
+**Programs.** They live in the initrd as ELF files, and the kernel knows
+nothing about them beyond what it reads from the header: where to start,
+what to load and with which permissions. The permissions come straight
+from the segments. Code is read-only, data and the stack are marked
+non-executable, and the processor enforces it, not the kernel.
+
+## Development journal
+
+The list is chronological. It records **why** things look the way they
+do, including the bugs that turned up on the way, because those explain
+the shape of the code better than the code itself. Everything below
+works and is checked by `make test`.
+
+
+- [x] GDT (Global Descriptor Table): the kernel's own segment descriptors
+- [x] IDT and CPU exception handling
+- [x] PIC (remapped) and hardware interrupts (IRQ)
+- [x] Keyboard driver (PS/2)
+- [x] Timer (PIT) and an uptime counter
+- [x] Serial port (COM1) and printk
+- [x] Reading the memory map from Multiboot
+- [x] Physical memory management (a frame allocator on a bitmap)
+- [x] Paging (identity-mapped 64 MiB; page faults reported with CR2)
+- [x] Kernel memory allocator (kmalloc/kfree)
+- [x] A simple shell in the kernel (help, ps, mem, uptime, clear, crash, reboot)
+- [x] Kernel threads and a scheduler (round-robin, preemption from the
+      timer, sleep/yield/exit, zombie cleanup)
+- [x] User mode (ring 3): TSS, `int 0x80` system calls, memory
+      protection (a process that reaches for kernel memory dies, and the
+      system carries on)
+- [x] Separate address spaces (a page directory per process, CR3 switched
+      by the scheduler, every frame freed when a process ends)
+- [x] Loading ELF programs from the initrd (`ls`, `run hello`, `run evil`)
+- [x] System calls read (keyboard, blocking), spawn, wait, getpid
+- [x] The shell as a user program (`run sh`: ring 3, takes over the
+      console, starts programs with spawn+wait, `exit` returns to the kernel)
+- [x] Program arguments (argc/argv): `run echo proton os works`
+- [x] An sbrk system call and malloc in user space (dynamic memory): `run memtest`
+- [x] ATA disk driver (PIO) and the PFS filesystem: files survive a restart
+- [x] Unix-style file descriptors: open/close/read/write/seek, fd 0/1/2
+      are keyboard/console, higher fds are files (one `write` for
+      everything); a `cat` program in ring 3
+- [x] Output redirection in the shell (`echo text > file`): the kernel
+      swaps the process's stdout for a file handle before entering ring 3
+- [x] Pipes between processes (`echo something | wc`): two processes in
+      parallel, a buffer in the kernel; the consumer blocks on an empty
+      pipe and gets EOF when the producer ends
+- [x] Unix tools that compose through pipes: `seq`, `grep`, `head`, `wc`,
+      `cat` (e.g. `seq 9 | grep 7 > file`)
+- [x] Multi-stage pipelines (`seq 20 | grep 1 | wc`, up to 5 stages)
+- [x] File management from ring 3: `ls` (sys_readdir), `rm` (sys_unlink)
+- [x] A process's exit status returned by `wait` (shown by `ush`; `grep`
+      returns 1 when nothing matched, a process killed by an exception
+      returns -1)
+- [x] Real-time clock (RTC/CMOS) and a `date` program
+- [x] Appending with `>>`, and the `cp` and `mv` programs
+- [x] Directories in PFS: paths (absolute and relative, `.`/`..`), a
+      working directory per process (inherited), `mkdir`/`cd`/`pwd`/`ls`
+- [x] Background processes (`cmd &`) and `kill <pid>` (delivered on the
+      way back to ring 3, from a system call or a timer interrupt)
+- [x] PS/2 mouse driver (IRQ12): position and buttons (the `mouse` command)
+- [x] VGA graphics mode 13h (320x200x256): pixels, rectangles, the
+      palette (the `gfx` command, tested through a QMP screendump)
+- [x] A mouse cursor on the graphical desktop (the compositor as a
+      kernel thread)
+- [x] Text rendering with an 8x8 bitmap font
+- [x] Windows with title bars, dragged with the mouse (the compositor): `desktop`
+- [x] Clickable controls: a close button [x], an action button with a counter
+- [x] Graphical applications in ring 3: a process creates its own window
+      and draws through system calls (`win_create`/`win_rect`/`win_text`);
+      the compositor composes its buffer and removes the window when the
+      process dies (`run guiapp`)
+- [x] Events delivered to applications: a click in a window reaches the
+      process through an event queue (`win_poll`), and the application
+      reacts
+- [x] Keyboard events to the focused window (a click focuses; a click on
+      the desktop removes the focus and the keys go back to the kernel
+      shell)
+- [x] A taskbar with a `Menu` button and an application launch menu (a
+      click starts the program through exec_spawn): `guiapp`, `gclock`
+- [x] A list of open windows on the taskbar: the focused window is
+      highlighted, a click raises a window (Z order independent of the slot)
+- [x] Higher VESA resolution (640x480x32 through DISPI and PCI), a
+      double-buffered desktop (no flicker), with a fallback to 320x200
+- [x] An `mmap` system call: anonymous process memory (fresh, zeroed),
+      freed with the address space; `run mmaptest`
+- [x] A GUI file manager (`gfiles`): a list of files on PFS, and clicking
+      a name opens the file and shows its contents (FS -> click -> read
+      -> window)
+- [x] Memory shared between processes (`sys_shm` by key): two processes
+      see the same memory (`shmtest` and `shmread`)
+- [x] Desktop icons: clickable tiles that start applications
+- [x] A resource monitor (`gmon`): RAM and uptime live, with a memory
+      usage bar (the `sys_sysinfo` system call)
+- [x] Threads in a process (`sys_thread`): several tasks share one address
+      space, which is freed after the last thread (`run threads`)
+- [x] A scheduler with priorities (`sys_setprio`): a higher priority
+      preempts a lower one, equal ones take turns (`run prio`)
+- [x] A terminal in a GUI window (`gterm`): type a command and its output
+      appears in the window (keyboard -> spawn with redirection -> read)
+- [x] Resizing and minimising windows: the `[_]` button minimises a
+      window (it stays on the taskbar, a click restores it), and a handle
+      in the bottom-right corner of the kernel's windows resizes them by
+      dragging
+- [x] Icon positions saved on disk: desktop icons can be dragged with the
+      mouse, and their layout is saved to a PFS file (`icons.pos`) and
+      comes back after a restart (the compositor reads it at start)
+- [x] RTL8139 network card (PCI and DMA: an RX ring, 4 TX descriptors,
+      the card's interrupt) and a network stack: Ethernet, ARP with an
+      address table, IPv4 with its checksum, ICMP. `ifconfig`, `arp`,
+      `ping 10.0.2.2` (the system also answers other machines' ARP
+      requests and pings to itself)
+- [x] Validating pointers from ring 3: every address given to a system
+      call must lie in user space and be mapped in the process's page
+      directory (`user_ok`/`user_str`), and strings and structures are
+      copied into kernel buffers. A bad pointer is an error -1, not a
+      write into kernel memory on somebody else's behalf (`run evil2`)
+- [x] UDP: sockets in the kernel (ports, datagram queues, a checksum with
+      the pseudo-header) and a DHCP client. The IP address, netmask,
+      gateway and DNS server come from the network instead of being
+      hard-coded (`dhcp`). `kill` also accepts a process name, and the
+      shell prompt is redrawn after asynchronous kernel messages
+- [x] UDP sockets in ring 3 (`udp_open`/`udp_send`/`udp_recv`/`udp_close`,
+      `netinfo`): a socket belongs to its process and is released when
+      the process dies, data goes through checked pointers, and the
+      loopback lets two processes talk over UDP without a network
+      (`udpecho` + `udptest`). A DNS client in user space
+      (`nslookup example.com`), and `kill` can interrupt a wait inside the
+      kernel
+- [x] TCP: active and passive open (client and server), sequence numbers
+      with acknowledgements, retransmissions from a `tcpd` thread, closing
+      with FIN, RST for a segment to a closed port. System calls
+      `tcp_connect`/`listen`/`accept`/`send`/`recv`/`close`, an HTTP
+      client (`httpget`: content from the world lands on PFS) and a
+      server in ring 3 (`tcpserv`), with `netstat` to look at them
+- [x] A browser in a desktop window (`gweb`): an address bar typed on the
+      keyboard, the page fetched over TCP, HTML tags stripped, the text
+      wrapped in the window and the content saved to PFS. Network, GUI,
+      keyboard and disk in one ring 3 application
+- [x] Booting straight to the graphical desktop; the kernel command line
+      (Multiboot `-append`) option `nodesktop` keeps the text console
+- [x] PFS3: blocks allocated from a bitmap instead of fixed areas. 64
+      inodes, names up to 63 characters, files up to 268 KiB (direct
+      blocks plus an indirect one), blocks freed on `rm`/truncate, `df`
+      and the disk size from ATA IDENTIFY. Metadata writes are limited to
+      the changed block of the inode table and the bitmap
+- [x] TCP: the window is updated after reading from a socket, so
+      receiving a large answer no longer waits for the sender's probe
+      (100 KiB in a few seconds)
+- [x] Names instead of addresses: a shared DNS client (`udns.h`) in
+      `nslookup` and the browser, and a server set by hand with `dns`
+- [x] An HTTP/1.1 client (`uhttp.h`): `chunked` encoding reassembled
+      across packet boundaries, redirects (absolute and relative),
+      parsing `http://host[:port]/path`. In the browser, HTML entities
+      (`&amp;`) and UTF-8 bytes are turned into readable characters
+- [x] Cryptography for TLS: SHA-256, HMAC-SHA256, HKDF (including
+      `HKDF-Expand-Label` from RFC 8446), ChaCha20, Poly1305 and the
+      ChaCha20-Poly1305 AEAD, X25519. All in user space and checked
+      against the vectors from FIPS 180-4, RFC 4231, RFC 5869, RFC 8439
+      and RFC 7748 (`run cryptotest`; one X25519 scalar multiplication
+      takes ~20 ms)
+- [x] An atomic `printk`: a message from one thread no longer lands in
+      the middle of a line printed by another thread or an interrupt
+      handler
+- [x] A **TLS 1.3** client (RFC 8446) in ring 3: ClientHello with SNI
+      and `key_share`, the X25519 shared secret, the key schedule on HKDF,
+      the encrypted rest of the handshake, checking the server's
+      `Finished`, our own `Finished`, separate application keys and a
+      record layer with ChaCha20-Poly1305. `httpget https://...` and the
+      browser fetch pages over HTTPS; a handshake with OpenSSL takes
+      ~90 ms (the certificate is not checked yet - that is the next step)
+- [x] A source of randomness for programs (`urand.h`): the RTC, the timer
+      count, the pid and stack addresses mixed through SHA-256
+- [x] Certificate verification: big numbers in Montgomery form, RSA
+      signatures (PKCS#1 v1.5 and PSS), an X.509/DER parser, checking the
+      chain up to a trusted issuer, the validity dates and the host name
+      (SubjectAltName with wildcards). The trust store is read from the
+      file `roots.der` on PFS (`run certtest`)
+- [x] The process stack grew from 4 KiB to 32 KiB: RSA at 2048 bits needs
+      several kilobytes for its working numbers alone
+- [x] ECDSA on the NIST P-256 curve: point arithmetic in Jacobian
+      coordinates on the same big numbers as RSA, verifying signatures in
+      certificates and in `CertificateVerify` (~80 ms per signature).
+      Servers with an EC key are no longer out of reach
+- [x] A built-in trust store: 14 public CA roots in the system image (the
+      `mkcaroots.py` script refreshes them from the host's bundle), plus
+      roots of one's own from `roots.der`. Verification is required by
+      default for `https://` (`httpget -k` skips it)
+- [x] Extended keys (arrows, PgUp/PgDn, Home/End) in the keyboard driver,
+      delivered to programs as control codes of their own
+- [x] Browser: scrolling the page, `<a href>` links highlighted and
+      clickable (relative and absolute addresses), text split at block
+      tags, the address bar refreshed after following a link
+- [x] PFS3: a double-indirect block. The file size limit rises from
+      268 KiB to 64 MiB (the test downloads 400 KB straight to disk and
+      reads it back through a pipe)
+- [x] ECDSA on the P-384 curve and SHA-384/SHA-512: the curve arithmetic
+      is parameterised (one set of formulas for P-256 and P-384), and the
+      curve constants and the SHA-512 tables are generated rather than
+      copied by hand. `CertificateVerify` accepts `ecdsa_secp384r1_sha384`
+- [x] Hardened parsers: `uhtml.h` (HTML to text) is split out of the
+      browser and bounds-checked, and `make fuzz` feeds broken
+      certificates, HTML, HTTP answers, DER signatures and **network
+      frames that reach the kernel** through sanitizers (net.c and tcp.c
+      compiled on the host with hardware stubs)
+- [x] The kernel shell as an ordinary thread: the keyboard interrupt only
+      puts a character into a ring buffer and wakes the thread, so a
+      command can sleep, wait for the network or read the disk, and
+      characters typed in the meantime are not lost (`ping` and `dhcp`
+      no longer need workaround threads)
+- [x] `fork()` with copy-on-write: the child returns from the system call
+      where the parent did and sees its memory, but nothing is copied.
+      Both address spaces get the same frames without write permission,
+      each frame counts its owners, and a private copy of a page is made
+      only on the first write. The WP bit in CR0 extends this to the
+      kernel's own writes (a system call filling a process's buffer). The
+      child inherits descriptors and pipe ends (`run forktest`: a
+      256 KiB buffer, RAM grows by 12 KiB after `fork`)
+- [x] `exec()` in place (the equivalent of `execv`): a process replaces
+      its own program and keeps its pid, descriptors and working
+      directory. Together with `fork()` this is the classic Unix pair
+      (fork, then jump into the new program in the child), and `ps` shows
+      the new name
+- [x] The process tree: every task knows its parent (`ps` shows a PARENT
+      column), `waitany` waits for **any** child of one's own and returns
+      them in the order they end (pid and exit code), and orphaned
+      processes are adopted by the grandparent, so their exit codes are
+      not lost with the parent (`run ptree`)
+- [x] Signals: `signal()` with a handler of one's own in ring 3,
+      `SIG_IGN` and default actions, `kill(pid, signal)`, `SIGCHLD` to
+      the parent when a child dies, an uncatchable `SIGKILL`. The kernel
+      delivers a signal on the way back to ring 3: it puts a frame with
+      the interrupted state on the process's stack and jumps into the
+      handler, and a trampoline from `usys.h` asks through `sigreturn`
+      for that state to be restored. Only the general registers, `eip`,
+      `esp` and the arithmetic flags come back from the frame, never the
+      selectors or IOPL. **Ctrl+C** on the keyboard goes as `SIGINT` to
+      the process holding the console and interrupts its wait for a key;
+      `kill P S` in the kernel shell sends any signal, also by process
+      name (`run sigtest`)
+- [x] All detected memory under management: the identity mapping no
+      longer ends at 64 MiB but reaches the top of RAM (up to 512 MiB).
+      The first 64 MiB are described by static tables, because the kernel
+      has to see memory before it asks the PMM for the first frame, and
+      later tables come from the PMM, so the limit is set by the amount
+      of RAM and not by the size of a table in `.bss`. User space moved
+      from `0x08048000` to **1 GiB** to get out of the mapping's way: one
+      process can now take 80 MiB, more than the whole system could see
+      before
+- [x] Demand paging: `sbrk` and `mmap` no longer allocate a single frame.
+      The area is promised to the process, and pages appear only when
+      they are first touched (asking for 64 MiB costs 0 KiB, writing
+      1 MiB costs exactly 1024 KiB). Pointer validation in system calls
+      can bring such a page into existence, so a freshly allocated,
+      untouched buffer does not look like a bad pointer to the kernel
+      (`run lazymem`)
+- [x] An old bug in recognising kernel page tables fixed: they were
+      recognised by the **whole value** of the page directory entry, and
+      the processor itself sets the "accessed" bit in it. After a while
+      the same table had different values in different directories, and
+      cleaning up a process could free a **kernel** table, handing a
+      piece of the kernel's own image to the free frame pool. Now the
+      USER bit decides, which kernel tables do not have, and the PMM has
+      an extra fuse that refuses to free a frame of the kernel image
+- [x] Swapping pages to disk: when frames run out, the kernel writes
+      idle pages to disk (the second-chance algorithm, using the
+      "accessed" bit the processor sets) and brings them back on first
+      touch. Space is reserved through the filesystem (`swap.sys`,
+      visible in `fls` and `df`), but the pages themselves go there
+      directly through ATA, bypassing the PFS code: swapping can start in
+      the middle of a file operation, and PFS has a single shared block
+      buffer. The entry of a swapped-out page keeps the slot number in its
+      upper bits, `mem` shows the balance, and `run swaptest 18` fits
+      18 MiB on a machine with 16 MiB of RAM
+- [x] Virtual consoles (Alt+F1..F4): each has its own 80x25 screen, its
+      own shell, its own key buffer and its own keyboard owner. Which
+      console output goes to follows from the **task** that writes it
+      (like a Unix controlling terminal). A program started on the second
+      console keeps writing there while we look at the first one, and
+      `Ctrl+C` reaches the process holding the console that is visible
+- [x] An **AHCI (SATA)** driver and a block device layer. The controller
+      is found by its PCI class (0x01/0x06/0x01), commands are built in
+      memory (a command list, a command table with a FIS and a PRDT), and
+      data moves by **DMA** instead of being copied word by word. The
+      filesystem and the swapper no longer know which disk is underneath:
+      the choice is made once at boot, and ATA PIO stays as the fallback.
+      This is what it takes to see the disk on a newer board without a
+      compatibility mode. Incidentally, the same 18 MiB swap test on a
+      16 MiB machine now takes 4.3 s instead of 8.3 s
+- [x] A **USB keyboard** (HID, boot protocol) on a UHCI controller:
+      enumerating the device on the bus (port reset, descriptors,
+      assigning an address, finding the HID interface and its endpoint),
+      switching to the boot protocol and translating the eight-byte
+      reports into keys, with modifiers, arrows, Ctrl+C and Alt+F1..F4.
+      To the rest of the system it makes no difference which keyboard is
+      attached: characters travel the same path as from PS/2. Also tested
+      with **PS/2 support disabled**, when the system could only be used
+      over USB
+- [x] The PCI scan covers every function of a device, not just function
+      zero. Controllers built into the bridge sit on function 2 or 3, and
+      looking only at function zero never found them
+- [x] **ACPI**: powering off and restarting the computer. The RSDP is
+      found in memory below one megabyte, it leads to the table list
+      (RSDT), and that to the power table (FADT). The value that has to
+      be written to turn the machine off sits deeper still, in AML
+      bytecode (the DSDT) under the name `_S5_`. There is no full
+      interpreter; this one object is read directly. The commands are
+      `poweroff` and `reboot` (restart through the ACPI reset register,
+      or a pulse through the keyboard controller when the firmware does
+      not provide one). The tables usually lie outside the memory the
+      kernel manages, so each one is added to the identity mapping
+      before it is read
+- [x] **Multiboot 2**: the kernel image now carries both headers at once.
+      QEMU with `-kernel` understands only the older one, and GRUB
+      prefers the newer one; the loader picks the one it knows and says
+      in `magic` which it used. Information from the newer format
+      (command line, modules, memory map) is copied into the same
+      structure the rest of the kernel has used from the start, so
+      neither the PMM nor the initrd sees a difference. The new thing
+      that really matters: **the loader supplies the pointer to the ACPI
+      tables**. Under UEFI there is no BIOS memory to search for it. This
+      is the first step towards booting through UEFI
+- [x] **A console on the framebuffer**: the Multiboot 2 header asks the
+      loader for a graphics mode, and the kernel draws the characters
+      itself, in the same 8x8 font as the rest of the graphics and in the
+      text-mode colours converted to RGB. The character buffer at
+      `0xB8000` is no longer needed, which is a precondition for working
+      under UEFI, where there is no VGA text mode at all. The four
+      virtual consoles work unchanged; only where a finished cell goes is
+      different. The desktop uses the same buffer: `video_init_vesa`
+      reaches for the Bochs/QEMU interface, which exists only on a
+      virtual machine, so when the loader has set a mode we keep it (and
+      get 1024x768 instead of 640x480)
+- [x] **The first step on x86-64**: a second kernel image (`make
+      kernel64`) enters long mode. GRUB leaves us in 32-bit protected
+      mode, so `boot64/boot64.S` builds the page tables itself (the first
+      4 GiB in 2 MiB pages, not for memory but because device registers
+      and the framebuffer live high up), enables PAE, sets the LME bit in
+      EFER, enables paging and does a far jump to a segment with the L
+      bit. The processor confirms the result itself: it sets the LMA bit
+      in EFER, not us. The most important thing is what this image does
+      **not** contain: any copy of code. Printing, the framebuffer
+      console, the Multiboot 2 tags and the string functions are the same
+      files compiled a second time, and the whole difference between the
+      modes fits in `io.h` and a few casts through `uintptr_t`
+- [x] Interrupts and exceptions in long mode: an IDT of its own (an entry
+      is now 16 bytes, because the handler address is 64-bit and does not
+      fit in one piece), stubs that save sixteen registers by hand
+      (`pushal` no longer exists in long mode), and return through
+      `iretq`. `struct regs` now has a version per mode, so the PIC and
+      PIT drivers compile in both kernels without a single change. The
+      proof: an `int3` trap returns without stopping the system, and the
+      timer ticks on its own (1 -> 201 ticks)
+- [x] A bug in the USB driver fixed: when there was no data, the read
+      descriptor was **abandoned**, and the controller could complete the
+      transfer after that decision. The report landed in a buffer nobody
+      read, the device flipped its data toggle, and from then on it never
+      matched ours again. It showed up the way such bugs usually do: it
+      worked, and worked, and then the keyboard went silent. Now the
+      descriptor stays armed all the time, and the controller retries it
+      every frame by itself
+- [x] Memory in long mode: the PMM and the kernel heap moved over
+      **without a single change of logic** (the frame bitmap does not
+      depend on the mode; a few casts through `uintptr_t` were enough),
+      and paging was rewritten: four levels instead of two, 64-bit
+      entries, tables built from frames taken from the PMM instead of
+      being fixed in the kernel image. A bit that 32-bit paging did not
+      have was added: **no-execute**. The framebuffer and data memory are
+      marked so that the processor refuses to execute anything in them.
+      The check: a 4 KiB page placed **eight gigabytes** above the
+      identity-mapped area, written and read through the full four-level
+      path
+- [x] Kernel threads in long mode: the context switch saves six
+      registers instead of four, eight bytes each, and the rest of a
+      thread's state stays on its own stack, just as in the 32-bit
+      kernel. A separate **idle thread** was added: with it, the case
+      "nobody is ready" simply does not happen, and the scheduler does
+      not have to wait for an interrupt in the middle of its own call
+      (which, when called from the timer handler, would nest forever).
+      The check is arithmetic: over 600 ms, a thread sleeping 20 ms at a
+      time wakes exactly 30 times, and one sleeping 50 ms wakes 12 times
+- [x] **Ring 3 and the `syscall` instruction** in long mode: the port of
+      the kernel closes the circle. A GDT with user segments (their order
+      is not arbitrary: `sysret` builds the selectors from one value in
+      the STAR register, so data must come **before** code) and a TSS,
+      which in long mode has only one job left: to say which stack to
+      switch to on an interrupt from ring 3. The way into the kernel is
+      not an interrupt gate but `syscall`: the processor takes the
+      address from a model-specific register and leaves the return
+      address in RCX. The price is that `syscall` **does not switch the
+      stack**. One has to be provided in advance, and twice, because an
+      interrupt takes it from somewhere else (the TSS) than a system call
+      does. The proof: the program tells the kernel its code selector,
+      which only the processor knows - `cs=23`, ring 3
+- [x] **Booting through UEFI**: the 64-bit kernel starts on a machine
+      without a BIOS. `make iso64` builds a **hybrid** disc: a boot sector
+      for BIOS on one side, and on the other a FAT partition with
+      `BOOTX64.EFI`, which the firmware looks for. The same disc boots on
+      old and new machines alike. Two things had to be fixed on the way.
+      First, GRUB under UEFI does not set a graphics mode by itself and
+      fails with "no suitable video mode found" until it is told to load
+      the video drivers (`insmod all_video`) and keep the mode set by the
+      firmware (`set gfxpayload=keep`); and the Multiboot 2 tag has to ask
+      for "any" resolution (0x0x0), because the firmware gives what it
+      has anyway. Second, it turned out that OVMF provides a **24-bit**
+      framebuffer, and the console could only draw 32 bits per pixel and
+      silently refused. The difference is small but fundamental: at 24
+      bits a pixel has no padding byte, so writing a whole word tramples
+      the neighbour; it has to be written as three bytes. `fbcon` now
+      handles both formats, and under UEFI the screen shows exactly the
+      same log as under BIOS, drawn in our font pixel by pixel, without
+      help from the firmware and without the character memory at 0xB8000,
+      which does not exist there at all
+- [x] **Programs from a file in long mode**: the 64-bit kernel runs ELF
+      files read from the initrd rather than a piece of itself. Until now,
+      what ran in ring 3 was a dozen bytes hard-coded in the kernel's
+      `.rodata`: proof that the switch to ring 3 worked, and nothing more.
+      Now `kernel64/elf64.c` reads the ELF64 header and learns everything
+      from the file: where to start, what to load and **with which
+      permissions**. The permissions come straight from the segments, so
+      a program's code is read-only and its data and stack are
+      non-executable, enforced by the processor, not the kernel. A small
+      library, `user64/usys64.h`, was added: the way into the kernel is
+      the `syscall` instruction (the number in RAX, arguments in
+      RDI/RSI, the result in RAX, and RCX and R11 are lost because the
+      processor puts the return address and the flags there). The kernel
+      does not take a pointer from ring 3 on trust: `paging64_user_range`
+      checks the USER bit on **all four** levels of tables, exactly the
+      way the processor evaluates an access; otherwise it would be enough
+      to pass an address of kernel memory to have the kernel print it.
+      The `hello64` program writes, counts, sleeps, asks for the tick
+      count and exits with code 7, and all of it passes the same way
+      under BIOS and under UEFI
+- [x] **Memory protection that really protects**, and survives its own
+      proof. An exception coming from ring 3 no longer stops the system:
+      the kernel prints what happened, kills the guilty task and carries
+      on. Where an exception came from is told by the two lowest bits of
+      the code selector in the interrupt frame; the processor puts them
+      there, so the program has no way to lie. The handler for such an
+      exception does not return: `schedule()` switches to another
+      thread, and the interrupt frame disappears together with the dead
+      task's stack. Only this made it possible to **test** the
+      protection instead of trusting it. `nx64` writes an instruction
+      into its array in `.bss` and jumps to its address: the write
+      succeeds, and the jump ends in a page fault with `err=0x15` (page
+      present, access from ring 3, instruction fetch), so it was the NX
+      bit that fired and not a plain missing mapping. `wild64` reaches for
+      kernel memory in two ways: first it asks the kernel itself
+      (`paging64_user_range` refuses), then it reaches for it directly,
+      getting `err=0x05`, a read of a page without the USER bit. After
+      both deaths the kernel threads keep counting, and that is the
+      assertion that really matters
+- [x] A bug in the system call contract fixed: the kernel destroyed RDX,
+      RSI, RDI and R8-R10, as a C function may, but the program did not
+      know that. The compiler kept a constant in RDX across a whole call
+      and later used it as the number of the next call, hitting garbage
+      left by the kernel (it showed up as "unknown system call 1016").
+      Now the stub saves those registers itself: apart from RAX with the
+      result and RCX and R11, which the processor takes, everything comes
+      back untouched. It is cheaper to save six registers once than to
+      remember six traps in every program
+- [x] **Separate process address spaces** in long mode: two programs can
+      finally run at once, each with its own memory at the same address.
+      The split followed from the address layout: the top level of the
+      tables divides the address space into 512 GiB pieces and the second
+      level into gigabytes, and all of physical memory, the kernel and the
+      framebuffer fit into gigabytes other than the one programs live in.
+      So a process gets its own second-level table with one entry
+      cleared, and **the rest stays shared**: the same frames as the
+      kernel's. A mapping the kernel adds after boot is visible
+      immediately in every address space, and on a task switch CR3 is
+      reloaded only when it really changes (every reload flushes the
+      whole TLB). A task now also carries its own kernel stack: `syscall`
+      and an interrupt from ring 3 take it from two different places, so
+      both have to be set on every switch. A dying task first moves to
+      the kernel's address space and only then gives its own back; it is
+      hard to free tables one is standing on. The proof: `sep64`, running
+      as two copies at once, writes to the same address `40002060`, each
+      its own number, and after handing the CPU to the other copy **both
+      find theirs untouched**. After they die, the count of used frames
+      goes back exactly to where it was
+- [x] On the way: `iretq` to ring 3 now clears every register apart from
+      the ones the program is meant to get. The kernel used to leave
+      addresses of its own structures in them, and ring 3 has no reason
+      to even know them. The program gets one number from the kernel in
+      RDI, which is all of "argv" for now, but it is enough for two copies
+      of the same file to tell which one is which
+- [x] **`fork()` in long mode**: a second process now comes from the
+      program's own decision, not the kernel's. To make that possible,
+      the system call stub now pushes **exactly the frame an interrupt
+      pushes**. The `syscall` instruction pushes nothing by itself (it
+      leaves the return address in RCX and the flags in R11), so those
+      five words are added by hand. It costs a dozen instructions and a
+      return through `iretq` instead of `sysretq`, and gives one thing:
+      the kernel sees a system call and an interrupt the same way. `fork`
+      then comes down to copying the frame and telling the new task to
+      return to ring 3 with it, with zero in RAX. No registers are
+      restored "by hand": the same path every other call returns through
+      does it. For now memory is copied outright, page by page
+      (copy-on-write will come once plain duplication works). The proof:
+      `fork64` stores 100, forks, the child stores 200, and the parent,
+      when it wakes up, **still has its 100**
+- [x] A bug that was waiting for a second process fixed: a program's
+      stack pointer was kept in one global variable for the **whole**
+      system call. It was enough for the call to put the task to sleep
+      and for a second process to enter the kernel in the meantime, and
+      the first one returned to ring 3 on somebody else's stack. It did
+      not blow up earlier only because both processes had their stacks
+      at the same virtual address, so the overwritten value happened to
+      be the same. Now the value goes on the kernel stack of that one
+      task, and nobody else sees it
+- [x] **Copy-on-write** in long mode: `fork` no longer copies memory. The
+      parent and the child get the same frames, and a page that was
+      writable loses write permission in **both** and gets a mark in bit
+      9 (which the processor leaves to the operating system). On the
+      first write the processor raises a page fault, and only then does
+      the kernel make a copy, of that one page only. Read-only pages
+      (code, constant data) do not even need that: since nobody will
+      change them, they stay shared for good, and a reference count in the
+      PMM decides when they go back to the pool. The write-protect bit in
+      CR0 (WP) was added: without it the kernel can write to pages marked
+      read-only, so a shared page would be silently overwritten instead
+      of split. The numbers from a real run: `fork64` has seven pages
+      (code, constant data, data, four stack pages), so copying outright
+      would cost seven frames plus tables. **With shared pages, fork takes
+      five frames, all of them for tables, and two pages get split**: the
+      one the child wrote and one stack page. The semantics did not change
+      one bit: the parent still has its 100 when it wakes up
+- [x] **`exec` and `wait`**: the process model comes full circle. A
+      program can start **another** program and wait for it to end, which
+      is exactly what every shell in the world does. `exec` needed no
+      separate return path: we are inside a system call handler, and it
+      returns to ring 3 through the frame it was given, so it is enough to
+      **rewrite** that frame (a new start address, a new stack, cleared
+      registers) and let it return. The program on the other side has no
+      way to notice that it came back somewhere other than where it
+      called from. The order here is the only possible one: the name has
+      to be copied into the kernel **before** the memory it lives in
+      disappears, and the old address space can only be freed once the
+      processor has left it. `wait` relies on a trace left by a finished
+      task: the task itself leaves the list at the next switch, but the
+      parent does not have to manage to ask before the child ends, so one
+      entry stays behind to be collected. When there are no children at
+      all, `wait` says so instead of waiting forever. The proof: `spawn64`
+      forks, the child replaces its image with `hello64`, and the parent
+      collects its **seven**. That seven is the proof that it waited for
+      that child and not for any finished task
+- [x] **Keyboard and shell in long mode**: one can finally talk to the
+      system instead of watching a script written into `kmain64`. I moved
+      the scancode translation out of the driver into `kernel/kbdmap.c`.
+      It is the one part of the driver that depends on nothing (not on
+      virtual consoles, not on tasks, not on the processor mode), so the
+      same state machine handles the keyboard in both kernels, and the
+      decision about **where** a finished character goes stays with the
+      driver. The state has to live in it, because one key press is split
+      into several bytes: the `0xE0` prefix, separate press and release
+      codes for modifiers. `kernel64/shell64.c` is an ordinary kernel
+      thread with a loop, with as many commands as the kernel can really
+      do: `help`, `ps`, `mem`, `ls`, `uptime`, `clear` and `run
+      <program>`. `run` **waits** for its child through `task64_wait` and
+      reports its exit code, exactly as a program would through a system
+      call; the shell does not respond in the meantime, as it should not.
+      On the way, starting programs moved from `kmain64` into
+      `proc64_spawn`, where it belongs: the kernel at boot and the shell
+      on request now take exactly the same path
+- [x] **Signals and Ctrl+C** in long mode: a program in an endless loop
+      is no longer impossible to stop. A signal is not a message to be
+      read but an interruption of the program's flow, and the kernel
+      cannot deliver it at the moment it is sent: the target is somewhere
+      else then, maybe asleep, maybe in the middle of a system call. So
+      it waits with the task until the **next return to ring 3**, because
+      only then does the frame describe the program and not the kernel.
+      That is checked in two places: on return from a system call and on
+      return from an interrupt; the second works even when the program
+      asks the kernel for nothing. The delivery itself is again an
+      operation on the frame: save it on the program's stack, point it at
+      the handler and put a return address under it. The address has to
+      come **from the program**, because the only executable pages a
+      process has are its own code; the stack is non-executable by design
+      (NX). The frame comes back from the user stack, so the program could
+      tamper with it: the registers and the return address are its own
+      business, but the segments and flags are not, because that is the
+      way into the kernel. The proof: `spin64` without a handler dies on
+      Ctrl+C and the shell gets the console back, while `sigtest64`
+      **catches** the signal: its handler prints and returns, and the
+      program goes on to finish normally with code zero
+- [x] **Input for programs and a shell in user space.** `read` blocks
+      until the first character and then hands over everything that has
+      accumulated, like every sensible input: one waits for anything, not
+      for a full buffer. A signal interrupts that wait and returns an
+      error, because otherwise Ctrl+C would have no way to reach a
+      program that is waiting for a key, and that is exactly the program
+      that needs Ctrl+C most often. `user64/ush64.c` is an ordinary ring 3
+      program with no privileges beyond those of any other process: it
+      reads the keyboard through a system call, starts programs with
+      `fork` and `exec`, and waits for them with `wait`. Everything it
+      does, any other program could do, and that is the point. The shell
+      in the kernel was needed so that there was anything at all to drive
+      the system with, and this one is the proof that **it no longer has
+      to live there**. A failed `exec` ends only the child (code 127), and
+      the parent lives on, as everywhere
+- [x] A **hang found by the user** fixed: `run ush64`, in it `spin64`,
+      Ctrl+C, and nothing. The program kept spinning and the console did
+      not come back. Two causes, both on my side. First, a signal sent to
+      a task waiting in `task64_wait` **was never delivered**: signals are
+      delivered only on the way back to ring 3, and that loop never goes
+      back there, so the signal waited for delivery for as long as the
+      waiting lasted, which, when the child does not end on its own,
+      means forever. `read` checked for a pending signal and returned an
+      error; `wait` did not. Second, Ctrl+C hit the shell and not the
+      program: the interrupt's target pointed at `ush64`, the one that is
+      **waiting**, so even a working signal would have killed the shell
+      and left the program alive. `task64_foreground` was added: it walks
+      down the chain of children to whatever is actually running at the
+      end. The walk is finite by construction (a child gets a higher
+      number than its parent), but there is a depth limit anyway: a loop
+      looking for the end of a loop is the last place one wants to rely on
+      reasoning. `ush64` also has its own SIGINT handler now, so a stray
+      Ctrl+C interrupts the line being typed instead of ending the
+      session, like every shell. An earlier audit of the loops **missed
+      this spot**: in `task64_wait` I checked the paths of the child's
+      exit record, not the signal path, and that was exactly the hole
+- [x] **The disk in long mode**: PCI, ATA PIO, AHCI and the block layer
+      are the same files as in the 32-bit kernel, compiled a second time.
+      The drivers know nothing about the processor mode: they talk to the
+      device through ports and memory, and both look the same on either
+      side. `pci.c`, `ata.c` and `blk.c` went over **without a single
+      change**; `ahci.c` needed casts through `uintptr_t` (DMA addresses
+      stay 32-bit, because the frames are below 512 MiB anyway) and one
+      condition on the mode: the controller's registers live high up,
+      outside the area mapped at boot, so they have to be added to the
+      mapping, or the first read from the BAR ends in a page fault.
+      `paging64_map_phys` was added: it maps a physical range writable and
+      non-executable, because there is no code in device registers. Both
+      paths are tested: `disk` writes the last sector, reads it back and
+      counts the differences: zero, through ATA PIO and through AHCI with
+      DMA alike
+- [x] **The filesystem in long mode**, and the first moment anything in
+      this kernel survives switching the machine off. `fs.c` went over
+      **without changing a single character**: the disk seen through the
+      block layer looks the same whatever the processor mode, and PFS
+      touches neither paging nor tasks. The shell got `fls`, `cat <file>`
+      and `write <file> <text>`; three commands are enough to check that a
+      file really is on the disk and not only in memory: write it, print
+      it, see it in the list. The fourth proof comes by itself, on the
+      next boot, and it is the only conclusive one: the test boots the
+      machine **a second time on the same disk** and checks that the file
+      is there with the same contents and that the filesystem was not
+      formatted anew
+- [x] **File descriptors for programs**: it is no longer only the kernel
+      that reaches the disk. `open`, `close`, `read` and `write` work in
+      ring 3, and a descriptor is an ordinary number in **a table that
+      belongs to the task**. One process's number means nothing in
+      another, and that is the whole difference between a descriptor and
+      an inode, which is shared by the whole system. Every descriptor
+      carries its own position in the file, because two processes may
+      read the same file at different speeds. The first numbers have
+      always been taken and refer to no file: zero is the keyboard, one is
+      the console. Thanks to that, printing to the screen is **an ordinary
+      write to descriptor one**, exactly like a write to a file, so `read`
+      and `write` take a descriptor as their first argument, as
+      everywhere. A child of `fork` inherits open files together with
+      their positions, just as it inherits memory. `fileio64` checks
+      itself: it creates a file, writes, closes, opens it again, reads and
+      compares byte by byte; if anything did not match it ends with an
+      error rather than a message someone has to read. A file written by
+      a program survives a restart just like one written by the kernel:
+      the descriptor path ends on the same disk
+- [x] **Program arguments (`argv`)**: tools no longer have to live inside
+      the shell. Until now `echo` and `cat` were built in, because there
+      was no way to pass a program a single word. The layout on the stack
+      is the same as everywhere: first the strings themselves, above them
+      an array of pointers ending in zero, and the program gets their
+      count and the address of the array in registers. There is nothing
+      magic about it; it is the program's ordinary memory, which the
+      kernel happened to fill before its first instruction. The arguments
+      are copied into the kernel **before** the memory they live in
+      disappears, just like the program name, and it is the same trap as
+      with `exec`. The strings are copied page by page, because a string
+      may end just before the boundary of what the program has mapped. The
+      limits are modest on purpose: this is meant to be `argv`, not a
+      channel for transferring data. `uecho64` prints what it got, and
+      `ucat64` takes a file name from its argument, opens it with a
+      descriptor and reads it; both work the same from the kernel's shell
+      and from the user shell. `sep64` also stopped getting its number
+      written into a register: it arrives as `argv[1]`, the way every
+      program gets it
+- [x] **A program heap (`sbrk`) with memory on demand**: until now every
+      buffer had to be fixed in the program. The kernel does not allocate
+      a single page here: it only moves the boundary and remembers how far
+      the program asked for it, and pages appear on first touch, in the
+      page fault handler, writable and non-executable, because there is no
+      code in a program's data. The difference is bigger than it looks:
+      **`heap64` asks for 4 MiB, i.e. 1024 pages, and the system gives it
+      four**, exactly the ones the program touched. Shrinking gives pages
+      back immediately; otherwise memory would go back to the pool only
+      with the whole process. A request below one's own heap or into the
+      stack is refused
+- [x] On the way, an x86-64 difference that could not show up earlier:
+      **SSE2 is baseline there**, so GCC vectorises loops without asking.
+      The first loop copying 4 KiB got `movdqa ... %xmm9` and ended in an
+      "invalid opcode" exception, because the kernel had not yet set
+      `CR4.OSFXSR`. For now programs are built with `-mno-sse`, like the
+      kernel; eventually SSE has to be enabled and the FPU state saved on
+      task switches. A second thing came up as well: the rule that builds
+      programs did not depend on the `Makefile`, so changing the compiler
+      flags **rebuilt nothing**, exactly the same trap as once with the
+      kernel headers
+- [x] **SSE and the floating-point state**: programs are built normally
+      again, without `-mno-sse`. On x86-64, SSE is not an extra but part
+      of the calling convention: the compiler uses it without asking,
+      because every processor in this mode has it. The processor,
+      however, starts with support disabled, and every such instruction
+      ends in an exception until the system says explicitly that it can
+      handle those registers. "Can" means one thing here: **it can save
+      and restore them on task switches**. The XMM registers are task
+      state just like RAX or RSP, except that there are many of them and
+      the processor saves them with one instruction into a 512-byte area.
+      The 16-byte alignment is not a courtesy: `fxsave` and `fxrstor`
+      simply refuse to work on a misaligned address. The kernel itself
+      stays without SSE: there is nothing to compute in an interrupt
+      handler, and every such instruction would require saving the
+      interrupted program's state. The proof: two copies of `fpu64test`
+      compute at the same time, each with a different starting number,
+      giving up the processor along the way, and **each gets its own
+      result**, not its neighbour's. The operation is chosen to be exact
+      to the last unit (`v = v*2 + 1` on integers that fit in double
+      precision), so the test does not have to approximate anything
+- [x] **Directories and paths** in long mode: the filesystem is no longer
+      flat. `mkdir`, `cd`, `pwd`, `rm` and `readdir` work from ring 3, and
+      **the working directory belongs to the task**, just like the
+      descriptors: two processes can stand in different places of the
+      tree without getting in each other's way. A child starts where its
+      parent stood, so `uls64` started from the shell lists the directory
+      the shell is in. `open` also looks at the working directory and not
+      always at the root. A bug worth remembering on the way: `fs_readdir`
+      returns **1 on a hit and 0 at the end** of the directory, not a
+      negative value. Checking for "less than zero" turned the end of the
+      directory into success, and the listing looped forever on the stale
+      contents of the buffer. I made the same mistake in two places at
+      once, because I assumed the convention instead of reading it
+- [x] **Pipes**: programs can be chained. A pipe is not a file and has
+      nothing to do with the disk: it is a ring in kernel memory plus
+      **two owner counters**, and those matter more than the buffer
+      itself, because they say when to stop. When the last writer
+      disappears, the reader gets end of data instead of waiting forever.
+      `dup2` was added, which is how input and output are redirected, and
+      where a write goes is now decided by **the kind of descriptor, not
+      its number**: descriptor one without redirection is the console,
+      but after `dup2` it can be the end of a pipe, and the program does
+      not see the difference. `uupper64` reads from zero and writes to
+      one; that a second program sits on the other side rather than a
+      keyboard and a screen is the business of whoever started it. This
+      is the easiest place to hang, so two things are done explicitly:
+      the shell closes **both** ends of the pipe on its side right after
+      handing them to the children (otherwise one writer, the shell
+      itself, would stay alive forever and the reader would never see the
+      end), and the waits in `pipe64_read`/`pipe64_write` check for a
+      pending signal, because nobody will deliver it for them inside a
+      loop in the kernel. A task also closes all its descriptors when it
+      ends
+- [x] **Networking in long mode**: the RTL8139 card, the IP layer, DHCP
+      and TCP, again the same files as in the 32-bit kernel. **Three out
+      of four went over without a single change**; the card driver only
+      needed an explicit cast of addresses, because the card addresses
+      memory with 32 bits and a pointer is eight bytes here (the buffers
+      are in the kernel image, just above one megabyte, so the address
+      fits with room to spare, but the cast has to be visible). They did
+      not compile for another reason: the network code talks to the
+      kernel through a few functions (put me to sleep, should I die, is
+      that task still alive, make a new thread), and the scheduler has
+      different names here. Instead of scattering conditions on the mode
+      across them, `kernel64/compat64.c` was added: **those names are a
+      contract, and what stands behind them is the kernel's business**.
+      That one file is the whole difference. The proof from a real run:
+      DHCP assigns an address, `ifconfig` shows the netmask, gateway and
+      DNS, `ping` to the gateway comes back 3/3, and the ARP table knows
+      its hardware address, so frames really go out and come back
+- [x] **The network from a program's side**: until now only the kernel
+      used the network, since `ping` and `ifconfig` are its own commands.
+      Now a ring 3 program asks for its address, opens a UDP socket, sends
+      a datagram and connects over TCP, without any special privileges. A
+      socket belongs to the task that opened it: the kernel keeps its
+      number and cleans up after its death, so a program cannot grab
+      someone else's socket by passing its number. A lesson about the ABI
+      on the way: the first version packed the socket number and the
+      timeout into one register, because three argument registers are not
+      enough for a socket, an address, a port, a length and a timeout at
+      once. It read terribly and broke at the first change. Now everything
+      apart from the data itself goes in one descriptor passed by pointer,
+      and the kernel writes the sender's address into the same descriptor
+      on receive. `unet64` checks three things in turn and grades itself:
+      an address from DHCP, a datagram sent **to itself** (the loopback
+      does not go out on the wire, so the attempt tests the stack and not
+      the network around it), and a TCP connection to an HTTP server on
+      the host. On QEMU's user network the gateway `10.0.2.2` **is** the
+      host, so no port forwarding is needed
+- [x] **Graphics mode in the 64-bit kernel**: `video.c` went over like
+      the rest, but it revealed something that could not show up in the
+      32-bit kernel. When it accepted the loader's framebuffer it assumed
+      **32 bits per pixel**. That worked as long as the buffer came from
+      BIOS; UEFI firmware can give 24, and then writing a whole word
+      tramples the neighbouring pixel. Now the depth is whatever the loader
+      really gave, exactly the same fix as in the console earlier. The
+      shell got `gfx`: four rectangles in the corners, a frame and text in
+      our own font. The picture is simple on purpose, because any mistake
+      in computing a pixel's address shows at once: a wrong bytes-per-pixel
+      skews the image diagonally, and swapped channels show in the
+      colours. The test checks it under BIOS **and** under UEFI, because
+      the firmware decides how many bits a pixel has. A mistake of my own
+      worth remembering: the first pattern used the **text-mode** colour
+      numbers, while the `video.c` palette defines indices 0-5 of its own.
+      The code drew correctly; it was the pattern that had the wrong
+      colours
+- [x] **The graphical desktop in the 64-bit kernel**, and the entry where
+      the whole approach to this port paid off most. `desktop.c` (736
+      lines: compositor, windows, title bars, icons, taskbar, menu,
+      dragging) and `mouse.c` went over **without a single change**. The
+      whole difference came down to three functions added to the
+      compatibility layer: `exec_spawn` by name, the desktop taking over
+      the keyboard, and giving it back. The rest (tasks, sleeping, the
+      filesystem for saving icon positions) was already there from the
+      network port. I was afraid of this step and it turned out the
+      cheapest so far, not because the desktop is simple, but because it
+      depends on the processor mode in nothing but the names it uses to
+      call the kernel. What is still missing: graphical applications in
+      ring 3. The `App`, `Clock` and `Files` icons call programs that are
+      not in the 64-bit initrd, so clicking them does nothing. That needs
+      window system calls and shared memory, which is a separate step
+- [x] **Graphical applications in ring 3 (64-bit kernel)**: the desktop
+      icons are no longer dead. Four system calls (`win_create`,
+      `win_rect`, `win_text`, `win_poll`) and a `guiapp64` program in the
+      initrd: it draws in its own window, gets clicks and keys back, counts
+      them and answers with a drawing. The compositor did not get a single
+      new line; `desktop_win_*` has existed since the 32-bit days, and only
+      the path to it from ring 3 was added. The program did not even need
+      another name: `mkinitrd` puts it into the image as `guiapp`, the same
+      name the shared icon table calls. Protection is where it was: a
+      window is owned by a process, not by whoever passes its number, so
+      passing someone else's number achieves nothing. The kernel copies
+      strings and drawing commands into its own memory, checking byte by
+      byte whether the program may reach there; a string cannot be checked
+      in bulk, because it may end at the last byte of a mapping.
+
+      And this revealed a bug that had been asleep in the kernel since the
+      first program: the first `movaps` in `guiapp64` ended in a general
+      protection fault. Not because of SSE (the kernel has saved the SSE
+      registers for a long time) but because of **stack alignment**.
+      `_start` is written in C, and the compiler treats it like any other
+      function: it assumes the stack is as found after a `call`
+      instruction, with the return address on top. The kernel gave a top
+      aligned to sixteen bytes, eight too many, and every sixteen-byte
+      store of an SSE register hit an unaligned address. The earlier
+      programs survived only because the compiler had nothing to
+      vectorise in them. Interestingly, signal delivery computed the stack
+      **correctly** from the start (its comment says outright "as every
+      function called with a call instruction finds it"), and process
+      start did not. One line in `build_args`, the same rule in both
+      places
+- [x] **ACPI, virtual consoles, the USB keyboard and swapping in the
+      64-bit kernel**: four things the 32-bit kernel has had for a long
+      time came over one after another. Three of them nearly for free; the
+      fourth revealed a bug the 32-bit version could not show.
+
+      **ACPI** is `kernel/acpi.c` without changes to its logic: the way to
+      power off (RSDP, the table list, the FADT, the `_S5_` object in AML
+      bytecode) does not depend on the processor mode. Only adding the
+      tables to the mapping does, so the file got the same macro pattern
+      as `initrd.c` and `video.c`, plus explicit casts of addresses to
+      pointers. `poweroff` turns the machine off and `reboot` resets it,
+      and the latter cannot be checked any other way than by QEMU (with
+      `-no-reboot`) simply disappearing.
+
+      **The virtual consoles** were already in `kernel/vga.c`, shared from
+      the start; the 64-bit kernel simply had only one, because `task_vc()`
+      returned zero. So a task now owns a console (inherited from the
+      parent, like the working directory), each console has its own key
+      queue, and Alt+F1..F4 is handled in the interrupt. On the way, the
+      shell stopped keeping the command line in a global variable: four
+      shells are four threads, and the line belongs to the thread and
+      lives on its stack.
+
+      **The USB keyboard** needed the same in `uhci.c` as the network card
+      before: the controller addresses memory with 32 bits, a pointer is
+      eight bytes here, so every structure address goes to it through an
+      explicit cast. `usbkbd.c` went over unchanged.
+
+      **Swapping** is the only item with real new work on the long-mode
+      side. The store (`kernel/swap.c`) is shared, but the eviction policy
+      had to be written anew: walking four levels of tables instead of
+      two, the second-chance algorithm on the "accessed" bit, and an entry
+      for a page that lives on disk, without the present bit, so the
+      processor ignores it, and with the slot number in the upper bits.
+
+      And here a bug worth remembering came up. The first version of the
+      on-disk entry carried only the slot number, and on the way back the
+      page got "writable, non-executable", because most pages are like
+      that. The program died right after starting with exception 14,
+      error code `0x15`. I first read that as **fifteen decimal** and
+      looked for a reserved-bit violation that was not there; in hex it is
+      a present page, an access from ring 3 and an **instruction fetch**.
+      A *code* page had been swapped out and came back non-executable. So
+      the access rights now travel to disk with the page, and that is the
+      right principle, not a patch: a code page is read-only and
+      executable, a data page the exact opposite, and the kernel has no
+      business guessing which is which when it handed them out itself.
+
+      On the way, a program's address space grew from eight megabytes to
+      half a gigabyte: swapping only makes sense when a program can ask for
+      more memory than the machine has RAM. The test takes 18 MiB on a
+      machine with 16 MiB and checks two things: that every page came back
+      from disk without a single byte changed, and that swapping **really
+      happened**, because without the second assertion a test in which
+      everything fitted in memory would pass too.
+
+      Five new test groups: `gui64`, `acpi64`, `consoles64`, `usbkbd64`,
+      `swap64`. All the 64-bit ones now read the screen the way a person
+      sees it: GRUB, seeing a framebuffer request in the kernel header,
+      always gives graphics, so the character memory at `0xB8000` is empty
+      and the console draws itself in the 8x8 font. The test recognises
+      those glyphs with the same table the kernel uses: one source of
+      truth, and reading what is really visible.
+- [x] **Programs from disk, not only from the initrd**: the ELF loader and
+      the filesystem had sat side by side for a long time and were never
+      connected. `run` looked only in the initrd, the image loaded together
+      with the kernel and read-only. Now a program can live on the disk:
+      `cp hello64 anything`, then `run anything`.
+
+      The whole connection is one file, `kernel/prog.c`, and there is not a
+      word about the processor mode in it: it only decides where to get the
+      bytes from, and the loader already knows what to do with them. That
+      is why **both kernels** use it: the 64-bit one through the
+      compatibility layer (`task_cwd`), the 32-bit one directly. The order
+      is fixed: the initrd first, then the disk. The initrd is always there
+      and always works, so a broken file on the disk has no way to shadow a
+      program shipped with the kernel, which means it has no way to take
+      the system away.
+
+      A program is looked for in the **task's** working directory, just
+      like with `cat` or `ls`: the directory belongs to the process, so
+      `run` means the same as it would after a `cd`.
+
+      And the same mistake again as with `fs_readdir`, even though I had
+      already described it here once. `fs_write_at` returns **the number of
+      bytes written**, not zero, and I checked `== 0`; the same for
+      `fs_read_at`. The first `cp` "failed" despite a correct write. The
+      lesson is probably just one: a return convention must not be guessed
+      from the similarity to a neighbouring function; it has to be read.
+      Now one condition checks that **as much as intended** was written,
+      because a file cut off halfway is not the same program.
+
+      The test uses the strongest proof there is here: a second boot of
+      the same machine with the same disk image. A program that still runs
+      after a restart and is not in the initrd can only come from the
+      platter. The path from ring 3 is checked too: `ush64` does `fork` and
+      `exec`, and `exec` looks for the program the same way as the kernel.
+
+      On the way, I gave the tests `q.command(...)`: it types a command
+      and returns **only what arrived after it**. Without that, a false
+      alarm in the other direction is easy: the shell echoes the typed
+      line, so the file name is on the serial port even when the command
+      found nothing, and the result of the previous command stays there
+      until the end of the run. Three assertions in this test passed for
+      that reason before the feature worked at all.
+- [x] **Shared memory and two more graphical applications (64-bit
+      kernel)**: `kernel/shm.c` went over without changes to its logic,
+      because a region is simply a contiguous block of frames from the
+      PMM. What is new is the path to it from ring 3: an area for mappings
+      was set aside between the heap and the stack (from 0x50000000
+      upwards), and the heap ends at its threshold, so one cannot run into
+      the other. Swapping skips shared frames, as in the 32-bit kernel:
+      with them one would have to count owners on disk as well.
+
+      The test shows what this is really about, not only that the bytes
+      match: the writer first maps a region on the side, under a different
+      key, so it **sees the shared one at a different address than the
+      reader**. The same bytes at two different addresses, because where
+      something is visible is decided by the address space, not by memory.
+      Without that the test would also pass on an accidental match of the
+      layout.
+
+      On the way: the CMOS clock (`rtc.c`, pure I/O ports, went over as it
+      was), a `date` command and a `SYS64_TIME` system call.
+
+      Two new applications in windows: `gclock64` (the time from the
+      hardware and the uptime from the kernel's ticks, two independent
+      time sources side by side) and `gfiles64` (a list of files on the
+      disk; clicking a name loads its contents). The `Clock` and `Files`
+      icons are no longer dead; three are left: Monitor, Term and Web.
+
+      And the same mistake again as with `fs_write_at` and `fs_readdir`,
+      **the third time in this project**. `sys_readdir` in the programs'
+      library returns ZERO on a hit and -1 at the end of the directory,
+      while `fs_readdir` in the kernel does the opposite: one on a hit. I
+      wrote `!= 1`, so the first entry looked like the end of the directory
+      and the window showed "(empty)". Neighbouring names are no hint about
+      a return convention; it has to be read, every time.
+- [x] **A resource monitor and a terminal in a window (64-bit kernel)**:
+      the fifth and sixth graphical applications, and with them the
+      `SYS64_SYSINFO` system call: how much memory there is, how much is
+      used, how long the machine has been running. None of that is a
+      secret (the numbers describe the machine, not other processes), so a
+      ring 3 program gets them without any privileges.
+
+      `gterm64` is the most interesting one here, because there is not a
+      single thing in it the kernel could not do before, and yet it uses
+      everything at once: the keyboard through window events, `fork`,
+      `exec`, redirecting output to a file with `dup2`, waiting for the
+      child, reading the file and drawing. The terminal is an ordinary
+      program and knows nothing about the compositor beyond four window
+      calls, and still a shell in a window comes out of those building
+      blocks.
+
+      The compositor holds at most six windows and the kernel takes two,
+      so five applications at once do not fit. The test got a second boot,
+      and that is the right answer, not raising the limit.
+
+      One dead icon is left: Web. It first needs TLS and an HTTP client in
+      ring 3.
+- [x] **TLS 1.3, HTTP and the browser in ring 3 (64-bit kernel)**, and
+      with that the catching up is over: everything the 32-bit kernel does,
+      the long-mode one now does too.
+
+      The most interesting part is how much code had to be written: **one
+      header file**. Cryptography, TLS, HTTP, DNS, X.509 and the HTML
+      parser (five thousand lines in `user/*.h`) compute on bytes and know
+      nothing about the processor mode. They talk to the kernel through a
+      few names: connect, send, receive, what time is it, open a file.
+      Those names are a contract; `user64/compat64.h` translates them into
+      long-mode calls, and `user/uapi.h` picks the side. Exactly the same
+      pattern as `kernel64/compat64.c` on the kernel side, and for the
+      second time it turned out cheaper than I feared.
+
+      Changes to the shared code itself: one. A stack address used to seed
+      the random generator went through `(uint32_t)` from a pointer; in
+      long mode that cuts off half the address, so now it goes through
+      `uintptr_t`. Nothing else.
+
+      A real bug did turn up, though. `certtest` died halfway: a page fault
+      just below the top of the stack. The program got four pages (16 KiB),
+      and verifying a signature on two-thousand-bit numbers goes deeper,
+      all the more so because pointers are eight bytes here, so every frame
+      with an array of pointers is twice as big. The constant could have
+      been raised. **Instead the stack now grows on demand**, exactly like
+      the heap: a program gets four pages to start with, the rest is added
+      as it goes, and the limit (a quarter of a megabyte) is there so that
+      a wild pointer does not silently turn into a mapped page; below it a
+      page fault stays a fault. Guessing in advance how much stack is
+      needed always ends either in wasted memory or in an exception in the
+      middle of a deep call.
+
+      The test talks to a real OpenSSL, not to a loop of our own, so a
+      handshake that completes means every byte matches: X25519,
+      ChaCha20-Poly1305, key derivation and the signature in Finished. It
+      also checks something more important than encryption itself: a
+      foreign certificate must **break** the connection, because an
+      encrypted conversation with a stranger is not secure, only private.
+
+      The last dead desktop icon came to life: `gweb` resolves the name
+      through DNS, fetches the page, strips the tags and draws it in the
+      window, one program tying together the compositor, keyboard, mouse,
+      DNS, TCP, TLS, the filesystem and its own address space.
+- [x] **Splitting the `core` group in three**, not for tidiness but for
+      time: one group made 174 assertions on one machine and on its own
+      decided how long the whole run took, because all the others
+      finished much earlier. Now there are three: boot and processes
+      (`core`), the network with the filesystem (`core2`) and TLS alone
+      (`tls32`). Since they run in parallel, the whole suite takes 259 s
+      instead of 310 s. The number of assertions is the same, 518.
+
+      The split also flushed out a flaky check that had been waiting
+      there for a long time. Demo thread C ends after two seconds and for
+      the next few redraws a message in row zero of the screen, and that
+      was the only proof that it ran. Row zero disappears on every scroll,
+      so on a loaded machine the proof scrolled away with the boot
+      messages before the test got to look. Moving the check earlier was
+      not enough: under full load just reaching the prompt takes longer
+      than the whole window of visibility.
+
+      So the thread now writes one line **directly to the serial port**,
+      not through `printk`, because it ends after the shell has started,
+      and output on the console would land in the middle of a line someone
+      is typing (the keyboard test caught that at once). The serial port is
+      a log and the screen is the work in progress; they are not always the
+      same thing, and it is good that this particular difference had to
+      show up here.
+- [x] **Memory-mapped files (64-bit kernel)**: the second half of the same
+      idea as running programs from disk. If a file can be a program, it
+      can also be **memory**. A program gets an address and reads the
+      contents like an ordinary array, without a single `read` call.
+
+      The most interesting part is the cost. A mapping does not create a
+      single page: the kernel only remembers the block numbers, and the
+      bytes come from disk as they are touched. Touching one byte of a
+      four-hundred-kilobyte file costs **one page**, not a hundred, and the
+      test checks that assertion directly, because after every program the
+      shell reports how many pages were read from mappings.
+
+      The block numbers are worked out once, when the mapping is set up,
+      and then read through the block layer, bypassing the PFS code. The
+      reason is the same as for swapping, and it was written down then too:
+      PFS has a single shared block buffer, and a page fault can land in
+      the middle of any file operation. A principle described once saved a
+      whole class of questions here.
+
+      The mapping is read-only, and that is a decision, not a gap: writing
+      would require sending pages back to the disk and deciding when. Until
+      that exists, a write attempt had better end in a protection fault than
+      be silently lost. The test checks this with a child: the child tries
+      to write and dies, and the parent survives and reports that the file
+      is untouched.
+- [x] **The e1000 card and the `netdev` layer**: disks have had a block
+      layer for a long time. ATA and AHCI stand under one name, and which
+      controller answered is the business of boot. The network had no such
+      layer, and it showed in every line that needed the MAC address:
+      `rtl8139_mac()` called directly in the IP and DHCP code. Now there is
+      `netdev.c`, on exactly the same idea.
+
+      The Intel 82540EM is built completely differently from the RTL8139,
+      which made it a good test for that layer. Its registers are in memory,
+      not in I/O ports, so they have to be added to the mapping first,
+      because they live high up. Traffic goes through two **descriptor
+      rings**, one per direction, instead of one ring of bytes: a
+      descriptor says where a buffer is and what happened to it, and who
+      owns it follows from the head and tail pointers. It is more
+      convenient than the RTL8139 in that packets do not run into each
+      other and the end of the buffer does not have to be copied to its
+      start.
+
+      For ARP, IP, DHCP and TCP nothing changed, and that is the real point
+      of this step. The test runs the same set of checks with `-device
+      e1000` on both kernels: a DHCP lease, a ping to the gateway, the ARP
+      table, HTTP from ring 3. The same path for a packet, a different card
+      underneath.
+
+      Receiving goes the other way from the rest: the driver itself calls
+      `net_rx` when a frame arrives, and the `netdev` layer does not stand
+      in between; that would be passing a pointer along for no reason.
+- [x] **An NVMe disk**: the third driver under the same block layer, and
+      the least like the other two. There is nothing of the ATA heritage
+      in it. No "select the drive", no FIS frames. There are two **queues
+      in memory** (we put 64-byte commands into the submission queue, and
+      the controller puts 16-byte answers into the completion queue) and
+      two doorbell registers, through which each side tells the other how
+      far it has got.
+
+      The nicest detail of the whole standard is the **phase bit**: the
+      controller flips it on every lap of the queue, so to know whether an
+      answer is new nothing has to be cleared or counted. It is enough to
+      compare one bit with the one we expect.
+
+      We have two pairs of queues: the admin one, which comes into being
+      by itself when the controller starts, and one for data, requested
+      with a command on the first. There is one buffer, page-aligned: a PRP
+      pointer describes a page, not an arbitrary piece of memory, so
+      copying through our own aligned page is cheaper than translating
+      every caller's buffer into a list of pages.
+
+      On the way the test fell into a trap that has nothing to do with
+      NVMe: it typed commands right after the message about the filesystem
+      being ready, but the shell starts only after the scheduler. The first
+      characters were lost, and of `write nvmetest text-through-queues`
+      the kernel received `through-queues`. The keyboard works from the
+      interrupt, but there is someone to read it only once the thread runs.
+- [x] **The other processors: detecting and waking them (both kernels)**:
+      the first step towards SMP, and deliberately only the first.
+
+      After power-on one core runs, the one the firmware picked as the boot
+      processor. The rest stand and wait, and that is the hardware's
+      decision: a processor woken with a SIPI starts in real mode, sixteen
+      bits, at the address `(vector << 12)`, exactly as a PC started forty
+      years ago. How many there are is told by the MADT table in ACPI; they
+      are woken with a pair of signals through the local APIC.
+
+      The most interesting part is how much of the way such a core has to
+      go **by itself**. In the 32-bit kernel: real mode, its own descriptor
+      table, protected mode. In the 64-bit one the whole way again: sixteen
+      bits, thirty-two, sixty-four, with PAE and EFER on the way. It does
+      not build page tables: it takes the ready ones, the same ones the
+      kernel runs on, and gets their address in a field the boot processor
+      fills in before sending the signal.
+
+      The trampoline is linked with the kernel but runs at `0x8000`, so
+      every address in it is computed as a base plus the offset from the
+      start of the block. Addresses go into a register first and only then
+      get used; the assembler then has one obvious meaning to choose
+      instead of two.
+
+      And that is where this step ends: a woken core reports in a counter
+      and halts. Giving it work requires a scheduler per core and locks in
+      every kernel structure, and those were written for one core and
+      quietly rely on that. Better for a processor to stand still than to
+      corrupt the task list. That is why the test checks two things at
+      once: that the cores report **and** that the system works exactly the
+      same after waking them. "I see four processors" alone would be worth
+      nothing if something broke along the way.
+- [x] **Fixing `make fuzz`**, and a lesson about why there is a separate
+      command at all that `make test` does not run.
+
+      Fuzzing builds the parsers **on the host**, under ASan and UBSan,
+      with a stub in place of the entry into the kernel. Porting TLS to
+      long mode changed that entry: the headers now include `uapi.h`, not
+      `usys.h`, so the stub replaced a name nobody calls any more, and the
+      harness stopped building. The `netdev` layer added a second such spot
+      on the kernel side.
+
+      Both went unnoticed through a full test run, because `make fuzz` is
+      not part of it, and rightly so: it takes its time and checks
+      something else. But it means it has to be run separately after every
+      change in how the shared code talks to the kernel. I am writing this
+      down precisely because it is easy to forget: five hundred cases per
+      parser, zero errors, but only when someone runs them.
+- [x] **The secondary cores get work**, and the first lock in this system.
+
+      Disabling interrupts was enough while there was one core: nobody else
+      could get into the middle of an operation. Now they can, and **truly
+      at the same time**, not just apparently. Hence `spinlock.h`: the
+      `xchg` instruction is atomic by definition and is also a barrier for
+      the ordering of writes, so no extra fences are needed here. What a
+      core wrote before releasing the lock, another one will see after
+      taking it.
+
+      The secondary cores do not run tasks of their own and will not for a
+      long while: the scheduler, the process list and most of the kernel
+      were written for one core. Instead they get **countable** work: a
+      shared queue of units, from which each takes the next number under
+      the lock and computes it on its own. All the state shared between the
+      cores is one number and one lock, and that is exactly why it can be
+      reasoned about.
+
+      The boot core computes together with the others; without that nobody
+      would compute anything on a single-core machine. Interrupts are off
+      while the lock is held on it too: if the timer preempted the thread
+      holding the lock, every other taker would wait until its next turn.
+
+      The `smp` command hands out 64 units and compares the result with the
+      one computed on one core. That is the right question about
+      concurrency: not "did something get computed" but "was **every** unit
+      computed exactly once". Four cores, sixteen units each, the sum the
+      same to the bit.
+
+      A bug on the way worth remembering: the first version of the
+      trampoline called a kernel function with a relative jump. The offset
+      computed at link time describes the distance from where the code
+      **lies in the kernel image**, but it runs at `0x8000`. So the jump
+      landed in a void and the machine reset in silence, because a secondary
+      core has no exception table yet. The address now goes through a
+      register, as in the 64-bit version, where it had to from the start,
+      because there a relative jump reaches at most two gigabytes.
+- [x] **A stack that grows on demand and memory-mapped files, in the
+      32-bit kernel too**: evening out an asymmetry I introduced myself by
+      doing both first in long mode. This project rests on both kernels
+      being the same files compiled twice; differences the processor mode
+      does not force are simply debt.
+
+      The stack: eight pages to start, the rest added as it is touched, a
+      limit of a quarter of a megabyte. The test recurses forty levels deep
+      with four-kilobyte frames and **after returning** checks that every
+      frame is still its own, because adding pages over somebody else's
+      frames would look half the same.
+
+      Mapping files flushed out a real bug on the way, in code older than
+      this whole change. `fork` marked **every** page of a process as
+      copy-on-write, including one that deliberately had no write
+      permission. So the child wrote to a mapped file and the write
+      *succeeded*: the copy-on-write handler made it a private, writable
+      copy. A page without write permission now stays as it is; that is
+      its whole property, so marking it for copy-on-write was a
+      contradiction in itself.
+
+      The pair `paging_map_user_in` / `paging_map_user_ro_in` was also
+      added over a common core: the same mapping, one bit of difference,
+      chosen by the caller.
+- [x] **Writing through a memory-mapped file**: the way back, in both
+      kernels at once.
+
+      Until now the mapping went one way: a file could be read like memory,
+      but a write attempt ended in a protection fault. That was honest
+      (better an error than a silently lost change) but half done. Now
+      `sys_mmap_file_w` gives the pages write permission, and the contents
+      go back to the file.
+
+      The most important question is **when**. Writing back after every
+      byte would kill the whole point of a mapping; it would be cheaper to
+      call `write` then. So the program decides, through `sys_msync`, and
+      the kernel adds one moment the program does not have to remember:
+      the end of the process. The write-back has to happen **there**, in
+      `task_exit` and in `exec`, while the process's address space is still
+      alive. The zombie reaper looks at those pages from someone else's
+      CR3, and `exec` is about to lose that address space.
+
+      Which pages to write back, the processor knows. It sets the "dirty"
+      bit itself on every write, so nothing has to be counted or guessed.
+      The test reads the whole twelve-kilobyte file, writes to the first
+      two pages, and `sys_msync` writes back **two**. A second one in a row
+      writes back zero, because the bit is cleared with the write-back.
+      That is an assertion that really decides something; "something was
+      written back" would pass just as well if the whole file were
+      rewritten every time.
+
+      A third software bit was added to the page entry: `PTE_FILE`
+      (`PG_FILE` in long mode), the last free one. It means two things at
+      once, both negative:
+
+      - `fork` must **share** such a page, not mark it copy-on-write. Both
+        processes write to one file, so a private copy in the child would
+        mean its writes never leave its own memory. The test forks, has the
+        child write, and checks in the parent.
+      - swapping must skip it. The place of such a page on disk is the
+        mapped file itself, not the swap file; writing it to `swap.sys`
+        would lose both the link to the file and the fact that it is dirty.
+
+      On the way, the 64-bit kernel needed a **fourth system call
+      argument**. Three had been enough until now; the fourth goes in R10,
+      as in Linux and for the same reason: the `syscall` instruction itself
+      takes RCX for the return address.
+
+      A bug older than this change also came up: `exec` in the 32-bit kernel
+      reset the counter of free mapping addresses but kept the
+      **descriptions** of the old image's mappings. Their ranges lie exactly
+      where the new image starts setting up its own, so a page fault in the
+      new heap hit the description of a file this process no longer had
+      open. `task_mmap_release` had existed from the start and was not
+      called from anywhere; the 64-bit version called its own.
+- [x] **xHCI, the third USB controller**, and the layer that hides it.
+
+      UHCI was enough until now only because QEMU emulates it. A machine
+      newer than roughly 2010 has neither PS/2 nor UHCI, only xHCI. Without
+      it, "works on real hardware" would stay an empty item on the list
+      forever.
+
+      The difference between these controllers is not in the details but
+      in **the division of labour**. In UHCI it was the driver that laid out
+      the transfer descriptors in a frame list the controller swept every
+      millisecond, and the driver made up the devices' addresses. In xHCI
+      one talks through commands placed in a ring, answers come back on a
+      second ring of events, and the controller assigns the addresses.
+
+      The ring is the nicest thing in this driver. It is an array of TRBs
+      whose last element is a jump back to the start, and which entries
+      already belong to the controller is decided by one bit, the cycle
+      bit. The jump has a flag that flips the meaning of that bit on every
+      lap. Thanks to that the ring never has to be cleared, and nobody has
+      to count how much is left in it: the same bit means "mine" one time
+      and "yours" the next.
+
+      Adding the driver REVEALED a boundary that had not been visible
+      before. `usbkbd.c` called `uhci_*` directly, not because recognising
+      a keyboard has anything to do with the controller, but simply because
+      there was only one controller. The new `usbhc.c` puts the boundary
+      where the difference ends: resetting the port, assigning the address
+      and finding the packet size of endpoint zero look completely
+      different in the two controllers, so they sit under one word,
+      `usbhc_attach`. Above it is only the conversation with the device,
+      the same whatever the bus, and that is why the whole HID code, the
+      key tables and the polling thread did not change by a line. It is the
+      same pattern as `blk.c` and `netdev.c`, and for the third time it
+      turns out it can only be put in place once there really are two
+      things to hide.
+
+      Writing PORTSC needs care about something UHCI did not have: some
+      bits are **cleared by writing a one**, and writing a one to the port
+      enable bit DISABLES the port. A plain read-modify-write would disable
+      the port while setting anything else. Hence `portsc_safe`.
+
+      The test is twofold on purpose. It checks that a keyboard on xHCI
+      talks at all, but above all that it talks **the same way**: the same
+      set of checks as with UHCI, the same character, the same Shift, the
+      same Alt+F2. Separate groups `usbkbd64` and `xhci` watch two buses
+      and one conclusion: above the layer one cannot see which is
+      underneath.
+- [x] **A shared library and binding symbols at load time**: no more copy
+      of the cryptography in every program.
+
+      `httpget` weighed 82 kilobytes, `gweb` 89, `certtest` 51. Nearly all
+      of it was the same cryptography and the same TLS, compiled in yet
+      again, once in the initrd and once in memory, separately for each
+      process. Now those three plus `cryptotest` together weigh less than
+      the one library they share.
+
+      **Where the library's source came from.** Cryptography lives in
+      ProtonOS in headers, as `static inline`. That was a good decision and
+      I did not want to undo it: one source of truth, no intermediate
+      files. A library, however, needs two different views of the same
+      file: with bodies (to compile them and make them findable by name)
+      and without bodies (so that a program contains calls, not copies).
+      Splitting fourteen headers into .c/.h pairs by hand would mean four
+      thousand lines rewritten and two places that could drift apart from
+      then on. So `scripts/split_headers.py` does it on every build: it
+      matches braces, skipping those in strings and comments, and emits
+      both versions. The source stays single and untouched.
+
+      **Why the library has a fixed address.** We link it at the address
+      where the kernel then places it in every process. Thanks to that, the
+      addresses in its symbol table are already final, and neither it nor
+      the kernel has anything to recompute at load time. There are two
+      costs and both are acceptable: there can be only one library, and it
+      is always visible at the same address. A real system does not do
+      this, because it wants many libraries and wants to randomise their
+      addresses, but a real system has a linker in user space for that,
+      and here a few dozen lines in the kernel play the role of `ld.so`.
+
+      **What exactly the kernel does.** It reads the dynamic symbol table
+      from the library (function name -> address) and the list of
+      relocations from the program (the address of an empty slot in its
+      jump table -> function name). Putting one together with the other is
+      the whole binding. Everything is bound at once, at start: lazy
+      binding would require a piece of the linker to live in the process's
+      address space and be called from a PLT stub, a whole separate
+      mechanism to save microseconds at start.
+
+      **Split into shared and private.** The segment without write
+      permission (code and constants) gets SHARED FRAMES: every process
+      sees the same physical pages, and that is the whole saving. The data
+      segment has to be private, because the library keeps its state in
+      it: the random generator's seed, TLS settings. One process's state
+      must never be visible in another. The tail of zeros (`.bss`) is
+      created on touch, like the heap: a program that takes only SHA-256
+      from the library has no reason to pay for TLS buffers.
+
+      **Two things that had to come out of the headers.** The elliptic
+      curves and the built-in trust store were variables in them. A program
+      that reached for them by name would get its own copy (a copy
+      relocation), and from then on the library would compute on one
+      instance while the program looked at another. Now they are exposed
+      through functions, and the kernel refuses to load a program in which
+      such a relocation appears. Better loudly at start than quietly in the
+      middle of a TLS handshake.
+
+      **A trap that shows only in the numbers.** The first version reported
+      "0 shared pages", and that would have bothered nobody, because
+      everything worked. The linker had put `.dynamic` into the same segment
+      as the code, and `.dynamic` is writable, so the whole segment became
+      writable and the kernel rightly gave every process its own copy.
+      There was no sharing for a single moment. Hence the page alignment in
+      the linker script, and hence that number in the boot message: without
+      it the mistake had no way of coming to light.
+
+      **A second trap, which showed up only in the test.** The library's
+      data first got its pages on touch: the zero tail (`.bss`) came into
+      being only on first touch, like the heap. TLS worked in the 32-bit
+      kernel and not in the 64-bit one. The reason: checking pointers from
+      ring 3 looks different in the two kernels. The 32-bit kernel BRINGS
+      INTO EXISTENCE a page the program asks about; the 64-bit one only
+      checks whether it is there and refuses when it is not. A buffer that
+      only the kernel writes to (like the one for received TCP bytes) is
+      never touched by anybody, and the system call rejects it. The whole
+      data segment is now set up at once; thirty-odd frames per process is
+      the price of one mechanism fewer and of both kernels doing the same
+      thing.
+
+      The test does not ask "does it work" but about things that cannot be
+      faked. The address of the running code lies OUTSIDE the program's
+      image, and the library itself must report it, because a non-relocatable
+      program that takes the address of one of its functions gets the
+      address of its own jump stub. A second process sees the same code
+      address (shared frames) but its generator counter starts from zero
+      again (private data). A write to the library's code ends in a
+      protection fault; otherwise one program could replace a function for
+      everyone at once.
+- [x] **Locks on the kernel's shared structures**: the first step without
+      which real SMP cannot begin.
+
+      Until now the secondary cores could only compute on what they were
+      given. All the state shared between them was one number and one lock,
+      and that is exactly why it could be reasoned about. For them ever to
+      run tasks, they first have to be able to **call the kernel** safely,
+      and the kernel has to withstand that.
+
+      Disabling interrupts, which was enough from the start, protects
+      against something other than a lock does, and it is worth naming
+      directly. A lock protects against ANOTHER CORE that really runs at
+      the same time. Disabling interrupts protects against ITSELF: a timer
+      entering the middle of a section would wait for a lock held by the
+      code it just interrupted, on the same core, the only one that could
+      release it. Hence `spin_lock_irq`, which does both things in one
+      order: interrupts go off BEFORE the lock is taken and come back AFTER
+      it is released.
+
+      Locks went onto three structures everything else reaches for: the
+      physical frame map, the kernel heap and the console. Each is one for
+      the whole machine, so its lock is one too.
+
+      **A trial that really decides something.** The `smpmem` command makes
+      every core allocate frames and heap blocks three thousand times at
+      once. We do not ask whether it crashed, though; the answer to that
+      can be a matter of luck. Every allocation gets a pattern that depends
+      on the unit number and is read right after: a frame handed to two
+      cores at once has two writers, and the pattern does not match. At the
+      end we count frames and heap bytes: the same before and after.
+
+      I checked whether this trial can fail at all by taking the locks out
+      again. Without the lock on the frame map: sixty-one pattern mismatches
+      and fifty-eight frames that never came back. Without the lock on the
+      heap: the kernel dies on a page fault at address `aaa9a8ab`, because
+      the free list falls apart in the middle of splitting a block. That is
+      the only way to know that a test is guarding anything.
+
+      **What a secondary core still may not do.** It has no exception or
+      interrupt table, so it may only call what does not sleep and does not
+      wait for hardware. Allocating memory, yes. The disk, the network,
+      anything that might reach for swapping, no. That is where the
+      boundary is today, and only a per-core scheduler will move it.
+
+      **An assertion that was a race.** The first version of the test
+      demanded that EVERY core take part of the work. It passed, but on the
+      64-bit kernel the shares came out `[1, 20, 21, 22]`: the boot core is
+      running the shell thread at that time and gets preempted by the
+      timer, while the secondary ones spin in a tight loop and take the job
+      apart before it gets a chance. The assertion now says what is true
+      whoever wins the race: more than one core took work, and every unit
+      was computed **exactly once**.
+- [x] **A secondary core gets an exception table and its own clock**: the
+      second step towards real SMP.
+
+      A woken core was in an odd position until now: it ran kernel code but
+      had neither the kernel's segment table (it sat on the temporary one
+      from the trampoline) nor any exception table. Any fault of its own
+      ended in a triple fault and **a silent reset of the whole machine**,
+      without a single word on the screen. Both tables are one for the
+      whole system and nobody changes them after they are built, so it was
+      enough to point at them. A secondary core does NOT load the task
+      state segment (TSS): `ltr` marks the descriptor as busy, so the same
+      table cannot be loaded twice, and there is no need anyway, since
+      ring 3 programs run only on the boot core for now.
+
+      **Its own clock.** The PIT interrupt goes through the PIC to ONE
+      processor; a secondary core would never see it, and without
+      interrupts it can never be preempted. Every processor does, however,
+      have its own timer in the local APIC. Its frequency cannot be read, so
+      it has to be measured: the boot core starts the APIC counter and sees
+      how far it counts during a known number of PIT ticks. Only it
+      measures, because only it has something to measure with.
+
+      **The bug that cost the most time and was worth it.** In long mode a
+      secondary core died the first time it touched the local APIC,
+      silently, together with the whole machine. The reason: the trampoline
+      set the long-mode enable bit in EFER but not the NXE bit. And the
+      kernel maps everything that is not meant to be code with the
+      no-execute bit, including the hardware registers added to the
+      identity mapping. Without NXE, bit 63 of a page table entry does not
+      mean "no execute"; it is **reserved**, and any access through such an
+      entry is a page fault. The same address, the same tables, the same
+      CR3, and one processor reads while the other dies. The difference was
+      one bit in a register nobody copied.
+
+      Finding it took going down to the simplest possible output: one byte
+      straight to the serial port, no locks, no functions, nothing that
+      could fail by itself. Letter by letter one could see how far the core
+      got.
+
+      **An idle core should stand still, not spin.** Until now a core with
+      no work spun on `pause`. On a virtual machine that costs exactly as
+      much as work: three cores spinning aimlessly took three quarters of
+      the machine from the boot core, so an ordinary disk write took four
+      times longer. **Booting to the shell on four cores: just over 22
+      seconds before the change, 6.5 seconds after.** Now the core halts on
+      `hlt`, and an inter-processor interrupt sent when work is posted wakes
+      it, the simplest interrupt one can send anybody, since all it carries
+      is the fact that it arrived.
+
+      The order matters and is written out in the code: the wake-up goes
+      AFTER the job is stored. Sent before, it would find the queue still
+      empty.
+
+      **And a race in an assertion again.** Since the cores sleep, how the
+      work is divided depends on how fast the wake-up reaches them, and that
+      is the emulator's business, not the kernel's. The assertion "every
+      core took a share" stopped meaning anything, so it now says what is
+      true regardless of the race: more than one core took work, and every
+      unit was computed exactly once. The comparison with the single-core
+      result, to the bit, guards that.
+- [x] **Kernel threads on every core**: what the three previous steps were
+      waiting for.
+
+      A secondary core already had an exception table, its own clock and
+      locks on the shared structures. One thing was missing, and the most
+      inconspicuous one: **the current task was a single global variable**.
+      As long as it was, more than one core had nowhere to record what it
+      was running. Now there are as many as there are cores, and which one
+      is mine is told by the processor itself: the number in its local
+      APIC.
+
+      The word `current` stayed, because the whole kernel uses that word
+      and there is no reason for it to stop. Only what it points at
+      changed: from one variable to a field of the core's block. One
+      hundred and thirty-nine places in each of the two kernels did not
+      have to know.
+
+      **A lock held across the switch.** This is the part that cannot be
+      done halfway. There is one task list, so one lock protects it, but it
+      is not enough to take it while choosing the next task and release it
+      right away. There would be a window in which the previous task is
+      already marked ready while its stack is still in use: a second core
+      would jump onto a stack the first one is still running on. So the
+      lock is held **across** the context switch, and whoever arrives on
+      the other side releases it. A new task does not return from a switch
+      like all the others, so it releases the lock itself, in its
+      trampoline. A task that is ending never returns, and does not have
+      to: its successor does it for it.
+
+      For the same reason, the current task's state now changes **under
+      the lock**, together with choosing the next one (`switch_to(state)`).
+      Set earlier, it would leave a window in which the task is marked as
+      sleeping while its stack is still busy, and a second core could wake
+      it in the meantime.
+
+      **What a secondary core still may not do, and why that is a decision
+      and not a gap.** An ordinary task stays on the boot core. A secondary
+      core takes only what somebody explicitly allowed through
+      `task_create_anycore`, because the rest of the kernel reaches for the
+      drivers, the filesystem and swapping, and those were written for one
+      core and quietly rely on it. The task state segment is one and
+      belongs to the boot core, so ring 3 stays there too. A caller who asks
+      for a task "anywhere" takes on the promise that its thread touches
+      only things that can stand two cores at once.
+
+      Every core gets its own idle task; otherwise there would be nowhere
+      to put its context. It runs on the stack the core got when it was
+      woken, and nobody else may run it. They show up in `ps` under negative
+      numbers: they are not processes.
+
+      **The proof has three parts, because each one alone could be faked.**
+      The thread records which core it is computing on, but if the scheduler
+      merely moved it between cores in turn, the mask would look the same.
+      The result of every chunk is the same to the bit as a chunk computed in
+      the shell thread, but that only proves correctness. **Time** decides:
+      four chunks run in parallel must take clearly less than four times as
+      long as one.
+
+      The numbers are nicer than I expected. In long mode one chunk takes 64
+      ticks, and four at once **61**: four times the work in the same time.
+      The same trial on one core: 28 ticks for one, 185 for four. That is the
+      difference that matters, and the test shows it directly.
+- [x] **Ring 3 on every core**: user programs are no longer the property of
+      the boot core.
+
+      It took four things. First, **a task state segment per core**. The
+      processor reads the kernel stack from it on entry from ring 3, and each
+      core enters from a different task onto a different stack; one shared
+      segment would mean two cores entering the kernel on the same stack.
+      There have to be as many descriptors as cores, too: `ltr` marks a
+      descriptor as **busy**, so a second core loading the same selector would
+      get a protection fault.
+
+      Second, **its own `syscall` entry**. In long mode the entry registers
+      (`IA32_LSTAR`, `IA32_STAR`) belong to the core, and one that does not
+      set them will not accept a system call at all. The kernel stack itself
+      comes through `swapgs` and `IA32_KERNEL_GS_BASE`, the only mechanism the
+      processor provides for "this is my core": an array of 16-byte blocks,
+      one per core.
+
+      Third, **the big kernel lock**. The rest of the kernel (drivers, the
+      filesystem, swapping) was written for one core and quietly relies on
+      it. The lock is reentrant, because it has to be: an interrupt lands in
+      the middle of a system call, and a core that already holds it cannot
+      wait for itself. Every entry from ring 3 takes it and every exit gives
+      it back, and `switch_to` gives it up **for the duration of the switch**;
+      otherwise a task sleeping in the middle of a syscall would close the
+      kernel to everyone until it woke. The depth is kept on that task's
+      stack, so each one gets exactly its own back.
+
+      The fourth turned out to be real and cost a day. **A secondary core in
+      protected mode did not have paging enabled.** The boot trampoline
+      switched to protected mode and stopped there; nobody ever set its CR3
+      or the PG bit. For kernel code it came out the same, because low memory
+      is mapped one to one, and that is why kernel threads on secondary cores
+      worked flawlessly through the whole previous step. But a user program's
+      address (0x40000000 and up) means nothing without page tables: the core
+      read whatever lies at that address **physically**, which was zeros.
+
+      The symptom was misleadingly far from the cause. The process died at a
+      random, wild address, different every time, because `iret` entered
+      ring 3 at the right address, and the processor executed zeros there and
+      jumped wherever. The big lock looked guilty, so I turned it off, and it
+      changed nothing, which was the first piece of good news. What decided
+      it was a dump in which the same data read two ways gave two different
+      answers: through the virtual address **zeros**, and through the same
+      frame read directly, the correct code. The page directory matched, the
+      entry matched, CR3 matched, and `invlpg` and reloading CR3 changed
+      nothing. One possibility was left: address translation was not working
+      at all. The fix is six instructions in the trampoline and one field for
+      CR3, exactly what the 64-bit core had from the start, because without
+      paging long mode simply does not start.
+
+      **A thread and a process are now two different permissions.** A kernel
+      task created through `task_create_anycore` is *independent*: it does
+      not take the big lock, because whoever asked for it took on the promise
+      that its thread touches only things that can stand two cores at once.
+      If it did take the lock, four threads computing in parallel would
+      compute one after another, which is not what they are for. A process
+      started with `runw` is the opposite: its kernel side runs under the
+      lock, and only the computing in ring 3 runs in parallel, which is where
+      a program spends most of its time anyway.
+
+      **The proof is again a comparison, not a measurement.** `run cores` and
+      `runw cores` in the same machine: the same program, the same checksum to
+      the bit, the same number of steps. All that differs is how many cores
+      may run it. In long mode 86 ticks against **33** and the mask of all
+      four cores; in protected mode 42 against **26**. On a single-core
+      machine `runw` changes nothing, and an assertion guards that too: the
+      promise "may run anywhere" is not the promise "must run elsewhere".
+- [x] **System calls without the big lock**: the first bite of what the
+      previous step put in the way.
+
+      It had to start with admitting a mistake. While cleaning up the
+      diagnostic code after the previous step I reverted `kernel/isr.c` to
+      the version in the repository, together with the wrapper that took the
+      big lock on entry from ring 3. So the 32-bit kernel went into the
+      repository with ring 3 on every core and **no lock at all**, although
+      the description said otherwise. All the tests passed, because nothing
+      in them pressed on that spot hard enough, and that is exactly the kind
+      of green that means nothing. The lock went back in this step.
+
+      **First, a measurement that showed something else entirely.** The
+      `syscalls` program calls the kernel a million times and does nothing
+      else. Under the big lock, two processes on four cores finished in 1080
+      ticks, and the same two on one core in 594. Four cores were **twice as
+      slow** as one. But when I took the lock off that call, the improvement
+      was negligible, so the lock was not the biggest cost here at all.
+
+      `smp_core()` was. The whole kernel uses the word `current`, and that
+      word means "the task of THIS core", so every use of it asked the
+      processor for the core number, and the question went **through a read
+      of the local APIC**. That is a hardware register outside the cache:
+      hundreds of cycles on a real machine, and more under an emulator,
+      because hardware access takes its own lock. The kernel paid that
+      several times per system call.
+
+      The number was there all along, and for free. Every core has **its own
+      task state segment** (it got one in the previous step), and its selector
+      sits in the processor's task register. The `str` instruction reads it
+      without a single memory access. Before a core loads its segment, `str`
+      gives zero, and that is the right answer, because until then only the
+      boot core runs. Setting up the segments itself still asks the APIC;
+      otherwise it would be asking for the number in order to set it.
+
+      The effect: a million calls on one core went from 594 ticks to 286 in
+      protected mode and from 288 to 159 in long mode. Twice as cheap, in
+      every system call and every interrupt.
+
+      **Only then the lock.** The list of calls that do not need the big lock
+      is short and explicit: the process number, the clock counter, the core
+      number, sleeping. Each of them touches only the calling task's state or
+      things that have locks of their own. The default answer is "with the
+      lock" and should stay so; adding a call to that list is a promise that
+      the call has been read to the end, together with everything it calls.
+
+      Delivering a kill and a signal stays under the lock, because one ends
+      the process and the other rewrites its stack, but the lock is taken only
+      when there really is something to deliver. Without that, this path would
+      differ from the ordinary one only in name.
+
+      **The numbers.** A million calls in each of two processes: in protected
+      mode 287 ticks one after the other against **192** at once, in long mode
+      147 against **62**. Before the whole change, this was slower on four
+      cores than on one.
+
+      The test watches more than time, though. Each of the million calls has
+      to return the number of THIS process, and that is exactly the mistake
+      the lock had been hiding until now: two cores confused about which task
+      they are running. Two million matching answers mean more than any
+      timing.
+- [x] **English names, tests split up**: a change of convention, not of
+      behaviour.
+
+      Identifiers, file names and program names are now in English; what the
+      system says to a person stays Polish: kernel messages, assertion
+      descriptions in the tests and this journal. Code is written in English
+      because that is how it is read.
+
+      I did the renaming with a syntax-aware tool: for C a scanner of my own
+      that skips strings and comments, for Python the tokenizer from the
+      standard library. I compared the result mechanically against a plain
+      renaming of the repository version: only the files I had fixed by hand
+      were supposed to differ, and only they did.
+
+      There were four manual fixes, all for one reason: a new name collided
+      with an existing one. One of them changed the MEANING of the code, and
+      neither the compiler nor any test reported it. In the NVMe driver the
+      DMA buffer at file scope got the name `buf`, which a parameter of
+      `nvme_write` already has, and it would have shadowed it so that the
+      write went to the caller's buffer instead of the DMA one. So I wrote a
+      separate tool that looks for NEW shadowing in the whole tree: apart from
+      one spot in ush64, no file gained any.
+
+      On the Python side there was one more trap. The tokenizer returns a
+      whole f-string as one token, so names inside the braces were left
+      untouched and `run_tests.py` fell over on an old name. A second pass
+      replaces them separately, only inside braces.
+
+      **Tests split into files of one thing each.** Three groups were sacks:
+      `core` (174 assertions), `core2` and `k64` (795 lines). Each of them did
+      everything on one machine, so a failure pointed at a group covering a
+      third of the system rather than at the broken thing. They became
+      separate groups: boot, shell, processes, fork, demand paging, signals,
+      protection, network, HTTP, mouse, ush, filesystem, and on the 64-bit
+      side the long-mode core, processes, shell and disk. The drivers split
+      into ACPI, USB keyboard, AHCI, consoles and swapping as well.
+
+      The price is fair and shows in the numbers: there are 49 groups instead
+      of 32, and the whole run takes 361 seconds instead of 326, because every
+      group has to start its own machine. In exchange the longest group went
+      from 174 to 87 seconds, and a failing assertion now says what broke.
+- [x] **Comments in English**: closing the previous step.
+
+      The names went over to English earlier, the comments stayed Polish, and
+      for a while a file looked as if two people had written it. Now Polish is
+      left only in what the system says to a person: kernel messages,
+      assertion descriptions in the tests and this journal.
+
+      All of it went through: kernel64/, user/, user64/, both .S files in
+      kernel/ that the previous pass missed, and the comments and docstrings
+      in scripts/. I did it with a tool that cuts the comments out of a file
+      and pastes the translations back under the same numbers: for C a scanner
+      of my own, for Python the tokenizer from the standard library. Once I
+      got the numbering off by one and overwrote a section header in
+      t_e1000.py with someone else's text; it showed at once, because one
+      Polish comment was left in the file that should not have been there.
+
+      On the way came names the previous pass had missed, because they were
+      not identifiers in code but file and program names (the map maker, the
+      deep recursion test, the two shared memory programs), plus the mode
+      arguments of mmapzap and a handful of identifiers with a Polish stem
+      that slipped through the sieve.
+
+      Automatic renaming has its price, and I paid it here too: replacing one
+      short Polish word with `nosync` got into Polish runtime strings and
+      turned a message about "bytes without msync" into "bytes nosync msync".
+      I caught it reading the diff, not by a test. No test will catch damage
+      of that kind, because the text of a message is nobody's assertion.
+
+      768 assertions, 49 groups, no change in behaviour.
+- [x] **A mapping change reaches the other cores (TLB shootdown)**, and
+      threads can finally leave the boot core.
+
+      A page table is memory, and memory is shared. A translation COMPUTED
+      from that table is not: every core keeps its own in a cache for which
+      the kernel has no instruction. Changing an entry changes what the
+      tables say and nothing in what the neighbour believes, and the
+      neighbour keeps writing to a frame the kernel has already freed or
+      given to someone else.
+
+      As long as a process ran on one core, nobody suffered from this. And
+      that is exactly why threads were kept on the boot core: they share an
+      address space, so they are the first to run into it.
+
+      The only way into somebody else's cache is to ask its owner: send an
+      interrupt and WAIT for the answer. That waiting is the whole thing. A
+      request sent and not waited for says nothing about when it will be
+      carried out, and "when" is exactly what the caller needs to know: it
+      is about to free the frame.
+
+      Only those at fault pay for it. Every core announces which address
+      space it is in, so a change in a space nobody else holds sends no
+      interrupt at all, which covers every single-threaded process, i.e.
+      nearly all of them.
+
+      **The mask cannot be wrong, and that is the whole argument.** We ask
+      only the cores that say they are in the given space, and a core can
+      change its mind while being asked. Both directions are safe for the
+      same reason: a core that LEFT the space after the count invalidates an
+      address in a space it no longer runs (one wasted miss, and the switch
+      itself flushed its cache anyway). A core that ENTERED after the count
+      had to load CR3, which flushes everything; there is no way to enter
+      while holding anything older than the moment of entry.
+
+      **The deadlock that stopped it.** The first run hung the machine. A
+      core waiting for the big kernel lock does so with interrupts off (it
+      came in through an interrupt gate), so it hears nothing. That was
+      harmless as long as the only thing to wait for was the lock itself:
+      the holder runs and sooner or later lets go. It stopped being harmless
+      the moment the holder started waiting for US. The lock's wait loop now
+      answers while it waits: one attempt, an answer, another attempt.
+
+      **A second bug, found on the way and older than the whole change.**
+      The test program showed 7296 memory mismatches, and they had nothing to
+      do with the TLB. The heap limit and the next free mmap address describe
+      the ADDRESS SPACE, and threads share one; kept per task, they were
+      copied when a thread was created and moved separately, so two threads
+      asking for memory at the same moment got THE SAME address, each sure it
+      was first. The bug had been a bug since the day threads appeared; it
+      was just hard to hit while a process stayed on one core.
+
+      **The numbers.** The `tlb` group and the `tlbtest` program: four threads
+      of one process, fresh memory in every round, so fresh mapping changes in
+      a space three other cores stand in.
+
+      | trial | core mask | remote | answers | memory errors |
       |---|---|---|---|---|
-      | `run tlbtest`, 4 rdzenie | 1 | 0 | 0 | 0 |
-      | `runw tlbtest`, 4 rdzenie | 15 | 124 | 203 | 0 |
-      | `runw tlbtest`, 1 rdzen | 1 | 0 | 0 | 0 |
-
-      Maska 15 to cztery rdzenie w JEDNEJ przestrzeni adresowej. Zera w
-      wierszu pierwszym i trzecim sa tu rownie wazne, co 124 w drugim:
-      mechanizm nie kosztuje nic tam, gdzie nie ma komu mowic.
-
-      Jadro 64-bitowe dostalo ten sam mechanizm i te same liczniki, ale
-      nie ma w nim jeszcze watkow - nie da sie wiec wsadzic dwoch
-      rdzeni do jednej przestrzeni i test sprawdza tam tylko tyle, ze
-      maszyneria stoi i milczy, kiedy ma milczec.
-
-      796 asercji, 50 grup, 385 s.
-
-- [x] **Watki w jadrze 64-bitowym** - i dopiero teraz widac, ze strzal
-      w TLB dziala takze tam.
-
-      Poprzedni krok wbudowal w oba jadra rozsylanie zmian mapowan, ale
-      pokazac dzialanie umial tylko w 32-bitowym: w trybie dlugim nie
-      bylo watkow, wiec nie dalo sie wsadzic dwoch rdzeni do JEDNEJ
-      przestrzeni adresowej. Test sprawdzal tam tylko tyle, ze
-      maszyneria stoi i milczy - a to zaden dowod.
-
-      Watek to nowe zadanie z TA SAMA przestrzenia i wlasnym stosem.
-      Cala trudnosc lezy poza samym utworzeniem: przestrzen musi
-      przezyc smierc pierwszego watku (zwalnia ja ten, kto konczy
-      ostatni), granica sterty i nastepny wolny adres musza byc jednym
-      licznikiem dla wszystkich, a nie kopia u kazdego - dokladnie ten
-      sam blad, ktory tydzien wczesniej wyszedl po stronie 32-bitowej.
-      Naprawiony tu od razu, zanim zdazyl kogokolwiek ugryzc.
-
-      Przy okazji doszla pamiec anonimowa (SYS64_MMAP): zarezerwowane
-      adresy, strony pod palcami - bo z czegos ten stos musi byc.
-
-      **Dwa bledy po drodze, oba starsze od tej zmiany.**
-
-      Pierwszy: watki ginely na "Invalid Opcode" pod adresem, ktory
-      okazal sie zwyklym `movdqa %xmm7`. CR0 i CR4 naleza do RDZENIA, a
-      SSE wlaczal tylko rdzen rozruchowy - wiec kazdy program uzywajacy
-      XMM, ktory trafil na rdzen wtorny, ginal na instrukcji zupelnie
-      poprawnej. Blad byl tam od chwili, gdy programy zaczely biegac po
-      wszystkich rdzeniach; nie trafil go dotad zaden test, bo zaden
-      program 64-bitowy uruchamiany przez 'runw' nie siegal po XMM w
-      widocznym miejscu. To jest ta kategoria bledow, ktora nie objawia
-      sie wcale, dopoki nie zrobi sie czegos nowego.
-
-      Drugi: watki ginely potem na "General Protection Fault" na
-      instrukcji `movaps %xmm0, 0xe0(%rsp)`. Wierzcholek stosu byl
-      wyrownany do szesnastu bajtow - i wlasnie o osiem bajtow za
-      dobrze. Funkcja w C zaklada stos taki, jak PO instrukcji call,
-      czyli z adresem powrotu na wierzchu; na tym opiera wyrownanie
-      swoich zmiennych. Stos programu byl juz od dawna ukladany
-      poprawnie, ja po prostu nie przepisalem tego minus osiem.
-
-      **Liczby.** 'runw tlbtest64' na czterech rdzeniach: maska rdzeni
-      15, 40 kawalkow pamieci sprawdzonych dwa razy, zero bledow, 140
-      zmian mapowan, ktore musialy dojsc do innych rdzeni, i 221
-      odpowiedzi. 'run tlbtest64' - maska 1 i ani jednego przerwania.
-      Te same cztery sprawdzenia po obu stronach, i po obu stronach
-      cos znacza.
-
-      809 asercji, 50 grup, 492 s.
-
-- [x] **Bledy stron bez wielkiego zamka** - i pierwszy podsystem, ktory
-      dostal wlasny.
-
-      Blad strony to najczestsze wejscie do jadra, jakie jest. Kazdy
-      program dotykajacy pamieci przechodzi tedy tysiace razy, a
-      wiekszosc tych bledow to nie sa bledy ani nawet praca z nazwy:
-      ramka od alokatora, cztery kilobajty zer i jeden wpis w tablicy.
-      Wszystkie trzy maja wlasne zamki.
-
-      A mimo to kazde takie wejscie bralo wielki zamek jadra - wiec dwa
-      procesy dotykajace WLASNEJ pamieci, w WLASNYCH przestrzeniach
-      adresowych, bez niczego wspolnego, i tak szly po kolei.
-
-      Lista przyczyn obslugiwanych bez zamka jest krotka i jawna, tak
-      samo jak lista wywolan systemowych: sterta, stos, pamiec
-      anonimowa w obszarze mapowan i kopiowanie przy zapisie. Reszta -
-      strona z pliku wymiany, strona odwzorowanego pliku i kazdy
-      prawdziwy blad - wchodzi jak dotad, bo siega po dysk albo po
-      liste zadan.
-
-      **Tablice stron dostaly wlasny zamek.** Byly wlasnoscia wielkiego
-      zamka tak dlugo, jak dlugo bral go kazdy blad strony; skoro juz
-      nie bierze, potrzebuja swojego. Jeden na cale jadro i z
-      rozmyslem: sekcja pod nim to przejscie dwoch (albo czterech)
-      poziomow i jeden zapis. Czego pod nim byc nie moze, to dysku -
-      wiec wymiana stron bierze go wokol wpisu i puszcza na czas
-      odczytu.
-
-      **Dwa rdzenie na TEJ SAMEJ stronie.** To jest nowy wyscig i
-      trzeba go bylo obsluzyc wprost: oba widza brak mapowania, oba
-      przynosza ramke, i przegrany musi sie dowiedziec, ze przegral -
-      inaczej strona zwyciezcy, juz zapisana, zostaje zastapiona pusta.
-      Stad mapowanie "tylko jesli nic tam nie ma".
-
-      **Wpis musi byc PUSTY, nie tylko nieobecny.** Strona wyrzucona na
-      dysk tez jest nieobecna, a danie jej swiezej strony zer zgubiloby
-      to, co lezy na dysku. Osobne pytanie i osobna odpowiedz.
-
-      **Alokator ramek skanowal bitmape od zera przy kazdym
-      przydziale.** Przydzielenie N ramek kosztowalo N do kwadratu, i
-      to pod zamkiem trzymanym przez caly czas. Program dotykajacy
-      dziewieciu tysiecy stron spedzal wiecej czasu na chodzeniu po
-      bitmapie, po ktorej juz chodzil, niz na czymkolwiek innym. Kursor
-      pamietajacy, gdzie skonczylo sie ostatnie szukanie, zalatwia to
-      dla przypadku jednej ramki - czyli dla prawie kazdego wolajacego.
-      To akurat pomaga takze na jednym rdzeniu.
-
-      **Czego NIE twierdze.** Pomiar czasu jest tu niestabilny i mowie
-      to wprost: w swiezej maszynie 'run faults' dawal 21, 45 i 51
-      tykniec, a 'runw faults' 12, 12 i 25. Kierunek jest widoczny,
-      liczba nie. Dlatego asercja nie stoi na stoperze, tylko na
-      liczniku: jadro liczy, ile bledow obsluzylo ktora droga. Po
-      'runw faults' rosnie o 18001 bez zamka i o ZERO z zamkiem - dwa
-      procesy po dziewiec tysiecy stron. To mowi wprost to, co stoper
-      moze najwyzej zasugerowac.
-
-      Poprawnosc pilnowana jest rownie mocno i to ona nadaje licznikom
-      wartosc: kazda strona ma wrocic z tym, co w nia wpisano, a swieza
-      ma byc wyzerowana. Ramka wydana dwom procesom naraz wychodzi tu
-      jako zla suma.
-
-      830 asercji, 51 grup, 493 s.
-
-      Uwaga na przyszlosc: przy 51 grupach i czterech maszynach naraz
-      asercje czasowe w 'proccores' i 'lockless' zaczely raz na jakis
-      czas przegrywac z obciazeniem gospodarza (35 wobec 44 tykniec
-      przy progu 3/4). Osobno przechodza z zapasem. Prog nie jest zly -
-      to pomiar czasu w maszynie wirtualnej stojacej obok trzech innych
-      nie jest niczym pewnym.
-
-- [x] **Ustawienia systemu** - maszyna zaczyna pamietac cos o sobie.
-
-      Wszystko, co system o sobie wiedzial, bylo w niego wpisane w
-      czasie budowania. Serwer nazw dalo sie zmienic komenda i zmiana
-      zyla dokladnie tyle, co maszyna - wylaczenie wystarczylo, zeby
-      zapomniec.
-
-      Ustawienie to linia w pliku tekstowym na dysku: nazwa=wartosc, i
-      nic wiecej. Zwykly tekst z rozmyslem - da sie go przeczytac przez
-      'cat' i zmienic przez 'write', a gdy cos pojdzie nie tak, widac
-      co. Jadro czyta ten plik raz, przy starcie, zaraz po systemie
-      plikow.
-
-      Zbior nazw jest staly i jawny, i to tez z rozmyslem: kazda z nich
-      ma gdzies w systemie miejsce, ktore ja czyta i cos z nia robi.
-      Nazwa, ktorej nikt nie czyta, nie jest ustawieniem - jest linia w
-      pliku. Stad cztery, a nie czterdziesci: nazwa maszyny (zacheta),
-      serwer nazw (siec), kolor zachety (konsola) i tlo pulpitu
-      (kompozytor).
-
-      **Okno na pulpicie.** Program 'gsettings' w pierscieniu 3 nie
-      trzyma z tego niczego: pyta jadro o i-te ustawienie i prosi jadro
-      o zmiane. Jest jedno miejsce, ktore decyduje, czym jest
-      ustawienie, i nie jest nim program. Program ma za to te czesc,
-      dla ktorej okno w ogole istnieje: ktory wiersz jest wybrany, co
-      wpisano i czy zdazylo to trafic na dysk.
-
-      Dwa sposoby zmiany, bo ustawienia sa dwojakie. Liczba z malego
-      zbioru - tlo, kolor - przeklikuje sie w wierszu: nie ma czego
-      pisac, gdy mozliwosci jest szesc. Tekst - nazwa maszyny, adres
-      serwera - wpisuje sie, bo zgadnac go nie sposob.
-
-      **Asercje nie dotycza pliku, tylko SKUTKOW.** Plik z linia
-      'nazwa=maszyna' nie dowodzi niczego; zacheta mowiaca 'maszyna>'
-      po restarcie dowodzi wszystkiego. Kazde ustawienie sprawdzane
-      jest wiec tam, gdzie jest uzywane: nazwa w zachecie, kolor w jej
-      barwie, tlo w pikselach pulpitu, a serwer nazw w tym, co mowi
-      'ifconfig' - i kazde przez RESTART na tym samym obrazie dysku.
-
-      Okno sprawdzane jest tak samo: ikona je otwiera, klik przeklikuje
-      wartosc, Enter zapisuje, a po restarcie pulpit ma inny kolor.
-
-      Po drodze jeden blad wart zapisania, bo pokazuje, jak latwo
-      pomylic sie o jedna konwencje: fs_write oddaje zero przy
-      powodzeniu, a nie liczbe bajtow. Sprawdzalem "wiecej niz zero",
-      wiec kazdy udany zapis meldowal porazke - plik na dysku byl
-      poprawny, a komunikat mowil, ze sie nie udalo. Test tego nie
-      zlapal, bo testu jeszcze nie bylo; zlapalo oko na wydruku.
-
-      849 asercji, 52 grupy, 483 s.
-
-- [x] **Zamykanie i zmiana rozmiaru okien aplikacji** - pulpit zaczyna
-      zachowywac sie jak pulpit.
-
-      Okno, ktore da sie otworzyc i nie da zamknac, nie jest oknem. A
-      dokladnie tak bylo: przycisk [x] kompozytora wyjmowal okno spod
-      dzialajacego procesu, ktory rysowal dalej - w cos, czego juz nie
-      bylo. Zmiana rozmiaru dzialala wylacznie dla okien jadra.
-
-      **Zamkniecie jest PROSBA.** Kompozytor mowi aplikacji, ze jej
-      okno jest zamykane, i daje jej czas skonczyc po swojemu. Program,
-      ktory odpowiada, konczy sie wlasnym kodem wyjscia, posprzatawszy
-      po sobie.
-
-      **Program, ktory nie odpowiada, ginie.** Okno, ktorego nikt nie
-      moze zamknac, jest gorsze niz aplikacja tracaca glos - wiec po
-      okolo dwoch sekundach pulpit przestaje prosic. Do sprawdzenia
-      tego jest osobny program 'gdeaf': otwiera okno i nie slucha
-      niczego. Ginie z kodem -9 i o to chodzi.
-
-      **Zmiana rozmiaru** robi oknu nowy bufor tresci i mowi aplikacji
-      nowy rozmiar - raz, w chwili puszczenia rogu, a nie przy kazdej
-      klatce ciagniecia. Starej tresci nie przenosimy: program zaraz i
-      tak przerysuje calosc, a przeciagnieta kopia byloby widac tylko
-      do tej chwili.
-
-      Po drodze dwa bledy warte zapisania, oba tego samego rodzaju -
-      wspolny plik kompilowany dwa razy:
-
-      - desktop.c jest wspolny dla obu jader, wiec siegniecie po
-        task_kill zerwalo linkowanie jadra 64-bitowego, gdzie ta nazwa
-        nie istnieje. Slownik zgodnosci dostal ja jako sygnal nie do
-        przechwycenia. Zobaczylem to dopiero po pelnym biegu, bo
-        wczesniejsze budowanie puscilem z wyciszonym stderr - i to jest
-        wlasciwa lekcja z tego bledu.
-      - Programy graficzne tez kompiluja sie dwa razy, wiec nowe
-        zdarzenia trzeba bylo dodac takze do user64/usys64.h.
-
-      **Asercje czasowe dostaly powtorke.** Grupa 'lockless' i
-      'proccores' przegrywaly czasem z obciazeniem gospodarza - przy 53
-      grupach i czterech maszynach naraz pomiar czasu w maszynie
-      wirtualnej stojacej obok trzech innych nie jest niczym pewnym.
-      Prog sie NIE zmienil; zmienilo sie to, ile odczytow trzeba, zeby
-      w jeden uwierzyc: gdy pierwszy przegrywa, mierzymy jeszcze raz.
-
-      862 asercje, 53 grupy, 480 s.
-
-- [x] **Dwanascie okien naraz i pasek zadan, ktory je miesci** - koniec
-      z limitem, o ktory dalo sie uderzyc samym klikaniem w ikony.
-
-      Kompozytor trzymal szesc okien, a dwa z nich sa jego wlasne. Czyli
-      cztery aplikacje - przy siedmiu ikonach na pulpicie. Piata nie
-      wstawala i nie mowila dlaczego: win_create oddawalo -1, program
-      konczyl sie po cichu, na ekranie nie dzialo sie nic. Najgorszy
-      rodzaj granicy: taki, ktorego nie widac, dopoki sie w niego nie
-      wejdzie.
-
-      Sama liczba to jedna zmiana, ale sensownie to trzy rzeczy:
-
-      **Wiecej slotow** - dwanascie zamiast szesciu, czyli siedem ikon
-      plus jeszcze troche z menu.
-
-      **Kaskada, ktora nie wychodzi poza ekran.** Okna sa stawiane
-      schodkiem w prawo i w dol; dosc daleko po tym schodku i okno
-      trafia pod pasek zadan albo za prawa krawedz - tam, gdzie nie
-      widac go i nie da sie go zlapac. Teraz schodek cofa sie o trzy
-      pozycje, dopoki okno sie miesci, a na koniec i tak dociskamy je do
-      krawedzi. Cofanie liczy sie z NUMERU SLOTU, a nie z licznika
-      otwarc - dzieki temu slot 2 nadal daje (94,54) i wspolrzedne, na
-      ktorych stoja starsze testy graficzne, sie nie ruszyly.
-
-      **Pasek zadan, ktory dzieli sie szerokoscia.** Pasek to staly
-      kawalek pikseli: 640 minus przycisk "Menu" to 592 px. Dwanascie
-      przyciskow po 52 px to 624 - czyli ostatnie dwa rysowaly sie za
-      ekranem. Szerokosc przycisku liczy sie wiec teraz z liczby
-      otwartych okien i tego, ile miejsca zostalo, a dlugosc napisu z
-      tej szerokosci (czcionka ma 8 px). Przy dziewieciu oknach wychodzi
-      52 px jak dotad, przy dwunastu 49.
-
-      I najwazniejsze w tym: szerokosc liczy JEDNA funkcja, a pyta o nia
-      i rysowanie, i obsluga klikniecia. Dwa miejsca liczace to samo
-      osobno rozjezdzaja sie po cichu - przycisk widac tam, gdzie nie
-      dziala, i nikt nie umie powiedziec, co jest zepsute. Test celuje
-      dokladnie w to: klika w OSTATNI przycisk (ten, ktory istnieje
-      tylko dlatego, ze przyciski sie zwezily) i sprawdza, ze ognisko
-      dostalo jego okno, a nie sasiad.
-
-      Nowa grupa 'manywin': siedem ikon otwiera siedem okien, menu
-      doklada trzy, pasek pokazuje dwanascie przyciskow, zadne dwa sie
-      nie nachodza, wszystkie mieszcza sie w ekranie, i klikniecie w
-      ostatni, w srodkowy oraz w zwezony ostatni trafia za kazdym razem
-      we wlasciwe okno. Asercje sa o pikselach paska, bo to jedyne
-      miejsce, gdzie widac jednoczesnie i to, co narysowane, i to, co
-      klikalne.
-
-- [x] **Okno na caly ekran** - ostatnia rzecz, ktorej okno nie umialo, a
-      ktora robi sie z oknem najczesciej.
-
-      Okno dalo sie przesunac, zlapac za rog, zwinac do paska i zamknac.
-      Nie dalo sie go rozciagnac na caly ekran - a to jest to, co czlowiek
-      robi z oknem, w ktorym naprawde pracuje. Ciagniecie rogu az do
-      krawedzi to nie to samo, i te roznice warto wypisac, bo one sa
-      cala trescia tej zmiany:
-
-      **Do paska zadan, ani piksela dalej.** Pasek to jedyna droga do
-      pozostalych okien. Okno narysowane na nim byloby oknem, z ktorego
-      nie ma wyjscia.
-
-      **Okno PAMIETA, skad przyszlo.** Ten sam przycisk odklada je
-      dokladnie tam, gdzie stalo - nie w miejsce rozsadne, tylko w to
-      samo. Stad cztery pola w strukturze okna, a nie jedna flaga.
-
-      **Aplikacja dostaje nowy rozmiar.** Okno to nie tylko prostokat,
-      ale i bufor tresci, wiec bufor rosnie i leci WEV_SIZE. Program,
-      ktoremu by tego nie powiedziano, rysowalby dalej na 330 pikselach
-      w oknie szerokim na 638, a reszta byla by pustym szarym polem -
-      wygladajacym jak blad rysowania, a bedacym brakiem wiadomosci.
-
-      I to jest to, na czym stoja asercje. 'gsettings' rysuje zaznaczony
-      wiersz jako niebieski pasek przez CALA szerokosc swojej tresci -
-      wiec ten pasek jest miarka: po maksymalizacji ma siegac prawej
-      krawedzi ekranu, po powrocie konczyc sie tam, gdzie konczy sie
-      mniejsze okno. Jedno i drugie widac w pikselach.
-
-      Dwie rzeczy przy okazji, obie z gatunku "a co, jesli":
-
-      - Nie ma pamieci na bufor 638x456 (a sterta jadra ma 1 MiB)? Wtedy
-        nie dzieje sie NIC: okno zostaje takie, jakie bylo. Polowa
-        maksymalizacji - okno wieksze niz jego bufor - rysowalaby cudza
-        pamiec na ekranie. resize_content oddaje teraz -1 zamiast
-        milczec.
-      - Zlapanie zmaksymalizowanego okna za pasek tytulu przywraca mu
-        wlasny rozmiar, jak wszedzie indziej - i okno wraca pod kursor w
-        tym samym miejscu swojego paska, wiec nie ucieka spod reki.
-        Pociagniecie za rog po prostu przestaje byc maksymalizacja: to,
-        co wyjdzie z ciagniecia, jest nowym rozmiarem okna.
-
-      Nowa grupa 'maxwin'.
-
-- [x] **Zegar na pasku zadan** - maszyna miala zegar, ale trzeba go
-      bylo pytac.
-
-      'date' go drukowal, program mogl go dostac przez wywolanie
-      systemowe. Nie bylo go tam, gdzie zegar jest potrzebny - na
-      wierzchu, bez pytania. Teraz siedzi na prawym koncu paska i
-      pokazuje czas co do sekundy.
-
-      Odczyt zegara CMOS to odczekanie trwajacej aktualizacji i
-      czytanie do skutku, az dwa odczyty sie zgodza - a pulpit
-      przerysowuje sie ze trzydziesci razy na sekunde. Wiec czas jest
-      czytany co szosta klatke (okolo pieciu razy na sekunde) i
-      trzymany w buforze. Zadna sekunda przez to nie ginie, a CMOS nie
-      jest odpytywany trzydziesci razy na sekunde o cyfre, ktora zmienia
-      sie raz.
-
-      Miejsce na zegar jest ODJETE od tego, co dziela miedzy siebie
-      przyciski okien - to ta sama funkcja, ktora liczy ich szerokosc.
-      Przy dwunastu oknach przycisk ma teraz 41 pikseli zamiast 47.
-      Zegar narysowany na przycisku bylby zegarem, ktory jeden przycisk
-      chowa.
-
-      Test czyta cyfry Z EKRANU: wzorzec osmiu bajtow kazdego znaku
-      szuka sie w tej samej czcionce, ktora rysowalo jadro (tak samo
-      dzialaja testy konsoli w trybie graficznym). Maszyna wstaje z
-      zegarem ustawionym na staly moment, wiec cyfry musza mowic ten
-      moment - a po czterech sekundach o kilka sekund wiecej. Zegar
-      narysowany raz i nigdy nieodswiezany przeszedlby pierwsza asercje
-      i polegl na drugiej.
-
-      Nowa grupa 'clock'.
-
-- [x] **Terminal, ktory jest terminalem** - i jeden program zamiast
-      dwoch.
-
-      To, co bylo, uruchamialo jedna komende i rysowalo to, co
-      wypisala. Kazda nastepna kasowala poprzednia, okno mialo 240x150
-      niezaleznie od tego, co czlowiek z nim zrobil, nie bylo kursora,
-      historii, powrotu do tego, co zjechalo, ani zmiany katalogu.
-      Dowodzilo, ze program w pierscieniu trzecim potrafi uruchomic
-      inny i przeczytac jego wyjscie. Nie bylo terminalem.
-
-      Terminal to sesja. To, co bylo uruchomione, zostaje na ekranie nad
-      tym, co sie wlasnie pisze; zacheta mowi, gdzie jestes; strzalki
-      wracaja do tego, co sie pisalo; a ile z tego widac, decyduje
-      rozmiar okna, a nie liczba wpisana w program.
-
-      Wiec: pierscien linii (SCROLL, najstarsza wypada - przesuwanie
-      czternastu kilobajtow przy kazdym nowym wierszu byloby tym
-      drugim sposobem), odbicie zachety i komendy tak, jak sie stalo,
-      dopisywanie wyjscia w miare czytania, PgUp/PgDn po tym, co
-      zjechalo (z napisem, ze nie patrzymy na koniec - inaczej terminal
-      wyglada na zawieszony), strzalki w bok, Home i End, pisanie W
-      MIEJSCU KURSORA, cd zmieniajace zachete od razu, potok 'a | b'
-      oraz komunikat zamiast ciszy, gdy programu nie ma.
-
-      **I jeden plik zamiast dwoch.** Byly dwa terminale: user/gterm.c
-      i user64/gterm64.c, kazdy z wlasnym bledem do poprawienia
-      osobno. Zostal jeden, kompilowany dwa razy - dokladnie jak
-      wspolne pliki jadra. Rozni sie w nim jedna rzecz, ta, ktora
-      naprawde zalezy od trybu: jak uruchomic komende i zlapac jej
-      wyjscie. W trybie chronionym jadro ma na to wywolanie (spawn z
-      przekierowaniem, a caly potok jednym wywolaniem); w trybie dlugim
-      nie ma - wiec terminal sklada to sam z fork, dup2, exec i pipe,
-      tak jak robi to powloka. Reszta - pierscien, edycja, historia,
-      rysowanie - to jeden kawalek kodu.
-
-      Trzy rzeczy, ktore test zlapal, a oko nie:
-
-      - Po uruchomieniu komendy linia wejscia byla "pusta" tylko przez
-        wyzerowanie dlugosci; w buforze dalej stal poprzedni tekst i
-        rysowal sie pod kursorem. Pusta linia to taka, ktorej pierwszy
-        bajt jest zerem.
-      - Napis "^ przewiniete" rysowal sie wprost na pierwszym wierszu i
-        oba teksty dzielily te same piksele. Teraz najpierw czysci pod
-        soba tlo. Widac to bylo dopiero przy czytaniu ekranu przez
-        czcionke - czlowiek widzi "cos tam jest", test widzi
-        "co^u????winiete".
-      - Napis o przewinieciu ma pietnascie znakow, a czyszczone pod nim
-        tlo mialo czternascie - wiec ostatnia litera rysowala sie poza
-        wyczyszczonym polem i gubila sie przy krawedzi. Test czytajacy
-        napis literka po literce widzi taka roznice; oko nie.
-
-      **Ciemny motyw i angielski.** Terminal ma tlo w kolorze czerni z
-      palety i jasny tekst - tak, jak terminal wyglada. Okna pulpitu sa
-      szare, wiec widac od razu, ze to nie jest formularz, tylko ekran w
-      oknie. Jego wlasne komunikaty sa po angielsku ('no such program',
-      'cd: no such directory', '[code N]', '^ scrolled back') - w
-      odroznieniu od komunikatow jadra, ktore zostaja po polsku.
-
-      Testy czytaja CYFRY I LITERY Z EKRANU - wzorzec osmiu bajtow
-      kazdej komorki szuka sie w tej samej czcionce, ktora rysowalo
-      jadro. Wiec asercje mowia o tym, co widzi czlowiek, a nie o tym,
-      w co wierzy program. Dwie grupy: 'gterm' (sesja, historia, ruch w
-      linii, cd, potok, przewijanie, wiecej linii po rozciagnieciu
-      okna) i 'gterm64' (ta sama sesja przez fork, dup2, exec i pipe w
-      trybie dlugim).
-
-- [x] **Alt+Tab** - klawiatura dostaje to, co dotad miala tylko mysz.
-
-      Przy dwunastu oknach jedyna droga do okna byla mysz: klik w okno
-      albo w jego przycisk na pasku. Klawisze do przelaczania byly w
-      sterowniku od dawna - wiedzial, ze Alt jest wcisniety, i wiedzial,
-      co to Tab. Nikt tych dwoch rzeczy nie zlozyl.
-
-      Teraz Alt+Tab oddaje ognisko nastepnemu oknu i wynosi je na
-      wierzch. Kolejnosc jest kolejnoscia slotow, czyli kolejnoscia
-      przyciskow na pasku zadan - wiec dwa nacisniecia zabieraja tam,
-      gdzie patrzenie na pasek mowi, ze zabiora. Okna zwiniete sa
-      pomijane (ognisko, ktorego nie widac, to klawiatura pisaca w
-      nicosc), tak samo dwa okna jadra - nie ma za nimi programu, ktory
-      by klawisz przyjal.
-
-      Kod Alt+Tab powstaje w kbdmap.c, wspolnym dla obu jader, jako
-      KEY_NEXTWIN - kolejny kod sterujacy obok strzalek. Pulpit lapie go
-      przed wszystkim innym; tam, gdzie pulpitu nie ma, nikt go nie
-      czyta i na konsoli tekstowej nic sie nie dzieje.
-
-      Nowa grupa 'alttab'. Dwie asercje sa tu wazniejsze od reszty: ze
-      okno naprawde WYCHODZI NA WIERZCH (caly jego pasek tytulu widac, a
-      nie polowa spod sasiada) i ze KLAWISZE ZA NIM IDA - po Alt+Tab
-      wpisana komenda laduje w terminalu, ktory chwile wczesniej
-      byl pod dwoma innymi oknami.
-
-- [x] **Kto jest przy maszynie** - dwa poziomy, haslo i sudo.
-
-      Wszystko, co dzialalo, moglo wszystko. Program w pierscieniu
-      trzecim mogl nadpisac plik, z ktorego system czyta ustawienia przy
-      starcie, skasowac plik wymiany albo zmienic nazwe maszyny - i tak
-      samo kazdy, kto cos wpisal. Nie bylo kogo pytac, bo nie bylo
-      nikogo.
-
-      Teraz sa dwa poziomy: admin, ktory moze zmieniac system, i zwykly
-      uzytkownik, ktory moze cala reszte. Bez grup, bez wlascicieli
-      plikow, bez listy uprawnien - dwa poziomy wystarcza, zeby
-      powiedziec to jedno, co warto: ze zmiana systemu to inna czynnosc
-      niz uzywanie go.
-
-      **Poziom nalezy do procesu i wedruje do dzieci.** Nowe pole w
-      strukturze zadania w obu jadrach; fork i exec je dziedzicza.
-      Shell jadra nie jest procesem, wiec ma swoj wlasny poziom obok -
-      i program uruchomiony z shella dostaje jego poziom, bo watek
-      stojacy w przestrzeni jadra jest z tego punktu widzenia shellem.
-
-      **W gore przez haslo, w dol za darmo.** Trzy wywolania systemowe:
-      auth, drop, level. Zejscie nizej nigdy nie jest sprawdzane -
-      oddanie uprawnienia zawsze wolno.
-
-      **Haslo lezy w pliku jako liczba**, nie jako tekst - i warto
-      powiedziec wprost, czym to jest: skrotem na osmiu bajtach (FNV-1a
-      z sola), a nie funkcja zrobiona do hasel. Chroni przed
-      PRZECZYTANIEM hasla z pliku, ktory kazdy moze obejrzec. Nie
-      chroni przed kims, kto zabierze dysk i weznie sie za te liczbe ze
-      slownikiem, i nic tu tego nie udaje. Zgadywanie kosztuje czas:
-      trzy zle proby i maszyna przez kilka sekund odpowiada "nie",
-      nawet nie patrzac - inaczej szescioznakowe haslo jest dla
-      programu w ringu 3 kwestia popoludnia.
-
-      **Czego pilnujemy:** ustawien (SYS_CFG_SET i komenda 'set'),
-      wlasnych plikow systemu (system.cfg, swap.sys, icons.pos - przy
-      otwarciu do zapisu i przy kasowaniu), oraz sygnalow do cudzych
-      procesow. Konsola pilnuje tego samego co wywolania systemowe -
-      inaczej byloby obejsciem wszystkich regul, ktorych reszta maszyny
-      przestrzega. Czytac te pliki moze kazdy: nie ma w nich nic
-      tajnego, a zmiana to co innego niz zajrzenie.
-
-      **Trzy miejsca, w ktorych sie o to prosi**, i wszystkie pytaja tak
-      samo - gwiazdkami zamiast tekstu:
-
-      - shell jadra: 'sudo <komenda>' (jedna komenda), 'sudo' (sesja do
-        'wyloguj'), 'kim', 'haslo'. Zacheta konczy sie '#' zamiast '>',
-        gdy jestes adminem - najstarszy sposob powiedzenia tego i taki,
-        ktory sie widzi, nie czyta.
-      - terminal w oknie: 'sudo <komenda>' zamienia linie w linie hasla.
-        Program w ringu 3 nie moze podniesc sobie uprawnien sam - moze
-        tylko dostac odmowe i cos z nia zrobic. Robi to, o co chodzi:
-        pyta i probuje raz jeszcze, po czym od razu schodzi z powrotem.
-      - okno ustawien: zapis wraca z odmowa, wiec okno mowi o tym i
-        pyta o haslo pod zmienianym ustawieniem.
-
-      Do tego 'rm' i 'cp' rozrozniaja teraz odmowe od "nie ma pliku" -
-      to dwie rozne odpowiedzi i czlowiek robi po nich co innego.
-
-      Dwie nowe grupy: 'users' (konsola: odmowa, ktora naprawde nie
-      zmienia wartosci; zle haslo; jedna komenda, nie sesja; blokada po
-      trzech probach; zmiana hasla przezywajaca restart; plik bez hasla
-      otwartym tekstem) i 'usersgui' (terminal i okno ustawien). Grupa
-      'k64shell' dostala te same asercje dla trybu dlugiego, bo to ten
-      sam user.c po obu stronach.
-
-- [x] **Terminal, ktory nie zamiera** - wyjscie na zywo i Ctrl+C.
-
-      Terminal uruchamial program i CZEKAL: nic nie rysowal, na nic nie
-      odpowiadal i nic nie pokazywal, dopoki program sie nie skonczyl.
-      Przy programie, ktory konczy sie szybko, tego nie bylo widac.
-      Przy takim, ktory sie nie konczy - a 'spin' jest wlasnie taki -
-      zabieral ze soba okno: bez wyjscia, bez sposobu na zamkniecie,
-      bez sposobu na zatrzymanie. To nie jest terminal uruchamiajacy
-      program, to jest terminal, ktory stanal.
-
-      **Wyjscie czytane w miare pisania.** Program pisze do pliku, a
-      terminal na kazdym przebiegu swojej petli czyta to, co jest za
-      punktem, na ktorym skonczyl ostatnio. Wiec linie pojawiaja sie,
-      gdy program jeszcze dziala, i pojawiaja sie dalej.
-
-      **Czekanie, ktore nie czeka.** Do tego potrzebne bylo nowe
-      wywolanie systemowe w obu jadrach: SYS_TRYWAIT - "0, jesli sie
-      skonczyl (i tu jest kod), -3, jesli jeszcze biegnie". Bez niego
-      program pilnujacy innego musi wybrac miedzy blokowaniem a
-      niewiedza. Jadro 64-bitowe dostalo przy okazji seek: bez niego
-      czytanie "tego, co nowe" znaczyloby czytanie calosci za kazdym
-      razem.
-
-      **Ctrl+C znaczy to samo, co wszedzie.** Klawisz przychodzi jako
-      0x03 jak kazdy inny, terminal wysyla SIGINT do programu, ktory
-      uruchomil, a program bez wlasnej procedury na tym ginie. Potem
-      terminal bierze nastepna komende.
-
-      Jeden blad wart zapisania: plik z wyjsciem nie byl czyszczony
-      przed startem, wiec pierwszy odczyt nowej komendy pokazywal
-      resztki poprzedniej. Przy czytaniu dopiero na koncu tego nie bylo
-      widac - stary plik i tak byl juz nadpisany, zanim ktokolwiek do
-      niego zajrzal. Czytanie na biezaco to wywleklo.
-
-      Nowa grupa 'gtermlive': wyjscie widac przed koncem programu, jest
-      go coraz wiecej, okno przyjmuje klawisze przy dzialajacym
-      programie, Ctrl+C pokazuje sie w sesji i konczy program, po nim
-      nic juz nie dopisuje, a nastepna komenda pokazuje swoje wyjscie,
-      nie resztki poprzedniego.
-
-- [x] **Rozmowa z programem** - shell w oknie terminala.
-
-      Terminal umial uruchomic program i pokazac, co ten wypisal. Nie
-      umial powiedziec mu nic z powrotem: wejscie programu bralo sie
-      znikad, wiec wszystko, co czyta, bylo poza jego zasiegiem - zaden
-      shell, zaden program pytajacy o cokolwiek, nic interaktywnego.
-
-      Teraz to, co sie pisze przy dzialajacym programie, idzie rura do
-      jego standardowego wejscia, a Ctrl+D te rure zamyka - czyli mowi
-      czytajacemu, ze nic wiecej nie bedzie. Trzeba bylo do tego trzech
-      rzeczy:
-
-      **Sposobu na uruchomienie programu z rura do srodka.** W trybie
-      chronionym robi to jadro: nowe wywolanie SYS_SPAWN_TALK tworzy
-      potok, daje dziecku jego koniec do czytania jako deskryptor zero,
-      a wolajacemu oddaje koniec do pisania jako zwykly deskryptor. W
-      trybie dlugim terminal sklada to sam z pipe, fork i dup2 - tam
-      wszystko to juz bylo.
-
-      **Wspolnego stdout.** Dzieci shella musza pisac tam, gdzie pisze
-      shell. Kazdy deskryptor niesie wlasne polozenie, wiec jedynym
-      miejscem, co do ktorego wszyscy sie zgadzaja, jest KONIEC pliku.
-      Bez tego kolejna zacheta shella ladowala na tym, co wlasnie
-      napisalo jego dziecko, i wyjscie znikalo pod nia. To samo w obu
-      jadrach: w 32-bitowym flaga na deskryptorze, w 64-bitowym regula
-      "plik pod deskryptorem numer jeden pisze sie na koncu".
-
-      Do tego w jadrze 32-bitowym dziecko dziedziczy teraz przekierowany
-      stdout rodzica (exec przekazuje i-wezel), bo inaczej programy
-      uruchamiane przez shella pisalyby na konsole tekstowa, ktorej w
-      trybie graficznym nikt nie oglada.
-
-      **Konca wejscia, ktory cos znaczy.** Oba shelle uzytkownika
-      krecily sie w kolko, gdy czytanie zwracalo zero: 'if (n != 1)
-      continue'. Shell czytajacy strumien, ktory sie skonczyl, tez sie
-      skonczyl - teraz obydwa konczy zero z read.
-
-      **Przy okazji dwa zrodla falszywych alarmow w testach**, oba
-      naprawione bez ruszania tego, co asercje twierdza:
-
-      - Czekanie na zachete przy starcie maszyny mialo pietnascie
-        sekund. Pelny bieg startuje cztery maszyny naraz i cztery jadra
-        wstajace na jednym hoscie potrzebuja wiecej - a to jest
-        czekanie NA ZDARZENIE, wiec dluzszy limit nie oslabia niczego.
-        Trzydziesci sekund.
-      - Grupa 'lockless' mierzy, czy dwa procesy potrafia byc w jadrze
-        naraz. To twierdzenie o MOZLIWOSCI, nie o sredniej: obala je
-        dopiero to, co robil wielki zamek - dwa rdzenie wolniejsze niz
-        jeden. Wiec pomiar, ktory przegrywa, jest powtarzany (do
-        czterech razy) i liczy sie najlepszy, a margines to teraz 0.85
-        zamiast 0.75. Jadro 64-bitowe wychodzi na 0.42, 32-bitowe na
-        0.68-0.80 - i to jest uczciwy obraz rzeczy: w trybie
-        chronionym pod wielkim zamkiem siedzi jeszcze wiekszosc
-        wywolan, a bez zamka sa na razie bledy stron.
-
-      I to jest dowod, ze to dziala: shell uzytkownika (ring 3) chodzi
-      w oknie terminala, jego komendy sie wykonuja, wyjscie ich dzieci
-      jest POD komenda i NAD nastepna zacheta, potok wewnatrz shella
-      wewnatrz terminala pisze do tego samego okna, a Ctrl+D konczy
-      calosc. Nowa grupa 'gtermsh'; ta sama droga w trybie dlugim
-      dopisana do 'gterm64'.
-
-- [x] **Schowek** - tekst, ktory przechodzi z okna do okna.
-
-      Kopiowanie i wklejanie to najprostsza rzecz, jaka dwa programy
-      robia razem - i jedyna, ktorej nie zrobia same: zaden nie moze
-      dotknac pamieci drugiego i zaden nie wie, ze ten drugi istnieje.
-      Wiec tekst musi czekac w miejscu nalezacym do obu, czyli w jadrze.
-
-      Piecset dwanascie bajtow tekstu i dwa wywolania systemowe, w obu
-      jadrach. Bez formatow, bez wlascicieli, bez negocjowania, co
-      znaczy zaznaczenie - tyle wystarcza, zeby nazwe wpisana w
-      terminalu wkleic do okna ustawien, a wszystko ponad to byloby
-      protokolem, ktorego tu jeszcze nikt nie potrzebuje.
-
-      Klawisze najstarsze z mozliwych: Ctrl+Insert kopiuje, Shift+Insert
-      wkleja. Nie Ctrl+C - w terminalu Ctrl+C znaczy "zatrzymaj ten
-      program" i nic innego. Insert jest jedynym klawiszem rozszerzonym,
-      ktorego znaczenie zalezy od tego, co jest wcisniete razem z nim,
-      wiec rozstrzyga sie to tam, gdzie ten stan jest znany - w
-      kbdmap.c, wspolnym dla obu jader.
-
-      Siega po niego terminal, okno ustawien i OBA shelle jadra: schowek
-      nalezy do systemu, a nie do jednego okna. Widac to najlepiej na
-      konsolach tekstowych - linia skopiowana na pierwszej wkleja sie na
-      drugiej, ktora ma wlasny bufor i wlasny shell.
-
-      Nowa grupa 'clip'. Najwazniejsza asercja jest ta ostatnia: okno, z
-      ktorego tekst pochodzil, zostaje ZAMKNIETE, a tekst dalej sie
-      wkleja - bo nigdy nie byl tego okna.
-
-- [x] **Zaznaczanie mysza** - schowek siega wreszcie po to, co napisal
+      | `run tlbtest`, 4 cores | 1 | 0 | 0 | 0 |
+      | `runw tlbtest`, 4 cores | 15 | 124 | 203 | 0 |
+      | `runw tlbtest`, 1 core | 1 | 0 | 0 | 0 |
+
+      Mask 15 is four cores in ONE address space. The zeros in the first and
+      third rows matter as much as the 124 in the second: the mechanism costs
+      nothing where there is nobody to tell.
+
+      The 64-bit kernel got the same mechanism and the same counters, but it
+      has no threads yet, so two cores cannot be put into one address space
+      and the test only checks there that the machinery stands and stays
+      quiet when it should.
+
+      796 assertions, 50 groups, 385 s.
+
+- [x] **Threads in the 64-bit kernel**, and only now can one see that the
+      TLB shootdown works there too.
+
+      The previous step built mapping-change broadcasts into both kernels,
+      but could show them working only in the 32-bit one: long mode had no
+      threads, so two cores could not be put into ONE address space. The test
+      there only checked that the machinery stands and stays quiet, which is
+      no proof.
+
+      A thread is a new task with THE SAME address space and its own stack.
+      The whole difficulty lies outside creating it: the address space has
+      to survive the death of the first thread (whoever ends last frees it),
+      and the heap limit and the next free address have to be one counter
+      for everyone, not a copy in each, exactly the same bug that came up on
+      the 32-bit side a week earlier. Fixed here at once, before it could
+      bite anybody.
+
+      On the way: anonymous memory (SYS64_MMAP), reserved addresses with pages
+      made on touch, because that stack has to come from somewhere.
+
+      **Two bugs on the way, both older than this change.**
+
+      First: threads died with "Invalid Opcode" at an address that turned out
+      to be an ordinary `movdqa %xmm7`. CR0 and CR4 belong to the CORE, and
+      only the boot core enabled SSE, so every program using XMM that landed
+      on a secondary core died on a perfectly valid instruction. The bug had
+      been there since programs started running on all cores; no test had hit
+      it so far, because no 64-bit program started with `runw` used XMM in a
+      visible place. This is the category of bug that does not show at all
+      until something new is done.
+
+      Second: threads then died with a "General Protection Fault" on
+      `movaps %xmm0, 0xe0(%rsp)`. The top of the stack was aligned to sixteen
+      bytes, which was exactly eight bytes too well. A C function assumes the
+      stack as it is AFTER a call instruction, with the return address on top,
+      and bases the alignment of its variables on that. The program stack had
+      been set up correctly for a long time; I simply had not copied that
+      minus eight.
+
+      **The numbers.** `runw tlbtest64` on four cores: core mask 15, 40 pieces
+      of memory checked twice, zero errors, 140 mapping changes that had to
+      reach other cores, and 221 answers. `run tlbtest64`: mask 1 and not a
+      single interrupt. The same four checks on both sides, and on both sides
+      they mean something.
+
+      809 assertions, 50 groups, 492 s.
+
+- [x] **Page faults without the big lock**, and the first subsystem to get
+      a lock of its own.
+
+      A page fault is the most common way into the kernel there is. Every
+      program touching memory goes through here thousands of times, and most
+      of these faults are neither faults nor even work in name: a frame from
+      the allocator, four kilobytes of zeros and one table entry. All three
+      have their own locks.
+
+      And still every such entry took the big kernel lock, so two processes
+      touching THEIR OWN memory, in THEIR OWN address spaces, with nothing in
+      common, still went one after the other.
+
+      The list of causes handled without the lock is short and explicit, just
+      like the list of system calls: the heap, the stack, anonymous memory in
+      the mapping area, and copy-on-write. The rest (a page from the swap
+      file, a page of a mapped file and every real fault) comes in as before,
+      because it reaches for the disk or the task list.
+
+      **The page tables got a lock of their own.** They were the big lock's
+      property for as long as every page fault took it; now that it no longer
+      does, they need their own. One for the whole kernel, deliberately: the
+      section under it is a walk of two (or four) levels and one write. What
+      must not be under it is the disk, so swapping takes it around the entry
+      and lets go of it while reading.
+
+      **Two cores on THE SAME page.** This is a new race and had to be handled
+      explicitly: both see no mapping, both bring a frame, and the loser has
+      to find out that it lost; otherwise the winner's page, already written,
+      gets replaced by an empty one. Hence the mapping "only if nothing is
+      there".
+
+      **The entry must be EMPTY, not merely not present.** A page swapped out
+      to disk is not present either, and giving it a fresh page of zeros would
+      lose what is on the disk. A separate question with a separate answer.
+
+      **The frame allocator scanned the bitmap from zero on every
+      allocation.** Allocating N frames cost N squared, under a lock held the
+      whole time. A program touching nine thousand pages spent more time
+      walking a bitmap it had already walked than on anything else. A cursor
+      remembering where the last search ended solves that for the one-frame
+      case, which is almost every caller. That one helps on a single core too.
+
+      **What I do NOT claim.** The timing here is unstable, and I say so
+      plainly: in a fresh machine `run faults` gave 21, 45 and 51 ticks, and
+      `runw faults` 12, 12 and 25. The direction is visible, the number is
+      not. That is why the assertion does not rest on a stopwatch but on a
+      counter: the kernel counts how many faults it handled by which path.
+      After `runw faults` it grows by 18001 without the lock and by ZERO with
+      it: two processes of nine thousand pages each. That says directly what
+      a stopwatch can at most suggest.
+
+      Correctness is guarded just as strongly, and it is what gives the
+      counters their value: every page has to come back with what was written
+      into it, and a fresh one has to be zeroed. A frame handed to two
+      processes at once shows up here as a wrong sum.
+
+      830 assertions, 51 groups, 493 s.
+
+      A note for the future: with 51 groups and four machines at once, the
+      timing assertions in `proccores` and `lockless` started to lose against
+      the host's load now and then (35 against 44 ticks with a threshold of
+      3/4). Run alone they pass with room to spare. The threshold is not
+      wrong; timing in a virtual machine standing next to three others is
+      simply not reliable.
+
+- [x] **System settings**: the machine starts to remember something about
+      itself.
+
+      Everything the system knew about itself was written into it at build
+      time. The name server could be changed with a command, and the change
+      lived exactly as long as the machine; switching it off was enough to
+      forget.
+
+      A setting is a line in a text file on the disk: name=value, and nothing
+      more. Plain text on purpose: it can be read with `cat` and changed with
+      `write`, and when something goes wrong one can see what. The kernel
+      reads this file once, at boot, right after the filesystem.
+
+      The set of names is fixed and explicit, also on purpose: each of them
+      has a place somewhere in the system that reads it and does something
+      with it. A name nobody reads is not a setting, it is a line in a file.
+      Hence four and not forty: the machine name (the prompt), the name server
+      (the network), the prompt colour (the console) and the desktop
+      background (the compositor).
+
+      **A window on the desktop.** The `gsettings` program in ring 3 keeps
+      none of this: it asks the kernel for the i-th setting and asks the
+      kernel to change it. There is one place that decides what a setting is,
+      and it is not the program. The program has the part the window exists
+      for: which row is selected, what was typed and whether it has reached
+      the disk yet.
+
+      Two ways of changing, because settings come in two kinds. A number from
+      a small set (the background, a colour) is clicked through in its row;
+      there is nothing to type when there are six possibilities. Text (the
+      machine name, a server address) is typed, because it cannot be guessed.
+
+      **The assertions are not about the file but about EFFECTS.** A file with
+      the line `name=machine` proves nothing; a prompt saying `machine>` after
+      a restart proves everything. So every setting is checked where it is
+      used: the name in the prompt, the colour in the prompt's colour, the
+      background in the desktop's pixels, and the name server in what
+      `ifconfig` says, and each one across a RESTART on the same disk image.
+
+      The window is checked the same way: the icon opens it, a click cycles a
+      value, Enter saves, and after a restart the desktop has a different
+      colour.
+
+      One bug on the way worth writing down, because it shows how easy it is
+      to get one convention wrong: fs_write returns zero on success, not a
+      number of bytes. I checked "more than zero", so every successful write
+      reported failure: the file on the disk was correct and the message said
+      it had not worked. No test caught it, because there was no test yet; an
+      eye on the output did.
+
+      849 assertions, 52 groups, 483 s.
+
+- [x] **Closing and resizing application windows**: the desktop starts to
+      behave like a desktop.
+
+      A window that can be opened and not closed is not a window. And that is
+      exactly how it was: the compositor's [x] button pulled the window out
+      from under a running process, which kept drawing into something that no
+      longer existed. Resizing worked only for the kernel's own windows.
+
+      **Closing is a REQUEST.** The compositor tells the application its
+      window is being closed and gives it time to finish its own way. A
+      program that answers ends with its own exit code, having cleaned up
+      after itself.
+
+      **A program that does not answer dies.** A window nobody can close is
+      worse than an application losing its say, so after about two seconds the
+      desktop stops asking. There is a separate program to check this,
+      `gdeaf`: it opens a window and listens to nothing. It dies with code -9,
+      and that is the point.
+
+      **Resizing** gives the window a new content buffer and tells the
+      application the new size, once, at the moment the corner is released,
+      not on every frame of the drag. The old content is not carried over: the
+      program is about to redraw everything anyway, and a stretched copy would
+      only be visible until then.
+
+      Two bugs on the way worth writing down, both of the same kind, a shared
+      file compiled twice:
+
+      - desktop.c is shared by both kernels, so reaching for task_kill broke
+        the link of the 64-bit kernel, where that name does not exist. The
+        compatibility layer got it as an uncatchable signal. I saw it only
+        after a full run, because I had run the earlier build with stderr
+        silenced, and that is the real lesson of this bug.
+      - Graphical programs are compiled twice as well, so the new events had
+        to be added to user64/usys64.h too.
+
+      **Timing assertions got a retry.** The `lockless` and `proccores` groups
+      sometimes lost against the host's load: with 53 groups and four machines
+      at once, timing in a virtual machine next to three others is not
+      reliable. The threshold did NOT change; what changed is how many
+      readings it takes to believe one: when the first one loses, we measure
+      again.
+
+      862 assertions, 53 groups, 480 s.
+- [x] **Twelve windows at once and a taskbar that fits them**: no more of a
+      limit one could hit just by clicking icons.
+
+      The compositor held six windows, and two of them are its own. That
+      means four applications, with seven icons on the desktop. The fifth
+      did not come up and did not say why: win_create returned -1, the
+      program ended quietly, and nothing happened on the screen. The worst
+      kind of limit: one you cannot see until you walk into it.
+
+      The number itself is one change, but done sensibly it is three things:
+
+      **More slots**: twelve instead of six, i.e. seven icons plus a few
+      more from the menu.
+
+      **A cascade that does not go off the screen.** Windows are placed in
+      steps to the right and down; far enough along those steps, a window
+      lands under the taskbar or past the right edge, where it cannot be
+      seen or grabbed. Now the step goes back three positions as long as the
+      window fits, and at the end it is pushed against the edge anyway. The
+      step back is computed from the SLOT NUMBER, not from a count of
+      openings, so slot 2 still gives (94,54) and the coordinates older
+      graphical tests stand on did not move.
+
+      **A taskbar that shares out its width.** The taskbar is a fixed piece
+      of pixels: 640 minus the "Menu" button is 592 px. Twelve buttons of
+      52 px are 624, so the last two were drawn off the screen. The button
+      width is now computed from the number of open windows and the space
+      left, and the length of the label from that width (the font is 8 px).
+      With nine windows it comes out at 52 px as before, with twelve at 49.
+
+      And the most important part: ONE function computes the width, and both
+      the drawing and the click handling ask it. Two places computing the
+      same thing separately drift apart quietly: a button is visible where it
+      does not work, and nobody can say what is broken. The test aims right
+      at that: it clicks the LAST button (the one that exists only because
+      the buttons got narrower) and checks that the focus went to its window
+      and not to a neighbour.
+
+      A new group, `manywin`: seven icons open seven windows, the menu adds
+      three, the taskbar shows twelve buttons, no two overlap, all fit on the
+      screen, and clicking the last, a middle one and the narrowed last one
+      lands on the right window every time. The assertions are about the
+      taskbar's pixels, because that is the only place where both what is
+      drawn and what is clickable can be seen at once.
+
+- [x] **A window filling the screen**: the last thing a window could not do,
+      and the thing one does with a window most often.
+
+      A window could be moved, grabbed by a corner, minimised to the taskbar
+      and closed. It could not be stretched to fill the screen, and that is
+      what a person does with a window they really work in. Dragging the
+      corner to the edge is not the same, and the differences are worth
+      listing, because they are the whole content of this change:
+
+      **Up to the taskbar, not one pixel further.** The taskbar is the only
+      way to the other windows. A window drawn over it would be a window with
+      no way out.
+
+      **The window REMEMBERS where it came from.** The same button puts it
+      back exactly where it stood, not in some sensible place but in the same
+      one. Hence four fields in the window structure, not one flag.
+
+      **The application gets the new size.** A window is not only a rectangle
+      but also a content buffer, so the buffer grows and WEV_SIZE is sent. A
+      program that was not told would keep drawing on 330 pixels in a window
+      638 wide, and the rest would be an empty grey area, looking like a
+      drawing bug while being a missing message.
+
+      And that is what the assertions stand on. `gsettings` draws the
+      selected row as a blue bar across the WHOLE width of its content, so
+      that bar is a ruler: after maximising it must reach the right edge of
+      the screen, and after restoring it must end where the smaller window
+      ends. Both show in the pixels.
+
+      Two things on the way, both of the "what if" kind:
+
+      - No memory for a 638x456 buffer (and the kernel heap is 1 MiB)? Then
+        NOTHING happens: the window stays as it was. Half a maximise (a window
+        larger than its buffer) would draw somebody else's memory on the
+        screen. resize_content now returns -1 instead of staying silent.
+      - Grabbing a maximised window by its title bar restores its own size,
+        as everywhere else, and the window comes back under the cursor at the
+        same point of its title bar, so it does not slip out from under the
+        hand. Dragging a corner simply stops being a maximise: whatever comes
+        out of the drag is the window's new size.
+
+      A new group, `maxwin`.
+
+- [x] **A clock on the taskbar**: the machine had a clock, but one had to ask
+      it.
+
+      `date` printed it, and a program could get it through a system call. It
+      was not where a clock is needed: on top, without asking. Now it sits at
+      the right end of the taskbar and shows the time to the second.
+
+      Reading the CMOS clock means waiting out an update in progress and
+      reading until two readings agree, and the desktop redraws about thirty
+      times a second. So the time is read every sixth frame (about five times
+      a second) and kept in a buffer. No second is lost that way, and the CMOS
+      is not asked thirty times a second for a digit that changes once.
+
+      The space for the clock is SUBTRACTED from what the window buttons share
+      between them; it is the same function that computes their width. With
+      twelve windows a button is now 41 pixels instead of 47. A clock drawn
+      over a button would be a clock that one button hides.
+
+      The test reads the digits FROM THE SCREEN: the eight-byte pattern of each
+      character is looked up in the same font the kernel drew with (the console
+      tests in graphics mode work the same way). The machine starts with the
+      clock set to a fixed moment, so the digits must show that moment, and
+      after four seconds a few seconds more. A clock drawn once and never
+      refreshed would pass the first assertion and fail the second.
+
+      A new group, `clock`.
+
+- [x] **A terminal that is a terminal**, and one program instead of two.
+
+      What existed ran one command and drew what it printed. Each next one
+      erased the previous, the window was 240x150 whatever a person did with
+      it, and there was no cursor, no history, no way back to what scrolled
+      off and no change of directory. It proved that a ring 3 program can
+      start another and read its output. It was not a terminal.
+
+      A terminal is a session. What was run stays on the screen above what is
+      being typed; the prompt says where you are; the arrows go back to what
+      was typed; and how much of it is visible is decided by the size of the
+      window, not by a number written into the program.
+
+      So: a ring of lines (SCROLL; the oldest drops out, since moving fourteen
+      kilobytes on every new line would be the other way), the prompt and the
+      command echoed as they happened, output appended as it is read, PgUp/PgDn
+      over what scrolled away (with a note that we are not looking at the end;
+      otherwise the terminal looks hung), left and right arrows, Home and End,
+      typing AT THE CURSOR, `cd` changing the prompt at once, a pipe `a | b`,
+      and a message instead of silence when a program does not exist.
+
+      **And one file instead of two.** There were two terminals, user/gterm.c
+      and user64/gterm64.c, each with its own bugs to fix separately. One is
+      left, compiled twice, exactly like the kernel's shared files. One thing
+      differs in it, the one that really depends on the mode: how to run a
+      command and catch its output. In protected mode the kernel has a call
+      for that (spawn with redirection, and a whole pipeline in one call); in
+      long mode it does not, so the terminal builds it itself from fork, dup2,
+      exec and pipe, the way a shell does. The rest (the ring, editing,
+      history, drawing) is one piece of code.
+
+      Three things the test caught and the eye did not:
+
+      - After running a command, the input line was "empty" only by having its
+        length reset; the old text was still in the buffer and was drawn under
+        the cursor. An empty line is one whose first byte is zero.
+      - The "^ scrolled back" note was drawn straight over the first row, and
+        both texts shared the same pixels. Now it clears the background under
+        itself first. That showed only when reading the screen through the
+        font: a person sees "something is there", the test sees
+        "co^u????scrolled".
+      - The note is fifteen characters long, and the background cleared under
+        it was fourteen, so the last letter was drawn outside the cleared area
+        and got lost at the edge. A test reading the note letter by letter sees
+        a difference like that; the eye does not.
+
+      **A dark theme and English.** The terminal has a background in the
+      palette's black and light text, as a terminal looks. Desktop windows are
+      grey, so it is clear at once that this is not a form but a screen in a
+      window. Its own messages are in English ('no such program',
+      'cd: no such directory', '[code N]', '^ scrolled back'), unlike the
+      kernel's messages, which stay in Polish.
+
+      The tests read DIGITS AND LETTERS FROM THE SCREEN: the eight-byte pattern
+      of each cell is looked up in the same font the kernel drew with. So the
+      assertions talk about what a person sees, not about what the program
+      believes. Two groups: `gterm` (the session, history, moving in the line,
+      cd, a pipe, scrolling, more lines after stretching the window) and
+      `gterm64` (the same session through fork, dup2, exec and pipe in long
+      mode).
+
+- [x] **Alt+Tab**: the keyboard gets what only the mouse had so far.
+
+      With twelve windows the only way to a window was the mouse: a click on
+      the window or on its taskbar button. The keys for switching had been in
+      the driver for a long time; it knew Alt was held and it knew what Tab
+      was. Nobody had put the two together.
+
+      Now Alt+Tab gives the focus to the next window and raises it. The order
+      is the order of the slots, i.e. the order of the buttons on the taskbar,
+      so two presses take you where looking at the taskbar says they will.
+      Minimised windows are skipped (a focus you cannot see is a keyboard
+      typing into nothing), and so are the kernel's two windows: there is no
+      program behind them to take the key.
+
+      The Alt+Tab code is produced in kbdmap.c, shared by both kernels, as
+      KEY_NEXTWIN, another control code next to the arrows. The desktop catches
+      it before anything else; where there is no desktop, nobody reads it and
+      nothing happens on the text console.
+
+      A new group, `alttab`. Two assertions matter more than the rest here:
+      that the window really COMES TO THE FRONT (its whole title bar is
+      visible, not half of it under a neighbour) and that THE KEYS FOLLOW IT:
+      after Alt+Tab, a typed command lands in the terminal that a moment
+      earlier was under two other windows.
+
+- [x] **Who is at the machine**: two levels, a password and sudo.
+
+      Everything that ran could do everything. A ring 3 program could
+      overwrite the file the system reads its settings from at boot, delete
+      the swap file or change the machine's name, and so could anyone who
+      typed something. There was nobody to ask, because there was nobody.
+
+      Now there are two levels: an admin, who can change the system, and an
+      ordinary user, who can do everything else. No groups, no file owners, no
+      permission lists; two levels are enough to say the one thing worth
+      saying: that changing the system is a different activity from using it.
+
+      **The level belongs to the process and travels to its children.** A new
+      field in the task structure in both kernels; fork and exec inherit it.
+      The kernel's shell is not a process, so it has its own level beside, and
+      a program started from the shell gets its level, because a thread
+      standing in kernel space is, from this point of view, the shell.
+
+      **Up through a password, down for free.** Three system calls: auth, drop,
+      level. Going down is never checked; giving up a privilege is always
+      allowed.
+
+      **The password is stored in the file as a number**, not as text, and it
+      is worth saying plainly what that is: an eight-byte hash (FNV-1a with a
+      salt), not a function made for passwords. It protects against READING
+      the password from a file anyone can look at. It does not protect against
+      someone who takes the disk and goes at that number with a dictionary,
+      and nothing here pretends otherwise. Guessing costs time: three wrong
+      attempts and the machine answers "no" for a few seconds without even
+      looking; otherwise a six-character password is an afternoon's work for a
+      program in ring 3.
+
+      **What is guarded:** the settings (SYS_CFG_SET and the `set` command),
+      the system's own files (system.cfg, swap.sys, icons.pos, on opening for
+      writing and on deleting), and signals to other people's processes. The
+      console guards the same things as the system calls; otherwise it would
+      be a way around every rule the rest of the machine follows. Anyone may
+      read these files: there is nothing secret in them, and changing is a
+      different thing from looking.
+
+      **Three places where one asks for it**, and all of them ask the same
+      way, with asterisks instead of text:
+
+      - the kernel shell: `sudo <command>` (one command), `sudo` (a session
+        until logging out), plus commands to show who you are and to change
+        the password. The prompt ends with `#` instead of `>` when you are an
+        admin, the oldest way of saying it, and one that is seen rather than
+        read.
+      - the terminal in a window: `sudo <command>` turns the line into a
+        password line. A ring 3 program cannot raise its own privileges; it can
+        only get a refusal and do something with it. It does what is wanted:
+        asks, tries once more, and drops back down right away.
+      - the settings window: a save comes back refused, so the window says so
+        and asks for the password under the setting being changed.
+
+      On top of that, `rm` and `cp` now tell a refusal apart from "no such
+      file"; those are two different answers, and a person does different
+      things after them.
+
+      Two new groups: `users` (the console: a refusal that really does not
+      change the value; a wrong password; one command, not a session; the lock
+      after three attempts; a password change surviving a restart; the file
+      without the password in plain text) and `usersgui` (the terminal and the
+      settings window). The `k64shell` group got the same assertions for long
+      mode, because it is the same user.c on both sides.
+- [x] **A terminal that does not freeze**: live output and Ctrl+C.
+
+      The terminal started a program and WAITED: it drew nothing, answered
+      nothing and showed nothing until the program ended. With a program that
+      ends quickly this did not show. With one that does not end (and `spin`
+      is exactly that) it took the window with it: no output, no way to
+      close it, no way to stop it. That is not a terminal running a program,
+      it is a terminal that has stopped.
+
+      **Output read as it is written.** The program writes to a file, and on
+      every pass of its loop the terminal reads what lies past the point
+      where it stopped last time. So lines appear while the program is still
+      running, and keep appearing.
+
+      **A wait that does not wait.** That needed a new system call in both
+      kernels: SYS_TRYWAIT, "0 if it has ended (and here is the code), -3 if
+      it is still running". Without it, a program watching another one has to
+      choose between blocking and not knowing. The 64-bit kernel also got
+      seek on the way: without it, reading "what is new" would mean reading
+      everything every time.
+
+      **Ctrl+C means the same as everywhere.** The key arrives as 0x03 like
+      any other, the terminal sends SIGINT to the program it started, and a
+      program without a handler of its own dies of it. Then the terminal
+      takes the next command.
+
+      One bug worth writing down: the output file was not cleared before the
+      start, so the first read of a new command showed leftovers of the
+      previous one. Reading only at the end hid it: the old file had already
+      been overwritten before anyone looked. Reading as it goes dragged it
+      out.
+
+      A new group, `gtermlive`: output is visible before the program ends,
+      there is more and more of it, the window takes keys while the program
+      runs, Ctrl+C shows in the session and ends the program, nothing is
+      appended after it, and the next command shows its own output, not the
+      leftovers of the previous one.
+
+- [x] **Talking to a program**: a shell in the terminal window.
+
+      The terminal could start a program and show what it printed. It could
+      not say anything back to it: the program's input came from nowhere, so
+      everything it reads was out of reach. No shell, no program asking about
+      anything, nothing interactive.
+
+      Now what is typed while a program runs goes through a pipe to its
+      standard input, and Ctrl+D closes that pipe, which tells the reader
+      there will be nothing more. It took three things:
+
+      **A way to start a program with a pipe into it.** In protected mode the
+      kernel does it: a new call, SYS_SPAWN_TALK, creates a pipe, gives the
+      child its reading end as descriptor zero, and hands the caller the
+      writing end as an ordinary descriptor. In long mode the terminal builds
+      it itself from pipe, fork and dup2; all of that was already there.
+
+      **A shared stdout.** The shell's children have to write where the shell
+      writes. Every descriptor carries its own position, so the only place
+      everyone agrees on is the END of the file. Without that, the shell's
+      next prompt landed on what its child had just written, and the output
+      vanished under it. The same in both kernels: in the 32-bit one a flag
+      on the descriptor, in the 64-bit one the rule "a file under descriptor
+      one is written at its end".
+
+      On top of that, in the 32-bit kernel a child now inherits its parent's
+      redirected stdout (exec passes the inode), because otherwise programs
+      started by the shell would write to the text console, which nobody
+      looks at in graphics mode.
+
+      **An end of input that means something.** Both user shells spun in a
+      loop when read returned zero: `if (n != 1) continue`. A shell reading a
+      stream that has ended has ended too; now zero from read ends both.
+
+      **On the way, two sources of false alarms in the tests**, both fixed
+      without touching what the assertions claim:
+
+      - The wait for the prompt at boot was fifteen seconds. A full run starts
+        four machines at once, and four kernels booting on one host need
+        more; this is a wait FOR AN EVENT, so a longer limit weakens nothing.
+        Thirty seconds.
+      - The `lockless` group measures whether two processes can be in the
+        kernel at once. That is a claim about POSSIBILITY, not about an
+        average: only what the big lock did refutes it, two cores slower than
+        one. So a measurement that loses is repeated (up to four times) and
+        the best one counts, and the margin is now 0.85 instead of 0.75. The
+        64-bit kernel comes out at 0.42, the 32-bit one at 0.68-0.80, and that
+        is an honest picture: in protected mode most calls still sit under
+        the big lock, and only page faults are free of it so far.
+
+      And this is the proof that it works: the user shell (ring 3) runs in the
+      terminal window, its commands execute, its children's output is BELOW
+      the command and ABOVE the next prompt, a pipeline inside the shell
+      inside the terminal writes to the same window, and Ctrl+D ends it all.
+      A new group, `gtermsh`; the same path in long mode added to `gterm64`.
+
+- [x] **A clipboard**: text that moves from window to window.
+
+      Copy and paste is the simplest thing two programs do together, and the
+      only thing they cannot do on their own: neither can touch the other's
+      memory, and neither knows the other exists. So the text has to wait in
+      a place that belongs to both, which is the kernel.
+
+      Five hundred and twelve bytes of text and two system calls, in both
+      kernels. No formats, no owners, no negotiating what a selection means;
+      that is enough to paste a name typed in the terminal into the settings
+      window, and anything beyond it would be a protocol nobody here needs
+      yet.
+
+      The oldest keys there are: Ctrl+Insert copies, Shift+Insert pastes. Not
+      Ctrl+C: in a terminal Ctrl+C means "stop this program" and nothing else.
+      Insert is the only extended key whose meaning depends on what is held
+      with it, so that is decided where that state is known, in kbdmap.c,
+      shared by both kernels.
+
+      The terminal, the settings window and BOTH kernel shells use it: the
+      clipboard belongs to the system, not to one window. It shows best on the
+      text consoles: a line copied on the first one pastes on the second,
+      which has its own buffer and its own shell.
+
+      A new group, `clip`. The most important assertion is the last one: the
+      window the text came from is CLOSED, and the text still pastes, because
+      it never belonged to that window.
+
+- [x] **Selecting with the mouse**: the clipboard finally reaches what a
+      program wrote.
+
+      The clipboard could take the line being TYPED. It could not take
+      anything a program had written, which is most of what is in a terminal,
+      and exactly the part a person wants to copy: an address, a number, a
+      file name from a listing.
+
+      Selecting needs something the compositor did not say. A click says
+      WHERE something happened; a selection is what happened BETWEEN two
+      places. So the desktop now sends three events for a drag inside a
+      window's content (button down, movement with the button held, button
+      up) in content coordinates, just like a click. What they mean is the
+      application's business: the compositor knows nothing about selections
+      and does not have to.
+
+      The terminal turns them into a range in ITS RING OF LINES, not on the
+      screen, so the selection stays on its text when the view scrolls under
+      it. And releasing the button copies: in a terminal, selecting HAS BEEN
+      copying for forty years, and there is no second key to press.
+
+      A new group, `gtermsel`: the selected piece has a field under it (and the
+      neighbouring one does not), exactly what was under the mouse is pasted,
+      a selection across two lines takes both, and a plain click clears the
+      selection.
+
+- [x] **The look of the desktop**: depth instead of flat rectangles.
+
+      Everything on the screen was drawn with one call: fill this rectangle
+      with this colour. It worked and it looked like it: a flat background,
+      flat windows with a black border, tiles with a label underneath. There
+      was no way to say which window was listening, that a window is ABOVE the
+      desktop and not in it, or what was on an icon beyond its caption.
+
+      The screen has eight bits per pixel and its own palette, so a shade
+      costs one index and nothing more. The whole depth is made of that:
+
+      **Light falls from the top left**, and it falls that way everywhere. An
+      edge light at the top and left and dark at the bottom and right is a
+      raised window; swapping those two lines makes it sunken. Hence a button
+      that stands out, a clock field set into the taskbar, and the focused
+      window's button that is PRESSED, not merely another colour.
+
+      **A shadow under a window**: not black but a darkened background; black
+      on a dark desktop is a hole, not a shadow.
+
+      **The background is sixteen bands**, darkening towards the bottom.
+      Sixteen and not six, because six can be counted by eye: the steps have to
+      be small enough to be a slope and not stairs. The range is narrow on
+      purpose: a machine set to "sea" should look like the sea from every part
+      of the screen.
+
+      **A title bar in two colours, and a different pair when the window has no
+      focus.** That is a functional change, not decoration: before, there was
+      no way to see which window would take a key. Now it shows from the other
+      end of the screen.
+
+      **Icons have pictures.** A coloured rectangle with a word under it is a
+      label, not an icon; it says nothing until it is read. A picture is
+      recognised before it is read, and that is what icons are for. Twelve by
+      twelve pixels is not much room, so each one is a single idea without
+      details: a window, a clock face, a folder, the bars of a chart, a prompt,
+      a globe, a gear.
+
+      A new group, `look`. A look cannot be written down as "pretty", so the
+      assertions are about the STRUCTURE the eye reads: the background darkens
+      towards the bottom in steps that cannot be seen; a window casts a shadow
+      darker than the background beside it; edges are light at the top and dark
+      at the bottom; the focused button has that reversed; there is exactly one
+      blue title bar and it moves with a click; an icon has dark pixels on it,
+      and two icons have different ones.
+
+      There were quite a few fixes in old tests, all of the same kind: probes
+      hit a pixel whose meaning had changed. The title bar of an unfocused
+      window is no longer blue, the taskbar buttons now have edges, and the
+      labels moved by a pixel so that an edge does not cut the last row of
+      letters. None of those assertions was weakened: each says the same as
+      before, in the place where it can now be seen.
+
+- [x] **Flat and clean**: the same said with colour instead of relief.
+
+      The previous step added depth: light from the top left, shadows under
+      windows, raised buttons, sunken fields. It worked, but it looked like a
+      system from thirty years ago, and we want modern and clean. So the relief
+      went, and what it said stayed:
+
+      **A surface is one colour.** No gradients on buttons, no edges light at
+      the top and dark at the bottom. What separates two surfaces is one line a
+      shade darker.
+
+      **There are no shadows.** Not under a window, not under an icon, not
+      under the menu.
+
+      **There is one accent and it says one thing**: which window is listening.
+      That window's title bar and taskbar button are blue, the rest is grey.
+      Since that is the only thing that shouts, nothing competes with it.
+
+      **The title bar buttons are just symbols**, without frames around them.
+      The symbol says what they do; a frame would only add ink. The exception
+      is close, which stays red, because that one has to be unmistakable.
+
+      **Icons are flat tiles with a white drawing.** No shadow, no edge: a shape
+      in the accent colour differs enough from the desktop to be a thing.
+
+      One thing from the previous step stayed, because it is not relief but
+      space: the background in sixteen bands, darkening towards the bottom.
+
+      The `look` group now says what is really visible: a window's inside is
+      ONE colour (four readings, all equal; otherwise it would be a gradient or
+      an edge), one line separates it from the desktop, there is nothing under
+      the window, the focused button has the accent colour and is flat (top and
+      bottom the same colour), and an icon tile is flat with the white pixels
+      of its drawing on it.
+- [x] **Pictures on the taskbar, and a taskbar to configure.**
+
+      The taskbar carried names, cut to six letters, so "Settings" read as a
+      stub and two terminals read the same. It carried them because a window
+      knows its title and nothing more; it does not know what was clicked to
+      start it.
+
+      Now the desktop remembers. When it starts something from an icon, it
+      records which icon that was; the window that process opens a moment
+      later gets the same picture. Nothing else would connect those two
+      things: the compositor sees a pid, and the icons are the only place a
+      program has a face. Kernel windows and everything started from the shell
+      get the default window symbol.
+
+      The taskbar grew from twelve pixels to eighteen, because what is on it
+      now is pictures, not words: a twelve-pixel drawing needs room around it.
+      On the way a button shrank to a third of what the cut name took, so
+      twelve windows now fit WITHOUT narrowing.
+
+      **And the taskbar became a matter of taste rather than fate.** Two
+      settings, kept on the disk like the rest (their names were Polish at the
+      time):
+
+      - the bar width: 100, 75 or 50 percent of the screen width. Narrower than
+        the screen, it is centred, and that is exactly what makes it a dock.
+      - the icon position: 0 on the left, 1 in the middle, 2 pushed against the
+        clock.
+
+      The drawing reads them and the click handling reads them, through the
+      same two functions, so a button is clickable exactly where it is seen,
+      in every one of these settings. That is the assertion that means the
+      most in the new `bar` group; the rest say that the bar really has that
+      width, that the pictures really move, and that two windows of different
+      programs have different pictures while two kernel windows have the same.
+
+      The settings window can switch both with a click: the icon position like
+      any other cyclic setting, and the width its own way, because it is not a
+      sequence of numbers but three of them. The window itself grew, because
+      six settings with a description and a line about what happened no longer
+      fitted in a hundred and sixty pixels.
+
+      One more timing assertion, "four chunks at once faster than one after
+      another" in the `kthreads` group, got what `lockless` got earlier: a
+      losing measurement is repeated and the better ratio counts. The threshold
+      stays where it was (halfway between one and four); only how many readings
+      it takes to believe one changed, on a host running four machines at once.
+
+      On the way, two assertions in old tests stopped computing a row's
+      position and started SEARCHING for it in the band where it can be: where
+      the program writes "saved to disk" depends on the number of settings and
+      the length of one of their descriptions, i.e. on a layout that is the
+      program's business. The message is the test's business.
+
+- [x] **A menu with pictures, the window's name under the cursor, a wallpaper
+      from a file.**
+
+      Three things in the same spirit: the desktop should speak without
+      reading, and where reading is needed, it should offer it on request.
+
+      **The menu has pictures.** The same as the icons and the taskbar buttons;
+      a program that looks like three different things is three things to
+      remember. Entries now carry the name under the icon ("Clock"), not the
+      program's name ("gclock"), because the program's name is for the shell.
+      The entry under the cursor gets the accent colour: without it a menu is
+      a list of words that happens to be clickable.
+
+      **The window's name comes back under the cursor.** The picture says WHICH
+      program; it does not say which of two terminals. So above the button the
+      cursor is on, the window's name appears, and only then. It is drawn at
+      the very end of the frame, after the menu, because what explains has to
+      be above what it explains.
+
+      **The wallpaper is a file.** The background was a colour, then sixteen
+      bands of colour. It could not be a picture, because a picture has to come
+      from somewhere, and a machine with no camera and no editor has only
+      arithmetic. So a picture is computed by the `mkwall` program in ring 3,
+      saved to the disk, and the compositor reads it at boot.
+
+      The format is the whole idea: "PWAL", the size, 192 colours of three bytes
+      and one byte per pixel. Small on purpose, 160 by 120, stretched over the
+      screen. A full-screen image is three hundred kilobytes and the kernel heap
+      is a megabyte; this one is a fifteenth of that, and each of its pixels
+      covers a piece of the screen. It looks like what it is: a picture, softly.
+      The wallpaper's colours sit ABOVE the desktop's colours (indices from 64),
+      so the wallpaper has no way to repaint a window.
+
+      Four patterns, because that is what one afternoon of arithmetic is worth:
+      a slope, rings, a weave and a lattice, each in six hues.
+
+      A new group, `wall`. The best assertion is the one that tells a picture
+      from a gradient without knowing what is drawn: a gradient has ONE colour
+      across a row, and a picture has many. Besides that: the file has the size
+      the format implies, the kernel says at boot what it loaded, a window on
+      top of the wallpaper still has its own colour, and a wallpaper that does
+      not exist breaks nothing; the gradient comes back.
+
+- [x] **Desktop icons from a file**, and no more list written into the
+      kernel.
+
+      Seven programs, fixed when the kernel was built. Adding an eighth meant
+      editing kernel/desktop.c and rebuilding the kernel, which is the same as
+      "it cannot be added".
+
+      Now the list is a file on the disk, one line per icon:
+
+          program  label  picture-number
+
+      and nothing more. Plain text, like everything this system remembers. It
+      can be read with `cat` and, more importantly, IT CAN BE MADE ON THIS
+      MACHINE: the shell in the terminal has redirections, so two `echo` lines
+      with `>` and `>>` are enough. A format nobody on the machine can produce
+      is a format for somebody else's machine.
+
+      A line that does not parse is skipped; an empty file, or one with no
+      sensible lines, keeps the built-in seven. A desktop without icons is a
+      machine with nothing to click on, and no broken line should have that
+      power.
+
+      A new group, `icons`, builds the file exactly as a person would (through
+      `run sh` and echo with `>` and `>>`) and then reads FROM THE SCREEN that
+      the tiles have the labels and pictures from the file, that there are as
+      many as there are lines, and that a click on such an icon starts its
       program.
 
-      Schowek umial wziac linie, ktora sie WPISUJE. Nie umial wziac
-      niczego, co napisal program - czyli wiekszosci tego, co jest w
-      terminalu, i akurat tej czesci, ktora czlowiek chce skopiowac:
-      adresu, liczby, nazwy pliku z listingu.
-
-      Zaznaczanie potrzebuje czegos, czego kompozytor nie mowil. Klik
-      mowi, GDZIE cos sie stalo; zaznaczenie jest tym, co sie stalo
-      MIEDZY dwoma miejscami. Wiec pulpit wysyla teraz trzy zdarzenia
-      dla przeciagniecia wewnatrz tresci okna - przycisk w dol, ruch z
-      trzymanym przyciskiem, przycisk w gore - we wspolrzednych tresci,
-      tak samo jak klik. Co one znacza, jest sprawa aplikacji:
-      kompozytor nie wie nic o zaznaczeniach i nie musi.
-
-      Terminal zamienia je na zakres w SWOIM PIERSCIENIU LINII, a nie na
-      ekranie - dzieki temu zaznaczenie zostaje na swoim tekscie, gdy
-      widok przewija sie pod nim. A puszczenie przycisku kopiuje: w
-      terminalu zaznaczenie JEST kopiowaniem od czterdziestu lat i nie
-      ma zadnego drugiego klawisza do nacisniecia.
-
-      Nowa grupa 'gtermsel': zaznaczony kawalek ma pod soba pole (a
-      sasiedni nie ma), wklejone jest dokladnie to, co bylo pod mysza,
-      zaznaczenie przez dwie linie bierze obie, a samo klikniecie
-      zaznaczenie kasuje.
-
-- [x] **Wyglad pulpitu** - glebia zamiast plaskich prostokatow.
-
-      Wszystko na ekranie bylo rysowane jednym wywolaniem: wypelnij ten
-      prostokat tym kolorem. Dzialalo i tak wygladalo - plaskie tlo,
-      plaskie okna z czarna obwodka, kafelki z napisem pod spodem. Nie
-      bylo czym powiedziec, ktore okno slucha, ani ze okno jest NAD
-      pulpitem, a nie w nim, ani co jest na ikonie poza jej podpisem.
-
-      Ekran ma osiem bitow na piksel i wlasna palete, wiec odcien
-      kosztuje jeden indeks i nic wiecej. Z tego zrobiona jest cala ta
-      glebia:
-
-      **Swiatlo pada z gory z lewej** - i pada tak wszedzie. Krawedz
-      jasna u gory i po lewej, ciemna u dolu i po prawej, to okno
-      wypukle; odwrocenie tych dwoch linii to okno wglebione. Stad
-      przycisk, ktory wystaje, i pole zegara, ktore jest wpuszczone w
-      pasek - i stad przycisk okna z ogniskiem, ktory jest WCISNIETY,
-      a nie tylko innego koloru.
-
-      **Cien pod oknem**: nie czarny, tylko przyciemnione tlo - czern na
-      ciemnym pulpicie jest dziura, a nie cieniem.
-
-      **Tlo to szesnascie pasm**, ciemniejacych ku dolowi. Szesnascie, a
-      nie szesc, bo szesc daje sie policzyc okiem: stopnie musza byc
-      dosc male, zeby to bylo zbocze, a nie schody. Zakres jest waski
-      celowo - maszyna ustawiona na morskie ma wygladac morsko z kazdego
-      miejsca ekranu.
-
-      **Pasek tytulu w dwoch kolorach, i w innej parze, gdy okno nie ma
-      ogniska.** To jest zmiana funkcjonalna, nie ozdoba: przedtem nie
-      dalo sie zobaczyc, ktore okno przyjmie klawisz. Teraz widac to z
-      drugiego konca ekranu.
-
-      **Ikony maja rysunki.** Kolorowy prostokat z wyrazem pod spodem to
-      etykieta, a nie ikona - nic nie mowi, dopoki nie zostanie
-      przeczytana. Obrazek rozpoznaje sie przed przeczytaniem i po to
-      wlasnie sa ikony. Dwanascie na dwanascie pikseli to nie jest duzo
-      miejsca, wiec kazdy z nich to jedna mysl bez szczegolow: okno,
-      tarcza zegara, teczka, slupki wykresu, znak zachety, kula ziemska,
-      kolo zebate.
-
-      Nowa grupa 'look'. Wygladu nie da sie zapisac jako "ladny", wiec
-      asercje mowia o STRUKTURZE, ktora oko czyta: tlo ciemnieje ku
-      dolowi stopniami, ktorych nie widac; okno rzuca cien ciemniejszy
-      od tla obok; krawedzie sa jasne u gory i ciemne u dolu; przycisk z
-      ogniskiem ma to odwrocone; niebieski pasek tytulu jest dokladnie
-      jeden i przenosi sie klikiem; ikona ma na sobie ciemne piksele, a
-      dwie ikony maja rozne.
-
-      Poprawek w starych testach bylo sporo i wszystkie tego samego
-      rodzaju: sondy trafialy w piksel, ktory zmienil znaczenie -
-      pasek tytulu okna bez ogniska nie jest juz niebieski, przyciski
-      paska maja teraz krawedzie, a napisy przesunely sie o piksel, zeby
-      krawedz nie przecinala ostatniego rzedu liter. Zadna z tych
-      asercji nie zostala oslabiona: kazda mowi to samo co przedtem, w
-      miejscu, w ktorym to teraz widac.
-
-- [x] **Plasko i czysto** - to samo powiedziane kolorem zamiast reliefem.
-
-      Poprzedni krok dodal glebie: swiatlo z gory z lewej, cienie pod
-      oknami, wypukle przyciski, wglebione pola. Dzialalo, ale wygladalo
-      jak system sprzed trzydziestu lat - a chcemy nowoczesnie i czysto.
-      Wiec relief poszedl, a zostalo to, co mowil:
-
-      **Powierzchnia to jeden kolor.** Zadnych gradientow na przyciskach,
-      zadnych krawedzi jasnych u gory i ciemnych u dolu. To, co dzieli
-      dwie powierzchnie, to jedna linia o odcien ciemniejsza.
-
-      **Cieni nie ma.** Ani pod oknem, ani pod ikona, ani pod menu.
-
-      **Akcent jest jeden i mowi jedna rzecz**: ktore okno slucha. Pasek
-      tytulu i przycisk na pasku zadan tego okna sa niebieskie, reszta
-      jest szara. Skoro to jedyna rzecz, ktora krzyczy, to nic z nia nie
-      konkuruje.
-
-      **Przyciski w pasku tytulu to same znaki** - bez ramek dookola. Co
-      robia, mowi znak; ramka dokladalaby tylko tuszu. Wyjatkiem jest
-      zamkniecie, ktore zostaje czerwone, bo akurat ono ma byc nie do
-      pomylenia.
-
-      **Ikony to plaskie kafelki z bialym rysunkiem.** Bez cienia, bez
-      krawedzi - ksztalt w kolorze akcentu i tak rozni sie od pulpitu
-      dosc, zeby byc rzecza.
-
-      Zostalo jedno z poprzedniego kroku, bo nie jest reliefem tylko
-      przestrzenia: tlo w szesnastu pasmach, ciemniejacych ku dolowi.
-
-      Grupa 'look' mowi teraz to, co widac naprawde: wnetrze okna jest
-      JEDNYM kolorem (cztery odczyty, wszystkie rowne - inaczej byloby
-      to gradientem albo krawedzia), dzieli je od pulpitu jedna linia,
-      pod oknem nie ma nic, przycisk z ogniskiem ma kolor akcentu i jest
-      plaski (gora i dol tego samego koloru), a kafelek ikony jest
-      plaski i ma na sobie biale piksele rysunku.
-
-- [x] **Obrazki na pasku zadan i pasek do ustawienia.**
-
-      Pasek nosil nazwy, przyciete do szesciu liter, wiec "Ustawienia"
-      czytalo sie "Ustawi", a dwa terminale czytaly sie tak samo. Nosil
-      je dlatego, ze okno zna swoj tytul i nic wiecej - nie wie, w co
-      kliknieto, zeby je uruchomic.
-
-      Teraz pulpit pamieta. Uruchamiajac cos z ikony zapisuje, z ktorej
-      ikony to bylo; okno, ktore ten proces otworzy chwile pozniej,
-      dostaje ten sam obrazek. Nic innego tych dwoch rzeczy nie polaczy:
-      kompozytor widzi pid, a ikony sa jedynym miejscem, gdzie program
-      ma twarz. Okna jadra i wszystko uruchomione z shella dostaja
-      domyslny znak okna.
-
-      Pasek urosl z dwunastu pikseli na osiemnascie, bo to, co na nim
-      teraz jest, to obrazki, a nie slowa: dwunastopikselowy rysunek
-      potrzebuje miejsca dookola. Przy okazji przycisk zmiescil sie w
-      jednej trzeciej tego, co zajmowala przycieta nazwa - dwanascie
-      okien miesci sie teraz BEZ zwezania.
-
-      **I pasek stal sie sprawa gustu, a nie losu.** Dwa ustawienia,
-      trzymane na dysku jak reszta:
-
-      - 'pasek' - 100, 75 albo 50 procent szerokosci ekranu. Wezszy niz
-        ekran jest wysrodkowany, i to wlasnie robi z niego dok.
-      - 'ikony' - 0 od lewej, 1 na srodku, 2 dosuniete do zegara.
-
-      Czyta je rysowanie i czyta je obsluga klikniecia - te same dwie
-      funkcje, wiec przycisk klika sie dokladnie tam, gdzie go widac,
-      w kazdym z tych ustawien. To jest ta asercja, ktora w nowej
-      grupie 'bar' znaczy najwiecej; reszta mowi, ze pasek naprawde ma
-      te szerokosc, ze obrazki naprawde sie przesuwaja i ze dwa okna
-      roznych programow maja rozne obrazki, a dwa okna jadra ten sam.
-
-      Okno ustawien umie te dwa ustawienia przelaczac klikiem: 'ikony'
-      jak kazde inne cykliczne, a 'pasek' po swojemu - bo to nie jest
-      ciag liczb, tylko trzy z nich. Samo okno uroslo, bo szesc ustawien
-      z opisem i wierszem o tym, co sie stalo, przestalo sie miescic w
-      stu szescdziesieciu pikselach.
-
-      Do tego jeszcze jedna asercja czasowa - "cztery porcje naraz
-      szybciej niz po kolei" w grupie 'kthreads' - dostala to samo, co
-      dostal wczesniej 'lockless': przegrany pomiar jest powtarzany i
-      liczy sie lepszy stosunek. Prog stoi tam, gdzie stal (polowa
-      drogi miedzy jednym a czterema); zmienilo sie tylko to, ile
-      odczytow trzeba, zeby w jeden uwierzyc na hoscie, na ktorym stoja
-      cztery maszyny naraz.
-
-      Przy okazji dwie asercje w starych testach przestaly liczyc
-      polozenie wiersza i zaczely go SZUKAC w pasie, w ktorym moze byc:
-      to, gdzie program pisze "zapisane na dysku", zalezy od liczby
-      ustawien i dlugosci opisu jednego z nich - czyli od ukladu, ktory
-      jest sprawa programu. Komunikat jest sprawa testu.
-
-- [x] **Menu z obrazkami, nazwa okna pod kursorem, tapeta z pliku.**
-
-      Trzy rzeczy w tym samym duchu: pulpit ma mowic bez czytania, a
-      tam, gdzie czytanie jest potrzebne, ma je podac na zawolanie.
-
-      **Menu ma obrazki.** Te same, co ikony i co przyciski na pasku -
-      program, ktory wyglada na trzy rozne rzeczy, jest trzema rzeczami
-      do zapamietania. Wpisy nosza teraz nazwe spod ikony ("Zegar"), a
-      nie nazwe programu ("gclock"), bo nazwa programu jest dla shella.
-      Wpis pod kursorem dostaje kolor akcentu: bez tego menu jest lista
-      slow, ktora akurat da sie kliknac.
-
-      **Nazwa okna wraca pod kursorem.** Obrazek mowi, KTORY program;
-      nie mowi, ktory z dwoch terminali. Wiec nad przyciskiem, na
-      ktorym stoi kursor, pojawia sie nazwa okna - i tylko wtedy.
-      Rysowana jest na samym koncu klatki, po menu, bo to, co objasnia,
-      musi byc nad tym, co objasnia.
-
-      **Tapeta jest plikiem.** Tlo bylo kolorem, potem szesnastoma
-      pasmami koloru. Obrazkiem byc nie moglo, bo obrazek musi skads
-      pochodzic - a maszyna bez aparatu i bez edytora ma tylko
-      arytmetyke. Wiec obrazek liczy program 'mkwall' w pierscieniu
-      trzecim, zapisuje na dysk, a kompozytor czyta go przy starcie.
-
-      Format to cala mysl: "PWAL", rozmiar, 192 kolory po trzy bajty i
-      jeden bajt na piksel. Maly z rozmyslem - 160 na 120, rozciagane
-      na ekran. Pelnoekranowy obraz to trzysta kilobajtow, a sterta
-      jadra ma megabajt; to, co tu lezy, to jedna pietnasta tego, i
-      kazdy jego piksel przykrywa kawalek ekranu. Wyglada na to, czym
-      jest - na obrazek, miekko. Kolory tapety siedza NAD kolorami
-      pulpitu (indeksy od 64), wiec tapeta nie ma jak przemalowac okna.
-
-      Cztery wzory, bo tyle jest warte jedno popoludnie arytmetyki:
-      zbocze, pierscienie, plecionka i krata - kazdy w szesciu barwach.
-
-      Nowa grupa 'wall'. Najlepsza asercja jest ta, ktora odroznia
-      obrazek od gradientu nie wiedzac, co jest narysowane: gradient ma
-      w poprzek wiersza JEDEN kolor, a obrazek ma ich wiele. Do tego:
-      plik ma rozmiar wynikajacy z formatu, jadro mowi przy starcie, co
-      wczytalo, okno na tapecie ma nadal swoj kolor, a tapeta, ktorej
-      nie ma, nie psuje niczego - wraca gradient.
-
-- [x] **Ikony pulpitu z pliku** - i koniec z lista wpisana w jadro.
-
-      Siedem programow, ustalonych w chwili budowania jadra. Dodanie
-      osmego znaczylo edycje kernel/desktop.c i zbudowanie jadra - czyli
-      tyle samo, co "nie da sie dodac".
-
-      Teraz lista to plik na dysku, jeden wiersz na ikone:
-
-          program  napis  numer-obrazka
-
-      i nic wiecej. Zwykly tekst, jak wszystko, co ten system pamieta -
-      da sie przeczytac przez 'cat' i, co wazniejsze, DA SIE ZROBIC NA
-      TEJ MASZYNIE: shell w terminalu ma przekierowania, wiec
-
-          echo gterm Terminal 4 > pulpit.ikony
-          echo gweb Internet 5 >> pulpit.ikony
-
-      wystarczy. Format, ktorego nikt na maszynie nie umie wyprodukowac,
-      jest formatem dla czyjejs innej maszyny.
-
-      Wiersz, ktory sie nie parsuje, jest pomijany; plik pusty albo bez
-      sensownych wierszy zostawia wbudowana siodemke. Pulpit bez ikon to
-      maszyna, w ktora nie ma w co kliknac, i zaden zepsuty wiersz nie
-      powinien miec takiej wladzy.
-
-      Nowa grupa 'icons' buduje plik dokladnie tak, jak zrobilby to
-      czlowiek - przez 'run sh' i echo z '>' oraz '>>' - a potem czyta z
-      EKRANU, ze kafelki maja napisy i obrazki z pliku, ze jest ich tyle,
-      ile wierszy, i ze klik w taka ikone uruchamia jej program.
-
-      Przy okazji dwie dziury w samym harnessie testowym, obie tego
-      samego rodzaju: QEMU nie zna klawisza 'T' ani '#'. Wielka litera to
-      shift i litera, a '#' to shift i trojka - bez tego wpisywany tekst
-      po cichu gubil znaki, i widac to bylo dopiero jako "erminal"
-      zamiast "Terminal" w pliku, ktory test sam napisal.
-
-- [x] **Alt+F4 i menu pod prawym przyciskiem** - dwa gesty, ktore kazdy
-      zna, a ktorych ten pulpit nie mial.
-
-      Klawisze byly na miejscu od dawna: Alt z klawiszem funkcyjnym
-      przelaczal konsole tekstowe. Tyle ze na pulpicie nie ma czego
-      przelaczac - ekran jest jeden - wiec te nacisniecia szly donikad.
-      Teraz, gdy ktos przejal klawiature (a na pulpicie przejmuje ja
-      kompozytor), te same klawisze ida do niego, i F4 znaczy to, co
-      znaczy wszedzie od trzydziestu lat.
-
-      Zamyka DOKLADNIE tak, jak [x] w rogu okna: program dostaje
-      pytanie i konczy sie sam, ze swoim kodem wyjscia. Wyrwanie okna
-      spod dzialajacego procesu byloby czyms innym niz to, co robi
-      mysz, a jeden gest i drugi maja robic to samo - inaczej sa dwie
-      rzeczy do zapamietania zamiast jednej.
-
-      Prawy przycisk na pustym pulpicie otwiera menu tam, gdzie stoi
-      kursor. To ta sama lista, co pod przyciskiem "Menu" w rogu, bo
-      druga lista bylaby druga rzecza do nauczenia - tylko przychodzi
-      do reki, zamiast kazac rece isc w rog. Menu nie wychodzi poza
-      krawedz ekranu i nie wchodzi na pasek zadan: przy kliknieciu w
-      rogu zjezdza w lewo i w gore. Na oknie prawy przycisk nie otwiera
-      niczego (wlasne menu okna to sprawa okna, a zadne go nie ma) i
-      zamyka to, ktore bylo otwarte.
-
-      Droga klawiszy nie jest wspolna - long mode ma wlasny sterownik
-      klawiatury - wiec Alt+F4 trzeba bylo przepuscic przez niego
-      osobno. Nowa grupa 'winkeys' sprawdza oba jadra: ze program
-      zamkniety Alt+F4 konczy sie SAM z kodem zero (a wiec byl pytany),
-      ze okno znika z ekranu i z paska zadan, ze menu stoi pod kursorem
-      a nie nad przyciskiem "Menu", ze pozycja pod kursorem sie
-      podswietla, ze wybrany z niego program naprawde chodzi (zegar
-      rysuje cyfry, nie samo okno sie pojawia) i ze przy krawedzi menu
-      sie miesci.
-
-- [x] **Okno przyciagane do krawedzi** - czyli dwa okna obok siebie
-      jednym ruchem.
-
-      Dwa okna obok siebie znaczylo dotad dwa przeciagniecia i dwa
-      ciagniecia za rog, na oko - a oko jest kiepskie w polowach. Teraz
-      okno dociagniete do lewej krawedzi bierze lewa polowe, do prawej
-      prawa, a do gory caly ekran. Nie ma tu czego sie uczyc: okno idzie
-      tam, gdzie sie je popchnelo.
-
-      Dopoki przycisk jest wcisniety, miejsce, ktore okno ZAJMIE, jest
-      rysowane jako obrys w kolorze akcentu. Okno, ktore po puszczeniu
-      skacze gdzie indziej bez uprzedzenia, to okno, ktore uciekło -
-      obrys jest pytaniem, a puszczenie przycisku odpowiedzia.
-
-      Decyzja zapada z polozenia OKNA, nie kursora. Kursor moze byc juz
-      przy samej krawedzi, gdy okno jeszcze do niej nie doszlo (ciagniete
-      okno nigdy nie wychodzi poza ekran), a czlowiek celuje oknem.
-      Kursor mowi tylko, o ktora krawedz chodzilo - inaczej okno na tyle
-      szerokie, ze dotyka obu naraz, przyciagaloby sie gdziekolwiek je
-      puscic. Rogi daja polowe, nie caly ekran: dwa okna obok siebie to
-      to, po co sie tam celuje, a caly ekran jest i tak jeden przycisk
-      dalej.
-
-      Rozmiar sprzed przyciagniecia jest pamietany tak samo, jak przy
-      maksymalizacji, wiec przycisk [] oddaje oknu jego wlasny rozmiar -
-      okno trzymane na polowie ekranu nie stracilo swojego rozmiaru
-      bardziej niz zmaksymalizowane.
-
-      Nowa grupa 'snap' sprawdza, ze w srodku ekranu obrysu nie ma, ze
-      przy krawedzi jest i konczy sie nad paskiem zadan, ze okno naprawde
-      zajmuje polowe (szare z jednej strony, pulpit z drugiej), ze
-      program przerysowuje sie w nowym rozmiarze, ze [] oddaje wlasna
-      szerokosc (360, a nie 320 czy 640) i - na koniec - to, po co to
-      wszystko: terminal na lewej polowie, ustawienia na prawej, granica
-      dokladnie w polowie.
-
-- [x] **Cztery pulpity wirtualne** - najstarsza odpowiedz na ekran,
-      ktoremu skonczylo sie miejsce.
-
-      Zamiast tuzina okien na jednej kupie - cztery male kupki, miedzy
-      ktorymi sie przelacza. Przelaczenie nie kosztuje nic: nic sie nie
-      rysuje, nie przesuwa i nie zmienia rozmiaru. Cala rzecz to jedno
-      pytanie - here(i) - ktore zadaje wszystko, co rysuje okno, liczy
-      okna albo szuka okna pod kursorem. Okno na innym pulpicie nie jest
-      SCHOWANE, tylko go tam nie ma; dziala i rysuje do swojego bufora
-      tak samo jak przedtem.
-
-      Ctrl+Alt i strzalka zmienia pulpit - strzalka pokazuje, dokad sie
-      idzie. Z Shiftem okno z ogniskiem idzie razem, bo okno zostawione
-      za soba to okno szukane. Idziemy za nim, zamiast wypchnac je poza
-      wzrok i zostac.
-
-      Ktory pulpit widac, pisze sie na prawym koncu gornej belki: jedna
-      komorka na pulpit, ta widoczna w kolorze akcentu, pusta - szarym
-      przygaszonym. "Gdzie jestem" i "czy tam cos jest" to jedno
-      spojrzenie, a nie dwa. Komorka jest tez przyciskiem.
-
-      Co sie konczy przy przelaczeniu: ciagniecie okna, ciagniecie ikony,
-      zmiana rozmiaru i otwarte menu. Ciagniecie, ktore przezywa
-      przelaczenie, upuszcza okno na pulpicie, na ktory nikt nie patrzy.
-
-      Przy okazji jedna rzecz, ktora zlapala dopiero pelna suita:
-      komorka na gornej belce lezy dokladnie tam, gdzie ma przyciski
-      okno rozwiniete na caly ekran. Belka jest rysowana POD oknami,
-      wiec i klikniecia musi brac pod nimi - inaczej [] okna
-      zmaksymalizowanego przelaczalo pulpit. Jedno pytanie -
-      window_at(x,y), zadawane od wierzchu stosu w dol - odpowiada teraz
-      i belce, i prawemu przyciskowi myszy.
-
-      Nowa grupa 'desks' (19 asercji) sprawdza komorki na belce, to ze
-      okno znika z ekranu I z paska po przejsciu obok, ze nowe okno
-      otwiera sie tam, gdzie sie patrzy, ze klik w komorke przenosi, ze
-      Shift zabiera okno - i najwazniejsze: ze zegar zostawiony na
-      niewidocznym pulpicie po powrocie pokazuje czas pozniejszy o tyle,
-      ile nas nie bylo. Program, na ktorego nikt nie patrzy, dalej
-      chodzi.
-
-- [x] **Edytor tekstu w oknie** - bo system, ktory umie zrobic plik, ale
-      nie umie go ZMIENIC, to maszyna do przechowywania tekstu, a nie do
-      pracy.
-
-      Wszystko, co dotad robilo plik - 'write' z shella, 'echo' z '>' -
-      bylo jednym wierszem wpisanym przy zachecie, a wiersz wpisany przy
-      zachecie nie moze wrocic do tego, co mowil chwile temu.
-
-      Wiec: biala kartka, czarny tekst, kursor tam, gdzie kaza strzalki
-      albo mysz, Enter dzielacy wiersz i Backspace laczacy dwa (jedyna
-      droga powrotna po Enterze wcisnietym przez pomylke), Ctrl+S i
-      Ctrl+O. Schowek ten sam, co reszta pulpitu: Ctrl+Insert kopiuje
-      wiersz z kursorem, Shift+Insert wstawia w kursor - wiec tekst
-      chodzi miedzy edytorem a terminalem, choc zaden z nich nie wie o
-      drugim.
-
-      Pasek stanu na dole jest calym interfejsem: nazwa pliku, gwiazdka
-      gdy sie zmienil, wiersz i kolumna, a gdy edytor potrzebuje nazwy -
-      pytanie, zadane w tym samym pasku. Okienko dialogowe byloby drugim
-      oknem do przesuwania, ogniskowania i zamykania, dla jednego
-      wiersza tekstu.
-
-      Dwa nowe kody klawiszy: Ctrl+S i Ctrl+O. Pozostale Ctrl+litera
-      przychodza jako sama litera (tego chce shell), ale program, ktory
-      pisze pliki, musi umiec odroznic "zapisz" od "s". Jadro nie wie nic
-      wiecej niz to, ze klawisze padly - co z nimi zrobic, to sprawa
-      programu.
-
-      Kursor to wlos MIEDZY znakami, nie blok i nie belka w komorce:
-      jedno i drugie zaslania wlasnie to, na co czlowiek patrzy, gdy
-      pisze. Test zlapal to od razu - czytal z ekranu 'Ala ma kota?',
-      bo kursor zjadal kolumne litery.
-
-      Nowa grupa 'gedit' (19 asercji, oba jadra) czyta z ekranu tekst i
-      pasek stanu, a potem wychodzi poza edytor: shell jadra robi 'cat'
-      na zapisanym pliku, a w trybie 64-bitowym - gdzie shella jadra z
-      pulpitu nie da sie pisac - robi to terminal przez 'ucat64'. Jeden
-      program zapisal, drugi przeczytal.
-
-- [x] **Edytor dostaje plik, a menedzer plikow ma czym go podac** - i
-      dwa jadra znowu robia to samo.
-
-      'gedit notatka' otwiera plik od razu. Kazanie czlowiekowi wpisac
-      nazwe drugi raz, w programie, ktoremu wlasnie powiedzial, o ktory
-      plik chodzi, to jest dokladnie to, od czego edytor robi sie
-      obowiazkiem.
-
-      W menedzerze plikow przybyl przycisk "Edytuj" - bo do czego SLUZY
-      menedzer plikow, jesli nie do dostania sie do pliku, a dostanie
-      sie do pliku tekstowego znaczy otworzenie go w edytorze. W trybie
-      chronionym to jedno wywolanie sys_spawn z gotowa linia polecenia,
-      w long mode fork i exec, bo tam nie ma spawnu - dwa zrodla, bo
-      menedzer plikow ma osobne, ale ten sam przycisk w tym samym rogu.
-
-      Przy okazji dziura, ktora znalazl test edytora: w trybie
-      64-bitowym pulpit nie mial komu oddac klawisza, ktorego nie chcialo
-      zadne okno. keyboard_console_handler() zwracalo NULL, wiec ekran
-      pelen okien byl ekranem, na ktorym nie dalo sie nic wpisac do
-      shella jadra - podczas gdy w trybie chronionym dzialalo to od
-      zawsze. Teraz klawisz idzie do kolejki ogladanej konsoli, czyli
-      tam, skad shell czyta. Grupa 'desktop64' sprawdza to jednym
-      'uptime' wpisanym przy oknach na ekranie.
-
-      Grupa 'gedit' urosla do 24 asercji i konczy sie tym samym po obu
-      stronach: menedzer plikow widzi plik, ktory zapisal edytor, i
-      oddaje go z powrotem edytorowi.
-
-- [x] **Program moze odmowic zamkniecia** - bo zamkniecie zawsze bylo
-      PROSBA, tyle ze nie bylo jak odpowiedziec "jeszcze nie".
-
-      Odliczanie po prosbie bylo od poczatku - dla programow, ktore nie
-      odpowiadaja. Brakowalo drugiej odpowiedzi: programu, ktory
-      USLYSZAL i ma powod zostac. Edytor z niezapisanym plikiem jest
-      calym tego przykladem.
-
-      Nowe wywolanie systemowe win_keep(okno): "slyszalem, jeszcze nie
-      zamykam". Pulpit przestaje odliczac, a co program zrobi z
-      wyproszona chwila - zapyta we wlasnym oknie, zapisze plik - to
-      juz jego sprawa. Milczenie dalej kosztuje okno: program, ktory nie
-      odpowiada, po dwoch sekundach je traci.
-
-      Przy okazji ognisko: prosba o zamkniecie zabierala je oknu, ktore
-      wlasnie pytano. Skoro program moze odmowic, drugie Alt+F4 musi
-      miec jak do niego trafic - wiec ognisko zostaje przy oknie tak
-      dlugo, jak okno, a puszcza sie je przy sprzataniu.
-
-      Edytor odmawia raz: pierwsze Alt+F4 zamienia sie w pytanie w pasku
-      stanu, drugie jest na nie odpowiedzia. Zapisanie pliku kasuje i
-      gwiazdke, i pamiec o pytaniu.
-
-      Grupa 'gedit' ma teraz 30 asercji i sprawdza obie strony: ze okno
-      po odmowie stoi jeszcze piec sekund pozniej (odliczanie naprawde
-      stanelo, a nie tylko zwolnilo), ze drugie Alt+F4 zdejmuje przycisk
-      z paska zadan i ze program konczy sie SAM z kodem zero, a nie
-      zostaje zabity. To samo w long mode, gdzie wywolanie ma wlasny
-      numer i wlasna obsluge.
-
-      I jedna nauka o samym tescie: kursor myszy jest bialy jak kartka
-      edytora. Sonda zostawiona pod kursorem mowila "okno dalej jest" o
-      oknie, ktorego juz nie bylo.
-
-- [x] **Kazdy rdzen dostaje wlasna linie cache planisty** - i przy okazji
-      lekcja o tym, czego test naprawde pilnuje.
-
-      Grupa 'kthreads' zaczela padac po dodaniu SZESCIU WIERSZY do
-      kompozytora - kodu, ktory w tym tescie nawet sie nie uruchamia
-      (test chodzi w trybie tekstowym). Cztery watki jadra, ktore
-      wczesniej konczyly w 45 tyknieciach, potrzebowaly 508. Bisekcja po
-      wlasnych zmianach pokazala winowajce, ktory winowajca byc nie mogl
-      - i to bylo wlasnie wskazowka.
-
-      Wskazniki 'running' i 'idle' kazdego rdzenia leza w tablicy
-      cores[]. Osiem bajtow na rdzen, cztery rdzenie - wszystkie w
-      JEDNEJ linii cache. Kazde przelaczenie zadania to zapis do tej
-      linii, wiec przy czterech rdzeniach linia jezdzi miedzy nimi
-      zamiast pracy. Ile to kosztuje, zalezy od tego, gdzie akurat
-      wypadnie granica linii - a to zmienia sie, gdy cokolwiek w jadrze
-      urosnie. Stad test, ktory pada od zmiany w zupelnie innym pliku.
-
-      Szescdziesiat cztery bajty na rdzen to najtansza rzecz, jaka to
-      jadro kupuje. Zamek planisty dostaje wlasna linie z tego samego
-      powodu. Po poprawce: 45 tykniec, niezaleznie od tego, co gdzie
-      indziej urosnie.
-
-      Test nie byl zbyt czuly. Mierzyl dokladnie to, co mial mierzyc -
-      czy praca idzie rownolegle - i powiedzial prawde o maszynie, ktora
-      przestala isc rownolegle. Prog zostal, gdzie byl.
-
-- [x] **Menedzer zadan w oknie** - bo 'ps' drukuje, a drukowania program
-      nie przeczyta.
-
-      Lista, po ktora trzeba napisac komende, to lista, w ktora nikt nie
-      patrzy. Maszyna z tuzinem okien potrzebuje jednego miejsca, ktore
-      mowi, co dziala - a gdy program przestal odpowiadac, sposobu na
-      zakonczenie go innego niz restart maszyny.
-
-      Nowe wywolanie sys_ps(numer, bufor): jeden wiersz listy zadan na
-      wywolanie, indeks od zera, -1 gdy nic tam nie ma - dokladnie tak,
-      jak czyta sie katalog. Kolejnosc to kolejnosc listy, wiec lista,
-      ktora program pokazuje, jest o jedno odswiezenie z tylu - jak w
-      kazdym menedzerze zadan na swiecie.
-
-      Okno: wiersz na zadanie, odswiezane dwa razy na sekunde, klik
-      wybiera, przycisk konczy. Dwie rzeczy, ktorych nie zrobi: nie
-      zakonczy watku jadra (te dziela pamiec jadra, wiec zabranie
-      jednego zabiera kawalek maszyny) i nie zakonczy SIEBIE - menedzer
-      zadan, ktory znika po kliknieciu, jest zartem, a nie narzedziem.
-      Oba przypadki mowia dlaczego, zamiast nie zrobic nic.
-
-      Co odroznia program od watku jadra: wlasna przestrzen adresowa, a
-      nie sterta. Sterte maja jedne i drugie - pierwsza wersja pokazywala
-      wszystko jako "program" i test to zlapal od razu.
-
-      Nowa grupa 'gtasks' (22 asercje, oba jadra) sprawdza, ze lista
-      ZYJE: program uruchomiony przy otwartym oknie sam sie na niej
-      pojawia, a zakonczony przyciskiem znika i z listy, i z paska
-      zadan. Oraz obie odmowy.
-
-      Test musial przy okazji odsunac okno menedzera z drogi kaskady -
-      bo kazde nowe okno otwiera sie o krok dalej i stanelo nad
-      czytana lista. Czlowiek by je przesunal; test tez.
-
-- [x] **Miernik obciazenia na gornej belce** - ile maszyny jest zajete,
-      jednym spojrzeniem.
-
-      Liczba mowi "4128 KiB", czyli jest do PRZECZYTANIA. Pasek
-      wypelniony w jednej trzeciej jest do ZOBACZENIA - a dokladne
-      liczby (ile pamieci, z ilu, i ile zadan za tym stoi) sa jedno
-      najechanie kursorem dalej, wiec belka milczy, dopoki sie jej nie
-      spyta.
-
-      Miejsce: gorna belka, obok przelacznika pulpitow. Tam mieszka to,
-      co jest ZAWSZE prawda - ktory pulpit jest widoczny i ile maszyny
-      jest zajete. Pasek zadan na dole jest dla okien; miernik na nim
-      bylby jeszcze jedna rzecza sciskajaca przyciski (i, jak sie
-      okazalo przy pierwszej wersji, jedna rzecza, ktora testy licza
-      jako przycisk).
-
-      Wypelnienie rysuje sie WEWNATRZ ramki. Narysowane po niej, odczyt
-      kilku procent ma jedna kolumne szerokosci - dokladnie te, ktora
-      zakrywa ramka - wiec miernik nie pokazywalby nic, dopoki maszyna
-      nie bylaby w polowie pelna.
-
-      Podpowiedz umie sie teraz pojawic tam, gdzie stoi to, co
-      tlumaczy: dotad zawsze wychodzila nad paskiem zadan, a
-      podpowiedz na drugim koncu ekranu niz rzecz, ktorej dotyczy, jest
-      zagadka.
-
-      Liczba zadan: task_count() w obu jadrach - 64-bitowe mialo ja od
-      dawna, 32-bitowe dostalo teraz.
-
-- [x] **Okno mowi, co ma otwarte** - bo trzy okna nazwane "Edytor" to
-      trzy okna do sprawdzenia po kolei.
-
-      Nowe wywolanie win_title(okno, napis): program zmienia nazwe
-      swojego okna. Pasek tytulu i podpowiedz na pasku zadan czytaja to
-      samo pole, wiec jedno wywolanie zalatwia oba miejsca.
-
-      Edytor mowi teraz "Edytor: notatka" - po wczytaniu i po zapisie,
-      bo dopiero wtedy plik ma nazwe. Terminal mowi "Terminal: /kat",
-      i robi to tam, gdzie i tak buduje zachete: katalog zmienia sie
-      jednym 'cd', a zacheta i tytul maja mowic to samo.
-
-      Dwa jadra, dwa numery wywolania, jedna funkcja w kompozytorze.
-
-- [x] **Podwojny klik i "pokaz pulpit"** - dwa odruchy, ktore czlowiek
-      sprawdza w pierwszej minucie.
-
-      Dwa klikniecia w ten sam pasek tytulu, blisko siebie w czasie, to
-      jeden gest: na caly ekran albo z powrotem. "Blisko siebie" to
-      dwadziescia klatek, czyli okolo szesc dziesiatych sekundy przy
-      trzydziestu trzech klatkach na sekunde - wartosc, przy ktorej
-      osiada kazdy system. Krocej i reka nie trafia na zajetej maszynie,
-      dluzej i dwa osobne klikniecia (bo tak sie podnosi okno) zaczynaja
-      liczyc sie jako jeden gest. Pierwsza wersja miala dwanascie klatek
-      i nie dalo sie w nia trafic.
-
-      Przycisk "pokaz pulpit" na gornej belce chowa wszystkie okna, a
-      drugim kliknieciem przywraca DOKLADNIE te, ktore schowal. To jest
-      cala rzecz: przycisk, ktory tylko chowa, kosztuje uklad okien i
-      nikt go nie nacisnie drugi raz. Okno zwiniete recznie zostaje
-      zwiniete, bo to byla czyjas decyzja.
-
-- [x] **Menedzer plikow napisany od nowa** - i jedno zrodlo zamiast
-      dwoch.
-
-      To, co bylo, listowalo osiem nazw w oknie wielkosci znaczka
-      pocztowego i pokazywalo pierwsze sto bajtow jednej z nich. To
-      dowodzilo drogi "dysk -> klik -> odczyt -> rysunek"; menedzerem
-      plikow nie bylo. Menedzer plikow to miejsce, do ktorego czlowiek
-      IDZIE po plik: mowi, ile co waży, wchodzi do katalogow i z nich
-      wychodzi, podaje plik programowi, ktory go otwiera, i wyrzuca go,
-      gdy poprosic dwa razy.
-
-      Wiec: lista z rozmiarami, katalogi oznaczone i chodliwe (Enter
-      albo "Otworz" wchodzi, Backspace wychodzi wyzej), nazwa katalogu w
-      tytule okna, PgUp/PgDn przewija, a licznik w rogu mowi, ktory
-      kawalek listy widac - lista, ktora przewija sie bez slowa, wyglada
-      na taka, ktora coz zgubila.
-
-      "Usun" pyta. Menedzer plikow, ktory wyrzuca plik po jednym
-      kliknieciu, to menedzer, ktorego czlowiek sie boi - a drugie
-      klikniecie jest odpowiedzia, nie powtorzeniem. Katalogu nie usuwa
-      wcale.
-
-      Podglad tresci znikl, bo od pokazywania tresci jest edytor, a
-      "Otworz" mu ten plik podaje. Dwie asercje w starych testach
-      mowily o podgladzie - zostaly przepisane na to, co program robi
-      teraz: klik wybiera wiersz, a wybor widac kolorem akcentu.
-
-      I najwazniejsze: JEDNO zrodlo dla obu jader. Osobne byly przez
-      jedna rzecz - czytanie katalogu, ktore w trybie chronionym oddaje
-      rozmiar w wyniku, a w long mode wypelnia strukture. Ta jedna
-      roznica to teraz dziesiec wierszy pod #ifdef, a reszta - lista,
-      klikanie, rysowanie - jest wspolna. user64/gfiles64.c usuniety.
-
-- [x] **Jeden klik, jedno dzialanie** - i przyciski trzymajace krawedz.
-
-      Screeny zlapaly blad, ktorego zaden test nie widzial: klikniecie
-      "Otworz" w menedzerze plikow uruchamialo edytor DWA RAZY. Okno
-      dostaje i WEV_PRESS, i WEV_CLICK - te same palce, dwa zdarzenia -
-      a programy sluchaly obu. Teraz slucha sie klikniecia, a nacisniecie
-      i puszczenie zostaja tam, gdzie sa potrzebne: przy ciagnieciu.
-
-      Drugi screen (okno rozwiniete na caly ekran) pokazal przyciski
-      przybite do liczby: "Zakoncz" stalo w polowie okna szerokiego na
-      caly ekran i wygladalo jak pomylka. Przyciski liczy sie teraz od
-      prawej krawedzi.
-
-      Obie rzeczy widac na obrazku od razu, a w tescie - dopiero gdyby
-      ktos sprawdzil, ile okien sie otworzylo.
-
-- [x] **Ctrl+F w edytorze i Tab w terminalu** - dwa klawisze, bez ktorych
-      pisze sie wolno.
-
-      Ctrl+F pyta w pasku stanu, szuka od miejsca ZA kursorem i okraza
-      koniec pliku, wracajac tam, skad zaczal - szukanie, ktore staje na
-      dole, trzeba obmyslic, a od myslenia o szukaniu nie jest szukanie.
-      Enter przy pustym pytaniu powtarza ostatnie, bo pierwsze trafienie
-      rzadko jest tym, o ktore chodzilo. Mowi, w ktorym wierszu znalazl,
-      albo ze nie znalazl.
-
-      Tab w terminalu konczy slowo spod kursora tym, co lezy na dysku.
-      Jedno dopasowanie konczy slowo, kilka - popycha je tak daleko, jak
-      sie zgadzaja, i wypisuje kandydatow (dalej byloby zgadywaniem,
-      ktore z nich); zadne nie robi nic, bo to jedyna uczciwa
-      odpowiedz. Nazwy bierze z katalogu roboczego, czyli stamtad, skad
-      bierze je shell - wiec dopelnia sie to, co i tak by sie
-      uruchomilo. Gdy program dziala, wiersz nalezy do niego i tabulator
-      jest tabulatorem.
-
-      Trzeci kod klawisza dla jadra: Ctrl+F. Jadro dalej wie tylko tyle,
-      ze klawisze padly.
-
-- [x] **Ctrl+Z w edytorze** - bo edytor bez cofania to edytor, w ktorym
-      pisze sie ostroznie, a ostrozne pisanie jest wolniejsze niz pisanie
-      i poprawianie.
-
-      Pamieta sie nie PLIK, tylko ZMIANY: znak wstawiony, znak usuniety,
-      wiersz rozdzielony, dwa wiersze zlaczone. Kazda z tych czterech ma
-      oczywiste przeciwienstwo, a robienie przeciwienstw w odwrotnej
-      kolejnosci jest calym cofaniem. Sto dwadziescia krokow wstecz
-      kosztuje dwa kilobajty; dwiescie kopii pliku kosztowaloby cztery
-      megabajty.
-
-      Najstarszy krok wypada, gdy log sie zapelni. Kto napisal od tamtej
-      pomylki sto dwadziescia rzeczy, nie szuka juz tamtej pomylki.
-
-      Przy okazji dwie operacje na wierszach - rozdziel i zlacz -
-      zostaly wypisane raz, jako split_at() i join_at(): uzywaja ich i
-      klawisze, i cofanie, tylko w druga strone. Wczesniej ta sama
-      robota byla wpisana w Enter i w Backspace osobno.
-
-- [x] **Struktura zadania na wlasnej linii cache - i utajony blad, ktory
-      to odkrylo.**
-
-      Grupa 'kthreads' znowu zaczela padac, tym razem po stronie
-      64-bitowej: cztery watki jadra 320 tykniec zamiast 42. Bisekcja po
-      commitach pokazala winowajce nie do uwierzenia - CZTERY WIERSZE
-      DODANE DO MAPY KLAWIATURY (Ctrl+F i Ctrl+Z). Kod, ktory w tym
-      tescie nawet nie jest wolany.
-
-      Struktury zadan leza na stercie, a sterta wyrownuje do osmiu
-      bajtow. Pierwsze slowa struktury - wskaznik stosu i stan - sa
-      zapisywane przy KAZDYM przelaczeniu zadania, przez ten rdzen,
-      ktory to zadanie prowadzi. Dwie struktury w jednej linii cache to
-      dwa rdzenie piszace do jednej linii, a wtedy linia jezdzi miedzy
-      nimi zamiast pracy. Czy tak wypadnie, zalezy od tego, gdzie
-      poukladaly sie bloki sterty - czyli od rozmiaru kodu, ktory nie ma
-      z tym nic wspolnego.
-
-      Zadanie dostaje teraz linie dla siebie: prosimy o linie wiecej i
-      sami przesuwamy sie do granicy, pamietajac adres do oddania.
-
-      Po drodze pierwsza proba - "kazdy blok sterty na wlasnej linii" -
-      wywrocila sterownik xHCI. I dobrze, bo pokazala blad starszy od
-      wszystkiego: tworzac zadanie zerowano w tablicy mapowan plikow
-      tylko POCZATEK i KONIEC, a nie wskaznik 'blocks'. Zwolnienie
-      mapowania oddawalo wiec sterte wskaznik, ktory byl smieciem z
-      poprzedniego zycia tej pamieci. Czekalo to na sterte, ktora poda
-      blok z odpowiednim smieciem w srodku - i doczekalo sie.
-
-      Sterta ma teraz straznika: wskaznik, przed ktorym nie ma
-      sensownego naglowka, nie jest zwalniany, tylko zglaszany. Awaria
-      byla w kfree, a blad calkiem gdzie indziej - i to jest dokladnie
-      ten rodzaj awarii, o ktorym warto powiedziec glosno.
-
-- [x] **Nadrobione testy: osiem funkcji dostaje siatke** - bo to ona
-      zlapala blad sprzed miesiecy w mapowaniach plikow.
-
-      Dwie nowe grupy i trzy rozszerzone:
-
-      'sysbar' (15 asercji) - gorna belka. Miernik pokazuje, ze cos jest
-      zajete i ze nie wszystko; podpowiedz podaje liczby, ktore trzymaja
-      sie kupy (uzyte <= calosc, procent <= 100); a najwazniejsze - te
-      liczby ZYJA: program uruchomiony miedzy dwoma spojrzeniami musi
-      pojawic sie w liczniku zadan. "Pokaz pulpit" chowa okna, nie
-      zamykajac ich (przyciski zostaja na pasku), a drugi klik przywraca
-      dokladnie te, ktore schowal - okno zwiniete recznie zostaje
-      zwiniete.
-
-      'files' (18 asercji) - menedzer plikow. Rozmiar sprawdzany przy
-      pliku, ktorego dlugosc test zna, bo kolumna liczb znikad niczego
-      nie dowodzi. Usuwanie sprawdzone w obu polowach: pierwszy klik
-      tylko pyta (i plik dalej jest), drugi usuwa - co potwierdza shell
-      jadra, nie umiejac juz tego pliku przeczytac. Katalogu nie usuwa
-      wcale. Nazwa okna mowi, w ktorym katalogu stoimy, i zmienia sie
-      przy wejsciu.
-
-      'winkeys' (+4) - podwojne klikniecie w pasek tytulu na caly ekran i
-      z powrotem. 'gedit' (+9) - Ctrl+F znajduje slowo LEZACE WYZEJ niz
-      kursor, czyli naprawde okraza koniec pliku; Enter przy pustym
-      pytaniu powtarza; Ctrl+Z cofa po jednym znaku; okno nosi nazwe
-      pliku. 'gterm' (+4) - Tab konczy nazwe, przy kilku pasujacych
-      wypisuje kandydatow i dopisuje tylko to, co wspolne; okno mowi, w
-      ktorym katalogu stoi.
-
-      Dwie rzeczy poprawione po drodze, obie znalezione przez pisanie
-      testu: podpowiedz miernika chowala sie POD KURSOREM (strzalka jest
-      rysowana na niej), wiec wychodzi teraz w lewo od tego, co
-      tlumaczy; a napis "katalog" w menedzerze byl wyrownany inaczej niz
-      kolumna rozmiarow - dwie kolumny konczace sie w roznych miejscach
-      czytaja sie jak dwie kolumny.
-
-- [x] **Zmiana nazwy w systemie plikow** - bo dotad przeniesienie
-      czterech megabajtow znaczylo przeczytanie i zapisanie czterech
-      megabajtow, zeby zmienic szescdziesiat cztery bajty wpisu w
-      katalogu.
-
-      fs_rename(): bloki pliku nie ruszaja sie z miejsca, zmienia sie
-      tylko wpis, ktory je nazywa - a gdy sciezki wskazuja rozne
-      katalogi, takze rodzic. Reguly ma te, co kazdy system plikow:
-      zrodlo musi istniec, katalog celu musi istniec, nazwa celu musi
-      byc wolna (zmiana nazwy nie jest sposobem na skasowanie czegos
-      przez przypadek), a katalogu nie da sie przeniesc do samego siebie
-      ani pod siebie - to odcielo by kawalek drzewa od korzenia i
-      zostawilo go wskazujacego w kolko.
-
-      Do tego wywolanie systemowe po obu stronach (pliki systemowe
-      chronione z OBU stron: przemianowanie systemowego pliku jest
-      rownie dobre jak jego skasowanie, a przemianowanie czegos NA jego
-      nazwe podklada obcy plik tam, gdzie system szuka swojego),
-      komenda 'mv' w shellu jadra, i program 'mv', ktory probuje teraz
-      najpierw taniej drogi, a kopiowanie zostawia jako druga probe -
-      bo "mv na istniejacy plik" jest rzecza, ktora ludzie robia.
-
-      W menedzerze plikow przybyl przycisk "Nazwa": pyta o nowa nazwe w
-      tym samym pasku, w ktorym mowi wszystko inne. Okienko dialogowe
-      byloby drugim oknem do przesuwania, ogniskowania i zamykania - dla
-      jednego slowa.
-
-      Testy: 'pfs' dostal zmiane nazwy i obie odmowy (nazwa zajeta,
-      zrodla nie ma), 'files' pyta i zmienia, a 'gedit' robi to samo na
-      jadrze 64-bitowym, gdzie wywolanie ma wlasny numer i wlasna
-      obsluge.
-
-- [x] **Zrzut ekranu i podglad obrazu** - maszyna, ktora umie sie
-      sfotografowac i sama na to zdjecie popatrzec.
-
-      Print Screen zapisuje ekran w wlasnych kategoriach maszyny: cztery
-      bajty "PSCR", szerokosc, wysokosc, cala paleta (256 kolorow po
-      trzy bajty, zeby plik mowil, co znacza jego liczby) i po jednym
-      bajcie na piksel - numer w palecie. To dokladnie to, co narysowal
-      kompozytor, wiec podglad nie ma czego interpretowac: wklada bajty
-      z powrotem do okna i to znowu sa te same kolory.
-
-      Odczyt ekranu wstecz: w trybach osmiobitowych bufor JUZ trzyma
-      numery i to jest kopia; w 24- i 32-bitowych trzyma kolory, a droga
-      powrotna to szukanie w palecie - dokladne, bo wszystko na tym
-      ekranie zostalo z tej palety narysowane. Szukanie byloby 256
-      porownan na piksel, gdyby robic je uczciwie za kazdym razem; ekran
-      sklada sie z ciagow jednego koloru, wiec ostatnia odpowiedz jest
-      pamietana i prawie zawsze jest znowu ta wlasciwa.
-
-      Nowe wywolanie win_blit(): blok pikseli prosto do tresci okna.
-      Wszystko, co program mogl dotad narysowac, to prostokat jednego
-      koloru albo wiersz tekstu - a obraz nie jest ani jednym, ani
-      drugim, i rysowanie go po prostokacie na piksel byloby trzysta
-      tysiecy wywolan systemowych na jeden zrzut.
-
-      Podglad pokazuje co drugi (albo co trzeci) piksel, bo caly ekran
-      nie miesci sie w oknie na tym samym ekranie. Najblizszy sasiad, bo
-      chodzi o to, zeby ZOBACZYC, co bylo na ekranie, a rozmyta polowka
-      ekranu pelnego osmiopikselowych liter pokazalaby mniej, nie
-      wiecej. Nic nie jest trzymane po wczytaniu: tresc okna JEST kopia.
-
-      Menedzer plikow podaje ".psc" podgladowi, a wszystko inne
-      edytorowi - po nazwie, bo zagladanie do srodka znaczyloby czytanie
-      kazdego pliku w katalogu, zeby narysowac liste.
-
-      Nowa grupa 'zrzut' (9 asercji) sprawdza, ze plik ma dokladnie tyle
-      bajtow, ile ma ekran plus paleta, i - co wazniejsze - ze obraz w
-      oknie NAPRAWDE jest ekranem: pomaranczowy ikon znajduje sie w
-      oknie w tym samym miejscu i w ilosci odpowiadajacej pokazywaniu co
-      drugiego piksela. Takiej liczby nie produkuje zaden przypadek.
-
-- [x] **Obraz z zewnatrz: BMP i kolory, ktorych ekran nie ma** - bo
-      pytanie "a co z JPG, PNG i BMP" ma trudnosc nie w formatach, tylko
-      w kolorze.
-
-      Ten ekran jest osmiobitowy z paleta: tresc okna to numery, nie
-      kolory. Plik .psc dziala bez wysilku, bo to SA bajty kompozytora.
-      Kazdy obraz z zewnatrz jest RGB i trzeba go skwantyzowac do tego,
-      co maszyna ma: trzydziesci szesc kolorow pulpitu plus sto
-      dziewiecdziesiat dwa miejsca po tapecie. Rysunek wychodzi dobrze,
-      zdjecie wychodzi jak zdjecie ogladane przez trzydziesci szesc
-      kredek - i to wlasnie jest osmiobitowy ekran, a nie usterka.
-
-      Wiec najpierw fundament: sys_palette() oddaje programowi cala
-      palete, bo bez wiedzy, co znacza numery, zaden format nie ma sensu.
-      Szukanie najblizszego koloru bylo by 256 porownan na piksel, wiec
-      odpowiedz jest pamietana dla koloru zaokraglonego do pieciu bitow
-      na kanal: najwyzej trzydziesci dwa tysiace szukan, a obraz rzadko
-      uzywa dziesiatej czesci tego.
-
-      BMP: bez kompresji, 24 bity albo 8 z wlasna paleta, wiersze
-      dopelniane do czterech bajtow i - o ile wysokosc nie jest ujemna -
-      liczone od DOLU.
-
-      Jak taki plik ma tu trafic? Nie ma dyskietki ani wymiany z hostem,
-      ale jest siec: 'httpget' sciaga plik na dysk, a podglad go
-      pokazuje. Tak tez sprawdza to test - serwer harnessu podaje BMP z
-      czterema cwiartkami w czerwieni, zieleni, blekicie i bieli, bo te
-      cztery kolory paleta ma DOKLADNIE: dekoder, ktory dziala, pokazuje
-      dokladnie je, a dekoder, ktory cos rysuje, pokazuje cos innego.
-
-      Nastepne w kolejce: PNG (inflate to jakies trzysta wierszy i
-      przyda sie jeszcze nie raz), potem JPEG baseline.
-
-- [x] **PNG: inflate wlasnej roboty, chunki i piec filtrow** - drugi z
-      trzech formatow z pytania "a co z JPG, PNG i BMP".
-
-      PNG to trzy rzeczy w jednym plaszczu: chunki, strumien deflate i
-      jeden bajt filtra na wiersz. Chunki sa latwe (dlugosc, nazwa,
-      bajty, suma kontrolna, na ktora nie trzeba patrzec, bo strumien
-      deflate i tak sie nie zlozy, jesli bajty sa zle).
-
-      Deflate wyladowal w osobnym pliku (user/uinflate.h), bo przyda sie
-      jeszcze nie raz: trzy rodzaje blokow (skladowany, ze stalymi
-      drzewami, z drzewami zapisanymi w samym bloku - opisanymi trzecim
-      drzewem), a potem strumien symboli, gdzie symbol ponizej 256 to
-      bajt, 256 konczy blok, a powyzej znaczy "przepisz N bajtow sprzed
-      D" - i to jest cale kompresowanie. Kopiowanie bajt po bajcie jest
-      celowe: kopia moze zachodzic na siebie, bo "trzy bajty sprzed
-      jednego" znaczy ten sam bajt trzy razy.
-
-      Dekodowanie Huffmana zwyklym chodzeniem po bitach, bez tablicy
-      podgladu: trzydziesci wierszy zamiast stu piecdziesieciu, a obraz
-      i tak wczytuje sie chwile. Sprawdzone na hoscie przeciw prawdziwej
-      zlib, na czterech poziomach kompresji - w tym zerowym, ktory daje
-      bloki skladowane.
-
-      Filtry to miejsce, gdzie dekodery zwykle padaja, wiec obraz w
-      tescie ma KAZDY z piatki po kolei (none, sub, up, average, paeth).
-      Obraz z samymi zerowymi filtrami nie mowi nic o pozostalych
-      czterech.
-
-      Przeplatanego PNG (Adam7) nie umiem i mowie to wprost, zamiast
-      rysowac cwierc obrazu: obraz pokazany zle jest gorszy niz obraz
-      niepokazany.
-
-      W 'proccores' wiecej cierpliwosci (cztery odczyty zamiast dwoch,
-      liczy sie najlepszy) przy tym samym progu - suita ma coraz
-      ciezszych sasiadow, a pomiar rownoleglosci na hoscie bez wolnego
-      rdzenia mierzy hosta.
-
-- [x] **JPEG baseline: Huffman, kosinus i kolor z polowy rozdzielczosci**
-      - trzeci i ostatni z formatow z pytania "a co z JPG, PNG i BMP".
-
-      BMP to bylo czytanie bajtow, PNG - rozpakowanie strumienia. JPEG
-      jest czyms innym: obrazu w tym pliku NIE MA. Sa wspolczynniki
-      przeksztalcenia kosinusowego, spakowane Huffmanem i podzielone
-      przez tablice kwantyzacji, a obraz trzeba z nich policzyc.
-
-      Kolejno: bity (z odkrecaniem wypelniacza - 0xFF w danych jest
-      zapisane jako 0xFF 0x00, zeby nie udawalo znacznika), Huffman po
-      kanonicznych tablicach z naglowka (mincode/maxcode/valptr, bez
-      drzewa - kody tej samej dlugosci leza obok siebie, wiec wystarczy
-      porownanie), zygzak z powrotem do kwadratu 8x8, mnozenie przez
-      kwantyzacje i odwrotny kosinus.
-
-      Kosinus w stalym przecinku, dwanascie bitow po przecinku, i
-      rozdzielony: osiem kolumn, potem osiem wierszy. Rozdzielenie to
-      jedyny powod, dla ktorego to sie liczy w rozsadnym czasie -
-      wprost byloby 64 mnozenia na piksel zamiast szesnastu.
-
-      A na koncu kolor: JPEG trzyma jasnosc w pelnej rozdzielczosci, a
-      barwe zwykle w polowie w obu osiach, bo oko tego nie widzi. Wiec
-      skladowe leza we wlasnych rozmiarach, a pytanie o piksel przelicza
-      wspolrzedne - i dopiero wtedy YCbCr wraca na RGB.
-
-      Sprawdzone przeciw dekoderowi Go (image/jpeg) na calym jego
-      zestawie testowym: trzynascie plikow baseline - 4:4:4, 4:4:0,
-      4:2:2, 4:2:0, 4:1:1, 4:1:0, ze znacznikami restartu, w skali
-      szarosci, z probkowaniem 2x2 na jedynej skladowej i z barwami
-      zapisanymi wprost jako R, G, B. Najwieksza roznica na kanal: 4
-      poziomy z 256, i to tylko na zaokragleniu kosinusa. To jest ten
-      rodzaj sprawdzenia, ktorego wlasny test nie zastapi - obcy plik
-      od obcego kodera.
-
-      Po drodze trzy prawdziwe bledy, wszystkie znalezione przez
-      psucie pliku losowo (900 uszkodzonych wersji, pod ASan i UBSan):
-      numery tablic z naglowka nie byly sprawdzane (tq=66 siegalo poza
-      tablice kwantyzacji), przesuwanie liczby ujemnej w lewo jest
-      niezdefiniowane, a wspolczynniki z popsutego pliku wychodzily poza
-      zakres na tyle, ze mnozenia w kosinusie przekraczaly int. Stad
-      dwa ograniczniki - na wspolczynnik i na wynik pierwszego przebiegu
-      - dobrane z pomiaru na prawdziwych obrazach (najwiekszy
-      wspolczynnik ~1000, najwiekszy wynik posredni ~4200) i ustawione
-      dziesieciokrotnie wyzej: poprawnego obrazu nie dotykaja, a
-      popsutemu daja bezsensowne piksele zamiast niezdefiniowanego
-      zachowania.
-
-      Przy okazji oba dekodery obrazow - inflate i JPEG - weszly na
-      stale do 'make fuzz', obok certyfikatow, HTML-a i ramek. Obraz
-      przychodzi z sieci dokladnie tak samo jak certyfikat, a w dodatku
-      to wejscie decyduje, ILE sie zapisze; jednorazowe sprawdzenie w
-      trakcie pisania nie pilnuje niczego pozniej.
-
-      Progresywnego JPEG nie umiem i mowie to wprost - to jest drugi
-      dekoder, nie wariant tego samego. Tak samo CMYK i arytmetycznego.
-
-      Test bierze obrazek od obcego kodera (Go, jakosc 90, 4:2:0),
-      wpisany do harnessu jako bajty - bo wlasny koder pisalby pliki
-      pod wlasny dekoder, a to nie jest sprawdzanie. Te same cztery
-      cwiartki co przy BMP i PNG, czytane w srodkach cwiartek, bo
-      format stratny ma prawo rozmazac granice. Sprawdzane na obu
-      jadrach - dekoder jest jednym zrodlem kompilowanym dwa razy, a w
-      trybie dlugim wskaznik ma inny rozmiar i indeksowanie plaszczyzny
-      idzie przez long.
-
-- [x] **Kolory: koniec z paleta 256 tam, gdzie ekran ma wiecej** -
-      odpowiedz na pytanie "co zrobic, zeby miec tyle kolorow, co
-      wspolczesne komputery".
-
-      Najpierw to, czego nie trzeba bylo robic: bufor ekranu JUZ byl
-      32-bitowy. video.c od dawna umie 24 i 32 bity na piksel, a
-      video_adopt_lfb bierze bufor od GRUB-a albo od UEFI, wiec na
-      prawdziwym sprzecie to dziala. Sufitem nie byl sprzet, tylko my
-      sami: wszystko powyzej video_putpixel mowilo indeksami palety.
-
-      **Sterta.** Pierwszy prawdziwy blocker nie mial nic wspolnego z
-      kolorem. Bufor okna to jeden bajt na piksel; w kolorach cztery.
-      Okno 420x300 rosnie ze 123 KiB do 492 KiB, a sterta jadra miala
-      MEGABAJT - dwa okna i po stercie. Wiec sterta liczy sie teraz z
-      wykrytej pamieci: szesnasta czesc, miedzy 1 a 8 MiB. Maszyna ze
-      128 MiB dostaje 8 MiB, a te z 16 MiB, na ktorych chodza testy
-      wymiany, dostaja dokladnie ten megabajt, ktory mialy - nie
-      zabieramy im polowy pamieci przy okazji.
-
-      **Paleta 8-bitowa.** video_set_palette brala skladowe 6-bitowe
-      (0..63) - spadek po DAC-u VGA, ktory tyle bierze. Teraz bierze
-      0..255, a zwezenie zostalo tam, gdzie jego miejsce: w jednej
-      linijce piszacej do DAC-u. Stale w desktop.c przeliczone dokladna
-      formula (v<<2)|(v>>4), czyli tak, jak przeliczala je sama paleta
-      - wyglad nie drgnal ani o poziom, co potwierdzily grupy 'look',
-      'wall' i 'icons'. To jest zmiana, ktora zdejmuje sufit i niczego
-      nie rusza.
-
-      **Druga sciezka rysowania.** video_putpixel_rgb, video_fill_rect_rgb
-      i video_blit_rgb biora 0x00RRGGBB. W trybie 8-bitowym (tryb 13h,
-      awaryjny) kolor jest wymieniany na najblizszy indeks - z pamiecia
-      ostatniej odpowiedzi, bo obraz sklada sie z ciagow jednego koloru.
-
-      **Okno z formatem.** Okno rodzi sie z indeksami, bo tak rysowal
-      kazdy program tej maszyny i zaden nie musial sie zmieniac. Program,
-      ktory ma co pokazac, prosi raz (win_truecolour) i od tej pory
-      pisze kolory przez win_blit32. Jego wlasna oprawa - tlo, pasek
-      stanu - dalej idzie przez win_rect i win_text w indeksach, bo te
-      wywolania TLUMACZA indeks na kolor dla takiego okna. Dzieki temu
-      gimg zmienil trzy petle, a nie caly plik.
-
-      Podmiana bufora pod oknem jest bezpieczna nie przez nowy zamek,
-      tylko przez ten, ktory juz jest: syscall bierze duzy zamek jadra,
-      a kompozytor trzyma go przez cale rysowanie. Ta sama zasada od
-      dawna chroni resize_content.
-
-      Ciekawe uboczne: okno w kolorach sklada sie SZYBCIEJ niz w
-      indeksach - jego piksele sa juz tym, czego chce bufor ekranu, wiec
-      idzie wierszami zamiast piksel po pikselu.
-
-      **gimg.** Znikla funkcja nearest() i tablica 32768 zapamietanych
-      odpowiedzi. Zdjecie jest zdjeciem, a nie zdjeciem widzianym przez
-      trzydziesci szesc kredek. Pliki .psc zostaja indeksami - ich bajty
-      SA numerami tej palety, wiec win_blit odklada je dokladnie.
-
-      **Tapeta.** Format dostal drugi ksztalt: "PWL2", rozmiar, trzy
-      bajty na piksel, bez palety. Stary "PWAL" dalej sie czyta. I tu
-      trzeba byc uczciwym: dla czterech z pieciu wzorow mkwalla to nie
-      zmienia NIC - zbocze przez 120 wierszy ma 120 kolorow, cokolwiek
-      by sie robilo. Zmiana zarabia na siebie piatym wzorem:
-      przenikaniem po obu osiach, gdzie kazdy piksel ma swoj kolor -
-      dziewietnascie tysiecy, czego paleta 192 nie udzwignie.
-
-      **gweb nie dostal nic** i mowie to wprost: jego parser HTML w
-      ogole nie czyta kolorow, rysuje szescioma stalymi. Przepisanie
-      tych szesciu stalych na RGB nie zmienilo by ani jednego piksela.
-      Prawdziwe kolory w przegladarce to parser CSS - inna robota, nie
-      ta.
-
-      **Prezentacja tylko tego, co sie zmienilo.** Kompozytor przerysowuje
-      calą klatke trzydziesci razy na sekunde, czy cos sie ruszylo, czy
-      nie, i dotad cala klatka szla na karte - przy 640x480 to 1,2 MB,
-      przy 1024x768 juz 3 MB. Pisanie do bufora karty jest DUZO drozsze
-      niz do pamieci, wiec doszedl trzeci bufor: kopia w RAM tego, co
-      ostatnio poszlo na ekran. Porownanie RAM z RAM-em mowi, ktore
-      wiersze naprawde sie zmienily, i tylko one przechodza przez
-      magistrale. Czytanie bufora karty z powrotem kosztowaloby wiecej
-      niz zapisy, ktore by oszczedzilo - stad kopia, a nie porownanie z
-      ekranem.
-
-      Zmierzone, nie oszacowane: komenda 'ekran' pokazuje ile wierszy
-      poszlo w ostatniej klatce. Bezczynny pulpit: ZERO. Z tykajacym
-      zegarem na pasku: szesc wierszy. Test tego pilnuje.
-
-      I blad, ktory ta optymalizacja przyniosla - bo przyniosla.
-      Konsola na buforze obrazu (fbcon) trzyma adres bufora WIDOCZNEGO
-      i pisze prosto na niego, nie wiedzac nic o buforze roboczym
-      kompozytora. Dopoki cala klatka szla na ekran, nie mialo to
-      znaczenia: nastepna klatka i tak zakrywala napis. Z porownaniem
-      wierszy - ma. Kompozytor rysowal wlasciwa rzecz, porownywal ja z
-      kopia, ktora juz sie zgadzala, i nie wysylal nic; napis z jadra
-      zostawal na ekranie na zawsze. Wysypala sie na tym grupa
-      'gterm64', bo jej OCR czytal te resztki jako tresc okna.
-
-      Naprawa jest tam, gdzie problem: kazdy, kto pisze po widocznym
-      buforze za plecami video.c, mowi to przez video_front_touched(),
-      a nastepna klatka idzie caloscia. Pierwsze podejscie wlozylem w
-      video_console_cell() i bylo bezuzyteczne - vga.c wola fbcon_cell
-      bezposrednio, z pominieciem tamtej funkcji. Wiec haczyk siedzi w
-      samym fbcon.c.
-
-      Grupa 'iso' pyta o to wprost: pulpit stoi na buforze od loadera,
-      z shella jadra leci komenda 'mem', i po niej tla ma byc tyle
-      samo, co przed. To jest asercja, ktora bez tego bledu przechodzi,
-      a z nim nie.
-
-      Czego to nadal nie daje: to jest bufor ramki bez GPU. Zadnego
-      przyspieszania, tryb ustawia za nas GRUB albo UEFI, jeden monitor.
-      Sterownik karty to projekt wielkosci calego dotychczasowego
-      systemu i nie tam bym szedl.
-
-      Nowa grupa 'kolory' liczy to, czego nie da sie podrobic: pulpit
-      rysowany indeksami ma 29 roznych kolorow na calym ekranie, a
-      wpuszczony w okno gradient JPEG - 3031, i rosnie w prawo czerwienia
-      i w dol zielenia, wiec to nie jest "duzo kolorow" tylko "wlasciwe
-      kolory".
-
-- [x] **Laptop: touchpad, kolko i rozdzielczosc wlasna panelu** - bo
-      "najpierw na laptopie bede system testowac".
-
-      **Blad, ktory na laptopie bylby widoczny od pierwszej sekundy.**
-      mouse.c rysowal "M x,y bN" w rogu ekranu przy KAZDYM pakiecie
-      myszy, a pit.c "uptime: Ns" co sekunde. W trybie tekstowym to byla
-      diagnostyka. Pod UEFI trybu tekstowego nie ma - vga_write_at idzie
-      przez fbcon prosto na WIDOCZNY bufor - wiec sterownik myszy malowal
-      po pulpicie, z przerwania, kilkaset razy na sekunde. Widac to bylo
-      na zrzucie jako napisy wiszace nad tapeta bez zadnego okna.
-
-      Naprawa: kompozytor mowi vga_screen_taken(1), gdy bierze ekran, i
-      rog tekstowego ekranu przestaje byc miejscem. Trzy wywolania
-      naraz - mysz, uptime, watki demonstracyjne z kmain.c - i wszystkie
-      i tak pisza do dziennika szeregowego, gdzie diagnostyka nalezy.
-
-      Przy okazji: bez tego kazdy ruch palcem po touchpadzie unieważnial
-      kopie ekranu (bo napis szedl na bufor widoczny), wiec optymalizacja
-      z poprzedniego wpisu przestawala dzialac dokladnie wtedy, gdy jest
-      najbardziej potrzebna.
-
-      **Kolko, czyli dwa palce.** Touchpad na porcie PS/2 to mysz: melduje
-      ruch wzgledny i przyciski dokladnie tak samo, a stukniecie w tafle
-      zamienia na klikniecie jego wlasny firmware. Czego mysz z 1987
-      roku nie miala, a touchpad ma, to kolko - i tak wlasnie zglasza
-      dwa palce sunace po tafli. To jest rozszerzenie IntelliMouse:
-      czwarty bajt, o ktory trzeba poprosic pukaniem, jakiego nikt nie
-      wysle przypadkiem - trzy czestotliwosci probkowania, 200, 100 i
-      80 - po czym urzadzenie mowi, kim jest. Odpowiedz 3 znaczy, ze
-      czwarty bajt jest.
-
-      Znak jest odwrotny, niz sie wydaje: protokol liczy zab KU
-      CZLOWIEKOWI jako dodatni, a cala reszta systemu nazywa dodatnim
-      kierunek OD czlowieka, bo w te strone jedzie dokument. Odwrocenie
-      siedzi w sterowniku, zeby nikt wyzej nie musial o tym pamietac -
-      wyszlo to na tescie, ktory pokazal liste jadaca w zla strone.
-
-      Przy okazji parser pakietow: byl switch z etykieta i skokiem, jest
-      tablica i licznik.
-
-      **WEV_SCROLL idzie do okna POD WSKAZNIKIEM**, nie do tego z fokusem.
-      Tak robi kazdy inny system i to jest wlasciwa strona: patrzy sie na
-      liste i przewija ja, nie robiac jej wpierw oknem od klawiatury.
-      Obsluzyly to gweb, gfiles i gedit.
-
-      W edytorze wyszla rzecz do przemyslenia: draw() wolal
-      scroll_to_caret() co klatke, wiec przewiniecie natychmiast by sie
-      cofalo. Stad follow_caret - kolko puszcza kursor, pierwszy klawisz
-      lapie go z powrotem. Przewijanie dokumentu to patrzenie gdzie
-      indziej, a nie przenoszenie sie tam.
-
-      **Rozdzielczosc: jadro samo sobie ja psulo.** boot/boot.S prosil
-      loader o 1024x768. Prosba w naglowku Multiboot2 WYGRYWA z
-      gfxpayload, wiec panel 1920x1080 dostawal cwiartke siebie. Naglowek
-      64-bitowy mial tam zero ("dowolna") juz od dawna, z komentarzem
-      tlumaczacym dlaczego; 32-bitowy nie mial, i to bylo cale zrodlo
-      malego pulpitu. Zmierzone, nie zgadniete: z prosba - 1024x768, bez
-      prosby - to, co da loader. Tak samo grub.cfg dostal 'insmod
-      all_video' i 'gfxpayload=keep', ktore plyta 64-bitowa miala, a
-      32-bitowa nie.
-
-      **Bufory okien wyszly ze sterty do PMM.** Bufor okna to najwieksza
-      pojedyncza rzecz, jaka ten system alokuje: przy wlasnej
-      rozdzielczosci laptopa zmaksymalizowane okno w kolorach to osiem
-      megabajtow, czyli CALA sterta. Trzymanie najwiekszych i
-      najmniejszych obiektow na jednej liscie pierwszego dopasowania to
-      przepis na fragmentacje. Teraz ida calymi stronami prosto z
-      alokatora ramek, i rozmiar jest kwestia panelu, a nie liczby
-      wpisanej w kod.
-
-      **I rzecz, ktorej nie bylo w planie.** 1920x1080 zadzialalo od
-      razu - i bylo NIECZYTELNE. Cale UI stoi w pikselach bezwzglednych,
-      font ma osiem pikseli, a osiem pikseli na 15-calowym panelu 1080p
-      to poltora milimetra. System poprawny i bezuzyteczny.
-
-      Odpowiedz: kompozytor rysuje we WLASNYM ekranie, logicznym, a na
-      panel idzie ten ekran z kazdym pikselem polozonym jako kwadrat
-      czterech. video_w() i video_h() odpowiadaja w pikselach logicznych
-      - i ani jedna linia rozkladu nigdzie nie musiala sie zmienic.
-      Maszyna, w ktorej kazde okno, ikona i pasek stanu stoja w
-      wspolrzednych bezwzglednych, inaczej wymagalaby przepisania ich
-      wszystkich, a z nimi geometrii w kilkudziesieciu grupach testowych.
-
-      Trzeba powiedziec wprost, co to kosztuje: to jest podwajanie
-      pikseli, nie skalowanie elementow. Litery sa tymi samymi literami
-      8x8, narysowanymi dwa razy wiekszymi - nie ostrzejszymi. Zdjecie
-      na takim ekranie ma polowe szczegolu, ktory panel mogl by uniesc.
-      W zamian: zero zmian wyzej i zero ryzyka.
-
-      Skala jest ustawieniem ('set skala'), a zero znaczy "niech
-      zdecyduje ekran": panel wysoki na 900 pikseli i wiecej dostaje 2,
-      wszystko mniejsze 1 - bo podwojenie 640x480 dalo by pulpit 320
-      pikseli w poprzek, a to nie jest pulpit. Dzieki temu wszystkie
-      dotychczasowe testy zostaja przy skali 1 i nie zmienia sie w nich
-      nic.
-
-      Grupa 'skala' pyta o mechanizm przy skali wymuszonej recznie, i
-      pyta uczciwie: nie tylko czy sasiednie piksele sa rowne w parach
-      (11100 na 11100), ale takze czy ta sama siatka przesunieta o
-      piksel juz sie NIE zgadza (8590 na 11100). Pierwsza liczba bez
-      drugiej nie znaczylaby nic.
-
-- [x] **Mysz USB - i maszyna, ktora nie ma PS/2 w ogole** - druga polowa
-      odpowiedzi na "najpierw na laptopie".
-
-      Wskaznik przychodzil przez kontroler 8042 od pierwszego dnia i na
-      komputerze stacjonarnym dalej tak przychodzi. Laptop z ostatnich
-      lat moze nie miec 8042 wcale: ani klawiatury PS/2, ani touchpada
-      PS/2, bo nie ma tych portow. Jego wskaznik to urzadzenie HID na
-      magistrali USB, i klawiatura tak samo.
-
-      Wiec sterownik myszy obok sterownika klawiatury, ta sama droga -
-      porty, ktore melduje warstwa kontrolera, deskryptor konfiguracji,
-      interfejs klasy HID w wersji rozruchowej - i rozstaja sie na
-      JEDNYM bajcie: protokol interfejsu to 1 dla klawiatury i 2 dla
-      myszy. Raport rozruchowy ma trzy bajty, czasem cztery: przyciski,
-      ruch w X, ruch w Y i - na urzadzeniu z kolkiem - liczba zebow.
-      Bajty ruchu sa ZE ZNAKIEM i trzeba je tak czytac: ruch o minus
-      jeden przychodzi jako 0xFF, a wziety jako 255 rzucilby wskaznik
-      przez caly ekran.
-
-      Wspolne kawalki - budowanie osmiu bajtow zadania i dwa rodzaje
-      transferu sterujacego - wyszly z usbkbd.c do usbhc.c. Siedzialy
-      tam, dopoki klawiatura byla jedynym urzadzeniem; drugie by je
-      skopiowalo, a dwie kopie formatu na drucie to sposob, w jaki
-      formaty sie rozjezdzaja.
-
-      **Pulapka, ktora sam bym zastawil.** Oba sterowniki chodza po tych
-      samych portach i kazdy zatrzymuje sie na pierwszym urzadzeniu,
-      ktore rozpozna - przygladajac sie po drodze wszystkim wczesniejszym.
-      A przygladanie sie znaczy RESET portu. Drugi przebieg wywrocilby
-      klawiature, ktora pierwszy wlasnie uruchomil. Wiec port jest witany
-      raz, a jego uchwyt zapamietany: drugi pytajacy dostaje to samo
-      urzadzenie, a nie urzadzenie wlasnie zresetowane pod wlascicielem.
-
-      Ruch z obu drog konczy sie w mouse_inject(), bo wskaznik na ekranie
-      jest jeden i kompozytor nie ma miedzy czym wybierac. Znak kolka w
-      HID jest juz taki, jakiego uzywa reszta systemu - w odroznieniu od
-      pakietu PS/2, ktory trzeba odwrocic.
-
-      **Dwa bledy po drodze, oba moje, oba zlapane przez testy.**
-
-      Pierwszy: usbhc_init() bezwarunkowo startowal kontroler, a start
-      znaczy RESET. Drugi sterownik, pytajac o kontroler, kasowal slot i
-      punkt koncowy, ktorych pierwszy juz uzywal - i klawiatura USB byla
-      znajdowana, meldowana i cicha. Teraz raz znaleziony kontroler
-      odpowiada od razu.
-
-      Drugi, subtelniejszy: nawet nie resetujac portu, drugi sterownik
-      CZYTAL deskryptory urzadzenia, z ktorym pierwszy juz rozmawial -
-      dwie rozmowy jednym drutem. Stad usbhc_claim(): sterownik, ktory
-      wzial urzadzenie, mowi to, i od tej pory port odpowiada "nic tu
-      nie ma" wszystkim innym.
-
-      Zadnego z nich nie widac w kodzie, ktory sie kompiluje; oba wyszly
-      dopiero z uruchomionej grupy 'usbkbd'. To jest dokladnie ten
-      rodzaj bledu, dla ktorego te testy istnieja.
-
-      Grupa 'usbmysz' pyta o dwie rzeczy, i druga jest ta, ktora sie
-      liczy: ze maszyna znajduje mysz na kontrolerze xHCI i mowi gdzie,
-      oraz ze przy WYLACZONYM 8042 pulpit wstaje, a jego kursor idzie za
-      mysza. Pytanie musi byc zadane w pikselach, nie slowami - bo
-      maszyna bez 8042 nie ma tez klawiatury PS/2, wiec nie ma jak
-      niczego WPISAC. Co poruszylo tym kursorem, przyszlo przez USB, bo
-      innej drogi tam nie ma.
-
-- [x] **Klawiatura milkla, gdy dolaczala mysz - i raport sprzetowy dla
-      pierwszego rozruchu na obcej maszynie.**
-
-      Laptop okazal sie Dellem. Dobra wiadomosc: Dell trzyma wbudowana
-      klawiature na i8042 nawet w nowych modelach. Touchpad to loteria
-      zalezna od rocznika - starsze sa PS/2, nowsze od okolo 2016 siedza
-      na I2C-HID, ktorego nie umiemy. Wiec zamiast zgadywac, ktora to
-      maszyna, trzeba bylo sprawic, zeby SAMA powiedziala.
-
-      **Pierwsze klamstwo do usuniecia.** mouse_init() nigdy nie
-      sprawdzalo, czy cokolwiek jest na porcie pomocniczym: mouse_ack()
-      czytalo bajt i wyrzucalo. Maszyna bez myszy PS/2 wygladala
-      dokladnie jak maszyna z mysza - kazde polecenie "dzialalo",
-      handler przerwania wchodzil, a wskaznik sie nie ruszal i nikt nie
-      mowil dlaczego. Teraz brak potwierdzenia 0xFA konczy sprawe i
-      rozruch mowi to wprost. Tak samo wait_write/wait_read: na maszynie
-      bez 8042 kazdy odczyt portu daje 0xFF, a 0xFF ma ustawiony ten
-      bit - bez sprawdzenia czekalismy pelna liczbe obrotow na kazdy
-      bajt kazdej komendy i nazywali to sukcesem.
-
-      Drugie: raport mowil "klawiatura tak" bez zadnej podstawy. To
-      dokladnie ten sam blad, ktory zarzucilem myszy. Teraz pyta o sam
-      kontroler - maszyna, ktora go nie ma, odpowiada 0xFF na wszystko,
-      i to jest klasyczny i uczciwy test.
-
-      **Komenda 'sprzet'** - napisana pod pierwszy rozruch na sprzecie,
-      ktorego nikt nie probowal. Ekran (skad bufor, jaka skala), porty
-      PS/2, co znalazlo sie na USB, i spis urzadzen PCI. Ten ostatni
-      jest tam po cos: touchpad, ktorego nie ma na PS/2, siedzi zwykle
-      na kontrolerze I2C, a kontroler I2C jest urzadzeniem klasy
-      magistrali szeregowej widocznym w tym spisie. Nie umiemy tej
-      magistrali - ale moc POWIEDZIEC, ze to ona, to roznica miedzy
-      zagadka a znana luka.
-
-      **I blad, ktory ta praca odslonila - w sterowniku xHCI.** Byl
-      napisany dla dokladnie jednego urzadzenia i nikt tego nie
-      zauwazyl, bo do dzis bylo jedno. Jeden bufor na caly kontroler:
-      dwa urzadzenia maja dwa odczyty w locie naraz, wiec raport jednego
-      lada w miejscu, z ktorego drugi wlasnie czyta. I jeden pierscien
-      zdarzen: kto pierwszy zajrzy, widzi CUDZE zakonczenia, a wziecie
-      nie swojego gubi tamten raport na zawsze.
-      Objaw: klawiatura milkla w chwili, gdy do magistrali dolaczala
-      mysz - czyli dokladnie na laptopie z klawiatura i touchpadem po
-      USB.
-
-      Naprawa: bufor na slot, a zdarzenie odkladane pod swoim slotem
-      (numer slotu jest w najstarszym bajcie slowa sterujacego - i tylko
-      dlatego dwa urzadzenia moga w ogole dzielic jeden pierscien).
-
-      Po drodze zepsulem to dwa razy i za kazdym razem powiedzialy o tym
-      testy, nie kompilator. Najpierw sort_events pozeralo zdarzenia
-      ZAKONCZENIA POLECEN, na ktore czekala enumeracja - stad osobna
-      kolejka na to, co nie jest transferem. Potem okazalo sie, ze na
-      slot potrzeba KOLEJKI, a nie jednego miejsca: transfer sterujacy
-      konczy sie dwa razy, raz dla danych i raz dla statusu, a przy
-      jednym miejscu drugie nadpisywalo pierwsze i wywolujacy czekal w
-      nieskonczonosc na cos, co juz mu powiedziano. Za trzecim razem
-      cofnalem sie do stanu z commita, potwierdzilem, ze dziala, i
-      dopiero wtedy zrobilem to raz a porzadnie.
-
-- [x] **Dysk, ktory nie jest nasz, nie jest nasz do wziecia** - i to jest
-      wpis, ktory powinien byl powstac dawno temu.
-
-      Pytanie brzmialo "a jakis instalator do tego systemu". Zaczalem od
-      sprawdzenia, czym instalator w ogole moglby tu byc, i po drodze
-      trafilem na to:
+      On the way, two holes in the test harness itself, both of the same kind:
+      QEMU does not know the key 'T' or '#'. A capital letter is shift plus the
+      letter, and '#' is shift plus three; without that, typed text quietly
+      lost characters, and it showed only as "erminal" instead of "Terminal"
+      in a file the test had written itself.
+
+- [x] **Alt+F4 and a right-button menu**: two gestures everyone knows that
+      this desktop did not have.
+
+      The keys had been in place for a long time: Alt with a function key
+      switched text consoles. But on the desktop there is nothing to switch
+      (the screen is one), so those presses went nowhere. Now, when someone has
+      taken over the keyboard (and on the desktop the compositor does), the
+      same keys go to it, and F4 means what it has meant everywhere for thirty
+      years.
+
+      It closes EXACTLY like the [x] in the window's corner: the program gets
+      the question and ends on its own, with its own exit code. Pulling the
+      window out from under a running process would be different from what the
+      mouse does, and one gesture and the other should do the same thing;
+      otherwise there are two things to remember instead of one.
+
+      The right button on the empty desktop opens the menu where the cursor
+      is. It is the same list as under the "Menu" button in the corner,
+      because a second list would be a second thing to learn; it just comes to
+      the hand instead of sending the hand to the corner. The menu does not go
+      past the edge of the screen or onto the taskbar: when clicked in a corner
+      it slides left and up. On a window the right button opens nothing (a
+      window's own menu is the window's business, and none has one) and closes
+      the one that was open.
+
+      The key path is not shared (long mode has its own keyboard driver), so
+      Alt+F4 had to be passed through it separately. A new group, `winkeys`,
+      checks both kernels: that a program closed with Alt+F4 ends ON ITS OWN
+      with code zero (so it was asked), that the window disappears from the
+      screen and from the taskbar, that the menu stands under the cursor and
+      not above the "Menu" button, that the item under the cursor lights up,
+      that a program chosen from it really runs (the clock draws digits, not
+      just an empty window), and that at the edge the menu fits.
+
+- [x] **A window snapped to an edge**, i.e. two windows side by side in one
+      move.
+
+      Two windows side by side used to mean two drags and two corner pulls, by
+      eye, and the eye is bad at halves. Now a window pushed to the left edge
+      takes the left half, to the right edge the right half, and to the top the
+      whole screen. There is nothing to learn: the window goes where it was
+      pushed.
+
+      While the button is held, the place the window WILL take is drawn as an
+      outline in the accent colour. A window that jumps somewhere else without
+      warning when released is a window that escaped; the outline is a
+      question, and releasing the button is the answer.
+
+      The decision is made from the WINDOW's position, not the cursor's. The
+      cursor can already be at the very edge while the window has not reached
+      it (a dragged window never goes off the screen), and a person aims with
+      the window. The cursor only says which edge was meant; otherwise a window
+      wide enough to touch both would snap wherever it was dropped. Corners
+      give a half, not the whole screen: two windows side by side is what one
+      aims there for, and the whole screen is one button away anyway.
+
+      The size from before the snap is remembered the same way as with
+      maximising, so the [] button gives the window back its own size; a window
+      kept on half the screen has lost its size no more than a maximised one.
+
+      A new group, `snap`, checks that there is no outline in the middle of the
+      screen, that there is one at the edge and it ends above the taskbar, that
+      the window really takes half (grey on one side, desktop on the other),
+      that the program redraws at the new size, that [] gives back its own
+      width (360, not 320 or 640) and, finally, what all of it is for: a
+      terminal on the left half, the settings on the right, the border exactly
+      in the middle.
+
+- [x] **Four virtual desktops**: the oldest answer to a screen that has run
+      out of room.
+
+      Instead of a dozen windows in one pile, four small piles to switch
+      between. Switching costs nothing: nothing is drawn, moved or resized. The
+      whole thing is one question, here(i), asked by everything that draws a
+      window, counts windows or looks for the window under the cursor. A window
+      on another desktop is not HIDDEN; it is simply not here. It runs and
+      draws into its buffer as before.
+
+      Ctrl+Alt and an arrow changes the desktop; the arrow shows where one is
+      going. With Shift the focused window comes along, because a window left
+      behind is a window searched for. We follow it instead of pushing it out
+      of sight and staying.
+
+      Which desktop is visible is shown at the right end of the top bar: one
+      cell per desktop, the visible one in the accent colour, empty ones in a
+      dimmed grey. "Where am I" and "is there anything there" are one glance,
+      not two. A cell is also a button.
+
+      What ends on a switch: dragging a window, dragging an icon, resizing and
+      an open menu. A drag that survived a switch would drop the window on a
+      desktop nobody is looking at.
+
+      On the way, one thing only the full suite caught: a cell on the top bar
+      lies exactly where a window maximised to the full screen has its buttons.
+      The bar is drawn UNDER the windows, so it has to take clicks under them
+      too; otherwise the [] of a maximised window switched the desktop. One
+      question, window_at(x,y), asked from the top of the stack down, now
+      answers both the bar and the right mouse button.
+
+      A new group, `desks` (19 assertions), checks the cells on the bar, that a
+      window disappears from the screen AND from the taskbar after moving next
+      door, that a new window opens where one is looking, that a click on a
+      cell moves there, that Shift takes the window along, and most
+      importantly: that a clock left on an invisible desktop shows, on return,
+      a time later by as much as we were away. A program nobody looks at keeps
+      running.
+
+- [x] **A text editor in a window**, because a system that can make a file
+      but cannot CHANGE it is a machine for storing text, not for working.
+
+      Everything that made a file so far (`write` from the shell, `echo` with
+      `>`) was one line typed at a prompt, and a line typed at a prompt cannot
+      go back to what it said a moment ago.
+
+      So: a white page, black text, a cursor wherever the arrows or the mouse
+      put it, Enter splitting a line and Backspace joining two (the only way
+      back after Enter pressed by mistake), Ctrl+S and Ctrl+O. The clipboard is
+      the same as the rest of the desktop's: Ctrl+Insert copies the line with
+      the cursor, Shift+Insert inserts at the cursor, so text moves between the
+      editor and the terminal although neither knows about the other.
+
+      The status bar at the bottom is the whole interface: the file name, an
+      asterisk when it has changed, the line and column, and, when the editor
+      needs a name, a question asked in the same bar. A dialog box would be a
+      second window to move, focus and close, for one line of text.
+
+      Two new key codes: Ctrl+S and Ctrl+O. Other Ctrl+letter combinations
+      arrive as the bare letter (that is what the shell wants), but a program
+      that writes files has to tell "save" from "s". The kernel knows nothing
+      more than that the keys were pressed; what to do with them is the
+      program's business.
+
+      The cursor is a hairline BETWEEN characters, not a block and not a bar in
+      a cell: both of those cover exactly what a person looks at while typing.
+      The test caught that at once: it read the text from the screen with a
+      character missing, because the cursor ate a letter's column.
+
+      A new group, `gedit` (19 assertions, both kernels), reads the text and the
+      status bar from the screen and then goes outside the editor: the kernel
+      shell does `cat` on the saved file, and in 64-bit mode (where the kernel
+      shell cannot be typed at from the desktop) the terminal does it through
+      `ucat64`. One program wrote it, another read it.
+- [x] **The editor takes a file, and the file manager has a way to hand it
+      one**, and the two kernels do the same again.
+
+      `gedit note` opens the file at once. Making a person type the name a
+      second time, in a program they have just told which file they mean, is
+      exactly how an editor turns into a chore.
+
+      The file manager got an "Edit" button, because what IS a file manager for
+      if not for getting to a file, and getting to a text file means opening it
+      in the editor. In protected mode that is one sys_spawn call with a ready
+      command line, in long mode fork and exec, since there is no spawn there:
+      two sources, because the file manager had separate ones, but the same
+      button in the same corner.
+
+      On the way, a hole the editor's test found: in 64-bit mode the desktop
+      had nobody to give a key no window wanted. keyboard_console_handler()
+      returned NULL, so a screen full of windows was a screen on which nothing
+      could be typed into the kernel shell, while in protected mode it had
+      always worked. Now the key goes to the queue of the console being viewed,
+      which is where the shell reads from. The `desktop64` group checks this
+      with one `uptime` typed with windows on the screen.
+
+      The `gedit` group grew to 24 assertions and ends the same way on both
+      sides: the file manager sees the file the editor saved, and hands it back
+      to the editor.
+
+- [x] **A program can refuse to close**, because closing was always a
+      REQUEST; there was just no way to answer "not yet".
+
+      The countdown after the request was there from the start, for programs
+      that do not answer. The second answer was missing: a program that HEARD
+      and has a reason to stay. An editor with an unsaved file is the whole
+      example.
+
+      A new system call, win_keep(window): "I heard, I am not closing yet". The
+      desktop stops counting down, and what the program does with the moment it
+      asked for (asks in its own window, saves the file) is its business.
+      Silence still costs the window: a program that does not answer loses it
+      after two seconds.
+
+      On the way, the focus: the close request took it away from the window
+      being asked. Since a program can refuse, a second Alt+F4 has to be able to
+      reach it, so the focus stays with the window as long as the window does,
+      and is let go during cleanup.
+
+      The editor refuses once: the first Alt+F4 turns into a question in the
+      status bar, the second is the answer to it. Saving the file clears both
+      the asterisk and the memory of the question.
+
+      The `gedit` group now has 30 assertions and checks both sides: that the
+      window still stands five seconds after the refusal (the countdown really
+      stopped, not just slowed down), that the second Alt+F4 removes the button
+      from the taskbar, and that the program ends ON ITS OWN with code zero
+      rather than being killed. The same in long mode, where the call has its
+      own number and its own handler.
+
+      And one lesson about the test itself: the mouse cursor is as white as the
+      editor's page. A probe left under the cursor said "the window is still
+      there" about a window that was gone.
+
+- [x] **Every core gets its own scheduler cache line**, and a lesson about
+      what a test really guards.
+
+      The `kthreads` group started failing after SIX LINES were added to the
+      compositor, code that does not even run in this test (it runs in text
+      mode). Four kernel threads that used to finish in 45 ticks needed 508. A
+      bisection over my own changes pointed at a culprit that could not be the
+      culprit, and that was exactly the clue.
+
+      The `running` and `idle` pointers of every core lie in the cores[] array.
+      Eight bytes per core, four cores, all in ONE cache line. Every task switch
+      is a write to that line, so with four cores the line travels between them
+      instead of work getting done. How much that costs depends on where the
+      line boundary happens to fall, and that changes whenever anything in the
+      kernel grows. Hence a test that fails because of a change in a completely
+      different file.
+
+      Sixty-four bytes per core is the cheapest thing this kernel buys. The
+      scheduler lock gets its own line for the same reason. After the fix:
+      45 ticks, whatever grows elsewhere.
+
+      The test was not too sensitive. It measured exactly what it was meant to
+      measure, whether work runs in parallel, and told the truth about a machine
+      that had stopped running in parallel. The threshold stayed where it was.
+
+- [x] **A task manager in a window**, because `ps` prints, and a program
+      cannot read printing.
+
+      A list one has to type a command to get is a list nobody looks at. A
+      machine with a dozen windows needs one place that says what is running,
+      and, when a program has stopped answering, a way to end it other than
+      restarting the machine.
+
+      A new call, sys_ps(index, buffer): one row of the task list per call,
+      indexed from zero, -1 when there is nothing there, exactly the way a
+      directory is read. The order is the order of the list, so the list the
+      program shows is one refresh behind, as in every task manager in the
+      world.
+
+      The window: a row per task, refreshed twice a second, a click selects, a
+      button ends it. Two things it will not do: it will not end a kernel thread
+      (those share kernel memory, so taking one takes a piece of the machine)
+      and it will not end ITSELF; a task manager that disappears when clicked is
+      a joke, not a tool. Both cases say why instead of doing nothing.
+
+      What tells a program from a kernel thread: its own address space, not a
+      heap. Both have heaps; the first version showed everything as "program",
+      and the test caught it at once.
+
+      A new group, `gtasks` (22 assertions, both kernels), checks that the list
+      is ALIVE: a program started while the window is open appears on it by
+      itself, and one ended with the button disappears both from the list and
+      from the taskbar. And both refusals.
+
+      On the way the test had to move the task manager's window out of the
+      cascade's way, because every new window opens one step further and landed
+      over the list being read. A person would move it; the test does too.
+
+- [x] **A load meter on the top bar**: how much of the machine is busy, at a
+      glance.
+
+      A number says "4128 KiB", i.e. it is something to READ. A bar filled a
+      third of the way is something to SEE, and the exact numbers (how much
+      memory, out of how much, and how many tasks are behind it) are one hover
+      away, so the bar stays quiet until asked.
+
+      The place: the top bar, next to the desktop switcher. That is where what
+      is ALWAYS true lives: which desktop is visible and how much of the machine
+      is in use. The taskbar at the bottom is for windows; a meter there would be
+      one more thing squeezing the buttons (and, as the first version showed, one
+      more thing the tests count as a button).
+
+      The fill is drawn INSIDE the frame. Drawn over it, a reading of a few
+      percent is one column wide, exactly the one the frame covers, so the meter
+      would show nothing until the machine was half full.
+
+      The tooltip can now appear where the thing it explains is: until now it
+      always came out above the taskbar, and a tooltip at the other end of the
+      screen from the thing it is about is a puzzle.
+
+      The task count: task_count() in both kernels; the 64-bit one had it for a
+      long time, the 32-bit one got it now.
+
+- [x] **A window says what it has open**, because three windows called
+      "Editor" are three windows to check one after another.
+
+      A new call, win_title(window, text): a program renames its own window.
+      The title bar and the taskbar tooltip read the same field, so one call
+      takes care of both.
+
+      The editor now says "Editor: note", after loading and after saving,
+      because only then does the file have a name. The terminal says
+      "Terminal: /dir", and does it where it builds the prompt anyway: the
+      directory changes with one `cd`, and the prompt and the title should say
+      the same thing.
+
+      Two kernels, two call numbers, one function in the compositor.
+
+- [x] **A double click and "show desktop"**: two reflexes a person tries in the
+      first minute.
+
+      Two clicks on the same title bar, close together in time, are one gesture:
+      to the full screen or back. "Close together" is twenty frames, i.e. about
+      six tenths of a second at thirty-three frames a second, the value every
+      system settles on. Shorter and the hand misses on a busy machine; longer
+      and two separate clicks (which is how a window is raised) start to count as
+      one gesture. The first version had twelve frames and could not be hit.
+
+      The "show desktop" button on the top bar hides all windows, and a second
+      click brings back EXACTLY the ones it hid. That is the whole thing: a
+      button that only hides costs the window layout, and nobody presses it a
+      second time. A window minimised by hand stays minimised, because that was
+      somebody's decision.
+
+- [x] **The file manager rewritten**, and one source instead of two.
+
+      What was there listed eight names in a window the size of a postage stamp
+      and showed the first hundred bytes of one of them. That proved the path
+      "disk -> click -> read -> drawing"; it was not a file manager. A file
+      manager is where a person GOES to find a file: it says how big things are,
+      it walks into directories and back out of them, it hands a file to the
+      program that opens it, and it throws one away when asked twice.
+
+      So: a list with sizes, directories marked and walkable (Enter or "Open"
+      goes in, Backspace goes up), the directory's name in the window title,
+      PgUp/PgDn scrolls, and a counter in the corner says which part of the list
+      is visible; a list that scrolls without a word looks like one that has lost
+      something.
+
+      "Remove" asks. A file manager that throws a file away on one click is a
+      file manager a person is afraid of, and the second click is an answer, not
+      a repetition. It does not remove directories at all.
+
+      The content preview went, because showing content is the editor's job, and
+      "Open" hands it the file. Two assertions in old tests talked about the
+      preview; they were rewritten for what the program does now: a click selects
+      a row, and the selection shows in the accent colour.
+
+      And most importantly: ONE source for both kernels. They were separate
+      because of one thing: reading a directory, which in protected mode returns
+      the size as the result and in long mode fills a structure. That one
+      difference is now ten lines under #ifdef, and the rest (the list, the
+      clicks, the drawing) is shared. user64/gfiles64.c was removed.
+
+- [x] **One click, one action**, and buttons that hold the edge.
+
+      Screenshots caught a bug no test saw: clicking "Open" in the file manager
+      started the editor TWICE. A window gets both WEV_PRESS and WEV_CLICK (the
+      same fingers, two events), and the programs listened to both. Now the click
+      is what they listen to, and press and release stay where they are needed:
+      for dragging.
+
+      The second screenshot (a window maximised to the full screen) showed buttons
+      nailed to a number: "End" stood in the middle of a full-screen window and
+      looked like a mistake. Buttons are now placed from the right edge.
+
+      Both things are obvious in a picture at once, and in a test only if someone
+      checked how many windows opened.
+
+- [x] **Ctrl+F in the editor and Tab in the terminal**: two keys without which
+      typing is slow.
+
+      Ctrl+F asks in the status bar, searches from just AFTER the cursor and wraps
+      around the end of the file, back to where it started; a search that stops at
+      the bottom has to be thought about, and thinking about searching is not
+      searching. Enter on an empty question repeats the last one, because the first
+      hit is rarely the one that was meant. It says on which line it found it, or
+      that it did not.
+
+      Tab in the terminal completes the word under the cursor with what is on the
+      disk. One match completes the word; several push it as far as they agree and
+      list the candidates (going further would be guessing which one); none does
+      nothing, because that is the only honest answer. It takes the names from the
+      working directory, i.e. from where the shell takes them, so what gets
+      completed is what would run anyway. While a program runs, the line belongs
+      to it and Tab is a tab.
+
+      A third key code for the kernel: Ctrl+F. The kernel still knows only that
+      the keys were pressed.
+- [x] **Ctrl+Z in the editor**, because an editor without undo is an editor
+      one types in carefully, and careful typing is slower than typing and
+      fixing.
+
+      What is remembered is not the FILE but the CHANGES: a character inserted,
+      a character deleted, a line split, two lines joined. Each of those four has
+      an obvious opposite, and doing the opposites in reverse order is the whole
+      of undo. A hundred and twenty steps back cost two kilobytes; two hundred
+      copies of the file would cost four megabytes.
+
+      The oldest step drops out when the log fills up. Whoever has written a
+      hundred and twenty things since that mistake is no longer looking for it.
+
+      On the way, the two line operations, split and join, were written once, as
+      split_at() and join_at(): both the keys and undo use them, only in
+      opposite directions. Before, the same work was written into Enter and into
+      Backspace separately.
+
+- [x] **The task structure on its own cache line, and a hidden bug this
+      uncovered.**
+
+      The `kthreads` group started failing again, this time on the 64-bit side:
+      four kernel threads took 320 ticks instead of 42. A bisection over commits
+      pointed at an unbelievable culprit: FOUR LINES ADDED TO THE KEYBOARD MAP
+      (Ctrl+F and Ctrl+Z). Code this test does not even call.
+
+      Task structures live on the heap, and the heap aligns to eight bytes. The
+      first words of the structure (the stack pointer and the state) are written
+      on EVERY task switch, by the core running that task. Two structures in one
+      cache line are two cores writing to one line, and then the line travels
+      between them instead of work getting done. Whether that happens depends on
+      how the heap blocks happened to be laid out, i.e. on the size of code that
+      has nothing to do with it.
+
+      A task now gets a line to itself: we ask for one line more and move up to
+      the boundary ourselves, remembering the address to free.
+
+      On the way, a first attempt ("every heap block on its own line") broke the
+      xHCI driver. And just as well, because it revealed a bug older than
+      everything: when creating a task, only the START and END in the file
+      mapping table were cleared, not the `blocks` pointer. Releasing a mapping
+      therefore handed the heap a pointer that was garbage from a previous life
+      of that memory. It was waiting for a heap that would hand out a block with
+      the right garbage in it, and it got one.
+
+      The heap now has a guard: a pointer without a sensible header in front of
+      it is not freed but reported. The crash was in kfree and the bug somewhere
+      else entirely, and that is exactly the kind of crash worth talking about
+      loudly.
+
+- [x] **Tests caught up: eight features get a net**, because it was a net that
+      caught a months-old bug in the file mappings.
+
+      Two new groups and three extended:
+
+      `sysbar` (15 assertions): the top bar. The meter shows that something is
+      in use and that not everything is; the tooltip gives numbers that hang
+      together (used <= total, percent <= 100); and most importantly, those
+      numbers are ALIVE: a program started between two looks has to show up in
+      the task count. "Show desktop" hides the windows without closing them (the
+      buttons stay on the taskbar), and a second click brings back exactly the
+      ones it hid; a window minimised by hand stays minimised.
+
+      `files` (18 assertions): the file manager. The size is checked on a file
+      whose length the test knows, because a column of numbers from nowhere
+      proves nothing. Deleting is checked in both halves: the first click only
+      asks (and the file is still there), the second deletes, which the kernel
+      shell confirms by no longer being able to read the file. It does not remove
+      a directory at all. The window's name says which directory we are in, and
+      changes on entering one.
+
+      `winkeys` (+4): a double click on the title bar to the full screen and
+      back. `gedit` (+9): Ctrl+F finds a word ABOVE the cursor, so it really
+      wraps around the end of the file; Enter on an empty question repeats;
+      Ctrl+Z undoes one character at a time; the window carries the file's name.
+      `gterm` (+4): Tab completes a name, with several matches it lists the
+      candidates and adds only what they share; the window says which directory
+      it is in.
+
+      Two things fixed on the way, both found by writing the test: the meter's
+      tooltip hid UNDER THE CURSOR (the arrow is drawn on top of it), so it now
+      comes out to the left of what it explains; and the word "directory" in the
+      file manager was aligned differently from the size column; two columns
+      ending in different places read as two columns.
+
+- [x] **Renaming in the filesystem**, because until now moving four megabytes
+      meant reading and writing four megabytes to change sixty-four bytes of a
+      directory entry.
+
+      fs_rename(): the file's blocks do not move, only the entry that names them
+      changes, and when the paths point at different directories, the parent
+      too. The rules are the ones every filesystem has: the source must exist,
+      the target's directory must exist, the target name must be free (a rename
+      is not a way to delete something by accident), and a directory cannot be
+      moved into itself or below itself; that would cut a piece of the tree off
+      from the root and leave it pointing in a circle.
+
+      On top of that: a system call on both sides (system files are protected
+      from BOTH sides: renaming a system file is as good as deleting it, and
+      renaming something TO its name plants a foreign file where the system looks
+      for its own), an `mv` command in the kernel shell, and an `mv` program that
+      now tries the cheap way first and leaves copying as a second attempt,
+      because "mv onto an existing file" is something people do.
+
+      The file manager got a "Rename" button: it asks for the new name in the
+      same bar where it says everything else. A dialog box would be a second
+      window to move, focus and close, for one word.
+
+      Tests: `pfs` got renaming and both refusals (the name is taken, the source
+      does not exist), `files` asks and renames, and `gedit` does the same on the
+      64-bit kernel, where the call has its own number and its own handler.
+
+- [x] **A screenshot and an image viewer**: a machine that can photograph
+      itself and look at the photo on its own.
+
+      Print Screen saves the screen in the machine's own terms: four bytes
+      "PSCR", the width, the height, the whole palette (256 colours of three
+      bytes, so that the file says what its numbers mean) and one byte per pixel,
+      a palette index. It is exactly what the compositor drew, so the viewer has
+      nothing to interpret: it puts the bytes back into a window, and they are the
+      same colours again.
+
+      Reading the screen back: in eight-bit modes the buffer ALREADY holds
+      indices, and it is a copy; in 24- and 32-bit modes it holds colours, and
+      the way back is a search in the palette, exact, because everything on this
+      screen was drawn from that palette. The search would be 256 comparisons per
+      pixel done honestly every time; the screen consists of runs of one colour,
+      so the last answer is remembered and is nearly always right again.
+
+      A new call, win_blit(): a block of pixels straight into a window's content.
+      Everything a program could draw so far was a rectangle of one colour or a
+      line of text, and an image is neither; drawing it a rectangle per pixel
+      would be three hundred thousand system calls per screenshot.
+
+      The viewer shows every second (or third) pixel, because the whole screen
+      does not fit into a window on the same screen. Nearest neighbour, because
+      the point is to SEE what was on the screen, and a blurred half of a screen
+      full of eight-pixel letters would show less, not more. Nothing is kept after
+      loading: the window's content IS the copy.
+
+      The file manager hands ".psc" to the viewer and everything else to the
+      editor, by name, because looking inside would mean reading every file in
+      the directory to draw a list.
+
+      A new group, `screenshot` (9 assertions), checks that the file has exactly
+      as many bytes as the screen plus the palette, and, more importantly, that
+      the image in the window REALLY is the screen: an orange icon is found in the
+      window in the same place and in the amount that showing every second pixel
+      implies. No accident produces a number like that.
+
+- [x] **An image from outside: BMP, and colours the screen does not have**,
+      because the question "what about JPG, PNG and BMP" is hard not in the
+      formats but in the colour.
+
+      This screen is eight-bit with a palette: a window's content is indices,
+      not colours. A .psc file works effortlessly because it IS the compositor's
+      bytes. Every image from outside is RGB and has to be quantised to what the
+      machine has: the desktop's thirty-six colours plus a hundred and ninety-two
+      slots left by the wallpaper. A drawing comes out well, a photo comes out
+      like a photo seen through thirty-six crayons, and that is what an eight-bit
+      screen is, not a defect.
+
+      So first the foundation: sys_palette() hands a program the whole palette,
+      because without knowing what the indices mean no format makes sense.
+      Searching for the nearest colour would be 256 comparisons per pixel, so the
+      answer is remembered per colour rounded to five bits per channel: at most
+      thirty-two thousand searches, and an image rarely uses a tenth of that.
+
+      BMP: uncompressed, 24 bits or 8 with its own palette, rows padded to four
+      bytes and, unless the height is negative, counted from the BOTTOM.
+
+      How is such a file supposed to get here? There is no floppy and no sharing
+      with the host, but there is a network: `httpget` downloads a file to the
+      disk and the viewer shows it. That is how the test checks it too: the
+      harness's server serves a BMP with four quarters in red, green, blue and
+      white, because the palette has those four colours EXACTLY. A decoder that
+      works shows exactly them, and a decoder that merely draws something shows
+      something else.
+
+      Next in line: PNG (inflate is some three hundred lines and will come in
+      handy more than once), then baseline JPEG.
+
+- [x] **PNG: an inflate of our own, chunks and five filters**: the second of
+      the three formats from "what about JPG, PNG and BMP".
+
+      PNG is three things in one coat: chunks, a deflate stream and one filter
+      byte per row. Chunks are easy (a length, a name, the bytes, a checksum one
+      does not need to look at, because the deflate stream will not come
+      together anyway if the bytes are wrong).
+
+      Deflate went into a separate file (user/uinflate.h), because it will come
+      in handy more than once: three kinds of block (stored, with fixed trees,
+      with trees written in the block itself, described by a third tree), and
+      then a stream of symbols, where a symbol below 256 is a byte, 256 ends the
+      block, and above that means "copy N bytes from D back", which is all of
+      compression. Copying byte by byte is deliberate: a copy can overlap
+      itself, because "three bytes from one back" means the same byte three
+      times.
+
+      Huffman decoding by plainly walking the bits, without a lookup table:
+      thirty lines instead of a hundred and fifty, and the image loads in a
+      moment anyway. Checked on the host against the real zlib, at four
+      compression levels, including zero, which produces stored blocks.
+
+      Filters are where decoders usually fail, so the image in the test has
+      EVERY one of the five in turn (none, sub, up, average, paeth). An image with
+      only zero filters says nothing about the other four.
+
+      Interlaced PNG (Adam7) I cannot do, and I say so plainly instead of drawing
+      a quarter of the image: an image shown wrong is worse than an image not
+      shown.
+
+      More patience in `proccores` (four readings instead of two, the best one
+      counts) at the same threshold: the suite has heavier and heavier
+      neighbours, and measuring parallelism on a host without a free core
+      measures the host.
+
+- [x] **Baseline JPEG: Huffman, the cosine and colour from half resolution**:
+      the third and last of the formats from "what about JPG, PNG and BMP".
+
+      BMP was reading bytes, PNG was unpacking a stream. JPEG is something else:
+      the image IS NOT in this file. There are cosine transform coefficients,
+      packed with Huffman and divided by quantisation tables, and the image has to
+      be computed from them.
+
+      In order: bits (with byte stuffing undone: 0xFF in the data is written as
+      0xFF 0x00 so it does not pose as a marker), Huffman over the canonical
+      tables from the header (mincode/maxcode/valptr, no tree: codes of the same
+      length lie next to each other, so a comparison is enough), the zigzag back
+      into an 8x8 square, multiplying by the quantisation table, and the inverse
+      cosine.
+
+      The cosine in fixed point, twelve fractional bits, and separated: eight
+      columns, then eight rows. Separating it is the only reason it computes in
+      reasonable time; done directly it would be 64 multiplications per pixel
+      instead of sixteen.
+
+      And at the end, colour: JPEG keeps luminance at full resolution and colour
+      usually at half in both axes, because the eye does not see it. So the
+      components are kept at their own sizes, a question about a pixel converts
+      the coordinates, and only then does YCbCr go back to RGB.
+
+      Checked against the Go decoder (image/jpeg) on its whole test set: thirteen
+      baseline files (4:4:4, 4:4:0, 4:2:2, 4:2:0, 4:1:1, 4:1:0, with restart
+      markers, greyscale, with 2x2 sampling on the only component, and with
+      colours stored directly as R, G, B). The largest difference per channel: 4
+      levels out of 256, and only on the rounding of the cosine. That is the kind
+      of check a test of one's own cannot replace: a foreign file from a foreign
+      encoder.
+
+      On the way, three real bugs, all found by corrupting a file at random (900
+      damaged versions, under ASan and UBSan): table numbers from the header were
+      not checked (tq=66 reached past the quantisation tables), shifting a
+      negative number left is undefined, and coefficients from a broken file went
+      far enough out of range that the multiplications in the cosine overflowed
+      an int. Hence two limits, on a coefficient and on the result of the first
+      pass, chosen from measurements on real images (the largest coefficient
+      ~1000, the largest intermediate result ~4200) and set ten times higher: they
+      do not touch a correct image, and give a broken one meaningless pixels
+      instead of undefined behaviour.
+
+      On the way, both image decoders (inflate and JPEG) became a permanent part of
+      `make fuzz`, next to certificates, HTML and frames. An image comes from the
+      network exactly like a certificate, and on top of that this input decides
+      HOW MUCH gets written; a one-off check while writing guards nothing later.
+
+      Progressive JPEG I cannot do, and I say so plainly: that is a second decoder,
+      not a variant of the same one. The same goes for CMYK and arithmetic coding.
+
+      The test takes an image from a foreign encoder (Go, quality 90, 4:2:0),
+      written into the harness as bytes, because an encoder of our own would write
+      files for our own decoder, and that is not checking. The same four quarters
+      as with BMP and PNG, read at the centres of the quarters, because a lossy
+      format is allowed to blur the borders. Checked on both kernels: the decoder is
+      one source compiled twice, and in long mode a pointer has a different size
+      and indexing a plane goes through a long.
+- [x] **Colours: no more 256-colour palette where the screen has more**: the
+      answer to "what does it take to have as many colours as modern
+      computers".
+
+      First, what did not need doing: the screen buffer ALREADY was 32-bit.
+      video.c has handled 24 and 32 bits per pixel for a long time, and
+      video_adopt_lfb takes the buffer from GRUB or UEFI, so on real hardware it
+      works. The ceiling was not the hardware but ourselves: everything above
+      video_putpixel spoke in palette indices.
+
+      **The heap.** The first real blocker had nothing to do with colour. A
+      window buffer is one byte per pixel; in colour, four. A 420x300 window
+      grows from 123 KiB to 492 KiB, and the kernel heap had ONE MEGABYTE: two
+      windows and the heap is gone. So the heap is now computed from the
+      detected memory: a sixteenth, between 1 and 8 MiB. A machine with 128 MiB
+      gets 8 MiB, and the 16 MiB machines the swap tests run on get exactly the
+      megabyte they had; we do not take half their memory along the way.
+
+      **An 8-bit palette.** video_set_palette took 6-bit components (0..63), a
+      legacy of the VGA DAC, which takes that many. Now it takes 0..255, and the
+      narrowing stays where it belongs: in one line writing to the DAC. The
+      constants in desktop.c were converted with the exact formula (v<<2)|(v>>4),
+      i.e. the way the palette itself used to convert them; the look did not move
+      by a single level, as the `look`, `wall` and `icons` groups confirmed. That
+      is a change that lifts a ceiling and touches nothing.
+
+      **A second drawing path.** video_putpixel_rgb, video_fill_rect_rgb and
+      video_blit_rgb take 0x00RRGGBB. In 8-bit mode (mode 13h, the fallback) a
+      colour is swapped for the nearest index, remembering the last answer,
+      because an image is made of runs of one colour.
+
+      **A window with a format.** A window is born with indices, because that is
+      how every program on this machine drew, and none had to change. A program
+      that has something to show asks once (win_truecolour) and from then on
+      writes colours through win_blit32. Its own frame (the background, the status
+      bar) still goes through win_rect and win_text in indices, because those calls
+      TRANSLATE an index into a colour for such a window. Thanks to that gimg
+      changed three loops, not the whole file.
+
+      Swapping the buffer under a window is safe not because of a new lock but
+      because of the one already there: the syscall takes the big kernel lock, and
+      the compositor holds it during the whole drawing. The same principle has
+      protected resize_content for a long time.
+
+      An interesting side effect: a window in colour is composed FASTER than one in
+      indices; its pixels are already what the screen buffer wants, so it goes row
+      by row instead of pixel by pixel.
+
+      **gimg.** The nearest() function and the table of 32768 remembered answers are
+      gone. A photo is a photo, not a photo seen through thirty-six crayons. .psc
+      files stay as indices: their bytes ARE indices of this palette, so win_blit
+      puts them back exactly.
+
+      **The wallpaper.** The format got a second shape: "PWL2", the size, three
+      bytes per pixel, no palette. The old "PWAL" is still read. And here one has
+      to be honest: for four of mkwall's five patterns this changes NOTHING; a slope
+      over 120 rows has 120 colours whatever one does. The change pays for itself
+      with a fifth pattern: a blend along both axes where every pixel has its own
+      colour, nineteen thousand of them, which a 192-colour palette cannot carry.
+
+      **gweb got nothing**, and I say so plainly: its HTML parser does not read
+      colours at all; it draws with six constants. Rewriting those six constants as
+      RGB would not change a single pixel. Real colours in the browser mean a CSS
+      parser, which is a different job.
+
+      **Presenting only what changed.** The compositor redraws the whole frame
+      thirty times a second whether anything moved or not, and until now the whole
+      frame went to the card: 1.2 MB at 640x480, 3 MB at 1024x768. Writing to the
+      card's buffer is MUCH more expensive than writing to memory, so a third buffer
+      was added: a copy in RAM of what last went to the screen. Comparing RAM with
+      RAM says which rows really changed, and only those cross the bus. Reading the
+      card's buffer back would cost more than the writes it saved, hence a copy and
+      not a comparison with the screen.
+
+      Measured, not estimated: a command shows how many rows went out in the last
+      frame. An idle desktop: ZERO. With the clock ticking on the bar: six rows. The
+      test guards that.
+
+      And the bug this optimisation brought, because it did bring one. The
+      framebuffer console (fbcon) keeps the address of the VISIBLE buffer and writes
+      straight to it, knowing nothing about the compositor's working buffer. As long
+      as the whole frame went to the screen, it did not matter: the next frame
+      covered the text anyway. With row comparison it does. The compositor drew the
+      right thing, compared it with a copy that already matched, and sent nothing;
+      the kernel's text stayed on the screen forever. The `gterm64` group fell over
+      on it, because its OCR read those leftovers as the window's content.
+
+      The fix is where the problem is: whoever writes to the visible buffer behind
+      video.c's back says so through video_front_touched(), and the next frame goes
+      out whole. My first attempt put that in video_console_cell() and it was
+      useless: vga.c calls fbcon_cell directly, bypassing that function. So the hook
+      sits in fbcon.c itself.
+
+      The `iso` group asks about it directly: the desktop stands on the loader's
+      buffer, the kernel shell runs `mem`, and afterwards there has to be as much
+      background as before. That is an assertion that passes without the bug and
+      fails with it.
+
+      What this still does not give: it is a framebuffer without a GPU. No
+      acceleration, the mode is set for us by GRUB or UEFI, one monitor. A graphics
+      card driver is a project the size of the whole system so far, and not where I
+      would go.
+
+      A new group, `colours`, counts what cannot be faked: the desktop drawn in
+      indices has 29 different colours on the whole screen, and a JPEG gradient
+      shown in a window has 3031, growing to the right in red and downwards in
+      green, so it is not "many colours" but "the right colours".
+
+- [x] **A laptop: the touchpad, the wheel and the panel's own resolution**,
+      because "I will test the system on a laptop first".
+
+      **A bug that on a laptop would have been visible from the first second.**
+      mouse.c drew "M x,y bN" in the corner of the screen on EVERY mouse packet, and
+      pit.c drew "uptime: Ns" every second. In text mode that was diagnostics. Under
+      UEFI there is no text mode (vga_write_at goes through fbcon straight to the
+      VISIBLE buffer), so the mouse driver painted over the desktop, from an
+      interrupt, several hundred times a second. It showed in a screenshot as text
+      hanging over the wallpaper with no window around it.
+
+      The fix: the compositor says vga_screen_taken(1) when it takes the screen,
+      and the corner of the text screen stops being a place. Three callers at once
+      (the mouse, uptime, the demo threads in kmain.c), and all of them write to the
+      serial log anyway, where diagnostics belong.
+
+      On the way: without this, every finger movement on the touchpad invalidated
+      the screen copy (because the text went to the visible buffer), so the
+      optimisation from the previous entry stopped working exactly when it is most
+      needed.
+
+      **The wheel, i.e. two fingers.** A touchpad on the PS/2 port is a mouse: it
+      reports relative movement and buttons exactly the same way, and its own
+      firmware turns a tap on the pad into a click. What a 1987 mouse did not have
+      and a touchpad does is a wheel, and that is how it reports two fingers sliding
+      on the pad. It is the IntelliMouse extension: a fourth byte that has to be
+      asked for with a knock nobody sends by accident (three sample rates, 200, 100
+      and 80), after which the device says what it is. An answer of 3 means the
+      fourth byte is there.
+
+      The sign is the opposite of what it seems: the protocol counts a notch
+      TOWARDS the person as positive, and the rest of the system calls the direction
+      AWAY from the person positive, because that is the way the document moves. The
+      flip sits in the driver, so that nobody above has to remember it; it showed up
+      in a test that showed a list moving the wrong way.
+
+      On the way, the packet parser: it was a switch with a label and a jump; now it
+      is an array and a counter.
+
+      **WEV_SCROLL goes to the window UNDER THE POINTER**, not to the focused one.
+      Every other system does it that way, and it is the right way: one looks at a
+      list and scrolls it, without first making it the keyboard's window. gweb,
+      gfiles and gedit handle it.
+
+      In the editor something came up to think about: draw() called
+      scroll_to_caret() every frame, so a scroll would be undone at once. Hence
+      follow_caret: the wheel lets go of the cursor, the first key catches it again.
+      Scrolling a document is looking elsewhere, not moving there.
+
+      **The resolution: the kernel spoiled it for itself.** boot/boot.S asked the
+      loader for 1024x768. A request in the Multiboot 2 header WINS over
+      gfxpayload, so a 1920x1080 panel got a quarter of itself. The 64-bit header
+      had zero ("any") there for a long time, with a comment explaining why; the
+      32-bit one did not, and that was the whole source of the small desktop.
+      Measured, not guessed: with the request, 1024x768; without it, whatever the
+      loader gives. Likewise grub.cfg got the `insmod all_video` and
+      `gfxpayload=keep` that the 64-bit disc had and the 32-bit one did not.
+
+      **Window buffers moved off the heap to the PMM.** A window buffer is the
+      largest single thing this system allocates: at a laptop's native resolution a
+      maximised window in colour is eight megabytes, i.e. THE WHOLE heap. Keeping
+      the largest and smallest objects on one first-fit list is a recipe for
+      fragmentation. Now they come in whole pages straight from the frame
+      allocator, and the size is a matter of the panel, not of a number written in
+      the code.
+
+      **And something that was not in the plan.** 1920x1080 worked at once, and was
+      UNREADABLE. The whole UI stands in absolute pixels, the font is eight pixels,
+      and eight pixels on a 15-inch 1080p panel are a millimetre and a half. A system
+      that is correct and useless.
+
+      The answer: the compositor draws on its OWN, logical screen, and that screen
+      goes to the panel with every pixel laid down as a square of four. video_w()
+      and video_h() answer in logical pixels, and not one line of layout anywhere
+      had to change. In a machine where every window, icon and status bar stands in
+      absolute coordinates, anything else would mean rewriting all of them, and with
+      them the geometry in dozens of test groups.
+
+      It has to be said plainly what this costs: it is pixel doubling, not scaling
+      the elements. The letters are the same 8x8 letters drawn twice as large, not
+      sharper. A photo on such a screen has half the detail the panel could carry.
+      In exchange: zero changes above and zero risk.
+
+      The scale is a setting, and zero means "let the screen decide": a panel 900
+      pixels tall or more gets 2, everything smaller 1, because doubling 640x480 would
+      give a desktop 320 pixels across, and that is not a desktop. Thanks to that all
+      existing tests stay at scale 1, and nothing changes in them.
+
+      The `scale` group asks about the mechanism at a scale forced by hand, and asks
+      honestly: not only whether neighbouring pixels are equal in pairs (11100 out of
+      11100), but also whether the same grid shifted by a pixel NO LONGER matches
+      (8590 out of 11100). The first number without the second would mean nothing.
+
+- [x] **A USB mouse, and a machine with no PS/2 at all**: the second half of the
+      answer to "on a laptop first".
+
+      The pointer has come through the 8042 controller since the first day, and on
+      a desktop computer it still does. A laptop from recent years may have no 8042
+      at all: no PS/2 keyboard and no PS/2 touchpad, because it has no such ports.
+      Its pointer is a HID device on the USB bus, and so is its keyboard.
+
+      So a mouse driver next to the keyboard driver, the same path (the ports the
+      controller layer reports, the configuration descriptor, a HID class interface
+      in its boot version), and they part on ONE byte: the interface protocol is 1
+      for a keyboard and 2 for a mouse. The boot report has three bytes, sometimes
+      four: the buttons, movement in X, movement in Y and, on a device with a wheel,
+      the number of notches. The movement bytes are SIGNED and have to be read that
+      way: a movement of minus one arrives as 0xFF, and taken as 255 it would throw
+      the pointer across the whole screen.
+
+      The shared pieces (building the eight bytes of a request and the two kinds of
+      control transfer) moved out of usbkbd.c into usbhc.c. They sat there as long
+      as the keyboard was the only device; a second one would have copied them, and
+      two copies of a wire format are how formats drift apart.
+
+      **A trap I would have set myself.** Both drivers walk the same ports, and each
+      stops at the first device it recognises, looking at all the earlier ones on the
+      way. And looking means RESETTING the port. The second pass would knock over the
+      keyboard the first one had just started. So a port is greeted once and its
+      handle remembered: the second asker gets the same device, not a device just
+      reset under its owner.
+
+      Movement from both paths ends in mouse_inject(), because there is one pointer
+      on the screen and the compositor has nothing to choose between. The wheel's
+      sign in HID is already the one the rest of the system uses, unlike the PS/2
+      packet, which has to be flipped.
+
+      **Two bugs on the way, both mine, both caught by tests.**
+
+      First: usbhc_init() started the controller unconditionally, and starting means
+      a RESET. The second driver, asking for the controller, wiped the slot and
+      endpoint the first one was already using, and the USB keyboard was found,
+      reported and silent. Now a controller found once answers at once.
+
+      Second, subtler: even without resetting the port, the second driver READ the
+      descriptors of a device the first one was already talking to: two
+      conversations over one wire. Hence usbhc_claim(): a driver that took a device
+      says so, and from then on the port answers "nothing here" to everyone else.
+
+      Neither is visible in code that compiles; both came out only from running the
+      `usbkbd` group. That is exactly the kind of bug these tests exist for.
+
+      The `usbmouse` group asks two things, and the second is the one that counts:
+      that the machine finds the mouse on the xHCI controller and says where, and
+      that with the 8042 DISABLED the desktop comes up and its cursor follows the
+      mouse. The question has to be asked in pixels, not words, because a machine
+      without an 8042 has no PS/2 keyboard either, so there is no way to TYPE
+      anything. Whatever moved that cursor came over USB, because there is no other
+      way there.
+- [x] **The keyboard went silent when a mouse joined, and a hardware report for
+      the first boot on someone else's machine.**
+
+      The laptop turned out to be a Dell. The good news: Dell keeps the built-in
+      keyboard on the i8042 even in new models. The touchpad is a lottery that
+      depends on the year: older ones are PS/2, newer ones from around 2016 sit on
+      I2C-HID, which we cannot do. So instead of guessing which machine it is, the
+      machine had to be made to SAY it itself.
+
+      **The first lie to remove.** mouse_init() never checked whether anything was
+      on the auxiliary port at all: mouse_ack() read a byte and threw it away. A
+      machine without a PS/2 mouse looked exactly like one with a mouse: every
+      command "worked", the interrupt handler came in, and the pointer did not move
+      and nobody said why. Now a missing 0xFA acknowledgement ends the matter, and
+      the boot says so plainly. The same with wait_write/wait_read: on a machine
+      without an 8042 every port read gives 0xFF, and 0xFF has that bit set;
+      without a check we waited the full number of spins for every byte of every
+      command and called it success.
+
+      Second: the report said "keyboard yes" without any basis. That is exactly the
+      same mistake I blamed the mouse for. Now it asks about the controller itself:
+      a machine that does not have one answers 0xFF to everything, and that is a
+      classic and honest test.
+
+      **The `hardware` command**, written for the first boot on hardware nobody had
+      tried. The screen (where the buffer came from, what scale), the PS/2 ports,
+      what was found on USB, and a list of PCI devices. That last one is there for a
+      reason: a touchpad that is not on PS/2 usually sits on an I2C controller, and an
+      I2C controller is a serial bus class device visible in that list. We cannot do
+      that bus, but being able to SAY that it is the one is the difference between a
+      puzzle and a known gap.
+
+      **And a bug this work uncovered, in the xHCI driver.** It was written for
+      exactly one device, and nobody noticed, because until today there was one. One
+      buffer for the whole controller: two devices have two reads in flight at once,
+      so one's report lands in the place the other is reading from. And one event
+      ring: whoever looks first sees SOMEBODY ELSE's completions, and taking one that
+      is not yours loses that report forever. The symptom: the keyboard went silent
+      the moment a mouse joined the bus, i.e. exactly on a laptop with a keyboard and
+      a touchpad over USB.
+
+      The fix: a buffer per slot, and an event put aside under its slot (the slot
+      number is in the top byte of the control word, and only that is why two devices
+      can share one ring at all).
+
+      On the way I broke it twice, and each time the tests said so, not the
+      compiler. First sort_events swallowed the COMMAND COMPLETION events the
+      enumeration was waiting for, hence a separate queue for whatever is not a
+      transfer. Then it turned out that a slot needs a QUEUE, not one place: a control
+      transfer completes twice, once for the data and once for the status, and with a
+      single place the second overwrote the first and the caller waited forever for
+      something it had already been told. The third time I went back to the committed
+      state, confirmed it worked, and only then did it once and properly.
+
+- [x] **A disk that is not ours is not ours to take**, and this is an entry that
+      should have been written long ago.
+
+      The question was "what about an installer for this system". I started by
+      checking what an installer could even be here, and on the way I came across
+      this:
 
           if (memcmp(sb->magic, MAGIC, 4) != 0)
               format_disk();
 
-      fs_init() przy KAZDYM starcie sprawdzal, czy pierwszy blok mowi
-      PFS3 - a jesli nie, formatowal dysk. Bez pytania, bez spojrzenia,
-      co tam jest.
-
-      Bylo to nieszkodliwe tak dlugo, jak kazdy dysk, jaki ten system
-      widzial, byl pustym plikiem zrobionym przez test. Przestaje byc w
-      chwili, gdy trafia na prawdziwa maszyne: dysk laptopa tez nie mowi
-      PFS3. Uruchomienie tego z pendrive'a na Dellu skasowaloby tablice
-      partycji, Windowsa i wszystko inne w pierwszej sekundzie
-      pierwszego rozruchu.
-
-      Zobaczylem to nie z lektury, tylko dlatego, ze moj obraz testowy z
-      GPT wrocil jako "bez tablicy partycji" - jadro zdazylo go
-      wyczyscic, zanim zdazylem go odczytac.
-
-      Teraz formatowany jest wylacznie dysk NAPRAWDE pusty. "Pusty"
-      odpowiedziane ostroznie, bo koszt pomylki w jedna strone to nowy
-      dysk, ktory czlowiek formatuje recznie, a w druga - czyjes dane:
-      sygnatura tablicy partycji w sektorze zerowym dyskwalifikuje od
-      razu, a poza tym pierwsze szescdziesiat cztery kilobajty musza byc
-      w calosci zerami. Wszystko inne zostaje nietkniete i powiedziane
-      wprost, a kto naprawde chce ten dysk, mowi to komenda 'formatuj'.
-
-      Potwierdzenie jest slowem wpisanym w calosci - TAK, duzymi
-      literami - bo klawisz do wcisniecia to rzecz, ktora czlowiek robi
-      odruchowo, a slowo trzeba postanowic napisac.
-
-      **Czytanie tablicy partycji** (kernel/part.c) powstalo przy tej
-      okazji i jest fundamentem calej reszty: MBR i GPT, przy czym
-      wykrycie jest jednym bajtem - typ 0xEE w sektorze zerowym znaczy
-      "patrz do sektora pierwszego". GPT trzyma tam wpis ochronny
-      obejmujacy caly dysk wlasnie po to, zeby program znajacy tylko
-      stary format zobaczyl dysk pelny zamiast pustego i nie zaproponowal
-      uprzejmie spartycjonowania go. Nic w tym pliku nie pisze.
-
-      Grupa 'dysk' pyta o powsciagliwosc i o to, na czym ona polega:
-      obraz z prawdziwa tablica GPT wchodzi w rozruch i wychodzi z niego
-      z ta sama tablica - odczytana Z POWROTEM PO STRONIE HOSTA, bajt po
-      bajcie, a nie wzieta na slowo systemu. Pusty dysk dalej jest
-      formatowany. Zla odpowiedz na 'formatuj' nie kasuje niczego, a
-      wpisane TAK kasuje - i wtedy tablicy juz nie ma, bo o to sie
-      prosilo.
-
-      **PFS w partycji** - drugi krok, zrobiony od razu, bo bez niego
-      poprzedni jest tylko odmowa. Przesuniecie siedzi w DWOCH
-      funkcjach dotykajacych dysku i nigdzie indziej, wiec zaden kod
-      wyzej nie musi wiedziec, czy stoi na calym dysku, czy na jego
-      kawalku. 'formatuj N' zajmuje jedna partycje - tablica i sasiedzi
-      zostaja tacy, jacy byli - a przy nastepnym rozruchu jadro samo
-      znajduje swoj PFS, szukajac partycji, ktorej pierwszy blok mowi
-      PFS3. Bez rejestru GUID-ow, bez nowych umow: system rozpoznaje
-      sie po tym, co juz zapisuje.
-
-      Test tego sprawdza rzecz, ktora latwo udawac. Nie tylko czy
-      tablica przezyla - to 34 sektory - ale czy SASIEDNIE PARTYCJE
-      dalej maja swoje dane, bo to sa setki megabajtow i to o nie
-      naprawde chodzi. Znacznik wpisany przed, odczytany po, po stronie
-      hosta.
-
-      Czego to NIE jest: instalatora. Zeby maszyna wystartowala z tej
-      partycji, brakuje jeszcze zapisu do partycji EFI - czyli FAT-u,
-      ktorego nie mamy - i programu rozruchowego EFI. To sa nastepne
-      kroki, nie ten.
-
-- [x] **protoboot: wlasny program rozruchowy UEFI** - etapy 1-3.
-
-      Do dzis ten system uruchamial GRUB. GRUB jest znakomity i jest
-      CUDZY; wszystko inne tutaj jest napisane od zera, a rzecz, ktora
-      kladzie jadro w pamieci, byla ostatnim kawalkiem, ktory nie byl.
-
-      **Etap 1 zdejmowal najwieksze ryzyko** i tylko o to chodzilo: nie
-      wiedzialem, czy ten toolchain w ogole zbuduje aplikacje EFI.
-      Aplikacja EFI to plik PE32+ z konwencja wywolan Microsoftu, czyli
-      dwie rzeczy, ktorych GCC na Linuksie nie robi. Robi je clang
-      celujacy w x86_64-unknown-windows plus lld-link; 'file' mowi "PE32+
-      executable (EFI application)", firmware to zaladowalo i wykonalo.
-      Dwa kilobajty, bez gnu-efi i bez EDK2. Jedyne, co cudze, to format
-      pliku.
-
-      **Deklaracje UEFI sa nasze** (boot/efi/efi.h) i dwie rzeczy trzeba
-      przy nich zrobic dobrze. KOLEJNOSC skladnikow: firmware podaje
-      tablice wskaznikow do funkcji, a my indeksujemy po pozycji -
-      pominiety wpis przesuwa wszystko po nim i maszyna skacze w zla
-      funkcje. Dlatego kazdy wpis tablicy uslug rozruchowych jest tam, w
-      kolejnosci, nawet te, ktorych nigdy nie wolamy. I KONWENCJA
-      WYWOLAN, ktora zalatwia wybor kompilatora, wiec nie musi jej
-      powtarzac ani jedna linijka.
-
-      **Etapy 2 i 3**: czytanie jadra i initrd, tryb graficzny, ACPI.
-      Wlasnego FAT-u do rozruchu NIE POTRZEBUJEMY - firmware ma juz
-      zamontowana partycje, z ktorej nas uruchomiono, i podaje protokol
-      plikowy. FAT bedzie potrzebny do ZAPISANIA takiej partycji, czyli
-      przy instalacji, a nie tutaj. Rozmiar pliku brany przez pojscie na
-      koniec i zapytanie, gdzie sie jest - co oszczedza EFI_FILE_INFO,
-      GUID-a i bufora, dla odpowiedzi bedacej jedna liczba.
-
-      Tryb graficzny brany taki, jaki firmware juz pokazuje: na laptopie
-      jest to rozdzielczosc wlasna panelu, czyli dokladnie to, czego
-      chcemy, a proszenie o konkretny tryb wlasnie by to wyrzucilo. To
-      ta sama lekcja, co przy naglowku Multiboot2 - prosba o konkret
-      wygrywa i psuje.
-
-      RSDP z tablicy konfiguracyjnej firmware'u, bo na maszynie UEFI nie
-      ma innej drogi: stare szukanie po niskiej pamieci nie znajdzie tam
-      nic.
-
-      Zmierzone pod OVMF: jadro 825028 B, initrd 448132 B - co do bajtu
-      tyle, ile maja pliki - ekran 1280x800, RSDP w wersji 2.0.
-
-      **Loader laduje jadro 64-bitowe i tylko je.** Poczatkowo siegal po
-      protonos.bin, co bylo bezmyslne: maszyna z UEFI jest maszyna
-      64-bitowa. Jadro 32-bitowe istnieje w tym projekcie po to, zeby
-      jeden zestaw zrodel byl kompilowany dwa razy i drugie kompilowanie
-      powiedzialo, co ukrylo pierwsze - to jest dobry powod, zeby je
-      trzymac, i nie jest powodem, zeby je uruchamiac na laptopie.
-      Wpuszczanie go tutaj znaczyloby loader ELF32 obok ELF64 dla
-      przypadku, ktorego nikt nie ma; ogolnosc, o ktora nikt nie prosil,
-      to sposob, w jaki loader przestaje byc godny zaufania. GRUB dalej
-      uruchamia tamto jadro komu trzeba.
-
-      Przy okazji dwie rzeczy, ktore to ustalilo: jadro 64-bitowe jest
-      ELF64 (nie ELF32, jak zakladalem, planujac wczytywanie), a modul
-      initrd jadro bierze PO POZYCJI, nie po nazwie - wiec loader ma
-      podac jeden modul i tyle.
-
-      **Czego jeszcze nie ma**: zbudowania tablicy tagow Multiboot 2,
-      wczytania ELF-a, ExitBootServices i skoku. Ten ostatni jest
-      niezrecznosc calego przedsiewziecia: aplikacja UEFI biegnie w
-      trybie dlugim, a jadro Multiboot 2 wchodzi w 32-bitowym trybie
-      chronionym, wiec po pozegnaniu firmware'u trzeba z trybu dlugiego
-      wyjsc samemu - na wlasnych tablicach, z wylaczonym stronicowaniem.
-
-      Ksztalt "powiedzenia jadru" jest juz ustalony i nie jest nasz do
-      zmieniania: jadro to obraz Multiboot 2 i chce magicznej liczby w
-      EAX oraz tablicy tagow w EBX. Wiec loader te tablice ZBUDUJE,
-      dokladnie tak jak robi to GRUB, a jadro sie nie dowie, ze cokolwiek
-      sie zmienilo. Ani jedna jego linijka nie musiala.
-
-- [x] **protoboot: etap 4 - jadro startuje z naszego loadera** (grupa
-      testow `protoboot`).
-
-      Etapy 1-3 czytaly pliki i pytaly firmware o ekran. Etap 4 jest
-      tym, po co to wszystko bylo: zbudowac tablice tagow Multiboot 2,
-      wczytac ELF-a, pozegnac firmware i skoczyc. Od chwili, gdy
-      ExitBootServices wroci, nie ma juz nikogo do pomocy - konsola
-      firmware'u nie istnieje, wiec kazdy blad w tej sekwencji to
-      maszyna, ktora gasnie bez slowa.
-
-      **Tablica tagow jest zbudowana pod to, co jadro faktycznie
-      czyta**, a nie pod cala specyfikacje. kernel/mb2.c rozpoznaje
-      siedem typow: koniec, wiersz polecen, modul, mape pamieci, bufor
-      obrazu i dwie postacie RSDP. Loader wystawia dokladnie te.
-      Wystawianie reszty byloby kodem, ktorego nikt nie czyta - a wiec
-      kodem, ktory nikt nie sprawdzi.
-
-      **Mapa pamieci UEFI ma pulapke i jest to najwazniejsza rzecz w
-      tym etapie.** Firmware oddaje mape swoich regionow; przelozenie
-      jej na Multiboot 2 jest zamiana typow. Kuszace jest uznac
-      EfiLoaderCode i EfiLoaderData za wolne - przeciez loader zaraz
-      przestanie istniec. Tyle ze W TEJ WLASNIE PAMIECI lezy initrd,
-      ktory loader wczytal z dysku. Oddane jako wolne, trafilyby do
-      alokatora jadra i zostalyby rozdane pierwszemu, kto poprosi -
-      a initrd zamienilby sie w smieci, zanim ktokolwiek by go otworzyl.
-      Wiec ida do mapy jako ZAJETE. Test pilnuje tego nie przez
-      ogladanie mapy, tylko przez uruchomienie programu z initrd:
-      jesli te strony ktos rozdal, program nie wystartuje.
-
-      **Zejscie z trybu dlugiego.** Aplikacja UEFI biegnie w trybie
-      dlugim, jadro Multiboot 2 wchodzi w 32-bitowym trybie chronionym.
-      Kolejnosc jest przymusowa i nie ma w niej miejsca na wlasne
-      pomysly: wlasna GDT (firmware'owa znika razem z firmware'em),
-      daleki skok do segmentu 32-bitowego, wylaczenie stronicowania w
-      CR0, wyczyszczenie EFER.LME, wylaczenie PAE w CR4 - i dopiero
-      wtedy skok pod punkt wejscia z EAX i EBX ustawionymi tak, jak
-      ustawia je GRUB. Adresy w tej sekwencji sa juz fizyczne, bo
-      UEFI mapuje pamiec tozsamosciowo; gdyby nie mapowalo, tego kroku
-      nie daloby sie zrobic w miejscu.
-
-      **Zadziolalo za pierwszym razem i nie jest to powod do dumy, tylko
-      skutek tego, ze ksztalt byl ustalony wczesniej.** Jadro nie
-      dowiedzialo sie o niczym: ta sama liczba magiczna, ta sama tablica,
-      ten sam modul. Ani jedna linijka jadra nie zmienila sie na potrzeby
-      tego loadera - i to jest miara, czy interfejs byl dobry.
-
-      **Grupa testow `protoboot`** startuje maszyne, na ktorej NIE MA
-      GRUB-a: partycja EFI z trzema plikami i firmware OVMF. Rozmiary
-      jadra i initrd sprawdzane sa co do bajtu wzgledem plikow na dysku
-      (loader ma je przeczytac, a nie powiedziec, ze przeczytal),
-      rozdzielczosc z GOP porownana z ta, ktora zobaczylo jadro, i z ta,
-      ktora ma zrzut ekranu. Sam plik BOOTX64.EFI czytany jest bajtowo:
-      PE32+, maszyna 0x8664, podsystem 10 - bo tylko taki firmware w
-      ogole uruchomi.
-
-      **Czego dalej nie ma**: zapisu do FAT-u i instalatora. Loader umie
-      juz uruchomic system z pendrive'a przygotowanego na hoscie; zeby
-      ProtonOS umial przygotowac go sam - obok Windowsa, na dysku
-      laptopa - musi umiec ZAPISAC partycje EFI. To jest nastepny krok.
-
-- [x] **FAT12/16/32 - jedyny cudzy system plikow w tym projekcie**
-      (kernel/fat.c, kernel/fatcmd.c, grupa testow `fat`).
-
-      Ten system trzyma swoje pliki w PFS3 i nie ma powodu chciec
-      czegokolwiek innego - poza jednym miejscem. Partycja EFI jest
-      FAT-em z urzedu: firmware kazdej maszyny UEFI umie czytac FAT i
-      nie umie czytac niczego innego, wiec program rozruchowy lezacy
-      gdzie indziej nigdy nie zostanie uruchomiony. Zainstalowanie tego
-      systemu obok innego znaczy wiec ZAPISAC do partycji, ktora juz
-      istnieje, ma juz w sobie czyjs loader i ma dzialac dalej.
-
-      Stad ksztalt sterownika. Czytanie jest kompletne. Zapis robi to,
-      czego potrzebuje instalator - katalog, plik, jego tresc - i nic
-      ponadto: nic tu nie formatuje, nic nie przenosi cudzych plikow,
-      nic nie przepisuje struktury, ktorej nie musialo dotknac. Kazdy
-      zapis idzie do WSZYSTKICH kopii tablicy alokacji, bo system,
-      ktory uruchomi te maszyne jutro, moze czytac dowolna z nich.
-
-      **Ktora to z trzech odmian, nie mowi nic w sektorze rozruchowym.**
-      Mowi to LICZBA KLASTROW, policzona z rozmiarow. To nie jest
-      zlosliwosc specyfikacji, tylko jedyna rzecz, ktora jest o FAT-cie
-      naprawde prawdziwa - a odczytanie nazwy z napisu w sektorze
-      rozruchowym, czyli miejsce, w ktorym mieszka pierwszy blad
-      kazdego, myli sie na woluminach, ktore glosza "FAT16   " i nim
-      nie sa.
-
-      **FAT12 nie jest ciekawostka.** Jego wpis ma dwanascie bitow,
-      wiec co drugi lezy okrakiem na granicy sektora tablicy. Sterownik
-      napisany na cale wpisy lamie sie wlasnie tam. Dlatego caly dostep
-      do tablicy - chodzenie po lancuchu, przydzielanie, zwalnianie -
-      idzie przez POJEDYNCZE BAJTY: bajt nie lezy okrakiem na niczym.
-
-      **Dlugie nazwy sa czytane i zapisywane**, i nie jest to
-      uprzejmosc. Loader szuka pliku 'protonos64.bin', ktore nie miesci
-      sie w osmiu znakach i kropce; nagiecie nazwy do ograniczen
-      systemu plikow byloby pozwoleniem, zeby to system plikow
-      decydowal, jak nazywaja sie pliki tego systemu. Nazwa, ktora
-      MIESCI sie w 8.3, dostaje jeden zwykly wpis - dokladnie taki, jaki
-      zapisalby kazdy inny - z dwoma bitami w bajcie na pozycji
-      dwunastej, ktore pamietaja, ze byla pisana malymi literami.
-
-      **Co jest po drugiej stronie kazdej asercji.** Obrazy FAT w
-      testach robi mtools i to mtools czyta z powrotem wszystko, co
-      system do nich zapisal: katalog, dluga nazwe wraz z jej nazwa
-      krotka (PROTON~1.BIN), tresc plikow, zniknięcie usunietego pliku.
-      Sterownik, ktory zgadza sie tylko sam ze soba, nie udowodnil
-      niczego - a juz najmniej na partycji nalezacej do systemu, ktory
-      uruchamia te maszyne. Osobno sprawdzane jest to, czego robic nie
-      wolno: cudzy bootmgfw.efi na tej samej partycji, tablica GPT i
-      sasiednia partycja Windows sa po wszystkim czytane z hosta i
-      musza byc nietkniete.
-
-      **fatcopy jest instalatorem w miniaturze.** Przepisuje plik z
-      initrd na partycje EFI - a instalowanie tego systemu to dokladnie
-      to: loader, jadro i initrd sa plikami, ktore dzialajacy system juz
-      ma. Komenda powstala przed instalatorem, bo jest ta czescia, ktora
-      da sie sprawdzic osobno, co do bajtu, programem, ktory nie jest
-      nasz. Test przepisuje libproton.so (83 272 B) i porownuje z
-      zawartoscia initrd.
-
-      **Komendy sa w osobnym pliku** (kernel/fatcmd.c), bo obie powloki
-      - 32- i 64-bitowa - maja je mieć, a zadna nie powinna miec
-      wlasnej kopii.
-
-- [x] **Instalator: ProtonOS na dysk maszyny** (kernel/install.c, grupa
-      testow `instaluj`).
-
-      Na maszynie z UEFI instalowanie jest mniejsze, niz slowo
-      sugeruje: trzy pliki zapisane na partycji EFI, ktora juz tam
-      jest. Firmware szuka na niej programu rozruchowego i uruchamia
-      go - to caly mechanizm. Wiec nic tutaj nie tworzy partycji, nic
-      nie rusza tablicy i nic nie usuwa ani nie przenosi zadnego pliku
-      nalezacego do systemu, ktory na tym dysku juz mieszka.
-
-      **Skad biora sie te trzy pliki - to jest sedno.** Jadro dzialajace
-      w tej chwili to zaladowane segmenty, a nie plik, z ktorego
-      przyszlo; a zapisac trzeba plik. Wiec loader podaje wszystkie trzy
-      jako moduly Multiboot 2: initrd tak, jak podawal zawsze, a obraz
-      jadra i SIEBIE SAMEGO - po nazwie. System uruchomiony inaczej
-      (QEMU z -kernel, GRUB z plyty, ktora nie byla o tym robiona) nie
-      ma czego instalowac i mowi to wprost, zamiast zapisac cos
-      przyblizonego.
-
-      Moduly poza initrd bierze sie PO NAZWIE, nie po pozycji.
-      Alternatywa jest umowa loadera z jadrem co do kolejnosci, czyli
-      rodzaj umowy, ktora psuje sie po cichu.
-
-      **Dwie sciezki, i roznica miedzy nimi jest cala etyka tej
-      komendy.** /EFI/ProtonOS jest nasz i zapisujemy go zawsze.
-      /EFI/BOOT/BOOTX64.EFI - nazwa, do ktorej firmware sie cofa, gdy
-      nic innego nie jest ustawione - zapisujemy TYLKO WTEDY, GDY GO
-      TAM NIE MA. Na maszynie, ktora go ma, nalezy on do tego, kto te
-      maszyne dzisiaj uruchamia; zabranie go byloby instalacja NA
-      MIEJSCE kogos, a nie OBOK niego. Wtedy droga wejscia jest wpis w
-      menu firmware'u i powiedzenie tego jest lepsze niz maszyna, ktora
-      po cichu przestaje uruchamiac to, co uruchamiala.
-
-      Potwierdzenie jest slowem wpisanym z klawiatury, tak samo jak przy
-      'formatuj' i z tego samego powodu: klawisz do nacisniecia to
-      odruch, a slowo to decyzja - a po drugiej stronie jest czyjs
-      laptop.
-
-      **Test zamyka petle.** Maszyna wstaje z pendrive'a (partycja EFI
-      podana QEMU jako katalog), dysk 'tej drugiej maszyny' wisi na
-      kontrolerze AHCI - a wiec jest tym, ktory system wybiera - i ma na
-      sobie tablice GPT, FAT-a zrobionego przez mtools i cudzego
-      bootmgfw.efi. Po instalacji kazdy z trzech plikow jest czytany z
-      obrazu przez mtools i porownywany co do bajtu, a cudzy plik,
-      tablica i sasiednia partycja musza byc nietkniete. Potem TEN DYSK
-      JEST URUCHAMIANY SAM, bez pendrive'a - i to jedyny dowod, ze
-      instalacja cokolwiek zainstalowala. Osobno sprawdzane jest, ze bez
-      wpisania TAK nie dzieje sie nic, i osobno drugi dysk - taki, ktory
-      cudzy /EFI/BOOT/BOOTX64.EFI juz ma - gdzie ten plik po wszystkim
-      musi byc bajt w bajt ten sam.
-
-      Przy okazji dwie poprawki w loaderze: pliki wczytuje teraz przez
-      AllocateMaxAddress ponizej czterech gigabajtow (adres modulu
-      Multiboot 2 ma trzydziesci dwa bity i nie ma gdzie zapisac
-      wiekszego - dotad bylo to ciche zalozenie), a szukajac jadra i
-      initrd zaglada takze do \EFI\ProtonOS - czyli tam, gdzie kladzie
-      je instalator.
-
-- [x] **Instalator ma wlasny ekran, a nie okno na pulpicie**
-      (user/ginstal.c, tryb kiosku w kernel/desktop.c, grupa testow
-      `ginstal`).
-
-      Najpierw powstal jako zwykle okno wsrod innych okien i tak bylo
-      zle. Instalowanie nie jest jednym z zadan: kiedy trwa zapis na
-      czyims dysku, pasek zadan i cudze okna w zasiegu reki nie sa
-      wygoda, tylko sposobem, zeby w polowie zapisu kliknac cos innego.
-      Wiec 'instaluj' bierze CALY ekran.
-
-      **Tryb kiosku** to ten sam kompozytor z odjeta cala reszta: bez
-      gornego paska, bez paska zadan, bez ikon, bez menu, bez pulpitow
-      i bez drugiego okna. Jeden program, na srodku pustego ekranu, i
-      jedyna rzecz, ktora oferuje samo srodowisko - restart maszyny w
-      prawym gornym rogu. Okno nie ma nawet przyciskow zamkniecia,
-      minimalizacji i maksymalizacji: nie ma dokad go zminimalizowac,
-      nie ma w co je powiekszyc i nie ma nic za nim, wiec byly to trzy
-      klamstwa.
-
-      Kiosk uruchamia program ponownie, gdy ten sie skonczy - kiosk z
-      pustym ekranem wyglada na zepsuta maszyne. Ale jesli program
-      pada od razu, po trzech probach kiosk przestaje i pisze o tym;
-      migotanie w nieskonczonosc bylo latwiejsze do napisania i gorsze
-      do ogladania.
-
-      **Instalatora nie ma juz w menu pulpitu** i to jest cala roznica
-      miedzy tym, co bylo, a tym, co jest.
-
-      **Program nie wie nic o instalowaniu.** Pyta jadro, jak wyglada
-      dysk (sys_install_look - czyta i nic nie zmienia, wiec wolno to
-      kazdemu), i prosi jadro o jeden krok naraz (sys_install_step -
-      kazdy krok wymaga admina, bo po drugiej stronie jest dysk maszyny,
-      ktora uruchamia sie bez nas). Decydowanie, co znaczy instalacja,
-      jest w jednym miejscu i nie jest nim okno.
-
-      Krok na obrot petli, a nie pieciu naraz: jadro zapisaloby wszystko
-      w jednym wywolaniu i okno zamarloby na czas zapisu. Tak pasek
-      idzie, a pod nim stoi nazwa pliku, ktory wlasnie leci na dysk - a
-      czlowiek patrzacy, jak zapisuje sie jego dysk, ma prawo widziec,
-      gdzie to jest.
-
-      **Slowo, nie przycisk.** Przycisk to odruch, a odruchami zapisuje
-      sie cudze dyski. Okno pyta o wpisane TAK, tak samo jak wersja
-      konsolowa. Potem jadro odmawia programowi, ktory nie jest adminem,
-      i wtedy - dopiero wtedy - okno pyta o haslo; ten sam ksztalt, co w
-      gsettings, i z tego samego powodu: odmowa to nie to samo co blad.
-
-      **Kazda linia lezy na siatce dwunastu pikseli.** Nie dla porzadku:
-      czcionka ma osiem pikseli wysokosci, a tekst rozstawiony na oko -
-      jedna linia na dwudziestu, druga na piecdziesieciu - to tekst,
-      ktory umie przeczytac tylko czlowiek. Siatka to tekst, ktory umie
-      przeczytac takze program. Kolumna z rozmiarami stoi na x=6+36*8 z
-      tego samego powodu, a nie na 296, bo 296 nie dzieli sie przez
-      osiem.
-
-      Test czyta ekran ta sama czcionka, ktora jadro go narysowalo
-      (nowe `Qemu.read_text` w ptest.py - screen_fbcon jest teraz jego
-      szczegolnym przypadkiem, bo konsola nie jest jedyna rzecza pisana
-      ta czcionka). Sprawdza obie polowy rzeczy: ze na tym ekranie NIE
-      MA paska zadan, gornego paska ani ikon i ze klik w rog, gdzie na
-      pulpicie jest 'Menu', niczego nie otwiera - oraz ze wszystko, co
-      program mowi, da sie z ekranu przeczytac. Na koniec, jak w grupie
-      `instaluj`, pliki sa czytane z obrazu przez mtools co do bajtu, a
-      zainstalowany dysk jest uruchamiany sam.
-
-      Dwie drobne rzeczy, ktore test odslonil: kursor myszy narysowany
-      na literze robi z niej znak, ktorego nie ma w czcionce (test
-      odsuwa wskaznik, tak jak zrobilby czlowiek), a pasek tytulu okna
-      zaczyna sie piksel od ramki - wiec tresc jest pod win->y +
-      TITLE_H + 1, a nie tam, gdzie zgadywalem.
-
-      Wersja konsolowa zostaje jako 'instaluj tekstem'. Nie z
-      sentymentu: kiedy nie ma na czym rysowac, albo kiedy odpowiedz ma
-      trafic do dziennika, jest to jedyna wersja, ktora dziala.
-
-- [x] **Kontrast: ciemny tekst na jasnym, jasny na ciemnym** - w calym
-      GUI, nie tylko w instalatorze.
-
-      Okna tego systemu maja jasnoszare tlo (227,227,227), a wszystkie
-      programy pisaly na nim BIALYM. Wygladalo to jak dzialajacy
-      program - wszystko bylo narysowane - i nie dalo sie tego czytac.
-      To najgorszy rodzaj bledu w interfejsie: nic nie jest zepsute,
-      tylko nikt nic nie widzi.
-
-      Zasada jest jedna i jest calym rozwiazaniem: **na jasnym tle
-      ciemny tekst, na ciemnym jasny**. Wiec czarny na szarym oknie,
-      bialy na akcentowym niebieskim (przyciski, zaznaczony wiersz,
-      pasek tytulu), bialy na czarnych polach do wpisywania, bialy na
-      ciemnym tle pulpitu. Ciemny szary (73,73,73) dla tego, co
-      powiedziane ciszej - rozmiar pliku obok jego nazwy - i niebieski
-      dla naglowkow, bo to ten sam akcent, ktorego uzywa pulpit.
-
-      Zielony (0,255,0) zniknal z jasnych powierzchni, bo na szarym 227
-      jest gorszy niz bialy; tam, gdzie sluzyl do odroznienia (katalog
-      od pliku, watek jadra od programu), zastapil go akcent albo ciemny
-      szary. Zolte odnosniki w gweb sa teraz niebieskie - odnosniki sa
-      niebieskie, odkad istnieja odnosniki, a zolty na jasnym tle to
-      nie jest kolor, to jest brak koloru.
-
-      Poprawione: ginstal, gtasks, gfiles, gweb, guiapp, gclock, gmon,
-      gsettings (dwa miejsca - reszta juz to wiedziala, jest tam nawet
-      komentarz "Black on grey reads; white on grey does not") i
-      licznik przy przycisku 'Klik' w samym kompozytorze. gedit, gterm
-      i gimg byly poprawne od poczatku: gedit ma biala strone i czarny
-      tekst, gterm czarne tlo i bialy, gimg pasek stanu w akcencie.
-
-      Kilka linii, ktore mialy byc kreskami oddzielajacymi, tez bylo
-      bialych na szarym - czyli niewidocznych. Sa teraz w kolorze linii
-      (150,150,150), tym samym, ktorego uzywa kompozytor.
-
-- [x] **Caly dysk: wlasna tablica partycji i wlasny FAT32**
-      (kernel/gpt.c, fat_mkfs w kernel/fat.c, grupa testow `caly`).
-
-      Dotad instalacja znaczyla: trzy pliki na cudzej partycji EFI.
-      Teraz jest druga droga - dysk zrobiony od nowa - i roznica miedzy
-      nimi jest calym sensem tego kroku. Obok: tablica zostaje, cudze
-      partycje zostaja, kazdy plik na partycji EFI zostaje. Caly dysk:
-      nowa tablica, nowa partycja EFI, partycja dla ProtonOS-a - i
-      wszystko, co tam bylo, znika.
-
-      Trzeciej drogi nie ma i nie bedzie takiej, ktora zmniejsza cudza
-      partycje, zeby zrobic miejsce. Przesuwanie danych innego systemu
-      na podstawie domyslu, czym one sa, to nie jest rzecz, ktora sie
-      robi.
-
-      **Tablica GPT jest napisana pod to, co sprawdza firmware, a nie
-      pod to, co wystarczy nam.** Ochronny MBR w sektorze zerowym,
-      naglowek w pierwszym, 128 wpisow za nim - i te same wpisy oraz
-      drugi naglowek na samym koncu dysku, od tylu. Ostatnie 34 sektory
-      dysku GPT to nie jest wolne miejsce, tylko kopia, dzieki ktorej
-      urwany poczatek da sie naprawic. Oba naglowki nosza CRC siebie i
-      CRC calej tablicy wpisow. Pomylka w tych sumach nie objawia sie
-      glosno: firmware po cichu uznaje tablice za uszkodzona i maszyna
-      nie startuje, nie mowiac dlaczego. Dlatego test czyta tablice po
-      swojemu, w Pythonie, tak jak czyta ja firmware - z obiema sumami
-      i porownaniem kopii z oryginalem.
-
-      Wpisy ida na dysk PRZED naglowkami, ktore na nie wskazuja, a
-      ochronny MBR na samym koncu: dopoki go nie ma, sektor zerowy
-      dalej mowi "pusto" kazdemu, kto go czyta. To jest kolejnosc na
-      wypadek, gdyby prad zniknal w polowie.
-
-      **GUID naszej partycji jest nasz.** Bajty ukladaja sie w
-      PROTONOS-PFS3, wiec czlowiek ogladajacy tablice edytorem
-      szesnastkowym widzi, czyja ona jest, a zaden inny system nie
-      wezmie jej za swoja. Pozyczanie GUID-a Linuksa byloby klamstwem,
-      ktore kiedys ktos by odczytal.
-
-      **fat_mkfs robi FAT32, i FAT32 nie jest flaga, ktora sie
-      ustawia.** To jest liczba klastrow powyzej 65524 - dokladnie ta
-      sama regula, ktorej uzywa montowanie. Wiec rozmiar klastra jest
-      dobierany tak, zeby liczba wypadla tam, gdzie trzeba, a partycja
-      za mala na to jest odrzucana, a nie formatowana na cos innego i
-      nazywana FAT32. Partycja EFI ma 128 MiB: znacznie wiecej, niz
-      trzy pliki potrzebuja, i najmniej, przy czym FAT32 jest wygodnie
-      FAT32.
-
-      Przy okazji: **"32" w FAT32 nie ma nic wspolnego z 32-bitowym
-      procesorem.** To szerokosc numeru klastra we wpisie tablicy
-      alokacji - FAT12 ma wpisy dwunastobitowe, FAT16 szesnastobitowe,
-      FAT32 trzydziestodwubitowe (uzywane 28). Decyduje to o tym, jak
-      duzy moze byc wolumin, a nie o tym, na czym sie go czyta.
-      Partycja EFI 64-bitowego laptopa z Windowsem tez jest FAT32;
-      FAT64 nie istnieje.
-
-      **Slowo jest inne.** Przy instalacji obok pyta o TAK. Tutaj o
-      KASUJ - bo TAK mowi sie na pytanie, a na to mowi sie co innego.
-
-      Test sprawdza cala droge: stary dysk z wlasna, poprawna tablica i
-      cudzym bootmgfw.efi; plan, ktory mowi wprost, co zniknie; slowo
-      inne niz TAK; brak zmian, gdy sie go nie wpisze; po wpisaniu -
-      tablica czytana w Pythonie z obiema sumami, dwie partycje o
-      wlasciwych GUID-ach, nazwach i granicach, FAT32 czytany przez
-      mtools, trzy pliki co do bajtu i na koniec URUCHOMIENIE TEGO
-      DYSKU. Osobno to, czego ten tryb NIE robi: nie zeruje dysku
-      bajt po bajcie, bo nie robi tego zaden instalator - znika ksztalt
-      (tablica i systemy plikow), a nie kazdy bajt, i test mowi to
-      wprost zamiast twierdzic cos, co nie byloby prawda.
-
-- [x] **Kilka dyskow i wybor miedzy nimi** (kernel/blk.c jako lista,
-      ata.c master i slave, ahci.c wszystkie porty, grupa testow
-      `dyski`).
-
-      Warstwa blokowa znajdowala jeden dysk i to byl dysk. Dla maszyny
-      z jednym jest to sluszne i przestaje byc sluszne w chwili, gdy
-      ktos ma wybrac, na ktory zainstalowac.
-
-      Wiec jest lista. Kolejnosc dalej idzie od nowszego do starszego -
-      NVMe, potem kazdy port AHCI z dyskiem, potem oba napedy starej
-      magistrali ATA - a pierwszy z listy jest tym uzywanym, dzieki
-      czemu maszyna z jednym dyskiem zachowuje sie dokladnie tak, jak
-      zachowywala sie wczesniej. To nie jest ostroznosc na wyrost: pod
-      ta warstwa lezy caly system plikow, wymiana i tablica partycji.
-
-      Ponad warstwa nic sie nie zmienilo: system plikow, part.c i fat.c
-      czytaja i pisza DYSK UZYWANY. Przewlekanie numeru urzadzenia
-      przez kazdego z nich byloby zmiana w kazdym z nich - dla pytania,
-      ktore zadaje sie raz, czlowiekowi, w instalatorze.
-
-      **OGLADANIE NIE MOZE NICZEGO ZMIENIAC** i to jest jedyna
-      subtelna rzecz w tym kroku. Przeczytanie tablicy innego dysku
-      wymaga wskazania go warstwie blokowej, bo part.c czyta dysk
-      uzywany. Ale maszyna zostawiona wskazujaca na dysk, o ktory ktos
-      tylko zapytal, to system plikow czytajacy cudze sektory. Wiec
-      install_look() zapamietuje, co bylo uzywane, i wraca tam przed
-      powrotem - razem z odmontowaniem FAT-u, ktory po drodze
-      podmontowal. Wskazanie wybranego dysku jest rzecza install_step(),
-      czyli chwili, w ktorej naprawde sie pisze.
-
-      **Test znalazl przy okazji prawdziwy blad, i to stary.** Komenda
-      'disk' pisala wzorzec do OSTATNIEGO SEKTORA dysku i czytala go z
-      powrotem - co bylo bezpieczne, dopoki nasze dyski nie mialy na
-      sobie nic. Na dysku z GPT ostatni sektor JEST kopia tablicy
-      partycji. Zapis tam niszczy ja bez slowa: dysk dalej startuje, a
-      pewnego dnia narzedzie naprawcze mowi, ze tablica jest
-      uszkodzona. Teraz dysk z tablica jest tylko czytany, i jest
-      asercja, ktora to trzyma.
-
-      Wersja tekstowa przyjmuje numer dysku ('instaluj tekstem caly 2')
-      i wypisuje liste, gdy dyskow jest wiecej niz jeden. W oknie linia
-      z dyskiem jest klikalna i mowi o tym wprost - wybor, ktorego
-      trzeba sie domyslic, nie jest wyborem.
-
-- [x] **Domkniecie drogi do sprzetu: `make stick`, `sprzet` i `dyski`
-      w jadrze 64-bitowym** (scripts/mkstick.py, kernel/hwinfo.c, grupa
-      testow `stick`).
-
-      Caly ten lancuch - loader, FAT, instalator, partycje, wybor dysku
-      - istnieje po to, zeby polozyc ProtonOS-a na prawdziwym laptopie.
-      I ani jeden bajt z tego nie dzialal na prawdziwym sprzecie:
-      wszystko bylo sprawdzane pod QEMU i OVMF. Miedzy "dziala w
-      emulatorze" a "startuje z pendrive'a" brakowalo trzech rzeczy i
-      wszystkie trzy byly banalne, co jest najgorszym rodzajem
-      brakujacych rzeczy.
-
-      **Nie bylo polecenia, ktore robi pendrive'a.** `make iso64` robi
-      plyte z GRUB-em, czyli dokladnie to, czego nasz loader nie
-      uzywa. Zeby przygotowac stick, trzeba bylo recznie zlozyc GPT,
-      sformatowac ESP i skopiowac trzy pliki - czyli powtorzyc z
-      pamieci to, co system umie sam. Teraz `make stick` daje surowy
-      obraz do dd, a `make run-stick` uruchamia go pod OVMF, zanim
-      pojdzie na pendrive.
-
-      Tablica w obrazie jest pisana bajt po bajcie w Pythonie, z tego
-      samego powodu, dla ktorego istnieje kernel/gpt.c: firmware
-      sprawdza sumy i kopie na koncu dysku i po cichu uznaje tablice
-      za uszkodzona. FAT robi mformat - czyli ktos inny. To, ze stick
-      jest robiony przez jedna implementacje, a czytany przez druga,
-      jest warte wiecej niz to, ze obie byly nasze.
-
-      Obraz ma 192 MiB i jedna partycje. Trzy pliki zajmuja poltora
-      megabajta; reszta jest po to, zeby FAT32 byl FAT32 (liczba
-      klastrow) i zeby bylo gdzie cos dopisac.
-
-      **`sprzet` nie istnial w jadrze 64-bitowym.** Napisalem te
-      komende wprost pod pierwszy rozruch na sprzecie - co jest na
-      PS/2, co na USB, co widzi PCI, jaki ekran dal loader - i siedziala
-      w powloce 32-bitowej, czyli w jadrze, ktorego na laptopie nikt nie
-      uruchomi. To jest ta komenda, ktora wpisuje sie jako pierwsza na
-      maszynie, ktorej nikt jeszcze nie probowal, i nie bylo jej tam,
-      gdzie jest potrzebna.
-
-      Wyladowala w kernel/hwinfo.c, wspolnym dla obu powlok, razem z
-      nowa komenda **`dyski`**: co maszyna ma za dyski, ktorego uzywa i
-      co jest na kazdym z nich. Bez wchodzenia w instalator. Ogladanie
-      cudzego dysku wskazuje go warstwie blokowej, wiec i tu jest
-      wskazywany z powrotem - ta sama zasada, co w install_look().
-
-      Test `stick` czyta obraz tak, jak przeczyta go firmware: tablica
-      w Pythonie z obiema sumami, FAT przez mtools, trzy pliki co do
-      bajtu - a potem go URUCHAMIA i wpisuje obie nowe komendy.
-
-- [x] **Dzwiek: Intel HD Audio** (kernel/hda.c, komenda `beep`, grupa
-      testow `dzwiek`).
-
-      Jedyna klasa urzadzen, ktorej w tym systemie nie bylo. Maszyna ze
-      stosem TCP, TLS 1.3 i przegladarka, ktora nie umie wydac zadnego
-      dzwieku, jest dziwnie niekompletna.
-
-      **HDA nie jest urzadzeniem, do ktorego sie pisze probki**, i to
-      jest cala trudnosc. W maszynie sa DWIE rzeczy. Kontroler siedzi
-      na PCI i sam wyciaga bajty z pamieci - dostaje liste buforow
-      (BDL) i chodzi po niej w kolko; od tej chwili to on czyta, a
-      sterownik ma tylko nadazac z wypelnianiem tej polowy, w ktorej go
-      akurat nie ma. Kodek siedzi za kontrolerem na szeregowym laczu i
-      jest GRAFEM: ponumerowane widzety - przetworniki, gniazda,
-      miksery - po ktorych trzeba CHODZIC, zeby dowiedziec sie, ktory
-      przetwornik dochodzi do ktorego gniazda. Dwie maszyny z tym samym
-      kontrolerem moga miec zupelnie inne grafy.
-
-      **Trzy bledy po drodze, wszystkie takie, ze urzadzenie po prostu
-      milczy.**
-
-      Pierwszy i najdrozszy: **RINTCNT ustawione na jeden**. To licznik
-      odpowiedzi, po ktorym kontroler uznaje, ze nie nadazamy - i
-      PRZESTAJE wykonywac polecenia, dopoki nie skasuje sie flagi,
-      ktora przy tym podniosl. Przy jedynce odpowiedz dostaje dokladnie
-      jedno pytanie, a kazde nastepne czeka na przerwanie, ktorego nie
-      bierzemy. Objaw byl idealnie mylacy: pierwsze pytanie (o
-      producenta kodeka) dawalo prawidlowa odpowiedz, wiec pierscienie
-      "dzialaly", a drugie nie dawalo nic. Widac to bylo dopiero po
-      wypisaniu CORBRP: wskaznik odczytu stal na jedynce, podczas gdy
-      wskaznik zapisu szedl dalej. Licznik jest teraz odsuniety, a
-      status kasowany po kazdej odpowiedzi.
-
-      Drugi: **werby maja dwie dlugosci i dlugosc decyduje o miejscu**.
-      Czterobitowy zostawia szesnascie bitow na argument, dwunastobitowy
-      osiem. Zapisanie krotkiego juz przesunietego - 0x200 zamiast 0x2 -
-      wyglada niewinnie i wysyla polecenie, na ktore kodek nie
-      odpowiada niczym. Sa teraz zapisane jako liczby, ktorymi sa, a
-      klasyfikuje je jeden warunek.
-
-      Trzeci wyszedl dopiero z pliku dzwiekowego: **ton trwal 243 ms
-      zamiast 200**. Kontroler chodzi po buforze w kolko, wiec polowa,
-      ktorej sie nie nadpisze, zostaje zagrana drugi raz. Po skonczeniu
-      sie probek trzeba dalej wypelniac - cisza - przez caly bufor, i
-      dopiero potem zatrzymac strumien. To jest roznica miedzy tonem o
-      zadanej dlugosci a tonem z zajakniem na koncu.
-
-      **Test nie pyta systemu, czy zagral.** Sterownik, ktory ustawi
-      wszystkie rejestry i wyprodukuje cisze, wyglada dokladnie tak samo
-      jak dzialajacy. Wiec QEMU zapisuje swoje wyjscie dzwiekowe do
-      pliku, a plik jest czytany tutaj: szczyt, dlugosc glosnego
-      fragmentu i odleglosc miedzy przejsciami przez zero. 440 Hz przez
-      200 ms musi wyjsc jako 440 Hz przez 200 ms, a 880 przez 100 jako
-      to - jedna liczba bylaby zbiegiem okolicznosci, dwie sa
-      sterownikiem. Wychodzi 441 Hz / 200 ms i 882 Hz / 100 ms.
-      Czestotliwosc liczona jest jako MEDIANA odstepow miedzy
-      przejsciami, a nie ich liczba na calosci: jedno przejscie
-      przeoczone na krawedzi przesuwa liczbe i nie przesuwa mediany.
-
-      Osobno maszyna BEZ karty dzwiekowej - musi powiedziec wprost,
-      czego nie ma, a 'beep' na niej ma odmowic, zamiast udawac. Stad
-      tez sterownik pamieta, GDZIE sie zatrzymal: "nie ma kontrolera
-      HDA na PCI" i "kodek nie ma wyjscia, ktore umiem znalezc" to dwie
-      rozne rzeczy i na prawdziwym sprzecie robi to cala roznice.
-
-- [x] **Mikser: glosnosc, wyciszenie i okno do tego** (hda_set_volume w
-      kernel/hda.c, komenda `glosnosc`, program user/gmikser.c,
-      rozszerzona grupa `dzwiek`).
-
-      **Pole, ktore latwo przeczytac odwrotnie.** Wzmacniacz widzetu
-      opisuje parametr 0x12, a w nim LICZBA STOPNI stoi na bitach 14..8,
-      a WIELKOSC stopnia na 22..16. Przeczytalem je na odwrot i nie
-      objawilo sie to bledem: kodek podal trzy stopnie zamiast
-      siedemdziesieciu czterech, mikser dostal trzy pozycje, a jedynym
-      znakiem bylo to, ze cicho i glosno brzmialo tak samo. Widac to
-      bylo dopiero w pliku dzwiekowym: szczyt 314 przy pelnej
-      glosnosci, podczas gdy wczesniej - z przypadkowo wieksza liczba -
-      wychodzilo 5679.
-
-      Procent jest procentem TEGO, co widzet ma, bo innego zakresu nie
-      ma. Stopnie sa decybelami, wiec trzydziesci procent jest znacznie
-      ciszej niz jedna trzecia - i to nie jest do poprawienia, tylko tak
-      dziala slyszenie. Okno mowi to wprost zamiast udawac skale
-      liniowa.
-
-      **I blad, ktory wyszedl dopiero przez mikser, a jest o calym
-      jadrze.** Po zagraniu tonu z okna mysz przestawala sie ruszac.
-      Powod: w trybie dlugim wywolanie systemowe wchodzi z WYLACZONYMI
-      przerwaniami - procesor kasuje flage przy wejsciu (SFMASK). Wiec
-      sterownik, ktory krecil sie w petli przez dwiesta milisekund,
-      zostawial maszyne gluchna na dwiescie milisekund: bez zegara i z
-      mysza PS/2, ktora gubila srodek pakietu i juz nigdy nie
-      odnajdywala ramkowania. Czekanie w hda.c SPI teraz, zamiast sie
-      krecic - a spanie oddaje rdzen planiscie, czyli tam, gdzie
-      przerwania wracaja. To jest rzecz, ktora dotyczy kazdego dlugiego
-      wywolania systemowego w tym jadrze i ten sterownik byl pierwszym,
-      ktory ja wywolal.
-
-      **Suwak dochodzi do stu procent**, bo dzieli sie przez szerokosc
-      MINUS JEDEN. Suwak, ktorego nie da sie dociagnac do konca, czuje
-      sie zepsuty, a roznica jest jednym znakiem w kodzie.
-
-      Glosnosc jest zapamietywana jak tlo pulpitu i nazwa maszyny - i
-      jest to jedyne ustawienie, ktore program z pierscienia 3 moze
-      zapisac bez pytania o haslo. Powod jest prosty: glosnosc to
-      pokretlo, a nie zmiana systemu.
-
-      Test mierzy to, co wyszlo z karty: 100% daje szczyt 8000, 30%
-      daje 2353, 5% daje 314, a cisza zero. Osobno to samo klikane w
-      oknie - suwak na koniec, przycisk 'Sprawdz', pomiar; suwak na
-      jedna piata, znowu pomiar, i musi byc ciszej.
-
-- [x] **AES, GCM i CCM - szyfr, ktorego dotad nie bylo** (user/uaes.h,
-      program user/aestest.c, wzorzec scripts/aesref.c, grupa testow
-      `aes`).
-
-      Cala kryptografia tego systemu stala dotad na ChaCha20 - wybranej
-      dlatego, ze liczy na dodawaniu, obrotach i XOR-ach, wiec da sie ja
-      napisac bez ani jednej tablicy. AES jest wejsciowka do dwoch
-      miejsc, do ktorych ChaCha nie siega: do zestawow szyfrow TLS,
-      ktore czesc serwerow oferuje wylacznie, i do WPA2 - bo ramke
-      bezprzewodowa szyfruje sie AES-CCM i niczym innym.
-
-      Sam szyfr to FIPS-197 przepisane wprost: jedna tablica podstawien
-      (256 bajtow) i jej odwrotnosc, a MixColumns liczone, nie czytane z
-      czterech kilobajtow tablic. Wolniej, ale kazda linia daje sie
-      przeczytac obok specyfikacji. **Nie jest to implementacja odporna
-      na pomiar czasu** - odczyt z tablicy zalezy od danych - i jest to
-      napisane wprost w naglowku, zamiast udawac, ze jest inaczej.
-
-      **Rzecz, ktora najlatwiej zrobic prawie dobrze.** AES z bledem w
-      rozwijaniu klucza szyfruje, odszyfrowuje, zgadza sie sam ze soba
-      idealnie - i nie zgadza sie z nikim na swiecie. Dlatego jedna
-      linia w rozwijaniu klucza (dodatkowe podstawienie co czwarte slowo
-      przy kluczu 256-bitowym) ma nad soba komentarz, ze bez niej
-      powstaje wlasnie taki AES.
-
-      **Licznik GCM to nie jest licznik CTR.** W trybie CTR podnosi sie
-      caly szesnastobajtowy blok, w GCM tylko ostatnie CZTERY bajty -
-      reszta bloku to nonce i ruszyc jej nie wolno. Sa to dwie funkcje,
-      choc wygladaja na jedna.
-
-      **CCM odszyfrowuje, zanim sprawdzi**, bo jego suma liczy tekst
-      JAWNY, a nie szyfrogram (odwrotnie niz GCM). Wiec przy zlym
-      znaczniku w buforze wolajacego lezy juz odszyfrowana tresc - i
-      dlatego jest tam zerowana. Oddanie czegos niesprawdzonego byloby
-      gorsze niz nieoddanie niczego, a test tego pilnuje osobno.
-
-      Sprawdzane z trzech stron, bo zadna z nich osobno nie wystarcza:
-
-        1. wektory oficjalne - FIPS-197 (trzy dlugosci klucza),
-           SP 800-38A dla CTR, przypadek 4 ze specyfikacji GCM i pakiet
-           nr 1 z RFC 3610 (czyli dokladnie ksztalt WPA2: nonce
-           trzynastobajtowy, znacznik osmiobajtowy);
-        2. przeciwko OpenSSL - system szyfruje wlasny material i
-           WYPISUJE wszystko, czego uzyl, a host szyfruje to samo przez
-           libcrypto (scripts/aesref.c, bo `openssl enc` nie umie trybow
-           uwierzytelnionych) i porownuje bajt w bajt;
-        3. w druga strone - to OpenSSL szyfruje, plik wjezdza do systemu
-           po HTTP, a system ma go odszyfrowac i ma ODMOWIC temu samemu
-           plikowi z jednym przestawionym bitem znacznika.
-
-      Trzecia droga jest najwazniejsza: to, ze nasze szyfrowanie zgadza
-      sie z naszym odszyfrowywaniem, nie mowi o zadnym z nich niczego.
-      Test sprawdza tez, ze material nie jest wyrodny - klucz z jednego
-      powtorzonego bajtu zgadza sie ze wszystkim.
-
-      Te same wektory ida osobno przez jadro 32-bitowe. Nie dlatego, ze
-      je rozwijamy, tylko dlatego, ze druga kompilacja tych samych
-      zrodel jest najtansza znana mi metoda na przesuniecie, szerokosc i
-      wskaznik, ktory przypadkiem mial dobry rozmiar.
-
-- [x] **WPA2: klucze i szyfrowanie ramki - wszystko poza radiem**
-      (user/usha1.h, user/uwpa.h, AES key wrap w user/uaes.h, program
-      user/wpatest.c, grupa testow `wpa`).
-
-      Tu przebiega uczciwa granica. Radia w tym systemie nie ma i QEMU
-      nie emuluje zadnej karty bezprzewodowej - ale wszystko, co stacja
-      robi z haslem, z uzgodnieniem i z ramka, da sie napisac i
-      sprawdzic juz teraz. Sterownika konkretnego ukladu - nie.
-
-      **SHA-1 jest tu z jednego powodu i tylko z jednego.** Do podpisow
-      nie nadaje sie od lat i przy certyfikatach go nie ma. WPA2 nie
-      daje wyboru: haslo sieci zamienia sie w klucz przez
-      PBKDF2-HMAC-SHA1 z 4096 rundami, a uzgodnienie czterech ramek
-      wyprowadza klucze sesji funkcja zbudowana z HMAC-SHA1. Kolizje,
-      ktore SHA-1 dobily, nie dotykaja zadnego z tych zastosowan.
-
-      Solą PBKDF2 jest NAZWA SIECI - i dlatego dwie sieci o tej samej
-      nazwie i tym samym hasle maja ten sam klucz, a policzyc tego raz
-      dla wszystkich sieci sie nie da. Cztery tysiace rund ma boleć: to
-      jedyne, co stoi miedzy krotkim haslem a slownikiem.
-
-      **Dane dodatkowe CCMP to jest cala rzecz.** Podpis obejmuje
-      naglowek, ale z zamaskowanymi polami, ktore po drodze legalnie
-      sie zmieniaja: retry, oszczedzanie energii, more-data, numer
-      kolejny. Adresy zostaja objete. Dzieki temu wzmacniak moze ramke
-      powtorzyc, a napastnik nie moze jej przekierowac - i test sprawdza
-      wlasnie to: zmiana jednego bitu w adresie A3 ma konczyc sie
-      wyrzuceniem ramki, przy nietknietych danych.
-
-      Sprawdzane wektorami z P802.11i/D7.0 (I.7.4) - prawdziwymi
-      ramkami z naglowkiem, numerem pakietu i podpisem, w tym jedna z
-      QoS i naglowkiem 26-bajtowym. To jest jedyny rodzaj wektora,
-      ktory lapie zle zlozone dane dodatkowe: CCMP z takim bledem zgadza
-      sie sam ze soba i z zadnym punktem dostepowym na swiecie.
-
-      Klucze sprawdza hashlib: system wyprowadza PMK, PTK i podpis
-      wiadomosci EAPOL-Key z nasiona, wypisuje wszystko, czego uzyl, a
-      host liczy to samo wlasnym PBKDF2 i HMAC. Do tego RFC 3394
-      (opakowanie klucza grupowego) z oficjalnym wektorem i z odmowa po
-      zmianie jednego bitu - bo stala A6A6A6A6A6A6A6A6 po to tam jest,
-      zeby zly klucz dawal odmowe, a nie smieci wygladajace jak klucz.
-
-      Czego to NIE zalatwia: sterownika. Karta wymaga wgranego
-      firmware'u i wlasnego protokolu na PCI, rozniacego sie miedzy
-      Intelem, Broadcomem i Realtekiem, a napisac go na slepo - bez
-      urzadzenia, ktore odpowiada - znaczy tyle, co pisac bez zadnego
-      testu. To zostaje na sprzet, i wtedy juz tylko sterownik, bo cala
-      kryptografia bedzie gotowa i sprawdzona.
-
-- [x] **TLS z AES-128-GCM, nie tylko z ChaCha20** (user/utls.h,
-      rozszerzona grupa `tls64`).
-
-      Pierwszy zysk z AES-a, ktory widac od razu. Do tej pory klient
-      oferowal jeden zestaw szyfrow i tyle - a czesc serwerow, zwlaszcza
-      wbudowanych i sprzetowych, nie oferuje nic poza AES-GCM. Teraz w
-      ClientHello ida dwa zestawy, serwer wybiera, a roznica miedzy nimi
-      konczy sie na rekordzie: rozklad kluczy, transkrypt i cale
-      uzgodnienie sa te same, klucz ma tylko szesnascie bajtow zamiast
-      trzydziestu dwoch.
-
-      ChaCha20 zostaje pierwsza w kolejnosci naszych preferencji, bo nie
-      potrzebuje tablic podstawien, wiec nie ma czym zdradzic klucza
-      przez pamiec podreczna. AES jest po to, zeby bylo z czym rozmawiac
-      tam, gdzie nie ma wyboru.
-
-      **Test, ktory nie pozwala sobie na "chyba dziala".** Do tej pory
-      "polaczylo sie" nie mowilo nic o tym, ktorego szyfru uzyto - bo
-      byl jeden. Teraz stoja dwa serwery, kazdy zgadza sie na DOKLADNIE
-      jeden zestaw (openssl s_server -ciphersuites, bo modul ssl
-      Pythona nie umie zawezic zestawow TLS 1.3) i przy innym zrywa
-      uzgodnienie. Odpowiedz, ktora wraca, jest wiec dowodem, czym
-      rekord byl zaszyfrowany - osobno dla AES-GCM i osobno dla
-      ChaCha20-Poly1305.
-
-- [x] **Dysk w gniazdku USB: pendrive jak kazdy inny dysk**
-      (transfery bulk w kernel/xhci.c, sterownik kernel/usbmass.c,
-      FAT z wybranego dysku, nowa grupa testow `usbdysk`).
-
-      Magistrala USB nosila dotad klawiature i mysz - urzadzenia, ktore
-      na pytanie odpowiadaja kilkoma bajtami. Dysk to drugi rodzaj
-      ruchu: punkty koncowe bulk, dane w obie strony i polecenie SCSI
-      w kazdym transferze. Klasa nazywa sie Bulk-Only Transport i mowi
-      nia kazdy pendrive z ostatnich dwudziestu lat: trzydziesci jeden
-      bajtow polecenia (CBW), dane, trzynascie bajtow werdyktu (CSW).
-
-      **Blad, ktory znalazl sie sam i byl powazniejszy niz cala reszta.**
-      Test uruchomil te sama maszyne przez UEFI - i USB znikneło.
-      Zupelnie: "USB: brak", mimo ze kontroler byl na PCI. Powod:
-      firmware UEFI przydziela kontrolerowi okno pamieci POWYZEJ 4 GiB,
-      a sterownik odmawial takiego adresu jednym warunkiem napisanym
-      wtedy, gdy jadro bylo tylko 32-bitowe. W trybie dlugim nie ma
-      powodu odmawiac - i teraz nie odmawia, a w trybie 32-bitowym
-      mowi wprost, dlaczego nie moze. **Na laptopie, ktory startuje
-      przez UEFI, oznaczalo to brak klawiatury i myszy USB** - czyli
-      wszystkiego, co ma nowy laptop. Zaden test tego nie lapal, bo
-      testy USB startowaly z plyty przez BIOS.
-
-      Stad tez druga zmiana: kontroler, ktory sie nie podnosi, ZAPISUJE,
-      gdzie stanal ("nie ma kontrolera xHCI na PCI", "kontroler siedzi
-      powyzej 4 GiB", "nie chce sie zresetowac"), a `sprzet` to
-      pokazuje. "USB: brak" nie jest odpowiedzia, z ktora ktokolwiek
-      moze cokolwiek zrobic.
-
-      **FAT z WSKAZANEGO dysku.** Pendrive jest do ogladania, a nie do
-      przestawiania na niego calej maszyny - wiec `fat 1 3` montuje
-      partycje z dysku trzeciego, a PFS dalej pracuje na swoim. Kazdy
-      odczyt i zapis tego systemu plikow przestawia warstwe blokowa na
-      wlasciwy dysk i odklada ja z powrotem, dokladnie tak jak przy
-      ogladaniu cudzych dyskow w `dyski`.
-
-      Sterownik dopisuje sie do blk.c jako zwykly dysk - ale na koncu
-      listy: maszyna, ktora ma wlasny dysk, ma z niego startowac,
-      cokolwiek tkwi w gniazdku.
-
-      Sprawdzane tak, ze wynik czyta ktos inny: mtools zapisuje plik na
-      obrazie pendrive'a i system musi go przeczytac, a potem system
-      pisze swoje i mtools musi to znalezc - razem z tym, ze plik hosta
-      przezyl. Na koniec to, po co pendrive w ogole jest: **instalacja
-      systemu na pendrive z poziomu dzialajacego systemu** (`instaluj
-      tekstem caly 3`), sprawdzenie tablicy GPT wlasnym czytnikiem,
-      loadera co do bajtu przez mtools - i uruchomienie tego pendrive'a
-      pod UEFI, az do powloki.
-
-- [x] **Bluetooth: rozmowa HCI z adapterem** (kernel/bt.c, komendy `bt`,
-      `bt skan`, `bt test`, grupa testow `bt`).
-
-      Kazdy adapter Bluetooth, cokolwiek ma w srodku, mowi tym samym
-      jezykiem: HCI. Polecenia w dol, zdarzenia w gore, a pakiety maja
-      ten sam ksztalt niezaleznie od tego, czy adapter siedzi na USB,
-      na porcie szeregowym czy na SDIO. W laptopie siedzi na USB -
-      wewnetrznie, na tej samej magistrali co kamerka - wiec ten
-      sterownik gada przez warstwe USB, ktora wlasnie powstala przy
-      pendrivie. Polecenia nie ida zadnym punktem koncowym: sa
-      transferem kontrolnym z typem zadania 0x20 i reszta wyzerowana.
-      Tak jest od 2001 roku.
-
-      **I tu przebiega granica, ktora trzeba nazwac.** QEMU nie emuluje
-      zadnego adaptera Bluetooth - caly stos wyrzucono z niego lata
-      temu - i zaden inny hipernadzorca tez go nie ma. Wiec ani jedna
-      linia tej rozmowy nigdy nie dotarla do urzadzenia, ktore
-      odpowiada. Sprawdzone jest to, co jest czystymi bajtami: skladanie
-      polecen i czytanie zdarzen, przeciwko nagranym pakietom o
-      ksztalcie z normy. `bt test` sam to mowi na koncu: "to sprawdza
-      skladanie i czytanie pakietow, nie rozmowe z adapterem".
-
-      Co lapie taki test, mimo wszystko: adres, ktory na drucie idzie
-      od najmlodszego bajtu, a na ekranie od najstarszego - odwrotnie
-      przeczytany jest poprawny i nie do poznania; wytworce, ktora w
-      odpowiedzi na Read Local Version stoi na bajcie osmym, a nie
-      siodmym; nazwe urzadzenia wyciagana z rozglaszania LE, gdzie jest
-      jednym z kawalkow o wlasnej dlugosci i typie. To sa dokladnie te
-      pomylki, ktore inaczej znajduje sie na laptopie, po jednym
-      restarcie na sztuke.
-
-      Druga rzecz, ktorej pilnuje test: **uczciwosc na maszynie bez
-      adaptera**. `bt` ma powiedziec, ze adaptera nie ma i dlaczego, a
-      `bt skan` ma odmowic - a nie pokazac pusta liste urzadzen, jakby
-      sie rozgladal. Pusta lista i brak adaptera to dwie rozne rzeczy i
-      tylko jedna z nich jest prawdziwa.
-
-      Czego tu nie ma: danych. Skanowanie potrzebuje tylko zdarzen,
-      wiec starczy punkt koncowy przerwaniowy; polaczenie z sluchawkami
-      czy myszka potrzebuje dwoch punktow bulk i warstwy L2CAP nad
-      nimi. To pojdzie wtedy, gdy bedzie z czym rozmawiac. Adaptery
-      Intela i Broadcoma chca dodatkowo wgranego firmware'u, zanim
-      zrobia cokolwiek poza podaniem wlasnego adresu.
-
-- [x] **Pendrive wlozony w trakcie pracy - i wyjety** (watek pilnujacy
-      gniazdek w kernel/usbhc.c, dyski dopisywane i wykreslane w
-      kernel/blk.c, rozszerzona grupa `usbdysk`).
-
-      Wyliczenie urzadzen przy starcie odpowiada na pytanie "co bylo
-      wetkniete, kiedy wstawalismy". Maszyna, ktorej ktos uzywa, ma
-      calkiem inne pytanie: co jest wetkniete TERAZ. Odpowiedz siedzi w
-      tym samym bicie - kontroler trzyma stan kazdego gniazdka w
-      rejestrze - wiec zauwazenie pendrive'a kosztuje jeden odczyt, a
-      nie mechanizm.
-
-      Ksztalt jest odwrotny niz przy starcie: tam kazdy sterownik
-      przechodzil po gniazdkach sam, tu jeden watek patrzy na gniazdka,
-      a sterowniki zglaszaja, co potrafia rozpoznac. Musi byc odwrotny,
-      bo teraz to GNIAZDKO sie zmienia, a nie sterownik pyta.
-
-      **Numery dyskow nie moga sie przesuwac.** Ktos patrzy na `dyski`
-      i za chwile wpisze `instaluj tekstem caly 2`. Wiec dysk, ktory
-      znika, zostaje na swoim miejscu z adnotacja "wyjety z gniazdka",
-      a nowy dopisuje sie na koncu. Odczyt z wyjetego konczy sie
-      odmowa, nie smieciami - i to samo dotyczy systemu plikow: FAT
-      podmontowany z wyjetego dysku przestaje byc podmontowany, BEZ
-      zapisywania czegokolwiek, bo nie ma dokad. System plikow, ktory
-      po zniknieciu dysku odpowiada z pamieci, to jest sposob na
-      nadpisanie cudzych danych.
-
-      Slot wraca do kontrolera przy kazdym wyjeciu. Bez tego maszyna, w
-      ktorej ktos cztery razy wlozyl i wyjal pendrive, nie ma juz
-      slotow - a piaty raz po prostu nie jest widziany, co wyglada jak
-      zepsute gniazdko.
-
-      **Dwa watki na jednym kontrolerze - i to wymaga zamka.** Do tej
-      pory wyliczanie konczylo sie, zanim ruszyl watek klawiatury.
-      Teraz pendrive moze byc witany w trakcie czytania klawiatury.
-      Wkladanie TRB do pierscienia i zdejmowanie zdarzenia sa krotkie -
-      od tego jest spinlock. Cale POLECENIE krotkie nie jest: czeka na
-      odpowiedz, a dwa polecenia naraz znalazlyby nawzajem swoje
-      zakonczenia, bo zdarzenie mowi, z ktorego pierscienia przyszlo, a
-      nie czyje bylo. Wiec polecenia ida po kolei.
-
-- [x] **FAT32 na malym wolumenie przestaje udawac FAT16** (kernel/fat.c,
-      nowy przypadek w grupie `fat`).
-
-      Znalezione przez pendrive: 32 MiB sformatowane przez mtools jako
-      FAT32, a system pokazywal pusty katalog na pelnym dysku. Typ FAT-u
-      wynika z liczby klastrow - to jest regula i tej reguly trzymamy
-      sie dalej - ale formater, ktoremu KAZANO zrobic FAT32, robi go
-      takze na wolumenie zbyt malym, zeby go potrzebowal. Taki wolumen
-      mowi to wprost: szesnastobitowe "sektorow na FAT" jest zerem, a
-      trzydziestodwubitowe nie, i nie ma katalogu glownego o stalym
-      rozmiarze. Czytany sama liczba klastrow wyglada jak FAT16 - i
-      wszystko po tym jest smieciem.
-
-      Dowod, ze to naprawde FAT32, przychodzi w tescie od mtools
-      ("sectors per fat: 0"), a nie od nas - bo nasza wlasna regula
-      byla tu wlasnie tym, co bylo do sprawdzenia.
-
-- [x] **Koncentratory USB: to, co jest w stacji dokujacej** (route string
-      w kernel/xhci.c, gniazdka rosnace w kernel/usbhc.c, rozszerzone
-      grupy `xhci` i `usbdysk`).
-
-      Urzadzenie za koncentratorem nie jest na ZADNYM porcie kontrolera
-      - wiec przejscie po portach kontrolera nie znajduje go w ogole.
-      Tak wlasnie wygladala z tej strony stacja dokujaca: pusto.
-
-      Gniazdko przestalo wiec znaczyc to samo, co port kontrolera.
-      Lista gniazdek zaczyna sie od portow kontrolera i ROSNIE: kazdy
-      znaleziony koncentrator dokleja swoje na koniec. Sterownik
-      chodzacy "po portach" siega przez to za koncentratory, nic o nich
-      nie wiedzac - i o to chodzi.
-
-      Sam koncentrator obsluguje sie zwyklymi transferami kontrolnymi:
-      zapytaj o deskryptor klasy (typ 0x29 - jedyne miejsce, gdzie
-      stoi liczba portow), daj kazdemu portowi zasilanie, odczekaj
-      tyle, ile koncentrator sobie zazyczyl (port, ktory jeszcze sie
-      nie zasilil, odpowiada "nic tu nie ma" i urzadzenie za nim nigdy
-      nie zostaje znalezione), potem reset portu i odczyt jego stanu -
-      w ktorym siedza takze dwa bity predkosci.
-
-      **Kontrolerowi trzeba potem powiedziec DROGE.** Route string:
-      cztery bity na kazde pietro koncentratorow, pierwsze pietro na
-      najnizszych. Do tego dwa pola, ktore latwo przeoczyc: urzadzenie
-      wolniejsze niz koncentrator nad nim jedzie przez jego translator
-      transakcji, wiec kontroler musi wiedziec, KTORY koncentrator i
-      ktory jego port za to odpowiada. Bez tego urzadzenie dostaje
-      adres i milczy - a to jest rzecz, na ktora patrzy sie dlugo, nim
-      sie ja zobaczy. I sam koncentrator musi byc oznaczony jako
-      koncentrator w swoim kontekscie, bo inaczej kontroler uwaza, ze
-      nie ma zadnych portow, a polecenie o drodze przez niego dotyczy
-      trasy, ktora dla niego nie istnieje.
-
-      Sprawdzane dwoma urzadzeniami za koncentratorem: klawiatura (i to,
-      co na niej wpisane, ma dojsc do powloki) oraz pendrive (ma byc na
-      liscie dyskow jak kazdy inny i dac sie czytac). Czego jeszcze nie
-      ma: zauwazania urzadzen wkladanych do koncentratora w trakcie
-      pracy - pytanie koncentratora o kazdy port dwa razy na sekunde
-      kosztowaloby wiecej, niz jest warte, i jest to napisane wprost
-      zamiast komentarza udajacego co innego.
-
-- [x] **Wkladanie do koncentratora, i przedzial czasu, ktory znaczy co
-      innego niz sie wydaje** (kernel/usbhc.c, kernel/xhci.c,
-      rozszerzona grupa `usbdysk`).
-
-      Pendrive wlozony do stacji dokujacej, a nie do maszyny. Koncentrator
-      ma punkt koncowy, ktorego calym zadaniem jest powiedziec "cos sie
-      zmienilo na porcie N" - i tak sie go pilnuje, zamiast pytac o
-      kazdy port dwa razy na sekunde. Odpowiedz to mapa bitowa: bit
-      pierwszy to port pierwszy.
-
-      **Blad, ktory chowal sie za dzialajaca klawiatura.** Przedzial
-      czasu w deskryptorze i przedzial w kontekscie punktu koncowego to
-      NIE jest ta sama liczba. Deskryptor high-speed podaje wykladnik,
-      a full-speed - milisekundy, i koncentrator prosi o dwiescie
-      piecdziesiat piec. Wpisane bez przeliczenia daje 2^255
-      mikroramek, czyli odpytywanie rzadsze niz zycie maszyny - punkt
-      koncowy, ktory nigdy nie odpowiada. Klawiatura dzialala mimo tego
-      samego bledu, bo prosila o osiem i wyszlo z tego trzydziesci dwie
-      milisekundy zamiast osmiu: dosc, zeby nikt nie zauwazyl.
-      Przeliczenie jest teraz takie, jak w normie, i zalezy od
-      predkosci urzadzenia - wiec kontroler zapamietuje predkosc kazdego
-      slotu.
-
-      **I drugi, o jeden stan za daleko.** Watek pilnujacy gniazdek
-      zapamietuje, co bylo wetkniete, zeby wiedziec, co sie zmienilo.
-      Gniazdko koncentratora, ktore przy starcie zostalo obejrzane i
-      okazalo sie puste, bylo zapamietane jako ZAJETE - bo "obejrzane"
-      myli sie z "cos w nim jest" tylko wtedy, gdy sie te dwie rzeczy
-      pomyli w kodzie. Efekt: pierwsze wlozenie bylo widziane, a nastepne
-      juz nie.
-
-      Kazda zmiana zgloszona przez koncentrator jest teraz kwitowana -
-      wszystkie flagi, nie tylko ta, po ktora sie przyszlo. Niepokwitowana
-      flaga jest zglaszana w kolko i punkt koncowy mowi "cos sie
-      zmienilo" na wieki, dwa razy na sekunde, o czyms, co zmienilo sie
-      raz.
-
-- [x] **Karta sieciowa na USB (RNDIS)** (kernel/usbnet.c, netdev.c,
-      nowa grupa testow `usbsiec`).
-
-      Druga polowa tego, co siedzi w stacji dokujacej. Rozni sie od
-      dwoch kart, ktore ten system juz zna, glebiej niz rejestrami: nie
-      ma zadnych rejestrow. Wszystko jest rozmowa - "wstan", "jaki masz
-      adres", "przepuszczaj rozgloszenia" - prowadzona przez punkt
-      koncowy zero jako "polecenia opakowane", a kazda ramka dostaje
-      czterdziestoczterobajtowy naglowek przed soba.
-
-      Protokolem jest RNDIS, czyli NDIS - interfejs sterownikow Windows
-      - rozciagniety po drucie. Stad jego wiadomosci pytaja o "OID-y"
-      zamiast o sprzet: OID to numer nazywajacy wlasciwosc, a
-      0x01010101 znaczy akurat "twoj staly adres ethernetowy".
-
-      **Rzecz, ktora kosztowala najwiecej czasu i miesci sie w jednym
-      polu.** Przy pytaniu bez danych PRZESUNIECIE tych danych ma byc
-      zerem, a nie dwudziestka, ktora niesie wiadomosc Z danymi. Karta
-      sprawdza, czy przesuniecie wskazuje do srodka wiadomosci - a
-      pytanie o dwudziestu osmiu bajtach, ktorego dane zaczynaja sie na
-      dwudziestym osmym, jest pytaniem, na ktore odmawia odpowiedzi. Z
-      zewnatrz wyglada to dokladnie jak karta, ktora nie dziala.
-
-      **I rzecz strukturalna: tu nic nie da sie zrobic z przerwania.**
-      Karta PCI zglasza przerwanie i program obslugi czyta pierscien;
-      karte USB trzeba ZAPYTAC, a pytanie to transfer, a transferu nie
-      wolno robic w obsludze przerwania. Wiec ramki zbiera watek, ktory
-      spedza zycie na czekaniu na odczyt bulk - i po to ten watek jest.
-      Przy okazji czekanie w sterowniku xHCI przestalo byc czystym
-      kreceniem sie w kolko: po kilkuset obrotach oddaje maszyne
-      planiscie, bo sterownik krecacy sie pieć sekund w oczekiwaniu na
-      pakiet, ktory moze nigdy nie przyjsc, zatrzymuje cala maszyne.
-
-      Karta USB jest ostatnia na liscie prob w netdev.c: maszyna z
-      wlasna karta zostaje przy niej, a maszyna bez zadnej moze siegnac
-      do sieci przez stacje dokujaca. Test stawia maszyne BEZ karty PCI
-      i sprawdza cala droge w gore: adres z DHCP, odpowiedz na ping i
-      strone pobrana po TCP z serwera na hoscie - z pierscienia 3.
-
-- [x] **Kontrolki: to, co kazdy program pisal od nowa** (user/ugui.h,
-      mikser przepisany na tej warstwie).
-
-      W kazdym programie graficznym tego systemu bylo to samo:
-      prostokat narysowany tam, gdzie ma byc przycisk, napis na nim, a
-      potem w petli zdarzen arytmetyka - czy klik jest w tych
-      wspolrzednych, czy to pierwszy przycisk czy drugi, ktory wiersz
-      listy to (y - 20) / 12. Szesc programow, szesc kopii tej samej
-      arytmetyki i szesc miejsc, w ktorych przycisk moze wyladowac o
-      piksel od tego, gdzie klik jest oczekiwany.
-
-      Wiec okno staje sie LISTA RZECZY zamiast ciagiem wywolan
-      rysujacych. Program mowi, co ma - etykieta tu, przycisk tam,
-      suwak od zera do stu - a warstwa rysuje, decyduje, w co trafil
-      klik, prowadzi ognisko klawiatury i zglasza "wcisnieto trzeci".
-
-      Czym to swiadomie NIE jest: nie przejmuje petli, nie trzyma
-      danych programu i niczego samo nie rozklada. Pozycje podaje
-      program, w pikselach, bo tak juz robi kazde okno tutaj, a silnik
-      ukladu bylby drugim frameworkiem na pierwszym.
-
-      **Dowod, ze przepisanie nic nie zmienilo, jest z zewnatrz.** Test
-      miksera klika w suwak i w przyciski, a potem MIERZY, co wyszlo z
-      karty dzwiekowej do pliku WAV: sto procent daje szczyt 8000,
-      jedna piata - 1506, cisza - zero. Ten sam test przechodzi na
-      przepisanym oknie, z tymi samymi liczbami. Framework, ktory sie
-      kompiluje, i framework, ktory dziala, rozniaca sie wlasnie tym.
-
-- [x] **Pytanie w oknie zamiast "kliknij jeszcze raz"** (ug_modal w
-      user/ugui.h, menedzer plikow pyta przed skasowaniem).
-
-      "Na pewno?" jest tym, czego potrzebuje kazdy program z
-      niszczacym przyciskiem, a do tej pory kazdy wymyslal to sobie
-      sam: gfiles pytal tak, ze DRUGIE klikniecie w ten sam przycisk
-      znaczylo co innego niz pierwsze. To dziala i nikt tego nie
-      zgadnie.
-
-      Panel jest rysowany W OKNIE, a nie jako drugie okno. Program,
-      ktorego pytanie ma wlasne okno, musi trzymac oba przy zyciu,
-      przesuwac je razem i odpowiadac za oba, gdy pulpit prosi o
-      zamkniecie; panel nad trescia ma to wszystko za darmo i dodatkowo
-      nie da sie go zgubic za czyms innym. Dopoki jest, bierze kazde
-      zdarzenie - i to jest roznica miedzy pytaniem a sugestia.
-
-      Test dostal przy okazji asercje, ktorej wczesniej nie bylo i
-      ktorej nie dalo sie napisac: **"Zostaw" ma zostawic plik**.
-      Pytanie, ktorego obie odpowiedzi znacza tak, nie jest pytaniem.
-
-- [x] **Wybor pliku z listy zamiast wpisywania nazwy w ciemno**
-      (ug_pick w user/ugui.h, Ctrl+O w edytorze).
-
-      Edytor pytal "Otworz:" i czekal na nazwe. To dziala, jesli sie
-      pamieta, co jest na dysku, a poza tym jest zgadywanka - jedyne
-      miejsce w systemie graficznym, gdzie czlowiek byl w gorszej
-      sytuacji niz w powloce, bo powloka przynajmniej dopowiada nazwy.
-
-      Teraz jest lista tego, co jest, linia do wpisania nazwy, ktorej
-      jeszcze nie ma, i dwa przyciski. Klikniecie wiersza wpisuje nazwe
-      do linii, wiec ktorakolwiek droga sie do niej dojdzie, otwierana
-      jest ta sama linia - i dlatego stary sposob uzywania (wpisac i
-      Enter) dziala dalej, co test sprawdza osobno od nowego.
-
-      **Popoludnie kosztowal blad, ktory nie byl w systemie.** Test
-      przestal znajdowac menedzer plikow, a przyczyna byla w jednej
-      linii, ktora dopisalem do testu: odsuniecie wskaznika na (700,
-      420) na ekranie 640x480. Sterownik myszy przycina wskaznik do
-      krawedzi, a test dalej liczy, ze jest tam, gdzie prosil - i od
-      tego miejsca kazdy klik ladowal szescdziesiat pikseli obok.
-      Nacisniecie na ikone nie bylo wiec nacisnieciem na ikone i nic
-      sie nie uruchamialo. Widac to bylo dopiero po dolozeniu do jadra
-      wypisywania, ktora ikona zostala puszczona.
-
-- [x] **System przygotowany do wypuszczenia na GitHubie jako open source**
-      (LICENSE, CONTRIBUTING.md, .github/, zrzuty w docs/, README).
-
-      Kod lezal na GitHubie, ale nie byl otwarty w zadnym uzytecznym
-      sensie: bez licencji nikt nie ma prawa go uzyc (brak licencji to
-      nie "rob co chcesz", tylko "wszystkie prawa zastrzezone"), bez
-      opisu zasad kazda przyslana zmiana byla loteria, a bez CI
-      pierwsza taka zmiana byla sprawdzana dopiero na moim komputerze.
-
-      **Licencja MIT** - najkrotsza z tych, ktore pozwalaja wszystko i
-      niczego nie wymagaja poza zachowaniem nazwiska.
-
-      **CONTRIBUTING.md** spisuje jedyna regule, ktora naprawde rzadzi
-      tym repozytorium: **kazda funkcja przynosi test, ktory bez niej
-      by nie przeszedl**, i test ma sprawdzac system z zewnatrz - przez
-      ekran, port szeregowy, mtools czytajace nasz FAT, OpenSSL
-      liczacy nasze szyfry, firmware, ktory z dysku wstaje albo nie.
-      Jest tam tez to, co ktos z zewnatrz musialby zgadywac: dlaczego
-      kod jest po angielsku, a system mowi po polsku; dlaczego jadra sa
-      dwa z jednych zrodel; i zeby nigdy nie pisac `time.sleep(3)` i
-      czytac ekranu raz - polowa migajacych testow, jakie ten projekt
-      mial, byla dokladnie tym.
-
-      **CI w GitHub Actions** jest podzielone: kazdy push buduje oba
-      jadra, protoboot, plyte i obraz pendrive'a, a potem uruchamia
-      kilkanascie grup, ktore dotykaja najwiecej systemu (start obu
-      jader, ring 3, PFS, FAT, AES, WPA, USB, dzwiek, UEFI). Caly
-      zestaw - dziewiecdziesiat piec grup i okolo stu maszyn
-      wirtualnych - chodzi raz na dobe, bo biegacz GitHuba ma dwa
-      rdzenie i nie ma KVM, wiec pelny przebieg trwalby dluzej, niz
-      ktokolwiek chce czekac przy pull requescie. Przy niepowodzeniu
-      wrzuca logi szeregowe jako artefakt, bo bez nich zdalna porazka
-      jest tylko czerwonym krzyzykiem.
-
-      **Zrzuty ekranu** robi skrypt, ktory startuje jadro 64-bitowe w
-      QEMU, klika po systemie i zrzuca framebufor - ta sama maszyneria,
-      co testy, wiec na obrazku jest to, co jadro naprawde narysowalo,
-      a nie makieta. Dwa: pulpit z menedzerem plikow, zegarem i
-      monitorem pamieci, oraz instalator na calym ekranie, w chwili gdy
-      wypisal juz, co zapisze, a jeszcze nie zapisal niczego.
-
-      Przy okazji wyszlo, ze README klamalo w liczbach - "prawie 800
-      asercji" i "50 grup" bylo prawda kilkadziesiat commitow temu.
-      Teraz asercji jest ponad 1600, a grup 95.
-
-      **Pierwszy przebieg CI zmierzyl to, czego sie balem.** Zestaw
-      kilkunastu grup zajal biegaczowi GitHuba **szesc minut** - dwa
-      rdzenie, bez KVM. Skoro tyle, to lista byla za krotka: doszly
-      grupy, ktore najlatwiej zepsuc niechcacy (pulpit, menedzer
-      plikow, instalator, powloka w ring 3, TLS 1.3, siec, pendrive).
-      Pelny lokalny przebieg po tych zmianach: **1714 asercji, zero
-      niepowodzen, 95 grup, 1229 s**.
-
-- [x] **Pierwsza porazka CI byla porazka srodowiska, nie systemu**
-      (port 53 w scripts/ptest.py).
-
-      Poszerzony zestaw grup wywalil sie na `tls64` po sekundzie, z
-      `PermissionError` przy `bind(("0.0.0.0", 53))`. Grupy sieciowe
-      stawiaja **wlasny serwer DNS na porcie 53 hosta**, bo tam wlasnie
-      siec uzytkownika QEMU wysyla pytania goscia (10.0.2.2:53) i nie
-      da sie tego przemapowac - `guestfwd` obsluguje TCP, nie UDP. U
-      mnie testy chodza jako root, wiec tego nie bylo widac; biegacz
-      GitHuba rootem nie jest.
-
-      Dwie rzeczy naraz. Po pierwsze, `start_dns_server` zwraca teraz
-      `(stop, ok)` zamiast wybuchac: grupa, ktora bez nazw nie ma czego
-      sprawdzac, mowi **co odpuszcza i dlaczego**, z gotowa recepta
-      (`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53`).
-      Slad stosu wygladal jak blad systemu, a byl brakiem uprawnien -
-      to jest dokladnie ta roznica, ktora test ma pokazywac.
-
-      Po drugie, CI dostalo te jedna linie sysctl przed testami, bo
-      **odpuszczenie asercji to strata pokrycia**, a nie rozwiazanie.
-      Zielone CI, ktore po cichu nie sprawdza TLS-a, byloby gorsze niz
-      czerwone.
-
-      Obie drogi sprawdzone lokalnie: normalna (jako root, cztery grupy
-      sieciowe przechodza) i odmowa (port 53 zajety przez inny proces -
-      grupa wypisuje POMINIETE i konczy sie zielono).
-
-      Potwierdzenie z zewnatrz: przebieg CI po tej zmianie jest zielony,
-      **559 asercji zamiast 539** - te dwadziescia to wlasnie `tls64`,
-      ktory wczesniej wywalal sie po sekundzie. Dziewiec minut na
-      biegaczu z dwoma rdzeniami.
-
----
-
-*Od tego miejsca dziennik jest po angielsku - razem z systemem. Wpisy
-powyzej zostaja takie, jakie byly pisane: przetlumaczony dziennik
-przestalby byc dziennikiem.*
-
-*From here on this journal is in English, together with the system. The
-entries above stay as they were written: a journal translated after the
-fact stops being a journal.*
+      fs_init() checked on EVERY boot whether the first block said PFS3, and if it did
+      not, it formatted the disk. Without asking, without looking at what was there.
+
+      That was harmless as long as every disk this system had seen was an empty file
+      made by a test. It stops being harmless the moment it meets a real machine: a
+      laptop's disk does not say PFS3 either. Starting this from a stick on the Dell
+      would have wiped the partition table, Windows and everything else in the first
+      second of the first boot.
+
+      I saw it not by reading, but because my test image with a GPT came back as
+      "no partition table": the kernel had wiped it before I got to read it.
+
+      Now only a REALLY empty disk is formatted. "Empty" is answered carefully,
+      because the cost of a mistake one way is a new disk a person formats by hand,
+      and the other way, somebody's data: a partition table signature in sector zero
+      disqualifies at once, and otherwise the first sixty-four kilobytes must be zeros
+      throughout. Everything else is left untouched and said plainly, and whoever
+      really wants that disk says so with the `format` command.
+
+      The confirmation is a word typed in full, YES in capitals, because a key to
+      press is something a person does by reflex, while a word has to be decided on.
+
+      **Reading the partition table** (kernel/part.c) came about on this occasion and
+      is the foundation for all the rest: MBR and GPT, where detecting the latter is
+      one byte. Type 0xEE in sector zero means "look at sector one". GPT keeps a
+      protective entry there covering the whole disk precisely so that a program that
+      knows only the old format sees a full disk instead of an empty one and does not
+      kindly offer to partition it. Nothing in that file writes.
+
+      The `disk` group asks about restraint and what it consists of: an image with a
+      real GPT goes into the boot and comes out of it with the same table, read BACK ON
+      THE HOST SIDE, byte by byte, not taken on the system's word. An empty disk is
+      still formatted. A wrong answer to `format` erases nothing, and a typed YES
+      erases, and then the table is gone, because that was what was asked for.
+
+      **PFS in a partition**: the second step, done at once, because without it the
+      first is only a refusal. The offset lives in TWO functions that touch the disk
+      and nowhere else, so no code above has to know whether it stands on the whole
+      disk or a piece of it. `format N` takes one partition (the table and the
+      neighbours stay as they were), and on the next boot the kernel finds its PFS by
+      itself, looking for a partition whose first block says PFS3. No registry of
+      GUIDs, no new agreements: the system recognises itself by what it already writes.
+
+      The test checks something that is easy to fake. Not only whether the table
+      survived (that is 34 sectors) but whether the NEIGHBOURING PARTITIONS still have
+      their data, because those are hundreds of megabytes and they are what really
+      matters. A marker written before, read after, on the host side.
+
+      What this is NOT: an installer. For the machine to start from this partition,
+      writing to the EFI partition is still missing (i.e. FAT, which we do not have),
+      and so is an EFI boot program. Those are the next steps, not this one.
+
+- [x] **protoboot (today threadboot): a UEFI boot loader of our own**, stages 1-3.
+
+      Until today this system was started by GRUB. GRUB is excellent and it is
+      SOMEBODY ELSE'S; everything else here is written from scratch, and the thing
+      that puts the kernel into memory was the last piece that was not.
+
+      **Stage 1 removed the biggest risk**, and that was its only point: I did not know
+      whether this toolchain would build an EFI application at all. An EFI application
+      is a PE32+ file with the Microsoft calling convention, two things GCC on Linux
+      does not do. clang targeting x86_64-unknown-windows plus lld-link does them;
+      `file` says "PE32+ executable (EFI application)", and the firmware loaded and ran
+      it. Two kilobytes, without gnu-efi and without EDK2. The only foreign thing is the
+      file format.
+
+      **The UEFI declarations are ours** (boot/efi/efi.h), and two things have to be
+      done right with them. The ORDER of members: the firmware hands over tables of
+      function pointers, and we index by position; a skipped entry shifts everything
+      after it and the machine jumps into the wrong function. That is why every entry of
+      the boot services table is there, in order, even those we never call. And the
+      CALLING CONVENTION, which the choice of compiler takes care of, so not a single
+      line has to repeat it.
+
+      **Stages 2 and 3**: reading the kernel and the initrd, the graphics mode, ACPI. We
+      do NOT NEED a FAT of our own to boot: the firmware has already mounted the
+      partition we were started from and provides a file protocol. FAT will be needed to
+      WRITE such a partition, i.e. when installing, not here. The file size is taken by
+      seeking to the end and asking where one is, which saves EFI_FILE_INFO, a GUID and a
+      buffer for an answer that is one number.
+
+      The graphics mode is taken as the firmware already shows it: on a laptop that is
+      the panel's native resolution, exactly what we want, and asking for a specific mode
+      would throw it away. It is the same lesson as with the Multiboot 2 header: asking
+      for something specific wins and spoils things.
+
+      The RSDP from the firmware's configuration table, because on a UEFI machine there
+      is no other way: the old search through low memory finds nothing there.
+
+      Measured under OVMF: kernel 825028 B, initrd 448132 B, to the byte as large as the
+      files, the screen 1280x800, RSDP version 2.0.
+
+      **The loader loads the 64-bit kernel and only that.** At first it reached for the
+      32-bit kernel, which was thoughtless: a UEFI machine is a 64-bit machine. The 32-bit
+      kernel exists in this project so that one set of sources is compiled twice and the
+      second compilation tells what the first one hid. That is a good reason to keep it,
+      and no reason to run it on a laptop. Letting it in here would mean an ELF32 loader
+      next to the ELF64 one for a case nobody has; generality nobody asked for is how a
+      loader stops being trustworthy. GRUB still starts that kernel for whoever needs it.
+
+      On the way, two things this established: the 64-bit kernel is ELF64 (not ELF32, as
+      I had assumed when planning the loading), and the kernel takes the initrd module BY
+      POSITION, not by name, so the loader has to pass one module and that is it.
+
+      **What is still missing**: building the Multiboot 2 tag table, loading the ELF,
+      ExitBootServices and the jump. That last one is the awkwardness of the whole
+      undertaking: a UEFI application runs in long mode, and a Multiboot 2 kernel enters
+      in 32-bit protected mode, so after saying goodbye to the firmware one has to leave
+      long mode oneself, on one's own tables, with paging turned off.
+
+      The shape of "telling the kernel" is already fixed and is not ours to change: the
+      kernel is a Multiboot 2 image and wants a magic number in EAX and a tag table in
+      EBX. So the loader BUILDS that table, exactly as GRUB does, and the kernel will not
+      find out that anything changed. Not one of its lines had to.
+
+- [x] **protoboot: stage 4, the kernel starts from our loader** (the
+      `threadboot` test group).
+
+      Stages 1-3 read files and asked the firmware about the screen. Stage 4 is what all
+      of it was for: build the Multiboot 2 tag table, load the ELF, say goodbye to the
+      firmware and jump. From the moment ExitBootServices returns, there is nobody left
+      to help: the firmware console no longer exists, so any mistake in this sequence is
+      a machine that goes dark without a word.
+
+      **The tag table is built for what the kernel actually reads**, not for the whole
+      specification. kernel/mb2.c recognises seven types: end, command line, module,
+      memory map, framebuffer and two forms of the RSDP. The loader provides exactly
+      those. Providing the rest would be code nobody reads, and so code nobody checks.
+
+      **The UEFI memory map has a trap, and it is the most important thing in this
+      stage.** The firmware returns a map of its regions; translating it to Multiboot 2
+      is a mapping of types. It is tempting to treat EfiLoaderCode and EfiLoaderData as
+      free: the loader is about to stop existing, after all. Except that IN THAT VERY
+      MEMORY lies the initrd the loader read from the disk. Handed over as free, those
+      pages would go to the kernel's allocator and be given to the first one who asks,
+      and the initrd would turn into garbage before anyone opened it. So they go into the
+      map as RESERVED. The test guards this not by looking at the map but by running a
+      program from the initrd: if somebody gave those pages away, the program will not
+      start.
+
+      **Leaving long mode.** A UEFI application runs in long mode, and a Multiboot 2
+      kernel enters in 32-bit protected mode. The order is forced and leaves no room for
+      ideas of one's own: a GDT of our own (the firmware's disappears with the firmware),
+      a far jump to a 32-bit segment, turning off paging in CR0, clearing EFER.LME,
+      turning off PAE in CR4, and only then a jump to the entry point with EAX and EBX
+      set the way GRUB sets them. The addresses in this sequence are already physical,
+      because UEFI identity-maps memory; if it did not, this step could not be done in
+      place.
+
+      **It worked the first time, and that is not a reason for pride but the result of
+      the shape having been fixed beforehand.** The kernel found out about nothing: the
+      same magic number, the same table, the same module. Not one line of the kernel
+      changed for this loader, and that is the measure of whether the interface was good.
+
+      **The test group** starts a machine on which there is NO GRUB: an EFI partition
+      with three files and the OVMF firmware. The sizes of the kernel and the initrd are
+      checked to the byte against the files on the disk (the loader has to read them, not
+      say it read them), the resolution from GOP is compared with the one the kernel saw
+      and with the one in the screenshot. The BOOTX64.EFI file itself is read byte by
+      byte: PE32+, machine 0x8664, subsystem 10, because only such a file will the
+      firmware run at all.
+
+      **What is still missing**: writing FAT, and an installer. The loader can already
+      start the system from a stick prepared on the host; for ProtonOS to prepare one
+      itself (next to Windows, on a laptop's disk) it has to be able to WRITE the EFI
+      partition. That is the next step.
+- [x] **FAT12/16/32, the only foreign filesystem in this project**
+      (kernel/fat.c, kernel/fatcmd.c, the `fat` test group).
+
+      This system keeps its files in PFS3 and has no reason to want anything
+      else, except in one place. The EFI partition is FAT by definition: the
+      firmware of every UEFI machine can read FAT and cannot read anything else,
+      so a boot program kept anywhere else will never be started. Installing this
+      system next to another one therefore means WRITING to a partition that
+      already exists, already holds someone else's loader, and has to keep
+      working.
+
+      Hence the shape of the driver. Reading is complete. Writing does what an
+      installer needs (a directory, a file, its contents) and nothing more:
+      nothing here formats, nothing moves other people's files, nothing rewrites
+      a structure it did not have to touch. Every write goes to ALL copies of the
+      allocation table, because the system that starts this machine tomorrow may
+      read any of them.
+
+      **Which of the three variants it is, nothing in the boot sector says.** The
+      NUMBER OF CLUSTERS says it, computed from the sizes. That is not malice in
+      the specification but the only thing about FAT that is really true; reading
+      the name from the string in the boot sector, which is where everyone's first
+      bug lives, gets it wrong on volumes that announce "FAT16   " and are not.
+
+      **FAT12 is not a curiosity.** Its entry has twelve bits, so every other one
+      straddles the boundary of a table sector. A driver written for whole entries
+      breaks exactly there. That is why all access to the table (walking a chain,
+      allocating, freeing) goes through SINGLE BYTES: a byte straddles nothing.
+
+      **Long names are read and written**, and that is not politeness. The loader
+      looks for 'protonos64.bin', which does not fit in eight characters and a
+      dot; bending the name to the filesystem's limits would be letting the
+      filesystem decide what this system's files are called. A name that DOES fit
+      in 8.3 gets one ordinary entry, exactly what anyone else would write, with
+      two bits in the byte at position twelve that remember it was written in
+      lower case.
+
+      **What is on the other side of every assertion.** The FAT images in the
+      tests are made by mtools, and mtools reads back everything the system wrote
+      to them: the directory, the long name together with its short name
+      (PROTON~1.BIN), the file contents, the disappearance of a deleted file. A
+      driver that agrees only with itself has proved nothing, least of all on a
+      partition that belongs to the system that starts this machine. What must not
+      be done is checked separately: a foreign bootmgfw.efi on the same partition,
+      the GPT and the neighbouring Windows partition are read from the host after
+      everything and must be untouched.
+
+      **fatcopy is an installer in miniature.** It copies a file from the initrd
+      to the EFI partition, and installing this system is exactly that: the
+      loader, the kernel and the initrd are files the running system already has.
+      The command came before the installer because it is the part that can be
+      checked on its own, to the byte, by a program that is not ours. The test
+      copies the shared library (83 272 B) and compares it with the contents of
+      the initrd.
+
+      **The commands are in a separate file** (kernel/fatcmd.c), because both
+      shells, 32- and 64-bit, should have them, and neither should have its own
+      copy.
+
+- [x] **The installer: ProtonOS onto the machine's disk** (kernel/install.c,
+      the `install` test group).
+
+      On a UEFI machine installing is smaller than the word suggests: three files
+      written to the EFI partition that is already there. The firmware looks for a
+      boot program on it and starts it; that is the whole mechanism. So nothing
+      here creates a partition, nothing touches the table, and nothing deletes or
+      moves any file belonging to the system that already lives on that disk.
+
+      **Where those three files come from: that is the heart of it.** The kernel
+      running right now is loaded segments, not the file it came from, and what
+      has to be written is a file. So the loader passes all three as Multiboot 2
+      modules: the initrd as it always did, and the kernel image and ITSELF, by
+      name. A system started otherwise (QEMU with -kernel, GRUB from a disc not
+      made for this) has nothing to install and says so plainly, instead of
+      writing something approximate.
+
+      Modules other than the initrd are taken BY NAME, not by position. The
+      alternative is an agreement between the loader and the kernel about the
+      order, the kind of agreement that breaks quietly.
+
+      **Two paths, and the difference between them is the whole ethics of this
+      command.** /EFI/ProtonOS is ours and we always write it.
+      /EFI/BOOT/BOOTX64.EFI, the name the firmware falls back to when nothing
+      else is set, we write ONLY IF IT IS NOT THERE. On a machine that has it, it
+      belongs to whoever starts that machine today; taking it would be installing
+      IN PLACE OF someone rather than NEXT TO them. Then the way in is an entry in
+      the firmware's menu, and saying so is better than a machine that quietly
+      stops starting what it used to start.
+
+      The confirmation is a word typed on the keyboard, the same as with `format`
+      and for the same reason: a key to press is a reflex, a word is a decision,
+      and on the other side is somebody's laptop.
+
+      **The test closes the loop.** The machine boots from a stick (the EFI
+      partition given to QEMU as a directory), and the disk of "the other machine"
+      hangs on the AHCI controller (so it is the one the system picks) and has a
+      GPT, a FAT made by mtools and a foreign bootmgfw.efi on it. After installing,
+      each of the three files is read from the image with mtools and compared to
+      the byte, and the foreign file, the table and the neighbouring partition must
+      be untouched. Then THIS DISK IS BOOTED ON ITS OWN, without the stick, and
+      that is the only proof that the installation installed anything. Checked
+      separately: without typing YES nothing happens; and a second disk, one that
+      already has a foreign /EFI/BOOT/BOOTX64.EFI, where that file must be the same
+      byte for byte afterwards.
+
+      On the way, two fixes in the loader: it now loads files with
+      AllocateMaxAddress below four gigabytes (a Multiboot 2 module address has
+      thirty-two bits and nowhere to write a bigger one; until now that was a
+      silent assumption), and when looking for the kernel and the initrd it also
+      looks in \EFI\ProtonOS, which is where the installer puts them.
+
+- [x] **The installer has a screen of its own, not a window on the desktop**
+      (user/ginstal.c, kiosk mode in kernel/desktop.c, the `ginstal` test group).
+
+      It was first made as an ordinary window among other windows, and that was
+      wrong. Installing is not one task among others: while someone's disk is
+      being written, a taskbar and other windows within reach are not a
+      convenience but a way to click something else halfway through the write. So
+      `install` takes the WHOLE screen.
+
+      **Kiosk mode** is the same compositor with everything else taken away: no top
+      bar, no taskbar, no icons, no menu, no desktops and no second window. One
+      program in the middle of an empty screen, and the only thing the environment
+      itself offers: restarting the machine in the top right corner. The window
+      does not even have close, minimise and maximise buttons: there is nowhere to
+      minimise it to, nothing to enlarge it into and nothing behind it, so they
+      were three lies.
+
+      The kiosk restarts the program when it ends; a kiosk with an empty screen
+      looks like a broken machine. But if the program dies at once, after three
+      attempts the kiosk stops and says so; flickering forever was easier to write
+      and worse to watch.
+
+      **The installer is no longer in the desktop menu**, and that is the whole
+      difference between what was and what is.
+
+      **The program knows nothing about installing.** It asks the kernel what the
+      disk looks like (sys_install_look, which reads and changes nothing, so anyone
+      may call it), and asks the kernel for one step at a time (sys_install_step;
+      every step requires an admin, because on the other side is the disk of a
+      machine that will boot without us). Deciding what installing means lives in
+      one place, and that place is not the window.
+
+      One step per loop iteration, not five at once: the kernel would write
+      everything in one call and the window would freeze for the duration of the
+      write. This way the bar moves, and under it stands the name of the file going
+      to the disk right now; a person watching their disk being written has a right
+      to see where it is.
+
+      **A word, not a button.** A button is a reflex, and reflexes are how other
+      people's disks get written. The window asks for YES to be typed, just like
+      the console version. Then the kernel refuses a program that is not an admin,
+      and then, only then, the window asks for the password; the same shape as in
+      gsettings and for the same reason: a refusal is not the same as an error.
+
+      **Every line lies on a twelve-pixel grid.** Not for tidiness: the font is
+      eight pixels tall, and text spaced by eye (one line at twenty, another at
+      fifty) is text only a person can read. A grid is text a program can read too.
+      The size column stands at x=6+36*8 for the same reason, and not at 296,
+      because 296 is not divisible by eight.
+
+      The test reads the screen in the same font the kernel drew it in (a new
+      `Qemu.read_text` in ptest.py; screen_fbcon is now a special case of it,
+      because the console is not the only thing written in that font). It checks
+      both halves: that on this screen there is NO taskbar, top bar or icons, and
+      that a click in the corner where the desktop has 'Menu' opens nothing; and
+      that everything the program says can be read from the screen. At the end, as
+      in the `install` group, the files are read from the image with mtools to the
+      byte, and the installed disk is booted on its own.
+
+      Two small things the test revealed: a mouse cursor drawn over a letter turns
+      it into a character the font does not have (the test moves the pointer away,
+      as a person would), and a window's title bar starts one pixel from the frame,
+      so the content is at win->y + TITLE_H + 1, not where I guessed.
+
+      The console version stays as `install text`. Not out of sentiment: when there
+      is nothing to draw on, or when the answer has to end up in a log, it is the
+      only version that works.
+
+- [x] **Contrast: dark text on light, light text on dark**, in the whole GUI, not
+      only in the installer.
+
+      This system's windows have a light grey background (227,227,227), and every
+      program wrote on it in WHITE. It looked like a working program (everything was
+      drawn) and could not be read. That is the worst kind of interface bug: nothing
+      is broken, it is just that nobody sees anything.
+
+      The rule is one, and it is the whole solution: **dark text on a light
+      background, light text on a dark one**. So black on the grey window, white on
+      the blue accent (buttons, the selected row, the title bar), white on the black
+      input fields, white on the dark desktop background. Dark grey (73,73,73) for
+      what is said more quietly (a file's size next to its name), and blue for
+      headings, because it is the same accent the desktop uses.
+
+      Green (0,255,0) disappeared from light surfaces, because on grey 227 it is worse
+      than white; where it served to tell things apart (a directory from a file, a
+      kernel thread from a program), the accent or the dark grey replaced it. The
+      yellow links in gweb are now blue; links have been blue since links existed,
+      and yellow on a light background is not a colour, it is an absence of colour.
+
+      Fixed: ginstal, gtasks, gfiles, gweb, guiapp, gclock, gmon, gsettings (two
+      places; the rest already knew, there is even a comment there, "Black on grey
+      reads; white on grey does not") and the counter next to the 'Click' button in
+      the compositor itself. gedit, gterm and gimg were right from the start: gedit
+      has a white page and black text, gterm a black background and white text, gimg
+      a status bar in the accent.
+
+      A few lines that were meant to be separators were also white on grey, i.e.
+      invisible. They are now in the line colour (150,150,150), the same the
+      compositor uses.
+
+- [x] **The whole disk: a partition table and a FAT32 of our own**
+      (kernel/gpt.c, fat_mkfs in kernel/fat.c, the `wholedisk` test group).
+
+      Until now installing meant three files on someone else's EFI partition. Now
+      there is a second way, a disk made anew, and the difference between them is
+      the whole point of this step. Beside: the table stays, other partitions stay,
+      every file on the EFI partition stays. Whole disk: a new table, a new EFI
+      partition, a partition for ProtonOS, and everything that was there is gone.
+
+      There is no third way, and there will not be one that shrinks somebody else's
+      partition to make room. Moving another system's data on the strength of a guess
+      about what it is, is not something one does.
+
+      **The GPT is written for what the firmware checks, not for what is enough for
+      us.** A protective MBR in sector zero, the header in sector one, 128 entries
+      after it, and the same entries plus a second header at the very end of the
+      disk, backwards. The last 34 sectors of a GPT disk are not free space but a
+      copy, thanks to which a damaged beginning can be repaired. Both headers carry a
+      CRC of themselves and a CRC of the whole entry table. A mistake in those sums
+      does not show loudly: the firmware quietly decides the table is damaged, and
+      the machine does not start, without saying why. That is why the test reads the
+      table its own way, in Python, the way the firmware reads it: with both sums and
+      a comparison of the copy with the original.
+
+      The entries go to the disk BEFORE the headers that point at them, and the
+      protective MBR at the very end: as long as it is not there, sector zero keeps
+      saying "empty" to anyone who reads it. That is the order in case the power goes
+      in the middle.
+
+      **Our partition's GUID is ours.** The bytes spell PROTONOS-PFS3, so a person
+      looking at the table with a hex editor sees whose it is, and no other system
+      will take it for its own. Borrowing Linux's GUID would be a lie someone would
+      read one day.
+
+      **fat_mkfs makes FAT32, and FAT32 is not a flag one sets.** It is a cluster
+      count above 65524, exactly the same rule mounting uses. So the cluster size is
+      chosen so that the count lands where it has to, and a partition too small for
+      that is refused, not formatted as something else and called FAT32. The EFI
+      partition is 128 MiB: much more than three files need, and the least at which
+      FAT32 is comfortably FAT32.
+
+      On the way: **the "32" in FAT32 has nothing to do with a 32-bit processor.** It
+      is the width of the cluster number in an allocation table entry: FAT12 has
+      twelve-bit entries, FAT16 sixteen-bit, FAT32 thirty-two-bit (28 of them used).
+      It decides how large a volume can be, not what it is read on. The EFI partition
+      of a 64-bit laptop with Windows is FAT32 too; there is no FAT64.
+
+      **The word is different.** Installing beside another system asks for YES. This
+      asks for ERASE, because YES is what one says to a question, and to this one
+      says something else.
+
+      The test checks the whole path: an old disk with its own valid table and a
+      foreign bootmgfw.efi; a plan that says plainly what will disappear; a word other
+      than YES; no change when it is not typed; after typing it, the table read in
+      Python with both sums, two partitions with the right GUIDs, names and bounds,
+      FAT32 read by mtools, three files to the byte and, finally, BOOTING THAT DISK.
+      Separately, what this mode does NOT do: it does not zero the disk byte by byte,
+      because no installer does that. What disappears is the shape (the table and the
+      filesystems), not every byte, and the test says so plainly instead of claiming
+      something that would not be true.
+- [x] **Several disks and a choice between them** (kernel/blk.c as a list,
+      ata.c master and slave, ahci.c every port, the `disks` test group).
+
+      The block layer found one disk, and that was the disk. For a machine with
+      one, that is right, and it stops being right the moment someone has to
+      choose which one to install onto.
+
+      So there is a list. The order still goes from newer to older (NVMe, then
+      every AHCI port with a disk, then both drives of the old ATA bus), and the
+      first on the list is the one in use, so a machine with one disk behaves
+      exactly as it did before. That is not excessive caution: the whole
+      filesystem, swapping and the partition table lie under this layer.
+
+      Above the layer nothing changed: the filesystem, part.c and fat.c read and
+      write THE DISK IN USE. Threading a device number through each of them would
+      be a change in each of them, for a question asked once, of a person, in the
+      installer.
+
+      **LOOKING MUST NOT CHANGE ANYTHING**, and that is the only subtle thing in
+      this step. Reading another disk's table requires pointing the block layer at
+      it, because part.c reads the disk in use. But a machine left pointing at a
+      disk someone only asked about is a filesystem reading someone else's
+      sectors. So install_look() remembers what was in use and goes back there
+      before returning, together with unmounting the FAT it mounted on the way.
+      Pointing at the chosen disk is install_step()'s job, i.e. the moment when
+      writing really happens.
+
+      **The test found a real bug on the way, and an old one.** The `disk` command
+      wrote a pattern to the LAST SECTOR of the disk and read it back, which was
+      safe as long as our disks had nothing on them. On a disk with a GPT, the last
+      sector IS the copy of the partition table. Writing there destroys it without
+      a word: the disk still boots, and one day a repair tool says the table is
+      damaged. Now a disk with a table is only read, and there is an assertion that
+      holds it.
+
+      The text version takes a disk number (`install text whole 2`) and prints the
+      list when there is more than one disk. In the window, the disk line is
+      clickable and says so plainly; a choice one has to guess at is not a choice.
+
+- [x] **Closing the path to real hardware: `make stick`, `hardware` and `disks`
+      in the 64-bit kernel** (scripts/mkstick.py, kernel/hwinfo.c, the `stick`
+      test group).
+
+      This whole chain (loader, FAT, installer, partitions, disk choice) exists to
+      put ProtonOS on a real laptop. And not a single byte of it had run on real
+      hardware: everything was checked under QEMU and OVMF. Between "works in the
+      emulator" and "boots from a stick" three things were missing, and all three
+      were trivial, which is the worst kind of missing thing.
+
+      **There was no command that makes a stick.** `make iso64` makes a disc with
+      GRUB, i.e. exactly what our loader does not use. To prepare a stick one had
+      to assemble a GPT by hand, format an ESP and copy three files, i.e. repeat
+      from memory what the system can do itself. Now `make stick` produces a raw
+      image for dd, and `make run-stick` boots it under OVMF before it goes onto a
+      stick.
+
+      The table in the image is written byte by byte in Python, for the same reason
+      kernel/gpt.c exists: the firmware checks the sums and the copy at the end of
+      the disk and quietly decides a table is damaged. The FAT is made by mformat,
+      i.e. by somebody else. That the stick is made by one implementation and read
+      by another is worth more than both of them being ours.
+
+      The image is 192 MiB with one partition. The three files take a megabyte and
+      a half; the rest is there so that FAT32 is FAT32 (the cluster count) and so
+      that there is room to add something.
+
+      **`hardware` did not exist in the 64-bit kernel.** I wrote that command
+      precisely for the first boot on real hardware (what is on PS/2, what on USB,
+      what PCI sees, what screen the loader gave), and it sat in the 32-bit shell,
+      i.e. in a kernel nobody will run on a laptop. It is the command one types
+      first on a machine nobody has tried yet, and it was not where it is needed.
+
+      It landed in kernel/hwinfo.c, shared by both shells, together with a new
+      command, **`disks`**: which disks the machine has, which one it uses and what
+      is on each of them, without going into the installer. Looking at another disk
+      points the block layer at it, so here too it is pointed back, the same rule as
+      in install_look().
+
+      The `stick` test reads the image the way the firmware will read it: the table
+      in Python with both sums, the FAT through mtools, three files to the byte, and
+      then it BOOTS it and types both new commands.
+
+- [x] **Sound: Intel HD Audio** (kernel/hda.c, the `beep` command, the `sound`
+      test group).
+
+      The only class of device this system did not have. A machine with a TCP
+      stack, TLS 1.3 and a browser that cannot make a single sound is strangely
+      incomplete.
+
+      **HDA is not a device one writes samples to**, and that is the whole
+      difficulty. There are TWO things in the machine. The controller sits on PCI
+      and fetches bytes from memory itself: it gets a list of buffers (the BDL) and
+      walks it round and round; from that moment it is the one reading, and the
+      driver only has to keep up filling the half it is not in at the moment. The
+      codec sits behind the controller on a serial link and is a GRAPH: numbered
+      widgets (converters, jacks, mixers) one has to WALK to find out which converter
+      reaches which jack. Two machines with the same controller can have completely
+      different graphs.
+
+      **Three bugs on the way, all of the kind where the device simply stays
+      silent.**
+
+      The first and most expensive: **RINTCNT set to one**. It is the count of
+      responses after which the controller decides we are not keeping up, and it
+      STOPS executing commands until the flag it raised is cleared. With a one, a
+      response is given to exactly one question, and every next one waits for an
+      interrupt we do not take. The symptom was perfectly misleading: the first
+      question (about the codec's vendor) gave a correct answer, so the rings
+      "worked", and the second gave nothing. It showed only after printing CORBRP:
+      the read pointer stood at one while the write pointer moved on. The count is
+      now pushed out, and the status is cleared after every response.
+
+      The second: **verbs come in two lengths, and the length decides the
+      position**. A four-bit one leaves sixteen bits for the argument, a twelve-bit
+      one eight. Writing the short one already shifted (0x200 instead of 0x2) looks
+      innocent and sends a command the codec answers with nothing. They are now
+      written as the numbers they are, and one condition classifies them.
+
+      The third came out only of the sound file: **the tone lasted 243 ms instead of
+      200**. The controller walks the buffer round and round, so a half that is not
+      overwritten gets played a second time. After the samples run out, filling has
+      to continue (with silence) through the whole buffer, and only then can the
+      stream be stopped. That is the difference between a tone of the requested
+      length and a tone with a stutter at the end.
+
+      **The test does not ask the system whether it played.** A driver that sets
+      every register and produces silence looks exactly like a working one. So QEMU
+      writes its audio output to a file, and the file is read here: the peak, the
+      length of the loud part and the distance between zero crossings. 440 Hz for
+      200 ms must come out as 440 Hz for 200 ms, and 880 for 100 as that; one number
+      would be a coincidence, two are a driver. It comes out as 441 Hz / 200 ms and
+      882 Hz / 100 ms. The frequency is computed as the MEDIAN of the gaps between
+      crossings, not their count over the whole: one crossing missed at the edge
+      shifts the count and does not shift the median.
+
+      Separately, a machine WITHOUT a sound card: it must say plainly what is
+      missing, and `beep` on it must refuse instead of pretending. That is also why
+      the driver remembers WHERE it stopped: "there is no HDA controller on PCI" and
+      "the codec has no output I can find" are two different things, and on real
+      hardware that makes all the difference.
+
+- [x] **A mixer: volume, mute and a window for them** (hda_set_volume in
+      kernel/hda.c, the `volume` command, the user/gmikser.c program, the
+      extended `sound` group).
+
+      **A field that is easy to read backwards.** A widget's amplifier is
+      described by parameter 0x12, and in it the NUMBER OF STEPS sits in bits 14..8
+      and the SIZE of a step in 22..16. I read them the other way round, and it did
+      not show as an error: the codec reported three steps instead of seventy-four,
+      the mixer got three positions, and the only sign was that quiet and loud
+      sounded the same. It showed only in the sound file: a peak of 314 at full
+      volume, while before (with an accidentally larger number) it came out at 5679.
+
+      A percentage is a percentage of what THIS widget has, because there is no
+      other range. The steps are decibels, so thirty percent is much quieter than a
+      third, and that cannot be fixed; it is how hearing works. The window says so
+      plainly instead of pretending a linear scale.
+
+      **And a bug that came out only through the mixer and is about the whole
+      kernel.** After playing a tone from the window, the mouse stopped moving. The
+      reason: in long mode a system call enters with interrupts DISABLED (the
+      processor clears the flag on entry, SFMASK). So a driver spinning in a loop for
+      two hundred milliseconds left the machine deaf for two hundred milliseconds:
+      no clock, and a PS/2 mouse that lost the middle of a packet and never found the
+      framing again. The waits in hda.c now SLEEP instead of spinning, and sleeping
+      gives the core to the scheduler, i.e. to where interrupts come back. This
+      concerns every long system call in this kernel, and this driver was the first
+      to make one.
+
+      **The slider reaches a hundred percent**, because it divides by the width
+      MINUS ONE. A slider that cannot be pulled all the way feels broken, and the
+      difference is one character in the code.
+
+      The volume is remembered like the desktop background and the machine name,
+      and it is the only setting a ring 3 program may save without asking for a
+      password. The reason is simple: volume is a knob, not a change to the system.
+
+      The test measures what came out of the card: 100% gives a peak of 8000, 30%
+      gives 2353, 5% gives 314, and mute gives zero. Separately the same clicked in
+      the window: the slider to the end, the 'Test' button, a measurement; the slider
+      to a fifth, another measurement, and it has to be quieter.
+
+- [x] **AES, GCM and CCM, a cipher that was not here before** (user/uaes.h, the
+      user/aestest.c program, the scripts/aesref.c reference, the `aes` test group).
+
+      All of this system's cryptography stood on ChaCha20 until now, chosen because
+      it computes with additions, rotations and XORs, so it can be written without a
+      single table. AES is the ticket to two places ChaCha does not reach: the TLS
+      cipher suites some servers offer exclusively, and WPA2, because a wireless frame
+      is encrypted with AES-CCM and nothing else.
+
+      The cipher itself is FIPS-197 copied directly: one substitution table (256
+      bytes) and its inverse, and MixColumns computed, not read from four kilobytes of
+      tables. Slower, but every line can be read next to the specification. **It is
+      not an implementation resistant to timing measurements** (a table read depends
+      on the data), and that is written plainly in the header instead of pretending
+      otherwise.
+
+      **The thing that is easiest to get almost right.** AES with a mistake in the key
+      expansion encrypts, decrypts, agrees with itself perfectly, and agrees with
+      nobody in the world. That is why one line in the key expansion (an extra
+      substitution every fourth word for a 256-bit key) has a comment above it saying
+      that without it, exactly such an AES comes out.
+
+      **The GCM counter is not the CTR counter.** In CTR mode the whole sixteen-byte
+      block is incremented, in GCM only the last FOUR bytes; the rest of the block is
+      the nonce and must not be touched. They are two functions, although they look
+      like one.
+
+      **CCM decrypts before it checks**, because its tag covers the PLAINTEXT, not the
+      ciphertext (the opposite of GCM). So with a bad tag, the decrypted content is
+      already in the caller's buffer, and that is why it is zeroed there. Handing over
+      something unchecked would be worse than handing over nothing, and the test guards
+      that separately.
+
+      Checked from three sides, because none of them alone is enough:
+
+        1. official vectors: FIPS-197 (three key lengths), SP 800-38A for CTR, test
+           case 4 from the GCM specification and packet no. 1 from RFC 3610 (exactly
+           the shape of WPA2: a thirteen-byte nonce, an eight-byte tag);
+        2. against OpenSSL: the system encrypts its own material and PRINTS everything
+           it used, and the host encrypts the same through libcrypto
+           (scripts/aesref.c, because `openssl enc` cannot do authenticated modes) and
+           compares byte for byte;
+        3. the other way round: OpenSSL encrypts, the file comes into the system over
+           HTTP, and the system has to decrypt it, and has to REFUSE the same file with
+           one flipped bit in the tag.
+
+      The third way is the most important: that our encryption agrees with our
+      decryption says nothing about either of them. The test also checks that the
+      material is not degenerate; a key made of one repeated byte agrees with
+      everything.
+
+      The same vectors go separately through the 32-bit kernel. Not because we develop
+      it, but because a second compilation of the same sources is the cheapest method I
+      know for catching a shift, a width or a pointer that happened to be the right size.
+- [x] **WPA2: keys and frame encryption, everything except the radio**
+      (user/usha1.h, user/uwpa.h, AES key wrap in user/uaes.h, the
+      user/wpatest.c program, the `wpa` test group).
+
+      This is where an honest boundary runs. There is no radio in this system
+      and QEMU emulates no wireless card, but everything a station does with the
+      password, the handshake and the frame can be written and checked right now.
+      The driver for a specific chip cannot.
+
+      **SHA-1 is here for one reason and one only.** It has been unfit for
+      signatures for years, and it is not used for certificates. WPA2 gives no
+      choice: the network password is turned into a key with PBKDF2-HMAC-SHA1
+      and 4096 rounds, and the four-way handshake derives the session keys with a
+      function built from HMAC-SHA1. The collisions that finished SHA-1 off do not
+      touch any of these uses.
+
+      The PBKDF2 salt is the NETWORK NAME, and that is why two networks with the
+      same name and the same password have the same key, while it cannot be
+      computed once for all networks. Four thousand rounds are meant to hurt:
+      they are the only thing standing between a short password and a dictionary.
+
+      **The CCMP additional data is the whole thing.** The tag covers the header,
+      but with the fields that legitimately change on the way masked out: retry,
+      power save, more-data, the sequence number. The addresses stay covered.
+      Thanks to that a repeater can retransmit a frame while an attacker cannot
+      redirect it, and the test checks exactly that: changing one bit in the A3
+      address must end with the frame being dropped, with the data untouched.
+
+      Checked with the vectors from P802.11i/D7.0 (I.7.4): real frames with a
+      header, a packet number and a tag, including one with QoS and a 26-byte
+      header. That is the only kind of vector that catches badly assembled
+      additional data: CCMP with such a mistake agrees with itself and with no
+      access point in the world.
+
+      hashlib checks the keys: the system derives the PMK, the PTK and the
+      EAPOL-Key message tag from a seed, prints everything it used, and the host
+      computes the same with its own PBKDF2 and HMAC. On top of that RFC 3394
+      (wrapping the group key) with the official vector and a refusal after one
+      bit is changed, because the constant A6A6A6A6A6A6A6A6 is there so that a
+      wrong key gives a refusal rather than garbage that looks like a key.
+
+      What this does NOT cover: the driver. A card requires uploaded firmware and
+      its own protocol on PCI, different between Intel, Broadcom and Realtek, and
+      writing it blind, without a device that answers, is the same as writing
+      without any test. That is left for when there is hardware, and then only the
+      driver will be left, because all the cryptography will be ready and checked.
+
+- [x] **TLS with AES-128-GCM, not only ChaCha20** (user/utls.h, the extended
+      `tls64` group).
+
+      The first gain from AES that shows at once. Until now the client offered one
+      cipher suite and that was it, and some servers, especially embedded and
+      hardware ones, offer nothing but AES-GCM. Now the ClientHello carries two
+      suites, the server chooses, and the difference between them ends at the
+      record: the key schedule, the transcript and the whole handshake are the
+      same, the key is just sixteen bytes instead of thirty-two.
+
+      ChaCha20 stays first in our order of preference, because it needs no
+      substitution tables, so it has nothing that could leak the key through the
+      cache. AES is there so that there is something to talk to where there is no
+      choice.
+
+      **A test that does not allow itself "it probably works".** Until now
+      "connected" said nothing about which cipher was used, because there was one.
+      Now there are two servers, each agreeing to EXACTLY one suite (openssl
+      s_server -ciphersuites, because Python's ssl module cannot narrow the TLS 1.3
+      suites), and breaking off the handshake for any other. The answer that comes
+      back is therefore proof of what the record was encrypted with, separately for
+      AES-GCM and for ChaCha20-Poly1305.
+
+- [x] **A disk in a USB socket: a stick like any other disk** (bulk transfers in
+      kernel/xhci.c, the kernel/usbmass.c driver, FAT from a chosen disk, a new
+      `usbdisk` test group).
+
+      The USB bus has carried a keyboard and a mouse so far, devices that answer a
+      question with a few bytes. A disk is a second kind of traffic: bulk
+      endpoints, data both ways and a SCSI command in every transfer. The class is
+      called Bulk-Only Transport and every stick of the last twenty years speaks
+      it: thirty-one bytes of command (CBW), the data, thirteen bytes of verdict
+      (CSW).
+
+      **A bug that turned up by itself and was more serious than all the rest.**
+      The test booted the same machine through UEFI, and USB disappeared.
+      Completely: "USB: none", although the controller was on PCI. The reason: UEFI
+      firmware gives the controller a memory window ABOVE 4 GiB, and the driver
+      refused such an address with one condition written when the kernel was only
+      32-bit. In long mode there is no reason to refuse, and now it does not, while
+      in 32-bit mode it says plainly why it cannot. **On a laptop booting through
+      UEFI this meant no USB keyboard and no USB mouse**, i.e. everything a new
+      laptop has. No test caught it, because the USB tests booted from a disc
+      through BIOS.
+
+      Hence a second change too: a controller that does not come up RECORDS where
+      it stopped ("no xHCI controller on PCI", "the controller sits above 4 GiB",
+      "it will not reset"), and `hardware` shows it. "USB: none" is not an answer
+      anyone can do anything with.
+
+      **FAT from a CHOSEN disk.** A stick is for looking at, not for moving the
+      whole machine onto, so `fat 1 3` mounts a partition from the third disk, and
+      PFS keeps working on its own. Every read and write of that filesystem points
+      the block layer at the right disk and puts it back, exactly as when looking at
+      other disks in `disks`.
+
+      The driver adds itself to blk.c as an ordinary disk, but at the end of the
+      list: a machine that has a disk of its own should boot from it, whatever is
+      stuck in the socket.
+
+      Checked so that someone else reads the result: mtools writes a file to the
+      stick image and the system has to read it, and then the system writes its own
+      and mtools has to find it, together with the host's file having survived.
+      Finally, what a stick is for in the first place: **installing the system onto
+      a stick from the running system** (`install text whole 3`), checking the GPT
+      with our own reader, the loader to the byte through mtools, and booting that
+      stick under UEFI, all the way to the shell.
+
+- [x] **Bluetooth: an HCI conversation with the adapter** (kernel/bt.c, the
+      `bt`, `bt scan` and `bt test` commands, the `bt` test group).
+
+      Every Bluetooth adapter, whatever is inside it, speaks the same language:
+      HCI. Commands go down, events come up, and the packets have the same shape
+      whether the adapter sits on USB, a serial port or SDIO. In a laptop it sits on
+      USB, internally, on the same bus as the webcam, so this driver talks through
+      the USB layer that was just built for the stick. Commands do not go through
+      any endpoint: they are a control transfer with request type 0x20 and
+      everything else zeroed. It has been that way since 2001.
+
+      **And here runs a boundary that has to be named.** QEMU emulates no Bluetooth
+      adapter (the whole stack was thrown out of it years ago), and no other
+      hypervisor has one either. So not a single line of this conversation has ever
+      reached a device that answers. What is checked is what is pure bytes:
+      assembling commands and reading events, against recorded packets shaped as in
+      the standard. `bt test` says so itself at the end: "this checks building and
+      reading packets, not the conversation with an adapter".
+
+      What such a test catches all the same: an address that goes over the wire
+      least significant byte first and on the screen most significant first (read
+      backwards it is valid and unrecognisable); a manufacturer that stands at byte
+      eight of the Read Local Version answer, not seven; a device name pulled out of
+      an LE advertisement, where it is one of several pieces with their own length
+      and type. Those are exactly the mistakes that are otherwise found on a laptop,
+      one restart apiece.
+
+      The second thing the test guards: **honesty on a machine without an
+      adapter**. `bt` has to say there is no adapter and why, and `bt scan` has to
+      refuse, not show an empty list of devices as if it were looking around. An
+      empty list and no adapter are two different things, and only one of them is
+      true.
+
+      What is not here: data. Scanning needs only events, so an interrupt endpoint
+      is enough; a connection to headphones or a mouse needs two bulk endpoints and
+      an L2CAP layer above them. That will come when there is something to talk to.
+      Intel and Broadcom adapters also want uploaded firmware before they do anything
+      beyond reporting their own address.
+
+- [x] **A stick plugged in while running, and pulled out** (a thread watching the
+      sockets in kernel/usbhc.c, disks added and struck off in kernel/blk.c, the
+      extended `usbdisk` group).
+
+      Enumerating devices at boot answers the question "what was plugged in when we
+      started". A machine someone is using has a quite different question: what is
+      plugged in NOW. The answer sits in the same bit (the controller keeps the state
+      of every socket in a register), so noticing a stick costs one read, not a
+      mechanism.
+
+      The shape is the reverse of boot: there each driver walked the sockets itself;
+      here one thread watches the sockets and the drivers report what they can
+      recognise. It has to be the reverse, because now it is the SOCKET that changes,
+      not the driver that asks.
+
+      **Disk numbers must not shift.** Someone looks at `disks` and is about to type
+      `install text whole 2`. So a disk that disappears stays in its place with the
+      note "pulled out of its socket", and a new one is added at the end. A read from
+      a pulled-out disk ends in a refusal, not garbage, and the same applies to the
+      filesystem: a FAT mounted from a pulled-out disk stops being mounted WITHOUT
+      writing anything, because there is nowhere to write. A filesystem that answers
+      from memory after its disk disappeared is a way to overwrite somebody else's
+      data.
+
+      The slot goes back to the controller on every removal. Without that, a machine
+      in which someone plugged and pulled a stick four times has no slots left, and the
+      fifth time it is simply not seen, which looks like a broken socket.
+
+      **Two threads on one controller, and that needs a lock.** Until now enumeration
+      finished before the keyboard thread started. Now a stick can be greeted while the
+      keyboard is being read. Putting a TRB into the ring and taking an event off are
+      short; that is what a spinlock is for. A whole COMMAND is not short: it waits
+      for an answer, and two commands at once would find each other's completions,
+      because an event says which ring it came from, not whose it was. So commands go
+      one after another.
+
+- [x] **FAT32 on a small volume stops posing as FAT16** (kernel/fat.c, a new case
+      in the `fat` group).
+
+      Found through a stick: 32 MiB formatted by mtools as FAT32, and the system
+      showed an empty directory on a full disk. The FAT type follows from the cluster
+      count (that is the rule, and we keep to it), but a formatter TOLD to make FAT32
+      makes it even on a volume too small to need it. Such a volume says so plainly:
+      the sixteen-bit "sectors per FAT" is zero while the thirty-two-bit one is not,
+      and there is no fixed-size root directory. Read by the cluster count alone it
+      looks like FAT16, and everything after that is garbage.
+
+      The proof that it really is FAT32 comes in the test from mtools ("sectors per
+      fat: 0"), not from us, because our own rule was exactly what was being checked
+      here.
+
+- [x] **USB hubs: what is in a docking station** (the route string in
+      kernel/xhci.c, sockets growing in kernel/usbhc.c, the extended `xhci` and
+      `usbdisk` groups).
+
+      A device behind a hub is on NO port of the controller, so walking the
+      controller's ports does not find it at all. That is exactly what a docking
+      station looked like from this side: empty.
+
+      So a socket stopped meaning the same as a controller port. The list of sockets
+      starts with the controller's ports and GROWS: every hub found appends its own at
+      the end. A driver walking "the ports" thereby reaches behind hubs without knowing
+      anything about them, and that is the point.
+
+      The hub itself is handled with ordinary control transfers: ask for the class
+      descriptor (type 0x29, the only place where the number of ports stands), power
+      every port, wait as long as the hub asked for (a port not yet powered answers
+      "nothing here", and the device behind it is never found), then a port reset and
+      reading its status, which also holds two speed bits.
+
+      **The controller then has to be told the ROUTE.** The route string: four bits for
+      each tier of hubs, the first tier in the lowest bits. On top of that, two fields
+      that are easy to overlook: a device slower than the hub above it travels through
+      that hub's transaction translator, so the controller has to know WHICH hub and
+      which of its ports is responsible. Without that the device gets an address and
+      stays silent, and that is something one stares at for a long time before seeing
+      it. And the hub itself has to be marked as a hub in its context, or else the
+      controller thinks it has no ports, and a command about a route through it refers
+      to a route that does not exist for it.
+
+      Checked with two devices behind a hub: a keyboard (and what is typed on it has to
+      reach the shell) and a stick (it has to be on the list of disks like any other
+      and be readable). What is not there yet: noticing devices plugged into a hub while
+      running. Asking the hub about every port twice a second would cost more than it is
+      worth, and that is written plainly instead of a comment pretending otherwise.
+- [x] **Plugging into a hub, and an interval that means something other than it
+      seems** (kernel/usbhc.c, kernel/xhci.c, the extended `usbdisk` group).
+
+      A stick plugged into the docking station, not into the machine. A hub has an
+      endpoint whose whole job is to say "something changed on port N", and that
+      is how it is watched, instead of asking about every port twice a second. The
+      answer is a bitmap: bit one is port one.
+
+      **A bug that hid behind a working keyboard.** The interval in the descriptor
+      and the interval in the endpoint context are NOT the same number. A
+      high-speed descriptor gives an exponent and a full-speed one milliseconds,
+      and the hub asks for two hundred and fifty-five. Written in without
+      conversion it gives 2^255 microframes, i.e. polling rarer than the lifetime
+      of the machine: an endpoint that never answers. The keyboard worked despite
+      the same bug, because it asked for eight, and that came out as thirty-two
+      milliseconds instead of eight: enough for nobody to notice. The conversion
+      is now the one in the standard and depends on the device's speed, so the
+      controller remembers the speed of every slot.
+
+      **And a second one, one state too far.** The thread watching the sockets
+      remembers what was plugged in, to know what changed. A hub socket that was
+      looked at during boot and turned out empty was remembered as OCCUPIED,
+      because "looked at" gets confused with "something is in it" only if the two
+      are confused in the code. The effect: the first insertion was seen, and the
+      next ones were not.
+
+      Every change the hub reports is now acknowledged, all the flags, not only the
+      one we came for. An unacknowledged flag is reported over and over, and the
+      endpoint says "something changed" forever, twice a second, about something
+      that changed once.
+
+- [x] **A network card on USB (RNDIS)** (kernel/usbnet.c, netdev.c, a new
+      `usbnet` test group).
+
+      The second half of what sits in a docking station. It differs from the two
+      cards this system already knows in a way that goes deeper than registers:
+      there are no registers. Everything is a conversation ("start yourself",
+      "what is your address", "pass me broadcasts") carried through endpoint zero
+      as "encapsulated commands", and every frame gets a forty-four-byte header in
+      front of it.
+
+      The protocol is RNDIS, i.e. NDIS (the Windows driver interface) stretched down
+      a wire. That is why its messages ask about "OIDs" instead of hardware: an OID
+      is a number naming a property, and 0x01010101 happens to mean "your permanent
+      Ethernet address".
+
+      **The thing that cost the most time fits in one field.** In a query without
+      data, the OFFSET of that data must be zero, not the twenty a message WITH data
+      carries. The card checks whether the offset points inside the message, and a
+      twenty-eight-byte query whose data starts at byte twenty-eight is a query it
+      refuses to answer. From outside it looks exactly like a card that does not
+      work.
+
+      **And a structural thing: nothing can be done from an interrupt here.** A PCI
+      card raises an interrupt and the handler reads the ring; a USB card has to be
+      ASKED, and asking is a transfer, and a transfer must not be done in an
+      interrupt handler. So frames are collected by a thread that spends its life
+      waiting on a bulk read, and that is what the thread is for. On the way, waiting
+      in the xHCI driver stopped being pure spinning: after a few hundred spins it
+      hands the machine to the scheduler, because a driver spinning for five seconds
+      waiting for a packet that may never come stops the whole machine.
+
+      The USB card is last on the list of attempts in netdev.c: a machine with a card
+      of its own stays with it, and a machine without any can reach the network
+      through the docking station. The test sets up a machine WITHOUT a PCI card and
+      checks the whole way up: an address from DHCP, an answer to a ping, and a page
+      fetched over TCP from a server on the host, from ring 3.
+
+- [x] **Widgets: what every program wrote anew** (user/ugui.h, the mixer rewritten
+      on that layer).
+
+      Every graphical program in this system had the same thing: a rectangle drawn
+      where a button is meant to be, a label on it, and then arithmetic in the event
+      loop (is the click within these coordinates, is it the first button or the
+      second, which row of the list is (y - 20) / 12). Six programs, six copies of the
+      same arithmetic and six places where a button can land a pixel away from where
+      the click is expected.
+
+      So a window becomes a LIST OF THINGS instead of a series of drawing calls. The
+      program says what it has (a label here, a button there, a slider from zero to a
+      hundred), and the layer draws, decides what a click hit, keeps the keyboard focus
+      and reports "the third one was pressed".
+
+      What it deliberately is NOT: it does not take over the loop, it does not keep the
+      program's data, and it lays nothing out by itself. The program gives the
+      positions, in pixels, because that is what every window here already does, and a
+      layout engine would be a second framework on top of the first.
+
+      **The proof that the rewrite changed nothing comes from outside.** The mixer test
+      clicks the slider and the buttons and then MEASURES what came out of the sound
+      card into a WAV file: a hundred percent gives a peak of 8000, a fifth 1506, mute
+      zero. The same test passes on the rewritten window with the same numbers. A
+      framework that compiles and a framework that works differ in exactly that.
+
+- [x] **A question in the window instead of "click again"** (ug_modal in
+      user/ugui.h, the file manager asks before deleting).
+
+      "Are you sure?" is what every program with a destructive button needs, and until
+      now each one made it up for itself: gfiles asked by making the SECOND click on
+      the same button mean something different from the first. That works, and nobody
+      will guess it.
+
+      The panel is drawn IN the window, not as a second window. A program whose
+      question has its own window has to keep both alive, move them together and
+      answer for both when the desktop asks to close; a panel over the content gets all
+      of that for free and, on top of that, cannot be lost behind something else. While
+      it is there, it takes every event, and that is the difference between a question
+      and a suggestion.
+
+      On the way the test got an assertion that did not exist before and could not be
+      written: **"Keep" has to keep the file**. A question whose both answers mean yes
+      is not a question.
+
+- [x] **Choosing a file from a list instead of typing a name blind** (ug_pick in
+      user/ugui.h, Ctrl+O in the editor).
+
+      The editor asked "Open:" and waited for a name. That works if one remembers what
+      is on the disk, and otherwise it is guesswork: the only place in the graphical
+      system where a person was worse off than in the shell, because the shell at least
+      completes names.
+
+      Now there is a list of what exists, a line to type a name that does not exist yet,
+      and two buttons. Clicking a row puts the name into the line, so whichever way one
+      gets there, the same line is opened, and that is why the old way of using it (type
+      and Enter) still works, which the test checks separately from the new one.
+
+      **An afternoon went on a bug that was not in the system.** The test stopped
+      finding the file manager, and the cause was one line I had added to the test:
+      moving the pointer out of the way to (700, 420) on a 640x480 screen. The mouse
+      driver clamps the pointer to the edge, and the test kept assuming it was where it
+      had asked, so from then on every click landed sixty pixels off. A press on an icon
+      was therefore not a press on the icon, and nothing started. It showed only after
+      adding output to the kernel saying which icon had been released.
+
+- [x] **The system prepared for release on GitHub as open source** (LICENSE,
+      CONTRIBUTING.md, .github/, screenshots in docs/, README).
+
+      The code was on GitHub, but it was not open in any useful sense: without a
+      licence nobody has the right to use it (no licence does not mean "do what you
+      like" but "all rights reserved"), without written rules every submitted change
+      was a lottery, and without CI the first such change would only be checked on my
+      computer.
+
+      **The MIT licence**: the shortest of those that allow everything and require
+      nothing beyond keeping the name.
+
+      **CONTRIBUTING.md** writes down the one rule that really governs this
+      repository: **every feature brings a test that would not pass without it**, and
+      the test has to check the system from outside, through the screen, the serial
+      port, mtools reading our FAT, OpenSSL computing our ciphers, firmware that boots
+      from the disk or does not. It also has what someone from outside would have to
+      guess: why the code is in English while the system spoke Polish; why there are two
+      kernels from one source; and never to write `time.sleep(3)` and read the screen
+      once; half the flaky tests this project ever had were exactly that.
+
+      **CI in GitHub Actions** is split: every push builds both kernels, the boot
+      loader, the disc and the stick image, and then runs a dozen groups that touch
+      most of the system (booting both kernels, ring 3, PFS, FAT, AES, WPA, USB, sound,
+      UEFI). The whole suite (ninety-five groups and about a hundred virtual machines)
+      runs once a day, because a GitHub runner has two cores and no KVM, so a full run
+      would take longer than anyone wants to wait on a pull request. On failure it
+      uploads the serial logs as an artifact, because without them a remote failure is
+      just a red cross.
+
+      **The screenshots** are made by a script that starts the 64-bit kernel in QEMU,
+      clicks through the system and dumps the framebuffer, the same machinery as the
+      tests, so the picture shows what the kernel really drew, not a mock-up. Two of
+      them: the desktop with the file manager, the clock and the memory monitor, and the
+      installer on the full screen, at the moment it has listed what it will write and
+      has not yet written anything.
+
+      On the way it turned out that the README lied in its numbers: "nearly 800
+      assertions" and "50 groups" were true several dozen commits ago. Now there are
+      more than 1600 assertions and 95 groups.
+
+      **The first CI run measured what I feared.** The set of a dozen groups took a
+      GitHub runner **six minutes**: two cores, no KVM. If that is all, the list was too
+      short: the groups easiest to break by accident were added (the desktop, the file
+      manager, the installer, the ring 3 shell, TLS 1.3, the network, the stick). A full
+      local run after these changes: **1714 assertions, zero failures, 95 groups,
+      1229 s**.
+
+- [x] **The first CI failure was a failure of the environment, not of the system**
+      (port 53 in scripts/ptest.py).
+
+      The extended set of groups fell over on `tls64` after a second, with a
+      `PermissionError` at `bind(("0.0.0.0", 53))`. The network groups set up **their
+      own DNS server on the host's port 53**, because that is exactly where QEMU's user
+      network sends the guest's questions (10.0.2.2:53), and it cannot be remapped:
+      `guestfwd` handles TCP, not UDP. My tests run as root, so it did not show; a
+      GitHub runner is not root.
+
+      Two things at once. First, `start_dns_server` now returns `(stop, ok)` instead of
+      blowing up: a group that has nothing to check without names says **what it is
+      giving up and why**, with a ready recipe
+      (`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53`). The stack trace looked
+      like a system bug and was a missing permission, and that is exactly the difference
+      a test is supposed to show.
+
+      Second, CI got that one sysctl line before the tests, because **giving up
+      assertions is a loss of coverage**, not a solution. A green CI that quietly does
+      not check TLS would be worse than a red one.
+
+      Both paths checked locally: the normal one (as root, four network groups pass) and
+      the refusal (port 53 taken by another process; the group prints SKIPPED and ends
+      green).
+
+      Confirmation from outside: the CI run after this change is green, **559 assertions
+      instead of 539**; those twenty are exactly `tls64`, which used to fall over after a
+      second. Nine minutes on a two-core runner.
 
 ---
 
@@ -5548,8 +4942,8 @@ fact stops being a journal.*
       and is in CONTRIBUTING: nothing gets rebuilt or edited while a run
       is in flight.
 
-      The journal stays Polish, and this entry says why on its own line
-      above.
+      The journal itself stayed Polish at that point; its early entries
+      were translated later (see the introduction at the top).
 
 
 - [x] **ProtonOS is ThreadOS**
@@ -6073,3 +5467,30 @@ fact stops being a journal.*
       a message of the fuzz harness), and the fuzz stubs learned the
       kernel's irqflags_t and spin_lock_irq, which the TrueType harness
       had needed since the font code took a lock.
+
+- [x] **Instructions for AI agents, a technical README, the journal in English**
+
+      The repository is meant to be read by people who do not speak Polish,
+      and more and more of the people who change it will work through an AI
+      coding assistant. Three things followed.
+
+      AGENTS.md (with CLAUDE.md importing it) gives such an assistant the
+      rules this repository is reviewed by, and the commands: how to build
+      both kernels, how to run one test group against a build that is not
+      in build/, never to rebuild build/ under a running suite, where a
+      system call, a program or a driver is added, and that test helpers
+      read layout constants straight out of the C sources.
+
+      The README became a technical one: the architecture of the two
+      kernels and the two boot paths, prerequisites, make targets and
+      variables, running in QEMU, the test suite, the release pipeline and
+      how to rotate the update signing key, the generated files and how to
+      update third-party code.
+
+      And this journal, kept in Polish for its first five thousand lines,
+      was translated into English and renamed docs/JOURNAL.md. Its old
+      introduction (a file tree, requirements and build commands that had
+      long gone stale and that the README now covers) was replaced by a
+      short one; the entries themselves were translated as written,
+      including the names things had at the time.
+
