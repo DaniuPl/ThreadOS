@@ -123,6 +123,52 @@ def session(slog):
               near(at(MENU_X0 + 8, session_y("Restart...")), DARK["accent"], 6))
         q.click_desktop()
 
+        # The keys: the Windows key opens the menu with its first entry
+        # chosen, the arrows choose, Enter does, Esc closes
+        q.mouse_goto(400, 300)
+        time.sleep(0.5)
+        q.sendkey("meta_l")
+        time.sleep(1)
+        _, _, at = q.screen_raw()
+        check("the Windows key opens the menu, its first entry chosen",
+              near(at(MENU_X0 + 8, menu_y(MENU_ITEMS[0])), DARK["accent"], 6))
+        q.sendkey("down")
+        q.sendkey("down")
+        time.sleep(0.8)
+        _, _, at = q.screen_raw()
+        check("Down twice chooses the third ('%s')" % MENU_ITEMS[2],
+              near(at(MENU_X0 + 8, menu_y(MENU_ITEMS[2])), DARK["accent"], 6)
+              and not near(at(MENU_X0 + 8, menu_y(MENU_ITEMS[0])),
+                           DARK["accent"], 6))
+        before = q.dock_windows()
+        q.sendkey("ret")
+        time.sleep(4)
+        check("and Enter starts it (%d -> %d windows)"
+              % (before, q.dock_windows()), q.dock_windows() == before + 1)
+        q.click_desktop()
+        time.sleep(0.5)
+        q.mouse_goto(400, 300)
+        time.sleep(0.5)
+        q.sendkey("meta_l")
+        time.sleep(0.5)
+        q.sendkey("up")
+        time.sleep(0.8)
+        _, _, at = q.screen_raw()
+        check("Up from the first goes round to the last ('Shut Down...')",
+              near(at(MENU_X0 + 8, session_y("Shut Down...")),
+                   DARK["accent"], 6))
+        q.sendkey("esc")
+        time.sleep(0.8)
+        _, _, at = q.screen_raw()
+        check("and Esc closes it, having done nothing",
+              not near(at(MENU_X0 + 8, session_y("Shut Down...")),
+                       DARK["accent"], 6) and q.proc.poll() is None)
+        # (the program started from the keys goes again)
+        q.click(*dock_tile(DOCK_N + 2, n_w=3))
+        time.sleep(0.5)
+        q.sendkey("alt-f4")
+        time.sleep(2)
+
         # About: what the machine is, said on a card - against what the
         # test knows it started (one 32-bit processor, a 640x480 screen,
         # the memory QEMU was given)

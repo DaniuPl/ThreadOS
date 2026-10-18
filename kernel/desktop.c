@@ -445,6 +445,11 @@ static int focus_idx = -1;  /* the window with keyboard focus */
  * pointer is - the same list either way, because a second list would
  * be a second thing to learn. */
 static int menu_open;
+/* The entry chosen with the keys (programs first, then the system's),
+   or -1 when the pointer is what chooses; and one chosen with Enter,
+   which the desktop's thread acts on - the keys arrive in an interrupt */
+static volatile int menu_sel = -1;
+static volatile int menu_go = -1;
 static int menu_px, menu_py;
 /* The installer is deliberately NOT here. It takes the whole screen
    and everything else has to be out of reach while it runs, so it is
@@ -1893,13 +1898,41 @@ static void open_or_raise(const char *app)
                     from >= 0 ? icons[from].art : art_of_app(app));
 }
 
+/* Entry k of the menu, done: programs first, then the system's */
+static void menu_activate(int k)
+{
+    menu_open = 0;
+    menu_sel = -1;
+    if (k < MENU_N) {
+        /* Started from the menu, which names programs - so its face is
+           looked up by name */
+        int from = icon_of_app(menu_items[k]);
+        remember_launch(exec_spawn(menu_items[k]), from,
+                        from >= 0 ? icons[from].art
+                                  : art_of_app(menu_items[k]));
+    } else if (k - MENU_N == SESS_LOCK) {
+        desktop_lock();
+    } else if (k - MENU_N < SESS_N) {
+        ask = k - MENU_N;            /* a question, or the About card */
+    }
+}
+
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
     int right = buttons & 0x02;
 
+    /* The pointer moving takes the choosing back from the keys */
+    if (mx != mouse_x || my != mouse_y)
+        menu_sel = -1;
     mouse_x = mx;
     mouse_y = my;
+    if (menu_go >= 0) {
+        int k = menu_go;
+        menu_go = -1;
+        if (menu_open)
+            menu_activate(k);
+    }
 
     /* Locked: the pointer reaches nothing */
     if (locked) {
@@ -2050,13 +2083,7 @@ static void handle_input(int mx, int my, int buttons)
             for (int i = 0; i < MENU_N; i++) {
                 if (in_rect(mx, my, menu_px, menu_item_y(i), MENU_W,
                             MENU_ROW)) {
-                    /* Started from the menu, which names programs -
-                       so its face is looked up by name */
-                    int from = icon_of_app(menu_items[i]);
-                    remember_launch(exec_spawn(menu_items[i]), from,
-                                    from >= 0 ? icons[from].art
-                                              : art_of_app(menu_items[i]));
-                    menu_open = 0;
+                    menu_activate(i);
                     prev_pressed = pressed;
                     return;
                 }
@@ -2064,11 +2091,7 @@ static void handle_input(int mx, int my, int buttons)
             for (int i = 0; i < SESS_N; i++) {
                 if (in_rect(mx, my, menu_px, session_item_y(i), MENU_W,
                             SESS_ROW)) {
-                    menu_open = 0;
-                    if (i == SESS_LOCK)
-                        desktop_lock();
-                    else
-                        ask = i;         /* a question, or the About card */
+                    menu_activate(MENU_N + i);
                     prev_pressed = pressed;
                     return;
                 }
@@ -3807,7 +3830,9 @@ static void draw_menu(void)
         /* The entry under the pointer wears the accent colour. Without
            it a menu is a list of words that happens to be clickable;
            with it, it answers. */
-        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, MENU_ROW);
+        int over = menu_sel >= 0 ? menu_sel == i
+                                 : in_rect(mouse_x, mouse_y, x, iy, MENU_W,
+                                           MENU_ROW);
         if (over)
             gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6, L.accent,
                       255);
@@ -3822,7 +3847,9 @@ static void draw_menu(void)
     gfx_fill(x + 12, sy, MENU_W - 24, 1, L.menu_text, 50);
     for (int i = 0; i < SESS_N; i++) {
         int iy = session_item_y(i);
-        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, SESS_ROW);
+        int over = menu_sel >= 0 ? menu_sel == MENU_N + i
+                                 : in_rect(mouse_x, mouse_y, x, iy, MENU_W,
+                                           SESS_ROW);
         if (over)
             gfx_rrect(x + 5, iy + 1, MENU_W - 10, SESS_ROW - 2, 6, L.accent,
                       255);
@@ -4388,6 +4415,36 @@ static void desktop_on_key(char c)
     if (c == KEY_LOCK) {
         desktop_lock();
         return;
+    }
+    if (c == KEY_MENU) {                /* the Windows key: the menu */
+        if (menu_open && menu_py == MENU_Y) {
+            menu_open = 0;
+        } else {
+            search_close();
+            menu_at(6, MENU_Y);
+            menu_sel = 0;
+        }
+        return;
+    }
+    if (menu_open) {                    /* the keys choose in the menu */
+        int n = MENU_N + SESS_N;
+        if (c == KEY_DOWN) {
+            menu_sel = menu_sel < 0 ? 0 : (menu_sel + 1) % n;
+            return;
+        }
+        if (c == KEY_UP) {
+            menu_sel = menu_sel <= 0 ? n - 1 : menu_sel - 1;
+            return;
+        }
+        if ((c == '\n' || c == '\r') && menu_sel >= 0) {
+            menu_go = menu_sel;
+            return;
+        }
+        if (c == 27) {
+            menu_open = 0;
+            menu_sel = -1;
+            return;
+        }
     }
     if (c == KEY_SEARCH) {
         if (search_open)

@@ -113,7 +113,10 @@ whose drawings the picture viewer opens; Ctrl+Alt+L (or 'lock') locks
 the screen behind the admin's password, and the bottom of the menu does
 what the end of a session needs — Lock Screen, Log Out, Restart, Shut
 Down — the last three only after a question in words with a Cancel next
-to it. Ctrl+Space opens a search under the bar that finds programs, open
+to it — and the Windows key opens that menu for the arrows and Enter.
+A dock tile has a menu under the right button (Show, Minimise, Close;
+Open), and the bar's date and memory meter open the calendar and the
+task manager. Ctrl+Space opens a search under the bar that finds programs, open
 windows, settings and files as they are typed; notifications slide in
 at the top right — from the shell, from any program, from the desktop
 itself when it saves a picture of the screen; and "Appearance" shows

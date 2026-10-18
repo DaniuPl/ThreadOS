@@ -73,6 +73,10 @@ static char extended_key(uint8_t scancode)
        nothing here, so the 0x37 is the whole of it. */
     if (scancode == 0x37)
         return KEY_SHOT;
+    /* The key with a window on it, left or right: on this desktop, as
+       on others, it opens the menu */
+    if (scancode == 0x5B || scancode == 0x5C)
+        return KEY_MENU;
 
     switch (scancode) {
     case 0x48: return KEY_UP;

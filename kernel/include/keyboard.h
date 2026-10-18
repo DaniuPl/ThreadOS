@@ -41,6 +41,7 @@
 #define KEY_SHOT  0x10      /* Print Screen - save what is on the screen */
 #define KEY_SEARCH 0x01     /* Ctrl+Space - the desktop's search */
 #define KEY_LOCK   0x02     /* Ctrl+Alt+L - lock the screen */
+#define KEY_MENU   0x0F     /* the Windows key - the desktop's menu */
 #define KEY_UNDO  0x0E      /* Ctrl+Z - take that back */
 #define KEY_FIND  0x07      /* Ctrl+F - "find", the third of them */
 #define KEY_SAVE  0x05

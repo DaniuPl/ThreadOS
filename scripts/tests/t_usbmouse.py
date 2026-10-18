@@ -97,6 +97,15 @@ def main():
               q.wait_pixel(200, 121, (255, 255, 255)))
         check("and the old place was painted over with the background (~50,41)",
               q.wait_background(50, 41, tol=0))
+
+        # The Windows key on a USB keyboard is a modifier bit in the
+        # report, not a key - and it opens the menu all the same
+        q.sendkey("meta_l")
+        time.sleep(1.5)
+        _, _, at = q.screen_raw()
+        check("the Windows key on the USB keyboard opens the menu",
+              near(at(MENU_X0 + 8, menu_y(MENU_ITEMS[0])),
+                   theme("dark")["accent"], 6))
     finally:
         q.close()
 

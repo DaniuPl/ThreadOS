@@ -140,10 +140,16 @@ static void handle_key(uint8_t usage, uint8_t mods)
 }
 
 static uint8_t prev[6];
+static uint8_t prev_mods;
 
 static void handle_report(void)
 {
     uint8_t mods = report[0];
+    /* The Windows key is a modifier in a USB report (GUI, left 0x08,
+       right 0x80) - it opens the menu the moment it goes down */
+    if ((mods & 0x88) && !(prev_mods & 0x88))
+        keyboard_inject(KEY_MENU);
+    prev_mods = mods;
     /* The report says what is pressed NOW - a new key is one that was
        not in the previous report */
     for (int i = 0; i < 6; i++) {
