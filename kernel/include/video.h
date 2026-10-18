@@ -60,6 +60,9 @@ void video_set_scale(int s);
 /* ... and taken up at once, while the screen runs (the logical size
    changes; the panel does not) */
 void video_rescale(void);
+/* Another mode while the screen runs (0x0 = the panel's own) - only
+   where the kernel set the mode itself. 1 changed, 0 already, -1 no. */
+int video_set_mode(int w, int h);
 int video_scale(void);
 
 /* Moves a finished frame from the working buffer onto the screen

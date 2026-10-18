@@ -490,6 +490,20 @@ static void p_shadow(const struct gfx_surface *t, int x, int y, int w, int h, in
 static long blur_px = 81920;
 static uint32_t *blur_a, *blur_b;
 
+/* The screen has another size: the room taken for it is given back,
+   and taken again at the new size the next time glass is drawn */
+void gfx_screen_changed(void)
+{
+    uint32_t pages = (uint32_t)((blur_px * 4 + 4095) / 4096);
+    for (uint32_t *b = blur_a; b; b = b == blur_a ? blur_b : (uint32_t *)0) {
+        uint32_t a = (uint32_t)(uintptr_t)b;
+        for (uint32_t n = pages; n; n--, a += 4096)
+            pmm_free_frame(a);
+    }
+    blur_a = blur_b = (uint32_t *)0;
+    blur_px = 81920;
+}
+
 static int blur_room(void)
 {
     if (blur_a)

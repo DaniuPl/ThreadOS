@@ -35,6 +35,8 @@ const struct gfx_surface *gfx_current(void);
    gfx_pblend_s is the one that does not - one pixel of the surface's
    own, for text, which is drawn at that size to begin with. */
 int gfx_k(const struct gfx_surface *t);
+/* Said when the screen changes size: buffers sized for it are let go */
+void gfx_screen_changed(void);
 void gfx_pblend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a);
 /* A picture already at the surface's own size, put down one for one
    inside round corners - everything in the surface's own pixels */

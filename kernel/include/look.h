@@ -83,7 +83,8 @@
 #define MENU_R       10
 #define MENU_ICON    18
 #define MENU_Y       (BAR_H + 4)  /* opened from the bar, it hangs here */
-#define MENU_SEP     9       /* the line between the programs and the system */
+#define MENU_SEP     7       /* the line between the programs and the system */
+#define SESS_ROW     22      /* an entry below it, a little lower */
 
 /* --- the question before logging out, restarting, shutting down ------- */
 #define ASK_W        320
@@ -95,6 +96,9 @@
 #define ASK_BTN_W    112
 #define ASK_BTN_H    28
 #define ASK_BTN_GAP  10
+#define ABOUT_H      196     /* About ThreadOS: the same card, taller */
+#define ABOUT_LINE_Y 66      /* its first line of facts */
+#define ABOUT_LINE_DY 20
 
 /* --- notifications: cards at the top right, newest on top ------------- */
 #define NOTE_W       280

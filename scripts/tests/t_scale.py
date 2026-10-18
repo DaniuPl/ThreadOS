@@ -18,7 +18,9 @@ What is asserted, against things that do not come from the system:
   with the screen saying what it is (EDID, as QEMU's VGA does), the
   desktop starts in that mode - the screen QEMU shows is that size,
   and the aurora covers all of it, painted at that size
-  the 'resolution' setting wins over what the screen says
+  the 'resolution' setting wins over what the screen says - changed
+  while the desktop runs, kept for the next start, and 'native' gives
+  the screen's own mode back
 
   with nothing said (as on a board whose card this system has no
   driver for), a panel of 1080 rows gets one and a half: the desktop
@@ -120,17 +122,43 @@ def native():
             same, n = aurora_covers(at, w, h)
             check("and the aurora is painted at that size (%d/%d samples)"
                   % (same, n), same == n)
+
+            # The setting, while the desktop runs: the mode changes
+            # under it, and everything is painted for the new size
+            q.type_line("sudo set resolution 1280x960")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            time.sleep(3)
+            m = mode(q)
+            w, h, at = q.screen_raw()
+            check("'resolution 1280x960' changes the mode while the desktop "
+                  "runs (%s, %dx%d)" % (m, w, h),
+                  m is not None and m[3:] == (1280, 960) and
+                  (w, h) == (1280, 960))
+            same, n = aurora_covers(at, w, h)
+            check("and the aurora is painted again for it (%d/%d samples)"
+                  % (same, n), same == n)
         finally:
             q.close()
 
-        q = boot(disk, slog, (1920, 1080), [("resolution", "1280x960")])
+        q = boot(disk, slog, (1920, 1080), [])
         try:
             m = mode(q)
             w, h, at = q.screen_raw()
-            check("the 'resolution' setting wins over the screen (%s, %dx%d)"
-                  % (m, w, h),
+            check("kept: the next start is in that mode too, whatever the "
+                  "screen says (%s, %dx%d)" % (m, w, h),
                   m is not None and m[3:] == (1280, 960) and
                   (w, h) == (1280, 960))
+            q.type_line("sudo set resolution native")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            time.sleep(3)
+            m = mode(q)
+            w, h, at = q.screen_raw()
+            check("and 'native' gives the screen its own mode back (%s, "
+                  "%dx%d)" % (m, w, h),
+                  m is not None and m[3:] == (1920, 1080) and
+                  (w, h) == (1920, 1080))
         finally:
             q.close()
     finally:

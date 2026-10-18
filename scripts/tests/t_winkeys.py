@@ -77,7 +77,7 @@ def menu_entry(q, mx, my, i):
 def menu_height():
     """The programs, the line, and the system's entries below it"""
     return (2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
-            len(SESSION_ITEMS) * MENU_ROW)
+            len(SESSION_ITEMS) * SESS_ROW)
 
 
 def menu_place(mx, my):
@@ -269,7 +269,7 @@ def main():
 
             # --- the menu under the right button ------------------------
             # (high enough for the whole menu to hang below the pointer)
-            MX, MY = 300, 34
+            MX, MY = 300, 28
             q.mouse_goto(MX, MY)
             time.sleep(0.5)
             q.mouse_right_click()

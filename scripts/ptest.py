@@ -91,7 +91,7 @@ def session_y(name, top=None):
     idx = SESSION_ITEMS.index(name)
     t = MENU_Y if top is None else top
     return (t + MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
-            idx * MENU_ROW + MENU_ROW // 2)
+            idx * SESS_ROW + SESS_ROW // 2)
 
 
 PAGE = b"<html>ThreadOS TCP works</html>\n"
@@ -2307,38 +2307,50 @@ class Qemu:
             gx = (pen + 32) >> 6
             if gx >= x1:
                 break
-            best = None
-            for ch in chars:
-                adv, left, gtop, gw, gh, a = font.glyph(ch)
-                nx = (pen + adv + 32) >> 6
-                x_lo = min(gx, gx + left)
-                x_hi = max(nx, gx + left + gw)
-                if x_hi > x1 or x_hi <= x_lo or x_lo < bx:
-                    continue
-                err = 0
-                gy0 = baseline - gtop - top      # the glyph's first row, in the band
-                for r in range(bot - top):
-                    prow, brow = painted[r], band[r]
-                    gr = r - gy0
-                    inside = 0 <= gr < gh
-                    for xx in range(x_lo, x_hi):
-                        exp = prow[xx - bx]
-                        if inside:
-                            k = xx - gx - left
-                            if 0 <= k < gw:
-                                v = a[gr * gw + k]
-                                if v:
-                                    exp = ui_mix(fg, exp, v)
-                        got = brow[xx - bx]
-                        err += (abs(exp[0] - got[0]) + abs(exp[1] - got[1])
-                                + abs(exp[2] - got[2]))
+            # Strictly first; if nothing fits, once more without holding
+            # the background past a letter's advance against it
+            for relax in (False, True):
+                best = None
+                for ch in chars:
+                    adv, left, gtop, gw, gh, a = font.glyph(ch)
+                    nx = (pen + adv + 32) >> 6
+                    x_lo = min(gx, gx + left)
+                    x_hi = max(nx, gx + left + gw)
+                    if x_hi > x1 or x_hi <= x_lo or x_lo < bx:
+                        continue
+                    err = 0
+                    gy0 = baseline - gtop - top      # the glyph's first row, in the band
+                    for r in range(bot - top):
+                        prow, brow = painted[r], band[r]
+                        gr = r - gy0
+                        inside = 0 <= gr < gh
+                        for xx in range(x_lo, x_hi):
+                            exp = prow[xx - bx]
+                            v = 0
+                            if inside:
+                                k = xx - gx - left
+                                if 0 <= k < gw:
+                                    v = a[gr * gw + k]
+                                    if v:
+                                        exp = ui_mix(fg, exp, v)
+                            # Past the advance, where the next letter begins
+                            # (an f leans into the o after it): on a second
+                            # try only the candidate's own ink is held
+                            # against the screen
+                            if relax and xx >= nx and not v:
+                                continue
+                            got = brow[xx - bx]
+                            err += (abs(exp[0] - got[0]) + abs(exp[1] - got[1])
+                                    + abs(exp[2] - got[2]))
+                            if best is not None and err > best[0] * (x_hi - x_lo) * (bot - top):
+                                break
                         if best is not None and err > best[0] * (x_hi - x_lo) * (bot - top):
                             break
-                    if best is not None and err > best[0] * (x_hi - x_lo) * (bot - top):
-                        break
-                score = err / ((x_hi - x_lo) * (bot - top))
-                if best is None or score < best[0]:
-                    best = (score, ch, adv, left, gtop, gw, gh, a)
+                    score = err / ((x_hi - x_lo) * (bot - top))
+                    if best is None or score < best[0]:
+                        best = (score, ch, adv, left, gtop, gw, gh, a)
+                if best is not None and best[0] <= 12:
+                    break
             if best is None or best[0] > 12:
                 break
             score, ch, adv, left, gtop, gw, gh, a = best

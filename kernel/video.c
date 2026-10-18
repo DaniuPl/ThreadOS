@@ -347,6 +347,8 @@ void video_native(int *w, int *h)
     *h = edid_h;
 }
 
+static int dispi_mode(uint32_t lfb, int w, int h);
+
 int video_init_vesa(int w, int h)
 {
     /* When the loader has already set a mode, we leave it alone: its
@@ -371,11 +373,18 @@ int video_init_vesa(int w, int h)
     uint32_t lfb = pci_find_vga_lfb();
     if (!lfb)
         return -1;
+    read_edid();
+    return dispi_mode(lfb, w, h);
+}
 
-    /* Asked for nothing in particular (0x0): the panel's own mode, when
-       it says what that is, and 640x480 when it does not */
+/* Sets a mode through the Bochs/QEMU interface: w x h, or for 0x0 the
+   panel's own mode when it says what that is, and 640x480 when it does
+   not */
+static uint32_t dispi_lfb;          /* 0 = the mode is not ours to change */
+
+static int dispi_mode(uint32_t lfb, int w, int h)
+{
     if (w <= 0 || h <= 0) {
-        read_edid();
         w = edid_w ? edid_w : 640;
         h = edid_h ? edid_h : 480;
     }
@@ -399,6 +408,7 @@ int video_init_vesa(int w, int h)
     phys_w = w; phys_h = h; phys_pitch = w * 4;
     vid_bpp = 32; vid_bypp = 4;
     front = (uint8_t *)(uintptr_t)lfb;
+    dispi_lfb = lfb;
 
     decide_scale();
     take_buffers();
@@ -407,6 +417,40 @@ int video_init_vesa(int w, int h)
     video_clear(0);
     video_present();
     return 0;
+}
+
+/* The buffers a mode had, given back */
+static void drop_buffers(void)
+{
+    uint32_t bytes = (uint32_t)phys_h * (uint32_t)vid_pitch;
+    if (fb != front)
+        for (uint32_t a = (uint32_t)(uintptr_t)fb, n = (bytes + 4095) / 4096;
+             n; n--, a += 4096)
+            pmm_free_frame(a);
+    if (shadow)
+        for (uint32_t a = (uint32_t)(uintptr_t)shadow,
+                      n = (bytes + 4095) / 4096; n; n--, a += 4096)
+            pmm_free_frame(a);
+    fb = front;
+    shadow = (uint8_t *)0;
+    shadow_valid = 0;
+}
+
+/* Another mode while the screen runs - where the mode is ours to set
+   (the Bochs/QEMU interface); a mode the loader set stays what it is.
+   1 = changed, 0 = it already was, -1 = it cannot be. */
+int video_set_mode(int w, int h)
+{
+    if (!dispi_lfb)
+        return -1;
+    int nw = w > 0 && h > 0 ? w : (edid_w ? edid_w : 640);
+    int nh = w > 0 && h > 0 ? h : (edid_h ? edid_h : 480);
+    if ((nw & ~7) == phys_w && nh == phys_h)
+        return 0;
+    drop_buffers();
+    if (dispi_mode(dispi_lfb, w, h) < 0)
+        return -1;
+    return 1;
 }
 
 /* --- The framebuffer supplied by the bootloader ----------------------

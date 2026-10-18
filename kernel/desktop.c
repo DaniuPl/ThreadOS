@@ -39,6 +39,7 @@
 #include "include/pmm.h"
 #include "include/pit.h"
 #include "include/user.h"
+#include "include/smp.h"
 #include "include/spinlock.h"
 
 /* Palette indices.
@@ -457,8 +458,10 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
    done to the session and to the machine. The three that end something
    ask first - the dots say they will, as they have on desktops for
    forty years; locking ends nothing, so it simply locks. */
-enum { SESS_LOCK, SESS_LOGOUT, SESS_RESTART, SESS_SHUTDOWN, SESS_N };
-static const char *const session_items[SESS_N] = {"Lock Screen", "Log Out...",
+enum { SESS_ABOUT, SESS_LOCK, SESS_LOGOUT, SESS_RESTART, SESS_SHUTDOWN,
+       SESS_N };
+static const char *const session_items[SESS_N] = {"About ThreadOS",
+                                                  "Lock Screen", "Log Out...",
                                                   "Restart...", "Shut Down..."};
 
 /* --- The kiosk -----------------------------------------------------
@@ -613,7 +616,7 @@ static int work_bottom(void)
 
 static int menu_h(void)
 {
-    return 2 * MENU_PAD + MENU_N * MENU_ROW + MENU_SEP + SESS_N * MENU_ROW;
+    return 2 * MENU_PAD + MENU_N * MENU_ROW + MENU_SEP + SESS_N * SESS_ROW;
 }
 
 static int menu_item_y(int i)
@@ -623,7 +626,7 @@ static int menu_item_y(int i)
 
 static int session_item_y(int i)
 {
-    return menu_item_y(MENU_N) + MENU_SEP + i * MENU_ROW;
+    return menu_item_y(MENU_N) + MENU_SEP + i * SESS_ROW;
 }
 
 /* Puts the menu somewhere it fits: never off the right-hand edge,
@@ -1419,7 +1422,22 @@ static void draw_body(const struct window *win, int focused, int off)
         int bx = x + 1;
         int by = y + TITLE_H + 1;
         int pw = win->pcw;
-        if (off) {
+        if (off && video_k() != 16) {
+            /* Into a picture at the panel's size: the buffer one for
+               one, from where the content area begins in it */
+            const struct gfx_surface *pic = gfx_current();
+            int px0 = P(bx), py0 = P(by);
+            int w1 = P(bx + win->cw) - px0, h1 = P(by + win->ch) - py0;
+            if (w1 > pw) w1 = pw;
+            if (h1 > win->pch) h1 = win->pch;
+            const uint32_t *rgb = (const uint32_t *)win->content;
+            for (int j = 0; j < h1; j++)
+                for (int i = 0; i < w1; i++) {
+                    long at = (long)j * pw + i;
+                    gfx_pblend_s(pic, px0 + i, py0 + j, win->truecolour ? rgb[at]
+                                 : video_palette_rgb(win->content[at]), 255);
+                }
+        } else if (off) {
             /* Into a picture of logical pixels: each one the buffer's
                pixel at its corner */
             const uint32_t *rgb = (const uint32_t *)win->content;
@@ -1480,6 +1498,8 @@ static void draw_body(const struct window *win, int focused, int off)
 
 static uint32_t *anim_px;
 static int anim_tried;
+static int anim_k;                   /* the scale the picture is sized for */
+static uint32_t anim_room;           /* in the panel's pixels */
 
 /* How long a way takes: the 'motion' setting - 0 is none at all (for
    whoever would rather the screen stayed still), 1 the usual, and more
@@ -1539,12 +1559,22 @@ static int win_tile(const struct window *win, int *x, int *y, int *t)
    it is drawn, or not, as if it were not moving) */
 static int draw_animated(const struct window *win, int focused)
 {
+    /* The picture is the panel's pixels, so that the window on its way
+       is as sharp as the window at rest - and the last frame of the way
+       is the window itself, pixel for pixel */
+    if (anim_px && anim_k != video_k()) {
+        win_buf_free((uint8_t *)anim_px, anim_room * 4u);
+        anim_px = (uint32_t *)0;
+        anim_tried = 0;
+    }
     if (!anim_px && !anim_tried) {
         anim_tried = 1;
-        uint32_t a = pmm_alloc_contiguous((ANIM_PX * 4 + 4095) / 4096);
+        anim_k = video_k();
+        anim_room = (uint32_t)((long)ANIM_PX * anim_k * anim_k / 256);
+        uint32_t a = pmm_alloc_contiguous((anim_room * 4 + 4095) / 4096);
         anim_px = (uint32_t *)(uintptr_t)a;
     }
-    if (!anim_px || win->w * win->h > ANIM_PX)
+    if (!anim_px || (uint32_t)(P(win->w) * P(win->h)) > anim_room)
         return 0;
 
     int p = anim_progress(win);
@@ -1581,7 +1611,8 @@ static int draw_animated(const struct window *win, int focused)
     struct window at0 = *win;
     at0.x = 0;
     at0.y = 0;
-    struct gfx_surface s = { anim_px, w, h, w, 16 };
+    int pw = P(w), ph = P(h);
+    struct gfx_surface s = { anim_px, pw, ph, pw, video_k() };
     gfx_target(&s);
     draw_body(&at0, focused, 1);
     gfx_target((const struct gfx_surface *)0);
@@ -1590,7 +1621,7 @@ static int draw_animated(const struct window *win, int focused)
     gfx_shadow(cx, cy, cw, ch, r, SHADOW_S,
                (focused ? L.shadow_a : L.shadow_a * 3 / 5) * a / 255,
                SHADOW_DY);
-    gfx_blit_scaled(cx, cy, cw, ch, r, anim_px, w, h, w, a);
+    gfx_blit_scaled(cx, cy, cw, ch, r, anim_px, pw, ph, pw, a);
     return 1;
 }
 
@@ -1803,9 +1834,10 @@ static volatile int locked;            /* the lock screen (below) is up */
    interrupt, and turning the machine off is not an interrupt's work. */
 static volatile int ask = -1;
 static volatile int ask_go;
+static int ask_h(void) { return ask == 0 ? ABOUT_H : ASK_H; }  /* 0: About */
 static int ask_x(void) { return (video_w() - ASK_W) / 2; }
-static int ask_y(void) { return (video_h() - ASK_H) / 2; }
-static int ask_btn_y(void) { return ask_y() + ASK_H - ASK_PAD - ASK_BTN_H; }
+static int ask_y(void) { return (video_h() - ask_h()) / 2; }
+static int ask_btn_y(void) { return ask_y() + ask_h() - ASK_PAD - ASK_BTN_H; }
 /* The one that does it is on the right, where the eye ends up; Cancel
    is next to it */
 static int ask_do_x(void) { return ask_x() + ASK_W - ASK_PAD - ASK_BTN_W; }
@@ -1838,7 +1870,8 @@ static void handle_input(int mx, int my, int buttons)
     if (ask >= 0) {
         if (pressed && !prev_pressed &&
             my >= ask_btn_y() && my < ask_btn_y() + ASK_BTN_H) {
-            if (mx >= ask_no_x() && mx < ask_no_x() + ASK_BTN_W)
+            if (mx >= ask_no_x() && mx < ask_no_x() + ASK_BTN_W &&
+                ask != SESS_ABOUT)
                 ask = -1;
             else if (mx >= ask_do_x() && mx < ask_do_x() + ASK_BTN_W)
                 ask_go = 1;
@@ -1962,12 +1995,12 @@ static void handle_input(int mx, int my, int buttons)
             }
             for (int i = 0; i < SESS_N; i++) {
                 if (in_rect(mx, my, menu_px, session_item_y(i), MENU_W,
-                            MENU_ROW)) {
+                            SESS_ROW)) {
                     menu_open = 0;
                     if (i == SESS_LOCK)
                         desktop_lock();
                     else
-                        ask = i;
+                        ask = i;         /* a question, or the About card */
                     prev_pressed = pressed;
                     return;
                 }
@@ -3548,6 +3581,13 @@ static void session_icon(int what, int x, int y, int s, uint32_t c)
     int x0 = x * 16, y0 = y * 16, cx = x0 + u / 2, cy = y0 + u / 2;
     int t = s * 16 / 10;                /* the stroke */
     switch (what) {
+    case SESS_ABOUT: {                  /* an i in a ring */
+        int r = u * 8 / 20;
+        gfx_circle16(cx, cy, r, t, c, 255);
+        gfx_disc16(cx, cy - r / 2, t * 2 / 3 + 4, c, 255);
+        gfx_line16(cx, cy - r / 8, cx, cy + r / 2, t, c, 255);
+        break;
+    }
     case SESS_LOCK: {
         int bw = u * 6 / 10, bh = u * 9 / 20;
         int bx = cx - bw / 2, by = y0 + u * 9 / 20;
@@ -3625,15 +3665,15 @@ static void draw_menu(void)
     gfx_fill(x + 12, sy, MENU_W - 24, 1, L.menu_text, 50);
     for (int i = 0; i < SESS_N; i++) {
         int iy = session_item_y(i);
-        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, MENU_ROW);
+        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, SESS_ROW);
         if (over)
-            gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6, L.accent,
+            gfx_rrect(x + 5, iy + 1, MENU_W - 10, SESS_ROW - 2, 6, L.accent,
                       255);
         uint32_t ink = over ? L.accent_text : L.menu_text;
-        session_icon(i, x + 10, iy + (MENU_ROW - MENU_ICON) / 2, MENU_ICON,
+        session_icon(i, x + 10, iy + (SESS_ROW - MENU_ICON) / 2, MENU_ICON,
                      ink);
         ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
-                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                     ui_font_baseline_in(MENU_PX, iy, SESS_ROW),
                      session_items[i], ink);
     }
 }
@@ -3923,6 +3963,97 @@ static void session_do(int what)
     }
 }
 
+/* --- About ThreadOS: what this machine is, on a card ------------------- */
+
+static int cat(char *d, int at, const char *s)
+{
+    while (*s && at < 63)
+        d[at++] = *s++;
+    d[at] = 0;
+    return at;
+}
+
+static int cat_num(char *d, int at, uint32_t v)
+{
+    char t[12];
+    int n = 0;
+    do {
+        t[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (n && at < 63)
+        d[at++] = t[--n];
+    d[at] = 0;
+    return at;
+}
+
+static void draw_about(void)
+{
+    uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    gfx_fill(0, 0, video_w(), video_h(), 0x000000, theme_dark ? 80 : 50);
+    int x = ask_x(), y = ask_y();
+    gfx_shadow(x, y, ASK_W, ABOUT_H, ASK_R, 18, theme_dark ? 160 : 100, 6);
+    gfx_rrect(x, y, ASK_W, ABOUT_H, ASK_R, L.win_bg, 255);
+    gfx_rring16(x * 16, y * 16, ASK_W * 16, ABOUT_H * 16, ASK_R * 16, 16,
+                L.win_line, 200);
+    int d = 40;
+    gfx_disc16((x + ASK_PAD) * 16 + d * 8, (y + ASK_PAD) * 16 + d * 8, d * 8,
+               L.accent, 255);
+    draw_logo(x + ASK_PAD + (d - BAR_LOGO_D) / 2,
+              y + ASK_PAD + (d - BAR_LOGO_D) / 2, L.accent_text);
+    int tx = x + ASK_PAD + d + 14;
+    ui_font_text(UI_BOLD, 15, tx, y + ASK_TITLE_Y, "ThreadOS", text);
+
+    char line[64];
+    int n;
+#ifdef __x86_64__
+    n = cat(line, 0, "64-bit kernel, ");
+#else
+    n = cat(line, 0, "32-bit kernel, ");
+#endif
+    n = cat_num(line, n, (uint32_t)smp_cpus());
+    cat(line, n, smp_cpus() == 1 ? " processor" : " processors");
+    ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y, line, dim);
+
+    uint32_t free_mib = (pmm_total_frames() - pmm_used_frames()) / 256;
+    n = cat(line, 0, "Memory: ");
+    n = cat_num(line, n, pmm_ram_kib() / 1024);
+    n = cat(line, n, " MiB, ");
+    n = cat_num(line, n, free_mib);
+    cat(line, n, " MiB free");
+    ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + ABOUT_LINE_DY, line, dim);
+
+    n = cat(line, 0, "Screen: ");
+    n = cat_num(line, n, (uint32_t)video_pw());
+    n = cat(line, n, "x");
+    n = cat_num(line, n, (uint32_t)video_ph());
+    n = cat(line, n, " at ");
+    n = cat_num(line, n, (uint32_t)video_scale());
+    cat(line, n, "%");
+    ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + 2 * ABOUT_LINE_DY,
+                 line, dim);
+
+    uint32_t up = pit_ticks() / 100, mins = up / 60;
+    n = cat(line, 0, "Up for ");
+    if (mins >= 60) {
+        n = cat_num(line, n, mins / 60);
+        n = cat(line, n, " h ");
+    }
+    n = cat_num(line, n, mins % 60);
+    cat(line, n, " min");
+    ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + 3 * ABOUT_LINE_DY,
+                 line, dim);
+
+    int by = ask_btn_y();
+    int over = in_rect(mouse_x, mouse_y, ask_do_x(), by, ASK_BTN_W, ASK_BTN_H);
+    gfx_rrect(ask_do_x(), by, ASK_BTN_W, ASK_BTN_H, 8, L.accent,
+              over ? 220 : 255);
+    int ow = ui_font_width(UI_BOLD, UI_PX, "OK");
+    ui_font_text(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - ow) / 2,
+                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), "OK", L.accent_text);
+}
+
 /* The question: a card in the middle of a dimmed screen, the question,
    what it will do, and two buttons - Enter is the one on the right,
    Esc is Cancel */
@@ -3934,25 +4065,31 @@ static void draw_ask(void)
         ask = -1;
         if (what > SESS_LOCK && what < SESS_N)
             session_do(what);
+        return;                   /* (and the About card is simply closed) */
+    }
+    if (ask == SESS_ABOUT) {
+        draw_about();
         return;
     }
     if (ask <= SESS_LOCK || ask >= SESS_N)
         return;
+    /* By name, so that an entry added to the menu cannot shift them */
     static const char *const title[SESS_N] = {
-        "", "Log out?", "Restart the computer?", "Shut down the computer?"
-    };
-    static const char *const body[SESS_N] = {
-        "", "Open programs will be closed and the",
-        "Open programs will be closed and the",
-        "Open programs will be closed and the"
+        [SESS_LOGOUT] = "Log out?",
+        [SESS_RESTART] = "Restart the computer?",
+        [SESS_SHUTDOWN] = "Shut down the computer?",
     };
     static const char *const body2[SESS_N] = {
-        "", "screen locked.", "machine started again.",
-        "machine switched off."
+        [SESS_LOGOUT] = "screen locked.",
+        [SESS_RESTART] = "machine started again.",
+        [SESS_SHUTDOWN] = "machine switched off.",
     };
     static const char *const act[SESS_N] = {
-        "", "Log Out", "Restart", "Shut Down"
+        [SESS_LOGOUT] = "Log Out",
+        [SESS_RESTART] = "Restart",
+        [SESS_SHUTDOWN] = "Shut Down",
     };
+    const char *body1 = "Open programs will be closed and the";
     int what = ask;
     uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
     uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
@@ -3973,7 +4110,7 @@ static void draw_ask(void)
                  L.accent_text);
     int tx = x + ASK_PAD + d + 14;
     ui_font_text(UI_BOLD, 15, tx, y + ASK_TITLE_Y, title[what], text);
-    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y, body[what], dim);
+    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y, body1, dim);
     ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y + 17, body2[what], dim);
 
     int by = ask_btn_y();
@@ -4621,6 +4758,33 @@ int desktop_frame_stats(int *fps, int *busy)
  * the meantime what it had drawn is carried over, enlarged or reduced,
  * so nothing goes blank while it does. */
 static int scale_now;                  /* the setting the desktop runs with */
+static char res_now[CONFIG_VAL_MAX];   /* ... and the 'resolution' one */
+
+/* The 'resolution' setting as a mode: "1280x800", or 0x0 for the
+   panel's own ("native", or anything that is not a mode) */
+static void resolution_wanted(int *w, int *h)
+{
+    const char *res = config_get("resolution");
+    int rw = 0, rh = 0;
+    if (res && res[0] >= '1' && res[0] <= '9') {
+        const char *q = res;
+        while (*q >= '0' && *q <= '9')
+            rw = rw * 10 + (*q++ - '0');
+        if (*q == 'x' || *q == 'X') {
+            q++;
+            while (*q >= '0' && *q <= '9')
+                rh = rh * 10 + (*q++ - '0');
+        }
+        if (rw < 320 || rh < 200 || rw > 7680 || rh > 4320)
+            rw = rh = 0;
+    }
+    int i = 0;
+    for (; res && res[i] && i < CONFIG_VAL_MAX - 1; i++)
+        res_now[i] = res[i];
+    res_now[i] = 0;
+    *w = rw;
+    *h = rh;
+}
 
 static void rebuffer(struct window *w)
 {
@@ -4702,6 +4866,18 @@ static void relayout(void)
 
 static void display_refresh(void)
 {
+    /* The mode first - where it is ours to set: the panel gets another
+       size, and the scale is decided again for it */
+    const char *res = config_get("resolution");
+    if (res && strcmp(res, res_now)) {
+        int rw, rh;
+        resolution_wanted(&rw, &rh);
+        if (video_set_mode(rw, rh) == 1) {
+            gfx_screen_changed();
+            relayout();
+        }
+    }
+
     int wish = (int)config_get_num("scale", 0);
     if (wish == scale_now)
         return;
@@ -4728,20 +4904,8 @@ static void desktop_thread(void *arg)
        'resolution' setting names one - "1024x768". Without either,
        640x480; without a framebuffer at all, mode 13h (320x200). Where
        the loader set the mode, it stays what the loader set. */
-    int rw = 0, rh = 0;
-    const char *res = config_get("resolution");
-    if (res && res[0] >= '1' && res[0] <= '9') {
-        const char *q = res;
-        while (*q >= '0' && *q <= '9')
-            rw = rw * 10 + (*q++ - '0');
-        if (*q == 'x' || *q == 'X') {
-            q++;
-            while (*q >= '0' && *q <= '9')
-                rh = rh * 10 + (*q++ - '0');
-        }
-        if (rw < 320 || rh < 200 || rw > 7680 || rh > 4320)
-            rw = rh = 0;
-    }
+    int rw, rh;
+    resolution_wanted(&rw, &rh);
     if (video_init_vesa(rw, rh) < 0)
         video_init();
 

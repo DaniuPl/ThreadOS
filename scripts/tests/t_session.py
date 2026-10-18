@@ -25,6 +25,7 @@ Run on its own or through scripts/run_tests.py.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -40,12 +41,16 @@ DO_X = AX + ASK_W - ASK_PAD - ASK_BTN_W
 NO_X = DO_X - ASK_BTN_GAP - ASK_BTN_W
 
 
-def entry(q, name, screen=None):
-    top = session_y(name) - MENU_ROW // 2
+def entry(q, name):
+    """An entry read the way a person reads a menu - with the pointer on
+    it: then it stands on the accent, one colour, instead of on glass
+    that is whatever lies under the menu, blurred"""
+    q.mouse_goto(MENU_X0 + MENU_W - 12, session_y(name))
+    time.sleep(0.6)
+    top = session_y(name) - SESS_ROW // 2
     return q.read_ui(MENU_X0 + 10 + MENU_ICON + 10,
-                     ui_font_baseline_in(MENU_PX, top, MENU_ROW),
-                     width=120, px=MENU_PX, fg=DARK["menu_text"],
-                     screen=screen)
+                     ui_font_baseline_in(MENU_PX, top, SESS_ROW),
+                     width=120, px=MENU_PX, fg=DARK["accent_text"])
 
 
 def pick(q, name):
@@ -97,11 +102,13 @@ def session(slog):
         q.open_menu()
         q.mouse_goto(400, 300)
         time.sleep(0.6)
+        got = [entry(q, n) for n in SESSION_ITEMS]
+        q.mouse_goto(400, 300)
+        time.sleep(0.6)
         scr = q.screen_raw()
-        got = [entry(q, n, scr) for n in SESSION_ITEMS]
         check("under the programs, the system's entries (%s)" % (got,),
-              got == ["Lock Screen", "Log Out...", "Restart...",
-                      "Shut Down..."])
+              got == ["About ThreadOS", "Lock Screen", "Log Out...",
+                      "Restart...", "Shut Down..."])
         _, _, at = scr
         line = at(MENU_X0 + MENU_W // 2,
                   MENU_Y + MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP // 2)
@@ -115,6 +122,30 @@ def session(slog):
         check("the entry under the pointer answers on the accent",
               near(at(MENU_X0 + 8, session_y("Restart...")), DARK["accent"], 6))
         q.click_desktop()
+
+        # About: what the machine is, said on a card - against what the
+        # test knows it started (one 32-bit processor, a 640x480 screen,
+        # the memory QEMU was given)
+        pick(q, "About ThreadOS")
+        ay = (SCREEN_H - ABOUT_H) // 2
+        tx = AX + ASK_PAD + 40 + 14
+        scr = q.screen_raw()
+        about = [q.read_ui(tx, ay + ASK_TITLE_Y, 260, px=15, face="bold",
+                           fg=DARK["app_text"], screen=scr)]
+        about += [q.read_ui(tx, ay + ABOUT_LINE_Y + i * ABOUT_LINE_DY, 260,
+                            px=UI_PX, fg=DARK["app_dim"], screen=scr)
+                  for i in range(4)]
+        check("About ThreadOS says what the machine is (%s)" % (about,),
+              about[0] == "ThreadOS" and
+              about[1] == "32-bit kernel, 1 processor" and
+              re.match(r"Memory: \d+ MiB, \d+ MiB free$", about[2]) and
+              about[3] == "Screen: 640x480 at 100%" and
+              about[4].startswith("Up for "))
+        q.sendkey("ret")
+        time.sleep(1)
+        check("and Enter closes it",
+              q.read_ui(tx, ay + ASK_TITLE_Y, 260, px=15, face="bold",
+                        fg=DARK["app_text"]) == "" and kernel_window(q))
 
         # Each of the three asks first
         for name, want, act in (("Log Out...", "Log out?", "Log Out"),

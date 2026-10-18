@@ -5711,3 +5711,34 @@ fact stops being a journal.*
       half times their size - which no enlargement could produce -
       while clicks and keys still land where the layout says; at two,
       the title bar's pixels are not squares of four.
+
+- [x] **The display while it runs, and what the machine is**
+
+      'set scale' and 'set resolution' - or the new Scale row in
+      Appearance - are taken up within a second, not at the next start.
+      A new scale keeps the panel and changes the logical size: icons,
+      the dock's kept glass, the bar's strip and every program's window
+      buffer are made again at the new size, windows are brought inside
+      the desktop (a maximised one fills it again), and each program is
+      told its size and draws itself again - until it does, what it had
+      drawn is carried over resampled. A new resolution, where the
+      kernel set the mode itself, sets the mode again, gives the old
+      buffers back and paints everything for the new size. The scale
+      never leaves a desktop smaller than 640x480.
+
+      Windows on their way (opening, minimising) are drawn into a
+      picture at the panel's size too, so the last frame of the way is
+      the window itself rather than a softened copy.
+
+      The menu's system part starts with About ThreadOS: a card with the
+      kernel (32- or 64-bit) and its processors, the memory and how much
+      of it is free, the screen and its scale, and how long the machine
+      has been up. Its rows are a little lower than the programs' so
+      that the menu still fits a 640x480 screen.
+
+      The tests' screen reader learned one thing: a letter that leans
+      past its advance into the next one (an f before an o) is tried a
+      second time with only its own ink held against the screen. And
+      the system's entries are read the way a person reads a menu, with
+      the pointer on them - on the accent, not on glass that is
+      whatever lies under the menu.
