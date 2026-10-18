@@ -1868,6 +1868,31 @@ static int search_key(char c);
 static int note_at(int x, int y);
 static void note_drop(int i);
 
+/* A program's window brought up if it is open - on this desktop or not
+   - and the program started if it is not: a second calendar is not
+   what a click on the date asks for */
+static void open_or_raise(const char *app)
+{
+    char name[24];
+    for (int i = 0; i < MAX_WIN; i++) {
+        struct window *w = &wins[i];
+        if (!w->used || !w->content || w->owner < 0 ||
+            !task_name_of(w->owner, name, sizeof(name)) || strcmp(name, app))
+            continue;
+        if (w->desk != cur_desk)
+            desk_switch(w->desk);
+        if (w->minimized)
+            anim_start(i, ANIM_RESTORE);
+        w->minimized = 0;
+        focus_idx = i;
+        raise_win(i);
+        return;
+    }
+    int from = icon_of_app(app);
+    remember_launch(exec_spawn(app), from,
+                    from >= 0 ? icons[from].art : art_of_app(app));
+}
+
 static void handle_input(int mx, int my, int buttons)
 {
     int pressed = buttons & 0x01;
@@ -2007,6 +2032,14 @@ static void handle_input(int mx, int my, int buttons)
             } else if (mx >= desk_x0() && mx < desk_x0() + DESK_N * DESK_CELL) {
                 menu_open = 0;
                 desk_switch((mx - desk_x0()) / DESK_CELL);
+            } else if (mx >= clock_x()) {
+                /* The date is where a calendar is looked for, and how
+                   full the memory is where the task manager is */
+                menu_open = 0;
+                open_or_raise("gcal");
+            } else if (in_rect(mx, my, load_x(), 0, LOAD_W, BAR_H)) {
+                menu_open = 0;
+                open_or_raise("gtasks");
             } else {
                 menu_open = 0;
             }

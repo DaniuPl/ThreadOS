@@ -19,6 +19,11 @@ minimised by hand stays minimised, because that was somebody's
 decision, and a button that undoes a person's decisions is a button
 they stop pressing.
 
+The clock and the meter are also where a person looks for more: a
+click on the date opens the calendar - and a second click brings that
+same calendar up rather than starting another - and a click on the
+meter opens the task manager.
+
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -33,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, font8x8
 from ptest import near as ptest_near
+from ptest import _kernel_define as define
 
 def is_accent(px):
     return ptest_near(px, theme("dark")["accent"], 12)
@@ -188,7 +194,53 @@ def main():
             if os.path.exists(f):
                 os.unlink(f)
 
+    shortcuts()
     return summary()
+
+
+def frame_of(src, slot):
+    w, h = define(src, "W0"), define(src, "H0")
+    x, y = cascade(slot, w + 2, h + TITLE_H + 2)
+    return x, y, w + 2
+
+
+def shortcuts():
+    slog = tempfile.mktemp(suffix=".log")
+    try:
+        q = Qemu(KERNEL, INITRD, serial=slog)
+        try:
+            check("(shortcuts) the desktop came up", q.wait_desktop(timeout=40))
+            q.mouse_home()
+            q.click(bar_clock_x() + BAR_CLOCK_W // 2, BAR_H // 2)
+            time.sleep(4)
+            q.mouse_goto(600, 400)
+            time.sleep(1)
+            x, y, w = frame_of("user/gcal.c", 2)
+            got = q.window_title(x, y, w)
+            check("a click on the date opens the calendar ('%s')" % got,
+                  got == "Calendar")
+            check("with its tile in the dock", q.dock_windows() == 3)
+            q.click_desktop()
+            time.sleep(0.5)
+            q.click(bar_clock_x() + BAR_CLOCK_W // 2, BAR_H // 2)
+            time.sleep(3)
+            q.mouse_goto(600, 400)
+            time.sleep(1)
+            check("a second click brings that one up, not another (%d "
+                  "windows)" % q.dock_windows(), q.dock_windows() == 3)
+            q.click(bar_load_x() + LOAD_W // 2, BAR_H // 2)
+            time.sleep(4)
+            q.mouse_goto(600, 400)
+            time.sleep(1)
+            x, y, w = frame_of("user/gtasks.c", 3)
+            got = q.window_title(x, y, w)
+            check("a click on the meter opens the task manager ('%s')" % got,
+                  got == "Tasks")
+        finally:
+            q.close()
+    finally:
+        if os.path.exists(slog):
+            os.unlink(slog)
 
 
 sys.exit(main())
