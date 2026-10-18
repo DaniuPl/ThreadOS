@@ -133,8 +133,12 @@ def main():
                 check("with 'runw' they would run off the boot core too "
                       "(mask %d)" % mask, (mask & ~1) != 0)
                 grew = after[0] - mid[0]
+                # Here the two count on two cores at once, and the
+                # count is one locked addition each: not one may go
+                # missing. (A plain ++ lost a few dozen of 18000 now and
+                # then - which the tolerance above used to hide.)
                 check("and again without the lock (%d, pages 2 x %d)"
-                      % (grew, pages), grew >= 2 * pages - 16)
+                      % (grew, pages), grew >= 2 * pages)
                 check("still not one with the lock (%d)"
                       % (after[1] - mid[1]), after[1] == mid[1])
 

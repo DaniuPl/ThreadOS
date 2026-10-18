@@ -131,6 +131,15 @@ static int demand_page_nolock(uint64_t addr)
 static uint32_t faults_nolock;
 static uint32_t faults_locked;
 
+/* Counted on any core at once - that is the point of not taking the
+   lock - so the count goes up in one locked instruction. A plain ++ is
+   a read and a write, and two cores doing it together lose one: the
+   test saw 17980 of 18000. */
+static inline void count_nolock(void)
+{
+    __atomic_fetch_add(&faults_nolock, 1, __ATOMIC_RELAXED);
+}
+
 uint32_t isr_faults_nolock(void) { return faults_nolock; }
 uint32_t isr_faults_locked(void) { return faults_locked; }
 
@@ -147,11 +156,11 @@ void isr64_handler(struct regs *r)
     if (r->int_no == 14) {
         uint64_t cr2 = read_cr2();
         if ((r->err_code & 0x02) && paging64_handle_cow(cr2)) {
-            faults_nolock++;
+            count_nolock();
             return;
         }
         if (z_ring3 && !(r->err_code & 0x01) && demand_page_nolock(cr2)) {
-            faults_nolock++;
+            count_nolock();
             return;
         }
         faults_locked++;
