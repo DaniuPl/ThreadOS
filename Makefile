@@ -659,7 +659,12 @@ kernel64: $(KERNEL64) $(INITRD64)
 # hardware - the old image knew only the BIOS road.
 ISO64 := $(BUILD)/threados64.iso
 
-$(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg
+# The disc carries threadboot too (when clang can build it): not to
+# boot from - GRUB does that - but for the installer to write onto a
+# disk, which then boots without GRUB (see grub64.cfg)
+ISO64_LOADER := $(if $(shell command -v clang 2>/dev/null),$(BUILD)/BOOTX64.EFI)
+
+$(ISO64): $(KERNEL64) $(INITRD64) grub64.cfg $(ISO64_LOADER)
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -669,6 +674,7 @@ grub-common xorriso mtools"; \
 	cp $(KERNEL64) $(BUILD)/isodir64/boot/threados64.bin
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
+	$(if $(ISO64_LOADER),cp $(ISO64_LOADER) $(BUILD)/isodir64/boot/threadboot.efi)
 	grub-mkrescue -o $@ $(BUILD)/isodir64
 	@echo "Done: $@ (BIOS + UEFI)"
 
@@ -764,7 +770,10 @@ run-iso: iso $(DISK)
 #   make test            every group
 #   make test T=k64      the 64-bit kernel only (or k64,uefi)
 #   make test J=1        one after another, for debugging
-test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
+# The disc too, where GRUB can make it: t_isoinstall installs from the
+# one 'make iso64' builds, not from a copy of its own
+test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64) \
+      $(if $(shell command -v grub-mkrescue 2>/dev/null),$(ISO64))
 	python3 -u scripts/run_tests.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
 	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
 

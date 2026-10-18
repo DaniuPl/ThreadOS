@@ -55,6 +55,7 @@
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/desktop.h"
+#include "../kernel/include/install.h"
 
 /* Demonstration threads: two counting forever and one that ends by
    itself - so that a zombie can be seen disappearing from the list. */
@@ -653,6 +654,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     if (boot_word(mbi, "desktop")) {
         printk("The desktop is starting - the console goes away\n");
         desktop_start();
+    } else if (boot_word(mbi, "install")) {
+        /* 'install': the installer on the whole screen, as if 'install'
+           had been typed - the disc's menu entry for a person who came
+           to install, not to read a shell's prompt */
+        printk("The installer is starting\n");
+        install_graphical();
     }
 
     /* From this moment on the main thread becomes the idle thread - the

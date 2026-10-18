@@ -5838,3 +5838,27 @@ fact stops being a journal.*
       Last, the console is typed into on the keyboard, Polish letters
       included.
 
+
+- [x] **Installing from the disc**
+
+      People put a disc image on a stick with whatever program they
+      have - Rufus, Etcher, Ventoy, dd - not with ours. Started that
+      way, the system came up through GRUB, and GRUB handed over only
+      the initrd: the installer, which writes the kernel's file and
+      threadboot onto the disk, had nothing to write and said so. Now
+      threados64.iso carries threadboot as a plain file
+      (/boot/threadboot.efi), and every entry of grub64.cfg has GRUB
+      hand over the kernel's file and threadboot as modules, under the
+      names threadboot gives them ("the kernel", "loader") - the
+      installer cannot tell the difference. The disc's menu has an
+      entry of its own for it: 'install' on the kernel's line starts
+      the installer on the whole screen, the way 'desktop' starts the
+      desktop.
+
+      t_isoinstall takes the disc 'make iso64' really builds (make test
+      builds it now): its menu is grub64.cfg, threadboot is on it byte
+      for byte; started under OVMF with somebody else's disk, 'install
+      text' writes the files, which mtools reads back equal to the
+      build's own, with Windows' loader and the partition table left
+      alone; that disk then boots by itself through threadboot; and the
+      install entry brings up the installer's own screen.
