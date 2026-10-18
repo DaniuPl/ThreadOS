@@ -240,6 +240,25 @@ static inline int ug_len(const char *s)
     return n;
 }
 
+/* Backspace in a field: the last letter, all of it - a Polish letter
+   is two bytes of UTF-8 */
+static inline void ug_rub(char *b)
+{
+    int n = ug_len(b);
+    while (n > 0) {
+        char gone = b[--n];
+        b[n] = '\0';
+        if (((unsigned char)gone & 0xC0) != 0x80)
+            break;
+    }
+}
+
+/* A key that is typing: printable ASCII, or a byte of a letter beyond */
+static inline int ug_typed(char c)
+{
+    return (unsigned char)c >= 0x20 && c != 0x7F;
+}
+
 /* A colour by its meaning */
 static inline uint32_t ug_rgb(const struct ud_look *l, int colour)
 {
@@ -520,11 +539,10 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
         if (c == '\n' || c == '\r')
             return UG_ENTER;
         if (c == '\b') {
-            if (len > 0)
-                t->buf[len - 1] = '\0';
+            ug_rub(t->buf);
             return UG_TYPED;
         }
-        if (c >= 0x20 && c < 0x7F && len < t->buflen - 1) {
+        if (ug_typed(c) && len < t->buflen - 1) {
             t->buf[len] = c;
             t->buf[len + 1] = '\0';
             return UG_TYPED;
@@ -692,11 +710,10 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
 
         int len = ug_len(m->buf);
         if (c == '\b') {
-            if (len > 0)
-                m->buf[len - 1] = '\0';
+            ug_rub(m->buf);
             return UG_TYPED;
         }
-        if (c >= 0x20 && c < 0x7F && len < m->buflen - 1) {
+        if (ug_typed(c) && len < m->buflen - 1) {
             m->buf[len] = c;
             m->buf[len + 1] = '\0';
             return UG_TYPED;
@@ -896,12 +913,11 @@ static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
 
         int len = ug_len(p->buf);
         if (c == '\b') {
-            if (len > 0)
-                p->buf[len - 1] = '\0';
+            ug_rub(p->buf);
             p->chosen = -1;
             return UG_TYPED;
         }
-        if (c >= 0x20 && c < 0x7F && len < p->buflen - 1) {
+        if (ug_typed(c) && len < p->buflen - 1) {
             p->buf[len] = c;
             p->buf[len + 1] = '\0';
             p->chosen = -1;

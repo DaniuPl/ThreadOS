@@ -123,7 +123,10 @@ Down — the last three only after a question in words with a Cancel next
 to it — and the Windows key opens that menu for the arrows and Enter.
 A dock tile has a menu under the right button (Show, Minimise, Close;
 Open), and the bar's date and memory meter open the calendar and the
-task manager. Ctrl+Space opens a search under the bar that finds programs, open
+task manager. AltGr types the Polish letters (the programmer's layout:
+ą ć ę ł ń ó ś ź ż, with Shift the capitals) on PS/2 and USB keyboards
+alike, as UTF-8 - and the editor, the terminal, the fields and the
+search take a letter of two bytes as one letter. Ctrl+Space opens a search under the bar that finds programs, open
 windows, settings and files as they are typed; notifications slide in
 at the top right — from the shell, from any program, from the desktop
 itself when it saves a picture of the screen; and "Appearance" shows

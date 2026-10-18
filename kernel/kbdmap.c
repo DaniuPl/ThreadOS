@@ -47,6 +47,53 @@ static char extended_key(uint8_t scancode);
 static int shift_pressed;
 static int ctrl_pressed;
 static int alt_pressed;
+static int altgr_pressed;              /* the right Alt, E0 38 */
+
+/* --- Polish letters: AltGr and a letter -------------------------------
+ *
+ * The "Polish (programmer's)" layout - the US keys, and the nine Polish
+ * letters on AltGr with the Latin letter nearest them: a c e l n o s,
+ * x for ź and z for ż. Each is two bytes of UTF-8, which is what the
+ * fonts and every text routine here read. */
+static const struct { char key; uint8_t lo[2], up[2]; } polish[] = {
+    { 'a', { 0xC4, 0x85 }, { 0xC4, 0x84 } },   /* ą Ą */
+    { 'c', { 0xC4, 0x87 }, { 0xC4, 0x86 } },   /* ć Ć */
+    { 'e', { 0xC4, 0x99 }, { 0xC4, 0x98 } },   /* ę Ę */
+    { 'l', { 0xC5, 0x82 }, { 0xC5, 0x81 } },   /* ł Ł */
+    { 'n', { 0xC5, 0x84 }, { 0xC5, 0x83 } },   /* ń Ń */
+    { 'o', { 0xC3, 0xB3 }, { 0xC3, 0x93 } },   /* ó Ó */
+    { 's', { 0xC5, 0x9B }, { 0xC5, 0x9A } },   /* ś Ś */
+    { 'x', { 0xC5, 0xBA }, { 0xC5, 0xB9 } },   /* ź Ź */
+    { 'z', { 0xC5, 0xBC }, { 0xC5, 0xBB } },   /* ż Ż */
+};
+
+int kbdmap_polish(char letter, int shift, char out[2])
+{
+    if (letter >= 'A' && letter <= 'Z') {
+        letter = (char)(letter - 'A' + 'a');
+        shift = 1;
+    }
+    for (unsigned i = 0; i < sizeof(polish) / sizeof(polish[0]); i++)
+        if (polish[i].key == letter) {
+            const uint8_t *b = shift ? polish[i].up : polish[i].lo;
+            out[0] = (char)b[0];
+            out[1] = (char)b[1];
+            return 1;
+        }
+    return 0;
+}
+
+static char more_byte;                 /* the second byte, still to come */
+static int more_waiting;
+
+int kbdmap_more(char *out_char)
+{
+    if (!more_waiting)
+        return 0;
+    more_waiting = 0;
+    *out_char = more_byte;
+    return 1;
+}
 
 static char extended_key(uint8_t scancode)
 {
@@ -107,6 +154,14 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
     }
     if (extended_next) {
         extended_next = 0;
+        if (scancode == 0x38) {            /* the right Alt: AltGr */
+            altgr_pressed = 1;
+            return KBD_NOTHING;
+        }
+        if (scancode == (0x38 | SC_RELEASED)) {
+            altgr_pressed = 0;
+            return KBD_NOTHING;
+        }
         if (!(scancode & SC_RELEASED)) {
             char c = extended_key(scancode);
             if (c) {
@@ -160,6 +215,16 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         return KBD_NOTHING;
 
     char c = shift_pressed ? keymap_shift[scancode] : keymap[scancode];
+    /* AltGr and a letter that has a Polish one: two bytes, the first
+       now and the second when the caller asks for more */
+    char pl[2];
+    if (altgr_pressed && !ctrl_pressed &&
+        kbdmap_polish(keymap[scancode], shift_pressed, pl)) {
+        more_byte = pl[1];
+        more_waiting = 1;
+        *out_char = pl[0];
+        return KBD_CHAR;
+    }
     if (ctrl_pressed && c == 'c')
         c = KEY_INTR;
     /* Ctrl+D: not a character but 'that is all I am going to type'.

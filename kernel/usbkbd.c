@@ -19,6 +19,7 @@
 #include "include/usbkbd.h"
 #include "include/usbhc.h"
 #include "include/keyboard.h"
+#include "include/kbdmap.h"
 #include "include/task.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -109,6 +110,16 @@ static void handle_key(uint8_t usage, uint8_t mods)
     int shift = (mods & 0x22) != 0;      /* the left or the right Shift */
     int ctrl  = (mods & 0x11) != 0;
     int alt   = (mods & 0x44) != 0;
+
+    /* The right Alt alone is AltGr: a Polish letter, as on PS/2 */
+    if ((mods & 0x40) && !(mods & 0x04) && !ctrl && usage < 0x40) {
+        char pl[2];
+        if (kbdmap_polish(hid_map[usage], shift, pl)) {
+            keyboard_inject(pl[0]);
+            keyboard_inject(pl[1]);
+            return;
+        }
+    }
 
     /* Alt+F1..F4 switches consoles - just as with PS/2 */
     if (alt && usage >= 0x3A && usage < 0x3A + 4) {

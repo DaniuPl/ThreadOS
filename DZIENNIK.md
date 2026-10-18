@@ -5742,3 +5742,30 @@ fact stops being a journal.*
       the system's entries are read the way a person reads a menu, with
       the pointer on them - on the accent, not on glass that is
       whatever lies under the menu.
+
+- [x] **Polish letters from the keyboard**
+
+      The fonts had them; nothing could type them. AltGr (the right
+      Alt, E0 38 on PS/2, the right-Alt bit on USB) with a c e l n o s
+      x z gives ą ć ę ł ń ó ś ź ż, with Shift the capitals - the Polish
+      programmer's layout. A letter is two bytes of UTF-8: kbdmap hands
+      out the first and keeps the second for kbdmap_more(), which both
+      kernels' drivers drain; the USB driver injects both.
+
+      Everything that takes typing had to learn that two bytes can be
+      one letter. The kernel's cell grid (WD_CELLS) gives a character a
+      cell, not a byte. The editor keeps byte offsets - that is what the
+      file is - and turns them into columns for the caret, the scroll
+      and the status line; Left and Right step over a letter whole,
+      Up and Down keep the column, Backspace takes a letter whole and
+      Ctrl+Z gives it back whole (the steps of one letter are marked to
+      be undone together). The terminal stores what programs write as
+      UTF-8, wraps by columns, copies selections by columns, and edits
+      its command line letter by letter; the password stars are one a
+      letter. The widget kit's fields, its questions and its file picker,
+      and the desktop's search, rub out a letter at a time.
+
+      t_polish types "Zażółć gęślą jaźń" and reads it back off the screen
+      against FreeType's own glyphs, steps the caret and rubs letters
+      out, saves the file and has 'cat' print the UTF-8 back, echoes
+      Polish through the terminal, and types "Łódź" on a USB keyboard.

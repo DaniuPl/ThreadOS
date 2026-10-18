@@ -22,4 +22,14 @@
 /* Feeds one byte from the driver. Returns one of the constants above. */
 int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey);
 
+/* A key may give more than one byte: a Polish letter (AltGr and a, c,
+   e, l, n, o, s, x, z - the layout every Polish keyboard is used with)
+   is two bytes of UTF-8. After KBD_CHAR the caller asks for the rest;
+   1 = one more in *out_char. */
+int kbdmap_more(char *out_char);
+
+/* The two bytes of UTF-8 for AltGr and an ASCII letter, or 0 when that
+   letter has none. Shared with the USB keyboard. */
+int kbdmap_polish(char letter, int shift, char out[2]);
+
 #endif

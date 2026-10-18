@@ -2548,7 +2548,7 @@ class Qemu:
     _cell_masks = {}
 
     def read_cells(self, ox, oy, cols, rows, cell=8, row_h=16, base=12,
-                   px=12, face="mono", screen=None):
+                   px=12, face="mono", screen=None, extra=""):
         """Text on a grid of cells - a terminal's, drawn with ud_cells():
         every character's pen at the left edge of its cell, the baseline
         'base' below the top of its row. One line per row, trailing
@@ -2564,12 +2564,11 @@ class Qemu:
         is drawn - under a letter, or between two - where no letter
         reaches."""
         w, h, at = screen or self.screen_raw()
-        key = (cell, row_h, base, px, face)
+        key = (cell, row_h, base, px, face, extra)
         if key not in Qemu._cell_masks:
             font = UiFont.shared(px, face)
             masks = {}
-            for code in range(33, 127):
-                ch = chr(code)
+            for ch in [chr(c) for c in range(33, 127)] + list(extra):
                 adv, left, top, gw, gh, a = font.glyph(ch)
                 m = [0] * ((cell - 1) * (row_h - 2))
                 for r in range(gh):

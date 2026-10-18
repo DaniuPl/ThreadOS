@@ -187,6 +187,8 @@ static void keyboard_irq(struct regs *r)
         break;
     case KBD_CHAR:
         deliver(c);
+        while (kbdmap_more(&c))         /* a letter of two bytes */
+            deliver(c);
         break;
     default:
         break;

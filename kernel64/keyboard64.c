@@ -147,6 +147,8 @@ static void keyboard_irq(struct regs *r)
         return;
 
     dorecz(c);
+    while (kbdmap_more(&c))             /* a letter of two bytes */
+        dorecz(c);
 }
 
 /* A character from a source other than PS/2 (a USB keyboard). Called

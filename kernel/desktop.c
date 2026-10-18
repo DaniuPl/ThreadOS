@@ -3599,12 +3599,16 @@ static int search_key(char c)
         if (search_pick > 0)
             search_pick--;
     } else if (c == '\b') {
-        if (search_len > 0) {
-            search_q[--search_len] = '\0';
-            search_pick = 0;
-            search_gen++;
+        /* the last letter, all of it - a Polish one is two bytes */
+        while (search_len > 0) {
+            char gone = search_q[--search_len];
+            search_q[search_len] = '\0';
+            if (((uint8_t)gone & 0xC0) != 0x80)
+                break;
         }
-    } else if (c >= 0x20 && c < 0x7F &&
+        search_pick = 0;
+        search_gen++;
+    } else if ((uint8_t)c >= 0x20 && c != 0x7F &&
                search_len < (int)sizeof(search_q) - 1) {
         search_q[search_len++] = c;
         search_q[search_len] = '\0';
@@ -4848,14 +4852,21 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     case WD_TEXT:
         return s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x;
     case WD_CELLS: {
-        int i = 0;
-        for (; s && s[i]; i++) {
-            if (s[i] == ' ')
-                continue;
-            char one[2] = { s[i], 0 };
-            ui_font_text_s(&t, font, px, d->x + i * d->w, d->y, one, d->rgb);
+        /* A cell is a character, not a byte: a Polish letter is two
+           bytes of UTF-8 and one column */
+        int col = 0;
+        for (int i = 0; s && s[i]; col++) {
+            char one[5];
+            int n = 0;
+            one[n++] = s[i++];
+            while (s[i] && ((uint8_t)s[i] & 0xC0) == 0x80 && n < 4)
+                one[n++] = s[i++];
+            one[n] = 0;
+            if (one[0] != ' ')
+                ui_font_text_s(&t, font, px, d->x + col * d->w, d->y, one,
+                               d->rgb);
         }
-        return d->x + i * d->w;
+        return d->x + col * d->w;
     }
     default:
         return -1;

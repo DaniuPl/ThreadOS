@@ -143,6 +143,31 @@ static void reread_files(void)
 }
 static int cols(void) { return (cw - TEXT_X - PAD) / CELL; }
 
+/* --- letters of more than one byte --------------------------------------
+ *
+ * The text is UTF-8: a Polish letter is two bytes and one column. The
+ * caret and the lines keep byte offsets - that is what the file is -
+ * and these turn them into columns and back, so the caret never stands
+ * in the middle of a letter. */
+static int cont(char c) { return ((unsigned char)c & 0xC0) == 0x80; }
+
+static int col_of(int l, int b)
+{
+    int n = 0;
+    for (int i = 0; i < b && i < llen[l]; i++)
+        if (!cont(text[l][i]))
+            n++;
+    return n;
+}
+
+static int byte_of(int l, int c)
+{
+    for (int i = 0; i < llen[l]; i++)
+        if (!cont(text[l][i]) && c-- == 0)
+            return i;
+    return llen[l];
+}
+
 
 static void num(char *d, int v)      /* a small unsigned number */
 {
@@ -166,6 +191,7 @@ static void num(char *d, int v)      /* a small unsigned number */
 #define UNDO_N 120
 struct step {
     unsigned char kind;
+    unsigned char with_prev;  /* one letter of two bytes: undone together */
     short line, col;
     char ch;
 };
@@ -201,6 +227,9 @@ static void clear_all(void)
 #define U_SPLIT 3     /* the line was split at (line,col) */
 #define U_JOIN  4     /* line+1 was joined onto line at col */
 
+/* Set by whoever records the second byte of a letter */
+static int join_next;
+
 static void record(int kind, int line, int col, char ch)
 {
     if (log_n == UNDO_N) {         /* drop the oldest */
@@ -212,6 +241,8 @@ static void record(int kind, int line, int col, char ch)
     log[log_n].line = (short)line;
     log[log_n].col = (short)col;
     log[log_n].ch = ch;
+    log[log_n].with_prev = (unsigned char)join_next;
+    join_next = 0;
     log_n++;
 }
 
@@ -267,6 +298,7 @@ static void insert_char(char c)
     text[cy][cx] = c;
     llen[cy]++;
     text[cy][llen[cy]] = '\0';
+    join_next = cont(c);          /* the rest of a letter goes with it */
     record(U_INS, cy, cx, c);
     cx++;
     dirty = 1;
@@ -289,12 +321,20 @@ static void split_line(void)
 static void backspace(void)
 {
     if (cx > 0) {
-        char gone = text[cy][cx - 1];
-        for (int i = cx - 1; i < llen[cy]; i++)
-            text[cy][i] = text[cy][i + 1];
-        llen[cy]--;
-        cx--;
-        record(U_DEL, cy, cx, gone);
+        /* A whole letter: its last byte back to its first */
+        int first = 1;
+        for (;;) {
+            char gone = text[cy][cx - 1];
+            for (int i = cx - 1; i < llen[cy]; i++)
+                text[cy][i] = text[cy][i + 1];
+            llen[cy]--;
+            cx--;
+            join_next = !first;
+            record(U_DEL, cy, cx, gone);
+            first = 0;
+            if (!cont(gone) || cx == 0)
+                break;
+        }
         dirty = 1;
         return;
     }
@@ -311,12 +351,23 @@ static void backspace(void)
 }
 
 /* One step back: the opposite of the last thing done. */
+static void undo_step(void);
+
 static void undo_one(void)
 {
     if (!log_n) {
         ecopy(note, "there is nothing to undo", sizeof(note) - 1);
         return;
     }
+    int more;
+    do {
+        more = log[log_n - 1].with_prev;
+        undo_step();
+    } while (more && log_n);
+}
+
+static void undo_step(void)
+{
     struct step st = log[--log_n];
     switch (st.kind) {
     case U_INS:                     /* it was put in - take it out */
@@ -516,10 +567,11 @@ static void scroll_to_caret(void)
         top = cy - r + 1;
     if (top < 0)
         top = 0;
-    if (cx < hoff)
-        hoff = cx;
-    if (cx >= hoff + c)
-        hoff = cx - c + 1;
+    int col = col_of(cy, cx);           /* hoff is in columns */
+    if (col < hoff)
+        hoff = col;
+    if (col >= hoff + c)
+        hoff = col - c + 1;
     if (hoff < 0)
         hoff = 0;
 }
@@ -547,13 +599,13 @@ static void draw(int win)
         num(no, l + 1);
         ud_text_right(win, GUTTER - 6, y + TEXT_BASE, no,
                       l == cy ? lk.text : lk.dim, UD_SANS, 11);
-        int n = llen[l] - hoff;
-        if (n < 0)
-            n = 0;
-        if (n > c)
-            n = c;
-        for (int k = 0; k < n; k++)
-            shown[k] = text[l][hoff + k];
+        /* From column hoff, c columns of it - whole letters */
+        int b = byte_of(l, hoff), n = 0, letters = 0;
+        while (b < llen[l]) {
+            if (!cont(text[l][b]) && letters++ == c)
+                break;
+            shown[n++] = text[l][b++];
+        }
         shown[n] = '\0';
         if (n)
             ud_cells(win, TEXT_X, y + TEXT_BASE, CELL, shown, lk.text,
@@ -564,7 +616,7 @@ static void draw(int win)
        will go. A block would cover the letter it stands on, and a bar
        inside the cell would eat its first column - both of them hide
        the very thing a person is looking at while they type. */
-    int caret_x = TEXT_X + (cx - hoff) * CELL - 1;
+    int caret_x = TEXT_X + (col_of(cy, cx) - hoff) * CELL - 1;
     ud_fill(win, caret_x, PAD + (cy - top) * ROW_H + 1, 1, ROW_H - 3,
             lk.accent);
 
@@ -597,7 +649,7 @@ static void draw(int win)
             line[p++] = n[i];
         line[p++] = ' ';
         line[p++] = 'C';
-        num(n, cx + 1);
+        num(n, col_of(cy, cx) + 1);
         for (int i = 0; n[i]; i++)
             line[p++] = n[i];
         if (note[0]) {
@@ -677,28 +729,35 @@ static void edit_key(char c)
     case KEY_UNDO:
         undo_one();
         return;
-    case KEY_UP:
+    case KEY_UP: {
+        int col = col_of(cy, cx);       /* the same column, a line up */
         if (cy > 0)
             cy--;
-        if (cx > llen[cy])
-            cx = llen[cy];
+        cx = byte_of(cy, col);
         return;
-    case KEY_DOWN:
+    }
+    case KEY_DOWN: {
+        int col = col_of(cy, cx);
         if (cy < nlines - 1)
             cy++;
-        if (cx > llen[cy])
-            cx = llen[cy];
+        cx = byte_of(cy, col);
         return;
+    }
     case KEY_LEFT:
-        if (cx > 0)
+        if (cx > 0) {
             cx--;
-        else if (cy > 0)
+            while (cx > 0 && cont(text[cy][cx]))
+                cx--;
+        } else if (cy > 0) {
             cx = llen[--cy];
+        }
         return;
     case KEY_RIGHT:
-        if (cx < llen[cy])
+        if (cx < llen[cy]) {
             cx++;
-        else if (cy < nlines - 1) {
+            while (cx < llen[cy] && cont(text[cy][cx]))
+                cx++;
+        } else if (cy < nlines - 1) {
             cy++;
             cx = 0;
         }
@@ -709,20 +768,22 @@ static void edit_key(char c)
     case KEY_END:
         cx = llen[cy];
         return;
-    case KEY_PGUP:
+    case KEY_PGUP: {
+        int col = col_of(cy, cx);
         cy -= rows();
         if (cy < 0)
             cy = 0;
-        if (cx > llen[cy])
-            cx = llen[cy];
+        cx = byte_of(cy, col);
         return;
-    case KEY_PGDN:
+    }
+    case KEY_PGDN: {
+        int col = col_of(cy, cx);
         cy += rows();
         if (cy > nlines - 1)
             cy = nlines - 1;
-        if (cx > llen[cy])
-            cx = llen[cy];
+        cx = byte_of(cy, col);
         return;
+    }
     case 0x1A: {                  /* Ctrl+Insert - the line the caret is on */
         sys_clip_set(text[cy], (uint32_t)llen[cy]);
         ecopy(note, "the line was copied", sizeof(note) - 1);
@@ -742,7 +803,8 @@ static void edit_key(char c)
         backspace();
         return;
     default:
-        if (c >= 0x20 && c < 0x7F)
+        /* printable, and the bytes of a letter beyond ASCII */
+        if ((unsigned char)c >= 0x20 && c != 0x7F)
             insert_char(c);
         return;
     }
@@ -833,9 +895,7 @@ void _start(int argc, char **argv)
                 int col = hoff + (ev.x - TEXT_X + CELL / 2) / CELL;
                 if (col < 0)
                     col = 0;
-                if (col > llen[cy])
-                    col = llen[cy];
-                cx = col;
+                cx = byte_of(cy, col);
             }
             drew = 1;
         }

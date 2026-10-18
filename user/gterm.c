@@ -57,7 +57,10 @@
 /* The screen buffer: a ring, because a terminal always throws the
    oldest line away and never the newest. Moving fourteen kilobytes up
    by one line on every newline would be the other way of doing it. */
-static char lines[SCROLL][COLS_MAX + 1];
+/* A line holds COLS_MAX columns; a column is a character, and a
+   character beyond ASCII (a Polish letter) is two bytes of UTF-8 */
+#define LINE_BYTES (2 * COLS_MAX)
+static char lines[SCROLL][LINE_BYTES + 1];
 static int  line_len[SCROLL];
 static int  first;            /* where the oldest line sits */
 static int  count;            /* how many lines the ring holds */
@@ -145,6 +148,42 @@ static int t_starts(const char *s, const char *p)
     return 1;
 }
 
+/* --- characters of more than one byte ---------------------------------- */
+
+static int u_cont(char c) { return ((unsigned char)c & 0xC0) == 0x80; }
+
+/* How many columns the first n bytes of s take */
+static int u_cols(const char *s, int n)
+{
+    int c = 0;
+    for (int i = 0; i < n && s[i]; i++)
+        if (!u_cont(s[i]))
+            c++;
+    return c;
+}
+
+/* The byte where column col of s (n bytes) begins - n past the end */
+static int u_byte(const char *s, int n, int col)
+{
+    for (int i = 0; i < n; i++)
+        if (!u_cont(s[i]) && col-- == 0)
+            return i;
+    return n;
+}
+
+/* At most 'cols' whole characters of src into dst */
+static void u_copy(char *dst, const char *src, int cols)
+{
+    int i = 0, c = 0;
+    while (src[i]) {
+        if (!u_cont(src[i]) && c++ == cols)
+            break;
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
 static void t_copy(char *dst, const char *src, int max)
 {
     int i = 0;
@@ -184,20 +223,24 @@ static void put_char(char c)
     if (c == '\t') {
         do
             put_char(' ');
-        while (line_len[at(count - 1)] % 8);
+        while (u_cols(lines[at(count - 1)], line_len[at(count - 1)]) % 8);
         return;
     }
-    if (c < 0x20 || c > 0x7E)
+    if ((unsigned char)c < 0x20 || c == 0x7F)
         c = '.';                   /* whatever it was, it is not text */
 
     int k = at(count - 1);
     /* Wrapping happens as the text arrives, at the width the window has
        then. Making the window wider afterwards does not re-flow what is
-       already written - the same as in a terminal that has scrolled. */
-    if (line_len[k] >= cols || line_len[k] >= COLS_MAX) {
+       already written - the same as in a terminal that has scrolled. A
+       letter's second byte stays with its first. */
+    if (!u_cont(c) && (u_cols(lines[k], line_len[k]) >= cols ||
+                       line_len[k] >= LINE_BYTES - 4)) {
         new_line();
         k = at(count - 1);
     }
+    if (line_len[k] >= LINE_BYTES)
+        return;
     lines[k][line_len[k]++] = c;
     lines[k][line_len[k]] = 0;
 }
@@ -874,12 +917,16 @@ static void on_key(char c)
             take_history(hist_pos);
         }
         return;
-    case KEY_LEFT:
+    case KEY_LEFT:                       /* over whole letters */
         if (icur > 0)
+            icur--;
+        while (icur > 0 && u_cont(input[icur]))
             icur--;
         return;
     case KEY_RIGHT:
         if (icur < ilen)
+            icur++;
+        while (icur < ilen && u_cont(input[icur]))
             icur++;
         return;
     case KEY_HOME:
@@ -958,7 +1005,7 @@ static void on_key(char c)
         int n = (int)sys_clip_get(got, sizeof(got));
         for (int i = 0; i < n && ilen < LINE_MAX - 1; i++) {
             char ch = got[i];
-            if (ch < 0x20 || ch > 0x7E)
+            if ((unsigned char)ch < 0x20 || ch == 0x7F)
                 continue;               /* one line, so no newlines */
             for (int k = ilen; k > icur; k--)
                 input[k] = input[k - 1];
@@ -980,16 +1027,19 @@ static void on_key(char c)
         return;
     }
     if (c == '\b') {
-        if (icur > 0) {
+        while (icur > 0) {               /* a whole letter, back to its start */
+            char gone = input[icur - 1];
             for (int i = icur - 1; i < ilen - 1; i++)
                 input[i] = input[i + 1];
             ilen--;
             icur--;
             input[ilen] = 0;
+            if (!u_cont(gone))
+                break;
         }
         return;
     }
-    if (c >= 0x20 && c < 0x7F && ilen < LINE_MAX - 1) {
+    if ((unsigned char)c >= 0x20 && c != 0x7F && ilen < LINE_MAX - 1) {
         /* Typing puts the character WHERE THE CURSOR IS, not at the end
            - otherwise moving the cursor would be a thing you can do and
            not a thing that means anything */
@@ -1069,12 +1119,8 @@ static void sel_copy(void)
     for (int i = la; i <= lb && i < count && n < CLIP_MAX; i++) {
         const char *src = lines[at(i)];
         int len = line_len[at(i)];
-        int from = (i == la) ? ca : 0;
-        int to = (i == lb) ? cb : len;
-        if (from > len)
-            from = len;
-        if (to > len)
-            to = len;
+        int from = (i == la) ? u_byte(src, len, ca) : 0;
+        int to = (i == lb) ? u_byte(src, len, cb) : len;
         for (int k = from; k < to && n < CLIP_MAX; k++)
             out[n++] = src[k];
         if (i != lb && n < CLIP_MAX)
@@ -1100,7 +1146,7 @@ static void measure(void)
 
 static void draw(int w)
 {
-    char buf[COLS_MAX + 1];
+    char buf[LINE_BYTES + 1];
     int text_rows = rows - 1;
     struct ud_look l;
     ud_look(&l);
@@ -1123,7 +1169,7 @@ static void draw(int w)
         /* What is selected gets a field behind it, drawn before the
            text, which is drawn over it */
         if (sel_on && i >= la && i <= lb) {
-            int len = line_len[at(i)];
+            int len = u_cols(lines[at(i)], line_len[at(i)]);
             int f = (i == la) ? ca : 0;
             int t = (i == lb) ? cb : len;
             if (f > len) f = len;
@@ -1132,7 +1178,7 @@ static void draw(int w)
                 ud_round(w, PAD + f * CELL, y, (t - f) * CELL, ROW_H, 3,
                          l.accent);
         }
-        t_copy(buf, lines[at(i)], cols + 1);
+        u_copy(buf, lines[at(i)], cols);
         ud_cells(w, PAD, y + TERM_BASE, CELL, buf, l.text, UD_MONO, TERM_PX);
         y += ROW_H;
     }
@@ -1152,14 +1198,19 @@ static void draw(int w)
     int room = cols - leadn;
     if (room < 4)
         room = 4;
-    int off = icur >= room ? icur - room + 1 : 0;
-    t_copy(buf, input + off, room + 1);
+    int icol = u_cols(input, icur);     /* the cursor's column */
+    int off = icol >= room ? icol - room + 1 : 0;
+    u_copy(buf, input + u_byte(input, ilen, off), room);
     /* A password is typed in the same line as everything else and shown
        in none of it: stars are what a person needs - that the keys are
-       arriving - and all they need. */
-    if (asking)
+       arriving - and all they need. One for each letter. */
+    if (asking) {
+        int n = 0;
         for (int i = 0; buf[i]; i++)
-            buf[i] = '*';
+            if (!u_cont(buf[i]))
+                buf[n++] = '*';
+        buf[n] = 0;
+    }
     ud_cells(w, PAD + leadn * CELL, iy + TERM_BASE, CELL, buf, l.text,
              UD_MONO, TERM_PX);
 
@@ -1167,7 +1218,7 @@ static void draw(int w)
        any letter reaches. It does not blink - a blinking cursor is a
        nicety, and one that is on half the time is one that can be
        photographed absent. */
-    ud_fill(w, PAD + (leadn + icur - off) * CELL, iy + ROW_H - 2, CELL, 2,
+    ud_fill(w, PAD + (leadn + icol - off) * CELL, iy + ROW_H - 2, CELL, 2,
             l.accent);
 
     /* Scrolled up, the last thing on the screen is not the last thing
