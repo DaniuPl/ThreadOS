@@ -751,6 +751,23 @@ GFILES_ROW_Y0 = _kernel_define("user/gfiles.c", "ROW_Y0")
 GFILES_ROW_H = _kernel_define("user/gfiles.c", "ROW_H")
 GFILES_FOOT_H = _kernel_define("user/gfiles.c", "FOOT_H")
 GFILES_NAME_X = _kernel_define("user/gfiles.c", "NAME_X")
+# The list starts right of the folder tree; a click on a row lands on
+# its name
+GFILES_LIST_X = _kernel_define("user/gfiles.c", "LIST_X")
+GFILES_ROW_X = GFILES_NAME_X + 20
+# The second bar: Up, New folder, Cut, Copy, Paste from the left
+GFILES_TOOL_H = _kernel_define("user/gfiles.c", "TOOL_H")
+GFILES_TOOLS = [("up", _kernel_define("user/gfiles.c", "UP_W")),
+                ("new", _kernel_define("user/gfiles.c", "NEW_W")),
+                ("cut", _kernel_define("user/gfiles.c", "CUT_W")),
+                ("copy", _kernel_define("user/gfiles.c", "COPY_W")),
+                ("paste", _kernel_define("user/gfiles.c", "PASTE_W"))]
+GFILES_TOOL_GAP = _kernel_define("user/gfiles.c", "TOOL_GAP")
+# The folder tree down the left
+GFILES_TREE_W = _kernel_define("user/gfiles.c", "TREE_W")
+GFILES_TREE_Y0 = _kernel_define("user/gfiles.c", "TREE_Y0")
+GFILES_TREE_ROW_H = _kernel_define("user/gfiles.c", "TREE_ROW_H")
+GFILES_TREE_STEP = _kernel_define("user/gfiles.c", "TREE_STEP")
 
 
 # The kit's question panel (user/ugui.h): a band across the middle of
@@ -818,6 +835,27 @@ def gfiles_button(which, cw=None):
 # The picture viewer (user/gimg.c): its status line along the bottom
 GIMG_STATUS_H = _kernel_define("user/gimg.c", "STATUS_H")
 GIMG_STATUS_PX = _kernel_define("user/gimg.c", "STATUS_PX")
+
+
+def gfiles_tool(which):
+    """The middle of the file manager's tool 'up', 'new', 'cut', 'copy'
+    or 'paste', in its content"""
+    x = 10
+    for name, w in GFILES_TOOLS:
+        if name == which:
+            return x + w // 2, GFILES_HEAD_H + 1 + (GFILES_TOOL_H - 1) // 2
+        x += w + GFILES_TOOL_GAP
+    raise KeyError(which)
+
+
+def gfiles_tree_y(i):
+    """The middle of line i of the file manager's folder tree"""
+    return GFILES_TREE_Y0 + i * GFILES_TREE_ROW_H + GFILES_TREE_ROW_H // 2
+
+
+def gfiles_tree_name_x(depth):
+    """Where a folder's name starts in the tree, 'depth' folders down"""
+    return 8 + depth * GFILES_TREE_STEP + 28
 
 
 def gfiles_row_y(r):
@@ -2457,7 +2495,8 @@ class Qemu:
         r = 0
         while GFILES_ROW_Y0 + (r + 1) * GFILES_ROW_H <= ch - GFILES_FOOT_H:
             y = GFILES_ROW_Y0 + r * GFILES_ROW_H
-            picked = near(at(cx + 8, cy + gfiles_row_y(r)), t["accent"], 6)
+            picked = near(at(cx + GFILES_LIST_X + 8, cy + gfiles_row_y(r)),
+                          t["accent"], 6)
             base = cy + ui_font_baseline_in(UD_PX, y, GFILES_ROW_H)
             ink = t["accent_text" if picked else "app_text"]
             name = ""
@@ -2474,6 +2513,53 @@ class Qemu:
             out.append((name, size, picked))
             r += 1
         return out
+
+    def gfiles_tree(self, cx, cy, ch=None, dark=True, screen=None):
+        """The file manager's folder tree as it stands: (depth, name,
+        here) per line - 'here' is the folder the list shows, which
+        wears the accent with its name in bold on it. The depth is
+        found from where the name starts."""
+        t = theme("dark" if dark else "light")
+        w, h, at = scr = screen or self.screen_raw()
+        ch = ch or GFILES_H
+        out = []
+        i = 0
+        while GFILES_TREE_Y0 + (i + 1) * GFILES_TREE_ROW_H <= ch - GFILES_FOOT_H:
+            y = GFILES_TREE_Y0 + i * GFILES_TREE_ROW_H
+            here = near(at(cx + 5, cy + gfiles_tree_y(i)), t["accent"], 6)
+            base = cy + ui_font_baseline_in(11, y, GFILES_TREE_ROW_H)
+            ink = t["accent_text" if here else "app_text"]
+            # The folder's small picture says how far in it is: the
+            # first depth whose picture is there, from the left (a row
+            # below the arrow, which shares its colour on the accent)
+            icon = t["accent_text"] if here else (0x5A, 0xB4, 0xF5)
+            depth = None
+            for d in range(8):
+                x = cx + 8 + d * GFILES_TREE_STEP + 17
+                if x >= cx + GFILES_TREE_W:
+                    break
+                if near(at(x, cy + y + 13), icon, 30):
+                    depth = d
+                    break
+            if depth is None:
+                break
+            x = cx + gfiles_tree_name_x(depth)
+            name = self.read_ui(x, base, cx + GFILES_TREE_W - x, px=11,
+                                face="bold" if here else "sans", fg=ink,
+                                screen=scr)
+            out.append((depth, name, here))
+            i += 1
+        return out
+
+    def gfiles_clipboard(self, cx, cy, dark=True):
+        """What the file manager says is waiting to be pasted, right of
+        its tools"""
+        t = theme("dark" if dark else "light")
+        x = 10 + sum(w + GFILES_TOOL_GAP for _, w in GFILES_TOOLS) + 6
+        base = cy + ui_font_baseline_in(11, GFILES_HEAD_H + 1,
+                                        GFILES_TOOL_H - 1)
+        return self.read_ui(cx + x, base, GFILES_W - x - 4, px=11,
+                            fg=t["app_dim"])
 
     def gfiles_heading(self, cx, cy, dark=True):
         """Where the file manager is: the bold heading at its top left"""

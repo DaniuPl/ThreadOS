@@ -76,7 +76,7 @@ void _start(int argc, char **argv)
     st.written = 0;
 
     if (outfile) {
-        st.fd = sys_open(outfile, O_CREATE | O_WRITE);
+        st.fd = sys_open(outfile, O_CREATE | O_WRITE | O_TRUNC);
         if (st.fd < 0) {
             print("[httpget] I cannot open the file ");
             print(outfile);

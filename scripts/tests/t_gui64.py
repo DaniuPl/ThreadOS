@@ -231,7 +231,7 @@ def main():
             picked = False
             if rows:
                 q.mouse_home()
-                q.mouse_goto(px2 + 60, py2 + gfiles_row_y(0))
+                q.mouse_goto(px2 + GFILES_ROW_X, py2 + gfiles_row_y(0))
                 q.mouse_click()
                 q.mouse_goto(400, 300)
                 for _ in range(10):

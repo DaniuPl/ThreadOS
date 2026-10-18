@@ -96,7 +96,7 @@ def main():
                   len(top_before) > 2)
 
             # --- the wheel over the list -------------------------------
-            q.mouse_goto(CX + 120, CY + 100)   # over the listing itself
+            q.mouse_goto(CX + GFILES_LIST_X + 120, CY + 100)   # over the listing
             time.sleep(0.5)
             q.mouse_wheel(-2)                  # towards the person: down
             time.sleep(1)

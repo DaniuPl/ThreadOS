@@ -6016,3 +6016,37 @@ fact stops being a journal.*
       system is version 7 and up to date, and a release signed by another
       key or with an initrd that does not match its hash is refused,
       leaving the disk as it was.
+
+- [x] **Files: a folder tree, new folders, cut, copy, paste, double click**
+
+      The file manager had a list, walking into folders, Open, Rename and
+      Remove. What a person expects after any other one was missing. Now
+      (user/gfiles.c): the folders as a tree down the left - the disk,
+      every folder on the way to the one shown (marked), and any opened by
+      its arrow; a second bar with Up, New folder, Cut, Copy and Paste,
+      and what is waiting to be pasted beside it; a double click on a row
+      opens it; an empty folder can be removed after the same question,
+      and one with something in it is refused before asking.
+
+      The kernel reads only the directory a program stands in, so the
+      tree is read by walking: into each open folder, one readdir each,
+      children put straight after their parent in a flat array, then
+      back to the folder of the list. Cut and Paste is a rename across
+      folders (the blocks stay; the kernel refuses a folder into itself);
+      Copy and Paste reads and writes the bytes, and a copy beside its
+      original is called "name-copy.ext".
+
+      On the way: the 64-bit side of the shared programs dropped O_TRUNC
+      before the kernel (user64/compat64.h now passes OPEN64_TRUNC), so
+      saving a shorter text over a longer one left the old end behind;
+      and httpget never asked to empty the file it downloads into, on
+      either kernel.
+
+      t_filetree checks the tree (marked folder, a click going there, the
+      arrow closing it), New folder, Copy+Paste beside the original (a
+      new name, the same size), Cut+Paste into another folder (and gone
+      from the first), a double click walking in, a non-empty folder
+      refused, and the kernel's own cat reading the copy. t_net64
+      downloads a long file and then a short one under the same name and
+      finds only the short one. t_files, t_wheel, t_desktop2, t_gedit
+      and t_gui64 follow the list to where it now starts.

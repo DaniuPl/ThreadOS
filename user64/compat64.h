@@ -24,9 +24,12 @@
 
 /* --- Files --------------------------------------------------------
  *
- * The 64-bit kernel has no open flags yet: a file either exists, or is
- * created when opened. So we translate the flags into that one question
- * it knows how to ask. */
+ * The 64-bit kernel knows two things about opening: whether a missing
+ * file is created (OPEN64_CREATE), and whether an existing one is
+ * emptied first (OPEN64_TRUNC). Reading and writing are not flags
+ * there - every descriptor does both - so the flags are translated
+ * into those two questions. Without the second, saving a shorter text
+ * over a longer one left the end of the old one behind it. */
 #define O_READ   1
 #define O_WRITE  2
 #define O_CREATE 4
@@ -37,7 +40,8 @@
 
 static inline int32_t u_open(const char *name, int flags)
 {
-    return (int32_t)sys_open(name, (flags & O_CREATE) ? 1 : 0);
+    return (int32_t)sys_open(name, ((flags & O_CREATE) ? 1 : 0) |
+                                   ((flags & O_TRUNC) ? 2 : 0));
 }
 #define sys_open(name, flags) u_open((name), (flags))
 

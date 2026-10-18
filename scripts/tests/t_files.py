@@ -14,7 +14,8 @@ file whose length the test knows, because a column of numbers that
 comes from nowhere proves nothing. Deleting is checked in both halves:
 the first click only ASKS - and the file is still there afterwards -
 and the second one does it, which the kernel's own shell then confirms
-by failing to read the file. A directory is not deleted at all.
+by failing to read the file. A folder is removed only when it is
+empty, and after the same question.
 
 The window's name is checked too: it says which directory it is
 showing, and changes when we walk into one. Two file managers open on
@@ -127,7 +128,7 @@ def main():
                   title(q) == "Files: /")
 
             # --- walking into a directory -------------------------------
-            click(q, CX + 60, row_y(names, "documents"))
+            click(q, CX + GFILES_ROW_X, row_y(names, "documents"))
             click(q, CX + EDIT_X + EDIT_W // 2, CY + BTN_Y, wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
@@ -142,7 +143,7 @@ def main():
                   % ", ".join(inside), inside in ([], [".."]))
 
             # --- and back out -------------------------------------------
-            click(q, CX + 160, CY + 120, wait=1)   # the focus into the window
+            click(q, CX + 250, CY + 16, wait=1)   # the focus into the window
             q.sendkey("backspace")
             time.sleep(2)
             q.mouse_goto(500, 380)
@@ -155,7 +156,7 @@ def main():
             check("and what was there shows again", "report.txt" in names)
 
             # --- deleting asks first ------------------------------------
-            click(q, CX + 60, row_y(names, "report.txt"))
+            click(q, CX + GFILES_ROW_X, row_y(names, "report.txt"))
             click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
@@ -197,9 +198,9 @@ def main():
             # The blocks do not move when a file is renamed, so this is
             # instant whatever its size - which is what the filesystem
             # grew a rename for.
-            click(q, CX + 160, CY + 120, wait=1)
+            click(q, CX + 250, CY + 16, wait=1)
             names = [r[0] for r in rows(q)]
-            click(q, CX + 60, row_y(names, "documents"))
+            click(q, CX + GFILES_ROW_X, row_y(names, "documents"))
             click(q, CX + NAME_X + NAME_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
@@ -208,7 +209,7 @@ def main():
             check("'Rename' asks for a new name ('%s')" % said,
                   "New name" in said)
 
-            click(q, CX + 160, CY + 120, wait=1)   # the keys into the window
+            click(q, CX + 250, CY + 16, wait=1)   # the keys into the window
             q.type_line("papers", enter=False)
             time.sleep(0.5)
             q.sendkey("ret")
@@ -220,19 +221,25 @@ def main():
             check("and it changes it (%s)" % ", ".join(names),
                   "papers" in names and "documents" not in names)
 
-            # --- a directory is not deleted -----------------------------
-            click(q, CX + 160, CY + 120, wait=1)
+            # --- an empty folder is removed, after the same question ---
+            # (one with something in it is refused before asking -
+            # scripts/tests/t_filetree.py)
+            click(q, CX + 250, CY + 16, wait=1)
             names = [r[0] for r in rows(q)]
-            click(q, CX + 60, row_y(names, "papers"))
+            click(q, CX + GFILES_ROW_X, row_y(names, "papers"))
             click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            said = status(q)
-            check("it does not remove a directory, and says why ('%s')" % said,
-                  "directory" in said)
-            check("and the directory is still there",
-                  "papers" in [r[0] for r in rows(q)])
+            asked = q.ug_question(CX, CY, CH)
+            check("an empty folder is asked about too ('%s')" % asked,
+                  "folder" in asked and "papers" in asked)
+            click(q, CX + MODAL["yes"][0], CY + MODAL["yes"][1], wait=2.5)
+            q.mouse_goto(500, 380)
+            time.sleep(1.5)
+            w, h, at = q.screen_raw()
+            check("and 'Remove' removes it",
+                  "papers" not in [r[0] for r in rows(q)])
         finally:
             q.close()
     finally:

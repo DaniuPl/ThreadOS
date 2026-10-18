@@ -63,7 +63,7 @@ def main():
         picked = False
         if "report" in names:
             r = names.index("report")
-            q9.mouse_goto(cx + 60, cy + gfiles_row_y(r))
+            q9.mouse_goto(cx + GFILES_ROW_X, cy + gfiles_row_y(r))
             q9.mouse_click()
             q9.mouse_goto(60, 300)
             for _ in range(15):

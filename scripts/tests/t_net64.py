@@ -38,6 +38,15 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     http_port, http_stop = start_http_server()
+    # Two answers for one file name: the longer first, then the shorter
+    # over it - what is left must be the shorter one and nothing else
+    LONG = b"the first download, which is the longer of the two\n" * 4
+    SHORT = b"the second, shorter\n"
+    SERVED["/long.txt"] = LONG
+    SERVED["/short.txt"] = SHORT
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
     try:
         os.makedirs(d + "/boot/grub")
         shutil.copy(KERNEL64, d + "/boot/threados64.bin")
@@ -59,8 +68,8 @@ def main():
         # On QEMU's user network the gateway 10.0.2.2 IS the host, so the
         # program connects to the server standing right here without any
         # forwarding - those are for traffic the other way
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
-                 qemu="qemu-system-x86_64")
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
+                 sata=True, qemu="qemu-system-x86_64")
         try:
             q.wait_serial("thread64>", timeout=60)
             q.wait_serial("[net] DHCP", timeout=40)
@@ -94,12 +103,27 @@ def main():
                   "[unet64] done, exit code 0" in out)
             check("no attempt reported an error",
                   "[unet64] FAILED" not in out)
+
+            # A download over a file that is already there replaces it:
+            # the file is emptied when it is opened, not just written
+            # from its start (O_TRUNC, which the 64-bit side of the
+            # shared programs used to drop on the way to the kernel)
+            for name in ("long.txt", "short.txt"):
+                seen = len(q.serial())
+                q.type_line(f"run httpget 10.0.2.2 {http_port} /{name} got.txt")
+                q.wait_serial("[httpget] done, exit code", timeout=60)
+            seen = len(q.serial())
+            q.type_line("run ucat64 got.txt")
+            out = q.wait_serial("[ucat64] done, exit code", timeout=30)[seen:]
+            check("a shorter download over a longer file leaves only the "
+                  "shorter one", SHORT.decode().strip() in out and
+                  "the first download" not in out)
         finally:
             q.close()
     finally:
         http_stop()
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog):
+        for f in (iso, slog, disk):
             if os.path.exists(f):
                 os.unlink(f)
 

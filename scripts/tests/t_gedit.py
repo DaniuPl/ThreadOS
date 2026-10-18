@@ -233,7 +233,7 @@ def sixty_four():
             check("(64) the file manager sees the editor's file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                files_click(q, fx, fy, 60, gfiles_row_y(row))
+                files_click(q, fx, fy, GFILES_ROW_X, gfiles_row_y(row))
                 time.sleep(1.5)
                 files_click(q, fx, fy, *gfiles_button("open"))
                 time.sleep(5)
@@ -257,11 +257,11 @@ def sixty_four():
                 q.mouse_click()
                 q.mouse_goto(600, 430)
                 q.wait_focus(fx, fy, timeout=10)
-                files_click(q, fx, fy, 60, gfiles_row_y(row))
+                files_click(q, fx, fy, GFILES_ROW_X, gfiles_row_y(row))
                 time.sleep(1)
                 files_click(q, fx, fy, *gfiles_button("rename"))
                 time.sleep(1.5)
-                q.mouse_goto(fx + 160, fy + 130)
+                q.mouse_goto(fx + 1 + 250, fy + CONTENT_DY + 16)
                 time.sleep(0.5)
                 q.mouse_click()                # the keys into the manager
                 time.sleep(1)
@@ -579,7 +579,7 @@ def main():
             check("the file manager sees the saved file (%s)"
                   % ", ".join(n for n in listed if n), row >= 0)
             if row >= 0:
-                files_click(q, WX, WY, 60, gfiles_row_y(row))
+                files_click(q, WX, WY, GFILES_ROW_X, gfiles_row_y(row))
                 time.sleep(1.5)
                 files_click(q, WX, WY, *gfiles_button("open"))
                 time.sleep(4)
