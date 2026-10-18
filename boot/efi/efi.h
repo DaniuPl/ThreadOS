@@ -35,6 +35,7 @@ typedef void              *EFI_HANDLE;
 
 #define EFI_SUCCESS         0
 #define EFI_BUFFER_TOO_SMALL 0x8000000000000005ULL
+#define EFI_NOT_FOUND        0x800000000000000EULL
 
 typedef struct { UINT32 a; UINT16 b, c; UINT8 d[8]; } EFI_GUID;
 
@@ -121,7 +122,9 @@ typedef struct {
     void *CloseProtocol;
     void *OpenProtocolInformation;
     void *ProtocolsPerHandle;
-    void *LocateHandleBuffer;
+    EFI_STATUS (*LocateHandleBuffer)(UINTN search, EFI_GUID *protocol,
+                                     void *key, UINTN *count,
+                                     EFI_HANDLE **buffer);
     EFI_STATUS (*LocateProtocol)(EFI_GUID *guid, void *registration,
                                  void **iface);
     void *InstallMultipleProtocolInterfaces;
@@ -131,6 +134,40 @@ typedef struct {
     void *SetMem;
     void *CreateEventEx;
 } EFI_BOOT_SERVICES;
+
+#define ByProtocol 2
+
+/* --- runtime services ------------------------------------------------ */
+/* Only the variables are called (the boot menu lives in them), but every
+   member before them has to take up its place */
+typedef struct {
+    char Hdr[24];
+    void *GetTime;
+    void *SetTime;
+    void *GetWakeupTime;
+    void *SetWakeupTime;
+    void *SetVirtualAddressMap;
+    void *ConvertPointer;
+    EFI_STATUS (*GetVariable)(CHAR16 *name, EFI_GUID *vendor, UINT32 *attrs,
+                              UINTN *size, void *data);
+    void *GetNextVariableName;
+    EFI_STATUS (*SetVariable)(CHAR16 *name, EFI_GUID *vendor, UINT32 attrs,
+                              UINTN size, void *data);
+    void *GetNextHighMonotonicCount;
+    void *ResetSystem;
+} EFI_RUNTIME_SERVICES;
+
+#define EFI_VARIABLE_NON_VOLATILE       1
+#define EFI_VARIABLE_BOOTSERVICE_ACCESS 2
+#define EFI_VARIABLE_RUNTIME_ACCESS     4
+
+/* A device path is a list of nodes, each with its type and its own
+   length, ending in a node of type 0x7F */
+typedef struct {
+    UINT8 Type;
+    UINT8 SubType;
+    UINT8 Length[2];
+} EFI_DEVICE_PATH;
 
 /* --- the system table ----------------------------------------------- */
 typedef struct {
@@ -149,7 +186,7 @@ typedef struct {
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
     EFI_HANDLE StandardErrorHandle;
     void *StdErr;
-    void *RuntimeServices;
+    EFI_RUNTIME_SERVICES *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
     UINTN NumberOfTableEntries;
     EFI_CONFIGURATION_TABLE *ConfigurationTable;

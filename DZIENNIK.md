@@ -5862,3 +5862,32 @@ fact stops being a journal.*
       build's own, with Windows' loader and the partition table left
       alone; that disk then boots by itself through threadboot; and the
       install entry brings up the installer's own screen.
+
+- [x] **A boot entry for a ThreadOS installed beside Windows**
+
+      The first install on real hardware - a Lenovo IdeaPad with
+      InsydeH2O firmware and Windows - went as designed: the installer
+      found the disk through AHCI, wrote the three files onto Windows'
+      EFI partition and left \EFI\BOOT\BOOTX64.EFI alone, because it was
+      Windows'. And then the machine had no way to start ThreadOS: that
+      firmware has no screen for adding a boot entry by hand.
+
+      threadboot now has a second mode. Started with the word
+      "register" (the disc's new menu entry, "Add the installed ThreadOS
+      to this computer's boot menu", chainloads it so), it looks through
+      every filesystem the firmware has mounted for
+      \EFI\ThreadOS\BOOTX64.EFI, writes a Boot#### variable named
+      ThreadOS pointing at it, and appends it to BootOrder - the machine
+      goes on starting Windows, and ThreadOS is a choice in its boot
+      menu. Run again, it rewrites its own entry. The path starts at the
+      partition (HD(n,GPT,guid)/file, the form efibootmgr writes), not at
+      the PCI root: the test caught that the full path did not survive
+      a controller moving to another slot, and a firmware finds a
+      partition by its GUID wherever it is. The installer's last words
+      for this case now name the disc's entry.
+
+      t_isoinstall installs onto a disk whose fallback name is taken,
+      adds the entry from the disc, reads it back with OVMF's own shell
+      ('bcfg boot dump'), sets BootNext to it the way a laptop's F12 menu
+      does, and boots the disk with no disc in a machine laid out
+      differently.

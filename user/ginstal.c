@@ -526,6 +526,9 @@ static void draw(int win)
             say(win, PAD, rowy(3),
                      "Add an entry in the firmware pointing at:", C_TEXT);
             say(win, PAD, rowy(4), STEP_NAME[1], C_HEAD);
+            say(win, PAD, rowy(5),
+                     "- or, from the disc: \"Add the installed ThreadOS\".",
+                     C_TEXT);
         }
         say(win, PAD, rowy(6), "Nothing of anybody else's was touched.",
                  C_TEXT);

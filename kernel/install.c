@@ -402,7 +402,9 @@ int install_plan(int mode, int disk)
                "any file\nthat is on the EFI partition already.\n");
     if (!in.fallback_free)
         printk("To start ThreadOS you will have to add an entry to the "
-               "firmware's boot menu\nand point it at %s.\n", PATH_LOADER);
+               "firmware's boot menu\nand point it at %s -\n"
+               "or start this disc again and choose \"Add the installed "
+               "ThreadOS\nto this computer's boot menu\".\n", PATH_LOADER);
     return 1;
 }
 
@@ -421,7 +423,9 @@ int install_do(void)
         printk("\nDone. This machine will boot ThreadOS off the disk.\n");
     else
         printk("\nDone. The files are on the EFI partition; %s stayed somebody else's,\n"
-               "so add an entry in the firmware pointing at %s.\n",
+               "so add an entry in the firmware pointing at %s -\n"
+               "or start the ThreadOS disc again and choose \"Add the installed "
+               "ThreadOS\nto this computer's boot menu\".\n",
                PATH_FALLBACK, PATH_LOADER);
     return 0;
 }

@@ -499,12 +499,282 @@ void enter_kernel(UINT64 entry, UINT64 magic, UINT64 table);
 
 /* --- the way in ------------------------------------------------------ */
 
+/* --- Adding the installed system to the firmware's boot menu ----------
+ *
+ * The installer writes \EFI\ThreadOS\BOOTX64.EFI onto the disk's EFI
+ * partition, and where nobody else holds \EFI\BOOT\BOOTX64.EFI the
+ * firmware finds it by itself. On a machine with Windows somebody does,
+ * and then the firmware has to be TOLD: a boot entry is a variable,
+ * Boot####, holding a name and a device path, and BootOrder lists the
+ * entries. Plenty of firmware (Lenovo's InsydeH2O, for one) has no
+ * screen for adding one by hand - so this does it.
+ *
+ * It runs as a mode of this loader, not as part of the kernel: setting
+ * a variable is one call while the firmware's boot services are still
+ * there, and something the kernel, which leaves them behind, could
+ * only do by calling into the firmware from its own page tables. GRUB
+ * starts it from the disc ("chainloader /boot/threadboot.efi register",
+ * grub64.cfg); any loader passing the word "register" does.
+ *
+ * What it adds goes at the END of BootOrder: the machine keeps booting
+ * what it booted before, and ThreadOS is one choice in its boot menu.
+ * Run twice, it rewrites its own entry rather than adding a second.
+ */
+
+static EFI_GUID GUID_DEVICE_PATH =
+    { 0x09576E91, 0x6D3F, 0x11D2,
+      { 0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B } };
+static EFI_GUID GUID_GLOBAL_VARIABLE =
+    { 0x8BE4DF61, 0x93CA, 0x11D2,
+      { 0xAA, 0x0D, 0x00, 0xE0, 0x98, 0x03, 0x2B, 0x8C } };
+
+static const CHAR16 INSTALLED[] = L"\\EFI\\ThreadOS\\BOOTX64.EFI";
+static const CHAR16 ENTRY_NAME[] = L"ThreadOS";
+
+static UINTN wlen(const CHAR16 *s)
+{
+    UINTN n = 0;
+    while (s[n])
+        n++;
+    return n;
+}
+
+static int has_word(const CHAR16 *s, UINTN chars, const CHAR16 *w)
+{
+    UINTN n = wlen(w);
+    for (UINTN i = 0; i + n <= chars; i++) {
+        UINTN k = 0;
+        while (k < n && s[i + k] == w[k])
+            k++;
+        if (k == n)
+            return 1;
+    }
+    return 0;
+}
+
+static UINTN path_len(const EFI_DEVICE_PATH *p)
+{
+    const UINT8 *at = (const UINT8 *)p;
+    for (;;) {
+        const EFI_DEVICE_PATH *n = (const EFI_DEVICE_PATH *)at;
+        UINTN len = n->Length[0] | (n->Length[1] << 8);
+        if (n->Type == 0x7F && n->SubType == 0xFF)
+            return (UINTN)(at - (const UINT8 *)p);   /* without the end */
+        if (len < 4)
+            return 0;
+        at += len;
+    }
+}
+
+/* "Boot0003": the variable's name for entry number n */
+static void boot_name(CHAR16 *out, UINT16 n)
+{
+    static const CHAR16 hex[] = L"0123456789ABCDEF";
+    const CHAR16 *b = L"Boot";
+    for (int i = 0; i < 4; i++)
+        out[i] = b[i];
+    for (int i = 0; i < 4; i++)
+        out[4 + i] = hex[(n >> (12 - 4 * i)) & 0xF];
+    out[8] = 0;
+}
+
+/* Whether entry n is ours: its description is our name */
+static int entry_is_ours(UINT16 n, UINT8 *buf, UINTN room)
+{
+    CHAR16 name[9];
+    boot_name(name, n);
+    UINTN size = room;
+    UINT32 attrs;
+    if (ST->RuntimeServices->GetVariable(name, &GUID_GLOBAL_VARIABLE, &attrs,
+                                         &size, buf) != EFI_SUCCESS)
+        return 0;
+    if (size < 6 + sizeof(ENTRY_NAME))
+        return 0;
+    const CHAR16 *desc = (const CHAR16 *)(buf + 6);
+    for (UINTN i = 0; i < sizeof(ENTRY_NAME) / 2; i++)
+        if (desc[i] != ENTRY_NAME[i])
+            return 0;
+    return 1;
+}
+
+static void pause_and_return(void)
+{
+    BS->Stall(8 * 1000 * 1000);
+}
+
+static EFI_STATUS register_installed(EFI_HANDLE from)
+{
+    EFI_RUNTIME_SERVICES *RT = ST->RuntimeServices;
+    put(L"threadboot: looking for ThreadOS installed on a disk\r\n");
+
+    /* Every filesystem the firmware has mounted, except the one we are
+       running from: the one holding \EFI\ThreadOS\BOOTX64.EFI is the
+       installed system */
+    UINTN count = 0;
+    EFI_HANDLE *handles = 0;
+    if (BS->LocateHandleBuffer(ByProtocol, &GUID_SIMPLE_FS, 0, &count,
+                               &handles) != EFI_SUCCESS)
+        count = 0;
+    EFI_HANDLE found = 0;
+    for (UINTN i = 0; i < count && !found; i++) {
+        if (handles[i] == from)
+            continue;
+        EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
+        EFI_FILE_PROTOCOL *vol, *f;
+        if (BS->HandleProtocol(handles[i], &GUID_SIMPLE_FS,
+                               (void **)&fs) != EFI_SUCCESS ||
+            fs->OpenVolume(fs, &vol) != EFI_SUCCESS)
+            continue;
+        if (vol->Open(vol, &f, (CHAR16 *)INSTALLED, EFI_FILE_MODE_READ, 0)
+            == EFI_SUCCESS) {
+            f->Close(f);
+            found = handles[i];
+        }
+        vol->Close(vol);
+    }
+    if (!found) {
+        put(L"threadboot: no disk here has \\EFI\\ThreadOS\\BOOTX64.EFI -\r\n"
+            L"            install ThreadOS first\r\n");
+        pause_and_return();
+        return EFI_NOT_FOUND;
+    }
+
+    EFI_DEVICE_PATH *dev;
+    EFI_STATUS st = BS->HandleProtocol(found, &GUID_DEVICE_PATH,
+                                       (void **)&dev);
+    UINTN dlen = st == EFI_SUCCESS ? path_len(dev) : 0;
+
+    /* From the partition on, not from the PCI root: HD(n,GPT,guid)
+       names the partition by its GUID, and firmware finds it wherever
+       the disk happens to be plugged in - which the full path (this
+       controller, this port) does not survive. It is the form
+       efibootmgr writes too. */
+    for (UINTN off = 0; off < dlen; ) {
+        EFI_DEVICE_PATH *n = (EFI_DEVICE_PATH *)((UINT8 *)dev + off);
+        UINTN len = n->Length[0] | (n->Length[1] << 8);
+        if (n->Type == 4 && n->SubType == 1) {   /* a hard drive partition */
+            dev = n;
+            dlen -= off;
+            break;
+        }
+        off += len;
+    }
+    if (!dlen) {
+        put(L"threadboot: the firmware gives no path to that disk\r\n");
+        pause_and_return();
+        return EFI_NOT_FOUND;
+    }
+
+    /* The entry: attributes, the path's length, the name, the path -
+       the disk's own path, then the file on it, then the end */
+    UINTN fname = sizeof(INSTALLED);             /* with its zero */
+    UINTN flen = 4 + fname;
+    UINTN plen = dlen + flen + 4;
+    UINTN size = 4 + 2 + sizeof(ENTRY_NAME) + plen;
+    UINT8 *opt;
+    if (BS->AllocatePool(EfiLoaderData_Type, size, (void **)&opt)
+        != EFI_SUCCESS)
+        fail(L"no memory for the boot entry", 0);
+    *(UINT32 *)opt = 1;                          /* LOAD_OPTION_ACTIVE */
+    *(UINT16 *)(opt + 4) = (UINT16)plen;
+    copy_bytes(opt + 6, ENTRY_NAME, sizeof(ENTRY_NAME));
+    UINT8 *p = opt + 6 + sizeof(ENTRY_NAME);
+    copy_bytes(p, dev, dlen);
+    p += dlen;
+    p[0] = 4;                                    /* a media path, */
+    p[1] = 4;                                    /* a file in it */
+    p[2] = (UINT8)flen;
+    p[3] = (UINT8)(flen >> 8);
+    copy_bytes(p + 4, INSTALLED, fname);
+    p += flen;
+    p[0] = 0x7F;
+    p[1] = 0xFF;
+    p[2] = 4;
+    p[3] = 0;
+
+    /* The order there is now */
+    UINT16 order[128];
+    UINTN osize = sizeof(order);
+    UINT32 oattrs;
+    if (RT->GetVariable(L"BootOrder", &GUID_GLOBAL_VARIABLE, &oattrs,
+                        &osize, order) != EFI_SUCCESS)
+        osize = 0;
+    UINTN n_order = osize / 2;
+
+    /* Our own entry if there is one, else the first free number */
+    static UINT8 scratch[4096];
+    int num = -1;
+    for (UINTN i = 0; i < n_order && num < 0; i++)
+        if (entry_is_ours(order[i], scratch, sizeof(scratch)))
+            num = order[i];
+    for (UINT16 n = 0; num < 0 && n < 0xFFFF; n++) {
+        CHAR16 name[9];
+        boot_name(name, n);
+        UINTN sz = sizeof(scratch);
+        UINT32 a;
+        if (RT->GetVariable(name, &GUID_GLOBAL_VARIABLE, &a, &sz, scratch)
+            == EFI_NOT_FOUND)
+            num = n;
+    }
+
+    UINT32 attrs = EFI_VARIABLE_NON_VOLATILE |
+                   EFI_VARIABLE_BOOTSERVICE_ACCESS |
+                   EFI_VARIABLE_RUNTIME_ACCESS;
+    CHAR16 name[9];
+    boot_name(name, (UINT16)num);
+    st = RT->SetVariable(name, &GUID_GLOBAL_VARIABLE, attrs, size, opt);
+    if (st != EFI_SUCCESS) {
+        put(L"threadboot: the firmware would not store ");
+        put(name);
+        put(L" (status 0x");
+        put_num(st, 16);
+        put(L")\r\n");
+        pause_and_return();
+        return st;
+    }
+
+    int listed = 0;
+    for (UINTN i = 0; i < n_order; i++)
+        if (order[i] == (UINT16)num)
+            listed = 1;
+    if (!listed && n_order < sizeof(order) / 2) {
+        order[n_order++] = (UINT16)num;
+        st = RT->SetVariable(L"BootOrder", &GUID_GLOBAL_VARIABLE, attrs,
+                             n_order * 2, order);
+        if (st != EFI_SUCCESS) {
+            put(L"threadboot: the firmware would not change BootOrder"
+                L" (status 0x");
+            put_num(st, 16);
+            put(L")\r\n");
+            pause_and_return();
+            return st;
+        }
+    }
+
+    put(L"threadboot: added ");
+    put(name);
+    put(L" \"ThreadOS\" to the boot menu (last in BootOrder).\r\n"
+        L"            Take the stick out, restart, and choose ThreadOS\r\n"
+        L"            in the firmware's boot menu (F12 on most laptops).\r\n");
+    pause_and_return();
+    return EFI_SUCCESS;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     ST = st;
     BS = st->BootServices;
 
     put(L"threadboot: ThreadOS\r\n");
+
+    /* Started to put the installed system into the boot menu rather
+       than to boot - see register_installed */
+    EFI_LOADED_IMAGE_PROTOCOL *me;
+    if (BS->HandleProtocol(image, &GUID_LOADED_IMAGE, (void **)&me)
+            == EFI_SUCCESS && me->LoadOptions &&
+        has_word((const CHAR16 *)me->LoadOptions, me->LoadOptionsSize / 2,
+                 L"register"))
+        return register_installed(me->DeviceHandle);
 
     open_volume(image);
 

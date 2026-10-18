@@ -86,8 +86,10 @@ def remaster(iso, work, default):
     return out if r.returncode == 0 else None
 
 
-def make_target(path):
-    """The other machine's disk: a GPT, an EFI partition, Windows' loader"""
+def make_target(path, taken=False):
+    """The other machine's disk: a GPT, an EFI partition, Windows' loader
+    - and with 'taken', Windows' copy under the fallback name too, which
+    is how a laptop sold with Windows comes"""
     make_gpt_disk(path)
     if not fat_format(path, ESP_START, ESP_SECTORS, fat32=True,
                       label="LAPTOPESP"):
@@ -96,6 +98,9 @@ def make_target(path):
                                  "/EFI/Microsoft/Boot"])
     fat_put(path, ESP_START, FOREIGN_BOOTMGR,
             "/EFI/Microsoft/Boot/bootmgfw.efi")
+    if taken:
+        fat_mkdirs(path, ESP_START, ["/EFI/BOOT"])
+        fat_put(path, ESP_START, FOREIGN_BOOTMGR, "/EFI/BOOT/BOOTX64.EFI")
     return True
 
 
@@ -134,13 +139,18 @@ def main():
               cfg is not None and cfg == blob(os.path.join(ROOT, "grub64.cfg")))
         entries = re.findall(r'menuentry "([^"]+)" \{(.*?)\}',
                              (cfg or b"").decode(), re.S)
-        check(f"every one of its {len(entries)} entries hands over the "
-              "kernel's file and threadboot, by the names the installer "
-              "looks for",
-              len(entries) == 3 and all(
+        systems = [(n, b) for n, b in entries if "multiboot2" in b]
+        check(f"every one of its {len(systems)} entries that start the "
+              "system hands over the kernel's file and threadboot, by the "
+              "names the installer looks for",
+              len(systems) == 3 and all(
                   "module2 /boot/threados64.bin the kernel" in body
                   and "module2 /boot/threadboot.efi loader" in body
-                  for _, body in entries))
+                  for _, body in systems))
+        register = [i for i, (n, b) in enumerate(entries)
+                    if "chainloader /boot/threadboot.efi register" in b]
+        check("and one more starts threadboot to add the installed system "
+              "to the firmware's boot menu", len(register) == 1)
         check("one of them is the installer",
               any(" install\n" in body for _, body in entries))
         got = iso_file(ISO, "/boot/threadboot.efi", os.path.join(work, "l.efi"))
@@ -149,9 +159,12 @@ def main():
 
         shell_iso = remaster(ISO, work, 2)
         install_iso = remaster(ISO, work, 1)
-        check("(the same disc, with the shell or the installer chosen)",
-              shell_iso is not None and install_iso is not None)
-        if not shell_iso or not install_iso:
+        register_iso = remaster(ISO, work, register[0]) if register else None
+        check("(the same disc, with the shell, the installer or the boot "
+              "menu entry chosen)",
+              shell_iso is not None and install_iso is not None
+              and register_iso is not None)
+        if not shell_iso or not install_iso or not register_iso:
             return summary()
 
         # --- Installing in text, from the disc
@@ -230,9 +243,101 @@ def main():
                   "ThreadOS - installation" in head and top == w // 8)
         finally:
             q.close()
+        boot_menu(work, shell_iso, register_iso, nvram)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return summary()
+
+
+def boot_menu(work, shell_iso, register_iso, nvram):
+    """A laptop sold with Windows: the fallback name is Windows', so the
+    installer leaves it - and the firmware has to be told about ThreadOS"""
+    laptop = os.path.join(work, "laptop.img")
+    check("a laptop's disk, with Windows under the fallback name too",
+          make_target(laptop, taken=True))
+    shutil.copy(OVMF_VARS, nvram)
+    q = Qemu(KERNEL, INITRD, cdrom=shell_iso, disk=laptop, sata=True,
+             serial=os.path.join(work, "s4.log"),
+             qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+    try:
+        q.wait_serial("The 64-bit system is ready", timeout=120)
+        q.command("install text", "Type YES", timeout=30)
+        out = q.command("YES", "Done", timeout=90)
+        check("the installer leaves Windows' fallback alone and says how to "
+              "add the entry - the disc's menu among the ways",
+              "stayed somebody else's" in out
+              and "Add the installed ThreadOS" in out)
+    finally:
+        q.close()
+    check("Windows' fallback loader is still Windows'",
+          fat_get(laptop, ESP_START, "/EFI/BOOT/BOOTX64.EFI")
+          == FOREIGN_BOOTMGR)
+
+    # The disc's entry, on the same firmware (the same variables)
+    q = Qemu(KERNEL, INITRD, cdrom=register_iso, disk=laptop, sata=True,
+             serial=os.path.join(work, "s5.log"),
+             qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+    try:
+        out = q.wait_serial("to the boot menu", timeout=120)
+        m = re.search(r"added (Boot[0-9A-F]{4}) \"ThreadOS\"", out)
+        check("threadboot finds the installed system and adds a boot entry "
+              f"for it ({m.group(1) if m else 'none'})", m is not None)
+    finally:
+        q.close()
+    if not m:
+        return
+    number = m.group(1)[4:]
+
+    # And the laptop with no disc at all: Windows' loader (here a file
+    # that is no program) fails, and the firmware goes down its list to
+    # the entry threadboot added. (No network card: OVMF would try to
+    # boot off the network first, and give up on that only slowly.)
+    q = Qemu(KERNEL, INITRD, disk=laptop, sata=True, nic=None,
+             serial=os.path.join(work, "s6.log"),
+             qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+    try:
+        # OVMF keeps its own UEFI shell ahead of anything added later,
+        # and that is where it stops. Its 'bcfg' reads the boot entries
+        # back - somebody else's reading of what threadboot wrote - and
+        # BootNext is what a laptop's F12 menu sets when ThreadOS is
+        # picked from it: boot this entry, once.
+        q.wait_serial("Shell> ", timeout=120)
+        time.sleep(1)
+        seen = len(q.serial())
+        q.type_line("bcfg boot dump")
+        time.sleep(4)
+        dump = q.serial()[seen:]
+        flat = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", dump)
+        ours = re.search(r"Boot%s\s+Desc\s+- ThreadOS\s+DevPath\s+- (\S+)"
+                         % number, flat)
+        check("the firmware's own shell lists the entry - ThreadOS, the "
+              "partition by its GUID and the file on it "
+              f"({ours.group(1) if ours else 'not there'})",
+              ours is not None and ours.group(1).startswith("HD(1,GPT,")
+              and ours.group(1).endswith("\\EFI\\ThreadOS\\BOOTX64.EFI"))
+        q.type_line("setvar BootNext -guid 8be4df61-93ca-11d2-aa0d-00e098032b8c "
+                    f"-bs -rt -nv ={number[2:]}{number[:2]}")
+        time.sleep(3)
+    finally:
+        q.close()
+
+    # The next start: the variables are flash, kept in the file
+    q = Qemu(KERNEL, INITRD, disk=laptop, sata=True, nic=None,
+             serial=os.path.join(work, "s7.log"),
+             qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+    try:
+        deadline = time.time() + 150
+        while (time.time() < deadline
+               and "The 64-bit system is ready" not in q.serial()):
+            time.sleep(1)
+        out = q.serial()
+        ok = ("threadboot: ThreadOS" in out and "Multiboot OK" in out
+              and "The 64-bit system is ready" in out)
+        check("with no disc, the firmware starts ThreadOS from that entry"
+              + ("" if ok else f" (the port's last words: {out[-300:]!r})"),
+              ok)
+    finally:
+        q.close()
 
 
 sys.exit(main())
