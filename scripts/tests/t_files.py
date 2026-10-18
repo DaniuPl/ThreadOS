@@ -15,7 +15,9 @@ comes from nowhere proves nothing. Deleting is checked in both halves:
 the first click only ASKS - and the file is still there afterwards -
 and the second one does it, which the kernel's own shell then confirms
 by failing to read the file. A folder is removed only when it is
-empty, and after the same question.
+empty, and after the same question. What the system keeps for itself
+in the root (the swap file, the settings) stays out of the list until
+the 'hidden' setting asks for it.
 
 The window's name is checked too: it says which directory it is
 showing, and changes when we walk into one. Two file managers open on
@@ -96,6 +98,12 @@ def main():
             time.sleep(1)
             q.type_line("run mkdir documents")
             time.sleep(2)
+            # A setting written down puts system.cfg beside swap.sys in
+            # the root - two files the list should not offer
+            q.type_line("sudo set hidden 0")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            on_disk = q.command("fls", "swap.sys", timeout=10)
 
             q.launch_dock(2)                   # the "Files" tile
             time.sleep(4)
@@ -109,6 +117,11 @@ def main():
                   % ", ".join(names), "report.txt" in names)
             check("and the directory too (%s)" % ", ".join(names),
                   "documents" in names)
+            check("the kernel's shell lists the swap file and the settings",
+                  "swap.sys" in on_disk and "system.cfg" in on_disk)
+            check("but the file manager keeps them out of sight (%s)"
+                  % ", ".join(names),
+                  "swap.sys" not in names and "system.cfg" not in names)
 
             # The size column against a file whose length we know: the
             # shell writes the text and a newline
@@ -240,6 +253,22 @@ def main():
             w, h, at = q.screen_raw()
             check("and 'Remove' removes it",
                   "papers" not in [r[0] for r in rows(q)])
+
+            # --- the 'hidden' setting shows them ------------------------
+            q.mouse_goto(500, 380)
+            q.mouse_click()                    # the desktop takes the keys
+            time.sleep(1)
+            q.type_line("sudo set hidden 1")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            names = []
+            end = time.time() + 15
+            while time.time() < end and "swap.sys" not in names:
+                time.sleep(1)
+                names = [r[0] for r in rows(q)]
+            check("with 'set hidden 1' the list shows them, without "
+                  "reopening (%s)" % ", ".join(names),
+                  "swap.sys" in names and "system.cfg" in names)
         finally:
             q.close()
     finally:

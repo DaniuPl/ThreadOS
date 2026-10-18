@@ -101,21 +101,19 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3: the corner at (70+36, 30+36), the content a frame
-            # line in and under the title bar; the 'name' row is the
-            # first (user/gsettings.c)
-            SX, SY = 106 + 1, 66 + CONTENT_DY
-            q.mouse_goto(SX + 40, SY + gset_row_y(0))
-            q.mouse_click()                # select the row
+            # Slot 3 of the cascade; it opens on General, whose first
+            # setting is the machine's name, in a field
+            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2)
+            SX, SY = sx + 1, sy + CONTENT_DY
+            name_field = gset_field(0)[0]
+            q.click(SX + name_field[0], SY + name_field[1])   # the keys
             time.sleep(1)
             q.sendkey("shift-insert")      # paste
             time.sleep(1.5)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Read in the lettering the settings write in: the row is
-            # the chosen one, its value on the accent
-            val = q.gset_row(SX, SY, 0, chosen=True)[1]
+            val = q.gset_field_text(SX, SY, 0)
             check("the text from the terminal appeared in another window ('%s')"
                   % val, WORD in val)
 
@@ -127,15 +125,18 @@ def main():
             q.mouse_click()
             time.sleep(3)
 
-            # Paste again, into the settings window's next row
-            q.mouse_goto(SX + 40, SY + gset_row_y(1))
-            q.mouse_click()
+            # Paste again, into another field: Display's resolution
+            q.click(SX + gset_section("Display")[0],
+                    SY + gset_section("Display")[1])
+            time.sleep(1)
+            res_field = gset_field(1)[0]
+            q.click(SX + res_field[0], SY + res_field[1])
             time.sleep(1)
             q.sendkey("shift-insert")
             time.sleep(1.5)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
-            val = q.gset_row(SX, SY, 1, chosen=True)[1]
+            val = q.gset_field_text(SX, SY, 1)
             check("the clipboard survived the closing of the window it came from "
                   "('%s')" % val, WORD in val)
         finally:

@@ -141,9 +141,11 @@ def sixty_four():
             q.mouse_goto(780, 450)
             time.sleep(1)
             place(*q.size())
-            name = q.gset_row(GX, GY, 0, chosen=True)
-            check("(64) the settings window lists the settings (%s)" % (name,),
-                  name[0] == "name" and name[1] == "thread")
+            head = q.gset_heading(GX, GY)
+            name = q.gset_field_text(GX, GY, 0)
+            check("(64) the settings window opens on General, the machine's "
+                  "name in its field (%s, %s)" % (head, name),
+                  head == "General" and name == "thread")
             q.sendkey("alt-f4")
             time.sleep(2)
             q.click_desktop()

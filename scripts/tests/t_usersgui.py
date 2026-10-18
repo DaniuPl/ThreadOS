@@ -15,9 +15,8 @@ the keyboard they already have:
   line, what is typed shows as stars, and the command runs once - after
   which the terminal is a plain user again
 
-  the settings window, when the write comes back refused: it says so,
-  asks for the password under the setting being changed, and tries the
-  same write again
+  the settings window, when the write comes back refused: a panel over
+  it asks for the password, and the same write is tried again
 
 Both go through the same syscall, and a wrong password gets the same
 answer in both: nothing happens and it says so.
@@ -66,7 +65,7 @@ def window_says(q, cx, cy, want, tries=8):
     rather than assume."""
     said = ""
     for _ in range(tries):
-        said = q.gset_note(cx, cy)
+        said = q.gset_status(cx, cy)
         if want in said:
             return True
         time.sleep(0.6)
@@ -159,32 +158,30 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3: (106,66), content from (107,77). The background
-            # is the fourth row.
-            SX, SY = 106 + 1, 66 + CONTENT_DY
-            q.mouse_goto(SX + 40, SY + gset_row_y(3))
-            q.mouse_click()
+            # Slot 3 of the cascade - which on this screen is back at
+            # the start. A background asked for under Appearance.
+            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2)
+            SX, SY = sx + 1, sy + CONTENT_DY
+            q.click(SX + gset_section("Appearance")[0],
+                    SY + gset_section("Appearance")[1])
             time.sleep(1)
-            q.mouse_click()                # cycle the value
-            time.sleep(1)
-            q.sendkey("ret")               # ask to write it
+            green = gset_swatch(3)
+            q.click(SX + green[0], SY + green[1])
             time.sleep(2)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # What became of it is said on the line at the bottom
-            check("the settings window says admin is needed",
-                  window_says(q, SX, SY, "needs admin"))
+            asked = q.gset_asks(SX, SY)
+            check("the settings window says admin is needed ('%s')" % asked,
+                  asked == "Changing settings needs admin")
 
             typed(q, "wrongpassword")
             q.sendkey("ret")
             time.sleep(2)
-            q.mouse_goto(600, 380)
-            time.sleep(1.5)
             check("a wrong password in the window writes nothing either",
-                  window_says(q, SX, SY, "NOT saved"))
+                  window_says(q, SX, SY, "NOT changed (wrong password)"))
 
-            q.sendkey("ret")               # ask again
+            q.click(SX + green[0], SY + green[1])     # ask again
             time.sleep(1.5)
             typed(q, "thread")
             q.sendkey("ret")
@@ -192,7 +189,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
             check("the right password saves the setting",
-                  window_says(q, SX, SY, "Saved to the disk"))
+                  window_says(q, SX, SY, "Saved"))
         finally:
             q.close()
     finally:

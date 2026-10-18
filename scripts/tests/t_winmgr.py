@@ -41,18 +41,19 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The application window is slot 2: the compositor cascades them at
-# (70+12i, 30+12i), so (94,54). gsettings asks for GSET_W x GSET_H of content.
+# (70+12i, 30+12i), so (94,54). The terminal asks for TERM_W x TERM_H of
+# content - small enough to leave desktop to its right to grow into.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
-WW, WH = GSET_W + 2, GSET_H + TITLE_H + 2
+WW, WH = TERM_W + 2, TERM_H + TITLE_H + 2
 
 # Where to look, and why there. The kernel's own windows sit at
 # (40,60) 120x70 and (180,95) 120x70, so a probe has to fall inside the
 # application's window and outside both of those - otherwise it reads
 # somebody else's grey and says nothing.
-# Inside gsettings, past both kernel windows - and right of its rows,
-# which stop six pixels short of its edge: its own background
-P_APP = (WX + 1 + GSET_W - 3, 200)
+# Inside the terminal, past both kernel windows and clear of its text:
+# its own ground
+P_APP = (WX + 1 + TERM_W - 3, 200)
 P_DEAF = (170, 59 + CONTENT_DY)   # inside gdeaf, in the gap between them
 
 
@@ -64,8 +65,9 @@ def grey(px):
 
 
 def app_bg(px):
-    """The background a program drawing in the theme's colours has"""
-    return near(px, theme("dark")["win_bg"], 3)
+    """The ground a terminal draws its text on - only the program draws
+    it, a window's own background is a shade lighter"""
+    return near(px, theme("dark")["app_field"], 3)
 
 
 def main():
@@ -81,13 +83,13 @@ def main():
             q.mouse_home()
 
             # --- an application window opens ---------------------------
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(600, 430)         # the cursor out of the way
             time.sleep(1)
 
             w, h, at = q.screen_raw()
-            check("the application window opened (a grey background in slot 2)",
+            check("the application window opened (its ground in slot 2)",
                   app_bg(at(*P_APP)))
             # Beyond the window there is desktop - so that growing it is
             # visible as a change and not as something already there
@@ -111,7 +113,7 @@ def main():
             # reaches the new bottom edge, and a buffer that was not
             # remade would leave rubbish or the desktop there
             check("the program redrew itself at the new size",
-                  app_bg(at(WX + WW + 60, WY + WH + 30)))
+                  app_bg(at(WX + WW + 60, min(WY + WH + 30, work_bottom() - 6))))
 
 
             # --- closing: the program is asked and ends itself ---------
@@ -124,7 +126,7 @@ def main():
 
             log = q.serial()
             check("the program ended BY ITSELF, with code zero",
-                  "process \'gsettings\' has ended (code 0)" in log)
+                  "process \'gterm\' has ended (code 0)" in log)
 
             w, h, at = q.screen_raw()
             check("the window is gone from the screen", not app_bg(at(*P_APP)))

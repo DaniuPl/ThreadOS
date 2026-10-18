@@ -171,28 +171,26 @@ def main():
             q.mouse_goto(560, 420)      # the cursor away from the window
             time.sleep(1)
 
-            # The window is slot 2: its corner at (94,54), the content
-            # one frame line in and under the title bar. Its first row,
-            # chosen when it opens, is the machine's name.
-            CX, CY = 94 + 1, 54 + CONTENT_DY
-            name = q.gset_row(CX, CY, 0, chosen=True)[0]
-            check("the settings window opened (its first row: '%s')" % name,
-                  name == "name")
+            # The window is slot 2 of the cascade, its content one frame
+            # line in and under the title bar. It opens on General.
+            wx, wy = cascade(2, GSET_W + 2, GSET_H + TITLE_H + 2)
+            CX, CY = wx + 1, wy + CONTENT_DY
+            head = q.gset_heading(CX, CY)
+            check("the settings window opened on General ('%s')" % head,
+                  head == "General")
 
-            # the 'background' row is the fourth
-            bg = q.gset_row(CX, CY, 3)[0]
-            check("the fourth row is the background ('%s')" % bg,
-                  bg == "background")
-            q.mouse_goto(CX + 40, CY + gset_row_y(3))
-            q.mouse_click()             # select the row
+            # The background is under Appearance: green is the fourth
+            q.click(CX + gset_section("Appearance")[0],
+                    CY + gset_section("Appearance")[1])
             time.sleep(1)
-            for _ in range(3):          # cycle 0 -> 3 (green)
-                q.mouse_click()
-                time.sleep(0.6)
-            q.sendkey("ret")            # Enter asks the kernel to write it
+            head = q.gset_heading(CX, CY)
+            check("a click on Appearance opens it ('%s')" % head,
+                  head == "Appearance")
+            green = gset_swatch(3)
+            q.click(CX + green[0], CY + green[1])
             time.sleep(2)
             # The kernel refuses a plain user, so the window asks for
-            # the admin's password - see t_users_gui.py for that on its
+            # the admin's password - see t_usersgui.py for that on its
             # own; here it is simply the way to the disk
             for ch in "thread":
                 q.sendkey(ch)
@@ -202,11 +200,10 @@ def main():
             q.mouse_goto(560, 420)
             time.sleep(1)
 
-            # 'Saved to the disk' is said on the line at the bottom of
-            # the window
-            said = q.gset_note(CX, CY)
+            # 'Saved' is said on the line at the bottom of the window
+            said = q.gset_status(CX, CY)
             check("the program reported the write to the disk ('%s')" % said,
-                  said == "Saved to the disk")
+                  said == "Saved")
         finally:
             q.close()
 

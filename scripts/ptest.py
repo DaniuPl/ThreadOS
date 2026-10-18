@@ -57,7 +57,10 @@ def _menu_items():
                         "kernel", "desktop.c")
     with open(full) as fh:
         m = re.search(r"menu_items\[\] = \{([^}]*)\}", fh.read())
-    return re.findall(r'"([^"]+)"', m.group(1))
+    # WEB_APP is the browser, a different program on each kernel
+    # (kernel/desktop.c); by the 32-bit name here
+    return [name or "gweb" for name in
+            re.findall(r'"([^"]+)"|\bWEB_APP\b', m.group(1))]
 
 
 MENU_ITEMS = _menu_items()
@@ -723,15 +726,65 @@ UI_PX = _kernel_define("kernel/include/uitext.h", "UI_PX")
 # ... and of the programs', which draw through user/udraw.h
 UD_PX = _kernel_define("user/udraw.h", "UD_PX")
 
-# The settings window (user/gsettings.c): its size, its rows, where a
-# setting's value starts, and the line at its bottom that says what
-# became of a change
-GSET_W = _kernel_define("user/gsettings.c", "W0")
-GSET_H = _kernel_define("user/gsettings.c", "H0")
-GSET_ROW_Y = _kernel_define("user/gsettings.c", "ROW_Y")
-GSET_ROW_H = _kernel_define("user/gsettings.c", "ROW_H")
-GSET_VAL_X = _kernel_define("user/gsettings.c", "VAL_X")
-GSET_NOTE_DY = _kernel_define("user/gsettings.c", "NOTE_DY")
+# The settings window (user/gsettings.c): sections down the left, the
+# open one on the right, a setting per row (its name, then its control
+# below it), and the line at the bottom that says what became of a change
+_GS = "user/gsettings.c"
+GSET_W = _kernel_define(_GS, "W0")
+GSET_H = _kernel_define(_GS, "H0")
+GSET_SIDE_W = _kernel_define(_GS, "SIDE_W")
+GSET_SIDE_Y0 = _kernel_define(_GS, "SIDE_Y0")
+GSET_SIDE_H = _kernel_define(_GS, "SIDE_H")
+GSET_PANE_X = _kernel_define(_GS, "PANE_X")
+GSET_HEAD_BASE = _kernel_define(_GS, "HEAD_BASE")
+GSET_PANE_Y0 = _kernel_define(_GS, "PANE_Y0")
+GSET_ROW_H = _kernel_define(_GS, "ROW_H")
+GSET_CTRL_DY = _kernel_define(_GS, "CTRL_DY")
+GSET_CHIP_W = _kernel_define(_GS, "CHIP_W")
+GSET_CHIP_H = _kernel_define(_GS, "CHIP_H")
+GSET_CHIP_GAP = _kernel_define(_GS, "CHIP_GAP")
+GSET_FIELD_W = _kernel_define(_GS, "FIELD_W")
+GSET_SAVE_W = _kernel_define(_GS, "SAVE_W")
+GSET_INFO_H = _kernel_define(_GS, "INFO_H")
+GSET_INFO_X = _kernel_define(_GS, "INFO_X")
+GSET_NOTE_DY = _kernel_define(_GS, "NOTE_DY")
+GSET_PASS_W = _kernel_define(_GS, "PASS_W")
+GSET_PASS_H = _kernel_define(_GS, "PASS_H")
+GSET_SW_W = _kernel_define(_GS, "SW_W")
+GSET_SW_H = _kernel_define(_GS, "SW_H")
+GSET_SW_GAP = _kernel_define(_GS, "SW_GAP")
+GSET_SECTIONS = ["General", "Appearance", "Display", "Sound", "Network",
+                 "Files", "About"]
+
+
+def gset_section(name):
+    """The middle of a section's line down the left, in the content"""
+    i = GSET_SECTIONS.index(name)
+    return GSET_SIDE_W // 2, GSET_SIDE_Y0 + i * GSET_SIDE_H + GSET_SIDE_H // 2
+
+
+def gset_ctrl_y(row):
+    """The top of the control of the open section's row 'row'"""
+    return GSET_PANE_Y0 + row * GSET_ROW_H + GSET_CTRL_DY
+
+
+def gset_chip(row, k):
+    """The middle of the k-th choice in a row of them"""
+    return (GSET_PANE_X + k * (GSET_CHIP_W + GSET_CHIP_GAP) + GSET_CHIP_W // 2,
+            gset_ctrl_y(row) + GSET_CHIP_H // 2)
+
+
+def gset_swatch(k):
+    """The middle of background k's swatch under Appearance"""
+    return (GSET_PANE_X + k * (GSET_SW_W + GSET_SW_GAP) + GSET_SW_W // 2,
+            gset_ctrl_y(1) + GSET_SW_H // 2)
+
+
+def gset_field(row):
+    """The middle of a row's field, and of its Save button"""
+    y = gset_ctrl_y(row) + GSET_CHIP_H // 2
+    return ((GSET_PANE_X + GSET_FIELD_W // 2, y),
+            (GSET_PANE_X + GSET_FIELD_W + 8 + GSET_SAVE_W // 2, y))
 
 
 # The clock (user/gclock.c): its size and the time on it
@@ -876,9 +929,6 @@ TERM_COLS = (TERM_W - 2 * TERM_PAD) // TERM_CELL
 TERM_ROWS = (TERM_H - 2 * TERM_PAD) // TERM_ROW_H
 
 
-def gset_row_y(r):
-    """The middle of the settings window's row r, in its content"""
-    return GSET_ROW_Y + r * GSET_ROW_H + GSET_ROW_H // 2
 # Where a window's content starts below its top edge: the frame line
 # and the title bar
 CONTENT_DY = 1 + TITLE_H
@@ -2456,22 +2506,58 @@ class Qemu:
                 best = got
         return best
 
-    def gset_row(self, cx, cy, r, chosen=False, dark=True, screen=None):
-        """(name, value) on row r of the settings window whose content
-        starts at (cx, cy). The chosen row wears the accent with its
-        text on it; the others are text and a quieter value."""
+    def gset_heading(self, cx, cy, dark=True, screen=None):
+        """The name of the open section, in bold over its pane"""
+        return self.read_ui(cx + GSET_PANE_X, cy + GSET_HEAD_BASE, 200,
+                            px=16, face="bold",
+                            fg=theme("dark" if dark else "light")["app_text"],
+                            screen=screen)
+
+    def gset_side(self, cx, cy, i, chosen=False, dark=True, screen=None):
+        """Section i's name down the left: on the accent when open"""
         t = theme("dark" if dark else "light")
-        scr = screen or self.screen_raw()
-        base = cy + ui_font_baseline_in(UD_PX, GSET_ROW_Y + r * GSET_ROW_H,
-                                        GSET_ROW_H)
-        name = self.read_ui(cx + 14, base, GSET_VAL_X - 18, px=UD_PX,
+        top = GSET_SIDE_Y0 + i * GSET_SIDE_H
+        return self.read_ui(cx + 20, cy + ui_font_baseline_in(UD_PX, top,
+                                                              GSET_SIDE_H),
+                            GSET_SIDE_W - 24, px=UD_PX,
                             fg=t["accent_text" if chosen else "app_text"],
-                            screen=scr)
-        value = self.read_ui(cx + GSET_VAL_X, base, GSET_W - GSET_VAL_X - 10,
-                             px=UD_PX,
-                             fg=t["accent_text" if chosen else "app_dim"],
-                             screen=scr)
-        return name, value
+                            screen=screen)
+
+    def gset_info(self, cx, cy, i, dark=True, screen=None):
+        """Line i of a section of figures (Network, About): its value"""
+        top = GSET_PANE_Y0 + i * GSET_INFO_H
+        return self.read_ui(cx + GSET_PANE_X + GSET_INFO_X,
+                            cy + ui_font_baseline_in(UD_PX, top, GSET_INFO_H),
+                            GSET_W - GSET_PANE_X - GSET_INFO_X - 8, px=UD_PX,
+                            fg=theme("dark" if dark else "light")["app_text"],
+                            screen=screen)
+
+    def gset_asks(self, cx, cy, cw=None, ch=None, screen=None):
+        """The title of the password panel over the settings window, ''
+        when there is none"""
+        cw, ch = cw or GSET_W, ch or GSET_H
+        px = GSET_PANE_X + (cw - GSET_PANE_X - GSET_PASS_W) // 2 - 10
+        py = (ch - GSET_PASS_H) // 2
+        return self.read_ui(cx + px + 14, cy + py + 24, GSET_PASS_W - 20,
+                            px=UD_PX, face="bold",
+                            fg=theme("dark")["app_text"], screen=screen)
+
+    def gset_field_text(self, cx, cy, row, screen=None):
+        """What a field of the open section holds"""
+        top = gset_ctrl_y(row)
+        return self.read_ui(cx + GSET_PANE_X + 8,
+                            cy + ui_font_baseline_in(UD_PX, top, GSET_CHIP_H),
+                            GSET_FIELD_W - 12, px=UD_PX,
+                            fg=theme("dark")["app_text"], screen=screen)
+
+    def gset_status(self, cx, cy, ch=None, screen=None):
+        """What became of the last change, at the bottom of the pane: in
+        bold, in whichever colour it says it in"""
+        t = theme("dark")
+        return self.read_ui(cx + GSET_PANE_X, cy + (ch or GSET_H) - GSET_NOTE_DY,
+                            GSET_W - GSET_PANE_X - 8, px=UD_PX, face="bold",
+                            colours=[t["app_good"], t["app_danger"],
+                                     t["app_dim"]], screen=screen)
 
     def gclock_time(self, cx, cy, dark=True, screen=None):
         """The 'HH:MM:SS' on the clock whose content starts at (cx, cy):
@@ -2608,20 +2694,6 @@ class Qemu:
                                         GIMG_STATUS_H)
         return self.read_ui(cx + 8, base, cw - 12, px=GIMG_STATUS_PX,
                             fg=t["app_text"])
-
-    def gset_note(self, cx, cy, ch=None, dark=True):
-        """The line at the bottom of the settings window: whether the
-        last change was saved (bold, good or bad news), or - while the
-        password is asked for - what it is asked for (small and quiet)"""
-        t = theme("dark" if dark else "light")
-        base = cy + (ch or GSET_H) - GSET_NOTE_DY
-        scr = self.screen_raw()
-        news = self.read_ui(cx + 12, base, GSET_W - 24, px=UD_PX, face="bold",
-                            colours=[t["app_good"], t["app_danger"]],
-                            screen=scr)
-        quiet = self.read_ui(cx + 12, base, GSET_W - 24, px=11,
-                             fg=t["app_dim"], screen=scr)
-        return news if len(news) >= len(quiet) else quiet
 
     def term_rows(self, cx, cy, cols=TERM_COLS, rows=TERM_ROWS,
                   screen=None):

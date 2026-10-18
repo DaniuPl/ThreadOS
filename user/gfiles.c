@@ -264,6 +264,39 @@ static int read_entry(int index, struct entry *out)
 }
 #endif
 
+/* What the system keeps for itself stays out of sight unless the
+   'hidden' setting asks for it: the swap file and the settings in the
+   root are nothing a person opens, and a list that starts with them
+   invites removing them. Names starting with a dot are hidden the way
+   they are everywhere else. */
+static int show_hidden;
+
+static void read_show_hidden(void)
+{
+    struct cfg_entry c;
+    show_hidden = 0;
+    for (uint32_t i = 0; sys_cfg_get(i, &c) == 0; i++)
+        if (same(c.name, "hidden"))
+            show_hidden = c.value[0] == '1';
+}
+
+static int hidden(const char *dir, const char *name)
+{
+    static const char *const system_files[] = {
+        "system.cfg", "swap.sys", "icons.pos", "update.key", "desktop.icons"
+    };
+    if (show_hidden)
+        return 0;
+    if (name[0] == '.')
+        return 1;
+    if (!same(dir, "/"))
+        return 0;
+    for (int i = 0; i < (int)(sizeof(system_files) / sizeof(system_files[0])); i++)
+        if (same(name, system_files[i]))
+            return 1;
+    return 0;
+}
+
 /* --- the tree ------------------------------------------------------ */
 
 static int is_opened(const char *path)
@@ -320,7 +353,7 @@ static void build_tree(void)
         for (int j = 0; j < 128 && nnodes < MAXNODES; j++) {
             if (read_entry(j, &e) != 0)
                 break;
-            if (!e.is_dir)
+            if (!e.is_dir || hidden(nodes[i].path, e.name))
                 continue;
             char p[PATH_LEN];
             if (!join(p, nodes[i].path, e.name))
@@ -374,17 +407,19 @@ static void where_am_i(void)
 
 static void reread(void)
 {
+    read_show_hidden();
+    where_am_i();                      /* what hidden() compares with */
     count = 0;
     for (int i = 0; i < 128 && count < MAXF; i++) {
         if (read_entry(i, &items[count]) != 0)
             break;
-        count++;
+        if (!hidden(here, items[count].name))
+            count++;
     }
     if (top > count - 1)
         top = 0;
     if (chosen >= count)
         chosen = -1;
-    where_am_i();
     build_tree();
 }
 

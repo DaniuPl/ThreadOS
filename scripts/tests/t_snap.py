@@ -192,7 +192,7 @@ def main():
             w, h, at = q.screen_raw()
             check("the green light gives the window its own size back",
                   not is_win(at(w - 3, 300)) and not is_win(at(20, 40)))
-            # Its own size is 362 wide - the size it asked for. Half
+            # Its own size is GSET_W + 2 wide - the size it asked for. Half
             # the screen is 320 and the whole of it 640, so this one
             # number tells the three apart. (Two rows down, the round
             # corners take a few pixels at either end.)

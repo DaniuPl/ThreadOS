@@ -5573,3 +5573,26 @@ works and is checked by `make test`.
       it, and the back arrow returning. litehtml places every word on
       its own at a whole pixel, so the screen reader got `read_page`,
       which reads a line a word at a time.
+
+- [x] **Settings in sections, and system files out of sight**
+      (user/gsettings.c, user/gfiles.c, a new `settings` group).
+
+      The settings window was the settings file drawn as a table:
+      `background 3` says nothing to someone who wants the green one. It
+      is now split the usual way - General, Appearance, Display, Sound,
+      Network, Files and About down the left - and each setting is shown
+      as what it is: a row of buttons with the current one lit, the
+      backgrounds as the kernel draws them, a box to tick, a field. The
+      network and the machine's figures are shown there too. Every change
+      is written at once; the first asks for the admin's password in a
+      panel, and the right is given back after each change.
+
+      The file manager no longer lists swap.sys, system.cfg and the rest
+      of what the system keeps in the root, nor names starting with a dot;
+      the new `hidden` setting (Settings, Files) shows them.
+
+      The test checks every change through the kernel's own shell (`set
+      <name>`), the network figures against QEMU's fixed addresses and the
+      memory against `mem`. Tests that used the old table as a generic
+      window now use its new layout, or the terminal where they needed a
+      window that fills its whole content.

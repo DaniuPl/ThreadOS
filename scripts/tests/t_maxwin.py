@@ -21,11 +21,11 @@ the difference is the part worth testing:
   wide, and the rest would be an empty grey field that looks like a
   drawing bug and is in fact a missing message.
 
-That last one is what the assertions here really turn on. 'gsettings'
-draws the selected row as a blue stripe across the FULL width of its
-content area, so the stripe is a ruler: after maximising it must reach
-the right-hand side of the screen, and after restoring it must stop
-where the smaller window ends.
+That last one is what the assertions here really turn on. The terminal
+fills ALL of its content with the ground text is typed on, a shade
+darker than a window's own background, so the ground is a ruler: after
+maximising it must reach the right-hand side of the screen, and after
+restoring it must stop where the smaller window ends.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -42,17 +42,16 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The window opens in slot 2: the compositor cascades at (70+12i, 30+12i)
-# and gsettings asks for GSET_W x GSET_H of content.
+# and gterm asks for TERM_W x TERM_H of content.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
-WW, WH = GSET_W + 2, GSET_H + TITLE_H + 2
+WW, WH = TERM_W + 2, TERM_H + TITLE_H + 2
 # Zoomed, the window is the room between the bar and the dock
 ZY = BAR_H
-# The selected row's stripe, the first under the heading (user/gsettings.c)
-ROW = CONTENT_DY + gset_row_y(0)
-# A column of the window's own background: right of the rows, which
-# stop six pixels short of the edge
-BG_X = WX + 1 + GSET_W - 3
+# A point in the terminal's content, clear of its text, and one right
+# of the window, where only a zoomed terminal reaches
+IN_X, IN_Y = WX + WW - 20, WY + 200
+OUT_X = 600
 DARK = theme("dark")
 
 
@@ -61,13 +60,14 @@ def title(px):
     return near(px, theme("dark")["title_bg"], 4)
 
 
-def blue(px):
-    """The accent of a selected row."""
-    return near(px, DARK["accent"], 6)
+def ground(px):
+    """The terminal's ground - what only the program draws."""
+    return near(px, DARK["app_field"], 3)
 
 
 def grey(px):
-    """A window's background."""
+    """A window's background: what the compositor shows where the
+    program has drawn nothing."""
     return near(px, DARK["win_bg"], 3)
 
 
@@ -88,20 +88,19 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(600, 300)
             time.sleep(1.5)
 
             w, h, at = q.screen_raw()
-            check("the application window opened", grey(at(BG_X, WY + 120)))
-            # The blue stripe of the selected row stops inside the small
-            # window - so its reaching further later means something
-            check("the marked row is visible in the window",
-                  blue(at(WX + 1 + 350, WY + ROW)))
-            check("and it ends inside the window, not beyond",
-                  not blue(at(WX + WW + 60, WY + ROW)))
-            check("outside the window is the desktop", not grey(at(600, WY + 120)))
+            check("the application window opened", ground(at(IN_X, IN_Y)))
+            # The ground stops at the small window's edge - so its
+            # reaching further later means something
+            check("and its ground ends inside the window, not beyond",
+                  not ground(at(OUT_X, IN_Y)))
+            check("outside the window is the desktop",
+                  not grey(at(OUT_X, IN_Y)))
             check("the dock shows", dock_shows(at))
 
             # --- zoom ---------------------------------------------------
@@ -114,20 +113,18 @@ def main():
             check("the title bar runs across the whole screen, under the "
                   "menu bar", title(at(600, ZY + 4)) and title(at(30, ZY + 4)))
             check("the window reaches down to the dock",
-                  grey(at(300, work_bottom() - 3)))
+                  ground(at(300, work_bottom() - 3)))
             # The dock is how every other window is reached
             check("the dock still shows (the window did not cover it)",
                   dock_shows(at))
             check("and so does the menu bar",
                   near(at(300, 12), bar_glass()[12][300], 1))
 
-            # The ruler: the selected row's stripe now reaches the right
-            # side of the screen, which it can only do if the program was
-            # told the new width and given a buffer that big
-            check("the program got the new size (the row bar reaches "
-                  "the right edge)", blue(at(600, ZY + ROW)))
-            check("and it is the row, not anything else",
-                  not blue(at(600, ZY + CONTENT_DY + 4)))
+            # The ruler: the ground now reaches the right side of the
+            # screen, which it can only do if the program was told the
+            # new width and given a buffer that big
+            check("the program got the new size (its ground reaches "
+                  "the right edge)", ground(at(OUT_X, ZY + 200)))
 
             # --- restore ----------------------------------------------
             q.click(*light_xy(0, ZY, 2))
@@ -137,12 +134,9 @@ def main():
 
             w, h, at = q.screen_raw()
             check("the window came back exactly where it was",
-                  grey(at(BG_X, WY + 120)) and
-                  not grey(at(600, WY + 120)))
-            check("the program narrowed back (the row bar ends "
-                  "inside the window)", not blue(at(600, WY + ROW)))
-            check("and that bar is still in the window",
-                  blue(at(WX + 1 + 350, WY + ROW)))
+                  ground(at(IN_X, IN_Y)) and not grey(at(OUT_X, IN_Y)))
+            check("the program narrowed back (the ground ends inside the "
+                  "window)", not ground(at(OUT_X, IN_Y)))
 
             # --- dragging a zoomed window puts it back ----------------
             q.click(*light_xy(WX, WY, 2))
@@ -169,7 +163,7 @@ def main():
             check("and it followed the pointer (its title bar is where it "
                   "was dropped)", title(at(320, ty + 4)))
             check("and the desktop is where the window no longer is",
-                  not grey(at(600, 100)))
+                  not ground(at(600, 100)) and not grey(at(600, 100)))
         finally:
             q.close()
     finally:

@@ -116,9 +116,14 @@ def main():
             q.mouse_goto(600, 300)
             time.sleep(0.7)
             w, h, mid = q.screen_raw()
-            time.sleep(4)
-            w, h, end = q.screen_raw()
             body = (WX + 1 + GSET_W - 3, WY + 150)     # its own background
+            # The way is counted in frames, and a larger window takes
+            # longer frames: wait for it to arrive rather than guess
+            for _ in range(30):
+                w, h, end = q.screen_raw()
+                if near(end(*body), DARK["win_bg"], 3):
+                    break
+                time.sleep(0.5)
             check("the window opened (its background %s)" % (end(*body),),
                   near(end(*body), DARK["win_bg"], 3))
             check("and on its way it was not yet that - caught half way (%s)"
