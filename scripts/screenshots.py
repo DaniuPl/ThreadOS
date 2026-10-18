@@ -74,8 +74,10 @@ def desktop():
             q.wait_serial("thread64>", timeout=120)
             for name in ("notes.txt", "report.txt", "todo.txt"):
                 q.command("write %s hello" % name, "write")
-            q.type_line("run mkdir documents")
-            time.sleep(1)
+            # Folders, so the file manager's tree has something to show
+            for folder in ("documents", "documents/photos", "projects"):
+                q.type_line("mkdir " + folder)
+                time.sleep(0.5)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=40)
             q.wait_desktop(40)
@@ -92,13 +94,13 @@ def desktop():
             # of the cascade: (70,30), (82,42), (94,54)
             q.launch_dock(2)
             time.sleep(4)
-            drag(q, 70 + 100, 30 + 4, 40 + 100, 50 + 4)
+            drag(q, 70 + 100, 30 + 4, 16 + 100, 44 + 4)
             q.launch_dock(3)
             time.sleep(4)
-            drag(q, 82 + 120, 42 + 4, w - 300 + 120, 60 + 4)
+            drag(q, 82 + 120, 42 + 4, w - 234 + 120, 44 + 4)
             q.launch_dock(1)
             time.sleep(4)
-            drag(q, 94 + 70, 54 + 4, w - 200 + 70, 210 + 4)
+            drag(q, 94 + 70, 54 + 4, w - 150 + 70, 200 + 4)
             # The pointer resting on a tile, so its name shows
             q.mouse_goto(*dock_tile(2, n_w=3, w=w, h=h))
             time.sleep(2)

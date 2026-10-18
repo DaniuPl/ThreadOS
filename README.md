@@ -2,6 +2,7 @@
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![release](https://img.shields.io/github/v/release/DaniuPl/ThreadOS)](https://github.com/DaniuPl/ThreadOS/releases/latest)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/AyaEyTSG6)
 
 ThreadOS is an x86 operating system written from scratch in C and
 assembly. It has its own kernel, drivers, filesystem, TCP/IP stack, TLS
@@ -334,6 +335,8 @@ one, replace its directory. ThreadOS-specific changes to musl live in
 
 ## Contributing, security, license
 
+- **[Discord](https://discord.gg/AyaEyTSG6)**: questions, ideas, screenshots from real hardware, and
+  help with getting ThreadOS to boot on your machine.
 - [CONTRIBUTING.md](CONTRIBUTING.md): review rules. The first one is that
   every feature comes with a test that would fail without it.
 - [AGENTS.md](AGENTS.md): instructions for AI coding assistants.

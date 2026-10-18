@@ -130,6 +130,13 @@ and, when something went wrong on the way, what it was. The journal
 (`docs/JOURNAL.md`) gets the longer version of that story for anything
 worth remembering.
 
+## Talking to people
+
+Questions that are not bug reports, ideas, and "it boots on my laptop" (or
+"it does not") are welcome on [Discord](https://discord.gg/AyaEyTSG6). Decisions that change the code
+still end up written down in an issue or a pull request, where they can be
+found later.
+
 ## Reporting a bug
 
 Please say which kernel (32- or 64-bit), how it was started (the QEMU
