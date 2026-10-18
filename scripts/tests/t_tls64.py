@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_iso64, no64,
                    start_suite_server, DNS_HINT)
+from ptest import _kernel_define as define
 
 
 def main():
@@ -164,11 +165,10 @@ def main():
                 os.unlink(slog)
 
         # --- The browser in a desktop window: network -> TLS -> GUI ---
-        # The last dead icon on the desktop. It ties everything together
-        # at once: the keyboard and mouse from the compositor, DNS, TCP,
-        # the HTML parser and drawing in a window - and all of it from
-        # ring 3.
-        print("--- the browser in a window (gweb) ---")
+        # It ties everything together at once: the keyboard and mouse
+        # from the compositor, DNS, TCP, the HTML parser and drawing in a
+        # window - and all of it from ring 3.
+        print("--- the browser in a window (web) ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
                   sata=True, qemu="qemu-system-x86_64")
@@ -183,40 +183,42 @@ def main():
             q2.wait_serial("The desktop is starting", timeout=30)
             check("the desktop comes up before the browser", q2.wait_desktop(30))
 
+            src = "apps/browser/web.cpp"
+            w0, h0 = define(src, "W0"), define(src, "H0")
+            wx, wy = cascade(2, w0 + 2, h0 + TITLE_H + 2)
+            cx, cy = wx + 1, wy + CONTENT_DY
+            bar = define(src, "BAR_H")
             q2.mouse_home()
             q2.launch_dock(5)                # the "Web" tile
+            end = time.time() + 30
+            while time.time() < end and \
+                    q2.window_title(wx, wy, w0 + 2) != "Web: Start":
+                time.sleep(0.5)
 
-            # The browser's window: slot 2, content 320x200 from (95,65)
-            def white_text():
-                _, _, a = q2.screen_raw()
-                return sum(1 for y in range(140, 390)
-                           for x in range(100, 520)
-                           if near(a(x, y), theme("dark")["app_text"], 40))
-
-            time.sleep(3)
-            before = white_text()
-
-            # A click in the window gives it keyboard focus, then the cursor
-# goes aside
-            q2.mouse_goto(150, 120)
-            q2.mouse_click()
-            q2.mouse_goto(500, 350)
-
-            for _ in range(24):             # clear the default address
-                q2.sendkey("backspace")
+            # A click picks the address whole; what is typed replaces it.
+            # A bare host name, the way people type one.
+            q2.click(cx + define(src, "ADDR_X") + 60, cy + bar // 2)
+            q2.mouse_goto(600, 440)
+            time.sleep(1)
             for ch in "threados.test:%d/" % http_port:
                 q2.sendkey(Qemu.KEYNAMES.get(ch, ch))
             q2.sendkey("ret")
 
-            showed = False
-            end = time.time() + 30
-            while time.time() < end:
-                if white_text() > before + 50:
-                    showed = True
-                    break
+            # The server's page, read back off the window in the page's
+            # own black on white
+            said = ""
+            end = time.time() + 40
+            while time.time() < end and said != "ThreadOS TCP works":
+                said = q2.read_page(cx + 2, cy + bar, cx + 300, cy + bar + 40,
+                                    define(src, "FONT_PX"), (0, 0, 0),
+                                    want="ThreadOS TCP works")
                 time.sleep(0.5)
             check("the browser resolved the name, fetched the page "
-                  "and it drew the text", showed)
+                  "and drew its text (%r)" % said,
+                  said == "ThreadOS TCP works")
+            check("the bare name became an http address",
+                  "[web] opened http://threados.test:%d/" % http_port
+                  in q2.serial())
         finally:
             q2.close()
             if os.path.exists(slog2):

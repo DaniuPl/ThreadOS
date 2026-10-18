@@ -5541,3 +5541,35 @@ works and is checked by `make test`.
 
       Next: a document_container that draws into a window with the
       system's own fonts, and the browser on top of it.
+
+- [x] **The browser draws pages** (apps/browser/web.cpp, a new `web`
+      group, the browser part of `tls64`).
+
+      `web` is litehtml with a document_container that draws through
+      udraw.h: the desktop's TrueType lettering, its rounded boxes, a
+      white page in a true-colour window. Pages come from the disk or,
+      through httpget, over HTTP and HTTPS - one place that resolves
+      names, follows redirects and checks certificates, not two. The
+      64-bit Web tile now opens it; the 32-bit system keeps gweb, which
+      needs no C++ runtime. A click in the address field picks the old
+      address whole, and a bare `example.com/` means the web, as in any
+      browser.
+
+      **It had to fit in sixteen megabytes.** The swap test gives the
+      machine 16 MiB and asks for 17; whatever the initrd holds is not
+      free, and the first build of the browser added 1.5 MB and broke it.
+      Three things brought it back: C++ built with -Os and
+      --gc-sections; litehtml's Chinese, Japanese and Korean legacy
+      decoders left out (370 KB of tables for text there is no font
+      for; the same pages in UTF-8 are unaffected), as a patch with its
+      reason; and every musl program stripped, with QuickJS at -Os. The
+      initrd is 2.5 MB, against 2.1 MB before the browser.
+
+      The test reads the window from outside: the start page's title,
+      an address typed and fetched from the host, the heading and the
+      floated box in the exact colours the page's CSS gives them, the
+      box 216 pixels wide (200 and the padding) on the right half, its
+      words read back off it, a click on the link's underline following
+      it, and the back arrow returning. litehtml places every word on
+      its own at a whole pixel, so the screen reader got `read_page`,
+      which reads a line a word at a time.

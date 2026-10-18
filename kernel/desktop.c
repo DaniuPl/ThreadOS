@@ -94,13 +94,20 @@ struct icon {
                                   the disk - the built-in ones point at
                                   their own literals */
 };
+/* The 64-bit system has the litehtml browser (apps/browser); the 32-bit
+   one keeps gweb, because there is no C++ runtime built for it */
+#ifdef __x86_64__
+#define WEB_APP "web"
+#else
+#define WEB_APP "gweb"
+#endif
 static struct icon icons[ICON_MAX] = {
     {"App", "guiapp", 0, {{0}}},
     {"Clock", "gclock", 1, {{0}}},
     {"Files", "gfiles", 2, {{0}}},
     {"Monitor", "gmon", 3, {{0}}},
     {"Term", "gterm", 4, {{0}}},
-    {"Web", "gweb", 5, {{0}}},
+    {"Web", WEB_APP, 5, {{0}}},
     {"Settings", "gsettings", 6, {{0}}},
     {"Editor", "gedit", 7, {{0}}},
     {"Tasks", "gtasks", 8, {{0}}},
@@ -118,7 +125,7 @@ static int icon_n = 9;         /* how many of them there are */
    that is not in the dock, say one started from the menu */
 static const struct { const char *app, *label; } known_apps[] = {
     { "guiapp", "App" }, { "gclock", "Clock" }, { "gfiles", "Files" },
-    { "gmon", "Monitor" }, { "gterm", "Term" }, { "gweb", "Web" },
+    { "gmon", "Monitor" }, { "gterm", "Term" }, { WEB_APP, "Web" },
     { "gsettings", "Settings" }, { "gedit", "Editor" },
     { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
     { "gappear", "Appearance" }, { "gcalc", "Calculator" },
@@ -461,7 +468,7 @@ static int menu_px, menu_py;
    and everything else has to be out of reach while it runs, so it is
    started as a kiosk ('install') and not as one more window among
    somebody's other windows. */
-static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
+static const char *menu_items[] = {"guiapp", "gclock", "gfiles", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint"};
 

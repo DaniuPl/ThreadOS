@@ -270,13 +270,17 @@ static inline int32_t sys_install_step(int32_t n)
 }
 
 /* The same bump allocator as in protected mode: it only allocates,
-   which is enough for a program that reads a file into memory once. */
+   which is enough for a program that reads a file into memory once.
+   A program built against the C library (libc/, THREADOS_LIBC) has the
+   real malloc, and this one would collide with it. */
+#ifndef THREADOS_LIBC
 static inline void *malloc(uint32_t size)
 {
     size = (size + 7) & ~7u;
     void *p = sys_sbrk((int64_t)size);
     return p == (void *)-1 ? (void *)0 : p;
 }
+#endif
 
 /* The clipboard - the same two calls as in protected mode */
 #define CLIP_MAX 512

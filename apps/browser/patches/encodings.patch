@@ -4,6 +4,10 @@ throws - to abandon the encoding prescan of a page early. The throw
 becomes a longjmp back to prescan_for_encoding; what it skips are the
 destructors of a few short strings, i.e. memory, not correctness.
 
+And without the Chinese, Japanese and Korean legacy decoders: 370 KB of
+tables for text the system has no font to show. Such a page decodes to
+the replacement character; the same page in UTF-8 is unaffected.
+
 --- a/src/encodings.cpp
 +++ b/src/encodings.cpp
 @@ -1,3 +1,4 @@
@@ -11,7 +15,40 @@ destructors of a few short strings, i.e. memory, not correctness.
  #include "html.h"
  #include "os_types.h"
  #include "utf8_strings.h"
-@@ -7879,20 +7880,18 @@
+@@ -7474,25 +7475,19 @@
+         case encoding::utf_8:
+             return std::make_shared<utf_8_decoder>();
+ 
+-        case encoding::gbk: // https://encoding.spec.whatwg.org/#gbk-decoder
++        // ThreadOS: the Chinese, Japanese and Korean legacy encodings
++        // decode to nothing the system has a font for, and their tables
++        // are 370 KB that every copy of the browser would carry in the
++        // initrd and in memory. Without a reference to these decoders the
++        // linker drops them (--gc-sections); such a page shows the
++        // replacement character. The same pages in UTF-8 are unaffected.
++        case encoding::gbk:
+         case encoding::gb18030:
+-            return std::make_shared<gb18030_decoder>();
+-
+         case encoding::big5:
+-            return std::make_shared<big5_decoder>();
+-
+         case encoding::euc_jp:
+-            return std::make_shared<euc_jp_decoder>();
+-
+         case encoding::iso_2022_jp:
+-            return std::make_shared<iso_2022_jp_decoder>();
+-
+         case encoding::shift_jis:
+-            return std::make_shared<shift_jis_decoder>();
+-
+         case encoding::euc_kr:
+-            return std::make_shared<euc_kr_decoder>();
+-
+         case encoding::replacement:
+             return std::make_shared<replacement_decoder>();
+ 
+@@ -7879,20 +7874,18 @@
          return index >= 1024;
      }
  
@@ -38,7 +75,7 @@ destructors of a few short strings, i.e. memory, not correctness.
          }
      }
  
-@@ -8028,7 +8027,7 @@
+@@ -8028,7 +8021,7 @@
              index = static_cast<int>(str.find("-->", index));
              if(index == -1 || end_condition(index))
              {
@@ -47,7 +84,7 @@ destructors of a few short strings, i.e. memory, not correctness.
              }
              index += 2; // not 3 because it will be incremented one more time in step 5 (next_byte)
          } else if(match_i(str, index, "<meta") && (is_whitespace(str[index + 5]) || str[index + 5] == '/'))
-@@ -8123,7 +8122,7 @@
+@@ -8123,7 +8116,7 @@
              index = static_cast<int>(str.find_first_of(" \t\r\n\f>", index));
              if(index == -1 || end_condition(index))
              {
@@ -56,7 +93,7 @@ destructors of a few short strings, i.e. memory, not correctness.
              }
  
              // 2.
-@@ -8137,7 +8136,7 @@
+@@ -8137,7 +8130,7 @@
              index = static_cast<int>(str.find('>', index));
              if(index == -1 || end_condition(index))
              {
@@ -65,7 +102,7 @@ destructors of a few short strings, i.e. memory, not correctness.
              }
          }
  
-@@ -8246,14 +8245,11 @@
+@@ -8246,14 +8239,11 @@
      // https://html.spec.whatwg.org/multipage/parsing.html#prescan-a-byte-stream-to-determine-its-encoding
      encoding prescan_for_encoding(const std::string& str)
      {

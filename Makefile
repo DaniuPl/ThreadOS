@@ -537,7 +537,7 @@ LIBC64_CFLAGS := -m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
                  -fno-pic -fno-asynchronous-unwind-tables \
                  -nostdinc -isystem $(MUSL_ROOT)/include \
                  -isystem $(shell $(CC) -print-file-name=include)
-LIBC64_LINK = $(CC) -m64 -static -no-pie -nostdlib \
+LIBC64_LINK = $(CC) -m64 -static -no-pie -nostdlib -s \
               -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 \
               -T libc/libc64.ld $(MUSL_ROOT)/lib/crt1.o \
               $(MUSL_ROOT)/lib/crti.o $(1) $(LIBC64) \
@@ -563,7 +563,8 @@ $(BUILD)/user64/libctest.elf: libc/tests/libctest.c $(LIBC64) libc/libc64.ld \
 QJS_SRC  := quickjs dtoa libregexp libunicode cutils
 QJS_OBJS := $(patsubst %,$(BUILD)/libc64/qjs-%.o,$(QJS_SRC))
 QJS_HDRS := $(wildcard third_party/quickjs/*.h)
-QJS_CFLAGS := $(LIBC64_CFLAGS) -D_GNU_SOURCE -fwrapv \
+# -Os: a third smaller, and the initrd is memory (see CXX64_FLAGS)
+QJS_CFLAGS := $(LIBC64_CFLAGS) -Os -D_GNU_SOURCE -fwrapv \
               -DCONFIG_VERSION=\"$(shell cat third_party/quickjs/VERSION)\" \
               -Wno-sign-compare -Wno-unused-parameter
 
@@ -598,12 +599,15 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
 # program) and libc/cxx/compat.h the glibc names the headers expect.
 CXX64_INCS := $(shell echo | $(CXX) -xc++ -E -v - 2>&1 | sed -n 's/^ \(.*c++.*\)$$/-isystem \1/p')
 LIBSTDCXX  := $(shell $(CXX) -print-file-name=libstdc++.a)
-CXX64_FLAGS := -m64 -std=gnu++17 -O2 -mno-red-zone -fno-stack-protector \
+# -Os and a section per function: whatever is in the initrd is memory
+# the machine never gets back, and the swap test runs in 16 MiB
+CXX64_FLAGS := -m64 -std=gnu++17 -Os -ffunction-sections -fdata-sections \
+               -mno-red-zone -fno-stack-protector \
                -fno-pic -fno-asynchronous-unwind-tables -fno-exceptions \
                -fno-threadsafe-statics -nostdinc -nostdinc++ $(CXX64_INCS) \
                -isystem $(MUSL_ROOT)/include \
                -isystem $(shell $(CC) -print-file-name=include) \
-               -include libc/cxx/compat.h
+               -include libc/cxx/compat.h -DTHREADOS_LIBC
 
 $(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
                          | $(BUILD)/libc64
@@ -647,7 +651,8 @@ $(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(LIBC64) \
 
 # The C++ link: musl's start files, the program, libstdc++ for what
 # the headers do not carry, and the C library after it
-CXX64_LINK = $(call LIBC64_LINK,$(1) $(BUILD)/libc64/cxxrt.o $(LIBSTDCXX))
+CXX64_LINK = $(call LIBC64_LINK,$(1) $(BUILD)/libc64/cxxrt.o \
+                                $(LIBSTDCXX)) -Wl,--gc-sections
 
 # layouttest lays pages out with a font of known sizes and prints every
 # box; scripts/tests/t_browser.py holds what it prints on ThreadOS
@@ -659,7 +664,18 @@ $(BUILD)/user64/layouttest.elf: apps/browser/layouttest.cpp $(LH_OBJS) \
                                 $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
                                 | $(BUILD)/user64
 	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -c $< -o $(BUILD)/litehtml/layouttest.o
-	$(call CXX64_LINK,$(BUILD)/litehtml/layouttest.o $(LH_OBJS)) -s -o $@
+	$(call CXX64_LINK,$(BUILD)/litehtml/layouttest.o $(LH_OBJS)) -o $@
+
+# web: the browser - litehtml's layout drawn into a window
+$(BUILD)/user64/web.elf: apps/browser/web.cpp $(LH_OBJS) \
+                         $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
+                         user/udraw.h user64/usys64.h user64/compat64.h \
+                         | $(BUILD)/user64
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -c $< \
+	    -o $(BUILD)/litehtml/web.o
+	$(call CXX64_LINK,$(BUILD)/litehtml/web.o $(LH_OBJS)) -o $@
+
+USER64_ELFS += $(BUILD)/user64/web.elf
 
 # ... and the same source and library built for this machine
 LH_HOST_OBJS := $(patsubst $(BUILD)/litehtml/%.o,$(BUILD)/litehtml/host/%.o,$(LH_OBJS))
@@ -683,7 +699,8 @@ $(BUILD)/litehtml/host/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c \
 $(BUILD)/litehtml/host/layouttest: apps/browser/layouttest.cpp $(LH_HOST_OBJS)
 	$(CXX) -std=gnu++17 -O2 -Wall $(LH_INC) $< $(LH_HOST_OBJS) -o $@
 
-browser: $(BUILD)/user64/layouttest.elf $(BUILD)/litehtml/host/layouttest
+browser: $(BUILD)/user64/layouttest.elf $(BUILD)/litehtml/host/layouttest \
+         $(BUILD)/user64/web.elf
 
 # The system's version: a number, the release it is (the release
 # workflow sets VERSION to its run number; a build by hand is 0, older
@@ -742,6 +759,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    nslookup=$(BUILD)/user64/nslookup.elf \
 	    httpget=$(BUILD)/user64/httpget.elf \
 	    gweb=$(BUILD)/user64/gweb.elf \
+	    web=$(BUILD)/user64/web.elf \
 	    mkmap64=$(BUILD)/user64/mkmap64.elf \
 	    tlbtest64=$(BUILD)/user64/tlbtest64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \

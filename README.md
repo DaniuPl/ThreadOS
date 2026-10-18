@@ -65,7 +65,8 @@ against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as
-it does on Linux.
+it does on Linux. The 64-bit web browser (`apps/browser/web.cpp`) draws
+its pages.
 
 **Graphics.** The compositor (`kernel/desktop.c`) runs in the kernel. It
 draws with `kernel/gfx.c` (anti-aliased shapes, shadows, blur) and
@@ -304,7 +305,7 @@ QuickJS is wrapped by `apps/js/`. After an update, run
   - file manager (folder tree, cut/copy/paste)
   - terminal (Tab completion, pipes)
   - text editor
-  - web browser
+  - web browser (litehtml, HTML and CSS)
   - settings, task manager, calculator, calendar, paint, mixer
   - picture viewer (PNG, JPEG, BMP)
   - installer
@@ -337,7 +338,7 @@ QuickJS is wrapped by `apps/js/`. After an update, run
 - Wi-Fi: a driver for a common laptop chip and an 802.11 layer. The WPA2
   cryptography is already done.
 - Ethernet chips found in laptops (Realtek RTL8111/8168).
-- A real HTML/CSS engine (litehtml) on the musl layer.
+- Images and external style sheets in the browser.
 - Removing the big kernel lock from drivers, the filesystem and swap.
 
 ## Contributing, security, license

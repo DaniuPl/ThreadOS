@@ -2756,6 +2756,40 @@ class Qemu:
             lines.append(" ".join(words))
         return "\n".join(lines)
 
+    def read_page(self, x0, y0, x1, y1, px, fg, want=None, screen=None):
+        """A line of text a web page put somewhere in this box, whose
+        baseline is not known. litehtml places every word on its own, at
+        a whole pixel, so a line is not one run of the pen: it is read a
+        word at a time, the words being the runs of ink with more than a
+        few pixels of ground between them. Every baseline in the box is
+        tried; with 'want' the first reading equal to it ends the search,
+        otherwise the longest wins."""
+        w, h, at = screen = screen or self.screen_raw()
+        font = UiFont.shared(px, "sans")
+        best = ""
+        for base in range(y0 + font.ascent, y1):
+            band = range(base - font.ascent, min(base + font.descent, h))
+            counts = {}
+            for yy in band:
+                for xx in range(x0, x1):
+                    counts[at(xx, yy)] = counts.get(at(xx, yy), 0) + 1
+            ground = max(counts, key=counts.get)
+            runs = []
+            for xx in range(x0, x1):
+                if any(at(xx, yy) != ground for yy in band):
+                    if runs and xx - runs[-1][1] <= 3:
+                        runs[-1][1] = xx
+                    else:
+                        runs.append([xx, xx])
+            words = [self.find_ui(a - 2, b + 2, base, px=px, fg=fg,
+                                  screen=screen) for a, b in runs]
+            got = " ".join(words) if words and all(words) else ""
+            if want is not None and got == want:
+                return got
+            if len(got) > len(best):
+                best = got
+        return best
+
     def window_title(self, wx, wy, ww=None):
         """A window's name as its title bar shows it: kernel/desktop.c
         draws it in bold, centred in the bar and clear of the three
