@@ -12,6 +12,9 @@ is in docs/ is what the kernel drew.
   docs/desktop.png    the desktop with a file manager, a clock and the
                       memory monitor open, the menu bar and the dock
   docs/installer.png  'install' on a UEFI machine, alone on the screen
+  docs/sharp.png      a 1920x1080 panel at one and a half: the calendar,
+                      the calculator and the menu, drawn at the panel's
+                      own size
 """
 
 import os
@@ -140,5 +143,48 @@ def installer():
                 os.unlink(f)
 
 
+def sharp():
+    """The 32-bit kernel on a 1920x1080 screen that says nothing about
+    itself: the panel's height gives one and a half"""
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+    try:
+        q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, ram_mib=256,
+                 serial=tempfile.mktemp(suffix=".log"))
+        try:
+            q.wait_for("ThreadOS shell", timeout=40)
+            q.type_line("sudo set resolution 1920x1080")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            q.type_line("desktop")
+            time.sleep(10)
+            q.mouse_home()
+            # The kernel's two windows out of the way, then the calendar
+            # and the calculator, side by side
+            q.click(*light_xy(40, 60, 0))
+            time.sleep(0.5)
+            q.click(*light_xy(180, 95, 0))
+            time.sleep(2)              # (gone, so the cascade starts over)
+            q.click(1200, 500)         # the desktop (in its own, smaller pixels)
+            q.type_line("run gcal")
+            time.sleep(4)
+            drag(q, 70 + 100, 30 + 4, 330 + 100, 90 + 4)
+            q.click(1200, 500)         # the desktop (in its own, smaller pixels)
+            q.type_line("run gcalc")
+            time.sleep(4)
+            drag(q, 82 + 100, 42 + 4, 680 + 100, 90 + 4)
+            q.open_menu()
+            q.mouse_goto(60, session_y("About ThreadOS"))
+            time.sleep(2)
+            save(q, "sharp.png")
+        finally:
+            q.close()
+    finally:
+        if os.path.exists(disk):
+            os.unlink(disk)
+
+
 desktop()
 installer()
+sharp()

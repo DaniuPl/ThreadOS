@@ -31,6 +31,13 @@ soft shadows that can be dragged, resized, tiled and closed. Every
 window is a ring 3 program talking to the compositor; the fonts are the
 kernel's own.
 
+![A 1920x1080 panel at one and a half: the menu, a calendar and a calculator](docs/sharp.png)
+
+The same desktop on a 1920x1080 panel at a scale of one and a half:
+laid out at 1280x720, drawn at the panel's own size - every edge and
+every letter worked out in the panel's pixels, the programs' windows
+too - with the menu open on its system part.
+
 ![The installer, alone on the screen](docs/installer.png)
 
 `install` on a UEFI machine, having found the disk, read its GPT and
