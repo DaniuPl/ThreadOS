@@ -16,7 +16,9 @@
 #define SYS64_SIGRETURN 10
 #define SYS64_KILL      11
 #define SYS64_READ      12
-#define SYS64_OPEN      13
+#define SYS64_OPEN      13  /* a1/a2 = name, a3 = OPEN64_* flags */
+#define OPEN64_CREATE   1
+#define OPEN64_TRUNC    2   /* empty it on opening */
 #define SYS64_CLOSE     14
 #define SYS64_SBRK      15
 #define SYS64_MKDIR     16
@@ -132,6 +134,13 @@
    or -2 for a plain user */
 #define SYS64_CFG_GET  72
 #define SYS64_CFG_SET  73
+/* What stands behind a descriptor: a1=fd, a2=&{int32 kind; uint32 size;
+   uint32 pos} -> 0 / -1. kind is FDK_* from task64.h; for a file size
+   and pos are filled in. A C library needs it to tell a console from a
+   file (isatty, buffering) and for fstat and lseek(SEEK_END). */
+#define SYS64_FDINFO   74
+/* a1 = the new FS base (must be a program address) -> 0 / -1 */
+#define SYS64_SET_FS   75
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

@@ -444,11 +444,13 @@ static void handle(struct regs *r)
             return;
         }
 
-        int slot = fs_open(task64_cwd(), name, (int)a3);
+        int slot = fs_open(task64_cwd(), name, (int)(a3 & OPEN64_CREATE));
         if (slot < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
+        if (a3 & OPEN64_TRUNC)
+            fs_truncate(slot);
         r->rax = (uint64_t)(int64_t)task64_fd_open(slot);
         return;
     }
@@ -1109,6 +1111,38 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)config_set(name, value);
         return;
     }
+    case SYS64_FDINFO: {
+        struct { int32_t kind; uint32_t size, pos; } info;
+        if (!paging64_user_range(a2, sizeof(info)) || (int64_t)a1 < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        info.kind = task64_fd_kind((int)a1);
+        info.size = info.pos = 0;
+        if (info.kind < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        if (info.kind == FDK_FILE) {
+            int sz = fs_size(task64_fd_slot((int)a1));
+            info.size = sz > 0 ? (uint32_t)sz : 0;
+            info.pos = task64_fd_pos((int)a1);
+        }
+        *(__typeof__(info) *)(uintptr_t)a2 = info;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_SET_FS:
+        /* Only an address the program could have - a kernel address in
+           FS would not let it read the kernel (the pages say so), but
+           there is no reason to allow it */
+        if (a1 && !paging64_user_range(a1, 8)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        task64_set_fsbase(a1);
+        r->rax = 0;
+        return;
     case SYS64_NOTIFY: {
         char title[40], body[80];
         if (text_from_ring3(a1, title, sizeof(title)) < 0 ||

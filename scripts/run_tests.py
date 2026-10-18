@@ -32,7 +32,8 @@ GROUPS = [
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "winmgr", "manywin", "maxwin", "clock", "gterm", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gtasks", "sysbar", "files", "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw", "motion", "notify", "appear", "apps", "lock", "session", "polish", "wall", "icons", "users", "usersgui", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
-    "usbkbd64", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet"
+    "usbkbd64", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet",
+    "libc"
 ]
 
 

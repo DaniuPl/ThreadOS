@@ -40,8 +40,11 @@
 
 /* How far the stack is allowed to grow. The limit is there so that a
    wild pointer does not quietly turn into a mapped page: below it a
-   page fault stays a fault. */
-#define USER64_STACK_MAX   (256 * 1024ULL)
+   page fault stays a fault. Four megabytes, because a JavaScript
+   engine (QuickJS, apps/js) recurses on the C stack for every call in
+   the script - and a script ten thousand calls deep is not unusual -
+   while pages nobody touches cost nothing. */
+#define USER64_STACK_MAX   (4 * 1024 * 1024ULL)
 
 /* Between the heap and the stack lies an area for mappings: shared
    memory and whatever comes after it. The heap ends at its threshold

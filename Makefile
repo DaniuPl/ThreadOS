@@ -161,7 +161,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/mb2.o \
         $(BUILD)/fbcon.o
 
-.PHONY: all iso iso64 initrd64 run run32 run-iso run-iso64-uefi test fuzz clean \
+.PHONY: all iso iso64 initrd64 libc64 run run32 run-iso run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick
 
 all: $(KERNEL) $(INITRD)
@@ -481,6 +481,103 @@ $(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL64) \
 	$(CC) $(USER64_DYN_CFLAGS) -I$(BUILD)/decl -Iuser \
 	    -T user64/userdyn64.ld $< $(LIBTHREAD64) -o $@
 
+# --- A C library for the 64-bit programs: musl ----------------------
+#
+# The programs above speak to the kernel through usys64.h and carry
+# what little of a C library they need with them. Software written
+# elsewhere - a JavaScript engine, later an HTML engine - is written
+# against C and POSIX, and needs the real thing. That is musl
+# (third_party/musl, unchanged upstream 1.2.5), built for x86_64 with a
+# handful of its files replaced (libc/overlay): the ones that issued
+# the syscall instruction with Linux's numbers now call one function,
+# which translates every Linux call into ThreadOS's own
+# (libc/overlay/src/threados/syscall.c). musl itself never learns it is
+# not on Linux.
+#
+# The tree is copied into the build directory, the overlay put over the
+# copy, and musl's own configure and Makefile do the rest - so a change
+# to the overlay rebuilds only what it touched.
+MUSL_TREE    := $(BUILD)/musl/tree
+MUSL_ROOT    := $(BUILD)/musl/root
+MUSL_OVERLAY := $(shell find libc/overlay -type f)
+LIBC64       := $(MUSL_ROOT)/lib/libc.a
+MUSL_CFLAGS  := -O2 -mno-red-zone -fno-stack-protector -fno-pic \
+                -fno-asynchronous-unwind-tables
+
+# A header of the overlay is included all over musl, and musl's
+# Makefile does not track headers - so a changed one starts the copy
+# afresh.
+$(MUSL_TREE)/config.mak: third_party/musl/VERSION $(filter %.h,$(MUSL_OVERLAY))
+	rm -rf $(MUSL_TREE) && mkdir -p $(MUSL_TREE)
+	cp -r third_party/musl/. $(MUSL_TREE)/
+	cd $(MUSL_TREE) && CC="$(CC)" AR=ar RANLIB=ranlib CFLAGS="$(MUSL_CFLAGS)" ./configure \
+	    --target=x86_64 --prefix=/ --disable-shared >/dev/null
+
+$(LIBC64): $(MUSL_TREE)/config.mak $(MUSL_OVERLAY)
+	cp -r libc/overlay/. $(MUSL_TREE)/
+	$(MAKE) -s -C $(MUSL_TREE) lib/libc.a lib/crt1.o lib/crti.o lib/crtn.o
+	$(MAKE) -s -C $(MUSL_TREE) install-libs install-headers \
+	    DESTDIR=$(abspath $(MUSL_ROOT))
+
+libc64: $(LIBC64)
+
+# Programs against musl: its headers first, the compiler's own after
+# them (for what a C library does not carry - stdatomic.h, the vector
+# intrinsics), musl's start files around the objects, libgcc for the
+# arithmetic the processor has no instruction for.
+LIBC64_CFLAGS := -m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
+                 -fno-pic -fno-asynchronous-unwind-tables \
+                 -nostdinc -isystem $(MUSL_ROOT)/include \
+                 -isystem $(shell $(CC) -print-file-name=include)
+LIBC64_LINK = $(CC) -m64 -static -no-pie -nostdlib \
+              -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 \
+              -T libc/libc64.ld $(MUSL_ROOT)/lib/crt1.o \
+              $(MUSL_ROOT)/lib/crti.o $(1) $(LIBC64) \
+              $(shell $(CC) -print-libgcc-file-name) $(MUSL_ROOT)/lib/crtn.o
+
+$(BUILD)/libc64:
+	mkdir -p $(BUILD)/libc64
+
+# The C programs that test the library itself
+$(BUILD)/user64/libctest.elf: libc/tests/libctest.c $(LIBC64) libc/libc64.ld \
+                              | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -Wno-infinite-recursion \
+	    -Wno-format-truncation -c $< -o $(BUILD)/libc64/libctest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/libctest.o) -o $@
+
+# --- JavaScript: QuickJS ----------------------------------------------
+#
+# Fabrice Bellard's engine (third_party/quickjs, upstream 2026-06-04),
+# its core only - the parser, the bytecode interpreter, the regular
+# expressions, Unicode and number formatting. What it reads and prints
+# is the host's business: apps/js/js.c, a console with a few functions
+# of ThreadOS's own.
+QJS_SRC  := quickjs dtoa libregexp libunicode cutils
+QJS_OBJS := $(patsubst %,$(BUILD)/libc64/qjs-%.o,$(QJS_SRC))
+QJS_HDRS := $(wildcard third_party/quickjs/*.h)
+QJS_CFLAGS := $(LIBC64_CFLAGS) -D_GNU_SOURCE -fwrapv \
+              -DCONFIG_VERSION=\"$(shell cat third_party/quickjs/VERSION)\" \
+              -Wno-sign-compare -Wno-unused-parameter
+
+$(BUILD)/libc64/qjs-%.o: third_party/quickjs/%.c $(QJS_HDRS) $(LIBC64) \
+                         | $(BUILD)/libc64
+	$(CC) $(QJS_CFLAGS) -c $< -o $@
+
+# The prelude (console.log, timers - apps/js/prelude.js) is built into
+# the program as one C string
+$(BUILD)/libc64/prelude.h: apps/js/prelude.js | $(BUILD)/libc64
+	python3 -c 'import sys, json; open(sys.argv[2], "w").write( \
+	    "static const char prelude_js[] = " + \
+	    json.dumps(open(sys.argv[1]).read()) + ";\n")' $< $@
+
+$(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
+                        $(LIBC64) libc/libc64.ld | $(BUILD)/user64
+	$(CC) $(QJS_CFLAGS) -Wall -Ithird_party/quickjs -I$(BUILD)/libc64 \
+	    -c $< -o $(BUILD)/libc64/js.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/js.o $(QJS_OBJS)) -o $@
+
+USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf
+
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
@@ -534,7 +631,9 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    dynlib=$(BUILD)/user64/dynlib.elf \
 	    cores=$(BUILD)/user64/cores.elf \
 	    mutex=$(BUILD)/user64/mutex.elf prodcons=$(BUILD)/user64/prodcons.elf \
-	    syscalls=$(BUILD)/user64/syscalls.elf
+	    syscalls=$(BUILD)/user64/syscalls.elf \
+	    libctest=$(BUILD)/user64/libctest.elf \
+	    js=$(BUILD)/user64/js.elf
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

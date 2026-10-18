@@ -30,7 +30,11 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
 RAM_MIB = 16          # less than the program is about to take
-REQUEST_MIB = 18
+# More than the RAM, but not more than the RAM left free plus the swap
+# file (8 MiB): what the kernel and the initrd hold in memory is not
+# free, and the initrd grows - a megabyte of JavaScript engine went into
+# it, and 18 MiB stopped fitting
+REQUEST_MIB = 17
 
 
 def main():

@@ -71,6 +71,7 @@ struct task64 {
     uint64_t sig_restorer;       /* the return from the handler into the kernel */
     struct fd_entry fds[FD_MAX];
     void *fpu;                   /* the floating-point register state */
+    uint64_t fsbase;             /* the FS segment base: a C library's thread pointer */
     uint64_t brk_base;           /* the start of the heap (past the program image) */
     uint64_t brk;                /* how far the program has asked for it */
     uint64_t mmap;               /* the next free address for mappings */
@@ -120,6 +121,14 @@ extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
    by whichever core is running it, and two structures sharing a line
    means two cores writing into one line. See kernel/task.c for what
    that cost and why it came and went with unrelated edits. */
+#define MSR_FS_BASE 0xC0000100
+
+static void write_fsbase(uint64_t v)
+{
+    __asm__ volatile("wrmsr" : : "c"(MSR_FS_BASE), "a"((uint32_t)v),
+                     "d"((uint32_t)(v >> 32)));
+}
+
 static struct task64 *task_alloc(void)
 {
     char *raw = kmalloc(sizeof(struct task64) + 64);
@@ -127,6 +136,7 @@ static struct task64 *task_alloc(void)
         return (struct task64 *)0;
     uintptr_t at = ((uintptr_t)raw + 63) & ~(uintptr_t)63;
     struct task64 *t = (struct task64 *)at;
+    memset(t, 0, sizeof(*t));        /* a field nobody set is a zero, not junk */
     t->raw = raw;
     return t;
 }
@@ -702,6 +712,12 @@ static void switch_to(int new_state)
        results without knowing it. */
     fpu64_save(prev->fpu);
     fpu64_load(next->fpu);
+    /* And the FS base, which a C library points at its thread's own
+       block (errno and the rest live there). Only the program sets it,
+       through SYS64_SET_FS, so the kernel's copy is always the current
+       one and there is nothing to read back from the processor. */
+    if (prev->fsbase != next->fsbase)
+        write_fsbase(next->fsbase);
 
     apply_context(next, nr);
     context_switch64(&prev->rsp, next->rsp);
@@ -1049,6 +1065,7 @@ void task64_set_brk_base(uint64_t base)
 {
     current->brk_base = base;
     current->brk = base;
+    task64_set_fsbase(0);            /* the new image sets up its own */
     /* A new program image is a new memory layout - the mappings from
        the previous one vanished with its address space */
     current->mmap = USER64_MMAP_BASE;
@@ -1203,6 +1220,13 @@ uint64_t task64_mmap_next(void)          { return current ? current->mmap : 0; }
 void task64_set_mmap_next(uint64_t adr)  { if (current) set_in_space(0, adr); }
 
 uint64_t task64_brk(void)      { return current->brk; }
+
+void task64_set_fsbase(uint64_t v)
+{
+    current->fsbase = v;
+    write_fsbase(v);
+}
+
 uint64_t task64_brk_base(void) { return current->brk_base; }
 
 void task64_set_brk(uint64_t brk)
@@ -1231,6 +1255,7 @@ void task64_inherit_brk(struct task64 *child)
     child->brk_base = current->brk_base;
     child->brk = current->brk;
     child->mmap = current->mmap;     /* the child sees the same layout */
+    child->fsbase = current->fsbase; /* and its memory, thread block included */
     /* The child inherits the right to run on any core: that is a
        property of the program, not of a single task */
     child->anycore = current->anycore;

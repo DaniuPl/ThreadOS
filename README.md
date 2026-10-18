@@ -227,6 +227,19 @@ partition, sets the graphics mode through GOP, takes the ACPI pointer
 from the firmware, builds the Multiboot 2 tag table itself, leaves long
 mode and jumps.
 
+**A C library, and JavaScript** — the 64-bit programs can be built
+against **musl** (unchanged upstream 1.2.5, `third_party/musl`): stdio,
+malloc, printf, strtod, files, errno, fork and wait. Eight of its files
+are replaced (`libc/overlay`) so that every Linux system call it makes
+goes through one function that speaks ThreadOS to the kernel — musl
+never learns it is not on Linux. The first program nobody wrote for
+ThreadOS runs on it: **QuickJS** (`third_party/quickjs`), behind `js` —
+a console, `js file.js`, `js -e …` — with files, timers and an event
+loop, and a `console.log` that prints exactly what Node.js prints.
+The tests hold both up against the real thing: a C program's output
+against the same source built with glibc, scripts' output against
+Node.js.
+
 ## Quick start
 
 ```sh
@@ -278,6 +291,9 @@ boot/efi/          threadboot: our own UEFI boot loader (PE32+)
 kernel/            shared code + 32-bit kernel
 kernel64/          only what depends on the CPU mode being 64-bit
 user/  user64/     ring 3 programs, packed into an initrd
+libc/              musl on ThreadOS: the replaced files, the linker script
+apps/js/           js, the host around QuickJS
+third_party/       other people's code, unchanged (musl, QuickJS)
 scripts/           build helpers and the test suite
 ```
 
@@ -341,7 +357,9 @@ conventions the code follows.
 ## License
 
 MIT - see [LICENSE](LICENSE). Do what you like with it; if it breaks
-your machine, you get to keep both halves.
+your machine, you get to keep both halves. `third_party/` holds other
+people's code under their own licences (musl and QuickJS are both MIT;
+see the COPYRIGHT and LICENSE files there).
 
 The exception is `fonts/`: subsets of the DejaVu fonts, under the
 Bitstream Vera licence that came with them - see

@@ -84,6 +84,8 @@
 #define SYS64_BG_PREVIEW 71
 #define SYS64_CFG_GET  72
 #define SYS64_CFG_SET  73
+#define SYS64_FDINFO   74
+#define SYS64_SET_FS   75
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -166,6 +168,22 @@ static inline int64_t sys_open(const char *name, int create)
 {
     return syscall64_3(SYS64_OPEN, (int64_t)(uintptr_t)name,
                        (int64_t)ustrlen(name), create);
+}
+
+/* What stands behind a descriptor - the layout matches the
+   SYS64_FDINFO handler in kernel64/syscall64.c */
+#define FDK64_NONE   0               /* nothing: 0 and 1 are then the console */
+#define FDK64_FILE   1
+#define FDK64_PIPE_R 2
+#define FDK64_PIPE_W 3
+struct fdinfo64 {
+    int32_t kind;
+    uint32_t size, pos;              /* for a file */
+};
+
+static inline int64_t sys_fdinfo(int fd, struct fdinfo64 *out)
+{
+    return syscall64(SYS64_FDINFO, fd, (int64_t)(uintptr_t)out);
 }
 
 static inline int64_t sys_close(int fd)

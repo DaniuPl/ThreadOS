@@ -180,6 +180,17 @@ ProtonOS/
 │   ├── uupper64.c      # filtr: czyta wejście, pisze wielkimi literami
 │   └── unet64.c        # sieć z ring 3: DHCP, UDP i TCP przez syscalle
 │   └── user64.ld       # sekcje wyrównane do stron (prawa dostępu!)
+├── libc/               # musl jako biblioteka C programów 64-bitowych
+│   ├── overlay/        # pliki musla podmienione na wersje ThreadOS
+│   │   └── src/threados/syscall.c  # wywołania Linuksa -> wywołania ThreadOS
+│   ├── libc64.ld       # skrypt linkera programów z libc (init_array itd.)
+│   └── tests/libctest.c  # przenośne C: wynik porównywany z glibc
+├── apps/js/            # js: konsola i uruchamianie skryptów JavaScript
+│   ├── js.c            # host QuickJS: pliki, zegar, pętla zdarzeń
+│   └── prelude.js      # console.log w formacie Node.js, timery
+├── third_party/        # cudzy kod bez zmian (licencje w środku)
+│   ├── musl/           # musl 1.2.5 (MIT)
+│   └── quickjs/        # QuickJS 2026-06-04, sam rdzeń (MIT)
 ├── linker.ld           # skrypt linkera - jądro ładowane pod adres 1 MiB
 ├── linker64.ld         # to samo dla jądra w trybie długim
 ├── grub.cfg            # konfiguracja GRUB-a dla obrazu ISO (BIOS)
@@ -5769,3 +5780,61 @@ fact stops being a journal.*
       against FreeType's own glyphs, steps the caret and rubs letters
       out, saves the file and has 'cat' print the UTF-8 back, echoes
       Polish through the terminal, and types "Łódź" on a USB keyboard.
+
+- [x] **A C library, and JavaScript on top of it**
+
+      Until now every ThreadOS program carried what little of a C
+      library it needed. Software written elsewhere is written against C
+      and POSIX, and needs the real thing - so the 64-bit programs get
+      musl 1.2.5 (third_party/musl, unchanged). It is built with eight
+      of its files replaced (libc/overlay): the ones that issued the
+      syscall instruction with Linux's numbers now call one function,
+      __tos_syscall, which translates every Linux call into ThreadOS's.
+      musl never learns it is not on Linux.
+
+      Much of the translation is renaming. The rest is built out of what
+      the kernel has: stat opens the file and asks about the descriptor
+      (a directory is a place one can go to and come back from); lseek
+      to the end is to the size; O_APPEND moves to the end before each
+      write; mmap's freed ranges are kept and handed out again, because
+      the kernel's mapping area only grows; descriptor 2, which the
+      kernel does not know, goes wherever 1 goes; the console gets a
+      terminal's line discipline (echo, Backspace taking a whole UTF-8
+      letter, Ctrl+D) since in ThreadOS the echo is the reader's job;
+      signals keep a table per signal behind the kernel's one handler;
+      the wall clock is the CMOS second once and the timer from then on.
+      A buffer is touched page by page before the kernel sees it - an
+      untouched heap page is not in the page tables yet, and the kernel
+      checks those. Threads, sockets and poll answer ENOSYS rather than
+      a Linux number landing on an unrelated ThreadOS call.
+
+      The kernel got three small things for it: SYS64_FDINFO (what is
+      behind a descriptor, a file's size and position), an O_TRUNC flag
+      for open, and a per-task FS base (SYS64_SET_FS, loaded on every
+      switch) - musl's thread pointer, where errno lives. A task's
+      structure is now zeroed when it is made, so a field nobody set is
+      a zero. And the stack may grow to 4 MiB instead of 256 KiB.
+
+      On top runs the first program nobody wrote for ThreadOS: QuickJS
+      (third_party/quickjs, the core only). apps/js/js.c is its host -
+      'js' alone is a console, 'js file.js' runs a script, 'js -e ...'
+      runs the rest of the line; there are files (readFile, writeFile),
+      timers and a real event loop, exit codes. console.log is written
+      in JavaScript (prelude.js) and prints values exactly as Node.js
+      does, columns of numbers included - checked against util.inspect
+      while it was written.
+
+      t_libc builds libctest (plain portable C: printf's rounding,
+      strtod, the heap, files truncated, appended, sought from the end
+      and renamed, errno's messages, setjmp, fork and an exit code) a
+      second time against the host's glibc and wants the same 52 lines.
+      Then it fetches scripts over HTTP onto the ThreadOS disk and wants
+      js to print exactly what Node.js prints for them - 92 lines of
+      the language (numbers, Unicode, regular expressions, JSON, sorts,
+      classes, generators, typed arrays, Dates) and 20 of the event
+      loop's order (microtasks, timers, intervals, async iteration). The
+      one place the two engines may differ by the standard - the error
+      a too-deep recursion throws - is printed as what both agree on.
+      Last, the console is typed into on the keyboard, Polish letters
+      included.
+

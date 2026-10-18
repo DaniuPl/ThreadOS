@@ -108,6 +108,9 @@ void task64_set_cwd(int slot);
 void task64_set_brk_base(uint64_t base);
 void task64_set_brk(uint64_t brk);
 uint64_t task64_brk(void);
+/* The FS segment base of the running task (a C library's thread
+   pointer); kept per task and loaded on every switch */
+void task64_set_fsbase(uint64_t v);
 uint64_t task64_brk_base(void);
 int task64_in_heap(uint64_t addr);
 void task64_inherit_brk(struct task64 *child);
