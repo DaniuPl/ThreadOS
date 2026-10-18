@@ -51,8 +51,19 @@ SW_Y, SW_W, SW_H, SW_GAP = (define("SW_Y"), define("SW_W"), define("SW_H"),
 MO_Y, MO_W, MO_H = define("MO_Y"), define("MO_W"), define("MO_H")
 NOTE_DY = define("NOTE_DY")
 
-WX, WY = 94, 54
-CX, CY = WX + 1, WY + CONTENT_DY
+# The settings window: slot two of the cascade
+GX, GY = 95, 54 + CONTENT_DY
+
+
+def place(sw, sh):
+    """The picker: slot two of the cascade - or wherever a window this
+    tall has to go on a screen this size"""
+    global WX, WY, CX, CY
+    WX, WY = cascade(2, W0 + 2, H0 + TITLE_H + 2, w=sw, h=sh)
+    CX, CY = WX + 1, WY + CONTENT_DY
+
+
+place(SCREEN_W, SCREEN_H)
 
 
 def backgrounds():
@@ -129,7 +140,8 @@ def sixty_four():
             time.sleep(4)
             q.mouse_goto(780, 450)
             time.sleep(1)
-            name = q.gset_row(CX, CY, 0, chosen=True)
+            place(*q.size())
+            name = q.gset_row(GX, GY, 0, chosen=True)
             check("(64) the settings window lists the settings (%s)" % (name,),
                   name[0] == "name" and name[1] == "thread")
             q.sendkey("alt-f4")

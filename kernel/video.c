@@ -210,6 +210,11 @@ static void decide_scale(void)
         k = 16;
     if (k > 64)
         k = 64;
+    /* Never a desktop smaller than 640x480: everything here was laid
+       out for at least that, and a window larger than the desktop is
+       a window that cannot be seen whole */
+    while (k > 16 && (phys_w * 16 / k < 640 || phys_h * 16 / k < 480))
+        k -= 4;
     k16 = k;
     vid_w = phys_w * 16 / k16;
     vid_h = phys_h * 16 / k16;
@@ -218,6 +223,13 @@ static void decide_scale(void)
 void video_set_scale(int s)
 {
     scale_wish = s;
+}
+
+/* The scale asked for again, with the mode already set: only the
+   logical size changes - the panel and its buffers stay what they are */
+void video_rescale(void)
+{
+    decide_scale();
 }
 
 /* As a percentage: 100, 125, 150 ... */

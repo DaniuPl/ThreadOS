@@ -1,12 +1,16 @@
 /* gappear - how the desktop looks, picked by looking at it (ring 3)
  *
- * The theme, the background and how windows move are three settings,
+ * The theme, the background, how windows move and how large the desktop
+ * is drawn are four settings,
  * and the settings window shows them as words: 'dark', '0', '1'. A
  * look is a thing to choose by seeing it, so here each choice is a
  * picture of itself: the two themes as a small desktop each, with a
  * window on it in that theme's colours, the backgrounds as the
  * backgrounds themselves - drawn by the kernel, the very pixels the
- * desktop would draw, only smaller - and the three ways of moving.
+ * desktop would draw, only smaller - the three ways of moving, and the
+ * scale: on a panel with many pixels to the inch the desktop is laid
+ * out larger and drawn at the panel's own size, and Auto lets the panel
+ * decide.
  *
  * A click chooses, and the desktop follows at once. Changing a setting
  * needs admin, so the first change asks for the password - once, and
@@ -17,7 +21,7 @@
 #include "udraw.h"
 
 #define W0 400
-#define H0 316
+#define H0 368
 #define PAD 14
 
 /* The two themes, side by side */
@@ -38,6 +42,12 @@
 #define MO_W    74
 #define MO_H    24
 
+/* How large the desktop is drawn */
+#define SC_N    5
+#define SC_Y    314
+#define SC_W    66
+#define SC_H    24
+
 #define NOTE_DY 12            /* the last line's baseline, from the bottom */
 
 static const char *const bg_names[BG_N] = {
@@ -45,6 +55,10 @@ static const char *const bg_names[BG_N] = {
 };
 static const char *const motions[3] = { "Still", "Quick", "Slow" };
 static const char *const motion_values[3] = { "0", "1", "3" };
+static const char *const scales[SC_N] = { "Auto", "100%", "125%", "150%",
+                                          "200%" };
+static const char *const scale_values[SC_N] = { "0", "100", "125", "150",
+                                                "200" };
 
 static uint32_t card_px[2][CARD_W * CARD_H];
 static uint32_t sw_px[BG_N][SW_W * SW_H];
@@ -61,6 +75,7 @@ static int said;
 static int card_x(int i) { return PAD + i * (CARD_W + CARD_GAP); }
 static int sw_x(int i) { return PAD + i * (SW_W + SW_GAP); }
 static int mo_x(int i) { return PAD + i * (MO_W + 8); }
+static int sc_x(int i) { return PAD + i * (SC_W + 8); }
 
 static int same(const char *a, const char *b)
 {
@@ -182,6 +197,19 @@ static void draw(int win, int cw, int ch)
                     on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS, UD_PX);
     }
 
+    /* The scale: 1 to 4 are the old way of saying 100 to 400 */
+    uint32_t sv = to_num(setting("scale"));
+    if (sv >= 1 && sv <= 4)
+        sv *= 100;
+    ud_text(win, PAD, SC_Y - 8, "Scale", l.dim, UD_SANS, 11);
+    for (int i = 0; i < SC_N; i++) {
+        int on = to_num(scale_values[i]) == sv;
+        ud_round(win, sc_x(i), SC_Y, SC_W, SC_H, SC_H / 2,
+                 on ? l.accent : l.row);
+        ud_text_mid(win, sc_x(i), SC_Y, SC_W, SC_H, scales[i],
+                    on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS, UD_PX);
+    }
+
     int nb = ch - NOTE_DY;
     if (asking) {
         int x = ud_text(win, PAD, nb, "Admin password:", l.dim, UD_SANS,
@@ -263,6 +291,12 @@ static void click(int x, int y)
         if (x >= mo_x(i) && x < mo_x(i) + MO_W && y >= MO_Y &&
             y < MO_Y + MO_H) {
             apply("motion", motion_values[i]);
+            return;
+        }
+    for (int i = 0; i < SC_N; i++)
+        if (x >= sc_x(i) && x < sc_x(i) + SC_W && y >= SC_Y &&
+            y < SC_Y + SC_H) {
+            apply("scale", scale_values[i]);
             return;
         }
 }

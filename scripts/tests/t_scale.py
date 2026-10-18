@@ -33,6 +33,11 @@ What is asserted, against things that do not come from the system:
   at two, the counter-check that it is not doubling: in a window's
   title, the panel's pixels are not equal in squares of four
 
+  and changed while it runs, from Appearance: the desktop takes up one
+  and a half within a second, a program that was open is drawn again
+  at the new size - its title and its numbers FreeType's at one and a
+  half - and still answers its keys; 'Auto' puts it back
+
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -258,10 +263,99 @@ def twice():
                 os.unlink(f)
 
 
+A = "user/gappear.c"
+
+
+def live():
+    """At 100% on a 1920x1080 screen; then 150% picked in Appearance"""
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+    slog = tempfile.mktemp(suffix=".log")
+    try:
+        q = boot(disk, slog, (1920, 1080), [])
+        try:
+            q.type_line("run gcalc")
+            time.sleep(4)
+            q.click(1900, 300)                   # the keys back to the shell
+            time.sleep(0.5)
+            q.type_line("run gappear")
+            time.sleep(4)
+            q.click(1900, 300)
+            time.sleep(0.5)
+            check("before: 100%% on the 1920x1080 screen (%s)" % (mode(q),),
+                  mode(q) == (1920, 1080, 100, 1920, 1080))
+            aw, ah = define(A, "W0"), define(A, "H0")
+            ax, ay = cascade(3, aw + 2, ah + TITLE_H + 2, w=1920, h=1080)
+            pad, sc_w = define(A, "PAD"), define(A, "SC_W")
+            q.click(ax + 1 + pad + 3 * (sc_w + 8) + sc_w // 2,
+                    ay + CONTENT_DY + define(A, "SC_Y") + define(A, "SC_H") // 2)
+            time.sleep(1)
+            for ch_ in "thread\n":
+                q.sendkey(Qemu.KEYNAMES.get(ch_, ch_))
+                time.sleep(0.12)
+            time.sleep(3)
+            q.sendkey("alt-f4")                  # Appearance, off the calculator
+            time.sleep(2)
+            q.click(1200, 300)                   # the shell, to ask it
+            time.sleep(0.5)
+            m = mode(q)
+            check("'150%%' in Appearance: the desktop is 1280x720 at once (%s)"
+                  % (m,), m == (1280, 720, 150, 1920, 1080))
+            if m != (1280, 720, 150, 1920, 1080):
+                return
+            k = 24
+            x, y, cw, ch = calc_frame(1280, 720)
+            q.mouse_goto(900, 600)
+            time.sleep(1)
+            scr = q.screen_raw()
+            got = q.find_ui(P(x + LIGHT_X + 2 * LIGHT_STEP + LIGHT_D + 6, k),
+                            P(x + cw, k), P(title_baseline(y), k),
+                            px=ppx(TITLE_PX, k), face="bold", screen=scr)
+            check("the calculator that was open is there, its title at one "
+                  "and a half ('%s')" % got, got == "Calculator")
+            cx, cy = x + 1, y + CONTENT_DY
+
+            def display():
+                return q.find_ui(P(cx + 20, k), P(cx + cw - 10, k),
+                                 P(cy + define(C, "DISP_BASE"), k),
+                                 px=ppx(define(C, "DISP_PX"), k),
+                                 fg=DARK["app_text"])
+            got = display()
+            check("and the program drew itself again at the new size ('%s')"
+                  % got, got == "0")
+            q.click(cx + cw // 2, cy + 40)       # its display: the focus
+            time.sleep(0.5)
+            for ch_ in "7*6\n":
+                q.sendkey(Qemu.KEYNAMES.get(ch_, ch_))
+                time.sleep(0.12)
+            q.mouse_goto(900, 600)               # the pointer off the display
+            time.sleep(1)
+            got = display()
+            check("it still counts: 7 * 6 = '%s'" % got, got == "42")
+
+            q.click(1200, 300)
+            time.sleep(0.5)
+            q.type_line("sudo set scale 0")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            time.sleep(3)
+            m = mode(q)
+            check("'Auto' again: the screen's own density, 100%% (%s)" % (m,),
+                  m == (1920, 1080, 100, 1920, 1080))
+        finally:
+            q.close()
+    finally:
+        for f in (disk, slog):
+            if os.path.exists(f):
+                os.unlink(f)
+
+
 def main():
     native()
     one_and_a_half()
     twice()
+    live()
     return summary()
 
 

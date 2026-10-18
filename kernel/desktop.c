@@ -1212,6 +1212,7 @@ static uint32_t art_pool_used;           /* in pixels */
 /* Kept at the panel's size: a picture drawn small and enlarged on its
    way to the screen would be the one soft thing on it */
 static uint32_t art_pool_px;
+static int art_pool_k;                   /* the scale it was sized for */
 
 static const uint32_t *art_get(int art, int s, char letter)
 {
@@ -1223,7 +1224,15 @@ static const uint32_t *art_get(int art, int s, char letter)
         if (art_cache[i].art == art && art_cache[i].s == s &&
             art_cache[i].letter == letter)
             return art_cache[i].px;
+    if (art_pool && art_pool_k != video_k()) {
+        /* Drawn for another scale: all of it is the wrong size now */
+        win_buf_free((uint8_t *)art_pool, art_pool_px * 4u);
+        art_pool = (uint32_t *)0;
+        art_cached = 0;
+        art_pool_used = 0;
+    }
     if (!art_pool) {
+        art_pool_k = video_k();
         uint32_t pages = (uint32_t)(ART_POOL_PAGES * video_k() * video_k() / 256);
         uint32_t a = pmm_alloc_contiguous(pages);
         if (!a)
@@ -2482,7 +2491,7 @@ static int background_choice(void)
     return bg < (uint32_t)BG_N ? (int)bg : 0;
 }
 
-static uint32_t *take_pages(uint32_t bytes, uint32_t *have)
+static uint32_t *take_pages(uint32_t bytes, uint32_t *have, uint32_t *old)
 {
     uint32_t pages = (bytes + 4095) / 4096;
     if (*have >= pages)
@@ -2490,6 +2499,8 @@ static uint32_t *take_pages(uint32_t bytes, uint32_t *have)
     uint32_t a = pmm_alloc_contiguous(pages);
     if (!a)
         return (uint32_t *)0;
+    if (old)                           /* a smaller one, given back */
+        win_buf_free((uint8_t *)old, *have * 4096u);
     *have = pages;
     return (uint32_t *)(uintptr_t)a;
 }
@@ -2571,11 +2582,15 @@ static void paint_colour(uint32_t *buf, int w, int h, int bg)
 
 /* Reads the theme and the background from the settings and, when they
    changed, draws what depends on them again */
+static void display_refresh(void);
+
 static void look_refresh(int force)
 {
     if (!force && --look_wait > 0)
         return;
     look_wait = FRAME_HZ;
+    if (!force)
+        display_refresh();       /* the scale, read as often as the theme */
 
     const char *t = config_get("theme");
     int dark = !(t && !strcmp(t, "light"));
@@ -2593,7 +2608,7 @@ static void look_refresh(int force)
     /* Both kept at the panel's own size - the background is painted at
        that size, not stretched to it */
     int w = video_pw(), h = video_ph();
-    uint32_t *nb = take_pages((uint32_t)(w * h) * 4, &bg_pages);
+    uint32_t *nb = take_pages((uint32_t)(w * h) * 4, &bg_pages, bg_buf);
     if (nb)
         bg_buf = nb;
     if (!bg_buf)
@@ -2605,7 +2620,7 @@ static void look_refresh(int force)
     int strip = P(BAR_H + 4 * BAR_BLUR);
     if (strip > h)
         strip = h;
-    uint32_t *nbar = take_pages((uint32_t)(w * strip) * 4, &bar_pages);
+    uint32_t *nbar = take_pages((uint32_t)(w * strip) * 4, &bar_pages, bar_buf);
     if (nbar)
         bar_buf = nbar;
     if (!bar_buf)
@@ -2909,6 +2924,7 @@ static void draw_bar(void)
 #define DOCK_KEEP_M 16                 /* the shadow's reach round the glass */
 
 static uint32_t *dock_keep;
+static uint32_t dock_keep_room;          /* in the panel's pixels */
 static int dock_keep_tried, dock_kept;
 static int dk_x, dk_y, dk_w, dk_h;
 static uint32_t dk_state, dk_under;
@@ -3031,8 +3047,10 @@ static void draw_dock(void)
         dock_keep_tried = 1;
         dock_keep = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
             (room * 4 + 4095) / 4096);
+        dock_keep_room = room;
     }
-    keep = keep && dock_keep && (uint32_t)(w * h) <= room;
+    keep = keep && dock_keep && (uint32_t)(w * h) <= room &&
+           room == dock_keep_room;
 
     uint32_t state = 0, under = 0;
     if (keep) {
@@ -4589,6 +4607,112 @@ int desktop_frame_stats(int *fps, int *busy)
     return 1;
 }
 
+/* --- The scale, changed while the desktop runs -------------------------
+ *
+ * 'set scale 150', or a choice in Appearance, and the desktop takes it
+ * up within a second - not at the next start. The panel and its buffer
+ * stay what they are; what changes is how many logical pixels it is,
+ * and with that everything kept at the panel's size for the old scale:
+ * the icons, the dock's kept glass, the bar's strip, and every program's
+ * window buffer. A window keeps its logical size where the smaller
+ * desktop still has room for it, is brought back inside where it does
+ * not, and a maximised one fills the new room. Its program is told the
+ * size, as after a resize, and draws itself again at the new scale; in
+ * the meantime what it had drawn is carried over, enlarged or reduced,
+ * so nothing goes blank while it does. */
+static int scale_now;                  /* the setting the desktop runs with */
+
+static void rebuffer(struct window *w)
+{
+    int cw = w->w - 2, ch = w->h - TITLE_H - 2;
+    if (cw < 8) cw = 8;
+    if (ch < 8) ch = 8;
+    int pcw = PC(cw), pch = PC(ch);
+    uint32_t bpp = w->truecolour ? 4u : 1u;
+    uint32_t bytes = (uint32_t)(pcw * pch) * bpp;
+    uint8_t *buf = win_buf_alloc(bytes);
+    if (!buf)
+        return;                    /* it stays as it was, a little off */
+    for (int y = 0; y < pch; y++) {
+        int oy = (int)((long)y * w->pch / pch);
+        for (int x = 0; x < pcw; x++) {
+            int ox = (int)((long)x * w->pcw / pcw);
+            long from = (long)oy * w->pcw + ox, to = (long)y * pcw + x;
+            if (w->truecolour)
+                ((uint32_t *)buf)[to] = ((const uint32_t *)w->content)[from];
+            else
+                buf[to] = w->content[from];
+        }
+    }
+    win_buf_free(w->content, w->content_bytes);
+    w->content = buf;
+    w->content_bytes = bytes;
+    w->cw = cw;
+    w->ch = ch;
+    w->pcw = pcw;
+    w->pch = pch;
+    win_enqueue(w, WEV_SIZE, cw, ch, 0);
+}
+
+/* A rectangle brought inside the room between the bar and the dock */
+static void fit_rect(int *x, int *y, int *w, int *h)
+{
+    int room_h = work_bottom() - work_top();
+    if (*w > video_w()) *w = video_w();
+    if (*h > room_h) *h = room_h;
+    if (*x + *w > video_w()) *x = video_w() - *w;
+    if (*x < 0) *x = 0;
+    if (*y + *h > work_bottom()) *y = work_bottom() - *h;
+    if (*y < work_top()) *y = work_top();
+}
+
+static void relayout(void)
+{
+    menu_open = 0;
+    search_close();
+    snap_hint = SNAP_NONE;
+    drag_idx = resize_idx = content_drag = -1;
+    unmax_pending = 0;
+
+    if (dock_keep)
+        win_buf_free((uint8_t *)dock_keep, dock_keep_room * 4u);
+    dock_keep = (uint32_t *)0;
+    dock_keep_tried = 0;
+    dock_kept = 0;
+
+    for (int i = 0; i < MAX_WIN; i++) {
+        struct window *w = &wins[i];
+        if (!w->used)
+            continue;
+        w->anim = 0;
+        if (w->maxed) {
+            w->x = 0;
+            w->y = work_top();
+            w->w = video_w();
+            w->h = work_bottom() - work_top();
+            fit_rect(&w->rx, &w->ry, &w->rw, &w->rh);
+        } else {
+            fit_rect(&w->x, &w->y, &w->w, &w->h);
+        }
+        if (w->content && w->owner >= 0)
+            rebuffer(w);
+    }
+    look_refresh(1);           /* the bar's strip, at the new scale */
+}
+
+static void display_refresh(void)
+{
+    int wish = (int)config_get_num("scale", 0);
+    if (wish == scale_now)
+        return;
+    scale_now = wish;
+    int was = video_k();
+    video_set_scale(wish);
+    video_rescale();
+    if (video_k() != was)
+        relayout();
+}
+
 static void desktop_thread(void *arg)
 {
     (void)arg;
@@ -4597,7 +4721,8 @@ static void desktop_thread(void *arg)
        a half, 1440 two, anything of 768 or fewer one. A person who
        disagrees says so once - 'scale 125', in per cent - and it is
        remembered, like the background and the wallpaper. */
-    video_set_scale((int)config_get_num("scale", 0));
+    scale_now = (int)config_get_num("scale", 0);
+    video_set_scale(scale_now);
 
     /* The resolution: the panel's own (its EDID says which), unless the
        'resolution' setting names one - "1024x768". Without either,

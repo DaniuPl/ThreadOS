@@ -57,6 +57,9 @@ int video_parse_edid(const uint8_t *e, int *w, int *h, int *mm_w, int *mm_h);
    is set up - 1 to 4 times, or 100 to 400 per cent; 0 means "decide
    from the panel" - and said afterwards, in per cent. */
 void video_set_scale(int s);
+/* ... and taken up at once, while the screen runs (the logical size
+   changes; the panel does not) */
+void video_rescale(void);
 int video_scale(void);
 
 /* Moves a finished frame from the working buffer onto the screen
