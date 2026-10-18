@@ -184,6 +184,35 @@ def main():
                   f"({lit} pixels)", lit > 2000)
         finally:
             q.close()
+
+        # --- A machine with 6 GiB, the way a laptop has it. The first
+        # one ThreadOS was installed on (a Lenovo, InsydeH2O, 8 GiB)
+        # started over and over right after the loader: the firmware
+        # gave the highest free pages below the four gigabytes the
+        # loader asked for, so the initrd and the tags lay at 3 GiB,
+        # outside the 512 MiB the kernel reaches, and it loaded this
+        # loader itself above 4 GiB, where the 32-bit way into the
+        # kernel cannot run. OVMF does both with this much memory.
+        shutil.copy(OVMF_VARS, nvram)
+        q = Qemu(KERNEL, INITRD, esp=esp, serial=slog, ram_mib=6144,
+                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+        try:
+            seen = len(q.serial())
+            q.wait_serial("The 64-bit system is ready", timeout=120)
+            out = q.serial()[seen:]
+            m = re.search(r"at:\s+0x([0-9a-f]+)", out)
+            at_addr = int(m.group(1), 16) if m else 0
+            check(f"(6 GiB) the firmware puts the loader above 4 GiB "
+                  f"(0x{at_addr:x}) - the case that has to work",
+                  at_addr >= 1 << 32)
+            mods = re.search(r"initrd: (\d+) files", out)
+            check("(6 GiB) and the kernel still finds its initrd and starts "
+                  "programs from it",
+                  "outside managed memory" not in out and
+                  "exception" not in out.lower() and
+                  "ELF64 from the initrd:" in out)
+        finally:
+            q.close()
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (slog, nvram):

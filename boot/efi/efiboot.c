@@ -99,6 +99,56 @@ static void fail(const CHAR16 *what, EFI_STATUS st)
         __asm__ volatile("hlt");
 }
 
+/* Everything the kernel is handed - its files, the table of tags, the
+   way in - goes below this. Not four gigabytes, which is what a
+   Multiboot 2 address can say, but the 512 MiB the kernel identity-maps
+   and manages (PAGING_MANAGED_MAX, kernel/include/paging.h): anything
+   above is memory it cannot reach at first. Under OVMF with a few
+   hundred megabytes nothing ever landed higher; a laptop with 8 GiB
+   gives the highest free pages below whatever limit it is told, and
+   with four gigabytes as the limit the initrd lay at 3 GiB - and the
+   kernel fell over its own files. */
+#define LOW_LIMIT 0x1FFFFFFFull
+
+/* And as LOW as possible, not merely below that line. AllocateMaxAddress
+   hands out the highest free pages under the limit - and the kernel
+   reaches only as far as the highest FREE memory it is told about, so
+   pages the loader took near 512 MiB lie past that, reserved and
+   unmapped. GRUB takes memory from the bottom; so does this: the lowest
+   stretch of free memory above 16 MiB (below lie the kernel and what
+   the firmware likes to keep low) that holds the request. */
+static EFI_STATUS alloc_low(UINTN type, UINTN pages, UINT64 *at)
+{
+    static UINT8 buf[16384];
+    UINTN size = sizeof(buf), key, dsize;
+    UINT32 dver;
+    if (BS->GetMemoryMap(&size, (EFI_MEMORY_DESCRIPTOR *)buf, &key, &dsize,
+                         &dver) == EFI_SUCCESS && dsize) {
+        UINT64 best = 0;
+        for (UINTN off = 0; off + dsize <= size; off += dsize) {
+            EFI_MEMORY_DESCRIPTOR *d = (EFI_MEMORY_DESCRIPTOR *)(buf + off);
+            if (d->Type != EfiConventionalMemory)
+                continue;
+            UINT64 start = d->PhysicalStart;
+            UINT64 end = start + d->NumberOfPages * 4096;
+            if (start < 0x1000000)
+                start = 0x1000000;
+            if (end > LOW_LIMIT + 1)
+                end = LOW_LIMIT + 1;
+            if (start + (UINT64)pages * 4096 <= end && (!best || start < best))
+                best = start;
+        }
+        if (best) {
+            *at = best;
+            if (BS->AllocatePages(AllocateAddress, type, pages, at)
+                == EFI_SUCCESS)
+                return EFI_SUCCESS;
+        }
+    }
+    *at = LOW_LIMIT;
+    return BS->AllocatePages(AllocateMaxAddress, type, pages, at);
+}
+
 /* --- reading a file off the partition we were loaded from ------------ */
 
 struct blob {
@@ -144,16 +194,12 @@ static int read_file(const CHAR16 *name, struct blob *out)
         return 0;
     }
 
-    /* Below four gigabytes, because a Multiboot 2 module is named by a
-       thirty-two bit address and there is nowhere to put a larger one.
-       AllocateMaxAddress means "at or below this", so the request says
-       what the format can express rather than hoping the firmware
-       happens to allocate low. Loader data, so that the memory map
+    /* Low - see alloc_low: what the kernel can reach, rather than
+       hoping the firmware happens to allocate there. Loader data, so that the memory map
        hands it to the kernel as something already spoken for. */
-    UINT64 where = 0xFFFFFFFFull;
+    UINT64 where;
     UINTN pages = (UINTN)((size + 4095) / 4096);
-    if (BS->AllocatePages(AllocateMaxAddress, EfiLoaderData_Type, pages,
-                          &where) != EFI_SUCCESS) {
+    if (alloc_low(EfiLoaderData_Type, pages, &where) != EFI_SUCCESS) {
         f->Close(f);
         return 0;
     }
@@ -448,20 +494,40 @@ static UINT64 load_elf(struct blob *img)
  * and the kernel can have it.
  *
  * It works because the firmware maps memory one-to-one, so this code's
- * address does not change when paging goes away underneath it.
+ * address does not change when paging goes away underneath it - but
+ * only if that address is below four gigabytes, which is where 32-bit
+ * code has to run. Under OVMF this loader always was; a laptop's
+ * firmware (InsydeH2O on a Lenovo with 8 GiB) loads it higher, and the
+ * far jump then went to the address with its top cut off - into
+ * nothing, a fault with nowhere to go, and the machine starting over.
+ * So these bytes are COPIED into a page below four gigabytes and run
+ * from there (move_trampoline): everything in them is relative to
+ * where they are, except the two absolute addresses the copy patches -
+ * the far pointer and the table's base.
+ *
+ * And PCIDE comes off first: with it set, clearing paging in long mode
+ * is a general protection fault.
  */
 __asm__(
 ".globl enter_kernel\n"
+".globl tramp_end\n"
+".globl tramp_far\n"
+".globl tramp_prot32\n"
+".globl tramp_gdt\n"
+".globl tramp_gdt_base\n"
 ".align 16\n"
 "enter_kernel:\n"                  /* rcx = entry, rdx = magic, r8 = mbi */
 "    cli\n"
 "    movl %ecx, %edi\n"            /* where we are going */
 "    movl %edx, %esi\n"            /* the magic word */
 "    movl %r8d, %ebp\n"            /* the table */
+"    movq %cr4, %rax\n"
+"    btrq $17, %rax\n"             /* PCIDE off */
+"    movq %rax, %cr4\n"
 "    lgdt gdt32_desc(%rip)\n"
 "    ljmpl *far_ptr(%rip)\n"       /* into a 32-bit code segment */
 ".code32\n"
-"prot32:\n"
+"tramp_prot32:\n"
 "    movl $0x10, %eax\n"
 "    movl %eax, %ds\n"
 "    movl %eax, %es\n"
@@ -483,19 +549,46 @@ __asm__(
 "    jmp *%edi\n"
 ".code64\n"
 ".align 8\n"
-"gdt32:\n"
+"tramp_gdt:\n"
 "    .quad 0\n"
 "    .quad 0x00CF9A000000FFFF\n"   /* 32-bit code, whole address space */
 "    .quad 0x00CF92000000FFFF\n"   /* 32-bit data */
 "gdt32_desc:\n"
 "    .word 23\n"
-"    .quad gdt32\n"
+"tramp_gdt_base:\n"
+"    .quad tramp_gdt\n"
+"tramp_far:\n"
 "far_ptr:\n"
-"    .long prot32\n"
+"    .long tramp_prot32\n"
 "    .word 8\n"
+"tramp_end:\n"
 );
 
 void enter_kernel(UINT64 entry, UINT64 magic, UINT64 table);
+extern char tramp_end[], tramp_far[], tramp_prot32[], tramp_gdt[],
+            tramp_gdt_base[];
+
+typedef void (*enter_fn)(UINT64 entry, UINT64 magic, UINT64 table);
+
+/* The trampoline, copied into a page below four gigabytes (see above).
+   Loader code in the memory map, so the kernel leaves the page alone. */
+static enter_fn move_trampoline(void)
+{
+    UINT64 page;
+    if (alloc_low(EfiLoaderCode, 1, &page) != EFI_SUCCESS)
+        fail(L"no memory below 4 GiB for the way into the kernel", 0);
+    const char *from = (const char *)enter_kernel;
+    UINTN n = (UINTN)(tramp_end - from);
+    if (n > 4096)
+        fail(L"the way into the kernel does not fit a page", n);
+    UINT8 *to = (UINT8 *)(UINTN)page;
+    copy_bytes(to, from, n);
+    *(UINT32 *)(to + (tramp_far - from)) =
+        (UINT32)(page + (UINTN)(tramp_prot32 - from));
+    *(UINT64 *)(to + (tramp_gdt_base - from)) =
+        page + (UINTN)(tramp_gdt - from);
+    return (enter_fn)(UINTN)page;
+}
 
 /* --- the way in ------------------------------------------------------ */
 
@@ -816,7 +909,12 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         !read_file(L"\\EFI\\ThreadOS\\BOOTX64.EFI", &self))
         self.data = 0;
 
-    put(L"  kernel: ");
+    /* Where the firmware put this loader: above four gigabytes is the
+       case move_trampoline exists for, and on a photo of a screen that
+       did not boot this is the first thing worth knowing */
+    put(L"  at:     0x");
+    put_num((UINT64)(UINTN)efi_main, 16);
+    put(L"\r\n  kernel: ");
     put_num(kernel.size, 10);
     put(L" B\r\n  initrd: ");
     put_num(initrd.size, 10);
@@ -857,10 +955,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     /* Generously sized and taken now: after the memory map is fetched
        nothing may allocate, or the key that ExitBootServices checks
        goes stale. */
-    UINT64 where = 0xFFFFFFFFull;         /* EBX holds this - so, low */
+    UINT64 where;                         /* EBX holds this - so, low */
     UINTN mbi_pages = 32;                 /* 128 KiB - a large memory map */
-    if (BS->AllocatePages(AllocateMaxAddress, EfiLoaderData_Type, mbi_pages,
-                          &where) != EFI_SUCCESS)
+    if (alloc_low(EfiLoaderData_Type, mbi_pages, &where) != EFI_SUCCESS)
         fail(L"no memory for the kernel's table", 0);
     mbi = (UINT8 *)(UINTN)where;
     mbi_room = mbi_pages * 4096;
@@ -909,75 +1006,91 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     UINT64 entry = load_elf(&kernel);
 
+    enter_fn go = move_trampoline();
+
     /* --- the memory map, and then no more firmware ----------------- */
+    /* Said BEFORE the map is taken: printing may allocate, a changed
+       map makes its key stale, and ExitBootServices refuses a stale
+       key. OVMF never minded; real firmware does. */
+    put(L"threadboot: handing the machine to the kernel\r\n");
+
     UINTN map_size = 0, map_key = 0, desc_size = 0;
     UINT32 desc_ver = 0;
     BS->GetMemoryMap(&map_size, 0, &map_key, &desc_size, &desc_ver);
-    map_size += 8 * desc_size;            /* room for what our own call adds */
+    map_size += 16 * desc_size;           /* room for what our own call adds */
+    UINTN map_room = map_size;
 
     UINT64 map_at = 0;
     if (BS->AllocatePages(AllocateAnyPages, EfiLoaderData_Type,
                           (map_size + 4095) / 4096, &map_at) != EFI_SUCCESS)
         fail(L"no memory for the memory map", 0);
     EFI_MEMORY_DESCRIPTOR *map = (EFI_MEMORY_DESCRIPTOR *)(UINTN)map_at;
+    UINTN tags_before_map = mbi_at;
 
-    EFI_STATUS st2 = BS->GetMemoryMap(&map_size, map, &map_key, &desc_size,
-                                      &desc_ver);
-    if (st2 != EFI_SUCCESS)
-        fail(L"I did not get a memory map", st2);
-
-    /* Turning the firmware's map into the kernel's.
-     *
-     * What matters is which regions are FREE, and the answer is not
-     * "everything the firmware is not using": the kernel image, the
-     * initrd and this table are all in memory the firmware calls
-     * loader memory, and reporting that as free would have the kernel
-     * hand out its own initrd as a spare page. So loader memory is
-     * reserved, and only genuinely spare memory - and what the boot
-     * services stop needing the moment we leave - is available. */
-    {
-        UINTN entries = map_size / desc_size;
-        UINT8 *p = tag_open(TAG_MMAP, 8 + 8 + entries * 24);
-        *(UINT32 *)(p + 8) = 24;          /* the size of one entry */
-        *(UINT32 *)(p + 12) = 0;          /* version */
-        UINT8 *e = p + 16;
-        for (UINTN i = 0; i < entries; i++) {
-            EFI_MEMORY_DESCRIPTOR *d =
-                (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
-            UINT32 kind;
-            switch (d->Type) {
-            case EfiConventionalMemory:
-            case EfiBootServicesCode:
-            case EfiBootServicesData:
-                kind = 1;                 /* free */
-                break;
-            case 9:  kind = 3; break;     /* ACPI, reclaimable */
-            case 10: kind = 4; break;     /* ACPI NVS */
-            default: kind = 2; break;     /* taken, ours included */
-            }
-            *(UINT64 *)(e + 0) = d->PhysicalStart;
-            *(UINT64 *)(e + 8) = d->NumberOfPages * 4096;
-            *(UINT32 *)(e + 16) = kind;
-            *(UINT32 *)(e + 20) = 0;
-            e += 24;
+    /* The map, the kernel's copy of it, and the hand-over - again if the
+       firmware says the map moved in between (it may, and then only
+       GetMemoryMap may still be called: nothing here prints any more) */
+    for (int attempt = 0;; attempt++) {
+        map_size = map_room;
+        EFI_STATUS st2 = BS->GetMemoryMap(&map_size, map, &map_key,
+                                          &desc_size, &desc_ver);
+        if (st2 != EFI_SUCCESS) {
+            if (!attempt)
+                fail(L"I did not get a memory map", st2);
+            for (;;)
+                __asm__ volatile("cli; hlt");
         }
+        mbi_at = tags_before_map;
+
+        /* Turning the firmware's map into the kernel's.
+         *
+         * What matters is which regions are FREE, and the answer is not
+         * "everything the firmware is not using": the kernel image, the
+         * initrd and this table are all in memory the firmware calls
+         * loader memory, and reporting that as free would have the kernel
+         * hand out its own initrd as a spare page. So loader memory is
+         * reserved, and only genuinely spare memory - and what the boot
+         * services stop needing the moment we leave - is available. */
+        {
+            UINTN entries = map_size / desc_size;
+            UINT8 *p = tag_open(TAG_MMAP, 8 + 8 + entries * 24);
+            *(UINT32 *)(p + 8) = 24;          /* the size of one entry */
+            *(UINT32 *)(p + 12) = 0;          /* version */
+            UINT8 *e = p + 16;
+            for (UINTN i = 0; i < entries; i++) {
+                EFI_MEMORY_DESCRIPTOR *d =
+                    (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
+                UINT32 kind;
+                switch (d->Type) {
+                case EfiConventionalMemory:
+                case EfiBootServicesCode:
+                case EfiBootServicesData:
+                    kind = 1;                 /* free */
+                    break;
+                case 9:  kind = 3; break;     /* ACPI, reclaimable */
+                case 10: kind = 4; break;     /* ACPI NVS */
+                default: kind = 2; break;     /* taken, ours included */
+                }
+                *(UINT64 *)(e + 0) = d->PhysicalStart;
+                *(UINT64 *)(e + 8) = d->NumberOfPages * 4096;
+                *(UINT32 *)(e + 16) = kind;
+                *(UINT32 *)(e + 20) = 0;
+                e += 24;
+            }
+        }
+
+        tag_open(TAG_END, 8);
+        *(UINT32 *)mbi = (UINT32)mbi_at;
+        *(UINT32 *)(mbi + 4) = 0;
+
+        if (BS->ExitBootServices(image, map_key) == EFI_SUCCESS)
+            break;
+        if (attempt >= 8)
+            for (;;)
+                __asm__ volatile("cli; hlt");
     }
 
-    tag_open(TAG_END, 8);
-    *(UINT32 *)mbi = (UINT32)mbi_at;
-    *(UINT32 *)(mbi + 4) = 0;
-
-    put(L"threadboot: handing the machine to the kernel\r\n");
-
-    if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS) {
-        /* The map may have moved under us; take it again and go. */
-        map_size = mbi_pages * 0;
-        BS->GetMemoryMap(&map_size, map, &map_key, &desc_size, &desc_ver);
-        if (BS->ExitBootServices(image, map_key) != EFI_SUCCESS)
-            fail(L"the firmware will not hand the machine over", 0);
-    }
-
-    enter_kernel(entry, MB2_MAGIC, (UINT64)(UINTN)mbi);
+    go(entry, MB2_MAGIC, (UINT64)(UINTN)mbi);
     for (;;)
         __asm__ volatile("hlt");
 }

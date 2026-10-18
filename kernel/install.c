@@ -115,6 +115,45 @@ static int no(struct install_info *out, uint32_t why)
     return 0;
 }
 
+/* Whether \EFI\BOOT\BOOTX64.EFI is threadboot - ours, from an earlier
+   installation - rather than somebody else's loader. Then installing
+   again replaces it like the rest of our files: a machine whose first
+   ThreadOS loader could not start it (one that fell over 8 GiB of RAM)
+   is fixed by installing again, not stuck with the old loader under
+   the one name its firmware boots. Recognised by what it prints first,
+   as UTF-16, the way UEFI programs keep their strings. */
+static int fallback_is_ours(uint32_t size)
+{
+    static const char mark[] = "threadboot: ThreadOS";
+    static uint8_t chunk[4096 + 64];
+    const uint32_t n = sizeof(mark) - 1;
+    uint32_t keep = 0;
+
+    if (size > 1024 * 1024)
+        return 0;                    /* far bigger than ours ever was */
+    for (uint32_t off = 0; off < size; ) {
+        int got = fat_read(PATH_FALLBACK, off, chunk + keep, 4096);
+        if (got <= 0)
+            return 0;
+        uint32_t len = keep + (uint32_t)got;
+        for (uint32_t i = 0; i + 2 * n <= len; i++) {
+            uint32_t k = 0;
+            while (k < n && chunk[i + 2 * k] == (uint8_t)mark[k] &&
+                   chunk[i + 2 * k + 1] == 0)
+                k++;
+            if (k == n)
+                return 1;
+        }
+        /* the mark may straddle two pieces */
+        keep = len < 2 * n ? len : 2 * n;
+        for (uint32_t i = 0; i < keep; i++)   /* forwards: the source lies higher */
+            chunk[i] = chunk[len - keep + i];
+        off += (uint32_t)got;
+    }
+    return 0;
+}
+
+
 int install_look(int mode, int disk, struct install_info *out)
 {
     struct partition pt;
@@ -206,7 +245,8 @@ int install_look(int mode, int disk, struct install_info *out)
     say(in->kind, fat_kind(), 8);
     say(in->label, fat_label(), INST_NAME);
     in->free_kib = fat_free_kib();
-    in->fallback_free = !fat_stat(PATH_FALLBACK, &e);
+    in->fallback_free = !fat_stat(PATH_FALLBACK, &e) ||
+                        fallback_is_ours(e.size);
     in->need_kib = (in->loader_size + in->kernel_size + in->initrd_size
                     + (in->fallback_free ? in->loader_size : 0)) / 1024 + 4;
     if (in->free_kib < in->need_kib)

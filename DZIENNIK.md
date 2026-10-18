@@ -5908,3 +5908,39 @@ fact stops being a journal.*
 
       t_wc reads QEMU's own page tables ('info tlb'): the framebuffer's
       pages carry PWT and not PCD, and nothing else carries PWT.
+
+- [x] **threadboot on a machine with gigabytes of memory**
+
+      Installed on the IdeaPad, ThreadOS started over and over right
+      after "handing the machine to the kernel". OVMF with the tests'
+      few hundred megabytes never showed it; with 6 GiB it did, three
+      ways at once:
+
+      - The loader asked for memory "below 4 GiB" for the initrd and
+        the tag table, and got the highest pages there - at 3 GiB,
+        outside the 512 MiB the kernel identity-maps and manages. Even
+        "below 512 MiB" was not enough: the highest pages under that
+        lie past the last free memory the kernel is told about. Now
+        alloc_low() takes the lowest free stretch above 16 MiB, as
+        GRUB does.
+      - The firmware loaded the loader itself above 4 GiB, and the way
+        out of long mode is 32-bit code: the far jump went to an
+        address with its top cut off. The trampoline is now copied
+        into a low page and its two absolute addresses patched; and
+        CR4.PCIDE is cleared first, since with it set turning paging
+        off is a fault.
+      - "handing the machine to the kernel" was printed between taking
+        the memory map and ExitBootServices: printing may allocate, the
+        key goes stale, and the retry asked for a map into a buffer of
+        size nought. The line comes first now, and the retry takes the
+        map again properly and rebuilds the kernel's copy of it.
+
+      The loader also says where it was loaded ("at: 0x..."), which is
+      the first thing worth knowing from a photo of a screen that did
+      not boot. And installing again over an earlier ThreadOS replaces
+      its \EFI\BOOT\BOOTX64.EFI - recognised by the loader's own
+      UTF-16 greeting - instead of keeping it as somebody else's, so a
+      machine stuck with the old loader is fixed by installing again.
+
+      t_threadboot boots a 6 GiB machine too: the loader lands above
+      4 GiB and the kernel still runs programs from its initrd.
