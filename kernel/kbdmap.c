@@ -77,6 +77,12 @@ static char extended_key(uint8_t scancode)
        on others, it opens the menu */
     if (scancode == 0x5B || scancode == 0x5C)
         return KEY_MENU;
+    if (scancode == 0x30)
+        return KEY_VOLUP;
+    if (scancode == 0x2E)
+        return KEY_VOLDOWN;
+    if (scancode == 0x20)
+        return KEY_MUTE;
 
     switch (scancode) {
     case 0x48: return KEY_UP;

@@ -599,7 +599,7 @@ static void read_secret(char *out, int max)
             }
             continue;
         }
-        if (c < 0x20)
+        if (c < 0x20 || c == 0x7F)
             continue;
         if (n < max - 1) {
             out[n++] = c;
@@ -626,7 +626,7 @@ static void read_word(char *out, int max)
             }
             continue;
         }
-        if (c < 0x20)
+        if (c < 0x20 || c == 0x7F)
             continue;
         if (n < max - 1) {
             out[n++] = c;

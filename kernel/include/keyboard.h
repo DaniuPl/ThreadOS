@@ -42,6 +42,11 @@
 #define KEY_SEARCH 0x01     /* Ctrl+Space - the desktop's search */
 #define KEY_LOCK   0x02     /* Ctrl+Alt+L - lock the screen */
 #define KEY_MENU   0x0F     /* the Windows key - the desktop's menu */
+/* The loudness keys a laptop has on Fn (PS/2 E0 30, E0 2E, E0 20):
+   the desktop turns the sound up, down or off and shows by how much */
+#define KEY_VOLUP   0x0B
+#define KEY_VOLDOWN 0x0C
+#define KEY_MUTE    0x7F
 #define KEY_UNDO  0x0E      /* Ctrl+Z - take that back */
 #define KEY_FIND  0x07      /* Ctrl+F - "find", the third of them */
 #define KEY_SAVE  0x05

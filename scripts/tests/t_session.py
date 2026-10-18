@@ -169,6 +169,36 @@ def session(slog):
         q.sendkey("alt-f4")
         time.sleep(2)
 
+        # The loudness keys a laptop has on Fn: a card above the dock
+        # says how loud it is now, and the setting keeps it
+        def loudness():
+            g = dock_geom()
+            x = (SCREEN_W - VOL_W) // 2
+            y = g["y"] - VOL_DY - VOL_H
+            return q.read_ui(x + VOL_BAR_X + VOL_BAR_W + 12,
+                             ui_font_baseline_in(MENU_PX, y, VOL_H), 60,
+                             px=MENU_PX, fg=DARK["menu_text"])
+        q.mouse_goto(400, 300)
+        q.sendkey("volumeup")
+        q.sendkey("volumeup")
+        time.sleep(0.8)
+        said = loudness()
+        check("Volume Up twice: the card says 90%% ('%s')" % said,
+              said == "90%")
+        check("and the setting keeps it",
+              "volume = 90" in q.command("set", "slower", timeout=10))
+        q.sendkey("audiomute")
+        time.sleep(0.8)
+        said = loudness()
+        check("Mute: the card says Off ('%s')" % said, said == "Off")
+        q.sendkey("volumedown")
+        time.sleep(0.8)
+        said = loudness()
+        check("and Volume Down brings the sound back, a step lower ('%s')"
+              % said, said == "85%")
+        time.sleep(2)
+        check("the card goes after a moment", loudness() == "")
+
         # About: what the machine is, said on a card - against what the
         # test knows it started (one 32-bit processor, a 640x480 screen,
         # the memory QEMU was given)

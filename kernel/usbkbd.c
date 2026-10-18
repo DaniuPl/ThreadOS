@@ -97,6 +97,9 @@ static char special_key(uint8_t usage)
     case 0x50: return KEY_LEFT;
     case 0x51: return KEY_DOWN;
     case 0x52: return KEY_UP;
+    case 0x7F: return KEY_MUTE;      /* where a keyboard has them on its */
+    case 0x80: return KEY_VOLUP;     /* own page rather than the media one */
+    case 0x81: return KEY_VOLDOWN;
     default:   return 0;
     }
 }

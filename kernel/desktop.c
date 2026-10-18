@@ -40,6 +40,7 @@
 #include "include/pit.h"
 #include "include/user.h"
 #include "include/smp.h"
+#include "include/hda.h"
 #include "include/spinlock.h"
 
 /* Palette indices.
@@ -450,6 +451,11 @@ static int menu_open;
    which the desktop's thread acts on - the keys arrive in an interrupt */
 static volatile int menu_sel = -1;
 static volatile int menu_go = -1;
+/* The loudness keys: what was pressed (1 up, -1 down, 2 mute), for the
+   desktop's thread - writing the setting is not an interrupt's work -
+   and until when the card says how loud it is now */
+static volatile int vol_key;
+static uint32_t vol_until;
 static int menu_px, menu_py;
 /* The installer is deliberately NOT here. It takes the whole screen
    and everything else has to be out of reach while it runs, so it is
@@ -1932,6 +1938,20 @@ static void handle_input(int mx, int my, int buttons)
         menu_go = -1;
         if (menu_open)
             menu_activate(k);
+    }
+    if (vol_key) {
+        int k = vol_key;
+        vol_key = 0;
+        if (k == 2) {
+            hda_set_mute(!hda_muted());
+        } else {
+            /* in steps of five, and a step up from silence is a sound */
+            int v = hda_volume() + 5 * k;
+            hda_set_volume(v);
+            hda_set_mute(0);
+            hda_remember();
+        }
+        vol_until = frames + 3 * FRAME_HZ / 2;
     }
 
     /* Locked: the pointer reaches nothing */
@@ -4148,6 +4168,62 @@ static void session_do(int what)
     }
 }
 
+/* --- How loud: a card above the dock for a moment -------------------- */
+
+static int cat(char *d, int at, const char *s);
+static int cat_num(char *d, int at, uint32_t v);
+
+static void draw_volume(void)
+{
+    if ((int32_t)(vol_until - frames) <= 0)
+        return;
+    struct dock d;
+    dock_geom(&d);
+    int x = (video_w() - VOL_W) / 2, y = d.y - VOL_DY - VOL_H;
+    gfx_shadow(x, y, VOL_W, VOL_H, VOL_R, 14, theme_dark ? 150 : 90, 4);
+    gfx_frost(x, y, VOL_W, VOL_H, VOL_R, 10, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, VOL_W * 16, VOL_H * 16, VOL_R * 16, 16,
+                L.win_line, 200);
+
+    /* A speaker - a box and a cone - and as many waves as it is loud */
+    int muted = hda_muted(), v = hda_volume();
+    int cx = x + 26, cy = y + VOL_H / 2;
+    gfx_rrect(cx - 10, cy - 4, 6, 8, 1, L.menu_text, 255);
+    gfx_line16((cx - 4) * 16, (cy - 4) * 16, (cx + 2) * 16, (cy - 9) * 16, 24,
+               L.menu_text, 255);
+    gfx_line16((cx - 4) * 16, (cy + 4) * 16, (cx + 2) * 16, (cy + 9) * 16, 24,
+               L.menu_text, 255);
+    gfx_line16((cx + 2) * 16, (cy - 9) * 16, (cx + 2) * 16, (cy + 9) * 16, 24,
+               L.menu_text, 255);
+    if (muted) {
+        gfx_line16((cx + 6) * 16, (cy - 4) * 16, (cx + 13) * 16, (cy + 4) * 16,
+                   24, L.menu_text, 255);
+        gfx_line16((cx + 6) * 16, (cy + 4) * 16, (cx + 13) * 16, (cy - 4) * 16,
+                   24, L.menu_text, 255);
+    } else {
+        for (int k = 0; k < 3 && v > k * 34; k++)
+            arc16((cx + 2) * 16, cy * 16, (6 + 4 * k) * 16, 2, 10, 22,
+                  L.menu_text);
+    }
+
+    int bx = x + VOL_BAR_X, by = cy - VOL_BAR_H / 2;
+    gfx_rrect(bx, by, VOL_BAR_W, VOL_BAR_H, VOL_BAR_H / 2, L.menu_text, 60);
+    int fill = muted ? 0 : v * VOL_BAR_W / 100;
+    if (fill > 0)
+        gfx_rrect(bx, by, fill, VOL_BAR_H, VOL_BAR_H / 2, L.accent, 255);
+    char t[8];
+    int n = 0;
+    if (muted) {
+        n = cat(t, 0, "Off");
+    } else {
+        n = cat_num(t, 0, (uint32_t)v);
+        n = cat(t, n, "%");
+    }
+    (void)n;
+    ui_font_text(UI_SANS, MENU_PX, bx + VOL_BAR_W + 12,
+                 ui_font_baseline_in(MENU_PX, y, VOL_H), t, L.menu_text);
+}
+
 /* --- About ThreadOS: what this machine is, on a card ------------------- */
 
 static int cat(char *d, int at, const char *s)
@@ -4414,6 +4490,10 @@ static void desktop_on_key(char c)
     }
     if (c == KEY_LOCK) {
         desktop_lock();
+        return;
+    }
+    if (c == KEY_VOLUP || c == KEY_VOLDOWN || c == KEY_MUTE) {
+        vol_key = c == KEY_VOLUP ? 1 : c == KEY_VOLDOWN ? -1 : 2;
         return;
     }
     if (c == KEY_MENU) {                /* the Windows key: the menu */
@@ -5207,6 +5287,7 @@ static void desktop_thread(void *arg)
         draw_menu();
         draw_notes();
         draw_search();
+        draw_volume();
         draw_ask();
         /* What was just saved stays on the screen for a moment - the
            hint itself lives one frame, so it is asked for again until

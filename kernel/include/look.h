@@ -86,6 +86,15 @@
 #define MENU_SEP     7       /* the line between the programs and the system */
 #define TMENU_W      132     /* the right button's menu on a dock tile */
 #define TMENU_GAP    8       /* between it and the dock */
+
+/* --- how loud: the card the loudness keys bring up ------------------- */
+#define VOL_W        240
+#define VOL_H        52
+#define VOL_R        14
+#define VOL_DY       24      /* above the dock */
+#define VOL_BAR_X    52      /* the bar, from the card's left edge */
+#define VOL_BAR_W    128
+#define VOL_BAR_H    6
 #define SESS_ROW     22      /* an entry below it, a little lower */
 
 /* --- the question before logging out, restarting, shutting down ------- */
