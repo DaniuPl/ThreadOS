@@ -1,4 +1,4 @@
-# ProtonOS - dziennik rozwoju
+# ThreadOS - dziennik rozwoju
 
 Szczegółowy opis projektu po polsku: struktura, sposób budowania
 i chronologiczna lista tego, co powstawało - **wraz z powodami**.
@@ -8,10 +8,13 @@ sam kod.
 
 Krótki opis po angielsku jest w [README.md](README.md).
 
+Do jesieni 2026 projekt nazywał się ProtonOS - tak też nazywa się go w
+starszych wpisach dziennika, które zostają w swoim brzmieniu.
+
 ## Struktura projektu
 
 ```
-ProtonOS/
+ThreadOS/
 ├── boot/
 │   └── boot.S          # nagłówek Multiboot, ustawienie stosu, skok do kmain()
 ├── kernel/
@@ -210,7 +213,7 @@ ProtonOS/
 ## Budowanie i uruchamianie
 
 ```sh
-make          # buduje build/protonos.bin
+make          # buduje build/threados.bin
 make run      # uruchamia jądro w QEMU (najprostsza droga)
 make test     # automatyczny test e2e w QEMU (grupy równolegle)
 make test T=k64      # jedna grupa - szybka pętla przy pracy (~80 s)
@@ -218,7 +221,7 @@ make test J=1        # grupy jedna po drugiej, do debugowania
 make fuzz     # parsery na uszkodzonych danych (sanitizery, na hoście)
 make iso      # buduje bootowalne ISO z GRUB-em (menu: pulpit / konsola)
 make run-iso  # uruchamia ISO w QEMU - z dyskiem i kartą sieciową
-make kernel64 # buduje build/protonos64.bin + initrd64 (tryb długi)
+make kernel64 # buduje build/threados64.bin + initrd64 (tryb długi)
 make iso64    # płyta hybrydowa z jądrem 64-bitowym (BIOS + UEFI)
 make run-iso64-uefi  # uruchamia tę płytę pod firmware UEFI (OVMF)
 make clean
@@ -235,12 +238,12 @@ konsolę), a część bez niej - żeby przejść ścieżkę, którą widzi użyt
 ### Jądro 64-bitowe
 
 ```sh
-make kernel64        # build/protonos64.bin + initrd64.img
+make kernel64        # build/threados64.bin + initrd64.img
 make run-iso64-uefi  # płyta hybrydowa pod firmware UEFI (OVMF)
 make test T=k64      # sprawdzenia tego jądra (~80 s)
 ```
 
-Po starcie wita shell `proton64>`. Polecenia: `help`, `ps`, `mem`,
+Po starcie wita shell `thread64>`. Polecenia: `help`, `ps`, `mem`,
 `uptime`, `clear`, `ls` (initrd), `fls`, `pwd`, `cd`, `mkdir`, `cat`,
 `write`, `rm`, `disk`, `gfx`, `ifconfig`, `arp`, `ping` oraz
 `run <program> [argumenty]`.

@@ -240,6 +240,21 @@ The tests hold both up against the real thing: a C program's output
 against the same source built with glibc, scripts' output against
 Node.js.
 
+## Download
+
+Every push to `main` is built and published by GitHub Actions as a
+[release](https://github.com/DaniuPl/ThreadOS/releases/latest):
+
+- **`threados64.iso`** - the system to try and to install from. Write it
+  to a USB stick with Rufus (DD mode), balenaEtcher or `dd`, start from
+  it (UEFI or BIOS; Secure Boot off), and choose *Install ThreadOS onto
+  this computer's disk* from the menu.
+- **`threados-stick.img.xz`** - the same as a stick image, UEFI only.
+
+An installed system updates itself: `run update check` says whether
+there is a newer release, `sudo run update` installs it (signed - see
+[SECURITY.md](SECURITY.md)), and the next start is the new system.
+
 ## Quick start
 
 ```sh

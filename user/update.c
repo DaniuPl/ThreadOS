@@ -21,7 +21,7 @@
  * the new system. Only an admin may do it - 'sudo run update'.
  *
  * Where a release comes from:
- *   https://github.com/DaniuPl/ProtonOS/releases/latest/download/
+ *   https://github.com/DaniuPl/ThreadOS/releases/latest/download/
  * GitHub answers that with a redirect to the file itself.
  *
  * update.key on the disk (a system file: only an admin writes it), if
@@ -36,7 +36,7 @@
 #include "usha256.h"
 #include "uecdsa.h"
 
-#define DEFAULT_URL "https://github.com/DaniuPl/ProtonOS/releases/latest/download/"
+#define DEFAULT_URL "https://github.com/DaniuPl/ThreadOS/releases/latest/download/"
 #define MANIFEST_MAX 4096
 #define URL_MAX 256
 
