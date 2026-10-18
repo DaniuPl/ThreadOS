@@ -5944,3 +5944,34 @@ fact stops being a journal.*
 
       t_threadboot boots a 6 GiB machine too: the loader lands above
       4 GiB and the kernel still runs programs from its initrd.
+
+- [x] **The installer puts ThreadOS into the firmware's boot menu**
+
+      On the IdeaPad, even with the loader fixed, the installed system
+      started only once the user had added a boot entry by hand: a
+      laptop's firmware boots what its menu lists, and ThreadOS was not
+      on the list. Every other system's installer adds itself; now this
+      one does too, as its last step ("boot menu entry (UEFI)").
+
+      The menu is a set of firmware variables - Boot#### and BootOrder -
+      and the only way to them once the loader has left is the UEFI
+      runtime services. kernel64/efirt.c calls them: the system table
+      and the firmware's memory map arrive as Multiboot 2 tags (GRUB
+      always passed them; threadboot does now), the regions marked for
+      runtime are identity-mapped into the kernel's own space (code
+      executable, device registers uncached), and the call itself runs
+      on that space, with interrupts off and the SSE registers of
+      whoever was running saved around it, in the firmware's calling
+      convention (ms_abi). The entry names the partition by its GPT
+      GUID and the file on it, like efibootmgr; it goes first when
+      ThreadOS took the whole disk and last when it sits beside another
+      system. An entry already called ThreadOS is rewritten, so
+      installing again does not pile them up - and the disc's "Add ..."
+      entry finds the same one.
+
+      Where there is no way to do it (a 32-bit kernel, a BIOS start)
+      the step says so and the files are written all the same.
+
+      t_isoinstall installs beside "Windows" from the disc and reads the
+      entry back with OVMF's own shell before booting it; t_wholedisk
+      wants it first, and boots on the firmware that now lists it.

@@ -830,6 +830,45 @@ int paging64_map_phys(uint64_t phys, uint64_t len)
     return 0;
 }
 
+/* Identity-mapping firmware memory into the KERNEL's own space - for
+ * calling UEFI runtime services (kernel64/efirt.c), which run where the
+ * firmware put them, at their physical addresses. 'exec' for the
+ * firmware's code; 'uncached' for the device registers it drives.
+ *
+ * Into the kernel's own tables, not the current ones: a process's
+ * space copies the kernel's top-level tables when it is made, so a
+ * gigabyte the kernel opens later would be missing from it. The call
+ * itself runs on the kernel's space (efirt.c switches to it). Where the
+ * identity map already covers an address with a 2 MiB page and the
+ * firmware's code lies there, the page simply loses its no-execute
+ * mark. */
+int paging64_firmware_map(uint64_t phys, uint64_t len, int exec,
+                          int uncached)
+{
+    uint64_t start = phys & ~0xFFFULL;
+    uint64_t end = (phys + len + PAGE_SIZE - 1) & ~0xFFFULL;
+    uint64_t flags = PTE_WRITE | (exec ? 0 : PG_NX) |
+                     (uncached ? 0x018 : 0);       /* PCD | PWT */
+
+    for (uint64_t a = start; a < end; a += PAGE_SIZE) {
+        tables_lock();
+        uint64_t *pdpt = ensure(pml4, (int)((a >> 39) & 0x1FF), 0);
+        uint64_t *pd = pdpt ? ensure(pdpt, (int)((a >> 30) & 0x1FF), 0) : 0;
+        int i2 = (int)((a >> 21) & 0x1FF);
+        if (pd && (pd[i2] & PTE_HUGE)) {
+            if (exec)
+                pd[i2] &= ~PG_NX;
+            tables_unlock();
+            continue;
+        }
+        tables_unlock();
+        if (!pd || map_in(pml4, a, a, flags) < 0)
+            return -1;
+    }
+    tlb_flush_space((uintptr_t)pml4);
+    return 0;
+}
+
 uint64_t paging64_identity_top(void)
 {
     return identity_top;

@@ -90,7 +90,7 @@ static void field(int win, int x, int y, int w, const char *s)
     ud_fill(win, end + 1, y + 1, 1, ROW_H - 2, L.text);     /* the caret */
 }
 
-/* The same five steps the kernel takes, in the same order. The paths
+/* The same six steps the kernel takes, in the same order. The paths
    are shown on the screen above the button anyway - a person who is
    told what will be written should see the same names move past while
    it is. */
@@ -99,7 +99,8 @@ static const char *STEP_NAME[INST_STEPS] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
-    "/EFI/BOOT/BOOTX64.EFI"
+    "/EFI/BOOT/BOOTX64.EFI",
+    "boot menu entry (UEFI)"
 };
 
 /* Taking the whole disk adds three steps in front: a table, a
@@ -112,7 +113,8 @@ static const char *STEP_WHOLE[INST_STEPS_WHOLE] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
-    "/EFI/BOOT/BOOTX64.EFI"
+    "/EFI/BOOT/BOOTX64.EFI",
+    "boot menu entry (UEFI)"
 };
 
 /* Where the program is in the business. */
@@ -127,6 +129,7 @@ static struct install_info info;
 static int state = S_LOOK;
 static int step;                  /* the next step to take */
 static int failed_at = -1;
+static int entry_made;            /* the last step put ThreadOS in the boot menu */
 static char typed[12];
 static int tlen;
 static char pass[32];
@@ -516,7 +519,14 @@ static void draw(int win)
 
     if (state == S_DONE) {
         say(win, PAD, rowy(0), "Done", C_HEAD);
-        if (info.fallback_free) {
+        if (entry_made) {
+            say(win, PAD, rowy(2),
+                     "ThreadOS is in this machine's boot menu.", C_TEXT);
+            say(win, PAD, rowy(3), info.mode == INST_WHOLE
+                     ? "It starts first. Pull the stick out and restart."
+                     : "Restart and choose it in the firmware's boot menu.",
+                     C_TEXT);
+        } else if (info.fallback_free) {
             say(win, PAD, rowy(2),
                      "This machine will boot ThreadOS off the disk.", C_TEXT);
             say(win, PAD, rowy(3),
@@ -580,6 +590,8 @@ static void one_step(void)
         state = S_FAIL;
         return;
     }
+    if (step == (int)info.steps - 1)
+        entry_made = rc == 0;
     step++;
     if (step >= (int)info.steps)
         state = S_DONE;

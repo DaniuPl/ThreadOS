@@ -128,6 +128,8 @@ static int scan_gpt(void)
         uint64_t lo = le64(e), hi = le64(e + 8);
         if (!lo && !hi)
             continue;
+        memcpy(parts[count].guid, e + 16, 16);
+        parts[count].slot = i + 1;
         parts[count].start = le64(e + 32);
         parts[count].sectors = le64(e + 40) - le64(e + 32) + 1;
         say(parts[count].kind, gpt_kind(e));
@@ -163,6 +165,8 @@ int part_scan(void)
         parts[count].sectors = n;
         say(parts[count].kind, mbr_kind(type));
         parts[count].label[0] = '\0';
+        memset(parts[count].guid, 0, 16);
+        parts[count].slot = 0;
         count++;
     }
     return count;

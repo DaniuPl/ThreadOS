@@ -233,6 +233,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     if (mbi->flags & MULTIBOOT_FLAG_MODS)
         printk("[ OK ] Modules from the loader: %u\n", mbi->mods_count);
+    {
+        uint64_t systab;
+        const uint8_t *emap;
+        uint32_t esize, edesc;
+        if (mb2_efi(&systab, &emap, &esize, &edesc))
+            printk("[ OK ] UEFI firmware handed on: system table at %x, "
+                   "%u memory regions\n", (uint32_t)systab, esize / edesc);
+    }
 
     if (fbcon_have())
         printk("[ OK ] Framebuffer: %ux%u, %u bits per pixel\n",

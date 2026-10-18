@@ -89,8 +89,8 @@ int install_look(int mode, int disk, struct install_info *out);
 
 /* How many steps each way takes, and what each of them is called. A
    person watching a bar move wants to know what is moving. */
-#define INST_STEPS       5   /* alongside */
-#define INST_STEPS_WHOLE 8   /* the whole disk */
+#define INST_STEPS       6   /* alongside */
+#define INST_STEPS_WHOLE 9   /* the whole disk */
 const char *install_step_name(int n);
 
 /* One step (0 .. steps-1) of the way install_look() was last asked

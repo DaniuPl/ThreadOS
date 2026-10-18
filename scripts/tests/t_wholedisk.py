@@ -17,6 +17,7 @@ Run on its own or through scripts/run_tests.py.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -133,6 +134,10 @@ def main():
             check("and it writes the files onto them",
                   "/EFI/ThreadOS/threados64.bin - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
+            check("and puts ThreadOS FIRST in the firmware's boot menu - "
+                  "the disk holds nothing else to boot",
+                  "boot menu entry (UEFI) - done" in out
+                  and re.search(r"boot menu as Boot[0-9A-F]{4}, first", out))
         finally:
             q.close()
 
@@ -189,8 +194,8 @@ def main():
         check("and somebody else's bootmgfw.efi can no longer be read",
               fat_get(target, 2048, "/EFI/Microsoft/bootmgfw.efi") is None)
 
-        # --- the proof: it boots
-        shutil.copy(OVMF_VARS, nvram)
+        # --- the proof: it boots - on the same firmware, whose boot
+        # menu now starts with the entry the installer made
         q2 = Qemu(KERNEL, INITRD, disk=target, sata=True, serial=slog2,
                   qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:

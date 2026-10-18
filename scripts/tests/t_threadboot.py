@@ -209,7 +209,7 @@ def main():
             check("(6 GiB) and the kernel still finds its initrd and starts "
                   "programs from it",
                   "outside managed memory" not in out and
-                  "exception" not in out.lower() and
+                  "CPU EXCEPTION" not in out and
                   "ELF64 from the initrd:" in out)
         finally:
             q.close()

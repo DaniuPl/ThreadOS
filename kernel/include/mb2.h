@@ -53,4 +53,10 @@ uint32_t mb2_rsdp(void);
  */
 int mb2_module(const char *name, uint32_t *start, uint32_t *size);
 
+/* The UEFI system table and the firmware's memory map, when the loader
+   was a UEFI one that passed them (GRUB does, and so does threadboot).
+   1 = both are there. */
+int mb2_efi(uint64_t *systab, const uint8_t **map, uint32_t *map_size,
+            uint32_t *desc_size);
+
 #endif

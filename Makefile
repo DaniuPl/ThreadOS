@@ -349,7 +349,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
           $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o \
-          $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o \
+          $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o $(BUILD)/64/efirt.o \
           $(BUILD)/64/syscall64_stub.o \
           $(BUILD)/64/ap64.o \
           $(addprefix $(BUILD)/64/,$(addsuffix .o,$(SHARED64)))

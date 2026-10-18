@@ -26,6 +26,8 @@ struct partition {
     uint64_t sectors;          /* how many */
     char kind[PART_NAME];      /* what it is, as far as we can tell */
     char label[PART_NAME];     /* the name it carries, when GPT gives one */
+    uint8_t guid[16];          /* GPT: the partition's own GUID */
+    uint32_t slot;             /* GPT: its entry's number, from 1 */
 };
 
 /* Reads the table. Returns how many partitions were found, or -1 when

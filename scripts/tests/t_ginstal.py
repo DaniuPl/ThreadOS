@@ -309,8 +309,9 @@ def main():
                 time.sleep(0.5)
             check("with the right password the installation runs to the end",
                   "Done" in done)
-            check("and it says what follows from that",
-                  "will boot ThreadOS off the disk" in done
+            check("and it says what follows from that: ThreadOS is in the "
+                  "firmware's boot menu",
+                  "in this machine's boot menu" in done
                   and "Nothing of anybody else's was touched" in done)
 
             # A click where the desktop's menu button would be does

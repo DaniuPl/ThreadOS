@@ -251,7 +251,8 @@ def main():
 
 def boot_menu(work, shell_iso, register_iso, nvram):
     """A laptop sold with Windows: the fallback name is Windows', so the
-    installer leaves it - and the firmware has to be told about ThreadOS"""
+    installer leaves it - and tells the firmware about ThreadOS itself,
+    through the UEFI runtime services (kernel64/efirt.c)"""
     laptop = os.path.join(work, "laptop.img")
     check("a laptop's disk, with Windows under the fallback name too",
           make_target(laptop, taken=True))
@@ -263,12 +264,16 @@ def boot_menu(work, shell_iso, register_iso, nvram):
         q.wait_serial("The 64-bit system is ready", timeout=120)
         q.command("install text", "Type YES", timeout=30)
         out = q.command("YES", "Done", timeout=90)
-        check("the installer leaves Windows' fallback alone and says how to "
-              "add the entry - the disc's menu among the ways",
-              "stayed somebody else's" in out
-              and "Add the installed ThreadOS" in out)
+        made = re.search(r"boot menu as Boot([0-9A-F]{4}) \(last", out)
+        check("the installer adds ThreadOS to the firmware's boot menu "
+              "itself - last, since the machine has a system of its own "
+              f"({'Boot' + made.group(1) if made else 'no entry'})",
+              made is not None and "boot menu entry (UEFI) - done" in out)
     finally:
         q.close()
+    if not made:
+        return
+    number = made.group(1)
     check("Windows' fallback loader is still Windows'",
           fat_get(laptop, ESP_START, "/EFI/BOOT/BOOTX64.EFI")
           == FOREIGN_BOOTMGR)
@@ -280,13 +285,12 @@ def boot_menu(work, shell_iso, register_iso, nvram):
     try:
         out = q.wait_serial("to the boot menu", timeout=120)
         m = re.search(r"added (Boot[0-9A-F]{4}) \"ThreadOS\"", out)
-        check("threadboot finds the installed system and adds a boot entry "
-              f"for it ({m.group(1) if m else 'none'})", m is not None)
+        check("the disc's own entry for it finds the entry the installer "
+              "made and rewrites it rather than adding a second "
+              f"({m.group(1) if m else 'none'})",
+              m is not None and m.group(1) == "Boot" + number)
     finally:
         q.close()
-    if not m:
-        return
-    number = m.group(1)[4:]
 
     # And the laptop with no disc at all: Windows' loader (here a file
     # that is no program) fails, and the firmware goes down its list to

@@ -25,6 +25,8 @@
 #define TAG_FRAMEBUF 8
 #define TAG_RSDP_OLD 14
 #define TAG_RSDP_NEW 15
+#define TAG_EFI64    12          /* the UEFI system table's address */
+#define TAG_EFI_MMAP 17          /* the firmware's own memory map */
 /* Our own, from boot/efi/efiboot.c: the panel's size in millimetres,
    out of its EDID - the one thing about the screen a framebuffer tag
    has no room for, and the one the desktop's scale wants */
@@ -74,6 +76,26 @@ static struct multiboot_mod mods[MODS_MAX];
 static uint32_t rsdp_addr;
 static struct mb2_framebuffer framebuffer;
 static const char *kind = "?";
+
+/* What a UEFI loader leaves of the firmware: the system table, and its
+   memory map as the firmware wrote it - the regions marked for runtime
+   are what has to stay reachable to call it (kernel64/efirt.c). Copied,
+   so that nothing depends on the loader's memory staying put. */
+static uint64_t efi_systab;
+static uint8_t efi_map[16384];
+static uint32_t efi_map_size, efi_desc_size;
+
+int mb2_efi(uint64_t *systab, const uint8_t **map, uint32_t *map_size,
+            uint32_t *desc_size)
+{
+    if (!efi_systab || !efi_map_size || !efi_desc_size)
+        return 0;
+    *systab = efi_systab;
+    *map = efi_map;
+    *map_size = efi_map_size;
+    *desc_size = efi_desc_size;
+    return 1;
+}
 
 const char *mb2_boot_kind(void)
 {
@@ -202,6 +224,21 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
             const uint32_t *mm = (const uint32_t *)(pos + sizeof(struct tag));
             framebuffer.mm_w = mm[0];
             framebuffer.mm_h = mm[1];
+            break;
+        }
+
+        case TAG_EFI64:
+            efi_systab = *(const uint64_t *)(uintptr_t)(pos + sizeof(struct tag));
+            break;
+
+        case TAG_EFI_MMAP: {
+            const uint32_t *h = (const uint32_t *)(uintptr_t)(pos + sizeof(struct tag));
+            uint32_t bytes = t->size - sizeof(struct tag) - 8;
+            if (h[0] >= 40 && bytes <= sizeof(efi_map)) {
+                memcpy(efi_map, h + 2, bytes);
+                efi_map_size = bytes;
+                efi_desc_size = h[0];
+            }
             break;
         }
 

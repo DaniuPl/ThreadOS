@@ -1042,6 +1042,19 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         }
         mbi_at = tags_before_map;
 
+        /* The firmware itself, for the kernel to call later: the system
+           table, and the memory map as the firmware wrote it - its
+           runtime regions are what has to stay reachable
+           (kernel64/efirt.c). GRUB passes the same two tags. */
+        {
+            UINT8 *p = tag_open(12, 8 + 8);         /* EFI 64-bit system table */
+            *(UINT64 *)(p + 8) = (UINT64)(UINTN)ST;
+            p = tag_open(17, 8 + 8 + map_size);      /* the EFI memory map */
+            *(UINT32 *)(p + 8) = (UINT32)desc_size;
+            *(UINT32 *)(p + 12) = desc_ver;
+            copy_bytes(p + 16, map, map_size);
+        }
+
         /* Turning the firmware's map into the kernel's.
          *
          * What matters is which regions are FREE, and the answer is not

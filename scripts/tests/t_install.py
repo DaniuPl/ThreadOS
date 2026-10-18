@@ -154,8 +154,11 @@ def main():
                   and "/EFI/ThreadOS/initrd64.img - done" in out)
             check("and - since nobody was there - "
                   "/EFI/BOOT/BOOTX64.EFI too",
-                  "/EFI/BOOT/BOOTX64.EFI - done" in out
-                  and "will boot ThreadOS off the disk" in out)
+                  "/EFI/BOOT/BOOTX64.EFI - done" in out)
+            check("and it puts ThreadOS into the firmware's boot menu "
+                  "(last - beside, not instead)",
+                  "boot menu entry (UEFI) - done" in out
+                  and "boot menu as Boot" in out and "(last" in out)
         finally:
             q.close()
 
@@ -212,8 +215,9 @@ def main():
             check("it writes its files all the same",
                   "/EFI/ThreadOS/threados64.bin - done" in out)
             check("but it does not talk about writing over somebody else's file",
-                  "/EFI/BOOT/BOOTX64.EFI - done" not in out
-                  and "add an entry in the firmware" in out)
+                  "/EFI/BOOT/BOOTX64.EFI - done" not in out)
+            check("and puts itself into the firmware's boot menu instead",
+                  "boot menu as Boot" in out)
         finally:
             q3.close()
 

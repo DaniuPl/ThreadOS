@@ -36,6 +36,7 @@
 #include "include/desktop.h"
 #include "include/gpt.h"
 #include "include/fs.h"
+#include "include/efirt.h"
 
 #ifdef __x86_64__
 #include "../kernel64/paging64.h"
@@ -66,6 +67,7 @@ static struct {
     const uint8_t *loader;
     const uint8_t *kernel;
     const uint8_t *initrd;
+    int entry;                   /* the boot entry made, or -1 */
 } plan;
 
 /* A module the loader named, checked against the memory this kernel
@@ -280,6 +282,7 @@ const char *install_step_name(int n)
     case 2: return PATH_KERNEL;
     case 3: return PATH_INITRD;
     case 4: return PATH_FALLBACK;
+    case 5: return "boot menu entry (UEFI)";
     default: return "?";
     }
 }
@@ -312,6 +315,46 @@ static int step_wipe(int n)
     default:
         return -1;
     }
+}
+
+/* The firmware's boot menu: an entry "ThreadOS" for our loader,
+   through the UEFI runtime services (kernel64/efirt.c). Taking the
+   whole disk puts it first - nothing else is left to boot; installing
+   beside another system puts it last, so the machine goes on starting
+   what it did and ThreadOS is one choice in its menu (F12, mostly).
+   1 = nothing could be done here: a 32-bit kernel, a start through a
+   BIOS, or firmware that refused - the files are written all the same,
+   and the disc's menu can still add the entry. */
+static int step_boot_entry(void)
+{
+    plan.entry = -1;
+#ifdef __x86_64__
+    struct partition pt;
+    int idx = plan.info.mode == INST_WHOLE ? 0 : (int)plan.info.esp_index - 1;
+    if (!efirt_available()) {
+        printk("install: no UEFI runtime services to add a boot entry with\n");
+        return 1;
+    }
+    if (part_scan() <= idx || !part_get(idx, &pt) || !pt.slot) {
+        printk("install: the EFI partition is not in a GPT table\n");
+        return 1;
+    }
+    struct efirt_partition ep;
+    ep.number = pt.slot;
+    ep.start = pt.start;
+    ep.sectors = pt.sectors;
+    memcpy(ep.guid, pt.guid, 16);
+    unsigned num;
+    if (efirt_add_boot_entry("ThreadOS", &ep, PATH_LOADER,
+                             plan.info.mode == INST_WHOLE, &num) < 0) {
+        printk("install: the firmware did not take the boot entry\n");
+        return 1;
+    }
+    plan.entry = (int)num;
+    return 0;
+#else
+    return 1;
+#endif
 }
 
 int install_step(int n)
@@ -357,6 +400,8 @@ int install_step(int n)
             return -1;
         return fat_write_file(PATH_FALLBACK, plan.loader,
                               plan.info.loader_size) < 0 ? -1 : 0;
+    case 5:
+        return step_boot_entry();
     default:
         return -1;
     }
@@ -459,7 +504,17 @@ int install_do(void)
         if (rc == 0)
             printk("  %s - done\n", install_step_name(n));
     }
-    if (plan.info.fallback_free)
+    if (plan.entry >= 0) {
+        static const char hex[] = "0123456789ABCDEF";
+        char num[5];
+        for (int i = 0; i < 4; i++)
+            num[i] = hex[(plan.entry >> (12 - 4 * i)) & 0xF];
+        num[4] = '\0';
+        printk("\nDone. ThreadOS is in this machine's boot menu as Boot%s%s.\n",
+               num, plan.info.mode == INST_WHOLE ? ", first"
+                   : " (last - choose it from the firmware's boot menu)");
+    }
+    else if (plan.info.fallback_free)
         printk("\nDone. This machine will boot ThreadOS off the disk.\n");
     else
         printk("\nDone. The files are on the EFI partition; %s stayed somebody else's,\n"

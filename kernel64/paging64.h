@@ -114,5 +114,9 @@ int paging64_nx_enabled(void);
 void paging64_pat_init(void);
 int paging64_fb_wc(void);
 int paging64_map_phys_wc(uint64_t phys, uint64_t len);
+/* Firmware memory, identity-mapped into the kernel's own space (for
+   UEFI runtime services) */
+int paging64_firmware_map(uint64_t phys, uint64_t len, int exec,
+                          int uncached);
 
 #endif

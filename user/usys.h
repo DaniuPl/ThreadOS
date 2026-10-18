@@ -948,8 +948,8 @@ static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
 #define INST_ALONGSIDE 0
 #define INST_WHOLE     1
 
-#define INST_STEPS       5
-#define INST_STEPS_WHOLE 8
+#define INST_STEPS       6
+#define INST_STEPS_WHOLE 9
 
 struct install_info {
     uint32_t ok;
