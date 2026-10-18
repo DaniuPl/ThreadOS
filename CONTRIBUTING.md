@@ -1,6 +1,7 @@
 # Contributing to ThreadOS
 
-Thank you for looking. This file is short on ceremony and long on the
+Thank you for looking. (AI coding assistants: [AGENTS.md](AGENTS.md) has
+the same rules in a shorter form, with the commands.) This file is short on ceremony and long on the
 two or three rules that actually shape this codebase, because those are
 the ones a patch gets sent back for.
 
@@ -79,10 +80,11 @@ This is deliberate, and it is not negotiable in a patch:
   saving;
 - **test assertion descriptions: English**, because they are read next
   to the system's own output;
-- `docs/DZIENNIK.md` - the development journal - **stays Polish**. It is a
-  record written day by day from the first commit, and translating it
-  after the fact would turn a diary into a report. New entries are
-  written in English.
+- **documentation: English**, the development journal
+  ([docs/JOURNAL.md](docs/JOURNAL.md)) included.
+
+The one place other languages appear is the keyboard: the Polish layout
+(`kernel/kbdmap.c`) and the test that types its letters.
 
 ## Comments explain WHY
 
@@ -125,7 +127,7 @@ usually a test that assumes how long something takes.
 
 One line saying what changed, then a paragraph or two saying **why** -
 and, when something went wrong on the way, what it was. The journal
-(`docs/DZIENNIK.md`) gets the longer version of that story for anything
+(`docs/JOURNAL.md`) gets the longer version of that story for anything
 worth remembering.
 
 ## Reporting a bug

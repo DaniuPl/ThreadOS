@@ -1,13 +1,20 @@
-# ThreadOS - building the kernel
+# ThreadOS - the build
 #
-# Targets:
-#   make        - builds threados.bin (the Multiboot kernel)
-#   make iso    - builds a bootable ISO (needs grub-mkrescue + xorriso)
-#   make run    - the 64-bit system in QEMU, from its disc, to the desktop
-#                 (needs qemu-system-x86_64, grub-mkrescue, xorriso)
-#   make run32  - the 32-bit kernel in QEMU (needs qemu-system-i386)
-#   make fuzz   - feeds the parsers corrupted data (under sanitizers)
-#   make clean  - removes what was built
+# Targets (BUILD=<dir> puts everything somewhere other than build/):
+#   make            - the 32-bit kernel and its initrd
+#   make kernel64   - the 64-bit kernel and its initrd
+#   make efi        - threadboot, the UEFI loader (needs clang + lld)
+#   make iso64      - the hybrid BIOS + UEFI disc, the installer included
+#   make iso        - a disc with the 32-bit kernel
+#   make stick      - a bootable USB image (GPT + an EFI partition)
+#   make run        - the 64-bit system in QEMU, from its disc, to the desktop
+#   make run32      - the 32-bit kernel in QEMU
+#   make test       - the test suite (T=group,... selects, J=n runs n at once)
+#   make fuzz       - feeds the parsers corrupted data (under sanitizers)
+#   make clean      - removes what was built
+#
+# VERSION=<n> stamps the system's version into the initrd (0 for a build
+# by hand; the release workflow uses its run number).
 
 CC      := gcc
 AS      := gcc
