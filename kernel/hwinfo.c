@@ -61,9 +61,10 @@ static const char *pci_class_name(uint32_t class)
 
 void hwinfo_print(void)
 {
-    printk("screen:   %dx%d, %s, scale %d, buffer %s\n",
+    printk("screen:   %dx%d, %s, scale %d%%, panel %dx%d, buffer %s\n",
            video_w(), video_h(),
            video_true_colour() ? "true colour" : "256-colour palette", video_scale(),
+           video_pw(), video_ph(),
            video_have_loader_lfb() ? "from the loader" : "set by the kernel");
 
     if (!ps2_controller_present())

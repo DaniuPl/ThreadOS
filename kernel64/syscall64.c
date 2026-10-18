@@ -1073,6 +1073,42 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_CFG_GET: {
+        /* The same record the 32-bit kernel copies out */
+        struct { char name[32], value[32], help[80]; } out;
+        const char *name = config_name((int)a1);
+        if (!name || !paging64_user_range(a2, sizeof(out))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memset(&out, 0, sizeof(out));
+        const char *v = config_value((int)a1), *h = config_help((int)a1);
+        for (int i = 0; name[i] && i < 31; i++)
+            out.name[i] = name[i];
+        for (int i = 0; v && v[i] && i < 31; i++)
+            out.value[i] = v[i];
+        for (int i = 0; h && h[i] && i < 79; i++)
+            out.help[i] = h[i];
+        *(__typeof__(out) *)(uintptr_t)a2 = out;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_CFG_SET: {
+        char name[32], value[32];
+        if (text_from_ring3(a1, name, sizeof(name)) < 0 ||
+            text_from_ring3(a2, value, sizeof(value)) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        /* Changing what the system reads at boot is changing the
+           system: an admin's business, as on the 32-bit side */
+        if (task64_level() != USER_ADMIN || config_is_hidden(name)) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)config_set(name, value);
+        return;
+    }
     case SYS64_NOTIFY: {
         char title[40], body[80];
         if (text_from_ring3(a1, title, sizeof(title)) < 0 ||

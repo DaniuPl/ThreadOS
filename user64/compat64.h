@@ -160,6 +160,29 @@ static inline int32_t sys_notify(const char *title, const char *text)
                               (int64_t)(uintptr_t)text);
 }
 
+/* The settings - the same record and the same answers as on the 32-bit
+   side (usys.h) */
+#define CFG_NAME_MAX 32
+#define CFG_VAL_MAX  32
+#define CFG_HELP_MAX 80
+struct cfg_entry {
+    char name[CFG_NAME_MAX];
+    char value[CFG_VAL_MAX];
+    char help[CFG_HELP_MAX];
+};
+
+static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
+{
+    return (int32_t)syscall64(SYS64_CFG_GET, (int64_t)index,
+                              (int64_t)(uintptr_t)out);
+}
+
+static inline int32_t sys_cfg_set(const char *name, const char *value)
+{
+    return (int32_t)syscall64(SYS64_CFG_SET, (int64_t)(uintptr_t)name,
+                              (int64_t)(uintptr_t)value);
+}
+
 struct bg_preview_cmd {
     int32_t bg, dark, w, h;
     uint32_t *out;

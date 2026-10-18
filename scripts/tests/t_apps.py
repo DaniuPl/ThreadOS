@@ -229,12 +229,20 @@ def paint(q):
     # Save, and the viewer opens what was written
     sx2 = define(P, "SAVE_X") + define(P, "SAVE_W") // 2
     q.click(cx + sx2, cy + define(P, "BTN_Y") + define(P, "BTN_H") // 2)
-    time.sleep(1.5)
+    # The card slides in; with the whole suite running, writing the file
+    # and the slide may take longer than a moment - so it is looked for
+    # until it has settled, not at one guessed instant
     nx = SCREEN_W - NOTE_RIGHT - NOTE_W
-    said = (q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_TITLE_Y, 200,
-                      px=NOTE_PX, face="bold", fg=DARK["menu_text"]),
-            q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_BODY_Y, 220,
-                      px=NOTE_PX, fg=DARK["menu_text"]))
+    for _ in range(12):
+        time.sleep(0.5)
+        scr = q.screen_raw()
+        said = (q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_TITLE_Y, 200,
+                          px=NOTE_PX, face="bold", fg=DARK["menu_text"],
+                          screen=scr),
+                q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_BODY_Y, 220,
+                          px=NOTE_PX, fg=DARK["menu_text"], screen=scr))
+        if said[0] == "Paint" and "drawing.bmp" in said[1]:
+            break
     check("Save says so in a notification (%s)" % (said,),
           said[0] == "Paint" and "drawing.bmp" in said[1])
     close(q, cx, cy, cw)

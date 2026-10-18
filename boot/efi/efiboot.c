@@ -45,6 +45,14 @@ static EFI_GUID GUID_SIMPLE_FS =
 static EFI_GUID GUID_GOP =
     { 0x9042A9DE, 0x23DC, 0x4A38,
       { 0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A } };
+/* What the screen says about itself (its EDID): the active one is what
+   the firmware settled on, the discovered one what it read */
+static EFI_GUID GUID_EDID_ACTIVE =
+    { 0xBD8C1056, 0x9F36, 0x44EC,
+      { 0x92, 0xA8, 0xA6, 0x33, 0x7F, 0x81, 0x79, 0x86 } };
+static EFI_GUID GUID_EDID_DISCOVERED =
+    { 0x1C0C34F6, 0xD380, 0x41FA,
+      { 0xA0, 0x49, 0x8A, 0xD0, 0x6C, 0x1A, 0x66, 0xAA } };
 static EFI_GUID GUID_ACPI20 =
     { 0x8868E871, 0xE4F1, 0x11D3,
       { 0xBC, 0x22, 0x00, 0x80, 0xC7, 0x3C, 0x88, 0x81 } };
@@ -168,20 +176,95 @@ struct screen {
     UINT64 base;
     UINT32 width, height, pitch_pixels;
     UINT32 red_shift, green_shift, blue_shift;
+    UINT32 mm_w, mm_h;          /* the panel's size, 0 when unknown */
     int have;
 };
+
+typedef struct {
+    UINT32 SizeOfEdid;
+    UINT8 *Edid;
+} EFI_EDID_PROTOCOL;
+
+/* The mode the panel was built for and its size, out of the first
+   timing descriptor of its EDID. 0 when the firmware has no EDID to
+   give, or it does not hold up. */
+static int panel_native(UINT32 *w, UINT32 *h, UINT32 *mm_w, UINT32 *mm_h)
+{
+    EFI_EDID_PROTOCOL *ep = 0;
+    if (BS->LocateProtocol(&GUID_EDID_ACTIVE, 0, (void **)&ep) != EFI_SUCCESS
+        || !ep || ep->SizeOfEdid < 128 || !ep->Edid) {
+        ep = 0;
+        if (BS->LocateProtocol(&GUID_EDID_DISCOVERED, 0, (void **)&ep)
+            != EFI_SUCCESS || !ep || ep->SizeOfEdid < 128 || !ep->Edid)
+            return 0;
+    }
+    const UINT8 *e = ep->Edid;
+    static const UINT8 magic[8] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
+    UINT8 sum = 0;
+    for (int i = 0; i < 8; i++)
+        if (e[i] != magic[i])
+            return 0;
+    for (int i = 0; i < 128; i++)
+        sum = (UINT8)(sum + e[i]);
+    if (sum)
+        return 0;
+    const UINT8 *d = e + 54;
+    if (!(d[0] | d[1]))
+        return 0;                         /* not a timing */
+    *w = d[2] | ((UINT32)(d[4] & 0xF0) << 4);
+    *h = d[5] | ((UINT32)(d[7] & 0xF0) << 4);
+    *mm_w = d[12] | ((UINT32)(d[14] & 0xF0) << 4);
+    *mm_h = d[13] | ((UINT32)(d[14] & 0x0F) << 8);
+    if (*mm_w < 10 || *mm_h < 10) {
+        *mm_w = e[21] * 10u;
+        *mm_h = e[22] * 10u;
+    }
+    return *w && *h;
+}
+
+static int direct_colour(const EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *i)
+{
+    return i->PixelFormat == PixelRedGreenBlueReserved8BitPerColor ||
+           i->PixelFormat == PixelBlueGreenRedReserved8BitPerColor;
+}
 
 static void find_screen(struct screen *s)
 {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     s->have = 0;
+    s->mm_w = s->mm_h = 0;
     if (BS->LocateProtocol(&GUID_GOP, 0, (void **)&gop) != EFI_SUCCESS)
         return;
 
+    /* The panel's own mode, when the screen says which it is and the
+       firmware has it on its list. Firmware does not always start in
+       it - a logo at 1024x768 on a 1920x1080 panel is common - and any
+       other mode the panel scales, which is a soft picture. Without an
+       EDID, whatever the firmware is already showing: on a laptop that
+       is usually the panel's own resolution anyway. */
+    UINT32 nw, nh, mw, mh;
+    if (panel_native(&nw, &nh, &mw, &mh)) {
+        s->mm_w = mw;
+        s->mm_h = mh;
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *cur = gop->Mode->Info;
+        if (cur->HorizontalResolution != nw || cur->VerticalResolution != nh) {
+            for (UINT32 m = 0; m < gop->Mode->MaxMode; m++) {
+                EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *mi;
+                UINTN size;
+                if (gop->QueryMode(gop, m, &size, &mi) != EFI_SUCCESS)
+                    continue;
+                int fits = mi->HorizontalResolution == nw &&
+                           mi->VerticalResolution == nh && direct_colour(mi);
+                BS->FreePool(mi);
+                if (fits) {
+                    gop->SetMode(gop, m);
+                    break;
+                }
+            }
+        }
+    }
+
     EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = gop->Mode->Info;
-    /* Whatever the firmware is already showing. On a laptop that is
-       the panel's own resolution, which is exactly what we want and
-       what asking for a particular mode would throw away. */
     if (info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
         s->red_shift = 0;
         s->green_shift = 8;
@@ -247,6 +330,7 @@ static void *find_rsdp(int *is_v2)
 #define TAG_FRAMEBUF     8
 #define TAG_RSDP_OLD     14
 #define TAG_RSDP_NEW     15
+#define TAG_PANEL        0x4C4E4150u   /* ours: the panel's size, "PANL" */
 
 static UINT8 *mbi;                 /* the structure being built */
 static UINTN mbi_at;               /* how far into it we are */
@@ -537,6 +621,12 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         p[32] = (UINT8)sc.red_shift;   p[33] = 8;
         p[34] = (UINT8)sc.green_shift; p[35] = 8;
         p[36] = (UINT8)sc.blue_shift;  p[37] = 8;
+    }
+
+    if (sc.have && sc.mm_w && sc.mm_h) {
+        UINT8 *p = tag_open(TAG_PANEL, 8 + 8);
+        *(UINT32 *)(p + 8) = sc.mm_w;
+        *(UINT32 *)(p + 12) = sc.mm_h;
     }
 
     if (rsdp) {

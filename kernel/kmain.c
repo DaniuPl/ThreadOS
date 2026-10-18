@@ -168,8 +168,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        the mapping comes right after paging_init. */
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
     if (lfb && video_adopt_lfb(lfb->addr, lfb->pitch, (int)lfb->width,
-                               (int)lfb->height, (int)lfb->bpp) == 0)
+                               (int)lfb->height, (int)lfb->bpp) == 0) {
+        video_panel_mm((int)lfb->mm_w, (int)lfb->mm_h);
         console_use_framebuffer();
+    }
 
     vga_init();
     serial_init();

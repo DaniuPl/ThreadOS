@@ -130,8 +130,11 @@ def main():
             w, h, at = q.screen_raw()
             check("a new window opens where you are looking",
                   q.dock_windows() == 1)
-            check("and it is a terminal (a black screen)",
-                  near(at(WX + 100, WY + 60), 0))
+            # (in the next slot of the cascade: the clock holds slot 2)
+            tx, ty = cascade(3, TERM_W + 2, TERM_H + TITLE_H + 2)
+            check("and it is a terminal (its prompt: %s)"
+                  % q.term_rows(tx + 1, ty + CONTENT_DY)[-1:],
+                  q.term_rows(tx + 1, ty + CONTENT_DY)[-1:] == ["/>"])
 
             # --- back to the first --------------------------------------
             time.sleep(4)
@@ -143,7 +146,7 @@ def main():
             check("the clock waited where it was left",
                   q.dock_windows() == 3 and clock_here(at))
             check("and the terminal stayed on the second",
-                  not near(at(WX + 100, WY + 60), 0))
+                  q.term_rows(tx + 1, ty + CONTENT_DY)[-1:] != ["/>"])
 
             # The heart of it: the program was RUNNING all that time
             second = read_clock(q)

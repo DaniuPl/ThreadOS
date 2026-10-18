@@ -171,6 +171,8 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey)
         c = KEY_UNDO;
     if (ctrl_pressed && c == ' ')
         c = KEY_SEARCH;
+    if (ctrl_pressed && alt_pressed && c == 'l')
+        c = KEY_LOCK;
     *out_char = c;
     return KBD_CHAR;
 }

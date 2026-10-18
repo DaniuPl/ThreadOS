@@ -31,7 +31,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, make_iso64, no64
+import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
@@ -97,6 +98,73 @@ def password(q):
         time.sleep(0.15)
     q.sendkey("ret")
     time.sleep(2)
+
+
+def sixty_four():
+    """The settings and the picker on the 64-bit kernel: the calls that
+    read and write the settings are long mode's own"""
+    reason = no64()
+    if reason:
+        print("SKIPPED (64): " + reason)
+        return
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+    try:
+        check("(64) the disc with the 64-bit kernel builds",
+              make_iso64(d, iso, graphics=True))
+        q = Qemu(KERNEL, INITRD, cdrom=iso, disk=disk, sata=True,
+                 serial=tempfile.mktemp(suffix=".log"),
+                 qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("thread64>", timeout=120)
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=40)
+            q.wait_desktop(40)
+            q.mouse_home()
+            q.mouse_goto(700, 400)
+            q.type_line("run gsettings")
+            time.sleep(4)
+            q.mouse_goto(780, 450)
+            time.sleep(1)
+            name = q.gset_row(CX, CY, 0, chosen=True)
+            check("(64) the settings window lists the settings (%s)" % (name,),
+                  name[0] == "name" and name[1] == "thread")
+            q.sendkey("alt-f4")
+            time.sleep(2)
+            q.click_desktop()
+            time.sleep(0.5)
+            q.type_line("run gappear")
+            time.sleep(4)
+            q.click(card_x(1) + CARD_W // 2, CY + CARD_Y + CARD_H // 2)
+            time.sleep(1)
+            password(q)
+            q.mouse_goto(780, 450)
+            time.sleep(2)
+            said = status(q, theme("light"))
+            check("(64) the picker writes the theme ('%s')" % said,
+                  said == "Saved")
+            # (the aurora is painted again for the light theme, which at
+            # this size takes the desktop a few seconds)
+            light_now = False
+            for _ in range(16):
+                w, h, at = q.screen_raw()
+                if near(at(CX + W0 - 3, CY + H0 - 40),
+                        theme("light")["win_bg"], 3):
+                    light_now = True
+                    break
+                time.sleep(0.5)
+            check("(64) and the desktop is light - the picker's window "
+                  "follows it", light_now)
+        finally:
+            q.close()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+        for f in (iso, disk):
+            if os.path.exists(f):
+                os.unlink(f)
 
 
 def main():
@@ -201,6 +269,8 @@ def main():
         for f in (disk, slog):
             if os.path.exists(f):
                 os.unlink(f)
+    print("--- the same on the 64-bit kernel ---")
+    sixty_four()
     return summary()
 
 

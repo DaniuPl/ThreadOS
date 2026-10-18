@@ -55,15 +55,23 @@ static const struct gfx_surface *cur(void)
     return to_screen ? (const struct gfx_surface *)0 : &tgt;
 }
 
-static int tw(const struct gfx_surface *t) { return t ? t->w : video_w(); }
-static int th(const struct gfx_surface *t) { return t ? t->h : video_h(); }
+const struct gfx_surface *gfx_current(void)
+{
+    return cur();
+}
+
+/* Everything from here to the public calls below works in the
+   target's own pixels - the screen's physical ones, not the logical
+   ones the desktop lays itself out in */
+static int tw(const struct gfx_surface *t) { return t ? t->w : video_pw(); }
+static int th(const struct gfx_surface *t) { return t ? t->h : video_ph(); }
 
 /* The row as words, or NULL when the pixels have to go one at a time
    through video.c (a screen that is not four bytes a pixel) */
 static uint32_t *row_of(const struct gfx_surface *t, int y)
 {
     if (!t)
-        return video_row32(y);
+        return video_prow32(y);
     if ((unsigned)y >= (unsigned)t->h)
         return (uint32_t *)0;
     return t->px + (long)y * t->stride;
@@ -90,17 +98,17 @@ uint32_t gfx_mix(uint32_t over, uint32_t under, int a)
     return out;
 }
 
-uint32_t gfx_get_s(const struct gfx_surface *t, int x, int y)
+static uint32_t p_get(const struct gfx_surface *t, int x, int y)
 {
     if ((unsigned)x >= (unsigned)tw(t) || (unsigned)y >= (unsigned)th(t))
         return 0;
     uint32_t *row = row_of(t, y);
     if (row)
         return row[x] & 0xFFFFFF;
-    return video_getpixel_rgb(x, y);
+    return video_pgetpixel_rgb(x, y);
 }
 
-void gfx_put_s(const struct gfx_surface *t, int x, int y, uint32_t c)
+static void p_put(const struct gfx_surface *t, int x, int y, uint32_t c)
 {
     if ((unsigned)x >= (unsigned)tw(t) || (unsigned)y >= (unsigned)th(t))
         return;
@@ -108,10 +116,10 @@ void gfx_put_s(const struct gfx_surface *t, int x, int y, uint32_t c)
     if (row)
         row[x] = c & 0xFFFFFF;
     else
-        video_putpixel_rgb(x, y, c);
+        video_pputpixel_rgb(x, y, c);
 }
 
-void gfx_blend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
+static void p_blend(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
 {
     if (a <= 0 || (unsigned)x >= (unsigned)tw(t) ||
         (unsigned)y >= (unsigned)th(t))
@@ -121,7 +129,7 @@ void gfx_blend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
         row[x] = a >= 255 ? (c & 0xFFFFFF) : gfx_mix(c, row[x], a);
         return;
     }
-    video_putpixel_rgb(x, y, a >= 255 ? c : gfx_mix(c, video_getpixel_rgb(x, y), a));
+    video_pputpixel_rgb(x, y, a >= 255 ? c : gfx_mix(c, video_pgetpixel_rgb(x, y), a));
 }
 
 /* One run of a row, clipped once */
@@ -136,7 +144,7 @@ static void span_s(const struct gfx_surface *t, int x0, int x1, int y, uint32_t 
     uint32_t *row = row_of(t, y);
     if (!row) {
         for (int x = x0; x < x1; x++)
-            gfx_blend_s(t, x, y, c, a);
+            p_blend(t, x, y, c, a);
         return;
     }
     if (a >= 255) {
@@ -158,7 +166,7 @@ static void span_s(const struct gfx_surface *t, int x0, int x1, int y, uint32_t 
     }
 }
 
-void gfx_fill_s(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t c, int a)
+static void p_fill(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t c, int a)
 {
     for (int j = 0; j < h; j++)
         span_s(t, x, x + w, y + j, c, a);
@@ -176,7 +184,7 @@ static uint32_t lerp_rgb(uint32_t p, uint32_t q, int num, int den)
     return out;
 }
 
-void gfx_fill_grad_s(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t top,
+static void p_fill_grad(const struct gfx_surface *t, int x, int y, int w, int h, uint32_t top,
                    uint32_t bottom, int a)
 {
     for (int j = 0; j < h; j++)
@@ -324,36 +332,36 @@ static void rrect_rows_s(const struct gfx_surface *t, int x, int y, int w, int h
             int cv = gfx_cov_rrect16(l, py, x, y, w, h, r);
             if (cv >= 255)
                 break;
-            gfx_blend_s(t, l, py, c, cv * a / 255);
+            p_blend(t, l, py, c, cv * a / 255);
         }
         for (; rr >= l; rr--) {
             int cv = gfx_cov_rrect16(rr, py, x, y, w, h, r);
             if (cv >= 255)
                 break;
-            gfx_blend_s(t, rr, py, c, cv * a / 255);
+            p_blend(t, rr, py, c, cv * a / 255);
         }
         if (l <= rr)
             span_s(t, l, rr + 1, py, c, a);
     }
 }
 
-void gfx_rrect16_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
+static void p_rrect16(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
 {
     rrect_rows_s(t, x, y, w, h, r, c, c, a);
 }
 
-void gfx_rrect_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
+static void p_rrect(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t c, int a)
 {
     rrect_rows_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, c, c, a);
 }
 
-void gfx_rrect_grad_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t top,
+static void p_rrect_grad(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t top,
                     uint32_t bottom, int a)
 {
     rrect_rows_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, top, bottom, a);
 }
 
-void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int thick, uint32_t c,
+static void p_rring16(const struct gfx_surface *t, int x, int y, int w, int h, int r, int thick, uint32_t c,
                  int a)
 {
     int px0, py0, px1, py1;
@@ -373,7 +381,7 @@ void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h, int 
                         ? gfx_cov_rrect16(l, py, ix, iy, iw, ih, ir) : 0;
             int cv = gfx_cov_rrect16(l, py, x, y, w, h, r) - inner;
             if (cv > 0)
-                gfx_blend_s(t, l, py, c, cv * a / 255);
+                p_blend(t, l, py, c, cv * a / 255);
             if (inner >= 255)
                 break;
         }
@@ -382,24 +390,24 @@ void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h, int 
                         ? gfx_cov_rrect16(rr, py, ix, iy, iw, ih, ir) : 0;
             int cv = gfx_cov_rrect16(rr, py, x, y, w, h, r) - inner;
             if (cv > 0)
-                gfx_blend_s(t, rr, py, c, cv * a / 255);
+                p_blend(t, rr, py, c, cv * a / 255);
             if (inner >= 255)
                 break;
         }
     }
 }
 
-void gfx_disc16_s(const struct gfx_surface *t, int cx, int cy, int rad, uint32_t c, int a)
+static void p_disc16(const struct gfx_surface *t, int cx, int cy, int rad, uint32_t c, int a)
 {
     rrect_rows_s(t, cx - rad, cy - rad, 2 * rad, 2 * rad, rad, c, c, a);
 }
 
-void gfx_circle16_s(const struct gfx_surface *t, int cx, int cy, int rad, int thick, uint32_t c, int a)
+static void p_circle16(const struct gfx_surface *t, int cx, int cy, int rad, int thick, uint32_t c, int a)
 {
-    gfx_rring16_s(t, cx - rad, cy - rad, 2 * rad, 2 * rad, rad, thick, c, a);
+    p_rring16(t, cx - rad, cy - rad, 2 * rad, 2 * rad, rad, thick, c, a);
 }
 
-void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1, int thick, uint32_t c,
+static void p_line16(const struct gfx_surface *t, int x0, int y0, int x1, int y1, int thick, uint32_t c,
                 int a)
 {
     int m = thick / 2 + 16;
@@ -411,13 +419,13 @@ void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1, i
         for (int px = px0; px < px1; px++) {
             int cv = gfx_cov_line16(px, py, x0, y0, x1, y1, thick);
             if (cv)
-                gfx_blend_s(t, px, py, c, cv * a / 255);
+                p_blend(t, px, py, c, cv * a / 255);
         }
 }
 
 /* --- shadows ------------------------------------------------------------------ */
 
-void gfx_shadow_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int s, int a, int dy)
+static void p_shadow(const struct gfx_surface *t, int x, int y, int w, int h, int r, int s, int a, int dy)
 {
     if (s <= 0 || a <= 0 || w <= 0 || h <= 0)
         return;
@@ -467,25 +475,29 @@ void gfx_shadow_s(const struct gfx_surface *t, int x, int y, int w, int h, int r
                 d = 0;
             if (d >= s2)
                 continue;
-            gfx_blend_s(t, px, py, 0x000000, fall[d]);
+            p_blend(t, px, py, 0x000000, fall[d]);
         }
     }
 }
 
 /* --- blur ------------------------------------------------------------------- */
 
-/* Two buffers, each room for 81920 pixels: a menu bar across a wide
-   screen, a dock, a menu - with what lies around them that the blur
-   reads. Taken from the frame allocator the first time glass is drawn,
-   and kept. */
-#define BLUR_PX 81920
+/* Two buffers, each room for at least 81920 pixels: a menu bar across
+   a wide screen, a dock, a menu - with what lies around them that the
+   blur reads. On a panel of many pixels an eighth of the screen, which
+   is that same bar in that panel's pixels. Taken from the frame
+   allocator the first time glass is drawn, and kept. */
+static long blur_px = 81920;
 static uint32_t *blur_a, *blur_b;
 
 static int blur_room(void)
 {
     if (blur_a)
         return 1;
-    uint32_t pages = (BLUR_PX * 4 + 4095) / 4096;
+    long screen = (long)video_pw() * video_ph() / 8;
+    if (screen > blur_px)
+        blur_px = screen;
+    uint32_t pages = (uint32_t)((blur_px * 4 + 4095) / 4096);
     uint32_t a = pmm_alloc_contiguous(pages);
     uint32_t b = a ? pmm_alloc_contiguous(pages) : 0;
     if (!a || !b)
@@ -552,13 +564,13 @@ static void box_cols(const uint32_t *in, uint32_t *out, int w, int ih,
     }
 }
 
-int gfx_blur_s(const struct gfx_surface *t, int x, int y, int w, int h, int radius)
+static int p_blur(const struct gfx_surface *t, int x, int y, int w, int h, int radius)
 {
     if (w <= 0 || h <= 0 || radius <= 0)
         return 0;
     int e = 2 * radius;               /* two passes eat 2r on each side */
     int w1 = w + 2 * e, h1 = h + 2 * e;
-    if ((long)w1 * h1 > BLUR_PX || !blur_room())
+    if (!blur_room() || (long)w1 * h1 > blur_px)
         return -1;
 
     /* What is read beyond the screen is the nearest pixel on it: an
@@ -571,7 +583,7 @@ int gfx_blur_s(const struct gfx_surface *t, int x, int y, int w, int h, int radi
         for (int i = 0; i < w1; i++) {
             int sx = x - e + i;
             sx = sx < 0 ? 0 : sx >= sw ? sw - 1 : sx;
-            blur_a[(long)j * w1 + i] = gfx_get_s(t, sx, sy);
+            blur_a[(long)j * w1 + i] = p_get(t, sx, sy);
         }
     }
     int w2 = w1 - 2 * radius, h2 = h1 - 2 * radius;
@@ -581,9 +593,13 @@ int gfx_blur_s(const struct gfx_surface *t, int x, int y, int w, int h, int radi
     box_cols(blur_b, blur_a, w, h2, radius);        /* w  x h  */
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
-            gfx_put_s(t, x + i, y + j, blur_a[(long)j * w + i]);
+            p_put(t, x + i, y + j, blur_a[(long)j * w + i]);
     return 0;
 }
+
+static void p_blit_smooth(const struct gfx_surface *t, int x, int y, int w,
+                          int h, int r, const uint32_t *src, int sw, int sh,
+                          int stride, int a);
 
 /* --- round corners on something already drawn --------------------------------- */
 
@@ -594,18 +610,18 @@ static void corner_xy(int k, int x, int y, int w, int h, int r, int *cx,
     *cy = (k & 2) ? y + h - r : y;
 }
 
-void gfx_round_save_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t *keep)
+static void p_round_save(const struct gfx_surface *t, int x, int y, int w, int h, int r, uint32_t *keep)
 {
     for (int k = 0; k < 4; k++) {
         int cx, cy;
         corner_xy(k, x, y, w, h, r, &cx, &cy);
         for (int j = 0; j < r; j++)
             for (int i = 0; i < r; i++)
-                *keep++ = gfx_get_s(t, cx + i, cy + j);
+                *keep++ = p_get(t, cx + i, cy + j);
     }
 }
 
-void gfx_round_apply_s(const struct gfx_surface *t, int x, int y, int w, int h, int r,
+static void p_round_apply(const struct gfx_surface *t, int x, int y, int w, int h, int r,
                      const uint32_t *keep)
 {
     for (int k = 0; k < 4; k++) {
@@ -616,26 +632,26 @@ void gfx_round_apply_s(const struct gfx_surface *t, int x, int y, int w, int h, 
                 int cv = gfx_cov_rrect16(cx + i, cy + j, x * 16, y * 16,
                                          w * 16, h * 16, r * 16);
                 if (cv < 255)
-                    gfx_put_s(t, cx + i, cy + j,
-                            gfx_mix(gfx_get_s(t, cx + i, cy + j), *keep, cv));
+                    p_put(t, cx + i, cy + j,
+                            gfx_mix(p_get(t, cx + i, cy + j), *keep, cv));
             }
     }
 }
 
-void gfx_frost_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, int blur, uint32_t tint,
+static void p_frost(const struct gfx_surface *t, int x, int y, int w, int h, int r, int blur, uint32_t tint,
                int a)
 {
-    static uint32_t keep[4 * 32 * 32];
-    if (r > 32)
-        r = 32;
-    gfx_round_save_s(t, x, y, w, h, r, keep);
+    static uint32_t keep[4 * 64 * 64];
+    if (r > 64)
+        r = 64;
+    p_round_save(t, x, y, w, h, r, keep);
     if (blur > 0)
-        gfx_blur_s(t, x, y, w, h, blur);
-    gfx_fill_s(t, x, y, w, h, tint, a);
-    gfx_round_apply_s(t, x, y, w, h, r, keep);
+        p_blur(t, x, y, w, h, blur);
+    p_fill(t, x, y, w, h, tint, a);
+    p_round_apply(t, x, y, w, h, r, keep);
 }
 
-void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h, int r, const uint32_t *src,
+static void p_blit_round(const struct gfx_surface *t, int x, int y, int w, int h, int r, const uint32_t *src,
                     int stride, int a)
 {
     for (int j = 0; j < h; j++) {
@@ -646,7 +662,7 @@ void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h, i
                 cv = gfx_cov_rrect16(x + i, y + j, x * 16, y * 16, w * 16,
                                      h * 16, r * 16);
             if (cv)
-                gfx_blend_s(t, x + i, y + j, src[(long)j * stride + i],
+                p_blend(t, x + i, y + j, src[(long)j * stride + i],
                           cv * a / 255);
         }
     }
@@ -656,7 +672,7 @@ void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h, i
    the source pixel its middle falls on (nearest, which is what a
    picture on its way somewhere for a few frames needs - not a filter),
    inside corners of radius r, 'a' of it let through */
-void gfx_blit_scaled_s(const struct gfx_surface *t, int x, int y, int w,
+static void p_blit_scaled(const struct gfx_surface *t, int x, int y, int w,
                        int h, int r, const uint32_t *src, int sw, int sh,
                        int stride, int a)
 {
@@ -678,12 +694,364 @@ void gfx_blit_scaled_s(const struct gfx_surface *t, int x, int y, int w,
                 cv = gfx_cov_rrect16(x + i, yy, x * 16, y * 16, w * 16,
                                      h * 16, r * 16);
             if (cv)
-                gfx_blend_s(t, x + i, yy, row[(2 * i + 1) * sw / (2 * w)],
+                p_blend(t, x + i, yy, row[(2 * i + 1) * sw / (2 * w)],
                             cv * a / 255);
         }
     }
 }
 
+
+/* --- the public calls: logical pixels ------------------------------------
+ *
+ * A surface may stand for more pixels than the desktop thinks in: a
+ * panel of 1920x1080 at one and a half is a desktop 1280x720 across,
+ * every logical pixel one and a half of the panel's. Then a shape is
+ * not drawn small and blown up - it is drawn at the panel's own size,
+ * its edges worked out in the panel's own pixels, which is the whole
+ * difference between sharp and merely large. So each call scales what
+ * it is given, in sixteenths, and passes it on; at a scale of one it
+ * passes it on untouched, and the pixels are the ones they always were.
+ */
+
+static int k_of(const struct gfx_surface *t)
+{
+    if (t)
+        return t->k ? t->k : 16;
+    return video_k();
+}
+
+int gfx_k(const struct gfx_surface *t)
+{
+    return k_of(t);
+}
+
+/* A logical position (or one in logical sixteenths) in the target's
+   own: rounded down, so that two shapes that meet in logical pixels
+   meet in physical ones too */
+static int sc(int v, int k)
+{
+    long p = (long)v * k;
+    return (int)(p >= 0 ? p / 16 : -((-p + 15) / 16));
+}
+
+/* A length that is not a position - a radius, a thickness - rounded */
+static int sl(int v, int k)
+{
+    return (int)(((long)v * k + 8) / 16);
+}
+
+uint32_t gfx_get_s(const struct gfx_surface *t, int x, int y)
+{
+    int k = k_of(t);
+    if (k == 16)
+        return p_get(t, x, y);
+    return p_get(t, sc(2 * x + 1, k) / 2, sc(2 * y + 1, k) / 2);
+}
+
+void gfx_put_s(const struct gfx_surface *t, int x, int y, uint32_t c)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_put(t, x, y, c);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_fill(t, x0, y0, sc(x + 1, k) - x0, sc(y + 1, k) - y0, c, 255);
+}
+
+void gfx_blend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_blend(t, x, y, c, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_fill(t, x0, y0, sc(x + 1, k) - x0, sc(y + 1, k) - y0, c, a);
+}
+
+void gfx_pblend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a)
+{
+    p_blend(t, x, y, c, a);
+}
+
+void gfx_pblit_round_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                       int r, const uint32_t *src, int stride, int a)
+{
+    p_blit_round(t, x, y, w, h, r, src, stride, a);
+}
+
+void gfx_fill_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_fill(t, x, y, w, h, c, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_fill(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, c, a);
+}
+
+void gfx_fill_grad_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                     uint32_t top, uint32_t bottom, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_fill_grad(t, x, y, w, h, top, bottom, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_fill_grad(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, top, bottom,
+                a);
+}
+
+void gfx_rrect16_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                   int r, uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_rrect16(t, x, y, w, h, r, c, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_rrect16(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k), c,
+              a);
+}
+
+void gfx_rrect_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int r, uint32_t c, int a)
+{
+    if (k_of(t) == 16)
+        p_rrect(t, x, y, w, h, r, c, a);
+    else
+        gfx_rrect16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, c, a);
+}
+
+void gfx_rrect_grad_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                      int r, uint32_t top, uint32_t bottom, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_rrect_grad(t, x, y, w, h, r, top, bottom, a);
+        return;
+    }
+    int x0 = sc(x * 16, k), y0 = sc(y * 16, k);
+    rrect_rows_s(t, x0, y0, sc((x + w) * 16, k) - x0, sc((y + h) * 16, k) - y0,
+                 sl(r * 16, k), top, bottom, a);
+}
+
+void gfx_rring16_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                   int r, int thick, uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_rring16(t, x, y, w, h, r, thick, c, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_rring16(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k),
+              sl(thick, k), c, a);
+}
+
+void gfx_disc16_s(const struct gfx_surface *t, int cx, int cy, int rad,
+                  uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16)
+        p_disc16(t, cx, cy, rad, c, a);
+    else
+        p_disc16(t, sc(cx, k), sc(cy, k), sl(rad, k), c, a);
+}
+
+void gfx_circle16_s(const struct gfx_surface *t, int cx, int cy, int rad,
+                    int thick, uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16)
+        p_circle16(t, cx, cy, rad, thick, c, a);
+    else
+        p_circle16(t, sc(cx, k), sc(cy, k), sl(rad, k), sl(thick, k), c, a);
+}
+
+void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
+                  int thick, uint32_t c, int a)
+{
+    int k = k_of(t);
+    if (k == 16)
+        p_line16(t, x0, y0, x1, y1, thick, c, a);
+    else
+        p_line16(t, sc(x0, k), sc(y0, k), sc(x1, k), sc(y1, k), sl(thick, k),
+                 c, a);
+}
+
+void gfx_shadow_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                  int r, int s, int a, int dy)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_shadow(t, x, y, w, h, r, s, a, dy);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_shadow(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k),
+             sl(s, k), a, sl(dy, k));
+}
+
+int gfx_blur_s(const struct gfx_surface *t, int x, int y, int w, int h,
+               int radius)
+{
+    int k = k_of(t);
+    if (k == 16)
+        return p_blur(t, x, y, w, h, radius);
+    int x0 = sc(x, k), y0 = sc(y, k);
+    return p_blur(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0,
+                  radius > 0 && sl(radius, k) < 1 ? 1 : sl(radius, k));
+}
+
+/* The corners kept between these two are the target's own pixels, and
+   at a scale there are more of them than the caller made room for - so
+   they are kept here instead. The pair is never nested. */
+static uint32_t keep_scaled[4 * 64 * 64];
+
+void gfx_round_save_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                      int r, uint32_t *keep)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_round_save(t, x, y, w, h, r, keep);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k), rr = sl(r, k) > 64 ? 64 : sl(r, k);
+    p_round_save(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, rr,
+                 keep_scaled);
+}
+
+void gfx_round_apply_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                       int r, const uint32_t *keep)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_round_apply(t, x, y, w, h, r, keep);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k), rr = sl(r, k) > 64 ? 64 : sl(r, k);
+    p_round_apply(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, rr,
+                  keep_scaled);
+}
+
+void gfx_frost_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int r, int blur, uint32_t tint, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_frost(t, x, y, w, h, r, blur, tint, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_frost(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k),
+            blur > 0 && sl(blur, k) < 1 ? 1 : sl(blur, k), tint, a);
+}
+
+void gfx_blit_round_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                      int r, const uint32_t *src, int stride, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_blit_round(t, x, y, w, h, r, src, stride, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_blit_smooth(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k),
+                  src, w, h, stride, a);
+}
+
+void gfx_blit_scaled_s(const struct gfx_surface *t, int x, int y, int w,
+                       int h, int r, const uint32_t *src, int sw, int sh,
+                       int stride, int a)
+{
+    int k = k_of(t);
+    if (k == 16) {
+        p_blit_scaled(t, x, y, w, h, r, src, sw, sh, stride, a);
+        return;
+    }
+    int x0 = sc(x, k), y0 = sc(y, k);
+    p_blit_smooth(t, x0, y0, sc(x + w, k) - x0, sc(y + h, k) - y0, sl(r, k),
+                  src, sw, sh, stride, a);
+}
+
+/* A picture put down at a scale: the w x h box in the target's pixels
+   from the sw x sh source. Where the box is a whole number of times the
+   source - twice, three times - every source pixel is simply a square;
+   otherwise each target pixel mixes the four source pixels around where
+   its middle falls (bilinear), so that one and a half does not turn a
+   line of text into lines alternately one and two pixels thick. */
+static uint32_t bilerp(const uint32_t *src, int sw, int sh, int stride,
+                       int fx, int fy)
+{
+    /* fx, fy: the position in the source in 256ths of a pixel, measured
+       from the middle of the first one */
+    if (fx < 0) fx = 0;
+    if (fy < 0) fy = 0;
+    int x0 = fx >> 8, y0 = fy >> 8, ax = fx & 255, ay = fy & 255;
+    if (x0 >= sw - 1) { x0 = sw - 1; ax = 0; }
+    if (y0 >= sh - 1) { y0 = sh - 1; ay = 0; }
+    const uint32_t *r0 = src + (long)y0 * stride + x0;
+    const uint32_t *r1 = ay ? r0 + stride : r0;
+    uint32_t p00 = r0[0], p01 = ax ? r0[1] : p00;
+    uint32_t p10 = r1[0], p11 = ax ? r1[1] : p10;
+    uint32_t out = 0;
+    for (int sh8 = 0; sh8 <= 16; sh8 += 8) {
+        int a = (int)((p00 >> sh8) & 255), b = (int)((p01 >> sh8) & 255);
+        int c = (int)((p10 >> sh8) & 255), d = (int)((p11 >> sh8) & 255);
+        int top = a * 256 + (b - a) * ax, bot = c * 256 + (d - c) * ax;
+        int v = (top * 256 + (bot - top) * ay + 32768) >> 16;
+        out |= (uint32_t)(v < 0 ? 0 : v > 255 ? 255 : v) << sh8;
+    }
+    return out;
+}
+
+static void p_blit_smooth(const struct gfx_surface *t, int x, int y, int w,
+                          int h, int r, const uint32_t *src, int sw, int sh,
+                          int stride, int a)
+{
+    if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0 || a <= 0)
+        return;
+    if ((w % sw == 0 && h % sh == 0) || w < sw || h < sh) {
+        p_blit_scaled(t, x, y, w, h, r, src, sw, sh, stride, a);
+        return;
+    }
+    if (r > w / 2)
+        r = w / 2;
+    if (r > h / 2)
+        r = h / 2;
+    int stepx = (int)(((long)sw << 8) / w), stepy = (int)(((long)sh << 8) / h);
+    int ty0 = th(t), tw0 = tw(t);
+    for (int j = 0; j < h; j++) {
+        int yy = y + j;
+        if (yy < 0 || yy >= ty0)
+            continue;
+        int fy = (int)(((2L * j + 1) * stepy) / 2) - 128;
+        int edge_row = j < r || j >= h - r;
+        uint32_t *row = row_of(t, yy);
+        for (int i = 0; i < w; i++) {
+            int xx = x + i;
+            if (xx < 0 || xx >= tw0)
+                continue;
+            int fx = (int)(((2L * i + 1) * stepx) / 2) - 128;
+            uint32_t c = bilerp(src, sw, sh, stride, fx, fy);
+            int cv = 255;
+            if (edge_row && (i < r || i >= w - r))
+                cv = gfx_cov_rrect16(xx, yy, x * 16, y * 16, w * 16, h * 16,
+                                     r * 16);
+            cv = cv * a / 255;
+            if (row && cv >= 255)
+                row[xx] = c;
+            else if (cv)
+                p_blend(t, xx, yy, c, cv);
+        }
+    }
+}
 
 /* --- the same, onto the compositor's current target ----------------------- */
 
@@ -870,7 +1238,7 @@ void gfx_command(const char *arg)
         printk("shape: the canvas is 1..64 on each side\n");
         return;
     }
-    struct gfx_surface s = { sheet, pw, ph, pw };
+    struct gfx_surface s = { sheet, pw, ph, pw, 16 };
     const struct gfx_surface *t = &s;
     if (shape == 4) {
         /* A pattern with edges in it and no symmetry, so that a blur

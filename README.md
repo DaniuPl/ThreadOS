@@ -104,8 +104,16 @@ nothing usable. The programs draw the way the desktop draws — two system
 calls hand them the same soft-edged shapes and TrueType lettering, and
 the theme's colours, which they follow the moment the theme changes —
 so the settings, the file manager, the task manager, the clock, the
-monitor, the mixer and the installer look like the desktop they stand
-on. Ctrl+Space opens a search under the bar that finds programs, open
+monitor, the mixer, the installer, the terminal, the editor and the
+browser look like the desktop they stand on — the last three in DejaVu
+Sans Mono on a grid of cells, because their columns have to stay
+columns. There is a calculator that counts in millionths rather than
+binary fractions (0.1 + 0.2 is 0.3), a calendar, and a paint program
+whose drawings the picture viewer opens; Ctrl+Alt+L (or 'lock') locks
+the screen behind the admin's password, and the bottom of the menu does
+what the end of a session needs — Lock Screen, Log Out, Restart, Shut
+Down — the last three only after a question in words with a Cancel next
+to it. Ctrl+Space opens a search under the bar that finds programs, open
 windows, settings and files as they are typed; notifications slide in
 at the top right — from the shell, from any program, from the desktop
 itself when it saves a picture of the screen; and "Appearance" shows
@@ -134,13 +142,17 @@ through thirty-six crayons. The compositor writes to the card only the
 rows that actually changed, so an idle desktop redrawn fifty times a
 second sends nothing at all across the bus — and spends a few per cent
 of each second drawing, the dock's glass kept between frames while
-nothing it shows or stands on changes. The screen is whatever the
-loader gives — the kernel asks for no particular mode, which on a
-laptop means the panel's own resolution — and when that panel is large
-enough that an eight-pixel letter would be a millimetre and a half
-tall, the compositor draws into a screen half the size and every
-logical pixel reaches the panel as a square of four, so not one line of
-layout had to change. A laptop's touchpad is a mouse with a wheel: the
+nothing it shows or stands on changes. The screen runs in the
+panel's own resolution — read from its EDID where the system can (its
+own UEFI loader asks the firmware for it and switches GOP to it; QEMU's
+VGA is read directly), whatever the loader set where it cannot, and the
+'resolution' setting where a person says otherwise — and on a panel with
+more pixels to the inch the desktop is laid out at a scale (from the
+EDID's physical size, or the panel's height: 1080 rows is one and a
+half) but drawn at the panel's own size: every edge worked out in the
+panel's pixels, every letter rendered from its outline at one and a half
+times the size, the programs' windows kept in the panel's pixels too —
+sharp, not blown up. A laptop's touchpad is a mouse with a wheel: the
 fourth byte is asked for the way it has to be asked for, and two
 fingers sliding on the pad scroll the window under the pointer — not
 the one with the keyboard. A pointer that is not on the PS/2 port at

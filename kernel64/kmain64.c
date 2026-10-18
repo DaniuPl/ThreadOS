@@ -203,8 +203,10 @@ void kmain64(uint32_t magic, uint32_t info_addr)
                                           (int)lfb->width,
                                           (int)lfb->height,
                                           (int)lfb->bpp) == 0;
-    if (fb_taken)
+    if (fb_taken) {
+        video_panel_mm((int)lfb->mm_w, (int)lfb->mm_h);
         console_use_framebuffer();
+    }
 
     vga_init();
     serial_init();

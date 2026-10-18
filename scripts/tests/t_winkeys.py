@@ -74,10 +74,16 @@ def menu_entry(q, mx, my, i):
                      fg=theme("dark")["menu_text"])
 
 
+def menu_height():
+    """The programs, the line, and the system's entries below it"""
+    return (2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
+            len(SESSION_ITEMS) * MENU_ROW)
+
+
 def menu_place(mx, my):
     """Where the menu opened at the pointer really stands: never past
     the right edge, never over the dock (menu_at())"""
-    hgt = 2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW
+    hgt = menu_height()
     x = min(mx, SCREEN_W - MENU_W)
     y = min(my, work_bottom() - hgt)
     return max(x, 0), max(y, BAR_H)
@@ -155,11 +161,11 @@ def sixty_four():
             check("(64) Alt+F4 gets through the long-mode driver and "
                   "closes the window (%d windows)" % left, left == 2)
 
-            q.mouse_goto(500, 200)
+            q.mouse_goto(500, 40)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            got = menu_entry(q, 500, 200, 1)
+            got = menu_entry(q, 500, 40, 1)
             check("(64) the right button opens the menu under the pointer "
                   "('%s')" % got, got == "Clock")
         finally:
@@ -263,7 +269,7 @@ def main():
 
             # --- the menu under the right button ------------------------
             # (high enough for the whole menu to hang below the pointer)
-            MX, MY = 300, 100
+            MX, MY = 300, 34
             q.mouse_goto(MX, MY)
             time.sleep(0.5)
             q.mouse_right_click()
@@ -341,8 +347,8 @@ def main():
                   "(%s at %d,%d)" % (got, mx, my), got == ("App", "Mixer"))
             check("it does not go past the right edge, nor over the dock",
                   mx + MENU_W <= SCREEN_W and
-                  my + 2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW <= work_bottom())
-            q.mouse_goto(600, 140)
+                  my + menu_height() <= work_bottom())
+            q.mouse_goto(420, 300)
             q.mouse_click()                    # away with it
             time.sleep(1)
             q.mouse_goto(WX + 72, WY + 4)      # past its lights

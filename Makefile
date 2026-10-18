@@ -408,6 +408,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
                $(BUILD)/user64/gpaint.elf \
+               $(BUILD)/user64/gsettings.elf $(BUILD)/user64/gappear.elf \
                $(BUILD)/user64/ginstal.elf \
                $(BUILD)/user64/gmikser.elf \
                $(BUILD)/user64/gimg.elf \
@@ -514,6 +515,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS)
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
 	    gpaint=$(BUILD)/user64/gpaint.elf \
+	    gsettings=$(BUILD)/user64/gsettings.elf \
+	    gappear=$(BUILD)/user64/gappear.elf \
 	    ginstal=$(BUILD)/user64/ginstal.elf \
 	    gmikser=$(BUILD)/user64/gmikser.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \

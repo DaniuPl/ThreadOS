@@ -130,14 +130,14 @@ static const struct {
     {"ifconfig", "the network card"},
     {"arp",      "the ARP table"},
     {"ping IP",  "4 ICMP packets"},
-    {"dns IP",   "set the DNS server"},
     {"netstat",  "TCP connections"},
-    {"dhcp",     "IP address over DHCP"},
+    {"dhcp, dns", "address; name server IP"},
     {"desktop",  "the graphical desktop"},
     {"kill P S", "signal to a process"},
     {"clear",    "clear the screen"},
     {"screen",    "video mode, frame cost"},
     {"notify T", "a card on the desktop"},
+    {"lock",     "lock the desktop"},
     {"hardware",   "what is in this machine"},
     {"disks",    "the machine's disks"},
     {"font",     "the fonts, glyphs drawn"},
@@ -205,10 +205,12 @@ static void cmd_help(void)
    that matters is how much of it had to cross the bus to the card. */
 static void cmd_ekran(void)
 {
-    printk("mode:            %dx%d, %s, scale %d\n", video_w(), video_h(),
-           video_true_colour() ? "true colour" : "256-colour palette", video_scale());
+    printk("mode:            %dx%d, %s, scale %d%%, panel %dx%d\n",
+           video_w(), video_h(),
+           video_true_colour() ? "true colour" : "256-colour palette",
+           video_scale(), video_pw(), video_ph());
     printk("last frame:      %u rows to the card (of %d)\n",
-           video_present_rows(), video_h());
+           video_present_rows(), video_ph());
     int fps, busy;
     if (desktop_frame_stats(&fps, &busy))
         printk("frames:          %d a second, %d%% of it drawing\n", fps,
@@ -1048,6 +1050,10 @@ static void run_command(char *cmd)
         cmd_mem();
     else if (!strcmp(cmd, "screen"))
         cmd_ekran();
+    else if (!strcmp(cmd, "lock")) {
+        if (desktop_lock() < 0)
+            printk("lock: the desktop is not running\n");
+    }
     else if (!strcmp(cmd, "notify")) {
         if (*arg)
             desktop_notify("Shell", arg);

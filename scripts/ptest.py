@@ -72,6 +72,28 @@ def menu_y(name, top=None):
     return t + MENU_PAD + idx * MENU_ROW + MENU_ROW // 2
 
 
+def _session_items():
+    """The menu's system part, under the line: what is done to the
+    session and the machine (kernel/desktop.c)"""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "kernel", "desktop.c")
+    with open(full) as fh:
+        m = re.search(r"session_items\[SESS_N\] = \{([^}]*)\}", fh.read())
+    return re.findall(r'"([^"]+)"', m.group(1))
+
+
+SESSION_ITEMS = _session_items()
+
+
+def session_y(name, top=None):
+    """The middle of one of the system entries, below the programs and
+    the line between them"""
+    idx = SESSION_ITEMS.index(name)
+    t = MENU_Y if top is None else top
+    return (t + MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
+            idx * MENU_ROW + MENU_ROW // 2)
+
+
 PAGE = b"<html>ThreadOS TCP works</html>\n"
 
 # Files a test wants the guest to be able to download: path -> bytes.
@@ -1662,13 +1684,25 @@ class Qemu:
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  usbhub=False, behind_hub=False, usbnic=False,
-                 nic="rtl8139", cpus=None, devices=None):
+                 nic="rtl8139", cpus=None, devices=None, edid=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The 64-bit kernel needs a processor with long mode, and
         # qemu-system-i386 does not pretend to be one
         cmd = [qemu,
                "-display", "none", "-no-reboot",
+               # The screen tells no resolution of its own (no EDID):
+               # the desktop then starts at 640x480, the size every
+               # click and every reading in these tests is laid out
+               # for. The tests of the panel's own resolution turn it
+               # back on with a size of their choosing (edid=).
+               # The card is the standard VGA in its usual slot either
+               # way - only what it says about the screen differs.
+               "-vga", "none", "-device",
+               "VGA,addr=02.0,edid=off" if edid is None else
+               "VGA,addr=02.0,edid=on,xres=%d,yres=%d%s"
+               % (edid[0], edid[1],
+                  ",vgamem_mb=%d" % edid[2] if len(edid) > 2 else ""),
                # A fixed RTC date -> a deterministic test of the 'date' command.
                # It has to be later than the moment the test certificates
                # were issued, otherwise TLS will rightly reject them as
@@ -2344,10 +2378,14 @@ class Qemu:
                 p = at(xx, yy)
                 counts[p] = counts.get(p, 0) + 1
         bg = max(counts, key=counts.get)
+        # The ground the ink stands out from: what lies under the text,
+        # when that is known (an aurora is not one colour), otherwise
+        # the band's commonest colour
+        ground = under or (lambda xx, yy: bg)
         start = None
         for xx in range(x0, x1):
-            if any(sum(abs(a - b) for a, b in zip(at(xx, yy), bg)) > 90
-                   for yy in range(top, bot)):
+            if any(sum(abs(a - b) for a, b in zip(at(xx, yy), ground(xx, yy)))
+                   > 90 for yy in range(top, bot)):
                 start = xx
                 break
         if start is None:
@@ -2360,7 +2398,10 @@ class Qemu:
             got = self.read_ui(pen, baseline, width=x1 - pen,
                                charset=charset, px=px, face=face,
                                under=under, fg=fg, screen=screen,
-                               colours=colours)
+                               colours=colours).lstrip()
+            # A pen too far left reads a space first, and then the text
+            # a little off - a reading that has to start with a space is
+            # not where the text starts
             if len(got) > len(best):
                 best = got
         return best

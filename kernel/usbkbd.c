@@ -134,6 +134,8 @@ static void handle_key(uint8_t usage, uint8_t mods)
         c = KEY_UNDO;
     else if (ctrl && c == ' ')
         c = KEY_SEARCH;
+    else if (ctrl && alt && c == 'l')
+        c = KEY_LOCK;
     keyboard_inject(c);
 }
 

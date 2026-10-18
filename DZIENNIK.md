@@ -5641,3 +5641,73 @@ fact stops being a journal.*
       bitmap. That is the next step - window titles, menus and the
       taskbar first, together with teaching the tests' screen reader
       the new letters.
+
+- [x] **The end of a session: locking, logging out, restarting, shutting
+      down**
+
+      Ctrl+Alt+L (or 'lock' in the shell) puts up a lock: the background
+      darkened, the time, the machine's name and a field. Keys go to the
+      field and nowhere else - the shell behind it gets nothing, which
+      t_lock checks by typing a command at the lock and finding it not
+      run - and the pointer reaches nothing. The admin's password opens
+      it, checked by the desktop's thread rather than in the keyboard
+      interrupt.
+
+      The menu under the mark has a second part below a line: Lock
+      Screen, Log Out..., Restart..., Shut Down... The dots mean what
+      they have meant for forty years - a question first. It is a card
+      in the middle of a dimmed screen with the question, what will
+      happen, Cancel and the action; Enter is the action, Esc is Cancel,
+      and a click beside the buttons is no answer at all, not even a
+      no. Log Out asks every program to end as its red light would (one
+      that does not answer is ended anyway), keeps the kernel's own
+      windows, and leaves a lock that says "to log in".
+
+      t_session holds it to the machine itself: the four entries read
+      off the screen, each question in words, Cancel and Esc leaving the
+      machine running with its windows, the program's tile gone from the
+      dock after a log out - and Restart and Shut Down really ending
+      QEMU (it runs with -no-reboot), the serial port saying which.
+
+- [x] **The panel's own resolution, drawn sharp at a scale**
+
+      The desktop used to start at 640x480 under QEMU and at whatever
+      the loader set elsewhere, and on a big panel it drew everything
+      at half size and doubled every pixel. Both are gone.
+
+      The mode: QEMU's standard VGA carries the screen's EDID in its
+      second memory window, and the kernel reads the preferred timing
+      out of it - the panel's own mode - and sets that. The 'resolution'
+      setting overrides it. Our UEFI loader asks the firmware for the
+      EDID (the active or the discovered one), switches GOP to the
+      native mode when the firmware did not start in it, and passes the
+      panel's size in millimetres to the kernel in a tag of its own.
+
+      The scale: from the EDID's size where it is known (dots an inch
+      against 96), from the panel's height where it is not (720 rows is
+      one, 1080 one and a half), always to a quarter, or the 'scale'
+      setting in per cent.
+
+      The drawing: the buffer the compositor draws into is the panel's
+      size, and every call in kernel/gfx.c takes logical numbers and
+      draws at the surface's own size - a gfx_surface now carries its
+      scale in sixteenths. Edges are worked out in the panel's pixels;
+      the letters are rendered from the outline at one and a half times
+      the size, the pen starting on a whole pixel. The background, the
+      bar's glass, the dock's kept pixels and the icons are kept at the
+      panel's size; a program's window keeps its buffer in the panel's
+      pixels too, and its drawing calls are scaled the same way, so a
+      calculator's digits are as sharp as the title above them. What
+      writes single pixels still - the 8x8 letters, pictures from
+      win_blit32 - gets each logical pixel as the block it covers. At a
+      scale of one every call passes straight through and the pixels
+      are the ones they always were - the whole suite says so.
+
+      t_scale (rewritten): with EDID 1920x1080 the desktop starts in
+      that mode and the aurora is painted at that size; the setting
+      wins over the screen; with nothing said, 1080 rows give 1280x720
+      drawn at 1920x1080, and a window's title and the calculator's
+      display read pixel for pixel as FreeType's letters at one and a
+      half times their size - which no enlargement could produce -
+      while clicks and keys still land where the layout says; at two,
+      the title bar's pixels are not squares of four.

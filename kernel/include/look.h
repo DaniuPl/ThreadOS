@@ -83,6 +83,18 @@
 #define MENU_R       10
 #define MENU_ICON    18
 #define MENU_Y       (BAR_H + 4)  /* opened from the bar, it hangs here */
+#define MENU_SEP     9       /* the line between the programs and the system */
+
+/* --- the question before logging out, restarting, shutting down ------- */
+#define ASK_W        320
+#define ASK_H        150
+#define ASK_R        14
+#define ASK_PAD      20
+#define ASK_TITLE_Y  40      /* the question's baseline, from the top */
+#define ASK_BODY_Y   66      /* what it will do */
+#define ASK_BTN_W    112
+#define ASK_BTN_H    28
+#define ASK_BTN_GAP  10
 
 /* --- notifications: cards at the top right, newest on top ------------- */
 #define NOTE_W       280
@@ -108,6 +120,11 @@
 #define SEARCH_R       14
 #define SEARCH_TEXT_X  44    /* the typing, from the panel's left edge */
 #define SEARCH_ICON    20
+
+/* --- the lock: the time, and a field for the password ------------------ */
+#define LOCK_TIME_PX  64
+#define LOCK_FIELD_W  240
+#define LOCK_FIELD_H  36
 
 /* --- the hint ----------------------------------------------------------- */
 #define HINT_H       20

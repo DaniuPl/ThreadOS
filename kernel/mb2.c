@@ -25,6 +25,10 @@
 #define TAG_FRAMEBUF 8
 #define TAG_RSDP_OLD 14
 #define TAG_RSDP_NEW 15
+/* Our own, from boot/efi/efiboot.c: the panel's size in millimetres,
+   out of its EDID - the one thing about the screen a framebuffer tag
+   has no room for, and the one the desktop's scale wants */
+#define TAG_PANEL    0x4C4E4150u   /* "PANL" */
 
 struct tag {
     uint32_t type;
@@ -191,6 +195,13 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
                 framebuffer.height = f->height;
                 framebuffer.bpp = f->bpp;
             }
+            break;
+        }
+
+        case TAG_PANEL: {
+            const uint32_t *mm = (const uint32_t *)(pos + sizeof(struct tag));
+            framebuffer.mm_w = mm[0];
+            framebuffer.mm_h = mm[1];
             break;
         }
 

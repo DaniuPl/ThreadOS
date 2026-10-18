@@ -301,48 +301,36 @@ def main():
             q2.mouse_goto(400, 300)
 
             tx, ty = body_text(3)
-            # The prompt in green on the last line of the window. The
-            # terminal's content is 400x240, its rows are 10 apart and
-            # the line being edited is the last of them: 4 + 22*10.
-            # We count the pixels of the whole character cell instead of
-            # aiming at one - the shape of a glyph is not a thing to
-            # guess at.
-            prompts = 0
+            # The prompt on the last line of the window, read in the
+            # terminal's own lettering
+            rows = []
             end = time.time() + 20
             while time.time() < end:
-                _, _, ah = q2.screen_raw()
-                prompts = sum(1 for dy in range(8) for dx in range(8)
-                              if ah(tx + 4 + dx, ty + 224 + dy) == GREEN)
-                if prompts > 3:
+                rows = q2.term_rows(tx, ty)
+                if rows and rows[-1].endswith(">"):
                     break
                 time.sleep(0.5)
             check("the 'Term' tile starts the terminal in a window "
-                  "(the prompt character: %d pixels)" % prompts, prompts > 3)
+                  "(its prompt: %s)" % rows[-1:], bool(rows) and
+                  rows[-1].endswith(">"))
 
             # The terminal's window has focus right after it appears - we
             # type a command and watch whether its output appears in the
             # window. It goes through a file: fork, dup2, exec, wait.
-            def result_field(fun):
-                return sum(1 for dy in range(40) for dx in range(200)
-                           if fun(tx + 4 + dx, ty + 4 + dy) == BIALY)
-
-            _, _, at1 = q2.screen_raw()
-            empty = result_field(at1)
             for ch in "uls64":
                 q2.sendkey(ch)
                 time.sleep(0.15)
             q2.sendkey("ret")
 
-            printed = 0
+            listed = []
             end = time.time() + 25
             while time.time() < end:
-                _, _, at2 = q2.screen_raw()
-                printed = result_field(at2)
-                if printed > empty + 100:
+                listed = [r for r in q2.term_rows(tx, ty) if r]
+                if len(listed) > 4:
                     break
                 time.sleep(0.5)
-            check("a command typed in the terminal prints its result in the window "
-                  "(%d white pixels)" % printed, printed > empty + 100)
+            check("a command typed in the terminal prints its result in the "
+                  "window (%d lines)" % len(listed), len(listed) > 4)
         finally:
             q2.close()
             if os.path.exists(slog2):

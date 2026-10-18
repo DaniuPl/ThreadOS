@@ -38,6 +38,7 @@
 #include "include/printk.h"
 #include "include/pmm.h"
 #include "include/pit.h"
+#include "include/user.h"
 #include "include/spinlock.h"
 
 /* Palette indices.
@@ -347,6 +348,10 @@ struct window {
     int truecolour;
     uint32_t content_bytes;   /* what was taken for it, so it can go back */
     int cw, ch;            /* dimensions of the content area */
+    /* ... and of the buffer, which is the panel's pixels: at a scale of
+       one and a half a 300-pixel-wide window keeps 450 of them, so that
+       what the program draws is drawn at the size it is shown at */
+    int pcw, pch;
     int z;                 /* drawing order (higher = on top) */
     /* Which desktop the window belongs to. A window is only ever on
        one of them - it is not hidden on the others, it is not THERE. */
@@ -447,6 +452,14 @@ static int menu_px, menu_py;
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gweb",
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint"};
+
+/* Under a line at the bottom of the same menu: not programs but what is
+   done to the session and to the machine. The three that end something
+   ask first - the dots say they will, as they have on desktops for
+   forty years; locking ends nothing, so it simply locks. */
+enum { SESS_LOCK, SESS_LOGOUT, SESS_RESTART, SESS_SHUTDOWN, SESS_N };
+static const char *const session_items[SESS_N] = {"Lock Screen", "Log Out...",
+                                                  "Restart...", "Shut Down..."};
 
 /* --- The kiosk -----------------------------------------------------
  *
@@ -598,11 +611,19 @@ static int work_bottom(void)
     return d.y - DOCK_BOTTOM;
 }
 
-static int menu_h(void) { return 2 * MENU_PAD + MENU_N * MENU_ROW; }
+static int menu_h(void)
+{
+    return 2 * MENU_PAD + MENU_N * MENU_ROW + MENU_SEP + SESS_N * MENU_ROW;
+}
 
 static int menu_item_y(int i)
 {
     return menu_py + MENU_PAD + i * MENU_ROW;
+}
+
+static int session_item_y(int i)
+{
+    return menu_item_y(MENU_N) + MENU_SEP + i * MENU_ROW;
 }
 
 /* Puts the menu somewhere it fits: never off the right-hand edge,
@@ -796,6 +817,14 @@ static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
 static int resizable(const struct window *w) { (void)w; return 1; }
 static int btn_x(const struct window *w)   { return w->x + 10; }
 static int btn_y(const struct window *w)    { return w->y + TITLE_H + 12; }
+/* A logical coordinate in the panel's own pixels (kernel/video.c): the
+   few things here that keep pixels of their own - the background, the
+   bar's glass, the dock - keep them at the panel's size */
+static int P(int v)
+{
+    return (int)((long)v * video_k() / 16);
+}
+
 /* An 8x12 cursor arrow: set bits = cursor pixels.
    The highest bit (0x80) is the leftmost column. */
 static const uint8_t cursor_bmp[12] = {
@@ -803,8 +832,58 @@ static const uint8_t cursor_bmp[12] = {
     0xFE, 0xFF, 0xF8, 0xD8, 0x88, 0x18,
 };
 
+/* The same arrow as a shape, for a panel at a scale: its corners in
+   sixteenths of a logical pixel from the tip. Filled white - each panel
+   pixel by how much of it the shape covers, sampled four by four - and
+   outlined in black with round joints. */
+static const int16_t arrow16[][2] = {
+    {0, 0}, {0, 232}, {60, 180}, {100, 264}, {134, 250}, {94, 166},
+    {164, 166}
+};
+#define ARROW_N ((int)(sizeof(arrow16) / sizeof(arrow16[0])))
+
+static int in_arrow(int x, int y)       /* in sixteenths, from the tip */
+{
+    int in = 0;
+    for (int i = 0, j = ARROW_N - 1; i < ARROW_N; j = i++) {
+        int xi = arrow16[i][0], yi = arrow16[i][1];
+        int xj = arrow16[j][0], yj = arrow16[j][1];
+        if ((yi > y) != (yj > y) &&
+            x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+            in = !in;
+    }
+    return in;
+}
+
+static void draw_arrow(int mx, int my)
+{
+    int k = video_k();
+    int ox = P(mx), oy = P(my);              /* the tip, in panel pixels */
+    int w = 176 * k / 256 + 2, h = 272 * k / 256 + 2;
+    for (int py = 0; py < h; py++)
+        for (int px = 0; px < w; px++) {
+            int n = 0;
+            for (int sy = 0; sy < 4; sy++)
+                for (int sx = 0; sx < 4; sx++)
+                    /* the sample, in logical sixteenths */
+                    n += in_arrow((px * 64 + sx * 16 + 8) * 4 / k,
+                                  (py * 64 + sy * 16 + 8) * 4 / k);
+            if (n)
+                gfx_pblend_s((const struct gfx_surface *)0, ox + px, oy + py,
+                             0xFFFFFF, n * 255 / 16);
+        }
+    for (int i = 0, j = ARROW_N - 1; i < ARROW_N; j = i++)
+        gfx_line16(mx * 16 + arrow16[j][0], my * 16 + arrow16[j][1],
+                   mx * 16 + arrow16[i][0], my * 16 + arrow16[i][1], 18,
+                   0x000000, 255);
+}
+
 static void draw_cursor(int mx, int my)
 {
+    if (video_k() != 16) {
+        draw_arrow(mx, my);
+        return;
+    }
     for (int row = 0; row < 12; row++) {
         for (int col = 0; col < 8; col++) {
             if (!(cursor_bmp[row] & (0x80 >> col)))
@@ -861,14 +940,42 @@ static void win_buf_free(uint8_t *p, uint32_t bytes)
  * drawing code does not change with the format. */
 
 
+/* A block of the buffer's own pixels, clipped to it */
+static void buf_prect(struct window *w, int x0, int y0, int x1, int y1,
+                      uint32_t c)
+{
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > w->pcw) x1 = w->pcw;
+    if (y1 > w->pch) y1 = w->pch;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            if (w->truecolour)
+                ((uint32_t *)w->content)[y * w->pcw + x] = c;
+            else
+                w->content[y * w->pcw + x] = (uint8_t)c;
+        }
+}
+
 static void buf_px(struct window *w, int x, int y, uint32_t c)
 {
     if (x < 0 || x >= w->cw || y < 0 || y >= w->ch)
         return;
+    if (video_k() != 16) {               /* a logical pixel is a block */
+        buf_prect(w, P(x), P(y), P(x + 1), P(y + 1), c);
+        return;
+    }
     if (w->truecolour)
         ((uint32_t *)w->content)[y * w->cw + x] = c;
     else
         w->content[y * w->cw + x] = (uint8_t)c;
+}
+
+/* The buffer for a content area of cw x ch: the panel's pixels, rounded
+   up so that the area is covered wherever on the screen it falls */
+static int PC(int v)
+{
+    return (int)(((long)v * video_k() + 15) / 16);
 }
 
 /* An index means one thing to an ordinary window and another to a
@@ -882,6 +989,16 @@ static uint32_t buf_colour(const struct window *w, uint8_t idx)
 static void buf_rect(struct window *w, int x, int y, int rw, int rh,
                      uint32_t c)
 {
+    if (video_k() != 16) {
+        if (x < 0) { rw += x; x = 0; }
+        if (y < 0) { rh += y; y = 0; }
+        if (rw <= 0 || rh <= 0)
+            return;
+        int x1 = x + rw >= w->cw ? w->pcw : P(x + rw);
+        int y1 = y + rh >= w->ch ? w->pch : P(y + rh);
+        buf_prect(w, P(x), P(y), x1, y1, c);
+        return;
+    }
     for (int j = 0; j < rh; j++)
         for (int i = 0; i < rw; i++)
             buf_px(w, x + i, y + j, c);
@@ -1092,32 +1209,39 @@ static int art_cached;
 static uint32_t *art_pool;
 static uint32_t art_pool_used;           /* in pixels */
 
+/* Kept at the panel's size: a picture drawn small and enlarged on its
+   way to the screen would be the one soft thing on it */
+static uint32_t art_pool_px;
+
 static const uint32_t *art_get(int art, int s, char letter)
 {
     if (art != ART_LETTER)
         letter = 0;
+    int ls = s;
+    s = P(s);
     for (int i = 0; i < art_cached; i++)
         if (art_cache[i].art == art && art_cache[i].s == s &&
             art_cache[i].letter == letter)
             return art_cache[i].px;
     if (!art_pool) {
-        uint32_t a = pmm_alloc_contiguous(ART_POOL_PAGES);
+        uint32_t pages = (uint32_t)(ART_POOL_PAGES * video_k() * video_k() / 256);
+        uint32_t a = pmm_alloc_contiguous(pages);
         if (!a)
             return (const uint32_t *)0;
         art_pool = (uint32_t *)(uintptr_t)a;
+        art_pool_px = pages * 1024u;
     }
     uint32_t need = (uint32_t)(s * s);
-    if (art_cached == ART_CACHE ||
-        art_pool_used + need > ART_POOL_PAGES * 1024u) {
+    if (art_cached == ART_CACHE || art_pool_used + need > art_pool_px) {
         art_cached = 0;
         art_pool_used = 0;
-        if (need > ART_POOL_PAGES * 1024u)
+        if (need > art_pool_px)
             return (const uint32_t *)0;
     }
     uint32_t *px = art_pool + art_pool_used;
-    struct gfx_surface surf = { px, s, s, s };
+    struct gfx_surface surf = { px, s, s, s, video_k() };
     gfx_target(&surf);
-    draw_art(art, 0, 0, s, letter);
+    draw_art(art, 0, 0, ls, letter);
     gfx_target((const struct gfx_surface *)0);
     art_cache[art_cached].art = art;
     art_cache[art_cached].s = s;
@@ -1135,7 +1259,10 @@ static void draw_tile(int art, int x, int y, int s, char letter, int a)
 {
     const uint32_t *px = art_get(art, s, letter);
     int r = s * 9 / 40;
-    if (px) {
+    if (px && video_k() != 16) {
+        int ps = P(s);
+        gfx_pblit_round_s(gfx_current(), P(x), P(y), ps, ps, P(r), px, ps, a);
+    } else if (px) {
         gfx_blit_round(x, y, s, s, r, px, s, a);
     } else {                      /* no room to keep it: draw it here */
         gfx_rrect(x, y, s, s, r, 0x8E8E93, a);
@@ -1282,13 +1409,33 @@ static void draw_body(const struct window *win, int focused, int off)
     if (win->content) {
         int bx = x + 1;
         int by = y + TITLE_H + 1;
+        int pw = win->pcw;
         if (off) {
+            /* Into a picture of logical pixels: each one the buffer's
+               pixel at its corner */
             const uint32_t *rgb = (const uint32_t *)win->content;
             for (int j = 0; j < win->ch; j++)
-                for (int i = 0; i < win->cw; i++)
-                    gfx_put(bx + i, by + j, win->truecolour
-                            ? rgb[j * win->cw + i]
-                            : video_palette_rgb(win->content[j * win->cw + i]));
+                for (int i = 0; i < win->cw; i++) {
+                    long at = (long)P(j) * pw + P(i);
+                    gfx_put(bx + i, by + j, win->truecolour ? rgb[at]
+                            : video_palette_rgb(win->content[at]));
+                }
+        } else if (video_k() != 16) {
+            /* The buffer is the panel's pixels already: one for one,
+               from where the content area begins on the panel */
+            int px0 = P(bx), py0 = P(by);
+            int w1 = P(bx + win->cw) - px0, h1 = P(by + win->ch) - py0;
+            if (w1 > pw) w1 = pw;
+            if (h1 > win->pch) h1 = win->pch;
+            if (win->truecolour) {
+                video_pblit_rgb(px0, py0, w1, h1,
+                                (const uint32_t *)win->content, pw);
+            } else {
+                for (int j = 0; j < h1; j++)
+                    for (int i = 0; i < w1; i++)
+                        video_pputpixel_rgb(px0 + i, py0 + j,
+                            video_palette_rgb(win->content[(long)j * pw + i]));
+            }
         } else if (win->truecolour) {
             video_blit_rgb(bx, by, win->cw, win->ch,
                            (const uint32_t *)win->content, win->cw);
@@ -1425,7 +1572,7 @@ static int draw_animated(const struct window *win, int focused)
     struct window at0 = *win;
     at0.x = 0;
     at0.y = 0;
-    struct gfx_surface s = { anim_px, w, h, w };
+    struct gfx_surface s = { anim_px, w, h, w, 16 };
     gfx_target(&s);
     draw_body(&at0, focused, 1);
     gfx_target((const struct gfx_surface *)0);
@@ -1640,6 +1787,20 @@ static int last_title_win = -1;
 
 /* The search and the notifications (below): what the input asks of them */
 static volatile int search_open;
+static volatile int locked;            /* the lock screen (below) is up */
+/* The question before logging out, restarting or shutting down: which
+   of session_items[] is being asked about, or -1. The answer is acted
+   on by the desktop's own thread (ask_go) - a key arrives in an
+   interrupt, and turning the machine off is not an interrupt's work. */
+static volatile int ask = -1;
+static volatile int ask_go;
+static int ask_x(void) { return (video_w() - ASK_W) / 2; }
+static int ask_y(void) { return (video_h() - ASK_H) / 2; }
+static int ask_btn_y(void) { return ask_y() + ASK_H - ASK_PAD - ASK_BTN_H; }
+/* The one that does it is on the right, where the eye ends up; Cancel
+   is next to it */
+static int ask_do_x(void) { return ask_x() + ASK_W - ASK_PAD - ASK_BTN_W; }
+static int ask_no_x(void) { return ask_do_x() - ASK_BTN_GAP - ASK_BTN_W; }
 static void search_click(int mx, int my);
 static void search_close(void);
 static int search_key(char c);
@@ -1653,6 +1814,31 @@ static void handle_input(int mx, int my, int buttons)
 
     mouse_x = mx;
     mouse_y = my;
+
+    /* Locked: the pointer reaches nothing */
+    if (locked) {
+        prev_pressed = pressed;
+        prev_right = right;
+        (void)mouse_take_scroll();
+        return;
+    }
+
+    /* A question on the screen: its two buttons are all there is to
+       click. A click beside them is not an answer - not even "no" -
+       because a click that misses is not a decision. */
+    if (ask >= 0) {
+        if (pressed && !prev_pressed &&
+            my >= ask_btn_y() && my < ask_btn_y() + ASK_BTN_H) {
+            if (mx >= ask_no_x() && mx < ask_no_x() + ASK_BTN_W)
+                ask = -1;
+            else if (mx >= ask_do_x() && mx < ask_do_x() + ASK_BTN_W)
+                ask_go = 1;
+        }
+        prev_pressed = pressed;
+        prev_right = right;
+        (void)mouse_take_scroll();
+        return;
+    }
 
     /* In the kiosk there is nothing to click but the one window and
        the one button the environment itself offers. Everything the
@@ -1761,6 +1947,18 @@ static void handle_input(int mx, int my, int buttons)
                                     from >= 0 ? icons[from].art
                                               : art_of_app(menu_items[i]));
                     menu_open = 0;
+                    prev_pressed = pressed;
+                    return;
+                }
+            }
+            for (int i = 0; i < SESS_N; i++) {
+                if (in_rect(mx, my, menu_px, session_item_y(i), MENU_W,
+                            MENU_ROW)) {
+                    menu_open = 0;
+                    if (i == SESS_LOCK)
+                        desktop_lock();
+                    else
+                        ask = i;
                     prev_pressed = pressed;
                     return;
                 }
@@ -2048,7 +2246,7 @@ static int resize_content(struct window *w)
     if (cw == w->cw && ch == w->ch)
         return 0;                      /* the drag changed nothing */
 
-    uint32_t bytes = (uint32_t)(cw * ch) * (w->truecolour ? 4u : 1u);
+    uint32_t bytes = (uint32_t)(PC(cw) * PC(ch)) * (w->truecolour ? 4u : 1u);
     uint8_t *buf = win_buf_alloc(bytes);
     if (!buf) {
         w->w = w->cw + 2;              /* back to the size that has a buffer */
@@ -2060,6 +2258,8 @@ static int resize_content(struct window *w)
     w->content_bytes = bytes;
     w->cw = cw;
     w->ch = ch;
+    w->pcw = PC(cw);
+    w->pch = PC(ch);
     buf_rect(w, 0, 0, cw, ch, buf_colour(w, COL_WIN));
     win_enqueue(w, WEV_SIZE, cw, ch, 0);
     return 0;
@@ -2390,7 +2590,9 @@ static void look_refresh(int force)
 
     if (!video_true_colour())
         return;                        /* bands of the palette will do */
-    int w = video_w(), h = video_h();
+    /* Both kept at the panel's own size - the background is painted at
+       that size, not stretched to it */
+    int w = video_pw(), h = video_ph();
     uint32_t *nb = take_pages((uint32_t)(w * h) * 4, &bg_pages);
     if (nb)
         bg_buf = nb;
@@ -2400,7 +2602,7 @@ static void look_refresh(int force)
 
     /* The bar's glass: the strip under it, with what lies below it for
        the blur to read, blurred and tinted */
-    int strip = BAR_H + 4 * BAR_BLUR;
+    int strip = P(BAR_H + 4 * BAR_BLUR);
     if (strip > h)
         strip = h;
     uint32_t *nbar = take_pages((uint32_t)(w * strip) * 4, &bar_pages);
@@ -2409,17 +2611,17 @@ static void look_refresh(int force)
     if (!bar_buf)
         return;
     memcpy(bar_buf, bg_buf, (uint32_t)(w * strip) * 4);
-    struct gfx_surface s = { bar_buf, w, strip, w };
+    struct gfx_surface s = { bar_buf, w, strip, w, video_k() };
     gfx_target(&s);
-    gfx_blur(0, 0, w, BAR_H, BAR_BLUR);
-    gfx_fill(0, 0, w, BAR_H, L.bar_tint, L.bar_a);
+    gfx_blur(0, 0, video_w(), BAR_H, BAR_BLUR);
+    gfx_fill(0, 0, video_w(), BAR_H, L.bar_tint, L.bar_a);
     gfx_target((const struct gfx_surface *)0);
 }
 
 static void draw_background(void)
 {
     if (bg_buf) {
-        video_blit_rgb(0, 0, video_w(), video_h(), bg_buf, video_w());
+        video_pblit_rgb(0, 0, video_pw(), video_ph(), bg_buf, video_pw());
         return;
     }
     /* Without a buffer: sixteen bands of the palette, or the picture
@@ -2589,7 +2791,7 @@ static void draw_bar(void)
 {
     int w = video_w();
     if (bar_buf)
-        video_blit_rgb(0, 0, w, BAR_H, bar_buf, w);
+        video_pblit_rgb(0, 0, video_pw(), P(BAR_H), bar_buf, video_pw());
     else
         gfx_fill(0, 0, w, BAR_H, L.bar_tint, 255);
     gfx_fill(0, BAR_H - 1, w, 1, 0x000000, theme_dark ? 90 : 40);
@@ -2745,7 +2947,7 @@ static uint32_t dock_under_fp(int x, int y, int w, int h)
 {
     uint32_t f = 2166136261u;
     for (int j = 0; j < h; j++) {
-        const uint32_t *row = video_row32(y + j);
+        const uint32_t *row = video_prow32(y + j);
         for (int i = 0; i < w; i++)
             f = fp_mix(f, row[x + i]);
     }
@@ -2815,16 +3017,22 @@ static void draw_dock(void)
     for (int k = 0; k < d.n_l; k++)
         if (hop_set[k])
             hopping = 1;
-    int keep = !hopping && video_row32(0) && w > 0 && h > 0;
+    /* What is kept is the panel's pixels, so from here on the box is
+       in those */
+    int lx = x, ly = y;
+    x = P(lx);
+    y = P(ly);
+    w = P(lx + w) - x;
+    h = P(ly + h) - y;
+    uint32_t room = (uint32_t)video_pw() * (uint32_t)P(DOCK_TILE_L +
+                                    2 * DOCK_PAD + 2 * DOCK_KEEP_M);
+    int keep = !hopping && video_prow32(0) && w > 0 && h > 0;
     if (keep && !dock_keep && !dock_keep_tried) {
         dock_keep_tried = 1;
-        uint32_t px = (uint32_t)video_w() * (DOCK_TILE_L + 2 * DOCK_PAD +
-                                             2 * DOCK_KEEP_M);
         dock_keep = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
-            (px * 4 + 4095) / 4096);
+            (room * 4 + 4095) / 4096);
     }
-    keep = keep && dock_keep && w * h <= video_w() * (DOCK_TILE_L +
-                                    2 * DOCK_PAD + 2 * DOCK_KEEP_M);
+    keep = keep && dock_keep && (uint32_t)(w * h) <= room;
 
     uint32_t state = 0, under = 0;
     if (keep) {
@@ -2833,13 +3041,13 @@ static void draw_dock(void)
     }
     if (keep && dock_kept && x == dk_x && y == dk_y && w == dk_w &&
         h == dk_h && state == dk_state && under == dk_under) {
-        video_blit_rgb(x, y, w, h, dock_keep, w);
+        video_pblit_rgb(x, y, w, h, dock_keep, w);
     } else {
         draw_dock_glass(&d);
         dock_kept = 0;
         if (keep) {
             for (int j = 0; j < h; j++)
-                memcpy(dock_keep + j * w, video_row32(y + j) + x,
+                memcpy(dock_keep + j * w, video_prow32(y + j) + x,
                        (uint32_t)w * 4);
             dk_x = x;
             dk_y = y;
@@ -3190,7 +3398,9 @@ static void search_go(int i)
         /* A picture to the viewer, anything else to the editor */
         const char *with = ends_with(f.name, ".png") ||
                            ends_with(f.name, ".jpg") ||
-                           ends_with(f.name, ".tsc") ? "gimg " : "gedit ";
+                           ends_with(f.name, ".jpeg") ||
+                           ends_with(f.name, ".bmp") ||
+                           ends_with(f.name, ".psc") ? "gimg " : "gedit ";
         char cmd[96];
         int n = 0;
         for (int k = 0; with[k]; k++)
@@ -3293,6 +3503,75 @@ static void draw_search(void)
 
 /* --- The launch menu ------------------------------------------------------ */
 
+/* sin(15 k degrees) * 1024: the points of a circle, an arc's corners */
+static const int16_t sin24[24] = {
+    0, 265, 512, 724, 887, 989, 1024, 989, 887, 724, 512, 265,
+    0, -265, -512, -724, -887, -989, -1024, -989, -887, -724, -512, -265
+};
+
+/* An arc round (cx, cy) - sixteenths - from k0 to k1 in fifteen-degree
+   steps, nought at the top and going clockwise */
+static void arc16(int cx, int cy, int r, int k0, int k1, int t, uint32_t c)
+{
+    for (int k = k0; k < k1; k++) {
+        int a = k % 24, b = (k + 1) % 24;
+        gfx_line16(cx + sin24[a] * r / 1024, cy - sin24[(a + 6) % 24] * r / 1024,
+                   cx + sin24[b] * r / 1024, cy - sin24[(b + 6) % 24] * r / 1024,
+                   t, c, 255);
+    }
+}
+
+/* The four of the menu's system part, drawn rather than lettered: a
+   padlock, a door with an arrow out of it, an arrow going round and
+   the power sign - in a square of side s at (x, y) */
+static void session_icon(int what, int x, int y, int s, uint32_t c)
+{
+    int u = s * 16;                     /* the square, in sixteenths */
+    int x0 = x * 16, y0 = y * 16, cx = x0 + u / 2, cy = y0 + u / 2;
+    int t = s * 16 / 10;                /* the stroke */
+    switch (what) {
+    case SESS_LOCK: {
+        int bw = u * 6 / 10, bh = u * 9 / 20;
+        int bx = cx - bw / 2, by = y0 + u * 9 / 20;
+        gfx_rrect16(bx, by, bw, bh, u / 10, c, 255);
+        int r = bw / 2 - u / 10;
+        arc16(cx, by - u / 20, r, 18, 30, t, c);
+        gfx_line16(cx - r, by - u / 20, cx - r, by, t, c, 255);
+        gfx_line16(cx + r, by - u / 20, cx + r, by, t, c, 255);
+        break;
+    }
+    case SESS_LOGOUT: {
+        int l = x0 + u / 6, r = x0 + u / 2, tp = y0 + u / 6, bt = y0 + u * 5 / 6;
+        gfx_line16(r, tp, l, tp, t, c, 255);
+        gfx_line16(l, tp, l, bt, t, c, 255);
+        gfx_line16(l, bt, r, bt, t, c, 255);
+        int ax = x0 + u * 9 / 10, ah = u / 5;
+        gfx_line16(x0 + u * 2 / 5, cy, ax, cy, t, c, 255);
+        gfx_line16(ax - ah, cy - ah, ax, cy, t, c, 255);
+        gfx_line16(ax - ah, cy + ah, ax, cy, t, c, 255);
+        break;
+    }
+    case SESS_RESTART: {
+        int r = u * 7 / 20;
+        arc16(cx, cy, r, 2, 22, t, c);
+        /* The head at the arc's end (330 degrees), pointing on round:
+           the way on there is up and to the right, and the head's two
+           strokes go back from it at 45 degrees either side */
+        int hx = cx + sin24[22] * r / 1024, hy = cy - sin24[4] * r / 1024;
+        int ah = u / 4;
+        gfx_line16(hx, hy, hx - ah * 97 / 100, hy - ah * 26 / 100, t, c, 255);
+        gfx_line16(hx, hy, hx - ah * 26 / 100, hy + ah * 97 / 100, t, c, 255);
+        break;
+    }
+    default: {                          /* the power sign */
+        int r = u * 7 / 20;
+        arc16(cx, cy, r, 2, 22, t, c);
+        gfx_line16(cx, cy - r - u / 12, cx, cy - u / 20, t, c, 255);
+        break;
+    }
+    }
+}
+
 static void draw_menu(void)
 {
     if (!menu_open)
@@ -3322,6 +3601,22 @@ static void draw_menu(void)
         ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
                      ui_font_baseline_in(MENU_PX, iy, MENU_ROW), label,
                      over ? L.accent_text : L.menu_text);
+    }
+
+    int sy = menu_item_y(MENU_N) + MENU_SEP / 2;
+    gfx_fill(x + 12, sy, MENU_W - 24, 1, L.menu_text, 50);
+    for (int i = 0; i < SESS_N; i++) {
+        int iy = session_item_y(i);
+        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, MENU_ROW);
+        if (over)
+            gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6, L.accent,
+                      255);
+        uint32_t ink = over ? L.accent_text : L.menu_text;
+        session_icon(i, x + 10, iy + (MENU_ROW - MENU_ICON) / 2, MENU_ICON,
+                     ink);
+        ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
+                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                     session_items[i], ink);
     }
 }
 
@@ -3447,7 +3742,9 @@ static volatile int shot_wanted;       /* Print Screen was pressed */
 
 static void save_screenshot(void)
 {
-    int w = video_w(), h = video_h();
+    /* The panel's pixels, all of them: a picture of the screen is a
+       picture of what is on the glass */
+    int w = video_pw(), h = video_ph();
     uint8_t *row = kmalloc((uint32_t)w);
     if (!row)
         return;
@@ -3489,7 +3786,7 @@ static void save_screenshot(void)
         uint32_t off = 8;
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                uint32_t c = video_getpixel_rgb(x, y);
+                uint32_t c = video_pgetpixel_rgb(x, y);
                 rgb[x * 3] = (uint8_t)(c >> 16);
                 rgb[x * 3 + 1] = (uint8_t)(c >> 8);
                 rgb[x * 3 + 2] = (uint8_t)c;
@@ -3545,8 +3842,240 @@ static void save_screenshot(void)
     desktop_notify("Screenshot", note);
 }
 
+static int compositor_running;
+
+/* --- The lock ---------------------------------------------------------------
+ *
+ * Ctrl+Alt+L, or 'lock' in the shell: the screen shows the background,
+ * the time and a field, and nothing of what is on the desktop. Keys go
+ * to the field and nowhere else - not to a window, not to the shell -
+ * and the pointer reaches nothing. The admin's password opens it again,
+ * checked by the desktop's own thread (the keys arrive in an
+ * interrupt, and checking a password is not an interrupt's work).
+ */
+static char lock_pass[32];
+static volatile int lock_len;
+static volatile int lock_try;          /* Enter: the thread checks */
+static uint32_t lock_wrong_at;         /* when a wrong one was given */
+static int lock_wrong;
+static int lock_out;                   /* it was a log out, not a lock */
+
+int desktop_lock(void)
+{
+    if (!compositor_running || kiosk)
+        return -1;
+    lock_len = 0;
+    lock_try = 0;
+    lock_wrong = 0;
+    lock_out = 0;
+    ask = -1;
+    search_close();
+    menu_open = 0;
+    locked = 1;
+    return 0;
+}
+
+/* Logging out: every program is asked to end, as its red light would
+   ask it - and one that does not answer is ended anyway (reap_windows)
+   - and then the lock is what is left. The kernel's own windows stay:
+   they are the machine's, not the session's. */
+static void log_out(void)
+{
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used && wins[i].content && wins[i].owner >= 0)
+            close_window(i);
+    desktop_lock();
+    lock_out = 1;
+}
+
+/* What was asked about, done - by the desktop's thread */
+static void session_do(int what)
+{
+    if (what == SESS_LOGOUT) {
+        log_out();
+    } else if (what == SESS_RESTART) {
+        printk("Restarting...\n");
+        if (!acpi_reboot())
+            outb(0x64, 0xFE);      /* a pulse through the keyboard controller */
+        desktop_notify("System", "The machine did not restart");
+    } else if (what == SESS_SHUTDOWN) {
+        printk("Powering off...\n");
+        acpi_poweroff();
+        desktop_notify("System", "The machine did not power off");
+    }
+}
+
+/* The question: a card in the middle of a dimmed screen, the question,
+   what it will do, and two buttons - Enter is the one on the right,
+   Esc is Cancel */
+static void draw_ask(void)
+{
+    if (ask_go) {
+        ask_go = 0;
+        int what = ask;
+        ask = -1;
+        if (what > SESS_LOCK && what < SESS_N)
+            session_do(what);
+        return;
+    }
+    if (ask <= SESS_LOCK || ask >= SESS_N)
+        return;
+    static const char *const title[SESS_N] = {
+        "", "Log out?", "Restart the computer?", "Shut down the computer?"
+    };
+    static const char *const body[SESS_N] = {
+        "", "Open programs will be closed and the",
+        "Open programs will be closed and the",
+        "Open programs will be closed and the"
+    };
+    static const char *const body2[SESS_N] = {
+        "", "screen locked.", "machine started again.",
+        "machine switched off."
+    };
+    static const char *const act[SESS_N] = {
+        "", "Log Out", "Restart", "Shut Down"
+    };
+    int what = ask;
+    uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    uint32_t row = theme_dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+
+    gfx_fill(0, 0, video_w(), video_h(), 0x000000, theme_dark ? 80 : 50);
+    int x = ask_x(), y = ask_y();
+    gfx_shadow(x, y, ASK_W, ASK_H, ASK_R, 18, theme_dark ? 160 : 100, 6);
+    gfx_rrect(x, y, ASK_W, ASK_H, ASK_R, L.win_bg, 255);
+    gfx_rring16(x * 16, y * 16, ASK_W * 16, ASK_H * 16, ASK_R * 16, 16,
+                L.win_line, 200);
+
+    /* What it is about, as in the menu, on the accent */
+    int d = 40;
+    gfx_disc16((x + ASK_PAD) * 16 + d * 8, (y + ASK_PAD) * 16 + d * 8, d * 8,
+               L.accent, 255);
+    session_icon(what, x + ASK_PAD + 9, y + ASK_PAD + 9, d - 18,
+                 L.accent_text);
+    int tx = x + ASK_PAD + d + 14;
+    ui_font_text(UI_BOLD, 15, tx, y + ASK_TITLE_Y, title[what], text);
+    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y, body[what], dim);
+    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y + 17, body2[what], dim);
+
+    int by = ask_btn_y();
+    int over_no = in_rect(mouse_x, mouse_y, ask_no_x(), by, ASK_BTN_W,
+                          ASK_BTN_H);
+    int over_do = in_rect(mouse_x, mouse_y, ask_do_x(), by, ASK_BTN_W,
+                          ASK_BTN_H);
+    gfx_rrect(ask_no_x(), by, ASK_BTN_W, ASK_BTN_H, 8, row,
+              over_no ? 255 : 200);
+    gfx_rrect(ask_do_x(), by, ASK_BTN_W, ASK_BTN_H, 8, L.accent,
+              over_do ? 220 : 255);
+    const char *no = "Cancel";
+    int nw = ui_font_width(UI_SANS, UI_PX, no);
+    ui_font_text(UI_SANS, UI_PX, ask_no_x() + (ASK_BTN_W - nw) / 2,
+                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), no, text);
+    int aw = ui_font_width(UI_BOLD, UI_PX, act[what]);
+    ui_font_text(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - aw) / 2,
+                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), act[what],
+                 L.accent_text);
+}
+
+static void lock_key(char c)
+{
+    if (c == '\n' || c == '\r') {
+        lock_try = 1;
+    } else if (c == '\b') {
+        if (lock_len > 0)
+            lock_pass[--lock_len] = 0;
+    } else if (c == 27) {
+        lock_len = 0;
+    } else if (c >= 0x20 && c < 0x7F && lock_len < (int)sizeof(lock_pass) - 1) {
+        lock_pass[lock_len++] = c;
+        lock_pass[lock_len] = 0;
+    }
+}
+
+static void draw_lock(void)
+{
+    if (lock_try) {
+        lock_try = 0;
+        lock_pass[lock_len] = 0;
+        int ok = lock_len && user_password_ok(lock_pass);
+        for (int i = 0; i < (int)sizeof(lock_pass); i++)
+            lock_pass[i] = 0;
+        lock_len = 0;
+        if (ok) {
+            locked = 0;
+            lock_wrong = 0;
+            lock_out = 0;
+            return;
+        }
+        lock_wrong = 1;
+        lock_wrong_at = frames;
+    }
+    int w = video_w(), h = video_h();
+    gfx_fill(0, 0, w, h, 0x000000, theme_dark ? 90 : 50);
+
+    struct rtc_time t;
+    rtc_read(&t);
+    char hm[6] = { (char)('0' + t.hour / 10), (char)('0' + t.hour % 10), ':',
+                   (char)('0' + t.min / 10), (char)('0' + t.min % 10), 0 };
+    int ty = h / 3;
+    int tw = ui_font_width(UI_BOLD, LOCK_TIME_PX, hm);
+    ui_font_text(UI_BOLD, LOCK_TIME_PX, (w - tw) / 2, ty, hm, 0xFFFFFF);
+    clock_refresh();
+    int dw = ui_font_width(UI_SANS, 15, clock_text);
+    ui_font_text(UI_SANS, 15, (w - dw) / 2, ty + 30, clock_text, 0xFFFFFF);
+
+    /* The field: who this machine is, and the dots of what is typed */
+    const char *name = config_get("name");
+    if (!name || !name[0])
+        name = "ThreadOS";
+    int nw = ui_font_width(UI_BOLD, 15, name);
+    int fy = h * 2 / 3 - LOCK_FIELD_H;
+    ui_font_text(UI_BOLD, 15, (w - nw) / 2, fy - 14, name, 0xFFFFFF);
+    int fx = (w - LOCK_FIELD_W) / 2;
+    gfx_frost(fx, fy, LOCK_FIELD_W, LOCK_FIELD_H, LOCK_FIELD_H / 2, 8,
+              0xFFFFFF, 60);
+    gfx_rring16(fx * 16, fy * 16, LOCK_FIELD_W * 16, LOCK_FIELD_H * 16,
+                LOCK_FIELD_H * 8, 16, 0xFFFFFF, 120);
+    if (lock_len) {
+        int dot = 8, gap = 6, n = lock_len > 16 ? 16 : lock_len;
+        int x = (w - (n * dot + (n - 1) * gap)) / 2;
+        for (int i = 0; i < n; i++)
+            gfx_disc16((x + i * (dot + gap)) * 16 + dot * 8,
+                       (fy + LOCK_FIELD_H / 2) * 16, dot * 8, 0xFFFFFF, 255);
+    } else {
+        const char *p = "Password";
+        int pw = ui_font_width(UI_SANS, MENU_PX, p);
+        ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
+                     ui_font_baseline_in(MENU_PX, fy, LOCK_FIELD_H), p,
+                     0xD8D8DC);
+    }
+    const char *say = lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
+                          ? "Wrong password - try again"
+                          : lock_out ? "Enter the admin's password to log in"
+                          : "Enter the admin's password to unlock";
+    int sw = ui_font_width(UI_SANS, UI_PX, say);
+    ui_font_text(UI_SANS, UI_PX, (w - sw) / 2, fy + LOCK_FIELD_H + 22, say,
+                 lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
+                     ? 0xFF6961 : 0xD8D8DC);
+}
+
 static void desktop_on_key(char c)
 {
+    if (locked) {                       /* the keys are the field's alone */
+        lock_key(c);
+        return;
+    }
+    if (ask >= 0) {                     /* a question: Enter or Esc */
+        if (c == '\n' || c == '\r')
+            ask_go = 1;
+        else if (c == 27)
+            ask = -1;
+        return;
+    }
+    if (c == KEY_LOCK) {
+        desktop_lock();
+        return;
+    }
     if (c == KEY_SEARCH) {
         if (search_open)
             search_close();
@@ -3598,7 +4127,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
     for (int i = 0; i < MAX_WIN; i++) {
         if (wins[i].used)
             continue;
-        uint32_t bytes = (uint32_t)(cw * ch);
+        uint32_t bytes = (uint32_t)(PC(cw) * PC(ch));
         uint8_t *buf = win_buf_alloc(bytes);
         if (!buf)
             return -1;
@@ -3635,6 +4164,8 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->content = buf;
         w->cw = cw;
         w->ch = ch;
+        w->pcw = PC(cw);
+        w->pch = PC(ch);
         w->used = 1;
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
@@ -3734,16 +4265,15 @@ int desktop_win_truecolour(int winid, int owner)
     if (win->truecolour)
         return 0;
 
-    uint32_t bytes = (uint32_t)(win->cw * win->ch) * 4u;
+    uint32_t n = (uint32_t)(win->pcw * win->pch);
+    uint32_t bytes = n * 4u;
     uint32_t *buf = (uint32_t *)win_buf_alloc(bytes);
     if (!buf)
         return -1;
     /* What was already drawn stays drawn - a program that asks after
        painting its chrome does not lose it. */
-    for (int j = 0; j < win->ch; j++)
-        for (int i = 0; i < win->cw; i++)
-            buf[j * win->cw + i] =
-                video_palette_rgb(win->content[j * win->cw + i]);
+    for (uint32_t i = 0; i < n; i++)
+        buf[i] = video_palette_rgb(win->content[i]);
     win_buf_free(win->content, win->content_bytes);
     win->content = (uint8_t *)buf;
     win->content_bytes = bytes;
@@ -3790,6 +4320,23 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
     if (!win->truecolour)
         return -1;
 
+    if (video_k() != 16) {
+        /* A picture has no outline to draw again at the panel's size:
+           each of its pixels is the block it covers */
+        for (int row = 0; row < h; row++) {
+            if (y + row < 0 || y + row >= win->ch)
+                continue;
+            const uint32_t *src = pixels + (long)row * w;
+            int py0 = P(y + row), py1 = P(y + row + 1);
+            for (int col = 0; col < w; col++) {
+                if (x + col < 0 || x + col >= win->cw)
+                    continue;
+                buf_prect(win, P(x + col), py0, P(x + col + 1), py1, src[col]);
+            }
+        }
+        return 0;
+    }
+
     for (int row = 0; row < h; row++) {
         int dy = y + row;
         if (dy < 0 || dy >= win->ch)
@@ -3821,8 +4368,8 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
         return -1;
     /* The window's own pixels, said explicitly: the compositor may be
        in the middle of a frame on another core, drawing somewhere else */
-    struct gfx_surface t = { (uint32_t *)win->content, win->cw, win->ch,
-                             win->cw };
+    struct gfx_surface t = { (uint32_t *)win->content, win->pcw, win->pch,
+                             win->pcw, video_k() };
     int a = d->a < 0 ? 0 : d->a > 255 ? 255 : d->a;
     int r = d->r < 0 ? 0 : d->r;
     switch (d->op) {
@@ -4046,14 +4593,31 @@ static void desktop_thread(void *arg)
 {
     (void)arg;
     /* How large a logical pixel is. Zero - the default - means the
-       screen decides: a laptop's own resolution gets two, everything
-       smaller gets one. A person who disagrees says so once and it is
+       panel decides (kernel/video.c): a laptop's 1080 rows get one and
+       a half, 1440 two, anything of 768 or fewer one. A person who
+       disagrees says so once - 'scale 125', in per cent - and it is
        remembered, like the background and the wallpaper. */
     video_set_scale((int)config_get_num("scale", 0));
 
-    /* Try the high VESA resolution (640x480x32); when there is no
-       framebuffer - fall back to mode 13h (320x200) */
-    if (video_init_vesa(640, 480) < 0)
+    /* The resolution: the panel's own (its EDID says which), unless the
+       'resolution' setting names one - "1024x768". Without either,
+       640x480; without a framebuffer at all, mode 13h (320x200). Where
+       the loader set the mode, it stays what the loader set. */
+    int rw = 0, rh = 0;
+    const char *res = config_get("resolution");
+    if (res && res[0] >= '1' && res[0] <= '9') {
+        const char *q = res;
+        while (*q >= '0' && *q <= '9')
+            rw = rw * 10 + (*q++ - '0');
+        if (*q == 'x' || *q == 'X') {
+            q++;
+            while (*q >= '0' && *q <= '9')
+                rh = rh * 10 + (*q++ - '0');
+        }
+        if (rw < 320 || rh < 200 || rw > 7680 || rh > 4320)
+            rw = rh = 0;
+    }
+    if (video_init_vesa(rw, rh) < 0)
         video_init();
 
     /* The palette, for the programs' windows and for a screen of 256
@@ -4098,6 +4662,15 @@ static void desktop_thread(void *arg)
 
         draw_background();
 
+        if (locked) {
+            draw_lock();
+            draw_cursor(mx, my);
+            video_present();
+            frames++;
+            frame_done(began);
+            continue;
+        }
+
         if (kiosk) {
             kiosk_frame(mx, my);
             continue;
@@ -4128,6 +4701,7 @@ static void desktop_thread(void *arg)
         draw_menu();
         draw_notes();
         draw_search();
+        draw_ask();
         /* What was just saved stays on the screen for a moment - the
            hint itself lives one frame, so it is asked for again until
            the moment is up. */
@@ -4149,8 +4723,6 @@ static void desktop_thread(void *arg)
         frame_done(began);
     }
 }
-
-static int compositor_running;
 
 int desktop_start_kiosk(const char *program)
 {

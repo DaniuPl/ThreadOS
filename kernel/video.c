@@ -28,6 +28,7 @@
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/io.h"
+#include "include/printk.h"
 
 /* The state of the current mode. We draw into 'fb' (the working
    buffer); 'front' is the visible framebuffer. When they differ
@@ -47,36 +48,51 @@ static volatile uint8_t *shadow;
 static volatile int shadow_valid;
 static uint32_t present_rows;
 /* Two sizes, and the difference between them is the whole of what
-   "scaling the interface" means here.
+ * "scaling the interface" means here.
  *
  * Everything above this file - the compositor, every program, the
- * mouse - draws in LOGICAL pixels and asks video_w()/video_h() how
- * many there are. The screen has its own, physical, number of them.
- * When a panel is large enough that an eight pixel letter would be a
- * millimetre and a half tall, the logical screen is made half the
- * physical one and every logical pixel is put on the screen as a
- * square of four.
+ * mouse - lays itself out in LOGICAL pixels and asks video_w() and
+ * video_h() how many there are. The panel has its own, physical,
+ * number of them, and on a laptop's panel there are more: a 15-inch
+ * 1920x1080 screen is a desktop 1280x720 across, every logical pixel
+ * one and a half of the panel's.
  *
- * It is pixel doubling, and it is worth saying plainly what that costs
- * and what it does not. It does not sharpen anything: the letters are
- * the same eight-by-eight letters, drawn twice as large, and a
- * photograph shown on such a screen has half the detail the panel
- * could carry. What it buys is that not one line of layout anywhere in
- * this system had to change - and a machine whose every window, icon
- * and status line is placed in absolute pixels would otherwise have
- * had all of them rewritten, and every test with them. */
-static int vid_w = 320, vid_h = 200;
-static int vid_pitch = 320;          /* bytes per row */
+ * It used to be pixel doubling: the desktop drawn small and every
+ * pixel put on the panel as a square of four - an eight pixel letter
+ * drawn twice as large, not sharper. Now the buffer the compositor
+ * draws into is the panel's own size, and kernel/gfx.c and
+ * kernel/uitext.c draw every shape and every letter at that size from
+ * logical numbers: an edge worked out in the panel's pixels, a letter
+ * rendered from its outline at one and a half times the size. The
+ * scale is in sixteenths, so it need not be a whole number.
+ *
+ * What still writes single pixels through this file - the 8x8 letters,
+ * the old palette drawing - gets each logical pixel as the block of
+ * panel pixels it covers, which is the doubling it always was. */
+static int vid_w = 320, vid_h = 200;  /* logical */
+static int vid_pitch = 320;          /* bytes per row of 'fb' (physical) */
 static int phys_w = 320, phys_h = 200;
-static int phys_pitch = 320;
-static int scale = 1;                /* logical pixels per screen pixel */
+static int phys_pitch = 320;         /* bytes per row of 'front' */
+static int k16 = 16;                 /* panel pixels per logical one, /16 */
 static int scale_wish;               /* 0 = decide from the panel */
+static int edid_mm_w, edid_mm_h;     /* the panel's size, when it says */
 static int vid_bpp = 8;
 static int vid_bypp = 1;             /* bytes per pixel: 1, 3 or 4 */
 static uint32_t palette_rgb[256];    /* the software palette (0x00RRGGBB) */
 
 int video_w(void) { return vid_w; }
 int video_h(void) { return vid_h; }
+int video_pw(void) { return phys_w; }
+int video_ph(void) { return phys_h; }
+int video_k(void) { return k16; }
+
+/* A logical coordinate on the panel: rounded down, so that two
+   neighbouring logical pixels cover neighbouring panel pixels and
+   nothing is left between them */
+static inline int to_p(int v)
+{
+    return k16 == 16 ? v : (int)((long)v * k16 / 16);
+}
 
 /* --- Mode 13h (VGA registers) --- */
 static uint8_t mode13[] = {
@@ -146,7 +162,7 @@ void video_init(void)
 {
     vid_w = 320; vid_h = 200; vid_pitch = 320; vid_bpp = 8;
     phys_w = 320; phys_h = 200; phys_pitch = 320;
-    scale = 1;                       /* nothing to scale down from */
+    k16 = 16;                        /* one for one */
     shadow = (uint8_t *)0;
     shadow_valid = 0;
     fb = front = (uint8_t *)(uintptr_t)0xA0000;  /* no double buffering */
@@ -166,22 +182,37 @@ static void dispi(uint16_t idx, uint16_t val)
     outw(VBE_DATA, val);
 }
 
-/* How many screen pixels one logical pixel is drawn as.
+/* How many panel pixels one logical pixel is, in sixteenths.
  *
- * Asked once, when the mode is set up. A wish of zero means "decide
- * from the panel": a screen nine hundred pixels tall or more is a
- * laptop's own resolution or better, and there an eight pixel letter
- * is about a millimetre and a half - readable through a magnifying
- * glass and not otherwise. Everything below that is left alone,
- * because doubling a 640x480 screen would leave a desktop 320 pixels
- * across, which is not a desktop. */
+ * Asked for (the 'scale' setting: 1 to 4 as multiples, 100 to 400 as a
+ * percentage), or decided from the panel. When the panel says how
+ * large it is (EDID), the answer is its density against the 96 dots an
+ * inch the desktop was laid out for. When it does not, its height
+ * stands in for that: a laptop's panel is about as tall in inches
+ * whatever its resolution, so 720 rows is taken for one and the rest
+ * scaled from it - 1080 is one and a half, 1440 two. Either way to the
+ * nearest quarter, and never below one: a desktop smaller than its
+ * panel is not a desktop. */
 static void decide_scale(void)
 {
-    scale = scale_wish > 0 ? scale_wish : (phys_h >= 900 ? 2 : 1);
-    if (scale < 1)
-        scale = 1;
-    if (scale > 4)
-        scale = 4;
+    int k;
+    if (scale_wish >= 100)
+        k = (scale_wish * 16 + 50) / 100;
+    else if (scale_wish > 0)
+        k = scale_wish * 16;
+    else if (edid_mm_w >= 100 && edid_mm_h >= 60)
+        /* dots an inch = w / (mm / 25.4); against 96, in sixteenths */
+        k = (int)(((long)phys_w * 254 * 16 / ((long)edid_mm_w * 960) + 2)
+                  / 4 * 4);
+    else
+        k = (phys_h * 16 / 720 + 2) / 4 * 4;
+    if (k < 16)
+        k = 16;
+    if (k > 64)
+        k = 64;
+    k16 = k;
+    vid_w = phys_w * 16 / k16;
+    vid_h = phys_h * 16 / k16;
 }
 
 void video_set_scale(int s)
@@ -189,24 +220,23 @@ void video_set_scale(int s)
     scale_wish = s;
 }
 
+/* As a percentage: 100, 125, 150 ... */
 int video_scale(void)
 {
-    return scale;
+    return (k16 * 100 + 8) / 16;
 }
 
 /* The working buffer, and the copy of the screen next to it, are both
-   the LOGICAL size - that is what makes the scaling cost nothing
-   above this file. Without room for them there is no scaling and no
-   double buffering either, and we draw straight onto the screen. */
+   the panel's size - the drawing is done at that size. Without room for
+   them there is no double buffering, and we draw straight onto the
+   screen. */
 static void take_buffers(void)
 {
-    uint32_t bytes = (uint32_t)vid_h * (uint32_t)vid_pitch;
+    vid_pitch = phys_w * vid_bypp;
+    uint32_t bytes = (uint32_t)phys_h * (uint32_t)vid_pitch;
     uint32_t pages = (bytes + 4095) / 4096;
     uint32_t back = pmm_alloc_contiguous(pages);
     if (!back) {
-        scale = 1;                   /* nothing to scale into */
-        vid_w = phys_w;
-        vid_h = phys_h;
         vid_pitch = phys_pitch;
         fb = front;
         shadow = (uint8_t *)0;
@@ -219,6 +249,92 @@ static void take_buffers(void)
     shadow_valid = 0;
 }
 
+/* --- The panel's own resolution ---------------------------------------
+ *
+ * A screen says what it is in a block of 128 bytes, the EDID: who made
+ * it, how large it is, and - in its first timing descriptor - the mode
+ * it was built for, its native one. Anything else is scaled by the
+ * screen itself, and a scaled picture is a soft one.
+ *
+ * A real card hands the EDID over through its own registers, which
+ * this system has no driver for; there the loader's mode is all there
+ * is. QEMU's standard VGA carries the block at the start of its second
+ * memory window (BAR2), and that is read here: the same thing a driver
+ * would do, on the one card this system drives itself.
+ */
+static int edid_w, edid_h;
+
+static int edid_valid(const volatile uint8_t *e)
+{
+    static const uint8_t magic[8] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
+    uint8_t sum = 0;
+    for (int i = 0; i < 8; i++)
+        if (e[i] != magic[i])
+            return 0;
+    for (int i = 0; i < 128; i++)
+        sum = (uint8_t)(sum + e[i]);
+    return sum == 0;
+}
+
+/* Reads the preferred mode and the size out of a block; 0 when it does
+   not hold one */
+int video_parse_edid(const uint8_t *e, int *w, int *h, int *mm_w, int *mm_h)
+{
+    if (!edid_valid(e))
+        return 0;
+    const uint8_t *d = e + 54;             /* the first descriptor */
+    int clock = d[0] | (d[1] << 8);
+    if (!clock)
+        return 0;                          /* not a timing */
+    *w = d[2] | ((d[4] & 0xF0) << 4);
+    *h = d[5] | ((d[7] & 0xF0) << 4);
+    *mm_w = d[12] | ((d[14] & 0xF0) << 4);
+    *mm_h = d[13] | ((d[14] & 0x0F) << 8);
+    if (*mm_w < 10 || *mm_h < 10) {         /* only in centimetres, then */
+        *mm_w = e[21] * 10;
+        *mm_h = e[22] * 10;
+    }
+    return *w > 0 && *h > 0;
+}
+
+static void read_edid(void)
+{
+    struct pci_dev d;
+    if (pci_find_device(0x1234, 0x1111, &d) < 0)
+        return;                            /* not the standard VGA */
+    uint32_t bar2 = d.bar[2];
+    if (!bar2 || (bar2 & 1))
+        return;
+    bar2 &= 0xFFFFFFF0u;
+    if (MAP_PHYS(bar2, 4096) < 0)
+        return;
+    uint8_t e[128];
+    const volatile uint8_t *m = (const volatile uint8_t *)(uintptr_t)bar2;
+    for (int i = 0; i < 128; i++)
+        e[i] = m[i];
+    int w, h, mw, mh;
+    if (!video_parse_edid(e, &w, &h, &mw, &mh))
+        return;
+    edid_w = w;
+    edid_h = h;
+    edid_mm_w = mw;
+    edid_mm_h = mh;
+}
+
+/* The panel's size, said by the loader from the EDID it could read and
+   we cannot (kernel/mb2.c) */
+void video_panel_mm(int w, int h)
+{
+    edid_mm_w = w;
+    edid_mm_h = h;
+}
+
+void video_native(int *w, int *h)
+{
+    *w = edid_w;
+    *h = edid_h;
+}
+
 int video_init_vesa(int w, int h)
 {
     /* When the loader has already set a mode, we leave it alone: its
@@ -227,14 +343,11 @@ int video_init_vesa(int w, int h)
        buffer so that the compositor does not flicker. */
     if (video_have_loader_lfb()) {
         decide_scale();
-        vid_w = phys_w / scale;
-        vid_h = phys_h / scale;
-        vid_pitch = vid_w * vid_bypp;
         take_buffers();
-        /* A screen whose height does not divide by the scale has a
-           strip at the bottom that no logical row covers. It is
-           painted once, here, rather than left showing whatever the
-           card powered up with. */
+        /* A panel whose size does not divide by the scale has a strip
+           at the edge that no logical pixel covers. It is painted once,
+           here, rather than left showing whatever the card powered up
+           with. */
         for (int y = 0; y < phys_h; y++)
             memset((void *)(front + (uint32_t)y * phys_pitch), 0,
                    (uint32_t)phys_pitch);
@@ -246,6 +359,22 @@ int video_init_vesa(int w, int h)
     uint32_t lfb = pci_find_vga_lfb();
     if (!lfb)
         return -1;
+
+    /* Asked for nothing in particular (0x0): the panel's own mode, when
+       it says what that is, and 640x480 when it does not */
+    if (w <= 0 || h <= 0) {
+        read_edid();
+        w = edid_w ? edid_w : 640;
+        h = edid_h ? edid_h : 480;
+    }
+    /* The card's memory holds what it holds - 16 MiB by default, which
+       is 2560x1600 and a little more. Past that, the largest mode of
+       the same shape that fits. */
+    while ((uint32_t)w * h * 4 > 16u * 1024 * 1024 && w > 640) {
+        h = h * 7 / 8;
+        w = w * 7 / 8;
+    }
+    w &= ~7;
     if (MAP_PHYS(lfb, (uint32_t)w * h * 4) < 0)
         return -1;
 
@@ -260,9 +389,6 @@ int video_init_vesa(int w, int h)
     front = (uint8_t *)(uintptr_t)lfb;
 
     decide_scale();
-    vid_w = phys_w / scale;
-    vid_h = phys_h / scale;
-    vid_pitch = vid_w * 4;
     take_buffers();
 
     set_default_palette();
@@ -293,7 +419,7 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     phys_w = w;
     phys_h = h;
     phys_pitch = (int)pitch;
-    scale = 1;
+    k16 = 16;
     /* The depth the loader really gave. Hardcoding thirty-two bits
        here worked while the buffer came from the BIOS - UEFI firmware
        can report 24, and then a full-word write tramples the
@@ -357,9 +483,9 @@ void video_console_cell(int col, int row, char ch, uint8_t attr)
  * always the right one again. */
 int video_read_row(int y, uint8_t *dst, int max)
 {
-    if (!dst || y < 0 || y >= vid_h)
+    if (!dst || y < 0 || y >= phys_h)
         return -1;
-    int n = vid_w < max ? vid_w : max;
+    int n = phys_w < max ? phys_w : max;
 
     if (vid_bpp == 8) {
         for (int x = 0; x < n; x++)
@@ -429,34 +555,12 @@ uint32_t video_present_rows(void)
     return present_rows;
 }
 
-/* One logical row onto the screen, as 'scale' screen rows of 'scale'
-   pixels each. At a scale of one this is the copy it always was. */
+/* One row of the drawing buffer onto the screen - the same size both
+   sides, since the drawing is done at the panel's own size */
 static void put_row(int y, const uint8_t *src)
 {
-    for (int r = 0; r < scale; r++) {
-        int py = y * scale + r;
-        if (py >= phys_h)
-            return;
-        volatile uint8_t *dst = front + (uint32_t)py * phys_pitch;
-        if (scale == 1) {
-            memcpy((void *)dst, src, (uint32_t)vid_pitch);
-            continue;
-        }
-        if (vid_bypp == 4) {
-            const uint32_t *s32 = (const uint32_t *)src;
-            volatile uint32_t *d32 = (volatile uint32_t *)dst;
-            for (int x = 0; x < vid_w; x++) {
-                uint32_t c = s32[x];
-                for (int k = 0; k < scale; k++)
-                    d32[x * scale + k] = c;
-            }
-            continue;
-        }
-        for (int x = 0; x < vid_w; x++)
-            for (int k = 0; k < scale; k++)
-                for (int b = 0; b < vid_bypp; b++)
-                    dst[(x * scale + k) * vid_bypp + b] = src[x * vid_bypp + b];
-    }
+    memcpy((void *)(front + (uint32_t)y * phys_pitch), src,
+           (uint32_t)phys_w * vid_bypp);
 }
 
 void video_present(void)
@@ -471,18 +575,18 @@ void video_present(void)
            the next frame is sent whole once more */
         if (shadow)
             shadow_valid = 1;
-        for (int y = 0; y < vid_h; y++)
+        for (int y = 0; y < phys_h; y++)
             put_row(y, (const uint8_t *)(fb + (uint32_t)y * pitch));
         if (shadow)
-            memcpy((void *)shadow, (const void *)fb, (uint32_t)vid_h * pitch);
-        present_rows = (uint32_t)vid_h;
+            memcpy((void *)shadow, (const void *)fb, (uint32_t)phys_h * pitch);
+        present_rows = (uint32_t)phys_h;
         return;
     }
 
     /* A row is the unit: finer than that and the bookkeeping costs
        more than the writes it saves. */
     uint32_t rows = 0;
-    for (int y = 0; y < vid_h; y++) {
+    for (int y = 0; y < phys_h; y++) {
         uint32_t off = (uint32_t)y * pitch;
         const void *src = (const void *)(fb + off);
         if (!memcmp((const void *)(shadow + off), src, pitch))
@@ -510,10 +614,92 @@ static inline void put_px(volatile uint8_t *p, uint32_t rgb)
     }
 }
 
+/* --- in the panel's own pixels -------------------------------------- */
+
+uint32_t video_pgetpixel_rgb(int x, int y)
+{
+    if ((unsigned)x >= (unsigned)phys_w || (unsigned)y >= (unsigned)phys_h)
+        return 0;
+    volatile uint8_t *p = fb + y * vid_pitch + x * vid_bypp;
+    if (vid_bpp == 8)
+        return palette_rgb[*p];
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
+}
+
+void video_pputpixel_rgb(int x, int y, uint32_t rgb)
+{
+    if ((unsigned)x >= (unsigned)phys_w || (unsigned)y >= (unsigned)phys_h)
+        return;
+    if (vid_bpp == 8)
+        fb[y * vid_pitch + x] = video_nearest_index(rgb);
+    else
+        put_px(fb + y * vid_pitch + x * vid_bypp, rgb);
+}
+
+/* The drawing buffer's row as words, for code that works on many
+   pixels at once (kernel/gfx.c). NULL unless the screen is four bytes a
+   pixel - every other format goes through the pixel calls. */
+uint32_t *video_prow32(int y)
+{
+    if (vid_bypp != 4 || (unsigned)y >= (unsigned)phys_h)
+        return (uint32_t *)0;
+    return (uint32_t *)(uintptr_t)(fb + (uint32_t)y * vid_pitch);
+}
+
+/* A rectangle of the panel's pixels, clipped once and then whole rows */
+static void pfill(int x, int y, int w, int h, uint32_t rgb)
+{
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > phys_w) w = phys_w - x;
+    if (y + h > phys_h) h = phys_h - y;
+    if (w <= 0 || h <= 0)
+        return;
+    if (vid_bypp == 4) {
+        for (int j = 0; j < h; j++) {
+            uint32_t *row = video_prow32(y + j) + x;
+            for (int i = 0; i < w; i++)
+                row[i] = rgb;
+        }
+        return;
+    }
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++)
+            video_pputpixel_rgb(x + i, y + j, rgb);
+}
+
+/* A rectangle of colours in the panel's own pixels, one for one */
+void video_pblit_rgb(int x, int y, int w, int h, const uint32_t *src,
+                     int stride)
+{
+    if (!src)
+        return;
+    for (int j = 0; j < h; j++) {
+        int dy = y + j;
+        if ((unsigned)dy >= (unsigned)phys_h)
+            continue;
+        const uint32_t *row = src + (long)j * stride;
+        if (vid_bypp == 4 && x >= 0 && x + w <= phys_w) {
+            memcpy((void *)(fb + (uint32_t)dy * vid_pitch + (uint32_t)x * 4),
+                   row, (uint32_t)w * 4);
+            continue;
+        }
+        for (int i = 0; i < w; i++)
+            video_pputpixel_rgb(x + i, dy, row[i]);
+    }
+}
+
+/* --- in logical pixels: each one the block of the panel it covers ----- */
+
 void video_putpixel(int x, int y, uint8_t color)
 {
     if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
         return;
+    if (k16 != 16) {
+        pfill(to_p(x), to_p(y), to_p(x + 1) - to_p(x), to_p(y + 1) - to_p(y),
+              palette_rgb[color]);
+        return;
+    }
     if (vid_bpp == 8)
         fb[y * vid_pitch + x] = color;
     else
@@ -523,15 +709,10 @@ void video_putpixel(int x, int y, uint8_t color)
 void video_clear(uint8_t color)
 {
     if (vid_bpp == 8) {
-        for (int i = 0; i < vid_pitch * vid_h; i++)
+        for (int i = 0; i < vid_pitch * phys_h; i++)
             fb[i] = color;
     } else {
-        uint32_t c = palette_rgb[color];
-        for (int y = 0; y < vid_h; y++) {
-            volatile uint8_t *row = fb + (uint32_t)y * vid_pitch;
-            for (int x = 0; x < vid_w; x++)
-                put_px(row + x * vid_bypp, c);
-        }
+        pfill(0, 0, phys_w, phys_h, palette_rgb[color]);
     }
 }
 
@@ -599,51 +780,37 @@ uint32_t video_getpixel_rgb(int x, int y)
 {
     if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
         return 0;
-    volatile uint8_t *p = fb + y * vid_pitch + x * vid_bypp;
-    if (vid_bpp == 8)
-        return palette_rgb[*p];
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
+    return video_pgetpixel_rgb(to_p(x), to_p(y));
 }
 
 void video_putpixel_rgb(int x, int y, uint32_t rgb)
 {
     if ((unsigned)x >= (unsigned)vid_w || (unsigned)y >= (unsigned)vid_h)
         return;
-    if (vid_bpp == 8)
-        fb[y * vid_pitch + x] = video_nearest_index(rgb);
+    if (k16 != 16)
+        pfill(to_p(x), to_p(y), to_p(x + 1) - to_p(x), to_p(y + 1) - to_p(y),
+              rgb);
     else
-        put_px(fb + y * vid_pitch + x * vid_bypp, rgb);
+        video_pputpixel_rgb(x, y, rgb);
 }
 
-/* The drawing buffer's row as words, for code that works on many
-   pixels at once (kernel/gfx.c). NULL unless the screen is four bytes a
-   pixel - every other format goes through the pixel calls. */
+/* A logical row as words - only where logical and panel pixels are the
+   same; at any other scale a logical row is not a row of anything */
 uint32_t *video_row32(int y)
 {
-    if (vid_bypp != 4 || (unsigned)y >= (unsigned)vid_h)
+    if (k16 != 16 || (unsigned)y >= (unsigned)vid_h)
         return (uint32_t *)0;
-    return (uint32_t *)(uintptr_t)(fb + (uint32_t)y * vid_pitch);
+    return video_prow32(y);
 }
 
 void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb)
 {
-    /* Clipped once, then whole rows of words: the compositor fills
-       most of the screen with this every frame. */
-    if (vid_bypp == 4) {
-        if (x < 0) { w += x; x = 0; }
-        if (y < 0) { h += y; y = 0; }
-        if (x + w > vid_w) w = vid_w - x;
-        if (y + h > vid_h) h = vid_h - y;
-        for (int j = 0; j < h; j++) {
-            uint32_t *row = video_row32(y + j) + x;
-            for (int i = 0; i < w; i++)
-                row[i] = rgb;
-        }
+    if (k16 != 16) {
+        int x0 = to_p(x), y0 = to_p(y);
+        pfill(x0, y0, to_p(x + w) - x0, to_p(y + h) - y0, rgb);
         return;
     }
-    for (int j = 0; j < h; j++)
-        for (int i = 0; i < w; i++)
-            video_putpixel_rgb(x + i, y + j, rgb);
+    pfill(x, y, w, h, rgb);
 }
 
 void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
@@ -651,6 +818,19 @@ void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
 {
     if (!src)
         return;
+    if (k16 != 16) {
+        /* Each source pixel the block it covers - a picture the
+           compositor did not draw itself, and has no outline of */
+        for (int j = 0; j < h; j++) {
+            int py0 = to_p(y + j), py1 = to_p(y + j + 1);
+            const uint32_t *row = src + (long)j * stride;
+            for (int i = 0; i < w; i++) {
+                int px0 = to_p(x + i), px1 = to_p(x + i + 1);
+                pfill(px0, py0, px1 - px0, py1 - py0, row[i]);
+            }
+        }
+        return;
+    }
     for (int j = 0; j < h; j++) {
         int dy = y + j;
         if ((unsigned)dy >= (unsigned)vid_h)

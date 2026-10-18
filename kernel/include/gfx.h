@@ -18,10 +18,28 @@
 struct gfx_surface {
     uint32_t *px;
     int w, h, stride;         /* stride in pixels */
+    /* How many of its pixels one logical pixel is, in sixteenths: 24
+       is one and a half. 0 is the same as 16 - one for one - so a
+       surface set up without it is what it always was. w, h and stride
+       are in its own pixels. */
+    int k;
 };
 
 /* Where drawing goes; NULL = the screen */
 void gfx_target(const struct gfx_surface *s);
+/* ... and where it goes now (NULL = the screen) */
+const struct gfx_surface *gfx_current(void);
+
+/* A surface's scale in sixteenths (the screen's for NULL). Every call
+   below takes logical pixels and draws at the surface's own size;
+   gfx_pblend_s is the one that does not - one pixel of the surface's
+   own, for text, which is drawn at that size to begin with. */
+int gfx_k(const struct gfx_surface *t);
+void gfx_pblend_s(const struct gfx_surface *t, int x, int y, uint32_t c, int a);
+/* A picture already at the surface's own size, put down one for one
+   inside round corners - everything in the surface's own pixels */
+void gfx_pblit_round_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                       int r, const uint32_t *src, int stride, int a);
 
 /* The mix every soft edge in the system uses, text included:
    (over * a + under * (255 - a) + 127) / 255, per channel */

@@ -127,6 +127,11 @@
 #define SYS64_NOTIFY   70
 /* A background as a small picture: a1=&cmd {bg, dark, w, h, out} */
 #define SYS64_BG_PREVIEW 71
+/* The settings, as the 32-bit kernel hands them out (SYS_CFG_GET/SET):
+   a1=index, a2=&struct cfg_entry -> 0/-1; a1=name, a2=value -> 0, -1,
+   or -2 for a plain user */
+#define SYS64_CFG_GET  72
+#define SYS64_CFG_SET  73
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

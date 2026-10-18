@@ -46,8 +46,10 @@ static struct setting settings[] = {
     { "dock",   "1",        "the size of the dock: 0 small, 1 medium,\n"
                             "2 large", 0, { 0 } },
     { "volume", "80",     "volume, 0-100 (0 = silence)",        0, { 0 } },
-    { "scale",  "0",        "screen pixels per desktop pixel:\n"
-                            "0 lets the screen decide (a big panel gets 2)", 0, { 0 } },
+    { "scale",  "0",        "the desktop's scale: 0 lets the panel decide,\n"
+                            "100-400 per cent (or 1-4 times)", 0, { 0 } },
+    { "resolution", "native", "the screen's mode: native (the panel's own)\n"
+                            "or one like 1280x800", 0, { 0 } },
     { "motion", "1",        "windows opening and minimising: 0 still,\n"
                             "1 quick, 2-10 that many times slower", 0, { 0 } },
     /* Not the password - a number computed from it. The default is the

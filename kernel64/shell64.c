@@ -989,10 +989,12 @@ static void execute(const char *line)
     } else if (!strcmp(line, "screen")) {
         /* What the screen is, and how much of the last frame had to
            cross the bus to the card. */
-        printk("mode:            %dx%d, %s, scale %d\n", video_w(), video_h(),
-               video_true_colour() ? "true colour" : "256-colour palette", video_scale());
+        printk("mode:            %dx%d, %s, scale %d%%, panel %dx%d\n",
+               video_w(), video_h(),
+               video_true_colour() ? "true colour" : "256-colour palette",
+               video_scale(), video_pw(), video_ph());
         printk("last frame:      %u rows to the card (of %d)\n",
-               video_present_rows(), video_h());
+               video_present_rows(), video_ph());
         int fps, busy;
         if (desktop_frame_stats(&fps, &busy))
             printk("frames:          %d a second, %d%% of it drawing\n",
@@ -1032,6 +1034,9 @@ static void execute(const char *line)
         }
         if (proc64_spawn_anycore(progw, 0, 1) < 0)
             printk("runw: could not start '%s'\n", progw);
+    } else if (!strcmp(line, "lock")) {
+        if (desktop_lock() < 0)
+            printk("lock: the desktop is not running\n");
     } else if (starts_with(line, "notify ")) {
         desktop_notify("Shell", argument(line, sizeof("notify ") - 1));
     } else if (starts_with(line, "run ")) {

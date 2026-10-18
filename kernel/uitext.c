@@ -35,8 +35,8 @@
  * if it ever fills (it would take a few hundred different characters),
  * everything is forgotten and drawn again - simpler than evicting, and
  * a desktop never gets there. */
-#define SLOTS 512
-#define POOL  (96 * 1024)
+#define SLOTS 1024
+#define POOL  (384 * 1024)       /* room for the sizes a panel at a scale asks for */
 
 struct cached {
     uint32_t key;                   /* see key_of(); 0 = empty */
@@ -49,7 +49,7 @@ static struct cached slots[SLOTS];
 static uint8_t pool[POOL];
 static uint32_t pool_used;
 static struct spinlock lock = SPINLOCK_FREE;
-static uint8_t scratch[192 * 192];
+static uint8_t scratch[320 * 320];
 
 static void forget_all(void)
 {
@@ -62,7 +62,8 @@ static void forget_all(void)
    too and 0 means an empty slot. */
 static uint32_t key_of(int font, int px, int g)
 {
-    return ((uint32_t)font << 24) | ((uint32_t)px << 16) | (uint32_t)(g + 1);
+    return ((uint32_t)font << 28) | ((uint32_t)(px & 0xFFF) << 16) |
+           (uint32_t)(g + 1);
 }
 
 /* The glyph's slot, drawn if it was not there. NULL when the glyph
@@ -232,8 +233,21 @@ static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
             video_draw_string(x, baseline - 8, s, video_nearest_index(rgb));
         return x + 8 * n;
     }
+    if (cur)
+        t = gfx_current();
 
-    int32_t pen = (int32_t)x << 6;
+    /* On a target that is more pixels than the layout, the letters are
+       drawn at ITS size: the outline at k/16 times the size, from the
+       pen and the baseline in its pixels. Not a small letter blown up -
+       the letter that size would be. */
+    int k = gfx_k(t);
+    int ppx = k == 16 ? px : (px * k + 8) / 16;
+    /* The pen starts on a whole pixel, as it does at one for one: the
+       distances between the letters are what carry the fractions */
+    int32_t pen = k == 16 ? (int32_t)x << 6
+                          : (int32_t)(((long)x * k + 8) / 16) << 6;
+    if (k != 16)
+        baseline = (int)((long)baseline * k / 16);
 
     /* With interrupts off, and not only for the lock's sake: the desktop
        thread draws text with them on, and a timer landing on it while it
@@ -243,7 +257,7 @@ static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
     irqflags_t fl = spin_lock_irq(&lock);
     while (*s) {
         uint32_t c = next_char(&s);
-        const struct cached *g = glyph_of(f, font, px, ttf_glyph(f, c));
+        const struct cached *g = glyph_of(f, font, ppx, ttf_glyph(f, c));
         if (!g)
             continue;
         /* The pen's whole pixel, rounded - glyphs are not placed at
@@ -252,18 +266,17 @@ static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
         int gy = baseline - g->top;
         const uint8_t *a = pool + g->at;
         for (int r = 0; r < g->h; r++)
-            for (int k = 0; k < g->w; k++) {
-                uint8_t v = a[r * g->w + k];
+            for (int i = 0; i < g->w; i++) {
+                uint8_t v = a[r * g->w + i];
                 if (!v)
                     continue;
-                if (cur)
-                    gfx_blend(gx + k, gy + r, rgb, v);
-                else
-                    gfx_blend_s(t, gx + k, gy + r, rgb, v);
+                gfx_pblend_s(t, gx + i, gy + r, rgb, v);
             }
         pen += g->advance;
     }
     spin_unlock_irq(&lock, fl);
+    if (k != 16)                     /* the end of it, back in logical pixels */
+        pen = (int32_t)((long)pen * 16 / k);
     return (pen + 63) >> 6;
 }
 

@@ -104,4 +104,8 @@ int desktop_frame_stats(int *fps, int *busy);
    worth a glance that nobody asked for. Callable from anywhere. */
 void desktop_notify(const char *title, const char *body);
 
+/* Locks the screen: nothing but the time and a field for the password
+   until it is given. 0, or -1 when there is no desktop to lock. */
+int desktop_lock(void);
+
 #endif

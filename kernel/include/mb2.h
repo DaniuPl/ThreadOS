@@ -30,6 +30,9 @@ struct mb2_framebuffer {
     uint32_t pitch;              /* bytes per row */
     uint32_t width, height;
     uint32_t bpp;
+    /* The panel's size in millimetres, when the loader read it from the
+       screen's EDID (our own UEFI loader does); 0 when nobody said */
+    uint32_t mm_w, mm_h;
 };
 const struct mb2_framebuffer *mb2_framebuffer(void);
 

@@ -36,8 +36,26 @@ void video_console_cell(int col, int row, char ch, uint8_t attr);
    report half of what the panel has. */
 int video_w(void);
 int video_h(void);
-/* How many screen pixels one logical pixel is. Said before the mode is
-   set up: 0 means "decide from the panel". */
+/* The panel's own size, and how many of its pixels a logical one is,
+   in sixteenths (24 = one and a half). Drawing through kernel/gfx.c
+   is done at the panel's size from logical numbers. */
+int video_pw(void);
+int video_ph(void);
+int video_k(void);
+uint32_t *video_prow32(int y);
+uint32_t video_pgetpixel_rgb(int x, int y);
+void video_pputpixel_rgb(int x, int y, uint32_t rgb);
+void video_pblit_rgb(int x, int y, int w, int h, const uint32_t *src,
+                     int stride);
+/* The mode the panel was made for, from its EDID; 0x0 when unknown.
+   video_init_vesa(0, 0) asks for it. */
+void video_native(int *w, int *h);
+/* The panel's size in millimetres, when the loader knows it (0 = not) */
+void video_panel_mm(int w, int h);
+int video_parse_edid(const uint8_t *e, int *w, int *h, int *mm_w, int *mm_h);
+/* How many panel pixels one logical pixel is: asked for before the mode
+   is set up - 1 to 4 times, or 100 to 400 per cent; 0 means "decide
+   from the panel" - and said afterwards, in per cent. */
 void video_set_scale(int s);
 int video_scale(void);
 
@@ -80,7 +98,8 @@ void video_putpixel_rgb(int x, int y, uint32_t rgb);
 uint32_t video_getpixel_rgb(int x, int y);
 void video_fill_rect_rgb(int x, int y, int w, int h, uint32_t rgb);
 /* One row of the drawing buffer as 0x00RRGGBB words, or NULL when the
-   screen is not four bytes a pixel */
+   screen is not four bytes a pixel - or when logical pixels are not the
+   panel's (video_prow32 is the panel's own row) */
 uint32_t *video_row32(int y);
 /* One rectangle of colours, 'stride' pixels to a source row */
 void video_blit_rgb(int x, int y, int w, int h, const uint32_t *src,
