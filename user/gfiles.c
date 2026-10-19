@@ -103,6 +103,12 @@ struct trash_record {
 };
 static struct trash_record trash_records[TRASH_MAX];
 
+static int free_name(char *out, const char *name);
+static int trash_map_load(void);
+static int trash_map_save(int count);
+static int trash_map_find(int count, const char *name);
+static int trash_unique_name(char *out, const char *name);
+
 /* What Cut or Copy picked up: the whole path, because the paste
    happens somewhere else */
 static char clip[PATH_LEN];
@@ -681,7 +687,8 @@ static void restore_chosen(void)
             ecopy(note, "the original path is too long", sizeof(note));
             return;
         }
-        memcpy(parent, original, (uint32_t)parent_len);
+        for (int i = 0; i < parent_len; i++)
+            parent[i] = original[i];
         parent[parent_len] = '\0';
     }
     if (sys_chdir(parent) < 0) {
