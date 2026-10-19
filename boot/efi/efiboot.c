@@ -964,7 +964,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     mbi_at = 8;                           /* total_size and a reserved word */
 
     tag_string(TAG_BOOTLOADER, "threadboot");
-    tag_string(TAG_CMDLINE, "");
+    tag_string(TAG_CMDLINE, "desktop");
 
     /* The initrd comes first and is nameless, because that is the
        module the kernel has always taken by position. The two behind

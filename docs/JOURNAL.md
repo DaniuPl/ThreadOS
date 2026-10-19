@@ -56,7 +56,6 @@ do, including the bugs that turned up on the way, because those explain
 the shape of the code better than the code itself. Everything below
 works and is checked by `make test`.
 
-
 - [x] GDT (Global Descriptor Table): the kernel's own segment descriptors
 - [x] IDT and CPU exception handling
 - [x] PIC (remapped) and hardware interrupts (IRQ)
@@ -5596,3 +5595,21 @@ works and is checked by `make test`.
       memory against `mem`. Tests that used the old table as a generic
       window now use its new layout, or the terminal where they needed a
       window that fills its whole content.
+
+- [x] **UEFI starts at the desktop, not a hidden shell.** The installed
+      loader now passes `desktop` to the kernel. The shell stays alive
+      behind the desktop for commands routed from the keyboard, but its
+      framebuffer output (and other kernel console writes) no longer
+      flashes over the compositor; installer boots do not start shell
+      threads they cannot use.
+      The threadboot test checks that the UEFI handoff reaches the
+      desktop at the firmware's screen resolution. The musl build
+      normalizes its configure script, shell scripts, sed program and
+      input templates after copying sources: Git's CRLF conversion
+      breaks shell parsing and sed's end-of-line matches.
+      The litehtml patch rule likewise normalizes temporary copies of
+      both source and patch, so GNU patch applies cleanly when Git checks
+      either file out with CRLF. The generated source depends on the
+      Makefile too, so changing the patch recipe rebuilds an earlier
+      failed output; patching into a temporary output prevents a rejected
+      patch from leaving a compilable-looking stale target.

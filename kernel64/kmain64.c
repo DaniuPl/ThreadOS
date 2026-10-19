@@ -653,22 +653,25 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         tcp_init();
     }
 
-    printk("\nThe 64-bit system is ready - type 'help'.\n");
-    shell64_start();
+    int start_desktop = boot_word(mbi, "desktop");
+    int start_installer = boot_word(mbi, "install");
+    printk("\nThe 64-bit system is ready%s.\n",
+           start_desktop || start_installer ? "" : " - type 'help'");
 
-    /* 'desktop' on the boot line: straight to the desktop, the way a
-       machine is used rather than the way it is tested. Without it the
-       system stays at the shell, where every test expects to find it;
-       'desktop' typed there does the same thing later. */
-    if (boot_word(mbi, "desktop")) {
+    /* The UEFI loader passes 'desktop' for an installed system. Keep the
+       shell running behind it so desktop keys can still reach commands. */
+    if (start_desktop) {
         printk("The desktop is starting - the console goes away\n");
         desktop_start();
-    } else if (boot_word(mbi, "install")) {
+        shell64_start();
+    } else if (start_installer) {
         /* 'install': the installer on the whole screen, as if 'install'
            had been typed - the disc's menu entry for a person who came
            to install, not to read a shell's prompt */
         printk("The installer is starting\n");
         install_graphical();
+    } else {
+        shell64_start();
     }
 
     /* From this moment on the main thread becomes the idle thread - the

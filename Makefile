@@ -515,9 +515,20 @@ MUSL_CFLAGS  := -O2 -mno-red-zone -fno-stack-protector -fno-pic \
 # A header of the overlay is included all over musl, and musl's
 # Makefile does not track headers - so a changed one starts the copy
 # afresh.
-$(MUSL_TREE)/config.mak: third_party/musl/VERSION $(filter %.h,$(MUSL_OVERLAY))
+$(MUSL_TREE)/config.mak: Makefile third_party/musl/VERSION \
+                         third_party/musl/tools/mkalltypes.sed \
+                         $(wildcard third_party/musl/tools/*.sh) \
+                         third_party/musl/arch/x86_64/bits/alltypes.h.in \
+                         third_party/musl/include/alltypes.h.in \
+                         $(filter %.h,$(MUSL_OVERLAY))
 	rm -rf $(MUSL_TREE) && mkdir -p $(MUSL_TREE)
 	cp -r third_party/musl/. $(MUSL_TREE)/
+	sed -i 's/\r$$//' $(MUSL_TREE)/configure \
+	    $(MUSL_TREE)/VERSION \
+	    $(MUSL_TREE)/tools/mkalltypes.sed \
+	    $(MUSL_TREE)/tools/*.sh \
+	    $(MUSL_TREE)/arch/x86_64/bits/alltypes.h.in \
+	    $(MUSL_TREE)/include/alltypes.h.in
 	cd $(MUSL_TREE) && CC="$(CC)" AR=ar RANLIB=ranlib CFLAGS="$(MUSL_CFLAGS)" ./configure \
 	    --target=x86_64 --prefix=/ --disable-shared >/dev/null
 
@@ -630,9 +641,15 @@ LH_INC     := -I$(LH_DIR)/include -I$(LH_DIR)/include/litehtml \
 $(BUILD)/litehtml:
 	mkdir -p $(BUILD)/litehtml
 
-$(BUILD)/litehtml/%.cpp: $(LH_DIR)/src/%.cpp apps/browser/patches/%.patch \
+$(BUILD)/litehtml/%.cpp: $(LH_DIR)/src/%.cpp apps/browser/patches/%.patch Makefile \
                          | $(BUILD)/litehtml
-	patch -s -o $@ $< apps/browser/patches/$*.patch
+	@set -e; \
+	src="$@.src"; patchfile="$@.patch"; output="$@.tmp"; \
+	trap 'rm -f "$$src" "$$patchfile" "$$output"' 0; \
+	sed 's/\r$$//' "$<" > "$$src"; \
+	sed 's/\r$$//' "apps/browser/patches/$*.patch" > "$$patchfile"; \
+	patch -s -o "$$output" "$$src" "$$patchfile"; \
+	mv "$$output" "$@"
 
 # (static patterns: a plain pattern rule would lose to the one below,
 # whose source exists without being made, and build the unpatched file)

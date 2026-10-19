@@ -38,6 +38,7 @@ static int active;
    buffer stays unchanged - all that differs is where a finished cell
    goes. */
 static int on_framebuffer;
+static int screen_taken;
 
 static uint16_t vga_entry(char c, uint8_t color)
 {
@@ -59,10 +60,10 @@ static void put(struct console *c, size_t idx, uint16_t cell)
     c->cells[idx] = cell;
     if (c != &consoles[active])
         return;
-    if (on_framebuffer)
+    if (on_framebuffer && !screen_taken)
         fbcon_cell((int)(idx % VGA_WIDTH), (int)(idx / VGA_WIDTH),
                            (char)(cell & 0xFF), (uint8_t)(cell >> 8));
-    else
+    else if (!on_framebuffer)
         vga_buffer[idx] = cell;
 }
 
@@ -71,6 +72,8 @@ static void put(struct console *c, size_t idx, uint16_t cell)
 static void redraw(const struct console *c)
 {
     if (on_framebuffer) {
+        if (screen_taken)
+            return;
         for (size_t i = 0; i < VGA_CELLS; i++)
             fbcon_cell((int)(i % VGA_WIDTH), (int)(i / VGA_WIDTH),
                                (char)(c->cells[i] & 0xFF),
@@ -185,10 +188,9 @@ void vga_write(const char *s)
  * compositor owns that buffer those writes are somebody scribbling on
  * the desktop. From a mouse interrupt, at packet rate.
  *
- * So the compositor says it has taken the screen, and the corner
- * quietly stops being a place. The serial log is untouched: that is
+ * So the compositor says it has taken the screen, and console output
+ * quietly stops drawing there. The serial log is untouched: that is
  * where a diagnostic belongs anyway. */
-static int screen_taken;
 
 void vga_screen_taken(int yes)
 {

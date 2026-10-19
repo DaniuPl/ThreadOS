@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -173,15 +174,17 @@ def main():
                   "ring 3" in elf and "exit code 7" in elf)
 
             q.wait_serial("The 64-bit system is ready", timeout=60)
+            desktop = q.wait_serial("The desktop is starting", timeout=30)
+            check("the installed-system loader starts directly in the desktop",
+                  "The desktop is starting - the console goes away" in desktop)
             w, h, at = q.screen_raw()
             check(f"the screen resolution matches the loader's ({w}x{h})",
                   w == loader_w and h == loader_h)
-            x0, y0 = (w - 640) // 2, (h - 200) // 2
-            lit = sum(1 for y in range(y0, y0 + 200)
-                      for x in range(x0, x0 + 640)
-                      if at(x, y) != (0, 0, 0))
-            check(f"the console draws on the screen from our loader "
-                  f"({lit} pixels)", lit > 2000)
+            time.sleep(4)
+            _, _, at = q.screen_raw()
+            mid = (w // 2, h // 2)
+            check("the desktop fills the installed system's screen",
+                  at(*mid) == aurora_px(*mid, w=w, h=h))
         finally:
             q.close()
 
