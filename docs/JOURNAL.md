@@ -5727,3 +5727,15 @@ works and is checked by `make test`.
       A fatal kernel exception restores visible diagnostics. The new
       `bootsplash` test checks the framebuffer colour after GRUB starts
       both kernel modes. Builds and QEMU tests were not run locally.
+
+- [ ] **System language selection and translation groundwork**
+      (kernel/locale.c, user/gsettings.c).
+
+      Region settings now include English and Polish. The selected value
+      is validated and saved as `language=en` or `language=pl`; the shared
+      kernel text path translates the settings interface and measured
+      strings together, so labels keep their alignment. The settings test
+      switches to Polish, checks the translated save status, and restores
+      English. This is the first localization pass; broader application
+      and system-message coverage remains to be translated. Builds and
+      QEMU tests were not run locally.

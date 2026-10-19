@@ -203,6 +203,35 @@ def main():
                 check("the Region control saves %s = %s (%s)"
                       % (name, value, got), got == value)
 
+            section(q, "Region")
+            x, y = gset_chip(3, 1)
+            q.click(CX + x, CY + y)
+            q.mouse_goto(*AWAY)
+            time.sleep(1.5)
+            password(q, "thread")
+            got = kernel_says(q, "language")
+            said = status(q, "Zapisano")
+            region_top = GSET_PANE_Y0 + 3 * GSET_ROW_H
+            label_baseline = CY + ui_font_baseline_in(UD_PX, region_top, 18)
+            shot = q.screen_raw()
+            label = q.read_ui(CX + GSET_PANE_X, label_baseline, 160,
+                             px=UD_PX, fg=theme("dark")["app_text"],
+                             screen=shot)
+            check("the language control saves Polish and translates settings "
+                  "(%s, %s, %s)" % (got, said, label),
+                  got == "pl" and said == "Zapisano" and label == "Język")
+
+            section(q, "Region")
+            x, y = gset_chip(3, 0)
+            q.click(CX + x, CY + y)
+            q.mouse_goto(*AWAY)
+            time.sleep(1.5)
+            password(q, "thread")
+            got = kernel_says(q, "language")
+            said = status(q, "Saved")
+            check("English can be restored (%s, %s)" % (got, said),
+                  got == "en" and said == "Saved")
+
             # --- the theme: refused, then taken ---------------------------
             section(q, "Appearance")
             light = gset_chip(0, 1)

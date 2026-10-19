@@ -799,6 +799,8 @@ static void draw_region(void)
     static const char *const time_values[] = { "24h", "12h" };
     static const char *const numbers[] = { "1,234.5", "1 234,5" };
     static const char *const number_values[] = { "dot", "comma" };
+    static const char *const languages[] = { "English", "Polski" };
+    static const char *const language_values[] = { "en", "pl" };
     int y = PANE_Y0;
 
     row_name(y, "Date order");
@@ -809,6 +811,9 @@ static void draw_region(void)
     y += ROW_H;
     row_name(y, "Numbers");
     chips(y + CTRL_DY, 2, numbers, number_values, "numfmt");
+    y += ROW_H;
+    row_name(y, "Language");
+    chips(y + CTRL_DY, 2, languages, language_values, "language");
     note(y + ROW_H, "Clock, calculator and file sizes follow these formats.");
 }
 

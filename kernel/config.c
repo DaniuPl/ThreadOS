@@ -17,6 +17,7 @@
 
 #include "include/config.h"
 #include "include/fs.h"
+#include "include/locale.h"
 #include "include/string.h"
 
 #define CONFIG_MAX_FILE 512
@@ -56,6 +57,7 @@ static struct setting settings[] = {
     { "datefmt", "dmy",     "date order: dmy, mdy or iso",          0, { 0 } },
     { "timefmt", "24h",     "clock: 24h or 12h",                   0, { 0 } },
     { "numfmt",  "dot",     "decimal mark: dot or comma",           0, { 0 } },
+    { "language", "en",     "system language: en or pl",            0, { 0 } },
     /* Legacy bootstrap data for migrating the first admin account.
        Hidden values are not written back to the public settings file. */
     { "password",  "14605732860167589771",
@@ -84,6 +86,12 @@ static int put_value(struct setting *s, const char *value, uint32_t len)
         s->value[i] = value[i];
     s->value[len] = 0;
     return 0;
+}
+
+static int language_value(const char *value, uint32_t len)
+{
+    return (len == 2 && value[0] == 'e' && value[1] == 'n') ||
+           (len == 2 && value[0] == 'p' && value[1] == 'l');
 }
 
 const char *config_get(const char *key)
@@ -187,6 +195,7 @@ int config_is_hidden(const char *key)
 
 void config_load(void)
 {
+    locale_set_language(config_get("language"));
     if (!fs_ready())
         return;
 
@@ -229,8 +238,12 @@ void config_load(void)
         struct setting *s = find(key);
         if (!s)
             continue;                       /* a name nobody reads */
+        if (!strcmp(key, "language") &&
+            !language_value(buf + eq + 1, (uint32_t)(end - eq - 1)))
+            continue;
         put_value(s, buf + eq + 1, (uint32_t)(end - eq - 1));
     }
+    locale_set_language(config_get("language"));
 }
 
 static uint32_t append(char *dst, uint32_t at, const char *src)
@@ -249,8 +262,12 @@ int config_set(const char *key, const char *value)
     uint32_t len = 0;
     while (value[len])
         len++;
+    if (!strcmp(key, "language") && !language_value(value, len))
+        return -1;
     if (put_value(s, value, len) < 0)
         return -1;
+    if (!strcmp(key, "language"))
+        locale_set_language(s->value);
 
     if (!fs_ready())
         return -1;                          /* changed here, but not remembered */

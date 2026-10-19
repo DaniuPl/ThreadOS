@@ -26,6 +26,7 @@
 #include "include/ttf.h"
 #include "include/video.h"
 #include "include/gfx.h"
+#include "include/locale.h"
 #include "include/string.h"
 #include "include/spinlock.h"
 
@@ -197,6 +198,7 @@ int ui_baseline_in(int top, int height)
 
 int ui_font_width(int font, int px, const char *s)
 {
+    s = locale_text(s);
     const struct ttf_font *f = font_of(font);
     if (!f) {
         int n = 0;
@@ -224,6 +226,7 @@ int ui_text_width(const char *s)
 static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
                      int x, int baseline, const char *s, uint32_t rgb)
 {
+    s = locale_text(s);
     const struct ttf_font *f = font_of(font);
     if (!f) {
         int n = 0;

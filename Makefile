@@ -95,6 +95,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/vga.o \
         $(BUILD)/serial.o \
         $(BUILD)/printk.o \
+        $(BUILD)/locale.o \
         $(BUILD)/bootsplash.o \
         $(BUILD)/string.o \
         $(BUILD)/gdt.o \
@@ -351,7 +352,7 @@ CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk bootsplash mb2 fbcon vga pic pit pmm heap initrd \
+SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \

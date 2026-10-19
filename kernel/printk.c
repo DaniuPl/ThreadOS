@@ -21,6 +21,7 @@
 #include "include/vga.h"
 #include "include/serial.h"
 #include "include/io.h"
+#include "include/locale.h"
 #include "include/spinlock.h"
 
 static volatile int screen_output = 1;
@@ -61,6 +62,7 @@ static struct spinlock lock = SPINLOCK_FREE;
 
 void printk(const char *fmt, ...)
 {
+    fmt = locale_text(fmt);
     va_list args;
     va_start(args, fmt);
 
