@@ -165,6 +165,7 @@ static void isr_dispatch(struct regs *r)
             task_exit(-1);          /* killed by a CPU exception */
         }
 
+        printk_screen_output(1);
         printk("\n!!! CPU EXCEPTION %u: %s (err=%x) at eip=%x\n",
                r->int_no, exception_names[r->int_no], r->err_code, r->eip);
         if (r->int_no == 14) {

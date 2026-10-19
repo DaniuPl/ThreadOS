@@ -43,6 +43,8 @@
 #include "include/net.h"
 #include "include/tcp.h"
 #include "include/signal.h"
+#include "include/pci.h"
+#include "include/pci_info.h"
 #include "include/string.h"
 
 #define USER_AUTH_WINDOW_TICKS 30000u
@@ -688,7 +690,8 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_INSTALL_STEP:
-        if (task_level() != USER_ADMIN || !auth_recent()) {
+        if (install_update_allowed() &&
+            (task_level() != USER_ADMIN || !auth_recent())) {
             r->eax = EPERM;
             break;
         }
@@ -1051,6 +1054,29 @@ void syscall_handler(struct regs *r)
             break;
         }
         r->eax = (uint32_t)pid;      /* -1 = there are no children left */
+        break;
+    }
+    case SYS_PCI_INFO: {
+        struct pci_info info;
+        struct pci_dev dev;
+        uint32_t class_code;
+        if ((int32_t)r->ebx < 0 || !user_ok(r->ecx, sizeof(info))) {
+            r->eax = EFAULT;
+            break;
+        }
+        int found = pci_enumerate((int)r->ebx, &dev, &class_code);
+        if (found <= 0) {
+            r->eax = (uint32_t)found;
+            break;
+        }
+        info.bus = (uint32_t)dev.bus;
+        info.slot = (uint32_t)dev.slot;
+        info.function = (uint32_t)dev.func;
+        info.vendor = dev.vendor;
+        info.device = dev.device;
+        info.class_code = class_code;
+        r->eax = user_put(r->ecx, &info, sizeof(info)) < 0
+                     ? EFAULT : 1;
         break;
     }
     case SYS_EXEC: {

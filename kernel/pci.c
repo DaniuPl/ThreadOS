@@ -52,36 +52,37 @@ uint32_t pci_find_vga_lfb(void)
     return 0;
 }
 
-static void fill(struct pci_dev *out, int slot, int func, uint32_t id)
+static void fill(struct pci_dev *out, int bus, int slot, int func,
+                 uint32_t id)
 {
-    out->bus = 0;
+    out->bus = bus;
     out->slot = slot;
     out->func = func;
     out->vendor = (uint16_t)(id & 0xFFFF);
     out->device = (uint16_t)(id >> 16);
     for (int i = 0; i < 6; i++)
-        out->bar[i] = pci_config_read(0, slot, func, 0x10 + i * 4);
+        out->bar[i] = pci_config_read(bus, slot, func, 0x10 + i * 4);
     out->bar0 = out->bar[0];
-    out->irq = (uint8_t)(pci_config_read(0, slot, func, 0x3C) & 0xFF);
+    out->irq = (uint8_t)(pci_config_read(bus, slot, func, 0x3C) & 0xFF);
 }
 
 /* Does the slot have more than one function (bit 7 of the header
    field)? Controllers built into the bridge can sit on function 2 or
    3 - scanning only the zero ones will never find them. */
-static int multifunction(int slot)
+static int multifunction(int bus, int slot)
 {
-    return (pci_config_read(0, slot, 0, 0x0C) >> 16) & 0x80;
+    return (pci_config_read(bus, slot, 0, 0x0C) >> 16) & 0x80;
 }
 
 int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out)
 {
     for (int slot = 0; slot < 32; slot++) {
-        int funcs = multifunction(slot) ? 8 : 1;
+        int funcs = multifunction(0, slot) ? 8 : 1;
         for (int func = 0; func < funcs; func++) {
             uint32_t id = pci_config_read(0, slot, func, 0x00);
             if ((id & 0xFFFF) != vendor || (id >> 16) != device)
                 continue;
-            fill(out, slot, func, id);
+            fill(out, 0, slot, func, id);
             return 1;
         }
     }
@@ -95,7 +96,7 @@ int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out)
 {
     for (int slot = 0; slot < 32; slot++) {
-        int funcs = multifunction(slot) ? 8 : 1;
+        int funcs = multifunction(0, slot) ? 8 : 1;
         for (int func = 0; func < funcs; func++) {
             uint32_t id = pci_config_read(0, slot, func, 0x00);
             if ((id & 0xFFFF) == 0xFFFF)
@@ -106,14 +107,14 @@ int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                 ((class >> 8) & 0xFF) != progif)
                 continue;
 
-            fill(out, slot, func, id);
+            fill(out, 0, slot, func, id);
             return 1;
         }
     }
     return 0;
 }
 
-/* Every device on the bus, one call at a time.
+/* Every device on every bus, one call at a time.
  *
  * The finders above answer "is there one of these"; this answers "what
  * is in this machine", which is the question one actually has in front
@@ -123,19 +124,28 @@ int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
  * here and nowhere else. */
 int pci_enumerate(int index, struct pci_dev *out, uint32_t *class_out)
 {
+    if (index < 0)
+        return -1;
     int seen = 0;
-    for (int slot = 0; slot < 32; slot++) {
-        int funcs = multifunction(slot) ? 8 : 1;
-        for (int func = 0; func < funcs; func++) {
-            uint32_t id = pci_config_read(0, slot, func, 0x00);
-            if ((id & 0xFFFF) == 0xFFFF)
+    for (int bus = 0; bus < 256; bus++) {
+        for (int slot = 0; slot < 32; slot++) {
+            uint32_t first_id = pci_config_read(bus, slot, 0, 0x00);
+            if ((first_id & 0xFFFF) == 0xFFFF)
                 continue;
-            if (seen++ != index)
-                continue;
-            fill(out, slot, func, id);
-            if (class_out)
-                *class_out = pci_config_read(0, slot, func, 0x08);
-            return 1;
+            int funcs = multifunction(bus, slot) ? 8 : 1;
+            for (int func = 0; func < funcs; func++) {
+                uint32_t id = func == 0
+                                  ? first_id
+                                  : pci_config_read(bus, slot, func, 0x00);
+                if ((id & 0xFFFF) == 0xFFFF)
+                    continue;
+                if (seen++ != index)
+                    continue;
+                fill(out, bus, slot, func, id);
+                if (class_out)
+                    *class_out = pci_config_read(bus, slot, func, 0x08);
+                return 1;
+            }
         }
     }
     return 0;

@@ -8,7 +8,7 @@
    address or 0 when nothing was found. */
 uint32_t pci_find_vga_lfb(void);
 
-/* A PCI device that was found (bus 0, function 0) */
+/* A PCI device's location, IDs and base address registers */
 struct pci_dev {
     int bus, slot, func;   /* one slot may have several functions */
     uint16_t vendor, device;
@@ -26,7 +26,7 @@ int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
 int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out);
 
-/* Walks every device on the bus: index 0, 1, 2... until it returns 0.
+/* Walks devices across all PCI buses: index 0, 1, 2... until it returns 0.
    'class_out' takes the raw class register (class, subclass, prog-if
    and revision), because on unknown hardware the class is the useful
    half of the answer. */

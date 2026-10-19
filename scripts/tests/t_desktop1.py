@@ -103,13 +103,50 @@ def main():
     # --- The desktop: windows and dragging with the mouse (a separate
     # boot) ---
     print("--- the desktop: windows + drag ---")
-    q5 = Qemu(KERNEL, INITRD)
+    q5_disk = tempfile.mktemp(suffix=".img")
+    with open(q5_disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
+    q5 = Qemu(KERNEL, INITRD, q5_disk)
     try:
         q5.wait_desktop()
         time.sleep(1.0)
         dark = theme("dark")
 
         check("the desktop has no placeholder windows", q5.dock_windows() == 0)
+
+        # The three fixed desktop shortcuts are movable and open their
+        # own folders on a double-click, just like the files below them.
+        icon_y = BAR_H + 42
+        q5.mouse_goto(48, icon_y)
+        q5.mouse_button(True)
+        q5.mouse_goto(338, 190)
+        q5.mouse_button(False)
+
+        def open_desktop_icon(x, y, want):
+            q5.mouse_goto(x, y)
+            time.sleep(0.4)
+            q5.mouse_click()
+            q5.mouse_click()
+            title = ""
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                title = q5.window_title(94, 54)
+                if want in title:
+                    break
+                time.sleep(0.25)
+            check("desktop shortcut opens %s (title: '%s')" % (want, title),
+                  want in title)
+            q5.click(*light_xy(94, 54, 0))
+            deadline = time.time() + 5
+            while time.time() < deadline and q5.dock_windows():
+                time.sleep(0.25)
+
+        open_desktop_icon(338, 224, "Files: /home/")
+        open_desktop_icon(136, icon_y, "/Desktop")
+        open_desktop_icon(224, icon_y, "/.Trash")
+        check("closing each desktop shortcut returns to the bare desktop",
+              q5.dock_windows() == 0)
+
         q5.launch_dock(4)
         time.sleep(3)
         check("a real application opens in the first cascade slot",
@@ -127,6 +164,29 @@ def main():
               near(at(244, 107), dark["title_bg"], 3))
     finally:
         q5.close()
+
+    # The moved position belongs to the user's profile and survives a
+    # restart, rather than living only in the compositor's memory.
+    q5r = Qemu(KERNEL, INITRD, q5_disk)
+    try:
+        q5r.wait_desktop()
+        q5r.mouse_goto(338, 224)
+        time.sleep(0.4)
+        q5r.mouse_click()
+        q5r.mouse_click()
+        title = ""
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            title = q5r.window_title(94, 54)
+            if "Files: /home/" in title:
+                break
+            time.sleep(0.25)
+        check("the Home shortcut position survives a reboot ('%s')" % title,
+              "Files: /home/" in title)
+    finally:
+        q5r.close()
+        if os.path.exists(q5_disk):
+            os.unlink(q5_disk)
 
     # --- The desktop: closing an application window -------------------
     print("--- the desktop: closing an application ---")

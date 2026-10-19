@@ -2,6 +2,7 @@
 
 #include "include/fonts.h"
 #include <stdint.h>
+#include "include/bootsplash.h"
 #include "include/vga.h"
 #include "include/video.h"
 #include "include/serial.h"
@@ -49,7 +50,7 @@
    boot/grub.cfg. */
 static int cmdline_has(const struct multiboot_info *mbi, const char *word)
 {
-    if (!(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)
+    if (!mbi || !(mbi->flags & MULTIBOOT_FLAG_CMDLINE) || !mbi->cmdline)
         return 0;
 
     const char *cmd = (const char *)mbi->cmdline;
@@ -162,6 +163,8 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     /* The loader says in the magic which form it passed the information
        in; from here on the whole system sees it the same way */
     const struct multiboot_info *mbi = mb2_info(magic, multiboot_info_addr);
+    int text_mode = !mbi || cmdline_has(mbi, "nodesktop") ||
+                    cmdline_has(mbi, "text");
 
     /* When the loader set a graphics mode, the console has to draw on
        it - and before the first message is printed. Paging is not
@@ -176,6 +179,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     vga_init();
     serial_init();
+    boot_splash_start(!text_mode);
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     printk("ThreadOS\n");
@@ -183,6 +187,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     printk("The kernel is running in 32-bit protected mode.\n\n");
 
     if (!mbi) {
+        printk_screen_output(1);
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
         printk("ERROR: unknown magic from the boot loader (%x)!\n", magic);
         for (;;)
@@ -230,6 +235,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        cores - and to do that they have to know what each is running */
     tlb_switch(paging_kernel_cr3());
     video_map_lfb();          /* before we write anything on the screen */
+    boot_splash_update(18, "Preparing memory");
     printk("[ OK ] Paging enabled (identity-mapped %u MiB)\n",
            paging_identity_limit() / (1024 * 1024));
 
@@ -245,6 +251,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (initrd_file_count())
         printk("[ OK ] initrd: %u files (the 'ls' and 'run' commands)\n",
                initrd_file_count());
+    boot_splash_update(36, "Loading system files");
 
     /* The shared library has to be ready before the first program
        starts - its frames are shared by all processes */
@@ -266,6 +273,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
     if (fs_init())
         printk("[ OK ] Disk %s + TFS ready (the 'fls', 'cat', 'write' commands)\n",
                blk_name());
+    boot_splash_update(60, "Checking storage");
 
     /* What the machine remembers about itself. Right after the file
        system, because that is where it is written - and before the
@@ -333,6 +341,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
         printk("[ OK ] Sound: Intel HDA, %s\n", hda_name());
     else
         printk("[ -- ] Sound: %s\n", hda_name());
+    boot_splash_update(84, "Starting devices");
 
     /* We take the IP address from the network - the DHCP client waits
        for the server's answers, so it has to run in a thread (after
@@ -347,7 +356,6 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        test and commands that print a lot of text use it). The message
        goes before shell_init, so that the last thing on the screen is
        the prompt. */
-    int text_mode = cmdline_has(mbi, "nodesktop") || cmdline_has(mbi, "text");
     if (text_mode)
         printk("Text mode (the kernel's command line) - desktop: 'desktop'\n");
     else
@@ -355,8 +363,10 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
 
     shell_init();
 
-    if (!text_mode)
+    if (!text_mode) {
+        boot_splash_update(96, "Starting desktop");
         desktop_start();
+    }
 
     /* The main thread becomes the idle thread - and such a thread may
        not hold the big kernel lock: a core standing on hlt with the

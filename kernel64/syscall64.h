@@ -155,6 +155,7 @@
 #define SYS64_UPDATE_WRITE 77
 /* Whether a trusted installed-system boot marker permits update writes */
 #define SYS64_UPDATE_ALLOWED 80
+#define SYS64_PCI_INFO 81 /* a1=index, a2=&struct pci_info -> 1/0/-1 */
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* Numbers taken since forever: keyboard, console, errors */

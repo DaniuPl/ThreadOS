@@ -25,7 +25,7 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 # The order matters only with J=1; in parallel the longest ones start
 # first anyway, so that they are not left alone at the end
 GROUPS = [
-    "boot", "shell", "process", "fork", "lazymem", "signals", "protect",
+    "boot", "bootsplash", "shell", "process", "fork", "lazymem", "signals", "protect",
     "net32", "http32", "mouse", "ush", "tfs", "foreigndisk", "k64core", "k64proc",
     "k64shell", "k64disk", "acpi", "usbkbd", "usbmouse", "ahci", "consoles", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "nvme", "xhci", "ehci", "ttf", "shapes", "sem", "disk",

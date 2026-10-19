@@ -13,6 +13,7 @@
 
 #include "../kernel/include/fonts.h"
 #include <stdint.h>
+#include "../kernel/include/bootsplash.h"
 #include "../kernel/include/mb2.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/video.h"
@@ -195,6 +196,8 @@ static int boot_word(const struct multiboot_info *mbi, const char *word)
 void kmain64(uint32_t magic, uint32_t info_addr)
 {
     const struct multiboot_info *mbi = mb2_info(magic, info_addr);
+    int start_desktop = boot_word(mbi, "desktop");
+    int start_installer = boot_word(mbi, "install");
 
     const struct mb2_framebuffer *lfb = mb2_framebuffer();
     /* The loader's buffer is taken over by video: it sets up both the
@@ -212,6 +215,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     vga_init();
     serial_init();
+    boot_splash_start((start_desktop || start_installer) && mbi);
 
     vga_set_color(VGA_LIGHT_CYAN, VGA_BLACK);
     printk("ThreadOS 64\n");
@@ -219,6 +223,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     printk("The kernel is running in long mode (x86-64).\n\n");
 
     if (!mbi) {
+        printk_screen_output(1);
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
         printk("ERROR: unknown magic from the boot loader (%x)!\n", magic);
         for (;;)
@@ -274,6 +279,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         video_map_lfb();
 
     if (paging64_init() < 0) {
+        printk_screen_output(1);
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
         printk("ERROR: the page tables could not be built\n");
         for (;;)
@@ -287,6 +293,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_nx_enabled() ? "on" : "off",
            paging64_fb_wc() ? "write-combining" : "uncached");
+    boot_splash_update(18, "Preparing memory");
 
     /* Fine-grained mapping: a frame placed high up, far beyond the area
        described one to one. Writing and reading through that address
@@ -391,6 +398,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* --- Programs from the initrd ------------------------------- */
     initrd_init(mbi);
+    boot_splash_update(32, "Loading system files");
     fonts_init();
     if (!initrd_file_count())
         printk("[ !! ] initrd: no programs - there is nothing to run\n");
@@ -545,6 +553,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     }
 
     task64_dump();
+    boot_splash_update(50, "Checking system services");
 
     /* --- Power -------------------------------------------------- */
     /* acpi.c came across like the rest of the shared code: the path to
@@ -587,6 +596,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     } else {
         printk("[ !! ] Disk: no controller answered\n");
     }
+    boot_splash_update(65, "Checking storage");
 
     /* --- Network ------------------------------------------------ */
     /* The card, the IP layer, DHCP and TCP are again the same files as
@@ -602,6 +612,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     } else {
         printk("[ !! ] Network: I found no network card\n");
     }
+    boot_splash_update(78, "Starting network");
 
     /* --- The remaining processors ------------------------------- */
     /* The MADT table lists them all, and each one waits for an
@@ -646,6 +657,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ OK ] Sound: Intel HDA, %s\n", hda_name());
     else
         printk("[ -- ] Sound: %s\n", hda_name());
+    boot_splash_update(90, "Starting devices");
 
     /* The IP address comes from the network, and the DHCP client waits
        for the server's replies - so it has to run in a thread, that is,
@@ -655,8 +667,6 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         tcp_init();
     }
 
-    int start_desktop = boot_word(mbi, "desktop");
-    int start_installer = boot_word(mbi, "install");
     install_set_booted_installed(start_desktop &&
         boot_word(mbi, "installed") && !boot_word(mbi, "live"));
     printk("\nThe 64-bit system is ready%s.\n",
@@ -667,6 +677,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        its keys can still reach commands. */
     if (start_desktop) {
         printk("The desktop is starting - the console goes away\n");
+        boot_splash_update(96, "Starting desktop");
         desktop_start();
         shell64_start();
     } else if (start_installer) {
@@ -674,6 +685,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            had been typed - the disc's menu entry for a person who came
            to install, not to read a shell's prompt */
         printk("The installer is starting\n");
+        boot_splash_update(96, "Starting installer");
         install_graphical();
     } else {
         user_session_guest();

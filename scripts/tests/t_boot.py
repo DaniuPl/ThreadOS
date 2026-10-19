@@ -68,6 +68,8 @@ def main():
               "gateway 10.0.2.2" in lease and "DNS 10.0.2.3" in lease)
 
         log_text = q.serial()
+        check("text-mode boot keeps the kernel console instead of the splash",
+              "[boot] visual loading screen active" not in log_text)
         for expected in ["Multiboot OK", "GDT loaded", "IDT loaded",
                          "PIC remapped", "Timer PIT", "The PS/2 keyboard",
                          "Interrupts enabled"]:

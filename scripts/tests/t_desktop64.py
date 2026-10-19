@@ -103,6 +103,33 @@ def main():
                   at(130, 120) == aurora_px(130, 120, w=w, h=h) and
                   at(240, 140) == aurora_px(240, 140, w=w, h=h))
 
+            # Moving a shortcut must not turn its release into a click;
+            # after the move, a double-click at its new position opens it.
+            icon_y = BAR_H + 42
+            q.mouse_goto(48, icon_y)
+            q.mouse_button(True)
+            q.mouse_goto(338, 190)
+            q.mouse_button(False)
+            q.mouse_goto(338, 224)
+            time.sleep(0.4)
+            q.mouse_click()
+            q.mouse_click()
+            title = ""
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                title = q.window_title(94, 54)
+                if "Files: /home/" in title:
+                    break
+                time.sleep(0.25)
+            check("the moved Home shortcut opens Files in the 64-bit "
+                  "desktop ('%s')" % title, "Files: /home/" in title)
+            q.click(*light_xy(94, 54, 0))
+            deadline = time.time() + 5
+            while time.time() < deadline and q.dock_windows():
+                time.sleep(0.25)
+            check("closing Files leaves the 64-bit desktop clear",
+                  q.dock_windows() == 0)
+
             # The mouse: the cursor is to go where we move it. We check
             # that through a change of pixels at the destination.
             q.mouse_goto(400, 300)

@@ -126,6 +126,8 @@
 #define SYS_NOTIFY   76
 /* A background as a small picture: ebx=&struct bg_preview_cmd */
 #define SYS_BG_PREVIEW 77
+/* ebx=index, ecx=&struct pci_info -> 1=device, 0=end, -1=bad pointer */
+#define SYS_PCI_INFO 80
 
 /* One setting as the program sees it. The layout has to match struct
    cfg_entry in user/usys.h. */

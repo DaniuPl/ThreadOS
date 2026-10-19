@@ -72,6 +72,7 @@
 #define SYS_UI_LOOK  75
 #define SYS_NOTIFY   76
 #define SYS_BG_PREVIEW 77
+#define SYS_PCI_INFO   80
 #define SYS_LEVEL      53
 #define SYS_TRYWAIT    54
 #define SYS_SPAWN_TALK 55

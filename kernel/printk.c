@@ -23,9 +23,17 @@
 #include "include/io.h"
 #include "include/spinlock.h"
 
+static volatile int screen_output = 1;
+
+void printk_screen_output(int enabled)
+{
+    screen_output = enabled != 0;
+}
+
 static void kputchar(char c)
 {
-    vga_putchar(c);
+    if (screen_output)
+        vga_putchar(c);
     serial_putchar(c);
 }
 

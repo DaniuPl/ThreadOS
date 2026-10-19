@@ -348,6 +348,7 @@ static void isr64_dispatch(struct regs *r)
             task64_kill_current(exception_names[r->int_no]);
         }
 
+        printk_screen_output(1);
         vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
         printk("\n!!! CPU EXCEPTION %u: %s (err=%x)\n",
                (uint32_t)r->int_no, exception_names[r->int_no],

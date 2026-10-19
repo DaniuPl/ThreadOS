@@ -43,6 +43,8 @@
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/shm.h"
+#include "../kernel/include/pci.h"
+#include "../kernel/include/pci_info.h"
 #include "../kernel/include/rtc.h"
 
 #define USER_AUTH_WINDOW_TICKS 30000u
@@ -1027,7 +1029,8 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_INSTALL_STEP:
-        if (task64_level() != USER_ADMIN || !auth_recent()) {
+        if (install_update_allowed() &&
+            (task64_level() != USER_ADMIN || !auth_recent())) {
             r->rax = (uint64_t)(int64_t)-2;
             return;
         }
@@ -1284,6 +1287,29 @@ static void handle(struct regs *r)
     case SYS64_UPDATE_ALLOWED:
         r->rax = (uint64_t)(int64_t)install_update_allowed();
         return;
+    case SYS64_PCI_INFO: {
+        struct pci_info info;
+        struct pci_dev dev;
+        uint32_t class_code;
+        if ((int64_t)a1 < 0 || !paging64_user_range(a2, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int found = pci_enumerate((int)a1, &dev, &class_code);
+        if (found <= 0) {
+            r->rax = (uint64_t)(int64_t)found;
+            return;
+        }
+        info.bus = (uint32_t)dev.bus;
+        info.slot = (uint32_t)dev.slot;
+        info.function = (uint32_t)dev.func;
+        info.vendor = dev.vendor;
+        info.device = dev.device;
+        info.class_code = class_code;
+        *(struct pci_info *)(uintptr_t)a2 = info;
+        r->rax = 1;
+        return;
+    }
     case SYS64_UPDATE_WRITE: {
         /* Replacing the system is the most an admin can do */
         if (task64_level() != USER_ADMIN) {

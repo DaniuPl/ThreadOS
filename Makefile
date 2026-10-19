@@ -86,7 +86,8 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/gmikser.elf \
              $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
              $(BUILD)/user/mutex.elf $(BUILD)/user/prodcons.elf \
-             $(BUILD)/user/syscalls.elf
+             $(BUILD)/user/syscalls.elf \
+             $(BUILD)/user/lspci.elf $(BUILD)/user/ifconfig.elf
 
 OBJS := $(BUILD)/boot.o \
         $(BUILD)/isr_stubs.o \
@@ -94,6 +95,7 @@ OBJS := $(BUILD)/boot.o \
         $(BUILD)/vga.o \
         $(BUILD)/serial.o \
         $(BUILD)/printk.o \
+        $(BUILD)/bootsplash.o \
         $(BUILD)/string.o \
         $(BUILD)/gdt.o \
         $(BUILD)/idt.o \
@@ -333,7 +335,9 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    dynlib=$(BUILD)/user/dynlib.elf \
 	    cores=$(BUILD)/user/cores.elf \
 	    mutex=$(BUILD)/user/mutex.elf prodcons=$(BUILD)/user/prodcons.elf \
-	    syscalls=$(BUILD)/user/syscalls.elf
+	    syscalls=$(BUILD)/user/syscalls.elf \
+	    lspci=$(BUILD)/user/lspci.elf hardware=$(BUILD)/user/lspci.elf \
+	    ifconfig=$(BUILD)/user/ifconfig.elf
 
 # --- The 64-bit kernel (long mode) -----------------------------------
 #
@@ -347,7 +351,7 @@ CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk mb2 fbcon vga pic pit pmm heap initrd \
+SHARED64 := string serial printk bootsplash mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
@@ -440,7 +444,8 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/cores.elf \
                $(BUILD)/user64/mutex.elf \
                $(BUILD)/user64/prodcons.elf \
-               $(BUILD)/user64/syscalls.elf
+               $(BUILD)/user64/syscalls.elf \
+               $(BUILD)/user64/lspci.elf $(BUILD)/user64/ifconfig.elf
 
 $(BUILD)/user64:
 	mkdir -p $(BUILD)/user64
@@ -803,6 +808,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    heap64=$(BUILD)/user64/heap64.elf \
 	    fpu64test=$(BUILD)/user64/fpu64test.elf \
 	    uls64=$(BUILD)/user64/uls64.elf \
+	    lspci=$(BUILD)/user64/lspci.elf hardware=$(BUILD)/user64/lspci.elf \
+	    ifconfig=$(BUILD)/user64/ifconfig.elf \
 	    uupper64=$(BUILD)/user64/uupper64.elf \
 	    unet64=$(BUILD)/user64/unet64.elf \
 	    guiapp=$(BUILD)/user64/guiapp64.elf \

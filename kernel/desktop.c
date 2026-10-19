@@ -134,6 +134,7 @@ struct desktop_item {
     uint32_t size;
     int is_dir;
     int dir_index;
+    int x, y;
 };
 
 #define DESKTOP_ITEM_MAX 32
@@ -141,8 +142,12 @@ static struct desktop_item desktop_items[DESKTOP_ITEM_MAX];
 static int desktop_item_n;
 static int desktop_selected = -1;
 static int desktop_last = -1;
+static int desktop_drag_icon = -1;
 static uint32_t desktop_last_click;
 static char desktop_owner[32];
+static int desktop_shortcut_pos[3][2] = {
+    { -1, -1 }, { -1, -1 }, { -1, -1 }
+};
 
 static int desktop_home_path(char *out, int cap)
 {
@@ -178,7 +183,7 @@ static int path_append(char *out, int cap, const char *path,
     return 1;
 }
 
-static void desktop_read_items(void)
+static int desktop_read_items(void)
 {
     char home[64], path[80], name[32];
     const char *owner = user_current_name();
@@ -186,7 +191,12 @@ static void desktop_read_items(void)
     int is_dir, dir;
     if (!owner || !owner[0])
         owner = "guest";
-    if (strcmp(desktop_owner, owner)) {
+    int owner_changed = strcmp(desktop_owner, owner) != 0;
+    if (owner_changed) {
+        for (int i = 0; i < 3; i++)
+            desktop_shortcut_pos[i][0] = desktop_shortcut_pos[i][1] = -1;
+        desktop_item_n = 0;
+        desktop_drag_icon = -1;
         int i = 0;
         while (owner[i] && i < (int)sizeof(desktop_owner) - 1) {
             desktop_owner[i] = owner[i];
@@ -195,11 +205,15 @@ static void desktop_read_items(void)
         desktop_owner[i] = '\0';
         desktop_selected = desktop_last = -1;
     }
+    struct desktop_item previous[DESKTOP_ITEM_MAX];
+    int previous_n = desktop_item_n;
+    for (int i = 0; i < previous_n; i++)
+        previous[i] = desktop_items[i];
     desktop_item_n = 0;
     if (!desktop_home_path(home, sizeof(home)) ||
         !path_append(path, sizeof(path), home, "Desktop") ||
         fs_chdir(FS_ROOT, path, &dir) < 0)
-        return;
+        return owner_changed;
     for (int i = 0; i < 128 && desktop_item_n < DESKTOP_ITEM_MAX; i++) {
         if (!fs_readdir(dir, i, name, &size, &is_dir))
             break;
@@ -215,7 +229,23 @@ static void desktop_read_items(void)
         item->size = size;
         item->is_dir = is_dir;
         item->dir_index = i;
+        int cols = video_w() / 88;
+        if (cols < 1)
+            cols = 1;
+        if (cols > 6)
+            cols = 6;
+        int icon_index = desktop_item_n + 2;
+        item->x = 10 + (icon_index % cols) * 88;
+        item->y = BAR_H + 8 + (icon_index / cols) * 72;
+        for (int old = 0; old < previous_n; old++) {
+            if (!strcmp(item->name, previous[old].name)) {
+                item->x = previous[old].x;
+                item->y = previous[old].y;
+                break;
+            }
+        }
     }
+    return owner_changed;
 }
 
 /* The programs that come with the system, by the name they run under:
@@ -516,6 +546,9 @@ static uint32_t frames;
 static uint32_t bar_until;
 
 static int drag_idx = -1;
+static int desktop_drag_dx, desktop_drag_dy;
+static int desktop_drag_start_x, desktop_drag_start_y;
+static int desktop_drag_moved;
 static int resize_idx = -1;
 /* A drag INSIDE a window's content: the slot whose application is
    being dragged in, or -1. Kept apart from drag_idx, which moves the
@@ -1470,7 +1503,7 @@ static const char *fit_text(const char *s, int font, int px, int maxw,
     return "";
 }
 
-static int desktop_icon_rect(int index, int *x, int *y)
+static void desktop_icon_default_rect(int index, int *x, int *y)
 {
     int cols = video_w() / 88;
     if (cols < 1)
@@ -1479,7 +1512,140 @@ static int desktop_icon_rect(int index, int *x, int *y)
         cols = 6;
     *x = 10 + (index % cols) * 88;
     *y = BAR_H + 8 + (index / cols) * 72;
+}
+
+static int desktop_icon_rect(int index, int *x, int *y)
+{
+    if (index < 3) {
+        if (desktop_shortcut_pos[index][0] < 0 ||
+            desktop_shortcut_pos[index][1] < 0)
+            desktop_icon_default_rect(index, &desktop_shortcut_pos[index][0],
+                                     &desktop_shortcut_pos[index][1]);
+        *x = desktop_shortcut_pos[index][0];
+        *y = desktop_shortcut_pos[index][1];
+    } else {
+        *x = desktop_items[index - 3].x;
+        *y = desktop_items[index - 3].y;
+    }
     return *y + 68 <= work_bottom() - 2;
+}
+
+static void desktop_icon_move(int index, int x, int y)
+{
+    int max_x = video_w() - 76;
+    int max_y = work_bottom() - 70;
+    if (max_x < 0)
+        max_x = 0;
+    if (max_y < BAR_H + 2)
+        max_y = BAR_H + 2;
+    if (x < 0)
+        x = 0;
+    if (x > max_x)
+        x = max_x;
+    if (y < BAR_H + 2)
+        y = BAR_H + 2;
+    if (y > max_y)
+        y = max_y;
+    if (index < 3) {
+        desktop_shortcut_pos[index][0] = x;
+        desktop_shortcut_pos[index][1] = y;
+    } else if (index - 3 < desktop_item_n) {
+        desktop_items[index - 3].x = x;
+        desktop_items[index - 3].y = y;
+    }
+}
+
+#define DESKTOP_LAYOUT_MAGIC 0x4449434Fu
+#define DESKTOP_LAYOUT_VERSION 1u
+#define DESKTOP_LAYOUT_ITEMS (DESKTOP_ITEM_MAX + 3)
+
+struct desktop_layout_entry {
+    uint32_t kind;
+    uint32_t index;
+    int32_t x, y;
+    char name[32];
+};
+
+struct desktop_layout_file {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t count;
+    struct desktop_layout_entry item[DESKTOP_LAYOUT_ITEMS];
+};
+
+static int desktop_layout_path(char *path, int cap)
+{
+    char home[64];
+    return desktop_home_path(home, sizeof(home)) &&
+           path_append(path, cap, home, ".desktop-icons");
+}
+
+static void desktop_layout_load(void)
+{
+    struct desktop_layout_file layout;
+    char path[80];
+    if (!fs_ready() || !desktop_layout_path(path, sizeof(path)))
+        return;
+    int slot = fs_open(FS_ROOT, path, 0);
+    if (slot < 0 || fs_size(slot) != (int)sizeof(layout) ||
+        fs_read_at(slot, 0, &layout, sizeof(layout)) != (int)sizeof(layout) ||
+        layout.magic != DESKTOP_LAYOUT_MAGIC ||
+        layout.version != DESKTOP_LAYOUT_VERSION ||
+        layout.count > DESKTOP_LAYOUT_ITEMS)
+        return;
+    for (uint32_t i = 0; i < layout.count; i++) {
+        const struct desktop_layout_entry *entry = &layout.item[i];
+        if (entry->kind == 0) {
+            if (entry->index < 3)
+                desktop_icon_move((int)entry->index, entry->x, entry->y);
+        } else if (entry->kind == 1) {
+            int terminated = 0;
+            for (int k = 0; k < (int)sizeof(entry->name); k++)
+                if (!entry->name[k]) {
+                    terminated = 1;
+                    break;
+                }
+            if (!terminated)
+                continue;
+            for (int j = 0; j < desktop_item_n; j++) {
+                if (!strcmp(entry->name, desktop_items[j].name)) {
+                    desktop_icon_move(j + 3, entry->x, entry->y);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+static void desktop_layout_save(void)
+{
+    struct desktop_layout_file layout = { 0 };
+    char path[80];
+    if (!fs_ready() || !desktop_layout_path(path, sizeof(path)))
+        return;
+    layout.magic = DESKTOP_LAYOUT_MAGIC;
+    layout.version = DESKTOP_LAYOUT_VERSION;
+    for (int i = 0; i < 3; i++) {
+        int x, y;
+        desktop_icon_rect(i, &x, &y);
+        struct desktop_layout_entry *entry = &layout.item[layout.count++];
+        entry->kind = 0;
+        entry->index = (uint32_t)i;
+        entry->x = x;
+        entry->y = y;
+    }
+    for (int i = 0; i < desktop_item_n; i++) {
+        struct desktop_layout_entry *entry = &layout.item[layout.count++];
+        entry->kind = 1;
+        entry->x = desktop_items[i].x;
+        entry->y = desktop_items[i].y;
+        memcpy(entry->name, desktop_items[i].name,
+               (uint32_t)strlen(desktop_items[i].name) + 1);
+    }
+    int slot = fs_open(FS_ROOT, path, 1);
+    if (slot < 0 || fs_truncate(slot) < 0 ||
+        fs_write_at(slot, 0, &layout, sizeof(layout)) != (int)sizeof(layout))
+        printk("[desktop] could not save desktop icon positions\n");
 }
 
 static int desktop_icon_at(int mx, int my)
@@ -1898,6 +2064,8 @@ static void desk_switch(int d)
     drag_idx = -1;
     resize_idx = -1;
     content_drag = -1;
+    desktop_drag_icon = -1;
+    desktop_selected = desktop_last = -1;
     menu_open = 0;
 
     /* The focus goes to the topmost window that is there, so that
@@ -2600,17 +2768,15 @@ static void handle_input(int mx, int my, int buttons)
             focus_idx = -1;            /* a click on the desktop: nobody listens */
             int icon = desktop_icon_at(mx, my);
             if (icon >= 0) {
-                uint32_t now = pit_ticks();
-                if (desktop_selected == icon && desktop_last == icon &&
-                    now - desktop_last_click <= DOUBLE_TICKS) {
-                    desktop_open_icon(icon);
-                    desktop_selected = -1;
-                    desktop_last = -1;
-                } else {
-                    desktop_selected = icon;
-                    desktop_last = icon;
-                    desktop_last_click = now;
-                }
+                int x, y;
+                desktop_icon_rect(icon, &x, &y);
+                desktop_selected = icon;
+                desktop_drag_icon = icon;
+                desktop_drag_dx = mx - x;
+                desktop_drag_dy = my - y;
+                desktop_drag_start_x = mx;
+                desktop_drag_start_y = my;
+                desktop_drag_moved = 0;
             } else {
                 desktop_selected = -1;
                 desktop_last = -1;
@@ -2619,6 +2785,24 @@ static void handle_input(int mx, int my, int buttons)
     }
 
     if (!pressed) {
+        if (desktop_drag_icon >= 0) {
+            if (!desktop_drag_moved) {
+                uint32_t now = pit_ticks();
+                if (desktop_last == desktop_drag_icon &&
+                    now - desktop_last_click <= DOUBLE_TICKS) {
+                    desktop_open_icon(desktop_drag_icon);
+                    desktop_selected = -1;
+                    desktop_last = -1;
+                } else {
+                    desktop_last = desktop_drag_icon;
+                    desktop_last_click = now;
+                }
+            } else {
+                desktop_last = -1;
+                desktop_layout_save();
+            }
+            desktop_drag_icon = -1;
+        }
         /* Let go against an edge: the window takes that edge's place.
            This has to happen before drag_idx is forgotten - it is the
            whole of what the drag was for. */
@@ -2651,6 +2835,16 @@ static void handle_input(int mx, int my, int buttons)
             resize_content(&wins[resize_idx]);
             resize_idx = -1;
         }
+    }
+
+    if (pressed && desktop_drag_icon >= 0) {
+        int dx = mx - desktop_drag_start_x;
+        int dy = my - desktop_drag_start_y;
+        if (dx * dx + dy * dy >= 16)
+            desktop_drag_moved = 1;
+        if (desktop_drag_moved)
+            desktop_icon_move(desktop_drag_icon, mx - desktop_drag_dx,
+                              my - desktop_drag_dy);
     }
 
     /* Dragging inside a window: the pointer's place, once per frame.
@@ -5983,7 +6177,8 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_ICON_LO, 186, 113, 0);
 
     icons_read_list();         /* which programs the dock holds, if the disk says */
-    desktop_read_items();      /* files the active user put on the desktop */
+    if (desktop_read_items())
+        desktop_layout_load();
     wallpaper_load();          /* and the wallpaper, if the settings name one */
     look_refresh(1);           /* the theme, and the background drawn once */
     bar_until = 3 * FRAME_HZ;
@@ -5993,8 +6188,9 @@ static void desktop_thread(void *arg)
         reap_windows();
         look_refresh(0);
         anim_settle();
-        if (frames && frames % (2 * FRAME_HZ) == 0)
-            desktop_read_items();
+        if (frames && frames % (2 * FRAME_HZ) == 0 &&
+            desktop_read_items())
+            desktop_layout_load();
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);

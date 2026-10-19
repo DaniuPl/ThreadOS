@@ -5692,3 +5692,38 @@ works and is checked by `make test`.
       Desktop enumeration after sign-in; desktop-menu and bar tests cover
       the new actions and hiding behavior. Per the user's request, builds
       and QEMU tests were not run.
+
+- [ ] **Identify PCI and network devices from the desktop terminal.**
+      `lspci` (also available as `hardware`) lists each PCI device's bus,
+      vendor/device IDs, and class, including devices behind PCI bridges;
+      `ifconfig` displays the configured IPv4 address, mask, gateway and
+      DNS or clearly reports when none is configured.
+      A read-only syscall exposes one checked device record in both kernel
+      ABIs. The IDs and class make it possible to identify a Wi-Fi chipset
+      without claiming that ThreadOS has a driver for it. The 32- and
+      64-bit terminal tests exercise both commands. Builds and QEMU tests
+      were not run locally.
+
+- [ ] **Move and open desktop shortcuts; skip install passwords on live
+      media.** Home, Files, Trash, and Desktop item icons can be dragged,
+      with each profile's layout saved in its home directory. A click
+      selects an icon; a double-click opens its target, while dragging
+      does not accidentally launch it. The kernel no longer requests an
+      account password for an install started from live media: the
+      installer's explicit YES/ERASE confirmation remains, and an installer
+      running from the installed system still requires recent admin
+      authentication. The 32- and 64-bit desktop tests cover moving and
+      opening shortcuts; the installer test covers the live-media flow.
+      Builds and QEMU tests were not run locally.
+
+- [ ] **A graphical boot screen instead of kernel messages**
+      (kernel/bootsplash.c, kernel/printk.c, kernel/kmain.c,
+      kernel64/kmain64.c).
+
+      Graphical boots now draw a ThreadOS title and a progress bar whose
+      stages follow memory, system files, storage, network and device
+      initialization. Kernel messages remain on the serial port; text
+      boots and systems without a loader framebuffer keep the console.
+      A fatal kernel exception restores visible diagnostics. The new
+      `bootsplash` test checks the framebuffer colour after GRUB starts
+      both kernel modes. Builds and QEMU tests were not run locally.

@@ -617,8 +617,9 @@ static void run_line(void)
     if (t_eq(line, "help")) {
         put_str("built in: cd <dir>, clear, exit, help, whoami, "
                 "sudo <command>\n");
-        put_str("everything else is a program from the disk or the "
-                "initrd; 'a | b' works\n");
+        put_str("lspci (also 'hardware') lists PCI devices; ifconfig "
+                "shows network settings\n");
+        put_str("other commands run from disk or initrd; 'a | b' works\n");
         put_str("arrows: history and moving in the line; "
                 "PgUp/PgDn: scrolling\n");
         return;

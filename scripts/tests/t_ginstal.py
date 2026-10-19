@@ -286,20 +286,9 @@ def main():
                   fat_get(target, ESP_START,
                           "/EFI/ThreadOS/threados64.bin") is None)
 
-            # The word, and then the kernel says no: writing needs an
-            # admin, and the answer to that is a password
+            # The confirmation word authorizes this live-media install;
+            # it must not ask for an unrelated kernel account password.
             q.type_line("YES")
-            time.sleep(1.5)
-            text = read_rows(q, cx, cy, 10)
-            check("after YES the kernel refuses a program that is not admin",
-                  "You have to be admin" in text)
-
-            q.type_line("wrongpassword")
-            time.sleep(1.5)
-            text = read_rows(q, cx, cy, 10)
-            check("a wrong password opens nothing", "wrong password" in text)
-
-            q.type_line("thread")
             deadline = time.time() + 60
             done = ""
             while time.time() < deadline:
@@ -307,8 +296,9 @@ def main():
                 if "Done" in done or "It did not work" in done:
                     break
                 time.sleep(0.5)
-            check("with the right password the installation runs to the end",
-                  "Done" in done)
+            check("after YES the installation runs to the end without a "
+                  "kernel password", "Done" in done
+                  and "You have to be admin" not in done)
             check("and it says what follows from that: ThreadOS is in the "
                   "firmware's boot menu",
                   "in this machine's boot menu" in done

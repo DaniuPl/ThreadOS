@@ -124,6 +124,20 @@ def main():
             check("and it shows a prompt with the directory",
                   any(r.startswith("/>") for r in rows))
 
+            # --- hardware inventory from the desktop terminal --------
+            q.type_line("lspci")
+            rows = wait_for_row(q, "class", **geom)
+            check("lspci runs from the terminal and prints PCI class IDs",
+                  any("class " in r and ":" in r for r in rows))
+            q.type_line("hardware")
+            rows = wait_for_row(q, "Network devices use class 02", **geom)
+            check("hardware is an alias for the PCI inventory",
+                  "Network devices use class 02" in text(rows))
+            q.type_line("ifconfig")
+            rows = wait_for_row(q, "Network configuration", **geom)
+            check("ifconfig runs from the desktop terminal",
+                  "Network configuration" in text(rows))
+
             # --- a command, its echo and its output --------------------
             q.type_line("seq 3")
             rows = wait_for_line(q, "3", **geom)

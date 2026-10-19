@@ -119,6 +119,16 @@ def main():
             check("the terminal opened and has a prompt",
                   any(r.startswith("/>") for r in rows))
 
+            # --- hardware inventory from the desktop terminal --------
+            q.type_line("lspci")
+            rows = wait_for(q, "class", geom)
+            check("lspci runs from the terminal and prints PCI class IDs",
+                  any("class " in r and ":" in r for r in rows))
+            q.type_line("ifconfig")
+            rows = wait_for(q, "Network configuration", geom)
+            check("ifconfig runs from the desktop terminal",
+                  "Network configuration" in "\n".join(rows))
+
             # --- fork + exec + a redirect built by hand ---------------
             q.type_line("uls64")
             rows = wait_for(q, "entries", geom)
