@@ -67,6 +67,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/udtest.elf $(BUILD)/user/gappear.elf \
              $(BUILD)/user/gcalc.elf $(BUILD)/user/gcal.elf \
              $(BUILD)/user/gpaint.elf \
+             $(BUILD)/user/gusers.elf \
              $(BUILD)/user/gimg.elf \
              $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
              $(BUILD)/user/nslookup.elf \
@@ -196,8 +197,9 @@ $(BUILD)/switch.o: kernel/switch.S | $(BUILD)
 # change in kernel/include/ rebuilt nothing and make ended green, while
 # the objects still remembered the old prototype.
 KERNEL_HEADERS := $(wildcard kernel/include/*.h)
+USERCTL_HEADER := user/userctl.h
 
-$(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)
+$(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL): $(OBJS) kernel/linker.ld
@@ -306,6 +308,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    udtest=$(BUILD)/user/udtest.elf gappear=$(BUILD)/user/gappear.elf \
 	    gcalc=$(BUILD)/user/gcalc.elf gcal=$(BUILD)/user/gcal.elf \
 	    gpaint=$(BUILD)/user/gpaint.elf \
+	    gusers=$(BUILD)/user/gusers.elf \
 	    gimg=$(BUILD)/user/gimg.elf \
 	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
 	    nslookup=$(BUILD)/user/nslookup.elf \
@@ -416,10 +419,12 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
                $(BUILD)/user64/gpaint.elf \
+               $(BUILD)/user64/gusers.elf \
                $(BUILD)/user64/gsettings.elf $(BUILD)/user64/gappear.elf \
                $(BUILD)/user64/ginstal.elf \
                $(BUILD)/user64/gmikser.elf \
                $(BUILD)/user64/gimg.elf \
+               $(BUILD)/user64/gmedia.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
@@ -539,6 +544,55 @@ $(LIBC64): $(MUSL_TREE)/config.mak $(MUSL_OVERLAY)
 	    DESTDIR=$(abspath $(MUSL_ROOT))
 
 libc64: $(LIBC64)
+
+# FFmpeg is built as a small static decoder set for the 64-bit media
+# player. Its upstream source archive is pinned in third_party; only the
+# containers and codecs the desktop opens are enabled.
+FFMPEG_TREE := $(BUILD)/ffmpeg64
+FFMPEG_CONFIG := $(FFMPEG_TREE)/config.h
+FFMPEG_LIBS := $(FFMPEG_TREE)/libavformat/libavformat.a \
+               $(FFMPEG_TREE)/libavcodec/libavcodec.a \
+               $(FFMPEG_TREE)/libswscale/libswscale.a \
+               $(FFMPEG_TREE)/libswresample/libswresample.a \
+               $(FFMPEG_TREE)/libavutil/libavutil.a
+FFMPEG_STAMP := $(FFMPEG_TREE)/threados-libs.stamp
+FFMPEG_COMMA := ,
+
+$(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(LIBC64)
+	rm -rf $(FFMPEG_TREE) && mkdir -p $(FFMPEG_TREE)
+	tar -xf $< -C $(FFMPEG_TREE) --strip-components=1
+	cd $(FFMPEG_TREE) && ./configure --prefix=/ --arch=x86_64 \
+	    --target-os=none --cc="$(CC)" --ar=ar --ranlib=ranlib \
+	    --disable-programs --disable-doc --disable-network \
+	    --disable-everything --disable-asm --disable-x86asm \
+	    --disable-pthreads --disable-w32threads --disable-os2threads \
+	    --disable-autodetect --disable-debug --disable-gpl \
+	    --disable-version3 --enable-static --disable-shared \
+	    --enable-demuxer=mov,mp3,wav,aac,flac,ogg,matroska,avi \
+	    --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,flac,vorbis,opus,pcm_s16le,pcm_s24le,pcm_s32le,pcm_u8,mjpeg,png,bmp \
+	    --enable-parser=h264,hevc,aac,mpegaudio,vorbis,opus \
+	    --enable-swscale --enable-swresample \
+	    --extra-cflags="-m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -nostdinc -isystem $(abspath $(MUSL_ROOT)/include) -isystem $(shell $(CC) -print-file-name=include) -D_GNU_SOURCE" \
+	    --extra-ldflags="-no-pie" --disable-logging \
+	    > configure.log 2>&1 || { cat configure.log; exit 1; }
+
+$(FFMPEG_STAMP): $(FFMPEG_CONFIG)
+	$(MAKE) -s -C $(FFMPEG_TREE) $(patsubst $(FFMPEG_TREE)/%,%,$(FFMPEG_LIBS))
+	touch $@
+
+$(FFMPEG_LIBS): $(FFMPEG_STAMP)
+
+$(BUILD)/user64/gmedia.elf: user64/gmedia.c user/uapi.h user/udraw.h \
+                             user64/usys64.h user64/compat64.h \
+                             $(FFMPEG_LIBS) $(LIBC64) libc/libc64.ld \
+                             Makefile | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -I$(FFMPEG_TREE) -D_GNU_SOURCE \
+	    -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gmedia.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gmedia.o \
+	    -Wl$(FFMPEG_COMMA)--start-group $(FFMPEG_LIBS) \
+	    -Wl$(FFMPEG_COMMA)--end-group \
+	    $(MUSL_ROOT)/lib/libm.a) -o $@
 
 # Programs against musl: its headers first, the compiler's own after
 # them (for what a C library does not carry - stdatomic.h, the vector
@@ -764,11 +818,13 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
 	    gpaint=$(BUILD)/user64/gpaint.elf \
+	    gusers=$(BUILD)/user64/gusers.elf \
 	    gsettings=$(BUILD)/user64/gsettings.elf \
 	    gappear=$(BUILD)/user64/gappear.elf \
 	    ginstal=$(BUILD)/user64/ginstal.elf \
 	    gmikser=$(BUILD)/user64/gmikser.elf \
 	    gimg=$(BUILD)/user64/gimg.elf \
+	    gmedia=$(BUILD)/user64/gmedia.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
@@ -795,10 +851,10 @@ initrd64: $(INITRD64)
 
 KERNEL64_HEADERS := $(wildcard kernel64/*.h)
 
-$(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) | $(BUILD)/64
+$(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
-$(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/64
+$(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
 $(KERNEL64): $(OBJS64) kernel64/linker64.ld

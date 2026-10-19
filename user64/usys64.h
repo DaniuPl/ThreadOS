@@ -56,6 +56,7 @@
 #define SYS64_SHM        36
 #define SYS64_TIME       37
 #define SYS64_AUTH       45
+#define SYS64_USER       78
 #define SYS64_DROP       46
 #define SYS64_LEVEL      47
 #define SYS64_TRYWAIT    48
@@ -75,6 +76,7 @@
 #define SYS64_SND_GET  62
 #define SYS64_SND_SET  63
 #define SYS64_SND_BEEP 64
+#define SYS64_SND_STREAM 79
 #define SYS64_SEM_GET  65
 #define SYS64_SEM_WAIT 66
 #define SYS64_SEM_POST 67
@@ -88,6 +90,7 @@
 #define SYS64_SET_FS   75
 #define SYS64_INITRD_READ 76
 #define SYS64_UPDATE_WRITE 77
+#define SYS64_UPDATE_ALLOWED 80
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -198,6 +201,11 @@ static inline void sys_exit(int code)
     syscall64(SYS64_EXIT, code, 0);
     for (;;)
         ;                            /* the kernel will not come back here */
+}
+
+static inline int32_t sys_drop(void)
+{
+    return (int32_t)syscall64(SYS64_DROP, 0, 0);
 }
 
 static inline void sys_sleep(uint32_t ms)

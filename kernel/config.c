@@ -25,9 +25,8 @@ struct setting {
     const char *name;
     const char *fallback;
     const char *help;
-    /* Hidden settings are kept and written like the rest, but nothing
-       lists them and nothing sets them by name: they are not a value a
-       person types, they are a value the system computes. */
+    /* Hidden values can be read internally, but are not listed or
+       serialized as public machine settings. */
     int hidden;
     char value[CONFIG_VAL_MAX];
 };
@@ -54,10 +53,8 @@ static struct setting settings[] = {
                             "1 quick, 2-10 that many times slower", 0, { 0 } },
     { "hidden", "0",        "the file manager shows system files: 0 no,\n"
                             "1 yes", 0, { 0 } },
-    /* Not the password - a number computed from it. The default is the
-       number for 'thread', so a machine on which nobody ever set one
-       still has a password. Hidden, because a number nobody can type
-       back is not a setting: it is changed by the 'passwd' command. */
+    /* Legacy bootstrap data for migrating the first admin account.
+       Hidden values are not written back to the public settings file. */
     { "password",  "14605732860167589771",
                             "the admin password (a number computed from it)",
                             1, { 0 } },
@@ -258,6 +255,8 @@ int config_set(const char *key, const char *value)
     char out[CONFIG_MAX_FILE];
     uint32_t at = 0;
     for (int i = 0; i < NSETTINGS; i++) {
+        if (settings[i].hidden)
+            continue;
         at = append(out, at, settings[i].name);
         if (at < CONFIG_MAX_FILE - 1)
             out[at++] = '=';

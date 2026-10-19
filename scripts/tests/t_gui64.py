@@ -248,6 +248,58 @@ def main():
             w, h, at4 = q.screen_raw()
             check("the compositor still draws the desktop",
                   at4(w - 20, h // 2) == aurora_px(w - 20, h // 2, w, h))
+
+            # --- Settings: the 64-bit-only Updates section ---------------
+            q.mouse_home()
+            q.launch_dock(6)                # the "Settings" tile
+            q.mouse_goto(400, 300)
+            swx, swy = cascade(5, GSET_W + 2, GSET_H + TITLE_H + 2)
+            scx, scy = swx + 1, swy + CONTENT_DY
+            head = ""
+            end = time.time() + 15
+            while time.time() < end:
+                head = q.gset_heading(scx, scy)
+                if head == "General":
+                    break
+                time.sleep(0.5)
+            check("the Settings tile opens on General ('%s')" % head,
+                  head == "General")
+            updates_section = len(GSET_SECTIONS64) - 1
+            side = q.gset_side(scx, scy, updates_section)
+            check("64-bit Settings has an Updates section ('%s')" % side,
+                  side == "Updates")
+            q.click(scx + GSET_SIDE_W // 2,
+                    scy + GSET_SIDE_Y0 + updates_section * GSET_SIDE_H +
+                    GSET_SIDE_H // 2)
+            q.mouse_goto(400, 300)
+            head = ""
+            end = time.time() + 15
+            while time.time() < end:
+                head = q.gset_heading(scx, scy)
+                if head == "Updates":
+                    break
+                time.sleep(0.5)
+            check("Updates opens its own settings page ('%s')" % head,
+                  head == "Updates")
+            shot = q.screen_raw()
+            check("Updates offers a release check",
+                  q.find_ui(scx + GSET_PANE_X,
+                            scx + GSET_PANE_X + 152,
+                            scy + ui_font_baseline_in(
+                                UD_PX, GSET_PANE_Y0 + GSET_INFO_H + 6,
+                                GSET_CHIP_H),
+                            px=UD_PX,
+                            fg=theme("dark")["accent_text"],
+                            screen=shot) == "Check for updates")
+            check("updates cannot be installed without an installed-system "
+                  "boot marker",
+                  q.read_ui(scx + GSET_PANE_X,
+                            scy + ui_font_baseline_in(
+                                11, GSET_PANE_Y0 + GSET_INFO_H + 70, 16),
+                            GSET_W - GSET_PANE_X - 8, px=11,
+                            fg=theme("dark")["app_dim"],
+                            screen=shot) ==
+                  "Install only after booting the installed system.")
         finally:
             q.close()
         # --- A second boot: the monitor and the terminal ---

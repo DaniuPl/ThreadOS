@@ -115,6 +115,10 @@
 #define SYS64_SND_GET  62
 #define SYS64_SND_SET  63
 #define SYS64_SND_BEEP 64
+#define SYS64_SND_STREAM 79
+#define SND_STREAM_BEGIN 0
+#define SND_STREAM_WRITE 1
+#define SND_STREAM_END 2
 /* Counting semaphores, shared by key (kernel/sem.c) */
 #define SYS64_SEM_GET  65   /* rdi=key, rsi=initial count -> id or -1 */
 #define SYS64_SEM_WAIT 66   /* rdi=id -> 0, or -1 (a bad id, a signal) */
@@ -146,8 +150,12 @@
 #define SYS64_INITRD_READ 76
 /* An update's file written over the installed one (admin only): a1 =
    0 kernel / 1 initrd / 2 loader, a2 = data, a3 = length -> 0, -1
-   write failed, -2 not allowed, -3 nothing installed here */
+   write failed, -2 not allowed, -3 nothing installed here, -4 not
+   booted from the installed system */
 #define SYS64_UPDATE_WRITE 77
+/* Whether a trusted installed-system boot marker permits update writes */
+#define SYS64_UPDATE_ALLOWED 80
+#define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0

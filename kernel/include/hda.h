@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define HDA_STREAM_MAX_FRAMES 1024
+
 /* Intel HD Audio
  *
  * The sound controller every machine made after about 2005 has, this
@@ -35,6 +37,16 @@ const char *hda_name(void);
    format every codec must support, so the one format worth having.
    Plays them and returns when they have been played. 0 = done. */
 int hda_play(const int16_t *samples, uint32_t frames);
+
+/* A stream is filled one DMA half at a time. begin starts silence;
+   write waits for the safe half and copies up to HDA_STREAM_MAX_FRAMES;
+   end drains the last half before stopping. Only the task that began
+   the stream may write or end it. */
+int hda_stream_begin(void);
+int hda_stream_owned(void);
+int hda_stream_write(const int16_t *samples, uint32_t frames);
+int hda_stream_end(void);
+void hda_stream_abort(int task_id);
 
 /* A tone of the given frequency and length. The oldest thing a
    computer does with a speaker, and the shortest way to hear whether

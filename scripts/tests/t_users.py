@@ -22,8 +22,8 @@ What is checked here is the whole road, not the flag:
   a program in ring 3 is refused by the KERNEL, not by the program: rm
   and cp are told 'not allowed', which is a different answer from
   'there is no such file'
-  the new password survives a restart, and the file on the disk holds
-  a number computed from it rather than the password itself
+  the new password survives a restart, and the public settings file
+  contains no account credential
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -123,7 +123,7 @@ def main():
             check("'sudo' with no command gives an admin session",
                   "you are admin" in out)
             out = q.command("whoami", "admin", timeout=30)
-            check("and 'whoami' confirms it", "admin (" in out)
+            check("and 'whoami' confirms the admin role", "(admin)" in out)
             out = q.command("set color 14", "saved", timeout=30)
             check("in an admin session the settings change with no question",
                   "color = 14 (saved)" in out)
@@ -152,20 +152,16 @@ def main():
 
             # --- changing the password -------------------------------
             q.type_line("sudo passwd")
-            time.sleep(1)
-            q.type_line("thread")       # for sudo itself
-            time.sleep(1)
-            q.type_line("newpassword")    # the new one
-            time.sleep(0.8)
+            q.command("thread", "current password:", timeout=30)
+            q.command("thread", "new password:", timeout=30)
+            q.command("newpassword", "again:", timeout=30)
             out = q.command("newpassword", "passwd", timeout=30)
             check("password changed", "password changed" in out)
 
-            # The file holds a number, not the password
-            f = q.command("cat system.cfg", "password=", timeout=30)
-            check("the file on the disk holds no password in the clear",
-                  "newpassword" not in f)
-            check("only a number computed from it",
-                  re.search(r"password=\d{6,}", f) is not None)
+            # The credential is stored only in the protected account DB.
+            f = q.command("cat system.cfg", "background=", timeout=30)
+            check("the public settings file contains no account credential",
+                  "password=" not in f and "newpassword" not in f)
         finally:
             q.close()
 

@@ -119,6 +119,9 @@ static uint32_t out_base;             /* the first output stream's registers */
 static int codec;                     /* which address answered */
 static int dac, pin;                  /* the two nodes the sound goes through */
 static int ready;
+static int stream_active;
+static int stream_owner = -1;
+static uint32_t stream_fill;
 static char name[48];
 
 /* Where it stopped, when it stopped. A driver for a device that is
@@ -515,7 +518,7 @@ int hda_play(const int16_t *samples, uint32_t frames)
     uint32_t done = 0;
     int filling, silent = 0;
 
-    if (!ready)
+    if (!ready || stream_active)
         return -1;
 
     /* Both halves before starting, so that nothing plays whatever was
@@ -578,6 +581,93 @@ int hda_play(const int16_t *samples, uint32_t frames)
     wait_ms(BUF_FRAMES * 1000 / RATE + 5);
     wr8(out_base + SD_CTL, 0);
     return 0;
+}
+
+/* The codec reads the DMA ring while the caller prepares its next
+   decoded frame. Wait until the half being filled is no longer in use;
+   sleeping leaves the other programs responsive while audio plays. */
+static int stream_wait_half(uint32_t filling)
+{
+    uint32_t guard = 0;
+    while (guard < 5000) {
+        if (task_killed())
+            return -1;
+        int playing = rd32(out_base + SD_LPIB) >= BUF_BYTES / 2;
+        if ((uint32_t)playing != filling)
+            return 0;
+        guard++;
+        task_sleep(1);
+    }
+    return -1;
+}
+
+int hda_stream_begin(void)
+{
+    if (!ready || stream_active)
+        return -1;
+    for (uint32_t i = 0; i < BUF_FRAMES * 2; i++)
+        buf[i] = 0;
+    stream_fill = 0;
+    stream_owner = task_current_id();
+    stream_active = 1;
+    wr8(out_base + SD_STS, 0x1C);
+    wr8(out_base + SD_CTL, SDCTL_RUN);
+    wr8(out_base + SD_CTL + 2, 0x10);
+    return 0;
+}
+
+int hda_stream_owned(void)
+{
+    return stream_active && stream_owner == task_current_id();
+}
+
+int hda_stream_write(const int16_t *samples, uint32_t frames)
+{
+    uint32_t half = BUF_FRAMES / 2;
+    if (!stream_active || stream_owner != task_current_id() ||
+        frames > half || (frames && !samples))
+        return -1;
+    if (stream_wait_half(stream_fill) < 0) {
+        wr8(out_base + SD_CTL, 0);
+        stream_active = 0;
+        stream_owner = -1;
+        return -1;
+    }
+    uint32_t at = stream_fill * half;
+    for (uint32_t i = 0; i < half; i++) {
+        buf[(at + i) * 2] = i < frames ? samples[i * 2] : 0;
+        buf[(at + i) * 2 + 1] = i < frames ? samples[i * 2 + 1] : 0;
+    }
+    stream_fill ^= 1;
+    return 0;
+}
+
+int hda_stream_end(void)
+{
+    if (!stream_active || stream_owner != task_current_id())
+        return -1;
+    /* The empty half follows the last samples, so the output stops on
+       silence rather than cutting off the final decoded block. */
+    if (hda_stream_write((const int16_t *)0, 0) < 0 ||
+        stream_wait_half(stream_fill) < 0) {
+        stream_active = 0;
+        stream_owner = -1;
+        wr8(out_base + SD_CTL, 0);
+        return -1;
+    }
+    wr8(out_base + SD_CTL, 0);
+    stream_active = 0;
+    stream_owner = -1;
+    return 0;
+}
+
+void hda_stream_abort(int task_id)
+{
+    if (stream_active && stream_owner == task_id) {
+        wr8(out_base + SD_CTL, 0);
+        stream_active = 0;
+        stream_owner = -1;
+    }
 }
 
 /* A square wave, because it is the shape a speaker makes loudest and

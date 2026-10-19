@@ -459,6 +459,23 @@ static int pick(const char *name)
 
 /* --- what the buttons do ------------------------------------------ */
 
+static char lower_ascii(char c)
+{
+    return c >= 'A' && c <= 'Z' ? (char)(c + ('a' - 'A')) : c;
+}
+
+static int suffix_is(const char *name, int len, const char *suffix)
+{
+    int n = slen(suffix);
+    if (len < n)
+        return 0;
+    name += len - n;
+    for (int i = 0; i < n; i++)
+        if (lower_ascii(name[i]) != suffix[i])
+            return 0;
+    return 1;
+}
+
 static void open_chosen(void)
 {
     if (chosen < 0 || chosen >= count)
@@ -473,25 +490,28 @@ static void open_chosen(void)
        reading every file in the directory to draw a list. */
     const char *nm = items[chosen].name;
     int ln = slen(nm);
-    /* The endings the viewer knows: the machine's own pictures, and
-       the formats that come from outside it. */
-    int picture = 0;
-    if (ln > 4 && nm[ln - 4] == '.') {
-        const char *e = nm + ln - 3;
-        picture = (e[0] == 'p' && e[1] == 's' && e[2] == 'c') ||
-                  (e[0] == 'p' && e[1] == 'n' && e[2] == 'g') ||
-                  (e[0] == 'b' && e[1] == 'm' && e[2] == 'p') ||
-                  (e[0] == 'j' && e[1] == 'p' && e[2] == 'g');
-    }
-    if (!picture && ln > 5 && nm[ln - 5] == '.') {
-        const char *e = nm + ln - 4;
-        picture = e[0] == 'j' && e[1] == 'p' && e[2] == 'e' && e[3] == 'g';
-    }
-    const char *prog = picture ? "gimg" : "gedit";
+    /* Extensions are folded to lowercase so files from another OS
+       open the same way regardless of the case used in their names. */
+    int picture = suffix_is(nm, ln, ".psc") ||
+                  suffix_is(nm, ln, ".png") ||
+                  suffix_is(nm, ln, ".bmp") ||
+                  suffix_is(nm, ln, ".jpg") ||
+                  suffix_is(nm, ln, ".jpeg");
+    int media = 0;
+#ifdef __x86_64__
+    media = suffix_is(nm, ln, ".mp3") || suffix_is(nm, ln, ".wav") ||
+            suffix_is(nm, ln, ".aac") || suffix_is(nm, ln, ".flac") ||
+            suffix_is(nm, ln, ".ogg") || suffix_is(nm, ln, ".m4a") ||
+            suffix_is(nm, ln, ".mp4") ||
+            suffix_is(nm, ln, ".m4v") || suffix_is(nm, ln, ".mov") ||
+            suffix_is(nm, ln, ".mkv") || suffix_is(nm, ln, ".avi") ||
+            suffix_is(nm, ln, ".webm");
+#endif
+    const char *prog = picture ? "gimg" : media ? "gmedia" : "gedit";
 
-    char cmd[NAME_LEN + 8];
+    char cmd[NAME_LEN + 10];
     int n = 0;
-    const char *pre = picture ? "gimg " : "gedit ";
+    const char *pre = picture ? "gimg " : media ? "gmedia " : "gedit ";
     for (int i = 0; pre[i]; i++)
         cmd[n++] = pre[i];
     ecopy(cmd + n, items[chosen].name, (int)sizeof(cmd) - n);
@@ -509,7 +529,8 @@ static void open_chosen(void)
     (void)prog;
     sys_spawn(cmd, 0, 0);
 #endif
-    ecopy(note, picture ? "opened in the viewer" : "opened in the editor",
+    ecopy(note, media ? "opened in the media player" :
+               picture ? "opened in the viewer" : "opened in the editor",
           sizeof(note));
 }
 

@@ -1,25 +1,10 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: asking for the password in the graphical part.
+"""ThreadOS smoke test: an admin session stays active in GUI apps.
 
-The kernel refuses a plain user who tries to change the system. On a
-console that is the end of the story - the person types 'sudo' and the
-shell asks. In a window there is no shell to ask, and an application in
-ring 3 cannot raise its own rights: it can only be told 'not allowed'
-and do something about it.
-
-What it does about it is ask, and that is what this group is for. Both
-of the machine's windows that need it ask in their own window, with
-the keyboard they already have:
-
-  the terminal, on 'sudo <command>': the line turns into a password
-  line, what is typed shows as stars, and the command runs once - after
-  which the terminal is a plain user again
-
-  the settings window, when the write comes back refused: a panel over
-  it asks for the password, and the same write is tried again
-
-Both go through the same syscall, and a wrong password gets the same
-answer in both: nothing happens and it says so.
+The desktop signs in as the administrator before this group starts.
+The terminal and settings app should keep that session, so ordinary
+system changes do not ask for the password again. Risky account changes
+are covered by the multiuser group, which checks their reauthentication.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -40,6 +25,7 @@ WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = TERM_PAD, TERM_ROW_H
 COLS, ROWS = TERM_COLS, TERM_ROWS
+USERS_W, USERS_H = 520, 340
 
 
 def read_rows(q, ox, oy, cols, rows):
@@ -102,55 +88,24 @@ def main():
             time.sleep(1)
 
             q.type_line("whoami")
-            rows = wait_row(q, "plain user", geom)
-            check("the terminal comes up as an ordinary user",
-                  "plain user" in "\n".join(rows))
+            rows = wait_row(q, "admin - you can change the system", geom)
+            check("the terminal inherits the logged-in admin session",
+                  "admin - you can change the system" in "\n".join(rows))
 
-            # A program in ring 3 asking to delete a system file is
-            # refused by the KERNEL - and rm says which refusal it was
-            q.type_line("rm swap.sys")
-            rows = wait_row(q, "permission", geom)
-            check("the program is refused, not told 'there is no file'",
-                  "no permission" in "\n".join(rows))
-
-            # --- sudo in the window ------------------------------------
+            # The admin session is already authenticated, so a normal
+            # system operation should not open a second password prompt.
             q.type_line("sudo cp termout system.cfg")
-            time.sleep(1.5)
-            rows = read_rows(q, **geom)
-            check("the terminal asks for a password",
-                  any(r.startswith("password:") for r in rows))
-
-            # A wrong one changes nothing and says so
-            typed(q, "wrongpassword")
-            q.sendkey("ret")
-            rows = wait_row(q, "wrong password", geom)
-            check("a wrong password is refused", "wrong password" in "\n".join(rows))
-
-            q.type_line("sudo cp termout system.cfg")
-            time.sleep(1.5)
-            # What is typed shows as stars: the line has as many of them
-            # as there were keys, and none of the letters
-            typed(q, "thread")
-            time.sleep(0.5)
-            rows = read_rows(q, **geom)
-            last = [r for r in rows if r][-1]
-            check("the password being typed shows as stars ('%s')" % last,
-                  "******" in last and "thread" not in last)
-
-            q.sendkey("ret")
-            time.sleep(3)
             rows = wait_row(q, "sudo cp", geom)
             body = "\n".join(rows)
-            check("the command ran with admin rights",
+            check("sudo uses the existing session without prompting",
+                  "password:" not in body and
                   "no permission" not in body.split("sudo cp")[-1])
 
             q.type_line("whoami")
             time.sleep(2)
             rows = read_rows(q, **geom)
-            # Twice: once at the start of the session and once now,
-            # after the one command that was run as an admin
-            check("and after it the terminal is an ordinary user again",
-                  "\n".join(rows).count("plain user") >= 2)
+            check("the terminal remains in the admin session",
+                  "\n".join(rows).count("admin - you can change the system") >= 2)
 
             # --- the settings window ------------------------------------
             q.launch_dock(6)                # the "Settings" tile
@@ -172,24 +127,67 @@ def main():
             time.sleep(1.5)
 
             asked = q.gset_asks(SX, SY)
-            check("the settings window says admin is needed ('%s')" % asked,
-                  asked == "Changing settings needs admin")
-
-            typed(q, "wrongpassword")
-            q.sendkey("ret")
-            time.sleep(2)
-            check("a wrong password in the window writes nothing either",
-                  window_says(q, SX, SY, "NOT changed (wrong password)"))
-
-            q.click(SX + green[0], SY + green[1])     # ask again
+            check("an admin setting change does not open a password panel",
+                  asked == "")
             time.sleep(1.5)
-            typed(q, "thread")
-            q.sendkey("ret")
-            time.sleep(2.5)
             q.mouse_goto(600, 380)
             time.sleep(1.5)
-            check("the right password saves the setting",
+            check("the setting is saved in the persistent admin session",
                   window_says(q, SX, SY, "Saved"))
+
+            # Account management is a desktop app shipped in both initrds.
+            q.launch_menu("gusers")
+            time.sleep(2)
+            ux, uy = cascade(4, USERS_W + 2,
+                             USERS_H + TITLE_H + 2)
+            check("the account manager opens from the desktop menu",
+                  q.window_title(ux, uy, USERS_W + 2) == "User Accounts")
+            ucx, ucy = ux + 1, uy + CONTENT_DY
+            q.click(ucx + 300, ucy + 105)
+            typed(q, "guiuser")
+            q.click(ucx + 300, ucy + 157)
+            typed(q, "guipass")
+            q.click(ucx + 300, ucy + 209)
+            typed(q, "guipass")
+            q.click(ucx + 300, ucy + 261)
+            typed(q, "thread")
+            q.click(ucx + 72, ucy + USERS_H - 28)
+            time.sleep(2)
+            row_base = ucy + ui_font_baseline_in(UD_PX, 118, 18)
+            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
+            check("the 32-bit account manager creates an account through the syscall",
+                  second_account == "guiuser")
+
+            q.click(ucx + 50, ucy + 124)
+            q.click(ucx + 300, ucy + 261)
+            typed(q, "thread")
+            q.click(ucx + 316, ucy + USERS_H - 28)
+            time.sleep(1)
+            role = q.read_ui(ucx + 160, row_base, 55, px=UD_PX)
+            check("the account manager changes a user's role",
+                  role == "admin")
+
+            q.click(ucx + 300, ucy + 157)
+            typed(q, "resetpass")
+            q.click(ucx + 300, ucy + 209)
+            typed(q, "resetpass")
+            q.click(ucx + 300, ucy + 261)
+            typed(q, "thread")
+            q.click(ucx + 194, ucy + USERS_H - 28)
+            time.sleep(1)
+            status_base = ucy + ui_font_baseline_in(
+                UD_PX, USERS_H - 70, 20)
+            status = q.read_ui(ucx + 16, status_base, 220, px=UD_PX)
+            check("the account manager resets a password after admin reauthentication",
+                  status == "Account updated")
+
+            q.click(ucx + 300, ucy + 261)
+            typed(q, "thread")
+            q.click(ucx + 438, ucy + USERS_H - 28)
+            time.sleep(1)
+            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
+            check("the account manager removes the selected account",
+                  second_account == "")
         finally:
             q.close()
     finally:

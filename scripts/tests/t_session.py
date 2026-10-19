@@ -84,6 +84,13 @@ def lock_says(q):
                      fg=(0xD8, 0xD8, 0xDC), under=under)
 
 
+def lock_profile(q):
+    w, h, at = q.screen_raw()
+    fy = h * 2 // 3 - LOCK_FIELD_H
+    return q.find_ui(80, w - 80, fy - 70, px=15, face="bold",
+                     fg=(0xFF, 0xFF, 0xFF), screen=(w, h, at))
+
+
 def typed(q, text):
     for ch in text:
         q.sendkey(Qemu.KEYNAMES.get(ch, ch))
@@ -284,6 +291,8 @@ def session(slog):
         said = lock_says(q)
         check("Enter logs out, and the lock says it is a log in ('%s')"
               % said, "to log in" in said and not kernel_window(q))
+        check("the logged-out screen shows the saved profile name",
+              lock_profile(q) == "Test Admin")
         typed(q, "thread\n")
         time.sleep(2)
         q.mouse_goto(600, 300)

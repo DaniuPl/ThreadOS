@@ -28,6 +28,7 @@
 #include "paging64.h"
 #include "../kernel/include/tlb.h"
 #include "../kernel/include/config.h"
+#include "../kernel/include/user.h"
 #include "task64.h"
 #include "gdt64.h"
 #include "syscall64.h"
@@ -574,6 +575,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         /* What the machine remembers about itself. Right after the file
            system, because that is where it is written. */
         config_load();
+        user_accounts_load();
         printk("[ OK ] Settings: %s (%d entries, the 'set' command)\n",
                config_get("name"), config_count());
         /* Page swapping: the space is reserved through the file system, but
@@ -655,11 +657,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     int start_desktop = boot_word(mbi, "desktop");
     int start_installer = boot_word(mbi, "install");
+    install_set_booted_installed(start_desktop &&
+        boot_word(mbi, "installed") && !boot_word(mbi, "live"));
     printk("\nThe 64-bit system is ready%s.\n",
            start_desktop || start_installer ? "" : " - type 'help'");
 
-    /* The UEFI loader passes 'desktop' for an installed system. Keep the
-       shell running behind it so desktop keys can still reach commands. */
+    /* ThreadBoot marks an installed EFI path explicitly; the GRUB desktop
+       entry marks the Live system. Keep the shell behind the desktop so
+       its keys can still reach commands. */
     if (start_desktop) {
         printk("The desktop is starting - the console goes away\n");
         desktop_start();
@@ -671,6 +676,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("The installer is starting\n");
         install_graphical();
     } else {
+        user_session_guest();
         shell64_start();
     }
 

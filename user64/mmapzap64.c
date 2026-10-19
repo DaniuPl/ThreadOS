@@ -126,6 +126,34 @@ void _start(int argc, char **argv)
     const char *name = argc > 1 ? argv[1] : "written.txt";
     const char *mode = argc > 2 ? argv[2] : "write";
 
+    if (equal(mode, "probe")) {
+        uint64_t size = 0;
+        void *p = sys_mmap_file_w(name, &size);
+        if (p) {
+            print("[mmapzap64] WRONG: a plain user mapped the file for writing\n");
+            sys_exit(1);
+        }
+        print("[mmapzap64] a plain user cannot map the file for writing\n");
+        sys_exit(0);
+    }
+
+    if (equal(mode, "privdrop")) {
+        uint64_t size = 0;
+        unsigned char *p = sys_mmap_file_w(name, &size);
+        if (!p || !size) {
+            print("[mmapzap64] WRONG: an admin could not map the file\n");
+            sys_exit(1);
+        }
+        sys_drop();
+        p[0] = 'X';
+        if (sys_msync() != 0) {
+            print("[mmapzap64] WRONG: a dropped admin flushed the file\n");
+            sys_exit(1);
+        }
+        print("[mmapzap64] a dropped admin cannot flush the file\n");
+        sys_exit(0);
+    }
+
     if (equal(mode, "check")) {
         uint64_t bad = check_by_reading(name);
         if (bad) {

@@ -31,6 +31,7 @@
 #include "include/spinlock.h"
 #include "include/smp.h"
 #include "include/biglock.h"
+#include "include/hda.h"
 
 #define STACK_SIZE 8192
 #define NAME_MAX   16
@@ -57,6 +58,7 @@ struct task {
         uint32_t size;        /* how many bytes the file itself has */
         uint32_t nblocks_of;
         uint32_t *blocks;
+        int file_slot;             /* inode whose permissions guard writeback */
         uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
     int cwd;                     /* working directory (TFS slot, -1 = root) */
@@ -64,6 +66,7 @@ struct task {
        child gets what its parent had - the level travels with the
        process, not with the program. */
     int level;
+    int uid;                      /* account that owns this process */
     int parent;                  /* parent pid (-1 = none, an orphan) */
     int vc;                      /* the console this task writes to */
     uint32_t sig_pending;        /* mask of pending signals */
@@ -269,6 +272,50 @@ void task_set_level(int level)
         current->level = level;
 }
 
+int task_uid(void)
+{
+    return current ? current->uid : 0;
+}
+
+void task_set_uid(int uid)
+{
+    if (current && uid >= 0)
+        current->uid = uid;
+}
+
+void task_set_identity_name(const char *name, int uid, int level, int cwd)
+{
+    if (!name || uid < 0)
+        return;
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    do {
+        if (t->state != TASK_ZOMBIE && t->cr3 == paging_kernel_cr3() &&
+            !strcmp(t->name, name)) {
+            t->uid = uid;
+            t->level = level;
+            t->cwd = cwd;
+        }
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+}
+
+void task_set_level_name(const char *name, int level)
+{
+    if (!name)
+        return;
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    do {
+        if (t->state != TASK_ZOMBIE && t->cr3 == paging_kernel_cr3() &&
+            !strcmp(t->name, name))
+            t->level = level;
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+}
+
 /* The level of the process with that pid - so that a caller can ask
    whether the process it is about to signal is its own. A pid nobody
    holds answers with the caller's own level: there is nothing there to
@@ -333,6 +380,7 @@ void scheduler_init(void)
     main_task->mmap_next = 0;
     main_task->cwd = -1;        /* the root directory */
     main_task->level = USER_ADMIN;
+    main_task->uid = 0;
     main_task->parent = -1;     /* the root of the process tree */
     main_task->vc = 0;
     main_task->killed = 0;
@@ -389,6 +437,8 @@ struct task *task_create(const char *name, void (*entry)(void *), void *arg)
        far as this is concerned. */
     t->level = (current && current->cr3 != paging_kernel_cr3())
                    ? current->level : user_shell_level();
+    t->uid = (current && current->cr3 != paging_kernel_cr3())
+                 ? current->uid : user_shell_uid();
     t->parent = current ? current->id : -1;
     t->vc = current ? current->vc : 0;   /* the child writes where the parent does */
     t->killed = 0;
@@ -663,6 +713,7 @@ struct task *task_fork(void (*entry)(void *), void *arg, uint32_t cr3)
     task_mmap_inherit(t);
     t->cwd = current->cwd;
     t->level = current->level;
+    t->uid = current->uid;
     t->priority = current->priority;
     /* The child inherits the right to run on any core: that is a
        property of the program, not of a single task */
@@ -916,6 +967,7 @@ void task_core_enter(int nr)
         }
     t->cwd = -1;
     t->level = USER_ADMIN;       /* a kernel thread is the kernel */
+    t->uid = 0;
     t->parent = -1;
     t->vc = 0;
     t->killed = 0;
@@ -1007,6 +1059,7 @@ int task_alive(int id)
 
 void task_exit(int code)
 {
+    hda_stream_abort(current->id);
     /* Write back to disk what the process wrote into a writable file
        mapping and has not managed to write back itself. This has to
        happen HERE, while its address space is still alive: the zombie
@@ -1142,6 +1195,25 @@ int task_kill(int pid)
     return found ? 0 : -1;
 }
 
+void task_kill_uid(int uid)
+{
+    if (uid < 0)
+        return;
+    irqflags_t flags = spin_lock_irq(&lock);
+    struct task *t = current;
+    do {
+        if (t->uid == uid && t->cr3 != paging_kernel_cr3() &&
+            t->state != TASK_ZOMBIE) {
+            t->level = USER_PLAIN;
+            t->killed = 1;
+            if (t->state == TASK_SLEEPING || t->state == TASK_BLOCKED)
+                t->state = TASK_READY;
+        }
+        t = t->next;
+    } while (t != current);
+    spin_unlock_irq(&lock, flags);
+}
+
 /* Kills the first live task with the given name and returns its pid
    (or -1). Useful when the pid is not known - e.g. an application was
    launched from the desktop menu rather than from a shell. */
@@ -1268,7 +1340,8 @@ void task_set_brk_base(uint32_t base)
 /* --- Memory-mapped files ------------------------------------------ */
 
 int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
-                    uint32_t *blocks, uint32_t nblocks_of, uint32_t write)
+                    uint32_t *blocks, uint32_t nblocks_of, int file_slot,
+                    uint32_t write)
 {
     if (!current)
         return -1;
@@ -1279,6 +1352,7 @@ int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
         current->maps[i].size = size;
         current->maps[i].blocks = blocks;
         current->maps[i].nblocks_of = nblocks_of;
+        current->maps[i].file_slot = file_slot;
         current->maps[i].write = write;
         /* 'end' says the entry is in use, so it goes in LAST. The page
            fault handler reads this table without the big kernel lock,
@@ -1368,7 +1442,7 @@ void task_mmap_inherit(struct task *child)
    pages back to disk, which has to go through each of them in turn.
    Returns 0 when the entry is free. */
 int task_mmap_info(int i, uint32_t *start, uint32_t *end,
-                   uint32_t *size, uint32_t *write)
+                   uint32_t *size, uint32_t *write, int *file_slot)
 {
     if (!current || i < 0 || i >= MMAP_FILES || !current->maps[i].end)
         return 0;
@@ -1376,6 +1450,7 @@ int task_mmap_info(int i, uint32_t *start, uint32_t *end,
     *end = current->maps[i].end;
     *size = current->maps[i].size;
     *write = current->maps[i].write;
+    *file_slot = current->maps[i].file_slot;
     return 1;
 }
 

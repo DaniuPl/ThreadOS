@@ -53,6 +53,18 @@
 #define DIR_FALLBACK "/EFI/BOOT"
 #define PATH_FALLBACK "/EFI/BOOT/BOOTX64.EFI"
 
+static int update_allowed;
+
+void install_set_booted_installed(int installed)
+{
+    update_allowed = !!installed;
+}
+
+int install_update_allowed(void)
+{
+    return update_allowed;
+}
+
 /* The EFI partition we make when the disk becomes ours. A hundred and
    twenty-eight megabytes is far more than three files need and is the
    smallest size at which FAT32 is comfortably FAT32 - the format is
@@ -545,6 +557,8 @@ int install_update_file(int which, const void *data, uint32_t len)
     struct fat_entry e;
     int np, i;
 
+    if (!update_allowed)
+        return -4;
     if (which < 0 || which > 2 || !data || !len)
         return -1;
     np = part_scan();

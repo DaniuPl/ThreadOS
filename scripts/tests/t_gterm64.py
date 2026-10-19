@@ -103,6 +103,7 @@ def main():
             q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
+            q.wait_desktop(40)
             time.sleep(4)
             q.mouse_home()
 

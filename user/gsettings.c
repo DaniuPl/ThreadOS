@@ -68,11 +68,23 @@
 #define SEC_NET     4
 #define SEC_FILES   5
 #define SEC_ABOUT   6
+#ifdef __x86_64__
+#define SEC_UPDATES 7
+#define SEC_N       8
+#else
 #define SEC_N       7
+#endif
 
+#ifdef __x86_64__
+static const char *const sections[SEC_N] = {
+    "General", "Appearance", "Display", "Sound", "Network", "Files",
+    "About", "Updates"
+};
+#else
 static const char *const sections[SEC_N] = {
     "General", "Appearance", "Display", "Sound", "Network", "Files", "About"
 };
+#endif
 
 static int win = -1;
 static int cw = W0, ch = H0;
@@ -167,12 +179,179 @@ static int put_ip(char *out, int at, uint32_t ip)
    here, copied, because the value may be a field that is still being
    typed into. */
 static int asking;
-static char pass[32];
+static char pass[USER_PASSWORD_MAX + 1];
 static int plen;
 static char want_name[CFG_NAME_MAX], want_value[CFG_VAL_MAX];
 /* 1 saved, 2 changed but there is no disk to keep it on, -1 refused
    (a wrong password), -2 refused (not a value it takes), 0 nothing */
 static int said;
+
+#ifdef __x86_64__
+#define UPDATE_OUTPUT_MAX 2048
+static int update_allowed;
+static int update_pid = -1;
+static int update_fd = -1;
+static int update_installing;
+static int update_available;
+static int update_auth_pending;
+static char update_message[80] = "Check for signed releases from ThreadOS.";
+static char update_output[UPDATE_OUTPUT_MAX];
+static int update_output_len;
+
+static int contains(const char *text, const char *part)
+{
+    if (!*part)
+        return 1;
+    for (; *text; text++) {
+        int i = 0;
+        while (part[i] && text[i] == part[i])
+            i++;
+        if (!part[i])
+            return 1;
+    }
+    return 0;
+}
+
+static int starts_with(const char *text, const char *prefix)
+{
+    while (*prefix && *text == *prefix) {
+        text++;
+        prefix++;
+    }
+    return !*prefix;
+}
+
+static void update_start(int installing)
+{
+    int fd[2];
+    if (update_pid >= 0)
+        return;
+    if (sys_pipe(fd) < 0) {
+        copy(update_message, "Could not start the update process.",
+             sizeof(update_message));
+        update_available = 0;
+        return;
+    }
+
+    int64_t pid = sys_fork();
+    if (pid < 0) {
+        sys_close(fd[0]);
+        sys_close(fd[1]);
+        copy(update_message, "Could not start the update process.",
+             sizeof(update_message));
+        update_available = 0;
+        return;
+    }
+    if (pid == 0) {
+        sys_close(fd[0]);
+        if (sys_dup2(fd[1], 1) < 0 || sys_dup2(fd[1], 2) < 0)
+            sys_exit(126);
+        sys_close(fd[1]);
+        if (installing) {
+            char *const args[] = { "update", (char *)0 };
+            sys_exec("update", args);
+        } else {
+            char *const args[] = { "update", "check", (char *)0 };
+            sys_exec("update", args);
+        }
+        sys_exit(127);
+    }
+
+    sys_close(fd[1]);
+    update_fd = fd[0];
+    update_pid = (int)pid;
+    update_installing = installing;
+    update_output_len = 0;
+    update_output[0] = 0;
+    update_available = 0;
+    copy(update_message, installing ? "Installing the signed update..." :
+                                      "Checking for signed updates...",
+         sizeof(update_message));
+}
+
+static int update_poll(void)
+{
+    if (update_pid < 0)
+        return 0;
+    int code = 0;
+    int rc = sys_trywait(update_pid, &code);
+    if (rc == -3)
+        return 0;
+    if (rc != 0) {
+        if (update_fd >= 0)
+            sys_close(update_fd);
+        update_fd = -1;
+        update_pid = -1;
+        update_installing = 0;
+        copy(update_message, "Could not read the update process result.",
+             sizeof(update_message));
+        return 1;
+    }
+
+    int read_failed = 0;
+    if (update_fd >= 0) {
+        char chunk[256];
+        for (;;) {
+            int64_t n = sys_read(update_fd, chunk, sizeof(chunk));
+            if (n < 0) {
+                read_failed = 1;
+                break;
+            }
+            if (!n)
+                break;
+            int room = UPDATE_OUTPUT_MAX - 1 - update_output_len;
+            int take = n > room ? room : (int)n;
+            for (int i = 0; i < take; i++)
+                update_output[update_output_len++] = chunk[i];
+            update_output[update_output_len] = 0;
+            if (!room)
+                break;
+        }
+        sys_close(update_fd);
+    }
+    update_fd = -1;
+    update_pid = -1;
+
+    if (read_failed) {
+        copy(update_message, "Could not read the update process output.",
+             sizeof(update_message));
+    } else if (code == 0 && update_installing &&
+        contains(update_output, "updated to version")) {
+        copy(update_message, "Installed. Restart to apply the update.",
+             sizeof(update_message));
+    } else if (code == 0 && contains(update_output, "a newer system is available")) {
+        update_available = 1;
+        copy(update_message, "A newer signed update is available.",
+             sizeof(update_message));
+    } else if (code == 0 && contains(update_output, "this system is up to date")) {
+        copy(update_message, "This system is up to date.",
+             sizeof(update_message));
+    } else if (code == 0) {
+        copy(update_message, "The update check completed.",
+             sizeof(update_message));
+    } else {
+        const char *last = 0;
+        for (int i = 0; i + 9 <= update_output_len; i++) {
+            if (starts_with(update_output + i, "[update] "))
+                last = update_output + i + 9;
+        }
+        if (last) {
+            int n = 0;
+            while (last[n] && last[n] != '\n' &&
+                   n < (int)sizeof(update_message) - 1)
+                n++;
+            for (int i = 0; i < n; i++)
+                update_message[i] = last[i];
+            update_message[n] = 0;
+        } else {
+            copy(update_message, "The update failed. Try again later.",
+                 sizeof(update_message));
+        }
+    }
+    update_installing = 0;
+    return 1;
+}
+#endif
 
 static int outcome(int32_t rc, const char *name, const char *value)
 {
@@ -201,14 +380,27 @@ static void apply(const char *name, const char *value)
 
 static void try_password(void)
 {
+#ifdef __x86_64__
+    int for_update = update_auth_pending;
+    update_auth_pending = 0;
+#endif
     pass[plen] = 0;
     asking = 0;
     if (!plen || sys_auth(pass) != 0) {
         said = plen ? -1 : 0;
     } else {
+#ifdef __x86_64__
+        if (for_update) {
+            update_start(1);
+            sys_drop();
+        } else {
+#endif
         said = outcome(sys_cfg_set(want_name, want_value), want_name,
                        want_value);
         sys_drop();
+#ifdef __x86_64__
+        }
+#endif
     }
     for (int i = 0; i < plen; i++)
         pass[i] = 0;
@@ -244,6 +436,10 @@ static void fields_from_settings(void)
 #define A_MUTE    6
 #define A_BEEP    7
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
+#ifdef __x86_64__
+#define A_UPDATE_CHECK   9
+#define A_UPDATE_INSTALL 10
+#endif
 
 struct hot {
     int x, y, w, h;
@@ -586,6 +782,36 @@ static void draw_about(void)
     info(i++, "Signed in as", sys_level() == 0 ? "admin" : "user");
 }
 
+#ifdef __x86_64__
+static void draw_updates(void)
+{
+    char version[16] = "unknown";
+    int64_t n = sys_initrd_read("version", version, sizeof(version) - 1);
+    if (n > 0) {
+        version[n] = 0;
+        for (int i = 0; version[i]; i++)
+            if (version[i] == '\n')
+                version[i] = 0;
+    }
+    info(0, "Installed version", version);
+    button(PANE_X, PANE_Y0 + INFO_H + 6, 152, "Check for updates",
+           A_UPDATE_CHECK, 0);
+    note(PANE_Y0 + INFO_H + 38, update_message);
+    if (update_available && update_allowed) {
+        button(PANE_X, PANE_Y0 + INFO_H + 70, 130, "Install update",
+               A_UPDATE_INSTALL, 0);
+        note(PANE_Y0 + INFO_H + 102,
+             "You will be asked for the admin password.");
+    } else if (update_available) {
+        note(PANE_Y0 + INFO_H + 70,
+             "Boot the installed system to enable installation.");
+    } else if (!update_allowed) {
+        note(PANE_Y0 + INFO_H + 70,
+             "Install only after booting the installed system.");
+    }
+}
+#endif
+
 /* --- the window -------------------------------------------------------- */
 
 static void draw(void)
@@ -619,6 +845,9 @@ static void draw(void)
     case SEC_SOUND:   draw_sound(); break;
     case SEC_NET:     draw_network(); break;
     case SEC_FILES:   draw_files(); break;
+#ifdef __x86_64__
+    case SEC_UPDATES: draw_updates(); break;
+#endif
     default:          draw_about(); break;
     }
 
@@ -645,7 +874,9 @@ static void draw(void)
         ud_fill_a(win, 0, 0, cw, ch, 0x000000, l.dark ? 110 : 70);
         ud_round(win, px, py, PASS_W, PASS_H, 10, l.field);
         ud_ring(win, px, py, PASS_W, PASS_H, 10, l.line);
-        ud_text(win, px + 14, py + 24, "Changing settings needs admin",
+        ud_text(win, px + 14, py + 24,
+                update_auth_pending ? "Installing an update needs admin" :
+                                      "Changing settings needs admin",
                 l.text, UD_BOLD, UD_PX);
         ud_round(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.bg);
         ud_ring(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.accent);
@@ -695,6 +926,23 @@ static void click(int x, int y)
         case A_BEEP:
             sys_snd_beep(440, 200);
             break;
+#ifdef __x86_64__
+        case A_UPDATE_CHECK:
+            update_start(0);
+            break;
+        case A_UPDATE_INSTALL:
+            if (update_allowed && update_available) {
+                if (sys_level() == LEVEL_ADMIN) {
+                    update_start(1);
+                } else {
+                    update_auth_pending = 1;
+                    asking = 1;
+                    plen = 0;
+                    said = 0;
+                }
+            }
+            break;
+#endif
         }
         return;
     }
@@ -710,6 +958,9 @@ static void key(char c)
         } else if (c == KEY_PASTE) {       /* Escape, the same code */
             asking = 0;
             plen = 0;
+#ifdef __x86_64__
+            update_auth_pending = 0;
+#endif
         } else if (c == '\b') {
             if (plen > 0)
                 pass[--plen] = 0;
@@ -756,6 +1007,9 @@ static void key(char c)
 
 void _start(void)
 {
+#ifdef __x86_64__
+    update_allowed = sys_update_allowed() == 1;
+#endif
     win = (int)win_create(W0, H0, "Settings");
     if (win < 0)
         sys_exit(1);
@@ -780,6 +1034,10 @@ void _start(void)
                 key((char)ev.val);
             }
         }
+#ifdef __x86_64__
+        if (update_poll())
+            again = 1;
+#endif
         /* The figures move by themselves (the uptime, the memory, the
            address once DHCP answers) and a setting may be changed from
            the shell: a redraw a second keeps them true */

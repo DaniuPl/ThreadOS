@@ -21,6 +21,24 @@
 #define THREADOS_COMPAT64_H
 
 #include "usys64.h"
+#include "../user/userctl.h"
+
+#define SND_STREAM_BEGIN 0
+#define SND_STREAM_WRITE 1
+#define SND_STREAM_END 2
+#define SND_STREAM_MAX_FRAMES 1024
+
+static inline int32_t sys_snd_stream(int op, const int16_t *samples,
+                                     uint32_t frames)
+{
+    return (int32_t)syscall64_3(SYS64_SND_STREAM, op,
+                                (int64_t)(uintptr_t)samples, frames);
+}
+
+static inline int32_t sys_user(struct user_ctl *ctl)
+{
+    return (int32_t)syscall64(SYS64_USER, (int64_t)(uintptr_t)ctl, 0);
+}
 
 /* --- Files --------------------------------------------------------
  *
@@ -78,14 +96,14 @@ static inline int32_t sys_auth(const char *password)
                                 (int64_t)ustrlen(password), 0);
 }
 
-static inline int32_t sys_drop(void)
-{
-    return (int32_t)syscall64(SYS64_DROP, 0, 0);
-}
-
 static inline int32_t sys_level(void)
 {
     return (int32_t)syscall64(SYS64_LEVEL, 0, 0);
+}
+
+static inline int32_t sys_update_allowed(void)
+{
+    return (int32_t)syscall64(SYS64_UPDATE_ALLOWED, 0, 0);
 }
 
 

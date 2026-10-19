@@ -370,6 +370,9 @@ void _start(int argc, char **argv)
             fail("only an admin may replace the system: 'sudo run update'");
         if (rc == -3)
             fail("there is no installed ThreadOS on this disk to update");
+        if (rc == -4)
+            fail("updates can only be installed after booting "
+                 "from an installed system");
         if (rc < 0)
             fail("writing the new system failed");
         say("written: ");

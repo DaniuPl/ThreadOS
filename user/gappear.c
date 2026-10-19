@@ -65,7 +65,7 @@ static uint32_t sw_px[BG_N][SW_W * SW_H];
 static int sw_dark = -1;          /* which theme the swatches were drawn in */
 
 static int asking;                /* the password is being typed */
-static char pass[32];
+static char pass[USER_PASSWORD_MAX + 1];
 static int plen;
 static const char *want_name, *want_value;   /* the change waiting for it */
 /* 1 saved, 2 changed but there is no disk to keep it on, -1 not changed,

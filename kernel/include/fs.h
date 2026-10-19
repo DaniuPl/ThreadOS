@@ -59,6 +59,10 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_dir);
 
 /* --- Operations by inode slot --- */
 int fs_size(int slot);
+int fs_owner(int slot);
+/* Rechecks whether the current task may change this inode. */
+int fs_can_write(int slot);
+int fs_set_owner(int slot, int uid);
 int fs_truncate(int slot);
 int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len);
 /* The disk block under the 'index'-th block of a file (alloc=1

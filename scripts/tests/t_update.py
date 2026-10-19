@@ -19,6 +19,9 @@ From outside:
   mtools reads the new kernel, initrd and loader off the disk image
   byte for byte
 
+  a separate GRUB Live boot sees a valid signed release but the kernel
+  refuses to write it to the installed disk
+
   restarted, the disk is version 7, and up to date
 
   a release signed by some other key, and one whose initrd does not
@@ -105,6 +108,22 @@ def boot_disk(disk, nvram, serial):
                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
 
 
+def make_live_iso(work, kernel, initrd):
+    root = os.path.join(work, "live-iso")
+    os.makedirs(os.path.join(root, "boot", "grub"))
+    shutil.copy(kernel, os.path.join(root, "boot", "threados64.bin"))
+    shutil.copy(initrd, os.path.join(root, "boot", "initrd64.img"))
+    with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as fh:
+        fh.write("set timeout=0\nset default=0\n"
+                 'menuentry "ThreadOS Live" {\n'
+                 "    multiboot2 /boot/threados64.bin live\n"
+                 "    module2 /boot/initrd64.img initrd64\n}\n")
+    iso = os.path.join(work, "live.iso")
+    subprocess.run(["grub-mkrescue", "-o", iso, root], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return iso
+
+
 def after(q, seen, text, timeout):
     deadline = time.time() + timeout
     while time.time() < deadline and text not in q.serial()[seen:]:
@@ -129,8 +148,10 @@ def main():
         print("SKIPPED: " + reason)
         return summary()
     if not mtools_ok() or not os.path.exists(LOADER) or \
-            not os.path.exists(OVMF_CODE) or shutil.which("openssl") is None:
-        print("SKIPPED: needs mtools, build/BOOTX64.EFI, OVMF and openssl")
+            not os.path.exists(OVMF_CODE) or shutil.which("openssl") is None or \
+            shutil.which("grub-mkrescue") is None:
+        print("SKIPPED: needs mtools, build/BOOTX64.EFI, OVMF, openssl "
+              "and grub-mkrescue")
         return summary()
 
     work = tempfile.mkdtemp()
@@ -139,6 +160,8 @@ def main():
         kernel = open(KERNEL64, "rb").read()
         loader = open(LOADER, "rb").read()
         initrd7 = initrd_with_version(INITRD64, 7)
+        initrd0 = initrd_with_version(INITRD64, 0)
+        initrd9 = initrd_with_version(INITRD64, 9)
         good_key = os.path.join(work, "good.pem")
         other_key = os.path.join(work, "other.pem")
         pub = make_key(good_key)
@@ -148,6 +171,8 @@ def main():
                                "rel"), kernel, initrd7, loader)
         serve("/forged/", release(work, other_key, 9, kernel, initrd7, loader,
                                   "forged"), kernel, initrd7, loader)
+        serve("/live/", release(work, good_key, 9, kernel, initrd9, loader,
+                                "live"), kernel, initrd9, loader)
         broken = bytearray(initrd7)
         broken[len(broken) // 2] ^= 0xFF
         serve("/broken/", release(work, good_key, 9, kernel, initrd7, loader,
@@ -226,6 +251,23 @@ def main():
             got = fat_get(disk, ESP_START, path)
             check(f"{path} on the disk is the release's, byte for byte",
                   got == want)
+
+        live_iso = make_live_iso(work, KERNEL64, initrd0)
+        q = Qemu(KERNEL, INITRD, cdrom=live_iso, disk=disk, sata=True,
+                 serial=os.path.join(work, "live.log"),
+                 qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("thread64>", timeout=60)
+            q.wait_serial("[net] DHCP", timeout=60)
+            out = run(q, "sudo run update " + base + "live/",
+                      end="[update] done, exit code", password=True)
+            check("a valid signed update is refused from a Live boot",
+                  "all three files match the signed hashes" in out and
+                  "updates can only be installed after booting from an "
+                  "installed system" in out and
+                  "[update] written:" not in out)
+        finally:
+            q.close()
 
         q = boot_disk(disk, nvram, os.path.join(work, "s3.log"))
         try:

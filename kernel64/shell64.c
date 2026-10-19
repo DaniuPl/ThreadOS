@@ -60,6 +60,28 @@
 
 #define LINE_MAX 80
 
+static int sudo_one_shot;
+static void read_secret(char *out, int max);
+
+static int confirm_admin_action(const char *action)
+{
+    if (user_shell_level() != USER_ADMIN) {
+        printk("%s: admin access required; try it through sudo\n", action);
+        return 0;
+    }
+    if (sudo_one_shot)
+        return 1;
+
+    char password[USER_PASSWORD_MAX + 1];
+    printk("%s: admin password: ", action);
+    read_secret(password, sizeof(password));
+    int ok = user_reauth(password);
+    memset(password, 0, sizeof(password));
+    if (!ok)
+        printk("%s: wrong admin password\n", action);
+    return ok;
+}
+
 /* Does the line start with the given word? (the kernel has no strncmp
    - and has no reason to have one for a single place) */
 static int starts_with(const char *s, const char *prefix)
@@ -106,6 +128,8 @@ static void cmd_help(void)
     printk("          reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("          runw <prog> - a program on any core\n");
     printk("          whoami, sudo <command>, logout, passwd\n");
+    printk("          login <account>\n");
+    printk("          users, useradd [admin] <name>, userdel <name>\n");
     printk("          fat [N [disk]] - the FAT partition: fatls, fatcat,\n");
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
@@ -165,6 +189,9 @@ static void cmd_disk(void)
                512u);
         return;
     }
+
+    if (!confirm_admin_action("disk write test"))
+        return;
 
     for (int i = 0; i < 512; i++)
         buf[i] = (uint8_t)(i + 7);
@@ -694,6 +721,11 @@ static void cmd_install_text(int mode, int disk)
 {
     char answer[8];
 
+    if (user_shell_level() != USER_ADMIN) {
+        printk("install: admin access required; try it through sudo\n");
+        return;
+    }
+
     if (blk_count() > 1)
         for (int i = 0; i < blk_count(); i++)
             printk("  disk %u: %s, %u MiB%s\n", (uint32_t)(i + 1),
@@ -710,6 +742,8 @@ static void cmd_install_text(int mode, int disk)
         printk("install: nothing was written\n");
         return;
     }
+    if (!confirm_admin_action("install"))
+        return;
     install_do();
 }
 
@@ -717,9 +751,26 @@ static void execute(const char *line);
 
 static void cmd_whoami(void)
 {
-    printk("%s\n", user_shell_level() == USER_ADMIN
-                        ? "admin (you can change the system)"
-                        : "user (change the system through 'sudo')");
+    printk("%s (%s)\n", user_current_name(),
+           user_shell_level() == USER_ADMIN ? "admin" : "user");
+}
+
+static void cmd_login(const char *name)
+{
+    char password[USER_PASSWORD_MAX + 1];
+    if (!name || !*name) {
+        printk("usage: login <account>\n");
+        return;
+    }
+    printk("password: ");
+    read_secret(password, sizeof(password));
+    if (user_login(name, password) < 0) {
+        memset(password, 0, sizeof(password));
+        printk("login: invalid account or password\n");
+        return;
+    }
+    memset(password, 0, sizeof(password));
+    printk("logged in as %s\n", user_current_name());
 }
 
 static void cmd_sudo(const char *arg)
@@ -732,10 +783,12 @@ static void cmd_sudo(const char *arg)
         return;
     }
 
-    char pass[CONFIG_VAL_MAX];
+    char pass[USER_PASSWORD_MAX + 1];
     printk("password: ");
     read_secret(pass, sizeof(pass));
-    if (!user_password_ok(pass)) {
+    int ok = user_password_ok(pass);
+    memset(pass, 0, sizeof(pass));
+    if (!ok) {
         printk("sudo: wrong password\n");
         return;
     }
@@ -745,7 +798,10 @@ static void cmd_sudo(const char *arg)
         printk("you are admin; 'logout' ends it\n");
         return;
     }
+    int old_one_shot = sudo_one_shot;
+    sudo_one_shot = 1;
     execute(arg);
+    sudo_one_shot = old_one_shot;
     user_shell_set(USER_PLAIN);        /* one command, not a session */
 }
 
@@ -759,35 +815,111 @@ static void cmd_logout(void)
     printk("an ordinary user again\n");
 }
 
+/* Changing a password is sensitive, even in an admin session, so prove
+   the current account's password again before replacing it. */
 static void cmd_password(void)
 {
-    char pass[CONFIG_VAL_MAX], again[CONFIG_VAL_MAX];
+    char pass[USER_PASSWORD_MAX + 1], again[USER_PASSWORD_MAX + 1];
 
-    if (user_shell_level() != USER_ADMIN) {
-        printk("old password: ");
-        read_secret(pass, sizeof(pass));
-        if (!user_password_ok(pass)) {
-            printk("passwd: wrong password\n");
-            return;
-        }
+    printk("current password: ");
+    read_secret(pass, sizeof(pass));
+    if (!user_password_current_ok(pass)) {
+        memset(pass, 0, sizeof(pass));
+        memset(again, 0, sizeof(again));
+        printk("passwd: wrong password\n");
+        return;
     }
+    memset(pass, 0, sizeof(pass));
     printk("new password: ");
     read_secret(pass, sizeof(pass));
     if (!pass[0]) {
+        memset(pass, 0, sizeof(pass));
+        memset(again, 0, sizeof(again));
         printk("passwd: an empty password is no password - not changing it\n");
         return;
     }
     printk("again: ");
     read_secret(again, sizeof(again));
     if (strcmp(pass, again)) {
+        memset(pass, 0, sizeof(pass));
+        memset(again, 0, sizeof(again));
         printk("passwd: those two are not the same - not changing it\n");
         return;
     }
     if (user_set_password(pass) < 0) {
+        memset(pass, 0, sizeof(pass));
+        memset(again, 0, sizeof(again));
         printk("passwd: could not save it (no disk?)\n");
         return;
     }
+    memset(pass, 0, sizeof(pass));
+    memset(again, 0, sizeof(again));
     printk("password changed\n");
+}
+
+static void cmd_users(void)
+{
+    char name[USER_NAME_MAX + 1];
+    int uid, level;
+    for (int i = 0; user_account_info(i, name, sizeof(name), &uid, &level) == 0;
+         i++)
+        printk("%s  %s  uid %d\n", name,
+               level == USER_ADMIN ? "admin" : "user", uid);
+}
+
+static void cmd_useradd(const char *arg)
+{
+    int level = USER_PLAIN;
+    if (starts_with(arg, "admin ")) {
+        level = USER_ADMIN;
+        arg += 6;
+    }
+    while (*arg == ' ') arg++;
+    if (!*arg || user_shell_level() != USER_ADMIN) {
+        printk("usage: sudo useradd [admin] <name>\n");
+        return;
+    }
+    char admin[USER_PASSWORD_MAX + 1], pass[USER_PASSWORD_MAX + 1];
+    char again[USER_PASSWORD_MAX + 1];
+    printk("admin password: ");
+    read_secret(admin, sizeof(admin));
+    printk("new account password: ");
+    read_secret(pass, sizeof(pass));
+    printk("again: ");
+    read_secret(again, sizeof(again));
+    if (strcmp(pass, again)) {
+        memset(admin, 0, sizeof(admin));
+        memset(pass, 0, sizeof(pass));
+        memset(again, 0, sizeof(again));
+        printk("useradd: passwords do not match\n");
+        return;
+    }
+    int rc = user_account_add(arg, pass, level, admin);
+    memset(admin, 0, sizeof(admin));
+    memset(pass, 0, sizeof(pass));
+    memset(again, 0, sizeof(again));
+    if (rc < 0) {
+        printk("useradd: could not create account\n");
+        return;
+    }
+    printk("account created\n");
+}
+
+static void cmd_userdel(const char *name)
+{
+    if (!*name || user_shell_level() != USER_ADMIN) {
+        printk("usage: sudo userdel <name>\n");
+        return;
+    }
+    char admin[USER_PASSWORD_MAX + 1];
+    printk("admin password: ");
+    read_secret(admin, sizeof(admin));
+    int rc = user_account_delete(name, admin);
+    memset(admin, 0, sizeof(admin));
+    if (rc < 0)
+        printk("userdel: could not remove account\n");
+    else
+        printk("account removed; its home directory was archived\n");
 }
 
 static void execute(const char *line)
@@ -797,6 +929,10 @@ static void execute(const char *line)
 
     if (!strcmp(line, "whoami")) {
         cmd_whoami();
+        return;
+    }
+    if (starts_with(line, "login ")) {
+        cmd_login(line + 6);
         return;
     }
     if (!strcmp(line, "sudo")) {
@@ -813,6 +949,18 @@ static void execute(const char *line)
     }
     if (!strcmp(line, "passwd")) {
         cmd_password();
+        return;
+    }
+    if (!strcmp(line, "users")) {
+        cmd_users();
+        return;
+    }
+    if (starts_with(line, "useradd ")) {
+        cmd_useradd(line + 8);
+        return;
+    }
+    if (starts_with(line, "userdel ")) {
+        cmd_userdel(line + 8);
         return;
     }
 
@@ -913,15 +1061,19 @@ static void execute(const char *line)
     } else if (starts_with(line, "fatcat ")) {
         fatcmd_cat(argument(line, sizeof("fatcat ") - 1));
     } else if (starts_with(line, "fatput ")) {
-        fatcmd_put(argument(line, sizeof("fatput ") - 1));
+        if (confirm_admin_action("FAT write"))
+            fatcmd_put(argument(line, sizeof("fatput ") - 1));
     } else if (starts_with(line, "fatmkdir ")) {
-        fatcmd_mkdir(argument(line, sizeof("fatmkdir ") - 1));
+        if (confirm_admin_action("FAT write"))
+            fatcmd_mkdir(argument(line, sizeof("fatmkdir ") - 1));
     } else if (starts_with(line, "fatrm ")) {
-        fatcmd_rm(argument(line, sizeof("fatrm ") - 1));
+        if (confirm_admin_action("FAT write"))
+            fatcmd_rm(argument(line, sizeof("fatrm ") - 1));
     } else if (starts_with(line, "fatsum ")) {
         fatcmd_sum(argument(line, sizeof("fatsum ") - 1));
     } else if (starts_with(line, "fatcopy ")) {
-        fatcmd_copy(argument(line, sizeof("fatcopy ") - 1));
+        if (confirm_admin_action("FAT write"))
+            fatcmd_copy(argument(line, sizeof("fatcopy ") - 1));
     } else if (!strcmp(line, "set")) {
         cmd_set("");
     } else if (starts_with(line, "set ")) {

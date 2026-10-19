@@ -71,6 +71,7 @@
    whose write end comes back as a descriptor of ours - closing it is
    how the program is told there will be no more input. -> pid */
 #define SYS_SPAWN_TALK 55
+#define SYS_USER       78  /* ebx=&struct user_ctl -> account operation */
 /* The clipboard: ebx=text, ecx=length -> how much was taken;
    and ebx=buffer, ecx=size -> how much is there */
 #define SYS_CLIP_SET   56
@@ -107,6 +108,10 @@
 #define SYS_SND_GET  68
 #define SYS_SND_SET  69
 #define SYS_SND_BEEP 70
+#define SYS_SND_STREAM 79
+#define SND_STREAM_BEGIN 0
+#define SND_STREAM_WRITE 1
+#define SND_STREAM_END 2
 /* Counting semaphores, shared by key (kernel/sem.c) */
 #define SYS_SEM_GET  71  /* ebx=key, ecx=initial count -> id or -1 */
 #define SYS_SEM_WAIT 72  /* ebx=id -> 0, or -1 (a bad id, being killed) */

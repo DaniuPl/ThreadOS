@@ -659,6 +659,42 @@ static UINTN path_len(const EFI_DEVICE_PATH *p)
     }
 }
 
+static int installed_loader_path(const EFI_DEVICE_PATH *p)
+{
+    static const CHAR16 expected[] = L"\\EFI\\ThreadOS\\BOOTX64.EFI";
+    UINTN expected_len = wlen(expected);
+
+    while (p) {
+        UINTN len = p->Length[0] | ((UINTN)p->Length[1] << 8);
+        if (len < 4)
+            return 0;
+        if (p->Type == 0x04 && p->SubType == 0x04) {
+            const CHAR16 *path = (const CHAR16 *)((const UINT8 *)p + 4);
+            UINTN chars = (len - 4) / sizeof(CHAR16);
+            if ((len - 4) % sizeof(CHAR16) == 0 &&
+                chars == expected_len + 1 && path[expected_len] == 0) {
+                UINTN i;
+                for (i = 0; i < expected_len; i++) {
+                    CHAR16 c = path[i];
+                    if (c >= 'a' && c <= 'z')
+                        c = (CHAR16)(c - 'a' + 'A');
+                    CHAR16 want = expected[i];
+                    if (want >= 'a' && want <= 'z')
+                        want = (CHAR16)(want - 'a' + 'A');
+                    if (c != want)
+                        break;
+                }
+                if (i == expected_len)
+                    return 1;
+            }
+        }
+        if (p->Type == 0x7F)
+            return 0;
+        p = (const EFI_DEVICE_PATH *)((const UINT8 *)p + len);
+    }
+    return 0;
+}
+
 /* "Boot0003": the variable's name for entry number n */
 static void boot_name(CHAR16 *out, UINT16 n)
 {
@@ -862,12 +898,17 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     /* Started to put the installed system into the boot menu rather
        than to boot - see register_installed */
-    EFI_LOADED_IMAGE_PROTOCOL *me;
+    EFI_LOADED_IMAGE_PROTOCOL *me = 0;
+    int installed_boot = 0;
     if (BS->HandleProtocol(image, &GUID_LOADED_IMAGE, (void **)&me)
-            == EFI_SUCCESS && me->LoadOptions &&
-        has_word((const CHAR16 *)me->LoadOptions, me->LoadOptionsSize / 2,
-                 L"register"))
-        return register_installed(me->DeviceHandle);
+            == EFI_SUCCESS) {
+        installed_boot = installed_loader_path(
+            (const EFI_DEVICE_PATH *)me->FilePath);
+        if (me->LoadOptions &&
+            has_word((const CHAR16 *)me->LoadOptions,
+                     me->LoadOptionsSize / 2, L"register"))
+            return register_installed(me->DeviceHandle);
+    }
 
     open_volume(image);
 
@@ -964,7 +1005,8 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     mbi_at = 8;                           /* total_size and a reserved word */
 
     tag_string(TAG_BOOTLOADER, "threadboot");
-    tag_string(TAG_CMDLINE, "desktop");
+    tag_string(TAG_CMDLINE, installed_boot ? "desktop installed" :
+                                             "desktop live");
 
     /* The initrd comes first and is nameless, because that is the
        module the kernel has always taken by position. The two behind

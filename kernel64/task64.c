@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "task64.h"
+#include "../kernel/include/signal.h"
 #include "paging64.h"
 #include "syscall64.h"
 #include "elf64.h"
@@ -29,6 +30,7 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/io.h"
+#include "../kernel/include/hda.h"
 
 #define STACK_SIZE 16384
 #define NAME_MAX   16
@@ -80,6 +82,7 @@ struct task64 {
         uint32_t size;        /* how many bytes the file itself has */
         uint32_t nblocks_of;
         uint32_t *blocks;         /* the TFS block numbers, in order */
+        int file_slot;             /* inode whose permissions guard writeback */
         uint32_t write;          /* 1 = changes go back to the file */
     } maps[MMAP_FILES];
     int cwd;                     /* the working directory (an inode, FS_ROOT = /) */
@@ -87,6 +90,7 @@ struct task64 {
     /* What this task may do: USER_ADMIN or USER_PLAIN. A child gets
        what its parent had - the level travels with the process. */
     int level;
+    int uid;
     /* Where this task may be run.
        'anycore' = 1 means any core may take it. The default is zero
        and that is how it should be: a task reaching for the disk, the
@@ -245,6 +249,7 @@ void scheduler64_init(void)
     main_task->fpu = fpu64_alloc();
     main_task->cwd = FS_ROOT;
     main_task->level = USER_ADMIN;
+    main_task->uid = 0;
     main_task->vc = 0;
     set_name(main_task, "main");
     main_task->anycore = 0;
@@ -313,6 +318,9 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->level = (current && current->space &&
                 current->space != paging64_kernel_space())
                    ? current->level : user_shell_level();
+    t->uid = (current && current->space &&
+              current->space != paging64_kernel_space())
+                 ? current->uid : user_shell_uid();
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
     t->anycore = 0;            /* until somebody says otherwise */
@@ -359,6 +367,7 @@ struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
     t->mmap = current->mmap;
     t->cwd = current->cwd;
     t->level = current->level;
+    t->uid = current->uid;
     t->vc = current->vc;
     t->anycore = current->anycore;
     for (int i = 0; i < FD_MAX; i++)
@@ -779,6 +788,7 @@ void task_core_enter(int nr)
     t->fpu = fpu64_alloc();
     t->cwd = FS_ROOT;
     t->level = USER_ADMIN;       /* a kernel thread is the kernel */
+    t->uid = 0;
     t->vc = 0;
     t->anycore = 0;
     t->nolock = 1;         /* an idle task does not take the lock */
@@ -826,6 +836,7 @@ void task64_sleep(uint32_t ms)
 void task64_exit_code(int code)
 {
     irq_save();
+    hda_stream_abort(current->id);
     task64_fd_close_all();
     /* Write back to disk what the process wrote into a writable
        mapping and did not manage to write back itself - this has to
@@ -842,6 +853,7 @@ void task64_exit_code(int code)
 void task64_exit(void)
 {
     irq_save();
+    hda_stream_abort(current->id);
     task64_fd_close_all();
     /* Write back to disk what the process wrote into a writable
        mapping and did not manage to write back itself - this has to
@@ -865,6 +877,7 @@ void task64_kill_current(const char *why)
     irq_save();
     printk("[kernel] task %d (%s) killed: %s\n",
            current->id, current->name, why);
+    hda_stream_abort(current->id);
     task64_fd_close_all();
     drop_space(current);
     record_exit(current, -1);          /* killed, that is not of its own death */
@@ -1028,6 +1041,56 @@ int task64_reclaim_page(void)
 
 int task64_level(void)       { return current ? current->level : USER_ADMIN; }
 void task64_set_level(int l)  { if (current) current->level = l; }
+int task64_uid(void)          { return current ? current->uid : 0; }
+void task64_set_uid(int uid)  { if (current && uid >= 0) current->uid = uid; }
+void task64_set_identity_name(const char *name, int uid, int level, int cwd)
+{
+    if (!current || !name || uid < 0)
+        return;
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    do {
+        if (t->state != TASK_ZOMBIE && !t->space &&
+            !strcmp(t->name, name)) {
+            t->uid = uid;
+            t->level = level;
+            t->cwd = cwd;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}
+void task64_set_level_name(const char *name, int level)
+{
+    if (!current || !name)
+        return;
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    do {
+        if (t->state != TASK_ZOMBIE && !t->space &&
+            !strcmp(t->name, name))
+            t->level = level;
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}
+void task64_kill_uid(int uid)
+{
+    if (!current || uid < 0)
+        return;
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    do {
+        if (t->uid == uid && t->space && t->state != TASK_ZOMBIE) {
+            t->level = USER_PLAIN;
+            t->sig_pending = SIGKILL;
+            if (t->state == TASK_SLEEPING)
+                t->state = TASK_READY;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+}
 
 /* The level of the process with that pid, so that a caller can ask
    whether what it is about to signal is its own. */
@@ -1076,7 +1139,8 @@ void task64_set_brk_base(uint64_t base)
  * Successive mappings go one after another upwards, without freeing:
  * the process takes this whole area with it when it ends anyway. */
 int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
-                      uint32_t *blocks, uint32_t nblocks_of, uint32_t write)
+                      uint32_t *blocks, uint32_t nblocks_of, int file_slot,
+                      uint32_t write)
 {
     if (!current)
         return -1;
@@ -1087,6 +1151,7 @@ int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
         current->maps[i].size = size;
         current->maps[i].blocks = blocks;
         current->maps[i].nblocks_of = nblocks_of;
+        current->maps[i].file_slot = file_slot;
         current->maps[i].write = write;
         /* 'end' says the entry is in use, so it goes in LAST. The page
            fault handler reads this table without the big kernel lock,
@@ -1181,7 +1246,7 @@ void task64_mmap_inherit(struct task64 *child)
    pages back to disk, which has to go through each of them in turn.
    Returns 0 when the entry is free. */
 int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
-                     uint32_t *size, uint32_t *write)
+                     uint32_t *size, uint32_t *write, int *file_slot)
 {
     if (!current || i < 0 || i >= MMAP_FILES || !current->maps[i].end)
         return 0;
@@ -1189,6 +1254,7 @@ int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
     *end = current->maps[i].end;
     *size = current->maps[i].size;
     *write = current->maps[i].write;
+    *file_slot = current->maps[i].file_slot;
     return 1;
 }
 

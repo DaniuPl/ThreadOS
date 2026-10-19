@@ -74,11 +74,12 @@ int task_cr3_shared(uint32_t cr3);
 #define MMAP_FILES 4
 
 int task_mmap_add(uint32_t start, uint32_t end, uint32_t size,
-                    uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
+                    uint32_t *blocks, uint32_t nblocks_of, int file_slot,
+                    uint32_t write);
 int task_mmap_find(uint32_t addr, uint32_t *first_block,
                      uint32_t *nbytes, uint32_t *write);
 int task_mmap_info(int i, uint32_t *start, uint32_t *end,
-                   uint32_t *size, uint32_t *write);
+                   uint32_t *size, uint32_t *write, int *file_slot);
 uint32_t task_mmap_block(uint32_t addr, uint32_t index);
 void task_mmap_release(void);
 void task_mmap_inherit(struct task *child);
@@ -100,11 +101,17 @@ void task_core_enter(int nr);
 int task_cwd(void);
 void task_set_cwd(int slot);
 
-/* The running task's privilege level (USER_ADMIN / USER_PLAIN, see
-   user.h). Inherited by every child. */
+/* The running task's privilege level and account UID. Both are inherited
+   by children; the filesystem checks the UID against inode ownership. */
 int task_level(void);
 void task_set_level(int level);
 int task_level_of(int pid);
+/* Account id carried by the process and inherited by children. */
+int task_uid(void);
+void task_set_uid(int uid);
+void task_set_identity_name(const char *name, int uid, int level, int cwd);
+void task_set_level_name(const char *name, int level);
+void task_kill_uid(int uid);
 
 /* Turns the current thread of execution (kmain) into the first task */
 void scheduler_init(void);

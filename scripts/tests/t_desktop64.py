@@ -64,6 +64,7 @@ def main():
             q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
+            check("the account sign-in completes", q.wait_desktop(40))
             time.sleep(4)
 
             w, h, at = q.screen_raw()
@@ -125,6 +126,41 @@ def main():
             out = q.serial()[seen:]
             check("a key no window wants reaches the "
                   "kernel's shell", "Uptime:" in out)
+
+            # The shared account manager also crosses the 64-bit user
+            # ABI to enumerate the persistent accounts.
+            users_w, users_h = 520, 340
+            q.launch_menu("gusers")
+            time.sleep(2)
+            ux, uy = cascade(2, users_w + 2,
+                             users_h + TITLE_H + 2)
+            check("the account manager opens in long mode",
+                  q.window_title(ux, uy, users_w + 2) == "User Accounts")
+            cx, cy = ux + 1, uy + CONTENT_DY
+            row_base = cy + ui_font_baseline_in(UD_PX, 96, 18)
+            first_account = q.read_ui(cx + 24, row_base, 100, px=UD_PX)
+            check("the 64-bit account syscall returns the admin account",
+                  first_account == "admin")
+
+            def type_text(text):
+                for ch in text:
+                    q.sendkey(q.KEYNAMES.get(ch, ch))
+                    time.sleep(0.12)
+
+            q.click(cx + 300, cy + 105)
+            type_text("gui64")
+            q.click(cx + 300, cy + 157)
+            type_text("gui64pass")
+            q.click(cx + 300, cy + 209)
+            type_text("gui64pass")
+            q.click(cx + 300, cy + 261)
+            type_text("thread")
+            q.click(cx + 72, cy + users_h - 28)
+            time.sleep(2)
+            second_base = cy + ui_font_baseline_in(UD_PX, 118, 18)
+            second_account = q.read_ui(cx + 24, second_base, 100, px=UD_PX)
+            check("the 64-bit account manager creates an account through the syscall",
+                  second_account == "gui64")
         finally:
             q.close()
     finally:

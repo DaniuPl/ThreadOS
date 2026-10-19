@@ -94,7 +94,7 @@ def main():
             q23.type_line("whoami")
             who = q23.wait_serial("user", timeout=20)
             check("the 64-bit kernel too comes up as an ordinary user",
-                  "user (change the system" in who)
+                  "guest (user)" in who)
             q23.type_line("set color 13")
             no = q23.wait_serial("needs admin", timeout=20)
             check("changing a setting without admin is refused",
@@ -108,7 +108,7 @@ def main():
             q23.type_line("whoami")
             back = q23.wait_serial("user", timeout=20)
             check("and the right lasted one command",
-                  "user (change the system" in back)
+                  "guest (user)" in back)
 
             # Signals: a program in an endless loop has to be
             # stoppable from the outside, because from the inside it

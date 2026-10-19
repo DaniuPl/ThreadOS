@@ -58,6 +58,11 @@
 #define INST_ALONGSIDE 0
 #define INST_WHOLE     1
 
+/* Update writes are allowed only after an explicit installed-boot marker;
+   a missing or Live marker leaves them disabled. */
+void install_set_booted_installed(int installed);
+int install_update_allowed(void);
+
 struct install_info {
     uint32_t ok;                 /* 1 = it can be done */
     uint32_t problem;            /* one of INST_* above */

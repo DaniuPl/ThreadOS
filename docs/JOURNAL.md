@@ -5613,3 +5613,59 @@ works and is checked by `make test`.
       Makefile too, so changing the patch recipe rebuilds an earlier
       failed output; patching into a temporary output prevents a rejected
       patch from leaving a compilable-looking stale target.
+
+- [ ] **Accounts, login and private home directories.** The desktop now
+      opens at an account login screen. Accounts have stable UIDs, admin
+      or user roles, salted PBKDF2 password hashes, and private folders
+      under `/home`; the `gusers` window can add, remove, reset passwords
+      and change roles, with a fresh admin password for account changes.
+      `passwd` verifies the current account's password. Logging out ends
+      that UID's ring 3 processes before another account can sign in.
+      Role changes, password resets for another account and account deletion
+      terminate that UID's ring 3 processes. Deleted homes are archived under
+      their old UID so a later account reusing the name starts with an empty
+      private folder.
+      The legacy fast password hash is removed from public `system.cfg`
+      after the protected account database is loaded or migrated.
+      TFS stores the owner in the inode type byte without changing the
+      inode size, so old files remain root-owned and old TFS3 images can
+      still be read. File and directory access checks run in the shared
+      filesystem code used by both kernels. Writable memory mappings check
+      ownership when created and again before writing pages back, so a
+      plain session cannot use `mmap` to bypass file checks or keep system
+      write access after dropping admin rights. Build and QEMU verification
+      for both kernels remains to be run.
+
+- [ ] **Open common media from the desktop.** The file manager and desktop
+      search route audio and video files to a 64-bit player. FFmpeg 9.0 is
+      built from its pinned upstream archive with a small LGPL codec set
+      for MP3, WAV, AAC, FLAC, Ogg, M4A, MP4/MOV, Matroska and AVI. The player
+      decodes audio to the HDA driver's 48 kHz stream and scales video into
+      a desktop window, paced by frame timestamps. The existing picture
+      viewer continues to open PNG, JPEG and BMP images. A stream is stopped
+      if its owning task exits. Build and playback verification remain to
+      be run on Linux.
+
+- [ ] **A first-run profile instead of a surprise login.** On a fresh
+      graphical installation the desktop now asks for a login name, a
+      separate profile name, an optional password and a theme before
+      showing the desktop. Leaving both password fields empty signs in
+      automatically on this and later boots. The account database accepts
+      the chosen login name as its initial administrator, and the profile
+      name is retained for the logged-out screen. The login and session
+      tests cover profile creation, rejection of a wrong password, saved
+      credentials after restart, the displayed profile name, and
+      passwordless sign-in with a saved light theme. Linux build and QEMU
+      verification remain to be run.
+
+- [ ] **Check and install updates from Settings.** The 64-bit Settings
+      window now checks signed releases through the existing updater and
+      offers installation only after a newer release is verified. It
+      asks for the administrator password before starting the installer.
+      The kernel refuses update writes unless ThreadBoot identified its
+      exact installed EFI path; the Live USB boot entries and unknown boot
+      sources remain read-only. The 64-bit graphical test checks the
+      section and its disabled-install state without an installed boot
+      marker, and the update test verifies a signed release cannot be
+      written during a GRUB Live boot. Linux build and QEMU verification
+      remain to be run.

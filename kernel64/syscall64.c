@@ -15,6 +15,7 @@
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/sem.h"
 #include <stdint.h>
+#include <stddef.h>
 #include "syscall64.h"
 #include "../kernel/include/video.h"
 #include "../kernel/include/smp.h"
@@ -43,6 +44,30 @@
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/shm.h"
 #include "../kernel/include/rtc.h"
+
+#define USER_AUTH_WINDOW_TICKS 30000u
+static int auth_pid = -1;
+static int auth_uid = -1;
+static uint32_t auth_tick;
+
+static void auth_remember(void)
+{
+    auth_pid = task64_current_id();
+    auth_uid = task64_uid();
+    auth_tick = pit_ticks();
+}
+
+static void auth_forget_current(void)
+{
+    if (task64_current_id() == auth_pid)
+        auth_pid = -1;
+}
+
+static int auth_recent(void)
+{
+    return auth_pid == task64_current_id() && auth_uid == task64_uid() &&
+           (uint32_t)(pit_ticks() - auth_tick) <= USER_AUTH_WINDOW_TICKS;
+}
 
 #define MSR_EFER   0xC0000080
 #define MSR_STAR   0xC0000081
@@ -348,6 +373,7 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_EXIT:
+        auth_forget_current();
         user_status = (int)a1;
         user_exited = 1;
         user_exits++;
@@ -748,21 +774,26 @@ static void handle(struct regs *r)
 
     /* --- who is at the machine: up by a password, down for free --- */
     case SYS64_AUTH: {
-        char pass[CONFIG_VAL_MAX];
+        char pass[USER_PASSWORD_MAX + 1];
         if (text_from_ring3(a1, pass, sizeof(pass)) < 0) {
+            memset(pass, 0, sizeof(pass));
             r->rax = (uint64_t)-1;
             return;
         }
         if (!user_password_ok(pass)) {
+            memset(pass, 0, sizeof(pass));
             r->rax = (uint64_t)-2;
             return;
         }
+        memset(pass, 0, sizeof(pass));
         task64_set_level(USER_ADMIN);
+        auth_remember();
         r->rax = 0;
         return;
     }
     case SYS64_DROP:
         task64_set_level(USER_PLAIN);
+        auth_forget_current();
         r->rax = 0;
         return;
     case SYS64_LEVEL:
@@ -996,7 +1027,7 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_INSTALL_STEP:
-        if (task64_level() != USER_ADMIN) {
+        if (task64_level() != USER_ADMIN || !auth_recent()) {
             r->rax = (uint64_t)(int64_t)-2;
             return;
         }
@@ -1032,6 +1063,28 @@ static void handle(struct regs *r)
     case SYS64_SND_BEEP:
         r->rax = (uint64_t)(int64_t)hda_beep((uint32_t)a1, (uint32_t)a2);
         return;
+    case SYS64_SND_STREAM: {
+        static int16_t samples[HDA_STREAM_MAX_FRAMES * 2];
+        int result = -1;
+        if ((int64_t)a1 == SND_STREAM_BEGIN) {
+            result = hda_stream_begin();
+        } else if ((int64_t)a1 == SND_STREAM_WRITE) {
+            if (hda_stream_owned() && a3 <= HDA_STREAM_MAX_FRAMES &&
+                (!a3 || paging64_user_range(a2, a3 * 4))) {
+                if (a3)
+                    memcpy(samples, (const void *)(uintptr_t)a2,
+                           (size_t)(a3 * 4));
+                result = hda_stream_write(samples, (uint32_t)a3);
+            } else if (a3 <= HDA_STREAM_MAX_FRAMES && a3 &&
+                       !paging64_user_range(a2, a3 * 4)) {
+                result = -1;
+            }
+        } else if ((int64_t)a1 == SND_STREAM_END) {
+            result = hda_stream_end();
+        }
+        r->rax = (uint64_t)(int64_t)result;
+        return;
+    }
 
     /* --- semaphores: waiting for one another ----------------------- */
     case SYS64_SEM_GET:
@@ -1112,6 +1165,83 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)config_set(name, value);
         return;
     }
+    case SYS64_USER: {
+        struct user_ctl ctl = { 0 };
+        if (!paging64_user_range(a1, sizeof(ctl))) {
+            memset(&ctl, 0, sizeof(ctl));
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        ctl = *(const struct user_ctl *)(uintptr_t)a1;
+        int rc = -1;
+        if (ctl.op == USER_CTL_LIST) {
+            int uid, level;
+            memset(ctl.name, 0, sizeof(ctl.name));
+            rc = user_account_info(ctl.index, ctl.name, sizeof(ctl.name),
+                                   &uid, &level);
+            if (rc == 0) {
+                ctl.uid = uid;
+                ctl.level = level;
+                memset(ctl.password, 0, sizeof(ctl.password));
+                memset(ctl.admin_password, 0, sizeof(ctl.admin_password));
+                *(struct user_ctl *)(uintptr_t)a1 = ctl;
+            }
+        } else {
+            char name[16] = { 0 };
+            char password[USER_PASSWORD_MAX + 1] = { 0 };
+            char admin_password[USER_PASSWORD_MAX + 1] = { 0 };
+            uint64_t p = a1 + offsetof(struct user_ctl, name);
+            if (text_from_ring3(p, name, sizeof(name)) < 0) {
+                memset(name, 0, sizeof(name));
+                memset(password, 0, sizeof(password));
+                memset(admin_password, 0, sizeof(admin_password));
+                memset(&ctl, 0, sizeof(ctl));
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            if ((ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_PASSWORD) &&
+                text_from_ring3(a1 + offsetof(struct user_ctl, password),
+                                password, sizeof(password)) < 0) {
+                memset(name, 0, sizeof(name));
+                memset(password, 0, sizeof(password));
+                memset(admin_password, 0, sizeof(admin_password));
+                memset(&ctl, 0, sizeof(ctl));
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            if ((ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_DELETE ||
+                 ctl.op == USER_CTL_PASSWORD || ctl.op == USER_CTL_ROLE) &&
+                text_from_ring3(a1 + offsetof(struct user_ctl, admin_password),
+                                admin_password, sizeof(admin_password)) < 0) {
+                memset(name, 0, sizeof(name));
+                memset(password, 0, sizeof(password));
+                memset(admin_password, 0, sizeof(admin_password));
+                memset(&ctl, 0, sizeof(ctl));
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            if (ctl.op == USER_CTL_ADD)
+                rc = user_account_add(name, password, ctl.level,
+                                      admin_password);
+            else if (ctl.op == USER_CTL_DELETE)
+                rc = user_account_delete(name, admin_password);
+            else if (ctl.op == USER_CTL_ROLE)
+                rc = user_account_set_level(name, ctl.level, admin_password);
+            else if (ctl.op == USER_CTL_PASSWORD) {
+                if (!strcmp(name, user_current_name()))
+                    rc = user_password_current_ok(admin_password)
+                             ? user_set_password(password) : -2;
+                else
+                    rc = user_set_password_for(name, password, admin_password);
+            }
+            memset(name, 0, sizeof(name));
+            memset(password, 0, sizeof(password));
+            memset(admin_password, 0, sizeof(admin_password));
+        }
+        memset(&ctl, 0, sizeof(ctl));
+        r->rax = (uint64_t)(int64_t)rc;
+        return;
+    }
     case SYS64_FDINFO: {
         struct { int32_t kind; uint32_t size, pos; } info;
         if (!paging64_user_range(a2, sizeof(info)) || (int64_t)a1 < 0) {
@@ -1151,6 +1281,9 @@ static void handle(struct regs *r)
         r->rax = n;
         return;
     }
+    case SYS64_UPDATE_ALLOWED:
+        r->rax = (uint64_t)(int64_t)install_update_allowed();
+        return;
     case SYS64_UPDATE_WRITE: {
         /* Replacing the system is the most an admin can do */
         if (task64_level() != USER_ADMIN) {

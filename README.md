@@ -308,6 +308,7 @@ QuickJS is wrapped by `apps/js/`. After an update, run
   - web browser (litehtml, HTML and CSS)
   - settings, task manager, calculator, calendar, paint, mixer
   - picture viewer (PNG, JPEG, BMP)
+  - 64-bit media player (MP3, WAV, AAC, FLAC, Ogg, M4A, MP4/MOV, Matroska, AVI)
   - installer
   - `update`
   - `js` (QuickJS)

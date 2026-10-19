@@ -778,6 +778,8 @@ uint32_t process_mmap_file(const char *name, uint32_t *size_out,
     int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return 0;
+    if (write && !fs_can_write(f))
+        return 0;
     int len = fs_size(f);
     if (len <= 0)
         return 0;
@@ -803,7 +805,7 @@ uint32_t process_mmap_file(const char *name, uint32_t *size_out,
         }
     }
 
-    if (task_mmap_add(base, end, (uint32_t)len, blocks, nblocks, write) < 0) {
+    if (task_mmap_add(base, end, (uint32_t)len, blocks, nblocks, f, write) < 0) {
         kfree(blocks);
         return 0;
     }
@@ -832,7 +834,9 @@ uint32_t process_msync(void)
 
     for (int i = 0; i < MMAP_FILES; i++) {
         uint32_t start, end, size, write;
-        if (!task_mmap_info(i, &start, &end, &size, &write) || !write)
+        int file_slot;
+        if (!task_mmap_info(i, &start, &end, &size, &write, &file_slot) ||
+            !write || !fs_can_write(file_slot))
             continue;
         for (uint32_t va = start; va < end; va += PAGE_SIZE) {
             if (!paging_file_dirty(dir, va))
@@ -842,15 +846,28 @@ uint32_t process_msync(void)
                 continue;
             uint32_t offset = va - start;
             const uint8_t *src = (const uint8_t *)frame;
+            int valid = 1;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
                 /* Beyond the end of the file there is nothing to write back - the
                    block either does not exist or already belongs to
                    somebody else */
                 if (offset + b * FS_BLOCK >= size)
                     break;
-                uint32_t block = task_mmap_block(va, offset / FS_BLOCK + b);
-                if (!block)
+                uint32_t index = offset / FS_BLOCK + b;
+                uint32_t block = task_mmap_block(va, index);
+                if (!block || fs_file_block(file_slot, index, 0) != block) {
+                    valid = 0;
                     break;
+                }
+            }
+            if (!valid) {
+                paging_file_clean(dir, va);
+                continue;
+            }
+            for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
+                if (offset + b * FS_BLOCK >= size)
+                    break;
+                uint32_t block = task_mmap_block(va, offset / FS_BLOCK + b);
                 blk_write(fs_block_lba(block), FS_BLOCK / 512,
                           src + b * FS_BLOCK);
             }

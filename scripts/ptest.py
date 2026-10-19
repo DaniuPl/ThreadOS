@@ -755,6 +755,7 @@ GSET_SW_H = _kernel_define(_GS, "SW_H")
 GSET_SW_GAP = _kernel_define(_GS, "SW_GAP")
 GSET_SECTIONS = ["General", "Appearance", "Display", "Sound", "Network",
                  "Files", "About"]
+GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
 
 
 def gset_section(name):
@@ -2030,16 +2031,47 @@ class Qemu:
         """Waits until the compositor draws the desktop. In graphics mode
         the VGA text buffer (0xB8000) stops being a window onto what can
         be seen, so we look for readiness in pixels rather than in
-        text."""
+        text. Fresh disks stop at profile setup; the shared desktop
+        fixtures create a known administrator before continuing."""
         deadline = time.time() + timeout
+        login_sent = False
+        setup_sent = False
         while time.time() < deadline:
             try:
                 w, h, at = self.screen_raw()
+                if not setup_sent and w >= 640:
+                    setup_y = (h - 438) // 2
+                    title = self.find_ui(
+                        80, w - 80, setup_y + 34, px=20, face="bold",
+                        screen=(w, h, at))
+                    if "Welcome to ThreadOS" in title:
+                        self.type_line("admin", enter=False)
+                        self.sendkey("tab")
+                        self.type_line("Test Admin", enter=False)
+                        self.sendkey("tab")
+                        self.type_line("thread", enter=False)
+                        self.sendkey("tab")
+                        self.type_line("thread", enter=False)
+                        self.sendkey("tab")
+                        self.sendkey("tab")
+                        self.sendkey("ret")
+                        setup_sent = True
                 want = aurora_px(600, 300, w, h) if w >= 640 else self.DESK_BG
-                if w >= 640 and all(abs(at(600, 300)[i] - want[i]) <= 40
+                if w >= 640 and all(abs(at(600, 300)[i] - want[i]) <= 25
                                     for i in range(3)):
                     self._size = (w, h)
                     return True
+                if not login_sent and w >= 640:
+                    fy = h * 2 // 3 - LOCK_FIELD_H
+                    under = lambda x, y: gfx_mix(
+                        (0, 0, 0), aurora_px(x, y, w, h), 90)
+                    hint = self.find_ui(
+                        80, w - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
+                        fg=(0xD8, 0xD8, 0xDC), under=under,
+                        screen=(w, h, at))
+                    if "signs in" in hint:
+                        self.type_line("thread")
+                        login_sent = True
             except Exception:
                 pass
             time.sleep(0.3)

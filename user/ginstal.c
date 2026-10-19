@@ -132,7 +132,7 @@ static int failed_at = -1;
 static int entry_made;            /* the last step put ThreadOS in the boot menu */
 static char typed[12];
 static int tlen;
-static char pass[32];
+static char pass[USER_PASSWORD_MAX + 1];
 static int plen;
 static char note[56];
 

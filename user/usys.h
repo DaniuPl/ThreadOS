@@ -4,6 +4,7 @@
 #define THREADOS_USYS_H
 
 #include <stdint.h>
+#include "userctl.h"
 
 #define SYS_WRITE    1
 #define SYS_EXIT     2
@@ -56,12 +57,14 @@
 #define SYS_CFG_GET    49
 #define SYS_CFG_SET    50
 #define SYS_AUTH       51
+#define SYS_USER       78
 #define SYS_DROP       52
 #define SYS_INSTALL_LOOK 66
 #define SYS_INSTALL_STEP 67
 #define SYS_SND_GET  68
 #define SYS_SND_SET  69
 #define SYS_SND_BEEP 70
+#define SYS_SND_STREAM 79
 #define SYS_SEM_GET  71
 #define SYS_SEM_WAIT 72
 #define SYS_SEM_POST 73
@@ -771,6 +774,14 @@ struct cfg_entry {
     char help[CFG_HELP_MAX];
 };
 
+static inline int32_t sys_user(struct user_ctl *ctl)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80" : "=a"(ret)
+                     : "a"(SYS_USER), "b"(ctl) : "memory");
+    return ret;
+}
+
 /* The i-th setting. Returns 0, or -1 past the last one. */
 static inline int32_t sys_cfg_get(uint32_t index, struct cfg_entry *out)
 {
@@ -917,6 +928,24 @@ static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_SND_BEEP), "b"(hz), "c"(ms)
+                     : "memory");
+    return ret;
+}
+
+/* Stream operations are shared with kernel/include/syscall.h: begin,
+   write at most 1024 interleaved stereo frames, then end. */
+#define SND_STREAM_BEGIN 0
+#define SND_STREAM_WRITE 1
+#define SND_STREAM_END 2
+#define SND_STREAM_MAX_FRAMES 1024
+static inline int32_t sys_snd_stream(int op, const int16_t *samples,
+                                     uint32_t frames)
+{
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+                     : "=a"(ret)
+                     : "a"(SYS_SND_STREAM), "b"(op), "c"(samples),
+                       "d"(frames)
                      : "memory");
     return ret;
 }

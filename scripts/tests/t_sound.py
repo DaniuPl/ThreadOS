@@ -133,6 +133,7 @@ def main():
                 q3.wait_serial("The 64-bit system is ready", timeout=120)
                 q3.type_line("desktop")
                 q3.wait_serial("The desktop is starting", timeout=40)
+                q3.wait_desktop(40)
                 time.sleep(4)
                 out = q3.command("run gmikser", "from initrd", timeout=30)
                 check("the mixer starts as a ring 3 program",

@@ -95,6 +95,11 @@ int task64_trywait(int id, int *code);
 int task64_level(void);
 void task64_set_level(int level);
 int task64_level_of(int pid);
+int task64_uid(void);
+void task64_set_uid(int uid);
+void task64_set_identity_name(const char *name, int uid, int level, int cwd);
+void task64_set_level_name(const char *name, int level);
+void task64_kill_uid(int uid);
 void task64_set_vc(int vc);
 int task64_alive(int id);            /* is the task with this number alive */
 
@@ -130,11 +135,11 @@ void task64_inherit_brk(struct task64 *child);
  * MMAP_FILES says how many mappings one process may have at a time. */
 #define MMAP_FILES 4
 
-/* Sets up a mapping: remembers the address range and the block
-   numbers. Returns 0 or -1. The blocks pass into the task's
-   ownership. */
+/* Sets up a mapping: remembers its source inode, address range and
+   block numbers so writeback can recheck access. Returns 0 or -1. */
 int task64_mmap_add(uint64_t start, uint64_t end, uint32_t size,
-                      uint32_t *blocks, uint32_t nblocks_of, uint32_t write);
+                      uint32_t *blocks, uint32_t nblocks_of, int file_slot,
+                      uint32_t write);
 
 /* Does the address belong to one of the mappings. If so, it writes out
    the TFS block number, how many bytes of the file are left from that
@@ -145,7 +150,7 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
 /* A description of the current process's i-th mapping (0 = a free
    entry) - for flushing dirty pages, which walks them in turn. */
 int task64_mmap_info(int i, uint64_t *start, uint64_t *end,
-                     uint32_t *size, uint32_t *write);
+                     uint32_t *size, uint32_t *write, int *file_slot);
 
 /* The TFS block number at the given index in the mapping covering an
    address */

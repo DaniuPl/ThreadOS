@@ -177,6 +177,7 @@ def main():
             desktop = q.wait_serial("The desktop is starting", timeout=30)
             check("the installed-system loader starts directly in the desktop",
                   "The desktop is starting - the console goes away" in desktop)
+            q.wait_desktop(40)
             w, h, at = q.screen_raw()
             check(f"the screen resolution matches the loader's ({w}x{h})",
                   w == loader_w and h == loader_h)

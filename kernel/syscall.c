@@ -17,6 +17,7 @@
 
 #include "include/sem.h"
 #include <stdint.h>
+#include <stddef.h>
 #include "include/syscall.h"
 #include "include/smp.h"
 #include "include/config.h"
@@ -43,6 +44,30 @@
 #include "include/tcp.h"
 #include "include/signal.h"
 #include "include/string.h"
+
+#define USER_AUTH_WINDOW_TICKS 30000u
+static int auth_pid = -1;
+static int auth_uid = -1;
+static uint32_t auth_tick;
+
+static void auth_remember(void)
+{
+    auth_pid = task_current_id();
+    auth_uid = task_uid();
+    auth_tick = pit_ticks();
+}
+
+static void auth_forget_current(void)
+{
+    if (task_current_id() == auth_pid)
+        auth_pid = -1;
+}
+
+static int auth_recent(void)
+{
+    return auth_pid == task_current_id() && auth_uid == task_uid() &&
+           (uint32_t)(pit_ticks() - auth_tick) <= USER_AUTH_WINDOW_TICKS;
+}
 
 /* --- which calls do not need the big kernel lock -------------------
  *
@@ -211,6 +236,7 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_EXIT:
+        auth_forget_current();
         printk("[kernel] process '%s' has ended (code %d)\n",
                task_current_name(), (int)r->ebx);
         task_exit((int)r->ebx);
@@ -662,7 +688,7 @@ void syscall_handler(struct regs *r)
         break;
     }
     case SYS_INSTALL_STEP:
-        if (task_level() != USER_ADMIN) {
+        if (task_level() != USER_ADMIN || !auth_recent()) {
             r->eax = EPERM;
             break;
         }
@@ -694,6 +720,25 @@ void syscall_handler(struct regs *r)
     case SYS_SND_BEEP:
         r->eax = (uint32_t)hda_beep(r->ebx, r->ecx);
         break;
+    case SYS_SND_STREAM: {
+        static int16_t samples[HDA_STREAM_MAX_FRAMES * 2];
+        int result = -1;
+        if (r->ebx == SND_STREAM_BEGIN) {
+            result = hda_stream_begin();
+        } else if (r->ebx == SND_STREAM_WRITE) {
+            uint32_t frames = r->edx;
+            if (hda_stream_owned() && frames <= HDA_STREAM_MAX_FRAMES &&
+                user_get(samples, r->ecx, frames * 4) == 0)
+                result = hda_stream_write(samples, frames);
+            else if (frames <= HDA_STREAM_MAX_FRAMES &&
+                     !user_ok(r->ecx, frames * 4))
+                result = (int)EFAULT;
+        } else if (r->ebx == SND_STREAM_END) {
+            result = hda_stream_end();
+        }
+        r->eax = (uint32_t)result;
+        break;
+    }
 
     /* --- semaphores: waiting for one another ----------------------- */
     case SYS_SEM_GET:
@@ -711,26 +756,100 @@ void syscall_handler(struct regs *r)
      * Up by a password, down for nothing. Going down is never a thing
      * to check: giving up a right is always allowed. */
     case SYS_AUTH: {
-        char pass[CFG_VAL_MAX];
+        char pass[USER_PASSWORD_MAX + 1];
         if (user_str(pass, r->ebx, sizeof(pass)) < 0) {
+            memset(pass, 0, sizeof(pass));
             r->eax = EFAULT;
             break;
         }
         if (!user_password_ok(pass)) {
+            memset(pass, 0, sizeof(pass));
             r->eax = EPERM;
             break;
         }
+        memset(pass, 0, sizeof(pass));
         task_set_level(USER_ADMIN);
+        auth_remember();
         r->eax = 0;
         break;
     }
     case SYS_DROP:
         task_set_level(USER_PLAIN);
+        auth_forget_current();
         r->eax = 0;
         break;
     case SYS_LEVEL:
         r->eax = (uint32_t)task_level();
         break;
+    case SYS_USER: {
+        struct user_ctl ctl = { 0 };
+        if (user_get(&ctl, r->ebx, sizeof(ctl)) < 0) {
+            memset(&ctl, 0, sizeof(ctl));
+            r->eax = EFAULT;
+            break;
+        }
+        int rc = -1;
+        if (ctl.op == USER_CTL_LIST) {
+            int uid, level;
+            memset(ctl.name, 0, sizeof(ctl.name));
+            rc = user_account_info(ctl.index, ctl.name, sizeof(ctl.name),
+                                   &uid, &level);
+            if (rc == 0) {
+                ctl.uid = uid;
+                ctl.level = level;
+                memset(ctl.password, 0, sizeof(ctl.password));
+                memset(ctl.admin_password, 0, sizeof(ctl.admin_password));
+                if (user_put(r->ebx, &ctl, sizeof(ctl)) < 0)
+                    rc = -1;
+            }
+        } else {
+            uint32_t base = r->ebx;
+            if (user_str(ctl.name, base + offsetof(struct user_ctl, name),
+                         sizeof(ctl.name)) < 0) {
+                memset(&ctl, 0, sizeof(ctl));
+                r->eax = EFAULT;
+                break;
+            }
+            if (ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_PASSWORD) {
+                if (user_str(ctl.password,
+                             base + offsetof(struct user_ctl, password),
+                             sizeof(ctl.password)) < 0) {
+                    memset(&ctl, 0, sizeof(ctl));
+                    r->eax = EFAULT;
+                    break;
+                }
+            }
+            if (ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_DELETE ||
+                ctl.op == USER_CTL_PASSWORD || ctl.op == USER_CTL_ROLE) {
+                if (user_str(ctl.admin_password,
+                             base + offsetof(struct user_ctl, admin_password),
+                             sizeof(ctl.admin_password)) < 0) {
+                    memset(&ctl, 0, sizeof(ctl));
+                    r->eax = EFAULT;
+                    break;
+                }
+            }
+            if (ctl.op == USER_CTL_ADD)
+                rc = user_account_add(ctl.name, ctl.password, ctl.level,
+                                      ctl.admin_password);
+            else if (ctl.op == USER_CTL_DELETE)
+                rc = user_account_delete(ctl.name, ctl.admin_password);
+            else if (ctl.op == USER_CTL_ROLE)
+                rc = user_account_set_level(ctl.name, ctl.level,
+                                            ctl.admin_password);
+            else if (ctl.op == USER_CTL_PASSWORD) {
+                if (!strcmp(ctl.name, user_current_name()))
+                    rc = user_password_current_ok(ctl.admin_password)
+                             ? user_set_password(ctl.password) : -2;
+                else
+                    rc = user_set_password_for(ctl.name, ctl.password,
+                                               ctl.admin_password);
+            }
+        }
+        memset(&ctl, 0, sizeof(ctl));
+        r->eax = (uint32_t)rc;
+        break;
+    }
     case SYS_SPAWN_TALK: {
         char cmd[PATH_MAX], out[PATH_MAX];
         if (user_str(cmd, r->ebx, sizeof(cmd)) < 0) {

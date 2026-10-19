@@ -30,6 +30,16 @@
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
+#include "include/task.h"
+#include "include/user.h"
+#ifdef __x86_64__
+#include "../kernel64/task64.h"
+#define current_level task64_level
+#define current_uid task64_uid
+#else
+#define current_level task_level
+#define current_uid task_uid
+#endif
 
 #define MAGIC          "TFS3"
 #define SECTORS_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)
@@ -44,13 +54,15 @@
 
 #define FS_TYPE_FILE 0
 #define FS_TYPE_DIR  1
+#define FS_TYPE_MASK 1
+#define FS_OWNER_SHIFT 1
 #define FS_NOTFOUND  (-2)
 
 struct inode {
     char name[FS_NAME_MAX + 1];   /* 64 B, with a NUL */
     uint32_t size;                /* 4 B */
     uint8_t used;                 /* 1 B */
-    uint8_t type;                 /* 1 B: FS_TYPE_FILE / FS_TYPE_DIR */
+    uint8_t type;                 /* low bit: type; high bits: owner UID */
     int16_t parent;               /* 2 B: the parent's slot, -1 = root */
     uint32_t direct[FS_DIRECT];   /* 48 B: block numbers */
     uint32_t indirect;            /* 4 B: a block of pointers (0 = none) */
@@ -494,7 +506,44 @@ static int alloc_inode(void)
 
 static int is_dir(int slot)
 {
-    return slot == FS_ROOT || (slot >= 0 && inodes[slot].type == FS_TYPE_DIR);
+    return slot == FS_ROOT || (slot >= 0 &&
+           (inodes[slot].type & FS_TYPE_MASK) == FS_TYPE_DIR);
+}
+
+static int inode_type(const struct inode *in)
+{
+    return in->type & FS_TYPE_MASK;
+}
+
+static int inode_owner(const struct inode *in)
+{
+    return in->type >> FS_OWNER_SHIFT;
+}
+
+static int can_access(int slot)
+{
+    if (slot < 0 || current_level() == USER_ADMIN)
+        return 1;
+    /* UID 0 owns the machine's files, but dropping the admin session
+       must still make those files read-only to that account. Check the
+       resolved inode name here, after path components like '..' have
+       been handled by resolve(). */
+    if (inodes[slot].parent == FS_ROOT &&
+        user_is_system_file(inodes[slot].name))
+        return 0;
+    return inode_owner(&inodes[slot]) == current_uid();
+}
+
+static int can_read(int slot)
+{
+    if (can_access(slot))
+        return 1;
+    /* Machine settings and icons are public; account hashes and swap data
+       stay private even though they are also system-owned files. */
+    return slot >= 0 && inode_type(&inodes[slot]) == FS_TYPE_FILE &&
+           inodes[slot].parent == FS_ROOT &&
+           (!strcmp(inodes[slot].name, "system.cfg") ||
+            !strcmp(inodes[slot].name, "icons.pos"));
 }
 
 static int parent_of(int slot)
@@ -592,7 +641,10 @@ static int create_inode(int dir, const char *base, int type)
     memset(&inodes[idx], 0, sizeof(inodes[idx]));
     memcpy(inodes[idx].name, base, strlen(base));
     inodes[idx].used = 1;
-    inodes[idx].type = (uint8_t)type;
+    int owner = current_uid();
+    if (dir == FS_ROOT && user_is_system_file(base))
+        owner = 0;
+    inodes[idx].type = (uint8_t)((owner << FS_OWNER_SHIFT) | type);
     inodes[idx].parent = (int16_t)dir;
     flush_inodes();
     return idx;
@@ -607,11 +659,15 @@ int fs_open(int cwd, const char *path, int create)
 
     uint32_t flags = irq_save();
     int slot = resolve(cwd, path);
-    if (slot >= 0 && inodes[slot].type == FS_TYPE_FILE) {
+    if (slot >= 0 && inode_type(&inodes[slot]) == FS_TYPE_FILE) {
+        if (!can_read(slot)) {
+            irq_restore(flags);
+            return -1;
+        }
         irq_restore(flags);
         return slot;                       /* an existing file */
     }
-    if (slot == FS_ROOT || (slot >= 0 && inodes[slot].type == FS_TYPE_DIR)) {
+    if (slot == FS_ROOT || (slot >= 0 && is_dir(slot))) {
         irq_restore(flags);
         return -1;                         /* that is a directory, not a file */
     }
@@ -622,7 +678,9 @@ int fs_open(int cwd, const char *path, int create)
 
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, path, base);
-    if (dir == FS_NOTFOUND) {
+    if (dir == FS_NOTFOUND || !can_access(dir) ||
+        (dir == FS_ROOT && user_is_system_file(base) &&
+         current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;
     }
@@ -642,7 +700,9 @@ int fs_mkdir(int cwd, const char *path)
     }
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, path, base);
-    if (dir == FS_NOTFOUND) {
+    if (dir == FS_NOTFOUND || !can_access(dir) ||
+        (dir == FS_ROOT && user_is_system_file(base) &&
+         current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;
     }
@@ -657,7 +717,7 @@ int fs_chdir(int cwd, const char *path, int *newcwd)
         return -1;
     uint32_t flags = irq_save();
     int slot = resolve(cwd, path);
-    int ok = (slot != FS_NOTFOUND) && is_dir(slot);
+    int ok = (slot != FS_NOTFOUND) && is_dir(slot) && can_access(slot);
     if (ok)
         *newcwd = slot;
     irq_restore(flags);
@@ -674,7 +734,11 @@ int fs_unlink(int cwd, const char *path)
         irq_restore(flags);
         return -1;
     }
-    if (inodes[slot].type == FS_TYPE_DIR) { /* a directory has to be empty */
+    if (!can_access(slot) || !can_access(inodes[slot].parent)) {
+        irq_restore(flags);
+        return -1;
+    }
+    if (inode_type(&inodes[slot]) == FS_TYPE_DIR) { /* a directory has to be empty */
         for (int i = 0; i < FS_MAX_FILES; i++)
             if (inodes[i].used && inodes[i].parent == slot) {
                 irq_restore(flags);
@@ -714,10 +778,16 @@ int fs_rename(int cwd, const char *from, const char *to)
         irq_restore(flags);
         return -1;
     }
+    if (!can_access(slot) || !can_access(inodes[slot].parent)) {
+        irq_restore(flags);
+        return -1;
+    }
 
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, to, base);
-    if (dir == FS_NOTFOUND) {
+    if (dir == FS_NOTFOUND || !can_access(dir) ||
+        (dir == FS_ROOT && user_is_system_file(base) &&
+         current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;
     }
@@ -727,7 +797,7 @@ int fs_rename(int cwd, const char *from, const char *to)
     }
 
     /* A directory into itself, or into its own descendant */
-    if (inodes[slot].type == FS_TYPE_DIR) {
+    if (inode_type(&inodes[slot]) == FS_TYPE_DIR) {
         for (int up = dir; up != FS_ROOT && up >= 0; up = inodes[up].parent)
             if (up == slot) {
                 irq_restore(flags);
@@ -777,9 +847,15 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
     if (!ready)
         return 0;
     uint32_t flags = irq_save();
+    if (!is_dir(dir) || !can_access(dir)) {
+        irq_restore(flags);
+        return 0;
+    }
     int count = 0;
     for (int i = 0; i < FS_MAX_FILES; i++) {
         if (!inodes[i].used || inodes[i].parent != dir)
+            continue;
+        if (!can_read(i))
             continue;
         if (count == index) {
             int j = 0;
@@ -791,7 +867,7 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
             if (size)
                 *size = inodes[i].size;
             if (is_d)
-                *is_d = (inodes[i].type == FS_TYPE_DIR);
+            *is_d = (inode_type(&inodes[i]) == FS_TYPE_DIR);
             irq_restore(flags);
             return 1;
         }
@@ -812,7 +888,8 @@ int fs_readdir(int dir, int index, char *name, uint32_t *size, int *is_d)
    shared block buffer. */
 uint32_t fs_file_block(int slot, uint32_t index, int alloc)
 {
-    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !(alloc ? can_access(slot) : can_read(slot)))
         return 0;
     uint32_t blk = inode_block(&inodes[slot], index, alloc);
     if (blk && alloc)
@@ -828,14 +905,42 @@ uint32_t fs_block_lba(uint32_t block)
 
 int fs_size(int slot)
 {
-    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !can_read(slot))
         return -1;
     return (int)inodes[slot].size;
 }
 
-int fs_truncate(int slot)
+int fs_owner(int slot)
 {
     if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+        return -1;
+    return inode_owner(&inodes[slot]);
+}
+
+int fs_can_write(int slot)
+{
+    return ready && slot >= 0 && slot < FS_MAX_FILES &&
+           inodes[slot].used && can_access(slot);
+}
+
+int fs_set_owner(int slot, int uid)
+{
+    if (!ready || current_level() != USER_ADMIN || slot < 0 ||
+        slot >= FS_MAX_FILES || !inodes[slot].used || uid < 0 || uid > 127)
+        return -1;
+    uint32_t flags = irq_save();
+    inodes[slot].type = (uint8_t)((uid << FS_OWNER_SHIFT) |
+                                  inode_type(&inodes[slot]));
+    flush_inode(slot);
+    irq_restore(flags);
+    return 0;
+}
+
+int fs_truncate(int slot)
+{
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !can_access(slot))
         return -1;
     uint32_t flags = irq_save();
     inode_free_blocks(&inodes[slot]);
@@ -846,7 +951,8 @@ int fs_truncate(int slot)
 
 int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len)
 {
-    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !can_read(slot))
         return -1;
 
     uint32_t flags = irq_save();
@@ -886,7 +992,8 @@ int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len)
 
 int fs_write_at(int slot, uint32_t off, const void *buf, uint32_t len)
 {
-    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used)
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !can_access(slot))
         return -1;
     if (off + len > FS_MAX_SIZE)
         return -1;

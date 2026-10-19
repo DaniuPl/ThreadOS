@@ -17,6 +17,7 @@
 #include "include/paging.h"
 #include "include/tlb.h"
 #include "include/config.h"
+#include "include/user.h"
 #include "include/heap.h"
 #include "include/shell.h"
 #include "include/string.h"
@@ -270,6 +271,7 @@ void kmain(uint32_t magic, uint32_t multiboot_info_addr)
        system, because that is where it is written - and before the
        network, because one of the settings is for the network. */
     config_load();
+    user_accounts_load();
     printk("[ OK ] Settings: %s (%d entries, the 'set' command)\n",
            config_get("name"), config_count());
 

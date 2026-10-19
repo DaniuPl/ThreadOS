@@ -42,6 +42,14 @@
 #include "include/smp.h"
 #include "include/hda.h"
 #include "include/spinlock.h"
+#ifdef __x86_64__
+#include "../kernel64/task64.h"
+#define desktop_uid task64_uid
+#define desktop_kill_uid task64_kill_uid
+#else
+#define desktop_uid task_uid
+#define desktop_kill_uid task_kill_uid
+#endif
 
 /* Palette indices.
  *
@@ -468,7 +476,7 @@ static int menu_px, menu_py;
    and everything else has to be out of reach while it runs, so it is
    started as a kiosk ('install') and not as one more window among
    somebody's other windows. */
-static const char *menu_items[] = {"guiapp", "gclock", "gfiles", WEB_APP,
+static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint"};
 
@@ -1885,6 +1893,13 @@ static void search_close(void);
 static int search_key(char c);
 static int note_at(int x, int y);
 static void note_drop(int i);
+static int setup_mode;
+static int setup_focus;
+static int setup_light;
+static int setup_try;
+static int setup_card_x(void);
+static int setup_card_y(void);
+static void setup_set_focus(int field);
 
 /* A program's window brought up if it is open - on this desktop or not
    - and the program started if it is not: a second calendar is not
@@ -1963,6 +1978,27 @@ static void handle_input(int mx, int my, int buttons)
 
     /* Locked: the pointer reaches nothing */
     if (locked) {
+        if (setup_mode && pressed && !prev_pressed) {
+            int x = setup_card_x(), y = setup_card_y();
+            if (in_rect(mx, my, x + 20, y + 88, 440, 32))
+                setup_set_focus(0);
+            else if (in_rect(mx, my, x + 20, y + 146, 440, 32))
+                setup_set_focus(1);
+            else if (in_rect(mx, my, x + 20, y + 204, 440, 32))
+                setup_set_focus(2);
+            else if (in_rect(mx, my, x + 20, y + 262, 440, 32))
+                setup_set_focus(3);
+            else if (in_rect(mx, my, x + 20, y + 322, 100, 30)) {
+                setup_focus = 4;
+                setup_light = 0;
+            } else if (in_rect(mx, my, x + 132, y + 322, 100, 30)) {
+                setup_focus = 4;
+                setup_light = 1;
+            } else if (in_rect(mx, my, x + 340, y + 386, 120, 34)) {
+                setup_focus = 5;
+                setup_try = 1;
+            }
+        }
         prev_pressed = pressed;
         prev_right = right;
         (void)mouse_take_scroll();
@@ -3631,6 +3667,22 @@ static int ends_with(const char *s, const char *tail)
     return n >= t && !strcmp(s + n - t, tail);
 }
 
+static int ends_with_ci(const char *s, const char *tail)
+{
+    int n = (int)strlen(s), t = (int)strlen(tail);
+    if (n < t)
+        return 0;
+    s += n - t;
+    for (int i = 0; i < t; i++) {
+        char a = s[i], b = tail[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = (char)(b + ('a' - 'A'));
+        if (a != b)
+            return 0;
+    }
+    return 1;
+}
+
 /* What a result does when it is taken */
 static void search_go(int i)
 {
@@ -3657,12 +3709,30 @@ static void search_go(int i)
         remember_launch(exec_spawn("gsettings"), icon_of_app("gsettings"),
                         f.art);
     } else {
-        /* A picture to the viewer, anything else to the editor */
-        const char *with = ends_with(f.name, ".png") ||
-                           ends_with(f.name, ".jpg") ||
-                           ends_with(f.name, ".jpeg") ||
-                           ends_with(f.name, ".bmp") ||
-                           ends_with(f.name, ".psc") ? "gimg " : "gedit ";
+        /* Open media with the decoder that understands its container. */
+        int picture = ends_with_ci(f.name, ".png") ||
+                      ends_with_ci(f.name, ".jpg") ||
+                      ends_with_ci(f.name, ".jpeg") ||
+                      ends_with_ci(f.name, ".bmp") ||
+                      ends_with_ci(f.name, ".psc");
+#ifdef __x86_64__
+        int media = ends_with_ci(f.name, ".mp3") ||
+                    ends_with_ci(f.name, ".wav") ||
+                    ends_with_ci(f.name, ".aac") ||
+                    ends_with_ci(f.name, ".flac") ||
+                    ends_with_ci(f.name, ".ogg") ||
+                    ends_with_ci(f.name, ".m4a") ||
+                    ends_with_ci(f.name, ".mp4") ||
+                    ends_with_ci(f.name, ".m4v") ||
+                    ends_with_ci(f.name, ".mov") ||
+                    ends_with_ci(f.name, ".mkv") ||
+                    ends_with_ci(f.name, ".avi") ||
+                    ends_with_ci(f.name, ".webm");
+#else
+        int media = 0;
+#endif
+        const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
+        const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
         char cmd[96];
         int n = 0;
         for (int k = 0; with[k]; k++)
@@ -3670,7 +3740,7 @@ static void search_go(int i)
         for (int k = 0; f.name[k] && n < (int)sizeof(cmd) - 1; k++)
             cmd[n++] = f.name[k];
         cmd[n] = '\0';
-        int art = art_of_app(with[1] == 'i' ? "gimg" : "gedit");
+        int art = art_of_app(app);
         remember_launch(exec_spawn(cmd), -1, art);
     }
 }
@@ -4126,21 +4196,67 @@ static int compositor_running;
  * checked by the desktop's own thread (the keys arrive in an
  * interrupt, and checking a password is not an interrupt's work).
  */
-static char lock_pass[32];
+static char lock_pass[USER_PASSWORD_MAX + 1];
 static volatile int lock_len;
+static char lock_user[USER_NAME_MAX + 1] = "admin";
+static char lock_display[USER_DISPLAY_NAME_MAX + 1];
+static volatile int lock_user_len = 5;
+static volatile int lock_field = 1;    /* username = 0, password = 1 */
 static volatile int lock_try;          /* Enter: the thread checks */
 static uint32_t lock_wrong_at;         /* when a wrong one was given */
 static int lock_wrong;
 static int lock_out;                   /* it was a log out, not a lock */
+static char setup_login[USER_NAME_MAX + 1];
+static char setup_display[USER_DISPLAY_NAME_MAX + 1];
+static char setup_password[USER_PASSWORD_MAX + 1];
+static char setup_confirm[USER_PASSWORD_MAX + 1];
+static int setup_len[4];
+static int setup_error;
+
+static int setup_card_x(void) { return (video_w() - 480) / 2; }
+static int setup_card_y(void) { return (video_h() - 438) / 2; }
+
+static void setup_set_focus(int field)
+{
+    if (field < 0)
+        field = 5;
+    if (field > 5)
+        field = 0;
+    setup_focus = field;
+}
+
+static void setup_submit(void)
+{
+    setup_try = 0;
+    if (strcmp(setup_password, setup_confirm)) {
+        setup_error = 1;
+        return;
+    }
+    if (user_account_setup(setup_login, setup_display, setup_password,
+                           setup_light ? "light" : "dark") < 0) {
+        setup_error = 1;
+        return;
+    }
+    for (int i = 0; i < (int)sizeof(setup_password); i++) {
+        setup_password[i] = 0;
+        setup_confirm[i] = 0;
+    }
+    setup_mode = 0;
+    lock_out = 0;
+    locked = 0;
+}
 
 int desktop_lock(void)
 {
     if (!compositor_running || kiosk)
         return -1;
+    if (user_current_passwordless())
+        return 0;
     lock_len = 0;
     lock_try = 0;
     lock_wrong = 0;
     lock_out = 0;
+    lock_field = 1;
     ask = -1;
     tmenu = -1;
     search_close();
@@ -4155,11 +4271,37 @@ int desktop_lock(void)
    they are the machine's, not the session's. */
 static void log_out(void)
 {
+    int uid = desktop_uid();
+    const char *who = user_current_name();
+    const char *display = user_current_display_name();
+    int n = 0;
+    while (who[n] && n < USER_NAME_MAX) {
+        lock_user[n] = who[n];
+        n++;
+    }
+    lock_user[n] = 0;
+    lock_user_len = n;
+    n = 0;
+    while (display[n] && n < USER_DISPLAY_NAME_MAX) {
+        lock_display[n] = display[n];
+        n++;
+    }
+    lock_display[n] = 0;
     for (int i = 0; i < MAX_WIN; i++)
         if (wins[i].used && wins[i].content && wins[i].owner >= 0)
             close_window(i);
+    desktop_kill_uid(uid);
+    /* UID 127 belongs to no account, so a shell behind the login screen
+       cannot retain the session that just ended. */
+    user_session_guest();
+    if (user_auto_login() == 0) {
+        locked = 0;
+        lock_out = 0;
+        return;
+    }
     desktop_lock();
     lock_out = 1;
+    lock_field = 1;
 }
 
 /* What was asked about, done - by the desktop's thread */
@@ -4404,34 +4546,207 @@ static void draw_ask(void)
                  L.accent_text);
 }
 
+static void setup_key(char c)
+{
+    if (c == '\t') {
+        setup_set_focus(setup_focus + 1);
+        return;
+    }
+    if (c == '\n' || c == '\r') {
+        if (setup_focus == 5)
+            setup_try = 1;
+        else
+            setup_set_focus(setup_focus + 1);
+        return;
+    }
+    if (c == '\b') {
+        if (setup_focus >= 0 && setup_focus < 4 && setup_len[setup_focus]) {
+            char *field = setup_focus == 0 ? setup_login :
+                          setup_focus == 1 ? setup_display :
+                          setup_focus == 2 ? setup_password : setup_confirm;
+            field[--setup_len[setup_focus]] = 0;
+            setup_error = 0;
+        }
+        return;
+    }
+    if (setup_focus == 4 && (c == ' ' || c == 'd' || c == 'l')) {
+        setup_light = !setup_light;
+        return;
+    }
+    if (setup_focus < 0 || setup_focus >= 4 || c < 0x20 || c > 0x7E)
+        return;
+
+    char *field = setup_focus == 0 ? setup_login :
+                  setup_focus == 1 ? setup_display :
+                  setup_focus == 2 ? setup_password : setup_confirm;
+    int cap = setup_focus == 0 ? USER_NAME_MAX :
+              setup_focus == 1 ? USER_DISPLAY_NAME_MAX : USER_PASSWORD_MAX;
+    if (setup_len[setup_focus] < cap) {
+        field[setup_len[setup_focus]++] = c;
+        field[setup_len[setup_focus]] = 0;
+        setup_error = 0;
+    }
+}
+
+static void draw_setup_field(int x, int y, const char *label,
+                             const char *value, int field, int secret)
+{
+    uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    uint32_t fill = theme_dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
+    ui_font_text(UI_SANS, UI_PX, x, y - 7, label, dim);
+    gfx_rrect(x, y, 440, 32, 8, fill, 255);
+    gfx_rring16(x * 16, y * 16, 440 * 16, 32 * 16, 8 * 16, 16,
+                setup_focus == field ? L.accent : L.win_line,
+                setup_focus == field ? 255 : 150);
+    if (value[0]) {
+        if (secret) {
+            char dots[USER_PASSWORD_MAX + 1];
+            int n = (int)strlen(value);
+            if (n > USER_PASSWORD_MAX)
+                n = USER_PASSWORD_MAX;
+            for (int i = 0; i < n; i++)
+                dots[i] = '*';
+            dots[n] = 0;
+            ui_font_text(UI_SANS, UI_PX, x + 12,
+                         ui_font_baseline_in(UI_PX, y, 32), dots, text);
+        } else {
+            ui_font_text(UI_SANS, UI_PX, x + 12,
+                         ui_font_baseline_in(UI_PX, y, 32), value, text);
+        }
+    } else {
+        const char *placeholder = field == 0 ? "Required" :
+                                  field == 1 ? "Required" : "Optional";
+        ui_font_text(UI_SANS, UI_PX, x + 12,
+                     ui_font_baseline_in(UI_PX, y, 32), placeholder, dim);
+    }
+}
+
+static void draw_setup(void)
+{
+    if (setup_try)
+        setup_submit();
+    int w = video_w(), h = video_h();
+    int x = setup_card_x(), y = setup_card_y();
+    uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+    uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    uint32_t fill = theme_dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+    gfx_fill(0, 0, w, h, 0x000000, theme_dark ? 90 : 50);
+    gfx_shadow(x, y, 480, 438, 18, 20, theme_dark ? 170 : 100, 6);
+    gfx_rrect(x, y, 480, 438, 18, L.win_bg, 255);
+    gfx_rring16(x * 16, y * 16, 480 * 16, 438 * 16, 18 * 16, 16,
+                L.win_line, 210);
+    ui_font_text(UI_BOLD, 20, x + 20, y + 34, "Welcome to ThreadOS", text);
+    ui_font_text(UI_SANS, UI_PX, x + 20, y + 59,
+                 "Create your profile to finish setting up.", dim);
+
+    draw_setup_field(x + 20, y + 88, "Login name", setup_login, 0, 0);
+    draw_setup_field(x + 20, y + 146, "Profile name", setup_display, 1, 0);
+    draw_setup_field(x + 20, y + 204, "Password (optional)", setup_password,
+                     2, 1);
+    draw_setup_field(x + 20, y + 262, "Confirm password", setup_confirm,
+                     3, 1);
+
+    ui_font_text(UI_SANS, UI_PX, x + 20, y + 315, "Theme", dim);
+    const int by = y + 322;
+    const char *themes[] = { "Dark", "Light" };
+    for (int i = 0; i < 2; i++) {
+        int bx = x + 20 + i * 112;
+        int selected = setup_light == i;
+        gfx_rrect(bx, by, 100, 30, 8, selected ? L.accent : fill, 255);
+        gfx_rring16(bx * 16, by * 16, 100 * 16, 30 * 16, 8 * 16, 16,
+                    setup_focus == 4 && selected ? L.accent_text : L.win_line,
+                    180);
+        int tw = ui_font_width(UI_SANS, UI_PX, themes[i]);
+        ui_font_text(UI_SANS, UI_PX, bx + (100 - tw) / 2,
+                     ui_font_baseline_in(UI_PX, by, 30), themes[i],
+                     selected ? L.accent_text : text);
+    }
+    ui_font_text(UI_SANS, UI_PX, x + 252, y + 343,
+                 "Language: English", dim);
+
+    int button_x = x + 340, button_y = y + 386;
+    gfx_rrect(button_x, button_y, 120, 34, 9, L.accent, 255);
+    gfx_rring16(button_x * 16, button_y * 16, 120 * 16, 34 * 16, 9 * 16,
+                16, setup_focus == 5 ? L.accent_text : L.win_line, 200);
+    int cw = ui_font_width(UI_BOLD, UI_PX, "Create profile");
+    ui_font_text(UI_BOLD, UI_PX, button_x + (120 - cw) / 2,
+                 ui_font_baseline_in(UI_PX, button_y, 34), "Create profile",
+                 L.accent_text);
+    if (setup_error) {
+        const char *error = "Check the names and matching passwords.";
+        ui_font_text(UI_SANS, UI_PX, x + 20, y + 405, error,
+                     theme_dark ? DARK_APP_DANGER : LIGHT_APP_DANGER);
+    } else {
+        ui_font_text(UI_SANS, UI_PX, x + 20, y + 405,
+                     "Leave both password fields empty for automatic sign-in.",
+                     dim);
+    }
+}
+
 static void lock_key(char c)
 {
+    if (setup_mode) {
+        setup_key(c);
+        return;
+    }
     if (c == '\n' || c == '\r') {
-        lock_try = 1;
+        if (lock_out && lock_field == 0)
+            lock_field = 1;
+        else
+            lock_try = 1;
+    } else if (c == '\t') {
+        if (lock_out)
+            lock_field = !lock_field;
     } else if (c == '\b') {
-        if (lock_len > 0)
+        if (lock_out && lock_field == 0) {
+            if (lock_user_len > 0)
+                lock_user[--lock_user_len] = 0;
+        } else if (lock_len > 0) {
             lock_pass[--lock_len] = 0;
+        }
     } else if (c == 27) {
         lock_len = 0;
-    } else if (c >= 0x20 && c < 0x7F && lock_len < (int)sizeof(lock_pass) - 1) {
-        lock_pass[lock_len++] = c;
-        lock_pass[lock_len] = 0;
+        lock_pass[0] = 0;
+        if (lock_out) {
+            lock_user_len = 0;
+            lock_user[0] = 0;
+            lock_field = 0;
+        }
+    } else if (c >= 0x20 && c < 0x7F) {
+        if (lock_out && lock_field == 0 &&
+            lock_user_len < USER_NAME_MAX) {
+            lock_user[lock_user_len++] = c;
+            lock_user[lock_user_len] = 0;
+        } else if (lock_field != 0 && lock_len < (int)sizeof(lock_pass) - 1) {
+            lock_pass[lock_len++] = c;
+            lock_pass[lock_len] = 0;
+        }
     }
 }
 
 static void draw_lock(void)
 {
+    if (setup_mode) {
+        draw_setup();
+        return;
+    }
     if (lock_try) {
         lock_try = 0;
         lock_pass[lock_len] = 0;
-        int ok = lock_len && user_password_ok(lock_pass);
+        lock_pass[lock_len] = 0;
+        int ok = lock_len && (lock_out
+                    ? user_login(lock_user, lock_pass) == 0
+                    : user_password_current_ok(lock_pass));
         for (int i = 0; i < (int)sizeof(lock_pass); i++)
             lock_pass[i] = 0;
         lock_len = 0;
+        lock_pass[0] = 0;
         if (ok) {
             locked = 0;
             lock_wrong = 0;
             lock_out = 0;
+            lock_display[0] = 0;
             return;
         }
         lock_wrong = 1;
@@ -4452,34 +4767,49 @@ static void draw_lock(void)
     ui_font_text(UI_SANS, 15, (w - dw) / 2, ty + 30, clock_text, 0xFFFFFF);
 
     /* The field: who this machine is, and the dots of what is typed */
-    const char *name = config_get("name");
+    const char *name = lock_out && lock_display[0]
+                           ? lock_display : config_get("name");
     if (!name || !name[0])
         name = "ThreadOS";
     int nw = ui_font_width(UI_BOLD, 15, name);
     int fy = h * 2 / 3 - LOCK_FIELD_H;
-    ui_font_text(UI_BOLD, 15, (w - nw) / 2, fy - 14, name, 0xFFFFFF);
+    ui_font_text(UI_BOLD, 15, (w - nw) / 2, fy - (lock_out ? 70 : 14),
+                 name, 0xFFFFFF);
     int fx = (w - LOCK_FIELD_W) / 2;
-    gfx_frost(fx, fy, LOCK_FIELD_W, LOCK_FIELD_H, LOCK_FIELD_H / 2, 8,
-              0xFFFFFF, 60);
-    gfx_rring16(fx * 16, fy * 16, LOCK_FIELD_W * 16, LOCK_FIELD_H * 16,
-                LOCK_FIELD_H * 8, 16, 0xFFFFFF, 120);
-    if (lock_len) {
-        int dot = 8, gap = 6, n = lock_len > 16 ? 16 : lock_len;
-        int x = (w - (n * dot + (n - 1) * gap)) / 2;
-        for (int i = 0; i < n; i++)
-            gfx_disc16((x + i * (dot + gap)) * 16 + dot * 8,
-                       (fy + LOCK_FIELD_H / 2) * 16, dot * 8, 0xFFFFFF, 255);
-    } else {
-        const char *p = "Password";
-        int pw = ui_font_width(UI_SANS, MENU_PX, p);
-        ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
-                     ui_font_baseline_in(MENU_PX, fy, LOCK_FIELD_H), p,
-                     0xD8D8DC);
+    int user_y = fy - LOCK_FIELD_H - 12;
+    int fields = lock_out ? 2 : 1;
+    for (int i = 0; i < fields; i++) {
+        int y = lock_out && i == 0 ? user_y : fy;
+        int focus = lock_out ? lock_field == i : 1;
+        gfx_frost(fx, y, LOCK_FIELD_W, LOCK_FIELD_H, LOCK_FIELD_H / 2, 8,
+                  0xFFFFFF, focus ? 75 : 45);
+        gfx_rring16(fx * 16, y * 16, LOCK_FIELD_W * 16, LOCK_FIELD_H * 16,
+                    LOCK_FIELD_H * 8, 16, 0xFFFFFF, focus ? 190 : 90);
+        if (lock_out && i == 0) {
+            const char *p = lock_user_len ? lock_user : "Account";
+            int pw = ui_font_width(UI_SANS, MENU_PX, p);
+            ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
+                         ui_font_baseline_in(MENU_PX, y, LOCK_FIELD_H), p,
+                         lock_user_len ? 0xFFFFFF : 0xD8D8DC);
+        } else if (lock_len) {
+            int dot = 8, gap = 6, n = lock_len > 16 ? 16 : lock_len;
+            int x = (w - (n * dot + (n - 1) * gap)) / 2;
+            for (int j = 0; j < n; j++)
+                gfx_disc16((x + j * (dot + gap)) * 16 + dot * 8,
+                           (y + LOCK_FIELD_H / 2) * 16, dot * 8,
+                           0xFFFFFF, 255);
+        } else {
+            const char *p = "Password";
+            int pw = ui_font_width(UI_SANS, MENU_PX, p);
+            ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
+                         ui_font_baseline_in(MENU_PX, y, LOCK_FIELD_H), p,
+                         0xD8D8DC);
+        }
     }
     const char *say = lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
                           ? "Wrong password - try again"
-                          : lock_out ? "Enter the admin's password to log in"
-                          : "Enter the admin's password to unlock";
+                          : lock_out ? "Tab selects a field; Enter signs in"
+                          : "Enter your password to unlock";
     int sw = ui_font_width(UI_SANS, UI_PX, say);
     ui_font_text(UI_SANS, UI_PX, (w - sw) / 2, fy + LOCK_FIELD_H + 22, say,
                  lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
@@ -5347,6 +5677,30 @@ void desktop_start(void)
     if (compositor_running)                      /* one compositor is enough */
         return;
     compositor_running = 1;
+
+    if (!kiosk) {
+        user_session_guest();
+        setup_mode = user_setup_required();
+        locked = 1;
+        lock_out = !setup_mode;
+        lock_wrong = 0;
+        setup_error = 0;
+        setup_focus = 0;
+        setup_light = !strcmp(config_get("theme"), "light");
+        setup_try = 0;
+        memset(setup_login, 0, sizeof(setup_login));
+        memset(setup_display, 0, sizeof(setup_display));
+        memset(setup_password, 0, sizeof(setup_password));
+        memset(setup_confirm, 0, sizeof(setup_confirm));
+        memset(setup_len, 0, sizeof(setup_len));
+        lock_user_len = 5;
+        memcpy(lock_user, "admin", 6);
+        lock_len = 0;
+        lock_pass[0] = 0;
+        lock_field = 1;
+        if (!setup_mode && user_auto_login() == 0)
+            locked = 0;
+    }
 
     /* From here the screen is the compositor's. Whatever used to write
        into the corner of the text screen - the mouse's position, the
