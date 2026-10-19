@@ -10,7 +10,7 @@
  */
 
 #include "usys64.h"
-#include "ubytes.h"
+#include "../user/ubytes.h"
 
 static char out[128];
 

@@ -450,7 +450,7 @@ $(BUILD)/user64:
 # make decides that since the sources did not change there is nothing
 # to do.
 $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
-                       Makefile | $(BUILD)/user64
+                       $(USER_HEADERS) Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
 # The programs shared by both kernels: the cryptography, TLS, HTTP and
