@@ -264,15 +264,17 @@ def twice():
             if not m:
                 return
             k = 32
+            q.launch_dock(4)
+            time.sleep(3)
             w, h, at = q.screen_raw()
-            # The first kernel window's title bar, letters and lights
-            got = q.find_ui(P(40 + LIGHT_X + 2 * LIGHT_STEP + LIGHT_D + 6, k),
-                            P(40 + 122, k),
-                            P(title_baseline(60), k), px=ppx(TITLE_PX, k),
+            # The first application window's title bar, letters and lights
+            got = q.find_ui(P(94 + LIGHT_X + 2 * LIGHT_STEP + LIGHT_D + 6, k),
+                            P(94 + TERM_W + 2, k),
+                            P(title_baseline(54), k), px=ppx(TITLE_PX, k),
                             face="bold", screen=(w, h, at))
             pairs = same = 0
-            for yy in range(P(60, k), P(60 + TITLE_H, k), 2):
-                for xx in range(P(40, k), P(160, k), 2):
+            for yy in range(P(54, k), P(54 + TITLE_H, k), 2):
+                for xx in range(P(94, k), P(94 + TERM_W + 2, k), 2):
                     pairs += 1
                     a = at(xx, yy)
                     if a == at(xx + 1, yy) == at(xx, yy + 1) == \

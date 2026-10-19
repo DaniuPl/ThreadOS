@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ThreadOS smoke test: many windows open at once.
 
-The compositor used to hold six windows, two of which are its own. Four
-applications, and the fifth failed - with no message, no error and
+The compositor used to hold six windows. Six applications, and the
+seventh failed - with no message, no error and
 nothing on the screen to say why. There are nine programs in the dock,
 so a person could reach that wall just by clicking what is in front of
 them.
@@ -60,21 +60,19 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            # The kernel's own two windows are there from the start - so
-            # anything we count later is on top of something real
-            check("at the start the dock holds two windows (the kernel's)",
-                  q.dock_windows() == 2)
+            check("the desktop starts without placeholder windows",
+                  q.dock_windows() == 0)
 
             # --- every program in the dock opens a window --------------
-            for k in range(7):
+            for k in range(9):
                 q.launch_dock(k)
                 time.sleep(2.5)
             q.mouse_goto(600, 300)         # the cursor out of the way
             time.sleep(2)
 
-            # Seven applications plus the two kernel windows. The old
-            # compositor held six windows in total, so this number is
-            # itself the thing that could not happen before.
+            # Nine applications, including the duplicates that the
+            # launch menu opens. The former six-window ceiling is the
+            # thing this count would expose.
             n = q.dock_windows()
             check("nine windows at once have their tiles in the dock "
                   "(there are %d)" % n, n == 9)

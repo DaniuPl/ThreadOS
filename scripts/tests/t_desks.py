@@ -35,7 +35,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 from ptest import near as ptest_near
 
-# The cascade: the first application window is slot 2, at (94,54)
+# The cascade keeps the familiar first application position (94,54).
 WX, WY = 94, 54
 
 
@@ -109,7 +109,7 @@ def main():
             check("the clock runs on the first desktop ('%s')" % first,
                   first.count(":") == 2 and "?" not in first)
             check("and it has its tile in the dock",
-                  q.dock_windows() == 3)
+                  q.dock_windows() == 1)
 
             # --- away, to the second ------------------------------------
             q.sendkey("ctrl-alt-right")
@@ -119,7 +119,7 @@ def main():
                   pager(at, w) == [False, True, False, False])
             check("the clock is not here - not on the screen",
                   not clock_here(at))
-            check("nor in the dock (the kernel's windows stayed too)",
+            check("nor in the dock",
                   q.dock_windows() == 0)
 
             # A window of its own over here, and it is the only one
@@ -130,7 +130,6 @@ def main():
             w, h, at = q.screen_raw()
             check("a new window opens where you are looking",
                   q.dock_windows() == 1)
-            # (in the next slot of the cascade: the clock holds slot 2)
             tx, ty = cascade(3, TERM_W + 2, TERM_H + TITLE_H + 2)
             check("and it is a terminal (its prompt: %s)"
                   % q.term_rows(tx + 1, ty + CONTENT_DY)[-1:],
@@ -144,7 +143,7 @@ def main():
             check("and back to the first",
                   pager(at, w) == [True, False, False, False])
             check("the clock waited where it was left",
-                  q.dock_windows() == 3 and clock_here(at))
+                  q.dock_windows() == 1 and clock_here(at))
             check("and the terminal stayed on the second",
                   q.term_rows(tx + 1, ty + CONTENT_DY)[-1:] != ["/>"])
 
@@ -198,9 +197,9 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("and the first desktop has its kernel windows back",
+            check("and the first desktop has its clock back",
                   pager(at, w) == [True, False, False, False] and
-                  q.dock_windows() == 2)
+                  q.dock_windows() == 1)
         finally:
             q.close()
     finally:

@@ -357,6 +357,26 @@ static int ensure_home(const struct account *a)
     }
     if (fs_set_owner(slot, a->uid) < 0)
         goto fail;
+    static const char *const home_dirs[] = {"Desktop", ".Trash"};
+    for (int i = 0; i < (int)(sizeof(home_dirs) / sizeof(home_dirs[0])); i++) {
+        char child[48];
+        int p = 0;
+        while (path[p] && p < (int)sizeof(child) - 2) {
+            child[p] = path[p];
+            p++;
+        }
+        child[p++] = '/';
+        for (int j = 0; home_dirs[i][j] && p < (int)sizeof(child) - 1; j++)
+            child[p++] = home_dirs[i][j];
+        child[p] = '\0';
+        if (fs_chdir(FS_ROOT, child, &slot) < 0) {
+            if (fs_mkdir(FS_ROOT, child) < 0 ||
+                fs_chdir(FS_ROOT, child, &slot) < 0)
+                goto fail;
+        }
+        if (fs_set_owner(slot, a->uid) < 0)
+            goto fail;
+    }
     set_current_level(old_level);
     set_current_uid(old_uid);
     return 0;
@@ -629,6 +649,7 @@ int user_login(const char *name, const char *password)
     set_current_cwd(home);
     set_shell_identity("shell", a->uid, a->level, home);
     set_shell_identity("main", a->uid, a->level, home);
+    set_shell_identity("desktop", a->uid, a->level, home);
     memcpy(current_name, a->name, sizeof(current_name));
     memcpy(current_display_name, a->display_name,
            sizeof(current_display_name));
@@ -646,6 +667,7 @@ void user_session_guest(void)
     set_current_cwd(FS_ROOT);
     set_shell_identity("shell", shell_uid, USER_PLAIN, FS_ROOT);
     set_shell_identity("main", shell_uid, USER_PLAIN, FS_ROOT);
+    set_shell_identity("desktop", shell_uid, USER_PLAIN, FS_ROOT);
 }
 
 int user_account_count(void)

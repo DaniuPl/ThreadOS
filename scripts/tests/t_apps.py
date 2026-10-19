@@ -13,9 +13,8 @@ does not come from the system:
   is in, today on the accent in the column of its weekday, the arrows
   going to the next month, and a picked day named
 
-  paint to its own file: a stroke in a colour lands on the canvas, and
-  what is saved is a BMP the picture viewer opens at the canvas's size,
-  with the stroke in it
+  paint to its own files: a stroke in a colour lands on the canvas, a BMP
+  opens in the picture viewer, and the drawing can be applied as wallpaper
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -245,7 +244,29 @@ def paint(q):
             break
     check("Save says so in a notification (%s)" % (said,),
           said[0] == "Paint" and "drawing.bmp" in said[1])
+
+    wall_x = define(P, "WALL_X") + define(P, "WALL_W") // 2
+    q.click(cx + wall_x, cy + define(P, "BTN_Y") + define(P, "BTN_H") // 2)
+    q.type_line("thread")
+    wall_note = ("", "")
+    for _ in range(12):
+        time.sleep(0.5)
+        wall_note = card(q, 0)
+        if wall_note[0] == "Paint" and "wallpaper" in wall_note[1]:
+            break
+    check("Paint can apply the drawing as the desktop wallpaper (%s)"
+          % (wall_note,),
+          wall_note[0] == "Paint" and "now the desktop wallpaper" in wall_note[1])
+
     close(q, cx, cy, cw)
+    time.sleep(1.5)
+    sw, sh, at = q.screen_raw()
+    wx, wy = sw * 50 // 160, sh * 32 // 120
+    pixel = at(wx, wy)
+    check("the exported wallpaper contains the painted red stroke (%s)"
+          % (pixel,),
+          pixel[0] > 200 and pixel[1] < 120 and pixel[2] < 120)
+
     q.click_desktop()
     time.sleep(0.5)
     q.type_line("run gimg drawing.bmp")

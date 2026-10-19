@@ -11,10 +11,10 @@ give a window with a palette drawn in it, clicking in the window is to
 leave a marker in it (that is, the event reached the process and came
 back as a drawing), and keys are to reach the window with focus.
 
-The application windows follow in turn behind the two kernel windows:
-the first stands at (94,54), each next one twelve pixels lower and to
-the right. The content area starts a pixel to the right and a title bar
-lower. All the screen coordinates below come from that one rule.
+The application windows start at (70,30), each next one twelve pixels
+lower and to the right. The content area starts a pixel to the right
+and a title bar lower. All the screen coordinates below come from that
+one rule.
 """
 
 import os
@@ -28,8 +28,7 @@ from ptest import check, summary
 
 # The compositor places the windows in a cascade: slot i at
 # (70+12i, 30+12i), and the content a pixel to the right and a title bar
-# (10 px) lower. The first two slots are taken by the kernel's windows,
-# so the applications start from the third.
+# (10 px) lower.
 def body_text(slot):
     return 70 + 12 * slot + 1, 30 + 12 * slot + CONTENT_DY
 

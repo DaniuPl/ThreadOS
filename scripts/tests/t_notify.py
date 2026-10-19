@@ -166,7 +166,7 @@ def main():
                   % rows, rows[:1] == [("Clock", "Program", True)])
             q.sendkey("ret")
             time.sleep(3)
-            check("Enter starts the program", q.dock_windows() == 4)
+            check("Enter starts the program", q.dock_windows() == 2)
             w, h, at = q.screen_raw()
             check("and the search is gone", typed(q) == "")
 

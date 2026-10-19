@@ -101,7 +101,7 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3 of the cascade; it opens on General, whose first
+            # Slot 1 of the cascade; it opens on General, whose first
             # setting is the machine's name, in a field
             sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2)
             SX, SY = sx + 1, sy + CONTENT_DY

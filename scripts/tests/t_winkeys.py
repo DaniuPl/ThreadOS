@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: Alt+F4 and the menu under the right button.
+"""ThreadOS smoke test: Alt+F4 and distinct desktop context actions.
 
 Two gestures that every system a person has used has, and this one did
 not:
@@ -12,18 +12,16 @@ not:
   [x] does: the application is TOLD and ends itself, rather than having
   its window pulled out from under it.
 
-  THE RIGHT BUTTON on empty desktop opens the launch menu where the
-  pointer is. It is the same list as the mark on the bar opens, because a
-  second list would be a second thing to learn - only it comes to the
-  hand instead of the hand going to the corner. On a window the right
-  button opens nothing (a window's own menu is the window's business)
-  and closes a menu that was open.
+  THE RIGHT BUTTON on empty desktop opens a separate menu for creating
+  folders and files and refreshing the desktop. The mark on the bar
+  remains the application launcher. On a window the right button opens
+  no desktop menu, and on a dock tile it still opens that tile's actions.
 
-The assertions are about what a person would notice: the program
-started from the menu really runs (it draws), the menu stands at the
-pointer and not under the mark on the bar, it never hangs off the screen or
-over the dock, Alt+F4 ends the program with its own exit code, and
-the window goes from the screen AND from the dock.
+The assertions are about what a person would notice: the desktop menu
+offers its own actions at the pointer, the bar menu still starts a
+program that really runs, neither menu hangs off the screen, Alt+F4
+ends the program with its own exit code, and the window goes from the
+screen AND from the dock.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -41,12 +39,12 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 from ptest import near as ptest_near
 
-# The cascade: slot i sits at (70+12i, 30+12i), and applications start
-# at slot 2 because the kernel's own two windows hold 0 and 1.
+# Applications keep the familiar cascade offset despite having no
+# placeholder windows ahead of them.
 WX, WY = 94, 54
 
-# Inside the settings, past both kernel windows - and right of their
-# rows, which stop six pixels short of the edge: their background
+# Inside the settings, right of its rows, which stop six pixels short
+# of the edge: its background
 P_APP = (WX + 1 + GSET_W - 3, 200)
 
 
@@ -115,10 +113,15 @@ def menu_height():
             len(SESSION_ITEMS) * SESS_ROW)
 
 
-def menu_place(mx, my):
-    """Where the menu opened at the pointer really stands: never past
-    the right edge, never over the dock (menu_at())"""
-    hgt = menu_height()
+def context_entry(q, mx, my, i):
+    top = my + MENU_PAD + i * MENU_ROW
+    return q.read_ui(mx + 14, ui_font_baseline_in(MENU_PX, top, MENU_ROW),
+                     width=MENU_W - 24, px=MENU_PX,
+                     fg=theme("dark")["menu_text"])
+
+
+def context_place(mx, my):
+    hgt = 2 * MENU_PAD + 3 * MENU_ROW
     x = min(mx, SCREEN_W - MENU_W)
     y = min(my, work_bottom() - hgt)
     return max(x, 0), max(y, BAR_H)
@@ -252,8 +255,7 @@ def main():
             check("and it went from the dock (%d -> %d windows)"
                   % (before, after), after == before - 1)
 
-            # Alt+F4 with nothing focused closes nothing - the kernel's
-            # own windows are still there
+            # Alt+F4 with nothing focused closes nothing.
             q.sendkey("alt-f4")
             time.sleep(2)
             w, h, at = q.screen_raw()
@@ -264,7 +266,7 @@ def main():
             # Every system does this, and a person who has used one
             # tries it here in the first minute: the window fills the
             # screen, and does it again the other way round.
-            q.launch_dock(6, n_w=2)         # the "Settings" tile
+            q.launch_dock(6, n_w=0)         # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 200)
             time.sleep(1.5)
@@ -303,8 +305,7 @@ def main():
             check("after the close the dock is as it was",
                   q.dock_windows() == after)
 
-            # --- the menu under the right button ------------------------
-            # (high enough for the whole menu to hang below the pointer)
+            # --- the desktop's own right-button menu -------------------
             MX, MY = 300, 28
             q.mouse_goto(MX, MY)
             time.sleep(0.5)
@@ -315,31 +316,81 @@ def main():
             time.sleep(1)
             w, h, at = q.screen_raw()
 
-            # (the first entry is lit under the pointer - read the next two)
-            got = menu_entry(q, MX, MY, 1), menu_entry(q, MX, MY, 2)
-            check("the right button on the desktop opened the menu UNDER THE "
-                  "POINTER (%s)" % (got,), got == ("Clock", "Files"))
-            # The pointer sits on the first entry, so that entry wears
-            # the accent colour - a menu that does not answer the
-            # pointer is a list of words that happens to be clickable
+            got = context_entry(q, MX, MY, 0), context_entry(q, MX, MY, 1)
+            check("the desktop right-click menu has creation actions (%s)"
+                  % (got,), got == ("New Folder", "New Text File"))
+            check("and a refresh action",
+                  context_entry(q, MX, MY, 2) == "Refresh")
             e0 = MY + MENU_PAD + MENU_ROW // 2
             check("the entry under the pointer is highlighted",
                   is_accent(at(MX + MENU_W - 16, e0)))
             check("and a further one is not",
                   not is_accent(at(MX + MENU_W - 16, e0 + 2 * MENU_ROW)))
-            # It came to the hand: nothing opened under the mark on the
-            # bar, where the menu stands when the mark is what opened it
+            # The start menu remains separate and closed.
             check("and nothing hangs from the mark on the bar",
                   menu_entry(q, MENU_X0, MENU_Y, 0) == "")
 
-            # --- a click on an entry starts the program -----------------
-            # The second entry is the clock, and what it draws is a
-            # TIME - so a window that merely appeared and a program
-            # that actually runs are not the same assertion. We read
-            # the digits with the font the kernel drew them with;
-            # counting dark pixels would count the kernel's own window
-            # underneath, whose button carries dark text too.
-            q.mouse_goto(MX + 60, MY + MENU_PAD + MENU_ROW + MENU_ROW // 2)
+            # Refresh closes the context menu without launching a program.
+            q.mouse_goto(MX + 60, MY + MENU_PAD + 2 * MENU_ROW +
+                         MENU_ROW // 2)
+            time.sleep(0.5)
+            q.mouse_click()
+            time.sleep(1.5)
+            check("Refresh closes the desktop menu",
+                  context_entry(q, MX, MY, 0) == "")
+
+            # The two creation entries must perform their work, not just
+            # appear in the menu. Each opens Files on the Desktop folder.
+            def choose_context(row):
+                q.mouse_goto(MX, MY)
+                time.sleep(0.4)
+                q.mouse_right_click()
+                time.sleep(0.5)
+                q.click(MX + 60,
+                        MY + MENU_PAD + row * MENU_ROW + MENU_ROW // 2)
+
+            baseline = q.dock_windows()
+            choose_context(0)
+            deadline = time.time() + 8
+            desktop_rows = []
+            while time.time() < deadline:
+                if q.dock_windows() > baseline:
+                    desktop_rows = [
+                        name for name, _, _ in
+                        q.gfiles_rows(WX + 1, WY + CONTENT_DY)]
+                    if "New Folder" in desktop_rows:
+                        break
+                time.sleep(0.3)
+            check("New Folder creates an item in Desktop (%s)" %
+                  desktop_rows, "New Folder" in desktop_rows)
+            q.sendkey("alt-f4")
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows() != baseline:
+                time.sleep(0.3)
+
+            choose_context(1)
+            deadline = time.time() + 8
+            desktop_rows = []
+            while time.time() < deadline:
+                if q.dock_windows() > baseline:
+                    desktop_rows = [
+                        name for name, _, _ in
+                        q.gfiles_rows(WX + 1, WY + CONTENT_DY)]
+                    if "New Text File.txt" in desktop_rows:
+                        break
+                time.sleep(0.3)
+            check("New Text File creates the requested Desktop file (%s)" %
+                  desktop_rows, "New Text File.txt" in desktop_rows and
+                  "New Folder" in desktop_rows)
+            q.sendkey("alt-f4")
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows() != baseline:
+                time.sleep(0.3)
+
+            # The application launcher is a different menu and still runs apps.
+            q.open_menu()
+            q.mouse_goto(MENU_X0 + 60,
+                         MENU_Y + MENU_PAD + MENU_ROW + MENU_ROW // 2)
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(4)
@@ -366,24 +417,25 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("the right button on a window does not open the menu",
-                  menu_entry(q, *menu_place(WX + 40, WY + 20), 0) == "")
+                  context_entry(q, *context_place(WX + 40, WY + 20), 0) == "")
             check("and it closes the one that was open",
-                  menu_entry(q, *menu_place(500, 350), 0) == "")
+                  context_entry(q, *context_place(500, 350), 0) == "")
 
             # --- the menu never hangs off the screen ----------------------
             # Clicked in the corner it slides back: to the left of the
             # right-hand edge, and up off the dock
-            q.mouse_goto(620, 400)
+            edge_x, edge_y = SCREEN_W - 8, work_bottom() - 5
+            q.mouse_goto(edge_x, edge_y)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            mx, my = menu_place(620, 400)
-            got = menu_entry(q, mx, my, 0), menu_entry(q, mx, my, 6)
-            check("the menu at the edge moved left and up, and is whole there "
-                  "(%s at %d,%d)" % (got, mx, my), got == ("App", "Mixer"))
+            mx, my = context_place(edge_x, edge_y)
+            got = context_entry(q, mx, my, 0), context_entry(q, mx, my, 2)
+            check("the context menu at the edge moved left and up (%s at %d,%d)"
+                  % (got, mx, my), got == ("New Folder", "Refresh"))
             check("it does not go past the right edge, nor over the dock",
                   mx + MENU_W <= SCREEN_W and
-                  my + menu_height() <= work_bottom())
+                  my + 2 * MENU_PAD + 3 * MENU_ROW <= work_bottom())
             q.mouse_goto(420, 300)
             q.mouse_click()                    # away with it
             time.sleep(1)

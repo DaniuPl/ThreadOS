@@ -5669,3 +5669,26 @@ works and is checked by `make test`.
       marker, and the update test verifies a signed release cannot be
       written during a GRUB Live boot. Linux build and QEMU verification
       remain to be run.
+
+- [ ] **Remove desktop placeholders and use Paint drawings as wallpaper.**
+      The desktop no longer opens pretend Terminal and Files windows, and
+      file, memory and process-size displays use IEC units. Paint can export
+      its canvas as the desktop's RGB wallpaper format; Settings can also
+      select a wallpaper file, and the compositor reloads it while running.
+      The application test checks the exported drawing behind the desktop.
+      Linux builds and QEMU verification remain to be run.
+
+- [ ] **Add desktop shortcuts, Trash, and desktop actions.** Each profile
+      receives a Desktop folder and a private Trash. Home, Files, and Trash
+      shortcuts are shown on the desktop; files and folders created in
+      Desktop appear there and open through Files. The compositor follows
+      the active account's filesystem identity across sign-in and logout, so
+      it can enumerate only that profile's Desktop. Removing an item moves
+      it to Trash with its original path recorded, where it can be restored
+      or permanently emptied. The desktop right-click menu has separate New
+      Folder, New Text File, and Refresh actions, and the menu bar hides
+      after three seconds of inactivity until the pointer reaches the top
+      edge. Files and both desktop-kernel tests now cover per-profile
+      Desktop enumeration after sign-in; desktop-menu and bar tests cover
+      the new actions and hiding behavior. Per the user's request, builds
+      and QEMU tests were not run.

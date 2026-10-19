@@ -10,6 +10,7 @@
  */
 
 #include "usys64.h"
+#include "ubytes.h"
 
 static char out[128];
 
@@ -51,8 +52,10 @@ void _start(void)
             n = put(n, "/  (directory)");
         } else {
             n = put(n, "  (");
-            n = putn(n, entry.size);
-            n = put(n, " B)");
+            char size[24];
+            format_bytes(entry.size, size, sizeof(size));
+            n = put(n, size);
+            n = put(n, ")");
         }
         n = put(n, "\n");
         out[n] = 0;

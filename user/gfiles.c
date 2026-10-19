@@ -31,6 +31,7 @@
 
 #include "uapi.h"
 #include "ugui.h"
+#include "ubytes.h"
 
 #define W0 500
 #define H0 280
@@ -89,6 +90,18 @@ static char answer[NAME_LEN];
 static int alen;
 static char note[48];
 static char here[PATH_LEN];   /* the directory we are looking at */
+static char home_dir[PATH_LEN];
+static char trash_dir[PATH_LEN];
+static char trash_index[PATH_LEN];
+static int in_trash;
+static int empty_asked;
+
+#define TRASH_MAX 64
+struct trash_record {
+    char name[NAME_LEN];
+    char path[PATH_LEN];
+};
+static struct trash_record trash_records[TRASH_MAX];
 
 /* What Cut or Copy picked up: the whole path, because the paste
    happens somewhere else */
@@ -209,6 +222,25 @@ static int join(char *out, const char *dir, const char *name)
             return 0;
         out[p++] = name[i];
     }
+    out[p] = '\0';
+    return 1;
+}
+
+static int path_is_home(const char *path, char *out)
+{
+    static const char prefix[] = "/home/";
+    int i = 0;
+    while (prefix[i] && path[i] == prefix[i])
+        i++;
+    if (prefix[i])
+        return 0;
+    int p = i;
+    while (path[p] && path[p] != '/' && p < PATH_LEN - 1)
+        p++;
+    if (p == i || p >= PATH_LEN - 1)
+        return 0;
+    for (int j = 0; j < p; j++)
+        out[j] = path[j];
     out[p] = '\0';
     return 1;
 }
@@ -409,10 +441,13 @@ static void reread(void)
 {
     read_show_hidden();
     where_am_i();                      /* what hidden() compares with */
+    in_trash = trash_dir[0] && same(here, trash_dir);
     count = 0;
     for (int i = 0; i < 128 && count < MAXF; i++) {
         if (read_entry(i, &items[count]) != 0)
             break;
+        if (in_trash && same(items[count].name, ".index"))
+            continue;
         if (!hidden(here, items[count].name))
             count++;
     }
@@ -547,9 +582,145 @@ static int folder_empty(const char *name)
     return empty;
 }
 
-/* Deleting asks first. A file manager that throws a file away on one
-   click is a file manager one is afraid to use - and the second click
-   is an answer, not a repetition. */
+static int remove_children(int trash_root)
+{
+    for (;;) {
+        struct entry e;
+        int index = 0;
+        for (;;) {
+            if (read_entry(index++, &e) != 0)
+                return 0;
+            if (!trash_root || !same(e.name, ".index"))
+                break;
+        }
+        if (e.is_dir) {
+            if (sys_chdir(e.name) < 0 || remove_children(0) < 0)
+                return -1;
+            if (sys_chdir("..") < 0)
+                return -1;
+        }
+        if (sys_unlink(e.name) < 0)
+            return -1;
+    }
+}
+
+static void empty_trash(void)
+{
+    if (!ask.answer) {
+        ecopy(note, "kept", sizeof(note));
+        return;
+    }
+    if (sys_chdir(trash_dir) < 0 || remove_children(1) < 0) {
+        sys_chdir(here);
+        ecopy(note, "some items could not be removed", sizeof(note));
+        return;
+    }
+    sys_chdir(here);
+    if (trash_map_save(0) < 0) {
+        ecopy(note, "Trash was emptied, but its index could not be saved",
+              sizeof(note));
+        return;
+    }
+    chosen = -1;
+    reread();
+    ecopy(note, "Trash emptied", sizeof(note));
+}
+
+static int move_to_trash(int row)
+{
+    if (!home_dir[0] || !trash_dir[0])
+        return -1;
+    int n = trash_map_load();
+    if (n >= TRASH_MAX)
+        return -1;
+    char original[PATH_LEN], target[PATH_LEN], name[NAME_LEN];
+    if (!join(original, here, items[row].name))
+        return -1;
+
+    if (sys_chdir(trash_dir) < 0)
+        return -1;
+    int unique = trash_unique_name(name, items[row].name);
+    if (sys_chdir(here) < 0)
+        return -1;
+    if (!unique || !join(target, trash_dir, name))
+        return -1;
+    if (sys_rename(items[row].name, target) < 0)
+        return -1;
+
+    ecopy(trash_records[n].name, name, sizeof(trash_records[n].name));
+    ecopy(trash_records[n].path, original, sizeof(trash_records[n].path));
+    if (trash_map_save(n + 1) < 0) {
+        sys_rename(target, original);
+        return -1;
+    }
+    return 0;
+}
+
+static void restore_chosen(void)
+{
+    if (!in_trash || chosen < 0 || chosen >= count)
+        return;
+    int n = trash_map_load();
+    int record = trash_map_find(n, items[chosen].name);
+    char original[PATH_LEN], parent[PATH_LEN], target[PATH_LEN];
+    if (record >= 0) {
+        ecopy(original, trash_records[record].path, sizeof(original));
+    } else if (!join(original, home_dir, items[chosen].name)) {
+        ecopy(note, "the original location is unknown", sizeof(note));
+        return;
+    }
+
+    const char *base = last_part(original);
+    int parent_len = (int)(base - original);
+    if (parent_len > 1)
+        parent_len--;
+    if (parent_len <= 0) {
+        ecopy(parent, "/", sizeof(parent));
+    } else {
+        if (parent_len >= (int)sizeof(parent)) {
+            ecopy(note, "the original path is too long", sizeof(note));
+            return;
+        }
+        memcpy(parent, original, (uint32_t)parent_len);
+        parent[parent_len] = '\0';
+    }
+    if (sys_chdir(parent) < 0) {
+        ecopy(note, "the original folder is unavailable", sizeof(note));
+        return;
+    }
+    char restored[NAME_LEN];
+    int unique = trash_unique_name(restored, base);
+    if (sys_chdir(trash_dir) < 0) {
+        sys_chdir(here);
+        ecopy(note, "Trash is unavailable", sizeof(note));
+        return;
+    }
+    if (!unique || !join(target, parent, restored)) {
+        ecopy(note, "cannot choose a name for the restored item", sizeof(note));
+        return;
+    }
+    char trashed[PATH_LEN];
+    if (!join(trashed, trash_dir, items[chosen].name) ||
+        sys_rename(items[chosen].name, target) < 0) {
+        ecopy(note, "the item could not be restored", sizeof(note));
+        return;
+    }
+    if (record >= 0) {
+        for (int i = record; i + 1 < n; i++)
+            trash_records[i] = trash_records[i + 1];
+        if (trash_map_save(n - 1) < 0) {
+            sys_rename(target, trashed);
+            ecopy(note, "the restore index could not be saved", sizeof(note));
+            return;
+        }
+    }
+    chosen = -1;
+    reread();
+    ecopy(note, "restored", sizeof(note));
+}
+
+/* Removing asks first. Outside Trash the answer moves an item there;
+   inside Trash it permanently deletes it. */
 static void delete_chosen(void)
 {
     if (chosen < 0 || chosen >= count) {
@@ -557,28 +728,37 @@ static void delete_chosen(void)
         return;
     }
     int dir = items[chosen].is_dir;
-    if (dir && !folder_empty(items[chosen].name)) {
+    if (in_trash && dir && !folder_empty(items[chosen].name)) {
         ecopy(note, "the folder is not empty - not removing it",
               sizeof(note));
         return;
     }
 
     int p = 0;
-    const char *q = dir ? "Remove the folder '" : "Remove '";
+    const char *q = in_trash
+                        ? (dir ? "Remove the folder '" : "Remove '")
+                        : (dir ? "Move the folder '" : "Move '");
     for (int i = 0; q[i]; i++)
         ask_line[p++] = q[i];
     for (int i = 0; items[chosen].name[i] && p < 52; i++)
         ask_line[p++] = items[chosen].name[i];
     ask_line[p++] = '\'';
-    ask_line[p++] = '?';
+    if (in_trash) {
+        ask_line[p++] = '?';
+    } else {
+        const char *end = "' to Trash?";
+        for (int i = 0; end[i] && p < (int)sizeof(ask_line) - 1; i++)
+            ask_line[p++] = end[i];
+    }
     ask_line[p] = '\0';
 
-    ug_ask(&ask, ask_line, dir ? "It is empty. This cannot be undone."
-                               : "This cannot be undone.", "Remove", "Keep");
+    ug_ask(&ask, ask_line,
+           in_trash ? "This cannot be undone."
+                    : "You can restore it from Trash.",
+           in_trash ? "Remove" : "Move", "Keep");
 }
 
-/* The answer. Only "Remove" removes anything - and that is the whole
-   point of asking. */
+/* Apply the explicit answer to the selected item. */
 static void delete_answered(void)
 {
     if (!ask.answer) {
@@ -587,14 +767,33 @@ static void delete_answered(void)
     }
     if (chosen < 0 || chosen >= count)
         return;
-    char gone[PATH_LEN];
-    join(gone, here, items[chosen].name);
-    if (sys_unlink(items[chosen].name) < 0) {
-        ecopy(note, "it cannot be removed", sizeof(note));
+    if (!in_trash) {
+        if (move_to_trash(chosen) < 0)
+            ecopy(note, "it could not be moved to Trash", sizeof(note));
+        else
+            ecopy(note, "moved to Trash", sizeof(note));
     } else {
-        ecopy(note, "removed", sizeof(note));
-        if (same(clip, gone))
-            clip[0] = '\0';            /* nothing left to paste */
+        char gone[PATH_LEN];
+        join(gone, here, items[chosen].name);
+        if (sys_unlink(items[chosen].name) < 0) {
+            ecopy(note, "it cannot be removed", sizeof(note));
+        } else {
+            int n = trash_map_load();
+            int record = trash_map_find(n, items[chosen].name);
+            if (record >= 0) {
+                for (int i = record; i + 1 < n; i++)
+                    trash_records[i] = trash_records[i + 1];
+                if (trash_map_save(n - 1) < 0)
+                    ecopy(note, "removed; Trash index could not be saved",
+                          sizeof(note));
+                else
+                    ecopy(note, "removed", sizeof(note));
+            } else {
+                ecopy(note, "removed", sizeof(note));
+            }
+            if (same(clip, gone))
+                clip[0] = '\0';
+        }
     }
     chosen = -1;
     reread();
@@ -628,6 +827,24 @@ static void make_folder(const char *what)
     ecopy(note, "folder made", sizeof(note));
     reread();
     pick(what);
+}
+
+static void make_desktop_file(void)
+{
+    char name[NAME_LEN];
+    if (!free_name(name, "New Text File.txt")) {
+        ecopy(note, "cannot choose a new file name", sizeof(note));
+        return;
+    }
+    int fd = (int)sys_open(name, O_WRITE | O_CREATE);
+    if (fd < 0) {
+        ecopy(note, "cannot create the file", sizeof(note));
+        return;
+    }
+    sys_close(fd);
+    ecopy(note, "text file made", sizeof(note));
+    reread();
+    pick(name);
 }
 
 static void go_up(void)
@@ -692,6 +909,103 @@ static int free_name(char *out, const char *name)
             out[p++] = name[i];
         out[p] = '\0';
         if (!listed(out))
+            return 1;
+    }
+    return 0;
+}
+
+static int trash_map_load(void)
+{
+    int fd = (int)sys_open(trash_index, O_READ);
+    if (fd < 0)
+        return 0;
+    int bytes = 0;
+    while (bytes < (int)sizeof(trash_records)) {
+        int n = (int)sys_read(fd, (char *)trash_records + bytes,
+                              (uint32_t)sizeof(trash_records) - (uint32_t)bytes);
+        if (n <= 0)
+            break;
+        bytes += n;
+    }
+    sys_close(fd);
+    int read_count = bytes / (int)sizeof(trash_records[0]);
+    int kept = 0;
+    for (int i = 0; i < read_count; i++) {
+        if (!trash_records[i].name[NAME_LEN - 1] &&
+            !trash_records[i].path[PATH_LEN - 1] &&
+            trash_records[i].name[0] && trash_records[i].path[0] == '/') {
+            if (kept != i)
+                trash_records[kept] = trash_records[i];
+            kept++;
+        }
+    }
+    return kept;
+}
+
+static int trash_map_save(int count)
+{
+    int fd = (int)sys_open(trash_index, O_WRITE | O_CREATE | O_TRUNC);
+    if (fd < 0)
+        return -1;
+    int bytes = count * (int)sizeof(trash_records[0]);
+    int written = bytes ? (int)sys_write(fd, trash_records, (uint32_t)bytes)
+                        : 0;
+    sys_close(fd);
+    return written == bytes ? 0 : -1;
+}
+
+static int trash_map_find(int count, const char *name)
+{
+    for (int i = 0; i < count; i++)
+        if (same(trash_records[i].name, name))
+            return i;
+    return -1;
+}
+
+static int trash_name_exists(const char *name)
+{
+    struct entry e;
+    for (int i = 0; i < 128 && read_entry(i, &e) == 0; i++)
+        if (same(e.name, name))
+            return 1;
+    return 0;
+}
+
+static int trash_unique_name(char *out, const char *name)
+{
+    if (!trash_name_exists(name)) {
+        ecopy(out, name, NAME_LEN);
+        return 1;
+    }
+    int ln = slen(name), dot = ln;
+    for (int i = ln - 1; i > 0; i--)
+        if (name[i] == '.') {
+            dot = i;
+            break;
+        }
+    for (int k = 2; k < 100; k++) {
+        char digits[8], suffix[8];
+        int dn = num(digits, (unsigned)k);
+        suffix[0] = '-';
+        for (int i = 0; i < dn; i++)
+            suffix[i + 1] = digits[i];
+        int sn = dn + 1;
+        suffix[sn] = '\0';
+        int ext = ln - dot;
+        int base = NAME_LEN - 1 - sn - ext;
+        if (base < 1)
+            base = 1;
+        if (base > dot)
+            base = dot;
+        int p = 0;
+        for (int i = 0; i < base; i++)
+            out[p++] = name[i];
+        for (int i = 0; i < sn; i++)
+            out[p++] = suffix[i];
+        for (int i = dot; i < ln && p < NAME_LEN - 1; i++)
+            out[p++] = name[i];
+        out[p] = '\0';
+        if (!trash_name_exists(out))
             return 1;
     }
     return 0;
@@ -875,21 +1189,26 @@ static void draw(void)
     ud_text(win, 12, ud_baseline(0, HEAD_H, 13), head, l.text, UD_BOLD, 13);
 
     int by = (HEAD_H - BTN_H) / 2;
-    ug_draw_button(win, &l, name_x(), by, NAME_W, BTN_H, "Rename",
+    ug_draw_button(win, &l, name_x(), by, NAME_W, BTN_H,
+                   in_trash ? "Restore" : "Rename",
                    asking == ASK_RENAME ? l.danger : l.row,
                    asking == ASK_RENAME ? l.on_accent : l.text);
     ug_draw_button(win, &l, edit_x(), by, EDIT_W, BTN_H, "Open", l.accent,
                    l.on_accent);
-    ug_draw_button(win, &l, del_x(), by, DEL_W, BTN_H, "Remove",
+    ug_draw_button(win, &l, del_x(), by, DEL_W, BTN_H,
+                   in_trash ? "Delete" : "Trash",
                    ask.on ? l.danger : l.row, ask.on ? l.on_accent : l.danger);
     ud_fill(win, 0, HEAD_H, cw, 1, l.line);
 
     /* The tools, and what is waiting to be pasted */
     int ty = HEAD_H + 1 + (TOOL_H - 1 - BTN_H) / 2;
     for (int t = 0; t < TOOLS; t++) {
-        int lit = (t == TOOL_NEW && asking == ASK_FOLDER) ||
+        int lit = (t == TOOL_NEW &&
+                   (asking == ASK_FOLDER || (in_trash && empty_asked))) ||
                   (t == TOOL_PASTE && clip[0]);
-        ug_draw_button(win, &l, tool_x(t), ty, tool_w[t], BTN_H, tool_name[t],
+        const char *label = t == TOOL_NEW && in_trash ? "Empty Trash"
+                                                       : tool_name[t];
+        ug_draw_button(win, &l, tool_x(t), ty, tool_w[t], BTN_H, label,
                        lit ? l.accent : l.row, lit ? l.on_accent : l.text);
     }
     if (clip[0]) {
@@ -928,11 +1247,8 @@ static void draw(void)
         if (items[idx].is_dir) {
             ud_text_right(win, cw - 14, base, "folder", quiet, UD_SANS, UD_PX);
         } else {
-            char sz[16];
-            int n = num(sz, items[idx].size);
-            sz[n++] = ' ';
-            sz[n++] = 'B';
-            sz[n] = '\0';
+            char sz[24];
+            format_bytes(items[idx].size, sz, sizeof(sz));
             ud_text_right(win, cw - 14, base, sz, quiet, UD_SANS, UD_PX);
         }
     }
@@ -996,8 +1312,12 @@ static void clicked(int x, int y)
             delete_chosen();
         else if (x >= edit_x())
             open_chosen();
-        else if (x >= name_x())
-            ask_for(ASK_RENAME);
+        else if (x >= name_x()) {
+            if (in_trash)
+                restore_chosen();
+            else
+                ask_for(ASK_RENAME);
+        }
         return;
     }
     if (y < body) {
@@ -1006,8 +1326,16 @@ static void clicked(int x, int y)
                 continue;
             if (t == TOOL_UP)
                 go_up();
-            else if (t == TOOL_NEW)
-                ask_for(ASK_FOLDER);
+            else if (t == TOOL_NEW) {
+                if (in_trash) {
+                    ug_ask(&ask, "Empty Trash permanently?",
+                           "Everything in Trash will be removed.",
+                           "Empty Trash", "Keep");
+                    empty_asked = 1;
+                } else {
+                    ask_for(ASK_FOLDER);
+                }
+            }
             else if (t == TOOL_CUT)
                 take(1);
             else if (t == TOOL_COPY)
@@ -1054,7 +1382,7 @@ static void clicked(int x, int y)
     }
 }
 
-void _start(void)
+void _start(int argc, char **argv)
 {
     int win = (int)win_create(W0, H0, "Files");
     if (win < 0)
@@ -1062,8 +1390,75 @@ void _start(void)
     winid = win;
 
     where_am_i();
+    char initial[PATH_LEN];
+    ecopy(initial, here, sizeof(initial));
+    if (!path_is_home(initial, home_dir)) {
+        for (int i = 1; i < argc; i++)
+            if (path_is_home(argv[i], home_dir))
+                break;
+    }
+    int arg = 1;
+    if (argc > 3 && same(argv[1], "--home")) {
+        path_is_home(argv[2], home_dir);
+        arg = 3;
+    }
+    if (home_dir[0]) {
+        join(trash_dir, home_dir, ".Trash");
+        join(trash_index, trash_dir, ".index");
+        if (sys_chdir(trash_dir) < 0) {
+            if (sys_mkdir(trash_dir) < 0 && sys_chdir(trash_dir) < 0)
+                ecopy(note, "Trash is unavailable", sizeof(note));
+        }
+        sys_chdir(initial);
+    }
+    int desktop_action = 0;
+    int open_index = -1;
+    const char *startup_dir = (const char *)0;
+    if (arg + 1 < argc && same(argv[arg], "--new-folder")) {
+        desktop_action = 1;
+        startup_dir = argv[arg + 1];
+    } else if (arg + 1 < argc && same(argv[arg], "--new-file")) {
+        desktop_action = 2;
+        startup_dir = argv[arg + 1];
+    } else if (arg + 2 < argc && same(argv[arg], "--open-index")) {
+        unsigned value = 0;
+        int digits = 0, valid = 1;
+        for (int i = 0; argv[arg + 1][i]; i++) {
+            char c = argv[arg + 1][i];
+            if (c < '0' || c > '9' ||
+                value > (0x7FFFFFFFu - (unsigned)(c - '0')) / 10u) {
+                valid = 0;
+                break;
+            }
+            value = value * 10u + (unsigned)(c - '0');
+            digits++;
+        }
+        if (valid && digits)
+            open_index = (int)value;
+        startup_dir = argv[arg + 2];
+    } else if (arg < argc && argv[arg][0] != '-') {
+        startup_dir = argv[arg];
+    }
+    if (startup_dir && sys_chdir(startup_dir) < 0)
+        ecopy(note, "cannot open the requested folder", sizeof(note));
+    where_am_i();
     open_the_way();
     reread();
+    if (desktop_action == 1) {
+        char name[NAME_LEN];
+        if (free_name(name, "New Folder"))
+            make_folder(name);
+        else
+            ecopy(note, "cannot choose a new folder name", sizeof(note));
+    } else if (desktop_action == 2)
+        make_desktop_file();
+    else if (open_index >= 0) {
+        struct entry item;
+        if (read_entry(open_index, &item) == 0 && pick(item.name) >= 0)
+            open_chosen();
+        else
+            ecopy(note, "that desktop item is no longer there", sizeof(note));
+    }
     draw();
 
     int ticks = 0;
@@ -1080,8 +1475,14 @@ void _start(void)
                 int what = ug_modal_event(&ui, &ask, &ev);
                 if (what == UG_CLOSED)
                     sys_exit(0);
-                if (what == UG_PRESSED)
-                    delete_answered();
+                if (what == UG_PRESSED) {
+                    if (empty_asked) {
+                        empty_asked = 0;
+                        empty_trash();
+                    } else {
+                        delete_answered();
+                    }
+                }
                 again = 1;
                 continue;
             }

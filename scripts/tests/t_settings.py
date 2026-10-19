@@ -185,6 +185,24 @@ def main():
             check("and the session is a plain user's ('%s')" % about[5],
                   about[5] == "user")
 
+            # --- regional date, time and number formats ------------------
+            head = section(q, "Region")
+            check("regional formats have their own section ('%s')" % head,
+                  head == "Region")
+            for name, row, col, value in (
+                    ("datefmt", 0, 2, "iso"),
+                    ("timefmt", 1, 1, "12h"),
+                    ("numfmt", 2, 1, "comma")):
+                section(q, "Region")
+                x, y = gset_chip(row, col)
+                q.click(CX + x, CY + y)
+                q.mouse_goto(*AWAY)
+                time.sleep(1.5)
+                password(q, "thread")
+                got = kernel_says(q, name)
+                check("the Region control saves %s = %s (%s)"
+                      % (name, value, got), got == value)
+
             # --- the theme: refused, then taken ---------------------------
             section(q, "Appearance")
             light = gset_chip(0, 1)

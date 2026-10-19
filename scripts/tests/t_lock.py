@@ -67,15 +67,14 @@ def main():
             q.mouse_home()
             q.mouse_goto(600, 300)
             time.sleep(1)
-            check("before: the kernel's window is on the screen",
-                  q.window_title(40, 60, 122) != "")
+            check("the desktop starts without placeholder windows",
+                  q.dock_windows() == 0)
 
             q.sendkey("ctrl-alt-l")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("Ctrl+Alt+L locks: the window is gone from the screen",
-                  q.window_title(40, 60, 122) == "")
-            check("and so is the dock", q.dock_windows() == 0)
+            check("Ctrl+Alt+L locks the desktop",
+                  "to unlock" in lock_says(q))
             got = lock_time(q)
             check("the time is there, big ('%s', the bar said %s)"
                   % (got, RTC_BASE[11:16]),
@@ -94,29 +93,22 @@ def main():
             check("it was taken for a password, and a wrong one ('%s')"
                   % said, "Wrong password" in said)
 
-            # A click on where the window was reaches nothing
-            q.click(80, 70)
-            time.sleep(1)
-            check("a click reaches nothing behind it",
-                  q.window_title(40, 60, 122) == "")
-
             typed(q, "thread\n")
             time.sleep(2)
             q.mouse_goto(600, 300)
             time.sleep(1)
-            check("the password opens it: the window is back",
-                  q.window_title(40, 60, 122) != "")
-            check("and the dock", q.dock_windows() == 2)
+            check("the password opens the desktop",
+                  lock_says(q) == "" and q.dock_windows() == 0)
 
             # And the shell's own command does the same
             q.type_line("lock")
             time.sleep(1.5)
             check("'lock' in the shell locks it too",
-                  q.window_title(40, 60, 122) == "")
+                  "to unlock" in lock_says(q))
             typed(q, "thread\n")
             time.sleep(2)
             check("and the password opens it",
-                  q.window_title(40, 60, 122) != "")
+                  lock_says(q) == "")
         finally:
             q.close()
     finally:

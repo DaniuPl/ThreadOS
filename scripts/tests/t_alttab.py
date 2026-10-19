@@ -11,9 +11,9 @@ Now Alt+Tab hands the focus to the next window and brings it to the
 top. The order is the order of the slots, which is the order of the
 windows' tiles in the dock - so pressing it twice takes you where
 looking at the dock says it will. Minimised windows are skipped, because a focus
-you cannot see is a keyboard typing into nowhere, and so are the
-kernel's own windows, which have no application behind them to take a
-key.
+you cannot see is a keyboard typing into nowhere. Only application
+windows participate in the switch, so every focus has somewhere to
+send keys.
 
 The assertions are about the two things that make it worth having: the
 window that takes the focus comes to the TOP (its title bar whole, not
@@ -35,8 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-# The cascade: slot i sits at (70+12i, 30+12i). Slots 0 and 1 are the
-# kernel's own windows, so applications start at slot 2.
+# The cascade: slot i sits at (70+12i, 30+12i).
 def slot_xy(i):
     return 70 + 12 * i, 30 + 12 * i
 
@@ -74,28 +73,27 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            # Three applications, in this order: the terminal (slot 2),
-            # the clock (slot 3), the settings (slot 4)
+            # Three applications, in this order: the terminal, the clock,
+            # then settings.
             for n, k in enumerate((4, 1, 6)):
-                q.launch_dock(k, n_w=2 + n)
+                q.launch_dock(k, n_w=n)
                 time.sleep(3)
             q.mouse_goto(600, 400)
             time.sleep(2)
 
             w, h, at = q.screen_raw()
-            start = focused_tile(at, 5)
+            start = focused_tile(at, 3)
             check("the window opened last has the focus (its tile in the "
-                  "dock, %d, has the accent dot)" % start, start == 4)
+                  "dock, %d, has the accent dot)" % start, start == 2)
 
             # --- Alt+Tab ------------------------------------------------
-            # Slot order wraps: from slot 4 the next application is the
-            # one in slot 2, because slots 0 and 1 are the kernel's
+            # Slot order wraps: from slot 2 the next application is slot 0.
             q.sendkey("alt-tab")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            now = focused_tile(at, 5)
+            now = focused_tile(at, 3)
             check("Alt+Tab moved the focus to the next window (%d -> %d)"
-                  % (start, now), now == 2)
+                  % (start, now), now == 0)
 
             # It is on top, not merely focused: its title bar is whole
             x2, y2 = slot_xy(2)
@@ -103,7 +101,7 @@ def main():
                   title_whole(at, x2, y2, 402))
 
             # --- the keys follow the focus ------------------------------
-            # Slot 2 is the terminal. If the focus is really there, what
+            # Slot 0 is the terminal. If the focus is really there, what
             # we type lands in it - and it says so on its own screen.
             q.type_line("date")
             time.sleep(3)
@@ -122,11 +120,11 @@ def main():
                 time.sleep(1)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("three Alt+Tabs with three windows come back where they "
-                  "started", focused_tile(at, 5) == 2)
+            check("three Alt+Tabs with three windows return to the same one",
+                  focused_tile(at, 3) == 0)
 
             # --- a minimised window is skipped --------------------------
-            # Slot 2's yellow light minimises it; that must take it out
+            # Slot 0's yellow light minimises it; that must take it out
             # of the ring, not leave a focus nobody can see
             q.mouse_goto(*light_xy(x2, y2, 1))
             time.sleep(0.5)
@@ -136,9 +134,9 @@ def main():
             q.sendkey("alt-tab")
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            after = focused_tile(at, 5)
+            after = focused_tile(at, 3)
             check("once a window is minimised Alt+Tab skips it (the focus on %d)"
-                  % after, after in (3, 4))
+                  % after, after in (1, 2))
 
             check("the desktop is still running",
                   at(600, 300)[0] + at(600, 300)[1] + at(600, 300)[2] > 20)

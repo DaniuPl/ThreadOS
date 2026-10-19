@@ -215,11 +215,11 @@ def shortcuts():
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1)
-            x, y, w = frame_of("user/gcal.c", 2)
+            x, y, w = frame_of("user/gcal.c", 0)
             got = q.window_title(x, y, w)
             check("a click on the date opens the calendar ('%s')" % got,
                   got == "Calendar")
-            check("with its tile in the dock", q.dock_windows() == 3)
+            check("with its tile in the dock", q.dock_windows() == 1)
             q.click_desktop()
             time.sleep(0.5)
             q.click(bar_clock_x() + BAR_CLOCK_W // 2, BAR_H // 2)
@@ -227,12 +227,12 @@ def shortcuts():
             q.mouse_goto(600, 400)
             time.sleep(1)
             check("a second click brings that one up, not another (%d "
-                  "windows)" % q.dock_windows(), q.dock_windows() == 3)
+                  "windows)" % q.dock_windows(), q.dock_windows() == 1)
             q.click(bar_load_x() + LOAD_W // 2, BAR_H // 2)
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1)
-            x, y, w = frame_of("user/gtasks.c", 3)
+            x, y, w = frame_of("user/gtasks.c", 1)
             got = q.window_title(x, y, w)
             check("a click on the meter opens the task manager ('%s')" % got,
                   got == "Tasks")

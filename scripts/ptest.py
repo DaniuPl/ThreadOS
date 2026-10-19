@@ -754,7 +754,7 @@ GSET_SW_W = _kernel_define(_GS, "SW_W")
 GSET_SW_H = _kernel_define(_GS, "SW_H")
 GSET_SW_GAP = _kernel_define(_GS, "SW_GAP")
 GSET_SECTIONS = ["General", "Appearance", "Display", "Sound", "Network",
-                 "Files", "About"]
+                 "Files", "About", "Region"]
 GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
 
 
@@ -2185,6 +2185,8 @@ class Qemu:
 
     def open_menu(self):
         """A click on the mark at the left end of the bar"""
+        self.mouse_goto(LOGO_XY[0], 1)
+        time.sleep(0.3)
         self.click(*LOGO_XY)
         time.sleep(0.6)
 
@@ -2206,10 +2208,9 @@ class Qemu:
         kw.setdefault("h", h)
         return kw
 
-    # How many windows the dock holds: the kernel's two, and one more
-    # for every program started through launch_dock()/launch_menu(). A
-    # test that opens or closes windows some other way says so here.
-    n_win = 2
+    # How many application windows the dock holds. Tests that open or
+    # close windows some other way update this count themselves.
+    n_win = 0
 
     def launch_menu(self, name):
         """Starts a program from the menu, by the name it runs under"""

@@ -67,6 +67,24 @@ def main():
             check("the account sign-in completes", q.wait_desktop(40))
             time.sleep(4)
 
+            q.click_desktop()
+            q.type_line("write /home/admin/Desktop/desk.txt visible")
+            deadline = time.time() + 10
+            desk_label = ""
+            while time.time() < deadline:
+                w, h, at = q.screen_raw()
+                desk_label = q.find_ui(
+                    270, 352,
+                    ui_font_baseline_in(10, BAR_H + 8 + 43, 20),
+                    charset="desk.txt", px=10,
+                    under=lambda x, y: aurora_px(x, y, w, h),
+                    screen=(w, h, at))
+                if "desk.txt" in desk_label:
+                    break
+                time.sleep(0.25)
+            check("the signed-in user's Desktop is enumerated after setup "
+                  "('%s')" % desk_label, "desk.txt" in desk_label)
+
             w, h, at = q.screen_raw()
             check(f"the desktop comes up in graphics mode ({w}x{h})",
                   w >= 640 and h >= 400)
@@ -80,13 +98,10 @@ def main():
             check("the dock is drawn: the first program's tile (%s)"
                   % (at(*tile),), min(at(*tile)) > 200)
 
-            # The kernel's windows: two, one on top of the other - their
-            # bodies where each stands
-            body = theme("dark")["win_bg"]
-            check("the 'Terminal' window is drawn",
-                  near(at(130, 120), body, 3))
-            check("the 'Files' window is drawn",
-                  near(at(240, 140), body, 3))
+            # The desktop starts with no placeholder windows.
+            check("no demo windows cover the desktop",
+                  at(130, 120) == aurora_px(130, 120, w=w, h=h) and
+                  at(240, 140) == aurora_px(240, 140, w=w, h=h))
 
             # The mouse: the cursor is to go where we move it. We check
             # that through a change of pixels at the destination.
@@ -97,19 +112,6 @@ def main():
                         if at2(400 + dx, 300 + dy) != at(400 + dx, 300 + dy))
             check(f"the pointer follows the mouse ({differ} pixels changed)",
                   differ > 8)
-
-            # A click on the second window's title bar brings it to the
-            # top - and that can be seen from it covering the first
-            q.mouse_goto(240, 100)
-            q.mouse_button(True)
-            time.sleep(0.3)
-            q.mouse_button(False)
-            time.sleep(1.5)
-            _, _, at3 = q.screen_raw()
-            check("a click on the title bar gives that window the focus",
-                  q.has_focus(180, 95))
-            check("and does not upset the compositor",
-                  at3(*mid) == aurora_px(*mid, w=w, h=h))
 
             # A key that no window wants goes to the kernel's shell -
             # the same as in protected mode. Long mode had nowhere to

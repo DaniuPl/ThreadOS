@@ -39,14 +39,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, RTC_BASE, RTC_DATE
 
-CHARS = "0123456789: ADFJMNOSTWabcdeghilnoprtuvy"
+CHARS = "0123456789: -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 
 def read_clock(q):
     """The clock off the bar, in the bar's lettering"""
-    return q.find_ui(bar_clock_x(), SCREEN_W,
-                     ui_font_baseline_in(BAR_PX, 0, BAR_H), charset=CHARS,
-                     px=BAR_PX, under=on_bar)
+    x = bar_clock_x() + 4
+    q.mouse_goto(x, 1)
+    time.sleep(0.3)
+    q.mouse_goto(x, BAR_H // 2)
+    time.sleep(0.2)
+    for px in range(BAR_PX, 7, -1):
+        text = q.find_ui(bar_clock_x() - 90, SCREEN_W,
+                         ui_font_baseline_in(BAR_PX, 0, BAR_H), charset=CHARS,
+                         px=px, under=on_bar)
+        if text:
+            return text
+    return ""
 
 
 def seconds(text):
@@ -104,14 +113,14 @@ def main():
 
             # --- a crowded dock --------------------------------------
             for k in range(DOCK_N):
-                q.launch_dock(k, n_w=2 + k)
+                q.launch_dock(k, n_w=1 + k)
                 time.sleep(2.5)
             q.mouse_goto(600, 300)
             time.sleep(2)
 
-            g = dock_geom(n_w=2 + DOCK_N)
+            g = dock_geom(n_w=1 + DOCK_N)
             w, h, at = q.screen_raw()
-            check("eleven windows: the dock's tiles got smaller to fit "
+            check("ten windows: the dock's tiles got smaller to fit "
                   "(%d px) and it ends inside the screen (at %d)"
                   % (g["tile"], g["x"] + g["w"]),
                   g["tile"] < DOCK_TILE_M and g["x"] + g["w"] <= w - DOCK_MARGIN)
@@ -130,6 +139,21 @@ def main():
             check("and it keeps running",
                   ok2 and re.match(SHAPE, third) is not None and
                   seconds(third) > seconds(second))
+
+            # Regional formats change what the clock presents without
+            # changing the underlying RTC value.
+            q.click_desktop()
+            time.sleep(0.5)
+            for key, value in (("datefmt", "iso"), ("timefmt", "12h")):
+                q.type_line("sudo set %s %s" % (key, value))
+                time.sleep(0.5)
+                q.command("thread", "saved", timeout=30)
+                time.sleep(1)
+            regional = read_clock(q)
+            check("ISO dates and a twelve-hour clock follow the Region "
+                  "settings ('%s')" % regional,
+                  re.match(r"^[A-Z][a-z]{2} \d{4}-\d\d-\d\d "
+                           r"\d{1,2}:\d\d:\d\d [AP]M$", regional) is not None)
         finally:
             q.close()
     finally:

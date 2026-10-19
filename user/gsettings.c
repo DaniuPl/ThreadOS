@@ -68,21 +68,23 @@
 #define SEC_NET     4
 #define SEC_FILES   5
 #define SEC_ABOUT   6
+#define SEC_REGION  7
 #ifdef __x86_64__
-#define SEC_UPDATES 7
-#define SEC_N       8
+#define SEC_UPDATES 8
+#define SEC_N       9
 #else
-#define SEC_N       7
+#define SEC_N       8
 #endif
 
 #ifdef __x86_64__
 static const char *const sections[SEC_N] = {
     "General", "Appearance", "Display", "Sound", "Network", "Files",
-    "About", "Updates"
+    "About", "Region", "Updates"
 };
 #else
 static const char *const sections[SEC_N] = {
-    "General", "Appearance", "Display", "Sound", "Network", "Files", "About"
+    "General", "Appearance", "Display", "Sound", "Network", "Files", "About",
+    "Region"
 };
 #endif
 
@@ -413,8 +415,11 @@ static void try_password(void)
 #define F_NAME 0
 #define F_RES  1
 #define F_DNS  2
-#define F_N    3
-static const char *const field_setting[F_N] = { "name", "resolution", "dns" };
+#define F_WALL 3
+#define F_N    4
+static const char *const field_setting[F_N] = {
+    "name", "resolution", "dns", "wallpaper"
+};
 static char fields[F_N][CFG_VAL_MAX];
 static int focus = -1;            /* the field that has the keys */
 
@@ -635,8 +640,12 @@ static void draw_look(void)
     row_name(y, "Size of the dock");
     chips(y + CTRL_DY, 3, docks, dock_values, "dock");
 
-    note(y + ROW_H, "The Appearance program shows the themes and the");
-    note(y + ROW_H + 14, "wallpaper at full size.");
+    y += ROW_H;
+    row_name(y, "Wallpaper file");
+    field(y + CTRL_DY, F_WALL);
+
+    note(y + ROW_H, "Paint's Wall button applies a drawing as wallpaper.");
+    note(y + ROW_H + 14, "Wallpaper files are read from the system root.");
 }
 
 static void draw_display(void)
@@ -782,6 +791,27 @@ static void draw_about(void)
     info(i++, "Signed in as", sys_level() == 0 ? "admin" : "user");
 }
 
+static void draw_region(void)
+{
+    static const char *const dates[] = { "D/M/Y", "M/D/Y", "ISO" };
+    static const char *const date_values[] = { "dmy", "mdy", "iso" };
+    static const char *const times[] = { "24-hour", "12-hour" };
+    static const char *const time_values[] = { "24h", "12h" };
+    static const char *const numbers[] = { "1,234.5", "1 234,5" };
+    static const char *const number_values[] = { "dot", "comma" };
+    int y = PANE_Y0;
+
+    row_name(y, "Date order");
+    chips(y + CTRL_DY, 3, dates, date_values, "datefmt");
+    y += ROW_H;
+    row_name(y, "Time");
+    chips(y + CTRL_DY, 2, times, time_values, "timefmt");
+    y += ROW_H;
+    row_name(y, "Numbers");
+    chips(y + CTRL_DY, 2, numbers, number_values, "numfmt");
+    note(y + ROW_H, "Clock, calculator and file sizes follow these formats.");
+}
+
 #ifdef __x86_64__
 static void draw_updates(void)
 {
@@ -845,6 +875,7 @@ static void draw(void)
     case SEC_SOUND:   draw_sound(); break;
     case SEC_NET:     draw_network(); break;
     case SEC_FILES:   draw_files(); break;
+    case SEC_REGION:  draw_region(); break;
 #ifdef __x86_64__
     case SEC_UPDATES: draw_updates(); break;
 #endif

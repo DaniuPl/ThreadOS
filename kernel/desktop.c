@@ -125,8 +125,98 @@ static int icon_n = 9;         /* how many of them there are */
 /* How many pictures there are (see draw_art): one per program that
    comes with the system, and a last one - a letter - for anything
    else. */
-#define ART_N      15
+#define ART_N      16
 #define ART_LETTER 14
+#define ART_TRASH  15
+
+struct desktop_item {
+    char name[32];
+    uint32_t size;
+    int is_dir;
+    int dir_index;
+};
+
+#define DESKTOP_ITEM_MAX 32
+static struct desktop_item desktop_items[DESKTOP_ITEM_MAX];
+static int desktop_item_n;
+static int desktop_selected = -1;
+static int desktop_last = -1;
+static uint32_t desktop_last_click;
+static char desktop_owner[32];
+
+static int desktop_home_path(char *out, int cap)
+{
+    const char *name = user_current_name();
+    if (!name || !name[0])
+        name = "guest";
+    int p = 0;
+    const char *prefix = "/home/";
+    while (*prefix && p < cap - 1)
+        out[p++] = *prefix++;
+    while (*name && p < cap - 1)
+        out[p++] = *name++;
+    out[p] = '\0';
+    return p < cap - 1;
+}
+
+static int path_append(char *out, int cap, const char *path,
+                       const char *name)
+{
+    int p = 0;
+    while (*path && p < cap - 1)
+        out[p++] = *path++;
+    if (p == 0 || out[p - 1] != '/') {
+        if (p >= cap - 1)
+            return 0;
+        out[p++] = '/';
+    }
+    while (*name && p < cap - 1)
+        out[p++] = *name++;
+    if (*name)
+        return 0;
+    out[p] = '\0';
+    return 1;
+}
+
+static void desktop_read_items(void)
+{
+    char home[64], path[80], name[32];
+    const char *owner = user_current_name();
+    uint32_t size;
+    int is_dir, dir;
+    if (!owner || !owner[0])
+        owner = "guest";
+    if (strcmp(desktop_owner, owner)) {
+        int i = 0;
+        while (owner[i] && i < (int)sizeof(desktop_owner) - 1) {
+            desktop_owner[i] = owner[i];
+            i++;
+        }
+        desktop_owner[i] = '\0';
+        desktop_selected = desktop_last = -1;
+    }
+    desktop_item_n = 0;
+    if (!desktop_home_path(home, sizeof(home)) ||
+        !path_append(path, sizeof(path), home, "Desktop") ||
+        fs_chdir(FS_ROOT, path, &dir) < 0)
+        return;
+    for (int i = 0; i < 128 && desktop_item_n < DESKTOP_ITEM_MAX; i++) {
+        if (!fs_readdir(dir, i, name, &size, &is_dir))
+            break;
+        if (name[0] == '.')
+            continue;
+        struct desktop_item *item = &desktop_items[desktop_item_n++];
+        int n = 0;
+        while (name[n] && n < (int)sizeof(item->name) - 1) {
+            item->name[n] = name[n];
+            n++;
+        }
+        item->name[n] = '\0';
+        item->size = size;
+        item->is_dir = is_dir;
+        item->dir_index = i;
+    }
+}
 
 /* The programs that come with the system, by the name they run under:
    the picture each wears and what a person calls it - for a program
@@ -351,8 +441,6 @@ struct window {
     int x, y, w, h;
     char title[24];
     int used;
-    int has_button;        /* does the window have an action button */
-    int counter;           /* the button's click counter */
     int owner;             /* the owning process's pid; -1 = a kernel window */
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
     /* What one pixel of that buffer means. A window starts holding
@@ -411,12 +499,7 @@ struct window {
    that a hung one does not hold the screen. */
 #define CLOSE_FRAMES (2 * FRAME_HZ)
 
-/* How many windows the compositor holds at once.
- *
- * Two of them are the kernel's own, so this is the number of
- * applications plus two - and there are seven icons on the desktop. Six
- * meant that opening a fifth application failed for no reason a person
- * could see. */
+/* How many application windows the compositor holds at once. */
 #define MAX_WIN 12
 static struct window wins[MAX_WIN];
 
@@ -430,6 +513,7 @@ static void snap_window(int i, int where);
 /* Frames since the desktop started - the compositor's own clock, and
    the only one it needs: everything here happens in frames. */
 static uint32_t frames;
+static uint32_t bar_until;
 
 static int drag_idx = -1;
 static int resize_idx = -1;
@@ -454,12 +538,8 @@ static int prev_pressed;    /* the previous left-button state - to detect a clic
 static int mouse_x, mouse_y;
 static int focus_idx = -1;  /* the window with keyboard focus */
 
-/* The launch menu.
- *
- * Opened from the mark at the left end of the bar it hangs under it;
- * opened with the right button on the desktop it stands where the
- * pointer is - the same list either way, because a second list would
- * be a second thing to learn. */
+/* The launch menu hangs under the mark at the left end of the bar.
+   Right-clicking the desktop uses the separate context menu below. */
 static int menu_open;
 /* The entry chosen with the keys (programs first, then the system's),
    or -1 when the pointer is what chooses; and one chosen with Enter,
@@ -472,6 +552,12 @@ static volatile int menu_go = -1;
 static volatile int vol_key;
 static uint32_t vol_until;
 static int menu_px, menu_py;
+static int context_open;
+static int context_px, context_py;
+static int context_h(void) { return 2 * MENU_PAD + 3 * MENU_ROW; }
+static const char *const context_items[] = {
+    "New Folder", "New Text File", "Refresh"
+};
 /* The installer is deliberately NOT here. It takes the whole screen
    and everything else has to be out of reach while it runs, so it is
    started as a kiosk ('install') and not as one more window among
@@ -693,6 +779,30 @@ static void menu_at(int x, int y)
     menu_open = 1;
 }
 
+static void context_at(int x, int y)
+{
+    int hgt = context_h();
+    if (x + MENU_W > video_w())
+        x = video_w() - MENU_W;
+    if (x < 0)
+        x = 0;
+    if (y + hgt > work_bottom())
+        y = work_bottom() - hgt;
+    if (y < BAR_H)
+        y = BAR_H;
+    context_px = x;
+    context_py = y;
+    context_open = 1;
+    menu_open = 0;
+    menu_sel = -1;
+}
+
+static int bar_visible(void)
+{
+    return frames <= bar_until || mouse_y < 3 ||
+           (menu_open && menu_py == MENU_Y);
+}
+
 /* How much of the machine is in use.
  *
  * A number would say "4128 KiB", which is a thing to read; a capsule
@@ -864,8 +974,6 @@ static int grip_y(const struct window *w)  { return w->y + w->h - GRIP_SZ; }
    kernel one - its content buffer has to be made anew - so that is done
    once, when the drag ends, and not on every frame of it. */
 static int resizable(const struct window *w) { (void)w; return 1; }
-static int btn_x(const struct window *w)   { return w->x + 10; }
-static int btn_y(const struct window *w)    { return w->y + TITLE_H + 12; }
 /* A logical coordinate in the panel's own pixels (kernel/video.c): the
    few things here that keep pixels of their own - the background, the
    bar's glass, the dock - keep them at the panel's size */
@@ -1120,6 +1228,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0xFFFFFF, 0xE5E5EA },   /* Calendar */
         { 0x5AC8FA, 0x34C759 },   /* Paint */
         { 0x8E8E93, 0x48484A },   /* anything else: a letter */
+        { 0x9A9AA0, 0x5A5A60 },   /* Trash */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -1231,6 +1340,14 @@ static void draw_art(int art, int x, int y, int s, char letter)
         gfx_disc16(PX(205), PY(110), D(40), 0xFFCC00, 255);
         gfx_disc16(PX(150), PY(205), D(44), 0x0A84FF, 255);
         gfx_line16(PX(220), PY(250), PX(260), PY(180), D(18), 0xFFFFFF, 255);
+        break;
+    case ART_TRASH:
+        gfx_rrect16(PX(85), PY(86), D(150), D(178), D(18), 0xFFFFFF, 235);
+        gfx_rrect16(PX(72), PY(70), D(176), D(20), D(8), 0xFFFFFF, 255);
+        gfx_rrect16(PX(125), PY(48), D(70), D(16), D(8), 0xFFFFFF, 255);
+        for (int k = 0; k < 3; k++)
+            gfx_line16(PX(125 + 35 * k), PY(116), PX(125 + 35 * k),
+                       PY(225), D(8), 0x77777D, 200);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
@@ -1352,6 +1469,73 @@ static const char *fit_text(const char *s, int font, int px, int maxw,
     }
     return "";
 }
+
+static int desktop_icon_rect(int index, int *x, int *y)
+{
+    int cols = video_w() / 88;
+    if (cols < 1)
+        cols = 1;
+    if (cols > 6)
+        cols = 6;
+    *x = 10 + (index % cols) * 88;
+    *y = BAR_H + 8 + (index / cols) * 72;
+    return *y + 68 <= work_bottom() - 2;
+}
+
+static int desktop_icon_at(int mx, int my)
+{
+    int count = 3 + desktop_item_n;
+    for (int i = 0; i < count; i++) {
+        int x, y;
+        if (desktop_icon_rect(i, &x, &y) &&
+            in_rect(mx, my, x, y, 76, 68))
+            return i;
+    }
+    return -1;
+}
+
+static void draw_desktop_icons(void)
+{
+    int count = 3 + desktop_item_n;
+    for (int i = 0; i < count; i++) {
+        int x, y;
+        if (!desktop_icon_rect(i, &x, &y))
+            continue;
+        int selected = desktop_selected == i;
+        if (selected)
+            gfx_rrect(x, y, 76, 68, 7, L.accent, 45);
+        int art;
+        char letter;
+        const char *label;
+        if (i == 0) {
+            art = 2;
+            letter = 'H';
+            label = "Home";
+        } else if (i == 1) {
+            art = 2;
+            letter = 'F';
+            label = "Files";
+        } else if (i == 2) {
+            art = ART_TRASH;
+            letter = 'T';
+            label = "Trash";
+        } else {
+            struct desktop_item *item = &desktop_items[i - 3];
+            art = item->is_dir ? 2 : 7;
+            letter = item->name[0];
+            label = item->name;
+        }
+        draw_tile(art, x + 18, y + 2, 40, letter, 255);
+        char cut[32];
+        const char *shown = fit_text(label, UI_SANS, 10, 74, cut,
+                                     sizeof(cut));
+        int tw = ui_font_width(UI_SANS, 10, shown);
+        ui_font_text(UI_SANS, 10, x + (76 - tw) / 2,
+                     ui_font_baseline_in(10, y + 43, 20), shown,
+                     selected ? L.accent_text : L.bar_text);
+    }
+}
+
 /* What was under a window's four corners before it was drawn - so the
    corners can be made round after its content is in (see
    gfx_round_save) */
@@ -1447,17 +1631,6 @@ static void draw_body(const struct window *win, int focused, int off)
         int gx = (x + w - 3) * 16, gy = (y + h - 3) * 16;
         for (int d = 3; d <= 7; d += 4)
             gfx_line16(gx, gy - d * 16, gx - d * 16, gy, 14, L.win_line, 255);
-    }
-
-    /* An optional action button plus a click counter */
-    if (win->has_button) {
-        int bx = btn_x(win), by = btn_y(win);
-        gfx_rrect(bx, by, BTN_W, BTN_H, 6, L.accent, 255);
-        int lw = ui_font_width(UI_SANS, UI_PX, "Click");
-        ui_font_text(UI_SANS, UI_PX, bx + (BTN_W - lw) / 2,
-                     ui_baseline_in(by, BTN_H), "Click", L.accent_text);
-        draw_int(bx + BTN_W + 8, ui_baseline_in(by, BTN_H), win->counter,
-                 L.title_text);
     }
 
     /* An application window: compose its content buffer into the work
@@ -1893,6 +2066,7 @@ static void search_close(void);
 static int search_key(char c);
 static int note_at(int x, int y);
 static void note_drop(int i);
+static int desktop_spawn_app(const char *command);
 static int setup_mode;
 static int setup_focus;
 static int setup_light;
@@ -1922,8 +2096,116 @@ static void open_or_raise(const char *app)
         return;
     }
     int from = icon_of_app(app);
-    remember_launch(exec_spawn(app), from,
+    remember_launch(desktop_spawn_app(app), from,
                     from >= 0 ? icons[from].art : art_of_app(app));
+}
+
+static void command_append(char *out, int cap, int *used, const char *text)
+{
+    while (*text && *used < cap - 1)
+        out[(*used)++] = *text++;
+    out[*used] = '\0';
+}
+
+static void command_number(char *out, int cap, int *used, int value)
+{
+    char digits[12];
+    int n = 0;
+    unsigned v = (unsigned)value;
+    do {
+        digits[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v && n < (int)sizeof(digits));
+    while (n && *used < cap - 1)
+        out[(*used)++] = digits[--n];
+    out[*used] = '\0';
+}
+
+static void desktop_launch_files(const char *command)
+{
+    int from = icon_of_app("gfiles");
+    remember_launch(exec_spawn(command), from,
+                    from >= 0 ? icons[from].art : art_of_app("gfiles"));
+}
+
+static int desktop_spawn_app(const char *command)
+{
+    if (!strcmp(command, "gfiles")) {
+        char home[64], line[96];
+        if (!desktop_home_path(home, sizeof(home)))
+            return exec_spawn(command);
+        int n = 0;
+        line[0] = '\0';
+        command_append(line, sizeof(line), &n, "gfiles --home ");
+        command_append(line, sizeof(line), &n, home);
+        command_append(line, sizeof(line), &n, " /");
+        return exec_spawn(line);
+    }
+    return exec_spawn(command);
+}
+
+static void desktop_open_icon(int index)
+{
+    char home[64], path[80], command[128];
+    if (!desktop_home_path(home, sizeof(home)))
+        return;
+    if (index == 0) {
+        memcpy(path, home, (uint32_t)(strlen(home) + 1));
+        command[0] = '\0';
+        int n = 0;
+        command_append(command, sizeof(command), &n, "gfiles ");
+        command_append(command, sizeof(command), &n, path);
+        desktop_launch_files(command);
+    } else if (index == 1) {
+        if (!path_append(path, sizeof(path), home, "Desktop"))
+            return;
+        command[0] = '\0';
+        int n = 0;
+        command_append(command, sizeof(command), &n, "gfiles ");
+        command_append(command, sizeof(command), &n, path);
+        desktop_launch_files(command);
+    } else if (index == 2) {
+        if (!path_append(path, sizeof(path), home, ".Trash"))
+            return;
+        command[0] = '\0';
+        int n = 0;
+        command_append(command, sizeof(command), &n, "gfiles ");
+        command_append(command, sizeof(command), &n, path);
+        desktop_launch_files(command);
+    } else if (index - 3 < desktop_item_n) {
+        if (!path_append(path, sizeof(path), home, "Desktop"))
+            return;
+        command[0] = '\0';
+        int n = 0;
+        command_append(command, sizeof(command), &n, "gfiles --open-index ");
+        command_number(command, sizeof(command), &n,
+                       desktop_items[index - 3].dir_index);
+        command_append(command, sizeof(command), &n, " ");
+        command_append(command, sizeof(command), &n, path);
+        desktop_launch_files(command);
+    }
+}
+
+static void desktop_context_action(int action)
+{
+    if (action == 2) {
+        desktop_read_items();
+        desktop_selected = -1;
+        context_open = 0;
+        return;
+    }
+    char home[64], path[80], command[128];
+    if (!desktop_home_path(home, sizeof(home)) ||
+        !path_append(path, sizeof(path), home, "Desktop"))
+        return;
+    command[0] = '\0';
+    int n = 0;
+    command_append(command, sizeof(command), &n,
+                   action == 0 ? "gfiles --new-folder "
+                               : "gfiles --new-file ");
+    command_append(command, sizeof(command), &n, path);
+    context_open = 0;
+    desktop_launch_files(command);
 }
 
 /* Entry k of the menu, done: programs first, then the system's */
@@ -1935,7 +2217,7 @@ static void menu_activate(int k)
         /* Started from the menu, which names programs - so its face is
            looked up by name */
         int from = icon_of_app(menu_items[k]);
-        remember_launch(exec_spawn(menu_items[k]), from,
+        remember_launch(desktop_spawn_app(menu_items[k]), from,
                         from >= 0 ? icons[from].art
                                   : art_of_app(menu_items[k]));
     } else if (k - MENU_N == SESS_LOCK) {
@@ -1955,6 +2237,8 @@ static void handle_input(int mx, int my, int buttons)
         menu_sel = -1;
     mouse_x = mx;
     mouse_y = my;
+    if (my < BAR_H && bar_visible())
+        bar_until = frames + 3 * FRAME_HZ;
     if (menu_go >= 0) {
         int k = menu_go;
         menu_go = -1;
@@ -2072,16 +2356,16 @@ static void handle_input(int mx, int my, int buttons)
         }
     }
 
-    /* The right button on the desktop opens the same menu where the
-       pointer is. On a window it does nothing yet - a window's own
-       menu is the window's business, and none of them has one. */
+    /* The desktop gets its own actions; a window's right button still
+       belongs to the application that drew it. */
     if (right && !prev_right) {
         tmenu = -1;
         if (window_at(mx, my) < 0 && my >= BAR_H && my < work_bottom() &&
             dock_hit(mx, my) < 0) {
-            menu_at(mx, my);
+            context_at(mx, my);
         } else {
             menu_open = 0;
+            context_open = 0;
             tmenu = dock_hit(mx, my);
         }
     }
@@ -2096,6 +2380,19 @@ static void handle_input(int mx, int my, int buttons)
     }
     if (pressed && !prev_pressed && note_at(mx, my) >= 0) {
         note_drop(note_at(mx, my));
+        prev_pressed = pressed;
+        return;
+    }
+
+    if (pressed && !prev_pressed && context_open) {
+        int row = (my - context_py - MENU_PAD) / MENU_ROW;
+        if (in_rect(mx, my, context_px, context_py, MENU_W, context_h()) &&
+            my >= context_py + MENU_PAD &&
+            row >= 0 && row < 3) {
+            desktop_context_action(row);
+        } else {
+            context_open = 0;
+        }
         prev_pressed = pressed;
         return;
     }
@@ -2116,7 +2413,7 @@ static void handle_input(int mx, int my, int buttons)
         /* The menu bar is above everything, the way it is drawn. Its
            left end opens the menu; on the right are the desktop switch,
            and "show the desktop". */
-        if (my < BAR_H) {
+        if (my < BAR_H && bar_visible()) {
             if (mx < logo_w()) {
                 if (menu_open && menu_py == MENU_Y)
                     menu_open = 0;
@@ -2171,7 +2468,8 @@ static void handle_input(int mx, int my, int buttons)
            drawing asks, so a tile is clickable exactly where it is. */
         int tile = dock_hit(mx, my);
         if (tile >= 0 && tile < 100) {
-            remember_launch(exec_spawn(icons[tile].app), tile, icons[tile].art);
+            remember_launch(desktop_spawn_app(icons[tile].app), tile,
+                            icons[tile].art);
             hop_at[tile] = frames;
             hop_set[tile] = 1;
             prev_pressed = pressed;
@@ -2253,15 +2551,6 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* an action button inside the window */
-            if (w->has_button &&
-                in_rect(mx, my, btn_x(w), btn_y(w), BTN_W, BTN_H)) {
-                w->counter++;
-                focus_idx = i;
-                raise_win(i);
-                hit = 1;
-                break;
-            }
             /* the title bar -> start dragging (and focus).
                Dragging a maximised window puts it back to its own size
                first - as everywhere else - and it comes back under the
@@ -2307,8 +2596,26 @@ static void handle_input(int mx, int my, int buttons)
                 break;            /* swallow it - do not fall through to lower ones */
             }
         }
-        if (!hit)
+        if (!hit) {
             focus_idx = -1;            /* a click on the desktop: nobody listens */
+            int icon = desktop_icon_at(mx, my);
+            if (icon >= 0) {
+                uint32_t now = pit_ticks();
+                if (desktop_selected == icon && desktop_last == icon &&
+                    now - desktop_last_click <= DOUBLE_TICKS) {
+                    desktop_open_icon(icon);
+                    desktop_selected = -1;
+                    desktop_last = -1;
+                } else {
+                    desktop_selected = icon;
+                    desktop_last = icon;
+                    desktop_last_click = now;
+                }
+            } else {
+                desktop_selected = -1;
+                desktop_last = -1;
+            }
+        }
     }
 
     if (!pressed) {
@@ -2577,6 +2884,7 @@ static void snap_window(int i, int where)
 static uint8_t *wall;              /* the picture, or NULL */
 static int wall_w, wall_h;
 static int wall_rgb;               /* three bytes a pixel, no palette */
+static char wall_source[CONFIG_VAL_MAX];
 
 /* Reads the wallpaper named in the settings. Anything wrong with the
    file - missing, too big, not a picture - leaves the gradient in
@@ -2588,6 +2896,12 @@ static void wallpaper_load(void)
     wall_rgb = 0;
 
     const char *name = config_get("wallpaper");
+    int i = 0;
+    while (name && name[i] && i < CONFIG_VAL_MAX - 1) {
+        wall_source[i] = name[i];
+        i++;
+    }
+    wall_source[i] = 0;
     if (!name || !name[0] || !fs_ready())
         return;
 
@@ -2638,6 +2952,22 @@ static void wallpaper_load(void)
     wall_w = w;
     wall_h = h;
     printk("[desktop] wallpaper '%s': %dx%d\n", name, w, h);
+}
+
+static int wallpaper_refresh(void)
+{
+    const char *name = config_get("wallpaper");
+    if (!name)
+        name = "";
+    if (!strcmp(name, wall_source))
+        return 0;
+    if (wall)
+        kfree(wall);
+    wall = (uint8_t *)0;
+    wall_w = wall_h = 0;
+    wall_rgb = 0;
+    wallpaper_load();
+    return 1;
 }
 
 /* --- The background ---------------------------------------------------------
@@ -2776,6 +3106,7 @@ static void look_refresh(int force)
     if (!force && --look_wait > 0)
         return;
     look_wait = FRAME_HZ;
+    int wall_changed = wallpaper_refresh();
     if (!force)
         display_refresh();       /* the scale, read as often as the theme */
 
@@ -2783,7 +3114,7 @@ static void look_refresh(int force)
     int dark = !(t && !strcmp(t, "light"));
     int bg = background_choice();
     int key = (dark << 8) | bg;
-    if (!force && key == bg_key)
+    if (!force && !wall_changed && key == bg_key)
         return;
     bg_key = key;
     theme_dark = dark;
@@ -2871,7 +3202,7 @@ static int put_num(char *d, int v)
  * to do thirty times a second for a digit that changes once a second.
  * The reading is kept and refreshed about five times a second, which is
  * often enough that no second is ever skipped on screen. */
-static char clock_text[24] = "--:--:--";
+static char clock_text[32] = "--:--:--";
 static int clock_wait;
 
 /* The day of the week, 0 = Sunday (Sakamoto's method) */
@@ -2881,6 +3212,19 @@ static int weekday(int y, int m, int d)
     if (m < 3)
         y -= 1;
     return (y + y / 4 - y / 100 + y / 400 + t[(m - 1) % 12] + d) % 7;
+}
+
+static int clock_is_12h(void)
+{
+    const char *format = config_get("timefmt");
+    return format && !strcmp(format, "12h");
+}
+
+static int clock_put_two(char *out, int at, int value)
+{
+    out[at++] = (char)('0' + (value / 10) % 10);
+    out[at++] = (char)('0' + value % 10);
+    return at;
 }
 
 static void clock_refresh(void)
@@ -2902,20 +3246,45 @@ static void clock_refresh(void)
         for (int i = 0; i < 3; i++)
             clock_text[n++] = dn[i];
         clock_text[n++] = ' ';
-        n += put_num(clock_text + n, t.day);
-        clock_text[n++] = ' ';
-        for (int i = 0; i < 3; i++)
-            clock_text[n++] = months[t.month - 1][i];
+        const char *datefmt = config_get("datefmt");
+        if (datefmt && !strcmp(datefmt, "iso")) {
+            n += put_num(clock_text + n, t.year);
+            clock_text[n++] = '-';
+            n = clock_put_two(clock_text, n, t.month);
+            clock_text[n++] = '-';
+            n = clock_put_two(clock_text, n, t.day);
+        } else if (datefmt && !strcmp(datefmt, "mdy")) {
+            for (int i = 0; i < 3; i++)
+                clock_text[n++] = months[t.month - 1][i];
+            clock_text[n++] = ' ';
+            n += put_num(clock_text + n, t.day);
+        } else {
+            n += put_num(clock_text + n, t.day);
+            clock_text[n++] = ' ';
+            for (int i = 0; i < 3; i++)
+                clock_text[n++] = months[t.month - 1][i];
+        }
         clock_text[n++] = ' ';
     }
-    clock_text[n++] = (char)('0' + (t.hour / 10) % 10);
-    clock_text[n++] = (char)('0' + t.hour % 10);
+    int hour = t.hour;
+    if (clock_is_12h()) {
+        hour %= 12;
+        if (!hour)
+            hour = 12;
+        n += put_num(clock_text + n, hour);
+    } else {
+        clock_text[n++] = (char)('0' + (hour / 10) % 10);
+        clock_text[n++] = (char)('0' + hour % 10);
+    }
     clock_text[n++] = ':';
-    clock_text[n++] = (char)('0' + (t.min / 10) % 10);
-    clock_text[n++] = (char)('0' + t.min % 10);
+    n = clock_put_two(clock_text, n, t.min);
     clock_text[n++] = ':';
-    clock_text[n++] = (char)('0' + (t.sec / 10) % 10);
-    clock_text[n++] = (char)('0' + t.sec % 10);
+    n = clock_put_two(clock_text, n, t.sec);
+    if (clock_is_12h()) {
+        clock_text[n++] = ' ';
+        clock_text[n++] = t.hour < 12 ? 'A' : 'P';
+        clock_text[n++] = 'M';
+    }
     clock_text[n] = 0;
 }
 
@@ -3090,8 +3459,13 @@ static void draw_bar(void)
 
     /* The clock: at the right-hand end, set against it */
     clock_refresh();
-    int cw = ui_font_width(UI_SANS, BAR_PX, clock_text);
-    ui_font_text(UI_SANS, BAR_PX, w - BAR_RIGHT - cw, base, clock_text,
+    int clock_px = BAR_PX;
+    int cw = ui_font_width(UI_SANS, clock_px, clock_text);
+    while (clock_px > 8 && cw > BAR_CLOCK_W - 4) {
+        clock_px--;
+        cw = ui_font_width(UI_SANS, clock_px, clock_text);
+    }
+    ui_font_text(UI_SANS, clock_px, w - BAR_RIGHT - cw, base, clock_text,
                  L.bar_text);
 }
 
@@ -3241,7 +3615,7 @@ static void tile_action(int t, int i)
     if (t < 100) {                       /* Open: one more of the program */
         if (t < 0 || t >= ICON_MAX)
             return;
-        remember_launch(exec_spawn(icons[t].app), t, icons[t].art);
+        remember_launch(desktop_spawn_app(icons[t].app), t, icons[t].art);
         hop_at[t] = frames;
         hop_set[t] = 1;
         return;
@@ -3692,7 +4066,7 @@ static void search_go(int i)
     search_close();
     if (f.kind == FIND_APP) {
         int k = icon_of_app(known_apps[f.index].app);
-        remember_launch(exec_spawn(known_apps[f.index].app), k, f.art);
+        remember_launch(desktop_spawn_app(known_apps[f.index].app), k, f.art);
         if (k >= 0) {
             hop_at[k] = frames;
             hop_set[k] = 1;
@@ -3960,6 +4334,27 @@ static void draw_menu(void)
         ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
                      ui_font_baseline_in(MENU_PX, iy, SESS_ROW),
                      session_items[i], ink);
+    }
+}
+
+static void draw_context_menu(void)
+{
+    if (!context_open)
+        return;
+    int x = context_px, y = context_py, h = context_h();
+    gfx_shadow(x, y, MENU_W, h, MENU_R, 12, theme_dark ? 145 : 85, 4);
+    gfx_frost(x, y, MENU_W, h, MENU_R, 8, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, MENU_W * 16, h * 16, MENU_R * 16, 16,
+                L.win_line, 200);
+    for (int i = 0; i < 3; i++) {
+        int iy = y + MENU_PAD + i * MENU_ROW;
+        int over = in_rect(mouse_x, mouse_y, x, iy, MENU_W, MENU_ROW);
+        if (over)
+            gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6,
+                      L.accent, 255);
+        ui_font_text(UI_SANS, MENU_PX, x + 14,
+                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                     context_items[i], over ? L.accent_text : L.menu_text);
     }
 }
 
@@ -4267,8 +4662,7 @@ int desktop_lock(void)
 
 /* Logging out: every program is asked to end, as its red light would
    ask it - and one that does not answer is ended anyway (reap_windows)
-   - and then the lock is what is left. The kernel's own windows stay:
-   they are the machine's, not the session's. */
+   - and then the lock is what is left. */
 static void log_out(void)
 {
     int uid = desktop_uid();
@@ -4757,8 +5151,25 @@ static void draw_lock(void)
 
     struct rtc_time t;
     rtc_read(&t);
-    char hm[6] = { (char)('0' + t.hour / 10), (char)('0' + t.hour % 10), ':',
-                   (char)('0' + t.min / 10), (char)('0' + t.min % 10), 0 };
+    char hm[12];
+    int hn = 0, hour = t.hour;
+    if (clock_is_12h()) {
+        hour %= 12;
+        if (!hour)
+            hour = 12;
+        hn += put_num(hm + hn, hour);
+    } else {
+        hm[hn++] = (char)('0' + (hour / 10) % 10);
+        hm[hn++] = (char)('0' + hour % 10);
+    }
+    hm[hn++] = ':';
+    hn = clock_put_two(hm, hn, t.min);
+    if (clock_is_12h()) {
+        hm[hn++] = ' ';
+        hm[hn++] = t.hour < 12 ? 'A' : 'P';
+        hm[hn++] = 'M';
+    }
+    hm[hn] = 0;
     int ty = h / 3;
     int tw = ui_font_width(UI_BOLD, LOCK_TIME_PX, hm);
     ui_font_text(UI_BOLD, LOCK_TIME_PX, (w - tw) / 2, ty, hm, 0xFFFFFF);
@@ -4838,6 +5249,7 @@ static void desktop_on_key(char c)
         return;
     }
     if (c == KEY_MENU) {                /* the Windows key: the menu */
+        context_open = 0;
         if (menu_open && menu_py == MENU_Y) {
             menu_open = 0;
         } else {
@@ -4845,6 +5257,10 @@ static void desktop_on_key(char c)
             menu_at(6, MENU_Y);
             menu_sel = 0;
         }
+        return;
+    }
+    if (context_open && c == 27) {
+        context_open = 0;
         return;
     }
     if (menu_open) {                    /* the keys choose in the menu */
@@ -4868,6 +5284,7 @@ static void desktop_on_key(char c)
         }
     }
     if (c == KEY_SEARCH) {
+        context_open = 0;
         if (search_open)
             search_close();
         else {
@@ -4933,7 +5350,8 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
            step would put it off the screen - so we walk back up until
            it fits. Walking back rather than clamping keeps the windows
            apart: two clamped to the same corner would look like one. */
-        int k = i;
+        /* Keep the familiar window position after removing the demo windows. */
+        int k = i + 2;
         while (k > 0 && (70 + k * 12 + w->w > video_w() ||
                          30 + k * 12 + w->h > work_bottom()))
             k -= 3;
@@ -4949,8 +5367,6 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
             w->y = work_bottom() - w->h > work_top() ? work_bottom() - w->h
                                                      : work_top();
         set_title(w, title);
-        w->has_button = 0;
-        w->counter = 0;
         w->owner = owner;
         w->content = buf;
         w->cw = cw;
@@ -5317,7 +5733,6 @@ static void kiosk_frame(int mx, int my)
         w->y = (video_h() - w->h) / 2;
         if (w->y < 30)
             w->y = 30;
-        w->has_button = 0;         /* nothing to close it with */
         w->minimized = 0;
         w->desk = cur_desk;
         focus_idx = i;
@@ -5568,26 +5983,18 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_ICON_LO, 186, 113, 0);
 
     icons_read_list();         /* which programs the dock holds, if the disk says */
+    desktop_read_items();      /* files the active user put on the desktop */
     wallpaper_load();          /* and the wallpaper, if the settings name one */
     look_refresh(1);           /* the theme, and the background drawn once */
-
-    if (!kiosk) {
-        /* Two kernel windows (no owner, no content buffer) */
-        wins[0] = (struct window){.x = 40, .y = 60, .w = 120, .h = 70,
-                                  .used = 1, .has_button = 1, .owner = -1};
-        set_title(&wins[0], "Terminal");
-        raise_win(0);
-        wins[1] = (struct window){.x = 180, .y = 95, .w = 120, .h = 70,
-                                  .used = 1, .has_button = 0, .owner = -1};
-        set_title(&wins[1], "Files");
-        raise_win(1);
-    }
+    bar_until = 3 * FRAME_HZ;
 
     for (;;) {
         uint32_t began = pit_ticks();
         reap_windows();
         look_refresh(0);
         anim_settle();
+        if (frames && frames % (2 * FRAME_HZ) == 0)
+            desktop_read_items();
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
@@ -5609,6 +6016,8 @@ static void desktop_thread(void *arg)
             continue;
         }
 
+        draw_desktop_icons();
+
         int ord[MAX_WIN];
         int n = zorder(ord);
         for (int k = 0; k < n; k++)      /* from the bottom up (Z order) */
@@ -5629,10 +6038,12 @@ static void desktop_thread(void *arg)
                         L.accent, 220);
         }
 
-        draw_bar();
+        if (bar_visible())
+            draw_bar();
         draw_dock();
         draw_tmenu();
         draw_menu();
+        draw_context_menu();
         draw_notes();
         draw_search();
         draw_volume();

@@ -17,6 +17,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W0 260
 #define H0 364
@@ -153,7 +154,7 @@ static num_t parse(const char *s)
     num_t v = 0, frac = 0;
     int places = 0, dot = 0;
     for (; *s; s++) {
-        if (*s == '.') {
+        if (*s == '.' || *s == ',') {
             dot = 1;
         } else if (!dot) {
             v = v * 10 + (*s - '0');
@@ -197,7 +198,7 @@ static void format(num_t v, char *out)
         int last = 5;
         while (last > 0 && f[last] == '0')
             last--;
-        out[k++] = '.';
+        out[k++] = ulocale_decimal_comma() ? ',' : '.';
         for (int i = 0; i <= last; i++)
             out[k++] = f[i];
     }
@@ -363,7 +364,15 @@ static void draw(int win, int cw, int ch)
     ud_round(win, 8, 8, cw - 16, DISP_H - 8, 12, l.field);
     if (expr[0])
         ud_text_right(win, cw - PAD - 4, EXPR_BASE, expr, l.dim, UD_SANS, 14);
+    char shown[ENTRY_MAX + 1];
     const char *big = failed ? "Error" : entry;
+    if (!failed && ulocale_decimal_comma()) {
+        int i = 0;
+        for (; entry[i]; i++)
+            shown[i] = entry[i] == '.' ? ',' : entry[i];
+        shown[i] = 0;
+        big = shown;
+    }
     int px = DISP_PX;
     while (px > 14 && ud_width(big, UD_SANS, px) > cw - 2 * PAD - 8)
         px -= 2;                         /* a long number gets smaller */
@@ -390,6 +399,8 @@ static void draw(int win, int cw, int ch)
             }
             ud_round(win, x, y, w, KEY_H, KEY_H / 2, face);
             const char *label = k;
+            if (k[0] == '.' && !k[1])
+                label = ulocale_decimal_comma() ? "," : ".";
             if (is_op && ch0 != '+' && ch0 != '=')
                 label = op_sign(ch0);
             else if (k[0] == '+' && k[1] == '/')

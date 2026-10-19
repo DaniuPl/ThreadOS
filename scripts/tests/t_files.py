@@ -11,11 +11,10 @@ asked twice.
 
 The assertions follow exactly that. The sizes are checked against a
 file whose length the test knows, because a column of numbers that
-comes from nowhere proves nothing. Deleting is checked in both halves:
-the first click only ASKS - and the file is still there afterwards -
-and the second one does it, which the kernel's own shell then confirms
-by failing to read the file. A folder is removed only when it is
-empty, and after the same question. What the system keeps for itself
+comes from nowhere proves nothing. Moving to Trash is checked in both
+halves: the first click only ASKS, and the second moves the file where
+the kernel's shell can independently find it. Restoring moves it back
+to its original path. What the system keeps for itself
 in the root (the swap file, the settings) stays out of the list until
 the 'hidden' setting asks for it.
 
@@ -60,9 +59,18 @@ def title(q):
     return q.window_title(WX, WY)
 
 
+def title_at(q, wx, wy):
+    return q.window_title(wx, wy)
+
+
 def rows(q):
     """(name, size) per row - read in the lettering the program writes in"""
     return [(n, sz) for n, sz, _ in q.gfiles_rows(CX, CY)]
+
+
+def rows_at(q, wx, wy):
+    return [(n, sz) for n, sz, _ in
+            q.gfiles_rows(wx + 1, wy + CONTENT_DY)]
 
 
 def row_y(names, name):
@@ -91,6 +99,27 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
+
+            # The compositor is a kernel task that starts as Guest before
+            # the profile is set up. The active account's Desktop must
+            # remain readable after sign-in changes that task's identity.
+            q.click_desktop()
+            q.type_line("write /home/admin/Desktop/desk.txt visible")
+            deadline = time.time() + 10
+            desk_label = ""
+            while time.time() < deadline:
+                w, h, at = q.screen_raw()
+                desk_label = q.find_ui(
+                    270, 352,
+                    ui_font_baseline_in(10, BAR_H + 8 + 43, 20),
+                    charset="desk.txt", px=10,
+                    under=lambda x, y: aurora_px(x, y, w, h),
+                    screen=(w, h, at))
+                if "desk.txt" in desk_label:
+                    break
+                time.sleep(0.25)
+            check("a file in the signed-in user's Desktop appears as an icon "
+                  "('%s')" % desk_label, "desk.txt" in desk_label)
 
             # Something to look at: a file whose length we know, and a
             # directory to walk into
@@ -168,17 +197,17 @@ def main():
             names = [r[0] for r in listed]
             check("and what was there shows again", "report.txt" in names)
 
-            # --- deleting asks first ------------------------------------
+            # --- moving to Trash asks first -----------------------------
             click(q, CX + GFILES_ROW_X, row_y(names, "report.txt"))
             click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             asked = q.ug_question(CX, CY, CH)
-            check("a click on 'Remove' asks a question instead of deleting ('%s')"
-                  % asked, "Remove" in asked and "report.txt" in asked)
+            check("a click on 'Trash' asks before moving the file ('%s')"
+                  % asked, "Move" in asked and "report.txt" in asked)
 
-            # The question removed nothing, and "Keep" has to leave it
+            # The question moves nothing, and "Keep" has to leave it
             # alone - a question whose answers both mean yes is not a
             # question. (While it is up, the list behind it is dimmed.)
             click(q, CX + MODAL["no"][0], CY + MODAL["no"][1], wait=2)
@@ -193,7 +222,7 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("only 'Remove' in the question removes it",
+            check("confirming 'Move' sends it to Trash",
                   "report.txt" not in [r[0] for r in rows(q)])
 
             # Confirmed by something that is not this program
@@ -204,8 +233,30 @@ def main():
             q.type_line("cat report.txt")
             time.sleep(2)
             after = q.serial()[seen:]
-            check("and the file really is gone from the disk",
+            check("the original path is no longer readable",
                   TEXT not in after)
+
+            trashed = q.command("cat /home/admin/.Trash/report.txt", TEXT,
+                                timeout=15)
+            check("and the file's data remains in the user's Trash",
+                  TEXT in trashed)
+
+            # A second file window opens Trash; Restore returns the entry
+            # to the exact path recorded when it was moved.
+            q.click_desktop()
+            q.type_line("run gfiles /home/admin/.Trash")
+            time.sleep(4)
+            TX, TY = WX + 12, WY + 12
+            check("Trash opens at its own path",
+                  title_at(q, TX, TY) == "Files: /home/admin/.Trash")
+            trash_rows = rows_at(q, TX, TY)
+            check("the removed item is listed in Trash",
+                  "report.txt" in [name for name, _ in trash_rows])
+            click(q, TX + NAME_X + NAME_W // 2, TY + BTN_Y, wait=2)
+            q.mouse_goto(600, 380)
+            time.sleep(2)
+            check("Restore puts it back in its original folder",
+                  "report.txt" in [name for name, _ in rows(q)])
 
             # --- a new name, asked for in the same status line ----------
             # The blocks do not move when a file is renamed, so this is
@@ -234,7 +285,7 @@ def main():
             check("and it changes it (%s)" % ", ".join(names),
                   "papers" in names and "documents" not in names)
 
-            # --- an empty folder is removed, after the same question ---
+            # --- an empty folder can be moved to Trash too --------------
             # (one with something in it is refused before asking -
             # scripts/tests/t_filetree.py)
             click(q, CX + 250, CY + 16, wait=1)
@@ -251,7 +302,7 @@ def main():
             q.mouse_goto(500, 380)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
-            check("and 'Remove' removes it",
+            check("and the folder leaves its original location",
                   "papers" not in [r[0] for r in rows(q)])
 
             # --- the 'hidden' setting shows them ------------------------

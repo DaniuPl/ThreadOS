@@ -40,21 +40,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-# The application window is slot 2: the compositor cascades them at
-# (70+12i, 30+12i), so (94,54). The terminal asks for TERM_W x TERM_H of
+# The application window keeps the original first cascade position,
+# (94,54). The terminal asks for TERM_W x TERM_H of
 # content - small enough to leave desktop to its right to grow into.
 WX, WY = 94, 54
 # The frame: the content, a line either side, and the title bar
 WW, WH = TERM_W + 2, TERM_H + TITLE_H + 2
 
-# Where to look, and why there. The kernel's own windows sit at
-# (40,60) 120x70 and (180,95) 120x70, so a probe has to fall inside the
-# application's window and outside both of those - otherwise it reads
-# somebody else's grey and says nothing.
-# Inside the terminal, past both kernel windows and clear of its text:
-# its own ground
+# Inside the terminal, clear of its text: its own ground.
 P_APP = (WX + 1 + TERM_W - 3, 200)
-P_DEAF = (170, 59 + CONTENT_DY)   # inside gdeaf, in the gap between them
+P_DEAF = (170, 59 + CONTENT_DY)
 
 
 def grey(px):
@@ -132,7 +127,7 @@ def main():
             check("the window is gone from the screen", not app_bg(at(*P_APP)))
             # The tile in the dock has to go too - a window that is gone
             # from the screen and left in the dock is half-closed
-            check("and it went from the dock", q.dock_windows() == 2)
+            check("and it went from the dock", q.dock_windows() == 0)
         finally:
             q.close()
 

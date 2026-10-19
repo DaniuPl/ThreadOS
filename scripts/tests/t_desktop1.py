@@ -109,80 +109,39 @@ def main():
         time.sleep(1.0)
         dark = theme("dark")
 
-        # The windows: win0 (40,60,120x70) and win1 (180,95). The mouse
-        # starts at (160,100). At boot nothing has the focus, so both
-        # title bars are the quiet colour and both have grey lights.
-        _, _, at = q5.screen_raw()
-        check("window 0: the title bar is drawn (150,63)",
-              near(at(150, 63), dark["title_off"], 3))
-        check("window 0: the body (130,120)",
-              near(at(130, 120), dark["win_bg"], 3))
-        check("window 1: the title bar is drawn (290,98)",
-              near(at(290, 98), dark["title_off"], 3))
-        check("neither has the focus: their lights are grey",
-              near(at(*light_xy(40, 60, 0)), dark["light_off"], 8) and
-              near(at(*light_xy(180, 95, 0)), dark["light_off"], 8))
-        # The corners are round: the very corner pixel is the shadow
-        # over the aurora, not the window, and the next ones in are
-        check("the window's corner is round (40,60 is not the window, "
-              "44,64 is)",
-              not near(at(40, 60), dark["title_off"], 6) and
-              near(at(44, 64), dark["title_off"], 3))
-        # ... and under it lies a shadow: darker than the aurora there
-        sx, sy = 100, 60 + 70 + 3
-        check("the window casts a shadow (100,133 darker than the aurora)",
-              sum(at(sx, sy)) < sum(aurora_px(sx, sy)) - 30)
+        check("the desktop has no placeholder windows", q5.dock_windows() == 0)
+        q5.launch_dock(4)
+        time.sleep(3)
+        check("a real application opens in the first cascade slot",
+              q5.wait_focus(94, 54))
 
-        # Dragging window 0 by its bar, clear of the lights: the cursor
-        # (160,100) -> (140,66), press, move (+80,+50), release. The
-        # window -> (120,110).
-        q5.mouse_move(-20, -34)
+        # Drag the app by its title bar, away from the lights.
+        q5.mouse_goto(160, 58)
         q5.mouse_button(True)
         q5.mouse_move(80, 50)
         q5.mouse_button(False)
-        # Dragging a window's bar gives it the focus: its lights light up
-        check("window 0 was dragged to a new place and has the focus "
-              "(its close light at %d,%d is red)" % light_xy(120, 110, 0),
-              q5.wait_focus(120, 110))
+        check("dragging the application window moves it and keeps focus",
+              q5.wait_focus(174, 104))
         _, _, at = q5.screen_raw()
-        check("window 0's title bar is the focused colour (230,113)",
-              near(at(230, 113), dark["title_bg"], 3))
-        check("window 0's old place was cleaned up (the aurora at 60,90)",
-              q5.is_background(60, 90, tol=0))
-        check("window 1 was untouched during the drag (290,98)",
-              near(at(290, 98), dark["title_off"], 3))
+        check("the title bar shows the focused colour",
+              near(at(244, 107), dark["title_bg"], 3))
     finally:
         q5.close()
 
-    # --- The desktop: clickable controls (an action button + closing) ---
-    print("--- the desktop: controls (a click) ---")
+    # --- The desktop: closing an application window -------------------
+    print("--- the desktop: closing an application ---")
     q6 = Qemu(KERNEL, INITRD)
     try:
         q6.wait_desktop()
         time.sleep(1.0)
-        # win0 (40,60,120x70): a 'Click' button 44x18 at (50,94) and the
-        # counter after it, written in TrueType
-        base = ui_baseline_in(94, 18)
-        ink = theme("dark")["title_text"]
-        before = q6.read_ui(102, base, width=40, charset="0123456789", fg=ink)
-        q6.mouse_goto(70, 102)                 # the middle of the button
-        for _ in range(3):
-            q6.mouse_click()
+        q6.launch_dock(4)
+        time.sleep(3)
+        check("the application opened", q6.dock_windows() == 1)
+        q6.click(*light_xy(94, 54, 0))
         q6.mouse_goto(300, 300)
-        time.sleep(0.8)
-        after = q6.read_ui(102, base, width=40, charset="0123456789", fg=ink)
-        check("the action button answers a click: the counter went from "
-              "'%s' to '%s'" % (before, after), before == "0" and after == "3")
-
-        # Closing a window: a click on window 1's red light
-        q6.click(*light_xy(180, 95, 0))
-        q6.mouse_goto(300, 300)
-        check("a click on the close light closes the window (the aurora is "
-              "back at 240,130)", q6.wait_background(240, 130, tol=0))
-        # window 0 is still there (the click did not touch other windows),
-        # and clicking its button gave it the focus
-        check("the other window stays open after the close, with the focus",
-              q6.wait_focus(40, 60))
+        time.sleep(3)
+        check("the close light closes the application window",
+              q6.dock_windows() == 0)
     finally:
         q6.close()
 
@@ -196,12 +155,11 @@ def main():
         q7.type_line("run guiapp")
         time.sleep(1.2)
 
-        # guiapp -> slot 2 (slots 0/1 are the kernel's windows): the window
-        # (94,54), its content from (95, 54 + CONTENT_DY). The RGB
+        # guiapp opens in its first cascade position, at (94,54). The RGB
         # squares are drawn through syscalls.
-        check("the ring 3 application drew a red square (101,71)",
+        check("the ring 3 application drew a red square",
               q7.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
-        check("the ring 3 application drew a blue square (170,75)",
+        check("the ring 3 application drew a blue square",
               q7.wait_pixel(170, 75 + DOWN, (0, 0, 255)))
 
         # Events: a click in the window's body reaches the application
@@ -252,8 +210,7 @@ def main():
         # kill by name - the pid depends on how many threads started
         # earlier
         q7.type_line("kill guiapp")
-        # (200,75) is inside guiapp's window and clear of the kernel's
-        # two and of their shadows
+        # (200,75) is inside guiapp's window.
         check("once the application is killed its window is cleaned up "
               "(the aurora at 200,75)", q7.wait_background(200, 75, tol=0))
     finally:
@@ -266,7 +223,7 @@ def main():
         q8.wait_desktop()
         time.sleep(1.0)
         _, _, at = q8.screen_raw()
-        # before the application starts, slot 2 is empty
+        # before the application starts, the first cascade slot is empty
         check("before the launch there is no application window (101,71 is not red)",
               not near(at(101, 71 + DOWN), (255, 0, 0)))
 
@@ -292,20 +249,20 @@ def main():
         check("the menu closes after a choice (its entry is gone)",
               entry("guiapp") == "")
 
-        # The windows in the dock: Terminal, Files, guiapp. guiapp is on
-        # top (freshly started) - red at (101,71). A click on the
-        # Terminal's tile brings it to the top and focuses it: guiapp's
-        # red gets covered by the kernel's window.
-        q8.click(*dock_window(0, 3))
+        # Opening a second program lets the first window's dock tile
+        # bring the original application back to the top.
+        q8.launch_menu("gclock")
+        time.sleep(3)
+        q8.click(*dock_window(0, 2))
         q8.mouse_goto(300, 300)
         check("a click on a window's tile brings the window to the top (the red one is covered)",
-              q8.wait_pixel(101, 60 + CONTENT_DY + 2, theme("dark")["win_bg"], 4))
-        check("and gives it the focus", q8.wait_focus(40, 60))
+              q8.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
+        check("and gives it the focus", q8.wait_focus(94, 54))
         # The window that is listening has its dot in the accent colour
-        g = dock_geom(n_w=3)
+        g = dock_geom(n_w=2)
         tx, ty = g["tiles"][DOCK_N]
         dot = (tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
-        dot2 = (g["tiles"][DOCK_N + 2][0] + g["tile"] // 2, dot[1])
+        dot2 = (g["tiles"][DOCK_N + 1][0] + g["tile"] // 2, dot[1])
         _, _, at = q8.screen_raw()
         check("the focused window's dot in the dock is the accent (%s)"
               % (at(*dot),), near(at(*dot), theme("dark")["accent"], 50))

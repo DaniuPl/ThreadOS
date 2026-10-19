@@ -1,8 +1,8 @@
 /* gpaint - drawing with the mouse (ring 3)
  *
  * A canvas, a brush in one of eight colours and three sizes, a rubber,
- * and two buttons: one clears the canvas, one saves it - as a BMP,
- * which the picture viewer opens (Ctrl+S does the same). The brush has
+ * and buttons to clear, save a BMP, or apply the drawing as wallpaper
+ * (Ctrl+S saves the BMP). The brush has
  * a soft edge, the way everything on this desktop has: how much of a
  * pixel the round tip covers is how much of the colour it takes.
  *
@@ -26,16 +26,21 @@
 #define SW_X0  12
 #define SW_STEP 28
 #define SW_Y   ((TOOL_H - SW_D) / 2)
-#define SIZE_X0 248           /* the three sizes */
-#define SIZE_STEP 26
+#define SIZE_X0  236           /* the three sizes */
+#define SIZE_STEP 24
 #define BTN_Y  9
 #define BTN_H  26
-#define CLEAR_X 330
-#define CLEAR_W 48
-#define SAVE_X  384
-#define SAVE_W  48
+#define CLEAR_X 310
+#define CLEAR_W 38
+#define SAVE_X  352
+#define SAVE_W  38
+#define WALL_X  394
+#define WALL_W  42
 
 #define FILE_NAME "drawing.bmp"
+#define WALL_FILE "/wallpaper.twl"
+#define WALL_W_PIX 160
+#define WALL_H_PIX 120
 
 static const uint32_t colours[8] = {
     0x1C1C1E, 0xFF3B30, 0xFF9500, 0xFFCC00, 0x34C759, 0x0A84FF, 0xAF52DE,
@@ -47,6 +52,9 @@ static uint32_t canvas[CW * CH];
 static int colour = 0, size = 1;
 static int painting, last_x, last_y;
 static int dx0, dy0, dx1, dy1;    /* what changed since it was shown */
+static int wall_asking, wall_error, wall_dialog_dimmed;
+static char wall_pass[USER_PASSWORD_MAX + 1];
+static int wall_pass_len;
 
 static void dirty(int x0, int y0, int x1, int y1)
 {
@@ -138,6 +146,101 @@ static void le32(uint8_t *p, uint32_t v)
         p[i] = (uint8_t)(v >> (8 * i));
 }
 
+static int write_all(int fd, const void *data, uint32_t size)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    while (size) {
+        int64_t n = sys_write(fd, p, size);
+        if (n <= 0)
+            return -1;
+        p += n;
+        size -= (uint32_t)n;
+    }
+    return 0;
+}
+
+static void apply_wallpaper(void)
+{
+    int fd = (int)sys_open(WALL_FILE, O_WRITE | O_CREATE | O_TRUNC);
+    if (fd < 0) {
+        sys_notify("Paint", "Could not create wallpaper.twl in the system root.");
+        return;
+    }
+
+    uint8_t header[8] = { 'T', 'W', 'L', '2' };
+    le16(header + 4, WALL_W_PIX);
+    le16(header + 6, WALL_H_PIX);
+    int failed = write_all(fd, header, sizeof(header)) < 0;
+    uint8_t row[WALL_W_PIX * 3];
+    for (int y = 0; y < WALL_H_PIX && !failed; y++) {
+        int sy = y * CH / WALL_H_PIX;
+        for (int x = 0; x < WALL_W_PIX; x++) {
+            uint32_t c = canvas[sy * CW + x * CW / WALL_W_PIX];
+            row[x * 3] = (uint8_t)(c >> 16);
+            row[x * 3 + 1] = (uint8_t)(c >> 8);
+            row[x * 3 + 2] = (uint8_t)c;
+        }
+        if (write_all(fd, row, sizeof(row)) < 0)
+            failed = 1;
+    }
+    sys_close(fd);
+    if (failed) {
+        sys_notify("Paint", "Could not write the wallpaper file.");
+        return;
+    }
+
+    int32_t rc = sys_cfg_set("wallpaper", "wallpaper.twl");
+    if (rc == 0)
+        sys_notify("Paint", "The drawing is now the desktop wallpaper.");
+    else
+        sys_notify("Paint", "The wallpaper was saved, but Settings could not apply it.");
+}
+
+static void wallpaper_click(void)
+{
+    wall_error = 0;
+    wall_pass_len = 0;
+    wall_pass[0] = 0;
+    if (sys_level() == LEVEL_ADMIN) {
+        apply_wallpaper();
+        return;
+    }
+    wall_asking = 1;
+    wall_dialog_dimmed = 0;
+}
+
+static void wallpaper_key(char c)
+{
+    if (c == '\n' || c == '\r') {
+        wall_pass[wall_pass_len] = 0;
+        if (!wall_pass_len || sys_auth(wall_pass) != 0) {
+            wall_error = 1;
+        } else {
+            wall_asking = 0;
+            wall_dialog_dimmed = 0;
+            dirty(0, 0, CW, CH);
+            apply_wallpaper();
+            sys_drop();
+        }
+        for (int i = 0; i < wall_pass_len; i++)
+            wall_pass[i] = 0;
+        wall_pass_len = 0;
+    } else if (c == 27) {
+        wall_asking = 0;
+        wall_error = 0;
+        wall_dialog_dimmed = 0;
+        wall_pass_len = 0;
+        wall_pass[0] = 0;
+        dirty(0, 0, CW, CH);
+    } else if (c == '\b') {
+        if (wall_pass_len)
+            wall_pass[--wall_pass_len] = 0;
+    } else if (c >= 0x20 && c < 0x7F &&
+               wall_pass_len < (int)sizeof(wall_pass) - 1) {
+        wall_pass[wall_pass_len++] = c;
+    }
+}
+
 static void save(void)
 {
     int fd = (int)sys_open(FILE_NAME, O_WRITE | O_CREATE | O_TRUNC);
@@ -223,10 +326,15 @@ static void draw_tools(int win)
     ud_round(win, SAVE_X, BTN_Y, SAVE_W, BTN_H, 7, l.accent);
     ud_text_mid(win, SAVE_X, BTN_Y, SAVE_W, BTN_H, "Save", l.on_accent,
                 UD_BOLD, UD_PX);
+    ud_round(win, WALL_X, BTN_Y, WALL_W, BTN_H, 7, l.row);
+    ud_text_mid(win, WALL_X, BTN_Y, WALL_W, BTN_H, "Wall", l.text,
+                UD_SANS, UD_PX);
 }
 
 static void tool_click(int x, int y)
 {
+    if (wall_asking)
+        return;
     for (int i = 0; i < 8; i++) {
         int sx = SW_X0 + i * SW_STEP;
         if (x >= sx && x < sx + SW_D && y >= SW_Y && y < SW_Y + SW_D)
@@ -242,7 +350,36 @@ static void tool_click(int x, int y)
             clear_canvas();
         if (x >= SAVE_X && x < SAVE_X + SAVE_W)
             save();
+        if (x >= WALL_X && x < WALL_X + WALL_W)
+            wallpaper_click();
     }
+}
+
+static void draw_wall_dialog(int win)
+{
+    if (!wall_asking)
+        return;
+    struct ud_look l;
+    ud_look(&l);
+    int x = (CW - 280) / 2, y = TOOL_H + (CH - 100) / 2;
+    if (!wall_dialog_dimmed) {
+        ud_fill_a(win, 0, TOOL_H, CW, CH, 0x000000, l.dark ? 170 : 110);
+        wall_dialog_dimmed = 1;
+    }
+    ud_round(win, x, y, 280, 100, 10, l.bg);
+    ud_ring(win, x, y, 280, 100, 10, l.line);
+    ud_text(win, x + 14, y + 23, "Set wallpaper", l.text, UD_BOLD, UD_PX);
+    ud_text(win, x + 14, y + 43, "Admin password:", l.dim, UD_SANS, UD_PX);
+    int px = x + 112;
+    for (int i = 0; i < wall_pass_len; i++, px += 10)
+        ud_disc(win, px, y + 36, 6, l.text);
+    ud_fill(win, px, y + 32, 1, 12, l.accent);
+    if (wall_error)
+        ud_text(win, x + 14, y + 63, "Password not accepted", l.danger,
+                UD_SANS, 11);
+    else
+        ud_text(win, x + 14, y + 63, "Enter confirms; Escape cancels",
+                l.dim, UD_SANS, 11);
 }
 
 void _start(void)
@@ -264,7 +401,9 @@ void _start(void)
             if (ev.type == WEV_CLOSE)
                 sys_exit(0);
             if (ev.type == WEV_PRESS) {
-                if (ev.y >= TOOL_H) {
+                if (wall_asking) {
+                    continue;
+                } else if (ev.y >= TOOL_H) {
                     painting = 1;
                     last_x = ev.x;
                     last_y = ev.y - TOOL_H;
@@ -279,7 +418,9 @@ void _start(void)
                 painting = 0;
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
-                if (c == KEY_SAVE)
+                if (wall_asking) {
+                    wallpaper_key(c);
+                } else if (c == KEY_SAVE)
                     save();
                 else if (c >= '1' && c <= '8')
                     colour = c - '1';
@@ -295,6 +436,7 @@ void _start(void)
         if (tools)
             draw_tools(win);
         show_canvas(win);
+        draw_wall_dialog(win);
         sys_sleep(20);
     }
 }

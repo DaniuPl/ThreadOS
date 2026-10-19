@@ -57,13 +57,18 @@ def dot_at(at, g, k):
     tx, ty = g["tiles"][k]
     return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
+def bar_name(q):
+    return q.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
+                     ui_font_baseline_in(BAR_PX, 0, BAR_H),
+                     charset="ThreadOS", px=BAR_PX, under=on_bar)
+
 
 def open_two(q, want=None):
     """The clock and the settings, from the dock. Each new window adds a
     tile, and the dock - as wide as what is in it - moves."""
-    q.launch_dock(CLOCK, n_w=2, want=want)
+    q.launch_dock(CLOCK, n_w=0, want=want)
     time.sleep(2.5)
-    q.launch_dock(SETTINGS, n_w=3, want=want)
+    q.launch_dock(SETTINGS, n_w=1, want=want)
     time.sleep(2.5)
     q.mouse_goto(600, 300)
     time.sleep(1.5)
@@ -81,19 +86,37 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
+
+            q.mouse_goto(LOGO_XY[0], 1)
+            time.sleep(0.4)
+            q.mouse_goto(300, BAR_MID)
+            time.sleep(0.4)
+            check("the top bar is visible while the pointer uses it",
+                  bar_name(q) == "ThreadOS")
+            q.mouse_goto(600, 300)
+            deadline = time.time() + 6
+            while time.time() < deadline and bar_name(q) == "ThreadOS":
+                time.sleep(0.2)
+            check("the idle top bar hides",
+                  bar_name(q) != "ThreadOS")
+            q.mouse_goto(LOGO_XY[0], 1)
+            time.sleep(0.4)
+            q.mouse_goto(300, BAR_MID)
+            time.sleep(0.4)
+            check("moving to the top edge reveals the bar",
+                  bar_name(q) == "ThreadOS")
+
             open_two(q)
 
-            g = dock_geom(n_w=4)
+            g = dock_geom(n_w=2)
             w, h, at = q.screen_raw()
-            win = [tile_px(at, g, DOCK_N + j) for j in range(4)]
+            win = [tile_px(at, g, DOCK_N + j) for j in range(2)]
             check("the clock's window wears the clock's picture - pixel for "
-                  "pixel the same as its tile", win[2] == tile_px(at, g, CLOCK))
+                  "pixel the same as its tile", win[0] == tile_px(at, g, CLOCK))
             check("the settings' window wears the settings' picture",
-                  win[3] == tile_px(at, g, SETTINGS))
-            check("and the two pictures are different", win[2] != win[3])
-            check("the kernel's two windows share the plain window, the "
-                  "picture of the first program",
-                  win[0] == win[1] == tile_px(at, g, 0))
+                  win[1] == tile_px(at, g, SETTINGS))
+            check("the two application windows have different pictures",
+                  win[0] != win[1])
 
             dark = theme("dark")
             running = [k for k in range(DOCK_N)
@@ -131,7 +154,7 @@ def main():
             # A picture says WHICH program; it does not say which of two
             # terminals. The name comes up over the tile the pointer is
             # on, and only then.
-            said = q.dock_hint(DOCK_N + 3, n_w=4)
+            said = q.dock_hint(DOCK_N + 1, n_w=2)
             check("the window's name comes up over its tile ('%s')" % said,
                   said == "Settings")
             q.mouse_goto(300, 300)          # the pointer off the dock
@@ -166,7 +189,7 @@ def main():
                 q2.mouse_home()
                 open_two(q2, want=want)
 
-                g = dock_geom(n_w=4, want=want)
+                g = dock_geom(n_w=2, want=want)
                 w, h, at = q2.screen_raw()
                 tx, ty = g["tiles"][0]
                 t = g["tile"]
@@ -184,15 +207,15 @@ def main():
                       min(edge) > 240 and max(out) < 230 and
                       min(at(tx + t // 2, ty + t // 2 + 2)) > 200)
                 check("a window's tile is still its program's picture",
-                      tile_px(at, g, DOCK_N + 3) == tile_px(at, g, SETTINGS))
+                      tile_px(at, g, DOCK_N + 1) == tile_px(at, g, SETTINGS))
 
                 # The one that matters: a tile clicks where it is drawn,
                 # whatever size the setting made it. The Terminal goes
                 # behind the settings, then its tile brings it back.
-                q2.click(*dock_window(0, 4, want=want))
+                q2.click(*dock_window(0, 2, want=want))
                 q2.mouse_goto(600, 300)
                 check("and a click on a window's tile, where it is seen, "
-                      "gives that window the focus", q2.wait_focus(40, 60))
+                      "gives that window the focus", q2.wait_focus(94, 54))
             finally:
                 q2.close()
         finally:

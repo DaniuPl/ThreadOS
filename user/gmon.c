@@ -12,6 +12,7 @@
  */
 
 #include "udraw.h"
+#include "ubytes.h"
 
 #define W 220                 /* the content */
 #define H 132
@@ -111,11 +112,9 @@ void _start(void)
             ud_round(w, PAD, 30, fill, 8, 4, l.accent);
 
         char v[32];
-        num(v, si.used_kib);
-        cat(v, " KiB");
+        format_bytes((uint64_t)si.used_kib * 1024, v, sizeof(v));
         row(w, &l, 44, "Used", v);
-        num(v, si.ram_kib);
-        cat(v, " KiB");
+        format_bytes((uint64_t)si.ram_kib * 1024, v, sizeof(v));
         row(w, &l, 62, "Total", v);
         num(v, si.uptime_s);
         cat(v, " s");

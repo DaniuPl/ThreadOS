@@ -90,13 +90,8 @@ def main():
             check("the kernel read the icon list and says how many",
                   "icons from the file 'desktop.icons': 3" in log)
 
-            # Three programs and the kernel's two windows: the dock is
-            # laid out for exactly that - a dot under each window's
-            # tile where three programs put it, and not where four or
-            # nine would have
-            check("there are three programs in the dock, and not one more",
-                  q.dock_windows(n_l=3) == 2 and q.dock_windows(n_l=4) != 2
-                  and q.dock_windows() != 2)
+            check("the desktop starts with no application windows",
+                  q.dock_windows(n_l=3) == 0)
 
             for k, (app, label, art) in enumerate(wanted):
                 got = q.dock_hint(k, n_l=3)
@@ -138,7 +133,7 @@ def main():
             time.sleep(2)
 
             check("the dock comes back to its nine programs",
-                  q2.dock_windows() == 2)
+                  q2.dock_windows() == 0)
             first = q2.dock_hint(0)
             check("and the first of them is the usual one ('%s')" % first,
                   first == "App")

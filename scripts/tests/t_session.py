@@ -14,8 +14,7 @@ end something, and what is asserted is what that promises:
   machine running with everything on it
 
   Lock Screen locks; Log Out closes the programs that were open (their
-  tiles leave the dock), leaves the kernel's own windows, and the lock
-  that is left says it is a log in
+  tiles leave the dock), and the lock that is left says it is a log in
 
   Restart really restarts the machine and Shut Down really switches it
   off - QEMU runs with -no-reboot, so either way it ends, and the
@@ -97,8 +96,8 @@ def typed(q, text):
         time.sleep(0.12)
 
 
-def kernel_window(q):
-    return q.window_title(40, 60, 122) != ""
+def desktop_unlocked(q):
+    return lock_says(q) == ""
 
 
 def session(slog):
@@ -228,7 +227,7 @@ def session(slog):
         time.sleep(1)
         check("and Enter closes it",
               q.read_ui(tx, ay + ASK_TITLE_Y, 260, px=15, face="bold",
-                        fg=DARK["app_text"]) == "" and kernel_window(q))
+                        fg=DARK["app_text"]) == "" and desktop_unlocked(q))
 
         # Each of the three asks first
         for name, want, act in (("Log Out...", "Log out?", "Log Out"),
@@ -245,7 +244,7 @@ def session(slog):
             time.sleep(1)
             check("and Cancel leaves everything as it was ('%s' gone, the "
                   "window there)" % question(q)[0],
-                  question(q)[0] == "" and kernel_window(q) and
+                  question(q)[0] == "" and desktop_unlocked(q) and
                   q.proc.poll() is None)
 
         # Neither Esc nor a click beside the buttons is a yes
@@ -270,36 +269,36 @@ def session(slog):
         pick(q, "Lock Screen")
         said = lock_says(q)
         check("Lock Screen locks ('%s')" % said,
-              not kernel_window(q) and "to unlock" in said)
+              "to unlock" in said)
         typed(q, "thread\n")
         time.sleep(2)
         q.mouse_goto(600, 300)
         time.sleep(1)
-        check("and the password opens it", kernel_window(q))
+        check("and the password opens it", desktop_unlocked(q))
 
-        # Log Out: the programs end, the kernel's windows stay
+        # Log Out: the programs end and the profile locks
         q.click_desktop()
         q.type_line("run gclock")
         time.sleep(3)
         q.mouse_goto(600, 300)
         time.sleep(1)
-        check("before: a program is open (3 windows in the dock)",
-              q.dock_windows() == 3)
+        check("before: a program is open (1 window in the dock)",
+              q.dock_windows() == 1)
         pick(q, "Log Out...")
         q.sendkey("ret")
         time.sleep(2)
         said = lock_says(q)
         check("Enter logs out, and the lock says it is a log in ('%s')"
-              % said, "to log in" in said and not kernel_window(q))
+              % said, "to log in" in said and not desktop_unlocked(q))
         check("the logged-out screen shows the saved profile name",
               lock_profile(q) == "Test Admin")
         typed(q, "thread\n")
         time.sleep(2)
         q.mouse_goto(600, 300)
         time.sleep(1)
-        check("logged in again: the program was closed (2 windows in the "
-              "dock), the kernel's own windows stayed",
-              q.dock_windows() == 2 and kernel_window(q))
+        check("logged in again: the program was closed (no windows in the "
+              "dock)",
+              q.dock_windows() == 0 and desktop_unlocked(q))
 
         # Restart, for real
         pick(q, "Restart...")

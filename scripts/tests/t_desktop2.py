@@ -195,39 +195,37 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         dark = theme("dark")
-        # win0 "Terminal" (40,60,120x70)
-        _, _, at = q13.screen_raw()
-        check("window 0: the title bar is drawn before the minimise (150,63)",
-              near(at(150, 63), dark["title_off"], 3))
+        q13.launch_dock(4)
+        time.sleep(3)
+        wx, wy = 94, 54
+        check("the terminal opens in the first cascade slot",
+              q13.wait_focus(wx, wy))
 
-        # win0's yellow light minimises it: the window goes, the aurora
-        # comes back
-        q13.click(*light_xy(40, 60, 1))
+        # The yellow light minimises it: the window goes and the aurora
+        # comes back.
+        q13.click(*light_xy(wx, wy, 1))
         q13.mouse_goto(400, 300)              # move the cursor away
-        check("a minimised window goes from the desktop (the aurora at 80,64)",
-              q13.wait_background(80, 64, tol=0))
+        check("a minimised window goes from the desktop",
+              q13.wait_background(wx + 10, wy + 60, tol=0))
 
-        # The window is still in the dock (the first window's tile). A
-        # click brings it back, with the focus.
-        q13.click(*dock_window(0, 2))
+        # The window is still in the dock. A click brings it back.
+        q13.click(*dock_window(0, 1))
         q13.mouse_goto(400, 300)
         check("a click on its tile in the dock brings a minimised window back",
-              q13.wait_focus(40, 60))
+              q13.wait_focus(wx, wy))
 
-        # Resizing: win0's grip in the bottom right corner (the last ten
-        # pixels each way). Before, (170,140) is outside the window - its
-        # shadow at most. We drag the grip (155,125) by (+60,+40) -> the
-        # window grows and covers (170,140).
-        _, _, at = q13.screen_raw()
-        check("before the resize the point is outside the window (170,140)",
-              not near(at(170, 140), dark["win_bg"], 4))
-        q13.mouse_goto(155, 125)
+        # Pull the bottom-right grip outward. A point beyond the old edge
+        # now belongs to the terminal's content.
+        grip_x = wx + TERM_W + 2 - 4
+        grip_y = wy + TERM_H + TITLE_H + 2 - 4
+        probe_x, probe_y = grip_x + 30, grip_y + 20
+        q13.mouse_goto(grip_x, grip_y)
         q13.mouse_button(True)
         q13.mouse_move(60, 40)
         q13.mouse_button(False)
         q13.mouse_goto(400, 300)
-        check("after the resize the window is bigger (170,140 the window's body)",
-              q13.wait_pixel(170, 140, dark["win_bg"], 3))
+        check("after the resize the terminal grew to cover the point",
+              q13.wait_pixel(probe_x, probe_y, dark["app_field"], 8))
     finally:
         q13.close()
 

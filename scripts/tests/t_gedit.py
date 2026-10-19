@@ -567,9 +567,8 @@ def main():
             # to a text file means opening it in the editor.
             q.sendkey("alt-f4")
             time.sleep(2.5)
-            # The editor is closed again: the kernel's two windows are
-            # all the dock holds
-            q.launch_dock(2, n_w=2)            # the "Files" tile
+            # The editor is closed; launch the file manager.
+            q.launch_dock(2, n_w=0)            # the "Files" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)

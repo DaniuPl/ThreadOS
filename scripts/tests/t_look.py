@@ -19,8 +19,7 @@ the STRUCTURE of it, which is what the eye actually reads:
 
   the background is not a fill: hundreds of colours down one column,
   and no step between two neighbouring rows big enough to be seen
-  a window's body is one colour, its corners are round, and it stands
-  on a shadow - darker right under it than a little further away
+  application windows have round corners and a shadow
   which window has the focus can be SEEN: its lights are coloured, its
   title bar a shade apart and its dot in the dock the accent - nobody
   else's - and clicking another window moves all three
@@ -74,41 +73,39 @@ def main():
             check("and nothing in it is a step (the biggest from one row to "
                   "the next: %d)" % step, step <= 4)
 
-            # --- a window: one body, round corners, a shadow -----------
-            # win0 is at (40,60) 120x70
-            body = [at(110, 120), at(140, 120), at(60, 118), at(150, 90)]
-            check("the inside of the window is one colour (%s)" % (body[0],),
-                  all(p == body[0] for p in body))
-            check("its corners are round: the very corner is not the window",
-                  at(40, 129) != body[0] and at(159, 129) != body[0] and
-                  at(44, 125) == body[0])
-            near_, far_ = at(100, 60 + 70 + 2), at(100, 60 + 70 + 20)
-            check("and it stands on a shadow (%s right under it, %s further "
-                  "down)" % (near_, far_),
-                  lum(near_) < lum(aurora_px(100, 132)) - 20 and
-                  far_ == aurora_px(100, 60 + 70 + 20))
+            check("the desktop starts without placeholder windows",
+                  q.dock_windows() == 0)
+            q.launch_dock(4)
+            time.sleep(3)
+            q.launch_dock(1)
+            time.sleep(3)
 
-            # --- which window is listening can be seen -----------------
-            check("at the start no window has the focus: grey lights",
-                  not q.has_focus(40, 60) and not q.has_focus(180, 95))
+            # --- application windows and their shadows -----------------
+            w, h, at = q.screen_raw()
+            check("the first application's corners are rounded",
+                  at(94, 54) != at(98, 58))
+            near_, far_ = at(124, 54 + TERM_H + TITLE_H + 2), \
+                          at(124, 54 + TERM_H + TITLE_H + 20)
+            check("the first application casts a shadow",
+                  lum(near_) < lum(aurora_px(124, 54 + TERM_H + TITLE_H + 2))
+                  and far_ == aurora_px(124, 54 + TERM_H + TITLE_H + 20))
 
-            q.click(140, 66)             # window 0's title bar
+            # --- which application is listening can be seen ------------
+            q.click(150, 58)             # first window's visible title strip
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("after the click window 0's lights are on",
-                  q.has_focus(40, 60))
-            check("and its title bar is a shade apart",
-                  near(at(150, 63), dark["title_bg"], 3) and
-                  near(at(290, 98), dark["title_off"], 3))
-            check("and window 1's are not", not q.has_focus(180, 95))
+            check("after the click the first application has focus",
+                  q.has_focus(94, 54))
+            check("its title bar is the focused colour",
+                  near(at(150, 58), dark["title_bg"], 3))
 
-            q.click(280, 99)             # window 1's title bar
+            q.click(280, 70)             # second window's title bar
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("a click on the second window moves the focus onto it",
-                  q.has_focus(180, 95) and not q.has_focus(40, 60))
+            check("a click on the second application moves the focus",
+                  q.has_focus(106, 66) and not q.has_focus(94, 54))
             # --- the dock says the same thing --------------------------
             check("its dot in the dock is the accent (%s)" % (dot_of(at, 1),),
                   near(dot_of(at, 1), dark["accent"], 50))
@@ -146,8 +143,8 @@ def main():
             check("and the background", at(550, 250) ==
                   aurora_px(550, 250, dark=False))
             check("and the windows (%s)" % (at(150, 63),),
-                  near(at(150, 63), light["title_off"], 3) and
-                  near(at(290, 98), light["title_bg"], 3))
+                  near(at(150, 58), light["title_off"], 3) and
+                  near(at(150, 70), light["title_bg"], 3))
         finally:
             q.close()
     finally:

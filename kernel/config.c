@@ -53,6 +53,9 @@ static struct setting settings[] = {
                             "1 quick, 2-10 that many times slower", 0, { 0 } },
     { "hidden", "0",        "the file manager shows system files: 0 no,\n"
                             "1 yes", 0, { 0 } },
+    { "datefmt", "dmy",     "date order: dmy, mdy or iso",          0, { 0 } },
+    { "timefmt", "24h",     "clock: 24h or 12h",                   0, { 0 } },
+    { "numfmt",  "dot",     "decimal mark: dot or comma",           0, { 0 } },
     /* Legacy bootstrap data for migrating the first admin account.
        Hidden values are not written back to the public settings file. */
     { "password",  "14605732860167589771",
