@@ -1,10 +1,7 @@
 /* Minimal PCI access (mechanism 1, ports 0xCF8/0xCFC)
  *
- * Used in two ways:
- *  - finding the linear framebuffer address of a graphics card
- *    (class 0x03, BAR0 -> the physical address of video memory),
- *  - finding the RTL8139 network card by vendor/device and enabling
- *    its bus mastering (DMA), without which it will not start.
+ * Drivers use these helpers to find PCI devices by ID or class, inspect
+ * BARs and enable bus mastering for DMA.
  */
 
 #include "include/pci.h"

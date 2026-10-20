@@ -837,7 +837,8 @@ void net_ping(uint32_t ip, int count)
 void net_ifconfig(void)
 {
     if (!netdev_present()) {
-        printk("there is no network card (QEMU: -device e1000 or rtl8139)\n");
+        printk("there is no network card (QEMU: -device e1000, rtl8139, "
+               "or virtio-net-pci,disable-modern=on)\n");
         return;
     }
     const uint8_t *m = netdev_mac();

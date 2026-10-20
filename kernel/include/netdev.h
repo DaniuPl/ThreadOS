@@ -8,9 +8,8 @@
  * The same thing blk.c does for disks: above the drivers there is one
  * name, and which of them answered is a matter for startup. The
  * network code asks for a MAC address and sends frames without knowing
- * whether underneath sits an RTL8139 with I/O ports or an e1000 with
- * registers in memory - and those are two completely different ways of
- * talking to a card.
+ * whether underneath sits an RTL8139 with I/O ports, an e1000 with
+ * registers in memory, or a VirtIO device with split queues.
  *
  * Reception goes the other way: the driver calls net_rx itself when a
  * frame arrives. This layer does not mediate that - it would be

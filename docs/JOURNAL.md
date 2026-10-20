@@ -5810,3 +5810,10 @@ works and is checked by `make test`.
       rather than returning through an invalid stack. `t_desktop64` and the
       terminal groups cover these paths. Builds and QEMU tests were not run
       locally.
+
+- [ ] **Legacy VirtIO network support.**
+      A ThreadOS-native PCI driver handles VirtIO-net's legacy transport,
+      negotiates the MAC address, and moves ordinary Ethernet frames through
+      split receive/transmit queues. Checksum and segmentation offloads stay
+      disabled. The `virtio` QEMU test verifies DHCP and ICMP in both kernel
+      modes; modern-only VirtIO PCI devices are not supported yet.

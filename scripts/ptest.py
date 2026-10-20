@@ -1803,10 +1803,9 @@ class Qemu:
                "-netdev",
                "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:{hostfwd_port}"
                                if hostfwd_port else ""),
-               # The network card: RTL8139 by default, but the system
-               # knows e1000 too - and that is the only difference in the
-               # QEMU invocation, because which card sits in the socket
-               # is decided by the netdev layer, not by the network code
+               # The network card: RTL8139 by default, with e1000 and
+               # VirtIO available to the tests. The netdev layer chooses
+               # the driver, not the network code.
                *(["-device", nic + ",netdev=n0"] if nic else []),
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
