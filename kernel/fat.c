@@ -1255,6 +1255,87 @@ int fat_write_file(const char *path, const void *data, uint32_t len)
     return 0;
 }
 
+int fat_copy_file(const char *source, const char *target)
+{
+    struct fat_entry src, old;
+    char last[FAT_NAME_MAX];
+    uint32_t dir, at_lba = 0, at_off = 0;
+
+    if (!v.type || !source || !target || !strcmp(source, target) ||
+        !fat_stat(source, &src) || src.is_dir ||
+        !walk_parent(target, &dir, last) || !last[0])
+        return -1;
+
+    int existed = lookup(dir, last, &old, &at_lba, &at_off);
+    if (existed && old.is_dir)
+        return -1;
+
+    if (existed) {
+        if (touch_entry(at_lba, at_off, 0, 0) < 0)
+            return -1;
+        if (old.clus >= 2) {
+            free_chain(old.clus);
+            if (fat_flush() < 0)
+                return -1;
+            fsinfo_unknown();
+        }
+    }
+
+    uint32_t first = 0, prev = 0;
+    uint32_t source_clus = src.clus;
+    uint32_t remaining = src.size;
+    while (remaining) {
+        if (source_clus < 2 || source_clus >= v.clusters + 2 ||
+            is_eoc(source_clus))
+            goto failed;
+
+        uint32_t fresh = alloc_cluster();
+        if (!fresh)
+            goto failed;
+        if (prev && chain_put(prev, fresh) < 0) {
+            free_chain(fresh);
+            goto failed;
+        }
+        if (!first)
+            first = fresh;
+        prev = fresh;
+
+        for (uint32_t s = 0; s < v.sec_per_clus && remaining; s++) {
+            uint32_t take = remaining > SECTOR ? SECTOR : remaining;
+            if (fat_bread(clus_lba(source_clus) + s, 1, datbuf) < 0)
+                goto failed;
+            if (take < SECTOR)
+                memset(datbuf + take, 0, SECTOR - take);
+            if (fat_bwrite(clus_lba(fresh) + s, 1, datbuf) < 0)
+                goto failed;
+            remaining -= take;
+        }
+
+        if (remaining)
+            source_clus = chain_next(source_clus);
+    }
+
+    if (fat_flush() < 0)
+        goto failed;
+    if (existed) {
+        if (touch_entry(at_lba, at_off, first, src.size) < 0)
+            return -1;
+    } else if (create_entry(dir, last, 0, first, src.size) < 0) {
+        return -1;
+    }
+    if (fat_flush() < 0)
+        return -1;
+    fsinfo_unknown();
+    return 0;
+
+failed:
+    if (first)
+        free_chain(first);
+    fat_flush();
+    fsinfo_unknown();
+    return -1;
+}
+
 int fat_unlink(const char *path)
 {
     char last[FAT_NAME_MAX];

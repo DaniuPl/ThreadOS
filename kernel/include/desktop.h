@@ -61,6 +61,8 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
  *   WD_CELLS   text on a grid: every character's pen at x + i*w, the
  *              baseline at y - a terminal's columns, which no font's
  *              own advances keep
+ *   WD_LTEXT   the same as WD_TEXT, but translate a static UI label
+ *   WD_LMEASURE the same as WD_MEASURE, but translate a static UI label
  */
 #define WD_FILL    1
 #define WD_RRECT   2
@@ -71,6 +73,8 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
 #define WD_TEXT    7
 #define WD_MEASURE 8
 #define WD_CELLS   9
+#define WD_LTEXT   10
+#define WD_LMEASURE 11
 
 struct win_draw {
     int op;

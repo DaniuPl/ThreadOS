@@ -356,6 +356,7 @@ static int key_y(int r) { return KEY_Y0 + r * (KEY_H + KEY_GAP); }
 
 static void draw(int win, int cw, int ch)
 {
+    ulocale_window_title(win, "Calculator", "Kalkulator");
     struct ud_look l;
     ud_look(&l);
     ud_fill(win, 0, 0, cw, ch, l.bg);
@@ -365,7 +366,12 @@ static void draw(int win, int cw, int ch)
     if (expr[0])
         ud_text_right(win, cw - PAD - 4, EXPR_BASE, expr, l.dim, UD_SANS, 14);
     char shown[ENTRY_MAX + 1];
-    const char *big = failed ? "Error" : entry;
+    const char *big = entry;
+    if (failed) {
+        ud_text_mid_l(win, 10, 8, W0 - 20, DISP_H, "Error", l.danger,
+                      UD_BOLD, DISP_PX);
+        big = (const char *)0;
+    }
     if (!failed && ulocale_decimal_comma()) {
         int i = 0;
         for (; entry[i]; i++)
@@ -373,11 +379,12 @@ static void draw(int win, int cw, int ch)
         shown[i] = 0;
         big = shown;
     }
-    int px = DISP_PX;
-    while (px > 14 && ud_width(big, UD_SANS, px) > cw - 2 * PAD - 8)
-        px -= 2;                         /* a long number gets smaller */
-    ud_text_right(win, cw - PAD - 4, DISP_BASE, big,
-                  failed ? l.danger : l.text, UD_SANS, px);
+    if (big) {
+        int px = DISP_PX;
+        while (px > 14 && ud_width(big, UD_SANS, px) > cw - 2 * PAD - 8)
+            px -= 2;                         /* a long number gets smaller */
+        ud_text_right(win, cw - PAD - 4, DISP_BASE, big, l.text, UD_SANS, px);
+    }
 
     for (int r = 0; r < 5; r++)
         for (int c = 0; c < 4; c++) {
@@ -432,7 +439,8 @@ static const char *key_at(int x, int y)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Calculator");
+    int win = (int)win_create(W0, H0, ulocale_language_polish()
+                                          ? "Kalkulator" : "Calculator");
     if (win < 0)
         sys_exit(1);
     int cw = W0, ch = H0;
@@ -440,8 +448,14 @@ void _start(void)
 
     struct ud_look was;
     ud_look(&was);
+    int language = ulocale_language_polish();
     for (;;) {
         int again = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            again = 1;
+        }
         struct win_event ev;
         while (win_poll(win, &ev) == 1) {
             if (ev.type == WEV_CLOSE)

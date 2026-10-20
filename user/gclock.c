@@ -13,6 +13,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W 132                 /* the content */
 #define H 52
@@ -48,20 +49,27 @@ static int put(char *d, const char *s)
 
 void _start(void)
 {
-    static const char *days[7] = { "Sunday", "Monday", "Tuesday",
-                                   "Wednesday", "Thursday", "Friday",
-                                   "Saturday" };
-    static const char *months[12] = { "January", "February", "March",
-                                      "April", "May", "June", "July",
-                                      "August", "September", "October",
-                                      "November", "December" };
-    int w = (int)win_create(W, H, "Clock");
+    static const char *days_en[7] = { "Sunday", "Monday", "Tuesday",
+                                      "Wednesday", "Thursday", "Friday",
+                                      "Saturday" };
+    static const char *days_pl[7] = { "Ndz", "Pon", "Wt", "Śr", "Czw",
+                                      "Pt", "Sob" };
+    static const char *months_en[12] = { "January", "February", "March",
+                                         "April", "May", "June", "July",
+                                         "August", "September", "October",
+                                         "November", "December" };
+    static const char *months_pl[12] = { "sty", "lut", "mar", "kwi", "maj",
+                                         "cze", "lip", "sie", "wrz", "paź",
+                                         "lis", "gru" };
+    int w = (int)win_create(W, H,
+                            ulocale_language_polish() ? "Zegar" : "Clock");
     if (w < 0)
         sys_exit(1);
 
     for (;;) {
         /* The desktop may ask us to end - a window with a close button
            that does nothing is a window that lies. */
+        ulocale_window_title(w, "Clock", "Zegar");
         struct win_event ev;
         while (win_poll(w, &ev) == 1)
             if (ev.type == WEV_CLOSE)
@@ -69,6 +77,9 @@ void _start(void)
 
         struct utime t;
         sys_time(&t);
+        int polish = ulocale_language_polish();
+        const char *const *days = polish ? days_pl : days_en;
+        const char *const *months = polish ? months_pl : months_en;
         struct ud_look look;
         ud_look(&look);
 

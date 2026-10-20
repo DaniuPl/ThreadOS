@@ -30,6 +30,7 @@
 
 #include "uapi.h"
 #include "ugui.h"
+#include "ulocale.h"
 
 #define W0 360
 #define H0 152
@@ -48,6 +49,7 @@ static int rowy(int r) { return ROW_Y0 + r * UG_ROW; }
 static struct snd_info snd;
 static struct ug u;
 static int id_state, id_steps, id_bar, id_mute, id_test, id_note;
+static int id_help1, id_help2;
 static char state_line[64];
 static char steps_line[64];
 static char note[40];
@@ -94,20 +96,24 @@ static int bar_w(void)
    change. The layer holds the pointers; the text is ours. */
 static void relabel(void)
 {
-    int at = add(state_line, 0, "Volume: ");
+    int polish = ulocale_language_polish();
+    int at = add(state_line, 0, polish ? "Głośność: " : "Volume: ");
 
     at += num(state_line + at, snd.volume);
     at = add(state_line, at, "%");
     if (snd.muted)
-        at = add(state_line, at, "  (muted)");
+        at = add(state_line, at, polish ? "  (wyciszone)" : "  (muted)");
     ug_set_colour(&u, id_state, snd.muted ? UG_RED : UG_BLUE);
 
-    at = add(steps_line, 0, "codec steps: ");
+    at = add(steps_line, 0, polish ? "kroki kodeka: " : "codec steps: ");
     at += num(steps_line + at, snd.steps);
-    add(steps_line, at, ", each of them a decibel");
+    add(steps_line, at, polish ? ", każdy to jeden decybel"
+                               : ", each of them a decibel");
 
     ug_set_value(&u, id_bar, snd.muted ? 0 : (int)snd.volume);
-    ug_set_text(&u, id_mute, snd.muted ? "Unmute" : "Mute");
+    ug_set_text(&u, id_mute, polish
+                                ? (snd.muted ? "Włącz dźwięk" : "Wycisz")
+                                : (snd.muted ? "Unmute" : "Mute"));
     ug_set_colour(&u, id_mute, snd.muted ? UG_RED : UG_BLUE);
     ug_set_text(&u, id_note, note);
 }
@@ -123,25 +129,38 @@ static void build(int win)
     ug_start(&u, win, W0, H0);
 
     if (!snd.present) {
-        ug_label(&u, 6, rowy(0), "Sound");
+        ug_label(&u, 6, rowy(0), ulocale_language_polish() ? "Dźwięk"
+                                                           : "Sound");
         ug_set_colour(&u, 0, UG_BLUE);
-        ug_label(&u, 6, rowy(2), "This machine has no sound card");
-        ug_label(&u, 6, rowy(3), "that I know how to drive.");
-        ug_note(&u, 6, rowy(5), "'hardware' says more.");
+        ug_label(&u, 6, rowy(2), ulocale_language_polish()
+                                     ? "Ten komputer nie ma karty dźwiękowej"
+                                     : "This machine has no sound card");
+        ug_label(&u, 6, rowy(3), ulocale_language_polish()
+                                     ? "obsługiwanej przez system."
+                                     : "that I know how to drive.");
+        ug_note(&u, 6, rowy(5), ulocale_language_polish()
+                                    ? "'hardware' zawiera więcej informacji."
+                                    : "'hardware' says more.");
+        id_help1 = id_help2 = -1;
         id_state = id_steps = id_bar = id_mute = id_test = id_note = -1;
         return;
     }
 
     id_state = ug_label(&u, 6, rowy(0), state_line);
     id_steps = ug_note(&u, 6, rowy(1), steps_line);
-    ug_note(&u, 6, rowy(2), "- so half the slider is not half the");
-    ug_note(&u, 6, rowy(3), "loudness. The mouse wheel works too.");
+    id_help1 = ug_note(&u, 6, rowy(2), ulocale_language_polish()
+                                           ? "połowa suwaka nie oznacza połowy"
+                                           : "- so half the slider is not half the");
+    id_help2 = ug_note(&u, 6, rowy(3), ulocale_language_polish()
+                                           ? "głośności. Działa też kółko myszy."
+                                           : "loudness. The mouse wheel works too.");
 
     id_bar = ug_slider(&u, BAR_X, BAR_Y, bar_w(), BAR_H,
                        (int)snd.volume, 100);
-    id_mute = ug_button(&u, BAR_X, BTN_Y, BTN_W, BTN_H, "Mute");
+    id_mute = ug_button(&u, BAR_X, BTN_Y, BTN_W, BTN_H,
+                        ulocale_language_polish() ? "Wycisz" : "Mute");
     id_test = ug_button(&u, BAR_X + BTN_W + 10, BTN_Y, BTN_W, BTN_H,
-                        "Test");
+                        ulocale_language_polish() ? "Testuj" : "Test");
     id_note = ug_label(&u, BAR_X + 2 * BTN_W + 26, BTN_Y + (BTN_H - UG_ROW) / 2, note);
 
     relabel();
@@ -149,7 +168,8 @@ static void build(int win)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Volume");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Głośność" : "Volume");
     if (win < 0)
         sys_exit(1);
 
@@ -157,10 +177,29 @@ void _start(void)
     sys_snd_get(&snd);
     build(win);
     ug_draw(&u);
+    int language = ulocale_language_polish();
 
     for (;;) {
         struct win_event ev;
         int again = 0;
+        int current_language = ulocale_language_polish();
+        ulocale_window_title(win, "Volume", "Głośność");
+        if (current_language != language) {
+            language = current_language;
+            if (!snd.present) {
+                build(win);
+            } else {
+                relabel();
+                ug_set_text(&u, id_help1, language
+                                               ? "połowa suwaka nie oznacza połowy"
+                                               : "- so half the slider is not half the");
+                ug_set_text(&u, id_help2, language
+                                               ? "głośności. Działa też kółko myszy."
+                                               : "loudness. The mouse wheel works too.");
+                ug_set_text(&u, id_test, language ? "Testuj" : "Test");
+            }
+            again = 1;
+        }
 
         while (win_poll(win, &ev) == 1) {
             int which = -1;
@@ -196,7 +235,9 @@ void _start(void)
                    call plays and returns, so the window is still while
                    it sounds; that is honest, because the machine
                    really is busy playing. */
-                ecopy(note, "playing...", sizeof(note));
+                ecopy(note, ulocale_language_polish() ? "odtwarzanie..."
+                                                       : "playing...",
+                      sizeof(note));
                 relabel();
                 ug_draw(&u);
                 sys_snd_beep(440, 200);

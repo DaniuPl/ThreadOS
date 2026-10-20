@@ -39,6 +39,9 @@
 #define UD_OP_TEXT    7
 #define UD_OP_MEASURE 8
 #define UD_OP_CELLS   9
+/* Localized variants are for fixed interface labels, never user data. */
+#define UD_OP_LTEXT   10
+#define UD_OP_LMEASURE 11
 
 /* The theme's colours, as the desktop hands them out (in this order) */
 struct ud_look {
@@ -127,6 +130,12 @@ static inline int ud_text(int win, int x, int y, const char *s, uint32_t rgb,
     return ud_op(win, UD_OP_TEXT, x, y, 0, 0, 0, rgb, 0, font, px, s);
 }
 
+static inline int ud_text_l(int win, int x, int y, const char *s,
+                            uint32_t rgb, int font, int px)
+{
+    return ud_op(win, UD_OP_LTEXT, x, y, 0, 0, 0, rgb, 0, font, px, s);
+}
+
 /* Text on a grid of cells 'cell' wide - a terminal's columns: each
    character starts at x + i * cell, whatever the font's own advance */
 static inline int ud_cells(int win, int x, int y, int cell, const char *s,
@@ -138,6 +147,11 @@ static inline int ud_cells(int win, int x, int y, int cell, const char *s,
 static inline int ud_width(const char *s, int font, int px)
 {
     return ud_op(-1, UD_OP_MEASURE, 0, 0, 0, 0, 0, 0, 0, font, px, s);
+}
+
+static inline int ud_width_l(const char *s, int font, int px)
+{
+    return ud_op(-1, UD_OP_LMEASURE, 0, 0, 0, 0, 0, 0, 0, font, px, s);
 }
 
 /* The baseline that centres capital letters in a band 'h' tall - the
@@ -156,11 +170,25 @@ static inline void ud_text_mid(int win, int x, int y, int w, int h,
     ud_text(win, x + (w - tw) / 2, ud_baseline(y, h, px), s, rgb, font, px);
 }
 
+static inline void ud_text_mid_l(int win, int x, int y, int w, int h,
+                                 const char *s, uint32_t rgb, int font,
+                                 int px)
+{
+    int tw = ud_width_l(s, font, px);
+    ud_text_l(win, x + (w - tw) / 2, ud_baseline(y, h, px), s, rgb, font, px);
+}
+
 /* Text ending at x - numbers in a column line up on their last digit */
 static inline void ud_text_right(int win, int x, int y, const char *s,
                                  uint32_t rgb, int font, int px)
 {
     ud_text(win, x - ud_width(s, font, px), y, s, rgb, font, px);
+}
+
+static inline void ud_text_right_l(int win, int x, int y, const char *s,
+                                   uint32_t rgb, int font, int px)
+{
+    ud_text_l(win, x - ud_width_l(s, font, px), y, s, rgb, font, px);
 }
 
 #endif

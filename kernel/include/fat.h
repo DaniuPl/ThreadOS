@@ -88,6 +88,10 @@ int fat_mkdir(const char *path);
    its contents when it is. 0 or -1. */
 int fat_write_file(const char *path, const void *data, uint32_t len);
 
+/* Replaces a file with a copy of another file on this volume, without
+   buffering the file in memory. 0 or -1. */
+int fat_copy_file(const char *source, const char *target);
+
 /* Removes a file (not a directory). 0 or -1. */
 int fat_unlink(const char *path);
 

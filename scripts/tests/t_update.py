@@ -12,20 +12,23 @@ trust through update.key (a system file: only an admin writes it).
 From outside:
 
   a machine installs ThreadOS onto its whole disk from a stick, and
-  starts from that disk; its version is 0, a build by hand
+  starts from that disk; its update sequence is 0, a build by hand
 
   'update check' sees release 7 and installs nothing; 'update' without
   sudo is refused; with sudo it downloads, checks and writes - and
   mtools reads the new kernel, initrd and loader off the disk image
-  byte for byte
+  byte for byte; the previous files are kept so an admin can roll back
 
   a separate GRUB Live boot sees a valid signed release but the kernel
   refuses to write it to the installed disk
 
-  restarted, the disk is version 7, and up to date
+  restarted, the disk is update sequence 7, and up to date
 
   a release signed by some other key, and one whose initrd does not
   match its hash, are both refused - and the disk is left as it was
+
+  'sudo run update rollback' restores the original kernel, initrd and
+  loader byte for byte, and that restored system boots again
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -52,16 +55,24 @@ DISK_MIB = 300
 
 
 def initrd_with_version(src, version):
-    """The same initrd with its 'version' file saying something else -
-    a release of another number, otherwise the same system"""
+    """The same initrd with its monotonic update sequence changed."""
     raw = open(src, "rb").read()
     count = struct.unpack_from("<I", raw, 4)[0]
     files = []
     for i in range(count):
         name, off, size = struct.unpack_from("<16sII", raw, 8 + 24 * i)
         files.append((name.rstrip(b"\0"), raw[off:off + size]))
-    files = [(n, (str(version) + "\n").encode() if n == b"version" else d)
-             for n, d in files]
+    has_code = any(n == b"version-code" for n, _ in files)
+    if has_code:
+        files = [
+            (n, (str(version) + "\n").encode() if n == b"version-code" else
+             (("0.1.0-test.%d\n" % version).encode()
+              if n == b"version" else d))
+            for n, d in files
+        ]
+    else:
+        files = [(n, (str(version) + "\n").encode() if n == b"version" else d)
+                 for n, d in files]
     out = bytearray(b"TIRD" + struct.pack("<I", len(files)))
     offset = 8 + 24 * len(files)
     for n, d in files:
@@ -202,6 +213,17 @@ def main():
         finally:
             q.close()
 
+        installed_paths = (
+            "/EFI/ThreadOS/threados64.bin",
+            "/EFI/ThreadOS/initrd64.img",
+            "/EFI/ThreadOS/BOOTX64.EFI",
+            "/EFI/BOOT/BOOTX64.EFI",
+        )
+        old_files = {path: fat_get(disk, ESP_START, path)
+                     for path in installed_paths}
+        check("the freshly installed system files are present for rollback",
+              all(data is not None for data in old_files.values()))
+
         q = boot_disk(disk, nvram, os.path.join(work, "s2.log"))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
@@ -209,8 +231,9 @@ def main():
 
             out = run(q, "run update check " + base + "rel/",
                       end="[update] done, exit code")
-            check("the installed system is version 0 - a build by hand",
-                  "this system is version 0" in out)
+            check("the installed system shows a pre-1.0 label and sequence 0",
+                  "this system is version 0.1.0-" in out and
+                  "(update sequence 0)" in out)
             check("'update check' sees the signed release 7 and installs "
                   "nothing - with the built-in key it is refused",
                   "NOT signed by the right key" in out)
@@ -225,7 +248,7 @@ def main():
                       end="[update] done, exit code")
             check("now release 7 checks out, and 'check' only reports it",
                   "signed by the right key" in out and
-                  "newest release is version 7" in out and
+                  "newest release update sequence is 7" in out and
                   "a newer system is available" in out and
                   "written:" not in out)
 
@@ -239,7 +262,7 @@ def main():
             check("with sudo: downloaded, every hash checked, written",
                   "all three files match the signed hashes" in out and
                   out.count("[update] written:") == 3 and
-                  "updated to version 7" in out and
+                  "updated to release sequence 7" in out and
                   "[update] done, exit code 0" in out)
         finally:
             q.close()
@@ -275,8 +298,9 @@ def main():
             q.wait_serial("[net] DHCP", timeout=60)
             out = run(q, "run update check " + base + "rel/",
                       end="[update] done, exit code")
-            check("restarted, the disk is version 7 - and up to date",
-                  "this system is version 7" in out and
+            check("restarted, the disk is update sequence 7 - and up to date",
+                  "this system is version 0.1.0-test.7" in out and
+                  "(update sequence 7)" in out and
                   "this system is up to date" in out)
 
             out = run(q, "sudo run update " + base + "forged/",
@@ -288,10 +312,81 @@ def main():
                       end="[update] done, exit code", password=True)
             check("a release whose initrd does not match its hash is refused",
                   "does not match its hash" in out and "written:" not in out)
+
+            check("refused releases left the installed release 7 untouched",
+                  fat_get(disk, ESP_START,
+                          "/EFI/ThreadOS/initrd64.img") == initrd7)
+
+            out = run(q, "run update rollback",
+                      end="[update] done, exit code")
+            check("a regular user cannot roll back the system",
+                  "only an admin may restore the system" in out)
+            out = run(q, "sudo run update rollback",
+                      end="[update] done, exit code", password=True)
+            check("an admin can restore the previous system",
+                  "the previous system was restored" in out and
+                  "[update] done, exit code 0" in out)
         finally:
             q.close()
-        check("and after both, the disk still holds release 7",
-              fat_get(disk, ESP_START, "/EFI/ThreadOS/initrd64.img") == initrd7)
+
+        for path, want in old_files.items():
+            check(f"{path} is restored byte for byte",
+                  fat_get(disk, ESP_START, path) == want)
+
+        q = boot_disk(disk, nvram, os.path.join(work, "s4.log"))
+        try:
+            q.wait_serial("The 64-bit system is ready", timeout=120)
+            q.wait_serial("[net] DHCP", timeout=60)
+            out = run(q, "run update check " + base + "rel/",
+                      end="[update] done, exit code")
+            check("the restored previous system boots with a pre-1.0 label",
+                  "this system is version 0.1.0-" in out and
+                  "(update sequence 0)" in out and
+                  "a newer system is available" in out)
+
+            q.type_line("desktop")
+            q.wait_serial("The desktop is starting", timeout=30)
+            check("the restored system reaches its desktop",
+                  q.wait_desktop(timeout=40))
+            q.launch_dock(6)
+            title = ""
+            wx = wy = 0
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                for slot in range(8):
+                    x, y = cascade(slot, GSET_W + 2,
+                                   GSET_H + TITLE_H + 2)
+                    title = q.window_title(x, y, GSET_W + 2)
+                    if title == "Settings":
+                        wx, wy = x, y
+                        break
+                if title == "Settings":
+                    break
+                time.sleep(0.25)
+            check("Settings opens on the restored installed system",
+                  title == "Settings")
+            if title == "Settings":
+                cx, cy = wx + 1, wy + CONTENT_DY
+                q.click(cx + GSET_SIDE_W // 2,
+                        cy + GSET_SIDE_Y0 + 8 * GSET_SIDE_H +
+                        GSET_SIDE_H // 2)
+                q.mouse_goto(600, 600)
+                time.sleep(1.5)
+                top = GSET_PANE_Y0 + GSET_INFO_H + 70
+                baseline = cy + ui_font_baseline_in(UD_PX, top,
+                                                    GSET_CHIP_H)
+                shot = q.screen_raw()
+                label = q.read_ui(cx + GSET_PANE_X, baseline,
+                                 GSET_W - GSET_PANE_X - 8, px=UD_PX,
+                                 fg=theme("dark")["accent_text"], screen=shot)
+                check("Settings exposes the previous-system rollback action",
+                      q.gset_heading(cx, cy, screen=shot) == "Updates" and
+                      "Restore previous system" in label)
+                installed_version = q.gset_info(cx, cy, 0, screen=shot)
+                check("Settings shows the pre-1.0 display version",
+                      installed_version.startswith("0.1.0-"))
+        finally:
+            q.close()
     finally:
         stop()
         shutil.rmtree(work, ignore_errors=True)

@@ -13,13 +13,10 @@
  * layer we already have: commands as control transfers, events on an
  * interrupt endpoint.
  *
- * What is honest to say about this file: the PACKETS are tested, the
- * WIRE is not. QEMU has no Bluetooth device to emulate - the whole
- * stack was removed from it years ago - so nothing here has ever
- * spoken to an adapter that answers. The building and reading of
- * packets is checked against recorded ones ('bt test'), and the rest
- * waits for hardware. That is written down so that nobody mistakes
- * "the tests pass" for "Bluetooth works".
+ * HCI commands and events plus the ACL bulk framing are here. L2CAP,
+ * pairing/security and HID profiles are not. QEMU has no Bluetooth
+ * device to emulate, so the test checks recorded packets and ACL frame
+ * bytes, not a conversation with working hardware.
  */
 
 /* Looks for an adapter on the USB bus and wakes it: reset, address,
@@ -27,6 +24,14 @@
 int bt_init(void);
 
 int bt_present(void);
+int bt_acl_available(void);
+
+/* HCI ACL data on the adapter's bulk endpoints. Receive waits for one
+   USB transfer and returns the L2CAP payload length, or -1. */
+int bt_acl_send(uint16_t handle, uint8_t packet_boundary, uint8_t broadcast,
+                const void *payload, uint16_t len);
+int bt_acl_receive(uint16_t *handle, uint8_t *packet_boundary,
+                   uint8_t *broadcast, void *payload, uint16_t capacity);
 
 /* When there is none: why - a sentence for a person. */
 const char *bt_why(void);

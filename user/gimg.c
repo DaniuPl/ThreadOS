@@ -24,6 +24,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 #include "uinflate.h"
 #include "ujpeg.h"
 
@@ -38,7 +39,7 @@
 #define HDR (4 + 2 + 2 + 256 * 3)
 
 static char fname[NAME_MAX_LEN + 1];
-static char note[48];
+static char note[80];
 static int img_w, img_h;          /* the picture's own size */
 static int step = 1;              /* show every 'step'-th pixel */
 static int cw = W0, ch = H0;
@@ -109,11 +110,55 @@ static int num(char *d, int v)
     return n;
 }
 
+static int text_equal(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return !*a && !*b;
+}
+
+static const char *note_for_language(const char *text)
+{
+    if (!ulocale_language_polish())
+        return text;
+    if (text_equal(text, "no memory for the colours"))
+        return "Brak pamięci na kolory";
+    if (text_equal(text, "no memory for the picture"))
+        return "Brak pamięci na obraz";
+    if (text_equal(text, "odd dimensions"))
+        return "Nieprawidłowe wymiary";
+    if (text_equal(text, "I read PNG with 8 bits per channel"))
+        return "Obsługuję PNG z 8 bitami na kanał";
+    if (text_equal(text, "I cannot read an interlaced PNG"))
+        return "Nie obsługuję przeplotu w PNG";
+    if (text_equal(text, "an unknown kind of PNG"))
+        return "Nieznany typ pliku PNG";
+    if (text_equal(text, "the PNG stream does not add up"))
+        return "Dane PNG są niepoprawne";
+    if (text_equal(text, "it did not work"))
+        return "Operacja nie powiodła się";
+    if (text_equal(text, "I only read 24- and 8-bit BMP with no compression"))
+        return "Obsługuję nieskompresowane BMP 24- i 8-bitowe";
+    if (text_equal(text, "the picture's palette cannot be read"))
+        return "Nie można odczytać palety obrazu";
+    if (text_equal(text, "this is not a picture"))
+        return "To nie jest obraz";
+    if (text_equal(text, "no colours here"))
+        return "Brak danych o kolorach";
+    if (text_equal(text, "there is no such file"))
+        return "Nie ma takiego pliku";
+    if (text_equal(text, "loaded"))
+        return "Wczytano";
+    return text;
+}
+
 static void retitle(void)
 {
     char t[NAME_MAX_LEN + 10];
     int p = 0;
-    const char *pre = "Picture";
+    const char *pre = ulocale_language_polish() ? "Obraz" : "Picture";
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     if (fname[0]) {
@@ -129,10 +174,11 @@ static void retitle(void)
 
 static void draw_status(void)
 {
+    ulocale_window_title(winid, "Picture", "Obraz");
     char line[80];
     int p = 0;
     if (asking) {
-        const char *q = "Open: ";
+        const char *q = ulocale_language_polish() ? "Otwórz: " : "Open: ";
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen; i++)
@@ -145,12 +191,14 @@ static void draw_status(void)
         /* How many pixels are skipped between the ones drawn. Said as
            a step rather than an ordinal, because "every 1st / 2nd /
            3rd" would need the suffix worked out from the number. */
-        const char *sc = ", step ";
+        const char *sc = ulocale_language_polish() ? ", krok " : ", step ";
         for (int i = 0; sc[i]; i++)
             line[p++] = sc[i];
         p += num(line + p, step);
     } else {
-        const char *hint = "Ctrl+O opens a picture";
+        const char *hint = ulocale_language_polish()
+                               ? "Ctrl+O otwiera obraz"
+                               : "Ctrl+O opens a picture";
         for (int i = 0; hint[i]; i++)
             line[p++] = hint[i];
     }
@@ -158,8 +206,9 @@ static void draw_status(void)
         line[p++] = ' ';
         line[p++] = '-';
         line[p++] = ' ';
-        for (int i = 0; note[i] && p < 70; i++)
-            line[p++] = note[i];
+        const char *shown_note = note_for_language(note);
+        for (int i = 0; shown_note[i] && p < 70; i++)
+            line[p++] = shown_note[i];
     }
     line[p] = '\0';
     struct ud_look l;
@@ -725,7 +774,8 @@ static void show(const char *name)
 
 void _start(int argc, char **argv)
 {
-    int win = (int)win_create(W0, H0, "Picture");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Obraz" : "Picture");
     if (win < 0)
         sys_exit(1);
     winid = win;
@@ -741,9 +791,15 @@ void _start(int argc, char **argv)
         show(argv[1]);
     draw_status();
 
+    int language = ulocale_language_polish();
     for (;;) {
         struct win_event ev;
         int again = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            again = 1;
+        }
         while (win_poll(win, &ev) == 1) {
             if (ev.type == WEV_CLOSE)
                 sys_exit(0);

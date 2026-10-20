@@ -198,7 +198,6 @@ int ui_baseline_in(int top, int height)
 
 int ui_font_width(int font, int px, const char *s)
 {
-    s = locale_text(s);
     const struct ttf_font *f = font_of(font);
     if (!f) {
         int n = 0;
@@ -226,7 +225,6 @@ int ui_text_width(const char *s)
 static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
                      int x, int baseline, const char *s, uint32_t rgb)
 {
-    s = locale_text(s);
     const struct ttf_font *f = font_of(font);
     if (!f) {
         int n = 0;
@@ -288,6 +286,17 @@ int ui_font_text(int font, int px, int x, int baseline, const char *s,
 {
     return draw_text(1, (const struct gfx_surface *)0, font, px, x, baseline,
                      s, rgb);
+}
+
+int ui_font_text_l(int font, int px, int x, int baseline, const char *s,
+                   uint32_t rgb)
+{
+    return ui_font_text(font, px, x, baseline, locale_text(s), rgb);
+}
+
+int ui_font_width_l(int font, int px, const char *s)
+{
+    return ui_font_width(font, px, locale_text(s));
 }
 
 int ui_font_text_s(const struct gfx_surface *t, int font, int px, int x,

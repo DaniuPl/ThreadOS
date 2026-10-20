@@ -4,6 +4,7 @@
  *   run update check      only say whether there is one
  *   run update <url>      ...from another place than GitHub (ends in /)
  *   run update check <url>
+ *   run update rollback   restore the previous system files
  *
  * A release is four files next to each other: the kernel, the initrd,
  * the loader, and update.txt saying which version they are, how long
@@ -17,8 +18,9 @@
  * privacy, not its trust.
  *
  * Writing is the kernel's (SYS64_UPDATE_WRITE): the three files go
- * over the installed ones on the EFI partition, and the next start is
- * the new system. Only an admin may do it - 'sudo run update'.
+ * over the installed ones on the EFI partition. Before the first write,
+ * the kernel keeps one previous system there; 'update rollback' restores
+ * it. Only an admin may update or roll back the system.
  *
  * Where a release comes from:
  *   https://github.com/DaniuPl/ThreadOS/releases/latest/download/
@@ -252,14 +254,36 @@ static const uint8_t *signing_key(void)
     return official_key;
 }
 
-static uint32_t local_version(void)
+static int initrd_text(const char *name, char *out, uint32_t cap)
 {
-    char v[16];
-    int64_t n = sys_initrd_read("version", v, sizeof(v) - 1);
+    if (cap < 2)
+        return 0;
+    int64_t n = sys_initrd_read(name, out, cap - 1);
     if (n <= 0)
         return 0;
-    v[n] = '\0';
-    return number(v);
+    out[n] = '\0';
+    for (int64_t i = 0; i < n; i++)
+        if (out[i] == '\n' || out[i] == '\r') {
+            out[i] = '\0';
+            break;
+        }
+    return 1;
+}
+
+static uint32_t local_version(void)
+{
+    char v[32];
+    if (initrd_text("version-code", v, sizeof(v)))
+        return number(v);
+    if (initrd_text("version", v, sizeof(v)))
+        return number(v);       /* images made before version-code */
+    return 0;
+}
+
+static void local_version_label(char *out, uint32_t cap)
+{
+    if (!initrd_text("version", out, cap))
+        out[0] = '\0';
 }
 
 void _start(int argc, char **argv)
@@ -267,6 +291,24 @@ void _start(int argc, char **argv)
     int only_check = 0;
     char base[URL_MAX];
     const char *url = DEFAULT_URL;
+
+    if (argc > 1 && ustreq(argv[1], "rollback")) {
+        if (argc != 2)
+            fail("usage: update rollback");
+        int64_t rc = sys_update_rollback();
+        if (rc == -2)
+            fail("only an admin may restore the system: 'sudo run update rollback'");
+        if (rc == -3)
+            fail("there is no installed ThreadOS on this disk");
+        if (rc == -4)
+            fail("rollback can only run after booting from the installed system");
+        if (rc == -5)
+            fail("there is no complete previous-system backup");
+        if (rc < 0)
+            fail("restoring the previous system failed; retry rollback");
+        say("the previous system was restored; restart to use it\n");
+        sys_exit(0);
+    }
 
     for (int i = 1; i < argc; i++) {
         if (ustreq(argv[i], "check"))
@@ -289,8 +331,13 @@ void _start(int argc, char **argv)
     http_set_roots(roots, roots_len, 1);
 
     uint32_t mine = local_version();
+    char label[32];
+    local_version_label(label, sizeof(label));
     say("this system is version ");
+    print(label[0] ? label : "unknown");
+    print(" (update sequence ");
     print_dec(mine);
+    print(")");
     print("\n");
 
     /* --- what the newest release is ---------------------------------- */
@@ -322,7 +369,7 @@ void _start(int argc, char **argv)
         fail("the release is NOT signed by the right key - refusing it");
     say("the release is signed by the right key\n");
 
-    say("the newest release is version ");
+    say("the newest release update sequence is ");
     print_dec(r.version);
     print("\n");
     if (r.version <= mine) {
@@ -373,14 +420,19 @@ void _start(int argc, char **argv)
         if (rc == -4)
             fail("updates can only be installed after booting "
                  "from an installed system");
+        if (rc == -5)
+            fail("the previous system could not be backed up; nothing was updated");
+        if (rc == -6)
+            fail("an earlier update is incomplete; use 'sudo run update rollback' first");
         if (rc < 0)
             fail("writing the new system failed");
         say("written: ");
         print(r.name[k]);
         print("\n");
     }
-    say("ThreadOS updated to version ");
+    say("ThreadOS updated to release sequence ");
     print_dec(r.version);
     print(" - restart to start it\n");
+    say("the previous system is saved; 'sudo run update rollback' restores it\n");
     sys_exit(0);
 }

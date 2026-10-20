@@ -1324,6 +1324,12 @@ static void handle(struct regs *r)
                      (const void *)(uintptr_t)a2, (uint32_t)a3);
         return;
     }
+    case SYS64_UPDATE_ROLLBACK:
+        if (task64_level() != USER_ADMIN)
+            r->rax = (uint64_t)-2;
+        else
+            r->rax = (uint64_t)(int64_t)install_update_rollback();
+        return;
     case SYS64_SET_FS:
         /* Only an address the program could have - a kernel address in
            FS would not let it read the kernel (the pages say so), but

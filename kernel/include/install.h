@@ -104,9 +104,16 @@ const char *install_step_name(int n);
 int install_step(int n);
 
 /* Writes a new kernel (0), initrd (1) or loader (2) over the installed
-   one on this disk's EFI partition - the last step of an update. 0 =
-   done, -1 = writing failed, -3 = nothing installed here to update. */
+   one on this disk's EFI partition. The previous system is backed up
+   before the first file is replaced. 0 = done, -1 = writing failed,
+   -3 = nothing installed here, -4 = not booted from the installed
+   system, -5 = backup failed, -6 = an earlier update is incomplete. */
 int install_update_file(int which, const void *data, uint32_t len);
+
+/* Restores the previous kernel, initrd and loader saved by an update.
+   0 = done, -1 = writing failed, -3 = no installed system,
+   -4 = not booted from the installed system, -5 = no valid backup. */
+int install_update_rollback(void);
 
 /* The two the text version uses: printing what would happen, and doing
    all the steps one after another. */

@@ -34,6 +34,7 @@
 #include "include/fs.h"
 #include "include/io.h"
 #include "include/config.h"
+#include "include/locale.h"
 #include "include/rtc.h"
 #include "include/printk.h"
 #include "include/pmm.h"
@@ -109,6 +110,9 @@ struct icon {
 #else
 #define WEB_APP "gweb"
 #endif
+#define ART_N      16
+#define ART_LETTER 14
+#define ART_TRASH  15
 static struct icon icons[ICON_MAX] = {
     {"App", "guiapp", 0, {{0}}},
     {"Clock", "gclock", 1, {{0}}},
@@ -119,15 +123,9 @@ static struct icon icons[ICON_MAX] = {
     {"Settings", "gsettings", 6, {{0}}},
     {"Editor", "gedit", 7, {{0}}},
     {"Tasks", "gtasks", 8, {{0}}},
+    {"Code", "gcode", ART_LETTER, {{0}}},
 };
-static int icon_n = 9;         /* how many of them there are */
-
-/* How many pictures there are (see draw_art): one per program that
-   comes with the system, and a last one - a letter - for anything
-   else. */
-#define ART_N      16
-#define ART_LETTER 14
-#define ART_TRASH  15
+static int icon_n = 10;        /* how many of them there are */
 
 struct desktop_item {
     char name[32];
@@ -258,6 +256,7 @@ static const struct { const char *app, *label; } known_apps[] = {
     { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
     { "gappear", "Appearance" }, { "gcalc", "Calculator" },
     { "gcal", "Calendar" }, { "gpaint", "Paint" },
+    { "gcode", "Code" },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -597,7 +596,7 @@ static const char *const context_items[] = {
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
-                                  "gcalc", "gcal", "gpaint"};
+                                  "gcalc", "gcal", "gpaint", "gcode"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -1693,11 +1692,13 @@ static void draw_desktop_icons(void)
         }
         draw_tile(art, x + 18, y + 2, 40, letter, 255);
         char cut[32];
-        const char *shown = fit_text(label, UI_SANS, 10, 74, cut,
-                                     sizeof(cut));
-        int tw = ui_font_width(UI_SANS, 10, shown);
+        if (i < 3)
+            label = locale_text(label);
+        const char *visible = fit_text(label, UI_SANS, 10, 74, cut,
+                                       sizeof(cut));
+        int tw = ui_font_width(UI_SANS, 10, visible);
         ui_font_text(UI_SANS, 10, x + (76 - tw) / 2,
-                     ui_font_baseline_in(10, y + 43, 20), shown,
+                     ui_font_baseline_in(10, y + 43, 20), visible,
                      selected ? L.accent_text : L.bar_text);
     }
 }
@@ -3421,24 +3422,37 @@ static int clock_put_two(char *out, int at, int value)
     return at;
 }
 
+static int clock_put_text(char *out, int at, const char *text)
+{
+    while (*text)
+        out[at++] = *text++;
+    return at;
+}
+
 static void clock_refresh(void)
 {
     if (--clock_wait > 0)
         return;
     clock_wait = 6;
 
-    static const char *days[7] = { "Sun", "Mon", "Tue", "Wed", "Thu",
-                                   "Fri", "Sat" };
-    static const char *months[12] = { "Jan", "Feb", "Mar", "Apr", "May",
-                                      "Jun", "Jul", "Aug", "Sep", "Oct",
-                                      "Nov", "Dec" };
+    static const char *days_en[7] = { "Sun", "Mon", "Tue", "Wed", "Thu",
+                                      "Fri", "Sat" };
+    static const char *days_pl[7] = { "Ndz", "Pon", "Wt", "Śr", "Czw",
+                                      "Pt", "Sob" };
+    static const char *months_en[12] = { "Jan", "Feb", "Mar", "Apr", "May",
+                                         "Jun", "Jul", "Aug", "Sep", "Oct",
+                                         "Nov", "Dec" };
+    static const char *months_pl[12] = { "Sty", "Lut", "Mar", "Kwi", "Maj",
+                                         "Cze", "Lip", "Sie", "Wrz", "Paź",
+                                         "Lis", "Gru" };
+    const char *const *days = locale_is_polish() ? days_pl : days_en;
+    const char *const *months = locale_is_polish() ? months_pl : months_en;
     struct rtc_time t;
     rtc_read(&t);
     int n = 0;
     if (t.month >= 1 && t.month <= 12 && t.day >= 1 && t.day <= 31) {
         const char *dn = days[weekday(t.year, t.month, t.day)];
-        for (int i = 0; i < 3; i++)
-            clock_text[n++] = dn[i];
+        n = clock_put_text(clock_text, n, dn);
         clock_text[n++] = ' ';
         const char *datefmt = config_get("datefmt");
         if (datefmt && !strcmp(datefmt, "iso")) {
@@ -3448,15 +3462,13 @@ static void clock_refresh(void)
             clock_text[n++] = '-';
             n = clock_put_two(clock_text, n, t.day);
         } else if (datefmt && !strcmp(datefmt, "mdy")) {
-            for (int i = 0; i < 3; i++)
-                clock_text[n++] = months[t.month - 1][i];
+            n = clock_put_text(clock_text, n, months[t.month - 1]);
             clock_text[n++] = ' ';
             n += put_num(clock_text + n, t.day);
         } else {
             n += put_num(clock_text + n, t.day);
             clock_text[n++] = ' ';
-            for (int i = 0; i < 3; i++)
-                clock_text[n++] = months[t.month - 1][i];
+            n = clock_put_text(clock_text, n, months[t.month - 1]);
         }
         clock_text[n++] = ' ';
     }
@@ -3591,8 +3603,8 @@ static void draw_bar(void)
     gfx_fill(sx + 3, sy + 3, SHOW_W - 6, 2,
              hidden_by_show ? L.accent_text : L.bar_text, 200);
     if (in_rect(mouse_x, mouse_y, sx, 0, SHOW_W, BAR_H)) {
-        const char *what = hidden_by_show ? "Restore windows"
-                                          : "Show desktop";
+        const char *what = locale_text(hidden_by_show ? "Restore windows"
+                                                      : "Show desktop");
         hint_at(sx - hint_w(what) / 2 + SHOW_W / 2, BAR_H + 4, what);
     }
 
@@ -3855,9 +3867,9 @@ static void draw_tmenu(void)
         if (over)
             gfx_rrect(x + 5, iy + 1, TMENU_W - 10, MENU_ROW - 2, 6, L.accent,
                       255);
-        ui_font_text(UI_SANS, MENU_PX, x + 14,
-                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
-                     tmenu_item(t, i), over ? L.accent_text : L.menu_text);
+        ui_font_text_l(UI_SANS, MENU_PX, x + 14,
+                       ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                       tmenu_item(t, i), over ? L.accent_text : L.menu_text);
     }
 }
 
@@ -4373,8 +4385,8 @@ static void draw_search(void)
                                search_q, L.menu_text);
         gfx_fill(end + 1, y + 12, 2, SEARCH_FIELD_H - 24, L.accent, 255);
     } else {
-        ui_font_text(UI_SANS, SEARCH_PX, x + SEARCH_TEXT_X, base,
-                     "Search", L.title_dim);
+        ui_font_text_l(UI_SANS, SEARCH_PX, x + SEARCH_TEXT_X, base,
+                       "Search", L.title_dim);
         gfx_fill(x + SEARCH_TEXT_X, y + 12, 2, SEARCH_FIELD_H - 24,
                  L.accent, 255);
     }
@@ -4395,9 +4407,9 @@ static void draw_search(void)
         ui_font_text(UI_SANS, MENU_PX, x + 16 + SEARCH_ICON + 12, rb,
                      found[i].name, on ? L.accent_text : L.menu_text);
         const char *k = kinds[found[i].kind];
-        int kw = ui_font_width(UI_SANS, UI_PX, k);
-        ui_font_text(UI_SANS, UI_PX, x + SEARCH_W - 18 - kw, rb, k,
-                     on ? L.accent_text : L.title_dim);
+        int kw = ui_font_width_l(UI_SANS, UI_PX, k);
+        ui_font_text_l(UI_SANS, UI_PX, x + SEARCH_W - 18 - kw, rb, k,
+                       on ? L.accent_text : L.title_dim);
     }
 }
 
@@ -4507,9 +4519,9 @@ static void draw_menu(void)
                       255);
         draw_tile(art, x + 10, iy + (MENU_ROW - MENU_ICON) / 2, MENU_ICON,
                   label[0], 255);
-        ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
-                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW), label,
-                     over ? L.accent_text : L.menu_text);
+        ui_font_text_l(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
+                       ui_font_baseline_in(MENU_PX, iy, MENU_ROW), label,
+                       over ? L.accent_text : L.menu_text);
     }
 
     int sy = menu_item_y(MENU_N) + MENU_SEP / 2;
@@ -4525,9 +4537,9 @@ static void draw_menu(void)
         uint32_t ink = over ? L.accent_text : L.menu_text;
         session_icon(i, x + 10, iy + (SESS_ROW - MENU_ICON) / 2, MENU_ICON,
                      ink);
-        ui_font_text(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
-                     ui_font_baseline_in(MENU_PX, iy, SESS_ROW),
-                     session_items[i], ink);
+        ui_font_text_l(UI_SANS, MENU_PX, x + 10 + MENU_ICON + 10,
+                       ui_font_baseline_in(MENU_PX, iy, SESS_ROW),
+                       session_items[i], ink);
     }
 }
 
@@ -4546,9 +4558,9 @@ static void draw_context_menu(void)
         if (over)
             gfx_rrect(x + 5, iy + 1, MENU_W - 10, MENU_ROW - 2, 6,
                       L.accent, 255);
-        ui_font_text(UI_SANS, MENU_PX, x + 14,
-                     ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
-                     context_items[i], over ? L.accent_text : L.menu_text);
+        ui_font_text_l(UI_SANS, MENU_PX, x + 14,
+                       ui_font_baseline_in(MENU_PX, iy, MENU_ROW),
+                       context_items[i], over ? L.accent_text : L.menu_text);
     }
 }
 
@@ -4955,7 +4967,7 @@ static void draw_volume(void)
     char t[8];
     int n = 0;
     if (muted) {
-        n = cat(t, 0, "Off");
+        n = cat(t, 0, locale_text("Off"));
     } else {
         n = cat_num(t, 0, (uint32_t)v);
         n = cat(t, n, "%");
@@ -5010,40 +5022,52 @@ static void draw_about(void)
     char line[64];
     int n;
 #ifdef __x86_64__
-    n = cat(line, 0, "64-bit kernel, ");
+    n = cat(line, 0, locale_text("64-bit kernel, "));
 #else
-    n = cat(line, 0, "32-bit kernel, ");
+    n = cat(line, 0, locale_text("32-bit kernel, "));
 #endif
     n = cat_num(line, n, (uint32_t)smp_cpus());
-    cat(line, n, smp_cpus() == 1 ? " processor" : " processors");
+    int cpu_count = smp_cpus();
+    const char *cpu_word;
+    if (locale_is_polish()) {
+        int last_two = cpu_count % 100;
+        int last = cpu_count % 10;
+        cpu_word = cpu_count == 1 ? " procesor"
+                   : last >= 2 && last <= 4 &&
+                     (last_two < 12 || last_two > 14) ? " procesory"
+                                                       : " procesorów";
+    } else {
+        cpu_word = cpu_count == 1 ? " processor" : " processors";
+    }
+    cat(line, n, cpu_word);
     ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y, line, dim);
 
     uint32_t free_mib = (pmm_total_frames() - pmm_used_frames()) / 256;
-    n = cat(line, 0, "Memory: ");
+    n = cat(line, 0, locale_text("Memory: "));
     n = cat_num(line, n, pmm_ram_kib() / 1024);
-    n = cat(line, n, " MiB, ");
+    n = cat(line, n, locale_text(" MiB, "));
     n = cat_num(line, n, free_mib);
-    cat(line, n, " MiB free");
+    cat(line, n, locale_text(" MiB free"));
     ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + ABOUT_LINE_DY, line, dim);
 
-    n = cat(line, 0, "Screen: ");
+    n = cat(line, 0, locale_text("Screen: "));
     n = cat_num(line, n, (uint32_t)video_pw());
     n = cat(line, n, "x");
     n = cat_num(line, n, (uint32_t)video_ph());
-    n = cat(line, n, " at ");
+    n = cat(line, n, locale_text(" at "));
     n = cat_num(line, n, (uint32_t)video_scale());
     cat(line, n, "%");
     ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + 2 * ABOUT_LINE_DY,
                  line, dim);
 
     uint32_t up = pit_ticks() / 100, mins = up / 60;
-    n = cat(line, 0, "Up for ");
+    n = cat(line, 0, locale_text("Up for "));
     if (mins >= 60) {
         n = cat_num(line, n, mins / 60);
-        n = cat(line, n, " h ");
+        n = cat(line, n, locale_text(" h "));
     }
     n = cat_num(line, n, mins % 60);
-    cat(line, n, " min");
+    cat(line, n, locale_text(" min"));
     ui_font_text(UI_SANS, UI_PX, tx, y + ABOUT_LINE_Y + 3 * ABOUT_LINE_DY,
                  line, dim);
 
@@ -5051,9 +5075,10 @@ static void draw_about(void)
     int over = in_rect(mouse_x, mouse_y, ask_do_x(), by, ASK_BTN_W, ASK_BTN_H);
     gfx_rrect(ask_do_x(), by, ASK_BTN_W, ASK_BTN_H, 8, L.accent,
               over ? 220 : 255);
-    int ow = ui_font_width(UI_BOLD, UI_PX, "OK");
-    ui_font_text(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - ow) / 2,
-                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), "OK", L.accent_text);
+    int ow = ui_font_width_l(UI_BOLD, UI_PX, "OK");
+    ui_font_text_l(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - ow) / 2,
+                   ui_font_baseline_in(UI_PX, by, ASK_BTN_H), "OK",
+                   L.accent_text);
 }
 
 /* The question: a card in the middle of a dimmed screen, the question,
@@ -5111,9 +5136,9 @@ static void draw_ask(void)
     session_icon(what, x + ASK_PAD + 9, y + ASK_PAD + 9, d - 18,
                  L.accent_text);
     int tx = x + ASK_PAD + d + 14;
-    ui_font_text(UI_BOLD, 15, tx, y + ASK_TITLE_Y, title[what], text);
-    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y, body1, dim);
-    ui_font_text(UI_SANS, UI_PX, tx, y + ASK_BODY_Y + 17, body2[what], dim);
+    ui_font_text_l(UI_BOLD, 15, tx, y + ASK_TITLE_Y, title[what], text);
+    ui_font_text_l(UI_SANS, UI_PX, tx, y + ASK_BODY_Y, body1, dim);
+    ui_font_text_l(UI_SANS, UI_PX, tx, y + ASK_BODY_Y + 17, body2[what], dim);
 
     int by = ask_btn_y();
     int over_no = in_rect(mouse_x, mouse_y, ask_no_x(), by, ASK_BTN_W,
@@ -5125,13 +5150,13 @@ static void draw_ask(void)
     gfx_rrect(ask_do_x(), by, ASK_BTN_W, ASK_BTN_H, 8, L.accent,
               over_do ? 220 : 255);
     const char *no = "Cancel";
-    int nw = ui_font_width(UI_SANS, UI_PX, no);
-    ui_font_text(UI_SANS, UI_PX, ask_no_x() + (ASK_BTN_W - nw) / 2,
-                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), no, text);
-    int aw = ui_font_width(UI_BOLD, UI_PX, act[what]);
-    ui_font_text(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - aw) / 2,
-                 ui_font_baseline_in(UI_PX, by, ASK_BTN_H), act[what],
-                 L.accent_text);
+    int nw = ui_font_width_l(UI_SANS, UI_PX, no);
+    ui_font_text_l(UI_SANS, UI_PX, ask_no_x() + (ASK_BTN_W - nw) / 2,
+                   ui_font_baseline_in(UI_PX, by, ASK_BTN_H), no, text);
+    int aw = ui_font_width_l(UI_BOLD, UI_PX, act[what]);
+    ui_font_text_l(UI_BOLD, UI_PX, ask_do_x() + (ASK_BTN_W - aw) / 2,
+                   ui_font_baseline_in(UI_PX, by, ASK_BTN_H), act[what],
+                   L.accent_text);
 }
 
 static void setup_key(char c)
@@ -5182,7 +5207,7 @@ static void draw_setup_field(int x, int y, const char *label,
     uint32_t text = theme_dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
     uint32_t dim = theme_dark ? DARK_APP_DIM : LIGHT_APP_DIM;
     uint32_t fill = theme_dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
-    ui_font_text(UI_SANS, UI_PX, x, y - 7, label, dim);
+    ui_font_text_l(UI_SANS, UI_PX, x, y - 7, label, dim);
     gfx_rrect(x, y, 440, 32, 8, fill, 255);
     gfx_rring16(x * 16, y * 16, 440 * 16, 32 * 16, 8 * 16, 16,
                 setup_focus == field ? L.accent : L.win_line,
@@ -5224,9 +5249,9 @@ static void draw_setup(void)
     gfx_rrect(x, y, 480, 438, 18, L.win_bg, 255);
     gfx_rring16(x * 16, y * 16, 480 * 16, 438 * 16, 18 * 16, 16,
                 L.win_line, 210);
-    ui_font_text(UI_BOLD, 20, x + 20, y + 34, "Welcome to ThreadOS", text);
-    ui_font_text(UI_SANS, UI_PX, x + 20, y + 59,
-                 "Create your profile to finish setting up.", dim);
+    ui_font_text_l(UI_BOLD, 20, x + 20, y + 34, "Welcome to ThreadOS", text);
+    ui_font_text_l(UI_SANS, UI_PX, x + 20, y + 59,
+                   "Create your profile to finish setting up.", dim);
 
     draw_setup_field(x + 20, y + 88, "Login name", setup_login, 0, 0);
     draw_setup_field(x + 20, y + 146, "Profile name", setup_display, 1, 0);
@@ -5235,7 +5260,7 @@ static void draw_setup(void)
     draw_setup_field(x + 20, y + 262, "Confirm password", setup_confirm,
                      3, 1);
 
-    ui_font_text(UI_SANS, UI_PX, x + 20, y + 315, "Theme", dim);
+    ui_font_text_l(UI_SANS, UI_PX, x + 20, y + 315, "Theme", dim);
     const int by = y + 322;
     const char *themes[] = { "Dark", "Light" };
     for (int i = 0; i < 2; i++) {
@@ -5245,30 +5270,31 @@ static void draw_setup(void)
         gfx_rring16(bx * 16, by * 16, 100 * 16, 30 * 16, 8 * 16, 16,
                     setup_focus == 4 && selected ? L.accent_text : L.win_line,
                     180);
-        int tw = ui_font_width(UI_SANS, UI_PX, themes[i]);
-        ui_font_text(UI_SANS, UI_PX, bx + (100 - tw) / 2,
-                     ui_font_baseline_in(UI_PX, by, 30), themes[i],
-                     selected ? L.accent_text : text);
+        int tw = ui_font_width_l(UI_SANS, UI_PX, themes[i]);
+        ui_font_text_l(UI_SANS, UI_PX, bx + (100 - tw) / 2,
+                       ui_font_baseline_in(UI_PX, by, 30), themes[i],
+                       selected ? L.accent_text : text);
     }
-    ui_font_text(UI_SANS, UI_PX, x + 252, y + 343,
-                 "Language: English", dim);
+    ui_font_text_l(UI_SANS, UI_PX, x + 252, y + 343,
+                   locale_is_polish() ? "Language: Polski"
+                                      : "Language: English", dim);
 
     int button_x = x + 340, button_y = y + 386;
     gfx_rrect(button_x, button_y, 120, 34, 9, L.accent, 255);
     gfx_rring16(button_x * 16, button_y * 16, 120 * 16, 34 * 16, 9 * 16,
                 16, setup_focus == 5 ? L.accent_text : L.win_line, 200);
-    int cw = ui_font_width(UI_BOLD, UI_PX, "Create profile");
-    ui_font_text(UI_BOLD, UI_PX, button_x + (120 - cw) / 2,
-                 ui_font_baseline_in(UI_PX, button_y, 34), "Create profile",
-                 L.accent_text);
+    int cw = ui_font_width_l(UI_BOLD, UI_PX, "Create profile");
+    ui_font_text_l(UI_BOLD, UI_PX, button_x + (120 - cw) / 2,
+                   ui_font_baseline_in(UI_PX, button_y, 34), "Create profile",
+                   L.accent_text);
     if (setup_error) {
         const char *error = "Check the names and matching passwords.";
-        ui_font_text(UI_SANS, UI_PX, x + 20, y + 405, error,
-                     theme_dark ? DARK_APP_DANGER : LIGHT_APP_DANGER);
+        ui_font_text_l(UI_SANS, UI_PX, x + 20, y + 405, error,
+                       theme_dark ? DARK_APP_DANGER : LIGHT_APP_DANGER);
     } else {
-        ui_font_text(UI_SANS, UI_PX, x + 20, y + 405,
-                     "Leave both password fields empty for automatic sign-in.",
-                     dim);
+        ui_font_text_l(UI_SANS, UI_PX, x + 20, y + 405,
+                       "Leave both password fields empty for automatic sign-in.",
+                       dim);
     }
 }
 
@@ -5391,7 +5417,7 @@ static void draw_lock(void)
         gfx_rring16(fx * 16, y * 16, LOCK_FIELD_W * 16, LOCK_FIELD_H * 16,
                     LOCK_FIELD_H * 8, 16, 0xFFFFFF, focus ? 190 : 90);
         if (lock_out && i == 0) {
-            const char *p = lock_user_len ? lock_user : "Account";
+            const char *p = lock_user_len ? lock_user : locale_text("Account");
             int pw = ui_font_width(UI_SANS, MENU_PX, p);
             ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
                          ui_font_baseline_in(MENU_PX, y, LOCK_FIELD_H), p,
@@ -5404,17 +5430,19 @@ static void draw_lock(void)
                            (y + LOCK_FIELD_H / 2) * 16, dot * 8,
                            0xFFFFFF, 255);
         } else {
-            const char *p = "Password";
+            const char *p = locale_text("Password");
             int pw = ui_font_width(UI_SANS, MENU_PX, p);
             ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
                          ui_font_baseline_in(MENU_PX, y, LOCK_FIELD_H), p,
                          0xD8D8DC);
         }
     }
-    const char *say = lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
-                          ? "Wrong password - try again"
-                          : lock_out ? "Tab selects a field; Enter signs in"
-                          : "Enter your password to unlock";
+    const char *say = locale_text(lock_wrong &&
+                                  frames - lock_wrong_at < 3 * FRAME_HZ
+                                      ? "Wrong password - try again"
+                                      : lock_out
+                                            ? "Tab selects a field; Enter signs in"
+                                            : "Enter your password to unlock");
     int sw = ui_font_width(UI_SANS, UI_PX, say);
     ui_font_text(UI_SANS, UI_PX, (w - sw) / 2, fy + LOCK_FIELD_H + 22, say,
                  lock_wrong && frames - lock_wrong_at < 3 * FRAME_HZ
@@ -5759,8 +5787,10 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
 {
     int px = d->px > 0 && d->px <= 64 ? d->px : UI_PX;
     int font = d->font == UI_BOLD || d->font == UI_MONO ? d->font : UI_SANS;
-    if (d->op == WD_MEASURE)
-        return s ? ui_font_width(font, px, s) : 0;
+    if (d->op == WD_MEASURE || d->op == WD_LMEASURE)
+        return s ? ui_font_width(font, px,
+                                 d->op == WD_LMEASURE ? locale_text(s) : s)
+                 : 0;
 
     struct window *win = app_window(winid, owner);
     if (!win)
@@ -5798,6 +5828,9 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
         return 0;
     case WD_TEXT:
         return s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x;
+    case WD_LTEXT:
+        return s ? ui_font_text_s(&t, font, px, d->x, d->y,
+                                  locale_text(s), d->rgb) : d->x;
     case WD_CELLS: {
         /* A cell is a character, not a byte: a Polish letter is two
            bytes of UTF-8 and one column */
@@ -5902,9 +5935,9 @@ static void kiosk_frame(int mx, int my)
         }
     }
 
-    ui_font_text(UI_BOLD, BAR_PX + 2, 14,
-                 ui_font_baseline_in(BAR_PX + 2, kiosk_btn_y(), KIOSK_BTN_H),
-                 "ThreadOS - installation", 0xFFFFFF);
+    ui_font_text_l(UI_BOLD, BAR_PX + 2, 14,
+                   ui_font_baseline_in(BAR_PX + 2, kiosk_btn_y(), KIOSK_BTN_H),
+                   "ThreadOS - installation", 0xFFFFFF);
 
     int bx = kiosk_btn_x(), by = kiosk_btn_y();
     int over = in_rect(mouse_x, mouse_y, bx, by, KIOSK_BTN_W, KIOSK_BTN_H);
@@ -5912,9 +5945,9 @@ static void kiosk_frame(int mx, int my)
               over ? L.accent : 0xFFFFFF, over ? 230 : 50);
     gfx_rring16(bx * 16, by * 16, KIOSK_BTN_W * 16, KIOSK_BTN_H * 16,
                 KIOSK_BTN_H * 8, 16, 0xFFFFFF, 110);
-    int rw = ui_font_width(UI_SANS, UI_PX, "Restart");
-    ui_font_text(UI_SANS, UI_PX, bx + (KIOSK_BTN_W - rw) / 2,
-                 ui_baseline_in(by, KIOSK_BTN_H), "Restart", 0xFFFFFF);
+    int rw = ui_font_width_l(UI_SANS, UI_PX, "Restart");
+    ui_font_text_l(UI_SANS, UI_PX, bx + (KIOSK_BTN_W - rw) / 2,
+                   ui_baseline_in(by, KIOSK_BTN_H), "Restart", 0xFFFFFF);
 
     /* The window, in the middle. It is put there every frame because
        in this mode nobody may move it - there is nowhere to move it
@@ -5934,8 +5967,8 @@ static void kiosk_frame(int mx, int my)
     }
 
     if (kiosk_gave_up) {
-        const char *a = "The installer will not start";
-        const char *b = "Restart the machine";
+        const char *a = locale_text("The installer will not start");
+        const char *b = locale_text("Restart the machine");
         int cx = video_w() / 2, cy = video_h() / 2;
         ui_font_text(UI_BOLD, TITLE_PX, cx - ui_font_width(UI_BOLD, TITLE_PX, a) / 2,
                      cy, a, 0xFFFFFF);

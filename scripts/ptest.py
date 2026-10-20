@@ -1105,7 +1105,7 @@ def ui_baseline_in(top, height):
 
 SCREEN_W, SCREEN_H = 640, 480
 MAX_DOCK_WINDOWS = 12           # MAX_WIN in kernel/desktop.c
-DOCK_N = 9                      # the programs in a dock nobody configured
+DOCK_N = 10                     # the programs in a dock nobody configured
 
 
 def dock_geom(n_l=DOCK_N, n_w=2, want=None, w=SCREEN_W, h=SCREEN_H):

@@ -82,10 +82,9 @@ int usbhc_connected(int port);
 /* Forgets a port, so that the next device in it is greeted afresh. */
 void usbhc_forget(int port);
 
-/* Bulk endpoints - what a disk speaks through. Declared in pairs (in
-   and out), because that is how the mass storage class works and
-   because one command describes the whole device anyway. Available on
-   xHCI; UHCI answers -1. */
+/* Bulk endpoints - used by mass storage and Bluetooth ACL data.
+   Declared in pairs (in and out), because one device uses both
+   directions. Available on xHCI and EHCI; UHCI answers -1. */
 int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket);
 
 /* Bulk transfers. They wait for the answer. The number of bytes moved,

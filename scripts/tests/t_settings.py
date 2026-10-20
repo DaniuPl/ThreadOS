@@ -217,9 +217,11 @@ def main():
             label = q.read_ui(CX + GSET_PANE_X, label_baseline, 160,
                              px=UD_PX, fg=theme("dark")["app_text"],
                              screen=shot)
+            win_title = q.window_title(WX, WY)
             check("the language control saves Polish and translates settings "
-                  "(%s, %s, %s)" % (got, said, label),
-                  got == "pl" and said == "Zapisano" and label == "Język")
+                  "(%s, %s, %s, %s)" % (got, said, label, win_title),
+                  got == "pl" and said == "Zapisano" and label == "Język" and
+                  win_title == "Ustawienia")
 
             section(q, "Region")
             x, y = gset_chip(3, 0)
@@ -229,8 +231,10 @@ def main():
             password(q, "thread")
             got = kernel_says(q, "language")
             said = status(q, "Saved")
-            check("English can be restored (%s, %s)" % (got, said),
-                  got == "en" and said == "Saved")
+            win_title = q.window_title(WX, WY)
+            check("English can be restored (%s, %s, %s)"
+                  % (got, said, win_title),
+                  got == "en" and said == "Saved" and win_title == "Settings")
 
             # --- the theme: refused, then taken ---------------------------
             section(q, "Appearance")

@@ -122,8 +122,16 @@ def main():
             # --- hardware inventory from the desktop terminal --------
             q.type_line("lspci")
             rows = wait_for(q, "class", geom)
+            body = "\n".join(rows)
             check("lspci runs from the terminal and prints PCI class IDs",
-                  any("class " in r and ":" in r for r in rows))
+                  any("class " in r and ":" in r for r in rows)
+                  and "[code -1]" not in body)
+            q.type_line("hardware")
+            rows = wait_for(q, "Network devices use class 02", geom)
+            body = "\n".join(rows)
+            check("hardware is a working 64-bit alias for the PCI inventory",
+                  "Network devices use class 02" in body
+                  and "[code -1]" not in body)
             q.type_line("ifconfig")
             rows = wait_for(q, "Network configuration", geom)
             check("ifconfig runs from the desktop terminal",

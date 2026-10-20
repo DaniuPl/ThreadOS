@@ -19,6 +19,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W0 400
 #define H0 368
@@ -150,8 +151,9 @@ static void draw_card(int win, int i, const struct ud_look *l, int chosen)
     ud_round(win, wx + ww - 42, wy + wh - 18, 34, 12, 6, t.accent);
 
     const char *name = i == 0 ? "Dark" : "Light";
-    ud_text_mid(win, x, y + CARD_H + 6, CARD_W, 18, name,
-                chosen ? l->text : l->dim, chosen ? UD_BOLD : UD_SANS, UD_PX);
+    ud_text_mid_l(win, x, y + CARD_H + 6, CARD_W, 18, name,
+                  chosen ? l->text : l->dim, chosen ? UD_BOLD : UD_SANS,
+                  UD_PX);
 }
 
 static void previews(int dark)
@@ -167,67 +169,70 @@ static void draw(int win, int cw, int ch)
 {
     struct ud_look l;
     ud_look(&l);
+    ulocale_window_title(win, "Appearance", "Wygląd");
     previews((int)l.dark);
     ud_fill(win, 0, 0, cw, ch, l.bg);
-    ud_text(win, PAD, 28, "Appearance", l.text, UD_BOLD, 15);
+    ud_text_l(win, PAD, 28, "Appearance", l.text, UD_BOLD, 15);
 
     const char *theme = setting("theme");
     int dark = !same(theme, "light");
-    ud_text(win, PAD, CARD_Y - 8, "Theme", l.dim, UD_SANS, 11);
+    ud_text_l(win, PAD, CARD_Y - 8, "Theme", l.dim, UD_SANS, 11);
     for (int i = 0; i < 2; i++)
         draw_card(win, i, &l, (i == 0) == dark);
 
     uint32_t bg = to_num(setting("background"));
-    ud_text(win, PAD, SW_Y - 8, "Background", l.dim, UD_SANS, 11);
+    ud_text_l(win, PAD, SW_Y - 8, "Background", l.dim, UD_SANS, 11);
     for (int i = 0; i < BG_N; i++) {
         picture(win, sw_x(i), SW_Y, SW_W, SW_H, sw_px[i], &l, (uint32_t)i == bg);
-        ud_text_mid(win, sw_x(i) - 4, SW_Y + SW_H + 4, SW_W + 8, 14,
-                    bg_names[i], (uint32_t)i == bg ? l.text : l.dim, UD_SANS,
-                    10);
+        ud_text_mid_l(win, sw_x(i) - 4, SW_Y + SW_H + 4, SW_W + 8, 14,
+                      bg_names[i], (uint32_t)i == bg ? l.text : l.dim,
+                      UD_SANS, 10);
     }
 
     uint32_t m = to_num(setting("motion"));
     int mi = m == 0 ? 0 : m == 1 ? 1 : 2;
-    ud_text(win, PAD, MO_Y - 8, "Windows move", l.dim, UD_SANS, 11);
+    ud_text_l(win, PAD, MO_Y - 8, "Windows move", l.dim, UD_SANS, 11);
     for (int i = 0; i < 3; i++) {
         int on = i == mi;
         ud_round(win, mo_x(i), MO_Y, MO_W, MO_H, MO_H / 2,
                  on ? l.accent : l.row);
-        ud_text_mid(win, mo_x(i), MO_Y, MO_W, MO_H, motions[i],
-                    on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS, UD_PX);
+        ud_text_mid_l(win, mo_x(i), MO_Y, MO_W, MO_H, motions[i],
+                      on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS,
+                      UD_PX);
     }
 
     /* The scale: 1 to 4 are the old way of saying 100 to 400 */
     uint32_t sv = to_num(setting("scale"));
     if (sv >= 1 && sv <= 4)
         sv *= 100;
-    ud_text(win, PAD, SC_Y - 8, "Scale", l.dim, UD_SANS, 11);
+    ud_text_l(win, PAD, SC_Y - 8, "Scale", l.dim, UD_SANS, 11);
     for (int i = 0; i < SC_N; i++) {
         int on = to_num(scale_values[i]) == sv;
         ud_round(win, sc_x(i), SC_Y, SC_W, SC_H, SC_H / 2,
                  on ? l.accent : l.row);
-        ud_text_mid(win, sc_x(i), SC_Y, SC_W, SC_H, scales[i],
-                    on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS, UD_PX);
+        ud_text_mid_l(win, sc_x(i), SC_Y, SC_W, SC_H, scales[i],
+                      on ? l.on_accent : l.text, on ? UD_BOLD : UD_SANS,
+                      UD_PX);
     }
 
     int nb = ch - NOTE_DY;
     if (asking) {
-        int x = ud_text(win, PAD, nb, "Admin password:", l.dim, UD_SANS,
-                        UD_PX) + 8;
+        int x = ud_text_l(win, PAD, nb, "Admin password:", l.dim, UD_SANS,
+                          UD_PX) + 8;
         for (int i = 0; i < plen && x < cw - PAD; i++, x += 9)
             ud_disc(win, x, nb - 7, 6, l.text);
         ud_fill(win, x, nb - 10, 1, 12, l.accent);
     } else if (said == 1) {
-        ud_text(win, PAD, nb, "Saved", l.good, UD_BOLD, UD_PX);
+        ud_text_l(win, PAD, nb, "Saved", l.good, UD_BOLD, UD_PX);
     } else if (said == 2) {
-        ud_text(win, PAD, nb, "Changed - no disk to keep it on", l.good,
-                UD_BOLD, UD_PX);
+        ud_text_l(win, PAD, nb, "Changed - no disk to keep it on", l.good,
+                  UD_BOLD, UD_PX);
     } else if (said < 0) {
-        ud_text(win, PAD, nb, "NOT changed (wrong password)", l.danger,
-                UD_BOLD, UD_PX);
+        ud_text_l(win, PAD, nb, "NOT changed (wrong password)", l.danger,
+                  UD_BOLD, UD_PX);
     } else {
-        ud_text(win, PAD, nb, "A click chooses; the desktop follows at once",
-                l.dim, UD_SANS, 11);
+        ud_text_l(win, PAD, nb, "A click chooses; the desktop follows at once",
+                  l.dim, UD_SANS, 11);
     }
 }
 
@@ -303,7 +308,9 @@ static void click(int x, int y)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Appearance");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Wygląd"
+                                                        : "Appearance");
     if (win < 0)
         sys_exit(1);
     int cw = W0, ch = H0;
@@ -313,8 +320,14 @@ void _start(void)
 
     struct ud_look was;
     ud_look(&was);
+    int language = ulocale_language_polish();
     for (;;) {
         int again = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            again = 1;
+        }
         struct win_event ev;
         while (win_poll(win, &ev) == 1) {
             if (ev.type == WEV_CLOSE)

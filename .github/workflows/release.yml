@@ -1,10 +1,11 @@
 # A ThreadOS release after every push to main - what 'update' installs.
 #
-# The version is this workflow's run number: it only grows, and a build
-# by hand is version 0, older than every release. The release carries
-# the three files an installed system is made of, update.txt saying
-# what they are and signing all of it (scripts/mkupdate.py), and the
-# disc and the stick image for a new machine.
+# Releases remain 0.x pre-releases until ThreadOS is ready for daily use.
+# The SemVer label is shown in Settings; the monotonically increasing run
+# number is kept separately to order signed updates. The release carries
+# the three files an installed system is made of, update.txt saying what
+# they are and signing all of it (scripts/mkupdate.py), and the disc and
+# stick image for a new machine.
 #
 # The signature is made with the private key in the repository secret
 # THREADOS_UPDATE_KEY (a P-256 key in PEM - Settings -> Secrets and
@@ -38,11 +39,14 @@ jobs:
             build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             clang lld python3 openssl xz-utils
 
-      - name: Build version ${{ github.run_number }}
+      - name: Build 0.1.0-alpha.${{ github.run_number }}
         run: |
+          VERSION_LABEL="0.1.0-alpha.${{ github.run_number }}"
           make -j$(nproc) VERSION=${{ github.run_number }} \
+            VERSION_LABEL="$VERSION_LABEL" \
             build/threados64.bin build/initrd64.img efi
-          make VERSION=${{ github.run_number }} iso64 stick
+          make VERSION=${{ github.run_number }} \
+            VERSION_LABEL="$VERSION_LABEL" iso64 stick
           xz -T0 -9 -k build/threados-stick.img
 
       - name: Sign
@@ -65,9 +69,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ github.run_number }}" \
-            --title "ThreadOS ${{ github.run_number }}" \
-            --notes "Built from ${{ github.sha }}. An installed system takes it with 'sudo run update'; a new machine starts from threados64.iso." \
+          gh release create "v0.1.0-alpha.${{ github.run_number }}" \
+            --title "ThreadOS 0.1.0-alpha.${{ github.run_number }}" \
+            --notes "Pre-1.0 alpha release built from ${{ github.sha }}. An installed system takes it with 'sudo run update'; a new machine starts from threados64.iso." \
             --latest \
             build/update.txt build/threados64.bin build/initrd64.img \
             build/BOOTX64.EFI build/threados64.iso build/threados-stick.img.xz

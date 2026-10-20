@@ -3,6 +3,7 @@
 
 #include "udraw.h"
 #include "ugui.h"
+#include "ulocale.h"
 
 #define W 520
 #define H 340
@@ -74,10 +75,15 @@ static void say(int x, int y, const char *s, uint32_t color)
     ud_text(win, x, ud_baseline(y, 20, UD_PX), s, color, UD_SANS, UD_PX);
 }
 
+static void say_l(int x, int y, const char *s, uint32_t color)
+{
+    ud_text_l(win, x, ud_baseline(y, 20, UD_PX), s, color, UD_SANS, UD_PX);
+}
+
 static void field(int x, int y, int w, const char *label, const char *value,
                   int selected_field, int secret)
 {
-    say(x, y, label, look.dim);
+    say_l(x, y, label, look.dim);
     ud_round(win, x, y + 20, w, 28, 5, look.field);
     ud_ring(win, x, y + 20, w, 28, 5,
             focus == selected_field ? look.accent : look.line);
@@ -97,18 +103,20 @@ static void button(int x, int y, int w, const char *label, int danger)
 {
     uint32_t color = danger ? look.danger : look.accent;
     ud_round(win, x, y, w, 28, 5, color);
-    ud_text_mid(win, x, y, w, 28, label, look.on_accent, UD_SANS, UD_PX);
+    ud_text_mid_l(win, x, y, w, 28, label, look.on_accent, UD_SANS, UD_PX);
 }
 
 static void draw(void)
 {
     ud_look(&look);
+    ulocale_window_title(win, "User Accounts", "Konta użytkowników");
     ud_fill(win, 0, 0, cw, ch, look.bg);
-    say(16, 12, "User Accounts", look.text);
-    say(16, 38, "Accounts and home folders are managed by the system", look.dim);
+    say_l(16, 12, "User Accounts", look.text);
+    say_l(16, 38, "Accounts and home folders are managed by the system",
+          look.dim);
     ud_fill(win, 16, 62, cw - 32, 1, look.line);
 
-    say(18, 72, "Accounts", look.dim);
+    say_l(18, 72, "Accounts", look.dim);
     int visible = rows_visible();
     for (int i = 0; i < visible && top + i < nrows; i++) {
         int row = top + i;
@@ -116,7 +124,10 @@ static void draw(void)
         if (row == selected)
             ud_round(win, 16, y - 2, 210, 21, 4, look.row);
         char role[24];
-        copy(role, rows[row].level == 0 ? "admin" : "user", sizeof(role));
+        copy(role, rows[row].level == 0
+                       ? (ulocale_language_polish() ? "administrator" : "admin")
+                       : (ulocale_language_polish() ? "użytkownik" : "user"),
+             sizeof(role));
         ud_text(win, 24, ud_baseline(y, 18, UD_PX), rows[row].name,
                 look.text, UD_SANS, UD_PX);
         ud_text_right(win, 215, ud_baseline(y, 18, UD_PX), role,
@@ -134,13 +145,13 @@ static void draw(void)
     if (make_admin)
         ud_text(win, x + 3, ud_baseline(285, 18, UD_PX), "x",
                 look.on_accent, UD_BOLD, UD_PX);
-    say(x + 24, 284, "Create as administrator", look.text);
+    say_l(x + 24, 284, "Create as administrator", look.text);
 
     button(16, ch - 42, 112, "Add account", 0);
     button(138, ch - 42, 112, "Set password", 0);
     button(260, ch - 42, 112, "Change role", 0);
     button(382, ch - 42, 112, "Remove", 1);
-    if (status[0]) say(16, ch - 70, status, look.dim);
+    if (status[0]) say_l(16, ch - 70, status, look.dim);
 }
 
 static void submit(int op)
@@ -220,13 +231,20 @@ static void key(char c)
 
 void _start(void)
 {
-    win = (int)win_create(W, H, "User Accounts");
+    win = (int)win_create(W, H, ulocale_language_polish()
+                                   ? "Konta użytkowników" : "User Accounts");
     if (win < 0) sys_exit(1);
     load();
     draw();
+    int language = ulocale_language_polish();
     for (;;) {
         struct win_event ev;
         int redraw = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            redraw = 1;
+        }
         while (win_poll(win, &ev) == 1) {
             redraw = 1;
             if (ev.type == WEV_CLOSE) sys_exit(0);

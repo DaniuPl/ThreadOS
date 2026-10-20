@@ -15,6 +15,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W0 440
 #define H0 340
@@ -49,6 +50,12 @@ static const uint32_t colours[8] = {
 static const int sizes[3] = { 2, 5, 10 };   /* the tip's radius */
 
 static uint32_t canvas[CW * CH];
+
+static void notify(const char *english, const char *polish)
+{
+    sys_notify(ulocale_language_polish() ? "Rysowanie" : "Paint",
+               ulocale_language_polish() ? polish : english);
+}
 static int colour = 0, size = 1;
 static int painting, last_x, last_y;
 static int dx0, dy0, dx1, dy1;    /* what changed since it was shown */
@@ -163,7 +170,8 @@ static void apply_wallpaper(void)
 {
     int fd = (int)sys_open(WALL_FILE, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        sys_notify("Paint", "Could not create wallpaper.twl in the system root.");
+        notify("Could not create wallpaper.twl in the system root.",
+               "Nie można utworzyć wallpaper.twl w katalogu głównym systemu.");
         return;
     }
 
@@ -185,15 +193,18 @@ static void apply_wallpaper(void)
     }
     sys_close(fd);
     if (failed) {
-        sys_notify("Paint", "Could not write the wallpaper file.");
+        notify("Could not write the wallpaper file.",
+               "Nie można zapisać pliku tapety.");
         return;
     }
 
     int32_t rc = sys_cfg_set("wallpaper", "wallpaper.twl");
     if (rc == 0)
-        sys_notify("Paint", "The drawing is now the desktop wallpaper.");
+        notify("The drawing is now the desktop wallpaper.",
+               "Rysunek jest teraz tapetą pulpitu.");
     else
-        sys_notify("Paint", "The wallpaper was saved, but Settings could not apply it.");
+        notify("The wallpaper was saved, but Settings could not apply it.",
+               "Tapeta została zapisana, ale nie udało się jej ustawić.");
 }
 
 static void wallpaper_click(void)
@@ -245,7 +256,8 @@ static void save(void)
 {
     int fd = (int)sys_open(FILE_NAME, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        sys_notify("Paint", "The drawing cannot be written - no disk?");
+        notify("The drawing cannot be written - no disk?",
+               "Nie można zapisać rysunku — brakuje dysku?");
         return;
     }
     uint32_t row = (uint32_t)(CW * 3 + 3) & ~3u;
@@ -272,7 +284,7 @@ static void save(void)
         sys_write(fd, line, row);
     }
     sys_close(fd);
-    sys_notify("Paint", "Saved as " FILE_NAME);
+    notify("Saved as " FILE_NAME, "Zapisano jako " FILE_NAME);
 }
 
 /* --- drawing ------------------------------------------------------------- */
@@ -321,14 +333,14 @@ static void draw_tools(int win)
                 on ? l.on_accent : l.text);
     }
     ud_round(win, CLEAR_X, BTN_Y, CLEAR_W, BTN_H, 7, l.row);
-    ud_text_mid(win, CLEAR_X, BTN_Y, CLEAR_W, BTN_H, "Clear", l.text,
-                UD_SANS, UD_PX);
+    ud_text_mid_l(win, CLEAR_X, BTN_Y, CLEAR_W, BTN_H, "Clear", l.text,
+                  UD_SANS, UD_PX);
     ud_round(win, SAVE_X, BTN_Y, SAVE_W, BTN_H, 7, l.accent);
-    ud_text_mid(win, SAVE_X, BTN_Y, SAVE_W, BTN_H, "Save", l.on_accent,
-                UD_BOLD, UD_PX);
+    ud_text_mid_l(win, SAVE_X, BTN_Y, SAVE_W, BTN_H, "Save", l.on_accent,
+                  UD_BOLD, UD_PX);
     ud_round(win, WALL_X, BTN_Y, WALL_W, BTN_H, 7, l.row);
-    ud_text_mid(win, WALL_X, BTN_Y, WALL_W, BTN_H, "Wall", l.text,
-                UD_SANS, UD_PX);
+    ud_text_mid_l(win, WALL_X, BTN_Y, WALL_W, BTN_H, "Wall", l.text,
+                  UD_SANS, UD_PX);
 }
 
 static void tool_click(int x, int y)
@@ -368,23 +380,24 @@ static void draw_wall_dialog(int win)
     }
     ud_round(win, x, y, 280, 100, 10, l.bg);
     ud_ring(win, x, y, 280, 100, 10, l.line);
-    ud_text(win, x + 14, y + 23, "Set wallpaper", l.text, UD_BOLD, UD_PX);
-    ud_text(win, x + 14, y + 43, "Admin password:", l.dim, UD_SANS, UD_PX);
+    ud_text_l(win, x + 14, y + 23, "Set wallpaper", l.text, UD_BOLD, UD_PX);
+    ud_text_l(win, x + 14, y + 43, "Admin password:", l.dim, UD_SANS, UD_PX);
     int px = x + 112;
     for (int i = 0; i < wall_pass_len; i++, px += 10)
         ud_disc(win, px, y + 36, 6, l.text);
     ud_fill(win, px, y + 32, 1, 12, l.accent);
     if (wall_error)
-        ud_text(win, x + 14, y + 63, "Password not accepted", l.danger,
-                UD_SANS, 11);
+        ud_text_l(win, x + 14, y + 63, "Password not accepted", l.danger,
+                  UD_SANS, 11);
     else
-        ud_text(win, x + 14, y + 63, "Enter confirms; Escape cancels",
-                l.dim, UD_SANS, 11);
+        ud_text_l(win, x + 14, y + 63, "Enter confirms; Escape cancels",
+                  l.dim, UD_SANS, 11);
 }
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Paint");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Rysowanie" : "Paint");
     if (win < 0)
         sys_exit(1);
     win_truecolour(win);
@@ -394,8 +407,15 @@ void _start(void)
 
     struct ud_look was;
     ud_look(&was);
+    int language = ulocale_language_polish();
     for (;;) {
         int tools = 0;
+        int current_language = ulocale_language_polish();
+        ulocale_window_title(win, "Paint", "Rysowanie");
+        if (current_language != language) {
+            language = current_language;
+            tools = 1;
+        }
         struct win_event ev;
         while (win_poll(win, &ev) == 1) {
             if (ev.type == WEV_CLOSE)

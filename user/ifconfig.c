@@ -1,18 +1,21 @@
 #include "uapi.h"
+#include "ulocale.h"
 
 int main(void)
 {
     struct netinfo info;
-    print("Network configuration:\n");
+    int polish = ulocale_language_polish();
+    print(polish ? "Konfiguracja sieci:\n" : "Network configuration:\n");
     if (netinfo(&info) < 0) {
-        print("No configured IPv4 connection.\n");
+        print(polish ? "Brak skonfigurowanego połączenia IPv4.\n"
+                     : "No configured IPv4 connection.\n");
         return 0;
     }
-    print("inet ");
+    print(polish ? "adres IP " : "inet ");
     print_ip(info.ip);
-    print("\nnetmask ");
+    print(polish ? "\nmaska " : "\nnetmask ");
     print_ip(info.mask);
-    print("\ngateway ");
+    print(polish ? "\nbrama " : "\ngateway ");
     print_ip(info.gw);
     print("\nDNS ");
     print_ip(info.dns);

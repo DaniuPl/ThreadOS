@@ -279,6 +279,12 @@ static inline int ug_say(int win, int x, int y, int h, const char *s,
     return ud_text(win, x, ud_baseline(y, h, UD_PX), s, rgb, font, UD_PX);
 }
 
+static inline int ug_say_l(int win, int x, int y, int h, const char *s,
+                           uint32_t rgb, int font)
+{
+    return ud_text_l(win, x, ud_baseline(y, h, UD_PX), s, rgb, font, UD_PX);
+}
+
 /* A field to type in: a white (or dark) surface, a line round it in
    the accent when it has the keys, and where the next letter goes */
 static inline void ug_draw_field(int win, const struct ud_look *l, int x,
@@ -300,6 +306,15 @@ static inline void ug_draw_button(int win, const struct ud_look *l, int x,
     (void)l;
     ud_round(win, x, y, w, h, UG_R, face);
     ud_text_mid(win, x, y, w, h, text, ink, UD_SANS, UD_PX);
+}
+
+static inline void ug_draw_button_l(int win, const struct ud_look *l, int x,
+                                    int y, int w, int h, const char *text,
+                                    uint32_t face, uint32_t ink)
+{
+    (void)l;
+    ud_round(win, x, y, w, h, UG_R, face);
+    ud_text_mid_l(win, x, y, w, h, text, ink, UD_SANS, UD_PX);
 }
 
 static inline void ug_draw_one(struct ug *u, int i)
@@ -635,10 +650,10 @@ static inline void ug_answers(struct ug *u, int by, const char *yes,
                               const char *no)
 {
     const struct ud_look *l = &u->look;
-    ug_draw_button(u->win, l, ug_yes_x(), by, UG_BTN_W, UG_BTN_H, yes,
-                   l->accent, l->on_accent);
-    ug_draw_button(u->win, l, ug_no_x(), by, UG_BTN_W, UG_BTN_H, no, l->row,
-                   l->text);
+    ug_draw_button_l(u->win, l, ug_yes_x(), by, UG_BTN_W, UG_BTN_H, yes,
+                     l->accent, l->on_accent);
+    ug_draw_button_l(u->win, l, ug_no_x(), by, UG_BTN_W, UG_BTN_H, no, l->row,
+                     l->text);
 }
 
 static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
@@ -654,7 +669,7 @@ static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
     const struct ud_look *l = &u->look;
     ud_text(u->win, x + 12, y + 22, m->title, l->text, UD_BOLD, UD_PX);
     if (m->note[0])
-        ud_text(u->win, x + 12, y + 40, m->note, l->dim, UD_SANS, UD_PX);
+        ud_text_l(u->win, x + 12, y + 40, m->note, l->dim, UD_SANS, UD_PX);
     if (m->buf)
         ug_draw_field(u->win, l, x + 12, y + 46, w - 24, 22, m->buf, 1);
     ug_answers(u, by, m->yes, m->no);

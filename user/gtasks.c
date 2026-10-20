@@ -21,6 +21,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W0 340
 #define H0 298
@@ -147,9 +148,11 @@ static void draw(int win)
 
     char line[32];
     int p = num(line, count);
-    ecopy(line + p, " tasks", (int)sizeof(line) - p);
-    int end = ud_text(win, PAD, ud_baseline(0, HEAD_H, 14), "Tasks", l.text,
-                      UD_BOLD, 14);
+    ecopy(line + p, ulocale_language_polish() ? " procesów" : " tasks",
+          (int)sizeof(line) - p);
+    ulocale_window_title(win, "Tasks", "Procesy");
+    int end = ud_text_l(win, PAD, ud_baseline(0, HEAD_H, 14), "Tasks",
+                        l.text, UD_BOLD, 14);
     ud_text(win, end + 8, ud_baseline(0, HEAD_H, 14), line, l.dim, UD_SANS,
             11);
 
@@ -158,14 +161,14 @@ static void draw(int win)
     int ready = chosen >= 0;
     ud_round(win, kill_x(), KILL_Y, KILL_W, KILL_H, 6,
              ready ? l.danger : l.row);
-    ud_text_mid(win, kill_x(), KILL_Y, KILL_W, KILL_H, "End task",
-                ready ? l.on_accent : l.dim, UD_BOLD, UD_PX);
+    ud_text_mid_l(win, kill_x(), KILL_Y, KILL_W, KILL_H, "End task",
+                  ready ? l.on_accent : l.dim, UD_BOLD, UD_PX);
 
     static const char *const head[4] = { "PID", "Name", "State", "Kind" };
     static const int col[4] = { COL_PID, COL_NAME, COL_STATE, COL_KIND };
     for (int k = 0; k < 4; k++)
-        ud_text(win, col[k], ud_baseline(COLS_Y, COLS_H, 11), head[k], l.dim,
-                UD_SANS, 11);
+        ud_text_l(win, col[k], ud_baseline(COLS_Y, COLS_H, 11), head[k],
+                  l.dim, UD_SANS, 11);
     ud_fill(win, PAD, ROW_Y0 - 2, cw - 2 * PAD, 1, l.line);
 
     for (int i = 0; i < count; i++) {
@@ -186,22 +189,23 @@ static void draw(int win)
         ud_text(win, COL_PID, base, pid, quiet, UD_SANS, UD_PX);
         ud_text(win, COL_NAME, base, list[i].name, ink,
                 UD_SANS, UD_PX);
-        ud_text(win, COL_STATE, base, state_name(list[i].state), ink, UD_SANS,
-                UD_PX);
+        ud_text_l(win, COL_STATE, base, state_name(list[i].state), ink,
+                  UD_SANS, UD_PX);
         /* A process has memory of its own; a kernel thread does not -
            and only the first of the two is something to end */
-        ud_text(win, COL_KIND, base, list[i].ring3 ? "program" : "kernel",
-                list[i].ring3 ? ink : quiet, UD_SANS, UD_PX);
+        ud_text_l(win, COL_KIND, base, list[i].ring3 ? "program" : "kernel",
+                  list[i].ring3 ? ink : quiet, UD_SANS, UD_PX);
     }
 
     if (note[0])
-        ud_text(win, PAD, ud_baseline(ch - FOOT_H, FOOT_H, 11), note,
-                note_ok ? l.good : l.danger, UD_SANS, 11);
+        ud_text_l(win, PAD, ud_baseline(ch - FOOT_H, FOOT_H, 11), note,
+                  note_ok ? l.good : l.danger, UD_SANS, 11);
 }
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Tasks");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Procesy" : "Tasks");
     if (win < 0)
         sys_exit(1);
 

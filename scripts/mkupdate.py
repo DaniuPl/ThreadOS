@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Makes update.txt - the signed description of a ThreadOS release.
 
-    mkupdate.py <out> <version> <key.pem> <kernel> <initrd> <loader>
+    mkupdate.py <out> <sequence> <key.pem> <kernel> <initrd> <loader>
 
 The format is what user/update.c reads:
 
@@ -18,6 +18,10 @@ from a repository secret; the tests make one of their own). It is made
 by the openssl command, so nothing beyond Python and OpenSSL is needed -
 which is what a CI runner has. The file names are the release's asset
 names, so update.c fetches them from next to update.txt.
+
+The numeric version in the manifest is an increasing update sequence.
+The human-facing SemVer label (currently 0.x pre-release) is in the
+initrd and does not determine update ordering.
 """
 
 import hashlib
@@ -68,7 +72,7 @@ def main():
     sig = sign(body, key)
     with open(out, "wb") as fh:
         fh.write(body + b"signature " + sig.hex().encode() + b"\n")
-    print("update.txt: version %d, %s" % (version, ", ".join(
+    print("update.txt: sequence %d, %s" % (version, ", ".join(
         "%s %d B" % (n, os.path.getsize(f)) for n, f in zip(NAMES, files))))
     return 0
 

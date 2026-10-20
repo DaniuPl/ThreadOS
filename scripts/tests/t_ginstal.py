@@ -165,6 +165,8 @@ def main():
                  uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
+            q.type_line("sudo set language pl")
+            q.command("thread", "saved", timeout=30)
             seen = len(q.serial())
             q.type_line("install")
             time.sleep(8)
@@ -198,7 +200,7 @@ def main():
                              fg=(255, 255, 255),
                              under=lambda x, y: aurora_px(x, y, w, h))
             check("the screen says what it is ('%s')" % head,
-                  "ThreadOS - installation" in head)
+                  "ThreadOS — instalacja" in head)
             # the button sits eight pixels off the right edge
             # (kernel/desktop.c), 152 wide
             bx = w - 152 - 8
@@ -207,7 +209,7 @@ def main():
                             under=frost_ref(bx, 8, 152, 20, 6, 0xFFFFFF, 50,
                                             w, h))
             check("and it offers the only way out: restarting the machine "
-                  "('%s')" % btn, "Restart" in btn)
+                  "('%s')" % btn, "Uruchom ponownie" in btn)
 
             wx, wy = find_window(q)
             check(f"the installer's window is in the middle, as wide as it "
@@ -220,11 +222,11 @@ def main():
             # kernel drew it with - not from the serial port
             text = read_rows(q, cx, cy)
             check("the window says what it is for",
-                  "Installing ThreadOS onto this machine's disk" in text)
+                  "Instalowanie ThreadOS na dysku tego komputera" in text)
             check("and what it found: a disk behind an AHCI controller",
-                  "AHCI" in text and "partitions: 3" in text)
+                  "AHCI" in text and "partycje: 3" in text)
             check("and the EFI partition with its label",
-                  "FAT32 LAPTOPESP" in text and "#1" in text)
+                  "FAT32 LAPTOPESP" in text and "nr 1" in text)
             check("it lists all three files it will write",
                   "/EFI/ThreadOS/BOOTX64.EFI" in text
                   and "/EFI/ThreadOS/threados64.bin" in text
@@ -232,9 +234,9 @@ def main():
             check("the kernel size on the screen matches the file",
                   str(len(want_kernel)) in text)
             check("it says /EFI/BOOT/BOOTX64.EFI is free",
-                  "/EFI/BOOT/BOOTX64.EFI" in text and "free" in text)
+                  "/EFI/BOOT/BOOTX64.EFI" in text and "wolne" in text)
             check("and it promises what it will not touch",
-                  "I do NOT touch the partition table" in text)
+                  "Nie zmieniam tablicy" in text)
 
             # Nothing has been written yet - the window has only read
             check("until somebody clicks, nothing on the disk has changed",
@@ -251,11 +253,11 @@ def main():
 
             q.mouse_goto(right, by)
             q.mouse_click()
-            text = wait_text(q, cx, cy, "The whole disk for ThreadOS")
+            text = wait_text(q, cx, cy, "Cały dysk dla ThreadOS")
             check("the second button shows the other way: the whole disk",
-                  "The whole disk for ThreadOS" in text)
+                  "Cały dysk dla ThreadOS" in text)
             check("and it says outright what that means",
-                  "THIS WILL ERASE EVERYTHING ON THIS DISK" in text)
+                  "TO USUNIE WSZYSTKO Z TEGO DYSKU" in text)
             check("listing what it will do instead",
                   "partition table (GPT)" in text
                   and "EFI partition (FAT32)" in text
@@ -266,22 +268,23 @@ def main():
 
             q.mouse_goto(left, by)        # "Back"
             q.mouse_click()
-            text = wait_text(q, cx, cy, "Installing ThreadOS onto this machine's disk")
+            text = wait_text(q, cx, cy,
+                             "Instalowanie ThreadOS na dysku tego komputera")
             check("'Back' goes back to installing beside",
-                  "Installing ThreadOS onto this machine's disk" in text)
+                  "Instalowanie ThreadOS na dysku tego komputera" in text)
 
             q.mouse_goto(left, by)        # "Install beside"
             q.mouse_click()
-            text = wait_text(q, cx, cy, "Type YES")
+            text = wait_text(q, cx, cy, "Wpisz YES")
             check("a click on 'Install beside' asks for a word instead of writing",
-                  "Type YES" in text)
+                  "Wpisz YES" in text)
 
             # A word that is not the word
             q.type_line("NO")
             time.sleep(1.2)
             text = read_rows(q, cx, cy, 10)
             check("another word does not start the writing",
-                  "that is not the word YES" in text)
+                  "to nie jest wymagane słowo YES" in text)
             check("and still nothing has been written",
                   fat_get(target, ESP_START,
                           "/EFI/ThreadOS/threados64.bin") is None)
@@ -293,16 +296,16 @@ def main():
             done = ""
             while time.time() < deadline:
                 done = read_rows(q, cx, cy, 10)
-                if "Done" in done or "It did not work" in done:
+                if "Gotowe" in done or "Operacja się nie powiodła" in done:
                     break
                 time.sleep(0.5)
             check("after YES the installation runs to the end without a "
-                  "kernel password", "Done" in done
-                  and "You have to be admin" not in done)
+                  "kernel password", "Gotowe" in done
+                  and "Wymagane są uprawnienia administratora" not in done)
             check("and it says what follows from that: ThreadOS is in the "
                   "firmware's boot menu",
-                  "in this machine's boot menu" in done
-                  and "Nothing of anybody else's was touched" in done)
+                  "menu startowym tego komputera" in done
+                  and "Nie zmieniono cudzych danych" in done)
 
             # A click where the desktop's menu button would be does
             # nothing - there is no menu to open, and that is the

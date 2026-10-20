@@ -31,6 +31,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 /* What a piece of text is: its colour comes from the theme, asked for
    every time the window is drawn, so a switch of the theme is followed
@@ -78,6 +79,18 @@ static void say(int win, int x, int y, const char *s, int c)
 {
     ud_text(win, x, ud_baseline(y, ROW_H, UD_PX), s, c == C_HEAD ? L.text
             : rgb_of(c), c == C_HEAD ? UD_BOLD : UD_SANS, UD_PX);
+}
+
+static void say_l(int win, int x, int y, const char *s, int c)
+{
+    ud_text_l(win, x, ud_baseline(y, ROW_H, UD_PX), s,
+              c == C_HEAD ? L.text : rgb_of(c),
+              c == C_HEAD ? UD_BOLD : UD_SANS, UD_PX);
+}
+
+static const char *language_text(const char *english, const char *polish)
+{
+    return ulocale_language_polish() ? polish : english;
 }
 
 /* A field to type into, over the row whose top is y */
@@ -248,8 +261,8 @@ static void one_button(int win, int which, int of, const char *label,
     int x = btn_x(which, of);
     ud_round(win, x, btn_y(), BTN_W, BTN_H, 7,
              colour == C_RED ? L.danger : L.accent);
-    ud_text_mid(win, x, btn_y(), BTN_W, BTN_H, label, L.on_accent, UD_BOLD,
-                UD_PX);
+    ud_text_mid_l(win, x, btn_y(), BTN_W, BTN_H, label, L.on_accent,
+                  UD_BOLD, UD_PX);
 }
 
 static void button(int win, const char *label, int colour)
@@ -289,21 +302,22 @@ static int in_button(int x, int y)
 static void disk_line(int win)
 {
     char line[80];
-    int at = add(line, 0, "Disk ");
+    int at = add(line, 0, language_text("Disk ", "Dysk "));
 
     at = addnum(line, at, info.disk + 1);
-    at = add(line, at, " of ");
+    at = add(line, at, language_text(" of ", " z "));
     at = addnum(line, at, info.disks);
     at = add(line, at, ": ");
     at = add(line, at, info.disk_name);
     at = add(line, at, ", ");
     at = addnum(line, at, info.disk_mib);
-    at = add(line, at, " MiB, partitions: ");
+    at = add(line, at, language_text(" MiB, partitions: ",
+                                     " MiB, partycje: "));
     at = addnum(line, at, info.parts);
     say(win, PAD, rowy(DISK_ROW), line, C_TEXT);
     if (info.disks > 1)
-        say(win, PAD, rowy(DISK_ROW + 1),
-                 "(a click on this line picks the next disk)", C_HEAD);
+        say_l(win, PAD, rowy(DISK_ROW + 1),
+              "(a click on this line picks the next disk)", C_HEAD);
 }
 
 static void draw_plan(int win)
@@ -311,12 +325,12 @@ static void draw_plan(int win)
     char line[80];
     int at;
 
-    say(win, PAD, rowy(0), "Installing ThreadOS onto this machine's disk",
-             C_HEAD);
+    say_l(win, PAD, rowy(0), "Installing ThreadOS onto this machine's disk",
+          C_HEAD);
 
     disk_line(win);
 
-    at = add(line, 0, "EFI partition: #");
+    at = add(line, 0, language_text("EFI partition: #", "Partycja EFI: nr "));
     at = addnum(line, at, info.esp_index);
     at = add(line, at, ", ");
     at = add(line, at, info.kind);
@@ -324,12 +338,12 @@ static void draw_plan(int win)
         at = add(line, at, " ");
         at = add(line, at, info.label);
     }
-    at = add(line, at, ", free ");
+    at = add(line, at, language_text(", free ", ", wolne "));
     at = addnum(line, at, info.free_kib);
     at = add(line, at, " KiB");
     say(win, PAD, rowy(4), line, C_TEXT);
 
-    say(win, PAD, rowy(6), "Will write:", C_HEAD);
+    say_l(win, PAD, rowy(6), "Will write:", C_HEAD);
 
     const uint32_t size3[3] = {info.loader_size, info.kernel_size,
                                info.initrd_size};
@@ -346,21 +360,20 @@ static void draw_plan(int win)
 
     if (info.fallback_free) {
         say(win, IND, rowy(10), STEP_NAME[4], C_TEXT);
-        say(win, IND, rowy(11), "free - the machine will boot on its own",
-                 C_HEAD);
+        say_l(win, IND, rowy(11), "free - the machine will boot on its own",
+              C_HEAD);
     } else {
         say(win, IND, rowy(10), STEP_NAME[4], C_RED);
-        say(win, IND, rowy(11), "somebody else's - not touching it",
-                 C_RED);
+        say_l(win, IND, rowy(11), "somebody else's - not touching it",
+              C_RED);
     }
 
-    say(win, PAD, rowy(13), "I do NOT touch the partition table, other "
-             "partitions", C_TEXT);
-    say(win, PAD, rowy(14), "or any file that is there already.",
-             C_TEXT);
+    say_l(win, PAD, rowy(13),
+          "I do NOT touch the partition table, other partitions", C_TEXT);
+    say_l(win, PAD, rowy(14), "or any file that is there already.", C_TEXT);
     if (!info.fallback_free)
-        say(win, PAD, rowy(15),
-                 "Then add an entry in the firmware - see above.", C_TEXT);
+        say_l(win, PAD, rowy(15),
+              "Then add an entry in the firmware - see above.", C_TEXT);
 }
 
 /* The other way, which destroys things. The screen says what will be
@@ -371,17 +384,20 @@ static void draw_wipe(int win)
     char line[80];
     int at;
 
-    say(win, PAD, rowy(0), "The whole disk for ThreadOS", C_RED);
+    say_l(win, PAD, rowy(0), "The whole disk for ThreadOS", C_RED);
 
     disk_line(win);
 
-    say(win, PAD, rowy(5), "THIS WILL ERASE EVERYTHING ON THIS DISK:", C_RED);
-    at = add(line, 0, "the partition table, all ");
+    say_l(win, PAD, rowy(5), "THIS WILL ERASE EVERYTHING ON THIS DISK:",
+          C_RED);
+    at = add(line, 0, language_text("the partition table, all ",
+                                    "tablicę partycji, wszystkie "));
     at = addnum(line, at, info.parts);
-    at = add(line, at, " partitions and what is on them.");
+    at = add(line, at, language_text(" partitions and what is on them.",
+                                     " partycje i ich zawartość."));
     say(win, IND, rowy(6), line, C_TEXT);
 
-    say(win, PAD, rowy(8), "I will make:", C_HEAD);
+    say_l(win, PAD, rowy(8), "I will make:", C_HEAD);
     say(win, IND, rowy(9), STEP_WHOLE[0], C_TEXT);
     at = add(line, 0, STEP_WHOLE[1]);
     at = add(line, at, ", ");
@@ -389,10 +405,10 @@ static void draw_wipe(int win)
     at = add(line, at, " MiB");
     say(win, IND, rowy(10), line, C_TEXT);
     say(win, IND, rowy(11), STEP_WHOLE[2], C_TEXT);
-    say(win, IND, rowy(12), "and write the system onto it.", C_TEXT);
+    say_l(win, IND, rowy(12), "and write the system onto it.", C_TEXT);
 
-    say(win, PAD, rowy(14),
-             "No other disk is touched - only this one.", C_TEXT);
+    say_l(win, PAD, rowy(14),
+          "No other disk is touched - only this one.", C_TEXT);
 }
 
 static void draw_bar(int win, int done, int total)
@@ -417,13 +433,14 @@ static void draw(int win)
     ud_fill(win, 0, 0, cw, ch, L.bg);
 
     if (state == S_LOOK && !info.ok) {
-        say(win, PAD, rowy(0), "Installing ThreadOS", C_HEAD);
-        say(win, PAD, rowy(2), problem_line(info.problem), C_RED);
-        say(win, PAD, rowy(3), problem_hint(info.problem), C_TEXT);
+        say_l(win, PAD, rowy(0), "Installing ThreadOS", C_HEAD);
+        say_l(win, PAD, rowy(2), problem_line(info.problem), C_RED);
+        say_l(win, PAD, rowy(3), problem_hint(info.problem), C_TEXT);
         if (info.problem == INST_NO_ROOM) {
-            int at = add(line, 0, "free ");
+            int at = add(line, 0, language_text("free ", "wolne "));
             at = addnum(line, at, info.free_kib);
-            at = add(line, at, " KiB, needs ");
+            at = add(line, at, language_text(" KiB, needs ",
+                                             " KiB, wymagane "));
             at = addnum(line, at, info.need_kib);
             at = add(line, at, " KiB");
             say(win, PAD, rowy(5), line, C_TEXT);
@@ -433,10 +450,9 @@ static void draw(int win)
            difference between a machine that cannot be installed on
            and one that can, if somebody means it. */
         if (info.can_wipe && info.mode != INST_WHOLE) {
-            say(win, PAD, rowy(7),
-                     "The whole disk can be taken instead - that erases",
-                     C_TEXT);
-            say(win, PAD, rowy(8), "everything on it.", C_TEXT);
+            say_l(win, PAD, rowy(7),
+                  "The whole disk can be taken instead - that erases", C_TEXT);
+            say_l(win, PAD, rowy(8), "everything on it.", C_TEXT);
             buttons(win, "Look again", C_BLUE,
                     "Whole disk", C_RED);
         } else {
@@ -462,27 +478,26 @@ static void draw(int win)
 
     if (state == S_WORD) {
         int wipe = info.mode == INST_WHOLE;
-        say(win, PAD, rowy(0), "Are you sure?", wipe ? C_RED : C_HEAD);
+        say_l(win, PAD, rowy(0), "Are you sure?", wipe ? C_RED : C_HEAD);
         if (wipe) {
-            say(win, PAD, rowy(2),
-                     "I am about to erase this WHOLE disk and remake it.",
-                     C_TEXT);
-            say(win, PAD, rowy(3),
-                     "This cannot be undone.", C_RED);
-            say(win, PAD, rowy(5),
-                     "Type ERASE (in capitals) and press Enter:",
-                     C_TEXT);
+            say_l(win, PAD, rowy(2),
+                  "I am about to erase this WHOLE disk and remake it.",
+                  C_TEXT);
+            say_l(win, PAD, rowy(3), "This cannot be undone.", C_RED);
+            say_l(win, PAD, rowy(5),
+                  "Type ERASE (in capitals) and press Enter:", C_TEXT);
         } else {
-        say(win, PAD, rowy(2),
-                 "I am about to write files onto this machine's EFI partition.", C_TEXT);
-        say(win, PAD, rowy(3),
-                 "Nothing else on the disk changes.", C_TEXT);
-        say(win, PAD, rowy(5),
-                 "Type YES (in capitals) and press Enter:", C_TEXT);
+            say_l(win, PAD, rowy(2),
+                  "I am about to write files onto this machine's EFI partition.",
+                  C_TEXT);
+            say_l(win, PAD, rowy(3), "Nothing else on the disk changes.",
+                  C_TEXT);
+            say_l(win, PAD, rowy(5),
+                  "Type YES (in capitals) and press Enter:", C_TEXT);
         }
         field(win, PAD, rowy(7), 140, typed);
         if (note[0])
-            say(win, PAD, rowy(9), note, C_RED);
+            say_l(win, PAD, rowy(9), note, C_RED);
         button(win, "Do not install", C_BLUE);
         return;
     }
@@ -490,71 +505,71 @@ static void draw(int win)
     if (state == S_PASS) {
         char stars[24];
         int n = plen < 20 ? plen : 20;
-        say(win, PAD, rowy(0), "You have to be admin", C_HEAD);
-        say(win, PAD, rowy(2),
-                 "The kernel refused the write. Give the admin password", C_TEXT);
-        say(win, PAD, rowy(3), "and press Enter:", C_TEXT);
+        say_l(win, PAD, rowy(0), "You have to be admin", C_HEAD);
+        say_l(win, PAD, rowy(2),
+              "The kernel refused the write. Give the admin password", C_TEXT);
+        say_l(win, PAD, rowy(3), "and press Enter:", C_TEXT);
         for (int i = 0; i < n; i++)
             stars[i] = '*';
         stars[n] = '\0';
         field(win, PAD, rowy(5), 180, stars);
         if (note[0])
-            say(win, PAD, rowy(7), note, C_RED);
+            say_l(win, PAD, rowy(7), note, C_RED);
         button(win, "Give up", C_BLUE);
         return;
     }
 
     if (state == S_WORK) {
-        int at = add(line, 0, "step ");
+        int at = add(line, 0, language_text("step ", "krok "));
         at = addnum(line, at, (uint32_t)step + 1);
-        at = add(line, at, " of ");
+        at = add(line, at, language_text(" of ", " z "));
         at = addnum(line, at, info.steps);
-        say(win, PAD, rowy(0), "Writing...", C_HEAD);
+        say_l(win, PAD, rowy(0), "Writing...", C_HEAD);
         say(win, PAD, rowy(2), line, C_TEXT);
         say(win, PAD, rowy(3), step_name(step), C_TEXT);
-        say(win, PAD, rowy(5), "Do not switch the machine off.", C_RED);
+        say_l(win, PAD, rowy(5), "Do not switch the machine off.", C_RED);
         draw_bar(win, step, (int)info.steps);
         return;
     }
 
     if (state == S_DONE) {
-        say(win, PAD, rowy(0), "Done", C_HEAD);
+        say_l(win, PAD, rowy(0), "Done", C_HEAD);
         if (entry_made) {
-            say(win, PAD, rowy(2),
-                     "ThreadOS is in this machine's boot menu.", C_TEXT);
-            say(win, PAD, rowy(3), info.mode == INST_WHOLE
-                     ? "It starts first. Pull the stick out and restart."
-                     : "Restart and choose it in the firmware's boot menu.",
-                     C_TEXT);
+            say_l(win, PAD, rowy(2),
+                  "ThreadOS is in this machine's boot menu.", C_TEXT);
+            say_l(win, PAD, rowy(3), info.mode == INST_WHOLE
+                    ? "It starts first. Pull the stick out and restart."
+                    : "Restart and choose it in the firmware's boot menu.",
+                  C_TEXT);
         } else if (info.fallback_free) {
-            say(win, PAD, rowy(2),
-                     "This machine will boot ThreadOS off the disk.", C_TEXT);
-            say(win, PAD, rowy(3),
-                     "You can pull the stick out and restart.", C_TEXT);
+            say_l(win, PAD, rowy(2),
+                  "This machine will boot ThreadOS off the disk.", C_TEXT);
+            say_l(win, PAD, rowy(3),
+                  "You can pull the stick out and restart.", C_TEXT);
         } else {
-            say(win, PAD, rowy(2), "The files are on the EFI partition.", C_TEXT);
-            say(win, PAD, rowy(3),
-                     "Add an entry in the firmware pointing at:", C_TEXT);
+            say_l(win, PAD, rowy(2), "The files are on the EFI partition.",
+                  C_TEXT);
+            say_l(win, PAD, rowy(3),
+                  "Add an entry in the firmware pointing at:", C_TEXT);
             say(win, PAD, rowy(4), STEP_NAME[1], C_HEAD);
-            say(win, PAD, rowy(5),
-                     "- or, from the disc: \"Add the installed ThreadOS\".",
-                     C_TEXT);
+            say_l(win, PAD, rowy(5),
+                  "- or, from the disc: \"Add the installed ThreadOS\".",
+                  C_TEXT);
         }
-        say(win, PAD, rowy(6), "Nothing of anybody else's was touched.",
-                 C_TEXT);
+        say_l(win, PAD, rowy(6), "Nothing of anybody else's was touched.",
+              C_TEXT);
         draw_bar(win, (int)info.steps, (int)info.steps);
         button(win, "Close", C_BLUE);
         return;
     }
 
     /* S_FAIL */
-    say(win, PAD, rowy(0), "It did not work", C_RED);
-    say(win, PAD, rowy(2), "I stopped at:", C_TEXT);
+    say_l(win, PAD, rowy(0), "It did not work", C_RED);
+    say_l(win, PAD, rowy(2), "I stopped at:", C_TEXT);
     say(win, PAD, rowy(3), step_name(failed_at), C_TEXT);
-    say(win, PAD, rowy(5), "Nothing beyond what is above was",
-             C_TEXT);
-    say(win, PAD, rowy(6),
-             "written - and nothing of anybody else's was touched.", C_TEXT);
+    say_l(win, PAD, rowy(5), "Nothing beyond what is above was", C_TEXT);
+    say_l(win, PAD, rowy(6),
+          "written - and nothing of anybody else's was touched.", C_TEXT);
     draw_bar(win, failed_at, (int)info.steps);
     button(win, "Look again", C_BLUE);
 }
@@ -624,6 +639,7 @@ void _start(void)
     int win = (int)win_create(W0, H0, "Installation");
     if (win < 0)
         sys_exit(1);
+    ulocale_window_title(win, "Installation", "Instalacja");
 
     look(INST_ALONGSIDE, -1);
     draw(win);

@@ -82,6 +82,8 @@ def main():
                   "adapter name: Thread" in out)
             check("the version and the maker from Read Local Version",
                   "version: Bluetooth 5.0" in out and "000f" in out)
+            check("ACL headers preserve handle, flags and L2CAP payload",
+                  "ACL framing: OK" in out)
             check("two devices out of two different kinds of event",
                   "devices heard: 2" in out)
             check("an LE device with a name from its advertising and a signal strength",

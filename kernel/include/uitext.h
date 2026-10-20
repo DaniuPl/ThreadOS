@@ -40,6 +40,9 @@ int ui_baseline_in(int top, int height);
 int ui_font_text(int font, int px, int x, int baseline, const char *s,
                  uint32_t rgb);
 int ui_font_width(int font, int px, const char *s);
+int ui_font_text_l(int font, int px, int x, int baseline, const char *s,
+                   uint32_t rgb);
+int ui_font_width_l(int font, int px, const char *s);
 /* ... onto a picture of one's own, whatever the compositor is drawing on
    (a program's window - see gfx.h); without a font it draws nothing */
 struct gfx_surface;

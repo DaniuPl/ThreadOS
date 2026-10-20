@@ -60,7 +60,7 @@ static void row(int w, const struct ud_look *l, int y, const char *label,
                 const char *value)
 {
     int base = ud_baseline(y, 18, UD_PX);
-    ud_text(w, PAD, base, label, l->dim, UD_SANS, UD_PX);
+    ud_text_l(w, PAD, base, label, l->dim, UD_SANS, UD_PX);
     ud_text_right(w, W - PAD, base, value, l->text, UD_SANS, UD_PX);
 }
 
@@ -71,6 +71,7 @@ void _start(void)
         sys_exit(1);
 
     for (;;) {
+        ulocale_window_title(w, "Monitor", "Monitor");
         struct win_event ev;
         while (win_poll(w, &ev) == 1)
             if (ev.type == WEV_CLOSE)
@@ -97,7 +98,8 @@ void _start(void)
         char p[8];
         num(p, (uint32_t)pct);
         cat(p, "%");
-        ud_text(w, PAD, ud_baseline(6, 18, 13), "Memory", l.text, UD_BOLD, 13);
+        ud_text_l(w, PAD, ud_baseline(6, 18, 13), "Memory", l.text, UD_BOLD,
+                  13);
         ud_text_right(w, W - PAD, ud_baseline(6, 18, 13), p, l.accent,
                       UD_BOLD, 13);
 

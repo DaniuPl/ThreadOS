@@ -12,6 +12,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 #define W0 300
 #define H0 336
@@ -26,16 +27,30 @@
 #define CELL_H    36
 #define FOOT_BASE 322         /* the line at the bottom */
 
-static const char *const months[12] = {
+static const char *const months_en[12] = {
     "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December"
 };
-static const char *const wdays[7] = {
+static const char *const months_pl[12] = {
+    "styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec",
+    "sierpień", "wrzesień", "październik", "listopad", "grudzień"
+};
+static const char *const months_pl_genitive[12] = {
+    "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca",
+    "sierpnia", "września", "października", "listopada", "grudnia"
+};
+static const char *const wdays_en[7] = {
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
     "Sunday"
 };
-static const char *const wshort[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa",
-                                       "Su" };
+static const char *const wdays_pl[7] = {
+    "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota",
+    "niedziela"
+};
+static const char *const wshort_en[7] = { "Mo", "Tu", "We", "Th", "Fr", "Sa",
+                                          "Su" };
+static const char *const wshort_pl[7] = { "Pn", "Wt", "Śr", "Cz", "Pt", "Sb",
+                                          "Nd" };
 
 static int year, month;       /* the month shown, month 1..12 */
 static int ty, tm, td;        /* today */
@@ -119,6 +134,11 @@ static void step(int by)
 
 static void draw(int win, int cw, int ch)
 {
+    int polish = ulocale_language_polish();
+    ulocale_window_title(win, "Calendar", "Kalendarz");
+    const char *const *months = polish ? months_pl : months_en;
+    const char *const *wdays = polish ? wdays_pl : wdays_en;
+    const char *const *wshort = polish ? wshort_pl : wshort_en;
     struct ud_look l;
     ud_look(&l);
     ud_fill(win, 0, 0, cw, ch, l.bg);
@@ -174,13 +194,14 @@ static void draw(int win, int cw, int ch)
         k += put(line + k, ", ");
         k += put_num(line + k, picked);
         line[k++] = ' ';
-        k += put(line + k, months[month - 1]);
+        k += put(line + k, polish ? months_pl_genitive[month - 1]
+                                   : months[month - 1]);
         line[k++] = ' ';
         put_num(line + k, year);
         ud_text(win, PAD, FOOT_BASE, line, l.text, UD_SANS, UD_PX);
     } else {
-        ud_text(win, PAD, FOOT_BASE, "A click on a day says what day it is",
-                l.dim, UD_SANS, 11);
+        ud_text_l(win, PAD, FOOT_BASE, "A click on a day says what day it is",
+                  l.dim, UD_SANS, 11);
     }
 }
 
@@ -207,7 +228,8 @@ static void click(int x, int y, int cw)
 
 void _start(void)
 {
-    int win = (int)win_create(W0, H0, "Calendar");
+    int win = (int)win_create(W0, H0, ulocale_language_polish()
+                                        ? "Kalendarz" : "Calendar");
     if (win < 0)
         sys_exit(1);
     int cw = W0, ch = H0;
@@ -216,9 +238,15 @@ void _start(void)
 
     struct ud_look was;
     ud_look(&was);
+    int language = ulocale_language_polish();
     int ticks = 0;
     for (;;) {
         int again = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            again = 1;
+        }
         struct win_event ev;
         while (win_poll(win, &ev) == 1) {
             if (ev.type == WEV_CLOSE)

@@ -16,6 +16,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 #include "uhttp.h"
 #include "ucert.h"
 #include "uhtml.h"
@@ -68,6 +69,11 @@ static void set_status(const char *s)
         i++;
     }
     status[i] = '\0';
+}
+
+static void set_status_localized(const char *english, const char *polish)
+{
+    set_status(ulocale_language_polish() ? polish : english);
 }
 
 /* --- fetching --- */
@@ -133,14 +139,16 @@ static void fetch(void)
     res.verify_err = 0;
 
     for (int hop = 0; hop < 3; hop++) {
-        set_status("Looking the address up...");
+        set_status_localized("Looking the address up...",
+                             "Wyszukiwanie adresu...");
         uint32_t ip = http_resolve(cur_host);
         if (!ip) {
-            set_status("I do not know that name");
+            set_status_localized("I do not know that name",
+                                 "Nie znam tej nazwy");
             return;
         }
 
-        set_status("Connecting...");
+        set_status_localized("Connecting...", "Łączenie...");
         if (http_get(ip, cur_port, cur_host, cur_path, cur_tls, page_sink, 0,
                      &res) < 0) {
             if (cur_tls && res.verify_err) {
@@ -155,7 +163,7 @@ static void fetch(void)
                 msg[k] = '\0';
                 set_status(msg);
             } else {
-                set_status("Could not connect");
+                set_status_localized("Could not connect", "Nie udało się połączyć");
             }
             return;
         }
@@ -171,14 +179,14 @@ static void fetch(void)
                                  &cur_tls))
             break;
         rebuild_addr();
-        set_status("Redirecting...");
+        set_status_localized("Redirecting...", "Przekierowywanie...");
     }
 
     last_secure = cur_tls && res.verified;
     page[page_len] = '\0';
 
     if (!page_len) {
-        set_status("An empty answer");
+        set_status_localized("An empty answer", "Pusta odpowiedź");
         return;
     }
 
@@ -241,7 +249,7 @@ static void navigate_from_addr(void)
     cur_tls = 0;
     if (!http_parse_url(addr, cur_host, sizeof(cur_host), &cur_port,
                         cur_path, sizeof(cur_path), &cur_tls)) {
-        set_status("A bad address");
+        set_status_localized("A bad address", "Nieprawidłowy adres");
         return;
     }
     fetch();
@@ -253,7 +261,7 @@ static void follow_link(int k)
     if (!http_apply_location(doc.links[k].href, cur_host, sizeof(cur_host),
                              &cur_port, cur_path, sizeof(cur_path),
                              &cur_tls)) {
-        set_status("A bad link");
+        set_status_localized("A bad link", "Nieprawidłowy odnośnik");
         return;
     }
     rebuild_addr();
@@ -339,9 +347,12 @@ static void scroll_by(int delta)
 
 void _start(void)
 {
-    int w = win_create(W, H, "Browser");
+    int w = win_create(W, H, ulocale_language_polish()
+                                ? "Przeglądarka" : "Browser");
     if (w < 0)
         sys_exit(1);
+    set_status_localized("Type an address and press Enter",
+                         "Wpisz adres i naciśnij Enter");
 
     for (;;) {
         struct win_event ev;

@@ -39,7 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, RTC_BASE, RTC_DATE
 
-CHARS = "0123456789: -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+CHARS = ("0123456789: -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+         "ŚśŻżŹźĆćŃńĄąĘęÓóŁł")
 
 
 def read_clock(q):
@@ -154,6 +155,21 @@ def main():
                   "settings ('%s')" % regional,
                   re.match(r"^[A-Z][a-z]{2} \d{4}-\d\d-\d\d "
                            r"\d{1,2}:\d\d:\d\d [AP]M$", regional) is not None)
+
+            for key, value in (("datefmt", "dmy"), ("timefmt", "24h"),
+                               ("language", "pl")):
+                q.type_line("sudo set %s %s" % (key, value))
+                time.sleep(0.5)
+                q.command("thread", "saved", timeout=30)
+                time.sleep(1)
+            polish = read_clock(q)
+            days = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Ndz"]
+            months = ["Sty", "Lut", "Mar", "Kwi", "Maj", "Cze",
+                      "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"]
+            expected = "%s %d %s" % (days[day.weekday()], day.day,
+                                     months[day.month - 1])
+            check("Polish language localizes the bar's date ('%s')" % polish,
+                  polish.startswith(expected + " "))
         finally:
             q.close()
     finally:

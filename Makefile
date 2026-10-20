@@ -13,8 +13,8 @@
 #   make fuzz       - feeds the parsers corrupted data (under sanitizers)
 #   make clean      - removes what was built
 #
-# VERSION=<n> stamps the system's version into the initrd (0 for a build
-# by hand; the release workflow uses its run number).
+# VERSION=<n> is the monotonic update sequence; VERSION_LABEL is the
+# human-facing pre-1.0 version shown by the system.
 
 CC      := gcc
 CXX     := g++
@@ -64,6 +64,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/mkwall.elf \
              $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
              $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
+             $(BUILD)/user/gcode.elf \
              $(BUILD)/user/udtest.elf $(BUILD)/user/gappear.elf \
              $(BUILD)/user/gcalc.elf $(BUILD)/user/gcal.elf \
              $(BUILD)/user/gpaint.elf \
@@ -223,6 +224,8 @@ USER_HEADERS := $(wildcard user/*.h)
 $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
 	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
 
+$(BUILD)/user/gcode.elf: user/gedit.c
+
 # --- The shared library ----------------------------------------------
 #
 # The cryptography, TLS, HTTP and DNS live in the user/*.h headers as
@@ -308,6 +311,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
 	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
 	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
+	    gcode=$(BUILD)/user/gcode.elf \
 	    udtest=$(BUILD)/user/udtest.elf gappear=$(BUILD)/user/gappear.elf \
 	    gcalc=$(BUILD)/user/gcalc.elf gcal=$(BUILD)/user/gcal.elf \
 	    gpaint=$(BUILD)/user/gpaint.elf \
@@ -420,6 +424,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gmon.elf \
                $(BUILD)/user64/gterm.elf \
                $(BUILD)/user64/gedit.elf \
+               $(BUILD)/user64/gcode.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -468,6 +473,8 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
                        user64/compat64.h user64/user64.ld $(USER_HEADERS) \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
+
+$(BUILD)/user64/gcode.elf: user/gedit.c
 
 # --- The shared library in long mode ---------------------------------
 #
@@ -779,18 +786,17 @@ $(BUILD)/litehtml/host/layouttest: apps/browser/layouttest.cpp $(LH_HOST_OBJS)
 browser: $(BUILD)/user64/layouttest.elf $(BUILD)/litehtml/host/layouttest \
          $(BUILD)/user64/web.elf
 
-# The system's version: a number, the release it is (the release
-# workflow sets VERSION to its run number; a build by hand is 0, older
-# than any release). It travels in the initrd as the file 'version',
-# where the update program and the About card read it. The file is
-# rewritten only when the number changes, so that make rebuilds the
-# initrd for a new number and not otherwise.
+# VERSION orders signed updates monotonically. VERSION_LABEL is the
+# SemVer-style version shown to people; releases stay in the 0.x
+# pre-release series until ThreadOS is ready for daily use.
 VERSION ?= 0
+VERSION_LABEL ?= 0.1.0-dev
 VERSION_FILE := $(BUILD)/version.txt
-$(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_FILE); })
+VERSION_CODE_FILE := $(BUILD)/version-code.txt
+$(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION_LABEL)" ] || echo "$(VERSION_LABEL)" > $(VERSION_FILE); } && { [ "$$(cat $(VERSION_CODE_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_CODE_FILE); })
 
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
-             $(VERSION_FILE)
+             $(VERSION_FILE) $(VERSION_CODE_FILE)
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
@@ -822,6 +828,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gmon=$(BUILD)/user64/gmon.elf \
 	    gterm=$(BUILD)/user64/gterm.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
+	    gcode=$(BUILD)/user64/gcode.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
@@ -852,7 +859,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
-	    version=$(VERSION_FILE)
+	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
 initrd64: $(INITRD64)

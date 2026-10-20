@@ -379,12 +379,18 @@ static inline int64_t sys_initrd_read(const char *name, void *buf,
 }
 
 /* A new kernel (0), initrd (1) or loader (2) written over the installed
-   one: 0, -1 failed, -2 not an admin, -3 nothing installed here */
+   one: 0, -1 failed, -2 not an admin, -3 nothing installed, -4 not
+   booted from the installed system, -5 backup failed, -6 rollback needed */
 static inline int64_t sys_update_write(int which, const void *data,
                                        uint64_t len)
 {
     return syscall64_3(SYS64_UPDATE_WRITE, which,
                        (int64_t)(uintptr_t)data, (int64_t)len);
+}
+
+static inline int64_t sys_update_rollback(void)
+{
+    return syscall64(SYS64_UPDATE_ROLLBACK, 0, 0);
 }
 
 static inline void print_dec(uint32_t v)

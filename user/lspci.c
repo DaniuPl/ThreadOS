@@ -1,4 +1,5 @@
 #include "pciinfo.h"
+#include "ulocale.h"
 
 static void put_hex(char *out, uint32_t value, int digits)
 {
@@ -9,7 +10,7 @@ static void put_hex(char *out, uint32_t value, int digits)
     }
 }
 
-static void show_device(const struct pci_info *info)
+static void show_device(const struct pci_info *info, int polish)
 {
     char line[64];
     int n = 0;
@@ -45,13 +46,9 @@ static void show_device(const struct pci_info *info)
     n += 2;
     if ((info->class_code >> 24) == 0x02) {
         line[n++] = ' ';
-        line[n++] = 'n';
-        line[n++] = 'e';
-        line[n++] = 't';
-        line[n++] = 'w';
-        line[n++] = 'o';
-        line[n++] = 'r';
-        line[n++] = 'k';
+        const char *network = polish ? "sieć" : "network";
+        while (*network)
+            line[n++] = *network++;
     }
     line[n++] = '\n';
     line[n] = '\0';
@@ -61,20 +58,26 @@ static void show_device(const struct pci_info *info)
 int main(void)
 {
     int count = 0;
+    int polish = ulocale_language_polish();
     struct pci_info info;
     for (int index = 0;; index++) {
         int result = sys_pci_info(index, &info);
         if (result < 0) {
-            print("lspci: unable to read PCI device information\n");
+            print(polish
+                      ? "lspci: nie można odczytać informacji o urządzeniach PCI\n"
+                      : "lspci: unable to read PCI device information\n");
             return 1;
         }
         if (result == 0)
             break;
-        show_device(&info);
+        show_device(&info, polish);
         count++;
     }
     if (!count)
-        print("No PCI devices found.\n");
-    print("Network devices use class 02; vendor:device IDs identify the model.\n");
+        print(polish ? "Nie znaleziono urządzeń PCI.\n"
+                     : "No PCI devices found.\n");
+    print(polish
+              ? "Urządzenia sieciowe mają klasę 02; identyfikatory wskazują model.\n"
+              : "Network devices use class 02; vendor:device IDs identify the model.\n");
     return 0;
 }

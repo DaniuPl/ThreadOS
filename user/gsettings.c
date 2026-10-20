@@ -25,6 +25,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 /* Small enough to open in the cascade's third place on a 640x480
    screen, between the bar and the dock */
@@ -190,10 +191,13 @@ static int said;
 
 #ifdef __x86_64__
 #define UPDATE_OUTPUT_MAX 2048
+#define UPDATE_CHECK 0
+#define UPDATE_INSTALL 1
+#define UPDATE_ROLLBACK 2
 static int update_allowed;
 static int update_pid = -1;
 static int update_fd = -1;
-static int update_installing;
+static int update_operation;
 static int update_available;
 static int update_auth_pending;
 static char update_message[80] = "Check for signed releases from ThreadOS.";
@@ -223,7 +227,7 @@ static int starts_with(const char *text, const char *prefix)
     return !*prefix;
 }
 
-static void update_start(int installing)
+static void update_start(int operation)
 {
     int fd[2];
     if (update_pid >= 0)
@@ -249,8 +253,11 @@ static void update_start(int installing)
         if (sys_dup2(fd[1], 1) < 0 || sys_dup2(fd[1], 2) < 0)
             sys_exit(126);
         sys_close(fd[1]);
-        if (installing) {
+        if (operation == UPDATE_INSTALL) {
             char *const args[] = { "update", (char *)0 };
+            sys_exec("update", args);
+        } else if (operation == UPDATE_ROLLBACK) {
+            char *const args[] = { "update", "rollback", (char *)0 };
             sys_exec("update", args);
         } else {
             char *const args[] = { "update", "check", (char *)0 };
@@ -262,13 +269,19 @@ static void update_start(int installing)
     sys_close(fd[1]);
     update_fd = fd[0];
     update_pid = (int)pid;
-    update_installing = installing;
+    update_operation = operation;
     update_output_len = 0;
     update_output[0] = 0;
     update_available = 0;
-    copy(update_message, installing ? "Installing the signed update..." :
-                                      "Checking for signed updates...",
-         sizeof(update_message));
+    if (operation == UPDATE_INSTALL)
+        copy(update_message, "Installing the signed update...",
+             sizeof(update_message));
+    else if (operation == UPDATE_ROLLBACK)
+        copy(update_message, "Restoring the previous system...",
+             sizeof(update_message));
+    else
+        copy(update_message, "Checking for signed updates...",
+             sizeof(update_message));
 }
 
 static int update_poll(void)
@@ -284,7 +297,7 @@ static int update_poll(void)
             sys_close(update_fd);
         update_fd = -1;
         update_pid = -1;
-        update_installing = 0;
+        update_operation = UPDATE_CHECK;
         copy(update_message, "Could not read the update process result.",
              sizeof(update_message));
         return 1;
@@ -317,9 +330,13 @@ static int update_poll(void)
     if (read_failed) {
         copy(update_message, "Could not read the update process output.",
              sizeof(update_message));
-    } else if (code == 0 && update_installing &&
-        contains(update_output, "updated to version")) {
+    } else if (code == 0 && update_operation == UPDATE_INSTALL &&
+        contains(update_output, "updated to release sequence")) {
         copy(update_message, "Installed. Restart to apply the update.",
+             sizeof(update_message));
+    } else if (code == 0 && update_operation == UPDATE_ROLLBACK &&
+               contains(update_output, "the previous system was restored")) {
+        copy(update_message, "Previous system restored. Restart to use it.",
              sizeof(update_message));
     } else if (code == 0 && contains(update_output, "a newer system is available")) {
         update_available = 1;
@@ -350,7 +367,7 @@ static int update_poll(void)
                  sizeof(update_message));
         }
     }
-    update_installing = 0;
+    update_operation = UPDATE_CHECK;
     return 1;
 }
 #endif
@@ -393,7 +410,7 @@ static void try_password(void)
     } else {
 #ifdef __x86_64__
         if (for_update) {
-            update_start(1);
+            update_start(for_update);
             sys_drop();
         } else {
 #endif
@@ -444,6 +461,7 @@ static void fields_from_settings(void)
 #ifdef __x86_64__
 #define A_UPDATE_CHECK   9
 #define A_UPDATE_INSTALL 10
+#define A_UPDATE_ROLLBACK 11
 #endif
 
 struct hot {
@@ -477,8 +495,8 @@ static void hot(int x, int y, int w, int h, int act, int arg,
 /* A setting's name, at the top of its row */
 static void row_name(int y, const char *text)
 {
-    ud_text(win, PANE_X, ud_baseline(y, 18, UD_PX), text, l.text, UD_SANS,
-            UD_PX);
+    ud_text_l(win, PANE_X, ud_baseline(y, 18, UD_PX), text, l.text, UD_SANS,
+              UD_PX);
 }
 
 /* One choice out of a few: lit when it is the one in force */
@@ -486,8 +504,8 @@ static void chip(int x, int y, const char *text, int on, const char *name,
                  const char *value)
 {
     ud_round(win, x, y, CHIP_W, CHIP_H, 8, on ? l.accent : l.row);
-    ud_text_mid(win, x, y, CHIP_W, CHIP_H, text, on ? l.on_accent : l.text,
-                UD_SANS, UD_PX);
+    ud_text_mid_l(win, x, y, CHIP_W, CHIP_H, text,
+                  on ? l.on_accent : l.text, UD_SANS, UD_PX);
     hot(x, y, CHIP_W, CHIP_H, A_SET, 0, name, value);
 }
 
@@ -503,7 +521,7 @@ static void chips(int y, int n, const char *const *texts,
 static void button(int x, int y, int w, const char *text, int act, int arg)
 {
     ud_round(win, x, y, w, CHIP_H, 8, l.accent);
-    ud_text_mid(win, x, y, w, CHIP_H, text, l.on_accent, UD_SANS, UD_PX);
+    ud_text_mid_l(win, x, y, w, CHIP_H, text, l.on_accent, UD_SANS, UD_PX);
     hot(x, y, w, CHIP_H, act, arg, (const char *)0, (const char *)0);
 }
 
@@ -532,14 +550,15 @@ static void check_box(int y, const char *text, int on, const char *name)
         ud_round(win, PANE_X, by, b, b, 4, l.field);
         ud_ring(win, PANE_X, by, b, b, 4, l.line);
     }
-    int end = ud_text(win, PANE_X + b + 8, ud_baseline(y, CHIP_H, UD_PX), text,
-                      l.text, UD_SANS, UD_PX);
+    int end = ud_text_l(win, PANE_X + b + 8,
+                        ud_baseline(y, CHIP_H, UD_PX), text, l.text, UD_SANS,
+                        UD_PX);
     hot(PANE_X, y, end - PANE_X, CHIP_H, A_TOGGLE, 0, name, (const char *)0);
 }
 
 static void note(int y, const char *text)
 {
-    ud_text(win, PANE_X, ud_baseline(y, 16, 11), text, l.dim, UD_SANS, 11);
+    ud_text_l(win, PANE_X, ud_baseline(y, 16, 11), text, l.dim, UD_SANS, 11);
 }
 
 /* A line of figures: what it is, and its value */
@@ -547,7 +566,7 @@ static void info(int i, const char *name, const char *value)
 {
     int y = PANE_Y0 + i * INFO_H;
     int base = ud_baseline(y, INFO_H, UD_PX);
-    ud_text(win, PANE_X, base, name, l.dim, UD_SANS, UD_PX);
+    ud_text_l(win, PANE_X, base, name, l.dim, UD_SANS, UD_PX);
     ud_text(win, PANE_X + INFO_X, base, value, l.text, UD_SANS, UD_PX);
 }
 
@@ -707,8 +726,9 @@ static void draw_sound(void)
         ud_round(win, PANE_X, by, b, b, 4, l.field);
         ud_ring(win, PANE_X, by, b, b, 4, l.line);
     }
-    int end = ud_text(win, PANE_X + b + 8, ud_baseline(y, CHIP_H, UD_PX),
-                      "Mute", l.text, UD_SANS, UD_PX);
+    int end = ud_text_l(win, PANE_X + b + 8,
+                        ud_baseline(y, CHIP_H, UD_PX), "Mute", l.text,
+                        UD_SANS, UD_PX);
     hot(PANE_X, y, end - PANE_X, CHIP_H, A_MUTE, 0, (const char *)0,
         (const char *)0);
 
@@ -820,7 +840,7 @@ static void draw_region(void)
 #ifdef __x86_64__
 static void draw_updates(void)
 {
-    char version[16] = "unknown";
+    char version[32] = "unknown";
     int64_t n = sys_initrd_read("version", version, sizeof(version) - 1);
     if (n > 0) {
         version[n] = 0;
@@ -837,6 +857,15 @@ static void draw_updates(void)
                A_UPDATE_INSTALL, 0);
         note(PANE_Y0 + INFO_H + 102,
              "You will be asked for the admin password.");
+        button(PANE_X, PANE_Y0 + INFO_H + 140, 190,
+               "Restore previous system", A_UPDATE_ROLLBACK, 0);
+        note(PANE_Y0 + INFO_H + 172,
+             "The previous system is kept after an update.");
+    } else if (update_allowed) {
+        button(PANE_X, PANE_Y0 + INFO_H + 70, 190,
+               "Restore previous system", A_UPDATE_ROLLBACK, 0);
+        note(PANE_Y0 + INFO_H + 102,
+             "Available after an update.");
     } else if (update_available) {
         note(PANE_Y0 + INFO_H + 70,
              "Boot the installed system to enable installation.");
@@ -855,24 +884,25 @@ static void draw(void)
     load();
     fields_from_settings();
     nhot = 0;
+    ulocale_window_title(win, "Settings", "Ustawienia");
 
     /* One background for both halves, a line between them: the window
        stays the theme's window colour, which is how other programs and
        the desktop's tests tell a window's body from its title bar */
     ud_fill(win, 0, 0, cw, ch, l.bg);
     ud_fill(win, SIDE_W, 12, 1, ch - 24, l.line);
-    ud_text(win, 16, HEAD_BASE, "Settings", l.text, UD_BOLD, 16);
+    ud_text_l(win, 16, HEAD_BASE, "Settings", l.text, UD_BOLD, 16);
     for (int i = 0; i < SEC_N; i++) {
         int y = SIDE_Y0 + i * SIDE_H;
         if (i == section)
             ud_round(win, 8, y + 2, SIDE_W - 16, SIDE_H - 4, 8, l.accent);
-        ud_text(win, 20, ud_baseline(y, SIDE_H, UD_PX), sections[i],
-                i == section ? l.on_accent : l.text, UD_SANS, UD_PX);
+        ud_text_l(win, 20, ud_baseline(y, SIDE_H, UD_PX), sections[i],
+                  i == section ? l.on_accent : l.text, UD_SANS, UD_PX);
         hot(0, y, SIDE_W, SIDE_H, A_SECTION, i, (const char *)0,
             (const char *)0);
     }
 
-    ud_text(win, PANE_X, HEAD_BASE, sections[section], l.text, UD_BOLD, 16);
+    ud_text_l(win, PANE_X, HEAD_BASE, sections[section], l.text, UD_BOLD, 16);
     switch (section) {
     case SEC_GENERAL: draw_general(); break;
     case SEC_LOOK:    draw_look(); break;
@@ -891,16 +921,17 @@ static void draw(void)
        is not looked for */
     int nb = ch - NOTE_DY;
     if (said == 1)
-        ud_text(win, PANE_X, nb, "Saved", l.good, UD_BOLD, UD_PX);
+        ud_text_l(win, PANE_X, nb, "Saved", l.good, UD_BOLD, UD_PX);
     else if (said == 2)
-        ud_text(win, PANE_X, nb, "Changed until the machine stops (no disk)",
-                l.dim, UD_BOLD, UD_PX);
+        ud_text_l(win, PANE_X, nb,
+                  "Changed until the machine stops (no disk)", l.dim, UD_BOLD,
+                  UD_PX);
     else if (said == -1)
-        ud_text(win, PANE_X, nb, "NOT changed (wrong password)", l.danger,
-                UD_BOLD, UD_PX);
+        ud_text_l(win, PANE_X, nb, "NOT changed (wrong password)", l.danger,
+                  UD_BOLD, UD_PX);
     else if (said == -2)
-        ud_text(win, PANE_X, nb, "NOT changed (not a value it takes)",
-                l.danger, UD_BOLD, UD_PX);
+        ud_text_l(win, PANE_X, nb, "NOT changed (not a value it takes)",
+                  l.danger, UD_BOLD, UD_PX);
 
     if (asking) {
         /* The password: dots, not what was typed - the person needs to
@@ -910,18 +941,22 @@ static void draw(void)
         ud_fill_a(win, 0, 0, cw, ch, 0x000000, l.dark ? 110 : 70);
         ud_round(win, px, py, PASS_W, PASS_H, 10, l.field);
         ud_ring(win, px, py, PASS_W, PASS_H, 10, l.line);
-        ud_text(win, px + 14, py + 24,
-                update_auth_pending ? "Installing an update needs admin" :
-                                      "Changing settings needs admin",
-                l.text, UD_BOLD, UD_PX);
+        ud_text_l(win, px + 14, py + 24,
+                  update_auth_pending == UPDATE_ROLLBACK
+                      ? "Restoring the previous system needs admin"
+                      : update_auth_pending == UPDATE_INSTALL
+                            ? "Installing an update needs admin"
+                            : "Changing settings needs admin",
+                  l.text, UD_BOLD, UD_PX);
         ud_round(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.bg);
         ud_ring(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.accent);
-        int x = ud_text(win, px + 22, ud_baseline(py + 36, CHIP_H, UD_PX),
-                        "Password:", l.dim, UD_SANS, UD_PX) + 8;
+        int x = ud_text_l(win, px + 22,
+                          ud_baseline(py + 36, CHIP_H, UD_PX), "Password:",
+                          l.dim, UD_SANS, UD_PX) + 8;
         for (int i = 0; i < plen && x < px + PASS_W - 24; i++, x += 9)
             ud_disc(win, x, py + 45, 6, l.text);
-        ud_text(win, px + 14, py + PASS_H - 14,
-                "Enter confirms, Escape gives up", l.dim, UD_SANS, 11);
+        ud_text_l(win, px + 14, py + PASS_H - 14,
+                  "Enter confirms, Escape gives up", l.dim, UD_SANS, 11);
     }
 }
 
@@ -964,14 +999,26 @@ static void click(int x, int y)
             break;
 #ifdef __x86_64__
         case A_UPDATE_CHECK:
-            update_start(0);
+            update_start(UPDATE_CHECK);
             break;
         case A_UPDATE_INSTALL:
             if (update_allowed && update_available) {
                 if (sys_level() == LEVEL_ADMIN) {
-                    update_start(1);
+                    update_start(UPDATE_INSTALL);
                 } else {
-                    update_auth_pending = 1;
+                    update_auth_pending = UPDATE_INSTALL;
+                    asking = 1;
+                    plen = 0;
+                    said = 0;
+                }
+            }
+            break;
+        case A_UPDATE_ROLLBACK:
+            if (update_allowed) {
+                if (sys_level() == LEVEL_ADMIN) {
+                    update_start(UPDATE_ROLLBACK);
+                } else {
+                    update_auth_pending = UPDATE_ROLLBACK;
                     asking = 1;
                     plen = 0;
                     said = 0;
@@ -1046,7 +1093,8 @@ void _start(void)
 #ifdef __x86_64__
     update_allowed = sys_update_allowed() == 1;
 #endif
-    win = (int)win_create(W0, H0, "Settings");
+    win = (int)win_create(W0, H0, ulocale_language_polish() ? "Ustawienia"
+                                                           : "Settings");
     if (win < 0)
         sys_exit(1);
     load();

@@ -33,7 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, _kernel_define as ptest_define
 
 # The window: slot 2 of the cascade, content a pixel right and a title
 # bar down; gfiles asks for GFILES_W x GFILES_H (user/gfiles.c).
@@ -42,6 +42,7 @@ CX, CY = WX + 1, WY + CONTENT_DY
 CW, CH = GFILES_W, GFILES_H
 # Its three buttons, kept at the right edge of the heading
 BTN_Y = GFILES_HEAD_H // 2
+BTN_H = ptest_define("user/gfiles.c", "BTN_H")
 DEL_W, EDIT_W, NAME_W = 70, 56, 70
 DEL_X = CW - 10 - DEL_W
 EDIT_X = DEL_X - 6 - EDIT_W
@@ -320,6 +321,27 @@ def main():
             check("with 'set hidden 1' the list shows them, without "
                   "reopening (%s)" % ", ".join(names),
                   "swap.sys" in names and "system.cfg" in names)
+
+            q.click_desktop()
+            q.type_line("write Files keep-this-name")
+            time.sleep(1)
+            q.type_line("sudo set language pl")
+            time.sleep(1)
+            q.command("thread", "saved", timeout=30)
+            time.sleep(2)
+            localized_rows = [name for name, _ in rows(q)]
+            check("Polish localizes the file-manager window title",
+                  title(q) == "Pliki: /")
+            check("localized UI does not translate a file name",
+                  "Files" in localized_rows)
+            shot = q.screen_raw()
+            open_label = q.read_ui(
+                CX + EDIT_X,
+                CY + ui_font_baseline_in(UD_PX, BTN_Y - BTN_H // 2, BTN_H),
+                EDIT_W, px=UD_PX,
+                fg=theme("dark")["accent_text"], screen=shot)
+            check("the file manager localizes its Open button ('%s')"
+                  % open_label, open_label == "Otwórz")
         finally:
             q.close()
     finally:

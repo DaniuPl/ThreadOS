@@ -1,4 +1,4 @@
-/* Bluetooth over USB: commands down, events up
+/* Bluetooth over USB: commands, events and ACL data
  *
  * The adapter in a laptop hangs off the internal USB bus and belongs to
  * a class of its own: 0xE0/0x01/0x01. Its endpoints are always the
@@ -8,11 +8,9 @@
  * That is the whole transport, and it has been the same since 2001.
  *
  * What this driver does: reset the adapter, ask for its address, its
- * name and its version, and then listen. Listening means a scan: LE
- * devices announce themselves every few dozen milliseconds and the
- * adapter passes those announcements up as events. Connecting to
- * anything needs the data endpoints and a good deal more, and is not
- * here.
+ * name and its version, scan for LE devices, and carry framed HCI ACL
+ * packets over the two bulk endpoints. L2CAP, security, pairing and
+ * HID profiles still have to be built on top of that transport.
  *
  * The honest part. QEMU emulates no Bluetooth device - the whole stack
  * was thrown out of it years ago - so not one line of the conversation
@@ -22,7 +20,8 @@
  * adapter, expect the transport to be right and the sequence to need
  * work; adapters from Intel and Broadcom additionally want their
  * firmware loaded before they will do anything beyond answering their
- * own address.
+ * own address. The ACL header builder/parser is tested too; that still
+ * does not prove that a real adapter or HID device will answer.
  */
 
 #include <stdint.h>
@@ -34,6 +33,7 @@
 
 #define DEVICES_MAX 12          /* how many neighbours we remember */
 #define NAME_MAX    32
+#define ACL_DATA_MAX 1024
 
 /* Opcodes: the group in the upper six bits, the command in the lower
    ten. Written out whole, because that is how they appear in a trace
@@ -63,6 +63,8 @@ static int dev = -1;            /* the handle from the USB layer */
 static int ep_events;
 static int ep_maxpacket = 16;
 static int ep_interval = 1;
+static int ep_acl_in, ep_acl_out, ep_acl_maxpacket;
+static int acl_ready;
 static int present;
 static const char *gave_up;
 
@@ -81,6 +83,8 @@ static int last_status = -1;
 static uint8_t report[260] __attribute__((aligned(16)));
 static uint8_t desc_buf[256] __attribute__((aligned(16)));
 static uint8_t cmdbuf[260] __attribute__((aligned(16)));
+static uint8_t acl_tx[ACL_DATA_MAX + 4] __attribute__((aligned(16)));
+static uint8_t acl_rx[ACL_DATA_MAX + 4] __attribute__((aligned(16)));
 
 /* --- text ----------------------------------------------------------- */
 
@@ -314,6 +318,86 @@ static int send_command(uint16_t opcode, const uint8_t *params, int plen)
     return usbhc_control(dev, setup, cmdbuf, plen + 3, 0);
 }
 
+static int acl_build(uint8_t *packet, int capacity, uint16_t handle,
+                     uint8_t packet_boundary, uint8_t broadcast,
+                     const uint8_t *payload, uint16_t len)
+{
+    if (!packet || handle > 0x0FFF || packet_boundary > 3 ||
+        broadcast > 3 || len > ACL_DATA_MAX || capacity < (int)len + 4 ||
+        (len && !payload))
+        return -1;
+
+    uint16_t flags = handle | ((uint16_t)packet_boundary << 12) |
+                     ((uint16_t)broadcast << 14);
+    packet[0] = (uint8_t)flags;
+    packet[1] = (uint8_t)(flags >> 8);
+    packet[2] = (uint8_t)len;
+    packet[3] = (uint8_t)(len >> 8);
+    if (len)
+        memcpy(packet + 4, payload, len);
+    return (int)len + 4;
+}
+
+static int acl_parse(const uint8_t *packet, int packet_len, uint16_t *handle,
+                     uint8_t *packet_boundary, uint8_t *broadcast,
+                     const uint8_t **payload, uint16_t *payload_len)
+{
+    if (!packet || packet_len < 4 || !handle || !packet_boundary ||
+        !broadcast || !payload || !payload_len)
+        return -1;
+
+    uint16_t flags = (uint16_t)(packet[0] | (packet[1] << 8));
+    uint16_t len = (uint16_t)(packet[2] | (packet[3] << 8));
+    if (len > ACL_DATA_MAX || packet_len != (int)len + 4)
+        return -1;
+
+    *handle = flags & 0x0FFF;
+    *packet_boundary = (uint8_t)((flags >> 12) & 3);
+    *broadcast = (uint8_t)((flags >> 14) & 3);
+    *payload = packet + 4;
+    *payload_len = len;
+    return 0;
+}
+
+int bt_acl_available(void)
+{
+    return present && acl_ready;
+}
+
+int bt_acl_send(uint16_t handle, uint8_t packet_boundary, uint8_t broadcast,
+                const void *payload, uint16_t len)
+{
+    if (!bt_acl_available())
+        return -1;
+    int packet_len = acl_build(acl_tx, sizeof(acl_tx), handle,
+                               packet_boundary, broadcast, payload, len);
+    if (packet_len < 0)
+        return -1;
+    return usbhc_bulk_out(dev, ep_acl_out, acl_tx, packet_len) == packet_len
+               ? 0 : -1;
+}
+
+int bt_acl_receive(uint16_t *handle, uint8_t *packet_boundary,
+                   uint8_t *broadcast, void *payload, uint16_t capacity)
+{
+    if (!bt_acl_available() || !handle || !packet_boundary || !broadcast ||
+        (!payload && capacity))
+        return -1;
+
+    int packet_len = usbhc_bulk_in(dev, ep_acl_in, acl_rx, sizeof(acl_rx));
+    if (packet_len < 0)
+        return -1;
+
+    const uint8_t *data;
+    uint16_t len;
+    if (acl_parse(acl_rx, packet_len, handle, packet_boundary, broadcast,
+                  &data, &len) < 0 || len > capacity)
+        return -1;
+    if (len)
+        memcpy(payload, data, len);
+    return len;
+}
+
 /* Reads whatever the adapter has to say, for up to 'ms' milliseconds.
    Every event goes through the same parser the test uses. */
 static void pump(uint32_t ms)
@@ -346,12 +430,17 @@ static int command(uint16_t opcode, const uint8_t *params, int plen,
     return 0;
 }
 
-/* Looks in the configuration for the Bluetooth interface and its
-   interrupt endpoint. The two bulk ones are for data, which this
-   driver does not carry yet. */
+/* Looks in the configuration for the Bluetooth interface, its event
+   endpoint and the two bulk endpoints used for HCI ACL data. */
 static int find_adapter(const uint8_t *cfg, int total)
 {
     int iface = -1;
+    int found = -1;
+    int have_events = 0;
+    int in_mps = 0, out_mps = 0;
+
+    ep_events = ep_acl_in = ep_acl_out = 0;
+    ep_acl_maxpacket = 0;
 
     for (int i = 0; i + 1 < total;) {
         int dlen = cfg[i];
@@ -365,25 +454,43 @@ static int find_adapter(const uint8_t *cfg, int total)
                device carries voice and has alternate settings; we do
                not touch it. */
             if (cfg[i + 5] == 0xE0 && cfg[i + 6] == 0x01 &&
-                cfg[i + 7] == 0x01 && cfg[i + 3] == 0)
+                cfg[i + 7] == 0x01 && cfg[i + 3] == 0) {
                 iface = cfg[i + 2];
-            else
+                found = iface;
+                have_events = 0;
+                in_mps = out_mps = 0;
+                ep_events = ep_acl_in = ep_acl_out = 0;
+            } else {
                 iface = -1;
+            }
         } else if (dtype == 0x05 && iface >= 0 && i + 6 < total) {
             uint8_t addr = cfg[i + 2];
             uint8_t attr = cfg[i + 3];
-            if ((addr & 0x80) && (attr & 0x03) == 0x03) {   /* interrupt in */
-                ep_events = addr & 0x0F;
-                ep_maxpacket = cfg[i + 4] | (cfg[i + 5] << 8);
+            int mps = (cfg[i + 4] | (cfg[i + 5] << 8)) & 0x07FF;
+            if ((addr & 0x80) && (attr & 0x03) == 0x03) {
+                ep_events = addr & 0x0F;   /* interrupt in */
+                ep_maxpacket = mps;
                 if (ep_maxpacket > (int)sizeof(report))
                     ep_maxpacket = (int)sizeof(report);
                 ep_interval = cfg[i + 6] ? cfg[i + 6] : 1;
-                return iface;
+                have_events = 1;
+            } else if ((attr & 0x03) == 0x02) {
+                if (addr & 0x80) {
+                    ep_acl_in = addr & 0x0F;
+                    in_mps = mps;
+                } else {
+                    ep_acl_out = addr & 0x0F;
+                    out_mps = mps;
+                }
             }
         }
         i += dlen;
     }
-    return -1;
+    if (found < 0 || !have_events)
+        return -1;
+    if (ep_acl_in && ep_acl_out && in_mps > 0 && out_mps > 0)
+        ep_acl_maxpacket = in_mps < out_mps ? in_mps : out_mps;
+    return found;
 }
 
 int bt_init(void)
@@ -415,6 +522,9 @@ int bt_init(void)
             continue;
         if (usbhc_int_endpoint(d, ep_events, ep_maxpacket, ep_interval) < 0)
             continue;
+        acl_ready = ep_acl_maxpacket > 0 &&
+                    usbhc_bulk_endpoint(d, ep_acl_in, ep_acl_out,
+                                        ep_acl_maxpacket) == 0;
 
         dev = d;
         usbhc_claim(port);
@@ -566,6 +676,19 @@ void bt_selftest(void)
         0x02, 0x0F, 0x01,
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
         0x01, 0x00, 0x00, 0x0C, 0x02, 0x5A, 0x00, 0x00 };
+    static const uint8_t l2cap[] = { 0x01, 0x00, 0x04, 0x00 };
+    uint8_t acl[16];
+    uint16_t handle = 0, payload_len = 0;
+    uint8_t pb = 0, bc = 0;
+    const uint8_t *payload = (const uint8_t *)0;
+    int acl_len = acl_build(acl, sizeof(acl), 0x123, 2, 1, l2cap,
+                            sizeof(l2cap));
+    int acl_ok = acl_len == 8 && acl[0] == 0x23 && acl[1] == 0x61 &&
+                 acl[2] == 4 && acl[3] == 0 &&
+                 acl_parse(acl, acl_len, &handle, &pb, &bc,
+                           &payload, &payload_len) == 0 &&
+                 handle == 0x123 && pb == 2 && bc == 1 && payload_len == 4 &&
+                 memcmp(payload, l2cap, sizeof(l2cap)) == 0;
 
     have_addr = have_name = have_version = 0;
     nseen = 0;
@@ -582,6 +705,7 @@ void bt_selftest(void)
     printk("  adapter name: %s\n", bt_name());
     printk("  version: %s\n", bt_version());
     printk("  devices heard: %u\n", (uint32_t)nseen);
+    printk("  ACL framing: %s\n", acl_ok ? "OK" : "failed");
     for (int i = 0; i < nseen; i++)
         printk("    %s  %s%s%d dBm\n", bt_found_addr(i), bt_found_name(i),
                bt_found_name(i)[0] ? "  " : "", bt_found_rssi(i));

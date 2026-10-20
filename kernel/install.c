@@ -52,8 +52,17 @@
 #define PATH_INITRD  "/EFI/ThreadOS/initrd64.img"
 #define DIR_FALLBACK "/EFI/BOOT"
 #define PATH_FALLBACK "/EFI/BOOT/BOOTX64.EFI"
+#define DIR_UPDATE_BACKUP "/EFI/ThreadOS/previous"
+#define PATH_BACKUP_KERNEL DIR_UPDATE_BACKUP "/threados64.bin"
+#define PATH_BACKUP_INITRD DIR_UPDATE_BACKUP "/initrd64.img"
+#define PATH_BACKUP_LOADER DIR_UPDATE_BACKUP "/BOOTX64.EFI"
+#define PATH_BACKUP_FALLBACK DIR_UPDATE_BACKUP "/fallback.EFI"
+#define PATH_BACKUP_READY DIR_UPDATE_BACKUP "/ready"
+#define PATH_UPDATE_PENDING DIR_UPDATE_BACKUP "/pending"
 
 static int update_allowed;
+static int update_active;
+static uint32_t update_written;
 
 void install_set_booted_installed(int installed)
 {
@@ -544,37 +553,167 @@ int install_do(void)
  * and the kernel only lets an admin call this), written over the
  * installed ones on the EFI partition of the disk the system runs
  * from. The loader reads them from there at the next start; nothing
- * else changes. When \EFI\BOOT\BOOTX64.EFI is ours too (a disk
- * ThreadOS has to itself), it gets the new loader as well.
+ * else changes. Before the first write, a previous copy is kept so an
+ * interrupted update can be rolled back. When
+ * \EFI\BOOT\BOOTX64.EFI is ours too, that loader is backed up and
+ * updated as well.
  *
- * Returns 0, -1 when writing failed, -3 when this disk holds no
- * installed ThreadOS (a system started from a stick has nothing here
- * to update). */
+ * The write returns -3 when this disk has no installed ThreadOS,
+ * -4 when booted from another system, -5 when no backup could be made,
+ * and -6 when an earlier update still needs rollback. */
+static int update_mount_esp(void)
+{
+    struct partition pt;
+    int np = part_scan();
+    for (int i = 0; i < np; i++)
+        if (part_get(i, &pt) && !strcmp(pt.kind, "EFI (ESP)"))
+            return fat_mount((uint32_t)pt.start);
+    return 0;
+}
+
+static int update_backup_marker(void)
+{
+    struct fat_entry e;
+    char marker[40];
+    static const char no_fallback[] = "TOSROLL1\nfallback=0\n";
+    static const char with_fallback[] = "TOSROLL1\nfallback=1\n";
+
+    if (!fat_stat(PATH_BACKUP_READY, &e) || e.is_dir ||
+        e.size >= sizeof(marker))
+        return -1;
+    int n = fat_read(PATH_BACKUP_READY, 0, marker, e.size);
+    if (n != (int)e.size)
+        return -1;
+    marker[n] = '\0';
+    if (!strcmp(marker, no_fallback))
+        return 0;
+    if (!strcmp(marker, with_fallback))
+        return 1;
+    return -1;
+}
+
+static int save_previous_system(void)
+{
+    static const char pending[] = "TOSUPDATE1\n";
+    static const char no_fallback[] = "TOSROLL1\nfallback=0\n";
+    static const char with_fallback[] = "TOSROLL1\nfallback=1\n";
+    struct fat_entry e;
+    int fallback = 0;
+
+    if (fat_stat(PATH_UPDATE_PENDING, &e))
+        return -2;
+    if (fat_mkdir(DIR_UPDATE_BACKUP) < 0)
+        return -1;
+    if (fat_stat(PATH_BACKUP_READY, &e) &&
+        fat_unlink(PATH_BACKUP_READY) < 0)
+        return -1;
+
+    if (!fat_stat(PATH_KERNEL, &e) || e.is_dir ||
+        !fat_stat(PATH_INITRD, &e) || e.is_dir ||
+        !fat_stat(PATH_LOADER, &e) || e.is_dir)
+        return -1;
+
+    if (fat_copy_file(PATH_KERNEL, PATH_BACKUP_KERNEL) < 0 ||
+        fat_copy_file(PATH_INITRD, PATH_BACKUP_INITRD) < 0 ||
+        fat_copy_file(PATH_LOADER, PATH_BACKUP_LOADER) < 0)
+        return -1;
+
+    if (fat_stat(PATH_FALLBACK, &e) && !e.is_dir &&
+        fallback_is_ours(e.size)) {
+        if (fat_copy_file(PATH_FALLBACK, PATH_BACKUP_FALLBACK) < 0)
+            return -1;
+        fallback = 1;
+    }
+
+    const char *marker = fallback ? with_fallback : no_fallback;
+    uint32_t marker_len = fallback ? sizeof(with_fallback) - 1
+                                  : sizeof(no_fallback) - 1;
+    if (fat_write_file(PATH_BACKUP_READY, marker, marker_len) < 0 ||
+        fat_write_file(PATH_UPDATE_PENDING, pending, sizeof(pending) - 1) < 0)
+        return -1;
+
+    update_written = 0;
+    update_active = 1;
+    return 0;
+}
+
 int install_update_file(int which, const void *data, uint32_t len)
 {
     static const char *paths[3] = { PATH_KERNEL, PATH_INITRD, PATH_LOADER };
-    struct partition pt;
     struct fat_entry e;
-    int np, i;
 
     if (!update_allowed)
         return -4;
     if (which < 0 || which > 2 || !data || !len)
         return -1;
-    np = part_scan();
-    for (i = 0; i < np; i++)
-        if (part_get(i, &pt) && !strcmp(pt.kind, "EFI (ESP)"))
-            break;
-    if (np <= 0 || i == np)
+    if (!update_mount_esp())
         return -3;
-    if (!fat_mount((uint32_t)pt.start))  /* this one, whatever was mounted */
+    if (!fat_stat(PATH_KERNEL, &e) || e.is_dir)
         return -3;
-    if (!fat_stat(PATH_KERNEL, &e))
-        return -3;                       /* an EFI partition, but not ours */
+
+    if (!update_active) {
+        int rc = save_previous_system();
+        if (rc == -2)
+            return -6;
+        if (rc < 0)
+            return -5;
+    } else if (which == 1 && update_written) {
+        return -6;
+    }
+
     if (fat_write_file(paths[which], data, len) < 0)
         return -1;
-    if (which == 2 && fat_stat(PATH_FALLBACK, &e) && fallback_is_ours(e.size))
-        fat_write_file(PATH_FALLBACK, data, len);
+    if (which == 2 && fat_stat(PATH_FALLBACK, &e) && !e.is_dir &&
+        fallback_is_ours(e.size) &&
+        fat_write_file(PATH_FALLBACK, data, len) < 0)
+        return -1;
+
+    update_written |= 1u << which;
+    if (update_written == 7u) {
+        if (!fat_stat(PATH_UPDATE_PENDING, &e) ||
+            fat_unlink(PATH_UPDATE_PENDING) < 0)
+            return -1;
+        update_active = 0;
+    }
+    return 0;
+}
+
+int install_update_rollback(void)
+{
+    static const char pending[] = "TOSUPDATE1\n";
+    struct fat_entry e;
+    int fallback;
+
+    if (!update_allowed)
+        return -4;
+    if (!update_mount_esp() ||
+        !fat_stat(DIR_OURS, &e) || !e.is_dir)
+        return -3;
+
+    fallback = update_backup_marker();
+    if (fallback < 0 ||
+        !fat_stat(PATH_BACKUP_KERNEL, &e) || e.is_dir ||
+        !fat_stat(PATH_BACKUP_INITRD, &e) || e.is_dir ||
+        !fat_stat(PATH_BACKUP_LOADER, &e) || e.is_dir ||
+        (fallback && (!fat_stat(PATH_BACKUP_FALLBACK, &e) || e.is_dir)))
+        return -5;
+
+    if (!fat_stat(PATH_UPDATE_PENDING, &e) &&
+        fat_write_file(PATH_UPDATE_PENDING, pending, sizeof(pending) - 1) < 0)
+        return -1;
+
+    if (fat_copy_file(PATH_BACKUP_INITRD, PATH_INITRD) < 0 ||
+        fat_copy_file(PATH_BACKUP_KERNEL, PATH_KERNEL) < 0 ||
+        fat_copy_file(PATH_BACKUP_LOADER, PATH_LOADER) < 0 ||
+        (fallback &&
+         fat_copy_file(PATH_BACKUP_FALLBACK, PATH_FALLBACK) < 0))
+        return -1;
+
+    if (!fat_stat(PATH_UPDATE_PENDING, &e) ||
+        fat_unlink(PATH_UPDATE_PENDING) < 0)
+        return -1;
+    update_active = 0;
+    update_written = 0;
     return 0;
 }
 

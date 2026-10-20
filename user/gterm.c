@@ -30,6 +30,7 @@
  */
 
 #include "udraw.h"
+#include "ulocale.h"
 
 /* Drawn the way the desktop draws, in its theme: the terminal's ground
    is the theme's field - the surface things are typed into - its text
@@ -249,6 +250,11 @@ static void put_str(const char *s)
 {
     while (*s)
         put_char(*s++);
+}
+
+static void put_str_locale(const char *english, const char *polish)
+{
+    put_str(ulocale_language_polish() ? polish : english);
 }
 
 static void put_num(int32_t v)
@@ -555,7 +561,7 @@ static void run_line(void)
         asking = 0;
         put_char('\n');
         if (sys_auth(cmd) != 0) {
-            put_str("sudo: wrong password\n");
+            put_str_locale("sudo: wrong password\n", "sudo: błędne hasło\n");
             pending[0] = 0;
             return;
         }
@@ -583,9 +589,12 @@ static void run_line(void)
     hist_pos = hist_n;
 
     if (t_eq(line, "whoami")) {
-        put_str(sys_level() == LEVEL_ADMIN
-                    ? "admin - you can change the system\n"
-                    : "plain user - use 'sudo' to change the system\n");
+        if (sys_level() == LEVEL_ADMIN)
+            put_str_locale("admin - you can change the system\n",
+                           "administrator — możesz zmieniać system\n");
+        else
+            put_str_locale("plain user - use 'sudo' to change the system\n",
+                           "zwykły użytkownik — użyj 'sudo', aby zmieniać system\n");
         return;
     }
     if (t_eq(line, "sudo") || t_starts(line, "sudo ")) {
@@ -593,7 +602,7 @@ static void run_line(void)
         while (*rest == ' ')
             rest++;
         if (!*rest) {
-            put_str("sudo: which command?\n");
+            put_str_locale("sudo: which command?\n", "sudo: jakie polecenie?\n");
             return;
         }
         if (sys_level() == LEVEL_ADMIN) {   /* already, so no asking */
@@ -603,7 +612,7 @@ static void run_line(void)
         }
         t_copy(pending, rest, LINE_MAX);
         asking = 1;
-        put_str("password: ");
+        put_str_locale("password: ", "hasło: ");
         return;
     }
     if (t_eq(line, "clear")) {
@@ -615,13 +624,21 @@ static void run_line(void)
         sys_exit(0);
     }
     if (t_eq(line, "help")) {
-        put_str("built in: cd <dir>, clear, exit, help, whoami, "
-                "sudo <command>\n");
-        put_str("lspci (also 'hardware') lists PCI devices; ifconfig "
-                "shows network settings\n");
-        put_str("other commands run from disk or initrd; 'a | b' works\n");
-        put_str("arrows: history and moving in the line; "
-                "PgUp/PgDn: scrolling\n");
+        put_str_locale("built in: cd <dir>, clear, exit, help, whoami, "
+                       "sudo <command>\n",
+                       "wbudowane: cd <katalog>, clear, exit, help, whoami, "
+                       "sudo <polecenie>\n");
+        put_str_locale("lspci (also 'hardware') lists PCI devices; ifconfig "
+                       "shows network settings\n",
+                       "lspci (także 'hardware') pokazuje urządzenia PCI; "
+                       "ifconfig wyświetla ustawienia sieci\n");
+        put_str_locale("other commands run from disk or initrd; 'a | b' works\n",
+                       "pozostałe polecenia uruchamiają się z dysku lub "
+                       "initrd; działa 'a | b'\n");
+        put_str_locale("arrows: history and moving in the line; "
+                       "PgUp/PgDn: scrolling\n",
+                       "strzałki: historia i edycja wiersza; "
+                       "PgUp/PgDn: przewijanie\n");
         return;
     }
     if (t_eq(line, "cd") || t_starts(line, "cd ")) {
@@ -631,7 +648,8 @@ static void run_line(void)
         if (!*path)
             path = "/";
         if (sys_chdir(path) < 0) {
-            put_str("cd: no such directory: ");
+            put_str_locale("cd: no such directory: ",
+                           "cd: brak takiego katalogu: ");
             put_str(path);
             put_char('\n');
         } else {
@@ -670,13 +688,13 @@ static void run_program(char *line)
     }
 
     if (pid == -1) {
-        put_str("no such program: ");
+        put_str_locale("no such program: ", "brak programu: ");
         put_str(line);
         put_char('\n');
         return;
     }
     if (pid < 0) {
-        put_str("could not start it\n");
+        put_str_locale("could not start it\n", "nie udało się go uruchomić\n");
         return;
     }
 
@@ -724,7 +742,7 @@ static void watch_running(void)
     /* In long mode a failed exec can only come back as the child's
        exit code, so 'there is no such program' arrives here */
     if (code == 127) {
-        put_str("no such program\n");
+        put_str_locale("no such program\n", "brak takiego programu\n");
         return;
     }
     /* A code other than zero is not an error of ours, but it is
@@ -1190,8 +1208,11 @@ static void draw(int w)
     /* While a password is being typed the line says so instead of
        saying where you are: what is being asked for matters more than
        which directory it happens in. */
-    const char *lead = asking ? "password: " : prompt;
-    int leadn = asking ? 10 : plen;
+    const char *lead = asking
+                           ? (ulocale_language_polish() ? "hasło: "
+                                                         : "password: ")
+                           : prompt;
+    int leadn = asking ? u_cols(lead, t_len(lead)) : plen;
     ud_cells(w, PAD, iy + TERM_BASE, CELL, lead, l.good, UD_MONO, TERM_PX);
 
     /* A line longer than the window slides under the cursor, so the
@@ -1229,15 +1250,18 @@ static void draw(int w)
        this the terminal looks the same whether it is waiting for a
        command or waiting for a program, which are not the same thing
        to be looking at. */
-    const char *say = running ? "running... ^C" : view ? "^ scrolled back"
-                                                       : (const char *)0;
+    const char *say = running ? (ulocale_language_polish()
+                                     ? "uruchomiono... ^C"
+                                     : "running... ^C")
+                      : view ? (ulocale_language_polish()
+                                    ? "^ przewinięto w górę"
+                                    : "^ scrolled back")
+                             : (const char *)0;
     if (say && cols > 24) {
         /* On a field of its own, on the grid like the rest: drawn
            straight onto the line underneath, the two texts would share
            the same pixels */
-        int n = 0;
-        while (say[n])
-            n++;
+        int n = u_cols(say, t_len(say));
         int mx = PAD + (cols - n) * CELL;
         ud_round(w, mx - 4, PAD, n * CELL + 8, ROW_H, 5, l.row);
         ud_cells(w, mx, PAD + TERM_BASE, CELL, say, l.accent, UD_MONO,
@@ -1254,7 +1278,8 @@ void _start(void)
 
     measure();
     refresh_prompt();
-    put_str("ThreadOS terminal - type 'help' to see what it can do.\n");
+    put_str_locale("ThreadOS terminal - type 'help' to see what it can do.\n",
+                   "Terminal ThreadOS — wpisz 'help', aby zobaczyć polecenia.\n");
 
     for (;;) {
         struct win_event ev;

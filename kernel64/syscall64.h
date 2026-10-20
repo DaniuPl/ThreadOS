@@ -148,14 +148,14 @@
 /* A file of the initrd, read: a1/a2 = name, a3 = buffer, a4 = its size
    -> how many bytes (the file may be longer), -1 = no such file */
 #define SYS64_INITRD_READ 76
-/* An update's file written over the installed one (admin only): a1 =
-   0 kernel / 1 initrd / 2 loader, a2 = data, a3 = length -> 0, -1
-   write failed, -2 not allowed, -3 nothing installed here, -4 not
-   booted from the installed system */
+/* Update a system file (admin only): a1 = 0 kernel / 1 initrd / 2 loader,
+   a2 = data, a3 = length. The previous system is backed up before the
+   first write. */
 #define SYS64_UPDATE_WRITE 77
 /* Whether a trusted installed-system boot marker permits update writes */
 #define SYS64_UPDATE_ALLOWED 80
 #define SYS64_PCI_INFO 81 /* a1=index, a2=&struct pci_info -> 1/0/-1 */
+#define SYS64_UPDATE_ROLLBACK 82 /* restore the previous installed system */
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* Numbers taken since forever: keyboard, console, errors */

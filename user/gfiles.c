@@ -88,7 +88,7 @@ static char ask_line[64];
 static int asking;            /* 0, or which of the two */
 static char answer[NAME_LEN];
 static int alen;
-static char note[48];
+static char note[80];
 static char here[PATH_LEN];   /* the directory we are looking at */
 static char home_dir[PATH_LEN];
 static char trash_dir[PATH_LEN];
@@ -433,7 +433,7 @@ static void where_am_i(void)
        otherwise. */
     char t[80];
     int p = 0;
-    const char *pre = "Files: ";
+    const char *pre = ulocale_language_polish() ? "Pliki: " : "Files: ";
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     for (int i = 0; here[i] && p < (int)sizeof(t) - 1; i++)
@@ -742,18 +742,23 @@ static void delete_chosen(void)
     }
 
     int p = 0;
-    const char *q = in_trash
-                        ? (dir ? "Remove the folder '" : "Remove '")
-                        : (dir ? "Move the folder '" : "Move '");
+    int polish = ulocale_language_polish();
+    const char *q = polish
+                        ? (in_trash
+                               ? (dir ? "Usuń folder \"" : "Usuń \"")
+                               : (dir ? "Przenieś folder \"" : "Przenieś \""))
+                        : (in_trash
+                               ? (dir ? "Remove the folder '" : "Remove '")
+                               : (dir ? "Move the folder '" : "Move '"));
     for (int i = 0; q[i]; i++)
         ask_line[p++] = q[i];
     for (int i = 0; items[chosen].name[i] && p < 52; i++)
         ask_line[p++] = items[chosen].name[i];
-    ask_line[p++] = '\'';
+    ask_line[p++] = polish ? '"' : '\'';
     if (in_trash) {
         ask_line[p++] = '?';
     } else {
-        const char *end = "' to Trash?";
+        const char *end = polish ? "\" do Kosza?" : "' to Trash?";
         for (int i = 0; end[i] && p < (int)sizeof(ask_line) - 1; i++)
             ask_line[p++] = end[i];
     }
@@ -1167,7 +1172,10 @@ static void draw_tree(int win, const struct ud_look *l)
         ud_round(win, x + 11, y + 6, 12, 8, 2, fc);
 
         char label[NAME_LEN + 4];
-        fit(label, (int)sizeof(label), idx == 0 ? "Disk" : last_part(n->path),
+        const char *name = idx == 0 && ulocale_language_polish()
+                               ? "Dysk"
+                               : idx == 0 ? "Disk" : last_part(n->path);
+        fit(label, (int)sizeof(label), name,
             TREE_W - (x + 28) - 6, here_one ? UD_BOLD : UD_SANS, 11);
         ud_text(win, x + 28, ud_baseline(y, TREE_ROW_H, 11), label, ink,
                 here_one ? UD_BOLD : UD_SANS, 11);
@@ -1196,15 +1204,16 @@ static void draw(void)
     ud_text(win, 12, ud_baseline(0, HEAD_H, 13), head, l.text, UD_BOLD, 13);
 
     int by = (HEAD_H - BTN_H) / 2;
-    ug_draw_button(win, &l, name_x(), by, NAME_W, BTN_H,
-                   in_trash ? "Restore" : "Rename",
-                   asking == ASK_RENAME ? l.danger : l.row,
-                   asking == ASK_RENAME ? l.on_accent : l.text);
-    ug_draw_button(win, &l, edit_x(), by, EDIT_W, BTN_H, "Open", l.accent,
-                   l.on_accent);
-    ug_draw_button(win, &l, del_x(), by, DEL_W, BTN_H,
-                   in_trash ? "Delete" : "Trash",
-                   ask.on ? l.danger : l.row, ask.on ? l.on_accent : l.danger);
+    ug_draw_button_l(win, &l, name_x(), by, NAME_W, BTN_H,
+                     in_trash ? "Restore" : "Rename",
+                     asking == ASK_RENAME ? l.danger : l.row,
+                     asking == ASK_RENAME ? l.on_accent : l.text);
+    ug_draw_button_l(win, &l, edit_x(), by, EDIT_W, BTN_H, "Open", l.accent,
+                 l.on_accent);
+    ug_draw_button_l(win, &l, del_x(), by, DEL_W, BTN_H,
+                 in_trash ? "Delete" : "Trash",
+                 ask.on ? l.danger : l.row,
+                 ask.on ? l.on_accent : l.danger);
     ud_fill(win, 0, HEAD_H, cw, 1, l.line);
 
     /* The tools, and what is waiting to be pasted */
@@ -1215,13 +1224,16 @@ static void draw(void)
                   (t == TOOL_PASTE && clip[0]);
         const char *label = t == TOOL_NEW && in_trash ? "Empty Trash"
                                                        : tool_name[t];
-        ug_draw_button(win, &l, tool_x(t), ty, tool_w[t], BTN_H, label,
-                       lit ? l.accent : l.row, lit ? l.on_accent : l.text);
+        ug_draw_button_l(win, &l, tool_x(t), ty, tool_w[t], BTN_H, label,
+                         lit ? l.accent : l.row,
+                         lit ? l.on_accent : l.text);
     }
     if (clip[0]) {
         char what[NAME_LEN + 12];
         int q = 0;
-        const char *pre = clip_cut ? "cut: " : "copied: ";
+        const char *pre = ulocale_language_polish()
+                              ? (clip_cut ? "wycięto: " : "skopiowano: ")
+                              : (clip_cut ? "cut: " : "copied: ");
         for (int i = 0; pre[i]; i++)
             what[q++] = pre[i];
         ecopy(what + q, last_part(clip), (int)sizeof(what) - q);
@@ -1274,10 +1286,9 @@ static void draw(void)
         more[n++] = '-';
         n += num(more + n, (unsigned)(top + shown > count ? count
                                                           : top + shown));
-        more[n++] = ' ';
-        more[n++] = 'o';
-        more[n++] = 'f';
-        more[n++] = ' ';
+        const char *of = ulocale_language_polish() ? " z " : " of ";
+        for (int i = 0; of[i]; i++)
+            more[n++] = of[i];
         n += num(more + n, (unsigned)count);
         more[n] = '\0';
         ud_text_right(win, cw - 12, fb, more, l.dim, UD_SANS, 11);
@@ -1286,7 +1297,11 @@ static void draw(void)
     if (asking) {
         char line[64];
         int p2 = 0;
-        const char *q = asking == ASK_FOLDER ? "Folder name: " : "New name: ";
+        const char *q = ulocale_language_polish()
+                            ? (asking == ASK_FOLDER ? "Nazwa folderu: "
+                                                    : "Nowa nazwa: ")
+                            : (asking == ASK_FOLDER ? "Folder name: "
+                                                    : "New name: ");
         for (int i = 0; q[i]; i++)
             line[p2++] = q[i];
         for (int i = 0; i < alen && p2 < (int)sizeof(line) - 2; i++)
@@ -1295,10 +1310,10 @@ static void draw(void)
         line[p2] = '\0';
         ud_text(win, 12, fb, line, l.accent, UD_BOLD, 11);
     } else if (note[0]) {
-        ud_text(win, 12, fb, note, l.text, UD_SANS, 11);
+        ud_text_l(win, 12, fb, note, l.text, UD_SANS, 11);
     } else {
-        ud_text(win, 12, fb, "A double click opens, Backspace goes up",
-                l.dim, UD_SANS, 11);
+        ud_text_l(win, 12, fb, "A double click opens, Backspace goes up",
+                  l.dim, UD_SANS, 11);
     }
 
     /* Last, and therefore over everything: a question one can scroll
@@ -1335,7 +1350,9 @@ static void clicked(int x, int y)
                 go_up();
             else if (t == TOOL_NEW) {
                 if (in_trash) {
-                    ug_ask(&ask, "Empty Trash permanently?",
+                    ug_ask(&ask, ulocale_language_polish()
+                                      ? "Opróżnić Kosz na stałe?"
+                                      : "Empty Trash permanently?",
                            "Everything in Trash will be removed.",
                            "Empty Trash", "Keep");
                     empty_asked = 1;
@@ -1391,7 +1408,8 @@ static void clicked(int x, int y)
 
 void _start(int argc, char **argv)
 {
-    int win = (int)win_create(W0, H0, "Files");
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Pliki" : "Files");
     if (win < 0)
         sys_exit(1);
     winid = win;
@@ -1468,10 +1486,17 @@ void _start(int argc, char **argv)
     }
     draw();
 
+    int language = ulocale_language_polish();
     int ticks = 0;
     for (;;) {
         struct win_event ev;
         int again = 0;
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            where_am_i();
+            again = 1;
+        }
         while (win_poll(win, &ev) == 1) {
             if (ask.on) {
                 /* While the question is up it takes everything: that is

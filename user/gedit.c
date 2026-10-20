@@ -27,6 +27,7 @@
 
 #include "uapi.h"
 #include "ugui.h"
+#include "ulocale.h"
 
 /* Drawn the way the desktop draws, in its theme: the page is the
    theme's field, the text DejaVu Sans Mono on a grid of cells (ud_cells)
@@ -37,8 +38,20 @@
 #define TEXT_BASE 12          /* the baseline, from a row's top */
 #define GUTTER   34           /* the line numbers' margin */
 
+#ifdef GCODE_IDE
+#define IDE_W0 520
+#define IDE_H0 360
+#define IDE_SIDE_W 152
+#define IDE_HEADER_H 30
+#define IDE_TAB_H 24
+#define IDE_EDIT_TOP 58
+#define IDE_TEXT_X 192
+#define IDE_LIST_ROW_H 17
+#define IDE_TAB_N 3
+#else
 #define W0 440                /* the size the window opens with */
 #define H0 320
+#endif
 
 #define MAXL 200              /* lines a file may have */
 #define MAXC 96               /* and characters in a line */
@@ -46,7 +59,7 @@
 #define PAD 4
 #define TEXT_X 40             /* a line's first column: the margin and a gap */
 #define STATUS_H 24
-#define NAME_MAX 31
+#define NAME_MAX 63
 
 static char text[MAXL][MAXC + 1];
 static int  llen[MAXL];
@@ -68,9 +81,22 @@ static int  dirty;            /* changed since the last save */
 static int  warned;
 
 static char fname[NAME_MAX + 1];
-static char note[48];         /* the last thing that happened */
+static char note[80];         /* the last thing that happened */
+static char old_title[NAME_MAX + 12];
 
+#ifdef GCODE_IDE
+static int  cw = IDE_W0, ch = IDE_H0;
+#else
 static int  cw = W0, ch = H0; /* the content area, as the desktop says */
+#endif
+#ifdef GCODE_IDE
+static char project_path[512];
+static int project_top;
+static char tabs[IDE_TAB_N][NAME_MAX + 1];
+static int tab_n, tab_active = -1;
+static int terminal_pid = -1;
+static unsigned char file_is_dir[64];
+#endif
 
 /* Asking for a file name: the status line becomes the question and
    what is typed goes into 'answer' until Enter. 0 = editing. */
@@ -78,6 +104,9 @@ static int  cw = W0, ch = H0; /* the content area, as the desktop says */
 #define ASK_SAVE 1
 #define ASK_OPEN 2
 #define ASK_FIND 3
+#ifdef GCODE_IDE
+#define ASK_NEW  4
+#endif
 static int  asking;
 static char answer[NAME_MAX + 1];
 static int  alen;
@@ -86,7 +115,28 @@ static int  alen;
    the first match is not the one they wanted. */
 static char last_find[NAME_MAX + 1];
 
-static int rows(void) { return (ch - PAD * 2 - STATUS_H) / ROW_H; }
+static int editor_x(void)
+{
+#ifdef GCODE_IDE
+    return IDE_TEXT_X;
+#else
+    return TEXT_X;
+#endif
+}
+
+static int editor_top(void)
+{
+#ifdef GCODE_IDE
+    return IDE_EDIT_TOP;
+#else
+    return PAD;
+#endif
+}
+
+static int rows(void)
+{
+    return (ch - editor_top() - PAD - STATUS_H) / ROW_H;
+}
 
 static void ecopy(char *d, const char *s, int max)
 {
@@ -96,6 +146,70 @@ static void ecopy(char *d, const char *s, int max)
         i++;
     }
     d[i] = '\0';
+}
+
+static int text_equal(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return !*a && !*b;
+}
+
+static const char *note_for_language(const char *text)
+{
+    if (!ulocale_language_polish())
+        return text;
+    if (text_equal(text, "there is nothing to undo"))
+        return "Nie ma czego cofnąć";
+    if (text_equal(text, "undone"))
+        return "Cofnięto";
+    if (text_equal(text, "it cannot be written"))
+        return "Nie można zapisać pliku";
+    if (text_equal(text, "saved"))
+        return "Zapisano";
+    if (text_equal(text, "there is no such file"))
+        return "Nie ma takiego pliku";
+    if (text_equal(text, "loaded"))
+        return "Wczytano";
+    if (text_equal(text, "there is nothing to look for"))
+        return "Nie wpisano tekstu do wyszukania";
+    if (text_equal(text, "not found"))
+        return "Nie znaleziono";
+    if (text_equal(text, "the line was copied"))
+        return "Skopiowano wiersz";
+    if (text_equal(text, "Ctrl+O opens, Ctrl+S saves, Ctrl+F finds, "
+                         "Ctrl+Z undoes"))
+        return "Ctrl+O otwiera, Ctrl+S zapisuje, Ctrl+F szuka, Ctrl+Z cofa";
+    if (text_equal(text, "Unsaved changes! Ctrl+S will save, closing again "
+                         "will not"))
+        return "Niezapisane zmiany! Ctrl+S zapisuje, zamknięcie odrzuca";
+    if (text_equal(text, "Save before changing files"))
+        return "Zapisz plik przed przełączeniem";
+    if (text_equal(text, "Project folder changed"))
+        return "Zmieniono folder projektu";
+    if (text_equal(text, "Project folder is not available"))
+        return "Folder projektu jest niedostępny";
+    if (text_equal(text, "Terminal opened at the project folder"))
+        return "Terminal otwarto w folderze projektu";
+    if (text_equal(text, "Terminal is already open"))
+        return "Terminal jest już otwarty";
+    if (text_equal(text, "Could not open the terminal"))
+        return "Nie udało się otworzyć terminala";
+    if (text_equal(text, "The project terminal ended"))
+        return "Terminal projektu został zamknięty";
+    if (text_equal(text, "No project file is open"))
+        return "Nie otwarto pliku projektu";
+    if (text_equal(text, "New file; save to create it"))
+        return "Nowy plik — zapisz, aby go utworzyć";
+    if (text_equal(text, "That file already exists"))
+        return "Taki plik już istnieje";
+    if (text_equal(text, "Choose a file from Project"))
+        return "Wybierz plik z panelu Projekt";
+    if (text_equal(text, "No compiler is bundled; Terminal opens in this project"))
+        return "Brak kompilatora; Terminal otworzy się w tym projekcie";
+    return text;
 }
 
 /* --- what is on the disk, for the panel that opens a file -----------
@@ -112,36 +226,193 @@ static struct ug editor_ui;
 static struct ug_pick picker;
 static char picked[NAME_MAX + 1];
 
+#ifndef GCODE_IDE
 static const char *file_row(void *ctx, int i)
 {
     (void)ctx;
     return (i >= 0 && i < nfiles) ? names[i] : "";
 }
+#endif
 
 static void reread_files(void)
 {
     nfiles = 0;
+#ifdef GCODE_IDE
+    if (project_path[0] && !text_equal(project_path, "/")) {
+        ecopy(names[nfiles], "..", NAME_MAX);
+        file_is_dir[nfiles++] = 1;
+    }
+#endif
     for (int i = 0; i < 128 && nfiles < FILES_MAX; i++) {
 #ifdef __x86_64__
         struct dirent64 e;
         if (sys_readdir(i, &e) != 0)
             break;
-        if (e.is_dir)
+        if (e.is_dir) {
+#ifdef GCODE_IDE
+            ecopy(names[nfiles], e.name, NAME_MAX);
+            file_is_dir[nfiles++] = 1;
+#endif
             continue;
+        }
         ecopy(names[nfiles], e.name, NAME_MAX);
 #else
         char name[FS_NAME_MAX + 1];
         int32_t r = sys_readdir(i, name);
         if (r == -1)
             break;
-        if (r == -2)
+        if (r == -2) {
+#ifdef GCODE_IDE
+            ecopy(names[nfiles], name, NAME_MAX);
+            file_is_dir[nfiles++] = 1;
+#endif
             continue;                    /* a directory, not a file */
+        }
         ecopy(names[nfiles], name, NAME_MAX);
+#endif
+#ifdef GCODE_IDE
+        file_is_dir[nfiles] = 0;
 #endif
         nfiles++;
     }
 }
-static int cols(void) { return (cw - TEXT_X - PAD) / CELL; }
+
+#ifdef GCODE_IDE
+static void project_read_path(void)
+{
+#ifdef __x86_64__
+    sys_getcwd(project_path, sizeof(project_path));
+#else
+    sys_getcwd(project_path);
+#endif
+    if (!project_path[0])
+        ecopy(project_path, "/", sizeof(project_path));
+}
+
+static void ide_tabs_reset(void)
+{
+    tab_n = 0;
+    tab_active = -1;
+    project_top = 0;
+}
+
+static void ide_register_tab(const char *name)
+{
+    if (!name || !name[0])
+        return;
+    for (int i = 0; i < tab_n; i++) {
+        if (text_equal(tabs[i], name)) {
+            tab_active = i;
+            return;
+        }
+    }
+    if (tab_n == IDE_TAB_N) {
+        int victim = tab_active == 0 ? 1 : 0;
+        for (int i = victim; i < tab_n - 1; i++)
+            ecopy(tabs[i], tabs[i + 1], sizeof(tabs[i]));
+        if (tab_active > victim)
+            tab_active--;
+        else if (tab_active == victim)
+            tab_active = -1;
+        tab_n--;
+    }
+    ecopy(tabs[tab_n], name, sizeof(tabs[tab_n]));
+    tab_active = tab_n++;
+}
+
+static void load_from(const char *name);
+static void save_to(const char *name);
+static void clear_all(void);
+static void retitle(void);
+
+static int ide_open_file(const char *name)
+{
+    if (text_equal(name, fname))
+        return 1;
+    if (dirty) {
+        ecopy(note, "Save before changing files", sizeof(note) - 1);
+        return 0;
+    }
+    load_from(name);
+    return text_equal(fname, name);
+}
+
+static void ide_open_item(int index)
+{
+    if (index < 0 || index >= nfiles)
+        return;
+    if (dirty) {
+        ecopy(note, "Save before changing files", sizeof(note) - 1);
+        return;
+    }
+    if (file_is_dir[index]) {
+        if (sys_chdir(names[index]) < 0) {
+            ecopy(note, "Project folder is not available", sizeof(note) - 1);
+            return;
+        }
+        clear_all();
+        fname[0] = '\0';
+        ide_tabs_reset();
+        project_read_path();
+        reread_files();
+        retitle();
+        ecopy(note, "Project folder changed", sizeof(note) - 1);
+        return;
+    }
+    ide_open_file(names[index]);
+}
+
+static void ide_activate_tab(int index)
+{
+    if (index < 0 || index >= tab_n || index == tab_active)
+        return;
+    if (dirty) {
+        ecopy(note, "Save before changing files", sizeof(note) - 1);
+        return;
+    }
+    ide_open_file(tabs[index]);
+}
+
+static void ide_start_terminal(void)
+{
+    if (terminal_pid >= 0) {
+        ecopy(note, "Terminal is already open", sizeof(note) - 1);
+        return;
+    }
+    int64_t pid = sys_fork();
+    if (pid < 0) {
+        ecopy(note, "Could not open the terminal", sizeof(note) - 1);
+        return;
+    }
+    if (!pid) {
+#ifdef __x86_64__
+        char *const args[] = { "gterm", (char *)0 };
+        sys_exec("gterm", args);
+#else
+        sys_exec("gterm");
+#endif
+        sys_exit(127);
+    }
+    terminal_pid = (int)pid;
+    ecopy(note, "Terminal opened at the project folder", sizeof(note) - 1);
+}
+
+static int ide_terminal_poll(void)
+{
+    if (terminal_pid < 0)
+        return 0;
+    int code = 0;
+    int rc = sys_trywait(terminal_pid, &code);
+    if (rc == -3)
+        return 0;
+    terminal_pid = -1;
+    if (rc != 0 || code != 0)
+        ecopy(note, "The project terminal ended", sizeof(note) - 1);
+    return 1;
+}
+#endif
+
+static int cols(void) { return (cw - editor_x() - PAD) / CELL; }
 
 /* --- letters of more than one byte --------------------------------------
  *
@@ -425,28 +696,35 @@ static void insert_text(const char *s, int n)
    otherwise - and the taskbar shows the same name under the pointer,
    so this is the difference between finding a window and hunting for
    it. */
-static int winid = -1;
+static int  winid = -1;
 
 static void retitle(void)
 {
     char t[NAME_MAX + 12];
     int p = 0;
-    const char *pre = "Editor";
+#ifdef GCODE_IDE
+    const char *pre = ulocale_language_polish() ? "Kod" : "Code";
+#else
+    const char *pre = ulocale_language_polish() ? "Edytor" : "Editor";
+#endif
     for (int i = 0; pre[i]; i++)
         t[p++] = pre[i];
     if (fname[0]) {
         t[p++] = ':';
         t[p++] = ' ';
-        for (int i = 0; fname[i] && p < (int)sizeof(t) - 1; i++)
+        for (int i = 0; fname[i] && p < 62; i++)
             t[p++] = fname[i];
     }
     t[p] = '\0';
-    if (winid >= 0)
+    if (winid >= 0 && !text_equal(t, old_title)) {
         win_title(winid, t);
+        ecopy(old_title, t, sizeof(old_title));
+    }
 }
 
 static void save_to(const char *name)
 {
+    retitle();
     int fd = (int)sys_open(name, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
         ecopy(note, "it cannot be written", sizeof(note) - 1);
@@ -459,6 +737,10 @@ static void save_to(const char *name)
     }
     sys_close(fd);
     ecopy(fname, name, NAME_MAX);
+#ifdef GCODE_IDE
+    ide_register_tab(name);
+    reread_files();
+#endif
     dirty = 0;
     warned = 0;
     ecopy(note, "saved", sizeof(note) - 1);
@@ -499,6 +781,9 @@ static void load_from(const char *name)
     cy = cx = top = hoff = 0;
     dirty = 0;
     ecopy(fname, name, NAME_MAX);
+#ifdef GCODE_IDE
+    ide_register_tab(name);
+#endif
     ecopy(note, "loaded", sizeof(note) - 1);
     retitle();
 }
@@ -576,6 +861,239 @@ static void scroll_to_caret(void)
         hoff = 0;
 }
 
+#ifdef GCODE_IDE
+#define CODE_PLAIN 0
+#define CODE_KEYWORD 1
+#define CODE_STRING 2
+#define CODE_COMMENT 3
+#define CODE_NUMBER 4
+#define CODE_PREPROC 5
+
+static int code_word_start(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+static int code_word_char(char c)
+{
+    return code_word_start(c) || (c >= '0' && c <= '9');
+}
+
+static int code_keyword(const char *line, int start, int end)
+{
+    static const char *const words[] = {
+        "auto", "break", "case", "char", "const", "continue", "default",
+        "do", "double", "else", "enum", "extern", "float", "for", "goto",
+        "if", "inline", "int", "long", "register", "return", "short",
+        "signed", "sizeof", "static", "struct", "switch", "typedef",
+        "union", "unsigned", "void", "volatile", "while", "asm", "bool",
+        "class", "namespace", "public", "private", "uint8_t", "uint16_t",
+        "uint32_t", "uint64_t", "int8_t", "int16_t", "int32_t", "int64_t"
+    };
+    int len = end - start;
+    for (int w = 0; w < (int)(sizeof(words) / sizeof(words[0])); w++) {
+        int i = 0;
+        while (words[w][i] && i < len && words[w][i] == line[start + i])
+            i++;
+        if (i == len && !words[w][i])
+            return 1;
+    }
+    return 0;
+}
+
+static void code_styles(const char *line, int len, unsigned char *style)
+{
+    for (int i = 0; i < len; i++)
+        style[i] = CODE_PLAIN;
+
+    int first = 0;
+    while (first < len && (line[first] == ' ' || line[first] == '\t'))
+        first++;
+    if (first < len && line[first] == '#') {
+        for (int i = first; i < len; i++)
+            style[i] = CODE_PREPROC;
+        return;
+    }
+
+    for (int i = 0; i < len;) {
+        if (line[i] == '/' && i + 1 < len && line[i + 1] == '/') {
+            for (; i < len; i++)
+                style[i] = CODE_COMMENT;
+            break;
+        }
+        if (line[i] == '/' && i + 1 < len && line[i + 1] == '*') {
+            for (; i < len; i++)
+                style[i] = CODE_COMMENT;
+            break;
+        }
+        if (line[i] == '"' || line[i] == '\'') {
+            char quote = line[i];
+            int end = i++;
+            style[end] = CODE_STRING;
+            while (i < len) {
+                style[i] = CODE_STRING;
+                if (line[i] == '\\' && i + 1 < len) {
+                    style[++i] = CODE_STRING;
+                    i++;
+                } else if (line[i++] == quote) {
+                    break;
+                }
+            }
+            continue;
+        }
+        if (code_word_start(line[i])) {
+            int start = i++;
+            while (i < len && code_word_char(line[i]))
+                i++;
+            if (code_keyword(line, start, i))
+                for (int j = start; j < i; j++)
+                    style[j] = CODE_KEYWORD;
+            continue;
+        }
+        if (line[i] >= '0' && line[i] <= '9') {
+            int start = i++;
+            while (i < len && code_word_char(line[i]))
+                i++;
+            for (int j = start; j < i; j++)
+                style[j] = CODE_NUMBER;
+            continue;
+        }
+        i++;
+    }
+}
+
+static uint32_t code_colour(const struct ud_look *lk, int style)
+{
+    switch (style) {
+    case CODE_KEYWORD: return lk->accent;
+    case CODE_STRING:  return lk->good;
+    case CODE_COMMENT: return lk->dim;
+    case CODE_NUMBER:
+    case CODE_PREPROC: return 0xC586C0;
+    default:           return lk->text;
+    }
+}
+
+static void draw_code_line(int win, const struct ud_look *lk, int line,
+                           int first_byte, int end_byte, int baseline)
+{
+    unsigned char style[MAXC];
+    code_styles(text[line], llen[line], style);
+
+    for (int at = first_byte; at < end_byte;) {
+        int kind = style[at];
+        int end = at + 1;
+        while (end < end_byte && style[end] == kind)
+            end++;
+        char part[MAXC + 1];
+        int n = end - at;
+        for (int i = 0; i < n; i++)
+            part[i] = text[line][at + i];
+        part[n] = '\0';
+        int xcol = col_of(line, at) - hoff;
+        ud_cells(win, editor_x() + xcol * CELL, baseline, CELL, part,
+                 code_colour(lk, kind), UD_MONO, TEXT_PX);
+        at = end;
+    }
+}
+
+static void ide_button(int win, const struct ud_look *lk, int x, int w,
+                       const char *label)
+{
+    ud_round(win, x, 3, w, IDE_HEADER_H - 6, 5, lk->accent);
+    ud_text_mid_l(win, x, 3, w, IDE_HEADER_H - 6, label, lk->on_accent,
+                  UD_SANS, 11);
+}
+
+static void ide_draw_chrome(int win, const struct ud_look *lk)
+{
+    ud_fill(win, 0, 0, IDE_SIDE_W, ch - STATUS_H, lk->bg);
+    ud_fill(win, IDE_SIDE_W, 0, 1, ch - STATUS_H, lk->line);
+    ud_fill(win, 0, IDE_HEADER_H, cw, 1, lk->line);
+    ud_text_l(win, 10, ud_baseline(4, IDE_HEADER_H - 8, 14), "Code",
+              lk->text, UD_BOLD, 14);
+    ide_button(win, lk, cw - 228, 62, "New");
+    ide_button(win, lk, cw - 160, 62, "Save");
+    ide_button(win, lk, cw - 92, 82, "Terminal");
+
+    ud_text_l(win, 8, ud_baseline(IDE_HEADER_H, 18, 10), "Project",
+              lk->dim, UD_SANS, 10);
+    char path[28];
+    int length = 0;
+    while (project_path[length] && length < 512)
+        length++;
+    int start = length > 24 ? length - 24 : 0;
+    int out = 0;
+    if (start) {
+        path[out++] = '.';
+        path[out++] = '.';
+    }
+    for (int i = start; i < length && out < (int)sizeof(path) - 1; i++)
+        path[out++] = project_path[i];
+    path[out] = '\0';
+    ud_text(win, 8, IDE_EDIT_TOP - 4, path, lk->dim, UD_MONO, 9);
+    int visible = (ch - IDE_EDIT_TOP - STATUS_H) / IDE_LIST_ROW_H;
+    for (int row = 0; row < visible; row++) {
+        int item = project_top + row;
+        if (item >= nfiles)
+            break;
+        int y = IDE_EDIT_TOP + row * IDE_LIST_ROW_H;
+        if (!file_is_dir[item] && fname[0] &&
+            text_equal(fname, names[item]))
+            ud_fill(win, 4, y, IDE_SIDE_W - 8, IDE_LIST_ROW_H, lk->row);
+        char label[24];
+        int n = 0;
+        if (file_is_dir[item])
+            label[n++] = '/';
+        int name_len = 0;
+        while (names[item][name_len])
+            name_len++;
+        int max_name = (int)sizeof(label) - 1 - n;
+        if (name_len <= max_name) {
+            for (int i = 0; i < name_len; i++)
+                label[n++] = names[item][i];
+        } else {
+            int copy_len = max_name - 3;
+            while (copy_len > 0 && cont(names[item][copy_len]))
+                copy_len--;
+            for (int i = 0; i < copy_len; i++)
+                label[n++] = names[item][i];
+            label[n++] = '.';
+            label[n++] = '.';
+            label[n++] = '.';
+        }
+        label[n] = '\0';
+        ud_text(win, 10, ud_baseline(y, IDE_LIST_ROW_H, 10), label,
+                file_is_dir[item] ? lk->accent : lk->text, UD_SANS, 10);
+    }
+
+    int tab_width = 112;
+    for (int i = 0; i < tab_n; i++) {
+        int x = IDE_SIDE_W + i * tab_width;
+        if (x + tab_width > cw)
+            break;
+        ud_fill(win, x, IDE_HEADER_H + 1, tab_width - 1, IDE_TAB_H - 1,
+                i == tab_active ? lk->field : lk->bg);
+        if (i == tab_active)
+            ud_fill(win, x, IDE_HEADER_H + IDE_TAB_H - 2,
+                    tab_width - 1, 2, lk->accent);
+        char label[NAME_MAX + 2];
+        ecopy(label, tabs[i], sizeof(label));
+        if (i == tab_active && dirty) {
+            int n = 0;
+            while (label[n] && n < NAME_MAX)
+                n++;
+            if (n < NAME_MAX)
+                label[n++] = '*';
+            label[n] = '\0';
+        }
+        ud_text(win, x + 7,
+                ud_baseline(IDE_HEADER_H, IDE_TAB_H, 10), label,
+                i == tab_active ? lk->text : lk->dim, UD_SANS, 10);
+    }
+}
+#endif
+
 static void draw(int win)
 {
     int r = rows(), c = cols();
@@ -584,20 +1102,33 @@ static void draw(int win)
     struct ud_look lk;
     ud_look(&lk);
     ud_fill(win, 0, 0, cw, ch, lk.field);
+#ifdef GCODE_IDE
+    ide_draw_chrome(win, &lk);
+    ud_fill(win, IDE_SIDE_W, IDE_EDIT_TOP, GUTTER, ch - IDE_EDIT_TOP -
+            STATUS_H, lk.bg);
+    ud_fill(win, IDE_SIDE_W + GUTTER, IDE_EDIT_TOP, 1, ch - IDE_EDIT_TOP -
+            STATUS_H, lk.line);
+#else
     ud_fill(win, 0, 0, GUTTER, ch - STATUS_H, lk.bg);
     ud_fill(win, GUTTER, 0, 1, ch - STATUS_H, lk.line);
+#endif
 
     char shown[MAXC + 1];
     for (int i = 0; i < r; i++) {
         int l = top + i;
         if (l >= nlines)
             break;
-        int y = PAD + i * ROW_H;
+        int y = editor_top() + i * ROW_H;
         /* The line's number, set against the margin's edge - the one
            the caret is on in the text's own colour, the rest quieter */
         char no[8];
         num(no, l + 1);
-        ud_text_right(win, GUTTER - 6, y + TEXT_BASE, no,
+#ifdef GCODE_IDE
+        int gutter_right = editor_x() - 6;
+#else
+        int gutter_right = GUTTER - 6;
+#endif
+        ud_text_right(win, gutter_right, y + TEXT_BASE, no,
                       l == cy ? lk.text : lk.dim, UD_SANS, 11);
         /* From column hoff, c columns of it - whole letters */
         int b = byte_of(l, hoff), n = 0, letters = 0;
@@ -607,17 +1138,23 @@ static void draw(int win)
             shown[n++] = text[l][b++];
         }
         shown[n] = '\0';
-        if (n)
+        if (n) {
+#ifdef GCODE_IDE
+            draw_code_line(win, &lk, l, byte_of(l, hoff),
+                           byte_of(l, hoff) + n, y + TEXT_BASE);
+#else
             ud_cells(win, TEXT_X, y + TEXT_BASE, CELL, shown, lk.text,
                      UD_MONO, TEXT_PX);
+#endif
+        }
     }
 
     /* The caret: a hair BETWEEN two characters, where the next one
        will go. A block would cover the letter it stands on, and a bar
        inside the cell would eat its first column - both of them hide
        the very thing a person is looking at while they type. */
-    int caret_x = TEXT_X + (col_of(cy, cx) - hoff) * CELL - 1;
-    ud_fill(win, caret_x, PAD + (cy - top) * ROW_H + 1, 1, ROW_H - 3,
+    int caret_x = editor_x() + (col_of(cy, cx) - hoff) * CELL - 1;
+    ud_fill(win, caret_x, editor_top() + (cy - top) * ROW_H + 1, 1, ROW_H - 3,
             lk.accent);
 
     /* The status line: what the file is, whether it has been changed,
@@ -627,9 +1164,20 @@ static void draw(int win)
     char line[80];
     int p = 0;
     if (asking) {
+#ifdef GCODE_IDE
+        int polish = ulocale_language_polish();
+        const char *q = asking == ASK_SAVE
+                            ? (polish ? "Zapisz jako: " : "Save as: ")
+                        : asking == ASK_OPEN
+                            ? (polish ? "Otwórz: " : "Open: ")
+                        : asking == ASK_FIND
+                            ? (polish ? "Szukaj: " : "Find: ")
+                            : (polish ? "Nowy: " : "New: ");
+#else
         const char *q = asking == ASK_SAVE ? "Save as: "
                       : asking == ASK_OPEN ? "Open: "
                                            : "Find: ";
+#endif
         for (int i = 0; q[i]; i++)
             line[p++] = q[i];
         for (int i = 0; i < alen; i++)
@@ -656,8 +1204,9 @@ static void draw(int win)
             line[p++] = ' ';
             line[p++] = '-';
             line[p++] = ' ';
-            for (int i = 0; note[i] && p < 70; i++)
-                line[p++] = note[i];
+            const char *shown_note = note_for_language(note);
+            for (int i = 0; shown_note[i] && p < 70; i++)
+                line[p++] = shown_note[i];
         }
     }
     line[p] = '\0';
@@ -672,6 +1221,60 @@ static void draw(int win)
     ug_pick_draw(&editor_ui, &picker);
 }
 
+#ifdef GCODE_IDE
+static void ide_click(int x, int y)
+{
+    if (asking)
+        return;
+    if (y < IDE_HEADER_H) {
+        if (x >= cw - 92) {
+            ide_start_terminal();
+        } else if (x >= cw - 160) {
+            if (fname[0])
+                save_to(fname);
+            else {
+                asking = ASK_SAVE;
+                alen = 0;
+            }
+        } else if (x >= cw - 228) {
+            if (dirty) {
+                ecopy(note, "Save before changing files", sizeof(note) - 1);
+            } else {
+                asking = ASK_NEW;
+                alen = 0;
+            }
+        }
+        return;
+    }
+
+    if (y < IDE_EDIT_TOP) {
+        if (y >= IDE_HEADER_H && x >= IDE_SIDE_W) {
+            int index = (x - IDE_SIDE_W) / 112;
+            ide_activate_tab(index);
+        }
+        return;
+    }
+
+    if (x < IDE_SIDE_W) {
+        int row = project_top + (y - IDE_EDIT_TOP) / IDE_LIST_ROW_H;
+        ide_open_item(row);
+        return;
+    }
+
+    follow_caret = 1;
+    int line = top + (y - IDE_EDIT_TOP) / ROW_H;
+    if (line < 0)
+        line = 0;
+    if (line >= nlines)
+        line = nlines - 1;
+    cy = line;
+    int col = hoff + (x - editor_x() + CELL / 2) / CELL;
+    if (col < 0)
+        col = 0;
+    cx = byte_of(cy, col);
+}
+#endif
+
 /* --- keys --------------------------------------------------------- */
 
 static void ask_key(char c)
@@ -684,6 +1287,21 @@ static void ask_key(char c)
             /* Nothing typed means "the same as last time" - which is
                how a search is repeated everywhere else. */
             find_answer(alen ? answer : last_find);
+#ifdef GCODE_IDE
+        } else if (which == ASK_NEW && alen) {
+            int fd = (int)sys_open(answer, O_READ);
+            if (fd >= 0) {
+                sys_close(fd);
+                ecopy(note, "That file already exists", sizeof(note) - 1);
+                return;
+            }
+            clear_all();
+            ecopy(fname, answer, NAME_MAX);
+            dirty = 1;
+            ide_register_tab(fname);
+            ecopy(note, "New file; save to create it", sizeof(note) - 1);
+            retitle();
+#endif
         } else if (alen) {
             if (which == ASK_SAVE)
                 save_to(answer);
@@ -715,13 +1333,19 @@ static void edit_key(char c)
         }
         return;
     case KEY_OPEN:
+#ifdef GCODE_IDE
+        ecopy(note, "Choose a file from Project", sizeof(note) - 1);
+        return;
+#else
         /* A list of what is there, instead of a name typed from
            memory. Typing still works - the line under the list is the
            same line the question used to be. */
         reread_files();
-        ug_pick_open(&picker, "Open a file:", file_row, (void *)0, nfiles,
-                     picked, (int)sizeof(picked));
+        ug_pick_open(&picker, ulocale_language_polish()
+                                  ? "Otwórz plik:" : "Open a file:",
+                     file_row, (void *)0, nfiles, picked, (int)sizeof(picked));
         return;
+#endif
     case KEY_FIND:
         asking = ASK_FIND;
         alen = 0;
@@ -797,8 +1421,34 @@ static void edit_key(char c)
         return;
     }
     case '\n':
+#ifdef GCODE_IDE
+    {
+        int previous = cy;
+        int indent = 0;
+        while (indent < llen[previous] && text[previous][indent] == ' ')
+            indent++;
+        int last = llen[previous] - 1;
+        while (last >= 0 && text[previous][last] == ' ')
+            last--;
+        if (last >= 0 && text[previous][last] == '{')
+            indent += 4;
+        split_line();
+        while (indent-- > 0 && llen[cy] < MAXC)
+            insert_char(' ');
+        return;
+    }
+#else
         split_line();
         return;
+#endif
+    case '\t':
+#ifdef GCODE_IDE
+        for (int i = 0; i < 4 && llen[cy] < MAXC; i++)
+            insert_char(' ');
+        return;
+#else
+        return;
+#endif
     case '\b':
         backspace();
         return;
@@ -812,12 +1462,35 @@ static void edit_key(char c)
 
 void _start(int argc, char **argv)
 {
-    int win = (int)win_create(W0, H0, "Editor");
+#ifdef GCODE_IDE
+    int win = (int)win_create(IDE_W0, IDE_H0,
+                              ulocale_language_polish() ? "Kod" : "Code");
+#else
+    int win = (int)win_create(W0, H0,
+                              ulocale_language_polish() ? "Edytor" : "Editor");
+#endif
     if (win < 0)
         sys_exit(1);
     winid = win;
 
     clear_all();
+#ifdef GCODE_IDE
+    ide_tabs_reset();
+    project_read_path();
+    ecopy(note, "No compiler is bundled; Terminal opens in this project",
+          sizeof(note) - 1);
+    if (argc > 1 && argv && argv[1] && argv[1][0]) {
+        if (sys_chdir(argv[1]) == 0) {
+            project_read_path();
+        } else {
+            load_from(argv[1]);
+        }
+    }
+    if (argc > 2 && argv && argv[2] && argv[2][0])
+        load_from(argv[2]);
+    project_read_path();
+    reread_files();
+#else
     ecopy(note, "Ctrl+O opens, Ctrl+S saves, Ctrl+F finds, "
                 "Ctrl+Z undoes", sizeof(note) - 1);
     /* Started with a name - 'gedit notatka' - it opens that file at
@@ -826,11 +1499,22 @@ void _start(int argc, char **argv)
        thing that makes an editor a chore. */
     if (argc > 1 && argv && argv[1] && argv[1][0])
         load_from(argv[1]);
+#endif
     draw(win);
 
+    int language = ulocale_language_polish();
     for (;;) {
         struct win_event ev;
         int drew = 0;
+#ifdef GCODE_IDE
+        if (ide_terminal_poll())
+            drew = 1;
+#endif
+        int current_language = ulocale_language_polish();
+        if (current_language != language) {
+            language = current_language;
+            drew = 1;
+        }
         while (win_poll(win, &ev) == 1) {
             if (picker.on) {
                 editor_ui.win = win;
@@ -865,6 +1549,20 @@ void _start(int argc, char **argv)
                 cw = ev.x;
                 ch = ev.y;
             } else if (ev.type == WEV_SCROLL) {
+#ifdef GCODE_IDE
+                if (ev.x < IDE_SIDE_W) {
+                    project_top -= ev.val * 3;
+                    int visible = (ch - IDE_EDIT_TOP - STATUS_H) /
+                                  IDE_LIST_ROW_H;
+                    int max_top = nfiles - visible;
+                    if (max_top < 0)
+                        max_top = 0;
+                    if (project_top > max_top)
+                        project_top = max_top;
+                    if (project_top < 0)
+                        project_top = 0;
+                } else {
+#endif
                 /* The page moves and the caret does not: looking
                    somewhere else in a file is not the same as putting
                    the caret there, and a person who scrolls and then
@@ -875,6 +1573,9 @@ void _start(int argc, char **argv)
                     top = nlines - 1;
                 if (top < 0)
                     top = 0;
+#ifdef GCODE_IDE
+                }
+#endif
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
                 follow_caret = 1;     /* a key means "where I am" again */
@@ -883,6 +1584,9 @@ void _start(int argc, char **argv)
                 else
                     edit_key(c);
             } else if (ev.type == WEV_CLICK) {
+#ifdef GCODE_IDE
+                ide_click(ev.x, ev.y);
+#else
                 follow_caret = 1;     /* putting the caret somewhere */
                 /* The caret goes where the pointer is - the nearest
                    place there is text, not the empty page past it. */
@@ -896,6 +1600,7 @@ void _start(int argc, char **argv)
                 if (col < 0)
                     col = 0;
                 cx = byte_of(cy, col);
+#endif
             }
             drew = 1;
         }

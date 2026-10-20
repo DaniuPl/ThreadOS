@@ -4568,9 +4568,9 @@ works and is checked by `make test`.
       adapter (the whole stack was thrown out of it years ago), and no other
       hypervisor has one either. So not a single line of this conversation has ever
       reached a device that answers. What is checked is what is pure bytes:
-      assembling commands and reading events, against recorded packets shaped as in
-      the standard. `bt test` says so itself at the end: "this checks building and
-      reading packets, not the conversation with an adapter".
+      assembling commands, reading events, and framing an HCI ACL packet, against
+      recorded packets shaped as in the standard. `bt test` says so itself at the
+      end: this checks packet handling, not the conversation with an adapter.
 
       What such a test catches all the same: an address that goes over the wire
       least significant byte first and on the screen most significant first (read
@@ -4586,11 +4586,12 @@ works and is checked by `make test`.
       empty list and no adapter are two different things, and only one of them is
       true.
 
-      What is not here: data. Scanning needs only events, so an interrupt endpoint
-      is enough; a connection to headphones or a mouse needs two bulk endpoints and
-      an L2CAP layer above them. That will come when there is something to talk to.
-      Intel and Broadcom adapters also want uploaded firmware before they do anything
-      beyond reporting their own address.
+      The adapter's two bulk endpoints are now discovered and configured, and the
+      kernel can frame and send/receive HCI ACL packets on them. What is not here
+      yet is L2CAP, link security, pairing, or the HID profiles needed to use a
+      keyboard or mouse. The packet test checks framing only; the USB wire still
+      needs an adapter to validate it. Intel and Broadcom adapters may also need
+      firmware before they do anything beyond reporting their own address.
 
 - [x] **A stick plugged in while running, and pulled out** (a thread watching the
       sockets in kernel/usbhc.c, disks added and struck off in kernel/blk.c, the
@@ -5389,13 +5390,15 @@ works and is checked by `make test`.
       the installed one on the EFI partition of the disk the system runs
       from (admin only; the fallback loader too when it is ours), and
       SYS64_INITRD_READ lets a program read a file of the initrd - the
-      version, which the build puts there as the file 'version'
-      (VERSION=..., 0 for a build by hand).
+      human-facing version label and the separate 'version-code'
+      sequence used to order updates.
 
       Releases are made by .github/workflows/release.yml after every push
-      to main: the run number is the version, scripts/mkupdate.py writes
-      and signs update.txt with the key from a repository secret, and the
-      release carries the disc and the stick image too. Getting there
+      to main: they are labelled 0.1.0-alpha.<run>, while the run number
+      remains the monotonic update sequence. Hand-built images use
+      0.1.0-dev. scripts/mkupdate.py writes and signs update.txt with the
+      key from a repository secret, and the release carries the disc and
+      the stick image too. Getting there
       from ThreadOS meant room for GitHub's redirects - a signed download
       link is a kilobyte; uhttp's Location, request and header buffers
       grew - and the roots GitHub's chains end in (USERTrust ECC, Sectigo
@@ -5406,9 +5409,10 @@ works and is checked by `make test`.
       built-in key refuses that release, update.key makes it check out,
       'check' changes nothing, without sudo nothing is written, with
       sudo all three files land on the disk byte for byte, the restarted
-      system is version 7 and up to date, and a release signed by another
-      key or with an initrd that does not match its hash is refused,
-      leaving the disk as it was.
+      system is update sequence 7 and up to date, and a release signed by
+      another key or with an initrd that does not match its hash is
+      refused, leaving the disk as it was. Manual rollback restores the
+      previous system files; it is not an automatic fallback boot.
 
 - [x] **Files: a folder tree, new folders, cut, copy, paste, double click**
 
@@ -5701,8 +5705,11 @@ works and is checked by `make test`.
       A read-only syscall exposes one checked device record in both kernel
       ABIs. The IDs and class make it possible to identify a Wi-Fi chipset
       without claiming that ThreadOS has a driver for it. The 32- and
-      64-bit terminal tests exercise both commands. Builds and QEMU tests
-      were not run locally.
+      64-bit terminal tests exercise both commands; the 64-bit test also
+      checks that the `hardware` alias does not exit with `[code -1]`.
+      The reported real-laptop failure still needs its kernel exception
+      output to identify the cause. Builds and QEMU tests were not run
+      locally.
 
 - [ ] **Move and open desktop shortcuts; skip install passwords on live
       media.** Home, Files, Trash, and Desktop item icons can be dragged,
@@ -5728,14 +5735,69 @@ works and is checked by `make test`.
       `bootsplash` test checks the framebuffer colour after GRUB starts
       both kernel modes. Builds and QEMU tests were not run locally.
 
-- [ ] **System language selection and translation groundwork**
-      (kernel/locale.c, user/gsettings.c).
+- [ ] **English and Polish system language**
+      (kernel/locale.c, kernel/uitext.c, user/gsettings.c).
 
-      Region settings now include English and Polish. The selected value
-      is validated and saved as `language=en` or `language=pl`; the shared
-      kernel text path translates the settings interface and measured
-      strings together, so labels keep their alignment. The settings test
-      switches to Polish, checks the translated save status, and restores
-      English. This is the first localization pass; broader application
-      and system-message coverage remains to be translated. Builds and
-      QEMU tests were not run locally.
+      Region settings now select and persist `language=en` or `language=pl`.
+      Fixed interface labels use explicit localized drawing operations;
+      file names, editor contents and other user data use raw text paths and
+      are never translated by matching their contents. The first coverage
+      batch includes Settings, desktop menus, the file manager, editor,
+      terminal, clock, calendar, calculator, appearance, account manager,
+      system monitor, task manager, image viewer, Paint, the graphical
+      installer, and the browser's fixed status messages; window titles
+      follow language changes. The installer keeps disk labels, file paths,
+      and typed confirmation words unchanged while translating its fixed
+      warnings and actions. Tests switch languages, verify localized UI,
+      check that a file named `Files` stays unchanged, and run the installer
+      test in Polish. Broader application and kernel-message coverage
+      remains. Builds and QEMU tests were not run locally.
+
+- [ ] **Keep one previous system for manual update recovery.**
+      Before replacing the installed kernel, initrd, or ThreadOS loader,
+      the kernel copies the current files on the EFI partition and records
+      whether the ThreadOS fallback loader also needs restoring. The
+      update UI and `sudo run update rollback` restore that snapshot;
+      incomplete updates stay marked until rollback succeeds. This snapshot
+      does not include personal files, and manual rollback requires a
+      bootable installed system. The update test checks byte-for-byte
+      restoration and boots the restored system. Builds and QEMU tests were
+      not run locally.
+
+- [ ] **Pre-1.0 versions, with update ordering kept separate.**
+      Hand-built images display `0.1.0-dev`; CI releases display
+      `0.1.0-alpha.<run>`. The initrd stores this human-facing label in
+      `version` and keeps the monotonic signed-update sequence in
+      `version-code`. The updater reads the sequence for ordering and still
+      accepts older images that only have a numeric `version`. Release tags
+      follow the same pre-1.0 label. The update test checks the displayed
+      label and sequence. Builds and QEMU tests were not run locally.
+
+- [ ] **ThreadCode, a native project workspace.**
+      The Code dock/menu app reuses the editor's editing, undo, and search
+      code while adding a project file/folder list, up to three saved-file
+      tabs, C-oriented syntax colouring, brace-aware indentation, and a
+      Terminal button that opens in the project directory. ThreadOS does
+      not yet bundle a compiler, so the workspace reports that clearly
+      instead of pretending to build. `t_gcode` covers 32- and 64-bit
+      project opening, highlighting, tabs, indentation, saving, and the
+      terminal launch. Builds and QEMU tests were not run locally.
+
+- [ ] **Pre-1.0 versions, with update ordering kept separate.**
+      Hand-built images display `0.1.0-dev`; CI releases display
+      `0.1.0-alpha.<run>`. The initrd stores this human-facing label in
+      `version` and keeps the monotonic signed-update sequence in
+      `version-code`. The updater reads the sequence for ordering and still
+      accepts older images that only have a numeric `version`. Release tags
+      follow the same pre-1.0 label. The update test checks the displayed
+      label and sequence. Builds and QEMU tests were not run locally.
+
+- [ ] **ThreadCode, a native project workspace.**
+      The Code dock/menu app reuses the editor's editing, undo, and search
+      code while adding a project file/folder list, up to three saved-file
+      tabs, C-oriented syntax colouring, brace-aware indentation, and a
+      Terminal button that opens in the project directory. ThreadOS does
+      not yet bundle a compiler, so the workspace reports that clearly
+      instead of pretending to build. `t_gcode` covers 32- and 64-bit
+      project opening, highlighting, tabs, indentation, saving, and the
+      terminal launch. Builds and QEMU tests were not run locally.
