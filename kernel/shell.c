@@ -145,10 +145,7 @@ static const struct {
     {"users",     "list accounts"},
     {"useradd",   "create an account"},
     {"userdel",   "remove an account"},
-    {"smp",      "count on every core"},
-    {"smpmem",   "memory lock test"},
-    {"smpthreads", "kernel threads on cores"},
-    {"runw",     "run on any core"},
+    {"smp*",     "core/mem/thread; runw"},
     {"df",       "disk usage"},
     {"mem",      "memory usage"},
     {"uptime",   "time since boot"},
@@ -165,12 +162,10 @@ static const struct {
     {"screen",    "video mode, frame cost"},
     {"notify T", "a card on the desktop"},
     {"lock",     "lock the desktop"},
-    {"hardware",   "what is in this machine"},
-    {"disks",    "the machine's disks"},
+    {"hardware", "PCI; disks list drives"},
     {"font",     "the fonts, glyphs drawn"},
     {"install", "ThreadOS onto a disk"},
-    {"fat [N]",  "EFI partition: fatls,"},
-    {"",         "  fatcat, fatcopy, fatrm"},
+    {"fat [N]",  "EFI: fatls/cat/copy/rm"},
     {"gfx, vesa", "the two video mode tests"},
     {"crash",    "page fault test"},
     {"reboot",   "restart the machine"},
@@ -1065,10 +1060,13 @@ static void cmd_users(void)
 static void cmd_useradd(char *arg)
 {
     int level = USER_PLAIN;
-    const char *admin = "admin";
+    const char *admin_word = "admin";
     int has_admin = 1;
     for (int i = 0; i < 5; i++)
-        if (!arg[i] || arg[i] != admin[i]) { has_admin = 0; break; }
+        if (!arg[i] || arg[i] != admin_word[i]) {
+            has_admin = 0;
+            break;
+        }
     if (has_admin && arg[5] == ' ') {
         level = USER_ADMIN;
         arg += 6;

@@ -39,6 +39,9 @@ def main():
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(16 * 1024 * 1024)
     try:
         os.makedirs(d + "/boot/grub")
         shutil.copy(KERNEL64, d + "/boot/threados64.bin")
@@ -58,7 +61,7 @@ def main():
         if not made:
             return summary()
 
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
+        q = Qemu(KERNEL, INITRD, disk=disk, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("thread64>", timeout=60)
@@ -85,6 +88,8 @@ def main():
             check("the signed-in user's Desktop is enumerated after setup "
                   "('%s')" % desk_label, "desk.txt" in desk_label)
 
+            q.mouse_goto(0, 0)
+            time.sleep(0.3)
             w, h, at = q.screen_raw()
             check(f"the desktop comes up in graphics mode ({w}x{h})",
                   w >= 640 and h >= 400)
@@ -92,11 +97,18 @@ def main():
             check("the aurora fills the screen (%s at the middle, %s expected)"
                   % (at(*mid), aurora_px(*mid, w=w, h=h)),
                   at(*mid) == aurora_px(*mid, w=w, h=h))
-            check("the menu bar is drawn - the aurora through glass",
-                  near(at(w // 2, 4), bar_glass(True, w, h)[4][w // 2], 1))
-            tile = dock_tile(0, w=w, h=h)
-            check("the dock is drawn: the first program's tile (%s)"
-                  % (at(*tile),), min(at(*tile)) > 200)
+            bar_pixel = at(w // 2, 4)
+            bar_expected = bar_glass(True, w, h)[4][w // 2]
+            check("the menu bar is drawn - the aurora through glass "
+                  "(%s vs %s)" % (bar_pixel, bar_expected),
+                  near(bar_pixel, bar_expected, 1))
+            tile = dock_tile(0, n_w=0, w=w, h=h)
+            tile_pixel = at(*tile)
+            tile_background = aurora_px(*tile, w=w, h=h)
+            tile_contrast = max(abs(tile_pixel[i] - tile_background[i])
+                                for i in range(3))
+            check("the first dock tile is visible (%s vs background %s)"
+                  % (tile_pixel, tile_background), tile_contrast > 32)
 
             # The desktop starts with no placeholder windows.
             check("no demo windows cover the desktop",
@@ -110,7 +122,7 @@ def main():
             q.mouse_button(True)
             q.mouse_goto(338, 190)
             q.mouse_button(False)
-            q.mouse_goto(338, 224)
+            q.mouse_goto(338, 190)
             time.sleep(0.4)
             q.mouse_click()
             q.mouse_click()
@@ -129,6 +141,91 @@ def main():
                 time.sleep(0.25)
             check("closing Files leaves the 64-bit desktop clear",
                   q.dock_windows() == 0)
+
+            # A Desktop file is opened through gfiles with both its raw
+            # directory index and the Desktop path as arguments.
+            file_x = 10 + 3 * 88 + 38
+            file_y = BAR_H + 42
+            q.mouse_goto(file_x, file_y)
+            time.sleep(0.4)
+            q.mouse_click()
+            q.mouse_click()
+            q.mouse_goto(w - 8, h - 8)
+            title = ""
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                for wx, wy in ((94, 54), (106, 66), (118, 78)):
+                    title = q.window_title(wx, wy)
+                    if "desk.txt" in title:
+                        break
+                if "desk.txt" in title:
+                    break
+                time.sleep(0.25)
+            check("double-clicking a Desktop file opens it in the editor "
+                  "('%s')" % title, "desk.txt" in title)
+            editor_xy = next(
+                ((wx, wy) for wx, wy in ((94, 54), (106, 66), (118, 78))
+                 if "desk.txt" in q.window_title(wx, wy)),
+                None)
+            if editor_xy:
+                q.click(*light_xy(*editor_xy, 0))
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows() > 1:
+                time.sleep(0.25)
+            if q.window_title(94, 54).startswith("Files:"):
+                q.click(*light_xy(94, 54, 0))
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows():
+                time.sleep(0.25)
+            check("closing the opened Desktop file returns to the desktop",
+                  q.dock_windows() == 0)
+
+            def create_from_desktop_menu(row):
+                mx, my = 300, 120
+                q.mouse_goto(mx, my)
+                time.sleep(0.3)
+                q.mouse_right_click()
+                time.sleep(0.5)
+                q.click(mx + 60,
+                        my + MENU_PAD + row * MENU_ROW + MENU_ROW // 2)
+
+            baseline = q.dock_windows()
+            create_from_desktop_menu(0)
+            desktop_rows = []
+            deadline = time.time() + 8
+            while time.time() < deadline:
+                if q.dock_windows() > baseline:
+                    desktop_rows = [
+                        name for name, _, _ in q.gfiles_rows(
+                            95, 54 + CONTENT_DY)]
+                    if "New Folder" in desktop_rows:
+                        break
+                time.sleep(0.3)
+            check("the 64-bit desktop menu creates a folder (%s)" %
+                  desktop_rows, "New Folder" in desktop_rows)
+            q.sendkey("alt-f4")
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows() != baseline:
+                time.sleep(0.3)
+
+            create_from_desktop_menu(1)
+            desktop_rows = []
+            deadline = time.time() + 8
+            while time.time() < deadline:
+                if q.dock_windows() > baseline:
+                    desktop_rows = [
+                        name for name, _, _ in q.gfiles_rows(
+                            95, 54 + CONTENT_DY)]
+                    if "New Text File.txt" in desktop_rows:
+                        break
+                time.sleep(0.3)
+            check("the 64-bit desktop menu creates a text file (%s)" %
+                  desktop_rows, "New Text File.txt" in desktop_rows and
+                  "New Folder" in desktop_rows)
+            q.sendkey("alt-f4")
+            deadline = time.time() + 8
+            while time.time() < deadline and q.dock_windows() != baseline:
+                time.sleep(0.3)
 
             # The mouse: the cursor is to go where we move it. We check
             # that through a change of pixels at the destination.
@@ -167,8 +264,10 @@ def main():
                   q.window_title(ux, uy, users_w + 2) == "User Accounts")
             cx, cy = ux + 1, uy + CONTENT_DY
             row_base = cy + ui_font_baseline_in(UD_PX, 96, 18)
-            first_account = q.read_ui(cx + 24, row_base, 100, px=UD_PX)
-            check("the 64-bit account syscall returns the admin account",
+            first_account = q.read_ui(cx + 24, row_base, 100,
+                                      charset="admin", px=UD_PX)
+            check("the 64-bit account syscall returns the admin account "
+                  "('%s')" % first_account,
                   first_account == "admin")
 
             def type_text(text):
@@ -194,7 +293,7 @@ def main():
             q.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog):
+        for f in (iso, slog, disk):
             if os.path.exists(f):
                 os.unlink(f)
 

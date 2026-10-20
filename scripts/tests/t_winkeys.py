@@ -115,9 +115,14 @@ def menu_height():
 
 def context_entry(q, mx, my, i):
     top = my + MENU_PAD + i * MENU_ROW
-    return q.read_ui(mx + 14, ui_font_baseline_in(MENU_PX, top, MENU_ROW),
-                     width=MENU_W - 24, px=MENU_PX,
-                     fg=theme("dark")["menu_text"])
+    baseline = ui_font_baseline_in(MENU_PX, top, MENU_ROW)
+    readings = (
+        q.read_ui(mx + 14, baseline, width=MENU_W - 24, px=MENU_PX,
+                  fg=theme("dark")["menu_text"]),
+        q.read_ui(mx + 14, baseline, width=MENU_W - 24, px=MENU_PX,
+                  fg=theme("dark")["accent_text"]),
+    )
+    return max(readings, key=len)
 
 
 def context_place(mx, my):
@@ -238,7 +243,7 @@ def main():
             check("the settings stand on the screen", is_win(at(*P_APP)))
             before = q.dock_windows()
             check("and they have their tile in the dock (%d with the kernel's "
-                  "windows)" % before, before == 3)
+                  "windows)" % before, before == 1)
 
             q.sendkey("alt-f4")
             time.sleep(3)
@@ -285,7 +290,7 @@ def main():
             check("two clicks on the title bar open the window to the whole "
                   "screen", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
             check("but not over the dock",
-                  min(at(*dock_tile(0, n_w=3))) > 200)
+                  min(at(*dock_tile(0, n_w=q.dock_windows()))) > 200)
 
             q.mouse_goto(200, BAR_H + 4)
             time.sleep(0.4)

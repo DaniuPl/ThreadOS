@@ -102,7 +102,46 @@ int task_reclaim_page(void)
  */
 int exec_spawn(const char *cmdline)
 {
-    return proc64_spawn(cmdline, 0, 1);
+    struct args64 args = { 0 };
+    int i = 0;
+
+    if (!cmdline) {
+        printk("[desktop] no command to start\n");
+        return -1;
+    }
+    while (cmdline[i]) {
+        while (cmdline[i] == ' ')
+            i++;
+        if (!cmdline[i])
+            break;
+        if (args.argc == ARG_MAX) {
+            printk("[desktop] too many command arguments\n");
+            return -1;
+        }
+        int n = 0;
+        while (cmdline[i] && cmdline[i] != ' ') {
+            if (n == ARG_LEN - 1) {
+                printk("[desktop] command argument is too long\n");
+                return -1;
+            }
+            args.v[args.argc][n++] = cmdline[i++];
+        }
+        args.v[args.argc][n] = '\0';
+        args.argc++;
+    }
+    if (!args.argc) {
+        printk("[desktop] empty command\n");
+        return -1;
+    }
+    for (int n = 0; args.v[0][n]; n++)
+        if (n >= 15) {
+            printk("[desktop] program name is too long\n");
+            return -1;
+        }
+    int id = proc64_spawn(args.v[0], &args, 1);
+    if (id < 0)
+        printk("[desktop] could not start '%s'\n", args.v[0]);
+    return id;
 }
 
 /* A USB keyboard supplies finished characters and console switch

@@ -55,7 +55,7 @@ static void show_device(const struct pci_info *info, int polish)
     print(line);
 }
 
-int main(void)
+void _start(void)
 {
     int count = 0;
     int polish = ulocale_language_polish();
@@ -66,7 +66,7 @@ int main(void)
             print(polish
                       ? "lspci: nie można odczytać informacji o urządzeniach PCI\n"
                       : "lspci: unable to read PCI device information\n");
-            return 1;
+            sys_exit(1);
         }
         if (result == 0)
             break;
@@ -79,5 +79,5 @@ int main(void)
     print(polish
               ? "Urządzenia sieciowe mają klasę 02; identyfikatory wskazują model.\n"
               : "Network devices use class 02; vendor:device IDs identify the model.\n");
-    return 0;
+    sys_exit(0);
 }

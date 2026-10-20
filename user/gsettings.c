@@ -941,12 +941,14 @@ static void draw(void)
         ud_fill_a(win, 0, 0, cw, ch, 0x000000, l.dark ? 110 : 70);
         ud_round(win, px, py, PASS_W, PASS_H, 10, l.field);
         ud_ring(win, px, py, PASS_W, PASS_H, 10, l.line);
-        ud_text_l(win, px + 14, py + 24,
-                  update_auth_pending == UPDATE_ROLLBACK
-                      ? "Restoring the previous system needs admin"
-                      : update_auth_pending == UPDATE_INSTALL
-                            ? "Installing an update needs admin"
-                            : "Changing settings needs admin",
+        const char *password_message = "Changing settings needs admin";
+#ifdef __x86_64__
+        if (update_auth_pending == UPDATE_ROLLBACK)
+            password_message = "Restoring the previous system needs admin";
+        else if (update_auth_pending == UPDATE_INSTALL)
+            password_message = "Installing an update needs admin";
+#endif
+        ud_text_l(win, px + 14, py + 24, password_message,
                   l.text, UD_BOLD, UD_PX);
         ud_round(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.bg);
         ud_ring(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.accent);

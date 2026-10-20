@@ -57,6 +57,10 @@ def read_rows(q, ox, oy, cols, rows):
 def text(rows):
     return "\n".join(rows)
 
+def command_echo(rows, command):
+    return any(row.startswith("/") and "> " in row and
+               row.split("> ", 1)[1] == command for row in rows)
+
 
 def wait_for_line(q, want, tries=20, **kw):
     """Waits for a WHOLE line to be exactly that text.
@@ -122,7 +126,8 @@ def main():
             check("the terminal opened and says hello",
                   "terminal" in text(rows))
             check("and it shows a prompt with the directory",
-                  any(r.startswith("/>") for r in rows))
+                  any(r.startswith("/") and r.rstrip().endswith(">")
+                      for r in rows))
 
             # --- hardware inventory from the desktop terminal --------
             q.type_line("lspci")
@@ -131,18 +136,23 @@ def main():
                   any("class " in r and ":" in r for r in rows))
             q.type_line("hardware")
             rows = wait_for_row(q, "Network devices use class 02", **geom)
+            body = text(rows)
             check("hardware is an alias for the PCI inventory",
-                  "Network devices use class 02" in text(rows))
+                  "Network devices use class 02" in body
+                  and "[code -1]" not in body)
             q.type_line("ifconfig")
             rows = wait_for_row(q, "Network configuration", **geom)
+            body = text(rows)
             check("ifconfig runs from the desktop terminal",
-                  "Network configuration" in text(rows))
+                  "Network configuration" in body
+                  and "[code -1]" not in body)
 
             # --- a command, its echo and its output --------------------
             q.type_line("seq 3")
             rows = wait_for_line(q, "3", **geom)
             body = text(rows)
-            check("the command was echoed together with the prompt", "/> seq 3" in body)
+            check("the command was echoed together with the prompt",
+                  command_echo(rows, "seq 3"))
             check("and under it is its output",
                   "1" in rows and "2" in rows and "3" in rows)
 
@@ -152,14 +162,15 @@ def main():
             body = text(rows)
             check("the date is printed (the machine's clock)", "2030-06-13" in body)
             check("and the previous command is STILL above it - a session, "
-                  "not one output", "/> seq 3" in body)
+                  "not one output", command_echo(rows, "seq 3"))
 
             # --- history ------------------------------------------------
             q.sendkey("up")
             q.sendkey("up")
             time.sleep(1)
             rows = read_rows(q, **geom)
-            last = [r for r in rows if r.startswith("/>")][-1]
+            last = next((r for r in reversed(rows)
+                         if command_echo([r], "seq 3")), "")
             check("the up arrow recalls the previous command ('%s')"
                   % last, last.strip().endswith("seq 3"))
 
@@ -168,7 +179,7 @@ def main():
             time.sleep(1)
             rows = read_rows(q, **geom)
             check("a recalled command can be run",
-                  text(rows).count("/> seq 3") >= 2)
+                  sum(command_echo([r], "seq 3") for r in rows) >= 2)
 
             # --- moving inside the line and inserting -------------------
             # 'eq 4' with the cursor sent home and an 's' typed in front
@@ -180,7 +191,8 @@ def main():
             q.sendkey("s")
             time.sleep(0.5)
             rows = read_rows(q, **geom)
-            last = [r for r in rows if r.startswith("/>")][-1]
+            last = next((r for r in reversed(rows)
+                         if command_echo([r], "seq 4")), "")
             check("the cursor went back and the character landed IN THE MIDDLE of the line ('%s')"
                   % last.strip(), last.strip().endswith("seq 4"))
             q.sendkey("ret")
@@ -193,7 +205,7 @@ def main():
             q.type_line("cd dir")
             rows = wait_for_row(q, "/dir>", **geom)
             check("cd changed the directory, and the prompt says so at once",
-                  any(r.startswith("/dir>") for r in rows))
+                  any(r.rstrip().endswith("/dir>") for r in rows))
             q.type_line("cd /")
             time.sleep(2)
 
@@ -225,10 +237,10 @@ def main():
                 pressed += 1
                 time.sleep(0.6)
                 rows = read_rows(q, **geom)
-                if "/> seq 3" in text(rows):
+                if command_echo(rows, "seq 3"):
                     break
             check("PgUp goes back to what scrolled away - as far as the first "
-                  "the session's commands", "/> seq 3" in text(rows))
+                  "the session's commands", command_echo(rows, "seq 3"))
             check("and the terminal says we are not looking at the end",
                   "scrolled back" in text(rows))
 
@@ -268,7 +280,8 @@ def main():
                   any(r.split()[:1] == ["40"] for r in rows)
                   and any(r.split()[:1] == ["30"] for r in rows))
             check("the prompt is at the bottom edge of the bigger window",
-                  any(r.startswith("/>") for r in rows[-2:]))
+                  any(r.startswith("/") and r.rstrip().endswith(">")
+                      for r in rows[-2:]))
 
             # --- Tab finishes what is being typed -----------------------
             # A terminal where a file name has to be typed out in full,
@@ -300,9 +313,7 @@ def main():
             time.sleep(2)
             rows = read_rows(q, **big)
             check("and it added only what they share (still 'cat file')",
-                  any(r.startswith("/> cat file") and
-                      not r.startswith("/> cat fileone") and
-                      not r.startswith("/> cat filetwo") for r in rows))
+                  any(row.endswith("> cat file") for row in rows))
 
             # --- and the window says where it stands --------------------
             # The window is zoomed by now, its corner under the bar

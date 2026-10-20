@@ -57,6 +57,11 @@ def wait_for(q, want, geom, tries=15):
     return seen
 
 
+def command_echo(rows, command):
+    return any(row.startswith("/") and "> " in row and
+               row.split("> ", 1)[1] == command for row in rows)
+
+
 def main():
     print("--- the terminal in a window (the 64-bit kernel) ---")
 
@@ -117,7 +122,8 @@ def main():
 
             rows = read_rows(q, **geom)
             check("the terminal opened and has a prompt",
-                  any(r.startswith("/>") for r in rows))
+                  any(r.startswith("/") and r.rstrip().endswith(">")
+                      for r in rows))
 
             # --- hardware inventory from the desktop terminal --------
             q.type_line("lspci")
@@ -134,14 +140,17 @@ def main():
                   and "[code -1]" not in body)
             q.type_line("ifconfig")
             rows = wait_for(q, "Network configuration", geom)
+            body = "\n".join(rows)
             check("ifconfig runs from the desktop terminal",
-                  "Network configuration" in "\n".join(rows))
+                  "Network configuration" in body
+                  and "[code -1]" not in body)
 
             # --- fork + exec + a redirect built by hand ---------------
             q.type_line("uls64")
             rows = wait_for(q, "entries", geom)
             body = "\n".join(rows)
-            check("the command was echoed together with the prompt", "/> uls64" in body)
+            check("the command was echoed together with the prompt",
+                  command_echo(rows, "uls64"))
             check("and its output shows - so the redirect was done "
                   "with fork, dup2 and exec worked", "entries" in body)
 
@@ -152,7 +161,7 @@ def main():
             check("the pipe passed the text through the other side (HEJ)",
                   "HEJ" in body)
             check("and the previous command is still above it - a session",
-                  "/> uls64" in body)
+                  command_echo(rows, "uls64"))
 
             # --- a program that is not there --------------------------
             q.type_line("nosuchprogram")

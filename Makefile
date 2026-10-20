@@ -48,6 +48,9 @@ DISK    := $(BUILD)/disk.img
 USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
                -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
                -Wl,--build-id=none -Wl,--no-warn-rwx-segments
+# The 32-bit ABI lowers some uint64_t division to libgcc helpers. These
+# freestanding programs link the compiler runtime, but still no libc.
+LIBGCC32 := $(shell $(CC) -m32 -print-libgcc-file-name)
 USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/evil2.elf \
              $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
@@ -222,7 +225,7 @@ $(BUILD)/user: | $(BUILD)
 USER_HEADERS := $(wildcard user/*.h)
 
 $(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
-	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@
+	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@ $(LIBGCC32)
 
 $(BUILD)/user/gcode.elf: user/gedit.c
 
@@ -289,7 +292,7 @@ USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
 $(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL) \
                      $(LIBTHREAD) user/userdyn.ld Makefile | $(BUILD)/user
 	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/decl -Iuser -T user/userdyn.ld \
-	    $< $(LIBTHREAD) -o $@
+	    $< $(LIBTHREAD) $(LIBGCC32) -o $@
 
 $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	python3 scripts/mkinitrd.py $@ \

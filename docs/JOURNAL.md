@@ -5801,3 +5801,12 @@ works and is checked by `make test`.
       instead of pretending to build. `t_gcode` covers 32- and 64-bit
       project opening, highlighting, tabs, indentation, saving, and the
       terminal launch. Builds and QEMU tests were not run locally.
+
+- [ ] **Desktop actions and command entry points.**
+      The 64-bit desktop now splits app command lines into argv before
+      spawning Files, so shortcuts and right-click creation actions receive
+      their paths and options. The `lspci`/`hardware` and `ifconfig` programs
+      now use the required freestanding `_start` entry point and exit syscall,
+      rather than returning through an invalid stack. `t_desktop64` and the
+      terminal groups cover these paths. Builds and QEMU tests were not run
+      locally.

@@ -2041,9 +2041,9 @@ class Qemu:
                 w, h, at = self.screen_raw()
                 if not setup_sent and w >= 640:
                     setup_y = (h - 438) // 2
-                    title = self.find_ui(
-                        80, w - 80, setup_y + 34, px=20, face="bold",
-                        screen=(w, h, at))
+                    title = self.read_ui(
+                        (w - 480) // 2 + 20, setup_y + 34, width=440,
+                        px=20, face="bold", screen=(w, h, at))
                     if "Welcome to ThreadOS" in title:
                         self.type_line("admin", enter=False)
                         self.sendkey("tab")

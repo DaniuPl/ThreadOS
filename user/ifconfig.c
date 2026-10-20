@@ -1,7 +1,7 @@
 #include "uapi.h"
 #include "ulocale.h"
 
-int main(void)
+void _start(void)
 {
     struct netinfo info;
     int polish = ulocale_language_polish();
@@ -9,7 +9,7 @@ int main(void)
     if (netinfo(&info) < 0) {
         print(polish ? "Brak skonfigurowanego połączenia IPv4.\n"
                      : "No configured IPv4 connection.\n");
-        return 0;
+        sys_exit(0);
     }
     print(polish ? "adres IP " : "inet ");
     print_ip(info.ip);
@@ -20,5 +20,5 @@ int main(void)
     print("\nDNS ");
     print_ip(info.dns);
     print("\n");
-    return 0;
+    sys_exit(0);
 }
