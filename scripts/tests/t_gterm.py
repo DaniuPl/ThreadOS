@@ -29,6 +29,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -58,8 +59,9 @@ def text(rows):
     return "\n".join(rows)
 
 def command_echo(rows, command):
-    return any(row.startswith("/") and "> " in row and
-               row.split("> ", 1)[1] == command for row in rows)
+    return any(row.startswith("/") and any(
+        row.split(prompt, 1)[1] == command
+        for prompt in ("> ", "# ") if prompt in row) for row in rows)
 
 
 def wait_for_line(q, want, tries=20, **kw):
@@ -103,17 +105,6 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            # Three files for the Tab test at the end, made now: the
-            # kernel's shell listens while no window has the focus, and
-            # once the terminal is open and filling the screen there is
-            # no desktop left to click on.
-            q.type_line("write fileone content")
-            time.sleep(1)
-            q.type_line("write filetwo content")
-            time.sleep(1)
-            q.type_line("write other content")
-            time.sleep(1.5)
-
             q.launch_dock(4)                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
@@ -126,7 +117,7 @@ def main():
             check("the terminal opened and says hello",
                   "terminal" in text(rows))
             check("and it shows a prompt with the directory",
-                  any(r.startswith("/") and r.rstrip().endswith(">")
+                  any(r.startswith("/") and r.rstrip().endswith((">", "#"))
                       for r in rows))
 
             # --- hardware inventory from the desktop terminal --------
@@ -203,9 +194,10 @@ def main():
             q.type_line("mkdir dir")
             time.sleep(2)
             q.type_line("cd dir")
-            rows = wait_for_row(q, "/dir>", **geom)
+            rows = wait_for_row(q, "/dir", **geom)
             check("cd changed the directory, and the prompt says so at once",
-                  any(r.rstrip().endswith("/dir>") for r in rows))
+                  any(r.rstrip().endswith(("/dir>", "/dir#"))
+                      for r in rows))
             q.type_line("cd /")
             time.sleep(2)
 
@@ -279,9 +271,21 @@ def main():
                   "the resize is in place (%s)" % [r for r in rows if r][-6:],
                   any(r.split()[:1] == ["40"] for r in rows)
                   and any(r.split()[:1] == ["30"] for r in rows))
-            check("the prompt is at the bottom edge of the bigger window",
-                  any(r.startswith("/") and r.rstrip().endswith(">")
-                      for r in rows[-2:]))
+            # The mouse pointer sits inside the zoomed window and smears
+            # noise at the end of the row, so only its start is matched.
+            check("the prompt is at the bottom edge of the bigger window (%s)"
+                  % rows[-3:],
+                  any(re.match(r"/\S*[>#](\s|$)", r) for r in rows[-2:]))
+
+            # Three files for the Tab test, made from the terminal itself:
+            # once a desktop session is logged in, keys typed with no window
+            # focused no longer reach the kernel's shell, and the terminal
+            # runs programs rather than shell commands such as 'write'.
+            q.type_line("fileio")
+            time.sleep(2)
+            for name in ("fileone", "filetwo", "other"):
+                q.type_line("cp ring3.txt " + name)
+                time.sleep(1.5)
 
             # --- Tab finishes what is being typed -----------------------
             # A terminal where a file name has to be typed out in full,
@@ -291,7 +295,7 @@ def main():
             q.sendkey("tab")
             time.sleep(1.5)
             q.sendkey("ret")
-            rows = wait_for_row(q, "content", **big)
+            rows = wait_for_row(q, "ring 3 process", **big)
             check("Tab finishes a name when only one matches "
                   "(cat oth -> other)",
                   any("cat other" in r for r in rows))
@@ -313,7 +317,8 @@ def main():
             time.sleep(2)
             rows = read_rows(q, **big)
             check("and it added only what they share (still 'cat file')",
-                  any(row.endswith("> cat file") for row in rows))
+                  any(row.endswith(("> cat file", "# cat file"))
+                      for row in rows))
 
             # --- and the window says where it stands --------------------
             # The window is zoomed by now, its corner under the bar

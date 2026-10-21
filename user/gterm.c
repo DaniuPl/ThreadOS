@@ -31,6 +31,7 @@
 
 #include "udraw.h"
 #include "ulocale.h"
+#include "uterm.h"
 
 /* Drawn the way the desktop draws, in its theme: the terminal's ground
    is the theme's field - the surface things are typed into - its text
@@ -281,28 +282,12 @@ static void put_num(int32_t v)
    redirection itself, because the kernel has no call that does all of
    it in one go. */
 
-#define ARGS_MAX 8
-static char words[ARGS_MAX][32];
-static char *argv[ARGS_MAX + 1];
+static struct uterm_args pipe_args;
 
 static void split(char *text)
 {
-    int n = 0, i = 0;
-    while (text[i] && n < ARGS_MAX) {
-        while (text[i] == ' ')
-            i++;
-        if (!text[i])
-            break;
-        int k = 0;
-        while (text[i] && text[i] != ' ' && k < 31)
-            words[n][k++] = text[i++];
-        words[n][k] = 0;
-        while (text[i] && text[i] != ' ')
-            i++;
-        argv[n] = words[n];
-        n++;
-    }
-    argv[n] = 0;
+    if (uterm_split_args(text, &pipe_args) < 0)
+        pipe_args.argc = 0;
 }
 
 static void term_cwd(char *buf, int len)
@@ -324,38 +309,11 @@ static int out_file(void)
    So it arrives later, where the exit code does. */
 static int32_t start_one(char *cmd)
 {
-    int fd = out_file();
-    if (fd < 0)
+    int fd = -1;
+    int32_t pid = uterm_start_one(cmd, OUTFILE, (const char *)0, &fd);
+    if (pid < 0)
         return -2;
-
-    /* A pipe for what the person types: the child reads its end as
-       descriptor zero and knows nothing about where the bytes come
-       from - which is exactly how a terminal is supposed to look from
-       inside a program. */
-    int pin[2];
-    if (sys_pipe(pin) < 0) {
-        sys_close(fd);
-        return -2;
-    }
-
-    int64_t pid = sys_fork();
-    if (pid == 0) {
-        sys_dup2(fd, FD_STDOUT);
-        sys_close(fd);
-        sys_dup2(pin[0], FD_STDIN);
-        sys_close(pin[0]);
-        sys_close(pin[1]);         /* the child must not hold OUR end */
-        split(cmd);
-        sys_exec(argv[0], argv);
-        sys_exit(127);             /* exec comes back only on an error */
-    }
-    sys_close(fd);
-    sys_close(pin[0]);
-    if (pid < 0) {
-        sys_close(pin[1]);
-        return -2;
-    }
-    in_fd = pin[1];
+    in_fd = fd;
     return (int32_t)pid;
 }
 
@@ -381,7 +339,8 @@ static int32_t start_pipe(char *left, char *right)
         sys_dup2(fd[1], FD_STDOUT);
         sys_close(fd[1]);
         split(left);
-        sys_exec(argv[0], argv);
+        if (pipe_args.argc > 0)
+            sys_exec(pipe_args.argv[0], pipe_args.argv);
         sys_exit(127);
     }
     int64_t b = sys_fork();
@@ -392,7 +351,8 @@ static int32_t start_pipe(char *left, char *right)
         sys_dup2(out, FD_STDOUT);
         sys_close(out);
         split(right);
-        sys_exec(argv[0], argv);
+        if (pipe_args.argc > 0)
+            sys_exec(pipe_args.argv[0], pipe_args.argv);
         sys_exit(127);
     }
     sys_close(fd[0]);
@@ -438,9 +398,8 @@ static void empty_out_file(void)
    it). */
 static int32_t start_one(char *cmd)
 {
-    empty_out_file();
     int fd = -1;
-    int32_t pid = sys_spawn_talk(cmd, OUTFILE, &fd);
+    int32_t pid = uterm_start_one(cmd, OUTFILE, (const char *)0, &fd);
     if (pid < 0)
         return -1;
     in_fd = fd;                    /* the way in to what we started */
@@ -511,23 +470,16 @@ static void refresh_prompt(void)
  * would in a terminal. */
 static void show_new_output(void)
 {
-    int32_t fd = sys_open(OUTFILE, O_READ);
-    if (fd < 0)
-        return;
-    if (shown)
-        sys_seek((int)fd, shown);
     char buf[256];
     for (;;) {
-        int32_t n = sys_read((int)fd, buf, sizeof(buf));
+        int32_t n = uterm_read_new(OUTFILE, &shown, buf, sizeof(buf));
         if (n <= 0)
             break;
         for (int32_t i = 0; i < n; i++)
             put_char(buf[i]);
-        shown += (uint32_t)n;
         if (n < (int32_t)sizeof(buf))
             break;
     }
-    sys_close((int)fd);
 }
 
 static void remember(const char *cmd)

@@ -58,8 +58,9 @@ def wait_for(q, want, geom, tries=15):
 
 
 def command_echo(rows, command):
-    return any(row.startswith("/") and "> " in row and
-               row.split("> ", 1)[1] == command for row in rows)
+    return any(row.startswith("/") and any(
+        row.split(prompt, 1)[1] == command
+        for prompt in ("> ", "# ") if prompt in row) for row in rows)
 
 
 def main():
@@ -122,7 +123,7 @@ def main():
 
             rows = read_rows(q, **geom)
             check("the terminal opened and has a prompt",
-                  any(r.startswith("/") and r.rstrip().endswith(">")
+                  any(r.startswith("/") and r.rstrip().endswith((">", "#"))
                       for r in rows))
 
             # --- hardware inventory from the desktop terminal --------

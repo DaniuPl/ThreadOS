@@ -22,10 +22,13 @@ not come from the system:
   the slope running from one colour to the other, the translucent fill
   exactly half way
 
-  a window that is not the program's own refused
+  an invalid or foreign window ID is refused
 
   the theme's colours exactly kernel/include/look.h's, and a switch of
   the theme reaching the program while it runs
+
+It also checks the shared GUI framework's workspace layout and tab
+control on the same window, including pointer and keyboard selection.
 
 on both kernels: the call has its own number and its own handler in
 long mode.
@@ -124,14 +127,54 @@ def check_answers(q, tag, log):
           width == (adv + 63) >> 6)
     check("%sand the pen ends where the text does (%d)" % (tag, pen),
           pen == ((TEXT_X << 6) + adv + 63) >> 6)
-    check("%sa window that is not its own is refused (%d)" % (tag, foreign),
+    check("%san invalid or foreign window id is refused (%d)" % (tag, foreign),
           foreign == -1)
+
+
+def wait_serial(q, text, timeout=5):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if text in q.serial():
+            return True
+        time.sleep(0.2)
+    return text in q.serial()
+
+
+def check_framework(q, tag, cx, cy, log):
+    expected = (
+        "udtest: workspace toolbar 0,0,200,12 "
+        "activity 0,12,20,100 sidebar 20,12,44,100 "
+        "tabs 64,12,136,10 breadcrumbs 64,22,136,8 "
+        "editor 64,30,136,64 panel 64,94,136,18 status 0,112,200,8")
+    check("%sthe shared workspace divides the window predictably" % tag,
+          expected in log)
+
+    _, _, at = q.screen_raw()
+    accent = theme("dark")["accent"]
+    check("%sthe tab widget draws its active indicator" % tag,
+          near(at(cx + 50, cy + 84), accent, 4))
+
+    q.click(cx + 148, cy + 76)
+    check("%sa tab click selects the requested view" % tag,
+          wait_serial(q, "udtest: tab 1"))
+    q.mouse_goto(600, 300)
+    time.sleep(0.5)
+    _, _, at = q.screen_raw()
+    check("%sthe active underline follows the selected tab" % tag,
+          near(at(cx + 148, cy + 84), accent, 4))
+
+    q.sendkey("left")
+    check("%sarrow keys navigate tabs" % tag,
+          wait_serial(q, "udtest: tab 0"))
 
 
 def main():
     slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
     try:
-        q = Qemu(KERNEL, INITRD, serial=slog)
+        q = Qemu(KERNEL, INITRD, disk=disk, serial=slog)
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
@@ -145,6 +188,7 @@ def main():
             check_window(q, "", cx, cy)
             log = q.serial()
             check_answers(q, "", log)
+            check_framework(q, "", cx, cy, log)
 
             seen = looks(log)
             check("the theme's colours are look.h's dark ones (%s)"
@@ -169,8 +213,9 @@ def main():
         finally:
             q.close()
     finally:
-        if os.path.exists(slog):
-            os.unlink(slog)
+        for f in (disk, slog):
+            if os.path.exists(f):
+                os.unlink(f)
 
     print("--- the same calls on the 64-bit kernel ---")
     reason = no64()
@@ -180,10 +225,13 @@ def main():
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.truncate(16 * 1024 * 1024)
     try:
         check("(64) the disc with the 64-bit kernel builds",
               make_iso64(d, iso, graphics=True))
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
+        q = Qemu(KERNEL, INITRD, disk=disk, cdrom=iso, serial=slog,
                  qemu="qemu-system-x86_64")
         try:
             q.wait_serial("thread64>", timeout=120)
@@ -199,6 +247,7 @@ def main():
             check_window(q, "(64) ", cx, cy)
             log = q.serial()
             check_answers(q, "(64) ", log)
+            check_framework(q, "(64) ", cx, cy, log)
             seen = looks(log)
             check("(64) the theme's colours are look.h's dark ones",
                   bool(seen) and seen[0] == expected_look("dark"))
@@ -206,7 +255,7 @@ def main():
             q.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog):
+        for f in (iso, slog, disk):
             if os.path.exists(f):
                 os.unlink(f)
 

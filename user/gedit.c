@@ -28,6 +28,9 @@
 #include "uapi.h"
 #include "ugui.h"
 #include "ulocale.h"
+#ifdef GCODE_IDE
+#include "uterm.h"
+#endif
 
 /* Drawn the way the desktop draws, in its theme: the page is the
    theme's field, the text DejaVu Sans Mono on a grid of cells (ud_cells)
@@ -39,15 +42,25 @@
 #define GUTTER   34           /* the line numbers' margin */
 
 #ifdef GCODE_IDE
-#define IDE_W0 520
+#define IDE_W0 560
 #define IDE_H0 360
-#define IDE_SIDE_W 152
-#define IDE_HEADER_H 30
-#define IDE_TAB_H 24
-#define IDE_EDIT_TOP 58
-#define IDE_TEXT_X 192
-#define IDE_LIST_ROW_H 17
+#define IDE_ACTIVITY_W 32
+#define IDE_SIDE_W 188
+#define IDE_HEADER_H 32
+#define IDE_TAB_H 26
+#define IDE_BREAD_H 20
+#define IDE_EDIT_TOP 80
+#define IDE_TEXT_X 228
+#define IDE_LIST_ROW_H 18
 #define IDE_TAB_N 3
+#define IDE_TERM_H 128
+#define IDE_TERM_HEADER_H 24
+#define IDE_TERM_LINES 12
+#define IDE_TERM_COLS 72
+#define IDE_TERM_INPUT_MAX 96
+#define IDE_TERM_HISTORY 8
+#define IDE_TERM_OUTFILE ".code-term.out"
+#define IDE_TERM_ERRFILE ".code-term.err"
 #else
 #define W0 440                /* the size the window opens with */
 #define H0 320
@@ -94,7 +107,16 @@ static char project_path[512];
 static int project_top;
 static char tabs[IDE_TAB_N][NAME_MAX + 1];
 static int tab_n, tab_active = -1;
-static int terminal_pid = -1;
+static int terminal_open, terminal_focus;
+static int terminal_pid = -1, terminal_input_fd = -1;
+static uint32_t terminal_out_shown, terminal_err_shown;
+static char terminal_out_path[256], terminal_err_path[256];
+static char terminal_input[IDE_TERM_INPUT_MAX];
+static int terminal_len, terminal_cursor;
+static char terminal_history[IDE_TERM_HISTORY][IDE_TERM_INPUT_MAX];
+static int terminal_history_n, terminal_history_pos = -1;
+static char terminal_lines[IDE_TERM_LINES][IDE_TERM_COLS + 1];
+static int terminal_line_n = 1, terminal_line_len, terminal_scroll;
 static unsigned char file_is_dir[64];
 #endif
 
@@ -133,9 +155,29 @@ static int editor_top(void)
 #endif
 }
 
+#ifdef GCODE_IDE
+static int ide_terminal_height(void)
+{
+    int available = ch - STATUS_H - IDE_EDIT_TOP - ROW_H;
+    if (available < IDE_TERM_HEADER_H + ROW_H * 2)
+        return 0;
+    return available < IDE_TERM_H ? available : IDE_TERM_H;
+}
+
+static int ide_terminal_top(void)
+{
+    return ch - STATUS_H - ide_terminal_height();
+}
+#endif
+
 static int rows(void)
 {
-    return (ch - editor_top() - PAD - STATUS_H) / ROW_H;
+    int height = ch - editor_top() - PAD - STATUS_H;
+#ifdef GCODE_IDE
+    if (terminal_open)
+        height -= ide_terminal_height();
+#endif
+    return height > 0 ? height / ROW_H : 0;
 }
 
 static void ecopy(char *d, const char *s, int max)
@@ -226,13 +268,11 @@ static struct ug editor_ui;
 static struct ug_pick picker;
 static char picked[NAME_MAX + 1];
 
-#ifndef GCODE_IDE
 static const char *file_row(void *ctx, int i)
 {
     (void)ctx;
     return (i >= 0 && i < nfiles) ? names[i] : "";
 }
-#endif
 
 static void reread_files(void)
 {
@@ -248,6 +288,12 @@ static void reread_files(void)
         struct dirent64 e;
         if (sys_readdir(i, &e) != 0)
             break;
+#ifdef GCODE_IDE
+        if (!e.is_dir &&
+            (text_equal(e.name, IDE_TERM_OUTFILE) ||
+             text_equal(e.name, IDE_TERM_ERRFILE)))
+            continue;
+#endif
         if (e.is_dir) {
 #ifdef GCODE_IDE
             ecopy(names[nfiles], e.name, NAME_MAX);
@@ -268,6 +314,11 @@ static void reread_files(void)
 #endif
             continue;                    /* a directory, not a file */
         }
+#ifdef GCODE_IDE
+        if (text_equal(name, IDE_TERM_OUTFILE) ||
+            text_equal(name, IDE_TERM_ERRFILE))
+            continue;
+#endif
         ecopy(names[nfiles], name, NAME_MAX);
 #endif
 #ifdef GCODE_IDE
@@ -373,43 +424,315 @@ static void ide_activate_tab(int index)
     ide_open_file(tabs[index]);
 }
 
-static void ide_start_terminal(void)
+static int ide_term_join_path(char *dst, int cap, const char *dir,
+                              const char *leaf)
 {
-    if (terminal_pid >= 0) {
-        ecopy(note, "Terminal is already open", sizeof(note) - 1);
+    int n = 0;
+    while (dir[n] && n < cap - 1) {
+        dst[n] = dir[n];
+        n++;
+    }
+    if (dir[n])
+        return 0;
+    if (!n || dst[n - 1] != '/') {
+        if (n >= cap - 1)
+            return 0;
+        dst[n++] = '/';
+    }
+    for (int i = 0; leaf[i]; i++) {
+        if (n >= cap - 1)
+            return 0;
+        dst[n++] = leaf[i];
+    }
+    dst[n] = '\0';
+    return 1;
+}
+
+static void ide_term_newline(void)
+{
+    if (terminal_line_n < IDE_TERM_LINES) {
+        terminal_line_n++;
+    } else {
+        for (int row = 1; row < IDE_TERM_LINES; row++)
+            ecopy(terminal_lines[row - 1], terminal_lines[row],
+                  IDE_TERM_COLS);
+    }
+    terminal_line_len = 0;
+    terminal_lines[terminal_line_n - 1][0] = '\0';
+    terminal_scroll = 0;
+}
+
+static void ide_term_put(char c)
+{
+    if (c == '\n') {
+        ide_term_newline();
         return;
     }
-    int64_t pid = sys_fork();
-    if (pid < 0) {
-        ecopy(note, "Could not open the terminal", sizeof(note) - 1);
+    if (c == '\r') {
+        terminal_line_len = 0;
+        terminal_lines[terminal_line_n - 1][0] = '\0';
         return;
     }
-    if (!pid) {
+    if (c == '\b') {
+        if (terminal_line_len > 0) {
+            terminal_lines[terminal_line_n - 1][--terminal_line_len] = '\0';
+        }
+        return;
+    }
+    if (c == '\t') {
+        for (int i = 0; i < 4; i++)
+            ide_term_put(' ');
+        return;
+    }
+    if ((unsigned char)c < 0x20 || c == 0x7F)
+        return;
+    if (terminal_line_len == IDE_TERM_COLS)
+        ide_term_newline();
+    terminal_lines[terminal_line_n - 1][terminal_line_len++] = c;
+    terminal_lines[terminal_line_n - 1][terminal_line_len] = '\0';
+}
+
+static void ide_term_text(const char *text)
+{
+    for (int i = 0; text[i]; i++)
+        ide_term_put(text[i]);
+}
+
+static int ide_term_start(void)
+{
+    if (terminal_pid >= 0)
+        return 1;
+    if (!ide_term_join_path(terminal_out_path,
+                            (int)sizeof(terminal_out_path), project_path,
+                            IDE_TERM_OUTFILE)) {
+        ecopy(note, "Project path is too long for Terminal", sizeof(note) - 1);
+        return 0;
+    }
 #ifdef __x86_64__
-        char *const args[] = { "gterm", (char *)0 };
-        sys_exec("gterm", args);
-#else
-        sys_exec("gterm");
-#endif
-        sys_exit(127);
+    if (!ide_term_join_path(terminal_err_path,
+                            (int)sizeof(terminal_err_path), project_path,
+                            IDE_TERM_ERRFILE)) {
+        ecopy(note, "Project path is too long for Terminal", sizeof(note) - 1);
+        return 0;
     }
-    terminal_pid = (int)pid;
-    ecopy(note, "Terminal opened at the project folder", sizeof(note) - 1);
+    const char *shell = "ush64";
+    const char *errfile = IDE_TERM_ERRFILE;
+#else
+    terminal_err_path[0] = '\0';
+    const char *shell = "sh";
+    const char *errfile = (const char *)0;
+#endif
+    int input_fd = -1;
+    int32_t pid = uterm_start_one(shell, IDE_TERM_OUTFILE, errfile, &input_fd);
+    if (pid < 0) {
+        ide_term_text("Could not start the project shell\n");
+        ecopy(note, "Could not start the project shell", sizeof(note) - 1);
+        return 0;
+    }
+    terminal_pid = pid;
+    terminal_input_fd = input_fd;
+    terminal_out_shown = 0;
+    terminal_err_shown = 0;
+    return 1;
+}
+
+static void ide_terminal_toggle(void)
+{
+    terminal_open = !terminal_open;
+    terminal_focus = terminal_open;
+    if (terminal_open && !ide_terminal_height()) {
+        terminal_open = 0;
+        terminal_focus = 0;
+        ecopy(note, "Terminal needs a taller Code window", sizeof(note) - 1);
+        return;
+    }
+    if (terminal_open && terminal_pid < 0)
+        ide_term_start();
+}
+
+static int ide_term_read_file(const char *path, uint32_t *shown)
+{
+    if (!path[0])
+        return 0;
+    char buf[256];
+    int changed = 0;
+    for (int i = 0; i < 4; i++) {
+        int32_t n = uterm_read_new(path, shown, buf, sizeof(buf));
+        if (n <= 0)
+            break;
+        for (int32_t j = 0; j < n; j++)
+            ide_term_put(buf[j]);
+        changed = 1;
+        if (n < (int32_t)sizeof(buf))
+            break;
+    }
+    return changed;
 }
 
 static int ide_terminal_poll(void)
 {
     if (terminal_pid < 0)
         return 0;
+
+    int changed = ide_term_read_file(terminal_out_path,
+                                     &terminal_out_shown);
+    changed |= ide_term_read_file(terminal_err_path,
+                                  &terminal_err_shown);
+
     int code = 0;
     int rc = sys_trywait(terminal_pid, &code);
     if (rc == -3)
-        return 0;
+        return changed;
+
+    changed |= ide_term_read_file(terminal_out_path, &terminal_out_shown);
+    changed |= ide_term_read_file(terminal_err_path, &terminal_err_shown);
+    if (terminal_input_fd >= 0)
+        sys_close(terminal_input_fd);
+    terminal_input_fd = -1;
     terminal_pid = -1;
-    if (rc != 0 || code != 0)
-        ecopy(note, "The project terminal ended", sizeof(note) - 1);
+    if (rc == 0 && code != 0)
+        ide_term_text("\n[process exited with an error]\n");
+    else if (rc != 0)
+        ide_term_text("\n[terminal process ended]\n");
     return 1;
 }
+
+static void ide_term_remember(void)
+{
+    if (!terminal_len)
+        return;
+    if (terminal_history_n > 0 &&
+        text_equal(terminal_history[(terminal_history_n - 1) %
+                                   IDE_TERM_HISTORY], terminal_input))
+        return;
+    ecopy(terminal_history[terminal_history_n % IDE_TERM_HISTORY],
+          terminal_input, IDE_TERM_INPUT_MAX - 1);
+    terminal_history_n++;
+}
+
+static void ide_term_submit(void)
+{
+    if (terminal_pid < 0 && !ide_term_start())
+        return;
+    if (terminal_input_fd < 0) {
+        ide_term_text("Terminal input is closed\n");
+        return;
+    }
+
+    ide_term_remember();
+
+    char line[IDE_TERM_INPUT_MAX + 1];
+    for (int i = 0; i < terminal_len; i++)
+        line[i] = terminal_input[i];
+    line[terminal_len] = '\n';
+    int32_t written = uterm_write_input(terminal_input_fd, line,
+                                        (uint32_t)terminal_len + 1);
+    if (written != terminal_len + 1)
+        ide_term_text("Could not write to the terminal process\n");
+
+    terminal_input[0] = '\0';
+    terminal_len = terminal_cursor = 0;
+    terminal_history_pos = -1;
+}
+
+static void ide_term_history_up(void)
+{
+    int count = terminal_history_n < IDE_TERM_HISTORY
+                    ? terminal_history_n : IDE_TERM_HISTORY;
+    if (terminal_history_pos + 1 >= count)
+        return;
+    terminal_history_pos++;
+    int index = (terminal_history_n - 1 - terminal_history_pos) %
+                IDE_TERM_HISTORY;
+    ecopy(terminal_input, terminal_history[index], IDE_TERM_INPUT_MAX - 1);
+    terminal_len = 0;
+    while (terminal_input[terminal_len])
+        terminal_len++;
+    terminal_cursor = terminal_len;
+}
+
+static void ide_term_history_down(void)
+{
+    if (terminal_history_pos <= 0) {
+        terminal_history_pos = -1;
+        terminal_input[0] = '\0';
+        terminal_len = terminal_cursor = 0;
+        return;
+    }
+    terminal_history_pos--;
+    int index = (terminal_history_n - 1 - terminal_history_pos) %
+                IDE_TERM_HISTORY;
+    ecopy(terminal_input, terminal_history[index], IDE_TERM_INPUT_MAX - 1);
+    terminal_len = 0;
+    while (terminal_input[terminal_len])
+        terminal_len++;
+    terminal_cursor = terminal_len;
+}
+
+static void ide_term_key(char c)
+{
+    if (c == '\n' || c == '\r') {
+        ide_term_submit();
+        return;
+    }
+    if (c == 3 && terminal_pid >= 0) {
+        sys_kill(terminal_pid, SIGINT);
+        return;
+    }
+    if (c == 4 && terminal_input_fd >= 0) {
+        sys_close(terminal_input_fd);
+        terminal_input_fd = -1;
+        ide_term_text("\n[terminal input closed]\n");
+        return;
+    }
+    if (c == KEY_UP) {
+        ide_term_history_up();
+        return;
+    }
+    if (c == KEY_DOWN) {
+        ide_term_history_down();
+        return;
+    }
+    if (c == KEY_LEFT) {
+        if (terminal_cursor > 0)
+            terminal_cursor--;
+        return;
+    }
+    if (c == KEY_RIGHT) {
+        if (terminal_cursor < terminal_len)
+            terminal_cursor++;
+        return;
+    }
+    if (c == KEY_HOME) {
+        terminal_cursor = 0;
+        return;
+    }
+    if (c == KEY_END) {
+        terminal_cursor = terminal_len;
+        return;
+    }
+    if (c == '\b') {
+        if (terminal_cursor > 0) {
+            for (int i = terminal_cursor; i < terminal_len; i++)
+                terminal_input[i - 1] = terminal_input[i];
+            terminal_len--;
+            terminal_cursor--;
+            terminal_input[terminal_len] = '\0';
+        }
+        terminal_history_pos = -1;
+        return;
+    }
+    if ((unsigned char)c >= 0x20 && c != 0x7F &&
+        terminal_len < IDE_TERM_INPUT_MAX - 1) {
+        for (int i = terminal_len; i > terminal_cursor; i--)
+            terminal_input[i] = terminal_input[i - 1];
+        terminal_input[terminal_cursor++] = c;
+        terminal_len++;
+        terminal_input[terminal_len] = '\0';
+        terminal_history_pos = -1;
+    }
+}
+
 #endif
 
 static int cols(void) { return (cw - editor_x() - PAD) / CELL; }
@@ -998,26 +1321,63 @@ static void draw_code_line(int win, const struct ud_look *lk, int line,
 }
 
 static void ide_button(int win, const struct ud_look *lk, int x, int w,
-                       const char *label)
+                       const char *label, int active)
 {
-    ud_round(win, x, 3, w, IDE_HEADER_H - 6, 5, lk->accent);
-    ud_text_mid_l(win, x, 3, w, IDE_HEADER_H - 6, label, lk->on_accent,
-                  UD_SANS, 11);
+    uint32_t fill = active ? lk->accent : lk->field;
+    uint32_t ink = active ? lk->on_accent : lk->text;
+    ud_round(win, x, 4, w, IDE_HEADER_H - 8, 4, fill);
+    ud_ring(win, x, 4, w, IDE_HEADER_H - 8, 4,
+            active ? lk->accent : lk->line);
+    ud_text_mid_l(win, x, 4, w, IDE_HEADER_H - 8, label, ink, UD_SANS, 10);
+}
+
+static void ide_draw_activity(int win, const struct ud_look *lk)
+{
+    int explorer_y = IDE_HEADER_H + 18;
+    ud_fill(win, 0, explorer_y - 14, 2, 28, lk->accent);
+    ud_ring(win, 9, explorer_y - 7, 14, 14, 2, lk->text);
+    ud_fill(win, 11, explorer_y - 3, 10, 1, lk->text);
+    ud_fill(win, 11, explorer_y, 10, 1, lk->text);
+
+    int search_y = explorer_y + 34;
+    ud_ring(win, 9, search_y - 8, 12, 12, 6, lk->dim);
+    ud_line(win, 19, search_y + 3, 24, search_y + 8, 16, lk->dim);
 }
 
 static void ide_draw_chrome(int win, const struct ud_look *lk)
 {
     ud_fill(win, 0, 0, IDE_SIDE_W, ch - STATUS_H, lk->bg);
-    ud_fill(win, IDE_SIDE_W, 0, 1, ch - STATUS_H, lk->line);
+    ud_fill(win, 0, IDE_HEADER_H, IDE_ACTIVITY_W,
+            ch - IDE_HEADER_H - STATUS_H, lk->row);
+    ud_fill(win, IDE_ACTIVITY_W, IDE_HEADER_H,
+            IDE_SIDE_W - IDE_ACTIVITY_W, ch - IDE_HEADER_H - STATUS_H,
+            lk->bg);
+    ud_fill(win, IDE_SIDE_W - 1, IDE_HEADER_H, 1,
+            ch - IDE_HEADER_H - STATUS_H, lk->line);
     ud_fill(win, 0, IDE_HEADER_H, cw, 1, lk->line);
-    ud_text_l(win, 10, ud_baseline(4, IDE_HEADER_H - 8, 14), "Code",
-              lk->text, UD_BOLD, 14);
-    ide_button(win, lk, cw - 228, 62, "New");
-    ide_button(win, lk, cw - 160, 62, "Save");
-    ide_button(win, lk, cw - 92, 82, "Terminal");
+    ide_draw_activity(win, lk);
 
-    ud_text_l(win, 8, ud_baseline(IDE_HEADER_H, 18, 10), "Project",
-              lk->dim, UD_SANS, 10);
+    static const char *const menus[] = {
+        "File", "Edit", "Selection", "View", "Go", "Run", "Terminal", "Help"
+    };
+    int menu_x = 10;
+    int menu_y = ud_baseline(0, IDE_HEADER_H, 10);
+    for (int i = 0; i < (int)(sizeof(menus) / sizeof(menus[0])); i++) {
+        int width = ud_width(menus[i], UD_SANS, 9);
+        if (menu_x + width > cw - 236)
+            break;
+        ud_text(win, menu_x, menu_y, menus[i], lk->dim, UD_SANS, 9);
+        menu_x += width + 9;
+    }
+    ide_button(win, lk, cw - 228, 62, "New", 0);
+    ide_button(win, lk, cw - 160, 62, "Save", 0);
+    ide_button(win, lk, cw - 92, 82,
+               terminal_open ? (ulocale_language_polish() ? "Ukryj" : "Hide")
+                             : "Terminal", terminal_open);
+
+    ud_text(win, IDE_ACTIVITY_W + 10,
+            ud_baseline(IDE_HEADER_H, 22, 9), "EXPLORER",
+            lk->dim, UD_BOLD, 9);
     char path[28];
     int length = 0;
     while (project_path[length] && length < 512)
@@ -1031,7 +1391,8 @@ static void ide_draw_chrome(int win, const struct ud_look *lk)
     for (int i = start; i < length && out < (int)sizeof(path) - 1; i++)
         path[out++] = project_path[i];
     path[out] = '\0';
-    ud_text(win, 8, IDE_EDIT_TOP - 4, path, lk->dim, UD_MONO, 9);
+    ud_text(win, IDE_ACTIVITY_W + 10, IDE_EDIT_TOP - 4, path,
+            lk->dim, UD_MONO, 9);
     int visible = (ch - IDE_EDIT_TOP - STATUS_H) / IDE_LIST_ROW_H;
     for (int row = 0; row < visible; row++) {
         int item = project_top + row;
@@ -1040,7 +1401,21 @@ static void ide_draw_chrome(int win, const struct ud_look *lk)
         int y = IDE_EDIT_TOP + row * IDE_LIST_ROW_H;
         if (!file_is_dir[item] && fname[0] &&
             text_equal(fname, names[item]))
-            ud_fill(win, 4, y, IDE_SIDE_W - 8, IDE_LIST_ROW_H, lk->row);
+            ud_fill(win, IDE_ACTIVITY_W + 4, y,
+                    IDE_SIDE_W - IDE_ACTIVITY_W - 8, IDE_LIST_ROW_H, lk->row);
+        if (!file_is_dir[item] && fname[0] &&
+            text_equal(fname, names[item]))
+            ud_fill(win, IDE_ACTIVITY_W + 4, y, 2, IDE_LIST_ROW_H, lk->accent);
+
+        int icon_x = IDE_ACTIVITY_W + 10;
+        if (file_is_dir[item]) {
+            ud_fill(win, icon_x + 1, y + 6, 11, 7, lk->accent);
+            ud_fill(win, icon_x + 2, y + 4, 5, 3, lk->accent);
+        } else {
+            ud_ring(win, icon_x + 2, y + 3, 9, 12, 1, lk->dim);
+            ud_fill(win, icon_x + 4, y + 7, 5, 1, lk->dim);
+            ud_fill(win, icon_x + 4, y + 10, 5, 1, lk->dim);
+        }
         char label[24];
         int n = 0;
         if (file_is_dir[item])
@@ -1063,9 +1438,22 @@ static void ide_draw_chrome(int win, const struct ud_look *lk)
             label[n++] = '.';
         }
         label[n] = '\0';
-        ud_text(win, 10, ud_baseline(y, IDE_LIST_ROW_H, 10), label,
+        ud_text(win, icon_x + 17, ud_baseline(y, IDE_LIST_ROW_H, 10), label,
                 file_is_dir[item] ? lk->accent : lk->text, UD_SANS, 10);
     }
+
+    int bread_y = IDE_HEADER_H + IDE_TAB_H;
+    ud_fill(win, IDE_SIDE_W, bread_y, cw - IDE_SIDE_W, IDE_BREAD_H, lk->field);
+    ud_fill(win, IDE_SIDE_W, bread_y + IDE_BREAD_H - 1,
+            cw - IDE_SIDE_W, 1, lk->line);
+    int bread_x = IDE_SIDE_W + 8;
+    int bread_base = ud_baseline(bread_y, IDE_BREAD_H, 10);
+    ud_text(win, bread_x, bread_base, path, lk->dim, UD_MONO, 9);
+    bread_x += ud_width(path, UD_MONO, 9) + 8;
+    ud_text(win, bread_x, bread_base, ">", lk->dim, UD_SANS, 10);
+    bread_x += 12;
+    ud_text(win, bread_x, bread_base, fname[0] ? fname : "Untitled",
+            lk->text, UD_SANS, 10);
 
     int tab_width = 112;
     for (int i = 0; i < tab_n; i++) {
@@ -1090,6 +1478,87 @@ static void ide_draw_chrome(int win, const struct ud_look *lk)
         ud_text(win, x + 7,
                 ud_baseline(IDE_HEADER_H, IDE_TAB_H, 10), label,
                 i == tab_active ? lk->text : lk->dim, UD_SANS, 10);
+    }
+}
+
+static void ide_terminal_draw(int win, const struct ud_look *lk)
+{
+    int height = ide_terminal_height();
+    if (!terminal_open || height <= 0 || cw <= IDE_SIDE_W + 24)
+        return;
+    int y = ide_terminal_top();
+    int x = IDE_SIDE_W;
+    int width = cw - x;
+    int output_y = y + IDE_TERM_HEADER_H;
+    int visible = (height - IDE_TERM_HEADER_H) / ROW_H;
+    if (visible < 0)
+        visible = 0;
+
+    ud_fill(win, x, y, width, height, lk->field);
+    ud_fill(win, x, y, width, 1, lk->line);
+    static const char *const tabs[] = {
+        "PROBLEMS", "OUTPUT", "DEBUG CONSOLE", "TERMINAL"
+    };
+    int tab_x = x + 10;
+    int tab_base = ud_baseline(y, IDE_TERM_HEADER_H, 9);
+    for (int i = 0; i < (int)(sizeof(tabs) / sizeof(tabs[0])); i++) {
+        uint32_t ink = i == 3 ? lk->text : lk->dim;
+        int tab_width = ud_width(tabs[i], UD_SANS, 9);
+        ud_text(win, tab_x, tab_base, tabs[i], ink, UD_SANS, 9);
+        if (i == 3)
+            ud_fill(win, tab_x, y + IDE_TERM_HEADER_H - 2,
+                    tab_width, 2, lk->accent);
+        tab_x += tab_width + 14;
+    }
+    ud_fill(win, x, y + IDE_TERM_HEADER_H - 1, width, 1, lk->line);
+
+    int max_scroll = terminal_line_n - visible;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (terminal_scroll > max_scroll)
+        terminal_scroll = max_scroll;
+    int first = terminal_line_n - visible - terminal_scroll;
+    if (first < 0)
+        first = 0;
+    int columns = (width - 20) / CELL;
+    if (columns > IDE_TERM_COLS)
+        columns = IDE_TERM_COLS;
+    if (columns < 1)
+        columns = 1;
+    for (int row = 0; row < visible; row++) {
+        int line = first + row;
+        if (line >= terminal_line_n)
+            break;
+        int current = line == terminal_line_n - 1 && terminal_scroll == 0;
+        char shown[IDE_TERM_COLS + IDE_TERM_INPUT_MAX + 1];
+        int length = 0;
+        for (int i = 0; terminal_lines[line][i] &&
+                        length < (int)sizeof(shown) - 1; i++)
+            shown[length++] = terminal_lines[line][i];
+        if (current) {
+            for (int i = 0; i < terminal_len &&
+                            length < (int)sizeof(shown) - 1; i++)
+                shown[length++] = terminal_input[i];
+        }
+        shown[length] = '\0';
+        int start = 0;
+        int cursor_col = -1;
+        if (current) {
+            int caret = terminal_line_len + terminal_cursor;
+            start = caret >= columns ? caret - columns + 1 : 0;
+            cursor_col = caret - start;
+        }
+        char visible_line[IDE_TERM_COLS + 1];
+        int out = 0;
+        for (int i = start; i < length && out < columns; i++)
+            visible_line[out++] = shown[i];
+        visible_line[out] = '\0';
+        int line_y = output_y + row * ROW_H;
+        ud_cells(win, x + 10, line_y + TEXT_BASE, CELL, visible_line,
+                 lk->text, UD_MONO, TEXT_PX);
+        if (terminal_focus && cursor_col >= 0 && cursor_col < columns)
+            ud_fill(win, x + 10 + cursor_col * CELL, line_y + 2, 1,
+                    ROW_H - 4, lk->accent);
     }
 }
 #endif
@@ -1157,9 +1626,17 @@ static void draw(int win)
     ud_fill(win, caret_x, editor_top() + (cy - top) * ROW_H + 1, 1, ROW_H - 3,
             lk.accent);
 
+#ifdef GCODE_IDE
+    ide_terminal_draw(win, &lk);
+#endif
+
     /* The status line: what the file is, whether it has been changed,
        where the caret is - or the question, when one is being asked. */
+#ifdef GCODE_IDE
+    ud_fill(win, 0, ch - STATUS_H, cw, STATUS_H, lk.accent);
+#else
     ud_fill(win, 0, ch - STATUS_H, cw, STATUS_H, lk.row);
+#endif
     ud_fill(win, 0, ch - STATUS_H, cw, 1, lk.line);
     char line[80];
     int p = 0;
@@ -1210,8 +1687,13 @@ static void draw(int win)
         }
     }
     line[p] = '\0';
+#ifdef GCODE_IDE
+    ud_text(win, 10, ud_baseline(ch - STATUS_H, STATUS_H, 11), line,
+            lk.on_accent, asking ? UD_BOLD : UD_SANS, 11);
+#else
     ud_text(win, 10, ud_baseline(ch - STATUS_H, STATUS_H, 11), line,
             asking ? lk.accent : lk.text, asking ? UD_BOLD : UD_SANS, 11);
+#endif
 
     /* Last, over everything: the panel that opens a file. A list one
        can scroll the text under is not a question. */
@@ -1222,13 +1704,15 @@ static void draw(int win)
 }
 
 #ifdef GCODE_IDE
+static void edit_key(char c);
+
 static void ide_click(int x, int y)
 {
     if (asking)
         return;
     if (y < IDE_HEADER_H) {
         if (x >= cw - 92) {
-            ide_start_terminal();
+            ide_terminal_toggle();
         } else if (x >= cw - 160) {
             if (fname[0])
                 save_to(fname);
@@ -1247,8 +1731,23 @@ static void ide_click(int x, int y)
         return;
     }
 
+    if (x < IDE_ACTIVITY_W) {
+        terminal_focus = 0;
+        if (y >= IDE_HEADER_H + 34 && y < IDE_HEADER_H + 70)
+            edit_key(KEY_OPEN);
+        return;
+    }
+
+    if (terminal_open && x >= IDE_SIDE_W &&
+        y >= ide_terminal_top() && y < ch - STATUS_H) {
+        terminal_focus = 1;
+        return;
+    }
+    terminal_focus = 0;
+
     if (y < IDE_EDIT_TOP) {
-        if (y >= IDE_HEADER_H && x >= IDE_SIDE_W) {
+        if (y >= IDE_HEADER_H && y < IDE_HEADER_H + IDE_TAB_H &&
+            x >= IDE_SIDE_W) {
             int index = (x - IDE_SIDE_W) / 112;
             ide_activate_tab(index);
         }
@@ -1334,7 +1833,12 @@ static void edit_key(char c)
         return;
     case KEY_OPEN:
 #ifdef GCODE_IDE
-        ecopy(note, "Choose a file from Project", sizeof(note) - 1);
+        reread_files();
+        ug_pick_open(&picker,
+                     ulocale_language_polish()
+                         ? "Szybkie otwieranie (Ctrl+O)"
+                         : "Quick Open (Ctrl+O)",
+                     file_row, (void *)0, nfiles, picked, sizeof(picked));
         return;
 #else
         /* A list of what is there, instead of a name typed from
@@ -1523,8 +2027,23 @@ void _start(int argc, char **argv)
                 int what = ug_pick_event(&editor_ui, &picker, &ev);
                 if (what == UG_CLOSED)
                     sys_exit(0);
-                if (what == UG_PRESSED && picker.answer && picked[0])
+                if (what == UG_PRESSED && picker.answer && picked[0]) {
+#ifdef GCODE_IDE
+                    int item = -1;
+                    for (int i = 0; i < nfiles; i++) {
+                        if (text_equal(names[i], picked)) {
+                            item = i;
+                            break;
+                        }
+                    }
+                    if (item >= 0)
+                        ide_open_item(item);
+                    else
+                        ide_open_file(picked);
+#else
                     load_from(picked);
+#endif
+                }
                 drew = 0;
                 draw(win);
                 continue;
@@ -1550,7 +2069,20 @@ void _start(int argc, char **argv)
                 ch = ev.y;
             } else if (ev.type == WEV_SCROLL) {
 #ifdef GCODE_IDE
-                if (ev.x < IDE_SIDE_W) {
+                if (terminal_open && ev.x >= IDE_SIDE_W &&
+                    ev.y >= ide_terminal_top() &&
+                    ev.y < ch - STATUS_H) {
+                    int visible = (ide_terminal_height() -
+                                   IDE_TERM_HEADER_H) / ROW_H;
+                    int max_scroll = terminal_line_n - visible;
+                    if (max_scroll < 0)
+                        max_scroll = 0;
+                    terminal_scroll += ev.val * 3;
+                    if (terminal_scroll > max_scroll)
+                        terminal_scroll = max_scroll;
+                    if (terminal_scroll < 0)
+                        terminal_scroll = 0;
+                } else if (ev.x < IDE_SIDE_W) {
                     project_top -= ev.val * 3;
                     int visible = (ch - IDE_EDIT_TOP - STATUS_H) /
                                   IDE_LIST_ROW_H;
@@ -1578,11 +2110,20 @@ void _start(int argc, char **argv)
 #endif
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
-                follow_caret = 1;     /* a key means "where I am" again */
                 if (asking)
                     ask_key(c);
-                else
+                else {
+#ifdef GCODE_IDE
+                    if (terminal_open && terminal_focus) {
+                        ide_term_key(c);
+                    } else {
+#endif
+                    follow_caret = 1; /* a key means "where I am" again */
                     edit_key(c);
+#ifdef GCODE_IDE
+                    }
+#endif
+                }
             } else if (ev.type == WEV_CLICK) {
 #ifdef GCODE_IDE
                 ide_click(ev.x, ev.y);

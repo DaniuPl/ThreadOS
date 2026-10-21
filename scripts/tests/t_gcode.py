@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -19,11 +20,16 @@ def ed(name):
 
 CODE_W, CODE_H = ed("IDE_W0"), ed("IDE_H0")
 SIDE_W, HEADER_H = ed("IDE_SIDE_W"), ed("IDE_HEADER_H")
+ACTIVITY_W, TAB_H = ed("IDE_ACTIVITY_W"), ed("IDE_TAB_H")
 EDIT_TOP, ROW_H = ed("IDE_EDIT_TOP"), ed("ROW_H")
 LIST_ROW_H, TEXT_X = ed("IDE_LIST_ROW_H"), ed("IDE_TEXT_X")
 PAD, STATUS_H = ed("PAD"), ed("STATUS_H")
 TEXT_BASE = ed("TEXT_BASE")
 CELL, TEXT_PX = ed("CELL"), ed("TEXT_PX")
+TERM_H = ed("IDE_TERM_H")
+TERM_HEADER_H = ed("IDE_TERM_HEADER_H")
+TERM_TOP = CODE_H - STATUS_H - TERM_H
+TERM_ROWS = (TERM_H - TERM_HEADER_H) // ROW_H
 WX, WY = cascade(0, CODE_W + 2, CODE_H + TITLE_H + 2)
 CX, CY = WX + 1, WY + CONTENT_DY
 
@@ -46,7 +52,8 @@ def project_rows(q):
     for row in range(visible):
         top = EDIT_TOP + row * LIST_ROW_H
         baseline = CY + ui_font_baseline_in(10, top, LIST_ROW_H)
-        rows.append(q.read_ui(CX + 10, baseline, SIDE_W - 18, px=10,
+        rows.append(q.read_ui(CX + ACTIVITY_W + 27, baseline,
+                              SIDE_W - ACTIVITY_W - 35, px=10,
                               fg=theme("dark")["app_text"], screen=shot))
     return rows
 
@@ -59,19 +66,49 @@ def code_row(q, row):
         screen=(w, h, at))[0]
 
 
+def terminal_rows(q):
+    return q.read_cells(
+        CX + SIDE_W + 10, CY + TERM_TOP + TERM_HEADER_H,
+        (CODE_W - SIDE_W - 20) // CELL, TERM_ROWS,
+        cell=CELL, row_h=ROW_H, base=TEXT_BASE, px=TEXT_PX)
+
+
+def visible_project_path(q):
+    return q.read_ui(CX + ACTIVITY_W + 10, CY + EDIT_TOP - 4,
+                     width=SIDE_W - ACTIVITY_W - 18, px=9,
+                     face="mono").strip()
+
+
 def wait_code(q, timeout=12):
+    global WX, WY, CX, CY
+    width, height = q.size()
+    frame_w, frame_h = CODE_W + 2, CODE_H + TITLE_H + 2
+    bottom = work_bottom(h=height)
+    positions = []
+    for slot in range(8):
+        wx, wy = cascade(slot, frame_w, frame_h, w=width, h=height)
+        if wx + frame_w > width:
+            wx = max(0, width - frame_w)
+        if wy + frame_h > bottom:
+            wy = max(0, bottom - frame_h)
+        if (wx, wy) not in positions:
+            positions.append((wx, wy))
+
     deadline = time.time() + timeout
-    title = ""
     while time.time() < deadline:
-        title = q.window_title(WX, WY, CODE_W + 2)
-        if title == "Code":
-            return True
+        for wx, wy in positions:
+            title = q.window_title(wx, wy, CODE_W + 2)
+            if title in ("Code", "Kod"):
+                WX, WY = wx, wy
+                CX, CY = WX + 1, WY + CONTENT_DY
+                return True
         time.sleep(0.25)
-    return title == "Code"
+    return False
 
 
 def click_project_row(q, row):
-    q.mouse_goto(CX + 18, CY + EDIT_TOP + row * LIST_ROW_H + 8)
+    q.mouse_goto(CX + ACTIVITY_W + 18,
+                 CY + EDIT_TOP + row * LIST_ROW_H + 8)
     time.sleep(0.3)
     q.mouse_click()
     time.sleep(1)
@@ -99,12 +136,20 @@ def open_code(q, is64=False):
           "int main() {" in text)
 
     w, h, at = q.screen_raw()
-    accent = theme("dark")["accent"]
-    highlighted = sum(
-        1 for y in range(CY + EDIT_TOP, CY + EDIT_TOP + ROW_H)
-        for x in range(CX + TEXT_X, CX + TEXT_X + 3 * CELL)
-        if near(at(x, y), accent, 4))
-    check("C keywords receive syntax highlighting", highlighted > 2)
+
+    def ink(x0, x1):
+        pixels = Counter(at(x, y)
+                         for y in range(CY + EDIT_TOP, CY + EDIT_TOP + ROW_H)
+                         for x in range(x0, x1))
+        background = pixels.most_common(1)[0][0]
+        colors = [(count, color) for color, count in pixels.items()
+                  if color != background]
+        return max(colors)[1] if colors else None
+
+    keyword = ink(CX + TEXT_X, CX + TEXT_X + 3 * CELL)
+    plain = ink(CX + TEXT_X + 4 * CELL, CX + TEXT_X + 8 * CELL)
+    check("C keywords receive syntax highlighting",
+          keyword is not None and plain is not None and keyword != plain)
 
     click_project_row(q, util_row)
     check("opening another file adds a tab and changes the source",
@@ -117,7 +162,25 @@ def open_code(q, is64=False):
     check("the first tab switches back to its saved document",
           "int main() {" in code_row(q, 0))
 
+    q.sendkey("ctrl-o")
+    time.sleep(1)
+    q.type_line("util", enter=False)
+    time.sleep(0.5)
+    title, quick_rows = q.ug_pick_read(CX, CY, CODE_H)
+    check("Quick Open filters project files as you type",
+          "Quick Open" in title and
+          any("util.h" in row for row in quick_rows) and
+          not any("main.c" in row for row in quick_rows))
+    q.sendkey("ret")
+    time.sleep(1)
+    check("Enter opens the first matching project file",
+          "#define VALUE 7" in code_row(q, 0))
+
     if not is64:
+        q.mouse_goto(CX + SIDE_W + 55, CY + HEADER_H + 10)
+        time.sleep(0.3)
+        q.mouse_click()
+        time.sleep(0.5)
         q.sendkey("end")
         q.sendkey("ret")
         q.type_line("return 0;", enter=False)
@@ -129,17 +192,62 @@ def open_code(q, is64=False):
         shot = q.screen_raw()
         status_y = CY + ui_font_baseline_in(11, CODE_H - STATUS_H, STATUS_H)
         status = q.read_ui(CX + 10, status_y, CODE_W - 20, px=11,
-                           fg=theme("dark")["app_text"], screen=shot)
+                           screen=shot)
         check("Ctrl+S saves the edited source", "saved" in status)
 
+    windows_before = q.dock_windows()
     q.mouse_goto(CX + CODE_W - 50, CY + 15)
     time.sleep(0.3)
     q.mouse_click()
     deadline = time.time() + 10
-    while time.time() < deadline and q.dock_windows() < 2:
+    rows = terminal_rows(q)
+    while time.time() < deadline and not any("ush" in row for row in rows):
         time.sleep(0.25)
-    check("Terminal opens alongside the project editor",
-          q.dock_windows() >= 2)
+        rows = terminal_rows(q)
+    check("Terminal opens inside the project editor",
+          q.dock_windows() == windows_before and
+          any("ush" in row for row in rows))
+
+    input_y = TERM_TOP + TERM_H - ROW_H // 2
+    expected_path = visible_project_path(q)
+    q.mouse_goto(CX + SIDE_W + 100, CY + input_y)
+    time.sleep(0.3)
+    q.mouse_click()
+    # ush64 has no pwd builtin. uls64 lists the working directory, but its
+    # output is taller than the panel, so only the tail stays visible: the
+    # project-only files and the exit line prove where it ran.
+    q.type_line("uls64" if is64 else "pwd")
+    deadline = time.time() + 10
+    rows = terminal_rows(q)
+
+    def ran_in_project(rows):
+        if is64:
+            text = "\n".join(rows)
+            return (".code-term.out" in text and "uls64: entries" in text and
+                    "ush64: done, code 0" in text)
+        return (any(row.startswith("ush:") and row.rstrip().endswith("pwd")
+                    for row in rows) and
+                any(row.strip().startswith(expected_path) for row in rows))
+
+    while time.time() < deadline and not ran_in_project(rows):
+        time.sleep(0.25)
+        rows = terminal_rows(q)
+    check("the embedded shell accepts input and runs in the project directory",
+          expected_path.startswith("/") and len(expected_path) >= 4 and
+          ran_in_project(rows))
+
+    q.mouse_goto(CX + SIDE_W + 80, CY + EDIT_TOP + 10)
+    time.sleep(0.3)
+    q.mouse_click()
+    q.sendkey("ctrl-o")
+    time.sleep(0.5)
+    q.type_line("code-term", enter=False)
+    time.sleep(0.5)
+    title, quick_rows = q.ug_pick_read(CX, CY, CODE_H)
+    check("terminal capture files stay hidden from Quick Open",
+          "Quick Open" in title and
+          not any("code-term" in row for row in quick_rows))
+    q.sendkey("esc")
 
 
 def test32():

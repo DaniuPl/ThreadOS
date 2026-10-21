@@ -15,11 +15,10 @@
  * decides what a click landed on, moves the keyboard focus between
  * them and reports what happened as "the third one was pressed".
  *
- * What it deliberately is not: it does not own the loop, it does not
- * keep a program's data, and it does not lay anything out by itself.
- * Positions are given by the program, in pixels, because that is what
- * every window here already knows and because a layout engine would
- * be a second framework on top of the first.
+ * It does not own the loop or keep a program's data. Controls accept
+ * pixel rectangles for compatibility; ug_layout and ug_workspace_layout
+ * can compute those rectangles so applications do not repeat layout
+ * arithmetic in their draw and event paths.
  *
  * It draws the way the desktop draws (udraw.h): TrueType, round
  * corners, the theme's colours - asked for every time it draws, so a
@@ -54,6 +53,7 @@
 #define UG_FIELD  4
 #define UG_LIST   5
 #define UG_LINE   6
+#define UG_TABS   7
 
 /* What happened */
 #define UG_NOTHING 0
@@ -88,6 +88,237 @@ struct ug {
     int focus;                   /* which thing has the keyboard, -1 = none */
     int top;                     /* the first visible row of a list */
 };
+
+/* --- rectangles and reusable layout -------------------------------- */
+
+#define UG_HORIZONTAL 0
+#define UG_VERTICAL   1
+#define UG_LAYOUT_MAX 16
+
+struct ug_rect {
+    int x, y, w, h;
+};
+
+struct ug_layout_slot {
+    struct ug_rect rect;
+    int size;
+    int weight;
+    int minimum;
+};
+
+struct ug_layout {
+    struct ug_rect bounds;
+    struct ug_layout_slot slots[UG_LAYOUT_MAX];
+    int axis, padding, gap, n;
+};
+
+static inline int ug_layout_start(struct ug_layout *l, struct ug_rect bounds,
+                                  int axis, int padding, int gap)
+{
+    if (!l || (axis != UG_HORIZONTAL && axis != UG_VERTICAL) ||
+        bounds.w < 0 || bounds.h < 0 || padding < 0 || gap < 0)
+        return -1;
+    l->bounds = bounds;
+    l->axis = axis;
+    l->padding = padding;
+    l->gap = gap;
+    l->n = 0;
+    return 0;
+}
+
+static inline int ug_layout_push(struct ug_layout *l, int size, int weight,
+                                 int minimum)
+{
+    if (!l || l->n >= UG_LAYOUT_MAX || size < 0 || weight < 0 ||
+        minimum < 0 || (weight && size))
+        return -1;
+    int id = l->n++;
+    l->slots[id].size = size;
+    l->slots[id].weight = weight;
+    l->slots[id].minimum = minimum;
+    l->slots[id].rect = (struct ug_rect){ 0, 0, 0, 0 };
+    return id;
+}
+
+static inline int ug_layout_fixed(struct ug_layout *l, int size)
+{
+    return ug_layout_push(l, size, 0, 0);
+}
+
+static inline int ug_layout_flex(struct ug_layout *l, int weight, int minimum)
+{
+    if (weight <= 0)
+        return -1;
+    return ug_layout_push(l, 0, weight, minimum);
+}
+
+static inline int ug_layout_run(struct ug_layout *l)
+{
+    if (!l)
+        return -1;
+    int main = l->axis == UG_HORIZONTAL ? l->bounds.w : l->bounds.h;
+    int cross = l->axis == UG_HORIZONTAL ? l->bounds.h : l->bounds.w;
+    if (l->n < 1 || l->padding > main / 2 || l->padding > cross / 2)
+        return -1;
+
+    int available = main - 2 * l->padding;
+    if (l->n > 1) {
+        if (l->gap > available / (l->n - 1))
+            return -1;
+        available -= l->gap * (l->n - 1);
+    }
+    int cross_size = cross - 2 * l->padding;
+    int fixed = 0, minimum = 0, total_weight = 0, last_flex = -1;
+    for (int i = 0; i < l->n; i++) {
+        struct ug_layout_slot *s = &l->slots[i];
+        if (!s->weight) {
+            if (s->size > available - fixed)
+                return -1;
+            fixed += s->size;
+        } else {
+            if (s->minimum > available - fixed - minimum ||
+                s->weight > 1000000 - total_weight)
+                return -1;
+            minimum += s->minimum;
+            total_weight += s->weight;
+            last_flex = i;
+        }
+    }
+    if (fixed + minimum > available)
+        return -1;
+    int extra = available - fixed - minimum;
+    int assigned = 0, cursor = l->padding;
+    for (int i = 0; i < l->n; i++) {
+        struct ug_layout_slot *s = &l->slots[i];
+        int size = s->size;
+        if (s->weight) {
+            int share = i == last_flex
+                            ? extra - assigned
+                            : (int)(((uint64_t)(unsigned int)extra *
+                                     (unsigned int)s->weight) /
+                                    (unsigned int)total_weight);
+            assigned += share;
+            size = s->minimum + share;
+        }
+        if (l->axis == UG_HORIZONTAL) {
+            s->rect = (struct ug_rect){
+                l->bounds.x + cursor, l->bounds.y + l->padding,
+                size, cross_size
+            };
+        } else {
+            s->rect = (struct ug_rect){
+                l->bounds.x + l->padding, l->bounds.y + cursor,
+                cross_size, size
+            };
+        }
+        cursor += size + l->gap;
+    }
+    return 0;
+}
+
+static inline int ug_layout_rect(const struct ug_layout *l, int id,
+                                 struct ug_rect *rect)
+{
+    if (!l || !rect || id < 0 || id >= l->n)
+        return -1;
+    *rect = l->slots[id].rect;
+    return 0;
+}
+
+/* A reusable editor-style frame; content areas are returned, not owned. */
+struct ug_workspace {
+    struct ug_rect toolbar, activity, sidebar, tabs, breadcrumbs;
+    struct ug_rect editor, panel, status;
+};
+
+static inline int ug_workspace_layout(struct ug_workspace *w, int width,
+                                      int height, int toolbar_h,
+                                      int activity_w, int sidebar_w,
+                                      int tabs_h, int breadcrumb_h,
+                                      int panel_h, int status_h)
+{
+    if (!w || width < 0 || height < 0 || toolbar_h < 0 || activity_w < 0 ||
+        sidebar_w < 0 || tabs_h < 0 || breadcrumb_h < 0 || panel_h < 0 ||
+        status_h < 0)
+        return -1;
+
+    struct ug_layout vertical, columns, content;
+    struct ug_rect full = { 0, 0, width, height }, work, center;
+    int toolbar, body, status, activity, sidebar, editor;
+    int tabs, breadcrumbs, panel;
+
+    if (ug_layout_start(&vertical, full, UG_VERTICAL, 0, 0) < 0)
+        return -1;
+    toolbar = ug_layout_fixed(&vertical, toolbar_h);
+    body = ug_layout_flex(&vertical, 1, 0);
+    status = ug_layout_fixed(&vertical, status_h);
+    if (toolbar < 0 || body < 0 || status < 0 ||
+        ug_layout_run(&vertical) < 0 ||
+        ug_layout_rect(&vertical, toolbar, &w->toolbar) < 0 ||
+        ug_layout_rect(&vertical, body, &work) < 0 ||
+        ug_layout_rect(&vertical, status, &w->status) < 0)
+        return -1;
+
+    if (ug_layout_start(&columns, work, UG_HORIZONTAL, 0, 0) < 0)
+        return -1;
+    activity = ug_layout_fixed(&columns, activity_w);
+    sidebar = ug_layout_fixed(&columns, sidebar_w);
+    editor = ug_layout_flex(&columns, 1, 1);
+    if (activity < 0 || sidebar < 0 || editor < 0 ||
+        ug_layout_run(&columns) < 0 ||
+        ug_layout_rect(&columns, activity, &w->activity) < 0 ||
+        ug_layout_rect(&columns, sidebar, &w->sidebar) < 0 ||
+        ug_layout_rect(&columns, editor, &center) < 0)
+        return -1;
+
+    if (ug_layout_start(&content, center, UG_VERTICAL, 0, 0) < 0)
+        return -1;
+    tabs = ug_layout_fixed(&content, tabs_h);
+    breadcrumbs = ug_layout_fixed(&content, breadcrumb_h);
+    editor = ug_layout_flex(&content, 1, 1);
+    panel = ug_layout_fixed(&content, panel_h);
+    if (tabs < 0 || breadcrumbs < 0 || editor < 0 || panel < 0 ||
+        ug_layout_run(&content) < 0 ||
+        ug_layout_rect(&content, tabs, &w->tabs) < 0 ||
+        ug_layout_rect(&content, breadcrumbs, &w->breadcrumbs) < 0 ||
+        ug_layout_rect(&content, editor, &w->editor) < 0 ||
+        ug_layout_rect(&content, panel, &w->panel) < 0)
+        return -1;
+    return 0;
+}
+
+static inline void ug_fill_rect(int win, struct ug_rect rect, uint32_t colour)
+{
+    if (rect.w > 0 && rect.h > 0)
+        ud_fill(win, rect.x, rect.y, rect.w, rect.h, colour);
+}
+
+static inline void ug_workspace_draw(int win, const struct ug_workspace *w,
+                                     const struct ud_look *look)
+{
+    if (!w || !look)
+        return;
+    ug_fill_rect(win, w->toolbar, look->bg);
+    ug_fill_rect(win, w->activity, look->row);
+    ug_fill_rect(win, w->sidebar, look->bg);
+    ug_fill_rect(win, w->tabs, look->bg);
+    ug_fill_rect(win, w->breadcrumbs, look->field);
+    ug_fill_rect(win, w->editor, look->field);
+    ug_fill_rect(win, w->panel, look->field);
+    ug_fill_rect(win, w->status, look->accent);
+    if (w->sidebar.w > 0)
+        ud_fill(win, w->sidebar.x + w->sidebar.w - 1, w->sidebar.y, 1,
+                w->sidebar.h, look->line);
+    if (w->tabs.h > 0)
+        ud_fill(win, w->tabs.x, w->tabs.y + w->tabs.h - 1,
+                w->tabs.w, 1, look->line);
+    if (w->breadcrumbs.h > 0)
+        ud_fill(win, w->breadcrumbs.x,
+                w->breadcrumbs.y + w->breadcrumbs.h - 1,
+                w->breadcrumbs.w, 1, look->line);
+    if (w->panel.h > 0)
+        ud_fill(win, w->panel.x, w->panel.y, w->panel.w, 1, look->line);
+}
 
 /* --- putting a window together -------------------------------------- */
 
@@ -190,6 +421,22 @@ static inline int ug_list(struct ug *u, int x, int y, int w, int h,
         u->it[i].ctx = ctx;
         u->it[i].max = rows;
         u->it[i].value = -1;
+    }
+    return i;
+}
+
+static inline int ug_tabs(struct ug *u, int x, int y, int w, int h,
+                          const char *(*row)(void *ctx, int i), void *ctx,
+                          int count, int active)
+{
+    if (count < 0 || active < -1 || active >= count)
+        return -1;
+    int i = ug_add(u, UG_TABS, x, y, w, h);
+    if (i >= 0) {
+        u->it[i].row = row;
+        u->it[i].ctx = ctx;
+        u->it[i].max = count;
+        u->it[i].value = active;
     }
     return i;
 }
@@ -398,17 +645,53 @@ static inline void ug_draw_one(struct ug *u, int i)
         break;
     }
 
+    case UG_TABS: {
+        ud_fill(win, t->x, t->y, t->w, t->h, l->bg);
+        if (t->max <= 0 || t->w <= 0 || t->h <= 0)
+            break;
+        for (int tab = 0; tab < t->max; tab++) {
+            int left = t->x + t->w * tab / t->max;
+            int right = t->x + t->w * (tab + 1) / t->max;
+            int width = right - left;
+            if (width <= 0)
+                continue;
+            const char *label = t->row ? t->row(t->ctx, tab) : "";
+            if (tab == t->value) {
+                ud_fill(win, left, t->y, width, t->h, l->field);
+                ud_fill(win, left, t->y + t->h - 2, width, 2, l->accent);
+            }
+            int text_width = ud_width(label, UD_SANS, 10);
+            int text_x = left + (width - text_width) / 2;
+            if (text_x < left + 4)
+                text_x = left + 4;
+            ud_text(win, text_x, ud_baseline(t->y, t->h, 10), label,
+                    tab == t->value ? l->text : l->dim, UD_SANS, 10);
+        }
+        break;
+    }
+
     default:
         break;
     }
+}
+
+static inline void ug_draw_controls(struct ug *u)
+{
+    for (int i = 0; i < u->n; i++)
+        ug_draw_one(u, i);
+}
+
+static inline void ug_draw_items(struct ug *u)
+{
+    ud_look(&u->look);
+    ug_draw_controls(u);
 }
 
 static inline void ug_draw(struct ug *u)
 {
     ud_look(&u->look);
     ud_fill(u->win, 0, 0, u->w, u->h, u->look.bg);
-    for (int i = 0; i < u->n; i++)
-        ug_draw_one(u, i);
+    ug_draw_controls(u);
 }
 
 /* --- what a click landed on ------------------------------------------ */
@@ -494,6 +777,21 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             t->value = row;
             return UG_CHANGED;
         }
+        case UG_TABS: {
+            struct ug_item *t = &u->it[id];
+            if (t->max <= 0 || t->w <= 0)
+                return UG_NOTHING;
+            u->focus = id;
+            int tab = (ev->x - t->x) * t->max / t->w;
+            if (tab < 0)
+                tab = 0;
+            if (tab >= t->max)
+                tab = t->max - 1;
+            if (tab == t->value)
+                return UG_NOTHING;
+            t->value = tab;
+            return UG_CHANGED;
+        }
         default:
             return UG_NOTHING;
         }
@@ -545,6 +843,17 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
                 u->top = t->value;
             if (t->value >= u->top + rows)
                 u->top = t->value - rows + 1;
+            return UG_CHANGED;
+        }
+        if (t->kind == UG_TABS) {
+            int next = t->value;
+            if (c == KEY_LEFT && next > 0)
+                next--;
+            else if (c == KEY_RIGHT && next + 1 < t->max)
+                next++;
+            else
+                return UG_NOTHING;
+            t->value = next;
             return UG_CHANGED;
         }
         if (t->kind != UG_FIELD || !t->buf)
@@ -746,10 +1055,9 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
  * in a shell, because a shell at least completes names.
  *
  * So: a list of what is there, a line to type in for the name that is
- * not there yet, and two buttons. Clicking a row fills the line, so
- * whichever way one arrives at a name, the same line is opened - and
- * typing goes on working exactly as it did, which is why the old way
- * of using it still works.
+ * not there yet, and two buttons. Typing narrows the list; an unmatched
+ * name can still be opened directly. Clicking a row fills the line, so
+ * whichever way one arrives at a name, the same line is opened.
  */
 #define UG_PICK_ROWS 7
 #define UG_PICK_H   (30 + UG_PICK_ROWS * UG_ROW + 8 + 22 + 10 + UG_BTN_H + 12)
@@ -764,6 +1072,7 @@ struct ug_pick {
     int top;                     /* the first one shown */
     char *buf;                   /* the name, typed or clicked */
     int buflen;
+    char query[64];
     const char *yes, *no;
     int answer;                  /* 1 = open it, 0 = never mind, -1 = asking */
 };
@@ -781,11 +1090,79 @@ static inline void ug_pick_open(struct ug_pick *p, const char *title,
     p->top = 0;
     p->buf = buf;
     p->buflen = buflen;
+    p->query[0] = '\0';
     p->yes = "Open";
     p->no = "Cancel";
     p->answer = -1;
     if (buf && buflen > 0)
         buf[0] = '\0';
+}
+
+static inline int ug_pick_matches(const struct ug_pick *p, int index)
+{
+    if (!p->query[0])
+        return 1;
+    const char *s = p->row ? p->row(p->ctx, index) : "";
+    for (int i = 0; s && s[i]; i++) {
+        int j = 0;
+        while (p->query[j] && s[i + j]) {
+            unsigned char a = (unsigned char)p->query[j];
+            unsigned char b = (unsigned char)s[i + j];
+            if (a >= 'A' && a <= 'Z')
+                a = (unsigned char)(a + ('a' - 'A'));
+            if (b >= 'A' && b <= 'Z')
+                b = (unsigned char)(b + ('a' - 'A'));
+            if (a != b)
+                break;
+            j++;
+        }
+        if (!p->query[j])
+            return 1;
+    }
+    return 0;
+}
+
+static inline int ug_pick_visible_count(const struct ug_pick *p)
+{
+    int count = 0;
+    for (int i = 0; i < p->rows; i++)
+        if (ug_pick_matches(p, i))
+            count++;
+    return count;
+}
+
+static inline int ug_pick_visible_at(const struct ug_pick *p, int visible)
+{
+    if (visible < 0)
+        return -1;
+    for (int i = 0; i < p->rows; i++) {
+        if (!ug_pick_matches(p, i))
+            continue;
+        if (!visible--)
+            return i;
+    }
+    return -1;
+}
+
+static inline int ug_pick_visible_pos(const struct ug_pick *p, int index)
+{
+    int visible = 0;
+    for (int i = 0; i < p->rows; i++) {
+        if (!ug_pick_matches(p, i))
+            continue;
+        if (i == index)
+            return visible;
+        visible++;
+    }
+    return -1;
+}
+
+static inline void ug_pick_show(struct ug_pick *p, int visible)
+{
+    if (visible < p->top)
+        p->top = visible;
+    else if (visible >= p->top + UG_PICK_ROWS)
+        p->top = visible - UG_PICK_ROWS + 1;
 }
 
 static inline int ug_pick_y(struct ug *u)
@@ -810,14 +1187,22 @@ static inline void ug_pick_draw(struct ug *u, struct ug_pick *p)
     int y = ug_pick_y(u);
     int listy = ug_pick_list_y(u);
     int by = y + UG_PICK_H - UG_BTN_H - 12;
+    int visible = ug_pick_visible_count(p);
+    int max_top = visible - UG_PICK_ROWS;
+    if (max_top < 0)
+        max_top = 0;
+    if (p->top > max_top)
+        p->top = max_top;
 
     ug_panel(u, y, UG_PICK_H);
     const struct ud_look *l = &u->look;
     ud_text(u->win, x + 12, y + 20, p->title, l->text, UD_BOLD, UD_PX);
     ud_round(u->win, x + 8, listy, w - 16, UG_PICK_ROWS * UG_ROW, UG_R, l->bg);
 
-    for (int r = 0; r < UG_PICK_ROWS && p->top + r < p->rows; r++) {
-        int index = p->top + r;
+    for (int r = 0; r < UG_PICK_ROWS; r++) {
+        int index = ug_pick_visible_at(p, p->top + r);
+        if (index < 0)
+            break;
         const char *s = p->row ? p->row(p->ctx, index) : "";
         int ry = listy + r * UG_ROW;
 
@@ -868,9 +1253,10 @@ static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
         return UG_CLOSED;
     }
     if (ev->type == WEV_SCROLL) {
+        int visible = ug_pick_visible_count(p);
         p->top -= ev->val;
-        if (p->top > p->rows - UG_PICK_ROWS)
-            p->top = p->rows - UG_PICK_ROWS;
+        if (p->top > visible - UG_PICK_ROWS)
+            p->top = visible - UG_PICK_ROWS;
         if (p->top < 0)
             p->top = 0;
         return UG_CHANGED;
@@ -891,7 +1277,10 @@ static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
         }
         if (ev->y >= listy && ev->y < listy + UG_PICK_ROWS * UG_ROW &&
             ev->x >= x && ev->x < x + w) {
-            ug_pick_take(p, p->top + (ev->y - listy) / UG_ROW);
+            int index = ug_pick_visible_at(
+                p, p->top + (ev->y - listy) / UG_ROW);
+            if (index >= 0)
+                ug_pick_take(p, index);
             return UG_CHANGED;
         }
         return UG_NOTHING;
@@ -905,37 +1294,59 @@ static inline int ug_pick_event(struct ug *u, struct ug_pick *p,
             return UG_PRESSED;
         }
         if (c == '\n' || c == '\r') {
+            if (p->chosen < 0 && p->query[0]) {
+                int index = ug_pick_visible_at(p, 0);
+                if (index >= 0)
+                    ug_pick_take(p, index);
+            }
             p->on = 0;
             p->answer = 1;
             return UG_PRESSED;
         }
-        if (c == KEY_DOWN) {
-            ug_pick_take(p, p->chosen + 1 < p->rows ? p->chosen + 1 : 0);
-            if (p->chosen >= p->top + UG_PICK_ROWS)
-                p->top = p->chosen - UG_PICK_ROWS + 1;
-            if (p->chosen < p->top)
-                p->top = p->chosen;
-            return UG_CHANGED;
-        }
-        if (c == KEY_UP) {
-            ug_pick_take(p, p->chosen > 0 ? p->chosen - 1 : 0);
-            if (p->chosen < p->top)
-                p->top = p->chosen;
+        if (c == KEY_DOWN || c == KEY_UP) {
+            int count = ug_pick_visible_count(p);
+            int pos = ug_pick_visible_pos(p, p->chosen);
+            if (!count)
+                return UG_NOTHING;
+            if (c == KEY_DOWN)
+                pos = pos < 0 || pos + 1 == count ? 0 : pos + 1;
+            else
+                pos = pos <= 0 ? 0 : pos - 1;
+            int index = ug_pick_visible_at(p, pos);
+            if (index >= 0) {
+                ug_pick_take(p, index);
+                ug_pick_show(p, pos);
+            }
             return UG_CHANGED;
         }
         if (!p->buf)
             return UG_NOTHING;
 
         int len = ug_len(p->buf);
+        if (p->chosen >= 0) {
+            len = 0;
+            while (p->buf[len] && len < (int)sizeof(p->query) - 1) {
+                p->query[len] = p->buf[len];
+                len++;
+            }
+            p->query[len] = '\0';
+            p->chosen = -1;
+        }
         if (c == '\b') {
             ug_rub(p->buf);
+            ug_rub(p->query);
             p->chosen = -1;
+            p->top = 0;
             return UG_TYPED;
         }
-        if (ug_typed(c) && len < p->buflen - 1) {
+        if (ug_typed(c) && len < p->buflen - 1 &&
+            len < (int)sizeof(p->query) - 1) {
             p->buf[len] = c;
             p->buf[len + 1] = '\0';
+            p->query[len] = c;
+            p->query[len + 1] = '\0';
             p->chosen = -1;
+            p->top = 0;
             return UG_TYPED;
         }
         return UG_NOTHING;

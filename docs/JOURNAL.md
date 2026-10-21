@@ -5817,3 +5817,38 @@ works and is checked by `make test`.
       split receive/transmit queues. Checksum and segmentation offloads stay
       disabled. The `virtio` QEMU test verifies DHCP and ICMP in both kernel
       modes; modern-only VirtIO PCI devices are not supported yet.
+
+- [ ] **ThreadCode Quick Open.**
+      Ctrl+O opens a project picker that filters filenames as text is typed.
+      Enter opens the first match, while an unmatched name can still be
+      entered directly. `t_gcode` covers filtering and opening a matching
+      project file in both kernel modes.
+
+- [ ] **ThreadCode terminal panel.**
+      The Code window has a TERMINAL panel that runs a shell in the project
+      directory (`sh` on the 32-bit kernel, `ush64` on the 64-bit one). The
+      process launch and incremental output reading that `gterm` already
+      had now live in `user/uterm.h`, so both programs share them. The
+      panel keeps its output in hidden `.code-term.*` files. `t_gcode` types
+      a command into the panel and checks that it ran in the project
+      directory; `ush64` has no `pwd`, so the 64-bit run uses `uls64`.
+      `t_gterm` now creates its Tab-completion files from inside the
+      terminal, because keys typed with no window focused no longer reach
+      the kernel shell once a profile is logged in.
+
+- [ ] **ThreadCode in a VS Code layout.**
+      The chrome follows the VS Code layout: an activity rail, an EXPLORER
+      sidebar with file and folder icons, a tab strip, a breadcrumb bar, a
+      status bar, and a bottom panel with PROBLEMS / OUTPUT / DEBUG CONSOLE
+      / TERMINAL tabs. The terminal prints inline, with the prompt line
+      carrying the typed input. `t_gcode` reads the geometry from the
+      `IDE_*` defines in `user/gedit.c`.
+
+- [ ] **Layout and tab primitives in the GUI toolkit.**
+      `user/ugui.h` gained a fixed/flex layout (`ug_layout_*`), a workspace
+      splitter (`ug_workspace_layout`) that produces the toolbar, activity
+      rail, sidebar, tabs, breadcrumbs, editor, panel and status rectangles,
+      and a `UG_TABS` widget with click and Left/Right key selection. The
+      existing widget API is unchanged. The `udtest` program draws all of
+      it, and `t_udraw` checks the rectangles, the tab underline, clicking
+      and arrow keys on both kernels. ThreadCode is the next consumer.
