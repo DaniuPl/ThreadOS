@@ -1,12 +1,17 @@
 /* httpget - an HTTP/HTTPS client in ring 3
  *
- * Usage: run httpget [-k] [-p <file>] <address> [port] [path] [file]
+ * Usage: run httpget [-k] [-p <file>] [-c <jar>] [-o <file>] <address>
+ *                    [port] [path] [file]
  *   run httpget 10.0.2.2 8000 /                - to the console
  *   run httpget https://example.com / str.htm  - over TLS 1.3, to a file
  *   run httpget -p form.txt 10.0.2.2 8000 /f   - POSTs what form.txt holds
  *
  * The body of a POST comes from a file, not the command line: a form's
- * fields can be longer than an argument may be.
+ * fields can be longer than an argument may be. With -c it keeps cookies
+ * in a jar file (ucookie.h) - read before, written after, and followed
+ * through redirects, since a sign-in usually answers with a cookie and a
+ * redirect in one response. -o names the output file, so a full address
+ * can stand alone, without a port and a path after it.
  *
  * It resolves the host name through DNS, copes with 'chunked' encoding
  * and follows redirects (up to three). For https addresses it connects
@@ -19,6 +24,7 @@
 #include "uapi.h"
 #include "uhttp.h"
 #include "ucert.h"
+#include "ucookie.h"
 
 #define MAX_REDIRECTS 3
 
@@ -43,8 +49,16 @@ void _start(int argc, char **argv)
     static char post[16384];
     const char *body = 0;
     uint32_t body_len = 0;
+    const char *jar_file = 0, *out_opt = 0;
     while (argc > 1 && argv[1][0] == '-') {
-        if (argv[1][1] == 'k') {
+        if ((argv[1][1] == 'c' || argv[1][1] == 'o') && argc > 2) {
+            if (argv[1][1] == 'c')
+                jar_file = argv[2];
+            else
+                out_opt = argv[2];
+            argv++;
+            argc--;
+        } else if (argv[1][1] == 'k') {
             insecure = 1;                /* like -k in curl */
         } else if (argv[1][1] == 'p' && argc > 2) {
             int fd = sys_open(argv[2], O_READ);
@@ -75,15 +89,15 @@ void _start(int argc, char **argv)
     }
 
     if (argc < 2) {
-        print("usage: httpget [-k] [-p <file>] <host|ip> [port] [path] "
-              "[file]\n");
+        print("usage: httpget [-k] [-p <file>] [-c <jar>] [-o <file>] "
+              "<host|ip> [port] [path] [file]\n");
         sys_exit(1);
     }
 
     char host[64];
     char path[512];
     uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 0;
-    const char *outfile = argc > 4 ? argv[4] : 0;
+    const char *outfile = argc > 4 ? argv[4] : out_opt;
 
     /* The host may be bare ("example.com") or a full address */
     uint32_t parsed_port = port;
@@ -127,6 +141,23 @@ void _start(int argc, char **argv)
             print("[httpget] WARNING: -k, the certificate will not be checked\n");
     }
 
+    static struct cookie_jar jar;
+    static char jar_text[24576];
+    static char cookie_line[4096];
+    if (jar_file) {
+        int fd = sys_open(jar_file, O_READ);
+        int len = 0;
+        if (fd >= 0) {
+            int32_t n;
+            while (len < (int)sizeof(jar_text) &&
+                   (n = sys_read(fd, jar_text + len,
+                                 sizeof(jar_text) - len)) > 0)
+                len += n;
+            sys_close(fd);
+        }
+        ck_load(&jar, jar_text, len);
+    }
+
     struct http_result res;
     for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
         uint32_t ip = http_resolve(host);
@@ -151,7 +182,24 @@ void _start(int argc, char **argv)
         print(path);
         print("\n");
 
-        if (http_request(ip, parsed_port, host, path, use_tls, body,
+        const char *extra = 0;
+        if (jar_file) {
+            int o = 0;
+            const char *pre = "Cookie: ";
+            while (*pre)
+                cookie_line[o++] = *pre++;
+            int n = ck_header(&jar, host, path, use_tls, cookie_line + o,
+                              (int)sizeof(cookie_line) - o - 3);
+            if (n) {
+                o += n;
+                cookie_line[o++] = '\r';
+                cookie_line[o++] = '\n';
+                cookie_line[o] = '\0';
+                extra = cookie_line;
+                print("[httpget] sending cookies\n");
+            }
+        }
+        if (http_request(ip, parsed_port, host, path, use_tls, extra, body,
                          body_len, body_sink, &st, &res) < 0) {
             print("[httpget] could not connect");
             if (use_tls && res.verify_err) {
@@ -162,6 +210,33 @@ void _start(int argc, char **argv)
             if (st.fd >= 0)
                 sys_close(st.fd);
             sys_exit(1);
+        }
+
+        /* What the response set, for the host and path it came from -
+           before a redirect moves them */
+        if (jar_file) {
+            const char *sc = http_last_cookies();
+            static char one[1024];
+            while (*sc) {
+                int k = 0;
+                while (sc[k] && sc[k] != '\n')
+                    k++;
+                int c = k < (int)sizeof(one) - 1 ? k : (int)sizeof(one) - 1;
+                for (int j = 0; j < c; j++)
+                    one[j] = sc[j];
+                one[c] = '\0';
+                if (ck_set(&jar, one, host, path, use_tls)) {
+                    print("[httpget] cookie kept: ");
+                    for (int j = 0; one[j] && one[j] != '='; j++) {
+                        char ch[2] = { one[j], 0 };
+                        print(ch);
+                    }
+                    print("\n");
+                }
+                sc += k;
+                if (*sc)
+                    sc++;
+            }
         }
 
         int redirect = (res.status == 301 || res.status == 302 ||
@@ -185,6 +260,15 @@ void _start(int argc, char **argv)
 
     if (st.fd >= 0)
         sys_close(st.fd);
+
+    if (jar_file) {
+        int len = ck_save(&jar, jar_text, sizeof(jar_text));
+        int fd = sys_open(jar_file, O_CREATE | O_WRITE | O_TRUNC);
+        if (fd >= 0) {
+            sys_write(fd, jar_text, (uint32_t)len);
+            sys_close(fd);
+        }
+    }
 
     if (use_tls) {
         print(res.verified ? "[httpget] certificate checked (issuer, "

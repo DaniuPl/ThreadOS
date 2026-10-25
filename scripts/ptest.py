@@ -107,6 +107,9 @@ PAGE = b"<html>ThreadOS TCP works</html>\n"
 SERVED = {}
 # What came in POSTs, (path, body) - a form's fields, as the browser sent them
 POSTED = []
+# Paths answered by a function: fn(handler, body) -> (status, [(header,
+# value)], body) - for what a fixed answer cannot do, like cookies
+ROUTES = {}
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>The first page</h1>"
              + b"<p>A line filling page number one.</p>" * 40
@@ -1673,6 +1676,8 @@ def start_http_server():
             n = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(n)
             POSTED.append((self.path, body))
+            if self.route(body):
+                return
             blob = SERVED.get("POST %s %s" % (self.path,
                                               body.decode(errors="replace")))
             self.send_response(200 if blob is not None else 404)
@@ -1682,7 +1687,22 @@ def start_http_server():
             self.end_headers()
             self.wfile.write(blob)
 
+        def route(self, body):
+            fn = ROUTES.get(self.path.split("?")[0])
+            if not fn:
+                return False
+            status, headers, blob = fn(self, body)
+            self.send_response(status)
+            for k, v in headers:
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
+            return True
+
         def do_GET(self):
+            if self.route(b""):
+                return
             blob = SERVED.get(self.path)
             if blob is not None:
                 self.send_response(200)

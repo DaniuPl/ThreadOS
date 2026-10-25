@@ -77,6 +77,18 @@ struct http_result {
                                     signed download link runs to ~1 KiB */
 };
 
+/* The Set-Cookie headers of the last response, one a line - for a
+   program that keeps cookies (ucookie.h); the others ignore them */
+static char http_set_cookies[4096];
+static int http_set_cookies_len;
+
+/* (a function, not the array itself: a program linked against the
+   shared library sees its functions, not its data) */
+static inline const char *http_last_cookies(void)
+{
+    return http_set_cookies;
+}
+
 /* Called for successive pieces of the body */
 typedef void (*http_sink)(const char *data, uint32_t len, void *arg);
 
@@ -190,11 +202,12 @@ static inline void http_set_roots(const uint8_t *roots, uint32_t len,
 }
 
 /* One request: a GET, or with a body a POST of a form's fields
-   (application/x-www-form-urlencoded, what a browser sends) */
+   (application/x-www-form-urlencoded, what a browser sends). 'extra'
+   is more header lines, each ending in CR LF - a Cookie one. */
 static inline int http_request(uint32_t ip, uint32_t port, const char *host,
                                const char *path, int use_tls,
-                               const char *body, uint32_t body_len,
-                               http_sink sink, void *arg,
+                               const char *extra, const char *body,
+                               uint32_t body_len, http_sink sink, void *arg,
                                struct http_result *res)
 {
     static char req[2560];
@@ -208,6 +221,8 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     res->verified = 0;
     res->verify_err = 0;
     res->location[0] = '\0';
+    http_set_cookies_len = 0;
+    http_set_cookies[0] = '\0';
 
     tp.tls = use_tls;
     tp.sock = -1;
@@ -256,11 +271,15 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
         req[r++] = '\r';
         req[r++] = '\n';
     }
-    req[r++] = '\r';
-    req[r++] = '\n';
 
-    /* (the body apart: it may be larger than the headers' buffer) */
+    /* (what is extra, and the body, apart: they may be larger than the
+       headers' buffer) */
+    uint32_t xn = 0;
+    while (extra && extra[xn])
+        xn++;
     if (http_tp_send(&tp, req, (uint32_t)r) < 0 ||
+        (xn && http_tp_send(&tp, extra, xn) < 0) ||
+        http_tp_send(&tp, "\r\n", 2) < 0 ||
         (body && body_len && http_tp_send(&tp, body, body_len) < 0)) {
         http_tp_close(&tp);
         return -1;
@@ -314,6 +333,19 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
                             res->chunked = 1;
                             break;
                         }
+                    }
+                }
+                v = uhttp_header(hdr + p, "set-cookie");
+                if (v) {
+                    int k = 0, o = http_set_cookies_len;
+                    while (v[k])
+                        k++;
+                    if (o + k + 2 < (int)sizeof(http_set_cookies)) {
+                        for (int j = 0; j < k; j++)
+                            http_set_cookies[o++] = v[j];
+                        http_set_cookies[o++] = '\n';
+                        http_set_cookies[o] = '\0';
+                        http_set_cookies_len = o;
                     }
                 }
                 v = uhttp_header(hdr + p, "location");
@@ -404,7 +436,8 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
                            const char *path, int use_tls, http_sink sink,
                            void *arg, struct http_result *res)
 {
-    return http_request(ip, port, host, path, use_tls, 0, 0, sink, arg, res);
+    return http_request(ip, port, host, path, use_tls, 0, 0, 0, sink, arg,
+                        res);
 }
 
 /* Resolves a name (or takes an address directly). 0 = it failed. */

@@ -5973,3 +5973,26 @@ works and is checked by `make test`.
       under the box, picks the third, adds a line to a text box and posts
       the form: the body must be `size=l&note=first%0D%0Asecond`. The
       earlier `<button>` check now goes through a real POST too.
+
+- [x] **Cookies: signing in to sites** (user/ucookie.h, user/uhttp.h,
+      user/httpget.c, apps/browser/web.cpp, the `web` group, `make fuzz`).
+
+      The browser keeps a cookie jar (`.web-cookies.txt`) and every fetch
+      goes with it - pages, pictures, style sheets. httpget learned
+      `-c <jar>`: it sends what applies (Cookie) and keeps what the
+      server sets (Set-Cookie), through redirects too, because a login
+      usually answers with a cookie and a redirect in one response. The
+      rules are RFC 6265's: a cookie goes back only to its host, or with
+      Domain= to that domain (never to one the host is not in); only to
+      paths under its Path=; Secure ones only over https; Max-Age=0 or a
+      past Expires= removes one. Other expiry dates are not kept. httpget
+      also got `-o <file>`, so the browser's eight arguments still fit.
+
+      The test signs in through a POST form whose answer sets a session
+      cookie, a cookie for another path and one for another domain, and
+      redirects: the next page and its picture come with exactly
+      `session=abc123`. Signing out (Max-Age=0 with a redirect) brings a
+      page with no cookie at all. `make fuzz` gained a cookie target: on
+      its first run it found that a Path= with a space in it broke the
+      jar file's lines; such cookies are now refused, and a jar written,
+      read and written again must come out the same.

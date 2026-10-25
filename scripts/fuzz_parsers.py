@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks the ThreadOS parsers against corrupted data.
 
-Three fronts: the ring 3 programs (certificates, HTML, HTTP), the
+Three fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
 packet path in the kernel (net.c + tcp.c), and the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere. In the kernel an error does
 not end in the death of a process but in the system going down, so it
@@ -170,7 +170,7 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": []}
+           "inflate": [], "jpeg": [], "cookie": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -212,6 +212,16 @@ def seeds(workdir):
     out["inflate"].append(zlib.compress(bytes(range(256)) * 8, 9))
     raw = zlib.compressobj(9, zlib.DEFLATED, -15)   # no zlib wrapper
     out["inflate"].append(raw.compress(body) + raw.flush())
+
+    # Set-Cookie headers as sites send them, a line each
+    out["cookie"].append(
+        b"session=abc123; Path=/; HttpOnly\n"
+        b"id=7; Domain=.example.com; Max-Age=3600; Secure\n"
+        b"theme=dark; Path=/a; Expires=Wed, 21 Oct 2037 07:28:00 GMT\n"
+        b"old=1; Expires=Thu, 01 Jan 1970 00:00:00 GMT\n"
+        b"evil=1; Domain=other.org\n"
+        b"session=; Path=/; Max-Age=0\n")
+    out["cookie"].append(b"a=" + b"x" * 500 + b"; Path=/" + b"p" * 200)
 
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     from ptest import JPEG_IMAGE           # noqa: E402 - it lives there

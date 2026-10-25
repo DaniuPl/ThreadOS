@@ -103,6 +103,44 @@ POSTFORM = (b"<html><head><title>Post form</title></head><body>"
             b"value=Post></p></form></body></html>")
 
 
+# A site to sign in to: the login answers with a cookie and a redirect in
+# one response, as real ones do - plus a cookie for another path and one
+# for a domain this host is not in, neither of which may come back
+LOGIN = (b"<html><head><title>Login</title></head><body>"
+         b"<form action=/login method=post><p>"
+         b"<input style='background:#fff0d0' name=user> "
+         b"<input type=submit value='Sign in'></p></form></body></html>")
+COOKIES = []          # (path, the Cookie header the browser sent)
+
+
+def r_login(h, body):
+    if body != b"user=daniu":
+        return 403, [], b"no"
+    return 302, [("Location", "/home"),
+                 ("Set-Cookie", "session=abc123; Path=/; HttpOnly"),
+                 ("Set-Cookie", "elsewhere=1; Path=/other"),
+                 ("Set-Cookie", "evil=1; Domain=example.com")], b""
+
+
+def r_home(h, body):
+    got = h.headers.get("Cookie")
+    COOKIES.append(("/home", got))
+    title = b"Signed in" if got == "session=abc123" else b"Signed out"
+    return 200, [("Content-Type", "text/html")], (
+        b"<html><head><title>" + title + b"</title></head><body>"
+        b"<p><img src=/avatar.png width=32 height=24> hello</p></body></html>")
+
+
+def r_avatar(h, body):
+    COOKIES.append(("/avatar.png", h.headers.get("Cookie")))
+    return 200, [("Content-Type", "image/png")], make_png(16, 12)
+
+
+def r_logout(h, body):
+    return 302, [("Location", "/home"),
+                 ("Set-Cookie", "session=; Path=/; Max-Age=0")], b""
+
+
 def page_titled(t):
     return b"<html><head><title>" + t + b"</title></head><body></body></html>"
 
@@ -167,6 +205,9 @@ def main():
     SERVED["/s?q=hello+world"] = RESULTS
     SERVED["/form.html"] = FORM
     SERVED["/post.html"] = POSTFORM
+    SERVED["/login.html"] = LOGIN
+    ROUTES.update({"/login": r_login, "/home": r_home,
+                   "/avatar.png": r_avatar, "/logout": r_logout})
     SERVED["POST /post size=l&note=first%0D%0Asecond"] = page_titled(b"Posted")
     SERVED["/find?q=two+words&lang=en&all=on"] = page_titled(b"Found")
     SERVED["/find?q=abc&lang=en"] = page_titled(b"Found plain")
@@ -458,6 +499,39 @@ def main():
                   f"the text's lines ending in CR LF ({got!r}, {sent})",
                   got == "Web: Posted" and
                   sent[-1:] == [b"size=l&note=first%0D%0Asecond"])
+
+            # --- cookies: signing in and out -----------------------------
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/login.html")
+            q.sendkey("ret")
+            wait_title(q, geom, "Web: Login")
+            time.sleep(1)
+            field, _ = pixels(q, *page, FIELD)
+            q.click((field[0] + field[2]) // 2, (field[1] + field[3]) // 2)
+            time.sleep(0.5)
+            typed(q, "daniu")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Signed in")
+            home = [c for p, c in COOKIES if p == "/home"]
+            pic = [c for p, c in COOKIES if p == "/avatar.png"]
+            check(f"the cookie the login set with its redirect comes back "
+                  f"with the next page, and with its picture - and not the "
+                  f"cookies for another path or domain ({got!r}, {home}, "
+                  f"{pic})", got == "Web: Signed in" and
+                  home[-1:] == ["session=abc123"] and
+                  pic[-1:] == ["session=abc123"])
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/logout")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Signed out")
+            home = [c for p, c in COOKIES if p == "/home"]
+            check(f"signing out removes it: the next page comes without "
+                  f"one ({got!r}, {home[-1:]})", got == "Web: Signed out"
+                  and home[-1:] == [None])
         finally:
             q.close()
     finally:

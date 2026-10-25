@@ -501,28 +501,30 @@ static bool write_file(const char* name, const std::string& data)
     return ok;
 }
 
+// Where the browser keeps cookies, between its fetches and its runs
+static const char COOKIE_JAR[] = ".web-cookies.txt";
+
 // With 'post', a form's fields go as the body of a POST - through a
 // file, since they may be longer than an argument can be
 static bool fetch(const std::string& address, std::string& out,
                   const char* file = ".web-page.htm",
                   const std::string* post = nullptr)
 {
-    url u(address);
-    std::string path = u.path().empty() ? "/" : u.path();
-    if (!u.query().empty())
-        path += "?" + u.query();
+    // (the fragment is the browser's, not the server's)
+    std::string where = address.substr(0, address.find('#'));
     // (files whose names start with a dot: not the person's)
     const char* body = ".web-form.txt";
     if (post && !write_file(body, *post))
         return false;
     pid_t pid = fork();
     if (pid == 0) {
-        char* get[] = {(char*)"httpget", (char*)address.c_str(), (char*)"0",
-                       (char*)path.c_str(), (char*)file, nullptr};
-        char* with[] = {(char*)"httpget", (char*)"-p", (char*)body,
-                        (char*)address.c_str(), (char*)"0",
-                        (char*)path.c_str(), (char*)file, nullptr};
-        char** args = post ? with : get;
+        // Every fetch - pages, pictures, style sheets - goes with the
+        // jar: a signed-in site's pictures may need its cookie too
+        char* args[] = {(char*)"httpget", (char*)"-c", (char*)COOKIE_JAR,
+                        (char*)"-o", (char*)file,
+                        post ? (char*)"-p" : (char*)where.c_str(),
+                        post ? (char*)body : nullptr,
+                        post ? (char*)where.c_str() : nullptr, nullptr};
         execv("httpget", args);
         _exit(127);
     }
