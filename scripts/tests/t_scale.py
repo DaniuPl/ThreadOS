@@ -264,7 +264,7 @@ def twice():
             if not m:
                 return
             k = 32
-            q.launch_dock(4)
+            q.launch_dock("gterm")
             time.sleep(3)
             w, h, at = q.screen_raw()
             # The first application window's title bar, letters and lights

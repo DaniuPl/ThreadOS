@@ -88,7 +88,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(600, 300)
             time.sleep(1.5)

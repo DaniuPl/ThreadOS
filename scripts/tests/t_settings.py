@@ -88,7 +88,7 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(*AWAY)
             time.sleep(1.5)

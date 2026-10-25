@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-CLOCK, SETTINGS = 1, 6       # their places among the programs
+MON, SETTINGS = dock_index("gmon"), dock_index("gsettings")
 
 
 def tile_px(at, g, k, inset=3):
@@ -64,9 +64,9 @@ def bar_name(q):
 
 
 def open_two(q, want=None):
-    """The clock and the settings, from the dock. Each new window adds a
+    """The monitor and the settings, from the dock. Each new window adds a
     tile, and the dock - as wide as what is in it - moves."""
-    q.launch_dock(CLOCK, n_w=0, want=want)
+    q.launch_dock(MON, n_w=0, want=want)
     time.sleep(2.5)
     q.launch_dock(SETTINGS, n_w=1, want=want)
     time.sleep(2.5)
@@ -111,8 +111,8 @@ def main():
             g = dock_geom(n_w=2)
             w, h, at = q.screen_raw()
             win = [tile_px(at, g, DOCK_N + j) for j in range(2)]
-            check("the clock's window wears the clock's picture - pixel for "
-                  "pixel the same as its tile", win[0] == tile_px(at, g, CLOCK))
+            check("the monitor's window wears the monitor's picture - pixel for "
+                  "pixel the same as its tile", win[0] == tile_px(at, g, MON))
             check("the settings' window wears the settings' picture",
                   win[1] == tile_px(at, g, SETTINGS))
             check("the two application windows have different pictures",
@@ -122,7 +122,7 @@ def main():
             running = [k for k in range(DOCK_N)
                        if near(dot_at(at, g, k), dark["dot"], 60)]
             check("the programs that run have a dot under them, the others "
-                  "none (dots under %s)" % running, running == [CLOCK, SETTINGS])
+                  "none (dots under %s)" % running, running == [MON, SETTINGS])
 
             # --- the launch menu shows the same faces ----------------
             # A program that looks like two different things - a tile

@@ -111,7 +111,7 @@ def main():
             page = (cx, cy + bar, cx + w0, cy + h0 - define(SRC, "STATUS_H"))
 
             q.mouse_home()
-            q.launch_dock(5, w=sw, h=sh)            # the "Web" tile
+            q.launch_dock("gweb", w=sw, h=sh)            # the "Web" tile
             got = wait_title(q, geom, "Web: Start")
             check(f"the Web tile opens the browser on its start page "
                   f"({got!r})", got == "Web: Start")

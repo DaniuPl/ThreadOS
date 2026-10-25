@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
-SETTINGS = 6                      # the settings' tile among the programs
+SETTINGS = dock_index("gsettings")  # the settings' tile
 WX, WY = 94, 54                   # slot 2 of the cascade
 DARK = theme("dark")
 

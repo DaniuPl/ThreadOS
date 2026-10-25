@@ -348,7 +348,7 @@ def main():
             q.wait_serial("The desktop is starting", timeout=30)
             check("the restored system reaches its desktop",
                   q.wait_desktop(timeout=40))
-            q.launch_dock(6)
+            q.launch_dock("gsettings")
             title = ""
             wx = wy = 0
             deadline = time.time() + 12

@@ -72,7 +72,7 @@ def main():
             q.mouse_home()
 
             # Something on the screen worth photographing
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(420, 300)
             time.sleep(1.5)
@@ -365,7 +365,7 @@ def sixty_four():
             # The same window as on the other kernel, so the viewer
             # lands in the same slot of the cascade and the reading
             # grid below is the same one
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(4)
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)

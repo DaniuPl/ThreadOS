@@ -64,9 +64,11 @@ def main():
                   q.dock_windows() == 0)
 
             # --- every program in the dock opens a window --------------
-            for k in range(9):
+            for k in range(DOCK_N):
                 q.launch_dock(k)
                 time.sleep(2.5)
+            q.launch_menu("gclock")         # and one from the menu: nine
+            time.sleep(2.5)
             q.mouse_goto(600, 300)         # the cursor out of the way
             time.sleep(2)
 
@@ -91,9 +93,9 @@ def main():
             # The window that tile belongs to came to the top, so its
             # title bar is on the screen with its lights on. A window
             # the cascade had pushed off the edge would have none.
-            # (the settings, the last one opened: slot 8 of the cascade,
-            # or as far back up it as a window that tall needs to fit)
-            sx, sy = cascade(8, GSET_W + 2, GSET_H + TITLE_H + 2)
+            # (the clock, the last one opened: slot 8 of the cascade,
+            # or as far back up it as a window that size needs to fit)
+            sx, sy = cascade(8, GCLOCK_W + 2, GCLOCK_H + TITLE_H + 2)
             check("a window called up from the dock has its title bar on "
                   "the screen, with the focus", q.has_focus(sx, sy))
 

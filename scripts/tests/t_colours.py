@@ -90,7 +90,7 @@ def main():
                   m is not None and int(m.group(1)) < 40)
 
             # --- a picture in real colours ------------------------------
-            q.launch_dock(0)                # the "App" tile
+            q.launch_menu("guiapp")                # the "App" tile
             time.sleep(4)
 
             # The desktop itself is drawn in real colours now - the

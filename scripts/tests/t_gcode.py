@@ -115,7 +115,7 @@ def click_project_row(q, row):
 
 
 def open_code(q, is64=False):
-    q.launch_dock(9)
+    q.launch_dock("gcode")
     check("Code opens from the dock", wait_code(q))
 
     new_file(q, "main.c", "int main() {")

@@ -182,7 +182,7 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
@@ -234,7 +234,7 @@ def main():
             q.mouse_home()
 
             # --- Alt+F4 -------------------------------------------------
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
@@ -271,7 +271,7 @@ def main():
             # Every system does this, and a person who has used one
             # tries it here in the first minute: the window fills the
             # screen, and does it again the other way round.
-            q.launch_dock(6, n_w=0)         # the "Settings" tile
+            q.launch_dock("gsettings", n_w=0)         # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 200)
             time.sleep(1.5)

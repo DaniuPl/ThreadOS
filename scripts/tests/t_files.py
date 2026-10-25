@@ -135,7 +135,7 @@ def main():
             q.command("thread", "saved", timeout=30)
             on_disk = q.command("fls", "swap.sys", timeout=10)
 
-            q.launch_dock(2)                   # the "Files" tile
+            q.launch_dock("gfiles")                   # the "Files" tile
             time.sleep(4)
             q.mouse_goto(500, 380)
             time.sleep(1.5)

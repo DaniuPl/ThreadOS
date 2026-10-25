@@ -78,7 +78,7 @@ def main():
             q.mouse_home()
 
             # --- an application window opens ---------------------------
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(600, 430)         # the cursor out of the way
             time.sleep(1)

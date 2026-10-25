@@ -75,9 +75,9 @@ def main():
 
             check("the desktop starts without placeholder windows",
                   q.dock_windows() == 0)
-            q.launch_dock(4)
+            q.launch_dock("gterm")
             time.sleep(3)
-            q.launch_dock(1)
+            q.launch_menu("gclock")
             time.sleep(3)
 
             # --- application windows and their shadows -----------------
@@ -119,7 +119,7 @@ def main():
                 tx, ty = g["tiles"][k]
                 return [at(tx + i, ty + j) for j in range(3, g["tile"] - 3)
                         for i in range(3, g["tile"] - 3)]
-            app, clock = tile(0), tile(1)
+            app, clock = tile(0), tile(1)       # (files, the monitor)
             marks = sum(1 for p in app if min(p) > 230)
             check("a tile has a drawing on it (%d white pixels)" % marks,
                   marks > 40)

@@ -1105,10 +1105,28 @@ def ui_baseline_in(top, height):
 
 SCREEN_W, SCREEN_H = 640, 480
 MAX_DOCK_WINDOWS = 12           # MAX_WIN in kernel/desktop.c
-DOCK_N = 10                     # the programs in a dock nobody configured
+def _dock_apps():
+    """The programs a dock nobody configured holds, in order, by the name
+    they run under (kernel/desktop.c's icons[])"""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "kernel", "desktop.c")
+    with open(full) as fh:
+        m = re.search(r"icons\[ICON_MAX\] = \{(.*?)\n\};", fh.read(), re.S)
+    return [b or "gweb" for _, b in
+            re.findall(r'\{"([^"]+)", (?:"([^"]+)"|WEB_APP)', m.group(1))]
 
 
-def dock_geom(n_l=DOCK_N, n_w=2, want=None, w=SCREEN_W, h=SCREEN_H):
+DOCK_APPS = _dock_apps()
+DOCK_N = len(DOCK_APPS)         # the programs in a dock nobody configured
+
+
+def dock_index(app):
+    """Where a program's tile is in the dock, by its name - 'gweb' for
+    the browser on either kernel"""
+    return DOCK_APPS.index("gweb" if app == "web" else app)
+
+
+def dock_geom(n_l=DOCK_N, n_w=0, want=None, w=SCREEN_W, h=SCREEN_H):
     """The dock as dock_geom() lays it out: its glass, its tile size and
     where every tile is - programs first, then the windows on this
     desktop. 'tiles' holds each tile's (x, y) top left corner."""
@@ -1134,7 +1152,7 @@ def dock_geom(n_l=DOCK_N, n_w=2, want=None, w=SCREEN_W, h=SCREEN_H):
                 n_l=n_l, n_w=n_w)
 
 
-def dock_tile(k, n_l=DOCK_N, n_w=2, **kw):
+def dock_tile(k, n_l=DOCK_N, n_w=0, **kw):
     """The middle of the k-th tile - the place to click"""
     g = dock_geom(n_l, n_w, **kw)
     tx, ty = g["tiles"][k]
@@ -2218,9 +2236,12 @@ class Qemu:
         self.n_win += 1
 
     def launch_dock(self, k, n_w=None, **kw):
-        """Starts the k-th program in the dock. Where its tile is depends
-        on how many windows the dock holds as well (n_w, by default what
-        this object has counted) - the dock is as wide as what is in it."""
+        """Starts the k-th program in the dock, or the one by that name.
+        Where its tile is depends on how many windows the dock holds as
+        well (n_w, by default what this object has counted) - the dock is
+        as wide as what is in it."""
+        if isinstance(k, str):
+            k = dock_index(k)
         self.click(*dock_tile(k, n_w=self.n_win if n_w is None else n_w,
                               **self._wh(kw)))
         self.n_win += 1
@@ -2281,7 +2302,7 @@ class Qemu:
         return self.read_ui(x0 + 8, ui_baseline_in(top, HINT_H),
                             width=best[0], fg=t["hint_text"])
 
-    def dock_hint(self, k, n_l=DOCK_N, n_w=2, want=None):
+    def dock_hint(self, k, n_l=DOCK_N, n_w=0, want=None):
         """Points at the k-th tile and reads the name that comes up over
         it"""
         g = dock_geom(n_l=n_l, n_w=n_w, want=want, **self._wh({}))

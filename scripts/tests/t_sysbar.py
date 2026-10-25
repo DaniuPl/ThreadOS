@@ -117,7 +117,7 @@ def main():
             # --- the figures are live -----------------------------------
             # A program started between two looks has to appear in the
             # count; a number that never moves is a picture of a number.
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
 
             # How long a program takes to start is not something to
             # guess: with the whole suite running in parallel four
@@ -137,7 +137,7 @@ def main():
                       % (tasks, int(m2.group(4))), int(m2.group(4)) > tasks)
 
             # --- show the desktop ---------------------------------------
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(320, 300)
             time.sleep(1.5)

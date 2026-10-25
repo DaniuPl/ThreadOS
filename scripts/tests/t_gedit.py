@@ -168,7 +168,7 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.launch_dock(7)                # the "Editor" tile
+            q.launch_dock("gedit")                # the "Editor" tile
             time.sleep(4)
             q.mouse_goto(CX + 200, CY + 100)
             q.mouse_click()                    # the focus, into the page
@@ -206,7 +206,7 @@ def sixty_four():
             # goes through the terminal window, which is a fuller
             # answer anyway: one application wrote the file and
             # another read it.
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(5)
             q.mouse_goto(TWX + 200, TWY + 100)
             q.mouse_click()
@@ -224,7 +224,7 @@ def sixty_four():
             # in long mode that is a fork and an exec from a program
             # drawing in a window, which is its own piece of code
             fx, fy = 118, 78              # the next slot of the cascade
-            q.launch_dock(2)              # the "Files" tile
+            q.launch_dock("gfiles")              # the "Files" tile
             time.sleep(5)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -298,7 +298,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.launch_dock(7)                # the "Editor" tile
+            q.launch_dock("gedit")                # the "Editor" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -568,7 +568,7 @@ def main():
             q.sendkey("alt-f4")
             time.sleep(2.5)
             # The editor is closed; launch the file manager.
-            q.launch_dock(2, n_w=0)            # the "Files" tile
+            q.launch_dock("gfiles", n_w=0)            # the "Files" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)

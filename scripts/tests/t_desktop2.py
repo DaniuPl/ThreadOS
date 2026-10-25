@@ -99,7 +99,7 @@ def main():
         check("the tile's corners are round (%s at the very corner)"
               % (at(tx, ty),), not near(at(tx, ty), top, 40))
         # a click on the tile starts the application (guiapp -> a red square)
-        q10.launch_dock(0)
+        q10.launch_menu("guiapp")
         q10.mouse_goto(300, 300)         # move the cursor away
         check("a click on a tile starts the application (a red square 101,71)",
               q10.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
@@ -195,7 +195,7 @@ def main():
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
 
         dark = theme("dark")
-        q13.launch_dock(4)
+        q13.launch_dock("gterm")
         time.sleep(3)
         wx, wy = 94, 54
         check("the terminal opens in the first cascade slot",

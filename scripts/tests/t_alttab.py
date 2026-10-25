@@ -75,9 +75,12 @@ def main():
 
             # Three applications, in this order: the terminal, the clock,
             # then settings.
-            for n, k in enumerate((4, 1, 6)):
-                q.launch_dock(k, n_w=n)
-                time.sleep(3)
+            q.launch_dock("gterm", n_w=0)
+            time.sleep(3)
+            q.launch_menu("gclock")
+            time.sleep(3)
+            q.launch_dock("gsettings", n_w=2)
+            time.sleep(3)
             q.mouse_goto(600, 400)
             time.sleep(2)
 

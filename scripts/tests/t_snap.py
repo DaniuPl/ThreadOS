@@ -115,7 +115,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1.5)
@@ -210,7 +210,7 @@ def main():
             # not, so one look tells which half holds which - and that
             # they do not overlap.
             drag(q, x0 + 60, ty + 4, w - 5, 200)
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(4)
             drag(q, 206, 70, 4, 200)
             q.mouse_goto(320, 440)

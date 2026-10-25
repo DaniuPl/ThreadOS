@@ -100,7 +100,7 @@ def main():
                   pager(at, w) == [True, False, False, False])
 
             # --- the clock, on the first desktop ------------------------
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
@@ -123,7 +123,7 @@ def main():
                   q.dock_windows() == 0)
 
             # A window of its own over here, and it is the only one
-            q.launch_dock(4, n_w=0)         # the "Term" tile
+            q.launch_dock("gterm", n_w=0)         # the "Term" tile
             time.sleep(4)
             q.mouse_goto(600, 430)
             time.sleep(1.5)

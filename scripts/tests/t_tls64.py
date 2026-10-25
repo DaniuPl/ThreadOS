@@ -189,7 +189,7 @@ def main():
             cx, cy = wx + 1, wy + CONTENT_DY
             bar = define(src, "BAR_H")
             q2.mouse_home()
-            q2.launch_dock(5)                # the "Web" tile
+            q2.launch_dock("gweb")                # the "Web" tile
             end = time.time() + 30
             while time.time() < end and \
                     q2.window_title(wx, wy, w0 + 2) != "Web: Start":

@@ -5870,3 +5870,13 @@ works and is checked by `make test`.
       kernel shell's `cat` and listed by its `fls`, `free` against `mem`,
       `date` against QEMU's clock, a `set` against what the kernel then
       holds, and `echo one two three | wc` counts 1, 3, 14.
+
+- [x] **The dock without the clock and the demonstration program**
+      (kernel/desktop.c, scripts/ptest.py).
+
+      The time is on the bar, so a Clock tile was a second clock; the App
+      tile was the first ring 3 demonstration, not something a person
+      uses. Both left the dock and stay in the menu. Tests now start
+      programs by name (`launch_dock("gterm")`, read from icons[] in
+      desktop.c) instead of by tile number, and the dock helpers default
+      to no windows, as the desktop now starts with none.

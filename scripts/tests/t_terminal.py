@@ -92,7 +92,7 @@ def shell(q, cmd, want):
 
 def session(q, tag, bits, ram_re):
     q.mouse_home()
-    q.launch_dock(4)                   # the "Term" tile
+    q.launch_dock("gterm")                   # the "Term" tile
     time.sleep(3)
     q.click(CX + 200, CY + 150)
     q.mouse_goto(600, 440)

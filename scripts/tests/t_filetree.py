@@ -134,7 +134,7 @@ def main():
             q.type_line("run cp report.txt documents/inside.txt")
             time.sleep(2)
 
-            q.launch_dock(2)                   # the "Files" tile
+            q.launch_dock("gfiles")                   # the "Files" tile
             time.sleep(4)
             look(q)
 

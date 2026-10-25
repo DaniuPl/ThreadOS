@@ -92,13 +92,13 @@ def desktop():
             # The file manager, the monitor and the clock - placed. The
             # kernel's windows are gone, so they open in the first slots
             # of the cascade: (70,30), (82,42), (94,54)
-            q.launch_dock(2)
+            q.launch_dock("gfiles")
             time.sleep(4)
             drag(q, 70 + 100, 30 + 4, 16 + 100, 44 + 4)
-            q.launch_dock(3)
+            q.launch_dock("gmon")
             time.sleep(4)
             drag(q, 82 + 120, 42 + 4, w - 234 + 120, 44 + 4)
-            q.launch_dock(1)
+            q.launch_menu("gclock")
             time.sleep(4)
             drag(q, 94 + 70, 54 + 4, w - 150 + 70, 200 + 4)
             # The pointer resting on a tile, so its name shows

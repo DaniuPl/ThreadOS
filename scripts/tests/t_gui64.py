@@ -101,7 +101,7 @@ def main():
             # The mouse is relative: first push the cursor into the
             # corner, so as to know where it is at all.
             q.mouse_home()
-            q.launch_dock(0)                # the "App" tile
+            q.launch_menu("guiapp")                # the "App" tile
             q.mouse_goto(400, 300)        # move the cursor away from the window
 
             # The application draws a palette of three squares at the top
@@ -181,7 +181,7 @@ def main():
 
             # --- The clock: a second application, its own window ---
             q.mouse_home()
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             q.mouse_goto(400, 300)
 
             # The clock writes the time in the lettering of the system,
@@ -207,7 +207,7 @@ def main():
 
             # --- Files: a third application, it reads the disk ---
             q.mouse_home()
-            q.launch_dock(2)                # the "Files" tile
+            q.launch_dock("gfiles")                # the "Files" tile
             q.mouse_goto(400, 300)
 
             px2, py2 = body_text(4)
@@ -250,7 +250,7 @@ def main():
 
             # --- Settings: the 64-bit-only Updates section ---------------
             q.mouse_home()
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             q.mouse_goto(400, 300)
             swx, swy = cascade(5, GSET_W + 2, GSET_H + TITLE_H + 2)
             scx, scy = swx + 1, swy + CONTENT_DY
@@ -316,7 +316,7 @@ def main():
             check("the desktop comes up a second time", q2.wait_desktop(30))
 
             q2.mouse_home()
-            q2.launch_dock(3)                # the "Monitor" tile
+            q2.launch_dock("gmon")                # the "Monitor" tile
             q2.mouse_goto(400, 300)
 
             mx, my = body_text(2)
@@ -348,7 +348,7 @@ def main():
 
             # --- The terminal: keyboard, fork, exec, dup2, a file ---
             q2.mouse_home()
-            q2.launch_dock(4)                # the "Term" tile
+            q2.launch_dock("gterm")                # the "Term" tile
             q2.mouse_goto(400, 300)
 
             tx, ty = body_text(3)

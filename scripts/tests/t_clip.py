@@ -69,7 +69,7 @@ def main():
             q.mouse_home()
 
             # --- copy: in the terminal ---------------------------------
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
             q.mouse_click()
@@ -96,7 +96,7 @@ def main():
                   not any(WORD in r for r in rows))
 
             # --- paste: in another window ------------------------------
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 380)
             time.sleep(1.5)

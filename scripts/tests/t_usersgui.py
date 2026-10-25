@@ -79,7 +79,7 @@ def main():
             q.mouse_home()
 
             # --- the terminal ------------------------------------------
-            q.launch_dock(4)                # the "Term" tile
+            q.launch_dock("gterm")                # the "Term" tile
             time.sleep(3)
             q.mouse_goto(CX + 200, CY + 150)
             q.mouse_click()
@@ -108,7 +108,7 @@ def main():
                   "\n".join(rows).count("admin - you can change the system") >= 2)
 
             # --- the settings window ------------------------------------
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(600, 380)
             time.sleep(1.5)

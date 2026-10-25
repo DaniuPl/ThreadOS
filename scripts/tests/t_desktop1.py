@@ -147,7 +147,7 @@ def main():
         check("closing each desktop shortcut returns to the bare desktop",
               q5.dock_windows() == 0)
 
-        q5.launch_dock(4)
+        q5.launch_dock("gterm")
         time.sleep(3)
         check("a real application opens in the first cascade slot",
               q5.wait_focus(94, 54))
@@ -194,7 +194,7 @@ def main():
     try:
         q6.wait_desktop()
         time.sleep(1.0)
-        q6.launch_dock(4)
+        q6.launch_dock("gterm")
         time.sleep(3)
         check("the application opened", q6.dock_windows() == 1)
         q6.click(*light_xy(94, 54, 0))

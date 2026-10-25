@@ -166,7 +166,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             # The settings are the seventh program in the dock
-            q.launch_dock(6)                # the "Settings" tile
+            q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(560, 420)      # the cursor away from the window
             time.sleep(1)

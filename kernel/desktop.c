@@ -113,9 +113,9 @@ struct icon {
 #define ART_N      16
 #define ART_LETTER 14
 #define ART_TRASH  15
+/* The time is on the bar, so the clock is not in the dock; it and the
+   demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
-    {"App", "guiapp", 0, {{0}}},
-    {"Clock", "gclock", 1, {{0}}},
     {"Files", "gfiles", 2, {{0}}},
     {"Monitor", "gmon", 3, {{0}}},
     {"Term", "gterm", 4, {{0}}},
@@ -125,7 +125,7 @@ static struct icon icons[ICON_MAX] = {
     {"Tasks", "gtasks", 8, {{0}}},
     {"Code", "gcode", ART_LETTER, {{0}}},
 };
-static int icon_n = 10;        /* how many of them there are */
+static int icon_n = 8;         /* how many of them there are */
 
 struct desktop_item {
     char name[32];

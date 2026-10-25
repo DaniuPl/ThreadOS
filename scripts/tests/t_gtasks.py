@@ -150,7 +150,7 @@ def sixty_four():
             time.sleep(4)
             q.mouse_home()
 
-            q.launch_dock(8)                # the "Tasks" tile
+            q.launch_dock("gtasks")                # the "Tasks" tile
             time.sleep(5)
             q.mouse_goto(WX + 100, WY + 4)     # out of the cascade
             time.sleep(0.4)
@@ -176,7 +176,7 @@ def sixty_four():
                   any(r[3] == "program" for r in listed) and
                   any(r[3] == "kernel" for r in listed))
 
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(5)
             q.mouse_goto(625, 300)
             time.sleep(2)
@@ -227,7 +227,7 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
 
-            q.launch_dock(8)                # the "Tasks" tile
+            q.launch_dock("gtasks")                # the "Tasks" tile
             time.sleep(4)
 
             # Out of the way of the cascade: every window opens at the
@@ -266,7 +266,7 @@ def main():
                   any(v == "kernel" for v in kinds.values()))
 
             # --- the list is live ---------------------------------------
-            q.launch_dock(1)                # the "Clock" tile
+            q.launch_menu("gclock")                # the "Clock" tile
             time.sleep(4)
             q.mouse_goto(625, 300)
             time.sleep(2)
