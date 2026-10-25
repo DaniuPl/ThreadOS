@@ -202,10 +202,12 @@ def main():
             time.sleep(2)
 
             # --- a pipe --------------------------------------------------
+            # (wc is core's: lines, words, bytes - nine lines of one
+            # digit and a newline each)
             q.type_line("seq 9 | wc")
-            rows = wait_for_row(q, "lines=9", **geom)
+            rows = wait_for_row(q, "18", **geom)
             check("the pipe 'a | b' counts what the left side printed",
-                  "lines=9" in text(rows))
+                  any(r.split() == ["9", "9", "18"] for r in rows))
 
             # --- a program that is not there ---------------------------
             q.type_line("nosuchprogram")

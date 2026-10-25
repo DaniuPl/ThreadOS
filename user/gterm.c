@@ -408,12 +408,18 @@ static int32_t start_one(char *cmd)
 
 static int32_t start_pipe(char *left, char *right)
 {
-    /* The kernel takes the pipeline as one line, so we put back the
-       '|' we cut it at */
-    (void)right;
+    /* The kernel takes the pipeline as one line, so the two halves are
+       joined again round a '|' */
+    static char both[2 * LINE_MAX + 20];
+    int n = 0;
+    for (int i = 0; left[i] && n < (int)sizeof(both) - 2; i++)
+        both[n++] = left[i];
+    both[n++] = '|';
+    for (int i = 0; right[i] && n < (int)sizeof(both) - 1; i++)
+        both[n++] = right[i];
+    both[n] = 0;
     empty_out_file();
-    left[t_len(left)] = '|';
-    int32_t pid = sys_pipeline(left, OUTFILE);
+    int32_t pid = sys_pipeline(both, OUTFILE);
     return pid < 0 ? -1 : pid;
 }
 
@@ -584,6 +590,10 @@ static void run_line(void)
                        "shows network settings\n",
                        "lspci (także 'hardware') pokazuje urządzenia PCI; "
                        "ifconfig wyświetla ustawienia sieci\n");
+        put_str_locale("commands: ls pwd cat head wc cp mv rm mkdir touch "
+                       "echo ps kill free uptime date uname hostname set\n",
+                       "polecenia: ls pwd cat head wc cp mv rm mkdir touch "
+                       "echo ps kill free uptime date uname hostname set\n");
         put_str_locale("other commands run from disk or initrd; 'a | b' works\n",
                        "pozostałe polecenia uruchamiają się z dysku lub "
                        "initrd; działa 'a | b'\n");
@@ -613,6 +623,34 @@ static void run_line(void)
     run_program(line);
 }
 
+/* The everyday commands - ls, ps, free and the rest - live in one
+   program, 'core' (user/core.c): 'ls -l' typed here runs 'core ls -l'.
+   The list is core's; a name not on it is a program of its own. */
+static const char *const core_cmds[] = {
+    "ls", "pwd", "cat", "head", "wc", "cp", "mv", "rm", "mkdir", "touch",
+    "echo", "ps", "kill", "free", "uptime", "date", "uname", "hostname",
+    "set"
+};
+static char routed[2][LINE_MAX + 8];
+
+static char *route(char *cmd, int k)
+{
+    while (*cmd == ' ')
+        cmd++;
+    int n = 0;
+    while (cmd[n] && cmd[n] != ' ')
+        n++;
+    for (int i = 0; i < (int)(sizeof(core_cmds) / sizeof(core_cmds[0])); i++) {
+        const char *c = core_cmds[i];
+        if (t_len(c) != n || !t_starts(cmd, c))
+            continue;
+        t_copy(routed[k], "core ", LINE_MAX + 8);
+        t_copy(routed[k] + 5, cmd, LINE_MAX + 3);
+        return routed[k];
+    }
+    return cmd;
+}
+
 /* Starts a program (or two joined by a pipe) and shows what it wrote.
    Kept apart from the line above it because 'sudo' runs a command that
    was typed a moment earlier, not the line that has just been read. */
@@ -634,9 +672,9 @@ static void run_program(char *line)
         char *right = bar + 1;
         while (*right == ' ')
             right++;
-        pid = start_pipe(line, right);
+        pid = start_pipe(route(line, 0), route(right, 1));
     } else {
-        pid = start_one(line);
+        pid = start_one(route(line, 0));
     }
 
     if (pid == -1) {

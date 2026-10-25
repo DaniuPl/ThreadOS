@@ -5852,3 +5852,21 @@ works and is checked by `make test`.
       existing widget API is unchanged. The `udtest` program draws all of
       it, and `t_udraw` checks the rectangles, the tab underline, clicking
       and arrow keys on both kernels. ThreadCode is the next consumer.
+
+- [x] **A terminal with the usual commands** (user/core.c, user/gterm.c,
+      a new `terminal` group).
+
+      `ls`, `ps`, `free`, `date` and the rest were the kernel shell's own
+      commands; on the 64-bit system the terminal answered `ls` with "no
+      such program". They are now one program, `core`, built for both
+      kernels (about 20 KB, instead of twenty files of the same code in
+      an initrd that is all memory): ls, pwd, cat, head, wc, cp, mv, rm,
+      mkdir, touch, echo, ps, kill, free, uptime, date, uname, hostname
+      and set. The terminal runs `core ls -l` when `ls -l` is typed,
+      pipes included.
+
+      The test runs them in the terminal on both kernels and checks each
+      against something else: files made and moved there are read by the
+      kernel shell's `cat` and listed by its `fls`, `free` against `mem`,
+      `date` against QEMU's clock, a `set` against what the kernel then
+      holds, and `echo one two three | wc` counts 1, 3, 14.

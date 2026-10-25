@@ -61,6 +61,7 @@ USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
              $(BUILD)/user/rm.elf $(BUILD)/user/date.elf \
              $(BUILD)/user/cp.elf $(BUILD)/user/mv.elf \
              $(BUILD)/user/mkdir.elf $(BUILD)/user/spin.elf \
+             $(BUILD)/user/core.elf \
              $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
              $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
              $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
@@ -309,6 +310,7 @@ $(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
 	    rm=$(BUILD)/user/rm.elf date=$(BUILD)/user/date.elf \
 	    cp=$(BUILD)/user/cp.elf mv=$(BUILD)/user/mv.elf \
 	    mkdir=$(BUILD)/user/mkdir.elf spin=$(BUILD)/user/spin.elf \
+	    core=$(BUILD)/user/core.elf \
 	    guiapp=$(BUILD)/user/guiapp.elf gclock=$(BUILD)/user/gclock.elf \
 	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf \
 	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf \
@@ -426,7 +428,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gclock.elf \
                $(BUILD)/user64/gfiles.elf \
                $(BUILD)/user64/gmon.elf \
-               $(BUILD)/user64/gterm.elf \
+               $(BUILD)/user64/gterm.elf $(BUILD)/user64/core.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gcode.elf \
                $(BUILD)/user64/gtasks.elf \
@@ -830,7 +832,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gclock=$(BUILD)/user64/gclock.elf \
 	    gfiles=$(BUILD)/user64/gfiles.elf \
 	    gmon=$(BUILD)/user64/gmon.elf \
-	    gterm=$(BUILD)/user64/gterm.elf \
+	    gterm=$(BUILD)/user64/gterm.elf core=$(BUILD)/user64/core.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gcode=$(BUILD)/user64/gcode.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
