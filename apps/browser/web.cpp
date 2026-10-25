@@ -14,14 +14,16 @@
 //   web page.html           a file on the disk
 //   web https://host/path   a page from the network
 //
-// Not yet: images, and style sheets in files of their own (<link>);
-// a page's own <style> works.
+// Pictures are PNG (8 bits a channel, not interlaced) and baseline
+// JPEG, the decoders the picture viewer uses; style sheets in files of
+// their own (<link>) are fetched like the page.
 
 #include <litehtml.h>
 #include <litehtml/url.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 #include <sys/wait.h>
@@ -29,6 +31,8 @@
 
 extern "C" {
 #include "udraw.h"
+#include "uinflate.h"
+#include "ujpeg.h"
 }
 
 using namespace litehtml;
@@ -40,6 +44,7 @@ using namespace litehtml;
 #define ADDR_X 46
 #define STATUS_H 20           // the line along the bottom
 #define LINE_STEP 40          // what an arrow key scrolls
+#define SCROLL_W 6             // the scroll thumb along the right edge
 #define FONT_PX 15            // a page's text when its CSS does not say
 
 static const char start_page[] =
@@ -68,6 +73,155 @@ static uint32_t rgb(const web_color& c)
 {
     return ((uint32_t)c.red << 16) | ((uint32_t)c.green << 8) | c.blue;
 }
+
+// --- what a page refers to: pictures and style sheets -----------------
+
+static bool get_url(const std::string& where, std::string& out,
+                    const char* file);
+
+struct picture {
+    int w = 0, h = 0;
+    std::vector<uint32_t> px;         // 0xRRGGBB, already on white
+};
+
+static uint32_t on_white(int r, int g, int b, int a)
+{
+    r = (r * a + 255 * (255 - a)) / 255;
+    g = (g * a + 255 * (255 - a)) / 255;
+    b = (b * a + 255 * (255 - a)) / 255;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+static uint32_t be32(const unsigned char* p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | p[3];
+}
+
+static int paeth(int a, int b, int c)
+{
+    int p = a + b - c, pa = abs(p - a), pb = abs(p - b), pc = abs(p - c);
+    return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+}
+
+// A PNG: the chunks, the zlib stream they carry, a filter byte a row
+static bool decode_png(const std::string& f, picture& pic)
+{
+    const unsigned char* d = (const unsigned char*)f.data();
+    size_t n = f.size();
+    if (n < 33 || memcmp(d, "\x89PNG\r\n\x1a\n", 8) != 0)
+        return false;
+    int w = 0, h = 0, depth = 0, type = 0, interlace = 0;
+    std::string idat;
+    unsigned char pal[256][4];
+    int npal = 0;
+    for (size_t at = 8; at + 12 <= n;) {
+        uint32_t len = be32(d + at);
+        const unsigned char* body = d + at + 8;
+        if (at + 12 + len > n)
+            return false;
+        if (!memcmp(d + at + 4, "IHDR", 4) && len >= 13) {
+            w = (int)be32(body);
+            h = (int)be32(body + 4);
+            depth = body[8];
+            type = body[9];
+            interlace = body[12];
+        } else if (!memcmp(d + at + 4, "PLTE", 4)) {
+            npal = (int)len / 3;
+            for (int i = 0; i < npal && i < 256; i++) {
+                pal[i][0] = body[3 * i];
+                pal[i][1] = body[3 * i + 1];
+                pal[i][2] = body[3 * i + 2];
+                pal[i][3] = 255;
+            }
+        } else if (!memcmp(d + at + 4, "tRNS", 4) && type == 3) {
+            for (uint32_t i = 0; i < len && i < 256; i++)
+                pal[i][3] = body[i];
+        } else if (!memcmp(d + at + 4, "IDAT", 4)) {
+            idat.append((const char*)body, len);
+        } else if (!memcmp(d + at + 4, "IEND", 4)) {
+            break;
+        }
+        at += 12 + len;
+    }
+    static const int channels[7] = {1, 0, 3, 1, 2, 0, 4};
+    if (w <= 0 || h <= 0 || w > 4096 || h > 4096 || depth != 8 ||
+        interlace || type > 6 || !channels[type] || (type == 3 && !npal))
+        return false;
+    int bpp = channels[type], stride = w * bpp;
+    std::vector<unsigned char> raw((size_t)(stride + 1) * h);
+    if (inflate_zlib((const unsigned char*)idat.data(), (unsigned)idat.size(),
+                     raw.data(), (unsigned)raw.size()) != (int)raw.size())
+        return false;
+    std::vector<unsigned char> prev(stride, 0), cur(stride);
+    pic.w = w;
+    pic.h = h;
+    pic.px.resize((size_t)w * h);
+    for (int y = 0; y < h; y++) {
+        const unsigned char* in = raw.data() + (size_t)y * (stride + 1);
+        int filter = in[0];
+        for (int i = 0; i < stride; i++) {
+            int a = i >= bpp ? cur[i - bpp] : 0, b = prev[i];
+            int c = i >= bpp ? prev[i - bpp] : 0, x = in[1 + i];
+            switch (filter) {
+            case 1: x += a; break;
+            case 2: x += b; break;
+            case 3: x += (a + b) / 2; break;
+            case 4: x += paeth(a, b, c); break;
+            default: break;
+            }
+            cur[i] = (unsigned char)x;
+        }
+        for (int x = 0; x < w; x++) {
+            const unsigned char* p = cur.data() + x * bpp;
+            uint32_t v;
+            switch (type) {
+            case 0: v = on_white(p[0], p[0], p[0], 255); break;
+            case 2: v = on_white(p[0], p[1], p[2], 255); break;
+            case 3: {
+                const unsigned char* e = pal[p[0] < npal ? p[0] : 0];
+                v = on_white(e[0], e[1], e[2], e[3]);
+                break;
+            }
+            case 4: v = on_white(p[0], p[0], p[0], p[1]); break;
+            default: v = on_white(p[0], p[1], p[2], p[3]); break;
+            }
+            pic.px[(size_t)y * w + x] = v;
+        }
+        prev.swap(cur);
+    }
+    return true;
+}
+
+static bool decode_jpeg(const std::string& f, picture& pic)
+{
+    // The decoder's planes, as large as the picture viewer allows -
+    // and only once a page has a JPEG on it
+    static std::vector<unsigned char> mem;
+    if (mem.empty())
+        mem.resize(3 * 1024 * 1024);
+    int w = 0, h = 0;
+    const char* why = "";
+    if (f.size() < 4 || (unsigned char)f[0] != 0xFF ||
+        (unsigned char)f[1] != 0xD8 ||
+        jpeg_decode((const unsigned char*)f.data(), (unsigned)f.size(),
+                    mem.data(), (unsigned)mem.size(), &w, &h, &why) < 0)
+        return false;
+    pic.w = w;
+    pic.h = h;
+    pic.px.resize((size_t)w * h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int r, g, b;
+            jpeg_pixel(x, y, &r, &g, &b);
+            pic.px[(size_t)y * w + x] = on_white(r, g, b, 255);
+        }
+    return true;
+}
+
+// Every picture a page names, by its full address; one that could not
+// be had is remembered too, as nothing, so it is not asked for again
+static std::map<std::string, picture> pictures;
 
 class window_container : public document_container {
   public:
@@ -155,15 +309,66 @@ class window_container : public document_container {
             ud_disc(win, x, y, d, rgb(m.color));
     }
 
-    // No images yet: no size, so the layout leaves no hole for them
-    void load_image(const char*, const char*, bool) override {}
-    void get_image_size(const char*, const char*, size& sz) override
+    std::string full(const char* src, const char* baseurl) const
     {
-        sz.width = 0;
-        sz.height = 0;
+        std::string b = baseurl && *baseurl ? baseurl : base;
+        return resolve(url(b), url(src ? src : "")).str();
     }
-    void draw_image(uint_ptr, const background_layer&, const std::string&,
-                    const std::string&) override {}
+
+    // Fetched and unpacked while the page is read: the layout needs
+    // each picture's size before it can place anything after it
+    void load_image(const char* src, const char* baseurl, bool) override
+    {
+        std::string where = full(src, baseurl);
+        if (pictures.count(where))
+            return;
+        picture& pic = pictures[where];
+        std::string data;
+        if (get_url(where, data, ".web-image") &&
+            !decode_png(data, pic) && !decode_jpeg(data, pic))
+            pic = picture();
+    }
+    void get_image_size(const char* src, const char* baseurl,
+                        size& sz) override
+    {
+        auto it = pictures.find(full(src, baseurl));
+        sz.width = it == pictures.end() ? 0 : it->second.w;
+        sz.height = it == pictures.end() ? 0 : it->second.h;
+    }
+    // Scaled to the box the layout gave it, a pixel at a time from the
+    // nearest one, and cut to what of it is on the page
+    void draw_image(uint_ptr, const background_layer& l,
+                    const std::string& u, const std::string& b) override
+    {
+        auto it = pictures.find(full(u.c_str(), b.c_str()));
+        if (it == pictures.end() || !it->second.w)
+            return;
+        const picture& pic = it->second;
+        const position& o = l.origin_box;
+        int ow = (int)o.width, oh = (int)o.height;
+        if (ow <= 0 || oh <= 0)
+            return;
+        int x0 = sx(o.x), y0 = sy(o.y);
+        static std::vector<uint32_t> row;
+        for (int y = 0; y < oh; y++) {
+            int wy = y0 + y;
+            if (wy < page_top() || wy >= page_top() + page_h())
+                continue;
+            int from = x0 < 0 ? -x0 : 0, to = ow;
+            if (x0 + to > width)
+                to = width - x0;
+            if (to <= from)
+                return;
+            row.resize(to - from);
+            int py = y * pic.h / oh;
+            for (int x = from; x < to; x++)
+                row[x - from] = pic.px[(size_t)py * pic.w + x * pic.w / ow];
+            for (int k = 0; k < to - from; k += 256)
+                win_blit32(win, x0 + from + k, wy,
+                           to - from - k < 256 ? to - from - k : 256, 1,
+                           row.data() + k);
+        }
+    }
 
     void draw_solid_fill(uint_ptr, const background_layer& l,
                          const web_color& c) override
@@ -228,7 +433,15 @@ class window_container : public document_container {
             start = c == ' ';
         }
     }
-    void import_css(std::string&, const std::string&, std::string&) override {}
+    // A <link rel=stylesheet>: fetched like the page, and what it names
+    // in turn is relative to where it came from
+    void import_css(std::string& text, const std::string& u,
+                    std::string& baseurl) override
+    {
+        std::string where = full(u.c_str(), baseurl.c_str());
+        if (get_url(where, text, ".web-style.css"))
+            baseurl = where;
+    }
     void set_clip(const position&, const border_radiuses&) override {}
     void del_clip() override {}
     void get_viewport(position& vp) const override
@@ -275,13 +488,14 @@ static bool read_file(const char* name, std::string& out)
 
 // A page over the network: httpget writes it to a file and says by its
 // exit code whether it worked
-static bool fetch(const std::string& address, std::string& out)
+static bool fetch(const std::string& address, std::string& out,
+                  const char* file = ".web-page.htm")
 {
     url u(address);
     std::string path = u.path().empty() ? "/" : u.path();
     if (!u.query().empty())
         path += "?" + u.query();
-    const char* file = ".web-page.htm";   // hidden: not a file of the person's
+    // (files whose names start with a dot: not the person's)
     pid_t pid = fork();
     if (pid == 0) {
         char* args[] = {(char*)"httpget", (char*)address.c_str(), (char*)"0",
@@ -294,6 +508,17 @@ static bool fetch(const std::string& address, std::string& out)
         WEXITSTATUS(status) != 0)
         return false;
     return read_file(file, out);
+}
+
+// Whatever an address names: a page, a picture, a style sheet - over
+// the network into 'file', or straight off the disk
+static bool get_url(const std::string& where, std::string& out,
+                    const char* file)
+{
+    if (where.compare(0, 7, "http://") == 0 ||
+        where.compare(0, 8, "https://") == 0)
+        return fetch(where, out, file);
+    return read_file(where.c_str(), out);
 }
 
 // --- the browser ------------------------------------------------------
@@ -394,6 +619,17 @@ static void draw()
     if (doc) {
         position clip(0, cont.scroll, cont.width, cont.page_h());
         doc->draw(0, 0, 0, &clip);
+    }
+    // Where in the page the window is, when the page is longer than it:
+    // a thumb as long as the share that shows, at the right edge
+    int total = doc ? (int)doc->height() : 0;
+    if (total > cont.page_h()) {
+        int ph = cont.page_h(), th = ph * ph / total;
+        if (th < 20)
+            th = 20;
+        int ty = BAR_H + (ph - th) * cont.scroll / (total - ph);
+        ud_round(w, cont.width - SCROLL_W - 2, ty + 2, SCROLL_W, th - 4,
+                 SCROLL_W / 2, 0x9A9AA0);
     }
     // The toolbar and the status line go over whatever the page drew
     // past its edges

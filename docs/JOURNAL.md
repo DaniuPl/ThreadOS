@@ -5894,3 +5894,20 @@ works and is checked by `make test`.
 
       The test opens both cards against what QEMU gives: an RTL8139 with
       10.0.2.15, and no USB controller, hence no Bluetooth.
+
+- [x] **The browser shows pictures and reads style sheets from files**
+      (apps/browser/web.cpp, the `web` group).
+
+      `<img>` and CSS backgrounds: PNG (eight bits a channel, any colour
+      type, not interlaced; through uinflate.h) and baseline JPEG (the
+      picture viewer's ujpeg.h), fetched while the page is read - the
+      layout needs each size before it can place what follows - and
+      drawn scaled to the box it gets. `<link rel=stylesheet>` is fetched
+      like the page, and what it names is relative to where it came from.
+      A long page shows a scroll thumb at the right edge.
+
+      The test serves a page with a PNG drawn at twice its size, a style
+      sheet in a file of its own and forty lines: each quarter of the
+      picture is exactly 64x48 pixels of its own colour, in its place;
+      the style sheet's box is in its colour, 150 pixels and the padding
+      wide; the thumb is there, and PgDn moves it down.
