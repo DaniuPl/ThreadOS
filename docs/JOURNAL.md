@@ -5953,3 +5953,23 @@ works and is checked by `make test`.
       them with Enter, unticks the box and sends with the button, and
       sends a second form through its `<button>` - each time the server
       answers only for exactly the expected query.
+
+- [x] **Lists, text boxes and POST in the browser** (apps/browser/web.cpp,
+      user/uhttp.h, user/httpget.c, scripts/ptest.py, the `web` group).
+
+      `<select>` shows its chosen option and, clicked, a list under it to
+      choose from (with the mouse, or the arrows and Enter); it is as wide
+      as its longest option unless the page says otherwise. `<textarea>`
+      holds its text as its value, wraps it at the box's edge and takes
+      Enter as a new line; it is sized by its cols and rows. A form that
+      says POST is now posted: httpget learned `-p <file>`, which sends
+      the file as an application/x-www-form-urlencoded body (a file, not
+      an argument, because a form can be longer than an argument may be),
+      and after a 301, 302 or 303 it fetches the answer with a GET, as
+      browsers do. httpget also keeps paths up to 511 characters, not 127.
+
+      The test server answers a POST only for exactly the expected body.
+      The test opens a list by a click, checks the chosen option is lit
+      under the box, picks the third, adds a line to a text box and posts
+      the form: the body must be `size=l&note=first%0D%0Asecond`. The
+      earlier `<button>` check now goes through a real POST too.

@@ -1,8 +1,12 @@
 /* httpget - an HTTP/HTTPS client in ring 3
  *
- * Usage: run httpget <address> [port] [path] [file]
+ * Usage: run httpget [-k] [-p <file>] <address> [port] [path] [file]
  *   run httpget 10.0.2.2 8000 /                - to the console
  *   run httpget https://example.com / str.htm  - over TLS 1.3, to a file
+ *   run httpget -p form.txt 10.0.2.2 8000 /f   - POSTs what form.txt holds
+ *
+ * The body of a POST comes from a file, not the command line: a form's
+ * fields can be longer than an argument may be.
  *
  * It resolves the host name through DNS, copes with 'chunked' encoding
  * and follows redirects (up to three). For https addresses it connects
@@ -36,19 +40,48 @@ static void body_sink(const char *data, uint32_t len, void *arg)
 void _start(int argc, char **argv)
 {
     int insecure = 0;
-    if (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'k') {
-        insecure = 1;                    /* like -k in curl */
+    static char post[16384];
+    const char *body = 0;
+    uint32_t body_len = 0;
+    while (argc > 1 && argv[1][0] == '-') {
+        if (argv[1][1] == 'k') {
+            insecure = 1;                /* like -k in curl */
+        } else if (argv[1][1] == 'p' && argc > 2) {
+            int fd = sys_open(argv[2], O_READ);
+            if (fd < 0) {
+                print("[httpget] I cannot read the body from ");
+                print(argv[2]);
+                print("\n");
+                sys_exit(1);
+            }
+            for (;;) {
+                int32_t n = sys_read(fd, post + body_len,
+                                     sizeof(post) - body_len);
+                if (n <= 0)
+                    break;
+                body_len += (uint32_t)n;
+                if (body_len >= sizeof(post))
+                    break;
+            }
+            sys_close(fd);
+            body = post;
+            argv++;
+            argc--;
+        } else {
+            break;
+        }
         argv++;
         argc--;
     }
 
     if (argc < 2) {
-        print("usage: httpget [-k] <host|ip> [port] [path] [file]\n");
+        print("usage: httpget [-k] [-p <file>] <host|ip> [port] [path] "
+              "[file]\n");
         sys_exit(1);
     }
 
     char host[64];
-    char path[128];
+    char path[512];
     uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 0;
     const char *outfile = argc > 4 ? argv[4] : 0;
 
@@ -107,6 +140,8 @@ void _start(int argc, char **argv)
         }
 
         print(use_tls ? "[httpget] TLS 1.3 " : "[httpget] ");
+        if (body)
+            print("POST ");
         print(host);
         print(" (");
         print_ip(ip);
@@ -116,8 +151,8 @@ void _start(int argc, char **argv)
         print(path);
         print("\n");
 
-        if (http_get(ip, parsed_port, host, path, use_tls, body_sink, &st,
-                     &res) < 0) {
+        if (http_request(ip, parsed_port, host, path, use_tls, body,
+                         body_len, body_sink, &st, &res) < 0) {
             print("[httpget] could not connect");
             if (use_tls && res.verify_err) {
                 print(": ");
@@ -130,9 +165,14 @@ void _start(int argc, char **argv)
         }
 
         int redirect = (res.status == 301 || res.status == 302 ||
-                        res.status == 307 || res.status == 308);
+                        res.status == 303 || res.status == 307 ||
+                        res.status == 308);
         if (!redirect || !res.location[0])
             break;
+        /* After a POST the answer is fetched with a GET - except where
+           307 and 308 say to send the same again */
+        if (res.status != 307 && res.status != 308)
+            body = 0;
 
         print("[httpget] redirect -> ");
         print(res.location);

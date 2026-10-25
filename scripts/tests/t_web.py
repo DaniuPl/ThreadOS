@@ -90,6 +90,17 @@ FORM = (b"<html><head><title>Form</title><style>"
         b"<button style='background:#ffc0ff' name=b value=ok>Send</button>"
         b"</p></form></body></html>")
 PINK = (0xFF, 0xC0, 0xFF)
+# A form that POSTs: a list to choose from and a text of several lines
+SELECT_BG, AREA_BG, CHOSEN = (0xFF, 0xE0, 0xE0), (0xE0, 0xFF, 0xE0), (0x33, 0x66, 0xCC)
+POSTFORM = (b"<html><head><title>Post form</title></head><body>"
+            b"<form action=/post method=post><p>"
+            b"<select style='background:#ffe0e0' name=size>"
+            b"<option value=s>Small</option><option value=m selected>Medium"
+            b"</option><option value=l>Large</option></select> "
+            b"<textarea style='background:#e0ffe0' name=note cols=20 rows=3>"
+            b"first</textarea> "
+            b"<input class=g style='background:#c0ffc0' type=submit "
+            b"value=Post></p></form></body></html>")
 
 
 def page_titled(t):
@@ -155,9 +166,11 @@ def main():
     SERVED["/pic.png"] = make_png(64, 48)
     SERVED["/s?q=hello+world"] = RESULTS
     SERVED["/form.html"] = FORM
+    SERVED["/post.html"] = POSTFORM
+    SERVED["POST /post size=l&note=first%0D%0Asecond"] = page_titled(b"Posted")
     SERVED["/find?q=two+words&lang=en&all=on"] = page_titled(b"Found")
     SERVED["/find?q=abc&lang=en"] = page_titled(b"Found plain")
-    SERVED["/other?x=1&b=ok"] = page_titled(b"Sent")
+    SERVED["POST /other x=1&b=ok"] = page_titled(b"Sent")
     work = tempfile.mkdtemp()
     iso = os.path.join(work, "t.iso")
     disk = os.path.join(work, "disk.img")
@@ -398,8 +411,53 @@ def main():
             q.click((send[0] + send[2]) // 2, (send[1] + send[3]) // 2)
             q.mouse_goto(sw - 20, sh // 2)
             got = wait_title(q, geom, "Web: Sent")
-            check(f"a <button> sends its own form, with its name and value "
-                  f"and the field's preset one ({got!r})", got == "Web: Sent")
+            check(f"a <button> sends its own form - a POST one - with its "
+                  f"name and value and the field's preset one ({got!r})",
+                  got == "Web: Sent")
+
+            # --- a list, a text of lines, and a POST ----------------------
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/post.html")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Post form")
+            time.sleep(1)
+            sel, _ = pixels(q, *page, SELECT_BG)
+            area, _ = pixels(q, *page, AREA_BG)
+            post, _ = pixels(q, *page, GO_BG)
+            check(f"the list, the text box and the button are drawn "
+                  f"({got!r}: {sel}, {area}, {post})",
+                  got == "Web: Post form" and None not in (sel, area, post)
+                  and area[3] - area[1] > 40)
+            q.click((sel[0] + sel[2]) // 2, (sel[1] + sel[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            row, _ = pixels(q, page[0], sel[3], page[2], page[3], CHOSEN)
+            check(f"a click opens the list under the box, the chosen option "
+                  f"(the second) lit ({row})", row is not None and
+                  sel[3] < row[1] < sel[3] + 60)
+            seen = len(q.serial())
+            h = row[3] - row[1] + 1
+            q.click((row[0] + row[2]) // 2, row[1] + h + h // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            gone, _ = pixels(q, page[0], sel[3], page[2], page[3], CHOSEN)
+            check("a click on the third option chooses it, and the list "
+                  "closes", "chose 'Large'" in q.serial()[seen:] and
+                  gone is None)
+            q.click((area[0] + area[2]) // 2, (area[1] + area[3]) // 2)
+            time.sleep(0.5)
+            q.sendkey("ret")
+            typed(q, "second")
+            q.click((post[0] + post[2]) // 2, (post[1] + post[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Posted")
+            sent = [b for p, b in POSTED if p == "/post"]
+            check(f"the button POSTs the form: the chosen option's value, "
+                  f"the text's lines ending in CR LF ({got!r}, {sent})",
+                  got == "Web: Posted" and
+                  sent[-1:] == [b"size=l&note=first%0D%0Asecond"])
         finally:
             q.close()
     finally:

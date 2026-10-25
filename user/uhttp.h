@@ -189,9 +189,13 @@ static inline void http_set_roots(const uint8_t *roots, uint32_t len,
     http_tls_cfg.verify = require;
 }
 
-static inline int http_get(uint32_t ip, uint32_t port, const char *host,
-                           const char *path, int use_tls, http_sink sink,
-                           void *arg, struct http_result *res)
+/* One request: a GET, or with a body a POST of a form's fields
+   (application/x-www-form-urlencoded, what a browser sends) */
+static inline int http_request(uint32_t ip, uint32_t port, const char *host,
+                               const char *path, int use_tls,
+                               const char *body, uint32_t body_len,
+                               http_sink sink, void *arg,
+                               struct http_result *res)
 {
     static char req[2560];
     static char buf[HTTP_CHUNK];
@@ -221,22 +225,43 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
     }
 
     int r = 0;
-    const char *pre = "GET ";
+    const char *pre = body ? "POST " : "GET ";
     while (*pre)
         req[r++] = *pre++;
-    for (int i = 0; path[i] && r < (int)sizeof(req) - 128; i++)
+    for (int i = 0; path[i] && r < (int)sizeof(req) - 512; i++)
         req[r++] = path[i];
     const char *mid = " HTTP/1.1\r\nHost: ";
     while (*mid)
         req[r++] = *mid++;
-    for (int i = 0; host[i] && r < (int)sizeof(req) - 64; i++)
+    for (int i = 0; host[i] && r < (int)sizeof(req) - 256; i++)
         req[r++] = host[i];
     const char *end = "\r\nUser-Agent: ThreadOS\r\nAccept: text/html\r\n"
-                      "Connection: close\r\n\r\n";
+                      "Connection: close\r\n";
     while (*end)
         req[r++] = *end++;
+    if (body) {
+        const char *ct = "Content-Type: application/x-www-form-urlencoded"
+                         "\r\nContent-Length: ";
+        while (*ct)
+            req[r++] = *ct++;
+        char digits[12];
+        int nd = 0;
+        uint32_t v = body_len;
+        do {
+            digits[nd++] = (char)('0' + v % 10);
+            v /= 10;
+        } while (v);
+        while (nd)
+            req[r++] = digits[--nd];
+        req[r++] = '\r';
+        req[r++] = '\n';
+    }
+    req[r++] = '\r';
+    req[r++] = '\n';
 
-    if (http_tp_send(&tp, req, (uint32_t)r) < 0) {
+    /* (the body apart: it may be larger than the headers' buffer) */
+    if (http_tp_send(&tp, req, (uint32_t)r) < 0 ||
+        (body && body_len && http_tp_send(&tp, body, body_len) < 0)) {
         http_tp_close(&tp);
         return -1;
     }
@@ -373,6 +398,13 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
 
     http_tp_close(&tp);
     return 0;
+}
+
+static inline int http_get(uint32_t ip, uint32_t port, const char *host,
+                           const char *path, int use_tls, http_sink sink,
+                           void *arg, struct http_result *res)
+{
+    return http_request(ip, port, host, path, use_tls, 0, 0, sink, arg, res);
 }
 
 /* Resolves a name (or takes an address directly). 0 = it failed. */

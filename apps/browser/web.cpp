@@ -491,18 +491,38 @@ static bool read_file(const char* name, std::string& out)
 
 // A page over the network: httpget writes it to a file and says by its
 // exit code whether it worked
+static bool write_file(const char* name, const std::string& data)
+{
+    FILE* f = fopen(name, "wb");
+    if (!f)
+        return false;
+    bool ok = fwrite(data.data(), 1, data.size(), f) == data.size();
+    fclose(f);
+    return ok;
+}
+
+// With 'post', a form's fields go as the body of a POST - through a
+// file, since they may be longer than an argument can be
 static bool fetch(const std::string& address, std::string& out,
-                  const char* file = ".web-page.htm")
+                  const char* file = ".web-page.htm",
+                  const std::string* post = nullptr)
 {
     url u(address);
     std::string path = u.path().empty() ? "/" : u.path();
     if (!u.query().empty())
         path += "?" + u.query();
     // (files whose names start with a dot: not the person's)
+    const char* body = ".web-form.txt";
+    if (post && !write_file(body, *post))
+        return false;
     pid_t pid = fork();
     if (pid == 0) {
-        char* args[] = {(char*)"httpget", (char*)address.c_str(), (char*)"0",
+        char* get[] = {(char*)"httpget", (char*)address.c_str(), (char*)"0",
+                       (char*)path.c_str(), (char*)file, nullptr};
+        char* with[] = {(char*)"httpget", (char*)"-p", (char*)body,
+                        (char*)address.c_str(), (char*)"0",
                         (char*)path.c_str(), (char*)file, nullptr};
+        char** args = post ? with : get;
         execv("httpget", args);
         _exit(127);
     }
@@ -540,11 +560,55 @@ static bool address_picked;           // clicked: the next key replaces it
 // do to the container. Each is a box the page's CSS sizes (the defaults
 // are in FORM_CSS); a text field draws its value itself, so typing into
 // it does not lay the page out again, and a button carries its words as
-// text litehtml places, so the box fits them
+// text litehtml places, so the box fits them. A <select> keeps its
+// options and shows the chosen one; a <textarea> takes its text out of
+// the page and holds it as its value.
+struct option {
+    std::string text, value;
+};
+
+// Text broken into lines that fit 'width': at its newlines, and at the
+// last space before the edge (mid-word only when a word is wider still)
+static std::vector<std::string> wrap(const std::string& s, int width,
+                                     int face, int px)
+{
+    std::vector<std::string> out;
+    std::string line;
+    for (size_t i = 0; i <= s.size(); i++) {
+        if (i == s.size() || s[i] == '\n') {
+            out.push_back(line);
+            line.clear();
+            continue;
+        }
+        line += s[i];
+        if (i + 1 < s.size() && (s[i + 1] & 0xC0) == 0x80)
+            continue;                  // the rest of a UTF-8 letter first
+        if (ud_width(line.c_str(), face, px) <= width || line.size() < 2)
+            continue;
+        size_t cut = line.rfind(' ');
+        std::string rest;
+        if (cut != std::string::npos && cut > 0) {
+            rest = line.substr(cut + 1);
+            line.erase(cut);
+        } else {
+            cut = line.size() - 1;
+            while (cut > 0 && (line[cut] & 0xC0) == 0x80)
+                cut--;
+            rest = line.substr(cut);
+            line.erase(cut);
+        }
+        out.push_back(line);
+        line = rest;
+    }
+    return out;
+}
+
 class el_input : public html_tag {
   public:
     std::string type, name, value, placeholder;
     bool checked = false;
+    std::vector<option> options;       // a <select>'s
+    int chosen = 0;
 
     explicit el_input(const document::ptr& d) : html_tag(d) {}
 
@@ -553,17 +617,33 @@ class el_input : public html_tag {
         return type == "submit" || type == "button" || type == "reset" ||
                type == "image";
     }
-    bool is_text() const { return !is_button() && !is_box(); }
+    bool is_text() const
+    {
+        return !is_button() && !is_box() && type != "select" &&
+               type != "textarea";
+    }
     bool is_box() const { return type == "checkbox" || type == "radio"; }
 
     void parse_attributes() override
     {
         bool button = !strcmp(get_tagName(), "button");
         type = get_attr("type", button ? "submit" : "text");
+        if (!strcmp(get_tagName(), "select") ||
+            !strcmp(get_tagName(), "textarea"))
+            type = get_tagName();
         for (auto& c : type)
             c = (char)tolower((unsigned char)c);
+        if (type == "select")
+            read_options(shared_from_this());
+        if (type == "textarea") {
+            std::string text;
+            get_text(text);
+            value = text;
+            clearRecursive();          // drawn by us, not laid out as words
+        }
         name = get_attr("name", "");
-        value = get_attr("value", is_box() ? "on" : "");
+        if (type != "textarea")
+            value = get_attr("value", is_box() ? "on" : "");
         placeholder = get_attr("placeholder", "");
         checked = get_attr("checked") != nullptr;
         if (!button && is_button())
@@ -572,12 +652,67 @@ class el_input : public html_tag {
         html_tag::parse_attributes();
     }
 
+    // Options straight in the <select> or in an <optgroup> in it
+    void read_options(const element::ptr& in)
+    {
+        for (auto& el : in->children()) {
+            if (!strcmp(el->get_tagName(), "optgroup")) {
+                read_options(el);
+                continue;
+            }
+            if (strcmp(el->get_tagName(), "option"))
+                continue;
+            option o;
+            el->get_text(o.text);
+            size_t a = o.text.find_first_not_of(" \t\r\n");
+            size_t b = o.text.find_last_not_of(" \t\r\n");
+            o.text = a == std::string::npos ? "" : o.text.substr(a, b - a + 1);
+            o.value = el->get_attr("value", o.text.c_str());
+            if (el->get_attr("selected"))
+                chosen = (int)options.size();
+            options.push_back(o);
+        }
+    }
+
+    // A <select> as wide as its longest option, a <textarea> as its
+    // cols and rows say - unless the page's CSS gives a size
+    void compute_styles(bool recursive) override
+    {
+        html_tag::compute_styles(recursive);
+        font* f = (font*)css().get_font();
+        int px = f ? f->px : FONT_PX, face = f ? f->face : UD_SANS;
+        if (type == "select" && css().get_width().is_predefined()) {
+            int w = 40;
+            for (auto& o : options) {
+                int ow = ud_width(o.text.c_str(), face, px);
+                if (ow > w)
+                    w = ow;
+            }
+            css_w().set_width(css_length((float)(w + 22)));
+        }
+        if (type == "textarea") {
+            int cols = atoi(get_attr("cols", "20")), rows = atoi(get_attr("rows", "2"));
+            if (cols < 2)
+                cols = 20;
+            if (rows < 1)
+                rows = 2;
+            if (css().get_width().is_predefined())
+                css_w().set_width(css_length(
+                    (float)(cols * ud_width("0", face, px))));
+            if (css().get_height().is_predefined())
+                css_w().set_height(css_length((float)(rows * line_h(px))));
+        }
+    }
+
+    static int line_h(int px) { return (px * 117 + 50) / 100; }
+
     void draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
               const std::shared_ptr<render_item>& ri) override;
 };
 
 static std::vector<std::weak_ptr<el_input>> inputs;   // the page's, in order
 static std::shared_ptr<el_input> typing;              // the field with the keys
+static std::shared_ptr<el_input> list_open;           // a <select> showing its list
 
 static const char FORM_CSS[] =
     "input{border:1px solid #8a8a90;background:#fff;padding:3px 5px;"
@@ -586,12 +721,16 @@ static const char FORM_CSS[] =
     "width:auto;height:auto;background:#e6e6ea;border:1px solid #8a8a90;"
     "border-radius:4px;padding:3px 10px;white-space:nowrap}"
     "input[type=checkbox],input[type=radio]{width:11px;height:11px;"
-    "padding:0;margin:0 3px}";
+    "padding:0;margin:0 3px}"
+    "select,textarea{border:1px solid #8a8a90;background:#fff;"
+    "padding:3px 5px;vertical-align:middle}"
+    "select{height:1.2em;border-radius:4px}";
 
 element::ptr window_container::create_element(
     const char* tag, const string_map&, const std::shared_ptr<document>& d)
 {
-    if (strcmp(tag, "input") && strcmp(tag, "button"))
+    if (strcmp(tag, "input") && strcmp(tag, "button") &&
+        strcmp(tag, "select") && strcmp(tag, "textarea"))
         return nullptr;
     auto el = std::make_shared<el_input>(d);
     inputs.push_back(el);
@@ -621,11 +760,37 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
         }
         return;
     }
-    if (!is_text())
-        return;                               // the words are litehtml's
     font* f = (font*)css().get_font();
     int px = f ? f->px : FONT_PX, face = f ? f->face : UD_SANS;
+    uint32_t ink = rgb(css().get_color());
     int base = by + (bh - px) / 2 + (px * 93 + 50) / 100;
+    if (type == "select") {
+        if (!options.empty())
+            ud_text(w, bx, base, options[chosen].text.c_str(), ink, face, px);
+        int ax = bx + bw - 8, ay = by + bh / 2;   // the arrow: a list here
+        ud_line(w, ax - 4, ay - 2, ax, ay + 2, 20, 0x505056);
+        ud_line(w, ax, ay + 2, ax + 4, ay - 2, 20, 0x505056);
+        return;
+    }
+    if (type == "textarea") {
+        std::vector<std::string> lines = wrap(value, bw - 2, face, px);
+        int lh = line_h(px), fit = bh / lh > 0 ? bh / lh : 1;
+        // Being typed into, it shows the end, where the caret is
+        size_t first = typing.get() == this && lines.size() > (size_t)fit
+                           ? lines.size() - fit : 0;
+        int end = bx;
+        for (size_t i = first; i < lines.size() && i < first + fit; i++)
+            end = ud_text(w, bx, by + (int)(i - first) * lh + (px * 93 + 50) / 100,
+                          lines[i].c_str(), ink, face, px);
+        if (typing.get() == this) {
+            int row = (int)(lines.size() - 1 - first);
+            ud_fill(w, lines.back().empty() ? bx : end + 1, by + row * lh, 1,
+                    px, 0x202024);
+        }
+        return;
+    }
+    if (!is_text())
+        return;                               // the words are litehtml's
     std::string shown = type == "password" ? std::string(value.size(), '*')
                                            : value;
     // The end of what is typed, where the caret is, stays in sight
@@ -638,8 +803,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
         ud_text(w, bx, base, ph.c_str(), 0x8A8A90, face, px);
         return;
     }
-    int end = ud_text(w, bx, base, shown.c_str(), rgb(css().get_color()),
-                      face, px);
+    int end = ud_text(w, bx, base, shown.c_str(), ink, face, px);
     if (typing.get() == this)
         ud_fill(w, shown.empty() ? bx : end + 1, by + (bh - px) / 2, 1, px,
                 0x202024);
@@ -647,7 +811,8 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 
 static void draw();
 static void scroll_by(int dy);
-static void open_page(const std::string& where0, bool remember);
+static void open_page(const std::string& where0, bool remember,
+                      const std::string* post = nullptr);
 static std::string form_encode(const std::string& s);
 
 static void layout()
@@ -678,11 +843,10 @@ static element::ptr form_of(const element::ptr& el)
     return nullptr;
 }
 
-// What a form holds goes after its action as name=value pairs - the
-// button pressed among them, the other buttons not. A form that says
-// POST is sent this way too: httpget only GETs, and the search pages
-// such forms usually are take either. ('by' is a copy: it may be the
-// field with the keys, which the next page lets go of.)
+// What a form holds goes as name=value pairs - the button pressed among
+// them, the other buttons not: after the action's address, or for a
+// POST form as the body. ('by' is a copy: it may be the field with the
+// keys, which the next page lets go of.)
 static void submit(std::shared_ptr<el_input> by)
 {
     element::ptr form = form_of(by);
@@ -695,14 +859,39 @@ static void submit(std::shared_ptr<el_input> by)
             continue;
         if ((in->is_button() && in != by) || (in->is_box() && !in->checked))
             continue;
+        std::string v = in->value;
+        if (in->type == "select") {
+            if (in->options.empty())
+                continue;
+            v = in->options[in->chosen].value;
+        } else if (in->type == "textarea") {
+            // Lines end in CR LF in what a form sends, as in browsers
+            v.clear();
+            for (char c : in->value) {
+                if (c == '\n')
+                    v += '\r';
+                v += c;
+            }
+        }
         if (!q.empty())
             q += '&';
-        q += form_encode(in->name) + "=" + form_encode(in->value);
+        q += form_encode(in->name) + "=" + form_encode(v);
     }
     const char* action = form->get_attr("action", "");
+    std::string method = form->get_attr("method", "get");
+    for (auto& c : method)
+        c = (char)tolower((unsigned char)c);
     std::string target =
         resolve(url(cont.base), url(*action ? action : cont.base)).str();
-    target = target.substr(0, target.find_first_of("?#")) + "?" + q;
+    target = target.substr(0, target.find('#'));
+    if (method == "post") {
+        std::printf("[web] form posted to %s: %s\n", target.c_str(),
+                    q.c_str());
+        std::fflush(stdout);
+        open_page(target, true, &q);
+        return;
+    }
+    target = target.substr(0, target.find('?')) + "?" + q;
     std::printf("[web] form sent: %s\n", target.c_str());
     std::fflush(stdout);
     open_page(target, true);
@@ -737,11 +926,65 @@ static bool click_form(int px, int py)
         } else if (in->is_button()) {
             if (in->type == "submit" || in->type == "image")
                 submit(in);
+        } else if (in->type == "select") {
+            if (!in->options.empty())
+                list_open = in;
         } else
             typing = in;
         return true;
     }
     return false;
+}
+
+// The list an open <select> shows: under its box, a row per option, in
+// the window's coordinates
+struct list_geom {
+    int x, y, w, row, px;
+};
+
+static list_geom list_at(const std::shared_ptr<el_input>& sel)
+{
+    position p = sel->get_placement();
+    font* f = (font*)sel->css().get_font();
+    list_geom g;
+    g.px = f ? f->px : FONT_PX;
+    g.x = cont.sx(p.x) - 6;
+    g.y = cont.sy(p.y + p.height) + 5;
+    g.w = (int)p.width + 12;
+    g.row = g.px + 8;
+    return g;
+}
+
+static void draw_list()
+{
+    if (!list_open)
+        return;
+    list_geom g = list_at(list_open);
+    int n = (int)list_open->options.size(), w = cont.win;
+    ud_fill(w, g.x, g.y, g.w, n * g.row + 2, 0x8A8A90);
+    for (int i = 0; i < n; i++) {
+        int ry = g.y + 1 + i * g.row;
+        bool on = i == list_open->chosen;
+        ud_fill(w, g.x + 1, ry, g.w - 2, g.row, on ? 0x3366CC : 0xFFFFFF);
+        ud_text(w, g.x + 6, ry + (g.row - g.px) / 2 + (g.px * 93 + 50) / 100,
+                list_open->options[i].text.c_str(),
+                on ? 0xFFFFFF : 0x202024, UD_SANS, g.px);
+    }
+}
+
+// A click while the list is open: on an option it is chosen; anywhere
+// the list closes
+static void click_list(int x, int y)
+{
+    list_geom g = list_at(list_open);
+    int i = (y - g.y - 1) / g.row;
+    if (x >= g.x && x < g.x + g.w && y > g.y &&
+        i < (int)list_open->options.size()) {
+        list_open->chosen = i;
+        std::printf("[web] chose '%s'\n", list_open->options[i].text.c_str());
+        std::fflush(stdout);
+    }
+    list_open.reset();
 }
 
 static std::string form_encode(const std::string& s)
@@ -775,7 +1018,8 @@ static bool looks_like_words(const std::string& s)
     return !f;
 }
 
-static void open_page(const std::string& where0, bool remember)
+static void open_page(const std::string& where0, bool remember,
+                      const std::string* post)
 {
     std::string where = where0;
     if (!where.empty() && where.compare(0, 6, "about:") != 0 &&
@@ -807,7 +1051,7 @@ static void open_page(const std::string& where0, bool remember)
         // window until the page is in
         status_line = "Loading " + target + " ...";
         draw();
-        ok = fetch(target, html);
+        ok = fetch(target, html, ".web-page.htm", post);
     } else {
         ok = read_file(where.c_str(), html);
     }
@@ -825,6 +1069,7 @@ static void open_page(const std::string& where0, bool remember)
     address = target;
     address_picked = false;
     typing.reset();
+    list_open.reset();
     inputs.clear();
     doc = document::createFromString(html, &cont,
                                      std::string(master_css) + FORM_CSS);
@@ -909,6 +1154,7 @@ static void draw()
     if (doc) {
         position clip(0, cont.scroll, cont.width, cont.page_h());
         doc->draw(0, 0, 0, &clip);
+        draw_list();
     }
     // Where in the page the window is, when the page is longer than it:
     // a thumb as long as the share that shows, at the right edge
@@ -988,7 +1234,9 @@ int main(int argc, char** argv)
             } else if (ev.type == WEV_SCROLL) {
                 scroll_by(-ev.val * LINE_STEP);
             } else if (ev.type == WEV_CLICK) {
-                if (ev.y < BAR_H) {
+                if (list_open) {
+                    click_list(ev.x, ev.y);
+                } else if (ev.y < BAR_H) {
                     typing.reset();
                     int b = (ev.x - 10) / BTN_STEP;
                     if (ev.x >= ADDR_X)
@@ -1017,9 +1265,22 @@ int main(int argc, char** argv)
                 }
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
+                if (list_open) {
+                    int& k = list_open->chosen;
+                    if (c == (char)KEY_DOWN &&
+                        k + 1 < (int)list_open->options.size())
+                        k++;
+                    else if (c == (char)KEY_UP && k > 0)
+                        k--;
+                    else if (c == '\n' || c == 27)
+                        list_open.reset();
+                    continue;
+                }
                 if (typing && (c == '\n' || c == '\b' || c == 27 ||
                                (c >= 0x20 && c < 0x7F))) {
-                    if (c == '\n')
+                    if (c == '\n' && typing->type == "textarea")
+                        typing->value += c;    // a new line, not a send
+                    else if (c == '\n')
                         submit(typing);
                     else if (c == 27)
                         typing.reset();

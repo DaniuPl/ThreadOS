@@ -105,6 +105,8 @@ PAGE = b"<html>ThreadOS TCP works</html>\n"
 # own to hand over (a ciphertext prepared on the host, say) does not
 # have to add a branch to the server.
 SERVED = {}
+# What came in POSTs, (path, body) - a form's fields, as the browser sent them
+POSTED = []
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>The first page</h1>"
              + b"<p>A line filling page number one.</p>" * 40
@@ -1664,6 +1666,21 @@ def start_http_server():
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+
+        def do_POST(self):
+            """A form sent as a POST: answered with SERVED["POST <path>
+            <body>"], so a page comes back only for exactly that body"""
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n)
+            POSTED.append((self.path, body))
+            blob = SERVED.get("POST %s %s" % (self.path,
+                                              body.decode(errors="replace")))
+            self.send_response(200 if blob is not None else 404)
+            blob = blob if blob is not None else b"no such form"
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            self.wfile.write(blob)
 
         def do_GET(self):
             blob = SERVED.get(self.path)
