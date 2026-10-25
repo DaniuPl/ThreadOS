@@ -194,8 +194,11 @@ static inline int ug_layout_run(struct ug_layout *l)
         if (s->weight) {
             int share = i == last_flex
                             ? extra - assigned
-                            : (int)(((uint64_t)(unsigned int)extra *
-                                     (unsigned int)s->weight) /
+                            /* pixels times a weight: far inside 32
+                               bits, and a 64-bit division would need
+                               libgcc in protected mode */
+                            : (int)((unsigned int)extra *
+                                    (unsigned int)s->weight /
                                     (unsigned int)total_weight);
             assigned += share;
             size = s->minimum + share;

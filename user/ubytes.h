@@ -9,30 +9,35 @@ static int format_bytes(uint64_t bytes, char *out, int size)
     static const char *const units[] = {
         "B", "KiB", "MiB", "GiB", "TiB"
     };
-    uint64_t divisor = 1;
+    /* Shifts and masks, not division: the units are powers of two, and
+       a 64-bit division in protected mode would need libgcc, which the
+       programs are not linked with */
+    int shift = 0;
     int unit = 0;
 
-    while (unit < 4 && bytes >= divisor * 1024) {
-        divisor *= 1024;
+    while (unit < 4 && (bytes >> shift) >= 1024) {
+        shift += 10;
         unit++;
     }
 
-    uint64_t tenths = bytes * 10 / divisor;
-    uint64_t remainder = bytes * 10 % divisor;
-    if (remainder >= (divisor + 1) / 2)
+    uint64_t mask = shift ? (((uint64_t)1 << shift) - 1) : 0;
+    uint64_t half = shift ? ((uint64_t)1 << (shift - 1)) : 1;
+    uint32_t tenths = (uint32_t)((bytes * 10) >> shift);
+    if (shift && ((bytes * 10) & mask) >= half)
         tenths++;
     if (unit < 4 && tenths >= 10240) {
-        divisor *= 1024;
+        shift += 10;
         unit++;
-        tenths = bytes * 10 / divisor;
-        remainder = bytes * 10 % divisor;
-        if (remainder >= (divisor + 1) / 2)
+        mask = ((uint64_t)1 << shift) - 1;
+        half = (uint64_t)1 << (shift - 1);
+        tenths = (uint32_t)((bytes * 10) >> shift);
+        if (((bytes * 10) & mask) >= half)
             tenths++;
     }
 
     char digits[24];
     int n = 0, used = 0;
-    uint64_t whole = tenths / 10;
+    uint32_t whole = tenths / 10;
     do {
         digits[n++] = (char)('0' + whole % 10);
         whole /= 10;
