@@ -5880,3 +5880,17 @@ works and is checked by `make test`.
       programs by name (`launch_dock("gterm")`, read from icons[] in
       desktop.c) instead of by tile number, and the dock helpers default
       to no windows, as the desktop now starts with none.
+
+- [x] **Network and Bluetooth on the bar** (kernel/desktop.c, a new
+      `netbar` group).
+
+      Two icons left of 'show the desktop', lit when there is something
+      behind them: a wired card with an address, a Bluetooth adapter that
+      answered. A click hangs a card from the bar with the card's name and
+      the address, an honest line on Wi-Fi (no driver yet), or the reason
+      there is no Bluetooth adapter. With an adapter, the card searches
+      for devices in a thread of its own - the search listens for seconds,
+      and the compositor must not stop drawing for that long.
+
+      The test opens both cards against what QEMU gives: an RTL8139 with
+      10.0.2.15, and no USB controller, hence no Bluetooth.

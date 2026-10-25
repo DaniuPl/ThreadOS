@@ -43,6 +43,9 @@
 #include "include/smp.h"
 #include "include/hda.h"
 #include "include/spinlock.h"
+#include "include/bt.h"
+#include "include/net.h"
+#include "include/netdev.h"
 #ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define desktop_uid task64_uid
@@ -661,6 +664,18 @@ static int clock_x(void) { return video_w() - BAR_RIGHT - BAR_CLOCK_W; }
 static int desk_x0(void) { return clock_x() - BAR_ITEM_GAP - DESK_N * DESK_CELL; }
 static int load_x(void)  { return desk_x0() - BAR_ITEM_GAP - LOAD_W; }
 static int show_x(void)  { return load_x() - BAR_ITEM_GAP - SHOW_W; }
+/* The network and Bluetooth: an icon each, left of 'show the desktop' */
+static int net_x(void)   { return show_x() - BAR_ITEM_GAP - STAT_W; }
+static int bt_x(void)    { return net_x() - BAR_ITEM_GAP - STAT_W; }
+/* Which card hangs from the bar, if one does (draw_status_card) */
+#define STAT_NONE 0
+#define STAT_NET  1
+#define STAT_BT   2
+static int stat_open;
+static volatile int bt_searching;
+static int stat_scan_x, stat_scan_y;   /* the Search button, as drawn */
+static int status_card_click(int mx, int my);
+static int cat(char *d, int at, const char *s);
 /* The mark and the name at the left end: what opens the menu */
 static int logo_w(void)
 {
@@ -2588,6 +2603,12 @@ static void handle_input(int mx, int my, int buttons)
                     menu_open = 0;
                 else
                     menu_at(6, MENU_Y);
+            } else if (in_rect(mx, my, net_x(), 0, STAT_W, BAR_H)) {
+                menu_open = 0;
+                stat_open = stat_open == STAT_NET ? STAT_NONE : STAT_NET;
+            } else if (in_rect(mx, my, bt_x(), 0, STAT_W, BAR_H)) {
+                menu_open = 0;
+                stat_open = stat_open == STAT_BT ? STAT_NONE : STAT_BT;
             } else if (in_rect(mx, my, show_x(), 0, SHOW_W, BAR_H)) {
                 menu_open = 0;
                 toggle_show_desktop();
@@ -2605,6 +2626,10 @@ static void handle_input(int mx, int my, int buttons)
             } else {
                 menu_open = 0;
             }
+            prev_pressed = pressed;
+            return;
+        }
+        if (status_card_click(mx, my)) {
             prev_pressed = pressed;
             return;
         }
@@ -3564,6 +3589,178 @@ static void draw_logo(int x, int y, uint32_t c)
     gfx_line16(cx - r + 10, cy + r - 10, cx + r - 10, cy - r + 10, 18, c, 200);
 }
 
+
+/* --- The network and Bluetooth on the bar ---------------------------
+ *
+ * Two icons, lit when there is something behind them: a wired network
+ * with an address, an adapter that answered. A click hangs a card from
+ * the bar saying what there is - and, as everywhere in this system, why
+ * not when there is not. Bluetooth's card searches for devices; the
+ * search runs in a thread of its own, because it listens for seconds and
+ * the compositor must not stop drawing for that long. */
+
+static void bt_search_thread(void *arg)
+{
+    (void)arg;
+    bt_scan(STAT_SCAN_S);
+    bt_searching = 0;
+}
+
+static int stat_card_x(void)
+{
+    int icon = stat_open == STAT_NET ? net_x() : bt_x();
+    int x = icon + STAT_W / 2 - STAT_CARD_W / 2;
+    if (x + STAT_CARD_W > video_w() - 6)
+        x = video_w() - 6 - STAT_CARD_W;
+    return x < 6 ? 6 : x;
+}
+
+static void draw_status_icons(void)
+{
+    int y = (BAR_H - 16) / 2;
+    /* Wired: three boxes joined, lit with an address */
+    int nx = net_x(), up = netdev_present() && net_ip() != 0;
+    int a = up ? 255 : 90;
+    gfx_rrect(nx + 5, y + 1, 6, 5, 1, L.bar_text, a);
+    gfx_fill(nx + 7, y + 6, 2, 3, L.bar_text, a);
+    gfx_fill(nx + 2, y + 8, 12, 2, L.bar_text, a);
+    gfx_rrect(nx, y + 10, 6, 5, 1, L.bar_text, a);
+    gfx_rrect(nx + 10, y + 10, 6, 5, 1, L.bar_text, a);
+    /* (no hint while a card hangs there: it would cover the card) */
+    if (stat_open == STAT_NONE &&
+        in_rect(mouse_x, mouse_y, nx, 0, STAT_W, BAR_H))
+        hint_at(nx - hint_w(locale_text("Network")) / 2 + STAT_W / 2,
+                BAR_H + 4, locale_text("Network"));
+
+    /* Bluetooth's rune, lit with an adapter */
+    int bx = bt_x() + STAT_W / 2, ba = bt_present() ? 255 : 90;
+    int t = y, b = y + 15;
+    gfx_line16(bx * 16, t * 16, bx * 16, b * 16, 24, L.bar_text, ba);
+    gfx_line16(bx * 16, t * 16, (bx + 4) * 16, (t + 4) * 16, 24, L.bar_text,
+               ba);
+    gfx_line16((bx + 4) * 16, (t + 4) * 16, (bx - 4) * 16, (b - 4) * 16, 24,
+               L.bar_text, ba);
+    gfx_line16(bx * 16, b * 16, (bx + 4) * 16, (b - 4) * 16, 24, L.bar_text,
+               ba);
+    gfx_line16((bx + 4) * 16, (b - 4) * 16, (bx - 4) * 16, (t + 4) * 16, 24,
+               L.bar_text, ba);
+    if (stat_open == STAT_NONE &&
+        in_rect(mouse_x, mouse_y, bt_x(), 0, STAT_W, BAR_H))
+        hint_at(bt_x() - hint_w("Bluetooth") / 2 + STAT_W / 2, BAR_H + 4,
+                "Bluetooth");
+}
+
+static int stat_line(char *d, const char *a, const char *b)
+{
+    int n = cat(d, 0, a);
+    n = cat(d, n, b);
+    return n;
+}
+
+static void put_ip_text(char *d, uint32_t ip)
+{
+    int n = 0;
+    for (int i = 3; i >= 0; i--) {
+        n += put_num(d + n, (int)((ip >> (8 * i)) & 0xFF));
+        if (i)
+            d[n++] = '.';
+    }
+    d[n] = 0;
+}
+
+static void draw_status_card(void)
+{
+    if (stat_open == STAT_NONE)
+        return;
+    static char lines[STAT_LINES][64];
+    int n = 0;
+    const char *title;
+    if (stat_open == STAT_NET) {
+        title = locale_text("Network");
+        if (netdev_present()) {
+            stat_line(lines[n++], locale_text("Wired: "), netdev_name());
+            uint32_t ip = net_ip();
+            if (ip) {
+                char t[16];
+                put_ip_text(t, ip);
+                stat_line(lines[n++], locale_text("Address: "), t);
+            } else {
+                stat_line(lines[n++], locale_text("No address yet (DHCP)"),
+                          "");
+            }
+        } else {
+            stat_line(lines[n++], locale_text("No network card found"), "");
+        }
+        stat_line(lines[n++],
+                  locale_text("Wi-Fi: no adapter this system can drive"), "");
+    } else {
+        title = "Bluetooth";
+        if (!bt_present()) {
+            stat_line(lines[n++], locale_text("No adapter: "), bt_why());
+        } else {
+            stat_line(lines[n++], locale_text("Adapter: "), bt_address());
+            int found = bt_found();
+            for (int i = 0; i < found && n < STAT_LINES - 1; i++) {
+                const char *name = bt_found_name(i);
+                stat_line(lines[n++], name && name[0] ? name
+                                                      : bt_found_addr(i), "");
+            }
+            if (!found && !bt_searching)
+                stat_line(lines[n++], locale_text("No devices found yet"), "");
+        }
+    }
+
+    int x = stat_card_x(), y = BAR_H + 6;
+    int with_button = stat_open == STAT_BT && bt_present();
+    int h = STAT_PAD * 2 + STAT_ROW * (n + 1) + (with_button ? STAT_ROW + 6 : 0);
+    gfx_shadow(x, y, STAT_CARD_W, h, VOL_R, 14, theme_dark ? 150 : 90, 4);
+    gfx_frost(x, y, STAT_CARD_W, h, VOL_R, 10, L.menu_bg, L.menu_a);
+    gfx_rring16(x * 16, y * 16, STAT_CARD_W * 16, h * 16, VOL_R * 16, 16,
+                L.win_line, 200);
+    int ty = y + STAT_PAD;
+    ui_font_text(UI_BOLD, UI_PX, x + STAT_PAD,
+                 ui_font_baseline_in(UI_PX, ty, STAT_ROW), title, L.menu_text);
+    for (int i = 0; i < n; i++) {
+        ty += STAT_ROW;
+        char cut[72];
+        ui_font_text(UI_SANS, UI_PX, x + STAT_PAD,
+                     ui_font_baseline_in(UI_PX, ty, STAT_ROW),
+                     fit_text(lines[i], UI_SANS, UI_PX,
+                              STAT_CARD_W - 2 * STAT_PAD, cut, sizeof(cut)),
+                     L.menu_text);
+    }
+    if (with_button) {
+        ty += STAT_ROW + 6;
+        stat_scan_x = x + STAT_PAD;
+        stat_scan_y = ty;
+        const char *what = locale_text(bt_searching ? "Searching..."
+                                                    : "Search for devices");
+        int bw = ui_font_width(UI_SANS, UI_PX, what) + 24;
+        gfx_rrect(stat_scan_x, ty, bw, STAT_ROW, 8,
+                  bt_searching ? L.bar_dim : L.accent, 255);
+        ui_font_text(UI_SANS, UI_PX, stat_scan_x + 12,
+                     ui_font_baseline_in(UI_PX, ty, STAT_ROW), what,
+                     L.accent_text);
+    }
+}
+
+/* A press while a card hangs from the bar: its button, or anywhere
+   else, which puts it away. 1 = the press was the card's. */
+static int status_card_click(int mx, int my)
+{
+    if (stat_open == STAT_NONE)
+        return 0;
+    if (stat_open == STAT_BT && bt_present() && !bt_searching &&
+        in_rect(mx, my, stat_scan_x, stat_scan_y, 160, STAT_ROW)) {
+        bt_searching = 1;
+        if (!task_create("btsearch", bt_search_thread, (void *)0))
+            bt_searching = 0;
+        return 1;
+    }
+    stat_open = STAT_NONE;
+    return 1;
+}
+
 static void draw_bar(void)
 {
     int w = video_w();
@@ -3586,12 +3783,14 @@ static void draw_bar(void)
        what the keyboard will reach */
     if (focus_idx >= 0 && wins[focus_idx].used && here(focus_idx)) {
         char cut[sizeof(wins[0].title) + 4];
-        int room = show_x() - BAR_ITEM_GAP - (x + BAR_APP_GAP);
+        int room = bt_x() - BAR_ITEM_GAP - (x + BAR_APP_GAP);
         ui_font_text(UI_SANS, BAR_PX, x + BAR_APP_GAP, base,
                      fit_text(wins[focus_idx].title, UI_SANS, BAR_PX,
                               room > 0 ? room : 0, cut, sizeof(cut)),
                      L.bar_text);
     }
+
+    draw_status_icons();
 
     /* "Show the desktop": a window drawn small - filled while the
        windows are away, an outline while they are here */
@@ -6276,6 +6475,7 @@ static void desktop_thread(void *arg)
         draw_notes();
         draw_search();
         draw_volume();
+        draw_status_card();
         draw_ask();
         /* What was just saved stays on the screen for a moment - the
            hint itself lives one frame, so it is asked for again until

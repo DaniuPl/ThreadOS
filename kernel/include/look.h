@@ -45,6 +45,12 @@
 #define LOAD_H       8
 /* show the desktop: a button the size of a cell */
 #define SHOW_W       18
+#define STAT_W       16      /* the network and Bluetooth icons */
+#define STAT_CARD_W  260     /* the card a click on one hangs from the bar */
+#define STAT_ROW     20
+#define STAT_PAD     12
+#define STAT_LINES   8
+#define STAT_SCAN_S  5       /* how long Bluetooth listens for devices */
 
 /* --- windows ----------------------------------------------------------- */
 /* The title bar. Twenty two pixels: the lights are eleven across and
