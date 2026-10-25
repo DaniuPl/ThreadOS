@@ -50,6 +50,9 @@ static struct setting settings[] = {
                             "100-400 per cent (or 1-4 times)", 0, { 0 } },
     { "resolution", "native", "the screen's mode: native (the panel's own)\n"
                             "or one like 1280x800", 0, { 0 } },
+    { "search", "https://duckduckgo.com/html/?q=",
+                            "where the browser sends words typed as an\n"
+                            "address: they go after this", 0, { 0 } },
     { "motion", "1",        "windows opening and minimising: 0 still,\n"
                             "1 quick, 2-10 that many times slower", 0, { 0 } },
     { "hidden", "0",        "the file manager shows system files: 0 no,\n"

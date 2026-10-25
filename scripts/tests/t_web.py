@@ -17,7 +17,18 @@ for, from outside:
   readable on it - and the blue underline of the link
 
   a click on that underline follows the link to the second page, and
-  the back arrow returns to the first
+  the back arrow returns to the first; forward goes there again
+
+  words typed as an address are searched for, with the engine the
+  'search' setting names; a link to '#end' scrolls the page to it, and
+  reload fetches a page the server has changed
+
+  a picture is drawn at the size the page asks for, a style sheet from
+  a file of its own is applied, and a long page has a scroll thumb
+
+  a form: its field takes the keys after a click, and Enter or a button
+  sends what the form holds - the server answers only to exactly the
+  query expected
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -45,15 +56,46 @@ body{margin:16px;font-family:sans-serif} h1{color:#c03030;font-size:30px}
 </body></html>"""
 # A page that takes the rest from elsewhere: a style sheet of its own,
 # a picture drawn at twice its size, and enough lines to scroll
-THREE = (b"<html><head><title>Three</title>"
-         b"<link rel=stylesheet href=style.css></head><body>"
-         b"<img src=pic.png width=128 height=96>"
-         b"<div class=ext>styled from a file</div>" +
-         b"".join(b"<p>line %d</p>" % i for i in range(40)) +
-         b"</body></html>")
+def three(title):
+    return (b"<html><head><title>" + title + b"</title>"
+            b"<link rel=stylesheet href=style.css></head><body>"
+            b"<img src=pic.png width=128 height=96>"
+            b"<div class=ext>styled from a file</div>"
+            b"<p><a href='#end' style='color:#806040'>to the end</a></p>" +
+            b"".join(b"<p>line %d</p>" % i for i in range(40)) +
+            b"<h2 id=end style='color:#aa22cc'>The end</h2>"
+            b"</body></html>")
+
+
+THREE = three(b"Three")
+PURPLE = (0xAA, 0x22, 0xCC)
+# (the link to it in a colour of its own: the picture's blue is LINK's)
+BROWN = (0x80, 0x60, 0x40)
+RESULTS = (b"<html><head><title>Results</title></head><body>"
+           b"<p>found it</p></body></html>")
 STYLE = b".ext{background:#22aa44;color:white;padding:6px;width:150px}"
 GREEN_BOX = (0x22, 0xAA, 0x44)
 THUMB = (0x9A, 0x9A, 0xA0)
+# Forms: the field, the box and the button each in a colour of its own,
+# for the test to find them by
+FIELD, TICK_BG, GO_BG = (0xFF, 0xF0, 0xD0), (0xD0, 0xF0, 0xFF), (0xC0, 0xFF, 0xC0)
+FORM = (b"<html><head><title>Form</title><style>"
+        b".f{background:#fff0d0} .t{background:#d0f0ff} .g{background:#c0ffc0}"
+        b"</style></head><body>"
+        b"<form action=/find><p><input class=f name=q placeholder='Type here'>"
+        b"<input type=hidden name=lang value=en> "
+        b"<input class=t type=checkbox name=all checked> "
+        b"<input class=g type=submit value=Go></p></form>"
+        b"<form action=/other method=post><p><input name=x value=1> "
+        b"<button style='background:#ffc0ff' name=b value=ok>Send</button>"
+        b"</p></form></body></html>")
+PINK = (0xFF, 0xC0, 0xFF)
+
+
+def page_titled(t):
+    return b"<html><head><title>" + t + b"</title></head><body></body></html>"
+
+
 TWO = (b"<html><head><title>Page two</title></head><body>"
        b"<h2>Second page</h2><p>You followed the link.</p></body></html>")
 
@@ -85,6 +127,18 @@ def pixels(q, x0, y0, x1, y1, colour):
     return (min(xs), min(ys), max(xs), max(ys)), len(xs)
 
 
+def colours(q, box, want):
+    """How many pixels in a box are of colours 'want' says yes to"""
+    _, _, at = q.screen_raw()
+    return sum(1 for y in range(box[1], box[3] + 1)
+               for x in range(box[0], box[2] + 1) if want(at(x, y)))
+
+
+def typed(q, text):
+    for ch in text:
+        q.sendkey(Qemu.KEYNAMES.get(ch, ch))
+
+
 def main():
     print()
     print("--- the web browser in a window (the 64-bit kernel) ---")
@@ -99,6 +153,11 @@ def main():
     SERVED["/three.html"] = THREE
     SERVED["/style.css"] = STYLE
     SERVED["/pic.png"] = make_png(64, 48)
+    SERVED["/s?q=hello+world"] = RESULTS
+    SERVED["/form.html"] = FORM
+    SERVED["/find?q=two+words&lang=en&all=on"] = page_titled(b"Found")
+    SERVED["/find?q=abc&lang=en"] = page_titled(b"Found plain")
+    SERVED["/other?x=1&b=ok"] = page_titled(b"Sent")
     work = tempfile.mkdtemp()
     iso = os.path.join(work, "t.iso")
     disk = os.path.join(work, "disk.img")
@@ -125,6 +184,17 @@ def main():
             page = (cx, cy + bar, cx + w0, cy + h0 - define(SRC, "STATUS_H"))
 
             q.mouse_home()
+            # Words typed as an address go to the 'search' setting's
+            # engine: here, the server on the host - set from the
+            # terminal, where the profile made at setup is the admin
+            q.launch_dock("gterm", w=sw, h=sh)
+            time.sleep(3)
+            q.click(cx + 200, cy + 150)
+            q.type_line("set search http://10.0.2.2:%d/s?q=" % port)
+            time.sleep(2)
+            q.sendkey("alt-f4")
+            time.sleep(2)
+            q.n_win -= 1
             q.launch_dock("gweb", w=sw, h=sh)            # the "Web" tile
             got = wait_title(q, geom, "Web: Start")
             check(f"the Web tile opens the browser on its start page "
@@ -182,6 +252,27 @@ def main():
             got = wait_title(q, geom, "Web: Test page")
             check(f"the back arrow returns to the first page ({got!r})",
                   got == "Web: Test page")
+            step = define(SRC, "BTN_STEP")
+            q.click(cx + 10 + step + 14, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Page two")
+            check(f"and the forward arrow goes there again ({got!r})",
+                  got == "Web: Page two")
+            q.click(cx + 10 + 14, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            wait_title(q, geom, "Web: Test page")
+
+            # --- words, not an address: a search ------------------------
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            for ch in "hello world":
+                q.sendkey(Qemu.KEYNAMES.get(ch, ch))
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Results")
+            check(f"words typed as an address are searched for, with the "
+                  f"engine the setting names ({got!r})",
+                  got == "Web: Results")
 
             # --- a picture, a style sheet, and a long page --------------
             q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
@@ -222,6 +313,93 @@ def main():
                               THUMB)
             check(f"and PgDn moves it down ({thumb} -> {moved})",
                   thumb and moved and moved[1] > thumb[1] + 20)
+
+            # --- a link to a place on the same page ----------------------
+            q.sendkey("home")
+            time.sleep(1.5)
+            box, n = pixels(q, *page, PURPLE)
+            check("the heading at the end is out of sight at the top",
+                  box is None)
+            link, n = pixels(q, page[0], page[1], page[2] - 20, page[3], BROWN)
+            seen = len(q.serial())
+            q.click((link[0] + link[2]) // 2, link[3] - 3)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            box, n = pixels(q, *page, PURPLE)
+            check(f"a click on '#end' scrolls to it - the heading shows "
+                  f"({box})", box is not None and
+                  "[web] went to #end" in q.serial()[seen:] and
+                  wait_title(q, geom, "Web: Three") == "Web: Three")
+
+            # --- reload: what the server has now -------------------------
+            SERVED["/three.html"] = three(b"Three again")
+            q.click(cx + 10 + 2 * step + 14, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Three again")
+            check(f"the reload button fetches the page again ({got!r})",
+                  got == "Web: Three again")
+
+            # --- a form ---------------------------------------------------
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/form.html")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Form")
+            time.sleep(1)
+            field, _ = pixels(q, *page, FIELD)
+            tick, _ = pixels(q, *page, TICK_BG)
+            go, _ = pixels(q, *page, GO_BG)
+            send, _ = pixels(q, *page, PINK)
+            check(f"a form's field, box and buttons are drawn ({got!r}: "
+                  f"{field}, {tick}, {go}, {send})",
+                  got == "Web: Form" and None not in (field, tick, go, send)
+                  and field[2] - field[0] > 100)
+            grey = lambda c: (0x60 < c[0] < 0xB0 and abs(c[0] - c[1]) < 12
+                              and abs(c[1] - c[2]) < 12)
+            before = colours(q, field, grey)
+            q.click((field[0] + field[2]) // 2, (field[1] + field[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            after_ = colours(q, field, grey)
+            caret = colours(q, field, lambda c: c == (0x20, 0x20, 0x24))
+            check(f"the field shows its placeholder until it is clicked; "
+                  f"then a caret ({before}, {after_}, {caret} pixels)",
+                  before > 10 and after_ == 0 and caret > 5)
+            seen = len(q.serial())
+            typed(q, "two words")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Found")
+            sent = [ln for ln in q.serial()[seen:].splitlines()
+                    if "form sent" in ln]
+            check(f"Enter sends the form: the field, the hidden value and "
+                  f"the ticked box, encoded ({got!r}, {sent})",
+                  got == "Web: Found" and
+                  any(ln.endswith("/find?q=two+words&lang=en&all=on")
+                      for ln in sent))
+
+            q.click(cx + define(SRC, "BACK_W") // 2 + 10, cy + bar // 2)
+            wait_title(q, geom, "Web: Form")
+            time.sleep(1)
+            q.click((field[0] + field[2]) // 2, (field[1] + field[3]) // 2)
+            time.sleep(0.5)
+            typed(q, "abc")
+            q.click((tick[0] + tick[2]) // 2, (tick[1] + tick[3]) // 2)
+            time.sleep(0.5)
+            q.click((go[0] + go[2]) // 2, (go[1] + go[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Found plain")
+            check(f"a click unticks the box, and the button sends the form "
+                  f"without it ({got!r})", got == "Web: Found plain")
+
+            q.click(cx + define(SRC, "BACK_W") // 2 + 10, cy + bar // 2)
+            wait_title(q, geom, "Web: Form")
+            time.sleep(1)
+            q.click((send[0] + send[2]) // 2, (send[1] + send[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Sent")
+            check(f"a <button> sends its own form, with its name and value "
+                  f"and the field's preset one ({got!r})", got == "Web: Sent")
         finally:
             q.close()
     finally:

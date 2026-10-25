@@ -5911,3 +5911,45 @@ works and is checked by `make test`.
       picture is exactly 64x48 pixels of its own colour, in its place;
       the style sheet's box is in its colour, 150 pixels and the padding
       wide; the thumb is there, and PgDn moves it down.
+
+- [x] **The browser goes forward, reloads, searches and follows `#links`**
+      (apps/browser/web.cpp, kernel/config.c, the `web` group).
+
+      Next to back there is forward (the pages gone back past, dropped
+      once a new one is opened) and reload, which fetches the page again
+      and keeps the place on it. What is typed into the address field and
+      does not look like an address - a space in it, or no dot and no
+      scheme - goes to a search engine: the new `search` setting names
+      the start of its address (DuckDuckGo's plain HTML page by default),
+      and the words go after it, encoded. A link to `#name` on the same
+      page scrolls to the element with that id, or the `<a name>`.
+
+      The test sets `search` to its own server from the terminal, types
+      two words and gets that server's results page; follows a link to a
+      heading forty lines down and finds the heading's colour on the
+      screen, where it was not before; and reloads a page the server has
+      changed in the meantime.
+
+- [x] **Forms in the browser** (apps/browser/web.cpp, kernel64/proc64.h,
+      the `web` group).
+
+      `<input>` (text, password, hidden, checkbox, radio, submit) and
+      `<button>`: litehtml lays them out and leaves what they hold to
+      us. A click in a field gives it the keys, a box ticks, a radio
+      button clears the others of its name; Enter in a field or a click
+      on a button sends the form as `action?name=value&...`, with the
+      pressed button and without the unticked boxes. POST forms go the
+      same way - httpget only GETs, and the search pages that use POST
+      take a GET as well.
+
+      Sending the first form showed the 64-bit kernel cut every program
+      argument at 31 characters: the browser hands httpget each address
+      it fetches, so any longer address was being fetched without its
+      end. Arguments may now be 255 characters.
+
+      The test finds the field, the box and both buttons on the screen by
+      colours the page gives them; checks the placeholder is drawn until
+      the field is clicked and a caret after; types two words and sends
+      them with Enter, unticks the box and sends with the button, and
+      sends a second form through its `<button>` - each time the server
+      answers only for exactly the expected query.

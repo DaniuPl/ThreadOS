@@ -10,9 +10,12 @@ struct regs;
  * We copy them into the kernel, because at the moment a new image is
  * started the old memory - the one they lie in - no longer exists. The
  * limits are modest and deliberately so: this is meant to be argv, not
- * a channel for shipping data. */
+ * a channel for shipping data. An argument can still be as long as an
+ * address on the web is - the browser hands one to httpget for every
+ * page, picture and form it fetches - and the whole set, 2 KiB, sits
+ * comfortably on the 16 KiB kernel stack the copy is made on. */
 #define ARG_MAX 8
-#define ARG_LEN 32
+#define ARG_LEN 256
 
 struct args64 {
     int argc;

@@ -16,12 +16,17 @@
 //
 // Pictures are PNG (8 bits a channel, not interlaced) and baseline
 // JPEG, the decoders the picture viewer uses; style sheets in files of
-// their own (<link>) are fetched like the page.
+// their own (<link>) are fetched like the page. Forms send what is in
+// their fields as a query; words typed as an address go to the search
+// engine the 'search' setting names.
 
 #include <litehtml.h>
+#include <litehtml/el_text.h>
+#include <litehtml/render_item.h>
 #include <litehtml/url.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <map>
 #include <string>
@@ -40,8 +45,9 @@ using namespace litehtml;
 #define W0 560              // fits a 640x480 screen between the bar and the dock
 #define H0 360
 #define BAR_H 40              // the toolbar: back, and the address
-#define BACK_W 28
-#define ADDR_X 46
+#define BACK_W 28             // back, forward and reload: three round buttons
+#define BTN_STEP 34           // from one to the next
+#define ADDR_X 112
 #define STATUS_H 20           // the line along the bottom
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
@@ -448,11 +454,8 @@ class window_container : public document_container {
     {
         vp = position(0, 0, width, page_h());
     }
-    element::ptr create_element(const char*, const string_map&,
-                                const std::shared_ptr<document>&) override
-    {
-        return nullptr;
-    }
+    element::ptr create_element(const char* tag, const string_map&,
+                                const std::shared_ptr<document>& d) override;
     void get_media_features(media_features& m) const override
     {
         m.type = media_type_screen;
@@ -526,11 +529,126 @@ static bool get_url(const std::string& where, std::string& out,
 static window_container cont;
 static document::ptr doc;
 static std::string address;           // what the address field holds
-static std::vector<std::string> history;
+static std::vector<std::string> history;   // back
+static std::vector<std::string> ahead;     // forward, after going back
 static std::string status_line;
 static bool address_picked;           // clicked: the next key replaces it
 
+// --- forms ------------------------------------------------------------
+
+// litehtml lays out <input> and <button> but leaves what they hold and
+// do to the container. Each is a box the page's CSS sizes (the defaults
+// are in FORM_CSS); a text field draws its value itself, so typing into
+// it does not lay the page out again, and a button carries its words as
+// text litehtml places, so the box fits them
+class el_input : public html_tag {
+  public:
+    std::string type, name, value, placeholder;
+    bool checked = false;
+
+    explicit el_input(const document::ptr& d) : html_tag(d) {}
+
+    bool is_button() const
+    {
+        return type == "submit" || type == "button" || type == "reset" ||
+               type == "image";
+    }
+    bool is_text() const { return !is_button() && !is_box(); }
+    bool is_box() const { return type == "checkbox" || type == "radio"; }
+
+    void parse_attributes() override
+    {
+        bool button = !strcmp(get_tagName(), "button");
+        type = get_attr("type", button ? "submit" : "text");
+        for (auto& c : type)
+            c = (char)tolower((unsigned char)c);
+        name = get_attr("name", "");
+        value = get_attr("value", is_box() ? "on" : "");
+        placeholder = get_attr("placeholder", "");
+        checked = get_attr("checked") != nullptr;
+        if (!button && is_button())
+            appendChild(std::make_shared<el_text>(
+                (value.empty() ? "Submit" : value).c_str(), get_document()));
+        html_tag::parse_attributes();
+    }
+
+    void draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
+              const std::shared_ptr<render_item>& ri) override;
+};
+
+static std::vector<std::weak_ptr<el_input>> inputs;   // the page's, in order
+static std::shared_ptr<el_input> typing;              // the field with the keys
+
+static const char FORM_CSS[] =
+    "input{border:1px solid #8a8a90;background:#fff;padding:3px 5px;"
+    "width:12em;height:1.2em;vertical-align:middle}"
+    "input[type=submit],input[type=button],input[type=reset],button{"
+    "width:auto;height:auto;background:#e6e6ea;border:1px solid #8a8a90;"
+    "border-radius:4px;padding:3px 10px;white-space:nowrap}"
+    "input[type=checkbox],input[type=radio]{width:11px;height:11px;"
+    "padding:0;margin:0 3px}";
+
+element::ptr window_container::create_element(
+    const char* tag, const string_map&, const std::shared_ptr<document>& d)
+{
+    if (strcmp(tag, "input") && strcmp(tag, "button"))
+        return nullptr;
+    auto el = std::make_shared<el_input>(d);
+    inputs.push_back(el);
+    return el;
+}
+
+void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
+                    const std::shared_ptr<render_item>& ri)
+{
+    html_tag::draw(hdc, x, y, clip, ri);      // the box and its border
+    position p = ri->pos();
+    int bx = cont.sx(p.x + x), by = cont.sy(p.y + y);
+    int bw = (int)p.width, bh = (int)p.height;
+    if (by + bh < cont.page_top() || by > cont.page_top() + cont.page_h())
+        return;
+    int w = cont.win;
+    if (is_box()) {
+        if (!checked)
+            return;
+        if (type == "radio")
+            ud_round(w, bx + 2, by + 2, bw - 4, bh - 4, (bw - 4) / 2, 0x202024);
+        else {
+            ud_line(w, bx + 1, by + bh / 2, bx + bw / 2 - 1, by + bh - 2, 24,
+                    0x202024);
+            ud_line(w, bx + bw / 2 - 1, by + bh - 2, bx + bw - 1, by + 1, 24,
+                    0x202024);
+        }
+        return;
+    }
+    if (!is_text())
+        return;                               // the words are litehtml's
+    font* f = (font*)css().get_font();
+    int px = f ? f->px : FONT_PX, face = f ? f->face : UD_SANS;
+    int base = by + (bh - px) / 2 + (px * 93 + 50) / 100;
+    std::string shown = type == "password" ? std::string(value.size(), '*')
+                                           : value;
+    // The end of what is typed, where the caret is, stays in sight
+    while (!shown.empty() && ud_width(shown.c_str(), face, px) > bw - 2)
+        shown.erase(0, 1);
+    if (shown.empty() && !placeholder.empty() && typing.get() != this) {
+        std::string ph = placeholder;
+        while (!ph.empty() && ud_width(ph.c_str(), face, px) > bw - 2)
+            ph.pop_back();
+        ud_text(w, bx, base, ph.c_str(), 0x8A8A90, face, px);
+        return;
+    }
+    int end = ud_text(w, bx, base, shown.c_str(), rgb(css().get_color()),
+                      face, px);
+    if (typing.get() == this)
+        ud_fill(w, shown.empty() ? bx : end + 1, by + (bh - px) / 2, 1, px,
+                0x202024);
+}
+
 static void draw();
+static void scroll_by(int dy);
+static void open_page(const std::string& where0, bool remember);
+static std::string form_encode(const std::string& s);
 
 static void layout()
 {
@@ -538,8 +656,131 @@ static void layout()
         doc->render(cont.width);
 }
 
-static void open_page(const std::string& where, bool remember)
+// Words, not an address, go to the search engine the 'search' setting
+// names (the address the words are put after)
+static std::string search_for(const std::string& words)
 {
+    std::string base = "https://duckduckgo.com/html/?q=";
+    struct cfg_entry c;
+    for (uint32_t i = 0; sys_cfg_get(i, &c) == 0; i++)
+        if (!strcmp(c.name, "search") && c.value[0])
+            base = c.value;
+    return base + form_encode(words);
+}
+
+// --- forms, sent -------------------------------------------------------
+
+static element::ptr form_of(const element::ptr& el)
+{
+    for (element::ptr p = el->parent(); p; p = p->parent())
+        if (!strcmp(p->get_tagName(), "form"))
+            return p;
+    return nullptr;
+}
+
+// What a form holds goes after its action as name=value pairs - the
+// button pressed among them, the other buttons not. A form that says
+// POST is sent this way too: httpget only GETs, and the search pages
+// such forms usually are take either. ('by' is a copy: it may be the
+// field with the keys, which the next page lets go of.)
+static void submit(std::shared_ptr<el_input> by)
+{
+    element::ptr form = form_of(by);
+    if (!form)
+        return;
+    std::string q;
+    for (auto& w : inputs) {
+        auto in = w.lock();
+        if (!in || in->name.empty() || form_of(in) != form)
+            continue;
+        if ((in->is_button() && in != by) || (in->is_box() && !in->checked))
+            continue;
+        if (!q.empty())
+            q += '&';
+        q += form_encode(in->name) + "=" + form_encode(in->value);
+    }
+    const char* action = form->get_attr("action", "");
+    std::string target =
+        resolve(url(cont.base), url(*action ? action : cont.base)).str();
+    target = target.substr(0, target.find_first_of("?#")) + "?" + q;
+    std::printf("[web] form sent: %s\n", target.c_str());
+    std::fflush(stdout);
+    open_page(target, true);
+}
+
+// A click on the page that litehtml did not take for a link: a form's
+// field gets the keys, a box is ticked, a button sends its form
+static bool click_form(int px, int py)
+{
+    typing.reset();
+    for (auto& w : inputs) {
+        auto in = w.lock();
+        if (!in)
+            continue;
+        position p = in->get_placement();
+        int x = (int)p.x, y = (int)p.y, w0 = (int)p.width, h0 = (int)p.height;
+        // (the placement is the content; the padding and the border are
+        // the field's too)
+        if (px < x - 6 || px >= x + w0 + 6 || py < y - 4 || py >= y + h0 + 4)
+            continue;
+        if (in->type == "checkbox")
+            in->checked = !in->checked;
+        else if (in->type == "radio") {
+            element::ptr form = form_of(in);
+            for (auto& w2 : inputs) {
+                auto o = w2.lock();
+                if (o && o->type == "radio" && o->name == in->name &&
+                    form_of(o) == form)
+                    o->checked = false;
+            }
+            in->checked = true;
+        } else if (in->is_button()) {
+            if (in->type == "submit" || in->type == "image")
+                submit(in);
+        } else
+            typing = in;
+        return true;
+    }
+    return false;
+}
+
+static std::string form_encode(const std::string& s)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    std::string q;
+    for (unsigned char ch : s) {
+        if (ch == ' ')
+            q += '+';
+        else if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.' ||
+                 ch == '~')
+            q += (char)ch;
+        else {
+            q += '%';
+            q += hex[ch >> 4];
+            q += hex[ch & 15];
+        }
+    }
+    return q;
+}
+
+static bool looks_like_words(const std::string& s)
+{
+    if (s.find(' ') != std::string::npos)
+        return true;
+    if (s.find_first_of("./:") != std::string::npos)
+        return false;
+    FILE* f = std::fopen(s.c_str(), "rb");      // a file here by that name
+    if (f)
+        std::fclose(f);
+    return !f;
+}
+
+static void open_page(const std::string& where0, bool remember)
+{
+    std::string where = where0;
+    if (!where.empty() && where.compare(0, 6, "about:") != 0 &&
+        looks_like_words(where))
+        where = search_for(where);
     std::string html, target = where;
     bool network = where.compare(0, 7, "http://") == 0 ||
                    where.compare(0, 8, "https://") == 0;
@@ -574,14 +815,19 @@ static void open_page(const std::string& where, bool remember)
         status_line = "Could not open " + where;
         return;
     }
-    if (remember && !cont.base.empty())
+    if (remember && !cont.base.empty()) {
         history.push_back(cont.base);
+        ahead.clear();                 // a new way: the old forward is gone
+    }
     cont.base = target;
     cont.title.clear();
     cont.scroll = 0;
     address = target;
     address_picked = false;
-    doc = document::createFromString(html, &cont);
+    typing.reset();
+    inputs.clear();
+    doc = document::createFromString(html, &cont,
+                                     std::string(master_css) + FORM_CSS);
     layout();
     status_line = network ? "Done" : "";
     std::string t = "Web";
@@ -593,10 +839,54 @@ static void open_page(const std::string& where, bool remember)
     std::fflush(stdout);
 }
 
+// A place on this page (#name): scrolled to, not fetched again
+static bool go_to_anchor(const std::string& link)
+{
+    std::string id = link.substr(link.find('#') + 1);
+    if (!doc || id.empty())
+        return false;
+    element::ptr el = doc->root()->select_one("[id=\"" + id + "\"]");
+    if (!el)
+        el = doc->root()->select_one("a[name=\"" + id + "\"]");
+    if (!el)
+        return false;
+    cont.scroll = (int)el->get_placement().y;
+    scroll_by(0);
+    std::printf("[web] went to #%s\n", id.c_str());
+    std::fflush(stdout);
+    return true;
+}
+
 static void follow(const std::string& link)
 {
     std::string target = resolve(url(cont.base), url(link)).str();
+    // The same page with a fragment: a jump within it
+    std::string here = cont.base.substr(0, cont.base.find('#'));
+    if (link[0] == '#' || target.compare(0, here.size() + 1, here + "#") == 0) {
+        if (go_to_anchor(link))
+            return;
+    }
     open_page(target, true);
+}
+
+static void go_back()
+{
+    if (history.empty())
+        return;
+    std::string to = history.back();
+    history.pop_back();
+    ahead.push_back(cont.base);
+    open_page(to, false);
+}
+
+static void go_forward()
+{
+    if (ahead.empty())
+        return;
+    std::string to = ahead.back();
+    ahead.pop_back();
+    history.push_back(cont.base);
+    open_page(to, false);
 }
 
 static void scroll_by(int dy)
@@ -635,9 +925,23 @@ static void draw()
     // past its edges
     ud_fill(w, 0, 0, cont.width, BAR_H, l.bg);
     ud_fill(w, 0, BAR_H - 1, cont.width, 1, l.line);
-    ud_round(w, 10, 8, BACK_W, 24, 12, history.empty() ? l.row : l.accent);
-    ud_line(w, 28, 13, 21, 20, 20, history.empty() ? l.dim : l.on_accent);
-    ud_line(w, 21, 20, 28, 27, 20, history.empty() ? l.dim : l.on_accent);
+    // Back and forward: lit when there is somewhere to go
+    for (int k = 0; k < 2; k++) {
+        bool can = k == 0 ? !history.empty() : !ahead.empty();
+        int bx = 10 + k * BTN_STEP, mid = bx + BACK_W / 2;
+        int d = k == 0 ? -1 : 1;
+        uint32_t ink = can ? l.on_accent : l.dim;
+        ud_round(w, bx, 8, BACK_W, 24, 12, can ? l.accent : l.row);
+        ud_line(w, mid - 3 * d, 13, mid + 4 * d, 20, 20, ink);
+        ud_line(w, mid + 4 * d, 20, mid - 3 * d, 27, 20, ink);
+    }
+    // Reload: a ring with a gap, and the head of an arrow on it
+    int rx = 10 + 2 * BTN_STEP;
+    ud_round(w, rx, 8, BACK_W, 24, 12, l.row);
+    ud_ring(w, rx + BACK_W / 2 - 6, 14, 12, 12, 6, l.text);
+    ud_fill(w, rx + BACK_W / 2 + 1, 13, 6, 5, l.row);
+    ud_line(w, rx + BACK_W / 2 + 1, 14, rx + BACK_W / 2 + 6, 15, 16, l.text);
+    ud_line(w, rx + BACK_W / 2 + 6, 15, rx + BACK_W / 2 + 5, 20, 16, l.text);
     ud_round(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.field);
     ud_ring(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.line);
     int tx = ADDR_X + 12, ty = ud_baseline(8, 24, UD_PX);
@@ -649,7 +953,8 @@ static void draw()
     } else {
         int end = ud_text(w, tx, ty, address.c_str(), l.text, UD_SANS,
                           UD_PX);
-        ud_fill(w, end + 1, 13, 1, 14, l.accent);
+        if (!typing)                   // the keys go here, not to a field
+            ud_fill(w, end + 1, 13, 1, 14, l.accent);
     }
     int fy = cont.height - STATUS_H;
     ud_fill(w, 0, fy, cont.width, STATUS_H, l.bg);
@@ -684,12 +989,19 @@ int main(int argc, char** argv)
                 scroll_by(-ev.val * LINE_STEP);
             } else if (ev.type == WEV_CLICK) {
                 if (ev.y < BAR_H) {
-                    if (ev.x < ADDR_X && !history.empty()) {
-                        std::string back = history.back();
-                        history.pop_back();
-                        open_page(back, false);
-                    } else if (ev.x >= ADDR_X) {
+                    typing.reset();
+                    int b = (ev.x - 10) / BTN_STEP;
+                    if (ev.x >= ADDR_X)
                         address_picked = !address_picked;
+                    else if (ev.x >= 10 && b == 0)
+                        go_back();
+                    else if (b == 1)
+                        go_forward();
+                    else if (b == 2 && !cont.base.empty()) {
+                        int keep = cont.scroll;
+                        open_page(cont.base, false);
+                        cont.scroll = keep;   // the same place, freshly
+                        scroll_by(0);
                     }
                 } else if (doc && ev.y < cont.height - STATUS_H) {
                     int px = ev.x, py = ev.y - BAR_H + cont.scroll;
@@ -700,9 +1012,24 @@ int main(int argc, char** argv)
                                        [](const position&) {});
                     if (!cont.clicked.empty())
                         follow(cont.clicked);
+                    else
+                        click_form(px, py);
                 }
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
+                if (typing && (c == '\n' || c == '\b' || c == 27 ||
+                               (c >= 0x20 && c < 0x7F))) {
+                    if (c == '\n')
+                        submit(typing);
+                    else if (c == 27)
+                        typing.reset();
+                    else if (c == '\b') {
+                        if (!typing->value.empty())
+                            typing->value.pop_back();
+                    } else
+                        typing->value += c;
+                    continue;
+                }
                 bool picked = address_picked;
                 address_picked = false;
                 if (picked && (c == '\b' || (c >= 0x20 && c < 0x7F)))
