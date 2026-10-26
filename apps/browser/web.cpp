@@ -53,6 +53,8 @@ using namespace litehtml;
 #define SCROLL_W 6             // the scroll thumb along the right edge
 #define FONT_PX 15            // a page's text when its CSS does not say
 #define SEL_BG 0xB4D5FE       // behind selected text
+#define FOUND_BG 0xFFE97A     // behind what Ctrl+F found
+#define FOUND_NOW 0xFF9632    // and behind the match it is at
 // The clipboard's keys, as the keyboard driver sends them
 // (kernel/include/keyboard.h): Ctrl+Insert and Shift+Insert
 #define KEY_COPY 0x1A
@@ -245,6 +247,24 @@ struct text_run {
     int x, y, w, h;                  // in the page's coordinates
 };
 static std::vector<text_run> runs;   // those the last drawing drew
+
+// Finding on the page (Ctrl+F): each match is the text elements its
+// letters lie in; at drawing time their places are worked out, and a
+// run drawn at one of them is lit
+static bool finding;
+static std::string find_q;
+static std::vector<std::vector<std::weak_ptr<element>>> matches;
+static int match_at;                     // the current one
+static std::vector<position> lit_all, lit_now;
+
+static bool at_one_of(const std::vector<position>& ps, const position& p)
+{
+    for (auto& q : ps)
+        if (std::abs((int)q.x - (int)p.x) <= 1 &&
+            std::abs((int)q.y - (int)p.y) <= 1)
+            return true;
+    return false;
+}
 static bool sel_drag, sel_any;
 static int sel_x0, sel_y0, sel_x1, sel_y1;
 
@@ -275,6 +295,7 @@ class window_container : public document_container {
     std::string base;                 // what relative addresses are relative to
     std::string title;
     std::string clicked;              // a link to follow, once the click is done
+    bool clicked_download = false;    // ... with a 'download' attribute
 
     int page_top() const { return BAR_H; }
     int page_h() const { return height - BAR_H - STATUS_H; }
@@ -331,6 +352,10 @@ class window_container : public document_container {
             return;
         int tw = ud_width(text, f->face, f->px);
         runs.push_back({text, (int)pos.x, (int)pos.y, tw, (int)pos.height});
+        if (at_one_of(lit_now, pos))
+            ud_fill(win, x, y, tw, (int)pos.height, FOUND_NOW);
+        else if (at_one_of(lit_all, pos))
+            ud_fill(win, x, y, tw, (int)pos.height, FOUND_BG);
         if (selected((int)pos.x, (int)pos.y, tw, (int)pos.height))
             ud_fill(win, x, y, tw, (int)pos.height, SEL_BG);
         int w = ud_text(win, x, y + f->ascent, text, rgb(c), f->face, f->px);
@@ -463,9 +488,10 @@ class window_container : public document_container {
             base = resolve(url(base), url(u)).str();
     }
     void link(const std::shared_ptr<document>&, const element::ptr&) override {}
-    void on_anchor_click(const char* u, const element::ptr&) override
+    void on_anchor_click(const char* u, const element::ptr& el) override
     {
         clicked = u ? u : "";
+        clicked_download = el && el->get_attr("download");
     }
     void on_mouse_event(const element::ptr&, mouse_event) override {}
     void set_cursor(const char*) override {}
@@ -548,9 +574,8 @@ static const char COOKIE_JAR[] = ".web-cookies.txt";
 
 // With 'post', a form's fields go as the body of a POST - through a
 // file, since they may be longer than an argument can be
-static bool fetch(const std::string& address, std::string& out,
-                  const char* file = ".web-page.htm",
-                  const std::string* post = nullptr)
+static bool fetch_to(const std::string& address, const char* file,
+                     const std::string* post = nullptr)
 {
     // (the fragment is the browser's, not the server's)
     std::string where = address.substr(0, address.find('#'));
@@ -574,7 +599,14 @@ static bool fetch(const std::string& address, std::string& out,
     if (pid < 0 || waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
         WEXITSTATUS(status) != 0)
         return false;
-    return read_file(file, out);
+    return true;
+}
+
+static bool fetch(const std::string& address, std::string& out,
+                  const char* file = ".web-page.htm",
+                  const std::string* post = nullptr)
+{
+    return fetch_to(address, file, post) && read_file(file, out);
 }
 
 // Whatever an address names: a page, a picture, a style sheet - over
@@ -865,6 +897,8 @@ static void scroll_by(int dy);
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post = nullptr);
 static std::string form_encode(const std::string& s);
+static void find_all();
+static std::string extension(const std::string& target);
 
 static void layout()
 {
@@ -1119,13 +1153,26 @@ static void open_page(const std::string& where0, bool remember,
     cont.scroll = 0;
     address = target;
     address_picked = false;
+    if (extension(target) == "txt") {
+        // Plain text is shown as it is: < and & in it are letters
+        std::string text = html;
+        html = "<html><head><title>" + target.substr(target.rfind('/') + 1) +
+               "</title></head><body><pre style='white-space:pre-wrap'>";
+        for (char ch : text)
+            html += ch == '<' ? std::string("&lt;")
+                  : ch == '&' ? std::string("&amp;") : std::string(1, ch);
+        html += "</pre></body></html>";
+    }
     typing.reset();
     list_open.reset();
     inputs.clear();
     sel_any = sel_drag = false;
+    matches.clear();
     doc = document::createFromString(html, &cont,
                                      std::string(master_css) + FORM_CSS);
     layout();
+    if (finding)
+        find_all();                    // the find field stays, on the new page
     status_line = network ? "Done" : "";
     std::string t = "Web";
     if (!cont.title.empty())
@@ -1154,7 +1201,86 @@ static bool go_to_anchor(const std::string& link)
     return true;
 }
 
-static void follow(const std::string& link)
+// The last part of an address's path, in lower case: "zip", "html", ""
+static std::string extension(const std::string& target)
+{
+    url u(target);
+    std::string path = u.path();
+    std::string last = path.substr(path.rfind('/') + 1);
+    size_t dot = last.rfind('.');
+    std::string ext = dot == std::string::npos ? "" : last.substr(dot + 1);
+    for (auto& c : ext)
+        c = (char)tolower((unsigned char)c);
+    return ext;
+}
+
+// What a link leads to is shown when it is a page, plain text or a
+// picture; anything else - an archive, a program, a document - is a
+// file to keep
+static bool is_download(const std::string& target)
+{
+    static const char* shown[] = {"", "html", "htm", "xhtml", "shtml", "php",
+                                  "asp", "aspx", "jsp", "cgi", "txt", "png",
+                                  "jpg", "jpeg"};
+    std::string ext = extension(target);
+    for (const char* e : shown)
+        if (ext == e)
+            return false;
+    return true;
+}
+
+// A file from the network, onto the disk where the browser runs (the
+// person's home), under the name its address ends in - with a number
+// added rather than over a file already there
+static void download(const std::string& target)
+{
+    url u(target);
+    std::string path = u.path();
+    std::string name;
+    for (char ch : path.substr(path.rfind('/') + 1))
+        name += isalnum((unsigned char)ch) || ch == '.' || ch == '-' ||
+                        ch == '_' ? ch : '_';
+    if (name.empty() || name[0] == '.')
+        name = "download" + name;
+    if (name.size() > 50)
+        name = name.substr(name.size() - 50);
+    std::string base = name, ext;
+    if (base.rfind('.') != std::string::npos && base.rfind('.') > 0) {
+        ext = base.substr(base.rfind('.'));
+        base.resize(base.rfind('.'));
+    }
+    for (int k = 1; k < 100; k++) {
+        FILE* f = std::fopen(name.c_str(), "rb");
+        if (!f)
+            break;
+        std::fclose(f);
+        name = base + "-" + std::to_string(k) + ext;
+    }
+    status_line = "Saving " + name + " ...";
+    draw();
+    if (!fetch_to(target, name.c_str())) {
+        status_line = "Could not save " + name;
+        std::remove(name.c_str());
+        return;
+    }
+    long size = 0;
+    if (FILE* f = std::fopen(name.c_str(), "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        size = std::ftell(f);
+        std::fclose(f);
+    }
+    char cwd[256] = "";
+    if (!getcwd(cwd, sizeof(cwd)))
+        cwd[0] = '\0';
+    std::string where = std::string(cwd) +
+                        (cwd[0] && cwd[std::strlen(cwd) - 1] != '/' ? "/" : "") +
+                        name;
+    status_line = "Saved " + where + " (" + std::to_string(size) + " bytes)";
+    std::printf("[web] saved %s (%ld bytes)\n", where.c_str(), size);
+    std::fflush(stdout);
+}
+
+static void follow(const std::string& link, bool keep = false)
 {
     std::string target = resolve(url(cont.base), url(link)).str();
     // The same page with a fragment: a jump within it
@@ -1163,7 +1289,10 @@ static void follow(const std::string& link)
         if (go_to_anchor(link))
             return;
     }
-    open_page(target, true);
+    if (keep || is_download(target))
+        download(target);
+    else
+        open_page(target, true);
 }
 
 static void go_back()
@@ -1194,6 +1323,80 @@ static void scroll_by(int dy)
         cont.scroll = max;
     if (cont.scroll < 0)
         cont.scroll = 0;
+}
+
+// The page's text in reading order, a piece per text element - the
+// hidden parts (the head, display:none) left out
+struct piece {
+    element::ptr el;
+    size_t at;
+};
+
+static void collect(const element::ptr& el, std::string& text,
+                    std::vector<piece>& pieces)
+{
+    for (auto& c : el->children()) {
+        if (c->css().get_display() == display_none)
+            continue;
+        if (c->is_text()) {
+            std::string t;
+            c->get_text(t);
+            if (t.find_first_not_of(" \t\r\n") == std::string::npos)
+                t = " ";               // a space, however it was written
+            pieces.push_back({c, text.size()});
+            for (auto& ch : t)
+                text += (char)tolower((unsigned char)ch);
+        } else {
+            collect(c, text, pieces);
+        }
+    }
+}
+
+static void show_match()
+{
+    if (matches.empty())
+        return;
+    auto el = matches[match_at][0].lock();
+    if (!el)
+        return;
+    int y = (int)el->get_placement().y;
+    // Brought into sight, a third of the way down, if it is not there
+    if (y < cont.scroll || y > cont.scroll + cont.page_h() - LINE_STEP) {
+        cont.scroll = y - cont.page_h() / 3;
+        scroll_by(0);
+    }
+    std::printf("[web] find '%s': %d of %d\n", find_q.c_str(), match_at + 1,
+                (int)matches.size());
+    std::fflush(stdout);
+}
+
+static void find_all()
+{
+    matches.clear();
+    match_at = 0;
+    if (!doc || find_q.empty())
+        return;
+    std::string text, q;
+    std::vector<piece> pieces;
+    collect(doc->root(), text, pieces);
+    for (auto ch : find_q)
+        q += (char)tolower((unsigned char)ch);
+    for (size_t at = text.find(q); at != std::string::npos;
+         at = text.find(q, at + q.size())) {
+        std::vector<std::weak_ptr<element>> m;
+        for (size_t i = 0; i < pieces.size(); i++) {
+            size_t end = i + 1 < pieces.size() ? pieces[i + 1].at : text.size();
+            if (end > at && pieces[i].at < at + q.size())
+                m.push_back(pieces[i].el);
+        }
+        if (!m.empty())
+            matches.push_back(m);
+    }
+    if (matches.empty()) {
+        std::printf("[web] find '%s': none\n", find_q.c_str());
+        std::fflush(stdout);
+    }
+    show_match();
 }
 
 // What is selected, as text: the runs in the order they were drawn, a
@@ -1248,6 +1451,13 @@ static void draw()
 {
     int w = cont.win;
     runs.clear();
+    lit_all.clear();
+    lit_now.clear();
+    for (size_t i = 0; finding && i < matches.size(); i++)
+        for (auto& wp : matches[i])
+            if (auto el = wp.lock())
+                ((int)i == match_at ? lit_now : lit_all)
+                    .push_back(el->get_placement());
     struct ud_look l;
     ud_look(&l);
     // The page is white, as pages are, whatever the theme around it
@@ -1306,6 +1516,20 @@ static void draw()
     int fy = cont.height - STATUS_H;
     ud_fill(w, 0, fy, cont.width, STATUS_H, l.bg);
     ud_fill(w, 0, fy, cont.width, 1, l.line);
+    if (finding) {
+        // The find field takes the status line's place while it is open
+        std::string say = "Find: " + find_q;
+        int end = ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), say.c_str(),
+                          l.text, UD_SANS, 11);
+        ud_fill(w, end + 1, fy + 4, 1, STATUS_H - 8, l.accent);
+        std::string n = find_q.empty() ? ""
+                      : matches.empty() ? "no matches"
+                      : std::to_string(match_at + 1) + " of " +
+                            std::to_string(matches.size());
+        ud_text(w, end + 16, ud_baseline(fy, STATUS_H, 11), n.c_str(), l.dim,
+                UD_SANS, 11);
+        return;
+    }
     ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), status_line.c_str(),
             l.dim, UD_SANS, 11);
 }
@@ -1383,7 +1607,7 @@ int main(int argc, char** argv)
                     doc->on_lbutton_up(px, py, ev.x, ev.y,
                                        [](const position&) {});
                     if (!cont.clicked.empty())
-                        follow(cont.clicked);
+                        follow(cont.clicked, cont.clicked_download);
                     else
                         click_form(px, py);
                 }
@@ -1398,6 +1622,36 @@ int main(int argc, char** argv)
                         k--;
                     else if (c == '\n' || c == 27)
                         list_open.reset();
+                    continue;
+                }
+                if (c == KEY_FIND) {
+                    if (!finding)
+                        find_q.clear();        // a new search
+                    finding = true;
+                    typing.reset();
+                    find_all();
+                    continue;
+                }
+                // While the find field is open the keys are its - but for
+                // the ones that move about the page
+                if (finding && (c == '\n' || c == '\b' || c == 0x1B ||
+                                (c >= 0x20 && c < 0x7F))) {
+                    if (c == 0x1B) {
+                        finding = false;       // Escape: closed
+                    } else if (c == '\n') {
+                        if (!matches.empty()) {
+                            match_at = (match_at + 1) % (int)matches.size();
+                            show_match();
+                        }
+                    } else {
+                        if (c == '\b') {
+                            if (!find_q.empty())
+                                find_q.pop_back();
+                        } else {
+                            find_q += c;
+                        }
+                        find_all();
+                    }
                     continue;
                 }
                 if (c == KEY_COPY) {          // Ctrl+Insert: again

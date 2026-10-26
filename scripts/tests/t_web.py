@@ -34,6 +34,7 @@ Run on its own or through scripts/run_tests.py.
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -111,6 +112,20 @@ LOGIN = (b"<html><head><title>Login</title></head><body>"
          b"<input style='background:#fff0d0' name=user> "
          b"<input type=submit value='Sign in'></p></form></body></html>")
 COOKIES = []          # (path, the Cookie header the browser sent)
+# Ctrl+F: three matches, the last far down; plain text with markup in it;
+# a file to download
+FIND = (b"<html><head><title>Find</title></head><body><p>An apple a day.</p>" +
+        b"".join(b"<p>filler %d</p>" % i for i in range(50)) +
+        b"<p>apple pie</p>" +
+        b"".join(b"<p>more %d</p>" % i for i in range(20)) +
+        b"<p>last APPLE</p></body></html>")
+ORANGE = (0xFF, 0x96, 0x32)
+NOTES = b"<b>not bold</b> & plain\n"
+REPORT = b"downloaded-ok: line one\ndownloaded-ok: line two\n" \
+         b"downloaded-ok: line three\n"
+DL = (b"<html><head><title>Downloads</title></head><body>"
+      b"<p><a href=files/report.dat style='color:#806040'>the report</a>"
+      b"</p></body></html>")
 # Words to select and copy, and two fields to Tab between and paste into
 VIOLET, FIELD2 = (0x8A, 0x2B, 0xE2), (0xE0, 0xE0, 0xFF)
 COPY = (b"<html><head><title>Copy</title></head><body>"
@@ -213,6 +228,10 @@ def main():
     SERVED["/post.html"] = POSTFORM
     SERVED["/login.html"] = LOGIN
     SERVED["/copy.html"] = COPY
+    SERVED["/find.html"] = FIND
+    SERVED["/notes.txt"] = NOTES
+    SERVED["/dl.html"] = DL
+    SERVED["/files/report.dat"] = REPORT
     SERVED["/pasted?t=a&u=copy+these+words"] = page_titled(b"Pasted")
     ROUTES.update({"/login": r_login, "/home": r_home,
                    "/avatar.png": r_avatar, "/logout": r_logout})
@@ -581,6 +600,95 @@ def main():
             check(f"Tab goes to the next field, and Shift+Insert pastes "
                   f"what was copied - through the kernel's clipboard "
                   f"({got!r})", got == "Web: Pasted")
+
+            # --- finding on the page -------------------------------------
+            def go(path, title):
+                q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+                q.mouse_goto(sw - 20, sh // 2)
+                time.sleep(1)
+                typed(q, f"http://10.0.2.2:{port}{path}")
+                q.sendkey("ret")
+                got = wait_title(q, geom, title)
+                time.sleep(1)
+                return got
+
+            def found(want, timeout=10):
+                end = time.time() + timeout
+                while time.time() < end:
+                    lines = [ln for ln in q.serial()[seen:].splitlines()
+                             if "[web] find" in ln]
+                    if lines and lines[-1].endswith(want):
+                        return lines[-1]
+                    time.sleep(0.3)
+                return lines[-1] if lines else ""
+
+            go("/find.html", "Web: Find")
+            seen = len(q.serial())
+            q.sendkey("ctrl-f")
+            time.sleep(0.5)
+            typed(q, "apple")
+            said = found("1 of 3")
+            time.sleep(1)
+            now, _ = pixels(q, *page, ORANGE)
+            check(f"Ctrl+F and a word: three matches, whatever their case, "
+                  f"the first lit ({said!r}, {now})",
+                  said.endswith("'apple': 1 of 3") and now is not None)
+            q.sendkey("ret")
+            q.sendkey("ret")
+            said = found("3 of 3")
+            time.sleep(1)
+            now, _ = pixels(q, *page, ORANGE)
+            check(f"Enter walks to the third, far down the page - brought "
+                  f"into sight ({said!r}, {now})",
+                  said.endswith("3 of 3") and now is not None)
+            q.sendkey("esc")
+            time.sleep(1)
+            now, _ = pixels(q, *page, ORANGE)
+            check("Escape closes the search, and the light goes",
+                  now is None)
+
+            # --- plain text is shown as text -----------------------------
+            got = go("/notes.txt", "Web: notes.txt")
+            seen = len(q.serial())
+            q.sendkey("ctrl-f")
+            time.sleep(0.5)
+            typed(q, "<b>")
+            said = found("1 of 1")
+            q.sendkey("esc")
+            check(f"a .txt file is shown as it is: its '<b>' is letters on "
+                  f"the page, not markup ({got!r}, {said!r})",
+                  got == "Web: notes.txt" and said.endswith("1 of 1"))
+
+            # --- downloading ---------------------------------------------
+            go("/dl.html", "Web: Downloads")
+            link, _ = pixels(q, *page, BROWN)
+            saved = []
+            for k in range(2):
+                seen = len(q.serial())
+                q.click((link[0] + link[2]) // 2, link[3] - 3)
+                q.mouse_goto(sw - 20, sh // 2)
+                end = time.time() + 20
+                m = None
+                while time.time() < end and not m:
+                    m = re.search(r"\[web\] saved (\S+) \((\d+) bytes\)",
+                                  q.serial()[seen:])
+                    time.sleep(0.3)
+                saved.append((m.group(1), int(m.group(2))) if m else None)
+            title = q.window_title(*geom)
+            check(f"a link to a file that is not a page saves it, with its "
+                  f"size, and the page stays ({saved}, {title!r})",
+                  None not in saved and title == "Web: Downloads" and
+                  all(n == len(REPORT) for _, n in saved) and
+                  saved[0][0].endswith("/report.dat") and
+                  saved[1][0].endswith("/report-1.dat"))
+            if saved[0]:
+                q.click_desktop()
+                time.sleep(0.5)
+                out = q.command("cat " + saved[0][0], "line three",
+                                timeout=15)
+                check(f"and the kernel's own 'cat' reads it whole from the "
+                      f"disk ({out.count('downloaded-ok')} lines)",
+                      out.count("downloaded-ok") == 3)
         finally:
             q.close()
     finally:

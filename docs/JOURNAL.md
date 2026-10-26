@@ -6020,3 +6020,27 @@ works and is checked by `make test`.
       Found on the way: Escape and Shift+Insert reach programs as the
       same code (0x1B), so Escape in the terminal pastes. Left for a
       change of its own; in a browser field 0x1B means paste.
+
+- [x] **Find on the page, plain text, downloads** (apps/browser/web.cpp,
+      the `web` group).
+
+      Ctrl+F opens a find field in the status line. The page's text is
+      gathered in reading order from litehtml's text elements (hidden
+      parts left out, whitespace as one space), searched without regard
+      to case, and every match is lit - the current one in another
+      colour - by finding where its elements were placed when the page is
+      drawn. Enter goes to the next match and scrolls it into sight;
+      Escape closes the field. A `.txt` address is shown as text in a
+      <pre>, its < and & as letters. A link to anything that is not a
+      page, plain text or a picture - or one with a `download` attribute -
+      saves the file in the browser's directory (the person's home)
+      under the name its address ends in, with -1, -2 added rather than
+      over a file already there.
+
+      The test finds "apple" three times in three cases, walks to the
+      third far down the page and sees it lit on the screen, and sees the
+      light go with Escape; finds "<b>" in a .txt file, which is there
+      only if the text was not taken for markup; and downloads a file
+      twice: both are saved whole, the second as report-1.dat, the page
+      stays, and the kernel shell's own 'cat' reads the file's three
+      lines from the disk.
