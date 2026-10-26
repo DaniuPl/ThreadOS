@@ -52,6 +52,11 @@ using namespace litehtml;
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
 #define FONT_PX 15            // a page's text when its CSS does not say
+#define SEL_BG 0xB4D5FE       // behind selected text
+// The clipboard's keys, as the keyboard driver sends them
+// (kernel/include/keyboard.h): Ctrl+Insert and Shift+Insert
+#define KEY_COPY 0x1A
+#define KEY_PASTE 0x1B
 
 static const char start_page[] =
     "<html><head><title>Start</title><style>"
@@ -229,6 +234,39 @@ static bool decode_jpeg(const std::string& f, picture& pic)
 // be had is remembered too, as nothing, so it is not asked for again
 static std::map<std::string, picture> pictures;
 
+// --- selecting text --------------------------------------------------
+
+// litehtml has no selection of its own; what it has is every run of
+// text it draws, with where it goes. Those are kept from each drawing,
+// and a drag picks the runs between where it started and where it is -
+// a word at a time, in the order the page reads.
+struct text_run {
+    std::string text;
+    int x, y, w, h;                  // in the page's coordinates
+};
+static std::vector<text_run> runs;   // those the last drawing drew
+static bool sel_drag, sel_any;
+static int sel_x0, sel_y0, sel_x1, sel_y1;
+
+static bool selected(int x, int y, int w, int h)
+{
+    if (!sel_any)
+        return false;
+    int ax = sel_x0, ay = sel_y0, bx = sel_x1, by = sel_y1;
+    // (a before b: the one higher up, or on one line, the one to the left)
+    if (by < ay - 3 || (by <= ay + 3 && bx < ax)) {
+        std::swap(ax, bx);
+        std::swap(ay, by);
+    }
+    if (y + h <= ay || y > by)
+        return false;                     // above the start, below the end
+    if (ay >= y && ay < y + h && x + w <= ax)
+        return false;                     // on the start's line, before it
+    if (by >= y && by < y + h && x >= bx)
+        return false;                     // on the end's line, after it
+    return true;
+}
+
 class window_container : public document_container {
   public:
     int win = -1;
@@ -291,6 +329,10 @@ class window_container : public document_container {
         int x = sx(pos.x), y = sy(pos.y);
         if (y + (int)pos.height < page_top() || y > page_top() + page_h())
             return;
+        int tw = ud_width(text, f->face, f->px);
+        runs.push_back({text, (int)pos.x, (int)pos.y, tw, (int)pos.height});
+        if (selected((int)pos.x, (int)pos.y, tw, (int)pos.height))
+            ud_fill(win, x, y, tw, (int)pos.height, SEL_BG);
         int w = ud_text(win, x, y + f->ascent, text, rgb(c), f->face, f->px);
         if (f->underline)
             ud_fill(win, x, y + f->ascent + 2, w - x, 1, rgb(c));
@@ -742,24 +784,31 @@ element::ptr window_container::create_element(
 void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
                     const std::shared_ptr<render_item>& ri)
 {
-    html_tag::draw(hdc, x, y, clip, ri);      // the box and its border
     position p = ri->pos();
     int bx = cont.sx(p.x + x), by = cont.sy(p.y + y);
     int bw = (int)p.width, bh = (int)p.height;
+    int w = cont.win;
+    if (type == "radio") {
+        // Round, which CSS borders here cannot be: drawn whole by us
+        if (by + bh < cont.page_top() || by > cont.page_top() + cont.page_h())
+            return;
+        ud_round(w, bx - 1, by - 1, bw + 2, bh + 2, (bw + 2) / 2, 0x8A8A90);
+        ud_round(w, bx, by, bw, bh, bw / 2, 0xFFFFFF);
+        if (checked)
+            ud_round(w, bx + 3, by + 3, bw - 6, bh - 6, (bw - 6) / 2,
+                     0x3366CC);
+        return;
+    }
+    html_tag::draw(hdc, x, y, clip, ri);      // the box and its border
     if (by + bh < cont.page_top() || by > cont.page_top() + cont.page_h())
         return;
-    int w = cont.win;
     if (is_box()) {
         if (!checked)
             return;
-        if (type == "radio")
-            ud_round(w, bx + 2, by + 2, bw - 4, bh - 4, (bw - 4) / 2, 0x202024);
-        else {
-            ud_line(w, bx + 1, by + bh / 2, bx + bw / 2 - 1, by + bh - 2, 24,
-                    0x202024);
-            ud_line(w, bx + bw / 2 - 1, by + bh - 2, bx + bw - 1, by + 1, 24,
-                    0x202024);
-        }
+        ud_line(w, bx + 1, by + bh / 2, bx + bw / 2 - 1, by + bh - 2, 24,
+                0x202024);
+        ud_line(w, bx + bw / 2 - 1, by + bh - 2, bx + bw - 1, by + 1, 24,
+                0x202024);
         return;
     }
     font* f = (font*)css().get_font();
@@ -1073,6 +1122,7 @@ static void open_page(const std::string& where0, bool remember,
     typing.reset();
     list_open.reset();
     inputs.clear();
+    sel_any = sel_drag = false;
     doc = document::createFromString(html, &cont,
                                      std::string(master_css) + FORM_CSS);
     layout();
@@ -1146,9 +1196,58 @@ static void scroll_by(int dy)
         cont.scroll = 0;
 }
 
+// What is selected, as text: the runs in the order they were drawn, a
+// line break where one starts below the last, onto the clipboard
+static void copy_selection()
+{
+    std::string out;
+    const text_run* last = nullptr;
+    for (auto& r : runs) {
+        if (!selected(r.x, r.y, r.w, r.h))
+            continue;
+        if (last && r.y >= last->y + last->h / 2) {
+            while (!out.empty() && out.back() == ' ')
+                out.pop_back();
+            out += '\n';
+        }
+        if (!(out.empty() || out.back() == '\n') || r.text != " ")
+            out += r.text;
+        last = &r;
+    }
+    while (!out.empty() && (out.back() == ' ' || out.back() == '\n'))
+        out.pop_back();
+    if (out.empty())
+        return;
+    if (out.size() > CLIP_MAX)
+        out.resize(CLIP_MAX);
+    sys_clip_set(out.c_str(), (uint32_t)out.size());
+    status_line = "Copied";
+    std::printf("[web] copied: %s\n", out.c_str());
+    std::fflush(stdout);
+}
+
+// A field among the page's, next after the one with the keys - Tab's
+static void next_field()
+{
+    bool past = !typing;
+    for (auto& w : inputs) {
+        auto in = w.lock();
+        if (!in)
+            continue;
+        if (past && (in->is_text() || in->type == "textarea")) {
+            typing = in;
+            return;
+        }
+        if (in == typing)
+            past = true;
+    }
+    typing.reset();                    // the last one: out of the form
+}
+
 static void draw()
 {
     int w = cont.win;
+    runs.clear();
     struct ud_look l;
     ud_look(&l);
     // The page is white, as pages are, whatever the theme around it
@@ -1235,6 +1334,29 @@ int main(int argc, char** argv)
                 scroll_by(0);
             } else if (ev.type == WEV_SCROLL) {
                 scroll_by(-ev.val * LINE_STEP);
+            } else if (ev.type == WEV_PRESS) {
+                // Perhaps the start of a selection; a click clears one
+                sel_any = false;
+                sel_drag = doc && !list_open && ev.y >= BAR_H &&
+                           ev.y < cont.height - STATUS_H;
+                sel_x0 = sel_x1 = ev.x;
+                sel_y0 = sel_y1 = ev.y - BAR_H + cont.scroll;
+            } else if (ev.type == WEV_DRAG || ev.type == WEV_RELEASE) {
+                if (sel_drag) {
+                    sel_x1 = ev.x;
+                    sel_y1 = ev.y - BAR_H + cont.scroll;
+                    sel_any = std::abs(sel_x1 - sel_x0) > 3 ||
+                              std::abs(sel_y1 - sel_y0) > 3;
+                }
+                if (ev.type == WEV_RELEASE && sel_drag) {
+                    sel_drag = false;
+                    // Selecting is copying, as in the terminal - drawn
+                    // first, so the runs are those now lit
+                    if (sel_any) {
+                        draw();
+                        copy_selection();
+                    }
+                }
             } else if (ev.type == WEV_CLICK) {
                 if (list_open) {
                     click_list(ev.x, ev.y);
@@ -1278,15 +1400,33 @@ int main(int argc, char** argv)
                         list_open.reset();
                     continue;
                 }
-                if (typing && (c == '\n' || c == '\b' || c == 27 ||
+                if (c == KEY_COPY) {          // Ctrl+Insert: again
+                    copy_selection();
+                    continue;
+                }
+                if (c == '\t' && !inputs.empty()) {
+                    next_field();
+                    continue;
+                }
+                // (Shift+Insert, the paste, arrives as 0x1B - which is
+                // Escape's code too; in a field it means the paste)
+                if (typing && (c == '\n' || c == '\b' || c == KEY_PASTE ||
                                (c >= 0x20 && c < 0x7F))) {
                     if (c == '\n' && typing->type == "textarea")
                         typing->value += c;    // a new line, not a send
                     else if (c == '\n')
                         submit(typing);
-                    else if (c == 27)
-                        typing.reset();
-                    else if (c == '\b') {
+                    else if (c == KEY_PASTE) {
+                        char got[CLIP_MAX + 1];
+                        int n = (int)sys_clip_get(got, sizeof(got));
+                        for (int i = 0; i < n; i++) {
+                            char ch = got[i];
+                            if (ch == '\n' && typing->type != "textarea")
+                                ch = ' ';      // one line: the breaks go
+                            if (ch != '\r')
+                                typing->value += ch;
+                        }
+                    } else if (c == '\b') {
                         if (!typing->value.empty())
                             typing->value.pop_back();
                     } else

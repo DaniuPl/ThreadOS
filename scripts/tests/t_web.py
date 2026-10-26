@@ -111,6 +111,12 @@ LOGIN = (b"<html><head><title>Login</title></head><body>"
          b"<input style='background:#fff0d0' name=user> "
          b"<input type=submit value='Sign in'></p></form></body></html>")
 COOKIES = []          # (path, the Cookie header the browser sent)
+# Words to select and copy, and two fields to Tab between and paste into
+VIOLET, FIELD2 = (0x8A, 0x2B, 0xE2), (0xE0, 0xE0, 0xFF)
+COPY = (b"<html><head><title>Copy</title></head><body>"
+        b"<p style='color:#8a2be2;font-size:20px'>copy these words</p>"
+        b"<form action=/pasted><p><input style='background:#fff0d0' name=t> "
+        b"<input style='background:#e0e0ff' name=u></p></form></body></html>")
 
 
 def r_login(h, body):
@@ -206,6 +212,8 @@ def main():
     SERVED["/form.html"] = FORM
     SERVED["/post.html"] = POSTFORM
     SERVED["/login.html"] = LOGIN
+    SERVED["/copy.html"] = COPY
+    SERVED["/pasted?t=a&u=copy+these+words"] = page_titled(b"Pasted")
     ROUTES.update({"/login": r_login, "/home": r_home,
                    "/avatar.png": r_avatar, "/logout": r_logout})
     SERVED["POST /post size=l&note=first%0D%0Asecond"] = page_titled(b"Posted")
@@ -532,6 +540,47 @@ def main():
             check(f"signing out removes it: the next page comes without "
                   f"one ({got!r}, {home[-1:]})", got == "Web: Signed out"
                   and home[-1:] == [None])
+
+            # --- selecting, copying, Tab and pasting ---------------------
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/copy.html")
+            q.sendkey("ret")
+            wait_title(q, geom, "Web: Copy")
+            time.sleep(1)
+            words, _ = pixels(q, *page, VIOLET)
+            mid = (words[1] + words[3]) // 2
+            seen = len(q.serial())
+            q.mouse_goto(words[0] - 4, mid)
+            q.mouse_button(True)
+            time.sleep(0.3)
+            q.mouse_goto((words[0] + words[2]) // 2, mid)
+            time.sleep(0.3)
+            q.mouse_goto(words[2] + 4, mid)
+            time.sleep(0.3)
+            q.mouse_button(False)
+            time.sleep(1.5)
+            sel_bg = (0xB4, 0xD5, 0xFE)
+            lit, n = pixels(q, *page, sel_bg)
+            check(f"a drag across words lights them ({lit}) and copies "
+                  f"them", lit is not None and lit[0] <= words[0] and
+                  lit[2] >= words[2] and
+                  "[web] copied: copy these words" in q.serial()[seen:])
+            field, _ = pixels(q, *page, FIELD)
+            q.click((field[0] + field[2]) // 2, (field[1] + field[3]) // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(0.5)
+            typed(q, "a")
+            q.sendkey("tab")
+            time.sleep(0.3)
+            q.sendkey("shift-insert")
+            time.sleep(0.3)
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Pasted")
+            check(f"Tab goes to the next field, and Shift+Insert pastes "
+                  f"what was copied - through the kernel's clipboard "
+                  f"({got!r})", got == "Web: Pasted")
         finally:
             q.close()
     finally:

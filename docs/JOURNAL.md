@@ -5996,3 +5996,27 @@ works and is checked by `make test`.
       its first run it found that a Path= with a space in it broke the
       jar file's lines; such cookies are now refused, and a jar written,
       read and written again must come out the same.
+
+- [x] **Selecting and copying text in the browser; Tab and paste in
+      forms; round radio buttons** (apps/browser/web.cpp, the `web`
+      group).
+
+      litehtml has no selection, but every run of text passes through
+      the container's draw_text with its place. The browser keeps those
+      runs from each drawing; a drag lights the ones between where it
+      started and where it is, a word at a time in reading order, and on
+      release puts them on the system clipboard - selecting is copying,
+      as in the terminal (Ctrl+Insert copies again). Shift+Insert pastes
+      into a form field, Tab moves to the next field. Radio buttons are
+      drawn round by the browser, since CSS borders here are square.
+
+      The test drags across a paragraph in a colour of its own: the
+      selection colour covers the words and the copied text is exactly
+      "copy these words". It then types into one field, Tabs to the next
+      and pastes with Shift+Insert: the server answers only to
+      `t=a&u=copy+these+words`, so the words went through the kernel's
+      clipboard and into the right field.
+
+      Found on the way: Escape and Shift+Insert reach programs as the
+      same code (0x1B), so Escape in the terminal pastes. Left for a
+      change of its own; in a browser field 0x1B means paste.
