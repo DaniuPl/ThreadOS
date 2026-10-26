@@ -12,9 +12,10 @@ struct regs;
  * limits are modest and deliberately so: this is meant to be argv, not
  * a channel for shipping data. An argument can still be as long as an
  * address on the web is - the browser hands one to httpget for every
- * page, picture and form it fetches - and the whole set, 2 KiB, sits
- * comfortably on the 16 KiB kernel stack the copy is made on. */
-#define ARG_MAX 8
+ * page, picture and form it fetches, with a handful of options - and
+ * the whole set, 4 KiB, sits comfortably on the 16 KiB kernel stack the
+ * copy is made on. */
+#define ARG_MAX 16
 #define ARG_LEN 256
 
 struct args64 {

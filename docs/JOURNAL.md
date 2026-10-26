@@ -6114,3 +6114,32 @@ works and is checked by `make test`.
       1.5 times as wide (within 4%); a click on the link where the zoomed
       page drew it follows it; and the percentage puts the heading back
       exactly where it was.
+
+- [x] **Character sets in the browser** (apps/browser/web.cpp,
+      user/uhttp.h, user/httpget.c, kernel64/proc64.h, `webtools`).
+
+      litehtml already follows the WHATWG sniffing for a byte order mark
+      and a <meta charset>. What it could not know was the server's word
+      and the system's default. httpget learned `-t <file>`, which writes
+      the answer's Content-Type, and the browser takes its charset as
+      certain. A page that says nothing and is not valid UTF-8 is read
+      in the old single-byte set of the system's language: windows-1250
+      in Polish, windows-1252 otherwise, as browsers decide it. A .txt
+      file is decoded to UTF-8 before it is shown. The browser's call of
+      httpget now has ten arguments, so the 64-bit kernel takes sixteen
+      (4 KiB in all, on a 16 KiB kernel stack).
+
+      The test serves the same Polish words in windows-1250 with a
+      <meta>, in ISO-8859-2 with only the server's header, and French
+      words in windows-1252 with nothing at all; each page's title must
+      come out as Python's own codecs say. A windows-1250 .txt file,
+      selected and copied, must give the Polish words in UTF-8.
+
+- [x] **The browser's tests in three groups** (scripts/tests/webtest.py,
+      t_web, t_webform, t_webtools).
+
+      t_web had grown to ten minutes in one QEMU. The pages, the server
+      and the boot are now in webtest.py, and the scenario in three
+      groups that run side by side: pages (`web`), forms, cookies and
+      the clipboard (`webform`), and the tools (`webtools`). With -j3 the
+      lot takes under four minutes.

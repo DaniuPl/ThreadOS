@@ -1,7 +1,7 @@
 /* httpget - an HTTP/HTTPS client in ring 3
  *
- * Usage: run httpget [-k] [-p <file>] [-c <jar>] [-o <file>] <address>
- *                    [port] [path] [file]
+ * Usage: run httpget [-k] [-p <file>] [-c <jar>] [-o <file>] [-t <file>]
+ *                    <address> [port] [path] [file]
  *   run httpget 10.0.2.2 8000 /                - to the console
  *   run httpget https://example.com / str.htm  - over TLS 1.3, to a file
  *   run httpget -p form.txt 10.0.2.2 8000 /f   - POSTs what form.txt holds
@@ -11,7 +11,8 @@
  * in a jar file (ucookie.h) - read before, written after, and followed
  * through redirects, since a sign-in usually answers with a cookie and a
  * redirect in one response. -o names the output file, so a full address
- * can stand alone, without a port and a path after it.
+ * can stand alone, without a port and a path after it. -t writes the
+ * answer's Content-Type to a file: a browser needs its charset.
  *
  * It resolves the host name through DNS, copes with 'chunked' encoding
  * and follows redirects (up to three). For https addresses it connects
@@ -49,13 +50,16 @@ void _start(int argc, char **argv)
     static char post[16384];
     const char *body = 0;
     uint32_t body_len = 0;
-    const char *jar_file = 0, *out_opt = 0;
+    const char *jar_file = 0, *out_opt = 0, *type_file = 0;
     while (argc > 1 && argv[1][0] == '-') {
-        if ((argv[1][1] == 'c' || argv[1][1] == 'o') && argc > 2) {
+        if ((argv[1][1] == 'c' || argv[1][1] == 'o' || argv[1][1] == 't') &&
+            argc > 2) {
             if (argv[1][1] == 'c')
                 jar_file = argv[2];
-            else
+            else if (argv[1][1] == 'o')
                 out_opt = argv[2];
+            else
+                type_file = argv[2];
             argv++;
             argc--;
         } else if (argv[1][1] == 'k') {
@@ -90,7 +94,7 @@ void _start(int argc, char **argv)
 
     if (argc < 2) {
         print("usage: httpget [-k] [-p <file>] [-c <jar>] [-o <file>] "
-              "<host|ip> [port] [path] [file]\n");
+              "[-t <file>] <host|ip> [port] [path] [file]\n");
         sys_exit(1);
     }
 
@@ -260,6 +264,18 @@ void _start(int argc, char **argv)
 
     if (st.fd >= 0)
         sys_close(st.fd);
+
+    if (type_file) {
+        const char *t = http_last_type();
+        int n = 0;
+        while (t[n])
+            n++;
+        int fd = sys_open(type_file, O_CREATE | O_WRITE | O_TRUNC);
+        if (fd >= 0) {
+            sys_write(fd, t, (uint32_t)n);
+            sys_close(fd);
+        }
+    }
 
     if (jar_file) {
         int len = ck_save(&jar, jar_text, sizeof(jar_text));

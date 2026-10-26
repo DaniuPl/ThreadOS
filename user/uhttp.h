@@ -89,6 +89,14 @@ static inline const char *http_last_cookies(void)
     return http_set_cookies;
 }
 
+/* The last response's Content-Type: what it is, and in what characters */
+static char http_content_type[128];
+
+static inline const char *http_last_type(void)
+{
+    return http_content_type;
+}
+
 /* Called for successive pieces of the body */
 typedef void (*http_sink)(const char *data, uint32_t len, void *arg);
 
@@ -223,6 +231,7 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     res->location[0] = '\0';
     http_set_cookies_len = 0;
     http_set_cookies[0] = '\0';
+    http_content_type[0] = '\0';
 
     tp.tls = use_tls;
     tp.sock = -1;
@@ -347,6 +356,15 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
                         http_set_cookies[o] = '\0';
                         http_set_cookies_len = o;
                     }
+                }
+                v = uhttp_header(hdr + p, "content-type");
+                if (v) {
+                    int k = 0;
+                    while (v[k] && k < (int)sizeof(http_content_type) - 1) {
+                        http_content_type[k] = v[k];
+                        k++;
+                    }
+                    http_content_type[k] = '\0';
                 }
                 v = uhttp_header(hdr + p, "location");
                 if (v) {

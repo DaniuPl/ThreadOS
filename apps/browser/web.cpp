@@ -592,6 +592,8 @@ static bool write_file(const char* name, const std::string& data)
 
 // Where the browser keeps cookies, between its fetches and its runs
 static const char COOKIE_JAR[] = ".web-cookies.txt";
+// What the last answer said it was (Content-Type), for its charset
+static const char TYPE_FILE[] = ".web-type.txt";
 
 // --- bookmarks and history ---------------------------------------------
 
@@ -751,7 +753,7 @@ static bool fetch_to(const std::string& address, const char* file,
         // Every fetch - pages, pictures, style sheets - goes with the
         // jar: a signed-in site's pictures may need its cookie too
         char* args[] = {(char*)"httpget", (char*)"-c", (char*)COOKIE_JAR,
-                        (char*)"-o", (char*)file,
+                        (char*)"-o", (char*)file, (char*)"-t", (char*)TYPE_FILE,
                         post ? (char*)"-p" : (char*)where.c_str(),
                         post ? (char*)body : nullptr,
                         post ? (char*)where.c_str() : nullptr, nullptr};
@@ -1319,6 +1321,68 @@ static std::string form_encode(const std::string& s)
     return q;
 }
 
+// --- characters ---------------------------------------------------------
+
+static bool valid_utf8(const std::string& s)
+{
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = (unsigned char)s[i];
+        int n = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2
+              : (c & 0xF8) == 0xF0 ? 3 : -1;
+        if (n < 0 || (n == 1 && c < 0xC2) || i + n >= s.size())
+            return false;
+        for (int k = 1; k <= n; k++)
+            if (((unsigned char)s[i + k] & 0xC0) != 0x80)
+                return false;
+        i += n + 1;
+    }
+    return true;
+}
+
+// The charset a Content-Type names: "text/html; charset=windows-1250"
+static encoding http_charset(const std::string& type)
+{
+    std::string t;
+    for (char c : type)
+        t += (char)tolower((unsigned char)c);
+    size_t at = t.find("charset=");
+    if (at == std::string::npos)
+        return encoding::null;
+    std::string label = t.substr(at + 8);
+    label = label.substr(0, label.find_first_of("; \t"));
+    if (!label.empty() && (label[0] == '"' || label[0] == '\''))
+        label = label.substr(1, label.find_first_of("\"'", 1) - 1);
+    return get_encoding(label);
+}
+
+// What an undeclared page that is not UTF-8 is taken to be: the old
+// single-byte set of the system's language, as browsers decide it
+static encoding legacy_default()
+{
+    struct cfg_entry c;
+    for (uint32_t i = 0; sys_cfg_get(i, &c) == 0; i++)
+        if (!strcmp(c.name, "language") && !strcmp(c.value, "pl"))
+            return encoding::windows_1250;
+    return encoding::windows_1252;
+}
+
+// The page's bytes with what they are in: the server's word first; then
+// what litehtml finds itself (a byte order mark, a <meta>), which it
+// does in createFromString; and for a page saying nothing that is not
+// UTF-8, the system's default
+static estring with_encoding(const std::string& bytes, const std::string& type)
+{
+    encoding e = http_charset(type);
+    if (e != encoding::null)
+        return estring(bytes, e, confidence::certain);
+    estring probe(bytes, encoding::null, confidence::tentative);
+    encoding_sniffing_algorithm(probe);
+    if (probe.encoding == encoding::utf_8 &&
+        probe.confidence == confidence::tentative && !valid_utf8(bytes))
+        return estring(bytes, legacy_default(), confidence::tentative);
+    return estring(bytes, encoding::null, confidence::certain);
+}
+
 static bool looks_like_words(const std::string& s)
 {
     if (s.find(' ') != std::string::npos)
@@ -1391,22 +1455,31 @@ static void open_page(const std::string& where0, bool remember,
     cont.scroll = 0;
     address = target;
     address_picked = false;
+    std::string type;
+    if (network)
+        read_file(TYPE_FILE, type);
+    estring page = with_encoding(html, type);
+    if (target == "about:start")
+        page = estring(html, encoding::utf_8, confidence::certain);
     if (extension(target) == "txt") {
-        // Plain text is shown as it is: < and & in it are letters
-        std::string text = html;
+        // Plain text is shown as it is: < and & in it are letters - in
+        // UTF-8, whatever it came in
+        std::string text = page.encoding == encoding::null
+                               ? html : decode(html, page.encoding);
         html = "<html><head><title>" + target.substr(target.rfind('/') + 1) +
                "</title></head><body><pre style='white-space:pre-wrap'>";
         for (char ch : text)
             html += ch == '<' ? std::string("&lt;")
                   : ch == '&' ? std::string("&amp;") : std::string(1, ch);
         html += "</pre></body></html>";
+        page = estring(html, encoding::utf_8, confidence::certain);
     }
     typing.reset();
     list_open.reset();
     inputs.clear();
     sel_any = sel_drag = false;
     matches.clear();
-    doc = document::createFromString(html, &cont,
+    doc = document::createFromString(page, &cont,
                                      std::string(master_css) + FORM_CSS);
     layout();
     if (finding)
@@ -1420,6 +1493,7 @@ static void open_page(const std::string& where0, bool remember,
     win_title(cont.win, t.c_str());
     if (target != "about:start")
         remember_visit(target, cont.title);
+    std::printf("[web] title: %s\n", cont.title.c_str());
     page_marked = target != "about:start" &&
                   find_visit(load_list(BOOKMARKS), target) >= 0;
     std::printf("[web] opened %s (%d x %d)\n", target.c_str(),
