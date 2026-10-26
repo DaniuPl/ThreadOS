@@ -28,4 +28,9 @@ int netdev_send(const void *frame, uint16_t len);
 uint32_t netdev_rx_packets(void);
 uint32_t netdev_tx_packets(void);
 
+/* Whether the cable has a link: 1, 0, or -1 for a card that does not
+   say (a virtual one is always up). DHCP waits for it - a real PHY
+   needs seconds to agree a speed with the other end. */
+int netdev_link(void);
+
 #endif

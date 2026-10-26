@@ -239,6 +239,9 @@ int dhcp_configure(void)
 static void dhcp_thread(void *arg)
 {
     (void)arg;
+    /* A real cable: up to five seconds for the link to come up */
+    for (int i = 0; i < 50 && netdev_link() == 0; i++)
+        task_sleep(100);
     if (!dhcp_configure()) {
         net_use_fallback();
         printk("[net] DHCP: no answer, using the fallback address ");

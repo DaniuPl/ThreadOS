@@ -6391,3 +6391,40 @@ works and is checked by `make test`.
       a 404 and its body; a request to another site is refused and never
       leaves the machine; and form.submit() posts the form, the buttons
       left out.
+
+- [x] **RTL8111/8168: the wired port of a real laptop**
+      (kernel/rtl8168.c, tests/hw/rtl8168_model.c, scripts/tests/t_rtl8168.py)
+      The `hardware` listing of an IdeaPad (Broadwell) showed two network
+      cards: an Intel Wireless 3160 and a Realtek 10ec:8168 - gigabit
+      Ethernet, the wired port of most laptops and boards since 2010, and
+      one this system had no driver for. It has one now. Registers
+      through I/O ports (BAR0), the same in both kernels; two rings of
+      descriptors whose OWN bit says who holds each, EOR closing the
+      ring, TPPoll to send. Of the pages of per-version fixes Linux
+      keeps for this family, the two a card that only sends and
+      receives cannot do without: from the 8168G on receiving is gated
+      (MISC) until the driver opens it, and its PHY sits behind OCP
+      instead of PHYAR; and a PHY left powered down by firmware or by
+      another system is powered up - one that is up is left alone, since
+      restarting auto-negotiation costs the link for seconds. Receiving
+      is polled by a thread: whether a PCIe card's interrupt reaches the
+      8259 depends on the firmware, and a UEFI laptop promises nothing.
+      DHCP now waits up to five seconds for a real cable's link.
+
+      No emulator has this card, so the test models it on the host,
+      from Realtek's description and what Linux relies on: ports,
+      a reset that takes reads to end, descriptor registers that take
+      writes only while 9346CR is unlocked, the rings in host memory,
+      a receive filter that follows RxConfig, the PHY behind PHYAR or
+      OCP (each chip ignoring the other road), the RXDV gate. The
+      driver's own source runs against it under ASan and UBSan, as an
+      8168B with its PHY up and as an 8168GU with its PHY down: started,
+      its address read, the PHY powered up only when down; a hundred
+      frames through a ring of 32 reach the wire whole and in order, a
+      short one padded to 60; a hundred through a ring of 64 reach the
+      network code whole, without the CRC, those for other addresses
+      filtered; a bad CRC dropped; a burst larger than the ring losing
+      only what did not fit. Broken on purpose - the gate left shut, the
+      registers left locked, EOR left out, the CRC left on, short frames
+      unpadded, the PHY asked the wrong way, descriptors not handed back
+      - the test fails each time. The real card is still to be seen.

@@ -17,8 +17,9 @@
 #include "include/e1000.h"
 #include "include/virtio_net.h"
 #include "include/usbnet.h"
+#include "include/rtl8168.h"
 
-enum { NIC_NONE, NIC_E1000, NIC_VIRTIO, NIC_RTL8139, NIC_USB };
+enum { NIC_NONE, NIC_E1000, NIC_VIRTIO, NIC_RTL8139, NIC_RTL8168, NIC_USB };
 
 static int nic;
 
@@ -32,6 +33,8 @@ int netdev_init(void)
         nic = NIC_VIRTIO;
     else if (rtl8139_init())
         nic = NIC_RTL8139;
+    else if (rtl8168_init())
+        nic = NIC_RTL8168;
     /* And last the one in the socket: a machine with a card of its own
        keeps using it, and a machine with nothing else can still reach
        the network through a docking station. */
@@ -51,6 +54,7 @@ const char *netdev_name(void)
     case NIC_E1000:   return "e1000";
     case NIC_VIRTIO:  return "VirtIO-net";
     case NIC_RTL8139: return "RTL8139";
+    case NIC_RTL8168: return "RTL8168";
     case NIC_USB:     return "USB (RNDIS)";
     default:            return "none";
     }
@@ -63,6 +67,7 @@ const uint8_t *netdev_mac(void)
     case NIC_E1000:   return e1000_mac();
     case NIC_VIRTIO:  return virtio_net_mac();
     case NIC_RTL8139: return rtl8139_mac();
+    case NIC_RTL8168: return rtl8168_mac();
     case NIC_USB:     return usbnet_mac();
     default:            return zeros;
     }
@@ -74,6 +79,7 @@ int netdev_send(const void *frame, uint16_t len)
     case NIC_E1000:   return e1000_send(frame, len);
     case NIC_VIRTIO:  return virtio_net_send(frame, len);
     case NIC_RTL8139: return rtl8139_send(frame, len);
+    case NIC_RTL8168: return rtl8168_send(frame, len);
     case NIC_USB:     return usbnet_send(frame, len);
     default:            return -1;
     }
@@ -85,6 +91,7 @@ uint32_t netdev_rx_packets(void)
     case NIC_E1000:   return e1000_rx_packets();
     case NIC_VIRTIO:  return virtio_net_rx_packets();
     case NIC_RTL8139: return rtl8139_rx_packets();
+    case NIC_RTL8168: return rtl8168_rx_packets();
     case NIC_USB:     return usbnet_rx_packets();
     default:            return 0;
     }
@@ -96,7 +103,13 @@ uint32_t netdev_tx_packets(void)
     case NIC_E1000:   return e1000_tx_packets();
     case NIC_VIRTIO:  return virtio_net_tx_packets();
     case NIC_RTL8139: return rtl8139_tx_packets();
+    case NIC_RTL8168: return rtl8168_tx_packets();
     case NIC_USB:     return usbnet_tx_packets();
     default:            return 0;
     }
+}
+
+int netdev_link(void)
+{
+    return nic == NIC_RTL8168 ? rtl8168_link() : -1;
 }
