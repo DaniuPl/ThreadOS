@@ -179,7 +179,7 @@ void _start(int argc, char **argv)
             sys_exit(1);
         }
 
-        print(use_tls ? "[httpget] TLS 1.3 " : "[httpget] ");
+        print(use_tls ? "[httpget] TLS " : "[httpget] ");
         if (body)
             print("POST ");
         print(host);
@@ -293,6 +293,8 @@ void _start(int argc, char **argv)
     }
 
     if (use_tls) {
+        print(res.tls12 ? "[httpget] TLS 1.2 agreed\n"
+                        : "[httpget] TLS 1.3 agreed\n");
         print(res.verified ? "[httpget] certificate checked (issuer, "
                              "name, dates)\n"
                            : "[httpget] certificate NOT CHECKED - the channel is "

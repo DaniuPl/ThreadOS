@@ -58,7 +58,19 @@
 
 #define TLS_AES_GCM_SHA256   0x1301
 #define TLS_CHACHA20_SHA256  0x1303
+/* TLS 1.2: ECDHE (x25519) for the key, the certificate's RSA or ECDSA
+   key for the signature over it, and the same two ciphers */
+#define TLS12_ECDSA_CHACHA20 0xCCA9
+#define TLS12_RSA_CHACHA20   0xCCA8
+#define TLS12_ECDSA_AES_GCM  0xC02B
+#define TLS12_RSA_AES_GCM    0xC02F
+#define HS_SERVER_KEY_EXCHANGE 12
+#define HS_CERT_REQUEST        13
+#define HS_SERVER_HELLO_DONE   14
+#define HS_CLIENT_KEY_EXCHANGE 16
 #define GROUP_X25519         0x001d
+#define GROUP_P256           0x0017
+#define GROUP_P384           0x0018
 
 /* What to check and against what */
 struct tls_config {
@@ -70,6 +82,7 @@ struct tls_config {
 struct tls_conn {
     int32_t sock;
     int established;
+    int v12;                             /* 1 = TLS 1.2 was agreed on */
     uint16_t suite;                      /* which one the server picked */
     uint32_t keylen;                     /* 32 for ChaCha20, 16 for AES-128 */
     int verified;                        /* 1 = the certificate was verified */
@@ -159,10 +172,105 @@ static inline void tls_nonce(const uint8_t *iv, uint32_t seq, uint8_t *out)
         out[11 - i] ^= (uint8_t)(seq >> (i * 8));
 }
 
+/* --- TLS 1.2's records ----------------------------------------------
+ *
+ * The same ciphers, put together differently: the record's type and
+ * length are in the clear and sealed into the tag through the additional
+ * data, together with the record's number. ChaCha20 makes its nonce as
+ * 1.3 does; AES-GCM takes four bytes of it from the keys and sends the
+ * other eight in front of every record. */
+
+static inline int tls12_gcm(const struct tls_conn *c)
+{
+    return c->suite == TLS12_ECDSA_AES_GCM || c->suite == TLS12_RSA_AES_GCM;
+}
+
+static inline void tls12_aad(uint8_t *aad, uint32_t seq, uint8_t type,
+                             uint32_t len)
+{
+    for (int i = 0; i < 4; i++)
+        aad[i] = 0;
+    for (int i = 0; i < 4; i++)
+        aad[4 + i] = (uint8_t)(seq >> (24 - 8 * i));
+    aad[8] = type;
+    aad[9] = 0x03;
+    aad[10] = 0x03;
+    tls_put16(aad + 11, len);
+}
+
+static inline int tls12_send(struct tls_conn *c, uint8_t type,
+                             const uint8_t *data, uint32_t len)
+{
+    static uint8_t out[TLS_RECORD_MAX + 5 + 8];
+    uint8_t nonce[12], aad[13], tag[16];
+    if (len > TLS_PLAINTEXT_MAX)
+        return -1;
+    uint32_t ex = tls12_gcm(c) ? 8 : 0;
+    tls12_aad(aad, c->seq_c, type, len);
+    out[0] = type;
+    out[1] = 0x03;
+    out[2] = 0x03;
+    tls_put16(out + 3, ex + len + 16);
+    if (ex) {
+        for (int i = 0; i < 4; i++)
+            nonce[i] = c->iv_c[i];
+        for (int i = 0; i < 8; i++)          /* the record number, sent */
+            nonce[4 + i] = out[5 + i] = aad[i];
+        aes_gcm_encrypt(c->key_c, 128, nonce, 12, aad, 13, data, out + 5 + 8,
+                        len, tag, 16);
+    } else {
+        tls_nonce(c->iv_c, c->seq_c, nonce);
+        aead_encrypt(c->key_c, nonce, aad, 13, data, out + 5, len, tag);
+    }
+    for (int i = 0; i < 16; i++)
+        out[5 + ex + len + i] = tag[i];
+    c->seq_c++;
+    return tls_write_all(c, out, 5 + ex + len + 16);
+}
+
+/* A record decrypted: its type in *type, its length returned, -1 when
+   it does not open */
+static inline int tls12_recv(struct tls_conn *c, uint8_t *type, uint8_t *out,
+                             uint32_t max)
+{
+    static uint8_t buf[TLS_RECORD_MAX];
+    uint8_t hdr[5], nonce[12], aad[13], t;
+    uint32_t len;
+    if (tls_read_record(c, &t, hdr, buf, &len) < 0)
+        return -1;
+    uint32_t ex = tls12_gcm(c) ? 8 : 0;
+    if (len < ex + 16 || len - ex - 16 > max)
+        return -1;
+    uint32_t ctlen = len - ex - 16;
+    tls12_aad(aad, c->seq_s, t, ctlen);
+    int good;
+    if (ex) {
+        for (int i = 0; i < 4; i++)
+            nonce[i] = c->iv_s[i];
+        for (int i = 0; i < 8; i++)
+            nonce[4 + i] = buf[i];
+        good = aes_gcm_decrypt(c->key_s, 128, nonce, 12, aad, 13, buf + 8,
+                               out, ctlen, buf + 8 + ctlen, 16);
+    } else {
+        tls_nonce(c->iv_s, c->seq_s, nonce);
+        good = aead_decrypt(c->key_s, nonce, aad, 13, buf, out, ctlen,
+                            buf + ctlen);
+    }
+    if (!good) {
+        c->error = "the record could not be decrypted";
+        return -1;
+    }
+    c->seq_s++;
+    *type = t;
+    return (int)ctlen;
+}
+
 /* Sends an encrypted record: body || the real type */
 static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
                                      const uint8_t *data, uint32_t len)
 {
+    if (c->v12)
+        return tls12_send(c, inner_type, data, len);
     static uint8_t plain[TLS_RECORD_MAX];
     static uint8_t out[TLS_RECORD_MAX + 5];
     uint8_t nonce[12], tag[16];
@@ -198,6 +306,8 @@ static inline int tls_send_encrypted(struct tls_conn *c, uint8_t inner_type,
 static inline int tls_recv_encrypted(struct tls_conn *c, uint8_t *inner_type,
                                      uint8_t *out, uint32_t max)
 {
+    if (c->v12)
+        return tls12_recv(c, inner_type, out, max);
     static uint8_t buf[TLS_RECORD_MAX];
     uint8_t hdr[5], nonce[12];
     uint8_t type;
@@ -248,26 +358,21 @@ static inline void tls_traffic_keys(const uint8_t *secret, uint8_t *key,
 
 /* --- certificate verification --- */
 
-/* Takes the Certificate message apart, checks the signature from
-   CertificateVerify (it is that signature which proves the server has
-   the certificate's private key) and the whole chain. Returns CERT_OK
-   or an error code. */
-static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
-                                  const uint8_t *cv, uint32_t cvlen,
-                                  const uint8_t *cv_hash, const char *host,
-                                  const uint8_t *roots, uint32_t roots_len)
+/* The certificates of a Certificate message, leaf first. TLS 1.2's
+   message is a bare list; 1.3's starts with a request context and
+   gives each certificate extensions of its own. Returns how many. */
+static inline int tls_parse_chain(const uint8_t *certmsg, uint32_t certlen,
+                                  int v12, struct x509_cert *chain)
 {
-    struct x509_cert chain[CERT_CHAIN_MAX];
     int n = 0;
-
-    if (certlen < 8)
-        return CERT_ERR_PARSE;
-
+    if (certlen < 7)
+        return 0;
     const uint8_t *p = certmsg + 4;      /* past the message header */
     const uint8_t *end = certmsg + certlen;
-    p += 1 + p[0];                       /* certificate_request_context */
+    if (!v12)
+        p += 1 + p[0];                   /* certificate_request_context */
     if (p + 3 > end)
-        return CERT_ERR_PARSE;
+        return 0;
     uint32_t list_len = tls_get24(p);
     p += 3;
     const uint8_t *list_end = p + list_len;
@@ -282,40 +387,25 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
         if (x509_parse(&chain[n], p, clen) == 0)
             n++;
         p += clen;
+        if (v12)
+            continue;
         if (p + 2 > list_end)
             break;
         uint32_t extlen = tls_get16(p);  /* the entry's extensions */
         p += 2 + extlen;
     }
-    if (!n)
-        return CERT_ERR_PARSE;
+    return n;
+}
 
-    /* CertificateVerify: algorithm, length, signature */
-    if (cvlen < 8)
-        return CERT_ERR_PARSE;
-    uint32_t alg = tls_get16(cv + 4);
-    uint32_t siglen = tls_get16(cv + 6);
-    const uint8_t *sig = cv + 8;
-    if (8 + siglen > cvlen)
-        return CERT_ERR_PARSE;
-
-    /* The signed content per RFC 8446 4.4.3 */
-    static uint8_t tosign[64 + 34 + 32];
-    uint32_t m = 0;
-    for (int i = 0; i < 64; i++)
-        tosign[m++] = 0x20;
-    const char *label = "TLS 1.3, server CertificateVerify";
-    for (int i = 0; label[i]; i++)
-        tosign[m++] = (uint8_t)label[i];
-    tosign[m++] = 0x00;
-    for (int i = 0; i < 32; i++)
-        tosign[m++] = cv_hash[i];
-
+/* Does the leaf's key sign 'tosign' as 'sig' says, by the algorithm the
+   server named? CERT_OK or an error code. */
+static inline int tls_check_signature(const struct x509_cert *leaf,
+                                      uint32_t alg, const uint8_t *tosign,
+                                      uint32_t m, const uint8_t *sig,
+                                      uint32_t siglen)
+{
     uint8_t hash[32];
     sha256(tosign, m, hash);
-
-    const struct x509_cert *leaf = &chain[0];
-    int ok = 0;
 
     if (leaf->key_type == X509_KEY_EC) {
         struct ec_curve *cv;
@@ -337,15 +427,15 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
         }
         if (!leaf->ec_point)
             return CERT_ERR_ALG;
-
         if (!ecdsa_verify_der(cv, leaf->ec_point, leaf->ec_point_len, echash,
                               hashlen, sig, siglen))
             return CERT_ERR_SIGNATURE;
-        return cert_verify_chain(chain, n, roots, roots_len, host);
+        return CERT_OK;
     }
 
     if (leaf->key_type != X509_KEY_RSA)
         return CERT_ERR_ALG;
+    int ok;
     if (alg == 0x0804)                   /* rsa_pss_rsae_sha256 */
         ok = rsa_verify_pss_sha256(leaf->mod, leaf->mod_len, leaf->exp,
                                    sig, siglen, hash, leaf->mod_len * 8);
@@ -354,11 +444,304 @@ static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
                                      sig, siglen, hash);
     else
         return CERT_ERR_ALG;
+    return ok ? CERT_OK : CERT_ERR_SIGNATURE;
+}
 
-    if (!ok)
-        return CERT_ERR_SIGNATURE;
+/* TLS 1.3: takes the Certificate message apart, checks the signature
+   from CertificateVerify (it is that signature which proves the server
+   has the certificate's private key) and the whole chain. Returns
+   CERT_OK or an error code. */
+static inline int tls_check_certs(const uint8_t *certmsg, uint32_t certlen,
+                                  const uint8_t *cv, uint32_t cvlen,
+                                  const uint8_t *cv_hash, const char *host,
+                                  const uint8_t *roots, uint32_t roots_len)
+{
+    struct x509_cert chain[CERT_CHAIN_MAX];
+    int n = tls_parse_chain(certmsg, certlen, 0, chain);
+    if (!n)
+        return CERT_ERR_PARSE;
 
+    /* CertificateVerify: algorithm, length, signature */
+    if (cvlen < 8)
+        return CERT_ERR_PARSE;
+    uint32_t alg = tls_get16(cv + 4);
+    uint32_t siglen = tls_get16(cv + 6);
+    if (8 + siglen > cvlen)
+        return CERT_ERR_PARSE;
+
+    /* The signed content per RFC 8446 4.4.3 */
+    static uint8_t tosign[64 + 34 + 32];
+    uint32_t m = 0;
+    for (int i = 0; i < 64; i++)
+        tosign[m++] = 0x20;
+    const char *label = "TLS 1.3, server CertificateVerify";
+    for (int i = 0; label[i]; i++)
+        tosign[m++] = (uint8_t)label[i];
+    tosign[m++] = 0x00;
+    for (int i = 0; i < 32; i++)
+        tosign[m++] = cv_hash[i];
+
+    int r = tls_check_signature(&chain[0], alg, tosign, m, cv + 8, siglen);
+    if (r != CERT_OK)
+        return r;
     return cert_verify_chain(chain, n, roots, roots_len, host);
+}
+
+/* --- TLS 1.2's handshake (RFC 5246, RFC 8422, RFC 7627) ------------- */
+
+/* The PRF: P_SHA256 - HMAC chained on itself (A(i) = HMAC(A(i-1))) and
+   each link HMAC'd with the label and seed again, until there is enough */
+static inline void tls12_prf(const uint8_t *secret, uint32_t slen,
+                             const char *label, const uint8_t *seed,
+                             uint32_t seedlen, uint8_t *out, uint32_t outlen)
+{
+    static uint8_t ls[128], buf[32 + 128];
+    uint32_t n = 0;
+    while (label[n] && n < 64) {
+        ls[n] = (uint8_t)label[n];
+        n++;
+    }
+    for (uint32_t i = 0; i < seedlen && n < sizeof(ls); i++)
+        ls[n++] = seed[i];
+    uint8_t a[32], block[32];
+    hmac_sha256(secret, slen, ls, n, a);             /* A(1) */
+    for (uint32_t done = 0; done < outlen;) {
+        for (int i = 0; i < 32; i++)
+            buf[i] = a[i];
+        for (uint32_t i = 0; i < n; i++)
+            buf[32 + i] = ls[i];
+        hmac_sha256(secret, slen, buf, 32 + n, block);
+        for (int i = 0; i < 32 && done < outlen; i++)
+            out[done++] = block[i];
+        hmac_sha256(secret, slen, a, 32, a);         /* A(i+1) */
+    }
+}
+
+static inline void tls12_snapshot(const struct sha256 *tr, uint8_t *out)
+{
+    struct sha256 s = *tr;
+    sha256_final(&s, out);
+}
+
+/* After a ServerHello for TLS 1.2: the server's certificate and its
+   signed x25519 key, our key, the keys from the master secret, the
+   Finished messages both ways. 'rest' is what followed the ServerHello
+   in its record. Returns 0 with the connection established. */
+static inline int tls12_handshake(struct tls_conn *c, struct sha256 *tr,
+                                  const uint8_t *crand, const uint8_t *srand,
+                                  const uint8_t *priv, const uint8_t *pub,
+                                  int ems, const uint8_t *rest,
+                                  uint32_t restlen, const char *sni,
+                                  const struct tls_config *cfg)
+{
+    static uint8_t hs[TLS_HS_MAX], rec[TLS_RECORD_MAX], cert_msg[TLS_HS_MAX];
+    struct x509_cert chain[CERT_CHAIN_MAX];
+    uint32_t hslen = 0, cert_len = 0;
+    uint8_t server_pub[1 + 2 * 48];
+    uint32_t group = 0, publen = 0;
+    int have_key = 0, done = 0, result = CERT_ERR_PARSE;
+
+    c->v12 = 0;
+    for (uint32_t i = 0; i < restlen && hslen < TLS_HS_MAX; i++)
+        hs[hslen++] = rest[i];
+
+    while (!done) {
+        /* every whole message in what has come; one record may hold
+           several, and one message run over several records */
+        uint32_t off = 0;
+        while (off + 4 <= hslen) {
+            uint32_t mlen = tls_get24(hs + off + 1);
+            if (off + 4 + mlen > hslen)
+                break;
+            uint8_t mtype = hs[off];
+            const uint8_t *b = hs + off + 4;
+            if (mtype == HS_CERTIFICATE && 4 + mlen <= TLS_HS_MAX) {
+                cert_len = 4 + mlen;
+                for (uint32_t i = 0; i < cert_len; i++)
+                    cert_msg[i] = hs[off + i];
+            } else if (mtype == HS_SERVER_KEY_EXCHANGE) {
+                /* a named curve, the server's point on it, and its
+                   signature over both randoms and those parameters */
+                group = mlen >= 4 && b[0] == 3 ? tls_get16(b + 1) : 0;
+                publen = mlen >= 4 ? b[3] : 0;
+                uint32_t want = group == GROUP_X25519 ? 32
+                              : group == GROUP_P256 ? 65
+                              : group == GROUP_P384 ? 97 : 0;
+                if (!want || publen != want || mlen < 4 + publen + 4) {
+                    c->error = "the server's key is on a curve we lack";
+                    return -1;
+                }
+                for (uint32_t i = 0; i < publen; i++)
+                    server_pub[i] = b[4 + i];
+                const uint8_t *sp = b + 4 + publen;
+                uint32_t alg = tls_get16(sp), siglen = tls_get16(sp + 2);
+                if (4 + publen + 4 + siglen > mlen) {
+                    c->error = "a damaged ServerKeyExchange";
+                    return -1;
+                }
+                static uint8_t tosign[64 + 4 + 97];
+                for (int i = 0; i < 32; i++) {
+                    tosign[i] = crand[i];
+                    tosign[32 + i] = srand[i];
+                }
+                for (uint32_t i = 0; i < 4 + publen; i++)
+                    tosign[64 + i] = b[i];
+                int n = tls_parse_chain(cert_msg, cert_len, 1, chain);
+                result = n ? tls_check_signature(&chain[0], alg, tosign,
+                                                 68 + publen, sp + 4, siglen)
+                           : CERT_ERR_PARSE;
+                if (result == CERT_OK)
+                    result = cert_verify_chain(chain, n,
+                                               cfg ? cfg->roots : 0,
+                                               cfg ? cfg->roots_len : 0, sni);
+                have_key = 1;
+            } else if (mtype == HS_CERT_REQUEST) {
+                c->error = "the server asks for a client certificate";
+                return -1;
+            } else if (mtype == HS_SERVER_HELLO_DONE) {
+                done = 1;
+            }
+            sha256_update(tr, hs + off, 4 + mlen);
+            off += 4 + mlen;
+            if (done)
+                break;
+        }
+        uint32_t left = hslen - off;
+        for (uint32_t i = 0; i < left; i++)
+            hs[i] = hs[off + i];
+        hslen = left;
+        if (done)
+            break;
+        uint8_t type = 0, hdr[5];
+        uint32_t len;
+        if (tls_read_record(c, &type, hdr, rec, &len) < 0 ||
+            type != REC_HANDSHAKE) {
+            c->error = type == REC_ALERT ? "the server tore the connection "
+                                           "down (alert)"
+                                         : "the handshake was broken off";
+            return -1;
+        }
+        for (uint32_t i = 0; i < len && hslen < TLS_HS_MAX; i++)
+            hs[hslen++] = rec[i];
+    }
+    if (!have_key) {
+        c->error = "no ServerKeyExchange";
+        return -1;
+    }
+    c->verify_err = result;
+    c->verified = result == CERT_OK;
+    if (cfg && cfg->verify && !c->verified) {
+        c->error = cert_error_text(result);
+        return -1;
+    }
+
+    /* Our half of the key, in the clear, on the server's curve; and the
+       secret both halves make */
+    uint8_t cke[5 + 97], pms[48], master[48];
+    uint32_t pmslen = 32, ourlen = 32;
+    if (group == GROUP_X25519) {
+        for (int i = 0; i < 32; i++)
+            cke[5 + i] = pub[i];
+        x25519(pms, priv, server_pub);
+    } else {
+        struct ec_curve *cv = group == GROUP_P256 ? ec_curve_p256()
+                                                  : ec_curve_p384();
+        uint8_t d[48];
+        int tries = 0;
+        do                              /* below the order, rarely retried */
+            urand_bytes(d, cv->size);
+        while (!ecdh_public(cv, d, cke + 5) && ++tries < 8);
+        if (tries == 8 || !ecdh_shared(cv, d, server_pub, publen, pms)) {
+            c->error = "the server's point is not on its curve";
+            return -1;
+        }
+        pmslen = cv->size;
+        ourlen = 1 + 2 * cv->size;
+    }
+    uint32_t ckelen = 4 + 1 + ourlen;
+    cke[0] = HS_CLIENT_KEY_EXCHANGE;
+    cke[1] = 0; cke[2] = 0; cke[3] = (uint8_t)(1 + ourlen);
+    cke[4] = (uint8_t)ourlen;
+    sha256_update(tr, cke, ckelen);
+    uint8_t rh[5] = { REC_HANDSHAKE, 0x03, 0x03, 0, (uint8_t)ckelen };
+    if (tls_write_all(c, rh, 5) < 0 || tls_write_all(c, cke, ckelen) < 0) {
+        c->error = "the ClientKeyExchange could not be sent";
+        return -1;
+    }
+
+    /* The master secret: with RFC 7627 bound to everything said so far,
+       so that it cannot be steered into another connection's */
+    uint8_t randoms[64];
+    if (ems) {
+        uint8_t session_hash[32];
+        tls12_snapshot(tr, session_hash);
+        tls12_prf(pms, pmslen, "extended master secret", session_hash, 32,
+                  master, 48);
+    } else {
+        for (int i = 0; i < 32; i++) {
+            randoms[i] = crand[i];
+            randoms[32 + i] = srand[i];
+        }
+        tls12_prf(pms, pmslen, "master secret", randoms, 64, master, 48);
+    }
+    for (int i = 0; i < 32; i++) {
+        randoms[i] = srand[i];
+        randoms[32 + i] = crand[i];
+    }
+    uint32_t ivlen = tls12_gcm(c) ? 4 : 12;
+    uint8_t kb[2 * 32 + 2 * 12];
+    tls12_prf(master, 48, "key expansion", randoms, 64, kb,
+              2 * c->keylen + 2 * ivlen);
+    for (uint32_t i = 0; i < c->keylen; i++) {
+        c->key_c[i] = kb[i];
+        c->key_s[i] = kb[c->keylen + i];
+    }
+    for (uint32_t i = 0; i < ivlen; i++) {
+        c->iv_c[i] = kb[2 * c->keylen + i];
+        c->iv_s[i] = kb[2 * c->keylen + ivlen + i];
+    }
+    c->v12 = 1;
+    c->seq_c = c->seq_s = 0;
+
+    /* ChangeCipherSpec, then our Finished - the first sealed record */
+    uint8_t ccs[6] = { REC_CCS, 0x03, 0x03, 0, 1, 1 };
+    uint8_t fin[16], th[32];
+    if (tls_write_all(c, ccs, 6) < 0) {
+        c->error = "the ChangeCipherSpec could not be sent";
+        return -1;
+    }
+    tls12_snapshot(tr, th);
+    fin[0] = HS_FINISHED;
+    fin[1] = 0; fin[2] = 0; fin[3] = 12;
+    tls12_prf(master, 48, "client finished", th, 32, fin + 4, 12);
+    sha256_update(tr, fin, 16);
+    if (tls12_send(c, REC_HANDSHAKE, fin, 16) < 0) {
+        c->error = "Finished could not be sent";
+        return -1;
+    }
+
+    /* The server's: its ChangeCipherSpec, and a Finished over everything,
+       ours included */
+    uint8_t type = 0, hdr[5];
+    uint32_t len;
+    if (tls_read_record(c, &type, hdr, rec, &len) < 0 || type != REC_CCS) {
+        c->error = type == REC_ALERT ? "the server refused our keys (alert)"
+                                     : "no ChangeCipherSpec from the server";
+        return -1;
+    }
+    uint8_t expect[12], sfin[64];
+    tls12_snapshot(tr, th);
+    tls12_prf(master, 48, "server finished", th, 32, expect, 12);
+    int got = tls12_recv(c, &type, sfin, sizeof(sfin));
+    int bad = got != 16 || type != REC_HANDSHAKE || sfin[0] != HS_FINISHED;
+    for (int i = 0; !bad && i < 12; i++)
+        bad = sfin[4 + i] != expect[i];
+    if (bad) {
+        c->error = "the server's Finished does not match";
+        return -1;
+    }
+    c->established = 1;
+    return 0;
 }
 
 /* --- the handshake --- */
@@ -388,6 +771,7 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
 
     c->error = 0;
     c->established = 0;
+    c->v12 = 0;
     c->suite = TLS_CHACHA20_SHA256;
     c->keylen = 32;
     c->verified = 0;
@@ -412,17 +796,23 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     uint32_t body = n;
 
     msg[n++] = 0x03; msg[n++] = 0x03;    /* legacy_version */
-    urand_bytes(msg + n, 32);            /* random */
-    n += 32;
+    uint8_t crand[32];
+    urand_bytes(crand, 32);              /* random */
+    for (int i = 0; i < 32; i++)
+        msg[n++] = crand[i];
     msg[n++] = 32;                       /* legacy_session_id */
     urand_bytes(msg + n, 32);
     n += 32;
-    /* Two cipher suites, in our order of preference - ChaCha20 first,
-       because it needs no substitution tables and so no cache. The
-       server picks; both are accepted below. */
-    tls_put16(msg + n, 4); n += 2;
+    /* The suites, in our order of preference - ChaCha20 first, because
+       it needs no substitution tables and so no cache; TLS 1.3's, then
+       1.2's for servers that have not moved on. The server picks. */
+    tls_put16(msg + n, 12); n += 2;
     tls_put16(msg + n, TLS_CHACHA20_SHA256); n += 2;
     tls_put16(msg + n, TLS_AES_GCM_SHA256); n += 2;
+    tls_put16(msg + n, TLS12_ECDSA_CHACHA20); n += 2;
+    tls_put16(msg + n, TLS12_RSA_CHACHA20); n += 2;
+    tls_put16(msg + n, TLS12_ECDSA_AES_GCM); n += 2;
+    tls_put16(msg + n, TLS12_RSA_AES_GCM); n += 2;
     msg[n++] = 1; msg[n++] = 0;          /* no compression */
 
     uint32_t ext_len_at = n;
@@ -441,17 +831,34 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
     for (uint32_t i = 0; i < sni_len; i++)
         msg[n++] = (uint8_t)sni[i];
 
-    /* supported_versions: TLS 1.3 only */
+    /* supported_versions: TLS 1.3, and 1.2 */
     tls_put16(msg + n, 0x002b); n += 2;
-    tls_put16(msg + n, 3); n += 2;
-    msg[n++] = 2;
+    tls_put16(msg + n, 5); n += 2;
+    msg[n++] = 4;
     tls_put16(msg + n, 0x0304); n += 2;
+    tls_put16(msg + n, 0x0303); n += 2;
 
-    /* supported_groups: x25519 */
-    tls_put16(msg + n, 0x000a); n += 2;
-    tls_put16(msg + n, 4); n += 2;
+    /* For 1.2: points sent whole (the only form x25519 has), the master
+       secret bound to the handshake (RFC 7627), and no renegotiation */
+    tls_put16(msg + n, 0x000b); n += 2;
     tls_put16(msg + n, 2); n += 2;
+    msg[n++] = 1;
+    msg[n++] = 0;
+    tls_put16(msg + n, 0x0017); n += 2;
+    tls_put16(msg + n, 0); n += 2;
+    tls_put16(msg + n, 0xff01); n += 2;
+    tls_put16(msg + n, 1); n += 2;
+    msg[n++] = 0;
+
+    /* supported_groups: x25519 first - the one key we send for 1.3 -
+       and the NIST curves, which TLS 1.2 also reads as the curves an
+       ECDSA certificate may be on, and some 1.2 servers exchange on */
+    tls_put16(msg + n, 0x000a); n += 2;
+    tls_put16(msg + n, 8); n += 2;
+    tls_put16(msg + n, 6); n += 2;
     tls_put16(msg + n, GROUP_X25519); n += 2;
+    tls_put16(msg + n, GROUP_P256); n += 2;
+    tls_put16(msg + n, GROUP_P384); n += 2;
 
     /* signature_algorithms - a server refuses without it */
     tls_put16(msg + n, 0x000d); n += 2;
@@ -498,38 +905,43 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
         tls_abort(c);
         return -1;
     }
-    sha256_update(&tr, msg, len);
-
-    uint32_t p = 4;
-    p += 2;                              /* legacy_version */
-    p += 32;                             /* random */
-    if (p >= len) {
+    /* (a 1.2 server may send what follows in the same record) */
+    uint32_t shlen = 4 + tls_get24(msg + 1);
+    if (shlen > len || shlen < 4 + 2 + 32 + 1) {
         c->error = "a damaged ServerHello";
         tls_abort(c);
         return -1;
     }
+    sha256_update(&tr, msg, shlen);
+
+    uint32_t p = 4;
+    p += 2;                              /* legacy_version */
+    uint8_t srand[32];
+    for (int i = 0; i < 32; i++)
+        srand[i] = msg[p + i];
+    p += 32;                             /* random */
     p += 1 + msg[p];                     /* legacy_session_id */
-    uint32_t suite = tls_get16(msg + p);
-    p += 2;
-    p += 1;                              /* compression */
-    if (suite != TLS_CHACHA20_SHA256 && suite != TLS_AES_GCM_SHA256) {
-        c->error = "the server picked another cipher suite";
+    if (p + 5 > shlen) {
+        c->error = "a damaged ServerHello";
         tls_abort(c);
         return -1;
     }
-    c->suite = (uint16_t)suite;
-    c->keylen = suite == TLS_AES_GCM_SHA256 ? 16 : 32;
+    uint32_t suite = tls_get16(msg + p);
+    p += 2;
+    p += 1;                              /* compression */
 
     uint32_t exts = tls_get16(msg + p);
     p += 2;
     uint32_t ext_end = p + exts;
     uint8_t server_pub[32];
-    int have_key = 0;
+    int have_key = 0, v13 = 0, ems = 0;
 
-    while (p + 4 <= ext_end && p + 4 <= len) {
+    while (p + 4 <= ext_end && p + 4 <= shlen) {
         uint32_t etype = tls_get16(msg + p);
         uint32_t elen = tls_get16(msg + p + 2);
         uint32_t edata = p + 4;
+        if (edata + elen > shlen)
+            break;
         if (etype == 0x0033 && elen >= 36) {          /* key_share */
             if (tls_get16(msg + edata) == GROUP_X25519 &&
                 tls_get16(msg + edata + 2) == 32) {
@@ -538,8 +950,45 @@ static inline int tls_connect(struct tls_conn *c, uint32_t ip, uint32_t port,
                 have_key = 1;
             }
         }
+        if (etype == 0x002b && elen == 2 && tls_get16(msg + edata) == 0x0304)
+            v13 = 1;                                  /* supported_versions */
+        if (etype == 0x0017)
+            ems = 1;                                  /* extended master secret */
         p = edata + elen;
     }
+
+    if (!v13) {
+        /* TLS 1.2 - unless the server can do 1.3 and something in between
+           took it away: then its random ends in "DOWNGRD\1" (RFC 8446
+           4.1.3), and we stop rather than settle for less */
+        static const uint8_t down[8] = { 'D', 'O', 'W', 'N', 'G', 'R', 'D', 1 };
+        int downgraded = 1;
+        for (int i = 0; i < 8; i++)
+            downgraded &= srand[24 + i] == down[i];
+        if (downgraded || tls_get16(msg + 4) != 0x0303 ||
+            (suite != TLS12_ECDSA_CHACHA20 && suite != TLS12_RSA_CHACHA20 &&
+             suite != TLS12_ECDSA_AES_GCM && suite != TLS12_RSA_AES_GCM)) {
+            c->error = downgraded ? "a TLS 1.3 server was pushed down to 1.2"
+                                  : "the server picked another cipher suite";
+            tls_abort(c);
+            return -1;
+        }
+        c->suite = (uint16_t)suite;
+        c->keylen = tls12_gcm(c) ? 16 : 32;
+        if (tls12_handshake(c, &tr, crand, srand, priv, pub, ems,
+                            msg + shlen, len - shlen, sni, cfg) < 0) {
+            tls_abort(c);
+            return -1;
+        }
+        return 0;
+    }
+    if (suite != TLS_CHACHA20_SHA256 && suite != TLS_AES_GCM_SHA256) {
+        c->error = "the server picked another cipher suite";
+        tls_abort(c);
+        return -1;
+    }
+    c->suite = (uint16_t)suite;
+    c->keylen = suite == TLS_AES_GCM_SHA256 ? 16 : 32;
     if (!have_key) {
         c->error = "a ServerHello with no x25519 key";
         tls_abort(c);

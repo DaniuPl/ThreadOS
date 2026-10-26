@@ -1618,6 +1618,36 @@ def aesref(mode, key, nonce, aad, plain, taglen=16):
     return ct, tag
 
 
+def start_tls12_server(cipher, ec, dirpath, groups="X25519"):
+    """OpenSSL's s_server speaking TLS 1.2 alone, with one cipher and one
+    group for the key exchange, for a certificate of its own (RSA, or
+    ECDSA on P-256) that it serves files from dirpath with.
+
+    Returns (port, stop, der) - der is the certificate, for the guest to
+    take as a trust root. (None, stop, None) when openssl is missing."""
+    try:
+        certfile, keyfile, der = make_test_cert(dirpath, ec)
+    except BaseException:
+        return None, lambda: None, None
+    sock = socket.socket()
+    sock.bind(("0.0.0.0", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    log = open(os.path.join(dirpath, "s_server.log"), "wb")
+    proc = subprocess.Popen(
+        ["openssl", "s_server", "-tls1_2", "-cipher", cipher,
+         "-groups", groups, "-cert", certfile, "-key", keyfile,
+         "-accept", str(port), "-naccept", "8", "-WWW"],
+        stdout=log, stderr=subprocess.STDOUT, cwd=dirpath)
+    time.sleep(1.0)
+
+    def stop():
+        proc.kill()
+        log.close()
+
+    return port, stop, der
+
+
 def start_suite_server(suite, dirpath=None):
     """An HTTPS server that will agree to ONE cipher suite.
 

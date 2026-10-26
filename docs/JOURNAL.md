@@ -6243,3 +6243,37 @@ works and is checked by `make test`.
       very RGBA bytes Pillow reads back. The QEMU test draws a Pillow
       GIF at twice its size: three quarters 32x24 each in their colours,
       side by side, and the transparent one not drawn at all.
+
+- [x] **TLS 1.2, for the servers that have not moved on** (user/utls.h,
+      user/uecdsa.h, user/uhttp.h, user/httpget.c, scripts/ptest.py,
+      `tls64`).
+
+      Only TLS 1.3 was spoken, and a server without it could not be
+      reached at all. The ClientHello now offers 1.2 as well, and a
+      ServerHello without 1.3's supported_versions takes the 1.2 road:
+      the Certificate (1.2's bare list), the ServerKeyExchange - the
+      server's ephemeral key, signed with its certificate's key over both
+      randoms, checked like 1.3's CertificateVerify by the same code -
+      ServerHelloDone; our ClientKeyExchange, ChangeCipherSpec and
+      Finished; the server's. Keys come from 1.2's PRF (P_SHA256), with
+      the master secret bound to the handshake (RFC 7627) when the server
+      agrees. Records carry their number and header in the AEAD's
+      additional data; AES-GCM takes eight bytes of its nonce from the
+      record. Suites: ECDHE with RSA or ECDSA, ChaCha20-Poly1305 or
+      AES-128-GCM. A 1.3-capable server pushed to 1.2 shows it in its
+      random ("DOWNGRD"), and we stop.
+
+      Testing with an ECDSA certificate showed that 1.2 reads the
+      supported groups as the curves a certificate may be on: x25519
+      alone made such servers refuse us. P-256 and P-384 are offered now,
+      and since a 1.2 server may then exchange keys on them, uecdsa.h
+      gained ECDH (d*G, d*Q) on both - variable-time, which is acceptable
+      for keys used once.
+
+      The test runs OpenSSL's s_server at TLS 1.2 with one suite and one
+      group each - RSA with ChaCha20 on x25519, RSA with AES-GCM on
+      P-256, ECDSA with ChaCha20 on P-384, ECDSA with AES-GCM on x25519 -
+      with its certificate as the guest's only root: every time "TLS 1.2
+      agreed", the certificate and the signature checked, the page whole.
+      A 1.2 server with another certificate is refused. All the TLS 1.3
+      checks still pass; httpget now says which version was agreed.

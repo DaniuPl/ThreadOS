@@ -28,7 +28,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_iso64, no64,
-                   start_suite_server, DNS_HINT)
+                   start_suite_server, start_tls12_server, DNS_HINT)
 from ptest import _kernel_define as define
 
 
@@ -159,6 +159,63 @@ def main():
                 finally:
                     sstop()
                     shutil.rmtree(sdir, ignore_errors=True)
+
+            # --- TLS 1.2, for servers that have not moved on -----------
+            # Each server speaks 1.2 alone with one cipher, so a page that
+            # arrives proves the suite; its certificate is the guest's
+            # one trust root, so "checked" proves the signature over the
+            # server's key and the chain both held.
+            # The key exchange on each curve a 1.2 server may pick.
+            for cipher, ec, groups, label in (
+                    ("ECDHE-RSA-CHACHA20-POLY1305", False, "X25519",
+                     "RSA, ChaCha20-Poly1305, x25519"),
+                    ("ECDHE-RSA-AES128-GCM-SHA256", False, "P-256",
+                     "RSA, AES-128-GCM, P-256"),
+                    ("ECDHE-ECDSA-CHACHA20-POLY1305", True, "P-384",
+                     "ECDSA, ChaCha20-Poly1305, P-384"),
+                    ("ECDHE-ECDSA-AES128-GCM-SHA256", True, "X25519",
+                     "ECDSA, AES-128-GCM, x25519")):
+                sdir = tempfile.mkdtemp()
+                with open(os.path.join(sdir, "index.html"), "wb") as fh:
+                    fh.write(PAGE)
+                sport, sstop, der = start_tls12_server(cipher, ec, sdir,
+                                                       groups)
+                if sport is None:
+                    print("SKIPPED: no openssl s_server")
+                    break
+                try:
+                    SERVED["/tls12.der"] = der
+                    q.command("run httpget 10.0.2.2 %d /tls12.der roots.der"
+                              % http_port, "exit code", timeout=60)
+                    got = q.command("run httpget https://threados.test "
+                                    "%d /index.html" % sport,
+                                    "exit code", timeout=120)
+                    said = [ln for ln in got.splitlines()
+                            if "[httpget]" in ln][-3:]
+                    check("TLS 1.2 with %s: agreed, the certificate and the "
+                          "signature over the key checked, the page whole "
+                          "(%s)" % (label, said),
+                          "[httpget] TLS 1.2 agreed" in got and
+                          "certificate checked" in got and
+                          "ThreadOS TCP works" in got)
+                finally:
+                    sstop()
+                    shutil.rmtree(sdir, ignore_errors=True)
+            # And a 1.2 server with a certificate that is not the root
+            sdir = tempfile.mkdtemp()
+            sport, sstop, _ = start_tls12_server(
+                "ECDHE-RSA-AES128-GCM-SHA256", False, sdir)
+            try:
+                if sport is not None:
+                    got = q.command("run httpget https://threados.test "
+                                    "%d /index.html" % sport,
+                                    "exit code", timeout=120)
+                    check("a TLS 1.2 server with a foreign certificate is "
+                          "refused", "no trusted issuer" in got and
+                          "HTTP 200" not in got)
+            finally:
+                sstop()
+                shutil.rmtree(sdir, ignore_errors=True)
         finally:
             q.close()
             if os.path.exists(slog):

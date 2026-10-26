@@ -73,6 +73,7 @@ struct http_result {
     int chunked;                 /* was the body in chunks */
     int verified;                /* https: did the certificate hold up */
     int verify_err;              /* https: the reason, when it did not */
+    int tls12;                   /* https: 1 = TLS 1.2 was agreed on */
     char location[2048];         /* the Location header (a redirect) - a
                                     signed download link runs to ~1 KiB */
 };
@@ -228,6 +229,7 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     res->chunked = 0;
     res->verified = 0;
     res->verify_err = 0;
+    res->tls12 = 0;
     res->location[0] = '\0';
     http_set_cookies_len = 0;
     http_set_cookies[0] = '\0';
@@ -242,6 +244,7 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
         }
         res->verified = tp.conn.verified;
         res->verify_err = tp.conn.verify_err;
+        res->tls12 = tp.conn.v12;
     } else {
         tp.sock = tcp_connect(ip, port, 5000);
         if (tp.sock < 0)

@@ -364,6 +364,89 @@ static inline void ec_mul(const struct ec_curve *c, struct ec_point *r,
     *r = acc;
 }
 
+/* --- Diffie-Hellman on the curve (for TLS 1.2 servers) ---
+ *
+ * Our key is a random number d below the order; the public half is
+ * d*G, and the secret shared with a peer whose half is Q is the x of
+ * d*Q. ec_mul's time depends on the bits of d - acceptable for a key
+ * made for one connection and thrown away, not for one kept. */
+
+/* A point back out of Jacobian and Montgomery form, as bytes */
+static inline void ec_affine(const struct ec_curve *c, const struct ec_point *p,
+                             uint8_t *x, uint8_t *y)
+{
+    struct bignum zinv, z2, z3, t;
+    fp_inv(c, &zinv, &p->z);
+    fp_mul(c, &z2, &zinv, &zinv);
+    fp_mul(c, &z3, &z2, &zinv);
+    fp_mul(c, &t, &p->x, &z2);
+    fp_leave(c, &t, &t);
+    bn_to_bytes(&t, x, c->size);
+    if (y) {
+        fp_mul(c, &t, &p->y, &z3);
+        fp_leave(c, &t, &t);
+        bn_to_bytes(&t, y, c->size);
+    }
+}
+
+/* d * (x, y) for a point given as 0x04 || X || Y; 0 when it is not one */
+static inline int ec_mul_bytes(struct ec_curve *c, const uint8_t *d,
+                               const uint8_t *pt, uint32_t ptlen,
+                               struct ec_point *out)
+{
+    ec_init(c);
+    struct bignum k, x, y;
+    struct ec_point p;
+    if (ptlen != 1 + 2 * c->size || pt[0] != 0x04 ||
+        bn_from_bytes(&k, d, c->size) < 0 ||
+        bn_from_bytes(&x, pt + 1, c->size) < 0 ||
+        bn_from_bytes(&y, pt + 1 + c->size, c->size) < 0 ||
+        bn_cmp(&x, &c->p) >= 0 || bn_cmp(&y, &c->p) >= 0)
+        return 0;
+    fp_enter(c, &p.x, &x);
+    fp_enter(c, &p.y, &y);
+    p.z = c->one_mont;
+    p.infinity = 0;
+    ec_mul(c, out, &k, &p);
+    return !out->infinity;
+}
+
+/* Our key pair: d from the random bytes given (retried by the caller
+   when it is not below the order), and d*G as 0x04 || X || Y */
+static inline int ecdh_public(struct ec_curve *c, const uint8_t *d,
+                              uint8_t *pub)
+{
+    ec_init(c);
+    struct bignum k;
+    if (bn_from_bytes(&k, d, c->size) < 0 || bn_is_zero(&k) ||
+        bn_cmp(&k, &c->n) >= 0)
+        return 0;
+    uint8_t g[1 + 2 * 48];
+    g[0] = 0x04;
+    for (uint32_t i = 0; i < c->size; i++) {
+        g[1 + i] = c->gx_bytes[i];
+        g[1 + c->size + i] = c->gy_bytes[i];
+    }
+    struct ec_point r;
+    if (!ec_mul_bytes(c, d, g, 1 + 2 * c->size, &r))
+        return 0;
+    pub[0] = 0x04;
+    ec_affine(c, &r, pub + 1, pub + 1 + c->size);
+    return 1;
+}
+
+/* The shared secret: the x of d * the peer's point */
+static inline int ecdh_shared(struct ec_curve *c, const uint8_t *d,
+                              const uint8_t *peer, uint32_t peerlen,
+                              uint8_t *x)
+{
+    struct ec_point r;
+    if (!ec_mul_bytes(c, d, peer, peerlen, &r))
+        return 0;
+    ec_affine(c, &r, x, 0);
+    return 1;
+}
+
 /* --- the signature --- */
 
 /* Multiplication modulo n (the group order) - outside the Montgomery
