@@ -125,7 +125,7 @@ def tools(e):
     # --- bookmarks and history -----------------------------------
     q.click(cx + w0 // 2, cy + h0 // 2)        # the keys back
     go("/two.html", "Web: Page two")
-    star_x = cx + w0 - 10 - define(SRC, "STAR_W")
+    star_x = cx + w0 - 10 - define(SRC, "MENU_W") - define(SRC, "STAR_W")
     star = (star_x, cy + 8, star_x + define(SRC, "STAR_W") - 8, cy + 32)
     accent = theme("dark")["accent"]
 

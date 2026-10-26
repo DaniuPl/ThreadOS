@@ -193,6 +193,12 @@ LOOP_PAGE = (b"<html><head><title>Loop</title><script>"
              b"</body></html>")
 
 
+# A page that tries to lead the browser to one of its own pages
+EVIL = (b"<html><head><title>Evil</title></head><body><p>"
+        b"<a href='about:history?clear=all' style='color:#806040'>free "
+        b"prizes</a></p></body></html>")
+
+
 def page_in(text, codec, meta=""):
     return ("<html><head>" + meta + "<title>" + text + "</title></head>"
             "<body><p>" + text + "</p></body></html>").encode(codec)
@@ -330,6 +336,7 @@ def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
     SERVED["/plform.html"] = PLFORM
+    SERVED["/evil.html"] = EVIL
     SERVED["/lib.js"] = JS_LIB
     SERVED["/js.html"] = JS_PAGE
     SERVED["/loop.html"] = LOOP_PAGE

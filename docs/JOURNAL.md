@@ -6323,3 +6323,32 @@ works and is checked by `make test`.
       appears, 120 pixels wide) and prevents the link; a timer paints
       another box later; console.log reaches the serial line; and a
       `while (true)` is stopped while its page still shows.
+
+- [x] **The browser's own pages: menu, history, cookies, settings**
+      (apps/browser/web.cpp, scripts/tests/t_webui.py)
+      The toolbar is drawn anew: flat icons, a rounded address field
+      with a padlock for https, and at its end a menu (⋮) with New tab,
+      History, Bookmarks, Cookies, Settings, Find and About. All but New
+      tab and Find open a page of the browser's own, built in memory:
+      about:history (searchable, entries removable, or all of it),
+      about:bookmarks, about:cookies (the jar as it is, with expiry
+      dates, removable one by one or all at once), about:settings and
+      about:version. The settings - JavaScript on or off, images on or
+      off, the search engine, the home page, the zoom - are a form that
+      submits to about:settings itself and are kept in .web-settings.txt.
+
+      These pages act on what their address says (?clear=all empties the
+      history), so a page from the network must not reach them: a link,
+      or a form's action, to about: from any page that is not about: is
+      refused and said so on the status line. The browser's pages run no
+      scripts, are not remembered in the history and cannot be
+      bookmarked.
+
+      The test opens the menu and picks History: it lists the two pages
+      seen, and its "Clear the history" empties it. Cookies lists the one
+      a site set; "Remove all cookies" removes it, and the site's next
+      request carries no Cookie header, by the server's own account. In
+      Settings a click unticks JavaScript and the button saves it; the
+      next page's scripts do not run, and once ticked again they do. A
+      served page's link to about:history?clear=all is refused and the
+      history is still there.

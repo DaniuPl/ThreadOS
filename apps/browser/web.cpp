@@ -42,6 +42,7 @@ extern "C" {
 #include "uinflate.h"
 #include "ujpeg.h"
 #include "ugif.h"
+#include "ucookie.h"
 }
 
 using namespace litehtml;
@@ -58,6 +59,9 @@ using namespace litehtml;
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
 #define STAR_W 26             // the bookmark star, at the address field's end
+#define MENU_W 34             // the menu's button, at the toolbar's end
+#define MENU_PANEL_W 210      // the menu it opens
+#define MENU_ROW 30           // and each of its items
 #define ZOOM_W 96             // "-  100%  +" at the status line's right end
 #define ZOOM_BTN 26           // each of its buttons
 #define FONT_PX 15            // a page's text when its CSS does not say
@@ -390,6 +394,17 @@ static bool selected(int x, int y, int w, int h)
     return true;
 }
 
+// The browser's settings (about:settings, further down)
+// - kept in the person's home, a line "name=value" each
+struct browser_prefs {
+    bool js = true;                    // run the pages' scripts
+    bool images = true;                // fetch and show pictures
+    std::string search;                // the engine words go to; "": the system's
+    std::string home = "about:start";  // what a new tab opens
+    int zoom = 100;                    // a new window's
+};
+static browser_prefs prefs;
+
 class window_container : public document_container {
   public:
     int win = -1;
@@ -506,7 +521,7 @@ class window_container : public document_container {
     void load_image(const char* src, const char* baseurl, bool) override
     {
         std::string where = full(src, baseurl);
-        if (pictures.count(where))
+        if (pictures.count(where) || !prefs.images)
             return;
         picture& pic = pictures[where];
         std::string data;
@@ -689,6 +704,49 @@ static bool write_file(const char* name, const std::string& data)
 
 // Where the browser keeps cookies, between its fetches and its runs
 static const char COOKIE_JAR[] = ".web-cookies.txt";
+// --- the browser's settings (about:settings) ------------------------------
+
+static const char PREFS_FILE[] = ".web-settings.txt";
+
+static void load_prefs()
+{
+    std::string text;
+    if (!read_file(PREFS_FILE, text))
+        return;
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos)
+            end = text.size();
+        std::string line = text.substr(at, end - at);
+        at = end + 1;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+        std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+        if (k == "javascript")
+            prefs.js = v == "1";
+        else if (k == "images")
+            prefs.images = v == "1";
+        else if (k == "search")
+            prefs.search = v;
+        else if (k == "home" && !v.empty())
+            prefs.home = v;
+        else if (k == "zoom")
+            prefs.zoom = std::atoi(v.c_str()) >= 50 && std::atoi(v.c_str()) <= 200
+                             ? std::atoi(v.c_str()) : 100;
+    }
+}
+
+static void save_prefs()
+{
+    write_file(PREFS_FILE,
+               std::string("javascript=") + (prefs.js ? "1" : "0") + "\n" +
+               "images=" + (prefs.images ? "1" : "0") + "\n" +
+               "search=" + prefs.search + "\n" + "home=" + prefs.home + "\n" +
+               "zoom=" + std::to_string(prefs.zoom) + "\n");
+}
+
 // What the last answer said it was (Content-Type), for its charset
 static const char TYPE_FILE[] = ".web-type.txt";
 
@@ -1188,6 +1246,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 
 static void draw();
 static void draw_chrome();
+static bool menu_open;                 // the toolbar's menu is showing
 
 // --- the page's scripts -------------------------------------------------
 
@@ -1309,6 +1368,7 @@ static std::string form_encode(const std::string& s);
 static std::string in_page_charset(const std::string& utf8);
 static void find_all();
 static std::string load_icon(const std::string& target);
+static bool is_about(const std::string& where);
 static void save_session();
 static std::string extension(const std::string& target);
 
@@ -1327,6 +1387,8 @@ static std::string search_for(const std::string& words)
     for (uint32_t i = 0; sys_cfg_get(i, &c) == 0; i++)
         if (!strcmp(c.name, "search") && c.value[0])
             base = c.value;
+    if (!prefs.search.empty())         // the browser's own choice first
+        base = prefs.search;
     return base + form_encode(words);
 }
 
@@ -1380,8 +1442,15 @@ static void submit(std::shared_ptr<el_input> by)
     for (auto& c : method)
         c = (char)tolower((unsigned char)c);
     std::string target =
-        resolve(url(cont.base), url(*action ? action : cont.base)).str();
+        !strncmp(action, "about:", 6)
+            ? std::string(action)
+            : resolve(url(cont.base), url(*action ? action : cont.base)).str();
     target = target.substr(0, target.find('#'));
+    // The browser's own pages take forms only from themselves
+    if (is_about(target) && !is_about(cont.base)) {
+        status_line = "Blocked: a page may not send a form to " + target;
+        return;
+    }
     if (method == "post") {
         std::printf("[web] form posted to %s: %s\n", target.c_str(),
                     q.c_str());
@@ -1626,6 +1695,320 @@ static bool looks_like_words(const std::string& s)
     return !f;
 }
 
+// --- the browser's own pages: about:history, :bookmarks, :cookies, ... -----
+//
+// Pages like any other, written here and laid out by litehtml, their
+// actions links and forms back to themselves ("about:history?clear=all").
+// A page from the network may not lead to them (see is_about's callers):
+// a link must not empty someone's history.
+
+static bool is_about(const std::string& where)
+{
+    return where.compare(0, 6, "about:") == 0;
+}
+
+static std::string url_decode(const std::string& s)
+{
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '+')
+            out += ' ';
+        else if (s[i] == '%' && i + 2 < s.size() && isxdigit((unsigned char)s[i + 1]) &&
+                 isxdigit((unsigned char)s[i + 2])) {
+            out += (char)std::strtol(s.substr(i + 1, 2).c_str(), nullptr, 16);
+            i += 2;
+        } else
+            out += s[i];
+    }
+    return out;
+}
+
+static std::map<std::string, std::string> query_of(const std::string& where)
+{
+    std::map<std::string, std::string> q;
+    size_t at = where.find('?');
+    while (at != std::string::npos && at + 1 < where.size()) {
+        size_t end = where.find('&', at + 1);
+        std::string pair = where.substr(at + 1, end == std::string::npos
+                                                    ? std::string::npos
+                                                    : end - at - 1);
+        size_t eq = pair.find('=');
+        q[url_decode(pair.substr(0, eq))] =
+            eq == std::string::npos ? "" : url_decode(pair.substr(eq + 1));
+        at = end;
+    }
+    return q;
+}
+
+static const char ABOUT_CSS[] =
+    "body{font-family:sans-serif;margin:0;background:#f4f5f8;color:#222}"
+    ".top{background:#ffffff;border-bottom:1px solid #dde0e8;padding:14px 22px}"
+    "h1{font-size:22px;margin:0;color:#223}"
+    ".sub{color:#667;font-size:13px;margin-top:4px}"
+    ".main{padding:14px 22px}"
+    ".card{background:#ffffff;border:1px solid #dde0e8;border-radius:8px;"
+    "padding:4px 0;margin-bottom:14px}"
+    ".row{padding:7px 14px;border-bottom:1px solid #eef0f4}"
+    ".title{color:#1a55c0} .url{color:#778;font-size:12px}"
+    ".act{float:right;font-size:12px;color:#b03030}"
+    ".none{color:#889;padding:12px 14px}"
+    ".bar{margin-bottom:12px} .bar a{color:#b03030}"
+    "h2{font-size:15px;margin:16px 0 6px;color:#334}"
+    "label{display:block;padding:6px 0}"
+    ".ok{background:#e3f4e6;border:1px solid #a8d8b0;border-radius:6px;"
+    "padding:7px 12px;margin-bottom:12px;color:#235c2d}";
+
+static std::string about_frame(const std::string& title, const std::string& sub,
+                               const std::string& body)
+{
+    return "<html><head><title>" + html_escape(title) + "</title><style>" +
+           ABOUT_CSS + "</style></head><body><div class=top><h1>" +
+           html_escape(title) + "</h1><div class=sub>" + sub +
+           "</div></div><div class=main>" + body + "</div></body></html>";
+}
+
+static std::string about_link(const std::string& where)
+{
+    std::string out;
+    for (char c : where)
+        out += c == '"' ? std::string("%22") : std::string(1, c);
+    return out;
+}
+
+// "1 page", "3 pages"
+static std::string count_of(size_t n, const char* one, const char* many)
+{
+    return std::to_string(n) + " " + (n == 1 ? one : many);
+}
+
+static std::string about_history(const std::map<std::string, std::string>& q)
+{
+    std::vector<visit> h = load_list(HISTORY);
+    std::string note;
+    if (q.count("clear")) {
+        h.clear();
+        save_list(HISTORY, h);
+        note = "<div class=ok>The history is cleared.</div>";
+    } else if (q.count("remove")) {
+        int at = find_visit(h, q.at("remove"));
+        if (at >= 0) {
+            h.erase(h.begin() + at);
+            save_list(HISTORY, h);
+            note = "<div class=ok>Removed from the history.</div>";
+        }
+    }
+    std::string filter = q.count("q") ? q.at("q") : "", low;
+    for (char c : filter)
+        low += (char)tolower((unsigned char)c);
+    std::string rows;
+    int shown = 0;
+    for (auto& v : h) {
+        std::string hay;
+        for (char c : v.title + " " + v.where)
+            hay += (char)tolower((unsigned char)c);
+        if (!low.empty() && hay.find(low) == std::string::npos)
+            continue;
+        rows += "<div class=row><a class=act href=\"about:history?remove=" +
+                about_link(form_encode(v.where)) + "\">remove</a><a class=title href=\"" +
+                about_link(v.where) + "\">" + html_escape(v.title) +
+                "</a><div class=url>" + html_escape(v.where) + "</div></div>";
+        shown++;
+    }
+    if (!shown)
+        rows = "<div class=none>" + std::string(h.empty() ? "Nothing visited yet."
+                                                         : "Nothing matches.") +
+               "</div>";
+    return about_frame("History",
+                       count_of(h.size(), "page", "pages") + ", the newest first",
+                       note + "<div class=bar><form action=about:history>"
+                       "<input name=q placeholder='Search the history' value=\"" +
+                       html_escape(filter) + "\"> <input type=submit value=Search>"
+                       " &nbsp; <a href=\"about:history?clear=all\">Clear the "
+                       "history</a></form></div><div class=card>" + rows + "</div>");
+}
+
+static std::string about_bookmarks(const std::map<std::string, std::string>& q)
+{
+    std::vector<visit> b = load_list(BOOKMARKS);
+    std::string note;
+    if (q.count("remove")) {
+        int at = find_visit(b, q.at("remove"));
+        if (at >= 0) {
+            b.erase(b.begin() + at);
+            save_list(BOOKMARKS, b);
+            note = "<div class=ok>The bookmark is removed.</div>";
+        }
+    }
+    std::string rows;
+    for (auto& v : b)
+        rows += "<div class=row><a class=act href=\"about:bookmarks?remove=" +
+                about_link(form_encode(v.where)) + "\">remove</a><a class=title href=\"" +
+                about_link(v.where) + "\">" + html_escape(v.title) +
+                "</a><div class=url>" + html_escape(v.where) + "</div></div>";
+    if (b.empty())
+        rows = "<div class=none>No bookmarks - the star at the end of the "
+               "address keeps a page here.</div>";
+    return about_frame("Bookmarks", count_of(b.size(), "page", "pages"),
+                       note + "<div class=card>" + rows + "</div>");
+}
+
+// "2031-06-13" for seconds since 1970
+static std::string date_of(int64_t t)
+{
+    int64_t z = t / 86400 + 719468;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp = (5 * doy + 2) / 153;
+    int d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    int m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    int y = (int)(yoe + era * 400 + (m <= 2));
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    return buf;
+}
+
+static std::string about_cookies(const std::map<std::string, std::string>& q)
+{
+    static struct cookie_jar jar;
+    std::string text, note;
+    read_file(COOKIE_JAR, text);
+    ck_load(&jar, text.data(), (int)text.size());
+    if (q.count("clear")) {
+        jar.n = 0;
+        note = "<div class=ok>All cookies are removed - the sites will "
+               "have you sign in again.</div>";
+    } else if (q.count("remove")) {
+        int i = std::atoi(q.at("remove").c_str());
+        if (i >= 0 && i < jar.n) {
+            ck_remove(&jar, i);
+            note = "<div class=ok>The cookie is removed.</div>";
+        }
+    }
+    if (!note.empty()) {
+        static char out[24576];
+        int n = ck_save(&jar, out, sizeof(out));
+        write_file(COOKIE_JAR, std::string(out, (size_t)n));
+    }
+    std::string rows;
+    for (int i = 0; i < jar.n; i++) {
+        const struct cookie& c = jar.c[i];
+        std::string v = c.value;
+        if (v.size() > 40)
+            v = v.substr(0, 37) + "...";
+        rows += "<div class=row><a class=act href=\"about:cookies?remove=" +
+                std::to_string(i) + "\">remove</a><span class=title>" +
+                html_escape(c.name) + "</span> = " + html_escape(v) +
+                "<div class=url>" + html_escape(c.host) + html_escape(c.path) +
+                (c.secure ? " &middot; https only" : "") + " &middot; " +
+                (c.expires ? "until " + date_of(c.expires) : std::string("no date")) +
+                "</div></div>";
+    }
+    if (!jar.n)
+        rows = "<div class=none>No cookies.</div>";
+    return about_frame("Cookies", count_of((size_t)jar.n, "cookie", "cookies") +
+                       " - what sites remember you by",
+                       note + "<div class=bar><a href=\"about:cookies?clear=all\">"
+                       "Remove all cookies</a></div><div class=card>" + rows +
+                       "</div>");
+}
+
+static std::string about_settings(const std::map<std::string, std::string>& q)
+{
+    std::string note;
+    if (q.count("save")) {
+        // (a box left unticked is not sent: absent means off)
+        prefs.js = q.count("js") > 0;
+        prefs.images = q.count("images") > 0;
+        prefs.search = q.count("search") ? q.at("search") : "";
+        std::string home = q.count("home") ? q.at("home") : "";
+        prefs.home = home.empty() ? "about:start" : home;
+        int z = q.count("zoom") ? std::atoi(q.at("zoom").c_str()) : 100;
+        prefs.zoom = z >= 50 && z <= 200 ? z : 100;
+        save_prefs();
+        note = "<div class=ok>Saved.</div>";
+        std::printf("[web] settings saved: javascript=%d images=%d\n",
+                    prefs.js, prefs.images);
+        std::fflush(stdout);
+    }
+    static const char* engines[][2] = {
+        {"", "The system's (Settings)"},
+        {"https://duckduckgo.com/html/?q=", "DuckDuckGo"},
+        {"https://www.google.com/search?q=", "Google"},
+        {"https://www.bing.com/search?q=", "Bing"},
+        {"https://www.startpage.com/do/search?q=", "Startpage"},
+    };
+    std::string opts;
+    for (auto& e : engines)
+        opts += std::string("<option value=\"") + e[0] + "\"" +
+                (prefs.search == e[0] ? " selected" : "") + ">" + e[1] +
+                "</option>";
+    std::string zooms;
+    for (int z : {50, 67, 80, 90, 100, 110, 125, 150, 175, 200})
+        zooms += "<option value=" + std::to_string(z) +
+                 (prefs.zoom == z ? " selected" : "") + ">" + std::to_string(z) +
+                 "%</option>";
+    return about_frame(
+        "Settings", "How ThreadOS Web behaves",
+        note + "<form action=about:settings><input type=hidden name=save value=1>"
+        "<div class=card><div class=row><h2>Content</h2>"
+        "<label><input type=checkbox name=js" + (prefs.js ? " checked" : "") +
+        "> Run the pages' JavaScript</label>"
+        "<label><input type=checkbox name=images" + (prefs.images ? " checked" : "") +
+        "> Show pictures</label></div>"
+        "<div class=row><h2>Search</h2><label>Words typed as an address go to "
+        "<select name=search>" + opts + "</select></label></div>"
+        "<div class=row><h2>New tabs and windows</h2>"
+        "<label>Open <input name=home value=\"" + html_escape(prefs.home) +
+        "\"></label><label>Zoom <select name=zoom>" + zooms +
+        "</select></label></div></div>"
+        "<input type=submit value='Save the settings'></form>"
+        "<h2>What is kept</h2><div class=card>"
+        "<div class=row><a class=title href=about:history>History</a></div>"
+        "<div class=row><a class=title href=about:bookmarks>Bookmarks</a></div>"
+        "<div class=row><a class=title href=about:cookies>Cookies</a></div></div>");
+}
+
+static std::string about_version()
+{
+    return about_frame(
+        "About ThreadOS Web", "A browser for ThreadOS",
+        "<div class=card><div class=row>Pages are laid out by <b>litehtml</b> "
+        "and drawn in the system's own lettering.</div>"
+        "<div class=row>Scripts run in <b>QuickJS</b>.</div>"
+        "<div class=row>Connections are HTTP, and HTTPS over TLS 1.3 or 1.2 "
+        "with the certificates checked.</div>"
+        "<div class=row>Pictures: PNG, JPEG, GIF; site icons in .ico too.</div>"
+        "</div>");
+}
+
+// One of the browser's pages: its markup, and where it really is (an
+// action done, the address without it, so that reloading does not do
+// it again). False for a name there is no page for.
+static bool about_page(const std::string& where, std::string& html,
+                       std::string& target)
+{
+    std::string name = where.substr(6, where.find('?') - 6);
+    auto q = query_of(where);
+    target = "about:" + name;
+    if (name == "history") {
+        html = about_history(q);
+        if (q.count("q"))
+            target = where;            // a search stays in the address
+    } else if (name == "bookmarks")
+        html = about_bookmarks(q);
+    else if (name == "cookies")
+        html = about_cookies(q);
+    else if (name == "settings")
+        html = about_settings(q);
+    else if (name == "version" || name == "web")
+        html = about_version();
+    else
+        return false;
+    return true;
+}
+
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post)
 {
@@ -1655,6 +2038,8 @@ static void open_page(const std::string& where0, bool remember,
         target = "about:start";
         html = start_html();
         ok = true;
+    } else if (is_about(where)) {
+        ok = about_page(where, html, target);
     } else if (network) {
         // Said before the wait, not after it - the fetch holds the
         // window until the page is in
@@ -1690,7 +2075,7 @@ static void open_page(const std::string& where0, bool remember,
     if (network)
         read_file(TYPE_FILE, type);
     estring page = with_encoding(html, type);
-    if (target == "about:start")
+    if (is_about(target))
         page = estring(html, encoding::utf_8, confidence::certain);
     // What litehtml reads the page as, for the forms: what was given; else
     // its own sniffing; and after the parse, a <meta> it went by (below)
@@ -1741,7 +2126,7 @@ static void open_page(const std::string& where0, bool remember,
     layout();
     // The page's scripts, once it is laid out as written - except the
     // start page's, which has none
-    if (target != "about:start")
+    if (!is_about(target) && prefs.js)
         page_js = webjs::start(doc, js_host());
     if (finding)
         find_all();                    // the find field stays, on the new page
@@ -1749,10 +2134,10 @@ static void open_page(const std::string& where0, bool remember,
     status_line = stopping ? "Stopped" : network ? "Done" : "";
     stopping = false;
     show_title();
-    if (target != "about:start")
+    if (!is_about(target))
         remember_visit(target, cont.title);
     std::printf("[web] title: %s\n", cont.title.c_str());
-    page_marked = target != "about:start" &&
+    page_marked = !is_about(target) &&
                   find_visit(load_list(BOOKMARKS), target) >= 0;
     page_icon = network ? load_icon(target) : "";
     save_session();
@@ -1847,7 +2232,7 @@ static void draw_icon(int w, int x0, int y0, const std::string& key)
 // The star: the page into the bookmarks, or out of them again
 static void toggle_bookmark()
 {
-    if (cont.base.empty() || cont.base == "about:start")
+    if (cont.base.empty() || is_about(cont.base))
         return;
     std::vector<visit> b = load_list(BOOKMARKS);
     int at = find_visit(b, cont.base);
@@ -1949,7 +2334,18 @@ static void download(const std::string& target)
 
 static void follow(const std::string& link, bool keep = false)
 {
-    std::string target = resolve(url(cont.base), url(link)).str();
+    std::string target = is_about(link) ? link
+                                        : resolve(url(cont.base), url(link)).str();
+    // A page from the network may not lead to the browser's own pages:
+    // "about:history?clear=all" in a link must not empty the history.
+    // (Typed into the address, it is the person's own doing.)
+    if (is_about(target) && !is_about(cont.base)) {
+        status_line = "Blocked: a page may not open " + target;
+        std::printf("[web] blocked %s from %s\n", target.c_str(),
+                    cont.base.c_str());
+        std::fflush(stdout);
+        return;
+    }
     // The same page with a fragment: a jump within it
     std::string here = cont.base.substr(0, cont.base.find('#'));
     if (link[0] == '#' || target.compare(0, here.size() + 1, here + "#") == 0) {
@@ -2377,6 +2773,61 @@ static void draw()
 // The toolbar and the status line - over whatever the page drew past
 // its edges. Alone while a page loads: the page is not to be touched
 // while litehtml builds the next one.
+// --- the browser's menu ---------------------------------------------------
+
+static const char* const menu_items[] = {
+    "New tab", "History", "Bookmarks", "Cookies", "Settings",
+    "Find on the page", "About ThreadOS Web",
+};
+#define MENU_N (int)(sizeof(menu_items) / sizeof(menu_items[0]))
+
+static int menu_x() { return cont.width - 10 - MENU_PANEL_W; }
+
+static void draw_menu(int w, const struct ud_look& l)
+{
+    if (!menu_open)
+        return;
+    int x = menu_x(), y = BAR_H - 2, h = MENU_N * MENU_ROW + 8;
+    ud_round(w, x - 1, y - 1, MENU_PANEL_W + 2, h + 2, 9, l.line);
+    ud_round(w, x, y, MENU_PANEL_W, h, 8, l.field);
+    for (int i = 0; i < MENU_N; i++) {
+        int ry = y + 4 + i * MENU_ROW;
+        if (i == 1 || i == 5)          // (groups: tabs, what is kept, the rest)
+            ud_fill(w, x + 10, ry, MENU_PANEL_W - 20, 1, l.line);
+        ud_text(w, x + 16, ud_baseline(ry, MENU_ROW, UD_PX), menu_items[i],
+                l.text, UD_SANS, UD_PX);
+    }
+}
+
+static void menu_do(int i)
+{
+    static const char* const pages[] = {
+        nullptr, "about:history", "about:bookmarks", "about:cookies",
+        "about:settings", nullptr, "about:version",
+    };
+    std::printf("[web] menu: %s\n", menu_items[i]);
+    std::fflush(stdout);
+    if (i == 0)
+        new_tab(prefs.home);
+    else if (i == 5) {
+        finding = true;
+        find_q.clear();
+        find_all();
+    } else
+        new_tab(pages[i]);             // in a tab of its own, as browsers do
+}
+
+// A click while the menu is open: on an item it is done; anywhere, the
+// menu closes
+static void click_menu(int x, int y)
+{
+    menu_open = false;
+    int i = (y - (BAR_H - 2) - 4) / MENU_ROW;
+    if (x >= menu_x() && x < menu_x() + MENU_PANEL_W && y >= BAR_H + 2 &&
+        i >= 0 && i < MENU_N)
+        menu_do(i);
+}
+
 static void draw_chrome()
 {
     int w = cont.win;
@@ -2384,63 +2835,76 @@ static void draw_chrome()
     ud_look(&l);
     ud_fill(w, 0, 0, cont.width, BAR_H, l.bg);
     ud_fill(w, 0, BAR_H - 1, cont.width, 1, l.line);
-    // Back and forward: lit when there is somewhere to go
+    // The buttons are flat: an icon in the text's colour, dimmed when it
+    // has nothing to do. Back and forward are arrows with a stem.
     for (int k = 0; k < 2; k++) {
         bool can = k == 0 ? !history.empty() : !ahead.empty();
-        int bx = 10 + k * BTN_STEP, mid = bx + BACK_W / 2;
-        int d = k == 0 ? -1 : 1;
-        uint32_t ink = can ? l.on_accent : l.dim;
-        ud_round(w, bx, 8, BACK_W, 24, 12, can ? l.accent : l.row);
-        ud_line(w, mid - 3 * d, 13, mid + 4 * d, 20, 20, ink);
-        ud_line(w, mid + 4 * d, 20, mid - 3 * d, 27, 20, ink);
+        int mid = 10 + k * BTN_STEP + BACK_W / 2, d = k == 0 ? -1 : 1;
+        uint32_t ink = can ? l.text : l.dim;
+        ud_line(w, mid - 6, 20, mid + 6, 20, 24, ink);
+        ud_line(w, mid + 6 * d, 20, mid + d, 15, 24, ink);
+        ud_line(w, mid + 6 * d, 20, mid + d, 25, 24, ink);
     }
-    // Reload: a ring with a gap, and the head of an arrow on it - or
+    // Reload: a ring with a gap and the head of an arrow on it - or
     // while a page loads, a cross that stops it
-    int rx = 10 + 2 * BTN_STEP, rm = rx + BACK_W / 2;
-    ud_round(w, rx, 8, BACK_W, 24, 12, l.row);
+    int rm = 10 + 2 * BTN_STEP + BACK_W / 2;
     if (loading) {
         ud_line(w, rm - 5, 15, rm + 5, 25, 24, l.text);
         ud_line(w, rm + 5, 15, rm - 5, 25, 24, l.text);
     } else {
-        ud_ring(w, rm - 6, 14, 12, 12, 6, l.text);
-        ud_fill(w, rm + 1, 13, 6, 5, l.row);
-        ud_line(w, rm + 1, 14, rm + 6, 15, 16, l.text);
-        ud_line(w, rm + 6, 15, rm + 5, 20, 16, l.text);
+        ud_ring(w, rm - 7, 13, 14, 14, 7, l.text);
+        ud_fill(w, rm + 1, 11, 7, 6, l.bg);
+        ud_line(w, rm, 13, rm + 5, 13, 20, l.text);
+        ud_line(w, rm + 5, 13, rm + 5, 8 + 10, 20, l.text);
     }
     // A new tab: a plus
     int nx = 10 + 3 * BTN_STEP + BACK_W / 2;
-    ud_round(w, nx - BACK_W / 2, 8, BACK_W, 24, 12, l.row);
-    ud_fill(w, nx - 5, 19, 11, 2, l.text);
-    ud_fill(w, nx - 1, 15, 2, 11, l.text);
+    ud_fill(w, nx - 6, 19, 13, 2, l.text);
+    ud_fill(w, nx - 1, 14, 2, 13, l.text);
     draw_strip(w, l);
-    ud_round(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.field);
-    ud_ring(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.line);
-    int tx = ADDR_X + 12, ty = ud_baseline(8, 24, UD_PX);
+    // The address: a pill; before the address, a padlock for a page
+    // that came over TLS, and the site's icon
+    int fx1 = cont.width - 10 - MENU_W;
+    ud_round(w, ADDR_X, 6, fx1 - ADDR_X, 28, 14, l.field);
+    ud_ring(w, ADDR_X, 6, fx1 - ADDR_X, 28, 14, l.line);
+    int tx = ADDR_X + 14, ty = ud_baseline(6, 28, UD_PX);
+    if (cont.base.compare(0, 8, "https://") == 0) {
+        ud_ring(w, tx + 1, 12, 8, 10, 4, l.dim);   // the shackle
+        ud_round(w, tx - 1, 17, 12, 9, 2, l.dim);  // the body
+        tx += 18;
+    }
     if (!page_icon.empty()) {
-        draw_icon(w, ADDR_X + 10, 12, page_icon);   // the site's, before it
-        tx += 22;
+        draw_icon(w, tx - 2, 12, page_icon);       // the site's, before it
+        tx += 20;
     }
     if (address_picked) {
         // Picked whole, the way a browser's address bar takes a click
         int aw = ud_width(address.c_str(), UD_SANS, UD_PX);
-        ud_fill(w, tx - 1, 12, aw + 2, 16, l.accent);
+        ud_fill(w, tx - 1, 11, aw + 2, 18, l.accent);
         ud_text(w, tx, ty, address.c_str(), l.on_accent, UD_SANS, UD_PX);
     } else {
         int end = ud_text(w, tx, ty, address.c_str(), l.text, UD_SANS,
                           UD_PX);
         if (!typing)                   // the keys go here, not to a field
-            ud_fill(w, end + 1, 13, 1, 14, l.accent);
+            ud_fill(w, end + 1, 12, 1, 16, l.accent);
     }
     // The star: full and lit for a page among the bookmarks. Over the
     // field's end, so a long address goes under it
-    int sx0 = cont.width - 10 - STAR_W;
-    ud_fill(w, sx0, 10, STAR_W - 8, 20, l.field);
+    int sx0 = fx1 - STAR_W;
+    ud_fill(w, sx0, 9, STAR_W - 8, 22, l.field);
     draw_star(w, sx0 + 9, 20, page_marked, page_marked ? l.accent : l.dim);
+    // The menu: three dots
+    int mx = cont.width - 10 - MENU_W / 2;
+    if (menu_open)
+        ud_round(w, mx - 13, 7, 26, 26, 13, l.row);
+    for (int k = 0; k < 3; k++)
+        ud_round(w, mx - 2, 13 + k * 6, 4, 4, 2, l.text);
     int fy = cont.height - STATUS_H;
     ud_fill(w, 0, fy, cont.width, STATUS_H, l.bg);
     ud_fill(w, 0, fy, cont.width, 1, l.line);
     if (finding) {
         draw_zoom(w, fy, l);
+        draw_menu(w, l);
         // The find field takes the status line's place while it is open
         std::string say = "Find: " + find_q;
         int end = ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), say.c_str(),
@@ -2457,6 +2921,7 @@ static void draw_chrome()
     ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), status_line.c_str(),
             l.dim, UD_SANS, 11);
     draw_zoom(w, fy, l);
+    draw_menu(w, l);
 }
 
 int main(int argc, char** argv)
@@ -2467,6 +2932,8 @@ int main(int argc, char** argv)
     // Real colours: a page is not drawn in the desktop's palette
     win_truecolour(cont.win);
     keeps_session = argc < 2;
+    load_prefs();
+    cont.zoom = prefs.zoom;
     std::string saved;
     if (keeps_session && read_file(TABS_FILE, saved) && !saved.empty()) {
         // The tabs of the last run, in their order, at the one that was
@@ -2490,13 +2957,13 @@ int main(int argc, char** argv)
                 new_tab(list[i]);
         }
         if (list.empty())
-            open_page("about:start", false);
+            open_page(prefs.home, false);
         else
             switch_tab(at);
         std::printf("[web] restored %d tabs\n", (int)list.size());
         say_tabs();
     } else {
-        open_page(argc > 1 ? argv[1] : "about:start", false);
+        open_page(argc > 1 ? argv[1] : prefs.home, false);
     }
     draw();
 
@@ -2556,7 +3023,9 @@ int main(int argc, char** argv)
                         open_in_new_window(to);
                 }
             } else if (ev.type == WEV_CLICK) {
-                if (list_open) {
+                if (menu_open) {
+                    click_menu(ev.x, ev.y);
+                } else if (list_open) {
                     click_list(ev.x, ev.y);
                 } else if (ev.y >= cont.height - STATUS_H &&
                            ev.x >= cont.width - ZOOM_W) {
@@ -2564,7 +3033,9 @@ int main(int argc, char** argv)
                 } else if (ev.y < BAR_H) {
                     typing.reset();
                     int b = (ev.x - 10) / BTN_STEP;
-                    if (ev.x >= cont.width - 10 - STAR_W)
+                    if (ev.x >= cont.width - 10 - MENU_W)
+                        menu_open = true;
+                    else if (ev.x >= cont.width - 10 - MENU_W - STAR_W)
                         toggle_bookmark();
                     else if (ev.x >= ADDR_X)
                         address_picked = !address_picked;
@@ -2578,7 +3049,7 @@ int main(int argc, char** argv)
                         cont.scroll = keep;   // the same place, freshly
                         scroll_by(0);
                     } else if (b == 3)
-                        new_tab("about:start");
+                        new_tab(prefs.home);
                 } else if (ev.y < cont.page_top()) {
                     click_strip(ev.x);
                 } else if (doc && ev.y < cont.height - STATUS_H) {
@@ -2606,6 +3077,10 @@ int main(int argc, char** argv)
                 }
             } else if (ev.type == WEV_KEY) {
                 char c = (char)ev.val;
+                if (menu_open) {
+                    menu_open = false;         // any key closes it
+                    continue;
+                }
                 if (list_open) {
                     int& k = list_open->chosen;
                     if (c == (char)KEY_DOWN &&
