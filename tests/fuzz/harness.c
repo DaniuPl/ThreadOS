@@ -182,13 +182,16 @@ static void run_cookie(const unsigned char *data, size_t len)
         size_t n = e - p < sizeof(line) - 1 ? e - p : sizeof(line) - 1;
         memcpy(line, data + p, n);
         line[n] = '\0';
-        ck_set(&jar, line, "www.example.com", "/a/b?q=1", (int)(p & 1));
+        ck_set(&jar, line, "www.example.com", "/a/b?q=1", (int)(p & 1),
+               1900000000);
         p = e + 1;
     }
     static const char *paths[] = { "/", "/a", "/a/b", "/a/bc", "/x?y" };
     for (int i = 0; i < 5; i++) {
-        ck_header(&jar, "www.example.com", paths[i], 1, hdr, sizeof(hdr));
-        ck_header(&jar, "example.com", paths[i], 0, hdr, sizeof(hdr));
+        ck_header(&jar, "www.example.com", paths[i], 1, 1900000000, hdr,
+                  sizeof(hdr));
+        ck_header(&jar, "example.com", paths[i], 0, 1900000000, hdr,
+                  sizeof(hdr));
     }
     int n = ck_save(&jar, text, sizeof(text));
     ck_load(&again, text, n);
@@ -200,6 +203,21 @@ static void run_cookie(const unsigned char *data, size_t len)
     /* And the input as a jar file of its own */
     ck_load(&again, (const char *)data, (int)len);
     ck_save(&again, text2, sizeof(text2));
+}
+
+/* Not a fuzz target: a date a line in, the seconds since 1970 the
+   cookie rules make of it out - for scripts/fuzz_parsers.py to hold
+   against Python's own calendar */
+static void run_cookiedate(const unsigned char *data, size_t len)
+{
+    for (size_t p = 0; p < len;) {
+        size_t e = p;
+        while (e < len && data[e] != '\n')
+            e++;
+        printf("%lld\n", (long long)ck_date((const char *)data + p,
+                                            (int)(e - p)));
+        p = e + 1;
+    }
 }
 
 int main(int argc, char **argv)
@@ -240,6 +258,8 @@ int main(int argc, char **argv)
         run_jpeg(input, len);
     else if (!strcmp(argv[1], "cookie"))
         run_cookie(input, len);
+    else if (!strcmp(argv[1], "cookiedate"))
+        run_cookiedate(input, len);
     else {
         fprintf(stderr, "nieznany parser: %s\n", argv[1]);
         free(input);

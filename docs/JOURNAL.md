@@ -6201,3 +6201,26 @@ works and is checked by `make test`.
       <link>s; each shows in its colour beside the address. Two tabs,
       the browser closed and opened from the dock: both come back, the
       second in front, the first with its page.
+
+- [x] **Cookies live as long as they say** (user/ucookie.h,
+      user/httpget.c, tests/fuzz/harness.c, scripts/fuzz_parsers.py,
+      the `webform` group).
+
+      Only "remove" was understood before: Max-Age=0, or an Expires= in a
+      year before 2020; every other cookie lived until replaced. Now a
+      cookie keeps the second it ends - now plus Max-Age, or the date
+      Expires= gives, Max-Age winning - measured against the clock
+      (httpget reads the RTC). Dates are read by RFC 6265's own forgiving
+      rules (a time, a day, a month and a year among the tokens, two-
+      digit years 70-99 in the 1900s), which take RFC 1123, RFC 850 and
+      asctime dates alike. A cookie whose time is over is not sent, and
+      leaves the jar when it is written. The jar file has a version line
+      now and an expiry field; a jar from before still loads.
+
+      `make fuzz` holds the date reader against Python's calendar: 900
+      dates in the three forms, 1970 to 2069, must give the seconds
+      timegm gives. The QEMU test sets a cookie for twenty seconds, one
+      for a year on and one dated the day before the clock (after 2020,
+      so only the clock can tell): the first two come back at once and
+      only the year-long one after the twenty seconds; the stale one
+      never. Before this change all three came back both times.

@@ -146,6 +146,11 @@ void _start(int argc, char **argv)
     }
 
     static struct cookie_jar jar;
+    /* The time the cookies' lives are measured by: the clock's */
+    struct utime clock;
+    sys_time(&clock);
+    int64_t now = ck_epoch(clock.year, clock.month, clock.day, clock.hour,
+                           clock.min, clock.sec);
     static char jar_text[24576];
     static char cookie_line[4096];
     if (jar_file) {
@@ -192,7 +197,7 @@ void _start(int argc, char **argv)
             const char *pre = "Cookie: ";
             while (*pre)
                 cookie_line[o++] = *pre++;
-            int n = ck_header(&jar, host, path, use_tls, cookie_line + o,
+            int n = ck_header(&jar, host, path, use_tls, now, cookie_line + o,
                               (int)sizeof(cookie_line) - o - 3);
             if (n) {
                 o += n;
@@ -229,7 +234,7 @@ void _start(int argc, char **argv)
                 for (int j = 0; j < c; j++)
                     one[j] = sc[j];
                 one[c] = '\0';
-                if (ck_set(&jar, one, host, path, use_tls)) {
+                if (ck_set(&jar, one, host, path, use_tls, now)) {
                     print("[httpget] cookie kept: ");
                     for (int j = 0; one[j] && one[j] != '='; j++) {
                         char ch[2] = { one[j], 0 };
@@ -278,6 +283,7 @@ void _start(int argc, char **argv)
     }
 
     if (jar_file) {
+        ck_expire(&jar, now);
         int len = ck_save(&jar, jar_text, sizeof(jar_text));
         int fd = sys_open(jar_file, O_CREATE | O_WRITE | O_TRUNC);
         if (fd >= 0) {

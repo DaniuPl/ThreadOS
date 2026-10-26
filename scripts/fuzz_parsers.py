@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -229,6 +230,40 @@ def seeds(workdir):
     return out
 
 
+def cookie_dates(binary, rng):
+    """The cookie date reader against Python's calendar: dates as servers
+    write them - RFC 1123, the old RFC 850 with two-digit years, and C's
+    asctime - each must come out as the seconds timegm gives. Returns
+    the dates it got wrong."""
+    import calendar
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    long_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                 "Saturday", "Sunday"]
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug",
+              "Sep", "Oct", "Nov", "Dec"]
+    lines, want = [], []
+    for _ in range(300):
+        t = time.gmtime(rng.randrange(0, 3155760000))      # 1970 to 2069
+        sec = calendar.timegm(t)
+        wd, mon = t.tm_wday, months[t.tm_mon - 1]
+        hms = "%02d:%02d:%02d" % (t.tm_hour, t.tm_min, t.tm_sec)
+        lines += ["%s, %02d %s %d %s GMT" % (days[wd], t.tm_mday, mon,
+                                             t.tm_year, hms),
+                  "%s, %02d-%s-%02d %s GMT" % (long_days[wd], t.tm_mday, mon,
+                                               t.tm_year % 100, hms),
+                  "%s %s %2d %s %d" % (days[wd], mon, t.tm_mday, hms,
+                                       t.tm_year)]
+        want += [sec] * 3
+    path = os.path.join(os.path.dirname(binary), "dates.txt")
+    with open(path, "w") as f:
+        f.write("\n".join(lines))
+    run = subprocess.run([binary, "cookiedate", path], capture_output=True,
+                         text=True, timeout=30)
+    got = [int(x) for x in run.stdout.split()]
+    return [(d, g, w) for d, g, w in zip(lines, got, want) if g != w] + \
+        ([("(count)", len(got), len(want))] if len(got) != len(want) else [])
+
+
 def mutate(data, rng):
     """Corrupting the data: truncation, byte changes, insertions, extreme
     lengths."""
@@ -269,6 +304,11 @@ def main():
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
         print("the harness is built, cases per parser: %d" % CASES)
+        wrong = cookie_dates(binary, rng)
+        print("  cookie dates against Python's calendar: %d wrong"
+              % len(wrong))
+        for d, g, w in wrong[:5]:
+            failures.append(("cookiedate", d, "got %s, want %s" % (g, w)))
 
         for parser, base in corpus.items():
             crashes = 0

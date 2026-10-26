@@ -230,6 +230,19 @@ def forms(e):
           sent[-1:] == [PLFORM_SENT] and got == "Web: Sent in 1250")
 
 
+    # --- cookies' lives ---------------------------------------------------
+    visit(e, "/lives", "Web: Lives")
+    visit(e, "/jar", "Web: Jar 1")
+    first = sorted((JAR_SEEN[-1] or "").split("; "))
+    time.sleep(16)              # (and typing the address: past 20 s)
+    visit(e, "/jar", "Web: Jar 2")
+    later = sorted((JAR_SEEN[-1] or "").split("; "))
+    check(f"a cookie lives as long as Max-Age says, one with a date to "
+          f"come stays, one with a date gone by never comes back "
+          f"({first} -> {later})",
+          first == ["brief=1", "lasting=1"] and later == ["lasting=1"])
+
+
 def main():
     return run("forms, cookies and the clipboard in the browser", [forms])
 

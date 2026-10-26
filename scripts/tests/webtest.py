@@ -199,6 +199,36 @@ def r_logout(h, body):
                  ("Set-Cookie", "session=; Path=/; Max-Age=0")], b""
 
 
+# Cookies' lives, against the clock QEMU's starts at (RTC_DATE, midnight):
+# twenty seconds; a year on; and a day gone - after 2020, so only the clock
+# can tell it is past
+def http_date(y, m, d):
+    import email.utils
+    from datetime import datetime, timezone
+    return email.utils.format_datetime(datetime(y, m, d, tzinfo=timezone.utc),
+                                       usegmt=True)
+
+
+CLOCK = tuple(int(x) for x in RTC_DATE.split("-"))
+JAR_SEEN = []           # the Cookie headers /jar was asked with
+
+
+def r_lives(h, body):
+    y, m, d = CLOCK
+    return 200, [("Content-Type", "text/html"),
+                 ("Set-Cookie", "brief=1; Max-Age=20; Path=/"),
+                 ("Set-Cookie", "lasting=1; Path=/; Expires=" +
+                  http_date(y + 1, m, d)),
+                 ("Set-Cookie", "stale=1; Path=/; Expires=" +
+                  http_date(y, m, d - 1))], page_titled(b"Lives")
+
+
+def r_jar(h, body):
+    JAR_SEEN.append(h.headers.get("Cookie"))
+    return 200, [("Content-Type", "text/html")], \
+        page_titled(b"Jar %d" % len(JAR_SEEN))
+
+
 def page_titled(t):
     return b"<html><head><title>" + t + b"</title></head><body></body></html>"
 
@@ -250,6 +280,7 @@ def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
     SERVED["/plform.html"] = PLFORM
+    ROUTES.update({"/lives": r_lives, "/jar": r_jar})
     SERVED["/favicon.ico"] = icon(ICON_GREEN, "bmp")
     SERVED["/icons/red.png"] = icon(ICON_RED, "png")
     SERVED["/icons/blue.ico"] = icon(ICON_BLUE, "png")
