@@ -161,6 +161,38 @@ ICO_PAGE = (b"<html><head><title>Icon ICO</title>"
             b"<p>an .ico holding a PNG</p></body></html>")
 
 
+# JavaScript: a script from a file and one in the page; what they do is
+# seen on the screen, each in a colour of its own
+JS_LIB = b"function add(a, b) { return a + b; }"
+JS_PAGE = (b"<html><head><title>JS page</title><style>"
+           b".hot{background:#ff8800} #box{width:120px;height:30px}"
+           b"#late{width:90px;height:24px}</style>"
+           b"<script src=/lib.js></script><script>"
+           b"document.title = 'Scripted ' + add(2, 3);"
+           b"document.addEventListener('DOMContentLoaded', () => {"
+           b"  document.getElementById('out').textContent ="
+           b"    [1, 2, 3].map(x => x * x).join('-');"
+           b"  const p = document.createElement('p');"
+           b"  p.textContent = 'made by a script';"
+           b"  p.style.color = '#aa0066';"
+           b"  document.body.appendChild(p);"
+           b"});"
+           b"document.getElementById('go').addEventListener('click', e => {"
+           b"  document.getElementById('box').classList.add('hot');"
+           b"  e.preventDefault();"
+           b"});"
+           b"setTimeout(() => {"
+           b"  document.getElementById('late').style.background = '#00aa88';"
+           b"}, 1500);"
+           b"console.log('hello from the page');"
+           b"</script></head><body><p id=out>not yet</p><div id=box></div>"
+           b"<p><a id=go href=/nowhere style='color:#806040'>make it hot</a>"
+           b"</p><div id=late></div></body></html>")
+LOOP_PAGE = (b"<html><head><title>Loop</title><script>"
+             b"while (true) {}</script></head><body><p>still here</p>"
+             b"</body></html>")
+
+
 def page_in(text, codec, meta=""):
     return ("<html><head>" + meta + "<title>" + text + "</title></head>"
             "<body><p>" + text + "</p></body></html>").encode(codec)
@@ -298,6 +330,9 @@ def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
     SERVED["/plform.html"] = PLFORM
+    SERVED["/lib.js"] = JS_LIB
+    SERVED["/js.html"] = JS_PAGE
+    SERVED["/loop.html"] = LOOP_PAGE
     SERVED["/q.gif"] = quarters_gif()
     SERVED["/gif.html"] = GIF_PAGE
     ROUTES.update({"/lives": r_lives, "/jar": r_jar})

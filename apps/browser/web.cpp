@@ -34,6 +34,7 @@
 #include <string>
 #include <vector>
 #include <sys/wait.h>
+#include "webjs.h"
 #include <unistd.h>
 
 extern "C" {
@@ -1093,6 +1094,11 @@ static const char FORM_CSS[] =
 element::ptr window_container::create_element(
     const char* tag, const string_map&, const std::shared_ptr<document>& d)
 {
+    // A <script> as a plain tag: litehtml's own keeps neither its
+    // attributes (src, type) nor its text where anything can reach them,
+    // and the page's scripts need both. (The master style sheet hides it.)
+    if (!strcmp(tag, "script"))
+        return std::make_shared<html_tag>(d);
     if (strcmp(tag, "input") && strcmp(tag, "button") &&
         strcmp(tag, "select") && strcmp(tag, "textarea"))
         return nullptr;
@@ -1182,6 +1188,67 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 
 static void draw();
 static void draw_chrome();
+
+// --- the page's scripts -------------------------------------------------
+
+static void layout();
+static void show_title();
+static std::shared_ptr<webjs::page> page_js;   // the current page's
+static std::string pending_nav;        // where a script sent the window
+static bool js_drew;                   // a script changed what shows
+
+// What the scripts reach of the browser. Going somewhere else waits
+// until the script is done: the page it runs in must not end under it.
+static webjs::host js_host()
+{
+    webjs::host h;
+    h.fetch = [](const std::string& where, std::string& out) {
+        return get_url(where, out, ".web-script.js");
+    };
+    h.resolve = [](const std::string& link) {
+        return resolve(url(cont.base), url(link)).str();
+    };
+    h.changed = []() {
+        if (!doc)
+            return;
+        doc->media_changed();          // (styled again from the sheets)
+        layout();
+        js_drew = true;
+    };
+    h.navigate = [](const std::string& where) { pending_nav = where; };
+    h.say = [](const std::string& msg) {
+        status_line = msg;
+        js_drew = true;
+    };
+    h.location = []() { return cont.base; };
+    h.get_title = []() { return cont.title; };
+    h.set_title = [](const std::string& t) {
+        cont.title = t;
+        show_title();
+    };
+    h.get_value = [](const element::ptr& el) -> std::string {
+        auto in = dynamic_cast<el_input*>(el.get());
+        if (!in)
+            return "";
+        if (in->type == "select")
+            return in->options.empty() ? "" : in->options[in->chosen].value;
+        return in->value;
+    };
+    h.set_value = [](const element::ptr& el, const std::string& v) {
+        auto in = dynamic_cast<el_input*>(el.get());
+        if (!in)
+            return;
+        if (in->type == "select") {
+            for (size_t i = 0; i < in->options.size(); i++)
+                if (in->options[i].value == v)
+                    in->chosen = (int)i;
+        } else {
+            in->value = v;
+        }
+        js_drew = true;
+    };
+    return h;
+}
 static void new_tab(const std::string& where);
 static void open_in_tab_behind(const std::string& where);
 static void click_strip(int x);
@@ -1655,6 +1722,7 @@ static void open_page(const std::string& where0, bool remember,
     inputs.clear();
     sel_any = sel_drag = false;
     matches.clear();
+    page_js.reset();                   // the old page's scripts end with it
     doc = document::createFromString(page, &cont,
                                      std::string(master_css) + FORM_CSS);
     if (!charset_certain) {
@@ -1671,6 +1739,10 @@ static void open_page(const std::string& where0, bool remember,
             page_charset = meta;
     }
     layout();
+    // The page's scripts, once it is laid out as written - except the
+    // start page's, which has none
+    if (target != "about:start")
+        page_js = webjs::start(doc, js_host());
     if (finding)
         find_all();                    // the find field stays, on the new page
     // (stopped while its pictures came: the page shows, without the rest)
@@ -2056,6 +2128,7 @@ struct tab {
     encoding charset = encoding::utf_8;
     bool marked = false;
     std::string icon;
+    std::shared_ptr<webjs::page> js;
 };
 static std::vector<tab> tabs(1);
 static int cur_tab;
@@ -2079,6 +2152,7 @@ static void save_tab()
     t.charset = page_charset;
     t.marked = page_marked;
     t.icon = page_icon;
+    t.js = page_js;
 }
 
 // The strip shows with two tabs or more, and the page moves down for it
@@ -2124,6 +2198,7 @@ static void load_tab(int i)
     page_charset = t.charset;
     page_marked = t.marked;
     page_icon = t.icon;
+    page_js = t.js;
     typing.reset();
     list_open.reset();
     sel_any = sel_drag = false;
@@ -2508,6 +2583,17 @@ int main(int argc, char** argv)
                     click_strip(ev.x);
                 } else if (doc && ev.y < cont.height - STATUS_H) {
                     int px = page_x(ev.x), py = page_y(ev.y);
+                    // The page's scripts hear of it first, and may keep
+                    // the link or the button from doing what it does
+                    element::ptr target;
+                    if (page_js && doc->root_render())
+                        target = doc->root_render()->get_element_by_point(
+                            px, py, ev.x, ev.y,
+                            [](const std::shared_ptr<render_item>&) {
+                                return true;
+                            });
+                    if (target && webjs::click(page_js, target))
+                        continue;
                     cont.clicked.clear();
                     doc->on_lbutton_down(px, py, ev.x, ev.y,
                                          [](const position&) {});
@@ -2617,8 +2703,17 @@ int main(int argc, char** argv)
                     address += c;
             }
         }
-        if (again)
+        if (page_js)
+            webjs::run_timers(page_js);
+        if (!pending_nav.empty()) {
+            std::string to = pending_nav;
+            pending_nav.clear();
+            open_page(to, true);
+            again = true;
+        }
+        if (again || js_drew)
             draw();
+        js_drew = false;
         usleep(30000);
     }
 }

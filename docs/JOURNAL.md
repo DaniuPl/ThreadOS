@@ -6277,3 +6277,49 @@ works and is checked by `make test`.
       agreed", the certificate and the signature checked, the page whole.
       A 1.2 server with another certificate is refused. All the TLS 1.3
       checks still pass; httpget now says which version was agreed.
+
+- [x] **JavaScript in the browser, first stage** (apps/browser/webjs.cpp,
+      apps/browser/webjs.h, apps/browser/web.cpp,
+      apps/browser/patches/document.patch, Makefile, the `webjs` group).
+
+      Pages' scripts run in QuickJS - the engine `js` already had - one
+      context per page (per tab), one runtime for the browser. The
+      scripts in a page run in order once it is laid out, from their src
+      or inline; then DOMContentLoaded and load. The DOM is split in two:
+      what has to touch litehtml is native and small (find elements by
+      id or selector, read and write text, markup and attributes, add and
+      remove elements, timers); what pages expect to find - textContent
+      and innerHTML as properties, style as an object writing the style
+      attribute, classList, dataset, addEventListener and onclick (as a
+      property or an attribute), events bubbling to the document,
+      setTimeout and setInterval, console, alert, location, document.title,
+      an in-memory localStorage - is JavaScript on top of it. One JS
+      object per element, so === and properties a script puts on one
+      hold. A click on the page reaches the scripts first and
+      preventDefault() keeps a link or a button from acting; a script
+      sending the window elsewhere does so after it returns. A script
+      that runs on for four seconds is stopped, and memory is capped at
+      64 MiB.
+
+      After a script changes the tree, the page is styled again from its
+      style sheets and laid out. litehtml keeps, per element, the
+      selectors that matched it - a list a script's changes cannot
+      follow (a class added can make a selector match that never did) -
+      so the browser builds litehtml's document.cpp from a patch whose
+      media_changed() drops those lists, matches the sheets afresh and
+      rebuilds the render tree. Nothing in litehtml calls it. litehtml's
+      own <script> element kept neither its attributes nor its text
+      where anything could reach them; the browser makes <script> a
+      plain tag instead.
+
+      Not yet: document.write, events other than click (no input,
+      change, submit, keys), XMLHttpRequest and fetch, getBoundingClientRect,
+      and innerHTML read back carries only the common attributes.
+
+      The test page takes a function from a script file and calls it to
+      set the title; at DOMContentLoaded writes a paragraph's text and
+      adds one of its own in a colour no style sheet has - it shows; a
+      click on a link adds a class the page's sheet paints (the box
+      appears, 120 pixels wide) and prevents the link; a timer paints
+      another box later; console.log reaches the serial line; and a
+      `while (true)` is stopped while its page still shows.

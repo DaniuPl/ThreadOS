@@ -698,10 +698,10 @@ $(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
 	$(CXX) $(CXX64_FLAGS) -Wall -c $< -o $@
 
 # litehtml (third_party/litehtml, upstream unchanged) lays out HTML and
-# CSS; gumbo, inside it, parses the HTML. Two of its files are built
+# CSS; gumbo, inside it, parses the HTML. Three of its files are built
 # from a patched copy - apps/browser/patches says what and why.
 LH_DIR     := third_party/litehtml
-LH_PATCHED := encodings url
+LH_PATCHED := encodings url document
 LH_SRC     := $(filter-out $(LH_PATCHED),$(basename $(notdir $(wildcard $(LH_DIR)/src/*.cpp))))
 GUMBO_SRC  := $(basename $(notdir $(wildcard $(LH_DIR)/src/gumbo/src/*.c)))
 LH_OBJS    := $(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_SRC) $(LH_PATCHED)) \
@@ -757,13 +757,20 @@ $(BUILD)/user64/layouttest.elf: apps/browser/layouttest.cpp $(LH_OBJS) \
 	$(call CXX64_LINK,$(BUILD)/litehtml/layouttest.o $(LH_OBJS)) -o $@
 
 # web: the browser - litehtml's layout drawn into a window
-$(BUILD)/user64/web.elf: apps/browser/web.cpp $(LH_OBJS) \
+# The browser's JavaScript is QuickJS, the same objects as js's
+$(BUILD)/litehtml/webjs.o: apps/browser/webjs.cpp apps/browser/webjs.h \
+                           $(QJS_HDRS) $(LH_HDRS) $(LIBC64) | $(BUILD)/litehtml
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Ithird_party/quickjs -c $< -o $@
+
+$(BUILD)/user64/web.elf: apps/browser/web.cpp apps/browser/webjs.h $(LH_OBJS) \
+                         $(BUILD)/litehtml/webjs.o $(QJS_OBJS) \
                          $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
                          user/udraw.h user64/usys64.h user64/compat64.h \
                          | $(BUILD)/user64
 	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -c $< \
 	    -o $(BUILD)/litehtml/web.o
-	$(call CXX64_LINK,$(BUILD)/litehtml/web.o $(LH_OBJS)) -o $@
+	$(call CXX64_LINK,$(BUILD)/litehtml/web.o $(BUILD)/litehtml/webjs.o \
+	    $(LH_OBJS) $(QJS_OBJS)) -o $@
 
 USER64_ELFS += $(BUILD)/user64/web.elf
 
