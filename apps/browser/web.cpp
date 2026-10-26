@@ -47,9 +47,11 @@ using namespace litehtml;
 #define W0 560              // fits a 640x480 screen between the bar and the dock
 #define H0 360
 #define BAR_H 40              // the toolbar: back, and the address
-#define BACK_W 28             // back, forward and reload: three round buttons
+#define BACK_W 28             // back, forward, reload, new tab: round buttons
 #define BTN_STEP 34           // from one to the next
-#define ADDR_X 112
+#define ADDR_X 146
+#define TAB_H 28              // the strip of tabs, under the toolbar, with two
+#define TAB_MAX 180           // the widest a tab gets
 #define STATUS_H 20           // the line along the bottom
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
@@ -306,8 +308,9 @@ class window_container : public document_container {
     std::string clicked;              // a link to follow, once the click is done
     bool clicked_download = false;    // ... with a 'download' attribute
 
-    int page_top() const { return BAR_H; }
-    int page_h() const { return height - BAR_H - STATUS_H; }
+    int strip = 0;                    // the tabs' strip, when it shows
+    int page_top() const { return BAR_H + strip; }
+    int page_h() const { return height - page_top() - STATUS_H; }
     // The window in the page's own pixels: smaller when zoomed in
     int view_w() const { return width * 100 / zoom; }
     int view_h() const { return page_h() * 100 / zoom; }
@@ -1085,6 +1088,18 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 
 static void draw();
 static void draw_chrome();
+static void new_tab(const std::string& where);
+static void open_in_tab_behind(const std::string& where);
+static void click_strip(int x);
+
+// "Web: " and the page's title, on the window
+static void show_title()
+{
+    std::string t = "Web";
+    if (!cont.title.empty())
+        t += ": " + cont.title;
+    win_title(cont.win, t.c_str());
+}
 
 // The steps a page can be zoomed by, as browsers have them
 static const int zooms[] = {50, 67, 80, 90, 100, 110, 125, 150, 175, 200};
@@ -1122,7 +1137,10 @@ static void click_zoom(int x)
 
 // Where on the page a point of the window is, at the zoom
 static int page_x(int x) { return x * 100 / cont.zoom; }
-static int page_y(int y) { return (y - BAR_H) * 100 / cont.zoom + cont.scroll; }
+static int page_y(int y)
+{
+    return (y - cont.page_top()) * 100 / cont.zoom + cont.scroll;
+}
 static void scroll_by(int dy);
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post = nullptr);
@@ -1562,10 +1580,7 @@ static void open_page(const std::string& where0, bool remember,
     // (stopped while its pictures came: the page shows, without the rest)
     status_line = stopping ? "Stopped" : network ? "Done" : "";
     stopping = false;
-    std::string t = "Web";
-    if (!cont.title.empty())
-        t += ": " + cont.title;
-    win_title(cont.win, t.c_str());
+    show_title();
     if (target != "about:start")
         remember_visit(target, cont.title);
     std::printf("[web] title: %s\n", cont.title.c_str());
@@ -1880,6 +1895,170 @@ static void next_field()
     typing.reset();                    // the last one: out of the form
 }
 
+// --- tabs ---------------------------------------------------------------
+
+// The page in the window, and what goes with it, is the current tab's;
+// the others keep theirs here until they are chosen. Switching is a
+// swap: what is shown goes into its tab, the chosen tab's comes out.
+struct tab {
+    document::ptr doc;
+    std::string base, title, address, status;
+    int scroll = 0;
+    std::vector<std::string> history, ahead;
+    std::vector<std::weak_ptr<el_input>> inputs;
+    encoding charset = encoding::utf_8;
+    bool marked = false;
+};
+static std::vector<tab> tabs(1);
+static int cur_tab;
+
+static void save_tab()
+{
+    tab& t = tabs[cur_tab];
+    t.doc = doc;
+    t.base = cont.base;
+    t.title = cont.title;
+    t.address = address;
+    t.status = status_line;
+    t.scroll = cont.scroll;
+    t.history = history;
+    t.ahead = ahead;
+    t.inputs = inputs;
+    t.charset = page_charset;
+    t.marked = page_marked;
+}
+
+// The strip shows with two tabs or more, and the page moves down for it
+static void set_strip()
+{
+    int was = cont.strip;
+    cont.strip = tabs.size() > 1 ? TAB_H : 0;
+    if (was != cont.strip)
+        scroll_by(0);
+}
+
+static void say_tabs()
+{
+    std::printf("[web] tabs: %d, at %d\n", (int)tabs.size(), cur_tab + 1);
+    std::fflush(stdout);
+}
+
+static void load_tab(int i)
+{
+    cur_tab = i;
+    tab& t = tabs[i];
+    doc = t.doc;
+    cont.base = t.base;
+    cont.title = t.title;
+    address = t.address;
+    status_line = t.status;
+    cont.scroll = t.scroll;
+    history = t.history;
+    ahead = t.ahead;
+    inputs = t.inputs;
+    page_charset = t.charset;
+    page_marked = t.marked;
+    typing.reset();
+    list_open.reset();
+    sel_any = sel_drag = false;
+    address_picked = false;
+    set_strip();
+    layout();                          // (the width may have changed since)
+    scroll_by(0);
+    if (finding)
+        find_all();
+    show_title();
+}
+
+static void switch_tab(int i)
+{
+    if (i == cur_tab || i < 0 || i >= (int)tabs.size())
+        return;
+    save_tab();
+    load_tab(i);
+    say_tabs();
+}
+
+// A new tab after the current one, with an address, and in front
+static void new_tab(const std::string& where)
+{
+    save_tab();
+    tabs.insert(tabs.begin() + cur_tab + 1, tab());
+    load_tab(cur_tab + 1);
+    doc.reset();
+    cont.base.clear();
+    open_page(where, false);
+    say_tabs();
+}
+
+// The middle button's: opened where it would be, and this one shown again
+static void open_in_tab_behind(const std::string& where)
+{
+    int back = cur_tab;
+    new_tab(where);
+    save_tab();
+    load_tab(back);
+    say_tabs();
+}
+
+static void close_tab(int i)
+{
+    if (tabs.size() < 2)
+        return;
+    if (i == cur_tab) {
+        tabs.erase(tabs.begin() + i);
+        load_tab(i < (int)tabs.size() ? i : i - 1);
+    } else {
+        save_tab();
+        tabs.erase(tabs.begin() + i);
+        load_tab(cur_tab > i ? cur_tab - 1 : cur_tab);
+    }
+    say_tabs();
+}
+
+// Where the tabs are on the strip: as wide as they fit, up to TAB_MAX
+static int tab_w()
+{
+    int n = (int)tabs.size();
+    int w = (cont.width - 16) / (n ? n : 1);
+    return w < TAB_MAX ? w : TAB_MAX;
+}
+
+static void click_strip(int x)
+{
+    int w = tab_w(), i = (x - 8) / w;
+    if (x < 8 || i >= (int)tabs.size())
+        return;
+    if (x >= 8 + i * w + w - 22)       // its cross
+        close_tab(i);
+    else
+        switch_tab(i);
+}
+
+static void draw_strip(int w, const struct ud_look& l)
+{
+    if (!cont.strip)
+        return;
+    int y = BAR_H, tw = tab_w();
+    ud_fill(w, 0, y, cont.width, TAB_H, l.bg);
+    ud_fill(w, 0, y + TAB_H - 1, cont.width, 1, l.line);
+    for (int i = 0; i < (int)tabs.size(); i++) {
+        int x = 8 + i * tw;
+        bool on = i == cur_tab;
+        ud_round(w, x + 1, y + 3, tw - 2, TAB_H - 6, 8, on ? l.field : l.row);
+        std::string t = on ? cont.title : tabs[i].title;
+        if (t.empty())
+            t = on ? address : tabs[i].address;
+        while (!t.empty() && ud_width(t.c_str(), UD_SANS, 11) > tw - 34)
+            t.pop_back();
+        ud_text(w, x + 10, ud_baseline(y + 3, TAB_H - 6, 11), t.c_str(),
+                on ? l.text : l.dim, UD_SANS, 11);
+        int cx = x + tw - 15, cy = y + TAB_H / 2;   // its cross
+        ud_line(w, cx - 3, cy - 3, cx + 3, cy + 3, 16, l.dim);
+        ud_line(w, cx + 3, cy - 3, cx - 3, cy + 3, 16, l.dim);
+    }
+}
+
 // A five-pointed star - drawn, since the system's lettering has no ★.
 // Full: lines fanned from its middle to every point of its edge.
 static void draw_star(int w, int cx, int cy, bool full, uint32_t ink)
@@ -1930,7 +2109,7 @@ static void draw()
     struct ud_look l;
     ud_look(&l);
     // The page is white, as pages are, whatever the theme around it
-    ud_fill(w, 0, BAR_H, cont.width, cont.page_h(), 0xFFFFFF);
+    ud_fill(w, 0, cont.page_top(), cont.width, cont.page_h(), 0xFFFFFF);
     if (doc) {
         position clip(0, cont.scroll, cont.view_w(), cont.view_h());
         doc->draw(0, 0, 0, &clip);
@@ -1943,7 +2122,8 @@ static void draw()
         int ph = cont.page_h(), th = ph * cont.view_h() / total;
         if (th < 20)
             th = 20;
-        int ty = BAR_H + (ph - th) * cont.scroll / (total - cont.view_h());
+        int ty = cont.page_top() +
+                 (ph - th) * cont.scroll / (total - cont.view_h());
         ud_round(w, cont.width - SCROLL_W - 2, ty + 2, SCROLL_W, th - 4,
                  SCROLL_W / 2, 0x9A9AA0);
     }
@@ -1983,6 +2163,12 @@ static void draw_chrome()
         ud_line(w, rm + 1, 14, rm + 6, 15, 16, l.text);
         ud_line(w, rm + 6, 15, rm + 5, 20, 16, l.text);
     }
+    // A new tab: a plus
+    int nx = 10 + 3 * BTN_STEP + BACK_W / 2;
+    ud_round(w, nx - BACK_W / 2, 8, BACK_W, 24, 12, l.row);
+    ud_fill(w, nx - 5, 19, 11, 2, l.text);
+    ud_fill(w, nx - 1, 15, 2, 11, l.text);
+    draw_strip(w, l);
     ud_round(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.field);
     ud_ring(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.line);
     int tx = ADDR_X + 12, ty = ud_baseline(8, 24, UD_PX);
@@ -2052,7 +2238,7 @@ int main(int argc, char** argv)
             } else if (ev.type == WEV_PRESS) {
                 // Perhaps the start of a selection; a click clears one
                 sel_any = false;
-                sel_drag = doc && !list_open && ev.y >= BAR_H &&
+                sel_drag = doc && !list_open && ev.y >= cont.page_top() &&
                            ev.y < cont.height - STATUS_H;
                 sel_x0 = sel_x1 = page_x(ev.x);
                 sel_y0 = sel_y1 = page_y(ev.y);
@@ -2073,8 +2259,9 @@ int main(int argc, char** argv)
                     }
                 }
             } else if (ev.type == WEV_ALTCLICK) {
-                // The right or middle button on a link: a new window
-                if (doc && !list_open && ev.y >= BAR_H &&
+                // The right button on a link: a new window; the middle
+                // one: a tab behind this one
+                if (doc && !list_open && ev.y >= cont.page_top() &&
                     ev.y < cont.height - STATUS_H) {
                     int px = page_x(ev.x), py = page_y(ev.y);
                     cont.clicked.clear();
@@ -2082,9 +2269,12 @@ int main(int argc, char** argv)
                                          [](const position&) {});
                     doc->on_lbutton_up(px, py, ev.x, ev.y,
                                        [](const position&) {});
-                    if (!cont.clicked.empty())
-                        open_in_new_window(
-                            resolve(url(cont.base), url(cont.clicked)).str());
+                    std::string to =
+                        resolve(url(cont.base), url(cont.clicked)).str();
+                    if (!cont.clicked.empty() && (ev.val & 4))
+                        open_in_tab_behind(to);
+                    else if (!cont.clicked.empty())
+                        open_in_new_window(to);
                 }
             } else if (ev.type == WEV_CLICK) {
                 if (list_open) {
@@ -2108,7 +2298,10 @@ int main(int argc, char** argv)
                         open_page(cont.base, false);
                         cont.scroll = keep;   // the same place, freshly
                         scroll_by(0);
-                    }
+                    } else if (b == 3)
+                        new_tab("about:start");
+                } else if (ev.y < cont.page_top()) {
+                    click_strip(ev.x);
                 } else if (doc && ev.y < cont.height - STATUS_H) {
                     int px = page_x(ev.x), py = page_y(ev.y);
                     cont.clicked.clear();

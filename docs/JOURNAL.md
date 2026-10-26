@@ -6161,3 +6161,20 @@ works and is checked by `make test`.
       The test sends a hidden field "żółw" and a snowman from a
       windows-1250 page: the query must be exactly what Python's
       quote_plus gives for "żółw&#9731;" in cp1250.
+
+- [x] **Tabs in the browser** (apps/browser/web.cpp, the `webtools`
+      group).
+
+      A plus in the toolbar opens a tab on the start page; the middle
+      button opens a link in a tab behind the current one (the right
+      button still opens a window). With two tabs or more a strip shows
+      under the toolbar - each tab with its title and a cross - and the
+      page moves down for it. Each tab keeps its own page, address,
+      history, scroll and form fields; switching is a swap of those with
+      what the window shows, so the rest of the browser still works on
+      "the page" as before.
+
+      The test opens a tab with the plus, loads a page in it, middle-
+      clicks a link (three tabs, still at the second, its page still
+      shown), shows the third and then the first, each with its own page,
+      and closes two with their crosses back to one.

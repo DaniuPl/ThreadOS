@@ -322,6 +322,77 @@ def tools(e):
           "[web] copied: " + on_serial(PL) in q.serial()[seen:])
 
 
+    # --- tabs -------------------------------------------------------------
+    tab_h, tab_max = define(SRC, "TAB_H"), define(SRC, "TAB_MAX")
+    strip = cy + bar + tab_h // 2
+    page2 = (page[0], page[1] + tab_h, page[2], page[3])
+
+    def tab_x(i, n):
+        """The middle of tab i of n, on the strip"""
+        tw = min(tab_max, (w0 - 16) // n)
+        return cx + 8 + i * tw + tw // 2, cx + 8 + i * tw + tw - 15
+
+    def tabs_said(want, timeout=15):
+        end = time.time() + timeout
+        said = []
+        while time.time() < end:
+            said = re.findall(r"\[web\] tabs: (\d+), at (\d+)",
+                              q.serial()[seen:])
+            if said and said[-1] == want:
+                break
+            time.sleep(0.3)
+        return said[-1] if said else None
+
+    first = q.window_title(*geom)
+    seen = len(q.serial())
+    q.click(cx + 10 + 3 * step + 14, cy + bar // 2)          # the plus
+    q.mouse_goto(sw - 20, sh // 2)
+    got = wait_title(q, geom, "Web: Start")
+    check(f"the plus opens a new tab on the start page ({got!r}, "
+          f"{tabs_said(('2', '2'))})", got == "Web: Start" and
+          tabs_said(("2", "2")) == ("2", "2"))
+    q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+    q.mouse_goto(sw - 20, sh // 2)
+    time.sleep(1)
+    typed(q, f"http://10.0.2.2:{port}/page.html")
+    q.sendkey("ret")
+    wait_title(q, geom, "Web: Test page")
+    time.sleep(1)
+    link, _ = pixels(q, page2[0], page2[1], page2[2] - 20, page2[3], LINK)
+    seen = len(q.serial())
+    q.mouse_goto((link[0] + link[2]) // 2, link[3] - 2)
+    time.sleep(0.3)
+    q.mouse_button(True, "middle")
+    q.mouse_button(False, "middle")
+    q.mouse_goto(sw - 20, sh // 2)
+    said = tabs_said(("3", "2"))
+    time.sleep(1)
+    check(f"the middle button opens a link in a tab behind this one "
+          f"({said}, {q.window_title(*geom)!r})", said == ("3", "2") and
+          q.window_title(*geom) == "Web: Test page")
+    q.click(tab_x(2, 3)[0], strip)
+    q.mouse_goto(sw - 20, sh // 2)
+    got = wait_title(q, geom, "Web: Page two")
+    check(f"a click on that tab shows its page ({got!r})",
+          got == "Web: Page two")
+    q.click(tab_x(0, 3)[0], strip)
+    q.mouse_goto(sw - 20, sh // 2)
+    got = wait_title(q, geom, first)
+    check(f"and the first tab still has its own ({got!r})", got == first)
+    seen = len(q.serial())
+    q.click(tab_x(2, 3)[1], strip)
+    q.mouse_goto(sw - 20, sh // 2)
+    said3 = tabs_said(("2", "1"))
+    q.click(tab_x(1, 2)[1], strip)
+    q.mouse_goto(sw - 20, sh // 2)
+    said2 = tabs_said(("1", "1"))
+    time.sleep(1)
+    check(f"the crosses close tabs, down to one, and the strip goes "
+          f"({said3}, {said2}, {q.window_title(*geom)!r})",
+          said3 == ("2", "1") and said2 == ("1", "1") and
+          q.window_title(*geom) == first)
+
+
 def main():
     return run("the browser's tools", [tools])
 
