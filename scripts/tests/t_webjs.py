@@ -20,6 +20,15 @@ word:
 
   a script that never ends is stopped, and the page shows anyway
 
+  a page that is an app: keys typed into its field reach its input
+  listener, and one its keydown listener keeps never gets in; leaving
+  the field is a change; a box ticked and a choice made are changes too;
+  its submit handler keeps the form and sends the fields itself, as
+  JSON with fetch() - the server's own account says what came, and the
+  answer it gave is on the window; an XMLHttpRequest reads a 404 as an
+  answer; a request to another site is refused before anything is sent;
+  and form.submit() sends the form as the browser would
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -87,8 +96,179 @@ def scripts(e):
           f"({got!r})", got == "Web: Loop" and "interrupted" in said)
 
 
+# A page that is an app. Its parts are found on the screen by their
+# colours: the field by its own, the box and the list just after a
+# marker of their own.
+APP = b"""<html><head><title>App</title></head><body>
+<form id=f action=/never method=post>
+<p><input id=name name=name style='background:#fff0d0;width:200px'></p>
+<p><span style='background:#40c040'>MMMM</span><input type=checkbox
+ id=agree name=agree></p>
+<p><span style='background:#4040c0'>MMMM</span><select id=size name=size>
+<option value=s>Small<option value=l>Large</select></p>
+<p><input type=submit value=Send style='background:#e6e6ea'>
+<input type=button id=plain value=Plain style='background:#d0f0d0'></p>
+</form>
+<p id=echo style='color:#aa0066'>nothing typed</p>
+<script>
+const log = m => console.log(m);
+const $ = id => document.getElementById(id);
+const name = $('name');
+name.addEventListener('input', e => {
+  $('echo').textContent = 'typed ' + e.target.value;
+});
+name.addEventListener('keydown', e => {
+  if (e.key === 'x') { e.preventDefault(); log('kept the x'); }
+});
+name.addEventListener('change', () => log('change: name=' + name.value));
+$('agree').addEventListener('change', e => log('change: agree=' + e.target.checked));
+$('size').onchange = e => log('change: size=' + e.target.value);
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown') log('the page heard ArrowDown ' + e.keyCode);
+});
+$('plain').addEventListener('click', () => $('f').submit());
+$('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  log('form: ' + new FormData($('f')));
+  const r = await fetch('/api/echo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name.value, agree: $('agree').checked })
+  });
+  const j = await r.json();
+  document.title = 'Got ' + j.reply;
+  log('fetch: ' + r.status + ' ' + r.ok + ' ' + r.headers.get('Content-Type'));
+  const x = new XMLHttpRequest();
+  x.open('GET', '/api/missing');
+  x.onload = () => log('xhr: ' + x.status + ' ' + x.responseText);
+  x.send();
+  fetch('http://example.com/data').then(() => log('cross: fetched'),
+    err => log('cross: refused ' + (err instanceof TypeError)));
+});
+</script></body></html>"""
+
+API_SEEN = []           # what /api/echo was sent: its type and body
+
+
+def r_echo(h, body):
+    import json
+    API_SEEN.append((h.command, h.headers.get("Content-Type"), body))
+    try:
+        sent = json.loads(body)
+        reply = sent["name"].upper() + ("+" if sent["agree"] is True else "-")
+    except (ValueError, KeyError, AttributeError):
+        reply = "nonsense"
+    return 200, [("Content-Type", "application/json")], \
+        json.dumps({"reply": reply}).encode()
+
+
+def r_missing(h, body):
+    return 404, [("Content-Type", "text/plain")], b"nothing here"
+
+
+def apps(e):
+    q, sw, sh = e.q, e.sw, e.sh
+    geom, page = e.geom, e.page
+    away = (sw - 20, sh // 2)
+    SERVED["/app.html"] = APP
+    SERVED["POST /never name=daniu&agree=on&size=l"] = \
+        b"<html><head><title>Sent plainly</title></head></html>"
+    ROUTES.update({"/api/echo": r_echo, "/api/missing": r_missing})
+
+    def said_since(at, text, timeout=10):
+        end = time.time() + timeout
+        while time.time() < end:
+            if text in q.serial()[at:]:
+                return True
+            time.sleep(0.3)
+        return False
+
+    def click_box(colour, dx=0):
+        box, _ = pixels(q, *page, colour)
+        if box:
+            q.click(box[2] + dx if dx else (box[0] + box[2]) // 2,
+                    (box[1] + box[3]) // 2)
+            q.mouse_goto(*away)
+            time.sleep(1)
+        return box
+
+    got = visit(e, "/app.html", "Web: App")
+    check(f"the app page opens ({got!r})", got == "Web: App")
+
+    # Typing: input on every key, and the x the page keeps; leaving the
+    # field is the change - once, with all of it
+    seen = len(q.serial())
+    field = click_box((0xFF, 0xF0, 0xD0))
+    typed(q, "danxiu")
+    kept = said_since(seen, "[js] kept the x")
+    time.sleep(1)
+    typing = "change:" not in q.serial()[seen:]
+    q.click((page[0] + page[2]) // 2, page[3] - 30)
+    q.mouse_goto(*away)
+    changed = said_since(seen, "[js] change: name=daniu\n")
+    once = q.serial()[seen:].count("change: name") == 1
+    q.sendkey("ctrl-f")
+    time.sleep(0.5)
+    typed(q, "typed daniu")
+    found = said_since(seen, "[web] find 'typed daniu': 1 of 1")
+    q.sendkey("esc")
+    time.sleep(0.5)
+    check(f"keys typed into a field reach its input listener, and the x "
+          f"its keydown listener kept is not in it ({field})",
+          field is not None and kept and found)
+    check(f"leaving the field is a change, once, with what it holds "
+          f"(none while typing: {typing})", typing and changed and once)
+
+    # A key outside the field is the page's
+    seen = len(q.serial())
+    q.sendkey("down")
+    check("a key outside reaches the document's listener, with its keyCode",
+          said_since(seen, "[js] the page heard ArrowDown 40"))
+
+    seen = len(q.serial())
+    tick = click_box((0x40, 0xC0, 0x40), dx=9)
+    ticked = said_since(seen, "[js] change: agree=true")
+    menu = click_box((0x40, 0x40, 0xC0), dx=30)
+    q.sendkey("down")
+    time.sleep(0.3)
+    q.sendkey("ret")
+    chose = said_since(seen, "[js] change: size=l")
+    check(f"a box ticked and a choice made in a list are changes "
+          f"({tick}, {menu})", ticked and chose)
+
+    # The submit handler sends the fields itself
+    seen = len(q.serial())
+    n_posted = len(POSTED)
+    send = click_box((0xE6, 0xE6, 0xEA))
+    got = wait_title(q, geom, "Web: Got DANIU+", timeout=20)
+    said = q.serial()[seen:]
+    check(f"its submit handler keeps the form: the page is not left "
+          f"({send}, {got!r})", "[web] the page kept its form" in said and
+          not any(p == "/never" for p, _ in POSTED[n_posted:]))
+    check("FormData holds the form's fields as the form would send them",
+          "[js] form: name=daniu&agree=on&size=l" in said)
+    check(f"fetch() POSTs JSON: the server got it, typed so, and the "
+          f"answer it gave names the window ({API_SEEN[-1:]}, {got!r})",
+          API_SEEN[-1:] == [("POST", "application/json",
+                             b'{"name":"daniu","agree":true}')] and
+          got == "Web: Got DANIU+")
+    check("the response says its status and type",
+          said_since(seen, "[js] fetch: 200 true application/json"))
+    check("an XMLHttpRequest reads a 404 as an answer, with its body",
+          said_since(seen, "[js] xhr: 404 nothing here"))
+    check("a request to another site is refused - a TypeError - before "
+          "anything is sent", said_since(seen, "[js] cross: refused true")
+          and "[js] request refused: http://example.com/data" in
+          q.serial()[seen:] and "example.com (" not in q.serial()[seen:])
+
+    # form.submit(): sent as the browser would, the buttons left out
+    plain = click_box((0xD0, 0xF0, 0xD0))
+    got = wait_title(q, geom, "Web: Sent plainly", timeout=20)
+    check(f"form.submit() sends the form as the browser would ({plain}, "
+          f"{got!r})", got == "Web: Sent plainly")
+
+
 def main():
-    return run("JavaScript in the browser", [scripts])
+    return run("JavaScript in the browser", [scripts, apps])
 
 
 sys.exit(main())

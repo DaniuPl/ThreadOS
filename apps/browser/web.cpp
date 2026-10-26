@@ -749,6 +749,9 @@ static void save_prefs()
 
 // What the last answer said it was (Content-Type), for its charset
 static const char TYPE_FILE[] = ".web-type.txt";
+// And its status code: a script's request reads a 404 as an answer
+static const char STATUS_FILE[] = ".web-status.txt";
+static int last_status;
 
 // --- bookmarks and history ---------------------------------------------
 
@@ -894,8 +897,10 @@ static bool stop_asked()
 }
 
 static bool fetch_to(const std::string& address, const char* file,
-                     const std::string* post = nullptr)
+                     const std::string* post = nullptr,
+                     const std::string& post_type = "")
 {
+    last_status = 0;
     if (stopping)
         return false;
     // (the fragment is the browser's, not the server's)
@@ -904,16 +909,26 @@ static bool fetch_to(const std::string& address, const char* file,
     const char* body = ".web-form.txt";
     if (post && !write_file(body, *post))
         return false;
+    write_file(STATUS_FILE, "");
     pid_t pid = fork();
     if (pid == 0) {
         // Every fetch - pages, pictures, style sheets - goes with the
         // jar: a signed-in site's pictures may need its cookie too
-        char* args[] = {(char*)"httpget", (char*)"-c", (char*)COOKIE_JAR,
-                        (char*)"-o", (char*)file, (char*)"-t", (char*)TYPE_FILE,
-                        post ? (char*)"-p" : (char*)where.c_str(),
-                        post ? (char*)body : nullptr,
-                        post ? (char*)where.c_str() : nullptr, nullptr};
-        execv("httpget", args);
+        std::vector<char*> args = {(char*)"httpget", (char*)"-c", (char*)COOKIE_JAR,
+                                   (char*)"-o", (char*)file, (char*)"-t",
+                                   (char*)TYPE_FILE, (char*)"-s",
+                                   (char*)STATUS_FILE};
+        if (post) {
+            args.push_back((char*)"-p");
+            args.push_back((char*)body);
+        }
+        if (post && !post_type.empty()) {
+            args.push_back((char*)"-y");
+            args.push_back((char*)post_type.c_str());
+        }
+        args.push_back((char*)where.c_str());
+        args.push_back(nullptr);
+        execv("httpget", args.data());
         _exit(127);
     }
     if (pid < 0)
@@ -948,6 +963,9 @@ static bool fetch_to(const std::string& address, const char* file,
     }
     loading = false;
     status_line = was;
+    std::string code;
+    if (read_file(STATUS_FILE, code))
+        last_status = std::atoi(code.c_str());
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
@@ -1040,7 +1058,9 @@ class el_input : public html_tag {
         return type == "submit" || type == "button" || type == "reset" ||
                type == "image";
     }
-    bool is_text() const
+    // (not is_text(): that is litehtml's, for text nodes - a field
+    // that said yes was no element to the page's scripts)
+    bool is_field() const
     {
         return !is_button() && !is_box() && type != "select" &&
                type != "textarea";
@@ -1224,7 +1244,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
         }
         return;
     }
-    if (!is_text())
+    if (!is_field())
         return;                               // the words are litehtml's
     std::string shown = type == "password" ? std::string(value.size(), '*')
                                            : value;
@@ -1255,6 +1275,9 @@ static void show_title();
 static std::shared_ptr<webjs::page> page_js;   // the current page's
 static std::string pending_nav;        // where a script sent the window
 static bool js_drew;                   // a script changed what shows
+static element::ptr pending_submit;    // a form a script sent
+class el_input;
+static void untick_group(el_input* in);
 
 // What the scripts reach of the browser. Going somewhere else waits
 // until the script is done: the page it runs in must not end under it.
@@ -1264,6 +1287,21 @@ static webjs::host js_host()
     h.fetch = [](const std::string& where, std::string& out) {
         return get_url(where, out, ".web-script.js");
     };
+    h.request = [](const std::string& where, const std::string* body,
+                   const std::string& type, webjs::reply& r) {
+        if (where.compare(0, 7, "http://") && where.compare(0, 8, "https://")) {
+            r.status = read_file(where.c_str(), r.text) ? 200 : 404;
+            return true;
+        }
+        fetch_to(where, ".web-request.txt", body, type);
+        if (!last_status)
+            return false;
+        r.status = last_status;
+        read_file(".web-request.txt", r.text);
+        read_file(TYPE_FILE, r.type);
+        return true;
+    };
+    h.submit = [](const element::ptr& form) { pending_submit = form; };
     h.resolve = [](const std::string& link) {
         return resolve(url(cont.base), url(link)).str();
     };
@@ -1304,6 +1342,19 @@ static webjs::host js_host()
         } else {
             in->value = v;
         }
+        js_drew = true;
+    };
+    h.get_checked = [](const element::ptr& el) {
+        auto in = dynamic_cast<el_input*>(el.get());
+        return in && in->is_box() ? (int)in->checked : -1;
+    };
+    h.set_checked = [](const element::ptr& el, bool on) {
+        auto in = dynamic_cast<el_input*>(el.get());
+        if (!in || !in->is_box())
+            return;
+        if (on && in->type == "radio")
+            untick_group(in);
+        in->checked = on;
         js_drew = true;
     };
     return h;
@@ -1406,11 +1457,45 @@ static element::ptr form_of(const element::ptr& el)
 // them, the other buttons not: after the action's address, or for a
 // POST form as the body. ('by' is a copy: it may be the field with the
 // keys, which the next page lets go of.)
+// The field with the keys, and what it held when they came to it: when
+// it changed, the page's scripts hear 'change' - as the keys leave it,
+// or as its form is sent
+static std::weak_ptr<el_input> field_at;
+static std::string field_was;
+
+static void field_settle(bool sending = false)
+{
+    auto f = field_at.lock();
+    if (f && (f != typing || sending) && f->value != field_was) {
+        field_was = f->value;
+        webjs::dispatch(page_js, f, "change");
+    }
+    if (f != typing) {
+        field_at = typing;
+        field_was = typing ? typing->value : "";
+    }
+}
+
+static void send_form(const element::ptr& form, std::shared_ptr<el_input> by);
+
+// A button or Enter sends its form - unless the page's own submit
+// handler takes it (and sends it itself, with fetch(), say)
 static void submit(std::shared_ptr<el_input> by)
 {
     element::ptr form = form_of(by);
     if (!form)
         return;
+    field_settle(true);
+    if (webjs::dispatch(page_js, form, "submit")) {
+        std::printf("[web] the page kept its form\n");
+        std::fflush(stdout);
+        return;
+    }
+    send_form(form, by);
+}
+
+static void send_form(const element::ptr& form, std::shared_ptr<el_input> by)
+{
     std::string q;
     for (auto& w : inputs) {
         auto in = w.lock();
@@ -1464,6 +1549,20 @@ static void submit(std::shared_ptr<el_input> by)
     open_page(target, true);
 }
 
+// A radio button's group: the others with its name in its form
+static void untick_group(el_input* in)
+{
+    element::ptr form = form_of(in->shared_from_this());
+    for (auto& w : inputs) {
+        auto o = w.lock();
+        if (o && o->type == "radio" && o->name == in->name &&
+            form_of(o) == form)
+            o->checked = false;
+    }
+}
+
+static int list_was;                   // what the open list had chosen
+
 // A click on the page that litehtml did not take for a link: a form's
 // field gets the keys, a box is ticked, a button sends its form
 static bool click_form(int px, int py)
@@ -1479,23 +1578,26 @@ static bool click_form(int px, int py)
         // the field's too)
         if (px < x - 6 || px >= x + w0 + 6 || py < y - 4 || py >= y + h0 + 4)
             continue;
-        if (in->type == "checkbox")
-            in->checked = !in->checked;
-        else if (in->type == "radio") {
-            element::ptr form = form_of(in);
-            for (auto& w2 : inputs) {
-                auto o = w2.lock();
-                if (o && o->type == "radio" && o->name == in->name &&
-                    form_of(o) == form)
-                    o->checked = false;
+        if (in->is_box()) {
+            bool was = in->checked;
+            if (in->type == "checkbox") {
+                in->checked = !in->checked;
+            } else {
+                untick_group(in.get());
+                in->checked = true;
             }
-            in->checked = true;
+            if (in->checked != was) {
+                webjs::dispatch(page_js, in, "input");
+                webjs::dispatch(page_js, in, "change");
+            }
         } else if (in->is_button()) {
             if (in->type == "submit" || in->type == "image")
                 submit(in);
         } else if (in->type == "select") {
-            if (!in->options.empty())
+            if (!in->options.empty()) {
                 list_open = in;
+                list_was = in->chosen;
+            }
         } else
             typing = in;
         return true;
@@ -1539,6 +1641,16 @@ static void draw_list()
     }
 }
 
+// The list closes: a choice other than the one it opened with is a
+// change, for the page's scripts
+static void close_list()
+{
+    auto l = list_open;
+    list_open.reset();
+    if (l && l->chosen != list_was)
+        webjs::dispatch(page_js, l, "change");
+}
+
 // A click while the list is open: on an option it is chosen; anywhere
 // the list closes
 static void click_list(int x, int y)
@@ -1551,7 +1663,7 @@ static void click_list(int x, int y)
         std::printf("[web] chose '%s'\n", list_open->options[i].text.c_str());
         std::fflush(stdout);
     }
-    list_open.reset();
+    close_list();
 }
 
 static std::string form_encode(const std::string& s)
@@ -2104,6 +2216,7 @@ static void open_page(const std::string& where0, bool remember,
     }
     typing.reset();
     list_open.reset();
+    field_at.reset();
     inputs.clear();
     sel_any = sel_drag = false;
     matches.clear();
@@ -2492,6 +2605,52 @@ static void copy_selection()
     std::fflush(stdout);
 }
 
+// A key in the field with the keys: what it does there
+static void type_into(char c)
+{
+    if (c == '\n' && typing->type == "textarea")
+        typing->value += c;            // a new line, not a send
+    else if (c == '\n')
+        submit(typing);
+    else if (c == KEY_PASTE) {
+        char got[CLIP_MAX + 1];
+        int n = (int)sys_clip_get(got, sizeof(got));
+        for (int i = 0; i < n; i++) {
+            char ch = got[i];
+            if (ch == '\n' && typing->type != "textarea")
+                ch = ' ';              // one line: the breaks go
+            if (ch != '\r')
+                typing->value += ch;
+        }
+    } else if (c == '\b') {
+        if (!typing->value.empty())
+            typing->value.pop_back();
+    } else
+        typing->value += c;
+}
+
+// A key as KeyboardEvent names it ("" for those a page has no name
+// for). 0x1B is Shift+Insert's code as well as Escape's: in a field, the
+// paste - no key a page hears.
+static std::string key_name(char c, bool in_field)
+{
+    switch ((unsigned char)c) {
+    case '\n': return "Enter";
+    case '\b': return "Backspace";
+    case '\t': return "Tab";
+    case 0x1B: return in_field ? "" : "Escape";
+    case KEY_UP: return "ArrowUp";
+    case KEY_DOWN: return "ArrowDown";
+    case KEY_LEFT: return "ArrowLeft";
+    case KEY_RIGHT: return "ArrowRight";
+    case KEY_PGUP: return "PageUp";
+    case KEY_PGDN: return "PageDown";
+    case KEY_HOME: return "Home";
+    case KEY_END: return "End";
+    }
+    return c >= 0x20 && c < 0x7F ? std::string(1, c) : "";
+}
+
 // A field among the page's, next after the one with the keys - Tab's
 static void next_field()
 {
@@ -2500,7 +2659,7 @@ static void next_field()
         auto in = w.lock();
         if (!in)
             continue;
-        if (past && (in->is_text() || in->type == "textarea")) {
+        if (past && (in->is_field() || in->type == "textarea")) {
             typing = in;
             return;
         }
@@ -2597,6 +2756,7 @@ static void load_tab(int i)
     page_js = t.js;
     typing.reset();
     list_open.reset();
+    field_at.reset();
     sel_any = sel_drag = false;
     address_picked = false;
     set_strip();
@@ -3089,7 +3249,7 @@ int main(int argc, char** argv)
                     else if (c == (char)KEY_UP && k > 0)
                         k--;
                     else if (c == '\n' || c == 27)
-                        list_open.reset();
+                        close_list();
                     continue;
                 }
                 if (c == KEY_FIND) {
@@ -3134,26 +3294,33 @@ int main(int argc, char** argv)
                 // Escape's code too; in a field it means the paste)
                 if (typing && (c == '\n' || c == '\b' || c == KEY_PASTE ||
                                (c >= 0x20 && c < 0x7F))) {
-                    if (c == '\n' && typing->type == "textarea")
-                        typing->value += c;    // a new line, not a send
-                    else if (c == '\n')
-                        submit(typing);
-                    else if (c == KEY_PASTE) {
-                        char got[CLIP_MAX + 1];
-                        int n = (int)sys_clip_get(got, sizeof(got));
-                        for (int i = 0; i < n; i++) {
-                            char ch = got[i];
-                            if (ch == '\n' && typing->type != "textarea")
-                                ch = ' ';      // one line: the breaks go
-                            if (ch != '\r')
-                                typing->value += ch;
-                        }
-                    } else if (c == '\b') {
-                        if (!typing->value.empty())
-                            typing->value.pop_back();
-                    } else
-                        typing->value += c;
+                    // The page's key handlers first: they may keep it
+                    // (Enter may send the form, and the next page's
+                    // scripts must not hear of this one's field)
+                    std::shared_ptr<el_input> field = typing;
+                    auto js = page_js;
+                    std::string k = key_name(c, true), before = field->value;
+                    bool kept = !k.empty() &&
+                                webjs::dispatch(js, field, "keydown", k);
+                    if (!kept)
+                        type_into(c);
+                    if (page_js == js && field->value != before)
+                        webjs::dispatch(js, field, "input");
+                    if (page_js == js && !k.empty())
+                        webjs::dispatch(js, field, "keyup", k);
                     continue;
+                }
+                // The other keys the page hears too - all but those for
+                // the address the person picked - and may keep
+                if (page_js && !address_picked) {
+                    std::string k = key_name(c, false);
+                    auto js = page_js;
+                    bool kept = !k.empty() &&
+                                webjs::dispatch(js, nullptr, "keydown", k);
+                    if (!k.empty() && page_js == js)
+                        webjs::dispatch(js, nullptr, "keyup", k);
+                    if (kept)
+                        continue;
                 }
                 bool picked = address_picked;
                 address_picked = false;
@@ -3177,6 +3344,13 @@ int main(int argc, char** argv)
                 else if (c >= 0x20 && c < 0x7F)
                     address += c;
             }
+        }
+        field_settle();
+        if (pending_submit) {
+            element::ptr form = pending_submit;
+            pending_submit.reset();
+            send_form(form, nullptr);
+            again = true;
         }
         if (page_js)
             webjs::run_timers(page_js);

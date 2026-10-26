@@ -210,6 +210,15 @@ static inline void http_set_roots(const uint8_t *roots, uint32_t len,
     http_tls_cfg.verify = require;
 }
 
+/* What a POST's body is said to be: a form's fields unless set - a
+   script's fetch() may send JSON or text */
+static const char *http_post_type = 0;
+
+static inline void http_set_post_type(const char *type)
+{
+    http_post_type = type;
+}
+
 /* One request: a GET, or with a body a POST of a form's fields
    (application/x-www-form-urlencoded, what a browser sends). 'extra'
    is more header lines, each ending in CR LF - a Cookie one. */
@@ -267,8 +276,14 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     while (*end)
         req[r++] = *end++;
     if (body) {
-        const char *ct = "Content-Type: application/x-www-form-urlencoded"
-                         "\r\nContent-Length: ";
+        const char *ct = "Content-Type: ";
+        while (*ct)
+            req[r++] = *ct++;
+        ct = http_post_type ? http_post_type
+                            : "application/x-www-form-urlencoded";
+        for (int i = 0; ct[i] && ct[i] != '\r' && ct[i] != '\n' && i < 120; i++)
+            req[r++] = ct[i];
+        ct = "\r\nContent-Length: ";
         while (*ct)
             req[r++] = *ct++;
         char digits[12];

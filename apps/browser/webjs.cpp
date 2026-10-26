@@ -341,6 +341,102 @@ static JSValue d_set_value(JSContext* ctx, JSValueConst, int, JSValueConst* a)
     return JS_UNDEFINED;
 }
 
+static JSValue d_checked(JSContext* ctx, JSValueConst, int, JSValueConst* a)
+{
+    element::ptr el = unwrap(a[0]);
+    page* p = of(ctx);
+    int c = el && p->h.get_checked ? p->h.get_checked(el) : -1;
+    return c < 0 ? JS_NULL : JS_NewBool(ctx, c);
+}
+
+static JSValue d_set_checked(JSContext* ctx, JSValueConst, int, JSValueConst* a)
+{
+    element::ptr el = unwrap(a[0]);
+    page* p = of(ctx);
+    if (el && p->h.set_checked)
+        p->h.set_checked(el, JS_ToBool(ctx, a[1]) > 0);
+    return JS_UNDEFINED;
+}
+
+// Where an address's page comes from: scheme, host and port
+static std::string origin(const std::string& where)
+{
+    size_t s = where.find("://");
+    if (s == std::string::npos)
+        return "";
+    size_t e = where.find_first_of("/?#", s + 3);
+    std::string o = where.substr(0, e);
+    for (auto& c : o)
+        c = (char)tolower((unsigned char)c);
+    return o;
+}
+
+static bool is_http(const std::string& where)
+{
+    return origin(where).compare(0, 4, "http") == 0;
+}
+
+// request(address, method, body, type): what a script's fetch() and
+// XMLHttpRequest come down to. Only to the page's own site: elsewhere
+// a browser would ask the other site first (CORS) whether this page
+// may read its answer - which is the person's, sent with their cookies
+// - and without asking, it may not. A page off the disk reads the disk.
+static JSValue d_request(JSContext* ctx, JSValueConst, int, JSValueConst* a)
+{
+    page* p = of(ctx);
+    std::string where = p->h.resolve(str(ctx, a[0]));
+    where = where.substr(0, where.find('#'));
+    std::string method = str(ctx, a[1]), base = p->h.location();
+    for (auto& c : method)
+        c = (char)toupper((unsigned char)c);
+    bool post = method == "POST";
+    if (!post && method != "GET")
+        return JS_ThrowTypeError(ctx, "%s requests are not supported",
+                                 method.c_str());
+    if (where.compare(0, 6, "about:") == 0 ||
+        (is_http(base) ? origin(where) != origin(base)
+                       : is_http(where) || post)) {
+        std::printf("[js] request refused: %s from %s\n", where.c_str(),
+                    base.c_str());
+        std::fflush(stdout);
+        return JS_ThrowTypeError(ctx, "a request to %s from this page is "
+                                 "not allowed", where.c_str());
+    }
+    std::string body = post && !JS_IsNull(a[2]) && !JS_IsUndefined(a[2])
+                           ? str(ctx, a[2]) : "";
+    std::string type = JS_IsNull(a[3]) || JS_IsUndefined(a[3])
+                           ? "" : str(ctx, a[3]);
+    reply r;
+    long left = deadline - now_ms();   // (the wait is not the script's)
+    bool ok = p->h.request && p->h.request(where, post ? &body : nullptr,
+                                           type, r);
+    deadline = now_ms() + (left > 0 ? left : 0);
+    std::printf("[js] %s %s: %d\n", method.c_str(), where.c_str(), r.status);
+    std::fflush(stdout);
+    if (!ok)
+        return JS_ThrowTypeError(ctx, "%s could not be fetched", where.c_str());
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "status", JS_NewInt32(ctx, r.status));
+    JS_SetPropertyStr(ctx, o, "type", jstr(ctx, r.type));
+    JS_SetPropertyStr(ctx, o, "text", jstr(ctx, r.text));
+    JS_SetPropertyStr(ctx, o, "url", jstr(ctx, where));
+    return o;
+}
+
+static JSValue d_submit(JSContext* ctx, JSValueConst, int, JSValueConst* a)
+{
+    element::ptr el = unwrap(a[0]);
+    page* p = of(ctx);
+    if (el && p->h.submit)
+        p->h.submit(el);
+    return JS_UNDEFINED;
+}
+
+static JSValue d_resolve(JSContext* ctx, JSValueConst, int, JSValueConst* a)
+{
+    return jstr(ctx, of(ctx)->h.resolve(str(ctx, a[0])));
+}
+
 static JSValue d_title(JSContext* ctx, JSValueConst, int argc, JSValueConst* a)
 {
     page* p = of(ctx);
@@ -458,8 +554,19 @@ static const char prelude[] = R"JS(
     for (let n = o; n; n = D.parent(n)) if (n === this) return true;
     return false;
   };
+  def(E, 'checked', function () { return !!D.checked(this); },
+      function (v) { D.setChecked(this, !!v); });
+  def(E, 'name', function () { return D.attr(this, 'name') || ''; },
+      function (v) { D.setAttr(this, 'name', String(v)); });
+  def(E, 'type', function () { return D.attr(this, 'type') || ''; });
+  def(E, 'form', function () { return this.closest('form'); });
   E.focus = E.blur = function () {};
   E.click = function () { __dispatch(this, 'click'); };
+  // submit() sends the form as it is; requestSubmit() asks its submit
+  // handlers first, as the button would
+  E.submit = function () { D.submit(this); };
+  E.requestSubmit = function () { if (!__dispatch(this, 'submit')) D.submit(this); };
+  E.reset = function () {};
 
   // style: an object whose properties write the element's style
   // attribute - read back from it, so that what a page set shows
@@ -535,13 +642,27 @@ static const char prelude[] = R"JS(
   const listen = l => function (t, f) { (l[t] = l[t] || []).push(f); };
   const unlisten = l => function (t, f) { if (l[t]) l[t] = l[t].filter(x => x !== f); };
 
-  globalThis.__dispatch = function (target, type) {
+  // The codes old scripts read off a key event instead of its name
+  const codes = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ' ': 32,
+    PageUp: 33, PageDown: 34, Home: 36, ArrowLeft: 37, ArrowUp: 38,
+    ArrowRight: 39, ArrowDown: 40 };
+
+  globalThis.__dispatch = function (target, type, key) {
+    if (!target) target = document.body;
     const ev = {
       type, target, defaultPrevented: false, bubbles: true, __stop: false,
+      cancelable: true, timeStamp: Date.now(),
+      ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
       preventDefault() { this.defaultPrevented = true; },
       stopPropagation() { this.__stop = true; },
       stopImmediatePropagation() { this.__stop = true; }
     };
+    if (key) {
+      ev.key = key;
+      ev.keyCode = ev.which = codes[key] || key.toUpperCase().charCodeAt(0);
+      ev.code = key.length === 1 && /[a-z]/i.test(key) ? 'Key' + key.toUpperCase() : key;
+      ev.shiftKey = key.length === 1 && key !== key.toLowerCase();
+    }
     const run = (who, f) => {
       try {
         if (f.call(who, ev) === false) ev.preventDefault();
@@ -555,7 +676,17 @@ static const char prelude[] = R"JS(
       if (typeof h === 'function') run(n, h);
       ((n.__l && n.__l[type]) || []).slice().forEach(f => run(n, f));
     }
-    if (!ev.__stop) (docListeners[type] || []).slice().forEach(f => run(document, f));
+    if (!ev.__stop) {
+      ev.currentTarget = document;
+      if (typeof document['on' + type] === 'function') run(document, document['on' + type]);
+      (docListeners[type] || []).slice().forEach(f => run(document, f));
+    }
+    if (!ev.__stop) {
+      ev.currentTarget = globalThis;
+      if (type !== 'load' && typeof globalThis['on' + type] === 'function')
+        run(globalThis, globalThis['on' + type]);
+      (winListeners[type] || []).slice().forEach(f => run(globalThis, f));
+    }
     return ev.defaultPrevented;
   };
 
@@ -636,6 +767,152 @@ static const char prelude[] = R"JS(
     get hash() { return (D.location().match(/#.*/) || [''])[0]; }
   };
   globalThis.navigator = { userAgent: 'ThreadOS Web', language: 'en' };
+
+  // --- requests: fetch(), XMLHttpRequest, and what they send ----------
+  const enc = s => encodeURIComponent(s).replace(/%20/g, '+');
+  const dec = s => decodeURIComponent(s.replace(/\+/g, ' '));
+  class URLSearchParams {
+    constructor(init) {
+      this.__p = [];
+      if (typeof init === 'string')
+        init.replace(/^\?/, '').split('&').filter(Boolean).forEach(kv => {
+          const i = kv.indexOf('=');
+          this.__p.push(i < 0 ? [dec(kv), ''] : [dec(kv.slice(0, i)), dec(kv.slice(i + 1))]);
+        });
+      else if (init && typeof init === 'object')
+        (Array.isArray(init) ? init : Object.entries(init))
+          .forEach(([k, v]) => this.__p.push([String(k), String(v)]));
+    }
+    append(k, v) { this.__p.push([String(k), String(v)]); }
+    set(k, v) { this.delete(k); this.append(k, v); }
+    get(k) { const e = this.__p.find(x => x[0] === k); return e ? e[1] : null; }
+    getAll(k) { return this.__p.filter(x => x[0] === k).map(x => x[1]); }
+    has(k) { return this.__p.some(x => x[0] === k); }
+    delete(k) { this.__p = this.__p.filter(x => x[0] !== k); }
+    forEach(f) { this.__p.forEach(([k, v]) => f(v, k, this)); }
+    entries() { return this.__p.map(x => x.slice())[Symbol.iterator](); }
+    [Symbol.iterator]() { return this.entries(); }
+    toString() { return this.__p.map(([k, v]) => enc(k) + '=' + enc(v)).join('&'); }
+  }
+  globalThis.URLSearchParams = URLSearchParams;
+  // A form's fields, as the form would send them; sent on as
+  // name=value pairs (there is no multipart here)
+  class FormData extends URLSearchParams {
+    constructor(form) {
+      super();
+      // (in the order they stand in, as the form sends them)
+      const walk = el => D.children(el, false).forEach(c => {
+        const tag = D.tag(c).toLowerCase();
+        if (tag !== 'input' && tag !== 'select' && tag !== 'textarea') return walk(c);
+        const n = D.attr(c, 'name'), t = (D.attr(c, 'type') || '').toLowerCase();
+        if (!n || ['submit', 'button', 'image', 'reset'].includes(t)) return;
+        if ((t === 'checkbox' || t === 'radio') && !D.checked(c)) return;
+        this.append(n, D.value(c) || '');
+      });
+      if (form) walk(form);
+    }
+  }
+  globalThis.FormData = FormData;
+
+  const headerOf = (h, name) => {
+    if (!h) return null;
+    if (typeof h.get === 'function') return h.get(name);
+    for (const k in h) if (k.toLowerCase() === name) return String(h[k]);
+    return null;
+  };
+  const bodyOf = (body, type) => {
+    if (body === undefined || body === null) return [null, type];
+    if (body instanceof URLSearchParams)
+      return [String(body), type || 'application/x-www-form-urlencoded;charset=UTF-8'];
+    return [String(body), type || 'text/plain;charset=UTF-8'];
+  };
+  const statusText = s => ({ 200: 'OK', 201: 'Created', 204: 'No Content',
+    400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
+    500: 'Internal Server Error' })[s] || '';
+  class Headers {
+    constructor(type) { this.__t = type || null; }
+    get(n) { return String(n).toLowerCase() === 'content-type' ? this.__t : null; }
+    has(n) { return this.get(n) !== null; }
+    forEach(f) { if (this.__t) f(this.__t, 'content-type', this); }
+  }
+  globalThis.Headers = Headers;
+  const response = r => {
+    let used = false;
+    const take = () => {
+      if (used) return Promise.reject(new TypeError('the body was read already'));
+      used = true;
+      return Promise.resolve(r.text);
+    };
+    return {
+      ok: r.status >= 200 && r.status < 300, status: r.status,
+      statusText: statusText(r.status), url: r.url, redirected: false,
+      type: 'basic', headers: new Headers(r.type),
+      get bodyUsed() { return used; },
+      text: take,
+      json: () => take().then(t => JSON.parse(t)),
+      clone() { return response(r); }
+    };
+  };
+  // The request waits for its turn - fetch() is never answered before
+  // the script that made it is done - and the answer comes as a promise
+  globalThis.fetch = function (input, init) {
+    init = init || {};
+    const where = String(input && typeof input === 'object' && input.url ? input.url : input);
+    const method = String(init.method || 'GET');
+    const [body, type] = bodyOf(init.body, headerOf(init.headers, 'content-type'));
+    return new Promise((ok, fail) => setTimeout(() => {
+      try { ok(response(D.request(where, method, body, type))); } catch (e) { fail(e); }
+    }, 0));
+  };
+
+  class XMLHttpRequest {
+    constructor() {
+      this.readyState = 0; this.status = 0; this.statusText = '';
+      this.responseText = ''; this.response = ''; this.responseType = '';
+      this.responseURL = ''; this.__h = {}; this.__l = {};
+    }
+    open(method, where, async) {
+      this.__m = String(method); this.__u = String(where);
+      this.__async = async !== false;
+      this.readyState = 1;
+      this.__fire('readystatechange');
+    }
+    setRequestHeader(n, v) { this.__h[String(n).toLowerCase()] = String(v); }
+    getResponseHeader(n) { return String(n).toLowerCase() === 'content-type' ? this.__type || null : null; }
+    getAllResponseHeaders() { return this.__type ? 'content-type: ' + this.__type + '\r\n' : ''; }
+    addEventListener(t, f) { (this.__l[t] = this.__l[t] || []).push(f); }
+    removeEventListener(t, f) { if (this.__l[t]) this.__l[t] = this.__l[t].filter(x => x !== f); }
+    __fire(t) {
+      const ev = { type: t, target: this, currentTarget: this };
+      const h = [this['on' + t]].concat(this.__l[t] || []);
+      h.forEach(f => { if (typeof f === 'function') try { f.call(this, ev); } catch (e) { __report(e); } });
+    }
+    send(data) {
+      const go = () => {
+        try {
+          const [body, type] = bodyOf(data, this.__h['content-type']);
+          const r = D.request(this.__u, this.__m, body, type);
+          this.status = r.status; this.statusText = statusText(r.status);
+          this.responseText = r.text; this.__type = r.type; this.responseURL = r.url;
+          this.response = r.text;
+          if (this.responseType === 'json')
+            try { this.response = JSON.parse(r.text); } catch (e) { this.response = null; }
+          this.readyState = 4;
+          this.__fire('readystatechange');
+          this.__fire('load');
+        } catch (e) {
+          this.readyState = 4; this.status = 0;
+          this.__fire('readystatechange');
+          this.__fire('error');
+        }
+        this.__fire('loadend');
+      };
+      if (this.__async) setTimeout(go, 0); else go();
+    }
+    abort() {}
+  }
+  Object.assign(XMLHttpRequest, { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
+  globalThis.XMLHttpRequest = XMLHttpRequest;
   globalThis.window = globalThis;
   globalThis.self = globalThis;
   globalThis.addEventListener = listen(winListeners);
@@ -744,6 +1021,9 @@ std::shared_ptr<page> start(const document::ptr& doc, const host& h)
         {"setValue", d_set_value, 2}, {"title", d_title, 1},
         {"location", d_location, 1}, {"say", d_say, 1}, {"log", d_log, 1},
         {"timer", d_timer, 2}, {"untimer", d_untimer, 1},
+        {"checked", d_checked, 1}, {"setChecked", d_set_checked, 2},
+        {"request", d_request, 4}, {"submit", d_submit, 1},
+        {"resolve", d_resolve, 1},
     };
     JSValue dom = JS_NewObject(ctx);
     for (auto& n : natives)
@@ -785,19 +1065,28 @@ std::shared_ptr<page> start(const document::ptr& doc, const host& h)
 
 bool click(const std::shared_ptr<page>& p, const element::ptr& target)
 {
-    if (!p || !target)
+    return target && dispatch(p, target, "click");
+}
+
+bool dispatch(const std::shared_ptr<page>& p, const element::ptr& target,
+              const char* type, const std::string& key)
+{
+    if (!p)
         return false;
     JSContext* ctx = p->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue fn = JS_GetPropertyStr(ctx, global, "__dispatch");
-    JSValue args[2] = {wrap(ctx, target), JS_NewString(ctx, "click")};
+    JSValue args[3] = {target ? wrap(ctx, target) : JS_NULL,
+                       JS_NewString(ctx, type), jstr(ctx, key)};
     deadline = now_ms() + 4000;
-    JSValue r = JS_Call(ctx, fn, global, 2, args);
+    JSValue r = JS_Call(ctx, fn, global, 3, args);
+    if (JS_IsException(r))
+        JS_FreeValue(ctx, JS_GetException(ctx));
     deadline = 0;
     bool prevented = JS_ToBool(ctx, r) > 0;
     JS_FreeValue(ctx, r);
-    JS_FreeValue(ctx, args[0]);
-    JS_FreeValue(ctx, args[1]);
+    for (auto& v : args)
+        JS_FreeValue(ctx, v);
     JS_FreeValue(ctx, fn);
     JS_FreeValue(ctx, global);
     JSContext* job;

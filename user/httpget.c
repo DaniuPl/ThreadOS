@@ -1,7 +1,7 @@
 /* httpget - an HTTP/HTTPS client in ring 3
  *
- * Usage: run httpget [-k] [-p <file>] [-c <jar>] [-o <file>] [-t <file>]
- *                    <address> [port] [path] [file]
+ * Usage: run httpget [-k] [-p <file>] [-y <type>] [-c <jar>] [-o <file>]
+ *                    [-t <file>] [-s <file>] <address> [port] [path] [file]
  *   run httpget 10.0.2.2 8000 /                - to the console
  *   run httpget https://example.com / str.htm  - over TLS 1.3, to a file
  *   run httpget -p form.txt 10.0.2.2 8000 /f   - POSTs what form.txt holds
@@ -12,7 +12,10 @@
  * through redirects, since a sign-in usually answers with a cookie and a
  * redirect in one response. -o names the output file, so a full address
  * can stand alone, without a port and a path after it. -t writes the
- * answer's Content-Type to a file: a browser needs its charset.
+ * answer's Content-Type to a file: a browser needs its charset. -s
+ * writes its status code, which a page's script reads (a 404 is an
+ * answer too), and -y says what a POST's body is, where it is not a
+ * form's fields.
  *
  * It resolves the host name through DNS, copes with 'chunked' encoding
  * and follows redirects (up to three). For https addresses it connects
@@ -50,16 +53,21 @@ void _start(int argc, char **argv)
     static char post[16384];
     const char *body = 0;
     uint32_t body_len = 0;
-    const char *jar_file = 0, *out_opt = 0, *type_file = 0;
+    const char *jar_file = 0, *out_opt = 0, *type_file = 0, *status_file = 0;
     while (argc > 1 && argv[1][0] == '-') {
-        if ((argv[1][1] == 'c' || argv[1][1] == 'o' || argv[1][1] == 't') &&
+        char o = argv[1][1];
+        if ((o == 'c' || o == 'o' || o == 't' || o == 's' || o == 'y') &&
             argc > 2) {
-            if (argv[1][1] == 'c')
+            if (o == 'c')
                 jar_file = argv[2];
-            else if (argv[1][1] == 'o')
+            else if (o == 'o')
                 out_opt = argv[2];
-            else
+            else if (o == 't')
                 type_file = argv[2];
+            else if (o == 's')
+                status_file = argv[2];
+            else
+                http_set_post_type(argv[2]);
             argv++;
             argc--;
         } else if (argv[1][1] == 'k') {
@@ -93,8 +101,9 @@ void _start(int argc, char **argv)
     }
 
     if (argc < 2) {
-        print("usage: httpget [-k] [-p <file>] [-c <jar>] [-o <file>] "
-              "[-t <file>] <host|ip> [port] [path] [file]\n");
+        print("usage: httpget [-k] [-p <file>] [-y <type>] [-c <jar>] "
+              "[-o <file>] [-t <file>] [-s <file>] <host|ip> [port] [path] "
+              "[file]\n");
         sys_exit(1);
     }
 
@@ -278,6 +287,21 @@ void _start(int argc, char **argv)
         int fd = sys_open(type_file, O_CREATE | O_WRITE | O_TRUNC);
         if (fd >= 0) {
             sys_write(fd, t, (uint32_t)n);
+            sys_close(fd);
+        }
+    }
+
+    if (status_file) {
+        char digits[12];
+        int nd = 0;
+        uint32_t v = (uint32_t)res.status;
+        do {
+            digits[11 - nd++] = (char)('0' + v % 10);
+            v /= 10;
+        } while (v);
+        int fd = sys_open(status_file, O_CREATE | O_WRITE | O_TRUNC);
+        if (fd >= 0) {
+            sys_write(fd, digits + 12 - nd, (uint32_t)nd);
             sys_close(fd);
         }
     }

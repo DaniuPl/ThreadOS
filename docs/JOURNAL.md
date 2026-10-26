@@ -6352,3 +6352,42 @@ works and is checked by `make test`.
       next page's scripts do not run, and once ticked again they do. A
       served page's link to about:history?clear=all is refused and the
       history is still there.
+
+- [x] **Scripts that talk to their server, and hear the keyboard**
+      (apps/browser/webjs.cpp, apps/browser/web.cpp, user/httpget.c)
+      fetch() and XMLHttpRequest: GET, and POST with a body of any type
+      (JSON, text, URLSearchParams); the answer's status, type and body
+      come back whatever the status - a 404 is an answer. Each goes
+      through httpget with the cookie jar, which now writes the status
+      code to a file (-s) and says what a POST's body is (-y). A request
+      waits for the script that made it to finish, as in browsers. Only
+      to the page's own site: a browser asks another site (CORS) before
+      a page may read what it answers - the person's, sent with their
+      cookies - and this one does not ask, so it refuses, with a
+      TypeError and before anything is sent. URLSearchParams, FormData
+      (as the form would send it) and Headers came with it.
+
+      Events besides click: input on every key that changes a field,
+      change when a changed field is left or its form is sent, when a box
+      is ticked and when a list's choice changes; keydown and keyup -
+      in a field, where a handler can keep the key out, and on the page,
+      where it can keep the key from scrolling; submit, where a handler
+      can keep the form and send it itself. form.submit() and
+      requestSubmit(), and element.checked.
+
+      Found on the way: the browser's form field class had an is_text()
+      of its own, meaning "a text field" - which overrode litehtml's
+      is_text(), meaning "a text node". To litehtml, and to scripts,
+      every text field was a piece of text, with no tag and no place
+      among the elements. It is is_field() now.
+
+      The test page is an app: typing reaches its input listener, and
+      the x its keydown listener keeps is not in the field; leaving the
+      field is one change with all of it; a tick and a choice are
+      changes; its submit handler keeps the form, FormData holds the
+      fields in order, and fetch() POSTs them as JSON - the server's own
+      account says it got application/json and that body, and the
+      answer it gave becomes the window's title; an XMLHttpRequest reads
+      a 404 and its body; a request to another site is refused and never
+      leaves the machine; and form.submit() posts the form, the buttons
+      left out.
