@@ -689,6 +689,81 @@ def main():
                 check(f"and the kernel's own 'cat' reads it whole from the "
                       f"disk ({out.count('downloaded-ok')} lines)",
                       out.count("downloaded-ok") == 3)
+
+            # --- bookmarks and history -----------------------------------
+            q.click(cx + w0 // 2, cy + h0 // 2)        # the keys back
+            go("/two.html", "Web: Page two")
+            star_x = cx + w0 - 10 - define(SRC, "STAR_W")
+            star = (star_x, cy + 8, star_x + define(SRC, "STAR_W") - 8, cy + 32)
+            accent = theme("dark")["accent"]
+
+            def star_lit():
+                return colours(q, star, lambda c: near(c, accent, 10))
+
+            unlit = star_lit()
+            seen = len(q.serial())
+            q.click(star_x + 10, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            lit = star_lit()
+            check(f"the star keeps the page among the bookmarks, and fills "
+                  f"({unlit} -> {lit} pixels)", unlit == 0 and lit > 10 and
+                  "[web] bookmarked http://10.0.2.2:%d/two.html" % port
+                  in q.serial()[seen:])
+
+            def find_page_two():
+                """Ctrl+F for "page two": what the find said"""
+                seen0 = len(q.serial())
+                q.sendkey("ctrl-f")
+                time.sleep(0.5)
+                typed(q, "page two")
+                end = time.time() + 10
+                said = ""
+                while time.time() < end and not said:
+                    said = next((ln for ln in reversed(
+                        q.serial()[seen0:].splitlines()) if "[web] find" in ln),
+                        "")
+                    time.sleep(0.3)
+                q.sendkey("esc")
+                return said
+
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, "about:start")
+            q.sendkey("ret")
+            got = wait_title(q, geom, "Web: Start")
+            time.sleep(1)
+            said = find_page_two()
+            check(f"the start page lists it twice: among the bookmarks and "
+                  f"the pages seen last ({got!r}, {said!r})",
+                  got == "Web: Start" and said.endswith("1 of 2"))
+
+            # They outlive the browser: closed, and opened again
+            q.sendkey("alt-f4")
+            time.sleep(2)
+            q.n_win -= 1
+            q.launch_dock("gweb", w=sw, h=sh)
+            got = wait_title(q, geom, "Web: Start")
+            time.sleep(1)
+            said = find_page_two()
+            check(f"opened again, the browser still has both - they are on "
+                  f"the disk ({got!r}, {said!r})",
+                  got == "Web: Start" and said.endswith("1 of 2"))
+            mark, _ = pixels(q, *page, (0x1A, 0x55, 0xC0))
+            q.click((mark[0] + mark[2]) // 2, mark[3] - 3)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Page two")
+            time.sleep(1)
+            lit = star_lit()
+            check(f"a click on the bookmark opens the page, its star full "
+                  f"({got!r}, {lit})", got == "Web: Page two" and lit > 10)
+            seen = len(q.serial())
+            q.click(star_x + 10, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            check("and the star again takes it out", star_lit() == 0 and
+                  "[web] bookmark removed" in q.serial()[seen:])
         finally:
             q.close()
     finally:

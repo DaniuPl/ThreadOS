@@ -6044,3 +6044,20 @@ works and is checked by `make test`.
       twice: both are saved whole, the second as report-1.dat, the page
       stays, and the kernel shell's own 'cat' reads the file's three
       lines from the disk.
+
+- [x] **Bookmarks and history in the browser** (apps/browser/web.cpp,
+      the `web` group).
+
+      A star at the end of the address field keeps the page among the
+      bookmarks, and takes it out again; it is full for a page that is
+      one. Every page opened goes to the top of the history (fifty kept).
+      Both are files in the person's home, lines of address and title,
+      so they outlive the browser. The start page lists the bookmarks
+      and the ten pages seen last, as links. The star is drawn, not
+      lettered: the system's font has no ★.
+
+      The test stars a page and sees the star fill with the accent
+      colour; finds the page's title twice on the start page (once in
+      each list); closes the browser, opens it again and finds both
+      still there; opens the page from its bookmark, its star full; and
+      empties the star again.

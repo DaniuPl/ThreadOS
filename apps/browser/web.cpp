@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <string>
@@ -51,6 +52,7 @@ using namespace litehtml;
 #define STATUS_H 20           // the line along the bottom
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
+#define STAR_W 26             // the bookmark star, at the address field's end
 #define FONT_PX 15            // a page's text when its CSS does not say
 #define SEL_BG 0xB4D5FE       // behind selected text
 #define FOUND_BG 0xFFE97A     // behind what Ctrl+F found
@@ -66,13 +68,16 @@ static const char start_page[] =
     "h1{font-size:28px;margin:0 0 8px} .lead{color:#555}"
     ".card{background:#eef3ff;border:1px solid #9ab;padding:10px 14px;"
     "margin:14px 0} code{font-family:monospace}"
+    "h2{font-size:17px;margin:18px 0 4px} .marks a{color:#1a55c0}"
+    ".seen a{color:#5a6a80} .none{color:#888}"
     "</style></head><body><h1>ThreadOS Web</h1>"
     "<p class=lead>Pages laid out by <b>litehtml</b> and drawn in the "
     "system's own lettering.</p><div class=card>Type an address above and "
     "press Enter - <code>https://example.com/</code>, or the name of a file "
     "on the disk.</div><ul><li>Scroll with the wheel, the arrows or "
-    "PgUp/PgDn</li><li>Click a link to follow it</li><li>The arrow on the "
-    "left goes back</li></ul></body></html>";
+    "PgUp/PgDn</li><li>Click a link to follow it</li><li>The star keeps "
+    "the page among the bookmarks below; Ctrl+F finds on the page</li>"
+    "</ul>";
 
 // --- the container: litehtml asks, the window draws ------------------
 
@@ -571,6 +576,106 @@ static bool write_file(const char* name, const std::string& data)
 
 // Where the browser keeps cookies, between its fetches and its runs
 static const char COOKIE_JAR[] = ".web-cookies.txt";
+
+// --- bookmarks and history ---------------------------------------------
+
+// Each a file of lines "address<TAB>title", the newest first, kept in
+// the person's home like the cookies
+struct visit {
+    std::string where, title;
+};
+static const char BOOKMARKS[] = ".web-bookmarks.txt";
+static const char HISTORY[] = ".web-history.txt";
+#define HISTORY_MAX 50
+static bool page_marked;               // is the page shown among them
+
+static std::vector<visit> load_list(const char* file)
+{
+    std::vector<visit> out;
+    std::string text;
+    if (!read_file(file, text))
+        return out;
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos)
+            end = text.size();
+        std::string line = text.substr(at, end - at);
+        size_t tab = line.find('\t');
+        if (tab != std::string::npos && tab > 0)
+            out.push_back({line.substr(0, tab), line.substr(tab + 1)});
+        at = end + 1;
+    }
+    return out;
+}
+
+static void save_list(const char* file, const std::vector<visit>& list)
+{
+    std::string text;
+    for (auto& v : list)
+        text += v.where + "\t" + v.title + "\n";
+    FILE* f = fopen(file, "wb");
+    if (!f)
+        return;
+    fwrite(text.data(), 1, text.size(), f);
+    fclose(f);
+}
+
+static int find_visit(const std::vector<visit>& list, const std::string& w)
+{
+    for (size_t i = 0; i < list.size(); i++)
+        if (list[i].where == w)
+            return (int)i;
+    return -1;
+}
+
+// A page opened goes to the top of the history, once
+static void remember_visit(const std::string& where, const std::string& title)
+{
+    std::vector<visit> h = load_list(HISTORY);
+    int at = find_visit(h, where);
+    if (at >= 0)
+        h.erase(h.begin() + at);
+    h.insert(h.begin(), {where, title.empty() ? where : title});
+    if (h.size() > HISTORY_MAX)
+        h.resize(HISTORY_MAX);
+    save_list(HISTORY, h);
+}
+
+static std::string html_escape(const std::string& s)
+{
+    std::string out;
+    for (char ch : s)
+        out += ch == '<' ? std::string("&lt;") : ch == '>' ? std::string("&gt;")
+             : ch == '&' ? std::string("&amp;") : ch == '"' ? std::string("&quot;")
+             : ch == '\t' || ch == '\n' ? std::string(" ") : std::string(1, ch);
+    return out;
+}
+
+static std::string list_html(const std::vector<visit>& list, size_t most,
+                             const char* cls, const char* none)
+{
+    if (list.empty())
+        return std::string("<p class=none>") + none + "</p>";
+    std::string out = std::string("<ul class=") + cls + ">";
+    for (size_t i = 0; i < list.size() && i < most; i++)
+        out += "<li><a href=\"" + html_escape(list[i].where) + "\">" +
+               html_escape(list[i].title) + "</a></li>";
+    return out + "</ul>";
+}
+
+// The start page: the words above, then the bookmarks and the pages
+// seen last
+static std::string start_html()
+{
+    return std::string(start_page) + "<h2>Bookmarks</h2>" +
+           list_html(load_list(BOOKMARKS), 100, "marks",
+                     "None yet - the star at the end of the address keeps "
+                     "a page here.") +
+           "<h2>Recently visited</h2>" +
+           list_html(load_list(HISTORY), 10, "seen", "Nothing yet.") +
+           "</body></html>";
+}
 
 // With 'post', a form's fields go as the body of a POST - through a
 // file, since they may be longer than an argument can be
@@ -1129,7 +1234,7 @@ static void open_page(const std::string& where0, bool remember,
     bool ok;
     if (where.empty() || where == "about:start") {
         target = "about:start";
-        html = start_page;
+        html = start_html();
         ok = true;
     } else if (network) {
         // Said before the wait, not after it - the fetch holds the
@@ -1178,6 +1283,10 @@ static void open_page(const std::string& where0, bool remember,
     if (!cont.title.empty())
         t += ": " + cont.title;
     win_title(cont.win, t.c_str());
+    if (target != "about:start")
+        remember_visit(target, cont.title);
+    page_marked = target != "about:start" &&
+                  find_visit(load_list(BOOKMARKS), target) >= 0;
     std::printf("[web] opened %s (%d x %d)\n", target.c_str(),
                 (int)doc->width(), (int)doc->height());
     std::fflush(stdout);
@@ -1199,6 +1308,28 @@ static bool go_to_anchor(const std::string& link)
     std::printf("[web] went to #%s\n", id.c_str());
     std::fflush(stdout);
     return true;
+}
+
+// The star: the page into the bookmarks, or out of them again
+static void toggle_bookmark()
+{
+    if (cont.base.empty() || cont.base == "about:start")
+        return;
+    std::vector<visit> b = load_list(BOOKMARKS);
+    int at = find_visit(b, cont.base);
+    if (at >= 0) {
+        b.erase(b.begin() + at);
+        status_line = "Bookmark removed";
+    } else {
+        b.insert(b.begin(), {cont.base,
+                             cont.title.empty() ? cont.base : cont.title});
+        status_line = "Bookmarked";
+    }
+    save_list(BOOKMARKS, b);
+    page_marked = at < 0;
+    std::printf("[web] %s %s\n", at >= 0 ? "bookmark removed" : "bookmarked",
+                cont.base.c_str());
+    std::fflush(stdout);
 }
 
 // The last part of an address's path, in lower case: "zip", "html", ""
@@ -1447,6 +1578,26 @@ static void next_field()
     typing.reset();                    // the last one: out of the form
 }
 
+// A five-pointed star - drawn, since the system's lettering has no ★.
+// Full: lines fanned from its middle to every point of its edge.
+static void draw_star(int w, int cx, int cy, bool full, uint32_t ink)
+{
+    int px[11], py[11];
+    for (int k = 0; k <= 10; k++) {
+        double a = (-90.0 + k * 36.0) * 3.14159265 / 180.0;
+        double r = k % 2 ? 3.6 : 8.5;
+        px[k] = cx + (int)std::lround(r * std::cos(a));
+        py[k] = cy + (int)std::lround(r * std::sin(a));
+    }
+    for (int k = 0; k < 10; k++) {
+        if (full)
+            for (int t = 0; t <= 8; t++)
+                ud_line(w, cx, cy, px[k] + (px[k + 1] - px[k]) * t / 8,
+                        py[k] + (py[k + 1] - py[k]) * t / 8, 24, ink);
+        ud_line(w, px[k], py[k], px[k + 1], py[k + 1], 20, ink);
+    }
+}
+
 static void draw()
 {
     int w = cont.win;
@@ -1513,6 +1664,11 @@ static void draw()
         if (!typing)                   // the keys go here, not to a field
             ud_fill(w, end + 1, 13, 1, 14, l.accent);
     }
+    // The star: full and lit for a page among the bookmarks. Over the
+    // field's end, so a long address goes under it
+    int sx0 = cont.width - 10 - STAR_W;
+    ud_fill(w, sx0, 10, STAR_W - 8, 20, l.field);
+    draw_star(w, sx0 + 9, 20, page_marked, page_marked ? l.accent : l.dim);
     int fy = cont.height - STATUS_H;
     ud_fill(w, 0, fy, cont.width, STATUS_H, l.bg);
     ud_fill(w, 0, fy, cont.width, 1, l.line);
@@ -1587,7 +1743,9 @@ int main(int argc, char** argv)
                 } else if (ev.y < BAR_H) {
                     typing.reset();
                     int b = (ev.x - 10) / BTN_STEP;
-                    if (ev.x >= ADDR_X)
+                    if (ev.x >= cont.width - 10 - STAR_W)
+                        toggle_bookmark();
+                    else if (ev.x >= ADDR_X)
                         address_picked = !address_picked;
                     else if (ev.x >= 10 && b == 0)
                         go_back();
