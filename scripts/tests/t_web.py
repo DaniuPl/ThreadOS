@@ -764,6 +764,36 @@ def main():
             time.sleep(1.5)
             check("and the star again takes it out", star_lit() == 0 and
                   "[web] bookmark removed" in q.serial()[seen:])
+
+            # --- a slow page, stopped ------------------------------------
+            # Twelve pieces a second apart: the window must answer while
+            # they come, and the cross must end it
+            ROUTES["/slow"] = lambda h, b: (
+                200, [("Content-Type", "text/html")],
+                [b"<html><head><title>Slow</title></head><body>"] +
+                [b"<p>" + b"x" * 2000 + b"</p>"] * 11)
+            seen = len(q.serial())
+            q.click(cx + define(SRC, "ADDR_X") + 60, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            typed(q, f"http://10.0.2.2:{port}/slow")
+            q.sendkey("ret")
+            time.sleep(5)
+            q.click(cx + 10 + 2 * step + 14, cy + bar // 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            m = None
+            end = time.time() + 10
+            while time.time() < end and not m:
+                m = re.search(r"\[web\] stopped loading \S+/slow after "
+                              r"(\d+) bytes", q.serial()[seen:])
+                time.sleep(0.3)
+            time.sleep(1)
+            title = q.window_title(*geom)
+            check(f"the cross stops a page still coming, part of it in "
+                  f"({m.group(1) if m else None} bytes), and the page "
+                  f"before stays ({title!r})",
+                  m is not None and 4000 <= int(m.group(1)) < 22000 and
+                  title == "Web: Page two")
         finally:
             q.close()
     finally:

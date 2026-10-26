@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <csignal>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -679,9 +680,51 @@ static std::string start_html()
 
 // With 'post', a form's fields go as the body of a POST - through a
 // file, since they may be longer than an argument can be
+static window_container cont;
+static std::string status_line;
+static bool loading;                  // httpget is fetching something
+static bool stopping;                 // stopped: the rest is not fetched
+static long stopped_after;            // bytes in when it was stopped
+static void draw_chrome();
+
+static long file_size(const char* name)
+{
+    long n = 0;
+    if (FILE* f = std::fopen(name, "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        n = std::ftell(f);
+        std::fclose(f);
+    }
+    return n;
+}
+
+// What the window says while something loads: a click on the cross or
+// Escape is "stop"; a new size is kept for when the page is laid out;
+// the rest waits for nobody
+static bool stop_asked()
+{
+    struct win_event ev;
+    while (win_poll(cont.win, &ev) == 1) {
+        if (ev.type == WEV_CLOSE)
+            std::exit(0);
+        if (ev.type == WEV_SIZE) {
+            cont.width = ev.x;
+            cont.height = ev.y;
+        }
+        if (ev.type == WEV_KEY && ev.val == 0x1B)
+            return true;
+        if (ev.type == WEV_CLICK && ev.y < BAR_H &&
+            ev.x >= 10 + 2 * BTN_STEP && ev.x < 10 + 2 * BTN_STEP + BACK_W)
+            return true;
+    }
+    return false;
+}
+
 static bool fetch_to(const std::string& address, const char* file,
                      const std::string* post = nullptr)
 {
+    if (stopping)
+        return false;
     // (the fragment is the browser's, not the server's)
     std::string where = address.substr(0, address.find('#'));
     // (files whose names start with a dot: not the person's)
@@ -700,11 +743,39 @@ static bool fetch_to(const std::string& address, const char* file,
         execv("httpget", args);
         _exit(127);
     }
-    int status = 0;
-    if (pid < 0 || waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0)
+    if (pid < 0)
         return false;
-    return true;
+    // The window keeps answering while it waits: the status line counts
+    // what has come, and the cross (or Escape) stops it
+    int status = 0, tick = 0;
+    loading = true;
+    std::string was = status_line;
+    for (;;) {
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid)
+            break;
+        if (r < 0) {
+            loading = false;
+            return false;
+        }
+        if (stop_asked()) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            stopping = true;
+            stopped_after = file_size(file);
+            loading = false;
+            return false;
+        }
+        if (++tick % 5 == 0) {
+            status_line = "Loading " + where + " ... " +
+                          std::to_string(file_size(file) / 1024) + " KB";
+            draw_chrome();
+        }
+        usleep(40000);
+    }
+    loading = false;
+    status_line = was;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static bool fetch(const std::string& address, std::string& out,
@@ -727,12 +798,10 @@ static bool get_url(const std::string& where, std::string& out,
 
 // --- the browser ------------------------------------------------------
 
-static window_container cont;
 static document::ptr doc;
 static std::string address;           // what the address field holds
 static std::vector<std::string> history;   // back
 static std::vector<std::string> ahead;     // forward, after going back
-static std::string status_line;
 static bool address_picked;           // clicked: the next key replaces it
 
 // --- forms ------------------------------------------------------------
@@ -998,6 +1067,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 }
 
 static void draw();
+static void draw_chrome();
 static void scroll_by(int dy);
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post = nullptr);
@@ -1211,6 +1281,7 @@ static bool looks_like_words(const std::string& s)
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post)
 {
+    stopping = false;
     std::string where = where0;
     if (!where.empty() && where.compare(0, 6, "about:") != 0 &&
         looks_like_words(where))
@@ -1245,6 +1316,15 @@ static void open_page(const std::string& where0, bool remember,
     } else {
         ok = read_file(where.c_str(), html);
     }
+    if (!ok && stopping) {
+        // Stopped: the page that was there stays
+        stopping = false;
+        status_line = "Stopped";
+        std::printf("[web] stopped loading %s after %ld bytes\n",
+                    target.c_str(), stopped_after);
+        std::fflush(stdout);
+        return;
+    }
     if (!ok) {
         status_line = "Could not open " + where;
         return;
@@ -1278,7 +1358,9 @@ static void open_page(const std::string& where0, bool remember,
     layout();
     if (finding)
         find_all();                    // the find field stays, on the new page
-    status_line = network ? "Done" : "";
+    // (stopped while its pictures came: the page shows, without the rest)
+    status_line = stopping ? "Stopped" : network ? "Done" : "";
+    stopping = false;
     std::string t = "Web";
     if (!cont.title.empty())
         t += ": " + cont.title;
@@ -1389,8 +1471,10 @@ static void download(const std::string& target)
     }
     status_line = "Saving " + name + " ...";
     draw();
+    stopping = false;
     if (!fetch_to(target, name.c_str())) {
-        status_line = "Could not save " + name;
+        status_line = stopping ? "Stopped" : "Could not save " + name;
+        stopping = false;
         std::remove(name.c_str());
         return;
     }
@@ -1629,8 +1713,17 @@ static void draw()
         ud_round(w, cont.width - SCROLL_W - 2, ty + 2, SCROLL_W, th - 4,
                  SCROLL_W / 2, 0x9A9AA0);
     }
-    // The toolbar and the status line go over whatever the page drew
-    // past its edges
+    draw_chrome();
+}
+
+// The toolbar and the status line - over whatever the page drew past
+// its edges. Alone while a page loads: the page is not to be touched
+// while litehtml builds the next one.
+static void draw_chrome()
+{
+    int w = cont.win;
+    struct ud_look l;
+    ud_look(&l);
     ud_fill(w, 0, 0, cont.width, BAR_H, l.bg);
     ud_fill(w, 0, BAR_H - 1, cont.width, 1, l.line);
     // Back and forward: lit when there is somewhere to go
@@ -1643,13 +1736,19 @@ static void draw()
         ud_line(w, mid - 3 * d, 13, mid + 4 * d, 20, 20, ink);
         ud_line(w, mid + 4 * d, 20, mid - 3 * d, 27, 20, ink);
     }
-    // Reload: a ring with a gap, and the head of an arrow on it
-    int rx = 10 + 2 * BTN_STEP;
+    // Reload: a ring with a gap, and the head of an arrow on it - or
+    // while a page loads, a cross that stops it
+    int rx = 10 + 2 * BTN_STEP, rm = rx + BACK_W / 2;
     ud_round(w, rx, 8, BACK_W, 24, 12, l.row);
-    ud_ring(w, rx + BACK_W / 2 - 6, 14, 12, 12, 6, l.text);
-    ud_fill(w, rx + BACK_W / 2 + 1, 13, 6, 5, l.row);
-    ud_line(w, rx + BACK_W / 2 + 1, 14, rx + BACK_W / 2 + 6, 15, 16, l.text);
-    ud_line(w, rx + BACK_W / 2 + 6, 15, rx + BACK_W / 2 + 5, 20, 16, l.text);
+    if (loading) {
+        ud_line(w, rm - 5, 15, rm + 5, 25, 24, l.text);
+        ud_line(w, rm + 5, 15, rm - 5, 25, 24, l.text);
+    } else {
+        ud_ring(w, rm - 6, 14, 12, 12, 6, l.text);
+        ud_fill(w, rm + 1, 13, 6, 5, l.row);
+        ud_line(w, rm + 1, 14, rm + 6, 15, 16, l.text);
+        ud_line(w, rm + 6, 15, rm + 5, 20, 16, l.text);
+    }
     ud_round(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.field);
     ud_ring(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.line);
     int tx = ADDR_X + 12, ty = ud_baseline(8, 24, UD_PX);

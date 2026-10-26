@@ -6061,3 +6061,20 @@ works and is checked by `make test`.
       each list); closes the browser, opens it again and finds both
       still there; opens the page from its bookmark, its star full; and
       empties the star again.
+
+- [x] **The browser answers while a page loads, and can stop it**
+      (apps/browser/web.cpp, scripts/ptest.py, the `web` group).
+
+      Fetching used to wait for httpget with the window frozen. Now the
+      browser polls it (waitpid with WNOHANG) and keeps reading the
+      window meanwhile: the status line counts the kilobytes come so far,
+      the reload button becomes a cross, and the cross or Escape kills
+      httpget. A stopped page leaves the one before it on the screen; a
+      stop while a page's pictures come shows the page without the rest.
+      Only the toolbar and the status line are drawn while loading, since
+      litehtml may be in the middle of building the next page.
+
+      The test server can now send a page a piece at a time. The test
+      opens one that takes twelve seconds, presses the cross after five:
+      the browser reports how much had come (some, not all of it), and
+      the page from before is still the one shown.

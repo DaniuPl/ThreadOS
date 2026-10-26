@@ -108,7 +108,9 @@ SERVED = {}
 # What came in POSTs, (path, body) - a form's fields, as the browser sent them
 POSTED = []
 # Paths answered by a function: fn(handler, body) -> (status, [(header,
-# value)], body) - for what a fixed answer cannot do, like cookies
+# value)], body) - for what a fixed answer cannot do, like cookies. A
+# body that is a list goes out a piece at a time, a second apart, with
+# no length given: a slow page
 ROUTES = {}
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>The first page</h1>"
@@ -1695,6 +1697,18 @@ def start_http_server():
             self.send_response(status)
             for k, v in headers:
                 self.send_header(k, v)
+            if isinstance(blob, list):
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                try:
+                    for part in blob:
+                        self.wfile.write(part)
+                        self.wfile.flush()
+                        time.sleep(1)
+                except OSError:
+                    pass             # the client went: it was stopped
+                return True
             self.send_header("Content-Length", str(len(blob)))
             self.end_headers()
             self.wfile.write(blob)
