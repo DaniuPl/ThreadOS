@@ -135,6 +135,24 @@ def icon(colour, fmt):
 
 
 ICON_GREEN, ICON_RED, ICON_BLUE = (0, 200, 0), (220, 0, 0), (0, 0, 210)
+
+
+def quarters_gif():
+    """A 32x24 GIF written by Pillow, interlaced: red, green and blue
+    quarters, and the fourth transparent"""
+    from PIL import Image
+    import io
+    pic = Image.new("P", (32, 24))
+    pic.putpalette([255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 9, 9])
+    pic.putdata([(x >= 16) + 2 * (y >= 12) for y in range(24)
+                 for x in range(32)])
+    out = io.BytesIO()
+    pic.save(out, "GIF", transparency=3, interlace=True)
+    return out.getvalue()
+
+
+GIF_PAGE = (b"<html><head><title>GIF</title></head><body style='margin:20px'>"
+            b"<img src=/q.gif width=64 height=48></body></html>")
 ICON_PAGE = (b"<html><head><title>Icon PNG</title>"
              b"<link rel=icon href=/icons/red.png></head><body>"
              b"<p>an icon of its own</p></body></html>")
@@ -280,6 +298,8 @@ def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
     SERVED["/plform.html"] = PLFORM
+    SERVED["/q.gif"] = quarters_gif()
+    SERVED["/gif.html"] = GIF_PAGE
     ROUTES.update({"/lives": r_lives, "/jar": r_jar})
     SERVED["/favicon.ico"] = icon(ICON_GREEN, "bmp")
     SERVED["/icons/red.png"] = icon(ICON_RED, "png")

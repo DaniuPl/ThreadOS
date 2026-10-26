@@ -6224,3 +6224,22 @@ works and is checked by `make test`.
       so only the clock can tell): the first two come back at once and
       only the year-long one after the twenty seconds; the stale one
       never. Before this change all three came back both times.
+
+- [x] **GIF pictures** (user/ugif.h, apps/browser/web.cpp, `make fuzz`,
+      the `web` group).
+
+      A GIF decoder of its own header, like ujpeg.h: the screen, the
+      global and local palettes, a transparent index from the graphic
+      control block, interlaced rows, and LZW rebuilt code by code up to
+      twelve bits with its clear code. The first frame of an animation is
+      what a page shows. Every index and length out of the file is
+      checked; a file cut short gives what was decoded. The browser
+      takes GIF wherever it takes PNG and JPEG - pictures, backgrounds,
+      site icons - and shows .gif addresses rather than saving them.
+
+      `make fuzz` gained a gif target, and holds the decoder to Pillow:
+      a 256-colour gradient plain and interlaced and a four-colour one
+      with a transparent index, written by Pillow, must decode to the
+      very RGBA bytes Pillow reads back. The QEMU test draws a Pillow
+      GIF at twice its size: three quarters 32x24 each in their colours,
+      side by side, and the transparent one not drawn at all.

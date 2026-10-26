@@ -36,7 +36,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import *        # noqa: F401,F403
-from webtest import check, define, run, typed
+from webtest import check, define, run, typed, visit
 
 
 def pages(e):
@@ -181,6 +181,22 @@ def pages(e):
     got = wait_title(q, geom, "Web: Three again")
     check(f"the reload button fetches the page again ({got!r})",
           got == "Web: Three again")
+
+
+    # --- a GIF ----------------------------------------------------------
+    visit(e, "/gif.html", "Web: GIF")
+    got = {name: pixels(q, *page, colour)
+           for name, colour in (("red", (255, 0, 0)), ("green", (0, 255, 0)),
+                                ("blue", (0, 0, 255)), ("the fourth",
+                                                        (9, 9, 9)))}
+    sizes = {k: (b[2] - b[0] + 1, b[3] - b[1] + 1) if b else None
+             for k, (b, n) in got.items()}
+    red = got["red"][0]
+    check(f"a GIF is drawn at twice its size, each quarter 32x24 in its "
+          f"colour and the transparent one not at all ({sizes})",
+          sizes["red"] == sizes["green"] == sizes["blue"] == (32, 24) and
+          sizes["the fourth"] is None and red is not None and
+          got["green"][0][0] == red[2] + 1 and got["blue"][0][1] == red[3] + 1)
 
 
 def main():

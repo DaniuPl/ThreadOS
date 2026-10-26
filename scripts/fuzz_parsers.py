@@ -171,7 +171,7 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": [], "cookie": []}
+           "inflate": [], "jpeg": [], "cookie": [], "gif": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -214,6 +214,8 @@ def seeds(workdir):
     raw = zlib.compressobj(9, zlib.DEFLATED, -15)   # no zlib wrapper
     out["inflate"].append(raw.compress(body) + raw.flush())
 
+    out["gif"] += [g for g, _ in gif_samples()]
+
     # Set-Cookie headers as sites send them, a line each
     out["cookie"].append(
         b"session=abc123; Path=/; HttpOnly\n"
@@ -228,6 +230,52 @@ def seeds(workdir):
     from ptest import JPEG_IMAGE           # noqa: E402 - it lives there
     out["jpeg"].append(JPEG_IMAGE)
     return out
+
+
+def gif_samples():
+    """GIFs written by Pillow, with what Pillow reads back from each:
+    plain and interlaced, a palette of 256 and of 4, one with a
+    transparent colour - as (file, (w, h, rgba bytes))"""
+    from PIL import Image
+    import io
+    out = []
+    pics = []
+    grad = Image.new("RGB", (37, 23))
+    grad.putdata([(x * 7 % 256, y * 11 % 256, (x * y) % 256)
+                  for y in range(23) for x in range(37)])
+    pics.append((grad.quantize(256), {"interlace": False}))
+    pics.append((grad.quantize(256), {"interlace": True}))
+    small = Image.new("P", (16, 9))
+    small.putpalette([255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0])
+    small.putdata([(x // 4 + y // 3) % 4 for y in range(9) for x in range(16)])
+    pics.append((small, {"transparency": 2, "interlace": False}))
+    for pic, kw in pics:
+        f = io.BytesIO()
+        pic.save(f, "GIF", **kw)
+        data = f.getvalue()
+        back = Image.open(io.BytesIO(data)).convert("RGBA")
+        if "transparency" in kw:
+            # (what is transparent may hold any colour; only alpha says)
+            back.putdata([p if p[3] else (0, 0, 0, 0) for p in back.getdata()])
+        out.append((data, (back.width, back.height, back.tobytes())))
+    return out
+
+
+def gif_pixels(binary):
+    """Our GIF decoder against Pillow's, picture by picture: the files that
+    came out different"""
+    wrong = []
+    for data, (w, h, rgba) in gif_samples():
+        path = os.path.join(os.path.dirname(binary), "sample.gif")
+        with open(path, "wb") as f:
+            f.write(data)
+        run = subprocess.run([binary, "gifpixels", path], capture_output=True,
+                             text=True, timeout=30)
+        lines = run.stdout.split()
+        if len(lines) < 3 or lines[:2] != [str(w), str(h)] or \
+                bytes.fromhex(lines[2]) != rgba:
+            wrong.append("%dx%d: %s" % (w, h, " ".join(lines[:2])))
+    return wrong
 
 
 def cookie_dates(binary, rng):
@@ -304,6 +352,10 @@ def main():
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
         print("the harness is built, cases per parser: %d" % CASES)
+        bad = gif_pixels(binary)
+        print("  GIFs against Pillow's reading of them: %d wrong" % len(bad))
+        for b in bad:
+            failures.append(("gifpixels", b, "the pixels differ"))
         wrong = cookie_dates(binary, rng)
         print("  cookie dates against Python's calendar: %d wrong"
               % len(wrong))

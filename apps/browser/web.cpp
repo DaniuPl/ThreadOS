@@ -14,8 +14,8 @@
 //   web page.html           a file on the disk
 //   web https://host/path   a page from the network
 //
-// Pictures are PNG (8 bits a channel, not interlaced) and baseline
-// JPEG, the decoders the picture viewer uses; style sheets in files of
+// Pictures are PNG (8 bits a channel, not interlaced), baseline JPEG -
+// the decoders the picture viewer uses - and GIF (its first frame); style sheets in files of
 // their own (<link>) are fetched like the page. Forms send what is in
 // their fields as a query; words typed as an address go to the search
 // engine the 'search' setting names.
@@ -40,6 +40,7 @@ extern "C" {
 #include "udraw.h"
 #include "uinflate.h"
 #include "ujpeg.h"
+#include "ugif.h"
 }
 
 using namespace litehtml;
@@ -249,6 +250,29 @@ static bool decode_jpeg(const std::string& f, picture& pic)
 
 // Every picture a page names, by its full address; one that could not
 // be had is remembered too, as nothing, so it is not asked for again
+// A GIF's first frame (ugif.h), its transparent parts on the backdrop
+static bool decode_gif(const std::string& f, picture& pic)
+{
+    const unsigned char* d = (const unsigned char*)f.data();
+    if (f.size() < 13 || f.compare(0, 3, "GIF"))
+        return false;
+    int w = d[6] | d[7] << 8, h = d[8] | d[9] << 8;
+    if (w <= 0 || h <= 0 || (long)w * h > 2048L * 2048)
+        return false;
+    std::vector<unsigned char> rgba((size_t)w * h * 4);
+    const char* why = "";
+    if (gif_decode(d, (unsigned)f.size(), rgba.data(), (unsigned)rgba.size(),
+                   &w, &h, &why) < 0)
+        return false;
+    pic.w = w;
+    pic.h = h;
+    pic.px.resize((size_t)w * h);
+    for (size_t i = 0; i < pic.px.size(); i++)
+        pic.px[i] = on_backdrop(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2],
+                                rgba[i * 4 + 3]);
+    return true;
+}
+
 static uint32_t le32(const unsigned char* p)
 {
     return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
@@ -486,7 +510,8 @@ class window_container : public document_container {
         picture& pic = pictures[where];
         std::string data;
         if (get_url(where, data, ".web-image") &&
-            !decode_png(data, pic) && !decode_jpeg(data, pic))
+            !decode_png(data, pic) && !decode_jpeg(data, pic) &&
+            !decode_gif(data, pic))
             pic = picture();
     }
     void get_image_size(const char* src, const char* baseurl,
@@ -1723,7 +1748,7 @@ static std::string load_icon(const std::string& target)
         backdrop = l.field;
         if (!get_url(where, data, ".web-icon") ||
             (!decode_png(data, pic) && !decode_jpeg(data, pic) &&
-             !decode_ico(data, pic)))
+             !decode_gif(data, pic) && !decode_ico(data, pic)))
             pic = picture();
         backdrop = 0xFFFFFF;
         std::printf("[web] icon %s: %dx%d\n", where.c_str(), pic.w, pic.h);
@@ -1789,7 +1814,7 @@ static bool is_download(const std::string& target)
 {
     static const char* shown[] = {"", "html", "htm", "xhtml", "shtml", "php",
                                   "asp", "aspx", "jsp", "cgi", "txt", "png",
-                                  "jpg", "jpeg"};
+                                  "jpg", "jpeg", "gif"};
     std::string ext = extension(target);
     for (const char* e : shown)
         if (ext == e)

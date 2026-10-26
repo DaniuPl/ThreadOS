@@ -7,7 +7,7 @@
  * scripts/fuzz_parsers.py feeds it thousands of cases made by damaging
  * data that was correct.
  *
- * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie> <file>
+ * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif> <file>
  */
 
 #include <stdio.h>
@@ -20,6 +20,7 @@
 #include "uinflate.h"
 #include "ujpeg.h"
 #include "ucookie.h"
+#include "ugif.h"
 
 #define MAX_INPUT (1 << 20)
 
@@ -205,6 +206,37 @@ static void run_cookie(const unsigned char *data, size_t len)
     ck_save(&again, text2, sizeof(text2));
 }
 
+static void run_gif(const unsigned char *data, size_t len)
+{
+    size_t max = (size_t)GIF_MAX_SIDE * 64 * 4;
+    unsigned char *out = malloc(max);
+    int w = 0, h = 0;
+    const char *why = "";
+    if (out)
+        gif_decode(data, (unsigned)len, out, (unsigned)max, &w, &h, &why);
+    free(out);
+}
+
+/* Not a fuzz target either: the pixels decoded, "w h" and then RGBA in
+   hex, for scripts/fuzz_parsers.py to hold against Pillow's */
+static void run_gifpixels(const unsigned char *data, size_t len)
+{
+    size_t max = 1 << 22;
+    unsigned char *out = malloc(max);
+    int w = 0, h = 0;
+    const char *why = "";
+    if (out && gif_decode(data, (unsigned)len, out, (unsigned)max, &w, &h,
+                          &why) == 0) {
+        printf("%d %d\n", w, h);
+        for (long i = 0; i < (long)w * h * 4; i++)
+            printf("%02x", out[i]);
+        printf("\n");
+    } else {
+        printf("error %s\n", why);
+    }
+    free(out);
+}
+
 /* Not a fuzz target: a date a line in, the seconds since 1970 the
    cookie rules make of it out - for scripts/fuzz_parsers.py to hold
    against Python's own calendar */
@@ -260,6 +292,10 @@ int main(int argc, char **argv)
         run_cookie(input, len);
     else if (!strcmp(argv[1], "cookiedate"))
         run_cookiedate(input, len);
+    else if (!strcmp(argv[1], "gif"))
+        run_gif(input, len);
+    else if (!strcmp(argv[1], "gifpixels"))
+        run_gifpixels(input, len);
     else {
         fprintf(stderr, "nieznany parser: %s\n", argv[1]);
         free(input);
