@@ -1127,6 +1127,7 @@ static void scroll_by(int dy);
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post = nullptr);
 static std::string form_encode(const std::string& s);
+static std::string in_page_charset(const std::string& utf8);
 static void find_all();
 static std::string extension(const std::string& target);
 
@@ -1190,7 +1191,8 @@ static void submit(std::shared_ptr<el_input> by)
         }
         if (!q.empty())
             q += '&';
-        q += form_encode(in->name) + "=" + form_encode(v);
+        q += form_encode(in_page_charset(in->name)) + "=" +
+             form_encode(in_page_charset(v));
     }
     const char* action = form->get_attr("action", "");
     std::string method = form->get_attr("method", "get");
@@ -1322,6 +1324,54 @@ static std::string form_encode(const std::string& s)
 }
 
 // --- characters ---------------------------------------------------------
+
+// What the page in the window was read as: a form on it is sent in it
+static encoding page_charset = encoding::utf_8;
+
+static uint32_t next_codepoint(const std::string& s, size_t& i)
+{
+    unsigned char c = (unsigned char)s[i++];
+    int n = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : 3;
+    uint32_t cp = n == 0 ? c : n == 1 ? (c & 0x1F) : n == 2 ? (c & 0x0F)
+                                                           : (c & 0x07);
+    for (int k = 0; k < n && i < s.size(); k++)
+        cp = (cp << 6) | ((unsigned char)s[i++] & 0x3F);
+    return cp;
+}
+
+// A form's text from UTF-8 into the page's single-byte set, as browsers
+// send it: what the set has not, as a numeric reference "&#9731;". The
+// table is the set's own decoding, turned round.
+static std::string in_page_charset(const std::string& utf8)
+{
+    encoding e = page_charset;
+    if ((int)e < (int)encoding::ibm866 || (int)e > (int)encoding::x_mac_cyrillic)
+        return utf8;                   // UTF-8, or one we cannot write
+    static encoding built = encoding::null;
+    static std::map<uint32_t, char> back;
+    if (built != e) {
+        back.clear();
+        for (int b = 0x80; b < 0x100; b++) {
+            std::string u = decode(std::string(1, (char)b), e);
+            size_t i = 0;
+            uint32_t cp = u.empty() ? 0xFFFD : next_codepoint(u, i);
+            if (cp != 0xFFFD && !back.count(cp))
+                back[cp] = (char)b;
+        }
+        built = e;
+    }
+    std::string out;
+    for (size_t i = 0; i < utf8.size();) {
+        uint32_t cp = next_codepoint(utf8, i);
+        if (cp < 0x80)
+            out += (char)cp;
+        else if (back.count(cp))
+            out += back[cp];
+        else
+            out += "&#" + std::to_string(cp) + ";";
+    }
+    return out;
+}
 
 static bool valid_utf8(const std::string& s)
 {
@@ -1461,6 +1511,17 @@ static void open_page(const std::string& where0, bool remember,
     estring page = with_encoding(html, type);
     if (target == "about:start")
         page = estring(html, encoding::utf_8, confidence::certain);
+    // What litehtml reads the page as, for the forms: what was given; else
+    // its own sniffing; and after the parse, a <meta> it went by (below)
+    page_charset = page.encoding;
+    bool charset_certain = page.encoding != encoding::null &&
+                           page.confidence == confidence::certain;
+    if (page_charset == encoding::null) {
+        estring probe(html, encoding::null, confidence::tentative);
+        encoding_sniffing_algorithm(probe);
+        page_charset = probe.encoding;
+        charset_certain = probe.confidence == confidence::certain;
+    }
     if (extension(target) == "txt") {
         // Plain text is shown as it is: < and & in it are letters - in
         // UTF-8, whatever it came in
@@ -1473,6 +1534,7 @@ static void open_page(const std::string& where0, bool remember,
                   : ch == '&' ? std::string("&amp;") : std::string(1, ch);
         html += "</pre></body></html>";
         page = estring(html, encoding::utf_8, confidence::certain);
+        page_charset = encoding::utf_8;
     }
     typing.reset();
     list_open.reset();
@@ -1481,6 +1543,19 @@ static void open_page(const std::string& where0, bool remember,
     matches.clear();
     doc = document::createFromString(page, &cont,
                                      std::string(master_css) + FORM_CSS);
+    if (!charset_certain) {
+        // litehtml parses again when a <meta> names another set; the
+        // forms must follow it there
+        encoding meta = encoding::null;
+        if (auto m = doc->root()->select_one("meta[charset]"))
+            meta = get_encoding(m->get_attr("charset", ""));
+        else if (auto m = doc->root()->select_one("meta[http-equiv][content]"))
+            meta = extract_encoding_from_meta_element(m->get_attr("content", ""));
+        if (meta == encoding::utf_16le || meta == encoding::utf_16be)
+            meta = encoding::utf_8;
+        if (meta != encoding::null)
+            page_charset = meta;
+    }
     layout();
     if (finding)
         find_all();                    // the find field stays, on the new page

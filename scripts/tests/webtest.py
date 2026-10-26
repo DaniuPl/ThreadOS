@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import time
+import urllib.parse
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -106,6 +107,17 @@ DL = (b"<html><head><title>Downloads</title></head><body>"
 # the bytes must become
 PL = "Zażółć gęślą jaźń"
 LATIN = "Café crème brûlée"
+
+
+# A form on a windows-1250 page: what it sends must be in windows-1250,
+# with what that set lacks (a snowman) as a numeric reference
+PLFORM = ("<html><head><meta charset=windows-1250><title>Formularz</title>"
+          "</head><body><form action=/plform><p>"
+          "<input type=hidden name=v value='żółw&#9731;'>"
+          "<input style='background:#c0ffc0' type=submit value=Go>"
+          "</p></form></body></html>").encode("cp1250")
+PLFORM_SENT = "/plform?v=" + urllib.parse.quote_plus("żółw&#9731;",
+                                                     encoding="cp1250")
 
 
 def page_in(text, codec, meta=""):
@@ -214,6 +226,8 @@ def typed(q, text):
 def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
+    SERVED["/plform.html"] = PLFORM
+    SERVED[PLFORM_SENT] = page_titled(b"Sent in 1250")
     SERVED["/page.html"] = PAGE
     SERVED["/two.html"] = TWO
     SERVED["/three.html"] = THREE
@@ -310,7 +324,7 @@ def run(title, sections, search=False):
     return summary()
 
 
-def go(e, path, title):
+def visit(e, path, title):
     """Types an address of the host's server into the browser and waits
     for the page's title: what the title bar said"""
     e.q.click(e.cx + define(SRC, "ADDR_X") + 60, e.cy + e.bar // 2)

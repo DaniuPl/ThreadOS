@@ -6143,3 +6143,21 @@ works and is checked by `make test`.
       groups that run side by side: pages (`web`), forms, cookies and
       the clipboard (`webform`), and the tools (`webtools`). With -j3 the
       lot takes under four minutes.
+
+- [x] **Forms sent in the page's character set** (apps/browser/web.cpp,
+      the `webform` group).
+
+      A form on a windows-1250 page was sent in UTF-8, which a server
+      written for that page reads as the wrong letters. It now goes in
+      the set the page was read in, as browsers send it: the set's own
+      decoding turned round into a table, and what the set lacks as a
+      numeric reference ("&#9731;"). Which set that is: the server's,
+      else litehtml's own sniffing, else - since litehtml parses a page
+      again when a <meta> names another set, and does not say so - the
+      <meta> found in the parsed page. (Its prescan did not find
+      `<meta charset=windows-1250>` where the parse did; the test caught
+      it.)
+
+      The test sends a hidden field "żółw" and a snowman from a
+      windows-1250 page: the query must be exactly what Python's
+      quote_plus gives for "żółw&#9731;" in cp1250.

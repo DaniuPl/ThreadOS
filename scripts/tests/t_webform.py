@@ -28,7 +28,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import *        # noqa: F401,F403
-from webtest import check, define, run, typed
+from webtest import check, define, run, typed, visit
 
 
 def forms(e):
@@ -215,6 +215,19 @@ def forms(e):
     check(f"Tab goes to the next field, and Shift+Insert pastes "
           f"what was copied - through the kernel's clipboard "
           f"({got!r})", got == "Web: Pasted")
+
+    # --- a form on a windows-1250 page ------------------------------------
+    seen = len(q.serial())
+    visit(e, "/plform.html", "Web: Formularz")
+    button, _ = pixels(q, *page, GO_BG)
+    q.click((button[0] + button[2]) // 2, (button[1] + button[3]) // 2)
+    q.mouse_goto(sw - 20, sh // 2)
+    got = wait_title(q, geom, "Web: Sent in 1250")
+    sent = re.findall(r"\[web\] form sent: \S*(/plform\?[^\r\n]*)",
+                      q.serial()[seen:])
+    check(f"a form on a windows-1250 page sends in windows-1250, a "
+          f"snowman as &#9731; ({sent[-1:]}, {got!r})",
+          sent[-1:] == [PLFORM_SENT] and got == "Web: Sent in 1250")
 
 
 def main():
