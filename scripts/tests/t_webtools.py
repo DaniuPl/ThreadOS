@@ -26,7 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import *        # noqa: F401,F403
-from webtest import check, define, run, typed
+from webtest import check, define, run, typed, visit
 
 
 def tools(e):
@@ -391,6 +391,44 @@ def tools(e):
           f"({said3}, {said2}, {q.window_title(*geom)!r})",
           said3 == ("2", "1") and said2 == ("1", "1") and
           q.window_title(*geom) == first)
+
+
+    # --- the sites' icons -------------------------------------------------
+    field = (cx + define(SRC, "ADDR_X") + 8, cy + 10,
+             cx + define(SRC, "ADDR_X") + 28, cy + 30)
+    for path, title, colour, how in (
+            ("/page.html", "Web: Test page", ICON_GREEN,
+             "the site's /favicon.ico, a bitmap inside"),
+            ("/iconpng.html", "Web: Icon PNG", ICON_RED,
+             "a <link rel=icon> to a PNG"),
+            ("/iconico.html", "Web: Icon ICO", ICON_BLUE,
+             "a <link rel='shortcut icon'> to an .ico holding a PNG")):
+        visit(e, path, title)
+        n = colours(q, field, lambda c, want=colour: c == want)
+        check(f"the address shows the site's icon from {how} "
+              f"({n} pixels of it)", n >= 200)
+
+
+    # --- the tabs come back -----------------------------------------------
+    # (one tab now, on the .ico page; a second on the test page)
+    q.click(cx + 10 + 3 * step + 14, cy + bar // 2)          # the plus
+    wait_title(q, geom, "Web: Start")
+    visit(e, "/page.html", "Web: Test page")
+    seen = len(q.serial())
+    q.sendkey("alt-f4")
+    time.sleep(2)
+    q.n_win -= 1
+    q.launch_dock("gweb", w=sw, h=sh)
+    got = wait_title(q, geom, "Web: Test page", timeout=60)
+    said = re.findall(r"\[web\] restored (\d+) tabs", q.serial()[seen:])
+    check(f"closed and opened again, the browser has its two tabs back, "
+          f"at the one in front ({said}, {got!r})",
+          said[-1:] == ["2"] and got == "Web: Test page")
+    tw = min(define(SRC, "TAB_MAX"), (w0 - 16) // 2)
+    q.click(cx + 8 + tw // 2, cy + bar + define(SRC, "TAB_H") // 2)
+    q.mouse_goto(sw - 20, sh // 2)
+    got = wait_title(q, geom, "Web: Icon ICO")
+    check(f"and the first holds its page ({got!r})", got == "Web: Icon ICO")
 
 
 def main():

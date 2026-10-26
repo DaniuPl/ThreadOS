@@ -104,14 +104,19 @@ static bool get_url(const std::string& where, std::string& out,
 
 struct picture {
     int w = 0, h = 0;
-    std::vector<uint32_t> px;         // 0xRRGGBB, already on white
+    std::vector<uint32_t> px;         // 0xRRGGBB, already on the backdrop
 };
 
-static uint32_t on_white(int r, int g, int b, int a)
+// What a picture's transparent parts are laid on, once and for all: a
+// page's white, or for a site's icon the toolbar's colour
+static uint32_t backdrop = 0xFFFFFF;
+
+static uint32_t on_backdrop(int r, int g, int b, int a)
 {
-    r = (r * a + 255 * (255 - a)) / 255;
-    g = (g * a + 255 * (255 - a)) / 255;
-    b = (b * a + 255 * (255 - a)) / 255;
+    int br = backdrop >> 16 & 255, bg = backdrop >> 8 & 255, bb = backdrop & 255;
+    r = (r * a + br * (255 - a)) / 255;
+    g = (g * a + bg * (255 - a)) / 255;
+    b = (b * a + bb * (255 - a)) / 255;
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
@@ -199,15 +204,15 @@ static bool decode_png(const std::string& f, picture& pic)
             const unsigned char* p = cur.data() + x * bpp;
             uint32_t v;
             switch (type) {
-            case 0: v = on_white(p[0], p[0], p[0], 255); break;
-            case 2: v = on_white(p[0], p[1], p[2], 255); break;
+            case 0: v = on_backdrop(p[0], p[0], p[0], 255); break;
+            case 2: v = on_backdrop(p[0], p[1], p[2], 255); break;
             case 3: {
                 const unsigned char* e = pal[p[0] < npal ? p[0] : 0];
-                v = on_white(e[0], e[1], e[2], e[3]);
+                v = on_backdrop(e[0], e[1], e[2], e[3]);
                 break;
             }
-            case 4: v = on_white(p[0], p[0], p[0], p[1]); break;
-            default: v = on_white(p[0], p[1], p[2], p[3]); break;
+            case 4: v = on_backdrop(p[0], p[0], p[0], p[1]); break;
+            default: v = on_backdrop(p[0], p[1], p[2], p[3]); break;
             }
             pic.px[(size_t)y * w + x] = v;
         }
@@ -237,13 +242,76 @@ static bool decode_jpeg(const std::string& f, picture& pic)
         for (int x = 0; x < w; x++) {
             int r, g, b;
             jpeg_pixel(x, y, &r, &g, &b);
-            pic.px[(size_t)y * w + x] = on_white(r, g, b, 255);
+            pic.px[(size_t)y * w + x] = on_backdrop(r, g, b, 255);
         }
     return true;
 }
 
 // Every picture a page names, by its full address; one that could not
 // be had is remembered too, as nothing, so it is not asked for again
+static uint32_t le32(const unsigned char* p)
+{
+    return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+// A site's icon (.ico): a directory of pictures, each a PNG or a bitmap
+// without its file header - 32 bits a pixel with alpha, or 24 with a
+// mask of one bit beside it. The one nearest 16 pixels, not under, is
+// taken: the size it is shown at.
+static bool decode_ico(const std::string& f, picture& pic)
+{
+    const unsigned char* d = (const unsigned char*)f.data();
+    size_t n = f.size();
+    if (n < 6 || d[0] || d[1] || d[2] != 1 || d[3])
+        return false;
+    int count = d[4] | d[5] << 8, best = -1, best_w = 0;
+    for (int i = 0; i < count && 6 + 16 * (size_t)(i + 1) <= n; i++) {
+        int w = d[6 + 16 * i] ? d[6 + 16 * i] : 256;
+        bool better = best < 0 || (w >= 16 && (best_w < 16 || w < best_w)) ||
+                      (w < 16 && best_w < 16 && w > best_w);
+        if (better) {
+            best = i;
+            best_w = w;
+        }
+    }
+    if (best < 0)
+        return false;
+    const unsigned char* e = d + 6 + 16 * best;
+    uint32_t size = le32(e + 8), at = le32(e + 12);
+    if (at >= n || size > n - at || size < 40)
+        return false;
+    std::string sub = f.substr(at, size);
+    if (!sub.compare(0, 8, "\x89PNG\r\n\x1a\n", 8))
+        return decode_png(sub, pic);
+    const unsigned char* b = d + at;
+    uint32_t hdr = le32(b);
+    int w = (int)le32(b + 4), h = (int)le32(b + 8) / 2;
+    int bpp = b[14] | b[15] << 8;
+    if (hdr < 40 || w <= 0 || w > 256 || h <= 0 || h > 256 || le32(b + 16) ||
+        (bpp != 32 && bpp != 24))
+        return false;
+    size_t stride = (size_t)((w * bpp + 31) / 32) * 4;
+    size_t mstride = (size_t)((w + 31) / 32) * 4;
+    if (hdr + stride * h + (bpp == 24 ? mstride * h : 0) > size)
+        return false;
+    const unsigned char* px = b + hdr;
+    const unsigned char* mask = px + stride * h;
+    pic.w = w;
+    pic.h = h;
+    pic.px.assign((size_t)w * h, 0);
+    for (int y = 0; y < h; y++) {
+        const unsigned char* row = px + stride * (h - 1 - y);    // bottom up
+        for (int x = 0; x < w; x++) {
+            const unsigned char* p = row + x * (bpp / 8);
+            int a = bpp == 32 ? p[3]
+                  : (mask[mstride * (h - 1 - y) + x / 8] >> (7 - x % 8) & 1)
+                        ? 0 : 255;
+            pic.px[(size_t)y * w + x] = on_backdrop(p[2], p[1], p[0], a);
+        }
+    }
+    return true;
+}
+
 static std::map<std::string, picture> pictures;
 
 // --- selecting text --------------------------------------------------
@@ -609,6 +677,7 @@ static const char BOOKMARKS[] = ".web-bookmarks.txt";
 static const char HISTORY[] = ".web-history.txt";
 #define HISTORY_MAX 50
 static bool page_marked;               // is the page shown among them
+static std::string page_icon;          // its site's icon: a key in pictures
 
 static std::vector<visit> load_list(const char* file)
 {
@@ -1147,6 +1216,8 @@ static void open_page(const std::string& where0, bool remember,
 static std::string form_encode(const std::string& s);
 static std::string in_page_charset(const std::string& utf8);
 static void find_all();
+static std::string load_icon(const std::string& target);
+static void save_session();
 static std::string extension(const std::string& target);
 
 static void layout()
@@ -1586,6 +1657,8 @@ static void open_page(const std::string& where0, bool remember,
     std::printf("[web] title: %s\n", cont.title.c_str());
     page_marked = target != "about:start" &&
                   find_visit(load_list(BOOKMARKS), target) >= 0;
+    page_icon = network ? load_icon(target) : "";
+    save_session();
     std::printf("[web] opened %s (%d x %d)\n", target.c_str(),
                 (int)doc->width(), (int)doc->height());
     std::fflush(stdout);
@@ -1623,6 +1696,55 @@ static void open_in_new_window(const std::string& target)
                           : "Could not open a new window";
     std::printf("[web] new window: %s\n", target.c_str());
     std::fflush(stdout);
+}
+
+// The site's icon: where the page's <link rel=icon> says, or the
+// /favicon.ico every browser has asked for since there were icons.
+// Fetched once a run for each address, laid on the toolbar's colour.
+// Returns its key in 'pictures', or "" for none.
+static std::string load_icon(const std::string& target)
+{
+    element::ptr link;
+    for (const char* sel : {"link[rel=icon]", "link[rel=\"shortcut icon\"]",
+                            "link[rel=\"icon shortcut\"]"})
+        if (!link)
+            link = doc->root()->select_one(sel);
+    url u(target);
+    const char* href = link ? link->get_attr("href") : nullptr;
+    std::string where = href && *href
+        ? resolve(url(cont.base), url(href)).str()
+        : u.scheme() + "://" + u.authority() + "/favicon.ico";
+    std::string key = "icon:" + where;
+    if (!pictures.count(key)) {
+        picture& pic = pictures[key];
+        std::string data;
+        struct ud_look l;
+        ud_look(&l);
+        backdrop = l.field;
+        if (!get_url(where, data, ".web-icon") ||
+            (!decode_png(data, pic) && !decode_jpeg(data, pic) &&
+             !decode_ico(data, pic)))
+            pic = picture();
+        backdrop = 0xFFFFFF;
+        std::printf("[web] icon %s: %dx%d\n", where.c_str(), pic.w, pic.h);
+        std::fflush(stdout);
+    }
+    return pictures[key].w ? key : "";
+}
+
+// An icon at 16 by 16, from the nearest of its pixels
+static void draw_icon(int w, int x0, int y0, const std::string& key)
+{
+    auto it = pictures.find(key);
+    if (key.empty() || it == pictures.end() || !it->second.w)
+        return;
+    const picture& p = it->second;
+    uint32_t row[16];
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++)
+            row[x] = p.px[(size_t)(y * p.h / 16) * p.w + x * p.w / 16];
+        win_blit32(w, x0, y0 + y, 16, 1, row);
+    }
 }
 
 // The star: the page into the bookmarks, or out of them again
@@ -1908,9 +2030,14 @@ struct tab {
     std::vector<std::weak_ptr<el_input>> inputs;
     encoding charset = encoding::utf_8;
     bool marked = false;
+    std::string icon;
 };
 static std::vector<tab> tabs(1);
 static int cur_tab;
+// The tabs open, kept for the next run: by the browser started from the
+// dock, not by one a link opened (that one would take their place)
+static const char TABS_FILE[] = ".web-tabs.txt";
+static bool keeps_session;
 
 static void save_tab()
 {
@@ -1926,6 +2053,7 @@ static void save_tab()
     t.inputs = inputs;
     t.charset = page_charset;
     t.marked = page_marked;
+    t.icon = page_icon;
 }
 
 // The strip shows with two tabs or more, and the page moves down for it
@@ -1937,8 +2065,20 @@ static void set_strip()
         scroll_by(0);
 }
 
+static void save_session()
+{
+    if (!keeps_session)
+        return;
+    save_tab();
+    std::string text = std::to_string(cur_tab) + "\n";
+    for (auto& t : tabs)
+        text += (t.base.empty() ? std::string("about:start") : t.base) + "\n";
+    write_file(TABS_FILE, text);
+}
+
 static void say_tabs()
 {
+    save_session();
     std::printf("[web] tabs: %d, at %d\n", (int)tabs.size(), cur_tab + 1);
     std::fflush(stdout);
 }
@@ -1958,6 +2098,7 @@ static void load_tab(int i)
     inputs = t.inputs;
     page_charset = t.charset;
     page_marked = t.marked;
+    page_icon = t.icon;
     typing.reset();
     list_open.reset();
     sel_any = sel_drag = false;
@@ -2049,9 +2190,12 @@ static void draw_strip(int w, const struct ud_look& l)
         std::string t = on ? cont.title : tabs[i].title;
         if (t.empty())
             t = on ? address : tabs[i].address;
-        while (!t.empty() && ud_width(t.c_str(), UD_SANS, 11) > tw - 34)
+        const std::string& icon = on ? page_icon : tabs[i].icon;
+        int tx = icon.empty() ? x + 10 : x + 30;
+        draw_icon(w, x + 9, y + (TAB_H - 16) / 2, icon);
+        while (!t.empty() && ud_width(t.c_str(), UD_SANS, 11) > x + tw - 24 - tx)
             t.pop_back();
-        ud_text(w, x + 10, ud_baseline(y + 3, TAB_H - 6, 11), t.c_str(),
+        ud_text(w, tx, ud_baseline(y + 3, TAB_H - 6, 11), t.c_str(),
                 on ? l.text : l.dim, UD_SANS, 11);
         int cx = x + tw - 15, cy = y + TAB_H / 2;   // its cross
         ud_line(w, cx - 3, cy - 3, cx + 3, cy + 3, 16, l.dim);
@@ -2172,6 +2316,10 @@ static void draw_chrome()
     ud_round(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.field);
     ud_ring(w, ADDR_X, 8, cont.width - ADDR_X - 10, 24, 12, l.line);
     int tx = ADDR_X + 12, ty = ud_baseline(8, 24, UD_PX);
+    if (!page_icon.empty()) {
+        draw_icon(w, ADDR_X + 10, 12, page_icon);   // the site's, before it
+        tx += 22;
+    }
     if (address_picked) {
         // Picked whole, the way a browser's address bar takes a click
         int aw = ud_width(address.c_str(), UD_SANS, UD_PX);
@@ -2218,7 +2366,38 @@ int main(int argc, char** argv)
         return 1;
     // Real colours: a page is not drawn in the desktop's palette
     win_truecolour(cont.win);
-    open_page(argc > 1 ? argv[1] : "about:start", false);
+    keeps_session = argc < 2;
+    std::string saved;
+    if (keeps_session && read_file(TABS_FILE, saved) && !saved.empty()) {
+        // The tabs of the last run, in their order, at the one that was
+        // in front
+        int at = std::atoi(saved.c_str());
+        std::vector<std::string> list;
+        size_t p = saved.find('\n');
+        while (p != std::string::npos && p + 1 < saved.size()) {
+            size_t e = saved.find('\n', p + 1);
+            std::string one = saved.substr(p + 1, e == std::string::npos
+                                                      ? std::string::npos
+                                                      : e - p - 1);
+            if (!one.empty())
+                list.push_back(one);
+            p = e;
+        }
+        for (size_t i = 0; i < list.size(); i++) {
+            if (i == 0)
+                open_page(list[0], false);
+            else
+                new_tab(list[i]);
+        }
+        if (list.empty())
+            open_page("about:start", false);
+        else
+            switch_tab(at);
+        std::printf("[web] restored %d tabs\n", (int)list.size());
+        say_tabs();
+    } else {
+        open_page(argc > 1 ? argv[1] : "about:start", false);
+    }
     draw();
 
     for (;;) {

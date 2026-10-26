@@ -120,6 +120,29 @@ PLFORM_SENT = "/plform?v=" + urllib.parse.quote_plus("żółw&#9731;",
                                                      encoding="cp1250")
 
 
+def icon(colour, fmt):
+    """A 16x16 icon of one colour, written by Pillow - not by us: as an
+    .ico holding a bitmap or a PNG, or as a plain PNG"""
+    from PIL import Image
+    import io
+    out = io.BytesIO()
+    pic = Image.new("RGBA", (16, 16), colour + (255,))
+    if fmt == "png":
+        pic.save(out, "PNG")
+    else:
+        pic.save(out, "ICO", sizes=[(16, 16)], bitmap_format=fmt)
+    return out.getvalue()
+
+
+ICON_GREEN, ICON_RED, ICON_BLUE = (0, 200, 0), (220, 0, 0), (0, 0, 210)
+ICON_PAGE = (b"<html><head><title>Icon PNG</title>"
+             b"<link rel=icon href=/icons/red.png></head><body>"
+             b"<p>an icon of its own</p></body></html>")
+ICO_PAGE = (b"<html><head><title>Icon ICO</title>"
+            b"<link rel='shortcut icon' href=/icons/blue.ico></head><body>"
+            b"<p>an .ico holding a PNG</p></body></html>")
+
+
 def page_in(text, codec, meta=""):
     return ("<html><head>" + meta + "<title>" + text + "</title></head>"
             "<body><p>" + text + "</p></body></html>").encode(codec)
@@ -227,6 +250,11 @@ def serve():
     """Every page the browser tests ask the host's server for"""
     port, stop = start_http_server()
     SERVED["/plform.html"] = PLFORM
+    SERVED["/favicon.ico"] = icon(ICON_GREEN, "bmp")
+    SERVED["/icons/red.png"] = icon(ICON_RED, "png")
+    SERVED["/icons/blue.ico"] = icon(ICON_BLUE, "png")
+    SERVED["/iconpng.html"] = ICON_PAGE
+    SERVED["/iconico.html"] = ICO_PAGE
     SERVED[PLFORM_SENT] = page_titled(b"Sent in 1250")
     SERVED["/page.html"] = PAGE
     SERVED["/two.html"] = TWO

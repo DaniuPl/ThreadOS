@@ -6178,3 +6178,26 @@ works and is checked by `make test`.
       clicks a link (three tabs, still at the second, its page still
       shown), shows the third and then the first, each with its own page,
       and closes two with their crosses back to one.
+
+- [x] **Site icons, and the tabs kept between runs** (apps/browser/web.cpp,
+      the `webtools` group).
+
+      Each page's site icon shows before its address and on its tab: the
+      one its <link rel=icon> (or "shortcut icon") names, else the
+      site's /favicon.ico. PNG and JPEG go through the decoders pages
+      use; .ico is new - a directory of pictures from which the one
+      nearest 16 pixels is taken, each a PNG or a headerless bitmap (32
+      bits with alpha, or 24 with a one-bit mask). Transparent parts are
+      laid on the toolbar's colour rather than the page's white. An icon
+      is fetched once a run for each address.
+
+      The browser started from the dock writes its tabs to a file in the
+      home directory as they change, and opens them again on its next
+      start, at the tab that was in front. A browser opened for a link
+      (with an address) neither reads nor writes it.
+
+      The icons in the test are made by Pillow, not by us: a bitmap .ico
+      as the site's /favicon.ico, a PNG and a PNG-holding .ico named by
+      <link>s; each shows in its colour beside the address. Two tabs,
+      the browser closed and opened from the dock: both come back, the
+      second in front, the first with its page.
