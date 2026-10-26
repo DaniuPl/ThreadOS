@@ -1392,6 +1392,22 @@ static bool go_to_anchor(const std::string& link)
     return true;
 }
 
+// A link into a window of its own: another browser, started with the
+// address. Nobody waits for it - the kernel clears away what has ended.
+static void open_in_new_window(const std::string& target)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        char* args[] = {(char*)"web", (char*)target.c_str(), nullptr};
+        execv("web", args);
+        _exit(127);
+    }
+    status_line = pid > 0 ? "Opened in a new window"
+                          : "Could not open a new window";
+    std::printf("[web] new window: %s\n", target.c_str());
+    std::fflush(stdout);
+}
+
 // The star: the page into the bookmarks, or out of them again
 static void toggle_bookmark()
 {
@@ -1835,6 +1851,20 @@ int main(int argc, char** argv)
                         draw();
                         copy_selection();
                     }
+                }
+            } else if (ev.type == WEV_ALTCLICK) {
+                // The right or middle button on a link: a new window
+                if (doc && !list_open && ev.y >= BAR_H &&
+                    ev.y < cont.height - STATUS_H) {
+                    int px = ev.x, py = ev.y - BAR_H + cont.scroll;
+                    cont.clicked.clear();
+                    doc->on_lbutton_down(px, py, ev.x, ev.y,
+                                         [](const position&) {});
+                    doc->on_lbutton_up(px, py, ev.x, ev.y,
+                                       [](const position&) {});
+                    if (!cont.clicked.empty())
+                        open_in_new_window(
+                            resolve(url(cont.base), url(cont.clicked)).str());
                 }
             } else if (ev.type == WEV_CLICK) {
                 if (list_open) {

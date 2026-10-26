@@ -540,6 +540,10 @@ struct win_text_cmd {
    the panel beside it are two things to scroll and only the pointer
    says which one was meant. */
 #define WEV_SCROLL  8
+/* The right button, or the middle one, clicked in the content - not a
+   WEV_CLICK, so a program that knows only clicks does not take it for
+   the left one. val: 2 right, 4 middle. */
+#define WEV_ALTCLICK 9
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */

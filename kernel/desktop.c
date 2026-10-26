@@ -467,6 +467,11 @@ struct wevent {
    the panel beside it are two things to scroll and only the pointer
    says which one was meant. */
 #define WEV_SCROLL  8
+/* The right button, or the middle one, clicked in the content. Not a
+   WEV_CLICK: a program that knows only clicks must not take it for the
+   left button. What it offers there - a menu, a link in a new window -
+   is its own; val says which button (2 right, 4 middle). */
+#define WEV_ALTCLICK 9
 #define WEV_QLEN  8
 
 struct window {
@@ -2211,6 +2216,7 @@ static int snap_where(int i, int mx, int my)
    Clicks take precedence over dragging; both are counted on the
    left-button press edge, so that one click = one action. */
 static int prev_right;      /* the previous right-button state */
+static int prev_alt;        /* the right and middle ones, for windows */
 
 
 /* Two clicks on the same title bar, close together in time, are one
@@ -2541,7 +2547,20 @@ static void handle_input(int mx, int my, int buttons)
     }
 
     /* The desktop gets its own actions; a window's right button still
-       belongs to the application that drew it. */
+       belongs to the application that drew it - and so does the middle
+       one, which the desktop has no use for. */
+    int alt = buttons & 0x06;
+    if (alt && !prev_alt) {
+        int k = window_at(mx, my);
+        if (k >= 0) {
+            struct window *w = &wins[k];
+            int cx = mx - (w->x + 1);
+            int cy = my - (w->y + TITLE_H + 1);
+            if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch)
+                win_enqueue(w, WEV_ALTCLICK, cx, cy, alt & ~prev_alt);
+        }
+    }
+    prev_alt = alt;
     if (right && !prev_right) {
         tmenu = -1;
         if (window_at(mx, my) < 0 && my >= BAR_H && my < work_bottom() &&

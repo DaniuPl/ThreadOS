@@ -6078,3 +6078,23 @@ works and is checked by `make test`.
       opens one that takes twelve seconds, presses the cross after five:
       the browser reports how much had come (some, not all of it), and
       the page from before is still the one shown.
+
+- [x] **Links in a new window; the right and middle buttons reach
+      programs** (kernel/desktop.c, user/usys.h, user64/usys64.h,
+      apps/browser/web.cpp, the `web` group).
+
+      A window's right button belonged to the program that drew it, the
+      comment said - but nothing was sent; the middle button was not
+      looked at at all. A press of either over a window's content is now
+      a WEV_ALTCLICK (val: 2 right, 4 middle) - a type of its own, so a
+      program that knows only WEV_CLICK does not take it for the left
+      button; the old gweb, the one program that does not ignore unknown
+      types, skips anything but keys. The browser opens a link pressed so
+      in a new browser window: fork and exec 'web' with the address; the
+      kernel reaps it when it ends, so nobody waits.
+
+      The test right-clicks a link: a second window opens one cascade
+      step on, titled with the linked page, and the first, brought
+      forward again, still shows the page it had. winmgr, clip, gtermsel,
+      snap and desktop64 pass on both kernels; wheel and desks fail the
+      same nine assertions with and without this change.

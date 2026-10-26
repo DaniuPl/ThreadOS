@@ -794,6 +794,26 @@ def main():
                   f"before stays ({title!r})",
                   m is not None and 4000 <= int(m.group(1)) < 22000 and
                   title == "Web: Page two")
+
+            # --- a link into a new window --------------------------------
+            go("/page.html", "Web: Test page")
+            link, _ = pixels(q, page[0], page[1], page[2] - 20, page[3], LINK)
+            q.mouse_goto((link[0] + link[2]) // 2, link[3] - 2)
+            time.sleep(0.3)
+            q.mouse_right_click()
+            q.n_win += 1
+            nx, ny = cascade(3, w0 + 2, h0 + TITLE_H + 2, w=sw, h=sh)
+            got = wait_title(q, (nx, ny, w0 + 2), "Web: Page two")
+            # (the new one lies over the first's title: a click on the
+            # strip of it still showing brings the first forward)
+            q.click(geom[0] + w0 // 2, geom[1] + 4)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1)
+            first = q.window_title(*geom)
+            check(f"the right button on a link opens it in a new window "
+                  f"({got!r}), and the first stays where it was "
+                  f"({first!r})",
+                  got == "Web: Page two" and first == "Web: Test page")
         finally:
             q.close()
     finally:
