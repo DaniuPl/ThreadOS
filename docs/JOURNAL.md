@@ -6098,3 +6098,19 @@ works and is checked by `make test`.
       forward again, still shows the page it had. winmgr, clip, gtermsel,
       snap and desktop64 pass on both kernels; wheel and desks fail the
       same nine assertions with and without this change.
+
+- [x] **Zoom in the browser** (apps/browser/web.cpp, the `web` group).
+
+      "- 100% +" at the right end of the status line zooms the page in
+      the steps browsers use, 50% to 200%; a click on the percentage
+      brings it back to 100%. litehtml lays the page out in its own
+      pixels for a window narrower or wider by the zoom (so text wraps
+      as it would on a smaller or larger screen), and only the drawing
+      is scaled: text at the zoomed size, boxes, borders (at least a
+      pixel), pictures, form fields, list markers. Clicks, drags and the
+      scroll are turned back into the page's pixels.
+
+      The test zooms the test page three steps: the red heading becomes
+      1.5 times as wide (within 4%); a click on the link where the zoomed
+      page drew it follows it; and the percentage puts the heading back
+      exactly where it was.

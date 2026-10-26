@@ -814,6 +814,40 @@ def main():
                   f"({got!r}), and the first stays where it was "
                   f"({first!r})",
                   got == "Web: Page two" and first == "Web: Test page")
+
+            # --- zoom ----------------------------------------------------
+            # (the first window is in front again, on the test page)
+            zx = cx + w0 - define(SRC, "ZOOM_W")
+            zb = define(SRC, "ZOOM_BTN")
+            zy = cy + h0 - define(SRC, "STATUS_H") // 2
+            red0, _ = pixels(q, *page, RED)
+            seen = len(q.serial())
+            for _ in range(3):                     # 110, 125, 150
+                q.click(cx + w0 - zb // 2, zy)
+                time.sleep(0.8)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            red1, _ = pixels(q, *page, RED)
+            w_0 = red0[2] - red0[0] + 1 if red0 else 0
+            w_1 = red1[2] - red1[0] + 1 if red1 else 0
+            check(f"three steps of + zoom the page to 150%: the heading is "
+                  f"half as wide again ({w_0} -> {w_1} px)",
+                  "[web] zoom 150%" in q.serial()[seen:] and w_0 > 0 and
+                  abs(w_1 - w_0 * 1.5) <= w_0 * 0.04)
+            link, _ = pixels(q, page[0], page[1], page[2] - 20, page[3], LINK)
+            q.click((link[0] + link[2]) // 2, link[3] - 2)
+            q.mouse_goto(sw - 20, sh // 2)
+            got = wait_title(q, geom, "Web: Page two")
+            check(f"a click on the link where the zoom drew it follows it "
+                  f"({got!r})", got == "Web: Page two")
+            q.click(cx + define(SRC, "BACK_W") // 2 + 10, cy + bar // 2)
+            wait_title(q, geom, "Web: Test page")
+            q.click(zx + define(SRC, "ZOOM_W") // 2, zy)
+            q.mouse_goto(sw - 20, sh // 2)
+            time.sleep(1.5)
+            red2, _ = pixels(q, *page, RED)
+            check(f"a click on the percentage brings it back to 100% "
+                  f"({red2} vs {red0})", red2 == red0)
         finally:
             q.close()
     finally:

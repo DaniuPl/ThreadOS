@@ -54,6 +54,8 @@ using namespace litehtml;
 #define LINE_STEP 40          // what an arrow key scrolls
 #define SCROLL_W 6             // the scroll thumb along the right edge
 #define STAR_W 26             // the bookmark star, at the address field's end
+#define ZOOM_W 96             // "-  100%  +" at the status line's right end
+#define ZOOM_BTN 26           // each of its buttons
 #define FONT_PX 15            // a page's text when its CSS does not say
 #define SEL_BG 0xB4D5FE       // behind selected text
 #define FOUND_BG 0xFFE97A     // behind what Ctrl+F found
@@ -297,7 +299,8 @@ class window_container : public document_container {
   public:
     int win = -1;
     int width = W0, height = H0;      // the window's content
-    int scroll = 0;                   // how far down the page we are
+    int scroll = 0;                   // how far down the page, in its own px
+    int zoom = 100;                   // the page's pixels to the screen's, %
     std::string base;                 // what relative addresses are relative to
     std::string title;
     std::string clicked;              // a link to follow, once the click is done
@@ -305,6 +308,10 @@ class window_container : public document_container {
 
     int page_top() const { return BAR_H; }
     int page_h() const { return height - BAR_H - STATUS_H; }
+    // The window in the page's own pixels: smaller when zoomed in
+    int view_w() const { return width * 100 / zoom; }
+    int view_h() const { return page_h() * 100 / zoom; }
+    int zs(double v) const { return (int)(v * zoom / 100.0 + 0.5); }
 
     uint_ptr create_font(const font_description& d, const document*,
                          font_metrics* fm) override
@@ -345,30 +352,34 @@ class window_container : public document_container {
     }
 
     // Everything litehtml places is in page coordinates; the window
-    // shows a band of the page under the toolbar
-    int sx(pixel_t x) const { return (int)x; }
-    int sy(pixel_t y) const { return (int)y + page_top() - scroll; }
+    // shows a band of the page under the toolbar, at the zoom - the
+    // layout is done in the page's pixels, and only the drawing scaled
+    int sx(pixel_t x) const { return zs(x); }
+    int sy(pixel_t y) const { return zs((double)y - scroll) + page_top(); }
 
     void draw_text(uint_ptr, const char* text, uint_ptr h, web_color c,
                    const position& pos) override
     {
         font* f = (font*)h;
-        int x = sx(pos.x), y = sy(pos.y);
-        if (y + (int)pos.height < page_top() || y > page_top() + page_h())
+        int x = sx(pos.x), y = sy(pos.y), hh = zs(pos.height);
+        if (y + hh < page_top() || y > page_top() + page_h())
             return;
-        int tw = ud_width(text, f->face, f->px);
+        int px = zs(f->px), asc = zs(f->ascent);
+        int tw = ud_width(text, f->face, f->px);       // in the page's px
+        int sw = ud_width(text, f->face, px);          // on the screen
         runs.push_back({text, (int)pos.x, (int)pos.y, tw, (int)pos.height});
         if (at_one_of(lit_now, pos))
-            ud_fill(win, x, y, tw, (int)pos.height, FOUND_NOW);
+            ud_fill(win, x, y, sw, hh, FOUND_NOW);
         else if (at_one_of(lit_all, pos))
-            ud_fill(win, x, y, tw, (int)pos.height, FOUND_BG);
+            ud_fill(win, x, y, sw, hh, FOUND_BG);
         if (selected((int)pos.x, (int)pos.y, tw, (int)pos.height))
-            ud_fill(win, x, y, tw, (int)pos.height, SEL_BG);
-        int w = ud_text(win, x, y + f->ascent, text, rgb(c), f->face, f->px);
+            ud_fill(win, x, y, sw, hh, SEL_BG);
+        int w = ud_text(win, x, y + asc, text, rgb(c), f->face, px);
+        int line = zs(1) > 1 ? zs(1) : 1;
         if (f->underline)
-            ud_fill(win, x, y + f->ascent + 2, w - x, 1, rgb(c));
+            ud_fill(win, x, y + asc + zs(2), w - x, line, rgb(c));
         if (f->strike)
-            ud_fill(win, x, y + f->ascent - f->px / 3, w - x, 1, rgb(c));
+            ud_fill(win, x, y + asc - px / 3, w - x, line, rgb(c));
     }
 
     pixel_t pt_to_px(float pt) const override { return pt * 96 / 72; }
@@ -377,7 +388,7 @@ class window_container : public document_container {
 
     void draw_list_marker(uint_ptr, const list_marker& m) override
     {
-        int x = sx(m.pos.x), y = sy(m.pos.y), d = (int)m.pos.width;
+        int x = sx(m.pos.x), y = sy(m.pos.y), d = zs(m.pos.width);
         if (d < 4)
             d = 4;
         if (m.marker_type == list_style_type_square)
@@ -424,7 +435,7 @@ class window_container : public document_container {
             return;
         const picture& pic = it->second;
         const position& o = l.origin_box;
-        int ow = (int)o.width, oh = (int)o.height;
+        int ow = zs(o.width), oh = zs(o.height);
         if (ow <= 0 || oh <= 0)
             return;
         int x0 = sx(o.x), y0 = sy(o.y);
@@ -457,10 +468,10 @@ class window_container : public document_container {
         const position& b = l.border_box;
         int r = (int)l.border_radius.top_left_x;
         if (r > 0)
-            ud_round(win, sx(b.x), sy(b.y), (int)b.width, (int)b.height, r,
+            ud_round(win, sx(b.x), sy(b.y), zs(b.width), zs(b.height), zs(r),
                      rgb(c));
         else
-            ud_fill(win, sx(b.x), sy(b.y), (int)b.width, (int)b.height,
+            ud_fill(win, sx(b.x), sy(b.y), zs(b.width), zs(b.height),
                     rgb(c));
     }
     void draw_linear_gradient(uint_ptr, const background_layer&,
@@ -473,14 +484,18 @@ class window_container : public document_container {
     void draw_borders(uint_ptr, const borders& b, const position& p,
                       bool) override
     {
-        int x = sx(p.x), y = sy(p.y), w = (int)p.width, h = (int)p.height;
+        int x = sx(p.x), y = sy(p.y), w = zs(p.width), h = zs(p.height);
         auto side = [&](const border& s, int bx, int by, int bw, int bh) {
             if ((int)s.width > 0 && s.style != border_style_none &&
                 s.style != border_style_hidden && s.color.alpha)
                 ud_fill(win, bx, by, bw, bh, rgb(s.color));
         };
-        int t = (int)b.top.width, l = (int)b.left.width;
-        int r = (int)b.right.width, bo = (int)b.bottom.width;
+        // (a border stays at least a pixel, however far out)
+        auto thick = [&](pixel_t v) {
+            return (double)v > 0 ? std::max(1, zs((double)v)) : 0;
+        };
+        int t = thick(b.top.width), l = thick(b.left.width);
+        int r = thick(b.right.width), bo = thick(b.bottom.width);
         side(b.top, x, y, w, t);
         side(b.bottom, x, y + h - bo, w, bo);
         side(b.left, x, y, l, h);
@@ -526,15 +541,15 @@ class window_container : public document_container {
     void del_clip() override {}
     void get_viewport(position& vp) const override
     {
-        vp = position(0, 0, width, page_h());
+        vp = position(0, 0, view_w(), view_h());
     }
     element::ptr create_element(const char* tag, const string_map&,
                                 const std::shared_ptr<document>& d) override;
     void get_media_features(media_features& m) const override
     {
         m.type = media_type_screen;
-        m.width = m.device_width = width;
-        m.height = m.device_height = page_h();
+        m.width = m.device_width = view_w();
+        m.height = m.device_height = view_h();
         m.color = 8;
         m.monochrome = 0;
         m.color_index = 256;
@@ -992,7 +1007,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 {
     position p = ri->pos();
     int bx = cont.sx(p.x + x), by = cont.sy(p.y + y);
-    int bw = (int)p.width, bh = (int)p.height;
+    int bw = cont.zs(p.width), bh = cont.zs(p.height);
     int w = cont.win;
     if (type == "radio") {
         // Round, which CSS borders here cannot be: drawn whole by us
@@ -1018,7 +1033,7 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
         return;
     }
     font* f = (font*)css().get_font();
-    int px = f ? f->px : FONT_PX, face = f ? f->face : UD_SANS;
+    int px = cont.zs(f ? f->px : FONT_PX), face = f ? f->face : UD_SANS;
     uint32_t ink = rgb(css().get_color());
     int base = by + (bh - px) / 2 + (px * 93 + 50) / 100;
     if (type == "select") {
@@ -1068,6 +1083,44 @@ void el_input::draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip,
 
 static void draw();
 static void draw_chrome();
+
+// The steps a page can be zoomed by, as browsers have them
+static const int zooms[] = {50, 67, 80, 90, 100, 110, 125, 150, 175, 200};
+
+static void layout();
+static void scroll_by(int dy);
+
+// A new zoom: laid out again for the width it makes, the same place on
+// the page at the top
+static void set_zoom(int z)
+{
+    if (z == cont.zoom)
+        return;
+    cont.zoom = z;
+    layout();
+    scroll_by(0);
+    std::printf("[web] zoom %d%%\n", z);
+    std::fflush(stdout);
+}
+
+// A click on the zoom's buttons: out a step, in a step, or back to 100%
+static void click_zoom(int x)
+{
+    int x0 = cont.width - ZOOM_W, n = sizeof(zooms) / sizeof(zooms[0]);
+    int at = 0;
+    while (at + 1 < n && zooms[at] < cont.zoom)
+        at++;
+    if (x < x0 + ZOOM_BTN)
+        set_zoom(zooms[at > 0 ? at - 1 : 0]);
+    else if (x >= cont.width - ZOOM_BTN)
+        set_zoom(zooms[at + 1 < n ? at + 1 : n - 1]);
+    else
+        set_zoom(100);
+}
+
+// Where on the page a point of the window is, at the zoom
+static int page_x(int x) { return x * 100 / cont.zoom; }
+static int page_y(int y) { return (y - BAR_H) * 100 / cont.zoom + cont.scroll; }
 static void scroll_by(int dy);
 static void open_page(const std::string& where0, bool remember,
                       const std::string* post = nullptr);
@@ -1078,7 +1131,7 @@ static std::string extension(const std::string& target);
 static void layout()
 {
     if (doc)
-        doc->render(cont.width);
+        doc->render(cont.view_w());
 }
 
 // Words, not an address, go to the search engine the 'search' setting
@@ -1207,7 +1260,7 @@ static list_geom list_at(const std::shared_ptr<el_input>& sel)
     position p = sel->get_placement();
     font* f = (font*)sel->css().get_font();
     list_geom g;
-    g.px = f ? f->px : FONT_PX;
+    g.px = cont.zs(f ? f->px : FONT_PX);
     g.x = cont.sx(p.x) - 6;
     g.y = cont.sy(p.y + p.height) + 5;
     g.w = (int)p.width + 12;
@@ -1548,8 +1601,8 @@ static void go_forward()
 
 static void scroll_by(int dy)
 {
-    int max = doc ? (int)doc->height() - cont.page_h() : 0;
-    cont.scroll += dy;
+    int max = doc ? (int)doc->height() - cont.view_h() : 0;
+    cont.scroll += dy * 100 / cont.zoom;      // (the screen's px, the page's)
     if (cont.scroll > max)
         cont.scroll = max;
     if (cont.scroll < 0)
@@ -1592,8 +1645,8 @@ static void show_match()
         return;
     int y = (int)el->get_placement().y;
     // Brought into sight, a third of the way down, if it is not there
-    if (y < cont.scroll || y > cont.scroll + cont.page_h() - LINE_STEP) {
-        cont.scroll = y - cont.page_h() / 3;
+    if (y < cont.scroll || y > cont.scroll + cont.view_h() - LINE_STEP) {
+        cont.scroll = y - cont.view_h() / 3;
         scroll_by(0);
     }
     std::printf("[web] find '%s': %d of %d\n", find_q.c_str(), match_at + 1,
@@ -1698,6 +1751,22 @@ static void draw_star(int w, int cx, int cy, bool full, uint32_t ink)
     }
 }
 
+// "-  100%  +" at the status line's right end
+static void draw_zoom(int w, int fy, const struct ud_look& l)
+{
+    int x0 = cont.width - ZOOM_W, base = ud_baseline(fy, STATUS_H, 11);
+    ud_fill(w, x0, fy + 1, ZOOM_W, STATUS_H - 1, l.bg);
+    int my = fy + STATUS_H / 2;
+    ud_fill(w, x0 + ZOOM_BTN / 2 - 4, my, 9, 1, l.text);           // -
+    int px = cont.width - ZOOM_BTN / 2;
+    ud_fill(w, px - 4, my, 9, 1, l.text);                          // +
+    ud_fill(w, px, my - 4, 1, 9, l.text);
+    std::string pct = std::to_string(cont.zoom) + "%";
+    int tw = ud_width(pct.c_str(), UD_SANS, 11);
+    ud_text(w, x0 + (ZOOM_W - tw) / 2, base, pct.c_str(),
+            cont.zoom == 100 ? l.dim : l.text, UD_SANS, 11);
+}
+
 static void draw()
 {
     int w = cont.win;
@@ -1714,18 +1783,18 @@ static void draw()
     // The page is white, as pages are, whatever the theme around it
     ud_fill(w, 0, BAR_H, cont.width, cont.page_h(), 0xFFFFFF);
     if (doc) {
-        position clip(0, cont.scroll, cont.width, cont.page_h());
+        position clip(0, cont.scroll, cont.view_w(), cont.view_h());
         doc->draw(0, 0, 0, &clip);
         draw_list();
     }
     // Where in the page the window is, when the page is longer than it:
     // a thumb as long as the share that shows, at the right edge
     int total = doc ? (int)doc->height() : 0;
-    if (total > cont.page_h()) {
-        int ph = cont.page_h(), th = ph * ph / total;
+    if (total > cont.view_h()) {
+        int ph = cont.page_h(), th = ph * cont.view_h() / total;
         if (th < 20)
             th = 20;
-        int ty = BAR_H + (ph - th) * cont.scroll / (total - ph);
+        int ty = BAR_H + (ph - th) * cont.scroll / (total - cont.view_h());
         ud_round(w, cont.width - SCROLL_W - 2, ty + 2, SCROLL_W, th - 4,
                  SCROLL_W / 2, 0x9A9AA0);
     }
@@ -1788,6 +1857,7 @@ static void draw_chrome()
     ud_fill(w, 0, fy, cont.width, STATUS_H, l.bg);
     ud_fill(w, 0, fy, cont.width, 1, l.line);
     if (finding) {
+        draw_zoom(w, fy, l);
         // The find field takes the status line's place while it is open
         std::string say = "Find: " + find_q;
         int end = ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), say.c_str(),
@@ -1803,6 +1873,7 @@ static void draw_chrome()
     }
     ud_text(w, 10, ud_baseline(fy, STATUS_H, 11), status_line.c_str(),
             l.dim, UD_SANS, 11);
+    draw_zoom(w, fy, l);
 }
 
 int main(int argc, char** argv)
@@ -1834,12 +1905,12 @@ int main(int argc, char** argv)
                 sel_any = false;
                 sel_drag = doc && !list_open && ev.y >= BAR_H &&
                            ev.y < cont.height - STATUS_H;
-                sel_x0 = sel_x1 = ev.x;
-                sel_y0 = sel_y1 = ev.y - BAR_H + cont.scroll;
+                sel_x0 = sel_x1 = page_x(ev.x);
+                sel_y0 = sel_y1 = page_y(ev.y);
             } else if (ev.type == WEV_DRAG || ev.type == WEV_RELEASE) {
                 if (sel_drag) {
-                    sel_x1 = ev.x;
-                    sel_y1 = ev.y - BAR_H + cont.scroll;
+                    sel_x1 = page_x(ev.x);
+                    sel_y1 = page_y(ev.y);
                     sel_any = std::abs(sel_x1 - sel_x0) > 3 ||
                               std::abs(sel_y1 - sel_y0) > 3;
                 }
@@ -1856,7 +1927,7 @@ int main(int argc, char** argv)
                 // The right or middle button on a link: a new window
                 if (doc && !list_open && ev.y >= BAR_H &&
                     ev.y < cont.height - STATUS_H) {
-                    int px = ev.x, py = ev.y - BAR_H + cont.scroll;
+                    int px = page_x(ev.x), py = page_y(ev.y);
                     cont.clicked.clear();
                     doc->on_lbutton_down(px, py, ev.x, ev.y,
                                          [](const position&) {});
@@ -1869,6 +1940,9 @@ int main(int argc, char** argv)
             } else if (ev.type == WEV_CLICK) {
                 if (list_open) {
                     click_list(ev.x, ev.y);
+                } else if (ev.y >= cont.height - STATUS_H &&
+                           ev.x >= cont.width - ZOOM_W) {
+                    click_zoom(ev.x);
                 } else if (ev.y < BAR_H) {
                     typing.reset();
                     int b = (ev.x - 10) / BTN_STEP;
@@ -1887,7 +1961,7 @@ int main(int argc, char** argv)
                         scroll_by(0);
                     }
                 } else if (doc && ev.y < cont.height - STATUS_H) {
-                    int px = ev.x, py = ev.y - BAR_H + cont.scroll;
+                    int px = page_x(ev.x), py = page_y(ev.y);
                     cont.clicked.clear();
                     doc->on_lbutton_down(px, py, ev.x, ev.y,
                                          [](const position&) {});
