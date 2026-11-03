@@ -171,7 +171,7 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": []}
+           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": [], "webp": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -220,6 +220,13 @@ def seeds(workdir):
     sys.path.insert(0, os.path.join(ROOT, "scripts", "tests"))
     from svgcases import CASES             # noqa: E402
     out["svg"] += [svg.encode() for _, _, _, svg in CASES]
+
+    # WebP pictures libwebp wrote: lossy, lossless, alpha, an animation -
+    # the small ones, so a case runs quickly
+    import webpcases                       # noqa: E402
+    if webpcases.available():
+        out["webp"] += [data for _, data, _ in webpcases.cases()
+                        if len(data) < 12000]
 
     # Set-Cookie headers as sites send them, a line each
     out["cookie"].append(

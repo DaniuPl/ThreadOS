@@ -6464,3 +6464,35 @@ works and is checked by `make test`.
       the end of a tag and NaN coordinates reaching an index, both
       fixed. t_web now waits for its page to be drawn, not just named:
       on a loaded host the title came seconds before the pixels.
+
+- [x] **WebP pictures** (user/uwebp.h, user/uvp8tab.h,
+      scripts/tests/t_webp.py, scripts/tests/webpcases.py)
+      Most of the pictures large sites serve now are WebP. uwebp.h reads
+      all of it but animation beyond the first frame: the RIFF container
+      and its extended form; VP8, the lossy codec (a key frame of VP8
+      video: the boolean decoder, the modes of 16x16 and 4x4 prediction
+      with their edge rules, the coefficient tokens and their contexts,
+      the inverse WHT and DCT, the normal and the simple loop filter),
+      and the chroma brought up to full size and turned to RGB as
+      libwebp does it; VP8L, the lossless codec (canonical prefix codes,
+      meta codes over an entropy image, LZ77 over the two-dimensional
+      distance map, the colour cache, and the predictor, colour,
+      subtract-green and palette transforms, packed pixels included);
+      ALPH with its filters, raw or lossless; and the first frame of an
+      animation, on its canvas. The fixed tables of VP8 - 3200 numbers -
+      are taken out of the text of RFC 6386 by a script rather than
+      retyped (user/uvp8tab.h). The browser reads WebP in <img> and as a
+      site's icon, up to 2048x2048 like a GIF.
+
+      The RFC's own pseudocode for the tokens has its block types
+      numbered wrong and sets its "previous was zero" flag after every
+      token; the reference decoder printed in the same RFC (dixie) is
+      right, and it is what this follows.
+
+      The test compares with libwebp itself, through Pillow: 86
+      pictures libwebp wrote - lossy at four qualities, three efforts
+      and four sizes, lossless at three efforts, palettes of 2 to 200
+      colours, exact alpha, lossy with alpha, an animation - come out the
+      same to the byte, lossy ones too. In QEMU a page with a lossy, a
+      palette and an alpha picture shows each exactly as libwebp reads
+      it, laid on white. `make fuzz` takes WebP too.

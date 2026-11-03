@@ -7,7 +7,7 @@
  * scripts/fuzz_parsers.py feeds it thousands of cases made by damaging
  * data that was correct.
  *
- * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif|svg> <file>
+ * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif|svg|webp> <file>
  */
 
 #include <stdio.h>
@@ -22,6 +22,7 @@
 #include "ucookie.h"
 #include "ugif.h"
 #include "usvg.h"
+#include "uwebp.h"
 
 #define MAX_INPUT (1 << 20)
 
@@ -234,6 +235,15 @@ static void run_svg(const unsigned char *data, size_t len)
         free(px);
 }
 
+static void run_webp(const unsigned char *data, size_t len)
+{
+    unsigned char *px = 0;
+    int w = 0, h = 0;
+    const char *why = "";
+    if (webp_decode(data, len, &px, &w, &h, &why) == 0)
+        free(px);
+}
+
 /* Not a fuzz target either: the pixels decoded, "w h" and then RGBA in
    hex, for scripts/fuzz_parsers.py to hold against Pillow's */
 static void run_gifpixels(const unsigned char *data, size_t len)
@@ -315,6 +325,8 @@ int main(int argc, char **argv)
         run_gifpixels(input, len);
     else if (!strcmp(argv[1], "svg"))
         run_svg(input, len);
+    else if (!strcmp(argv[1], "webp"))
+        run_webp(input, len);
     else {
         fprintf(stderr, "no such parser: %s\n", argv[1]);
         free(input);

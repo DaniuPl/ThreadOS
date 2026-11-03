@@ -44,6 +44,8 @@ extern "C" {
 #include "ujpeg.h"
 #include "ugif.h"
 #include "usvg.h"
+#define WEBP_MAX_PIXELS (2048 * 2048)  // as for GIFs: what a page may cost
+#include "uwebp.h"
 #include "ucookie.h"
 }
 
@@ -282,6 +284,29 @@ static bool decode_gif(const std::string& f, picture& pic)
     for (size_t i = 0; i < pic.px.size(); i++)
         pic.px[i] = on_backdrop(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2],
                                 rgba[i * 4 + 3]);
+    return true;
+}
+
+static bool decode_webp(const std::string& f, picture& pic)
+{
+    const unsigned char* d = (const unsigned char*)f.data();
+    if (!webp_sniff(d, f.size()))
+        return false;
+    unsigned char* rgba = nullptr;
+    int w, h;
+    const char* why = "";
+    if (webp_decode(d, f.size(), &rgba, &w, &h, &why) < 0) {
+        std::printf("[web] a WebP picture I cannot read: %s\n", why);
+        std::fflush(stdout);
+        return false;
+    }
+    pic.w = w;
+    pic.h = h;
+    pic.px.resize((size_t)w * h);
+    for (size_t i = 0; i < pic.px.size(); i++)
+        pic.px[i] = on_backdrop(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2],
+                                rgba[i * 4 + 3]);
+    std::free(rgba);
     return true;
 }
 
@@ -559,7 +584,8 @@ class window_container : public document_container {
         std::string data;
         if (get_url(where, data, ".web-image") &&
             !decode_png(data, pic) && !decode_jpeg(data, pic) &&
-            !decode_gif(data, pic) && !decode_svg(data, pic))
+            !decode_gif(data, pic) && !decode_webp(data, pic) &&
+            !decode_svg(data, pic))
             pic = picture();
     }
     static bool decode_svg(const std::string& data, picture& pic)
@@ -2486,7 +2512,8 @@ static std::string load_icon(const std::string& target)
         backdrop = l.field;
         if (!get_url(where, data, ".web-icon") ||
             (!decode_png(data, pic) && !decode_jpeg(data, pic) &&
-             !decode_gif(data, pic) && !decode_ico(data, pic)))
+             !decode_gif(data, pic) && !decode_ico(data, pic) &&
+             !decode_webp(data, pic)))
             pic = picture();
         backdrop = 0xFFFFFF;
         std::printf("[web] icon %s: %dx%d\n", where.c_str(), pic.w, pic.h);
