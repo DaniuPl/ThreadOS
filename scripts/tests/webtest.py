@@ -328,8 +328,11 @@ def colours(q, box, want):
 
 
 def typed(q, text):
+    """Types the text, as type_line does but without Enter (a capital is
+    Shift and the letter: QEMU has no key named 'T', and loses it)"""
     for ch in text:
-        q.sendkey(Qemu.KEYNAMES.get(ch, ch))
+        q.sendkey("shift-" + ch.lower() if ch.isupper()
+                  else Qemu.KEYNAMES.get(ch, ch))
 
 
 def serve():

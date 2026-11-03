@@ -6519,3 +6519,35 @@ works and is checked by `make test`.
       link: a tab behind, its page the link's, then one in front; on a
       served page Ctrl and the middle button on a link to
       about:history?clear=all are both refused, and no tab opens.
+
+- [x] **Real sites, shown side by side with Chromium** (apps/browser/web.cpp,
+      apps/browser/webjs.cpp, user/httpget.c, scripts/tests/t_webcompat.py)
+      Hacker News, a Wikipedia article and the Python tutorial, saved
+      with their style sheets, scripts and pictures and served to the
+      browser in QEMU, next to Chromium drawing them at the same width.
+      What that showed, and is fixed now:
+
+      * Addresses were not put right: "/3/tutorial/../_static/menu.js"
+        went to the server as it stood, and many servers have no file by
+        that name. A resolved address now has its "." and ".." segments
+        taken out (RFC 3986, 5.2.4), in absolute(), which every link,
+        picture, style sheet and script goes through.
+      * Wikipedia's style sheets have addresses of 300 and more
+        characters; a program argument holds 256, so httpget was handed
+        a cut one. An address that long now goes to it in a file (-u).
+      * Hacker News has no doctype, and in quirks mode browsers do not
+        let a table take its text alignment and font from around it
+        (Chromium's quirk.css); here every line in its <center>ed table
+        was centred. And <center> centres its blocks, not only its text.
+      * Scripts asked for URL, which was not there; it is now, with
+        searchParams, as WHATWG has it for the common cases.
+
+      What is still wrong is the layout of the modern sites: Wikipedia's
+      skin is built with CSS grid, custom properties and clipping, which
+      litehtml does not do. That is the next thing.
+
+      The test: a page at /site/pages/ takes ../css and ./../img from
+      where they are; a <center>ed table is centred, its text at the left
+      in quirks mode and in the middle with a doctype; a style sheet at
+      an address of 583 characters is fetched; and URL takes nine
+      addresses apart, eleven parts each, exactly as Node.js does.

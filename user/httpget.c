@@ -15,7 +15,9 @@
  * answer's Content-Type to a file: a browser needs its charset. -s
  * writes its status code, which a page's script reads (a 404 is an
  * answer too), and -y says what a POST's body is, where it is not a
- * form's fields.
+ * form's fields. -u reads the address itself from a file: an argument
+ * holds 256 bytes, and the addresses of a site's style sheets are often
+ * longer.
  *
  * It resolves the host name through DNS, copes with 'chunked' encoding
  * and follows redirects (up to three). For https addresses it connects
@@ -54,11 +56,28 @@ void _start(int argc, char **argv)
     const char *body = 0;
     uint32_t body_len = 0;
     const char *jar_file = 0, *out_opt = 0, *type_file = 0, *status_file = 0;
+    static char url_buf[2048];
+    const char *url_arg = 0;
     while (argc > 1 && argv[1][0] == '-') {
         char o = argv[1][1];
-        if ((o == 'c' || o == 'o' || o == 't' || o == 's' || o == 'y') &&
-            argc > 2) {
-            if (o == 'c')
+        if ((o == 'c' || o == 'o' || o == 't' || o == 's' || o == 'y' ||
+             o == 'u') && argc > 2) {
+            if (o == 'u') {
+                int fd = sys_open(argv[2], O_READ);
+                int32_t n = fd >= 0 ? sys_read(fd, url_buf, sizeof(url_buf) - 1) : -1;
+                if (fd >= 0)
+                    sys_close(fd);
+                if (n <= 0) {
+                    print("[httpget] I cannot read the address from ");
+                    print(argv[2]);
+                    print("\n");
+                    sys_exit(1);
+                }
+                while (n > 0 && (url_buf[n - 1] == '\n' || url_buf[n - 1] == '\r'))
+                    n--;
+                url_buf[n] = '\0';
+                url_arg = url_buf;
+            } else if (o == 'c')
                 jar_file = argv[2];
             else if (o == 'o')
                 out_opt = argv[2];
@@ -100,22 +119,26 @@ void _start(int argc, char **argv)
         argc--;
     }
 
-    if (argc < 2) {
+    if (argc < 2 && !url_arg) {
         print("usage: httpget [-k] [-p <file>] [-y <type>] [-c <jar>] "
-              "[-o <file>] [-t <file>] [-s <file>] <host|ip> [port] [path] "
-              "[file]\n");
+              "[-o <file>] [-t <file>] [-s <file>] [-u <file>] <host|ip> "
+              "[port] [path] [file]\n");
         sys_exit(1);
     }
+    const char *address = url_arg ? url_arg : argv[1];
+    if (url_arg) {
+        argc = 1;                        /* (no port, path or file after it) */
+    }
 
-    char host[64];
-    char path[512];
+    char host[256];
+    static char path[2048];
     uint32_t port = argc > 2 ? (uint32_t)uatoi(argv[2]) : 0;
     const char *outfile = argc > 4 ? argv[4] : out_opt;
 
     /* The host may be bare ("example.com") or a full address */
     uint32_t parsed_port = port;
     int use_tls = 0;
-    if (!http_parse_url(argv[1], host, sizeof(host), &parsed_port,
+    if (!http_parse_url(address, host, sizeof(host), &parsed_port,
                         path, sizeof(path), &use_tls)) {
         print("[httpget] a bad address\n");
         sys_exit(1);

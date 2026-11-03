@@ -107,6 +107,50 @@ static uint32_t rgb(const web_color& c)
     return ((uint32_t)c.red << 16) | ((uint32_t)c.green << 8) | c.blue;
 }
 
+// --- addresses -----------------------------------------------------------
+
+// A path with its "." and ".." segments taken out, as RFC 3986 (5.2.4)
+// says a resolved address is to be: litehtml's resolve() leaves them in,
+// and "/docs/tutorial/../_static/menu.js" is a file many servers do
+// not have.
+static std::string remove_dots(std::string in)
+{
+    std::string out;
+    while (!in.empty()) {
+        if (in.compare(0, 3, "../") == 0)
+            in.erase(0, 3);
+        else if (in.compare(0, 2, "./") == 0)
+            in.erase(0, 2);
+        else if (in.compare(0, 3, "/./") == 0)
+            in.replace(0, 3, "/");
+        else if (in == "/.")
+            in = "/";
+        else if (in.compare(0, 4, "/../") == 0 || in == "/..") {
+            in = in.size() > 3 ? in.substr(3) : std::string("/");
+            size_t cut = out.rfind('/');
+            out.erase(cut == std::string::npos ? 0 : cut);
+        } else if (in == "." || in == "..")
+            in.clear();
+        else {
+            size_t next = in.find('/', in[0] == '/' ? 1 : 0);
+            out += in.substr(0, next);
+            in.erase(0, next);
+        }
+    }
+    return out;
+}
+
+// A link on a page, made an address
+static std::string absolute(const std::string& base, const std::string& link)
+{
+    url u = resolve(url(base), url(link));
+    if (u.path().find("/.") == std::string::npos &&
+        u.path().compare(0, 2, "./") && u.path().compare(0, 3, "../"))
+        return u.str();
+    return url(u.scheme(), u.authority(), remove_dots(u.path()), u.query(),
+               u.fragment()).str();
+}
+
 // --- what a page refers to: pictures and style sheets -----------------
 
 static bool get_url(const std::string& where, std::string& out,
@@ -570,7 +614,7 @@ class window_container : public document_container {
         if (src && !strncmp(src, "svg-inline:", 11))
             return src;                // (no address: the page's own)
         std::string b = baseurl && *baseurl ? baseurl : base;
-        return resolve(url(b), url(src ? src : "")).str();
+        return absolute(b, src ? src : "");
     }
 
     // Fetched and unpacked while the page is read: the layout needs
@@ -741,7 +785,7 @@ class window_container : public document_container {
     void set_base_url(const char* u) override
     {
         if (u && *u)
-            base = resolve(url(base), url(u)).str();
+            base = absolute(base, u);
     }
     void link(const std::shared_ptr<document>&, const element::ptr&) override {}
     void on_anchor_click(const char* u, const element::ptr& el) override
@@ -1049,7 +1093,13 @@ static bool fetch_to(const std::string& address, const char* file,
             args.push_back((char*)"-y");
             args.push_back((char*)post_type.c_str());
         }
-        args.push_back((char*)where.c_str());
+        // (an argument holds 256 bytes; a longer address goes in a file)
+        if (where.size() > 200 && write_file(".web-url.txt", where)) {
+            args.push_back((char*)"-u");
+            args.push_back((char*)".web-url.txt");
+        } else {
+            args.push_back((char*)where.c_str());
+        }
         args.push_back(nullptr);
         execv("httpget", args.data());
         _exit(127);
@@ -1349,6 +1399,48 @@ static std::vector<std::weak_ptr<el_input>> inputs;   // the page's, in order
 static std::shared_ptr<el_input> typing;              // the field with the keys
 static std::shared_ptr<el_input> list_open;           // a <select> showing its list
 
+// A page with no <!doctype html> is read in "quirks mode", the way
+// browsers read the web of the 1990s - and much of what is still served:
+// Hacker News among it. Of the differences, the one that shows is that
+// a table does not take its text alignment, its font or its weight from
+// around it (Chromium's quirk.css): a <center> centres the table, not
+// every line in it.
+static const char QUIRKS_CSS[] =
+    "table{text-align:left;white-space:normal;line-height:normal;"
+    "font-weight:normal;font-size:medium;font-style:normal}";
+
+// Whether a page is in quirks mode: no doctype, or not "html" (the
+// public identifiers of old HTML 4 are left aside: they are rare)
+static bool quirks(const std::string& html)
+{
+    size_t i = 0;
+    for (;;) {
+        while (i < html.size() && (isspace((unsigned char)html[i]) ||
+                                   (unsigned char)html[i] >= 0xEF))
+            i++;
+        if (html.compare(i, 4, "<!--") == 0) {
+            size_t e = html.find("-->", i + 4);
+            if (e == std::string::npos)
+                return true;
+            i = e + 3;
+            continue;
+        }
+        break;
+    }
+    if (i + 14 > html.size())
+        return true;
+    std::string head = html.substr(i, 14);
+    for (auto& c : head)
+        c = (char)tolower((unsigned char)c);
+    return head != "<!doctype html";
+}
+
+// <center> centres what is in it, its tables and boxes too - which
+// text-align, all litehtml gives it, does not: browsers give its
+// blocks automatic side margins (Chromium's -webkit-center)
+static const char CENTER_CSS[] =
+    "center>*{margin-left:auto;margin-right:auto}";
+
 static const char FORM_CSS[] =
     "input{border:1px solid #8a8a90;background:#fff;padding:3px 5px;"
     "width:12em;height:1.2em;vertical-align:middle}"
@@ -1497,7 +1589,7 @@ static webjs::host js_host()
     };
     h.submit = [](const element::ptr& form) { pending_submit = form; };
     h.resolve = [](const std::string& link) {
-        return resolve(url(cont.base), url(link)).str();
+        return absolute(cont.base, link);
     };
     h.changed = []() {
         if (!doc)
@@ -1723,7 +1815,7 @@ static void send_form(const element::ptr& form, std::shared_ptr<el_input> by)
     std::string target =
         !strncmp(action, "about:", 6)
             ? std::string(action)
-            : resolve(url(cont.base), url(*action ? action : cont.base)).str();
+            : absolute(cont.base, *action ? action : cont.base);
     target = target.substr(0, target.find('#'));
     // The browser's own pages take forms only from themselves
     if (is_about(target) && !is_about(cont.base)) {
@@ -2415,8 +2507,11 @@ static void open_page(const std::string& where0, bool remember,
     sel_any = sel_drag = false;
     matches.clear();
     page_js.reset();                   // the old page's scripts end with it
+    bool quirky = quirks(html);
     doc = document::createFromString(page, &cont,
-                                     std::string(master_css) + FORM_CSS);
+                                     std::string(master_css) + FORM_CSS +
+                                     CENTER_CSS +
+                                     (quirky ? QUIRKS_CSS : ""));
     if (!charset_certain) {
         // litehtml parses again when a <meta> names another set; the
         // forms must follow it there
@@ -2501,7 +2596,7 @@ static std::string load_icon(const std::string& target)
     url u(target);
     const char* href = link ? link->get_attr("href") : nullptr;
     std::string where = href && *href
-        ? resolve(url(cont.base), url(href)).str()
+        ? absolute(cont.base, href)
         : u.scheme() + "://" + u.authority() + "/favicon.ico";
     std::string key = "icon:" + where;
     if (!pictures.count(key)) {
@@ -2648,7 +2743,7 @@ static void download(const std::string& target)
 static std::string link_target(const std::string& link)
 {
     std::string target = is_about(link) ? link
-                                        : resolve(url(cont.base), url(link)).str();
+                                        : absolute(cont.base, link);
     if (is_about(target) && !is_about(cont.base)) {
         status_line = "Blocked: a page may not open " + target;
         std::printf("[web] blocked %s from %s\n", target.c_str(),

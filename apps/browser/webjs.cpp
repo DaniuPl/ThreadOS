@@ -795,6 +795,66 @@ static const char prelude[] = R"JS(
     toString() { return this.__p.map(([k, v]) => enc(k) + '=' + enc(v)).join('&'); }
   }
   globalThis.URLSearchParams = URLSearchParams;
+
+  // URL: an address taken apart, and put together against a base
+  const split = s => {
+    const m = /^([a-z][a-z0-9+.-]*:)(?:\/\/(?:([^@/?#]*)@)?([^/?#:]*)(?::(\d*))?)?([^?#]*)(\?[^#]*)?(#.*)?$/i.exec(s);
+    return m && { protocol: m[1].toLowerCase(), auth: m[2], hostname: (m[3] || '').toLowerCase(),
+                  port: m[4] || '', pathname: m[5] || (m[3] !== undefined ? '/' : ''),
+                  search: m[6] === '?' ? '' : m[6] || '', hash: m[7] === '#' ? '' : m[7] || '' };
+  };
+  const dots = path => {
+    const out = [];
+    path.split('/').forEach((seg, i, all) => {
+      if (seg === '..') { if (out.length > 1) out.pop(); if (i === all.length - 1) out.push(''); }
+      else if (seg === '.') { if (i === all.length - 1) out.push(''); }
+      else out.push(seg);
+    });
+    return out.join('/');
+  };
+  const join = (ref, base) => {
+    if (split(ref)) return ref;
+    const b = split(base);
+    if (!b) return null;
+    const origin = b.protocol + '//' + (b.auth ? b.auth + '@' : '') + b.hostname + (b.port ? ':' + b.port : '');
+    if (ref.startsWith('//')) return b.protocol + ref;
+    if (ref === '' ) return origin + b.pathname + b.search;
+    if (ref.startsWith('#')) return origin + b.pathname + b.search + ref;
+    if (ref.startsWith('?')) return origin + b.pathname + ref;
+    const tail = ref.search(/[?#]/), p = tail < 0 ? ref : ref.slice(0, tail), rest = tail < 0 ? '' : ref.slice(tail);
+    const path = p.startsWith('/') ? p : b.pathname.replace(/[^/]*$/, '') + p;
+    return origin + dots(path) + rest;
+  };
+  class URL {
+    constructor(href, base) {
+      href = String(href);
+      const full = base === undefined ? (split(href) ? href : null)
+                                      : join(href, String(base instanceof URL ? base.href : base));
+      const u = full && split(full);
+      if (!u) throw new TypeError('Invalid URL: ' + href);
+      if (u.pathname !== '' || u.hostname) u.pathname = dots(u.pathname || '/');
+      Object.assign(this, u);
+      this.username = (u.auth || '').split(':')[0] || '';
+      this.password = (u.auth || '').split(':')[1] || '';
+      delete this.auth;
+      this.searchParams = new URLSearchParams(this.search);
+      // (the query as written stays, until its parameters are changed)
+      this.__search = this.search;
+      this.__params = String(this.searchParams);
+    }
+    get host() { return this.hostname + (this.port ? ':' + this.port : ''); }
+    get origin() { return this.hostname ? this.protocol + '//' + this.host : 'null'; }
+    get href() {
+      const q = String(this.searchParams);
+      const search = q === this.__params ? this.__search : q ? '?' + q : '';
+      return (this.hostname ? this.protocol + '//' + (this.username ? this.username +
+              (this.password ? ':' + this.password : '') + '@' : '') + this.host : this.protocol) +
+             this.pathname + search + this.hash;
+    }
+    toString() { return this.href; }
+    toJSON() { return this.href; }
+  }
+  globalThis.URL = URL;
   // A form's fields, as the form would send them; sent on as
   // name=value pairs (there is no multipart here)
   class FormData extends URLSearchParams {
