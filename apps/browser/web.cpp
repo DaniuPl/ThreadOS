@@ -2640,20 +2640,30 @@ static void download(const std::string& target)
     std::fflush(stdout);
 }
 
-static void follow(const std::string& link, bool keep = false)
+// Where a link on the page leads - or "" where it may not.
+// A page from the network may not lead to the browser's own pages:
+// "about:history?clear=all" in a link must not empty the history,
+// whichever way the link is opened. (Typed into the address, it is the
+// person's own doing.)
+static std::string link_target(const std::string& link)
 {
     std::string target = is_about(link) ? link
                                         : resolve(url(cont.base), url(link)).str();
-    // A page from the network may not lead to the browser's own pages:
-    // "about:history?clear=all" in a link must not empty the history.
-    // (Typed into the address, it is the person's own doing.)
     if (is_about(target) && !is_about(cont.base)) {
         status_line = "Blocked: a page may not open " + target;
         std::printf("[web] blocked %s from %s\n", target.c_str(),
                     cont.base.c_str());
         std::fflush(stdout);
-        return;
+        return "";
     }
+    return target;
+}
+
+static void follow(const std::string& link, bool keep = false)
+{
+    std::string target = link_target(link);
+    if (target.empty())
+        return;
     // The same page with a fragment: a jump within it
     std::string here = cont.base.substr(0, cont.base.find('#'));
     if (link[0] == '#' || target.compare(0, here.size() + 1, here + "#") == 0) {
@@ -3371,11 +3381,11 @@ int main(int argc, char** argv)
                                          [](const position&) {});
                     doc->on_lbutton_up(px, py, ev.x, ev.y,
                                        [](const position&) {});
-                    std::string to =
-                        resolve(url(cont.base), url(cont.clicked)).str();
-                    if (!cont.clicked.empty() && (ev.val & 4))
+                    std::string to = cont.clicked.empty()
+                                         ? "" : link_target(cont.clicked);
+                    if (!to.empty() && (ev.val & 4))
                         open_in_tab_behind(to);
-                    else if (!cont.clicked.empty())
+                    else if (!to.empty())
                         open_in_new_window(to);
                 }
             } else if (ev.type == WEV_CLICK) {
@@ -3426,7 +3436,21 @@ int main(int argc, char** argv)
                                          [](const position&) {});
                     doc->on_lbutton_up(px, py, ev.x, ev.y,
                                        [](const position&) {});
-                    if (!cont.clicked.empty())
+                    // Ctrl and a link: a new tab, behind this one as
+                    // the middle button opens it - with Shift as well,
+                    // in front (as other browsers have it)
+                    if (!cont.clicked.empty() && (ev.val & WEV_MOD_CTRL) &&
+                        !cont.clicked_download) {
+                        std::string to = link_target(cont.clicked);
+                        if (!to.empty()) {
+                            std::printf("[web] ctrl-click: %s\n", to.c_str());
+                            std::fflush(stdout);
+                            if (ev.val & WEV_MOD_SHIFT)
+                                new_tab(to);
+                            else
+                                open_in_tab_behind(to);
+                        }
+                    } else if (!cont.clicked.empty())
                         follow(cont.clicked, cont.clicked_download);
                     else
                         click_form(px, py);

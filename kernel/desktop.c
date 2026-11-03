@@ -30,6 +30,7 @@
 #include "include/acpi.h"
 #include "include/io.h"
 #include "include/keyboard.h"
+#include "include/kbdmap.h"
 #include "include/exec.h"
 #include "include/fs.h"
 #include "include/io.h"
@@ -439,6 +440,8 @@ struct wevent {
     int32_t val;           /* the button mask */
 };
 #define WEV_NONE  0
+/* A click: 'val' is the buttons in its low bits, and from bit 8 on the
+   modifiers held with it (KBD_MOD_*): Ctrl and a link is a new tab */
 #define WEV_CLICK 1
 #define WEV_KEY   2
 /* The window is being closed - the application is being ASKED to end.
@@ -2799,7 +2802,8 @@ static void handle_input(int mx, int my, int buttons)
                 int cx = mx - (w->x + 1);
                 int cy = my - (w->y + TITLE_H + 1);
                 if (cx >= 0 && cx < w->cw && cy >= 0 && cy < w->ch) {
-                    win_enqueue(w, WEV_CLICK, cx, cy, buttons & 0x07);
+                    win_enqueue(w, WEV_CLICK, cx, cy,
+                                (buttons & 0x07) | kbdmap_mods() << 8);
                     /* And the beginning of a possible drag. A program
                        that does not care about dragging sees only the
                        click it already knew about. */

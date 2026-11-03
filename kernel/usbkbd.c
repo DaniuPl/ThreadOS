@@ -164,6 +164,7 @@ static void handle_report(void)
     if ((mods & 0x88) && !(prev_mods & 0x88))
         keyboard_inject(KEY_MENU);
     prev_mods = mods;
+    kbdmap_usb_mods(mods);
     /* The report says what is pressed NOW - a new key is one that was
        not in the previous report */
     for (int i = 0; i < 6; i++) {

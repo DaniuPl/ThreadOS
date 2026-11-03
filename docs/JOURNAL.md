@@ -6496,3 +6496,26 @@ works and is checked by `make test`.
       same to the byte, lossy ones too. In QEMU a page with a lossy, a
       palette and an alpha picture shows each exactly as libwebp reads
       it, laid on white. `make fuzz` takes WebP too.
+
+- [x] **Ctrl and a click: a link in a new tab** (kernel/kbdmap.c,
+      kernel/desktop.c, apps/browser/web.cpp, scripts/tests/t_webui.py)
+      A click now says what was held with it: WEV_CLICK's val keeps the
+      buttons in its low bits and from bit 8 on the modifiers
+      (WEV_MOD_SHIFT, _CTRL, _ALT), which kbdmap_mods() reports for the
+      PS/2 keyboard and the USB one alike - the USB driver hands its
+      modifier byte over with every report. No program compared val of
+      a click whole, so none sees a difference. In the browser Ctrl and
+      a click open a link in a tab behind this one, as the middle button
+      does, and Ctrl with Shift in a tab in front, as other browsers
+      have it.
+
+      Found on the way: the rule that a page from the network may not
+      open the browser's own pages held for a click only; the middle and
+      the right button opened about:history?clear=all from any page. The
+      rule is one function now, link_target(), which every way of
+      opening a link goes through.
+
+      The test holds Ctrl (and Shift) down through QMP while clicking a
+      link: a tab behind, its page the link's, then one in front; on a
+      served page Ctrl and the middle button on a link to
+      about:history?clear=all are both refused, and no tab opens.

@@ -84,6 +84,21 @@ int kbdmap_polish(char letter, int shift, char out[2])
 }
 
 static char more_byte;                 /* the second byte, still to come */
+static uint8_t usb_mods;
+
+void kbdmap_usb_mods(uint8_t mods)
+{
+    usb_mods = mods;
+}
+
+int kbdmap_mods(void)
+{
+    /* (the right Alt alone is AltGr: a letter's, not a modifier's) */
+    return ((shift_pressed || (usb_mods & 0x22)) ? KBD_MOD_SHIFT : 0) |
+           ((ctrl_pressed || (usb_mods & 0x11)) ? KBD_MOD_CTRL : 0) |
+           ((alt_pressed || (usb_mods & 0x04)) ? KBD_MOD_ALT : 0);
+}
+
 static int more_waiting;
 
 int kbdmap_more(char *out_char)

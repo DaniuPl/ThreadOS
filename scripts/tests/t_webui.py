@@ -16,6 +16,10 @@
   a page from the network cannot lead to those pages: a link to
   about:history?clear=all is refused, and the history stays
 
+  Ctrl and a click on a link open it in a tab behind this one; with
+  Shift as well, in a tab in front; the middle button and Ctrl alike
+  refuse a page's link to the browser's own pages
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -25,7 +29,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from webtest import *        # noqa: F401,F403
-from webtest import check, define, run, typed, visit
+from webtest import check, define, run, typed, visit, wait_title
 
 
 def ui(e):
@@ -178,8 +182,104 @@ def ui(e):
           title == "Web: Evil" and said.endswith("1 of 1"))
 
 
+def held(q, keys, down):
+    """Keys held down, or let go - while the mouse clicks"""
+    q.cmd({"execute": "input-send-event", "arguments": {"events": [
+        {"type": "key", "data": {"down": down,
+                                 "key": {"type": "qcode", "data": k}}}
+        for k in keys]}})
+    time.sleep(0.3)
+
+
+def ctrl_click(e):
+    q, sw, sh, w0, geom = e.q, e.sw, e.sh, e.w0, e.geom
+    cx, cy, bar, page = e.cx, e.cy, e.bar, e.page
+    away = (sw - 20, sh // 2)
+    tab_h, tab_max = define(SRC, "TAB_H"), define(SRC, "TAB_MAX")
+    strip = cy + bar + tab_h // 2
+
+    def tab_x(i, n):
+        tw = min(tab_max, (w0 - 16) // n)
+        return cx + 8 + i * tw + tw // 2, cx + 8 + i * tw + tw - 15
+
+    def tabs_said(seen, want, timeout=15):
+        end = time.time() + timeout
+        said = []
+        while time.time() < end:
+            said = re.findall(r"\[web\] tabs: (\d+), at (\d+)", q.serial()[seen:])
+            if said and said[-1] == want:
+                break
+            time.sleep(0.3)
+        return said[-1] if said else None
+
+    def link_click(colour, region, keys=(), button=None):
+        box, _ = pixels(q, *region, colour)
+        if not box:
+            return None
+        q.mouse_goto((box[0] + box[2]) // 2, box[3] - 2)
+        time.sleep(0.3)
+        held(q, keys, True)
+        if button:
+            q.mouse_button(True, button)
+            q.mouse_button(False, button)
+        else:
+            q.mouse_button(True)
+            q.mouse_button(False)
+        held(q, keys, False)
+        q.mouse_goto(*away)
+        return box
+
+    visit(e, "/page.html", "Web: Test page")
+    # (the menu's pages are in tabs of their own by now: counted from
+    # where things stand)
+    now = re.findall(r"\[web\] tabs: (\d+), at (\d+)", q.serial())
+    n, at = (int(now[-1][0]), int(now[-1][1])) if now else (1, 1)
+    page2 = (page[0], page[1] + (tab_h if n > 1 else 0), page[2] - 20, page[3])
+    seen = len(q.serial())
+    link = link_click(LINK, page2, ["ctrl"])
+    said = tabs_said(seen, (str(n + 1), str(at)))
+    time.sleep(1)
+    check(f"Ctrl and a click on a link open it in a tab behind this one "
+          f"({link}, {said}, {q.window_title(*geom)!r})",
+          said == (str(n + 1), str(at)) and
+          q.window_title(*geom) == "Web: Test page"
+          and "[web] ctrl-click: " in q.serial()[seen:])
+    q.click(tab_x(at, n + 1)[0], strip)            # the one after this
+    q.mouse_goto(*away)
+    got = wait_title(q, geom, "Web: Page two")
+    check(f"the new tab holds the page the link leads to ({got!r})",
+          got == "Web: Page two")
+    seen = len(q.serial())
+    q.click(tab_x(at, n + 1)[1], strip)            # its cross
+    q.mouse_goto(*away)
+    tabs_said(seen, (str(n), str(at)))
+    wait_title(q, geom, "Web: Test page")
+
+    seen = len(q.serial())
+    page2 = (page[0], page[1] + tab_h, page[2] - 20, page[3])
+    link_click(LINK, page2, ["ctrl", "shift"])
+    said = tabs_said(seen, (str(n + 1), str(at + 1)))
+    got = wait_title(q, geom, "Web: Page two")
+    check(f"with Shift as well, the tab opens in front ({said}, {got!r})",
+          said == (str(n + 1), str(at + 1)) and got == "Web: Page two")
+
+    visit(e, "/evil.html", "Web: Evil")
+    region = (page[0], page[1], page[2], page[3])
+    seen = len(q.serial())
+    link_click((0x80, 0x60, 0x40), region, ["ctrl"])
+    time.sleep(1.5)
+    link_click((0x80, 0x60, 0x40), region, button="middle")
+    time.sleep(1.5)
+    said = q.serial()[seen:]
+    check(f"Ctrl and the middle button alike refuse a page's link to "
+          f"about:history ({said.count('[web] blocked about:history')} "
+          f"refused, {q.window_title(*geom)!r})",
+          said.count("[web] blocked about:history?clear=all") == 2 and
+          "[web] tabs:" not in said and q.window_title(*geom) == "Web: Evil")
+
+
 def main():
-    return run("the browser's menu and its own pages", [ui])
+    return run("the browser's menu and its own pages", [ui, ctrl_click])
 
 
 sys.exit(main())

@@ -580,6 +580,11 @@ static inline void win_text(int winid, int x, int y, const char *s, int color)
    WEV_CLICK, so a program that knows only clicks does not take it for
    the left one. val: 2 right, 4 middle. */
 #define WEV_ALTCLICK 9
+/* What a WEV_CLICK's val holds above its buttons: the modifiers held
+   with the click */
+#define WEV_MOD_SHIFT 0x100
+#define WEV_MOD_CTRL  0x200
+#define WEV_MOD_ALT   0x400
 struct win_event {
     int32_t type;          /* WEV_* */
     int32_t x, y;          /* coordinates relative to the content area */

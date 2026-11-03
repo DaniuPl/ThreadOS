@@ -28,6 +28,16 @@ int kbdmap_feed(uint8_t scancode, char *out_char, int *fkey);
    1 = one more in *out_char. */
 int kbdmap_more(char *out_char);
 
+/* The modifiers held down now, on either keyboard: KBD_MOD_* together.
+   A click says what was held with it - Ctrl and a link is a new tab. */
+#define KBD_MOD_SHIFT 1
+#define KBD_MOD_CTRL  2
+#define KBD_MOD_ALT   4
+int kbdmap_mods(void);
+
+/* What the USB keyboard's last report held (its modifier byte) */
+void kbdmap_usb_mods(uint8_t mods);
+
 /* The two bytes of UTF-8 for AltGr and an ASCII letter, or 0 when that
    letter has none. Shared with the USB keyboard. */
 int kbdmap_polish(char letter, int shift, char out[2]);
