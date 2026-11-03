@@ -155,6 +155,10 @@ static std::string absolute(const std::string& base, const std::string& link)
 
 static bool get_url(const std::string& where, std::string& out,
                     const char* file);
+static bool is_network(const std::string& where);
+static bool cache_find(const std::string& where, std::string& out);
+static void fetch_many(const std::vector<std::string>& where,
+                       std::vector<std::string>& out, std::vector<int>& status);
 
 struct picture {
     int w = 0, h = 0;
@@ -626,24 +630,56 @@ class window_container : public document_container {
         return absolute(b, src ? src : "");
     }
 
-    // Fetched and unpacked while the page is read: the layout needs
-    // each picture's size before it can place anything after it
+    // A picture from the network is only noted while the page is read,
+    // and fetched with all the others the first time the layout asks
+    // for a size or a picture is drawn (flush_pictures): several at
+    // once, over kept connections. One from the disk, a data: address or
+    // the cache is unpacked at once.
+    std::vector<std::string> pending;
     void load_image(const char* src, const char* baseurl, bool) override
     {
         std::string where = full(src, baseurl);
         if (pictures.count(where) || !prefs.images)
             return;
         picture& pic = pictures[where];
-        std::string data;
-        bool mask = where.compare(0, 6, "mask:#") == 0;
-        if (get_url(mask ? where.substr(13) : where, data, ".web-image") &&
-            !decode_png(data, pic) && !decode_jpeg(data, pic) &&
+        std::string data, from = source_of(where);
+        if (is_network(from) && !cache_find(from, data)) {
+            pending.push_back(where);
+            return;
+        }
+        if (get_url(from, data, ".web-image"))
+            unpack(where, data, pic);
+    }
+    static std::string source_of(const std::string& where)
+    {
+        return where.compare(0, 6, "mask:#") == 0 ? where.substr(13) : where;
+    }
+    static void unpack(const std::string& where, const std::string& data, picture& pic)
+    {
+        if (!decode_png(data, pic) && !decode_jpeg(data, pic) &&
             !decode_gif(data, pic) && !decode_webp(data, pic) &&
             !decode_svg(data, pic))
             pic = picture();
-        if (mask && pic.w) {
+        if (where.compare(0, 6, "mask:#") == 0 && pic.w) {
             pic.masked = true;
             pic.tint = (uint32_t)std::strtoul(where.substr(6, 6).c_str(), nullptr, 16);
+        }
+    }
+    void flush_pictures()
+    {
+        if (pending.empty())
+            return;
+        std::vector<std::string> keys;
+        keys.swap(pending);
+        std::vector<std::string> from, data;
+        std::vector<int> status;
+        for (const auto& k : keys)
+            from.push_back(source_of(k));
+        fetch_many(from, data, status);
+        for (size_t i = 0; i < keys.size(); i++) {
+            picture& pic = pictures[keys[i]];
+            if (status[i] == 200)
+                unpack(keys[i], data[i], pic);
         }
     }
     static bool decode_svg(const std::string& data, picture& pic)
@@ -713,6 +749,7 @@ class window_container : public document_container {
     void get_image_size(const char* src, const char* baseurl,
                         size& sz) override
     {
+        flush_pictures();
         auto it = pictures.find(full(src, baseurl));
         sz.width = it == pictures.end() ? 0 : it->second.w;
         sz.height = it == pictures.end() ? 0 : it->second.h;
@@ -722,6 +759,7 @@ class window_container : public document_container {
     void draw_image(uint_ptr, const background_layer& l,
                     const std::string& u, const std::string& b) override
     {
+        flush_pictures();
         auto it = pictures.find(full(u.c_str(), b.c_str()));
         if (it == pictures.end() || !it->second.w)
             return;
@@ -1239,15 +1277,145 @@ static bool data_url(const std::string& where, std::string& out)
     return true;
 }
 
+// What came over the network for a page's parts - style sheets,
+// scripts, pictures - is kept while the browser runs: the next page of a
+// site has most of them again. Reload fetches them afresh. Pages
+// themselves, and what scripts ask for, are always fetched.
+static std::map<std::string, std::string> net_cache;
+static size_t net_cache_bytes;
+static const size_t NET_CACHE_MAX = 24u << 20;
+static const size_t NET_CACHE_ONE = 4u << 20;    // larger: not kept
+
+static bool is_network(const std::string& where)
+{
+    return where.compare(0, 7, "http://") == 0 ||
+           where.compare(0, 8, "https://") == 0;
+}
+
+static bool cache_find(const std::string& where, std::string& out)
+{
+    auto it = net_cache.find(where);
+    if (it == net_cache.end())
+        return false;
+    out = it->second;
+    return true;
+}
+
+static void cache_keep(const std::string& where, const std::string& data)
+{
+    if (data.size() > NET_CACHE_ONE)
+        return;
+    if (net_cache_bytes + data.size() > NET_CACHE_MAX) {
+        net_cache.clear();               // (full: started again)
+        net_cache_bytes = 0;
+    }
+    auto& slot = net_cache[where];
+    net_cache_bytes += data.size() - slot.size();
+    slot = data;
+}
+
+// Reload: what the page is made of comes afresh, its pictures too
+static void reload_fresh()
+{
+    net_cache.clear();
+    net_cache_bytes = 0;
+    for (auto it = pictures.begin(); it != pictures.end();)
+        if (is_network(it->first) || it->first.compare(0, 6, "mask:#") == 0)
+            it = pictures.erase(it);
+        else
+            ++it;
+}
+
 static bool get_url(const std::string& where, std::string& out,
                     const char* file)
 {
     if (where.compare(0, 5, "data:") == 0)
         return data_url(where, out);
-    if (where.compare(0, 7, "http://") == 0 ||
-        where.compare(0, 8, "https://") == 0)
-        return fetch(where, out, file);
+    if (is_network(where)) {
+        if (cache_find(where, out))
+            return true;
+        if (!fetch(where, out, file))
+            return false;
+        if (last_status == 200)
+            cache_keep(where, out);
+        return true;
+    }
     return read_file(where.c_str(), out);
+}
+
+// Many at once: FETCH_WORKERS httpget lists side by side, each over its
+// own kept connection, the addresses dealt out among them in turn.
+// out[i] and status[i] (0: nothing came) for where[i]; what came whole
+// goes into the cache.
+#define FETCH_WORKERS 4
+static void fetch_many(const std::vector<std::string>& where,
+                       std::vector<std::string>& out, std::vector<int>& status)
+{
+    size_t n = where.size();
+    out.assign(n, "");
+    status.assign(n, 0);
+    if (!n || stopping)
+        return;
+    int workers = (int)std::min<size_t>(FETCH_WORKERS, n);
+    std::vector<std::string> lists(workers);
+    auto file_of = [](size_t i) { return ".web-get-" + std::to_string(i); };
+    for (size_t i = 0; i < n; i++)
+        lists[i % workers] += where[i].substr(0, where[i].find('#')) + "\t" +
+                              file_of(i) + "\n";
+    std::vector<pid_t> pids;
+    for (int w = 0; w < workers; w++) {
+        std::string list = ".web-list-" + std::to_string(w);
+        if (!write_file(list.c_str(), lists[w]))
+            continue;
+        pid_t pid = fork();
+        if (pid == 0) {
+            char* args[] = {(char*)"httpget", (char*)"-c", (char*)COOKIE_JAR,
+                            (char*)"-b", (char*)list.c_str(), nullptr};
+            execv("httpget", args);
+            _exit(127);
+        }
+        if (pid > 0)
+            pids.push_back(pid);
+    }
+    loading = true;
+    std::string was = status_line;
+    for (int tick = 0; !pids.empty(); tick++) {
+        for (size_t k = 0; k < pids.size();) {
+            int st;
+            pid_t r = waitpid(pids[k], &st, WNOHANG);
+            if (r == pids[k] || r < 0)
+                pids.erase(pids.begin() + (long)k);
+            else
+                k++;
+        }
+        if (pids.empty())
+            break;
+        if (stop_asked()) {
+            for (pid_t p : pids) {
+                kill(p, SIGKILL);
+                int st;
+                waitpid(p, &st, 0);
+            }
+            stopping = true;
+            break;
+        }
+        if (tick % 5 == 4) {
+            status_line = "Loading " + std::to_string(n) + " pictures ...";
+            draw_chrome();
+        }
+        usleep(20000);
+    }
+    loading = false;
+    status_line = was;
+    for (size_t i = 0; i < n; i++) {
+        std::string st, f = file_of(i);
+        if (read_file((f + ".st").c_str(), st))
+            status[i] = std::atoi(st.c_str());
+        if (status[i] && read_file(f.c_str(), out[i]) && status[i] == 200)
+            cache_keep(where[i], out[i]);
+        std::remove(f.c_str());
+        std::remove((f + ".st").c_str());
+    }
 }
 
 // --- the browser ------------------------------------------------------
@@ -1651,6 +1819,7 @@ static void show_title();
 static std::shared_ptr<webjs::page> page_js;   // the current page's
 static std::string pending_nav;        // where a script sent the window
 static bool js_drew;                   // a script changed what shows
+static bool js_starting;               // the page's scripts run before its layout
 static element::ptr pending_submit;    // a form a script sent
 class el_input;
 static void untick_group(el_input* in);
@@ -1685,7 +1854,8 @@ static webjs::host js_host()
         if (!doc)
             return;
         doc->media_changed();          // (styled again from the sheets)
-        layout();
+        if (!js_starting)              // (open_page lays it out after them)
+            layout();
         js_drew = true;
     };
     h.navigate = [](const std::string& where) { pending_nav = where; };
@@ -2615,11 +2785,15 @@ static void open_page(const std::string& where0, bool remember,
         if (meta != encoding::null)
             page_charset = meta;
     }
-    layout();
-    // The page's scripts, once it is laid out as written - except the
-    // start page's, which has none
-    if (!is_about(target) && prefs.js)
+    // The page's scripts - except the start page's, which has none -
+    // before it is laid out: they ask nothing of the layout, and what
+    // they change would have it laid out twice
+    if (!is_about(target) && prefs.js) {
+        js_starting = true;
         page_js = webjs::start(doc, js_host());
+        js_starting = false;
+    }
+    layout();
     if (finding)
         find_all();                    // the find field stays, on the new page
     // (stopped while its pictures came: the page shows, without the rest)
@@ -3600,6 +3774,7 @@ int main(int argc, char** argv)
                         go_forward();
                     else if (b == 2 && !cont.base.empty()) {
                         int keep = cont.scroll;
+                        reload_fresh();
                         open_page(cont.base, false);
                         cont.scroll = keep;   // the same place, freshly
                         scroll_by(0);

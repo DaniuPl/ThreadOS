@@ -6625,3 +6625,44 @@ works and is checked by `make test`.
       flex gap, transform, hidden, selectors, images, media and the rest -
       to within a pixel of Chromium's boxes; t_webcompat checks that
       document.cookie keeps and drops what scripts set.
+
+- [x] **Pages load faster: pictures together, kept connections, a cache**
+      (user/uhttp.h, user/httpget.c, apps/browser/web.cpp,
+      scripts/ptest.py, scripts/tests/t_webfetch.py)
+      Timed in QEMU, Wikipedia's article took 19 s in the browser, and
+      a third of it was its 33 pictures, fetched one after another, each
+      by a new httpget with its own TCP connection - and its own TLS
+      handshake on a real https site. Now:
+
+      * uhttp.h has a connection that is kept (http_conn): a request asks
+        for keep-alive, and its response ends where Content-Length or the
+        last chunk says, not at the server's FIN; one the server has
+        meanwhile closed is tried once more on a new connection.
+      * httpget -b <list> fetches a list of addresses over kept
+        connections, each into its file with "<file>.st" beside it for
+        the status and type. With -c it sends the jar's cookies but does
+        not write the jar: several lists run at once.
+      * The browser notes a page's pictures while the page is read and
+        fetches them all the first time the layout asks for a size or
+        one is drawn: four lists side by side. Wikipedia's 28 came in
+        0.6 s instead of 5.4.
+      * Style sheets, scripts and pictures are kept for the session (up
+        to 24 MB): the next page of a site asks for none of them again.
+        Reload fetches them afresh. Pages, and what scripts ask for, are
+        always fetched.
+      * The page's scripts run before its first layout - they ask nothing
+        of it - so a script's changes do not have the page laid out
+        twice.
+
+      The rest of the time in QEMU is the CPU: QEMU here has no KVM and
+      runs the guest some fifty times slower than the host, which styles
+      the same page in 0.12 s.
+
+      The test: a page with eight pictures the server answers each after
+      0.4 s shows them all, one behind a redirect too, with one that is no
+      picture; each is asked for once, four at a time, over four
+      connections, all in about a second, with the jar's cookie; a second
+      page of the same style sheet and pictures asks for nothing but
+      itself and shows them; reload asks for all of them again. The test
+      server now gives each connection its own thread and logs every
+      request (REQUESTS).

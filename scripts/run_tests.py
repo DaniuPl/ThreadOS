@@ -33,7 +33,7 @@ GROUPS = [
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "settings", "netbar", "winmgr", "manywin", "maxwin", "clock", "gterm", "terminal", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gcode", "gtasks", "sysbar", "files", "filetree", "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw", "motion", "notify", "appear", "apps", "lock", "session", "polish", "wall", "icons", "users", "usersgui", "login", "multiuser", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
     "usbkbd64", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "usbnet", "rtl8168",
-    "libc", "browser", "web", "webform", "webtools", "webjs", "webui", "websvg", "webp", "webcompat", "webcss", "isoinstall", "wc", "update"
+    "libc", "browser", "web", "webform", "webtools", "webjs", "webui", "websvg", "webp", "webcompat", "webcss", "webfetch", "isoinstall", "wc", "update"
 ]
 
 

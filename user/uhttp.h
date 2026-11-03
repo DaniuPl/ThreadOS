@@ -2,7 +2,9 @@
  *
  * Shared by 'httpget' and the 'gweb' browser. It handles what real
  * servers require:
- *   - HTTP/1.1 with 'Connection: close' (the body ends at FIN),
+ *   - HTTP/1.1 with 'Connection: close' (the body ends at FIN), or a
+ *     connection kept for the next request (http_conn), where the body
+ *     ends where Content-Length or the last chunk says,
  *   - 'chunked' encoding (servers use it when they do not know the
  *     response length up front) glued across packet boundaries,
  *   - the Location header, so that a redirect can be followed,
@@ -76,6 +78,8 @@ struct http_result {
     int tls12;                   /* https: 1 = TLS 1.2 was agreed on */
     char location[2048];         /* the Location header (a redirect) - a
                                     signed download link runs to ~1 KiB */
+    int keep;                    /* the connection may carry the next request */
+    uint32_t received;           /* bytes that came at all, headers too */
 };
 
 /* The Set-Cookie headers of the last response, one a line - for a
@@ -222,16 +226,20 @@ static inline void http_set_post_type(const char *type)
 /* One request: a GET, or with a body a POST of a form's fields
    (application/x-www-form-urlencoded, what a browser sends). 'extra'
    is more header lines, each ending in CR LF - a Cookie one. */
-static inline int http_request(uint32_t ip, uint32_t port, const char *host,
-                               const char *path, int use_tls,
-                               const char *extra, const char *body,
-                               uint32_t body_len, http_sink sink, void *arg,
-                               struct http_result *res)
+/* One request and its response over a transport that is open. With
+   'keep' it asks the server to keep the connection, and the response
+   ends where its Content-Length or its last chunk says, not at FIN;
+   res->keep says whether the connection may carry the next. -1: the
+   request could not be sent. */
+static inline int http_exchange(struct http_transport *tp, const char *host,
+                                const char *path, int keep,
+                                const char *extra, const char *body,
+                                uint32_t body_len, http_sink sink, void *arg,
+                                struct http_result *res)
 {
     static char req[2560];
     static char buf[HTTP_CHUNK];
     static char hdr[HTTP_HDR_MAX];
-    static struct http_transport tp;
 
     res->status = 0;
     res->body_len = 0;
@@ -240,24 +248,15 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     res->verify_err = 0;
     res->tls12 = 0;
     res->location[0] = '\0';
+    res->keep = 0;
+    res->received = 0;
     http_set_cookies_len = 0;
     http_set_cookies[0] = '\0';
     http_content_type[0] = '\0';
-
-    tp.tls = use_tls;
-    tp.sock = -1;
-    if (use_tls) {
-        if (tls_connect(&tp.conn, ip, port, host, &http_tls_cfg) < 0) {
-            res->verify_err = tp.conn.verify_err;
-            return -1;
-        }
-        res->verified = tp.conn.verified;
-        res->verify_err = tp.conn.verify_err;
-        res->tls12 = tp.conn.v12;
-    } else {
-        tp.sock = tcp_connect(ip, port, 5000);
-        if (tp.sock < 0)
-            return -1;
+    if (tp->tls) {
+        res->verified = tp->conn.verified;
+        res->verify_err = tp->conn.verify_err;
+        res->tls12 = tp->conn.v12;
     }
 
     int r = 0;
@@ -271,8 +270,10 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
         req[r++] = *mid++;
     for (int i = 0; host[i] && r < (int)sizeof(req) - 256; i++)
         req[r++] = host[i];
-    const char *end = "\r\nUser-Agent: ThreadOS\r\nAccept: text/html\r\n"
-                      "Connection: close\r\n";
+    const char *end = keep ? "\r\nUser-Agent: ThreadOS\r\nAccept: text/html\r\n"
+                             "Connection: keep-alive\r\n"
+                           : "\r\nUser-Agent: ThreadOS\r\nAccept: text/html\r\n"
+                             "Connection: close\r\n";
     while (*end)
         req[r++] = *end++;
     if (body) {
@@ -304,15 +305,16 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     uint32_t xn = 0;
     while (extra && extra[xn])
         xn++;
-    if (http_tp_send(&tp, req, (uint32_t)r) < 0 ||
-        (xn && http_tp_send(&tp, extra, xn) < 0) ||
-        http_tp_send(&tp, "\r\n", 2) < 0 ||
-        (body && body_len && http_tp_send(&tp, body, body_len) < 0)) {
-        http_tp_close(&tp);
+    if (http_tp_send(tp, req, (uint32_t)r) < 0 ||
+        (xn && http_tp_send(tp, extra, xn) < 0) ||
+        http_tp_send(tp, "\r\n", 2) < 0 ||
+        (body && body_len && http_tp_send(tp, body, body_len) < 0))
         return -1;
-    }
 
     int hlen = 0, headers_done = 0;
+    /* where the body ends without FIN: its length, or none (-1) */
+    int64_t length = -1;
+    int http11 = 0, close_said = 0, done = 0;
     /* the 'chunked' decoder's states */
     enum { CH_SIZE, CH_DATA, CH_CRLF, CH_DONE } cstate = CH_SIZE;
     uint32_t cremain = 0;
@@ -320,9 +322,10 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
     int sizelen = 0;
 
     for (;;) {
-        int n = http_tp_recv(&tp, buf, sizeof(buf));
+        int n = http_tp_recv(tp, buf, sizeof(buf));
         if (n <= 0)
             break;                     /* 0 = end of stream, -1 = timeout */
+        res->received += (uint32_t)n;
 
         int i = 0;
 
@@ -344,6 +347,7 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
             if (hlen > 12)
                 res->status = (hdr[9] - '0') * 100 + (hdr[10] - '0') * 10 +
                               (hdr[11] - '0');
+            http11 = hlen > 8 && hdr[5] == '1' && hdr[7] == '1';
 
             /* headers line by line */
             for (int p = 0; p < hlen;) {
@@ -384,6 +388,15 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
                     }
                     http_content_type[k] = '\0';
                 }
+                v = uhttp_header(hdr + p, "content-length");
+                if (v) {
+                    length = 0;
+                    for (int k = 0; v[k] >= '0' && v[k] <= '9'; k++)
+                        length = length * 10 + (v[k] - '0');
+                }
+                v = uhttp_header(hdr + p, "connection");
+                if (v && (uhttp_lower(v[0]) == 'c'))
+                    close_said = 1;
                 v = uhttp_header(hdr + p, "location");
                 if (v) {
                     int k = 0;
@@ -401,13 +414,28 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
             }
             if (res->chunked)
                 cstate = CH_SIZE;
+            /* no body at all: 1xx, 204, 304, and the answer to a HEAD */
+            if (res->status == 204 || res->status == 304 ||
+                (res->status >= 100 && res->status < 200))
+                length = 0;
+            if (res->chunked)
+                length = -1;
+            if (length == 0) {
+                done = 1;
+                break;
+            }
         }
 
         /* the body */
         while (i < n) {
             if (!res->chunked) {
-                sink(buf + i, (uint32_t)(n - i), arg);
-                res->body_len += (uint32_t)(n - i);
+                uint32_t take = (uint32_t)(n - i);
+                if (length >= 0 && res->body_len + take >= (uint64_t)length) {
+                    take = (uint32_t)(length - res->body_len);
+                    done = 1;
+                }
+                sink(buf + i, take, arg);
+                res->body_len += take;
                 i = n;
                 break;
             }
@@ -460,12 +488,117 @@ static inline int http_request(uint32_t ip, uint32_t port, const char *host,
             i++;
         }
 
-        if (res->chunked && cstate == CH_DONE)
+        if (res->chunked && cstate == CH_DONE) {
+            done = 1;
+            break;
+        }
+        if (done)
             break;
     }
 
-    http_tp_close(&tp);
+    /* (a chunked body's trailer, its last CRLF, is not read: a keep-alive
+       answer that has one is not kept) */
+    res->keep = keep && done && http11 && !close_said &&
+                (!res->chunked || cstate == CH_DONE);
     return 0;
+}
+
+static inline int http_tp_open(struct http_transport *tp, uint32_t ip,
+                               uint32_t port, const char *host, int use_tls,
+                               struct http_result *res)
+{
+    tp->tls = use_tls;
+    tp->sock = -1;
+    if (use_tls) {
+        if (tls_connect(&tp->conn, ip, port, host, &http_tls_cfg) < 0) {
+            res->verify_err = tp->conn.verify_err;
+            return -1;
+        }
+        return 0;
+    }
+    tp->sock = tcp_connect(ip, port, 5000);
+    return tp->sock < 0 ? -1 : 0;
+}
+
+/* One request on its own connection, closed after it */
+static inline int http_request(uint32_t ip, uint32_t port, const char *host,
+                               const char *path, int use_tls,
+                               const char *extra, const char *body,
+                               uint32_t body_len, http_sink sink, void *arg,
+                               struct http_result *res)
+{
+    static struct http_transport tp;
+    res->verify_err = 0;
+    if (http_tp_open(&tp, ip, port, host, use_tls, res) < 0)
+        return -1;
+    int r = http_exchange(&tp, host, path, 0, extra, body, body_len, sink,
+                          arg, res);
+    http_tp_close(&tp);
+    return r;
+}
+
+/* A connection kept for the next request to the same server - what
+   saves a TCP and a TLS handshake for each picture of a page */
+struct http_conn {
+    struct http_transport tp;
+    int open;
+    uint32_t ip, port;
+    int tls;
+    char host[256];
+    uint32_t reused;             /* requests that went over a kept one */
+};
+
+static inline void http_conn_close(struct http_conn *c)
+{
+    if (c->open)
+        http_tp_close(&c->tp);
+    c->open = 0;
+}
+
+static inline int http_conn_request(struct http_conn *c, uint32_t ip,
+                                    uint32_t port, const char *host,
+                                    const char *path, int use_tls,
+                                    const char *extra, http_sink sink,
+                                    void *arg, struct http_result *res)
+{
+    int same = c->open && c->ip == ip && c->port == port && c->tls == use_tls;
+    if (same) {
+        int k = 0;
+        while (host[k] && host[k] == c->host[k])
+            k++;
+        same = host[k] == c->host[k];
+    }
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (!same) {
+            http_conn_close(c);
+            res->verify_err = 0;
+            if (http_tp_open(&c->tp, ip, port, host, use_tls, res) < 0)
+                return -1;
+            c->open = 1;
+            c->ip = ip;
+            c->port = port;
+            c->tls = use_tls;
+            int k = 0;
+            for (; host[k] && k < (int)sizeof(c->host) - 1; k++)
+                c->host[k] = host[k];
+            c->host[k] = '\0';
+        }
+        int r = http_exchange(&c->tp, host, path, 1, extra, 0, 0, sink, arg,
+                              res);
+        /* A kept connection the server has closed meanwhile answers
+           nothing: once more on a new one */
+        if (same && (r < 0 || res->received == 0)) {
+            http_conn_close(c);
+            same = 0;
+            continue;
+        }
+        if (same)
+            c->reused++;
+        if (r < 0 || !res->keep)
+            http_conn_close(c);
+        return r;
+    }
+    return -1;
 }
 
 static inline int http_get(uint32_t ip, uint32_t port, const char *host,

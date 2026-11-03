@@ -112,6 +112,10 @@ POSTED = []
 # body that is a list goes out a piece at a time, a second apart, with
 # no length given: a slow page
 ROUTES = {}
+# Every request start_http_server() answered: (start, end, request line,
+# connection) with time.monotonic() times - which came, in what order,
+# over how many connections and how many at once
+REQUESTS = []
 # A page with a link and enough text that it has to be scrolled
 LINK_PAGE = (b"<html><body><h1>The first page</h1>"
              + b"<p>A line filling page number one.</p>" * 40
@@ -1860,7 +1864,19 @@ def start_http_server():
         def log_message(self, *args):
             pass
 
-    srv = socketserver.TCPServer(("0.0.0.0", 0), Handler)
+        def handle_one_request(self):
+            start = time.monotonic()
+            super().handle_one_request()
+            # (a connection's end reads an empty line: the request line
+            # of the one before is still there, and is no new request)
+            if getattr(self, "raw_requestline", b""):
+                REQUESTS.append((start, time.monotonic(), self.requestline,
+                                 id(self.connection)))
+
+    # a thread for each connection: a browser fetches several things at
+    # once, and keeps a connection open for the next
+    srv = socketserver.ThreadingTCPServer(("0.0.0.0", 0), Handler)
+    srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv.server_address[1], srv.shutdown
 
