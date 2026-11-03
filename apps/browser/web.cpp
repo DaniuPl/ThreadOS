@@ -22,6 +22,7 @@
 
 #include <litehtml.h>
 #include <litehtml/el_text.h>
+#include <litehtml/el_image.h>
 #include <litehtml/render_item.h>
 #include <litehtml/url.h>
 #include <cstdio>
@@ -42,6 +43,7 @@ extern "C" {
 #include "uinflate.h"
 #include "ujpeg.h"
 #include "ugif.h"
+#include "usvg.h"
 #include "ucookie.h"
 }
 
@@ -111,6 +113,11 @@ static bool get_url(const std::string& where, std::string& out,
 struct picture {
     int w = 0, h = 0;
     std::vector<uint32_t> px;         // 0xRRGGBB, already on the backdrop
+    // An SVG is kept as its text and drawn at the size it is shown at -
+    // sharp at any zoom; the last drawing is kept for the next frame
+    std::string svg;
+    int dw = 0, dh = 0;
+    std::vector<unsigned char> drawn;  // RGBA, dw by dh
 };
 
 // What a picture's transparent parts are laid on, once and for all: a
@@ -343,6 +350,29 @@ static bool decode_ico(const std::string& f, picture& pic)
 
 static std::map<std::string, picture> pictures;
 
+// The solid fills of this frame, in the order they were drawn: what an
+// SVG's transparent parts are laid on is the last of them under it.
+// (The window cannot be read back; but backgrounds are drawn before
+// what stands on them.)
+struct fill_rect {
+    int x, y, w, h;
+    uint32_t rgb;
+};
+static std::vector<fill_rect> fills;
+
+static uint32_t under(int x, int y)
+{
+    for (size_t i = fills.size(); i-- > 0;) {
+        const fill_rect& f = fills[i];
+        if (x >= f.x && x < f.x + f.w && y >= f.y && y < f.y + f.h)
+            return f.rgb;
+    }
+    return 0xFFFFFF;                   // the page's own white
+}
+
+// Inline <svg>s, their markup by the name their element goes by
+static int inline_svgs;
+
 // --- selecting text --------------------------------------------------
 
 // litehtml has no selection of its own; what it has is every run of
@@ -512,6 +542,8 @@ class window_container : public document_container {
 
     std::string full(const char* src, const char* baseurl) const
     {
+        if (src && !strncmp(src, "svg-inline:", 11))
+            return src;                // (no address: the page's own)
         std::string b = baseurl && *baseurl ? baseurl : base;
         return resolve(url(b), url(src ? src : "")).str();
     }
@@ -527,8 +559,66 @@ class window_container : public document_container {
         std::string data;
         if (get_url(where, data, ".web-image") &&
             !decode_png(data, pic) && !decode_jpeg(data, pic) &&
-            !decode_gif(data, pic))
+            !decode_gif(data, pic) && !decode_svg(data, pic))
             pic = picture();
+    }
+    static bool decode_svg(const std::string& data, picture& pic)
+    {
+        if (svg_size(data.data(), (unsigned)data.size(), &pic.w, &pic.h) < 0)
+            return false;
+        pic.svg = data;
+        return true;
+    }
+    // An SVG at the size it is shown at, laid on what is under it
+    void draw_svg(picture& pic, int x0, int y0, int ow, int oh)
+    {
+        if ((long)ow * oh > 2048L * 2048)
+            return;
+        if (pic.dw != ow || pic.dh != oh) {
+            unsigned char* rgba = nullptr;
+            int nw, nh;
+            const char* why;
+            pic.drawn.clear();
+            pic.dw = ow;
+            pic.dh = oh;
+            if (svg_render(pic.svg.data(), (unsigned)pic.svg.size(), ow, oh,
+                           &rgba, &nw, &nh, &why) == 0) {
+                pic.drawn.assign(rgba, rgba + (size_t)ow * oh * 4);
+                std::free(rgba);
+            }
+        }
+        if (pic.drawn.empty())
+            return;
+        uint32_t keep = backdrop;
+        backdrop = under(x0 + ow / 2, y0 + oh / 2);
+        static std::vector<uint32_t> row;
+        for (int y = 0; y < oh; y++) {
+            int wy = y0 + y;
+            if (wy < page_top() || wy >= page_top() + page_h())
+                continue;
+            // Runs of what is not wholly transparent: the rest is left
+            // as it was - text, a gradient, anything under the picture
+            const unsigned char* p = &pic.drawn[(size_t)y * ow * 4];
+            for (int x = 0; x < ow;) {
+                while (x < ow && p[x * 4 + 3] == 0)
+                    x++;
+                int start = x;
+                row.clear();
+                while (x < ow && p[x * 4 + 3] != 0 && x - start < 256) {
+                    row.push_back(on_backdrop(p[x * 4], p[x * 4 + 1],
+                                              p[x * 4 + 2], p[x * 4 + 3]));
+                    x++;
+                }
+                int from = x0 + start < 0 ? -(x0 + start) : 0;
+                int n = (int)row.size();
+                if (x0 + start + n > width)
+                    n = width - x0 - start;
+                if (n > from)
+                    win_blit32(win, x0 + start + from, wy, n - from, 1,
+                               row.data() + from);
+            }
+        }
+        backdrop = keep;
     }
     void get_image_size(const char* src, const char* baseurl,
                         size& sz) override
@@ -545,12 +635,16 @@ class window_container : public document_container {
         auto it = pictures.find(full(u.c_str(), b.c_str()));
         if (it == pictures.end() || !it->second.w)
             return;
-        const picture& pic = it->second;
         const position& o = l.origin_box;
         int ow = zs(o.width), oh = zs(o.height);
         if (ow <= 0 || oh <= 0)
             return;
         int x0 = sx(o.x), y0 = sy(o.y);
+        if (!it->second.svg.empty()) {
+            draw_svg(it->second, x0, y0, ow, oh);
+            return;
+        }
+        const picture& pic = it->second;
         static std::vector<uint32_t> row;
         for (int y = 0; y < oh; y++) {
             int wy = y0 + y;
@@ -579,6 +673,9 @@ class window_container : public document_container {
             return;
         const position& b = l.border_box;
         int r = (int)l.border_radius.top_left_x;
+        if (c.alpha == 255)
+            fills.push_back({sx(b.x), sy(b.y), zs(b.width), zs(b.height),
+                             rgb(c)});
         if (r > 0)
             ud_round(win, sx(b.x), sy(b.y), zs(b.width), zs(b.height), zs(r),
                      rgb(c));
@@ -1044,6 +1141,75 @@ static std::vector<std::string> wrap(const std::string& s, int width,
     return out;
 }
 
+// An <svg> in the page itself: litehtml would lay its shapes out as
+// unknown elements of no size. Instead it is a picture: its markup,
+// written back out of the tree, drawn by usvg.h like an .svg file.
+class el_svg : public el_image {
+public:
+    explicit el_svg(const document::ptr& d) : el_image(d) {}
+    void parse_attributes() override
+    {
+        std::string markup;
+        write(shared_from_this(), markup);
+        std::string key = "svg-inline:" + std::to_string(++inline_svgs);
+        picture& pic = pictures[key];
+        pic = picture();
+        if (svg_size(markup.data(), (unsigned)markup.size(), &pic.w, &pic.h) == 0)
+            pic.svg = markup;
+        set_attr("src", key.c_str());
+        el_image::parse_attributes();
+    }
+
+private:
+    // HTML's parser hands names over in lower case, and SVG's has
+    // capitals in them
+    static const char* svg_case(const std::string& n)
+    {
+        static const char* names[] = {
+            "viewBox", "preserveAspectRatio", "linearGradient",
+            "radialGradient", "gradientUnits", "gradientTransform",
+            "spreadMethod", "clipPath", "clipPathUnits", "textPath",
+            "foreignObject", "patternUnits", "stdDeviation"};
+        for (const char* x : names)
+            if (!strcasecmp(x, n.c_str()))
+                return x;
+        return nullptr;
+    }
+    // (m_attrs is protected; a pointer to the member, taken here, reads
+    // it in any tag)
+    struct peek : html_tag {
+        static const string_map& attrs(const html_tag* t)
+        {
+            static string_map html_tag::*m = &peek::m_attrs;
+            return t->*m;
+        }
+    };
+    static void write(const element::ptr& el, std::string& out)
+    {
+        if (el->is_text()) {
+            std::string t;
+            el->get_text(t);
+            out += html_escape(t);
+            return;
+        }
+        auto tag = std::dynamic_pointer_cast<html_tag>(el);
+        if (!tag)
+            return;
+        std::string name = el->get_tagName();
+        const char* fixed = svg_case(name);
+        out += "<" + std::string(fixed ? fixed : name.c_str());
+        for (auto& a : peek::attrs(tag.get())) {
+            const char* an = svg_case(a.first);
+            out += " " + std::string(an ? an : a.first.c_str()) + "=\"" +
+                   html_escape(a.second) + "\"";
+        }
+        out += ">";
+        for (auto& c : el->children())
+            write(c, out);
+        out += "</" + std::string(fixed ? fixed : name.c_str()) + ">";
+    }
+};
+
 class el_input : public html_tag {
   public:
     std::string type, name, value, placeholder;
@@ -1177,6 +1343,8 @@ element::ptr window_container::create_element(
     // and the page's scripts need both. (The master style sheet hides it.)
     if (!strcmp(tag, "script"))
         return std::make_shared<html_tag>(d);
+    if (!strcmp(tag, "svg"))
+        return std::make_shared<el_svg>(d);
     if (strcmp(tag, "input") && strcmp(tag, "button") &&
         strcmp(tag, "select") && strcmp(tag, "textarea"))
         return nullptr;
@@ -2899,6 +3067,7 @@ static void draw()
 {
     int w = cont.win;
     runs.clear();
+    fills.clear();
     lit_all.clear();
     lit_now.clear();
     for (size_t i = 0; finding && i < matches.size(); i++)

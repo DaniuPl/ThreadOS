@@ -55,9 +55,13 @@ def pages(e):
     check(f"the typed address was fetched from the host and the "
           f"title bar took the page's <title> ({got!r})",
           got == "Web: Test page")
-    check("the program says what it opened",
-          f"[web] opened http://10.0.2.2:{port}/page.html"
-          in q.serial())
+    # (the title comes before the drawing: on a loaded host, seconds)
+    opened = f"[web] opened http://10.0.2.2:{port}/page.html"
+    end = time.time() + 20
+    while time.time() < end and (opened not in q.serial() or
+                                 pixels(q, *page, RED)[1] <= 150):
+        time.sleep(0.5)
+    check("the program says what it opened", opened in q.serial())
 
     mid = (page[0] + page[2]) // 2
     box, n_red = pixels(q, *page, RED)

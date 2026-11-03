@@ -6428,3 +6428,39 @@ works and is checked by `make test`.
       registers left locked, EOR left out, the CRC left on, short frames
       unpadded, the PHY asked the wrong way, descriptors not handed back
       - the test fails each time. The real card is still to be seen.
+
+- [x] **SVG pictures in the browser** (user/usvg.h, apps/browser/web.cpp,
+      scripts/tests/t_websvg.py, scripts/svgref.py)
+      Logos and icons on today's sites are SVG, as files and written
+      into the page; the browser showed neither. usvg.h draws the part
+      of SVG they are made of: the shapes and paths with every command
+      (arcs too), groups and transforms, viewBox and
+      preserveAspectRatio, nested <svg>, <use> of an element or a
+      <symbol>, fill and stroke with opacity, nonzero and evenodd,
+      joins and caps, linear and radial gradients (with href), and the
+      class rules of a <style>. Every shape becomes polygons - a stroke
+      the quadrilaterals along it and the pieces at its joins and ends,
+      all of one orientation, so the nonzero rule makes their union -
+      filled along four scanlines a row, each counting the exact share
+      of a pixel it covers. Not yet: text, clipping, masks, filters,
+      patterns, dashes.
+
+      An .svg is kept as text and drawn at the size it is shown at, so
+      it is sharp at any zoom. An inline <svg> becomes a picture of its
+      own markup, written back out of the tree - with the capitals put
+      back in viewBox and linearGradient, which HTML's parser lowers.
+      The window cannot be read back, so what is transparent is left
+      undrawn, and an edge is blended with the last solid fill drawn
+      under it this frame.
+
+      Tested against librsvg, GNOME's renderer, reached through ctypes
+      (scripts/svgref.py): eleven pictures, one per part of SVG
+      (scripts/tests/svgcases.py), agree with it to a mean difference
+      under 0.2 of 255 on the host; in QEMU a page shows one at twice
+      its size, one with gradients and an inline icon on a dark
+      background, each agreeing with librsvg to under 0.1. With the
+      viewBox's capitals not put back, or the edges blended on white,
+      the test fails. `make fuzz` takes SVG too: it found a read past
+      the end of a tag and NaN coordinates reaching an index, both
+      fixed. t_web now waits for its page to be drawn, not just named:
+      on a loaded host the title came seconds before the pixels.

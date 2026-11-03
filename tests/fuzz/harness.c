@@ -7,7 +7,7 @@
  * scripts/fuzz_parsers.py feeds it thousands of cases made by damaging
  * data that was correct.
  *
- * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif> <file>
+ * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif|svg> <file>
  */
 
 #include <stdio.h>
@@ -21,6 +21,7 @@
 #include "ujpeg.h"
 #include "ucookie.h"
 #include "ugif.h"
+#include "usvg.h"
 
 #define MAX_INPUT (1 << 20)
 
@@ -217,6 +218,22 @@ static void run_gif(const unsigned char *data, size_t len)
     free(out);
 }
 
+/* An SVG drawn at its own size and at a size of its own choosing:
+   the parser, the paths, the strokes and the fills all go through it */
+static void run_svg(const unsigned char *data, size_t len)
+{
+    unsigned char *px = 0;
+    int w = 0, h = 0;
+    const char *why = "";
+    if (svg_render((const char *)data, (unsigned)len, 64, 48, &px, &w, &h,
+                   &why) == 0)
+        free(px);
+    if (w > 0 && h > 0 && w <= 512 && h <= 512 &&
+        svg_render((const char *)data, (unsigned)len, 0, 0, &px, &w, &h,
+                   &why) == 0)
+        free(px);
+}
+
 /* Not a fuzz target either: the pixels decoded, "w h" and then RGBA in
    hex, for scripts/fuzz_parsers.py to hold against Pillow's */
 static void run_gifpixels(const unsigned char *data, size_t len)
@@ -296,8 +313,10 @@ int main(int argc, char **argv)
         run_gif(input, len);
     else if (!strcmp(argv[1], "gifpixels"))
         run_gifpixels(input, len);
+    else if (!strcmp(argv[1], "svg"))
+        run_svg(input, len);
     else {
-        fprintf(stderr, "nieznany parser: %s\n", argv[1]);
+        fprintf(stderr, "no such parser: %s\n", argv[1]);
         free(input);
         return 2;
     }

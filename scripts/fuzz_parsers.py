@@ -59,7 +59,7 @@ def build(workdir):
     binary = os.path.join(workdir, "harness")
     cmd = ["gcc", "-I", inc, "-fsanitize=address,undefined",
            "-fno-omit-frame-pointer", "-g", "-O1", "-Wall",
-           "-o", binary, os.path.join(FUZZ, "harness.c")]
+           "-o", binary, os.path.join(FUZZ, "harness.c"), "-lm"]
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:4000])
@@ -171,7 +171,7 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": [], "cookie": [], "gif": []}
+           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -215,6 +215,11 @@ def seeds(workdir):
     out["inflate"].append(raw.compress(body) + raw.flush())
 
     out["gif"] += [g for g, _ in gif_samples()]
+
+    # The pictures the SVG test draws: every part of SVG it knows
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "tests"))
+    from svgcases import CASES             # noqa: E402
+    out["svg"] += [svg.encode() for _, _, _, svg in CASES]
 
     # Set-Cookie headers as sites send them, a line each
     out["cookie"].append(
