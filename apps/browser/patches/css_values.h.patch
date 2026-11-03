@@ -1,0 +1,24 @@
+overflow: clip - clipped as overflow: hidden is, the last in the list so
+that every test of 'more than visible' takes it in.
+
+--- a/include/litehtml/css_values.h
++++ b/include/litehtml/css_values.h
+@@ -425,7 +425,7 @@
+     // ==========================================================
+     // CSS Property: overflow
+     // ==========================================================
+-    inline constexpr auto overflow_strings = split_css_values<6>("visible;hidden;scroll;auto;no-display;no-content");
++    inline constexpr auto overflow_strings = split_css_values<7>("visible;hidden;scroll;auto;no-display;no-content;clip");
+ 
+     enum overflow
+     {
+@@ -434,7 +434,8 @@
+         overflow_scroll,
+         overflow_auto,
+         overflow_no_display,
+-        overflow_no_content
++        overflow_no_content,
++        overflow_clip
+     };
+ 
+     // ==========================================================

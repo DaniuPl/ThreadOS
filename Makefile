@@ -699,18 +699,34 @@ $(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
 	$(CXX) $(CXX64_FLAGS) -Wall -c $< -o $@
 
 # litehtml (third_party/litehtml, upstream unchanged) lays out HTML and
-# CSS; gumbo, inside it, parses the HTML. Three of its files are built
-# from a patched copy - apps/browser/patches says what and why.
+# CSS; gumbo, inside it, parses the HTML. The files in LH_PATCHED are
+# built from a patched copy - apps/browser/patches says what and why.
 LH_DIR     := third_party/litehtml
-LH_PATCHED := encodings url document
+LH_PATCHED := encodings url document css_length
 LH_SRC     := $(filter-out $(LH_PATCHED),$(basename $(notdir $(wildcard $(LH_DIR)/src/*.cpp))))
 GUMBO_SRC  := $(basename $(notdir $(wildcard $(LH_DIR)/src/gumbo/src/*.c)))
 LH_OBJS    := $(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_SRC) $(LH_PATCHED)) \
               $(patsubst %,$(BUILD)/litehtml/gumbo-%.o,$(GUMBO_SRC))
-LH_HDRS    := $(wildcard $(LH_DIR)/include/*.h $(LH_DIR)/include/litehtml/*.h \
-                         $(LH_DIR)/src/*.h)
-LH_INC     := -I$(LH_DIR)/include -I$(LH_DIR)/include/litehtml \
+# Headers are patched as the sources are: the include directory is
+# copied into the build with apps/browser/patches/<name>.h.patch applied
+# to <name>.h - all of it, since a header finds the others beside it
+# first - and third_party/litehtml stays as upstream has it
+LH_HDR_PATCHES := $(wildcard apps/browser/patches/*.h.patch)
+LH_INC_DIR := $(BUILD)/litehtml/inc
+LH_HDRS    := $(LH_INC_DIR)/.stamp $(wildcard $(LH_DIR)/src/*.h)
+LH_INC     := -I$(LH_INC_DIR) -I$(LH_INC_DIR)/litehtml \
               -I$(LH_DIR)/src -I$(LH_DIR)/src/gumbo/src
+
+$(LH_INC_DIR)/.stamp: $(wildcard $(LH_DIR)/include/*.h $(LH_DIR)/include/litehtml/*.h) \
+                      $(LH_HDR_PATCHES) Makefile
+	@set -e; mkdir -p $(LH_INC_DIR)/litehtml; \
+	cp -f $(LH_DIR)/include/*.h $(LH_INC_DIR)/; \
+	cp -f $(LH_DIR)/include/litehtml/*.h $(LH_INC_DIR)/litehtml/; \
+	for p in $(LH_HDR_PATCHES); do \
+	    h=$(LH_INC_DIR)/litehtml/$$(basename $$p .patch); \
+	    sed 's/\r$$//' $$h > $$h.orig; \
+	    sed 's/\r$$//' $$p | patch -s -o $$h $$h.orig; \
+	done; touch $@
 
 $(BUILD)/litehtml:
 	mkdir -p $(BUILD)/litehtml

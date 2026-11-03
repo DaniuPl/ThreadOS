@@ -97,7 +97,7 @@ def tools(e):
     saved = []
     for k in range(2):
         seen = len(q.serial())
-        q.click((link[0] + link[2]) // 2, link[3] - 3)
+        q.click(*on_link(q, link, BROWN))
         q.mouse_goto(sw - 20, sh // 2)
         end = time.time() + 20
         m = None
@@ -230,7 +230,7 @@ def tools(e):
     # --- a link into a new window --------------------------------
     go("/page.html", "Web: Test page")
     link, _ = pixels(q, page[0], page[1], page[2] - 20, page[3], LINK)
-    q.mouse_goto((link[0] + link[2]) // 2, link[3] - 2)
+    q.mouse_goto(*on_link(q, link, LINK))
     time.sleep(0.3)
     q.mouse_right_click()
     q.n_win += 1
@@ -267,7 +267,7 @@ def tools(e):
           "[web] zoom 150%" in q.serial()[seen:] and w_0 > 0 and
           abs(w_1 - w_0 * 1.5) <= w_0 * 0.04)
     link, _ = pixels(q, page[0], page[1], page[2] - 20, page[3], LINK)
-    q.click((link[0] + link[2]) // 2, link[3] - 2)
+    q.click(*on_link(q, link, LINK))
     q.mouse_goto(sw - 20, sh // 2)
     got = wait_title(q, geom, "Web: Page two")
     check(f"a click on the link where the zoom drew it follows it "
@@ -360,7 +360,7 @@ def tools(e):
     time.sleep(1)
     link, _ = pixels(q, page2[0], page2[1], page2[2] - 20, page2[3], LINK)
     seen = len(q.serial())
-    q.mouse_goto((link[0] + link[2]) // 2, link[3] - 2)
+    q.mouse_goto(*on_link(q, link, LINK))
     time.sleep(0.3)
     q.mouse_button(True, "middle")
     q.mouse_button(False, "middle")

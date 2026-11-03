@@ -6551,3 +6551,34 @@ works and is checked by `make test`.
       in quirks mode and in the middle with a doctype; a style sheet at
       an address of 583 characters is fetched; and URL takes nine
       addresses apart, eleven parts each, exactly as Node.js does.
+
+- [x] **CSS custom properties, calc() and clipping, held against Chromium**
+      (apps/browser/patches/css_length.patch, css_length.h.patch,
+      css_values.h.patch, document.patch, apps/browser/web.cpp,
+      kernel/desktop.c, user/udraw.h, scripts/tests/cssprobes.py,
+      scripts/cssref.py, scripts/tests/t_webcss.py)
+      Pages of coloured boxes with no text ("probes"), one for each part
+      of CSS that modern sites lean on, are drawn by the browser and by
+      Chromium at the same width; where each colour lands is compared
+      box by box, and fonts do not come into it.
+
+      * calc(), min(), max() and clamp(): litehtml took a length as one
+        number and one unit. A length now can also hold an expression
+        tree, worked out once the percentages in it have a base: units
+        other than % are made pixels when the style is computed, and
+        what is left is evaluated against the containing block's width.
+        litehtml's headers are third-party code too, so they are copied
+        into the build and patched there (the *.h.patch files).
+      * overflow: hidden and overflow: clip cut a box's children off at
+        its edge. The compositor has a clip rectangle per window
+        (WD_CLIP), which every drawing operation and blit keeps inside;
+        the browser sets it from litehtml's set_clip()/del_clip() stack.
+      * The default font is 16 px, as in every other browser: rem and em
+        in calc() came out a pixel short at 15.
+      * var() was already there; the probe confirms it, fallbacks too.
+
+      The test: the probes for var, calc, overflow, fixed and media are
+      within a pixel of Chromium's boxes (stored in cssref.json, which
+      scripts/cssref.py makes with Playwright). The probes for
+      transform, flex gap, grid, grid areas, :has() and clip-path fail
+      still and are not held yet; they are what comes next.

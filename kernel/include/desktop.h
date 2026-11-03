@@ -75,6 +75,10 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
 #define WD_CELLS   9
 #define WD_LTEXT   10
 #define WD_LMEASURE 11
+/* From now on, draw only inside x, y, w, h (in the content's
+   coordinates); w or h 0 draws everywhere again. For a web page's boxes
+   that hide what overflows them. */
+#define WD_CLIP    12
 
 struct win_draw {
     int op;

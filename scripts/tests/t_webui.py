@@ -216,7 +216,7 @@ def ctrl_click(e):
         box, _ = pixels(q, *region, colour)
         if not box:
             return None
-        q.mouse_goto((box[0] + box[2]) // 2, box[3] - 2)
+        q.mouse_goto(*on_link(q, box, colour))
         time.sleep(0.3)
         held(q, keys, True)
         if button:

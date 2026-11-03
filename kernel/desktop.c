@@ -491,6 +491,9 @@ struct window {
        0x00RRGGBB. The compositor does not care which: it composes one
        with a row copy and the other a pixel at a time. */
     int truecolour;
+    /* What the program's drawing is held to (WD_CLIP), in its content's
+       coordinates: a box that hides what overflows it, in a web page */
+    int clip, clx, cly, clw, clh;
     uint32_t content_bytes;   /* what was taken for it, so it can go back */
     int cw, ch;            /* dimensions of the content area */
     /* ... and of the buffer, which is the panel's pixels: at a scale of
@@ -5786,6 +5789,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         memset(buf, COL_WIN, bytes);       /* a grey background to start with */
         struct window *w = &wins[i];
         w->truecolour = 0;                 /* indices until asked otherwise */
+        w->clip = 0;
         w->content_bytes = bytes;
         w->w = cw + 2;
         w->h = ch + TITLE_H + 2;
@@ -5975,12 +5979,14 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
         /* A picture has no outline to draw again at the panel's size:
            each of its pixels is the block it covers */
         for (int row = 0; row < h; row++) {
-            if (y + row < 0 || y + row >= win->ch)
+            if (y + row < 0 || y + row >= win->ch ||
+                (win->clip && (y + row < win->cly || y + row >= win->cly + win->clh)))
                 continue;
             const uint32_t *src = pixels + (long)row * w;
             int py0 = P(y + row), py1 = P(y + row + 1);
             for (int col = 0; col < w; col++) {
-                if (x + col < 0 || x + col >= win->cw)
+                if (x + col < 0 || x + col >= win->cw ||
+                    (win->clip && (x + col < win->clx || x + col >= win->clx + win->clw)))
                     continue;
                 buf_prect(win, P(x + col), py0, P(x + col + 1), py1, src[col]);
             }
@@ -5988,16 +5994,23 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
         return 0;
     }
 
+    /* (held to the clip, when there is one) */
+    int lo_x = win->clip ? win->clx : 0, hi_x = win->clip ? win->clx + win->clw : win->cw;
+    int lo_y = win->clip ? win->cly : 0, hi_y = win->clip ? win->cly + win->clh : win->ch;
+    if (lo_x < 0) lo_x = 0;
+    if (lo_y < 0) lo_y = 0;
+    if (hi_x > win->cw) hi_x = win->cw;
+    if (hi_y > win->ch) hi_y = win->ch;
     for (int row = 0; row < h; row++) {
         int dy = y + row;
-        if (dy < 0 || dy >= win->ch)
+        if (dy < lo_y || dy >= hi_y)
             continue;
         /* A row that lands whole inside the window is a copy - which
            is the whole point of having asked for this format. */
         const uint32_t *src = pixels + (long)row * w;
         uint32_t *dst = (uint32_t *)win->content + (long)dy * win->cw;
-        int from = x < 0 ? -x : 0;
-        int to = x + w > win->cw ? win->cw - x : w;
+        int from = x < lo_x ? lo_x - x : 0;
+        int to = x + w > hi_x ? hi_x - x : w;
         for (int col = from; col < to; col++)
             dst[x + col] = src[col];
     }
@@ -6017,12 +6030,49 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
+    if (d->op == WD_CLIP) {            /* w or h 0: no clip */
+        win->clip = d->w > 0 && d->h > 0;
+        win->clx = d->x;
+        win->cly = d->y;
+        win->clw = d->w;
+        win->clh = d->h;
+        return 0;
+    }
     if (!win->truecolour && desktop_win_truecolour(winid, owner) < 0)
         return -1;
     /* The window's own pixels, said explicitly: the compositor may be
-       in the middle of a frame on another core, drawing somewhere else */
+       in the middle of a frame on another core, drawing somewhere else.
+       With a clip they are the clip's part of them, and what is drawn
+       is moved by as much - so that whatever an operation draws, it
+       cannot leave the box. */
     struct gfx_surface t = { (uint32_t *)win->content, win->pcw, win->pch,
                              win->pcw, video_k() };
+    struct win_draw moved = *d;
+    if (win->clip) {
+        int x0 = P(win->clx), y0 = P(win->cly);
+        int x1 = P(win->clx + win->clw), y1 = P(win->cly + win->clh);
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (x1 > win->pcw) x1 = win->pcw;
+        if (y1 > win->pch) y1 = win->pch;
+        if (x1 <= x0 || y1 <= y0) {
+            /* (nothing of it shows; a text still says where it ends) */
+            if ((d->op == WD_TEXT || d->op == WD_LTEXT) && s)
+                return d->x + ui_font_width(font, px, d->op == WD_LTEXT
+                                                          ? locale_text(s) : s);
+            return d->op == WD_TEXT || d->op == WD_LTEXT || d->op == WD_CELLS ? d->x : 0;
+        }
+        t.px += (long)y0 * win->pcw + x0;
+        t.w = x1 - x0;
+        t.h = y1 - y0;
+        moved.x -= win->clx;
+        moved.y -= win->cly;
+        if (d->op == WD_LINE) {        /* (w and h are its other end) */
+            moved.w -= win->clx;
+            moved.h -= win->cly;
+        }
+        d = &moved;
+    }
     int a = d->a < 0 ? 0 : d->a > 255 ? 255 : d->a;
     int r = d->r < 0 ? 0 : d->r;
     switch (d->op) {
@@ -6049,10 +6099,12 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
                      d->h * 16 + 8, r ? r : 16, d->rgb, a);
         return 0;
     case WD_TEXT:
-        return s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x;
+        return (s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x) +
+               (win->clip ? win->clx : 0);
     case WD_LTEXT:
-        return s ? ui_font_text_s(&t, font, px, d->x, d->y,
-                                  locale_text(s), d->rgb) : d->x;
+        return (s ? ui_font_text_s(&t, font, px, d->x, d->y,
+                                   locale_text(s), d->rgb) : d->x) +
+               (win->clip ? win->clx : 0);
     case WD_CELLS: {
         /* A cell is a character, not a byte: a Polish letter is two
            bytes of UTF-8 and one column */
@@ -6068,7 +6120,7 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
                 ui_font_text_s(&t, font, px, d->x + col * d->w, d->y, one,
                                d->rgb);
         }
-        return d->x + col * d->w;
+        return d->x + col * d->w + (win->clip ? win->clx : 0);
     }
     default:
         return -1;

@@ -1,0 +1,186 @@
+calc(), min(), max() and clamp() parsed into css_length's expression tree,
+and worked out (see css_length.h.patch).
+
+--- a/src/css_length.cpp
++++ b/src/css_length.cpp
+@@ -1,11 +1,180 @@
+ #include "html.h"
+ #include "css_length.h"
++#include <algorithm>
+ 
+ namespace litehtml
+ {
+ 
++    // --- ThreadOS: calc() and its kin --------------------------------------
++
++    namespace
++    {
++        struct calc_parser
++        {
++            const css_token_vector& t;
++            size_t                  i = 0;
++
++            explicit calc_parser(const css_token_vector& tokens) : t(tokens) {}
++
++            void skip()
++            {
++                while(i < t.size() && t[i].type == WHITESPACE)
++                    i++;
++            }
++            bool at(int ch)
++            {
++                skip();
++                return i < t.size() && t[i].type == ch;
++            }
++            calc_ptr node(char op, std::vector<calc_ptr> args)
++            {
++                auto n  = std::make_shared<calc_node>();
++                n->op   = op;
++                n->args = std::move(args);
++                return n;
++            }
++            calc_ptr sum()
++            {
++                calc_ptr a = product();
++                while(a && (at('+') || at('-')))
++                {
++                    char op = (char)t[i++].type;
++                    calc_ptr b = product();
++                    if(!b)
++                        return nullptr;
++                    a = node(op, {a, b});
++                }
++                return a;
++            }
++            calc_ptr product()
++            {
++                calc_ptr a = unary();
++                while(a && (at('*') || at('/')))
++                {
++                    char op = (char)t[i++].type;
++                    calc_ptr b = unary();
++                    if(!b)
++                        return nullptr;
++                    a = node(op, {a, b});
++                }
++                return a;
++            }
++            calc_ptr unary()
++            {
++                skip();
++                if(i >= t.size())
++                    return nullptr;
++                const css_token& tok = t[i++];
++                if(tok.type == ROUND_BLOCK)
++                    return inner(tok.value);
++                if(tok.type == CV_FUNCTION)
++                    return function(tok);
++                auto n = std::make_shared<calc_node>();
++                n->op  = 'v';
++                if(tok.type == NUMBER)
++                    n->value.set_value(tok.n.number, css_units_none);
++                else if(!n->value.from_token(tok, f_length_percentage))
++                    return nullptr;
++                return n;
++            }
++            static calc_ptr inner(const css_token_vector& v)
++            {
++                calc_parser p(v);
++                calc_ptr r = p.sum();
++                p.skip();
++                return r && p.i == v.size() ? r : nullptr;
++            }
++            static calc_ptr function(const css_token& fn)
++            {
++                std::string name = lowcase(fn.name());
++                if(name == "calc")
++                    return inner(fn.value);
++                char op = name == "min" ? 'm' : name == "max" ? 'M' : name == "clamp" ? 'c' : 0;
++                if(!op)
++                    return nullptr;
++                std::vector<calc_ptr> args;
++                css_token_vector      arg;
++                for(size_t k = 0; k <= fn.value.size(); k++)
++                {
++                    if(k == fn.value.size() || fn.value[k].type == COMMA)
++                    {
++                        calc_ptr a = inner(arg);
++                        if(!a)
++                            return nullptr;
++                        args.push_back(a);
++                        arg.clear();
++                    } else
++                    {
++                        arg.push_back(fn.value[k]);
++                    }
++                }
++                if(args.empty() || (op == 'c' && args.size() != 3))
++                    return nullptr;
++                auto n  = std::make_shared<calc_node>();
++                n->op   = op;
++                n->args = std::move(args);
++                return n;
++            }
++        };
++
++        pixel_t eval(const calc_node& n, pixel_t base,
++                     const std::function<pixel_t(const css_length&)>& leaf)
++        {
++            switch(n.op)
++            {
++            case 'v':
++                return leaf(n.value);
++            case '+':
++                return eval(*n.args[0], base, leaf) + eval(*n.args[1], base, leaf);
++            case '-':
++                return eval(*n.args[0], base, leaf) - eval(*n.args[1], base, leaf);
++            case '*':
++                return eval(*n.args[0], base, leaf) * eval(*n.args[1], base, leaf);
++            case '/': {
++                pixel_t d = eval(*n.args[1], base, leaf);
++                return d != 0_px ? eval(*n.args[0], base, leaf) / d : 0_px;
++            }
++            case 'c': {
++                pixel_t lo = eval(*n.args[0], base, leaf), v = eval(*n.args[1], base, leaf),
++                        hi = eval(*n.args[2], base, leaf);
++                return std::max(lo, std::min(v, hi));
++            }
++            default: { // min, max
++                pixel_t r = eval(*n.args[0], base, leaf);
++                for(size_t k = 1; k < n.args.size(); k++)
++                {
++                    pixel_t v = eval(*n.args[k], base, leaf);
++                    r         = n.op == 'm' ? std::min(r, v) : std::max(r, v);
++                }
++                return r;
++            }
++            }
++        }
++    } // namespace
++
++    pixel_t css_length::calc_eval(pixel_t base,
++                                  const std::function<pixel_t(const css_length&)>& leaf) const
++    {
++        return m_calc ? eval(*m_calc, base, leaf) : leaf(*this);
++    }
++
++    bool css_length::from_calc(const css_token& token)
++    {
++        if(token.type != CV_FUNCTION)
++            return false;
++        calc_ptr c = calc_parser::function(token);
++        if(!c)
++            return false;
++        set_calc(c);
++        return true;
++    }
++
+     bool css_length::from_token(const css_token& token, int options, css_values keywords)
+     {
++        if(token.type == CV_FUNCTION && (options & (f_length | f_percentage)))
++        {
++            return from_calc(token);
++        }
+         if((options & f_positive) && is_one_of(token.type, NUMBER, DIMENSION, PERCENTAGE) && token.n.number < 0)
+         {
+             return false;

@@ -1,0 +1,114 @@
+litehtml's lengths with calc(), min(), max() and clamp(): an expression
+tree kept in the length, worked out when its percentages have a base.
+
+--- a/include/litehtml/css_length.h
++++ b/include/litehtml/css_length.h
+@@ -1,7 +1,10 @@
+ #ifndef LITEHTML_CSS_LENGTH_H
+ #define LITEHTML_CSS_LENGTH_H
+ 
++#include <functional>
++#include <memory>
+ #include <string>
++#include <vector>
+ #include "css_tokenizer.h"
+ #include "css_values.h"
+ #include "pixel_type.h"
+@@ -19,6 +22,14 @@
+         f_positive          = 16                       // ⩾0 (non-negative)
+     };
+ 
++    // ThreadOS: calc(), min(), max() and clamp() - an expression of
++    // lengths, kept as a tree and worked out when what its percentages
++    // are of is known. em, rem, vw... in it become pixels when the
++    // element's style is computed (document::cvt_units); percentages
++    // stay until layout gives them a base (calc_percent).
++    struct calc_node;
++    using calc_ptr = std::shared_ptr<const calc_node>;
++
+     // <length> | <percentage> | <number> | auto | none | normal
+     // https://developer.mozilla.org/en-US/docs/Web/CSS/length
+     class css_length
+@@ -29,8 +40,16 @@
+         };
+         css_units m_units         = css_units_none;
+         bool      m_is_predefined = false;
++        calc_ptr  m_calc;
+ 
+       public:
++        // (an expression counts as a percentage: it may hold one, and
++        // whatever asks for its value gives the base)
++        bool            has_calc() const { return (bool)m_calc; }
++        const calc_ptr& calc() const { return m_calc; }
++        void            set_calc(calc_ptr c);
++        pixel_t         calc_eval(pixel_t base,
++                                  const std::function<pixel_t(const css_length&)>& leaf) const;
+         css_length() = default;
+         css_length(float val, css_units units = css_units_px);
+         css_length& operator=(float val);
+@@ -44,11 +63,27 @@
+         css_units         units() const;
+         pixel_t           calc_percent(pixel_t width) const;
+         bool              from_token(const css_token& token, int options, css_values predefined_keywords = {});
++        bool              from_calc(const css_token& token);
+         std::string       to_string() const;
+     };
+ 
+     using length_vector = std::vector<css_length>;
+ 
++    struct calc_node
++    {
++        char                  op; // 'v' a value; + - * /; 'm' min, 'M' max, 'c' clamp
++        css_length            value;
++        std::vector<calc_ptr> args;
++    };
++
++    inline void css_length::set_calc(calc_ptr c)
++    {
++        m_calc          = std::move(c);
++        m_value         = 0;
++        m_units         = css_units_percentage;
++        m_is_predefined = false;
++    }
++
+     inline css_length::css_length(float val, css_units units) :
+         m_value(val),
+         m_units(units)
+@@ -57,6 +92,7 @@
+ 
+     inline css_length& css_length::operator=(float val)
+     {
++        m_calc.reset();
+         m_value         = val;
+         m_units         = css_units_px;
+         m_is_predefined = false;
+@@ -70,6 +106,7 @@
+ 
+     inline void css_length::predef(int val)
+     {
++        m_calc.reset();
+         m_predef        = val;
+         m_is_predefined = true;
+     }
+@@ -85,6 +122,7 @@
+ 
+     inline void css_length::set_value(float val, css_units units)
+     {
++        m_calc.reset();
+         m_value         = val;
+         m_is_predefined = false;
+         m_units         = units;
+@@ -108,6 +146,13 @@
+     {
+         if(!is_predefined())
+         {
++            if(m_calc)
++            {
++                return calc_eval(width, [width](const css_length& l) {
++                    return l.units() == css_units_percentage ? width * l.val() / 100.0_px
++                                                             : static_cast<pixel_t>(l.val());
++                });
++            }
+             if(units() == css_units_percentage)
+             {
+                 return width * m_value / 100.0_px;

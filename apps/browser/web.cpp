@@ -68,7 +68,7 @@ using namespace litehtml;
 #define MENU_ROW 30           // and each of its items
 #define ZOOM_W 96             // "-  100%  +" at the status line's right end
 #define ZOOM_BTN 26           // each of its buttons
-#define FONT_PX 15            // a page's text when its CSS does not say
+#define FONT_PX 16            // a page's text when its CSS does not say: "medium", as browsers have it
 #define SEL_BG 0xB4D5FE       // behind selected text
 #define FOUND_BG 0xFFE97A     // behind what Ctrl+F found
 #define FOUND_NOW 0xFF9632    // and behind the match it is at
@@ -816,8 +816,35 @@ class window_container : public document_container {
         if (get_url(where, text, ".web-style.css"))
             baseurl = where;
     }
-    void set_clip(const position&, const border_radiuses&) override {}
-    void del_clip() override {}
+    // A box that hides what overflows it (overflow: hidden, clip): the
+    // window draws only inside the innermost of them - and inside the
+    // page's own band of the window, which is the outermost
+    struct clip_box {
+        int x, y, w, h;
+    };
+    std::vector<clip_box> clips;
+    clip_box page_box() const { return {0, page_top(), width, page_h()}; }
+    void apply_clip()
+    {
+        clip_box c = page_box();
+        for (const auto& k : clips) {
+            int x0 = std::max(c.x, k.x), y0 = std::max(c.y, k.y);
+            int x1 = std::min(c.x + c.w, k.x + k.w), y1 = std::min(c.y + c.h, k.y + k.h);
+            c = {x0, y0, std::max(0, x1 - x0), std::max(0, y1 - y0)};
+        }
+        ud_clip(win, c.x, c.y, c.w, c.h);
+    }
+    void set_clip(const position& p, const border_radiuses&) override
+    {
+        clips.push_back({sx(p.x), sy(p.y), zs(p.width), zs(p.height)});
+        apply_clip();
+    }
+    void del_clip() override
+    {
+        if (!clips.empty())
+            clips.pop_back();
+        apply_clip();
+    }
     void get_viewport(position& vp) const override
     {
         vp = position(0, 0, view_w(), view_h());
@@ -3213,8 +3240,12 @@ static void draw()
     ud_fill(w, 0, cont.page_top(), cont.width, cont.page_h(), 0xFFFFFF);
     if (doc) {
         position clip(0, cont.scroll, cont.view_w(), cont.view_h());
+        // (held to the page's band: nothing of it over the toolbar)
+        cont.clips.clear();
+        cont.apply_clip();
         doc->draw(0, 0, 0, &clip);
         draw_list();
+        ud_unclip(w);
     }
     // Where in the page the window is, when the page is longer than it:
     // a thumb as long as the share that shows, at the right edge

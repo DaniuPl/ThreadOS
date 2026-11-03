@@ -6,10 +6,59 @@ selectors (kept so that only those need checking again) cannot follow
 such changes: a class added can make a selector match that never did.
 So the lists are dropped and the sheets matched afresh. Nothing in
 litehtml calls media_changed(); the browser does, after a script.
+Also: calc() lengths through to_pixels() and cvt_units() (css_length.h.patch).
 
 --- a/src/document.cpp
 +++ b/src/document.cpp
-@@ -877,27 +877,39 @@
+@@ -578,6 +578,11 @@
+         {
+             return 0_px;
+         }
++        // ThreadOS: calc() - each length in it, as a length would be
++        if(val.has_calc())
++        {
++            return val.calc_eval(size, [&](const css_length& l) { return to_pixels(l, metrics, size); });
++        }
+         pixel_t ret;
+         switch(val.units())
+         {
+@@ -639,6 +644,35 @@
+         {
+             return;
+         }
++        // ThreadOS: calc() - its lengths in pixels now; what holds a
++        // percentage waits for its base, and what holds none is a length
++        if(val.has_calc())
++        {
++            bool pct = false;
++            std::function<calc_ptr(const calc_node&)> to_px = [&](const calc_node& n) -> calc_ptr {
++                auto c = std::make_shared<calc_node>();
++                c->op  = n.op;
++                if(n.op == 'v')
++                {
++                    c->value = n.value;
++                    if(n.value.units() == css_units_percentage)
++                        pct = true;
++                    else if(n.value.units() != css_units_none)
++                        c->value.set_value(static_cast<float>(to_pixels(n.value, metrics, size)), css_units_px);
++                }
++                for(const auto& a : n.args)
++                    c->args.push_back(to_px(*a));
++                return c;
++            };
++            calc_ptr done = to_px(*val.calc());
++            css_length folded;
++            folded.set_calc(done);
++            if(pct)
++                val = folded;
++            else
++                val.set_value(static_cast<float>(folded.calc_percent(0_px)), css_units_px);
++            return;
++        }
+         if(val.units() != css_units_percentage)
+         {
+             val.set_value(static_cast<float>(to_pixels(val, metrics, size)), css_units_px);
+@@ -877,27 +911,39 @@
          m_fixed_boxes.push_back(pos);
      }
  

@@ -42,6 +42,7 @@
 /* Localized variants are for fixed interface labels, never user data. */
 #define UD_OP_LTEXT   10
 #define UD_OP_LMEASURE 11
+#define UD_OP_CLIP    12
 
 /* The theme's colours, as the desktop hands them out (in this order) */
 struct ud_look {
@@ -75,6 +76,21 @@ static inline int ud_op(int win, int op, int x, int y, int w, int h, int r,
 {
     struct win_draw_cmd c = { op, x, y, w, h, r, rgb, rgb2, 255, font, px, s };
     return sys_win_draw(win, &c);
+}
+
+/* Everything drawn from now on held to x, y, w, h - text, shapes and
+   pictures alike; ud_unclip lets it go */
+static inline void ud_clip(int win, int x, int y, int w, int h)
+{
+    ud_op(win, UD_OP_CLIP, x, y, w > 0 ? w : 0, h > 0 ? h : 0, 0, 0, 0, 0, 0,
+          (const char *)0);
+    if (w <= 0 || h <= 0)              /* (an empty box hides all) */
+        ud_op(win, UD_OP_CLIP, -1, -1, 1, 1, 0, 0, 0, 0, 0, (const char *)0);
+}
+
+static inline void ud_unclip(int win)
+{
+    ud_op(win, UD_OP_CLIP, 0, 0, 0, 0, 0, 0, 0, 0, 0, (const char *)0);
 }
 
 static inline void ud_fill(int win, int x, int y, int w, int h, uint32_t rgb)

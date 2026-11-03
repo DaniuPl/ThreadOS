@@ -2983,7 +2983,10 @@ class Qemu:
             runs = []
             for xx in range(x0, x1):
                 if any(at(xx, yy) != ground for yy in band):
-                    if runs and xx - runs[-1][1] <= 3:
+                    # (the letters of a word stand further apart the
+                    # bigger they are: a quarter of the size and more is
+                    # a space)
+                    if runs and xx - runs[-1][1] <= max(3, px // 4):
                         runs[-1][1] = xx
                     else:
                         runs.append([xx, xx])

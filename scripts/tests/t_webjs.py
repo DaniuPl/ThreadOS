@@ -74,7 +74,7 @@ def scripts(e):
     before, _ = pixels(q, *page, hot)
     link, _ = pixels(q, *page, (0x80, 0x60, 0x40))
     seen = len(q.serial())
-    q.click((link[0] + link[2]) // 2, link[3] - 3)
+    q.click(*on_link(q, link, (0x80, 0x60, 0x40)))
     q.mouse_goto(sw - 20, sh // 2)
     time.sleep(1.5)
     after, n = pixels(q, *page, hot)

@@ -88,7 +88,7 @@ def pages(e):
 
     # The underline is the link's bottom row: a click just above
     # it is on the words
-    q.click((link[0] + link[2]) // 2, link[3] - 3)
+    q.click(*on_link(q, link, LINK))
     q.mouse_goto(sw - 20, sh // 2)
     got = wait_title(q, geom, "Web: Page two")
     check(f"a click on the link follows it ({got!r})",
@@ -169,7 +169,7 @@ def pages(e):
           box is None)
     link, n = pixels(q, page[0], page[1], page[2] - 20, page[3], BROWN)
     seen = len(q.serial())
-    q.click((link[0] + link[2]) // 2, link[3] - 3)
+    q.click(*on_link(q, link, BROWN))
     q.mouse_goto(sw - 20, sh // 2)
     time.sleep(1.5)
     box, n = pixels(q, *page, PURPLE)

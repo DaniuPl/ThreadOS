@@ -320,6 +320,24 @@ def pixels(q, x0, y0, x1, y1, colour):
     return (min(xs), min(ys), max(xs), max(ys)), len(xs)
 
 
+def on_link(q, box, colour):
+    """A point on a link's words: above its underline, on its first line -
+    a link that wraps has its box's middle between two lines, on nothing"""
+    _, _, at = q.screen_raw()
+    rows = {}
+    for y in range(box[1], box[3] + 1):
+        xs = [x for x in range(box[0], box[2] + 1) if at(x, y) == colour]
+        if xs:
+            rows[y] = xs
+    # the first line ends at the first row with none of the colour
+    y = box[1]
+    while y + 1 in rows:
+        y += 1
+    under = max((r for r in rows if r <= y), key=lambda r: len(rows[r]))
+    xs = rows[under]
+    return xs[len(xs) // 2], under - 3
+
+
 def colours(q, box, want):
     """How many pixels in a box are of colours 'want' says yes to"""
     _, _, at = q.screen_raw()
