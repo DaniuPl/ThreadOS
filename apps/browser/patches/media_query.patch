@@ -1,0 +1,36 @@
+calc(), min(), max() and clamp() in media features: Wikipedia asks for
+its narrow layout with (max-width: calc(1120px - 1px)).
+
+--- a/src/media_query.cpp
++++ b/src/media_query.cpp
+@@ -1,5 +1,6 @@
+ #include "html.h"
+ #include "media_query.h"
++#include <functional>
+ #include "css_parser.h"
+ #include <cassert>
+ #include "document.h"
+@@ -717,7 +718,22 @@
+         const css_token& b = at(tokens, index + 1);
+         const css_token& c = at(tokens, index + 2);
+ 
+-        if(!is_one_of(a.type, NUMBER, DIMENSION, IDENT))
++        // patched in: calc() too - "(max-width: calc(1120px - 1px))" is
++        // how Wikipedia's narrow layout is asked for. Not with a
++        // percentage in it: a media feature has nothing it is a part of.
++        std::function<bool(const css_token_vector&)> has_percent = [&](const css_token_vector& v) {
++            for(const auto& t : v)
++            {
++                if(t.type == PERCENTAGE || has_percent(t.value))
++                {
++                    return true;
++                }
++            }
++            return false;
++        };
++        if(!is_one_of(a.type, NUMBER, DIMENSION, IDENT) &&
++           !(a.type == CV_FUNCTION && is_one_of(lowcase(a.name()), "calc", "min", "max", "clamp") &&
++             !has_percent(a.value)))
+         {
+             return false;
+         }

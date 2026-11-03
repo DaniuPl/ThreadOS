@@ -18,6 +18,10 @@ showing them (Hacker News, Wikipedia, the Python documentation).
   JavaScript's URL class takes addresses apart and puts them together
   against a base as Node.js does, address for address
 
+  document.cookie keeps what a script sets, overwritten by name and gone
+  with max-age=0 or an expiry in the past: Wikipedia's first script reads
+  it, and without it none of the page's scripts ran
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -95,6 +99,15 @@ def compat(e):
                             b"'></head><body><p class=box>styled</p></body></html>")
     SERVED[LONG] = STYLE
     SERVED["/urls.html"] = page_urls()
+    SERVED["/cookie.html"] = (
+        b"<html><head><title>Cookie</title></head><body><script>"
+        b"const was = document.cookie; document.cookie = 'a=1; path=/';"
+        b"document.cookie = 'b=2'; document.cookie = 'c=3; max-age=60';"
+        b"document.cookie = 'b=two'; document.cookie = 'a=; max-age=0';"
+        b"document.cookie = 'c=; expires=Thu, 01 Jan 1970 00:00:00 GMT';"
+        b"console.log('cookie [' + was + '] [' + document.cookie + '] ' +"
+        b"document.cookie.match(/(?:^|; )b=([^;]*)/)[1]);"
+        b"</script></body></html>")
 
     seen = len(q.serial())
     visit(e, "/site/pages/dots.html", "Web: Dots")
@@ -128,6 +141,17 @@ def compat(e):
     box, _ = pixels(q, *page, ORANGE)
     check(f"a style sheet at an address of {len(LONG)} characters is fetched "
           f"whole ({box})", box is not None and box[2] - box[0] + 1 == 150)
+
+    seen = len(q.serial())
+    visit(e, "/cookie.html", "Web: Cookie")
+    end, line = time.time() + 10, None
+    while time.time() < end and line is None:
+        for ln in q.serial()[seen:].splitlines():
+            if ln.startswith("[js] cookie "):
+                line = ln[len("[js] cookie "):]
+        time.sleep(0.3)
+    check(f"document.cookie keeps what scripts set, by name, and drops what "
+          f"has expired ({line!r})", line == "[] [b=two] two")
 
     want = node_urls()
     seen = len(q.serial())

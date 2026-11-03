@@ -6582,3 +6582,46 @@ works and is checked by `make test`.
       scripts/cssref.py makes with Playwright). The probes for
       transform, flex gap, grid, grid areas, :has() and clip-path fail
       still and are not held yet; they are what comes next.
+
+- [x] **CSS grid, flex gap, transform, clip-path, :has(), mask-image**
+      (apps/browser/lhgrid.cpp, apps/browser/patches/*, apps/browser/web.cpp,
+      apps/browser/webjs.cpp, scripts/tests/cssprobes.py, t_webcss.py,
+      t_webcompat.py)
+      The rest of what the CSS probes showed missing, and what Wikipedia
+      needed next, each held against Chromium's boxes:
+
+      * CSS grid. litehtml has no grid layout; display: grid is made a
+        flex container with a flag, so litehtml does for a grid all it
+        does for flex but the layout, and the layout is ours
+        (lhgrid.cpp): track lists with px, %, fr, auto, minmax(),
+        fit-content() and repeat() with a count, auto-fill and auto-fit;
+        named lines, negative line numbers, span, grid-template-areas,
+        auto placement around placed items, grid-auto-rows/-columns,
+        gaps, justify-/align-items and -self.
+      * gap, row-gap and column-gap between flex items and lines.
+      * transform: its translations (translate, translateX/Y,
+        translate3d) and the translate property move a box and all in
+        it when drawn, and clicks find it there; % is of the box's own
+        size. Menus kept off screen with translateX(-100%) stay there.
+      * clip-path: inset() and clip: rect() cut a box to their box, and
+        opacity: 0 draws nothing: how sites hide text for screen readers
+        and their own checkboxes.
+      * :has(), :enabled (without it a whole rule that names it was
+        dropped: Wikipedia's buttons lost their transparent borders),
+        calc() in @media features, and data: addresses for pictures.
+      * mask-image: icons are a colour shown through an SVG. The SVG is
+        drawn in the box's colour, keeping its alpha.
+      * litehtml bugs that showed on Wikipedia: a percentage height in a
+        block whose height is auto was a percentage of the viewport (the
+        header was as tall as the window), and an absolutely positioned
+        inline-flex box stayed in its line and took room there.
+      * document.cookie, for the page's own scripts (the jar's cookies are
+        not shown: it does not keep which are HttpOnly). Wikipedia's first
+        script reads it, and none of its scripts ran without.
+      * A box at a negative x was rounded towards zero and showed a
+        pixel at the left edge.
+
+      The test: t_webcss now holds all 14 probes - grid in three, areas,
+      flex gap, transform, hidden, selectors, images, media and the rest -
+      to within a pixel of Chromium's boxes; t_webcompat checks that
+      document.cookie keeps and drops what scripts set.

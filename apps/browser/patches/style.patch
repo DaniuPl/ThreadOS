@@ -1,0 +1,290 @@
+Parses transform (its translate functions), translate, opacity, clip-path:
+inset(), clip: rect(), gap and its longhands, the grid properties and
+their shorthands (grid-template, grid-column, grid-row, grid-area),
+justify-items/-self, and mask-image.
+
+--- a/src/style.cpp
++++ b/src/style.cpp
+@@ -592,6 +592,282 @@
+             add_parsed_property(name, property_value(str, important));
+             break;
+ 
++            //  ==========  patched in: transform, clip, gaps, grid  ==========
++
++        // Only the translation of a transform moves anything here: the
++        // translate functions are added up and the rest (scale, rotate)
++        // dropped. It is what sites slide menus and centre boxes with.
++        case _transform_:
++        case _translate_:
++            {
++                css_length x(0, css_units_px), y(0, css_units_px);
++                bool       none = ident == "none";
++                auto       add  = [](css_length& to, const css_token& tok) {
++                    css_length l;
++                    if(!l.from_token(tok, f_length_percentage) || l.is_predefined())
++                    {
++                        return false;
++                    }
++                    // the two may be of different units: kept as calc(to + l)
++                    if(to.val() == 0 && !to.has_calc())
++                    {
++                        to = l;
++                    } else
++                    {
++                        auto a = std::make_shared<calc_node>(calc_node{'v', to, {}});
++                        auto b = std::make_shared<calc_node>(calc_node{'v', l, {}});
++                        to.set_calc(std::make_shared<calc_node>(calc_node{'+', css_length(), {a, b}}));
++                    }
++                    return true;
++                };
++                if(name == _translate_ && !none)
++                {
++                    if(value.empty() || !add(x, value[0]) || (value.size() > 1 && !add(y, value[1])))
++                    {
++                        break;
++                    }
++                } else
++                {
++                    for(const auto& tok : value)
++                    {
++                        if(tok.type != CV_FUNCTION)
++                        {
++                            continue;
++                        }
++                        std::string fn   = lowcase(tok.name());
++                        auto        args = parse_comma_separated_list(tok.value);
++                        if((fn == "translate" || fn == "translate3d") && !args.empty() && args[0].size() == 1)
++                        {
++                            add(x, args[0][0]);
++                            if(args.size() > 1 && args[1].size() == 1)
++                            {
++                                add(y, args[1][0]);
++                            }
++                        } else if(fn == "translatex" && !args.empty() && args[0].size() == 1)
++                        {
++                            add(x, args[0][0]);
++                        } else if(fn == "translatey" && !args.empty() && args[0].size() == 1)
++                        {
++                            add(y, args[0][0]);
++                        }
++                    }
++                }
++                length_vector v;
++                if(!none)
++                {
++                    v = {x, y};
++                }
++                add_parsed_property(name, property_value(v, important));
++                break;
++            }
++
++        // clip-path: inset(<top> <right> <bottom> <left> [round ...]);
++        // clip: rect(<top>, <right>, <bottom>, <left>) - offsets from the
++        // top left corner, auto for the edge. Both how sites hide text
++        // meant for screen readers only.
++        case _clip_path_:
++        case _clip_:
++            {
++                length_vector v;
++                if(val.type == CV_FUNCTION &&
++                   lowcase(val.name()) == (name == _clip_path_ ? "inset" : "rect"))
++                {
++                    for(const auto& tok : val.value)
++                    {
++                        if(tok.type == ',' || v.size() == 4)
++                        {
++                            continue;
++                        }
++                        if(tok.ident() == "round")
++                        {
++                            break;
++                        }
++                        css_length l;
++                        if(tok.ident() == "auto")
++                        {
++                            l.predef(0);
++                        } else if(!l.from_token(tok, f_length_percentage))
++                        {
++                            return;
++                        }
++                        v.push_back(l);
++                    }
++                    if(v.empty())
++                    {
++                        return;
++                    }
++                    // inset(a) is all four, inset(a b) top-bottom and sides ...
++                    while(v.size() < 4)
++                    {
++                        v.push_back(v[v.size() == 3 ? 1 : v.size() == 2 ? 0 : 0]);
++                    }
++                }
++                add_parsed_property(name, property_value(v, important));
++                break;
++            }
++
++        // mask-image: icons are drawn as a mask over their background
++        // colour; with no masks here, the mask's picture is drawn instead,
++        // in its own colours (css_properties.cpp)
++        case _mask_image_:
++            {
++                image img;
++                if(value.size() == 1 && parse_bg_image(value[0], img, container))
++                {
++                    add_parsed_property(_mask_image_, property_value(std::vector<image>{img}, important));
++                    add_parsed_property(_mask_image_baseurl_, property_value(baseurl, important));
++                }
++                break;
++            }
++
++        // opacity: only whether it is 0 is used - nothing of a box that
++        // is fully transparent is drawn, though clicks still find it
++        case _opacity_:
++            if(val.type == NUMBER || val.type == PERCENTAGE)
++            {
++                float o = val.type == PERCENTAGE ? val.n.number / 100 : val.n.number;
++                add_parsed_property(name, property_value(std::clamp(o, 0.0f, 1.0f), important));
++            }
++            break;
++
++        case _gap_:
++        case _grid_gap_:
++        case _row_gap_:
++        case _column_gap_:
++        case _grid_row_gap_:
++        case _grid_column_gap_:
++            {
++                css_length g[2];
++                size_t     n = std::min<size_t>(value.size(), 2);
++                for(size_t i = 0; i < n; i++)
++                {
++                    if(value[i].ident() == "normal")
++                    {
++                        g[i].set_value(0, css_units_px);
++                    } else if(!g[i].from_token(value[i], f_length_percentage | f_positive))
++                    {
++                        return;
++                    }
++                }
++                if(n == 0)
++                {
++                    return;
++                }
++                if(name == _gap_ || name == _grid_gap_)
++                {
++                    add_parsed_property(_row_gap_, property_value(g[0], important));
++                    add_parsed_property(_column_gap_, property_value(n > 1 ? g[1] : g[0], important));
++                } else
++                {
++                    add_parsed_property(is_one_of(name, _row_gap_, _grid_row_gap_) ? _row_gap_ : _column_gap_,
++                                        property_value(g[0], important));
++                }
++                break;
++            }
++
++        // The grid's properties are kept as tokens; lhgrid.cpp reads them.
++        case _grid_template_columns_:
++        case _grid_template_rows_:
++        case _grid_template_areas_:
++        case _grid_auto_columns_:
++        case _grid_auto_rows_:
++        case _grid_auto_flow_:
++        case _grid_column_start_:
++        case _grid_column_end_:
++        case _grid_row_start_:
++        case _grid_row_end_:
++            add_parsed_property(name, property_value(value, important));
++            break;
++
++        case _grid_template_:
++            {
++                // <rows> / <columns>, the rows maybe with area strings in them
++                css_token_vector rows, cols, areas;
++                bool             slash = false;
++                for(const auto& tok : value)
++                {
++                    if(tok.type == '/')
++                    {
++                        slash = true;
++                    } else if(tok.type == STRING && !slash)
++                    {
++                        areas.push_back(tok);
++                    } else
++                    {
++                        (slash ? cols : rows).push_back(tok);
++                    }
++                }
++                add_parsed_property(_grid_template_rows_, property_value(rows, important));
++                add_parsed_property(_grid_template_columns_, property_value(cols, important));
++                add_parsed_property(_grid_template_areas_, property_value(areas, important));
++                break;
++            }
++
++        case _grid_column_:
++        case _grid_row_:
++        case _grid_area_:
++            {
++                // up to four parts between slashes; a missing end is the
++                // start's name when that is a name, otherwise auto
++                std::vector<css_token_vector> parts(1);
++                for(const auto& tok : value)
++                {
++                    if(tok.type == '/')
++                    {
++                        parts.emplace_back();
++                    } else
++                    {
++                        parts.back().push_back(tok);
++                    }
++                }
++                auto part = [&](size_t i, size_t from) {
++                    if(i < parts.size())
++                    {
++                        return parts[i];
++                    }
++                    const auto& f = parts[from];
++                    if(f.size() == 1 && f[0].type == IDENT && f[0].ident() != "auto")
++                    {
++                        return f;
++                    }
++                    return css_token_vector();
++                };
++                if(name == _grid_area_)
++                {
++                    add_parsed_property(_grid_row_start_, property_value(parts[0], important));
++                    add_parsed_property(_grid_column_start_, property_value(part(1, 0), important));
++                    add_parsed_property(_grid_row_end_, property_value(part(2, 0), important));
++                    add_parsed_property(_grid_column_end_, property_value(part(3, 1 < parts.size() ? 1 : 0), important));
++                } else
++                {
++                    bool col = name == _grid_column_;
++                    add_parsed_property(col ? _grid_column_start_ : _grid_row_start_,
++                                        property_value(parts[0], important));
++                    add_parsed_property(col ? _grid_column_end_ : _grid_row_end_,
++                                        property_value(part(1, 0), important));
++                }
++                break;
++            }
++
++        case _justify_items_:
++        case _justify_self_:
++            {
++                auto found = css_values(flex_align_items_strings).value_index(ident);
++                int  idx   = found ? *found : -1;
++                if(ident == "legacy" || ident == "left")
++                {
++                    idx = flex_align_items_start;
++                } else if(ident == "right")
++                {
++                    idx = flex_align_items_end;
++                }
++                if(idx >= 0)
++                {
++                    add_parsed_property(name, property_value(idx, important));
++                }
++                break;
++            }
++
+         //  =============================  CUSTOM PROPERTY  =============================
+ 
+         // https://drafts.csswg.org/css-variables-2/#defining-variables

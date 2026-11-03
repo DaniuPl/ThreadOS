@@ -1,0 +1,135 @@
+Computes the new properties: transform/translate added up, opacity, clip-path,
+clip (only for absolute and fixed boxes, as CSS has it), row-gap and
+column-gap, the grid properties as tokens; display: grid becomes flex
+with m_grid set, so litehtml does for a grid all it does for flex but
+the layout. An element with a mask-image has the mask drawn as its
+background, its address marked "mask:#rrggbb:" with the background
+colour, which the browser draws the mask's shape in: icons are made so.
+And an absolutely positioned or floated inline-flex box becomes flex, as
+CSS has it: Wikipedia's hidden checkboxes took a line's room each.
+
+--- a/src/css_properties.cpp
++++ b/src/css_properties.cpp
+@@ -6,6 +6,7 @@
+ #include "document_container.h"
+ #include "types.h"
+ #include <cstddef>
++#include <cstdio>
+ 
+ #define offset(member) offsetof(litehtml::css_properties, member)
+ // #define offset(func)	[](const css_properties& css) { return css.func; }
+@@ -17,6 +18,11 @@
+     m_el_position = static_cast<element_position>(
+         el->get_property<int>(_position_, false, element_position_static, offset(m_el_position)));
+     m_display = static_cast<style_display>(el->get_property<int>(_display_, false, display_inline, offset(m_display)));
++    m_grid    = m_display == display_grid || m_display == display_inline_grid;
++    if(m_grid)
++    {
++        m_display = m_display == display_grid ? display_flex : display_inline_flex;
++    }
+     m_visibility =
+         static_cast<visibility>(el->get_property<int>(_visibility_, true, visibility_visible, offset(m_visibility)));
+     m_float = static_cast<element_float>(el->get_property<int>(_float_, false, float_none, offset(m_float)));
+@@ -63,6 +69,11 @@
+                       m_display == display_table_caption || m_display == display_inline_block)
+             {
+                 m_display = display_block;
++            } else if(m_display == display_inline_flex)
++            {
++                // patched in: inline-flex (and inline-grid) too, or the box
++                // stays on its line and takes room there
++                m_display = display_flex;
+             }
+         } else if(m_float != float_none)
+         {
+@@ -78,6 +89,11 @@
+                       m_display == display_table_caption || m_display == display_inline_block)
+             {
+                 m_display = display_block;
++            } else if(m_display == display_inline_flex)
++            {
++                // patched in: inline-flex (and inline-grid) too, or the box
++                // stays on its line and takes room there
++                m_display = display_flex;
+             }
+         } else if(el->is_root())
+         {
+@@ -283,6 +299,55 @@
+ 
+     m_order = el->get_property<int>(_order_, false, 0, offset(m_order));
+ 
++    m_translate = el->get_property<length_vector>(_translate_, false, {}, offset(m_translate));
++    // transform and translate add up; the patched parser gives both as x, y
++    const auto& tf = el->get_property<length_vector>(_transform_, false, {}, offset(m_translate));
++    if(m_translate.empty())
++    {
++        m_translate = tf;
++    } else if(!tf.empty())
++    {
++        for(int i = 0; i < 2; i++)
++        {
++            auto a = std::make_shared<calc_node>(calc_node{'v', m_translate[i], {}});
++            auto b = std::make_shared<calc_node>(calc_node{'v', tf[i], {}});
++            m_translate[i].set_calc(std::make_shared<calc_node>(calc_node{'+', css_length(), {a, b}}));
++        }
++    }
++    m_opacity   = el->get_property<float>(_opacity_, false, 1.0f, offset(m_opacity));
++    m_clip_path = el->get_property<length_vector>(_clip_path_, false, {}, offset(m_clip_path));
++    m_clip_rect.clear();
++    if(m_el_position == element_position_absolute || m_el_position == element_position_fixed)
++    {
++        m_clip_rect = el->get_property<length_vector>(_clip_, false, {}, offset(m_clip_rect));
++    }
++    for(auto* v : {&m_translate, &m_clip_path, &m_clip_rect})
++    {
++        for(auto& l : *v)
++        {
++            doc->cvt_units(l, m_font_metrics, 0_px);
++        }
++    }
++    m_row_gap    = el->get_property<css_length>(_row_gap_, false, css_length(0, css_units_px), offset(m_row_gap));
++    m_column_gap = el->get_property<css_length>(_column_gap_, false, css_length(0, css_units_px), offset(m_column_gap));
++    doc->cvt_units(m_row_gap, m_font_metrics, 0_px);
++    doc->cvt_units(m_column_gap, m_font_metrics, 0_px);
++
++    const css_token_vector no_tokens;
++    m_grid_template_columns = el->get_property<css_token_vector>(_grid_template_columns_, false, no_tokens,
++                                                                 offset(m_grid_template_columns));
++    m_grid_template_rows  = el->get_property<css_token_vector>(_grid_template_rows_, false, no_tokens, offset(m_grid_template_rows));
++    m_grid_template_areas = el->get_property<css_token_vector>(_grid_template_areas_, false, no_tokens, offset(m_grid_template_areas));
++    m_grid_auto_columns   = el->get_property<css_token_vector>(_grid_auto_columns_, false, no_tokens, offset(m_grid_auto_columns));
++    m_grid_auto_rows      = el->get_property<css_token_vector>(_grid_auto_rows_, false, no_tokens, offset(m_grid_auto_rows));
++    m_grid_auto_flow      = el->get_property<css_token_vector>(_grid_auto_flow_, false, no_tokens, offset(m_grid_auto_flow));
++    m_grid_column_start   = el->get_property<css_token_vector>(_grid_column_start_, false, no_tokens, offset(m_grid_column_start));
++    m_grid_column_end     = el->get_property<css_token_vector>(_grid_column_end_, false, no_tokens, offset(m_grid_column_end));
++    m_grid_row_start      = el->get_property<css_token_vector>(_grid_row_start_, false, no_tokens, offset(m_grid_row_start));
++    m_grid_row_end        = el->get_property<css_token_vector>(_grid_row_end_, false, no_tokens, offset(m_grid_row_end));
++    m_justify_items = el->get_property<int>(_justify_items_, false, flex_align_items_normal, offset(m_justify_items));
++    m_justify_self  = el->get_property<int>(_justify_self_, false, flex_align_items_auto, offset(m_justify_self));
++
+     compute_background(el, doc);
+     compute_flex(el, doc);
+ }
+@@ -550,6 +615,22 @@
+ 
+     m_bg.m_image   = el->get_property<std::vector<image>>(_background_image_, false, {image()}, offset(m_bg.m_image));
+     m_bg.m_baseurl = el->get_property<std::string>(_background_image_baseurl_, false, "", offset(m_bg.m_baseurl));
++    // patched in: an icon drawn by masking its background colour is drawn
++    // as the mask's picture, its address marked "mask:#rrggbb:" for the
++    // container to draw the picture's shape in that colour (style.cpp)
++    const auto& mask = el->get_property<std::vector<image>>(_mask_image_, false, {}, offset(m_bg.m_image));
++    if(!mask.empty() && mask[0].type == image::type_url && !mask[0].url.empty())
++    {
++        char tint[16];
++        std::snprintf(tint, sizeof(tint), "mask:#%02x%02x%02x:", m_bg.m_color.red, m_bg.m_color.green,
++                      m_bg.m_color.blue);
++        m_bg.m_image        = mask;
++        m_bg.m_image[0].url = tint + m_bg.m_image[0].url;
++        m_bg.m_baseurl = el->get_property<std::string>(_mask_image_baseurl_, false, "", offset(m_bg.m_baseurl));
++        m_bg.m_color   = web_color::transparent;
++        m_bg.m_repeat  = {background_repeat_no_repeat};
++        m_bg.m_size    = {css_size(css_length(100, css_units_percentage), css_length(100, css_units_percentage))};
++    }
+ 
+     for(auto& image : m_bg.m_image)
+     {

@@ -1,0 +1,62 @@
+:has(<relative-selector-list>), parsed: each selector with the combinator
+before it. And :enabled, without which a whole rule that names it is
+dropped - Wikipedia's buttons lost their transparent borders so.
+
+--- a/src/css_selector.cpp
++++ b/src/css_selector.cpp
+@@ -412,6 +412,8 @@
+         return selector;
+     }
+ 
++    css_selector::ptr parse_complex_selector(const css_token_vector& tokens, document_mode mode); // for :has()
++
+     css_attribute_selector parse_function_pseudo_class(const css_token& token, document_mode mode)
+     {
+         std::string name = lowcase(token.name());
+@@ -446,6 +448,38 @@
+             }
+             return selector;
+         }
++        // patched in: :has(<relative-selector-list>). Each selector's leading
++        // combinator (none: a descendant) is kept in 'value', one character
++        // for each, in the order of selector_list.
++        if(name == "has")
++        {
++            css_attribute_selector selector(select_pseudo_class, name);
++            for(auto list : parse_comma_separated_list(token.value))
++            {
++                char comb = ' ';
++                while(!list.empty() && list.front().type == WHITESPACE)
++                {
++                    list.erase(list.begin());
++                }
++                if(!list.empty() && is_one_of(list.front().ch, '>', '+', '~'))
++                {
++                    comb = static_cast<char>(list.front().ch);
++                    list.erase(list.begin());
++                }
++                css_selector::ptr sel = parse_complex_selector(list, mode);
++                if(!sel)
++                {
++                    return {};
++                }
++                selector.selector_list.push_back(sel);
++                selector.value += comb;
++            }
++            if(selector.selector_list.empty())
++            {
++                return {};
++            }
++            return selector;
++        }
+         if(name == "lang") // https://www.w3.org/TR/selectors-4/#the-lang-pseudo
+         {
+             css_attribute_selector selector(select_pseudo_class, name);
+@@ -478,6 +512,7 @@
+             // has no UI state of its own).
+             "checked",
+             "disabled",
++            "enabled", // patched in
+             // Tree-Structural pseudo-classes  https://www.w3.org/TR/selectors-4/#structural-pseudos
+             "root",
+             "empty",

@@ -1,0 +1,92 @@
+:has() matched: has_relative() looks below the element, at its children
+or at its later siblings. :enabled matches a form control that is not
+disabled.
+
+--- a/src/html_tag.cpp
++++ b/src/html_tag.cpp
+@@ -666,6 +666,20 @@
+                 return select_no_match;
+             }
+             break;
++        case _enabled_: // patched in: a form control that is not disabled
++            if(!is_one_of(_s(m_tag), "button", "input", "select", "textarea", "optgroup", "option",
++                          "fieldset") ||
++               get_attr("disabled"))
++            {
++                return select_no_match;
++            }
++            break;
++        case _has_: // patched in (css_selector.cpp keeps the combinators in value)
++            if(!has_relative(sel))
++            {
++                return select_no_match;
++            }
++            break;
+         case _lang_:
+             if(!get_document()->match_lang(sel.value))
+             {
+@@ -696,6 +710,64 @@
+         return select_match;
+     }
+ 
++    // patched in: does an element in the place each selector of :has()
++    // says - below, a child, the next sibling, a later one - match it?
++    bool html_tag::has_relative(const css_attribute_selector& sel)
++    {
++        std::function<bool(const element::ptr&, const css_selector&)> below =
++            [&below](const element::ptr& el, const css_selector& s) {
++                for(const auto& c : el->children())
++                {
++                    if(c->select(s, true) || below(c, s))
++                    {
++                        return true;
++                    }
++                }
++                return false;
++            };
++        for(size_t i = 0; i < sel.selector_list.size() && i < sel.value.size(); i++)
++        {
++            const css_selector& s = *sel.selector_list[i];
++            char                comb = sel.value[i];
++            if(comb == ' ' && below(shared_from_this(), s))
++            {
++                return true;
++            }
++            if(comb == '>')
++            {
++                for(const auto& c : children())
++                {
++                    if(c->select(s, true))
++                    {
++                        return true;
++                    }
++                }
++            }
++            if((comb == '+' || comb == '~') && parent())
++            {
++                bool after = false;
++                for(const auto& c : parent()->children())
++                {
++                    if(c.get() == this)
++                    {
++                        after = true;
++                    } else if(after && !c->is_text() && !c->is_comment())
++                    {
++                        if(c->select(s, true))
++                        {
++                            return true;
++                        }
++                        if(comb == '+')
++                        {
++                            break;
++                        }
++                    }
++                }
++            }
++        }
++        return false;
++    }
++
+     // https://www.w3.org/TR/selectors-4/#attribute-selectors
+     int html_tag::select_attribute(const css_attribute_selector& sel) const
+     {

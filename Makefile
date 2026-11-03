@@ -702,11 +702,14 @@ $(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
 # CSS; gumbo, inside it, parses the HTML. The files in LH_PATCHED are
 # built from a patched copy - apps/browser/patches says what and why.
 LH_DIR     := third_party/litehtml
-LH_PATCHED := encodings url document css_length
+LH_PATCHED := encodings url document css_length style css_properties \
+              render_item flex_line render_flex css_selector html_tag media_query
 LH_SRC     := $(filter-out $(LH_PATCHED),$(basename $(notdir $(wildcard $(LH_DIR)/src/*.cpp))))
 GUMBO_SRC  := $(basename $(notdir $(wildcard $(LH_DIR)/src/gumbo/src/*.c)))
+# lhgrid.cpp is ours: CSS grid layout, which litehtml has none of
 LH_OBJS    := $(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_SRC) $(LH_PATCHED)) \
-              $(patsubst %,$(BUILD)/litehtml/gumbo-%.o,$(GUMBO_SRC))
+              $(patsubst %,$(BUILD)/litehtml/gumbo-%.o,$(GUMBO_SRC)) \
+              $(BUILD)/litehtml/lhgrid.o
 # Headers are patched as the sources are: the include directory is
 # copied into the build with apps/browser/patches/<name>.h.patch applied
 # to <name>.h - all of it, since a header finds the others beside it
@@ -751,6 +754,10 @@ $(BUILD)/litehtml/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) $(LIBC64) \
 $(BUILD)/litehtml/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) $(LIBC64) \
                           | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/lhgrid.o: apps/browser/lhgrid.cpp $(LH_HDRS) $(LIBC64) \
+                           | $(BUILD)/litehtml
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -c $< -o $@
 
 $(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(LIBC64) \
                              | $(BUILD)/litehtml
@@ -805,6 +812,10 @@ $(BUILD)/litehtml/host/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) \
 $(BUILD)/litehtml/host/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) \
                                | $(BUILD)/litehtml/host
 	$(CXX) -std=gnu++17 -O2 -w $(LH_INC) -c $< -o $@
+
+$(BUILD)/litehtml/host/lhgrid.o: apps/browser/lhgrid.cpp $(LH_HDRS) \
+                                | $(BUILD)/litehtml/host
+	$(CXX) -std=gnu++17 -O2 -Wall $(LH_INC) -c $< -o $@
 
 $(BUILD)/litehtml/host/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c \
                                   | $(BUILD)/litehtml/host

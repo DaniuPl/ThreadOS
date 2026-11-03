@@ -1,0 +1,16 @@
+translate_x(), translate_y() and push_clip(): a transform's translation
+and clip-path/clip, applied when an element and all in it are drawn.
+
+--- a/include/litehtml/render_item.h
++++ b/include/litehtml/render_item.h
+@@ -426,6 +426,10 @@
+         rendered_width render(pixel_t x, pixel_t y, const containing_block_context& containing_block_size,
+                               formatting_context* fmt_ctx, bool second_pass = false);
+         void           apply_relative_shift(const containing_block_context& containing_block_size);
++        // patched in: transform's translation and clip-path/clip
++        pixel_t        translate_x() const;
++        pixel_t        translate_y() const;
++        bool           push_clip(pixel_t x, pixel_t y);
+         void           calc_outlines(pixel_t parent_width);
+         pixel_t        calc_auto_margins(pixel_t parent_width); // returns left margin
+ 

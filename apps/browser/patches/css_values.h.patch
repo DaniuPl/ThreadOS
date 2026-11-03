@@ -1,9 +1,35 @@
 overflow: clip - clipped as overflow: hidden is, the last in the list so
-that every test of 'more than visible' takes it in.
+that every test of 'more than visible' takes it in. And display: grid
+and inline-grid, which css_properties.cpp turns into flex with m_grid set.
 
 --- a/include/litehtml/css_values.h
 +++ b/include/litehtml/css_values.h
-@@ -425,7 +425,7 @@
+@@ -69,10 +69,10 @@
+     // ==========================================================
+     // CSS Property: display
+     // ==========================================================
+-    inline constexpr auto style_display_strings = split_css_values<18>(
++    inline constexpr auto style_display_strings = split_css_values<20>(
+         "none;block;inline;inline-block;inline-table;list-item;table;table-caption;table-cell;table-column;"
+         "table-column-group;table-footer-group;table-header-group;table-row;table-row-group;inline-text;flex;"
+-        "inline-flex");
++        "inline-flex;grid;inline-grid");
+ 
+     enum style_display
+     {
+@@ -94,6 +94,11 @@
+         display_inline_text,
+         display_flex,
+         display_inline_flex,
++        // only as parsed: computed, a grid is a flex container with m_grid
++        // set, so that all litehtml does for flex containers and their
++        // items (blockifying them, a formatting context) is done for it
++        display_grid,
++        display_inline_grid,
+     };
+ 
+     // ==========================================================
+@@ -425,7 +430,7 @@
      // ==========================================================
      // CSS Property: overflow
      // ==========================================================
@@ -12,7 +38,7 @@ that every test of 'more than visible' takes it in.
  
      enum overflow
      {
-@@ -434,7 +434,8 @@
+@@ -434,7 +439,8 @@
          overflow_scroll,
          overflow_auto,
          overflow_no_display,

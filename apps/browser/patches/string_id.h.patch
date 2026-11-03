@@ -1,0 +1,28 @@
+Names for the properties litehtml did not know: transform, translate, opacity,
+clip-path, clip, mask-image, :has(), :enabled, the gaps and the grid
+properties.
+
+--- a/include/litehtml/string_id.h
++++ b/include/litehtml/string_id.h
+@@ -36,7 +36,7 @@
+ 
+         // CSS pseudo-classes
+         _root_, _only_child_, _only_of_type_, _first_child_, _first_of_type_, _last_child_, _last_of_type_, _nth_child_,
+-        _nth_of_type_, _nth_last_child_, _nth_last_of_type_, _is_, _where_, _not_, _lang_,
++        _nth_of_type_, _nth_last_child_, _nth_last_of_type_, _is_, _where_, _not_, _has_, _lang_,
+ 
+         _active_, _hover_, _checked_, _disabled_,
+ 
+@@ -92,6 +92,12 @@
+ 
+         _caption_side_, _order_,
+ 
++        _transform_, _translate_, _opacity_, _mask_image_, _mask_image_baseurl_, _enabled_, _gap_, _row_gap_, _column_gap_, _clip_path_, _clip_,
++        _grid_template_columns_, _grid_template_rows_, _grid_template_areas_, _grid_template_,
++        _grid_column_, _grid_row_, _grid_area_, _grid_column_start_, _grid_column_end_,
++        _grid_row_start_, _grid_row_end_, _grid_auto_flow_, _grid_auto_rows_, _grid_auto_columns_,
++        _grid_gap_, _grid_row_gap_, _grid_column_gap_, _justify_items_, _justify_self_,
++
+         _counter_reset_, _counter_increment_,
+ 
+         // some CSS dimensions

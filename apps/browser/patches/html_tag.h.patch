@@ -1,0 +1,13 @@
+:has(): an element matches when one below it, a child, the next sibling
+or a later one (as its selectors say) matches.
+
+--- a/include/litehtml/html_tag.h
++++ b/include/litehtml/html_tag.h
+@@ -91,6 +91,7 @@
+         int select(const css_selector& selector, bool apply_pseudo = true) override;
+         int select(const css_element_selector& selector, bool apply_pseudo = true) override;
+         int select_pseudoclass(const css_attribute_selector& sel);
++        bool has_relative(const css_attribute_selector& sel); // patched in: :has()
+         int select_attribute(const css_attribute_selector& sel) const;
+ 
+         elements_list select_all(const std::string& selector) override;

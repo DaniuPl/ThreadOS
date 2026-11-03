@@ -712,11 +712,31 @@ static const char prelude[] = R"JS(
     get head() { return D.query(null, 'head', false); },
     get documentElement() { return D.query(null, 'html', false); },
     get readyState() { return __loaded ? 'complete' : 'loading'; },
+    // The cookies the page's scripts set, for them to read back. The
+    // jar's own are not shown: it does not keep which are HttpOnly, and
+    // those must never reach a script.
+    get cookie() { return [...__cookies].map(([k, v]) => k + '=' + v).join('; '); },
+    set cookie(v) {
+      const parts = String(v).split(';');
+      const eq = parts[0].indexOf('=');
+      if (eq < 0) return;
+      const name = parts[0].slice(0, eq).trim();
+      let gone = false;
+      for (const a of parts.slice(1)) {
+        const [k, x = ''] = a.split('=');
+        const key = k.trim().toLowerCase();
+        if (key === 'max-age' && +x <= 0) gone = true;
+        if (key === 'expires' && Date.parse(x.trim()) <= Date.now()) gone = true;
+      }
+      if (!name) return;
+      if (gone) __cookies.delete(name); else __cookies.set(name, parts[0].slice(eq + 1).trim());
+    },
     get location() { return location; },
     set location(v) { D.location(String(v)); },
     write() { __report('document.write is not supported here'); }
   };
   let __loaded = false;
+  const __cookies = new Map();
 
   const timers = new Map();
   let nextTimer = 1;

@@ -1,0 +1,94 @@
+Gaps between flex items and lines: the items share the main size less
+the gaps, lines wrap with them counted, and lines are that far apart.
+A grid goes to _render_grid instead.
+
+--- a/src/render_flex.cpp
++++ b/src/render_flex.cpp
+@@ -2,10 +2,35 @@
+ #include "render_flex.h"
+ #include "html_tag.h"
+ 
++// patched in: the gap between flex items along an axis. A percentage is
++// of the container's width; of its height only when that is fixed, as
++// it is not known otherwise.
++static litehtml::pixel_t flex_gap(const litehtml::css_properties& css,
++                                  const litehtml::containing_block_context& self_size, bool row_gap)
++{
++    using namespace litehtml;
++    const css_length& g = row_gap ? css.m_row_gap : css.m_column_gap;
++    if(g.is_predefined())
++    {
++        return 0_px;
++    }
++    if(!row_gap)
++    {
++        return g.calc_percent(self_size.render_width);
++    }
++    return self_size.height.type == containing_block_context::cbc_value_type_absolute
++               ? g.calc_percent(self_size.height)
++               : (g.units() == css_units_percentage && !g.has_calc() ? 0_px : g.calc_percent(0_px));
++}
++
+ litehtml::rendered_width litehtml::render_item_flex::_render_content(pixel_t x, pixel_t y, bool /*second_pass*/,
+                                                                      const containing_block_context& self_size,
+                                                                      formatting_context*             fmt_ctx)
+ {
++    if(css().m_grid)
++    {
++        return _render_grid(x, y, self_size, fmt_ctx);
++    }
+     bool    is_row_direction    = true;
+     bool    reverse             = false;
+     pixel_t container_main_size = self_size.render_width;
+@@ -62,6 +87,8 @@
+     /// Split flex items to lines
+     /////////////////////////////////////////////////////////////////
+     m_lines = get_lines(self_size, fmt_ctx, is_row_direction, container_main_size, single_line);
++    pixel_t main_gap  = flex_gap(css(), self_size, !is_row_direction);
++    pixel_t cross_gap = flex_gap(css(), self_size, is_row_direction);
+ 
+     pixel_t sum_cross_size = 0_px;
+     pixel_t sum_main_size  = 0_px;
+@@ -73,11 +100,20 @@
+     /////////////////////////////////////////////////////////////////
+     for(auto& ln : m_lines)
+     {
++        pixel_t gaps = main_gap * static_cast<int>(ln.items.size() - 1);
+         if(is_row_direction)
+         {
+-            ret_width += ln.base_size;
++            // as if all were on one line: the gaps between lines too
++            ret_width += ln.base_size + gaps + (&ln != &m_lines.front() ? main_gap : 0_px);
++        }
++        ln.init(container_main_size > gaps ? container_main_size - gaps : container_main_size, fit_container,
++                is_row_direction, self_size, fmt_ctx);
++        ln.main_size   += gaps;
++        ln.gap          = main_gap;
++        if(&ln != &m_lines.front())
++        {
++            sum_cross_size += cross_gap;
+         }
+-        ln.init(container_main_size, fit_container, is_row_direction, self_size, fmt_ctx);
+         sum_cross_size += ln.cross_size;
+         sum_main_size   = std::max(sum_main_size, ln.main_size);
+         if(reverse)
+@@ -209,7 +245,7 @@
+     {
+         line_pos       += add_before_line;
+         ln.cross_start  = line_pos;
+-        line_pos       += ln.cross_size + add_after_line;
++        line_pos       += ln.cross_size + add_after_line + cross_gap;
+     }
+ 
+     /// Fix justify-content property
+@@ -302,7 +338,9 @@
+     // Add flex items to lines
+     for(auto& item : items)
+     {
+-        if(!line.items.empty() && !single_line && line.main_size + item->main_size > container_main_size)
++        pixel_t gaps =
++            flex_gap(css(), self_size, !is_row_direction) * static_cast<int>(line.items.size());
++        if(!line.items.empty() && !single_line && line.main_size + gaps + item->main_size > container_main_size)
+         {
+             lines.emplace_back(line);
+             line = flex_line(reverse_main, reverse_cross);

@@ -164,6 +164,9 @@ struct picture {
     std::string svg;
     int dw = 0, dh = 0;
     std::vector<unsigned char> drawn;  // RGBA, dw by dh
+    // A mask-image: the SVG's shape, in the colour of the box it masks
+    bool masked = false;
+    uint32_t tint = 0;
 };
 
 // What a picture's transparent parts are laid on, once and for all: a
@@ -521,7 +524,9 @@ class window_container : public document_container {
     // The window in the page's own pixels: smaller when zoomed in
     int view_w() const { return width * 100 / zoom; }
     int view_h() const { return page_h() * 100 / zoom; }
-    int zs(double v) const { return (int)(v * zoom / 100.0 + 0.5); }
+    // rounded down from .5, not towards zero: a box at x -200 (a menu
+    // moved out of sight to the left) must not show at 0
+    int zs(double v) const { return (int)std::floor(v * zoom / 100.0 + 0.5); }
 
     uint_ptr create_font(const font_description& d, const document*,
                          font_metrics* fm) override
@@ -611,8 +616,12 @@ class window_container : public document_container {
 
     std::string full(const char* src, const char* baseurl) const
     {
-        if (src && !strncmp(src, "svg-inline:", 11))
+        if (src && (!strncmp(src, "svg-inline:", 11) || !strncmp(src, "data:", 5)))
             return src;                // (no address: the page's own)
+        // "mask:#rrggbb:<address>", from the patched litehtml: a
+        // mask-image over that colour
+        if (src && !strncmp(src, "mask:#", 6) && strlen(src) > 13)
+            return std::string(src, 13) + full(src + 13, baseurl);
         std::string b = baseurl && *baseurl ? baseurl : base;
         return absolute(b, src ? src : "");
     }
@@ -626,11 +635,16 @@ class window_container : public document_container {
             return;
         picture& pic = pictures[where];
         std::string data;
-        if (get_url(where, data, ".web-image") &&
+        bool mask = where.compare(0, 6, "mask:#") == 0;
+        if (get_url(mask ? where.substr(13) : where, data, ".web-image") &&
             !decode_png(data, pic) && !decode_jpeg(data, pic) &&
             !decode_gif(data, pic) && !decode_webp(data, pic) &&
             !decode_svg(data, pic))
             pic = picture();
+        if (mask && pic.w) {
+            pic.masked = true;
+            pic.tint = (uint32_t)std::strtoul(where.substr(6, 6).c_str(), nullptr, 16);
+        }
     }
     static bool decode_svg(const std::string& data, picture& pic)
     {
@@ -655,6 +669,12 @@ class window_container : public document_container {
                            &rgba, &nw, &nh, &why) == 0) {
                 pic.drawn.assign(rgba, rgba + (size_t)ow * oh * 4);
                 std::free(rgba);
+                // a mask keeps its shape - the alpha - in the box's colour
+                for (size_t i = 0; pic.masked && i < pic.drawn.size(); i += 4) {
+                    pic.drawn[i] = (unsigned char)(pic.tint >> 16);
+                    pic.drawn[i + 1] = (unsigned char)(pic.tint >> 8);
+                    pic.drawn[i + 2] = (unsigned char)pic.tint;
+                }
             }
         }
         if (pic.drawn.empty())
@@ -1178,9 +1198,52 @@ static bool fetch(const std::string& address, std::string& out,
 
 // Whatever an address names: a page, a picture, a style sheet - over
 // the network into 'file', or straight off the disk
+// A data: address (RFC 2397) holds what it names: "data:<type>[;base64],"
+// and the bytes, in base64 or %-escaped. Sites put small pictures and
+// icons in their style sheets so.
+static bool data_url(const std::string& where, std::string& out)
+{
+    size_t comma = where.find(',');
+    if (comma == std::string::npos)
+        return false;
+    std::string head = where.substr(5, comma - 5);
+    out.clear();
+    if (head.size() >= 7 && head.compare(head.size() - 7, 7, ";base64") == 0) {
+        unsigned bits = 0;
+        int have = 0;
+        for (size_t i = comma + 1; i < where.size(); i++) {
+            char c = where[i];
+            int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 :
+                    c >= '0' && c <= '9' ? c - '0' + 52 : c == '+' || c == '-' ? 62 :
+                    c == '/' || c == '_' ? 63 : -1;
+            if (v < 0)
+                continue;              // '=', spaces, %0A: nothing
+            bits = bits << 6 | (unsigned)v;
+            if ((have += 6) >= 8) {
+                have -= 8;
+                out += (char)(bits >> have & 0xFF);
+            }
+        }
+        return true;
+    }
+    for (size_t i = comma + 1; i < where.size(); i++) {
+        if (where[i] == '%' && i + 2 < where.size() &&
+            std::isxdigit((unsigned char)where[i + 1]) &&
+            std::isxdigit((unsigned char)where[i + 2])) {
+            out += (char)std::stoi(where.substr(i + 1, 2), nullptr, 16);
+            i += 2;
+        } else {
+            out += where[i];
+        }
+    }
+    return true;
+}
+
 static bool get_url(const std::string& where, std::string& out,
                     const char* file)
 {
+    if (where.compare(0, 5, "data:") == 0)
+        return data_url(where, out);
     if (where.compare(0, 7, "http://") == 0 ||
         where.compare(0, 8, "https://") == 0)
         return fetch(where, out, file);

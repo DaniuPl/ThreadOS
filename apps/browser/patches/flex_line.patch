@@ -1,0 +1,13 @@
+Leaves the gap between items when it places them.
+
+--- a/src/flex_line.cpp
++++ b/src/flex_line.cpp
+@@ -585,7 +585,7 @@
+             item_remainder -= distribute_step;
+         }
+         item->place(*this, main_pos, self_size, fmt_ctx);
+-        main_pos += item->get_el_main_size() + add_after_item;
++        main_pos += item->get_el_main_size() + add_after_item + gap;
+         if(add_after_item > 0_px && item_remainder > 0_px)
+         {
+             main_pos       += distribute_step;

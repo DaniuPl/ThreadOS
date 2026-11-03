@@ -1,0 +1,17 @@
+_render_grid(), which lays out a flex container that is really a grid
+(apps/browser/lhgrid.cpp).
+
+--- a/include/litehtml/render_flex.h
++++ b/include/litehtml/render_flex.h
+@@ -16,6 +16,11 @@
+         rendered_width _render_content(pixel_t x, pixel_t y, bool second_pass,
+                                        const containing_block_context& self_size, formatting_context* fmt_ctx) override;
+ 
++        // patched in: a grid is a flex container with css().m_grid set, laid
++        // out by this instead (apps/browser/lhgrid.cpp)
++        rendered_width _render_grid(pixel_t x, pixel_t y, const containing_block_context& self_size,
++                                    formatting_context* fmt_ctx);
++
+       public:
+         explicit render_item_flex(std::shared_ptr<element> src_el) :
+             render_item_block(std::move(src_el))

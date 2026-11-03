@@ -13,8 +13,22 @@ scripts/cssref.py), to within a pixel:
        block's width
   overflow: overflow: hidden and overflow: clip cut a child off at the
        box's edge
-  fixed: position: sticky and position: fixed
-  media: @media width tests and prefers-color-scheme
+  hidden: what sites hide text for screen readers with - clip: rect()
+       and clip-path: inset() - visibility: hidden and opacity: 0
+  transform: translate(), translateX() and translateY(), in px and in %
+       of the box's own size, on a fixed box too
+  fixed: position: sticky and position: fixed; an absolute inline-flex
+       box is taken out of its line
+  flexgap: gap between flex items, in a row and in a column
+  grid, grid2, grid3: grid-template-columns and -rows with px, fr,
+       repeat(), auto-fill and auto-fit with minmax(), named lines,
+       negative line numbers, span, grid-auto-rows, auto placement
+       around placed items, justify-/align-items and -self
+  areas: grid-template-areas, items placed by area name out of order
+  selectors: :not(), :is(), :where(), @supports, :has() and :enabled
+  images: data: addresses, base64 and %-escaped, as a background and
+       as a mask-image - drawn as the mask's own picture here
+  media: @media width tests, calc() in them, and prefers-color-scheme
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -31,8 +45,7 @@ import cssprobes             # noqa: E402
 
 REF = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "cssref.json")))
-# the probes the browser is held to; the rest show what is still missing
-HELD = ["var", "calc", "overflow", "fixed", "media"]
+HELD = [n for n, _ in cssprobes.PROBES]
 
 
 def far(ours, ref):

@@ -1,0 +1,179 @@
+Draws a translated element, and everything in it, moved by its
+translation, and finds it there for clicks; cuts an element with
+clip-path or clip to its clip box; draws nothing of one with opacity 0. And a percentage height in a block
+whose height is auto is auto, as CSS has it, not a percentage of the
+viewport - Wikipedia's logo, height: 100% in its header, made the
+header as tall as the window.
+
+--- a/src/render_item.cpp
++++ b/src/render_item.cpp
+@@ -927,9 +927,9 @@
+ void litehtml::render_item::draw_children(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip, draw_flag flag,
+                                           int zindex)
+ {
+-    position pos  = m_pos;
+-    pos.x        += x - get_scroll_left();
+-    pos.y        += y - get_scroll_top();
++    position base  = m_pos;
++    base.x        += x - get_scroll_left();
++    base.y        += y - get_scroll_top();
+ 
+     document::ptr doc = src_el()->get_document();
+ 
+@@ -957,8 +957,17 @@
+ 
+     for(const auto& el : m_children)
+     {
+-        if(el->is_visible())
++        if(el->is_visible() && el->src_el()->css().m_opacity > 0)
+         {
++            // patched in: one with opacity: 0 is not drawn; a child's translation moves it and all in it,
++            // and its clip-path or clip cuts it and all in it
++            position pos = base;
++            pixel_t  tx = el->translate_x(), ty = el->translate_y();
++            pos.x += tx;
++            pos.y += ty;
++            bool fixed   = el->src_el()->css().get_position() == element_position_fixed;
++            bool clipped = el->push_clip(fixed ? tx : pos.x, fixed ? ty : pos.y);
++
+             bool process = true;
+             switch(flag)
+             {
+@@ -968,8 +977,8 @@
+                     if(el->src_el()->css().get_position() == element_position_fixed)
+                     {
+                         // Fixed elements position is always relative to the (0,0)
+-                        el->src_el()->draw(hdc, 0_px, 0_px, clip, el);
+-                        el->draw_stacking_context(hdc, 0_px, 0_px, clip, true);
++                        el->src_el()->draw(hdc, tx, ty, clip, el);
++                        el->draw_stacking_context(hdc, tx, ty, clip, true);
+                     } else
+                     {
+                         el->src_el()->draw(hdc, pos.x, pos.y, clip, el);
+@@ -1027,6 +1036,10 @@
+                     }
+                 }
+             }
++            if(clipped)
++            {
++                doc->container()->del_clip();
++            }
+         }
+     }
+ 
+@@ -1036,6 +1049,65 @@
+     }
+ }
+ 
++litehtml::pixel_t litehtml::render_item::translate_x() const
++{
++    const auto& t = src_el()->css().m_translate;
++    return t.empty() ? 0_px
++                     : t[0].calc_percent(m_pos.width + m_padding.left + m_padding.right + m_borders.left +
++                                         m_borders.right);
++}
++
++litehtml::pixel_t litehtml::render_item::translate_y() const
++{
++    const auto& t = src_el()->css().m_translate;
++    return t.size() < 2 ? 0_px
++                        : t[1].calc_percent(m_pos.height + m_padding.top + m_padding.bottom + m_borders.top +
++                                            m_borders.bottom);
++}
++
++// x, y: where the element is drawn from, as draw() is given it
++bool litehtml::render_item::push_clip(pixel_t x, pixel_t y)
++{
++    const auto& css   = src_el()->css();
++    bool        inset = !css.m_clip_path.empty();
++    const auto& v     = inset ? css.m_clip_path : css.m_clip_rect;
++    if(v.size() != 4)
++    {
++        return false;
++    }
++    position box  = m_pos;
++    box.x        += x;
++    box.y        += y;
++    box          += m_padding;
++    box          += m_borders;
++    position c    = box;
++    auto     len  = [](const css_length& l, pixel_t base, pixel_t dflt) {
++        return l.is_predefined() ? dflt : l.calc_percent(base);
++    };
++    if(inset)
++    {
++        pixel_t t = len(v[0], box.height, 0_px), r = len(v[1], box.width, 0_px);
++        pixel_t b = len(v[2], box.height, 0_px), l = len(v[3], box.width, 0_px);
++        c.x      += l;
++        c.y      += t;
++        c.width  -= l + r;
++        c.height -= t + b;
++    } else
++    {
++        // rect()'s right and bottom are from the left and top too
++        pixel_t t = len(v[0], box.height, 0_px), r = len(v[1], box.width, box.width);
++        pixel_t b = len(v[2], box.height, box.height), l = len(v[3], box.width, 0_px);
++        c.x      = box.x + l;
++        c.y      = box.y + t;
++        c.width  = r - l;
++        c.height = b - t;
++    }
++    c.width  = std::max(c.width, 0_px);
++    c.height = std::max(c.height, 0_px);
++    src_el()->get_document()->container()->set_clip(c, border_radiuses());
++    return true;
++}
++
+ std::shared_ptr<litehtml::element> litehtml::render_item::get_child_by_point(
+     pixel_t x, pixel_t y, pixel_t client_x, pixel_t client_y, draw_flag flag, int zindex,
+     const std::function<bool(const std::shared_ptr<render_item>&)>& check)
+@@ -1050,13 +1122,17 @@
+ 
+     element::ptr ret = nullptr;
+ 
+-    position el_pos = m_pos;
+-    el_pos.x        = x - el_pos.x + get_scroll_left();
+-    el_pos.y        = y - el_pos.y + get_scroll_top();
++    position base_pos = m_pos;
++    base_pos.x        = x - base_pos.x + get_scroll_left();
++    base_pos.y        = y - base_pos.y + get_scroll_top();
+ 
+     for(auto i = m_children.crbegin(); i != m_children.crend() && !ret; std::advance(i, 1))
+     {
+         const auto& el = *i;
++        // patched in: a translated child is found where it is drawn
++        position el_pos  = base_pos;
++        el_pos.x        -= el->translate_x();
++        el_pos.y        -= el->translate_y();
+ 
+         if(el->is_visible() && el->src_el()->css().get_display() != display_inline_text)
+         {
+@@ -1068,8 +1144,9 @@
+                 {
+                     if(el->src_el()->css().get_position() == element_position_fixed)
+                     {
+-                        ret = el->get_element_by_point(client_x, client_y, client_x, client_y, check);
+-                        if(!ret && el->is_point_inside(client_x, client_y))
++                        pixel_t fx = client_x - el->translate_x(), fy = client_y - el->translate_y();
++                        ret = el->get_element_by_point(fx, fy, client_x, client_y, check);
++                        if(!ret && el->is_point_inside(fx, fy))
+                         {
+                             if(!check || check(el))
+                             {
+@@ -1507,6 +1584,16 @@
+                     }
+                 }
+             }
++            // patched in: a percentage of a height that is auto is auto
++            // (CSS 2, 10.5) - not of the viewport's, which is what the
++            // value of an auto height carries down
++            if(height != nullptr && height->units() == css_units_percentage && !height->is_predefined() &&
++               cb_context.height.type == containing_block_context::cbc_value_type_auto &&
++               src_el()->css().get_position() != element_position_absolute &&
++               src_el()->css().get_position() != element_position_fixed)
++            {
++                height = nullptr;
++            }
+             if(height != nullptr)
+             {
+                 calc_cb_length(*height, cb_context.height, ret.height);
