@@ -3,3 +3,5 @@ build/
 *.bin
 *.iso
 __pycache__/
+# Brotli's fixed data is source, not a build product
+!third_party/brotli-rfc7932/*.bin
