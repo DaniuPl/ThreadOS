@@ -32,6 +32,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <sys/wait.h>
@@ -41,6 +42,11 @@
 extern "C" {
 #include "udraw.h"
 #include "uinflate.h"
+#include "uwoff.h"
+#include "uwoff2.h"
+extern "C" {
+#include "../../kernel/include/ttf.h"
+}
 #include "ujpeg.h"
 #include "ugif.h"
 #include "usvg.h"
@@ -100,6 +106,7 @@ struct font {
     int face, px;
     int ascent, descent;
     bool underline, strike;
+    const ttf_font* web = nullptr;     // a page's own (@font-face), or none
 };
 
 static uint32_t rgb(const web_color& c)
@@ -426,6 +433,234 @@ static bool decode_ico(const std::string& f, picture& pic)
 
 static std::map<std::string, picture> pictures;
 
+// --- a page's own fonts: @font-face ----------------------------------
+//
+// litehtml knows nothing of @font-face; the rules are picked out of the
+// page's style sheets here, as they are read (scan_font_faces). A font a
+// rule names is fetched the first time a box asks for its family, and
+// drawn with the kernel's TrueType rasteriser, built into the browser
+// (kernel/ttf.c) - TrueType outlines, as a .ttf, an .otf of them or
+// a WOFF or a WOFF2.
+
+struct font_face {
+    std::string family;                // lower case, no quotes
+    int wmin = 400, wmax = 400;
+    bool italic = false;
+    std::string url;
+};
+static std::vector<font_face> faces;
+
+struct loaded_font {
+    std::string data;                  // the sfnt, which 'f' points into
+    ttf_font f;
+    bool ok = false;
+};
+static std::map<std::string, std::unique_ptr<loaded_font>> loaded_fonts;
+
+static std::string css_lower_trim(std::string s)
+{
+    size_t a = s.find_first_not_of(" \t\r\n\"'");
+    size_t b = s.find_last_not_of(" \t\r\n\"'");
+    s = a == std::string::npos ? "" : s.substr(a, b - a + 1);
+    for (auto& c : s)
+        c = (char)std::tolower((unsigned char)c);
+    return s;
+}
+
+// The @font-face rules of a style sheet, its addresses against 'base'
+static void scan_font_faces(const std::string& css, const std::string& base)
+{
+    size_t at = 0;
+    for (;;) {
+        size_t k = css.find("@font-face", at);
+        if (k == std::string::npos)
+            return;
+        size_t open = css.find('{', k), close = open == std::string::npos ? open
+                                                     : css.find('}', open);
+        if (close == std::string::npos)
+            return;
+        at = close + 1;
+        std::string body = css.substr(open + 1, close - open - 1);
+        font_face ff;
+        std::string src;
+        // declarations: "name: value;" - a value may hold ';' inside
+        // url(...) or quotes only in theory; data: fonts are skipped
+        size_t p = 0;
+        while (p < body.size()) {
+            size_t colon = body.find(':', p);
+            if (colon == std::string::npos)
+                break;
+            size_t end = colon + 1;
+            int paren = 0;
+            char quote = 0;
+            for (; end < body.size(); end++) {
+                char c = body[end];
+                if (quote) {
+                    if (c == quote)
+                        quote = 0;
+                } else if (c == '"' || c == '\'') {
+                    quote = c;
+                } else if (c == '(') {
+                    paren++;
+                } else if (c == ')') {
+                    paren--;
+                } else if (c == ';' && paren <= 0) {
+                    break;
+                }
+            }
+            std::string name = css_lower_trim(body.substr(p, colon - p));
+            std::string value = body.substr(colon + 1, end - colon - 1);
+            p = end + 1;
+            if (name == "font-family") {
+                ff.family = css_lower_trim(value);
+            } else if (name == "src") {
+                src = value;
+            } else if (name == "font-style") {
+                std::string v = css_lower_trim(value);
+                ff.italic = v.compare(0, 6, "italic") == 0 || v.compare(0, 7, "oblique") == 0;
+            } else if (name == "font-weight") {
+                std::string v = css_lower_trim(value);
+                int a = v == "bold" ? 700 : std::atoi(v.c_str());
+                size_t sp = v.find(' ');
+                int b = sp == std::string::npos ? a : std::atoi(v.c_str() + sp + 1);
+                if (a > 0) {
+                    ff.wmin = std::min(a, b ? b : a);
+                    ff.wmax = std::max(a, b ? b : a);
+                }
+            }
+        }
+        // the first url() of a format this reads: WOFF, TrueType, OpenType
+        for (size_t u = src.find("url("); u != std::string::npos;
+             u = src.find("url(", u + 4)) {
+            size_t e = src.find(')', u);
+            if (e == std::string::npos)
+                break;
+            std::string url = css_lower_trim(src.substr(u + 4, e - u - 4));
+            std::string raw = src.substr(u + 4, e - u - 4);
+            size_t a = raw.find_first_not_of(" \t\"'"), b = raw.find_last_not_of(" \t\"'");
+            raw = a == std::string::npos ? "" : raw.substr(a, b - a + 1);
+            size_t next = src.find("url(", e);
+            std::string fmt = css_lower_trim(src.substr(e + 1, next == std::string::npos
+                                                                 ? std::string::npos
+                                                                 : next - e - 1));
+            (void)url;
+            (void)fmt;
+            if (raw.compare(0, 5, "data:") == 0)
+                continue;
+            ff.url = absolute(base, raw);
+            break;
+        }
+        if (!ff.family.empty() && !ff.url.empty())
+            faces.push_back(ff);
+    }
+}
+
+static bool get_url(const std::string& where, std::string& out, const char* file);
+
+// The font for a family at a weight and slant, fetched and opened the
+// first time; null when the page has none for it or it will not open
+static const ttf_font* web_font(const std::string& family, int weight, bool italic)
+{
+    const font_face* best = nullptr;
+    int best_score = 1 << 30;
+    for (const auto& ff : faces) {
+        if (ff.family != family)
+            continue;
+        // the nearest weight, a slant that is not the one asked for last
+        int dw = weight < ff.wmin ? ff.wmin - weight : weight > ff.wmax ? weight - ff.wmax : 0;
+        int score = dw + (ff.italic != italic ? 10000 : 0);
+        if (score < best_score) {
+            best_score = score;
+            best = &ff;
+        }
+    }
+    if (!best)
+        return nullptr;
+    auto& slot = loaded_fonts[best->url];
+    if (!slot) {
+        slot.reset(new loaded_font);
+        std::string data;
+        if (get_url(best->url, data, ".web-font")) {
+            const unsigned char* in = (const unsigned char*)data.data();
+            uint32_t size = woff_sfnt_size(in, (uint32_t)data.size());
+            unsigned char* w2 = nullptr;
+            uint32_t w2_len = 0;
+            if (woff2_is(in, (uint32_t)data.size())) {
+                if (woff2_unpack(in, (uint32_t)data.size(), &w2, &w2_len) == 0)
+                    slot->data.assign((const char*)w2, w2_len);
+                std::free(w2);
+            } else if (size) {
+                slot->data.assign(size, '\0');
+                if (!woff_unpack(in, (uint32_t)data.size(), (unsigned char*)&slot->data[0], size))
+                    slot->data.clear();
+            } else {
+                slot->data = data;
+            }
+            const char* why = nullptr;
+            slot->ok = !slot->data.empty() &&
+                       ttf_open(&slot->f, slot->data.data(), (uint32_t)slot->data.size(), &why) == 0;
+            std::printf("[web] font %s: %s\n", best->url.c_str(), slot->ok ? "opened" : why ? why : "not read");
+            std::fflush(stdout);
+        }
+    }
+    return slot->ok ? &slot->f : nullptr;
+}
+
+static uint32_t utf8_next(const char* s, size_t& i)
+{
+    unsigned char c = (unsigned char)s[i++];
+    if (c < 0x80)
+        return c;
+    int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+    uint32_t cp = c & (0x3F >> extra);
+    for (int k = 0; k < extra && (s[i] & 0xC0) == 0x80; k++)
+        cp = cp << 6 | ((unsigned char)s[i++] & 0x3F);
+    return cp;
+}
+
+// A string's width in a web font at px, in 1/64 of a pixel
+static int64_t web_width(const ttf_font* f, const char* text, int px)
+{
+    int64_t w = 0;
+    for (size_t i = 0; text[i];)
+        w += ttf_advance(f, ttf_glyph(f, utf8_next(text, i)), px);
+    return w;
+}
+
+struct glyph_key {
+    const ttf_font* f;
+    int glyph, px;
+    bool operator<(const glyph_key& o) const
+    {
+        return f != o.f ? f < o.f : glyph != o.glyph ? glyph < o.glyph : px < o.px;
+    }
+};
+struct drawn_glyph {
+    int w = 0, h = 0, left = 0, top = 0;
+    std::vector<uint8_t> alpha;
+};
+static std::map<glyph_key, drawn_glyph> glyph_cache;
+
+static const drawn_glyph& glyph_at(const ttf_font* f, int glyph, int px)
+{
+    auto it = glyph_cache.find({f, glyph, px});
+    if (it != glyph_cache.end())
+        return it->second;
+    if (glyph_cache.size() > 20000)
+        glyph_cache.clear();
+    drawn_glyph& g = glyph_cache[{f, glyph, px}];
+    static uint8_t buf[192 * 192];
+    ttf_bitmap b;
+    if (ttf_render(f, glyph, px, &b, buf, sizeof(buf)) == 0 && b.w > 0) {
+        g.w = b.w;
+        g.h = b.h;
+        g.left = b.left;
+        g.top = b.top;
+        g.alpha.assign(buf, buf + b.w * b.h);
+    }
+    return g;
+}
+
 // The solid fills of this frame, in the order they were drawn: what an
 // SVG's transparent parts are laid on is the last of them under it.
 // (The window cannot be read back; but backgrounds are drawn before
@@ -545,10 +780,26 @@ class window_container : public document_container {
                     d.family.find("courier") != std::string::npos ||
                     d.family.find("Courier") != std::string::npos;
         f->face = mono ? UD_MONO : d.weight >= 600 ? UD_BOLD : UD_SANS;
+        // The first family in the list the page has a font for: its own
+        for (size_t a = 0; a <= d.family.size() && !f->web;) {
+            size_t b = d.family.find(',', a);
+            if (b == std::string::npos)
+                b = d.family.size();
+            std::string name = css_lower_trim(d.family.substr(a, b - a));
+            if (!name.empty())
+                f->web = web_font(name, d.weight, d.style == font_style_italic);
+            a = b + 1;
+        }
         // DejaVu's own proportions: 0.93 of the size above the
         // baseline and 0.24 below it
         f->ascent = (f->px * 93 + 50) / 100;
         f->descent = (f->px * 24 + 50) / 100;
+        if (f->web) {
+            int32_t asc, desc, gap;
+            ttf_vmetrics(f->web, f->px, &asc, &desc, &gap);
+            f->ascent = (asc + 32) >> 6;
+            f->descent = (-desc + 32) >> 6;
+        }
         f->underline = d.decoration_line & text_decoration_line_underline;
         f->strike = d.decoration_line & text_decoration_line_line_through;
         if (fm) {
@@ -557,7 +808,8 @@ class window_container : public document_container {
             fm->descent = (pixel_t)f->descent;
             fm->height = (pixel_t)(f->ascent + f->descent);
             fm->x_height = (pixel_t)((f->px * 55 + 50) / 100);
-            fm->ch_width = (pixel_t)ud_width("0", f->face, f->px);
+            fm->ch_width = f->web ? (pixel_t)(float)(web_width(f->web, "0", f->px) / 64.0)
+                                  : (pixel_t)ud_width("0", f->face, f->px);
             fm->draw_spaces = true;
         }
         return (uint_ptr)f;
@@ -567,6 +819,8 @@ class window_container : public document_container {
     pixel_t text_width(const char* text, uint_ptr h) override
     {
         font* f = (font*)h;
+        if (f->web)
+            return (pixel_t)(float)(web_width(f->web, text, f->px) / 64.0);
         return (pixel_t)ud_width(text, f->face, f->px);
     }
 
@@ -584,8 +838,10 @@ class window_container : public document_container {
         if (y + hh < page_top() || y > page_top() + page_h())
             return;
         int px = zs(f->px), asc = zs(f->ascent);
-        int tw = ud_width(text, f->face, f->px);       // in the page's px
-        int sw = ud_width(text, f->face, px);          // on the screen
+        int tw = f->web ? (int)(web_width(f->web, text, f->px) / 64)
+                        : ud_width(text, f->face, f->px);       // in the page's px
+        int sw = f->web ? (int)(web_width(f->web, text, px) / 64)
+                        : ud_width(text, f->face, px);          // on the screen
         runs.push_back({text, (int)pos.x, (int)pos.y, tw, (int)pos.height});
         if (at_one_of(lit_now, pos))
             ud_fill(win, x, y, sw, hh, FOUND_NOW);
@@ -593,12 +849,82 @@ class window_container : public document_container {
             ud_fill(win, x, y, sw, hh, FOUND_BG);
         if (selected((int)pos.x, (int)pos.y, tw, (int)pos.height))
             ud_fill(win, x, y, sw, hh, SEL_BG);
-        int w = ud_text(win, x, y + asc, text, rgb(c), f->face, px);
+        int w = f->web ? draw_web_text(f->web, x, y + asc, text, rgb(c), px)
+                       : ud_text(win, x, y + asc, text, rgb(c), f->face, px);
         int line = zs(1) > 1 ? zs(1) : 1;
         if (f->underline)
             ud_fill(win, x, y + asc + zs(2), w - x, line, rgb(c));
         if (f->strike)
             ud_fill(win, x, y + asc - px / 3, w - x, line, rgb(c));
+    }
+
+    // A run in a page's own font: the glyphs' coverage laid on what is
+    // under the run, a row of the run at a time from its first inked
+    // pixel to its last. The pen's x right of the run, as ud_text gives.
+    int draw_web_text(const ttf_font* tf, int x, int base, const char* text,
+                      uint32_t colour, int px)
+    {
+        int32_t asc, desc, gap;
+        ttf_vmetrics(tf, px, &asc, &desc, &gap);
+        int top = base - ((asc + 63) >> 6), h = ((asc + 63) >> 6) + ((-desc + 63) >> 6) + 1;
+        int64_t pen = 0;
+        struct placed {
+            const drawn_glyph* g;
+            int x;
+        };
+        std::vector<placed> glyphs;
+        for (size_t i = 0; text[i];) {
+            int gl = ttf_glyph(tf, utf8_next(text, i));
+            const drawn_glyph& g = glyph_at(tf, gl, px);
+            if (g.w)
+                glyphs.push_back({&g, (int)((pen + 32) >> 6) + g.left});
+            pen += ttf_advance(tf, gl, px);
+        }
+        int w = (int)((pen + 63) >> 6) + 2;
+        if (glyphs.empty() || w <= 0 || h <= 0 || w > 8192)
+            return x + (int)(pen >> 6);
+        // the coverage of the run, then the colour on what is under it
+        std::vector<uint8_t> cov((size_t)w * h, 0);
+        for (const auto& p : glyphs)
+            for (int r = 0; r < p.g->h; r++) {
+                int yy = base - p.g->top + r - top;
+                if (yy < 0 || yy >= h)
+                    continue;
+                for (int c = 0; c < p.g->w; c++) {
+                    int xx = p.x + c;
+                    if (xx < 0 || xx >= w)
+                        continue;
+                    uint8_t a = p.g->alpha[(size_t)r * p.g->w + c];
+                    uint8_t& d = cov[(size_t)yy * w + xx];
+                    d = (uint8_t)std::min(255, d + a);
+                }
+            }
+        uint32_t bg = under(x + w / 2, top + h / 2);
+        int cr = colour >> 16 & 255, cg = colour >> 8 & 255, cb = colour & 255;
+        int br = bg >> 16 & 255, bgg = bg >> 8 & 255, bb = bg & 255;
+        static std::vector<uint32_t> row;
+        for (int r = 0; r < h; r++) {
+            int wy = top + r;
+            if (wy < page_top() || wy >= page_top() + page_h())
+                continue;
+            const uint8_t* a = &cov[(size_t)r * w];
+            int first = 0, last = w - 1;
+            while (first < w && !a[first])
+                first++;
+            while (last > first && !a[last])
+                last--;
+            if (first >= w)
+                continue;
+            row.resize((size_t)(last - first + 1));
+            for (int c = first; c <= last; c++) {
+                int v = a[c];
+                row[(size_t)(c - first)] = (uint32_t)((br + (cr - br) * v / 255) << 16 |
+                                                      (bgg + (cg - bgg) * v / 255) << 8 |
+                                                      (bb + (cb - bb) * v / 255));
+            }
+            win_blit32(win, x + first, wy, last - first + 1, 1, row.data());
+        }
+        return x + (int)(pen >> 6);
     }
 
     pixel_t pt_to_px(float pt) const override { return pt * 96 / 72; }
@@ -871,8 +1197,10 @@ class window_container : public document_container {
                     std::string& baseurl) override
     {
         std::string where = full(u.c_str(), baseurl.c_str());
-        if (get_url(where, text, ".web-style.css"))
+        if (get_url(where, text, ".web-style.css")) {
             baseurl = where;
+            scan_font_faces(text, where);
+        }
     }
     // A box that hides what overflows it (overflow: hidden, clip): the
     // window draws only inside the innermost of them - and inside the
@@ -2768,6 +3096,15 @@ static void open_page(const std::string& where0, bool remember,
     matches.clear();
     page_js.reset();                   // the old page's scripts end with it
     bool quirky = quirks(html);
+    // the page's own fonts in its <style>s; its sheets' as they come
+    faces.clear();
+    for (size_t s = html.find("<style"); s != std::string::npos;
+         s = html.find("<style", s + 6)) {
+        size_t b = html.find('>', s), e = html.find("</style", s);
+        if (b == std::string::npos || e == std::string::npos || e < b)
+            break;
+        scan_font_faces(html.substr(b + 1, e - b - 1), target);
+    }
     doc = document::createFromString(page, &cont,
                                      std::string(master_css) + FORM_CSS +
                                      CENTER_CSS +

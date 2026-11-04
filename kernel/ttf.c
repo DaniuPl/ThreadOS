@@ -36,7 +36,20 @@
 #include <stdint.h>
 #include "include/ttf.h"
 #include "include/string.h"
+#ifdef TTF_IN_PROGRAM
+/* Built into a ring 3 program too - the browser draws a page's own
+   fonts with it. One thread draws there, and interrupts are not a
+   program's to turn off: no lock. */
+struct spinlock {
+    int unused;
+};
+#define SPINLOCK_FREE { 0 }
+typedef int irqflags_t;
+#define spin_lock_irq(l) ((void)(l), 0)
+#define spin_unlock_irq(l, f) ((void)(l), (void)(f))
+#else
 #include "include/spinlock.h"
+#endif
 
 /* --- reading the file ------------------------------------------------ */
 

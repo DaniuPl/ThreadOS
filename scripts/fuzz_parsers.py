@@ -55,6 +55,10 @@ def build(workdir):
     for name in stubbed:
         shutil.copy(os.path.join(FUZZ, "stub_usys.h"),
                     os.path.join(inc, name))
+    # Brotli's fixed data, as the build makes it
+    subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "mkbrotlidata.py"),
+                    os.path.join(ROOT, "third_party", "brotli-rfc7932"),
+                    os.path.join(inc, "ubrotlidata.h")], check=True)
 
     binary = os.path.join(workdir, "harness")
     cmd = ["gcc", "-I", inc, "-fsanitize=address,undefined",
@@ -171,7 +175,8 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": [], "webp": []}
+           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": [], "webp": [],
+           "brotli": [], "woff": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
                          ("p256", ["-newkey", "ec", "-pkeyopt",
@@ -227,6 +232,33 @@ def seeds(workdir):
     if webpcases.available():
         out["webp"] += [data for _, data, _ in webpcases.cases()
                         if len(data) < 12000]
+
+    # Brotli streams libbrotli wrote - text, a font, at several qualities
+    # and windows - and fonts as WOFF and WOFF2 that fontTools wrote
+    import brotliref                       # noqa: E402
+    font = open(os.path.join(ROOT, "fonts", "mono.ttf"), "rb").read()
+    if brotliref.install():
+        text = open(os.path.join(ROOT, "README.md"), "rb").read()[:20000]
+        for data, q, w in [(text, 11, 22), (text, 5, 16), (text, 1, 10), (font[:30000], 11, 18)]:
+            out["brotli"].append(brotliref.compress(data, quality=q, lgwin=w))
+    try:
+        import io
+        from fontTools.ttLib import TTFont, woff2
+        f = TTFont(io.BytesIO(font))
+        f.flavor = "woff"
+        b = io.BytesIO()
+        f.save(b)
+        out["woff"].append(b.getvalue())
+        if brotliref.available():
+            for tables in ({"glyf", "loca"}, {"glyf", "loca", "hmtx"}):
+                b = io.BytesIO()
+                woff2.compress(io.BytesIO(font), b, transform_tables=tables)
+                out["woff"].append(b.getvalue())
+    except ImportError:
+        pass
+    for k in ("brotli", "woff"):
+        if not out[k]:
+            del out[k]
 
     # Set-Cookie headers as sites send them, a line each
     out["cookie"].append(

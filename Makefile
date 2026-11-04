@@ -786,15 +786,28 @@ $(BUILD)/litehtml/webjs.o: apps/browser/webjs.cpp apps/browser/webjs.h \
                            $(QJS_HDRS) $(LH_HDRS) $(LIBC64) | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Ithird_party/quickjs -c $< -o $@
 
+# The kernel's TrueType reader and rasteriser, built into the browser
+# too: a page's own fonts are drawn there
+$(BUILD)/litehtml/ttf-prog.o: kernel/ttf.c kernel/include/ttf.h $(LIBC64) \
+                              | $(BUILD)/litehtml
+	$(CC) $(LIBC64_CFLAGS) -Wall -DTTF_IN_PROGRAM -c $< -o $@
+
+# Brotli's fixed data, from the RFC's (third_party/brotli-rfc7932): WOFF2
+$(BUILD)/gen/ubrotlidata.h: scripts/mkbrotlidata.py $(wildcard third_party/brotli-rfc7932/*)
+	@mkdir -p $(BUILD)/gen
+	python3 scripts/mkbrotlidata.py third_party/brotli-rfc7932 $@
+
 $(BUILD)/user64/web.elf: apps/browser/web.cpp apps/browser/webjs.h $(LH_OBJS) \
                          $(BUILD)/litehtml/webjs.o $(QJS_OBJS) \
+                         $(BUILD)/litehtml/ttf-prog.o user/uwoff.h \
+                         user/uwoff2.h user/ubrotli.h $(BUILD)/gen/ubrotlidata.h \
                          $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
                          user/udraw.h user64/usys64.h user64/compat64.h \
                          | $(BUILD)/user64
-	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -c $< \
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -I$(BUILD)/gen -c $< \
 	    -o $(BUILD)/litehtml/web.o
 	$(call CXX64_LINK,$(BUILD)/litehtml/web.o $(BUILD)/litehtml/webjs.o \
-	    $(LH_OBJS) $(QJS_OBJS)) -o $@
+	    $(BUILD)/litehtml/ttf-prog.o $(LH_OBJS) $(QJS_OBJS)) -o $@
 
 USER64_ELFS += $(BUILD)/user64/web.elf
 

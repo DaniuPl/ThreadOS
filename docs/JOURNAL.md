@@ -6666,3 +6666,47 @@ works and is checked by `make test`.
       itself and shows them; reload asks for all of them again. The test
       server now gives each connection its own thread and logs every
       request (REQUESTS).
+
+- [x] **A page's own fonts: @font-face, TTF, WOFF and WOFF2**
+      (apps/browser/web.cpp, kernel/ttf.c, user/uwoff.h, user/uwoff2.h,
+      user/ubrotli.h, third_party/brotli-rfc7932, scripts/mkbrotlidata.py,
+      scripts/brotliref.py, tests/fuzz/harness.c, scripts/tests/t_webfont.py)
+      The browser drew every page in the three faces the compositor has.
+      Now:
+
+      * @font-face rules are picked out of a page's <style>s and style
+        sheets as they are read (litehtml knows nothing of them): the
+        family, the weight or range of weights, the slant and the first
+        url() of the src list. A box's font-family list takes the first
+        family the page has a font for; the face nearest its weight and
+        slant is fetched (once, and kept like the page's other parts).
+      * The glyphs are drawn by the kernel's TrueType rasteriser, the one
+        t_ttf holds against FreeType - kernel/ttf.c is built into the
+        browser too, without the interrupt-off lock a program may not
+        take. A run is drawn into coverage and laid onto what is under
+        it, a row at a time.
+      * WOFF is each table zlib-compressed (uwoff.h, on uinflate.h).
+        WOFF2 is one Brotli stream, so Brotli is new: user/ubrotli.h, from
+        RFC 7932 - prefix codes simple and complex, block types and
+        counts, context maps with move-to-front, literal contexts,
+        distance codes with postfix bits and the last four distances,
+        and words of the static dictionary with their 121 transforms.
+        The dictionary and the transform table are the RFC's data
+        (third_party/brotli-rfc7932), made into a header at build time.
+        uwoff2.h puts the transformed glyf, loca and hmtx back together:
+        the seven glyph streams, the triplet-coded deltas, composites,
+        bounding boxes and instructions.
+
+      The test: fonts made by fontTools whose letters are rectangles of
+      known size - a .ttf, a WOFF and a WOFF2 (written with libbrotli,
+      reached through ctypes) - draw "aab" as exactly the rectangles
+      they should and the layout measures the run so; font-weight picks
+      the 700 face of a family; an @font-face of an external sheet takes
+      its url() against the sheet; and the system's DejaVu Sans as WOFF2,
+      glyf and hmtx transformed, sets a line as wide as fontTools'
+      advances say. On the host, the Brotli decoder gave libbrotli's
+      input back byte for byte for 504 streams (seven samples, every
+      quality, four windows, three modes), and the WOFF2 unpacker gave
+      fontTools' glyphs, metrics and tables for three system fonts and
+      two WOFF2s from the web, a variable font among them. make fuzz has
+      the Brotli and WOFF parsers too.
