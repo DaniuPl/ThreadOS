@@ -57,6 +57,7 @@
 #include "../kernel/include/video.h"
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/vga.h"
+#include "../kernel/include/mouse.h"
 
 #define LINE_MAX 80
 
@@ -450,6 +451,16 @@ static void cmd_cp(char *rest)
 /* 'bt' - what the adapter is, 'bt skan [s]' - who is in range,
    'bt test' - the packet parser against recorded packets, which is the
    only part of Bluetooth that can be checked without an adapter. */
+/* Where the pointer is - the same line as the 32-bit shell's, so that
+   a test can see where a movement of the hand put it */
+static void cmd_mouse(void)
+{
+    int x, y, b;
+    mouse_get(&x, &y, &b);
+    printk("mouse: x=%u y=%u buttons=%u wheel=%s\n", (uint32_t)x,
+           (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "yes" : "no");
+}
+
 static void cmd_bt(const char *arg)
 {
     while (*arg == ' ')
@@ -1019,6 +1030,8 @@ static void execute(const char *line)
         cmd_beep(argument(line, sizeof("beep ") - 1));
     } else if (!strcmp(line, "hardware")) {
         hwinfo_print();
+    } else if (!strcmp(line, "mouse")) {
+        cmd_mouse();
     } else if (!strcmp(line, "bt")) {
         cmd_bt("");
     } else if (starts_with(line, "bt ")) {

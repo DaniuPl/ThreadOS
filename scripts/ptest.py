@@ -760,9 +760,14 @@ GSET_PASS_H = _kernel_define(_GS, "PASS_H")
 GSET_SW_W = _kernel_define(_GS, "SW_W")
 GSET_SW_H = _kernel_define(_GS, "SW_H")
 GSET_SW_GAP = _kernel_define(_GS, "SW_GAP")
-GSET_SECTIONS = ["General", "Appearance", "Display", "Sound", "Network",
-                 "Files", "About", "Region"]
+GSET_SIDE_TEXT_X = _kernel_define(_GS, "SIDE_TEXT_X")
+# In the order down the left; Updates is last, being the 64-bit
+# system's alone, so that the rest stand in the same place in both
+GSET_SECTIONS = ["Wi-Fi", "Bluetooth", "Network", "Sound", "General",
+                 "Appearance", "Display", "Screen Lock", "Mouse", "Files",
+                 "Region", "About"]
 GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
+GSET_OPENS_ON = "General"
 
 
 def gset_section(name):
@@ -2651,9 +2656,9 @@ class Qemu:
         """Section i's name down the left: on the accent when open"""
         t = theme("dark" if dark else "light")
         top = GSET_SIDE_Y0 + i * GSET_SIDE_H
-        return self.read_ui(cx + 20, cy + ui_font_baseline_in(UD_PX, top,
-                                                              GSET_SIDE_H),
-                            GSET_SIDE_W - 24, px=UD_PX,
+        return self.read_ui(cx + GSET_SIDE_TEXT_X,
+                            cy + ui_font_baseline_in(UD_PX, top, GSET_SIDE_H),
+                            GSET_SIDE_W - GSET_SIDE_TEXT_X - 4, px=UD_PX,
                             fg=t["accent_text" if chosen else "app_text"],
                             screen=screen)
 

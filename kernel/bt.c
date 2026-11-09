@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include "include/bt.h"
+#include "include/bt_info.h"
 #include "include/usbhc.h"
 #include "include/task.h"
 #include "include/printk.h"
@@ -676,11 +677,80 @@ const char *bt_version(void)
     return have_version ? version : "unknown";
 }
 
+/* One search at a time: two would send their commands down the same
+   control pipe and read each other's answers. The bar's card and the
+   Settings window can both ask. */
+static volatile int scanning, scan_pending;
+
+static int scan(uint32_t seconds);
+
 int bt_scan(uint32_t seconds)
 {
-    if (!present)
+    if (!present || scanning)
         return -1;
+    scanning = 1;
+    int n = scan(seconds);
+    scanning = 0;
+    return n;
+}
 
+static void scan_thread(void *arg)
+{
+    (void)arg;
+    bt_scan(4);
+    scan_pending = 0;
+}
+
+int bt_scan_start(void)
+{
+    if (!present || scanning || scan_pending)
+        return -1;
+    scan_pending = 1;
+    if (!task_create("btscan", scan_thread, (void *)0)) {
+        scan_pending = 0;
+        return -1;
+    }
+    return 0;
+}
+
+int bt_scanning(void)
+{
+    return scanning || scan_pending;
+}
+
+static void put_text(char *dst, int room, const char *src)
+{
+    int i = 0;
+    while (src && src[i] && i < room - 1) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
+void bt_info_fill(struct bt_info *o)
+{
+    memset(o, 0, sizeof(*o));
+    o->present = present;
+    o->scanning = bt_scanning();
+    if (!present) {
+        put_text(o->why, sizeof(o->why), bt_why());
+        return;
+    }
+    put_text(o->address, sizeof(o->address), bt_address());
+    put_text(o->name, sizeof(o->name), have_name ? local_name : "");
+    put_text(o->version, sizeof(o->version), bt_version());
+    int n = nseen < BT_INFO_DEVICES ? nseen : BT_INFO_DEVICES;
+    o->found = n;
+    for (int i = 0; i < n; i++) {
+        put_text(o->dev_addr[i], sizeof(o->dev_addr[i]), bt_found_addr(i));
+        put_text(o->dev_name[i], sizeof(o->dev_name[i]), seen[i].name);
+        o->dev_rssi[i] = seen[i].rssi;
+    }
+}
+
+static int scan(uint32_t seconds)
+{
     nseen = 0;
 
     /* Passive scanning: we listen, we do not ask. An interval of 0x0010

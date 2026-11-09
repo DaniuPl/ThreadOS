@@ -36,7 +36,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 HW = os.path.join(ROOT, "tests", "hw")
 
 DRIVERS = ("xhci.c", "usbhc.c", "bt.c")
-HEADERS = ("xhci.h", "usbhc.h", "bt.h", "uhci.h", "ehci.h", "pci.h")
+HEADERS = ("xhci.h", "usbhc.h", "bt.h", "bt_info.h", "uhci.h", "ehci.h",
+           "pci.h")
 
 
 STUBS = r"""

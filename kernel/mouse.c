@@ -49,6 +49,48 @@ static uint8_t packet[4];
 static int wheel;              /* the device sends a fourth byte */
 static int scroll_acc;         /* notches since somebody last asked */
 
+/* How far the pointer goes for a movement of the hand, in per cent. A
+   touchpad that needs three strokes to cross the screen is the usual
+   reason to change it. What does not make a whole pixel is carried to
+   the next movement, so that slow and steady still moves at half
+   speed rather than not at all. */
+static int speed = 100;
+static int carry_x, carry_y;
+static int natural;            /* the wheel moves the content, not the view */
+static volatile uint32_t activity;   /* anything at all the hand did */
+
+static int scaled(int d, int *carry)
+{
+    if (speed == 100)
+        return d;
+    int v = d * speed + *carry;
+    int out = v / 100;
+    *carry = v - out * 100;
+    return out;
+}
+
+void mouse_set_speed(int percent)
+{
+    if (percent < 25)
+        percent = 25;
+    if (percent > 400)
+        percent = 400;
+    if (percent != speed) {
+        carry_x = carry_y = 0;
+        speed = percent;
+    }
+}
+
+void mouse_set_natural(int on)
+{
+    natural = on ? 1 : 0;
+}
+
+uint32_t mouse_activity(void)
+{
+    return activity;
+}
+
 /* Waits until the controller's input buffer is empty (writing is
    possible). Returns 0 when it never emptied - on a machine with no
    8042 at all every port read answers 0xFF, and 0xFF has that bit
@@ -140,8 +182,9 @@ static void packet_done(void)
     if (packet[0] & 0x20)
         dy -= 256;             /* the Y sign */
 
-    mouse_x += dx;
-    mouse_y -= dy;             /* the screen's Y axis grows downwards */
+    mouse_x += scaled(dx, &carry_x);
+    mouse_y -= scaled(dy, &carry_y);   /* the screen's Y axis grows downwards */
+    activity++;
     int mw = video_w(), mh = video_h();   /* clamp to the mode */
     if (mouse_x < 0) mouse_x = 0;
     if (mouse_x >= mw) mouse_x = mw - 1;
@@ -279,7 +322,9 @@ int mouse_take_scroll(void)
 {
     int n = scroll_acc;
     scroll_acc = 0;
-    return n;
+    /* Natural scrolling turns it round in one place, so that every
+       window scrolls the same way whatever it does with a notch */
+    return natural ? -n : n;
 }
 
 int mouse_has_wheel(void)
@@ -301,8 +346,9 @@ int mouse_has_wheel(void)
  * turned round here - unlike the PS/2 packet, which does not. */
 void mouse_inject(int dx, int dy, int buttons, int wheel_notches)
 {
-    mouse_x += dx;
-    mouse_y += dy;             /* HID's Y already grows downwards */
+    mouse_x += scaled(dx, &carry_x);
+    mouse_y += scaled(dy, &carry_y);   /* HID's Y already grows downwards */
+    activity++;
     int mw = video_w(), mh = video_h();
     if (mouse_x < 0) mouse_x = 0;
     if (mouse_x >= mw) mouse_x = mw - 1;

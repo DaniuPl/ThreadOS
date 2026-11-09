@@ -6643,3 +6643,57 @@ works and is checked by `make test`.
       written from the documents, not from the chip. A boot with
       `hardware` on the IdeaPad will say which socket the adapter is in,
       or what stopped it.
+
+- [x] **The screen goes dark, and Settings laid out like a Mac's**
+      (kernel/desktop.c, kernel/mouse.c, kernel/config.c, kernel/bt.c,
+      kernel64/syscall64.c, user/gsettings.c, user/ubt.h,
+      scripts/tests/t_screenoff.py, scripts/tests/t_pointer.py)
+      Nothing touched for 'screenoff' seconds (ten minutes unless set)
+      and the desktop goes black; for the last ten seconds - the last
+      half of a shorter wait - it is dimmed first, the warning a person
+      reading gets in time to move the mouse. Any key, movement or click
+      brings it back, and that one goes no further: a click on a dark
+      screen does not start the program under the pointer, and a key
+      does not land in a field. With 'lockoff' the lock goes up as the
+      screen goes dark, so the moment in between is not an open desktop.
+      While dark nothing is drawn at all - one black frame, and then the
+      loop only watches for somebody. Black is what it can do: switching
+      a laptop panel's backlight off needs the graphics chip's
+      registers, and there is no driver for them yet, which Settings says.
+      Whether somebody is there is a counter the mouse driver moves on
+      every packet - movement, buttons, the wheel, a push against the
+      edge - and every key the desktop sees.
+
+      The pointer has two settings of its own: its speed, a share of
+      the hand's movement from a quarter to four times with the part of
+      a pixel carried to the next movement, so that slow still moves;
+      and natural scrolling, the wheel turned round in the one place
+      every window reads it. The desktop passes both on once a second,
+      so the driver never parses text in an interrupt.
+
+      Settings has its sections in groups down the left, each with a
+      coloured square, the way a Mac shows them: Wi-Fi, Bluetooth and
+      Network; Sound; General, Appearance, Display and Screen Lock;
+      Mouse, Files and Region; About and Updates. Four are new. Screen
+      Lock holds the three settings above. Mouse holds the speed and the
+      scrolling. Bluetooth shows the adapter - its address, name and
+      version - or why there is none, and searches for devices nearby
+      in a kernel thread (SYS64_BT), one search at a time between it and
+      the bar's card. Wi-Fi names the card it finds on PCI (an IdeaPad's
+      is an Intel Wireless 3160) and says plainly that there is no
+      driver for it yet. The window used to read sixteen settings, and
+      the seventeenth - the language - was never shown as chosen; it
+      reads thirty-two. The settings file had room for 512 bytes and cut
+      off what did not fit; it has 1024.
+
+      t_screenoff sets twelve seconds and reads the screen against the
+      aurora it computes: dimmed (darker, not black) between three and
+      eleven seconds, black after; a movement brings the aurora back; a
+      click on the Files tile of a dark screen opens nothing and the same
+      click on a lit one opens Files; with 'lockoff' it comes back
+      locked and the password opens it with Files still there; with 0 it
+      stays lit. t_pointer pushes the pointer into the corner and moves
+      it fifty by forty: at 100 % that is where it is, at 200 % twice as
+      far, at 50 % half; at the top of a list the wheel turned away does
+      nothing, and with natural scrolling it moves the list down and the
+      other way brings it back.

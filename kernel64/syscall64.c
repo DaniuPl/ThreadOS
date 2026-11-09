@@ -45,6 +45,8 @@
 #include "../kernel/include/shm.h"
 #include "../kernel/include/pci.h"
 #include "../kernel/include/pci_info.h"
+#include "../kernel/include/bt.h"
+#include "../kernel/include/bt_info.h"
 #include "../kernel/include/rtc.h"
 
 #define USER_AUTH_WINDOW_TICKS 30000u
@@ -1287,6 +1289,23 @@ static void handle(struct regs *r)
     case SYS64_UPDATE_ALLOWED:
         r->rax = (uint64_t)(int64_t)install_update_allowed();
         return;
+    case SYS64_BT: {
+        if (a1 == 1) {
+            r->rax = (uint64_t)(int64_t)bt_scan_start();
+            return;
+        }
+        if (a1 != 0 || !paging64_user_range(a2, sizeof(struct bt_info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        /* Filled on the kernel's side and copied whole, so that a
+           search finishing half way through is not seen half done */
+        static struct bt_info bi;
+        bt_info_fill(&bi);
+        *(struct bt_info *)(uintptr_t)a2 = bi;
+        r->rax = 0;
+        return;
+    }
     case SYS64_PCI_INFO: {
         struct pci_info info;
         struct pci_dev dev;

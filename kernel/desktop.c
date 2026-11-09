@@ -3340,11 +3340,14 @@ static void paint_colour(uint32_t *buf, int w, int h, int bg)
    changed, draws what depends on them again */
 static void display_refresh(void);
 
+static void idle_settings(void);
+
 static void look_refresh(int force)
 {
     if (!force && --look_wait > 0)
         return;
     look_wait = FRAME_HZ;
+    idle_settings();
     int wall_changed = wallpaper_refresh();
     if (!force)
         display_refresh();       /* the scale, read as often as the theme */
@@ -5667,8 +5670,12 @@ static void draw_lock(void)
                      ? 0xFF6961 : 0xD8D8DC);
 }
 
+static int idle_key(void);
+
 static void desktop_on_key(char c)
 {
+    if (idle_key())
+        return;                         /* it only woke the screen */
     if (locked) {                       /* the keys are the field's alone */
         lock_key(c);
         return;
@@ -6393,9 +6400,98 @@ static void display_refresh(void)
         relayout();
 }
 
+/* --- The screen going dark when nobody is there ------------------------
+ *
+ * Nothing touched for 'screenoff' seconds and the screen goes black.
+ * For the last ten seconds before that - the last half, when the whole
+ * wait is shorter than twenty - it is dimmed: the warning a person
+ * reading something gets in time to move the mouse. Any key, any
+ * movement, any click brings it back, and the one that did goes no
+ * further: a click meant to wake the screen must not close a window
+ * nobody could see, and a key must not land in a field. With
+ * 'lockoff' the lock is up when it comes back - the lock is put up as
+ * it goes dark, so the moment in between is not an open desktop.
+ *
+ * Black is all this can do. Turning a laptop panel's backlight off
+ * needs the graphics chip's own registers, and there is no driver for
+ * those yet: the panel stays lit, showing nothing. And nothing is
+ * drawn while it is dark - one black frame goes out and the loop only
+ * watches for somebody coming back.
+ */
+static uint32_t idle_from;             /* pit_ticks() of the last input */
+static uint32_t idle_seen;             /* mouse_activity() at the last look */
+static volatile int dark;              /* 0 on, 1 dimmed, 2 dark */
+static int dark_shown;                 /* the black frame has gone out */
+static int wake_hold;                  /* a click that woke it, until let go */
+static uint32_t off_s = 600;           /* the settings, read once a second */
+static int dim_on = 1, lock_on_dark;
+
+#define DIM_ALPHA 140                  /* a little more than half as bright */
+
+static void idle_settings(void)
+{
+    off_s = config_get_num("screenoff", 600);
+    if (off_s > 86400)
+        off_s = 86400;
+    dim_on = config_get_num("screendim", 1) != 0;
+    lock_on_dark = config_get_num("lockoff", 0) != 0;
+    /* The pointer's two settings live here too: the desktop reads the
+       settings once a second anyway, and the mouse driver should not
+       be parsing text in an interrupt */
+    mouse_set_speed((int)config_get_num("pointer", 100));
+    mouse_set_natural(config_get_num("natural", 0) != 0);
+}
+
+/* A key. 1 = it was there only to wake the screen. */
+static int idle_key(void)
+{
+    idle_from = pit_ticks();
+    return dark == 2;
+}
+
+/* Once a frame: is anybody there, and how dark should the screen be.
+   Returns the buttons to pass on - none while the click that woke a
+   dark screen is held down. */
+static int idle_frame(int buttons)
+{
+    uint32_t now = pit_ticks();
+    uint32_t a = mouse_activity();
+
+    if (a != idle_seen) {
+        idle_seen = a;
+        if (dark == 2 && (buttons & 7))
+            wake_hold = 1;
+        idle_from = now;
+    }
+    if (wake_hold) {
+        if (!(buttons & 7))
+            wake_hold = 0;
+        buttons = 0;
+    }
+
+    int was = dark, now_dark = 0;
+    if (off_s && !kiosk) {
+        uint32_t idle = (now - idle_from) / 100;
+        uint32_t lead = off_s >= 20 ? 10 : off_s / 2;
+        if (idle >= off_s)
+            now_dark = 2;
+        else if (dim_on && idle >= off_s - lead)
+            now_dark = 1;
+    }
+    dark = now_dark;
+    if (dark == 2 && was != 2) {
+        dark_shown = 0;
+        if (lock_on_dark && !locked && !setup_mode)
+            desktop_lock();
+    }
+    return buttons;
+}
+
 static void desktop_thread(void *arg)
 {
     (void)arg;
+    idle_from = pit_ticks();
+    idle_seen = mouse_activity();
     /* How large a logical pixel is. Zero - the default - means the
        panel decides (kernel/video.c): a laptop's 1080 rows get one and
        a half, 1440 two, anything of 768 or fewer one. A person who
@@ -6445,12 +6541,26 @@ static void desktop_thread(void *arg)
 
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
+        buttons = idle_frame(buttons);
         handle_input(mx, my, buttons);
+
+        if (dark == 2) {
+            if (!dark_shown) {
+                gfx_fill(0, 0, video_w(), video_h(), 0x000000, 255);
+                video_present();
+                dark_shown = 1;
+            }
+            frames++;
+            frame_done(began);
+            continue;
+        }
 
         draw_background();
 
         if (locked) {
             draw_lock();
+            if (dark == 1)
+                gfx_fill(0, 0, video_w(), video_h(), 0x000000, DIM_ALPHA);
             draw_cursor(mx, my);
             video_present();
             frames++;
@@ -6505,6 +6615,8 @@ static void desktop_thread(void *arg)
                 hint_at(8, BAR_H + 4, shot_note);
         }
         draw_hint();               /* above everything, including the menu */
+        if (dark == 1)
+            gfx_fill(0, 0, video_w(), video_h(), 0x000000, DIM_ALPHA);
         draw_cursor(mx, my);
 
         video_present();                      /* the finished frame -> the screen */

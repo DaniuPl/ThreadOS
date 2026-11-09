@@ -97,7 +97,9 @@ def main():
             check("the Settings tile opens the window ('%s')" % got,
                   got == "Settings")
             shot = q.screen_raw()
-            sides = [q.gset_side(CX, CY, i, chosen=(i == 0), screen=shot)
+            sides = [q.gset_side(CX, CY, i,
+                                 chosen=(GSET_SECTIONS[i] == GSET_OPENS_ON),
+                                 screen=shot)
                      for i in range(len(GSET_SECTIONS))]
             check("the sections are listed down the left (%s)"
                   % ", ".join(sides), sides == GSET_SECTIONS)
@@ -121,7 +123,9 @@ def main():
                   "QEMU gave (%s)" % ", ".join(got),
                   head == "Network" and got == want)
 
-            # The arrows walk the sections when no field has the keys
+            # The arrows walk the sections when no field has the keys:
+            # from Mouse, the next one down is Files
+            section(q, "Mouse")
             q.sendkey("down")
             time.sleep(1.5)
             head = q.gset_heading(CX, CY)

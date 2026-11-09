@@ -1,6 +1,8 @@
 #ifndef THREADOS_MOUSE_H
 #define THREADOS_MOUSE_H
 
+#include <stdint.h>
+
 /* PS/2 mouse driver (IRQ12). The position is accumulated from relative
    movements and clamped to the screen range (320x200 by default -
    ready for graphics mode). The state is read through mouse_get. */
@@ -25,5 +27,15 @@ int mouse_has_wheel(void);
    or a laptop touchpad on a machine that has no 8042 at all. There is
    one pointer on the screen, so both roads end in the same place. */
 void mouse_inject(int dx, int dy, int buttons, int wheel_notches);
+
+/* Pointer speed in per cent of the hand's movement (25-400), and
+   whether the wheel moves the content rather than the view - the
+   'pointer' and 'natural' settings, passed on by the desktop. */
+void mouse_set_speed(int percent);
+void mouse_set_natural(int on);
+/* A count that changes whenever the pointer is touched at all - moved,
+   clicked, scrolled, pushed against the edge. The desktop's measure of
+   whether somebody is there. */
+uint32_t mouse_activity(void);
 
 #endif

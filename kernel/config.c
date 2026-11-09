@@ -20,7 +20,10 @@
 #include "include/locale.h"
 #include "include/string.h"
 
-#define CONFIG_MAX_FILE 512
+/* Twenty-odd settings with a path and an address among them come near
+   five hundred bytes, and what does not fit is cut off at the end -
+   the last settings would be lost on the next start without a word */
+#define CONFIG_MAX_FILE 1024
 
 struct setting {
     const char *name;
@@ -61,6 +64,16 @@ static struct setting settings[] = {
     { "timefmt", "24h",     "clock: 24h or 12h",                   0, { 0 } },
     { "numfmt",  "dot",     "decimal mark: dot or comma",           0, { 0 } },
     { "language", "en",     "system language: en or pl",            0, { 0 } },
+    { "screenoff", "600",   "the screen goes dark after this many seconds\n"
+                            "with nothing touched (0 = never)",     0, { 0 } },
+    { "screendim", "1",     "dim the screen for a while before it goes\n"
+                            "dark: 0 no, 1 yes",                    0, { 0 } },
+    { "lockoff", "0",       "ask for the password when the screen comes\n"
+                            "back from dark: 0 no, 1 yes",          0, { 0 } },
+    { "pointer", "100",     "pointer speed, per cent of the hand's\n"
+                            "movement: 25-400",                     0, { 0 } },
+    { "natural", "0",       "scrolling: 0 the wheel moves the view,\n"
+                            "1 it moves the content (natural)",     0, { 0 } },
     /* Legacy bootstrap data for migrating the first admin account.
        Hidden values are not written back to the public settings file. */
     { "password",  "14605732860167589771",
