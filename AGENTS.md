@@ -14,6 +14,16 @@ source tree builds **two kernels**:
 - a 64-bit long-mode kernel: the shared `kernel/` files plus `kernel64/`
   and `boot64/`
 
+A third kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
+machine, built with clang) is at its third stage: it boots, reads the
+device tree, catches exceptions, runs with the MMU on, takes timer
+interrupts through a GICv2, preempts kernel threads and runs them on
+every core it wakes through PSCI. Of `kernel/` it builds `string.c` and
+`heap.c` so far, on `kernel/include/io.h` and `spinlock.h`, which have
+an AArch64 branch next to the x86 one; the rest follows as shared code
+stops assuming x86. Its tests are `arm64boot`, `arm64core` and
+`arm64threads`.
+
 Code that does not depend on the CPU mode lives in `kernel/` and is
 **compiled twice**. Only paging, interrupts, context switching and the
 syscall entry are separate in `kernel64/`. Ring 3 programs in `user/` are
@@ -27,6 +37,8 @@ for 64-bit.
 make -j8                      # 32-bit kernel + initrd (build/threados.bin, build/initrd.img)
 make -j8 kernel64             # 64-bit kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
+make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
+make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make iso64 stick              # hybrid disc and USB image
 make run                      # boot the 64-bit desktop in QEMU
 make test                     # full suite: 100+ QEMU groups, ~20-30 min with -j4

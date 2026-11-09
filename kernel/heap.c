@@ -58,7 +58,11 @@ void heap_init(void)
     if (!heap_start) {
         printk("heap: no %u KiB of contiguous memory!\n", heap_size / 1024);
         for (;;)
+#if defined(__aarch64__)
+            __asm__ volatile("msr daifset, #0xf; wfi");
+#else
             __asm__ volatile("cli; hlt");
+#endif
     }
     heap_end = heap_start + heap_size;
 

@@ -11,6 +11,7 @@
  * system call, and backwards would be a disaster); the comparison is a
  * plain loop over words, the bytes only for what does not fill one. */
 
+#if defined(__i386__) || defined(__x86_64__)
 void *memset(void *dst, int value, size_t n)
 {
     void *d = dst;
@@ -32,6 +33,29 @@ void *memcpy(void *dst, const void *src, size_t n)
                      : : "memory");
     return dst;
 }
+#else
+/* Elsewhere (the ARM64 kernel) plain loops for now. The kernel is built
+   freestanding, so the compiler does not recognise them as memset and
+   memcpy and turn them back into calls to themselves. Byte at a time is
+   also what an ARM core with its MMU still off asks for: until then all
+   memory is Device memory, where an unaligned word is a fault. */
+void *memset(void *dst, int value, size_t n)
+{
+    unsigned char *d = dst;
+    while (n--)
+        *d++ = (unsigned char)value;
+    return dst;
+}
+
+void *memcpy(void *dst, const void *src, size_t n)
+{
+    unsigned char *d = dst;
+    const unsigned char *s = src;
+    while (n--)
+        *d++ = *s++;
+    return dst;
+}
+#endif
 
 typedef unsigned long __attribute__((may_alias)) word_t;
 

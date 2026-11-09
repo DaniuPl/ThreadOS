@@ -6428,3 +6428,129 @@ works and is checked by `make test`.
       registers left locked, EOR left out, the CRC left on, short frames
       unpadded, the PHY asked the wrong way, descriptors not handed back
       - the test fails each time. The real card is still to be seen.
+
+- [x] **ARM64, stage one: a kernel that boots on QEMU's virt machine**
+      (bootarm64/boot.S, kernelarm64/, kernel/string.c,
+      tests/fuzz/fdt_harness.c, scripts/tests/t_arm64boot.py)
+      The start of a port to the processors phones and tablets run on,
+      for now on QEMU only. A third kernel, built by clang (one clang
+      targets every architecture; the PC's gcc does not), in its own
+      two directories the way kernel64/ is. boot.S keeps core 0 and
+      parks the rest, leaves EL2 for EL1 when started there (64-bit
+      EL1, the timer readable from it, SCTLR in a known state), sets a
+      stack and clears .bss. kmain talks through the PL011 UART and
+      finds out the machine rather than assuming it: the level it was
+      entered at, the core from MIDR_EL1, and the memory ranges and
+      cores from the device tree QEMU leaves at the start of RAM.
+      kernel/string.c is the first shared file it builds; its x86
+      string instructions now sit behind an #if, with plain loops for
+      the rest - byte loads, because with the MMU off every access is
+      to Device memory, where an unaligned one is a fault (the kernel
+      is built with -mstrict-align for the same reason).
+
+      t_arm64boot builds two different machines - a Cortex-A72 with
+      256 MiB and two cores started in EL1, a Cortex-A53 with 1 GiB and
+      four cores started in EL2 - and the kernel has to report each as
+      QEMU built it: the level it entered at and that it runs at EL1,
+      the core's name, the memory, the cores. Broken on purpose - the
+      memory or the cores printed as fixed numbers, EL2 never left, the
+      root's #size-cells ignored, cpu-map counted as a core, the part
+      number read from the wrong bits of MIDR - it fails each time. It
+      skips without qemu-system-aarch64, which the CI test job now
+      installs. The tree
+      reader also runs on the host (make fuzz) against trees written in
+      Python from the specification, in virt's layout - two memory
+      ranges and one-cell sizes among them - and against damaged
+      copies under ASan and UBSan. That found the first bug before the
+      kernel ever ran: a header claiming more bytes than were there was
+      believed, and now the caller says how much room there is.
+
+- [x] **ARM64, stage two: exceptions, the MMU, the GIC and the timer**
+      (bootarm64/vectors.S, kernelarm64/exceptions.c, mmu.c, gic.c,
+      timer.c, scripts/tests/t_arm64core.py)
+      What makes the ARM64 kernel a machine that can be relied on before
+      it runs anything. The vector table's sixteen slots each save two
+      registers and jump to a common part that saves the rest with ELR
+      and SPSR, calls C and puts it all back - ELR included, so a
+      handler can step over what trapped. Faults are named on the
+      serial port from ESR and FAR (a data abort says what was read or
+      written, where, and which fault at which level), because on a
+      real board that is all there will be. The MMU maps every address
+      to itself, but gives each range its kind: the first gigabyte as
+      Device memory in 2 MiB blocks, never executable, with the first
+      block left out so a null pointer is a fault rather than a read of
+      the flash; RAM, from the device tree, as Normal write-back memory
+      in 1 GiB blocks, which also lifts the Device-memory rules stage
+      one had to live by. The GICv2's two halves and the address of
+      each come from the device tree; a GICv3 is recognised and declined
+      in words. The virtual timer ticks a hundred times a second, each
+      deadline the last plus the interval, so lateness does not add up.
+      The device tree's /chosen/bootargs is read too, and asks for two
+      self-tests.
+
+      t_arm64core asks each part for the one thing that proves it: a
+      breakpoint caught, named, stepped over, with a value left in x9
+      still there afterwards; a read of address 0x10 - the flash with
+      the MMU off - stopped by a translation fault at level 2 that
+      names the address, with nothing running after it; the GIC found
+      at virt's addresses; a hundred ticks taking a second by the
+      counter, from EL1 and from EL2; a GICv3 machine declined. Broken
+      on purpose - x9 not restored, the breakpoint not stepped over,
+      block 0 mapped, the M or C bit left off, the timer re-armed twice
+      as far, the CPU interface not read from the tree, a GICv3 driven
+      as a v2 - it fails each time. One thing it cannot see: leaving
+      out the clearing of CNTVOFF_EL2 passes, because QEMU resets it to
+      0 anyway. The device tree harness now also holds the GIC (v2 and
+      v3) and the command line to what the trees were made with.
+
+- [x] **ARM64, stage three: pages, the shared heap, threads, every core**
+      (kernelarm64/pmm.c, thread.c, smp.c, bootarm64/switch.S,
+      kernel/include/io.h, kernel/include/spinlock.h, kernel/heap.c,
+      scripts/tests/t_arm64threads.py)
+      The first shared code beyond string.c. kernel/heap.c is the x86
+      kernels' heap, built for ARM unchanged but for its last-resort
+      halt; what it stood on was x86 only. io.h now keeps its ports for
+      x86 and gives ARM just the interrupt flag, read and restored
+      through DAIF; spinlock.h makes its lock from the compiler's
+      atomics on ARM (an exclusive load and store, acquire and release)
+      next to the unchanged xchg. The ARM printk is now called printk,
+      so shared code that prints builds as it is, and takes a lock once
+      the MMU is on - before that, exclusives are not promised to work.
+      Under the heap, a page allocator behind kernel/include/pmm.h, fed
+      from the device tree and keeping back everything from the start
+      of RAM to the end of the kernel's .bss.
+
+      Threads: a switch that saves only what a callee must (x19-x30 and
+      sp), one round-robin list and one lock for every core, held across
+      the switch and released by whatever runs next - so a thread is
+      never picked up by a second core before its registers are saved.
+      The timer marks its core, and on the way out of the interrupt the
+      core switches on the interrupted thread's own stack. An exiting
+      thread is marked dead by the next one on its core, and thread_join
+      gives its stack back. Sleeping is by the counter. Every further
+      core is started through PSCI's CPU_ON - hvc or smc, as the device
+      tree's /psci says, at the MPIDRs the tree lists - enters at
+      secondary_entry with its MMU off, comes down from EL2 the same
+      way the first did, switches on the MMU over the same tables, sets
+      up its own GIC CPU interface and its own timer, and becomes that
+      core's idle thread.
+
+      t_arm64threads runs one core, two through hvc, and four started
+      in EL2 through smc. The pages must be the RAM's, the ones kept
+      back exactly those up to the kernel's end as the ELF file's
+      program headers give it, and the 1 GiB machine must have exactly
+      196608 more free than the 256 MiB one. The heap hands out 2000
+      blocks, each filled and read back, none overlapping, all freed.
+      Every core comes up. Four threads that never yield each get at
+      least a tenth of the time, between them run on every core, and
+      give back every byte when joined; the main thread's half-second
+      sleep ends on time. Broken on purpose - no preemption, PSCI
+      always by hvc, a further core without its timer or its GIC
+      interface, nothing or not the .bss kept back, sleepers never
+      woken, stacks not freed, MPIDRs not read from the tree, an exiting
+      thread never marked dead - it fails each time. A per-thread "on
+      which core" mark the first version had was dropped: with it
+      removed the test still passed, because the lock held across the
+      switch already guarantees it. The x86 groups that use the changed
+      headers (boot, shell, process, swap, k64core, k64proc, smp, locks,
+      kthreads, lockless) pass on both kernels, with no new warnings.

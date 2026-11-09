@@ -128,6 +128,7 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 | `make` | `build/threados.bin`, `build/initrd.img` (32-bit) |
 | `make kernel64` | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
+| `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (first stage; clang + lld). `make run-arm64` boots it |
 | `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
 | `make iso` | `build/threados.iso` (32-bit) |
 | `make stick` | `build/threados-stick.img` |
@@ -212,6 +213,8 @@ boot/efi/        threadboot, the UEFI loader
 boot64/          long-mode entry, ISR and syscall stubs, AP startup
 kernel/          shared kernel code + the 32-bit kernel; headers in kernel/include/
 kernel64/        64-bit-only kernel code, linker script
+bootarm64/       ARM64 entry (EL2 -> EL1, stack, .bss, further cores), exception vectors, thread switch
+kernelarm64/     ARM64-only kernel code: PL011 serial, device tree, MMU, GIC, timer, pages, threads, PSCI
 user/            ring 3 programs and the header-only libraries (crypto, TLS, HTTP, GUI kit)
 user64/          64-bit-only programs, the 64-bit syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests

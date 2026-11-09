@@ -35,6 +35,9 @@ jobs:
       - name: threadboot - our own EFI loader
         run: make efi
 
+      - name: The ARM64 kernel (QEMU virt)
+        run: make kernelarm64
+
       - name: The hybrid disc (BIOS + UEFI)
         run: make iso64
 
@@ -55,8 +58,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential gcc-multilib \
-            qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            ovmf clang lld python3 openssl libssl-dev
+            qemu-system-x86 qemu-system-arm grub-pc-bin grub-efi-amd64-bin \
+            xorriso mtools ovmf clang lld python3 openssl libssl-dev
           # FreeType and fontTools are what the TrueType test compares
           # the kernel's glyphs with
           python3 -m pip install --user freetype-py fonttools
@@ -66,6 +69,7 @@ jobs:
           make -j$(nproc)
           make -j$(nproc) kernel64
           make efi
+          make kernelarm64
 
       # The network groups stand a DNS server of their own on the
       # host's port 53, because that is where QEMU's user network sends
@@ -85,7 +89,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=boot,shell,process,tfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
+          make test J=2 T=boot,shell,process,tfs,k64core,k64shell,k64disk,arm64boot,arm64core,arm64threads,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

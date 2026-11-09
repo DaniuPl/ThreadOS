@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#if defined(__i386__) || defined(__x86_64__)
+
 /* Access to x86 I/O ports */
 
 static inline void outb(uint16_t port, uint8_t value)
@@ -76,5 +78,30 @@ static inline void irq_restore(irqflags_t flags)
 {
     __asm__ volatile(IRQ_POPF : : "r"(flags) : "memory", "cc");
 }
+
+#elif defined(__aarch64__)
+
+/* ARM has no I/O ports - a device is memory at an address - so of this
+   header only the interrupt flag is left. Its place is the I bit of
+   DAIF: read the four mask bits whole, set I, and later write back
+   exactly what was there. */
+typedef unsigned long irqflags_t;
+
+static inline irqflags_t irq_save(void)
+{
+    irqflags_t flags;
+    __asm__ volatile("mrs %0, daif\n\tmsr daifset, #2"
+                     : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static inline void irq_restore(irqflags_t flags)
+{
+    __asm__ volatile("msr daif, %0" : : "r"(flags) : "memory");
+}
+
+#else
+#error "io.h: no interrupt flag for this processor"
+#endif
 
 #endif

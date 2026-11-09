@@ -28,6 +28,31 @@ struct spinlock {
 
 #define SPINLOCK_FREE { 0 }
 
+#if defined(__aarch64__)
+/* ARM has no xchg that is a barrier by itself. The compiler's atomics
+   make the exclusive load and store pair out of these (ldaxr/stlxr),
+   with acquire on the way in and release on the way out - the same
+   promise xchg makes on x86: what the last holder wrote before letting
+   go is seen by the next one. They need the MMU on: on Device memory,
+   the exclusive pair never succeeds. While waiting, only read - a
+   store attempt per loop would steal the line back and forth. */
+static inline void spin_lock(struct spinlock *z)
+{
+    while (__atomic_exchange_n(&z->taken, 1, __ATOMIC_ACQUIRE))
+        while (__atomic_load_n(&z->taken, __ATOMIC_RELAXED))
+            __asm__ volatile("yield" ::: "memory");
+}
+
+static inline int spin_trylock(struct spinlock *z)
+{
+    return !__atomic_exchange_n(&z->taken, 1, __ATOMIC_ACQUIRE);
+}
+
+static inline void spin_unlock(struct spinlock *z)
+{
+    __atomic_store_n(&z->taken, 0, __ATOMIC_RELEASE);
+}
+#else
 static inline void spin_lock(struct spinlock *z)
 {
     uint32_t was;
@@ -62,6 +87,7 @@ static inline void spin_unlock(struct spinlock *z)
                      : "+r"(zero), "+m"(z->taken)
                      : : "memory");
 }
+#endif
 
 /* The lock taken together with interrupts turned off - which is what
  * almost every use inside the kernel looks like.

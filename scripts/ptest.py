@@ -3260,3 +3260,83 @@ def no64():
     if shutil.which("qemu-system-x86_64") is None:
         return "no qemu-system-x86_64"
     return None
+
+
+# --- the ARM64 kernel -------------------------------------------------
+#
+# It is booted straight from its ELF image (QEMU's virt loads one with
+# -kernel) and says everything on the serial port, so none of the x86
+# machinery above applies. The image is built next to the x86 ones.
+
+ARM64_IMAGE = os.path.join(os.path.dirname(os.path.abspath(KERNEL)),
+                           "threados-arm64.elf")
+ARM64_READY = "The ARM64 kernel is ready."
+
+
+def noarm64():
+    """The reason an ARM64 test cannot be run, or None when it can"""
+    if not os.path.exists(ARM64_IMAGE):
+        return "no ARM64 image (make kernelarm64)"
+    if shutil.which("qemu-system-aarch64") is None:
+        return "no qemu-system-aarch64 (apt install qemu-system-arm)"
+    return None
+
+
+def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
+               append=None, timeout=30):
+    """Runs the ARM64 kernel until it says it is ready or that it is
+    stopping (or the time is up) and returns everything it said, with
+    the carriage returns taken out"""
+    log = tempfile.mktemp(suffix=".log")
+    cmd = ["qemu-system-aarch64", "-machine", machine, "-cpu", cpu,
+           "-m", str(mib), "-smp", str(cores), "-display", "none",
+           "-no-reboot", "-monitor", "none", "-serial", "file:" + log,
+           "-kernel", ARM64_IMAGE]
+    if append:
+        cmd += ["-append", append]
+    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE)
+    text = ""
+    try:
+        deadline = time.time() + timeout
+        while time.time() < deadline and p.poll() is None:
+            if os.path.exists(log):
+                with open(log, "rb") as f:
+                    text = f.read().decode(errors="replace")
+                if ARM64_READY in text or "stopping" in text:
+                    break
+            time.sleep(0.2)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        p.wait()
+        if os.path.exists(log):
+            with open(log, "rb") as f:
+                text = f.read().decode(errors="replace")
+            os.unlink(log)
+    return text.replace("\r", "")
+
+
+def said_line(text, start):
+    """The first line of 'text' that starts so, or 'no line'"""
+    return next((l for l in text.splitlines() if l.startswith(start)),
+                "no line")
+
+
+def arm64_image_end():
+    """Where the ARM64 kernel ends in memory, .bss and all: the highest
+    end of its loadable segments, read from the ELF file's own program
+    headers rather than from anything the kernel says"""
+    with open(ARM64_IMAGE, "rb") as f:
+        elf = f.read()
+    if elf[:4] != b"\x7fELF" or elf[4] != 2:
+        return None
+    phoff, = struct.unpack_from("<Q", elf, 0x20)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x36)
+    end = 0
+    for i in range(phnum):
+        p_type, _, _, _, p_paddr, _, p_memsz = struct.unpack_from(
+            "<IIQQQQQ", elf, phoff + i * phentsize)
+        if p_type == 1:                      # PT_LOAD
+            end = max(end, p_paddr + p_memsz)
+    return end
