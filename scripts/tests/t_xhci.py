@@ -177,6 +177,85 @@ def main():
                 if os.path.exists(f):
                     os.unlink(f)
 
+    # --- A laptop's worth of devices on one controller --------------
+    #
+    # A laptop has a webcam, a card reader and the Bluetooth half of its
+    # wireless card on this bus before anybody plugs anything in. The
+    # controller used to keep four slots, so a fifth device got none;
+    # and every attach and port reset sends an event the driver kept
+    # in a queue of eight, until the answer to a command found no room
+    # and every command after that "never finished". Ten devices here,
+    # the keyboard in the last socket, and it has to type.
+    if not no64():
+        print("--- ten devices on one xHCI controller ---")
+        dl = tempfile.mkdtemp()
+        isol = tempfile.mktemp(suffix=".iso")
+        slogl = tempfile.mktemp(suffix=".log")
+        sticks = [tempfile.mktemp(suffix=".img") for _ in range(3)]
+        for s in sticks:
+            with open(s, "wb") as fh:
+                fh.truncate(8 * 1024 * 1024)
+        # QEMU puts the USB 3.0 port first, so its USB 2.0 port N is the
+        # controller's port N + 1 - our socket N + 1
+        devs = ["-device", "qemu-xhci,id=xhci,p2=15,p3=1",
+                "-device", "usb-tablet,bus=xhci.0,port=1",
+                "-device", "usb-wacom-tablet,bus=xhci.0,port=2",
+                "-audiodev", "none,id=usbsnd",
+                "-device", "usb-audio,audiodev=usbsnd,bus=xhci.0,port=3",
+                "-device", "usb-tablet,bus=xhci.0,port=4",
+                "-device", "usb-hub,bus=xhci.0,port=5"]
+        for i, s in enumerate(sticks):
+            devs += ["-drive", "if=none,id=st%d,format=raw,file=%s" % (i, s),
+                     "-device", "usb-storage,drive=st%d,bus=xhci.0,port=%d"
+                     % (i, 6 + i)]
+        devs += ["-device", "usb-mouse,bus=xhci.0,port=9",
+                 "-device", "usb-kbd,bus=xhci.0,port=10"]
+        try:
+            check("the disc for the ten-device machine builds",
+                  make_iso64(dl, isol, text=True))
+            ql = Qemu(KERNEL, INITRD, cdrom=isol, serial=slogl,
+                      qemu="qemu-system-x86_64", devices=devs)
+            try:
+                start = ql.wait_serial("thread64>", timeout=150)
+                check("the keyboard in the last socket is found",
+                      re.search(r"A USB keyboard \(HID, xHCI\) on port 11\b",
+                                start) is not None)
+                before = len(ql.serial())
+                for ch in "uptime":
+                    ql.sendkey(ch)
+                    time.sleep(0.12)
+                ql.sendkey("ret")
+                typed = ""
+                for _ in range(20):
+                    time.sleep(0.5)
+                    typed = ql.serial()[before:]
+                    if "Uptime:" in typed:
+                        break
+                check("and what is typed on it reaches the shell",
+                      "Uptime:" in typed)
+
+                said = ql.command("hardware", "PCI:", timeout=30)
+                check("'hardware' lists what is in each socket: the "
+                      "keyboard in socket 11",
+                      "socket 11: 0627:0001, input (HID)" in said)
+                check("the three sticks as storage, the hub as a hub",
+                      said.count(", storage, high speed") == 3
+                      and "socket 6: 0409:55aa, hub" in said)
+                check("and the sound card by its interface, its device "
+                      "class being 0", "socket 4: 46f4:0002, audio" in said)
+                check("ten devices listed, one per socket",
+                      len(re.findall(r"socket \d+: [0-9a-f]{4}:[0-9a-f]{4}",
+                                     said)) == 10)
+                if not re.search(r"socket 11: 0627:0001", said):
+                    print(said)
+            finally:
+                ql.close()
+        finally:
+            shutil.rmtree(dl, ignore_errors=True)
+            for f in [isol, slogl] + sticks:
+                if os.path.exists(f):
+                    os.unlink(f)
+
     # --- And the same machine started through UEFI ------------------
     #
     # This is where a real laptop starts, and it turned out to be a

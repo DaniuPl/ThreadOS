@@ -6554,3 +6554,92 @@ works and is checked by `make test`.
       switch already guarantees it. The x86 groups that use the changed
       headers (boot, shell, process, swap, k64core, k64proc, smp, locks,
       kthreads, lockless) pass on both kernels, with no new warnings.
+
+- [x] **USB and Bluetooth on a real Intel laptop** (kernel/xhci.c,
+      kernel/usbhc.c, kernel/bt.c, kernel/hwinfo.c,
+      tests/hw/xhci_model.c, scripts/tests/t_intelusb.py, new checks
+      in t_bt and t_xhci)
+      On the IdeaPad, Bluetooth said there was no adapter, and it would
+      have said so on every machine: every USB Bluetooth adapter has a
+      second interface, for voice, with the same class as the first
+      (0xE0/1/1, as the transport specification gives both), and the
+      driver took the LAST such interface for the adapter. That threw
+      away the event endpoint it had just found and left only
+      isochronous ones, so every real adapter read as "no adapter".
+      QEMU has no Bluetooth device, and the recorded packets the test
+      used never included a configuration. Now the first interface
+      counts, and `bt test` reads an Intel 3160's own 177-byte
+      configuration to prove it.
+
+      Below it, the xHCI driver had five things QEMU never asks for and
+      an Intel controller of those years does:
+      - scratchpad pages: the controller says how many it wants (34 in
+        the model, the count split across two fields of HCSPARAMS2) and
+        one that gets none fails its first Enable Slot or stops with an
+        internal error - every socket then looks empty;
+      - the firmware's ownership: the USB Legacy Support capability is
+        now asked (OS owned, wait for BIOS owned to clear, Linux's one
+        second, then take it anyway) and the firmware's SMIs turned off
+        before the controller is touched;
+      - Intel's shared sockets: from Panther Point to Wildcat Point the
+        USB 2.0 wires go to EHCI or xHCI as XUSB2PR says, and firmware
+        may leave them with EHCI - the webcam, the Bluetooth adapter and
+        every USB 2.0 stick then sit in sockets this controller sees as
+        empty. They are moved as the mask registers allow, as Linux
+        does, and only where an Intel EHCI is there too;
+      - four device slots, when a laptop has four internal devices
+        before anything is plugged in. Sixteen now, and contexts and
+        rings are aligned so that none crosses a page or 64 KiB
+        (table 6-1; QEMU does not care, a real controller may);
+      - port change events kept in the queue meant for commands' answers:
+        two per device at start-up filled its eight places, and the
+        answer to the next command was dropped. They are dropped instead
+        (the sockets are watched through their registers), and a
+        command's answer is matched to the command by the TRB's address.
+      Two smaller ones came out on the way: a USB 3.0 device gives its
+      endpoint zero size as a power of two (9 = 512), which was used as
+      it stood; and the walk at start-up now waits until the sockets
+      have been still for 100 ms, since a real device reattaches a while
+      after the reset.
+
+      Bluetooth events longer than one USB packet (Read Local Name's
+      answer is 254 bytes; packets are 64 bytes on Intel's adapters and
+      16 on many others) are gathered by their length byte; a transfer
+      that ends short of its event is dropped rather than glued to the
+      next. An adapter that appears after the walk - a radio the
+      firmware switches on late - is found through the socket watcher.
+      A step that fails on an adapter says which step ("would not take
+      its configuration", "did not answer HCI Reset") instead of "no
+      adapter". And `hardware` lists every socket: IDs, the class of the
+      device or of its first interface, the speed, or why something that
+      is there did not answer - the first thing to ask of a laptop where
+      something on the internal bus does not work.
+
+      No emulator has any of this, so tests/hw/xhci_model.c is the
+      machine: an Intel xHCI (8086:9cb1, Wildcat Point-LP) the firmware
+      left running and owns, wanting 34 scratchpad pages, with an Intel
+      EHCI beside it holding the USB 2.0 sockets; a webcam, a card
+      reader, a fingerprint reader, a mouse and a touchscreen, with
+      their real descriptors; the 3160's Bluetooth in socket 8 sending
+      HCI events in 64-byte packets; a USB 3.0 stick in socket 10.
+      The controller runs only while the driver waits, so a run is the
+      same every time, and holds the driver to the specification:
+      contexts and rings in place, endpoints described as the device
+      describes them, the event ring read, a doorbell for every
+      transfer. kernel/xhci.c, usbhc.c and bt.c, compiled as they are
+      under ASan and UBSan, have to find the adapter, read its address,
+      name and version, scan three devices nearby, give all seven
+      devices an address, and list them; and, with the radio switched
+      on late, find it through the watcher. Broken on purpose - the
+      voice interface taken, no scratchpad, the count read from one
+      field, no handoff, SMIs left on, the sockets left with EHCI, four
+      slots, the USB 3.0 size taken as it stands, input contexts across
+      pages, no watcher, no interface class - the test fails each time.
+      t_xhci boots ten devices on one controller with the keyboard in
+      the last socket, which has to type and be listed; t_bt checks the
+      3160's configuration and events gathered from 16-byte pieces.
+
+      What is still not proven is the laptop itself: the model is
+      written from the documents, not from the chip. A boot with
+      `hardware` on the IdeaPad will say which socket the adapter is in,
+      or what stopped it.

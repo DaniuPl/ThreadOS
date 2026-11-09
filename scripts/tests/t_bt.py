@@ -75,7 +75,9 @@ def main():
                   "Bluetooth: none" in said)
 
             # --- the packets ------------------------------------------
-            out = q.command("bt test", "heard", timeout=30)
+            # Waits for the last line, so that every line before it is in
+            out = q.command("bt test", "not a conversation with an adapter",
+                            timeout=30)
             check("the adapter address read out of the packet the right way round",
                   "adapter address: 00:1a:7d:da:71:13" in out)
             check("the adapter name pulled out of the answer",
@@ -93,6 +95,24 @@ def main():
                   "66:55:44:33:22:11" in out)
             check("and the test says outright what it does NOT check",
                   "not a conversation with an adapter" in out)
+
+            # A real adapter's description: the voice interface after
+            # the HCI one has the same class, and taking it for the
+            # adapter left no event endpoint - every real adapter read
+            # as "no adapter".
+            check("an Intel 3160's configuration: the HCI interface, not "
+                  "the voice one beside it",
+                  "Intel 3160 configuration: interface 0, events on "
+                  "endpoint 1 (64 bytes), data in 2 / out 2" in out)
+            # Events longer than one USB packet, gathered from pieces
+            check("an event in sixteen 16-byte pieces read as one, the "
+                  "name whole",
+                  "name from 16-byte pieces: ThreadOS laptop adapter "
+                  "(1 event)" in out)
+            check("a transfer cut short is dropped, and the next event "
+                  "read clean",
+                  "after a cut-off event, the next one read: "
+                  "00:1a:7d:da:71:13" in out)
 
             # A scan with no adapter must refuse, not pretend
             out = q.command("bt scan 1", "bt:", timeout=30)

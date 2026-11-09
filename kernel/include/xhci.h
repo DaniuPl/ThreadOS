@@ -28,6 +28,10 @@ const char *xhci_why(void);
    number (1..MAX) or -1. */
 int xhci_attach(int port);
 
+/* Why the last attach or address failed - a sentence for a person, or
+   NULL when none has failed yet. */
+const char *xhci_attach_why(void);
+
 /* The same, for a device that is NOT on a root port: behind hubs. The
    port has already been reset by the hub above, so this only gives the
    device a slot and an address - but it has to be told the way there.

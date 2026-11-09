@@ -106,4 +106,9 @@ int usbhc_descriptor(int dev, uint8_t type, uint8_t index,
 int usbhc_request(int dev, uint8_t type, uint8_t req,
                   uint16_t value, uint16_t index);
 
+/* Prints, one line per socket, what was found in it - IDs, class and
+   speed - or why something that is there did not answer. For
+   'hardware'. */
+void usbhc_print_devices(void);
+
 #endif

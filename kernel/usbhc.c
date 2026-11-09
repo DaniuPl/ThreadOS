@@ -100,7 +100,24 @@ static struct hubinfo hubs[HUBS];
 static int nhubs;
 static int dev_speed[PORTS_MAX];         /* per socket, filled on greeting */
 
+/* What each socket turned out to hold, kept for 'hardware'.
+ *
+ * On a laptop the interesting devices are the ones nobody plugged in:
+ * the webcam, the card reader, the Bluetooth half of the wireless card,
+ * all on internal sockets. When one of them does not work, the first
+ * question is whether the bus sees it at all, and the second is what
+ * stopped it - so both are written down when a socket is first
+ * greeted, whoever greeted it. */
+struct seen {
+    uint16_t vid, pid;
+    uint8_t cls, sub, proto;    /* the device's, or its first interface's */
+    uint8_t speed;              /* xHCI numbering: 1 full, 2 low, 3 high */
+    const char *trouble;        /* something is there and did not answer */
+};
+static struct seen seen[PORTS_MAX];
+
 static int usbhc_greet(int port);
+static void note(int port, int dev);
 
 /* Why there is no controller. The question is asked by 'hardware', and
    the answer matters most on a real machine: "no xHCI on the PCI bus"
@@ -319,7 +336,122 @@ int usbhc_attach(int port)
 
     port_known[port] = 1;
     port_dev[port] = usbhc_greet(port);
+    note(port, port_dev[port]);
     return port_dev[port];
+}
+
+/* --- what is in which socket ----------------------------------------- */
+
+static void note(int port, int dev)
+{
+    struct seen *s = &seen[port];
+    struct seen none = { 0, 0, 0, 0, 0, 0, (const char *)0 };
+    uint8_t d[18];
+
+    *s = none;
+    if (dev < 1) {
+        /* Nothing answered. Whether anything is THERE is a different
+           question, and only the controller's own register can say. */
+        if (usbhc_connected(port) > 0) {
+            const char *why = controller == XHCI ? xhci_attach_why()
+                                                 : (const char *)0;
+            s->trouble = why ? why : "it did not answer";
+        }
+        return;
+    }
+    if (usbhc_descriptor(dev, 0x01, 0, d, 18) < 18) {
+        s->trouble = "it would not describe itself";
+        return;
+    }
+    s->vid = (uint16_t)(d[8] | (d[9] << 8));
+    s->pid = (uint16_t)(d[10] | (d[11] << 8));
+    s->cls = d[4];
+    s->sub = d[5];
+    s->proto = d[6];
+    /* Class 0 says "see the interfaces", and 0xEF says "several
+       functions" - a webcam with a microphone, a wireless card with
+       two radios. The first interface is what the device mostly is. */
+    if (s->cls == 0x00 || s->cls == 0xEF) {
+        /* Not necessarily right after the configuration: a device of
+           several functions puts an association descriptor first */
+        uint8_t c[64];
+        int n = usbhc_descriptor(dev, 0x02, 0, c, (int)sizeof(c));
+        for (int i = 0; i + 8 < n && c[i] >= 2; i += c[i]) {
+            if (c[i + 1] == 0x04) {
+                s->cls = c[i + 5];
+                s->sub = c[i + 6];
+                s->proto = c[i + 7];
+                break;
+            }
+        }
+    }
+    if (controller == XHCI)
+        s->speed = (uint8_t)dev_speed[port];
+    else if (controller == EHCI && sock[port].hc == EHCI)
+        s->speed = 3;
+    else if (dev <= DEVICES)
+        s->speed = list[dev - 1].lowspeed ? 2 : 1;
+}
+
+static const char *class_name(const struct seen *s)
+{
+    switch (s->cls) {
+    case 0x01: return "audio";
+    case 0x02: return "communications";
+    case 0x03: return "input (HID)";
+    case 0x06: return "still camera";
+    case 0x07: return "printer";
+    case 0x08: return "storage";
+    case 0x09: return "hub";
+    case 0x0A: return "communications data";
+    case 0x0B: return "smart card";
+    case 0x0E: return "video (webcam)";
+    case 0x10: return "audio/video";
+    case 0xDC: return "diagnostic";
+    case 0xE0: return s->sub == 0x01 && s->proto == 0x01 ? "Bluetooth"
+                                                         : "wireless";
+    case 0xFE: return "application specific";
+    case 0xFF: return "vendor specific";
+    default:   return "a class of its own";
+    }
+}
+
+static const char *speed_name(int speed)
+{
+    switch (speed) {
+    case 1:  return "full speed";
+    case 2:  return "low speed";
+    case 3:  return "high speed";
+    case 4:
+    case 5:  return "SuperSpeed";
+    default: return "speed unknown";
+    }
+}
+
+/* Four hex digits, always: "8087:07dc" is how every list of USB IDs
+   writes it, and printk has no field widths. */
+static void hex4(char *o, uint16_t v)
+{
+    for (int i = 0; i < 4; i++)
+        o[i] = "0123456789abcdef"[(v >> (12 - 4 * i)) & 0xF];
+    o[4] = 0;
+}
+
+void usbhc_print_devices(void)
+{
+    for (int i = 0; i < usbhc_ports() && i < PORTS_MAX; i++) {
+        const struct seen *s = &seen[i];
+        if (s->trouble) {
+            printk("          socket %d: something is there, but %s\n",
+                   i + 1, s->trouble);
+        } else if (s->vid || s->pid) {
+            char v[5], p[5];
+            hex4(v, s->vid);
+            hex4(p, s->pid);
+            printk("          socket %d: %s:%s, %s, %s\n", i + 1, v, p,
+                   class_name(s), speed_name(s->speed));
+        }
+    }
 }
 
 /* --- hubs -----------------------------------------------------------
@@ -657,6 +789,8 @@ void usbhc_forget(int port)
     port_known[port] = 0;
     port_taken[port] = 0;
     port_dev[port] = -1;
+    struct seen none = { 0, 0, 0, 0, 0, 0, (const char *)0 };
+    seen[port] = none;
 }
 
 /* One look at what a hub has to say. Its endpoint answers with a
